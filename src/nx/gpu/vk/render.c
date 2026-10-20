@@ -171,6 +171,41 @@ static void target_written(Surf* s) {
     vk_rt_drawn(s);
 }
 
+/* A pass with no attachments, for a draw that only captures its vertices (transform feedback with no target): its
+   area is as large as a framebuffer may be, so the draw's viewport and scissor fit in it */
+static int render_begin_empty(void) {
+    if (g_rp.open && !g_rp.n && !g_rp.zt) return 1;
+    vk_render_end();
+    VkExtent2D ext = {g_vk.props.limits.maxFramebufferWidth, g_vk.props.limits.maxFramebufferHeight};
+    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, ext}, .layerCount = 1};
+    rec_CmdBeginRendering(vk_cmd(), &ri);
+    memset(g_rp.rt, 0, sizeof g_rp.rt);
+    g_rp.zt = NULL;
+    g_rp.n = 0;
+    g_rp.ext = ext;
+    g_rp.zt_ro = 0;
+    g_rp.srgb_write = 0;
+    g_rp.fb = g_rp.fb_written = g_rp.fb_read = 0;
+    g_rp.open = 1;
+    return 1;
+}
+
+/* Transform feedback's byte counters, a word for each of the 4 buffers: where a capture's end left each buffer, which
+   the next draw's capture resumes from (3D 0x1D1; made at the first capture) */
+static struct {
+    VkBuffer buf;
+    VmaAllocation mem;
+} g_xfb;
+static int xfb_counters(void) {
+    if (g_xfb.buf) return 1;
+    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                              .size = 16,
+                              .usage = VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_COUNTER_BUFFER_BIT_EXT,
+                              .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+    VmaAllocationCreateInfo aci = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+    return VK_OK(vmaCreateBuffer(g_vk.vma, &bci, &aci, &g_xfb.buf, &g_xfb.mem, NULL));
+}
+
 /* Feedback loops. A Maxwell draw may sample a color target it renders to: a game may blend in its shaders,
    reading the pixel under the fragment and writing it back, in hundreds of draws a frame. With
    VK_EXT_attachment_feedback_loop_layout the target stays the pass's attachment, in ATTACHMENT_FEEDBACK_LOOP_OPTIMAL,
@@ -704,7 +739,9 @@ int vk_tex_num(const u32* tic, const Surf* t) {
     return f.is_int ? (f.sint ? 2 : 1) : 0;
 }
 
-int vk_image_keyable(const ShaderInfo* si, int i) { return si->img[i].type == 3 && si->img[i].kind != 1; }
+int vk_image_keyable(const ShaderInfo* si, int i) {
+    return (si->img[i].type == 3 || si->img[i].type == 4) && si->img[i].kind != 1;
+}
 
 int vk_image_key(const ShaderInfo* si, int i, const u32* tic) {
     return !!vk_tic_format(tic[0], 0).is_int != !!si->img[i].bindless;
@@ -715,10 +752,11 @@ VkImageView vk_storage_image_view(Surf* t, const ShaderInfo* si, int i, u64* byt
                                    VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
     *bytes = vk_surf_guest_size(t);
     if (!t || !t->storage_capable || !vk_surf_can_writeback(t) || t->levels != 1 || t->depth3d != 1 ||
-        si->img[i].type != 3 || !*bytes || *bytes > UINT32_MAX ||
+        (si->img[i].type != 3 && si->img[i].type != 4) || !*bytes || *bytes > UINT32_MAX ||
         (si->img[i].kind ? t->f.vk != VK_FORMAT_R32_UINT : t->f.is_int))
         return VK_NULL_HANDLE;
-    return vk_tex_view(t, VK_IMAGE_VIEW_TYPE_2D, 0, &identity, 0);
+    /* a 2D array surface sees every layer of the image, a single layer one too */
+    return vk_tex_view(t, si->img[i].type == 4 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D, 0, &identity, 0);
 }
 
 u32 vk_gbuf_desc(int stage, u32 off, const u32* v, u64* addr) {
@@ -746,7 +784,7 @@ static VkSh* fs_get_keyed(GpuChannel* ch, u64 addr, TexRes* res, u32 last_out) {
             if (f.sint) rs |= 1u << i;
         }
     }
-    VkSh* s0 = vk_shader_get(ch, addr, 0, ST_FS, 0, 0, 0, 0, 0, 0, 0, 0);
+    VkSh* s0 = vk_shader_get(ch, addr, 0, ST_FS, 0, 0, 0, 0, 0, 0, 0, 0, NULL);
     u32 unfed;
     if (!s0) return s0;
     unfed = s0->si.in_mask & ~last_out;
@@ -785,7 +823,7 @@ static VkSh* fs_get_keyed(GpuChannel* ch, u64 addr, TexRes* res, u32 last_out) {
         if (vk_image_key(&s0->si, i, tic)) rm |= 1u << (8 + i);
     }
     if (!tm && !rm && !dm && !unfed) return s0;
-    return vk_shader_get(ch, addr, 0, ST_FS, tm, ts, rm, rs, 0, dm, df, unfed);
+    return vk_shader_get(ch, addr, 0, ST_FS, tm, ts, rm, rs, 0, dm, df, unfed, NULL);
 }
 
 VkImageViewType vk_tex_view_type(const ShTex* st) {
@@ -918,12 +956,21 @@ typedef struct {
     u32 n;
 } DescWrites;
 
+/* Fragment programs' storage images, written back to guest memory: each with its bytes from before the draw (original,
+   for the merge with the CPU's writes since) and the pages it covers. A release puts their write-back aside: their
+   copy is recorded into the frame's host-readable ring (sub, the submit it is in, back, wgen the write generation it
+   copies), and they land once that submit is done (vk_gfx_image_frame_done), as storage buffers' results do. Before,
+   each release copied and waited for the GPU: half of one game's frame time in vk_finish. Whatever needs their memory
+   sooner lands them at once, waiting for that submit when its copy is recorded */
 typedef struct {
     Surf* surf;
     u8* original;
     u32 size;
     u64* pages;
     size_t npages;
+    u64 sub, back_off, back_size, wgen;
+    u8* back;
+    VmaAllocation back_mem;
 } GfxImageOut;
 static GfxImageOut* g_img_out;
 static size_t g_img_count, g_img_cap;
@@ -934,9 +981,10 @@ static int image_page_cmp(const void* a, const void* b) {
     u64 x = *(const u64*)a, y = *(const u64*)b;
     return (x > y) - (x < y);
 }
+/* surf has a write-back waiting whose copy isn't recorded yet: a later draw's writes are in it */
 static int image_pending(Surf* surf) {
     for (size_t i = 0; i < g_img_count; i++)
-        if (g_img_out[i].surf == surf) return 1;
+        if (g_img_out[i].surf == surf && !g_img_out[i].sub) return 1;
     return 0;
 }
 static void image_record(Surf* surf, u8* original, u32 size) {
@@ -961,7 +1009,8 @@ static void image_record(Surf* surf, u8* original, u32 size) {
         if (cpu) pages[npages++] = cpu >> 12;
     }
     qsort(pages, npages, sizeof *pages, image_page_cmp);
-    g_img_out[g_img_count++] = (GfxImageOut){surf, original, size, pages, npages};
+    g_img_out[g_img_count++] = (GfxImageOut){.surf = surf, .original = original, .size = size, .pages = pages,
+                                             .npages = npages};
     g_gfx_img_any = 1;
 }
 static int image_overlaps(const GfxImageOut* out, u64 gva, u64 size) {
@@ -976,15 +1025,40 @@ static int image_overlaps(const GfxImageOut* out, u64 gva, u64 size) {
     }
     return 0;
 }
-static void image_flush_at(size_t index) {
-    GfxImageOut out = g_img_out[index];
-    vk_surf_flush(out.surf, out.original);
-    if (out.surf->mem_wgen != out.surf->wgen) fatal("Cannot write back graphics storage image");
-    free(out.original);
-    free(out.pages);
+static void image_remove(size_t index) {
+    free(g_img_out[index].original);
+    free(g_img_out[index].pages);
     memmove(g_img_out + index, g_img_out + index + 1, (g_img_count - index - 1) * sizeof *g_img_out);
     g_img_count--;
     g_gfx_img_any = g_img_count != 0;
+}
+/* an entry whose copy's submit is done, landed from the ring */
+static void image_land(size_t index) {
+    GfxImageOut* o = &g_img_out[index];
+    vmaInvalidateAllocation(g_vk.vma, o->back_mem, o->back_off, o->back_size);
+    vk_surf_flush_land(o->surf, o->back, o->original, o->wgen);
+    image_remove(index);
+}
+/* the entry whose bytes from before the draw are original (each its own allocation): waiting for the GPU can land
+   others and move the entries, so an entry is found again after a wait */
+static size_t image_find(const u8* original) {
+    size_t k = 0;
+    while (k < g_img_count && g_img_out[k].original != original) k++;
+    return k;
+}
+static void image_flush_at(size_t index) {
+    GfxImageOut out = g_img_out[index];
+    if (out.sub) { /* its copy is recorded: once its submit is done, from there */
+        if (out.sub > vk_last_submit()) vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
+        vk_wait_submit(out.sub);
+        index = image_find(out.original);
+        if (index < g_img_count) image_land(index); /* not landed by a frame's landing meanwhile */
+        return;
+    }
+    vk_surf_flush(out.surf, out.original);
+    if (out.surf->mem_wgen != out.surf->wgen) fatal("Cannot write back graphics storage image");
+    index = image_find(out.original);
+    if (index < g_img_count) image_remove(index);
 }
 void vk_gfx_image_mem_need(u64 gva, u64 size) {
     if (!g_gfx_img_any || g_img_landing || !size) return;
@@ -1013,6 +1087,54 @@ void vk_gfx_image_land(void) {
     while (g_img_count) image_flush_at(0);
     g_img_landing = 0;
     vk_unlock();
+}
+void vk_gfx_image_put_aside(void) {
+    if (!g_gfx_img_any || g_img_landing) return;
+    vk_lock();
+    g_img_landing = 1;
+    vk_cmd(); /* a new frame, if one begins, lands what it lands before the entries are walked */
+    for (size_t i = 0; i < g_img_count;) {
+        GfxImageOut* o = &g_img_out[i];
+        u64 size, off;
+        VkBuffer buf;
+        VmaAllocation mem;
+        u8* p;
+        if (o->sub) {
+            i++;
+            continue;
+        }
+        size = vk_surf_flush_size(o->surf);
+        p = size ? vk_stage_back(size, &buf, &off, &mem) : NULL;
+        if (!p) { /* nothing to copy, or no room in the ring: at once */
+            image_flush_at(i);
+            continue;
+        }
+        vk_surf_flush_record(o->surf, buf, off);
+        o->sub = vk_submit_number();
+        o->back = p;
+        o->back_mem = mem;
+        o->back_off = off;
+        o->back_size = size;
+        o->wgen = o->surf->wgen;
+        i++;
+    }
+    g_img_landing = 0;
+    vk_unlock();
+}
+int vk_gfx_image_in_flight(int unsubmitted) {
+    for (size_t i = 0; i < g_img_count; i++)
+        if (g_img_out[i].sub && (!unsubmitted || g_img_out[i].sub > vk_last_submit())) return 1;
+    return 0;
+}
+void vk_gfx_image_frame_done(u64 sub) {
+    int landing = g_img_landing;
+    g_img_landing = 1; /* nothing lands the entries over again while they are walked */
+    for (size_t i = 0; i < g_img_count;)
+        if (g_img_out[i].sub && g_img_out[i].sub <= sub)
+            image_land(i);
+        else
+            i++;
+    g_img_landing = landing;
 }
 
 typedef struct {
@@ -1427,7 +1549,11 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         int seen = 0;
         for (int j = 0; j < images->n; j++)
             if (images->surf[j] == surf) seen = 1;
-        if (!seen) {
+        /* an earlier draw's writes to it wait for their copy (image_pending): that copy, recorded later, takes this
+           draw's writes too, over the same bytes from before them. Reading guest memory for this draw's own would land
+           those writes first, waiting for the GPU (once a frame in Pokemon Legends Z-A). A landing during the setup
+           submits, and the setup starts over */
+        if (!seen && !image_pending(surf)) {
             u8* original = malloc((size_t)size);
             if (!original) return VK_NULL_HANDLE;
             gmem_read(surf->gva, original, size);
@@ -1598,14 +1724,29 @@ retry:
     /* SetUserClipEnable (0x544): a clip distance the program writes clips only when its bit is set, in the last
        stage before rasterization */
     clip = r[0x544] & 0xFF;
-    VkSh* vs = vk_shader_get(ch, code + r[0x811], (r[0x800] & 1) ? code + r[0x801] : 0, ST_VS, attr_int, attr_sint, 0,
-                             0, tes_on || gs_on ? SNX_SH_NOT_LAST : clip, 0, 0, 0);
-    tcs = tcs_on ? vk_shader_get(ch, code + r[0x821], 0, ST_TCS, 0, 0, 0, 0, SNX_SH_NOT_LAST, 0, 0, 0) : NULL;
+    /* transform feedback (0x1D1): what the last stage before rasterization captures, from each buffer's control
+       (0x1C0 + 4 * i: its stream, the words of a vertex, their stride in bytes) and the layout of those words
+       (0xA00 + 0x20 * i, a byte each: an attribute word, as Eden's MakeTransformFeedbackVaryings reads them) */
+    ShXfb xfb;
+    int xfb_on = g_vk.has_xfb && r[0x1D1] && xfb_counters();
+    if (xfb_on) {
+        memset(&xfb, 0, sizeof xfb);
+        for (int i = 0; i < 4; i++) {
+            u32 words = r[0x1C1 + 4 * i];
+            xfb.count[i] = (u8)(words > 128 ? 128 : words);
+            xfb.stride[i] = (u16)r[0x1C2 + 4 * i];
+            memcpy(xfb.layout[i], &r[0xA00 + 0x20 * i], sizeof xfb.layout[i]); /* word n / 4's byte n % 4 */
+        }
+    }
+    VkSh* vs =
+        vk_shader_get(ch, code + r[0x811], (r[0x800] & 1) ? code + r[0x801] : 0, ST_VS, attr_int, attr_sint, 0, 0,
+                      tes_on || gs_on ? SNX_SH_NOT_LAST : clip, 0, 0, 0, xfb_on && !tes_on && !gs_on ? &xfb : NULL);
+    tcs = tcs_on ? vk_shader_get(ch, code + r[0x821], 0, ST_TCS, 0, 0, 0, 0, SNX_SH_NOT_LAST, 0, 0, 0, NULL) : NULL;
     tes = tes_on ? vk_shader_get(ch, code + r[0x831], 0, ST_TES, 0, 0, r[0xC8] & 0x333, 0,
-                                 gs_on ? SNX_SH_NOT_LAST : clip, 0, 0, 0)
+                                 gs_on ? SNX_SH_NOT_LAST : clip, 0, 0, 0, xfb_on && !gs_on ? &xfb : NULL)
                  : NULL;
     gs = gs_on ? vk_shader_get(ch, code + r[0x841], 0, ST_GS, 0, 0, gs_input_vertices(topology, tes_on, r[0xC8]), 0,
-                               clip, 0, 0, 0)
+                               clip, 0, 0, 0, xfb_on ? &xfb : NULL)
                : NULL;
     if ((tcs_on && (!tcs || tcs->failed)) || (tes_on && (!tes || tes->failed)) || (gs_on && (!gs || gs->failed))) {
         g_vk_skipped++;
@@ -1647,7 +1788,7 @@ retry:
                     break;
                 }
         }
-    if (!n && !zt) {
+    if (!n && !zt && !xfb_on) { /* nothing drawn to and nothing captured */
         g_vk_skipped++;
         return;
     }
@@ -1996,6 +2137,25 @@ retry:
         }
     }
 
+    /* the transform feedback buffers (0xE0 + 8 * i: enable, address, size, start offset), from the start offset on as
+       Eden's UpdateTransformFeedbackBuffer binds them: a writable copy of guest memory each, which lands there and
+       which later draws read on the GPU until then (vk_buf_copy_writable) */
+    VkBuffer xbuf[4];
+    VkDeviceSize xoff[4], xsize[4];
+    u32 xbound = 0;
+    for (int i = 0; i < 4 && xfb_on; i++) {
+        const u32* t = &r[0xE0 + 8 * i];
+        i32 size = (i32)t[3];
+        u64 a = (((u64)(t[1] & 0xFF) << 32) | t[2]) + t[4];
+        if (!t[0] || size <= 0 || (!r[0x1C1 + 4 * i] && !r[0x1C2 + 4 * i])) continue;
+        if (!vk_buf_copy_writable(a, (u32)size, &xbuf[i], &xoff[i])) {
+            draw_images_discard(&images);
+            g_vk_skipped++;
+            return;
+        }
+        xsize[i] = (u32)size;
+        xbound |= 1u << i;
+    }
     k.feedback = fb && !g_vk.has_feedback_dynamic;
     /* the last draw's pipeline when its key is the same (draws in a row mostly are): one comparison of the key, where
        the table hashed all of it each draw. Pipelines and modules live as long as the run, so the handle stays good */
@@ -2026,7 +2186,22 @@ retry:
     if (fs)
         for (u32 i = 0; i < n; i++)
             if (rt[i] && (k.blend[i].mask & ((fs->si.sph[18] >> (i * 4)) & 15))) writes |= 1u << i;
-    if (!render_begin(rt, zt, n, zt_ro, r[0x56E] & 1, fb) || !feedback_order(fb, writes)) {
+    /* a buffer that captured since its write pointer was loaded resumes from its counter, which the last capture's end
+       wrote: the end is ordered before the begin outside a pass */
+    u32 resume = xbound & ch->xfb_started & ~ch->xfb_reload;
+    if (resume) {
+        vk_render_end();
+        VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                               .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFORM_FEEDBACK_BIT_EXT,
+                               .srcAccessMask = VK_ACCESS_2_TRANSFORM_FEEDBACK_COUNTER_WRITE_BIT_EXT,
+                               .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFORM_FEEDBACK_BIT_EXT,
+                               .dstAccessMask = VK_ACCESS_2_TRANSFORM_FEEDBACK_COUNTER_READ_BIT_EXT};
+        VkDependencyInfo di = {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &mb};
+        rec_CmdPipelineBarrier2(vk_cmd(), &di);
+    }
+    if (!n && !zt ? !render_begin_empty()
+                  : !render_begin(rt, zt, n, zt_ro, r[0x56E] & 1, fb) || !feedback_order(fb, writes)) {
         draw_images_discard(&images);
         return;
     }
@@ -2098,7 +2273,10 @@ retry:
         DYN(front, front, rec_CmdSetFrontFace(cb, front));
         DYN(topo, topo, rec_CmdSetPrimitiveTopology(cb, topo));
         DYN(restart, prim_restart, rec_CmdSetPrimitiveRestartEnable(cb, prim_restart));
-        DYN(discard, 1, rec_CmdSetRasterizerDiscardEnable(cb, VK_FALSE));
+        /* RASTERIZE_ENABLE (0xDF) off discards the primitives once captured: only a capture draws without them here,
+           as the register's reset value isn't known to be on (1 off, 2 on: 0 is a new command buffer's) */
+        u32 discard = xfb_on && !r[0xDF] ? 2 : 1;
+        DYN(discard, discard, rec_CmdSetRasterizerDiscardEnable(cb, discard == 2));
     }
     {
         float lw; /* smooth lines (0x55C) have a width of their own */
@@ -2186,6 +2364,25 @@ retry:
     rec_CmdPushConstants(cb, g_vk_playout, VK_PUSH_STAGES, 0, 32, pc);
 
     vk_query_draw(cb, ch->id, r[0x574]); /* counted by the channel's samples-passed counter when it runs */
+    VkBuffer counters[4] = {g_xfb.buf, g_xfb.buf, g_xfb.buf, g_xfb.buf};
+    VkDeviceSize counter_offs[4] = {0, 4, 8, 12};
+    /* the buffers from 0 to the last one bound, as begin and end take the counters of: one between that isn't bound
+       gets another's memory for 4 bytes, which nothing captures into (its layout has no words) */
+    u32 xcount = xbound & 8 ? 4 : xbound & 4 ? 3 : xbound & 2 ? 2 : xbound & 1 ? 1 : 0;
+    if (xcount) {
+        VkBuffer from[4];
+        int first = xbound & 1 ? 0 : xbound & 2 ? 1 : xbound & 4 ? 2 : 3;
+        for (u32 i = 0; i < xcount; i++) {
+            if (!(xbound >> i & 1)) {
+                xbuf[i] = xbuf[first];
+                xoff[i] = xoff[first];
+                xsize[i] = 4;
+            }
+            from[i] = resume >> i & 1 ? g_xfb.buf : VK_NULL_HANDLE; /* none: from the bound offset */
+        }
+        rec_CmdBindTransformFeedbackBuffersEXT(cb, 0, xcount, xbuf, xoff, xsize);
+        rec_CmdBeginTransformFeedbackEXT(cb, 0, xcount, from, counter_offs);
+    }
     if (indexed) {
         rec_CmdBindIndexBuffer(cb, ibuf, ioff, itype);
         /* quads made from guest indices keep the base vertex, quads made from vertex numbers have it in them */
@@ -2193,6 +2390,12 @@ retry:
                          base_instance);
     } else
         rec_CmdDraw(cb, count, instances, first, base_instance);
+    if (xcount) {
+        rec_CmdEndTransformFeedbackEXT(cb, 0, xcount, counters, counter_offs);
+        ch->xfb_started = (u8)((ch->xfb_started | xbound) & 15);
+        ch->xfb_reload = (u8)(ch->xfb_reload & ~xbound);
+        vk_render_end(); /* the next capture's begin waits for this end outside a pass, and readers for its writes */
+    }
     vk_buf_writable_commit();
     draw_images_commit(&images);
     feedback_done(fb, writes);

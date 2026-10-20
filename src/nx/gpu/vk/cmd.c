@@ -36,6 +36,7 @@ typedef struct {
     VkCommandBuffer* cbs; /* one per submission in this use of the frame */
     u32 ncb, icb;         /* icb: the one recording, or the next to begin */
     u64 last;             /* the timeline value of the frame's last submission, 0 when it has none */
+    u64 hold;             /* the next frame's submission that reads buffers in this one's rings (vk_frame_hold), or 0 */
     int recording, fresh; /* fresh: just ended up current, not yet reset for its new use */
     Ring stage;           /* uploads and draw data, written by the CPU and read by the GPU */
     Ring back;            /* storage results copied back by the GPU for the CPU to read (vk_stage_back) */
@@ -187,15 +188,20 @@ static void timeline_wait(u64 value) {
 }
 /* the storage results of every submission up to value, which has finished, land in guest memory, in order */
 static void land_through(u64 value) {
-    while (g_landed < value) vk_buf_frame_done(++g_landed);
+    while (g_landed < value) {
+        vk_buf_frame_done(++g_landed);
+        vk_gfx_image_frame_done(g_landed);
+    }
 }
 
 /* the frame's previous use is done, its results landed and what it held freed, before it records again */
 static void frame_recycle(Frame* f) {
-    if (f->last) {
-        timeline_wait(f->last);
-        land_through(f->last);
+    u64 done = f->last > f->hold ? f->last : f->hold;
+    if (done) {
+        timeline_wait(done);
+        land_through(done);
         f->last = 0;
+        f->hold = 0;
     }
     dead_free(f);
     vkResetCommandPool(g_vk.dev, f->pool, 0);
@@ -292,7 +298,9 @@ u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation*
                       VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                           VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                           VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                          VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT,
+                          VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT |
+                          /* a draw's transform feedback captures into a writable copy (vk_buf_copy_writable) */
+                          (g_vk.has_xfb ? VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT : 0),
                       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT,
                       VMA_MEMORY_USAGE_AUTO, buf, off, mem);
 }
@@ -375,6 +383,10 @@ u64 vk_last_submit(void) { return g_gval; }
 void vk_wait_submit(u64 value) { timeline_wait(value); }
 void vk_land_through(u64 value) { land_through(value < g_gval ? value : g_gval); }
 u64 vk_frame_id(void) { return g_frame_id; }
+void vk_frame_hold(u64 frame_id) {
+    if (frame_id + 1 != g_frame_id) return; /* this frame's own rings, or an older frame's, landed when reused */
+    g_fr[(g_cur + VK_FRAMES - 1) % VK_FRAMES].hold = vk_submit_number();
+}
 u32 vk_frame_slot(void) { return g_cur; }
 
 VkDescriptorPool vk_desc_pool_new(void) {

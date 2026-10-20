@@ -596,6 +596,17 @@ static void vertex_depth_fix(DirectCtx* c, u32 position, u32 push, u32 push_poin
     spv_emit_label(&c->emit, merge);
 }
 
+/* Transform feedback: each captured output's private vec4 (ShaderInfo.xfb) copied into its component outputs, the
+   variables that carry the capture's offsets, before the program ends or emits a vertex */
+static void xfb_store(DirectCtx* c, u32 vec4, const u32* output_attrs, const u8* attr_private, u32 (*components)[4]) {
+    for (u32 i = 0; i < 32; i++) {
+        if (!attr_private[i]) continue;
+        u32 value = spv_emit_load(&c->emit, vec4, output_attrs[i]);
+        for (u32 k = 0; k < 4; k++)
+            spv_emit_store(&c->emit, components[i][k], spv_emit_vec4_extract(&c->emit, c->f32_type, value, k));
+    }
+}
+
 /* Hardware passthrough emits once at program exit. Save generated outputs before EmitVertex,
    which makes every output undefined, and merge forwarded components afresh for each vertex. */
 static void geometry_passthrough(DirectCtx* c, const ShaderInfo* si, u32 vertices, u32 vec4, u32 position,
@@ -1501,12 +1512,16 @@ static int supported(u64 w, int op) {
         case O_SULD:
             return (B(w, 33, 3) == 3 && (!B(w, 52, 1) || B(w, 20, 4) == 4)) ||
                    (B(w, 33, 3) == 1 && B(w, 52, 1) && B(w, 20, 4) == 4);
-        case O_SUST: return !B(w, 52, 1) && (B(w, 33, 3) == 3 || B(w, 33, 3) == 1);
+        /* stores and atomics also reach 2D array surfaces (4), the layer in the coordinates' third register */
+        case O_SUST: return !B(w, 52, 1) && (B(w, 33, 3) == 3 || B(w, 33, 3) == 4 || B(w, 33, 3) == 1);
         /* 32-bit atomics other than INC and DEC, which wrap at the operand. Bindless is bit 54 here. */
         case O_SUATOM:
-            return (B(w, 33, 3) == 3 || B(w, 33, 3) == 1) && (B(w, 51, 3) <= 1 || B(w, 51, 3) == 6) &&
-                   B(w, 29, 4) <= 8 && B(w, 29, 4) != 3 && B(w, 29, 4) != 4 && !B(w, 49, 2);
-        case O_SURED: return B(w, 33, 3) == 3 && B(w, 20, 3) == 0 && B(w, 24, 3) <= 2 && !B(w, 23, 1) && !B(w, 49, 2);
+            return (B(w, 33, 3) == 3 || B(w, 33, 3) == 4 || B(w, 33, 3) == 1) &&
+                   (B(w, 51, 3) <= 1 || B(w, 51, 3) == 6) && B(w, 29, 4) <= 8 && B(w, 29, 4) != 3 && B(w, 29, 4) != 4 &&
+                   !B(w, 49, 2);
+        case O_SURED:
+            return (B(w, 33, 3) == 3 || B(w, 33, 3) == 4) && B(w, 20, 3) == 0 && B(w, 24, 3) <= 2 && !B(w, 23, 1) &&
+                   !B(w, 49, 2);
         case O_HADD2_R:
         case O_HADD2_C:
         case O_HADD2_I:
@@ -1566,7 +1581,8 @@ static int supported(u64 w, int op) {
 }
 
 /* The storage image slot for a surface operation: images of one handle share a slot when they have the same
-   dimension (3 a 2D image, 1 a buffer) and are both R32ui (atomics, and loads from buffers) or both not. */
+   dimension (3 a 2D image, 4 a 2D array, 1 a buffer) and are both R32ui (atomics, and loads from buffers) or both
+   not. */
 static int direct_image_slot(const ShaderInfo* info, u32 off, int bindless, u32 bank, int r32ui, int type) {
     int slot = 0;
     while (slot < info->nimg && (info->img[slot].cbuf_off != off || info->img[slot].bindless != bindless ||
@@ -1856,6 +1872,102 @@ static u32* direct_reject_with_buffers(ShaderInfo* si, const char* reason, u32* 
     free(gb_at);
     free(pop_targets);
     return direct_reject(si, reason);
+}
+
+/* gb_at's mark for an access whose buffer is found when it runs (global_dynamic) */
+#define GB_DYNAMIC 254
+
+/* A global memory access at i whose base register (reg) the tracking lost, and that can't be found among the
+   program's buffers when it runs (an atomic, a sub-word access, or no tracked buffer at all). The reason names the
+   last instruction before it that wrote the base, so a log shows what to add without the program */
+static u32* untracked_reject(ShaderInfo* si, const u64* insn, u32 i, u32 reg, u8* gb_at, u32* pop_targets) {
+    const Op* writer = NULL;
+    u32 at = i;
+    while (!writer && at > 11) {
+        const Op* o;
+        at--;
+        o = IDX_OK(at) ? decode(insn[at]) : NULL;
+        if (o && shader_writes_reg(insn[at], o->id, reg)) writer = o;
+    }
+    free(gb_at);
+    free(pop_targets);
+    if (writer)
+        snprintf(si->first_unsupported, sizeof si->first_unsupported,
+                 "global memory base R%u not tracked at %x: %s at %x", reg, i * 8, writer->name, at * 8);
+    else
+        snprintf(si->first_unsupported, sizeof si->first_unsupported,
+                 "global memory base R%u not tracked at %x: no write before", reg, i * 8);
+    si->unsupported++;
+    return NULL;
+}
+
+/* An LDG or STG of whole words whose base register the tracking lost (gb_at's GB_DYNAMIC): as Eden's SPIR-V backend
+   does for such an access (DefineGlobalMemoryFunctions), its 64-bit address is compared with each buffer the
+   program binds (cbuf 0's descriptor at gbuf_off, address and size), and the buffer that holds it is accessed.
+   Without .E (bit 45) the address is the register zero-extended; the 24-bit offset is signed. A load from an address
+   in none of them reads 0, and a store there is dropped, where the console would fault. The buffers' sizes are those
+   the renderer binds (vk_gbuf_desc: 16 bytes for 0, at most 16 MiB) */
+static void global_dynamic(DirectCtx* c, int stage, u64 w, int op, const u32* gbuf_off, int ngbuf) {
+    u32 a = B(w, 8, 8), d = B(w, 0, 8), words = B(w, 48, 3) == 5 ? 2 : B(w, 48, 3) >= 6 ? 4 : 1, k;
+    /* an absolute address (RZ) has an unsigned offset, as Eden reads it */
+    i32 offset = a == 255 ? (i32)B(w, 20, 24) : (i32)(B(w, 20, 24) << 8) >> 8;
+    u32 lo = reg_read(c, a), hi = B(w, 45, 1) && a < 255 ? reg_read(c, a + 1) : c->zero;
+    u32 address =
+        spv_emit_iadd_u32(&c->emit, c->u32_type, lo, spv_emit_constant_u32(&c->emit, c->u32_type, (u32)offset));
+    /* the offset's carry into the high word, or its borrow */
+    u32 wrapped = offset < 0 ? spv_emit_u_less(&c->emit, c->bool_type, lo, address)
+                             : spv_emit_u_less(&c->emit, c->bool_type, address, lo);
+    u32 one = spv_emit_constant_u32(&c->emit, c->u32_type, 1);
+    u32 carry = spv_emit_select(&c->emit, c->u32_type, wrapped, one, c->zero);
+    u32 data[4];
+    hi = offset < 0 ? spv_emit_isub_u32(&c->emit, c->u32_type, hi, carry)
+                    : spv_emit_iadd_u32(&c->emit, c->u32_type, hi, carry);
+    for (k = 0; k < words; k++) data[k] = op == O_STG ? reg_read(c, d + k) : c->zero;
+    if (op == O_LDG)
+        for (k = 0; k < words; k++) reg_write(c, d + k, c->zero);
+    for (int slot = 0; slot < ngbuf; slot++) {
+        u32 then_label, merge_label, base_lo, base_hi, size, relative, borrow, inside;
+        if (gbuf_off[slot] == 0xb0) continue; /* the vertex stage's bare pointer, a buffer of its own */
+        base_lo = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot]));
+        base_hi = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot] + 4));
+        size = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot] + 8));
+        size = spv_emit_select(&c->emit, c->u32_type, spv_emit_i_equal(&c->emit, c->bool_type, size, c->zero),
+                               spv_emit_constant_u32(&c->emit, c->u32_type, 16), size);
+        size = spv_emit_select(
+            &c->emit, c->u32_type,
+            spv_emit_u_less(&c->emit, c->bool_type, spv_emit_constant_u32(&c->emit, c->u32_type, 16u << 20), size),
+            spv_emit_constant_u32(&c->emit, c->u32_type, 16u << 20), size);
+        relative = spv_emit_isub_u32(&c->emit, c->u32_type, address, base_lo);
+        borrow = spv_emit_select(&c->emit, c->u32_type, spv_emit_u_less(&c->emit, c->bool_type, address, base_lo), one,
+                                 c->zero);
+        /* inside: the high words' difference, less the low words' borrow, is 0, and the low one is under the size
+           (each access's words lie within the binding, as the tracked path's do) */
+        inside = spv_emit_select(
+            &c->emit, c->u32_type, spv_emit_u_less(&c->emit, c->bool_type, relative, size),
+            spv_emit_isub_u32(&c->emit, c->u32_type, spv_emit_isub_u32(&c->emit, c->u32_type, hi, base_hi), borrow),
+            one);
+        inside =
+            spv_emit_i_equal(&c->emit, c->bool_type, inside, c->zero); /* before the merge, which precedes the branch */
+        then_label = spv_emit_id(&c->emit);
+        merge_label = spv_emit_id(&c->emit);
+        spv_emit_selection_merge(&c->emit, merge_label);
+        spv_emit_branch_conditional(&c->emit, inside, then_label, merge_label);
+        spv_emit_label(&c->emit, then_label);
+        for (k = 0; k < words; k++) {
+            u32 word = spv_emit_iadd_u32(&c->emit, c->u32_type,
+                                         spv_emit_shift_right_u32(&c->emit, c->u32_type, relative,
+                                                                  spv_emit_constant_u32(&c->emit, c->u32_type, 2)),
+                                         spv_emit_constant_u32(&c->emit, c->u32_type, k));
+            u32 ptr = spv_emit_storage_access_u32(&c->emit, c->gbuf_pointer, c->gbuf[slot], c->zero,
+                                                  gbuf_word_index(c, stage, (u32)slot, word));
+            if (op == O_STG)
+                spv_emit_store(&c->emit, ptr, data[k]);
+            else
+                reg_write(c, d + k, spv_emit_load(&c->emit, c->u32_type, ptr));
+        }
+        spv_emit_branch(&c->emit, merge_label);
+        spv_emit_label(&c->emit, merge_label);
+    }
 }
 
 u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count, int can_flush,
@@ -2242,6 +2354,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             if (d != 255 && d + count > 256) return direct_reject(si, "global memory register range");
             for (u32 k = 0; k < count; k++)
                 if (d + k < 255) used[d + k] = 1;
+            /* a 64-bit address's high word, which an access whose buffer is found when it runs compares */
+            if (B(insn[i], 45, 1) && a + 1 < 255) used[a + 1] = 1;
         }
         if (op->id == O_RED && d < 255) used[d] = 1;
         if (op->id == O_ATOM && b < 255) used[b] = 1;
@@ -2469,7 +2583,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 }
         }
         if (op->id == O_SULD || op->id == O_SUST || op->id == O_SURED || op->id == O_SUATOM) {
-            int buffer = B(insn[i], 33, 3) == 1;
+            int dim = (int)B(insn[i], 33, 3), buffer = dim == 1;
             u32 bank, off, handle;
             int bindless;
             if (buffer && stage != ST_CS) return direct_reject(si, "buffer surface outside compute");
@@ -2483,6 +2597,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 return direct_reject(si, "untracked surface handle");
             if (a < 255) used[a] = 1;
             if (!buffer && a + 1 < 255) used[a + 1] = 1;
+            if (dim == 4 && a + 2 < 255) used[a + 2] = 1;
             if (bindless && handle < 255) used[handle] = 1;
             int raw = op->id == O_SULD && B(insn[i], 52, 1);
             u32 mask = raw ? 1u : B(insn[i], 20, 4), target = d;
@@ -2501,7 +2616,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                16384 texels, and the dispatch's own stores and atomics wouldn't reach it */
             if (op->id != O_SULD || buffer) {
                 int r32ui = op->id != O_SUST;
-                int type = buffer ? 1 : 3;
+                int type = dim; /* 1, 3 or 4: the forms supported() takes here */
                 int slot = direct_image_slot(&image_info, off, bindless, bank, r32ui, type);
                 if (slot == image_info.nimg) {
                     if (slot >= 8) return direct_reject(si, "storage image descriptor count");
@@ -2871,6 +2986,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     int gtags[255] = {0}, ngbuf = 0;
     u32 gbuf_wmask = 0;
     u32 gbuf_off[16] = {0};
+    /* the first access whose base the tracking lost (0 for none), its register, and whether one of them stores */
+    u32 untracked_at = 0, untracked_reg = 0;
+    int untracked_store = 0;
     for (u32 i = 11; i < n; i++) {
         u32 second;
         u32 r;
@@ -2913,18 +3031,29 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             tag = gbuf_tag(stage, B(w, 34, 5), B(w, 20, 14) * 4);
         else if (op == O_ISCADD_R && B(w, 48, 2) != 1 && b < 255)
             tag = gtags[b];
+        /* LEA's low word adds the base the same way, with its carry out for the high word's LEA.HI.X; negated
+           (bit 45) or with a carry in (bit 46) it is no base plus an index */
+        else if (op == O_LEA_LC && !B(w, 45, 2))
+            tag = gbuf_tag(stage, B(w, 34, 5), B(w, 20, 14) * 4);
+        else if (op == O_LEA_LR && !B(w, 45, 2) && b < 255)
+            tag = gtags[b];
         if (tag == 0xb1 && op != O_MOV_C && op != O_LDC && op != O_MOV_R) tag = 0;
         if (op == O_LDG || op == O_STG || op == O_RED || op == O_ATOM || op == O_ATOM_CAS) {
             int current = a < 255 ? gtags[a] : 0, slot = 0;
-            if (!current) {
-                free(gb_at);
-                free(pop_targets);
-                snprintf(si->first_unsupported, sizeof si->first_unsupported,
-                         "global memory base R%u not tracked at %x", a, i * 8);
-                si->unsupported++;
-                return NULL;
-            }
-            if (current == 0xcbe) {
+            if (!current && (op == O_LDG || op == O_STG) && B(w, 48, 3) >= 4) {
+                /* the address came along a path the tracking doesn't follow (a switch's case, a loop): it is found
+                   among the program's tracked buffers when it runs (global_dynamic) */
+                gb_at[i] = GB_DYNAMIC;
+                untracked_store |= op == O_STG;
+                if (!untracked_at) {
+                    untracked_at = i;
+                    untracked_reg = a;
+                }
+            } else if (!current) {
+                untracked_at = i;
+                untracked_reg = a;
+                return untracked_reject(si, insn, untracked_at, untracked_reg, gb_at, pop_targets);
+            } else if (current == 0xcbe) {
                 if (op != O_STG) {
                     free(gb_at);
                     free(pop_targets);
@@ -2965,6 +3094,13 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             if (shader_writes_reg(w, op, r)) gtags[r] = 0;
         if (shader_writes_reg(w, op, d)) gtags[d] = tag;
     }
+    /* an untracked access needs a tracked buffer to be in; one that stores may write any of them */
+    for (int slot = 0; untracked_at && slot < ngbuf; slot++)
+        if (gbuf_off[slot] != 0xb0) {
+            untracked_at = 0;
+            if (untracked_store) gbuf_wmask |= (1u << ngbuf) - 1;
+        }
+    if (untracked_at) return untracked_reject(si, insn, untracked_at, untracked_reg, gb_at, pop_targets);
 
     /* A zero skip bit forwards that scalar from the input primitive. */
     if (passthrough) {
@@ -3063,8 +3199,15 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     /* Maximum VS interface: point size, position, 32 outputs, 32 inputs, 18 buffers, 32 samplers, push constants. */
     u32 outputs[8], inputs[32] = {0}, input_vec_type[32] = {0}, input_component_type[32] = {0};
     u32 output_attrs[32] = {0}, position = 0, point_size = 0, layer_output = 0, layer_input = 0;
+    /* transform feedback: each output word's buffer (0xFF none) and offset, the outputs written to a private vec4,
+       and their component outputs (xfb_store) */
+    u8 xfb_buf[160], attr_private[32] = {0};
+    u16 xfb_off[160] = {0};
+    u32 xfb_components[32][4] = {{0}};
+    int xfb_on = 0;
+    memset(xfb_buf, 0xFF, sizeof xfb_buf);
     u32 clip_output = 0, clip_count = 0;
-    u32 depth_output = 0, interfaces[256], count = 0;
+    u32 depth_output = 0, interfaces[384], count = 0;
     /* the stages between: the levels and vectors of a patch, and the inputs of each vertex */
     u32 tess_outer = 0, tess_inner = 0, patch_vars[30] = {0}, position_in = 0, primitive_id = 0, primitive_id_out = 0,
         tess_coord = 0;
@@ -3120,13 +3263,49 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             clip_output = spv_emit_clip_distance_output(&c->emit, c->f32_type, c->u32_type, clip_count);
             interfaces[count++] = clip_output;
         }
+        /* transform feedback, in the last stage before rasterization: the buffer and offset of each output word the
+           key captures (a word captured twice goes to its first place) */
+        if (!per_vertex && !(si->clip_enable & SNX_SH_NOT_LAST))
+            for (u32 b = 0; b < 4; b++)
+                for (u32 w = 0; w < si->xfb.count[b] && w < 128; w++) {
+                    u32 word = si->xfb.layout[b][w];
+                    if (word >= 160 || xfb_buf[word] != 0xFF) continue;
+                    xfb_buf[word] = (u8)b;
+                    xfb_off[word] = (u16)(w * 4);
+                    xfb_on = 1;
+                }
         if (position_used) {
             position = per_vertex ? spv_emit_interface_variable(&c->emit, 3, vec4, c->u32_type, per_vertex, 0, 0, 0)
                                   : spv_emit_position_output(&c->emit, vec4);
             interfaces[count++] = position;
+            /* the position is a built-in: captured only whole, its four words in order in one buffer */
+            if (xfb_buf[28] != 0xFF && xfb_buf[29] == xfb_buf[28] && xfb_buf[30] == xfb_buf[28] &&
+                xfb_buf[31] == xfb_buf[28] && xfb_off[29] == xfb_off[28] + 4 && xfb_off[30] == xfb_off[28] + 8 &&
+                xfb_off[31] == xfb_off[28] + 12)
+                spv_emit_xfb_capture(&c->emit, position, xfb_buf[28], si->xfb.stride[xfb_buf[28]], xfb_off[28]);
         }
         for (u32 i = 0; i < 32; i++)
             if (outputs_used[i]) {
+                u32 k;
+                int captured = 0;
+                for (k = 0; k < 4; k++) captured |= xfb_buf[32 + 4 * i + k] != 0xFF;
+                if (captured) {
+                    /* a captured output is written to a private vec4 and copied out a component a variable
+                       (xfb_store), so that each captured component has an offset of its own: the next stage's vec4
+                       input takes the four at its location */
+                    output_attrs[i] = spv_emit_private_variable(&c->emit, vec4);
+                    interfaces[count++] = output_attrs[i];
+                    attr_private[i] = 1;
+                    for (k = 0; k < 4; k++) {
+                        u32 word = 32 + 4 * i + k;
+                        xfb_components[i][k] = spv_emit_output_component(&c->emit, c->f32_type, i, k);
+                        interfaces[count++] = xfb_components[i][k];
+                        if (xfb_buf[word] != 0xFF)
+                            spv_emit_xfb_capture(&c->emit, xfb_components[i][k], xfb_buf[word],
+                                                 si->xfb.stride[xfb_buf[word]], xfb_off[word]);
+                    }
+                    continue;
+                }
                 output_attrs[i] = per_vertex ? spv_emit_interface_variable(&c->emit, 3, vec4, c->u32_type, per_vertex,
                                                                            SPV_NOT_BUILTIN, i, 0)
                                              : spv_emit_output_vec4(&c->emit, vec4, i);
@@ -3322,10 +3501,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
        format of the same bits */
     for (int i = 0; i < image_info.nimg; i++) {
         int integer = image_info.img[i].kind != 0, buffer = image_info.img[i].type == 1;
-        c->image[i] =
-            spv_emit_storage_image(&c->emit, integer ? c->u32_type : c->f32_type, shader_vk_set(stage),
-                                   (buffer ? SNX_VKB_IMGBUF : SNX_VKB_IMG) + (u32)i, buffer ? 5 : 1, 0,
-                                   integer && (!buffer || image_info.img[i].kind == 1) ? 33 : 0, &c->image_type[i]);
+        c->image[i] = spv_emit_storage_image(
+            &c->emit, integer ? c->u32_type : c->f32_type, shader_vk_set(stage),
+            (buffer ? SNX_VKB_IMGBUF : SNX_VKB_IMG) + (u32)i, buffer ? 5 : 1, image_info.img[i].type == 4,
+            integer && (!buffer || image_info.img[i].kind == 1) ? 33 : 0, &c->image_type[i]);
         interfaces[count++] = c->image[i];
     }
     if (ngbuf) {
@@ -3356,6 +3535,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         interfaces[count++] = push;
     }
     spv_emit_entry_str(&c->emit, (SpvShaderStage)stage, fn, "main", interfaces, count); /* ST_ is SPIR-V's model */
+    if (xfb_on) {
+        spv_emit_capability(&c->emit, 53);               /* TransformFeedback */
+        spv_emit_execution_mode(&c->emit, fn, 11, 0, 0); /* Xfb */
+    }
     if (stage == ST_TCS) spv_emit_execution_mode(&c->emit, fn, 26, 1, out_vertices);    /* OutputVertices */
     if (stage == ST_TES) {
         /* 0xC8: the domain (isolines, triangles, quads), the spacing (equal, fractional odd and even) and the output
@@ -3723,8 +3906,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     value = spv_emit_load(&c->emit, c->u32_type, primitive_id);
                 else if (output)
                     pointer = spv_emit_interface_scalar_pointer(
-                        &c->emit, 3, c->f32_type, location < 0x80 ? position : output_attrs[(location - 0x80) >> 4],
-                        vertex, component);
+                        &c->emit, location >= 0x80 && attr_private[(location - 0x80) >> 4] ? 6 : 3, c->f32_type,
+                        location < 0x80 ? position : output_attrs[(location - 0x80) >> 4], vertex, component);
                 else
                     pointer = spv_emit_interface_scalar_pointer(
                         &c->emit, 1, c->f32_type, location < 0x80 ? position_in : inputs[(location - 0x80) >> 4],
@@ -3767,8 +3950,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 u32 component = spv_emit_constant_u32(&c->emit, c->u32_type, (location >> 2) & 3);
                 if (!B(w, 31, 1))
                     pointer = spv_emit_interface_scalar_pointer(
-                        &c->emit, 3, c->f32_type, location < 0x80 ? position : output_attrs[(location - 0x80) >> 4],
-                        vertex, component);
+                        &c->emit, location >= 0x80 && attr_private[(location - 0x80) >> 4] ? 6 : 3, c->f32_type,
+                        location < 0x80 ? position : output_attrs[(location - 0x80) >> 4], vertex, component);
                 else if (location >= 0x20)
                     pointer = spv_emit_interface_scalar_pointer(&c->emit, 3, c->f32_type,
                                                                 patch_vars[(location - 0x20) >> 4], 0, component);
@@ -3831,6 +4014,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 if (B(w, 39, 1)) {
                     if (depth_fix) vertex_depth_fix(c, position, push, push_pointer, vec4);
                     spv_emit_store(&c->emit, primitive_id_out, spv_emit_load(&c->emit, c->u32_type, primitive_id));
+                    if (xfb_on) xfb_store(c, vec4, output_attrs, attr_private, xfb_components);
                     spv_emit_emit_vertex(&c->emit);
                     /* outputs are undefined after it: the next vertex gets the default point size, unless the
                        program writes its own */
@@ -4345,6 +4529,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             }
         } else if (op == O_STG && gb_at[i] == 255) {
             /* SR_DIRECTCBEWRITEENABLED is zero: use the shader's ordinary attribute-export path. */
+        } else if ((op == O_LDG || op == O_STG) && gb_at[i] == GB_DYNAMIC) {
+            global_dynamic(c, stage, w, op, gbuf_off, ngbuf);
         } else if (op == O_LDG || op == O_STG) {
             u32 slot = gb_at[i] - 1;
             u32 offset = spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot]);
@@ -5806,17 +5992,26 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     if (target < 255) target++;
                 }
         } else if (op == O_SULD || op == O_SUST || op == O_SURED || op == O_SUATOM) {
-            int buffer = B(w, 33, 3) == 1;
+            int dim = (int)B(w, 33, 3), buffer = dim == 1;
             u32 bank = 0, off = B(w, 36, 13);
             int bindless = op == O_SUATOM ? (int)B(w, 54, 1) : !B(w, 51, 1);
             if (bindless) direct_track_image_handle(insn, n, i, B(w, 39, 8), &bank, &off, 0);
-            u32 x = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a));
-            u32 coord = buffer ? x
-                               : spv_emit_vec2_construct(&c->emit, vec2_i32, x,
-                                                         spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + 1)));
+            u32 x = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a)), coord = x;
+            if (!buffer) {
+                u32 y = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + 1));
+                /* a 2D array's layer is the low 16 bits of the third register, as TLD's is (Eden's MakeCoords in
+                   surface_load_store.cpp reads it the same way) */
+                coord = dim == 4 ? spv_emit_vec3_construct(
+                                       &c->emit, vec3_i32, x, y,
+                                       spv_emit_bitcast(&c->emit, i32_type,
+                                                        spv_emit_bitwise_and_u32(
+                                                            &c->emit, c->u32_type, reg_read(c, a + 2),
+                                                            spv_emit_constant_u32(&c->emit, c->u32_type, 0xffff))))
+                                 : spv_emit_vec2_construct(&c->emit, vec2_i32, x, y);
+            }
             u32 mask = op == O_SULD && B(w, 52, 1) ? 1u : B(w, 20, 4), source = d;
             if (op != O_SULD || buffer) {
-                int slot = direct_image_slot(&image_info, off, bindless, bank, op != O_SUST, buffer ? 1 : 3);
+                int slot = direct_image_slot(&image_info, off, bindless, bank, op != O_SUST, dim);
                 int kind = image_info.img[slot].kind;
                 if (op == O_SULD) {
                     u32 texel = spv_emit_image_read(&c->emit, vec4_u32, c->image_type[slot], c->image[slot], coord);
@@ -6370,6 +6565,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 geometry_passthrough(c, si, in_vertices, vec4, position, position_in, output_attrs, inputs, point_size,
                                      layer_output, i32_type, clip_output, clip_count, primitive_id, primitive_id_out,
                                      depth_fix, push, push_pointer);
+            if (xfb_on && stage != ST_GS) xfb_store(c, vec4, output_attrs, attr_private, xfb_components);
             if (depth_fix && stage != ST_GS) { /* a geometry program's vertices are fixed as it emits them */
                 vertex_depth_fix(c, position, push, push_pointer, vec4);
             } else if (stage == ST_FS) {
@@ -6437,6 +6633,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             geometry_passthrough(c, si, in_vertices, vec4, position, position_in, output_attrs, inputs, point_size,
                                  layer_output, i32_type, clip_output, clip_count, primitive_id, primitive_id_out,
                                  depth_fix, push, push_pointer);
+        if (xfb_on && stage != ST_GS) xfb_store(c, vec4, output_attrs, attr_private, xfb_components);
         if (depth_fix && stage != ST_GS) vertex_depth_fix(c, position, push, push_pointer, vec4);
         spv_emit_return(&c->emit);
     }

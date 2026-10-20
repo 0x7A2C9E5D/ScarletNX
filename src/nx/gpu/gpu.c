@@ -460,8 +460,10 @@ static void puller_method(GpuChannel* ch, u32 sub, u32 m, u32 v) {
             if (v & 1)
                 stream_incr(id);
             else {
-                if (g_renderer->before_syncwait) g_renderer->before_syncwait();
+                /* results in flight land before the stream waits on something else (the CPU may read them before
+                   it increments the syncpoint): a wait already met is none, and stalls nothing */
                 gpu_park(ch, GPU_PARK_SYNCPOINT, id, ch->puller[0x1C], 1);
+                if (ch->park && g_renderer->before_syncwait) g_renderer->before_syncwait();
             }
             break;
         }
@@ -647,8 +649,8 @@ static int run_job(GpuItem* j) {
         j->started = 1;
         ch->dma_launch_index = 0;
         if (j->wait_id != ~0u) { /* the fence is the stream's first wait, as nvgpu puts a syncpoint wait first */
-            if (g_renderer->before_syncwait) g_renderer->before_syncwait();
             gpu_park(ch, GPU_PARK_FENCE, j->wait_id, j->wait_val, 1);
+            if (ch->park && g_renderer->before_syncwait) g_renderer->before_syncwait(); /* as at SYNCPOINTB */
             if (ch->park) {
                 stream_stop(ch);
                 return 0;

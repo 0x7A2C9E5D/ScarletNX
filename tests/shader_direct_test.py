@@ -34,6 +34,7 @@ def main():
         subgroup = Path(directory) / 'subgroup.spv'
         storage_write = Path(directory) / 'storage_write.spv'
         storage_atomic = Path(directory) / 'storage_atomic.spv'
+        storage_arrays = tuple(Path(directory) / f'storage_{kind}_array.spv' for kind in ('write', 'atomic'))
         nro_raw = Path(directory) / 'nro_raw.spv'
         nro_ms = Path(directory) / 'nro_ms.spv'
         nro_ms_array = Path(directory) / 'nro_ms_array.spv'
@@ -55,6 +56,7 @@ def main():
         fixtures = (
             storage_write,
             storage_atomic,
+            *storage_arrays,
             nro_raw,
             nro_ms,
             nro_ms_array,
@@ -70,12 +72,17 @@ def main():
             *beyond,
             *attributes,
             pexit,
+            Path(directory) / 'global_dynamic.spv',
+            Path(directory) / 'xfb.spv',
             *(Path(directory) / f'passthrough_{i}.spv' for i in range(6)),
             *(Path(directory) / f'audit_{i}.spv' for i in range(6)),
         )
         subprocess.run([args.regressions, directory], check=True)
         for fixture in (path, vertex, abs_fragment, stack_fragment, subgroup, *fixtures):
             subprocess.run([args.validator, '--target-env', 'vulkan1.3', str(fixture)], check=True)
+        for fixture in storage_arrays:
+            if ' 2D 0 1 0 2 ' not in disassemble(args.disassembler, fixture):
+                raise AssertionError('a 2D array surface must be an arrayed storage image')
         raw_code = disassemble(args.disassembler, nro_raw)
         if 'OpTypeImage %uint 2D 0 0 0 1 Unknown' not in raw_code or 'OpImageFetch %v4uint' not in raw_code:
             raise AssertionError('raw surface load must fetch an unsigned texel')

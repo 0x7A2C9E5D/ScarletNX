@@ -77,6 +77,17 @@ static PendPages g_out_pages = {.also = &g_pend_any};
 static void out_pages(const GfxOut* o, int delta) {
     for (u32 i = 0; i < o->npages && o->pages[i] != ~0ull; i++) pend_add_page(&g_out_pages, o->pages[i], delta);
 }
+/* where and how pending results were written: shader stores, copies, and transform feedback's captures when the device
+   has it (its flags are invalid without the extension) */
+static VkPipelineStageFlags2 out_stages(void) {
+    return VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT |
+           (g_vk.has_xfb ? VK_PIPELINE_STAGE_2_TRANSFORM_FEEDBACK_BIT_EXT : 0);
+}
+static VkAccessFlags2 out_access(void) {
+    return VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT |
+           (g_vk.has_xfb ? VK_ACCESS_2_TRANSFORM_FEEDBACK_WRITE_BIT_EXT : 0);
+}
 /* an output with its page lists and its original bytes after it, in one block */
 static GfxOut* gfx_out_new(u32 npages, u32 len) {
     GfxOut* o = calloc(1, sizeof *o + 2 * (size_t)npages * sizeof *o->pages + len);
@@ -271,10 +282,8 @@ void vk_buf_host_barrier(VkCommandBuffer cb, u64 frame) {
     while (first && first->frame != frame) first = first->next;
     if (!first) return;
     VkMemoryBarrier2 b = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-                          .srcStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-                                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-                                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                          .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                          .srcStageMask = out_stages(),
+                          .srcAccessMask = out_access(),
                           .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
                           .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT};
     VkDependencyInfo d = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &b};
@@ -380,8 +389,27 @@ static int backing_overlap(const RangePages* q, const GfxOut* o) {
     }
     return 0;
 }
+static void any_span(void* user, u64 at, u64 from, u64 n) {
+    (void)at;
+    (void)from;
+    (void)n;
+    *(int*)user = 1;
+}
+/* [gva, gva + len) and o share bytes, through the same GPU address or pages in common (q): a result lands its own
+   bytes alone, so the rest of a page it shares is free to read and write (Pokemon Legends Z-A writes a word next to
+   its transform feedback captures before each, through a macro's inline upload). *rmap is the range's pages, made
+   once; without memory for them, any page in common counts */
+static int out_meets(const GfxOut* o, u64 gva, u64 len, const RangePages* q, u64** rmap, u64 local[16]) {
+    int hit = 0;
+    if (gva < o->addr + o->size && o->addr < gva + len) return 1;
+    if (!backing_overlap(q, o)) return 0;
+    if (!*rmap && !(*rmap = range_map(gva, len, local))) return 1;
+    out_spans(o, gva, len, *rmap, any_span, &hit);
+    return hit;
+}
 static void mem_need_reason(u64 gva, u64 len, int reason) {
     RangePages q;
+    u64 local[16], *rmap = NULL;
     if (!g_gfx_any || g_out_landing || !len) return;
     vk_lock();
     if (reason != WB_MAP && !pend_hit(&g_out_pages, gva, len)) {
@@ -389,11 +417,23 @@ static void mem_need_reason(u64 gva, u64 len, int reason) {
         return;
     }
     range_pages(gva, len, &q);
+    /* the results over the range land: those of submits already made by waiting for the newest of them, the GPU
+       going on with what came after, and only one in the commands being recorded by finishing them all */
+    u64 newest = 0;
+    int recording = 0;
     for (GfxOut* o = g_out; o; o = o->next)
-        if ((gva < o->addr + o->size && o->addr < gva + len) || backing_overlap(&q, o)) {
-            wait_finish(reason);
-            break;
+        if (reason == WB_MAP ? (gva < o->addr + o->size && o->addr < gva + len) || backing_overlap(&q, o)
+                             : out_meets(o, gva, len, &q, &rmap, local)) {
+            if (o->frame > vk_last_submit()) recording = 1;
+            if (o->frame > newest) newest = o->frame;
         }
+    if (recording)
+        wait_finish(reason);
+    else if (newest) {
+        vk_wait_submit(newest);
+        vk_land_through(newest);
+    }
+    if (rmap && rmap != local) free(rmap);
     vk_unlock();
 }
 void vk_buf_mem_need(u64 gva, u64 len) { mem_need_reason(gva, len, WB_READ); }
@@ -448,10 +488,8 @@ static void copy_add(CopyBatch* c, VkBuffer src, u64 src_off, u64 dst_off, u64 s
     int overlap = c->nwritten == sizeof c->written / sizeof *c->written;
     if (!c->started) {
         vk_render_end();
-        copy_barrier(VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
-                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                     VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        copy_barrier(out_stages(), out_access(), VK_PIPELINE_STAGE_2_COPY_BIT,
+                     VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
         c->started = 1;
     }
     for (k = 0; k < c->nwritten && !overlap; k++)
@@ -493,11 +531,11 @@ static void read_untracked(u64 gva, u8* dst, u64 len) {
         len -= n;
     }
 }
-/* a pending result can be copied over guest memory on the GPU: this frame's staging still holds it, and the guest
-   hasn't written the bytes it covers in [lo, hi) since it was snapshotted */
+/* a pending result can be copied over guest memory on the GPU: this frame's staging or the last one's still holds
+   it, and the guest hasn't written the bytes it covers in [lo, hi) since it was snapshotted */
 static int out_copyable(const GfxOut* o, u64 lo, u64 hi) {
     const u8* host = gmem_ptr_untracked(lo, hi - lo);
-    return o->frame_id == vk_frame_id() && host && !memcmp(host, o->org + (lo - o->addr), hi - lo);
+    return o->frame_id + 1 >= vk_frame_id() && host && !memcmp(host, o->org + (lo - o->addr), hi - lo);
 }
 /* the same for each run of o's bytes in [gva, gva + len), through whichever GPU address maps them (out_spans) */
 typedef struct {
@@ -540,10 +578,12 @@ static void gfx_overlay(u64 gva, u64 len, VkBuffer dst, u64 dst_off) {
    accept, from this submit when the reader writes it (its copy back for landing was recorded at its submit's end) or
    this frame otherwise. Returns 2 when pending results cover the range and can all be copied over guest memory on the
    GPU (gfx_overlay), 0 when none do, or after landing them because one can't: it maps the range through another
-   virtual address, its frame is over, or the guest wrote its original bytes since */
+   virtual address, or the guest wrote its original bytes since. A result of the frame before is read where it is too
+   (transform feedback captures the same buffers every frame, over the last frame's capture), its frame's rings held
+   until the reader is done (vk_frame_hold) */
 static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off, int writable) {
     GfxOut* match = NULL;
-    int count = 0;
+    int count = 0, before = 0;
     RangePages q;
     u64 local[16], *rmap = NULL;
     if (!g_gfx_any || g_out_landing || !gva || !len) return 0;
@@ -553,7 +593,7 @@ static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off, int writable) 
     for (GfxOut* o = g_out; o; o = o->next) {
         u64 lo = gva > o->addr ? gva : o->addr, hi = gva + len < o->addr + o->size ? gva + len : o->addr + o->size;
         if (lo >= hi && !backing_overlap(&q, o)) continue;
-        Copyable c = {o, gva, o->frame_id == vk_frame_id()};
+        Copyable c = {o, gva, o->frame_id + 1 >= vk_frame_id()};
         if (c.ok && !rmap && !(rmap = range_map(gva, len, local))) c.ok = 0;
         if (c.ok) out_spans(o, gva, len, rmap, copyable_span, &c);
         if (!c.ok) {
@@ -564,9 +604,11 @@ static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off, int writable) 
         }
         match = o;
         count++;
+        before |= o->frame_id != vk_frame_id();
     }
     if (rmap && rmap != local) free(rmap);
     if (!count) return 0;
+    if (before) vk_frame_hold(vk_frame_id() - 1);
     if (count == 1 && gva >= match->addr && gva + len <= match->addr + match->size &&
         !((match->off + (gva - match->addr)) & (vk_stage_align() - 1)) &&
         (!writable || match->frame == vk_submit_number())) {
@@ -575,9 +617,7 @@ static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off, int writable) 
         static u64 barrier_frame = ~0ull, barrier_work = ~0ull;
         if (barrier_frame != vk_submit_number() || barrier_work != g_vk_drawn + g_vk_dispatches) {
             vk_render_end();
-            copy_barrier(VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
-                         VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            copy_barrier(out_stages(), out_access(),
                          VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                          VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
             barrier_frame = vk_submit_number();
@@ -956,6 +996,7 @@ static int atlas_fill(const DrawPage* p, size_t unique, u8* ptr, VkBuffer atlas,
             u32 at = draw_page_index(p, unique, key);
             if (at < unique && p[at].key == key) {
                 copy_add(&c, o->buf, o->off + (lo - o->addr), atlas_off + at * 4096ull + (lo - g), hi - lo);
+                if (o->frame_id != vk_frame_id()) vk_frame_hold(o->frame_id);
                 composed = 1;
             }
         }

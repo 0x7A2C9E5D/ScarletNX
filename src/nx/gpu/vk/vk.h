@@ -64,6 +64,7 @@ typedef struct {
     /* optional features that were enabled */
     VkPhysicalDeviceFeatures feat;
     int has_divisor;      /* VK_EXT_vertex_attribute_divisor: instance divisors above 1 */
+    int has_xfb;          /* VK_EXT_transform_feedback: draws capture their outputs into guest memory */
     int has_border_color; /* VK_EXT_custom_border_color */
     u32 border_color_max; /* maxCustomBorderColorSamplers: past it, samplers take the nearest built-in color */
     int has_mirror_clamp; /* samplerMirrorClampToEdge: VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE */
@@ -132,6 +133,9 @@ void vk_defer_buffer_view(VkBufferView v);
 u64 vk_submit_number(void);
 u32 vk_cb_begun(void); /* command buffers begun so far: changes when a new one starts recording */
 u64 vk_frame_id(void);
+/* the submission being recorded reads buffers in frame frame_id's rings: that frame's slot isn't reused until it is
+   done. Only the frame before the current one can be held: older slots were reused already */
+void vk_frame_hold(u64 frame_id);
 u64 vk_last_submit(void);        /* the last submission's number, which its completion signals */
 void vk_wait_submit(u64 value);  /* until the GPU has done that submission (any thread, without vk_lock) */
 void vk_land_through(u64 value); /* the results of the submissions up to value, done, into guest memory (vk_lock) */
@@ -208,6 +212,12 @@ void rec_CmdBindDescriptorSets(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPip
 void rec_CmdBindVertexBuffers2(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* bufs, const VkDeviceSize* offs,
                                const VkDeviceSize* sizes, const VkDeviceSize* strides);
 void rec_CmdBindVertexBuffers(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* bufs, const VkDeviceSize* offs);
+void rec_CmdBindTransformFeedbackBuffersEXT(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* bufs,
+                                            const VkDeviceSize* offs, const VkDeviceSize* sizes);
+void rec_CmdBeginTransformFeedbackEXT(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* counters,
+                                      const VkDeviceSize* offs);
+void rec_CmdEndTransformFeedbackEXT(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* counters,
+                                    const VkDeviceSize* offs);
 void rec_CmdSetViewportWithCount(VkCommandBuffer cb, u32 n, const VkViewport* v);
 void rec_CmdSetViewport(VkCommandBuffer cb, u32 first, u32 n, const VkViewport* v);
 void rec_CmdSetScissorWithCount(VkCommandBuffer cb, u32 n, const VkRect2D* r);
@@ -362,9 +372,21 @@ void vk_rt_flush(u64 gva);
 void vk_gfx_image_mem_need(u64 gva, u64 size);
 int vk_gfx_image_pending(u64 gva, u64 size);
 void vk_gfx_image_land(void);
+/* at a release: the storage images' write-backs recorded, to land once their submit is done (vk_lock) */
+void vk_gfx_image_put_aside(void);
+/* a recorded write-back waits to land (unsubmitted: in the submit being recorded) */
+int vk_gfx_image_in_flight(int unsubmitted);
+/* the submissions up to sub are done: the write-backs recorded in them land (cmd.c's landing, vk_lock) */
+void vk_gfx_image_frame_done(u64 sub);
 u64 vk_surf_guest_size(const Surf* s);
 int vk_surf_can_writeback(const Surf* s);
 void vk_surf_flush(Surf* s, const u8* original); /* original preserves newer guest writes for storage images */
+/* vk_surf_flush in two halves, the GPU not waited for: the bytes a write-back of s copies (0 for none), its copy
+   recorded into buf at at (host-readable once the submit being recorded is done), and its landing from those bytes p,
+   as of the write generation the copy was recorded at */
+u64 vk_surf_flush_size(const Surf* s);
+void vk_surf_flush_record(Surf* s, VkBuffer buf, u64 at);
+void vk_surf_flush_land(Surf* s, const u8* p, const u8* original, u64 wgen);
 void vk_tex_note_writeback(Surf* s);
 void vk_rt_drawn(Surf* s);      /* a render target was drawn to (gpu/vk/render.c) */
 void vk_rt_drawn_full(Surf* s); /* a full clear or blit replaced every pixel */
@@ -549,9 +571,10 @@ void vk_pipeline_init(void);
    vertex stage, textures and render target outputs for the fragment stage. rt_int keys the primitives of the
    tessellation evaluation and geometry stages (ShaderInfo.rt_int_mask). clip: the clip distances the 3D engine
    enables, and SNX_SH_NOT_LAST (the stages before rasterization). The translator reads ch's bound constant buffers
-   (ch->cbind) to resolve indirect branches */
+   (ch->cbind) to resolve indirect branches. xfb: what transform feedback captures of the last stage before
+   rasterization's outputs (ShaderInfo.xfb), NULL for none */
 VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int_mask, u64 sint_mask, u32 rt_int,
-                    u32 rt_sint, u32 clip, u64 dc_color, u32 dc_funcs, u32 unfed);
+                    u32 rt_sint, u32 clip, u64 dc_color, u32 dc_funcs, u32 unfed, const ShXfb* xfb);
 typedef struct {
     VkShaderModule vs, fs;
     VkShaderModule tcs, tes, gs; /* tessellation control and evaluation, geometry: VK_NULL_HANDLE when off */
@@ -611,7 +634,10 @@ u64 vk_compute_adds(void);
 int vk_compute_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off);
 extern VkSemaphore g_vk_csem;  /* timeline semaphore the compute queue signals */
 extern u64 g_vk_cs_wait_value; /* the value graphics work waits for before reading compute results */
-extern u64 g_vk_dispatches, g_vk_cs_batches, g_vk_cs_skipped, g_vk_cs_wait_ns; /* statistics */
+extern u64 g_vk_dispatches, g_vk_cs_batches, g_vk_cs_wait_ns; /* statistics */
+/* the dispatches skipped so far; why (size bytes) gets their reasons with each one's count, " (12 not translated, 3
+   a texture not bound)", or "" when none was */
+u64 vk_cs_skipped(char* why, size_t size);
 
 /* render.c */
 void vk_render_end(void); /* ends the dynamic rendering pass, if one is open */
@@ -639,15 +665,16 @@ VkSampler vk_tex_bind_sampler(const u32* tsc, const ShTex* st, int num, const Su
    to, which can be a depth target of another type than the header's; NULL takes the type a surface made from the
    header has (tex_from_tic copies a target of another color format into the header's).
    Storage image stores are translated unsigned when bindless and float when bound (spirv_translate.c's image kinds).
-   vk_image_keyable: whether slot i of an unkeyed program is one whose declaration follows its image, a 2D store.
-   Atomics need an unsigned image whatever the header says, and buffer images (bound by compute only) take a view in
-   the format the unkeyed kind needs instead (cs_buffer_image). vk_image_key: whether such a slot's header names an
-   image of the other class, so that the program is translated again with bit 8 + i of rt_int_mask set. The header
-   has the class of the surface vk_storage_image_view checks (tex_from_tic keeps it).
+   vk_image_keyable: whether slot i of an unkeyed program is one whose declaration follows its image, a 2D or 2D array
+   store. Atomics need an unsigned image whatever the header says, and buffer images (bound by compute only) take a
+   view in the format the unkeyed kind needs instead (cs_buffer_image). vk_image_key: whether such a slot's header
+   names an image of the other class, so that the program is translated again with bit 8 + i of rt_int_mask set. The
+   header has the class of the surface vk_storage_image_view checks (tex_from_tic keeps it).
    vk_storage_image_view: the view storage image slot i of the keyed program si binds t through, or VK_NULL_HANDLE when
-   it can't: one 2D level that lands back in guest memory as it is, R32_UINT for unsigned stores and atomics (which
-   declare that format) and a float format for float stores (which declare none). *bytes is set to the guest bytes t
-   covers. A draw also refuses its own attachments, which a dispatch, outside any rendering pass, can write.
+   it can't: one level (a 2D view, or a 2D array view of every layer for a 2D array slot) that lands back in guest
+   memory as it is, R32_UINT for unsigned stores and atomics (which declare that format) and a float format for float
+   stores (which declare none). *bytes is set to the guest bytes t covers, every layer. A draw also refuses its own
+   attachments, which a dispatch, outside any rendering pass, can write.
    vk_gbuf_desc: a storage buffer's address (*addr) and size from its descriptor's words {address low, address high,
    size} in constant buffer 0 at off, where gbuf_tag (spirv_translate.c) found it for stage (ST_VS, ST_FS or ST_CS).
    No size takes 16 bytes, and sizes are capped at 16 MiB and rounded up to words. The vertex stage's 0xb0 holds a

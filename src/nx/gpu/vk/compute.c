@@ -85,7 +85,48 @@ u64 g_vk_cs_wait_value;
 static u64 g_cval;
 static int g_ar_gfx;
 static u64 g_org_cap;
-u64 g_vk_dispatches, g_vk_cs_batches, g_vk_cs_skipped, g_vk_cs_wait_ns;
+u64 g_vk_dispatches, g_vk_cs_batches, g_vk_cs_wait_ns;
+/* the dispatches skipped, by why: most reasons are logged once, so the counts show which one a game's dispatches keep
+   hitting (a program that wasn't translated is skipped every time it is dispatched) */
+enum {
+    CS_SKIP_LIMITS,
+    CS_SKIP_UNTRANSLATED,
+    CS_SKIP_FEATURE,
+    CS_SKIP_TEXTURE,
+    CS_SKIP_STORAGE_IMAGE,
+    CS_SKIP_BUFFER_IMAGE,
+    CS_SKIP_STORAGE_BUFFER,
+    CS_SKIP_RESOURCES,
+    CS_SKIP_INPUTS_MOVED,
+    CS_SKIP_COUNT
+};
+static u64 g_cs_skips[CS_SKIP_COUNT];
+static const char* const g_cs_skip_names[CS_SKIP_COUNT] = {
+    "past the GPU's limits",       "not translated",
+    "missing a device feature",    "a texture not bound",
+    "a storage image not bound",   "a buffer image not bound",
+    "a storage buffer not read",   "out of descriptors or staging",
+    "inputs changed while binding"};
+u64 vk_cs_skipped(char* why, size_t size) {
+    u64 total = 0;
+    size_t at = 0;
+    int i;
+    if (size) why[0] = 0;
+    for (i = 0; i < CS_SKIP_COUNT; i++) {
+        int n;
+        if (!g_cs_skips[i]) continue;
+        total += g_cs_skips[i];
+        if (at >= size) continue;
+        n = snprintf(why + at, size - at, "%s%llu %s", at ? ", " : " (", (unsigned long long)g_cs_skips[i],
+                     g_cs_skip_names[i]);
+        if (n > 0) at += (size_t)n;
+    }
+    if (at && at + 1 < size) {
+        why[at] = ')';
+        why[at + 1] = 0;
+    }
+    return total;
+}
 
 static u8 g_cb[8][0x10000];
 static u32 g_cbn[8];
@@ -651,7 +692,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
                   "vulkan: a dispatch of %ux%ux%u blocks of %ux%ux%u with %u bytes shared is past this GPU's limits "
                   "(skipped)\n",
                   gx, gy, gz, lx, ly, lz, shm);
-        g_vk_cs_skipped++;
+        g_cs_skips[CS_SKIP_LIMITS]++;
         return;
     }
     cs_init();
@@ -723,7 +764,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         p = p->keyed;
     }
     if (p->failed) {
-        g_vk_cs_skipped++;
+        g_cs_skips[CS_SKIP_UNTRANSLATED]++;
         return;
     }
     int needs_unformatted_image = 0;
@@ -731,7 +772,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         needs_unformatted_image |= p->si.img[i].kind == 0 || (p->si.img[i].type == 1 && p->si.img[i].kind == 2);
     if (needs_unformatted_image && !g_vk.feat.shaderStorageImageWriteWithoutFormat) {
         LOG_LIMIT(1, "vulkan: storage image writes need shaderStorageImageWriteWithoutFormat (skipped)\n");
-        g_vk_cs_skipped++;
+        g_cs_skips[CS_SKIP_FEATURE]++;
         return;
     }
     /* storage buffers: {address, size} in constant buffer 0 */
@@ -758,13 +799,13 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         if ((u32)i >= g_vk_buffer_image_slots ||
             !cs_cb_read(p->si.img[i].bindless ? (p->si.img[i].bl_cbuf & 7) : (rc[0x982] & 7), p->si.img[i].cbuf_off * 4,
                         &h)) {
-            g_vk_cs_skipped++;
+            g_cs_skips[CS_SKIP_BUFFER_IMAGE]++;
             return;
         }
         gmem_read(tic_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
         if (!cs_buffer_image(tic, p->si.img[i].kind, &bimg[i])) {
             LOG_LIMIT(4, "vulkan: unsupported compute buffer image (header word 0 %08x, skipped)\n", tic[0]);
-            g_vk_cs_skipped++;
+            g_cs_skips[CS_SKIP_BUFFER_IMAGE]++;
             return;
         }
         need += bimg[i].bytes + vk_stage_align();
@@ -811,7 +852,10 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
             cs_put_aside(); /* full: it runs while the next one records, and lands when its results are needed */
             for (int i = 0; i < ng; i++) chain[i] = -1; /* a new arena */
         }
-        if (!g_recording && !arena_fit(need)) return;
+        if (!g_recording && !arena_fit(need)) {
+            g_cs_skips[CS_SKIP_RESOURCES]++;
+            return;
+        }
     }
 
     VkDescriptorSet set;
@@ -822,7 +866,7 @@ rebind:
         vk_buf_writable_abort();
         set = vk_desc_alloc(g_vk_dslayout[0][shader_vk_set(ST_CS)]);
         if (!set) {
-            g_vk_cs_skipped++;
+            g_cs_skips[CS_SKIP_RESOURCES]++;
             return;
         }
     } else {
@@ -832,7 +876,10 @@ rebind:
                                            .pSetLayouts = &g_vk_dslayout[0][shader_vk_set(ST_CS)]};
         if (vkAllocateDescriptorSets(g_vk.dev, &dai, &set) != VK_SUCCESS) {
             cs_land();
-            if (!VK_OK(vkAllocateDescriptorSets(g_vk.dev, &dai, &set))) return;
+            if (!VK_OK(vkAllocateDescriptorSets(g_vk.dev, &dai, &set))) {
+                g_cs_skips[CS_SKIP_RESOURCES]++;
+                return;
+            }
         }
     }
     VkWriteDescriptorSet w[SNX_VKB_END];
@@ -860,7 +907,7 @@ rebind:
             if (deferred) {
                 dst = vk_stage(range, vk_stage_align(), &cbuf, &o);
                 if (!dst) {
-                    g_vk_cs_skipped++;
+                    g_cs_skips[CS_SKIP_RESOURCES]++;
                     return;
                 }
             } else {
@@ -891,7 +938,7 @@ rebind:
                                                  : vk_buf_copy(0, ss[i], &sbuf, &o);
             if (!ok) {
                 vk_buf_writable_abort();
-                g_vk_cs_skipped++;
+                g_cs_skips[CS_SKIP_STORAGE_BUFFER]++;
                 return;
             }
             so[i] = o;
@@ -933,14 +980,14 @@ rebind:
             VkImageViewType want = vk_tex_view_type(st);
             if (st->flags & 2) {
                 LOG_LIMIT(4, "vulkan: multisample texture upload is unavailable (skipped)\n");
-                g_vk_cs_skipped++;
+                g_cs_skips[CS_SKIP_TEXTURE]++;
                 cs_abandon_binding(originals);
                 return;
             }
             Surf* t = st->flags & 1 ? vk_tex_from_tic_raw(tic) : vk_tex_from_tic(tic);
             if ((st->flags & 1) && !t) {
                 LOG_LIMIT(4, "vulkan: raw surface load requires an RGBA8 texture (skipped)\n");
-                g_vk_cs_skipped++;
+                g_cs_skips[CS_SKIP_TEXTURE]++;
                 cs_abandon_binding(originals);
                 return;
             }
@@ -962,7 +1009,7 @@ rebind:
             }
             VkSampler smp = vk_tex_bind_sampler(tsc, st, num, sampled, want);
             if (!v || !smp) { /* before any output is recorded: nothing of this dispatch lands */
-                g_vk_cs_skipped++;
+                g_cs_skips[CS_SKIP_TEXTURE]++;
                 cs_abandon_binding(originals);
                 return;
             }
@@ -987,7 +1034,7 @@ rebind:
             const u32 off = p->si.img[i].cbuf_off;
             u32 h = 0, tic[8];
             if (!cs_cb_read(p->si.img[i].bindless ? (p->si.img[i].bl_cbuf & 7) : tcb, off * 4, &h)) {
-                g_vk_cs_skipped++;
+                g_cs_skips[CS_SKIP_STORAGE_IMAGE]++;
                 cs_abandon_binding(originals);
                 return;
             }
@@ -998,7 +1045,7 @@ rebind:
             if (!view) {
                 LOG_LIMIT(4, "vulkan: unsupported compute storage image (header word 0 %08x, kind %d, skipped)\n",
                           tic[0], p->si.img[i].kind);
-                g_vk_cs_skipped++;
+                g_cs_skips[CS_SKIP_STORAGE_IMAGE]++;
                 cs_abandon_binding(originals);
                 return;
             }
@@ -1011,7 +1058,7 @@ rebind:
             if (!seen) {
                 originals[i] = malloc(image_bytes);
                 if (!originals[i]) {
-                    g_vk_cs_skipped++;
+                    g_cs_skips[CS_SKIP_RESOURCES]++;
                     cs_abandon_binding(originals);
                     return;
                 }
@@ -1046,7 +1093,7 @@ rebind:
                 if (!vk_buf_copy_writable(bimg[i].gva, (u32)bimg[i].bytes, &bufimg_buf[i], &bufimg_off[i])) {
                     for (k = 0; k < i; k++)
                         if (bufimg_view[k]) vk_defer_buffer_view(bufimg_view[k]);
-                    g_vk_cs_skipped++;
+                    g_cs_skips[CS_SKIP_BUFFER_IMAGE]++;
                     cs_abandon_binding(originals);
                     return;
                 }
@@ -1064,7 +1111,7 @@ rebind:
             if (!VK_OK(vkCreateBufferView(g_vk.dev, &vci, NULL, &bufimg_view[i]))) {
                 for (k = 0; k < i; k++)
                     if (bufimg_view[k]) vk_defer_buffer_view(bufimg_view[k]); /* a draw may still use the set */
-                g_vk_cs_skipped++;
+                g_cs_skips[CS_SKIP_BUFFER_IMAGE]++;
                 cs_abandon_binding(originals);
                 return;
             }
@@ -1086,7 +1133,7 @@ rebind:
                 if (!dst) {
                     for (i = 0; i < p->si.nimg && i < 8; i++)
                         if (bufimg_view[i]) vk_defer_buffer_view(bufimg_view[i]);
-                    g_vk_cs_skipped++;
+                    g_cs_skips[CS_SKIP_RESOURCES]++;
                     cs_abandon_binding(originals);
                     return;
                 }
@@ -1114,7 +1161,7 @@ rebind:
             }
         vk_buf_writable_abort();
         if (++retries < 4) goto rebind;
-        g_vk_cs_skipped++;
+        g_cs_skips[CS_SKIP_INPUTS_MOVED]++;
         return;
     }
     /* the outputs, once every input is read (an input can alias another storage buffer's output) */
@@ -1165,11 +1212,15 @@ rebind:
     rec_CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, g_vk_playout, 0, 1, &set, 0, NULL);
     rec_CmdDispatch(cb, gx, gy, gz);
     if (deferred) {
-        /* pending from here: the submit copies them where the host reads them (vk_buf_host_barrier) */
+        /* pending from here: the submit copies them where the host reads them (vk_buf_host_barrier). Submitted at
+           once, the GPU runs it while the stream goes on, and a reader of its results waits for that submit alone,
+           not for the draws recorded after it: Pokemon Legends Z-A writes command lists with a dispatch and fetches
+           them a little later (a GPFIFO entry with SYNC), once a frame */
         vk_buf_writable_commit();
         for (i = 0; i < p->si.nimg && i < 8; i++)
             if (bufimg_view[i]) vk_defer_buffer_view(bufimg_view[i]);
         g_vk_dispatches++;
+        vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
         return;
     }
     /* results visible to the host */

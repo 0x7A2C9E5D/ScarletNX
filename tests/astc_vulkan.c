@@ -44,6 +44,7 @@ int vk_ok_(VkResult r, const char* what, const char* file, int line) {
 void vk_render_end(void) {}
 /* The standalone upload test has no guest buffer cache to flush or retire. */
 void vk_buf_frame_done(u64 frame) { (void)frame; }
+void vk_gfx_image_frame_done(u64 sub) { (void)sub; }
 void vk_buf_host_barrier(VkCommandBuffer cb, u64 frame) {
     (void)cb;
     (void)frame;

@@ -7,8 +7,8 @@
    GPU thread goes on recording. The release thread waits for that submit on the GPU, lands its results and performs
    the releases it gates, in order. Whoever needs a queued release sooner (a stream that reads the semaphore, or writes
    over it) performs it itself.
-   The compute queue's results are waited for the same way (its batches, put aside, land in order). Storage images
-   still land at the release (vk_gfx_image_land). */
+   The compute queue's results are waited for the same way (its batches, put aside, land in order), and so are
+   fragment programs' storage images (their copies recorded at the release, vk_gfx_image_put_aside). */
 #include <string.h>
 #include "common/utilities/common.h"
 #include "nx/gpu/gpu.h"
@@ -114,22 +114,24 @@ static void submit_through(u64 gate) {
 static void release(Release* r) {
     int queued;
     vk_lock();
-    vk_gfx_image_land();
+    vk_gfx_image_put_aside();
     r->cgate = vk_compute_put_aside();
     pm_lock(&g_rlock);
     queued = g_rtail != g_rhead;
     pm_unlock(&g_rlock);
     /* a samples-passed report always waits for the GPU: its count is the draws' */
-    if (!r->samples && !vk_buf_pending_any() && !r->cgate && !queued) {
+    if (!r->samples && !vk_buf_pending_any() && !vk_gfx_image_in_flight(0) && !r->cgate && !queued) {
         perform(r);
         vk_unlock();
         return;
     }
-    /* the work before it, submitted so its completion can be waited for; results of earlier submits are older. A
-       samples-passed report waits for the submit being recorded, which holds its counts, without submitting it now */
+    /* the work before it: results of earlier submits are older, and the submit being recorded holds the rest (and a
+       samples-passed report's counts). The release waits for that submit without submitting it now: whoever needs the
+       release submits it (submit_through), and so do the end of the GPFIFO submission and a wait in it (stream_end).
+       Submitting at each release made Pokemon Legends Z-A submit about 150 times a frame, with storage results
+       pending through most of its releases */
     u64 recording = vk_submit_number();
-    if (vk_buf_pending_unsubmitted()) vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
-    r->gate = r->samples ? recording : vk_last_submit();
+    r->gate = r->samples || vk_buf_pending_unsubmitted() || vk_gfx_image_in_flight(1) ? recording : vk_last_submit();
     pm_lock(&g_rlock);
     if (g_rhead - g_rtail == RQ_N) { /* full: the oldest goes now */
         u64 oldest = g_rq[g_rtail % RQ_N].gate, coldest = g_rq[g_rtail % RQ_N].cgate;

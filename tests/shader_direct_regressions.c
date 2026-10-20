@@ -18,7 +18,7 @@
 #define FFMA_KEEP      0x5980000000070000ull
 
 static int failures;
-static const char* storage_paths[2];
+static const char* storage_paths[4];
 static const char* nro_paths[4];
 static const char* dc_color_path;
 static const char* audit_paths[6];
@@ -32,8 +32,10 @@ static const char* arithmetic_path;
 static const char* beyond_paths[3];
 static const char* attribute_paths[6];
 static const char* pexit_path;
+static const char* global_dynamic_path;
+static const char* xfb_path;
 static const char* passthrough_paths[6];
-static char* fixture_paths[64];
+static char* fixture_paths[68];
 static size_t fixture_count;
 
 static const char* fixture_path(const char* directory, const char* name) {
@@ -561,6 +563,46 @@ static void global_buffers(void) {
     u32* code = translate(unused, 1, ST_FS, &info, &words, 1);
     check(code && !info.unsupported && info.ngbuf == 0, "unused constant is not a global buffer");
     free(code);
+    /* an LDG whose base comes from arithmetic the tracking doesn't follow names that instruction (issue #440) */
+    const u64 untracked[] = {FMUL_KEEP | 2, 0xEED4200000070200ull};
+    code = translate(untracked, 2, ST_FS, &info, &words, 1);
+    check_refused(code, &info, "global memory base R2 not tracked at 60: FMUL (reg) at 58",
+                  "an untracked global base names its last writer");
+    free(code);
+    code = translate(untracked + 1, 1, ST_FS, &info, &words, 1);
+    check_refused(code, &info, "global memory base R2 not tracked at 58: no write before",
+                  "an untracked global base without a writer says so");
+    free(code);
+    /* LEA.LO R2, R0, c[0][0x510], 4: the base plus an index, as a 64-bit address's low word (Pokemon Legends Z-A) */
+    const u64 lea[] = {0x4BD7020014470002ull, 0xEED4200000070200ull};
+    code = translate(lea, 2, ST_FS, &info, &words, 1);
+    check(code && !info.unsupported && info.ngbuf == 1 && info.gbuf_cbuf_off[0] == 0x510,
+          "an LEA of a buffer's base keeps the buffer");
+    free(code);
+    /* A load and a store through bases the tracking lost (R6 from an FMUL, as a switch's case reaches a base in
+       Pokemon Legends Z-A, issue #440) find their buffer among the tracked one when they run */
+    const u64 dynamic[] = {
+        0x4C98078014470002ull, /* MOV R2, c[0][0x510] */
+        0xEED4200000070200ull, /* LDG.E R0, [R2] */
+        FMUL_KEEP | 6,         /* R6 = an address the tracking doesn't follow */
+        0xEED4200000070608ull, /* LDG.E R8, [R6] */
+        0xEEDC200000070608ull, /* STG.E [R6], R8 */
+    };
+    code = translate(dynamic, 5, ST_FS, &info, &words, 1);
+    if (!code || info.unsupported) fprintf(stderr, "dynamic global access: %s\n", info.first_unsupported);
+    check(code && !info.unsupported && info.ngbuf == 1 && (info.gbuf_wmask & 1),
+          "untracked global accesses use the tracked buffer, which a store through them writes");
+    if (code) {
+        check(count_opcode(code, words, 247, 0xffffffffu) > 0, "an untracked access tests the buffer's range");
+        save_fixture(global_dynamic_path, code, words);
+    }
+    free(code);
+    /* an atomic, or an access with no tracked buffer to be in, is still refused */
+    const u64 dynamic_atomic[] = {0x4C98078014470002ull, 0xEED4200000070200ull, FMUL_KEEP | 6, 0xED03000000600606ull};
+    code = translate(dynamic_atomic, 4, ST_FS, &info, &words, 1);
+    check_refused(code, &info, "global memory base R6 not tracked at 78: FMUL (reg) at 68",
+                  "an untracked global atomic is refused");
+    free(code);
 }
 
 static void float_controls(void) {
@@ -697,14 +739,20 @@ static void hfma2_immediate(void) {
 }
 
 static void fragment_storage_images(void) {
+    /* the same store and atomic on 2D array surfaces (bits 33-35 set to 4), as Pokemon Legends Z-A's fragment
+       programs write them (issue #440): the layer in the coordinates' third register */
+#define SURFACE_2D_ARRAY(w) (((w) & ~(7ull << 33)) | 4ull << 33)
     static const struct {
         u64 instructions[2];
-        u8 kind;
+        u8 kind, type;
         u32 opcode;
     } cases[] = {
-        {{0x4C98078804A70002ull, 0xEB20010600F70004ull}, 2, 99},
-        {{0x4C98078804A70001ull, 0xEB50008602070A00ull}, 1, 239},
+        {{0x4C98078804A70002ull, 0xEB20010600F70004ull}, 2, 3, 99},
+        {{0x4C98078804A70001ull, 0xEB50008602070A00ull}, 1, 3, 239},
+        {{0x4C98078804A70002ull, SURFACE_2D_ARRAY(0xEB20010600F70004ull)}, 2, 4, 99},
+        {{0x4C98078804A70001ull, SURFACE_2D_ARRAY(0xEB50008602070A00ull)}, 1, 4, 239},
     };
+#undef SURFACE_2D_ARRAY
     for (size_t i = 0; i < sizeof cases / sizeof *cases; i++) {
         ShaderInfo info;
         size_t words = 0;
@@ -712,9 +760,9 @@ static void fragment_storage_images(void) {
         check(code && !info.unsupported && info.nimg == 1, "fragment storage image translates");
         if (code) {
             save_fixture(storage_paths[i], code, words);
-            check(info.img[0].kind == cases[i].kind && info.img[0].bindless && info.img[0].bl_cbuf == 2 &&
-                      info.img[0].cbuf_off == 74,
-                  "fragment storage image resolves its handle and integer format");
+            check(info.img[0].kind == cases[i].kind && info.img[0].type == cases[i].type && info.img[0].bindless &&
+                      info.img[0].bl_cbuf == 2 && info.img[0].cbuf_off == 74,
+                  "fragment storage image resolves its handle, dimension and integer format");
             check(count_opcode(code, words, cases[i].opcode, 0xffffffffu) > 0,
                   "fragment storage image emits the write or atomic operation");
             check(count_opcode(code, words, 5381, 0xffffffffu) > 0,
@@ -1846,6 +1894,37 @@ static void beyond_eden(void) {
 }
 
 /* AL2P keeps byte offsets, including bit 10, and adds the register before an attribute access. */
+/* Transform feedback (ShaderInfo.xfb): a vertex program's AST.128 of R0-R3 to generic 0, of which buffer 0 captures y
+   and z (from mid-vector, 8 bytes a vertex) and buffer 1 x. Each captured component gets an offset of its own: the
+   module declares TransformFeedback and Xfb, and three captures (Pokemon Legends Z-A skins with them, issue #440) */
+static void transform_feedback(void) {
+    const u64 instructions[] = {mov32i(0, 0x3f800000), mov32i(1, 0x40000000), mov32i(2, 0x40400000),
+                                mov32i(3, 0x40800000), 0xeff000000007ff00ull | (0x80ull << 20) | (3ull << 47)};
+    ShaderInfo info;
+    size_t slots, words = 0;
+    u64* code = guest_program(instructions, 5, NULL, &slots);
+    if (!code) return;
+    memset(&info, 0, sizeof info);
+    info.xfb.layout[0][0] = 33;
+    info.xfb.layout[0][1] = 34;
+    info.xfb.count[0] = 2;
+    info.xfb.stride[0] = 8;
+    info.xfb.layout[1][0] = 32;
+    info.xfb.count[1] = 1;
+    info.xfb.stride[1] = 4;
+    u32* spv = shader_to_spirv((const u8*)code, slots * sizeof *code, ST_VS, &info, &words, 0, 1, 1, 1);
+    free(code);
+    check_translated(spv, &info, "a transform feedback capture translates");
+    if (spv) {
+        check(count_opcode(spv, words, 17, 53) == 1, "transform feedback declares its capability once");
+        check(count_opcode(spv, words, 16, 11) == 1, "the entry point captures (Xfb)");
+        check(count_opcode(spv, words, 71, 36) == 3 && count_opcode(spv, words, 71, 35) == 3,
+              "each captured component has a buffer and an offset");
+        save_fixture(xfb_path, spv, words);
+    }
+    free(spv);
+}
+
 static void attribute_pointer(void) {
     const u64 base = 0xefa070010607ff01ull; /* a game's: AL2P R1, RZ + 0x60, PT */
     const u64 instructions[] = {mov32i(4, 0x1234),
@@ -2169,6 +2248,8 @@ int main(int argc, char** argv) {
     if (argc == 2) {
         storage_paths[0] = fixture_path(argv[1], "storage_write");
         storage_paths[1] = fixture_path(argv[1], "storage_atomic");
+        storage_paths[2] = fixture_path(argv[1], "storage_write_array");
+        storage_paths[3] = fixture_path(argv[1], "storage_atomic_array");
         static const char* nro_names[] = {"nro_raw", "nro_ms", "nro_ms_array", "nro_exchange"};
         for (int i = 0; i < 4; i++) nro_paths[i] = fixture_path(argv[1], nro_names[i]);
         char name[32];
@@ -2206,6 +2287,8 @@ int main(int argc, char** argv) {
             attribute_paths[i] = fixture_path(argv[1], name);
         }
         pexit_path = fixture_path(argv[1], "pexit");
+        global_dynamic_path = fixture_path(argv[1], "global_dynamic");
+        xfb_path = fixture_path(argv[1], "xfb");
         for (int i = 0; i < 6; i++) {
             char name[32];
             snprintf(name, sizeof name, "passthrough_%d", i);
@@ -2216,7 +2299,7 @@ int main(int argc, char** argv) {
             snprintf(name, sizeof name, "audit_%d", i);
             audit_paths[i] = fixture_path(argv[1], name);
         }
-        if (fixture_count != 64) {
+        if (fixture_count != 68) {
             fprintf(stderr, "failed to allocate fixture paths\n");
             return 2;
         }
@@ -2237,6 +2320,7 @@ int main(int argc, char** argv) {
     tlds_fp16();
     txd_grad();
     fragment_storage_images();
+    transform_feedback();
     nro_shader_modes();
     issue126_shader_modes();
     between_stages();

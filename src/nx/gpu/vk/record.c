@@ -386,6 +386,65 @@ void rec_CmdBindVertexBuffers(VkCommandBuffer cb, u32 first, u32 n, const VkBuff
     rec_CmdBindVertexBuffers2(cb, first, n, bufs, offs, NULL, NULL);
 }
 
+/* transform feedback (VK_EXT_transform_feedback): the buffers with their offsets and sizes (bind), or the counter
+   buffers begin resumes from and end writes (NULL: none), each an array of n after the arguments */
+typedef struct {
+    VkCommandBuffer cb;
+    u32 first, n;
+    int what; /* 0 bind, 1 begin, 2 end */
+    int counters;
+} XfbArgs;
+static void xfb_run(const void* p) {
+    const XfbArgs* x = p;
+    const u8* q = (const u8*)p + REC_AL(sizeof *x);
+    u64 bn = REC_AL(x->n * sizeof(VkBuffer)), dn = REC_AL(x->n * sizeof(VkDeviceSize));
+    const VkBuffer* bufs = (const VkBuffer*)q;
+    const VkDeviceSize* offs = (const void*)(q + bn);
+    if (x->what == 0)
+        vkCmdBindTransformFeedbackBuffersEXT(x->cb, x->first, x->n, bufs, offs, (const void*)(q + bn + dn));
+    else if (x->what == 1)
+        vkCmdBeginTransformFeedbackEXT(x->cb, x->first, x->n, x->counters ? bufs : NULL, x->counters ? offs : NULL);
+    else
+        vkCmdEndTransformFeedbackEXT(x->cb, x->first, x->n, x->counters ? bufs : NULL, x->counters ? offs : NULL);
+}
+static void xfb_rec(VkCommandBuffer cb, int what, u32 first, u32 n, const VkBuffer* bufs, const VkDeviceSize* offs,
+                    const VkDeviceSize* sizes) {
+    int counters = bufs != NULL;
+    u64 h = REC_AL(sizeof(XfbArgs)), bn = REC_AL(n * sizeof(VkBuffer)), dn = REC_AL(n * sizeof(VkDeviceSize));
+    XfbArgs* x;
+    u8* q;
+    if (!rec_on(cb)) {
+        if (what == 0)
+            vkCmdBindTransformFeedbackBuffersEXT(cb, first, n, bufs, offs, sizes);
+        else if (what == 1)
+            vkCmdBeginTransformFeedbackEXT(cb, first, n, bufs, offs);
+        else
+            vkCmdEndTransformFeedbackEXT(cb, first, n, bufs, offs);
+        return;
+    }
+    x = rec_push(xfb_run, h + bn + dn * 2);
+    q = (u8*)x + h;
+    *x = (XfbArgs){cb, first, n, what, counters};
+    if (counters) {
+        memcpy(q, bufs, n * sizeof *bufs);
+        memcpy(q + bn, offs, n * sizeof *offs);
+    }
+    if (sizes) memcpy(q + bn + dn, sizes, n * sizeof *sizes);
+    rec_commit();
+}
+void rec_CmdBindTransformFeedbackBuffersEXT(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* bufs,
+                                            const VkDeviceSize* offs, const VkDeviceSize* sizes) {
+    xfb_rec(cb, 0, first, n, bufs, offs, sizes);
+}
+void rec_CmdBeginTransformFeedbackEXT(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* counters,
+                                      const VkDeviceSize* offs) {
+    xfb_rec(cb, 1, first, n, counters, offs, NULL);
+}
+void rec_CmdEndTransformFeedbackEXT(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* counters,
+                                    const VkDeviceSize* offs) {
+    xfb_rec(cb, 2, first, n, counters, offs, NULL);
+}
+
 typedef struct {
     VkCommandBuffer cb;
     u32 first, n;
