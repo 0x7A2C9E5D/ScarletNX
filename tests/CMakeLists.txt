@@ -653,6 +653,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME trim_caches COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/trim_caches_test.py")
     # the check that keeps a pull request red while its title says donotmerge (scripts/pr-title.py, pr-title.yml)
     add_test(NAME pr_title COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/pr_title_test.py")
+    # the target LLVM's llvm-config of the linux-*-cross presets, run under its machine's qemu (scripts/)
+    if(UNIX)
+        add_test(NAME cross_llvm_config
+                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/cross_llvm_config_test.py")
+    endif()
     # the log summary (src/common/utilities/logscan.c), and the issues with a log: summarized, labelled and grouped
     # (scripts/game-reports.py, game-reports.yml), both through snx-logscan
     if(TARGET snx-logscan)

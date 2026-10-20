@@ -6,8 +6,11 @@
 #   - SNX_ARCH_FLAGS, the CPU baseline the whole build compiles for, which CMake's compiles get too (added here).
 #     PowerPC64 builds for POWER8: before it there is no lqarx/stqcx., and Clang calls libatomic's
 #     __atomic_compare_exchange_16 for snx_cas128 (helpers/integer.c), which a module links no library to have.
-#     ppc64le starts at POWER8 anyway; the BE machines before it (970) have no Vulkan driver.
-#   - for a Linux cross build with Clang (the linux-ppc64* presets): the target triple and the sysroot, which CMake
+#     ppc64le starts at POWER8 anyway; the BE machines before it (970) have no Vulkan driver. RISC-V builds rv64gc and
+#     LoongArch LA64 v1.0, as the recompiler's modules are (ir.c), and both without linker relaxation: the runtime
+#     library is merged into each module with its functions' own target features, and the module's linker (link_elf.c)
+#     moves no code.
+#   - for a Linux cross build with Clang (the linux-*-cross presets): the target triple and the sysroot, which CMake
 #     passes to its own compiles from CMAKE_C_COMPILER_TARGET and CMAKE_SYSROOT and the others don't get from the
 #     compiler's path. SNX_TARGET_LDFLAGS adds what their links need: LLD, as the build machine's ld only knows its
 #     own architecture.
@@ -16,6 +19,10 @@ include_guard(GLOBAL)
 set(SNX_ARCH_FLAGS "")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64|ppc64le|powerpc64|powerpc64le)$")
     set(SNX_ARCH_FLAGS -mcpu=power8)
+elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "riscv64")
+    set(SNX_ARCH_FLAGS -march=rv64gc -mno-relax)
+elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "loongarch64")
+    set(SNX_ARCH_FLAGS -march=la64v1.0 -mno-relax)
 endif()
 add_compile_options(${SNX_ARCH_FLAGS})
 

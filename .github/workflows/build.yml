@@ -465,7 +465,7 @@ jobs:
           SUMS
           EOF
       # The build machine's: Clang and LLD build for the target (cmake/cross.cmake), glslang the shaders, qemu-user runs
-      # the target's llvm-config (scripts/ppc64-llvm-config.sh) and its loader behind the packaging's ldd, wayland's
+      # the target's llvm-config (scripts/cross-llvm-config.sh) and its loader behind the packaging's ldd, wayland's
       # wayland-scanner the protocols SDL3 builds (appimagetool brings its own compressor, as in the appimage job). The
       # target's: the libraries the runtime links and bundles, gcc for the crt files, libgcc and libstdc++ Clang links
       # the target's programs with, and what the pinned SDL3's build needs, as Arch POWER's SDL3 is older than the pin
