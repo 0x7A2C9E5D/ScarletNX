@@ -926,7 +926,10 @@ static void undeclared_commands(void) {
     memset(&c, 0, sizeof c);
     o.name = "test:p";
     c.cmd = 77;
-    CHECK(stub_ok(&o, &c) == 0 && c.out_size == 0);
+    c.msg = msg(); /* the request's message, as ipc_handle gives it: the answer is written over it */
+    c.msg_size = 0x100;
+    memset(c.msg, 0xA5, c.msg_size);
+    CHECK(stub_ok(&o, &c) == 0 && c.out_size == 0 && !c.msg[0] && !c.msg[0xFF]);
     g_settings.answer_unknown_commands = 0;
     CHECK(stub_ok(&o, &c) == (int)RC(10, 221));
     g_settings.answer_unknown_commands = 1;
