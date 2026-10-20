@@ -128,6 +128,7 @@ void vk_image_destroy(VkImage img, VmaAllocation mem);
    g_vk_present moved. vk_present_before: the present before which an entry last used then has gone unused for at
    least ago_ns and at least `presents` presents (0: none has) */
 void vk_mem_use(u64* usage, u64* budget);
+int vk_mem_heap(void); /* that heap's index */
 void vk_mem_present(void);
 u32 vk_present_before(u64 ago_ns, u32 presents);
 

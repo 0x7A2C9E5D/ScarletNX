@@ -476,8 +476,10 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
                         (unsigned long long)early_left);
             }
             {
-                /* each memory heap's use by this process and the driver's budget for it (VK_EXT_memory_budget): past
-                   the budget the driver moves memory, and the heap the CPU maps (the BAR window) is the one to watch */
+                /* each memory heap's use and the driver's budget for it (VK_EXT_memory_budget), and our own memory in
+                   it (VMA's blocks): past the budget the driver moves memory, and the heap the CPU maps (the BAR window)
+                   is the one to watch. NVIDIA counts the whole system's use of the window as ours, and budgets what
+                   is left of it (cmd.c bar_room) */
                 VmaBudget b[VK_MAX_MEMORY_HEAPS];
                 const VkPhysicalDeviceMemoryProperties* mp;
                 char line[256];
@@ -485,9 +487,10 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
                 vmaGetHeapBudgets(g_vk.vma, b);
                 vmaGetMemoryProperties(g_vk.vma, &mp);
                 for (u32 q = 0; q < mp->memoryHeapCount && at < sizeof line; q++)
-                    at += (size_t)snprintf(line + at, sizeof line - at, "%s heap %u %llu of %llu MB", q ? "," : "", q,
-                                           (unsigned long long)(b[q].usage >> 20),
-                                           (unsigned long long)(b[q].budget >> 20));
+                    at += (size_t)snprintf(line + at, sizeof line - at, "%s heap %u %llu of %llu MB (%llu ours)",
+                                           q ? "," : "", q, (unsigned long long)(b[q].usage >> 20),
+                                           (unsigned long long)(b[q].budget >> 20),
+                                           (unsigned long long)(b[q].statistics.blockBytes >> 20));
                 LOG("vulkan: memory used and budgeted:%s\n", line);
             }
             {

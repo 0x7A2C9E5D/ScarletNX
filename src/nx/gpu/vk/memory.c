@@ -183,6 +183,11 @@ static void heap_find(void) {
     }
 }
 
+int vk_mem_heap(void) {
+    if (g_heap < 0) heap_find();
+    return g_heap;
+}
+
 /* the heap's use as the caches see it, and its budget. The use leaves out the free space inside VMA's blocks, which
    the next allocations fill before VMA asks the driver for more, and the memory of evicted entries the frames in
    flight still hold (vk_deferred_bytes): it goes once they are done */
