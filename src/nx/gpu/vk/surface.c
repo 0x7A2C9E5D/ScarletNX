@@ -711,11 +711,63 @@ void vk_surf_evict(u32 before) {
         }
 }
 
+/* A 2D blit whose source is a depth target: the game copies the depth buffer's texels as a color surface of their
+   size (Pokemon Legends Z-A blits its D24S8 depth as BGRA8 into another depth buffer, which its lighting tests
+   against, and halves it for half-size passes). The texels are copied whole on the console, so here the depth and
+   stencil go into a depth target of the source's format at the destination, which the draw that binds it finds.
+   Depth targets don't reach guest memory, so a copy through memory would leave it undefined: black lighting. 0 when
+   the surfaces don't describe that (another texel size, or a source of another size than the target) */
+static int blit_depth(Surf* st, const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy,
+                      double sdx, double sdy) {
+    u32 fmt = st->fkey & 0xFFFF, tile = (d->linear ? 0x1000u : 0) | (d->bh << 4);
+    Surf* dt;
+    if (vk_rt_format(s->format).bpp != vk_zt_format(fmt).bpp || s->format != d->format || s->width != st->w ||
+        s->height < st->h || !blit_ok(st->f.vk, VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT))
+        return 0;
+    dt = vk_zt_array(d->addr, d->width, d->height, fmt, tile, 1, 0);
+    if (!dt || dt == st || dt->f.vk != st->f.vk) return 0;
+    float S = g_vk_scale;
+    i32 x0 = (i32)(sx * S), y0 = (i32)(sy * S), x1 = (i32)((sx + sdx * dw) * S + 0.5),
+        y1 = (i32)((sy + sdy * dh) * S + 0.5);
+    i32 X1 = (i32)((dx + dw) * S + 0.5f), Y1 = (i32)((dy + dh) * S + 0.5f);
+    dx = (i32)(dx * S);
+    dy = (i32)(dy * S);
+    if (x1 > (i32)st->sw) x1 = (i32)st->sw;
+    if (y1 > (i32)st->sh) y1 = (i32)st->sh;
+    if (X1 > (i32)dt->sw) X1 = (i32)dt->sw;
+    if (Y1 > (i32)dt->sh) Y1 = (i32)dt->sh;
+    if (x1 <= x0 || y1 <= y0 || X1 <= dx || Y1 <= dy || x0 < 0 || y0 < 0 || dx < 0 || dy < 0) return 0;
+    vk_rt_note_read(st);
+    VkCommandBuffer cb = vk_cmd();
+    vk_surf_use(cb, st, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT);
+    vk_surf_use(cb, dt, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    /* one aspect a region; nearest, as filtering packed depth and stencil bits as color would only mix them */
+    VkImageBlit b[2] = {{.srcSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1},
+                         .srcOffsets = {{x0, y0, 0}, {x1, y1, 1}},
+                         .dstSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1},
+                         .dstOffsets = {{dx, dy, 0}, {X1, Y1, 1}}}};
+    b[1] = b[0];
+    b[1].srcSubresource.aspectMask = b[1].dstSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+    rec_CmdBlitImage(cb, st->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dt->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                     st->f.stencil ? 2 : 1, b, VK_FILTER_NEAREST);
+    dt->wgen++;
+    if (dx == 0 && dy == 0 && X1 == (i32)dt->sw && Y1 == (i32)dt->sh)
+        vk_rt_drawn_full(dt);
+    else
+        vk_rt_drawn(dt);
+    dt->last_used = g_vk_present;
+    return 1;
+}
+
 /* the 2D engine's blit between render targets, on the GPU. The surfaces are gpu/gpu.h's
    Surf2D. 0 when it can't be done there: the front end then copies through guest memory */
 int vk_blit2d(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy, double sdx,
               double sdy) {
     Surf* st = vk_rt_find(s->addr);
+    if (st && st->f.depth && st->layout != VK_IMAGE_LAYOUT_UNDEFINED && dw > 0 && dh > 0)
+        return blit_depth(st, s, d, dx, dy, dw, dh, sx, sy, sdx, sdy);
     if (!st || st->f.depth || st->layout == VK_IMAGE_LAYOUT_UNDEFINED || dw <= 0 || dh <= 0) return 0;
     u32 tile = (d->linear ? 0x1000u : 0) | (d->bh << 4);
     Surf* dt = vk_rt(d->addr, d->width, d->height, d->format, tile, 0, d->pitch);
