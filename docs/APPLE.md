@@ -58,8 +58,11 @@ Apple silicon's 16 KiB pages no longer stop the runtime: it commits guest memory
 PowerPC64 ([PowerPC64](./PPC64.md)), and views of memory are copies there, as Windows has them. What still keeps
 games from running:
 
-- **Game modules.** The recompiler links ELF and PE only (`src/common/cpu/recompiler/llvm/link.c`). macOS needs a
-  Mach-O dylib, signed. iOS loads no code it did not ship with, so its games would have to be linked into the app
+- **Game modules on a Mac, untested.** The recompiler links an arm64 Mach-O dylib
+  (`src/common/cpu/recompiler/llvm/link_macho.c`) with the ad hoc signature ld64 gives one, which Apple silicon
+  needs to run it. Its layout, rebases, exports and signature were checked on Linux against LLVM's tools and
+  `ld64.lld`, and its code was run there under qemu. No Mac has loaded one yet.
+- **Game modules on iOS.** iOS loads no code it did not ship with, so its games would have to be linked into the app
   (`snx_module_static`, `src/nx/runtime/main.c`) or loaded into JIT memory on a device that allows it.
 - **32-bit games on iOS.** Their blocks are compiled at run time (`src/nx/runtime/arm.c`,
   `src/common/cpu/arm/exec.c`), which needs memory that becomes executable. iOS gives that only to an app that may JIT.
