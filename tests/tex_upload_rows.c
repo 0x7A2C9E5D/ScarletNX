@@ -161,7 +161,8 @@ int vk_astc_upload(VkCommandBuffer cb, Surf* t, u32 w, u32 h, u32 depth, u32 lev
 }
 /* a CPU model of the GPU's moves (vk/blocklinear.c) and conversions (vk/texconv.c), done as they are recorded: the
    recorded order is the order the barriers keep. Conversions: RGBA4 only, the format the cases convert */
-static u32 moves, convs;
+/* static u32 moves */
+static u32 convs;
 void vk_bl_barrier(VkCommandBuffer cb, int before) {
     (void)cb;
     bar_state = before ? 1 : 2;
@@ -191,7 +192,7 @@ int vk_bl_move(VkCommandBuffer cb, const VkBlMove* m, int to_bl, VkBuffer bl, u6
                 CHECK(o >= lo && o < hi);
                 mem_of(lin)[lin_at + ((u64)z * m->rows + y) * m->lin_pitch + x] = mem_of(bl)[bl_at + o - lo];
             }
-    moves++;
+    /*moves++;*/
     batch_moves++;
     return 1;
 }

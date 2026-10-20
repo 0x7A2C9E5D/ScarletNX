@@ -345,7 +345,10 @@ static int g_uffd = -1;
 #define SNX_UFFD_MINOR 1
 #endif
 #endif
+
+#if SNX_UFFD_MINOR
 static int g_uffd_minor; /* the userfaultfd takes minor faults on shared memory: traps work (plat_trap_init) */
+#endif
 
 static int ww_register(u8* p, u64 size) {
 #if SNX_UFFD
@@ -586,8 +589,8 @@ u8* plat_alias_mirror(void) {
 }
 
 /* ---- traps: userfaultfd minor faults on the pool's pages, answered on a thread of their own */
-static void (*g_trap_fault)(u8* p, int write, u32 tid);
 #if SNX_UFFD_MINOR
+static void (*g_trap_fault)(u8* p, int write, u32 tid);
 static void* trap_thread(void* arg) {
     struct uffd_msg msg[16];
     u64 page = (u64)sysconf(_SC_PAGESIZE);
