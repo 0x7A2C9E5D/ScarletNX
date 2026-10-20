@@ -22,6 +22,11 @@ typedef struct {
     u32 swapped; /* 1 + the slot whose sampler is an array element for this instruction */
     u32 image[8], image_type[8];
     u32 gbuf[16], gbuf_pointer, smap, subgroup_lane_input;
+    /* A fragment program with flow discards nothing inside its loop: a KIL or a failed alpha test sets this bool,
+       an EXIT ends the loop for the lane, and the lane is discarded after it. A demote or a kill in the loop lets a
+       driver drop a quad's remaining helpers from execution while they still hold the loop open: AMD's Windows
+       compiler then repeats the loop with no lane left to end it, until the GPU is reset. */
+    u32 discarded;
 } DirectCtx;
 
 int g_shader_texture_arrays;
@@ -344,6 +349,12 @@ static int helper_side_effect(int op) {
 }
 static u32 cc_not(DirectCtx* c, u32 x) { return spv_emit_bool_not(&c->emit, c->bool_type, x); }
 static u32 cc_and(DirectCtx* c, u32 x, u32 y) { return spv_emit_bool_binary(&c->emit, c->bool_type, 0, x, y); }
+/* a lane whose writes must not land: a helper, or one a KIL inside the flow loop marked */
+static u32 lane_dead(DirectCtx* c) {
+    u32 helper = spv_emit_is_helper(&c->emit, c->bool_type);
+    if (!c->discarded) return helper;
+    return spv_emit_bool_binary(&c->emit, c->bool_type, 1, helper, spv_emit_load(&c->emit, c->bool_type, c->discarded));
+}
 static u32 cc_or(DirectCtx* c, u32 x, u32 y) { return spv_emit_bool_binary(&c->emit, c->bool_type, 1, x, y); }
 static u32 cc_xor(DirectCtx* c, u32 x, u32 y) { return spv_emit_bool_binary(&c->emit, c->bool_type, 2, x, y); }
 static u32 cc_test(DirectCtx* c, u32 code) {
@@ -564,6 +575,12 @@ static void alpha_test(DirectCtx* c, u32 push, u32 push_pointer, u32 alpha) {
     }
     u32 fail = spv_emit_bool_not(&c->emit, c->bool_type, pass);
     fail = spv_emit_bool_binary(&c->emit, c->bool_type, 0, active, fail);
+    if (c->discarded) { /* in the flow loop: discarded after it */
+        spv_emit_store(
+            &c->emit, c->discarded,
+            spv_emit_bool_binary(&c->emit, c->bool_type, 1, spv_emit_load(&c->emit, c->bool_type, c->discarded), fail));
+        return;
+    }
     u32 discard = spv_emit_id(&c->emit), merge = spv_emit_id(&c->emit);
     spv_emit_selection_merge(&c->emit, merge);
     spv_emit_branch_conditional(&c->emit, fail, discard, merge);
@@ -3623,6 +3640,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     /* every OpVariable comes before the first block's other instructions, the clip distances' stores included */
     if (has_flow)
         pc = spv_emit_function_variable_init(&c->emit, reg_ptr, spv_emit_constant_u32(&c->emit, c->u32_type, 11));
+    c->discarded = has_flow && stage == ST_FS ? spv_emit_function_variable_init(&c->emit, pred_ptr, c->false_value) : 0;
     for (clip = 0; clip < clip_count; clip++) {
         u32 index = spv_emit_constant_u32(&c->emit, c->u32_type, clip);
         u32 ptr = spv_emit_output_element_pointer(&c->emit, c->f32_type, clip_output, index);
@@ -3741,7 +3759,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             guard_merge = spv_emit_id(&c->emit);
             u32 condition = pred_read(c, B(w, 16, 3), B(w, 19, 1));
             if (flow_has_cc(op) && B(w, 0, 5) != 15) condition = cc_and(c, condition, cc_test(c, B(w, 0, 5)));
-            if (skip_helper) condition = cc_and(c, condition, cc_not(c, spv_emit_is_helper(&c->emit, c->bool_type)));
+            if (skip_helper) condition = cc_and(c, condition, cc_not(c, lane_dead(c)));
             spv_emit_selection_merge(&c->emit, guard_merge);
             spv_emit_branch_conditional(&c->emit, condition, execute, guard_merge);
             spv_emit_label(&c->emit, execute);
@@ -3860,7 +3878,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     &c->emit, c->u32_type, value, spv_emit_vec4_extract(&c->emit, c->u32_type, tid, 2),
                     spv_emit_constant_u32(&c->emit, c->u32_type, 26), spv_emit_constant_u32(&c->emit, c->u32_type, 6));
             } else if (stage == ST_FS && sr == 0x13) /* SR_THREAD_KILL: all ones in a lane KIL demoted */
-                value = spv_emit_select(&c->emit, c->u32_type, spv_emit_is_helper(&c->emit, c->bool_type),
+                value = spv_emit_select(&c->emit, c->u32_type, lane_dead(c),
                                         spv_emit_constant_u32(&c->emit, c->u32_type, 0xffffffffu), c->zero);
             else if (sr == 0x11) /* SR_INVOCATION_ID */
                 value = spv_emit_load(&c->emit, c->u32_type, invocation_id);
@@ -6544,8 +6562,12 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             spv_emit_memory_barrier(&c->emit, c->u32_type, scope, 0x848u | (stage == ST_CS ? 0x100u : 0));
         } else if (op == O_KIL) {
             /* the lane goes on as a helper, so that its quad's derivatives stay defined, and nothing it writes
-               lands: what the hardware gives, and what Eden does */
-            spv_emit_demote(&c->emit);
+               lands: what the hardware gives, and what Eden does. Inside the flow loop it goes on as a lane that
+               only remembers it, and is discarded after the loop (DirectCtx.discarded) */
+            if (c->discarded)
+                spv_emit_store(&c->emit, c->discarded, c->true_value);
+            else
+                spv_emit_demote(&c->emit);
         } else if (op == O_EXIT) {
             u32 pexit_merge = 0;
             if (has_pexit) {
@@ -6597,18 +6619,22 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                                    spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, reg + 1)));
                 if (push && (target & 15)) alpha_test(c, push, push_pointer, alpha);
             }
-            spv_emit_return(&c->emit);
+            if (c->discarded) { /* the lane leaves the flow loop, and a discarded one is discarded after it */
+                spv_emit_store(&c->emit, pc, spv_emit_constant_u32(&c->emit, c->u32_type, UINT32_MAX));
+                if (has_pexit) spv_emit_branch(&c->emit, pexit_merge);
+            } else
+                spv_emit_return(&c->emit);
             if (has_pexit) spv_emit_label(&c->emit, pexit_merge);
         }
         /* no texture is sparse, so every texel a fetch reads is resident */
         pred_write(c, sparse_predicate(w, op), c->false_value);
         if (guard_merge) {
-            if (op != O_EXIT) spv_emit_branch(&c->emit, guard_merge);
+            if (op != O_EXIT || c->discarded) spv_emit_branch(&c->emit, guard_merge);
             spv_emit_label(&c->emit, guard_merge);
         } else if (op == O_EXIT && !has_flow)
             break;
         u32 next = next_instruction(i, n);
-        if (has_flow && (next >= n || block_start[next]) && (guard_merge || op != O_EXIT || has_pexit))
+        if (has_flow && (next >= n || block_start[next]) && (guard_merge || op != O_EXIT || has_pexit || c->discarded))
             spv_emit_branch(&c->emit, dispatch_merge);
     }
     if (has_flow) {
@@ -6629,6 +6655,15 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         spv_emit_label(&c->emit, loop_continue);
         spv_emit_branch(&c->emit, loop_header);
         spv_emit_label(&c->emit, loop_merge);
+        if (c->discarded) {
+            u32 kill_label = spv_emit_id(&c->emit), kept = spv_emit_id(&c->emit);
+            u32 discard = spv_emit_load(&c->emit, c->bool_type, c->discarded);
+            spv_emit_selection_merge(&c->emit, kept);
+            spv_emit_branch_conditional(&c->emit, discard, kill_label, kept);
+            spv_emit_label(&c->emit, kill_label);
+            spv_emit_kill(&c->emit);
+            spv_emit_label(&c->emit, kept);
+        }
         if (passthrough)
             geometry_passthrough(c, si, in_vertices, vec4, position, position_in, output_attrs, inputs, point_size,
                                  layer_output, i32_type, clip_output, clip_count, primitive_id, primitive_id_out,
