@@ -1212,11 +1212,15 @@ rebind:
     rec_CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, g_vk_playout, 0, 1, &set, 0, NULL);
     rec_CmdDispatch(cb, gx, gy, gz);
     if (deferred) {
-        /* pending from here: the submit copies them where the host reads them (vk_buf_host_barrier) */
+        /* pending from here: the submit copies them where the host reads them (vk_buf_host_barrier). Submitted at
+           once, the GPU runs it while the stream goes on, and a reader of its results waits for that submit alone,
+           not for the draws recorded after it: Pokemon Legends Z-A writes command lists with a dispatch and fetches
+           them a little later (a GPFIFO entry with SYNC), once a frame */
         vk_buf_writable_commit();
         for (i = 0; i < p->si.nimg && i < 8; i++)
             if (bufimg_view[i]) vk_defer_buffer_view(bufimg_view[i]);
         g_vk_dispatches++;
+        vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
         return;
     }
     /* results visible to the host */

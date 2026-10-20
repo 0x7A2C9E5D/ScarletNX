@@ -398,11 +398,21 @@ static void mem_need_reason(u64 gva, u64 len, int reason) {
         return;
     }
     range_pages(gva, len, &q);
+    /* the results over the range land: those of submits already made by waiting for the newest of them, the GPU
+       going on with what came after, and only one in the commands being recorded by finishing them all */
+    u64 newest = 0;
+    int recording = 0;
     for (GfxOut* o = g_out; o; o = o->next)
         if ((gva < o->addr + o->size && o->addr < gva + len) || backing_overlap(&q, o)) {
-            wait_finish(reason);
-            break;
+            if (o->frame > vk_last_submit()) recording = 1;
+            if (o->frame > newest) newest = o->frame;
         }
+    if (recording)
+        wait_finish(reason);
+    else if (newest) {
+        vk_wait_submit(newest);
+        vk_land_through(newest);
+    }
     vk_unlock();
 }
 void vk_buf_mem_need(u64 gva, u64 len) { mem_need_reason(gva, len, WB_READ); }
