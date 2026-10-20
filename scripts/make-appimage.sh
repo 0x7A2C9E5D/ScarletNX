@@ -29,7 +29,7 @@ export ARCH VERSION
 export APPIMAGE_ARCH=$ARCH
 export OUTPATH=./dist
 export OUTNAME=ScarletNX-linux-$ARCH.AppImage
-# .DirIcon, what file managers and integrators show, is this PNG (docs.appimage.org/reference/appdir.html)
+# quick-sharun copies ICON to .DirIcon as well
 export ICON=$SYSROOT/usr/share/icons/hicolor/256x256/apps/wimsy.png
 export DESKTOP=$SYSROOT/usr/share/applications/scarletnx.desktop
 # AppImageUpdate finds new builds through the .zsync file next to the AppImage in the latest release
