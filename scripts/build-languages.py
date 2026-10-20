@@ -3,13 +3,13 @@
 # Copyright 2026 the ScarletNX contributors
 """The menu's languages (src/gui/i18n.h): its phrases listed from the code, and each translation compiled into it.
 
---pot writes po/scarletnx.pot from the phrases of src/gui (snx_tr, SNX_TR_NOOP, SNX_TR_KEYS, SNX_TR_KEY) and the
-launcher's own rows in src/nx/runtime/settings.txt (their names, labels, help and sections, which its Settings show
-through snx_tr); --check
-fails when it is not what the code makes, or a po/*.po would not compile. --out FILE PO... makes FILE, the C source of
-every language's catalog (the .mo format, read by snx_mo_lookup). A .po is refused when a translation changes the
-printf conversions of its phrase (C's printf takes the arguments in order), changes a foot's keys, has a letter the
-menu's font does not draw (scripts/build-glyphs.py), or is not a plain UTF-8 .po of single phrases.
+--pot writes po/scarletnx.pot from the phrases of src/gui (snx_tr, SNX_TR_NOOP, SNX_TR_KEYS, SNX_TR_KEY), the setup's
+notices it shows (src/common/utilities/setup.c) and the launcher's own rows in src/nx/runtime/settings.txt (their
+names, labels, help and sections, which its Settings show through snx_tr); --check fails when it is not what the code
+makes, or a po/*.po would not compile. --out FILE PO... makes FILE, the C source of every language's catalog (the .mo
+format, read by snx_mo_lookup). A .po is refused when a translation changes the printf conversions of its phrase (C's
+printf takes the arguments in order), changes a foot's keys, has a letter the menu's font does not draw
+(scripts/build-glyphs.py), or is not a plain UTF-8 .po of single phrases.
 """
 
 import argparse
@@ -21,10 +21,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = 'src/gui'
+SHOWN = ('src/common/utilities/setup.c',)  # files elsewhere with phrases the menu shows: the setup's notices
 SETTINGS = 'src/nx/runtime/settings.txt'
 POT = 'po/scarletnx.pot'
 MARKS = {'snx_tr': None, 'SNX_TR_NOOP': None, 'SNX_TR_KEYS': 'snx-keys', 'SNX_TR_KEY': 'snx-key'}
-CODE = re.compile(r'[a-z]{2,3}(_[A-Z]{2})?$')
+CODE = re.compile(r'[a-z]{2,3}(-[A-Z][a-z]{3})?(-([A-Z]{2}|[0-9]{3}))?$')  # BCP 47: language[-Script][-REGION]
 ESCAPES = {'n': '\n', 't': '\t', 'r': '\r', 'a': '\a', 'b': '\b', 'f': '\f', 'v': '\v'}
 ESCAPES.update({c: c for c in '\\"\'?'})
 CHAR = re.compile(r"'(?:\\.[^']*|[^'\\])'")
@@ -173,7 +174,7 @@ def settings_phrases(root, phrases):
 def code_phrases(root):
     """every phrase of the code, in the order first met: {phrase: (flags, files)}"""
     phrases = {}
-    for path in sorted((root / SOURCES).iterdir()):
+    for path in sorted((root / SOURCES).iterdir()) + [root / shown for shown in SHOWN]:
         if path.suffix not in ('.c', '.h', '.m', '.cpp') or path.name == 'i18n.h':
             continue
         name = path.relative_to(root).as_posix()
@@ -373,19 +374,25 @@ def check_entry(msgid, msgstr, keys, words, where):
 
 
 def drawable(root):
-    """the code points past ASCII the menu's font draws: CP437's, and the Latin letters kept from GNU Unifont"""
+    """the code points past ASCII the menu's font draws: CP437's, and the Latin and the wide letters kept from GNU
+    Unifont"""
     spec = importlib.util.spec_from_file_location('build_glyphs', Path(__file__).with_name('build-glyphs.py'))
     glyphs = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(glyphs)
-    kept = root / glyphs.KEPT
-    return glyphs.codepage(root) | set(glyphs.read_hex(kept.read_text().splitlines(), kept))
+    drawn = glyphs.codepage(root)
+    for kept in (root / glyphs.KEPT, root / glyphs.WIDE_KEPT):
+        drawn |= set(glyphs.read_hex(kept.read_text().splitlines(), kept))
+    return drawn
 
 
 def check_drawn(text, drawn, where):
     lacking = sorted({c for c in text if ord(c) > 127 and ord(c) not in drawn})
     if lacking:
         letters = ', '.join(f'U+{ord(c):04X}' for c in lacking)
-        raise Refused(f"{where}: {text!r} has what the menu's font does not draw ({letters}): it would show as ?")
+        raise Refused(
+            f"{where}: {text!r} has what the menu's font does not draw ({letters}): it would show as ?. "
+            'scripts/build-glyphs.py --from takes from GNU Unifont the glyph of each letter the languages show'
+        )
 
 
 def compile_po(path, phrases, drawn):
@@ -393,7 +400,10 @@ def compile_po(path, phrases, drawn):
     points past ASCII the menu's font has"""
     code = path.stem
     if not CODE.match(code) or code == 'en':
-        raise Refused(f'{path}: a .po is named for its language, as pt_BR.po or de.po, and English is the code itself')
+        raise Refused(
+            f"{path}: a .po is named by its language's BCP 47 tag, as pt-BR.po, zh-Hans-CN.po or de.po, and English is"
+            ' the code itself'
+        )
     entries = read_po(path)
     if not entries or entries[0][0] != '':
         raise Refused(f'{path}: no header (the msgid "" first)')
@@ -446,20 +456,25 @@ def c_quote(s):
     return '"' + ''.join(chr(b) if 32 <= b < 127 and chr(b) not in '"\\?' else f'\\{b:03o}' for b in s.encode()) + '"'
 
 
+def mo_name(code):
+    """the C name of a language's catalog: the tag's hyphens are no C"""
+    return 'mo_' + code.replace('-', '_')
+
+
 def c_text(languages, folder):
     out = [
         f'/* Generated by scripts/build-languages.py from {folder}. Do not edit. */',
         '#include "gui/i18n.h"',
     ]
     for code, _, mo, _ in languages:
-        out.append(f'static const unsigned char mo_{code}[] = {{')
+        out.append(f'static const unsigned char {mo_name(code)}[] = {{')
         for i in range(0, len(mo), 16):
             out.append('    ' + ' '.join(f'0x{b:02x},' for b in mo[i : i + 16]))
         out.append('};')
     out.append('const SnxLanguage snx_gui_languages[] = {')
     out.append('    {"en", "English", NULL, 0},')
     for code, name, _, _ in languages:
-        out.append(f'    {{{c_quote(code)}, {c_quote(name)}, mo_{code}, sizeof mo_{code}}},')
+        out.append(f'    {{{c_quote(code)}, {c_quote(name)}, {mo_name(code)}, sizeof {mo_name(code)}}},')
     out.append('};')
     out.append(f'const int snx_gui_language_count = {len(languages) + 1};')
     return '\n'.join(out) + '\n'

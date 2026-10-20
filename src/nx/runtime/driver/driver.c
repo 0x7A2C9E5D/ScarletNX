@@ -7,6 +7,8 @@
 #include "nx/runtime/driver/extract.h"
 #include "nx/runtime/driver/game_name.h"
 #include "nx/runtime/driver/recompile.h"
+#include "nx/runtime/driver/setup.h"
+#include "common/utilities/setup.h"
 #include "nx/runtime/cli.h"
 #include <ctype.h>
 #include <stdlib.h>
@@ -52,6 +54,10 @@ static void usage(void) {
 #else
          "                         ~/.local/share/scarletnx)");
 #endif
+    puts("  --setup                Go through the setup in the terminal: the language, the install, the\n"
+         "                         folders, the keys and the first user (asked by itself the first time\n"
+         "                         a terminal runs a dump, or after an update says what changed)\n"
+         "  --debug, --skip --skip Leave the setup out of this run, writing nothing");
     puts("  --build-dir DIR        Override this build's build directory\n"
          "  --dump-modules PROGRAM DIR\n"
          "                         Write an extracted program's (or an NRO's) modules as laid out\n"
@@ -579,6 +585,16 @@ static int dump_modules(int argc, char** argv) {
     if (snx_dump_program(argv[2], argv[3], error, sizeof error)) return snx_error("%s", error);
     return 0;
 }
+/* the setup in the terminal for the program at argv0: all of it, or what setup.ini has left. 0 once done */
+static int setup_run(const char* argv0, int all) {
+    char *self = snx_executable(argv0), *dir = self ? snx_dirname(self) : NULL;
+    int rc;
+    snx_tool_console();
+    rc = snx_setup_terminal(stdin, stdout, dir, all);
+    free(dir);
+    free(self);
+    return rc;
+}
 int snx_driver(int argc, char** argv) {
     SnxPaths paths;
     const char *repo = NULL, *build = SNX_BUILD_DIR, *input = NULL, *outdir = NULL, *out = NULL, *opt = NULL;
@@ -586,6 +602,7 @@ int snx_driver(int argc, char** argv) {
     unsigned flags = 0;
     int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, tmpfs_args = 0;
     int repo_given = 0, settings = 0, recompiling = 0;
+    if (argc <= 1 && snx_setup_again) return setup_run(argv[0], 1); /* scarletnx --setup */
     if (argc <= 1) return -1;
     if (!strcmp(argv[1], "--dump-modules")) return dump_modules(argc, argv);
     if (!strcmp(argv[1], "--scan-log")) return snx_logscan_main(argc - 1, argv + 1, snx_demangle);
@@ -758,6 +775,11 @@ int snx_driver(int argc, char** argv) {
     exe = NULL;
     snx_tool_console();
     if (data && source) snx_checkout_left(source, data);
+    /* what the setup has left, before the first run a terminal makes and the first after an update, or all of it */
+    if (!snx_setup_skip && (snx_setup_again || snx_terminal()) && setup_run(argv[0], snx_setup_again)) {
+        result = 1;
+        goto done;
+    }
     r = snx_absolute(repo);
     b = snx_absolute(build);
     exe = snx_executable(argv[0]);

@@ -882,7 +882,7 @@ char* snx_work_dir(const char* data_dir) {
     free(old);
     return work;
 }
-char* snx_data_dir(const char* program_dir) {
+char* snx_portable_dir(const char* program_dir) {
     const char *appimage = getenv("APPIMAGE"), *appdir = getenv("APPDIR");
     char *dir = NULL, *copy;
     /* an AppImage's programs run from its mount: the copy is the AppImage file. APPIMAGE is inherited, so it counts
@@ -893,6 +893,10 @@ char* snx_data_dir(const char* program_dir) {
         dir = snx_strdup(program_dir);
     copy = dir ? snx_path_join(dir, SNX_PORTABLE_DIR) : NULL;
     free(dir);
+    return copy;
+}
+char* snx_data_dir(const char* program_dir) {
+    char* copy = snx_portable_dir(program_dir);
     if (copy && snx_is_dir(copy)) return copy;
     free(copy);
     return snx_user_data_dir();
@@ -1118,6 +1122,13 @@ void snx_vm_flush_code(void* p, size_t size) {
     /* nothing on x86-64, whose instruction fetch sees stores; AArch64 cleans the data cache to the point of
        unification and invalidates the instruction cache over the range */
     __builtin___clear_cache((char*)p, (char*)p + size);
+#endif
+}
+int snx_terminal(void) {
+#ifdef _WIN32
+    return _fileno(stdin) >= 0 && _fileno(stdout) >= 0 && _isatty(_fileno(stdin)) && _isatty(_fileno(stdout));
+#else
+    return isatty(fileno(stdin)) && isatty(fileno(stdout));
 #endif
 }
 void snx_tool_console(void) {

@@ -16,7 +16,7 @@
 #define SNX_TR_KEY(s)  s
 
 typedef struct {
-    const char* code; /* the .po's name, as "pt_BR"; "en" for English */
+    const char* code; /* the .po's name, a BCP 47 tag (common/utilities/language_tag.h): "pt-BR"; "en" for English */
     const char* name; /* in the language itself, UTF-8 */
     const unsigned char* mo;
     size_t size; /* 0: no catalog (English) */
@@ -38,11 +38,11 @@ int snx_tr_language(void);
 #define SNX_TR_FORMAT
 #endif
 const char* snx_tr(const char* english) SNX_TR_FORMAT;
-/* the language whose code is code, -1 for none */
+/* the language code names: its tag, or the tag in another form (pt_BR, zh-CN for zh-Hans-CN). -1 for none */
 int snx_tr_find(const char* code);
-/* the language of the first of the user's locales ("pt_BR", "pt-BR" or "pt", the most wanted first) one of the
-   list's is for: the same language and country, else the language with no country, else the language for another
-   country; English (0) when none is */
+/* the language of the first of the user's locales (pt_BR.UTF-8, pt, zh-Hant_TW, the most wanted first) one of the
+   list's is for, as snx_language_fit has it: the same language, script and region, else the language with no region,
+   else the language for another region; never one of another script. English (0) when none is */
 int snx_tr_pick(const char* const* locales, int count);
 /* musl's __mo_lookup: the translation of s in a catalog of size bytes, NULL when it has none or the catalog is not a
    whole one */

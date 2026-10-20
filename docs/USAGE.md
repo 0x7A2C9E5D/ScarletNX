@@ -11,6 +11,7 @@
 * [AppImage / display](#appimage--display)
 * [Folders](#folders)
 * [Users](#users)
+* [Setup](#setup)
 * [Settings / input](#settings--input)
   * [On-screen controls](#on-screen-controls)
 
@@ -311,6 +312,7 @@ list). The user's data folder and a portable copy's keep each kind of file apart
 | extractions (`3ds/` for the 3DS driver) | `work/` | `~/.cache/scarletnx/work/` | `cache/work/` |
 | the menu's themes, `<name>/theme.ini` | - | `~/.local/share/scarletnx/themes/` | `themes/` |
 | the menu's `settings.ini`, `app.ini`, `folders.txt`, `gamecontrollerdb.txt` | - | `~/.config/scarletnx/` | `config/` |
+| the setup's `setup.ini` ([Setup](#setup)) | - | `~/.config/scarletnx/` | `config/` |
 | the menu's `recent.txt`, `last-run.log` | - | `~/.local/state/scarletnx/` | `state/` |
 | the menu's Share log, `scarletnx.log` | - | `~/.local/state/scarletnx/` | `state/` |
 | `prod.keys`, read before `~/.switch` | the folder | `~/.local/share/scarletnx/` | the folder |
@@ -336,10 +338,10 @@ and an older game runs where it is, its run saying where its folder goes.
 ## Users
 
 The console's users are in `users/users.ini` of the data folder ([Folders](#folders)), every game's: up to 8, each a
-section in the console's order. Without the file there is one, `Player`. User 1 is always that first user, by the uid it
-has always had, so its saves stay its own; each other one needs a uid of 32 hex digits of its own (not zero) and a
-nickname. A nickname is 4 to 20 letters, digits, spaces, `.`, `_` or `-`, the names Eden's rooms take; any other
-stops the game and says why:
+section in the console's order. Without the file there is one, `Player`. User 1 has the uid users.ini gives it; with
+none it has the one it always had, `0123456789abcdeffedcba9876543210`, so the saves made before there were others stay
+its own. Each other one needs a uid of 32 hex digits of its own (not zero) and a nickname. A nickname is 4 to 20
+letters, digits, spaces, `.`, `_` or `-`, the names Eden's rooms take; any other stops the game and says why:
 
 ```ini
 [user1]
@@ -349,15 +351,53 @@ uid=5f3c0d9e8a7b41c2963e0f1a2b3c4d5e
 nickname=Xuji
 ```
 
-`uid` (user 1's, if written, is `0123456789abcdeffedcba9876543210`) and `nickname` are the keys; any
-other key, a section out of order or twice, or a line that is no key stops the game and says why. A user's picture is
-`users/<uid>.jpg`, a JPEG of at most 128 KiB (256x256 as the console's), read when the game starts; without one it is
-Wimsy. The game plays as the user its `.ini`'s `user` names (`--user=N` for one run): with one user, the game picks it
-on its own; with more, the game's user selector gets that user. Each user's Account saves are `save/user.<uid>` in the
-game's `<id>_data/`; the first user's that an older version left in `save/user` are played there until you move them
-([DEPRECATIONS](DEPRECATIONS.md)). The game's menu (Home, F2) shows the user playing in a box at its head's right, their
-nickname and picture, and the launcher the one its Settings' `user` names, where a click picks another
-([GUI](GUI.md)); a users.ini that lists no users is said in the launcher's foot.
+`uid` and `nickname` are the keys; any other key, a section out of order or twice, or a line that is no key stops the
+game and says why. A user's picture is `users/<uid>.jpg`, a JPEG of at most 128 KiB (256x256 as the console's), read
+when the game starts; without one it is Wimsy. The game plays as the user its `.ini`'s `user` names (`--user=N` for one
+run): with one user, the game picks it on its own; with more, the game's user selector gets that user. Each user's
+Account saves are `save/user.<uid>` in the game's `<id>_data/`; those an older version left in `save/user`, of the uid
+`0123456789abcdeffedcba9876543210`, are played there until you move them ([DEPRECATIONS](DEPRECATIONS.md)). The game's
+menu (Home, F2) shows the user playing in a box at its head's right, their nickname and picture, and the launcher the
+one its Settings' `user` names, where a click picks another ([GUI](GUI.md)); a users.ini that lists no users is said in
+the launcher's foot.
+
+## Setup
+
+The first start goes through a setup: in the launcher's window ([GUI](GUI.md#setup)), or in the terminal a dump is
+first run from. It says first what older versions did that this one does otherwise ([DEPRECATIONS](DEPRECATIONS.md):
+only said, nothing is moved), then asks:
+
+1. **Appearance**: the launcher's language (app.ini's `language`), starting on the one it has (the system's, until
+   one is picked), and in the launcher's setup its theme and text size beside it; the terminal's asks the language
+   alone.
+2. **Install type**: installed, in the user's folders ([Folders](#folders)), or portable, everything in
+   `.scarletnx/` beside the program (or the AppImage), which it makes. An app (Android, iOS) has no other.
+3. **Folders**, the launcher's: where its recompiled games go and the folders of dumps it lists (Settings > App >
+   Folders and Library).
+4. **Keys**: `prod.keys` and `title.keys` where the driver reads them, or installed from a folder that has them.
+5. **First user**: a `users/users.ini` there is kept, or overwritten, the one before kept as `users.ini.old`. A new one
+   has one user, the nickname given (`Player` by default), its uid random, of a v4 UUID's form as Ryujinx's are; or
+   `0123456789abcdeffedcba9876543210`, the uid user 1 has had, while a game in `games/` has saves of it.
+
+`setup.ini`, in the config folder, keeps how far it went:
+
+```ini
+[setup]
+version = 1
+notices = 9
+```
+
+`version` is the steps asked, and a newer version's step is asked alone; `notices` is how many of the notices it has
+shown, and one a newer version adds shows alone, with OK, before anything else.
+
+```sh
+./build/scarletnx --setup                  # all of it again, in the terminal
+printf '\n\n\n\n\nAogo\n' | ./build/scarletnx --setup  # its answers a line each, Enter the one in brackets
+./build/scarletnx --debug "Game.xci"       # no setup this run (--skip --skip too), nothing written
+```
+
+A run whose stdin or stdout is no terminal (a pipe, the launcher's runs) asks nothing. With `--debug` nothing is
+written, so a data folder with no users.ini plays as `Player`, uid `0123456789abcdeffedcba9876543210`.
 
 ## Settings / input
 

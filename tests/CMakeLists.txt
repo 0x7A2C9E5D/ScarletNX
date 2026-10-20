@@ -43,8 +43,8 @@ if(SNX_TEST_SANITIZERS)
         snx-logscan
         # the recompiler and its backends
         snx_llvm snx_arm_llvm scarletnx-recompiler scarletnx-recompiler-shared
-        # the driver, its extraction, the settings and the build's line
-        snx_driver snx_nx_module snx_driver_llvm hactool_lib snx_settings snx_settings_runtime snx_build_info
+        # the driver, its extraction, the first start's setup, the settings and the build's line
+        snx_driver snx_nx_module snx_driver_llvm hactool_lib snx_setup snx_settings snx_settings_runtime snx_build_info
         snx-test-build-info
         # the Switch runtime: its components, the shader translator and the Vulkan backend
         scarletnx snx_core snx_kernel snx_hle snx_video snx_gpu snx_platform snx_shader snx_vk
@@ -776,11 +776,14 @@ endif()
 
 add_executable(snx-test-driver driver_workflow.c
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/driver.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/game_name.c"
-    "${PROJECT_SOURCE_DIR}/src/nx/loader/loader.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/process.c"
-    "${PROJECT_SOURCE_DIR}/src/common/utilities/logscan.c")
+    "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/setup.c" "${PROJECT_SOURCE_DIR}/src/nx/loader/loader.c"
+    "${PROJECT_SOURCE_DIR}/src/common/utilities/process.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/logscan.c")
 snx_test_target(snx-test-driver 90)
-target_link_libraries(snx-test-driver PRIVATE snx_test_common snx_lz4 OpenSSL::Crypto snx_demangle)
+target_link_libraries(snx-test-driver PRIVATE snx_test_common snx_setup snx_lz4 OpenSSL::Crypto snx_demangle)
 set_target_properties(snx-test-driver PROPERTIES LINKER_LANGUAGE CXX)
+if(APPLE) # driver/setup.c's weak snx_menu_language, as snx_driver has it: ld64 wants it named
+    target_link_options(snx-test-driver PRIVATE "LINKER:-U,_snx_menu_language")
+endif()
 add_test(NAME driver_workflow COMMAND snx-test-driver)
 set_tests_properties(driver_workflow PROPERTIES TIMEOUT 60)
 add_executable(snx-test-link-file link_file.c)
@@ -803,6 +806,19 @@ if(UNIX)
         target_link_libraries(${target} PRIVATE scarletnx-common)
         add_test(NAME ${name} COMMAND ${target})
     endforeach()
+endif()
+# the setup's files and choices (common/utilities/setup.c), its notices against docs/DEPRECATIONS.md
+if(UNIX AND TARGET snx_setup)
+    add_executable(snx-test-setup setup.c)
+    snx_test_target(snx-test-setup 90)
+    target_link_libraries(snx-test-setup PRIVATE snx_setup)
+    target_compile_definitions(snx-test-setup PRIVATE SNX_DEPRECATIONS="${PROJECT_SOURCE_DIR}/docs/DEPRECATIONS.md")
+    add_test(NAME setup COMMAND snx-test-setup)
+    # the driver's setup in a terminal, its answers from a file
+    add_executable(snx-test-setup-terminal setup_terminal.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/setup.c")
+    snx_test_target(snx-test-setup-terminal 90)
+    target_link_libraries(snx-test-setup-terminal PRIVATE snx_setup)
+    add_test(NAME setup_terminal COMMAND snx-test-setup-terminal)
 endif()
 
 if(UNIX)

@@ -13,6 +13,7 @@ include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
 add_library(snx_i18n STATIC i18n.c)
 set_target_properties(snx_i18n PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_compile_options(snx_i18n PRIVATE -pedantic-errors -Wall -Wextra -Werror=missing-prototypes)
+target_link_libraries(snx_i18n PUBLIC scarletnx-common) # the tags' fit (common/utilities/language_tag.h)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # target, a library of out made from the .po files of folder
 function(snx_gui_languages target folder out)
@@ -21,21 +22,23 @@ function(snx_gui_languages target folder out)
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-languages.py" --out "${out}" ${pos}
         DEPENDS "${PROJECT_SOURCE_DIR}/scripts/build-languages.py" "${PROJECT_SOURCE_DIR}/po/scarletnx.pot" ${pos}
                 "${PROJECT_SOURCE_DIR}/scripts/build-glyphs.py" "${CMAKE_CURRENT_SOURCE_DIR}/unifont-latin.hex"
-                "${PROJECT_SOURCE_DIR}/src/common/utilities/font.c"
+                "${CMAKE_CURRENT_SOURCE_DIR}/unifont-wide.hex" "${PROJECT_SOURCE_DIR}/src/common/utilities/font.c"
         COMMENT "The menu's languages from ${folder}" VERBATIM)
     add_library(${target} STATIC "${out}")
 endfunction()
 snx_gui_languages(snx_gui_languages "${PROJECT_SOURCE_DIR}/po" "${CMAKE_BINARY_DIR}/generated/gui_languages.c")
-# The Latin letters past the VGA font's CP437 (latin.h): GNU Unifont's, kept in unifont-latin.hex
-add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/generated/gui_latin.c"
+# The letters past the VGA font's CP437: GNU Unifont's, the Latin ones (latin.h) kept in unifont-latin.hex and the wide
+# ones the languages show (wide.h) in unifont-wide.hex
+add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/generated/gui_glyphs.c"
     COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-glyphs.py"
-            --out "${CMAKE_BINARY_DIR}/generated/gui_latin.c"
+            --out "${CMAKE_BINARY_DIR}/generated/gui_glyphs.c"
     DEPENDS "${PROJECT_SOURCE_DIR}/scripts/build-glyphs.py" "${CMAKE_CURRENT_SOURCE_DIR}/unifont-latin.hex"
-    COMMENT "The menu's Latin glyphs" VERBATIM)
+            "${CMAKE_CURRENT_SOURCE_DIR}/unifont-wide.hex"
+    COMMENT "The menu's Latin and wide glyphs" VERBATIM)
 add_library(snx_gui_support STATIC model.c browser.c steps.c theme.c recent.c editor.c settings.c place.c clean.c
-            latin.c ${gui_process}
-            "${CMAKE_BINARY_DIR}/generated/gui_themes.c" "${CMAKE_BINARY_DIR}/generated/gui_latin.c")
-target_link_libraries(snx_gui_support PUBLIC scarletnx-common snx_i18n snx_settings)
+            latin.c wide.c ${gui_process}
+            "${CMAKE_BINARY_DIR}/generated/gui_themes.c" "${CMAKE_BINARY_DIR}/generated/gui_glyphs.c")
+target_link_libraries(snx_gui_support PUBLIC scarletnx-common snx_setup snx_i18n snx_settings)
 target_include_directories(snx_gui_support PRIVATE "${CMAKE_BINARY_DIR}/generated")
 set_target_properties(snx_gui_support PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_compile_options(snx_gui_support PRIVATE -Wall -Wextra -Werror=missing-prototypes)
@@ -162,7 +165,8 @@ if(BUILD_TESTING)
     add_test(NAME gui_languages_pot COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-languages.py"
              --check)
     add_test(NAME gui_languages_script COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/languages_test.py")
-    # unifont-latin.hex holds the Latin letters CP437 lacks, each once, in order
+    # unifont-latin.hex holds the Latin letters CP437 lacks, unifont-wide.hex the wide ones the languages show, each
+    # once, in order
     add_test(NAME gui_glyphs_kept COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-glyphs.py" --check)
     add_test(NAME gui_glyphs_script COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/glyphs_test.py")
     add_executable(snx-test-gui-process "${PROJECT_SOURCE_DIR}/tests/gui_process.c")
@@ -192,6 +196,19 @@ if(BUILD_TESTING)
         add_test(NAME gui_sdl_events COMMAND snx-test-gui-sdl)
         # no file picker of the desktop's: the portal would open one on the screen, DBus being there without a display
         set_tests_properties(gui_sdl_events PROPERTIES TIMEOUT 30
+                             ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_FILE_DIALOG_DRIVER=none;SDL_PREFERRED_LOCALES=en_US")
+    endif()
+    # the setup's pages (gui_setup.c), as gui_sdl's: the real renderer, a language of the tests' own, no picker
+    add_executable(snx-test-gui-setup "${PROJECT_SOURCE_DIR}/tests/gui_setup.c")
+    target_link_libraries(snx-test-gui-setup PRIVATE snx_gui_support scarletnx-common SDL3::SDL3 snx_window_icon
+                          snx_build_info snx_pad_sdl snx_splash snx_gui_languages_test snx_demangle)
+    if(APPLE)
+        target_sources(snx-test-gui-setup PRIVATE apple.m)
+        target_link_libraries(snx-test-gui-setup PRIVATE snx_apple_frontend "-framework Foundation")
+        set_target_properties(snx-test-gui-setup PROPERTIES LINKER_LANGUAGE CXX)
+    else()
+        add_test(NAME gui_setup COMMAND snx-test-gui-setup)
+        set_tests_properties(gui_setup PROPERTIES TIMEOUT 30
                              ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_FILE_DIALOG_DRIVER=none;SDL_PREFERRED_LOCALES=en_US")
     endif()
     # every test here, as snx_test_target does: warnings are errors, the asserts stay in any build type, and the

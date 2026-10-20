@@ -2,10 +2,11 @@
    Copyright 2026 the ScarletNX contributors */
 /* The console's users, which the runtime's acc lists, am selects and fs keeps the saves of, and the launcher shows at
    the right of its head: users/users.ini of a data folder, up to eight, each a [userN] section in the console's order,
-   and their pictures beside it as users/<uid>.jpg. User 1 is the user ScarletNX always had, by its uid
-   (SNX_USERS_FIRST_UID0 and 1), so the saves made before there were others stay its own. Without users.ini it is the
-   only user, "Player". A nickname follows the rule of Eden's rooms, where it is the member's name: 4 to 20 letters,
-   digits, spaces, '.', '_' or '-'. Anything users.ini says that is not a user is refused */
+   and their pictures beside it as users/<uid>.jpg. User 1 has the uid users.ini gives it; with none (no users.ini, or
+   a [user1] without one) the uid ScarletNX always gave it (SNX_USERS_FIRST_UID0 and 1), so the saves made before there
+   were others stay its own. Without users.ini it is the only user, "Player". A nickname follows the rule of Eden's
+   rooms, where it is the member's name: 4 to 20 letters, digits, spaces, '.', '_' or '-'. Anything users.ini says that
+   is not a user is refused */
 #ifndef SNX_COMMON_USERS_H
 #define SNX_COMMON_USERS_H
 #include <stddef.h>
@@ -38,4 +39,8 @@ const unsigned char* snx_users_picture(const SnxUser* user, uint32_t* size); /* 
 int snx_users_nickname_valid(const char* nickname);
 /* uid as 32 hex digits, uid[0] first: users.ini's, the pictures' and the saves' */
 void snx_users_uid_text(const uint64_t uid[2], char text[33]);
+/* users.ini in dir started over with one user, user 1 of uid (not zero) and nickname (the rule's), the one there before
+   kept as users.ini.old, which replaces the one an earlier start left. 0, else -1 with why: nothing changed, unless why
+   says users.ini is gone and its users are in users.ini.old */
+int snx_users_start(const char* dir, const uint64_t uid[2], const char* nickname, char* why, size_t why_size);
 #endif

@@ -4,6 +4,7 @@
 
 ## Index
 
+* [Setup](#setup)
 * [Games: the games of games/ and the player's folders](#games-the-games-of-games-and-the-players-folders)
 * [Output and resource use](#output-and-resource-use)
 * [Themes](#themes)
@@ -15,8 +16,9 @@
 name beside it, opens its launcher: a small SDL3 menu for the command-line drivers. A copy named
 after a game, without its code, says so and never opens it. It uses an
 embedded public-domain 8x16 VGA BIOS font, with GNU Unifont's 8x16 glyphs fitted to it for the Latin letters its CP437
-lacks, and nearest-neighbor integer scaling; its words are English or a language compiled into it
-([Languages](#languages)). No font files or localization packages are needed.
+lacks and its 16x16 ones, two columns each, for the wide letters a language shows (Chinese), and nearest-neighbor
+integer scaling; its words are English or a language compiled into it ([Languages](#languages)). No font files or
+localization packages are needed.
 
 ```sh
 ./build/scarletnx
@@ -36,7 +38,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - A list with rows out of sight (the menu with big letters, `games/`'s pages, the Settings, the theme
   editor) shows an arrow past the right edge of its boxes, up on its first row and down on its last, in
   the soft colour.
-- Moving the mouse over an item focuses it in yellow without activating it.
+- Moving the mouse over an item focuses it in yellow without activating it; in the Settings, a row of the list the
+  keys move in (the groups, or the rows of the one open), the other list, a tab and Back waiting for a click.
 - The keys at the foot are buttons: a click or a tap on one presses it, as the keyboard does (ESC or
   Back goes back, Tab to the next screen, Enter or Tap selects, Swipe across turns the page). A key of
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
@@ -100,7 +103,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   dead zone, background input, Joy-Cons). A player's *Controller* is *Any*, the next to connect, until Enter on it
   and a press on a controller give it that one (ESC leaves it as it was, Del makes it *Any* again); its *Button
   map* is the page above on its own keys, its A and B as its *Swap A/B* says.
-  **App** holds **Theme**, **Text size** and **Language**, which Left/Right or Enter go round either way, **Theme editor**, which comes back to App, and **Library**: first `games/`,
+  **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **Text size**, which opens
+  its box of sizes (below), **Theme editor**, which comes back to App, and **Library**: first `games/`,
   where recompiled games go: Enter there picks another, as **Folders > Games** does; at its default it stays on the
   list (the foot's Del greyed), and a folder picked goes back to the default with Del pressed twice, only the setting
   changing. Then the player's own folders, whose games the `games/` browser lists after
@@ -163,11 +167,14 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   and YoRHa, then each folder of `themes/` (see [Themes](#themes)). The menu opens in YoRHa until one is picked.
   It is kept for the next start,
   as are Text size and Language, in `app.ini` beside `settings.ini`: `[app]` with `theme` (a theme's folder
-  name), `text_size` (`auto` or 1 to 4) and `language` (`auto`, `en` or a language's code, as `pt_BR`), and once one
+  name), `text_size` (`auto`, `0.25`, `0.5`, `0.75` or 1 to 4) and `language` (`auto`, `en` or a language's BCP 47
+  tag, as `pt-BR` or `zh-Hans-CN`), and once one
   is picked `[folders]` with Folders' `data`, `games` and
   `work` (a full path, nothing for the default). A value the
   menu does not know, or a theme no longer there, is named in the menu's message as it opens and
-  left out; a file that cannot be written is named in App's note.
+  left out; a file that cannot be written is named in App's note. A language in another form of its tag (`pt_BR`,
+  `zh_CN`, which builds before the tags wrote) is read as that language and written as its tag, the message saying
+  the two once (`language = pt_BR is now pt-BR`).
 - Settings > App's **Theme editor** edits the current theme: **Save** first, the folder it is saved in, a row
   per `theme.ini` key, and beside them a
   preview of the menu or a run (Ctrl+P, or a click on it, switches). Left/Right change a word, a switch or a
@@ -178,14 +185,18 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Save (or Ctrl+S) writes `themes/<folder>/theme.ini` in the data folder and switches to it;
   a built-in is saved as a new theme, `mytheme` until renamed. ESC leaves, asking first if
   there are unsaved changes.
-- Settings > App's **Text size** steps the menu's letters through Auto (fit the screen) and four
-  sizes. Bigger letters scroll the menu. The foot's letters (its keys, and the tips when they are
+- Settings > App's **Text size** opens a box of sizes: a quarter, half or three quarters of Auto (Auto's scale times
+  it, rounded, 1x at the least), Auto (fit the screen), then 1x to 4x. The size picked is used at once, and a question
+  asks to keep it: Keep keeps it in `app.ini`; Back, ESC or no answer in 15 s bring the one before it back. Bigger
+  letters scroll the menu. The foot's letters (its keys, and the tips when they are
   there) are a size under the rest's, 1x at the least.
 - Settings > App's **Language** goes round Auto, English and each language compiled in, by its own name. Auto,
-  the default, takes the first of the system's languages (SDL's preferred locales) the menu has: that language for
-  that country, else the language with no country of its own, else the language for another country (Portuguese of
-  Portugal reads `pt_BR` when it is the only Portuguese), else English; the row says which it took. The words change
-  at once; a phrase the language has not translated stays English.
+  the default, takes the first of the system's languages (SDL's preferred locales, as `pt_BR`, `zh-Hant_TW`) the
+  menu has: that language for that country, else the language with no country of its own, else the language for
+  another country (Portuguese of Portugal reads `pt-BR` when it is the only Portuguese), else English; the row says
+  which it took. A language written in two scripts goes by its script, written or implied by its country (`zh-CN`,
+  `zh-SG` simplified, `zh-TW`, `zh-HK`, `zh-MO` traditional): a system in one never takes a catalog of the other. The
+  words change at once; a phrase the language has not translated stays English.
 - **Share log** saves the last run's output and game log to `scarletnx.log`. On the
   desktop it goes in the working folder with its path copied. On Android it goes to the
   data folder's `state/` and is shared.
@@ -224,6 +235,41 @@ as argv entries, never through a shell. Spaces, Unicode paths and shell punctuat
 are not evaluated. Local `file://` text drops are decoded, but lists and remote URI
 authorities are rejected. The working directory is not changed and is shown in the
 Status box. See [GNUABI](GNUABI.md) for supported Linux ELF applications.
+
+## Setup
+
+The first start opens on the setup, not the menu, a page at a time, each a tab at the top under its number: the
+notices of what older versions did that this one does otherwise (only said, nothing moves:
+[DEPRECATIONS](DEPRECATIONS.md)), then **Appearance**, **Install**, **Folders**, **Keys** and **User**
+([USAGE](USAGE.md#setup) has what each asks, the terminal's setup too). Its boxes say what the page is about; its
+question and choices come as the theme's `[body] options-dialog` places a question ([Themes](#themes)), over the boxes
+without darkening them; its tip, and what a choice did or why it did not, are in the foot. Up/Down (or the mouse)
+move between the choices, Enter takes one and ESC goes back a page, on the first page asking whether to exit. The
+notices come one a page, numbered (Changed 1/8), each read before the setup goes on: Next the next one, Back (from the
+second) the one before, and OK on the last.
+
+- **Appearance**: a box of Settings > App's Language, Theme and Text size, a row each, and Next under
+  them. Up/Down go over the rows and Next; Left/Right (or a click, on the left arrow back) change the language among
+  the menu's and the theme, at once, the screen with them; Text size opens its box of sizes, the size picked asked
+  about for 15 s as App's is; Enter does as App's (the language or the theme a step on, Text size's box), and on
+  Next goes on. What was changed is kept in `app.ini` once the setup is done, in the folders Install picks; Auto
+  stays Auto while the language is the system's.
+- **Install**: Installed, or Portable, which makes `.scarletnx/` beside the program and moves the menu's own files
+  there from then on. A box over the two says which the copy is now: `Now: portable, its files in <folder>/.scarletnx`
+  while that folder is there, the focus then on Portable, else `Now: installed, its files in` the user's data folder.
+  Installed is refused while a `.scarletnx/` is there, which keeps the copy portable. An app (Android, iOS) has no such
+  page.
+- **Folders**: Keep, Change games folder (Settings > App > Folders' Games) or Add dumps folder (a folder of
+  Settings > App > Library), each through the folder picker, the page showing what they are now.
+- **Keys**: `prod.keys` and `title.keys` where the driver reads them; Use these, Choose folder (a folder with
+  `prod.keys`, and `title.keys` if it has one, installed where Setup device keys installs them) or Later.
+- **User**: with `users/users.ini` there, its users with their pictures and uids, then Keep or Overwrite; without one,
+  or to overwrite it, the nickname typed (`Player` to start with; Backspace takes a letter out) and Enter. A nickname
+  the rooms' rule refuses is said, and the page stays.
+
+Once the last page is done the menu opens, `setup.ini` written. After an update that brings a notice, the setup
+shows that notice alone (1/1), with OK, before the menu. `scarletnx --debug` (or `--skip --skip`) opens the menu with no
+setup, writing nothing.
 
 ## Games: the games of games/ and the player's folders
 
@@ -317,8 +363,10 @@ every screen (`[body] sizing = fixed`), and a window too narrow for both shows t
 column is as wide as its entries and the side box goes under the list. A text too long for its box wraps over
 its rows, its last sliding what is left, or takes one that slides with `[body] text = slide`. A run of the console layout shows the driver's output in a box sized to it,
 beside it what runs and how it ended over the status, the file in the tips and the ESC line where the keys
-go, which a tap aborts. The button map draws the pad in the box between the head and the foot. A question, or
-the files an older version left, comes in a box over the screen darkened.
+go, which a tap aborts. The button map draws the pad in the box between the head and the foot. A question comes
+over the screen darkened, in a box in its middle, or with `[body] options-dialog = yorha` (YoRHa's) in a box at its
+foot, a tab with its label on the box's edge, the choices at its right above it, as the game's dialogs. The files an
+older version left come in a box over the screen darkened.
 
 The built-ins are `default`, the look above, and `yorha`: paper and ink, a title twice the text's size, a faint
 grid on the page, square markers, the focused box inverted, the tips in a box under the head, the keys in one on a
@@ -392,6 +440,9 @@ sizing = fixed
 text = wrap
 ; in the list's margin, beside the focused box
 cursor = "> "
+; a question and its choices: default (a box in the middle) | yorha (the question in a box at the foot, the
+; choices at its right above it)
+options-dialog = yorha
 [backdrop]
 ; a faint grid on the page behind the boxes, in the dim colour
 grid = true
@@ -497,9 +548,11 @@ ErET needs `[theme] layout`, so the built-in files carry one: `debug` and `menu`
 
 ## Languages
 
-The menu's phrases are English in its code, each through `snx_tr` (`src/gui/i18n.h`). `po/scarletnx.pot` lists
+The menu's phrases are English in its code, each through `snx_tr` (`src/gui/i18n.h`), and so are the setup's notices,
+marked in `src/common/utilities/setup.c`, which the terminal shows as they are. `po/scarletnx.pot` lists
 them, made from the code by `scripts/build-languages.py --pot`; the `gui_languages_pot` test fails when it is not what
-the code says. A language is a `po/<code>.po` (`pt_BR.po`, `de.po`), gettext's format: the build makes each one a
+the code says. A language is a `po/<tag>.po`, named by its BCP 47 tag as language-Script-REGION, each part only
+when it tells the language apart (`de.po`, `pt-BR.po`, `zh-Hans-CN.po`), in gettext's format: the build makes each one a
 catalog of gettext's `.mo` format compiled into the menu, which reads it with musl's `__mo_lookup`
 (`src/gui/i18n.c`). A new one starts as a copy of the `.pot` whose header names it, in UTF-8:
 
@@ -518,10 +571,14 @@ brings a translation up to the code; a phrase it leaves empty, or marks `fuzzy`,
 - changes the keys of a foot's sentences (`#, snx-keys`, "Key: what it does."): each key stays as it is, or as the
   same file translates it (`#, snx-key`, as `Back`), since a click on the foot finds a key by its word, and a sentence
   greyed (`~`, one its screen cannot do now) stays greyed;
-- has a letter the menu's font does not draw, which would show as `?`: the font is CP437 and the Latin letters of
-  U+00A0 to U+024F past it, GNU Unifont's (`src/gui/unifont-latin.hex`, which `scripts/build-glyphs.py --from` keeps
-  from a Unifont `.hex`, and the build draws with the VGA font's stems and baseline; the `gui_glyphs_kept` test checks
-  it holds each of them once);
+- has a letter the menu's font does not draw, which would show as `?`: the font is CP437, the Latin letters of
+  U+00A0 to U+024F past it and the wide letters the languages show, GNU Unifont's. `scripts/build-glyphs.py --from`
+  keeps them from a Unifont `.hex` (`unifont-<version>.hex` or `unifont_all-<version>.hex`): the Latin ones in
+  `src/gui/unifont-latin.hex`, which the build draws with the VGA font's stems and baseline, and in
+  `src/gui/unifont-wide.hex` the 16x16 glyphs of every other letter of `po/*.po` and `tests/po/*.po`, as Chinese,
+  which the menu draws two columns wide: every width, cut, wrap and slide of its text counts them so (`src/gui/wide.h`),
+  and a row breaks after one as at a space. A language that shows a new letter runs it again; the `gui_glyphs_kept`
+  test checks the files hold each of them once, and no other;
 - has contexts (`msgctxt`), plurals (`msgid_plural`), a phrase twice, or is not UTF-8.
 
 The runtime's settings stay as the runtime names them (their groups, names, help and words come from
@@ -556,11 +613,16 @@ sequences, path parsing, argument quoting, inherited grandchild output, resource
 accounting and process-tree cleanup. Browser tests cover filtering, missing/empty
 directories, pagination, resizing, Back/ESC, launching selected files and R's recompile.
 Key setup tests cover installation, replacement, invalid drops, failed writes,
-self-copy safety, cancellation, and the bright-red overwrite warning.
+self-copy safety, cancellation, and the bright-red overwrite warning. Setup tests (`gui_setup`) go through every
+page of a first start in a home of their own and check what each writes (a portable copy, the language, the folders,
+the keys, the first user) and refuses, users.ini kept or overwritten, the fixed uid kept for its saves, a notice
+alone after an update, `--debug`, and the question where `options-dialog` puts it.
 Language tests cover a catalog's search in either byte order, catalogs cut or pointing out of themselves, the language
 Auto picks from the system's locales, English where a language has none, the Language row and `app.ini`'s key, and
-the script's refusals; they use a language of their own, `tests/po/xx.po`. Glyph tests cover the Latin letters'
-lookup, each way the menu draws a line with them, and the script that keeps them.
+the script's refusals; they use a language of their own, `tests/po/xx.po`. Glyph tests cover the Latin and the wide
+letters' lookup, each way the menu draws a line with them (a wide one's two columns in widths, cuts, wraps, slides, a
+foot's keys and typed text), UTF-8 read with a `?` for each byte no character starts, and the script that keeps
+them.
 Settings tests cover the runtime's list read into rows, picks, the options each combination
 passes, and the screens of its groups and App; menu tests cover mouse hover versus explicit
 activation, the menu without the games and Games with Add a folder and the recent games' show-more row,

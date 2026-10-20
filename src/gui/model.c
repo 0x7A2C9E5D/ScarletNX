@@ -3,7 +3,10 @@
 #include "gui/model.h"
 #include "common/utilities/common.h"
 #include "common/utilities/font.h"
+#include "common/utilities/setup.h"
 #include "gui/i18n.h"
+#include "gui/latin.h"
+#include "gui/wide.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,22 +56,56 @@ void gui_confirm_open(GuiConfirm* confirm, GuiAsk ask, bool twice) {
     confirm->twice = twice;
     confirm->armed = false;
 }
-bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
-    if (!confirm->shown) return false;
+GuiChoiceDo gui_choice_key(GuiChoice* choice, GuiKey key) {
     switch (key) {
         case GUI_UP:
-        case GUI_DOWN:
         case GUI_LEFT:
-        case GUI_RIGHT: gui_confirm_focus(confirm, confirm->selected ^ 1); return false;
+            if (choice->count > 0) choice->focus = (choice->focus + choice->count - 1) % choice->count;
+            return GUI_CHOICE_STAY;
+        case GUI_DOWN:
+        case GUI_RIGHT:
+            if (choice->count > 0) choice->focus = (choice->focus + 1) % choice->count;
+            return GUI_CHOICE_STAY;
+        case GUI_SELECT: return choice->count > 0 ? GUI_CHOICE_TAKE : GUI_CHOICE_STAY;
+        case GUI_CANCEL: return GUI_CHOICE_BACK;
+        default: return GUI_CHOICE_STAY;
+    }
+}
+GuiAppearanceDo gui_appearance_key(int* row, GuiKey key, int* step) {
+    *step = 0;
+    switch (key) {
+        case GUI_UP: *row = (*row + GUI_APPEARANCE_ROWS - 1) % GUI_APPEARANCE_ROWS; return GUI_APPEARANCE_STAY;
+        case GUI_DOWN: *row = (*row + 1) % GUI_APPEARANCE_ROWS; return GUI_APPEARANCE_STAY;
+        case GUI_LEFT:
+        case GUI_RIGHT:
+            if (*row == GUI_APPEARANCE_TEXT) return GUI_APPEARANCE_SIZES;
+            if (*row == GUI_APPEARANCE_NEXT) return GUI_APPEARANCE_STAY;
+            *step = key == GUI_LEFT ? -1 : 1;
+            return GUI_APPEARANCE_CHANGE;
         case GUI_SELECT:
+            if (*row == GUI_APPEARANCE_TEXT) return GUI_APPEARANCE_SIZES;
+            if (*row == GUI_APPEARANCE_NEXT) return GUI_APPEARANCE_ON;
+            *step = 1;
+            return GUI_APPEARANCE_CHANGE;
+        case GUI_CANCEL: return GUI_APPEARANCE_BACK;
+        default: return GUI_APPEARANCE_STAY;
+    }
+}
+bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
+    GuiChoice two;
+    if (!confirm->shown) return false;
+    two.count = 2;
+    two.focus = confirm->selected;
+    switch (gui_choice_key(&two, key)) {
+        case GUI_CHOICE_STAY: gui_confirm_focus(confirm, two.focus); return false;
+        case GUI_CHOICE_TAKE:
             if (confirm->twice && confirm->selected == GUI_CONFIRM_ABORT && !confirm->armed) {
                 confirm->armed = true;
                 return false;
             }
             confirm->shown = false;
             return confirm->selected == GUI_CONFIRM_ABORT;
-        case GUI_CANCEL: confirm->shown = false; return false;
-        default: return false;
+        default: confirm->shown = false; return false;
     }
 }
 void gui_confirm_focus(GuiConfirm* confirm, int choice) {
@@ -140,15 +177,17 @@ int gui_slide(int over, uint64_t ms, uint32_t step_ms) {
     return over - (int)(t - 2 * GUI_SLIDE_WAIT - over);
 }
 size_t gui_wrap(const char* s, int width) {
-    size_t at = 0, slash = 0, space = 0;
-    int chars;
-    for (chars = 0; s[at]; ++chars) {
-        if (chars == (width < 1 ? 1 : width)) return slash ? slash : space ? space : at;
-        while ((s[++at] & 0xC0) == 0x80) {} /* a character's other bytes */
-        if (s[at - 1] == '/' || s[at - 1] == '\\') slash = at;
-        if (s[at - 1] == ' ') space = at;
+    const char* p = s;
+    size_t slash = 0, space = 0;
+    int cols = 0;
+    while (*p) {
+        const char* at = p;
+        cols += gui_glyph_cols(gui_menu_glyph(gui_utf8_step(&p)));
+        if (cols > (width < 1 ? 1 : width) && at > s) return slash ? slash : space ? space : (size_t)(at - s);
+        if (p[-1] == '/' || p[-1] == '\\') slash = (size_t)(p - s);
+        if (p[-1] == ' ') space = (size_t)(p - s);
     }
-    return at;
+    return (size_t)(p - s);
 }
 size_t gui_browser_pages(const GuiBrowser* browser) {
     if (!browser->count || !browser->page_size) return 1;
@@ -370,24 +409,4 @@ char* gui_document_path(const char* uri) {
     free(id);
     return path;
 }
-int gui_keys_text(const char* data, size_t size) {
-    size_t at = 0;
-    int keys = 0;
-    if (!data || memchr(data, 0, size)) return 0;
-    while (at < size) {
-        const char *line = data + at, *end = memchr(line, '\n', size - at);
-        size_t n = end ? (size_t)(end - line) : size - at, i = 0, name, hex = 0;
-        while (i < n && (line[i] == ' ' || line[i] == '\t')) ++i;
-        for (name = i; i < n && (isalnum((unsigned char)line[i]) || line[i] == '_'); ++i) {}
-        name = i - name;
-        while (i < n && (line[i] == ' ' || line[i] == '\t')) ++i;
-        if (name && i < n && line[i] == '=') {
-            for (++i; i < n && (line[i] == ' ' || line[i] == '\t'); ++i) {}
-            for (; i < n && isxdigit((unsigned char)line[i]); ++i) ++hex;
-            while (i < n && isspace((unsigned char)line[i])) ++i;
-            keys += hex >= 2 && i == n;
-        }
-        at += n + 1;
-    }
-    return keys > 0;
-}
+int gui_keys_text(const char* data, size_t size) { return snx_keys_text(data, size); }

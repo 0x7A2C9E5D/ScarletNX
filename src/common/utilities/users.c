@@ -136,6 +136,50 @@ char* snx_users_dir(const char* folder) {
     free(data);
     return dir;
 }
+int snx_users_start(const char* dir, const uint64_t uid[2], const char* nickname, char* why, size_t why_size) {
+    char* path = snx_path_join(dir, USERS_FILE);
+    char *old = snx_format("%s.old", path), *staged = snx_format("%s.new", path), *text = NULL, hex[33];
+    int rc = -1;
+    if (!snx_users_nickname_valid(nickname)) {
+        snprintf(why, why_size, "nickname %.40s is not %d to %d letters, digits, spaces, '.', '_' or '-'", nickname,
+                 SNX_USERS_NICKNAME_MIN, SNX_USERS_NICKNAME_MAX);
+        goto done;
+    }
+    if (!uid[0] && !uid[1]) {
+        snprintf(why, why_size, "a uid of zero is no user's");
+        goto done;
+    }
+    snx_users_uid_text(uid, hex);
+    text = snx_format("; The console's users (docs/USAGE.md#users), up to 8 in the console's order\n"
+                      "[user1]\nuid=%s\nnickname=%s\n",
+                      hex, nickname);
+    if (snx_mkdirs(dir)) {
+        snprintf(why, why_size, "%s could not be made", dir);
+        goto done;
+    }
+    /* written beside it first: a full disk leaves users.ini as it was */
+    if (snx_write_file(staged, text, strlen(text))) {
+        snprintf(why, why_size, "%s could not be written", staged);
+        remove(staged);
+        goto done;
+    }
+    if (snx_is_file(path) && snx_replace(path, old)) {
+        snprintf(why, why_size, "%s could not be kept as %s", path, old);
+        remove(staged);
+        goto done;
+    }
+    if (snx_replace(staged, path)) {
+        snprintf(why, why_size, "%s could not be put in place of %s, whose users are in %s", staged, path, old);
+        goto done;
+    }
+    rc = 0;
+done:
+    free(text);
+    free(staged);
+    free(old);
+    free(path);
+    return rc;
+}
 int snx_users_load(const char* dir, int selected, char* why, size_t why_size) {
     char *path = snx_path_join(dir, USERS_FILE), *text, *key, *value;
     const char* bad;
@@ -167,11 +211,6 @@ int snx_users_load(const char* dir, int selected, char* why, size_t why_size) {
                     snprintf(why, why_size, "%s: [user%d] uid=%s is not 32 hex digits, nor zero", path, n, value);
                     goto done;
                 }
-                if (n == 1 && (uid[0] != SNX_USERS_FIRST_UID0 || uid[1] != SNX_USERS_FIRST_UID1)) {
-                    snprintf(why, why_size, "%s: [user1] is always uid 0123456789abcdeffedcba9876543210, not %s", path,
-                             value);
-                    goto done;
-                }
                 u->uid[0] = uid[0];
                 u->uid[1] = uid[1];
             } else if (!strcmp(key, "nickname")) {
@@ -189,9 +228,11 @@ int snx_users_load(const char* dir, int selected, char* why, size_t why_size) {
             }
         }
     }
-    /* user 1 is the console's first user whatever users.ini says of it, and "Player" unless it names it */
-    g_users[0].uid[0] = SNX_USERS_FIRST_UID0;
-    g_users[0].uid[1] = SNX_USERS_FIRST_UID1;
+    /* user 1 has the uid users.ini gives it, else the one it always had; "Player" unless it names it */
+    if (!g_users[0].uid[0] && !g_users[0].uid[1]) {
+        g_users[0].uid[0] = SNX_USERS_FIRST_UID0;
+        g_users[0].uid[1] = SNX_USERS_FIRST_UID1;
+    }
     if (!g_users[0].nickname[0]) strcpy(g_users[0].nickname, USERS_FIRST_NAME);
     for (i = 1; i < count; i++) {
         if (!g_users[i].uid[0] && !g_users[i].uid[1]) {

@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "common/utilities/setup.h"
 #include "nx/runtime/driver/driver.h"
 #include "nx/runtime/driver/mcp.h"
 #include "nx/runtime/main.h"
@@ -24,9 +25,16 @@ __attribute__((visibility("default"))) int main(int argc, char** argv);
 
 int main(int argc, char** argv) {
     int result;
+    char why[160];
     /* a launcher reads our progress through pipes: lines as they end, errors at once */
     setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
     setvbuf(stderr, NULL, _IONBF, 0);
+    /* the setup's own options, for the driver and the menu, before anything reads the rest */
+    argc = snx_setup_options(argc, argv, why, sizeof why);
+    if (argc < 0) {
+        fprintf(stderr, "scarletnx: %s\n", why);
+        return 2;
+    }
 #ifdef SNX_WITH_GUI
     snx_menu = snx_gui_main;
 #endif

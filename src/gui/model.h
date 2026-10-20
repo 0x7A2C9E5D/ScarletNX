@@ -32,7 +32,8 @@ typedef struct {
     bool activated;
     GuiLoadView view;
     bool running, quit;
-    int text_size; /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen */
+    /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen (Auto); -1 to -3 that many quarters of Auto's */
+    int text_size;
 } GuiMenu;
 /* what a key on the menu asks of the GUI: nothing more, the Settings or the logs shared */
 typedef enum { GUI_MENU_STAY, GUI_MENU_SETTINGS, GUI_MENU_LOG, GUI_MENU_DATA } GuiMenuDo;
@@ -45,7 +46,8 @@ typedef enum {
     GUI_ASK_EXIT,    /* leaving the menu on a computer */
     GUI_ASK_DEEP,    /* a folder picked with folders in it: are their games listed too */
     GUI_ASK_OUTSIDE, /* a folder picked in Folders outside the app's own storage, which Android slows */
-    GUI_ASK_ROOM     /* a run whose extraction may not fit (gui_room) */
+    GUI_ASK_ROOM,    /* a run whose extraction may not fit (gui_room) */
+    GUI_ASK_TEXT     /* a text size just picked: kept, or the one before it back */
 } GuiAsk;
 typedef struct {
     bool shown;
@@ -54,6 +56,27 @@ typedef struct {
     bool twice; /* the second choice is pressed twice: the first press only arms it */
     bool armed; /* pressed once, its focus kept */
 } GuiConfirm;
+/* A choice among count, the one in focus (0 first): Up and Down, Left and Right, move round them, Select takes it and
+   Cancel goes back. A question's yes and no are two (gui_confirm_key); the setup's steps take as many as they offer */
+typedef struct {
+    int count, focus;
+} GuiChoice;
+typedef enum { GUI_CHOICE_STAY, GUI_CHOICE_TAKE, GUI_CHOICE_BACK } GuiChoiceDo;
+GuiChoiceDo gui_choice_key(GuiChoice* choice, GuiKey key);
+/* The setup's first step, Appearance: Language, Theme and Text size a row each, as Settings > App has them, and Next
+   under them. Up and Down move round the four; Left and Right change Language's or Theme's value a step either way and
+   open Text size's box; Select steps Language's or Theme's value on and opens Text size's box, as Settings > App's
+   Enter does, and goes on from Next; Cancel goes back */
+enum { GUI_APPEARANCE_LANGUAGE, GUI_APPEARANCE_THEME, GUI_APPEARANCE_TEXT, GUI_APPEARANCE_NEXT, GUI_APPEARANCE_ROWS };
+typedef enum {
+    GUI_APPEARANCE_STAY,
+    GUI_APPEARANCE_CHANGE, /* the row's value, *step (-1 or 1) away */
+    GUI_APPEARANCE_SIZES,  /* Text size's box opened */
+    GUI_APPEARANCE_ON,     /* the next step */
+    GUI_APPEARANCE_BACK
+} GuiAppearanceDo;
+/* key on the page whose focus is *row (GUI_APPEARANCE_*), moved by it */
+GuiAppearanceDo gui_appearance_key(int* row, GuiKey key, int* step);
 void gui_confirm_open(GuiConfirm* confirm, GuiAsk ask, bool twice);
 /* A key on the question: the arrows move between its choices, Select takes the one in focus and Cancel keeps going,
    both closing it; a question asked twice takes its second choice at the second Select, a move between choices
@@ -75,8 +98,9 @@ bool gui_room(uint64_t dump, bool copy, uint64_t work_free, uint64_t games_free,
 void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_bytes, double cpu_percent, int cores);
 /* how many columns a line over columns too many has slid at ms, a column every step_ms: it waits at each end */
 int gui_slide(int over, uint64_t ms, uint32_t step_ms);
-/* the bytes of s's first row when it is wrapped at width characters (at least 1): all of it when it fits, else up to
-   the last slash or backslash that fits, else the last space, else width characters */
+/* the bytes of s's first row when it is wrapped at width columns (at least 1; a wide letter's two, gui_text_cols): all
+   of it when it fits, else up to the last slash or backslash that fits, else the last space, else the characters that
+   fit, one at least */
 size_t gui_wrap(const char* s, int width);
 
 typedef struct {

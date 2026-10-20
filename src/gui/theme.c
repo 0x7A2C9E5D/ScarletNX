@@ -19,7 +19,7 @@ typedef char snx_gui_word_int[sizeof(GuiStyle) == sizeof(int) && sizeof(GuiRunLa
                                       sizeof(GuiRing) == sizeof(int) && sizeof(GuiLineIn) == sizeof(int) &&
                                       sizeof(GuiAlign) == sizeof(int) && sizeof(GuiPanels) == sizeof(int) &&
                                       sizeof(GuiHeadPlace) == sizeof(int) && sizeof(GuiTipsPlace) == sizeof(int) &&
-                                      sizeof(GuiPicture) == sizeof(int)
+                                      sizeof(GuiDialog) == sizeof(int) && sizeof(GuiPicture) == sizeof(int)
                                   ? 1
                                   : -1];
 
@@ -38,6 +38,7 @@ static const char* const flows[] = {"wrap", "slide", NULL};
 static const char* const head_places[] = {"tabs", "below", NULL};
 static const char* const pictures[] = {"none", "square", "round", NULL}; /* GuiPicture's order */
 static const char* const tips_places[] = {"bottom", "top", NULL};
+static const char* const dialogs[] = {"default", "yorha", NULL}; /* GuiDialog's order */
 #define FIELD(f)                    offsetof(GuiTheme, f), sizeof(((GuiTheme*)0)->f)
 #define TEXT(s, k, f, about)        {s, k, GUI_KEY_TEXT, FIELD(f), NULL, 0, about}
 #define COLOUR(s, k, f, about)      {s, k, GUI_KEY_COLOUR, FIELD(f), NULL, 0, about}
@@ -78,6 +79,9 @@ const GuiThemeKey gui_theme_keys[] = {
              "fixed: the list two fifths of every screen, alone on a narrow one; adaptive: as wide as its entries")),
     WORD("body", "text", text, flows, SNX_TR_NOOP("a text too long for its box over its rows, or on one that slides")),
     TEXT("body", "cursor", cursor, SNX_TR_NOOP("in the margin, beside the focused box")),
+    WORD(
+        "body", "options-dialog", dialog, dialogs,
+        SNX_TR_NOOP("a question: default, a box in the middle; yorha, at the foot, its choices at its right above it")),
     FLAG("backdrop", "grid", grid, SNX_TR_NOOP("a faint grid on the page, in the dim colour")),
     WORD("tips", "place", tips_place, tips_places,
          SNX_TR_NOOP("in a box at the foot beside the keys, or on a row under the head")),

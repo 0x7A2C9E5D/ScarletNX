@@ -3,6 +3,8 @@
 /* Exercise the actual renderer and SDL event handlers without production test flags. */
 #define SNX_GUI_NO_MAIN
 #include "gui/main.c"
+#define SNX_SCREEN_TEST "gui_sdl.c"
+#include "gui_screen.h"
 #include <assert.h>
 #ifdef _WIN32
 #include "win32_crash.h"
@@ -13,6 +15,15 @@
 static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255}, red = {255, 0, 0, 255},
                        pink = {255, 85, 255, 255}, black = {0, 0, 0, 255};
 
+/* the question's box and its choices, as the theme places them (ask_place) */
+static void ask_boxes(App* app, GuiRect* r, GuiList* choices) {
+    GuiChoices c;
+    const char* labels[2];
+    char second[96];
+    ask_place(app, &c, labels, second, sizeof second);
+    *r = c.box;
+    *choices = c.list;
+}
 static void key(App* app, SDL_Keycode code) {
     SDL_Event e = {0};
     e.type = SDL_EVENT_KEY_DOWN;
@@ -132,95 +143,6 @@ static void splash_drawn(App* app, const SDL_Rect* view, const SnxSplashSvg* svg
     free(drawing);
     SDL_DestroySurface(image);
 }
-/* the 16 rows of the menu font's glyph c: CP437's, then the Latin letters past it (gui_menu_glyph) */
-static const uint8_t* font_rows(int c) { return c < 256 ? gui_vga_font + c * 16 : gui_latin_font + (c - 256) * 16; }
-/* n glyphs in color anywhere on the render: their ink pixels in color, the others not (a box's frame may cross the
-   font's last row, which is empty); 1 and where they start, else 0 */
-static int find_glyphs(App* app, const int* text, int n, SDL_Color color, int size, int* at_x, int* at_y) {
-    SDL_Surface *read = SDL_RenderReadPixels(app->renderer, NULL), *image;
-    int s = app->scale * size, first = -1, fx = 0, fy = 0, found = 0, x, y;
-    assert(read);
-    image = SDL_ConvertSurface(read, SDL_PIXELFORMAT_RGBA32);
-    SDL_DestroySurface(read);
-    assert(image);
-#define SNX_AT(px, py) ((const Uint8*)image->pixels + (py) * image->pitch + (px) * 4)
-#define SNX_IS(c)      ((c)[0] == color.r && (c)[1] == color.g && (c)[2] == color.b)
-    for (int i = 0; i < n && first < 0; ++i) /* the first ink, to look for */
-        for (int gy = 0; gy < 15 && first < 0; ++gy)
-            for (int gx = 0; gx < 8 && first < 0; ++gx)
-                if (font_rows(text[i])[gy] & (0x80 >> gx)) {
-                    first = i;
-                    fx = (i * 8 + gx) * s;
-                    fy = gy * s;
-                }
-    assert(first >= 0);
-    for (y = 0; !found && y + 15 * s <= image->h; ++y)
-        for (x = 0; !found && x + n * 8 * s <= image->w; ++x) {
-            if (!SNX_IS(SNX_AT(x + fx, y + fy))) continue;
-            found = 1;
-            for (int i = 0; found && i < n; ++i)
-                for (int gy = 0; found && gy < 15; ++gy)
-                    for (int gx = 0; found && gx < 8; ++gx) {
-                        int ink = (font_rows(text[i])[gy] & (0x80 >> gx)) != 0;
-                        found = ink == SNX_IS(SNX_AT(x + (i * 8 + gx) * s, y + gy * s));
-                    }
-            if (found) {
-                *at_x = x;
-                *at_y = y;
-            }
-        }
-#undef SNX_IS
-#undef SNX_AT
-    SDL_DestroySurface(image);
-    return found;
-}
-/* text in color, glyph by glyph in the font's own bytes (CP437) */
-static int find_text(App* app, const char* text, SDL_Color color, int size, int* at_x, int* at_y) {
-    int glyphs[256], n = 0;
-    while (text[n]) {
-        assert(n < 256);
-        glyphs[n] = (unsigned char)text[n];
-        ++n;
-    }
-    return find_glyphs(app, glyphs, n, color, size, at_x, at_y);
-}
-/* UTF-8 text in color, a glyph each letter as the menu draws it (gui_menu_glyph), size times the text's letters */
-static int find_letters(App* app, const char* text, SDL_Color color, int size, int* at_x, int* at_y) {
-    int glyphs[256], n = 0;
-    while (*text) {
-        assert(n < 256);
-        glyphs[n++] = gui_menu_glyph(SDL_StepUTF8(&text, NULL));
-    }
-    return find_glyphs(app, glyphs, n, color, size, at_x, at_y);
-}
-/* the text drawn, or not, in color, its letters size times the text's: a check that fails names its line */
-#define shows(app, text, color)           shows_at(__LINE__, app, text, color, 1, 1)
-#define hides(app, text, color)           shows_at(__LINE__, app, text, color, 1, 0)
-#define shows_big(app, text, color, size) shows_at(__LINE__, app, text, color, size, 1)
-static void shows_at(int line, App* app, const char* text, SDL_Color color, int size, int drawn) {
-    int x, y;
-    if (find_text(app, text, color, size, &x, &y) == drawn) return;
-    if (drawn)
-        fprintf(stderr, "gui_sdl.c:%d: \"%s\" is not drawn in %02x%02x%02x\n", line, text, color.r, color.g, color.b);
-    else
-        fprintf(stderr, "gui_sdl.c:%d: \"%s\" is drawn in %02x%02x%02x at %d,%d\n", line, text, color.r, color.g,
-                color.b, x, y);
-    if (getenv("SNX_GUI_FAILED_SHOT")) { /* what was drawn, to look at */
-        SDL_Surface* image = SDL_RenderReadPixels(app->renderer, NULL);
-        if (image) SDL_SaveBMP(image, getenv("SNX_GUI_FAILED_SHOT"));
-        SDL_DestroySurface(image);
-    }
-    assert(!"the text drawn");
-}
-/* the same in the foot's letters, a size under the rest's (foot_scale) */
-#define shows_foot(app, text, color) foot_shows_at(__LINE__, app, text, color, 1)
-#define hides_foot(app, text, color) foot_shows_at(__LINE__, app, text, color, 0)
-static void foot_shows_at(int line, App* app, const char* text, SDL_Color color, int drawn) {
-    int scale = app->scale;
-    app->scale = foot_scale(app);
-    shows_at(line, app, text, color, 1, drawn);
-    app->scale = scale;
-}
 /* the boxes a pointer or a finger goes to: a menu's item, Games' rows (0 Add a folder, then the page's games; with
    recent a recent row), a form's row on the left or the right; a pointer at a box's middle */
 static GuiRect entry_box(App* app, int item) {
@@ -280,40 +202,6 @@ static GuiRect foot_room(App* app, GuiRect r, int box) {
     app->scale = scale;
     return out;
 }
-/* the mouse at pixel x, y of the render, moved there or clicking */
-static void mouse_px(App* app, int x, int y, bool click) {
-    SDL_Event e = {0};
-    float wx, wy;
-    layout(app);
-    assert(SDL_RenderCoordinatesToWindow(app->renderer, (float)x + 0.5f, (float)y + 0.5f, &wx, &wy));
-    e.type = click ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_MOTION;
-    e.button.button = SDL_BUTTON_LEFT;
-    if (click) {
-        e.button.x = wx;
-        e.button.y = wy;
-    } else {
-        e.motion.x = wx;
-        e.motion.y = wy;
-    }
-    event(app, &e);
-}
-/* a finger tapping pixel x, y of the render */
-static void tap_px(App* app, int x, int y) {
-    SDL_Event e = {0};
-    float wx, wy;
-    int w, h;
-    layout(app);
-    SDL_GetWindowSize(app->window, &w, &h);
-    assert(SDL_RenderCoordinatesToWindow(app->renderer, (float)x + 0.5f, (float)y + 0.5f, &wx, &wy));
-    e.tfinger.fingerID = 9;
-    e.tfinger.x = wx / (float)w;
-    e.tfinger.y = wy / (float)h;
-    e.type = SDL_EVENT_FINGER_DOWN;
-    event(app, &e);
-    e.type = SDL_EVENT_FINGER_UP;
-    event(app, &e);
-}
-static void point(App* app, GuiRect b, bool click) { mouse_px(app, b.x + b.w / 2, b.y + b.h / 2, click); }
 /* a click, or a tap, on column col of the key the foot draws in color, in its letters */
 #define press_key(app, key, col, tap, color) press_key_at(__LINE__, app, key, col, tap, color)
 static void press_key_at(int line, App* app, const char* key, int col, bool tap, SDL_Color color) {
@@ -855,6 +743,14 @@ static void step_line(void) {
     s.state = GUI_STEP_ACTIVE;
     step_runs(&s, GUI_PROGRESS_PERCENT, 0, runs, lengths);
     assert(!runs[2][0] && !lengths[2]);
+    /* a detail of wide letters (tests/po/xx.po's Menu twice) in columns, cut to those left: none crossing them, its
+       length the columns it keeps */
+    snprintf(s.detail, sizeof s.detail, "\xe8\x8f\x9c\xe5\x8d\x95\xe8\x8f\x9c\xe5\x8d\x95");
+    s.state = GUI_STEP_DONE;
+    step_runs(&s, GUI_PROGRESS_PERCENT, 0, runs, lengths);
+    assert(lengths[0] == 8 && lengths[1] == 9 && lengths[2] == 5);
+    clip_row(runs, lengths, 0, 17); /* 4 columns left for the detail: the second letter would end on the 5th */
+    assert(!strcmp(runs[1], " \xe8\x8f\x9c") && lengths[1] == 3 && lengths[0] == 8 && lengths[2] == 5);
 }
 static int SDLCALL hang(void* unused) {
     (void)unused;
@@ -882,6 +778,17 @@ static void set_env(const char* name, const char* value) {
     assert(!_putenv_s(name, value ? value : ""));
 #endif
     assert(!(value ? SDL_setenv_unsafe(name, value, 1) : SDL_unsetenv_unsafe(name)));
+}
+/* Settings > App's Text size, its row in focus, made size through its box, then kept or not */
+static void pick_size(App* app, int size, bool keep) {
+    key(app, SDLK_RETURN);
+    assert(app->sizes_shown);
+    app->sizes.focus = size < 0 ? -size - 1 : size + 3;
+    key(app, SDLK_RETURN);
+    assert(app->menu.text_size == size && app->confirm.shown && app->confirm.ask == GUI_ASK_TEXT);
+    if (keep) key(app, SDLK_RIGHT);
+    key(app, SDLK_RETURN);
+    assert(!app->confirm.shown && !app->size_until && app->menu.text_size == (keep ? size : app->size_was));
 }
 int main(int argc, char** argv) {
 #ifdef _WIN32
@@ -1239,7 +1146,7 @@ int main(int argc, char** argv) {
     assert(app.keys_done && !app.keys_ok); /* not installed: said, then the menu after a while */
     assert(!snx_remove_tree(app.keys_path));
     {
-        char* keys_path = app.keys_path; /* NULL when home_keys_path finds no home: the variable it reads is named */
+        char* keys_path = app.keys_path; /* NULL when snx_keys_dir finds no home: the variable it reads is named */
         app.keys_path = NULL;
         drop(&app, source_keys, false);
 #ifdef _WIN32
@@ -1542,13 +1449,51 @@ int main(int argc, char** argv) {
         assert(!strcmp(app.theme.name, first));
     }
     key(&app, SDLK_DOWN);
-    key(&app, SDLK_RETURN);
-    assert(app.menu.text_size == 1 && !strcmp(app.app_form.text, "1x"));
-    key(&app, SDLK_LEFT);
-    assert(!app.menu.text_size && !strcmp(app.app_form.text, "Auto"));
-    key(&app, SDLK_LEFT);
-    assert(app.menu.text_size == GUI_TEXT_MAX);
+    /* Text size: its sizes in a box, Auto's parts first; the one picked is used at once and asked about: Keep keeps it,
+       Back, ESC or no answer in 15 s bring the one before it back */
     key(&app, SDLK_RIGHT);
+    assert(app.sizes_shown && app.sizes.count == GUI_TEXT_MAX + 4 && app.sizes.focus == 3 && !app.menu.text_size);
+    render(&app);
+    key(&app, SDLK_DOWN);
+    key(&app, SDLK_RETURN);
+    assert(!app.sizes_shown && app.menu.text_size == 1 && app.scale == 1 && !strcmp(app.app_form.text, "1x"));
+    assert(app.confirm.shown && app.confirm.ask == GUI_ASK_TEXT && strstr(app.size_line, "Back to Auto in 15 s"));
+    render(&app);
+    key(&app, SDLK_ESCAPE);
+    assert(!app.confirm.shown && !app.menu.text_size && !strcmp(app.app_form.text, "Auto"));
+    app.clock = 1000;
+    key(&app, SDLK_RETURN);
+    app.sizes.focus = 1; /* 0.5 of Auto */
+    key(&app, SDLK_RETURN);
+    assert(app.menu.text_size == -2 && app.scale == SDL_max(1, (app.auto_scale * 2 + 2) / 4) &&
+           strstr(app.app_form.text, "0.5 of Auto: "));
+    app.clock = 1000 + GUI_TEXT_KEEP_MS - 1;
+    pump(&app);
+    assert(app.confirm.shown && strstr(app.size_line, "in 1 s"));
+    app.clock = 1000 + GUI_TEXT_KEEP_MS;
+    pump(&app);
+    assert(!app.confirm.shown && !app.menu.text_size && !app.size_until);
+    app.clock = 0;
+    /* a part of Auto is Auto's scale times it, rounded, never under 1x */
+    {
+        int was = app.auto_scale;
+        app.auto_scale = 4;
+        for (int q = 1; q <= 3; ++q) {
+            app.menu.text_size = -q;
+            layout(&app);
+            assert(app.scale == q);
+        }
+        app.auto_scale = 2;
+        app.menu.text_size = -1;
+        layout(&app);
+        assert(app.scale == 1);
+        app.menu.text_size = -3;
+        layout(&app);
+        assert(app.scale == 2);
+        app.auto_scale = was;
+        app.menu.text_size = 0;
+        layout(&app);
+    }
     assert(!app.menu.text_size && app.editor.row == GUI_APP_TEXT);
     /* the App's picks kept at once in app.ini, which the next start reads back */
     {
@@ -1559,7 +1504,7 @@ int main(int argc, char** argv) {
         char* blocker = snx_path_join(temporary, "not a folder");
         char* kept_file = app.app_file;
         snprintf(first_id, sizeof first_id, "%s", app.theme.id);
-        key(&app, SDLK_RIGHT); /* 1x */
+        pick_size(&app, 1, true);
         key(&app, SDLK_UP);
         key(&app, SDLK_RIGHT); /* the next theme */
         snprintf(id, sizeof id, "%s", app.theme.id);
@@ -1580,8 +1525,17 @@ int main(int argc, char** argv) {
         /* back as they were, kept so */
         key(&app, SDLK_LEFT);
         key(&app, SDLK_DOWN);
-        key(&app, SDLK_LEFT);
+        pick_size(&app, 0, true);
         assert(!strcmp(app.theme.id, first_id) && !app.menu.text_size && !app.editor.note[0]);
+        /* a part of Auto kept as app.ini names it, and read back */
+        pick_size(&app, -3, true);
+        kept = (char*)snx_read_file(app.app_file, &size);
+        assert(kept && strstr(kept, "\ntext_size = 0.75\n"));
+        free(kept);
+        app.menu.text_size = 0;
+        app_load(&app);
+        assert(app.menu.text_size == -3);
+        pick_size(&app, 0, true);
         snprintf(expected, sizeof expected,
                  "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = auto\n"
                  "language = auto\n",
@@ -1602,11 +1556,11 @@ int main(int argc, char** argv) {
         /* a file that cannot be written: the pick holds for the session, and the note says it is not kept */
         assert(!snx_write_file(blocker, "file", 4));
         app.app_file = snx_path_join(blocker, "app.ini");
-        key(&app, SDLK_RIGHT);
+        pick_size(&app, 1, true);
         assert(app.menu.text_size == 1 && !snx_is_file(app.app_file));
         snprintf(expected, sizeof expected, "Not kept for the next start: %s could not be written", app.app_file);
         assert(!strcmp(app.editor.note, expected));
-        key(&app, SDLK_LEFT);
+        pick_size(&app, 0, true);
         assert(!app.menu.text_size);
         free(app.app_file);
         app.app_file = kept_file;
@@ -1614,8 +1568,9 @@ int main(int argc, char** argv) {
         free(blocker);
         app.editor.note[0] = 0;
     }
-    /* Language: Auto (the system's: English here, SDL_PREFERRED_LOCALES), English, then the test's xx (tests/po), round
-       either way; kept in app.ini and read back; its words on the screens, a key of the foot found by its own */
+    /* Language: Auto (the system's: English here, SDL_PREFERRED_LOCALES), English, then the test's xx and zh-Hant-TW
+       (tests/po), round either way; kept in app.ini and read back, an older form of a tag written as the tag; its words
+       on the screens, a key of the foot found by its own */
     {
         size_t size = 0;
         char *kept, expected[512], line[128];
@@ -1643,8 +1598,29 @@ int main(int argc, char** argv) {
         shows_foot(&app, "linha", normal);
         shows_foot(&app, "tela", normal);
         hides_foot(&app, "change or open", normal);
+        /* xx's wide letters, two columns each: the Menu tab (U+83DC U+5355) as wide as they are, the Theme row's value
+           (U+4E3B U+9898) lined up with the others, a foot's keys (Up/Down as U+4E0A/U+4E0B) found by their columns */
+        {
+            GuiRect none = {0, 0, 0, 0};
+            int x, y, up = hint_word("Up", 2), down = hint_word("Down", 4);
+            assert(tab_rect(&app, none, GUI_TAB_MENU).w == 6 * cell_w(&app));
+            assert(tab_rect(&app, none, GUI_TAB_GAMES).x == 7 * cell_w(&app));
+            assert(find_letters(&app, "\xe8\x8f\x9c\xe5\x8d\x95", normal, 1, &x, &y));
+            snprintf(line, sizeof line, "- \xe4\xb8\xbb\xe9\xa2\x98%14s %.4s", "", app.app_form.theme);
+            assert(find_letters(&app, line, normal, 1, &x, &y));
+            assert(hint_width("\xe4\xb8\x8a/\xe4\xb8\x8b", "linha") == 11 && up >= 0 && down >= 0 && up != down);
+            assert(hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 1) == up && hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 2) == up);
+            assert(hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 3) == down &&
+                   hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 4) == down);
+            assert(hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 5) == -1); /* past them: no one key for both */
+        }
+        key(&app, SDLK_RIGHT);
+        assert(app.language == 3 && snx_tr_language() == 2 &&
+               !strcmp(app.app_form.language, "\xe4\xb8\xad\xe6\x96\x87 (TW)"));
         key(&app, SDLK_RIGHT);
         assert(!app.language && snx_tr_language() == 0); /* Auto again: English */
+        key(&app, SDLK_LEFT);
+        assert(app.language == 3 && snx_tr_language() == 2);
         key(&app, SDLK_LEFT);
         assert(app.language == 2 && snx_tr_language() == 1);
         /* a start with them: xx as it was left, a language the menu does not have named and left out */
@@ -1660,6 +1636,27 @@ int main(int argc, char** argv) {
         snprintf(expected, sizeof expected, "Fora de uso em %s: language = tlh", app.app_file); /* in xx: its words */
         assert(!strcmp(app.message, expected));
         app.message[0] = 0;
+        /* zh_TW, as a build before the tags wrote zh-Hant-TW: that language, its tag written in place of it, the file's
+           other lines as they were, and the message saying so once */
+        {
+            const char* older = "; kept\n[app]\ntheme = no-such-theme\nlanguage = zh_TW\n";
+            const char* written = "; kept\n[app]\ntheme = no-such-theme\nlanguage = zh-Hant-TW\n";
+            assert(!snx_write_file(app.app_file, older, strlen(older)));
+            app_load(&app);
+            assert(app.language == 3 && snx_tr_language() == 2);
+            snprintf(expected, sizeof expected, "%s: language = zh_TW is now zh-Hant-TW", app.app_file);
+            assert(strstr(app.message, expected));
+            kept = (char*)snx_read_file(app.app_file, &size);
+            assert(kept && size == strlen(written) && !memcmp(kept, written, size));
+            free(kept);
+            app.message[0] = 0;
+            app_load(&app);
+            assert(app.language == 3 && !strstr(app.message, "is now"));
+            assert(!snx_write_file(app.app_file, other, strlen(other)));
+            app.message[0] = 0;
+            app_load(&app);
+            assert(app.language == 2 && snx_tr_language() == 1 && !app.message[0]);
+        }
         /* the foot's Back, as xx says it, presses Back: the App's rows left for the groups */
         assert(hint_press(&app, "Volta", 0) && app.editing && app.form == GUI_FORM_SETTINGS);
         assert(hint_press(&app, "Back", 0) && !app.editing); /* and as English does */
@@ -1675,6 +1672,7 @@ int main(int argc, char** argv) {
         assert(language_auto() == 0);
         /* English for what follows, kept so, on App as the next part opens it */
         open_app(&app, GUI_APP_LANGUAGE);
+        key(&app, SDLK_RIGHT); /* xx, zh-Hant-TW, then Auto */
         key(&app, SDLK_RIGHT);
         assert(!app.language && snx_tr_language() == 0);
     }
@@ -1695,6 +1693,78 @@ int main(int argc, char** argv) {
         SDL_RenderClear(app.renderer);
         big_text(&app, gui_rect(0, 0, 60 * w, 6 * h), w, h, words, 2, white);
         assert(find_letters(&app, words, white, 2, &x, &y) && x == w && y == h);
+    }
+    /* the wide letters (tests/po/xx.po's, Unifont's 16x16) two columns each, by each way the menu draws a line: at a
+       cell, in a box, in the title's bigger letters and a column count at a time; none drawn across an edge, a row
+       wrapped after one */
+    {
+        static const char menu[] = "\xe8\x8f\x9c\xe5\x8d\x95" /* U+83DC U+5355, then A: 5 columns */ "A";
+        static const char cai[] = "\xe8\x8f\x9c", dan[] = "\xe5\x8d\x95";
+        SDL_Color white = {255, 255, 255, 255};
+        int x, y, w = cell_w(&app), h = cell_h(&app);
+        SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
+        SDL_RenderClear(app.renderer);
+        text(&app, 2, 1, menu, white);
+        assert(find_letters(&app, menu, white, 1, &x, &y) && x == 2 * w && y == h);
+        { /* over its row by 2 columns, slid by 1: past the first letter whole, the second at the row's start */
+            Uint32 scroll = app.theme.scroll_ms;
+            Uint64 clock = app.clock;
+            app.theme.scroll_ms = 100;
+            for (app.clock = 1; gui_slide(2, app.clock, app.theme.scroll_ms) != 1;) app.clock += 100;
+            SDL_RenderClear(app.renderer);
+            text(&app, app.cols - 4, 1, menu, white);
+            assert(find_letters(&app, menu + 3, white, 1, &x, &y) && x == (app.cols - 4) * w && y == h);
+            app.theme.scroll_ms = scroll;
+            app.clock = clock;
+        }
+        SDL_RenderClear(app.renderer);
+        text_in(&app, gui_rect(0, 0, 6 * w, 4 * h), 3 * w, 2 * h, menu, white); /* 3 columns: the first alone */
+        assert(find_letters(&app, cai, white, 1, &x, &y) && x == 3 * w && y == 2 * h);
+        assert(!find_letters(&app, dan, white, 1, &x, &y));
+        SDL_RenderClear(app.renderer);
+        big_text(&app, gui_rect(0, 0, 60 * w, 6 * h), w, h, menu, 2, white);
+        assert(find_letters(&app, menu, white, 2, &x, &y) && x == w && y == h);
+        SDL_RenderClear(app.renderer);
+        big_text(&app, gui_rect(0, 0, 7 * w, 6 * h), w, h, menu, 2, white); /* 6 columns at twice the size: one */
+        assert(find_letters(&app, cai, white, 2, &x, &y) && x == w && !find_letters(&app, dan, white, 2, &x, &y));
+        SDL_RenderClear(app.renderer);
+        assert(text_px(&app, (float)w, (float)h, menu, 3, white, 1) == (float)(3 * w));
+        assert(find_letters(&app, cai, white, 1, &x, &y) && x == w && !find_letters(&app, dan, white, 1, &x, &y));
+        assert(text_px(&app, (float)w, (float)h, menu, 5, white, 1) == (float)(6 * w));
+        /* widths in columns: the cursor's margin, the user's box, a question's box */
+        {
+            char cursor[sizeof app.theme.cursor], name[sizeof app.user_name], room[sizeof app.room_line];
+            int user = app.user, side = 3 * h;
+            GuiAsk ask = app.confirm.ask;
+            GuiPicture picture = app.theme.picture;
+            GuiList l, choices;
+            GuiRect asked, ascii;
+            memcpy(cursor, app.theme.cursor, sizeof cursor);
+            memcpy(name, app.user_name, sizeof name);
+            memcpy(room, app.room_line, sizeof room);
+            snprintf(app.theme.cursor, sizeof app.theme.cursor, "%s", cai);
+            list_place(&app, &l, gui_rect(0, 0, 40 * w, 10 * h), 3, 0);
+            assert(l.margin == 2 * w);
+            app.user = 1;
+            app.theme.picture = GUI_PICTURE_SQUARE;
+            snprintf(app.user_name, sizeof app.user_name, "%s", menu);
+            assert(user_width(&app, side) == 7 * w + user_side(&app, side) + 2 * app.scale);
+            app.confirm.ask = GUI_ASK_ROOM;
+            snprintf(app.room_line, sizeof app.room_line, "%s%s%s%s%s", menu, menu, menu, menu, menu); /* 25 columns */
+            ask_boxes(&app, &asked, &choices);
+            snprintf(app.room_line, sizeof app.room_line, "%25s", "");
+            ask_boxes(&app, &ascii, &choices);
+            assert(asked.w == ascii.w && asked.w == 27 * w && asked.h == ascii.h); /* on one row, wrapped at 25 */
+            memcpy(app.theme.cursor, cursor, sizeof cursor);
+            memcpy(app.user_name, name, sizeof name);
+            memcpy(app.room_line, room, sizeof room);
+            app.user = user;
+            app.confirm.ask = ask;
+            app.theme.picture = picture;
+        }
+        /* a line wraps after a wide letter as at a space: "U+83DC U+5355 U+83DC" in 7 columns */
+        assert(wrap_at("\xe8\x8f\x9c\xe5\x8d\x95 \xe8\x8f\x9c\xe5\x8d\x95\xe8\x8f\x9c\xe5\x8d\x95", 7, 0) == 10);
+        assert(wrap_at("\xe8\x8f\x9c\xe5\x8d\x95\xe8\x8f\x9c", 5, 0) == 6 && wrap_at("ab cd", 4, 0) == 2);
     }
     /* Clean old settings, Enter twice: the first says what it would do, another key in between starts again, the
        second does it and shows what it did over the screen, until a key closes it; then there is nothing left */
@@ -2759,16 +2829,29 @@ int main(int argc, char** argv) {
             held.key.repeat = true;
             event(&app, &held);
             assert(!app.confirm.shown);
-            /* over YoRHa's loading screen: its box, the focused choice on a band of its focus colour */
+            /* over YoRHa's loading screen: the question in a box of ink at its foot, in the page colour, the choices
+               above it at its right, the focused one on a band of its focus colour (options-dialog = yorha) */
             app.theme = *gui_theme_builtin("yorha");
             app.fade_ms = 0;
             key(&app, SDLK_ESCAPE);
             render(&app);
-            shows(&app, "Abort the recompile?", rgb(app.theme.warning));
+            shows(&app, "Abort the recompile?", rgb(app.theme.page));
             shows(&app, "\xfe Keep going", rgb(app.theme.page));
             shows(&app, "\xfe Abort", rgb(app.theme.ink));
             ask_boxes(&app, &r, &l);
+            {
+                int w, h;
+                area(&app, &w, &h);
+                assert(r.y + r.h >= h - cell_h(&app) && r.w > w * 3 / 4); /* the foot's whole width */
+                assert(l.at.y + l.at.h <= r.y && l.at.x > w / 2);         /* above it, at its right */
+                assert(same_colour(pixel(&app, (float)(r.x + r.w / 2), (float)(r.y + r.h - 2)), rgb(app.theme.ink)));
+            }
+            /* its options-dialog = default: in the middle, the question in the warning colour */
+            app.theme.dialog = GUI_DIALOG_DEFAULT;
+            render(&app);
+            shows(&app, "Abort the recompile?", rgb(app.theme.warning));
             app.theme = *gui_theme_builtin("default");
+            ask_boxes(&app, &r, &l);
             touch_box(&app, list_box(&l, 1));
             assert(app.aborting && !app.confirm.shown);
             while (app.menu.running && SDL_GetTicks() < until) {
@@ -3388,6 +3471,8 @@ int main(int argc, char** argv) {
             typed(&app, "x");
             key(&app, SDLK_SPACE);
             assert(app.editor.typing);
+            point(&app, row_box(&app, 3, false), false); /* the pointer moves no focus off a value being typed */
+            assert(app.editor.row == 2 && app.editor.typing);
             key(&app, SDLK_ESCAPE);
             assert(!app.editor.typing && strcmp(app.editor.theme.name, "Defaultx"));
             /* a click focuses a row, a click on the focused one changes it */
@@ -3922,6 +4007,13 @@ int main(int argc, char** argv) {
                        black); /* no focus on the right yet */
             for (launch = 0; launch < app.groups && strcmp(app.group_keys[launch].key, "Launch"); ++launch) {}
             assert(launch < app.groups);
+            /* the pointer over a group focuses it, its rows beside it; over those rows it waits for a click */
+            b = list_box(&f.left, 2);
+            mouse_px(&app, b.x + 4, b.y + 4, false);
+            assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 2);
+            b = list_box(&f.right, 0);
+            mouse_px(&app, b.x + 4, b.y + 4, false);
+            assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 2);
             app.editor.row = launch;
             render(&app);
             form_boxes(&app, &f);
@@ -3950,6 +4042,20 @@ int main(int argc, char** argv) {
             assert(setting_is(&app, "tmpfs", "on"));
             key(&app, SDLK_LEFT); /* back as it was */
             assert(setting_is(&app, "tmpfs", NULL));
+            /* the pointer over a row, not pressed, focuses it, as on the menu's screens (#415), and a click then
+               changes it; over the groups' list it waits for a click */
+            b = list_box(&f.right, 0);
+            mouse_px(&app, b.x + 4, b.y + 4, false);
+            assert(app.form == GUI_FORM_GROUP && app.editor.row == 0);
+            b = list_box(&f.right, 1);
+            mouse_px(&app, b.x + 4, b.y + 4, false);
+            assert(app.editor.row == 1 && setting_is(&app, "tmpfs", NULL));
+            mouse_px(&app, b.x + 4, b.y + 4, true);
+            assert(setting_is(&app, "tmpfs", "on"));
+            key(&app, SDLK_LEFT);
+            b = list_box(&f.left, 0);
+            mouse_px(&app, b.x + 4, b.y + 4, false);
+            assert(app.form == GUI_FORM_GROUP && app.editor.row == 1);
             /* a click on App in the list opens it, from a group's rows */
             b = list_box(&f.left, 0);
             mouse_px(&app, b.x + 4, b.y + 4, true);
@@ -4010,8 +4116,17 @@ int main(int argc, char** argv) {
             form_boxes(&app, &f);
             b = list_box(&f.left, row);
             {
-                int room = (b.w - cw * 3 / 2) / cw, end = b.x + cw / 2 + (room - 2) * cw;
+                int room = (b.w - cw * 3 / 2) / cw, end = b.x + cw / 2 + (room - 2) * cw, x, y;
                 text_px_is(&app, end, item_text_y(&app, b), "e_", yellow, black); /* its end, and the cursor */
+                /* wide letters typed in its place (tests/po/xx.po's Menu, 52 columns in 78 bytes): the end still in
+                   view, the last letter's two columns and the cursor's within the box, a column short of it at most */
+                for (x = 0; x < 80; ++x) key(&app, SDLK_BACKSPACE);
+                assert(!app.editor.text[0]);
+                for (x = 0; x < 13; ++x) typed(&app, "\xe8\x8f\x9c\xe5\x8d\x95");
+                assert(strlen(app.editor.text) == 78);
+                render(&app);
+                assert(find_letters(&app, "\xe5\x8d\x95_", yellow, 1, &x, &y) && y == item_text_y(&app, b));
+                assert(x <= b.x + cw / 2 + (room - 3) * cw && x >= b.x + cw / 2 + (room - 4) * cw);
             }
             key(&app, SDLK_ESCAPE);
             key(&app, SDLK_ESCAPE);

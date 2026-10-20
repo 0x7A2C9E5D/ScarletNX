@@ -116,6 +116,8 @@ char* snx_work_dir(const char* data_dir);
    beside the AppImage or the program, when it is there (a portable copy); else the user's data folder. NULL when none
    can be named */
 char* snx_data_dir(const char* program_dir);
+/* SNX_PORTABLE_DIR beside the AppImage or the program in program_dir, there or not; NULL when none can be named */
+char* snx_portable_dir(const char* program_dir);
 /* The checkout a program run from its build tree (build; NULL: any program) was built from, for what only a checkout
    has: its sources, and what an older version kept in it. NULL for any other program */
 char* snx_checkout(const char* checkout, const char* build, const char* program_dir);
@@ -154,6 +156,8 @@ void snx_vm_release(void* p, size_t size);
    core needs nothing more when the pages were never executable before: it cannot hold old instructions for them */
 void snx_vm_flush_code(void* p, size_t size);
 void snx_tool_console(void);
+/* 1 when stdin and stdout are a terminal's, which a person types into and reads */
+int snx_terminal(void);
 char* snx_find_tool(const char* name);
 /* argv is NULL terminated. No shell. Captured output is heap-owned by caller.
    home isolates HOME/USERPROFILE and removes XDG_CONFIG_HOME in the child. */

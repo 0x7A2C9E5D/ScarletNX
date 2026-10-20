@@ -44,8 +44,8 @@
 
 #define AM_PRESELECTED_USER_MAGIC 0xc79497cau /* LaunchParameterAccountPreselectedUser */
 
-/* the console's first user (users.c). Fixed: a game may keep it in its saves, and the saves of existing installs
-   belong to this one */
+/* the uid user 1 has when users.ini gives it none (users.c). Fixed: the device id below is made from it, and the
+   saves an older version left belong to it (fs.c) */
 const u64 g_user_id[2] = {SNX_USERS_FIRST_UID0, SNX_USERS_FIRST_UID1};
 
 /* the application's message queue, the user channel and the rest of am's state, and the pools of its objects' data:
