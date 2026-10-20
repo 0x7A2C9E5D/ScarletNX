@@ -72,6 +72,12 @@ static unsigned a9_thumb(uint16_t h, uint16_t h2, SnxThumb* o) {
 SnxA32Kind snx_a32_decode_profile(SnxArmProfile profile, uint32_t w) {
     if (profile == SNX_ARM_PROFILE_A57) return snx_a32_decode(w);
     if (profile == SNX_ARM_PROFILE_A9) return a9_a32(w);
+    if (profile == SNX_ARM_PROFILE_ARM7TDMI) {
+        /* An MSR that writes the control or extension byte switches modes on the AGB board, which banks the
+           registers: the board runs it. A57's EL0 MSR would drop the mode bits */
+        SnxA32Kind kind = snx_a32_decode(w);
+        return kind == SNX_A32_MSR && ((w >> 16) & 3) ? SNX_A32_UNDEFINED : kind;
+    }
     if (profile != SNX_ARM_PROFILE_ARM11) return SNX_A32_UNDEFINED;
     /* ARM11 CP15 barrier operations, not ARMv7's unconditional encodings.
        Only these user-accessible maintenance operations are admitted. */
@@ -116,7 +122,7 @@ SnxA32Kind snx_a32_decode_profile(SnxArmProfile profile, uint32_t w) {
     }
 }
 unsigned snx_thumb_decode_profile(SnxArmProfile profile, uint16_t h, uint16_t h2, SnxThumb* o) {
-    if (profile == SNX_ARM_PROFILE_A57) return snx_thumb_decode(h, h2, o);
+    if (profile == SNX_ARM_PROFILE_A57 || profile == SNX_ARM_PROFILE_ARM7TDMI) return snx_thumb_decode(h, h2, o);
     if (profile == SNX_ARM_PROFILE_A9) return a9_thumb(h, h2, o);
     memset(o, 0, sizeof *o);
     if (profile != SNX_ARM_PROFILE_ARM11) return 0;

@@ -12,6 +12,7 @@
 		[button]"Load Linux ARM ELF" {}
 		[button]"Load 3DS CIA" {}
 		[button]"Load Vita VPK" {}
+		[button]"Load GBA ROM" {}
 		[button]"Install Keys" {}
 		[button]"Settings" {}
 		[button]"Share Log" {}

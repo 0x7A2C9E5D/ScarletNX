@@ -14,6 +14,7 @@ enum {
     GUI_LINUX,
     GUI_3DS,
     GUI_VITA,
+    GUI_GBA,
     GUI_KEYS,
     GUI_SETTINGS, /* the game's .ini settings, the launcher's own for the runs and its App: settings.h */
     GUI_LOG,      /* the logs in one file, for a bug report: a phone has no terminal to copy them from */

@@ -2429,6 +2429,10 @@ int main(int argc, char** argv) {
     render(&app);
     shows(&app, "- Load Vita VPK", yellow);
     key(&app, SDLK_RIGHT);
+    assert(app.menu.selected == GUI_GBA);
+    render(&app);
+    shows(&app, "- Load GBA ROM", yellow);
+    key(&app, SDLK_RIGHT);
     assert(app.menu.selected == GUI_KEYS);
     /* Never touch the real user's keys: exercise installation in a private home. */
     free(app.keys_path);
@@ -4520,6 +4524,7 @@ int main(int argc, char** argv) {
         }
     }
     key(&app, SDLK_UP);
+    key(&app, SDLK_LEFT);
     key(&app, SDLK_LEFT);
     key(&app, SDLK_LEFT);
     key(&app, SDLK_LEFT);

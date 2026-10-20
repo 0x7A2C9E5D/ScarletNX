@@ -1301,6 +1301,10 @@ msgid "Recompiles a PS Vita homebrew .vpk, then runs it"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Runs a GBA ROM on the emulated AGB board"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Installs prod.keys, which games are extracted with"
 msgstr ""
 
@@ -3476,6 +3480,10 @@ msgstr ""
 
 #: src/gui/ui.txt
 msgid "Load Vita VPK"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Load GBA ROM"
 msgstr ""
 
 #: src/gui/ui.txt
