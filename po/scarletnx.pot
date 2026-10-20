@@ -557,19 +557,16 @@ msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
-msgid "SCARLETNX  /  SETUP"
-msgstr ""
-
-#: src/gui/main.c
-msgid "The game"
-msgstr ""
-
 #, snx-key
 msgid "Recompile"
 msgstr ""
 
 #: src/gui/main.c
 msgid "Play"
+msgstr ""
+
+#: src/gui/main.c
+msgid "SCARLETNX  /  SETUP"
 msgstr ""
 
 #: src/gui/main.c
