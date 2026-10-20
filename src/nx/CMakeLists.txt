@@ -96,8 +96,9 @@ snx_glsl_spirv(snx_vk SOURCE gpu/video/vic.comp NAME vic_spv HEADER nx/gpu/video
 snx_glsl_spirv(snx_vk SOURCE gpu/video/vic.comp NAME vic_unaligned_spv HEADER nx/gpu/video/vic_spv.h
                DEFINES VIC_UNALIGNED)
 set(components core kernel hle video gpu platform shader vk)
-# third-party code (vma.cpp is VMA's implementation)
-set_source_files_properties("${volk_SOURCE_DIR}/volk.c" gpu/vk/vma.cpp PROPERTIES COMPILE_OPTIONS -w)
+# third-party code (vma.cpp is VMA's implementation), cmake/dependencies.cmake
+set_source_files_properties("${volk_SOURCE_DIR}/volk.c" gpu/vk/vma.cpp PROPERTIES COMPILE_OPTIONS
+                            "${snx_third_party_flags}")
 
 if(ANDROID)
     # the app (dist/android): its game activity loads libscarletnx.so and calls its main; the menu runs the driver as
@@ -241,8 +242,7 @@ if(BUILD_TESTING AND SNX_TEST_VULKAN)
     set_tests_properties(astc_vulkan astc_vulkan_pieces PROPERTIES TIMEOUT 300)
 endif()
 if(BUILD_TESTING)
-    snx_test_sanitize(snx_shader) # tests/CMakeLists.txt: made after it looked
-    snx_sanitizer_path()          # this folder's tests
+    snx_sanitizer_path() # tests/CMakeLists.txt: this folder's tests
 endif()
 
 # a sanitized build (SNX_TEST_SANITIZERS) is a test build, its runtime instrumented: it doesn't go next to the games

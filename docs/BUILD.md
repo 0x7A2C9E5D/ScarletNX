@@ -298,8 +298,8 @@ cmake --preset default -B build -DSNX_FFMPEG_ASM=OFF && cmake --build build
 
 Test options, read when `BUILD_TESTING` is on (CTest's default), all OFF by default:
 
-- `-DSNX_TEST_SANITIZERS=ON`: build the native tests and the in-tree libraries they exercise with ASan and UBSan.
-  The runtime links those libraries too, so it is not deployed.
+- `-DSNX_TEST_SANITIZERS=ON`: build the native tests, and the programs and libraries of the repository they run or
+  link, with ASan and UBSan (`runtime_architecture` names one left out). The runtime is one, so it is not deployed.
 - `-DSNX_TEST_VULKAN=ON`: add the offscreen Vulkan integration tests, see below.
 - `-DSNX_TEST_A64_FP_DIFF=ON`: add the AArch64 FP differential test, which needs Python unicorn 2.1.4 and a native
   Linux host.

@@ -179,6 +179,121 @@ class ArchitectureTests(unittest.TestCase):
                 ],
             )
 
+    def test_sanitized_build_names_the_code_its_tests_reach_without_them(self):
+        with tempfile.TemporaryDirectory(prefix='snx-arch-test-') as temporary:
+            repo = Path(temporary)
+            build = repo / 'build'
+            reply = build / '.cmake/api/v1/reply'
+            reply.mkdir(parents=True)
+            sanitized = {'language': 'C', 'compileCommandFragments': [{'fragment': '-O2 -fsanitize=address,undefined'}]}
+            plain = {'language': 'C', 'compileCommandFragments': [{'fragment': '-O2'}]}
+            turned_off = {
+                'language': 'CXX',
+                'compileCommandFragments': [
+                    {'fragment': '-fsanitize=address,undefined'},
+                    {'fragment': '-w -fno-sanitize=address,undefined'},
+                ],
+            }
+            address_only = {'language': 'C', 'compileCommandFragments': [{'fragment': '-fsanitize=address'}]}
+            assembly = {'language': 'ASM', 'compileCommandFragments': [{'fragment': '-O2'}]}
+
+            def target(name, kind, sources, groups, artifact=None, dependencies=()):
+                document = {
+                    'id': name,
+                    'name': name,
+                    'type': kind,
+                    'compileGroups': groups,
+                    'sources': [{'path': path, 'compileGroupIndex': group} for path, group in sources],
+                    'dependencies': [{'id': dependency} for dependency in dependencies],
+                }
+                if artifact:
+                    document['artifacts'] = [{'path': artifact}]
+                return document
+
+            targets = [
+                # a test program, sanitized, linking a library of ours, a dependency's, and built after a generator
+                target(
+                    'snx-test-a',
+                    'EXECUTABLE',
+                    [('tests/a.c', 0)],
+                    [sanitized],
+                    'tests/snx-test-a',
+                    ('snx_b', 'SDL3-static', 'snx-gen'),
+                ),
+                target(
+                    'snx_b',
+                    'STATIC_LIBRARY',
+                    [
+                        ('src/b.c', 0),
+                        (str(build / 'generated/c.c'), 0),
+                        ('src/vendor.cpp', 1),
+                        ('src/half.c', 2),
+                        ('src/b.S', 3),
+                    ],
+                    [plain, turned_off, address_only, assembly],
+                ),
+                target(
+                    'SDL3-static',
+                    'STATIC_LIBRARY',
+                    [('.cache/cpm/sdl3/src/SDL.c', 0), (str(build / '_deps/sdl3-build/SDL_revision.c'), 0)],
+                    [plain],
+                ),
+                # a generator the build runs but no test: not linked into one
+                target('snx-gen', 'EXECUTABLE', [('tools/gen.c', 0)], [plain], 'snx-gen'),
+                # a program a cmake -P test runs, named by its -D value
+                target('snx-tool', 'EXECUTABLE', [('src/tool.c', 0)], [plain], 'snx-tool'),
+            ]
+            documents = {
+                'index-test.json': {'reply': {'codemodel-v2': {'jsonFile': 'model.json'}}},
+                'model.json': {
+                    'configurations': [
+                        {
+                            'targets': [
+                                {'id': t['id'], 'name': t['name'], 'jsonFile': f'{t["id"]}.json'} for t in targets
+                            ]
+                        }
+                    ]
+                },
+            }
+            documents.update({f'{t["id"]}.json': t for t in targets})
+            for name, content in documents.items():
+                (reply / name).write_text(json.dumps(content), encoding='utf-8')
+            tests = [
+                {'name': 'a', 'command': [str(build / 'tests/snx-test-a')]},
+                {
+                    'name': 'tool_list',
+                    'command': ['/usr/bin/cmake', f'-DRUNTIME={build / "snx-tool"}', '-P', 'x.cmake'],
+                },
+            ]
+            errors, exempt = architecture.check_sanitizers(repo, build, tests)
+            links = 'and snx-test-a, which the test a runs, links it'
+            self.assertEqual(
+                sorted(errors),
+                [
+                    f'build/generated/c.c: snx_b builds it without -fsanitize=address,undefined, {links}',
+                    f'src/b.c: snx_b builds it without -fsanitize=address,undefined, {links}',
+                    f'src/half.c: snx_b builds it without -fsanitize=address,undefined, {links}',
+                    'src/tool.c: snx-tool builds it without -fsanitize=address,undefined, and snx-tool, which the '
+                    'test tool_list runs, is it',
+                ],
+            )
+            self.assertEqual(exempt, ['src/vendor.cpp: snx_b turns off -fsanitize=address,undefined'])
+            # no test running a program of the build checks nothing, which is an error
+            self.assertEqual(
+                architecture.check_sanitizers(repo, build, [{'name': 'script', 'command': ['/usr/bin/python3']}]),
+                (['no test runs a program of the build: the sanitizers would be checked on nothing'], []),
+            )
+
+    def test_sanitizers_of_a_compile_line(self):
+        self.assertEqual(
+            architecture.sanitizers_of(['-fsanitize=address,undefined -fno-sanitize=vptr']),
+            ({'address', 'undefined'}, {'vptr'}),
+        )
+        self.assertEqual(
+            architecture.sanitizers_of(['-fsanitize=address', '-fno-sanitize=all', '-fsanitize=undefined']),
+            ({'undefined'}, {'address', 'undefined'}),
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

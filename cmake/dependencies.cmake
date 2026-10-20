@@ -113,6 +113,12 @@ if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY) OR SNX_BUILD_3DS)
                   URL https://github.com/zeux/volk/archive/refs/tags/vulkan-sdk-1.4.363.0.tar.gz
                   URL_HASH SHA256=1547d8d74395d4048fb3f4a6313da56db626e89b55db238d0d7e8944c8a645f3
                   DOWNLOAD_ONLY YES)
+    # volk.c and VMA's implementation (src/nx/gpu/vk/vma.cpp) compiled into a target of ours: no warnings, and not
+    # the sanitizers SNX_TEST_SANITIZERS gives our code (tests/CMakeLists.txt)
+    set(snx_third_party_flags -w)
+    if(SNX_TEST_SANITIZERS)
+        list(APPEND snx_third_party_flags -fno-sanitize=address,undefined)
+    endif()
 endif()
 
 # Extraction-only and tools-only builds do not contain the NX runtime or its graphics/media dependencies.
