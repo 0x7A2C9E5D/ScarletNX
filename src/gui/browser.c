@@ -154,7 +154,16 @@ static size_t addons_of(const char* path, GuiGames* addons) {
     const char* leaf = folder + strlen(folder);
     const char* own = path + strlen(path);
     size_t count = 0, found = 0, i, j;
+    SnxU64 game = 0, aoc_base = 0;
     while (leaf > folder && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
+    if (snx_title_parse(leaf, &game) && addons) { /* what its DLCs are numbered from: its control.nacp's base ID */
+        char* file = snx_format("%s/%s_data/control.nacp", folder, leaf);
+        size_t size = 0;
+        unsigned char* nacp = (unsigned char*)snx_read_file(file, &size);
+        aoc_base = snx_nacp_aoc_base(nacp, size, game);
+        free(nacp);
+        free(file);
+    }
     while (own > path && own[-1] != '/' && own[-1] != '\\') --own;
     /* the game's own program, <name>/<name>: an add-on has none of its own */
     if (!gui_game_folder(path) || strncmp(own, leaf, strlen(leaf)) || (own[strlen(leaf)] && own[strlen(leaf)] != '.') ||
@@ -169,7 +178,7 @@ static size_t addons_of(const char* path, GuiGames* addons) {
         bool listed = n > 5 && !strcmp(names[i] + n - 5, "_data") && snx_is_dir(data);
         if (listed) stem[n - 5] = 0;
         listed = listed && snx_addon_name(leaf, stem, &id);
-        if (listed && snx_addon_kind(id) == SNX_ADDON_UPDATE) {
+        if (listed && snx_addon_kind(game, id) == SNX_ADDON_UPDATE) {
 #if defined(__ANDROID__) || defined(SNX_IOS)
             char* file = snx_format("%s_code.so", stem);
 #elif defined(_WIN32)
@@ -189,10 +198,14 @@ static size_t addons_of(const char* path, GuiGames* addons) {
             unsigned char* nacp;
             size_t size = 0;
             own = snx_format("%s/control.nacp", data);
-            nacp = snx_addon_kind(id) == SNX_ADDON_UPDATE ? (unsigned char*)snx_read_file(own, &size) : NULL;
-            if (snx_addon_kind(id) == SNX_ADDON_DLC)
-                snprintf(text, sizeof text, snx_tr("DLC %u"), (unsigned)(id & 0x1FFF) - 0x1000u);
-            else if (snx_nacp_version(nacp, size, version, sizeof version))
+            nacp = snx_addon_kind(game, id) == SNX_ADDON_UPDATE ? (unsigned char*)snx_read_file(own, &size) : NULL;
+            if (snx_addon_kind(game, id) == SNX_ADDON_DLC && id > aoc_base && id - aoc_base < 0x800)
+                snprintf(text, sizeof text, snx_tr("DLC %u"), (unsigned)(id - aoc_base));
+            else if (snx_addon_kind(game, id) == SNX_ADDON_DLC) { /* numbered from no base the game names */
+                char title[17];
+                snx_title_text(id, title);
+                snprintf(text, sizeof text, snx_tr("DLC %s"), title);
+            } else if (snx_nacp_version(nacp, size, version, sizeof version))
                 snprintf(text, sizeof text, snx_tr("Update %s"), version);
             else
                 snprintf(text, sizeof text, "%s", snx_tr("Update"));

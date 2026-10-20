@@ -1485,28 +1485,43 @@ int snx_title_text(SnxU64 id, char* out) {
     sprintf(out, "%08lX%08lX", (unsigned long)(id >> 32), (unsigned long)(id & 0xFFFFFFFFUL));
     return 1;
 }
-int snx_addon_name(const char* base, const char* name, SnxU64* id) {
-    size_t n = strlen(base), i;
+int snx_title_parse(const char* text, SnxU64* id) {
     SnxU64 value = 0;
-    char text[17];
-    int c;
-    if (!n || strncmp(name, base, n) || name[n] != '_' || strlen(name + n + 1) != 16) return 0;
-    for (i = n + 1; name[i]; ++i) {
-        c = (unsigned char)name[i];
+    int i, c;
+    for (i = 0; i < 16; ++i) {
+        c = (unsigned char)text[i];
         if (!isxdigit(c) || islower(c)) return 0; /* as snx_title_text writes it */
         value = value << 4 | (SnxU64)(c <= '9' ? c - '0' : c - 'A' + 10);
     }
-    if (snx_addon_kind(value) == SNX_ADDON_NONE || !snx_title_text(snx_addon_base(value), text) || strcmp(text, base))
-        return 0; /* not this game's */
+    if (text[16]) return 0;
+    *id = value;
+    return 1;
+}
+int snx_addon_name(const char* base, const char* name, SnxU64* id) {
+    size_t n = strlen(base);
+    SnxU64 game, value;
+    if (!snx_title_parse(base, &game) || strncmp(name, base, n) || name[n] != '_' ||
+        !snx_title_parse(name + n + 1, &value) || snx_addon_kind(game, value) == SNX_ADDON_NONE)
+        return 0;
     if (id) *id = value;
     return 1;
 }
-int snx_addon_kind(SnxU64 id) {
-    /* a DLC's index is 1 to 0x7FF past the game's 0x1000: it never has the update's bit */
-    if (id & 0x800) return SNX_ADDON_UPDATE;
-    return (id & 0x1FFF) > 0x1000 ? SNX_ADDON_DLC : SNX_ADDON_NONE;
+int snx_addon_kind(SnxU64 game, SnxU64 id) {
+    /* the console's rule: an application's patch is its ID with 0x800 added; any other add-on of it is content */
+    if (!id || id == game) return SNX_ADDON_NONE;
+    return id == (game | 0x800) ? SNX_ADDON_UPDATE : SNX_ADDON_DLC;
 }
-SnxU64 snx_addon_base(SnxU64 id) { return id & ~(SnxU64)(id & 0x800 ? 0x800 : 0x1FFF); }
+SnxU64 snx_addon_guess(SnxU64 id) {
+    /* a patch's ID is its application's with 0x800; add-on content's commonly starts at its application's 0x1000 */
+    return id & ~(SnxU64)(id & 0x800 ? 0x800 : 0x1FFF);
+}
+SnxU64 snx_nacp_aoc_base(const unsigned char* nacp, size_t size, SnxU64 application) {
+    /* AddOnContentBaseId: a u64 at 0x3070; the SDK's default, the application's ID less its low bits plus 0x1000 */
+    SnxU64 base = 0;
+    int i;
+    for (i = 7; nacp && size >= 0x3078 && i >= 0; --i) base = base << 8 | nacp[0x3070 + i];
+    return base ? base : (application & ~(SnxU64)0x1FFF) + 0x1000;
+}
 int snx_nacp_version(const unsigned char* nacp, size_t size, char* version, size_t version_size) {
     /* DisplayVersion: 0x10 bytes at 0x3060 */
     size_t i, n = 0;

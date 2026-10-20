@@ -134,9 +134,9 @@ int main(void) {
 #undef EXE
     }
     /* updates and DLCs made beside their game, in its folder: not games of their own, its add-ons, listed by the
-       names the player reads (an update's version from its control.nacp), the update first. A program named so
-       without its data, an update's data without its program, another game's add-on or a name that is no title ID
-       is none */
+       names the player reads (an update's version from its control.nacp, a DLC's number past the base ID its game's
+       control.nacp gives, else its whole title ID), the update first. A program named so without its data, an
+       update's data without its program, or a name that is no title ID is none */
     {
 #ifdef _WIN32
 #define EXE ".exe"
@@ -147,13 +147,12 @@ int main(void) {
                                            "0100ABCD12340000/0100ABCD12340000_0100ABCD12341002" EXE,
                                            "0100ABCD12340000/0100ABCD12340000_0100ABCD12340800" EXE,
                                            "0100ABCD12340000/0100ABCD12340000_0100ABCD12341003" EXE,
-                                           "0100ABCD12340000/0100ABCD12340000_0100ABCD12360800" EXE,
+                                           "0100ABCD12340000/0100ABCD12340000_0100ABCD5555A001" EXE,
                                            "0100ABCD12340000/0100ABCD12340000_junk" EXE};
         static const char* const data[] = {"0100ABCD12340000_data", "0100ABCD12340000_0100ABCD12341002_data",
                                            "0100ABCD12340000_0100ABCD12340800_data",
                                            "0100ABCD12340000_0100ABCD12341005_data",
-                                           "0100ABCD12340000_0100ABCD12360800_data", "0100ABCD12340000_junk_data",
-                                           "0100ABCD12340000_0100ABCD12340801_data"};
+                                           "0100ABCD12340000_0100ABCD5555A001_data", "0100ABCD12340000_junk_data"};
         static unsigned char nacp[0x4000];
         char *ready = snx_temp_dir(NULL), *path, *folder, *game, *update;
         GuiGames addons = {0};
@@ -178,8 +177,8 @@ int main(void) {
         update = snx_path_join(ready, made[2]);
         assert(gui_games_scan(&games, ready, false, error, sizeof error) && games.count == 1);
         /* a DLC is its data folder alone, its program an older version's left aside; an update needs its program */
-        assert(!strcmp(games.names[0], "0100ABCD12340000") && games.addons[0] == 3);
-        assert(gui_game_folder(update) && gui_game_addons(game, &addons) && addons.count == 3);
+        assert(!strcmp(games.names[0], "0100ABCD12340000") && games.addons[0] == 4);
+        assert(gui_game_folder(update) && gui_game_addons(game, &addons) && addons.count == 4);
         assert(!strcmp(addons.names[0], "0100ABCD12340000_0100ABCD12340800") && !strcmp(addons.shown[0], "Update 1.2.0"));
         assert(!strcmp(addons.paths[0], update));
         assert(!strcmp(addons.names[1], "0100ABCD12340000_0100ABCD12341002") && !strcmp(addons.shown[1], "DLC 2"));
@@ -187,6 +186,9 @@ int main(void) {
         path = snx_path_join(folder, "0100ABCD12340000_0100ABCD12341005_data");
         assert(!strcmp(addons.paths[2], path));
         free(path);
+        /* a DLC numbered from no base its game's control.nacp names: by its whole title ID */
+        assert(!strcmp(addons.names[3], "0100ABCD12340000_0100ABCD5555A001") &&
+               !strcmp(addons.shown[3], "DLC 0100ABCD5555A001"));
         assert(!gui_game_addons(update, &addons) && !addons.count); /* an add-on has none of its own */
         gui_games_free(&addons);
         free(game);

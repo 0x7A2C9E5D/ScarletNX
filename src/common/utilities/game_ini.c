@@ -95,24 +95,19 @@ done:
     return rc;
 }
 size_t snx_addons_parse(const char* text, const char* game, SnxU64* ids, size_t max) {
-    char word[17], name[64];
-    size_t count = 0, n, i, update = (size_t)-1;
-    SnxU64 id;
+    char word[17];
+    size_t count = 0, n, i;
+    SnxU64 own, id;
+    if (!snx_title_parse(game, &own)) return 0;
     while (text && *text) {
         while (*text == ',' || *text == ' ' || *text == '\t') text++;
         for (n = 0; text[n] && text[n] != ',' && text[n] != ' ' && text[n] != '\t'; n++) continue;
         if (n == 16) {
             for (i = 0; i < 16; i++) word[i] = (char)toupper((unsigned char)text[i]);
             word[16] = 0;
-            sprintf(name, "%.40s_%s", game, word);
-            if (strlen(game) <= 40 && snx_addon_name(game, name, &id)) {
+            if (snx_title_parse(word, &id) && snx_addon_kind(own, id) != SNX_ADDON_NONE) {
                 for (i = 0; i < count && ids[i] != id; i++) continue;
-                if (i == count && snx_addon_kind(id) == SNX_ADDON_UPDATE && update != (size_t)-1)
-                    ids[update] = id; /* one update: the last one listed */
-                else if (i == count && count < max) {
-                    if (snx_addon_kind(id) == SNX_ADDON_UPDATE) update = count;
-                    ids[count++] = id;
-                }
+                if (i == count && count < max) ids[count++] = id;
             }
         }
         text += n;

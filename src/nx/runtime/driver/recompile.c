@@ -313,7 +313,7 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs)
 }
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *arg, *value;
-    SnxU64 addon = 0;
+    SnxU64 addon = 0, owner = 0; /* an update, and the game its content meta names it of */
     SnxLlvmBuild llvm;
     SnxCompileOptions compile;
     SnxCodegenOptions gen;
@@ -439,20 +439,20 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     gen.abi = snx_game_abi();
     /* a dump, read in place, else an ExeFS folder or an NRO. An update's dump is its own program; a DLC has none */
     dump = snx_is_file(input) && snx_is_dump(input);
-    if (dump && snx_extract_title(input, paths, &addon)) return 1;
-    if (snx_addon_kind(addon) == SNX_ADDON_NONE)
+    if (dump && snx_extract_title(input, paths, &addon, &owner)) return 1;
+    if (snx_addon_kind(owner, addon) == SNX_ADDON_NONE)
         addon = 0;
     else if (name)
         return snx_error("an update or a DLC is named after its game and itself: --name names a game");
-    if (snx_addon_kind(addon) == SNX_ADDON_DLC)
+    if (addon && snx_addon_kind(owner, addon) == SNX_ADDON_DLC)
         return snx_error("a DLC runs its game's code and has no program of its own: play its dump, which checks it "
                          "in the game's list of updates and DLCs");
     if (dump ? load_dump(input, addon ? input : NULL, paths, compile.quiet, &program, error, sizeof(error))
              : snx_load_program(input, &program, error, sizeof(error)))
         return dump ? 1 : snx_error("%s", error);
-    if (addon && program.npdm.title_id != snx_addon_base(addon)) {
+    if (addon && program.npdm.title_id != owner) {
         char of[17], other[17];
-        snx_title_text(snx_addon_base(addon), of);
+        snx_title_text(owner, of);
         snx_title_text(program.npdm.title_id, other);
         snx_error("%s is an update of the game %s, and its program is %s", input, of,
                   other[0] ? other : "none with a title ID");
@@ -463,7 +463,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     if (addon) { /* <game>_<add-on>, in the game's folder */
         char own[17], of[17];
         snx_title_text(addon, own);
-        snx_title_text(snx_addon_base(addon), of);
+        snx_title_text(owner, of);
         game = snx_format("%s_%s", of, own);
     } else
         game = snx_game_name(name, &program.npdm, program.entry_path);
@@ -485,7 +485,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
        game's */
     if (addon) {
         char of[17];
-        snx_title_text(snx_addon_base(addon), of);
+        snx_title_text(owner, of);
         folder = snx_path_join(out, of);
     } else
         folder = snx_path_join(out, game);
@@ -522,7 +522,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("cannot stage game data in %s", data);
         goto done;
     }
-    if (program.nacp && snx_addon_kind(addon) != SNX_ADDON_DLC) { /* the name the launcher lists the game by */
+    if (program.nacp) { /* the name the launcher lists the game by */
         char* nacp = snx_path_join(data, "control.nacp");
         int failed = !nacp || snx_write_file(nacp, program.nacp, program.nacp_size);
         free(nacp);

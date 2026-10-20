@@ -77,6 +77,10 @@ uint64_t snx_hac_fs_romfs_size(const SnxHacFs* fs);
 /* size bytes of the RomFS image at offset: 0, or -1 */
 int snx_hac_fs_read_romfs(SnxHacFs* fs, uint64_t offset, void* buffer, size_t size);
 
+/* The content meta (a .cnmt file) of a Meta NCA, the one file of its PFS0 section ending in .cnmt, malloc'd into
+   *data (size bytes): 0, or -1 when the NCA cannot be read or holds none */
+int snx_hac_cnmt(SnxHac* hac, int container, size_t entry, unsigned char** data, size_t* size);
+
 /* tick(written, data) as hactool writes the extraction, written the bytes so far */
 void snx_hac_progress(void (*tick)(uint64_t written, void* data), void* data);
 /* cleanup(data) before an exit hactool takes on a dump it cannot read, which ends the process */

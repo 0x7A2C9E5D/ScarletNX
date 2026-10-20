@@ -38,6 +38,11 @@ msgstr ""
 
 #: src/gui/browser.c
 #, c-format
+msgid "DLC %s"
+msgstr ""
+
+#: src/gui/browser.c
+#, c-format
 msgid "Update %s"
 msgstr ""
 

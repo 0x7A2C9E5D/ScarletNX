@@ -94,6 +94,11 @@ static void dump_exit(void* data) {
     snx_hac_error("fs: hactool stopped on the game's dump");
 }
 
+/* the game's title ID, which its folder and data are named by: 0 for a game named otherwise */
+static SnxU64 game_title(void) {
+    SnxU64 id = 0;
+    return snx_title_parse(g_gamename, &id) ? id : 0;
+}
 /* dump opened as snx_dump_open takes it (base, addon, either NULL) and each container mapped read-only for the whole
    run: the base's into base_map, the add-on's into addon_map. Ends the run on a dump that cannot be read */
 static void dump_map(SnxDump* dump, PFileMap* base_map, PFileMap* addon_map, const char* base, const char* addon,
@@ -216,7 +221,7 @@ static void dlcs_open(void) {
     for (i = 0; i < count; i++) {
         char text[17], *image, *ini, *dump;
         FsAoc* aoc = &g_hle.fs.aocs[g_hle.fs.naocs];
-        if (snx_addon_kind(ids[i]) == SNX_ADDON_UPDATE) {
+        if (snx_addon_kind(game_title(), ids[i]) == SNX_ADDON_UPDATE) {
             if (ids[i] != g_addon)
                 LOG("fs: the update %016llx is checked, and runs from its own program: the game's leaves it out\n",
                     (unsigned long long)ids[i]);
@@ -295,7 +300,7 @@ static void overlays(void) {
     count = snx_addons_parse(g_settings.game_addons, g_gamename, ids, SNX_ADDONS_MAX);
     for (i = 0; i < count; i++) {
         char text[17], *folder;
-        if (snx_addon_kind(ids[i]) != SNX_ADDON_DLC) continue;
+        if (snx_addon_kind(game_title(), ids[i]) != SNX_ADDON_DLC) continue;
         snx_title_text(ids[i], text);
         folder = snx_format("%s%s_%s_data/", g_exedir, g_gamename, text);
         r = snx_is_dir(folder) ? fs_tree_overlay(&g_hle.fs.tree, folder, whole, merged) : FS_TREE_OK;

@@ -310,13 +310,13 @@ done:
 static int extract_files(ExtractState* state, const ExtractOptions* options, const SnxPaths* paths) {
     const SnxNcaRef *program = &state->dump.program, *patch = &state->dump.patch;
     char* main_path;
-    SnxU64 title;
+    SnxU64 title, game;
     int failed;
     /* a game, an add-on over it, or a dump of a DLC alone */
     if (state->update ? snx_dump_open(&state->dump, state->base, state->update, options->keys, options->title_keys,
                                       paths->repo, 1)
                       : snx_dump_title(&state->dump, state->base, options->keys, options->title_keys, paths->repo, 1,
-                                       &title))
+                                       &title, &game))
         return 1;
     if (!program->found && patch->found)
         return snx_error("%s is an update, which goes over its game: give the game's dump, with this one as --update",
@@ -403,7 +403,7 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
     }
     return cleanup(&state, result);
 }
-int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title) {
+int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title, SnxU64* game) {
     ExtractState state;
     int result;
     memset(&state, 0, sizeof state);
@@ -414,7 +414,7 @@ int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title) {
         result = snx_error("%s is not a file", state.base);
     else {
         snx_hac_on_exit(hactool_exit, &state);
-        result = snx_dump_title(&state.dump, state.base, NULL, NULL, paths->repo, 0, title);
+        result = snx_dump_title(&state.dump, state.base, NULL, NULL, paths->repo, 0, title, game);
         snx_hac_on_exit(NULL, NULL);
     }
     return cleanup(&state, result);

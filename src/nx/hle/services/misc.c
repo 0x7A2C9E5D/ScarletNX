@@ -734,8 +734,10 @@ static int nn_bcat_detail_ipc_INotifierService_GetEvent(SvcObj* self, u32* event
 #define AOC_NO_PURCHASED_PRODUCT RC(164, 400) /* nim's shop: NoPurchasedProductInfoAvailable */
 #define AOC_NOT_CONNECTED        RC(110, 300) /* nifm's: the token needs the network */
 
-/* the add-on contents' ids start past the application's: its base id with 0x1000 added */
-static u64 aoc_base_id(u64 application_id) { return (application_id & 0xFFFFFFFFFFFFE000ull) + 0x1000; }
+/* the running game's from its control.nacp (am_aoc_base_id), another application's as the SDK numbers them */
+static u64 aoc_base_id(u64 application_id) {
+    return application_id == g_hle.kernel.title_id ? am_aoc_base_id() : snx_nacp_aoc_base(NULL, 0, application_id);
+}
 /* am's ApplicationRecordNotFound, for a list asked from past its end */
 #define SNX_AOC_NO_RECORD RC(128, 37)
 /* An add-on content is installed when its RomFS image is in the data folder as system/archives/<data id>.romfs, the
@@ -763,7 +765,7 @@ static void aoc_scan(void) {
 }
 /* the running game's; another application has none here */
 static i32 aoc_count_of(u64 application_id) {
-    if (aoc_base_id(application_id) != aoc_base_id(g_hle.kernel.title_id)) return 0;
+    if (application_id != g_hle.kernel.title_id) return 0;
     aoc_scan();
     return g_hle.misc.aoc_count;
 }

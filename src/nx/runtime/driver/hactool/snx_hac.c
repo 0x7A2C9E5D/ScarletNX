@@ -448,6 +448,49 @@ void snx_hac_fs_free(SnxHacFs *fs) {
     free(fs);
 }
 
+int snx_hac_cnmt(SnxHac *hac, int container, size_t entry, unsigned char **data, size_t *size) {
+    hactool_ctx_t *tool = calloc(1, sizeof *tool), *base_tool = calloc(1, sizeof *base_tool);
+    nca_ctx_t *nca = calloc(1, sizeof *nca), *base = calloc(1, sizeof *base);
+    int rc = -1;
+    *data = NULL;
+    *size = 0;
+    if (tool && base_tool && nca && base) {
+        tool->settings = hac->tool.settings;
+        tool->action = 0; /* the tables read, nothing printed or saved */
+        if (!program_process(hac, tool, nca, base_tool, base, container, entry, -1, 0))
+            for (unsigned int i = 0; rc && i < 4; i++) {
+                nca_section_ctx_t *section = &nca->section_contexts[i];
+                pfs0_header_t *h;
+                if (!section->is_present || section->type != PFS0 || !section->storage || !section->pfs0_ctx.header)
+                    continue;
+                h = section->pfs0_ctx.header;
+                for (uint32_t j = 0; rc && j < h->num_files; j++) {
+                    pfs0_file_entry_t *e = pfs0_get_file_entry(h, j);
+                    const char *name = pfs0_get_file_name(h, j);
+                    size_t n = strlen(name);
+                    uint64_t at = section->pfs0_ctx.superblock->pfs0_offset + pfs0_get_header_size(h) + e->offset;
+                    if (n < 5 || strcmp(name + n - 5, ".cnmt") || !e->size || e->size > 0x100000) continue;
+                    *data = malloc((size_t)e->size);
+                    if (*data && storage_read(section->storage, at, *data, (size_t)e->size)) {
+                        *size = (size_t)e->size;
+                        rc = 0;
+                    } else {
+                        free(*data);
+                        *data = NULL;
+                    }
+                }
+            }
+        program_free(nca, base);
+    }
+    if (tool) memset(tool, 0, sizeof *tool); /* the keys */
+    if (base_tool) memset(base_tool, 0, sizeof *base_tool);
+    free(tool);
+    free(base_tool);
+    free(nca);
+    free(base);
+    return rc;
+}
+
 size_t snx_hac_fs_files(SnxHacFs *fs, const SnxHacEntry **files) {
     *files = fs->files;
     return fs->count;

@@ -2117,6 +2117,13 @@ static SnxU64 addon_id(const App* app, size_t i) {
     free(game);
     return id;
 }
+/* what addons' i is to its game: SNX_ADDON_UPDATE or SNX_ADDON_DLC */
+static int addon_kind(const App* app, size_t i) {
+    char game[17];
+    SnxU64 id = 0;
+    snprintf(game, sizeof game, "%s", app->addons.names[i]);
+    return snx_title_parse(game, &id) ? snx_addon_kind(id, addon_id(app, i)) : SNX_ADDON_NONE;
+}
 static void addons_label(const App* app, int row, char* label, size_t size) {
     if ((size_t)row < app->addons.count)
         snprintf(label, size, "%s%s %s", app->theme.marker, app->addons_checked[row] ? "[x]" : "[ ]",
@@ -2158,10 +2165,10 @@ static void addons_press(App* app, int row) {
     int item = app->menu.selected;
     bool recompile = app->recompile;
     if ((size_t)row < app->addons.count) {
-        bool update = snx_addon_kind(addon_id(app, (size_t)row)) == SNX_ADDON_UPDATE;
+        bool update = addon_kind(app, (size_t)row) == SNX_ADDON_UPDATE;
         app->addons_checked[row] = !app->addons_checked[row];
         for (i = 0; update && app->addons_checked[row] && i < app->addons.count; ++i)
-            if (i != (size_t)row && snx_addon_kind(addon_id(app, i)) == SNX_ADDON_UPDATE)
+            if (i != (size_t)row && addon_kind(app, i) == SNX_ADDON_UPDATE)
                 app->addons_checked[i] = false;
         return;
     }
@@ -2170,7 +2177,7 @@ static void addons_press(App* app, int row) {
     for (i = 0; ids && i < app->addons.count; ++i)
         if (app->addons_checked[i]) {
             ids[count++] = addon_id(app, i);
-            if (snx_addon_kind(ids[count - 1]) == SNX_ADDON_UPDATE) path = snx_absolute(app->addons.paths[i]);
+            if (addon_kind(app, i) == SNX_ADDON_UPDATE) path = snx_absolute(app->addons.paths[i]);
         }
     ini = snx_game_ini(folder, name);
     text = ids ? snx_addons_text(ids, count) : NULL;

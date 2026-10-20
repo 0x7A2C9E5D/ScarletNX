@@ -18,8 +18,8 @@ int snx_ini_record(const char* path, const char* key, const char* value);
 /* addons=: the game's updates and DLCs played with it, their title IDs as snx_title_text writes them, a comma between
    two. The most a list holds */
 #define SNX_ADDONS_MAX 2048
-/* text's IDs that are add-ons of the game named game (snx_addon_name), into ids (max of them), each once and an
-   update at most, the last one listed: their count. Anything else in text is left out */
+/* text's IDs that are add-ons of the game named game (snx_addon_kind), into ids (max of them), each once: their count.
+   Its update is the one ID with 0x800, so one at most. Anything else in text is left out */
 size_t snx_addons_parse(const char* text, const char* game, SnxU64* ids, size_t max);
 /* ids as addons= writes them, malloc'd */
 char* snx_addons_text(const SnxU64* ids, size_t count);

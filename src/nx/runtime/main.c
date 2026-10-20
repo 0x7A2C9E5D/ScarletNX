@@ -266,7 +266,9 @@ static void addon_init(char* ini, size_t ini_size, char* base, size_t base_size)
     while (n > 1 && is_separator(dir[n - 1])) dir[--n] = 0;
     for (cut = n; cut && !is_separator(dir[cut - 1]); cut--) continue;
     if (dir && snx_addon_name(dir + cut, g_exename, &g_addon)) {
-        if (snx_addon_kind(g_addon) != SNX_ADDON_UPDATE)
+        SnxU64 game = 0;
+        snx_title_parse(dir + cut, &game);
+        if (snx_addon_kind(game, g_addon) != SNX_ADDON_UPDATE)
             fatal("%s is a DLC's program, which an older version made: a DLC plays with its game, checked in the "
                   "game's list of updates and DLCs (addons= in its .ini). Play the DLC's dump again",
                   g_exename);
