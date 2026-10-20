@@ -338,9 +338,43 @@ static void macro_call(GpuChannel* ch, u32 m, u32 v, int last) {
     }
 }
 
+/* the methods below the macros' that do more than store their value: those the switch in maxwell3d_method acts on,
+   those keeps_draw names, the constant buffer's data, and those the shadow RAM leaves alone (shadowed). Every other
+   method, most of a stream, is a plain register: maxwell3d_method stores it without the switch, a call per method
+   word that was the GPU thread's biggest single cost */
+static const u8 g_m3d_acts[0xE00] = {
+    [0x44] = 1, [0x45] = 1, [0x46] = 1, [0x47] = 1, [0x48] = 1, [0x49] = 1, [0x6C] = 1, [0x6D] = 1, [0xB2] = 1,
+    [0xE4] = 1, [0xEC] = 1, [0xF4] = 1, [0xFC] = 1, [0x1D1] = 1,
+    [0x35D] = 1, [0x35E] = 1, [0x378] = 1, [0x3DD] = 1, [0x3DF] = 1, [0x42B] = 1, [0x485] = 1, [0x486] = 1,
+    [0x4C1] = 1, [0x4EB] = 1, [0x509] = 1, [0x50A] = 1, [0x545] = 1, [0x54C] = 1, [0x556] = 1, [0x57A] = 1,
+    [0x57C] = 1, [0x585] = 1, [0x586] = 1, [0x5F7] = 1, [0x5F8] = 1, [0x5F9] = 1, [0x5FA] = 1, [0x5FB] = 1,
+    [0x5FC] = 1, [0x5FD] = 1, [0x5FE] = 1, [0x651] = 1, [0x674] = 1, [0x6C3] = 1, [0x8C4] = 1, [0x8E4] = 1,
+    [0x8E5] = 1, [0x8E6] = 1, [0x8E7] = 1, [0x8E8] = 1, [0x8E9] = 1, [0x8EA] = 1, [0x8EB] = 1, [0x8EC] = 1,
+    [0x8ED] = 1, [0x8EE] = 1, [0x8EF] = 1, [0x8F0] = 1, [0x8F1] = 1, [0x8F2] = 1, [0x8F3] = 1, [0x904] = 1,
+    [0x90C] = 1, [0x914] = 1, [0x91C] = 1, [0x924] = 1};
+/* inline indices packed in one word, 32 / bits of them, the low ones first. Out of line: its array, inlined, made
+   maxwell3d_method check a stack canary on every method */
+__attribute__((noinline)) static void inline_push_packed(GpuChannel* ch, u32 v, u32 bits) {
+    u32 idx[4], n = 32 / bits, i, mask = bits == 32 ? ~0u : (1u << bits) - 1;
+    for (i = 0; i < n; i++) idx[i] = (v >> (i * bits)) & mask;
+    inline_push(ch, idx, n);
+}
+
 void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
     u32* r = ch->r3d;
     m &= 0xFFF;
+    if (m < 0xE00 && !g_m3d_acts[m]) { /* a plain register, as the slow path below treats it */
+        if (ch->cb_n) r3d_const_flush(ch);
+        if (m >= 0x80) {
+            if (ch->shadow_mode == 3)
+                v = ch->r3d_shadow[m];
+            else if (ch->shadow_mode <= 1)
+                ch->r3d_shadow[m] = v;
+        }
+        if (g_pend.ch && (g_pend.ch != ch || r[m] != v)) r3d_pending_flush();
+        r[m] = v;
+        return;
+    }
     if (m >= 0xE00) {
         r3d_const_flush(ch);
         r[m] = v;
@@ -362,7 +396,7 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
     }
     if (g_pend.ch && (g_pend.ch != ch || !keeps_draw(r, m, v))) r3d_pending_flush();
     r[m] = v;
-    switch (m) {
+    switch (m) { /* a new case, or a new one in keeps_draw, needs its method in g_m3d_acts too */
         case 0x44: /* WAIT_FOR_IDLE */
             /* The idle wait and the texture cache invalidation below order GPU work, which method_barrier gives
                Vulkan. Neither is anything the game sees, so pending shader results don't land here: whatever reads
@@ -388,12 +422,7 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
         case 0x3DD: barrier(2); break; /* INVALIDATE_TEXTURE_DATA_CACHE */
         case 0x3DF: barrier(1); break; /* TILED_CACHE_BARRIER */
         case 0x42B: r3d_draw_texture(ch); break;
-        case 0x4C1: { /* four 8-bit indices, the low byte first */
-            u32 idx[4];
-            idx[0] = v & 0xFF, idx[1] = (v >> 8) & 0xFF, idx[2] = (v >> 16) & 0xFF, idx[3] = v >> 24;
-            inline_push(ch, idx, 4);
-            break;
-        }
+        case 0x4C1: inline_push_packed(ch, v, 8); break; /* four 8-bit indices */
         case 0x485: /* VERTEX_ARRAY_INSTANCE_FIRST: instance 0 of first (bits 0-15), count (16-27), topology (28-31) */
         case 0x486: /* _SUBSEQUENT: the next instance */
             if (m == 0x486)
@@ -410,13 +439,8 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
         case 0x54C: counter_reset(ch, v); break;
         case 0x556:
         case 0x651: render_enable_update(ch); break;
-        case 0x57A: inline_push(ch, &v, 1); break; /* one 32-bit index */
-        case 0x57C: {                              /* two 16-bit indices, the low half first */
-            u32 idx[2];
-            idx[0] = v & 0xFFFF, idx[1] = v >> 16;
-            inline_push(ch, idx, 2);
-            break;
-        }
+        case 0x57A: inline_push_packed(ch, v, 32); break; /* one 32-bit index */
+        case 0x57C: inline_push_packed(ch, v, 16); break; /* two 16-bit indices */
         /* SET_STREAM_OUT_BUFFER_LOAD_WRITE_POINTER: the buffer's capture starts over at its start offset, where
            draws after an earlier one append to what it captured */
         case 0xE4:
