@@ -212,6 +212,7 @@ static void frame_recycle(Frame* f) {
         f->last = 0;
         f->hold = 0;
     }
+    vk_gpuprof_frame_done((u32)(f - g_fr)); /* its timestamps, read before the slot records again */
     dead_free(f);
     g_dead_bytes -= f->dead_bytes;
     f->dead_bytes = 0;

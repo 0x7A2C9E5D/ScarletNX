@@ -345,6 +345,7 @@ REC2(CmdSetStencilCompareMask, VkStencilFaceFlags, u32)
 REC2(CmdSetStencilWriteMask, VkStencilFaceFlags, u32)
 REC1(CmdSetAttachmentFeedbackLoopEnableEXT, VkImageAspectFlags)
 REC3(CmdResetQueryPool, VkQueryPool, u32, u32)
+REC3(CmdWriteTimestamp2, VkPipelineStageFlags2, VkQueryPool, u32)
 REC3(CmdBeginQuery, VkQueryPool, u32, VkQueryControlFlags)
 REC2(CmdEndQuery, VkQueryPool, u32)
 REC7(CmdCopyQueryPoolResults, VkQueryPool, u32, u32, VkBuffer, VkDeviceSize, VkDeviceSize, VkQueryResultFlags)
@@ -640,8 +641,19 @@ static void clear_depth_run(const void* p) {
     vkCmdClearDepthStencilImage(x->cb, (VkImage)x->h1, x->l1, (const VkClearDepthStencilValue*)x->v, x->n,
                                 XFER_REGIONS(x));
 }
+u64 g_rec_xfers, g_rec_barriers; /* copies and blits, and barriers, put in the frame's ring (gpuprof.c's gaps) */
+u64 g_rec_xfer_kind[3], g_rec_buf_bytes; /* buffer copies, buffer-image copies, image copies and blits; buffer bytes */
+static void copy_buffer_run(const void* p);
+static void buffer_to_image_run(const void* p);
+static void image_to_buffer_run(const void* p);
 static XferArgs* rec_xfer(RecFn fn, VkCommandBuffer cb, u64 h1, VkImageLayout l1, u64 h2, VkImageLayout l2, u32 n,
                           const void* regions, u64 size) {
+    g_rec_xfers++;
+    if (fn == copy_buffer_run) {
+        g_rec_xfer_kind[0]++;
+        for (u32 i = 0; i < n; i++) g_rec_buf_bytes += ((const VkBufferCopy*)regions)[i].size;
+    } else
+        g_rec_xfer_kind[fn == buffer_to_image_run || fn == image_to_buffer_run ? 1 : 2]++;
     XferArgs* x = rec_push(fn, REC_AL(sizeof *x) + size);
     memset(x, 0, sizeof *x);
     x->cb = cb;
@@ -771,6 +783,7 @@ static int barrier_chained(const VkDependencyInfo* d) {
     return 0;
 }
 void rec_CmdPipelineBarrier2(VkCommandBuffer cb, const VkDependencyInfo* d) {
+    if (rec_on(cb)) g_rec_barriers++;
     if (!rec_on(cb) || barrier_chained(d)) {
         if (rec_on(cb)) vk_rec_sync();
         vkCmdPipelineBarrier2(cb, d);
