@@ -25,4 +25,10 @@ char* snx_game_source(const char* folder, const char* name, int* recorded);
 /* dump, absolute, as source= in [Game] of the game's .ini, the file made when there is none and left as it is when it
    names dump already. 0, or nonzero with a line saying why */
 int snx_record_source(const char* folder, const char* name, const char* dump);
+/* <folder>/<name>.folders: the game's folders of each kind its environment chose (snx_user_path into snx_user_dir's,
+   an installed build's settings, log and caches), a line config=, state= or cache= each, which the runtime takes over
+   its own environment's: a game started elsewhere (an AppImage's copy, without its portable home or config) finds
+   them where the launcher keeps them. Those folders made; the file taken away when no kind's comes from the
+   environment. 0, or nonzero with a line saying why */
+int snx_record_folders(const char* folder, const char* name);
 #endif

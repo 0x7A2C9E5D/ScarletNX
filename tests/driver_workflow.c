@@ -353,6 +353,65 @@ static void record_source(const char* root) {
     free(ini);
     free(folder);
 }
+/* snx_record_folders: a game of the user's data folder gets <name>.folders naming the config, state and cache folders
+   snx_user_path moves its files to, each made; a game elsewhere none, and an older one there is taken away. The
+   user's folders in root for the test, from the variables that name them */
+static void record_folders(const char* root) {
+#ifdef _WIN32
+    static const char* const vars[] = {"APPDATA"};
+#elif defined(SNX_XDG)
+    static const char* const vars[] = {"XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"};
+#else
+    static const char* const vars[] = {"HOME"};
+#endif
+    static const char* const keys[] = {"config", "state", "cache"};
+    char *old[4], *value, *data, *folder, *record, *text, *expected, *line, *other;
+    size_t i, size;
+    int kind;
+    for (i = 0; i < sizeof vars / sizeof *vars; ++i) {
+        old[i] = getenv(vars[i]) ? snx_strdup(getenv(vars[i])) : NULL;
+        value = snx_format("%s/user %d", root, (int)i);
+        set_env(vars[i], value);
+        free(value);
+    }
+    data = snx_user_data_dir();
+    CHECK(data != NULL);
+    folder = snx_format("%s/games/G", data);
+    record = snx_format("%s/G.folders", folder);
+    expected = snx_strdup("");
+    CHECK(!snx_mkdirs(folder) && !snx_record_folders(folder, "G"));
+    for (kind = SNX_USER_CONFIG; kind <= SNX_USER_CACHE; ++kind) {
+        char* moved = snx_user_path(folder, kind);
+        CHECK(strcmp(moved, folder) && snx_is_dir(moved));
+        line = snx_format("%s%s=%s\n", expected, keys[kind - SNX_USER_CONFIG], moved);
+        free(expected);
+        free(moved);
+        expected = line;
+    }
+    text = (char*)snx_read_file(record, &size);
+    if (!text || strcmp(text, expected))
+        fprintf(stderr, "%s has:\n%s\nnot:\n%s", record, text ? text : "(no such file)\n", expected);
+    CHECK(text && !strcmp(text, expected));
+    free(text);
+    free(record);
+    other = snx_format("%s/elsewhere/G", root);
+    record = snx_format("%s/G.folders", other);
+    CHECK(!snx_mkdirs(other) && !snx_write_file(record, expected, strlen(expected)));
+    CHECK(!snx_record_folders(other, "G") && !snx_path_exists(record));
+    for (i = 0; i < sizeof vars / sizeof *vars; ++i) {
+#ifdef _WIN32
+        CHECK(!_putenv_s(vars[i], old[i] ? old[i] : ""));
+#else
+        CHECK(old[i] ? !setenv(vars[i], old[i], 1) : !unsetenv(vars[i]));
+#endif
+        free(old[i]);
+    }
+    free(data);
+    free(folder);
+    free(record);
+    free(expected);
+    free(other);
+}
 static void reset(const char* repo, const char* dump) {
     CHECK(!snx_remove_tree(repo));
     CHECK(!snx_mkdirs(repo));
@@ -408,6 +467,7 @@ int main(int argc, char** argv) {
     root = snx_temp_dir(NULL);
     CHECK(exe && root);
     record_source(root);
+    record_folders(root);
     repo = snx_path_join(root, "checkout with spaces");
     CHECK(!snx_mkdirs(repo));
     dump = snx_path_join(repo, "Test [game];.NSP");

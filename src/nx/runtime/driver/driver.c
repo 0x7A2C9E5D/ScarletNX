@@ -473,6 +473,8 @@ made:
         goto done;
     }
     rc = nro ? 0 : ensure_romfs(command, folder, name, tmpfs, extract);
+    /* the game may start with another environment than this run's (its copy outside an AppImage, a shortcut) */
+    if (!rc) rc = snx_record_folders(folder, name);
     if (rc) goto done;
 #ifdef __ANDROID__
     /* an app's child process has no window to play in: the app runs the game this names (docs/ANDROID.md) */

@@ -475,6 +475,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
             goto done;
         }
     }
+    if (snx_record_folders(folder, game)) goto done;
     if (dump) { /* what the game reads in place, and Extract to tmpfs extracts again */
         char* absolute = snx_absolute(input);
         int failed = !absolute || snx_record_source(folder, game, absolute);
