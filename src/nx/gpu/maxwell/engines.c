@@ -118,7 +118,7 @@ void query_get(GpuChannel* ch, u32* r, int base, u32 v) {
             break;
         case 1: /* acquire: GE (bit 16) or EQ */ gpu_park(ch, GPU_PARK_REPORT, a, payload, (v >> 16) & 1); break;
         case 2: /* report a counter, selector bits 23-27 */ counter_report(ch, a, (v >> 23) & 31, payload, one); break;
-        default: LOG_LIMIT(4, "gpu: report semaphore trap %08x is ignored\n", v); break;
+        default: LOG_LIMIT(4, "gpu: report semaphore trap %08x is not emulated: nothing is written\n", v); break;
     }
 }
 

@@ -277,6 +277,11 @@ if(UNIX)
     add_test(NAME data_dir COMMAND snx-test-data-dir)
     add_test(NAME runtime_deploy COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/deploy.cmake")
 endif()
+# snx_os_error: the system's reason a message names, Windows' GetLastError where its calls leave errno
+add_executable(snx-test-os-error os_error.c)
+snx_test_target(snx-test-os-error 90)
+target_link_libraries(snx-test-os-error PRIVATE scarletnx-common)
+add_test(NAME os_error COMMAND snx-test-os-error)
 if(NOT SNX_BUILD_NX AND NOT SNX_BUILD_GNUABI)
     include(architecture.cmake)
     snx_sanitizer_path()
@@ -925,7 +930,7 @@ if(NOT SNX_TOOLS_ONLY)
     # by their shaders' records, a cut or changed record ending the reading, another key starting over, a full file
     add_executable(snx-test-pipeline-file pipeline_file.c)
     snx_test_target(snx-test-pipeline-file 23)
-    target_link_libraries(snx-test-pipeline-file PRIVATE snx_nx_flags)
+    target_link_libraries(snx-test-pipeline-file PRIVATE snx_nx_flags scarletnx-common)
     add_test(NAME pipeline_file COMMAND snx-test-pipeline-file)
 endif()
 
@@ -1165,6 +1170,7 @@ if(UNIX)
         "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme_hle.c"
         "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/dma.c")
     snx_test_target(snx-test-gpu-park 23)
+    target_link_libraries(snx-test-gpu-park PRIVATE scarletnx-common) # gpu.c says why a thread did not start
         add_test(NAME gpu_park COMMAND snx-test-gpu-park)
     set_tests_properties(gpu_park PROPERTIES TIMEOUT 30) # a deadlock in the queue would otherwise hang ctest
 endif()

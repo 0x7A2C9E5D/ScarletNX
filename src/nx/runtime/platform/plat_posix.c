@@ -176,6 +176,7 @@ int plat_thread(PThreadFn fn, void* arg, size_t stack) {
     pthread_attr_destroy(&a);
     if (r) {
         free(s);
+        errno = r; /* the reason, for what the caller says */
         return -1;
     }
     return 0;

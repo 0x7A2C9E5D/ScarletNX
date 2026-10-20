@@ -6,6 +6,7 @@
 #define _GNU_SOURCE 1 /* sched_getaffinity: the CPUs this process may run on */
 #endif
 #include "common/cpu/recompiler/llvm/jit_service.h"
+#include "common/utilities/common.h"
 #include "common/cpu/recompiler/llvm/code_loader.h"
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/llvm/rtlib_object.h"
@@ -13,6 +14,7 @@
 #include <llvm/Config/llvm-config.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include <time.h>
 #ifdef _WIN32
@@ -1168,7 +1170,11 @@ static void* worker_main(void* s) {
     worker((SnxJitService*)s);
     return NULL;
 }
-static int thread_start(JitThread* t, SnxJitService* s) { return pthread_create(t, NULL, worker_main, s) ? -1 : 0; }
+static int thread_start(JitThread* t, SnxJitService* s) {
+    int failed = pthread_create(t, NULL, worker_main, s);
+    if (failed) errno = failed; /* the reason, for what the caller says */
+    return failed ? -1 : 0;
+}
 static void thread_join(JitThread t) { pthread_join(t, NULL); }
 #endif
 
@@ -1510,7 +1516,8 @@ SnxJitService* snx_jit_service_new(const SnxJitConfig* config, char* error, size
         if (thread_start(&s->threads[i], s)) break;
     s->stats.threads = (unsigned)i;
     if (!i) {
-        snprintf(error, error_size, "cannot start a compile thread");
+        char why[256];
+        snprintf(error, error_size, "cannot start a compile thread: %s", snx_os_error(why, sizeof why));
         snx_jit_service_free(s);
         return NULL;
     }

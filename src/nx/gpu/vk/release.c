@@ -10,6 +10,7 @@
    The compute queue's results are waited for the same way (its batches, put aside, land in order). Storage images
    still land at the release (vk_gfx_image_land). */
 #include <string.h>
+#include "common/utilities/common.h"
 #include "nx/gpu/gpu.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/vk/pending_pages.h"
@@ -154,7 +155,10 @@ static void release(Release* r) {
     if (!g_rthread) {
         pc_init(&g_rcv);
         g_rthread = 1;
-        if (plat_thread(release_thread, NULL, (size_t)1 << 20)) fatal("could not start the GPU release thread");
+        if (plat_thread(release_thread, NULL, (size_t)1 << 20)) {
+            char why[256];
+            fatal("could not start the GPU release thread: %s", snx_os_error(why, sizeof why));
+        }
     }
     pc_broadcast(&g_rcv);
     pm_unlock(&g_rlock);

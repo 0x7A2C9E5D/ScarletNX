@@ -7,6 +7,7 @@ stays there, each run saying where it is and where this one keeps it. A game rec
 everything in its folder. No GPU: the game stops before it, its ExeFS taken away."""
 
 import argparse
+import errno
 import os
 import shutil
 import subprocess
@@ -106,6 +107,19 @@ def main():
                 'was left by an older version' not in text, f'the {start} start of a game in its folder said so', text
             )
         check((folder / 'Smoke.log').read_text() == 'older log\n', 'the game wrote in the older Smoke.log', out)
+        # a .ini the game cannot read: said with its path and the reason, the defaults taken, the file not written over.
+        # Root reads it all the same
+        if hasattr(os, 'geteuid') and os.geteuid() != 0:
+            before = ini.read_bytes()
+            ini.chmod(0)
+            try:
+                status, out = run(['./Smoke', '-H'], cwd=folder)
+            finally:
+                ini.chmod(0o644)
+            text = log.read_text(errors='replace') if log.is_file() else ''
+            said = f'settings: cannot read {ini} ({os.strerror(errno.EACCES)}): every setting takes its default'
+            check(said in text, f'the game did not say "{said}"', text)
+            check(ini.read_bytes() == before, 'the game wrote over the .ini it could not read', out)
         check((folder / 'threads.txt').read_text() == 'older threads\n', 'the older threads.txt was touched', out)
         check(
             (folder / 'shader_cache/vk_pipelines.bin').read_bytes() == b'pipelines',

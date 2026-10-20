@@ -41,6 +41,7 @@ typedef struct {
 typedef struct {
     PMutex lock;
     FILE* f;  /* appended to; NULL once nothing more is (an error, or the file reached PF_MAX) */
+    char path[1024]; /* f's, for what a failed write says */
     u64 size; /* the file's bytes */
     u32 nsh;  /* shader records in it */
     /* each module with a record: its number and check, by open addressing on the handle (cap a power of two) */

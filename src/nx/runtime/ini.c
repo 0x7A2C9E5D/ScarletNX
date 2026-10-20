@@ -15,11 +15,17 @@ const IniOpt* ini_find(const IniOpt* table, const char* key) {
 
 static void (*g_say)(const char* line);
 void ini_set_say(void (*say)(const char* line)) { g_say = say; }
-/* a value not taken as given: ini_check's why, and what was done */
-static void say(const IniOpt* o, const char* v, const char* done) {
-    char why[256], line[320];
+/* a value not taken as given: ini_check's why, and the value the setting has now, as the .ini writes it (the default,
+   or the value before a reload) */
+static void say(const IniOpt* o, const char* v) {
+    char why[256], value[64], line[1024];
     ini_check(o, v, why, sizeof why);
-    snprintf(line, sizeof line, "settings: %s: %s", why, done);
+    if (o->type == INI_TEXT)
+        snprintf(line, sizeof line, "settings: %s: it keeps \"%s\"", why, (const char*)o->var);
+    else {
+        ini_format(o, value, sizeof value);
+        snprintf(line, sizeof line, "settings: %s: it keeps %s", why, value);
+    }
     if (g_say)
         g_say(line);
     else
@@ -27,13 +33,13 @@ static void say(const IniOpt* o, const char* v, const char* done) {
 }
 
 void ini_read(const IniOpt* o, const char* v) {
-    char kept[32];
+    char why[256];
     char* end;
     double d;
     if (o->type == INI_TEXT) {
         size_t n = strlen(v);
         if (n >= o->size) {
-            say(o, v, "left as it was");
+            say(o, v);
             return;
         }
         memcpy(o->var, v, n + 1);
@@ -42,18 +48,11 @@ void ini_read(const IniOpt* o, const char* v) {
     }
     d = strtod(v, &end);
     if (end == v || d != d) { /* NaN would pass the range unclamped */
-        say(o, v, "left as it was");
+        say(o, v);
         return;
     }
     if (d < o->lo) d = o->lo;
     if (d > o->hi) d = o->hi;
-    if (ini_check(o, v, kept, sizeof kept)) { /* clamped, an int's whole part, or a number with something after it */
-        if (o->type == INI_INT)
-            snprintf(kept, sizeof kept, "%d kept", (int)d);
-        else
-            snprintf(kept, sizeof kept, "%g kept", d);
-        say(o, v, kept);
-    }
     /* atomic: other threads read some of the settings while a reload writes them (the GPU thread's vsync) */
     if (o->type == INI_INT)
         __atomic_store_n((int*)o->var, (int)d, __ATOMIC_RELAXED);
@@ -61,6 +60,8 @@ void ini_read(const IniOpt* o, const char* v) {
         float f = (float)d;
         __atomic_store((float*)o->var, &f, __ATOMIC_RELAXED);
     }
+    /* clamped, an int's whole part, or a number with something after it */
+    if (ini_check(o, v, why, sizeof why)) say(o, v);
     if (o->set) o->set(o, v);
 }
 

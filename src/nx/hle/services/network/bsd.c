@@ -722,11 +722,13 @@ static int nn_socket_sf_IClient_SetSockOpt(SvcObj* self, i32 fd, i32 level_in, i
         /* the host refusing an option the console has (a buffer size out of its range, SO_DEBUG without
            privileges) isn't the game's fault: it gets what the console would answer */
         if (r == -SNX_ENOPROTOOPT || r == -SNX_EPERM || r == -SNX_EACCES) {
-            LOG_LIMIT(8, "bsd: the host refused option level %#x name %#x (errno %d), ignored\n", glevel, gname, -r);
+            LOG_LIMIT(8, "bsd: the host refused option level %#x name %#x (errno %d): the game is told it is set\n",
+                      glevel, gname, -r);
             r = 0;
         }
     } else if (k < 0)
-        WARN_LIMIT(8, "bsd: SetSockOpt of unknown option level %#x name %#x, ignored\n", glevel, gname);
+        WARN_LIMIT(8, "bsd: SetSockOpt of unknown option level %#x name %#x: not set, and the game is told it is\n",
+                   glevel, gname);
     snx_socket_unref(s);
     return reply(r, ret, bsd_errno);
 }

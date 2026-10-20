@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* The profile option on Windows: samples the program counter of the runtime's threads every millisecond, and writes
    the functions they spent their time in to profile.txt beside the game every 10 seconds */
+#include "common/utilities/common.h"
 #include "nx/loader/module_abi.h"
 #include "nx/runtime/loader.h"
 #include "nx/runtime/main.h"
@@ -177,7 +178,8 @@ void plat_prof_start(void) {
     plat_prof_add_thread(GetCurrentThread()); /* the main thread (the window and the frame loop) */
     h = CreateThread(NULL, 0, sampler, NULL, 0, NULL);
     if (!h) {
-        WARN("profile: the sampling thread could not start\n");
+        char why[256];
+        WARN("profile: the sampling thread could not start: %s\n", snx_os_error(why, sizeof why));
         return;
     }
     SetThreadPriority(h, THREAD_PRIORITY_HIGHEST);

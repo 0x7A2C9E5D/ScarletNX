@@ -3623,7 +3623,9 @@ static void device_open(App* app) {
     SDL_free(ids);
 }
 /* a player's Controller row: Enter waits for a press on a controller, which the player then takes, by its GUID ("/2"
-   after it for the second of two alike), as Eden's Input Device. ESC leaves it as it was */
+   after it for the second of two alike), as Eden's Input Device. ESC keeps the one it has */
+/* a Controller row's controller as the row shows it */
+static const char* device_shown(const GuiSetting* v) { return v->text[0] ? v->text : snx_tr("Any [default]"); }
 static void device_listen(App* app, int row) {
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
         snprintf(app->editor.note, sizeof app->editor.note, snx_tr("Controllers cannot be read: %s"), SDL_GetError());
@@ -3633,8 +3635,8 @@ static void device_listen(App* app, int row) {
     app->device_listen = row + 1;
     device_open(app);
     snprintf(app->editor.note, sizeof app->editor.note,
-             snx_tr("Press a button on player %d's controller. ESC: as it was"),
-             player_key(app->settings.values[row].key, "device"));
+             snx_tr("Press a button on player %d's controller. ESC keeps %s"),
+             player_key(app->settings.values[row].key, "device"), device_shown(&app->settings.values[row]));
 }
 static void device_stop(App* app) {
     if (!app->device_listen) return;
@@ -3675,8 +3677,10 @@ static bool device_event(App* app, const SDL_Event* e) {
     else if (e->type == SDL_EVENT_GAMEPAD_ADDED) /* plugged in while it waits: its press counts too */
         device_open(app);
     else if (e->type == SDL_EVENT_KEY_DOWN && menu_key_of(&e->key, &key) && key == GUI_CANCEL) {
+        const GuiSetting* v = &app->settings.values[app->device_listen - 1];
         device_stop(app);
-        snprintf(app->editor.note, sizeof app->editor.note, "%s", snx_tr("As it was"));
+        snprintf(app->editor.note, sizeof app->editor.note, snx_tr("Player %d keeps %s"), player_key(v->key, "device"),
+                 device_shown(v));
     } else
         return e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT ||
                e->type == SDL_EVENT_MOUSE_BUTTON_DOWN || e->type == SDL_EVENT_FINGER_DOWN;
@@ -4954,6 +4958,7 @@ static void keys_result(App* app, bool ok) {
     app->keys_done = now_ms(app) ? now_ms(app) : 1;
 }
 static void keys_write(App* app, const char* data, size_t size) {
+    char why[256];
     if (!app->keys_path) {
         snprintf(app->message, sizeof(app->message), "%s",
                  snx_tr("Cannot locate your home directory. Keys were not installed."));
@@ -4970,13 +4975,15 @@ static void keys_write(App* app, const char* data, size_t size) {
     if (ok) ok = chmod(staged, 0600) == 0;
 #endif
     if (ok) ok = !snx_replace(staged, app->keys_path);
+    if (!ok) snx_os_error(why, sizeof why); /* before the cleanup's calls set another */
     if (temporary) snx_remove_tree(temporary);
     free(staged);
     free(temporary);
     free(directory);
-    snprintf(app->message, sizeof(app->message), "%s",
-             ok ? snx_tr("prod.keys installed: games can be extracted now.")
-                : snx_tr("Cannot install prod.keys. Check file and folder permissions, then try again."));
+    if (ok)
+        snprintf(app->message, sizeof(app->message), "%s", snx_tr("prod.keys installed: games can be extracted now."));
+    else
+        snprintf(app->message, sizeof(app->message), snx_tr("Cannot install %s: %s"), app->keys_path, why);
     keys_result(app, ok);
 }
 static void install_keys(App* app, const char* source) {
@@ -5181,7 +5188,7 @@ static void games_scan(App* app, GuiGames* games, char* message, size_t size) {
     char error[sizeof app->message];
     gui_games_free(games);
     if (!gui_games_add(games, app->games_dir, kinds, error, sizeof error))
-        snprintf(message, size, "%s", snx_tr("Cannot open games/. Create it in the displayed working directory."));
+        snprintf(message, size, "%s", error);
     else
         message[0] = 0;
     for (i = 0; i < app->folder_count; ++i)
