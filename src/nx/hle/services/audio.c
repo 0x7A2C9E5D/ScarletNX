@@ -217,11 +217,12 @@ static int audout_append(SvcObj* self, u64 tag, IpcBuf b) {
     q->tag[i] = tag;
     q->frames[i] = (u32)((d.data_size < 0xFFFFFFFFu ? d.data_size : 0xFFFFFFFFu) / (q->channels * 2u));
     q->nqueued++;
-    if (!q->output || !d.data_size) { /* without a host device it is played on the clock alone */
+    if (!q->output || !q->frames[i]) { /* without a host device it is played on the clock alone */
     } else if (d.data_size <= 0xFFFFFFFFu && d.data_offset <= d.buffer_capacity &&
                d.data_size <= d.buffer_capacity - d.data_offset && d.buffer + d.data_offset >= d.buffer &&
                guest_ok(d.buffer + d.data_offset, d.data_size, PERM_R))
-        plat_audio_queue(q->output, GP(d.buffer + d.data_offset), (u32)d.data_size);
+        /* the frames the clock plays, a part of one at the end left out: SDL refuses it, and the whole buffer too */
+        plat_audio_queue(q->output, GP(d.buffer + d.data_offset), q->frames[i] * q->channels * 2u);
     else
         WARN_LIMIT(4, "audout: buffer %#llx (%llu bytes at offset %llu) isn't readable, played as silence\n",
                    (unsigned long long)d.buffer, (unsigned long long)d.data_size,
