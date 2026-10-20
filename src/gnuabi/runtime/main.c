@@ -4,6 +4,7 @@
 #include "gnuabi/runtime/execution.h"
 #include "common/utilities/common.h"
 #include "common/cpu/recompiler/snx_recompiler.h"
+#include <openssl/crypto.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +45,7 @@ static void guest_main(void) {
     gnu_start_sampler(process);
     run_status = gnu_runtime_run(process);
     if (process->faulted && process->diagnostic[0]) fprintf(stderr, "scarletnx-gnuabi: %s\n", process->diagnostic);
+    OPENSSL_thread_stop(); /* its state for this thread (an execve's random bytes): it ends the process, not itself */
     gnu_spawn_exit(process);
 }
 #ifdef _WIN32
@@ -112,6 +114,13 @@ static char* default_sysroot(const char* argv0) {
     return root;
 }
 
+/* what main's options made, once they are copied or the runtime stops before the guest runs */
+static void options_free(char** changes, size_t change_count, char* sysroot) {
+    for (size_t i = 0; i < change_count; i++) free(changes[i]);
+    free(changes);
+    free(sysroot);
+}
+
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IOLBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
@@ -130,6 +139,7 @@ int main(int argc, char** argv) {
         const char* value = first + 1 < argc ? argv[first + 1] : NULL;
         if (!strcmp(option, "--help") || !strcmp(option, "-h")) {
             fputs(usage, stdout);
+            options_free(changes, change_count, sysroot);
             return 0;
         }
         if (!strcmp(option, "--")) {
@@ -173,12 +183,14 @@ int main(int argc, char** argv) {
             first++;
         } else {
             fprintf(stderr, "scarletnx-gnuabi: unknown option %s (--help lists them)\n", option);
+            options_free(changes, change_count, sysroot);
             return 2;
         }
         first++;
     }
     if (first == argc) {
         fputs(usage, stderr);
+        options_free(changes, change_count, sysroot);
         return 2;
     }
     if (!isolated && !sysroot) sysroot = default_sysroot(argv[0]);
@@ -230,6 +242,14 @@ int main(int argc, char** argv) {
         fprintf(stderr, "scarletnx-gnuabi: %s\n", error);
         return 2;
     }
+    /* copied by now: the arguments and the environment to the guest's stack, the sysroot to the file system, the cache
+       folder to the recompiler. This thread only waits from here, and never ends (the guest's ends the process), so
+       OpenSSL's state for it, from the stack's random bytes, goes now too */
+    options_free(changes, change_count, sysroot);
+    free(env);
+    free(guest_argv);
+    free(cache);
+    OPENSSL_thread_stop();
     if (cwd && !isolated) gnu_vfs_set_cwd(&process->vfs, cwd);
     for (int i = 0; i < adopted_count; i++) {
 #ifdef _WIN32
