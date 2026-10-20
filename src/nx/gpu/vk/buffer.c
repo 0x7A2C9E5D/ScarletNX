@@ -510,11 +510,11 @@ static void read_untracked(u64 gva, u8* dst, u64 len) {
         len -= n;
     }
 }
-/* a pending result can be copied over guest memory on the GPU: this frame's staging still holds it, and the guest
-   hasn't written the bytes it covers in [lo, hi) since it was snapshotted */
+/* a pending result can be copied over guest memory on the GPU: this frame's staging or the last one's still holds
+   it, and the guest hasn't written the bytes it covers in [lo, hi) since it was snapshotted */
 static int out_copyable(const GfxOut* o, u64 lo, u64 hi) {
     const u8* host = gmem_ptr_untracked(lo, hi - lo);
-    return o->frame_id == vk_frame_id() && host && !memcmp(host, o->org + (lo - o->addr), hi - lo);
+    return o->frame_id + 1 >= vk_frame_id() && host && !memcmp(host, o->org + (lo - o->addr), hi - lo);
 }
 /* the same for each run of o's bytes in [gva, gva + len), through whichever GPU address maps them (out_spans) */
 typedef struct {
@@ -557,10 +557,12 @@ static void gfx_overlay(u64 gva, u64 len, VkBuffer dst, u64 dst_off) {
    accept, from this submit when the reader writes it (its copy back for landing was recorded at its submit's end) or
    this frame otherwise. Returns 2 when pending results cover the range and can all be copied over guest memory on the
    GPU (gfx_overlay), 0 when none do, or after landing them because one can't: it maps the range through another
-   virtual address, its frame is over, or the guest wrote its original bytes since */
+   virtual address, or the guest wrote its original bytes since. A result of the frame before is read where it is too
+   (transform feedback captures the same buffers every frame, over the last frame's capture), its frame's rings held
+   until the reader is done (vk_frame_hold) */
 static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off, int writable) {
     GfxOut* match = NULL;
-    int count = 0;
+    int count = 0, before = 0;
     RangePages q;
     u64 local[16], *rmap = NULL;
     if (!g_gfx_any || g_out_landing || !gva || !len) return 0;
@@ -570,7 +572,7 @@ static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off, int writable) 
     for (GfxOut* o = g_out; o; o = o->next) {
         u64 lo = gva > o->addr ? gva : o->addr, hi = gva + len < o->addr + o->size ? gva + len : o->addr + o->size;
         if (lo >= hi && !backing_overlap(&q, o)) continue;
-        Copyable c = {o, gva, o->frame_id == vk_frame_id()};
+        Copyable c = {o, gva, o->frame_id + 1 >= vk_frame_id()};
         if (c.ok && !rmap && !(rmap = range_map(gva, len, local))) c.ok = 0;
         if (c.ok) out_spans(o, gva, len, rmap, copyable_span, &c);
         if (!c.ok) {
@@ -581,9 +583,11 @@ static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off, int writable) 
         }
         match = o;
         count++;
+        before |= o->frame_id != vk_frame_id();
     }
     if (rmap && rmap != local) free(rmap);
     if (!count) return 0;
+    if (before) vk_frame_hold(vk_frame_id() - 1);
     if (count == 1 && gva >= match->addr && gva + len <= match->addr + match->size &&
         !((match->off + (gva - match->addr)) & (vk_stage_align() - 1)) &&
         (!writable || match->frame == vk_submit_number())) {
@@ -971,6 +975,7 @@ static int atlas_fill(const DrawPage* p, size_t unique, u8* ptr, VkBuffer atlas,
             u32 at = draw_page_index(p, unique, key);
             if (at < unique && p[at].key == key) {
                 copy_add(&c, o->buf, o->off + (lo - o->addr), atlas_off + at * 4096ull + (lo - g), hi - lo);
+                if (o->frame_id != vk_frame_id()) vk_frame_hold(o->frame_id);
                 composed = 1;
             }
         }

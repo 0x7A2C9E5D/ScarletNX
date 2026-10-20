@@ -133,6 +133,9 @@ void vk_defer_buffer_view(VkBufferView v);
 u64 vk_submit_number(void);
 u32 vk_cb_begun(void); /* command buffers begun so far: changes when a new one starts recording */
 u64 vk_frame_id(void);
+/* the submission being recorded reads buffers in frame frame_id's rings: that frame's slot isn't reused until it is
+   done. Only the frame before the current one can be held: older slots were reused already */
+void vk_frame_hold(u64 frame_id);
 u64 vk_last_submit(void);        /* the last submission's number, which its completion signals */
 void vk_wait_submit(u64 value);  /* until the GPU has done that submission (any thread, without vk_lock) */
 void vk_land_through(u64 value); /* the results of the submissions up to value, done, into guest memory (vk_lock) */
