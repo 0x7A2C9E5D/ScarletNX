@@ -279,6 +279,30 @@ static void addon_init(char* ini, size_t ini_size, char* base, size_t base_size)
     free(dir);
 }
 
+/* what the game plays with, for its window's title: its update by its version ("Update 1.2.0") and the DLCs found,
+   each by its number past the base ID its control.nacp gives ("DLC 1", else its title ID), four at most and how many
+   more. "" for none */
+static void addons_line(char* out, size_t size) {
+    const u64* ids;
+    size_t count = fs_dlcs(&ids), i, n;
+    u64 base = am_aoc_base_id();
+    char version[16];
+    out[0] = 0;
+    if (g_addon) {
+        am_display_version(version);
+        snprintf(out, size, "Update %s", version);
+    }
+    for (i = 0; i < count && i < 4; i++) {
+        n = strlen(out);
+        if (ids[i] > base && ids[i] - base < 0x800)
+            snprintf(out + n, size - n, "%sDLC %u", n ? ", " : "", (unsigned)(ids[i] - base));
+        else
+            snprintf(out + n, size - n, "%sDLC %016llX", n ? ", " : "", (unsigned long long)ids[i]);
+    }
+    n = strlen(out);
+    if (count > 4) snprintf(out + n, size - n, " and %u more DLCs", (unsigned)(count - 4));
+}
+
 /* nothing is moved: a game an older version laid out beside the others (its folder named otherwise) runs where it
    is, each start saying where its folder goes */
 static void say_old_layout(void) {
@@ -528,7 +552,12 @@ int snx_main(int argc, char** argv) {
     nv_init();
     romfs_init();
     gpu_init();
-    video_init(title);
+    {
+        char addons[256];
+        addons_line(addons, sizeof addons);
+        if (addons[0]) LOG("game: played with %s\n", addons);
+        video_init(title, addons);
+    }
     if (g_settings.profiler) {
 #if defined(_WIN32)
         plat_prof_start();

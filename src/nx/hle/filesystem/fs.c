@@ -217,7 +217,8 @@ static void dlcs_open(void) {
     if (!ids) fatal("Out of memory for the game's DLCs");
     count = snx_addons_parse(g_settings.game_addons, g_gamename, ids, SNX_ADDONS_MAX);
     g_hle.fs.aocs = calloc(count ? count : 1, sizeof *g_hle.fs.aocs);
-    if (!g_hle.fs.aocs) fatal("Out of memory for the game's DLCs");
+    g_hle.fs.dlcs = calloc(count ? count : 1, sizeof *g_hle.fs.dlcs);
+    if (!g_hle.fs.aocs || !g_hle.fs.dlcs) fatal("Out of memory for the game's DLCs");
     for (i = 0; i < count; i++) {
         char text[17], *image, *ini, *dump;
         FsAoc* aoc = &g_hle.fs.aocs[g_hle.fs.naocs];
@@ -231,8 +232,10 @@ static void dlcs_open(void) {
         image = snx_format("%s%s_%s_data/system/archives/%s.romfs", g_exedir, g_gamename, text, text);
         ini = snx_format("%s%s_%s.ini", g_confdir, g_gamename, text);
         dump = snx_is_file(image) ? NULL : snx_ini_value(ini, "source");
-        if (snx_is_file(image))
+        if (snx_is_file(image)) {
             LOG("fs: the DLC %s from its extraction\n", text);
+            g_hle.fs.dlcs[g_hle.fs.ndlcs++] = ids[i];
+        }
         else if (!dump || !snx_is_file(dump))
             WARN("fs: the DLC %s is checked, and its settings %s name %s: the game runs without it. Play its dump "
                  "again to record it\n",
@@ -248,6 +251,7 @@ static void dlcs_open(void) {
                      (unsigned long long)aoc->dump.aoc.title_id, text);
             LOG("fs: the DLC %016llx read from its dump %s (%.1f MB)\n", (unsigned long long)aoc->dump.aoc.title_id,
                 dump, (double)snx_hac_fs_romfs_size(aoc->fs) / 1048576.0);
+            g_hle.fs.dlcs[g_hle.fs.ndlcs++] = aoc->dump.aoc.title_id;
             g_hle.fs.naocs++;
         }
         free(image);
@@ -769,6 +773,10 @@ static FsAoc* aoc_of(u64 id) {
     return NULL;
 }
 int fs_aoc_has(u64 id) { return aoc_of(id) != NULL; }
+size_t fs_dlcs(const u64** ids) {
+    *ids = g_hle.fs.dlcs;
+    return g_hle.fs.ndlcs;
+}
 
 static int buffer_valid(u64 addr, u64 size) { return addr <= AS_SIZE && size <= AS_SIZE - addr; }
 /* 64-bit file offsets: long is 32 bits on Windows. */

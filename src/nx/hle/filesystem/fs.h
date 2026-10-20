@@ -17,6 +17,9 @@ int fs_map_file(const char* path, PFileMap* map); /* 0, or -1 */
 /* 1 when id is a DLC read in place from its dump (one the game's addons= checks), which OpenDataStorageByDataId serves
    as installed */
 int fs_aoc_has(u64 id);
+/* the checked DLCs the game plays with, those found extracted or read from their dumps, in addons= order, into *ids:
+   their count */
+size_t fs_dlcs(const u64** ids);
 u8* fs_read_file(const char* path, u64* size);    /* malloc'd, or NULL */
 /* a file that exists only in memory, which the lookups find like any other. 0, or -1 */
 int fs_add_virtual_file(const char* path, const void* data, u64 size);
@@ -99,6 +102,8 @@ typedef struct {
     PFileMap amap;
     FsAoc* aocs;
     size_t naocs;
+    u64* dlcs; /* the checked DLCs the game plays with, extracted or read in place, ndlcs of them (fs_dlcs) */
+    size_t ndlcs;
 } HleFs;
 /* all zero: fs_init sets the tree up */
 #endif

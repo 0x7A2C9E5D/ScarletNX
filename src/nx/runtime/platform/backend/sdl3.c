@@ -256,7 +256,7 @@ static void buzzer_open(void) {
 #endif
 }
 
-void video_init(const char* title) {
+void video_init(const char* title, const char* addons) {
     if (g_opt_headless) {
         /* No SDL video subsystem: this also works without DISPLAY, WAYLAND_DISPLAY or a seat. */
         unattended_start();
@@ -295,10 +295,13 @@ void video_init(const char* title) {
     unattended_start();
     SDL_AddEventWatch(lifecycle, NULL);
     int w, h;
-    char header[512];
+    char header[768];
     snprintf(g_title, sizeof g_title, "%s", title);
     backend_window_size(&w, &h);
-    snprintf(header, sizeof header, "%s - %s", title, snx_build_info());
+    if (addons[0])
+        snprintf(header, sizeof header, "%s (%s) - %s", title, addons, snx_build_info());
+    else
+        snprintf(header, sizeof header, "%s - %s", title, snx_build_info());
     g_win = SDL_CreateWindow(header, w, h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
     if (!g_win) fatal("SDL could not open a Vulkan window: %s", SDL_GetError());
     snx_window_icon(g_win);

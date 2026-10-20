@@ -1160,6 +1160,10 @@ static void test_addon(SvcObj* proxy, int update) {
     CHECK(data && size == sizeof dump_code - 1 && !memcmp(data, dump_code, size));
     free(data);
     CHECK(g_hle.fs.naocs == 2 && !g_hle.fs.dump.patch.found);
+    { /* the DLCs the game plays with, which its window names: the two found, in addons= order */
+        const u64* ids;
+        CHECK(fs_dlcs(&ids) == 2 && ids[0] == 0x0100000000AB1001ULL && ids[1] == 0x0100000000AB1002ULL);
+    }
     CHECK(fs_aoc_has(0x0100000000AB1001ULL) && fs_aoc_has(0x0100000000AB1002ULL) && !fs_aoc_has(0x0100000000AB1003ULL));
     CHECK(strstr(test_fs_text, "the DLC 0100000000AB1003 is checked") != NULL);
     for (u64 i = 0; i < 2; i++) {
@@ -1235,6 +1239,10 @@ static void test_overlay(void) {
     /* the checked DLC's extraction laid over it too, the unchecked one's not */
     CHECK(!fs_tree_lookup(&g_hle.fs.tree, NULL, "system/archives/0100000000AB1001.romfs", &node) && node->readonly);
     CHECK(fs_tree_lookup(&g_hle.fs.tree, NULL, "system/archives/0100000000AB1004.romfs", &node) == FS_TREE_NOTFOUND);
+    {
+        const u64* ids;
+        CHECK(fs_dlcs(&ids) == 1 && ids[0] == 0x0100000000AB1001ULL);
+    }
     pm_unlock(&g_hle.fs.tree.lock);
     CHECK(snx_is_file("overlay-data/0100000000AB0000_data/romfs/b.bin")); /* hidden, never removed */
     romfs_init();
