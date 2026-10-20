@@ -116,7 +116,7 @@ see [Android](./docs/ANDROID.md). macOS and iOS build in CI, but no game runs on
 - [Atmosphère](https://github.com/Atmosphere-NX/Atmosphere)
 - LibHac.
 - MZ Labs for SwitchRecomp, which we started from. Its code has since been replaced by our own.
-- [Nexium](https://nexium-emu.org/) for research and development.
+- [NeXium](https://nexium-emu.org/) for research and development.
 - [Switchbrew](https://switchbrew.org) for research.
 - [Azahar](https://github.com/azahar-emu/azahar) and Citra, for all of the 3DS emulation.
 
