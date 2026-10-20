@@ -750,10 +750,17 @@ static int all_blue(const u8* p, u32 n) {
         if (memcmp(p + i, blue, 4)) return 0;
     return 1;
 }
+/* n bytes at p all v */
+static int all_bytes(const u8* p, u32 n, u8 v) {
+    for (u32 i = 0; i < n; i++)
+        if (p[i] != v) return 0;
+    return 1;
+}
 /* Render targets over one another in the DMA test's region, as when a program frees an image and makes a bigger one
    there: a red 64 by 64 target 64 KiB into a blue 160 by 128 one cleared after it is its block columns 8 and 9 (pixels
-   128 to 159 of every row). The newer one's pixels are on top in a DMA copy of it, in guest memory once both are
-   written back, and in a copy of a range a newer target reaches past (written back, then its part copied over) */
+   128 to 159 of every row). The newer one's pixels are on top in a DMA copy of it, and in guest memory once both are
+   written back, together or the newer one alone. A target reaching past a copy's range is one whose memory a smaller
+   surface took over: the copy takes what the program wrote there since */
 static int check_rt_overlap(void) {
     GpuChannel* ch = calloc(1, sizeof *ch);
     GpuDmaOp o;
@@ -771,17 +778,19 @@ static int check_rt_overlap(void) {
     CHECK(all_blue(GP(DMA_A + 0x40000), 160 * 128 * 4)); /* reading it lands it */
     vk_rt_before_write(DMA_GA, 0x14000);
     CHECK(all_blue(GP(DMA_A), 0x14000));
-    /* 160 by 256 reaches past the 160 by 128 the copy reads: guest memory has none of either target before it */
-    memset(GP(DMA_A), 0x11, 0x28000);
+    /* the newer one written back alone: the older one first, under it, and not again after */
     rt_clear(ch, DMA_GA + 0x10000, 64, 64, 3, 0);
+    rt_clear(ch, DMA_GA, 160, 128, 4, 1);
+    g_renderer->rt_flush(DMA_GA);
+    vk_rt_before_write(DMA_GA, 0x14000);
+    CHECK(all_blue(GP(DMA_A), 0x14000));
+    /* a 160 by 256 target, the program's own bytes over its memory after it, and a copy of the 160 by 128 surface */
     rt_clear(ch, DMA_GA, 160, 256, 4, 1);
+    memset(GP(DMA_A), 0x11, 0x28000);
     readbacks = g_vk_rt_readbacks;
     CHECK(g_renderer->dma_copy(&o));
     CHECK(g_vk_rt_readbacks == readbacks + 1);
-    CHECK(all_blue(GP(DMA_A + 0x40000), 160 * 128 * 4));
-    CHECK(all_blue(GP(DMA_A), 0x28000)); /* the newer target written back over the older one's bytes */
-    vk_rt_before_write(DMA_GA, 0x28000); /* the older one, written back before the newer one was, isn't again now */
-    CHECK(all_blue(GP(DMA_A), 0x28000));
+    CHECK(all_bytes(GP(DMA_A + 0x40000), 160 * 128 * 4, 0x11));
     free(ch);
     return 0;
 }

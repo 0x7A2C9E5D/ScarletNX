@@ -405,9 +405,8 @@ void vk_surf_wrote(Surf* s); /* its image changed: its copies are out of date (w
 /* the render targets over [gva, gva + size) that hold what guest memory doesn't yet (drawn since their last
    writeback): their bytes recorded over buf's copy of the range (at `at`), on the GPU, swizzled as guest memory lays
    them out, the oldest image first so the newest is on top; a target reaching past the range is written back to guest
-   memory and its part of the range copied from there, in its turn (g_vk_rt_readbacks counts those). How many were
-   recorded, -1 when a part couldn't be (no staging): the caller orders their writes (a barrier) before what reads
-   buf */
+   memory instead (g_vk_rt_readbacks counts those). How many were recorded: the caller orders their writes (a barrier)
+   before what reads buf */
 int vk_rt_overlay(u64 gva, u64 size, VkBuffer buf, u64 at);
 extern u64 g_vk_rt_readbacks;
 u64 vk_surf_flush_size(const Surf* s);

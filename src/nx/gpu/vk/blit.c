@@ -25,7 +25,8 @@ static u8* stage_range(u64 gva, u64 span, VkBuffer* buf, u64* at) {
     u8* p = vk_stage(span, vk_stage_align(), buf, at);
     if (!p) return NULL;
     vk_guest_read(gva, span, p, *buf, *at);
-    return vk_rt_overlay(gva, span, *buf, *at) < 0 ? NULL : p;
+    vk_rt_overlay(gva, span, *buf, *at);
+    return p;
 }
 
 static int blit(const GpuBlit* b) {

@@ -571,20 +571,6 @@ void vk_surf_flush(Surf* s, const u8* original) {
 }
 void vk_rt_flush(u64 gva) { vk_surf_flush(vk_rt_find(gva), NULL); }
 
-/* s's part of [gva, gva + size), from guest memory (s just written back there), over buf's copy of the range at at: on
-   the GPU, so it lands after the targets recorded before it and under the ones after. 0 when there is no staging */
-static int rt_restage(const Surf* s, u64 gva, u64 size, VkBuffer buf, u64 at) {
-    u64 end = s->gva + rt_bytes(s), lo = s->gva > gva ? s->gva : gva, hi = end < gva + size ? end : gva + size, sat;
-    VkBuffer sb;
-    u8* p = vk_stage(hi - lo, vk_stage_align(), &sb, &sat);
-    if (!p) return 0;
-    vk_guest_read(lo, hi - lo, p, sb, sat);
-    VkBufferCopy c = {sat, at + (lo - gva), hi - lo};
-    rec_CmdCopyBuffer(vk_cmd(), sb, buf, 1, &c);
-    vk_all_barrier(vk_cmd());
-    return 1;
-}
-
 u64 g_vk_rt_readbacks; /* render targets written back to guest memory because the GPU's copy couldn't take them */
 int vk_rt_overlay(u64 gva, u64 size, VkBuffer buf, u64 at) {
     Surf *local[16], **list;
@@ -592,7 +578,7 @@ int vk_rt_overlay(u64 gva, u64 size, VkBuffer buf, u64 at) {
     u32 count, i;
     if (!size || !pend_hit_va(&g_rt_pages, gva, size)) return 0;
     count = rt_pending_over(gva, size, local, 16, &list);
-    for (i = 0; i < count && n >= 0; i++) {
+    for (i = 0; i < count; i++) {
         Surf* s = list[i];
         if (s->gva >= gva && s->gva + rt_bytes(s) <= gva + size) {
             vk_render_end();
@@ -601,16 +587,11 @@ int vk_rt_overlay(u64 gva, u64 size, VkBuffer buf, u64 at) {
                 continue;
             }
         }
-        /* reaching past the range, or its copy refused: written back to guest memory (the targets after it stay
-           pending: they go over it here, and later in memory), and its part of the range copied from there */
+        /* reaching past the range, or its copy refused: written back to guest memory, the copy keeping the bytes
+           the caller read. A target past the range is mostly one whose memory a smaller surface took over since, and
+           the program's writes there are newer than its pixels */
         g_vk_rt_readbacks++;
         vk_surf_flush(s, NULL);
-        if (!rt_restage(s, gva, size, buf, at)) {
-            LOG_LIMIT(4,
-                      "vulkan: no staging for %llu bytes of the target at %llx under a copy of %llx: the copy fails\n",
-                      (unsigned long long)rt_bytes(s), (unsigned long long)s->gva, (unsigned long long)gva);
-            n = -1;
-        }
     }
     if (list != local) free(list);
     return n;
