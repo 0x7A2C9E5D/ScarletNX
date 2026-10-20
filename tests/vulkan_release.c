@@ -39,7 +39,7 @@ u64 vk_query_value(u32, u64, u64);
 int g_gpu_releases;
 static unsigned lock_depth, landing_calls, payload_writes, submits, query_reads;
 static u64 next_compute, next_graphics = 1, waited_compute, waited_graphics;
-static int pending, landing_probe, other_pending;
+static int pending, unsubmitted, landing_probe, other_pending;
 static u32 completed[128];
 static u8 memory[8192];
 static u64 mapping = 4096;
@@ -161,7 +161,7 @@ int vk_gfx_image_pending(u64 a, u64 n) {
     return 0;
 }
 void gmem_read_raw(u64 address, void* data, u64 size) { memcpy(data, memory + gmmu_translate(address), size); }
-int vk_buf_pending_unsubmitted(void) { return 0; }
+int vk_buf_pending_unsubmitted(void) { return unsubmitted; }
 /* a submit: what was recorded becomes the last submission */
 void vk_submit(u64 a, u64 b, u64 c) {
     (void)a;
@@ -227,6 +227,19 @@ int main(void) {
     u32 word;
     memcpy(&word, memory + 1 + 0x30, 4);
     assert(query_reads == 2 && word == 207 && memory[1 + 0x34] == 0);
+    /* a release after storage results in the submit being recorded waits for that submit the same way, without
+       submitting it: the end of the GPFIFO submission does */
+    pending = unsubmitted = 1;
+    before = submits;
+    recording = vk_submit_number();
+    vk_release_incr(6);
+    assert(submits == before && g_rq[(g_rhead - 1) % RQ_N].gate == recording && completed[6] == 0);
+    vk_release_submit();
+    assert(submits == before + 1 && vk_last_submit() == recording);
+    unsubmitted = 0;
+    vk_release_retire(6);
+    assert(completed[6] == 1 && g_rhead == g_rtail);
+    pending = 0;
     /* a read over queued releases takes their payloads, in their order, without waiting for the work before them or
        writing memory; the same memory through another address, another pending result there or a samples-passed count
        not known yet make it decline, and the caller waits as before */
