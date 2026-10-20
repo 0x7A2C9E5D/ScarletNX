@@ -3385,6 +3385,8 @@ int main(int argc, char** argv) {
             typed(&app, "x");
             key(&app, SDLK_SPACE);
             assert(app.editor.typing);
+            point(&app, row_box(&app, 3, false), false); /* the pointer moves no focus off a value being typed */
+            assert(app.editor.row == 2 && app.editor.typing);
             key(&app, SDLK_ESCAPE);
             assert(!app.editor.typing && strcmp(app.editor.theme.name, "Defaultx"));
             /* a click focuses a row, a click on the focused one changes it */
@@ -3919,6 +3921,13 @@ int main(int argc, char** argv) {
                        black); /* no focus on the right yet */
             for (launch = 0; launch < app.groups && strcmp(app.group_keys[launch].key, "Launch"); ++launch) {}
             assert(launch < app.groups);
+            /* the pointer over a group focuses it, its rows beside it; over those rows it waits for a click */
+            b = list_box(&f.left, 2);
+            mouse_px(&app, b.x + 4, b.y + 4, false);
+            assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 2);
+            b = list_box(&f.right, 0);
+            mouse_px(&app, b.x + 4, b.y + 4, false);
+            assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 2);
             app.editor.row = launch;
             render(&app);
             form_boxes(&app, &f);
@@ -3947,6 +3956,20 @@ int main(int argc, char** argv) {
             assert(setting_is(&app, "tmpfs", "on"));
             key(&app, SDLK_LEFT); /* back as it was */
             assert(setting_is(&app, "tmpfs", NULL));
+            /* the pointer over a row, not pressed, focuses it, as on the menu's screens (#415), and a click then
+               changes it; over the groups' list it waits for a click */
+            b = list_box(&f.right, 0);
+            mouse_px(&app, b.x + 4, b.y + 4, false);
+            assert(app.form == GUI_FORM_GROUP && app.editor.row == 0);
+            b = list_box(&f.right, 1);
+            mouse_px(&app, b.x + 4, b.y + 4, false);
+            assert(app.editor.row == 1 && setting_is(&app, "tmpfs", NULL));
+            mouse_px(&app, b.x + 4, b.y + 4, true);
+            assert(setting_is(&app, "tmpfs", "on"));
+            key(&app, SDLK_LEFT);
+            b = list_box(&f.left, 0);
+            mouse_px(&app, b.x + 4, b.y + 4, false);
+            assert(app.form == GUI_FORM_GROUP && app.editor.row == 1);
             /* a click on App in the list opens it, from a group's rows */
             b = list_box(&f.left, 0);
             mouse_px(&app, b.x + 4, b.y + 4, true);

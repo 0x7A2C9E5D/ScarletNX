@@ -38,7 +38,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - A list with rows out of sight (the menu with big letters, `games/`'s pages, the Settings, the theme
   editor) shows an arrow past the right edge of its boxes, up on its first row and down on its last, in
   the soft colour.
-- Moving the mouse over an item focuses it in yellow without activating it.
+- Moving the mouse over an item focuses it in yellow without activating it; in the Settings, a row of the list the
+  keys move in (the groups, or the rows of the one open), the other list, a tab and Back waiting for a click.
 - The keys at the foot are buttons: a click or a tap on one presses it, as the keyboard does (ESC or
   Back goes back, Tab to the next screen, Enter or Tap selects, Swipe across turns the page). A key of
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it

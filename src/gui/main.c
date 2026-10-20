@@ -4404,6 +4404,16 @@ static void picker_pointer(App* app, float x, float y, bool press) {
         gui_editor_pick_end(e, true);
 }
 /* a row of a form under the pointer: focused, or on the focused one Select, as a key would */
+/* the pointer over a form, not pressed: a row of the list the keys move in takes the focus, as on the menu's screens
+   and the setup's pages; the other list, a tab and Back wait for a click */
+static void form_hover(App* app, float x, float y) {
+    GuiFormBoxes f;
+    int i;
+    if (app->editor.typing) return;
+    form_boxes(app, &f);
+    i = list_hit(app->form == GUI_FORM_THEME || app->form == GUI_FORM_SETTINGS ? &f.left : &f.right, x, y, false);
+    if (i >= 0 && i < gui_editor_rows(&app->editor)) app->editor.row = i;
+}
 static void form_row_pointer(App* app, int r) {
     if (r == app->editor.row && !app->editor.typing)
         editor_key(app, GUI_SELECT);
@@ -6356,7 +6366,10 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
     } else if (app->editing && app->editor.picking)
         picker_pointer(app, x, y, click);
     else if (app->editing) {
-        if (click) form_pointer(app, x, y, touch);
+        if (click)
+            form_pointer(app, x, y, touch);
+        else if (!touch)
+            form_hover(app, x, y);
     } else if (app->setup_on)
         setup_pointer(app, x, y, click);
     else
