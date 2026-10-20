@@ -99,7 +99,14 @@ int main(int argc, char** argv) {
     inputs[1].data = slurp(argv[2], &inputs[1].size);
     inputs[1].name = argv[2];
     /* the entry's own object alone leaves helper and counter undefined */
-    assert(snx_link(inputs, 1, exports, 1, "test.dylib", &out, error, sizeof(error)) && strstr(error, "undefined"));
+    if (!snx_link(inputs, 1, exports, 1, "test.dylib", &out, error, sizeof(error))) {
+        fprintf(stderr, "link of %s alone: linked, with helper and counter undefined\n", argv[1]);
+        return 1;
+    }
+    if (!strstr(error, "undefined")) {
+        fprintf(stderr, "link of %s alone: %s, not an undefined symbol\n", argv[1], error);
+        return 1;
+    }
     if (snx_link(inputs, 2, exports, 1, "test.dylib", &out, error, sizeof(error))) {
         fprintf(stderr, "link: %s\n", error);
         return 1;
