@@ -485,6 +485,54 @@ static void test_invalidate(void) {
     snx_jit_service_free(service);
 }
 
+/* an invalidation of another range while a pc compiles: the batch read code that may be stale, so it publishes nothing
+   and its pcs go back to their queue. Before, they were left GONE with their pending bit set, which snx_jit_resolve's
+   fast path reads as "queued, wait for it": nothing queued them again, and the pc was never compiled (rt_miss's fatal,
+   DQ7 at 98f1fc4). Each round invalidates elsewhere until its batch ends, so the batch reads the epoch before one of
+   them and is dropped, unless it was quicker than the first; a run where none was dropped proves nothing and fails */
+static void test_invalidate_in_flight(void) {
+    static const u32 words[] = {0x91000400, 0xD65F03C0}; /* add x0, x0, #1; ret */
+    static const SnxU64 warm_pc[] = {0x4800};
+    SnxJitStats stats;
+    unsigned long batches, dropped, spins;
+    unsigned round;
+    service = start(1, 1);
+    if (!service) {
+        ++failures;
+        return;
+    }
+    put(0x4000, words, 2);
+    snx_jit_stats(service, &stats);
+    dropped = stats.dropped;
+    for (round = 0; round < 8; ++round) {
+        snx_jit_invalidate(service, 0x4000, 4); /* 0x4000 is new to the service again */
+        snx_jit_stats(service, &stats);
+        batches = stats.batches;
+        CHECK(snx_jit_resolve(service, 0x4000) == NULL);
+        for (spins = 0; stats.batches == batches && spins < 100000000; ++spins) {
+            snx_jit_invalidate(service, 0x8000, 0x10);
+            snx_jit_stats(service, &stats);
+        }
+        CHECK(stats.batches != batches);
+        CHECK(snx_jit_wait(service, 0x4000) != NULL); /* queued again, and compiled once nothing changes */
+    }
+    /* a warm pc goes back to the warm queue, and is compiled from there */
+    put(0x4800, words, 2);
+    snx_jit_stats(service, &stats);
+    batches = stats.batches;
+    CHECK(snx_jit_warm(service, warm_pc, 1) == 1);
+    for (spins = 0; stats.batches == batches && spins < 100000000; ++spins) {
+        snx_jit_invalidate(service, 0x8000, 0x10);
+        snx_jit_stats(service, &stats);
+    }
+    snx_jit_drain(service);
+    CHECK(get(0x4800) != NULL);
+    snx_jit_stats(service, &stats);
+    printf("invalidate in flight: %lu batches dropped in 9 rounds, each pc compiled again\n", stats.dropped - dropped);
+    CHECK(stats.dropped > dropped);
+    snx_jit_service_free(service);
+}
+
 /* added images in different 16 MiB chunks: the page map finds each, and removing one leaves the other's pages */
 static void test_image_map(void) {
     static const u32 far_words[] = {0x91000400, 0xD65F03C0}; /* add x0, x0, #1; ret */
@@ -709,6 +757,7 @@ int main(void) {
     test_added_image();
     test_cache();
     test_invalidate();
+    test_invalidate_in_flight();
     test_image_map();
     free(memory);
     if (failures) return 1;
