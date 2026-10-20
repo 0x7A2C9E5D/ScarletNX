@@ -7,6 +7,7 @@
 #include "gnuabi/process/process.h"
 #include "common/cpu/recompiler/snx_recompiler.h"
 #include "common/utilities/common.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -171,7 +172,9 @@ int gnu_jit_init(GnuJit* jit, const char* cache, char* error, size_t error_size)
     if (jit->table == MAP_FAILED) jit->table = NULL;
 #endif
     if (!jit->table) {
-        snprintf(error, error_size, "cannot reserve the dispatch table");
+        char why[256];
+        snprintf(error, error_size, "cannot reserve %" PRIu64 " GiB for the dispatch table: %s",
+                 (uint64_t)TABLE_BYTES >> 30, snx_os_error(why, sizeof why));
         return -1;
     }
     jit->recompiler = snx_recompiler_new(SNX_RECOMPILER_FLAG_LLVM);
