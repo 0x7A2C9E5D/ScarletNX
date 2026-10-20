@@ -72,12 +72,15 @@ static u32 to_rgba8(u32 fmt, u32 p) {
     }
 }
 
-/* Each row's pixels are read into the end of out's row block and widened forward in place: a 2-byte pixel i is read
-   from beyond where pixel i is written, so no temporary buffer is needed */
+/* out is staging memory, which can be device memory the CPU maps write-combined (resizable BAR): each read of it goes
+   uncached across PCIe. Widening the guest's pixels in place there read each of a 1280x720 RGB565 frame's 921600
+   pixels back, and frames took over 600 ms (bad-apple-switch.nro, whose console libnx draws on the CPU), so
+   out is only written, each pixel once and in order, from runs of at most 16 bytes read from guest memory: a block
+   linear row's runs are 16 bytes apart in a GOB, its base is computed once per row */
 void vi_convert_cpu(u64 a, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt, u32* out) {
     u32 bpp = bytes_per_pixel(fmt), row_bytes = w * bpp, stride = pitch > row_bytes ? pitch : row_bytes;
     u32 rows = layout == NV_LAYOUT_BLOCK_LINEAR ? (h + (8u << bhl) - 1) & ~((8u << bhl) - 1) : h;
-    u32 x, y;
+    u32 x, y, i;
     if (!w || !h) return;
     if (a >= AS_SIZE || (u64)stride * rows > AS_SIZE - a) {
         WARN_LIMIT(5, "vi: buffer at %llx runs outside guest memory, not shown\n", (unsigned long long)a);
@@ -85,25 +88,29 @@ void vi_convert_cpu(u64 a, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt
         return;
     }
     for (y = 0; y < h; y++) {
-        u8* row = (u8*)(out + (size_t)y * w);
-        u8* in = row + (size_t)w * 4 - row_bytes;
-        if (layout == NV_LAYOUT_BLOCK_LINEAR)
-            for (x = 0; x < row_bytes; x += 16) {
-                u32 n = row_bytes - x < 16 ? row_bytes - x : 16;
-                memcpy(in + x, g_mem + a + bl_offset(x, y, 0, stride, h, bhl, 0), n);
+        const u8* row;
+        u8* dst = (u8*)(out + (size_t)y * w);
+        if (fmt == 1 && layout != NV_LAYOUT_BLOCK_LINEAR) { /* RGBA8888 is out's format already */
+            memcpy(dst, g_mem + a + (u64)y * stride, row_bytes);
+            continue;
+        }
+        row = layout == NV_LAYOUT_BLOCK_LINEAR ? g_mem + a + bl_offset(0, y, 0, stride, h, bhl, 0)
+                                               : g_mem + a + (u64)y * stride;
+        for (x = 0; x < row_bytes; x += 16) {
+            u32 n = row_bytes - x < 16 ? row_bytes - x : 16, px[8];
+            const u8* in = layout == NV_LAYOUT_BLOCK_LINEAR ? row + bl_offset(x, 0, 0, stride, h, bhl, 0) : row + x;
+            for (i = 0; i < n / bpp; i++) {
+                u32 p;
+                if (bpp == 2) {
+                    u16 v;
+                    memcpy(&v, in + 2 * i, 2);
+                    p = v;
+                } else
+                    memcpy(&p, in + 4 * i, 4);
+                px[i] = to_rgba8(fmt, p);
             }
-        else
-            memcpy(in, g_mem + a + (u64)y * stride, row_bytes);
-        for (x = 0; x < w; x++) {
-            u32 p;
-            if (bpp == 2) {
-                u16 v;
-                memcpy(&v, in + 2 * x, 2);
-                p = v;
-            } else
-                memcpy(&p, in + 4 * x, 4);
-            p = to_rgba8(fmt, p);
-            memcpy(row + 4 * x, &p, 4);
+            memcpy(dst, px, (size_t)i * 4);
+            dst += (size_t)i * 4;
         }
     }
 }
