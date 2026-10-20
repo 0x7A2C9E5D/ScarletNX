@@ -5,7 +5,9 @@
    SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
    SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
    SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project */
-/* NVDEC: H.264 and VP9 jobs decoded with FFmpeg's libavcodec, each picture written into the surface its job names.
+/* NVDEC: H.264 and VP9 jobs decoded with FFmpeg's libavcodec, each picture written into the surface its job names, on
+   the GPU (the renderer's nvdec_write). FFmpeg decodes on the CPU, or H.264 with Vulkan Video on the renderer's GPU
+   when the vulkan_video setting asks for it (experimental and untested).
 
    NVDEC writes a picture into its job's surface as it decodes it, in decode order, and the game shows surfaces in
    display order on its own. FFmpeg hands pictures out in display order, later, or not at all for one it judges out
@@ -15,6 +17,7 @@
 
    FFmpeg is a hard dependency: a build without the decoder once left every movie black without a word */
 #include "nx/gpu/video/host1x_int.h"
+#include "nx/gpu/renderer.h"
 #include "nx/gpu/video/vp9_rebuild.h"
 #include <libavcodec/avcodec.h>
 #include <libavutil/error.h>
@@ -308,52 +311,50 @@ static int make_packet(AVPacket* p, const u8* hdr, u32 hn, const u8* s, u32 n) {
 }
 
 /* ---- the picture into its surface */
-/* NV12 planes, block linear. The layout's offset is separable, offset(x, y) = offset(x, 0) + offset(0, y), so the
-   columns of 16-byte runs are walked once and each row once. 1 when written */
+/* NV12 planes, block linear, laid out on the GPU (the renderer's nvdec_write), which keeps them there for VIC
+   (docs/GPU_OWNERSHIP.md). 1 when written */
 static int write_pic(const AVFrame* f, const PicOut* t) {
-    u64 col[MAX_DIM / 16], ext_y, ext_c;
-    u8 line[MAX_DIM + 2], *py, *pc;
-    u32 w, h, pairs, cw, ch, gob_rows, runs, i, x, y;
-    if (f->format != AV_PIX_FMT_YUV420P && f->format != AV_PIX_FMT_YUVJ420P) {
+    NvdecPic p;
+    u64 gob_rows;
+    u8 *py, *pc;
+    if (f->format != AV_PIX_FMT_YUV420P && f->format != AV_PIX_FMT_YUVJ420P && f->format != AV_PIX_FMT_VULKAN) {
         WARN_LIMIT(4, "video: NVDEC picture format %d isn't written (4:2:0 only)\n", f->format);
         return 0;
     }
     if (f->width <= 0 || f->height <= 0 || t->bh > 5) return 0;
-    w = min_u32(min_u32((u32)f->width, t->w), min_u32(min_u32(t->pitch_y, t->pitch_c / 2 * 2), MAX_DIM));
-    h = min_u32(min_u32((u32)f->height, t->h), MAX_DIM);
-    if (!w || !h) return 0;
-    pairs = (w + 1) / 2;
-    cw = 2 * pairs;
-    ch = (h + 1) / 2;
+    memset(&p, 0, sizeof p);
+    p.w = min_u32(min_u32((u32)f->width, t->w), min_u32(min_u32(t->pitch_y, t->pitch_c / 2 * 2), MAX_DIM));
+    p.h = min_u32(min_u32((u32)f->height, t->h), MAX_DIM);
+    if (!p.w || !p.h) return 0;
     /* the surfaces mapped for their whole block linear extent: whole GOBs wide, whole blocks high */
     gob_rows = 8u << t->bh;
-    ext_y = (u64)((t->pitch_y + 63) / 64 * 64) * ((t->h + gob_rows - 1) / gob_rows * gob_rows);
-    ext_c = (u64)((t->pitch_c + 63) / 64 * 64) * (((t->h + 1) / 2 + gob_rows - 1) / gob_rows * gob_rows);
-    py = iova_ptr(t->luma, ext_y);
-    pc = iova_ptr(t->chroma, ext_c);
+    p.ext_y = (u64)((t->pitch_y + 63) / 64 * 64) * ((t->h + gob_rows - 1) / gob_rows * gob_rows);
+    p.ext_c = (u64)((t->pitch_c + 63) / 64 * 64) * (((t->h + 1) / 2 + gob_rows - 1) / gob_rows * gob_rows);
+    py = iova_ptr(t->luma, p.ext_y);
+    pc = iova_ptr(t->chroma, p.ext_c);
     if (!py || !pc) {
         WARN_LIMIT(8, "video: NVDEC surface %llx/%llx isn't mapped, picture dropped\n", (unsigned long long)t->luma,
                    (unsigned long long)t->chroma);
         return 0;
     }
-    runs = (cw + 15) / 16;
-    for (i = 0; i < runs; i++) col[i] = bl_offset(16 * i, 0, 0, t->pitch_y, t->h, t->bh, 0);
-    for (y = 0; y < h; y++) {
-        u64 row = bl_offset(0, y, 0, t->pitch_y, t->h, t->bh, 0);
-        const u8* src = f->data[0] + (size_t)y * (size_t)f->linesize[0];
-        for (i = 0, x = 0; x < w; i++, x += 16) memcpy(py + row + col[i], src + x, min_u32(16, w - x));
-    }
-    for (y = 0; y < ch; y++) {
-        u64 row = bl_offset(0, y, 0, t->pitch_c, (t->h + 1) / 2, t->bh, 0);
-        const u8* u = f->data[1] + (size_t)y * (size_t)f->linesize[1];
-        const u8* v = f->data[2] + (size_t)y * (size_t)f->linesize[2];
-        for (x = 0; x < pairs; x++) {
-            line[2 * x] = u[x];
-            line[2 * x + 1] = v[x];
+    p.luma = (u64)(py - g_mem);
+    p.chroma = (u64)(pc - g_mem);
+    p.pitch_y = t->pitch_y;
+    p.pitch_c = t->pitch_c;
+    p.surf_h = t->h;
+    p.bh = t->bh;
+    if (f->format == AV_PIX_FMT_VULKAN)
+        p.hw = f; /* decoded with Vulkan Video, in a GPU image */
+    else
+        for (int i = 0; i < 3; i++) {
+            p.plane[i] = f->data[i];
+            p.stride[i] = f->linesize[i];
         }
-        for (i = 0, x = 0; x < cw; i++, x += 16) memcpy(pc + row + col[i], line + x, min_u32(16, cw - x));
+    if (!g_renderer_up || !g_renderer || !g_renderer->nvdec_write) {
+        WARN_LIMIT(4, "video: an NVDEC picture before the renderer started, dropped\n");
+        return 0;
     }
-    return 1;
+    return g_renderer->nvdec_write(&p);
 }
 
 /* ---- the decoder */
@@ -400,6 +401,11 @@ static int dec_open(NvdecCtx* d, u32 app) {
     d->dec->get_buffer2 = get_buf;
     d->dec->thread_type = FF_THREAD_SLICE;
     d->dec->thread_count = app == APP_VP9 ? 4 : 1;
+    /* H.264 with Vulkan Video on the renderer's GPU when the vulkan_video setting asks for it (experimental). FFmpeg
+       decodes a stream its Vulkan decoder can't take on the CPU, as it does without */
+    if (app == APP_H264 && g_renderer_up && g_renderer && g_renderer->nvdec_hw_device &&
+        (d->dec->hw_device_ctx = g_renderer->nvdec_hw_device()))
+        LOG_LIMIT(1, "video: H.264 decodes with Vulkan Video (experimental)\n");
     if ((r = avcodec_open2(d->dec, codec, NULL)) < 0) {
         ff_warn("cannot open its decoder", r);
         avcodec_free_context(&d->dec);

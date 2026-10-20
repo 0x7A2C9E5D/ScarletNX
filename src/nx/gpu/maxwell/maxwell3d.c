@@ -49,6 +49,15 @@ void gpu_mem_written(u64 gva, u64 size) {
     pm_unlock(&g_wlk);
 }
 void gpu_mem_written_shader(u64 gva, u64 size) { gpu_mem_written(gva, size); }
+void gpu_mem_written_cpu(u64 cpu, u64 size) {
+    u64 gen;
+    if (!size) return;
+    pm_lock(&g_wlk);
+    gen = g_wgen + 1;
+    write_pages_stamp(&g_wcpu, cpu, size, gen);
+    __atomic_store_n(&g_wgen, gen, __ATOMIC_RELEASE);
+    pm_unlock(&g_wlk);
+}
 u64 gpu_mem_generation(void) { return __atomic_load_n(&g_wgen, __ATOMIC_ACQUIRE); }
 typedef struct {
     u64 since;

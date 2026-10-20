@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* ASTC LDR uploads on the graphics queue. CPU work stops at deswizzling the
-   compressed blocks, straight into staging memory a strip at a time. The shader
-   writes packed RGBA8 to device memory, then a transfer copies those bytes to the
+/* ASTC LDR uploads on the graphics queue. The caller hands the compressed blocks
+   over a strip at a time as rows of blocks in a buffer: block linear ones are
+   deswizzled on the GPU (vk/blocklinear.c), pitch linear ones staged a row at a
+   time. The shader writes packed RGBA8 to device memory, then a transfer copies those bytes to the
    image (including sRGB images, without an unwanted gamma conversion). Strips
    bound scratch memory, staging and SSBO ranges, so a level of any size goes
    through: one of a 512 MiB texture is 32 strips. A strip is block rows of one
@@ -150,13 +151,12 @@ int vk_astc_upload(VkCommandBuffer cb, Surf* t, u32 w, u32 h, u32 depth, u32 lev
             u32 height = h - y * bh < n * bh ? h - y * bh : n * bh;
             u64 size = row_in * n * nz, offset;
             VkBuffer input;
-            u8* mapped = vk_stage(size, vk_stage_align(), &input, &offset);
-            VkDescriptorSet set = mapped ? vk_desc_alloc(g_astc_ds) : VK_NULL_HANDLE;
+            VkDescriptorSet set =
+                rows(ctx, cb, z, nz, y, n, &input, &offset) ? vk_desc_alloc(g_astc_ds) : VK_NULL_HANDLE;
             if (!set) {
                 LOG_LIMIT(1, "vulkan: out of staging memory for a %ux%u ASTC texture (left out)\n", w, h);
                 return 0;
             }
-            for (u32 k = 0; k < nz; k++) rows(ctx, z + k, y, n, mapped + row_in * n * k);
             VkDescriptorBufferInfo buffers[2] = {{input, offset, size},
                                                  {g_astc_scratch, 0, (u64)w * height * nz * 4}};
             VkWriteDescriptorSet writes[2];

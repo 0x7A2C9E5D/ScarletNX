@@ -14,6 +14,7 @@
 #include "nx/hle/hle.h"
 #include "hle/filesystem/fs.swipc.inc"
 #include "nx/memory/mem.h"
+#include "nx/memory/own.h"
 #include "nx/runtime/platform/backend.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
@@ -618,6 +619,8 @@ static int nn_fssrv_sf_IStorage_Read(SvcObj* self, i64 offset, IpcBuf buffer, i6
     int rc = check_transfer(offset, buffer, size_in);
     if (rc) return rc;
     if (!sz) R_SUCCEED();
+    /* the reads below go through the kernel, which can't wait on memory the GPU holds: it lands first */
+    if (buffer_valid(a, sz)) own_acquire(a, sz);
     if (!data) { /* the RomFS */
         R_UNLESS(sz <= (u64)INT64_MAX - off && off <= g_hle.fs.rtotal && sz <= g_hle.fs.rtotal - off, FS_OUT_OF_RANGE);
         R_UNLESS(buffer_valid(a, sz), FS_OUT_OF_RANGE);
@@ -707,6 +710,7 @@ static int nn_fssrv_sf_IFile_Read(SvcObj* self, nn_fs_ReadOption option, i64 off
     R_UNLESS(off <= f->node->size, FS_OUT_OF_RANGE);
     if (sz > f->node->size - off) sz = f->node->size - off;
     R_UNLESS(buffer_valid(a, sz), FS_OUT_OF_RANGE);
+    own_acquire(a, sz); /* read() can't wait on memory the GPU holds: it lands first */
     u64 n = sz;
     if (node_in_memory(f->node)) {
         if (sz) memcpy(GP(a), node_memory(f->node) + off, (size_t)sz);
@@ -730,6 +734,7 @@ static int nn_fssrv_sf_IFile_Write(SvcObj* self, nn_fs_WriteOption option, i64 o
     R_UNLESS(buffer_valid(a, sz), FS_OUT_OF_RANGE);
     if (off + sz > f->node->size && !(f->mode & 4)) R_THROW(FS_NO_APPEND);
     R_UNLESS(!file_seek(f->f, off), FS_OUT_OF_RANGE);
+    own_acquire(a, sz); /* write() can't wait on memory the GPU holds: it lands first */
     size_t n = fwrite(GP(a), 1, (size_t)sz, f->f);
     if (n && off + n > f->node->size) f->node->size = off + n;
     R_UNLESS(n == sz && !fflush(f->f), FS_NO_SPACE);

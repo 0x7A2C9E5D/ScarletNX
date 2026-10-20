@@ -477,7 +477,8 @@ snx_test_target(snx-test-fake-room 23)
 target_link_libraries(snx-test-fake-room PUBLIC scarletnx-net snx_enet)
 
 # sfdnsres and nifm (dns.c, nifm.c) offline, with bsd.c beside them for whether the console is online
-add_executable(snx-test-network-service network_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c")
+add_executable(snx-test-network-service network_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c"
+    own_stub.c)
 snx_test_target(snx-test-network-service 23)
 snx_service_swipc(snx-test-network-service hle/services/network/bsd.swipc hle/services/network/dns.swipc
                   hle/services/network/nifm.swipc)
@@ -522,7 +523,8 @@ add_test(NAME room_service COMMAND snx-test-room-service)
 # ssl (ssl.c) against a TLS server in the test, on the game's bsd sockets (bsd.c, built beside). OpenSSL comes with
 # the NX, 3DS and hactool builds (cmake/dependencies.cmake), not with a GNU ABI-only one
 if(TARGET OpenSSL::SSL)
-    add_executable(snx-test-ssl-service ssl_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c")
+    add_executable(snx-test-ssl-service ssl_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c"
+    own_stub.c)
     snx_test_target(snx-test-ssl-service 23)
         snx_service_swipc(snx-test-ssl-service hle/services/network/bsd.swipc hle/services/network/ssl.swipc)
     target_link_libraries(snx-test-ssl-service PRIVATE scarletnx-ldn OpenSSL::SSL)
@@ -845,12 +847,14 @@ if(NOT WIN32)
 endif()
 
 # Deterministic FFmpeg API double: no decoder dependency in tools-only builds.
-add_executable(snx-test-nvdec-packets nvdec_packets.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vp9_rebuild.cpp")
+add_executable(snx-test-nvdec-packets nvdec_packets.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vp9_rebuild.cpp"
+    "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/nvdec_ref.c")
 snx_test_target(snx-test-nvdec-packets 11)
 target_include_directories(snx-test-nvdec-packets BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg_stub")
 add_test(NAME nvdec_packets COMMAND snx-test-nvdec-packets)
 if(NOT SNX_TOOLS_ONLY)
-    add_executable(snx-test-nvdec-decode nvdec_packets.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vp9_rebuild.cpp")
+    add_executable(snx-test-nvdec-decode nvdec_packets.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vp9_rebuild.cpp"
+        "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/nvdec_ref.c")
     snx_test_target(snx-test-nvdec-decode 11)
     target_compile_definitions(snx-test-nvdec-decode PRIVATE SNX_TEST_REAL_FFMPEG)
     target_link_libraries(snx-test-nvdec-decode PRIVATE FFmpeg::avcodec)
@@ -904,7 +908,8 @@ if(NOT SNX_TOOLS_ONLY)
                            --system-header-prefix=libavutil/ --system-header-prefix=compat/)
     target_link_libraries(snx-test-nvdec-vp9-jobs PUBLIC FFmpeg::avcodec)
     add_executable(snx-test-nvdec-vp9-vectors nvdec_vp9_vectors.c
-                   "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vp9_rebuild.cpp")
+                   "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vp9_rebuild.cpp"
+                   "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/nvdec_ref.c")
     snx_test_target(snx-test-nvdec-vp9-vectors 11)
     target_link_libraries(snx-test-nvdec-vp9-vectors PRIVATE snx-test-nvdec-vp9-jobs)
     while(snx_vp9_vectors)
@@ -945,11 +950,11 @@ snx_test_target(snx-test-vp9-rebuild 23)
 add_test(NAME vp9_rebuild COMMAND snx-test-vp9-rebuild)
 # the 2D engine's blit in guest memory (fermi2d.c, dma.c's bl_span_ptr): block linear scaling, an odd window, the
 # renderer's hooks once a blit
-add_executable(snx-test-fermi2d-blit fermi2d_blit.c)
+add_executable(snx-test-fermi2d-blit fermi2d_blit.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/fermi2d_ref.c")
 snx_test_target(snx-test-fermi2d-blit 23)
 add_test(NAME fermi2d_blit COMMAND snx-test-fermi2d-blit)
 # vic.c's CPU composition, through vic_execute, with a renderer that declines the GPU
-add_executable(snx-test-vic-compose vic_compose.c)
+add_executable(snx-test-vic-compose vic_compose.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vic_ref.c")
 snx_test_target(snx-test-vic-compose 23)
 add_test(NAME vic_compose COMMAND snx-test-vic-compose)
 if(NOT WIN32)
@@ -1156,11 +1161,23 @@ target_compile_options(snx-test-astc-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-astc-glsl PRIVATE glsl)
 add_test(NAME astc_glsl COMMAND snx-test-astc-glsl)
 # the VIC shader's GLSL, both builds, run on the CPU against vic.c's composition of random jobs: no GPU needed
-add_executable(snx-test-vic-glsl glsl/vic_jobs.c glsl/vic_glsl.cpp)
+add_executable(snx-test-vic-glsl glsl/vic_jobs.c glsl/vic_glsl.cpp "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vic_ref.c")
 snx_test_target(snx-test-vic-glsl 23)
 target_compile_options(snx-test-vic-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-vic-glsl PRIVATE glsl)
 add_test(NAME vic_glsl COMMAND snx-test-vic-glsl)
+# the block linear deswizzle and swizzle shader's GLSL run on the CPU against bl_offset's layout: no GPU needed
+add_executable(snx-test-blocklinear-glsl glsl/blocklinear_glsl.cpp)
+snx_test_target(snx-test-blocklinear-glsl 23)
+target_compile_options(snx-test-blocklinear-glsl PRIVATE -fwrapv)
+target_include_directories(snx-test-blocklinear-glsl PRIVATE glsl)
+add_test(NAME blocklinear_glsl COMMAND snx-test-blocklinear-glsl)
+# the texture conversion shader's GLSL run on the CPU against the CPU's conversions and ETC2 decoder: no GPU needed
+add_executable(snx-test-texconv-glsl glsl/texconv_glsl.cpp "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
+snx_test_target(snx-test-texconv-glsl 23)
+target_compile_options(snx-test-texconv-glsl PRIVATE -fwrapv)
+target_include_directories(snx-test-texconv-glsl PRIVATE glsl)
+add_test(NAME texconv_glsl COMMAND snx-test-texconv-glsl)
 
 # single blocks from rEden's ASTC decoder tests, against edenprobe's and astcenc's texels (astc_blocks.c)
 add_executable(snx-test-astc-blocks astc_blocks.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/astc.c")
@@ -1243,7 +1260,8 @@ if(UNIX)
     add_executable(snx-test-gpu-park gpu_park.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/gpu.c"
         "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/engines.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/write_pages.c"
         "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme_hle.c"
-        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/dma.c")
+        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/dma.c"
+        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/dma_ref.c" own_stub.c)
     snx_test_target(snx-test-gpu-park 23)
     target_link_libraries(snx-test-gpu-park PRIVATE scarletnx-common) # gpu.c says why a thread did not start
         add_test(NAME gpu_park COMMAND snx-test-gpu-park)
@@ -1295,13 +1313,23 @@ if(UNIX)
     set_tests_properties(memory_accounting PROPERTIES TIMEOUT 60)
     # views through the alias pool, with the real POSIX platform layer (77 where the host has no pool)
     add_executable(snx-test-memory-alias memory_alias.c
-        "${PROJECT_SOURCE_DIR}/src/nx/memory/mem.c" "${PROJECT_SOURCE_DIR}/src/nx/hle/svc/svc_mem.c"
+        "${PROJECT_SOURCE_DIR}/src/nx/memory/mem.c" "${PROJECT_SOURCE_DIR}/src/nx/memory/own.c"
+        "${PROJECT_SOURCE_DIR}/src/nx/hle/svc/svc_mem.c"
         "${PROJECT_SOURCE_DIR}/src/nx/hle/hle.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/plat_posix.c"
         "${PROJECT_SOURCE_DIR}/src/common/filesystem/host.c")
     snx_test_target(snx-test-memory-alias 11)
     target_link_libraries(snx-test-memory-alias PRIVATE ${CMAKE_DL_LIBS})
     add_test(NAME memory_alias COMMAND snx-test-memory-alias)
     set_tests_properties(memory_alias PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+    # GPU-owned memory over the real pool and traps, owners whose GPU copy is host memory (77 without traps)
+    add_executable(snx-test-memory-own memory_own.c
+        "${PROJECT_SOURCE_DIR}/src/nx/memory/mem.c" "${PROJECT_SOURCE_DIR}/src/nx/memory/own.c"
+        "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/plat_posix.c"
+        "${PROJECT_SOURCE_DIR}/src/common/filesystem/host.c")
+    snx_test_target(snx-test-memory-own 11)
+    target_link_libraries(snx-test-memory-own PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+    add_test(NAME memory_own COMMAND snx-test-memory-own)
+    set_tests_properties(memory_own PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 endif()
 
 endif() # SNX_BUILD_NX

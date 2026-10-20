@@ -92,6 +92,27 @@ void plat_alias_free(u64 off, u64 size); /* the range reads as zero again and us
 /* the pool's range mapped outside the reservation (a service's side of shared memory): NULL on failure */
 u8* plat_alias_host(u64 off, u64 size);
 void plat_alias_host_free(u8* p, u64 size);
+/* the whole pool mapped once outside the reservation, never trapped: what a trap's handler writes the GPU's data
+   through before the trapped pages open (memory/own.c). NULL without a pool */
+u8* plat_alias_mirror(void);
+
+/* Traps on pool pages of the reservation (memory/own.c, docs/GPU_OWNERSHIP.md): an access to an armed page, by any
+   thread, waits while fault (on a thread of the trap's own, never in a signal handler) gets the page's contents into
+   the pool and lets it go on with plat_trap_continue. Linux 5.13 and later (userfaultfd minor faults on shared
+   memory); elsewhere plat_trap_init says -1. An access from the kernel (a system call given a pointer into an armed
+   page) fails with EFAULT instead of waiting, so the runtime opens a range before it hands it to the kernel. tid is
+   the faulting thread's plat_tid */
+int plat_trap_init(void (*fault)(u8* p, int write, u32 tid));
+u32 plat_tid(void); /* the calling thread's id, as the system numbers threads */
+/* every page of [p, p + size), whole host pages of pool memory, armed / let go (0, or -1) */
+int plat_trap_arm(u8* p, u64 size);
+int plat_trap_continue(u8* p, u64 size);
+/* [p, p + size) not trapped any more: a page not yet let go reads the pool's contents when it is touched */
+void plat_trap_disarm(u8* p, u64 size);
+/* [p, p + size) read only while it is copied somewhere else: a write to it, from any thread, waits for plat_thaw and
+   is done then (to whatever is mapped there by then). One range at a time */
+void plat_freeze(u8* p, u64 size);
+void plat_thaw(void);
 
 /* ---- shared libraries */
 void* plat_dl_open(const char* path);

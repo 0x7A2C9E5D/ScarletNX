@@ -37,7 +37,7 @@ struct VicGpuSlot {
     int gy, gu, gv;
     int by, bu, bv;
     int r3, g3, b3; /* c3 of each row */
-    int lo, hi;     /* the soft clamp as output bytes: clamp_lo >> 2, clamp_hi >> 2 (vic_gpu_params checks lo <= hi) */
+    int lo, hi;     /* the soft clamp, 10 bit (lo may be above hi: vic_clamp) */
     uint aw;        /* the planar alpha's output byte in place, (alpha >> 2) << 24 */
     uint ush, vsh;  /* U's and V's bit in a chroma pair of the input: 0 and 8, or 8 and 0 for NV21 */
     uint cswap;     /* NV12 or NV21 out without the matrix: the input's chroma order isn't the output's */

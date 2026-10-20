@@ -289,26 +289,6 @@ VkFmt vk_tic_format(u32 w0, int srgb) {
     return r;
 }
 
-/* Depth-aspect copies use four bytes per texel (D24 in the low 24 bits, or float32), stencil copies one byte. */
-void vk_depth_unpack(const VkFmt* f, const u8* src, u64 pixels, u8* depth, u8* stencil) {
-    for (u64 i = 0; i < pixels; i++) {
-        u32 v;
-        memcpy(&v, src + i * f->bpp, 4);
-        if (f->conv == VKC_D32S8) {
-            memcpy(depth + i * 4, &v, 4);
-            stencil[i] = src[i * f->bpp + 4];
-        } else {
-            u32 z = f->conv == VKC_S8D24 ? v >> 8 : v & 0xFFFFFF;
-            stencil[i] = f->conv == VKC_D24X8 ? 0 : f->conv == VKC_S8D24 ? v & 0xFF : v >> 24;
-            if (f->vk == VK_FORMAT_D32_SFLOAT_S8_UINT) {
-                float value = (float)z / 16777215.0f;
-                memcpy(depth + i * 4, &value, 4);
-            } else
-                memcpy(depth + i * 4, &z, 4);
-        }
-    }
-}
-
 VkFormat vk_srgb_as(VkFormat f, int srgb) {
     static const VkFormat pairs[][2] = {{VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_SRGB},
                                         {VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_B8G8R8A8_SRGB},

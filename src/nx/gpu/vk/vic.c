@@ -1,51 +1,31 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The VIC composition as a compute shader (gpu/video/vic.comp). gpu/video/vic.c hands over the job's planes and its
-   slots' parameters; the planes travel into a host-visible buffer byte for byte as they lie in guest memory (the
-   shader's address math matches the CPU's, bl_offset included), the shader composes the picture, and the output
-   planes travel back the same way. The call is synchronous: when it returns the picture is in guest memory, which
-   is what the CPU path in gpu/video/vic.c gives the callers too.
+/* The VIC composition as a compute shader (gpu/video/vic.comp), and its picture kept on the GPU (docs/GPU_OWNERSHIP.md).
+   gpu/video/vic.c hands over the job's planes and its slots' parameters. A job's buffer is device-local and its own:
+   the parameters (gpu/video/vic.c's vic_gpu_params) as a uniform buffer at its start, the slots' input planes, then
+   the output planes, each byte for byte as it lies in guest memory (the shader's address math matches the CPU's,
+   bl_offset included). What the CPU holds of the planes comes through staging, read without touching what the GPU
+   holds (own_stage); what the GPU holds (NVDEC's pictures, the last job's output) is copied in on the GPU. The output
+   planes come in too: the shader writes whole words, one owning invocation each, and the bytes it doesn't own
+   (outside the target rectangle, past the width) keep their values.
 
-   The shader works on a device-local copy of that buffer, made and read back with transfer copies in the job's
-   command buffer. Over the host buffer itself every output word was a read and a write across the bus in block
-   linear order: a 1280x720 picture took 33 ms on an RTX 2080, with the submitting game thread waiting in its ioctl,
-   against well under 1 ms of copies. Where the host buffer is device-local already (a UMA device), the shader
-   uses it directly.
-
-   The output planes are copied in as well as out: the shader writes whole words, one owning invocation each, and
-   the bytes it does not own (outside the target rectangle, past the width) keep their guest values. The parameters
-   (gpu/video/vic.c's vic_gpu_params) are a uniform buffer at the start of the buffer, the slots' input planes
-   follow, then the output planes, which the shader reaches through one binding.
-
-   A job holds vk_lock only to make the pipeline and the buffer and to submit to the queue it shares with the
-   renderer: its buffer, descriptor set, command buffer and fence are its own, under g_vic_lock. The planes are
-   copied in and out of guest memory, and the fence waited for, without vk_lock, as the CPU composition writes them:
-   written under it, the renderer did not take the whole picture (parts of a 1920x1080 block linear one stayed
-   black) and stood still for the whole job. */
+   The job is recorded into the frame's command buffer under vk_lock, in order with the draws and copies that read
+   its picture, and nothing waits for it: the output planes are published over the guest's (vk_own_publish), so a
+   texture or the display copies them on the GPU, and the CPU sees them only when it touches them (the trap lands
+   them then). */
 #include <stdlib.h>
 #include <string.h>
 #include "nx/gpu/renderer.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/video/vic.h"
 #include "nx/gpu/video/vic_spv.h"
+#include "nx/memory/mem.h"
+#include "nx/memory/own.h"
 #include "nx/runtime/platform/log.h"
-#include "nx/runtime/platform/plat.h"
 
-static PMutex g_vic_lock = PMUTEX_INIT; /* a job at a time: the buffer and the objects below are the job's */
 static VkDescriptorSetLayout g_vic_ds;
-static VkDescriptorPool g_vic_pool;
-static VkDescriptorSet g_vic_set;
 static VkPipelineLayout g_vic_layout;
 static VkPipeline g_vic_pipe, g_vic_pipe_unaligned;
-static VkBuffer g_vic_buf;
-static VmaAllocation g_vic_mem;
-static u8* g_vic_ptr;
-static u64 g_vic_cap;
-static VkBuffer g_vic_dbuf; /* the shader's device-local copy, VK_NULL_HANDLE when g_vic_buf is device-local */
-static VmaAllocation g_vic_dmem;
-static VkCommandPool g_vic_cpool;
-static VkCommandBuffer g_vic_cb;
-static VkFence g_vic_fence;
 
 static void vic_init(void) {
     if (g_vic_pipe) return;
@@ -85,92 +65,51 @@ static void vic_init(void) {
         vkDestroyShaderModule(g_vk.dev, module, NULL);
         if (!ok) fatal("vulkan: cannot create the VIC compute pipeline");
     }
-    VkCommandPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-                                   .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-                                   .queueFamilyIndex = g_vk.compute_family};
-    if (!VK_OK(vkCreateCommandPool(g_vk.dev, &pci, NULL, &g_vic_cpool)))
-        fatal("vulkan: cannot create the VIC command pool");
-    VkCommandBufferAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                                      .commandPool = g_vic_cpool,
-                                      .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                                      .commandBufferCount = 1};
-    if (!VK_OK(vkAllocateCommandBuffers(g_vk.dev, &ai, &g_vic_cb)))
-        fatal("vulkan: cannot allocate the VIC command buffer");
-    VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    if (!VK_OK(vkCreateFence(g_vk.dev, &fci, NULL, &g_vic_fence))) fatal("vulkan: cannot create the VIC fence");
-    /* the job's own set, not one of the frame's: those pools are reset when a frame starts, which a job no longer
-       holds back */
-    VkDescriptorPoolSize psz[2] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2}};
-    VkDescriptorPoolCreateInfo pi = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1, .poolSizeCount = 2, .pPoolSizes = psz};
-    if (!VK_OK(vkCreateDescriptorPool(g_vk.dev, &pi, NULL, &g_vic_pool)))
-        fatal("vulkan: cannot create the VIC descriptor pool");
-    VkDescriptorSetAllocateInfo si = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                                      .descriptorPool = g_vic_pool,
-                                      .descriptorSetCount = 1,
-                                      .pSetLayouts = &g_vic_ds};
-    if (!VK_OK(vkAllocateDescriptorSets(g_vk.dev, &si, &g_vic_set))) fatal("vulkan: cannot allocate the VIC set");
 }
 
-/* one buffer for the job, grown as needed: every job waits for its fence before it returns, so the old buffer is
-   idle when the next job replaces it */
-static int buf_fit(u64 need) {
-    if (g_vic_buf && need <= g_vic_cap) return 1;
-    if (g_vic_dbuf) {
-        vmaDestroyBuffer(g_vk.vma, g_vic_dbuf, g_vic_dmem);
-        g_vic_dbuf = VK_NULL_HANDLE;
-    }
-    if (g_vic_buf) {
-        vmaDestroyBuffer(g_vk.vma, g_vic_buf, g_vic_mem);
-        g_vic_buf = VK_NULL_HANDLE;
-        g_vic_cap = 0;
-    }
-    u64 cap = 8ull << 20;
-    while (cap < need) cap *= 2;
-    VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                             .size = cap,
-                             .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                             .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
-    VmaAllocationCreateInfo ai = {.flags =
-                                      VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-                                  .usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST};
-    VmaAllocationInfo info;
-    if (!VK_OK(vmaCreateBuffer(g_vk.vma, &bi, &ai, &g_vic_buf, &g_vic_mem, &info))) {
-        g_vic_buf = VK_NULL_HANDLE;
-        return 0;
-    }
-    VkMemoryPropertyFlags props;
-    vmaGetAllocationMemoryProperties(g_vk.vma, g_vic_mem, &props);
-    if (!(props & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
-        VmaAllocationCreateInfo di = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
-        if (!VK_OK(vmaCreateBuffer(g_vk.vma, &bi, &di, &g_vic_dbuf, &g_vic_dmem, NULL))) {
-            g_vic_dbuf = VK_NULL_HANDLE;
-            vmaDestroyBuffer(g_vk.vma, g_vic_buf, g_vic_mem);
-            g_vic_buf = VK_NULL_HANDLE;
-            return 0;
-        }
-    }
-    g_vic_ptr = info.pMappedData;
-    g_vic_cap = cap;
-    return 1;
-}
-/* a barrier between two stages of the job's command buffer */
-static void job_barrier(VkPipelineStageFlags2 src, VkAccessFlags2 src_access, VkPipelineStageFlags2 dst,
-                        VkAccessFlags2 dst_access) {
+/* a barrier in the frame's command buffer */
+static void job_barrier(VkCommandBuffer cb, VkPipelineStageFlags2 src, VkAccessFlags2 src_access,
+                        VkPipelineStageFlags2 dst, VkAccessFlags2 dst_access) {
     VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
                            .srcStageMask = src,
                            .srcAccessMask = src_access,
                            .dstStageMask = dst,
                            .dstAccessMask = dst_access};
     VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &mb};
-    vkCmdPipelineBarrier2(g_vic_cb, &di);
+    rec_CmdPipelineBarrier2(cb, &di);
+}
+
+/* the job's GPU copies: owned parts of its planes, from their resources into the job's buffer */
+typedef struct {
+    VkBufferCopy c[64];
+    VkBuffer src[64];
+    u32 n;
+} Copies;
+
+/* plane pl's bytes into the staging at host (its place at `at` in the job's buffer): the CPU's from guest memory, the
+   GPU's as copies into the job's buffer */
+static void plane_stage(const VicPlane* pl, u8* host, u64 at, Copies* cp) {
+    OwnRange o[16];
+    u32 n, i;
+    if (!pl->p || !pl->lim) return;
+    n = own_stage((u64)(pl->p - g_mem), pl->lim, host, o, sizeof o / sizeof *o);
+    if (n > sizeof o / sizeof *o || cp->n + n > sizeof cp->c / sizeof *cp->c) {
+        /* more owners than noted: what the GPU holds of the plane lands, and it is read as it is then */
+        own_acquire((u64)(pl->p - g_mem), pl->lim);
+        memcpy(host, pl->p, pl->lim);
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        const VkOwnRes* r = (const VkOwnRes*)o[i].res;
+        cp->src[cp->n] = r->buf;
+        cp->c[cp->n].srcOffset = o[i].res_off;
+        cp->c[cp->n].dstOffset = at + (o[i].addr - (u64)(pl->p - g_mem));
+        cp->c[cp->n].size = o[i].size;
+        cp->n++;
+    }
 }
 
 static int compose(const VicJob* j) {
-    vk_lock();
-    vic_init();
-    vk_unlock();
     u64 al = vk_stage_align();
     /* the buffer's layout: the parameters, every slot's input planes, then the two output planes */
     u64 at = sizeof(VicGpuParams);
@@ -192,44 +131,44 @@ static int compose(const VicJob* j) {
     if (oc_size < 4) oc_size = 4;
     u64 total = oc_off + oc_size;
     u64 range_max = g_vk.props.limits.maxStorageBufferRange;
-    if (total - ol_off > range_max || at > range_max) {
-        LOG_LIMIT(4, "video: VIC job too large for the GPU (%llu bytes), composed in guest memory\n",
-                  (unsigned long long)total);
+    if (total - ol_off > range_max || at > range_max || total > g_vk.alloc_cap) {
+        LOG_LIMIT(4, "video: a VIC job of %llu bytes exceeds the device's limits, skipped\n", (unsigned long long)total);
         return 0;
     }
     VicGpuParams p;
-    if (!vic_gpu_params(j, &p, in_offs, (u32)(oc_off - ol_off))) {
-        LOG_LIMIT(4, "video: a VIC slot's soft clamp has its low end above its high one, or the slot lies outside the "
-                     "target, composed in guest memory\n");
-        return 0;
-    }
-    vk_lock();
-    int fits = buf_fit(total);
-    vk_unlock();
-    if (!fits) {
-        LOG_LIMIT(4, "video: no GPU memory for a VIC job, composed in guest memory\n");
-        return 0;
-    }
+    vic_gpu_params(j, &p, in_offs, (u32)(oc_off - ol_off));
 
+    vic_init();
+    vk_render_end(); /* compute and copies happen outside rendering passes */
+    VkOwnRes* w = vk_own_res_new(total);
+    VkBuffer staged;
+    u64 soff;
+    u8* host = w ? vk_stage(total, al, &staged, &soff) : NULL;
+    VkDescriptorSet set = host ? vk_desc_alloc(g_vic_ds) : VK_NULL_HANDLE;
+    if (!set) {
+        LOG_LIMIT(4, "video: no GPU memory for a VIC job, skipped\n");
+        if (w) vk_own_res_unref(w);
+        return 0;
+    }
+    Copies cp;
+    cp.n = 0;
+    memset(host, 0, total); /* the padding between planes, which the shader may load and never uses */
+    memcpy(host, &p, sizeof p);
     for (int s = 0; s < 8; s++) {
         const VicSlot* sl = &j->slots[s];
         if (!sl->on) continue;
-        memcpy(g_vic_ptr + in_offs[2 * s], sl->iy.p, sl->iy.lim);
-        memcpy(g_vic_ptr + in_offs[2 * s + 1], sl->ic.p, sl->ic.lim);
+        plane_stage(&sl->iy, host + in_offs[2 * s], in_offs[2 * s], &cp);
+        plane_stage(&sl->ic, host + in_offs[2 * s + 1], in_offs[2 * s + 1], &cp);
     }
-    memcpy(g_vic_ptr, &p, sizeof p);
-    /* the output planes round trip: the shader owns whole words and leaves the other bytes alone */
-    memcpy(g_vic_ptr + ol_off, j->oy.p, j->oy.lim);
-    if (j->oc.p) memcpy(g_vic_ptr + oc_off, j->oc.p, j->oc.lim);
-    vmaFlushAllocation(g_vk.vma, g_vic_mem, 0, VK_WHOLE_SIZE);
+    /* the output planes come in: the shader owns whole words and leaves the other bytes as they are */
+    plane_stage(&j->oy, host + ol_off, ol_off, &cp);
+    plane_stage(&j->oc, host + oc_off, oc_off, &cp);
 
-    VkDescriptorSet set = g_vic_set;
-    VkBuffer work = g_vic_dbuf ? g_vic_dbuf : g_vic_buf; /* the buffer the shader composes in */
-    VkDescriptorBufferInfo buffers[3] = {{work, 0, sizeof(VicGpuParams)},
+    VkDescriptorBufferInfo buffers[3] = {{w->buf, 0, sizeof(VicGpuParams)},
                                          /* from 0: in_offs count from the start of the buffer */
-                                         {work, 0, at},
+                                         {w->buf, 0, at},
                                          /* both output planes: the chroma's base is oc_off - ol_off */
-                                         {work, ol_off, total - ol_off}};
+                                         {w->buf, ol_off, total - ol_off}};
     VkWriteDescriptorSet writes[3];
     for (u32 i = 0; i < 3; i++)
         writes[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -241,52 +180,37 @@ static int compose(const VicJob* j) {
                                            .pBufferInfo = &buffers[i]};
     vkUpdateDescriptorSets(g_vk.dev, 3, writes, 0, NULL);
 
-    VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-                                   .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
-    VK_OK(vkBeginCommandBuffer(g_vic_cb, &bi));
-    if (g_vic_dbuf) {
-        VkBufferCopy in = {0, 0, total};
-        vkCmdCopyBuffer(g_vic_cb, g_vic_buf, g_vic_dbuf, 1, &in);
-        job_barrier(
-            VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    VkCommandBuffer cb = vk_cmd();
+    /* the staged bytes, then what the GPU holds over them: the GPU's writes to those resources first done */
+    VkBufferCopy in = {soff, 0, total};
+    job_barrier(cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    rec_CmdCopyBuffer(cb, staged, w->buf, 1, &in);
+    if (cp.n) {
+        job_barrier(cb, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+                    VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        for (u32 i = 0; i < cp.n; i++) rec_CmdCopyBuffer(cb, cp.src[i], w->buf, 1, &cp.c[i]);
     }
-    vkCmdBindPipeline(g_vic_cb, VK_PIPELINE_BIND_POINT_COMPUTE, vic_gpu_aligned(j) ? g_vic_pipe : g_vic_pipe_unaligned);
-    vkCmdBindDescriptorSets(g_vic_cb, VK_PIPELINE_BIND_POINT_COMPUTE, g_vic_layout, 0, 1, &set, 0, NULL);
+    job_barrier(
+        cb, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    rec_CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, vic_gpu_aligned(j) ? g_vic_pipe : g_vic_pipe_unaligned);
+    rec_CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, g_vic_layout, 0, 1, &set, 0, NULL);
     /* a workgroup composes a tile of output pixels, over the target rectangle only: nothing else is written */
-    vkCmdDispatch(g_vic_cb, (p.job.tx1 - p.job.gx0 + VIC_TILE_W - 1) / VIC_TILE_W,
-                  (p.job.ty0 + p.job.th - p.job.gy0 + VIC_TILE_H - 1) / VIC_TILE_H, 1);
-    /* the fence alone does not make the writes visible to the host */
-    if (g_vic_dbuf) {
-        VkBufferCopy out = {ol_off, ol_off, total - ol_off}; /* the output planes, which end the buffer */
-        job_barrier(VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
-        vkCmdCopyBuffer(g_vic_cb, g_vic_dbuf, g_vic_buf, 1, &out);
-        job_barrier(VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
-                    VK_ACCESS_2_HOST_READ_BIT);
-    } else
-        job_barrier(VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
-    VK_OK(vkEndCommandBuffer(g_vic_cb));
-    VkCommandBufferSubmitInfo c = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = g_vic_cb};
-    VkSubmitInfo2 si = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .commandBufferInfoCount = 1, .pCommandBufferInfos = &c};
-    vk_lock(); /* the queue is the renderer's compute queue too */
-    vk_rec_queue(g_vk.compute);
-    VkResult r = vkQueueSubmit2(g_vk.compute, 1, &si, g_vic_fence);
-    vk_unlock();
-    if (r == VK_ERROR_DEVICE_LOST) fatal("vulkan: the GPU device was lost (driver reset or crash)");
-    if (r != VK_SUCCESS) return 0;
-    VK_OK(vkWaitForFences(g_vk.dev, 1, &g_vic_fence, VK_TRUE, UINT64_MAX));
-    VK_OK(vkResetFences(g_vk.dev, 1, &g_vic_fence));
-    vmaInvalidateAllocation(g_vk.vma, g_vic_mem, 0, VK_WHOLE_SIZE);
-    memcpy(j->oy.p, g_vic_ptr + ol_off, j->oy.lim);
-    if (j->oc.p) memcpy(j->oc.p, g_vic_ptr + oc_off, j->oc.lim);
+    rec_CmdDispatch(cb, (p.job.tx1 - p.job.gx0 + VIC_TILE_W - 1) / VIC_TILE_W,
+                    (p.job.ty0 + p.job.th - p.job.gy0 + VIC_TILE_H - 1) / VIC_TILE_H, 1);
+    /* what reads the picture next (a copy into a texture or the display, a landing) sees the shader's writes */
+    job_barrier(cb, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
+    /* the picture is the guest's output planes from now on */
+    vk_own_publish((u64)(j->oy.p - g_mem), j->oy.lim, w, ol_off);
+    if (j->oc.p && j->oc.lim) vk_own_publish((u64)(j->oc.p - g_mem), j->oc.lim, w, oc_off);
+    vk_own_res_unref(w); /* the owned ranges hold it */
     return 1;
 }
 int vk_vic_compose(const VicJob* j) {
-    pm_lock(&g_vic_lock);
+    vk_lock();
     int r = compose(j);
-    pm_unlock(&g_vic_lock);
+    vk_unlock();
     return r;
 }

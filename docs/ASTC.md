@@ -95,7 +95,8 @@ what scattered stores, divergence and idle invocations cost there.
 ### Interface
 
 - Binding 0 is the input: rows of whole blocks, 16 bytes each, already deswizzled from block-linear guest memory
-  by `texture.c`. Eden's shader deswizzles in the shader instead. That part was left out.
+  on the GPU by `blocklinear.comp` (docs/BLOCKLINEAR.md). Eden's shader deswizzles in the shader instead. That part
+  was left out: the deswizzle is one shader for every format.
 - Binding 1 is the output: one packed RGBA8 word per texel, red in the low byte, in rows of `width` words.
 - The push constants are `width` and `height` (the size of each slice of the strip in texels), `blocks_x` and
   `blocks_y` (the same in blocks), `srgb`, nonzero for an SRGB image (the texture header's sRGB bit, which
@@ -142,8 +143,9 @@ specification treats as errors. Both ports make the same choices, checked agains
   of one slice, or whole slices when one fits, so a 3D texture's thin slices share a dispatch and a copy. Strips keep
   both descriptor ranges within `maxStorageBufferRange` and the staging within the allocation cap. Every mip level,
   array layer and depth slice is uploaded.
-- `texture.c` deswizzles guest block-linear memory on the CPU straight into the staging ring, a strip's block rows
-  at a time as `vk_astc_upload` asks for them, so a level is never copied whole into memory of its own.
+- `texture.c` stages a strip's guest bytes as they are, whole rows of blocks, as `vk_astc_upload` asks for them, and
+  `vk/blocklinear.c` deswizzles them into a device-local scratch buffer the decoder reads, so a level is never
+  copied whole into memory of its own and the CPU never takes GOBs apart.
 - The compute work runs on the graphics queue, outside rendering. A barrier orders the shader's writes before the
   copy into the image, and another orders the copy's reads before the scratch buffer is reused, including across
   submissions. Descriptors come from the frame's pools. Staging stays alive until the frame's fence.

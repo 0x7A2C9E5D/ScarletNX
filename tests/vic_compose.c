@@ -5,6 +5,7 @@
    the target rectangle (clipping, an odd left edge, wholly outside the surface), and the GPU asked only once the
    renderer is up. The stand-in renderer declines every job, so the CPU composes; surfaces are pitch linear */
 #include "nx/gpu/video/vic.c"
+#include <stdarg.h>
 
 static unsigned checks;
 #define CHECK(x)                                                                                                       \
@@ -18,17 +19,25 @@ static unsigned checks;
 
 /* ------------------------------------------------ what vic.c reaches outside itself */
 static int g_asked; /* jobs the renderer was handed */
-static int decline(const VicJob* j) {
-    (void)j;
+/* the renderer composes on the GPU; here the reference does it in guest memory (vic_ref.c) */
+static int compose(const VicJob* j) {
     g_asked++;
-    return 0;
+    vic_compose_ref(j);
+    return 1;
 }
-static const Renderer stand_in = {.name = "stand-in", .vic_compose = decline};
+static const Renderer stand_in = {.name = "stand-in", .vic_compose = compose};
 const Renderer* g_renderer = &stand_in;
 int g_renderer_up = 1;
 void logf_(int lvl, const char* fmt, ...) {
     (void)lvl;
     (void)fmt;
+}
+void fatal(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    exit(1);
 }
 #define BASE  0x1000000ull
 #define ARENA (4u << 20)
@@ -289,7 +298,7 @@ static void nv21_out(void) {
     vic_execute(regs);
     CHECK(arena[OUT_Y] == 100 && arena[OUT_C] == 120 && arena[OUT_C + 1] == 110);
 }
-/* the renderer is handed the job only once it is up; before, the CPU composes it */
+/* the renderer is handed the job only once it is up; before, the job is skipped (the GPU composes every job) */
 static void gpu_only_once_up(void) {
     Job j = job16();
     g_renderer_up = 0;
@@ -297,7 +306,7 @@ static void gpu_only_once_up(void) {
     job_setup(&j);
     in_fill(&j, 50, 60, 70);
     vic_execute(regs);
-    CHECK(g_asked == 0 && px(&j, 0, 0)[0] == 50);
+    CHECK(g_asked == 0 && px(&j, 0, 0)[0] != 50);
     g_renderer_up = 1;
     job_setup(&j);
     in_fill(&j, 50, 60, 70);

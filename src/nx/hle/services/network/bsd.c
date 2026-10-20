@@ -13,6 +13,7 @@
    SocketExempt socket; those are real here. */
 #include "nx/hle/services/network/network.h"
 #include "nx/hle/hle.h"
+#include "nx/memory/own.h"
 #include "hle/services/network/bsd.swipc.inc"
 #include <time.h>
 
@@ -544,6 +545,7 @@ static int64_t do_recv(Bsd* b, IpcBuf message, i32 fd, u32 gflags, IpcBuf addr, 
     SnxSocket* c = fd_get_bcast(b, fd);
     SnxSockAddr from = {0};
     int64_t r;
+    if (n && a) own_acquire(a, n); /* the kernel writes the buffer, and can't wait on memory the GPU holds */
     if (!n)
         r = 0; /* Eden: nothing to receive into, and a datagram stays queued */
     else if (!a)
@@ -576,8 +578,10 @@ static int64_t do_send(Bsd* b, IpcBuf message, i32 fd, u32 gflags, const SnxSock
         r = -SNX_ENETUNREACH;
     else if (!a && n)
         r = -SNX_EFAULT;
-    else
+    else {
+        if (a) own_acquire(a, n); /* the kernel reads the buffer, and can't wait on memory the GPU holds */
         r = snx_socket_send(s, a ? GP(a) : NULL, n, msg_in(gflags), to);
+    }
     if (to && g_settings.log_level >= 2) {
         char t[64];
         LOGV("bsd: SendTo(%d) %llu bytes to %s = %lld\n", fd, (unsigned long long)n, addr_text(to, t, sizeof t),

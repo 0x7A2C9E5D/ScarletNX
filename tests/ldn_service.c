@@ -41,6 +41,8 @@ void pm_init(PMutex* m) { pthread_mutex_init(&m->l, NULL); }
 void pm_lock(PMutex* m) { pthread_mutex_lock(&m->l); }
 void pm_unlock(PMutex* m) { pthread_mutex_unlock(&m->l); }
 #endif
+/* memory/own.c: nothing is GPU-owned here */
+void own_acquire(u64 addr, u64 size) { (void)addr, (void)size; }
 void logf_(int level, const char* format, ...) {
     (void)level;
     (void)format;

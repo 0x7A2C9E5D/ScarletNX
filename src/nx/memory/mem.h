@@ -90,6 +90,9 @@ int mem_heap_set(u64 size, u64 budget);
 int mem_map_code(MemCodeMap* m);
 int mem_unmap_code(const MemCodeMap* m);
 void mem_query(u64 addr, MemBlock* out);
+/* the bytes of [addr, addr + size) still mapped, up to the first free or inaccessible page: what a GPU mapping older
+   than the guest's frees may read (gpu.c's copy_runs). All of them before mem_init, with no block list */
+u64 mem_mapped_run(u64 addr, u64 size);
 int mem_set_state(u64 addr, u64 size, u32 state, u32 perm);
 int mem_set_attr(u64 addr, u64 size, u32 mask, u32 attr);
 /* Called with no memory lock held after a mapping change that can make compiled guest code stale: an unmap, a state
@@ -116,6 +119,16 @@ int mem_map_pool(u64 addr, u64 off, u64 size, u32 state, u32 perm);
 /* unmaps the range only when it is in state with the pages from off: 0, or MEM_BADSTATE with nothing changed */
 int mem_unmap_pool(u64 addr, u64 off, u64 size, u32 state);
 u64 mem_pool_used(void); /* bytes of the pool handed out */
+/* [a, a + size), whole pages, made pool pages mapped there only, ready to be trapped (memory/own.c): the parts that
+   aren't pool pages moved there, each part frozen meanwhile. 0 with the range's runs of pool pages in runs (*n of
+   them, at most max), or -1 (no pool, unmapped or code memory, pages mapped elsewhere too, or more runs than max).
+   The caller holds the renderer's lock */
+typedef struct {
+    u64 addr, size, pool; /* guest pages [addr, addr + size) are pool pages from pool on */
+} MemPoolRun;
+int mem_own_prepare(u64 a, u64 size, MemPoolRun* runs, u32 max, u32* n);
+/* the pool offset of guest address a: 0, or -1 when a isn't pool memory */
+int mem_pool_offset(u64 a, u64* off);
 
 extern MemLayout g_layout;
 extern u8* g_mem;

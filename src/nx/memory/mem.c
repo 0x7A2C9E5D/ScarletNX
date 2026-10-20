@@ -7,6 +7,7 @@
 /* the guest address space: the host reservation every guest address is an offset into, its regions, and the list of
    memory blocks with the state, permission and attributes QueryMemory reports */
 #include "nx/memory/mem.h"
+#include "nx/memory/own.h"
 #include "nx/gpu/gpu.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
@@ -71,6 +72,12 @@ static void mem_unlock(void) {
     t_mem_held = 0;
     pm_unlock(&g_mem_lk);
 }
+
+/* bumped under g_mem_lk before guest pages lose their host memory or turn free or inaccessible, and by mem_init:
+   until it moves, a run mem_mapped_run found mapped stays mapped, so each thread keeps its last one */
+static u64 g_unmap_gen = 1;
+static __thread u64 t_run_lo, t_run_hi, t_run_gen;
+static void runs_stale_nl(void) { __atomic_add_fetch(&g_unmap_gen, 1, __ATOMIC_RELEASE); }
 
 static void (*g_code_invalidate)(u64, u64); /* the runtime's JIT: what was compiled in the range is stale now */
 void mem_set_code_invalidate(void (*fn)(u64, u64)) { g_code_invalidate = fn; }
@@ -149,6 +156,7 @@ typedef struct {
 } Change;
 static void blk_change_nl(u64 a, u64 size, const Change* c) {
     u32 i = blk_split_nl(a), j = blk_split_nl(a + size), k;
+    if (c->set_state && (c->state == MS_FREE || c->state == MS_INACCESSIBLE)) runs_stale_nl();
     for (k = i; k < j; k++) {
         MemBlock* b = &g_blk[k];
         if (c->set_pool) b->pool = c->pool ? c->pool + (b->addr - a) : 0;
@@ -192,6 +200,8 @@ static int commit_nl(u64 a, u64 size) {
 static void decommit_nl(u64 a, u64 size) {
     u64 mask = g_host_page - 1, end = a + size, first = a & ~mask, last = (end - 1) & ~mask, edge[2];
     int i, n = 0;
+    runs_stale_nl();
+    own_drop(a, size);
     if (!((a | end) & mask)) { /* whole host pages, all of them free */
         plat_vm_decommit(GP(a), size);
         return;
@@ -202,8 +212,10 @@ static void decommit_nl(u64 a, u64 size) {
         u64 lo = edge[i] > a ? edge[i] : a, hi = edge[i] + g_host_page < end ? edge[i] + g_host_page : end;
         if (range_is_nl(edge[i], g_host_page, MS_FREE, ANY, ANY))
             plat_vm_decommit(GP(edge[i]), g_host_page);
-        else
+        else {
+            own_acquire(edge[i], g_host_page); /* a neighbour's bytes the GPU holds land before the page is written */
             memset(GP(lo), 0, (size_t)(hi - lo));
+        }
     }
     if (last > first + g_host_page) plat_vm_decommit(GP(first + g_host_page), last - first - g_host_page);
 }
@@ -344,6 +356,8 @@ static void pool_set_nl(u64 a, u64 size, u64 pool) {
 static void unmap_nl(u64 a, u64 size) {
     u64 end = a + size;
     u32 i;
+    runs_stale_nl(); /* before the pages go, not with the state after them */
+    own_drop(a, size); /* what the GPU held there goes with the mapping */
     for (i = blk_index_nl(a); i < g_nblk && g_blk[i].addr < end; i++) {
         const MemBlock* b = &g_blk[i];
         u64 lo = b->addr > a ? b->addr : a, hi = blk_end(b) < end ? blk_end(b) : end;
@@ -362,17 +376,33 @@ static void unmap_nl(u64 a, u64 size) {
    without off. Also what a failed MAP_FIXED needs, as it may have taken the old pages with it; a host that can't do
    even this leaves nothing to run on */
 static void unpool_nl(u64 a, u64 size, const u64* off) {
+    runs_stale_nl();
     if (plat_alias_unmap(GP(a), size) || (off && (commit_nl(a, size) || plat_alias_read(*off, GP(a), size))))
         fatal("Could not put %llu KiB of guest memory back from the alias pool", (unsigned long long)(size >> 10));
 }
 /* Moves mapped memory into the pool: its contents are copied there and the pool's pages mapped over it, so views of
-   it can map them too. Memory that is pool pages already (a view of a view) stays as it is */
+   it can map them too. Memory that is pool pages already (a view of a view) stays as it is. Pool pages mapped here
+   only (what an owner of GPU memory moved there, mem_own_prepare) move again with the rest, into one run, and their
+   old pages are given back */
+static int pool_mapped_elsewhere_nl(u64 off, u64 size, u64 a);
+static int host_view_nl(u64 off, u64 size);
 static int promote_nl(u64 a, u64 size) {
     u64 end = a + size, off;
     u32 i;
     if (!g_pool_on || pool_run_nl(a, size)) return 0;
-    for (i = blk_index_nl(a); i < g_nblk && g_blk[i].addr < end; i++)
-        if (g_blk[i].state == MS_FREE || g_blk[i].pool) return MEM_BADSTATE;
+    for (i = blk_index_nl(a); i < g_nblk && g_blk[i].addr < end; i++) {
+        const MemBlock* b = &g_blk[i];
+        u64 lo, hi, boff;
+        if (b->state == MS_FREE) return MEM_BADSTATE;
+        if (!b->pool) continue;
+        lo = b->addr > a ? b->addr : a;
+        hi = blk_end(b) < end ? blk_end(b) : end;
+        boff = b->pool - 1 + (lo - b->addr);
+        if (pool_mapped_elsewhere_nl(boff, hi - lo, lo) || host_view_nl(boff, hi - lo)) return MEM_BADSTATE;
+    }
+    /* the copy goes through the kernel, which can't wait on trapped pages: what the GPU holds there lands first (the
+       caller holds the renderer's lock, which landing takes on this thread) */
+    own_acquire(a, size);
     if (pool_alloc_nl(size, &off)) return MEM_NOMEM;
     if (plat_alias_write(off, GP(a), size)) {
         pool_free_nl(off, size);
@@ -383,6 +413,13 @@ static int promote_nl(u64 a, u64 size) {
         pool_free_nl(off, size);
         return MEM_NOMEM;
     }
+    for (i = blk_index_nl(a); i < g_nblk && g_blk[i].addr < end; i++) { /* the old pool pages, not mapped any more */
+        const MemBlock* b = &g_blk[i];
+        if (b->pool) {
+            u64 lo = b->addr > a ? b->addr : a, hi = blk_end(b) < end ? blk_end(b) : end;
+            pool_free_nl(b->pool - 1 + (lo - b->addr), hi - lo);
+        }
+    }
     pool_set_nl(a, size, off + 1);
     return 0;
 }
@@ -392,6 +429,7 @@ static void demote_nl(u64 a, u64 size) {
     u64 p = pool_run_nl(a, size), lo, hi;
     u32 i;
     if (!p) return;
+    own_acquire(a, size); /* the pool's contents are read below, past any trap */
     lo = p - 1;
     hi = lo + size;
     for (i = 0; i < g_nblk; i++) {
@@ -412,6 +450,7 @@ static int alias_map_nl(u64 dst, u64 src, u64 size, u32 state, u32 perm) {
     u64 p;
     Change c;
     if (!range_is_nl(dst, size, MS_FREE, ANY, ANY)) return MEM_BADSTATE;
+    own_acquire(src, size); /* owned memory has one mapping: what the GPU holds of src lands before it has two */
     p = pool_run_nl(src, size);
     if (p && plat_alias_map(GP(dst), p - 1, size)) {
         unpool_nl(dst, size, NULL);
@@ -440,6 +479,7 @@ void mem_init(void) {
     memset(&g_blk[0], 0, sizeof *g_blk);
     g_blk[0].size = AS_END;
     g_nblk = 1;
+    runs_stale_nl();
     mem_unlock();
     /* a view shares pages only at the same place in a host page as its source, which a game picking addresses in
        4 KiB steps leaves to chance with larger pages: they copy, as hosts without a pool do */
@@ -492,6 +532,38 @@ void mem_query(u64 addr, MemBlock* out) {
     mem_lock();
     *out = g_blk[blk_index_nl(addr)];
     mem_unlock();
+}
+u64 mem_mapped_run(u64 addr, u64 size) {
+    u64 end, lo, lim = addr, run, gen;
+    u32 i;
+    int mine = !t_mem_held; /* a crash report's queries come from the thread that holds the lock */
+    if (!size) return 0;
+    if (__atomic_load_n(&g_unmap_gen, __ATOMIC_ACQUIRE) == t_run_gen && addr >= t_run_lo && addr < t_run_hi &&
+        size <= t_run_hi - addr)
+        return size;
+    if (mine) mem_lock();
+    gen = __atomic_load_n(&g_unmap_gen, __ATOMIC_RELAXED);
+    if (!g_nblk)
+        run = size;
+    else if (addr >= AS_END)
+        run = 0;
+    else {
+        end = size < AS_END - addr ? addr + size : AS_END;
+        i = blk_index_nl(addr);
+        lo = g_blk[i].addr;
+        for (; i < g_nblk && lim < end; i++) {
+            if (g_blk[i].state == MS_FREE || g_blk[i].state == MS_INACCESSIBLE) break;
+            lim = blk_end(&g_blk[i]);
+        }
+        run = (lim < end ? lim : end) - addr;
+        if (lim > addr) {
+            t_run_lo = lo;
+            t_run_hi = lim;
+            t_run_gen = gen;
+        }
+    }
+    if (mine) mem_unlock();
+    return run;
 }
 /* the state and permission of mapped memory (the loader's sections, ldr's code views, the memory SVCs) */
 int mem_set_state(u64 addr, u64 size, u32 state, u32 perm) {
@@ -561,6 +633,7 @@ int mem_alias_begin(u64 src, u64 size) {
     int r;
     if (!page_range(&src, &size)) return MEM_BADSTATE;
     mapping_begin();
+    own_acquire(src, size); /* owned memory has one mapping: what the GPU holds of src lands before views come */
     mem_lock();
     r = promote_nl(src, size);
     mem_unlock();
@@ -602,6 +675,123 @@ int mem_alias_unmap(u64 dst, u64 size, u64 back) {
     gpu_mem_changed(dst, size);
     return 0;
 }
+/* the pool's pages a service also maps outside the reservation (mem_pool_host): never GPU-owned, as the service's
+   view of them can't be trapped. Runs of offsets as g_run's, under g_mem_lk */
+static PoolRun* g_hostrun;
+static u32 g_nhostrun, g_caphostrun;
+static int host_view_nl(u64 off, u64 size) {
+    u32 i;
+    for (i = 0; i < g_nhostrun; i++)
+        if (g_hostrun[i].off < off + size && off < g_hostrun[i].off + g_hostrun[i].size) return 1;
+    return 0;
+}
+static void host_view_add_nl(u64 off, u64 size) {
+    if (g_nhostrun == g_caphostrun) {
+        u32 cap = g_caphostrun ? g_caphostrun * 2 : 16;
+        PoolRun* r = (PoolRun*)realloc(g_hostrun, sizeof *r * (size_t)cap);
+        if (!r) fatal("Out of memory for the alias pool's map");
+        g_hostrun = r;
+        g_caphostrun = cap;
+    }
+    g_hostrun[g_nhostrun].off = off;
+    g_hostrun[g_nhostrun++].size = size;
+}
+static void host_view_remove_nl(u64 off) {
+    u32 i;
+    for (i = 0; i < g_nhostrun; i++)
+        if (g_hostrun[i].off == off) {
+            g_hostrun[i] = g_hostrun[--g_nhostrun];
+            return;
+        }
+}
+/* whether a guest mapping other than the one at a has any of the pool pages [off, off + size): a block mapping them
+   with another translation from guest addresses to pool offsets than a's (off + x - a at x) */
+static int pool_mapped_elsewhere_nl(u64 off, u64 size, u64 a) {
+    u32 i;
+    for (i = 0; i < g_nblk; i++) {
+        const MemBlock* b = &g_blk[i];
+        if (b->pool && b->pool - 1 < off + size && off < b->pool - 1 + b->size && b->pool - 1 - b->addr != off - a)
+            return 1;
+    }
+    return 0;
+}
+int mem_own_prepare(u64 a, u64 size, MemPoolRun* runs, u32 max, u32* n) {
+    u64 end = a + size, at;
+    u32 i;
+    int r = -1;
+    *n = 0;
+    if (!g_pool_on || (a | size) & (PAGE - 1) || !size || a < AS_BASE || end > AS_END) return -1;
+    mem_lock();
+    for (i = blk_index_nl(a); i < g_nblk && g_blk[i].addr < end; i++) {
+        const MemBlock* b = &g_blk[i];
+        u32 st = b->state;
+        /* data only: code and its aliases are the code's, I/O and the kernel's aren't the guest's */
+        if (st == MS_FREE || st == MS_CODE || st == MS_ALIASCODE || st == MS_SHAREDCODE || st == MS_GENCODE ||
+            st == MS_CODEOUT || st == MS_IO || st == MS_KERNEL || st == MS_INACCESSIBLE || st == MS_TLS)
+            goto out;
+        if (b->pool) { /* pool pages already: only when mapped here alone */
+            u64 lo = b->addr > a ? b->addr : a, hi = blk_end(b) < end ? blk_end(b) : end;
+            u64 boff = b->pool - 1 + (lo - b->addr);
+            if (pool_mapped_elsewhere_nl(boff, hi - lo, lo) || host_view_nl(boff, hi - lo)) goto out;
+        }
+    }
+    /* the parts that aren't pool pages yet moved there, each a run of its own: parts that are may be another owner's,
+       trapped, and keep their pages. Writes to a part wait while it is copied (a neighbour's, on a page it shares) */
+    for (at = a; at < end;) {
+        u32 j = blk_index_nl(at);
+        u64 lo = at, hi = at;
+        if (g_blk[j].pool) {
+            at = blk_end(&g_blk[j]) < end ? blk_end(&g_blk[j]) : end;
+            continue;
+        }
+        while (hi < end && !g_blk[blk_index_nl(hi)].pool) {
+            const MemBlock* b = &g_blk[blk_index_nl(hi)];
+            hi = blk_end(b) < end ? blk_end(b) : end;
+        }
+        plat_freeze(GP(lo), hi - lo);
+        r = promote_nl(lo, hi - lo);
+        plat_thaw();
+        if (r) {
+            r = -1;
+            goto out;
+        }
+        at = hi;
+    }
+    /* the runs of pool pages, in order */
+    for (at = a; at < end;) {
+        const MemBlock* b = &g_blk[blk_index_nl(at)];
+        u64 hi = blk_end(b) < end ? blk_end(b) : end, off = b->pool - 1 + (at - b->addr);
+        if (*n && runs[*n - 1].addr + runs[*n - 1].size == at && runs[*n - 1].pool + runs[*n - 1].size == off)
+            runs[*n - 1].size += hi - at;
+        else if (*n == max) {
+            r = -1;
+            goto out;
+        } else {
+            runs[*n].addr = at;
+            runs[*n].size = hi - at;
+            runs[*n].pool = off;
+            ++*n;
+        }
+        at = hi;
+    }
+    r = 0;
+out:
+    mem_unlock();
+    return r;
+}
+int mem_pool_offset(u64 a, u64* off) {
+    int r = -1;
+    u32 i;
+    if (a >= AS_END) return -1;
+    mem_lock();
+    i = blk_index_nl(a);
+    if (g_blk[i].pool) {
+        *off = g_blk[i].pool - 1 + (a - g_blk[i].addr);
+        r = 0;
+    }
+    mem_unlock();
+    return r;
+}
 u8* mem_pool_host(u64 size, u64* off) {
     u8* p;
     int r;
@@ -612,17 +802,19 @@ u8* mem_pool_host(u64 size, u64* off) {
     mem_unlock();
     if (r) return NULL;
     p = plat_alias_host(*off, size);
-    if (!p) {
-        mem_lock();
+    mem_lock();
+    if (!p)
         pool_free_nl(*off, size);
-        mem_unlock();
-    }
+    else
+        host_view_add_nl(*off, size);
+    mem_unlock();
     return p;
 }
 void mem_pool_host_free(u8* p, u64 off, u64 size) {
     size = (size + PAGE - 1) & ~(PAGE - 1);
     plat_alias_host_free(p, size);
     mem_lock();
+    host_view_remove_nl(off);
     pool_free_nl(off, size);
     mem_unlock();
 }

@@ -19,17 +19,25 @@ VkState g_vk;
 /* reentrant on the thread that holds it: landing compute results writes guest memory, which can come back here */
 static PMutex g_vklock;
 static _Thread_local int t_vkdepth;
+static u32 g_vk_owner; /* the thread holding it (plat_tid), 0 when none: a trap's fault on it can't be answered */
 void vk_lock(void) {
-    if (!t_vkdepth++) pm_lock(&g_vklock);
+    if (!t_vkdepth++) {
+        pm_lock(&g_vklock);
+        __atomic_store_n(&g_vk_owner, plat_tid(), __ATOMIC_RELAXED);
+    }
 }
 void vk_unlock(void) {
-    if (!--t_vkdepth) pm_unlock(&g_vklock);
+    if (!--t_vkdepth) {
+        __atomic_store_n(&g_vk_owner, 0, __ATOMIC_RELAXED);
+        pm_unlock(&g_vklock);
+    }
 }
 int vk_trylock(void) {
     if (!t_vkdepth && !pm_trylock(&g_vklock)) return 0;
-    ++t_vkdepth;
+    if (!t_vkdepth++) __atomic_store_n(&g_vk_owner, plat_tid(), __ATOMIC_RELAXED);
     return 1;
 }
+u32 vk_lock_owner(void) { return __atomic_load_n(&g_vk_owner, __ATOMIC_RELAXED); }
 
 static const char* vk_result_str(VkResult r) {
     switch (r) {
@@ -147,6 +155,29 @@ static int create_instance(void) {
     return 1;
 }
 
+/* the queue family that decodes H.264 with Vulkan Video, other than the graphics and compute ones; ~0u when none */
+static u32 video_decode_family(void) {
+    u32 n = 0, found = ~0u;
+    vkGetPhysicalDeviceQueueFamilyProperties2(g_vk.phys, &n, NULL);
+    VkQueueFamilyProperties2* q = calloc(n ? n : 1, sizeof *q);
+    VkQueueFamilyVideoPropertiesKHR* v = calloc(n ? n : 1, sizeof *v);
+    if (!q || !v) fatal("vulkan: out of memory for the queue families");
+    for (u32 i = 0; i < n; i++) {
+        v[i].sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR;
+        q[i].sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2;
+        q[i].pNext = &v[i];
+    }
+    vkGetPhysicalDeviceQueueFamilyProperties2(g_vk.phys, &n, q);
+    for (u32 i = 0; i < n && found == ~0u; i++)
+        if ((q[i].queueFamilyProperties.queueFlags & VK_QUEUE_VIDEO_DECODE_BIT_KHR) &&
+            (v[i].videoCodecOperations & VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR) && i != g_vk.gfx_family &&
+            i != g_vk.compute_family)
+            found = i;
+    free(q);
+    free(v);
+    return found;
+}
+
 /* Vulkan 1.3 and a graphics queue. Only windowed runs need WSI and presentation support.
    *gfx_queues: how many queues the graphics family has */
 static int device_score(VkPhysicalDevice pd, u32* gfx, u32* compute, u32* gfx_queues) {
@@ -235,7 +266,7 @@ static int create_device(void) {
     /* compute gets a queue of its own: of a compute-only family, or else a second one of the graphics family */
     int second = g_vk.compute_family == g_vk.gfx_family && gfx_queues >= 2;
     float prio[2] = {1.0f, 1.0f};
-    VkDeviceQueueCreateInfo qci[2] = {{.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+    VkDeviceQueueCreateInfo qci[3] = {{.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
                                        .queueFamilyIndex = g_vk.gfx_family,
                                        .queueCount = second ? 2 : 1,
                                        .pQueuePriorities = prio},
@@ -295,10 +326,10 @@ static int create_device(void) {
     g_shader_stage_point_size = want->shaderTessellationAndGeometryPointSize != 0;
     g_shader_geometry = want->geometryShader != 0;
     g_shader_tessellation = want->tessellationShader != 0;
-    const char* ext[16];
+    const char** ext = g_vk.dev_ext;
     int has_budget = 0;
     u32 next = 0;
-    int has_shader_clock = 0, has_feedback_dynamic = 0;
+    int has_shader_clock = 0, has_feedback_dynamic = 0, video_exts = 0;
     if (!g_opt_headless) ext[next++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
     {
         u32 n = 0;
@@ -321,10 +352,23 @@ static int create_device(void) {
             if (!strcmp(e[i].extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) has_budget = 1;
             /* a portability driver's subset must be enabled when it has one (MoltenVK) */
             if (!strcmp(e[i].extensionName, "VK_KHR_portability_subset")) ext[next++] = "VK_KHR_portability_subset";
+            if (!strcmp(e[i].extensionName, VK_KHR_VIDEO_QUEUE_EXTENSION_NAME) ||
+                !strcmp(e[i].extensionName, VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) ||
+                !strcmp(e[i].extensionName, VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME))
+                video_exts++;
         }
         free(e);
     }
     if (has_budget) ext[next++] = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;
+    g_vk.video_family = g_settings.vulkan_video_decode && video_exts == 3 ? video_decode_family() : ~0u;
+    if (g_vk.video_family != ~0u) {
+        ext[next++] = VK_KHR_VIDEO_QUEUE_EXTENSION_NAME;
+        ext[next++] = VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME;
+        ext[next++] = VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME;
+        LOG("vulkan: H.264 movies decode with Vulkan Video, on queue family %u (experimental)\n", g_vk.video_family);
+    } else if (g_settings.vulkan_video_decode)
+        WARN("vulkan: Vulkan Video decode was asked for, but the device has no H.264 decode queue: FFmpeg decodes "
+             "movies on the CPU\n");
     VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT fdiv = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT};
     VkPhysicalDeviceCustomBorderColorFeaturesEXT fbc = {
@@ -387,8 +431,11 @@ static int create_device(void) {
         vkGetPhysicalDeviceProperties2(g_vk.phys, &cp2);
         g_vk.border_color_max = cbp.maxCustomBorderColorSamplers;
     }
-    VkPhysicalDeviceVulkan11Features f11 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
-                                            .shaderDrawParameters = q11.shaderDrawParameters};
+    /* FFmpeg's decoder makes views of its two plane pictures */
+    VkPhysicalDeviceVulkan11Features f11 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+        .shaderDrawParameters = q11.shaderDrawParameters,
+        .samplerYcbcrConversion = g_vk.video_family != ~0u && q11.samplerYcbcrConversion};
     g_vk.has_shader_draw_parameters = q11.shaderDrawParameters != 0;
     /* Enable mirror clamp and vertex shader Layer output when the device supports them. */
     g_vk.has_mirror_clamp = q12.samplerMirrorClampToEdge;
@@ -471,14 +518,30 @@ static int create_device(void) {
         chain = &flocal;
         ext[next++] = VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME;
     }
+    u32 nq = g_vk.compute_family == g_vk.gfx_family ? 1 : 2;
+    if (g_vk.video_family != ~0u)
+        qci[nq++] = (VkDeviceQueueCreateInfo){.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                                              .queueFamilyIndex = g_vk.video_family,
+                                              .queueCount = 1,
+                                              .pQueuePriorities = prio};
     VkDeviceCreateInfo dci = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
                               .pNext = chain,
-                              .queueCreateInfoCount = g_vk.compute_family == g_vk.gfx_family ? 1 : 2,
+                              .queueCreateInfoCount = nq,
                               .pQueueCreateInfos = qci,
                               .enabledExtensionCount = next,
                               .ppEnabledExtensionNames = ext,
                               .pEnabledFeatures = &g_vk.feat};
     if (!VK_OK(vkCreateDevice(g_vk.phys, &dci, NULL, &g_vk.dev))) return 0;
+    g_vk.gfx_queues = second ? 2 : 1;
+    g_vk.dev_ext_n = next;
+    g_vk.feat11 = f11;
+    g_vk.feat12 = f12;
+    g_vk.feat13 = f13;
+    g_vk.feat11.pNext = &g_vk.feat12;
+    g_vk.feat12.pNext = &g_vk.feat13;
+    g_vk.feat13.pNext = NULL;
+    g_vk.feat2 = (VkPhysicalDeviceFeatures2){
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &g_vk.feat11, .features = g_vk.feat};
     volkLoadDevice(g_vk.dev);
     vkGetDeviceQueue(g_vk.dev, g_vk.gfx_family, 0, &g_vk.gfx);
     vkGetDeviceQueue(g_vk.dev, g_vk.compute_family, second ? 1 : 0, &g_vk.compute);

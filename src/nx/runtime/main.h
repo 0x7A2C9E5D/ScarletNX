@@ -33,7 +33,5 @@ void vi_show_buffer(u32 nvmap_id, u32 offset, u32 w, u32 h, u32 pitch, u32 layou
 /* the wait before vi hands the game a buffer for its next frame, as fps_limit says: with fps_limit=game until the
    frame before has been on the display for interval refreshes (its swap interval) */
 void present_pace(u32 interval);
-/* a buffer in guest memory at a as RGBA8 into out (w * h words), for one no render target holds */
-void vi_convert_cpu(u64 a, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt, u32* out);
 
 #endif

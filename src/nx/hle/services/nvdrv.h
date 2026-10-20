@@ -22,6 +22,9 @@ u64 gmmu_translate(u64 gva);
 /* The bytes from gva on, at most max, that stay contiguous in guest memory, with gva's guest address in *cpu. 0 when
    gva's page isn't mapped */
 u64 gmmu_run(u64 gva, u64 max, u64* cpu);
+/* Points the pages of [gva, gva + size) at guest memory from cpu on, the renderer told (its mapping bracket): what
+   nvhost-as-gpu's MapBufferEx does, and a test without the ioctls */
+void gmmu_map(u64 gva, u64 cpu, u64 size);
 
 /* Every syncpoint user allocates its ids here, so they stay below the 128 the stream library sizes its tables at.
    Running out is fatal. A freed id can be handed out again */

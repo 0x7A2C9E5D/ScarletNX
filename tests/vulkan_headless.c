@@ -6,10 +6,13 @@
 #include "nx/runtime/options.h"
 #include "nx/gpu/renderer.h"
 #include "nx/gpu/vk/vk.h"
+#include "nx/gpu/video/vic.h"
 #include "nx/memory/mem.h"
+#include "nx/memory/own.h"
 #include "nx/hle/services/nvdrv.h"
 #include "nx/runtime/platform/backend.h"
 #include "spirv_emitter_fixture.h"
+#include <libavutil/buffer.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,6 +75,31 @@ static int check_viewport_orientation(void) {
     return 0;
 }
 
+/* n texels of packed depth and stencil (one row) converted on the device (vk/texconv.c): the depth aspect's words and
+   the stencil aspect's bytes a copy would take */
+static int gpu_unpack(const VkFmt* f, const u32* src, u32 n, u32* depth, u8* stencil) {
+    VkTcShape s = vk_tc_shape(f, n);
+    u32 pitch = (n * f->bpp + s.in_align - 1) / s.in_align * s.in_align;
+    u64 at, cap, out_size = vk_tc_out_size(&s, 1, 1);
+    VkBuffer staged, rb;
+    u8* p = vk_stage(pitch, vk_stage_align(), &staged, &at);
+    VkBuffer scratch = vk_bl_scratch(out_size, &cap);
+    u8* out = vk_readback_buffer(out_size, &rb);
+    CHECK(p && scratch && out);
+    memset(p, 0, pitch);
+    memcpy(p, src, (size_t)n * f->bpp);
+    vk_bl_barrier(vk_cmd(), 1);
+    CHECK(vk_tc_convert(vk_cmd(), f, n, 1, 1, staged, at, pitch, scratch, 0));
+    vk_bl_barrier(vk_cmd(), 0);
+    VkBufferCopy c = {0, 0, out_size};
+    rec_CmdCopyBuffer(vk_cmd(), scratch, rb, 1, &c);
+    vk_finish();
+    vk_readback_ready();
+    memcpy(depth, out, (size_t)n * 4);
+    memcpy(stencil, out + (u64)s.out_texels * 4, n);
+    return 0;
+}
+
 static int check_packed_depth(void) {
     const u32 formats[] = {0x0D, 0x0E, 0x29, 0x2A, 0x2B, 0x30};
     for (u32 i = 0; i < sizeof formats / sizeof *formats; i++) {
@@ -93,7 +121,7 @@ static int check_packed_depth(void) {
         }
         for (int fallback = 0; fallback < 2; fallback++) {
             f.vk = fallback || floating ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_D24_UNORM_S8_UINT;
-            vk_depth_unpack(&f, (const u8*)src, 3, (u8*)depth, stencil);
+            CHECK(!gpu_unpack(&f, src, 3, depth, stencil));
             for (u32 k = 0; k < 3; k++) {
                 CHECK(stencil[k] == (formats[i] == 0x2A ? 0 : 0x51 + k));
                 if (floating)
@@ -351,10 +379,15 @@ static int check_direct_spirv(void) {
 
 /* VIC through the compute shader: raw YUV and alpha, odd starts kept, luma-only NV12, an NV21 slot over the background
    colour, the background with no slot, bytes outside the target and the slots untouched, a colour matrix, and NV12
-   rows that aren't word aligned (the shader's unaligned build) */
+   rows that aren't word aligned (the shader's unaligned build). The planes are guest memory, as VIC's always are: the
+   picture stays on the GPU (vk/vic.c publishes it), and reading it here is a CPU access to GPU-owned memory, which
+   the trap answers by landing it (memory/own.c). Each case's output starts where the last one's picture is owned, so
+   the next job copies what the GPU holds of it on the GPU */
+#define VIC_BASE (HEAP_BASE + 0x100000)
 static int check_vic(void) {
     enum { W = 32, H = 16, SENTINEL = 0xA5 };
-    static u8 y[W * H], uv[W * H / 2], out[W * 4 * H];
+    u8 *y = GP(VIC_BASE), *uv = GP(VIC_BASE + 0x1000), *out = GP(VIC_BASE + 0x2000);
+    u64 lands = own_landings();
     for (u32 j = 0; j < H; ++j)
         for (u32 i = 0; i < W; ++i) y[j * W + i] = (u8)(16 + i + 4 * j);
     for (u32 j = 0; j < H / 2; ++j)
@@ -381,7 +414,7 @@ static int check_vic(void) {
         const u32 bpp = rgba ? 4 : 1;
         VicJob job;
         memset(&job, 0, sizeof job);
-        memset(out, SENTINEL, sizeof out);
+        memset(out, SENTINEL, W * 4 * H + 64); /* a CPU write: what the GPU held there lands first */
         job.fmt = cases[c].fmt;
         job.sw = W;
         job.sh = H;
@@ -407,9 +440,10 @@ static int check_vic(void) {
         sl->mat_enable = (int)cases[c].mat;
         sl->mat_shift = 1;
         memcpy(sl->mat, m601, sizeof m601);
-        sl->iy = (VicPlane){y, sizeof y, W, H, 0, 0};
-        sl->ic = (VicPlane){uv, sizeof uv, W, H / 2, 0, 0};
+        sl->iy = (VicPlane){y, W * H, W, H, 0, 0};
+        sl->ic = (VicPlane){uv, W * H / 2, W, H / 2, 0, 0};
         CHECK(g_renderer->vic_compose(&job));
+        CHECK(!own_traps() || own_lookup(VIC_BASE + 0x2000, (u64)pitch * H, NULL, 0) > 0); /* on the GPU until read */
         for (u32 j = 0; j < H; ++j)
             for (u32 i = 0; i < W; ++i) {
                 const u8* o = out + j * pitch + i * bpp;
@@ -440,11 +474,330 @@ static int check_vic(void) {
                     CHECK(o[rb] == v[0] >> 2 && o[1] == v[1] >> 2 && o[2 - rb] == v[2] >> 2 && o[3] == 255);
             }
     }
+    /* each picture was read here: landed once, by the trap, where the host has traps */
+    CHECK(!own_traps() || own_landings() >= lands + sizeof cases / sizeof cases[0]);
     return 0;
 }
+/* two jobs into the same output with no CPU access between: the second's picture outside its target rectangle is the
+   first one's, which the GPU held and copied on the GPU (one landing, when it is read at the end) */
+static int check_vic_chain(const char* shot) {
+    enum { W = 32, H = 16 };
+    u8 *y = GP(VIC_BASE), *uv = GP(VIC_BASE + 0x1000), *out = GP(VIC_BASE + 0x2000);
+    static const u32 bg[4] = {1023, 512, 0, 1023};
+    VicJob job;
+    u64 lands;
+    memset(out, 0, W * 4 * H);
+    memset(&job, 0, sizeof job);
+    job.fmt = 0x1F;
+    job.sw = W;
+    job.sh = H;
+    job.oy = (VicPlane){out, (u64)W * 4 * H, W * 4, H, 0, 0};
+    job.tw = W;
+    job.th = H;
+    memcpy(job.bg, bg, sizeof job.bg);
+    job.slots[0] = (VicSlot){.on = 1, .w = W, .h = H, .alpha = 0x3FF, .clamp_hi = 0x3FF};
+    job.slots[0].iy = (VicPlane){y, W * H, W, H, 0, 0};
+    job.slots[0].ic = (VicPlane){GP(VIC_BASE + 0x1000), W * H / 2, W, H / 2, 0, 0};
+    CHECK(g_renderer->vic_compose(&job));
+    memset(&job.slots[0], 0, sizeof job.slots[0]); /* the second: the background in a smaller rectangle */
+    job.tx0 = 4, job.ty0 = 2, job.tw = 6, job.th = 9;
+    CHECK(g_renderer->vic_compose(&job));
+    lands = own_landings();
+    /* the display takes the picture on the GPU, where it is: nothing lands */
+    {
+        const i32 full[4] = {0, 0, 0, 0};
+        u64 expected = 1469598103934665603ull;
+        for (u32 j = 0; j < H; ++j)
+            for (u32 i = 0; i < W; ++i) {
+                int t = i >= 4 && i < 10 && j >= 2 && j < 11;
+                const u8* c = uv + (j / 2) * W + (i & ~1u);
+                u32 px = t ? 0xFF0080FFu : y[j * W + i] | (u32)c[0] << 8 | (u32)c[1] << 16 | 0xFF000000u;
+                expected = (expected ^ px) * 1099511628211ull;
+            }
+        g_renderer->present_buffer(VIC_BASE + 0x2000, W, H, W * 4, 0, 0, 1, full, 0);
+        CHECK(g_renderer->screenshot(shot) == expected);
+        CHECK(own_landings() == lands);
+    }
+    for (u32 j = 0; j < H; ++j)
+        for (u32 i = 0; i < W; ++i) {
+            const u8* o = out + (j * W + i) * 4;
+            if (i >= 4 && i < 10 && j >= 2 && j < 11)
+                CHECK(o[0] == 255 && o[1] == 128 && o[2] == 0 && o[3] == 255);
+            else
+                CHECK(o[0] == y[j * W + i] && o[3] == 255); /* the first job's: the samples as they are */
+        }
+    CHECK(!own_traps() || own_landings() == lands + 1);
+    return 0;
+}
+/* NVDEC's picture laid out on the GPU (vk/nvdec.c), then composed by VIC from there, with no CPU access between: the
+   same steps on the CPU's references (nvdec_ref.c, vic_ref.c) into twin surfaces must give the same bytes, the GPU's
+   read last (which lands them). Pictures whose rows end inside a 16 byte run, and surface padding that must keep its
+   bytes */
+#define NV_GPU (HEAP_BASE + 0x40000)
+#define NV_REF (HEAP_BASE + 0xC0000)
+static int nvdec_vic_case(u32 w, u32 h, u32 pitch, u32 sh, u32 bh) {
+    static u8 y[64 * 48], u[32 * 24], v[32 * 24];
+    u32 pairs = (w + 1) / 2;
+    u64 gob_rows = 8u << bh, ext_y = (u64)(pitch + 63) / 64 * 64 * ((sh + gob_rows - 1) / gob_rows * gob_rows);
+    u64 ext_c = (u64)(pitch + 63) / 64 * 64 * (((sh + 1) / 2 + gob_rows - 1) / gob_rows * gob_rows);
+    u64 out_size = (u64)w * 4 * h;
+    for (u32 i = 0; i < w * h; i++) y[i] = (u8)(i * 7 + 3);
+    for (u32 i = 0; i < pairs * ((h + 1) / 2); i++) u[i] = (u8)(i * 3 + 1), v[i] = (u8)(i * 5 + 2);
+    /* the twins: the same bytes before (padding included), luma, then chroma, then the output */
+    for (int k = 0; k < 2; k++) {
+        u8* base = GP(k ? NV_REF : NV_GPU);
+        for (u64 i = 0; i < 0x40000; i++) base[i] = (u8)(i * 13 + 5);
+    }
+    NvdecPic p = {{y, u, v}, {(int)w, (int)pairs, (int)pairs}, w, h, NV_GPU, NV_GPU + 0x10000, ext_y, ext_c,
+                  pitch, pitch, sh, bh};
+    NvdecPic q = p;
+    q.luma = NV_REF;
+    q.chroma = NV_REF + 0x10000;
+    CHECK(g_renderer->nvdec_write(&p));
+    nvdec_write_ref(&q);
+    /* VIC: the picture as an RGBA one, from the surfaces as NVDEC left them */
+    for (int k = 0; k < 2; k++) {
+        u64 at = k ? NV_REF : NV_GPU;
+        VicJob job;
+        memset(&job, 0, sizeof job);
+        job.fmt = 0x1F;
+        job.sw = w;
+        job.sh = h;
+        job.oy = (VicPlane){GP(at + 0x20000), out_size, w * 4, h, 0, 0};
+        job.tw = w;
+        job.th = h;
+        job.slots[0] = (VicSlot){.on = 1, .w = w & ~1u, .h = h & ~1u, .alpha = 0x3FF, .clamp_hi = 0x3FF};
+        job.slots[0].iy = (VicPlane){GP(at), ext_y, pitch, sh, 1, bh};
+        job.slots[0].ic = (VicPlane){GP(at + 0x10000), ext_c, pitch, (sh + 1) / 2, 1, bh};
+        if (k)
+            vic_compose_ref(&job);
+        else
+            CHECK(g_renderer->vic_compose(&job));
+    }
+    /* the GPU's bytes, read now (landing them), against the references' */
+    CHECK(!memcmp(GP(NV_GPU), GP(NV_REF), ext_y));
+    CHECK(!memcmp(GP(NV_GPU + 0x10000), GP(NV_REF + 0x10000), ext_c));
+    CHECK(!memcmp(GP(NV_GPU + 0x20000), GP(NV_REF + 0x20000), out_size));
+    return 0;
+}
+static int check_nvdec_vic(void) {
+    u64 lands = own_landings();
+    CHECK(!nvdec_vic_case(64, 32, 64, 32, 1));
+    CHECK(!nvdec_vic_case(33, 17, 64, 24, 0)); /* rows ending inside a run, padding rows, blocks of one GOB */
+    CHECK(!nvdec_vic_case(54, 40, 128, 48, 2)); /* a wider surface than the picture */
+    /* each case lands its three ranges when read, nothing before */
+    CHECK(!own_traps() || own_landings() <= lands + 9);
+    return 0;
+}
+
+/* The DMA copy engine on the GPU (vk/dma.c) against its CPU reference (dma_ref.c), each on one of two twin regions of
+   guest memory mapped into the GPU's address space: pitch and block linear sides, origins not on 16 bytes, lines
+   past the surface, the remap's shuffles, constants and kept bytes */
+#define DMA_A (HEAP_BASE + 0x400000) /* the GPU's twin, at GPU address DMA_GA */
+#define DMA_B (HEAP_BASE + 0x600000) /* the reference's, at DMA_GB */
+#define DMA_GA 0x200000000ull
+#define DMA_GB 0x300000000ull
+#define DMA_SPAN 0x100000u
+static int dma_case(GpuDmaOp o) {
+    GpuDmaOp g = o, c = o;
+    for (int k = 0; k < 2; k++) { /* the same bytes in both */
+        u8* t = GP(k ? DMA_B : DMA_A);
+        for (u32 i = 0; i < DMA_SPAN; i++) t[i] = (u8)(i * 29 + (i >> 9) * 7 + 3);
+    }
+    g.src.addr += DMA_GA, g.dst.addr += DMA_GA;
+    c.src.addr += DMA_GB, c.dst.addr += DMA_GB;
+    CHECK(g_renderer->dma_copy(&g));
+    dma_copy_ref(&c);
+    CHECK(!memcmp(GP(DMA_A), GP(DMA_B), DMA_SPAN)); /* reading the GPU's lands it */
+    return 0;
+}
+static GpuDmaSide pitch_side(u64 addr, u32 pitch) {
+    GpuDmaSide s = {addr, 0, pitch, 0, 0, 0, 0, 0, 0, 0};
+    return s;
+}
+static GpuDmaSide bl_side(u64 addr, u32 wb, u32 h, u32 bh, u32 ox, u32 oy) {
+    GpuDmaSide s = {addr, 1, 0, wb, h, 0, bh, 0, ox, oy};
+    return s;
+}
+static int check_dma(void) {
+    GpuDmaOp o;
+    gmmu_map(DMA_GA, DMA_A, DMA_SPAN);
+    gmmu_map(DMA_GB, DMA_B, DMA_SPAN);
+    /* a one-dimensional copy */
+    memset(&o, 0, sizeof o);
+    o.width = o.line_in = o.line_out = 1001;
+    o.lines = 1;
+    o.src = pitch_side(0x100, 0);
+    o.dst = pitch_side(0x80003, 0);
+    CHECK(!dma_case(o));
+    /* pitch to block linear, a window of a surface (a texture upload) */
+    memset(&o, 0, sizeof o);
+    o.multi = 1;
+    o.width = o.line_in = o.line_out = 80;
+    o.lines = 20;
+    o.src = pitch_side(0x1000, 100);
+    o.dst = bl_side(0x80000, 128, 40, 2, 16, 3);
+    CHECK(!dma_case(o));
+    /* block linear to pitch, from an origin not on 16 bytes, lines past the surface reading zero */
+    o.src = bl_side(0x2000, 192, 40, 1, 7, 35);
+    o.dst = pitch_side(0x90001, 120);
+    o.width = o.line_in = o.line_out = 101;
+    o.lines = 10;
+    CHECK(!dma_case(o));
+    /* block linear to block linear, lines past the destination dropped */
+    o.src = bl_side(0x4000, 256, 64, 3, 32, 5);
+    o.dst = bl_side(0xA0000, 200, 30, 0, 9, 22);
+    o.width = o.line_in = o.line_out = 150;
+    o.lines = 16;
+    CHECK(!dma_case(o));
+    /* the remap: B and R swapped (4 components of a byte), pitch to pitch */
+    memset(&o, 0, sizeof o);
+    o.multi = o.remap = o.shuffle = 1;
+    o.cs = 1, o.ns = 4, o.nd = 4;
+    o.sel[0] = 2, o.sel[1] = 1, o.sel[2] = 0, o.sel[3] = 3;
+    o.width = 33;
+    o.line_in = o.line_out = 33 * 4;
+    o.lines = 7;
+    o.src = pitch_side(0x100, 140);
+    o.dst = pitch_side(0x80002, 150);
+    CHECK(!dma_case(o));
+    /* constants only (a fill), 2 byte components, into block linear */
+    o.fill = 1, o.shuffle = 0;
+    o.cs = 2, o.ns = 2, o.nd = 2;
+    o.sel[0] = 4, o.sel[1] = 5;
+    o.const_a = 0x1234ABCD, o.const_b = 0x5678EF01;
+    o.width = 21;
+    o.line_in = o.line_out = 21 * 4;
+    o.lines = 9;
+    o.dst = bl_side(0x80000, 128, 16, 1, 6, 2);
+    CHECK(!dma_case(o));
+    /* a component kept: the destination's own bytes stay, 3 components out of 2 in */
+    o.fill = 0, o.shuffle = 1, o.keep = 1;
+    o.cs = 1, o.ns = 2, o.nd = 3;
+    o.sel[0] = 1, o.sel[1] = 6, o.sel[2] = 0;
+    o.width = 40;
+    o.line_in = 80, o.line_out = 120;
+    o.lines = 6;
+    o.src = pitch_side(0x3000, 90);
+    o.dst = bl_side(0x80000, 256, 16, 0, 5, 1);
+    CHECK(!dma_case(o));
+    return 0;
+}
+
+/* The 2D engine's blit from memory on the GPU (vk/blit.c) against its CPU reference (fermi2d_ref.c), on the DMA
+   test's twin regions: block linear and pitch planes, windows not on 16 bytes, scaled up and down, 1 to 16 bytes a
+   pixel */
+static int blit_case(GpuDmaSide src, GpuDmaSide dst, u32 bpp, u32 x0, u32 y0, u32 w, u32 h, u32 sw, u32 sh) {
+    static u32 scol[256], srow[256];
+    GpuBlit g, c;
+    for (u32 i = 0; i < w; i++) scol[i] = (u32)((u64)i * sw / w); /* nearest, the source scaled onto the window */
+    for (u32 i = 0; i < h; i++) srow[i] = (u32)((u64)(h - 1 - i) * sh / h); /* flipped */
+    for (int k = 0; k < 2; k++) {
+        u8* t = GP(k ? DMA_B : DMA_A);
+        for (u32 i = 0; i < DMA_SPAN; i++) t[i] = (u8)(i * 13 + (i >> 8) * 5 + 1);
+    }
+    g = (GpuBlit){src, dst, bpp, x0, x0 + w, y0, y0 + h, scol, srow};
+    c = g;
+    g.src.addr += DMA_GA, g.dst.addr += DMA_GA;
+    c.src.addr += DMA_GB, c.dst.addr += DMA_GB;
+    CHECK(g_renderer->blit_mem(&g));
+    blit_mem_ref(&c);
+    CHECK(!memcmp(GP(DMA_A), GP(DMA_B), DMA_SPAN));
+    return 0;
+}
+static GpuDmaSide pitch_plane(u64 addr, u32 pitch, u32 wb, u32 h) { /* as fermi2d.c's f2d_plane makes them */
+    GpuDmaSide s = pitch_side(addr, pitch);
+    s.wb = wb, s.h = h;
+    return s;
+}
+static int check_blit(void) {
+    /* block linear halved into block linear, an odd window */
+    CHECK(!blit_case(bl_side(0x1000, 128 * 4, 64, 2, 0, 0), bl_side(0x80000, 64 * 4, 32, 1, 0, 0), 4, 5, 3, 21, 9,
+                     42, 18));
+    /* pitch scaled up into block linear, 2 bytes a pixel */
+    CHECK(!blit_case(pitch_plane(0x3000, 70, 31 * 2, 12), bl_side(0x80000, 100 * 2, 40, 0, 0, 0), 2, 7, 1, 90, 33, 31, 12));
+    /* block linear into pitch, 16 bytes a pixel, a source whose rows end inside a 16 byte run */
+    CHECK(!blit_case(bl_side(0x1000, 37 * 16, 24, 1, 0, 0), pitch_plane(0x90003, 40 * 16, 40 * 16, 24), 16, 2, 2, 30, 20, 37, 24));
+    /* pitch to pitch, a byte a pixel */
+    CHECK(!blit_case(pitch_plane(0x101, 77, 77, 30), pitch_plane(0x90001, 99, 99, 15), 1, 3, 4, 95, 11, 77, 30));
+    /* 8 bytes a pixel, block linear 3 GOBs a block high */
+    CHECK(!blit_case(bl_side(0x2000, 50 * 8, 48, 3, 0, 0), bl_side(0xA0000, 40 * 8, 20, 1, 0, 0), 8, 1, 0, 39, 20,
+                     50, 48));
+    return 0;
+}
+
+/* a block linear A8B8G8R8 target of w by h at gva (blocks 2^bh GOBs high) cleared to red or blue */
+static void rt_clear(GpuChannel* ch, u64 gva, u32 w, u32 h, u32 bh, int blue) {
+    u32* r = ch->r3d;
+    const float color[4] = {blue ? 0.0f : 1.0f, 0, blue ? 1.0f : 0.0f, 1};
+    r[0x487] = 1;
+    r[0x200] = (u32)(gva >> 32);
+    r[0x201] = (u32)gva;
+    r[0x202] = w;
+    r[0x203] = h;
+    r[0x204] = 0xD5;
+    r[0x205] = bh << 4;
+    r[0x206] = 1;
+    r[0x207] = 0;
+    memcpy(&r[0x360], color, sizeof color);
+    vk_render_clear(ch, 15 << 2);
+    vk_render_end();
+}
+/* n bytes at p all blue pixels */
+static int all_blue(const u8* p, u32 n) {
+    static const u8 blue[4] = {0, 0, 255, 255};
+    for (u32 i = 0; i < n; i += 4)
+        if (memcmp(p + i, blue, 4)) return 0;
+    return 1;
+}
+/* n bytes at p all v */
+static int all_bytes(const u8* p, u32 n, u8 v) {
+    for (u32 i = 0; i < n; i++)
+        if (p[i] != v) return 0;
+    return 1;
+}
+/* Render targets over one another in the DMA test's region, as when a program frees an image and makes a bigger one
+   there: a red 64 by 64 target 64 KiB into a blue 160 by 128 one cleared after it is its block columns 8 and 9 (pixels
+   128 to 159 of every row). The newer one's pixels are on top in a DMA copy of it, and in guest memory once both are
+   written back, together or the newer one alone. A target reaching past a copy's range is one whose memory a smaller
+   surface took over: the copy takes what the program wrote there since */
+static int check_rt_overlap(void) {
+    GpuChannel* ch = calloc(1, sizeof *ch);
+    GpuDmaOp o;
+    u64 readbacks;
+    CHECK(ch);
+    memset(&o, 0, sizeof o);
+    o.multi = 1;
+    o.width = o.line_in = o.line_out = 160 * 4;
+    o.lines = 128;
+    o.src = bl_side(DMA_GA, 160 * 4, 128, 4, 0, 0);
+    o.dst = pitch_side(DMA_GA + 0x40000, 160 * 4);
+    rt_clear(ch, DMA_GA + 0x10000, 64, 64, 3, 0);
+    rt_clear(ch, DMA_GA, 160, 128, 4, 1);
+    CHECK(g_renderer->dma_copy(&o));
+    CHECK(all_blue(GP(DMA_A + 0x40000), 160 * 128 * 4)); /* reading it lands it */
+    vk_rt_before_write(DMA_GA, 0x14000);
+    CHECK(all_blue(GP(DMA_A), 0x14000));
+    /* the newer one written back alone: the older one first, under it, and not again after */
+    rt_clear(ch, DMA_GA + 0x10000, 64, 64, 3, 0);
+    rt_clear(ch, DMA_GA, 160, 128, 4, 1);
+    g_renderer->rt_flush(DMA_GA);
+    vk_rt_before_write(DMA_GA, 0x14000);
+    CHECK(all_blue(GP(DMA_A), 0x14000));
+    /* a 160 by 256 target, the program's own bytes over its memory after it, and a copy of the 160 by 128 surface */
+    rt_clear(ch, DMA_GA, 160, 256, 4, 1);
+    memset(GP(DMA_A), 0x11, 0x28000);
+    readbacks = g_vk_rt_readbacks;
+    CHECK(g_renderer->dma_copy(&o));
+    CHECK(g_vk_rt_readbacks == readbacks + 1);
+    CHECK(all_bytes(GP(DMA_A + 0x40000), 160 * 128 * 4, 0x11));
+    free(ch);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     const u32 w = 32, h = 16;
-    const u64 address = 4096;
+    const u64 address = HEAP_BASE;
     const i32 full[4] = {0, 0, 0, 0}, crop[4] = {4, 2, 20, 10};
     char *root = snx_temp_dir(NULL), *shot, *ppm;
     CHECK(root);
@@ -452,9 +805,10 @@ int main(int argc, char** argv) {
     snprintf(g_exedir, 1024, "%s/", root);
     shot = snx_path_join(root, "frame");
     ppm = snx_format("%s.ppm", shot);
-    g_mem = calloc(1, (size_t)address + w * h * 4);
-    CHECK(g_mem);
+    mem_init(); /* the real reservation and alias pool: the renderer traps what the GPU owns where the host can */
+    CHECK(mem_map(HEAP_BASE, 0x800000, MS_NORMAL, PERM_RW) == 0);
     nv_init(); /* color targets may import guest memory through the GPU page table */
+    g_settings.vulkan_video_decode = 1; /* a Vulkan Video decode queue where the device has one (lavapipe has none) */
     video_init("Headless Vulkan fixture");
     CHECK(g_opt_headless && g_renderer_up && g_vk.dev && !g_vk.surface && !g_vk.swapchain && !g_vk.sc_count);
     CHECK(!check_viewport_orientation());
@@ -464,6 +818,15 @@ int main(int argc, char** argv) {
     CHECK(!check_multisample_shader_gate());
     CHECK(!check_direct_spirv());
     CHECK(!check_vic());
+    CHECK(!check_vic_chain(shot));
+    CHECK(!check_nvdec_vic());
+    CHECK(!check_dma());
+    CHECK(!check_blit());
+    CHECK(!check_rt_overlap());
+    /* FFmpeg takes the device for Vulkan Video exactly when it has the decode queue */
+    void* video_device = g_renderer->nvdec_hw_device();
+    CHECK(!video_device == (g_vk.video_family == ~0u));
+    av_buffer_unref((AVBufferRef**)&video_device);
     CHECK(g_renderer->method_barrier);
     u32 epoch = g_vk_epoch;
     u64 finishes = g_vk_finishes;
@@ -516,13 +879,14 @@ int main(int argc, char** argv) {
     g_renderer->present_buffer(0, 0, 0, 0, 0, 0, 1, full, 0);
     CHECK(vk_frame_id() == before + 1);
     vk_finish();
-    free(g_mem);
-    g_mem = NULL;
     CHECK(!snx_remove_tree(root));
     free(root);
     free(shot);
     free(ppm);
-    puts("PASS headless Vulkan: viewport orientation, 7 VIC compositions, 8 cropped/transformed readbacks and PPMs, "
-         "no WSI");
+    puts(
+        "PASS headless Vulkan: viewport orientation, 7 VIC compositions, a VIC picture kept on the GPU and "
+        "presented from there, NVDEC pictures laid out on the GPU and composed by VIC as the CPU references do, DMA copies and 2D blits on the GPU as theirs, "
+        "render targets over one another newest on top, "
+        "8 cropped/transformed readbacks and PPMs, no WSI");
     return 0;
 }

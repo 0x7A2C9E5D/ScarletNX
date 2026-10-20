@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* tex_upload (vk/texture.c) from guest memory into the staging buffer, read back region by region against a walk of
-   the block-linear layout byte by byte (bl_offset below): a level whose rows are whole 16-byte pieces, one whose rows
-   end inside a piece, a 3D level with blocks of slices, mip levels, a level read through gmem_read, a pitch-linear
-   level, and a converted format, which still goes through its packed rows. A format the GPU takes as it
-   is goes into the staging buffer without a buffer of the level's size of its own. Levels past the allocation cap go
-   in bands of rows of a slice, each region checked where it lands, and an ASTC level's block rows reach
-   vk_astc_upload strip by strip as the layout has them */
+/* tex_upload (vk/texture.c) from guest memory through the staging buffer and the GPU's deswizzles and conversions
+   (a CPU model of them below, run as they are recorded, which checks the barriers around them) to the copies into
+   the image, each copy's bytes checked against a walk of the block-linear layout byte by byte (bl_offset below): a
+   level whose rows are whole 16-byte pieces, one whose rows end inside a piece, a 3D level with blocks of slices, mip
+   levels, a level read through gmem_read, a pitch-linear level, and a converted format. No level takes a buffer of
+   its size on the CPU. Levels past the allocation cap go in strips, each region checked where it lands, and an ASTC
+   level's block rows reach vk_astc_upload strip by strip, deswizzled */
 #include <stdlib.h>
 #include <string.h>
 static size_t g_watch, g_big; /* allocations of g_watch bytes or more, while watched */
@@ -42,24 +42,58 @@ int gmem_read(u64 gva, void* dst, u64 size) {
     for (u64 i = 0; i < size; i++) ((u8*)dst)[i] = gva + i >= GVA && gva + i < guest_end ? guest[gva + i - GVA] : 0;
     return 0;
 }
+/* nothing is GPU-owned here: vk_guest_read reads guest memory as gmem_read does, into staging */
+int g_own_any;
+void vk_guest_read(u64 gva, u64 size, u8* host, VkBuffer buf, u64 at) {
+    (void)buf, (void)at;
+    gmem_read(gva, host, size);
+}
+void vk_guest_peek(u64 gva, void* dst, u64 size) { gmem_read(gva, dst, size); }
+u8* gmem_host(u64 gva, u64 size) { return gmem_ptr(gva, size); }
 #define STAGE (8u << 20)
+#define STAGE_BUF ((VkBuffer)(uintptr_t)0x5157)
+#define SCRATCH_BUF ((VkBuffer)(uintptr_t)0x5C2A)
+/* where the GPU's batch is (vk_bl_barrier below): 1 after the barrier before its dispatches, 2 after one after them;
+   batch_moves since 1 */
+static u32 bar_state, batch_moves;
 static u8 stage[STAGE];
 static u64 stage_used;
+static u32 copy_bpp = 4, copy_bw = 1, copy_bh = 1; /* the texture's: the bytes of a copy's texel or block */
 u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off) {
     u64 at = (stage_used + align - 1) & ~(align - 1);
     if (at + size > STAGE) return NULL;
     memset(stage + at, 0xA5, size); /* bytes the upload leaves alone show */
     stage_used = at + size;
-    *buf = (VkBuffer)(uintptr_t)0x5157;
+    *buf = STAGE_BUF;
     *off = at;
     return stage + at;
 }
+u64 vk_stage_align(void) { return 64; }
+/* the scratch buffer the GPU deswizzles and converts into, which a CPU model of those dispatches writes here */
+#define SCRATCH (8u << 20)
+static u8 scratch[SCRATCH];
+static u8* mem_of(VkBuffer b) { return b == STAGE_BUF ? stage : b == SCRATCH_BUF ? scratch : NULL; }
+/* the copies into the image, with the bytes each copies taken when it is recorded (the scratch buffer is reused):
+   a region's bufferOffset is where its bytes start in copied */
 static VkBufferImageCopy regs[1024];
 static u32 nregs;
+static u8 copied[16u << 20];
+static u64 copied_used;
 static void VKAPI_CALL copy_to_image(VkCommandBuffer cb, VkBuffer b, VkImage img, VkImageLayout l, uint32_t n,
                                      const VkBufferImageCopy* r) {
-    (void)cb, (void)b, (void)img, (void)l;
-    for (u32 i = 0; i < n && nregs < 1024; i++) regs[nregs++] = r[i];
+    (void)cb, (void)img, (void)l;
+    for (u32 i = 0; i < n && nregs < 1024; i++) {
+        VkBufferImageCopy c = r[i];
+        u32 bpp = c.imageSubresource.aspectMask == VK_IMAGE_ASPECT_STENCIL_BIT ? 1 : copy_bpp;
+        u64 row = (u64)(c.bufferRowLength ? c.bufferRowLength : c.imageExtent.width) / copy_bw * bpp;
+        u64 rows = (c.bufferImageHeight ? c.bufferImageHeight : c.imageExtent.height) / copy_bh;
+        u64 size = row * rows * c.imageExtent.depth;
+        CHECK(copied_used + size <= sizeof copied && mem_of(b) && (b != SCRATCH_BUF || bar_state == 2));
+        memcpy(copied + copied_used, mem_of(b) + c.bufferOffset, size);
+        c.bufferOffset = copied_used;
+        copied_used += size;
+        regs[nregs++] = c;
+    }
 }
 PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage = copy_to_image;
 PFN_vkCmdBlitImage vkCmdBlitImage;
@@ -113,10 +147,74 @@ VkImageAspectFlags vk_aspect(const VkFmt* f) {
 static u8 astc_out[64 << 10];
 int vk_astc_upload(VkCommandBuffer cb, Surf* t, u32 w, u32 h, u32 depth, u32 level, u32 layer, VkAstcRows rows,
                    void* ctx) {
-    (void)cb, (void)level, (void)layer;
+    (void)level, (void)layer;
     u32 nx = (w + t->f.bw - 1) / t->f.bw, ny = (h + t->f.bh - 1) / t->f.bh;
     for (u32 z = 0; z < depth; z++)
-        for (u32 y = 0; y < ny; y += 3) rows(ctx, z, y, ny - y < 3 ? ny - y : 3, astc_out + ((u64)z * ny + y) * nx * 16);
+        for (u32 y = 0; y < ny; y += 3) {
+            u32 n = ny - y < 3 ? ny - y : 3;
+            VkBuffer b;
+            u64 off;
+            CHECK(rows(ctx, cb, z, 1, y, n, &b, &off) && mem_of(b));
+            memcpy(astc_out + ((u64)z * ny + y) * nx * 16, mem_of(b) + off, (u64)n * nx * 16);
+        }
+    return 1;
+}
+/* a CPU model of the GPU's moves (vk/blocklinear.c) and conversions (vk/texconv.c), done as they are recorded: the
+   recorded order is the order the barriers keep. Conversions: RGBA4 only, the format the cases convert */
+/* static u32 moves */
+static u32 convs;
+void vk_bl_barrier(VkCommandBuffer cb, int before) {
+    (void)cb;
+    bar_state = before ? 1 : 2;
+    if (before) batch_moves = 0;
+}
+VkBuffer vk_bl_scratch(u64 size, u64* cap) {
+    *cap = SCRATCH < g_vk.alloc_cap ? SCRATCH : g_vk.alloc_cap;
+    return size <= *cap ? SCRATCH_BUF : VK_NULL_HANDLE;
+}
+void vk_bl_range(const VkBlMove* m, u64* lo, u64* hi) {
+    u64 block_row = (u64)((m->row_bytes + 63) >> 6) << (9 + m->bh + m->bd);
+    u64 slab = (((((u64)m->height + 7) >> 3) + (1u << m->bh) - 1) >> m->bh) * block_row;
+    u32 last = m->y0 + m->rows - 1, zl = m->z0 + m->slices - 1;
+    *lo = (u64)(m->z0 >> m->bd) * slab + (u64)((m->y0 >> 3) >> m->bh) * block_row;
+    *hi = (u64)(zl >> m->bd) * slab + (u64)(((last >> 3) >> m->bh) + 1) * block_row;
+}
+int vk_bl_move(VkCommandBuffer cb, const VkBlMove* m, int to_bl, VkBuffer bl, u64 bl_at, VkBuffer lin, u64 lin_at) {
+    (void)cb;
+    u64 lo, hi;
+    vk_bl_range(m, &lo, &hi);
+    CHECK(!to_bl && mem_of(bl) && mem_of(lin) && bar_state == 1 && m->lin_pitch % 16 == 0 &&
+          m->lin_pitch >= ((m->row_bytes + 15) & ~15u));
+    for (u32 z = 0; z < m->slices; z++)
+        for (u32 y = 0; y < m->rows; y++)
+            for (u32 x = 0; x < m->row_bytes; x++) {
+                u64 o = bl_offset(x, m->y0 + y, m->z0 + z, m->row_bytes, m->height, m->bh, m->bd);
+                CHECK(o >= lo && o < hi);
+                mem_of(lin)[lin_at + ((u64)z * m->rows + y) * m->lin_pitch + x] = mem_of(bl)[bl_at + o - lo];
+            }
+    /*moves++;*/
+    batch_moves++;
+    return 1;
+}
+int vk_tc_converts(const VkFmt* f) { return f->conv != VKC_NONE && f->conv != VKC_ASTC; }
+VkTcShape vk_tc_shape(const VkFmt* f, u32 w) {
+    CHECK(f->conv == VKC_RGBA4);
+    return (VkTcShape){.units = (w + 1) / 2, .out_texels = (w + 1) / 2 * 2, .out_bpp = 4, .out_rows = 1, .in_align = 16};
+}
+u64 vk_tc_out_size(const VkTcShape* s, u32 rows, u32 slices) { return (u64)s->out_texels * 4 * rows * slices; }
+int vk_tc_convert(VkCommandBuffer cb, const VkFmt* f, u32 w, u32 rows, u32 slices, VkBuffer in, u64 in_at,
+                  u32 in_pitch, VkBuffer out, u64 out_at) {
+    (void)cb, (void)f;
+    u32 ow = (w + 1) / 2 * 2;
+    CHECK(mem_of(in) && mem_of(out) && (bar_state == 2 || (bar_state == 1 && !batch_moves)));
+    for (u32 y = 0; y < rows * slices; y++)
+        for (u32 x = 0; x < w; x++) {
+            const u8* t = mem_of(in) + in_at + (u64)y * in_pitch + x * 2;
+            u32 v = t[0] | t[1] << 8;
+            u32 c = (v & 15) * 17 | ((v >> 4) & 15) * 17 << 8 | ((v >> 8) & 15) * 17 << 16 | (v >> 12) * 17 << 24;
+            memcpy(mem_of(out) + out_at + ((u64)y * ow + x) * 4, &c, 4);
+        }
+    convs++;
     return 1;
 }
 void vk_barrier(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect, VkPipelineStageFlags2 src_stage,
@@ -126,15 +224,14 @@ void vk_barrier(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect, VkPi
         (void)to;
 }
 void vk_compute_mem_need(u64 a, u64 n) { (void)a, (void)n; }
-void vk_depth_unpack(const VkFmt* f, const u8* src, u64 pixels, u8* depth, u8* stencil) {
-    (void)f, (void)src, (void)pixels, (void)depth, (void)stencil;
-}
 void vk_defer_image(VkImage img, VmaAllocation a, VkImageView v1, VkImageView v2) {
     (void)img, (void)a, (void)v1, (void)v2;
 }
-u64 vk_hash(const void* p, u64 size) {
-    (void)p;
-    return size;
+u64 vk_hash(const void* p, u64 size) { /* FNV-1a over the bytes: mem_hash's check below tells contents apart */
+    const u8* b = (const u8*)p;
+    u64 h = 1469598103934665603ull;
+    for (u64 i = 0; i < size; i++) h = (h ^ b[i]) * 1099511628211ull;
+    return h;
 }
 int vk_rt_drawn_fresh(Surf* s) {
     (void)s;
@@ -184,13 +281,6 @@ int gpu_mem_dirty_since(u64 since, u64 a, u64 sz) {
     return 0;
 }
 u64 gpu_mem_generation(void) { return 0; }
-void etc2_decode_image(const u8* src, u32 w, u32 h, int kind, u8* dst) {
-    (void)src, (void)w, (void)h, (void)kind, (void)dst;
-}
-u32 etc2_pixel_bytes(int kind) {
-    (void)kind;
-    return 4;
-}
 VkResult vmaCreateImage(VmaAllocator a, const VkImageCreateInfo* ii, const VmaAllocationCreateInfo* ai, VkImage* img,
                         VmaAllocation* mem, VmaAllocationInfo* info) {
     (void)a, (void)ii, (void)ai, (void)img, (void)mem, (void)info;
@@ -238,9 +328,12 @@ static Surf tex(u32 w, u32 h, u32 d3, u32 levels, u32 bpp, u32 bh, u32 bd, int b
    the base level takes, more than one when it goes in bands */
 static void upload_and_check(Surf* t, u64 limit, u32 bands) {
     guest_end = GVA + limit;
-    stage_used = 0;
+    stage_used = copied_used = 0;
     nregs = 0;
     g_watch = 0;
+    copy_bpp = t->f.bpp;
+    copy_bw = t->f.bw;
+    copy_bh = t->f.bh;
     CHECK(tex_upload(t));
     guest_end = GVA + GUEST;
     u32 d3 = t->type == VK_IMAGE_VIEW_TYPE_3D ? t->depth3d : 1;
@@ -256,13 +349,16 @@ static void upload_and_check(Surf* t, u64 limit, u32 bands) {
             CHECK(r->imageOffset.x == 0 && r->imageExtent.width == lw && y0 + rows <= lh &&
                   z0 + r->imageExtent.depth <= ld);
             covered += rows * r->imageExtent.depth;
-            const u8* s = stage + r->bufferOffset;
+            const u8* s = copied + r->bufferOffset;
+            u64 pitch = r->bufferRowLength ? (u64)r->bufferRowLength * t->f.bpp : rowb;
+            u64 height = r->bufferImageHeight ? r->bufferImageHeight : rows;
+            CHECK(pitch >= rowb && height >= rows);
             for (u32 z = z0; z < z0 + r->imageExtent.depth; z++)
                 for (u32 y = y0; y < y0 + rows; y++)
                     for (u32 x = 0; x < rowb; x++) {
                         u64 o = t->bl ? bl_offset(x, y, z, rowb, lh, lbh, lbd) : (u64)(z * lh + y) * t->pitch + x;
                         u8 want = at + o < limit ? guest[at + o] : 0;
-                        CHECK(s[((u64)(z - z0) * rows + (y - y0)) * rowb + x] == want);
+                        CHECK(s[((u64)(z - z0) * height + (y - y0)) * pitch + x] == want);
                     }
         }
         CHECK(covered == lh * ld && (l || n == bands));
@@ -296,35 +392,43 @@ int main(void) {
     g_watch = 1920 * 136 * 4;
     tex_upload(&a);
     CHECK(g_big == 0);
-    /* a converted format still packs its rows first: RGBA4 from 2 byte texels, through level_convert */
+    /* a converted format: deswizzled, then RGBA4 from 2 byte texels converted, both on the GPU */
     Surf f = tex(16, 8, 1, 1, 2, 0, 0, 1);
     f.f.conv = VKC_RGBA4;
-    stage_used = nregs = 0;
+    stage_used = copied_used = nregs = 0;
+    convs = 0;
+    copy_bpp = 4;
     tex_upload(&f);
-    CHECK(nregs == 1);
+    CHECK(nregs == 1 && convs == 1 && regs[0].bufferRowLength == 16);
     for (u32 y = 0; y < 8; y++)
         for (u32 x = 0; x < 16; x++) {
             u32 v = guest[bl_offset(x * 2, y, 0, 32, 8, 0, 0)] | guest[bl_offset(x * 2 + 1, y, 0, 32, 8, 0, 0)] << 8;
             u32 want = (v & 15) * 17 | ((v >> 4) & 15) * 17 << 8 | ((v >> 8) & 15) * 17 << 16 | (v >> 12) * 17 << 24;
             u32 got;
-            memcpy(&got, stage + regs[0].bufferOffset + (y * 16 + x) * 4, 4);
+            memcpy(&got, copied + regs[0].bufferOffset + (y * 16 + x) * 4, 4);
             CHECK(got == want);
         }
-    /* past a 16 KiB allocation cap, bands of rows of one slice: the picture (7680 byte rows) in 68 bands of 2 rows,
-       the pitch-linear level in bands of 13 rows (its second level fits whole), and under a 4 KiB cap the 3D level
-       (5600 bytes) slice by slice */
+    /* past the allocation cap, strips: under 64 KiB a row of the picture's blocks (16 GOBs high, 960 KiB) doesn't
+       fit, so it goes a GOB row (8 rows, 7680 bytes each) at a time, each GOB of it gathered from its block, 17 of
+       them; under 16 KiB the pitch-linear level in strips of 13 rows (its second level fits whole), and under 4 KiB
+       the 3D level (blocks of 2 GOBs high and 2 slices deep, 4096 bytes a row of them) a row of blocks of 2 slices
+       at a time */
+    g_vk.alloc_cap = 64 << 10;
+    upload_and_check(&a, GUEST, 17);
     g_vk.alloc_cap = 16 << 10;
-    upload_and_check(&a, GUEST, 68);
     Surf g = tex(300, 40, 1, 2, 4, 0, 0, 0);
     upload_and_check(&g, GUEST, 4);
     g_vk.alloc_cap = 4 << 10;
     upload_and_check(&c, GUEST, 4);
     g_vk.alloc_cap = 16 << 10;
-    /* a converted format is converted band by band: 64 rows of 256 converted bytes a band */
-    stage_used = nregs = 0;
+    /* a converted format is deswizzled and converted strip by strip: a row of blocks (32 rows) takes 4 KiB
+       deswizzled and 8 KiB converted, so a strip is one, 10 of them */
+    stage_used = copied_used = nregs = 0;
+    convs = 0;
+    copy_bpp = 4; /* the copies' texels are converted ones */
     Surf h = tex(64, 300, 1, 1, 2, 2, 0, 1);
     h.f.conv = VKC_RGBA4;
-    CHECK(tex_upload(&h) && nregs == 5);
+    CHECK(tex_upload(&h) && nregs == 10 && convs == 10);
     for (u32 i = 0; i < nregs; i++)
         for (u32 y = 0; y < regs[i].imageExtent.height; y++)
             for (u32 x = 0; x < 64; x++) {
@@ -333,11 +437,12 @@ int main(void) {
                                                                             << 8;
                 u32 want = (v & 15) * 17 | ((v >> 4) & 15) * 17 << 8 | ((v >> 8) & 15) * 17 << 16 | (v >> 12) * 17 << 24;
                 u32 got;
-                memcpy(&got, stage + regs[i].bufferOffset + (y * 64 + x) * 4, 4);
+                memcpy(&got, copied + regs[i].bufferOffset + (y * 64 + x) * 4, 4);
                 CHECK(got == want);
             }
     g_vk.alloc_cap = 256ull << 20;
-    /* an ASTC level (4x4 blocks of 16 bytes) of 3 slices: its block rows as vk_astc_upload receives them */
+    /* an ASTC level (4x4 blocks of 16 bytes) of 3 slices: its block rows as vk_astc_upload receives them,
+       deswizzled on the GPU */
     Surf k = tex(60, 37, 3, 1, 16, 1, 1, 1);
     k.f.bw = k.f.bh = 4;
     k.f.conv = VKC_ASTC;
@@ -347,6 +452,19 @@ int main(void) {
         for (u32 y = 0; y < 10; y++)
             for (u32 x = 0; x < 15 * 16; x++)
                 CHECK(astc_out[((z * 10 + y) * 15) * 16 + x] == guest[bl_offset(x, y, z, 15 * 16, 10, 1, 1)]);
+    /* the change check, mem_hash: the same hash whether the GPU holds bytes somewhere (g_own_any: the texture read
+       through vk_guest_peek) or not, and a byte past a page's first 64 changes it, as a row the CPU rewrites does */
+    {
+        const u64 at = GVA + 0x20000, size = 4 * 4096;
+        u64 plain = mem_hash(at, size), owned;
+        g_own_any = 1;
+        owned = mem_hash(at, size);
+        CHECK(owned == plain);
+        guest[0x20000 + 4096 + 100] ^= 0x5A;
+        CHECK(mem_hash(at, size) != owned);
+        guest[0x20000 + 4096 + 100] ^= 0x5A;
+        g_own_any = 0;
+    }
     printf("tex_upload_rows: %u checks passed\n", checks);
     return 0;
 }

@@ -60,6 +60,12 @@ set(snx_ffmpeg_args
     --nm=${CMAKE_NM}
     # FFmpeg's own warnings stay out of the build output
     --extra-cflags=-w)
+if((WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux") AND NOT ANDROID)
+    # the H.264 decoder's Vulkan Video path, which the vulkan_video setting turns on (src/nx/gpu/vk/nvdec.c). FFmpeg
+    # loads Vulkan's functions through the runtime's device (no link to the loader); only the headers are needed
+    list(APPEND snx_ffmpeg_args --enable-vulkan --enable-hwaccel=h264_vulkan
+         "--extra-cflags=-I${Vulkan-Headers_SOURCE_DIR}/include")
+endif()
 if(WIN32 OR CMAKE_CROSSCOMPILING)
     # configure guesses the target from the machine doing the build, so a cross build names it. CMake names the
     # architecture AMD64 or ARM64 on Windows, which configure doesn't know
@@ -197,7 +203,8 @@ if(WIN32)
     # libavutil's random seed uses BCryptGenRandom
     target_link_libraries(FFmpeg::avutil INTERFACE bcrypt)
 else()
-    target_link_libraries(FFmpeg::avutil INTERFACE Threads::Threads m)
+    # dl: libavutil's Vulkan code can open the loader itself, which the runtime never has it do
+    target_link_libraries(FFmpeg::avutil INTERFACE Threads::Threads m ${CMAKE_DL_LIBS})
 endif()
 add_library(FFmpeg::swresample STATIC IMPORTED GLOBAL)
 set_target_properties(FFmpeg::swresample PROPERTIES IMPORTED_LOCATION "${snx_ffmpeg_prefix}/lib/libswresample.a"

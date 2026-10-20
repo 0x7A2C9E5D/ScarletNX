@@ -32,6 +32,7 @@ New here? Start with [Build](./BUILD.md), then [Usage](./USAGE.md).
   - **[Memory accounting](./MEMORY_ACCOUNTING.md)**
 - GPU:
   - **[ASTC compute uploads](./ASTC.md)**
+  - **[Block linear surfaces and texture conversions on the GPU](./BLOCKLINEAR.md)**
   - **[VIC composition on the GPU](./VIC.md)**
   - **[Guest buffers on unified memory](./UMA_MEMORY.md)**
   - **[Shader corrections, batch 001](./shader-audit/fixes-001.md)**

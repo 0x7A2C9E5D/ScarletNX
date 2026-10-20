@@ -155,6 +155,8 @@ void plat_file_unshare(int fd, const u8* data, u64 size) {
 }
 static int test_left_said; /* the warnings that a folder was left by an older version, the last in test_left_text */
 static char test_left_text[1024];
+/* memory/own.c: nothing is GPU-owned here */
+void own_acquire(u64 addr, u64 size) { (void)addr, (void)size; }
 void logf_(int level, const char* format, ...) {
     char text[1024];
     va_list args;

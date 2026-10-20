@@ -167,7 +167,7 @@ static int render_begin(Surf** rt, Surf* zt, u32 n, int zt_ro, int srgb_write, u
     return 1;
 }
 static void target_written(Surf* s) {
-    s->wgen++;
+    vk_surf_wrote(s);
     vk_rt_drawn(s);
 }
 
@@ -449,7 +449,7 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
         rec_CmdClearAttachments(vk_cmd(), na, at, 1, &rect);
         if (color_clear) {
             Surf* s = g_rp.rt[slot];
-            s->wgen++;
+            vk_surf_wrote(s);
             if (s->layers == 1 && rect.rect.offset.x == 0 && rect.rect.offset.y == 0 &&
                 rect.rect.extent.width == s->sw && rect.rect.extent.height == s->sh)
                 vk_rt_drawn_full(s);
@@ -457,7 +457,7 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
                 vk_rt_drawn(s);
         }
         if (na > (u32)color_clear && zt) {
-            zt->wgen++;
+            vk_surf_wrote(zt);
             int all_aspects = (v & 1) && (!zt->f.stencil || (v & 2));
             if (all_aspects && zt->layers == 1 && rect.rect.offset.x == 0 && rect.rect.offset.y == 0 &&
                 rect.rect.extent.width == zt->sw && rect.rect.extent.height == zt->sh)
@@ -1149,7 +1149,7 @@ static void draw_images_discard(DrawImages* images) {
 }
 static void draw_images_commit(DrawImages* images) {
     for (int i = 0; i < images->n; i++) {
-        images->surf[i]->wgen++;
+        vk_surf_wrote(images->surf[i]);
         if (images->original[i]) image_record(images->surf[i], images->original[i], images->size[i]);
     }
     images->n = 0;
@@ -2460,7 +2460,7 @@ void vk_render_draw_texture(GpuChannel* ch) {
                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
     rec_CmdBlitImage(cb, t->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, d->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                    &b, linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
-    d->wgen++;
+    vk_surf_wrote(d);
     vk_rt_drawn(d);
     d->last_used = g_vk_present;
 }
