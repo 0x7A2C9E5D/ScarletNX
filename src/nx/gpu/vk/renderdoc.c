@@ -81,9 +81,11 @@ static int rd_wanted(u64 present) {
    capture of this frame ends here, and the next frame's starts */
 void vk_renderdoc_present(u64 present) {
     void* dev;
+    int want;
     if (!g_rd || !g_vk.instance) return;
     dev = RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE(g_vk.instance);
-    if (g_rd_open || rd_wanted(present)) vk_rec_sync(); /* the frame's commands are recorded within the capture */
+    want = rd_wanted(present);            /* asked once: it takes the frame it answers for */
+    if (g_rd_open || want) vk_rec_sync(); /* the frame's commands are recorded within the capture */
     if (g_rd_open) {
         g_rd_open = 0;
         if (g_rd->EndFrameCapture(dev, NULL)) {
@@ -96,7 +98,7 @@ void vk_renderdoc_present(u64 present) {
         } else
             WARN("renderdoc: the capture of present %llu failed\n", (unsigned long long)present);
     }
-    if (rd_wanted(present)) {
+    if (want) {
         g_rd->StartFrameCapture(dev, NULL);
         g_rd_open = 1;
     }
