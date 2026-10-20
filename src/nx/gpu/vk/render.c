@@ -713,15 +713,20 @@ typedef struct {
 /* What a texture handle resolved to, kept while nothing it came from can have changed: the pools' addresses, the
    surface table (g_vk_surf_epoch), the CPU's writes the stream can see (vk_ww_epoch), the results pending over guest
    memory (none was added: g_pend_any.adds) and the GPU's writes to the two headers. A draw resolved each of its
-   textures again, reading both headers and finding the texture by them: a tenth of the GPU thread in Tears of the
-   Kingdom, for the same few hundred handles every draw. A texture a render target holds isn't kept (its contents and
-   whether it is the target change with drawing), and a kept one is still checked against its memory (vk_tex_recheck) */
+   textures again, reading both headers and finding the texture by them: a tenth of the GPU thread in one game, for
+   the same few hundred handles every draw. A kept texture is still checked against its memory
+   (vk_tex_recheck). A render target read whole as the texture is kept too (rt): its Surf stays the target while the
+   surface table doesn't change, and a hit does what tex_from_tic does for it each draw, the read check
+   (vk_rt_note_read) and whether its contents are defined. Those were a twentieth of the GPU thread in one game,
+   which samples its targets in most draws. A crop of a target, or a texture over a target's memory read from memory,
+   isn't kept (their contents change with drawing) */
 typedef struct {
     const GpuChannel* ch;
     u64 tic_base, tsc_base, gw, adds;
     u32 handle, surf_epoch, ww_epoch;
     u32 tic[8], tsc[8];
     Surf* t;
+    int rt; /* t is the render target itself, read whole */
 } TexMemo;
 #define TEX_MEMO 1024
 static TexMemo g_tex_memo[TEX_MEMO];
@@ -764,15 +769,26 @@ static void tex_resolve(GpuChannel* ch, u32 handle, TexRes* x) {
         m->gw = gw;
         memcpy(x->tic, m->tic, sizeof x->tic);
         memcpy(x->tsc, m->tsc, sizeof x->tsc);
-        x->t = vk_tex_recheck(m->t);
-        if (!x->t) m->t = NULL;
-        return;
+        if (m->rt) {
+            if (m->t->layout != VK_IMAGE_LAYOUT_UNDEFINED) vk_rt_note_read(m->t);
+            if (m->t->layout != VK_IMAGE_LAYOUT_UNDEFINED) {
+                x->t = m->t;
+                return;
+            }
+            m->t = NULL; /* undefined: memory has its texels, resolved below */
+        } else {
+            x->t = vk_tex_recheck(m->t);
+            if (!x->t) m->t = NULL;
+            return;
+        }
     }
     vk_gmem_words(tic_at, x->tic, 8);
     vk_gmem_words(tsc_at, x->tsc, 8);
     x->t = vk_tex_from_tic(x->tic);
     m->t = NULL;
-    if (x->t && !x->t->is_rt && !vk_rt_find(x->t->gva)) {
+    Surf* at = x->t ? vk_rt_find(x->t->gva) : NULL;
+    if (x->t && (x->t->is_rt ? x->t == at : !at)) {
+        m->rt = x->t->is_rt;
         m->ch = ch;
         m->handle = handle;
         m->tic_base = tic_base;
