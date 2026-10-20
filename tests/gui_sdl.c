@@ -4471,6 +4471,15 @@ int main(int argc, char** argv) {
                 render(&app);
                 boxed = preview_pixels(&app);
                 assert(same_pixels(plain, boxed));
+                /* the box shows over the editor itself, its pictures the app's at the size it draws them, render
+                   after render */
+                assert(find_text(&app, "Who plays the games", rgb(app.theme.page), 1, &nx, &ny));
+                render(&app);
+                for (int i = 0; i < g_user_count; ++i) {
+                    float w = 0, h = 0;
+                    assert(app.users_pictures[i] && SDL_GetTextureSize(app.users_pictures[i], &w, &h) &&
+                           (int)w == app.users_side);
+                }
                 SDL_DestroySurface(plain);
                 SDL_DestroySurface(boxed);
                 key(&app, SDLK_ESCAPE);

@@ -4316,7 +4316,10 @@ static void render(App* app) {
         render_pad(app);
     else if (app->editing) {
         draw_form(app);
-        if (app->confirm.shown) render_ask(app); /* a folder picked on the folders' screen */
+        if (app->confirm.shown)
+            render_ask(app); /* a folder picked on the folders' screen */
+        else if (app->users_shown)
+            render_users(app); /* opened from the form's head, as from the menu's */
     } else
         draw_screen(app);
     if (app->cleaned_shown) render_files(app, 1); /* over the menu, or the App's rows it was started from */
