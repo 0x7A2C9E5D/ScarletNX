@@ -652,8 +652,9 @@ static int language_auto(void) {
 /* the language Settings > App picked, or Auto's, in use */
 static void language_apply(App* app) { snx_tr_use(app->language ? app->language - 1 : language_auto()); }
 /* what app_save kept, read: applied as the menu opens (apply), else only looked at. A value the menu does not know, or a
-   theme no longer there, leaves what the menu has, named in bad as key = value; how many */
-static int app_read(App* app, bool apply, char* bad, size_t size) {
+   theme no longer there, leaves what the menu has, named in bad as key = value; how many. A language named in another
+   form of its tag (pt_BR, which builds before the tags wrote) is that language, the form read kept in renamed */
+static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed, size_t renamed_size) {
     size_t bytes = 0, i;
     char *text = app->app_file ? (char*)snx_read_file(app->app_file, &bytes) : NULL, *key, *value;
     char* places[GUI_PLACES] = {NULL, NULL, NULL};
@@ -661,6 +662,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size) {
     int scale = app->menu.text_size, language = app->language, n = 0, count = 0, moved = 0;
     SnxIni ini;
     if (size) bad[0] = 0;
+    if (renamed_size) renamed[0] = 0;
     if (!text) return 0;
     snx_ini_start(&ini, text);
     while (snx_ini_next(&ini, &key, &value)) {
@@ -696,8 +698,11 @@ static int app_read(App* app, bool apply, char* bad, size_t size) {
                 continue;
             }
         } else if (!strcmp(ini.section, "app") && !strcmp(key, "language")) {
-            if (!strcmp(value, "auto") || snx_tr_find(value) >= 0) {
-                language = strcmp(value, "auto") ? snx_tr_find(value) + 1 : 0;
+            int found = snx_tr_find(value);
+            if (!strcmp(value, "auto") || found >= 0) {
+                language = found + 1;
+                if (found >= 0 && strcmp(value, snx_gui_languages[found].code) && renamed_size)
+                    snprintf(renamed, renamed_size, "%s", value);
                 continue;
             }
         }
@@ -731,8 +736,22 @@ static int app_read(App* app, bool apply, char* bad, size_t size) {
 }
 /* app.ini as the menu opens, what it does not take named in the message */
 static void app_load(App* app) {
-    char bad[384];
-    app_read(app, true, bad, sizeof bad);
+    char bad[384], renamed[64];
+    app_read(app, true, bad, sizeof bad, renamed, sizeof renamed);
+    /* an older form of the language's tag: the tag in its place, the file's other lines as they were, said once */
+    if (renamed[0] && app->language) {
+        const char* code = snx_gui_languages[app->language - 1].code;
+        char why[512];
+        size_t m = strlen(app->message);
+        snprintf(app->message + m, sizeof app->message - m, "%s", m ? " " : "");
+        m = strlen(app->message);
+        if (snx_ini_put(app->app_file, "app", "language", code, why, sizeof why))
+            snprintf(app->message + m, sizeof app->message - m, snx_tr("%s: language = %s read as %s, not written: %s"),
+                     app->app_file, renamed, code, why);
+        else
+            snprintf(app->message + m, sizeof app->message - m, snx_tr("%s: language = %s is now %s"), app->app_file,
+                     renamed, code);
+    }
     if (bad[0]) {
         size_t m = strlen(app->message);
         snprintf(app->message + m, sizeof app->message - m, "%s", m ? " " : "");
@@ -5546,7 +5565,7 @@ static void clean_old(App* app) {
     clean_inis(app, &app->cleaned);
     if (settings_unread(app, unread, sizeof unread))
         clean_keys(app, app->settings_file, unread, gui_settings_save(&app->settings, app->settings_file));
-    if (app_read(app, false, unread, sizeof unread)) /* the picks as the menu has them, nothing else */
+    if (app_read(app, false, unread, sizeof unread, NULL, 0)) /* the picks as the menu has them, nothing else */
         clean_keys(app, app->app_file, unread, app_save(app));
     app->cleaned_shown = app->cleaned.count > 0;
     app->files_top = 0;
@@ -5564,7 +5583,7 @@ static void clean_row(App* app) {
         return;
     }
     inis = clean_inis(app, NULL);
-    keys = settings_unread(app, unread, sizeof unread) + app_read(app, false, unread, sizeof unread);
+    keys = settings_unread(app, unread, sizeof unread) + app_read(app, false, unread, sizeof unread, NULL, 0);
     if (!inis && !keys) {
         snprintf(note, size, "%s", snx_tr("Nothing to clean: no [Deprecated] in a game's .ini, no old keys"));
         return;

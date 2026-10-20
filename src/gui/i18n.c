@@ -21,6 +21,7 @@
    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
    SOFTWARE. */
 #include "gui/i18n.h"
+#include "common/utilities/language_tag.h"
 #include <string.h>
 
 #define SNX_MO_MAGIC   0x950412deUL
@@ -90,35 +91,22 @@ int snx_tr_find(const char* code) {
     int i;
     for (i = 0; i < tr_count; ++i)
         if (!strcmp(tr_list[i].code, code)) return i;
+    for (i = 0; i < tr_count; ++i)
+        if (snx_language_fit(tr_list[i].code, code) == 3) return i;
     return -1;
-}
-/* the bytes of a locale's language, before its country */
-static size_t tr_language_length(const char* locale) { return strcspn(locale, "_-.@"); }
-/* 2: the locale's language and country, 1: its language with no country, 0: another */
-static int tr_match(const char* code, const char* locale) {
-    size_t n = tr_language_length(locale), c = tr_language_length(code), country;
-    if (n != c || strncmp(code, locale, n)) return 0;
-    if (!code[c]) return 1;
-    if (locale[n] != '_' && locale[n] != '-') return 0;
-    country = strcspn(locale + n + 1, ".@");
-    return strlen(code + c + 1) == country && !strncmp(code + c + 1, locale + n + 1, country) ? 2 : 0;
 }
 int snx_tr_pick(const char* const* locales, int count) {
     int l, i, best, how;
     for (l = 0; l < count; ++l) {
-        size_t n = tr_language_length(locales[l]);
-        if (!n) continue;
         best = -1;
         how = 0;
         for (i = 0; i < tr_count; ++i) {
-            int m = tr_match(tr_list[i].code, locales[l]);
-            if (m > how) {
+            int fit = snx_language_fit(tr_list[i].code, locales[l]);
+            if (fit > how) {
                 best = i;
-                how = m;
+                how = fit;
             }
         }
-        for (i = 0; best < 0 && i < tr_count; ++i) /* the language for another country */
-            if (tr_language_length(tr_list[i].code) == n && !strncmp(tr_list[i].code, locales[l], n)) best = i;
         if (best >= 0) return best;
     }
     return 0;

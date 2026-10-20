@@ -156,7 +156,7 @@ static void test_first(App* app) {
     /* the language: the system's to start on, the test's other one picked with the mouse */
     key(app, SDLK_RETURN);
     assert(page(app) == SNX_SETUP_LANGUAGE && app->setup_choice.count == snx_gui_language_count &&
-           snx_gui_language_count == 2 && app->setup_choice.focus == 0);
+           snx_gui_language_count == 3 && app->setup_choice.focus == 0);
     setup_boxes(app, &b);
     point(app, list_box(&b.choices.list, 1), true);
     assert(page(app) == SNX_SETUP_INSTALL && app->language == 2 && app->setup_save && snx_tr_language() == 1);

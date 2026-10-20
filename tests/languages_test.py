@@ -42,7 +42,7 @@ DRAWN = bl.drawable(ROOT)
 class Po:
     """a .po written in a folder of its own"""
 
-    def __init__(self, test, body, code='pt_BR', name='Portugu\u00eas (Brasil)', header=None):
+    def __init__(self, test, body, code='pt-BR', name='Portugu\u00eas (Brasil)', header=None):
         self.folder = tempfile.TemporaryDirectory(prefix='snx-languages-')
         test.addCleanup(self.folder.cleanup)
         self.path = Path(self.folder.name) / f'{code}.po'
@@ -156,7 +156,7 @@ class Files(unittest.TestCase):
             + '#~ msgid "Older"\n#~ msgstr "Antigo"\n\n'
             + '# its comment\n#~ msgid "Oldest"\n#~ msgstr "O mais antigo"\n'
         )
-        self.assertEqual((code, name, stale), ('pt_BR', 'Portugu\u00eas (Brasil)', ['Gone from the code']))
+        self.assertEqual((code, name, stale), ('pt-BR', 'Portugu\u00eas (Brasil)', ['Gone from the code']))
         catalog = gettext.GNUTranslations(io.BytesIO(mo))
         self.assertEqual(catalog.gettext('Settings'), 'Configura\u00e7\u00f5es')
         self.assertEqual(catalog.gettext('Cannot open %s: %s'), 'N\u00e3o abre %s: %s')
@@ -199,7 +199,7 @@ class Files(unittest.TestCase):
             'msgid "Settings"\n\n',
             'msgid "Settings"\nmsgstr "Ajustes"\nmsgstr "Outra"\n\n',
             'what is this\n\n',
-            entry('', 'Language: pt_BR\\n'),
+            entry('', 'Language: pt-BR\\n'),
             entry('Cannot open %s: %s', 'N\u00e3o abre %s'),
         ]
         for body in bodies:
@@ -229,26 +229,31 @@ class Files(unittest.TestCase):
         with self.assertRaises(bl.Refused):
             self.compile(entry('Settings', 'Ajustes'), header='')
         with self.assertRaises(bl.Refused):
-            self.compile(entry('Settings', 'Ajustes'), header=HEADER.format(code='pt_PT', name='Portugu\u00eas'))
+            self.compile(entry('Settings', 'Ajustes'), header=HEADER.format(code='pt-PT', name='Portugu\u00eas'))
         with self.assertRaises(bl.Refused):
-            self.compile(entry('Settings', 'Ajustes'), header=HEADER.format(code='pt_BR', name=''))
+            self.compile(entry('Settings', 'Ajustes'), header=HEADER.format(code='pt-BR', name=''))
         with self.assertRaises(bl.Refused):
             self.compile(
                 entry('Settings', 'Ajustes'),
-                header=HEADER.format(code='pt_BR', name='x').replace('charset=UTF-8', 'charset=ISO-8859-1'),
+                header=HEADER.format(code='pt-BR', name='x').replace('charset=UTF-8', 'charset=ISO-8859-1'),
             )
-        for code in ('en', 'PT_br', 'portuguese', 'pt-BR'):
-            with self.assertRaises(bl.Refused, msg=code):
+        # a BCP 47 tag as written for it: language, Script, REGION; the locale's forms and English refused
+        for code in ('en', 'PT_br', 'portuguese', 'pt_BR', 'pt-br', 'zh_CN', 'zh-hans-CN', 'zh-Hans-cn', 'pt-BRA'):
+            with self.assertRaisesRegex(bl.Refused, 'BCP 47 tag', msg=code):
                 self.compile(entry('Settings', 'Ajustes'), code=code)
+        for code in ('pt-BR', 'pt', 'zh-Hans-CN', 'zh-Hant', 'es-419'):
+            self.assertEqual(self.compile(entry('Settings', 'Ajustes'), code=code)[0], code)
         with self.assertRaises(bl.Refused):
             self.compile(entry('Settings', 'Configura\u00e7\u00f5es').encode('latin-1'))
 
     def test_the_c_source(self):
         mo = bl.mo_bytes({'': 'h', 'a': 'b'})
-        text = bl.c_text([('pt_BR', 'Portugu\u00eas "?"', mo, [])], 'po/')
+        text = bl.c_text([('pt-BR', 'Portugu\u00eas "?"', mo, []), ('zh-Hans-CN', 'x', mo, [])], 'po/')
         self.assertIn('{"en", "English", NULL, 0},', text)
-        self.assertIn('{"pt_BR", "Portugu\\303\\252s \\042\\077\\042", mo_pt_BR, sizeof mo_pt_BR},', text)
-        self.assertIn('const int snx_gui_language_count = 2;', text)
+        self.assertIn('{"pt-BR", "Portugu\\303\\252s \\042\\077\\042", mo_pt_BR, sizeof mo_pt_BR},', text)
+        self.assertIn('static const unsigned char mo_zh_Hans_CN[] = {', text)
+        self.assertIn('{"zh-Hans-CN", "x", mo_zh_Hans_CN, sizeof mo_zh_Hans_CN},', text)
+        self.assertIn('const int snx_gui_language_count = 3;', text)
         self.assertTrue(text.isascii())
 
 

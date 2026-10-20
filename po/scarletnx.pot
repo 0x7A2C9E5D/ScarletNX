@@ -371,6 +371,16 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "%s: language = %s read as %s, not written: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: language = %s is now %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "Not used from %s: %s"
 msgstr ""
 

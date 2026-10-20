@@ -4,9 +4,9 @@
 #include "nx/runtime/driver/setup.h"
 #include "common/utilities/common.h"
 #include "common/utilities/ini_lines.h"
+#include "common/utilities/language_tag.h"
 #include "common/utilities/setup.h"
 #include "common/utilities/users.h"
-#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -121,17 +121,19 @@ static int notices(Ask* a, const SnxSetup* setup) {
     fputs("  Not moved. See docs/DEPRECATIONS.md\n[Enter] OK ", a->out);
     return answer(a, line, sizeof line);
 }
-/* the system's language among the launcher's: LANG's (pt_BR.UTF-8), the same language for another country, else the
-   first, English; 1-based */
+/* the system's language among the launcher's, by their tags' fit (language_tag.h) to LANG's locale (pt_BR.UTF-8): the
+   same language and region, else the language for another one; else the first, English. 1-based */
 static int language_auto(int count) {
-    const char *lang = getenv("LANG"), *code, *name;
-    int i, near = 0;
+    const char *lang = getenv("LANG"), *name;
+    int i, best = 1, how = 0;
     for (i = 0; lang && i < count; ++i) {
-        code = snx_menu_language(i, &name);
-        if (!strncmp(lang, code, strlen(code)) && !isalnum((unsigned char)lang[strlen(code)])) return i + 1;
-        if (!near && !strncmp(lang, code, 2)) near = i + 1;
+        int fit = snx_language_fit(snx_menu_language(i, &name), lang);
+        if (fit > how) {
+            best = i + 1;
+            how = fit;
+        }
     }
-    return near ? near : 1;
+    return best;
 }
 /* the launcher's language: the one it has (app.ini's, else the system's) or another, kept in *picked (1-based) for
    app.ini once the install's folder is known; 0 for the one it has, which app.ini keeps as it is */
@@ -146,8 +148,8 @@ static int language(Ask* a, int* picked) {
         ++count;
     }
     now = language_auto(count);
-    for (*picked = 0; set && *picked < count; ++*picked)
-        if (!strcmp(snx_menu_language(*picked, &name), set)) now = *picked + 1;
+    for (*picked = 0; set && *picked < count; ++*picked) /* its tag, or an older form of it (pt_BR) */
+        if (snx_language_fit(snx_menu_language(*picked, &name), set) == 3) now = *picked + 1;
     free(set);
     fputc('\n', a->out);
     rc = choose(a, count, now, picked);

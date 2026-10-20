@@ -167,11 +167,14 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   and YoRHa, then each folder of `themes/` (see [Themes](#themes)). The menu opens in YoRHa until one is picked.
   It is kept for the next start,
   as are Text size and Language, in `app.ini` beside `settings.ini`: `[app]` with `theme` (a theme's folder
-  name), `text_size` (`auto`, `0.25`, `0.5`, `0.75` or 1 to 4) and `language` (`auto`, `en` or a language's code, as `pt_BR`), and once one
+  name), `text_size` (`auto`, `0.25`, `0.5`, `0.75` or 1 to 4) and `language` (`auto`, `en` or a language's BCP 47
+  tag, as `pt-BR` or `zh-Hans-CN`), and once one
   is picked `[folders]` with Folders' `data`, `games` and
   `work` (a full path, nothing for the default). A value the
   menu does not know, or a theme no longer there, is named in the menu's message as it opens and
-  left out; a file that cannot be written is named in App's note.
+  left out; a file that cannot be written is named in App's note. A language in another form of its tag (`pt_BR`,
+  `zh_CN`, which builds before the tags wrote) is read as that language and written as its tag, the message saying
+  the two once (`language = pt_BR is now pt-BR`).
 - Settings > App's **Theme editor** edits the current theme: **Save** first, the folder it is saved in, a row
   per `theme.ini` key, and beside them a
   preview of the menu or a run (Ctrl+P, or a click on it, switches). Left/Right change a word, a switch or a
@@ -188,10 +191,12 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   letters scroll the menu. The foot's letters (its keys, and the tips when they are
   there) are a size under the rest's, 1x at the least.
 - Settings > App's **Language** goes round Auto, English and each language compiled in, by its own name. Auto,
-  the default, takes the first of the system's languages (SDL's preferred locales) the menu has: that language for
-  that country, else the language with no country of its own, else the language for another country (Portuguese of
-  Portugal reads `pt_BR` when it is the only Portuguese), else English; the row says which it took. The words change
-  at once; a phrase the language has not translated stays English.
+  the default, takes the first of the system's languages (SDL's preferred locales, as `pt_BR`, `zh-Hant_TW`) the
+  menu has: that language for that country, else the language with no country of its own, else the language for
+  another country (Portuguese of Portugal reads `pt-BR` when it is the only Portuguese), else English; the row says
+  which it took. A language written in two scripts goes by its script, written or implied by its country (`zh-CN`,
+  `zh-SG` simplified, `zh-TW`, `zh-HK`, `zh-MO` traditional): a system in one never takes a catalog of the other. The
+  words change at once; a phrase the language has not translated stays English.
 - **Share log** saves the last run's output and game log to `scarletnx.log`. On the
   desktop it goes in the working folder with its path copied. On Android it goes to the
   data folder's `state/` and is shared.
@@ -538,7 +543,8 @@ ErET needs `[theme] layout`, so the built-in files carry one: `debug` and `menu`
 
 The menu's phrases are English in its code, each through `snx_tr` (`src/gui/i18n.h`). `po/scarletnx.pot` lists
 them, made from the code by `scripts/build-languages.py --pot`; the `gui_languages_pot` test fails when it is not what
-the code says. A language is a `po/<code>.po` (`pt_BR.po`, `de.po`), gettext's format: the build makes each one a
+the code says. A language is a `po/<tag>.po`, named by its BCP 47 tag as language-Script-REGION, each part only
+when it tells the language apart (`de.po`, `pt-BR.po`, `zh-Hans-CN.po`), in gettext's format: the build makes each one a
 catalog of gettext's `.mo` format compiled into the menu, which reads it with musl's `__mo_lookup`
 (`src/gui/i18n.c`). A new one starts as a copy of the `.pot` whose header names it, in UTF-8:
 

@@ -1568,8 +1568,9 @@ int main(int argc, char** argv) {
         free(blocker);
         app.editor.note[0] = 0;
     }
-    /* Language: Auto (the system's: English here, SDL_PREFERRED_LOCALES), English, then the test's xx (tests/po), round
-       either way; kept in app.ini and read back; its words on the screens, a key of the foot found by its own */
+    /* Language: Auto (the system's: English here, SDL_PREFERRED_LOCALES), English, then the test's xx and zh-Hant-TW
+       (tests/po), round either way; kept in app.ini and read back, an older form of a tag written as the tag; its words
+       on the screens, a key of the foot found by its own */
     {
         size_t size = 0;
         char *kept, expected[512], line[128];
@@ -1614,7 +1615,12 @@ int main(int argc, char** argv) {
             assert(hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 5) == -1); /* past them: no one key for both */
         }
         key(&app, SDLK_RIGHT);
+        assert(app.language == 3 && snx_tr_language() == 2 &&
+               !strcmp(app.app_form.language, "\xe4\xb8\xad\xe6\x96\x87 (TW)"));
+        key(&app, SDLK_RIGHT);
         assert(!app.language && snx_tr_language() == 0); /* Auto again: English */
+        key(&app, SDLK_LEFT);
+        assert(app.language == 3 && snx_tr_language() == 2);
         key(&app, SDLK_LEFT);
         assert(app.language == 2 && snx_tr_language() == 1);
         /* a start with them: xx as it was left, a language the menu does not have named and left out */
@@ -1630,6 +1636,27 @@ int main(int argc, char** argv) {
         snprintf(expected, sizeof expected, "Fora de uso em %s: language = tlh", app.app_file); /* in xx: its words */
         assert(!strcmp(app.message, expected));
         app.message[0] = 0;
+        /* zh_TW, as a build before the tags wrote zh-Hant-TW: that language, its tag written in place of it, the file's
+           other lines as they were, and the message saying so once */
+        {
+            const char* older = "; kept\n[app]\ntheme = no-such-theme\nlanguage = zh_TW\n";
+            const char* written = "; kept\n[app]\ntheme = no-such-theme\nlanguage = zh-Hant-TW\n";
+            assert(!snx_write_file(app.app_file, older, strlen(older)));
+            app_load(&app);
+            assert(app.language == 3 && snx_tr_language() == 2);
+            snprintf(expected, sizeof expected, "%s: language = zh_TW is now zh-Hant-TW", app.app_file);
+            assert(strstr(app.message, expected));
+            kept = (char*)snx_read_file(app.app_file, &size);
+            assert(kept && size == strlen(written) && !memcmp(kept, written, size));
+            free(kept);
+            app.message[0] = 0;
+            app_load(&app);
+            assert(app.language == 3 && !strstr(app.message, "is now"));
+            assert(!snx_write_file(app.app_file, other, strlen(other)));
+            app.message[0] = 0;
+            app_load(&app);
+            assert(app.language == 2 && snx_tr_language() == 1 && !app.message[0]);
+        }
         /* the foot's Back, as xx says it, presses Back: the App's rows left for the groups */
         assert(hint_press(&app, "Volta", 0) && app.editing && app.form == GUI_FORM_SETTINGS);
         assert(hint_press(&app, "Back", 0) && !app.editing); /* and as English does */
@@ -1645,6 +1672,7 @@ int main(int argc, char** argv) {
         assert(language_auto() == 0);
         /* English for what follows, kept so, on App as the next part opens it */
         open_app(&app, GUI_APP_LANGUAGE);
+        key(&app, SDLK_RIGHT); /* xx, zh-Hant-TW, then Auto */
         key(&app, SDLK_RIGHT);
         assert(!app.language && snx_tr_language() == 0);
     }

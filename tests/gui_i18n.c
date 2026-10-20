@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The menu's languages: a catalog's search (either byte order), catalogs that are not whole ones, the language picked
-   from the system's locales, and English wherever a language has no translation. The languages linked are the test's
-   own, tests/po, through scripts/build-languages.py. */
+   from the system's locales by their BCP 47 tags, and English wherever a language has no translation. The languages
+   linked are the test's own, tests/po, through scripts/build-languages.py. */
 #include "gui/i18n.h"
+#include "common/utilities/language_tag.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -120,14 +121,21 @@ static void malformed(void) {
     word(&bad, 28 + 8 * PAIRS + 8 * 2, 3, 0); /* a translation whose length does not end at its NUL */
     assert(!look(&bad, "Back") && !strcmp(look(&bad, "Exit"), "Sair"));
 }
-/* the languages tests/po makes: English first, no catalog; then xx, its name in UTF-8 */
+/* the languages tests/po makes: English first, no catalog; then xx, its name in UTF-8, and zh-Hant-TW, which its
+   file alone brings in */
 static void languages(void) {
-    assert(snx_gui_language_count == 2);
+    assert(snx_gui_language_count == 3);
     assert(!strcmp(snx_gui_languages[0].code, "en") && !snx_gui_languages[0].mo && !snx_gui_languages[0].size);
     assert(!strcmp(snx_gui_languages[1].code, "xx") && !strcmp(snx_gui_languages[1].name, "Test\303\252s"));
+    assert(!strcmp(snx_gui_languages[2].code, "zh-Hant-TW") && snx_gui_languages[2].size);
     snx_tr_languages(snx_gui_languages, snx_gui_language_count);
     assert(snx_tr_language() == 0 && !strcmp(snx_tr("Settings"), "Settings"));
-    assert(snx_tr_find("xx") == 1 && snx_tr_find("en") == 0 && snx_tr_find("pt_BR") == -1 && snx_tr_find("") == -1);
+    assert(snx_tr_find("xx") == 1 && snx_tr_find("en") == 0 && snx_tr_find("pt-BR") == -1 && snx_tr_find("") == -1);
+    /* a tag in another form names it: the older names of app.ini, any case; a part of it does not */
+    assert(snx_tr_find("zh-Hant-TW") == 2 && snx_tr_find("zh_TW") == 2 && snx_tr_find("ZH-tw") == 2);
+    assert(snx_tr_find("zh-Hant") == -1 && snx_tr_find("zh_CN") == -1 && snx_tr_find("XX") == 1);
+    snx_tr_use(2);
+    assert(!strcmp(snx_tr("Settings"), "Settings (TW)"));
     snx_tr_use(1);
     assert(snx_tr_language() == 1);
     assert(!strcmp(snx_tr("Settings"), "Ajustes") && !strcmp(snx_tr("Language"), "L\303\255ngua"));
@@ -141,7 +149,7 @@ static void languages(void) {
     assert(!strcmp(snx_tr("Not a phrase of the menu"), "Not a phrase of the menu") && !strcmp(snx_tr(""), ""));
     snx_tr_use(0);
     assert(!strcmp(snx_tr("Settings"), "Settings"));
-    snx_tr_use(2); /* past the list, or before it: English */
+    snx_tr_use(3); /* past the list, or before it: English */
     assert(snx_tr_language() == 0 && !strcmp(snx_tr("Settings"), "Settings"));
     snx_tr_use(1);
     snx_tr_use(-1);
@@ -169,10 +177,10 @@ static int pick(const SnxLanguage* list, int count, const char* const* locales, 
 }
 static void choice(void) {
     static const SnxLanguage list[] = {{"en", "English", NULL, 0},
-                                       {"de_AT", "Deutsch", NULL, 0},
-                                       {"fr_CA", "Fran\303\247ais", NULL, 0},
+                                       {"de-AT", "Deutsch", NULL, 0},
+                                       {"fr-CA", "Fran\303\247ais", NULL, 0},
                                        {"pt", "Portugu\303\252s", NULL, 0},
-                                       {"pt_BR", "Portugu\303\252s (Brasil)", NULL, 0}};
+                                       {"pt-BR", "Portugu\303\252s (Brasil)", NULL, 0}};
     static const char *const brazil[] = {"pt_BR"}, *hyphen[] = {"pt-BR"}, *encoded[] = {"pt_BR.UTF-8"},
                              *portugal[] = {"pt_PT"}, *bare[] = {"pt"}, *german[] = {"de_DE"}, *french[] = {"fr"},
                              *order[] = {"ja_JP", "en_US", "pt_BR"}, *later[] = {"ja", "C", "pt_BR"}, *none[] = {"C"},
@@ -186,9 +194,9 @@ static void choice(void) {
     /* only another country's: that one */
     assert(pick(list, count, german, 1) == 1 && pick(list, count, french, 1) == 2);
     {
-        static const SnxLanguage brazil_only[] = {{"en", "English", NULL, 0}, {"pt_BR", "Portugu\303\252s", NULL, 0}};
+        static const SnxLanguage brazil_only[] = {{"en", "English", NULL, 0}, {"pt-BR", "Portugu\303\252s", NULL, 0}};
         static const SnxLanguage brazil_first[] = {
-            {"en", "English", NULL, 0}, {"pt_BR", "Portugu\303\252s", NULL, 0}, {"pt", "Portugu\303\252s", NULL, 0}};
+            {"en", "English", NULL, 0}, {"pt-BR", "Portugu\303\252s", NULL, 0}, {"pt", "Portugu\303\252s", NULL, 0}};
         assert(pick(brazil_only, 2, portugal, 1) == 1 && pick(brazil_only, 2, bare, 1) == 1);
         assert(pick(brazil_first, 3, portugal, 1) == 2); /* the one with no country, wherever it is in the list */
     }
@@ -196,12 +204,57 @@ static void choice(void) {
     assert(pick(list, count, order, 3) == 0 && pick(list, count, later, 3) == 4);
     assert(pick(list, count, none, 1) == 0 && pick(list, count, empty, 1) == 0 && pick(list, count, NULL, 0) == 0);
 }
+/* two parts of a tag compared: language, script (written, or the one the language and region imply) and region, in
+   any case, '-' or '_' between them, a locale's encoding and modifier left out */
+static void fit(void) {
+    assert(snx_language_fit("pt-BR", "pt_BR.UTF-8") == 3 && snx_language_fit("pt-BR", "PT-br") == 3);
+    assert(snx_language_fit("pt", "pt") == 3 && snx_language_fit("pt", "pt_BR") == 2);
+    assert(snx_language_fit("pt-BR", "pt") == 1 && snx_language_fit("pt-BR", "pt_PT") == 1);
+    assert(snx_language_fit("es-419", "es_419") == 3 && snx_language_fit("de-AT", "de_AT@euro") == 3);
+    assert(snx_language_fit("es-419", "es_MX") == 1 && snx_language_fit("es-419", "es") == 1);
+    assert(snx_language_fit("zh-Hans-CN", "zh_CN") == 3 && snx_language_fit("zh-Hans-CN", "zh-Hans_CN") == 3);
+    assert(snx_language_fit("zh-Hans-CN", "zh") == 1 && snx_language_fit("zh-Hans-CN", "zh_SG") == 1);
+    assert(snx_language_fit("zh-Hant-TW", "zh-Hant_TW") == 3 && snx_language_fit("zh-Hant-TW", "zh_HK") == 1);
+    assert(snx_language_fit("zh-Hans-CN", "zh_TW") == 0 && snx_language_fit("zh-Hant-TW", "zh_CN") == 0);
+    assert(snx_language_fit("zh-Hans-CN", "zh-Hant-CN") == 0 && snx_language_fit("zh-Hant-TW", "zh-Hans-TW") == 0);
+    assert(snx_language_fit("sr-Latn", "sr-Cyrl") == 0 && snx_language_fit("sr-Latn-RS", "sr_RS") == 3);
+    assert(snx_language_fit("en", "") == 0 && snx_language_fit("", "en") == 0 && snx_language_fit("en", "C") == 0);
+    assert(snx_language_fit("pt-BR", "ptx_BR") == 0 && snx_language_fit("en", "en-GB") == 2);
+}
+/* each Chinese locale to the catalog of its script, or English: never to the other script's */
+static void scripts(void) {
+    static const char* const simplified[] = {"zh_CN",       "zh-CN",      "zh-Hans", "zh-Hans-CN",
+                                             "zh_CN.UTF-8", "zh-Hans_CN", "zh_SG",   "zh"};
+    static const char* const traditional[] = {"zh_TW",       "zh-TW",      "zh-Hant", "zh-Hant-TW",
+                                              "zh_TW.UTF-8", "zh-Hant_TW", "zh_HK",   "zh_MO"};
+    /* po/'s languages, and the same with a catalog of the traditional script's: tests/po's, whose file alone adds it */
+    static const SnxLanguage menu[] = {{"en", "English", NULL, 0},
+                                       {"pt-BR", "Portugu\303\252s (Brasil)", NULL, 0},
+                                       {"zh-Hans-CN", "\347\256\200\344\275\223\344\270\255\346\226\207", NULL, 0}};
+    SnxLanguage both[4];
+    int i;
+    for (i = 0; i < 8; ++i) {
+        assert(pick(menu, 3, simplified + i, 1) == 2);
+        assert(pick(menu, 3, traditional + i, 1) == 0);
+    }
+    assert(snx_tr_find("pt_BR") == 1 && snx_tr_find("zh_CN") == 2 && snx_tr_find("zh-CN") == 2);
+    assert(snx_tr_find("zh_TW") == -1 && snx_tr_find("zh-Hans") == -1);
+    assert(snx_gui_language_count == 3 && !strcmp(snx_gui_languages[2].code, "zh-Hant-TW"));
+    memcpy(both, snx_gui_languages, 3 * sizeof *both);
+    both[3] = menu[2];
+    for (i = 0; i < 8; ++i) {
+        assert(pick(both, 4, traditional + i, 1) == 2);
+        assert(pick(both, 4, simplified + i, 1) == 3);
+    }
+}
 int main(void) {
     search();
     malformed();
     languages();
     empty();
     choice();
+    fit();
+    scripts();
     puts("gui_i18n: ok");
     return 0;
 }

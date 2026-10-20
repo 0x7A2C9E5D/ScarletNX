@@ -3,7 +3,7 @@
 /* The driver's setup in a terminal (src/nx/runtime/driver/setup.c), its answers from a file: every step at its
    default, each choice that writes a file, answers that are no answer asked again, an end of input before the end,
    a portable copy, the fixed uid kept for its saves, and a notice alone after an update. The launcher's languages are
-   this file's two */
+   this file's three, as po/ has them */
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE   700 /* realpath */
 #include "nx/runtime/driver/setup.h"
@@ -20,8 +20,10 @@
 #define FIRST "0123456789abcdeffedcba9876543210"
 
 const char* snx_menu_language(int i, const char** name) {
-    static const char *const codes[] = {"en", "pt_BR"}, *const names[] = {"English", "Portugu\xc3\xaas (Brasil)"};
-    if (i < 0 || i > 1) return NULL;
+    static const char *const codes[] = {"en", "pt-BR", "zh-Hans-CN"},
+                             *const names[] = {"English", "Portugu\xc3\xaas (Brasil)",
+                                               "\xe7\xae\x80\xe4\xbd\x93\xe4\xb8\xad\xe6\x96\x87"};
+    if (i < 0 || i > 2) return NULL;
     *name = names[i];
     return codes[i];
 }
@@ -98,7 +100,8 @@ static void test_defaults(void) {
     assert(!run("\n\n\n\n\n\n", 0));
     said("Changed in older versions\n  Game settings\n    before  removed or renamed keys");
     said("    now     <id>_data/save/user.<uid>\n  Not moved. See docs/DEPRECATIONS.md\n[Enter] OK ");
-    said("[1/5] Language (the launcher's)\n  1) English 2) Portugu\xc3\xaas (Brasil)\n  [1] ");
+    said("[1/5] Language (the launcher's)\n  1) English 2) Portugu\xc3\xaas (Brasil) 3) "
+         "\xe7\xae\x80\xe4\xbd\x93\xe4\xb8\xad\xe6\x96\x87\n  [1] ");
     said_with("[2/5] Install type\n  Installed: settings %s, data %s", config, data);
     said_with("[3/5] Folders (the launcher's)\n  Games: %s/games\n  Dumps: none yet\n", data, NULL);
     said("[4/5] Keys\n  prod.keys missing\n  title.keys missing: only some .nsp need it\n  1) Choose folder  2) Later\n"
@@ -129,7 +132,7 @@ static void test_again(void) {
     sprintf(answers, "\n9\n2\n1\n2\n%s\n3\n/no/such/folder\n%s\n3\n%s\n1\n1\n%s\n1\nmaybe\nn\n", games, dumps, dumps,
             keys);
     assert(!run(answers, 1));
-    said("9: answer 1 to 2, or Enter for 1");
+    said("9: answer 1 to 3, or Enter for 1");
     said("/no/such/folder is not a folder");
     said("  Dumps:\n");
     said_with("  Installed prod.keys in %s\n", keys_dir, NULL);
@@ -137,7 +140,7 @@ static void test_again(void) {
     said("[5/5] users.ini has 1 user: Player\n  Overwrite? (users.ini.old keeps it) [y/N] ");
     said("maybe: answer y or n");
     expect(config, "app.ini", "[folders]\ngames = ");
-    expect(config, "app.ini", "\n[app]\nlanguage = pt_BR\n");
+    expect(config, "app.ini", "\n[app]\nlanguage = pt-BR\n");
     path = text_of(config, "folders.txt");
     assert(path && !strcmp(strstr(path, "dumps"), "dumps\n")); /* once */
     free(path);
@@ -196,20 +199,38 @@ static void test_first_saves(void) {
     puts("PASS the fixed uid kept for its saves");
 }
 
-/* the language it starts on: the system's (LANG), the same language of another country, else English; app.ini's
-   once it names one, and English picked over the system's written */
+/* the language it starts on: the system's (LANG), the same language of another country, else English, and never one
+   of another script; app.ini's once it names one, in an older form of its tag too, and English picked over the
+   system's written */
 static void test_language(void) {
+    char* app = join(config, "app.ini");
+    static const char* const simplified[] = {"zh_CN.UTF-8", "zh_SG.UTF-8", "zh"};
+    static const char* const traditional[] = {"zh_TW.UTF-8", "zh_HK.UTF-8", "zh-Hant"};
+    int i;
     fresh();
     setenv("LANG", "pt_BR.UTF-8", 1);
     assert(!run("\n\n\n\n\n\n", 0));
-    said("Portugu\xc3\xaas (Brasil)\n  [2] ");
+    said("\xe7\xae\x80\xe4\xbd\x93\xe4\xb8\xad\xe6\x96\x87\n  [2] ");
     assert(!text_of(config, "app.ini"));
+    for (i = 0; i < 3; ++i) {
+        setenv("LANG", simplified[i], 1);
+        assert(!run("\n\n\n\n\n\n", 1));
+        said("\xe7\xae\x80\xe4\xbd\x93\xe4\xb8\xad\xe6\x96\x87\n  [3] ");
+        setenv("LANG", traditional[i], 1);
+        assert(!run("\n\n\n\n\n\n", 1));
+        said("\xe7\xae\x80\xe4\xbd\x93\xe4\xb8\xad\xe6\x96\x87\n  [1] ");
+    }
     setenv("LANG", "pt_PT.UTF-8", 1);
-    assert(!run("\n1\n\n\n\n\n", 1) && strstr(output, "Portugu\xc3\xaas (Brasil)\n  [2] "));
+    assert(!run("\n1\n\n\n\n\n", 1) && strstr(output, "\xe7\xae\x80\xe4\xbd\x93\xe4\xb8\xad\xe6\x96\x87\n  [2] "));
     expect(config, "app.ini", "[app]\nlanguage = en\n");
     assert(!run("\n\n\n\n\n\n", 1));
-    said("Portugu\xc3\xaas (Brasil)\n  [1] ");
+    said("\xe7\xae\x80\xe4\xbd\x93\xe4\xb8\xad\xe6\x96\x87\n  [1] ");
+    put(app, "[app]\nlanguage = pt_BR\n"); /* as a build before the tags wrote it */
+    assert(!run("\n\n\n\n\n\n", 1));
+    said("\xe7\xae\x80\xe4\xbd\x93\xe4\xb8\xad\xe6\x96\x87\n  [2] ");
+    expect(config, "app.ini", "[app]\nlanguage = pt_BR\n"); /* kept: the launcher writes its tag */
     unsetenv("LANG");
+    free(app);
     puts("PASS the language it starts on");
 }
 

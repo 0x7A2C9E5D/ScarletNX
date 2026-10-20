@@ -121,7 +121,7 @@ class Glyphs(unittest.TestCase):
         latin = bg.wanted(self.root)
         # what the languages show: a name and translations, the menu's and the tests', not a fuzzy one nor ASCII nor
         # a letter CP437 or the Latin ones draw
-        self.write_po('po', 'zh_CN', [('Menu', '\u83dc\u5355', False), ('Exit', '\u9000', True)], '\u4e2d\u6587')
+        self.write_po('po', 'zh-Hans-CN', [('Menu', '\u83dc\u5355', False), ('Exit', '\u9000', True)], '\u4e2d\u6587')
         self.write_po('tests/po', 'xx', [('Back', 'Voltar\\n\u00e3 \u00e7 \u4e0a', False)])
         points = [0x4E0A, 0x4E2D, 0x6587, 0x83DC, 0x5355]
         self.assertEqual(bg.wide_wanted(self.root), sorted(points))
@@ -141,7 +141,7 @@ class Glyphs(unittest.TestCase):
         self.assertIn(' '.join(f'0x{r | 0x80:02x},' for r in range(16)) + ' /* U+4E2D, right */', text)
         self.assertTrue(text.isascii())
         # none shown: arrays of one, C having no empty ones
-        (self.root / 'po/zh_CN.po').unlink()
+        (self.root / 'po/zh-Hans-CN.po').unlink()
         (self.root / 'tests/po/xx.po').unlink()
         self.assertEqual(self.run_script('--from', str(self.unifont)).returncode, 0)
         self.assertEqual((self.root / bg.WIDE_KEPT).read_text(), '')
@@ -152,7 +152,7 @@ class Glyphs(unittest.TestCase):
         latin = bg.wanted(self.root)
         self.write_unifont([glyph(cp) for cp in latin])
         self.assertEqual(self.run_script('--from', str(self.unifont)).returncode, 0)
-        self.write_po('po', 'zh_CN', [('Menu', '\u83dc\u5355', False)])
+        self.write_po('po', 'zh-Hans-CN', [('Menu', '\u83dc\u5355', False)])
         wide = self.root / bg.WIDE_KEPT
         lines = [glyph(0x5355, True), glyph(0x83DC, True)]
         wide.write_text(''.join(lines))
@@ -169,17 +169,17 @@ class Glyphs(unittest.TestCase):
 
     def test_wide_from_refuses(self):
         latin = [glyph(cp) for cp in bg.wanted(self.root)]
-        self.write_po('po', 'zh_CN', [('Menu', '\u83dc\u5355', False)])
+        self.write_po('po', 'zh-Hans-CN', [('Menu', '\u83dc\u5355', False)])
         self.write_unifont(latin + [glyph(0x83DC, True)])  # one the font lacks
         self.refused('no glyph for U+5355, which a language shows', '--from', str(self.unifont))
-        self.write_po('po', 'zh_CN', [('Menu', '\u83dc \u2026', False)])  # one it draws 8 wide: a block for RANGES
+        self.write_po('po', 'zh-Hans-CN', [('Menu', '\u83dc \u2026', False)])  # one it draws 8 wide: a block for RANGES
         self.write_unifont(latin + [glyph(0x83DC, True), glyph(0x2026)])
         self.refused('U+2026 is 8x16 in it, not 16x16: its block goes in RANGES', '--from', str(self.unifont))
-        self.write_po('po', 'zh_CN', [('Menu', '\u83dc\u00ad', False)])  # Latin's left out: not a wide one
+        self.write_po('po', 'zh-Hans-CN', [('Menu', '\u83dc\u00ad', False)])  # Latin's left out: not a wide one
         self.write_unifont(latin + [glyph(0x83DC, True), glyph(0xAD, True)])
         self.assertEqual(self.run_script('--from', str(self.unifont)).returncode, 0)
         self.assertEqual((self.root / bg.WIDE_KEPT).read_text(), glyph(0x83DC, True))
-        (self.root / 'po/zh_CN.po').write_text('msgid "x"\nmsgctxt "y"\n')  # a .po the languages' script refuses
+        (self.root / 'po/zh-Hans-CN.po').write_text('msgid "x"\nmsgctxt "y"\n')  # a .po the languages' script refuses
         self.refused('build-glyphs.py: ', '--from', str(self.unifont))
 
     def test_check_refuses(self):

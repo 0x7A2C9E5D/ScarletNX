@@ -222,11 +222,11 @@ static void test_keys(const char* root, const char* home) {
 
 static void test_files(const char* root) {
     char *app = join(root, "app.ini"), *list = join(root, "folders.txt"), why[256];
-    assert(!snx_ini_put(app, "app", "language", "pt_BR", why, sizeof why));
-    expect_text(app, "[app]\nlanguage = pt_BR\n");
+    assert(!snx_ini_put(app, "app", "language", "pt-BR", why, sizeof why));
+    expect_text(app, "[app]\nlanguage = pt-BR\n");
     put(app, "; Settings > App\n[app]\ntheme = yorha\n\n[folders]\ndata =\n");
-    assert(!snx_ini_put(app, "app", "language", "pt_BR", why, sizeof why));
-    expect_text(app, "; Settings > App\n[app]\ntheme = yorha\nlanguage = pt_BR\n\n[folders]\ndata =\n");
+    assert(!snx_ini_put(app, "app", "language", "pt-BR", why, sizeof why));
+    expect_text(app, "; Settings > App\n[app]\ntheme = yorha\nlanguage = pt-BR\n\n[folders]\ndata =\n");
     assert(!snx_ini_put(app, "app", "language", "en", why, sizeof why));
     expect_text(app, "; Settings > App\n[app]\ntheme = yorha\nlanguage = en\n\n[folders]\ndata =\n");
     assert(!snx_ini_put(app, "folders", "games", "/games", why, sizeof why));
