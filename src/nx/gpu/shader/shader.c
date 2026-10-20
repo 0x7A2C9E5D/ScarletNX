@@ -50,15 +50,9 @@ u32 bra_target(u64 w, u32 idx) {
 /* predicate PT, not negated, and flow condition T (15): the instruction always takes effect */
 int flow_always(u64 w) { return B(w, 16, 4) == 7 && B(w, 0, 5) == 15; }
 
-/* instructions that move control elsewhere, where a backward search for a register's writer has to stop */
-static int moves_control(int id) {
-    return id == O_BRA || id == O_BRX || id == O_JMP || id == O_CAL || id == O_RET || id == O_EXIT || id == O_KIL ||
-           id == O_SYNC || id == O_BRK || id == O_CONT;
-}
-
-/* The nearest instruction before from that writes reg, within limit instructions (0 for no limit), or -1. With
-   stop_at_flow the search ends at a flow instruction. An undecodable word ends it too. */
-static int find_writer(const u64* words, u32 from, u32 reg, u32 limit, int stop_at_flow) {
+/* The nearest instruction before from in the code's order that writes reg, within limit instructions (0 for no
+   limit), or -1. An undecodable word ends the search. */
+static int find_writer(const u64* words, u32 from, u32 reg, u32 limit) {
     u32 j, seen = 0;
     if (reg == 255) return -1;
     for (j = from; j-- > 11;) {
@@ -66,57 +60,219 @@ static int find_writer(const u64* words, u32 from, u32 reg, u32 limit, int stop_
         if (!IDX_OK(j)) continue;
         if (limit && seen++ == limit) return -1;
         op = decode(words[j]);
-        if (!op || (stop_at_flow && moves_control(op->id))) return -1;
+        if (!op) return -1;
         if (shader_writes_reg(words[j], op->id, reg)) return (int)j;
     }
     return -1;
 }
 
+/* One path through a region in def_reaches: where it is, whether the value def wrote still holds there, and the
+   tokens pushed on the CRS stack since the region began (target << 2 | kind) */
+typedef struct {
+    u32 pc, valid, depth;
+    u32 entry[CRS_DEPTH];
+} RegionPath;
+
+#define REGION_PATHS 256 /* the distinct paths def_reaches follows before it gives up */
+
+/* Whether the paths left holding these tokens could come back into (start, use] through them later: a SYNC, BRK
+   or CONT outside the region would pop one and land at its target */
+static int tokens_return(const RegionPath* p, u32 start, u32 use) {
+    u32 k;
+    for (k = 0; k < p->depth; k++)
+        if (p->entry[k] >> 2 > start && p->entry[k] >> 2 <= use) return 1;
+    return 0;
+}
+
+/* path p goes on at target: inside the region it's queued unless an equal path was, and leaving it ends the path,
+   allowed unless a token it leaves on the stack leads back in. Returns 0 on what def_reaches can't follow. */
+static int region_go(RegionPath* paths, u32* npaths, u32* work, u32* nwork, const RegionPath* p, u32 target,
+                     u32 start, u32 use) {
+    u32 q;
+    if (target < start || target > use) return !tokens_return(p, start, use);
+    for (q = 0; q < *npaths; q++)
+        if (paths[q].pc == target && paths[q].valid == p->valid && paths[q].depth == p->depth &&
+            !memcmp(paths[q].entry, p->entry, p->depth * sizeof *p->entry))
+            return 1;
+    if (*npaths == REGION_PATHS) return 0;
+    paths[*npaths] = *p;
+    paths[*npaths].pc = target;
+    work[(*nwork)++] = (*npaths)++;
+    return 1;
+}
+
+/* Whether the value def writes to reg is the one use reads on every path that reaches use: control comes into
+   (def, use] only through def, and nothing on the way writes reg again. The code between them may branch and
+   reconverge: the compiler loads a jump table's entry and then puts an if-else (SSY ... SYNC) before the BRX that
+   reads it. The region starts at the earliest push of a token whose target lies in (def, use], so that its SYNCs,
+   BRKs and CONTs are seen, and each path through it is followed with the CRS tokens pushed in it, as
+   shader_resolve_crs does for the whole program. Other BRXs' tables are assumed not to land in the region: the
+   compiler's tables lead to their own switch's cases. */
+static int def_reaches(const u64* words, u32 count, u32 def, u32 use, u32 reg) {
+    RegionPath* paths;
+    u32 start = def, j, npaths = 0, nwork = 0, work[REGION_PATHS];
+    int ok = 1, pexit = 0;
+    if (def >= use || use >= count) return 0;
+    /* one pass down from def: a push below the region's start so far moves it down when its target lies in it */
+    for (j = def; j-- > 11;) {
+        const Op* op;
+        u32 t;
+        if (!IDX_OK(j)) continue;
+        op = decode(words[j]);
+        if (!op || (op->id != O_SSY && op->id != O_PBK && op->id != O_PCNT)) continue;
+        t = bra_target(words[j], j);
+        if (t > start && t <= use) start = j;
+    }
+    /* nothing outside the region branches into it, or pushes a token or a return point there */
+    for (j = 11; j < count; j++) {
+        const Op* op;
+        u32 t;
+        if (!IDX_OK(j)) continue;
+        op = decode(words[j]);
+        if (op && op->id == O_PEXIT) pexit = 1;
+        if (j >= start && j < use) continue;
+        if (!op || (op->id != O_BRA && op->id != O_SSY && op->id != O_PBK && op->id != O_PCNT && op->id != O_CAL &&
+                    op->id != O_PRET && op->id != O_PEXIT))
+            continue;
+        t = bra_target(words[j], j);
+        if (t > start && t <= use) return 0;
+    }
+    paths = (RegionPath*)calloc(REGION_PATHS, sizeof *paths);
+    if (!paths) return 0;
+    paths[0].pc = start;
+    work[nwork++] = npaths++;
+    while (ok && nwork) {
+        RegionPath p = paths[work[--nwork]];
+        u32 i = p.pc;
+        for (;;) {
+            u64 w;
+            const Op* op;
+            u32 t, k, kind;
+            if (i == use) {
+                ok = p.valid && !tokens_return(&p, start, use);
+                break;
+            }
+            w = words[i];
+            op = decode(w);
+            if (!op) {
+                ok = 0;
+                break;
+            }
+            if (i == def)
+                p.valid = 1;
+            else if (shader_writes_reg(w, op->id, reg))
+                p.valid = 0;
+            if (B(w, 16, 4) != 15) { /* predicated never: no effect */
+                switch (op->id) {
+                    case O_SSY:
+                    case O_PBK:
+                    case O_PCNT:
+                    case O_PEXIT:
+                        if (p.depth == CRS_DEPTH) {
+                            ok = 0;
+                            break;
+                        }
+                        p.entry[p.depth++] = bra_target(w, i) << 2 | (u32)CRS_KIND(op->id);
+                        break;
+                    case O_SYNC:
+                    case O_BRK:
+                    case O_CONT: {
+                        RegionPath popped = p;
+                        kind = (u32)CRS_KIND(op->id);
+                        for (k = p.depth; k > 0 && (p.entry[k - 1] & 3) != kind; k--) {
+                        }
+                        /* with no token of its kind pushed here the pop takes one from before the region, and
+                           drops every token pushed since: the path leaves the region */
+                        popped.depth = k ? k - 1 : 0;
+                        t = k ? p.entry[k - 1] >> 2 : 0;
+                        if (k) ok = region_go(paths, &npaths, work, &nwork, &popped, t, start, use);
+                        if (flow_always(w)) goto next_path;
+                        break;
+                    }
+                    case O_BRA:
+                        ok = region_go(paths, &npaths, work, &nwork, &p, bra_target(w, i), start, use);
+                        if (flow_always(w)) goto next_path;
+                        break;
+                    case O_EXIT: {
+                        /* an EXIT goes to the target of the nearest PEXIT token. Whether it keeps the token and
+                           the ones above it isn't settled, so both stacks are followed. With none pushed here it
+                           ends the invocation, or goes to a PEXIT's from before the region with every token
+                           pushed here still on the stack */
+                        RegionPath popped = p;
+                        for (k = p.depth; k > 0 && (p.entry[k - 1] & 3) != 3; k--) {
+                        }
+                        popped.depth = k ? k - 1 : 0;
+                        if (k)
+                            ok = region_go(paths, &npaths, work, &nwork, &p, p.entry[k - 1] >> 2, start, use) &&
+                                 region_go(paths, &npaths, work, &nwork, &popped, p.entry[k - 1] >> 2, start, use);
+                        else if (pexit)
+                            ok = !tokens_return(&p, start, use);
+                        if (flow_always(w)) goto next_path;
+                        break;
+                    }
+                    case O_PRET: /* a return point outside the region doesn't lead back */
+                        t = bra_target(w, i);
+                        if (t > start && t <= use) ok = 0;
+                        break;
+                    case O_BRX:
+                    case O_JMP:
+                    case O_CAL:
+                    case O_RET: ok = 0; break;
+                    default: break;
+                }
+            }
+            if (!ok) break;
+            i = next_code(i);
+        }
+    next_path:;
+    }
+    free(paths);
+    return ok;
+}
+
 /* The compiler bounds a switch index before it loads the jump table: IMNMX Ri, Rx, max; SHL Rj, Ri, 2;
    LDC.B32 Rk, c[bank][Rj + offset]. Gives the table's entry count, or 0 when the load isn't that idiom (as Eden's
-   TrackIndirectBranchTable finds it). */
-static int clamped_entries(const u64* words, u32 load) {
+   TrackIndirectBranchTable finds it). Each value has to reach the next instruction on every path (def_reaches): a
+   nearer clamp on one side of a branch would give too few entries, and the translated BRX ends the invocation
+   where an index past them lands. */
+static int clamped_entries(const u64* words, u32 count, u32 load) {
     u64 w;
-    int at = find_writer(words, load, B(words[load], 8, 8), 32, 0);
+    int shl, at = find_writer(words, load, B(words[load], 8, 8), 32);
     if (at < 0) return 0;
     w = words[at];
-    if (decode(w)->id != O_SHL_I || B(w, 16, 4) != 7 || B(w, 20, 19) != 2 || B(w, 56, 1)) return 0;
-    at = find_writer(words, (u32)at, B(w, 8, 8), 32, 0);
+    if (decode(w)->id != O_SHL_I || B(w, 16, 4) != 7 || B(w, 20, 19) != 2 || B(w, 56, 1) ||
+        !def_reaches(words, count, (u32)at, load, B(w, 0, 8)))
+        return 0;
+    shl = at;
+    at = find_writer(words, (u32)shl, B(w, 8, 8), 32);
     if (at < 0) return 0;
     w = words[at];
-    if (decode(w)->id != O_IMNMX_I || B(w, 16, 4) != 7 || B(w, 56, 1)) return 0;
+    if (decode(w)->id != O_IMNMX_I || B(w, 16, 4) != 7 || B(w, 56, 1) ||
+        !def_reaches(words, count, (u32)at, (u32)shl, B(w, 0, 8)))
+        return 0;
     return (int)B(w, 20, 19) + 1;
 }
 
 /* The targets of the BRX at index, read from its jump table through g_shader_cb_read: up to max_targets, or -1 when
-   the table can't be found or read. The table address comes from the 32-bit LDC that last wrote the BRX's register
-   in its block, with no other way into the code between the two. With the clamp idiom every entry it allows has to
-   be a valid target; without it the valid entries up to the first invalid one are taken. */
+   the table can't be found or read. The table address comes from the 32-bit LDC that last wrote the BRX's register,
+   whose value the BRX reads on every path (def_reaches). With the clamp idiom every entry it allows has to be a
+   valid target; without it the valid entries up to the first invalid one are taken. */
 int shader_brx_targets(const u64* words, u32 index, u32 count, u32* targets, int max_targets) {
     u64 brx, load;
-    u32 bank, j;
+    u32 bank;
     i32 offset, imm;
     int at, exact, limit, k, n = 0;
     if (!g_shader_cb_read || index >= count || !IDX_OK(index) || max_targets <= 0) return -1;
     brx = words[index];
-    at = find_writer(words, index, B(brx, 8, 8), 0, 1);
+    at = find_writer(words, index, B(brx, 8, 8), 0);
     if (at < 0) return -1;
     load = words[at];
     /* entries are word offsets: a load of another size reads them wrong. Mode 0 is the plain c[bank][reg + offset] */
     if (decode(load)->id != O_LDC || B(load, 0, 8) != B(brx, 8, 8) || B(load, 16, 4) != 7 || B(load, 48, 3) != 4 ||
         B(load, 44, 2) != 0)
         return -1;
-    for (j = 11; j < count; j++) {
-        const Op* op;
-        u32 t;
-        if (!IDX_OK(j)) continue;
-        op = decode(words[j]);
-        if (!op || (op->id != O_BRA && op->id != O_SSY && op->id != O_PBK && op->id != O_PCNT && op->id != O_CAL))
-            continue;
-        t = bra_target(words[j], j);
-        if (t > (u32)at && t <= index) return -1;
-    }
-    exact = clamped_entries(words, (u32)at);
+    if (!def_reaches(words, count, (u32)at, index, B(brx, 8, 8))) return -1;
+    exact = clamped_entries(words, count, (u32)at);
     if (exact > max_targets) return -1;
     limit = exact ? exact : max_targets < 64 ? max_targets : 64;
     bank = B(load, 36, 5);
@@ -128,6 +284,8 @@ int shader_brx_targets(const u64* words, u32 index, u32 count, u32* targets, int
         long long t = 0;
         int ok = addr >= 0 && g_shader_cb_read(bank, (u32)addr, &value);
         if (ok) {
+            /* a case lies after the BRX, never back in the region def_reaches followed: from there only a branch
+               or a token it already refused would lead back */
             rel = (long long)value + imm;
             ok = rel >= 0 && rel % 8 == 0;
             if (ok) {
@@ -145,22 +303,17 @@ int shader_brx_targets(const u64* words, u32 index, u32 count, u32* targets, int
     return n ? n : -1;
 }
 
-/* the last nonzero code word below n, or 10 */
-static u32 last_nonzero(const u64* words, u32 n) {
-    u32 i;
-    for (i = n; i-- > 11;)
-        if (IDX_OK(i) && words[i]) return i;
-    return 10;
-}
-
 /* The program's length in bytes (out_len) and a 64-bit FNV-1a hash of that many bytes. The scan follows every
    branch target forward and ends at an EXIT that always runs once no target lies past it, at an unconditional
    backward BRA past every target, or at an unconditional RET past every target when the program has calls. A jump
-   table that can't be read leaves targets unknown: then only an EXIT past every known target and past the last
-   nonzero code word ends it, since the zero tail of the window can't be reached. */
+   table that can't be read leaves targets unknown: then no instruction ends it, but an all-zero instruction word
+   ends the scan before it, as it does in every case. That word is no Maxwell instruction, so control never reaches
+   it, and the compiler fills bundles with NOPs, leaving zeros only as the padding after a program. NVN packs
+   programs into one pool, so the window goes on past that padding into the next program, which an unknown jump
+   table would otherwise take for its own code. */
 u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
     const u64* words = (const u64*)code;
-    u32 n = max_bytes / 8, i, last = 10, furthest = 0, tail = 0, len;
+    u32 n = max_bytes / 8, i, last = 10, furthest = 0, len;
     int resolved = 1, calls = 0;
     u64 h = 1469598103934665603ull;
     if (n > SH_SCAN_WORDS) n = SH_SCAN_WORDS;
@@ -170,6 +323,7 @@ u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
         u32 t;
         if (!IDX_OK(i)) continue;
         w = words[i];
+        if (!w) break;
         last = i;
         op = decode(w);
         if (!op) continue;
@@ -188,16 +342,13 @@ u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
             case O_BRX: {
                 u32 targets[64];
                 int k, count = shader_brx_targets(words, i, n, targets, 64);
-                if (count < 0 && resolved) {
-                    resolved = 0;
-                    tail = last_nonzero(words, n);
-                }
+                if (count < 0) resolved = 0;
                 for (k = 0; k < count; k++)
                     if (targets[k] > furthest) furthest = targets[k];
                 break;
             }
             case O_EXIT:
-                if (flow_always(w) && i >= furthest && (resolved || i >= tail)) goto done;
+                if (flow_always(w) && i >= furthest && resolved) goto done;
                 break;
             case O_RET:
                 if (calls && resolved && flow_always(w) && i >= furthest) goto done;
@@ -411,6 +562,8 @@ int shader_merge_dual(const u8* a, const u8* b, u8* out, u32 max_bytes) {
         u64 w = code[i];
         const Op* op;
         if (!IDX_OK(i)) continue;
+        /* a zero after A's end, its padding, would end the merged program there (shader_hash): a NOP instead */
+        if (!w) code[i] = w = 0x50B0000000070F00ull;
         op = decode(w);
         if (!op || op->id != O_EXIT) continue;
         /* BRA (opcode 0xE24) to B's first instruction, keeping the EXIT's predicate (16-19) and condition (0-4) */

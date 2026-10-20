@@ -834,6 +834,7 @@ static void brx_length(void) {
     code[14] = code[10];
     code[15] = 0xe250000000070d0full; /* BRX R13 */
     code[16] = 0xe30000000007000full;
+    code[17] = 0x50B0000000070F00ull; /* NOP: live code fills its bundles, zeros are padding after the program */
     code[18] = code[10];
     code[19] = code[16];
     g_shader_cb_read = clamped_brx_table;
@@ -849,9 +850,13 @@ static void brx_length(void) {
     g_shader_cb_read = NULL;
     shader_hash((const u8*)code, sizeof code, &len);
     check(len == 13 * 8, "unresolved BRX stops at the exit before an all-zero tail");
+    code[13] = 0x50B0000000070F00ull; /* NOP */
     code[15] = code[12];
     shader_hash((const u8*)code, sizeof code, &len);
     check(len == 16 * 8, "unresolved BRX keeps nonzero instructions beyond an earlier exit");
+    code[13] = 0; /* padding, then the next program of the pool */
+    shader_hash((const u8*)code, sizeof code, &len);
+    check(len == 13 * 8, "unresolved BRX ends at the zero padding before the next program");
     g_shader_cb_read = old;
 }
 
