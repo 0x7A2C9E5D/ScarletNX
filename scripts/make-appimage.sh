@@ -14,6 +14,9 @@
 # A copy named after a game works like the bare runtime: games/MyGame.AppImage (or games/MyGame) loads
 # games/MyGame_code.so, since the runtime takes its name and folder from $APPIMAGE.
 #
+# An install of the Linux runtime alone (a big-endian host's: no scarletnx, only scarletnx-gnuabi) makes an AppImage
+# of it: it runs Linux AArch64 programs (`ScarletNX-linux-ppc64.AppImage ./program`), and its checks run one.
+#
 # With SYSROOT and ARCH set, the AppImage is made for another architecture on this machine: the runtime was
 # cross-compiled and installed into the sysroot (an Arch root of that architecture), and the libraries and licenses
 # to bundle come from there. CI makes the ppc64le, riscv64 and loongarch64 ones this way (.github/workflows/build.yml,
@@ -35,7 +38,13 @@ export OUTPATH=./dist
 export OUTNAME=ScarletNX-linux-$ARCH.AppImage
 # quick-sharun copies ICON to .DirIcon as well
 export ICON=$SYSROOT/usr/share/icons/hicolor/256x256/apps/wimsy.png
-export DESKTOP=$SYSROOT/usr/share/applications/scarletnx.desktop
+# the AppImage's program: the driver, else the Linux runtime when it is all the install has
+bin=$SYSROOT/usr/bin
+main=scarletnx
+if [ ! -e "$bin/scarletnx" ] && [ -e "$bin/scarletnx-gnuabi" ]; then
+    main=scarletnx-gnuabi
+fi
+export DESKTOP=$SYSROOT/usr/share/applications/$main.desktop
 # AppImageUpdate finds new builds through the .zsync file next to the AppImage in the latest release
 # (scripts/publish-builds.py): a version's in this repository's, a nightly's in the owner's nightly repository
 if [ "${GITHUB_REF_TYPE:-}" = tag ]; then
@@ -74,7 +83,7 @@ if [ -n "$SYSROOT" ]; then
 exec /usr/bin/uname "\$@"
 EOF
     # The target's loader, its symlinks followed inside the sysroot (an absolute one would land on this machine)
-    interp=$(patchelf --print-interpreter "$SYSROOT/usr/bin/scarletnx")
+    interp=$(patchelf --print-interpreter "$bin/$main")
     for _ in 1 2 3 4 5 6 7 8; do
         [ -L "$SYSROOT$interp" ] || break
         link=$(readlink "$SYSROOT$interp")
@@ -83,7 +92,7 @@ EOF
             *) interp=$(dirname "$interp")/$link ;;
         esac
     done
-    machine=$(od -An -tu2 -j18 -N2 "$SYSROOT/usr/bin/scarletnx" | tr -d ' ')
+    machine=$(od -An -tu2 -j18 -N2 "$bin/$main" | tr -d ' ')
     # A target program's libraries as its loader finds them, each path made the sysroot's so quick-sharun copies the
     # target's library and not this machine's; a loader that fails says so. Anything else is this machine's ldd's
     cat >"$shim/ldd" <<EOF
@@ -99,9 +108,9 @@ EOF
     PATH=$shim:$PATH
     export PATH
     # without the runtime's own libraries from the sysroot the AppImage would start nowhere: stop here, saying why
-    listed=$(ldd "$SYSROOT/usr/bin/scarletnx") || exit 1
+    listed=$(ldd "$bin/$main") || exit 1
     if ! grep -qF "$SYSROOT/usr/lib/" <<<"$listed"; then
-        echo "ldd listed none of $SYSROOT/usr/bin/scarletnx's libraries in $SYSROOT:" >&2
+        echo "ldd listed none of $bin/$main's libraries in $SYSROOT:" >&2
         echo "$listed" >&2
         exit 1
     fi
@@ -111,8 +120,11 @@ fi
 # The runtime stays the AppImage's program (the desktop entry's Exec), so a copy named after a game runs that game.
 # Started bare it opens its launcher, which runs Switch games with it and the other drivers from beside it
 # (scarletnx-3ds, scarletnx-gnuabi)
-bin=$SYSROOT/usr/bin
-quick-sharun "$bin/scarletnx" "$bin/scarletnx-switch" "$bin/scarletnx-3ds" "$bin/scarletnx-gnuabi"
+if [ "$main" = scarletnx ]; then
+    quick-sharun "$bin/scarletnx" "$bin/scarletnx-switch" "$bin/scarletnx-3ds" "$bin/scarletnx-gnuabi"
+else
+    quick-sharun "$bin/scarletnx-gnuabi"
+fi
 
 # The licenses travel with the AppImage: the runtime's and those of the libraries built into it (`cmake --install` put
 # them in /usr/share/licenses/scarletnx, in the sysroot for a cross build), and those of the Arch packages quick-sharun
@@ -160,6 +172,19 @@ if [ -n "$SYSROOT" ]; then
         echo "qemu-$ARCH runs the $ARCH AppImage's checks, and it is not on PATH" >&2
         exit 1
     }
+fi
+# The Linux runtime alone: it runs an AArch64 program, which prints its line and exits with 42
+if [ "$main" = scarletnx-gnuabi ]; then
+    "$(dirname "$0")/aarch64-smoke.sh" "$probe/smoke"
+    status=0
+    out=$(cd "$probe" && APPIMAGE_EXTRACT_AND_RUN=1 "${launch[@]}" ./Probe.AppImage ./smoke 2>&1) || status=$?
+    if [ "$status" != 42 ] || ! grep -qx 'gnuabi smoke' <<<"$out"; then
+        echo "The AppImage ran an AArch64 program to exit status $status, not 42 with its line. It printed:" >&2
+        echo "$out" >&2
+        exit 1
+    fi
+    echo "AppImage checked: it runs Linux AArch64 programs"
+    exit 0
 fi
 check() { # expected module, then the AppImage's arguments
     local want=$1 out

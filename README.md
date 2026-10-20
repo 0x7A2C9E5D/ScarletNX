@@ -17,7 +17,9 @@ kept, with each open pull request's builds. The latest:
 [ScarletNX-linux-ppc64le.AppImage](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-linux-ppc64le.AppImage),
 [ScarletNX-linux-riscv64.AppImage](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-linux-riscv64.AppImage) and
 [ScarletNX-linux-loongarch64.AppImage](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-linux-loongarch64.AppImage) are
-cross-built for [PowerPC64 LE](docs/PPC64.md), [RISC-V and LoongArch](docs/RISCV-LOONGARCH.md), when their jobs built),
+cross-built for [PowerPC64 LE](docs/PPC64.md), [RISC-V and LoongArch](docs/RISCV-LOONGARCH.md), when their jobs built.
+[ScarletNX-linux-ppc64.AppImage](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-linux-ppc64.AppImage), for
+[PowerPC64 BE](docs/PPC64.md#big-endian-hosts), runs Linux AArch64 programs only),
 [ScarletNX-windows-x86_64.zip](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-windows-x86_64.zip) for Windows (run `bin\scarletnx.exe`)
 and [ScarletNX-android-universal.apk](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-android-universal.apk) ([Android](docs/ANDROID.md)).
 Games need a Vulkan 1.3 driver.

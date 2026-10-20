@@ -18,10 +18,11 @@ system root and runs it under qemu as installed; the test suite's job, `linux-pp
 The big-endian port has a job of its own, `linux-ppc64`, which builds the Linux runtime and runs its tests under
 qemu-ppc64.
 
-On a big-endian host (`linux-ppc64-cross`, Debian's glibc port, ELFv1) the Linux runtime runs AArch64 programs:
-under qemu-ppc64, an AArch64-hosted GCC compiles a C file and the program it made runs, both dynamically linked
-against glibc. The Switch runtime builds there but refuses to start a game. See
-[Big-endian hosts](#big-endian-hosts).
+On a big-endian host the Linux runtime runs AArch64 programs, with Debian ports' glibc (`linux-ppc64-cross`, ELFv1)
+and with Arch POWER's (`linux-ppc64-elfv2-cross`, ELFv2): under qemu-ppc64, an AArch64-hosted GCC compiles a C file
+and the program it made runs, both dynamically linked against glibc. CI packages the Arch POWER build as
+`ScarletNX-linux-ppc64.AppImage`, the Linux runtime alone (`ScarletNX-linux-ppc64.AppImage ./program`). The Switch
+runtime builds there but refuses to start a game. See [Big-endian hosts](#big-endian-hosts).
 
 ## Building on an x86-64 Debian machine
 
@@ -137,6 +138,12 @@ cmake --build --preset linux-ppc64-cross --target scarletnx-gnuabi-run
 CI's `linux-ppc64` job builds it this way against that system root, made weekly, and runs the Linux runtime's tests
 (`gnuabi_*`, `endian`, `cas128`) under qemu-ppc64. Debian ports' unstable can break for a day, so the job may fail
 without failing the run.
+
+Arch POWER's big-endian glibc is ELFv2, as LLD links it. Its preset (`linux-ppc64-elfv2-cross`, `SNX_PPC64_ELFV2`)
+builds for ELFv2 with `-mabi=elfv2` and the Linux runtime alone. Its system root is pkgforge's Arch image of the
+architecture with LLVM and GCC's runtime installed into it, as the `appimage-cross` job makes it. The runtime's own
+code generator takes its ABI from the runtime itself (`_CALL_ELF`, `new_ir` in `ir.c`), as LLVMs differ in which
+ABI their `powerpc64-*-linux-gnu` picks: Debian's 19 ELFv1, Arch POWER's 22 ELFv2.
 
 What was run under qemu-ppc64: the Linux runtime's tests (`gnuabi_*`, `endian`, `cas128`), `tools/gnuabi_diff.py
 --suite all` against qemu-aarch64 (the CPU suite covers SIMD, floating point, exclusives and unaligned accesses), a

@@ -138,6 +138,8 @@ typedef struct SnxIr {
     /* the target stores values big-endian (ppc64): guest memory and the vector registers hold the guest's
        little-endian bytes, so the accesses that read them as numbers swap (ir_rd, ir_vd and their siblings) */
     int big_endian;
+    /* PowerPC64's ABI is ELFv2, else ELFv1 (new_ir): what a function pointer is, where the TOC is saved */
+    int elfv2;
 } SnxIr;
 
 void ir_state_invalidate(SnxIr* ir);

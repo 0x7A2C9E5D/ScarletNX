@@ -133,6 +133,15 @@ endif()
 if(NOT SNX_BUILD_NX)
     include(GNUInstallDirs)
     install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/scarletnx)
+    # the Linux runtime alone (a big-endian host's build): its desktop entry, for the AppImage made of it
+    # (scripts/make-appimage.sh), and the license of OpenSSL, which it links
+    if(SNX_BUILD_GNUABI AND NOT SNX_BUILD_3DS)
+        if(NOT WIN32)
+            install(FILES dist/scarletnx-gnuabi.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+                    COMPONENT desktop)
+        endif()
+        install(FILES "${OpenSSL_SOURCE_DIR}/LICENSE.txt" DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/scarletnx/OpenSSL)
+    endif()
     return()
 endif()
 if(BUILD_TESTING AND TARGET hactool_lib)

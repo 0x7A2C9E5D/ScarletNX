@@ -6,7 +6,8 @@
 #   - SNX_ARCH_FLAGS, the CPU baseline the whole build compiles for, which CMake's compiles get too (added here).
 #     PowerPC64 builds for POWER8: before it there is no lqarx/stqcx., and Clang calls libatomic's
 #     __atomic_compare_exchange_16 for snx_cas128 (helpers/integer.c), which a module links no library to have.
-#     ppc64le starts at POWER8 anyway; the BE machines before it (970) have no Vulkan driver. RISC-V builds rv64gc and
+#     ppc64le starts at POWER8 anyway; the BE machines before it (970) have no Vulkan driver. SNX_PPC64_ELFV2 builds
+#     big-endian glibc for ELFv2 (Arch POWER's), as Clang builds it for ELFv1 (Debian ports'). RISC-V builds rv64gc and
 #     LoongArch LA64 v1.0, as the recompiler's modules are (ir.c), and both without linker relaxation: the runtime
 #     library is merged into each module with its functions' own target features, and the module's linker (link_elf.c)
 #     moves no code.
@@ -16,15 +17,23 @@
 #     own architecture.
 # All are empty for the other hosts and builds.
 include_guard(GLOBAL)
+option(SNX_PPC64_ELFV2 "Build big-endian PowerPC64 glibc for ELFv2 (Arch POWER), not ELFv1 (Debian ports)" OFF)
 set(SNX_ARCH_FLAGS "")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64|ppc64le|powerpc64|powerpc64le)$")
     set(SNX_ARCH_FLAGS -mcpu=power8)
+    if(SNX_PPC64_ELFV2)
+        list(APPEND SNX_ARCH_FLAGS -mabi=elfv2)
+    endif()
 elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "riscv64")
     set(SNX_ARCH_FLAGS -march=rv64gc -mno-relax)
 elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "loongarch64")
     set(SNX_ARCH_FLAGS -march=la64v1.0 -mno-relax)
 endif()
 add_compile_options(${SNX_ARCH_FLAGS})
+# the links' too: Clang names the program's loader by it (ELFv2's ld64.so.2, ELFv1's ld64.so.1)
+if(SNX_PPC64_ELFV2)
+    add_link_options(-mabi=elfv2)
+endif()
 
 set(SNX_TARGET_FLAGS "")
 set(SNX_TARGET_LDFLAGS "")
@@ -37,9 +46,9 @@ if(CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
     if(CMAKE_SYSROOT)
         list(APPEND SNX_TARGET_FLAGS --sysroot=${CMAKE_SYSROOT})
     endif()
-    # LLD links no ELFv1 object, the ABI of big-endian PowerPC64 glibc (Debian ports): GNU ld does
-    # (binutils-powerpc64-linux-gnu). Big-endian musl is ELFv2, as LLD takes it
-    if(CMAKE_C_COMPILER_TARGET MATCHES "^(powerpc64|ppc64)-([a-z]+-)?linux-gnu$")
+    # LLD links no ELFv1 object, the ABI of big-endian PowerPC64 glibc on Debian ports: GNU ld does
+    # (binutils-powerpc64-linux-gnu). Big-endian musl and Arch POWER's glibc are ELFv2, as LLD takes it
+    if(CMAKE_C_COMPILER_TARGET MATCHES "^(powerpc64|ppc64)-([a-z]+-)?linux-gnu$" AND NOT SNX_PPC64_ELFV2)
         set(SNX_TARGET_LDFLAGS -fuse-ld=bfd)
     else()
         set(SNX_TARGET_LDFLAGS -fuse-ld=lld)
