@@ -823,6 +823,11 @@ int main(int argc, char** argv) {
     CHECK(!check_dma());
     CHECK(!check_blit());
     CHECK(!check_rt_overlap());
+    /* the pipeline workers: pipeline_threads when given, else a quarter of the CPUs, two to six */
+    CHECK(vk_pipeline_worker_count(0, 12) == 3 && vk_pipeline_worker_count(0, 4) == 2 &&
+          vk_pipeline_worker_count(0, 0) == 2 && vk_pipeline_worker_count(0, 64) == 6);
+    CHECK(vk_pipeline_worker_count(5, 12) == 5 && vk_pipeline_worker_count(32, 4) == 32 &&
+          vk_pipeline_worker_count(1, 64) == 1);
     /* FFmpeg takes the device for Vulkan Video exactly when it has the decode queue */
     void* video_device = g_renderer->nvdec_hw_device();
     CHECK(!video_device == (g_vk.video_family == ~0u));

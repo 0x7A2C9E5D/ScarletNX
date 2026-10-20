@@ -824,6 +824,9 @@ typedef struct {
 } PipeKey;
 /* the pipeline for k, made when new and waited for while a worker makes it: NULL only when it can't be made */
 VkPipeline vk_pipeline_get(const PipeKey* k);
+/* the threads making new pipelines: setting (pipeline_threads) when it is one or more, else a quarter of cpus, two
+   to six */
+int vk_pipeline_worker_count(int setting, int cpus);
 /* a draw's pipeline: the pipeline, or a stand-in the recording thread waits for at its bind (vk_pipeline_resolve, the
    pipeline a stand-in names, or h itself) */
 VkPipeline vk_pipeline_get_deferred(const PipeKey* k);

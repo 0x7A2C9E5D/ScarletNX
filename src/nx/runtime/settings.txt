@@ -149,6 +149,15 @@ setting Heap limit (MB)
     startup
     set options_heap_max_set
     help The most heap the game can allocate, in MB; 0 = as much as its memory allows
+setting Pipeline threads
+    key pipeline_threads
+    int 0 32
+    default 0
+    startup
+    words Auto|#
+    help The threads that make the GPU's new pipelines while the game goes on: 0 = a quarter of the computer's
+    help threads, two to six; 1 to 32 = that many. More make a first run's new pipelines sooner, with less CPU left
+    help for the game
 setting JIT threads
     key jit_threads
     int 0 8

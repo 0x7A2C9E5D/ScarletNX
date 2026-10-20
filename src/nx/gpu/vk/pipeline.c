@@ -551,9 +551,12 @@ static VkShaderModule null_fs(void) {
 }
 
 /* ------------------------------------------------------------ pipelines */
-/* A draw's new pipeline is made on the GPU thread, and the draw waits for it. The shader file's pipelines (pf_merge)
-   are made on two worker threads from startup, and a draw that asks for one before then waits for it too, at the head
-   of the workers' queue. Skipping a draw whose pipeline was still being made, as Eden's asynchronous shaders do, left
+/* A draw's new pipeline is made on the worker threads (pipeline_threads, vk_pipeline_worker_count): the GPU thread hands
+   the recording thread a stand-in for it and decodes on, and the recording thread waits for the pipeline at its bind
+   (vk_pipeline_resolve; without that thread, SNX_VK_RECORD=0, the draw waits on the GPU thread). The shader file's
+   pipelines (pf_merge) are made on the workers from startup, and a draw that asks for one before then waits for it
+   too, at the head of the workers' queue. Skipping a draw whose pipeline was still being made, as Eden's asynchronous
+   shaders do, left
    one game's menus over a black backdrop and its loading screen without its map whenever their one draw was
    skipped, and failed 190 of edenprobe's cases: a draw is never skipped for its pipeline. What a worker needs that is
    made lazily, the layout and the empty fragment shader, is made on the GPU thread first */
@@ -804,14 +807,19 @@ static void pipe_worker(void* arg) {
         pm_unlock(&g_pj_lock);
     }
 }
+int vk_pipeline_worker_count(int setting, int cpus) {
+    int n = cpus / 4;
+    if (setting > 0) return setting;
+    /* a quarter of the CPUs, two to six: the driver's compile is the CPU's work, which the game's threads need too,
+       and a first run's bursts of new pipelines go to them side by side (vk_pipeline_get_deferred) */
+    if (n < 2) n = 2;
+    if (n > 6) n = 6;
+    return n;
+}
 /* the workers, started the first time one is needed: how many there are (g_pj_lock) */
 static int pipe_workers(void) {
     if (!g_pj_started) {
-        /* a quarter of the CPUs, two to six: the driver's compile is the CPU's work, which the game's threads need
-           too, and a first run's bursts of new pipelines go to them side by side (vk_pipeline_get_deferred) */
-        int ids[256], n = plat_cpus(ids, 256) / 4; /* 0 where the platform doesn't say */
-        if (n < 2) n = 2;
-        if (n > 6) n = 6;
+        int ids[256], n = vk_pipeline_worker_count(g_settings.pipeline_threads, plat_cpus(ids, 256));
         g_pj_started = 1;
         pc_init(&g_pj_work);
         pc_init(&g_pj_done);

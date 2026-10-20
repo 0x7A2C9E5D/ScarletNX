@@ -363,7 +363,7 @@ nickname and picture, and the launcher the one its Settings' `user` names, where
 
 `Game.ini`: help rewritten at startup, most settings hot-reload. `--key=value` overrides one run.
 Restart for `docked`, `fullscreen`, `language`, `resolution`, `anisotropy`, `memory_gb`, `heap_max_mb`, `airplane_mode`,
-`ldn`, `room`, `profile`, `jit_threads`.
+`ldn`, `room`, `profile`, `pipeline_threads`, `jit_threads`.
 `scarletnx --settings` prints each setting the launcher's Settings offer, one a line: its section, key, default,
 type, range and help, tab-separated. Every setting, the recompiler's too, is described once in
 `src/nx/runtime/settings.txt`, which the build generates the tables and `g_settings` from.
@@ -381,6 +381,7 @@ type, range and help, tab-separated. Every setting, the recompiler's too, is des
 | `fps_limit` | `game` | The pace the game asks for, as on the console: 60 FPS, or 30 for a game made for 30. `0` is unlimited, and `10` to `1000` is that many FPS |
 | `memory_gb` | `0` | Memory the game sees. Below `6` it is the console's 3.2 GB, `6` gives 4.8 GB and `8` gives 6.8 GB. Games that run out of memory on 3.2 GB, like Tears of the Kingdom, need `6` |
 | `heap_max_mb` | `0` | The most heap the game can allocate, in MB. `0` is as much as the memory allows |
+| `pipeline_threads` | `0` | Threads that make the GPU's new pipelines while the game goes on. `0` uses a quarter of the computer's threads, two to six; `1` to `32` is that many. More make a first run's new pipelines sooner, with less CPU left for the game |
 | `jit_threads` | `0` | Threads compiling the game code the recompiler missed, which a thread waits for when it reaches it. `0` uses every CPU the game may run on but two, at most 8. They run below the game's threads |
 | `network` | `0` | `0` reports offline and lets the game reach only loopback, which is not a network sandbox. `1` uses the computer's connection, and the resolver blocks known console service domains. Local wireless works either way (`ldn`) |
 | `airplane_mode` | `0` | `1` is the console in airplane mode: offline whatever `network` says, no local wireless, as the game hears it, and in no Eden room |
