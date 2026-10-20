@@ -78,7 +78,8 @@ typedef struct Out {
     size_t n, max;
 } Out;
 static void put(Out* o, const void* v, size_t n) {
-    if (o->n <= o->max && n <= o->max - o->n) memcpy(o->p + o->n, v, n);
+    /* n 0: a packet with no data names none, which memcpy can't take even for 0 bytes */
+    if (n && o->n <= o->max && n <= o->max - o->n) memcpy(o->p + o->n, v, n);
     o->n += n; /* past max: the caller sees it didn't fit */
 }
 static void put8(Out* o, uint8_t v) { put(o, &v, 1); }
