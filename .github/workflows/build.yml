@@ -413,7 +413,7 @@ jobs:
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
-          get-debloated-pkgs opus-mini icu-mini
+          get-debloated-pkgs mesa-nano opus-mini icu-mini
       - name: Build and install into /usr
         run: |
           git config --global --add safe.directory '*'
