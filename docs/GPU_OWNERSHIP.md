@@ -7,7 +7,7 @@ the ownership map and copies it on the GPU. Only when the guest CPU (recompiled 
 touches an owned range is the data written back into guest memory, the one readback the rules allow, and the range
 is the CPU's again.
 
-The trap model is Skyline's (read for the design only: its source is MPL-2.0 and was withdrawn at Nintendo's
+The trap model is Skyline's (read for the design only: its source is MPL-2.0 and was withdrawn at the console maker's
 request, so nothing is copied from it). The fault is taken differently on each host (below).
 
 ## The trap model
