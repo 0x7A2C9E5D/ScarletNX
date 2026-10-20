@@ -466,8 +466,8 @@ static void build_ldxp(SnxIr* ir, LLVMValueRef function) {
 }
 /* stxp(c,M,a,sz,v1,v2) */
 static void build_stxp(SnxIr* ir, LLVMValueRef function) {
-    LLVMValueRef a = P(2), sz = P(3), v1 = P(4), v2 = P(5), ok32, ok128, ok, values[3], args[5], packed;
-    LLVMTypeRef params[5];
+    LLVMValueRef a = P(2), sz = P(3), v1 = P(4), v2 = P(5), ok32, ok128, ok, values[3], args[6], packed;
+    LLVMTypeRef params[6];
     LLVMBasicBlockRef start, attempt = ir_block(ir, "attempt"), pair32 = ir_block(ir, "pair32"),
                              pair64 = ir_block(ir, "pair64"), finish = ir_block(ir, "finish"), blocks[3];
     ir->c = P(0);
@@ -481,14 +481,15 @@ static void build_stxp(SnxIr* ir, LLVMValueRef function) {
     ok32 = cas(ir, a, 64, ir_cpu_load(ir, ir->t_i64, offsetof(CPU, excl_val)), packed);
     LLVMBuildBr(B, finish);
     LLVMPositionBuilderAtEnd(B, pair64);
-    params[0] = ir->t_ptr;
-    params[1] = params[2] = params[3] = params[4] = ir->t_i64;
-    args[0] = ir_mp(ir, a);
-    args[1] = ir_cpu_load(ir, ir->t_i64, offsetof(CPU, excl_val));
-    args[2] = ir_cpu_load(ir, ir->t_i64, offsetof(CPU, excl_val2));
-    args[3] = v1;
-    args[4] = v2;
-    ok128 = ir_call(ir, ir_extern(ir, "snx_cas128", ir->t_i32, params, 5), args, 5);
+    params[0] = params[1] = ir->t_ptr;
+    params[2] = params[3] = params[4] = params[5] = ir->t_i64;
+    args[0] = ir->c; /* RISC-V and LoongArch reach the runtime's compare-and-swap through it (cpu.h) */
+    args[1] = ir_mp(ir, a);
+    args[2] = ir_cpu_load(ir, ir->t_i64, offsetof(CPU, excl_val));
+    args[3] = ir_cpu_load(ir, ir->t_i64, offsetof(CPU, excl_val2));
+    args[4] = v1;
+    args[5] = v2;
+    ok128 = ir_call(ir, ir_extern(ir, "snx_cas128", ir->t_i32, params, 6), args, 6);
     LLVMBuildBr(B, finish);
     LLVMPositionBuilderAtEnd(B, finish);
     ok = LLVMBuildPhi(B, ir->t_i32, "");

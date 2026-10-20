@@ -278,6 +278,7 @@ void snx_runtime_defaults(RtAPI* rt) {
     rt->sev = default_sev;
     rt->wfe = default_wfe;
     rt->poll = default_poll;
+    rt->cas128 = snx_runtime_cas128;
 }
 
 /* ---- the input ---- */
