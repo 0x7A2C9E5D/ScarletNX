@@ -3,6 +3,7 @@
 #include "gui/browser.h"
 #include "common/utilities/common.h"
 #include <assert.h>
+#include <errno.h>
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -136,6 +137,11 @@ int main(void) {
     assert(gui_games_scan(&games, subdir, true, error, sizeof error) && !games.count);
     assert(!snx_remove_tree(dir));
     assert(!gui_games_scan(&games, dir, true, error, sizeof error) && error[0] && !games.count);
+    /* the folder gone is said with its path and the system's reason */
+    assert(strstr(error, dir) != NULL);
+#ifndef _WIN32
+    assert(strstr(error, strerror(ENOENT)) != NULL);
+#endif
     gui_games_free(&games);
     free(subdir);
     free(dir);

@@ -33,16 +33,12 @@ msgstr ""
 
 #: src/gui/browser.c
 #, c-format
-msgid "Cannot open %s."
+msgid "Cannot open %s: %s"
 msgstr ""
 
 #: src/gui/browser.c
 #, c-format
 msgid "Not enough memory to list %s."
-msgstr ""
-
-#: src/gui/browser.c src/gui/main.c
-msgid "Cannot open games/. Create it in the displayed working directory."
 msgstr ""
 
 #: src/gui/clean.c
@@ -978,13 +974,17 @@ msgid "SDL mappings could not be read: %s"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Any [default]"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "Controllers cannot be read: %s"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Press a button on player %d's controller. ESC: as it was"
+msgid "Press a button on player %d's controller. ESC keeps %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -997,7 +997,8 @@ msgid "the controller pressed"
 msgstr ""
 
 #: src/gui/main.c
-msgid "As it was"
+#, c-format
+msgid "Player %d keeps %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -1018,10 +1019,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "The runtime listed no settings"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Any [default]"
 msgstr ""
 
 #: src/gui/main.c
@@ -1178,7 +1175,8 @@ msgid "prod.keys installed: games can be extracted now."
 msgstr ""
 
 #: src/gui/main.c
-msgid "Cannot install prod.keys. Check file and folder permissions, then try again."
+#, c-format
+msgid "Cannot install %s: %s"
 msgstr ""
 
 #: src/gui/main.c

@@ -155,7 +155,8 @@ static bool add_games(GuiGames* games, const char* directory, int kinds, size_t 
     char **names = NULL, **more;
     size_t count = 0, i;
     if (snx_list_dir(directory, &names, &count)) {
-        snprintf(error, size, snx_tr("Cannot open %s."), directory);
+        char why[256];
+        snprintf(error, size, snx_tr("Cannot open %s: %s"), directory, snx_os_error(why, sizeof why));
         return false;
     }
     size_t j;
@@ -226,14 +227,6 @@ bool gui_has_folders(const char* directory, int kinds) {
     return found;
 }
 bool gui_games_scan(GuiGames* games, const char* directory, bool cia, char* error, size_t size) {
-    char* open;
     gui_games_free(games);
-    if (gui_games_add(games, directory, cia ? GUI_GAMES_CIA : GUI_GAMES_RUN, error, size)) return true;
-    /* the folder could not be read, not the memory: in whatever language the error came */
-    open = size ? (char*)malloc(size) : NULL;
-    if (open) snprintf(open, size, snx_tr("Cannot open %s."), directory);
-    if (open && !strcmp(error, open))
-        snprintf(error, size, "%s", snx_tr("Cannot open games/. Create it in the displayed working directory."));
-    free(open);
-    return false;
+    return gui_games_add(games, directory, cia ? GUI_GAMES_CIA : GUI_GAMES_RUN, error, size);
 }
