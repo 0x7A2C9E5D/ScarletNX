@@ -545,6 +545,9 @@ static int relocations(Link* l, unsigned char* image, Rebases* rebases) {
                     got = l->got_address + 8 * slot;
                 }
                 if (!image) {
+                    if (type == R_BRANCH26 && weak) /* the module imports nothing: there is no address to call */
+                        return fail(l, "%s: a call to the undefined weak symbol %s", o->input->name,
+                                    symbol_name(o, symbol(o, number)));
                     if (type == R_BRANCH26 && l->far && def_object != i && !weak) {
                         veneer_key(key, i, def_object, def_index);
                         if (!snx_link_find(&l->veneer, key, &slot)) snx_link_insert(&l->veneer, key, o->veneers++);
@@ -582,7 +585,6 @@ static int relocations(Link* l, unsigned char* image, Rebases* rebases) {
                         break;
                     case R_BRANCH26:
                         relative = (int64_t)(S + (uint64_t)A - P);
-                        if (weak) goto range;
                         if (!fits(relative, 28)) {
                             /* the caller's veneer, which it reaches, jumps there: ADRP x16, ADD x16, BR x16 */
                             uint64_t target = S + (uint64_t)A, at_veneer;

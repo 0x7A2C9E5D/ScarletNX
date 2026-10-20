@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* link_macho.c's objects, compiled for arm64 macOS twice: PART 1 calls into PART 2 (branches, GOT loads, pointers in
-   data to rebase, a weak import nothing defines, zerofill, constants, a 128-bit load and a signed byte one), as LLVM's
-   modules do */
+/* link_macho.c's objects, compiled for arm64 macOS once per PART: PART 1 calls into PART 2 (branches, GOT loads,
+   pointers in data to rebase, a weak import nothing defines, zerofill, constants, a 128-bit load and a signed byte
+   one), as LLVM's modules do. The others are objects the linker refuses */
 #if PART == 1
 extern int counter;
 int helper(int x);
@@ -24,8 +24,12 @@ unsigned long long test_entry(void) {
     return (unsigned long long)(names[2][1] + fns[1](2) + counter + (missing ? 1 : 2)) + zeroes[4095] +
            (unsigned long long)scale[1];
 }
-#else
+#elif PART == 2
 int counter = 10;
 int helper(int x);
 int helper(int x) { return x * 3; }
+#elif PART == 3 /* refused: a call to a weak import nothing defines */
+extern int missing(void) __attribute__((weak_import));
+int test_entry(void);
+int test_entry(void) { return missing ? missing() : 0; }
 #endif

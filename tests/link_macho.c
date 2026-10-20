@@ -4,7 +4,8 @@
    in order, __LINKEDIT last; the rebases inside __DATA, onto addresses in the image; the export trie finding the
    entry in __text; the code's ADRP and its low 12 bits onto the symbols they name; the ad hoc signature last, with
    each 4 KiB page's SHA-256 as OpenSSL computes it. A dump of the output is written to argv[3] for llvm-objdump
-   --macho. Usage: link_macho part1.o part2.o out.dylib */
+   --macho. Then objects the linker refuses, each with words of the reason it must give.
+   Usage: link_macho part1.o part2.o out.dylib [refused.o reason]... */
 #include "common/cpu/recompiler/llvm/link.h"
 #include <assert.h>
 #include <openssl/evp.h>
@@ -80,6 +81,29 @@ static uint64_t trie_find(const unsigned char* trie, size_t size, const char* na
         }
         if (!next) return 0;
     }
+}
+
+/* 0 when the linker refuses the object at path with an error that says reason; 1, saying why, otherwise */
+static int refused(const char* path, const char* reason) {
+    SnxLinkInput input;
+    SnxLinkOutput out;
+    const char* exports[] = {"test_entry"};
+    char error[512];
+    int linked;
+    input.data = slurp(path, &input.size);
+    input.name = path;
+    linked = !snx_link(&input, 1, exports, 1, "test.dylib", &out, error, sizeof(error));
+    free((void*)input.data);
+    if (linked) {
+        fprintf(stderr, "%s: linked, where it should fail with %s\n", path, reason);
+        free(out.data);
+        return 1;
+    }
+    if (!strstr(error, reason)) {
+        fprintf(stderr, "%s: refused with \"%s\", not %s\n", path, error, reason);
+        return 1;
+    }
+    return 0;
 }
 
 /* name's address in a symbol table, or 0 */
@@ -162,7 +186,9 @@ int main(int argc, char** argv) {
     uint32_t nsymbols = 0;
     unsigned rebases = 0, pages, wide = 0, signed_bytes = 0;
     FILE* f;
-    assert(argc == 4);
+    assert(argc >= 4 && argc % 2 == 0);
+    for (i = 4; i < (uint32_t)argc; i += 2)
+        if (refused(argv[i], argv[i + 1])) return 1;
     inputs[0].data = slurp(argv[1], &inputs[0].size);
     inputs[0].name = argv[1];
     inputs[1].data = slurp(argv[2], &inputs[1].size);
