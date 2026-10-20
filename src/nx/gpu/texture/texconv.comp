@@ -26,12 +26,16 @@ layout(push_constant) uniform Params {
     uint out_bias;  /* the output's first row */
     uint st_bias;   /* the stencil output's first row */
     uint zfloat;    /* nonzero: 24 bit depth goes out as a float (D32_SFLOAT_S8_UINT) */
+    uint remap;     /* TC_DMA_REMAP: the components and their sources (texconv_modes.glsl) */
+    uint const_a, const_b;
+    uint line_out;  /* TC_DMA_REMAP: a line's bytes out (its last word's bytes past it are left) */
 };
 
 layout(std430, binding = 0) readonly restrict buffer Src {
     uint src[];
 };
-layout(std430, binding = 1) writeonly restrict buffer Dst {
+/* read too: the DMA remap keeps the destination's own bytes where it says to */
+layout(std430, binding = 1) restrict buffer Dst {
     uint dst[];
 };
 

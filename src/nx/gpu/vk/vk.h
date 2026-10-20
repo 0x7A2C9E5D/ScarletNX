@@ -49,6 +49,17 @@ typedef struct {
        it is the graphics queue itself */
     u32 gfx_family, compute_family;
     VkQueue gfx, compute;
+    u32 gfx_queues; /* the queues made of the graphics family (2 when compute is the second) */
+    /* Vulkan Video's H.264 decode queue, of a family of its own (~0u without one), made when the vulkan_video setting
+       asks for it (experimental): FFmpeg's Vulkan decoder decodes on it (vk/nvdec.c), told of the device by the
+       extensions and features enabled */
+    u32 video_family;
+    const char* dev_ext[24];
+    u32 dev_ext_n;
+    VkPhysicalDeviceFeatures2 feat2; /* feat, with the 1.1 to 1.3 features enabled chained */
+    VkPhysicalDeviceVulkan11Features feat11;
+    VkPhysicalDeviceVulkan12Features feat12;
+    VkPhysicalDeviceVulkan13Features feat13;
     /* swapchain */
     VkSwapchainKHR swapchain;
     VkExtent2D sc_extent;
@@ -94,6 +105,7 @@ int vk_ok_(VkResult r, const char* what, const char* file, int line);
 void vk_lock(void);
 void vk_unlock(void);
 int vk_trylock(void); /* vk_lock unless another thread holds it: 1 when taken */
+u32 vk_lock_owner(void); /* the thread (plat_tid) holding vk_lock, 0 when none */
 
 /* memory.c. vk_mem_init once the device exists, before the allocator (VMA's blocks are kept within the cap):
    sparse_queue is whether the graphics queue's family can bind sparse memory */
@@ -117,6 +129,9 @@ u8* vk_stage_back(u64 size, VkBuffer* buf, u64* off, VmaAllocation* mem);
    The frame goes on: its staging, pools and deferred resources live until vk_frame_next and its slot's next use.
    Either semaphore may be VK_NULL_HANDLE */
 void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal);
+/* the next submission waits for a timeline semaphore of someone else's (FFmpeg's picture's) at one value and signals
+   it at another: whichever submit comes next takes them, so commands recorded from now on never run before the wait */
+void vk_submit_after(VkSemaphore sem, u64 wait, u64 signal);
 void vk_finish(void); /* submits and waits until the GPU has done everything, and lands every result */
 extern u64 g_vk_finishes, g_vk_finish_ns; /* statistics: vk_finish calls and their wait (the GPU thread idles) */
 void vk_frame_next(void);                 /* ends the frame (a present): the next records in the other slot */
@@ -128,6 +143,7 @@ void vk_readback_ready(void);
 void vk_defer_image(VkImage img, VmaAllocation a, VkImageView v1, VkImageView v2);
 void vk_defer_buffer(VkBuffer b, VmaAllocation a);
 void vk_defer_buffer_view(VkBufferView v);
+void vk_defer_call(void (*fn)(void*), void* arg); /* fn(arg) then */
 /* the submission being recorded (a number that grows at every submit: what a submit may have changed, results landed,
    is checked against it), and the frame (grows at vk_frame_next: frame f's work is done once f + VK_FRAMES started) */
 u64 vk_submit_number(void);
@@ -383,6 +399,12 @@ void vk_surf_flush(Surf* s, const u8* original); /* original preserves newer gue
 /* vk_surf_flush in two halves, the GPU not waited for: the bytes a write-back of s copies (0 for none), its copy
    recorded into buf at at (host-readable once the submit being recorded is done), and its landing from those bytes p,
    as of the write generation the copy was recorded at */
+/* the render targets over [gva, gva + size) that hold what guest memory doesn't yet (drawn since their last
+   writeback): their bytes recorded over buf's copy of the range (at `at`), on the GPU, swizzled as guest memory lays
+   them out; a target reaching past the range is written back to guest memory instead (g_vk_rt_readbacks counts
+   those). How many were recorded: the caller orders their writes (a barrier) before what reads buf */
+int vk_rt_overlay(u64 gva, u64 size, VkBuffer buf, u64 at);
+extern u64 g_vk_rt_readbacks;
 u64 vk_surf_flush_size(const Surf* s);
 void vk_surf_flush_record(Surf* s, VkBuffer buf, u64 at);
 void vk_surf_flush_land(Surf* s, const u8* p, const u8* original, u64 wgen);
@@ -428,6 +450,38 @@ void vk_bl_barrier(VkCommandBuffer cb, int before);
    g_vk.alloc_cap or when memory ran out */
 VkBuffer vk_bl_scratch(u64 size, u64* cap);
 
+/* owned.c: guest memory the GPU holds (memory/own.c, docs/GPU_OWNERSHIP.md). An engine's result (VIC's planes, a
+   DMA copy's destination, a 2D blit's, inline-to-memory) is a resource: a device-local buffer in the guest's own
+   layout, published over the guest bytes it holds. The CPU sees it only when it touches those bytes: the trap lands
+   it then. vk_own_init after the device and the frames exist: 0 when the host traps guest memory */
+typedef struct VkOwnRes {
+    VkBuffer buf;
+    VmaAllocation mem;
+    u64 size;
+    u32 refs; /* the creator's, and one an owned range */
+} VkOwnRes;
+int vk_own_init(void);
+VkOwnRes* vk_own_res_new(u64 size); /* with the caller's reference; NULL when out of memory */
+void vk_own_res_unref(VkOwnRes* r);
+/* the guest CPU bytes [cpu, cpu + size) hold r's bytes from off on once the work recorded so far is done: owned, or,
+   where the host can't trap them, landed at once (the GPU waited for). Under vk_lock */
+void vk_own_publish(u64 cpu, u64 size, VkOwnRes* r, u64 off);
+/* guest bytes [gva, gva + size) (by GPU address) for the GPU to read, without landing what it holds: the CPU's
+   copied into host (staging memory at `at` in buf), the GPU's copied into buf there by the GPU, recorded in the
+   frame's command buffer with the barriers that order them. vk_cpu_read is the same by guest CPU address. Under
+   vk_lock */
+void vk_guest_read(u64 gva, u64 size, u8* host, VkBuffer buf, u64 at);
+void vk_cpu_read(u64 cpu, u64 size, u8* host, VkBuffer buf, u64 at);
+/* guest bytes [gva, gva + size) into dst for change detection, as gmem_read reads them, except that bytes the GPU
+   holds come back as a pattern of their owner (which a new owner changes, and the CPU's own bytes replace once it
+   touches them): nothing lands */
+void vk_guest_peek(u64 gva, void* dst, u64 size);
+/* everything recorded so far done before what follows reads or writes what it did (the engines' steps) */
+void vk_all_barrier(VkCommandBuffer cb);
+/* rows rows of row_bytes from src (rows src_pitch apart) over dst's rows (dst_pitch apart), a region a row */
+void vk_copy_rows(VkCommandBuffer cb, VkBuffer src, u64 src_at, u32 src_pitch, VkBuffer dst, u64 dst_at,
+                  u32 dst_pitch, u32 row_bytes, u32 rows);
+
 /* texconv.c: a format the host can't take as it is (f->conv but ASTC, and packed depth and stencil), converted on the
    GPU (gpu/texture/texconv.comp) from linear rows of its guest texels or blocks into rows a copy into the image
    takes */
@@ -450,6 +504,21 @@ int vk_tc_convert(VkCommandBuffer cb, const VkFmt* f, u32 w, u32 rows, u32 slice
 /* the same for a frame vi presents from memory, of vi's pixel format fmt (Android's: 2 RGBX8888, 4 RGB565, 5
    BGRA8888, 6 RGBA5551, 7 RGBA4444) to RGBA8 rows of the shape's out_texels; vk_tc_vi_converts is 0 for RGBA8888,
    which needs no conversion, and formats vi doesn't have */
+/* NV12's chroma rows from FFmpeg's U and V planes (rows in_pitch bytes apart at u_at and v_at in in): pairs pairs a
+   row, rows rows, into out at out_at, rows out_pitch bytes apart (offsets and pitches multiples of 4; the rows are
+   written in whole words: pairs rounded up to 4). 0 past the device's limits */
+int vk_tc_nv12_uv(VkCommandBuffer cb, u32 pairs, u32 rows, VkBuffer in, u64 u_at, u64 v_at, u32 in_pitch,
+                  VkBuffer out, u64 out_at, u32 out_pitch);
+/* the DMA copy engine's remap (gpu.h's GpuDmaOp) of lines lines: each line in at in_at + y * in_pitch (bytes, any
+   alignment), out at out_at + y * out_pitch (words), which holds the destination's own bytes already for the
+   components that keep them. 0 past the device's limits */
+int vk_tc_dma_remap(VkCommandBuffer cb, const GpuDmaOp* o, u32 lines, VkBuffer in, u64 in_at, u32 in_pitch,
+                    VkBuffer out, u64 out_at, u32 out_pitch);
+/* the 2D blit's gather (gpu.h's GpuBlit): rows rows of nb bytes into out at out_at (rows out_pitch bytes apart, a
+   multiple of 4), pixels of bpp bytes from source rows in_pitch bytes apart at src_at in in, through the column and
+   row tables at col_at and row_at in in (words, multiples of 4). in is bound from 0. 0 past the device's limits */
+int vk_tc_blit(VkCommandBuffer cb, u32 bpp, u32 nb, u32 rows, VkBuffer in, u64 in_size, u64 src_at, u32 in_pitch,
+               u64 col_at, u64 row_at, VkBuffer out, u64 out_at, u32 out_pitch);
 int vk_tc_vi_converts(u32 fmt);
 VkTcShape vk_tc_vi_shape(u32 fmt, u32 w);
 int vk_tc_convert_vi(VkCommandBuffer cb, u32 fmt, u32 w, u32 rows, VkBuffer in, u64 in_at, u32 in_pitch, VkBuffer out,
@@ -465,10 +534,19 @@ typedef int (*VkAstcRows)(void* ctx, VkCommandBuffer cb, u32 z, u32 nz, u32 y, u
 int vk_astc_upload(VkCommandBuffer cb, Surf* t, u32 w, u32 h, u32 depth, u32 level, u32 layer, VkAstcRows rows,
                    void* ctx);
 
-/* vic.c: the VIC composition as a compute shader, synchronously: 1 when it composed the picture into the job's
-   output planes, 0 when the job is too large for the GPU and the caller composes in guest memory. Called without
-   vk_lock, which it takes only around what needs it */
+/* vic.c: the VIC composition as a compute shader, recorded in the frame's command buffer, its output planes
+   published (vk_own_publish): 1 when composed, 0 when the job exceeds the device (it is skipped). Takes vk_lock */
 int vk_vic_compose(const VicJob* j);
+/* nvdec.c: an NVDEC picture into its surfaces on the GPU (gpu.h's NvdecPic): staged rows (chroma interleaved there)
+   or a Vulkan Video picture's planes copied out of its image, both planes swizzled there, the surfaces published
+   (vk_own_publish). 1 when written; takes vk_lock. vk_nvdec_hw_device: the renderer's nvdec_hw_device */
+int vk_nvdec_write(const NvdecPic* p);
+void* vk_nvdec_hw_device(void);
+/* dma.c: a launch of the DMA copy engine on the GPU (gpu.h's GpuDmaOp), its destination published: 1 when done, 0
+   past the device's limits (skipped). Takes vk_lock */
+int vk_dma_copy(const GpuDmaOp* o);
+/* blit.c: a 2D blit from memory on the GPU (gpu.h's GpuBlit), its destination published: 1 when done. Takes vk_lock */
+int vk_blit_mem(const GpuBlit* b);
 
 /* texture.c */
 void vk_render_forget_state(void); /* the next draw sets all its state again (another pipeline or state was set) */

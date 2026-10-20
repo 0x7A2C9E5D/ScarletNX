@@ -14,7 +14,14 @@ static unsigned checks;
         }                                                                                                              \
     } while (0)
 
-static u8 memory[0x6000];
+/* guest memory: the small surfaces from 0, block_linear_test's big ones after (iova_ptr), one arena g_mem names, as
+   nvdec.c hands the renderer guest addresses */
+#define MEMORY 0x6000u
+#define BIGMEM (4u << 20)
+static u8 arena[MEMORY + BIGMEM];
+u8* g_mem = arena;
+#define memory arena
+static u8* const big = arena + MEMORY;
 static u32 regs[0x1000 / 4];
 static u8* const setup = memory + 0x1000;
 static u8* const stream = memory + 0x2000;
@@ -22,13 +29,19 @@ void logf_(int level, const char* fmt, ...) {
     (void)level;
     (void)fmt;
 }
+/* the renderer lays the picture out on the GPU; here the reference does it in guest memory (nvdec_ref.c) */
+static int write_ref(const NvdecPic* p) {
+    nvdec_write_ref(p);
+    return 1;
+}
+static const Renderer stand_in = {.name = "stand-in", .nvdec_write = write_ref};
+const Renderer* g_renderer = &stand_in;
+int g_renderer_up = 1;
 /* block_linear_test's surfaces, from iova BIG on */
-#define BIG    0x1000000u
-#define BIGMEM (4u << 20)
-static u8 big[BIGMEM];
+#define BIG 0x1000000u
 u8* iova_ptr(u64 addr, u64 size) {
     if (addr >= BIG) return addr - BIG <= BIGMEM && size <= BIGMEM - (addr - BIG) ? big + (addr - BIG) : NULL;
-    return addr && addr <= sizeof memory && size <= sizeof memory - addr ? memory + addr : NULL;
+    return addr && addr <= MEMORY && size <= MEMORY - addr ? memory + addr : NULL;
 }
 /* Surface addressing is deliberately linear in this test, so the production NV12 interleave/write path runs, except
    in block_linear_test: the block linear layout, GOBs of 64 bytes by 8 rows in blocks of 1 << bh GOBs, the GOB's 16
@@ -47,7 +60,7 @@ u64 bl_offset(u32 x, u32 y, u32 z, u32 pitch, u32 height, u32 bh, u32 bd) {
 }
 static void put32(u32 off, u32 value) { memcpy(setup + off, &value, 4); }
 static void fixture(void) {
-    memset(memory, 0, sizeof memory);
+    memset(memory, 0, MEMORY);
     memset(regs, 0, sizeof regs);
     regs[0x200 / 4] = 3;
     regs[0x404 / 4] = 0x10;
@@ -71,7 +84,7 @@ static void status_is(int failed) {
     CHECK(rd32(memory, 0x3004) == (failed ? 1u : 0u));
     CHECK(rd32(memory, 0x300c) == (u32)failed);
     if (failed)
-        for (unsigned i = 0x4000; i < sizeof memory; ++i) CHECK(memory[i] == 0xcc);
+        for (unsigned i = 0x4000; i < MEMORY; ++i) CHECK(memory[i] == 0xcc);
 }
 static void pixels_are(u8 y, u8 u, u8 v) {
     status_is(0);
@@ -407,7 +420,7 @@ static void submission_tests(void) {
 /* a job failed before its size was known: the status says failed, and the output surface keeps its bytes */
 static void failed_untouched(void) {
     CHECK(rd32(memory, 0x3000) == 0 && rd32(memory, 0x300c) == 1);
-    for (unsigned i = 0x4000; i < sizeof memory; ++i) CHECK(memory[i] == 0xcc);
+    for (unsigned i = 0x4000; i < MEMORY; ++i) CHECK(memory[i] == 0xcc);
 }
 static void vp9_tests(void) {
     fixture();
@@ -470,7 +483,7 @@ static void block_linear_picture(u32 w, u32 h, u32 pitch, u32 pitch_c, u32 sh, u
     f.linesize[0] = (int)w;
     f.linesize[1] = f.linesize[2] = (int)(cw / 2);
     PicOut t = {ys, cs, pitch, pitch_c, bh, w, sh};
-    memset(big, 0xEE, sizeof big);
+    memset(big, 0xEE, BIGMEM);
     bl_layout = 1;
     bl_walks = 0;
     CHECK(write_pic(&f, &t));
@@ -484,7 +497,7 @@ static void block_linear_picture(u32 w, u32 h, u32 pitch, u32 pitch_c, u32 sh, u
             bl_want[cs - BIG + bl_offset(2 * x + 1, y, 0, pitch_c, ch, bh, 0)] = bl_v[y * (cw / 2) + x];
         }
     bl_layout = 0;
-    CHECK(memcmp(big, bl_want, sizeof big) == 0);
+    CHECK(memcmp(big, bl_want, BIGMEM) == 0);
 }
 static void block_linear_test(void) {
     block_linear_picture(1920, 1080, 1920, 1920, 1080, 4);

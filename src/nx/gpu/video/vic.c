@@ -35,11 +35,6 @@
 #define CFG_SIZE  0x610u
 #define SLOT_BASE 0x90u
 #define SLOT_SIZE 0xB0u
-#define FMT_ABGR  0x1Fu /* A8B8G8R8 */
-#define FMT_ARGB  0x20u /* A8R8G8B8 */
-#define FMT_XBGR  0x23u /* X8B8G8R8 */
-#define FMT_NV21  0x43u /* Y8___U8V8_N420: V in each chroma pair's even byte (NVIDIA names bytes from the high one) */
-#define FMT_NV12  0x44u /* Y8___V8U8_N420 */
 
 static u32 bits(u64 v, u32 lo, u32 n) { return (u32)(v >> lo) & ((1u << n) - 1); }
 static u32 min_u32(u32 a, u32 b) { return a < b ? a : b; }
@@ -69,18 +64,6 @@ static int plane_map(VicPlane* pl, u64 iova, u32 pitch, u32 rows, u32 blk, u32 b
     pl->bh = bh;
     return 1;
 }
-static u64 plane_off(const VicPlane* p, u32 x, u32 y) {
-    return p->blk ? bl_offset(x, y, 0, p->pitch, p->h, p->bh, 0) : (u64)y * p->pitch + x;
-}
-/* bytes past the mapping read as 0 and take no writes */
-static u32 plane_rd(const VicPlane* p, u32 x, u32 y) {
-    u64 o = plane_off(p, x, y);
-    return o < p->lim ? p->p[o] : 0;
-}
-static void plane_wr(const VicPlane* p, u64 o, u8 v) {
-    if (o < p->lim) p->p[o] = v;
-}
-
 /* the output surface, its planes and the target rectangle. 0 when the job can't be composed */
 static int job_output(VicJob* j, const u8* cfg, const u32* r) {
     u64 sc = rd64(cfg, 0x20), pad = rd64(cfg, 0x28), bg = rd64(cfg, 0x10);
@@ -192,56 +175,6 @@ static void slot_resolve(VicJob* j, const u8* sl, const u32* sr, u32 s) {
     o->on = 1;
 }
 
-/* the composition in guest memory, as vic.comp does it */
-static void slot_pixel(const VicSlot* sl, u32 x, u32 y, u32 px[4]) {
-    u32 sx = sl->sx0 + (x - sl->dx0), sy = sl->sy0 + (y - sl->dy0), kc = sx & ~1u, c;
-    int q[3];
-    q[0] = (int)(plane_rd(&sl->iy, sx, sy) << 2);
-    q[1] = (int)(plane_rd(&sl->ic, kc + sl->vu, sy >> 1) << 2);
-    q[2] = (int)(plane_rd(&sl->ic, kc + 1 - sl->vu, sy >> 1) << 2);
-    for (c = 0; c < 3; c++) {
-        int v = q[c];
-        if (sl->mat_enable) {
-            v = q[0] * sl->mat[c][0] + q[1] * sl->mat[c][1] + q[2] * sl->mat[c][2];
-            v = ((v >> sl->mat_shift) + sl->mat[c][3]) >> 8;
-            v = v < (int)sl->clamp_lo ? (int)sl->clamp_lo : v > (int)sl->clamp_hi ? (int)sl->clamp_hi : v;
-        }
-        px[c] = (u32)v;
-    }
-    px[3] = sl->alpha;
-}
-static void compose_cpu(const VicJob* j) {
-    u32 x, y, s, k, yuv = j->fmt == FMT_NV12 || j->fmt == FMT_NV21, vu = j->fmt == FMT_NV21;
-    for (y = 0; y < j->sh; y++)
-        for (x = 0; x < j->sw; x++) {
-            u32 px[4];
-            int covered = x >= j->tx0 && x - j->tx0 < j->tw && y >= j->ty0 && y - j->ty0 < j->th;
-            memcpy(px, j->bg, sizeof px);
-            for (s = 0; s < 8; s++) {
-                const VicSlot* sl = &j->slots[s];
-                if (!sl->on || x < sl->dx0 || x - sl->dx0 >= sl->w || y < sl->dy0 || y - sl->dy0 >= sl->h) continue;
-                slot_pixel(sl, x, y, px);
-                covered = 1;
-            }
-            if (!covered) continue;
-            if (!yuv) {
-                u64 o = plane_off(&j->oy, 4 * x, y);
-                u32 rb = j->fmt == FMT_ARGB ? 2 : 0; /* A8R8G8B8 stores R and B the other way around */
-                plane_wr(&j->oy, o + rb, (u8)(px[0] >> 2));
-                plane_wr(&j->oy, o + 1, (u8)(px[1] >> 2));
-                plane_wr(&j->oy, o + 2 - rb, (u8)(px[2] >> 2));
-                plane_wr(&j->oy, o + 3, (u8)(px[3] >> 2));
-                continue;
-            }
-            plane_wr(&j->oy, plane_off(&j->oy, x, y), (u8)(px[0] >> 2));
-            /* a pair's chroma comes from its even pixel on the even row */
-            if (!(x & 1) && !(y & 1) && j->oc.p) {
-                u64 o = plane_off(&j->oc, x, y >> 1);
-                for (k = 0; k < 2; k++) plane_wr(&j->oc, o + (k ^ vu), (u8)(px[1 + k] >> 2));
-            }
-        }
-}
-
 /* ------------------------------------------------ the shader's parameters (vic_params.glsl) */
 static VicGpuPlane gpu_plane(const VicPlane* p, u32 base) {
     VicGpuPlane g;
@@ -257,7 +190,7 @@ static VicGpuPlane gpu_plane(const VicPlane* p, u32 base) {
     g.bstride = ((p->pitch + 63) / 64) << g.bsh;
     return g;
 }
-int vic_gpu_params(const VicJob* j, VicGpuParams* p, const u32 in_base[16], u32 oc_base) {
+void vic_gpu_params(const VicJob* j, VicGpuParams* p, const u32 in_base[16], u32 oc_base) {
     u32 yuv = j->fmt == FMT_NV12 || j->fmt == FMT_NV21, ovu = j->fmt == FMT_NV21, rb = j->fmt == FMT_ARGB ? 16 : 0;
     u32 bg[4], s, n = 0;
     VicGpuJob* g = &p->job;
@@ -282,12 +215,10 @@ int vic_gpu_params(const VicJob* j, VicGpuParams* p, const u32 in_base[16], u32 
         const VicSlot* sl = &j->slots[s];
         VicGpuSlot* o = &p->slots[n];
         if (!sl->on) continue;
-        /* lo above hi clamps to lo below it and to hi above, which the shader's clamp of bytes can't. And the shader
-           writes the target rectangle alone, which holds every slot slot_resolve leaves on */
-        if (sl->mat_enable && sl->clamp_lo > sl->clamp_hi) return 0;
+        /* the shader writes the target rectangle alone, which holds every slot slot_resolve leaves on */
         if (sl->dx0 < j->tx0 || sl->dx0 + sl->w > j->tx0 + j->tw || sl->dy0 < j->ty0 ||
             sl->dy0 + sl->h > j->ty0 + j->th)
-            return 0;
+            fatal("VIC slot %u outside the target rectangle, which slot_resolve clips it to", s);
         n++;
         o->dx0 = sl->dx0;
         o->dx1 = sl->dx0 + sl->w;
@@ -300,8 +231,8 @@ int vic_gpu_params(const VicJob* j, VicGpuParams* p, const u32 in_base[16], u32 
         o->ry = sl->mat[0][0] * 4, o->ru = sl->mat[0][1] * 4, o->rv = sl->mat[0][2] * 4, o->r3 = sl->mat[0][3];
         o->gy = sl->mat[1][0] * 4, o->gu = sl->mat[1][1] * 4, o->gv = sl->mat[1][2] * 4, o->g3 = sl->mat[1][3];
         o->by = sl->mat[2][0] * 4, o->bu = sl->mat[2][1] * 4, o->bv = sl->mat[2][2] * 4, o->b3 = sl->mat[2][3];
-        o->lo = (int)(sl->clamp_lo >> 2);
-        o->hi = (int)(sl->clamp_hi >> 2);
+        o->lo = (int)sl->clamp_lo;
+        o->hi = (int)sl->clamp_hi;
         o->aw = (sl->alpha >> 2) << 24;
         o->ush = 8 * sl->vu;
         o->vsh = 8 - 8 * sl->vu;
@@ -310,7 +241,6 @@ int vic_gpu_params(const VicJob* j, VicGpuParams* p, const u32 in_base[16], u32 
         o->ic = gpu_plane(&sl->ic, in_base[2 * s + 1]);
     }
     g->nslots = n;
-    return 1;
 }
 
 /* the shader's build for word aligned rows needs every plane's rows to keep a word aligned column word aligned: block
@@ -321,18 +251,6 @@ int vic_gpu_aligned(const VicJob* j) {
     for (s = 0; s < 8; s++)
         if (j->slots[s].on && !(plane_aligned(&j->slots[s].iy) && plane_aligned(&j->slots[s].ic))) return 0;
     return plane_aligned(&j->oy) && plane_aligned(&j->oc);
-}
-
-/* SNX_NO_VIC_GPU set (and not 0): the CPU composes every job */
-static int gpu_allowed(void) {
-    static int state; /* 0 unread, 1 allowed, 2 not */
-    int s = __atomic_load_n(&state, __ATOMIC_RELAXED);
-    if (!s) {
-        const char* e = getenv("SNX_NO_VIC_GPU");
-        s = e && *e && strcmp(e, "0") ? 2 : 1;
-        __atomic_store_n(&state, s, __ATOMIC_RELAXED);
-    }
-    return s == 1;
 }
 
 void vic_execute(const u32* r) {
@@ -351,7 +269,10 @@ void vic_execute(const u32* r) {
         any |= j.slots[s].on;
     }
     if (!any && !j.tw) return;
-    /* the GPU once the renderer is up, as the 2D engine and the draws wait for it */
-    if (g_renderer_up && g_renderer && g_renderer->vic_compose && gpu_allowed() && g_renderer->vic_compose(&j)) return;
-    compose_cpu(&j);
+    /* on the GPU, whose result stays there (docs/GPU_OWNERSHIP.md): a job before the renderer is up has nowhere to go */
+    if (!g_renderer_up || !g_renderer || !g_renderer->vic_compose) {
+        WARN_LIMIT(4, "video: a VIC job before the renderer started, skipped\n");
+        return;
+    }
+    if (!g_renderer->vic_compose(&j)) WARN_LIMIT(4, "video: the GPU could not compose a VIC job, skipped\n");
 }

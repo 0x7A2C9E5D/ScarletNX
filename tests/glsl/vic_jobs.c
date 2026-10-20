@@ -8,6 +8,7 @@
    up to eight slots overlapping in any order, odd source columns and rows (RGBA out), target rectangles, crops,
    planes cut short by the end of their mapping or unmapped, and colour matrices with their shifts and clamps. */
 #include "nx/gpu/video/vic.c"
+#include <stdarg.h>
 
 void vic_glsl_run(const void* params, const u32* inputs, u32* outputs, int unaligned);
 
@@ -46,6 +47,13 @@ void logf_(int lvl, const char* fmt, ...) {
     (void)lvl;
     (void)fmt;
 }
+void fatal(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    exit(1);
+}
 
 static u32 rng = 0x2545F491u;
 static u32 rnd(void) {
@@ -63,7 +71,7 @@ static u64 g_ol_lim, g_oc_lim;
 static u32 g_buf[2][2][(2u << 20) / 4]; /* [build][inputs, outputs] */
 static u32 g_oc_base;
 static int g_ran[2];
-static unsigned g_declined, g_unaligned, g_composed, g_fmt[0x45], g_matrix, g_odd, g_blk, g_multi;
+static unsigned g_lo_above_hi, g_unaligned, g_composed, g_fmt[0x45], g_matrix, g_odd, g_blk, g_multi;
 
 static int shader_compose(const VicJob* j) {
     VicGpuParams p;
@@ -72,6 +80,7 @@ static int shader_compose(const VicJob* j) {
         if (!j->slots[s].on) continue;
         n++;
         g_matrix += j->slots[s].mat_enable != 0;
+        g_lo_above_hi += j->slots[s].mat_enable && j->slots[s].clamp_lo > j->slots[s].clamp_hi;
         g_odd += !!((j->slots[s].sx0 - j->slots[s].dx0) & 1);
         g_blk += j->slots[s].iy.blk;
         in_base[2 * s] = at = (at + 15) & ~15u;
@@ -85,10 +94,7 @@ static int shader_compose(const VicJob* j) {
     CHECK(at + 8 <= sizeof g_buf[0][0] && g_oc_base + j->oc.lim + 8 <= sizeof g_buf[0][1]);
     g_ol = j->oy.p, g_ol_lim = j->oy.lim, g_oc = j->oc.p, g_oc_lim = j->oc.p ? j->oc.lim : 0;
     g_ran[0] = g_ran[1] = 0;
-    if (!vic_gpu_params(j, &p, in_base, g_oc_base)) {
-        g_declined++;
-        return 0;
-    }
+    vic_gpu_params(j, &p, in_base, g_oc_base);
     for (b = 0; b < 2; b++) {
         u8 *in = (u8*)g_buf[b][0], *out = (u8*)g_buf[b][1];
         if (!b && !vic_gpu_aligned(j)) continue;
@@ -108,7 +114,8 @@ static int shader_compose(const VicJob* j) {
     g_unaligned += !g_ran[0];
     g_composed++;
     g_fmt[j->fmt]++;
-    return 0;
+    vic_compose_ref(j); /* the reference, into guest memory, which compare holds the shader's planes to */
+    return 1;
 }
 static const Renderer stand_in = {.name = "stand-in", .vic_compose = shader_compose};
 const Renderer* g_renderer = &stand_in;
@@ -179,7 +186,7 @@ static void job_random(void) {
         dx1 = below(6) ? dx0 + (sx1 - sx0) : dx0 + below(sw);
         dy1 = below(6) ? dy0 + (sy1 - sy0) : dy0 + below(sh);
         if (below(3) == 0) sx0 = sy0 = dx0 = dy0 = 0, sx1 = dx1 = sw - 1, sy1 = dy1 = sh - 1, iw = sw, ih = sh;
-        if (below(12) && lo > hi) k = lo, lo = hi, hi = k; /* lo above hi now and then: the shader declines it */
+        if (below(12) && lo > hi) k = lo, lo = hi, hi = k; /* lo above hi now and then */
         w64(sl + 0x00, 1);
         w64(sl + 0x10, (u64)lo | (u64)hi << 10 | (u64)below(1024) << 32);
         w64(sl + 0x20, (u64)(sx0 << 16 | below(0x10000)) | (u64)(sx1 << 16 | below(0x10000)) << 32);
@@ -201,7 +208,7 @@ static void job_random(void) {
     regs[0x708 / 4] = (u32)((BASE + CFG) >> 8);
 }
 
-/* the output planes after the CPU composed them: both builds' must be the same bytes, and nothing around the planes
+/* the output planes after the reference (vic_ref.c) composed them: both builds' must be the same bytes, and nothing around the planes
    may have been written (in gpu/vk/vic.c's buffer that is the other plane, or past the binding) */
 static void compare(void) {
     int b;
@@ -226,13 +233,14 @@ int main(int argc, char** argv) {
         compare();
     }
     printf(
-        "%u jobs composed (%u ABGR, %u ARGB, %u XBGR, %u NV21, %u NV12), %u by the unaligned build alone, %u declined; "
-        "slots: %u with the matrix, %u with an odd source column, %u block linear; %u jobs of several slots; "
+        "%u jobs composed (%u ABGR, %u ARGB, %u XBGR, %u NV21, %u NV12), %u by the unaligned build alone; "
+        "slots: %u with the matrix (%u clamping with lo above hi), %u with an odd source column, %u block linear; "
+        "%u jobs of several slots; "
         "%u checks\n",
-        g_composed, g_fmt[0x1F], g_fmt[0x20], g_fmt[0x23], g_fmt[0x43], g_fmt[0x44], g_unaligned, g_declined, g_matrix,
-        g_odd, g_blk, g_multi, checks);
+        g_composed, g_fmt[0x1F], g_fmt[0x20], g_fmt[0x23], g_fmt[0x43], g_fmt[0x44], g_unaligned, g_matrix,
+        g_lo_above_hi, g_odd, g_blk, g_multi, checks);
     /* the random jobs must have reached every case */
     CHECK(g_fmt[0x1F] && g_fmt[0x20] && g_fmt[0x23] && g_fmt[0x43] && g_fmt[0x44]);
-    CHECK(g_unaligned && g_declined && g_matrix && g_odd && g_blk && g_multi);
+    CHECK(g_unaligned && g_lo_above_hi && g_matrix && g_odd && g_blk && g_multi);
     return 0;
 }

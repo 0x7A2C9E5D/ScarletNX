@@ -21,6 +21,8 @@ static unsigned failures;
 void pm_init(PMutex* m) { (void)m; }
 void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
+/* memory/own.c: nothing is GPU-owned here */
+void own_acquire(u64 addr, u64 size) { (void)addr, (void)size; }
 void logf_(int level, const char* format, ...) {
     (void)level;
     (void)format;

@@ -34,7 +34,9 @@
 #if defined(__linux__)
 #include <linux/falloc.h>
 #include <linux/fs.h>
+#include <linux/futex.h>
 #include <linux/userfaultfd.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
 #endif
@@ -337,11 +339,16 @@ i64 plat_tz_offset(void) {
    over it fails. g_pagemap goes back to -1 when that fails, so every scan says -1 and the caches compare contents */
 static int g_pagemap = -1;
 #if defined(__linux__) && defined(PAGEMAP_SCAN) && defined(UFFD_FEATURE_WP_ASYNC) && defined(UFFD_USER_MODE_ONLY)
+#define SNX_UFFD 1
 static int g_uffd = -1;
+#if defined(UFFD_FEATURE_MINOR_SHMEM) && defined(UFFDIO_CONTINUE)
+#define SNX_UFFD_MINOR 1
 #endif
+#endif
+static int g_uffd_minor; /* the userfaultfd takes minor faults on shared memory: traps work (plat_trap_init) */
 
 static int ww_register(u8* p, u64 size) {
-#if defined(__linux__) && defined(PAGEMAP_SCAN) && defined(UFFD_FEATURE_WP_ASYNC) && defined(UFFD_USER_MODE_ONLY)
+#if SNX_UFFD
     struct uffdio_register reg;
     if (g_uffd < 0) return 0;
     memset(&reg, 0, sizeof reg);
@@ -356,30 +363,45 @@ static int ww_register(u8* p, u64 size) {
 #endif
 }
 
-static void ww_init(u8* p, u64 size) {
-#if defined(__linux__) && defined(PAGEMAP_SCAN) && defined(UFFD_FEATURE_WP_ASYNC) && defined(UFFD_USER_MODE_ONLY)
+#if SNX_UFFD
+/* a userfaultfd with these features (faults from user mode only: the unprivileged kind), or -1 */
+static int uffd_open(u64 features) {
     struct uffdio_api api;
-    long fd;
-    int pm;
-    if (getenv("SNX_NO_WW")) return;
-    fd = syscall(SYS_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY);
-    if (fd < 0) return;
+    long fd = syscall(SYS_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY);
+    if (fd < 0) return -1;
     memset(&api, 0, sizeof api);
     api.api = UFFD_API;
-    api.features = UFFD_FEATURE_WP_ASYNC | UFFD_FEATURE_WP_UNPOPULATED;
-    g_uffd = (int)fd;
-    if (ioctl((int)fd, UFFDIO_API, &api) || ww_register(p, size)) {
+    api.features = features;
+    if (ioctl((int)fd, UFFDIO_API, &api)) {
         close((int)fd);
-        g_uffd = -1;
-        return;
+        return -1;
     }
+    return (int)fd;
+}
+#endif
+
+/* One userfaultfd serves the written-page tracking and the traps (a mapping is registered with one at most). Without
+   minor faults (before Linux 5.13) it does the tracking alone; SNX_NO_WW leaves it the traps alone */
+static void ww_init(u8* p, u64 size) {
+#if SNX_UFFD
+    int no_ww = getenv("SNX_NO_WW") != NULL, fd = -1, pm;
+    u64 wp = no_ww ? 0 : UFFD_FEATURE_WP_ASYNC | UFFD_FEATURE_WP_UNPOPULATED;
+#if SNX_UFFD_MINOR
+    fd = uffd_open(wp | UFFD_FEATURE_MINOR_SHMEM | UFFD_FEATURE_THREAD_ID);
+    g_uffd_minor = fd >= 0;
+#endif
+    if (fd < 0 && wp) fd = uffd_open(wp);
+    if (fd < 0) return;
+    g_uffd = fd; /* before any other thread exists: mem_init runs on the main thread at startup */
+    if (no_ww) return;
+    if (ww_register(p, size)) return;
     pm = open("/proc/self/pagemap", O_RDONLY | O_CLOEXEC);
     if (pm < 0) {
-        close((int)fd);
-        g_uffd = -1;
+        struct uffdio_range r = {(u64)(uintptr_t)p, size};
+        ioctl(g_uffd, UFFDIO_UNREGISTER, &r);
         return;
     }
-    g_pagemap = pm; /* before any other thread exists: mem_init runs on the main thread at startup */
+    g_pagemap = pm;
 #else
     (void)p;
     (void)size;
@@ -469,6 +491,7 @@ void plat_vm_decommit(u8* p, u64 size) {
    copies: the pool is untested there (FreeBSD has memfd_create and, from 14, fspacectl to free a range; Apple has
    shm_open, whose descriptors can't be read or written, and no way to free part of one) */
 static int g_alias = -1;
+static u64 g_alias_size;
 
 int plat_alias_init(u64 size) {
 #if defined(__linux__) && defined(SYS_memfd_create) && defined(FALLOC_FL_PUNCH_HOLE)
@@ -479,6 +502,7 @@ int plat_alias_init(u64 size) {
         return -1;
     }
     g_alias = (int)fd; /* mem_init, before any other thread */
+    g_alias_size = size;
     return 0;
 #else
     (void)size;
@@ -538,6 +562,182 @@ u8* plat_alias_host(u64 off, u64 size) {
     return p == MAP_FAILED ? NULL : (u8*)p;
 }
 void plat_alias_host_free(u8* p, u64 size) { munmap(p, (size_t)size); }
+static u64 g_alias_size;
+u32 plat_tid(void) {
+#if defined(__linux__)
+    return (u32)syscall(SYS_gettid);
+#else
+    return (u32)(uintptr_t)pthread_self();
+#endif
+}
+u8* plat_alias_mirror(void) {
+    static u8* mirror;
+    u8 *m = __atomic_load_n(&mirror, __ATOMIC_ACQUIRE), *none = NULL;
+    void* v;
+    if (m || g_alias < 0) return m;
+    v = mmap(NULL, (size_t)g_alias_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_NORESERVE, g_alias, 0);
+    if (v == MAP_FAILED) return NULL;
+    /* the first one made stays: a thread that made another at the same time unmaps its own */
+    if (!__atomic_compare_exchange_n(&mirror, &none, (u8*)v, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        munmap(v, (size_t)g_alias_size);
+        return none;
+    }
+    return (u8*)v;
+}
+
+/* ---- traps: userfaultfd minor faults on the pool's pages, answered on a thread of their own */
+static void (*g_trap_fault)(u8* p, int write, u32 tid);
+#if SNX_UFFD_MINOR
+static void* trap_thread(void* arg) {
+    struct uffd_msg msg[16];
+    u64 page = (u64)sysconf(_SC_PAGESIZE);
+    (void)arg;
+    for (;;) {
+        struct pollfd pf;
+        ssize_t n;
+        int i;
+        pf.fd = g_uffd;
+        pf.events = POLLIN;
+        pf.revents = 0;
+        if (poll(&pf, 1, -1) <= 0) continue;
+        n = read(g_uffd, msg, sizeof msg);
+        if (n <= 0) continue;
+        for (i = 0; i < (int)(n / (ssize_t)sizeof *msg); i++)
+            if (msg[i].event == UFFD_EVENT_PAGEFAULT)
+                g_trap_fault((u8*)(uintptr_t)(msg[i].arg.pagefault.address & ~(page - 1)),
+                             (msg[i].arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WRITE) != 0,
+                             msg[i].arg.pagefault.feat.ptid);
+    }
+    return NULL;
+}
+#endif
+int plat_trap_init(void (*fault)(u8* p, int write, u32 tid)) {
+#if SNX_UFFD_MINOR
+    pthread_t t;
+    pthread_attr_t a;
+    if (!g_uffd_minor || g_alias < 0 || !fault) return -1;
+    g_trap_fault = fault;
+    pthread_attr_init(&a);
+    pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&t, &a, trap_thread, NULL)) {
+        pthread_attr_destroy(&a);
+        return -1;
+    }
+    pthread_attr_destroy(&a);
+    return 0;
+#else
+    (void)fault;
+    return -1;
+#endif
+}
+int plat_trap_arm(u8* p, u64 size) {
+#if SNX_UFFD_MINOR
+    struct uffdio_register reg;
+    memset(&reg, 0, sizeof reg);
+    reg.range.start = (u64)(uintptr_t)p;
+    reg.range.len = size;
+    reg.mode = UFFDIO_REGISTER_MODE_MINOR; /* in place of the write tracking's registration */
+    if (ioctl(g_uffd, UFFDIO_REGISTER, &reg)) return -1;
+    /* the pages leave the page tables and stay in the pool: the next access is a minor fault */
+    return madvise(p, (size_t)size, MADV_DONTNEED) ? -1 : 0;
+#else
+    (void)p;
+    (void)size;
+    return -1;
+#endif
+}
+int plat_trap_continue(u8* p, u64 size) {
+#if SNX_UFFD_MINOR
+    u64 page = (u64)sysconf(_SC_PAGESIZE), at = (u64)(uintptr_t)p, end = at + size;
+    while (at < end) {
+        struct uffdio_continue c;
+        memset(&c, 0, sizeof c);
+        c.range.start = at;
+        c.range.len = end - at;
+        if (!ioctl(g_uffd, UFFDIO_CONTINUE, &c)) break;
+        if (errno == EAGAIN) continue;
+        /* a page mapped already (EEXIST), or not in the pool (a hole, which faults in as zero by itself): past it */
+        at += (c.mapped > 0 ? (u64)c.mapped : 0) + page;
+    }
+    return 0;
+#else
+    (void)p;
+    (void)size;
+    return -1;
+#endif
+}
+void plat_trap_disarm(u8* p, u64 size) {
+#if SNX_UFFD_MINOR
+    struct uffdio_range r;
+    if (__atomic_load_n(&g_pagemap, __ATOMIC_ACQUIRE) >= 0) {
+        ww_remapped(p, size); /* written-page tracking again, in place of the trap */
+        return;
+    }
+    r.start = (u64)(uintptr_t)p;
+    r.len = size;
+    ioctl(g_uffd, UFFDIO_UNREGISTER, &r);
+#else
+    (void)p;
+    (void)size;
+#endif
+}
+
+/* ---- a range frozen while it is copied: a write to it waits in the signal handler (fault_signal) for the thaw */
+static u8 *g_frz_lo, *g_frz_hi;
+static int g_frozen; /* a futex word: 1 while frozen */
+static __thread void* t_frz_retried; /* the address a thawed write was let go again at once */
+static int frozen_wait(void* a);
+/* a process without the crash handler (a test): faults outside a frozen range end it as they would have */
+static void freeze_signal(int sig, siginfo_t* si, void* ctx) {
+    (void)ctx;
+    if (frozen_wait(si->si_addr)) return;
+    signal(sig, SIG_DFL);
+}
+static int g_fault_handler; /* plat_install_crash_handler's, or freeze_signal, catches SIGSEGV and SIGBUS */
+void plat_freeze(u8* p, u64 size) {
+    if (!__atomic_load_n(&g_fault_handler, __ATOMIC_ACQUIRE)) {
+        struct sigaction sa;
+        memset(&sa, 0, sizeof sa);
+        sigemptyset(&sa.sa_mask);
+        sa.sa_sigaction = freeze_signal;
+        sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+        sigaction(SIGSEGV, &sa, NULL);
+        sigaction(SIGBUS, &sa, NULL);
+        __atomic_store_n(&g_fault_handler, 1, __ATOMIC_RELEASE);
+    }
+    g_frz_lo = p;
+    g_frz_hi = p + size;
+    __atomic_store_n(&g_frozen, 1, __ATOMIC_SEQ_CST);
+    mprotect(p, (size_t)size, PROT_READ);
+}
+void plat_thaw(void) {
+    /* readable and writable whatever is mapped there now (the copy's pages, or the old ones when it failed) */
+    mprotect(g_frz_lo, (size_t)(g_frz_hi - g_frz_lo), PROT_READ | PROT_WRITE);
+    __atomic_store_n(&g_frozen, 0, __ATOMIC_SEQ_CST);
+#if defined(__linux__)
+    syscall(SYS_futex, &g_frozen, FUTEX_WAKE_PRIVATE, INT_MAX, NULL, NULL, 0);
+#endif
+}
+/* 1 when the fault at a is a write to the frozen range, which may go on now (after waiting for the thaw). The range
+   is kept after the thaw, so a write that faulted just before it is let go once more */
+static int frozen_wait(void* a) {
+    u8* lo = __atomic_load_n(&g_frz_lo, __ATOMIC_ACQUIRE);
+    if (!lo || (u8*)a < lo || (u8*)a >= __atomic_load_n(&g_frz_hi, __ATOMIC_ACQUIRE)) return 0;
+    if (!__atomic_load_n(&g_frozen, __ATOMIC_SEQ_CST)) {
+        if (t_frz_retried == a) return 0; /* faulted again after the thaw: not the freeze's */
+        t_frz_retried = a;
+        return 1;
+    }
+    t_frz_retried = NULL;
+    while (__atomic_load_n(&g_frozen, __ATOMIC_SEQ_CST)) {
+#if defined(__linux__)
+        syscall(SYS_futex, &g_frozen, FUTEX_WAIT_PRIVATE, 1, NULL, NULL, 0);
+#else
+        sched_yield();
+#endif
+    }
+    return 1;
+}
 
 /* ================================================================ libraries */
 #if defined(__ANDROID__)
@@ -835,6 +1035,8 @@ static void* context_pc(void* ctx) {
 static void crash_signal(int sig, siginfo_t* si, void* ctx) {
     int idle = 0;
     void* fault;
+    /* a write to memory frozen while it moves (plat_freeze): it goes on once the move is done */
+    if ((sig == SIGSEGV || sig == SIGBUS) && frozen_wait(si->si_addr)) return;
     /* a fault inside the report itself */
     if (t_crashed) _exit(1);
     t_crashed = 1;
@@ -869,6 +1071,7 @@ void plat_install_crash_handler(void) {
     /* NODEFER: a fault during the report re-enters the handler, which ends the process, instead of hanging */
     sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
     for (i = 0; i < sizeof sigs / sizeof *sigs; i++) sigaction(sigs[i], &sa, NULL);
+    __atomic_store_n(&g_fault_handler, 1, __ATOMIC_RELEASE);
     memset(&sa, 0, sizeof sa);
     sigemptyset(&sa.sa_mask);
     sa.sa_handler = abort_signal;

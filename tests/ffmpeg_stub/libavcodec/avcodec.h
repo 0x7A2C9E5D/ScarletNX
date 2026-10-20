@@ -18,6 +18,7 @@
 #define FF_THREAD_SLICE              2
 #define AV_PIX_FMT_YUV420P           0
 #define AV_PIX_FMT_YUVJ420P          12
+#define AV_PIX_FMT_VULKAN            1000 /* never made by the stub's decoder */
 typedef struct AVCodec {
     int unused;
 } AVCodec;
@@ -36,6 +37,7 @@ typedef struct AVCodecContext {
     void* opaque;
     int thread_count, thread_type;
     int (*get_buffer2)(struct AVCodecContext*, AVFrame*, int);
+    void* hw_device_ctx;
 } AVCodecContext;
 const AVCodec* avcodec_find_decoder(int id);
 AVCodecContext* avcodec_alloc_context3(const AVCodec* codec);

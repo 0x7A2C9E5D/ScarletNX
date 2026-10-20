@@ -175,13 +175,53 @@ uint tc_16to32(uint v) {
            (((v >> 11) & 31u) * 255u / 31u << 24);
 }
 
+/* byte b of the input buffer (byte addressed) */
+uint tc_src_byte(uint b) { return (src[b >> 2] >> (8u * (b & 3u))) & 0xFFu; }
+/* TC_DMA_REMAP: byte ob of a line out, with the line in from byte in_line on and the byte now there in old */
+uint tc_remap_byte(uint ob, uint in_line, uint old) {
+    uint cs = remap & 15u, ns = (remap >> 4) & 15u, nd = (remap >> 8) & 15u, eo = cs * nd;
+    uint e = ob / eo, within = ob - e * eo, k = within / cs, j = within - k * cs, sel = (remap >> (12u + 4u * k)) & 7u;
+    if (sel < 4u) return sel < ns ? tc_src_byte(in_line + e * cs * ns + sel * cs + j) : 0u;
+    if (sel < 6u) return ((sel == 4u ? const_a : const_b) >> (8u * j)) & 0xFFu;
+    return old;
+}
+
 void main() {
     uint u = gl_GlobalInvocationID.x;
     if (u >= units) return;
+    if (mode == TC_BLIT) {
+        uint line = gl_GlobalInvocationID.y, at = out_bias + line * out_pitch + u, w = dst[at], r = 0u;
+        uint row = in_bias + src[const_b + line] * in_pitch;
+        for (uint b = 0u; b < 4u; b++) {
+            uint ob = 4u * u + b, v = (w >> (8u * b)) & 0xFFu;
+            if (ob < line_out) { /* a branch, not a select: the tables end at the row's last pixel */
+                uint i = ob / remap;
+                v = tc_src_byte(row + src[const_a + i] * remap + (ob - i * remap));
+            }
+            r |= v << (8u * b);
+        }
+        dst[at] = r;
+        return;
+    }
+    if (mode == TC_DMA_REMAP) {
+        uint line = gl_GlobalInvocationID.y, at = out_bias + line * out_pitch + u, w = dst[at], r = 0u;
+        for (uint b = 0u; b < 4u; b++) {
+            uint ob = 4u * u + b, v = (w >> (8u * b)) & 0xFFu;
+            if (ob < line_out) v = tc_remap_byte(ob, in_bias + line * in_pitch, v); /* not past the line's input */
+            r |= v << (8u * b);
+        }
+        dst[at] = r;
+        return;
+    }
     /* the row of units (texels, or blocks for ETC2) of all the dispatch's slices */
     uint row = gl_GlobalInvocationID.z * rows + gl_GlobalInvocationID.y;
     uint in_at = in_bias + row * in_pitch, out_at = out_bias + row * out_pitch;
-    if (mode >= TC_VI_RGBX8888) {
+    if (mode == TC_NV12_UV) {
+        uint u4 = src[in_at + u], v4 = src[st_bias + row * st_pitch + u];
+        dst[out_at + 2u * u] = (u4 & 0xFFu) | ((v4 & 0xFFu) << 8) | ((u4 & 0xFF00u) << 8) | ((v4 & 0xFF00u) << 16);
+        dst[out_at + 2u * u + 1u] =
+            ((u4 >> 16) & 0xFFu) | ((v4 >> 8) & 0xFF00u) | ((u4 >> 8) & 0xFF0000u) | (v4 & 0xFF000000u);
+    } else if (mode >= TC_VI_RGBX8888) {
         uint p = src[in_at + u];
         dst[out_at + u] = mode == TC_VI_RGBX8888 ? p | 0xFF000000u
                                                  : (p & 0xFF00FF00u) | ((p >> 16) & 0xFFu) | ((p & 0xFFu) << 16);

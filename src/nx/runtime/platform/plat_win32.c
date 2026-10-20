@@ -301,6 +301,32 @@ void plat_alias_host_free(u8* p, u64 size) {
     (void)p;
     (void)size;
 }
+/* no pool, so no mirror and no traps yet: a GPU result lands at its own fence (docs/GPU_OWNERSHIP.md) */
+u8* plat_alias_mirror(void) { return NULL; }
+u32 plat_tid(void) { return (u32)GetCurrentThreadId(); }
+int plat_trap_init(void (*fault)(u8* p, int write, u32 tid)) {
+    (void)fault;
+    return -1;
+}
+int plat_trap_arm(u8* p, u64 size) {
+    (void)p;
+    (void)size;
+    return -1;
+}
+int plat_trap_continue(u8* p, u64 size) {
+    (void)p;
+    (void)size;
+    return -1;
+}
+void plat_trap_disarm(u8* p, u64 size) {
+    (void)p;
+    (void)size;
+}
+void plat_freeze(u8* p, u64 size) {
+    (void)p;
+    (void)size;
+}
+void plat_thaw(void) {}
 
 /* ================================================================ libraries */
 void* plat_dl_open(const char* path) {

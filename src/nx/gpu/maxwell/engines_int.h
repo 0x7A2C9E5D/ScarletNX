@@ -19,11 +19,6 @@
    registers r hold the address at base and base + 1 and the payload at base + 2 */
 void query_get(GpuChannel* ch, u32* r, int base, u32 v);
 
-/* dma.c: a block linear surface's bytes up to slice z as one host pointer, with their count in span, when they are
-   contiguous in guest memory and 256 MiB at most; NULL otherwise */
-u8* bl_span_ptr(u64 base, u32 wbytes, u32 h, u32 bh, u32 z, u32 bd, u64* span);
-/* dma.c: the bytes of a block linear surface up to the end of slice z (the span bl_span_ptr hands out) */
-u64 bl_span_size(u32 wbytes, u32 h, u32 bh, u32 z, u32 bd);
 
 /* mme.c: runs macro idx over the np parameters in ch->mme_params (it may stop at a wait, gpu.h's mme_resume),
    natively when its code is one mme_hle.c knows */

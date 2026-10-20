@@ -21,9 +21,10 @@
    - No matrix, no arithmetic. A sample goes to 10 bit (<< 2) and back to 8 (>> 2) unchanged, so without the colour
      matrix NV12 out is the input's luma and chroma words as they are (the chroma pair's bytes swapped when the
      input is NV21 and the output NV12, or the other way), and RGBA out is the bytes moved into place.
-   - The matrix's shifts folded. ((v >> shift + c3) >> 8) clamped to the 10 bit range and then >> 2 is
-     ((v >> shift + c3) >> 10) clamped to the range >> 2 (floor and clamp commute, for lo <= hi), and (Y << 2) * c0
-     is Y * (c0 * 4) exactly: vic_gpu_params scales the coefficients and the clamp.
+   - The matrix's shift folded: (Y << 2) * c0 is Y * (c0 * 4) exactly, so vic_gpu_params scales the coefficients
+     and the samples stay 8 bit. The soft clamp is the CPU's, compares on the 10 bit value then >> 2, which holds for
+     a clamp whose low end is above its high one too (below lo it gives lo, from there on hi), where clamping the
+     byte (floor and clamp commuting) would not.
    - Chroma terms per pair. U * c1 + V * c2 is the same for a pair's pixels and for the two rows of the block that
      share a chroma row, so it is computed once per pair: 3 multiplications a pixel for RGBA, and for NV12 out only
      the R row for every pixel and G and B for the two pixels a chroma word takes them from.
@@ -105,8 +106,10 @@ uint cover(uint x0, uint x1, uint y0, uint h, uint px, uint py) {
 /* a 4 bit pixel mask as a byte mask */
 uint bytes(uint m) { return ((m * 0x204081u) & 0x01010101u) * 0xFFu; }
 
+/* a 10 bit matrix value t soft clamped as the CPU does it (lo first: below lo is lo even when lo > hi), as a byte */
+uint vic_clamp(int t, int lo, int hi) { return uint(t < lo ? lo >> 2 : (t > hi ? hi >> 2 : t >> 2)); }
 /* a matrix channel's output byte, from the sum of the products */
-#define VIC_F(v, c3) uint(clamp((((v) >> msh) + (c3)) >> 10, lo, hi))
+#define VIC_F(v, c3) vic_clamp((((v) >> msh) + (c3)) >> 8, lo, hi)
 /* byte i of word w, as an int */
 #define VIC_B(w, i) int(((w) >> (8u * (i))) & 0xFFu)
 /* the chroma terms of pair word q (U at ush, V at vsh), as ints t##R, t##G, t##B */

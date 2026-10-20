@@ -20,6 +20,7 @@
 #include <string.h>
 #include "common/utilities/common.h"
 #include "nx/gpu/gpu.h"
+#include "nx/memory/own.h"
 #include "nx/gpu/maxwell/engines_int.h"
 #include "nx/gpu/renderer.h"
 #include "nx/hle/services/nvdrv.h"
@@ -37,7 +38,8 @@ void (*g_gpu_mapping_end)(void);
 
 /* ------------------------------------------------------------ guest memory through the GPU's address space */
 /* the runs of guest memory behind [gva, gva + size), copied in or out: 1 when every page was mapped. An unmapped
-   page reads as zero and takes no write */
+   page reads as zero and takes no write. What the GPU holds of a run lands first (memory/own.c): the caller may hold
+   the renderer's lock, and a trap can't be answered then */
 static int copy_runs(u64 gva, u8* in, const u8* out, u64 size) {
     int all = 1;
     while (size) {
@@ -47,10 +49,14 @@ static int copy_runs(u64 gva, u8* in, const u8* out, u64 size) {
             if (n > size) n = size;
             if (in) memset(in, 0, (size_t)n);
             all = 0;
-        } else if (in)
+            goto next;
+        }
+        if (__atomic_load_n(&g_own_any, __ATOMIC_ACQUIRE)) own_acquire(cpu, n);
+        if (in)
             memcpy(in, GP(cpu), (size_t)n);
         else
             memcpy(GP(cpu), out, (size_t)n);
+    next:
         if (in)
             in += n;
         else
@@ -106,7 +112,16 @@ int gmem_write(u64 gva, const void* src, u64 size) {
     gpu_mem_written(gva, size);
     return all ? 0 : -1;
 }
+/* the host pointer of [gva, gva + size) when contiguous, what the GPU holds of it landed (memory/own.c): the caller
+   reads or writes it on the CPU, maybe with the renderer's lock held */
 u8* gmem_ptr_untracked(u64 gva, u64 size) {
+    u64 cpu = 0;
+    if (!size) size = 1;
+    if (gmmu_run(gva, size, &cpu) != size) return NULL;
+    if (__atomic_load_n(&g_own_any, __ATOMIC_ACQUIRE)) own_acquire(cpu, size);
+    return GP(cpu);
+}
+u8* gmem_host(u64 gva, u64 size) {
     u64 cpu = 0;
     if (!size) size = 1;
     return gmmu_run(gva, size, &cpu) == size ? GP(cpu) : NULL;

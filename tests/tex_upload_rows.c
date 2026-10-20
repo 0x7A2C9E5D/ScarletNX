@@ -42,6 +42,14 @@ int gmem_read(u64 gva, void* dst, u64 size) {
     for (u64 i = 0; i < size; i++) ((u8*)dst)[i] = gva + i >= GVA && gva + i < guest_end ? guest[gva + i - GVA] : 0;
     return 0;
 }
+/* nothing is GPU-owned here: vk_guest_read reads guest memory as gmem_read does, into staging */
+int g_own_any;
+void vk_guest_read(u64 gva, u64 size, u8* host, VkBuffer buf, u64 at) {
+    (void)buf, (void)at;
+    gmem_read(gva, host, size);
+}
+void vk_guest_peek(u64 gva, void* dst, u64 size) { gmem_read(gva, dst, size); }
+u8* gmem_host(u64 gva, u64 size) { return gmem_ptr(gva, size); }
 #define STAGE (8u << 20)
 #define STAGE_BUF ((VkBuffer)(uintptr_t)0x5157)
 #define SCRATCH_BUF ((VkBuffer)(uintptr_t)0x5C2A)

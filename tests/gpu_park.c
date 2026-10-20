@@ -98,7 +98,12 @@ void syncpt_add(u32 id, u32 n) {
     gpu_kick();
 }
 void syncpt_incr(u32 id) { syncpt_add(id, 1); }
+static int dma_on_cpu(const GpuDmaOp* o) { /* the renderer's copy as its CPU reference does it */
+    dma_copy_ref(o);
+    return 1;
+}
 static const Renderer stand_in = {.name = "stand-in",
+                                  .dma_copy = dma_on_cpu,
                                   .mem_may_have_changed = new_epoch,
                                   .clear = record_clear,
                                   .draw = no_draw,

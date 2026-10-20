@@ -26,9 +26,20 @@ typedef struct Renderer {
     /* the 2D engine: 1 when the renderer did the blit on the GPU, 0 to do it in guest memory */
     int (*blit)(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy, double sdx,
                 double sdy);
-    /* the VIC composition (gpu/video/vic.c): 1 when the renderer composed the picture as a compute shader,
-       0 to compose in guest memory */
+    /* the VIC composition (gpu/video/vic.c), on the GPU, its picture kept there (docs/GPU_OWNERSHIP.md): 0 when
+       the job exceeds the device (it is skipped) */
     int (*vic_compose)(const VicJob* j);
+    /* an NVDEC picture laid out in its surfaces on the GPU, kept there as VIC's picture is: 0 when it couldn't be */
+    int (*nvdec_write)(const NvdecPic* p);
+    /* a new reference to an FFmpeg device (an AVBufferRef of an AVHWDeviceContext) that decodes H.264 with Vulkan
+       Video on this renderer's GPU, for NVDEC's decoder, whose pictures then reach nvdec_write as GPU images: NULL when
+       the GPU has no decode queue or the vulkan_video setting is off */
+    void* (*nvdec_hw_device)(void);
+    /* a launch of the DMA copy engine on the GPU, its destination kept there: 0 when it couldn't be */
+    int (*dma_copy)(const GpuDmaOp* o);
+    /* a 2D blit the GPU's own blit can't do (its source isn't a render target) done on the GPU from memory, its
+       destination kept there: 0 when it couldn't be */
+    int (*blit_mem)(const GpuBlit* b);
     void (*rt_flush)(u64 gva);  /* a render target at gva is about to be read from guest memory: write it back */
     void (*rt_reload)(u64 gva); /* guest memory under a render target changed: load it again */
     void (*dispatch)(GpuChannel* ch, const u32* q, u64 code); /* a compute launch (q: its QMD) */

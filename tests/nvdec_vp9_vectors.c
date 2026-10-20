@@ -26,6 +26,15 @@
 static u8* g_guest;
 static u64 g_guest_size;
 static unsigned g_warnings;
+u8* g_mem; /* g_guest: nvdec.c hands the renderer guest addresses into it */
+/* the renderer lays the picture out on the GPU; here the reference does it in guest memory (nvdec_ref.c) */
+static int write_ref(const NvdecPic* p) {
+    nvdec_write_ref(p);
+    return 1;
+}
+static const Renderer stand_in = {.name = "stand-in", .nvdec_write = write_ref};
+const Renderer* g_renderer = &stand_in;
+int g_renderer_up = 1;
 
 u8* iova_ptr(u64 addr, u64 size) {
     if (!size || addr < BASE || addr - BASE > g_guest_size || size > g_guest_size - (addr - BASE)) return NULL;
@@ -94,6 +103,7 @@ static int run(const char* path, const char* md5_path) {
         fprintf(stderr, "%s: out of memory\n", path);
         return 1;
     }
+    g_mem = g_guest;
     memset(regs, 0, sizeof regs);
     regs[0x200 / 4] = APP_VP9;
     regs[0x404 / 4] = (u32)((BASE + AT_SETUP) >> 8);

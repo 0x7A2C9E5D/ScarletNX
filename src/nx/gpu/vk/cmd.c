@@ -18,6 +18,8 @@ typedef struct {
     VkImageView v1, v2;
     VkBuffer buf;
     VkBufferView view;
+    void (*fn)(void*);
+    void* arg;
 } Dead;
 
 /* A per-frame ring of one mapped buffer, reused once the frame's previous work is done. */
@@ -62,6 +64,7 @@ static u64 g_frame_id;
 static VkSemaphore g_gsem; /* graphics timeline: submission n signals n */
 static u64 g_gval;         /* the last submission */
 static u64 g_landed;       /* submissions whose storage results vk_buf_frame_done has landed */
+static VkSemaphoreSubmitInfo g_after[2]; /* vk_submit_after's wait and signal, for the next submission (semaphore 0: none) */
 u32 g_vk_epoch, g_vk_present;
 
 u64 vk_hash(const void* p, u64 size) {
@@ -82,17 +85,17 @@ u64 vk_hash(const void* p, u64 size) {
 u64 vk_sample_hash(u64 gva, u64 len) {
     u8 tmp[2048 + 128];
     if (len <= sizeof tmp) {
-        gmem_read(gva, tmp, len);
+        vk_guest_peek(gva, tmp, len);
         return vk_hash(tmp, len);
     }
     u32 n = 0;
-    gmem_read(gva, tmp, 64);
+    vk_guest_peek(gva, tmp, 64);
     n = 64;
-    gmem_read(gva + len - 64, tmp + n, 64);
+    vk_guest_peek(gva + len - 64, tmp + n, 64);
     n += 64;
     u64 step = (len - 32) / 62;
     for (int i = 0; i < 62; i++) {
-        gmem_read(gva + (u64)i * step, tmp + n, 32);
+        vk_guest_peek(gva + (u64)i * step, tmp + n, 32);
         n += 32;
     }
     return vk_hash(tmp, n);
@@ -125,6 +128,7 @@ static void dead_free(Frame* f) {
         if (d->view) vkDestroyBufferView(g_vk.dev, d->view, NULL);
         if (d->img) vk_image_destroy(d->img, d->mem);
         if (d->buf) vmaDestroyBuffer(g_vk.vma, d->buf, d->mem);
+        if (d->fn) d->fn(d->arg);
     }
     f->ndead = 0;
 }
@@ -311,12 +315,15 @@ u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off) { return vk_stage_out
    on the GPU into host-cached memory instead, and read from there. */
 u8* vk_stage_back(u64 size, VkBuffer* buf, u64* off, VmaAllocation* mem) {
     vk_cmd();
+    /* storage: render targets are swizzled into it (vk/blocklinear.c) */
     return ring_alloc(&g_fr[g_cur], &g_fr[g_cur].back, size, g_vk.props.limits.nonCoherentAtomSize,
-                      VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
+                      VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                      VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
                       VMA_MEMORY_USAGE_AUTO_PREFER_HOST, buf, off, mem);
 }
 
-void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal) {
+/* the frame's commands submitted, waiting for xw and signaling xs besides the graphics timeline (one each at most) */
+static void submit(const VkSemaphoreSubmitInfo* xw, const VkSemaphoreSubmitInfo* xs) {
     vk_render_end();
     Frame* f = &g_fr[g_cur];
     VkCommandBuffer cb = vk_cmd(); /* a submit with nothing recorded still has to wait and signal */
@@ -324,9 +331,13 @@ void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore s
     vk_buf_host_barrier(cb, g_gval + 1);
     /* staging memory may not be host coherent: the host writes are made visible to the GPU here */
     if (f->stage.mem) vmaFlushAllocation(g_vk.vma, f->stage.mem, 0, VK_WHOLE_SIZE);
-    VkSemaphoreSubmitInfo w[2] = {
-        {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = wait, .stageMask = wait_stage}};
-    u32 nw = wait ? 1 : 0;
+    VkSemaphoreSubmitInfo w[2];
+    u32 nw = 0;
+    if (g_after[0].semaphore) { /* at most one of the two: vk_submit_after's comes with no other */
+        xw = &g_after[0];
+        xs = &g_after[1];
+    }
+    if (xw) w[nw++] = *xw;
     if (g_vk_cs_wait_value) { /* draws read compute results on the GPU: after that batch */
         w[nw++] = (VkSemaphoreSubmitInfo){.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
                                           .semaphore = g_vk_csem,
@@ -337,13 +348,12 @@ void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore s
     VkSemaphoreSubmitInfo s[2] = {{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
                                    .semaphore = g_gsem,
                                    .value = g_gval + 1,
-                                   .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT},
-                                  {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-                                   .semaphore = signal,
                                    .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}};
+    if (xs) s[1] = *xs;
     /* ended and submitted after its commands, on the recording thread (a submission that fails signals the timeline
        from the host there, so waits for it end) */
-    vk_rec_submit(cb, w, nw, s, signal ? 2u : 1u);
+    vk_rec_submit(cb, w, nw, s, xs ? 2u : 1u);
+    memset(g_after, 0, sizeof g_after);
     g_gval++;
     f->recording = 0;
     f->icb++;
@@ -351,6 +361,20 @@ void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore s
     /* results of submissions the GPU has finished land now, so a later release doesn't find them pending */
     u64 done = 0;
     if (VK_OK(vkGetSemaphoreCounterValue(g_vk.dev, g_gsem, &done))) land_through(done < g_gval ? done : g_gval);
+}
+
+void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal) {
+    VkSemaphoreSubmitInfo w = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = wait,
+                               .stageMask = wait_stage};
+    VkSemaphoreSubmitInfo s = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = signal,
+                               .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
+    submit(wait ? &w : NULL, signal ? &s : NULL);
+}
+void vk_submit_after(VkSemaphore sem, u64 wait, u64 signal) {
+    g_after[0] = (VkSemaphoreSubmitInfo){.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = sem,
+                                         .value = wait, .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
+    g_after[1] = (VkSemaphoreSubmitInfo){.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = sem,
+                                         .value = signal, .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
 }
 
 u64 g_vk_finishes, g_vk_finish_ns;
@@ -460,6 +484,10 @@ void vk_defer_buffer(VkBuffer b, VmaAllocation a) {
 void vk_defer_buffer_view(VkBufferView v) {
     vk_cmd();
     dead_push(&g_fr[g_cur], (Dead){.view = v});
+}
+void vk_defer_call(void (*fn)(void*), void* arg) {
+    vk_cmd();
+    dead_push(&g_fr[g_cur], (Dead){.fn = fn, .arg = arg});
 }
 
 void vk_barrier(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect, VkPipelineStageFlags2 src_stage,

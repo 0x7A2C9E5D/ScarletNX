@@ -135,8 +135,7 @@ static void gmmu_clip(u64 first) {
             __atomic_store_n(&t[q & ((1u << GL2_BITS) - 1)], (e & ~GHINT_MASK) | ((k - 1) << 1), __ATOMIC_RELAXED);
     }
 }
-/* points the pages of [gva, gva+size) at cpu onwards */
-static void gmmu_map(u64 gva, u64 cpu, u64 size) {
+void gmmu_map(u64 gva, u64 cpu, u64 size) {
     u64 first, last, p;
     if (!size) return;
     gmmu_change_begin(gva, size);

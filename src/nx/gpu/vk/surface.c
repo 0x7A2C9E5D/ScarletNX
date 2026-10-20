@@ -15,6 +15,7 @@
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/vk/pending_pages.h"
 #include "nx/gpu/texture/blocklinear.h"
+#include "nx/memory/own.h"
 
 #define SURFH 4096
 static Surf* g_surfh[SURFH];
@@ -248,9 +249,9 @@ static void rt_pages(const Surf* s, int delta) {
 }
 int vk_surf_can_writeback(const Surf* s) { return s && s->f.raw && !s->f.depth && moves_scaled(s); }
 
-/* s's layers, in rows of pitch bytes from off in buf, copied into its image (scaled when it is) */
-static void rt_load_copy(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 off, u32 pitch) {
-    u64 slice = (u64)pitch * s->h;
+/* s's layers, in rows of pitch bytes from off in buf, a layer slice bytes after the last, copied into its image
+   (scaled when it is) */
+static void rt_load_copy(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 off, u32 pitch, u64 slice) {
     vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
     for (u32 layer = 0; layer < s->layers; layer++) {
@@ -302,17 +303,13 @@ static void rt_reload_bl(Surf* s) {
     vk_render_end();
     u8* p = vk_stage(sz, vk_stage_align(), &staged, &off);
     if (!p || !(scratch = vk_bl_scratch(lin, &cap))) return;
-    const u8* src = gmem_ptr(s->gva, sz);
-    if (src)
-        memcpy(p, src, sz);
-    else
-        gmem_read(s->gva, p, sz);
+    vk_guest_read(s->gva, sz, p, staged, off); /* what the GPU holds of it copied on the GPU */
     VkCommandBuffer cb = vk_cmd();
     vk_bl_barrier(cb, 1);
     for (u32 i = 0; i < moves; i++)
         if (!vk_bl_move(cb, &m, 0, staged, off + (u64)i * s->layer_size, scratch, (u64)i * pitch * s->h)) return;
     vk_bl_barrier(cb, 0);
-    rt_load_copy(cb, s, scratch, 0, pitch);
+    rt_load_copy(cb, s, scratch, 0, pitch, (u64)pitch * s->h);
     rt_loaded(s);
 }
 
@@ -334,30 +331,28 @@ void vk_rt_reload(u64 gva) {
         rt_reload_bl(s);
         return;
     }
+    /* pitch linear: its guest bytes staged as they lie, the copy taking the pitch, when it is whole texels (else a
+       row at a time into tight rows); what the GPU holds of them copied on the GPU */
     u64 sz = rt_bytes(s), row = (u64)s->w * s->f.bpp;
-    u8* tmp = NULL;
-    const u8* src = gmem_ptr(gva, sz);
-    if (!src) {
-        tmp = malloc(sz);
-        if (!tmp) return;
-        gmem_read(gva, tmp, sz);
-        src = tmp;
-    }
-    vk_render_end();
+    int as_is = s->pitch % s->f.bpp == 0;
     VkBuffer buf;
     u64 off;
-    u64 slice = row * s->h;
-    u8* p = vk_stage(slice * s->layers, s->f.bpp, &buf, &off);
-    if (p) {
-        for (u32 layer = 0; layer < s->layers; layer++) {
-            const u8* layer_src = src + (u64)layer * s->layer_size;
-            u8* layer_dst = p + (u64)layer * slice;
-            for (u32 y = 0; y < s->h; y++) memcpy(layer_dst + y * row, layer_src + (u64)y * s->pitch, row);
-        }
-        rt_load_copy(vk_cmd(), s, buf, off, (u32)row);
-        rt_loaded(s);
-    }
-    free(tmp);
+    vk_render_end();
+    u8* p = vk_stage(as_is ? sz : row * s->h * s->layers, vk_stage_align(), &buf, &off);
+    if (!p) return;
+    if (as_is)
+        vk_guest_read(gva, sz, p, buf, off);
+    else
+        for (u32 layer = 0; layer < s->layers; layer++)
+            for (u32 y = 0; y < s->h; y++) {
+                u64 to = ((u64)layer * s->h + y) * row;
+                vk_guest_read(gva + (u64)layer * s->layer_size + (u64)y * s->pitch, row, p + to, buf, off + to);
+            }
+    if (as_is)
+        rt_load_copy(vk_cmd(), s, buf, off, s->pitch, s->layer_size);
+    else
+        rt_load_copy(vk_cmd(), s, buf, off, (u32)row, row * s->h);
+    rt_loaded(s);
 }
 
 /* a depth target whose Vulkan format holds the guest's bytes (Z32F as D32_SFLOAT, Z16 as D16_UNORM): its depth
@@ -403,12 +398,12 @@ static void flush_copy(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 at, u32 pi
         }
     }
 }
-/* s's pixels into buf as flush_bytes says: tightly packed rows, or the guest's block linear layout, the image copied
-   into the scratch buffer and swizzled from there into buf. 0 when that can't be done */
-static int flush_record(VkCommandBuffer cb, Surf* s, VkBuffer buf) {
+/* s's pixels into buf at at as flush_bytes says: tightly packed rows, or the guest's block linear layout, the image
+   copied into the scratch buffer and swizzled from there into buf. 0 when that can't be done */
+static int flush_record(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 at) {
     u32 row = s->w * s->f.bpp;
     if (!s->bl) {
-        flush_copy(cb, s, buf, 0, row);
+        flush_copy(cb, s, buf, at, row);
         return 1;
     }
     u32 pitch = (row + 15) & ~15u, moves = s->volume ? 1 : s->layers;
@@ -419,7 +414,7 @@ static int flush_record(VkCommandBuffer cb, Surf* s, VkBuffer buf) {
     flush_copy(cb, s, scratch, 0, pitch);
     vk_bl_barrier(cb, 1);
     for (u32 i = 0; i < moves; i++)
-        if (!vk_bl_move(cb, &m, 1, buf, (u64)i * s->layer_size, scratch, (u64)i * pitch * s->h)) return 0;
+        if (!vk_bl_move(cb, &m, 1, buf, at + (u64)i * s->layer_size, scratch, (u64)i * pitch * s->h)) return 0;
     vk_bl_barrier(cb, 0);
     return 1;
 }
@@ -501,7 +496,7 @@ static void surf_flush(Surf* s, const u8* original) {
     const u8* p = vk_readback_buffer(size, &buf);
     if (!p) return;
     VkCommandBuffer cb = vk_cmd();
-    if (!flush_record(cb, s, buf)) return;
+    if (!flush_record(cb, s, buf, 0)) return;
     flush_wait(cb);
     flush_land(s, p, original, s->wgen);
 }
@@ -531,6 +526,28 @@ void vk_surf_flush(Surf* s, const u8* original) {
     vk_result_end();
 }
 void vk_rt_flush(u64 gva) { vk_surf_flush(vk_rt_find(gva), NULL); }
+
+u64 g_vk_rt_readbacks; /* render targets written back to guest memory because the GPU's copy couldn't take them */
+int vk_rt_overlay(u64 gva, u64 size, VkBuffer buf, u64 at) {
+    int n = 0;
+    if (!size || !pend_hit_va(&g_rt_pages, gva, size)) return 0;
+    for (Surf* s = g_rt_first; s; s = s->rt_next) {
+        u64 bytes;
+        if ((s->gva >> 63) || s->gva >= gva + size || s->gva + rt_bytes(s) <= gva || !flush_bytes(s)) continue;
+        bytes = rt_bytes(s);
+        if (s->gva >= gva && s->gva + bytes <= gva + size) {
+            vk_render_end();
+            if (flush_record(vk_cmd(), s, buf, at + (s->gva - gva))) {
+                n++;
+                continue;
+            }
+        }
+        /* reaching past the range, or its copy refused: written back to guest memory, which the caller then reads */
+        g_vk_rt_readbacks++;
+        vk_surf_flush(s, NULL);
+    }
+    return n;
+}
 
 void vk_rt_before_write(u64 gva, u64 size) {
     if (!size || g_rt_flushing) return;
@@ -665,7 +682,9 @@ static u64 rt_mem_hash(const Surf* s) {
         if (n > size - o) n = size - o;
         while (cpu && o + n < size && gmmu_translate(a + n) == cpu + n) /* the next page follows in host memory */
             n += size - o - n < 0x1000 ? size - o - n : 0x1000;
-        h = (h ^ (cpu ? vk_hash(GP(cpu), n) : n)) * 1099511628211ull; /* an unmapped page counts as its length */
+        /* an unmapped page counts as its length, pages the GPU holds as their owners (they are trapped) */
+        if (!cpu || !own_hash(cpu, n, &h))
+            h = (h ^ (cpu ? vk_hash(GP(cpu), n) : n)) * 1099511628211ull;
         o += n;
     }
     return h;

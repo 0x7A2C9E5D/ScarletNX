@@ -150,6 +150,56 @@ typedef struct VicJob {
     VicPlane oy, oc;      /* oc.p is NULL when the format has no chroma */
     VicSlot slots[8];
 } VicJob;
+/* An NVDEC picture for its surfaces (gpu/video/nvdec.c): FFmpeg's planar 4:2:0 rows, w x h of them written into NV12
+   surfaces, block linear, at guest CPU addresses luma and chroma: widths pitch_y and pitch_c bytes, the luma surface
+   surf_h rows high (the chroma's half of that, rounded up), blocks 2^bh GOBs high. The surfaces' extents (whole GOBs
+   wide, whole blocks high) are ext_y and ext_c bytes. Only the picture's bytes are written: in a row's last 16
+   bytes, those past its width keep their values. A picture Vulkan Video decoded (the vulkan_video setting) is FFmpeg's
+   AVFrame of format AV_PIX_FMT_VULKAN in hw instead, its NV12 planes in a GPU image, and plane is unused */
+typedef struct NvdecPic {
+    const u8* plane[3]; /* Y, U, V */
+    int stride[3];
+    u32 w, h;
+    u64 luma, chroma, ext_y, ext_c;
+    u32 pitch_y, pitch_c, surf_h, bh;
+    const void* hw;
+} NvdecPic;
+/* A launch of the DMA copy engine (maxwell/dma.c), for the renderer, which does it on the GPU: lines of width
+   elements from src to dst, each side pitch linear (rows pitch bytes apart from addr) or block linear (a surface wb
+   bytes wide and h rows high, blocks 2^bh GOBs high and 2^bd deep, slice z, from the origin ox bytes in, oy rows
+   down; rows from h on read as zero and take no writes). With remap, an element is ns components of cs bytes in and
+   nd out, component k of it from sel[k] (0-3 a source component, 4 constant A, 5 constant B, 6 and 7 the
+   destination's own bytes); fill: nothing is read. snap: the source's bytes as read at submission (pitch linear, its
+   span), or NULL */
+typedef struct {
+    u64 addr;
+    int bl;
+    u32 pitch, wb, h, z, bh, bd, ox, oy;
+} GpuDmaSide;
+typedef struct {
+    int multi, remap, fill, shuffle, keep;
+    u32 cs, ns, nd, sel[4], const_a, const_b;
+    u32 width, lines, line_in, line_out; /* elements a line, lines, a line's bytes in and out */
+    GpuDmaSide src, dst;
+    const u8* snap;
+} GpuDmaOp;
+/* A 2D engine blit (maxwell/fermi2d.c) the renderer does on the GPU: each destination pixel of columns x0 to x1 - 1
+   and rows y0 to y1 - 1 the source pixel at column scol[x - x0] and row srow[y - y0] (nearest sampled, the tables
+   the engine works out), bpp bytes each. The sides are surface planes as the DMA engine's are (no origin) */
+typedef struct {
+    GpuDmaSide src, dst;
+    u32 bpp, x0, x1, y0, y1;
+    const u32* scol;
+    const u32* srow;
+} GpuBlit;
+/* maxwell/fermi2d_ref.c: the blit done on the CPU in guest memory, the reference for the tests (not in the runtime) */
+void blit_mem_ref(const GpuBlit* b);
+/* maxwell/dma_ref.c: the launch done on the CPU in guest memory, the reference the tests hold the renderer's dma_copy
+   to (not in the runtime) */
+void dma_copy_ref(const GpuDmaOp* o);
+/* video/nvdec_ref.c: the picture written into guest memory on the CPU, the reference the tests hold the renderer's
+   nvdec_write to (not in the runtime) */
+void nvdec_write_ref(const NvdecPic* p);
 
 /* ---- gpu.c: guest memory through the GPU's address space. A read lands the renderer's pending results over the
    range first, a write lets it land what would overwrite the write later, and records the write (gpu_mem_written).
@@ -170,6 +220,9 @@ void gmem_read_code(u64 gva, void* dst, u64 size);
 u8* gmem_ptr(u64 gva, u64 size);
 /* the same without landing anything: only for comparing a pending result's original guest bytes */
 u8* gmem_ptr_untracked(u64 gva, u64 size);
+/* the host address of [gva, gva + size) when contiguous, nothing landed and nothing acquired: only to name the range
+   (a write-watch scan), never to read or write through, as GPU-owned bytes there are trapped (memory/own.c) */
+u8* gmem_host(u64 gva, u64 size);
 u32 gmem_r32(u64 gva);
 void gmem_w32(u64 gva, u32 v);
 /* the byte offset of (x_bytes, y, z) in a block linear surface width_bytes wide and height rows high, with blocks of
@@ -200,6 +253,9 @@ void dma_snap_reset(u32 channel);              /* the channel closed: what it qu
    address and by the guest pages behind them */
 void gpu_mem_written(u64 gva, u64 size);
 void gpu_mem_written_shader(u64 gva, u64 size); /* a shader's result landing in guest memory */
+/* guest CPU bytes [cpu, cpu + size) written by an engine that doesn't go through the GPU's address space (VIC's
+   picture, published over them, memory/own.c): what is built from them checks them again */
+void gpu_mem_written_cpu(u64 cpu, u64 size);
 u64 gpu_mem_generation(void);                   /* the last generation fully published */
 int gpu_mem_dirty_since(u64 since, u64 a, u64 sz); /* a GPU-side write after since touched [a, a + sz) */
 

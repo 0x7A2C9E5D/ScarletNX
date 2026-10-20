@@ -22,6 +22,7 @@ using namespace glsl;
 // what texconv.comp declares, under its names
 struct Conv : Invocation {
     uint mode, units, rows, in_pitch, out_pitch, st_pitch, in_bias, out_bias, st_bias, zfloat;
+    uint remap, const_a, const_b, line_out;
     const uint* src;
     uint* dst;
 #include "nx/gpu/texture/texconv_modes.glsl"
@@ -167,6 +168,89 @@ static void vi_frames() {
     }
 }
 
+// NVDEC's chroma: U and V rows interleaved, U first, in rows of whole words
+static void nv12_uv() {
+    const uint32_t pairs = 13, rows = 5, in_pitch = 16, out_pitch = 32;
+    std::vector<uint32_t> in(in_pitch / 4 * rows * 2), out(out_pitch / 4 * rows, 0xDEADBEEFu);
+    for (auto& x : in) x = random_word();
+    const uint8_t* ub = (const uint8_t*)in.data();
+    const uint8_t* vb = ub + in_pitch * rows;
+    glsl::dispatch<Conv>(glsl::uvec3(1, rows, 1), glsl::uvec3(64, 1, 1), [&](Conv& c) {
+        c.mode = 20;
+        c.units = (pairs + 3) / 4;
+        c.rows = rows;
+        c.in_pitch = in_pitch / 4;
+        c.st_pitch = in_pitch / 4;
+        c.out_pitch = out_pitch / 4;
+        c.in_bias = 0;
+        c.st_bias = in_pitch * rows / 4;
+        c.out_bias = 0;
+        c.zfloat = 0;
+        c.src = in.data();
+        c.dst = out.data();
+    });
+    const uint8_t* ob = (const uint8_t*)out.data();
+    for (uint32_t y = 0; y < rows; y++)
+        for (uint32_t x = 0; x < pairs; x++) {
+            CHECK(ob[y * out_pitch + 2 * x] == ub[y * in_pitch + x], "nv12 u (%u, %u)", x, y);
+            CHECK(ob[y * out_pitch + 2 * x + 1] == vb[y * in_pitch + x], "nv12 v (%u, %u)", x, y);
+        }
+}
+
+// the DMA engine's remap against dma.c's on the CPU: random component sizes and counts, every source (components,
+// constants, keeping the destination's bytes), lines starting anywhere in a word, lines that end inside one
+static void dma_remap_case(uint32_t cs, uint32_t ns, uint32_t nd, const uint32_t sel[4], uint32_t width, uint32_t lines,
+                           uint32_t in_at) {
+    uint32_t ca = random_word(), cb = random_word(), line_in = width * cs * ns, line_out = width * cs * nd;
+    uint32_t in_pitch = line_in + 5, out_pitch = (line_out + 3) / 4 * 4 + 8;
+    std::vector<uint8_t> inb(in_at + in_pitch * lines + 8), old(out_pitch * lines), want;
+    for (auto& b : inb) b = (uint8_t)random_word();
+    for (auto& b : old) b = (uint8_t)random_word();
+    want = old;
+    for (uint32_t y = 0; y < lines; y++)
+        for (uint32_t e = 0; e < width; e++)
+            for (uint32_t k = 0; k < nd; k++) {
+                uint8_t* d = &want[y * out_pitch + (e * nd + k) * cs];
+                const uint8_t* src = &inb[in_at + y * in_pitch + e * cs * ns];
+                if (sel[k] == 4 || sel[k] == 5)
+                    std::memcpy(d, sel[k] == 4 ? (const void*)&ca : (const void*)&cb, cs);
+                else if (sel[k] < 4) {
+                    if (sel[k] < ns)
+                        std::memcpy(d, src + sel[k] * cs, cs);
+                    else
+                        std::memset(d, 0, cs);
+                }
+            }
+    std::vector<uint32_t> in((inb.size() + 3) / 4), out(old.size() / 4);
+    std::memcpy(in.data(), inb.data(), inb.size());
+    std::memcpy(out.data(), old.data(), old.size());
+    uint32_t remap = cs | ns << 4 | nd << 8;
+    for (int k = 0; k < 4; k++) remap |= (sel[k] & 7) << (12 + 4 * k);
+    glsl::dispatch<Conv>(glsl::uvec3(((line_out + 3) / 4 + 63) / 64, lines, 1), glsl::uvec3(64, 1, 1), [&](Conv& c) {
+        c.mode = 21;
+        c.units = (line_out + 3) / 4;
+        c.rows = lines;
+        c.in_pitch = in_pitch;
+        c.out_pitch = out_pitch / 4;
+        c.in_bias = in_at;
+        c.out_bias = 0;
+        c.remap = remap;
+        c.const_a = ca;
+        c.const_b = cb;
+        c.line_out = line_out;
+        c.src = in.data();
+        c.dst = out.data();
+    });
+    CHECK(!std::memcmp(out.data(), want.data(), want.size()), "dma remap cs %u ns %u nd %u", cs, ns, nd);
+}
+static void dma_remaps() {
+    for (int i = 0; i < 400; i++) {
+        uint32_t cs = 1 + random_word() % 4, ns = 1 + random_word() % 4, nd = 1 + random_word() % 4, sel[4];
+        for (int k = 0; k < 4; k++) sel[k] = random_word() % 8;
+        dma_remap_case(cs, ns, nd, sel, 1 + random_word() % 9, 1 + random_word() % 4, random_word() % 7);
+    }
+}
+
 static void depth_float() {
     Conv c;
     for (uint32_t z = 0; z < 1u << 24; z++) {
@@ -264,6 +348,8 @@ static void etc2_kinds() {
 int main() {
     two_byte_texels();
     vi_frames();
+    nv12_uv();
+    dma_remaps();
     depth_float();
     rgb32f();
     depth_stencil();

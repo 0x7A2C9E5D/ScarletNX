@@ -55,6 +55,11 @@ void vk_buf_host_barrier(VkCommandBuffer cb, u64 frame) {
 VkPipelineCache vk_pipeline_cache(void) { return VK_NULL_HANDLE; }
 /* no occlusion queries, and no guest memory for cmd.c's sampled hashes */
 void vk_query_flush(VkCommandBuffer cb) { (void)cb; }
+/* cmd.c's sampled hash reads guest memory this way: there is none here */
+void vk_guest_peek(u64 gva, void* dst, u64 size) {
+    (void)gva;
+    memset(dst, 0, size);
+}
 int gmem_read(u64 gva, void* dst, u64 size) {
     (void)gva;
     memset(dst, 0, size);

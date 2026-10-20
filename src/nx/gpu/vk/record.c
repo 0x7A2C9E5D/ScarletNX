@@ -186,6 +186,9 @@ static void submit_run(const void* p) {
     VkResult r = vkQueueSubmit2(g_vk.gfx, 1, &si, VK_NULL_HANDLE);
     if (r == VK_ERROR_DEVICE_LOST) fatal("vulkan: the GPU device was lost (driver reset or crash)");
     VK_OK(r);
+    /* a timeline of FFmpeg's never reaching its value would hang its decoder for good */
+    if (r != VK_SUCCESS && x->ns > 1 && x->s[1].value)
+        fatal("vulkan: a submission FFmpeg's Vulkan Video decoder waits for failed");
     if (r != VK_SUCCESS) { /* never signaled by the GPU: the host signals it, so waits for it and later ones end */
         VkSemaphoreSignalInfo ss = {
             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO, .semaphore = x->timeline, .value = x->value};

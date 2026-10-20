@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* the 2D engine's blit in guest memory (fermi2d.c, with dma.c's bl_span_ptr), the renderer declining it: a block
-   linear source scaled down by two into a block linear destination, read back pixel by pixel through the block
-   linear layout itself (bl_offset below, the whole formula, against the blit's column table and row base); an odd
-   destination window, whose runs start inside a 16 byte group, and nothing written outside it; the same through one
-   host pointer when the surfaces are contiguous; and the renderer's hooks called once for the blit, not for each run */
+/* the 2D engine's blit from memory (fermi2d.c), the renderer's image blit declining it: the source pixels the blit
+   samples, which fermi2d.c works out, handed to the renderer's blit_mem (here the CPU reference, fermi2d_ref.c, as
+   vk/blit.c is held to it on a device by vulkan_headless). A block linear source scaled down by two into a block
+   linear destination, read back pixel by pixel through the block linear layout itself (bl_offset below, the whole
+   formula); an odd destination window, and nothing written outside it; a source whose rows end inside a 16 byte run;
+   the renderer's blit asked once, and the render target over the destination reloaded once */
 #include "nx/gpu/maxwell/fermi2d.c"
-#include "nx/gpu/maxwell/dma.c"
 
 static unsigned checks;
 #define CHECK(x)                                                                                                       \
@@ -18,48 +18,16 @@ static unsigned checks;
         }                                                                                                              \
     } while (0)
 
-/* ------------------------------------------------ guest memory, its hooks counted */
+/* ------------------------------------------------ guest memory */
 #define MEM (1u << 20)
 static u8 mem[MEM];
-static int contiguous; /* gmem_ptr hands out a host pointer */
-static unsigned needs, before_writes, written, raw_runs;
-void gmem_need(u64 gva, u64 size) {
-    (void)gva, (void)size;
-    needs++;
-}
 void gmem_read_raw(u64 gva, void* dst, u64 size) {
     CHECK(gva + size <= MEM);
     memcpy(dst, mem + gva, size);
-    raw_runs++;
-}
-int gmem_read(u64 gva, void* dst, u64 size) {
-    gmem_need(gva, size);
-    gmem_read_raw(gva, dst, size);
-    return 0;
-}
-void gmem_before_write(u64 gva, u64 size) {
-    (void)gva, (void)size;
-    before_writes++;
 }
 void gmem_write_raw(u64 gva, const void* src, u64 size) {
     CHECK(gva + size <= MEM);
     memcpy(mem + gva, src, size);
-    raw_runs++;
-}
-int gmem_write(u64 gva, const void* src, u64 size) {
-    gmem_before_write(gva, size);
-    gmem_write_raw(gva, src, size);
-    gpu_mem_written(gva, size);
-    return 0;
-}
-void gpu_mem_written(u64 gva, u64 size) {
-    (void)gva, (void)size;
-    written++;
-}
-u8* gmem_ptr(u64 gva, u64 size) {
-    if (!contiguous || gva + size > MEM) return NULL;
-    needs++;
-    return mem + gva;
 }
 /* the block linear layout: GOBs of 64 bytes by 8 rows in blocks of 1 << bh GOBs, the GOB's 16 byte groups in
    their order */
@@ -71,20 +39,6 @@ u64 bl_offset(u32 x, u32 y, u32 z, u32 wb, u32 h, u32 bh_log2, u32 bd_log2) {
             ((u64)(z % bd) * bh + gy % bh) * 512;
     return o + (xb / 32) * 256 + (yb / 2) * 64 + ((xb % 32) / 16) * 32 + (yb % 2) * 16 + xb % 16;
 }
-/* what dma.c's own copies reach, which the test does not run */
-void (*g_gpu_before_write)(u64 gva, u64 size);
-void gmem_w32(u64 gva, u32 v) { gmem_write(gva, &v, 4); }
-void gpu_signal_point(void) {}
-void gpu_release_write(u64 gva, const void* data, u32 len) { gmem_write(gva, data, len); }
-u64 gpu_ticks(void) { return 0; }
-/* dma.c's snapshots of linear sources: one thread here, and no GPU write ever lands */
-void pm_lock(PMutex* m) { (void)m; }
-void pm_unlock(PMutex* m) { (void)m; }
-u64 gpu_mem_generation(void) { return 0; }
-int gpu_mem_dirty_since(u64 since, u64 a, u64 sz) {
-    (void)since, (void)a, (void)sz;
-    return 0;
-}
 u32 gpu_color_bpp(u32 format) {
     (void)format;
     return 4;
@@ -94,8 +48,17 @@ int r3d_blit(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, d
     (void)s, (void)d, (void)dx, (void)dy, (void)dw, (void)dh, (void)sx, (void)sy, (void)sdx, (void)sdy;
     return 0; /* the renderer declines: the blit runs in guest memory */
 }
-static void no_target(u64 gva) { (void)gva; }
-static const Renderer stand_in = {.name = "stand-in", .rt_flush = no_target, .rt_reload = no_target};
+static unsigned blits, reloads;
+static void reloaded(u64 gva) {
+    (void)gva;
+    reloads++;
+}
+static int blit_ref(const GpuBlit* b) {
+    blits++;
+    blit_mem_ref(b);
+    return 1;
+}
+static const Renderer stand_in = {.name = "stand-in", .rt_reload = reloaded, .blit_mem = blit_ref};
 const Renderer* g_renderer = &stand_in;
 int g_renderer_up = 1;
 void logf_(int lvl, const char* fmt, ...) {
@@ -143,8 +106,9 @@ static void blit_from(u32 sw, i32 dx, i32 dy, i32 dw, i32 dh) {
     r[0x22F] = (u32)dh;
     r[0x231] = 2; /* du/dx 2.0 */
     r[0x233] = 2; /* dv/dy 2.0 */
-    needs = before_writes = written = raw_runs = 0;
+    blits = reloads = 0;
     fermi2d_method(&ch, 0x237, 0); /* src_y0 starts it */
+    CHECK(blits == 1 && reloads == 1);
 }
 static void blit(i32 dx, i32 dy, i32 dw, i32 dh) { blit_from(SW, dx, dy, dw, dh); }
 static void fill_from(u32 sw) {
@@ -156,17 +120,13 @@ static void fill_from(u32 sw) {
         }
 }
 static void fill(void) { fill_from(SW); }
-static void whole(int direct) {
-    contiguous = direct;
+static void whole(void) {
     fill();
     blit(0, 0, DW, DH);
     for (u32 y = 0; y < DH; y++)
         for (u32 x = 0; x < DW; x++) CHECK(at(DST, x, y, DW, DH) == src_px(2 * x, 2 * y));
-    CHECK(before_writes == 1 && written == 1 && needs == (direct ? 2u : 1u));
-    CHECK(direct ? raw_runs == 0 : raw_runs > 0);
 }
-static void window(int direct) {
-    contiguous = direct;
+static void window(void) {
     fill();
     blit(5, 3, 21, 9); /* runs start mid group at 20 bytes, end mid group at 104 */
     for (u32 y = 0; y < DH; y++)
@@ -175,12 +135,10 @@ static void window(int direct) {
             u32 v = at(DST, x, y, DW, DH);
             CHECK(inside ? v == src_px(2 * (x - 5), 2 * (y - 3)) : v == 0xEEEEEEEEu);
         }
-    CHECK(before_writes == 1 && written == 1);
 }
 
 /* a source 37 pixels wide: its rows end 4 bytes into a 16 byte run */
-static void odd_source(int direct) {
-    contiguous = direct;
+static void odd_source(void) {
     fill_from(37);
     blit_from(37, 0, 0, 19, 16);
     for (u32 y = 0; y < DH; y++)
@@ -191,12 +149,9 @@ static void odd_source(int direct) {
 }
 
 int main(void) {
-    whole(0);
-    whole(1);
-    window(0);
-    window(1);
-    odd_source(0);
-    odd_source(1);
+    whole();
+    window();
+    odd_source();
     printf("fermi2d_blit: %u checks passed\n", checks);
     return 0;
 }

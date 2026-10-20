@@ -11,6 +11,7 @@
 #include "nx/gpu/renderer.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/gpu/vk/vk.h"
+#include "nx/memory/own.h"
 
 /* the block height and depth (log2 GOBs) of a mip level of a block-linear texture. The hardware shrinks them for
    small levels: the height from the base level on, the depth only from level 1 on and by one step a level
@@ -66,18 +67,16 @@ static u64 bl_layer_size(u32 w, u32 h, u32 d, const VkFmt* f, u32 bh, u32 bd, u3
     return sz;
 }
 
-/* the guest bytes a move of a level reads (lsz bytes at gva, src when they are contiguous in host memory) staged as
-   they are, zero past the level's end: buf and off hold the layout's first byte the move reads (vk_bl_range) */
-static int stage_bl(const VkBlMove* m, u64 gva, const u8* src, u64 lsz, VkBuffer* buf, u64* off) {
+/* the guest bytes a move of a level reads (lsz bytes at gva) staged as they are (what the GPU holds of them copied on
+   the GPU, vk_guest_read), zero past the level's end: buf and off hold the layout's first byte the move reads
+   (vk_bl_range) */
+static int stage_bl(const VkBlMove* m, u64 gva, u64 lsz, VkBuffer* buf, u64* off) {
     u64 lo, hi;
     vk_bl_range(m, &lo, &hi);
     u8* p = vk_stage(hi - lo, vk_stage_align(), buf, off);
     if (!p) return 0;
     u64 n = lo >= lsz ? 0 : hi <= lsz ? hi - lo : lsz - lo;
-    if (src)
-        memcpy(p, src + lo, n);
-    else
-        gmem_read(gva + lo, p, n);
+    vk_guest_read(gva + lo, n, p, *buf, *off);
     memset(p + n, 0, hi - lo - n);
     return 1;
 }
@@ -86,7 +85,6 @@ static int stage_bl(const VkBlMove* m, u64 gva, const u8* src, u64 lsz, VkBuffer
 typedef struct {
     const Surf* t;
     u64 gva;
-    const u8* src; /* NULL when the level isn't contiguous in host memory */
     u64 lsz;
     u32 rowb, th, lbh, lbd;
 } LevelSource;
@@ -101,7 +99,7 @@ static int astc_rows(void* ctx, VkCommandBuffer cb, u32 z, u32 nz, u32 y, u32 n,
         u64 cap;
         *buf = vk_bl_scratch((u64)l->rowb * n * nz, &cap);
         *off = 0;
-        if (!*buf || !stage_bl(&m, l->gva, l->src, l->lsz, &staged, &at)) return 0;
+        if (!*buf || !stage_bl(&m, l->gva, l->lsz, &staged, &at)) return 0;
         vk_bl_barrier(cb, 1);
         int ok = vk_bl_move(cb, &m, 0, staged, at, *buf, 0);
         vk_bl_barrier(cb, 0);
@@ -112,11 +110,8 @@ static int astc_rows(void* ctx, VkCommandBuffer cb, u32 z, u32 nz, u32 y, u32 n,
     for (u32 k = 0; k < nz; k++)
         for (u32 r = 0; r < n; r++) {
             u64 at = ((u64)(z + k) * l->th + y + r) * l->t->pitch;
-            u8* d = p + ((u64)k * n + r) * l->rowb;
-            if (l->src)
-                memcpy(d, l->src + at, l->rowb);
-            else
-                gmem_read(l->gva + at, d, l->rowb);
+            u64 to = ((u64)k * n + r) * l->rowb;
+            vk_guest_read(l->gva + at, l->rowb, p + to, *buf, *off + to);
         }
     return 1;
 }
@@ -245,7 +240,7 @@ static int up_move(Upload* u, const UpLevel* lv, const VkBlMove* m, VkBuffer sta
    it fits in band; else strips of whole rows of blocks of 2^lbd slices, contiguous in memory; else, when one of those
    is too big, strips of 2^k GOB rows of a slice, each block's piece of them (contiguous in it) staged after the last
    one's: the layout of a surface of one row of blocks 2^k GOBs high */
-static int level_upload_bl(Upload* u, const UpLevel* lv, u64 gva, const u8* src, u64 lsz, u32 lbh, u32 lbd, u64 band) {
+static int level_upload_bl(Upload* u, const UpLevel* lv, u64 gva, u64 lsz, u32 lbh, u32 lbd, u64 band) {
     u32 rowb = lv->rowb, th = lv->th, ld = lv->ld, pitch = lv->pitch;
     u32 gobs_x = (rowb + 63) >> 6, nz = ld < (1u << lbd) ? ld : 1u << lbd;
     u64 block = 512ull << (lbh + lbd), block_row = gobs_x * block;
@@ -255,7 +250,7 @@ static int level_upload_bl(Upload* u, const UpLevel* lv, u64 gva, const u8* src,
     u64 staged_at;
     if (per_row * th * ld <= band && lsz <= band) {
         VkBlMove m = {rowb, th, lbh, lbd, 0, th, 0, ld, pitch};
-        return stage_bl(&m, gva, src, lsz, &staged, &staged_at) && up_move(u, lv, &m, staged, staged_at, 0, 0);
+        return stage_bl(&m, gva, lsz, &staged, &staged_at) && up_move(u, lv, &m, staged, staged_at, 0, 0);
     }
     u64 rows_cost = per_row * (8u << lbh) * nz;
     if (rows_cost <= band && block_row <= band) {
@@ -264,7 +259,7 @@ static int level_upload_bl(Upload* u, const UpLevel* lv, u64 gva, const u8* src,
         for (u32 z = 0; z < ld; z += nz)
             for (u32 y = 0; y < th; y += n) {
                 VkBlMove m = {rowb, th, lbh, lbd, y, th - y < n ? th - y : n, z, ld - z < nz ? ld - z : nz, pitch};
-                if (!stage_bl(&m, gva, src, lsz, &staged, &staged_at) ||
+                if (!stage_bl(&m, gva, lsz, &staged, &staged_at) ||
                     !up_move(u, lv, &m, staged, staged_at, z, y))
                     return 0;
             }
@@ -285,10 +280,7 @@ static int level_upload_bl(Upload* u, const UpLevel* lv, u64 gva, const u8* src,
                        ((((u64)(z & ((1u << lbd) - 1)) << lbh) + (gy & ((1u << lbh) - 1))) << 9);
             for (u32 gx = 0; gx < gobs_x; gx++) {
                 u64 o = base + gx * block, n = o >= lsz ? 0 : o + piece <= lsz ? piece : lsz - o;
-                if (src)
-                    memcpy(p + gx * piece, src + o, n);
-                else
-                    gmem_read(gva + o, p + gx * piece, n);
+                vk_guest_read(gva + o, n, p + gx * piece, staged, staged_at + gx * piece);
                 memset(p + gx * piece + n, 0, piece - n);
             }
             u32 y = gy << 3;
@@ -300,7 +292,7 @@ static int level_upload_bl(Upload* u, const UpLevel* lv, u64 gva, const u8* src,
 
 /* a pitch linear level: its rows staged as they are, whole slices or strips of rows of a slice, when the guest's
    pitch suits the copies and the conversion; else each row into rows of lv->pitch */
-static int level_upload_pitch(Upload* u, const UpLevel* lv, u64 gva, const u8* src, u64 lsz, u64 band) {
+static int level_upload_pitch(Upload* u, const UpLevel* lv, u64 gva, u64 lsz, u64 band) {
     const Surf* t = u->t;
     u32 th = lv->th, ld = lv->ld, gp = t->pitch;
     int as_is = gp % (lv->conv ? lv->tc.in_align : 4) == 0 && gp % t->f.bpp == 0;
@@ -318,21 +310,15 @@ static int level_upload_pitch(Upload* u, const UpLevel* lv, u64 gva, const u8* s
             if (!p) return 0;
             if (as_is) { /* the rows, slices after another, are one range of guest memory */
                 u64 have = first >= lsz ? 0 : first + size <= lsz ? size : lsz - first;
-                if (src)
-                    memcpy(p, src + first, have);
-                else
-                    gmem_read(gva + first, p, have);
+                vk_guest_read(gva + first, have, p, staged, at);
                 memset(p + have, 0, size - have);
             } else
                 for (u32 k = 0; k < slices; k++)
                     for (u32 r = 0; r < rows; r++) {
                         u64 o = ((u64)(z + k) * th + y + r) * gp;
-                        u8* d = p + ((u64)k * rows + r) * pitch;
-                        memset(d, 0, pitch);
-                        if (src)
-                            memcpy(d, src + o, lv->rowb);
-                        else
-                            gmem_read(gva + o, d, lv->rowb);
+                        u64 to = ((u64)k * rows + r) * pitch;
+                        memset(p + to, 0, pitch);
+                        vk_guest_read(gva + o, lv->rowb, p + to, staged, at + to);
                     }
             if (!up_reserve(u, lv->conv ? vk_tc_out_size(&lv->tc, rows, slices) : 0) ||
                 !up_rows(u, lv, staged, at, pitch, z, slices, y, rows))
@@ -377,10 +363,9 @@ static int tex_upload(Surf* t) {
             u32 tw = (lw + f->bw - 1) / f->bw, th = (lh + f->bh - 1) / f->bh;
             u32 rowb = tw * f->bpp, lbh = 0, lbd = 0;
             u64 lsz = t->bl ? bl_level_size(t->w, t->h, d3, f, t->bh, t->bd, l, &lbh, &lbd) : (u64)t->pitch * th * ld;
-            const u8* src = gmem_ptr(t->gva + at, lsz); /* NULL: read through gmem_read */
             if (f->conv == VKC_ASTC) { /* decoded on the GPU from its block rows, deswizzled on the GPU */
                 complete = up_flush(&u);
-                LevelSource ls = {t, t->gva + at, src, lsz, rowb, th, lbh, lbd};
+                LevelSource ls = {t, t->gva + at, lsz, rowb, th, lbh, lbd};
                 complete = complete && vk_astc_upload(cb, t, lw, lh, ld, l, layer, astc_rows, &ls);
                 u.scratch = VK_NULL_HANDLE; /* astc_rows may have grown the scratch buffer: asked for again */
                 u.cap = 0;
@@ -392,8 +377,8 @@ static int tex_upload(Surf* t) {
                     if (lv.tc.in_align > align) align = lv.tc.in_align;
                 }
                 lv.pitch = (rowb + align - 1) / align * align;
-                complete = t->bl ? level_upload_bl(&u, &lv, t->gva + at, src, lsz, lbh, lbd, band)
-                                 : level_upload_pitch(&u, &lv, t->gva + at, src, lsz, band);
+                complete = t->bl ? level_upload_bl(&u, &lv, t->gva + at, lsz, lbh, lbd, band)
+                                 : level_upload_pitch(&u, &lv, t->gva + at, lsz, band);
             }
             if (!complete)
                 LOG_LIMIT(1, "vulkan: out of memory or staging uploading a %ux%u texture level (left out)\n", lw, lh);
@@ -407,12 +392,13 @@ static int tex_upload(Surf* t) {
 /* change checks: a hash of the whole texture when it is contiguous in host memory, else of 64 bytes of each page
    (the sampled check for big long-stable textures is vk_sample_hash) */
 static u64 mem_hash(u64 gva, u64 size) {
-    u8* p = gmem_ptr(gva, size);
+    /* bytes the GPU holds are trapped: they hash as their owner (vk_guest_peek), and the texture is read in pieces */
+    u8* p = __atomic_load_n(&g_own_any, __ATOMIC_ACQUIRE) ? NULL : gmem_ptr(gva, size);
     if (p) return vk_hash(p, size);
     u64 h = 1469598103934665603ull;
     for (u64 o = 0; o < size; o += 4096) {
         u64 v[8] = {0};
-        gmem_read(gva + o, v, size - o < 64 ? size - o : 64);
+        vk_guest_peek(gva + o, v, size - o < 64 ? size - o : 64);
         for (int i = 0; i < 8; i++) h = (h ^ v[i]) * 1099511628211ull;
     }
     return h;
@@ -635,7 +621,7 @@ static Surf* tex_check(Surf* t, u64 gva) {
        stream's to see (vk_ww_epoch): write tracking proves the memory unchanged without hashing its texels */
     if (t->checked != g_vk_present || t->ww_epoch != vk_ww_epoch()) {
         u32 wnow = vk_ww_now();
-        int wr = vk_written_since(gmem_ptr(gva, t->size), t->size, t->wseen);
+        int wr = vk_written_since(gmem_host(gva, t->size), t->size, t->wseen);
         int epoch = t->ww_epoch != vk_ww_epoch();
         t->ww_epoch = vk_ww_epoch();
         if (wr >= 0) {
@@ -807,7 +793,7 @@ texture_from_memory:
     for (u32 l = 0; l < levels; l++) sz += bl ? bl_level_size(w, h, d3, &f, bh, bd, l, NULL, NULL) : stride;
     t->size = stride * (layers - 1) + sz;
     t->wseen = vk_ww_now();
-    vk_written_since(gmem_ptr(gva, t->size), t->size, 0); /* starts tracking it */
+    vk_written_since(gmem_host(gva, t->size), t->size, 0); /* starts tracking it */
     t->wseen = vk_ww_now();
     t->gw = gpu_mem_generation();
     t->hash = mem_hash(gva, t->size);

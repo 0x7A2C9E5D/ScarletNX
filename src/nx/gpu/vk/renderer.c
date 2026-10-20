@@ -20,6 +20,7 @@
 #include "nx/runtime/platform/plat.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/memory/mem.h"
+#include "nx/memory/own.h"
 #include "nx/gpu/vk/pending_pages.h"
 #include "nx/gpu/renderer.h"
 
@@ -78,6 +79,7 @@ static int vkr_start(void) {
     if (g_vk_scale != 1.0f) LOG("vulkan: render targets at %.2fx\n", g_vk_scale);
     vk_cmd_init();
     vk_pipeline_init();
+    vk_own_init(); /* GPU engines' results stay on the GPU where guest memory can be trapped (memory/own.c) */
     g_gpu_before_write = vkr_before_write;
     g_gpu_mapping_begin = vkr_mapping_begin;
     g_gpu_mapping_end = vkr_mapping_end;
@@ -156,12 +158,11 @@ static int vkr_blit(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, in
     vk_unlock();
     return r; /* 0: the front end copies through memory, with the renderer's rt_flush and rt_reload around it */
 }
-static int vkr_vic_compose(const VicJob* j) {
-    static int off = -1;
-    if (off < 0) off = getenv("SNX_NO_VIC_GPU") != NULL;
-    if (off) return 0;
-    return vk_vic_compose(j); /* 0: the caller composes in guest memory. It takes vk_lock where it needs it */
-}
+static int vkr_vic_compose(const VicJob* j) { return vk_vic_compose(j); } /* it takes vk_lock */
+static int vkr_nvdec_write(const NvdecPic* p) { return vk_nvdec_write(p); }   /* it takes vk_lock */
+static void* vkr_nvdec_hw_device(void) { return vk_nvdec_hw_device(); }
+static int vkr_dma_copy(const GpuDmaOp* o) { return vk_dma_copy(o); }         /* it takes vk_lock */
+static int vkr_blit_mem(const GpuBlit* b) { return vk_blit_mem(b); }          /* it takes vk_lock */
 static void vkr_rt_flush(u64 gva) {
     vk_lock();
     vk_gfx_image_mem_need(gva, 1);
@@ -241,11 +242,13 @@ static Surf* cpu_frame(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout, u32 bh
     VkBuffer staged;
     u8* p = vk_stage(staged_size + 16, vk_stage_align(), &staged, &at);
     if (!p) return NULL;
-    const u8* src = g_mem + cpu_addr; /* a CPU address (nvmap's), in the guest's address space */
+    /* a CPU address (nvmap's), in the guest's address space: what the GPU holds of it (VIC's picture) is copied on
+       the GPU */
     if (bl || in_pitch == stride)
-        memcpy(p, src, hi);
+        vk_cpu_read(cpu_addr, hi, p, staged, at);
     else
-        for (u32 y = 0; y < h; y++) memcpy(p + (u64)y * in_pitch, src + (u64)y * stride, row_bytes);
+        for (u32 y = 0; y < h; y++)
+            vk_cpu_read(cpu_addr + (u64)y * stride, row_bytes, p + (u64)y * in_pitch, staged, at + (u64)y * in_pitch);
     memset(p + staged_size, 0, 16);
     /* deswizzled and converted to RGBA8 on the GPU, in the scratch buffer: the linear rows, then the converted ones */
     int conv = vk_tc_vi_converts(fmt);
@@ -487,6 +490,10 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
                 "begun again), %llu through a copy\n",
                 (unsigned long long)g_vk_fb_draws, (unsigned long long)g_vk_fb_barriers,
                 (unsigned long long)g_vk_fb_restarts, (unsigned long long)g_vk_rt_copies);
+            /* what the GPU engines keep on the GPU (docs/GPU_OWNERSHIP.md), and what the CPU had to wait for */
+            LOG("vulkan: GPU-owned guest memory landed for the CPU %llu times, render targets written back for an "
+                "engine %llu times\n",
+                (unsigned long long)own_landings(), (unsigned long long)g_vk_rt_readbacks);
         }
     }
     /* Offscreen frames still submit and advance the frame ring. g_last remains available for readback. */
@@ -668,6 +675,10 @@ const Renderer vk_renderer = {
     .method_barrier = vkr_method_barrier,
     .blit = vkr_blit,
     .vic_compose = vkr_vic_compose,
+    .nvdec_write = vkr_nvdec_write,
+    .nvdec_hw_device = vkr_nvdec_hw_device,
+    .dma_copy = vkr_dma_copy,
+    .blit_mem = vkr_blit_mem,
     .rt_flush = vkr_rt_flush,
     .rt_reload = vkr_rt_reload,
     .dispatch = vkr_dispatch,
