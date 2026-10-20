@@ -930,7 +930,7 @@ if(NOT SNX_TOOLS_ONLY)
     # by their shaders' records, a cut or changed record ending the reading, another key starting over, a full file
     add_executable(snx-test-pipeline-file pipeline_file.c)
     snx_test_target(snx-test-pipeline-file 23)
-    target_link_libraries(snx-test-pipeline-file PRIVATE snx_nx_flags)
+    target_link_libraries(snx-test-pipeline-file PRIVATE snx_nx_flags scarletnx-common)
     add_test(NAME pipeline_file COMMAND snx-test-pipeline-file)
 endif()
 

@@ -6,6 +6,8 @@
    appended after a reading refer to the shaders read; a record cut short by a crash or changed on disk ends the
    reading, and the file goes on from the last good record; a file of another key starts over; a full file takes no
    more */
+#include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,7 +23,15 @@ static unsigned checks;
         }                                                                                                              \
     } while (0)
 
-void logf_(int lvl, const char* fmt, ...) { (void)lvl, (void)fmt; }
+/* the last warning */
+static char warned[1024];
+void logf_(int lvl, const char* fmt, ...) {
+    va_list ap;
+    if (lvl) return;
+    va_start(ap, fmt);
+    vsnprintf(warned, sizeof warned, fmt, ap);
+    va_end(ap);
+}
 
 #define PATH "pipeline_file_test.vkshaders"
 #define KEYB 96 /* a pipeline key's bytes */
@@ -242,6 +252,21 @@ int main(void) {
     CHECK(file_size() == header);
 
     remove(PATH);
+#ifdef __linux__
+    /* a file no write reaches (a full disk): said with its path and the system's reason */
+    {
+        PfLoad load;
+        load.shader = load_shader;
+        load.pipe = load_pipe;
+        load.ctx = NULL;
+        memset(&pf, 0, sizeof pf);
+        pm_init(&pf.lock);
+        warned[0] = 0;
+        pf_open(&pf, "/dev/full", "key one", &load, loaded);
+        CHECK(!pf.f && strstr(warned, "cannot write /dev/full (") && strstr(warned, strerror(ENOSPC)));
+        close_file(&pf);
+    }
+#endif
     printf("pipeline_file: %u checks passed\n", checks);
     return 0;
 }

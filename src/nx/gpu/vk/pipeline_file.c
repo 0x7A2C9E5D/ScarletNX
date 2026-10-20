@@ -5,6 +5,7 @@
    pipeline.c makes the modules and pipelines from what it hands back */
 #include <stdlib.h>
 #include <string.h>
+#include "common/utilities/common.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/vk/pipeline_file.h"
@@ -117,7 +118,9 @@ static int pf_append(PFile* pf, u32 type, const void* const* piece, const size_t
     if (ok && pad) ok = fwrite(zero, 1, pad, pf->f) == pad;
     if (ok) ok = fflush(pf->f) == 0;
     if (!ok) { /* a record cut short ends what the next run reads, which is all it can tell */
-        WARN("vulkan: cannot write the shader and pipeline file: what is made from now on is not kept\n");
+        char why[256];
+        WARN("vulkan: cannot write %s (%s): what is made from now on is not kept\n", pf->path,
+             snx_os_error(why, sizeof why));
         fclose(pf->f);
         pf->f = NULL;
         return -1;
@@ -247,8 +250,10 @@ void pf_open(PFile* pf, const char* path, const char* key, const PfLoad* load, u
     u8 *head = pf_header(key, &hsize), *buf = NULL;
     FILE* f;
     long length = -1;
+    char why[256] = "";
     loaded[0] = loaded[1] = 0;
     pm_lock(&pf->lock);
+    snprintf(pf->path, sizeof pf->path, "%s", path);
     if (!head) {
         pm_unlock(&pf->lock);
         return;
@@ -272,13 +277,15 @@ void pf_open(PFile* pf, const char* path, const char* key, const PfLoad* load, u
                 (unsigned long)used, (unsigned long)size);
     } else if (length > 0)
         LOG("vulkan: %s is of another build, GPU or driver, or unreadable: started over\n", path);
-    if (used && used == size)
+    if (used && used == size) {
         pf->f = fopen(path, "ab");
-    else { /* started over, or rewritten with the records that checked out (what a crash cut short goes) */
+        if (!pf->f) snx_os_error(why, sizeof why);
+    } else { /* started over, or rewritten with the records that checked out (what a crash cut short goes) */
         int ok;
         pf->f = fopen(path, "wb");
         ok = pf->f && fwrite(used ? buf : head, 1, used ? used : hsize, pf->f) == (used ? used : hsize) &&
              !fflush(pf->f);
+        if (!ok) snx_os_error(why, sizeof why); /* before fclose's */
         if (!ok && pf->f) {
             fclose(pf->f);
             pf->f = NULL;
@@ -289,7 +296,8 @@ void pf_open(PFile* pf, const char* path, const char* key, const PfLoad* load, u
         }
     }
     pf->size = used;
-    if (!pf->f) WARN("vulkan: cannot write %s: shaders and pipelines made are not kept for the next run\n", path);
+    if (!pf->f)
+        WARN("vulkan: cannot write %s (%s): shaders and pipelines made are not kept for the next run\n", path, why);
     free(buf);
     free(head);
     pm_unlock(&pf->lock);
