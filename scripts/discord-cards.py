@@ -51,11 +51,15 @@ JOBS = {
     'ScarletNX-linux-x86_64.AppImage': 'Linux AppImage (x86_64)',
     'ScarletNX-linux-aarch64.AppImage': 'Linux AppImage (aarch64)',
     'ScarletNX-linux-ppc64le.AppImage': 'Linux AppImage (ppc64le)',
+    'ScarletNX-linux-riscv64.AppImage': 'Linux AppImage (riscv64)',
+    'ScarletNX-linux-loongarch64.AppImage': 'Linux AppImage (loongarch64)',
     'ScarletNX-windows-x86_64.zip': 'Windows (Clang + LLVM)',
     'ScarletNX-android-universal.apk': 'Android APK',
     'ScarletNX-macos-arm64.zip': 'macOS and iOS (arm64)',
     'ScarletNX-ios-arm64.ipa': 'macOS and iOS (arm64)',
 }
+# Build's jobs that make no release file, shown after the packages: each job and the system and architecture it tests
+CHECKS = {'Linux (ppc64, cross)': ('Linux', 'PowerPC64 BE')}
 # a nightly's colours: building, published, a package failed, not published
 BUILDING, SCARLET, AMBER, CLOSED = 0x1F6FEB, 0xB0102A, 0xD29922, 0x6E7681
 # GitHub's own, for a pull request and an issue: open, draft, merged, closed; an issue done, or not planned
@@ -406,7 +410,7 @@ class Cards:
 
     def packages(self, jobs, release, built):
         """a field per release file: published, its link and size; else what its job does; built: what a built one
-        waits for"""
+        waits for. Then a field per job of CHECKS: what its tests did"""
         assets = {a['name']: a for a in (release or {}).get('assets', [])}
         by_name = {j['name']: j for j in jobs}
         fields = []
@@ -426,6 +430,19 @@ class Cards:
             else:
                 value = f'Failed\n[log]({job["html_url"]})'
             fields.append({'name': system if ',' in arch else f'{system} {arch}', 'value': value, 'inline': True})
+        for name, (system, arch) in CHECKS.items():
+            job = by_name.get(name)
+            if not job or job['status'] in WAITING:
+                value = 'Waiting'
+            elif job['status'] != 'completed':
+                value = f'Testing\n[log]({job["html_url"]})'
+            elif job['conclusion'] == 'success':
+                value = 'Tests passed'
+            elif job['conclusion'] in ('cancelled', 'skipped'):
+                value = job['conclusion'].capitalize()
+            else:
+                value = f'Tests failed\n[log]({job["html_url"]})'
+            fields.append({'name': f'{system} {arch}', 'value': value, 'inline': True})
         return fields
 
     @staticmethod

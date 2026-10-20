@@ -14,8 +14,10 @@ Each push to `main` that builds everywhere becomes a nightly in [scarletnx/night
 kept, with each open pull request's builds. The latest:
 [ScarletNX-linux-x86_64.AppImage](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-linux-x86_64.AppImage) and
 [ScarletNX-linux-aarch64.AppImage](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-linux-aarch64.AppImage) for Linux (`chmod +x` it first;
-[ScarletNX-linux-ppc64le.AppImage](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-linux-ppc64le.AppImage), cross-built for
-[PowerPC64 LE](docs/PPC64.md), when its job built),
+[ScarletNX-linux-ppc64le.AppImage](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-linux-ppc64le.AppImage),
+[ScarletNX-linux-riscv64.AppImage](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-linux-riscv64.AppImage) and
+[ScarletNX-linux-loongarch64.AppImage](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-linux-loongarch64.AppImage) are
+cross-built for [PowerPC64 LE](docs/PPC64.md), [RISC-V and LoongArch](docs/RISCV-LOONGARCH.md), when their jobs built),
 [ScarletNX-windows-x86_64.zip](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-windows-x86_64.zip) for Windows (run `bin\scarletnx.exe`)
 and [ScarletNX-android-universal.apk](https://github.com/scarletnx/nightly/releases/latest/download/ScarletNX-android-universal.apk) ([Android](docs/ANDROID.md)).
 Games need a Vulkan 1.3 driver.

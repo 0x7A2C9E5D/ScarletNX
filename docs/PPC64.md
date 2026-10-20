@@ -15,6 +15,8 @@ passes under qemu-user, and Super Haxagon, recompiled under qemu, played a level
 lavapipe as the Vulkan driver. No real POWER machine has run it yet. CI cross-builds its AppImage
 (`ScarletNX-linux-ppc64le.AppImage`, the `appimage-cross` job in `.github/workflows/build.yml`) against an Arch POWER
 system root and runs it under qemu as installed; the test suite's job, `linux-ppc64le`, is commented out.
+The big-endian port has a job of its own, `linux-ppc64`, which builds the Linux runtime and runs its tests under
+qemu-ppc64.
 
 On a big-endian host (`linux-ppc64-cross`, Debian's glibc port, ELFv1) the Linux runtime runs AArch64 programs:
 under qemu-ppc64, an AArch64-hosted GCC compiles a C file and the program it made runs, both dynamically linked
@@ -131,6 +133,10 @@ export SNX_SYSROOT=$PWD/.cache/sysroot-ppc64
 cmake --preset linux-ppc64-cross -DSNX_BUILD_NX=OFF -DSNX_BUILD_3DS=OFF -DSNX_BUILD_GUI=OFF
 cmake --build --preset linux-ppc64-cross --target scarletnx-gnuabi-run
 ```
+
+CI's `linux-ppc64` job builds it this way against that system root, made weekly, and runs the Linux runtime's tests
+(`gnuabi_*`, `endian`, `cas128`) under qemu-ppc64. Debian ports' unstable can break for a day, so the job may fail
+without failing the run.
 
 What was run under qemu-ppc64: the Linux runtime's tests (`gnuabi_*`, `endian`, `cas128`), `tools/gnuabi_diff.py
 --suite all` against qemu-aarch64 (the CPU suite covers SIMD, floating point, exclusives and unaligned accesses), a

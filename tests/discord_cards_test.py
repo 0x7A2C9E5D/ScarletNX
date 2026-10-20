@@ -27,21 +27,27 @@ JOBS = [
     'Linux AppImage (x86_64)',
     'Linux AppImage (aarch64)',
     'Linux AppImage (ppc64le)',
+    'Linux AppImage (riscv64)',
+    'Linux AppImage (loongarch64)',
     'Windows (Clang + LLVM)',
     'Android APK',
     'macOS and iOS (arm64)',
     'macOS and iOS (arm64)',
+    'Linux (ppc64, cross)',
 ]
 FILES = [
     'ScarletNX-linux-x86_64.AppImage',
     'ScarletNX-linux-aarch64.AppImage',
     'ScarletNX-linux-ppc64le.AppImage',
+    'ScarletNX-linux-riscv64.AppImage',
+    'ScarletNX-linux-loongarch64.AppImage',
     'ScarletNX-windows-x86_64.zip',
     'ScarletNX-android-universal.apk',
     'ScarletNX-macos-arm64.zip',
     'ScarletNX-ios-arm64.ipa',
 ]
-N = len(JOBS)  # the packages, each with its job (macOS's and iOS's are one)
+N = len(JOBS)  # the packages, each with its job (macOS's and iOS's are one), then the tests' job of CHECKS
+WINDOWS = FILES.index('ScarletNX-windows-x86_64.zip')  # its field
 failures = []
 
 
@@ -184,9 +190,9 @@ with tempfile.TemporaryDirectory() as temporary:
     w, b, ok = ('queued', None), ('in_progress', None), ('completed', 'success')
     steps = [
         {'status': 'in_progress', 'jobs': jobs([w] * N)},
-        {'status': 'in_progress', 'jobs': jobs([b, b, b, w, w, w, w])},
-        {'status': 'in_progress', 'jobs': jobs([b, b, b, w, w, w, w])},  # no change: no edit
-        {'status': 'in_progress', 'jobs': jobs([ok, b, b, w, w, w, w])},
+        {'status': 'in_progress', 'jobs': jobs([b] * 3 + [w] * (N - 3))},
+        {'status': 'in_progress', 'jobs': jobs([b] * 3 + [w] * (N - 3))},  # no change: no edit
+        {'status': 'in_progress', 'jobs': jobs([ok, b, b] + [w] * (N - 3))},
         {'status': 'completed', 'conclusion': 'success', 'jobs': jobs([ok] * N)},
     ]
     save_state(dict(base, runs=[push_run(sha, steps)]))
@@ -233,9 +239,9 @@ with tempfile.TemporaryDirectory() as temporary:
         and values
         == [
             ['Waiting'] * N,
-            ['Building', 'Building', 'Building', 'Waiting', 'Waiting', 'Waiting', 'Waiting'],
-            ['Built', 'Building', 'Building', 'Waiting', 'Waiting', 'Waiting', 'Waiting'],
-            ['Built'] * N,
+            ['Building'] * 3 + ['Waiting'] * (N - 3),
+            ['Built'] + ['Building'] * 2 + ['Waiting'] * (N - 3),
+            ['Built'] * (N - 1) + ['Tests passed'],
         ],
         values,
     )
@@ -261,7 +267,7 @@ with tempfile.TemporaryDirectory() as temporary:
         done.returncode == 0
         and posted('nightly')[-1]['method'] == 'PATCH'
         and card['url'] == published['html_url']
-        and card['fields'][3]['value']
+        and card['fields'][WINDOWS]['value']
         == f'[zip](https://github.com/{TO}/releases/download/{published["tag_name"]}/ScarletNX-windows-x86_64.zip)\n94.6 MB'
         and card['color'] == cards.SCARLET
         and card['description'].startswith(f'Built from main at [`{sha[:7]}`]')
@@ -282,16 +288,22 @@ with tempfile.TemporaryDirectory() as temporary:
         and card['fields'][0]['value'] == 'Built\nnot published',
         card,
     )
-    failed = jobs([ok, ok, ok, ('completed', 'failure'), ok, ok, ok])
+    bad = ('completed', 'failure')
+    failed = jobs([ok] * WINDOWS + [bad] + [ok] * (N - WINDOWS - 2) + [bad])
     s['releases'][TO] = [nightly_release(previous, '2026-10-01')]
     s['runs'] = [dict(push_run(sha, []), status='completed', conclusion='failure', jobs=failed)]
     save_state(s)
     run('refresh', 'nightly', sha)
     card = posted('nightly')[-1]['body']['embeds'][0]
     check(
-        'a failed build: not published, the failed package linking its log, amber',
+        'a failed build: not published, the failed package and tests linking their logs, amber',
         card['description'].startswith(f'Not published: the build of [`{sha[:7]}`]')
-        and card['fields'][3]['value'] == 'Failed\n[log](https://x/runs/1/Windo)'
+        and card['fields'][WINDOWS]['value'] == 'Failed\n[log](https://x/runs/1/Windo)'
+        and card['fields'][N - 1] == {
+            'name': 'Linux PowerPC64 BE',
+            'value': 'Tests failed\n[log](https://x/runs/1/Linux)',
+            'inline': True,
+        }
         and card['color'] == cards.AMBER,
         card,
     )
@@ -661,9 +673,9 @@ with tempfile.TemporaryDirectory() as temporary:
 
 # the jobs the cards name are Build's: a renamed job would leave its package waiting forever
 build = (ROOT / '.github' / 'workflows' / 'build.yml').read_text()
-for name in cards.JOBS.values():
-    template = re.sub(r'\((x86_64|aarch64|ppc64le)\)', '(${{ matrix.arch }})', name)
-    arch = re.search(r'\((x86_64|aarch64|ppc64le)\)', name)
+for name in [*cards.JOBS.values(), *cards.CHECKS]:
+    template = re.sub(r'\((x86_64|aarch64|ppc64le|riscv64|loongarch64)\)', '(${{ matrix.arch }})', name)
+    arch = re.search(r'\((x86_64|aarch64|ppc64le|riscv64|loongarch64)\)', name)
     check(
         f'{name} is a job of build.yml',
         f'name: {name}\n' in build or (f'name: {template}\n' in build and arch and f'{arch.group(1)}' in build),
