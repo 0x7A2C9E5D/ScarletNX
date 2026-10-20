@@ -385,6 +385,7 @@ if(NOT WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
 endif()
 foreach(bad IN ITEMS
         array_of_arrays 5 "give the element a name"
+        bad_number 4 "bad number 12ab"
         big_command_id 4 "number too large"
         buffer_two_modes 5 "exactly one of MapAlias"
         duplicate_argument 4 "two arguments named a"
@@ -394,7 +395,7 @@ foreach(bad IN ITEMS
         exchange_buffer 5 "exchange \\(W\\) buffers"
         fixed_size_array 4 "it is not FixedSize"
         keyword_argument 4 "a C keyword"
-        long_service_name 3 "at most 8 characters"
+        long_service_name 3 "service name abcdefghi has more than 8 characters"
         move_handle_in 5 "a client can't send a move handle"
         output_too_big 5 "the reply takes 260 bytes"
         padding_name 4 "padN_ names"
@@ -426,6 +427,10 @@ foreach(bad IN ITEMS
         unset(bad_line)
     endif()
 endforeach()
+add_test(NAME swipc_says_why_it_cannot_open COMMAND snx-swipc --root "${CMAKE_CURRENT_SOURCE_DIR}/swipc/bad"
+         --out "${CMAKE_CURRENT_BINARY_DIR}" missing.swipc)
+set_tests_properties(swipc_says_why_it_cannot_open PROPERTIES PASS_REGULAR_EXPRESSION
+                     "swipc: cannot open [^\n]*missing\\.swipc: [A-Za-z]")
 
 # This IPC fixture stubs the kernel and needs no NX graphics/media dependencies
 add_executable(snx-test-bsd-service bsd_service.c)
