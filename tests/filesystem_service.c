@@ -695,6 +695,18 @@ static u32 romfs_find(const u8* image, const u64* header, int dir, u32 parent, c
     }
     return UINT32_MAX;
 }
+/* NgWord2's 52 file names, as the 11.0.1 archive names them */
+static const char* const ngword2_names[52] = {
+    "ac_0_b1_nx", "ac_0_b2_nx", "ac_0_not_b_nx", "ac_1_b1_nx", "ac_1_b2_nx", "ac_1_not_b_nx",
+    "ac_2_b1_nx", "ac_2_b2_nx", "ac_2_not_b_nx", "ac_3_b1_nx", "ac_3_b2_nx", "ac_3_not_b_nx",
+    "ac_4_b1_nx", "ac_4_b2_nx", "ac_4_not_b_nx", "ac_5_b1_nx", "ac_5_b2_nx", "ac_5_not_b_nx",
+    "ac_6_b1_nx", "ac_6_b2_nx", "ac_6_not_b_nx", "ac_7_b1_nx", "ac_7_b2_nx", "ac_7_not_b_nx",
+    "ac_8_b1_nx", "ac_8_b2_nx", "ac_8_not_b_nx", "ac_9_b1_nx", "ac_9_b2_nx", "ac_9_not_b_nx",
+    "ac_10_b1_nx", "ac_10_b2_nx", "ac_10_not_b_nx", "ac_11_b1_nx", "ac_11_b2_nx", "ac_11_not_b_nx",
+    "ac_12_b1_nx", "ac_12_b2_nx", "ac_12_not_b_nx", "ac_13_b1_nx", "ac_13_b2_nx", "ac_13_not_b_nx",
+    "ac_14_b1_nx", "ac_14_b2_nx", "ac_14_not_b_nx", "ac_15_b1_nx", "ac_15_b2_nx", "ac_15_not_b_nx",
+    "ac_common_b1_nx", "ac_common_b2_nx", "ac_common_not_b_nx", "version.dat",
+};
 static void test_virtual_services(SvcObj* fs, SvcObj* proxy) {
     u8 bytes[] = {1, 0, 3, 0xff, 5};
     CHECK(!fs_add_virtual_file("sdmc/virtual.bin", bytes, sizeof bytes));
@@ -742,6 +754,68 @@ static void test_virtual_services(SvcObj* fs, SvcObj* proxy) {
     r.c.na = 1;
     dispatch(archive, &r, RC(2, 6300));
     svcobj_unref(archive);
+
+    {
+        Request a;
+        request(&a, 202);
+        argument64(&a, 8, 0x0100000000000823ull);
+        dispatch(proxy, &a, 0);
+        CHECK(a.c.nout_objs == 1);
+        SvcObj* ngword = a.c.out_objs[0];
+        u64 ngword_size = get_size(ngword);
+        CHECK(ngword_size > 0x200 && ngword_size <= 0x2000);
+        test_storage_contracts(ngword, ngword_size);
+        request(&a, 0);
+        argument64(&a, 0, 0);
+        argument64(&a, 8, ngword_size);
+        output_buffer(&a, ngword_size);
+        dispatch(ngword, &a, 0);
+        u8* image = GP(0x5000);
+        u64 header[10];
+        memcpy(header, image, sizeof header);
+        CHECK(header[0] == 0x50 && header[9] < ngword_size && header[7] < ngword_size);
+        {
+            u32 entry, count = 0;
+            memcpy(&entry, image + header[3] + 12, 4); /* the root's first file, then the sibling chain */
+            while (entry != UINT32_MAX) {
+                CHECK(++count <= sizeof ngword2_names / sizeof ngword2_names[0]);
+                memcpy(&entry, image + header[7] + entry + 4, 4);
+            }
+            CHECK(count == sizeof ngword2_names / sizeof ngword2_names[0]);
+        }
+        {
+            u32 entry = romfs_find(image, header, 0, 0, "version.dat");
+            u64 offset, size;
+            CHECK(entry != UINT32_MAX);
+            memcpy(&offset, image + header[7] + entry + 8, 8);
+            memcpy(&size, image + header[7] + entry + 16, 8);
+            CHECK(size == 4 && offset + 4 <= ngword_size - header[9]);
+            CHECK(!memcmp(image + header[9] + offset, "\0\0\0\x1a", 4));
+        }
+        {
+            u32 entry = romfs_find(image, header, 0, 0, "ac_common_b1_nx");
+            u64 offset, size;
+            CHECK(entry != UINT32_MAX);
+            memcpy(&offset, image + header[7] + entry + 8, 8);
+            memcpy(&size, image + header[7] + entry + 16, 8);
+            CHECK(size == 44 && offset + 44 <= ngword_size - header[9]);
+            CHECK(image[header[9] + offset] == 0x1f && image[header[9] + offset + 1] == 0x8b);
+        }
+        {
+            unsigned i;
+            for (i = 0; i < sizeof ngword2_names / sizeof ngword2_names[0]; i++) {
+                const u8* body = strcmp(ngword2_names[i], "version.dat") ? ngword2_ac : ngword2_version;
+                u32 entry = romfs_find(image, header, 0, 0, ngword2_names[i]);
+                u64 offset = 0, size = 0;
+                CHECK(entry != UINT32_MAX);
+                memcpy(&offset, image + header[7] + entry + 8, 8);
+                memcpy(&size, image + header[7] + entry + 16, 8);
+                CHECK(size == (strcmp(ngword2_names[i], "version.dat") ? 44 : 4));
+                CHECK(!memcmp(image + header[9] + offset, body, (size_t)size));
+            }
+        }
+        svcobj_unref(ngword);
+    }
     puts("PASS HLE readonly virtual files and synthetic system archive");
 }
 

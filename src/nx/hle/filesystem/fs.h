@@ -72,6 +72,8 @@ typedef struct {
     ROpen openf[NOPEN]; /* rf_open's files, under tree.lock */
     u64 openclk;
     u8 emptyrom[0x200]; /* the empty RomFS of the system archives (emptyrom_init) */
+    u8 ngword2rom[0x2000]; /* the synthesized NgWord2 archive 0100000000000823 (ngword2rom_init) */
+    u64 ngword2rom_size;   /* the bytes used in ngword2rom */
     /* the service objects' data */
     FsData fss[FS_FS_MAX];
     FileData files[FS_FILE_MAX];
