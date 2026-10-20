@@ -300,7 +300,8 @@ Test options, read when `BUILD_TESTING` is on (CTest's default), all OFF by defa
 
 - `-DSNX_TEST_SANITIZERS=ON`: build the native tests, and the programs and libraries of the repository they run or
   link, with ASan and UBSan (`runtime_architecture` names one left out). The runtime is one, so it is not deployed.
-  CI's `Linux (x86_64, ASan + UBSan)` job runs the tests this way.
+  CI's `Linux (x86_64, ASan + UBSan)` job runs the tests this way, with `LSAN_OPTIONS=use_stacks=0:use_registers=0`
+  so the leak check finds the same leaks on every machine.
 - `-DSNX_TEST_VULKAN=ON`: add the offscreen Vulkan integration tests, see below.
 - `-DSNX_TEST_A64_FP_DIFF=ON`: add the AArch64 FP differential test, which needs Python unicorn 2.1.4 and a native
   Linux host.

@@ -182,6 +182,9 @@ jobs:
     env:
       ASAN_OPTIONS: halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      # a block only a stale stack slot or register still points at is a leak, on every machine alike: with them
+      # read, what a leak check finds depends on what the stack happened to hold at exit
+      LSAN_OPTIONS: use_stacks=0:use_registers=0
     steps:
       - name: Install tools
         run: |
