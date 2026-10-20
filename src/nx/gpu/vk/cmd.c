@@ -187,7 +187,10 @@ static void timeline_wait(u64 value) {
 }
 /* the storage results of every submission up to value, which has finished, land in guest memory, in order */
 static void land_through(u64 value) {
-    while (g_landed < value) vk_buf_frame_done(++g_landed);
+    while (g_landed < value) {
+        vk_buf_frame_done(++g_landed);
+        vk_gfx_image_frame_done(g_landed);
+    }
 }
 
 /* the frame's previous use is done, its results landed and what it held freed, before it records again */

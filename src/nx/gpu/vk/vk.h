@@ -369,9 +369,21 @@ void vk_rt_flush(u64 gva);
 void vk_gfx_image_mem_need(u64 gva, u64 size);
 int vk_gfx_image_pending(u64 gva, u64 size);
 void vk_gfx_image_land(void);
+/* at a release: the storage images' write-backs recorded, to land once their submit is done (vk_lock) */
+void vk_gfx_image_put_aside(void);
+/* a recorded write-back waits to land (unsubmitted: in the submit being recorded) */
+int vk_gfx_image_in_flight(int unsubmitted);
+/* the submissions up to sub are done: the write-backs recorded in them land (cmd.c's landing, vk_lock) */
+void vk_gfx_image_frame_done(u64 sub);
 u64 vk_surf_guest_size(const Surf* s);
 int vk_surf_can_writeback(const Surf* s);
 void vk_surf_flush(Surf* s, const u8* original); /* original preserves newer guest writes for storage images */
+/* vk_surf_flush in two halves, the GPU not waited for: the bytes a write-back of s copies (0 for none), its copy
+   recorded into buf at at (host-readable once the submit being recorded is done), and its landing from those bytes p,
+   as of the write generation the copy was recorded at */
+u64 vk_surf_flush_size(const Surf* s);
+void vk_surf_flush_record(Surf* s, VkBuffer buf, u64 at);
+void vk_surf_flush_land(Surf* s, const u8* p, const u8* original, u64 wgen);
 void vk_tex_note_writeback(Surf* s);
 void vk_rt_drawn(Surf* s);      /* a render target was drawn to (gpu/vk/render.c) */
 void vk_rt_drawn_full(Surf* s); /* a full clear or blit replaced every pixel */

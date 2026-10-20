@@ -20,6 +20,8 @@ void vk_land_through(u64);
 void vk_wait_submit(u64);
 void vk_compute_wait(u64);
 void vk_gfx_image_land(void);
+void vk_gfx_image_put_aside(void);
+int vk_gfx_image_in_flight(int unsubmitted);
 u64 vk_compute_put_aside(void);
 int vk_buf_pending_any(void);
 int vk_buf_pending(u64, u64);
@@ -131,6 +133,11 @@ void vk_compute_wait(u64 gate) {
     if (gate > waited_compute) waited_compute = gate;
 }
 void vk_gfx_image_land(void) {}
+void vk_gfx_image_put_aside(void) {}
+int vk_gfx_image_in_flight(int unsubmitted) {
+    (void)unsubmitted;
+    return 0;
+}
 u64 vk_compute_put_aside(void) {
     u64 value = next_compute;
     next_compute = 0;

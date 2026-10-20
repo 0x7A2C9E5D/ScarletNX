@@ -956,12 +956,21 @@ typedef struct {
     u32 n;
 } DescWrites;
 
+/* Fragment programs' storage images, written back to guest memory: each with its bytes from before the draw (original,
+   for the merge with the CPU's writes since) and the pages it covers. A release puts their write-back aside: their
+   copy is recorded into the frame's host-readable ring (sub, the submit it is in, back, wgen the write generation it
+   copies), and they land once that submit is done (vk_gfx_image_frame_done), as storage buffers' results do. Before,
+   each release copied and waited for the GPU: half of one game's frame time in vk_finish. Whatever needs their memory
+   sooner lands them at once, waiting for that submit when its copy is recorded */
 typedef struct {
     Surf* surf;
     u8* original;
     u32 size;
     u64* pages;
     size_t npages;
+    u64 sub, back_off, back_size, wgen;
+    u8* back;
+    VmaAllocation back_mem;
 } GfxImageOut;
 static GfxImageOut* g_img_out;
 static size_t g_img_count, g_img_cap;
@@ -972,9 +981,10 @@ static int image_page_cmp(const void* a, const void* b) {
     u64 x = *(const u64*)a, y = *(const u64*)b;
     return (x > y) - (x < y);
 }
+/* surf has a write-back waiting whose copy isn't recorded yet: a later draw's writes are in it */
 static int image_pending(Surf* surf) {
     for (size_t i = 0; i < g_img_count; i++)
-        if (g_img_out[i].surf == surf) return 1;
+        if (g_img_out[i].surf == surf && !g_img_out[i].sub) return 1;
     return 0;
 }
 static void image_record(Surf* surf, u8* original, u32 size) {
@@ -999,7 +1009,8 @@ static void image_record(Surf* surf, u8* original, u32 size) {
         if (cpu) pages[npages++] = cpu >> 12;
     }
     qsort(pages, npages, sizeof *pages, image_page_cmp);
-    g_img_out[g_img_count++] = (GfxImageOut){surf, original, size, pages, npages};
+    g_img_out[g_img_count++] = (GfxImageOut){.surf = surf, .original = original, .size = size, .pages = pages,
+                                             .npages = npages};
     g_gfx_img_any = 1;
 }
 static int image_overlaps(const GfxImageOut* out, u64 gva, u64 size) {
@@ -1014,15 +1025,40 @@ static int image_overlaps(const GfxImageOut* out, u64 gva, u64 size) {
     }
     return 0;
 }
-static void image_flush_at(size_t index) {
-    GfxImageOut out = g_img_out[index];
-    vk_surf_flush(out.surf, out.original);
-    if (out.surf->mem_wgen != out.surf->wgen) fatal("Cannot write back graphics storage image");
-    free(out.original);
-    free(out.pages);
+static void image_remove(size_t index) {
+    free(g_img_out[index].original);
+    free(g_img_out[index].pages);
     memmove(g_img_out + index, g_img_out + index + 1, (g_img_count - index - 1) * sizeof *g_img_out);
     g_img_count--;
     g_gfx_img_any = g_img_count != 0;
+}
+/* an entry whose copy's submit is done, landed from the ring */
+static void image_land(size_t index) {
+    GfxImageOut* o = &g_img_out[index];
+    vmaInvalidateAllocation(g_vk.vma, o->back_mem, o->back_off, o->back_size);
+    vk_surf_flush_land(o->surf, o->back, o->original, o->wgen);
+    image_remove(index);
+}
+/* the entry whose bytes from before the draw are original (each its own allocation): waiting for the GPU can land
+   others and move the entries, so an entry is found again after a wait */
+static size_t image_find(const u8* original) {
+    size_t k = 0;
+    while (k < g_img_count && g_img_out[k].original != original) k++;
+    return k;
+}
+static void image_flush_at(size_t index) {
+    GfxImageOut out = g_img_out[index];
+    if (out.sub) { /* its copy is recorded: once its submit is done, from there */
+        if (out.sub > vk_last_submit()) vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
+        vk_wait_submit(out.sub);
+        index = image_find(out.original);
+        if (index < g_img_count) image_land(index); /* not landed by a frame's landing meanwhile */
+        return;
+    }
+    vk_surf_flush(out.surf, out.original);
+    if (out.surf->mem_wgen != out.surf->wgen) fatal("Cannot write back graphics storage image");
+    index = image_find(out.original);
+    if (index < g_img_count) image_remove(index);
 }
 void vk_gfx_image_mem_need(u64 gva, u64 size) {
     if (!g_gfx_img_any || g_img_landing || !size) return;
@@ -1051,6 +1087,54 @@ void vk_gfx_image_land(void) {
     while (g_img_count) image_flush_at(0);
     g_img_landing = 0;
     vk_unlock();
+}
+void vk_gfx_image_put_aside(void) {
+    if (!g_gfx_img_any || g_img_landing) return;
+    vk_lock();
+    g_img_landing = 1;
+    vk_cmd(); /* a new frame, if one begins, lands what it lands before the entries are walked */
+    for (size_t i = 0; i < g_img_count;) {
+        GfxImageOut* o = &g_img_out[i];
+        u64 size, off;
+        VkBuffer buf;
+        VmaAllocation mem;
+        u8* p;
+        if (o->sub) {
+            i++;
+            continue;
+        }
+        size = vk_surf_flush_size(o->surf);
+        p = size ? vk_stage_back(size, &buf, &off, &mem) : NULL;
+        if (!p) { /* nothing to copy, or no room in the ring: at once */
+            image_flush_at(i);
+            continue;
+        }
+        vk_surf_flush_record(o->surf, buf, off);
+        o->sub = vk_submit_number();
+        o->back = p;
+        o->back_mem = mem;
+        o->back_off = off;
+        o->back_size = size;
+        o->wgen = o->surf->wgen;
+        i++;
+    }
+    g_img_landing = 0;
+    vk_unlock();
+}
+int vk_gfx_image_in_flight(int unsubmitted) {
+    for (size_t i = 0; i < g_img_count; i++)
+        if (g_img_out[i].sub && (!unsubmitted || g_img_out[i].sub > vk_last_submit())) return 1;
+    return 0;
+}
+void vk_gfx_image_frame_done(u64 sub) {
+    int landing = g_img_landing;
+    g_img_landing = 1; /* nothing lands the entries over again while they are walked */
+    for (size_t i = 0; i < g_img_count;)
+        if (g_img_out[i].sub && g_img_out[i].sub <= sub)
+            image_land(i);
+        else
+            i++;
+    g_img_landing = landing;
 }
 
 typedef struct {
@@ -1465,7 +1549,11 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         int seen = 0;
         for (int j = 0; j < images->n; j++)
             if (images->surf[j] == surf) seen = 1;
-        if (!seen) {
+        /* an earlier draw's writes to it wait for their copy (image_pending): that copy, recorded later, takes this
+           draw's writes too, over the same bytes from before them. Reading guest memory for this draw's own would land
+           those writes first, waiting for the GPU (once a frame in Pokemon Legends Z-A). A landing during the setup
+           submits, and the setup starts over */
+        if (!seen && !image_pending(surf)) {
             u8* original = malloc((size_t)size);
             if (!original) return VK_NULL_HANDLE;
             gmem_read(surf->gva, original, size);

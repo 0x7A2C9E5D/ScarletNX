@@ -378,8 +378,9 @@ static void flush_wait(VkCommandBuffer cb) {
     vk_finish();
     vk_readback_ready();
 }
-/* s's pixels, read back to p, into guest memory in its layout (or over original, a storage image's merge) */
-static void flush_land(Surf* s, const u8* p, const u8* original) {
+/* s's pixels, read back to p as of its write generation wgen, into guest memory in its layout (or over original, a
+   storage image's merge) */
+static void flush_land(Surf* s, const u8* p, const u8* original, u64 wgen) {
     u64 gva = s->gva, row = (u64)s->w * s->f.bpp, slice = row * s->h;
     u64 sz = rt_bytes(s);
     u8* dst = original ? NULL : gmem_ptr(gva, sz);
@@ -420,7 +421,7 @@ static void flush_land(Surf* s, const u8* p, const u8* original) {
         }
         guest_changed = memcmp(current, original, sz) != 0;
         free(current_copy);
-        s->mem_wgen = s->wgen; /* avoid flushing this target again when writeback checks overlapping targets */
+        s->mem_wgen = wgen; /* avoid flushing this target again when writeback checks overlapping targets */
         vk_write_changed(gva, dst, original, (u32)sz);
         free(tmp);
     } else if (tmp) {
@@ -428,7 +429,7 @@ static void flush_land(Surf* s, const u8* p, const u8* original) {
         free(tmp);
     } else
         gpu_mem_written(gva, sz); /* caches built from this memory check it again */
-    s->mem_wgen = s->wgen;
+    s->mem_wgen = wgen;
     s->gw = gpu_mem_generation();
     if (!s->is_rt) vk_tex_note_writeback(s);
     if (guest_changed) {
@@ -448,7 +449,27 @@ static void surf_flush(Surf* s, const u8* original) {
     VkCommandBuffer cb = vk_cmd();
     flush_record(cb, s, buf, 0);
     flush_wait(cb);
-    flush_land(s, p, original);
+    flush_land(s, p, original, s->wgen);
+}
+u64 vk_surf_flush_size(const Surf* s) { return flush_bytes(s); }
+void vk_surf_flush_record(Surf* s, VkBuffer buf, u64 at) {
+    VkCommandBuffer cb;
+    vk_render_end();
+    cb = vk_cmd();
+    flush_record(cb, s, buf, at);
+    /* the copy's writes made visible to the host reads that land it, once its submit is done */
+    VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                           .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+                           .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                           .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+                           .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT};
+    VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &mb};
+    rec_CmdPipelineBarrier2(cb, &di);
+}
+void vk_surf_flush_land(Surf* s, const u8* p, const u8* original, u64 wgen) {
+    vk_result_begin();
+    flush_land(s, p, original, wgen);
+    vk_result_end();
 }
 void vk_surf_flush(Surf* s, const u8* original) {
     vk_result_begin();
