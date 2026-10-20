@@ -4738,6 +4738,8 @@ int main(int argc, char** argv) {
         app.home_dir = data;
         app.data_dir = full;
         app.menu_old = old;
+        free(app.users_dir); /* the users test's: open_files names the new data folder's */
+        app.users_dir = NULL;
         open_files(&app);
         config = menu_folder(&app, SNX_USER_CONFIG, false);
         state = menu_folder(&app, SNX_USER_STATE, false);
