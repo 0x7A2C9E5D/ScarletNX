@@ -2524,6 +2524,8 @@ static bool preview_texture(App* app) {
     app->menu.running = run;
     app->editing = false; /* the menu's own tabs */
     app->finished = app->aborting = app->abnormal_exit = app->confirm.shown = false;
+    /* the box of users is the editor's: its pictures, made or replaced on this copy, would go with it */
+    app->users_shown = false;
     app->native = 0;
     app->entering_ms = app->leaving_ms = 0;
     app->fade_ms = run ? app->preview_since : 0; /* a run fades in from black, as after the menu */
