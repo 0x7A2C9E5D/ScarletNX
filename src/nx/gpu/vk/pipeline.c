@@ -581,6 +581,14 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
     return s;
 }
 
+/* whether the constant buffer words s's translation read (BRX jump tables) still hold in ch's bound buffers, as
+   vk_shader_get checks them on each hit */
+int vk_shader_cb_hold(const GpuChannel* ch, const VkSh* s) {
+    g_sh_ch = ch;
+    g_sh_bind = s->stage <= ST_FS ? s->stage : 0;
+    return vk_cb_reads_hold(&s->cbr, sh_cb_read);
+}
+
 VkShaderModule vk_module_spv(const u32* spv, size_t nw) {
     VkShaderModuleCreateInfo mi = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = nw * 4, .pCode = spv};
@@ -1081,6 +1089,14 @@ VkPipeline vk_pipeline_resolve(VkPipeline h) {
     VkPipeline got = pipe_wait(p, -1);
     __atomic_add_fetch(&g_pipe_wait_ns, plat_ns() - t0, __ATOMIC_RELAXED);
     return got;
+}
+/* the pipeline a handle from vk_pipeline_get_deferred names once it is ready, else the handle: without waiting */
+VkPipeline vk_pipeline_ready(VkPipeline h) {
+    u64 v = (u64)(uintptr_t)h;
+    if ((v & ~(u64)0xFFFFFFFFull) != PIPE_STANDIN) return h;
+    u32 i = (u32)v - 1;
+    Pipe* p = g_pstand[i / PSTAND_PAGE][i % PSTAND_PAGE];
+    return __atomic_load_n(&p->ready, __ATOMIC_ACQUIRE) ? p->p : h;
 }
 void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* shaders, u64* shader_ms) {
     *pipes = g_pipes_new;

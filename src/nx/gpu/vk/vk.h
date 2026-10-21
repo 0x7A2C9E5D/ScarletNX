@@ -830,6 +830,9 @@ void vk_pipeline_init(void);
    rasterization's outputs (ShaderInfo.xfb), NULL for none */
 VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int_mask, u64 sint_mask, u32 rt_int,
                     u32 rt_sint, u32 clip, u64 dc_color, u32 dc_funcs, u32 unfed, const ShXfb* xfb);
+/* whether the constant buffer words s's translation read still hold in ch's bound buffers (vk_shader_get's check on
+   a hit, for a caller that kept s) */
+int vk_shader_cb_hold(const GpuChannel* ch, const VkSh* s);
 typedef struct {
     VkShaderModule vs, fs;
     VkShaderModule tcs, tes, gs; /* tessellation control and evaluation, geometry: VK_NULL_HANDLE when off */
@@ -867,6 +870,8 @@ int vk_pipeline_worker_count(int setting, int cpus);
    pipeline a stand-in names, or h itself) */
 VkPipeline vk_pipeline_get_deferred(const PipeKey* k);
 VkPipeline vk_pipeline_resolve(VkPipeline h);
+/* the pipeline h names when it is ready, else h itself, without waiting: a stand-in and its pipeline are one */
+VkPipeline vk_pipeline_ready(VkPipeline h);
 /* so far: pipelines made, how many of them the pipeline cache had, ms the workers took making them, ms the GPU thread
    waited for new ones, shaders translated, ms translating them */
 void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* shaders, u64* shader_ms);
@@ -954,6 +959,8 @@ u32 vk_gbuf_desc(int stage, u32 off, const u32* v, u64* addr);
    accesses a barrier names see the writes before it */
 #define VK_STORAGE_IMAGE_ACCESS (VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT)
 extern u64 g_vk_drawn, g_vk_skipped; /* draws recorded, and draws skipped (unsupported topology, failed shader) */
+/* draws that kept the last draw's shaders and pipeline key, and those of them SNX_DIRTY_CHECK made again to compare */
+extern u64 g_vk_draw_kept, g_vk_draw_checked;
 /* draws that sampled a color target they render to in place, the barriers ordering them within a pass, the passes
    begun again for them (a target's layout, or ordering without those barriers), and draws that sampled a target
    through a copy instead (gpu/vk/render.c) */
