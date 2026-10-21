@@ -334,7 +334,7 @@ static int create_device(void) {
     const char** ext = g_vk.dev_ext;
     int has_budget = 0;
     u32 next = 0;
-    int has_shader_clock = 0, has_feedback_dynamic = 0, has_cond = 0, video_exts = 0;
+    int has_shader_clock = 0, has_feedback_dynamic = 0, has_cond = 0, has_provoking = 0, video_exts = 0;
     if (!g_opt_headless) ext[next++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
     {
         u32 n = 0;
@@ -353,6 +353,7 @@ static int create_device(void) {
             if (!strcmp(e[i].extensionName, VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME))
                 g_vk.has_local_read = 1;
             if (!strcmp(e[i].extensionName, VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME)) has_cond = 1;
+            if (!strcmp(e[i].extensionName, VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME)) has_provoking = 1;
             /* the driver's budget for each heap, the other processes' use taken out, for VMA: without it VMA took
                80% of a heap's size as its budget, blind to what the desktop and other programs hold */
             if (!strcmp(e[i].extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) has_budget = 1;
@@ -424,9 +425,16 @@ static int create_device(void) {
         *tail = &qcond;
         tail = &qcond.pNext;
     }
+    VkPhysicalDeviceProvokingVertexFeaturesEXT qprov = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT};
+    if (has_provoking) {
+        *tail = &qprov;
+        tail = &qprov.pNext;
+    }
     if (has_shader_clock) *tail = &qclock;
     vkGetPhysicalDeviceFeatures2(g_vk.phys, &f2);
     g_vk.has_cond_render = has_cond && qcond.conditionalRendering;
+    g_vk.has_provoking_last = has_provoking && qprov.provokingVertexLast;
     /* the dynamic state and the barriers within a pass only serve feedback loops */
     g_vk.has_feedback = g_vk.has_feedback && qloop.attachmentFeedbackLoopLayout;
     g_vk.has_feedback_dynamic =
@@ -539,6 +547,14 @@ static int create_device(void) {
     if (g_vk.has_cond_render) {
         chain = &fcond;
         ext[next++] = VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME;
+    }
+    VkPhysicalDeviceProvokingVertexFeaturesEXT fprov = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT,
+        .pNext = chain,
+        .provokingVertexLast = VK_TRUE};
+    if (g_vk.has_provoking_last) {
+        chain = &fprov;
+        ext[next++] = VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME;
     }
     u32 nq = g_vk.compute_family == g_vk.gfx_family ? 1 : 2;
     if (g_vk.video_family != ~0u)

@@ -361,6 +361,7 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
                     (u32)(dc_color >> 32),
                     dc_funcs,
                     unfed};
+    if (stage == ST_FS && ch) mask[11] = ch->r3d[0x084] & 1; /* MANDATED_EARLY_Z */
     if (stage == ST_GS && ch) memcpy(mask + 12, ch->r3d + 0x490, 8 * sizeof(u32));
     /* a capture's layout, in the words only the fragment stage's key uses otherwise */
     if (stage != ST_FS && xfb) {
@@ -461,6 +462,7 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
             s->si.tex_dc_color_mask = dc_color;
             s->si.tex_dc_color_funcs = dc_funcs;
             s->si.in_unfed_mask = unfed;
+            s->si.early_fragment_tests = mask[11];
         } else {
             s->si.attr_int_mask = int_mask;
             s->si.attr_sint_mask = sint_mask;
@@ -650,7 +652,11 @@ static VkPipeline pipe_create(const Pipe* e) {
     VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
                                                  .topology = (VkPrimitiveTopology)k->topo_class};
     VkPipelineViewportStateCreateInfo vp = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+    VkPipelineRasterizationProvokingVertexStateCreateInfoEXT provoking = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT,
+        .provokingVertexMode = VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT};
     VkPipelineRasterizationStateCreateInfo rs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+                                                 .pNext = k->provoking_last ? &provoking : NULL,
                                                  .depthClampEnable = k->depth_clamp,
                                                  .polygonMode = (VkPolygonMode)k->polygon,
                                                  .lineWidth = 1.0f};
@@ -692,7 +698,11 @@ static VkPipeline pipe_create(const Pipe* e) {
         LOG_LIMIT(
             1, "vulkan: blending that needs dual-source or independent blend, which this GPU lacks, is simplified\n");
     }
+    /* a logic operation takes the place of blending on integer and normalized targets; float and sRGB ones pass
+       their color through, as the 3D engine's LOGIC_OP does */
     VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+                                              .logicOpEnable = k->logic_op != 0,
+                                              .logicOp = k->logic_op ? (VkLogicOp)(k->logic_op - 1) : VK_LOGIC_OP_COPY,
                                               .attachmentCount = k->ncolor,
                                               .pAttachments = cba};
     VkDynamicState dyn[21 + 2] = {VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
@@ -1171,6 +1181,7 @@ static void pf_key(char* out, size_t n) {
                   (u32)g_vk_preserve_infnan,
                   (u32)g_vk_preserve_infnan64,
                   (u32)g_vk_subgroup_stages,
+                  (u32)g_vk.has_provoking_last,
                   g_vk_stage_sets,
                   g_vk_buffer_image_slots,
                   d->limits.maxPerStageDescriptorStorageImages,

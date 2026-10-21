@@ -57,13 +57,16 @@ static void read_targets(GpuChannel* ch, Surf** rt, Surf** zt, u32* n) {
         if (a && t[2] && t[3] && t[4]) {
             /* a pitch-linear target (bit 12 of the memory layout) holds its row pitch in bytes where the width is */
             u32 bpp = vk_rt_format(t[4]).bpp, linear = (t[5] >> 12) & 1, w = linear ? t[2] / bpp : t[2];
-            /* COLOR_TARGET_THIRD_DIMENSION names the number of renderable array slices. Vertex shaders may
-               select one with their layer output (the color LUT passes render all slices in one draw). */
-            u32 layers = t[6] & 0xffff;
+            /* COLOR_TARGET_THIRD_DIMENSION (bits 0-27) names the number of renderable array slices, or a volume's
+               depth when the memory word's THIRD_DIMENSION_CONTROL (bit 16, NVIDIA's clb197.h) says so: its slices
+               are then GOB slices of a 3D surface, and the array pitch says nothing. One game's 64x64x64 light
+               volume taken as 64 layers its 1 MiB array pitch apart covered 63 MiB of other memory. Vertex shaders
+               may select one with their layer output (the color LUT passes render all slices in one draw). */
+            u32 layers = t[6] & 0x0fffffff;
             if (!layers || layers > g_vk.props.limits.maxImageArrayLayers) layers = 1;
             if (w)
                 rt[i] = vk_rt_array(a, w, t[3], t[4], t[5], linear ? t[2] : w * bpp, layers, (u64)t[7] * 4,
-                                    (t[6] >> 16) & 1);
+                                    (t[5] >> 16) & 1);
             if (rt[i]) *n = i + 1;
         }
     }
@@ -735,6 +738,25 @@ static void tex_resolve(GpuChannel* ch, u32 handle, TexRes* x) {
     u64 gw = gpu_mem_generation();
     x->handle = handle;
     x->have = 1;
+    /* an index past its pool's limit (0x55F the headers', 0x559 the samplers') names no header: no texture, or the
+       default sampler, as Eden's VisitImageView and the sampler table have it. One game's movie overlay hands
+       texture indices 0x2000 past a 2048-entry pool, where shader code lies */
+    if ((handle & 0xFFFFF) > r[0x55F] || ((handle >> 20) & 0xFFF) > r[0x559]) {
+        if ((handle & 0xFFFFF) > r[0x55F]) {
+            memset(x->tic, 0, sizeof x->tic);
+            x->t = NULL;
+        } else {
+            gmem_read(tic_at, x->tic, 32);
+            x->t = vk_tex_from_tic(x->tic);
+        }
+        if (((handle >> 20) & 0xFFF) > r[0x559])
+            memset(x->tsc, 0, sizeof x->tsc);
+        else
+            gmem_read(tsc_at, x->tsc, 32);
+        LOG_LIMIT(1, "vulkan: a texture handle %08x names headers past the pools' limits (%x, %x): no texture there\n",
+                  handle, r[0x55F], r[0x559]);
+        return;
+    }
     if (m->t && m->ch == ch && m->handle == handle && m->tic_base == tic_base && m->tsc_base == tsc_base &&
         m->surf_epoch == g_vk_surf_epoch && m->ww_epoch == vk_ww_epoch() && !g_gfx_img_any &&
         m->adds == __atomic_load_n(&g_pend_any.adds, __ATOMIC_RELAXED) &&
@@ -1504,7 +1526,11 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         Surf* t = x->t;
         if (st->flags & 2) return VK_NULL_HANDLE;
         if (st->flags & 1) t = vk_tex_from_tic_raw(x->tic);
-        if ((st->flags & 1) && !t) return VK_NULL_HANDLE;
+        /* a raw load's header without 4-byte texels, or no header at all, reads zeros through the null view, as a
+           missing texture does: the draw still runs (it was dropped, from one game's movie and gameplay passes) */
+        if ((st->flags & 1) && !t)
+            LOG_LIMIT(1, "vulkan: a raw surface load's header %08x %08x %08x has no 32-bit view: it reads zeros\n",
+                      x->tic[0], x->tic[2], x->tic[4]);
         VkImageViewType want = vk_tex_view_type(st);
         int num = st->flags & 1                                    ? 1
                   : st->shadow || !((s->si.tex_int_mask >> i) & 1) ? 0
@@ -1862,6 +1888,17 @@ retry:
     k.vs = vs->mod;
     k.fs = fs ? fs->mod : VK_NULL_HANDLE;
     k.depth_clamp = g_vk.feat.depthClamp && vk_render_depth_clamp(r);
+    /* PROVOKING_VERTEX (0x5A1): 1 the last vertex, GL's and NVN's default, 0 the first, Vulkan's */
+    k.provoking_last = (r[0x5A1] & 1) && g_vk.has_provoking_last;
+    if ((r[0x5A1] & 1) && !g_vk.has_provoking_last)
+        LOG_LIMIT(1, "vulkan: flat inputs take the first vertex of a primitive, not the last the game asks for\n");
+    /* LOGIC_OP (0x671 on, 0x672 the operation as GL numbers it from CLEAR 0x1500 to SET 0x150F, VkLogicOp's order) */
+    if (r[0x671] & 1) {
+        if (g_vk.feat.logicOp)
+            k.logic_op = (r[0x672] & 15) + 1;
+        else
+            LOG_LIMIT(1, "vulkan: this GPU has no logic operations: targets are blended instead\n");
+    }
     VkPrimitiveTopology topo;
     switch (topology) {
         case 0: topo = VK_PRIMITIVE_TOPOLOGY_POINT_LIST; break;

@@ -36,4 +36,9 @@ The orchestrator applies your fixes without re-deriving them. A confident causal
 
 ## Known past-bug shapes to check for
 - Only VertexB was translated, so every vertex sat at the origin and the screen stayed black while every draw "succeeded".
+- A color target's volume bit was read from COLOR_TARGET_THIRD_DIMENSION (0x206 + 16i) instead of the memory word's
+  THIRD_DIMENSION_CONTROL (0x205 + 16i, bit 16): a 64x64x64 volume became 64 layers its 1 MiB array pitch apart, and
+  its 63 MiB extent flushed and overwrote other memory. Check a register field against NVIDIA's class header.
+- The record thread's descriptor sets were taken from a frame slot's pools before that frame's first vk_cmd() reset
+  them, so the frame's first draws bound freed sets (RenderDoc crashed, the driver silently reused them).
 - host1x syncpoints at 150 and above wrote past NvRmStream's 128-entry table into the game heap on every video frame.

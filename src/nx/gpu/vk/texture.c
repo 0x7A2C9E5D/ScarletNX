@@ -704,7 +704,10 @@ static Surf* tex_from_tic(const u32* tic, int raw) {
         d *= 6;
     VkFmt f = vk_tic_format(tic[0], srgb);
     if (raw) {
-        if (f.vk != VK_FORMAT_R8G8B8A8_UNORM && f.vk != VK_FORMAT_R8G8B8A8_SRGB) return NULL;
+        /* SULD.D.32 takes texel coordinates and reads a texel's 32 bits, whatever the header's components are (one
+           game's post-processing reads its A2B10G10R10 targets and R32 masks this way): any color format of 4-byte
+           texels stored as they are, viewed as R32_UINT */
+        if (f.bpp != 4 || f.bw != 1 || f.conv || f.depth) return NULL;
         f.vk = VK_FORMAT_R32_UINT;
         f.is_int = 1;
         f.sint = 0;
@@ -1167,8 +1170,13 @@ static void tex_take_drawn(Surf* t) {
             if (t->f.depth) continue;
             /* A layered color target can be sampled as a 3D texture at the same address. Its slices only exist in
                the host image: guest memory is not updated by draws. Each array layer goes to the matching Z slice */
+            /* Its layers are the texture's slices when they are GOB slices (a volume) or lie inside the texture. A
+               target over the texture's first slice with layers a whole texture apart (one game's colour grading
+               table, slice 0 drawn through it and the others through targets of their own) holds the first slice
+               alone: it is taken as that slice below */
             if (s->layers > 1 && off == 0 && s->w == t->w && s->h == t->h && s->layers >= t->depth3d &&
-                s->f.vk == t->f.vk && vk_rt_drawn_fresh(s)) {
+                (s->volume || s->layer_size * (t->depth3d - 1) < t->size) && s->f.vk == t->f.vk &&
+                vk_rt_drawn_fresh(s)) {
                 /* a blit can't take array layers into a 3D image's slices, only a copy can: scaled, the layers
                    are blitted down to an array at the guest's size first, and copied into the slices from there */
                 VmaAllocation mm = VK_NULL_HANDLE;
@@ -1210,22 +1218,24 @@ static void tex_take_drawn(Surf* t) {
                 u32 lw = t->w >> l ? t->w >> l : 1, lh = t->h >> l ? t->h >> l : 1;
                 u32 ld = t->depth3d >> l ? t->depth3d >> l : 1, lbh, lbd;
                 u64 size = bl_level_size(t->w, t->h, t->depth3d, &t->f, t->bh, t->bd, l, &lbh, &lbd);
-                u32 padded = (ld + (1u << lbd) - 1) & ~((1u << lbd) - 1);
-                u64 slice = size / padded;
                 u32 rowb = lw * t->f.bpp, gobs_x = (rowb + 63) / 64;
-                u32 gobs_y = ((lh + 7) / 8 + (1u << lbh) - 1) >> lbh;
-                /* With block depth, Z slices are interleaved across multiple GOB planes rather than contiguous. */
-                if (lbd && (gobs_x != 1 || gobs_y != 1)) {
-                    lo += size;
-                    continue;
-                }
+                u32 blocks_y = ((lh + 7) / 8 + (1u << lbh) - 1) >> lbh;
+                /* A block is one GOB wide, 2^lbh high and 2^lbd deep, its GOBs Y first and then Z, and the blocks of
+                   a level go X, then Y, then Z. So slice z's first GOB is at block z >> lbd's depth plane, z & (2^lbd
+                   - 1) GOB columns of 2^lbh into the first block: slices 512 << lbh bytes apart inside a depth plane,
+                   a plane (slab) apart across them. Without block depth that is a slice after another */
+                u64 slab = (u64)gobs_x * blocks_y * (512ull << (lbh + lbd)), step = 512ull << lbh;
                 u32 sbh;
                 u64 source_size = bl_level_size(s->w, s->h, 1, &s->f, s->bh, 0, 0, &sbh, NULL);
-                if (off >= lo && off - lo < slice * ld && (off - lo) % slice == 0 && s->w >= lw && s->h == lh &&
-                    sbh == lbh && source_size == slice && vk_rt_drawn_fresh(s)) {
-                    copy_layers(copy_begin(s, t), s, t, l, (u32)((off - lo) / slice), 1, lw, lh, 1);
-                    mark_copied(s, t);
-                    break;
+                if (off >= lo && off - lo < size && (off - lo) % slab % step == 0 &&
+                    (off - lo) % slab / step < (1u << lbd) && s->w >= lw && s->h == lh &&
+                    sbh == lbh && (lbd || source_size == slab) && vk_rt_drawn_fresh(s)) {
+                    u64 z = ((off - lo) / slab << lbd) + (off - lo) % slab / step;
+                    if (z < ld) {
+                        copy_layers(copy_begin(s, t), s, t, l, (u32)z, 1, lw, lh, 1);
+                        mark_copied(s, t);
+                        break;
+                    }
                 }
                 lo += size;
             }

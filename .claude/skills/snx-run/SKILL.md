@@ -75,6 +75,12 @@ The game's log, `games/<id>/<id>.log` in a checkout (a data folder keeps it in i
   crash a little after a capture (one test game's arena deleter lists were overwritten): that crash is the capture's.
   Replay from scripts with RenderDoc's Python module (not in the Arch package): build it from the same tag with
   `-DENABLE_QRENDERDOC=OFF -DENABLE_PYRENDERDOC=ON` outside the repo and put its `lib/` on `sys.path`.
+  With 1.46 on Arch, `-DENABLE_GL=OFF -DENABLE_GLES=OFF -DENABLE_EGL=OFF -DENABLE_WAYLAND=OFF` configures and the
+  module builds in about 10 minutes (it fetches its own SWIG). Run scripts with `PYTHONPATH` and `LD_LIBRARY_PATH` both
+  set to that `lib/`. `ReplayController` lists actions (`GetRootActions`), saves targets (`SaveTexture`), reads buffers
+  (`GetBufferData`), and has `PixelHistory`, `DebugPixel` with `ContinueDebug`, and `GetPostVSData`: a pixel trace
+  of a pass's samples finds which input is wrong faster than reading its SPIR-V. Under the layer a game runs about 3x
+  slower, so a scene comes later on both the `s` clock and in presents: capture a few points across a long run.
 
 Crash reports are handled with the `snx-crash` skill.
 

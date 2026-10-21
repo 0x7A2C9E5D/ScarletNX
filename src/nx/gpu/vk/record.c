@@ -970,6 +970,9 @@ static void new_set_run(const void* p) {
 VkDescriptorSet vk_rec_new_set(VkDescriptorSetLayout layout, u32 n, const VkWriteDescriptorSet* w) {
     u64 size = REC_AL(sizeof(NewSetArgs)) + REC_AL(n * sizeof *w);
     int chained = 0;
+    /* a slot's pools are reset when its frame starts, in the first vk_cmd (frame_recycle): before the frame's first
+       set is made from them, not after it, which freed the set its draw then bound */
+    vk_cmd();
     u32 slot = vk_frame_slot();
     for (u32 i = 0; i < n; i++) {
         size += REC_AL(write_info_size(&w[i]));
