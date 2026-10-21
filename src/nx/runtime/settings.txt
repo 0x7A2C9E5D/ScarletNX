@@ -192,7 +192,7 @@ setting JIT threads
 setting JIT optimization
     key jit_opt
     text 2
-    default 2
+    default 0
     startup
     words 0=O0|1=O1|2=O2|3=O3|s=Os|z=Oz
     help LLVM's optimization of the code the runtime JIT compiles when the game reaches code the recompiler missed:

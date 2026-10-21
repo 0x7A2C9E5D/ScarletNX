@@ -1480,7 +1480,7 @@ SnxJitService* snx_jit_service_new(const SnxJitConfig* config, char* error, size
     s->config = *config;
     if (!s->config.budget) s->config.budget = SNX_JIT_BUDGET;
     if (!s->config.batch) s->config.batch = SNX_JIT_BATCH;
-    if (!s->config.opt) s->config.opt = '2';
+    if (!s->config.opt) s->config.opt = '0';
     if (!s->config.threads) s->config.threads = default_threads();
     if (s->config.threads > SNX_JIT_THREADS) s->config.threads = SNX_JIT_THREADS;
     bits = s->config.code_hi > s->config.code_lo ? (size_t)((s->config.code_hi - s->config.code_lo) >> 2) : 0;

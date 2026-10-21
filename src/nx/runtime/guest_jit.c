@@ -71,7 +71,7 @@ void jit_init(void) {
     }
     memset(&config, 0, sizeof(config));
     opt = g_settings.jit_optimization[0];
-    if (!opt || !strchr("0123sz", opt)) opt = '2'; /* an empty or hand-edited .ini */
+    if (!opt || !strchr("0123sz", opt)) opt = '0'; /* an empty or hand-edited .ini */
     config.opt = opt;
     config.images = g_jit_images;
     config.image_count = g_mod->nmods;
