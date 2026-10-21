@@ -303,8 +303,7 @@ static int emit_module(SnxIr* ir, const SnxCodegen* codegen, const SnxCodegenOpt
         char name[40];
         LLVMValueRef target = snx_ir_guest_function(ir, codegen->functions[entries[i].function].start);
         LLVMValueRef wrapper, call, args[2];
-        sprintf(name, "snx_aot_%lx%08lx", (unsigned long)(entries[i].address >> 32),
-                (unsigned long)(entries[i].address & 0xFFFFFFFFu));
+        sprintf(name, "snx_aot_%llx", (unsigned long long)entries[i].address);
         wrapper = LLVMAddFunction(ir->mod, name, ir->t_guest);
         LLVMPositionBuilderAtEnd(ir->b, LLVMAppendBasicBlockInContext(ir->ctx, wrapper, "entry"));
         args[0] = LLVMGetParam(wrapper, 0);
