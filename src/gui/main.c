@@ -2458,8 +2458,8 @@ static const char* screen_title(const App* app, char* out, size_t size) {
 }
 /* the status box: the usage, the disk and the working folder, wrapped to width columns; with draw, drawn in r */
 static int status_rows(App* app, int width, GuiRect r, int y, int draw) {
-    char usage[256], disk[96], cwd[1100];
-    const char* lines[3];
+    char usage[256], disk[96], cwd[1100], *apart;
+    const char* lines[4];
     int i, rows = 0;
     SDL_Color soft = rgb(app->theme.soft), ink = rgb(app->theme.ink);
     gui_usage_text(usage, sizeof usage, app->usage.available, app->usage.memory_bytes, app->usage.cpu_percent,
@@ -2467,14 +2467,21 @@ static int status_rows(App* app, int width, GuiRect r, int y, int draw) {
     disk_text(app, disk, sizeof disk);
     snprintf(cwd, sizeof cwd, "%s %s", snx_tr("CWD:"), app->cwd ? app->cwd : snx_tr("(unavailable)"));
     lines[0] = usage;
-    lines[1] = disk;
-    lines[2] = cwd;
-    for (i = 0; i < 3; ++i) {
+    lines[1] = "";
+    lines[2] = disk;
+    lines[3] = cwd;
+    /* the usage too wide for a row: the memory and the CPU a row each, at the two spaces between them, so a row breaks
+       between two values and never inside one ("(0.5 cores)") */
+    if (gui_text_cols(usage) > width && (apart = strstr(usage, "  ")) != NULL) {
+        *apart = 0;
+        lines[1] = apart + 2;
+    }
+    for (i = 0; i < 4; ++i) {
         if (!lines[i][0]) continue;
         if (draw)
-            rows += wrap_in(app, r, r.x, y + rows * cell_h(app), lines[i], i == 2, i == 2 ? ink : soft);
+            rows += wrap_in(app, r, r.x, y + rows * cell_h(app), lines[i], i == 3, i == 3 ? ink : soft);
         else
-            rows += wrap_rows(app, lines[i], width, i == 2);
+            rows += wrap_rows(app, lines[i], width, i == 3);
     }
     return rows;
 }

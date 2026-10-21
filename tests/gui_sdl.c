@@ -4295,6 +4295,23 @@ int main(int argc, char** argv) {
         text_px_is(&app, r.x + cw, r.y + 2 * s, "Setup device keys", normal, black);
         text_px_is(&app, r.x + cw, r.y + head_h(&app) + 2 * s, "In use: ", rgb(app.theme.soft), black);
         text_px_is(&app, m.place.status.x + cw, m.place.status.y + 2 * s, "Status", normal, black);
+        { /* a status too narrow for the usage: the memory and the CPU a row each, the CPU's from its row's start */
+            char usage[256];
+            int first, cx, cy;
+            GuiRect box;
+            app.usage.available = true;
+            app.usage.memory_bytes = 90u << 20;
+            app.usage.cpu_percent = 50;
+            gui_usage_text(usage, sizeof usage, true, app.usage.memory_bytes, 50, SDL_GetNumLogicalCPUCores());
+            first = (int)(strstr(usage, "  ") - usage);
+            box = gui_rect(cw, cw, (first + 6) * cw, 10 * 16 * s); /* room for "  CPU" on the first row, not more */
+            SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
+            SDL_RenderClear(app.renderer);
+            assert(status_rows(&app, first + 6, box, box.y, 1) == status_rows(&app, first + 6, box, box.y, 0));
+            assert(find_text(&app, "CPU ", rgb(app.theme.soft), 1, &cx, &cy) && cx == box.x && cy > box.y);
+            assert(find_text(&app, "GUI + children: RAM 90 MB", rgb(app.theme.soft), 1, &cx, &cy) && cx == box.x);
+            render(&app);
+        }
         /* the tips on a row of their own under the head, what the focus is about or the screen's message, a failure's
            in its colour; the keys alone at the foot, the whole width */
         r = m.place.tips;
