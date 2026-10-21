@@ -203,7 +203,9 @@ def check_state(path, text, report):
             while re.search(r"\{[^{}]*\}", decl):
                 decl = re.sub(r"\{[^{}]*\}", "", decl)
             head = decl.split("=")[0]
-            if decl and "(" not in head and not re.match(r"(?:extern|typedef)\b", decl) and \
+            # a thread's own variables (rule 6 exempts them) can't be members of one global
+            thread_local = re.match(r"(?:static\s+)?(?:_Thread_local|thread_local|__thread)\b", decl)
+            if decl and not thread_local and "(" not in head and not re.match(r"(?:extern|typedef)\b", decl) and \
                     not re.fullmatch(r"(?:struct|union|enum)\b\s*\w*\s*", head.strip()) and not const_object(head):
                 for part in head.split(","):
                     names = re.findall(r"(\w+)\s*(?:\[[^\]]*\]\s*)*$", part.strip())
