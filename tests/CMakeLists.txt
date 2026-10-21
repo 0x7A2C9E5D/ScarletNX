@@ -59,7 +59,7 @@ if(SNX_TEST_SANITIZERS)
         scarletnx-gui snx_gui_support snx_i18n snx_gui_languages snx_gui_languages_test snx_splash snx-test-splash
         snx_window_icon snx-test-window-icon snx_pad_sdl
         # the code generators, which tests run on files they refuse
-        snx-swipc snx-svcgen snx-shaderdec snx-settingsgen)
+        snx-swipc snx-svcgen snx-shaderdec snx-settingsgen snx-uigen)
 endif()
 # one Python for the scripted tests: without it they are left out
 find_package(Python3 QUIET COMPONENTS Interpreter)
