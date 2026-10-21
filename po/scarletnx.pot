@@ -1914,6 +1914,26 @@ msgid "Ready"
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "%s: into which folder of the recompiled library?"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "  %s free"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "  picked, %s free"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "  default, %s free"
+msgstr ""
+
+#: src/gui/main.c
 msgid "That path is not a readable file. Try again or press ESC."
 msgstr ""
 

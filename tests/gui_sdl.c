@@ -856,6 +856,14 @@ int main(int argc, char** argv) {
         fputs("CIA execution is not implemented (stage 2)\n", stderr);
         return 3;
     }
+    if (argc > 1 && strstr(argv[1], "elsewhere dump")) { /* its game in the recompiled library's folder picked */
+        int i = 2;
+        while (i < argc && strcmp(argv[i], "--outdir")) ++i;
+        assert(i == argc || (i + 1 < argc && strstr(argv[i + 1], "recompiled extra")));
+        puts(i == argc ? "Recompiling elsewhere dump at home"
+                       : "Recompiling elsewhere dump\nScarletNX - elsewhere dump");
+        return 0;
+    }
     if (argc > 1 && strstr(argv[1], "picked folders")) { /* Settings > App > Folders' games and extractions */
         int i = 2;
         bool nro = strstr(argv[1], ".nro") != NULL, extract = false; /* an NRO runs without an extraction */
@@ -3076,6 +3084,41 @@ int main(int argc, char** argv) {
         free(games);
     }
 
+    /* a dump with more than one folder of the recompiled library that can take its game: asked which, its Main first
+       with what it is and the room each has; the one taken is the run's --outdir; Back runs nothing; with one, no box */
+    {
+        char *extra = snx_path_join(temporary, "recompiled extra"),
+             *dump = snx_path_join(temporary, "elsewhere dump.nsp");
+        char question[512];
+        bool still = app.animations_off;
+        app.animations_off = true; /* the run's foot read at once, no box's shade fading over it */
+        assert(!snx_mkdirs(extra) && !snx_write_file(dump, "fixture", 7));
+        folder_keep(&app, extra, GUI_LIBRARY_RECOMPILED, false);
+        folder_keep(&app, "/nonexistent/snx-recompiled", GUI_LIBRARY_RECOMPILED, false); /* not there: not offered */
+        app.menu.selected = GUI_SWITCH;
+        launcher(&app, true);
+        launch(&app, snx_strdup(dump), false);
+        assert(app.dests_shown && app.dests.count == 2 && !app.menu.running && app.dest_file);
+        render(&app);
+        snprintf(question, sizeof question, "%s", "elsewhere dump.nsp: into which folder of the recompiled library?");
+        shows(&app, question, rgb(app.theme.warning));
+        shows(&app, "default, ", yellow); /* the Main first, in focus */
+        key(&app, SDLK_ESCAPE);
+        assert(!app.dests_shown && !app.menu.running && !app.dest_file && !app.dest_out);
+        launch(&app, snx_strdup(dump), false);
+        key(&app, SDLK_DOWN);
+        key(&app, SDLK_RETURN);
+        assert(!app.dests_shown && app.menu.running && !app.dest_out && app.menu.selected == GUI_SWITCH);
+        finish(&app, 0);                       /* status 0: the fake driver found its --outdir the folder taken */
+        free(app.folders[--app.folder_count]); /* off the list, no screen of Folders opened for them */
+        free(app.folders[--app.folder_count]);
+        launch(&app, snx_strdup(dump), false); /* the Main alone: no box, its default */
+        assert(!app.dests_shown && app.menu.running);
+        finish(&app, 0);
+        app.animations_off = still;
+        free(dump);
+        free(extra);
+    }
     /* a dump not extracted yet, with less room than its extraction takes (straight into its game's folder: once):
        asked first, Run anyway pressed twice; Back runs nothing. With room, made already or an NRO, it runs at once */
     {
@@ -3812,6 +3855,7 @@ int main(int argc, char** argv) {
         free(app.folders[1]);
         app.folder_count = 1;
         assert(!snx_remove_tree(zed));
+        app.folders_library[0] = GUI_LIBRARY_DUMPS; /* as dropped: one recompiled library folder for the runs below */
         list_games(&app);
         assert(app.games.count == 35 && !app.message[0]);
         free(zed);

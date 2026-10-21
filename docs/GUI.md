@@ -61,7 +61,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   and takes no room, unless *Extract game container* is on. Then one not extracted yet takes about its size, a Switch
   dump's extracted straight into its game's folder (as much again only with an **Extractions** folder picked, which
   keeps a copy, and in the temporary folder with *Extract to tmpfs*); when its disks have less free, the menu says how
-  much it needs and *Run anyway* takes a second press.
+  much it needs and *Run anyway* takes a second press. With more than one folder of the recompiled library that can
+  take a game (its Main, and each Extra that can be written and runs programs), a box asks which the dump's game goes
+  in, **Recompile** on its tab: each folder with what it is and its free room, the Main first and in focus; ESC runs
+  nothing. The one taken is the run's `--outdir`, and the room asked about is that folder's.
 - **Load 3DS CIA** uses `scarletnx-3ds`. Its `recompiled/` browser lists CIA inputs,
   not host executables. The driver reads supported decrypted application CIAs where they lie, or extracts them
   with *Extract game container*.

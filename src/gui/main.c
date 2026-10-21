@@ -286,6 +286,12 @@ typedef struct {
     int room_item;
     bool room_prepared, room_recompile;
     bool room_ok;       /* asked and answered: the run goes */
+    GuiChoice dests;    /* Recompile: which of the recompiled library's folders a dump's game goes in */
+    bool dests_shown;
+    char* dest_file; /* the run asked about, as room_file, and its load */
+    int dest_item;
+    bool dest_prepared, dest_recompile;
+    char* dest_out;     /* the folder picked there: the run's --outdir, until it starts or is not run */
     char room_line[96]; /* the question: what it takes, what is free */
     char ask_line[4400]; /* GUI_ASK_CLEAN's to GUI_ASK_FOLDER's question, with what the change takes or where */
     char error_line[4400];    /* GUI_ASK_ERROR's: the failure, whole */
@@ -1093,6 +1099,7 @@ static const char* dots(const App* app) {
     return app->finished ? "..." : turn[(now_ms(app) / 400) % 4];
 }
 static void launch(App* app, char* absolute, bool prepared);
+static void render_dests(App* app);
 /* the game's name as the run knows it: the runner's banner, else the file's own, in capitals */
 static void run_name(const App* app, char* out, size_t size) {
     const char* q;
@@ -1337,7 +1344,7 @@ static unsigned screen_mark(const App* app) {
 static void fades_mark(App* app) {
     unsigned mark = screen_mark(app);
     bool boxed = app->confirm.shown || app->sizes_shown || app->users_shown || app->addons_shown ||
-                 app->cleaned_shown || app->left_shown;
+                 app->cleaned_shown || app->left_shown || app->dests_shown;
     if (mark != app->screen_was && app->screen_was) app->switch_ms = SDL_max(now_ms(app), 1);
     if (boxed != app->boxed_was) app->box_ms = SDL_max(now_ms(app), 1);
     app->screen_was = mark;
@@ -3162,6 +3169,7 @@ static void draw_screen(App* app) {
     else
         draw_menu(app);
     if (app->confirm.shown) render_ask(app);
+    if (idle && app->dests_shown && !app->confirm.shown) render_dests(app);
     if (idle && app->users_shown && !app->confirm.shown) render_users(app);
     if (idle && app->addons_shown && !app->confirm.shown) render_addons(app);
     if (idle && app->left_shown && app->lefts) render_files(app, 0);
@@ -4155,7 +4163,8 @@ static bool room_fits(App* app, const char* file) {
     if (!tmpfs && !gui_settings_extract(settings_of(app))) return true; /* read in place: nothing extracted */
     bool kept = !nx || (app->place[GUI_PLACE_WORK] && !tmpfs), fits = true;
     char *out, *temp = tmpfs ? snx_temp_root() : NULL, need_text[32], left_text[32];
-    const char* work = temp ? temp : kept ? app->work_dir : app->games_dir;
+    const char* games = app->dest_out ? app->dest_out : app->games_dir; /* where the game goes */
+    const char* work = temp ? temp : kept ? app->work_dir : games;
     uint64_t need = 0, left = 0;
     if (nx && nro_file(file)) { /* no extraction */
         free(temp);
@@ -4164,8 +4173,7 @@ static bool room_fits(App* app, const char* file) {
     out = dump_out(app, file, nx ? NULL : "3ds");
     if (kept ? !snx_is_dir(out) : !made_from(app, file)) /* else extracted already, and its game made with it */
         fits = gui_room(snx_file_size(file), nx && kept, app->room_free ? app->room_free : free_space(work),
-                        app->room_free ? app->room_free : free_space(app->games_dir),
-                        snx_same_disk(work, app->games_dir), &need, &left);
+                        app->room_free ? app->room_free : free_space(games), snx_same_disk(work, games), &need, &left);
     free(temp);
     if (!fits) {
         gui_size_text(need_text, sizeof need_text, need);
@@ -7035,6 +7043,107 @@ static void pump(App* app) {
         }
     }
 }
+/* ---- Recompile: the recompiled library's folders a dump's game can go in, its Main first, then each Extra that can
+   take one (snx_folder_unfit); asked when there are more than one, the game going in the one taken ---- */
+static int dest_dirs(const App* app, const char** dirs) {
+    int i, n = 0;
+    if (app->games_dir) dirs[n++] = app->games_dir;
+    for (i = 0; i < app->folder_count; ++i)
+        if (app->folders_library[i] == GUI_LIBRARY_RECOMPILED && !snx_folder_unfit(app->folders[i], true))
+            dirs[n++] = app->folders[i];
+    return n;
+}
+static void dests_open(App* app, char* file, bool prepared) {
+    const char* dirs[GUI_FOLDERS_MAX + 1];
+    free(app->dest_file);
+    app->dest_file = file;
+    app->dest_item = app->menu.selected;
+    app->dest_prepared = prepared;
+    app->dest_recompile = app->recompile;
+    app->dests.count = dest_dirs(app, dirs);
+    app->dests.focus = 0;
+    app->dests_shown = true;
+}
+/* the box's question, and each choice: the folder from home, cut in its middle to fit, what it is and its free room */
+static void dests_text(App* app, char* question, size_t size, char (*text)[512], const char** labels) {
+    const char* dirs[GUI_FOLDERS_MAX + 1];
+    char *slash = app->dest_file ? strrchr(app->dest_file, '/') : NULL, home[512], left[32];
+    int i, n = dest_dirs(app, dirs), room = SDL_max(app->cols - 40, 16);
+    snprintf(question, size, snx_tr("%s: into which folder of the recompiled library?"),
+             slash            ? slash + 1
+             : app->dest_file ? app->dest_file
+                              : "");
+    for (i = 0; i < n && i < app->dests.count; ++i) {
+        snx_home_short(dirs[i], home, sizeof home);
+        gui_path_fit(home, room, text[i], 300);
+        gui_size_text(left, sizeof left, free_space(dirs[i]));
+        snprintf(text[i] + strlen(text[i]), 512 - strlen(text[i]),
+                 i                             ? snx_tr("  %s free")
+                 : app->place[GUI_PLACE_GAMES] ? snx_tr("  picked, %s free")
+                                               : snx_tr("  default, %s free"),
+                 left);
+        labels[i] = text[i];
+    }
+}
+static void dests_place(App* app, GuiChoices* c, char* question, size_t size, char (*text)[512], const char** labels) {
+    int width, height;
+    area(app, &width, &height);
+    dests_text(app, question, size, text, labels);
+    choices_place(app,
+                  app->theme.dialog == GUI_DIALOG_YORHA
+                      ? gui_rect(cell_w(app), cell_h(app) / 2, width - 2 * cell_w(app), height - cell_h(app))
+                      : gui_rect(0, 0, width, height),
+                  question, snx_tr("Recompile"), labels, app->dests.count, app->dests.focus, c);
+}
+static void render_dests(App* app) {
+    GuiChoices c;
+    char question[640], text[GUI_FOLDERS_MAX + 1][512];
+    const char* labels[GUI_FOLDERS_MAX + 1];
+    dests_place(app, &c, question, sizeof question, text, labels);
+    box_shade(app);
+    choices_draw(app, &c, question, snx_tr("Recompile"), labels, app->dests.count, app->dests.focus);
+}
+static void launch(App* app, char* absolute, bool prepared);
+/* choice i taken (the run goes, its game in that folder), or none (-1: Back, nothing runs) */
+static void dest_take(App* app, int i) {
+    const char* dirs[GUI_FOLDERS_MAX + 1];
+    char* file = app->dest_file;
+    int item = app->menu.selected, n = dest_dirs(app, dirs);
+    app->dests_shown = false;
+    app->dest_file = NULL;
+    if (i < 0 || i >= n) {
+        free(file);
+        return;
+    }
+    free(app->dest_out);
+    app->dest_out = snx_strdup(dirs[i]);
+    app->recompile = app->dest_recompile;
+    app->menu.selected = app->dest_item;
+    launch(app, file, app->dest_prepared);
+    app->menu.selected = item;
+    app->recompile = false;
+}
+static void dests_key(App* app, GuiKey key) {
+    switch (gui_choice_key(&app->dests, key)) {
+        case GUI_CHOICE_TAKE: dest_take(app, app->dests.focus); break;
+        case GUI_CHOICE_BACK: dest_take(app, -1); break;
+        default: break;
+    }
+}
+/* a folder under the pointer takes the focus, a click takes it; a click off the box is Back */
+static void dests_pointer(App* app, float x, float y, bool click) {
+    GuiChoices c;
+    char question[640], text[GUI_FOLDERS_MAX + 1][512];
+    const char* labels[GUI_FOLDERS_MAX + 1];
+    bool on;
+    int i;
+    dests_place(app, &c, question, sizeof question, text, labels);
+    if ((i = choices_hit(&c, x, y, &on)) >= 0) {
+        app->dests.focus = i;
+        if (click) dest_take(app, i);
+    } else if (click && !on)
+        dest_take(app, -1);
+}
 static void launch(App* app, char* absolute, bool prepared) {
     if (!absolute || !snx_is_file(absolute)) {
         snprintf(app->message, sizeof(app->message), "%s",
@@ -7075,6 +7184,15 @@ static void launch(App* app, char* absolute, bool prepared) {
         free(absolute);
         return;
     }
+    /* a dump made into the folder the player picks, when the recompiled library has more than one that can take it */
+    if (app->menu.selected == GUI_SWITCH && !prepared && !app->dest_out) {
+        const char* dirs[GUI_FOLDERS_MAX + 1];
+        if (dest_dirs(app, dirs) > 1) {
+            dests_open(app, absolute, prepared);
+            free(driver);
+            return;
+        }
+    }
     /* a dump not extracted yet may need more room than its disks have: asked first, Run anyway pressed twice */
     if (folders && !app->room_ok && !room_fits(app, absolute)) {
         free(app->room_file);
@@ -7107,9 +7225,9 @@ static void launch(App* app, char* absolute, bool prepared) {
         argv[n++] = "--repo";
         argv[n++] = app->data_dir;
     }
-    if (folders && app->menu.selected == GUI_SWITCH && app->place[GUI_PLACE_GAMES]) {
+    if (folders && app->menu.selected == GUI_SWITCH && (app->place[GUI_PLACE_GAMES] || app->dest_out)) {
         argv[n++] = "--outdir";
-        argv[n++] = app->games_dir;
+        argv[n++] = app->dest_out ? app->dest_out : app->games_dir;
     }
     /* the picked extractions folder, which Extract to tmpfs leaves for the temporary one, and a Switch dump read in
        place (Extract game container off) has no use for. A CIA's title folder is there either way, its saves in it */
@@ -7124,6 +7242,8 @@ static void launch(App* app, char* absolute, bool prepared) {
     pad_mappings_share(app);
 #endif
     bool started = gui_process_start(app->process, argv, app->message, sizeof(app->message));
+    free(app->dest_out); /* the run's: a next one asks again */
+    app->dest_out = NULL;
     if (started && app->run_log) {
         size_t k;
         if (app->run_out) fclose(app->run_out);
@@ -7170,6 +7290,8 @@ static void room_answer(App* app, bool taken) {
     app->room_file = NULL;
     if (!taken) {
         free(file);
+        free(app->dest_out); /* not run: a next one asks where again */
+        app->dest_out = NULL;
         return;
     }
     app->room_ok = true;
@@ -7933,6 +8055,8 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
         ask_pointer(app, x, y, click);
     else if (app->sizes_shown)
         sizes_pointer(app, x, y, click);
+    else if (app->dests_shown)
+        dests_pointer(app, x, y, click);
     else if (app->users_shown)
         users_pointer(app, x, y, click, touch);
     else if (app->addons_shown)
@@ -8221,6 +8345,10 @@ static void event(App* app, const SDL_Event* e) {
     /* the box of sizes and the box of users take every key while they show, as a question does */
     if (app->sizes_shown && !app->confirm.shown && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
         if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && menu_key_of(&e->key, &key)) sizes_key(app, key);
+        return;
+    }
+    if (app->dests_shown && !app->confirm.shown && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
+        if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && menu_key_of(&e->key, &key)) dests_key(app, key);
         return;
     }
     if (app->users_shown && !app->confirm.shown && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
@@ -8544,6 +8672,8 @@ static void forget(App* app) {
     free(app->menu_old);
     free(app->outside_path);
     free(app->room_file);
+    free(app->dest_file);
+    free(app->dest_out);
     free(app->folders_file);
     free(app->app_file);
     gui_cleaned_free(&app->cleaned);

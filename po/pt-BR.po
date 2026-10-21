@@ -627,6 +627,26 @@ msgid "Folders"
 msgstr "Pastas"
 
 #: src/gui/main.c
+#, c-format
+msgid "%s: into which folder of the recompiled library?"
+msgstr "%s: em qual pasta da biblioteca de recompilados?"
+
+#: src/gui/main.c
+#, c-format
+msgid "  %s free"
+msgstr "  %s livres"
+
+#: src/gui/main.c
+#, c-format
+msgid "  picked, %s free"
+msgstr "  escolhida, %s livres"
+
+#: src/gui/main.c
+#, c-format
+msgid "  default, %s free"
+msgstr "  padrão, %s livres"
+
+#: src/gui/main.c
 msgid "SCARLETNX  /  SETTINGS  /  FOLDERS"
 msgstr "SCARLETNX  /  CONFIGURAÇÕES  /  PASTAS"
 
