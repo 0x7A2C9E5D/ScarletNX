@@ -217,7 +217,7 @@ static int addon_recompile(int argc, char** argv, const SnxPaths* paths) {
     free(data);
     return event('R');
 }
-int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
+int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     char *game, *partial, *name, *folder;
     int rc, tmpfs;
     if (addon_mode()) return addon_recompile(argc, argv, paths);

@@ -160,7 +160,8 @@ def oracle(output, native):
 
 def main():
     assert len(sys.argv) == 4 or (len(sys.argv) == 5 and sys.argv[4] == '--oracle')
-    driver, cia, probe = [str(Path(p).resolve()) for p in sys.argv[1:4]]
+    # absolute, not resolved: scarletnx-3ds may be a link to scarletnx, which runs the driver its name says
+    driver, cia, probe = [str(Path(p).absolute()) for p in sys.argv[1:4]]
     digest = hashlib.sha256(Path(cia).read_bytes()).hexdigest()
     assert digest == '943d98144d6e7ffdbcf9cdbce43a4d0b4630afb8bc88f89d02ecc7f24eae5784', (
         'Not the pinned supplied SuperTux CIA'

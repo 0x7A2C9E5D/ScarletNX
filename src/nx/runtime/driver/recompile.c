@@ -311,7 +311,7 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs)
     free(ex);
     return rc;
 }
-int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
+int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *arg, *value;
     SnxU64 addon = 0, owner = 0, version = SNX_NO_VERSION; /* an update, its game and version, as its content meta
                                                                 names them */

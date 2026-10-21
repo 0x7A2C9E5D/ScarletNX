@@ -15,7 +15,8 @@ from ctr_fixtures import TITLE, NONE, cia, ncch, put
 
 
 def main():
-    driver = str(Path(sys.argv[1]).resolve())
+    # absolute, not resolved: scarletnx-3ds may be a link to scarletnx, which runs the driver its name says
+    driver = str(Path(sys.argv[1]).absolute())
     assert '--aot' in sys.argv[2:] or True  # AOT is always on
     cases = 0
     with tempfile.TemporaryDirectory(prefix='snx-ctr-extract-') as temp:

@@ -380,12 +380,24 @@ AppImage: run inside pkgforge's Arch container with `quick-sharun` ([CI setup](.
 documentation:
 
 ```sh
-cmake --preset default -B build/appimage -DSNX_DEPLOY=OFF -DCMAKE_INSTALL_PREFIX=/usr &&
+scripts/linux-llvm.sh "$(uname -m)" ~/linux-llvm &&
+cmake --preset default -B build/appimage -DSNX_DEPLOY=OFF -DCMAKE_INSTALL_PREFIX=/usr \
+  -DLLVM_DIR="$HOME/linux-llvm/lib/cmake/llvm" -DSNX_A64_DISASM=OFF &&
 cmake --build build/appimage &&
 cmake --install build/appimage &&
 GITHUB_REPOSITORY=scarletnx/ScarletNX scripts/make-appimage.sh
 # -> dist/ScarletNX-linux-<arch>.AppImage
 ```
+
+The AppImage links LLVM statically: `scripts/linux-llvm.sh ARCH PREFIX` builds the libraries the recompiler links and
+nothing else, with one code generator, the host's (a distribution's libLLVM is one library with every target). It
+takes the version in `LLVM_VERSION` (CI gives it the container's, whose `opt` prints the LLVM settings' pipelines),
+and with `SNX_SYSROOT` set it cross-builds for another architecture. `SNX_A64_DISASM=OFF` leaves out `scarletnx
+--mcp`'s A64 disassembler, which is for working on the runtime.
+
+`scarletnx-3ds` and `scarletnx-gnuabi` are names of `scarletnx` on Linux and macOS (`SNX_MULTICALL`,
+`src/multicall`), links beside it as `scarletnx-switch` is: one program carries LLVM, SDL and the code the drivers
+share once. Windows, whose zips keep no links, has three programs, as Android and iOS do.
 
 [Nightly AppImages](https://github.com/scarletnx/nightly/releases/latest), x86_64 and aarch64 · [Launch](USAGE.md).
 

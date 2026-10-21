@@ -3,6 +3,7 @@
 #include "3ds/board/board.h"
 #include "3ds/loader/ctr_loader.h"
 #include "3ds/aot/ctr_module.h"
+#include "3ds/runtime/main.h"
 #include "common/utilities/common.h"
 #include <ctype.h>
 #include <errno.h>
@@ -165,7 +166,7 @@ done:
     snx_ctr_cia_close(cia);
     return status;
 }
-int main(int argc, char** argv) {
+int snx_ctr_main(int argc, char** argv) {
     SnxCtrModel model = SNX_CTR_OLD;
     const char *input = NULL, *output = NULL, *repo = NULL;
     bool info = false, positional = false, extract_only = false, recompile = false, budget_set = false;
@@ -299,3 +300,8 @@ int main(int argc, char** argv) {
     if (status) fprintf(stderr, "scarletnx-3ds: %s\n", error);
     return status;
 }
+#ifndef SNX_MULTICALL
+int main(int argc, char** argv) {
+    return snx_ctr_main(argc, argv);
+}
+#endif

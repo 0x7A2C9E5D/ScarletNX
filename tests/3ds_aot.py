@@ -256,7 +256,8 @@ class Descriptor(C.Structure):
 
 
 def main():
-    driver, probe = [str(Path(p).resolve()) for p in sys.argv[1:3]]
+    # absolute, not resolved: scarletnx-3ds may be a link to scarletnx, which runs the driver its name says
+    driver, probe = [str(Path(p).absolute()) for p in sys.argv[1:3]]
     cases = 0
     with tempfile.TemporaryDirectory(prefix='snx-ctr-aot-') as temp:
         root = Path(temp)

@@ -13,7 +13,8 @@ from ctr_fixtures import NONE, cia, ncch, put
 
 
 def main():
-    driver, probe = [str(Path(p).resolve()) for p in sys.argv[1:3]]
+    # absolute, not resolved: scarletnx-3ds may be a link to scarletnx, which runs the driver its name says
+    driver, probe = [str(Path(p).absolute()) for p in sys.argv[1:3]]
     checked = 0
     with tempfile.TemporaryDirectory(prefix='snx-ctr-container-') as temp:
         root = Path(temp)

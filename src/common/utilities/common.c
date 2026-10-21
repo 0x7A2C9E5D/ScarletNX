@@ -319,7 +319,12 @@ char* snx_executable(const char* argv0) {
         return path;
     }
 #endif
-    return snx_find_tool(argv0);
+    {
+        /* the program's own file, where snx_find_tool keeps the name of a link to it */
+        char *found = snx_find_tool(argv0), *file = found ? snx_absolute(found) : NULL;
+        free(found);
+        return file;
+    }
 }
 int snx_is_file(const char* path) {
 #ifdef _WIN32
@@ -1141,6 +1146,20 @@ void snx_tool_console(void) {
     }
 #endif
 }
+/* file's path from the root, its folder resolved and its own name kept: a program found by name runs under that name,
+   which can say what it does (scarletnx-3ds, a link to scarletnx) */
+static char* tool_path(const char* file) {
+    const char* name = file + strlen(file);
+    char *dir, *absolute, *path;
+    while (name > file && !separator(name[-1])) --name;
+    dir = snx_dirname(file);
+    absolute = snx_absolute(dir);
+    free(dir);
+    if (!absolute) return NULL;
+    path = snx_path_join(absolute, name);
+    free(absolute);
+    return path;
+}
 char* snx_find_tool(const char* name) {
     const char *env, *p, *end;
     char *dir, *file, *absolute;
@@ -1148,7 +1167,7 @@ char* snx_find_tool(const char* name) {
     int has_sep = 0;
     for (p = name; *p; ++p)
         if (separator(*p)) has_sep = 1;
-    if (has_sep) return snx_is_file(name) ? snx_absolute(name) : NULL;
+    if (has_sep) return snx_is_file(name) ? tool_path(name) : NULL;
     env = getenv("PATH");
     if (!env) return NULL;
     p = env;
@@ -1171,13 +1190,13 @@ char* snx_find_tool(const char* name) {
             file = next;
         }
         if (snx_is_file(file)) {
-            absolute = snx_absolute(file);
+            absolute = tool_path(file);
             free(file);
             return absolute;
         }
 #else
         if (snx_is_file(file) && access(file, X_OK) == 0) {
-            absolute = snx_absolute(file);
+            absolute = tool_path(file);
             free(file);
             return absolute;
         }

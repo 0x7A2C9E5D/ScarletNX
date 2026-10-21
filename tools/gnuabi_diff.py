@@ -24,14 +24,15 @@ from pathlib import Path
 
 
 def command(value):
-    # An existing filename can contain spaces, particularly on Windows.
+    # An existing filename can contain spaces, particularly on Windows. Absolute, not resolved: scarletnx-gnuabi may
+    # be a link to scarletnx, which runs the driver its name says
     if Path(value).is_file():
-        return [str(Path(value).resolve())]
+        return [str(Path(value).absolute())]
     result = shlex.split(value)
     if not result:
         raise ValueError('empty command')
     if Path(result[0]).is_file():
-        result[0] = str(Path(result[0]).resolve())
+        result[0] = str(Path(result[0]).absolute())
     return result
 
 

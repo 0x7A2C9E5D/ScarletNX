@@ -62,7 +62,11 @@ reads Linux syscall number `x8` and arguments `x0` through `x5`, and writes resu
 used as Linux syscalls.
 
 `scarletnx-switch` is the `scarletnx` NX implementation under the Switch's name,
-a Unix symlink or a Windows executable copy.
+a Unix symlink or a Windows executable copy. On Linux and macOS `scarletnx-3ds` and
+`scarletnx-gnuabi` are symlinks to `scarletnx` too (`SNX_MULTICALL`): `src/multicall/main.c`
+runs the driver the name says, from the library of its own folder (`snx_ctr_program`,
+`snx_gnuabi_program`), so LLVM and SDL are in one program once. Elsewhere each is its own
+executable.
 The original game-name entry points and CLI remain available. GNU ABI has an
 independent CPU-only entry point; see [GNUABI.md](GNUABI.md) for implemented
 syscalls, ELF execution, filesystem scope, and differential testing.
