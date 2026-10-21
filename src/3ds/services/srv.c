@@ -12,6 +12,19 @@ static uint32_t snx_ctr_srv_RegisterClient(SnxCtrIpc* c, uint32_t process) {
     c->process->objects[c->object].data.session.client_pid = process;
     return 0;
 }
+/* The semaphore srv: releases once per notification the process subscribed to (Azahar srv.cpp, at most 16 pending).
+   The SDK's notification thread waits on it from its start: without a handle that wait fails and the thread throws a
+   fatal error. Nothing here publishes notifications yet, so it is never released */
+static uint32_t snx_ctr_srv_EnableNotification(SnxCtrIpc* c, uint32_t* semaphore) {
+    SnxCtrProcess* p = c->process;
+    if (p->srv_notification) return snx_ctr_handle_add(p, p->srv_notification, semaphore);
+    uint32_t result = snx_ctr_object_create(p, CTR_OBJ_SEMAPHORE, semaphore);
+    if (result) return result;
+    p->srv_notification = snx_ctr_handle_object(p, *semaphore);
+    p->objects[p->srv_notification].data.semaphore.max = 16;
+    ++p->objects[p->srv_notification].refs; /* the service's own, while the process lives */
+    return 0;
+}
 static uint32_t snx_ctr_srv_GetServiceHandle(SnxCtrIpc* c, const uint8_t* name, uint32_t length, uint32_t flags,
                                              uint32_t* session) {
     SnxCtrProcess* p = c->process;

@@ -182,7 +182,7 @@ bool snx_ctr_vk_init(SnxCtrMemory* memory, char* error, size_t error_size) {
     /* a window first: a display server and a Vulkan surface make it the output; without one frames go to the frame
        dumps only */
     if (SDL_InitSubSystem(SDL_INIT_VIDEO))
-        v->window = SDL_CreateWindow("ScarletNX 3DS", 800, 480, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+        v->window = SDL_CreateWindow("ScarletNX 3DS", 600, 720, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
     VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
                              .pApplicationName = "scarletnx-ctr",
                              .apiVersion = VK_API_VERSION_1_3};

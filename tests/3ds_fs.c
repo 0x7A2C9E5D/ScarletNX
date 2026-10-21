@@ -32,7 +32,9 @@ static void request(SnxCtrProcess* p, uint32_t h, const uint32_t* w, unsigned n,
     assert(snx_ctr_write_ram(p->space, CMD, zero, 256) == SNX_CTR_MEM_OK);
     for (unsigned i = 0; i < n; ++i) word(p, CMD + i * 4, w[i]);
     p->cpu.state.cpu.r[0] = h;
-    assert(snx_ctr_svc(p, 0x32) == state);
+    SnxCtrSvcResult got = snx_ctr_svc(p, 0x32);
+    if (got != state) fprintf(stderr, "request 0x%08x: state %d, expected %d\n", w[0], (int)got, (int)state);
+    assert(got == state);
     assert(p->cpu.state.cpu.r[0] == (state == SNX_CTR_SVC_RETURN ? transport : h));
 }
 static bool no_mmio(void* context, uint32_t address, const void* bytes, size_t size) {
@@ -294,8 +296,9 @@ static void sd_area(SnxCtrProcess* p, uint32_t fs, const char* directory) {
     request(p, fs, opend, 7, SNX_CTR_SVC_RETURN, 0);
     assert(get(p, 0) == 0x80b0042 && !get(p, 1) && get(p, 2) == 0x10);
     uint32_t handle = get(p, 3);
-    request(p, handle, finish, 1, SNX_CTR_SVC_RETURN, 0);
-    assert(!get(p, 1) && !snx_ctr_handle_close(p, handle));
+    uint32_t dclose[] = {0x8020000}; /* a directory session's Close (libctru FSDIR_Close) */
+    request(p, handle, dclose, 1, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 0) == 0x8020040 && !get(p, 1) && !snx_ctr_handle_close(p, handle));
     /* rename through the wire, then delete */
     utf16(p, 0x300400, file16, 16);
     utf16(p, 0x300700, moved16, 16);
@@ -324,6 +327,177 @@ static void sd_area(SnxCtrProcess* p, uint32_t fs, const char* directory) {
     uint32_t commit[] = {0x80d0144, lo, hi, 0, 12, 8, (12u << 4) | 10, 0x300400, (8u << 4) | 12, 0x300500};
     request(p, fs, commit, 10, SNX_CTR_SVC_RETURN, 0);
     assert(!get(p, 1));
+}
+/* ExtSaveData (archive 7): missing until CreateExtSaveData makes it in the SD card's extdata folder, its files fixed
+   in size, its folder read through a directory session, then all of it deleted */
+static void extdata(SnxCtrProcess* p, uint32_t fs, const char* directory) {
+    word(p, 0x300020, 1); /* the path: media SDMC, save ID low, high */
+    word(p, 0x300024, 0x1234);
+    word(p, 0x300028, 0);
+    uint32_t a[] = {0x80c00c2, 7, 2, 12, (12u << 14) | 2, 0x300020};
+    request(p, fs, a, 6, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 1) == 0xc8a04478); /* not found: the game creates it */
+    uint32_t info[] = {0x84500c2, 7, 2, 12, (12u << 14) | 2, 0x300020};
+    request(p, fs, info, 6, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 1) == 0xc8a04554);
+    word(p, 0x300600, 0x48444d53); /* a four-byte icon */
+    uint32_t create[] = {0x8510242, 1, 0x1234, 0, 0, 10, 20, 0x100000, 0, 4, (4u << 4) | 10, 0x300600};
+    request(p, fs, create, 12, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 0) == 0x8510042 && !get(p, 1) && get(p, 2) == ((4u << 4) | 10) && get(p, 3) == 0x300600);
+    char host[1024];
+    snprintf(host, sizeof host,
+             "%s/sdmc/Nintendo 3DS/00000000000000000000000000000000/00000000000000000000000000000000/extdata/"
+             "00000000/00001234/metadata",
+             directory);
+    FILE* f = fopen(host, "rb");
+    unsigned char metadata[17];
+    assert(f && fread(metadata, 1, sizeof metadata, f) == 16 && !fclose(f));
+    assert(metadata[2] == 0x10 && metadata[4] == 10 && metadata[8] == 20);
+    request(p, fs, info, 6, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 0) == 0x8450140 && !get(p, 1) && get(p, 2) == 0x100000 && get(p, 3) == 10 && get(p, 4) == 20 &&
+           !get(p, 5));
+    request(p, fs, a, 6, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 0) == 0x80c00c0 && !get(p, 1));
+    uint32_t lo = get(p, 2), hi = get(p, 3);
+    static const uint16_t file16[] = {'/', 'f', '.', 'd', 'a', 't', 0};
+    static const uint16_t root16[] = {'/', 0};
+    utf16(p, 0x300400, file16, 14);
+    uint32_t mkfile[] = {0x8080202, 0, lo, hi, 4, 14, 0, 8, 0, (14u << 14) | 2, 0x300400};
+    request(p, fs, mkfile, 11, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1));
+    uint32_t open[] = {0x80201c2, 0, lo, hi, 4, 14, 7, 0, (14u << 14) | 2, 0x300400};
+    request(p, fs, open, 10, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 1) == 0xe0c046f8); /* no create flag in an ExtSaveData */
+    open[6] = 1;                     /* read only, opened read-write all the same */
+    request(p, fs, open, 10, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1));
+    uint32_t file = get(p, 3);
+    word(p, 0x300600, 0x64636261);
+    uint32_t write[] = {0x8030102, 6, 0, 4, 0, (4u << 4) | 10, 0x300600};
+    request(p, file, write, 7, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1) && get(p, 2) == 2); /* stops at the end */
+    write[1] = 9;
+    request(p, file, write, 7, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 1) == 0xe0c046c1); /* past it */
+    uint32_t grow[] = {0x8050080, 100, 0};
+    request(p, file, grow, 3, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1));
+    uint32_t size[] = {0x8040000};
+    request(p, file, size, 1, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1) && get(p, 2) == 8); /* kept its size */
+    uint32_t flush[] = {0x8090000};
+    request(p, file, flush, 1, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 0) == 0x8090040 && !get(p, 1));
+    uint32_t priority[] = {0x80a0040, 5}, get_priority[] = {0x80b0000};
+    request(p, file, priority, 2, SNX_CTR_SVC_RETURN, 0);
+    request(p, file, get_priority, 1, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 0) == 0x80b0080 && get(p, 2) == 5);
+    uint32_t link[] = {0x80c0000};
+    request(p, file, link, 1, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 0) == 0x80c0042 && !get(p, 1) && get(p, 2) == 0x10);
+    uint32_t linked = get(p, 3);
+    request(p, linked, get_priority, 1, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 2) == 5);
+    uint32_t finish[] = {0x8080000};
+    request(p, linked, finish, 1, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1) && !snx_ctr_handle_close(p, linked));
+    request(p, file, finish, 1, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1) && !snx_ctr_handle_close(p, file));
+    /* the folder's one entry, then none */
+    utf16(p, 0x300400, root16, 4);
+    uint32_t opend[] = {0x80b0102, lo, hi, 4, 4, (4u << 14) | 2, 0x300400};
+    request(p, fs, opend, 7, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1));
+    uint32_t dir = get(p, 3);
+    uint32_t read[] = {0x8010042, 2, ((2u * 0x228) << 4) | 12, 0x300800};
+    request(p, dir, read, 4, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 0) == 0x8010082 && !get(p, 1) && get(p, 2) == 1);
+    unsigned char entry[0x228];
+    assert(snx_ctr_read_ram(p->space, 0x300800, entry, sizeof entry) == SNX_CTR_MEM_OK);
+    assert(entry[0] == 'f' && entry[2] == '.' && !entry[12] && !memcmp(entry + 0x20c, "F       ", 9) &&
+           !memcmp(entry + 0x216, "DAT", 4) && !entry[0x21c] && entry[0x21e] == 1 && entry[0x220] == 8);
+    request(p, dir, read, 4, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1) && !get(p, 2));
+    uint32_t dclose[] = {0x8020000};
+    request(p, dir, dclose, 1, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1) && !snx_ctr_handle_close(p, dir));
+    uint32_t free_bytes[] = {0x8120080, lo, hi};
+    request(p, fs, free_bytes, 3, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 0) == 0x81200c0 && !get(p, 1) && get(p, 2) == 32u << 20 && !get(p, 3)); /* 32 MiB */
+    uint32_t close[] = {0x80e0080, lo, hi};
+    request(p, fs, close, 3, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1));
+    uint32_t del[] = {0x8520100, 1, 0x1234, 0, 0};
+    request(p, fs, del, 5, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 0) == 0x8520040 && !get(p, 1));
+    request(p, fs, a, 6, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 1) == 0xc8a04478);
+    assert(!fopen(host, "rb"));
+}
+/* The NCCH archive through OpenFileDirectly: a system title that is not installed (the Mii data) is NotFound, the
+   title's own RomFS a file */
+static void ncch(SnxCtrProcess* p, uint32_t fs, bool absent) {
+    word(p, 0x300020, 0x00010202); /* the Mii data's title ID, media NAND */
+    word(p, 0x300024, 0x0004009b);
+    word(p, 0x300028, 0);
+    word(p, 0x30002c, 0);
+    for (unsigned i = 0; i < 5; ++i) word(p, 0x300040 + i * 4, 0); /* NCCH data, content 0, its RomFS */
+    uint32_t open[] = {0x8030204, 0, 0x2345678a, 2, 16, 2, 0x14, 1, 0, (16u << 14) | 0x802, 0x300020,
+                       (0x14u << 14) | 2, 0x300040};
+    request(p, fs, open, 13, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 1) == 0xc8804478);
+    word(p, 0x300020, (uint32_t)p->title_id);
+    word(p, 0x300024, (uint32_t)(p->title_id >> 32));
+    request(p, fs, open, 13, SNX_CTR_SVC_RETURN, 0);
+    if (absent) {
+        assert(get(p, 1) == 0xc8804464);
+        return;
+    }
+    assert(get(p, 0) == 0x8030042 && !get(p, 1) && get(p, 2) == 0x10);
+    uint32_t file = get(p, 3), close[] = {0x8080000};
+    request(p, file, close, 1, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1) && !snx_ctr_handle_close(p, file));
+}
+/* SelfNCCH's other file types: an ExeFS file (the extraction's exefs/icon), one it lacks, an unknown name, the code
+   and an update's RomFS */
+static void self_exefs(SnxCtrProcess* p, uint32_t fs) {
+    uint32_t a[] = {0x80c00c2, 3, 1, 1, 0x4002, 0x300020};
+    request(p, fs, a, 6, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1));
+    uint32_t lo = get(p, 2), hi = get(p, 3);
+    static const struct {
+        uint32_t type;
+        char name[9];
+        uint32_t result;
+    } cases[] = {{2, "banner", 0xc8804637}, {2, ".code", 0xe0e046be}, {1, "", 0xd9004676}, {5, "", 0xc8804464}};
+    unsigned char path[12] = {2, 0, 0, 0, 'i', 'c', 'o', 'n'};
+    uint32_t open[] = {0x80201c2, 0, lo, hi, 2, 12, 1, 0, 0x30002, 0x300000};
+    for (unsigned i = 0; i < sizeof cases / sizeof *cases; ++i) {
+        unsigned char other[12] = {(unsigned char)cases[i].type};
+        memcpy(other + 4, cases[i].name, 8);
+        assert(snx_ctr_write_ram(p->space, 0x300000, other, sizeof other) == SNX_CTR_MEM_OK);
+        request(p, fs, open, 10, SNX_CTR_SVC_RETURN, 0);
+        assert(get(p, 1) == cases[i].result);
+    }
+    assert(snx_ctr_write_ram(p->space, 0x300000, path, sizeof path) == SNX_CTR_MEM_OK);
+    request(p, fs, open, 10, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 0) == 0x8020042 && !get(p, 1));
+    uint32_t file = get(p, 3);
+    uint32_t read[] = {0x80200c2, 0, 0, 16, (16u << 4) | 12, 0x300100};
+    request(p, file, read, 6, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1) && get(p, 2) == 9);
+    unsigned char bytes[9];
+    assert(snx_ctr_read_ram(p->space, 0x300100, bytes, 9) == SNX_CTR_MEM_OK && !memcmp(bytes, "SMDH-icon", 9));
+    uint32_t write[] = {0x8030102, 0, 0, 4, 0, (4u << 4) | 10, 0x300100};
+    request(p, file, write, 7, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 1) == 0xc92044e6); /* read-only */
+    uint32_t finish[] = {0x8080000}, close[] = {0x80e0080, lo, hi};
+    request(p, file, finish, 1, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1) && !snx_ctr_handle_close(p, file));
+    request(p, fs, close, 3, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1));
+    static const unsigned char romfs_path[12] = {0}; /* the RomFS's path again, which later checks open */
+    assert(snx_ctr_write_ram(p->space, 0x300000, romfs_path, sizeof romfs_path) == SNX_CTR_MEM_OK);
 }
 int main(int argc, char** argv) {
     assert(argc == 4);
@@ -359,6 +533,9 @@ int main(int argc, char** argv) {
         archives(p, fs, absent);
         if (!absent) timestamps(p, fs, argv[1]);
         sd_area(p, fs, argv[1]);
+        extdata(p, fs, argv[1]);
+        ncch(p, fs, absent);
+        if (!absent) self_exefs(p, fs);
         if (absent) {
             request(p, fs, open, 13, SNX_CTR_SVC_RETURN, 0);
             assert(get(p, 1) == 0xc8804464 && objects(p) == before);
@@ -454,7 +631,7 @@ int main(int argc, char** argv) {
         request(p, file, read, 6, SNX_CTR_SVC_RETURN, SNX_CTR_IPC_BAD_DESCRIPTOR);
         read[4] = 512 << 4 | 10; /* a buffer the service may only read, for a Read */
         request(p, file, read, 6, SNX_CTR_SVC_RETURN, SNX_CTR_IPC_BAD_DESCRIPTOR);
-        uint32_t unknown[] = {0x8090000};
+        uint32_t unknown[] = {0x8060000}; /* no FSFILE command 0x806 */
         request(p, file, unknown, 1, SNX_CTR_SVC_UNSUPPORTED, 0);
         uint32_t close[] = {0x8080000};
         request(p, file, close, 1, SNX_CTR_SVC_RETURN, 0);

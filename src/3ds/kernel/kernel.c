@@ -261,6 +261,21 @@ static bool private_heap(SnxCtrProcess* p, uint32_t va, uint32_t size) {
     }
     return true;
 }
+/* The data segment with its BSS, read-write and held by nothing else: private memory as the heap is (Azahar's
+   Process::LoadModule maps it MemoryState::Private), so it can be a memory block's owner range. A game's SDK makes
+   the microphone's buffer from a page of its BSS. MAP still takes its source from the heap only */
+static bool private_data(SnxCtrProcess* p, uint32_t va, uint32_t size) {
+    const SnxCtrSegment* data = &p->segment[2];
+    uint64_t end = data->address + (uint64_t)data->pages * 4096 + ((p->bss_size + 4095u) & ~4095u);
+    if (va < data->address || va + (uint64_t)size > end || held(p, va, size)) return false;
+    for (uint32_t off = 0; off < size; off += 4096) {
+        uint32_t pa;
+        unsigned permissions;
+        if (snx_ctr_query(p->space, va + off, &pa, &permissions) != SNX_CTR_MEM_OK || (permissions & 3) != 3)
+            return false;
+    }
+    return true;
+}
 /* Map size bytes at va onto the physical pages behind source in this process, page runs at a time; nothing stays
    mapped on failure */
 static bool mirror(SnxCtrProcess* p, uint32_t va, uint32_t source, uint32_t size, unsigned permissions) {
@@ -858,8 +873,8 @@ SnxCtrSvcResult snx_ctr_svc(SnxCtrProcess* p, uint32_t number) {
                 result = MISALIGNED_ADDRESS;
             else if (address < 0x00100000u || (uint64_t)address + size > 0x14000000u)
                 result = INVALID_ADDRESS;
-            else if (!size || !private_heap(p, address, size))
-                result = INVALID_STATE; /* the owner's range must be private read-write heap; it is Locked now */
+            else if (!size || !(private_heap(p, address, size) || private_data(p, address, size)))
+                result = INVALID_STATE; /* the owner's range must be private read-write memory; it is Locked now */
             else
                 result = create_limited(p, CTR_OBJ_SHARED, &out);
             if (!result) {

@@ -47,7 +47,9 @@ enum { CTR_FILE_VIEW, CTR_FILE_HOST, CTR_FILE_DIR };
    monotonically issued and never reused; the process owns their RomFS backing. */
 typedef struct {
     uint64_t token;
-    uint32_t kind; /* 0: SelfNCCH RomFS view (read-only), 1: SDMC host area, 2: SaveData host area (read-write) */
+    uint32_t kind; /* 0: SelfNCCH RomFS view (read-only), 1: SDMC host area, 2: SaveData host area (read-write),
+                      3: an ExtSaveData's user folder (read-write, its files' sizes fixed) */
+    FsNode* root;  /* kind 3: the user folder, retained while the archive is open */
 } CtrSelfArchive;
 typedef struct {
     SnxArmCPU context; /* inactive architectural prefix only; never the checked adapter */
@@ -77,7 +79,10 @@ typedef struct {
         CtrThread thread;
         struct {
             uint32_t closed, kind, writable;
-            void* host; /* FILE* for CTR_FILE_HOST */
+            uint32_t fixed;    /* an ExtSaveData file: Write stops at its end and SetSize changes nothing */
+            uint32_t priority; /* SetPriority's, given back by GetPriority */
+            uint32_t position; /* CTR_FILE_DIR: the entries Read has given so far */
+            void* host;        /* FILE* for CTR_FILE_HOST */
             void* node; /* FsNode*, retained for the file's lifetime */
         } file;
         struct {
@@ -171,6 +176,7 @@ struct SnxCtrProcess {
     uint32_t next_core, core_thread[4];
     uint32_t last_ipc_service, last_ipc_header;
     uint32_t apt_lock; /* manager-owned object index; independent of client sessions */
+    uint32_t srv_notification; /* srv:'s notification semaphore (retained), made at the first EnableNotification */
     uint32_t apt_phase, apt_notification, apt_parameter;
     uint32_t hid_objects[6]; /* the shared memory, then the events: pad 1, pad 2, accelerometer, gyroscope, debug pad */
     SnxCtrHid hid;
@@ -178,6 +184,7 @@ struct SnxCtrProcess {
     double clock_origin;   /* host monotonic origin for the base ARM11 tick domain */
     CtrSelfArchive self_archives[CTR_SELF_ARCHIVES];
     uint64_t archive_sequence;
+    uint32_t fs_priority; /* fs:USER's SetPriority, UINT32_MAX until one */
     SnxCtrGsp gsp;
     SnxCtrDspService dsp;
     uint64_t svc_count, svc_counts[256]; /* all, and each SVC's */

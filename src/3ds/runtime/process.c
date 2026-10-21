@@ -121,6 +121,8 @@ void snx_ctr_process_free(SnxCtrProcess* p) {
     /* files still open when the process ends close their host files and release their nodes before the tree goes */
     for (uint32_t i = 1; i < CTR_OBJECTS; ++i)
         if (p->objects[i].type == CTR_OBJ_FILE && !p->objects[i].data.file.closed) snx_ctr_file_release(p, i);
+    for (unsigned i = 0; i < CTR_SELF_ARCHIVES; ++i) /* and so do the ExtSaveData archives still open */
+        if (p->self_archives[i].root) fs_tree_release(p->self_archives[i].root);
     snx_ctr_romfs_free(p->romfs);
     if (p->tree) {
         fs_tree_destroy(p->tree);
@@ -143,6 +145,7 @@ SnxCtrProcess* snx_ctr_process_new(const SnxCtrImage* image, SnxCtrModel model) 
     p->title_id = image->title_id;
     memcpy(p->name, image->name, sizeof p->name);
     p->gsp.rights_thread = UINT32_MAX; /* no GPU right holder until an AcquireRight */
+    p->fs_priority = UINT32_MAX;       /* fs:USER's, until a SetPriority (Azahar's starts at -1) */
     p->physical_next = CTR_PHYS_BASE;
     p->physical_end = p->physical_next + p->app_limit;
     p->objects[1] = (CtrObject){.type = CTR_OBJ_PROCESS, .refs = 1};
@@ -263,6 +266,17 @@ static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia)
         const unsigned char* image = snx_ctr_cia_romfs(cia, &size);
         /* a CIA without a RomFS reads as an empty one, as its extraction's empty romfs/ folder does */
         ok = ok && snx_ctr_romfs_open_image(image, size, snx_ctr_cia_mtime(cia), &p->romfs);
+        /* the ExeFS files SelfNCCH serves (services/fs.c), in the tree as an extraction's exefs/ has them: copies of
+           the CIA's sections, read-only and never on the host */
+        static const char* const sections[] = {"icon", "logo", "banner"};
+        pm_lock(&tree->lock);
+        for (unsigned i = 0; i < 3 && ok; ++i) {
+            const unsigned char* data = snx_ctr_cia_exefs(cia, sections[i], &size);
+            char path[16];
+            snprintf(path, sizeof path, "exefs/%s", sections[i]);
+            if (data) ok = !fs_tree_add_virtual(tree, path, data, size, NULL);
+        }
+        pm_unlock(&tree->lock);
     } else if (!ok || !snx_ctr_romfs_open(tree, &p->romfs))
         ok = false;
     FsNode* sd = NULL;

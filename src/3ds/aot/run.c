@@ -65,8 +65,9 @@ static void report_threads(SnxCtrProcess* p) {
         if (o->type != CTR_OBJ_THREAD || o->data.thread.dead) continue;
         const CtrThread* t = &o->data.thread;
         const SnxArmCPU* cpu = i == p->current_thread ? &p->cpu.state.cpu : &t->context;
-        printf("  thread %" PRIu32 "%s: core %" PRIu32 " priority 0x%02" PRIx32 " pc 0x%08" PRIx32 " lr 0x%08" PRIx32, i,
-               i == p->current_thread ? " (running)" : "", t->core, t->priority, cpu->r[15], cpu->r[14]);
+        printf("  thread %" PRIu32 "%s: core %" PRIu32 " priority 0x%02" PRIx32 " pc 0x%08" PRIx32 " lr 0x%08" PRIx32 " tls 0x%08" PRIx32,
+               i, i == p->current_thread ? " (running)" : "", t->core, t->priority, cpu->r[15], cpu->r[14],
+               cpu->tpidruro);
         if (t->waiting_object) {
             const CtrObject* w = &p->objects[t->waiting_object];
             printf(", waits on %s %" PRIu32, w->type < sizeof types / sizeof *types ? types[w->type] : "?",
@@ -78,7 +79,13 @@ static void report_threads(SnxCtrProcess* p) {
                        t->wait_more[j]);
                 if (m->type == CTR_OBJ_EVENT) printf(" (%s)", event_owner(p, t->wait_more[j]));
             }
-            if (w->type == CTR_OBJ_ARBITER) printf(" at 0x%08" PRIx32, t->waiting_address);
+            if (w->type == CTR_OBJ_ARBITER) {
+                /* the words there: an SDK critical section is its count, its owner's TLS and its depth */
+                uint32_t words[3];
+                printf(" at 0x%08" PRIx32, t->waiting_address);
+                if (snx_ctr_read_ram(p->space, t->waiting_address, words, sizeof words) == SNX_CTR_MEM_OK)
+                    printf(" [0x%08" PRIx32 " 0x%08" PRIx32 " 0x%08" PRIx32 "]", words[0], words[1], words[2]);
+            }
             if (t->waiting_service[0]) printf(" (the service %s)", t->waiting_service);
         } else if (t->wake_ns)
             printf(", sleeps%s", t->wake_ns == UINT64_MAX ? " forever" : "");

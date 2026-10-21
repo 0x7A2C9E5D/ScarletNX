@@ -70,6 +70,8 @@ def main():
             path = root / 'romfs' / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(contents)
+        (root / 'exefs').mkdir()
+        (root / 'exefs' / 'icon').write_bytes(b'SMDH-icon')  # what SelfNCCH's ExeFS type serves
         for mode in ['shared', *(['fallback'] if os.name == 'posix' else [])]:
             output = Path(temp) / f'{mode}.bin'
             subprocess.run([probe, str(root), str(output), mode], check=True)

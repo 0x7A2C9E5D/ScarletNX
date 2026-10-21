@@ -121,7 +121,6 @@ blocks presented frames until it was ended. It is **not playable** yet:
 
 - Input is the pad alone: the touch screen is not read, and the sensors are at
   rest (`hid:USER`, below).
-- Only the top screen is shown in the window.
 - The music has a gap after every rendered frame, because rendering and presenting
   run inside the guest's GSP call.
 - Geometry shaders, procedural textures, shadows and the DSP's AAC pipe still stop
@@ -357,8 +356,10 @@ created with. Each mapping holds a reference to the block. HLE shared pages are
 reserved from board FCRAM past the application pool.
 
 Presentation is **Vulkan only** (volk, with no linked Vulkan library):
-the device converts the guest framebuffer to RGBA8 and shows the landscape-
-rotated frame live in an SDL3 Vulkan window through a real swapchain. Bounded
+the device converts the guest framebuffers to RGBA8 and shows the landscape-
+rotated screens live in an SDL3 Vulkan window through a real swapchain, the top
+screen above the bottom one as on the console, the bottom one centred under it.
+The pair keeps its shape in a window of any size. Bounded
 PPM snapshots land in `<output>/frames` in every mode. Without a display the
 window path is unavailable and frames are only recorded; without a Vulkan
 device the presenter reports unavailability and no frame is fabricated.
