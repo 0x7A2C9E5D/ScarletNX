@@ -111,6 +111,9 @@ int vk_window_release(void); /* Renderer.release_window */
 /* logs a failed call with where it happened; evaluates to 1 on success */
 #define VK_OK(call) vk_ok_((call), #call, __FILE__, __LINE__)
 int vk_ok_(VkResult r, const char* what, const char* file, int line);
+/* The renderer's lock, reentrant on the thread that holds it. The outermost vk_unlock, once the lock is let go,
+   signals the event slots this thread's syncpoint releases under it reached (vk_release_events): that takes nvdrv's
+   nvev_lk and the kernel's lock, so a hold that performs releases is never let go under either */
 void vk_lock(void);
 void vk_unlock(void);
 int vk_trylock(void); /* vk_lock unless another thread holds it: 1 when taken */
@@ -697,6 +700,9 @@ int vk_release_read(u64 gva, void* dst, u64 len);
 extern u64 g_vk_release_forwards;           /* statistics: reads vk_release_read answered */
 extern u64 g_vk_dset_new, g_vk_dset_reused; /* statistics: descriptor sets written, reused for the same contents */
 u32 vk_release_value(u32 id);
+/* the event slots the syncpoint increments this thread performed under vk_lock reached, signaled (nvdrv.c's
+   syncpt_events): the outermost vk_unlock's, after the lock goes */
+void vk_release_events(void);
 /* renderer.h render_predicate and render_predicate_drop. A predicate is its slot + 1 (query.c), with VK_PRED_EQUAL for
    a draw when the count is zero */
 #define VK_PRED_EQUAL 0x80000000u

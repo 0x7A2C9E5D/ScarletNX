@@ -422,6 +422,32 @@ static void test_ctrl_event_fds(u32 ctrl) {
     CHECK(nv_close(other) == 0 && !g_hle.nvdrv.ctrl_ev[other]); /* its slots go with it */
 }
 
+/* an increment under the renderer's lock (syncpt_add_quiet) wakes the GPU thread but signals an armed slot only at
+   the thread's syncpt_events, once, and a zero increment leaves nothing due */
+static void test_quiet_increments(u32 ctrl) {
+    put(0, 11);
+    CHECK(nv_ioctl1(ctrl, EVENT_REG, 4) == 0);
+    NvEvent* e = &CTRL_EV(ctrl)[11];
+    u32 base = syncpt_read(42), kicks = test_gpu.kicks;
+    CHECK(event_wait(ctrl, 42, base + 1, 100, 11) == 5 && e->armed);
+    syncpt_add_quiet(42, 1);
+    CHECK(syncpt_read(42) == base + 1 && test_gpu.kicks == kicks + 1 && e->armed && !e->ev->signaled);
+    syncpt_events();
+    CHECK(!e->armed && e->ev->signaled);
+    /* armed again where it already is, so only a check of the slots signals it: none is due */
+    kevent_clear(e->ev);
+    e->armed = 1;
+    syncpt_events();
+    CHECK(e->armed && !e->ev->signaled);
+    syncpt_add_quiet(42, 0);
+    syncpt_events();
+    CHECK(e->armed && !e->ev->signaled && syncpt_read(42) == base + 1 && test_gpu.kicks == kicks + 1);
+    syncpt_add(42, 1); /* checks at once */
+    CHECK(!e->armed && e->ev->signaled);
+    put(0, 11);
+    CHECK(nv_ioctl1(ctrl, EVENT_UNREG, 4) == 0);
+}
+
 /* Ioctl3 (12): ctrl-gpu's GET_CHARACTERISTICS writes the characteristics to the inline output, B1 or C1 */
 #define GET_CHARACTERISTICS 0xC0B04705u
 static void test_ioctl3(u32 ctrlgpu) {
@@ -789,6 +815,7 @@ int main(void) {
     test_ioctl3(ctrlgpu);
     test_ctrl_syncpoints(ctrl);
     test_ctrl_event_fds(ctrl);
+    test_quiet_increments(ctrl);
 
     /* a channel's own events (1 to 3), made on first query and kept by the fd; the ctrl fd's ids name event slots */
     KEvent* sm = query_event(gpu, 1);

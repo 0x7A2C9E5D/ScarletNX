@@ -334,9 +334,9 @@ void syncpt_add(u32 id, u32 n) {
     nv_events_check();
     gpu_kick(); /* a GPU channel's stream may wait for it */
 }
-/* this thread's syncpt_add_quiet moved a syncpoint: its syncpt_events checks the event slots, where syncpt_add would
-   have, so no other thread takes the kernel's lock for it */
-static __thread int t_events_due;
+/* this thread's syncpt_add_quiet moved a syncpoint: its syncpt_events checks the event slots where syncpt_add would
+   have, so the same thread takes the kernel's lock, after vk_lock goes */
+static _Thread_local int t_events_due;
 void syncpt_add_quiet(u32 id, u32 n) {
     if (!syncpt_bump(id, n)) return;
     t_events_due = 1;
@@ -370,7 +370,7 @@ int syncpt_wait(u32 id, u32 thresh, i64 timeout_ns) {
     if (syncpt_reached(id, thresh)) return 1;
     if (!timeout_ns) return 0;
     deadline = timeout_ns > 0 ? plat_ns() + (u64)timeout_ns : 0;
-    /* syncpt_add broadcasts under it, so no increment slips between the check and the wait */
+    /* syncpt_bump broadcasts under it, so no increment slips between the check and the wait */
     pm_lock(&g_hle.nvdrv.sync_lk);
     for (;;) {
         i64 left = -1;

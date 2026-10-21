@@ -127,6 +127,7 @@ static void perform(Release* r) {
         syncpt_add_quiet(r->id, 1); /* under vk_lock: the events it reaches are signaled as it is let go */
     vk_result_end();
 }
+void vk_release_events(void) { syncpt_events(); }
 /* lands the results of every submit up to gate and compute batch up to cgate (they have finished) and performs the
    releases they gate, in order */
 static void release_through(u64 gate, u64 cgate) {
