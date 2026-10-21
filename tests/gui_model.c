@@ -284,6 +284,44 @@ int main(void) {
         assert(gui_cols_skip(menu, 3) == menu + 6 && gui_cols_skip(menu, 5) == menu + 7 &&
                gui_cols_skip(menu, 9) == menu + 7);
     }
+    /* a path in a row's columns: whole when it fits, else the root and its first folder, "...", and as many of the last
+       folders as fit; a last name too long alone keeps its last letters; never wider than asked, a wide letter whole */
+    {
+        const char* data = "/home/dravee/.local/share/scarletnx/recompiled"; /* 46 */
+        const char* paths[] = {
+            data,
+            "C:\\Users\\me\\AppData\\Roaming\\scarletnx\\recompiled",
+            "relative/to/here",
+            "/x/averyveryverylongfilename.nsp",
+            "nameonlynoseparatorsatall",
+            "/\xe8\x8f\x9c\xe5\x8d\x95/\xe8\x8f\x9c\xe5\x8d\x95\xe8\x8f\x9c/\xe6\xb8\xb8\xe6\x88\x8f.nsp"};
+        char out[128];
+        gui_path_fit(data, 46, out, sizeof out);
+        assert(!strcmp(out, data));
+        gui_path_fit(data, 30, out, sizeof out);
+        assert(!strcmp(out, "/home/.../scarletnx/recompiled"));
+        gui_path_fit(data, 29, out, sizeof out); /* the end's room first, then the start up to a separator */
+        assert(!strcmp(out, "/home/dravee/.../recompiled"));
+        gui_path_fit(data, 33, out, sizeof out);
+        assert(!strcmp(out, "/home/.../scarletnx/recompiled"));
+        gui_path_fit(paths[1], 30, out, sizeof out);
+        assert(!strcmp(out, "C:\\...\\scarletnx\\recompiled"));
+        gui_path_fit(paths[3], 16, out, sizeof out);
+        assert(!strcmp(out, "/x/...lename.nsp"));
+        gui_path_fit(paths[4], 12, out, sizeof out);
+        assert(!strcmp(out, "nam...satall")); /* no separator: a third of the room for the start */
+        gui_path_fit(data, 4, out, sizeof out);
+        assert(!strcmp(out, "/hom"));
+        gui_path_fit(data, 0, out, sizeof out);
+        assert(!out[0]);
+        for (size_t p = 0; p < sizeof paths / sizeof *paths; ++p)
+            for (int cols = -1; cols < 60; ++cols) {
+                gui_path_fit(paths[p], cols, out, sizeof out);
+                assert(gui_text_cols(out) <= (cols < 0 ? 0 : cols));
+                assert(gui_text_cols(paths[p]) > cols || !strcmp(out, paths[p]));
+                assert(cols < 5 || gui_text_cols(paths[p]) <= cols || strstr(out, "..."));
+            }
+    }
     for (int i = 0; i < 1000000; ++i) gui_console_feed(&screen, "z", 1);
     assert(screen.row < screen.rows && screen.col <= screen.cols);
     gui_console_resize(&screen, 3, 1);

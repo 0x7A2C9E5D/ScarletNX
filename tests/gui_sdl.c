@@ -218,6 +218,13 @@ static void press_key_at(int line, App* app, const char* key, int col, bool tap,
         mouse_px(app, x, y, true);
 }
 static void touch_box(App* app, GuiRect b) { tap_px(app, b.x + b.w / 2, b.y + b.h / 2); }
+/* a Library row's start as it shows path, whole or cut in its middle (gui_path_fit): the marker, the root and the first
+   folder, which it always keeps */
+static void row_start(const char* path, char* out, size_t size) {
+    size_t n = strspn(path, "/\\");
+    n += strcspn(path + n, "/\\");
+    snprintf(out, size, "- %.*s", (int)n + (path[n] != 0), path);
+}
 /* a path the GUI keeps against one the test made: on Windows the system hands paths back with backslashes, where
    snx_path_join put a '/' */
 static bool same_path(const char* a, const char* b) {
@@ -1929,7 +1936,7 @@ int main(int argc, char** argv) {
         render(&app);
         shows(&app, "Library", normal);
         shows(&app, "Where recompiled games go", normal);
-        snprintf(line, sizeof line, "- %.20s", app.games_dir);
+        row_start(app.games_dir, line, sizeof line);
         shows(&app, line, yellow);
         shows(&app, "- Add a folder", normal);
         assert(!strcmp(app.app_form.folder[0], "not found")); /* games/ was taken away above */
@@ -2022,7 +2029,7 @@ int main(int argc, char** argv) {
         event(&app, &e);
         assert(app.folder_count == 1 && !strncmp(app.editor.note, "Already listed: ", 16));
         render(&app);
-        snprintf(line, sizeof line, "- %.20s", kept_as);
+        row_start(kept_as, line, sizeof line);
         shows(&app, line, yellow);
         /* F5 looks at the folders again: one gone from the disk says so on its row, and the note counts them */
         {
@@ -2039,6 +2046,26 @@ int main(int argc, char** argv) {
             free(said);
             free(dumps);
             free(moved);
+        }
+        /* a folder too long for its row: cut in its middle, its end kept, never sliding; whole under the rows */
+        {
+            char* deep = snx_format("%s/a folder name long enough to be cut in its row/games", temporary);
+            assert(!snx_mkdirs(deep));
+            folder_add(&app, deep, false);
+            assert(app.folder_count == 2 && app.editor.row == 3 && !strcmp(form_note(&app), app.folders[1]));
+            render(&app);
+            { /* its end as the system wrote the path: a backslash before games on Windows */
+                char tail[16];
+                snprintf(tail, sizeof tail, "...%s", app.folders[1] + strlen(app.folders[1]) - 6);
+                shows(&app, tail, yellow);
+            }
+            hides(&app, "long enough to be cut", yellow);
+            assert(!strcmp(app.app_form.folder[0], "not found"));
+            shows(&app, " not found", normal); /* recompiled/'s value in its row, not padded past it */
+            folder_remove(&app, 1);
+            assert(app.folder_count == 1);
+            app.editor.row = 2;
+            free(deep);
         }
         app.editor.row = 3; /* Add a folder, after games/, dumps/ and the folder */
         key(&app, SDLK_RETURN);

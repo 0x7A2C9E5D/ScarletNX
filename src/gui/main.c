@@ -4672,6 +4672,8 @@ static int form_labels(const GuiEditor* e) {
 /* the line at the foot of a group's rows, about what they hold, NULL on the screens with none */
 static const char* form_note(const App* app) {
     if (app->form == GUI_FORM_APP) return app->places_note;
+    if (app->form == GUI_FORM_FOLDERS) /* the focused folder whole, its row cut to fit */
+        return app->editor.row < app->folder_count + 2 ? app->folder_keys[app->editor.row].key : NULL;
     if (app->form == GUI_FORM_PLACES)
         return app->editor.row < GUI_PLACES ? app->place_line[app->editor.row] : snx_tr("Data, games and extractions");
     if (app->form != GUI_FORM_SETTINGS && app->form != GUI_FORM_GROUP) return NULL;
@@ -4728,7 +4730,7 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
 /* a row of a form as its box shows it: its label, the value past the widest label; one being typed ends where the
    typing is, its start giving way */
 static void form_row(App* app, const GuiList* l, const GuiEditor* e, int r, int labels, int focused) {
-    char label[64], value[96], line[200];
+    char label[256], value[96], line[400];
     const GuiThemeKey* k = gui_editor_key_of(e, r);
     int typing = focused && e->typing, room = (list_box(l, r).w - cell_w(app) * 3 / 2) / cell_w(app),
         pad; /* list_item's */
@@ -4748,6 +4750,11 @@ static void form_row(App* app, const GuiList* l, const GuiEditor* e, int r, int 
                      app->settings.values[row].text[0] ? snx_tr("Its own >") : snx_tr("As All >"));
     } else
         gui_editor_value(e, r, value, sizeof value);
+    if (k && e->keys == app->folder_keys) { /* a Library folder's path: cut in its middle, whole under the rows */
+        int fit = room - gui_text_cols(app->theme.marker) - (value[0] ? gui_text_cols(value) + 1 : 0);
+        gui_path_fit(k->key, fit, label, sizeof label);
+        labels = SDL_min(labels, SDL_max(fit, 0));
+    }
     pad = SDL_max(labels - gui_text_cols(label), 0); /* the labels' columns, not their bytes */
     if (value[0])
         snprintf(line, sizeof line, "%s%s%*s %s", app->theme.marker, label, pad, "", value);
