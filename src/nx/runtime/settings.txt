@@ -69,6 +69,15 @@ setting Game addons
     help The game's updates and DLCs played with it, made beside it in its folder: their title IDs, a comma between
     help two. The launcher's list of them writes it. An update runs from its own program, which plays with this
     help list's DLCs; the game's own program leaves an update listed out
+setting Game mods off
+    key mods_off
+    text 2048
+    once
+    startup
+    in-game
+    help The game's mods left out of play, folders of mods/ in its data folder: their names, a / between two. Every
+    help other mod there is played, its exefs/ and romfs/ laid over the game's as an update's are, in their names'
+    help order. The launcher's list of updates, DLCs and mods writes it. A mod's exefs/ is recompiled into the game
 
 table g_display_ini
 setting TV mode

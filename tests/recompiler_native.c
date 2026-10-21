@@ -221,7 +221,7 @@ int main(int argc, char** argv) {
         data_file = snx_path_join(out, "Native Fixture/Native Fixture.abi");
         check(snx_is_file(data_file) == !rc, "ABI checkpoint published only after a successful build");
         if (!rc) { /* what the driver takes for this build's: the ABI and the commit */
-            char* stamp = snx_game_stamp();
+            char* stamp = snx_game_stamp("");
             cached = (char*)snx_read_file(data_file, &cached_size);
             check(cached && cached_size == strlen(stamp) && !memcmp(cached, stamp, cached_size) &&
                       strchr(stamp, '\n') < stamp + strlen(stamp) - 1,

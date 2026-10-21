@@ -7,6 +7,7 @@
 #endif
 #include "common/utilities/common.h"
 #include "common/utilities/game_ini.h"
+#include "common/utilities/mods.h"
 #include "common/utilities/demangle.h"
 #include "common/utilities/logscan.h"
 #include "gui/browser.h"
@@ -174,13 +175,16 @@ typedef struct {
     char size_line[128];
     SDL_Texture* users_pictures[SNX_USERS_MAX]; /* theirs, users_side pixels square, made as the box is drawn */
     int users_side;
-    /* the box opening a game with updates or DLCs beside it shows (addons_open): a box to check each of them by, the
-       game's addons= when it opened, then Play, which runs as recompile was when it opened */
+    /* the box opening a game with updates, DLCs or mods beside it shows (addons_open): a box to check each of them
+       by, the game's addons= and mods_off= when it opened, then Play, which runs as recompile was when it opened */
     bool addons_shown, addons_recompile;
     int addons_focus;
     char *addons_game, *addons_title; /* the game's path and what it is shown as */
     GuiGames addons;
     bool* addons_checked; /* each of addons' */
+    char *mods_folder, **mods; /* the game's mods folder and its mods (gui_game_mods), mods_count of them */
+    size_t mods_count;
+    bool* mods_on; /* each of mods': played, not in mods_off= */
     bool previewing; /* drawing the theme editor's preview, on a copy of the app put back after it */
     Uint64 splash_until;
     GuiRgb splash_page;
@@ -320,7 +324,8 @@ static const char* const items[] = {SNX_TR_NOOP("Load Switch NSP/XCI/NRO"),
 #define SAY_PAD            SNX_TR_KEYS("Tap a control; tap it again for a press. Back: go back.")
 #else
 #define SAY_MENU       SNX_TR_KEYS("Arrows/mouse: move. Space/Enter/click: select.")
-#define SAY_GAMES      SNX_TR_KEYS("Up/Down: select. Enter/Space: open. R: recompile. Left/Right/PgUp/PgDown: page.")
+#define SAY_GAMES                                                                                                      \
+    SNX_TR_KEYS("Up/Down: select. Enter/Space: open. R: recompile. M: mods folder. Left/Right/PgUp/PgDown: page.")
 #define SAY_PICK_BOX   SNX_TR_NOOP("click the box (or Enter) to open the file picker")
 #define SAY_KEYS_HOW   SNX_TR_KEYS("Ctrl+V: paste a path, or drop the file on the window. ESC: back.")
 #define SAY_KEYS_WAIT  SNX_TR_NOOP("Pick or drop prod.keys")
@@ -2055,18 +2060,64 @@ static void users_pointer(App* app, float x, float y, bool click, bool touch) {
     } else if (click && (x < (float)r.x || x >= (float)(r.x + r.w) || y < (float)r.y || y >= (float)(r.y + r.h)))
         users_close(app);
 }
-/* ---- the box of a game's updates and DLCs (gui_game_addons), which opening the game shows, as the game's addons=
-   has them picked: its updates as a choice of one (each version installed, newest first, or No update), its DLCs a
-   box to check each by; then Save, which keeps them in addons=, and Play, which keeps them and plays the game with
-   them, from the picked update's program, else its own ---- */
+/* ---- the box of a game's updates and DLCs (gui_game_addons) and mods (gui_game_mods), which opening the game shows,
+   as the game's addons= and mods_off= have them picked: its updates as a choice of one (each version installed,
+   newest first, or No update), its DLCs and mods a box to check each by, and Open mods folder; then Save, which keeps
+   them in addons= and mods_off=, and Play, which keeps them and plays the game with them, from the picked update's
+   program, else its own ---- */
 static void addons_close(App* app) {
     gui_games_free(&app->addons);
     free(app->addons_game);
     free(app->addons_title);
     free(app->addons_checked);
-    app->addons_game = app->addons_title = NULL;
-    app->addons_checked = NULL;
+    snx_free_strings(app->mods, app->mods_count);
+    free(app->mods_folder);
+    free(app->mods_on);
+    app->addons_game = app->addons_title = app->mods_folder = NULL;
+    app->addons_checked = app->mods_on = NULL;
+    app->mods = NULL;
+    app->mods_count = 0;
     app->addons_shown = false;
+}
+/* folder as a file:// URL, owned: its bytes other than letters, digits and -._~/: written %XX, a \\ as / */
+static char* file_url(const char* folder) {
+    static const char hex[] = "0123456789ABCDEF";
+    size_t n = strlen(folder), i, at = 0;
+    char* url = (char*)malloc(8 + 3 * n + 1);
+    if (!url) return NULL;
+    memcpy(url, "file://", 7);
+    at = 7;
+    if (folder[0] != '/' && folder[0] != '\\') url[at++] = '/'; /* C:/... */
+    for (i = 0; i < n; ++i) {
+        unsigned char c = (unsigned char)folder[i];
+        if (c == '\\') c = '/';
+        if (SDL_isalnum(c) || strchr("-._~/:", c)) {
+            url[at++] = (char)c;
+        } else {
+            url[at++] = '%';
+            url[at++] = hex[c >> 4];
+            url[at++] = hex[c & 15];
+        }
+    }
+    url[at] = 0;
+    return url;
+}
+/* folder opened in the system's file manager, made first when it isn't there: app->message says where it is, or why
+   it could not be opened */
+static void show_folder(App* app, const char* folder) {
+    char why[256], *url;
+    if (snx_mkdirs(folder)) {
+        snprintf(app->message, sizeof app->message, snx_tr("Cannot make %s: %s"), folder,
+                 snx_os_error(why, sizeof why));
+        return;
+    }
+    url = file_url(folder);
+    if (url && SDL_OpenURL(url))
+        snprintf(app->message, sizeof app->message, snx_tr("Opened %s"), folder);
+    else
+        snprintf(app->message, sizeof app->message, snx_tr("Could not open %s: %s"), folder,
+                 url ? SDL_GetError() : snx_tr("out of memory"));
+    free(url);
 }
 /* the game's folder and name, owned, from its program's path */
 static void addons_where(const App* app, char** folder, char** name) {
@@ -2094,31 +2145,43 @@ static size_t addons_updates(const App* app) {
     while (n < app->addons.count && addon_kind(app, n) == SNX_ADDON_UPDATE) n++;
     return n;
 }
-/* the box's rows: the updates and No update (with any update), the DLCs, Save, then Play */
-enum { ROW_NO_UPDATE = -1, ROW_SAVE = -2, ROW_PLAY = -3 };
+/* the box's rows: the updates and No update (with any update), the DLCs, the mods, Open mods folder, Save, then Play */
+enum { ROW_NO_UPDATE = -1, ROW_SAVE = -2, ROW_PLAY = -3, ROW_MODS_FOLDER = -4 };
 static int addons_rows(const App* app) {
-    return (int)app->addons.count + (addons_updates(app) ? 1 : 0) + 2;
+    return (int)(app->addons.count + app->mods_count) + (addons_updates(app) ? 1 : 0) + 3;
 }
-/* what row is: its add-on's index in addons, or ROW_NO_UPDATE, ROW_SAVE or ROW_PLAY */
+/* what row is: its add-on's index in addons, a mod's (mods' index past addons' count), or ROW_NO_UPDATE,
+   ROW_MODS_FOLDER, ROW_SAVE or ROW_PLAY */
 static int addons_row(const App* app, int row) {
     int updates = (int)addons_updates(app), rows = addons_rows(app);
     if (row == rows - 1) return ROW_PLAY;
     if (row == rows - 2) return ROW_SAVE;
+    if (row == rows - 3) return ROW_MODS_FOLDER;
     if (row < updates) return row;
     if (updates && row == updates) return ROW_NO_UPDATE;
     return row - (updates ? 1 : 0);
+}
+/* a mod's row's item (addons_row): its index in mods, else -1 */
+static int addons_mod(const App* app, int item) {
+    return item >= (int)app->addons.count ? item - (int)app->addons.count : -1;
 }
 static void addons_open(App* app, const char* game, const char* title) {
     char *folder, *name, *ini, *text;
     SnxAddon* list;
     size_t count, i, j;
     addons_close(app);
-    if (!gui_game_addons(game, &app->addons)) return;
+    gui_game_addons(game, &app->addons);
+    app->mods_count = gui_game_mods(game, &app->mods_folder, &app->mods);
+    if (!app->addons.count && !app->mods_count) {
+        addons_close(app);
+        return;
+    }
     app->addons_game = snx_strdup(game);
     app->addons_title = snx_strdup(title);
-    app->addons_checked = (bool*)calloc(app->addons.count, sizeof *app->addons_checked);
+    app->addons_checked = (bool*)calloc(app->addons.count + 1, sizeof *app->addons_checked);
+    app->mods_on = (bool*)calloc(app->mods_count + 1, sizeof *app->mods_on);
     list = (SnxAddon*)malloc(SNX_ADDONS_MAX * sizeof *list);
-    if (!app->addons_checked || !list) {
+    if (!app->addons_checked || !app->mods_on || !list) {
         free(list);
         addons_close(app);
         return;
@@ -2130,6 +2193,9 @@ static void addons_open(App* app, const char* game, const char* title) {
     for (i = 0; i < app->addons.count; ++i)
         for (j = 0; j < count; ++j)
             if (!strcmp(addon_entry(app, i), list[j].entry)) app->addons_checked[i] = true;
+    free(text);
+    text = snx_ini_value(ini, "mods_off");
+    for (i = 0; i < app->mods_count; ++i) app->mods_on[i] = !snx_mod_off(text, app->mods[i]);
     free(text);
     free(ini);
     free(folder);
@@ -2144,13 +2210,18 @@ static void addons_label(const App* app, int row, char* label, size_t size) {
     size_t i;
     bool none = true;
     for (i = 0; i < addons_updates(app); ++i) none = none && !app->addons_checked[i];
-    if (item >= 0)
+    if (addons_mod(app, item) >= 0)
+        snprintf(label, size, "%s%s %s", app->theme.marker, app->mods_on[addons_mod(app, item)] ? "[x]" : "[ ]",
+                 app->mods[addons_mod(app, item)]);
+    else if (item >= 0)
         snprintf(label, size, "%s%s %s", app->theme.marker,
                  addon_kind(app, (size_t)item) == SNX_ADDON_UPDATE ? (app->addons_checked[item] ? "(*)" : "( )")
                                                                    : (app->addons_checked[item] ? "[x]" : "[ ]"),
                  app->addons.shown[item]);
     else if (item == ROW_NO_UPDATE)
         snprintf(label, size, "%s%s %s", app->theme.marker, none ? "(*)" : "( )", snx_tr("No update"));
+    else if (item == ROW_MODS_FOLDER)
+        snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Open mods folder"));
     else if (item == ROW_SAVE)
         snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Save"));
     else
@@ -2180,10 +2251,10 @@ static void render_addons(App* app) {
         list_item(app, &rows, i, label, app->addons_focus == i, false);
     }
 }
-/* what is picked kept as the game's addons=: 1, else 0 with app->message saying why. The picked update's program,
-   absolute and owned, in *program when it is not NULL (NULL with no update picked) */
+/* what is picked kept as the game's addons= and mods_off=: 1, else 0 with app->message saying why. The picked
+   update's program, absolute and owned, in *program when it is not NULL (NULL with no update picked) */
 static int addons_save(App* app, char** program) {
-    char *folder, *name, *ini, *text;
+    char *folder, *name, *ini, *text, *off = snx_strdup("");
     SnxAddon* list = (SnxAddon*)calloc(app->addons.count + 1, sizeof *list);
     size_t i, count = 0;
     int saved;
@@ -2194,10 +2265,17 @@ static int addons_save(App* app, char** program) {
             snprintf(list[count++].entry, sizeof list->entry, "%s", addon_entry(app, i));
             if (program && addon_kind(app, i) == SNX_ADDON_UPDATE) *program = snx_absolute(app->addons.paths[i]);
         }
+    for (i = 0; i < app->mods_count; ++i)
+        if (!app->mods_on[i]) {
+            char* more = snx_format("%s%s%s", off, off[0] ? "/" : "", app->mods[i]);
+            free(off);
+            off = more;
+        }
     ini = snx_game_ini(folder, name);
     text = list ? snx_addons_text(list, count) : NULL;
-    saved = text && !snx_ini_record(ini, "addons", text);
+    saved = text && !snx_ini_record(ini, "addons", text) && !snx_ini_record(ini, "mods_off", off);
     if (!saved) snprintf(app->message, sizeof app->message, snx_tr("Not saved: %s could not be written"), ini);
+    free(off);
     free(text);
     free(ini);
     free(list);
@@ -2206,14 +2284,23 @@ static int addons_save(App* app, char** program) {
     return saved;
 }
 static void launch(App* app, char* absolute, bool prepared);
-/* row pressed: an update picked (the others not: one runs at a time), No update, a DLC's box checked or not; Save,
-   the picks kept and the box closed; or Play, the picks kept and the game played (or recompiled) through the driver,
-   from the picked update's program */
+/* row pressed: an update picked (the others not: one runs at a time), No update, a DLC's or a mod's box checked or
+   not; Open mods folder, the folder opened; Save, the picks kept and the box closed; or Play, the picks kept and the
+   game played (or recompiled) through the driver, from the picked update's program. A mod's exefs/ changes the
+   program, which the driver recompiles before it plays */
 static void addons_press(App* app, int row) {
     int item = addons_row(app, row), selected = app->menu.selected;
     size_t i;
     char* path;
     bool recompile = app->recompile;
+    if (addons_mod(app, item) >= 0) {
+        app->mods_on[addons_mod(app, item)] = !app->mods_on[addons_mod(app, item)];
+        return;
+    }
+    if (item == ROW_MODS_FOLDER) {
+        if (app->mods_folder) show_folder(app, app->mods_folder);
+        return;
+    }
     if (item >= 0 && addon_kind(app, (size_t)item) == SNX_ADDON_DLC) {
         app->addons_checked[item] = !app->addons_checked[item];
         return;
@@ -2224,7 +2311,7 @@ static void addons_press(App* app, int row) {
     }
     if (!addons_save(app, item == ROW_PLAY ? &path : NULL)) return;
     if (item == ROW_SAVE) {
-        snprintf(app->message, sizeof app->message, snx_tr("%s: its updates and DLCs kept"), app->addons_title);
+        snprintf(app->message, sizeof app->message, snx_tr("%s: its updates, DLCs and mods kept"), app->addons_title);
         addons_close(app);
         return;
     }
@@ -2596,7 +2683,7 @@ static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** ab
         const char* name = app->games.names[g->start + selected - head]; /* its file's: what kind it is */
         size_t addons = app->games.addons[g->start + selected - head];
         if (addons)
-            snprintf(kind, size, snx_tr("Ready to run, with %zu update(s) or DLC(s) to pick from"), addons);
+            snprintf(kind, size, snx_tr("Ready to run, with %zu update(s), DLC(s) or mod(s) to pick from"), addons);
         else
             snprintf(kind, size, "%s",
                      gui_is_cia(name)    ? snx_tr("3DS CIA, opened with scarletnx-3ds")
@@ -2626,7 +2713,7 @@ static void draw_games(App* app) {
             list_item(app, &g.list, e, label, app->browser.selected == (size_t)e, false);
         } else {
             i = (size_t)(e - g.lead);
-            if (app->games.addons[g.start + i]) /* its updates and DLCs, which opening it offers */
+            if (app->games.addons[g.start + i]) /* its updates, DLCs and mods, which opening it offers */
                 snprintf(label, sizeof label, "%s%s  +%zu", app->theme.marker, app->games.shown[g.start + i],
                          app->games.addons[g.start + i]);
             else
@@ -6260,6 +6347,23 @@ static void recompile_focus(App* app) {
         app->recompile = false;
     }
 }
+/* M on Games: the focused game's mods folder opened, made first when it isn't there; else why not */
+static void mods_focus(App* app) {
+    size_t row = app->browser.selected, head = app->browser.head;
+    size_t index = app->browser.page * app->browser.page_size + row - head;
+    bool recent = row && row < head && (int)row - 1 < recent_shown(app), game = row >= head && index < app->games.count;
+    char* folder = NULL;
+    if (recent && app->recent.game[row - 1].driver == GUI_SWITCH)
+        gui_game_mods(app->recent.game[row - 1].path, &folder, NULL);
+    else if (game)
+        gui_game_mods(app->games.paths[index], &folder, NULL);
+    if (folder)
+        show_folder(app, folder);
+    else
+        snprintf(app->message, sizeof app->message, "%s",
+                 snx_tr("M opens the mods folder of a recompiled Switch game in focus."));
+    free(folder);
+}
 #define SNX_GUI_KEYS_MAX (1 << 20) /* a prod.keys is a few kilobytes: past this it is not one */
 /* the bytes of file (a path, or on Android a document's URI, which SDL opens through its app), up to SNX_GUI_KEYS_MAX;
    NULL when it cannot be read or is bigger */
@@ -6769,6 +6873,7 @@ static const struct {
                  {SNX_TR_KEY("Del"), SDLK_DELETE, 0},
                  {SNX_TR_KEY("R"), SDLK_R, 0},
                  {SNX_TR_KEY("Recompile"), SDLK_R, 0},
+                 {SNX_TR_KEY("M"), SDLK_M, 0},
                  {SNX_TR_KEY("Ctrl+S"), SDLK_S, SDL_KMOD_CTRL},
                  {SNX_TR_KEY("Ctrl+V"), SDLK_V, SDL_KMOD_CTRL},
                  {SNX_TR_KEY("Add a folder"), SDLK_UNKNOWN, 0}};
@@ -7309,6 +7414,12 @@ static void event(App* app, const SDL_Event* e) {
         app->menu.view == GUI_LOAD_GAMES && !app->finished) {
         layout(app); /* the page a resize in the same poll gave */
         recompile_focus(app);
+        return;
+    }
+    if (e->key.key == SDLK_M && !e->key.repeat && !(e->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
+        app->menu.view == GUI_LOAD_GAMES && !app->finished) {
+        layout(app);
+        mods_focus(app);
         return;
     }
     if (menu_key_of(&e->key, &key)) menu_key(app, key);

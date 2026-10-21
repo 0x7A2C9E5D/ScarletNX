@@ -17,6 +17,11 @@
 *.keys
 *.tik
 *.cert
+*.cia
+*.3ds
+*.gba
+*.gb
+*.nds
 exefs/
 romfs/
 /work/

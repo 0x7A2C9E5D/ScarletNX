@@ -6,9 +6,10 @@
 #include "nx/runtime/ini.h"
 /* the ABI stamped into the games this build recompiles */
 unsigned snx_game_abi(void);
-/* what a game this build recompiled has in its <name>.abi, owned: the ABI. A game whose stamp says anything else is
-   from another version, and is recompiled before it runs */
-char* snx_game_stamp(void);
+/* what a game this build recompiled has in its <name>.abi, owned: the ABI, and " mods " and the stamp of the mods'
+   ExeFS files it was built with (snx_mods_stamp, mods) unless that is "". A game whose stamp says anything else is
+   from another version or was made with other mods, and is recompiled before it runs */
+char* snx_game_stamp(const char* mods);
 /* the runtime a game's folder gets a copy of, owned: this program, or the AppImage it runs in; NULL in a build without
    the runtime, which deploys one it builds */
 char* snx_own_runtime(const SnxPaths* paths);

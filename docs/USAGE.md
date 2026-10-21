@@ -139,6 +139,25 @@ playing, Play keeps it and plays the game, and Back leaves the list as it was.
 `-x` keeps extracting an update over its game into one folder (`-x Game.nsp --update Update.nsp`), and extracts a
 DLC's dump given alone as its RomFS image.
 
+### Mods
+
+A game's mods go in the `mods` folder of its data folder, one folder each, named as you like:
+`games/<id>/<id>_data/mods/<mod name>/exefs/` and `.../<mod name>/romfs/`. A mod lies over the game the way an update
+does, and over the update too when one is checked. A file in its `romfs/` replaces the RomFS file at the same path, or
+is added to the RomFS when the game has none there. A file in its `exefs/` (`main`, `subsdk0` and the other modules,
+or `main.npdm`) replaces the program's file of that name. Mods are laid in the order of their names, so a later one
+wins over an earlier one where both have the same file.
+
+Every mod in the folder is played until it is turned off. Opening a game in the launcher lists its mods under its
+updates and DLCs, each with a box to check, and Open mods folder opens the folder in the file manager (it is made
+first when it isn't there). M opens it too, for the game in focus on Games. The mods turned off are kept in
+`mods_off=` in the game's `.ini`, their folder names with a `/` between two.
+
+A mod's `exefs/` changes the game's code, which ScarletNX compiles ahead of time. The game's stamp (`<id>.abi`) records
+the mods' ExeFS files it was recompiled with, and playing it through the driver or the launcher recompiles it when the
+mods played have other ones. Run directly, a game made with other mods' files runs the ExeFS it was made from, and the
+log says so. IPS patches and cheats in `exefs/` are not applied.
+
 Run the same command again to retry after a failure or interruption:
 
 - `work/Game/` skips extraction. Automatic extraction publishes this directory only after success,

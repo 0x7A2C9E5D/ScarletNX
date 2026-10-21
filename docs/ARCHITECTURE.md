@@ -86,6 +86,14 @@ update's over that folder (`fs_tree_overlay`, which takes only their ExeFS, RomF
 reads an update's dump with the game's in one `SnxDump` (its Patch RomFS reads the game's NCA), and each checked DLC's
 in one of its own (`HleFs.aocs`), whose image `OpenDataStorageByDataId` serves by its title ID.
 
+A game's mods are the folders of `<id>_data/mods/` (`common/utilities/mods.c`), each played unless the game's
+`mods_off=` names it. The data folder's index leaves `mods/` out (`fs_tree_init_skipping`). The recompile loads the
+program with the played mods' ExeFS files over its own (`snx_exefs_mods`) and records their stamp in `<id>.abi`, which
+the driver compares (`stamped`) to recompile a game whose mods changed. The runtime's `fs.c` serves those files in
+place of the game's when the stamp matches, grafts each played mod's `romfs/` as `mods.<i>`, and `romfs_init` makes
+the RomFS image up from the game's (its `romfs/` folder, or its image's tables) with the mods' laid over it, a file of
+the game's image read from that image.
+
 - `driver.c`: CLI dispatch only; `extract.c` and `recompile.c` own their workflows.
 - `container.c`: a dump opened with hactool, its keys loaded and its NCAs picked, shared by the extraction, the
   recompiler (a dump given to `-r`, its ExeFS read through `SnxExefsReader`) and the runtime's `fs.c`. Without
