@@ -16,6 +16,10 @@
 #include <unistd.h>
 #endif
 
+#ifndef MAP_NORESERVE
+#define MAP_NORESERVE 0
+#endif
+
 /* the fault handler's: the space it watches and the pc it reports */
 static struct {
     unsigned char* base;
@@ -173,7 +177,7 @@ void ctr_host_memory_free(CtrHostMemory* m) {
     memset(m, 0, sizeof *m);
 }
 unsigned char* ctr_host_reserve(void) {
-    void* base = mmap(NULL, (size_t)(CTR_HOST_SPACE + CTR_HOST_GUARD), PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
+    void* base = mmap(NULL, (size_t)(CTR_HOST_SPACE + CTR_HOST_GUARD), PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS,
                       -1, 0);
     return base == MAP_FAILED ? NULL : base;
 }
@@ -187,7 +191,7 @@ bool ctr_host_protect(unsigned char* base, uint32_t va, uint32_t size, unsigned 
     return !mprotect(base + va, size, protection(permissions));
 }
 bool ctr_host_unmap(unsigned char* base, uint32_t va, uint32_t size) {
-    return mmap(base + va, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0) !=
+    return mmap(base + va, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) !=
            MAP_FAILED;
 }
 /* hexadecimal for a signal handler, which may not call stdio */
