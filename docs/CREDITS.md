@@ -14,6 +14,8 @@ Generated modules include runtime ABI code. Game assets, keys and firmware are e
 | OpenSSL | Apache 2.0 |
 | DejaVu Sans 2.37 (the shared fonts' stand-in, `cmake/shared_fonts.cmake`) | the Bitstream Vera license ([text](../dist/licenses/DejaVu/LICENSE)) |
 | yuzu's controller button glyphs (`font_nintendo_extended.cpp`, as Eden carries it) | GPL-2.0-or-later |
+| The 3DS system archives' open stand-ins (`cmake/ctr_system_archives.cmake`): the Mii data, country list, shared font and bad word list B3n30/citra_system_archives makes (Weiyi Wang's generators), as Azahar carries them | GPL-2.0-or-later |
+| Montserrat and GNU Unifont 10.0.05, the glyphs of the 3DS shared font's stand-in | OFL-1.1 ([text](../dist/licenses/Montserrat/OFL.txt)) / GPL-2.0-or-later with the GNU font embedding exception |
 | LZ4 (the library, `lib/`) | BSD-2-Clause |
 | Vulkan-Headers | Apache 2.0 |
 | volk / Vulkan Memory Allocator | MIT |

@@ -15,7 +15,9 @@
 #include "3ds/gpu/vk/shaders/present_spv.h"
 #include "3ds/gpu/vk/vk_transfer.h"
 #include "3ds/gpu/vk/vk_render.h"
+#include "common/utilities/build_info.h"
 #include "common/utilities/common.h"
+#include "common/utilities/window_icon.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -183,6 +185,17 @@ bool snx_ctr_present_init(SnxCtrMemory* memory, const char* frame_dir) {
     }
     g_present.up = 1;
     return true;
+}
+void snx_ctr_present_title(const char* name, const char* addons) {
+    const SnxCtrVk* v = snx_ctr_vk();
+    if (!g_present.up || !v->window) return;
+    char header[768];
+    if (addons && addons[0])
+        snprintf(header, sizeof header, "%s (%s) - %s", name, addons, snx_build_info());
+    else
+        snprintf(header, sizeof header, "%s - %s", name, snx_build_info());
+    SDL_SetWindowTitle(v->window, header);
+    snx_window_icon(v->window);
 }
 bool snx_ctr_present_ready(void) { return g_present.up; }
 bool snx_ctr_present_windowed(void) { return g_present.windowed; }

@@ -201,11 +201,30 @@ static void open_self(SnxCtrIpc* c, const unsigned char path[12]) {
     }
     if (!snx_ctr_fs_file_object(c, CTR_FILE_HOST, 0, 0, host, node) && host) fclose(host);
 }
+/* the system archives' open stand-ins (cmake/ctr_system_archives.cmake) */
+extern const unsigned char snx_ctr_mii_data[], snx_ctr_country_list[], snx_ctr_shared_font[], snx_ctr_bad_word_list[];
+extern const size_t snx_ctr_mii_data_size, snx_ctr_country_list_size, snx_ctr_shared_font_size,
+    snx_ctr_bad_word_list_size;
+/* The system titles whose RomFS a stand-in replaces, as Azahar's NCCHArchive::OpenFile picks them: the shared font
+   for the Chinese, Korean and Taiwanese ones too (their text will not show right) */
+static const unsigned char* system_archive(uint64_t title, size_t* size) {
+    switch (title) {
+        case 0x0004009b00010202ull: *size = snx_ctr_mii_data_size; return snx_ctr_mii_data;
+        case 0x0004009b00010402ull: *size = snx_ctr_country_list_size; return snx_ctr_country_list;
+        case 0x0004009b00014002ull:
+        case 0x0004009b00014102ull:
+        case 0x0004009b00014202ull:
+        case 0x0004009b00014302ull: *size = snx_ctr_shared_font_size; return snx_ctr_shared_font;
+        case 0x000400db00010302ull: *size = snx_ctr_bad_word_list_size; return snx_ctr_bad_word_list;
+        default: return NULL;
+    }
+}
 /* The NCCH archive (0x2345678A): a title's content by its ID, its archive path the title ID, a media type and a
    word, its file path the open type, the content index, the section (0 the RomFS, 1 the code, 2 an ExeFS file) and
-   an ExeFS name (Azahar's NCCHArchivePath and NCCHFilePath). This title's own RomFS is its RomFS view. No other title
-   is installed: one is NotFound, as Azahar answers for a title it has no content or replacement of, a Status the
-   SDK passes back to its caller (the Mii data's mount returns an error code and the game goes on without it) */
+   an ExeFS name (Azahar's NCCHArchivePath and NCCHFilePath). This title's own RomFS is its RomFS view. No system title
+   is installed: the RomFS of one Azahar has an open stand-in for (the Mii data, the country list, the shared font,
+   the bad word list) is that stand-in, read-only in the tree from the first open (system/), and another title is
+   NotFound, as Azahar answers for one it has nothing of, a Status the SDK passes back to its caller */
 static void open_ncch(SnxCtrIpc* c) {
     SnxCtrProcess* p = c->process;
     if (c->in[3] != 2 || c->in[4] != 16 || c->in[5] != 2 || c->in[6] != 0x14 || c->in[7] != 1 || c->in[8]) {
@@ -238,6 +257,24 @@ static void open_ncch(SnxCtrIpc* c) {
             return;
         }
         snx_ctr_fs_file_object(c, CTR_FILE_VIEW, 0, 0, NULL, NULL);
+        return;
+    }
+    size_t size = 0;
+    const unsigned char* stand_in = system_archive(title, &size);
+    if (stand_in && !words[0] && !words[1] && !words[2]) {
+        char path[40];
+        snprintf(path, sizeof path, "system/%016llx.romfs", (unsigned long long)title);
+        FsNode* node = NULL;
+        pm_lock(&p->tree->lock);
+        FsTreeResult rc = fs_tree_lookup(p->tree, NULL, path, &node);
+        if (rc == FS_TREE_NOTFOUND) rc = fs_tree_add_virtual(p->tree, path, stand_in, size, &node);
+        if (!rc && !node->is_virtual) rc = FS_TREE_INVALID; /* a host file of that name is not the stand-in */
+        pm_unlock(&p->tree->lock);
+        if (rc) {
+            snx_ctr_ipc_error_reply(c, tree_result(rc));
+            return;
+        }
+        snx_ctr_fs_file_object(c, CTR_FILE_HOST, 0, 0, NULL, node);
         return;
     }
     fprintf(stderr,

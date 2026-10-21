@@ -434,16 +434,35 @@ static void extdata(SnxCtrProcess* p, uint32_t fs, const char* directory) {
     assert(get(p, 1) == 0xc8a04478);
     assert(!fopen(host, "rb"));
 }
-/* The NCCH archive through OpenFileDirectly: a system title that is not installed (the Mii data) is NotFound, the
-   title's own RomFS a file */
+/* The NCCH archive through OpenFileDirectly: a system title Azahar has an open stand-in for (the Mii data, the bad
+   word list) is that RomFS, another one NotFound, and the title's own RomFS a file */
 static void ncch(SnxCtrProcess* p, uint32_t fs, bool absent) {
-    word(p, 0x300020, 0x00010202); /* the Mii data's title ID, media NAND */
-    word(p, 0x300024, 0x0004009b);
-    word(p, 0x300028, 0);
-    word(p, 0x30002c, 0);
     for (unsigned i = 0; i < 5; ++i) word(p, 0x300040 + i * 4, 0); /* NCCH data, content 0, its RomFS */
     uint32_t open[] = {0x8030204, 0, 0x2345678a, 2, 16, 2, 0x14, 1, 0, (16u << 14) | 0x802, 0x300020,
                        (0x14u << 14) | 2, 0x300040};
+    uint32_t size[] = {0x8040000}, close[] = {0x8080000};
+    static const struct {
+        uint64_t title;
+        uint32_t size;
+    } stand_ins[] = {{0x0004009b00010202ull, 73600}, {0x000400db00010302ull, 1508}};
+    for (unsigned i = 0; i < 2; ++i) {
+        word(p, 0x300020, (uint32_t)stand_ins[i].title);
+        word(p, 0x300024, (uint32_t)(stand_ins[i].title >> 32));
+        request(p, fs, open, 13, SNX_CTR_SVC_RETURN, 0);
+        assert(get(p, 0) == 0x8030042 && !get(p, 1));
+        uint32_t file = get(p, 3);
+        request(p, file, size, 1, SNX_CTR_SVC_RETURN, 0);
+        assert(!get(p, 1) && get(p, 2) == stand_ins[i].size && !get(p, 3));
+        uint32_t read[] = {0x80200c2, 0, 0, 4, (4u << 4) | 12, 0x300100};
+        request(p, file, read, 6, SNX_CTR_SVC_RETURN, 0);
+        unsigned char header[4];
+        assert(!get(p, 1) && get(p, 2) == 4 && snx_ctr_read_ram(p->space, 0x300100, header, 4) == SNX_CTR_MEM_OK);
+        assert(header[0] == 0x28 && !header[1] && !header[2] && !header[3]); /* a level 3 RomFS's header size */
+        request(p, file, close, 1, SNX_CTR_SVC_RETURN, 0);
+        assert(!get(p, 1) && !snx_ctr_handle_close(p, file));
+    }
+    word(p, 0x300020, 0x00010102); /* a system title with no stand-in */
+    word(p, 0x300024, 0x0004009b);
     request(p, fs, open, 13, SNX_CTR_SVC_RETURN, 0);
     assert(get(p, 1) == 0xc8804478);
     word(p, 0x300020, (uint32_t)p->title_id);
@@ -454,7 +473,7 @@ static void ncch(SnxCtrProcess* p, uint32_t fs, bool absent) {
         return;
     }
     assert(get(p, 0) == 0x8030042 && !get(p, 1) && get(p, 2) == 0x10);
-    uint32_t file = get(p, 3), close[] = {0x8080000};
+    uint32_t file = get(p, 3);
     request(p, file, close, 1, SNX_CTR_SVC_RETURN, 0);
     assert(!get(p, 1) && !snx_ctr_handle_close(p, file));
 }

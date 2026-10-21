@@ -15,11 +15,15 @@ add_library(snx_ctr_loader STATIC loader/loader.c loader/cia.c loader/ncch.c loa
 target_link_libraries(snx_ctr_loader PUBLIC scarletnx-common scarletnx-filesystem OpenSSL::Crypto)
 target_compile_definitions(snx_ctr_loader PRIVATE _FILE_OFFSET_BITS=64 _CRT_SECURE_NO_WARNINGS)
 add_library(snx_ctr_process STATIC runtime/process.c kernel/kernel.c kernel/thread.c aot/dispatch.c ipc/ipc.c services/srv.c services/fs.c services/apt.c services/ptm.c services/hid.c services/romfs.c services/file.c services/gsp.c services/dsp.c services/cfg.c services/system.c services/am.c)
+# the system archives' stand-ins (cmake/ctr_system_archives.cmake), which services/fs.c serves through the NCCH archive
+target_sources(snx_ctr_process PRIVATE "${CMAKE_BINARY_DIR}/generated/ctr_system_archives.c")
 # the player's input lives beside the presenter, whose window's events it reads
 add_library(snx_ctr_gpu STATIC gpu/present.c input/input.c gpu/transfer.c gpu/vk/device.c gpu/vk/transfer.c gpu/vk/spirv.c
             gpu/vk/vsgen.c gpu/vk/fsgen.c gpu/vk/render.c gpu/pica.c "${volk_SOURCE_DIR}/volk.c")
 target_include_directories(snx_ctr_gpu PUBLIC "${volk_SOURCE_DIR}")
-target_link_libraries(snx_ctr_gpu PUBLIC snx_ctr_memory Vulkan::Headers SDL3::SDL3 snx_settings ${CMAKE_DL_LIBS})
+include("${PROJECT_SOURCE_DIR}/cmake/window_icon.cmake") # the window's icon, as the Switch runtime's
+target_link_libraries(snx_ctr_gpu PUBLIC snx_ctr_memory Vulkan::Headers SDL3::SDL3 snx_settings snx_build_info
+                                         snx_window_icon ${CMAKE_DL_LIBS})
 set_source_files_properties("${volk_SOURCE_DIR}/volk.c" PROPERTIES COMPILE_OPTIONS "${snx_third_party_flags}")
 # the GPU's compute shaders, compiled at build time (cmake/glsl.cmake)
 include("${PROJECT_SOURCE_DIR}/cmake/glsl.cmake")

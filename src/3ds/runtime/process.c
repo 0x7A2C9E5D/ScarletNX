@@ -242,6 +242,39 @@ bool snx_ctr_process_mount_fs(SnxCtrProcess* p, const char* directory) { return 
 bool snx_ctr_process_mount_cia(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia) {
     return cia && mount(p, directory, cia);
 }
+/* The SMDH's short title, for the window: one of the 16 languages' 0x200-byte entries (short title, 0x40 UTF-16LE
+   units, then the long one and the publisher), English (1) first, then the others in order, as UTF-8 */
+static void smdh_title(const unsigned char* smdh, char out[192]) {
+    out[0] = 0;
+    for (unsigned order = 0; order < 16 && !out[0]; ++order) {
+        const unsigned char* s = smdh + 8 + 0x200 * (order == 0 ? 1 : order == 1 ? 0 : order);
+        size_t n = 0;
+        for (unsigned i = 0; i < 0x40; ++i) {
+            uint32_t cp = (uint32_t)s[i * 2] | (uint32_t)s[i * 2 + 1] << 8;
+            if (!cp) break;
+            if (cp >= 0xd800 && cp < 0xdc00 && i + 1 < 0x40) { /* a surrogate pair */
+                uint32_t low = (uint32_t)s[i * 2 + 2] | (uint32_t)s[i * 2 + 3] << 8;
+                if (low >= 0xdc00 && low < 0xe000) {
+                    cp = 0x10000 + ((cp - 0xd800) << 10) + (low - 0xdc00);
+                    ++i;
+                }
+            }
+            if (cp == '\n') cp = ' '; /* a title broken over two lines is one in a window's */
+            unsigned char u[4];
+            unsigned len = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+            if (len == 1)
+                u[0] = (unsigned char)cp;
+            else {
+                for (unsigned k = len - 1; k > 0; --k, cp >>= 6) u[k] = (unsigned char)(0x80 | (cp & 0x3f));
+                u[0] = (unsigned char)((len == 2 ? 0xc0 : len == 3 ? 0xe0 : 0xf0) | cp);
+            }
+            if (n + len >= 192) break;
+            memcpy(out + n, u, len);
+            n += len;
+        }
+        out[n] = 0;
+    }
+}
 static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia) {
     if (!p || !directory || !*directory || p->tree) return false;
     FsTree* tree = calloc(1, sizeof *tree);
@@ -309,6 +342,7 @@ static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia)
         if (f) fclose(f);
         free(path);
     }
+    if (icon && smdh_size >= 0x201c && !memcmp(icon, "SMDH", 4)) smdh_title(icon, p->title);
     if (icon && smdh_size >= 0x201c && !memcmp(icon, "SMDH", 4))
         p->region_lockout = (uint32_t)icon[0x2018] | (uint32_t)icon[0x2019] << 8 | (uint32_t)icon[0x201a] << 16 |
                             (uint32_t)icon[0x201b] << 24;

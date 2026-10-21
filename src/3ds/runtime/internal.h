@@ -194,6 +194,7 @@ struct SnxCtrProcess {
     uint32_t bss_size, stack_size; /* the main thread's stack, page-rounded, below SNX_CTR_STACK_TOP */
     uint64_t title_id;
     char name[8];
+    char title[192]; /* the SMDH's short title (English, else the first language that has one), UTF-8; "" without */
     uint32_t region_lockout; /* the SMDH's regions the title runs in, bit per CFG region (0 JPN ... 6 TWN), 0 unknown */
     uint32_t resource_limit; /* CTR_OBJ_RESOURCE_LIMIT object, 0 until the first GetResourceLimit */
     uint32_t ipc_stubs;      /* services whose unknown commands answer success (bit per SNX_CTR_SERVICE_*), with

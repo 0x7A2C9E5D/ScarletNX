@@ -10,6 +10,9 @@
    bounded PPM dumps (the 3DS framebuffer is 240x400/320 portrait, shown rotated 90 degrees clockwise, like the
    console's landscape screens). */
 bool snx_ctr_present_init(SnxCtrMemory* memory, const char* frame_dir);
+/* The window's title, as a Switch game's: the game's name, what it is played with in parentheses when anything (an
+   update, DLC), then the build ("ScarletNX <branch> <commit> (<compiler>, <OS> <arch>)"); and the program's icon */
+void snx_ctr_present_title(const char* name, const char* addons);
 bool snx_ctr_present_ready(void);
 /* Live window output is active (SDL3 Vulkan window + swapchain). When false, frames still render but only the dumps
    record them. */

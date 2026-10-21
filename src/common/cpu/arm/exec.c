@@ -17,7 +17,7 @@
 #include <string.h>
 
 /* a block's -O level, the A64 JIT's default */
-#define BLOCK_OPT '2'
+#define BLOCK_OPT '0'
 
 typedef struct {
     uint64_t key; /* (pc << 1 | thumb) + 1, 0 for an empty slot */
