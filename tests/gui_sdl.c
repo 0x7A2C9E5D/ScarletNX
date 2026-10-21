@@ -2368,9 +2368,12 @@ int main(int argc, char** argv) {
             free(dumps);
             free(moved);
         }
-        /* a folder too long for its row: cut in its middle, its end kept, never sliding; whole under the rows */
+        /* a folder too long for its row: cut in its middle, its end kept, never sliding; whole under the rows. Its
+           middle folder is longer than the row, so that whatever root it has (C:\ is shorter than /tmp/), the end
+           kept is games alone */
         {
-            char* deep = snx_format("%s/a folder name long enough to be cut in its row/games", temporary);
+            char* deep = snx_format(
+                "%s/a folder name long enough to be cut in its row whatever the root before it/games", temporary);
             assert(!snx_mkdirs(deep));
             folder_add(&app, deep, GUI_LIBRARY_DUMPS, false);
             assert(app.folder_count == 2 && app.editor.row == FOLDER_ROW(GUI_ROW_FOLDER, 1) &&
