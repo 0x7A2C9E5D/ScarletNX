@@ -256,9 +256,70 @@ void vk_surf_add(Surf* s) {
     lru_add(s, VK_LRU_TEX);
 }
 
+/* The live render targets (parked ones aren't) by address, open addressed. vk_rt_find is asked about 4,000 times a
+   frame in one game, mostly by texture lookups, and walking the hash chain read two or three Surfs scattered in
+   memory each time: a twentieth of its GPU thread. An address has at most one live target (rt_create parks the one
+   there before it makes or takes another), and a few hundred live at once, so the table stays in the cache. Without
+   it (an allocation failed) the chain is walked */
+typedef struct {
+    u64 gva;
+    Surf* s; /* NULL: a free slot */
+} RtSlot;
+static RtSlot* g_rtx;
+static u32 g_rtx_mask, g_rtx_n;
+static int g_rtx_failed;
+static u32 rtx_home(u64 gva) { return (u32)((gva * 0x9E3779B97F4A7C15ull) >> 40) & g_rtx_mask; }
+static void rtx_put(RtSlot* t, u32 mask, u64 gva, Surf* s) {
+    u32 i = (u32)((gva * 0x9E3779B97F4A7C15ull) >> 40) & mask;
+    while (t[i].s) i = (i + 1) & mask;
+    t[i].gva = gva;
+    t[i].s = s;
+}
+static void rtx_add(Surf* s) {
+    if (g_rtx_failed) return;
+    if ((g_rtx_n + 1) * 2 > (g_rtx ? g_rtx_mask + 1 : 0)) {
+        u32 cap = g_rtx ? (g_rtx_mask + 1) * 2 : 1024;
+        RtSlot* t = calloc(cap, sizeof *t);
+        if (!t) {
+            g_rtx_failed = 1;
+            free(g_rtx);
+            g_rtx = NULL;
+            return;
+        }
+        for (u32 i = 0; g_rtx && i <= g_rtx_mask; i++)
+            if (g_rtx[i].s) rtx_put(t, cap - 1, g_rtx[i].gva, g_rtx[i].s);
+        free(g_rtx);
+        g_rtx = t;
+        g_rtx_mask = cap - 1;
+    }
+    rtx_put(g_rtx, g_rtx_mask, s->gva, s);
+    g_rtx_n++;
+}
+/* the live target at gva out of the table, the slots after it shifted back so that every probe still finds its own */
+static void rtx_del(u64 gva) {
+    u32 i, j;
+    if (!g_rtx) return;
+    for (i = rtx_home(gva); g_rtx[i].s && g_rtx[i].gva != gva; i = (i + 1) & g_rtx_mask) {}
+    if (!g_rtx[i].s) return;
+    g_rtx_n--;
+    for (j = (i + 1) & g_rtx_mask; g_rtx[j].s; j = (j + 1) & g_rtx_mask) {
+        u32 h = rtx_home(g_rtx[j].gva);
+        /* j's entry stays when its home lies cyclically in (i, j] */
+        if (i <= j ? (i < h && h <= j) : (i < h || h <= j)) continue;
+        g_rtx[i] = g_rtx[j];
+        i = j;
+    }
+    g_rtx[i].s = NULL;
+}
 Surf* vk_rt_find(u64 gva) {
-    for (Surf* s = g_surfh[hkey(gva)]; s; s = s->next)
-        if (s->gva == gva && s->is_rt) return s;
+    if (g_rtx_failed) {
+        for (Surf* s = g_surfh[hkey(gva)]; s; s = s->next)
+            if (s->gva == gva && s->is_rt) return s;
+        return NULL;
+    }
+    if (!g_rtx) return NULL;
+    for (u32 i = rtx_home(gva); g_rtx[i].s; i = (i + 1) & g_rtx_mask)
+        if (g_rtx[i].gva == gva) return g_rtx[i].s;
     return NULL;
 }
 
@@ -726,12 +787,14 @@ static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 
     for (Surf* s = g_surfh[hkey(gva)]; s; s = s->next)
         if (s->gva == gva && s->is_rt) {
             rt_pages(s, -1);
+            rtx_del(gva);
             s->gva = gva | 1ull << 63;
             g_parked++;
             g_vk_surf_epoch++;
         }
     if (parked) {
         parked->gva = gva;
+        rtx_add(parked);
         g_parked--;
         g_vk_surf_epoch++;
         rt_pages(parked, 1);
@@ -741,6 +804,7 @@ static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 
     VkFmt f = depth ? vk_zt_format(fmt) : vk_rt_format(fmt);
     Surf* s = surf_create(gva, w, h, f, fkey, bl, bh, pitch, 1, layers);
     if (!s) return NULL;
+    rtx_add(s);
     s->layer_size = layer_size;
     s->bd = bd;
     s->volume = volume;
@@ -947,6 +1011,7 @@ static int lossless(const Surf* s) {
 }
 /* s out of the table and freed, with its copies (gpu/vk/texture.c rt_crop): the device memory that releases */
 static u64 surf_evict(Surf* s) {
+    if (s->is_rt && !(s->gva >> 63)) rtx_del(s->gva);
     for (Surf** pp = &g_surfh[hkey(s->gva)]; *pp; pp = &(*pp)->next)
         if (*pp == s) {
             *pp = s->next;
