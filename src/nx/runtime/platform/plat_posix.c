@@ -975,6 +975,23 @@ static int run_dialog(char* const argv[], char* out, size_t cap) {
     }
 }
 
+#ifndef __APPLE__
+/* zenity takes the initial text joined to its option, so it goes through a buffer. kdialog takes it as an argument of
+   its own, so a long text only fails the dialog that needs the buffer */
+static int run_text_dialog(int kdialog_dialog, const char* initial, char* out, size_t cap) {
+    if (kdialog_dialog) {
+        char* kdialog[] = {"kdialog", "--title", "ScarletNX", "--inputbox", "Enter text", NULL, NULL};
+        kdialog[5] = (char*)initial;
+        return run_dialog(kdialog, out, cap);
+    }
+    char entry[1100];
+    char* zenity[] = {"zenity", "--entry", "--title=ScarletNX", "--text=Enter text", NULL, NULL};
+    if ((size_t)snprintf(entry, sizeof entry, "--entry-text=%s", initial) >= sizeof entry) return DIALOG_FAILED;
+    zenity[4] = entry;
+    return run_dialog(zenity, out, cap);
+}
+#endif
+
 int plat_text_input(char* out, size_t cap, const char* initial) {
     int r;
 #if defined(__APPLE__)
@@ -993,16 +1010,10 @@ int plat_text_input(char* out, size_t cap, const char* initial) {
     argv[8] = (char*)initial;
     r = run_dialog(argv, out, cap);
 #else
-    char entry[1100];
     const char* desk = getenv("XDG_CURRENT_DESKTOP");
     int kde_first = desk && (strstr(desk, "KDE") || strstr(desk, "Plasma"));
-    char* zenity[] = {"zenity", "--entry", "--title=ScarletNX", "--text=Enter text", NULL, NULL};
-    char* kdialog[] = {"kdialog", "--title", "ScarletNX", "--inputbox", "Enter text", NULL, NULL};
-    if ((size_t)snprintf(entry, sizeof entry, "--entry-text=%s", initial) >= sizeof entry) return -1;
-    zenity[4] = entry;
-    kdialog[5] = (char*)initial;
-    r = run_dialog(kde_first ? kdialog : zenity, out, cap);
-    if (r == DIALOG_MISSING) r = run_dialog(kde_first ? zenity : kdialog, out, cap);
+    r = run_text_dialog(kde_first, initial, out, cap);
+    if (r == DIALOG_MISSING) r = run_text_dialog(!kde_first, initial, out, cap);
 #endif
     return r < 0 ? -1 : r;
 }
