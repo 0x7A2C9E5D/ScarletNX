@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_GUI_THEME_H
 #define SNX_GUI_THEME_H
+#include "common/utilities/run_theme.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -153,4 +154,8 @@ void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, cons
 /* the built-ins, then each other folder of dirs with a theme.ini, once */
 void gui_themes_scan(GuiThemes* themes, const char* const* dirs, size_t count);
 void gui_themes_free(GuiThemes* themes);
+/* The loading screen's look of the theme the launcher of a program in folder picked (its app.ini's [app] theme, from
+   the built-ins and its data folder's themes/; YoRHa, the launcher's own, until one is picked), for the runtime's
+   screens (main.h's snx_menu_run_theme) */
+void gui_run_theme(const char* folder, SnxRunTheme* out);
 #endif

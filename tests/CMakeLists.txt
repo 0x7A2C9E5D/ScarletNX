@@ -1328,6 +1328,11 @@ snx_test_target(snx-test-mme-jit 23)
 target_link_libraries(snx-test-mme-jit PRIVATE snx_llvm)
 add_test(NAME mme_jit COMMAND snx-test-mme-jit)
 
+# the shader programs a game ships, found in containers built by the test (gpu/shader/shipped.c)
+add_executable(snx-test-shipped-shaders shipped_shaders.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/shader/shipped.c")
+snx_test_target(snx-test-shipped-shaders 99)
+add_test(NAME shipped_shaders COMMAND snx-test-shipped-shaders)
+
 add_executable(snx-test-etc2 etc2_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
 snx_test_target(snx-test-etc2 23)
 add_test(NAME etc2_decode COMMAND snx-test-etc2)

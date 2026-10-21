@@ -543,3 +543,40 @@ char* gui_theme_write(const GuiTheme* theme, const GuiThemeFile* file) {
     }
     return o.p;
 }
+static uint32_t rgb_word(GuiRgb c) { return (uint32_t)c.r << 16 | (uint32_t)c.g << 8 | c.b; }
+void gui_run_theme(const char* folder, SnxRunTheme* out) {
+    char *config = snx_menu_dir(folder, SNX_USER_CONFIG), *data = snx_menu_dir(folder, SNX_USER_DATA);
+    char *app = config ? snx_path_join(config, "app.ini") : NULL, *themes = data ? snx_path_join(data, "themes") : NULL;
+    size_t bytes = 0;
+    char *text = app ? (char*)snx_read_file(app, &bytes) : NULL, *key, *value, id[64] = "yorha";
+    const char* dirs[1];
+    GuiTheme* t = malloc(sizeof *t);
+    SnxIni ini;
+    memset(out, 0, sizeof *out);
+    if (text) {
+        snx_ini_start(&ini, text);
+        while (snx_ini_next(&ini, &key, &value))
+            if (!strcmp(ini.section, "app") && !strcmp(key, "theme") && *value) snprintf(id, sizeof id, "%s", value);
+    }
+    dirs[0] = themes;
+    if (t) {
+        gui_theme_load(t, dirs, themes ? 1 : 0, id);
+        out->page = rgb_word(t->run_colors.page);
+        out->ink = rgb_word(t->run_colors.ink);
+        out->soft = rgb_word(t->run_colors.soft);
+        out->dim = rgb_word(t->run_colors.dim);
+        out->failure = rgb_word(t->run_colors.failure);
+        snprintf(out->name, sizeof out->name, "%s", t->name);
+        snprintf(out->title, sizeof out->title, "%s", t->title[GUI_SCREEN_LOADING]);
+        out->steps = t->run == GUI_RUN_STEPS;
+        out->texture = t->texture;
+        out->bar = t->bar;
+        out->progress = t->progress;
+    }
+    free(t);
+    free(text);
+    free(themes);
+    free(app);
+    free(data);
+    free(config);
+}

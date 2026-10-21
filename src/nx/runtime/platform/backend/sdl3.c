@@ -49,6 +49,7 @@ static int g_shot_req;
 static int g_audio_ready;
 static int g_hidden;         /* the app is in the background (Android) */
 static int g_given_up;       /* the window went to a fatal error's screen: the renderer presents nothing more */
+static char g_pressed[48];   /* backend_pressed's: the press since its last call, "" for none */
 static char g_title[256];    /* the game's name, for that screen */
 static SDL_Haptic* g_buzzer; /* the phone's vibrator, for the on-screen controls' taps (Android) */
 static u32 g_generation;     /* the window's surface came back this many times */
@@ -913,6 +914,17 @@ void video_poll(void) {
     /* the menu had the controls when this poll began: the press that closes it (B) is in this poll's state */
     int menu_had = overlay_shown() || vpad_editing();
     while (!g_opt_headless && SDL_PollEvent(&e)) {
+        /* not the mouse's: the click that gives the window the focus arrives as one */
+        /* not a modifier, nor a key with Ctrl, Alt or the system key: the desktop's shortcuts (the system key alone
+           skipped one run) */
+        if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && e.key.key != SDLK_ESCAPE &&
+            !(e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
+            !(e.key.key >= SDLK_LCTRL && e.key.key <= SDLK_RGUI))
+            snprintf(g_pressed, sizeof g_pressed, "the key %s", SDL_GetKeyName(e.key.key));
+        else if (e.type == SDL_EVENT_FINGER_DOWN)
+            snprintf(g_pressed, sizeof g_pressed, "%s", "a touch");
+        else if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)
+            snprintf(g_pressed, sizeof g_pressed, "a gamepad's button %d", (int)e.gbutton.button);
         if (overlay_event(&e)) continue;
         switch (e.type) {
             case SDL_EVENT_QUIT: g_quit = 1; break;
@@ -1092,6 +1104,13 @@ void video_poll(void) {
     pm_unlock(&g_hle.hid.input_lock);
 }
 
+const char* backend_pressed(void) {
+    static char was[sizeof g_pressed];
+    if (!g_pressed[0]) return NULL;
+    memcpy(was, g_pressed, sizeof was);
+    g_pressed[0] = 0;
+    return was;
+}
 void frontend_frame(void) {
     char p[1200];
     /* the controls and the menu stay on the window while the game shows nothing new */

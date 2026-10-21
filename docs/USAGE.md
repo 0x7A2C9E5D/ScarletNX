@@ -240,6 +240,7 @@ With `--out work/Game` and `--outdir games` as above (without them, see [Folders
 | `games/<id>/<id>_build/` | Generated code, only with `--keep-ir` |
 | `games/<id>/shader_cache/vk_pipelines.bin` | Vulkan pipeline cache |
 | `games/<id>/shader_cache/<id>.vkshaders` | Translated shaders and the pipelines made, made again at the next start |
+| `games/<id>/shader_cache/<id>.vkshipped` | The shader programs found in the game's own files and executables, translated before it draws (`prepare_shaders`), each read when a draw first needs it |
 
 ## GDB (UNIX only)
 
@@ -439,7 +440,7 @@ written, so a data folder with no users.ini plays as `Player`, uid `0123456789ab
 
 `Game.ini`: help rewritten at startup, most settings hot-reload. `--key=value` overrides one run.
 Restart for `docked`, `fullscreen`, `language`, `resolution`, `anisotropy`, `memory_gb`, `heap_max_mb`, `airplane_mode`,
-`ldn`, `room`, `pipeline_threads`, `jit_threads`, and the `[Debug]` settings other than `log`, `auto_stub_ipc` and `diag`.
+`ldn`, `room`, `pipeline_threads`, `prepare_shaders`, `jit_threads`, and the `[Debug]` settings other than `log`, `auto_stub_ipc` and `diag`.
 `scarletnx --settings` prints each setting the launcher's Settings offer, one a line: its section, key, default,
 type, range and help, tab-separated. Every setting, the recompiler's too, is described once in
 `src/nx/runtime/settings.txt`, which the build generates the tables and `g_settings` from.
@@ -460,6 +461,7 @@ type, range and help, tab-separated. Every setting, the recompiler's too, is des
 | `memory_gb` | `0` | Memory the game sees. Below `6` it is the console's 3.2 GB, `6` gives 4.8 GB and `8` gives 6.8 GB. Games that run out of memory on 3.2 GB, like Tears of the Kingdom, need `6` |
 | `heap_max_mb` | `0` | The most heap the game can allocate, in MB. `0` is as much as the memory allows |
 | `pipeline_threads` | `0` | Threads that make the GPU's new pipelines while the game goes on. `0` uses a quarter of the computer's threads, two to six; `1` to `32` is that many. More make a first run's new pipelines sooner, with less CPU left for the game |
+| `prepare_shaders` | `2` | The shader programs the game ships in its files and executables, found and translated before it draws with them, once for each build. `0` does none. `1` does it while the game starts, until its first picture. `2` shows a screen in the launcher theme's loading look that waits for them and for the pipelines of earlier runs, so an opening movie doesn't stutter. Any key or button but a modifier skips it |
 | `jit_threads` | `0` | Threads compiling the game code the recompiler missed, which a thread waits for when it reaches it. `0` uses every CPU the game may run on but two, at most 8. They run below the game's threads |
 | `network` | `0` | `0` reports offline and lets the game reach only loopback, which is not a network sandbox. `1` uses the computer's connection, and the resolver blocks known console service domains. Local wireless works either way (`ldn`) |
 | `airplane_mode` | `0` | `1` is the console in airplane mode: offline whatever `network` says, no local wireless, as the game hears it, and in no Eden room |

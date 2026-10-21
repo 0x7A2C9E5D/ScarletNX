@@ -7,6 +7,23 @@
 #include "common/cpu/aarch64/cpu.h"
 #include "nx/gpu/gpu.h"
 
+/* What the renderer makes before the game draws, for the screen main.c shows while it does: the shader programs the
+   game ships in its RomFS, found and translated, and the pipelines of earlier runs. done once the pass over the RomFS
+   ended (finished, stopped, or not run) and those pipelines are made */
+typedef struct RendererPrepare {
+    u32 files, files_seen;       /* the RomFS's files, and those the pass looked at for programs */
+    u32 programs, programs_done; /* the programs found in them (once all were looked at), and those translated */
+    u32 shipped;                 /* the programs it translated, this run */
+    u32 shaders;                 /* shaders of earlier runs, theirs included */
+    u32 pipes, pipes_made;       /* pipelines of earlier runs, and those made */
+    int scanning;                /* the pass runs */
+    int done;
+#define RENDERER_NOTES     48
+#define RENDERER_NOTE_SIZE 256                     /* a line's bytes: as wide as a wide window's row, which cuts it */
+    char note[RENDERER_NOTES][RENDERER_NOTE_SIZE]; /* the pass's latest lines, oldest first (the log has every one) */
+    int notes;
+} RendererPrepare;
+
 typedef struct Renderer {
     const char* name;
     int (*start)(void); /* 0 when it can't run here */
@@ -97,6 +114,10 @@ typedef struct Renderer {
        as nothing else can draw in a window something presents to. Called on the failing thread, which never returns to
        its callers, so it keeps no lock. 0 when another thread held the renderer too long. NULL without a window */
     int (*release_window)(void);
+    /* RendererPrepare's progress, any thread; prepare_stop ends the RomFS pass at its next program (the rest of the
+       pipelines are made in the background, as the game goes on). NULL when the renderer makes nothing before */
+    void (*prepare)(RendererPrepare* p);
+    void (*prepare_stop)(void);
 } Renderer;
 
 extern const Renderer vk_renderer;

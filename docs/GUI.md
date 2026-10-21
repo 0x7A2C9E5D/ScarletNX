@@ -383,6 +383,12 @@ what hactool has written, the recompile by its blocks, shows how far it is on it
 driver's own row says it, `extracted 1229 of 4096 MB (30%)`, written over itself each second. The menu fades out to black as a run starts and the run fades in from it; ESC
 fades the run out and the menu back in.
 
+The runtime draws a loading screen of its own in the same look: the shaders it prepares before a game starts
+(`prepare_shaders`), as steps with their progress, the lines of the work scrolling under them, and a progress bar in
+every theme. It reads the theme the launcher picked from the launcher's `app.ini`, from the built-ins and the data
+folder's `themes/`, and uses its `[run]` colours, its loading title and its `progress`. A runtime built without the
+launcher draws YoRHa's.
+
 A theme is also a folder holding a `theme.ini`, the folder's name its id, in
 `themes/` in that same folder or in `themes/` beside the GUI; the first one found
 wins, and a folder named like a built-in replaces it. The built-ins are such files, and

@@ -165,3 +165,17 @@ int loader_load(void) {
         if (load_module(&g_mod->mods[i])) return -1;
     return 0;
 }
+void loader_segments(int (*each)(void* ctx, const char* name, const u8* bytes, u64 gva, u64 size), void* ctx) {
+    for (u32 i = 0; g_mod && i < g_mod->nmods; i++) {
+        const SnxModInfo* mi = &g_mod->mods[i];
+        char name[96];
+        snprintf(name, sizeof name, "%s.ro", mi->name ? mi->name : "module");
+        if (mi->ro_size && inside(mi->ro_off, mi->ro_size, mi->size) &&
+            each(ctx, name, GP(mi->base + mi->ro_off), mi->base + mi->ro_off, mi->ro_size))
+            return;
+        snprintf(name, sizeof name, "%s.data", mi->name ? mi->name : "module");
+        if (mi->data_size && inside(mi->data_off, mi->data_size, mi->size) &&
+            each(ctx, name, GP(mi->base + mi->data_off), mi->base + mi->data_off, mi->data_size))
+            return;
+    }
+}

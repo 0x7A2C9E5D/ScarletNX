@@ -4,6 +4,7 @@
    Every stage has a descriptor set of the same bindings, one set per stage
    (shader_vk_set). Pipelines are made per PipeKey: the shaders, vertex layout, attachment formats and blend state;
    everything else is dynamic state. */
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +17,10 @@
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/vk/pipeline_file.h"
 #include "nx/gpu/vk/internal_spv.h"
+#include "nx/gpu/renderer.h"
+#include "nx/gpu/shader/shipped.h"
+#include "nx/hle/filesystem/fs.h"
+#include "nx/runtime/loader.h"
 #include "common/utilities/build_info.h"
 #include "common/utilities/common.h"
 #include <sys/stat.h>
@@ -36,6 +41,8 @@ static VkPipelineCache g_pcache;
 static void pf_start_load(void);
 static void pf_merge(void);
 static void pf_shader_record(const VkSh* s, const u32* spv, size_t nw);
+static void pf_ship_found(VkSh* s);
+static VkSh* pf_ship_take(u64 h, int stage, const u32 mask[20], u32 len, u64 qh, u32 len_a, u64 qh_a);
 /* the channel and stage whose bound constant buffers the translator reads, for the vk_shader_get call running */
 static const GpuChannel* g_sh_ch;
 static int g_sh_bind;
@@ -103,8 +110,12 @@ const char* vk_spirv_unavailable(const u32* spv, size_t words) {
     return NULL;
 }
 
+/* The translator's reader (g_shader_cb_read) and what rec_read records into are one for the process: the GPU thread's
+   draws and dispatches and the RomFS pass on the shader file's thread (pf_ship) translate and hash one at a time */
+static PMutex g_xlate_lock = PMUTEX_INIT;
 u32* vk_translate_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* words, VkCbReader read,
                         VkCbReads* reads) {
+    pm_lock(&g_xlate_lock);
     int (*old)(u32, u32, u32*) = g_shader_cb_read;
     g_rec_read = read;
     g_rec = reads;
@@ -121,7 +132,9 @@ u32* vk_translate_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si
                                   g_vk_preserve_infnan64, (g_vk_subgroup_stages & shader_stage) != 0);
     g_shader_cb_read = old;
     g_rec = NULL;
-    if (g_rec_failed) {
+    int failed = g_rec_failed;
+    pm_unlock(&g_xlate_lock);
+    if (failed) {
         free(result);
         return NULL;
     }
@@ -144,10 +157,12 @@ u32* vk_translate_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si
 /* shader_hash with the jump tables of BRX read through read, as the translation reads them: without a reader the
    length stops at the first EXIT and leaves out code only a jump table reaches */
 u64 vk_shader_hash(const u8* code, u32 max_bytes, u32* out_len, VkCbReader read) {
+    pm_lock(&g_xlate_lock);
     int (*old)(u32, u32, u32*) = g_shader_cb_read;
     g_shader_cb_read = read;
     u64 h = shader_hash(code, max_bytes, out_len);
     g_shader_cb_read = old;
+    pm_unlock(&g_xlate_lock);
     return h;
 }
 int vk_cb_reads_hold(const VkCbReads* reads, VkCbReader read) {
@@ -345,6 +360,88 @@ static u64 g_pipes_new, g_sh_new, g_sh_ns;
 static u64 g_pipe_wait_ns; /* the GPU thread's and the recording thread's waits, added atomically */
 static u64 g_pipe_make_ns; /* the workers' time making pipelines, added atomically */
 static u64 g_pipe_hits;    /* pipelines the pipeline cache had */
+/* what a shader's key words (vk_shader_get's mask) tell its translation, into si zeroed */
+static void sh_key_info(ShaderInfo* si, int stage, const u32 mask[20], const ShXfb* xfb) {
+    u64 ints = mask[0] | (u64)mask[1] << 32, sints = mask[2] | (u64)mask[3] << 32;
+    memset(si, 0, sizeof *si);
+    if (stage == ST_FS) {
+        si->tex_int_mask = ints;
+        si->tex_sint_mask = sints;
+        si->rt_int_mask = mask[4];
+        si->rt_sint_mask = mask[5];
+        si->tex_dc_color_mask = mask[7] | (u64)mask[8] << 32;
+        si->tex_dc_color_funcs = mask[9];
+        si->in_unfed_mask = mask[10];
+        si->early_fragment_tests = mask[11];
+    } else {
+        si->attr_int_mask = ints;
+        si->attr_sint_mask = sints;
+        si->rt_int_mask = mask[4]; /* the tessellation or geometry primitive */
+        si->clip_enable = mask[6];
+        memcpy(si->gp_skip_mask, mask + 12, sizeof si->gp_skip_mask);
+        if (xfb) si->xfb = *xfb;
+    }
+}
+/* s for its key, from code (0x10000 bytes: the merged program, for VertexA and VertexB) whose whole code hashes to h,
+   each part with its length and hash, translated: its SPIR-V (malloc'd, nw words), the constant buffers the
+   translation read through read in s->cbr. NULL when it can't be (si.first_unsupported says why). shipped: a program
+   the game ships, translated before any draw (pf_ship), which fails when its translation read a constant buffer: a
+   draw's lookup checks those reads against its own buffers, which no read without them matches */
+static u32* sh_spirv(VkSh* s, const u8* code, u64 h, int stage, const u32 mask[20], u32 len, u64 qh, u32 len_a,
+                     u64 qh_a, const ShXfb* xfb, VkCbReader read, int shipped, size_t* nw) {
+    s->shipped = shipped;
+    s->hash = h;
+    s->stage = stage;
+    memcpy(s->mask, mask, sizeof s->mask);
+    s->clen = len;
+    s->qh = qh;
+    s->clen_a = len_a;
+    s->qh_a = qh_a;
+    sh_key_info(&s->si, stage, mask, xfb);
+    *nw = 0;
+    u32* spv = vk_translate_spirv(code, 0x10000, stage, &s->si, nw, read, &s->cbr);
+    for (int i = 0; i < s->si.ntex; i++) s->indexed |= (s->si.tex[i].flags & SNX_TEX_INDEXED) != 0;
+    if (spv && shipped && s->cbr.n) {
+        free(spv);
+        spv = NULL;
+        snprintf(s->si.first_unsupported, sizeof s->si.first_unsupported, "a jump table in a constant buffer");
+    }
+    if (spv && s->si.nimg) {
+        u32 image_slots = g_vk.props.limits.maxPerStageDescriptorStorageImages;
+        if (image_slots > g_vk.props.limits.maxDescriptorSetStorageImages)
+            image_slots = g_vk.props.limits.maxDescriptorSetStorageImages;
+        int needs_unformatted = 0;
+        for (int i = 0; i < s->si.nimg; i++) needs_unformatted |= s->si.img[i].kind == 0;
+        if (stage != ST_FS || (u32)s->si.nimg > image_slots ||
+            (needs_unformatted && !g_vk.feat.shaderStorageImageWriteWithoutFormat)) {
+            free(spv);
+            spv = NULL;
+            snprintf(s->si.first_unsupported, sizeof s->si.first_unsupported,
+                     "fragment storage image feature or descriptor limit");
+        }
+    }
+    return spv;
+}
+/* A draw's shader (sh_spirv's arguments): translated, its module made, kept in the shader file. One that couldn't be
+   translated comes back failed; NULL when out of memory */
+static VkSh* sh_make(const u8* code, u64 h, int stage, const u32 mask[20], u32 len, u64 qh, u32 len_a, u64 qh_a,
+                     const ShXfb* xfb, VkCbReader read) {
+    size_t nw;
+    VkSh* s = calloc(1, sizeof *s);
+    if (!s) return NULL;
+    u32* spv = sh_spirv(s, code, h, stage, mask, len, qh, len_a, qh_a, xfb, read, 0, &nw);
+    if (spv) {
+        VkShaderModuleCreateInfo mi = {
+            .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = nw * 4, .pCode = spv};
+        if (!VK_OK(vkCreateShaderModule(g_vk.dev, &mi, NULL, &s->mod)))
+            s->failed = 1;
+        else
+            pf_shader_record(s, spv, nw);
+        free(spv);
+    } else
+        s->failed = 1;
+    return s;
+}
 VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int_mask, u64 sint_mask, u32 rt_int,
                     u32 rt_sint, u32 clip, u64 dc_color, u32 dc_funcs, u32 unfed, const ShXfb* xfb) {
     pf_merge();
@@ -417,10 +514,12 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
             return NULL;
         }
         /* the merge sizes A and B with shader_hash too */
+        pm_lock(&g_xlate_lock);
         int (*old)(u32, u32, u32*) = g_shader_cb_read;
         g_shader_cb_read = sh_cb_read;
         int merged = shader_merge_dual(a, code, m, 0x10000);
         g_shader_cb_read = old;
+        pm_unlock(&g_xlate_lock);
         if (merged) {
             free(code);
             code = m;
@@ -441,68 +540,26 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
         if (q->hash == h && q->stage == stage && !memcmp(q->mask, mask, sizeof mask) && q->clen == len &&
             q->qh == qh && q->clen_a == len_a && q->qh_a == qh_a && vk_cb_reads_hold(&q->cbr, sh_cb_read))
             s = q;
+    if (s && s->shipped == 1) pf_ship_found(s);
+    if (!s && (s = pf_ship_take(h, stage, mask, len, qh, len_a, qh_a)) != NULL) {
+        s->next = g_shh[h & 1023];
+        g_shh[h & 1023] = s;
+    }
     if (!s) {
-        s = calloc(1, sizeof *s);
+        if (vk_corpus_dir()) { /* the key's words as sh_make takes them into si, which the corpus keeps */
+            ShaderInfo si;
+            sh_key_info(&si, stage, mask, xfb);
+            shader_corpus_save(vk_corpus_dir(), code, mlen, 0x10000, stage, &si, h ^ mix);
+        }
+        u64 t0 = plat_ns();
+        s = sh_make(code, h, stage, mask, len, qh, len_a, qh_a, xfb, sh_cb_read);
         if (!s) {
             free(code);
             return NULL;
         }
-        s->hash = h;
-        s->stage = stage;
-        memcpy(s->mask, mask, sizeof mask);
-        s->clen = len;
-        s->qh = qh;
-        s->clen_a = len_a;
-        s->qh_a = qh_a;
-        if (stage == ST_FS) {
-            s->si.tex_int_mask = int_mask;
-            s->si.tex_sint_mask = sint_mask;
-            s->si.rt_int_mask = rt_int;
-            s->si.rt_sint_mask = rt_sint;
-            s->si.tex_dc_color_mask = dc_color;
-            s->si.tex_dc_color_funcs = dc_funcs;
-            s->si.in_unfed_mask = unfed;
-            s->si.early_fragment_tests = mask[11];
-        } else {
-            s->si.attr_int_mask = int_mask;
-            s->si.attr_sint_mask = sint_mask;
-            s->si.rt_int_mask = rt_int; /* the tessellation or geometry primitive */
-            s->si.clip_enable = clip;
-            memcpy(s->si.gp_skip_mask, mask + 12, sizeof s->si.gp_skip_mask);
-            if (xfb) s->si.xfb = *xfb;
-        }
-        if (vk_corpus_dir()) shader_corpus_save(vk_corpus_dir(), code, mlen, 0x10000, stage, &s->si, h ^ mix);
-        u64 t0 = plat_ns();
-        size_t nw = 0;
-        u32* spv = vk_translate_spirv(code, 0x10000, stage, &s->si, &nw, sh_cb_read, &s->cbr);
-        for (int i = 0; i < s->si.ntex; i++) s->indexed |= (s->si.tex[i].flags & SNX_TEX_INDEXED) != 0;
-        if (spv && s->si.nimg) {
-            u32 image_slots = g_vk.props.limits.maxPerStageDescriptorStorageImages;
-            if (image_slots > g_vk.props.limits.maxDescriptorSetStorageImages)
-                image_slots = g_vk.props.limits.maxDescriptorSetStorageImages;
-            int needs_unformatted = 0;
-            for (int i = 0; i < s->si.nimg; i++) needs_unformatted |= s->si.img[i].kind == 0;
-            if (stage != ST_FS || (u32)s->si.nimg > image_slots ||
-                (needs_unformatted && !g_vk.feat.shaderStorageImageWriteWithoutFormat)) {
-                free(spv);
-                spv = NULL;
-                snprintf(s->si.first_unsupported, sizeof s->si.first_unsupported,
-                         "fragment storage image feature or descriptor limit");
-            }
-        }
-        if (spv) {
-            VkShaderModuleCreateInfo mi = {
-                .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = nw * 4, .pCode = spv};
-            if (!VK_OK(vkCreateShaderModule(g_vk.dev, &mi, NULL, &s->mod)))
-                s->failed = 1;
-            else
-                pf_shader_record(s, spv, nw);
-            free(spv);
-        } else {
-            s->failed = 1;
+        if (s->failed)
             WARN("vulkan: shader %016llx (stage %d) not translated: %s\n", (unsigned long long)h, stage,
                  s->si.first_unsupported[0] ? s->si.first_unsupported : "unsupported feature or float controls");
-        }
         g_sh_new++;
         g_sh_ns += plat_ns() - t0;
         s->next = g_shh[h & 1023];
@@ -583,6 +640,12 @@ static Pipe* g_pipeh[PIPEH];
    meanwhile. A thread of its own reads the file at startup, makes the modules and queues the pipelines to the workers
    behind any draw's; the first draw puts what it made in the tables (pf_merge), where vk_shader_get finds a shader
    only as it finds one made this run, by its code hashed in guest memory, its key and its constant buffer reads */
+/* a shader of the shipped file: its key's words, the clip word of the key the pass gave it (ship_clip), and where its
+   record starts (at 0: a free slot) */
+typedef struct {
+    u64 hash, qh, qh_a, at;
+    u32 clen, clen_a, stage, clip;
+} ShipIdx;
 static struct {
     PFile file;
     char path[1400];
@@ -595,6 +658,27 @@ static struct {
     Pipe* pipes;        /* its pipelines, linked by next until merged */
     u32 nsh, npipe;
     u64 made, hits; /* its pipelines made, and those the pipeline cache had (the workers add, atomically) */
+    /* The RomFS pass (pf_ship_pass): the shader programs the game ships, translated before a draw asks for them, in
+       a file of their own (ship, <game>.vkshipped) that is read as they are used: a game ships thousands, and a
+       session uses a few of them. Its PF_SCAN records say which of the RomFS's files the pass read (SCAN_FILE), and
+       that it read them all (SCAN_ALL) */
+    PFile ship;
+    char ship_path[1400];
+    ShipIdx* idx; /* its shaders by hash, open addressing (icap a power of two); read-only once loaded */
+    u32 icap, nidx;
+    u64* scanned; /* the PF_SCAN ids, in the file's order */
+    u32 nscanned, scanned_cap;
+    int stop;              /* the pass ends at its next program: a draw came, or the screen was skipped (atomic) */
+    int scanning;          /* it runs (atomic) */
+    u32 files, files_seen; /* the RomFS's files, and those the count's walk is past (atomics) */
+    u32 programs, programs_done, ship_new; /* the programs to read, those it is past, and its new shaders (atomics) */
+    char apart[64];                        /* the reading thread's counters above, the GPU thread's below */
+    u32 ship_used;                         /* its shaders a draw found (atomic) */
+    u32 ship_said;                         /* ship_used as vk_pipeline_save last logged it */
+    u32 shaders_total, pipes_total;        /* nsh and npipe once the file was read (atomics) */
+    PMutex note_lock;                      /* the pass's lines, for the screen: the latest, round */
+    char note[RENDERER_NOTES][RENDERER_NOTE_SIZE];
+    u32 nnote; /* the lines so far */
 } g_pf;
 static void pf_pipe_record(const PipeKey* k);
 
@@ -1010,6 +1094,12 @@ VkPipelineCache vk_pipeline_cache(void) {
    at exit waits for a periodic one in progress to finish its file before the process ends */
 static PMutex g_psave = PMUTEX_INIT;
 void vk_pipeline_save(void) {
+    u32 used = __atomic_load_n(&g_pf.ship_used, __ATOMIC_RELAXED);
+    if (used != g_pf.ship_said) { /* the frontend's thread alone saves and says */
+        g_pf.ship_said = used;
+        LOG("vulkan: %u of the %u shaders translated from the game's files found by its draws so far\n", used,
+            g_pf.nidx);
+    }
     pm_lock(&g_psave);
     if (!g_pcache || !__atomic_exchange_n(&g_pcache_dirty, 0, __ATOMIC_RELAXED)) {
         pm_unlock(&g_psave);
@@ -1047,22 +1137,26 @@ static VkShaderModule mod_handle(u64 v) {
 }
 typedef char pf_cbr_words[sizeof(VkCbRead) == 16 ? 1 : -1]; /* the file's reads are VkCbRead's four words */
 
-/* s, made this run from spv: kept for the next one */
-static void pf_shader_record(const VkSh* s, const u32* spv, size_t nw) {
-    PfShader r;
-    if (!g_pf.on || nw > 0xFFFFFFFFu) return;
-    memset(&r, 0, sizeof r);
+/* s's record, of spv (nw words), into pf for module (0 for none): where it starts in the file, 0 when not written */
+static u64 pf_shader_into(PFile* pf, const VkSh* s, u64 module, const u32* spv, size_t nw) {
+    PfShader r = {0};
+    if (!g_pf.on || nw > 0xFFFFFFFFu) return 0;
     r.hash = s->hash;
     r.qh = s->qh;
     r.qh_a = s->qh_a;
     r.stage = (u32)s->stage;
     r.clen = s->clen;
     r.clen_a = s->clen_a;
+    r.flags = s->shipped ? PF_SHIPPED : 0;
     r.ncbr = s->cbr.n;
     r.nspv = (u32)nw;
     memcpy(r.mask, s->mask, sizeof r.mask);
     memcpy(&r.si, &s->si, sizeof r.si);
-    pf_shader(&g_pf.file, mod_bits(s->mod), &r, (const u32*)(const void*)s->cbr.r, spv);
+    return pf_shader(pf, module, &r, (const u32*)(const void*)s->cbr.r, spv);
+}
+/* s, made this run from spv: kept for the next one */
+static void pf_shader_record(const VkSh* s, const u32* spv, size_t nw) {
+    pf_shader_into(&g_pf.file, s, mod_bits(s->mod), spv, nw);
 }
 /* a draw's pipeline, made: kept for the next run, its modules by their shaders' records (any thread) */
 static void pf_pipe_record(const PipeKey* k) {
@@ -1079,23 +1173,33 @@ static void pf_pipe_record(const PipeKey* k) {
     pf_pipe(&g_pf.file, m, &c, sizeof c);
 }
 
-/* on the reading thread: a shader of the file, made into a VkSh as vk_shader_get makes one, but without translating */
-static u64 pf_load_shader(void* ctx, const PfShader* r, const u32* cbr, const u32* spv) {
+/* s after the file's shaders, which pf_merge puts in the tables (the reading thread, before loaded) */
+static void pf_sh_append(VkSh* s) {
+    if (g_pf.sh_tail)
+        g_pf.sh_tail->next = s;
+    else
+        g_pf.sh = s;
+    g_pf.sh_tail = s;
+    g_pf.nsh++;
+}
+/* a shader record (its reads and SPIR-V after it) made into a VkSh as vk_shader_get makes one, without translating:
+   NULL when it can't be */
+static VkSh* sh_from_record(const PfShader* r, const u32* cbr, const u32* spv) {
     VkSh* s;
-    (void)ctx;
-    if (r->si.ntex < 0 || r->si.ntex > SH_MAXTEX || vk_spirv_unavailable(spv, r->nspv)) return 0;
+    if (r->si.ntex < 0 || r->si.ntex > SH_MAXTEX || vk_spirv_unavailable(spv, r->nspv)) return NULL;
     s = calloc(1, sizeof *s);
-    if (!s) return 0;
+    if (!s) return NULL;
     if (r->ncbr) {
         s->cbr.r = malloc(r->ncbr * sizeof *s->cbr.r);
         if (!s->cbr.r) {
             free(s);
-            return 0;
+            return NULL;
         }
         memcpy(s->cbr.r, cbr, r->ncbr * sizeof *s->cbr.r);
         s->cbr.n = r->ncbr;
     }
     s->hash = r->hash;
+    s->shipped = (r->flags & PF_SHIPPED) != 0;
     s->stage = (int)r->stage;
     memcpy(s->mask, r->mask, sizeof s->mask);
     memcpy(&s->si, &r->si, sizeof s->si);
@@ -1108,14 +1212,16 @@ static u64 pf_load_shader(void* ctx, const PfShader* r, const u32* cbr, const u3
     if (!s->mod) {
         free(s->cbr.r);
         free(s);
-        return 0;
+        return NULL;
     }
-    if (g_pf.sh_tail)
-        g_pf.sh_tail->next = s;
-    else
-        g_pf.sh = s;
-    g_pf.sh_tail = s;
-    g_pf.nsh++;
+    return s;
+}
+/* on the reading thread: a shader of the file */
+static u64 pf_load_shader(void* ctx, const PfShader* r, const u32* cbr, const u32* spv) {
+    VkSh* s = sh_from_record(r, cbr, spv);
+    (void)ctx;
+    if (!s) return 0;
+    pf_sh_append(s);
     return mod_bits(s->mod);
 }
 /* on the reading thread: a pipeline of the file, whose shaders were made, queued to the workers behind the draws' */
@@ -1204,8 +1310,485 @@ static void pf_key(char* out, size_t n) {
              (unsigned)sizeof(ShaderInfo), (unsigned)sizeof(PipeKey), (unsigned)sizeof(PfShader));
 }
 
+/* ---- the RomFS pass: the shader programs the game ships (shipped.h), translated before a draw asks for them ---- */
+enum { SCAN_FILE = 1, SCAN_ALL = 2 }; /* a PF_SCAN record's what: a file of the RomFS read, or every one */
+#define SHIP_WINDOW   0x10000u        /* the bytes vk_shader_get reads of a program, from its SPH */
+#define SHIP_FILE_MAX (512u << 20)    /* a RomFS file past this isn't read */
+#define SHIP_MAX      (4ull << 30)    /* the shipped file's limit: one game's 2,700 programs made 245 MB of SPIR-V */
+static u64 scan_key(u64 what, u64 id) { return id ^ what * 0x9E3779B97F4A7C15ull; }
+static void pf_load_scan(void* ctx, u64 what, u64 id) {
+    (void)ctx;
+    if (g_pf.nscanned == g_pf.scanned_cap) {
+        u32 cap = g_pf.scanned_cap ? g_pf.scanned_cap * 2 : 256;
+        u64* grown = realloc(g_pf.scanned, cap * sizeof *grown);
+        if (!grown) return;
+        g_pf.scanned = grown;
+        g_pf.scanned_cap = cap;
+    }
+    g_pf.scanned[g_pf.nscanned++] = scan_key(what, id);
+}
+static int pf_scanned(u64 what, u64 id) {
+    u64 k = scan_key(what, id);
+    for (u32 i = 0; i < g_pf.nscanned; i++)
+        if (g_pf.scanned[i] == k) return 1;
+    return 0;
+}
+static int pf_stopped(void) { return __atomic_load_n(&g_pf.stop, __ATOMIC_RELAXED); }
+/* a line of the pass: in the log, and among the latest the screen shows under its steps */
+static void pf_note(const char* fmt, ...) {
+    char line[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    LOG("vulkan: %s\n", line); /* whole; the screen's, as much as its row holds */
+    pm_lock(&g_pf.note_lock);
+    snprintf(g_pf.note[g_pf.nnote++ % RENDERER_NOTES], sizeof g_pf.note[0], "%s", line);
+    pm_unlock(&g_pf.note_lock);
+}
+static const char* stage_name(int stage) {
+    static const char* const names[] = {
+        "vertex", "tessellation control", "tessellation evaluation", "geometry", "fragment", "compute", "VertexA"};
+    return stage == SHIPPED_VERTEX_A ? names[6] : stage >= 0 && stage <= ST_CS ? names[stage] : "?";
+}
+static void pf_ship_found(VkSh* s) {
+    s->shipped = 2;
+    __atomic_add_fetch(&g_pf.ship_used, 1, __ATOMIC_RELAXED);
+}
+
+/* the index's slot for a key: its entry, or the free one where it would go (NULL with no index) */
+static ShipIdx* idx_slot(u64 hash, int stage, u32 clip, u32 len, u64 qh, u32 len_a, u64 qh_a) {
+    u32 i;
+    if (!g_pf.icap) return NULL;
+    for (i = (u32)(hash * 0x9E3779B97F4A7C15ull >> 32) & (g_pf.icap - 1); g_pf.idx[i].at;
+         i = (i + 1) & (g_pf.icap - 1)) {
+        const ShipIdx* e = &g_pf.idx[i];
+        if (e->hash == hash && e->stage == (u32)stage && e->clip == clip && e->clen == len && e->qh == qh &&
+            e->clen_a == len_a && e->qh_a == qh_a)
+            break;
+    }
+    return &g_pf.idx[i];
+}
+static void idx_add(u64 hash, int stage, u32 clip, u32 len, u64 qh, u32 len_a, u64 qh_a, u64 at) {
+    ShipIdx* e;
+    if ((g_pf.nidx + 1) * 2 > g_pf.icap) { /* at most half full */
+        u32 cap = g_pf.icap ? g_pf.icap * 2 : 4096, old = g_pf.icap, i;
+        ShipIdx *was = g_pf.idx, *grown = calloc(cap, sizeof *grown);
+        if (!grown) return;
+        g_pf.idx = grown;
+        g_pf.icap = cap;
+        for (i = 0; i < old; i++)
+            if (was[i].at)
+                *idx_slot(was[i].hash, (int)was[i].stage, was[i].clip, was[i].clen, was[i].qh, was[i].clen_a,
+                          was[i].qh_a) = was[i];
+        free(was);
+    }
+    e = idx_slot(hash, stage, clip, len, qh, len_a, qh_a);
+    if (e->at) return; /* the file has it twice */
+    *e = (ShipIdx){hash, qh, qh_a, at, len, len_a, (u32)stage, clip};
+    g_pf.nidx++;
+}
+/* The key's clip word the pass translates a stage with, as the draws ask for it (render.c): the clip distances the 3D
+   engine enables, all eight (0xff) in every NVN game seen (one's cube maps, another's and a third's every vertex
+   program, docs/NVN_HLE.md), for the stages that can be the last before rasterization; SNX_SH_NOT_LAST for
+   tessellation control, which never is; none for fragment */
+static u32 ship_clip(int stage) { return stage == ST_TCS ? SNX_SH_NOT_LAST : stage == ST_FS ? 0 : 0xFFu; }
+/* a key whose words are all zero but the clip word: the keys the pass translates with */
+static int ship_key_only_clip(const u32 mask[20]) {
+    for (int i = 0; i < 20; i++)
+        if (i != 6 && mask[i]) return 0;
+    return 1;
+}
+/* on the reading thread: a record of the shipped file, into the index (a shader) or the scans' list */
+static void pf_ship_rec(void* ctx, u32 type, const u8* p, u32 len, u64 at) {
+    PfShader r;
+    (void)ctx;
+    if (type == PF_SCAN && len == 16) {
+        u64 w[2];
+        memcpy(w, p, sizeof w);
+        pf_load_scan(NULL, w[0], w[1]);
+    } else if (type == PF_SHADER && len >= sizeof r) {
+        memcpy(&r, p, sizeof r);
+        if (!r.ncbr && r.stage <= ST_FS && (u64)r.nspv * 4 <= len - sizeof r && ship_key_only_clip(r.mask))
+            idx_add(r.hash, (int)r.stage, r.mask[6], r.clen, r.qh, r.clen_a, r.qh_a, at);
+    }
+}
+/* A draw's shader the game ships, from the shipped file (vk_shader_get, after the tables had none, vk_lock): a key of
+   zeros but its clip word only, the way the pass translated it (ship_clip). Its record is checked and made into a module now, and kept in the
+   file of the shaders made, so that the pipelines made with it are kept too. NULL when the file has none */
+static VkSh* pf_ship_take(u64 h, int stage, const u32 mask[20], u32 len, u64 qh, u32 len_a, u64 qh_a) {
+    const ShipIdx* e;
+    const u8* p;
+    PfShader r;
+    u32 n;
+    VkSh* s;
+    if (!g_pf.on || !ship_key_only_clip(mask) || !(e = idx_slot(h, stage, mask[6], len, qh, len_a, qh_a)) || !e->at)
+        return NULL;
+    p = pf_payload(&g_pf.ship, e->at, &n);
+    if (!p || n < sizeof r) return NULL;
+    memcpy(&r, p, sizeof r);
+    if (r.ncbr || (u64)r.nspv * 4 > n - sizeof r) return NULL;
+    /* the SPIR-V is 8-byte aligned in the view: a record, its header and its fixed part are multiples of 8 */
+    s = sh_from_record(&r, NULL, (const u32*)(const void*)(p + sizeof r));
+    if (!s) return NULL;
+    pf_shader_record(s, (const u32*)(const void*)(p + sizeof r), r.nspv);
+    pf_ship_found(s);
+    return s;
+}
+
+/* a file the count found programs in, read again to translate them; or a module's segment, in guest memory (mem) */
+typedef struct {
+    u64 off, size, id;
+    const u8* mem;
+    char name[64];
+} ShipHit;
+typedef struct {
+    u32 files, found, failed, vertex_a, read, big;
+    u32 stages[ST_CS + 2]; /* the programs counted by stage, VertexA's last */
+    u64 romfs;             /* the RomFS's files' ids, mixed: SCAN_ALL's */
+    int counting;          /* the first walk: the programs only counted (found), for the progress */
+    ShipHit* hit;          /* the files it found them in */
+    u32 nhit, hit_cap;
+} ShipPass;
+static int pf_no_read(u32 idx, u32 off, u32* out) {
+    (void)idx;
+    (void)off;
+    (void)out;
+    return 0;
+}
+/* the shader of code (SHIP_WINDOW bytes) a draw asks for first: float attributes, textures and outputs, no capture,
+   not early-Z (a fragment shader's first lookup, render.c), and the clip word of ship_clip. Translated into the
+   shipped file, unless it has it */
+static void pf_ship_make(ShipPass* c, const u8* code, int stage, u32 len, u64 qh, u32 len_a, u64 qh_a) {
+    u32 mask[20] = {0}, mlen;
+    u64 h = vk_shader_hash(code, SHIP_WINDOW, &mlen, pf_no_read), at = 0;
+    mask[6] = ship_clip(stage);
+    const ShipIdx* e = idx_slot(h, stage, mask[6], len, qh, len_a, qh_a);
+    VkSh s = {0};
+    size_t nw;
+    if (e && e->at) return;
+    u32* spv = sh_spirv(&s, code, h, stage, mask, len, qh, len_a, qh_a, NULL, pf_no_read, 1, &nw);
+    if (spv) at = pf_shader_into(&g_pf.ship, &s, 0, spv, nw);
+    if (at) {
+        idx_add(h, stage, mask[6], len, qh, len_a, qh_a, at);
+        __atomic_add_fetch(&g_pf.ship_new, 1, __ATOMIC_RELAXED);
+    } else if (!spv) {
+        c->failed++;
+        pf_note("%s %016llx not translated: %s", stage_name(stage), (unsigned long long)h,
+                s.si.first_unsupported[0] ? s.si.first_unsupported : "unsupported feature or float controls");
+    }
+    free(spv);
+    free(s.cbr.r);
+}
+/* bytes from p (avail of them) as vk_shader_get reads a program from guest memory: its window, zeros past them */
+static u8* ship_window(const u8* p, size_t avail) {
+    u8* code = calloc(1, SHIP_WINDOW);
+    if (code) memcpy(code, p, avail < SHIP_WINDOW ? avail : SHIP_WINDOW);
+    return code;
+}
+/* A VertexA with the VertexB after it, merged as a draw that binds the two merges them (vk_shader_get): the VertexB is
+   the first SPH of one in the 256-byte slots past A's code, where NVN's compiler puts it (docs/NVN_HLE.md). A
+   VertexA without one, or that won't merge, is left for the draws */
+static void pf_ship_dual(ShipPass* c, const u8* sph, size_t avail) {
+    u8 *a = ship_window(sph, avail), *b = NULL, *m = NULL;
+    u32 len_a = 0, len;
+    size_t at = SHIP_WINDOW;
+    int merged = 0;
+    if (a) {
+        vk_shader_hash(a, SHIP_WINDOW, &len_a, pf_no_read);
+        for (at = ((size_t)len_a + 255) & ~(size_t)255; at < SHIP_WINDOW && avail >= 0x50 && at <= avail - 0x50;
+             at += 256)
+            if (shipped_sph_stage(sph + at) == ST_VS) break;
+    }
+    if (a && at < SHIP_WINDOW && avail >= 0x50 && at <= avail - 0x50 && (b = ship_window(sph + at, avail - at)) &&
+        (m = malloc(SHIP_WINDOW))) {
+        vk_shader_hash(b, SHIP_WINDOW, &len, pf_no_read);
+        pm_lock(&g_xlate_lock); /* the merge sizes A and B with shader_hash, through the reader */
+        int (*old)(u32, u32, u32*) = g_shader_cb_read;
+        g_shader_cb_read = pf_no_read;
+        merged = shader_merge_dual(a, b, m, SHIP_WINDOW);
+        g_shader_cb_read = old;
+        pm_unlock(&g_xlate_lock);
+        if (merged) pf_ship_make(c, m, ST_VS, len, vk_hash(b, len), len_a, vk_hash(a, len_a));
+    }
+    if (!merged) c->vertex_a++;
+    free(m);
+    free(b);
+    free(a);
+}
+/* a program the game ships (shipped_programs' each): 0 to go on, 1 once told to stop */
+static int pf_ship(void* ctx, const u8* sph, size_t avail, int stage) {
+    ShipPass* c = ctx;
+    u32 len;
+    if (pf_stopped()) return 1;
+    c->found++;
+    if (c->counting) {
+        c->stages[stage == SHIPPED_VERTEX_A ? ST_CS + 1 : stage]++;
+        return 0;
+    }
+    __atomic_add_fetch(&g_pf.programs_done, 1, __ATOMIC_RELAXED);
+    if (stage == SHIPPED_VERTEX_A) {
+        pf_ship_dual(c, sph, avail);
+        return 0;
+    }
+    u8* code = ship_window(sph, avail);
+    if (!code) return 1;
+    vk_shader_hash(code, SHIP_WINDOW, &len, pf_no_read);
+    pf_ship_make(c, code, stage, len, vk_hash(code, len), 0, 0);
+    free(code);
+    return 0;
+}
+/* whether the Yaz0 stream in[0, n), all of it or its start, holds a SARC whose names say it has shader programs: 1,
+   0, or -1 when more of the stream is needed to tell */
+static int yaz0_wants(const u8* in, size_t n) {
+    u8 head[0x20];
+    size_t total = shipped_yaz0_size(in, n), need;
+    if (total < sizeof head) return 0;
+    if (shipped_yaz0(in, n, head, sizeof head) < sizeof head) return -1;
+    need = shipped_sarc_head(head, sizeof head);
+    if (need < sizeof head || need > total || need > (16u << 20)) return 0;
+    u8* t = malloc(need);
+    if (!t) return 0;
+    int wants = shipped_yaz0(in, n, t, need) < need ? -1 : shipped_sarc_wants(t, need) == 1;
+    free(t);
+    return wants;
+}
+static void pf_ship_yaz0(ShipPass* c, const u8* in, size_t n, int depth);
+/* the programs in d[0, n), and in the Yaz0 entries of a SARC there, which no scan of its bytes reaches */
+static void pf_ship_bytes(ShipPass* c, const u8* d, size_t n, int depth) {
+    int count = shipped_sarc_count(d, n);
+    shipped_programs(d, n, pf_ship, c);
+    for (int i = 0; depth < 2 && i < count && !pf_stopped(); i++) {
+        size_t off, size;
+        const char* name;
+        if (!shipped_sarc_entry(d, n, i, &off, &size, &name) && shipped_yaz0_size(d + off, size))
+            pf_ship_yaz0(c, d + off, size, depth + 1);
+    }
+}
+static void pf_ship_yaz0(ShipPass* c, const u8* in, size_t n, int depth) {
+    size_t total = shipped_yaz0_size(in, n);
+    if (yaz0_wants(in, n) != 1 || total > SHIP_FILE_MAX) return;
+    u8* out = malloc(total);
+    if (!out) return;
+    if (shipped_yaz0(in, n, out, total) == total) pf_ship_bytes(c, out, total, depth);
+    free(out);
+}
+/* each file's id in the PF_SCAN records: its name, place and size */
+static u64 ship_file_id(const char* name, u64 off, u64 size) {
+    return vk_hash(name, strlen(name)) ^ (off * 0xC2B2AE3D27D4EB4Full) ^ (size * 0x165667B19E3779F9ull);
+}
+static int pf_ship_count(void* ctx, const char* name, u64 off, u64 size) {
+    ShipPass* c = ctx;
+    c->files++;
+    c->romfs = (c->romfs ^ ship_file_id(name, off, size)) * 0x100000001B3ull;
+    return 0;
+}
+/* whether a Yaz0 file of the RomFS, at off, holds shader programs by the names at the start of its stream */
+static int yaz0_file_wants(u64 off, u64 size) {
+    size_t part = size < (64u << 10) ? (size_t)size : 64u << 10;
+    u8* t = malloc(part);
+    int go = t && !romfs_peek(off, t, part) ? yaz0_wants(t, part) : 0;
+    if (go < 0) { /* the tables need more of the stream: as much as they are, and an eighth more for its flags */
+        u8 sarc[0x20];
+        size_t want =
+            shipped_yaz0(t, part, sarc, sizeof sarc) == sizeof sarc ? shipped_sarc_head(sarc, sizeof sarc) : 0;
+        want += want / 8 + 64;
+        if (want > size) want = (size_t)size;
+        u8* more = want > part ? realloc(t, want) : NULL;
+        if (more) t = more;
+        go = more && !romfs_peek(off, t, want) && yaz0_wants(t, want) == 1;
+    }
+    free(t);
+    return go == 1;
+}
+/* the programs of a RomFS file whose first bytes said kind: counted, or translated */
+static void pf_ship_read(ShipPass* c, u64 off, u64 size, int kind) {
+    u8* d;
+    if (size > SHIP_FILE_MAX) {
+        c->big += !c->counting;
+        return;
+    }
+    if (kind == SHIPPED_YAZ0 && !yaz0_file_wants(off, size)) return;
+    d = malloc(size ? (size_t)size : 1);
+    if (d && !romfs_peek(off, d, size)) {
+        c->read += !c->counting;
+        if (kind == SHIPPED_YAZ0)
+            pf_ship_yaz0(c, d, (size_t)size, 0);
+        else
+            pf_ship_bytes(c, d, (size_t)size, 0);
+    }
+    free(d);
+}
+/* a source's programs, as the count found them: since was the count's stages before it */
+static void pf_note_source(const ShipPass* c, const char* name, const u32* since) {
+    char by[160] = "";
+    size_t at = 0;
+    for (int k = 0; k < ST_CS + 2; k++)
+        if (c->stages[k] > since[k] && at < sizeof by)
+            at += (size_t)snprintf(by + at, sizeof by - at, "%s%u %s", at ? ", " : "", c->stages[k] - since[k],
+                                   stage_name(k == ST_CS + 1 ? SHIPPED_VERTEX_A : k));
+    pf_note("%s: %s", name, by);
+}
+/* the count's walk over the RomFS: each file's first bytes, and the programs of a shader container, an archive, or a
+   Yaz0 one whose SARC names one. A file with programs is kept for the translating walk (pf_ship_pass); one without
+   is kept in the file as read */
+static int pf_ship_file(void* ctx, const char* name, u64 off, u64 size) {
+    ShipPass* c = ctx;
+    u8 head[SHIPPED_HEAD];
+    u64 id = ship_file_id(name, off, size);
+    size_t n = size < sizeof head ? (size_t)size : sizeof head;
+    u32 before = c->found, since[ST_CS + 2];
+    int kind;
+    memcpy(since, c->stages, sizeof since);
+    __atomic_add_fetch(&g_pf.files_seen, 1, __ATOMIC_RELAXED);
+    if (pf_stopped()) return 1;
+    /* by its name first: opening each file costs most of the walk on a first run, as the host's cache holds none of
+       them (a millisecond and more each, one game's 4,669 taking six seconds) */
+    if (shipped_name_skips(name) || pf_scanned(SCAN_FILE, id) || romfs_peek(off, head, n) ||
+        (kind = shipped_kind(head, n)) == SHIPPED_SKIP)
+        return 0;
+    pf_ship_read(c, off, size, kind);
+    if (pf_stopped()) return 1;
+    if (c->found == before) {
+        pf_scan(&g_pf.ship, SCAN_FILE, id);
+        return 0;
+    }
+    if (c->nhit == c->hit_cap) {
+        u32 cap = c->hit_cap * 2 + 16;
+        ShipHit* grown = realloc(c->hit, cap * sizeof *grown);
+        if (!grown) return 0; /* not translated, nor kept as read: a later run reads it */
+        c->hit = grown;
+        c->hit_cap = cap;
+    }
+    c->hit[c->nhit] = (ShipHit){off, size, id, NULL, ""};
+    snprintf(c->hit[c->nhit++].name, sizeof c->hit[0].name, "%s", name);
+    pf_note_source(c, name, since);
+    return 0;
+}
+/* the modules' segments (loader_segments): in the count, mixed into SCAN_ALL's id */
+static int pf_seg_count(void* ctx, const char* name, const u8* bytes, u64 gva, u64 size) {
+    ShipPass* c = ctx;
+    (void)bytes;
+    c->files++;
+    c->romfs = (c->romfs ^ ship_file_id(name, gva, size)) * 0x100000001B3ull;
+    return 0;
+}
+/* and in the count's walk: their programs counted, a segment with some kept for the translating walk */
+static int pf_ship_seg(void* ctx, const char* name, const u8* bytes, u64 gva, u64 size) {
+    ShipPass* c = ctx;
+    u64 id = ship_file_id(name, gva, size);
+    u32 before = c->found, since[ST_CS + 2];
+    memcpy(since, c->stages, sizeof since);
+    __atomic_add_fetch(&g_pf.files_seen, 1, __ATOMIC_RELAXED);
+    if (pf_stopped()) return 1;
+    if (pf_scanned(SCAN_FILE, id) || size > SHIP_FILE_MAX) return 0;
+    pf_ship_bytes(c, bytes, (size_t)size, 0);
+    if (c->found == before) {
+        pf_scan(&g_pf.ship, SCAN_FILE, id);
+        return 0;
+    }
+    if (c->nhit == c->hit_cap) {
+        u32 cap = c->hit_cap * 2 + 16;
+        ShipHit* grown = realloc(c->hit, cap * sizeof *grown);
+        if (!grown) return 0;
+        c->hit = grown;
+        c->hit_cap = cap;
+    }
+    c->hit[c->nhit] = (ShipHit){gva, size, id, bytes, ""};
+    snprintf(c->hit[c->nhit++].name, sizeof c->hit[0].name, "%s", name);
+    pf_note_source(c, name, since);
+    return 0;
+}
+/* on the reading thread, after the files: the RomFS read for the programs the game ships, unless an earlier run read
+   all of it (SCAN_ALL of the same files). Translating is the GPU thread's too (g_xlate_lock), so the game can start
+   while it runs; its first draw stops it (pf_merge), and so does a skip of the screen */
+static void pf_ship_pass(void) {
+    ShipPass c = {0};
+    u64 t0 = plat_ns();
+    u32 kept = g_pf.nidx;
+    if (romfs_files(pf_ship_count, &c)) c.files = 0; /* a game without a RomFS still has its executables */
+    loader_segments(pf_seg_count, &c);
+    if (!c.files) return;
+    if (pf_scanned(SCAN_ALL, c.romfs)) {
+        LOG("vulkan: the game's own shaders were read from its RomFS before: %u of them in %s\n", kept, g_pf.ship_path);
+        return;
+    }
+    __atomic_store_n(&g_pf.files, c.files, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_pf.scanning, 1, __ATOMIC_RELAXED);
+    /* the programs counted first, without translating (a scan of the files' bytes), so that the progress follows the
+       translations, the pass's time: one game had nine tenths of its programs in one of its 4,669 files */
+    c.counting = 1;
+    loader_segments(pf_ship_seg, &c);
+    romfs_files(pf_ship_file, &c);
+    u64 counted_ms = (plat_ns() - t0) / 1000000;
+    __atomic_store_n(&g_pf.programs, c.found, __ATOMIC_RELAXED);
+    c.counting = 0;
+    c.found = 0;
+    for (u32 i = 0; i < c.nhit && !pf_stopped(); i++) {
+        u8 head[SHIPPED_HEAD];
+        size_t n = c.hit[i].size < sizeof head ? (size_t)c.hit[i].size : sizeof head;
+        u32 made = __atomic_load_n(&g_pf.ship_new, __ATOMIC_RELAXED), failed = c.failed, found = c.found,
+            lone = c.vertex_a;
+        if (c.hit[i].mem) {
+            c.read++;
+            pf_ship_bytes(&c, c.hit[i].mem, (size_t)c.hit[i].size, 0);
+        } else if (!romfs_peek(c.hit[i].off, head, n))
+            pf_ship_read(&c, c.hit[i].off, c.hit[i].size, shipped_kind(head, n));
+        else
+            continue;
+        made = __atomic_load_n(&g_pf.ship_new, __ATOMIC_RELAXED) - made;
+        failed = c.failed - failed;
+        lone = c.vertex_a - lone;
+        pf_note("%s: %u translated, %u had been, %u not translatable, %u VertexA without a VertexB", c.hit[i].name,
+                made, c.found - found - made - failed - lone, failed, lone);
+        if (!pf_stopped()) pf_scan(&g_pf.ship, SCAN_FILE, c.hit[i].id);
+    }
+    free(c.hit);
+    if (!pf_stopped()) pf_scan(&g_pf.ship, SCAN_ALL, c.romfs);
+    pf_remap(&g_pf.ship); /* with the records appended, for the draws to read */
+    __atomic_store_n(&g_pf.scanning, 0, __ATOMIC_RELAXED);
+    LOG("vulkan: the game's own shaders: %u programs in %u of its %u files and executables' segments, %u translated "
+        "new and %u from "
+        "earlier runs, %u not translatable, %u VertexA without a VertexB to merge with, %u files too large, in %llu "
+        "ms (%llu of them finding them)%s\n",
+        c.found, c.read, c.files, __atomic_load_n(&g_pf.ship_new, __ATOMIC_RELAXED), kept, c.failed, c.vertex_a, c.big,
+        (unsigned long long)((plat_ns() - t0) / 1000000), (unsigned long long)counted_ms,
+        pf_stopped() ? " (stopped: the rest is read on a later run)" : "");
+}
+void vk_pipeline_prepare(RendererPrepare* p) {
+    int loaded;
+    memset(p, 0, sizeof *p);
+    if (!g_pf.on) {
+        p->done = 1;
+        return;
+    }
+    pm_lock(&g_pf.lock);
+    loaded = g_pf.loaded;
+    pm_unlock(&g_pf.lock);
+    p->files = __atomic_load_n(&g_pf.files, __ATOMIC_RELAXED);
+    p->files_seen = __atomic_load_n(&g_pf.files_seen, __ATOMIC_RELAXED);
+    p->programs = __atomic_load_n(&g_pf.programs, __ATOMIC_RELAXED);
+    p->programs_done = __atomic_load_n(&g_pf.programs_done, __ATOMIC_RELAXED);
+    p->shipped = __atomic_load_n(&g_pf.ship_new, __ATOMIC_RELAXED);
+    p->scanning = __atomic_load_n(&g_pf.scanning, __ATOMIC_RELAXED);
+    p->shaders = __atomic_load_n(&g_pf.shaders_total, __ATOMIC_RELAXED);
+    p->pipes = __atomic_load_n(&g_pf.pipes_total, __ATOMIC_RELAXED);
+    p->pipes_made = (u32)__atomic_load_n(&g_pf.made, __ATOMIC_RELAXED);
+    p->done = loaded && p->pipes_made >= p->pipes;
+    pm_lock(&g_pf.note_lock);
+    p->notes = g_pf.nnote < RENDERER_NOTES ? (int)g_pf.nnote : RENDERER_NOTES;
+    for (int i = 0; i < p->notes; i++) /* oldest first */
+        memcpy(p->note[i], g_pf.note[(g_pf.nnote - (u32)p->notes + (u32)i) % RENDERER_NOTES], sizeof p->note[i]);
+    pm_unlock(&g_pf.note_lock);
+}
+void vk_pipeline_shipped_stats(u64* shaders, u64* used) {
+    *shaders = g_pf.merged ? g_pf.nidx : 0;
+    *used = __atomic_load_n(&g_pf.ship_used, __ATOMIC_RELAXED);
+}
+void vk_pipeline_prepare_stop(void) { __atomic_store_n(&g_pf.stop, 1, __ATOMIC_RELAXED); }
+
 static void pf_load(void* arg) {
-    PfLoad load = {pf_load_shader, pf_load_pipe, NULL};
+    PfLoad load = {pf_load_shader, pf_load_pipe, pf_load_scan, NULL};
     char key[1024];
     u32 loaded[2];
     u64 t0 = plat_ns();
@@ -1215,6 +1798,13 @@ static void pf_load(void* arg) {
     LOG("vulkan: %u shaders and %u pipelines of earlier runs loaded from %s in %llu ms, the pipelines to be made in "
         "the background\n",
         g_pf.nsh, g_pf.npipe, g_pf.path, (unsigned long long)((plat_ns() - t0) / 1000000));
+    __atomic_store_n(&g_pf.shaders_total, g_pf.nsh, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_pf.pipes_total, g_pf.npipe, __ATOMIC_RELAXED);
+    if (g_settings.prepare_shaders) {
+        g_pf.ship.max = SHIP_MAX;
+        pf_open_mapped(&g_pf.ship, g_pf.ship_path, key, pf_ship_rec, NULL);
+        pf_ship_pass();
+    }
     pm_lock(&g_pf.lock);
     g_pf.loaded = 1;
     pc_broadcast(&g_pf.done);
@@ -1223,6 +1813,8 @@ static void pf_load(void* arg) {
 /* at the end of vk_pipeline_init: the file is read on a thread of its own, so startup doesn't wait for it */
 static void pf_start_load(void) {
     pm_init(&g_pf.file.lock);
+    pm_init(&g_pf.ship.lock);
+    pm_init(&g_pf.note_lock);
     pm_init(&g_pf.lock);
     pc_init(&g_pf.done);
     if (g_settings.shader_corpus[0]) {
@@ -1232,6 +1824,7 @@ static void pf_start_load(void) {
     g_pf.on = 1;
     null_fs(); /* made here, before the reading thread uses it */
     snprintf(g_pf.path, sizeof g_pf.path, "%s/%s.vkshaders", g_cache_dir, g_exename);
+    snprintf(g_pf.ship_path, sizeof g_pf.ship_path, "%s/%s.vkshipped", g_cache_dir, g_exename);
     if (plat_thread(pf_load, NULL, (size_t)1 << 20)) pf_load(NULL); /* no thread: read here */
 }
 /* the reading thread's shaders and pipelines into the tables, waiting for it the first time a draw needs them
@@ -1242,6 +1835,7 @@ static void pf_merge(void) {
     if (g_pf.merged) return;
     g_pf.merged = 1;
     if (!g_pf.on) return;
+    vk_pipeline_prepare_stop(); /* the RomFS pass ends at its next program: the draw waits no longer for it */
     pm_lock(&g_pf.lock);
     while (!g_pf.loaded) pc_wait(&g_pf.done, &g_pf.lock, -1);
     pm_unlock(&g_pf.lock);

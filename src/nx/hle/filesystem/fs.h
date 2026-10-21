@@ -25,6 +25,14 @@ u8* fs_read_file(const char* path, u64* size);    /* malloc'd, or NULL */
 int fs_add_virtual_file(const char* path, const void* data, u64 size);
 /* the RomFS the game opens: romfs.bin as it is, or an image built from the romfs folder */
 void romfs_init(void);
+/* What the runtime reads of the RomFS for itself, once romfs_init ran (the shader programs the game ships,
+   gpu/vk/pipeline.c), from any thread. romfs_files hands each file of the image's file table to each (its name, its
+   data's offset in the image and its size) while each returns 0: 0, or -1 when there is no image or its table can't
+   be read. romfs_peek reads the image as the game would, without logging the files it comes from: 0, or -1 past its
+   end or when part of it couldn't be read */
+typedef int (*RomfsEach)(void* ctx, const char* name, u64 off, u64 size);
+int romfs_files(RomfsEach each, void* ctx);
+int romfs_peek(u64 off, void* dst, u64 size);
 /* ---- HLE state in g_hle (hle.h) */
 /* RomFS. With no romfs.bin, the image is made up from the romfs/ folder: its header and tables in memory (rmeta), the
    files' data read from the files themselves when the game reads that part of the image */

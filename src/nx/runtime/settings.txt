@@ -181,6 +181,16 @@ setting Pipeline threads
     help The threads that make the GPU's new pipelines while the game goes on: 0 = a quarter of the computer's
     help threads, two to six; 1 to 32 = that many. More make a first run's new pipelines sooner, with less CPU left
     help for the game
+setting Prepare shaders
+    key prepare_shaders
+    int 0 2
+    default 2
+    startup
+    words Off|In background|Before the game
+    help The shaders the game ships in its files, read and translated before it draws with them, once for each
+    help build: Off = none. In background = while the game starts, until its first picture. Before the game = a screen
+    help that waits for them and for the pipelines of earlier runs, so an opening movie doesn't stutter; any button
+    help skips it
 setting JIT threads
     key jit_threads
     int 0 8

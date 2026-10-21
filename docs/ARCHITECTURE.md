@@ -187,7 +187,9 @@ service the runtime doesn't have gets sm's stand-in object, which answers every 
 2. Copy entries to GPU queue. `nv.submit_lk` orders fence promises and cross-channel submits. A submission's fence
    is the stream's first wait on the GPU thread, whoever increments it, and the ioctl returns at once, as nvgpu's does.
 3. GPU-thread dispatch: 3D, MME, compute, 2D, DMA, inline-to-memory. Draws -> `g_renderer` (`gpu/renderer.h`).
-   Shaders: Maxwell SASS -> SPIR-V (`gpu/shader/`). Each channel's jobs run in order. A stream that waits (a semaphore
+   Shaders: Maxwell SASS -> SPIR-V (`gpu/shader/`). Before the game's first thread, `gpu/vk/pipeline.c` translates the
+   programs the game ships, found by NVN's code wrapper in its RomFS and executables (`gpu/shader/shipped.c`), into
+   `<id>.vkshipped`, which a draw's lookup reads from when it has no shader. Each channel's jobs run in order. A stream that waits (a semaphore
    acquire, a syncpoint wait, its fence) parks its channel (`gpu_park`), even inside a macro, and the thread runs the
    other channels' jobs until the wait is met or times out. A release from another stream or a syncpoint increment
    wakes it, and a release the CPU writes is polled every 0.5 ms while nothing else can run.

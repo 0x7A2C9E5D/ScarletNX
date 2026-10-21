@@ -777,6 +777,7 @@ typedef struct VkSh {
     VkShaderModule mod;
     int indexed; /* it reads indexed textures: its set needs the texture array bindings (vk_playout) */
     int failed;
+    int shipped; /* a program the game ships, translated before a draw asked for it: 2 once one found it */
     u32 clen, clen_a;
     u64 qh, qh_a;
     struct VkSh* next;
@@ -856,6 +857,12 @@ VkShaderModule vk_module_spv(const u32* words, size_t count);
 VkShaderModule vk_module_spv_location(const u32* words, size_t count, u32 location);
 /* pipelines of earlier runs made in the background: made so far, how many the pipeline cache had, and still to make */
 void vk_pipeline_prewarm_stats(u64* made, u64* hits, u64* left);
+/* the shaders translated from the programs the game ships (this run's and earlier runs'), and those a draw found */
+void vk_pipeline_shipped_stats(u64* shaders, u64* used);
+/* what is made before the game draws, so far (the renderer's prepare), and the RomFS pass told to stop (prepare_stop) */
+struct RendererPrepare;
+void vk_pipeline_prepare(struct RendererPrepare* p);
+void vk_pipeline_prepare_stop(void);
 
 /* compute.c */
 void vk_dispatch(GpuChannel* ch, const u32* q, u64 code);

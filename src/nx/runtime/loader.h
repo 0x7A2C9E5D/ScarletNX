@@ -13,6 +13,10 @@ extern GuestFn* g_disp;
 /* Maps every module g_mod lists at its base, from the game's data folder, and sets its pages' permissions. 0, or -1
    after logging why */
 int loader_load(void);
+/* each module's read-only and data segments as loaded, while each returns 0: their name ("main.ro", "main.data"),
+   bytes, guest address and size. The game's executables carry shaders of their own, the SDK's and the game's, which
+   the renderer translates before they are drawn with (gpu/vk/pipeline.c) */
+void loader_segments(int (*each)(void* ctx, const char* name, const u8* bytes, u64 gva, u64 size), void* ctx);
 /* The guest code range g_disp covers */
 extern u64 g_code_lo, g_code_hi;
 

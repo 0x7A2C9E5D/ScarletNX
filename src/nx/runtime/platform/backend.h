@@ -28,6 +28,11 @@ void backend_window_safe(int* x, int* y, int* w, int* h);
 /* 0 while nothing presented can be seen: the window minimized or covered, or its surface taken away (Android in the
    background) */
 int backend_window_shown(void);
+/* what was pressed since the last call, a key (not Esc, which quits, nor a modifier or a key with Ctrl, Alt or the
+   system key, the desktop's shortcuts), a finger or a gamepad's button ("the key
+   Return"), NULL for nothing: video_poll's events, for a screen any press skips (main.c's prepare). The text lasts
+   until the next call; main thread */
+const char* backend_pressed(void);
 /* changes whenever the surface comes back, so the renderer knows to make a new Vulkan surface */
 u32 backend_window_generation(void);
 

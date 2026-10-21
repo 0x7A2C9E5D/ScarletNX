@@ -12,6 +12,7 @@
 #include "nx/runtime/main.h"
 #ifdef SNX_WITH_GUI
 #include "gui/gui.h"
+#include "gui/theme.h"
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #if TARGET_OS_IOS
@@ -35,6 +36,7 @@ int snx_switch_main(int argc, char** argv) {
     }
 #ifdef SNX_WITH_GUI
     snx_menu = snx_gui_main;
+    snx_menu_run_theme = gui_run_theme;
 #endif
     if (argc > 1 && !strcmp(argv[1], "--mcp")) return snx_mcp(argc, argv);
     result = snx_driver(argc, argv);
