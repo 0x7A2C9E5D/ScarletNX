@@ -28,6 +28,7 @@ size_t snx_ctr_jit_save_hints(SnxCtrJit* jit, const char* directory) {
 #include "3ds/runtime/internal.h"
 #include "common/cpu/arm/exec.h"
 #include "common/utilities/common.h"
+#include "snx_settings.h"
 
 typedef struct {
     uint64_t key; /* (pc << 1 | thumb) + 1, 0 for an empty slot */
@@ -85,6 +86,7 @@ static SnxArmBlock compile(void* context, uint32_t pc, bool thumb, bool stale) {
     if (!j->slots[slot].key) ++j->count;
     j->slots[slot] = (Slot){key, block, false};
     ++j->compiled;
+    if (g_settings.ctr_run_time_compile_trace) fprintf(stderr, "3ds jit: compiled %08x\n", pc | thumb);
     return block;
 }
 SnxCtrJit* snx_ctr_jit_new(SnxCtrProcess* process, char* error, size_t error_size) {

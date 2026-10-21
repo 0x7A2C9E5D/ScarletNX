@@ -14,6 +14,7 @@
 #include "3ds/services/dsp.h"
 #include "3ds/services/cfg.h"
 #include "3ds/services/system.h"
+#include "snx_settings.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -190,6 +191,7 @@ SnxCtrSvcResult snx_ctr_ipc_send(SnxCtrProcess* p, uint32_t handle, uint32_t* re
     p->last_ipc_service =
         p->objects[id].type == CTR_OBJ_FILE ? SNX_CTR_SERVICE_FILE : p->objects[id].data.session.service;
     uint32_t normal = (c.in[0] >> 6) & 63, translated = c.in[0] & 63;
+
     if ((c.in[0] & 0xf000) || 1 + normal + translated > SNX_CTR_IPC_WORDS) {
         *result = SNX_CTR_IPC_BAD_DESCRIPTOR;
         return SNX_CTR_SVC_RETURN;
@@ -256,6 +258,14 @@ SnxCtrSvcResult snx_ctr_ipc_send(SnxCtrProcess* p, uint32_t handle, uint32_t* re
     for (uint32_t i = 0; i < c.handle_count; ++i)
         if ((c.handle_moved >> i & 1) && c.handle_in[i]) (void)snx_ctr_handle_close(p, c.handle_in[i]);
     *result = c.transport_result;
+    if (g_settings.ctr_ipc_trace) { /* the request and its answer: the reply's header and result, or the transport's */
+        uint32_t service = p->last_ipc_service;
+        fprintf(stderr, "3ds ipc trace: thread %u %s 0x%08x -> 0x%08x %s0x%08x\n", (unsigned)p->current_thread,
+                service == SNX_CTR_SERVICE_SYSTEM ? snx_ctr_system_name(p->objects[id].data.session.name)
+                : service < sizeof families / sizeof *families ? families[service]
+                                                               : "?",
+                c.in[0], *result ? 0 : c.out[0], *result ? "transport " : "", *result ? *result : c.out[1]);
+    }
     if (*result) return SNX_CTR_SVC_RETURN;
     for (unsigned i = 0; i < SNX_CTR_IPC_WORDS; ++i) store32(bytes + i * 4, c.out[i]);
     if (snx_ctr_write_ram(p->space, address, bytes, sizeof bytes) != SNX_CTR_MEM_OK) return SNX_CTR_SVC_UNSUPPORTED;

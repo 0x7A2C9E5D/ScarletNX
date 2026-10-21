@@ -14,6 +14,44 @@
 
 #define SNX_CTR_RUN_SLICE 1000000u
 
+/* whose an event is: a service's that signals it, or the game's own */
+static const char* event_owner(const SnxCtrProcess* p, uint32_t id) {
+    if (id == p->apt_notification) return "APT's notification";
+    if (id == p->apt_parameter) return "APT's parameter";
+    for (unsigned i = 0; i < sizeof p->hid_objects / sizeof *p->hid_objects; ++i)
+        if (id == p->hid_objects[i]) return "HID's";
+    for (unsigned i = 0; i < CTR_GSP_THREADS; ++i)
+        if (id == p->gsp.event_object[i]) return "GSP's interrupt";
+    for (unsigned i = 0; i < sizeof p->dsp.interrupt / sizeof *p->dsp.interrupt; ++i)
+        if (id == p->dsp.interrupt[i]) return "the DSP's interrupt";
+    if (id == p->dsp.semaphore) return "the DSP's semaphore";
+    return p->objects[id].from_app ? "the game's" : "a service's";
+}
+/* The return addresses on a thread's stack, as a backtrace: the words that point just past a BL or BLX (ARM, or with
+   the low bit set Thumb's BL/BLX suffix) into the process's text, nearest first */
+static void report_stack(SnxCtrProcess* p, const SnxArmCPU* cpu) {
+    const SnxCtrSegment* text = &p->segment[0];
+    unsigned shown = 0;
+    printf("    stack:");
+    for (uint32_t at = cpu->r[13] & ~3u; shown < 12 && at - (cpu->r[13] & ~3u) < 0x2000; at += 4) {
+        unsigned char b[4];
+        if (snx_ctr_read_ram(p->space, at, b, 4) != SNX_CTR_MEM_OK) break;
+        uint32_t w = (uint32_t)b[0] | (uint32_t)b[1] << 8 | (uint32_t)b[2] << 16 | (uint32_t)b[3] << 24;
+        bool thumb = w & 1;
+        uint32_t ret = w & ~1u;
+        if (ret < text->address + 4 || ret >= text->address + text->bytes || (!thumb && (ret & 3))) continue;
+        unsigned char c[4];
+        if (snx_ctr_read_ram(p->space, ret - (thumb ? 2 : 4), c, thumb ? 2 : 4) != SNX_CTR_MEM_OK) continue;
+        uint32_t i = (uint32_t)c[0] | (uint32_t)c[1] << 8 | (thumb ? 0 : (uint32_t)c[2] << 16 | (uint32_t)c[3] << 24);
+        bool call = thumb ? (i & 0xe800) == 0xe800 /* BL or BLX suffix */
+                          : (i & 0x0f000000) == 0x0b000000 || (i & 0xfe000000) == 0xfa000000 ||
+                                (i & 0x0ffffff0) == 0x012fff30;
+        if (!call) continue;
+        printf(" 0x%08" PRIx32, w);
+        ++shown;
+    }
+    putchar('\n');
+}
 /* Every live thread, where it is and what it waits on, as the run ended */
 static void report_threads(SnxCtrProcess* p) {
     static const char* const types[] = {"free",  "process", "thread",    "arbiter", "session",       "mutex",
@@ -23,19 +61,40 @@ static void report_threads(SnxCtrProcess* p) {
         if (o->type != CTR_OBJ_THREAD || o->data.thread.dead) continue;
         const CtrThread* t = &o->data.thread;
         const SnxArmCPU* cpu = i == p->current_thread ? &p->cpu.state.cpu : &t->context;
-        printf("  thread %" PRIu32 "%s: priority 0x%02" PRIx32 " pc 0x%08" PRIx32 " lr 0x%08" PRIx32, i,
-               i == p->current_thread ? " (running)" : "", t->priority, cpu->r[15], cpu->r[14]);
+        printf("  thread %" PRIu32 "%s: core %" PRIu32 " priority 0x%02" PRIx32 " pc 0x%08" PRIx32 " lr 0x%08" PRIx32, i,
+               i == p->current_thread ? " (running)" : "", t->core, t->priority, cpu->r[15], cpu->r[14]);
         if (t->waiting_object) {
             const CtrObject* w = &p->objects[t->waiting_object];
             printf(", waits on %s %" PRIu32, w->type < sizeof types / sizeof *types ? types[w->type] : "?",
                    t->waiting_object);
-            if (t->wait_more_count) printf(" and %" PRIu32 " more%s", t->wait_more_count, t->wait_all ? " (all)" : "");
+            if (w->type == CTR_OBJ_EVENT) printf(" (%s)", event_owner(p, t->waiting_object));
+            for (uint32_t j = 0; j < t->wait_more_count; ++j) {
+                const CtrObject* m = &p->objects[t->wait_more[j]];
+                printf("%s %s %" PRIu32, j ? "," : t->wait_all ? " and all of" : " or", types[m->type < 12 ? m->type : 0],
+                       t->wait_more[j]);
+                if (m->type == CTR_OBJ_EVENT) printf(" (%s)", event_owner(p, t->wait_more[j]));
+            }
             if (w->type == CTR_OBJ_ARBITER) printf(" at 0x%08" PRIx32, t->waiting_address);
             if (t->waiting_service[0]) printf(" (the service %s)", t->waiting_service);
         } else if (t->wake_ns)
             printf(", sleeps%s", t->wake_ns == UINT64_MAX ? " forever" : "");
         putchar('\n');
+        report_stack(p, cpu);
     }
+    printf("  idle: %.1f s in %" PRIu64 " waits for a deadline with no thread to run\n", (double)p->idle_ns / 1e9,
+           p->idle_waits);
+    /* the SVCs it made most */
+    printf("  SVCs:");
+    bool shown[256] = {false};
+    for (unsigned n = 0; n < 8; ++n) {
+        unsigned best = 256;
+        for (unsigned i = 0; i < 256; ++i)
+            if (!shown[i] && p->svc_counts[i] && (best == 256 || p->svc_counts[i] > p->svc_counts[best])) best = i;
+        if (best == 256) break;
+        shown[best] = true;
+        printf(" 0x%02x x%" PRIu64, best, p->svc_counts[best]);
+    }
+    putchar('\n');
 }
 int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel model, uint64_t limit, double seconds,
                     unsigned flags, uint32_t ipc_stubs, char* error, size_t error_size) {

@@ -38,7 +38,7 @@ def main():
     run(['--board-info'], 0, 'Old 3DS\nARM11 cores: 2\nBase clock: 268111856 Hz\nFCRAM: 128 MiB')
     run(['--model', 'new', '--board-info'], 0, 'New 3DS\nARM11 cores: 4')
     run(['--board-info', 'game.cia'], 2, 'Usage:')
-    run(['--backend=gcc'], 2, 'unexpected argument')
+    run(['--backend=gcc'], 2, 'unknown setting: --backend=gcc')  # --key=value is the 3DS debug table's
     with tempfile.TemporaryDirectory(prefix='snx-3ds-') as temp:
         root = pathlib.Path(temp)
         for name in ['game with spaces;literal.CIA', 'game.nsp', '--game.cia']:

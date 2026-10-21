@@ -8,6 +8,7 @@
    transfer engine (gpu/transfer.c), PICA command lists (SubmitCmdList) through the
    command processor (gpu/pica.c) and its software draws; the save-VRAM paths stop. */
 #include "3ds/runtime/internal.h"
+#include "snx_settings.h"
 #include "3ds/services/gsp.h"
 #include "3ds/gpu/present.h"
 #include "3ds/gpu/pica.h"
@@ -121,6 +122,10 @@ static void present_screen(SnxCtrProcess* p, uint32_t screen) {
     uint32_t stride = p->gsp.fb_screen[screen].stride, format = p->gsp.fb_screen[screen].format & 7;
     uint32_t height = screen_height(screen), width = 240;
     p->gsp.fb_pending[screen] = 0;
+    if (g_settings.ctr_gpu_trace)
+        fprintf(stderr, "3ds gpu trace: screen %u shows 0x%08x format %u stride %u%s\n", (unsigned)screen,
+                (unsigned)address, (unsigned)format, (unsigned)stride,
+                !address || format > 4 || stride < width * bpp_of(format) || stride > 0x40000 ? ": dropped" : "");
     if (!address || format > 4 || stride < width * bpp_of(format) || stride > 0x40000) return;
     uint64_t span = (uint64_t)stride * height;
     unsigned char* pixels = malloc((size_t)span);
@@ -606,6 +611,7 @@ static void trigger_queue(SnxCtrIpc* c) {
         --pending;
         GxStep step = GX_DONE;
         SnxCtrGsp* g = &p->gsp;
+        if (g_settings.ctr_gpu_trace) fprintf(stderr, "3ds gpu trace: GX command 0x%02x\n", (unsigned)id);
         switch (id) {
             case 0: step = gx_dma(c, args, &irq); break;
             case 1: step = gx_submit(c, args, &irq); break;

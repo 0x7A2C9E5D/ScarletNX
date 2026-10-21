@@ -170,8 +170,12 @@ SnxCtrProcess* snx_ctr_process_new(const SnxCtrImage* image, SnxCtrModel model) 
     }
     uint32_t stack = (image->stack_size + 4095) & ~4095u;
     p->stack_size = stack;
+    /* the main thread's TLS page is the BASE region's, outside the application's pool, as every TLS page is
+       (kernel/thread.c) */
+    uint32_t tls_page = 0;
     if (offset != image->code_size || !map(p, SNX_CTR_STACK_TOP - stack, stack, SNX_CTR_READ | SNX_CTR_WRITE) ||
-        !map(p, SNX_CTR_INITIAL_TLS, 4096, SNX_CTR_READ | SNX_CTR_WRITE) ||
+        !(tls_page = snx_ctr_shared_pages(p, 4096)) ||
+        snx_ctr_map(p->space, SNX_CTR_INITIAL_TLS, tls_page, 4096, SNX_CTR_READ | SNX_CTR_WRITE) != SNX_CTR_MEM_OK ||
         !snx_ctr_cpu_init(&p->cpu, p->space, image->segment[0].address, SNX_CTR_STACK_TOP, false))
         goto fail;
     p->cpu.state.cpu.tpidruro = SNX_CTR_INITIAL_TLS;

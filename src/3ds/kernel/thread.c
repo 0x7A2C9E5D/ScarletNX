@@ -76,18 +76,15 @@ static uint32_t tls(SnxCtrProcess* p, uint32_t* address) {
                 used = true;
         if (used) continue;
         uint32_t page = va & ~4095u;
+        /* a new TLS page comes from the BASE region, not the application's pool (Azahar's
+           Process::AllocateThreadLocalStorage): a game that commits all of its pool still starts threads */
         if (snx_ctr_query(p->space, page, NULL, NULL) != SNX_CTR_MEM_OK) {
-            uint32_t physical;
-            for (physical = 0; physical < p->app_limit / 4096; ++physical)
-                if (!p->physical_owner[physical]) break;
-            if (physical == p->app_limit / 4096) return 0xd86007f3u;
-            if (snx_ctr_map(p->space, page, CTR_PHYS_BASE + physical * 4096, 4096, 3) != SNX_CTR_MEM_OK)
-                return 0xd86007f3u;
+            uint32_t physical = snx_ctr_shared_pages(p, 4096);
+            if (!physical || snx_ctr_map(p->space, page, physical, 4096, 3) != SNX_CTR_MEM_OK) return 0xd86007f3u;
             if (snx_ctr_write_ram(p->space, page, zero, sizeof zero) != SNX_CTR_MEM_OK) {
                 (void)snx_ctr_unmap(p->space, page, 4096);
                 return 0xe0e01bf5u;
             }
-            p->physical_owner[physical] = CTR_STATIC;
             *address = va;
             return 0;
         }
@@ -136,6 +133,7 @@ uint32_t snx_ctr_thread_create(SnxCtrProcess* p, const uint32_t* r, uint32_t* ou
     /* default NaN, flush-to-zero and round toward zero, as Azahar's svcCreateThread sets every new thread's FPSCR */
     t->context.fpscr = 0x03c00000u;
     t->priority = r[0];
+    t->core = processor < 0 ? 0 : (uint32_t)processor; /* -2 the process's ideal processor (0), -1 any: core 0 */
     snx_ctr_thread_ready(p, id);
     ++p->objects[id].refs; /* live thread owns a root, even if its handle closes */
     return 0;
@@ -360,9 +358,12 @@ static void sleep_until(uint64_t deadline) {
     nanosleep(&ts, NULL);
 #endif
 }
-/* The runnable thread of best effective priority (inheritance from mutex waiters included). Among equals the current
-   one keeps the core (Azahar's PopNextReadyThread: only a strictly better priority takes it), else the one runnable
-   longest (ready_seq: Azahar's per-priority ready queue, a preempted thread keeping its place at the front). Time is
+/* The cores take turns, each scheduling a slice of its own as Azahar's per-core schedulers do (a slice ends at an SVC
+   or after SNX_CTR_POLL_BLOCKS blocks): a busy thread on the system core no longer keeps a waiting one of the
+   application core from running, as it never does on the console. A core with no thread to run gives its turn to the
+   next. On the core whose turn it is: the runnable thread of best effective priority (inheritance from mutex waiters
+   included). Among equals the core's own last one keeps it (Azahar's PopNextReadyThread: only a strictly better
+   priority takes it), else the one runnable longest (ready_seq: Azahar's per-priority ready queue, a preempted thread keeping its place at the front). Time is
    part of it: a sleeping thread is runnable again at its deadline, a waiting one times out at its own, timers fire,
    and the display's vblank and the DSP's audio frame are delivered when due, which wakes the threads waiting on GSP's
    and the DSP's interrupt events. A thread that yielded runs only when no other can. When no thread can run but a
@@ -416,23 +417,29 @@ SnxCtrSchedule snx_ctr_schedule(SnxCtrProcess* p) {
             t->wake_ns = 0;
         }
         snx_ctr_thread_priorities(p, priority);
-        uint32_t next = 0, yielded = 0;
-        for (uint32_t i = 1; i < CTR_OBJECTS; ++i) {
-            if (p->objects[i].type != CTR_OBJ_THREAD) continue;
-            CtrThread* t = &p->objects[i].data.thread;
-            if (t->dead || t->wake_ns || t->waiting_object) continue;
-            if (t->yield) {
-                t->yield = 0;
-                if (!yielded || priority[i] < priority[yielded]) yielded = i;
-                continue;
+        uint32_t next = 0, core = 0;
+        for (uint32_t turn = 0; turn < 4 && !next; ++turn) {
+            core = (p->next_core + turn) & 3;
+            uint32_t yielded = 0, own = p->core_thread[core];
+            for (uint32_t i = 1; i < CTR_OBJECTS; ++i) {
+                if (p->objects[i].type != CTR_OBJ_THREAD) continue;
+                CtrThread* t = &p->objects[i].data.thread;
+                if (t->dead || t->wake_ns || t->waiting_object || (t->core & 3) != core) continue;
+                if (t->yield) {
+                    t->yield = 0;
+                    if (!yielded || priority[i] < priority[yielded]) yielded = i;
+                    continue;
+                }
+                bool better = !next || priority[i] < priority[next];
+                if (!better && priority[i] == priority[next])
+                    better = next != own && (i == own || t->ready_seq < p->objects[next].data.thread.ready_seq);
+                if (better) next = i;
             }
-            bool better = !next || priority[i] < priority[next];
-            if (!better && priority[i] == priority[next])
-                better = next != current && (i == current || t->ready_seq < p->objects[next].data.thread.ready_seq);
-            if (better) next = i;
+            if (!next) next = yielded;
         }
-        if (!next) next = yielded;
         if (next) {
+            p->next_core = (core + 1) & 3;
+            p->core_thread[core] = next;
             p->current_thread = next;
             p->cpu.state.cpu = snx_ctr_thread(p)->context;
             if (next == current) p->cpu.state.cpu.exclusive_valid = exclusive;
@@ -446,6 +453,9 @@ SnxCtrSchedule snx_ctr_schedule(SnxCtrProcess* p) {
         if (deadline >= UINT64_MAX - 1) return SNX_CTR_SCHED_BLOCKED;
         slept_for_device = deadline < earliest;
         exclusive = 0;
+        uint64_t before = now_ns();
         sleep_until(deadline);
+        p->idle_ns += now_ns() - before;
+        ++p->idle_waits;
     }
 }

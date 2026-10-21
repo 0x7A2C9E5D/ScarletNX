@@ -611,6 +611,7 @@ SnxCtrSvcResult snx_ctr_svc(SnxCtrProcess* p, uint32_t number) {
     uint32_t* r = cpu->r;
     p->last_svc = number;
     ++p->svc_count;
+    ++p->svc_counts[number & 255];
     cpu->exclusive_valid = 0; /* exception entry may clear the local monitor */
     switch (number) {
         case 0x01: {

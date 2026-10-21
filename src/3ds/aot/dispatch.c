@@ -3,6 +3,8 @@
 #include "3ds/aot/ctr_module.h"
 #include "3ds/kernel/ctr_kernel.h"
 #include "3ds/runtime/internal.h"
+#include "snx_settings.h"
+#include <stdio.h>
 #include <string.h>
 
 bool snx_ctr_module_compatible(const SnxCtrModule* m, const SnxCtrImage* image) {
@@ -82,7 +84,14 @@ SnxCtrRunResult snx_ctr_dispatch(const SnxCtrModule* m, SnxCtrProcess* process, 
             continue;
         }
         if (cpu->exit == SNX_ARM_SVC) {
+            uint32_t before[4] = {cpu->r[0], cpu->r[1], cpu->r[2], cpu->r[3]}, thread = process->current_thread;
             SnxCtrSvcResult result = snx_ctr_svc(process, cpu->syndrome);
+            if (g_settings.ctr_svc_trace && result == SNX_CTR_SVC_RETURN &&
+                (g_settings.ctr_svc_trace > 1 || (cpu->r[0] >> 31)))
+                fprintf(stderr,
+                        "3ds svc trace: thread %u svc 0x%02x at 0x%08x (0x%08x 0x%08x 0x%08x 0x%08x) -> 0x%08x 0x%08x\n",
+                        (unsigned)thread, (unsigned)cpu->syndrome, cpu->r[15] - (thumb ? 2u : 4u), before[0], before[1],
+                        before[2], before[3], cpu->r[0], cpu->r[1]);
             if (result == SNX_CTR_SVC_EXIT) return SNX_CTR_RUN_EXIT;
             if (result == SNX_CTR_SVC_BLOCKED) {
                 if (!scheduled(process, &stop)) return stop;

@@ -6,6 +6,8 @@
 #include "3ds/runtime/main.h"
 #include "3ds/ipc/ctr_ipc.h"
 #include "common/utilities/common.h"
+#include "nx/runtime/ini.h"
+#include "snx_settings.h"
 #include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -38,6 +40,9 @@ static void usage(FILE* out) {
           "  --max-blocks N  Stop after N native blocks (default: run until the game exits or its window\n"
           "                  closes)\n"
           "  --seconds N     Stop after N seconds, reporting where each thread is\n"
+          "  --KEY=VALUE     A setting of the 3DS debug table (g_ctr_debug_ini in src/nx/runtime/settings.txt):\n"
+          "                  --ctr_ipc_trace=1 logs each service request, --ctr_jit_trace=1 each block\n"
+          "                  compiled while the game runs\n"
           "  --ipc-stubs L   Answer a service command the runtime lacks with success instead of stopping, for\n"
           "                  the services in L: all, or a comma list of srv, fs, apt, ptm, hid, gsp, cfg, dsp.\n"
           "                  Given more than once, the lists add up\n"
@@ -339,6 +344,21 @@ int snx_ctr_main(int argc, char** argv) {
                 return 2;
             }
             model = !strcmp(argv[i], "old") ? SNX_CTR_OLD : SNX_CTR_NEW;
+        } else if (!positional && !strncmp(arg, "--", 2) && strchr(arg, '=')) {
+            /* a setting of the 3DS debug table (g_ctr_debug_ini, src/nx/runtime/settings.txt), --key=value */
+            char key[64];
+            size_t length = (size_t)(strchr(arg, '=') - arg - 2);
+            const IniOpt* o = NULL;
+            if (length < sizeof key) {
+                memcpy(key, arg + 2, length);
+                key[length] = 0;
+                o = ini_find(g_ctr_debug_ini, key);
+            }
+            if (!o) {
+                fprintf(stderr, "scarletnx-3ds: unknown setting: %s\n", arg);
+                return 2;
+            }
+            ini_read(o, strchr(arg, '=') + 1);
         } else if ((!positional && arg[0] == '-') || input) {
             fprintf(stderr, "scarletnx-3ds: unexpected argument: %s\n", arg);
             usage(stderr);

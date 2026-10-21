@@ -218,7 +218,7 @@ int main(void) {
         uint32_t physical;
         unsigned permissions;
         assert(snx_ctr_query(p->space, 0x10000000, &physical, &permissions) == SNX_CTR_MEM_OK &&
-               physical == p->physical_end && permissions == 1);
+               physical >= p->physical_end && permissions == 1); /* past the application's pool */
         assert(snx_ctr_write_ram(p->space, 0x10000000, fill, 1) == SNX_CTR_MEM_PERMISSION);
         for (unsigned i = 0; i < 6; ++i) {
             assert(!snx_ctr_handle_close(p, get(p, 3 + i)));

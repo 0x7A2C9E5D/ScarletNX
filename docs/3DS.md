@@ -49,8 +49,22 @@ and a half minutes on six cores (the chunks compile in parallel).
 
 Since 2026-10-21 a commercial title, decrypted this way, runs its startup
 (cfg, FS with its save data, APT, and the system services the runtime answers
-generically) and draws its own loading indicator and a dialog's text through the
-PICA renderer.
+generically), creates its save data and stops at its first prompt for the A
+button, drawn through the PICA renderer. Input is the next gap.
+
+The cores take turns on the one host thread, each scheduling its own threads (a
+slice ends at an SVC or after `SNX_CTR_POLL_BLOCKS` blocks), so a busy thread on the
+system core leaves the application core's threads their time, as on the console.
+TLS pages come from the BASE region, outside the application's pool, as Azahar
+allocates them: a game that commits all of its pool still starts threads.
+
+Debug switches are settings of `g_ctr_debug_ini` in `src/nx/runtime/settings.txt`,
+given as `--key=value`: `--ctr_ipc_trace=1` logs each service request with the
+thread and its answer, `--ctr_svc_trace=1` each SVC that fails (2: every SVC),
+`--ctr_gpu_trace=1` each GX command and framebuffer swap, `--ctr_jit_trace=1` each
+block compiled at run time. A run ended by `--seconds` (or a stop) reports each
+thread's core, priority, pc, what it waits on (whose event it is) and the return
+addresses on its stack, how long the process sat idle, and its most frequent SVCs.
 
 Since 2026-10-16, SuperTux runs past `main` and its RomFS reads. It draws its title and loading
 screens through a software port of Azahar's PICA pipeline (command processor,

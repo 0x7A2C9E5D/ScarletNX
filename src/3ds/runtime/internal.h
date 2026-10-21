@@ -52,6 +52,7 @@ typedef struct {
 typedef struct {
     SnxArmCPU context; /* inactive architectural prefix only; never the checked adapter */
     uint32_t priority, dead, waiting_object, waiting_address;
+    uint32_t core; /* the processor it was created for: 0 the application's, 1 the system's (2 and 3 the New 3DS's) */
     /* Host monotonic deadline, 0 for none. A sleeping thread (no waiting_object) is not runnable before it,
        UINT64_MAX sleeping forever; a waiting thread times out at it (CTR_TIMED_OUT), and waits without one forever */
     uint64_t wake_ns;
@@ -157,6 +158,8 @@ struct SnxCtrProcess {
     CtrObject objects[CTR_OBJECTS];
     CtrHandle handles[CTR_HANDLES];
     uint32_t last_svc, current_thread;
+    /* the cores take turns on the one host thread: the one the next scheduling serves, and each one's thread last run */
+    uint32_t next_core, core_thread[4];
     uint32_t last_ipc_service, last_ipc_header;
     uint32_t apt_lock; /* manager-owned object index; independent of client sessions */
     uint32_t apt_phase, apt_notification, apt_parameter;
@@ -167,7 +170,8 @@ struct SnxCtrProcess {
     uint64_t archive_sequence;
     SnxCtrGsp gsp;
     SnxCtrDspService dsp;
-    uint64_t svc_count;
+    uint64_t svc_count, svc_counts[256]; /* all, and each SVC's */
+    uint64_t idle_ns, idle_waits;          /* the host time the scheduler slept with no thread to run, and how often */
     /* the codeset GetProcessInfo describes: segments as loaded, BSS, title and name (ExHeader) */
     SnxCtrSegment segment[3];
     uint32_t bss_size, stack_size; /* the main thread's stack, page-rounded, below SNX_CTR_STACK_TOP */

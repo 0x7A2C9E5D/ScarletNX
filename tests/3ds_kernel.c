@@ -271,7 +271,7 @@ int main(void) {
         assert(snx_ctr_write_ram(p->space, CTR_CONFIG, "x", 1) == SNX_CTR_MEM_PERMISSION);
         assert(snx_ctr_fetch(p->space, CTR_CONFIG, code, 4) == SNX_CTR_MEM_PERMISSION);
         uint32_t baseline = used(p);
-        assert(baseline == 0x9000);
+        assert(baseline == 0x8000); /* the code and the stack: the TLS page is the BASE region's, outside the pool */
         uint32_t va = memory(p, 3, CTR_HEAP, 8192, 3, 0);
         assert(va == CTR_HEAP && used(p) == baseline + 8192);
         assert(!word(p, va) && !word(p, va + 4096));

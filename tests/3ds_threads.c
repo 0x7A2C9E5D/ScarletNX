@@ -119,6 +119,22 @@ static void preemption(SnxCtrProcess* p) {
     assert(snx_ctr_dispatch(&module, p, UINT64_C(4000000000), &executed) == SNX_CTR_RUN_EXIT);
     assert(finished == 1 && p->current_thread == bid && executed < UINT64_C(4000000000));
 }
+/* The cores take turns: a thread of better priority on the system core that loops and never blocks still leaves the
+   application core's main thread its turns, and the main thread ends the process */
+static void cores(SnxCtrProcess* p) {
+    static SnxArmBlock arm[1024], thumb[2048];
+    arm[0] = spin_block; /* 0x100000 */
+    arm[2] = exit_block; /* 0x100008 */
+    SnxCtrModule module = {.text_address = 0x100000, .text_bytes = 4096, .arm_blocks = arm, .thumb_blocks = thumb};
+    uint32_t busy = svc(p, 8, 0x20, 0x100000, 0, SNX_CTR_STACK_TOP - 0x1000, 1, SNX_CTR_SVC_RETURN);
+    uint32_t bid = snx_ctr_handle_object(p, busy);
+    assert(!p->cpu.state.cpu.r[0] && p->objects[bid].data.thread.core == 1);
+    p->cpu.state.cpu.r[15] = 0x100008;
+    finished = 0;
+    uint64_t executed = 0;
+    assert(snx_ctr_dispatch(&module, p, UINT64_C(100000000), &executed) == SNX_CTR_RUN_EXIT);
+    assert(finished == 1 && p->current_thread == 2);
+}
 int main(void) {
     unsigned char code[0x3000] = {0};
     SnxCtrImage image = {.segment = {{0x100000, 1, 16}, {0x200000, 1, 4}, {0x300000, 1, 4}},
@@ -331,6 +347,10 @@ int main(void) {
         p = snx_ctr_process_new(&image, (SnxCtrModel)model);
         assert(p);
         preemption(p);
+        snx_ctr_process_free(p);
+        p = snx_ctr_process_new(&image, (SnxCtrModel)model);
+        assert(p);
+        cores(p);
         snx_ctr_process_free(p);
     }
     puts(
