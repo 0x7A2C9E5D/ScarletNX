@@ -422,12 +422,25 @@ what hactool has written, the recompile by its blocks, shows how far it is on it
 driver's own row says it, `extracted 1229 of 4096 MB (30%)`, written over itself each second. The menu fades out to black as a run starts and the run fades in from it; ESC
 fades the run out and the menu back in.
 
+The runtime draws a loading screen of its own in the same look while it prepares the shaders before a game starts
+(`prepare_shaders = 2`, the default). It shows steps with their progress, the lines of the work scrolling under
+them, and a progress bar in every theme. A key that types, an arrow or the keypad, a gamepad button other than Home,
+or a tap starts the game at once, and the rest is prepared while it runs. Esc quits, or on Android back opens the
+menu, whose Exit quits. The screen appears only when the work takes longer than a quarter second, and its words are
+in English whatever language the launcher uses. It reads the theme the launcher picked from the launcher's
+`app.ini`, from the built-ins, the `themes/` of the data folder (the one Folders picked, when it did) and
+the themes shipped beside the launcher, which it finds when the launcher started the game. It uses the theme's
+`[run]` colours, `layout`, `texture` and `progress`, and its loading title. A theme that is no longer there draws as
+YoRHa. So does a runtime built without the launcher, which on Android is every runtime: the launcher is the app's
+own library there, and the game's runtime can't ask it.
+
 A theme is also a folder holding a `theme.ini`, the folder's name its id, in
 `themes/` in that same folder or in `themes/` beside the GUI; the first one found
 wins, and a folder named like a built-in replaces it. The built-ins are such files, and
 nothing else: each folder of `src/gui/themes/` is one, its `theme.ini` compiled into the GUI
 (`cmake/gui_themes.cmake`) and read as any other, setting every key. The runtime's game menu
-takes YoRHa's colours from the same file at build time. The files are copied beside the GUI
+takes YoRHa's colours from the same file at build time, and so does its loading screen when it can't read the
+launcher's theme. The files are copied beside the GUI
 in the build and installed in `share/scarletnx/themes`: copy one under a new name to make a theme, or edit one
 to change the built-in. `[theme] base` picks the built-in a file starts from, and a key it
 leaves out, or that cannot be read, keeps the base's value. What a file has that the theme does not take as written

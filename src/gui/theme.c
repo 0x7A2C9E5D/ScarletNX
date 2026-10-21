@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #include "gui/theme.h"
 #include "gui/i18n.h"
+#include "gui/steps.h" /* GuiProgress */
 #include "common/utilities/common.h"
 #include "common/utilities/ini_lines.h"
 #include "gui_themes.h"
@@ -653,4 +654,69 @@ char* gui_theme_write(const GuiTheme* theme, const GuiThemeFile* file) {
         return NULL;
     }
     return o.p;
+}
+static uint32_t rgb_word(GuiRgb c) { return (uint32_t)c.r << 16 | (uint32_t)c.g << 8 | c.b; }
+typedef char run_progress_same[SNX_RUN_PROGRESS_AMOUNT == GUI_PROGRESS_AMOUNT &&
+                                       SNX_RUN_PROGRESS_PERCENT == GUI_PROGRESS_PERCENT &&
+                                       SNX_RUN_PROGRESS_TIME == GUI_PROGRESS_TIME
+                                   ? 1
+                                   : -1];
+void gui_run_theme(const char* folder, SnxRunTheme* out) {
+    char *config = snx_menu_dir(folder, SNX_USER_CONFIG), *data = snx_menu_dir(folder, SNX_USER_DATA);
+    char* app = config ? snx_path_join(config, "app.ini") : NULL;
+    size_t bytes = 0, i;
+    char *text = app ? (char*)snx_read_file(app, &bytes) : NULL, *key, *value, id[64] = "yorha", picked[1024] = "";
+    /* the running program's folder: the launcher's own when it started the run, as it runs itself with --game */
+    char *self = snx_executable("scarletnx"), *program_dir = self ? snx_dirname(self) : NULL;
+    char *beside = program_dir ? snx_path_join(program_dir, "themes") : NULL, *dirs[2] = {NULL, NULL};
+    GuiTheme* t = malloc(sizeof *t);
+    GuiThemes listed = {0};
+    SnxIni ini;
+    *out = (SnxRunTheme){0};
+    /* as the launcher reads app.ini (src/gui/main.c app_read): its theme, and the data folder Folders picked, a full
+       path or none */
+    if (text) {
+        snx_ini_start(&ini, text);
+        while (snx_ini_next(&ini, &key, &value))
+            if (!strcmp(ini.section, "app") && !strcmp(key, "theme") && *value)
+                snprintf(id, sizeof id, "%s", value);
+            else if (!strcmp(ini.section, "folders") && !strcmp(key, "data") && snx_path_is_full(value))
+                snprintf(picked, sizeof picked, "%s", value);
+    }
+    /* the launcher's two folders of themes (themes_dirs): its data folder's, then those shipped beside it (main.c
+       shipped_themes), which an installed one keeps in ../share/scarletnx/themes. A game's copy of the runtime
+       started on its own has none beside it, and finds the data folder's and the built-ins */
+    dirs[0] = picked[0] ? snx_path_join(picked, "themes") : data ? snx_path_join(data, "themes") : NULL;
+    if (beside && !snx_is_dir(beside)) {
+        free(beside);
+        beside = snx_path_join(program_dir, "../share/scarletnx/themes");
+    }
+    dirs[1] = beside;
+    /* a theme it lists, as the launcher takes one only then (an id is a folder's name, never a path); else YoRHa,
+       the launcher's own until another is picked */
+    gui_themes_scan(&listed, (const char* const*)dirs, 2);
+    for (i = 0; i < listed.count && strcmp(listed.ids[i], id); ++i) {}
+    if (i == listed.count) snprintf(id, sizeof id, "%s", "yorha");
+    if (t) {
+        gui_theme_load(t, (const char* const*)dirs, 2, id, NULL, 0); /* its problems are the launcher's to say */
+        out->page = rgb_word(t->run_colors.page);
+        out->ink = rgb_word(t->run_colors.ink);
+        out->soft = rgb_word(t->run_colors.soft);
+        out->dim = rgb_word(t->run_colors.dim);
+        snprintf(out->name, sizeof out->name, "%s", t->name);
+        snprintf(out->title, sizeof out->title, "%s", t->title[GUI_SCREEN_LOADING]);
+        out->steps = t->run == GUI_RUN_STEPS;
+        out->texture = t->texture;
+        out->progress = t->progress;
+    }
+    gui_themes_free(&listed);
+    free(t);
+    free(text);
+    free(dirs[0]);
+    free(dirs[1]);
+    free(program_dir);
+    free(self);
+    free(app);
+    free(data);
+    free(config);
 }

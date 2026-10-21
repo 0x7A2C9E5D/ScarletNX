@@ -3,6 +3,7 @@
 /* The game's menu (runtime/platform/overlay.c): where it goes, its pages, what a tap, a move or a step does, its look;
    and ui.c's atlas and text */
 #include "nx/runtime/platform/overlay.h"
+#include "nx/runtime/platform/prepare_screen.h"
 #include "nx/runtime/platform/fatal_screen.h"
 #include "nx/runtime/platform/backend.h"
 #include "nx/runtime/platform/gamepad.h"
@@ -169,12 +170,60 @@ static SnxOverlayError panel_of(const char* name, const char* msg, const char* h
     e.focus = SNX_OVERLAY_ERROR_CLOSE;
     return e;
 }
+/* The screen before the game (prepare_screen.c): hidden until told; then the page over the window, the steps, bar
+   and foot within its safe part, the scrolling lines last and only as many as leave the menu room; a line cut to the
+   width by glyphs, not UTF-8 bytes; and nothing once hidden again */
+static void prepare_screen(void) {
+    static SnxUiQuad many[4096];
+    static char notes[SNX_PREPARE_NOTES][SNX_PREPARE_NOTE_SIZE];
+    SnxPrepareStep st[3] = {{0}};
+    SnxUiList l = {many, 0, 4096};
+    const int safe[4] = {40, 0, 3760, 1080}; /* a cutout at each side */
+    int i, at_foot = 0, in_cutout = 0, on_note = 0;
+    assert(!prepare_screen_shown());
+    prepare_screen_draw(&l, 3840, 1080, safe, 100);
+    assert(l.n == 0);
+    st[0].label = "FINDING SHADERS";
+    st[0].value = st[0].total = 10;
+    st[0].done = 1;
+    st[1].label = "PREPARING SHADERS";
+    st[1].value = 5;
+    st[1].total = 20;
+    st[2].label = NULL; /* drawn as no label */
+    for (i = 0; i < SNX_PREPARE_NOTES; ++i) memset(notes[i], 'x', SNX_PREPARE_NOTE_SIZE - 1);
+    prepare_screen_set(NULL, "GAME", st, 3, (const char (*)[SNX_PREPARE_NOTE_SIZE])notes, SNX_PREPARE_NOTES, "FOOT",
+                       1000);
+    assert(prepare_screen_shown());
+    prepare_screen_draw(&l, 3840, 1080, safe, 100);
+    /* scale 2 (1080 / 480), 33 rows of 32 pixels and 235 columns of 16 in the safe part */
+    assert(l.n > 0 && l.n <= 4096 - PREPARE_SCREEN_MENU_QUADS);
+    assert(many[0].x == 0 && many[0].w == 3840 && many[0].h == 1080); /* the page, the whole window */
+    for (i = 1; i < l.n; ++i) {
+        if (many[i].y == 32.0f * 32 && many[i].x == 40 + 16) at_foot = 1; /* the foot's F, at its row */
+        if (many[i].h == 32 && many[i].x < 40) in_cutout = 1;             /* a letter left of the safe part */
+        if (many[i].y == 32.0f * 6) on_note = 1;                          /* the first line's row, under three steps */
+    }
+    assert(at_foot && !in_cutout && on_note);
+    /* one line of a glyph that takes two bytes in UTF-8 (127 of them), on a picture 100 columns wide: cut to 96
+       glyphs (the width less 4), the last three of them dots, as a cut by bytes would not */
+    for (i = 0; i < 127; ++i) memcpy(notes[0] + 2 * i, "\xC3\xA9", 2);
+    notes[0][254] = 0;
+    prepare_screen_set(NULL, "GAME", st, 2, (const char (*)[SNX_PREPARE_NOTE_SIZE])notes, 1, "", 1000);
+    l.n = 0;
+    prepare_screen_draw(&l, 1600, 1080, NULL, 100);
+    on_note = 0;
+    for (i = 0; i < l.n; ++i) on_note += many[i].y == 32.0f * 5 && many[i].h == 32;
+    assert(on_note == 96);
+    prepare_screen_set(NULL, NULL, NULL, 0, NULL, 0, NULL, 0);
+    assert(!prepare_screen_shown());
+}
 int main(void) {
     const u32 ink = 0xFF3A4145u;
     int x, y, sc;
     vpad_set_store(store);
     snx_pad_map_unset(&pads.own); /* as gamepad.c starts it: every control the button in its place */
     snx_pad_map_unset(&players[0].own);
+    prepare_screen();
     assert(!overlay_shown());
     overlay_toggle();
     assert(overlay_shown());

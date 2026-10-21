@@ -78,7 +78,9 @@ build/scarletnx --scan-log "$games/<id>/<id>.log" [--format markdown]
   logs as JSON lines. A maintainer's `status: confirmed` label on a report gets one comment: ready for an edenprobe
   case, with the steps.
 
-- Runtime: `--seconds=N` / `--frames=N`; `--shot=out` → CWD `out.ppm`; `--shot_every=N` → every N frames.
+- Runtime: `--seconds=N` / `--frames=N`, counted from the game's start, after the shader loading screen
+  (`prepare_shaders=2`, which the first run after a rebuild spends translating the game's shaders again);
+  `--shot=out` → CWD `out.ppm`; `--shot_every=N` → every N frames.
   `--script=ms:hexbuttons,...` (or `Nf:hexbuttons` to press at present N), `--press_len=ms` (default 300).
   `--swkbd_text=TEXT`: the software keyboard answers TEXT instead of opening the host's dialog.
   Masks: A/B/X/Y `1/2/4/8`, L/R `40/80`, ZL/ZR `100/200`, Plus/Minus `400/800`,

@@ -661,15 +661,6 @@ static void next_theme(App* app, int step) {
 static const char* const place_names[GUI_PLACES] = {"data", "recompiled", "work"};
 static const char* const place_labels[GUI_PLACES] = {SNX_TR_NOOP("Data"), SNX_TR_NOOP("Recompiled"),
                                                      SNX_TR_NOOP("Extractions")};
-/* a path from the root: '/' first, or on Windows a drive's (C:\ or C:/) or a share's (\\host) */
-static bool full_path(const char* path) {
-#ifdef _WIN32
-    if (SDL_isalpha((unsigned char)path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) return true;
-    return path[0] == '\\' && path[1] == '\\';
-#else
-    return path[0] == '/';
-#endif
-}
 /* side_box's words in app.ini, GuiSide's order, and as Settings > App shows them */
 static const char* const side_words[] = {"auto", "on", "off"};
 static const char* const side_names[] = {SNX_TR_NOOP("Auto"), SNX_TR_NOOP("On"), SNX_TR_NOOP("Off")};
@@ -771,7 +762,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
                 }
             }
         }
-        if (place < GUI_PLACES && (!*value || full_path(value))) { /* nothing is the default */
+        if (place < GUI_PLACES && (!*value || snx_path_is_full(value))) { /* nothing is the default */
             free(places[place]);
             places[place] = *value ? snx_strdup(value) : NULL;
             continue;

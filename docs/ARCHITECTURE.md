@@ -168,7 +168,7 @@ bump `SNX_ABI` for ABI changes. Version mismatches reject loading.
 | `hle/services/`, `hle/filesystem/` | Services, nvdrv, guest filesystem services |
 | `gpu/` and `gpu/maxwell/` | GPFIFO, Maxwell engine implementation, shaders, Vulkan renderer |
 | `gpu/video/` | host1x, NVDEC H.264 and VP9 decoding through FFmpeg, VIC |
-| `runtime/platform/` | Host APIs, SDL3/headless, input, screenshots, timed exit |
+| `runtime/platform/` | Host APIs, SDL3/headless, input, screenshots, timed exit, the in-game menu, the shader loading screen |
 
 ### Guest exec
 
@@ -202,6 +202,13 @@ service the runtime doesn't have gets sm's stand-in object, which answers every 
 5. vi waits on the fences no submission promised (a host1x engine's, the CPU's), then queues present (`gpu_call`)
    after the jobs of the channels that promised the others. Other channels' jobs don't hold it. The GPU thread checks
    the remaining fences. `present_buffer` uses the matching RT and vi's crop, or converts guest memory.
+
+The shader programs a game ships are translated at startup, on the renderer's shader file thread rather than the GPU
+thread, into `<id>.vkshipped` (`prepare_shaders`: before the game's first thread runs, behind main.c's loading screen,
+or in the background as it runs). `gpu/shipped_pass.c` walks the RomFS and the executables' segments, and
+`gpu/shader/shipped.c` finds the programs by NVN's code wrapper (or a bare NVN shader file's layout) in their bytes,
+and in the Yaz0 SARCs whose names list a shader container. `gpu/vk/pipeline.c` translates each into the file, which a
+draw's lookup reads from when it has no shader of its own.
 
 ### Renderer coherence + lifetime
 

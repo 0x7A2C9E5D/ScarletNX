@@ -8,9 +8,12 @@ set(dir "${CMAKE_CURRENT_BINARY_DIR}/runtime-deploy")
 set(script "${CMAKE_CURRENT_LIST_DIR}/../cmake/deploy.cmake")
 file(REMOVE_RECURSE "${dir}")
 file(WRITE "${dir}/bin/scarletnx" "runtime")
-# a recompiled game in games
+# a recompiled game in games, with its update's module beside its own, and another in a folder whose name a glob
+# would read as a pattern
 function(game games)
     file(WRITE "${games}/Game/Game_code.so" "")
+    file(WRITE "${games}/Game/Game_01000000000AB800_code.so" "")
+    file(WRITE "${games}/Game [JP]/Game [JP]_code.so" "")
 endfunction()
 # deploy.cmake with SNX_RECOMPILED_DIR games, in an environment without HOME and XDG_DATA_HOME but for ARGN's NAME=VALUE
 function(deploy games)
@@ -22,15 +25,19 @@ function(deploy games)
     set(out "${out}" PARENT_SCOPE)
 endfunction()
 function(deployed games what)
-    if(NOT result EQUAL 0 OR NOT EXISTS "${games}/Game/Game")
+    if(NOT result EQUAL 0 OR NOT EXISTS "${games}/Game/Game" OR NOT EXISTS "${games}/Game/Game_01000000000AB800"
+       OR NOT EXISTS "${games}/Game [JP]/Game [JP]")
         file(REMOVE_RECURSE "${dir}")
-        message(FATAL_ERROR "${what}: the runtime is not in ${games}/Game/ (${result}):\n${out}")
+        message(FATAL_ERROR "${what}: the runtime is not beside each game module in ${games} (${result}):\n${out}")
     endif()
 endfunction()
 
 game("${dir}/named")
 deploy("${dir}/named")
 deployed("${dir}/named" "SNX_RECOMPILED_DIR")
+game("${dir}/na[me]d*")
+deploy("${dir}/na[me]d*")
+deployed("${dir}/na[me]d*" "an SNX_RECOMPILED_DIR whose name a glob would read as a pattern")
 # a 3DS game, named after its title ID: the 3DS runtime's (CTR_RUNTIME), never the Switch runtime's
 set(ctr "0004000000ABCD00")
 file(WRITE "${dir}/bin/scarletnx-3ds" "3ds runtime")

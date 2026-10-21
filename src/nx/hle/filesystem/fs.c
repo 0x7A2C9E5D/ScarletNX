@@ -259,7 +259,7 @@ static void dlcs_open(void) {
         free(ini);
         free(dump);
     }
-    if (g_hle.fs.naocs) pm_init(&g_hle.fs.dlock);
+    if (g_hle.fs.naocs && !g_hle.fs.dfs) pm_init(&g_hle.fs.dlock); /* dump_open, before this, made it for the game */
     free(ids);
     free(data);
     free(folder);
@@ -735,8 +735,8 @@ static void romfs_build(const RNode* dir, const char* what) {
 
 /* size bytes of the game's own image at off into dst: romfs.bin, mapped or not, or the dump's. The caller checked the
    range against the image's size, and holds tree.lock when locked is set. 0, or -1 with the part that couldn't be read
-   zeroed */
-static int image_read(u64 off, void* dst, u64 size, int locked) {
+   zeroed. quiet: the runtime's own read (romfs_peek), which warns of nothing */
+static int image_read(u64 off, void* dst, u64 size, int locked, int quiet) {
     u8* out = dst;
     int rc;
     if (g_hle.fs.rimage) {
@@ -749,8 +749,9 @@ static int image_read(u64 off, void* dst, u64 size, int locked) {
         pm_unlock(&g_hle.fs.dlock);
         if (rc) {
             memset(out, 0, (size_t)size);
-            WARN("RomFS: could not read the dump at %llx (%llx bytes): the game gets zeros\n", (unsigned long long)off,
-                 (unsigned long long)size);
+            if (!quiet)
+                WARN("RomFS: could not read the dump at %llx (%llx bytes): the game gets zeros\n",
+                     (unsigned long long)off, (unsigned long long)size);
         }
         return rc;
     }
@@ -839,7 +840,7 @@ static int rnode_image(RNode* root, u64 total) {
     RImage im;
     u8 *dirs = NULL, *files = NULL;
     int rc = -1, i;
-    if (total < sizeof head || image_read(0, head, sizeof head, 1)) return -1;
+    if (total < sizeof head || image_read(0, head, sizeof head, 1, 0)) return -1;
     for (i = 0; i < 10; i++) h[i] = snx_ld_le64(head + i * 8);
     /* the header's size, then each table's offset and size (the folder hash table, the folder table, the file hash
        table, the file table), then where the file data starts */
@@ -849,7 +850,7 @@ static int rnode_image(RNode* root, u64 total) {
     dirs = malloc((size_t)h[4]);
     files = malloc(h[8] ? (size_t)h[8] : 1);
     if (!dirs || !files) fatal("RomFS: out of memory for the game's image's tables\n");
-    if (!image_read(h[3], dirs, h[4], 1) && (!h[8] || !image_read(h[7], files, h[8], 1))) {
+    if (!image_read(h[3], dirs, h[4], 1, 0) && (!h[8] || !image_read(h[7], files, h[8], 1, 0))) {
         im.dirs = dirs;
         im.files = files;
         im.dir_bytes = h[4];
@@ -956,40 +957,52 @@ static FILE* rf_open(FsNode* node) {
     slot->used = ++g_hle.fs.openclk;
     return f;
 }
-/* size bytes of the file at offset rel into dst: 0, or -1 with the part that couldn't be read zeroed */
-static int rfile_read(RFile* rf, u64 rel, u8* dst, u64 size) {
+/* size bytes of the file at offset rel into dst: 0, or -1 with the part that couldn't be read zeroed. quiet: the
+   runtime's own read, which doesn't count as the game's first of the file */
+static int rfile_read(RFile* rf, u64 rel, u8* dst, u64 size, int quiet) {
     FsNode* node = rf->node;
     i64 got = (i64)size;
-    if (!node) return image_read(rf->base + rel, dst, size, 0); /* the game's image's, under the mods' */
-    if (!__atomic_exchange_n(&rf->logged, 1, __ATOMIC_RELAXED))
+    if (!node) return image_read(rf->base + rel, dst, size, 0, quiet); /* the game's image's, under the mods' */
+    if (!quiet && !__atomic_exchange_n(&rf->logged, 1, __ATOMIC_RELAXED))
         LOG("RomFS: reading %s (%.1f KB)\n", node->name, (double)node->size / 1024.0);
     if (node->fd >= 0) { /* mapped for the whole run, and never changes */
         memcpy(dst, node->map + rel, (size_t)size);
         return 0;
     }
     pm_lock(&g_hle.fs.tree.lock);
-    if (node->is_virtual && node->attached)
+    if (node->is_virtual && node->attached) {
         memcpy(dst, node->virtual_data + rel, (size_t)size);
-    else {
+        pm_unlock(&g_hle.fs.tree.lock);
+    } else if (quiet) {
+        /* a file of its own, read outside tree.lock: the game's open files (rf_open's) stay open, and its file
+           system commands don't wait for this read */
+        FILE* f = node->attached ? node_open(node, "rb") : NULL;
+        pm_unlock(&g_hle.fs.tree.lock);
+        got = f ? plat_pread(f, dst, size, rel) : -1;
+        if (f) fclose(f);
+    } else {
         FILE* f = rf_open(node);
         got = f ? plat_pread(f, dst, size, rel) : -1;
+        pm_unlock(&g_hle.fs.tree.lock);
     }
-    pm_unlock(&g_hle.fs.tree.lock);
     if (got == (i64)size) return 0;
     if (got < 0) got = 0;
     memset(dst + got, 0, (size_t)(size - (u64)got));
+    if (quiet) return -1; /* the runtime's own read says nothing: the game gets no zeros from it */
     if (!__atomic_exchange_n(&rf->warned, 1, __ATOMIC_RELAXED))
         WARN("RomFS: could not read %s at %llx (%llx bytes): the game gets zeros\n", node->name,
              (unsigned long long)rel, (unsigned long long)size);
     return -1;
 }
 /* size bytes of the image at off into dst. The caller checked the range against rtotal. 0, or -1 when part of it
-   couldn't be read from the host, that part zeroed */
-static int romfs_read(u64 off, void* dst, u64 size) {
+   couldn't be read from the host, that part zeroed. quiet: as rfile_read's */
+static int romfs_read(u64 off, void* dst, u64 size, int quiet) {
     u8* out = dst;
     int rc = 0;
     int lo, hi, k;
-    if (!g_hle.fs.rlayered && (g_hle.fs.rimage || g_hle.fs.dfs || g_hle.fs.rraw)) return image_read(off, dst, size, 0);
+    if (!size) return 0;
+    if (!g_hle.fs.rlayered && (g_hle.fs.rimage || g_hle.fs.dfs || g_hle.fs.rraw))
+        return image_read(off, dst, size, 0, quiet);
     if (off < g_hle.fs.rmeta_size) {
         u64 n = size < g_hle.fs.rmeta_size - off ? size : g_hle.fs.rmeta_size - off;
         memcpy(out, g_hle.fs.rmeta + off, (size_t)n);
@@ -1015,7 +1028,7 @@ static int romfs_read(u64 off, void* dst, u64 size) {
             RFile* rf = &g_hle.fs.rfiles[k];
             n = rf->off + rf->size - off;
             if (n > size) n = size;
-            if (rfile_read(rf, off - rf->off, out, n)) rc = -1;
+            if (rfile_read(rf, off - rf->off, out, n, quiet)) rc = -1;
         } else { /* padding up to the next file, or past the last */
             n = k + 1 < g_hle.fs.nrfiles ? g_hle.fs.rfiles[k + 1].off - off : size;
             if (n > size) n = size;
@@ -1026,6 +1039,71 @@ static int romfs_read(u64 off, void* dst, u64 size) {
         size -= n;
     }
     return rc;
+}
+/* whether [off, off + size) lies in the image */
+static int romfs_in(u64 off, u64 size) { return off <= g_hle.fs.rtotal && size <= g_hle.fs.rtotal - off; }
+int romfs_peek(u64 off, void* dst, u64 size) {
+    u8* out = dst;
+    int rc = 0;
+    if (!romfs_in(off, size)) return -1;
+    while (size) {
+        /* a piece at a time when a read can hold a lock (a dump's, an unmapped romfs.bin's, with or without mods
+           over it), so the game's reads wait for one piece at most. A mapped image takes none, and one built from
+           extracted files opens each file a read reaches: read whole */
+        int locked = !g_hle.fs.rimage && (g_hle.fs.dfs || g_hle.fs.rraw);
+        u64 n = locked && size > ((u64)1 << 20) ? (u64)1 << 20 : size;
+        if (romfs_read(off, out, n, 1)) rc = -1;
+        out += n;
+        off += n;
+        size -= n;
+    }
+    return rc;
+}
+/* the file table (the header's eighth and ninth u64s) read whole, its entries in their order */
+int romfs_files(RomfsEach each, void* ctx) {
+    u8 head[0x50];
+    char name[0x301]; /* a RomFS name is at most 0x300 bytes */
+    u64 table, size, data, at;
+    u8* t;
+    int rc = 0, malformed = 0;
+    if (!g_hle.fs.rtotal) return 0;
+    if (romfs_peek(0, head, sizeof head)) return -1;
+    table = snx_ld_le64(head + 0x38);
+    size = snx_ld_le64(head + 0x40);
+    data = snx_ld_le64(head + 0x48);
+    /* a header past the image, or a table bigger than any game's or past it: malformed, as on every call */
+    if (data > g_hle.fs.rtotal || size > (64u << 20) || table > g_hle.fs.rtotal || size > g_hle.fs.rtotal - table)
+        return -2;
+    if (!(t = malloc(size ? (size_t)size : 1))) return -1;
+    if (romfs_peek(table, t, size)) {
+        free(t);
+        return -1;
+    }
+    for (at = 0; !rc && at < size;) {
+        u32 len;
+        u64 off, bytes;
+        if (size - at < ROM_FILE_ENTRY) {
+            rc = -2; /* an entry cut short: the table ends there */
+            break;
+        }
+        len = snx_ld_le32(t + at + 0x1C);
+        off = snx_ld_le64(t + at + 8);
+        bytes = snx_ld_le64(t + at + 0x10);
+        if (len >= sizeof name || len > size - at - ROM_FILE_ENTRY) {
+            rc = -2; /* a name past the table: no entry after it can be found */
+            break;
+        }
+        memcpy(name, t + at + ROM_FILE_ENTRY, len);
+        name[len] = 0;
+        at += ROM_FILE_ENTRY + ((len + 3u) & ~3u);
+        if (off > g_hle.fs.rtotal - data || bytes > g_hle.fs.rtotal - data - off) {
+            malformed = 1; /* its data past the image: left out, the others listed */
+            continue;
+        }
+        rc = each(ctx, name, data + off, bytes) ? 1 : 0;
+    }
+    free(t);
+    return rc ? rc : malformed ? -2 : 0;
 }
 /* ============================================================ IStorage: the RomFS (no data) or a system archive */
 /* u[0] of a storage without data: the RomFS, or a DLC's image read in place, u[1] its index in aocs */
@@ -1081,9 +1159,9 @@ static int nn_fssrv_sf_IStorage_Read(SvcObj* self, i64 offset, IpcBuf buffer, i6
         return rc ? FS_OUT_OF_RANGE : 0;
     }
     if (!data) { /* the RomFS */
-        R_UNLESS(sz <= (u64)INT64_MAX - off && off <= g_hle.fs.rtotal && sz <= g_hle.fs.rtotal - off, FS_OUT_OF_RANGE);
+        R_UNLESS(sz <= (u64)INT64_MAX - off && romfs_in(off, sz), FS_OUT_OF_RANGE);
         R_UNLESS(buffer_valid(a, sz), FS_OUT_OF_RANGE);
-        return romfs_read(off, GP(a), sz) ? FS_OUT_OF_RANGE : 0;
+        return romfs_read(off, GP(a), sz, 0) ? FS_OUT_OF_RANGE : 0;
     }
     R_UNLESS(sz <= (u64)INT64_MAX - off && buffer_valid(a, sz), FS_OUT_OF_RANGE);
     pm_lock(&g_hle.fs.tree.lock);
