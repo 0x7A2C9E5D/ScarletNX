@@ -1259,8 +1259,8 @@ msgid "Portable"
 msgstr "便携"
 
 #: src/gui/main.c
-msgid "Change games folder"
-msgstr "更改游戏文件夹"
+msgid "Change recompiled folder"
+msgstr "更改已重编译游戏的文件夹"
 
 #: src/gui/main.c
 msgid "Add dumps folder"
@@ -2437,7 +2437,7 @@ msgid "Up/Down: row. Enter: next. ESC: exit."
 msgstr "上/下: 行. Enter: 下一步. ESC: 退出."
 
 msgid "Recompiled"
-msgstr ""
+msgstr "已重编译"
 
 msgid "Not enough memory to list the games in their groups."
 msgstr ""

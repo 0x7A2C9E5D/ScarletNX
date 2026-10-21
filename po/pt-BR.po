@@ -1259,8 +1259,8 @@ msgid "Portable"
 msgstr "Portátil"
 
 #: src/gui/main.c
-msgid "Change games folder"
-msgstr "Mudar a pasta dos jogos"
+msgid "Change recompiled folder"
+msgstr "Mudar a pasta dos recompilados"
 
 #: src/gui/main.c
 msgid "Add dumps folder"

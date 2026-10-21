@@ -300,7 +300,7 @@ static void test_first(App* app) {
     assert(app->folder_count == 1 && same_path(app->folders[0], dumps));
     holds(config, "folders.txt", "dumps\n");
     render(app);
-    shows(app, "Games", rgb(app->theme.ink));
+    shows(app, "Recompiled", rgb(app->theme.ink));
     key(app, SDLK_DOWN); /* round to Keep */
     key(app, SDLK_RETURN);
     /* the keys: none, Later in focus; a folder of them installed where the menu keeps them, Use these then */

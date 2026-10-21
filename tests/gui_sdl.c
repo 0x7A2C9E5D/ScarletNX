@@ -1433,13 +1433,13 @@ int main(int argc, char** argv) {
             char *games = app.games_dir, *work = app.work_dir;
             app.work_dir = snx_path_join(temporary, "extractions");
             app_values(&app);
-            snprintf(line, sizeof line, "Data: %s  Games: %s  Extractions: %s", app.data_dir, app.games_dir,
+            snprintf(line, sizeof line, "Data: %s  Recompiled: %s  Extractions: %s", app.data_dir, app.games_dir,
                      app.work_dir);
             assert(!strcmp(app.places_note, line));
             /* one in the data folder, from it: the note stays short on a phone, whose data folder is a long path */
             app.games_dir = snx_recompiled_dir(app.data_dir);
             app_values(&app);
-            snprintf(line, sizeof line, "Data: %s  Games: recompiled%c  Extractions: %s", app.data_dir,
+            snprintf(line, sizeof line, "Data: %s  Recompiled: recompiled%c  Extractions: %s", app.data_dir,
                      app.games_dir[strlen(app.data_dir)], app.work_dir);
             assert(!strcmp(app.places_note, line));
             free(app.games_dir);
@@ -1942,7 +1942,7 @@ int main(int argc, char** argv) {
             answer.user.data1 = SDL_strdup(elsewhere);
             event(&app, &answer);
             assert(app.place[GUI_PLACE_GAMES] && same_path(app.games_dir, elsewhere) &&
-                   !strncmp(app.editor.note, "Games: ", 7));
+                   !strncmp(app.editor.note, "Recompiled: ", 12));
             assert(app.form == GUI_FORM_FOLDERS && !app.editor.row && same_path(app.folder_keys[0].key, elsewhere));
             assert(app.folder_keys[0].about == games_row_picked);
             assert(strstr(shown_keys(&app, keys, sizeof keys), "Del: back to the default"));
@@ -2163,14 +2163,14 @@ int main(int argc, char** argv) {
         }
         assert(app.place_row == -1 && app.place[GUI_PLACE_GAMES] && !strcmp(app.games_dir, app.place[GUI_PLACE_GAMES]));
         assert(snx_path_within(app.games_dir, picked) && !strcmp(app.data_dir, data) && !strcmp(app.work_dir, work));
-        snprintf(line, sizeof line, "Games: %s. The folder before keeps what it has", app.games_dir);
+        snprintf(line, sizeof line, "Recompiled: %s. The folder before keeps what it has", app.games_dir);
         assert(!strcmp(app.editor.note, line) && app.editor.row == GUI_PLACE_GAMES);
         kept = (char*)snx_read_file(app.app_file, &size);
         snprintf(line, sizeof line, "[folders]\ndata = \nrecompiled = %s\nwork = \n", app.games_dir);
         assert(kept && strstr(kept, "[app]\ntheme = ") && strstr(kept, line));
         free(kept);
         render(&app);
-        shows(&app, "- Games", yellow);
+        shows(&app, "- Recompiled", yellow);
         shows(&app, "picked", yellow);
         assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir));
         app_values(&app); /* App's note, the folder now */
@@ -2229,7 +2229,7 @@ int main(int argc, char** argv) {
         snprintf(line, sizeof line, "%s is not there", app.games_dir);
         assert(!strcmp(app.app_form.place[GUI_PLACE_GAMES], "is not there") &&
                !strcmp(app.place_line[GUI_PLACE_GAMES], line));
-        assert(!places_fit(&app, line, sizeof line) && strstr(line, "Games folder ") &&
+        assert(!places_fit(&app, line, sizeof line) && strstr(line, "Recompiled folder ") &&
                strstr(line, " is not there. "));
         /* Del: the default again, kept */
         key(&app, SDLK_DELETE);

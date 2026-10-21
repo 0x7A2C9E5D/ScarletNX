@@ -596,7 +596,7 @@ static void next_theme(App* app, int step) {
 }
 /* app.ini's [folders] keys, in the order of Settings > App > Folders' rows */
 static const char* const place_names[GUI_PLACES] = {"data", "recompiled", "work"};
-static const char* const place_labels[GUI_PLACES] = {SNX_TR_NOOP("Data"), SNX_TR_NOOP("Games"),
+static const char* const place_labels[GUI_PLACES] = {SNX_TR_NOOP("Data"), SNX_TR_NOOP("Recompiled"),
                                                      SNX_TR_NOOP("Extractions")};
 /* a path from the root: '/' first, or on Windows a drive's (C:\ or C:/) or a share's (\\host) */
 static bool full_path(const char* path) {
@@ -5390,8 +5390,8 @@ static bool setup_event(App* app, const SDL_Event* e) {
 /* the page's choices into labels, own the room for those it makes; how many */
 static int setup_labels(const App* app, const char** labels) {
     static const char* const install[] = {SNX_TR_NOOP("Installed"), SNX_TR_NOOP("Portable")};
-    static const char* const folders[] = {SNX_TR_NOOP("Keep"), SNX_TR_NOOP("Change games folder"),
-                                          SNX_TR_NOOP("Add dumps folder")};
+    static const char* const folders[] = {SNX_TR_NOOP("Keep"), SNX_TR_NOOP("Change recompiled folder"),
+                                          SNX_TR_NOOP("Add a folder")};
     static const char* const keys[] = {SNX_TR_NOOP("Use these"), SNX_TR_NOOP("Choose folder"), SNX_TR_NOOP("Later")};
     static const char* const user[] = {SNX_TR_NOOP("Keep"), SNX_TR_NOOP("Overwrite")};
     int i, page = setup_page_of(app), count = app->setup_choice.count, list[SNX_NOTICES];
@@ -5649,7 +5649,7 @@ static void setup_panes(App* app, GuiRect r) {
     static const int kinds[] = {SNX_USER_CONFIG, SNX_USER_DATA, SNX_USER_STATE, SNX_USER_CACHE};
     static const char* const kind_names[] = {SNX_TR_NOOP("settings"), SNX_TR_NOOP("data"), SNX_TR_NOOP("logs"),
                                              SNX_TR_NOOP("caches")};
-    static const char* const folder_names[] = {SNX_TR_NOOP("Games"), SNX_TR_NOOP("Dumps")};
+    static const char* const folder_names[] = {SNX_TR_NOOP("Recompiled"), SNX_TR_NOOP("Dumps")};
     static const char* const found[] = {SNX_TR_NOOP("found"), SNX_TR_NOOP("missing")};
     char text[GUI_FOLDERS_MAX + 4][1100], shown[1024], pad[96];
     const char* lines[GUI_FOLDERS_MAX + 4];
@@ -5692,13 +5692,15 @@ static void setup_panes(App* app, GuiRect r) {
         case SNX_SETUP_FOLDERS:
             snx_home_short(app->games_dir ? app->games_dir : "recompiled/", shown, sizeof shown);
             SETUP_LINE("%s%s%s", m, setup_pad(pad, sizeof pad, folder_names[0], setup_cols(folder_names, 2, 2)), shown);
-            if (!app->folder_count)
-                SETUP_LINE("%s%s%s", m, setup_pad(pad, sizeof pad, folder_names[1], setup_cols(folder_names, 2, 2)),
-                           snx_tr("none yet"));
+            /* the data folder's dumps/, always listed, then the player's folders of games or dumps */
+            path = app->data_dir ? snx_path_join(app->data_dir, "dumps") : NULL;
+            snx_home_short(path ? path : "dumps/", shown, sizeof shown);
+            free(path);
+            SETUP_LINE("%s%s%s%s", m, setup_pad(pad, sizeof pad, folder_names[1], setup_cols(folder_names, 2, 2)),
+                       shown, snx_tr(" + subfolders"));
             for (i = 0; i < app->folder_count; ++i) {
                 snx_home_short(app->folders[i], shown, sizeof shown);
-                SETUP_LINE("%s%s%s%s", m,
-                           setup_pad(pad, sizeof pad, i ? "" : folder_names[1], setup_cols(folder_names, 2, 2)), shown,
+                SETUP_LINE("%s%s%s%s", m, setup_pad(pad, sizeof pad, "", setup_cols(folder_names, 2, 2)), shown,
                            app->folders_deep[i] ? snx_tr(" + subfolders") : "");
             }
             setup_box(app, r, snx_tr("Folders"), lines, n);

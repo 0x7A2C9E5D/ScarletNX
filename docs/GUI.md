@@ -105,7 +105,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   map* is the page above on its own keys, its A and B as its *Swap A/B* says.
   **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **Text size**, which opens
   its box of sizes (below), **Theme editor**, which comes back to App, and **Library**: first `recompiled/`,
-  where recompiled games go: Enter there picks another, as **Folders > Games** does; at its default it stays on the
+  where recompiled games go: Enter there picks another, as **Folders > Recompiled** does; at its default it stays on the
   list (the foot's Del greyed), and a folder picked goes back to the default with Del pressed twice, only the setting
   changing. Then the player's own folders, whose games the `recompiled/` browser lists after
   `recompiled/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
@@ -115,7 +115,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   folder stays). They are kept in `folders.txt` beside `settings.ini`, a line each, `/**` after
   one kept with its subfolders; one that cannot be read is named when the games are listed. Under App's rows, the
   three folders in use: the data folder, the games' and the extractions'. **Folders** has a row for
-  the data folder (**Data**: `recompiled/`, `themes/` and `prod.keys`), **Games** and **Extractions**, each its default or a
+  the data folder (**Data**: `recompiled/`, `themes/` and `prod.keys`), **Recompiled** and **Extractions**, each its default or a
   folder picked. Enter opens the folder picker, a folder dropped or pasted with Ctrl+V takes the focused row, Del puts
   its default back and the last row, **All back to the defaults**, all three. A row says *default*, *picked* or why
   its folder cannot be; the line under the rows names the folder in use, the one above its disk's free space. A folder
@@ -260,8 +260,9 @@ second) the one before, and OK on the last.
   while that folder is there, the focus then on Portable, else `Now: installed, its files in` the user's data folder.
   Installed is refused while a `.scarletnx/` is there, which keeps the copy portable. An app (Android, iOS) has no such
   page.
-- **Folders**: Keep, Change games folder (Settings > App > Folders' Games) or Add dumps folder (a folder of
-  Settings > App > Library), each through the folder picker, the page showing what they are now.
+- **Folders**: Keep, Change recompiled folder (Settings > App > Folders' Recompiled) or Add a folder (a folder of
+  Settings > App > Library), each through the folder picker, the page listing what is there now: Recompiled, Dumps
+  (the data folder's `dumps/`, with its subfolders), then the player's folders.
 - **Keys**: `prod.keys` and `title.keys` where the driver reads them; Use these, Choose folder (a folder with
   `prod.keys`, and `title.keys` if it has one, installed where Setup device keys installs them) or Later.
 - **User**: with `users/users.ini` there, its users with their pictures and uids, then Keep or Overwrite; without one,
