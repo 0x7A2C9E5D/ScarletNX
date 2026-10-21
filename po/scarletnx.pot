@@ -2404,6 +2404,10 @@ msgid "a text too long for its box over its rows, or on one that slides"
 msgstr ""
 
 #: src/gui/theme.c
+msgid "the most pixels between two boxes of a list, times the text's size, 0 to 14"
+msgstr ""
+
+#: src/gui/theme.c
 msgid "in the margin, beside the focused box"
 msgstr ""
 

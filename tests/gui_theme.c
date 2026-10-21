@@ -41,6 +41,7 @@ static const char* const format_keys[] = {"theme/format",
                                           "body/panels",
                                           "body/sizing",
                                           "body/text",
+                                          "body/gap",
                                           "body/cursor",
                                           "body/options-dialog",
                                           "backdrop/grid",
@@ -204,6 +205,14 @@ int main(void) {
     assert(!def->tips_box && !def->footer_box && yorha->tips_box && yorha->footer_box);
     assert(def->footer == GUI_STYLE_PLAIN && yorha->footer == GUI_STYLE_BAR && yorha->head_rule && !def->head_rule);
     assert(!gui_theme_key("body", "layout") && !gui_theme_key("head", "tabs") && !gui_theme_key("frame", "edges"));
+
+    /* a list's boxes at most 6 pixels apart in both; a theme's gap from 0 to 14, over 14 taken as 14 as every number
+       past its most */
+    assert(def->gap == 6 && yorha->gap == 6);
+    parse(&theme, "[body]\ngap = 0\n");
+    assert(theme.gap == 0);
+    parse(&theme, "[body]\ngap = 99\n");
+    assert(theme.gap == 14);
 
     parse(&theme, ""); /* nothing: the default, named after its folder */
     assert(same(theme.ink, def->ink) && !strcmp(theme.id, "mine") && !strcmp(theme.name, "mine"));

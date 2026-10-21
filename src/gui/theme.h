@@ -71,6 +71,7 @@ typedef struct {
     GuiPanels panels;
     GuiSizing sizing;
     GuiTextFlow text;
+    uint32_t gap;    /* the most pixels between two boxes of a list, times the scale: they spread up to it */
     char cursor[16]; /* in the list's margin, beside the focused box */
     GuiDialog dialog;
     int grid;        /* a faint grid on the page behind the boxes, in the dim colour */

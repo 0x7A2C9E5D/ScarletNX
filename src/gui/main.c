@@ -978,14 +978,15 @@ static void games_place(App* app, GuiPlace* p) {
 /* a list entry's box: its text under a frame's width, the frame at its foot over the font's last row, which is empty,
    so many fit; its text's row in it */
 static int item_h(const App* app) { return cell_h(app) + app->scale; }
+/* the boxes spread over the column, the theme's gap at most between two */
 static void list_place(const App* app, GuiList* l, GuiRect at, int count, int focus) {
-    int s = app->scale;
+    int s = app->scale, gap = (int)app->theme.gap;
     l->at = at;
     l->count = count;
     l->focus = focus;
     l->margin = app->theme.cursor[0] ? (gui_text_cols(app->theme.cursor) * cell_w(app)) : 0;
     l->item = item_h(app);
-    l->pitch = gui_place_pitch(at.h, count, l->item + 2 * s, l->item + 14 * s);
+    l->pitch = gui_place_pitch(at.h, count, l->item + SDL_min(2, gap) * s, l->item + gap * s);
     l->shown = gui_place_list(at.h, l->item, l->pitch, count, focus, &l->first);
     l->arrows = l->shown < count ? cell_w(app) : 0;
 }

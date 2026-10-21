@@ -78,6 +78,8 @@ const GuiThemeKey gui_theme_keys[] = {
          SNX_TR_NOOP(
              "fixed: the list two fifths of every screen, alone on a narrow one; adaptive: as wide as its entries")),
     WORD("body", "text", text, flows, SNX_TR_NOOP("a text too long for its box over its rows, or on one that slides")),
+    NUMBER("body", "gap", gap, 14,
+           SNX_TR_NOOP("the most pixels between two boxes of a list, times the text's size, 0 to 14")),
     TEXT("body", "cursor", cursor, SNX_TR_NOOP("in the margin, beside the focused box")),
     WORD(
         "body", "options-dialog", dialog, dialogs,

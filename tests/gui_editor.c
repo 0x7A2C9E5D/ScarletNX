@@ -81,6 +81,13 @@ int main(void) {
     e.row = row_of("head", "rule");
     gui_editor_key(&e, GUI_SELECT);
     assert(e.theme.head_rule == !def->head_rule);
+    e.row = row_of("body", "gap"); /* 0 to 14 */
+    assert(e.theme.gap == 6);
+    for (r = 0; r < 8; ++r) gui_editor_key(&e, GUI_LEFT);
+    assert(e.theme.gap == 0);
+    for (r = 0; r < 14; ++r) gui_editor_key(&e, GUI_RIGHT);
+    assert(e.theme.gap == 14);
+    e.theme.gap = 6;
     e.row = row_of("transitions", "blink_ms");
     e.theme.blink_ms = 5;
     gui_editor_key(&e, GUI_LEFT);

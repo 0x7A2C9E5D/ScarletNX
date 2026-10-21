@@ -4841,6 +4841,24 @@ int main(int argc, char** argv) {
             render(&app);
             form_boxes(&app, &f);
             assert(f.place.side.x > f.place.list.x + f.place.list.w && f.left.count == app.groups);
+            /* the groups the theme's gap apart in a column that would spread them further: 6, then 14 and 0 */
+            assert(f.left.shown == f.left.count && f.left.count * (f.left.item + 14 * s) <= f.left.at.h &&
+                   app.theme.gap == 6 && f.left.pitch == f.left.item + 6 * s);
+            app.theme.gap = 14;
+            form_boxes(&app, &f);
+            assert(f.left.pitch == f.left.item + 14 * s);
+            app.theme.gap = 0;
+            form_boxes(&app, &f);
+            assert(f.left.pitch == f.left.item);
+            { /* a column too short for them all: 2 pixels apart, the least, unless the gap is under it */
+                GuiList l;
+                list_place(&app, &l, gui_rect(0, 0, 100 * s, 3 * f.left.item), 10, 0);
+                assert(l.pitch == l.item && l.shown == 3);
+                app.theme.gap = 6;
+                list_place(&app, &l, gui_rect(0, 0, 100 * s, 3 * f.left.item), 10, 0);
+                assert(l.pitch == l.item + 2 * s && l.shown == 2);
+            }
+            form_boxes(&app, &f);
             b = list_box(&f.left, 0);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- App", yellow, black);
             b = list_box(&f.left, app.groups - 1); /* the last group, whole */
