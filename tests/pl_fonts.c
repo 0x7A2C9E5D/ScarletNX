@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* pl.c's shared fonts with no fonts/ in the game folder: the stand-ins compiled in (cmake/shared_fonts.cmake), Open
+/* pl.c's shared fonts with no fonts/ in the game folder: the stand-ins compiled in (cmake/shared_fonts.cmake), DejaVu
    Sans once for slots 0 to 4 and the button glyphs in slot 5, each a TrueType font behind the obfuscated header the
    SDK decodes its size from; and a game folder's .ttf taken over the stand-in for its slot */
 #include "nx/hle/services/pl.c"
@@ -99,8 +99,8 @@ int main(void) {
     CHECK(!memcmp(shm + g_hle.pl.font_off[5], snx_font_extended, snx_font_extended_size) && truetype(g_hle.pl.font_off[5]));
     CHECK(header_size(g_hle.pl.font_off[0]) == ((snx_font_standard_size + 3) & ~3u));
     CHECK(header_size(g_hle.pl.font_off[5]) == ((snx_font_extended_size + 3) & ~3u));
-    /* Open Sans, as the font's name table says it */
-    CHECK(contains(snx_font_standard, snx_font_standard_size, "OpenSans-Regular"));
+    /* DejaVu Sans, as the font's name table says it */
+    CHECK(contains(snx_font_standard, snx_font_standard_size, "DejaVuSans"));
 
     memset(shm, 0, sizeof shm);
     memset(&g_hle.pl, 0, sizeof g_hle.pl);
