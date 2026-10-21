@@ -457,6 +457,9 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
         snx_error("LLVM backend: %s", error);
         goto done;
     }
+    if (options->jit_cache && !options->quiet)
+        printf("AOT pack: %lu cached function%s%s\n", (unsigned long)variant_count, variant_count == 1 ? "" : "s",
+               variant_count ? "" : " (the cache did not match the game)");
     if ((build->keep_ir && save_ir(ir, build->keep_ir, "module")) ||
         snx_ir_object(ir, build->opt, &module_object, &module_size, error, sizeof(error))) {
         snx_error("LLVM backend: %s", error);

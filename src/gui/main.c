@@ -10,6 +10,7 @@
 #include "common/utilities/mods.h"
 #include "common/utilities/demangle.h"
 #include "common/utilities/logscan.h"
+#include "gui/aot.h"
 #include "gui/browser.h"
 #include "gui/editor.h"
 #include "common/utilities/font.h"
@@ -100,6 +101,8 @@ enum { GUI_GROUP_APP, GUI_GROUP_RECOMPILED, GUI_GROUP_DUMPS, GUI_FOLDER_GROUPS }
 #define SNX_GUI_PLAYERS  8     /* Controllers' players, as the runtime's gamepad_p<N>_ keys */
 /* Settings > App > Folders' rows, its last aside: the app's two, then each library's Main, its Extras and Add a folder */
 #define GUI_FOLDER_ROWS  (GUI_PLACES + 1 + GUI_FOLDERS_MAX + 2)
+/* the focused game's runtime JIT cache: none to show, no cache yet, one read, one unreadable */
+enum { GUI_AOT_NONE, GUI_AOT_NO_CACHE, GUI_AOT_CACHE, GUI_AOT_BAD };
 /* the App screen's values, as its rows show them, and Folders' (what each row's folder is, past its path) */
 typedef struct {
     char theme[64], text[16], language[64], animations[16], side[16], places[48], moves[32];
@@ -162,6 +165,17 @@ typedef struct App {
     bool ask_abort;     /* ESC asks first: on a phone it is Back, an edge swipe easily made by mistake */
     int native;
     bool recompile;           /* R on Games: the run recompiles its game (-r) and plays nothing */
+    /* B on Games: the focused game's JIT cache (aot.c), and the pack build it starts */
+    int aot_state;       /* GUI_AOT_* */
+    GuiAotInfo aot_info; /* the cache's header */
+    char* aot_focus;     /* the focused game's path the state is for, owned */
+    char aot_build_opt;  /* the launcher's opt setting, one char */
+    int aot_match;         /* the cache's level is the build's */
+    Uint64 aot_checked;    /* when aot_focus was looked at */
+    bool aot_pack;         /* the run builds a pack from the cache */
+    char* aot_cache;       /* its .jitcache, owned */
+    char aot_opt[2];       /* the -O the build uses */
+    int aot_hook;          /* --hook-direct-calls */
     Uint64 finger;            /* the finger on the screen (finger_id), 0 for none */
     float finger_x, finger_y; /* where it went down, 0 to 1 across the window */
     float finger_mark;        /* the height a drag last moved the focus at, a row at a time */
@@ -353,8 +367,9 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 /* what the screens say to press: a phone has a finger, the back button and the system's file picker, nothing to drop;
    a computer has the picker too (on Linux the desktop's portal, else zenity), on a screen of its own as the keys' */
 #ifdef SDL_PLATFORM_ANDROID
-#define SAY_MENU SNX_TR_KEYS("Tap: select. Refresh: tap it. Back: go back.")
-#define SAY_GAMES SNX_TR_KEYS("Tap: open. Swipe: turn the page. Recompile: tap it. Refresh: tap it. Back: go back.")
+#define SAY_MENU      SNX_TR_KEYS("Tap: select. Refresh: tap it. Back: go back.")
+#define SAY_GAMES     SNX_TR_KEYS("Tap: open. Swipe: turn the page. Recompile: tap it. Refresh: tap it. Back: go back.")
+#define SAY_GAMES_AOT SNX_TR_KEYS("AOT pack: tap it.")
 #define SAY_KEYS_HOW   SNX_TR_KEYS("Back: go back.")
 #define SAY_KEYS_WAIT  SNX_TR_NOOP("Pick prod.keys")
 #define SAY_PICK_BOX   SNX_TR_NOOP("tap the box to open the file picker")
@@ -376,6 +391,7 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_GAMES                                                                                                      \
     SNX_TR_KEYS("Up/Down: select. Enter/Space: open. R: recompile. M: mods folder. Left/Right/PgUp/PgDown: page. "  \
                 "F5: refresh.")
+#define SAY_GAMES_AOT SNX_TR_KEYS("B: build AOT pack.")
 #define SAY_PICK_BOX   SNX_TR_NOOP("click the box (or Enter) to open the file picker")
 #define SAY_KEYS_HOW   SNX_TR_KEYS("Ctrl+V: paste a path, or drop the file on the window. ESC: back.")
 #define SAY_KEYS_WAIT  SNX_TR_NOOP("Pick or drop prod.keys")
@@ -971,16 +987,23 @@ typedef struct {
 enum { GUI_SHOWS_STATUS = 1, GUI_SHOWS_TABS = 2 };
 static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols, int shows);
 static const char* shown_keys(const App* app, char* out, size_t size);
+static void aot_status_update(App* app);
 /* a screen's keys, Tab's after them */
 #define SAY_TAB SNX_TR_KEYS("Tab: screen. F2: side box.")
 static const char* screen_keys(const App* app, const char* keys, char* out, size_t size) {
+    int aot = app->menu.view == GUI_LOAD_GAMES &&
+              (app->aot_state == GUI_AOT_CACHE || app->aot_state == GUI_AOT_BAD);
 #ifdef SDL_PLATFORM_ANDROID
-    (void)app;
-    (void)out;
-    (void)size;
-    return snx_tr(keys); /* a tap on a tab */
+    if (aot) {
+        snprintf(out, size, "%s %s", snx_tr(keys), snx_tr(SAY_GAMES_AOT));
+        return out; /* a tap on a tab */
+    }
+    return snx_tr(keys);
 #else
-    (void)app;
+    if (aot) {
+        snprintf(out, size, "%s %s %s", snx_tr(keys), snx_tr(SAY_GAMES_AOT), snx_tr(SAY_TAB));
+        return out;
+    }
     snprintf(out, size, "%s %s", snx_tr(keys), snx_tr(SAY_TAB));
     return out;
 #endif
@@ -3085,8 +3108,9 @@ static void draw_games(App* app) {
     char line[1100], keys[256], kind[192];
     const char *about, *name;
     size_t i;
-    SDL_Color soft = rgb(app->theme.soft), ink = rgb(app->theme.ink);
+    SDL_Color soft = rgb(app->theme.soft), ink = rgb(app->theme.ink), failure = rgb(app->theme.failure);
     int y;
+    aot_status_update(app);
     games_boxes(app, &g);
     chrome(app, &g.place);
     ui_games_draw(app, g.rects, app->scale, g.lists);
@@ -3097,7 +3121,24 @@ static void draw_games(App* app) {
     if (g.place.side.h) {
         y = pane(app, g.place.side, name);
         r = gui_rect(r.x, y, r.w, g.place.side.y + g.place.side.h - y);
-        if (kind[0]) y += wrap_in(app, r, r.x, y, about, 1, ink) * cell_h(app) + cell_h(app);
+        y += wrap_in(app, r, r.x, y, about, app->browser.selected != 0, ink) * cell_h(app);
+        if (kind[0]) y += wrap_in(app, r, r.x, y, kind, 0, soft) * cell_h(app);
+        if (app->aot_state == GUI_AOT_CACHE) {
+            char size[32];
+            gui_size_text(size, sizeof size, app->aot_info.size);
+            snprintf(line, sizeof line, snx_tr("JIT cache: %s, O%c"), size, app->aot_info.opt);
+            y += wrap_in(app, r, r.x, y, line, 0, soft) * cell_h(app);
+            snprintf(line, sizeof line, snx_tr("AOT build: O%c%s"), app->aot_build_opt,
+                     app->aot_match ? "" : snx_tr(" (levels differ)"));
+            y += wrap_in(app, r, r.x, y, line, 0, app->aot_match ? soft : failure) * cell_h(app);
+        } else if (app->aot_state == GUI_AOT_NO_CACHE) {
+            y += wrap_in(app, r, r.x, y, snx_tr("JIT cache: none yet. Play once to collect one."), 0, soft) *
+                 cell_h(app);
+        } else if (app->aot_state == GUI_AOT_BAD) {
+            y += wrap_in(app, r, r.x, y, snx_tr("JIT cache: unreadable. Play once to rebuild it."), 0, failure) *
+                 cell_h(app);
+        }
+        y += cell_h(app);
         if (!app->games.count)
             y += wrap_in(app, r, r.x, y, snx_tr(SAY_NO_GAMES), 0, soft) * cell_h(app);
         else {
@@ -6610,6 +6651,7 @@ static void leave_run(App* app) {
     app->menu.view = GUI_LOAD_NONE;
     space_start(app); /* a run takes disk */
     app->message[0] = 0;
+    app->aot_checked = 0; /* the cache may have grown: look again when Games shows */
     recent_note(app);
     app->leaving_ms = 0;
     app->fade_ms = app->theme.fade_in_ms ? SDL_max(now_ms(app), 1) : 0;
@@ -7080,6 +7122,13 @@ static void change_answer(App* app, GuiAsk ask, bool taken) {
     else if (ask == GUI_ASK_FOLDER)
         folder_remove(app, app->folder_off);
 }
+/* the functions an AOT pack used, from the driver's line, -1 when it printed none */
+static int aot_built(const App* app) {
+    int i, n;
+    for (i = app->steps.notes - 1; i >= 0; --i)
+        if (sscanf(app->steps.note[i].text, "AOT pack: %d", &n) == 1) return n;
+    return -1;
+}
 static void pump(App* app) {
     keys_left(app);
     text_left(app);
@@ -7117,13 +7166,32 @@ static void pump(App* app) {
             recent_name(app, "LAUNCH");
             recent_name(app, "RECOMPILE"); /* a run that ended before its game loaded */
             app->menu.view = GUI_LOAD_NONE;
-            if (app->aborting)
+            if (app->aot_pack && app->aborting)
+                snprintf(app->message, sizeof(app->message), "%s", snx_tr("AOT pack build aborted."));
+            else if (app->aot_pack && app->abnormal_exit)
+                snprintf(app->message, sizeof(app->message), snx_tr("AOT pack build failed (status %d)."), status);
+            else if (app->aot_pack) {
+                int built = aot_built(app);
+                if (built > 0)
+                    snprintf(app->message, sizeof(app->message), snx_tr("AOT pack built from %d cached function%s."),
+                             built, built == 1 ? "" : "s");
+                else if (built == 0)
+                    snprintf(app->message, sizeof(app->message), "%s",
+                             snx_tr("AOT pack built, but no cached function matched the game."));
+                else
+                    snprintf(app->message, sizeof(app->message), "%s", snx_tr("AOT pack built."));
+            } else if (app->aborting)
                 snprintf(app->message, sizeof(app->message), "%s",
                          snx_tr("Program ended abnormally (force-terminated by ESC)."));
             else if (app->abnormal_exit)
                 snprintf(app->message, sizeof(app->message), snx_tr("Program ended abnormally (status %d)."), status);
             else
                 snprintf(app->message, sizeof(app->message), snx_tr("Driver exited with status %d."), status);
+            if (app->aot_pack) {
+                app->aot_pack = false;
+                free(app->aot_cache);
+                app->aot_cache = NULL;
+            }
             recent_note(app);
             app->aborting = false;
             app->confirm.shown = false; /* a run that ended while asking has nothing left to abort */
@@ -7336,7 +7404,7 @@ static void launch(App* app, char* absolute, bool prepared) {
     }
     /* the driver, the file, the settings, --repo and its folder, the picked games and extraction folders, NULL */
     GuiSettings* s = settings_of(app);
-    const char** argv = (const char**)snx_alloc((size_t)(s->count + 10) * sizeof(*argv));
+    const char** argv = (const char**)snx_alloc((size_t)(s->count + 16) * sizeof(*argv));
     char* out = NULL; /* a dump's extraction in the picked extractions folder */
     size_t n = 1;
     argv[0] = direct ? absolute : driver;
@@ -7346,6 +7414,15 @@ static void launch(App* app, char* absolute, bool prepared) {
        option of a run. The drivers work in the menu's data folder, so they list the same games */
     if (app->recompile && app->menu.selected == GUI_SWITCH && gui_settings_tmpfs(s)) argv[n++] = gui_settings_tmpfs(s);
     if (!direct && app->menu.selected == GUI_SWITCH) n += gui_settings_recompile(s, argv + n);
+    /* B's pack: the cache the profile run left, and the level and hook its key was made with. -O after the
+       settings' --opt= so the matched level is the one the build uses */
+    if (app->aot_pack && app->aot_cache && app->menu.selected == GUI_SWITCH) {
+        argv[n++] = "--jit-cache";
+        argv[n++] = app->aot_cache;
+        argv[n++] = "-O";
+        argv[n++] = app->aot_opt;
+        if (app->aot_hook) argv[n++] = "--hook-direct-calls";
+    }
     if (app->menu.selected == GUI_SWITCH && !app->recompile) n += gui_settings_options(s, 1, argv + n);
     /* Extract game container, which both drivers take, for a run and for R's recompile: off, nothing is extracted */
     if ((app->menu.selected == GUI_3DS || (app->menu.selected == GUI_SWITCH && app->recompile)) &&
@@ -7481,6 +7558,165 @@ static void recompile_focus(App* app) {
             open_game(app, index);
         app->recompile = false;
     }
+}
+/* the focused prepared Switch game: its program path, and the folder and name the runtime's cache is under */
+typedef struct {
+    const char* path;
+    char* folder;
+    char* name;
+} AotFocus;
+static char* aot_leaf(const char* folder) {
+    const char* leaf = folder + strlen(folder);
+    while (leaf > folder && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
+    return snx_strdup(leaf);
+}
+static int aot_focus_game(App* app, AotFocus* f) {
+    size_t row = app->browser.selected, head = app->browser.head;
+    size_t index = app->browser.page * app->browser.page_size + row - head;
+    bool recent = row && row < head && (int)row - 1 < recent_shown(app), game = row >= head && index < app->games.count;
+    const char* path = NULL;
+    f->path = NULL;
+    f->folder = f->name = NULL;
+    if (recent) {
+        if (app->recent.game[row - 1].driver != GUI_SWITCH) return 0;
+        path = app->recent.game[row - 1].path;
+    } else if (game) {
+        if (gui_is_cia(app->games.names[index])) return 0;
+        path = app->games.paths[index];
+    } else {
+        return 0;
+    }
+    if (!gui_game_folder(path)) return 0;
+    f->folder = snx_dirname(path);
+    f->name = f->folder ? aot_leaf(f->folder) : NULL;
+    {
+        /* the base program, not an add-on's: one pack for the game, the add-ons run from it */
+        char* file = aot_leaf(path);
+        int base = f->folder && f->name && file && !strcmp(file, f->name);
+        free(file);
+        if (!base) {
+            free(f->folder);
+            free(f->name);
+            f->folder = f->name = NULL;
+            return 0;
+        }
+    }
+    f->path = path;
+    return 1;
+}
+/* the launcher's AOT optimization: the row's pick, else its .ini default, 2 */
+static const char* aot_build_opt(App* app) {
+    GuiSettings* s = settings_of(app);
+    const char* value;
+    int i;
+    if (!s) return "2";
+    value = gui_settings_value(s, "opt");
+    if (value && value[0]) return value;
+    for (i = 0; i < s->count; ++i)
+        if (!s->values[i].kind && s->values[i].key && !strcmp(s->values[i].key, "opt"))
+            return s->values[i].def && s->values[i].def[0] ? s->values[i].def : "2";
+    return "2";
+}
+static void aot_clear_focus(App* app) {
+    free(app->aot_focus);
+    app->aot_focus = NULL;
+    app->aot_state = GUI_AOT_NONE;
+    app->aot_checked = 0;
+    app->aot_match = 0;
+    memset(&app->aot_info, 0, sizeof app->aot_info);
+}
+/* the focused game's cache, for the side panel and the B key: looked at again when the focus moves or a second passes */
+static void aot_status_update(App* app) {
+    AotFocus f = {0};
+    GuiAotInfo info = {0};
+    char* cache = NULL;
+    const char* opt;
+    int state;
+    if (!aot_focus_game(app, &f)) {
+        aot_clear_focus(app);
+        return;
+    }
+    if (app->aot_focus && !strcmp(app->aot_focus, f.path) && now_ms(app) - app->aot_checked < 1000) {
+        free(f.folder);
+        free(f.name);
+        return;
+    }
+    free(app->aot_focus);
+    app->aot_focus = snx_strdup(f.path);
+    app->aot_checked = now_ms(app);
+    state = GUI_AOT_NO_CACHE;
+    cache = gui_aot_cache_path(f.folder, f.name);
+    if (cache && snx_is_file(cache)) state = gui_aot_cache_info(cache, &info) ? GUI_AOT_CACHE : GUI_AOT_BAD;
+    free(cache);
+    app->aot_info = info;
+    app->aot_state = state;
+    app->aot_match = 0;
+    if (state == GUI_AOT_CACHE) {
+        opt = aot_build_opt(app);
+        app->aot_build_opt = opt && opt[0] ? opt[0] : '2';
+        app->aot_match = gui_aot_levels_match(opt, info.opt);
+    }
+    free(f.folder);
+    free(f.name);
+}
+/* B on Games: build the focused game's AOT pack from its JIT cache, with the same optimization and hook the cache
+   was made with; the game's AOT level must be that level too, or the two kinds of code would not be coherent */
+static void aot_focus(App* app) {
+    AotFocus f = {0};
+    GuiAotInfo info = {0};
+    char* cache = NULL;
+    const char* opt;
+    char build;
+    if (!aot_focus_game(app, &f)) {
+        snprintf(app->message, sizeof app->message, "%s",
+                 snx_tr("B builds an AOT pack for a prepared Switch game in focus."));
+        goto done;
+    }
+    cache = gui_aot_cache_path(f.folder, f.name);
+    if (!cache || !snx_is_file(cache)) {
+        snprintf(app->message, sizeof app->message, "%s",
+                 snx_tr("No JIT cache for this game yet. Play it once to collect one."));
+        goto done;
+    }
+    if (!gui_aot_cache_info(cache, &info)) {
+        snprintf(app->message, sizeof app->message, "%s",
+                 snx_tr("The JIT cache is unreadable. Play it once to rebuild it."));
+        goto done;
+    }
+    opt = aot_build_opt(app);
+    build = opt && opt[0] ? opt[0] : '2';
+    if (!gui_aot_levels_match(opt, info.opt)) {
+        snprintf(app->message, sizeof app->message,
+                 snx_tr("The JIT cache is O%c, but the game's AOT optimization is O%c. They must match: set "
+                        "Optimization level to O%c before building, or set JIT optimization to O%c and play once to "
+                        "make a matching cache."),
+                 info.opt, build, info.opt, build);
+        goto done;
+    }
+    app->aot_pack = true;
+    free(app->aot_cache);
+    app->aot_cache = cache;
+    cache = NULL;
+    app->aot_opt[0] = build;
+    app->aot_opt[1] = 0;
+    app->aot_hook = info.hook;
+    app->recompile = true;
+    {
+        int item = app->menu.selected;
+        app->menu.selected = GUI_SWITCH;
+        launch(app, snx_absolute(f.path), true);
+        app->menu.selected = item;
+    }
+    app->recompile = false;
+    if (!app->menu.running) {
+        app->aot_pack = false;
+        free(app->aot_cache);
+        app->aot_cache = NULL;
+    }
+done:
+    free(cache);
+    free(f.folder);
+    free(f.name);
 }
 /* M on Games: the focused game's mods folder opened, made first when it isn't there; else why not */
 static void mods_focus(App* app) {
@@ -8068,6 +8304,8 @@ static const struct {
                  {SNX_TR_KEY("Del"), SDLK_DELETE, 0},
                  {SNX_TR_KEY("R"), SDLK_R, 0},
                  {SNX_TR_KEY("Recompile"), SDLK_R, 0},
+                 {SNX_TR_KEY("B"), SDLK_B, 0},
+                 {SNX_TR_KEY("AOT pack"), SDLK_B, 0},
                  {SNX_TR_KEY("M"), SDLK_M, 0},
                  {SNX_TR_KEY("Ctrl+S"), SDLK_S, SDL_KMOD_CTRL},
                  {SNX_TR_KEY("Ctrl+V"), SDLK_V, SDL_KMOD_CTRL},
@@ -8713,6 +8951,12 @@ static void event(App* app, const SDL_Event* e) {
         recompile_focus(app);
         return;
     }
+    if (e->key.key == SDLK_B && !e->key.repeat && !(e->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
+        app->menu.view == GUI_LOAD_GAMES && !app->finished) {
+        layout(app);
+        aot_focus(app);
+        return;
+    }
     if (e->key.key == SDLK_M && !e->key.repeat && !(e->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
         app->menu.view == GUI_LOAD_GAMES && !app->finished) {
         layout(app);
@@ -8859,6 +9103,8 @@ static void forget(App* app) {
     free(app->checkout);
     free(app->games_dir);
     free(app->library_dumps);
+    free(app->aot_focus);
+    free(app->aot_cache);
     free(app->themes_dirs[0]);
     free(app->themes_dirs[1]);
     gui_themes_free(&app->themes);
