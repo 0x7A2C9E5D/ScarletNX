@@ -1113,11 +1113,6 @@ snx_test_target(snx-test-jit-service 11)
 target_link_libraries(snx-test-jit-service PRIVATE snx_llvm Threads::Threads)
 add_test(NAME jit_service COMMAND snx-test-jit-service)
 set_tests_properties(jit_service PROPERTIES TIMEOUT 120)
-# the runtime JIT's coverage of code outside every image (guest_jit.c's jit_resolve_or_add): a block the game mapped
-add_executable(snx-test-nx-jit-region nx_jit_region.c)
-snx_test_target(snx-test-nx-jit-region 11)
-target_link_libraries(snx-test-nx-jit-region PRIVATE snx_llvm Threads::Threads)
-add_test(NAME nx_jit_region COMMAND snx-test-nx-jit-region)
 # longjmp across the loader's code, which on Windows unwinds through its registered function table
 add_executable(snx-test-code-loader-unwind code_loader_unwind.c)
 snx_test_target(snx-test-code-loader-unwind 11)

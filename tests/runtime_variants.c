@@ -18,6 +18,8 @@
 #define CODE_LO 0x1000
 #define CODE_HI 0x3000
 #define START   0x2000
+#define OUT     0x3000
+#define OUT_SIZE 0x800
 
 static int failures;
 #define CHECK(x)                                                                                                       \
@@ -40,9 +42,10 @@ static GuestFn g_dispatch[(CODE_HI - CODE_LO) / 4];
 GuestFn* g_disp = g_dispatch;
 u64 g_code_lo = CODE_LO, g_code_hi = CODE_HI;
 
-static SnxVariantRun g_run;
-static SnxU64 g_leader;
-static SnxVariantFunction g_function;
+static SnxVariantRun g_run, g_run2;
+static SnxU64 g_leader, g_leader2;
+static SnxVariantFunction g_function, g_function2;
+static SnxVariantFunction g_functions[2];
 static SnxVariants g_variants_table;
 const SnxVariants* g_variants = &g_variants_table;
 
@@ -53,9 +56,16 @@ static void test_fn(CPU* c, u64 entry) {
     ++g_called;
 }
 
+static int g_called2;
+static void test_fn2(CPU* c, u64 entry) {
+    (void)c;
+    (void)entry;
+    ++g_called2;
+}
+
 static int word(void* user, SnxU64 address, SnxU32* out) {
     (void)user;
-    if (address < CODE_LO || address > CODE_HI - 4 || (address & 3)) return -1;
+    if (address > sizeof(g_memory) - 4 || (address & 3)) return -1;
     memcpy(out, g_memory + address, sizeof(*out));
     return 0;
 }
@@ -74,12 +84,14 @@ void logf_(int lvl, const char* fmt, ...) {
 }
 
 int main(void) {
-    static const SnxU32 words[] = {0x91000400u, 0xD65F03C0u}; /* add x0, x0, #1; ret */
+    static const SnxU32 words[] = {0x91000400u, 0xD65F03C0u};  /* add x0, x0, #1; ret */
+    static const SnxU32 words2[] = {0x91000800u, 0xD65F03C0u}; /* add x0, x0, #2; ret */
     GuestFn fn;
     memcpy(g_memory + START, words, sizeof(words));
+    memcpy(g_memory + OUT, words2, sizeof(words2));
     memset(&g_block, 0, sizeof(g_block));
     g_block.addr = CODE_LO;
-    g_block.size = CODE_HI - CODE_LO;
+    g_block.size = OUT + OUT_SIZE - CODE_LO;
     g_block.state = MS_CODE;
     g_block.perm = PERM_RX;
     memset(g_mods, 0, sizeof(g_mods));
@@ -105,9 +117,21 @@ int main(void) {
     g_function.runs = &g_run;
     g_function.fn = test_fn;
     CHECK(snx_variant_hash(word, NULL, &g_run, 1, &g_function.h1, &g_function.h2) == 0);
+    g_leader2 = OUT;
+    g_run2.address = OUT;
+    g_run2.words = 2;
+    g_function2.start = OUT;
+    g_function2.leader_count = 1;
+    g_function2.leaders = &g_leader2;
+    g_function2.run_count = 1;
+    g_function2.runs = &g_run2;
+    g_function2.fn = test_fn2;
+    CHECK(snx_variant_hash(word, NULL, &g_run2, 1, &g_function2.h1, &g_function2.h2) == 0);
+    g_functions[0] = g_function;
+    g_functions[1] = g_function2;
     g_variants_table.version = SNX_VARIANTS_VERSION;
-    g_variants_table.count = 1;
-    g_variants_table.functions = &g_function;
+    g_variants_table.count = 2;
+    g_variants_table.functions = g_functions;
 
     jit_init();
     CHECK(g_invalidate == jit_code_invalidate);
@@ -128,9 +152,23 @@ int main(void) {
 
     g_memory[START] ^= 1;
     CHECK(jit_wait(START) == test_fn);
-    CHECK(jit_wait(CODE_HI) == NULL);
-    CHECK(jit_resolve(CODE_HI) == NULL);
-    CHECK(jit_resolve_or_add(CODE_HI) == NULL);
+    /* a pc outside code_lo..hi is looked up through a block the game mapped */
+    CHECK(jit_wait(OUT) == NULL);
+    fn = jit_resolve_or_add(OUT);
+    CHECK(fn == test_fn2);
+    if (fn) fn(NULL, OUT);
+    CHECK(g_called2 == 1);
+    CHECK(jit_resolve(OUT) == test_fn2);
+    /* the block stops being code: invalidation drops the synthetic image */
+    g_block.state = MS_NORMAL;
+    g_block.perm = PERM_RW;
+    jit_code_invalidate(OUT, 4);
+    CHECK(jit_wait(OUT) == NULL);
+    CHECK(jit_resolve_or_add(OUT) == NULL);
+    /* a pc outside the table, in the same block, has no variant */
+    CHECK(jit_wait(OUT + 0x400) == NULL);
+    CHECK(jit_resolve(OUT + 0x400) == NULL);
+    CHECK(jit_resolve_or_add(OUT + 0x400) == NULL);
     jit_report();
 
     if (failures) {
