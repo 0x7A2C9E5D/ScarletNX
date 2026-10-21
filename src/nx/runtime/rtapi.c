@@ -169,21 +169,14 @@ static void rt_wfe(CPU* c) {
 }
 static void rt_poll(CPU* c) { core_poll((KThread*)c->thread); }
 
-/* snx_lookup found no function for pc: the JIT's code, which a call into code the game mapped (an NRO) finds without a
-   wait once compiled. A pc without code yet waits for its compile off its guest core, so the core's other threads run
-   meanwhile. It is noted as a hint, so the next recompile has the function in the module: not code the game mapped,
-   which the module never holds and which lands elsewhere next time */
+/* snx_lookup found no function for pc: the AOT module's variant table, which the build linked in from the profile
+   run's cache. A pc the pack has no variant for ends the game. It is noted as a hint, so the next recompile has the
+   function in the module: not code the game mapped, which the module never holds and which lands elsewhere next time */
 static void rt_miss(CPU* c, u64 pc) {
     GuestFn f = jit_resolve_or_add(pc);
-    if (!f) {
-        KThread* t = kthread_cur();
-        if (t) core_leave(t);
-        f = jit_wait(pc);
-        if (t) core_enter(t);
-        if (!f)
-            fatal("The game reached code at %llx that the recompiler missed, and %s", (unsigned long long)pc,
-                  jit_failure());
-    }
+    if (!f)
+        fatal("The game reached code at %llx that the recompiler missed, and %s", (unsigned long long)pc,
+              jit_failure());
     if (pc - g_code_lo < g_code_hi - g_code_lo) hint_add(pc);
     f(c, pc);
 }

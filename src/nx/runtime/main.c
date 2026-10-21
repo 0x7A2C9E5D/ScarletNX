@@ -51,6 +51,7 @@ volatile int g_quit;
 int (*snx_menu)(const char* self);
 void (*snx_menu_run_theme)(const char* folder, SnxRunTheme* out);
 const SnxModule* g_mod;
+const SnxVariants* g_variants;
 GuestFn* g_disp;
 
 /* A build that links a game's code into the runtime defines it; none does yet (src/nx/CMakeLists.txt) */
@@ -58,6 +59,7 @@ const SnxModule* snx_module_static(void) __attribute__((weak));
 
 typedef const SnxModule* (*ModuleFn)(void);
 typedef const SnxArmModule* (*ArmModuleFn)(void);
+typedef const SnxVariants* (*VariantsFn)(void);
 
 static int is_separator(char c) { return c == '/' || c == '\\'; }
 
@@ -149,6 +151,7 @@ static const SnxModule* load_module(const char* path) {
     void *lib, *sym;
     ModuleFn get;
     ArmModuleFn get_arm;
+    VariantsFn get_variants;
     const SnxModule* m;
     if (snx_module_static) return snx_module_static();
     if (!snx_is_file(path))
@@ -167,6 +170,12 @@ static const SnxModule* load_module(const char* path) {
     } else
         fatal("%s is not a ScarletNX game module", path);
     if (!m) fatal("%s could not be loaded: it describes no game", path);
+    if ((sym = plat_dl_sym(lib, "snx_variants")) != NULL) {
+        memcpy(&get_variants, &sym, sizeof get_variants);
+        g_variants = get_variants();
+        if (!g_variants || g_variants->version != SNX_VARIANTS_VERSION)
+            fatal("%s has a runtime variant table of another version", path);
+    }
     return m;
 }
 
