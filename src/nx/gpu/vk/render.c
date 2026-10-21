@@ -1507,7 +1507,11 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         Surf* t = x->t;
         if (st->flags & 2) return VK_NULL_HANDLE;
         if (st->flags & 1) t = vk_tex_from_tic_raw(x->tic);
-        if ((st->flags & 1) && !t) return VK_NULL_HANDLE;
+        /* a raw load's header without 4-byte texels, or no header at all, reads zeros through the null view, as a
+           missing texture does: the draw still runs (it was dropped, from one game's movie and gameplay passes) */
+        if ((st->flags & 1) && !t)
+            LOG_LIMIT(1, "vulkan: a raw surface load's header %08x %08x %08x has no 32-bit view: it reads zeros\n",
+                      x->tic[0], x->tic[2], x->tic[4]);
         VkImageViewType want = vk_tex_view_type(st);
         int num = st->flags & 1                                    ? 1
                   : st->shadow || !((s->si.tex_int_mask >> i) & 1) ? 0

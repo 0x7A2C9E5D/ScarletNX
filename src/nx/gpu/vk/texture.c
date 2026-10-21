@@ -704,7 +704,10 @@ static Surf* tex_from_tic(const u32* tic, int raw) {
         d *= 6;
     VkFmt f = vk_tic_format(tic[0], srgb);
     if (raw) {
-        if (f.vk != VK_FORMAT_R8G8B8A8_UNORM && f.vk != VK_FORMAT_R8G8B8A8_SRGB) return NULL;
+        /* SULD.D.32 takes texel coordinates and reads a texel's 32 bits, whatever the header's components are (one
+           game's post-processing reads its A2B10G10R10 targets and R32 masks this way): any color format of 4-byte
+           texels stored as they are, viewed as R32_UINT */
+        if (f.bpp != 4 || f.bw != 1 || f.conv || f.depth) return NULL;
         f.vk = VK_FORMAT_R32_UINT;
         f.is_int = 1;
         f.sint = 0;
