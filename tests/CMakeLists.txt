@@ -218,6 +218,9 @@ if(TARGET snx_ctr_board)
                     "${SNX_CTR_PROGRAM}" $<TARGET_FILE:snx-test-3ds-native>)
                 set_tests_properties(3ds_static_pipeline PROPERTIES TIMEOUT 180)
             endif()
+            add_test(NAME 3ds_decrypt COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_decrypt.py"
+                "${SNX_CTR_PROGRAM}")
+            set_tests_properties(3ds_decrypt PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
             add_test(NAME 3ds_extract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_extract.py"
                 "${SNX_CTR_PROGRAM}" ${snx_ctr_extract_test_args})
             set_tests_properties(3ds_extract PROPERTIES TIMEOUT 120)

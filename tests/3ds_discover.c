@@ -81,7 +81,7 @@ int main(void) {
     put(image.code + 0xf08, 0xef000003);
     put(image.code + 0xf0c, 0x100f40);
     put(image.code + 0xf40, 0xef000003);
-    assert(snx_ctr_discover(&image, &p, error, sizeof error));
+    assert(snx_ctr_discover(&image, NULL, 0, &p, error, sizeof error));
     assert(p.entries > 128 && p.instructions > p.entries);
     assert(snx_ctr_plan_length(&p, 0x100000, false) == 1);
     assert(snx_ctr_plan_length(&p, 0x100004, false) == 1);
@@ -107,30 +107,28 @@ int main(void) {
     snx_ctr_plan_free(&p);
     assert(!p.arm && !p.thumb && !snx_ctr_plan_length(&p, 0x100000, false));
     image.segment[0].bytes = SNX_CTR_AOT_TEXT_LIMIT + 4;
-    assert(!snx_ctr_discover(&image, &p, error, sizeof error) && !p.arm);
+    assert(!snx_ctr_discover(&image, NULL, 0, &p, error, sizeof error) && !p.arm);
     image.segment[0].bytes = 0x5000;
     image.segment[0].address += 2;
-    assert(!snx_ctr_discover(&image, &p, error, sizeof error));
+    assert(!snx_ctr_discover(&image, NULL, 0, &p, error, sizeof error));
     image.segment[0].address -= 2;
     --image.code_size;
-    assert(!snx_ctr_discover(&image, &p, error, sizeof error));
+    assert(!snx_ctr_discover(&image, NULL, 0, &p, error, sizeof error));
     free(image.code);
-    /* Exhausting the analysis budget is an error, not silent partial coverage. */
+    /* The graph is bounded by the text alone: a commercial title's megabytes of it are discovered whole */
     image = (SnxCtrImage){.code_size = 0x201000, .segment = {{0x100000, 513, 0x200004}}};
     image.code = calloc(1, image.code_size);
     assert(image.code);
-    assert(!snx_ctr_discover(&image, &p, error, sizeof error) && strstr(error, "instruction limit") && !p.arm);
-    free(image.code);
-    /* Independent entry-cap failure: many genuine exits, below the instruction
-       cap. Increased VFP coverage must remain bounded, not truncate silently. */
-    image = (SnxCtrImage){.code_size = 0x102000, .segment = {{0x100000, 129, 0x80004}, {0x200000, 129, 0x80004}}};
-    image.code = calloc(1, image.code_size);
-    assert(image.code);
-    for (unsigned i = 0; i < 131073; ++i) {
-        put(image.code + i * 4, 0xef000003);
-        put(image.code + 0x81000 + i * 4, 0x100000 + i * 4);
-    }
-    assert(!snx_ctr_discover(&image, &p, error, sizeof error) && strstr(error, "entry limit") && !p.arm);
+    assert(snx_ctr_discover(&image, NULL, 0, &p, error, sizeof error) && p.instructions == 0x200004 / 4);
+    snx_ctr_plan_free(&p);
+    /* A hint (a block an earlier run compiled at run time) is an entry, in its instruction set; one outside the text
+       is passed over */
+    for (unsigned i = 0; i < 0x2000; i += 4) put(image.code + i, 0xe12fff1e); /* bx lr, nothing falls through */
+    const uint32_t hints[] = {0x100800, 0x101001, 0x50000000};
+    assert(snx_ctr_discover(&image, hints, 3, &p, error, sizeof error));
+    assert(snx_ctr_plan_length(&p, 0x100800, false) == 1 && snx_ctr_plan_length(&p, 0x101000, true));
+    assert(!snx_ctr_plan_length(&p, 0x100804, false));
+    snx_ctr_plan_free(&p);
     free(image.code);
     puts("CTR bounded static CFG discovery / literal-pointer / jump-window / resource tests passed");
     return 0;

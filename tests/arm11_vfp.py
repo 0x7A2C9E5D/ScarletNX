@@ -69,7 +69,7 @@ def bus(memory, fail=False):
     @M.Access
     def access(context, operation, address, size, data):
         events.append((operation, address, size))
-        if operation not in (3, 0x101, 0x102) or not 0 < size <= 64 or address + size > SIZE:
+        if operation not in (3, 0x101, 0x102) or not 0 < size <= 128 or address + size > SIZE:
             return 1
         if fail and operation != 3:
             return 1
@@ -156,7 +156,7 @@ def main():
                             actual.mem_size = 2**64 - 1
                         functions[index](C.byref(actual))
                         label = f'O{opt} {mode} {text} seed={seed}'
-                        if text == 'vpush {d0-d15}' or text.startswith('unsupported legacy'):
+                        if text.startswith('unsupported legacy'):
                             assert actual.exit == 10 and actual.r[15] == PC, label
                             assert list(actual.d) == list(CPU.from_buffer_copy(before).d), label
                             assert all(op == 3 for op, _, _ in accesses), label

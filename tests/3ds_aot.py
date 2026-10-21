@@ -285,7 +285,8 @@ def main():
         assert text.index('Extracting ') < text.index('Recompiling ARM11') < text.index('Running ARM11')
         assert (basic / 'romfs/hello.txt').read_bytes() == b'hello'
         assert (basic / 'contents/00002222.app').is_file()
-        assert (basic / 'native/code.o').is_file() and (basic / 'native/code.so').is_file()
+        # the module alone is published, not the objects it was linked from
+        assert (basic / 'native/code.so').is_file() and [p.name for p in (basic / 'native').iterdir()] == ['code.so']
         subprocess.run([probe, str(basic), 'basic'], check=True, capture_output=True)
         # Like the Switch driver, the extraction and the module are used again, with no error and no recompile
         before = (basic / 'native/code.so').read_bytes()
@@ -405,12 +406,14 @@ def main():
         run(thread_program(), message='Guest ExitProcess: r0=42')
         run(ipc_program(), message='Guest ExitProcess: r0=42')
         run(ipc_program(wait=True), 3, 'wait_service=MISSING')
-        run(application([0xEE300A01]), 3, 'unsupported guest operation')  # VFPv2
+        run(application([0xEE300A01, 0xE3A0002A, 0xEF000003]), message='Guest ExitProcess: r0=42')  # VFPv2 VADD.F32
         run(application([0xE3010234]), 1, 'guest fault')  # MOVW is not ARM11
         run(application([0xE3A01000, 0xE5910000]), 1, 'guest fault')  # unmapped data
         run(application([0xE59F1004, 0xE5810000, 0xEF000003, 0x200000]), 1, 'guest fault')  # RO store
         run(application([0xE59FF000, 0xE1A00000, 0x200000]), 1, 'exit=11')  # non-X branch
-        run(application([0xEA000002]), 3, 'missing static entry')  # RX page padding, outside declared text
+        # the RX page's padding, outside the declared text, runs as the console runs it (compiled at run time) up to
+        # the read-only page after it, whose fetch faults
+        run(application([0xEA000002]), 1, 'exit=11 syndrome=0x00101000')
         # Exhaustive discovery includes the last valid ARM word at the cap.
         maximum = bytearray(4096)
         put(maximum, 0, '<I', 0xEA0003FD)
@@ -422,18 +425,24 @@ def main():
         put(sparse, 0, '<6I', 0xE59F300C, 0xE5933000, 0xE12FFF33, 0xEF000003, 0xE1A00000, 0x200000)
         put(sparse, 0x2000, '<HH', 0x202F, 0x4770)
         run(application(raw=sparse, ro=struct.pack('<I', 0x102001)), message='Guest ExitProcess: r0=47 blocks=3')
-        # More than 128 block entries forces multiple independent LLVM chunks.
-        chained = bytearray(0x1800)
-        for i in range(129):
+        # More than 512 block entries make several LLVM chunks, which the workers compile in parallel.
+        chained = bytearray(0x5000)
+        for i in range(600):
             put(chained, i * 32, '<I', 0xEA000006)
-        put(chained, 129 * 32, '<II', 0xE3A00031, 0xEF000003)
-        chain, _ = run(application(raw=chained), message='Guest ExitProcess: r0=49 blocks=130')
-        assert len(list((chain / 'native').glob('block-*.o'))) >= 2
-        # Unproven dynamic targets do not trigger discovery/compilation at run time.
+        put(chained, 600 * 32, '<II', 0xE3A00031, 0xEF000003)
+        run(application(raw=chained), message='Guest ExitProcess: r0=49 blocks=601')
+        # A target the static discovery can't prove (a register's) compiles at run time, and goes in the title's
+        # hints, which the next recompile starts from: then it is a static block.
         uncovered = bytearray(0x1800)
         put(uncovered, 0, '<3I', 0xE3A01601, 0xE2811C01, 0xE12FFF11)
         put(uncovered, 0x100, '<I', 0xEF000003)
-        run(application(raw=uncovered), 3, 'missing static entry')
+        hinted, text = run(application(raw=uncovered), message='Compiled at run time: 1 blocks, 1 new')
+        assert (hinted / 'hints').read_text().split() == ['00100100']
+        source = root / f'input {cases};literal.cia'
+        p = subprocess.run([driver, '-r', '--output', str(hinted), str(source)], text=True, capture_output=True, timeout=90)
+        assert p.returncode == 0 and 'Seeding ARM11 discovery with 1 blocks' in p.stdout, p.stdout + p.stderr
+        p = subprocess.run([driver, '--output', str(hinted), str(source)], text=True, capture_output=True, timeout=90)
+        assert 'Guest ExitProcess' in p.stdout and 'Compiled at run time' not in p.stdout, p.stdout + p.stderr
         too_large, _ = run(application([0xEF000003], text_size=16 * 1024 * 1024 + 4), 3, 'static AOT text limit')
         assert not (too_large / 'native').exists()
         extracted, text = run(application([0xE3A0002A, 0xEF000003]), message='Extracted', extra=('-x',))

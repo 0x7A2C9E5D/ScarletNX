@@ -4,7 +4,7 @@
 #define SNX_CTR_MODULE_H
 #include "3ds/runtime/ctr_process.h"
 #define SNX_CTR_MODULE_MAGIC         0x31525443584e5353ull
-#define SNX_CTR_MODULE_ABI           1u
+#define SNX_CTR_MODULE_ABI           2u /* 2: checked VFP transfers of up to 128 bytes */
 #define SNX_CTR_MODULE_CODEGEN_ABI   1u
 #define SNX_CTR_MODULE_CHECKED_MODE  1u
 /* Offline compilation bounds, NOT a general title-support guarantee. Tiny
@@ -53,11 +53,11 @@ bool snx_ctr_native_open(const char* path, const SnxCtrImage* image, SnxCtrNativ
 void snx_ctr_native_close(SnxCtrNative* native);
 /* The title's module (in directory/native) is compiled when it is missing, when it no longer loads or matches the
    image (an older build, a changed .code), or when SNX_CTR_RECOMPILE asks, then run unless SNX_CTR_COMPILE_ONLY: until
-   the game exits or its window closes, or for limit blocks when limit is not 0. The title is the extraction in
+   the game exits or its window closes, for limit blocks when limit is not 0, or for seconds when it is above 0. The title is the extraction in
    directory, or with cia the CIA read where it lies, directory then its state folder. The module is
    trusted as code the driver compiled itself, never as a sandbox. */
 enum { SNX_CTR_RECOMPILE = 1, SNX_CTR_COMPILE_ONLY = 2 };
 /* ipc_stubs: the services whose unknown commands answer success instead of stopping (snx_ctr_ipc_stub_mask) */
-int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel model, uint64_t limit, unsigned flags,
-                    uint32_t ipc_stubs, char* error, size_t error_size);
+int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel model, uint64_t limit, double seconds,
+                    unsigned flags, uint32_t ipc_stubs, char* error, size_t error_size);
 #endif

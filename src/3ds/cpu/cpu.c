@@ -5,7 +5,7 @@
 
 static uint32_t access_memory(void* context, uint32_t op, uint32_t va, uint32_t size, void* bytes) {
     SnxCtrCpu* cpu = context;
-    if (!cpu || !size || size > 64 || !bytes) return 1;
+    if (!cpu || !size || size > 128 || !bytes) return 1;
     SnxCtrAddressSpace* space = cpu->space;
     SnxCtrMemResult result;
     if (op == (SNX_ARM_ACCESS_READ | SNX_ARM_ACCESS_EXCLUSIVE) ||

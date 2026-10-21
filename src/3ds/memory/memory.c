@@ -159,6 +159,22 @@ SnxCtrMemResult snx_ctr_check_ram(SnxCtrAddressSpace* s, uint32_t va, size_t siz
 static SnxCtrMemResult transfer(SnxCtrAddressSpace* s, uint32_t va, void* buffer, size_t size, unsigned access,
                                 bool ram_only) {
     if (!s || !buffer || !size || size > 0x100000000ull - va) return SNX_CTR_MEM_INVALID;
+    /* within one page, as nearly every access is (each instruction's fetch among them): one lookup */
+    if ((va & 4095) + size <= 4096) {
+        Page* p = page(s, va);
+        if (!p || !p->present) return SNX_CTR_MEM_UNMAPPED;
+        if (!(p->permissions & access)) return SNX_CTR_MEM_PERMISSION;
+        bool mmio;
+        unsigned char* host = physical(s->memory, p->pa + (va & 4095), &mmio);
+        if (!mmio) {
+            if (access == SNX_CTR_WRITE) {
+                memcpy(host, buffer, size);
+                changed(s->memory);
+            } else
+                memcpy(buffer, host, size);
+            return SNX_CTR_MEM_OK;
+        }
+    }
     size_t offset = 0;
     while (offset < size) {
         uint32_t at = va + (uint32_t)offset;

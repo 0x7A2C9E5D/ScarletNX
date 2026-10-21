@@ -185,10 +185,15 @@ int main(void) {
         send(p, cfg, SNX_CTR_SVC_RETURN, 0);
         assert(get(p, 1) == 0xd90103ec); /* InvalidSize */
         sound[1] = 1;
-        sound[2] = 0x50005;
+        sound[2] = 0x50005; /* the stereo camera settings: 32 bytes, not 1 */
         sound[3] = 1 << 4 | 0xc;
         request(p, sound, 5);
-        send(p, cfg, SNX_CTR_SVC_UNSUPPORTED, 0);
+        send(p, cfg, SNX_CTR_SVC_RETURN, 0);
+        assert(get(p, 1) == 0xd90103ec);
+        sound[2] = 0x12345678; /* a block no console has */
+        request(p, sound, 5);
+        send(p, cfg, SNX_CTR_SVC_RETURN, 0);
+        assert(get(p, 1) == 0xd90103fa); /* NotFound */
         assert(!snx_ctr_handle_close(p, cfg) && endpoint(p, srv, "cfg:u") && endpoint(p, srv, "cfg:s"));
         uint32_t hid = endpoint(p, srv, "hid:USER"), hid_args[] = {0xa0000};
         n = 0;

@@ -47,7 +47,7 @@ enum { CTR_FILE_VIEW, CTR_FILE_HOST, CTR_FILE_DIR };
    monotonically issued and never reused; the process owns their RomFS backing. */
 typedef struct {
     uint64_t token;
-    uint32_t kind; /* 0: SelfNCCH RomFS view (read-only), 1: SDMC host area (read-write) */
+    uint32_t kind; /* 0: SelfNCCH RomFS view (read-only), 1: SDMC host area, 2: SaveData host area (read-write) */
 } CtrSelfArchive;
 typedef struct {
     SnxArmCPU context; /* inactive architectural prefix only; never the checked adapter */
@@ -71,6 +71,7 @@ typedef struct {
     union {
         struct {
             uint32_t service, client_pid, sdk_version, gsp_thread;
+            uint32_t name; /* SNX_CTR_SERVICE_SYSTEM's: which of them (snx_ctr_system_name) */
         } session;
         CtrThread thread;
         struct {
@@ -142,6 +143,7 @@ struct SnxCtrProcess {
     SnxCtrRomfs* romfs; /* runtime-owned immutable host filesystem view */
     FsTree* tree;       /* the shared NX-style tree: romfs/exefs read-only, sdmc read-write */
     FsNode* sd;         /* the "sdmc" subtree root (read-write) */
+    FsNode* save;       /* the "savedata" subtree root (read-write), NULL until the game formats its save data */
     SnxCtrMemory* memory;
     SnxCtrAddressSpace* space;
     SnxCtrCpu cpu;
@@ -171,12 +173,17 @@ struct SnxCtrProcess {
     uint32_t bss_size, stack_size; /* the main thread's stack, page-rounded, below SNX_CTR_STACK_TOP */
     uint64_t title_id;
     char name[8];
+    uint32_t region_lockout; /* the SMDH's regions the title runs in, bit per CFG region (0 JPN ... 6 TWN), 0 unknown */
     uint32_t resource_limit; /* CTR_OBJ_RESOURCE_LIMIT object, 0 until the first GetResourceLimit */
     uint32_t ipc_stubs;      /* services whose unknown commands answer success (bit per SNX_CTR_SERVICE_*) */
     /* the stubbed commands already reported, service << 16 | command, so each is logged once */
-    uint32_t stub_logged[32], stub_logged_count;
+    uint32_t stub_logged[256], stub_logged_count;
     uint64_t time_update_ns; /* host monotonic deadline of the shared page's next hourly time entry */
     uint64_t sched_seq;      /* the last ready_seq/wait_seq handed out */
+    /* the block at pc the static module lacks, compiled while the game runs (aot/jit.c) when the driver sets it: NULL
+       when it cannot be. stale drops the one compiled before, whose code changed */
+    SnxArmBlock (*compile)(void* compiler, uint32_t pc, bool thumb, bool stale);
+    void* compiler;
     unsigned char physical_owner[];
 };
 CtrThread* snx_ctr_thread(SnxCtrProcess* p);

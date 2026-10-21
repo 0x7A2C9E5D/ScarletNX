@@ -10,6 +10,7 @@
    x * 240 + 239 - y); the window and the snapshots show it that way round. */
 #include "3ds/gpu/present.h"
 #include "3ds/gpu/transfer.h"
+#include "common/utilities/common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +28,7 @@ typedef struct {
     VkSemaphore acquire_sem, present_sem;
     const char* frame_dir;
     unsigned dumps;
+    uint64_t presents; /* past the first dumps, every 60th frame is kept as each screen's latest */
     int up, windowed, closed;
     SDL_Window* window;
     VkSurfaceKHR surface;
@@ -265,11 +267,18 @@ bool snx_ctr_present_init(const char* frame_dir) {
 }
 bool snx_ctr_present_ready(void) { return v.up; }
 bool snx_ctr_present_windowed(void) { return v.windowed; }
+/* The first eight frames, then about one a second as frame-<screen>-latest.ppm (written beside and renamed over it,
+   so a reader never sees half of one) */
 static void write_ppm(unsigned screen, unsigned width, unsigned height, const unsigned char* rgba) {
-    if (!v.frame_dir || v.dumps >= 8) return;
-    char path[1024];
-    snprintf(path, sizeof path, "%s/frame-%u-%02u.ppm", v.frame_dir, screen, v.dumps);
-    FILE* file = fopen(path, "wb");
+    bool latest = v.dumps >= 8;
+    if (!v.frame_dir || (latest && v.presents++ % 120 >= 2)) return;
+    char path[1024], staged[1040];
+    if (latest)
+        snprintf(path, sizeof path, "%s/frame-%u-latest.ppm", v.frame_dir, screen);
+    else
+        snprintf(path, sizeof path, "%s/frame-%u-%02u.ppm", v.frame_dir, screen, v.dumps);
+    snprintf(staged, sizeof staged, "%s.partial", path);
+    FILE* file = fopen(latest ? staged : path, "wb");
     if (!file) return;
     /* the console screens are landscape: framebuffer row x is screen column x,
        its pixel width - 1 - y screen row y */
@@ -280,8 +289,11 @@ static void write_ppm(unsigned screen, unsigned width, unsigned height, const un
             const unsigned char rgb[3] = {p[0], p[1], p[2]};
             if (fwrite(rgb, 1, 3, file) != 3) break;
         }
-    fclose(file);
-    ++v.dumps;
+    bool closed = !fclose(file);
+    if (!latest)
+        ++v.dumps;
+    else if (closed)
+        (void)snx_replace(staged, path);
 }
 /* Live presentation of the landscape frame to the window's swapchain. */
 static void pump(void) {

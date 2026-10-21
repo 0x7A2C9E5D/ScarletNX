@@ -55,13 +55,14 @@ SnxCtrRunResult snx_ctr_dispatch(const SnxCtrModule* m, SnxCtrProcess* process, 
             cpu->syndrome = pc;
             return SNX_CTR_RUN_FAULT;
         }
-        if (pc < m->text_address || (uint64_t)pc + width > (uint64_t)m->text_address + m->text_bytes) {
-            cpu->exit = SNX_ARM_BACKEND_UNSUPPORTED;
-            cpu->syndrome = pc;
-            return SNX_CTR_RUN_UNSUPPORTED;
+        SnxArmBlock block = NULL;
+        if (pc >= m->text_address && (uint64_t)pc + width <= (uint64_t)m->text_address + m->text_bytes) {
+            uint32_t index = (pc - m->text_address) / width;
+            block = thumb ? m->thumb_blocks[index] : m->arm_blocks[index];
         }
-        uint32_t index = (pc - m->text_address) / width;
-        SnxArmBlock block = thumb ? m->thumb_blocks[index] : m->arm_blocks[index];
+        /* code the static discovery didn't reach (an indirect target, a module loaded at run time) compiles now */
+        bool compiled = !block && process->compile;
+        if (compiled) block = process->compile(process->compiler, pc, thumb, false);
         if (!block) {
             cpu->exit = SNX_ARM_BACKEND_UNSUPPORTED;
             cpu->syndrome = pc;
@@ -70,6 +71,16 @@ SnxCtrRunResult snx_ctr_dispatch(const SnxCtrModule* m, SnxCtrProcess* process, 
         block(cpu);
         ++*executed;
         if (cpu->exit == SNX_ARM_OK) continue;
+        /* the bytes a compiled block was made from changed under it: it stopped before the first changed instruction,
+           which compiles anew from where it stopped, and the block is made again the next time it is entered. A
+           static block's text is the game's read-only code: one that changed past its first instruction goes on the
+           same way, one changed at its entry, which the static table would only enter again, stops */
+        if (cpu->exit == SNX_ARM_CODE_CHANGED && process->compile && (compiled || cpu->r[15] != pc)) {
+            if (compiled) (void)process->compile(process->compiler, pc, thumb, true);
+            cpu->exit = SNX_ARM_OK;
+            cpu->syndrome = 0;
+            continue;
+        }
         if (cpu->exit == SNX_ARM_SVC) {
             SnxCtrSvcResult result = snx_ctr_svc(process, cpu->syndrome);
             if (result == SNX_CTR_SVC_EXIT) return SNX_CTR_RUN_EXIT;

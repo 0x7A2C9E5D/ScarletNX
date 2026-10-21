@@ -83,7 +83,7 @@ def main():
 
                         @Access
                         def access(context, operation, address, size, data):
-                            if operation not in (1, 2, 3, 0x101, 0x102) or not 1 <= size <= 64:
+                            if operation not in (1, 2, 3, 0x101, 0x102) or not 1 <= size <= 128:
                                 errors.append((operation, size))
                                 return 1
                             if address + size > A.SIZE:

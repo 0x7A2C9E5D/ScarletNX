@@ -16,12 +16,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
 
 _Static_assert(SNX_ARM_CODEGEN_OPTIONS_ABI == SNX_CTR_MODULE_CODEGEN_ABI, "codegen ABI");
 _Static_assert(SNX_ARM_MEMORY_CHECKED == SNX_CTR_MODULE_CHECKED_MODE, "memory ABI");
-#define CHUNK_ENTRIES 128u
-#define OBJECT_LIMIT  (256u * 1024u * 1024u)
-#define MODULE_LIMIT  (512u * 1024u * 1024u)
+#define CHUNK_ENTRIES 512u
+#define OBJECT_LIMIT  (1024u * 1024u * 1024u) /* a commercial title's 330000 blocks take about 300 MiB */
+#define MODULE_LIMIT  (1024u * 1024u * 1024u)
 typedef struct {
     unsigned mode, index, length;
 } Entry;
@@ -144,33 +149,54 @@ fail:
     LLVMDisposeMessage(detail);
     return false;
 }
+/* The entries' blocks into one object. A block the backend ends sooner than discovery planned (at an MSR to the CPSR,
+   which it ends blocks on) goes on as a block of its own at the instruction after, appended to *rest (*rest_count of
+   them, the caller's to free) for the index */
 static bool chunk(Host* h, const SnxCtrImage* image, const Entry* entries, unsigned count, char* output,
-                  bool exhaustive, char* error, size_t size) {
+                  bool exhaustive, Entry** rest, unsigned* rest_count, char* error, size_t size) {
     LLVMContextRef c = LLVMContextCreate();
     LLVMModuleRef mod = new_module(h, c);
     bool ok = false;
+    unsigned capacity = 0;
     SnxArmCodegenOptions options = {SNX_ARM_CODEGEN_OPTIONS_ABI, SNX_ARM_PROFILE_ARM11, SNX_ARM_MEMORY_CHECKED};
+    *rest = NULL;
+    *rest_count = 0;
     for (unsigned i = 0; i < count; ++i) {
-        const Entry* e = entries + i;
-        unsigned width = e->mode ? 2 : 4;
-        uint32_t pc = image->segment[0].address + e->index * width;
-        uint32_t words[SNX_CTR_AOT_BLOCK_WORDS];
-        uint16_t halves[SNX_CTR_AOT_BLOCK_WORDS];
-        for (unsigned j = 0; j < e->length; ++j) {
-            words[j] = little(image->code + e->index * width + j * width, width);
-            halves[j] = (uint16_t)words[j];
+        Entry e = entries[i];
+        while (e.length) {
+            unsigned width = e.mode ? 2 : 4;
+            uint32_t pc = image->segment[0].address + e.index * width;
+            uint32_t words[SNX_CTR_AOT_BLOCK_WORDS];
+            uint16_t halves[SNX_CTR_AOT_BLOCK_WORDS];
+            for (unsigned j = 0; j < e.length; ++j) {
+                words[j] = little(image->code + e.index * width + j * width, width);
+                halves[j] = (uint16_t)words[j];
+            }
+            char id[40];
+            name(id, e.mode, e.index);
+            size_t consumed = 0;
+            LLVMValueRef f = e.mode ? snx_thumb_llvm_block_ex(mod, id, halves, e.length, pc, &consumed, &options)
+                                    : snx_arm_llvm_block_ex(mod, id, words, e.length, pc, &consumed, &options);
+            if (!f || !consumed || consumed > e.length) {
+                snprintf(error, size, "static discovery/backend termination mismatch at 0x%08x (%zu/%u)", pc,
+                         consumed, e.length);
+                goto done;
+            }
+            LLVMSetVisibility(f, LLVMHiddenVisibility);
+            if (e.index != entries[i].index) {
+                if (*rest_count == capacity) {
+                    Entry* grown = realloc(*rest, (capacity = capacity ? capacity * 2 : 16) * sizeof *grown);
+                    if (!grown) {
+                        snprintf(error, size, "out of memory for static entries");
+                        goto done;
+                    }
+                    *rest = grown;
+                }
+                (*rest)[(*rest_count)++] = (Entry){e.mode, e.index, (unsigned)consumed};
+            }
+            e.index += (unsigned)consumed;
+            e.length -= (unsigned)consumed;
         }
-        char id[40];
-        name(id, e->mode, e->index);
-        size_t consumed = 0;
-        LLVMValueRef f = e->mode ? snx_thumb_llvm_block_ex(mod, id, halves, e->length, pc, &consumed, &options)
-                                 : snx_arm_llvm_block_ex(mod, id, words, e->length, pc, &consumed, &options);
-        if (!f || consumed != e->length) {
-            snprintf(error, size, "static discovery/backend termination mismatch at 0x%08x (%zu/%u)", pc, consumed,
-                     e->length);
-            goto done;
-        }
-        LLVMSetVisibility(f, LLVMHiddenVisibility);
     }
     ok = write_object(h, mod, output, exhaustive ? "default<O2>" : "default<O1>", error, size);
 done:
@@ -214,6 +240,173 @@ done:
     LLVMContextDispose(c);
     return ok;
 }
+/* The title's hints (snx_ctr_jit_save_hints): the blocks earlier runs compiled at run time, one pc a line in hex, | 1
+   for Thumb. *count of them, the caller's to free; none (NULL) without the file */
+static uint32_t* read_hints(const char* directory, size_t* count) {
+    char* path = snx_path_join(directory, SNX_CTR_HINTS);
+    FILE* f = path ? fopen(path, "r") : NULL;
+    uint32_t* hints = NULL;
+    size_t capacity = 0;
+    unsigned value;
+    *count = 0;
+    while (f && fscanf(f, "%x", &value) == 1) {
+        if (*count == capacity) {
+            uint32_t* grown = realloc(hints, (capacity = capacity ? capacity * 2 : 1024) * sizeof *grown);
+            if (!grown) break;
+            hints = grown;
+        }
+        hints[(*count)++] = value;
+    }
+    if (f) fclose(f);
+    free(path);
+    return hints;
+}
+static bool host_new(Host* h, char* error, size_t size) {
+    LLVMTargetRef backend;
+    char* detail = NULL;
+    h->triple = LLVMGetDefaultTargetTriple();
+    if (LLVMGetTargetFromTriple(h->triple, &backend, &detail)) {
+        snprintf(error, size, "%s", detail);
+        LLVMDisposeMessage(detail);
+        return false;
+    }
+    h->machine = LLVMCreateTargetMachine(backend, h->triple, "generic", "", LLVMCodeGenLevelDefault, LLVMRelocPIC,
+                                         LLVMCodeModelDefault);
+    if (!h->machine) {
+        snprintf(error, size, "cannot create an LLVM target machine for %s", h->triple);
+        return false;
+    }
+    h->layout = LLVMCreateTargetDataLayout(h->machine);
+    return true;
+}
+static void host_free(Host* h) {
+    if (h->layout) LLVMDisposeTargetData(h->layout);
+    if (h->machine) LLVMDisposeTargetMachine(h->machine);
+    LLVMDisposeMessage(h->triple);
+    memset(h, 0, sizeof *h);
+}
+/* The chunks shared out to a worker per host core, each with a target machine and LLVM contexts of its own: a
+   commercial title's few hundred thousand blocks take an hour on one */
+typedef struct {
+    const SnxCtrImage* image;
+    const Entry* entries;
+    char** objects; /* chunk i's object is objects[i] */
+    unsigned count, chunks, next, finished;
+    bool exhaustive, failed;
+    Entry* rest; /* the blocks the backend split off, every chunk's */
+    unsigned rest_count;
+    uint64_t output_bytes;
+    char error[512];
+#ifdef _WIN32
+    CRITICAL_SECTION lock;
+#else
+    pthread_mutex_t lock;
+#endif
+} Work;
+static void work_lock(Work* w) {
+#ifdef _WIN32
+    EnterCriticalSection(&w->lock);
+#else
+    pthread_mutex_lock(&w->lock);
+#endif
+}
+static void work_unlock(Work* w) {
+#ifdef _WIN32
+    LeaveCriticalSection(&w->lock);
+#else
+    pthread_mutex_unlock(&w->lock);
+#endif
+}
+static void worker(Work* w) {
+    Host h = {0};
+    char error[512] = "";
+    bool ok = host_new(&h, error, sizeof error);
+    for (;;) {
+        work_lock(w);
+        if (!ok && !w->failed) {
+            w->failed = true;
+            snprintf(w->error, sizeof w->error, "%s", error);
+        }
+        unsigned i = w->failed ? w->chunks : w->next++;
+        work_unlock(w);
+        if (i >= w->chunks) break;
+        unsigned begin = i * CHUNK_ENTRIES, n = w->count - begin;
+        if (n > CHUNK_ENTRIES) n = CHUNK_ENTRIES;
+        Entry* rest = NULL;
+        unsigned rest_count = 0;
+        ok = chunk(&h, w->image, w->entries + begin, n, w->objects[i], w->exhaustive, &rest, &rest_count, error,
+                   sizeof error);
+        work_lock(w);
+        Entry* merged = rest_count ? realloc(w->rest, (w->rest_count + rest_count) * sizeof *merged) : w->rest;
+        if (ok && rest_count && !merged) {
+            ok = false;
+            snprintf(error, sizeof error, "out of memory for static entries");
+        }
+        if (ok) {
+            w->rest = merged;
+            if (rest_count) memcpy(w->rest + w->rest_count, rest, rest_count * sizeof *rest);
+            w->rest_count += rest_count;
+            w->output_bytes += snx_file_size(w->objects[i]);
+            if (!(++w->finished % 16) || w->finished == w->chunks)
+                printf("ARM11 AOT: %u/%u chunks of static blocks emitted\n", w->finished, w->chunks);
+        }
+        work_unlock(w);
+        free(rest);
+    }
+    host_free(&h);
+}
+#ifdef _WIN32
+static DWORD WINAPI worker_main(LPVOID w) {
+    worker(w);
+    return 0;
+}
+#else
+static void* worker_main(void* w) {
+    worker(w);
+    return NULL;
+}
+#endif
+static bool compile_chunks(Work* w) {
+    unsigned jobs = snx_cpu_count(), created = 0;
+    if (jobs > w->chunks) jobs = w->chunks;
+    if (jobs < 1) jobs = 1;
+#ifdef _WIN32
+    HANDLE* threads = calloc(jobs, sizeof *threads);
+    InitializeCriticalSection(&w->lock);
+#else
+    pthread_t* threads = calloc(jobs, sizeof *threads);
+    pthread_mutex_init(&w->lock, NULL);
+#endif
+    for (unsigned i = 1; threads && i < jobs; ++i) {
+#ifdef _WIN32
+        if (!(threads[created] = CreateThread(NULL, 0, worker_main, w, 0, NULL))) break;
+#else
+        if (pthread_create(&threads[created], NULL, worker_main, w)) break;
+#endif
+        ++created;
+    }
+    worker(w);
+    for (unsigned i = 0; i < created; ++i) {
+#ifdef _WIN32
+        WaitForSingleObject(threads[i], INFINITE);
+        CloseHandle(threads[i]);
+#else
+        pthread_join(threads[i], NULL);
+#endif
+    }
+#ifdef _WIN32
+    DeleteCriticalSection(&w->lock);
+#else
+    pthread_mutex_destroy(&w->lock);
+#endif
+    free(threads);
+    return !w->failed;
+}
+static int by_place(const void* a, const void* b) {
+    const Entry *x = a, *y = b;
+    if (x->mode != y->mode) return x->mode < y->mode ? -1 : 1;
+    return (x->index > y->index) - (x->index < y->index);
+}
 int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error, size_t error_size) {
     int result = 1;
     SnxCtrImage image = {0}, check = {0};
@@ -224,8 +417,7 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
     Entry* entries = NULL;
     unsigned count = 0, files = 0;
     const char** command = NULL;
-    LLVMTargetRef backend;
-    char* detail = NULL;
+    Work work = {0};
     if (error_size) error[0] = 0;
     if (!(cia ? snx_ctr_image_from_cia(cia, &image, error, error_size)
               : snx_ctr_image_load(extracted, &image, error, error_size)))
@@ -244,7 +436,12 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
     target = snx_path_join(directory, "native");
     bool exhaustive = image.segment[0].bytes <= SNX_CTR_AOT_EXHAUSTIVE_LIMIT;
     unsigned capacity = image.segment[0].bytes / 4 + image.segment[0].bytes / 2;
-    if (!exhaustive && !snx_ctr_discover(&image, &plan, error, error_size)) {
+    size_t hint_count = 0;
+    uint32_t* hints = read_hints(directory, &hint_count);
+    if (hint_count) printf("Seeding ARM11 discovery with %zu blocks earlier runs compiled at run time\n", hint_count);
+    bool discovered = exhaustive || snx_ctr_discover(&image, hints, hint_count, &plan, error, error_size);
+    free(hints);
+    if (!discovered) {
         result = 3;
         goto done;
     }
@@ -266,18 +463,7 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
         snprintf(error, error_size, "cannot initialize native LLVM target");
         goto done;
     }
-    host.triple = LLVMGetDefaultTargetTriple();
-    if (LLVMGetTargetFromTriple(host.triple, &backend, &detail)) {
-        snprintf(error, error_size, "%s", detail);
-        goto done;
-    }
-    host.machine = LLVMCreateTargetMachine(backend, host.triple, "generic", "", LLVMCodeGenLevelDefault, LLVMRelocPIC,
-                                           LLVMCodeModelDefault);
-    if (!host.machine) {
-        snprintf(error, error_size, "cannot create an LLVM target machine for %s", host.triple);
-        goto done;
-    }
-    host.layout = LLVMCreateTargetDataLayout(host.machine);
+    if (!host_new(&host, error, error_size)) goto done;
     stage = snx_temp_dir(directory);
     if (!stage) {
         char why[256];
@@ -292,21 +478,27 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
         goto done;
     }
     objects[0] = snx_path_join(stage, "code.o");
-    if (!index_object(&host, &image, entries, count, objects[0], error, error_size)) goto done;
-    uint64_t output_bytes = snx_file_size(objects[0]);
-    for (unsigned i = 1; i < files; ++i) {
-        unsigned begin = (i - 1) * CHUNK_ENTRIES, n = count - begin;
-        if (n > CHUNK_ENTRIES) n = CHUNK_ENTRIES;
-        objects[i] = snx_format("%s/block-%05u.o", stage, i);
-        if (!chunk(&host, &image, entries + begin, n, objects[i], exhaustive, error, error_size)) goto done;
-        output_bytes += snx_file_size(objects[i]);
-        if (output_bytes > OBJECT_LIMIT) {
-            snprintf(error, error_size, "native object output limit exceeded");
-            result = 3;
+    for (unsigned i = 1; i < files; ++i) objects[i] = snx_format("%s/block-%05u.o", stage, i);
+    work = (Work){.image = &image, .entries = entries, .objects = objects + 1, .count = count, .chunks = files - 1,
+                  .exhaustive = exhaustive};
+    if (!compile_chunks(&work)) {
+        snprintf(error, error_size, "%s", work.error);
+        goto done;
+    }
+    /* the index of every block, the ones the backend split off with the planned ones */
+    if (work.rest_count) {
+        Entry* all = realloc(entries, (count + work.rest_count) * sizeof *all);
+        if (!all) {
+            snprintf(error, error_size, "out of memory for static entries");
             goto done;
         }
-        if (!(i % 16) || i + 1 == files) printf("ARM11 AOT: %u/%u static blocks emitted\n", begin + n, count);
+        entries = all;
+        memcpy(entries + count, work.rest, work.rest_count * sizeof *entries);
+        count += work.rest_count;
+        qsort(entries, count, sizeof *entries, by_place);
     }
+    if (!index_object(&host, &image, entries, count, objects[0], error, error_size)) goto done;
+    uint64_t output_bytes = work.output_bytes + snx_file_size(objects[0]);
     if (output_bytes > OBJECT_LIMIT || snx_ctr_aot_runtime_size > OBJECT_LIMIT - output_bytes) {
         snprintf(error, error_size, "native object output limit exceeded including semantic helpers");
         result = 3;
@@ -342,7 +534,7 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
 #endif
     /* The linker runs in the staging directory and is given the files' names alone. With full paths a large image's
        hundreds of chunks pass the 32767 characters a Windows command line holds (CreateProcessW fails with
-       ERROR_FILENAME_EXCED_RANGE). 1024 chunks, the most the entry limit allows, take about 16500 by name, quotes
+       ERROR_FILENAME_EXCED_RANGE). A commercial title's 700 chunks of 512 blocks take about 13000 by name, quotes
        included. */
     for (unsigned i = 0; i < files; ++i) command[arg++] = leaf(objects[i]);
     command[arg++] = leaf(runtime);
@@ -361,6 +553,10 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
         result = 3;
         goto done;
     }
+    /* the module is all the folder publishes: the objects and the helpers it was linked from go (a commercial title's
+       are as large as the module) */
+    for (unsigned i = 0; i < files; ++i) (void)remove(objects[i]);
+    (void)remove(runtime);
     if (!(cia ? snx_ctr_image_from_cia(cia, &check, error, error_size)
               : snx_ctr_image_load(directory, &check, error, error_size)))
         goto done; /* its own error says why */
@@ -406,16 +602,14 @@ done:
     free(command);
     free(objects);
     free(entries);
+    free(work.rest);
     free(runtime);
     free(module);
     free(stage);
     free(target);
     free(previous);
     free(directory);
-    LLVMDisposeMessage(detail);
-    if (host.layout) LLVMDisposeTargetData(host.layout);
-    if (host.machine) LLVMDisposeTargetMachine(host.machine);
-    LLVMDisposeMessage(host.triple);
+    host_free(&host);
     snx_ctr_plan_free(&plan);
     snx_ctr_image_free(&check);
     snx_ctr_image_free(&image);

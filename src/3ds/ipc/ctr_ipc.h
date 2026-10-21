@@ -17,6 +17,7 @@ enum {
     SNX_CTR_SERVICE_GSP,
     SNX_CTR_SERVICE_CFG,
     SNX_CTR_SERVICE_DSP,
+    SNX_CTR_SERVICE_SYSTEM, /* the system services the runtime has no model of (services/system.c) */
     SNX_CTR_SERVICE_COUNT
 };
 /* SNX_CTR_IPC_UNKNOWN: a command the service does not have, as opposed to a form of a known one it does not

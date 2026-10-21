@@ -13,6 +13,7 @@
 #include "3ds/services/gsp.h"
 #include "3ds/services/dsp.h"
 #include "3ds/services/cfg.h"
+#include "3ds/services/system.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -65,7 +66,7 @@ uint32_t snx_ctr_session_create(SnxCtrProcess* p, uint32_t service, uint32_t* ou
     *out = 0;
     if (service != SNX_CTR_SERVICE_SRV && service != SNX_CTR_SERVICE_FS && service != SNX_CTR_SERVICE_APT &&
         service != SNX_CTR_SERVICE_PTM && service != SNX_CTR_SERVICE_HID && service != SNX_CTR_SERVICE_GSP &&
-        service != SNX_CTR_SERVICE_DSP && service != SNX_CTR_SERVICE_CFG)
+        service != SNX_CTR_SERVICE_DSP && service != SNX_CTR_SERVICE_CFG && service != SNX_CTR_SERVICE_SYSTEM)
         return 0xe0e01bf4u;
     unsigned count = 0;
     for (unsigned i = 1; i < CTR_OBJECTS; ++i)
@@ -73,6 +74,7 @@ uint32_t snx_ctr_session_create(SnxCtrProcess* p, uint32_t service, uint32_t* ou
     if (count >= (service == SNX_CTR_SERVICE_SRV   ? 64u
                   : service == SNX_CTR_SERVICE_FS  ? 32u
                   : service == SNX_CTR_SERVICE_GSP ? 2u
+                  : service == SNX_CTR_SERVICE_SYSTEM ? 64u /* all of them, two of each at most in use */
                                                    : 2u))
         return 0xd0401834u;
     uint32_t result = snx_ctr_object_create(p, CTR_OBJ_SESSION, out);
@@ -138,7 +140,7 @@ static unsigned translation(SnxCtrIpc* c, uint32_t normal, uint32_t translated) 
     return WIRE_OK;
 }
 /* the --ipc-stubs name of each SNX_CTR_SERVICE_*: a file session is fs's */
-static const char* const families[] = {"", "srv", "fs", "apt", "ptm", "hid", "fs", "gsp", "cfg", "dsp"};
+static const char* const families[] = {"", "srv", "fs", "apt", "ptm", "hid", "fs", "gsp", "cfg", "dsp", "system"};
 _Static_assert(sizeof families / sizeof *families == SNX_CTR_SERVICE_COUNT, "a family name per service");
 int snx_ctr_ipc_stub_mask(const char* list, uint32_t* mask) {
     uint32_t names = 0;
@@ -212,6 +214,7 @@ SnxCtrSvcResult snx_ctr_ipc_send(SnxCtrProcess* p, uint32_t handle, uint32_t* re
         case SNX_CTR_SERVICE_GSP: snx_ctr_gsp_dispatch(&c); break;
         case SNX_CTR_SERVICE_DSP: snx_ctr_dsp_dispatch(&c); break;
         case SNX_CTR_SERVICE_CFG: snx_ctr_cfg_dispatch(&c); break;
+        case SNX_CTR_SERVICE_SYSTEM: snx_ctr_system_dispatch(&c); break;
         default: return SNX_CTR_SVC_UNSUPPORTED;
     }
     if (c.state == SNX_CTR_IPC_UNKNOWN) {
@@ -237,7 +240,14 @@ SnxCtrSvcResult snx_ctr_ipc_send(SnxCtrProcess* p, uint32_t handle, uint32_t* re
         c.out[0] = (c.in[0] & 0xffff0000u) | 0x40;
         c.state = SNX_CTR_IPC_RETURN;
     }
-    if (c.state == SNX_CTR_IPC_UNSUPPORTED) return SNX_CTR_SVC_UNSUPPORTED;
+    if (c.state == SNX_CTR_IPC_UNSUPPORTED) { /* a form of the command the handler doesn't take: what it was sent */
+        const char* family =
+            p->last_ipc_service < sizeof families / sizeof *families ? families[p->last_ipc_service] : "?";
+        fprintf(stderr, "3ds ipc: %s command 0x%04x has a form the runtime does not take:", family, c.in[0] >> 16);
+        for (uint32_t i = 0; i <= normal + translated; ++i) fprintf(stderr, " %08x", c.in[i]);
+        fputc('\n', stderr);
+        return SNX_CTR_SVC_UNSUPPORTED;
+    }
     if (c.state == SNX_CTR_IPC_BLOCKED) return SNX_CTR_SVC_BLOCKED;
     if (c.state == SNX_CTR_IPC_FAULT) return SNX_CTR_SVC_UNSUPPORTED;
     /* The handles the request moved leave the caller's table once the service has taken the request, whatever it

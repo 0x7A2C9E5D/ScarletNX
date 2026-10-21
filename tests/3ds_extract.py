@@ -32,6 +32,8 @@ def main():
             if explicit:
                 args += ['-x', '--output', str(output)]
             args += [str(source)]
+            # no 3DS keys but the case's own: the home folder is the test's (the user's ~/.3ds is not read)
+            env = {**(env or os.environ), 'HOME': str(root), 'USERPROFILE': str(root)}
             p = subprocess.run(args, capture_output=True, text=True, cwd=root, timeout=20, env=env)
             text = p.stdout + p.stderr
             assert p.returncode == status, (cases, args, p.returncode, text)
@@ -134,8 +136,8 @@ def main():
             assert expected.is_dir() and str(expected) in text
             assert not (root / 'xdg-data/scarletnx/work').exists()
         # Requested extraction alone may succeed without a runtime; normal launches stop before AOT.
-        run(cia(encrypted=True), 3, 'encrypted CIA')
-        run(cia(application=ncch(encrypted=True)), 3, 'encrypted NCCH')
+        run(cia(encrypted=True), 3, 'no 3DS keys')
+        run(cia(application=ncch(encrypted=True)), 3, 'no 3DS keys')
         run(cia(title=0x0004000E01234500), 3, 'updates/DLC/system')
         run(cia(ticket_title=TITLE + 1), 1, 'title ID mismatch')
         run(cia(boot=7), 1, 'boot content')

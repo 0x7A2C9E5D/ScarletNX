@@ -64,7 +64,7 @@ The ARM11 profile implements a **conservative ARMv6K integer subset**, rejecting
 MOVW/MOVT, MLS, divide, RBIT, bitfields, ARMv7 barrier encodings, acquire/release,
 NEON, VFPv3/v4 and D16..D31. It recognizes the ARM11 CP15 barrier forms.
 Scalar VFPv2 F32/F64 arithmetic, non-fused multiply/accumulate, compares,
-conversions, register/status transfers and up-to-64-byte memory transfers are
+conversions, register/status transfers and up-to-128-byte memory transfers are
 implemented. Arithmetic uses the shared raw-bit integer FP primitives, not host
 floating point or ARMv8 fused replacements. LEN/STRIDE and exception enables must
 be zero for arithmetic. FPSCR writes outside NZCV, rounding mode, DN/FZ and

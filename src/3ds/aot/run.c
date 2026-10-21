@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #include "3ds/aot/ctr_module.h"
 #include "3ds/aot/ctr_compile.h"
+#include "3ds/aot/ctr_jit.h"
 #include "common/utilities/common.h"
 #include "3ds/runtime/internal.h"
 #include "3ds/gpu/present.h"
@@ -13,10 +14,34 @@
 
 #define SNX_CTR_RUN_SLICE 1000000u
 
-int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel model, uint64_t limit, unsigned flags,
-                    uint32_t ipc_stubs, char* error, size_t error_size) {
+/* Every live thread, where it is and what it waits on, as the run ended */
+static void report_threads(SnxCtrProcess* p) {
+    static const char* const types[] = {"free",  "process", "thread",    "arbiter", "session",       "mutex",
+                                        "event", "shared",  "file",      "semaphore", "timer", "resource limit"};
+    for (uint32_t i = 1; i < CTR_OBJECTS; ++i) {
+        const CtrObject* o = &p->objects[i];
+        if (o->type != CTR_OBJ_THREAD || o->data.thread.dead) continue;
+        const CtrThread* t = &o->data.thread;
+        const SnxArmCPU* cpu = i == p->current_thread ? &p->cpu.state.cpu : &t->context;
+        printf("  thread %" PRIu32 "%s: priority 0x%02" PRIx32 " pc 0x%08" PRIx32 " lr 0x%08" PRIx32, i,
+               i == p->current_thread ? " (running)" : "", t->priority, cpu->r[15], cpu->r[14]);
+        if (t->waiting_object) {
+            const CtrObject* w = &p->objects[t->waiting_object];
+            printf(", waits on %s %" PRIu32, w->type < sizeof types / sizeof *types ? types[w->type] : "?",
+                   t->waiting_object);
+            if (t->wait_more_count) printf(" and %" PRIu32 " more%s", t->wait_more_count, t->wait_all ? " (all)" : "");
+            if (w->type == CTR_OBJ_ARBITER) printf(" at 0x%08" PRIx32, t->waiting_address);
+            if (t->waiting_service[0]) printf(" (the service %s)", t->waiting_service);
+        } else if (t->wake_ns)
+            printf(", sleeps%s", t->wake_ns == UINT64_MAX ? " forever" : "");
+        putchar('\n');
+    }
+}
+int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel model, uint64_t limit, double seconds,
+                    unsigned flags, uint32_t ipc_stubs, char* error, size_t error_size) {
     SnxCtrImage image = {0};
     SnxCtrProcess* process = NULL;
+    SnxCtrJit* jit = NULL;
     SnxCtrNative native = {0};
     char *module_path = NULL, *frames = NULL, *wav = NULL;
     int result = 1;
@@ -45,6 +70,9 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
         goto done;
     }
     process->ipc_stubs = ipc_stubs;
+    char why[256];
+    if (!(jit = snx_ctr_jit_new(process, why, sizeof why)))
+        printf("No run-time compiler (%s): only the static blocks run\n", why);
     if (!(cia ? snx_ctr_process_mount_cia(process, directory, cia) : snx_ctr_process_mount_fs(process, directory))) {
         snprintf(error, error_size, cia ? "cannot mount the CIA's filesystem" : "cannot index extracted title filesystem");
         goto done;
@@ -64,7 +92,8 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
     /* Runs until the game exits or its window is closed, as a Switch game does, or for the --max-blocks budget. The
        dispatch goes in slices so the window's events are seen between them */
     uint64_t executed = 0;
-    bool closed = false;
+    bool closed = false, timed = false;
+    double deadline = seconds > 0 ? snx_seconds() + seconds : 0;
     SnxCtrRunResult state;
     printf("Running ARM11 static AOT\n");
     for (;;) {
@@ -74,6 +103,7 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
         executed += n;
         if (state != SNX_CTR_RUN_BUDGET || (limit && executed >= limit)) break;
         if ((closed = snx_ctr_present_closed())) break;
+        if ((timed = deadline && snx_seconds() >= deadline)) break;
     }
     SnxArmCPU* cpu = snx_ctr_process_cpu(process);
     if (state == SNX_CTR_RUN_EXIT) {
@@ -83,8 +113,9 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
         else
             printf("Guest ExitProcess: r0=%" PRIu32 " blocks=%" PRIu64 "\n", cpu->r[0], executed);
         result = 0;
-    } else if (closed) {
-        printf("Closed: blocks=%" PRIu64 "\n", executed);
+    } else if (closed || timed) {
+        printf("%s: blocks=%" PRIu64 "\n", closed ? "Closed" : "Ran its time", executed);
+        report_threads(process);
         result = 0;
     } else {
         snprintf(error, error_size,
@@ -97,8 +128,16 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
                  cpu->r[15], cpu->exit, cpu->syndrome, executed, process->svc_count, process->last_svc,
                  process->last_ipc_service, process->last_ipc_header, snx_ctr_thread(process)->waiting_service);
         result = state == SNX_CTR_RUN_FAULT ? 1 : 3;
+        report_threads(process);
+    }
+    if (snx_ctr_jit_compiled(jit)) {
+        size_t hinted = snx_ctr_jit_save_hints(jit, directory);
+        printf("Compiled at run time: %" PRIu64 " blocks", snx_ctr_jit_compiled(jit));
+        if (hinted) printf(", %zu new in the title's hints, which a recompile (-r) starts from", hinted);
+        putchar('\n');
     }
 done:
+    snx_ctr_jit_free(jit);
     snx_ctr_present_free();
     snx_ctr_audio_free();
     snx_ctr_process_free(process);

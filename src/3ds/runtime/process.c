@@ -4,6 +4,7 @@
 #include "3ds/gpu/pica.h"
 #include "3ds/services/dsp.h"
 #include "3ds/services/file.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -279,6 +280,24 @@ static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia)
         return false;
     }
     p->sd = sd;
+    /* the regions the title's SMDH (ExeFS icon) says it runs in, which pick the console's (services/cfg.c) */
+    unsigned char smdh[0x2020];
+    uint64_t smdh_size = 0;
+    const unsigned char* icon = cia ? snx_ctr_cia_exefs(cia, "icon", &smdh_size) : NULL;
+    if (!cia) {
+        char* path = snx_path_join(directory, "exefs/icon");
+        FILE* f = path ? fopen(path, "rb") : NULL;
+        if (f && fread(smdh, 1, sizeof smdh, f) == sizeof smdh) icon = smdh, smdh_size = sizeof smdh;
+        if (f) fclose(f);
+        free(path);
+    }
+    if (icon && smdh_size >= 0x201c && !memcmp(icon, "SMDH", 4))
+        p->region_lockout = (uint32_t)icon[0x2018] | (uint32_t)icon[0x2019] << 8 | (uint32_t)icon[0x201a] << 16 |
+                            (uint32_t)icon[0x201b] << 24;
+    /* the save data a run formatted before */
+    pm_lock(&tree->lock);
+    if (fs_tree_lookup(tree, NULL, "savedata", &p->save) || !p->save->is_dir) p->save = NULL;
+    pm_unlock(&tree->lock);
     snx_ctr_dsp_component_file(p);
     return true;
 }

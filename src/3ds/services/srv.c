@@ -3,6 +3,7 @@
    SRV wire commands/results referenced against Azahar service/sm/{srv.cpp,sm.h}. */
 #include "3ds/runtime/internal.h"
 #include "3ds/services/dsp.h"
+#include "3ds/services/system.h"
 #include "services/srv.swipc.inc"
 #include <stdio.h>
 #include <string.h>
@@ -22,8 +23,11 @@ static uint32_t snx_ctr_srv_GetServiceHandle(SnxCtrIpc* c, const uint8_t* name, 
         if (name[i] < 0x21 || name[i] > 0x7e) return 0xd8e06406u;
     }
     if (length == 7 && !memcmp(name, "fs:USER", 7)) return snx_ctr_session_create(p, SNX_CTR_SERVICE_FS, session);
-    if (length == 5 && !memcmp(name, "APT:S", 5)) return snx_ctr_session_create(p, SNX_CTR_SERVICE_APT, session);
-    if (length == 8 && !memcmp(name, "ptm:sysm", 8)) return snx_ctr_session_create(p, SNX_CTR_SERVICE_PTM, session);
+    /* APT:U is the application's, APT:A an applet's and APT:S the system's: the same commands, as Azahar serves them */
+    if (length == 5 && (!memcmp(name, "APT:S", 5) || !memcmp(name, "APT:U", 5) || !memcmp(name, "APT:A", 5)))
+        return snx_ctr_session_create(p, SNX_CTR_SERVICE_APT, session);
+    if ((length == 8 && !memcmp(name, "ptm:sysm", 8)) || (length == 5 && !memcmp(name, "ptm:u", 5)))
+        return snx_ctr_session_create(p, SNX_CTR_SERVICE_PTM, session);
     if (length == 8 && !memcmp(name, "hid:USER", 8)) return snx_ctr_session_create(p, SNX_CTR_SERVICE_HID, session);
     if (length == 8 && !memcmp(name, "gsp::Gpu", 8)) return snx_ctr_session_create(p, SNX_CTR_SERVICE_GSP, session);
     if (length == 5 && (!memcmp(name, "cfg:u", 5) || !memcmp(name, "cfg:s", 5) || !memcmp(name, "cfg:i", 5)))
@@ -32,6 +36,8 @@ static uint32_t snx_ctr_srv_GetServiceHandle(SnxCtrIpc* c, const uint8_t* name, 
         uint32_t result = snx_ctr_dsp_open(p);
         return result ? result : snx_ctr_session_create(p, SNX_CTR_SERVICE_DSP, session);
     }
+    uint32_t system = snx_ctr_system_open(p, name, length, session);
+    if (system != SNX_CTR_SYSTEM_UNKNOWN) return system;
     if (flags & 1) return 0xd0406401u;
     /* The console waits for the service to be registered (Azahar's GetServiceHandle). No other process runs here
        to register it, so the thread waits forever: say which service it was. */

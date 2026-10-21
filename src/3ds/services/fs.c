@@ -33,11 +33,16 @@ static uint32_t snx_ctr_fs_wire_InitializeWithSdkVersion(SnxCtrIpc* c, uint32_t 
 static uint32_t snx_ctr_fs_wire_Initialize(SnxCtrIpc* c, uint32_t process) {
     return snx_ctr_fs_wire_InitializeWithSdkVersion(c, 0, process);
 }
+#define CTR_NOT_FORMATTED 0xc8a04554u /* NotFormatted, FS, InvalidState, Status */
 static CtrSelfArchive* archive(SnxCtrProcess* p, uint64_t token) {
     if (token)
         for (unsigned i = 0; i < CTR_SELF_ARCHIVES; ++i)
             if (p->self_archives[i].token == token) return &p->self_archives[i];
     return NULL;
+}
+/* the host area an archive's paths are in: the SD card's or the save data's; NULL for the read-only RomFS */
+static FsNode* area(const SnxCtrProcess* p, const CtrSelfArchive* a) {
+    return !a ? NULL : a->kind == 1 ? p->sd : a->kind == 2 ? p->save : NULL;
 }
 static uint32_t snx_ctr_fs_wire_CloseArchive(SnxCtrIpc* c, uint64_t token) {
     if (!initialized(c)) return SNX_CTR_IPC_INVALID_STATE;
@@ -130,13 +135,13 @@ static bool read_path(SnxCtrIpc* c, uint32_t type_word, uint32_t size_word, uint
     return true;
 }
 /* The read-write sdmc area: resolve an indexed host file and open it. */
-static void open_host(SnxCtrIpc* c, uint32_t flags, const char* relative) {
+static void open_host(SnxCtrIpc* c, FsNode* root, uint32_t flags, const char* relative) {
     SnxCtrProcess* p = c->process;
     FsNode* node = NULL;
     FILE* host = NULL;
     pm_lock(&p->tree->lock);
-    FsTreeResult rc = fs_tree_lookup(p->tree, p->sd, relative, &node);
-    if (rc == FS_TREE_NOTFOUND && (flags & 4)) rc = fs_tree_create(p->tree, p->sd, relative, 0, 0, &node);
+    FsTreeResult rc = fs_tree_lookup(p->tree, root, relative, &node);
+    if (rc == FS_TREE_NOTFOUND && (flags & 4)) rc = fs_tree_create(p->tree, root, relative, 0, 0, &node);
     if (!rc && (node->is_dir || node->is_virtual)) rc = FS_TREE_INVALID;
     if (!rc) {
         host = fs_tree_open(p->tree, node, (flags & 2) ? "r+b" : "rb");
@@ -150,14 +155,14 @@ static void open_host(SnxCtrIpc* c, uint32_t flags, const char* relative) {
     }
     if (!new_object(c, CTR_FILE_HOST, !!(flags & 2), host, node)) fclose(host);
 }
-/* SelfNCCH, empty archive path, binary selector for this process' RomFS. */
+/* SelfNCCH, empty archive path, binary selector for this process' RomFS: its first word the type, 0 for the RomFS,
+   whose ExeFS file name after it means nothing (Azahar's SelfNCCHFilePath) */
 static void open_romfs(SnxCtrIpc* c, const unsigned char path[12]) {
     SnxCtrProcess* p = c->process;
-    for (unsigned i = 0; i < 12; ++i)
-        if (path[i]) {
-            c->state = SNX_CTR_IPC_UNSUPPORTED;
-            return;
-        }
+    if (path[0] || path[1] || path[2] || path[3]) {
+        c->state = SNX_CTR_IPC_UNSUPPORTED;
+        return;
+    }
     if (!p->romfs) {
         snx_ctr_ipc_error_reply(c, 0xc8804464u);
         return;
@@ -186,14 +191,10 @@ static void open_direct(SnxCtrIpc* c) {
             snx_ctr_ipc_bad(c);
             return;
         }
-        unsigned char path[12], empty;
-        if (snx_ctr_read_ram(p->space, c->in[10], &empty, 1) != SNX_CTR_MEM_OK ||
-            snx_ctr_read_ram(p->space, c->in[12], path, sizeof path) != SNX_CTR_MEM_OK) {
+        /* the archive's path is empty: its byte means nothing */
+        unsigned char path[12];
+        if (snx_ctr_read_ram(p->space, c->in[12], path, sizeof path) != SNX_CTR_MEM_OK) {
             c->transport_result = 0xe0e01bf5u;
-            return;
-        }
-        if (empty) {
-            c->state = SNX_CTR_IPC_UNSUPPORTED;
             return;
         }
         open_romfs(c, path);
@@ -209,15 +210,7 @@ static void open_direct(SnxCtrIpc* c) {
         c->state = SNX_CTR_IPC_UNSUPPORTED;
         return;
     }
-    unsigned char empty;
-    if (snx_ctr_read_ram(p->space, c->in[10], &empty, 1) != SNX_CTR_MEM_OK) {
-        c->transport_result = 0xe0e01bf5u;
-        return;
-    }
-    if (empty) {
-        c->state = SNX_CTR_IPC_UNSUPPORTED;
-        return;
-    }
+    /* the archive's path is empty: its byte means nothing (Azahar reads no byte of an empty path) */
     if (!p->sd) {
         snx_ctr_ipc_error_reply(c, 0xc8804478u);
         return;
@@ -225,7 +218,7 @@ static void open_direct(SnxCtrIpc* c) {
     char path[768];
     const char* relative = NULL;
     if (!read_path(c, 5, 6, 12, path, &relative)) return;
-    open_host(c, flags, relative);
+    open_host(c, p->sd, flags, relative);
 }
 static void open_file(SnxCtrIpc* c) {
     if (!snx_ctr_ipc_expect(c, 7, 2)) return;
@@ -269,7 +262,7 @@ static void open_file(SnxCtrIpc* c) {
     char path[768];
     const char* relative = NULL;
     if (!read_path(c, 4, 5, 9, path, &relative)) return;
-    open_host(c, flags, relative);
+    open_host(c, area(p, a), flags, relative);
 }
 static void open_directory(SnxCtrIpc* c) {
     if (!snx_ctr_ipc_expect(c, 4, 2)) return;
@@ -290,13 +283,13 @@ static void open_directory(SnxCtrIpc* c) {
     char path[768];
     const char* relative = NULL;
     if (!path_descriptor(c, 4, 6) || !read_path(c, 3, 4, 6, path, &relative)) return;
-    if (a->kind != 1) {
+    if (!area(p, a)) {
         c->state = SNX_CTR_IPC_UNSUPPORTED;
         return;
     }
     FsNode* node = NULL;
     pm_lock(&p->tree->lock);
-    FsTreeResult rc = fs_tree_lookup(p->tree, p->sd, relative, &node);
+    FsTreeResult rc = fs_tree_lookup(p->tree, area(p, a), relative, &node);
     if (!rc && !node->is_dir) rc = FS_TREE_INVALID;
     pm_unlock(&p->tree->lock);
     if (rc) {
@@ -313,7 +306,7 @@ static void create_entry(SnxCtrIpc* c, int is_dir) {
         return;
     }
     CtrSelfArchive* a = archive(p, (uint64_t)c->in[2] | (uint64_t)c->in[3] << 32);
-    if (!a || a->kind != 1) {
+    if (!area(p, a)) {
         snx_ctr_ipc_error_reply(c, a ? 0xd8e01beeu : 0xc8804465u);
         return;
     }
@@ -326,7 +319,7 @@ static void create_entry(SnxCtrIpc* c, int is_dir) {
     const char* relative = NULL;
     if (!path_descriptor(c, 5, is_dir ? 8 : 10) || !read_path(c, 4, 5, is_dir ? 8 : 10, path, &relative)) return;
     pm_lock(&p->tree->lock);
-    FsTreeResult rc = fs_tree_create(p->tree, p->sd, relative, is_dir, file_size, NULL);
+    FsTreeResult rc = fs_tree_create(p->tree, area(p, a), relative, is_dir, file_size, NULL);
     pm_unlock(&p->tree->lock);
     snx_ctr_ipc_error_reply(c, tree_result(rc));
 }
@@ -338,7 +331,7 @@ static void remove_entry(SnxCtrIpc* c, int is_dir) {
         return;
     }
     CtrSelfArchive* a = archive(p, (uint64_t)c->in[2] | (uint64_t)c->in[3] << 32);
-    if (!a || a->kind != 1) {
+    if (!area(p, a)) {
         snx_ctr_ipc_error_reply(c, a ? 0xd8e01beeu : 0xc8804465u);
         return;
     }
@@ -350,7 +343,7 @@ static void remove_entry(SnxCtrIpc* c, int is_dir) {
     const char* relative = NULL;
     if (!path_descriptor(c, 5, 7) || !read_path(c, 4, 5, 7, path, &relative)) return;
     pm_lock(&p->tree->lock);
-    FsTreeResult rc = fs_tree_remove(p->tree, p->sd, relative, is_dir, 0, 0);
+    FsTreeResult rc = fs_tree_remove(p->tree, area(p, a), relative, is_dir, 0, 0);
     pm_unlock(&p->tree->lock);
     snx_ctr_ipc_error_reply(c, tree_result(rc));
 }
@@ -363,7 +356,7 @@ static void rename_entry(SnxCtrIpc* c, int is_dir) {
     }
     CtrSelfArchive* src = archive(p, (uint64_t)c->in[2] | (uint64_t)c->in[3] << 32);
     CtrSelfArchive* dst = archive(p, (uint64_t)c->in[6] | (uint64_t)c->in[7] << 32);
-    if (!src || !dst || src->kind != 1 || dst != src) {
+    if (!area(p, src) || dst != src) {
         snx_ctr_ipc_error_reply(c, 0xc8804465u);
         return;
     }
@@ -380,7 +373,7 @@ static void rename_entry(SnxCtrIpc* c, int is_dir) {
     if (!read_path(c, 4, 5, 11, from, &a_path)) return;
     if (!read_path(c, 8, 9, 13, to, &b_path)) return;
     pm_lock(&p->tree->lock);
-    FsTreeResult rc = fs_tree_rename(p->tree, p->sd, a_path, b_path, is_dir);
+    FsTreeResult rc = fs_tree_rename(p->tree, area(p, src), a_path, b_path, is_dir);
     pm_unlock(&p->tree->lock);
     snx_ctr_ipc_error_reply(c, tree_result(rc));
 }
@@ -400,7 +393,7 @@ static void control_archive(SnxCtrIpc* c) {
         return;
     }
     if (!c->in[3]) { /* COMMIT_SAVE_DATA */
-        if (a->kind == 1) {
+        if (area(p, a)) {
             c->out[0] = 0x080d0040;
             return;
         }
@@ -444,7 +437,7 @@ static void control_archive(SnxCtrIpc* c) {
         while (*relative == '/') ++relative;
         FsNode* node = NULL;
         pm_lock(&p->tree->lock);
-        FsTreeResult rc = fs_tree_lookup(p->tree, p->sd, relative, &node);
+        FsTreeResult rc = area(p, a) ? fs_tree_lookup(p->tree, area(p, a), relative, &node) : FS_TREE_INVALID;
         uint64_t unix_ms = 0;
         if (!rc) rc = fs_tree_mtime(p->tree, node, &unix_ms);
         pm_unlock(&p->tree->lock);
@@ -468,7 +461,7 @@ static void open_archive(SnxCtrIpc* c) {
         snx_ctr_ipc_error_reply(c, SNX_CTR_IPC_INVALID_STATE);
         return;
     }
-    if ((c->in[1] != 9 && c->in[1] != 3) || c->in[2] != 1 || c->in[3] != 1) {
+    if ((c->in[1] != 9 && c->in[1] != 3 && c->in[1] != 4) || c->in[2] != 1 || c->in[3] != 1) {
         c->state = SNX_CTR_IPC_UNSUPPORTED;
         return;
     }
@@ -476,15 +469,7 @@ static void open_archive(SnxCtrIpc* c) {
         snx_ctr_ipc_bad(c);
         return;
     }
-    unsigned char empty;
-    if (snx_ctr_read_ram(p->space, c->in[5], &empty, 1) != SNX_CTR_MEM_OK) {
-        c->transport_result = 0xe0e01bf5u;
-        return;
-    }
-    if (empty) {
-        c->state = SNX_CTR_IPC_UNSUPPORTED;
-        return;
-    }
+    /* the archive's path is empty: its byte means nothing (Azahar reads no byte of an empty path) */
     if (c->in[1] == 3 && !p->romfs) {
         snx_ctr_ipc_error_reply(c, 0xc8804464u);
         return;
@@ -493,18 +478,92 @@ static void open_archive(SnxCtrIpc* c) {
         snx_ctr_ipc_error_reply(c, 0xc8804478u);
         return;
     }
+    if (c->in[1] == 4 && !p->save) { /* the game formats its save data when told it has none */
+        snx_ctr_ipc_error_reply(c, CTR_NOT_FORMATTED);
+        return;
+    }
     if (p->archive_sequence != UINT64_MAX)
         for (unsigned i = 0; i < CTR_SELF_ARCHIVES; ++i) {
             if (p->self_archives[i].token) continue;
             uint64_t token = ++p->archive_sequence;
             p->self_archives[i].token = token;
-            p->self_archives[i].kind = c->in[1] == 9 ? 1u : 0u;
+            p->self_archives[i].kind = c->in[1] == 9 ? 1u : c->in[1] == 4 ? 2u : 0u;
             c->out[0] = 0x080c00c0;
             c->out[2] = (uint32_t)token;
             c->out[3] = (uint32_t)(token >> 32);
             return;
         }
     snx_ctr_ipc_error_reply(c, 0xd0401834u);
+}
+/* The save data's format (FormatSaveData's numbers), kept beside it in the title's state folder as five little-endian
+   words: total size, directories, files, duplicate data, and a version 1 */
+#define CTR_FORMAT_FILE "savedata.format"
+/* FSUSER FormatSaveData: this title's save data (archive 4, an empty path) made anew and empty, as Azahar's
+   ArchiveSource_SDSaveData::Format does */
+static void format_save(SnxCtrIpc* c) {
+    if (!snx_ctr_ipc_expect(c, 9, 2)) return;
+    SnxCtrProcess* p = c->process;
+    if (!initialized(c)) {
+        snx_ctr_ipc_error_reply(c, SNX_CTR_IPC_INVALID_STATE);
+        return;
+    }
+    if (c->in[1] != 4) {
+        snx_ctr_ipc_error_reply(c, 0xd9001001u); /* InvalidPath */
+        return;
+    }
+    if (c->in[2] != 1) { /* another title's save data */
+        c->state = SNX_CTR_IPC_UNSUPPORTED;
+        return;
+    }
+    if (c->in[10] != ((c->in[3] << 14) | 2)) {
+        snx_ctr_ipc_bad(c);
+        return;
+    }
+    uint32_t info[5] = {c->in[4] * 512, c->in[5], c->in[6], c->in[9] & 0xff, 1};
+    unsigned char bytes[sizeof info];
+    for (unsigned i = 0; i < 5; ++i)
+        for (unsigned j = 0; j < 4; ++j) bytes[i * 4 + j] = (unsigned char)(info[i] >> (j * 8));
+    for (unsigned i = 0; i < CTR_SELF_ARCHIVES; ++i) /* an open save data archive goes with what it held */
+        if (p->self_archives[i].kind == 2) p->self_archives[i].token = 0;
+    pm_lock(&p->tree->lock);
+    FsTreeResult rc = p->save ? fs_tree_remove(p->tree, NULL, "savedata", 1, 1, 0) : FS_TREE_OK;
+    p->save = NULL;
+    if (!rc) rc = fs_tree_create(p->tree, NULL, "savedata", 1, 0, &p->save);
+    FsNode* format = NULL;
+    if (!rc && fs_tree_lookup(p->tree, NULL, CTR_FORMAT_FILE, &format) == FS_TREE_NOTFOUND)
+        rc = fs_tree_create(p->tree, NULL, CTR_FORMAT_FILE, 0, 0, &format);
+    FILE* f = !rc ? fs_tree_open(p->tree, format, "r+b") : NULL;
+    if (!rc && (!f || fwrite(bytes, 1, sizeof bytes, f) != sizeof bytes)) rc = FS_TREE_IO;
+    if (f && fclose(f)) rc = FS_TREE_IO;
+    pm_unlock(&p->tree->lock);
+    if (rc) p->save = NULL;
+    snx_ctr_ipc_error_reply(c, tree_result(rc));
+}
+/* FSUSER GetFormatInfo of the save data: the numbers it was formatted with */
+static void format_info(SnxCtrIpc* c) {
+    if (!snx_ctr_ipc_expect(c, 3, 2)) return;
+    SnxCtrProcess* p = c->process;
+    if (c->in[1] != 4 || c->in[2] != 1) {
+        c->state = SNX_CTR_IPC_UNSUPPORTED;
+        return;
+    }
+    unsigned char bytes[20] = {0};
+    FsNode* format = NULL;
+    pm_lock(&p->tree->lock);
+    FILE* f = p->save && !fs_tree_lookup(p->tree, NULL, CTR_FORMAT_FILE, &format)
+                  ? fs_tree_open(p->tree, format, "rb")
+                  : NULL;
+    bool read = f && fread(bytes, 1, sizeof bytes, f) == sizeof bytes;
+    if (f) fclose(f);
+    pm_unlock(&p->tree->lock);
+    if (!read) {
+        snx_ctr_ipc_error_reply(c, CTR_NOT_FORMATTED);
+        return;
+    }
+    c->out[0] = 0x08450140;
+    for (unsigned i = 0; i < 4; ++i)
+        c->out[2 + i] = (uint32_t)bytes[i * 4] | (uint32_t)bytes[i * 4 + 1] << 8 | (uint32_t)bytes[i * 4 + 2] << 16 |
+                        (uint32_t)bytes[i * 4 + 3] << 24;
 }
 void snx_ctr_fs_dispatch(SnxCtrIpc* c) {
     switch (c->in[0] >> 16) {
@@ -519,6 +578,8 @@ void snx_ctr_fs_dispatch(SnxCtrIpc* c) {
         case 0x80b: open_directory(c); break;
         case 0x80c: open_archive(c); break;
         case 0x80d: control_archive(c); break;
+        case 0x845: format_info(c); break;
+        case 0x84c: format_save(c); break;
         default: snx_ctr_fs_wire_dispatch(c); break;
     }
 }

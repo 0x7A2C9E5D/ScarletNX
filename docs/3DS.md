@@ -21,10 +21,36 @@
 
 ## Status: stage 1 + stage 2a + stages 2b1–2b4 + initial 3a/3b/FS
 
-`scarletnx-3ds` extracts **decrypted application CIAs** and runs them through
-**extract -> offline static AOT -> native module -> checked ARM/Thumb execution**,
+`scarletnx-3ds` runs **application CIAs** through
+**offline static AOT -> native module -> checked ARM/Thumb execution**,
 with the compiler built into the driver. A launch reuses a finished extraction
-and module and runs until the game exits or its window closes.
+and module and runs until the game exits or its window closes (or for `--seconds N`,
+after which it reports where each thread is).
+
+An encrypted CIA, as a console dump is, is decrypted once with the user's own keys
+into `<title folder>.decrypted.cia` beside the title's folder, which is read from
+then on (`src/3ds/loader/decrypt.c`). The keys are an `aes_keys.txt` in Azahar's
+format, looked for in `~/.3ds/aes_keys.txt` (`%USERPROFILE%\.3ds` on Windows) as
+the Switch driver looks in `~/.switch`, or named with `--keys FILE`. They are
+never part of ScarletNX. Both layers come off: each content's AES-CBC under the
+ticket's title key (itself under the common key), and the NCCH's AES-CTR under
+the primary key (slot 0x2C) and the secondary one its crypto method names (0x2C,
+0x25, 0x18, 0x1B). The decrypted CIA says NoCrypto and carries the decrypted
+contents' hashes, and it is checked as any CIA is before it is published, so keys
+that are not the console's never leave a CIA behind. Seed crypto (seeddb) is not
+supported yet.
+
+Code the static discovery misses (an indirect call's target, a return into it)
+compiles when the dispatch first reaches it (`src/3ds/aot/jit.c`, through the ARM
+backend's executor), and goes in the title folder's `hints`, which the next
+recompile (`-r`) seeds discovery with, so it is static from then on. A
+commercial title's 7 MiB of text compiles to about 340000 blocks in about six
+and a half minutes on six cores (the chunks compile in parallel).
+
+Since 2026-10-21 a commercial title, decrypted this way, runs its startup
+(cfg, FS with its save data, APT, and the system services the runtime answers
+generically) and draws its own loading indicator and a dialog's text through the
+PICA renderer.
 
 Since 2026-10-16, SuperTux runs past `main` and its RomFS reads. It draws its title and loading
 screens through a software port of Azahar's PICA pipeline (command processor,
@@ -352,8 +378,8 @@ status**. When the last thread ends with ExitThread the driver prints
 
 ### Current limits and trust
 
-Only decrypted application CIA/NCCH content is supported, not encrypted layers,
-updates, DLC, system titles or nonstandard NCCH media units/platforms. Input and
+Only application CIA/NCCH content is supported (encrypted ones decrypted with the
+user's keys as above, without seed crypto), not updates, DLC, system titles or nonstandard NCCH media units/platforms. Input and
 total materialized output are each capped at 1 GiB; metadata tables at 16 MiB,
 code at 64 MiB, entries at 100000, and RomFS nesting at 64. Host filenames must
 be portable safe components (maximum 255 UTF-8 bytes); unsafe/reserved names
@@ -378,13 +404,12 @@ covers a versioned domain, full ExHeader and full expanded code. It is not yet a
 complete cache key (CIA/resources, compiler/build/configuration versions and
 resume policy still need a separate design). Initial AOT also requires a
 word-multiple declared text length. Text-page padding beyond declared text has
-no static entry, even if its page is executable. Larger images also have NULL
-slots for unproven indirect targets; these fail explicitly without recompilation.
-The static graph is capped at 524288 discovered instructions and 131072 entries.
-The entry cap was raised for genuine scalar-VFP fallthrough coverage, not runtime
-discovery. Exceeding either aborts compilation, never silently truncates the graph.
-Objects together are capped at 256 MiB and the linked module at 512 MiB. Tiny-image
-code uses O2, and larger-image chunks use O1, with 128 entries per LLVM module.
+no static entry, even if its page is executable: it compiles at run time, as any
+code the static graph lacks does. The static graph is bounded by the text itself
+(each instruction slot is visited once in each instruction set). Objects together
+are capped at 1 GiB and the linked module at 1 GiB, and only the module is kept in
+`native/`. Tiny-image code uses O2, and larger-image chunks use O1, with 512
+entries per LLVM module, compiled by a worker per host core.
 
 ### Build and test
 
