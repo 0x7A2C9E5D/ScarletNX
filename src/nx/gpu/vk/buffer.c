@@ -25,6 +25,8 @@ typedef struct {
     u64 frame; /* the staging frame buf/off point into, when not own */
     int own;   /* buf is this entry's own buffer */
     u32 wseen; /* write-tracking clock when it last matched memory */
+    u32 host_gen; /* g_vb_map_gen when host_cpu was found: 0 never */
+    u64 host_cpu; /* the guest memory the range shows, ~0 for none (entry_host) */
     VkBuffer buf;
     VmaAllocation mem;
     u64 off;
@@ -1484,6 +1486,22 @@ static int make_own(u32 i, const u8* src) {
     return 1;
 }
 
+static u32 g_vb_map_gen = 1;
+void vk_buf_mapping_changed(void) {
+    if (!++g_vb_map_gen) g_vb_map_gen = 1;
+}
+/* the host bytes of an entry's range, for the write tracking's question about them: kept with the generation of the GPU
+   mappings, which a change of either kind moves (vk_buf_mapping_changed). An own buffer asked it each time it was
+   checked, translating the range, 1.6% of one game's GPU thread. The question needs no more than the address: the
+   pending results were checked already, and the bytes aren't read */
+static const u8* entry_host(Vb* e, u64 gva, u64 len) {
+    if (e->host_gen != g_vb_map_gen) {
+        const u8* p = gmem_host(gva, len);
+        e->host_cpu = p ? (u64)(p - g_mem) : ~0ull;
+        e->host_gen = g_vb_map_gen;
+    }
+    return e->host_cpu == ~0ull ? NULL : GP(e->host_cpu);
+}
 static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
     int pending;
     u32 i = 0;
@@ -1516,7 +1534,7 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
             return 1;
         }
         /* with write tracking, an own buffer is checked only when its memory was written */
-        int w = e->own ? vk_written_since(gmem_ptr(gva, len), len, e->wseen) : -1;
+        int w = e->own ? vk_written_since(entry_host(e, gva, len), len, e->wseen) : -1;
         if (w == 0) {
             e->epoch = g_vk_epoch;
             if (strict) e->strict_epoch = g_vk_epoch;

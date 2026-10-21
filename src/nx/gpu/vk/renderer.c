@@ -74,6 +74,7 @@ static void vkr_mapping_begin(u64 gva, u64 size, int full) {
 /* the pages changed count what is pending at the guest pages they show now. A change of guest memory (full) leaves
    the GMMU as it was: pending pages are compared by address, and freed memory is landed first */
 static void vkr_mapping_end(void) {
+    vk_buf_mapping_changed();
     pend_remap(g_mapping_gva, g_mapping_size);
     g_mapping_size = 0;
     vk_unlock();
