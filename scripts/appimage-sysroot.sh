@@ -23,6 +23,7 @@ libraries=gcc
 retry() { for try in 1 2 3; do "$@" && return; [ "$try" = 3 ] && return 1; sleep 5; done; }
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+mkdir "$work/pkg" # pacman's downloads, which it doesn't make a folder for
 sed "s#/etc/pacman.d/#$root/etc/pacman.d/#g" "$root/etc/pacman.conf" >"$work/pacman.conf"
 pacman-key --gpgdir "$root/etc/pacman.d/gnupg" --init
 pacman-key --gpgdir "$root/etc/pacman.d/gnupg" --populate-from "$root/usr/share/pacman/keyrings" --populate
