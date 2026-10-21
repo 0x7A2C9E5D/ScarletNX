@@ -29,7 +29,7 @@ The runtime options behind it, for a run by hand from `games/<id>/` (`./<id> --s
 
 | Option | Effect |
 | --- | --- |
-| `--seconds=N` | Exit after N seconds, printing `frames=N hash=...` (the last frame's hash) and writing `--shot` |
+| `--seconds=N` | Exit after N seconds, printing `frames=N hash=...` (the last frame's hash) and writing `--shot`. They count from the game's start, after the shader loading screen (`prepare_shaders=2`), which ends after N seconds itself. The first run after a rebuild translates the game's shaders again there (seconds, or a minute in a big game) |
 | `--frames=N` | Exit after N presented frames |
 | `--shot=PATH` | Screenshot to `PATH.ppm` at exit |
 | `--shot_every=N` | Also a numbered screenshot every N frames (`PATH_0000.ppm`, ...), needs `--shot` |

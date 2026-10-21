@@ -661,15 +661,6 @@ static void next_theme(App* app, int step) {
 static const char* const place_names[GUI_PLACES] = {"data", "recompiled", "work"};
 static const char* const place_labels[GUI_PLACES] = {SNX_TR_NOOP("Data"), SNX_TR_NOOP("Recompiled"),
                                                      SNX_TR_NOOP("Extractions")};
-/* a path from the root: '/' first, or on Windows a drive's (C:\ or C:/) or a share's (\\host) */
-static bool full_path(const char* path) {
-#ifdef _WIN32
-    if (SDL_isalpha((unsigned char)path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) return true;
-    return path[0] == '\\' && path[1] == '\\';
-#else
-    return path[0] == '/';
-#endif
-}
 /* side_box's words in app.ini, GuiSide's order, and as Settings > App shows them */
 static const char* const side_words[] = {"auto", "on", "off"};
 static const char* const side_names[] = {SNX_TR_NOOP("Auto"), SNX_TR_NOOP("On"), SNX_TR_NOOP("Off")};
@@ -771,7 +762,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
                 }
             }
         }
-        if (place < GUI_PLACES && (!*value || full_path(value))) { /* nothing is the default */
+        if (place < GUI_PLACES && (!*value || snx_path_is_full(value))) { /* nothing is the default */
             free(places[place]);
             places[place] = *value ? snx_strdup(value) : NULL;
             continue;
@@ -7225,16 +7216,18 @@ static void launch(App* app, char* absolute, bool prepared) {
         argv[n++] = "--repo";
         argv[n++] = app->data_dir;
     }
-    if (folders && app->menu.selected == GUI_SWITCH && (app->place[GUI_PLACE_GAMES] || app->dest_out)) {
+    /* a CIA's game is a folder of the recompiled library as a Switch game is, named after its title ID, its saves in
+       it */
+    if (folders && (app->place[GUI_PLACE_GAMES] || app->dest_out)) {
         argv[n++] = "--outdir";
         argv[n++] = app->dest_out ? app->dest_out : app->games_dir;
     }
     /* the picked extractions folder, which Extract to tmpfs leaves for the temporary one, and a Switch dump read in
-       place (Extract game container off) has no use for. A CIA's title folder is there either way, its saves in it */
-    if (folders && app->place[GUI_PLACE_WORK] &&
-        (app->menu.selected == GUI_3DS || (!nro_file(absolute) && !gui_settings_tmpfs(s) && gui_settings_extract(s)))) {
-        out = dump_out(app, absolute, app->menu.selected == GUI_3DS ? "3ds" : NULL); /* an NRO has no extraction */
-        argv[n++] = app->menu.selected == GUI_3DS ? "--output" : "--out";
+       place (Extract game container off) has no use for */
+    if (folders && app->place[GUI_PLACE_WORK] && app->menu.selected == GUI_SWITCH && !nro_file(absolute) &&
+        !gui_settings_tmpfs(s) && gui_settings_extract(s)) {
+        out = dump_out(app, absolute, NULL); /* an NRO has no extraction */
+        argv[n++] = "--out";
         argv[n++] = out;
     }
     argv[n] = NULL;

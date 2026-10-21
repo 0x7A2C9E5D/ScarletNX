@@ -134,7 +134,7 @@ static bool parse(CtrReader* r, const CtrCia* cia, CtrNcch* n) {
     if (expanded < minimum) return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "code is shorter than process segments");
     /* each ExeFS file's hash, which the extraction checks as it copies the file */
     for (size_t i = 0; i < 10; ++i)
-        if (*names[i] && !ctr_hash_matches(r, files[i], exefs + 0x1e0 - i * 32)) return false;
+        if (*names[i] && !r->quick && !ctr_hash_matches(r, files[i], exefs + 0x1e0 - i * 32)) return false;
     n->rom = rom;
     if (rom.size) {
         uint64_t rom_hash_size = (uint64_t)ctr_le32(h + 0x1b8) * 512;
@@ -183,15 +183,20 @@ bool ctr_ncch_write(CtrReader* r, const CtrCia* cia, const CtrNcch* n, const cha
         free(path);
         if (!ok) return false;
     }
-    char input_hash[65], code_hash[65];
+    char input_hash[80] = "", code_hash[65];
     unsigned char hash[32];
     if (!ctr_sha256(r, n->code, n->code_size, hash)) return false;
     for (size_t i = 0; i < 32; ++i) {
-        snprintf(input_hash + i * 2, 3, "%02x", cia->input_hash[i]);
+        if (cia->input_hashed) snprintf(input_hash + 13 + i * 2, 3, "%02x", cia->input_hash[i]);
         snprintf(code_hash + i * 2, 3, "%02x", hash[i]);
     }
+    if (cia->input_hashed) { /* the input's hash is taken only when it names the output (snx_ctr_extract) */
+        memcpy(input_hash, "input_sha256=", 13);
+        input_hash[77] = '\n';
+        input_hash[78] = 0;
+    }
     char* manifest =
-        snx_format("format=1\nstate=extracted\ntitle_id=%016" PRIx64 "\ntitle_version=%u\ninput_sha256=%s\n"
+        snx_format("format=1\nstate=extracted\ntitle_id=%016" PRIx64 "\ntitle_version=%u\n%s"
                    "code_sha256=%s\nentry=0x%08" PRIx32 "\nstack_size=0x%08" PRIx32 "\nbss_size=0x%08" PRIx32 "\n"
                    "text_address=0x%08" PRIx32 "\ntext_pages=%" PRIu32 "\ntext_bytes=%" PRIu32 "\n"
                    "ro_address=0x%08" PRIx32 "\nro_pages=%" PRIu32 "\nro_bytes=%" PRIu32 "\n"

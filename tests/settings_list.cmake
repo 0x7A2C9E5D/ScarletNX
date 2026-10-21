@@ -25,6 +25,8 @@ foreach(row "Display\tdocked\t1\tint\t0\t1\t1 = TV mode" "Display\tfullscreen\t0
             "Controllers/Button map\tgamepad_map\t\ttext\t"
             "\tStick dead zone\t0=0%|5=5%|10=10%|" "|90=90%\n" "\tVibration\t0=Off|10=10%|20=20%|"
             "Debug\tlog\t1\tint\t0\t2\t" "\tLog level\t0=0|1=1|2=2\n"
+            "Performance\tprepare_shaders\t2\tint\t0\t2\t"
+            "\tPrepare shaders\t0=Off|1=While playing|2=Before starting\n"
             ", 2 French, 3 German, 4 Italian, 5 Spanish, 6 Chinese, 7 Korean,")
     string(FIND "${list}" "${row}" at)
     if(at LESS 0)

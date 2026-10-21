@@ -190,6 +190,17 @@ setting Pipeline threads
     help The threads that make the GPU's new pipelines while the game goes on: 0 = a quarter of the computer's
     help threads, two to six; 1 to 32 = that many. More make a first run's new pipelines sooner, with less CPU left
     help for the game
+setting Prepare shaders
+    key prepare_shaders
+    int 0 2
+    default 2
+    startup
+    words Off|While playing|Before starting
+    help Prepares the game's shaders ahead of time so it stutters less, and again after ScarletNX, the GPU or its driver
+    help is updated. Off = shaders are made only when the game first draws with them. While playing = prepared in the
+    help background, used once all are ready. Before starting = a loading screen waits for them and for the shader cache
+    help of earlier sessions. Any key, button or tap starts the game at once and the rest is prepared while you play.
+    help Esc quits (on Android, back opens the menu)
 setting JIT threads
     key jit_threads
     int 0 8
@@ -617,6 +628,51 @@ setting Keyboard text
     default ""
     once
     help The text the software keyboard answers instead of asking (shorter than the game's minimum: cancelled)
+
+# ---- the 3DS driver's (scarletnx-3ds --key=value), in no section of the game's .ini ----
+
+table g_ctr_debug_ini
+setting CTR IPC trace
+    key ctr_ipc_trace
+    int 0 1
+    default 0
+    words Off|On
+    help 1 = logs each service request the 3DS game sends, its service and header, in the order sent
+setting CTR SVC trace
+    key ctr_svc_trace
+    int 0 2
+    default 0
+    words Off|Failures|All
+    help 1 = logs each SVC the 3DS game makes that answers a failure (r0 with its top bit set), 2 = every SVC, with
+    help the thread, its pc and r0 to r3 before and after
+setting CTR GPU trace
+    key ctr_gpu_trace
+    int 0 1
+    default 0
+    words Off|On
+    help 1 = logs each GX command the 3DS game queues, and each framebuffer swap the display takes or drops (and why)
+setting CTR run-time compile trace
+    key ctr_jit_trace
+    int 0 1
+    default 0
+    words Off|On
+    help 1 = logs each block the 3DS runtime compiles while the game runs (the static module lacked it), Thumb ones
+    help with the pc's low bit set as the hints file writes them
+setting CTR answer unknown commands
+    key ctr_auto_stub_ipc
+    int 0 1
+    default 1
+    words Off|On
+    help 1 = a command of a 3DS service the runtime doesn't know answers success, and a service it doesn't have is a
+    help stand-in that answers each command so (each logged the first time), as auto_stub_ipc does for a Switch game;
+    help 0 = the run stops at the first, saying which, except for the services --ipc-stubs names
+setting CTR script
+    key ctr_script
+    text 4096
+    default ""
+    help The 3DS game's scripted input (--script= too): when:buttons, comma between, when in ms from the start and
+    help buttons in hex as hid:USER's pad has them (1 A, 2 B, 4 Select, 8 Start, 10 Right, 20 Left, 40 Up, 80 Down,
+    help 100 R, 200 L, 400 X, 800 Y), each held for press_len ms
 
 section Game: g_game_ini
 section Display: g_display_ini

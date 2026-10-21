@@ -860,6 +860,65 @@ static void test_romfs_names(const u8* image, const u64* header) {
 }
 #endif
 
+/* romfs_files' entries, as the shader pass lists them: their names, places in the image and sizes, until stop_at */
+static struct {
+    int n, stop_at;
+    char name[4][16];
+    u64 off[4], size[4];
+} listed;
+static int list_file(void* ctx, const char* name, u64 off, u64 size) {
+    (void)ctx;
+    if (listed.n < 4) {
+        snprintf(listed.name[listed.n], sizeof listed.name[0], "%s", name);
+        listed.off[listed.n] = off;
+        listed.size[listed.n] = size;
+    }
+    return ++listed.n == listed.stop_at;
+}
+/* the RomFS as the runtime itself reads it, outside the service: each file's entry, and its bytes by their place */
+static void test_romfs_listing(const u8* image, const u64* header) {
+    u8 got[16];
+    int asset = -1;
+    memset(&listed, 0, sizeof listed);
+    /* asset.bin, empty.bin and zulu.bin, and off Windows the two in folders with names past ASCII */
+    CHECK(romfs_files(list_file, NULL) == 0 && listed.n >= 3 && listed.n <= 5);
+    for (int i = 0; i < listed.n && i < 4; i++)
+        if (!strcmp(listed.name[i], "asset.bin")) asset = i;
+    CHECK(asset >= 0 && listed.off[asset] == header[9] && listed.size[asset] == 10);
+    CHECK(!romfs_peek(listed.off[asset], got, 10) && !memcmp(got, "romfs test", 10) &&
+          !memcmp(got, image + header[9], 10));
+    CHECK(!romfs_peek(g_hle.fs.rtotal, got, 0));          /* nothing, at the end */
+    CHECK(romfs_peek(g_hle.fs.rtotal - 4, got, 8) == -1); /* past the end */
+    /* the pass's reads are quiet: none is logged as the game's first read of a file */
+    for (int i = 0; i < g_hle.fs.nrfiles; i++) g_hle.fs.rfiles[i].logged = g_hle.fs.rfiles[i].warned = 0;
+    CHECK(!romfs_peek(header[9], got, 10));
+    for (int i = 0; i < g_hle.fs.nrfiles; i++) CHECK(!g_hle.fs.rfiles[i].logged && !g_hle.fs.rfiles[i].warned);
+    /* a file table whose first name runs past it: malformed, so nothing after it can be listed, on any call */
+    {
+        u8* len = g_hle.fs.rmeta + header[7] + 0x1C;
+        u32 was = snx_ld_le32(len);
+        int all;
+        snx_st_le32(len, 0xFFFFu);
+        memset(&listed, 0, sizeof listed);
+        CHECK(romfs_files(list_file, NULL) == -2 && listed.n == 0);
+        snx_st_le32(len, was);
+        /* an entry whose data lies past the image: left out, the others listed */
+        memset(&listed, 0, sizeof listed);
+        CHECK(romfs_files(list_file, NULL) == 0);
+        all = listed.n;
+        {
+            u8* off = g_hle.fs.rmeta + header[7] + 8;
+            u64 at = snx_ld_le64(off);
+            snx_st_le64(off, g_hle.fs.rtotal);
+            memset(&listed, 0, sizeof listed);
+            CHECK(romfs_files(list_file, NULL) == -2 && listed.n == all - 1);
+            snx_st_le64(off, at);
+        }
+    }
+    memset(&listed, 0, sizeof listed);
+    listed.stop_at = 2;
+    CHECK(romfs_files(list_file, NULL) == 1 && listed.n == 2); /* stopped by the second */
+}
 static void test_extracted_romfs(SvcObj* proxy) {
     Request r;
     request(&r, 200);
@@ -906,6 +965,7 @@ static void test_extracted_romfs(SvcObj* proxy) {
 #if !defined(_WIN32)
     test_romfs_names(image, header);
 #endif
+    test_romfs_listing(image, header);
     request(&r, 0);
     argument64(&r, 0, header[9] + 7);
     argument64(&r, 8, 13);

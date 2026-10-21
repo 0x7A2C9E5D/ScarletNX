@@ -3,6 +3,7 @@
 #include "nx/runtime/platform/gamepad.h"
 #include "nx/runtime/options.h"
 #include "nx/runtime/main.h"
+#include "nx/runtime/platform/backend.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/ui.h"
 #include "common/utilities/common.h"
@@ -192,18 +193,12 @@ static void load_mappings(void) {
         LOG("input: SDL mappings from %s\n", override);
         return;
     }
-    /* the launcher's, beside its settings.ini: one mapping database for every game it opens. On Android that of its
-       data folder in the app's own files (src/gui/android.c), wherever the game is */
-#ifdef SDL_PLATFORM_ANDROID
+    /* the launcher's, beside its settings.ini: one mapping database for every game it opens */
     {
-        const char* files = SDL_GetAndroidInternalStoragePath();
-        char* data = files ? snx_path_join(files, SNX_PORTABLE_DIR) : NULL;
-        folder = data ? snx_menu_dir(data, SNX_USER_CONFIG) : NULL;
-        free(data);
+        char* launcher = backend_launcher_folder();
+        folder = launcher ? snx_menu_dir(launcher, SNX_USER_CONFIG) : NULL;
+        free(launcher);
     }
-#else
-    folder = snx_menu_dir(g_exedir[0] ? g_exedir : ".", SNX_USER_CONFIG);
-#endif
     path = folder ? snx_path_join(folder, "gamecontrollerdb.txt") : NULL;
     if (!path) path = snx_path_join(g_confdir, "gamecontrollerdb.txt");
     if (!path || !snx_is_file(path)) {

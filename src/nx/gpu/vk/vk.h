@@ -16,7 +16,9 @@
    astc.c      compute decoding of ASTC texture blocks during upload
    buffer.c    vertex, index, constant and storage buffers from guest memory
    pipeline.c  translated shaders, the pipeline layout and pipelines by state
-   pipeline_file.c  the shaders and pipelines kept across runs, made again at startup (pipeline_file.h)
+   pipeline_file.c  the shaders and pipelines kept across runs, made again at startup (pipeline_file.h), and the
+                    shaders of the programs the game ships (<game>.vkshipped, translated by the pass over its files
+                    in gpu/shipped_pass.c), read as the draws ask for them
    render.c    the render target set (dynamic rendering), clears and draws
    compute.c   compute dispatches (on a queue of their own when there is one), landing their results in guest memory
    renderer.c  the renderer interface the GPU front end calls (gpu/renderer.h) and presenting
@@ -784,6 +786,7 @@ typedef struct VkSh {
     VkShaderModule mod;
     int indexed; /* it reads indexed textures: its set needs the texture array bindings (vk_playout) */
     int failed;
+    int shipped; /* a program the game ships, translated before a draw asked for it: 2 once one found it */
     u32 clen, clen_a;
     u64 qh, qh_a;
     struct VkSh* next;
@@ -864,6 +867,9 @@ VkShaderModule vk_module_spv(const u32* words, size_t count);
 VkShaderModule vk_module_spv_location(const u32* words, size_t count, u32 location);
 /* pipelines of earlier runs made in the background: made so far, how many the pipeline cache had, and still to make */
 void vk_pipeline_prewarm_stats(u64* made, u64* hits, u64* left);
+/* what is made before the game draws, so far (the renderer's prepare) */
+struct RendererPrepare;
+void vk_pipeline_prepare(struct RendererPrepare* p);
 
 /* compute.c */
 void vk_dispatch(GpuChannel* ch, const u32* q, u64 code);

@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The runtime's startup: which game to run, its recompiled code, its folders and settings, the console's parts in the
-   order they depend on each other, the game's main thread; then the frontend's loop at the display's rate until the
-   run ends, saving what outlives it */
+   order they depend on each other, the shaders made before the game draws (prepare_wait), the game's main thread;
+   then the frontend's loop at the display's rate until the run ends, saving what outlives it */
 #include "nx/runtime/main.h"
 #include "common/cpu/recompiler/llvm/gdb_jit.h"
 #include "common/utilities/build_info.h"
@@ -29,7 +29,10 @@
 #include "nx/runtime/startup.h"
 #include "nx/runtime/platform/backend.h"
 #include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/prepare_screen.h"
 #include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/ui.h"
+#include "nx/runtime/platform/unattended.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +49,7 @@ char g_addondir[1024], g_gamename[256];
 char g_confdir[1024], g_statedir[1024], g_cachedir[1024];
 volatile int g_quit;
 int (*snx_menu)(const char* self);
+void (*snx_menu_run_theme)(const char* folder, SnxRunTheme* out);
 const SnxModule* g_mod;
 GuestFn* g_disp;
 
@@ -346,7 +350,6 @@ static void read_npdm(void) {
         caps = rd32le(d + aci + 0x30);
         caps_size = rd32le(d + aci + 0x34);
         for (i = 0; caps < aci_size && caps_size <= aci_size - caps && i + 4 <= caps_size; i += 4) {
-        nvn_trace_report();
             u32 cap = rd32le(d + aci + caps + i), lowest, highest, min_core, max_core;
             if ((cap & 0xF) != 0x7) continue; /* ThreadInfo: three ones, then a zero */
             lowest = cap >> 4 & 63;
@@ -378,6 +381,7 @@ void snx_save_before_exit(void) {
         if (g_renderer && g_renderer->save) g_renderer->save();
         svc_core_exit();
         jit_report();
+        nvn_trace_report();
         saved = 1;
     }
     pm_unlock(&lock);
@@ -385,7 +389,9 @@ void snx_save_before_exit(void) {
 
 /* ---- the frontend's loop ---- */
 
-#define STALL_NS ((u64)15000000000u) /* this long without a new frame is worth a line and a dump */
+/* this long without a new frame is worth a line and a dump; and without progress on the shader loading screen, a
+   line (prepare_wait) */
+#define STALL_NS ((u64)15000000000u)
 
 static void write_threads(u64 second) {
     char path[sizeof g_statedir + 16];
@@ -441,6 +447,152 @@ static void frontend_loop(void) {
     snx_save_before_exit();
     LOG("Exit.\n");
     plat_exit_now(0);
+}
+
+/* The shaders and pipelines the renderer makes before the game's first thread runs (prepare_shaders 2, the
+   renderer's prepare): a screen in the launcher's loading look says how far they are, until they are made, a press
+   starts the game at once (the rest is made in the background as it runs), the run quits (the window closed, Esc),
+   or an unattended run's time limit passes. Then the game starts, its window black until it draws. It shows past a
+   quarter second only, so a run with little to make doesn't flash it */
+enum { STEP_FIND, STEP_TRANSLATE, STEP_PIPES, STEP_KINDS };
+/* the next row of the screen, a step of a kind first seen at work at *began (set to now_ms the first time) */
+static SnxPrepareStep* prepare_step(SnxPrepareStep* st, int* n, u64* began, u64 now_ms, const char* label, u32 value,
+                                    u32 total, int done) {
+    SnxPrepareStep* s = &st[(*n)++];
+    *s = (SnxPrepareStep){0};
+    if (!*began) *began = now_ms;
+    s->label = label;
+    s->value = value;
+    s->total = total;
+    s->started_ms = *began; /* for the theme's time left */
+    s->done = done;
+    return s;
+}
+/* the screen's rows for p into st (STEP_KINDS of SNX_PREPARE_STEPS at most): their count */
+static int prepare_steps(const RendererPrepare* p, SnxPrepareStep* st, u64 began[STEP_KINDS], u64 now_ms) {
+    SnxPrepareStep* s;
+    int n = 0;
+    if (p->files) { /* the walk that finds the programs, then their translation */
+        s = prepare_step(st, &n, &began[STEP_FIND], now_ms, "FINDING SHADERS", p->files_seen, p->files,
+                         p->programs || !p->scanning);
+        snprintf(s->detail, sizeof s->detail, "%s", "files checked");
+    }
+    if (p->programs) {
+        s = prepare_step(st, &n, &began[STEP_TRANSLATE], now_ms, "PREPARING SHADERS", p->programs_done, p->programs,
+                         !p->scanning);
+        snprintf(s->detail, sizeof s->detail, "(%u new)", p->shipped);
+    }
+    if (p->pipes) {
+        /* the pipelines of earlier runs, made from the shader cache: a player knows them by that name */
+        s = prepare_step(st, &n, &began[STEP_PIPES], now_ms, "LOADING SHADER CACHE", p->pipes_made, p->pipes,
+                         p->pipes_made >= p->pipes);
+        snprintf(s->detail, sizeof s->detail, "%s", "from earlier sessions");
+    }
+    return n;
+}
+typedef char prepare_note_sizes[RENDERER_NOTE_SIZE == SNX_PREPARE_NOTE_SIZE ? 1 : -1]; /* the renderer's, handed on */
+typedef char prepare_step_room[STEP_KINDS <= SNX_PREPARE_STEPS ? 1 : -1];
+static void prepare_draw(const SnxRunTheme* look, const char* title, const SnxPrepareStep* st, int n,
+                         const RendererPrepare* p, const char* foot) {
+    ui_lock();
+    prepare_screen_set(look, title, st, n, (const char (*)[SNX_PREPARE_NOTE_SIZE])p->note, p->notes, foot,
+                       plat_ns() / 1000000u);
+    ui_unlock();
+    if (g_renderer->refresh) g_renderer->refresh();
+}
+static void prepare_wait(const char* title) {
+    RendererPrepare p;
+    SnxRunTheme theme = {0}, *look = NULL;
+    SnxPrepareStep st[SNX_PREPARE_STEPS];
+    u64 began[STEP_KINDS] = {0}, t0 = plat_ns(), moved = t0;
+    u32 was = 0;
+    int shown = 0, themed = 0, n = 0, stalls = 0;
+    char ended[96] = "", how[96];
+    if (g_settings.prepare_shaders != 2 || !g_renderer->prepare) return;
+    g_renderer->prepare(&p);
+    if (p.done) { /* nothing to make (shaders are recorded, or the renderer makes none) */
+        unattended_start();
+        return;
+    }
+    for (;;) {
+        u64 now = plat_ns();
+        u32 at;
+        const char* press;
+        g_renderer->prepare(&p);
+        if (p.done) break;
+        video_poll();
+        if (g_quit) {
+            snprintf(ended, sizeof ended, ", quit");
+            break;
+        }
+        if ((press = backend_pressed()) != NULL) {
+            snprintf(ended, sizeof ended, ", skipped by %s", press);
+            break;
+        }
+        /* an unattended run's time limit, counted from here too: the game then has one of its own */
+        if (g_settings.seconds > 0 && now - t0 >= (u64)g_settings.seconds * 1000000000u) {
+            snprintf(ended, sizeof ended, ", cut short at the run's time limit");
+            break;
+        }
+        /* a line after STALL_NS without progress, so that a pass that hangs leaves a trace */
+        at = p.files_seen + p.programs_done + p.pipes_made;
+        if (at != was) {
+            was = at;
+            moved = now;
+        } else if (now - moved >= STALL_NS && stalls < 4) {
+            stalls++;
+            moved = now;
+            WARN("prepare: no progress for %llu seconds (%u of %u files, %u of %u programs, %u of %u pipelines, the "
+                 "shader files of earlier runs %s)\n",
+                 (unsigned long long)(STALL_NS / 1000000000u), p.files_seen, p.files, p.programs_done, p.programs,
+                 p.pipes_made, p.pipes, p.loaded ? "read" : "still being read");
+        }
+        n = prepare_steps(&p, st, began, now / 1000000u);
+        if (now - t0 >= 250000000ull && n && backend_window_shown()) { /* not for a headless run */
+            char* dir = !themed && snx_menu_run_theme ? backend_launcher_folder() : NULL;
+            if (dir) {
+                snx_menu_run_theme(dir, &theme);
+                if (theme.ink != theme.page) look = &theme; /* else the YoRHa theme's, built in */
+            }
+            free(dir);
+            themed = 1;
+#if defined(__ANDROID__) /* no Esc there: back opens the menu, whose Exit quits */
+            prepare_draw(look, title, st, n, &p,
+                         "Any button or tap: start now. The rest is prepared while you play. Back: menu.");
+#else
+            prepare_draw(look, title, st, n, &p,
+                         "Any key, button or tap: start now. The rest is prepared while you play. Esc: quit.");
+#endif
+            shown = 1;
+        }
+        plat_sleep_ns(16000000);
+    }
+    g_renderer->prepare(&p);
+    if (shown && !g_quit) { /* the steps as they ended, a quarter second; then gone, the window black until the game
+                               draws */
+        n = prepare_steps(&p, st, began, plat_ns() / 1000000u);
+        plat_sleep_ns(40000000); /* refresh's pace after the loop's last picture, so this one isn't dropped */
+        prepare_draw(look, title, st, n, &p, "");
+        plat_sleep_ns(250000000);
+        ui_lock();
+        prepare_screen_set(look, title, NULL, 0, NULL, 0, "", 0);
+        ui_unlock();
+        /* twice, refresh's pace apart (a picture each 33 ms at most), so that one dropped doesn't leave the steps up */
+        for (int i = 0; i < 2 && g_renderer->refresh; i++) {
+            g_renderer->refresh();
+            plat_sleep_ns(40000000);
+        }
+    }
+    if (shown)
+        snprintf(how, sizeof how, "shown in %s's look", look ? look->name : "the built-in YoRHa theme");
+    else
+        snprintf(how, sizeof how, "%s",
+                 backend_window_shown() ? "not shown, as it was quick" : "not shown, as nothing could be seen");
+    LOG("prepare: %llu ms before the game %s (%u shaders translated from its files, %u of %u pipelines of earlier "
+        "runs made), %s%s\n",
+        (unsigned long long)((plat_ns() - t0) / 1000000u), g_quit ? "would have started" : "started", p.shipped,
+        p.pipes_made, p.pipes, how, ended);
+    unattended_start(); /* scripted presses and the timed exit count from the game's start */
 }
 
 /* ---- startup ---- */
@@ -526,9 +678,7 @@ int snx_main(int argc, char** argv) {
         LOG("gdb: the code the JIT compiles is named to GDB (gdb_jit=1): it stops the game for each compile while "
             "attached\n");
     }
-    if (g_addon)
-        LOG("game: %s of the game in %s, with its settings and saves\n",
-            "the update", base);
+    if (g_addon) LOG("game: the update of the game in %s, with its settings and saves\n", base);
 
     fs_init(); /* the npdm is read through it, and mem_init's layout comes before */
     mem_init();
@@ -570,8 +720,10 @@ int snx_main(int argc, char** argv) {
         LOG("the CPU profiler is Windows only, profile=1 does nothing here\n");
 #endif
     }
-    kernel_run_main(mod->mods[0].base + mod->mods[0].text_off, mod->main_stack, (int)mod->main_prio,
-                    (int)mod->main_core);
+    prepare_wait(title);
+    if (!g_quit)
+        kernel_run_main(mod->mods[0].base + mod->mods[0].text_off, mod->main_stack, (int)mod->main_prio,
+                        (int)mod->main_core);
     frontend_loop();
     return 0;
 }

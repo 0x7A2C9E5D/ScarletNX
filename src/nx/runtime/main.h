@@ -5,11 +5,16 @@
 #ifndef SNX_MAIN_H
 #define SNX_MAIN_H
 #include "common/cpu/aarch64/cpu.h"
+#include "common/utilities/run_theme.h"
 
 int snx_main(int argc, char** argv); /* runs the game the arguments or the program's name say; its exit status */
 /* the launcher's menu (src/gui), for an executable built with it: a bare start of the runtime opens it, with the
    program's own path */
 extern int (*snx_menu)(const char* self);
+/* the launcher's loading look (gui/theme.h's gui_run_theme), for the runtime's own loading screen: NULL in a runtime
+   built without the menu, which keeps the YoRHa theme's built in. Android's is one (src/nx/CMakeLists.txt: the
+   launcher is the app's own library there), so its screen is YoRHa's whatever theme the launcher shows */
+extern void (*snx_menu_run_theme)(const char* folder, SnxRunTheme* out);
 /* Saves what outlives the run (the hints, the renderer's pipeline cache) and reports nvn_trace before a clean exit:
    the main loop's, the unattended limit's, svcExitProcess. The first caller saves; one that comes while it does waits,
    then does nothing */

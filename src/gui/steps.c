@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #include "gui/steps.h"
 #include "gui/i18n.h"
+#include "common/utilities/run_theme.h" /* snx_run_seconds_left */
 #include <stdio.h>
 #include <string.h>
 
@@ -119,10 +120,10 @@ void gui_step_progress(const GuiStep* s, int how, uint64_t now, char* out, size_
         snprintf(out, size, "%s", "");
     else if (how == GUI_PROGRESS_PERCENT)
         snprintf(out, size, "%u%%", (unsigned)(done * 100 / s->total));
-    else if (how == GUI_PROGRESS_TIME && (!done || spent < 1000))
+    else if (how == GUI_PROGRESS_TIME && snx_run_seconds_left(spent, done, s->total) < 0)
         snprintf(out, size, "%s", snx_tr("--:-- left"));
     else if (how == GUI_PROGRESS_TIME) {
-        left = (spent * (s->total - done) / done + 999) / 1000;
+        left = (uint64_t)snx_run_seconds_left(spent, done, s->total);
         if (left >= 3600)
             snprintf(out, size, snx_tr("%u:%02u:%02u left"), (unsigned)(left / 3600), (unsigned)(left / 60 % 60),
                      (unsigned)(left % 60));

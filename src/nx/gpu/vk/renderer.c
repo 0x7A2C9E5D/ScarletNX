@@ -737,5 +737,6 @@ const Renderer vk_renderer = {
     .refresh = vkr_refresh,
     .save = vk_pipeline_save,
     .release_window = vk_window_release,
+    .prepare = vk_pipeline_prepare,
 };
 const Renderer* g_renderer = &vk_renderer;

@@ -123,7 +123,11 @@ def main():
         cmd = [exe, '--seconds=%d' % a.seconds, '--shot=' + shot] + (['--script=' + a.script] if a.script else [])
         with open(log, 'w') as f:
             try:
-                r = subprocess.run(cmd + a.args, cwd=folder, stdout=f, stderr=subprocess.STDOUT, timeout=a.seconds + 60)
+                # the shader loading screen before the game (prepare_shaders=2) may take up to --seconds itself
+                # before the game's own --seconds start (main.c prepare_wait)
+                r = subprocess.run(
+                    cmd + a.args, cwd=folder, stdout=f, stderr=subprocess.STDOUT, timeout=2 * a.seconds + 60
+                )
                 code = r.returncode
             except subprocess.TimeoutExpired:
                 code = 'timeout'

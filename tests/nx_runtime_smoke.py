@@ -72,23 +72,37 @@ def main():
                 raise RuntimeError(f'NRO recompilation returned {compiled.returncode}')
             folder = output / 'NX Smoke'  # the game's own
             launcher = folder / ('NX Smoke.exe' if os.name == 'nt' else 'NX Smoke')
-            result = subprocess.run(
-                [str(launcher), '-H'],
-                cwd=folder,
-                env=env,
-                capture_output=True,
-                timeout=args.timeout,
-                check=False,
-            )
-            (scratch / 'runtime.stdout').write_bytes(result.stdout)
-            (scratch / 'runtime.stderr').write_bytes(result.stderr)
+            # each way of making the game's shaders: before it starts (the default, which the pass's line says ended
+            # before the game ran), none, and in the background, which the game's exit may cut short
             log = folder / 'NX Smoke.log'
-            text = log.read_text(encoding='utf-8', errors='replace') if log.is_file() else ''
-            if result.returncode or '[game] NX runtime smoke' not in text or 'The game exited (code 0)' not in text:
-                raise RuntimeError(
-                    f'NX runtime returned {result.returncode} or did not execute the Horizon SVC markers'
+            for mode in ('2', '0', '1'):
+                log.unlink(missing_ok=True)  # each mode judged on its own log
+                result = subprocess.run(
+                    [str(launcher), '-H', f'--prepare_shaders={mode}'],
+                    cwd=folder,
+                    env=env,
+                    capture_output=True,
+                    timeout=args.timeout,
+                    check=False,
                 )
-            print('Synthetic NRO recompiled and ran Horizon OutputDebugString/ExitProcess with headless Vulkan.')
+                (scratch / f'runtime{mode}.stdout').write_bytes(result.stdout)
+                (scratch / f'runtime{mode}.stderr').write_bytes(result.stderr)
+                text = log.read_text(encoding='utf-8', errors='replace') if log.is_file() else ''
+                (scratch / f'runtime{mode}.log').write_text(text, encoding='utf-8')
+                if result.returncode or '[game] NX runtime smoke' not in text or 'The game exited (code 0)' not in text:
+                    raise RuntimeError(
+                        f'NX runtime returned {result.returncode} or did not execute the Horizon SVC markers'
+                        f' (prepare_shaders={mode})'
+                    )
+                passed = "vulkan: the game's own shaders:" in text
+                if mode == '2' and (not passed or text.index("the game's own shaders:") > text.index('[game] NX')):
+                    raise RuntimeError("prepare_shaders=2: the shader pass didn't end before the game ran")
+                if mode == '0' and passed:
+                    raise RuntimeError('prepare_shaders=0: the shader pass ran')
+            print(
+                'Synthetic NRO recompiled and ran Horizon OutputDebugString/ExitProcess with headless Vulkan, '
+                'with each prepare_shaders mode.'
+            )
             return 0
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
             artifacts.mkdir(parents=True, exist_ok=True)

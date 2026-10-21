@@ -103,10 +103,10 @@ target_link_libraries(scarletnx-gui PUBLIC snx_gui_support PRIVATE scarletnx-com
                       snx_build_info snx_pad_sdl snx_splash snx_gui_languages snx_demangle)
 if(WIN32 AND NOT SNX_BUILD_NX)
     enable_language(RC)
-    target_sources(scarletnx-gui PRIVATE ../nx/runtime/platform/runtime.rc)
+    target_sources(scarletnx-gui PRIVATE ../common/platform/runtime.rc)
     # where the resource compiler finds the manifest and the icon; C includes from src/ alone
     target_include_directories(scarletnx-gui PRIVATE
-                               "$<$<COMPILE_LANGUAGE:RC>:${CMAKE_CURRENT_SOURCE_DIR}/../nx/runtime/platform>")
+                               "$<$<COMPILE_LANGUAGE:RC>:${CMAKE_CURRENT_SOURCE_DIR}/../common/platform>")
     target_link_options(scarletnx-gui PRIVATE -mwindows -static)
 endif()
 if(SNX_SDL3_FROM_SOURCE AND NOT SNX_BUILD_NX)

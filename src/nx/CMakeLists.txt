@@ -64,7 +64,7 @@ target_link_libraries(snx_video PRIVATE FFmpeg::avcodec)
 include("${PROJECT_SOURCE_DIR}/cmake/splash.cmake")
 target_link_libraries(snx_hle PRIVATE FFmpeg::avcodec OpenSSL::SSL snx_splash)
 snx_component(gpu gpu/gpu.c gpu/maxwell/engines.c gpu/maxwell/mme.c gpu/maxwell/mme_hle.c gpu/maxwell/mme_jit.c gpu/maxwell/compute.c gpu/maxwell/fermi2d.c gpu/maxwell/dma.c gpu/maxwell/write_pages.c gpu/maxwell/maxwell3d.c gpu/renderer.c
-              gpu/nvn_trace.c)
+              gpu/nvn_trace.c gpu/shipped_pass.c)
 # mme_jit.c compiles the macros mme_hle.c has no implementation for with the LLVM backend
 target_link_libraries(snx_gpu PRIVATE snx_llvm)
 
@@ -73,7 +73,8 @@ include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
 set(platform runtime/platform/plat.c runtime/platform/unattended.c runtime/platform/backend/sdl3.c
              runtime/platform/backend/gamepad.c
              runtime/platform/overlay.c runtime/platform/touch.c runtime/platform/ui.c runtime/platform/vpad.c
-             runtime/platform/fatal_screen.c "${CMAKE_BINARY_DIR}/generated/controls_png.c")
+             runtime/platform/fatal_screen.c runtime/platform/prepare_screen.c
+             "${CMAKE_BINARY_DIR}/generated/controls_png.c")
 if(WIN32)
     list(APPEND platform runtime/platform/plat_win32.c runtime/platform/profiler_win32.c)
 else()
@@ -81,7 +82,7 @@ else()
 endif()
 snx_component(platform ${platform})
 
-snx_component(shader gpu/shader/shader.c gpu/shader/decode.c gpu/shader/corpus.c
+snx_component(shader gpu/shader/shader.c gpu/shader/decode.c gpu/shader/corpus.c gpu/shader/shipped.c
                      gpu/shader/spirv_translate.c gpu/shader/spirv_compute.c gpu/shader/spirv_emit.c)
 # the opcode enum and decoder, generated from gpu/shader/maxwell_opcodes.def
 include("${PROJECT_SOURCE_DIR}/cmake/shaderdec.cmake")
@@ -155,9 +156,9 @@ if(WIN32)
     # advapi32 the registry (the log's system line); winmm is loaded at run time, and the
     # static SDL3 brings the libraries it needs
     target_link_libraries(scarletnx PRIVATE user32 advapi32)
-    # The application manifest (runtime/platform/runtime.manifest): UTF-8 as the process's code page, long paths
+    # The application manifest (src/common/platform/runtime.manifest): UTF-8 as the process's code page, long paths
     enable_language(RC)
-    target_sources(scarletnx PRIVATE runtime/platform/runtime.rc)
+    target_sources(scarletnx PRIVATE "${CMAKE_SOURCE_DIR}/src/common/platform/runtime.rc")
     target_link_options(scarletnx PRIVATE -static)
     target_link_options(scarletnx PRIVATE -mwindows)
 else()
@@ -177,9 +178,10 @@ include("${PROJECT_SOURCE_DIR}/cmake/window_icon.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/build_info.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/pad_sdl.cmake")
 target_link_libraries(snx_platform PRIVATE SDL3::SDL3 snx_window_icon snx_build_info snx_pad_sdl snx_splash)
-# the build is part of the key of the shader and pipeline file (gpu/vk/pipeline.c)
+# the build is part of the key of the shader files, .vkshaders and .vkshipped (gpu/vk/pipeline.c)
 target_link_libraries(snx_vk PRIVATE snx_build_info FFmpeg::avutil) # vk/nvdec.c: FFmpeg's Vulkan device and pictures
-# the game's menu in YoRHa's colours, from src/gui/themes/yorha/theme.ini (cmake/gui_themes.cmake)
+# the game's menu in YoRHa's colours, from src/gui/themes/yorha/theme.ini (cmake/gui_themes.cmake), and the shader
+# loading screen's when the launcher's theme can't be read
 target_include_directories(snx_platform PRIVATE "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(scarletnx PRIVATE SDL3::SDL3)
 
@@ -273,9 +275,15 @@ endif()
 if(SNX_DEPLOY AND SNX_TEST_SANITIZERS AND BUILD_TESTING)
     message(STATUS "SNX_TEST_SANITIZERS: the runtime is not deployed to the games")
 elseif(SNX_DEPLOY)
+    # where scarletnx is also the 3DS driver (src/multicall), the 3DS games' copies are of it too; else scarletnx-3ds
+    # deploys them (src/3ds/CMakeLists.txt)
+    set(snx_ctr_deployed "")
+    if(SNX_MULTICALL AND SNX_BUILD_3DS)
+        set(snx_ctr_deployed "$<TARGET_FILE:scarletnx>")
+    endif()
     add_custom_command(TARGET scarletnx POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" "-DRUNTIME=$<TARGET_FILE:scarletnx>" "-DGAMES=${SNX_RECOMPILED_DIR}" "-DWINDOWS=${WIN32}"
-                "-DMACOS=${APPLE}"
+        COMMAND "${CMAKE_COMMAND}" "-DRUNTIME=$<TARGET_FILE:scarletnx>" "-DCTR_RUNTIME=${snx_ctr_deployed}"
+                "-DGAMES=${SNX_RECOMPILED_DIR}" "-DWINDOWS=${WIN32}" "-DMACOS=${APPLE}"
                 -P "${CMAKE_SOURCE_DIR}/cmake/deploy.cmake"
         VERBATIM)
 endif()

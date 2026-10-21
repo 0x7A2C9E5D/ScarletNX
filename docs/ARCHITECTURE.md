@@ -23,11 +23,10 @@ Source map: [CLAUDE.md](../CLAUDE.md).
 | `src/gnuabi/` / `scarletnx-gnuabi` | Linux syscall/errno/structure translation, ELF loading, isolated VFS, Linux process/memory/signal/futex compatibility |
 
 The experimental `src/3ds/` / `scarletnx-3ds` target supplies board profiles,
-decrypted CIA/NCCH/ExeFS/RomFS extraction, or the same read in place from the mapped CIA, and an independent
-checked page-memory
-controller. `SNX_3DS_AOT=ON` adds a native Linux static-AOT pipeline:
+decrypted CIA/NCCH/ExeFS/RomFS extraction, or the same read in place from the mapped CIA, an independent checked page-memory
+controller and a static-AOT pipeline for Linux and Windows hosts:
 extraction -> the driver's offline LLVM compiler/host linker (only when the module is missing or stale) ->
-native ELF -> checked process/ARM/Thumb dispatch. `snx_ctr_process` maps raw
+a native module (an ELF shared object, or a DLL on Windows) -> checked process/ARM/Thumb dispatch. `snx_ctr_process` maps raw
 ExHeader segments/BSS/stack/TLS; `snx_ctr_native` validates/loads module ABI 1.
 The driver links LLVM for its compiler, the modules do not. The runtime uses neither MCJIT nor NX/GNU
 ABI code. `common/filesystem/` / `scarletnx-filesystem` owns NX and CTR's shared
@@ -35,7 +34,7 @@ indexed host tree, immutable file mappings and on-demand opens. CTR uses its own
 level-3 RomFS serializer/file objects and wire protocol, not Switch FS IPC.
 Host staging/process utilities are also reused.
 
-The shared A32 backend's A57/flat defaults and CPU ABI 2 are unchanged. ARM11 ISA
+The shared A32 backend's A57/flat defaults are unchanged, and its CPU ABI is 3. ARM11 ISA
 and callback memory are explicit codegen options, never global 3DS defines. The
 shared backend CMake target is initialized once when several runtimes request it.
 The compiler exhaustively emits one-instruction entries for images up to 4 KiB.
@@ -43,8 +42,8 @@ Larger images use bounded offline CFG discovery, code-pointer candidates and a
 bounded PC-relative ADD jump window, with blocks of at most 32 instructions.
 It emits 128 entries per LLVM chunk and links all PIC objects with a separate
 ABI-1 full-geometry index object; unproven targets remain NULL. There is no
-runtime discovery or compilation. SuperTux reaches its first SVC through this
-path, not gameplay. See [3DS port](3DS.md) for coverage limits, absent HLE/devices
+runtime discovery or compilation. SuperTux draws its title screen and plays its
+music through this path, without input yet. See [3DS port](3DS.md) for coverage limits, absent HLE/devices
 and remaining cache/ISA work.
 
 The common target has no runtime-specific imports. NX and GNU ABI each link
@@ -169,7 +168,7 @@ bump `SNX_ABI` for ABI changes. Version mismatches reject loading.
 | `hle/services/`, `hle/filesystem/` | Services, nvdrv, guest filesystem services |
 | `gpu/` and `gpu/maxwell/` | GPFIFO, Maxwell engine implementation, shaders, Vulkan renderer |
 | `gpu/video/` | host1x, NVDEC H.264 and VP9 decoding through FFmpeg, VIC |
-| `runtime/platform/` | Host APIs, SDL3/headless, input, screenshots, timed exit |
+| `runtime/platform/` | Host APIs, SDL3/headless, input, screenshots, timed exit, the in-game menu, the shader loading screen |
 
 ### Guest exec
 
@@ -203,6 +202,13 @@ service the runtime doesn't have gets sm's stand-in object, which answers every 
 5. vi waits on the fences no submission promised (a host1x engine's, the CPU's), then queues present (`gpu_call`)
    after the jobs of the channels that promised the others. Other channels' jobs don't hold it. The GPU thread checks
    the remaining fences. `present_buffer` uses the matching RT and vi's crop, or converts guest memory.
+
+The shader programs a game ships are translated at startup, on the renderer's shader file thread rather than the GPU
+thread, into `<id>.vkshipped` (`prepare_shaders`: before the game's first thread runs, behind main.c's loading screen,
+or in the background as it runs). `gpu/shipped_pass.c` walks the RomFS and the executables' segments, and
+`gpu/shader/shipped.c` finds the programs by NVN's code wrapper (or a bare NVN shader file's layout) in their bytes,
+and in the Yaz0 SARCs whose names list a shader container. `gpu/vk/pipeline.c` translates each into the file, which a
+draw's lookup reads from when it has no shader of its own.
 
 ### Renderer coherence + lifetime
 

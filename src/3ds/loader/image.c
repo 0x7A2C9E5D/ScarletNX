@@ -32,10 +32,14 @@ static bool image_parse(const unsigned char* ex, bool (*code)(const void*, unsig
     image->stack_size = le32(ex + 0x1c);
     image->bss_size = le32(ex + 0x3c);
     image->title_id = (uint64_t)le32(ex + 0x200) | (uint64_t)le32(ex + 0x204) << 32;
+    memcpy(image->name, ex, sizeof image->name);
+    image->main_priority = ex[0x20f];
     for (unsigned i = 0; i < 28; ++i) image->kernel_caps[i] = le32(ex + 0x370 + i * 4);
+    const char* reason = "invalid ExHeader main thread priority";
+    if (image->main_priority > 63) goto fail;
     const unsigned offsets[] = {0x10, 0x20, 0x30};
     uint64_t sizes[3], total = 0;
-    const char* reason = "invalid extracted process segment/BSS/stack layout";
+    reason = "invalid extracted process segment/BSS/stack layout";
     for (unsigned i = 0; i < 3; ++i) {
         const unsigned char* p = ex + offsets[i];
         SnxCtrSegment* s = &image->segment[i];
