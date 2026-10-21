@@ -62,8 +62,10 @@ games from running:
   (`src/common/cpu/recompiler/llvm/link_macho.c`) with the ad hoc signature ld64 gives one, which Apple silicon
   needs to run it. Its layout, rebases, exports and signature were checked on Linux against LLVM's tools and
   `ld64.lld`, and its code was run there under qemu. No Mac has loaded one yet.
-- **Game modules on iOS.** iOS loads no code it did not ship with, so its games would have to be linked into the app
-  (`snx_module_static`, `src/nx/runtime/main.c`) or loaded into JIT memory on a device that allows it.
+- **Game modules on iOS, untested on a device.** iOS loads no code it did not ship with, so a game's code is a pack of
+  objects (`scarletnx -r Game --target ios` writes `<id>_code.snxobj`, 64-bit games only) that the app loads into
+  memory a debugger made executable (`load_pack` in `src/nx/runtime/main.c`, the JIT loader's iOS arena in
+  `code_loader.c`). The pack is made on a computer, since nothing runs the recompiler inside the app yet.
 - **32-bit games on iOS.** Their blocks are compiled at run time (`src/nx/runtime/arm.c`,
   `src/common/cpu/arm/exec.c`), which needs memory that becomes executable. iOS gives that only to an app that may JIT.
 - **Preparing on iOS**, for the reasons above, until the driver runs in the app's process.

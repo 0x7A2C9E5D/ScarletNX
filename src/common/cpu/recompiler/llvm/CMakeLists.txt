@@ -47,11 +47,15 @@ if(WIN32)
 else()
     list(APPEND snx_rtlib_flags -fPIC)
 endif()
-# The object is the JIT loader's (code_loader.c), which reads ELF: on macOS too, where the triple's object format says
-# so and the code stays Darwin's (ir.c's host_triple). The bitcode below keeps the Mach-O triple of the AOT modules
+# The object is the JIT loader's (code_loader.c), which reads ELF: on macOS and iOS too, where the triple's object format
+# says so and the code stays Darwin's (ir.c's host_triple). The bitcode below keeps the Mach-O triple of the AOT modules
 set(snx_rtlib_object_flags "")
-if(APPLE AND NOT IOS AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
-    set(snx_rtlib_object_flags --target=arm64-apple-macos${CMAKE_OSX_DEPLOYMENT_TARGET}-elf)
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+    if(IOS)
+        set(snx_rtlib_object_flags --target=arm64-apple-ios${CMAKE_OSX_DEPLOYMENT_TARGET}-elf)
+    else()
+        set(snx_rtlib_object_flags --target=arm64-apple-macos${CMAKE_OSX_DEPLOYMENT_TARGET}-elf)
+    endif()
 endif()
 add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib${CMAKE_C_OUTPUT_EXTENSION}"
     COMMAND "${CMAKE_C_COMPILER}" ${snx_rtlib_flags} ${snx_rtlib_object_flags} -I "${CMAKE_CURRENT_BINARY_DIR}"
@@ -120,7 +124,7 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/armlib_bitcode.c"
     DEPENDS "${snx_rtlib_gen}" "${CMAKE_CURRENT_BINARY_DIR}/armlib.bc" VERBATIM)
 
 add_library(snx_llvm STATIC ir.c ir_state.c ir_emit.c ir_profile.c ir_helpers.c
-    ir_a64.c ir_simd.c ir_fp.c ir_codegen.c link.c link_elf.c link_coff.c link_macho.c elf_object.c
+    ir_a64.c ir_simd.c ir_fp.c ir_codegen.c link.c link_elf.c link_coff.c link_macho.c elf_object.c objects_pack.c
     code_loader.c code_loader_coff.c jit_service.c "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/exec.c"
     "${CMAKE_CURRENT_BINARY_DIR}/rtlib_object.c" "${CMAKE_CURRENT_BINARY_DIR}/rtlib_bitcode.c"
     "${CMAKE_CURRENT_BINARY_DIR}/armlib_bitcode.c")

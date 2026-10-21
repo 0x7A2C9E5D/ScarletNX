@@ -8,6 +8,10 @@
 #include "nx/loader/loader.h"
 #include "nx/loader/module.h"
 #include "nx/loader/module_llvm.h"
+
+/* the triple of the iOS app's code: Darwin's calling convention and the generic AArch64 CPU, in the object format the
+   JIT loader reads (recompiler/llvm/ir.c's host_triple). The version only names the ABI */
+#define SNX_IOS_TRIPLE "arm64-apple-ios16.0-elf"
 #include "nx/runtime/driver/toolchain.h"
 #include "snx_settings.h"
 #include "common/utilities/build_info.h"
@@ -34,6 +38,7 @@ static void usage(void) {
     printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",
            SNX_CHUNK_INSTRUCTIONS);
     puts("  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
+         "  --target ios           A pack of objects for the iOS app, which loads them into JIT memory (docs/APPLE.md)\n"
          "  --no-build             Stage data/INI only, generate no code\n"
          "  --tmpfs                Leave the RomFS in the extraction (in tmpfs), which the game reads it from");
     puts("  --interp-only          Generate no code: the runtime JIT compiles all of it\n"
@@ -331,7 +336,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     char error[1024], option[64], why[256];
     const char* equal;
     size_t option_size;
-    int i, rc = 1, no_build = 0, keep_c = 0, host_win = 0, positional = 0, tmpfs = 0, dump = 0;
+    int i, rc = 1, ios = 0, no_build = 0, keep_c = 0, host_win = 0, positional = 0, tmpfs = 0, dump = 0;
     memset(&compile, 0, sizeof(compile));
     memset(&gen, 0, sizeof(gen));
     memset(&program, 0, sizeof(program));
@@ -440,8 +445,10 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         compile.target_win = 1;
     else if (!strcmp(target, "linux"))
         compile.target_win = 0;
+    else if (!strcmp(target, "ios"))
+        ios = 1;
     else if (strcmp(target, "auto"))
-        return snx_error("--target expects auto, linux or win64");
+        return snx_error("--target expects auto, linux, win64 or ios");
     /* The backends write the module for the machine they run on (build == host == target) */
     if (compile.target_win != host_win) return snx_error("--target: modules are built for this host only");
     gen.abi = snx_game_abi();
@@ -583,10 +590,15 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         rc = 0;
         goto done;
     }
-    code = snx_format("%s_code.%s", base, compile.target_win ? "dll" : "so");
+    if (ios && !program.npdm.is64) {
+        snx_error("--target ios: 32-bit games are not supported yet");
+        goto done;
+    }
+    code = ios ? snx_format("%s_code.snxobj", base) : snx_format("%s_code.%s", base, compile.target_win ? "dll" : "so");
     {
         char* kept = keep_c ? snx_format("%s_build", base) : NULL;
         llvm.output = code;
+        llvm.triple = ios ? SNX_IOS_TRIPLE : NULL;
         llvm.opt = compile.opt[0];
         llvm.tuning = snx_llvm_tuning(llvm.opt, error, sizeof error);
         if (!llvm.tuning) {
@@ -604,6 +616,11 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             i = snx_build_module_llvm(&program, &gen, &llvm);
         free(kept);
         if (i) goto done;
+    }
+    if (ios) { /* the iOS app is the runtime: only the code is made here */
+        if (!compile.quiet) printf("Built %s\n", code);
+        rc = 0;
+        goto done;
     }
     if (runtime) run = snx_absolute(runtime);
 #ifdef SNX_WITH_RUNTIME

@@ -33,8 +33,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+/* iOS loads no code that was not shipped with the app: the game's code is a pack of objects (recompile --target ios)
+   that the JIT loader places in memory a debugger made executable (load_pack) */
+#if defined(__APPLE__) && TARGET_OS_IOS
+#define MODULE_PACK 1
+#include "common/cpu/recompiler/llvm/code_loader.h"
+#include "common/cpu/recompiler/llvm/objects_pack.h"
+#include "common/cpu/recompiler/llvm/rtlib_object.h"
+#endif
+
 #if defined(_WIN32)
 #define MODULE_SUFFIX "_code.dll"
+#elif defined(MODULE_PACK)
+#define MODULE_SUFFIX "_code.snxobj"
 #else
 #define MODULE_SUFFIX "_code.so"
 #endif
@@ -119,6 +133,7 @@ static void name_game(const char* from) {
     drop_suffix(g_exename, ".AppImage");
     drop_suffix(g_exename, "_code.so");
     drop_suffix(g_exename, "_code.dll");
+    drop_suffix(g_exename, "_code.snxobj");
     path[cut] = 0;
 #if defined(_WIN32)
     snprintf(g_exedir, sizeof g_exedir, "%s", path);
@@ -140,6 +155,42 @@ static const char* program_path(const char* argv0) {
 
 static const SnxModule g_other_version; /* abi 0: a 32-bit module of another version, refused as such below */
 
+#ifdef MODULE_PACK
+/* The pack's objects loaded into an arena of the JIT loader's, after the runtime library this app embeds (the pack has
+   none: its host had none for this machine). The arena holds the pack with room to spare, since the objects' sections
+   take their alignment and a GOT. The module's descriptor is its one export. A debugger the arena needs is asked for
+   by the loader, which says what to enable when there is none */
+static const SnxModule* load_pack(const char* path) {
+    SnxLinkInput rtlib, *inputs;
+    SnxCodeLoader* loader;
+    const char* names[1];
+    SnxU64 address = 0;
+    ModuleFn get;
+    size_t size = 0, count = 0, reserve;
+    unsigned char* data = (unsigned char*)snx_read_file(path, &size);
+    char error[1024];
+    if (!data) fatal("%s could not be read", path);
+    inputs = snx_objects_unpack(data, size, "game code", &count);
+    if (!inputs) fatal("%s is not a pack of recompiled code: recompile the game with --target ios", path);
+    /* at least 64 MiB, and twice the objects' size up to the 2 GiB an arena holds */
+    reserve = size < ((size_t)1 << 25) ? ((size_t)1 << 26) : size < ((size_t)1 << 30) ? size * 2 : ((size_t)1 << 31);
+    loader = snx_code_loader_new(reserve, error, sizeof(error));
+    if (!loader) fatal("The game's code cannot be loaded: %s", error);
+    memset(&rtlib, 0, sizeof(rtlib));
+    rtlib.data = snx_rtlib_object;
+    rtlib.size = snx_rtlib_object_size;
+    rtlib.name = "rtlib";
+    names[0] = "snx_module";
+    if (snx_code_load(loader, &rtlib, 1, NULL, 0, NULL, error, sizeof(error)) ||
+        snx_code_load(loader, inputs, count, names, 1, &address, error, sizeof(error)))
+        fatal("The game's code cannot be loaded: %s", error);
+    free(inputs);
+    free(data); /* the loaded code is a copy */
+    get = (ModuleFn)(uintptr_t)address;
+    return get();
+}
+#endif
+
 static const SnxModule* load_module(const char* path) {
     void *lib, *sym;
     ModuleFn get;
@@ -150,6 +201,11 @@ static const SnxModule* load_module(const char* path) {
         fatal("Cannot find the recompiled code: %s. A copy of the runtime runs the game it is named after, with "
               "that code beside it, or --game=PATH names the game (--game=games/Game)",
               path);
+#ifdef MODULE_PACK
+    m = load_pack(path);
+    if (!m) fatal("%s could not be loaded: it describes no game", path);
+    return m;
+#endif
     lib = plat_dl_open(path);
     if (!lib) fatal("%s could not be loaded: %s", path, plat_dl_error());
     if ((sym = plat_dl_sym(lib, "snx_module")) != NULL) {
