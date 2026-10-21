@@ -1515,7 +1515,7 @@ int main(int argc, char** argv) {
     /* App: the theme and the letters, either way round, and the theme editor, which comes back here */
     app.editor.row = 0;
     key(&app, SDLK_RETURN);
-    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 7);
+    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 8);
     {
         char first[64], line[1024];
         snprintf(first, sizeof first, "%s", app.theme.name);
@@ -1958,6 +1958,135 @@ int main(int argc, char** argv) {
         free(old_ini);
         app.editor.row = row;
         app.editor.note[0] = 0;
+    }
+    /* Move old files: what an older version left, moved where this one keeps it once asked, entry by entry; a game laid
+       out beside others is not, the report says how it goes; then nothing that can move, said; nothing left, said */
+    {
+        char *data_was = app.data_dir, *older = snx_path_join(temporary, "move data"), *old_games, *old_game;
+        char *laid = snx_path_join(app.games_dir, "Laid"), *laid_data = snx_path_join(app.games_dir, "Laid_data");
+        char *moved = snx_format("%s/Old/Old", app.games_dir), *dir;
+        int row = app.editor.row, had_games = snx_is_dir(app.games_dir);
+        SDL_Color title = rgb(app.theme.panels == GUI_PANELS_FILL ? app.theme.page : app.theme.ink);
+        app.data_dir = older;
+        old_games = snx_path_join(older, "games");
+        old_game = snx_format("%s/Old/Old", old_games);
+        dir = snx_dirname(old_game);
+        assert(!snx_mkdirs(dir) && !snx_write_file(old_game, "fixture", 7) && !snx_mkdirs(laid_data));
+        assert(!snx_write_file(laid, "fixture", 7));
+        free(dir);
+        app.editor.row = GUI_APP_MOVE;
+        key(&app, SDLK_RETURN);
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_MOVE &&
+               !strcmp(app.ask_line, "Move old files? 1 move, 1 stay where they are"));
+        assert(!strcmp(app.app_form.moves, "2 left"));
+        render(&app);
+        shows(&app, "- Move", normal);
+        key(&app, SDLK_ESCAPE); /* Back: nothing moved */
+        assert(!app.confirm.shown && snx_is_file(old_game) && !snx_path_exists(moved));
+        key(&app, SDLK_RETURN);
+        key(&app, SDLK_DOWN);
+        key(&app, SDLK_RETURN);
+        assert(!app.confirm.shown && app.cleaned_shown && app.report_move && snx_is_file(moved));
+        assert(!snx_path_exists(old_games) && snx_is_file(laid)); /* games/ went once empty; Laid stays */
+        assert(!strcmp(app.editor.note, "1 moved, 1 not") && app.cleaned.count == 3 && app.cleaned.done == 2);
+        assert(strstr(app.cleaned.text, "Not moved: run it from its dump once, which makes "));
+        render(&app);
+        shows(&app, "Move old files: 2 done, 1 not", title);
+        key(&app, SDLK_LEFT); /* the report closes */
+        assert(!app.cleaned_shown && app.lefts == 1 && !strcmp(app.app_form.moves, "1 left"));
+        key(&app, SDLK_RETURN); /* only Laid: none can move, the report says why at once */
+        assert(!app.confirm.shown && app.cleaned_shown && app.cleaned.count == 1 && !app.cleaned.done &&
+               !strcmp(app.editor.note, "None of the 1 can move: the box says why"));
+        key(&app, SDLK_LEFT);
+        assert(!snx_remove_tree(laid_data) && !remove(laid));
+        key(&app, SDLK_RETURN);
+        assert(!app.confirm.shown && !app.cleaned_shown &&
+               !strcmp(app.editor.note, "Nothing left by an older version"));
+        dir = snx_dirname(moved);
+        assert(!snx_remove_tree(dir) && !snx_remove_tree(older));
+        if (!had_games) assert(!snx_remove_tree(app.games_dir));
+        free(dir);
+        free(old_game);
+        free(old_games);
+        free(older);
+        app.data_dir = data_was;
+        left_behind(&app);
+        gui_cleaned_free(&app.cleaned);
+        app.report_move = false;
+        app.editor.row = row;
+        app.editor.note[0] = 0;
+        free(moved);
+        free(laid_data);
+        free(laid);
+#ifdef SNX_XDG
+        /* scarletnx --migrate, the same without the menu, in the XDG folders (Linux's): each entry a line and where it
+           goes, nothing touched; =yes moves them; any other value refused, naming it */
+        {
+            char *xdg = snx_path_join(temporary, "migrate"), *was[4], *data_home = snx_path_join(xdg, "data");
+            char *game = snx_format("%s/scarletnx/games/G/G", data_home),
+                 *now = snx_format("%s/scarletnx/recompiled/G/G", data_home);
+            static const char* const vars[4] = {"XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"};
+            char said[8192];
+            size_t n;
+            FILE* out;
+            for (int v = 0; v < 4; ++v) {
+                char* to = snx_format("%s/%d", xdg, v);
+                was[v] = getenv(vars[v]) ? snx_strdup(getenv(vars[v])) : NULL;
+                set_env(vars[v], v ? to : data_home);
+                free(to);
+            }
+            dir = snx_dirname(game);
+            assert(!snx_mkdirs(dir) && !snx_write_file(game, "fixture", 7));
+            free(dir);
+            { /* the menu's gui/ of an older version: its files split between the config and state folders */
+                char *gui = snx_format("%s/scarletnx/gui", data_home), *recent = snx_path_join(gui, "recent.txt"),
+                     *picks = snx_path_join(gui, "app.ini");
+                assert(!snx_mkdirs(gui) && !snx_write_file(recent, "", 0) && !snx_write_file(picks, "", 0));
+                free(picks);
+                free(recent);
+                free(gui);
+            }
+            for (int apply = 0; apply < 2; ++apply) {
+                char* line = snx_format("%s/scarletnx/games/G: %s to %s/scarletnx/recompiled/G\n%s", data_home,
+                                        apply ? "Moved" : "Moves", data_home,
+                                        apply ? "" : "3 to move, 0 staying: --migrate=yes moves them\n");
+                assert((out = tmpfile()) != NULL);
+                assert(!migrate(app.self, apply, out));
+                rewind(out);
+                n = fread(said, 1, sizeof said - 1, out);
+                said[n] = 0;
+                fclose(out);
+                if (!apply) { /* nothing touched, no folder made */
+                    char *config = snx_path_join(xdg, "1"), *state = snx_path_join(xdg, "2");
+                    char* dumps = snx_format("%s/scarletnx/dumps", data_home);
+                    assert(strstr(said, line) && snx_is_file(game) && !snx_path_exists(now));
+                    assert(!snx_path_exists(config) && !snx_path_exists(state) && !snx_path_exists(dumps));
+                    free(dumps);
+                    free(state);
+                    free(config);
+                } else {
+                    char *recent = snx_format("%s/2/scarletnx/recent.txt", xdg),
+                         *picks = snx_format("%s/1/scarletnx/app.ini", xdg);
+                    assert(strstr(said, line) && strstr(said, "3 moved, 0 not\n") && snx_is_file(now) &&
+                           !snx_path_exists(game));
+                    assert(snx_is_file(recent) && snx_is_file(picks));
+                    free(picks);
+                    free(recent);
+                }
+                free(line);
+            }
+            assert(snx_gui_migrate(app.self, "--migrate=maybe") == 2);
+            for (int v = 0; v < 4; ++v) {
+                set_env(vars[v], was[v]);
+                free(was[v]);
+            }
+            assert(!snx_remove_tree(xdg));
+            free(now);
+            free(game);
+            free(data_home);
+            free(xdg);
+        }
+#endif
     }
     key(&app, SDLK_DOWN);
     key(&app, SDLK_RIGHT); /* the editor opens with Enter only */

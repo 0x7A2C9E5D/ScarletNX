@@ -54,6 +54,7 @@ typedef enum {
     GUI_ASK_PLACES, /* Folders' All back to the defaults: the folders picked */
     GUI_ASK_PLACE,  /* a folder picked in Folders, or the Library's recompiled/, back to its default */
     GUI_ASK_FOLDER, /* a game folder taken off the Library */
+    GUI_ASK_MOVE,   /* App's Move old files: how many entries move, how many stay */
     GUI_ASK_ERROR   /* a failure of the system's, said whole (main.c's say_failure): OK alone, which closes it */
 } GuiAsk;
 typedef struct {

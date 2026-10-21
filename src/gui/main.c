@@ -85,7 +85,7 @@ enum { GUI_PLACE_DATA, GUI_PLACE_GAMES, GUI_PLACE_WORK, GUI_PLACES };
 #define SNX_GUI_PLAYERS  8     /* Controllers' players, as the runtime's gamepad_p<N>_ keys */
 /* the App screen's values, as its rows show them, and the game folders' (recompiled/ first) */
 typedef struct {
-    char theme[64], text[16], language[64], folders[32], places[32];
+    char theme[64], text[16], language[64], folders[32], places[32], moves[32];
     char folder[GUI_FOLDERS_MAX + 2][16]; /* recompiled/, dumps/, then the player's folders */
     char place[GUI_PLACES][64];
 } GuiAppForm;
@@ -223,6 +223,8 @@ typedef struct {
     char* games_key;    /* [folders] games = as app.ini had it, recompiled = before it was named so: written again */
     GuiCleaned cleaned; /* what it did, in a box over the screen while cleaned_shown, until a key closes it */
     bool cleaned_shown;
+    bool report_move; /* the box shows what Move old files did, not Clean old settings */
+    bool look_only; /* scarletnx --migrate, =yes left out: nothing is written, app.ini's rewrite of an older key too */
     int files_top, files_shown; /* the box of files over the screen (render_files): its first file, and how many */
     char* folders[GUI_FOLDERS_MAX];     /* the player's game folders, listed after recompiled/ and dumps/ */
     bool folders_deep[GUI_FOLDERS_MAX]; /* each with its subfolders' games too */
@@ -638,7 +640,7 @@ static int app_save(App* app) {
     char *text, *dir, *staged;
     size_t size = 256;
     int n, failed, i;
-    if (!app->app_file) return 0;
+    if (!app->app_file || app->look_only) return 0;
     for (i = 0; i < GUI_PLACES; ++i) size += 16 + (app->place[i] ? strlen(app->place[i]) : 0);
     text = (char*)snx_alloc(size);
     n = snprintf(text, size, "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\n", app->theme.id);
@@ -1281,7 +1283,8 @@ static const char* ask_question(const App* app) {
         case GUI_ASK_RESET:
         case GUI_ASK_PLACES:
         case GUI_ASK_PLACE:
-        case GUI_ASK_FOLDER: return app->ask_line;
+        case GUI_ASK_FOLDER:
+        case GUI_ASK_MOVE: return app->ask_line;
         case GUI_ASK_ERROR: return app->error_line;
         default:
             return screen(app) == GUI_SCREEN_COMPILING ? snx_tr("Abort the recompile? Its work is lost.")
@@ -1466,6 +1469,8 @@ static void render_files(App* app, int report) {
     r = over_rect(app, cols, head_h(app) + (used + (top + shown < count) + hint) * cell_h(app) + item + 16 * s);
     if (!report)
         snprintf(label, sizeof label, "%s", snx_tr(SAY_LEFT_TITLE));
+    else if (app->report_move)
+        snprintf(label, sizeof label, snx_tr("Move old files: %d done, %d not"), done, count - done);
     else if (count > done)
         snprintf(label, sizeof label, snx_tr("Clean old settings: %d done, %d not"), done, count - done);
     else
@@ -1587,6 +1592,7 @@ static const char* const ask_choices[][2] = {{SNX_TR_NOOP("Keep going"), SNX_TR_
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Reset")},
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Reset")},
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Take it off")},
+                                             {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Move")},
                                              {SNX_TR_NOOP("OK"), NULL}};
 /* the question shown, over the whole screen in the middle or at its foot, a choice asked twice saying so once pressed
    (its label in second): how many choices it has, one for a failure's OK */
@@ -3311,7 +3317,10 @@ static const GuiThemeKey app_keys[] = {
     {"", SNX_TR_NOOP("Folders"), GUI_KEY_ACTION, offsetof(GuiAppForm, places), sizeof(((GuiAppForm*)0)->places), NULL,
      0, SNX_TR_NOOP("Where the data, the games and the extractions are")},
     {"", SNX_TR_NOOP("Clean old settings"), GUI_KEY_ACTION, 0, 0, NULL, 0,
-     SNX_TR_NOOP("The settings the runtime and the launcher no longer read, taken out once asked")}};
+     SNX_TR_NOOP("The settings the runtime and the launcher no longer read, taken out once asked")},
+    {"", SNX_TR_NOOP("Move old files"), GUI_KEY_ACTION, offsetof(GuiAppForm, moves), sizeof(((GuiAppForm*)0)->moves),
+     NULL, 0,
+     SNX_TR_NOOP("What an older version left where this one no longer looks, moved where it keeps it once asked")}};
 enum {
     GUI_APP_THEME,
     GUI_APP_TEXT,
@@ -3320,6 +3329,7 @@ enum {
     GUI_APP_FOLDERS,
     GUI_APP_PLACES,
     GUI_APP_CLEAN,
+    GUI_APP_MOVE,
     GUI_APP_ROWS
 };
 /* path as App's note says it: from the data folder when it is in it (recompiled/), else whole */
@@ -3361,6 +3371,10 @@ static void app_values(App* app) {
         snprintf(f->places, sizeof f->places, snx_tr("%d picked"), moved);
     else
         snprintf(f->places, sizeof f->places, "%s", snx_tr("Defaults"));
+    if (app->lefts) /* as the menu last looked: when it opened, or App did */
+        snprintf(f->moves, sizeof f->moves, snx_tr("%d left"), app->lefts);
+    else
+        snprintf(f->moves, sizeof f->moves, "%s", snx_tr("Nothing left"));
     /* the three folders under the rows, as Folders' value has no room for them; one in the data folder from it */
     data_relative(app, app->games_dir, games, sizeof games);
     data_relative(app, app->work_dir, work, sizeof work);
@@ -3639,7 +3653,7 @@ static void places_apply(App* app) {
     app->themes_dirs[0] = snx_path_join(app->data_dir, "themes");
     { /* where dumps go to be listed: made here, so the player finds it; one that cannot be made is said here, once */
         char* dumps = snx_path_join(app->data_dir, "dumps");
-        if (dumps && !snx_is_dir(dumps) && snx_mkdirs(dumps)) {
+        if (dumps && !app->look_only && !snx_is_dir(dumps) && snx_mkdirs(dumps)) {
             snprintf(app->message, sizeof app->message, snx_tr("Could not make %s"), dumps);
             say_failure(app, app->message);
         }
@@ -4063,6 +4077,7 @@ static void leave_form(App* app) {
     }
 }
 static void clean_row(App* app);
+static void move_row(App* app);
 static void settings_reset_ask(App* app);
 /* ---- Text size: picked in a box over the App's rows, then kept once said so, else back by itself after a while, as
    a screen mode is: a size can leave the menu too small or too big to read ---- */
@@ -4182,6 +4197,9 @@ static void app_action(App* app, int row, int step) {
         return;
     } else if (row == GUI_APP_CLEAN) {
         if (!step) clean_row(app);
+        return;
+    } else if (row == GUI_APP_MOVE) {
+        if (!step) move_row(app);
         return;
     }
     if (row == GUI_APP_THEME || row == GUI_APP_TEXT || row == GUI_APP_LANGUAGE) app_save(app);
@@ -6276,6 +6294,7 @@ static void clean_keys(App* app, const char* file, const char* unread, int faile
 static void clean_old(App* app) {
     char unread[1024];
     gui_cleaned_free(&app->cleaned);
+    app->report_move = false;
     clean_inis(app, &app->cleaned);
     if (settings_unread(app, unread, sizeof unread))
         clean_keys(app, app->settings_file, unread, gui_settings_save(&app->settings, app->settings_file));
@@ -6283,6 +6302,92 @@ static void clean_old(App* app) {
         clean_keys(app, app->app_file, unread, app_save(app));
     app->cleaned_shown = app->cleaned.count > 0;
     app->files_top = 0;
+}
+/* the moves of Move old files, made with apply, else what they would be, an entry each in done: each folder app->left
+   names, entry by entry, into the one this version keeps it in; the menu's gui/ split by its files between the config
+   and state folders; with the data folder's games/, its games' settings and caches in the config, state and cache
+   folders. A game laid out beside others is not moved: its run from its dump makes its folder (docs/DEPRECATIONS.md).
+   How many entries move */
+static const char* last_part(const char* path) {
+    const char* end = path + strlen(path);
+    while (end > path && end[-1] != '/' && end[-1] != '\\') --end;
+    return end;
+}
+static int move_old(App* app, GuiCleaned* done, bool apply) {
+    char old[4400], now[4400], what[4500];
+    char *config = menu_folder(app, SNX_USER_CONFIG, false), *state = menu_folder(app, SNX_USER_STATE, false);
+    char* games = games_old(app);
+    const char* only[2][5];
+    const char* at = app->left;
+    int i, k, moves = 0;
+    for (i = 0; i < 2; ++i) { /* menu_files, as gui_move_entries takes them */
+        for (k = 0; k < 4 && menu_files[i][k][0]; ++k) only[i][k] = menu_files[i][k];
+        only[i][k] = NULL;
+    }
+    for (i = 0; at && *at && i < app->lefts; ++i, at = strchr(at, '\n') ? strchr(at, '\n') + 1 : NULL) {
+        const char* const* files = NULL;
+        char* data;
+        left_paths(at, old, now, sizeof old);
+        data = snx_format("%s_data", old);
+        if (!snx_is_dir(old) && data && snx_is_dir(data)) { /* a game laid out beside others */
+            snprintf(what, sizeof what,
+                     snx_tr("Not moved: run it from its dump once, which makes %s, then move its saves "
+                            "(docs/DEPRECATIONS.md)"),
+                     now);
+            gui_cleaned_add(done, false, old, what);
+            free(data);
+            continue;
+        }
+        free(data);
+        if (!strcmp(last_part(old), "gui") && snx_is_dir(old))
+            files = config && !strcmp(now, config) ? only[0] : state && !strcmp(now, state) ? only[1] : NULL;
+        moves += gui_move_entries(done, old, now, files, apply);
+        for (k = SNX_USER_CONFIG; games && !strcmp(old, games) && k <= SNX_USER_CACHE; ++k) {
+            char *from = snx_user_path(old, k), *to = snx_user_path(now, k);
+            if (from && to && strcmp(from, old) && strcmp(to, now))
+                moves += gui_move_entries(done, from, to, NULL, apply);
+            else if (from && strcmp(from, old) && snx_path_exists(from)) { /* recompiled/ is not in the data folder */
+                snprintf(what, sizeof what,
+                         snx_tr("Not moved: %s is not in the data folder, which these settings go by"), now);
+                gui_cleaned_add(done, false, from, what);
+            }
+            free(from);
+            free(to);
+        }
+    }
+    free(games);
+    free(config);
+    free(state);
+    return moves;
+}
+/* App's Move old files: what it would move, in a box (GUI_ASK_MOVE); nothing left, said; nothing that can move, the
+   box of entries saying why */
+static void move_row(App* app) {
+    GuiCleaned plan = {0};
+    int moves;
+    left_behind(app);
+    app_values(app);
+    moves = move_old(app, &plan, false);
+    if (!plan.count) {
+        snprintf(app->editor.note, sizeof app->editor.note, "%s", snx_tr("Nothing left by an older version"));
+        return;
+    }
+    if (!moves) {
+        gui_cleaned_free(&app->cleaned);
+        app->cleaned = plan;
+        app->report_move = true;
+        app->cleaned_shown = true;
+        app->files_top = 0;
+        snprintf(app->editor.note, sizeof app->editor.note, snx_tr("None of the %d can move: the box says why"),
+                 plan.count);
+        return;
+    }
+    snprintf(app->ask_line, sizeof app->ask_line,
+             plan.count > moves ? snx_tr("Move old files? %d move, %d stay where they are")
+                                : snx_tr("Move old files? %d move"),
+             moves, plan.count - moves);
+    gui_cleaned_free(&plan);
+    gui_confirm_open(&app->confirm, GUI_ASK_MOVE, false);
 }
 /* App's row: what it would take out, in a box (GUI_ASK_CLEAN), else that there is nothing */
 static void clean_row(App* app) {
@@ -6336,6 +6441,18 @@ static void change_answer(App* app, GuiAsk ask, bool taken) {
                  changed > 1 ? snx_tr("%d settings back to their defaults") : snx_tr("%d setting back to its default"),
                  changed);
         keep_settings(app); /* a save that fails says so over the count */
+    } else if (ask == GUI_ASK_MOVE) { /* done: what it did over the screen, and the menu as the files are now */
+        int moved;
+        gui_cleaned_free(&app->cleaned);
+        moved = move_old(app, &app->cleaned, true);
+        app->report_move = true;
+        app->cleaned_shown = app->cleaned.count > 0;
+        app->files_top = 0;
+        snprintf(app->editor.note, sizeof app->editor.note, snx_tr("%d moved, %d not"), moved,
+                 app->cleaned.count - app->cleaned.done);
+        left_behind(app);
+        app->games_stamp = 0; /* Games lists them again where they are */
+        app_values(app);
     } else if (ask == GUI_ASK_PLACES)
         places_reset(app);
     else if (ask == GUI_ASK_PLACE)
@@ -7805,6 +7922,27 @@ static char* shipped_themes(const char* program_dir) {
     free(beside);
     return snx_path_join(program_dir, "../share/scarletnx/themes");
 }
+#ifndef SDL_PLATFORM_ANDROID
+/* where the menu runs from and keeps its files, which need no window: the drivers' folder (self's, else this
+   program's), the data folder, a build tree's checkout, the folders by them and the shipped themes */
+static bool paths_start(App* app, const char* self) {
+    app->cwd = SDL_GetCurrentDirectory();
+    app->drivers = self ? snx_dirname(self) : SDL_GetBasePath() ? snx_strdup(SDL_GetBasePath()) : NULL;
+    if (!app->drivers) { /* SDL_GetBasePath's failure */
+        char why[256];
+        SDL_strlcpy(why, SDL_GetError(), sizeof why);
+        return SDL_SetError(snx_tr("Cannot find the folder ScarletNX runs from: %s"), why);
+    }
+    app->data_dir = snx_data_dir(app->drivers);
+    if (!app->data_dir) app->data_dir = snx_strdup(app->cwd ? app->cwd : ".");
+    app->checkout = snx_checkout(GUI_CHECKOUT, GUI_BUILD, app->drivers);
+    app->home_dir = snx_strdup(app->data_dir);
+    app->place_row = -1;
+    places_apply(app); /* recompiled/, themes/, work/ and the keys, by the data folder */
+    app->themes_dirs[1] = shipped_themes(app->drivers);
+    return true;
+}
+#endif
 static bool initialize(App* app, const char* self) {
     SDL_WindowFlags flags;
     memset(app, 0, sizeof(*app));
@@ -7849,8 +7987,8 @@ static bool initialize(App* app, const char* self) {
     }
     app->process = gui_process_create();
     if (!app->process) return SDL_SetError("%s", snx_tr("Cannot start the menu: out of memory"));
-    app->cwd = SDL_GetCurrentDirectory();
 #ifdef SDL_PLATFORM_ANDROID
+    app->cwd = SDL_GetCurrentDirectory();
     app->drivers = gui_android_libraries() ? snx_strdup(gui_android_libraries()) : NULL;
     if (!app->drivers) return SDL_SetError("%s", snx_tr("Cannot find the folder of the app's libraries"));
     /* the app's own storage: no FUSE between it and the drivers, as the shared storage has */
@@ -7865,21 +8003,13 @@ static bool initialize(App* app, const char* self) {
         app->menu_old = sdl ? snx_strdup(sdl) : NULL;
         SDL_free(sdl);
     }
-#else
-    app->drivers = self ? snx_dirname(self) : SDL_GetBasePath() ? snx_strdup(SDL_GetBasePath()) : NULL;
-    if (!app->drivers) { /* SDL_GetBasePath's failure */
-        char why[256];
-        SDL_strlcpy(why, SDL_GetError(), sizeof why);
-        return SDL_SetError(snx_tr("Cannot find the folder ScarletNX runs from: %s"), why);
-    }
-    app->data_dir = snx_data_dir(app->drivers);
-    if (!app->data_dir) app->data_dir = snx_strdup(app->cwd ? app->cwd : ".");
-    app->checkout = snx_checkout(GUI_CHECKOUT, GUI_BUILD, app->drivers);
-#endif
     app->home_dir = snx_strdup(app->data_dir);
     app->place_row = -1;
     places_apply(app); /* recompiled/, themes/, work/ and the keys, by the data folder */
     app->themes_dirs[1] = shipped_themes(app->drivers);
+#else
+    if (!paths_start(app, self)) return false;
+#endif
     gui_console_init(&app->console, 78, 17);
 #ifdef SDL_PLATFORM_ANDROID
     SDL_AddEventWatch(lifecycle, app);
@@ -7887,7 +8017,8 @@ static bool initialize(App* app, const char* self) {
     layout(app);
     return true;
 }
-static void cleanup(App* app) {
+/* what the menu holds, let go; SDL itself left as it is (cleanup's) */
+static void forget(App* app) {
 #ifdef SDL_PLATFORM_ANDROID
     SDL_RemoveEventWatch(lifecycle, app);
     gui_android_ran(NULL); /* the run goes with the menu */
@@ -7938,6 +8069,9 @@ static void cleanup(App* app) {
     SDL_DestroyTexture(app->font);
     SDL_DestroyRenderer(app->renderer);
     SDL_DestroyWindow(app->window);
+}
+static void cleanup(App* app) {
+    forget(app);
     SDL_Quit();
 }
 /* the settings, its picks and its game folders in a file each */
@@ -7945,7 +8079,8 @@ static char* settings_path(const char* config) { return config ? snx_path_join(c
 /* the menu's own files, in its folders of them (menu_folder) alone: an older version's elsewhere are listed by
    left_behind, never read, and with none here the menu starts from its defaults */
 static void open_files(App* app) {
-    char *prefs = menu_folder(app, SNX_USER_STATE, true), *config = menu_folder(app, SNX_USER_CONFIG, true);
+    char *prefs = menu_folder(app, SNX_USER_STATE, !app->look_only),
+         *config = menu_folder(app, SNX_USER_CONFIG, !app->look_only);
     if (prefs) recent_open(app, snx_path_join(prefs, "recent.txt"));
     if (prefs) app->run_log = snx_path_join(prefs, "last-run.log");
     app->settings_file = settings_path(config);
@@ -7969,6 +8104,50 @@ const char* snx_menu_language(int i, const char** name) {
     *name = snx_gui_languages[i].name;
     return snx_gui_languages[i].code;
 }
+#if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
+/* Move old files without the menu, to out: each entry and what it does or would, then how many; with apply, done.
+   0, or 1 when one could not be moved; 2 when the folders cannot be found */
+static int migrate(const char* self, bool apply, FILE* out) {
+    App app;
+    char file[4400], what[4400];
+    const char* at;
+    bool ok;
+    int moves, rc;
+    memset(&app, 0, sizeof app);
+    snx_tr_languages(snx_gui_languages, snx_gui_language_count);
+    app.look_only = !apply;
+    if (!paths_start(&app, self)) {
+        fprintf(stderr, "scarletnx: %s\n", SDL_GetError());
+        forget(&app);
+        return 2;
+    }
+    open_files(&app); /* the folders the menu picked, which tell where things go */
+    left_behind(&app);
+    moves = move_old(&app, &app.cleaned, apply);
+    for (at = app.cleaned.text; at;) {
+        at = gui_cleaned_entry(at, &ok, file, what, sizeof file);
+        fprintf(out, "%s: %s\n", file, what);
+    }
+    if (!app.cleaned.count)
+        snprintf(what, sizeof what, "%s", snx_tr("Nothing left by an older version"));
+    else if (!apply)
+        snprintf(what, sizeof what, snx_tr("%d to move, %d staying: --migrate=yes moves them"), moves,
+                 app.cleaned.count - moves);
+    else
+        snprintf(what, sizeof what, snx_tr("%d moved, %d not"), moves, app.cleaned.count - app.cleaned.done);
+    fprintf(out, "%s\n", what);
+    rc = apply && app.cleaned.done < app.cleaned.count;
+    forget(&app);
+    return rc;
+}
+int snx_gui_migrate(const char* self, const char* option) {
+    if (!strcmp(option, "--migrate") || !strcmp(option, "--migrate=yes"))
+        return migrate(self, option[9] == '=', stdout);
+    fprintf(stderr, "scarletnx: %s is not --migrate (it says what would move) or --migrate=yes (it moves it)\n",
+            option);
+    return 2;
+}
+#endif
 int snx_gui_main(const char* self) {
     App app;
     if (!initialize(&app, self)) {

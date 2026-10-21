@@ -388,9 +388,18 @@ An older version made its games in the data folder's `games/` (`recompiled/` now
 kept a game's files side by side in `games/` (`games/Game`, `Game_code.so`, `Game_data/`,
 `Game.ini`), the menu's in the data folder's `gui/`, outside Linux the rest in the data folder itself, a portable
 copy's in a `games/` beside the program, and a build tree's `games/`, `work/` and keys in its checkout. This one moves
-none of it: as long as it is there, the menu lists each folder and where it goes now, the driver says so on each run,
-and an older game runs where it is, its run saying where its folder goes.
-[DEPRECATIONS](DEPRECATIONS.md) says how to move them.
+none of it by itself: as long as it is there, the menu lists each folder and where it goes now, the driver says so on
+each run, and an older game runs where it is, its run saying where its folder goes. Asked, it moves them:
+
+```
+./build/scarletnx --migrate       # each entry a line and where it would go; nothing is touched
+./build/scarletnx --migrate=yes   # moved, the same lines; Settings > App > Move old files in the menu
+```
+
+Each entry of an older folder goes into the folder this version keeps it in, the data folder's `games/` with its games'
+settings, logs and caches in the config, state and cache folders; one already there stays, and one on another disk is
+not moved, each said with both paths, the status 1. A game laid out beside the others is not moved by name: it moves
+as [DEPRECATIONS](DEPRECATIONS.md) says.
 
 ## Users
 

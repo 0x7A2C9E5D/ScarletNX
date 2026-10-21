@@ -457,6 +457,7 @@ static int remove_one(const char* path, int dir) {
     return (dir ? rmdir(path) : unlink(path)) != 0;
 #endif
 }
+int snx_remove_empty_dir(const char* path) { return !snx_is_dir(path) || snx_is_link(path) || remove_one(path, 1); }
 int snx_remove_tree(const char* path) {
     char **names, *p;
     size_t i, n;

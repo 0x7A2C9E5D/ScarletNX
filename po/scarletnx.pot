@@ -74,6 +74,45 @@ msgstr ""
 msgid "[Deprecated] taken out"
 msgstr ""
 
+#: src/gui/clean.c
+#, c-format
+msgid "Stays: %s is there"
+msgstr ""
+
+#: src/gui/clean.c
+#, c-format
+msgid "Not moved: %s is on another disk"
+msgstr ""
+
+#: src/gui/clean.c
+#, c-format
+msgid "Not moved to %s: %s"
+msgstr ""
+
+#: src/gui/clean.c
+#, c-format
+msgid "Moved to %s"
+msgstr ""
+
+#: src/gui/clean.c
+#, c-format
+msgid "Moves to %s"
+msgstr ""
+
+#: src/gui/clean.c
+#, c-format
+msgid "Not moved: %s could not be made: %s"
+msgstr ""
+
+#: src/gui/clean.c
+#, c-format
+msgid "Not moved: it cannot be read: %s"
+msgstr ""
+
+#: src/gui/clean.c
+msgid "Taken away: empty now"
+msgstr ""
+
 #: src/gui/editor.c
 msgid "Select to pick it, or type it as #RRGGBB"
 msgstr ""
@@ -473,6 +512,11 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "Move old files: %d done, %d not"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "Clean old settings: %d done, %d not"
 msgstr ""
 
@@ -546,6 +590,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Take it off"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Move"
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -851,6 +899,14 @@ msgid "The settings the runtime and the launcher no longer read, taken out once 
 msgstr ""
 
 #: src/gui/main.c
+msgid "Move old files"
+msgstr ""
+
+#: src/gui/main.c
+msgid "What an older version left where this one no longer looks, moved where it keeps it once asked"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "%s of Auto: %dx"
 msgstr ""
@@ -876,6 +932,15 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Defaults"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%d left"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Nothing left"
 msgstr ""
 
 #: src/gui/main.c
@@ -1593,6 +1658,35 @@ msgid "Took out %s"
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "Not moved: run it from its dump once, which makes %s, then move its saves (docs/DEPRECATIONS.md)"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not moved: %s is not in the data folder, which these settings go by"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Nothing left by an older version"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "None of the %d can move: the box says why"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Move old files? %d move, %d stay where they are"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Move old files? %d move"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Nothing to clean: no [Deprecated] in a game's .ini, no old keys"
 msgstr ""
 
@@ -1648,6 +1742,11 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "%d setting back to its default"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%d moved, %d not"
 msgstr ""
 
 #: src/gui/main.c
@@ -1960,6 +2059,11 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "Cannot find the folder ScarletNX runs from: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "Cannot make the menu's font: %s"
 msgstr ""
 
@@ -1972,12 +2076,12 @@ msgid "Cannot find the folder of the app's libraries"
 msgstr ""
 
 #: src/gui/main.c
-#, c-format
-msgid "Cannot find the folder ScarletNX runs from: %s"
+msgid "No user shown: out of memory"
 msgstr ""
 
 #: src/gui/main.c
-msgid "No user shown: out of memory"
+#, c-format
+msgid "%d to move, %d staying: --migrate=yes moves them"
 msgstr ""
 
 #: src/gui/model.c

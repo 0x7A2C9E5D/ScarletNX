@@ -132,7 +132,11 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   (only while the runtime lists its settings) and those of `app.ini` the menu does not know. A box
   over the screen then lists each file and what was done to it, or why not, Up/Down and the wheel going over those
   that do not fit, until another key closes it;
-  Share log lists them too. A group of settings shows
+  Share log lists them too. **Move old files** (its value how many folders an older version left) asks first, with
+  how many entries would move and how many stay, then moves what *Left by older versions* lists an entry at a time
+  (`scarletnx --migrate=yes` without the menu, [USAGE](USAGE.md#folders)), the same box saying what moved and why the
+  rest did not: one already there, one on another disk, a game laid out beside others, which moves from its dump.
+  A group of settings shows
   a row each, its help above, Left/Right going round its values, Enter typing one. A setting not picked shows the runtime's default and `[default]` (*Off [default]*):
   the run takes the game's `.ini`'s, which starts as that; one picked goes to every
   Switch run as `--key=value`, over the `.ini` ([USAGE](USAGE.md)), and is kept for every game:

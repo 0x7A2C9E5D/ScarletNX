@@ -36,6 +36,8 @@ int snx_is_link(const char* path);
 int snx_path_exists(const char* path);
 int snx_mkdirs(const char* path);
 int snx_remove_tree(const char* path);
+/* the folder at path taken away when it is empty, and only then (0); nonzero, and nothing touched, when it is not */
+int snx_remove_empty_dir(const char* path);
 int snx_copy_file(const char* src, const char* dst);
 /* size bytes of src from offset into a new dst, in pieces: never the whole range in memory */
 int snx_copy_file_range(const char* src, SnxU64 offset, SnxU64 size, const char* dst);

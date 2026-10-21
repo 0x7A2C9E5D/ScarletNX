@@ -37,6 +37,15 @@ int snx_switch_main(int argc, char** argv) {
     snx_menu = snx_gui_main;
 #endif
     if (argc > 1 && !strcmp(argv[1], "--mcp")) return snx_mcp(argc, argv);
+#if defined(SNX_WITH_GUI) && !defined(__ANDROID__) && !defined(SNX_MENU_THEN_GAME)
+    if (argc > 1 && !strncmp(argv[1], "--migrate", 9) && (!argv[1][9] || argv[1][9] == '=')) {
+        if (argc > 2) {
+            fprintf(stderr, "scarletnx: %s takes nothing after it: %s\n", argv[1], argv[2]);
+            return 2;
+        }
+        return snx_gui_migrate(argv[0], argv[1]);
+    }
+#endif
     result = snx_driver(argc, argv);
     if (result >= 0) return result;
 #ifdef SNX_MENU_THEN_GAME

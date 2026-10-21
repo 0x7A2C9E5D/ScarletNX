@@ -1513,6 +1513,110 @@ msgstr "已去掉 %s"
 msgid "Cleaned: %d done, %d not"
 msgstr "已清理：%d 项完成，%d 项未完成"
 
+#: src/gui/clean.c
+#, c-format
+msgid "Stays: %s is there"
+msgstr "保留：%s 已存在"
+
+#: src/gui/clean.c
+#, c-format
+msgid "Not moved: %s is on another disk"
+msgstr "未移动：%s 在另一个磁盘上"
+
+#: src/gui/clean.c
+#, c-format
+msgid "Not moved to %s: %s"
+msgstr "未移动到 %s：%s"
+
+#: src/gui/clean.c
+#, c-format
+msgid "Moved to %s"
+msgstr "已移动到 %s"
+
+#: src/gui/clean.c
+#, c-format
+msgid "Moves to %s"
+msgstr "将移动到 %s"
+
+#: src/gui/clean.c
+#, c-format
+msgid "Not moved: %s could not be made: %s"
+msgstr "未移动：无法创建 %s：%s"
+
+#: src/gui/clean.c
+#, c-format
+msgid "Not moved: it cannot be read: %s"
+msgstr "未移动：无法读取：%s"
+
+#: src/gui/clean.c
+msgid "Taken away: empty now"
+msgstr "已移除：现在为空"
+
+#: src/gui/main.c
+#, c-format
+msgid "Move old files: %d done, %d not"
+msgstr "移动旧文件：%d 项完成，%d 项未完成"
+
+#: src/gui/main.c
+msgid "Move"
+msgstr "移动"
+
+#: src/gui/main.c
+msgid "Move old files"
+msgstr "移动旧文件"
+
+#: src/gui/main.c
+msgid "What an older version left where this one no longer looks, moved where it keeps it once asked"
+msgstr "旧版本留在本版本不再读取之处的内容，确认后移到本版本存放的位置"
+
+#: src/gui/main.c
+#, c-format
+msgid "%d left"
+msgstr "剩余 %d 项"
+
+#: src/gui/main.c
+msgid "Nothing left"
+msgstr "没有剩余"
+
+#: src/gui/main.c
+#, c-format
+msgid "Not moved: run it from its dump once, which makes %s, then move its saves (docs/DEPRECATIONS.md)"
+msgstr "未移动：从转储运行一次以创建 %s，再移动其存档（docs/DEPRECATIONS.md）"
+
+#: src/gui/main.c
+#, c-format
+msgid "Not moved: %s is not in the data folder, which these settings go by"
+msgstr "未移动：%s 不在数据文件夹中，这些设置以它为准"
+
+#: src/gui/main.c
+msgid "Nothing left by an older version"
+msgstr "旧版本没有留下任何内容"
+
+#: src/gui/main.c
+#, c-format
+msgid "None of the %d can move: the box says why"
+msgstr "%d 项都无法移动：框中列出原因"
+
+#: src/gui/main.c
+#, c-format
+msgid "Move old files? %d move, %d stay where they are"
+msgstr "移动旧文件？%d 项移动，%d 项保留原处"
+
+#: src/gui/main.c
+#, c-format
+msgid "Move old files? %d move"
+msgstr "移动旧文件？%d 项移动"
+
+#: src/gui/main.c
+#, c-format
+msgid "%d moved, %d not"
+msgstr "已移动 %d 项，%d 项未移动"
+
+#: src/gui/main.c
+#, c-format
+msgid "%d to move, %d staying: --migrate=yes moves them"
+msgstr "将移动 %d 项，%d 项保留：--migrate=yes 会移动它们"
+
 #: src/gui/main.c
 #, c-format
 msgid "%d settings back to their defaults"

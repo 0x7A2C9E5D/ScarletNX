@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* Settings > App's Clean old settings, without SDL: the [Deprecated] section the runtime gives a game's .ini for the
-   keys it no longer reads, taken out. Every file is an entry of what was done, or of why it was not */
+/* Settings > App's Clean old settings and Move old files, without SDL: the [Deprecated] section the runtime gives a
+   game's .ini for the keys it no longer reads, taken out; what an older version left where this one no longer looks,
+   moved where it keeps it. Every file is an entry of what was done, or of why it was not */
 #ifndef SNX_GUI_CLEAN_H
 #define SNX_GUI_CLEAN_H
 #include <stdbool.h>
@@ -22,4 +23,9 @@ void gui_cleaned_add(GuiCleaned* done, bool ok, const char* file, const char* wh
 /* entry at's fields; the next entry, NULL after the last */
 const char* gui_cleaned_entry(const char* at, bool* ok, char* file, char* what, size_t size);
 void gui_cleaned_free(GuiCleaned* done);
+/* Move old files, an entry at a time: each entry of the folder old (old itself when it is a file) into the folder now,
+   made when it is not there. One already in now stays where it is, and one on another disk than now is not moved,
+   each said with both paths; only, NULL-terminated, names the entries to move (NULL: every one). With apply false
+   nothing is touched and the entries say what would move; with it, old goes once it is empty. How many move */
+int gui_move_entries(GuiCleaned* done, const char* old, const char* now, const char* const* only, bool apply);
 #endif

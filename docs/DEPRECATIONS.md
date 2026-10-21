@@ -48,6 +48,9 @@ renderer=opengl
 | A game's Account saves in `<id>_data/save/user` (before there were other users) or, with none there, in `save/system` (the versions that read the save type from a byte that is always 0) | [filesystem] a folder of Account saves per user | `save/user.<uid>`, here the uid `0123456789abcdeffedcba9876543210`'s, user 1's without a users.ini that gives it another ([USAGE](USAGE.md#users)) | played where they are while that uid has no folder, the game's log and stderr naming both folders once a run; with `save/user` and the user's folder both there the game stops, for you to keep one |
 | The data folder's `games/` of recompiled games, `[folders] games =` in `app.ini`, the CMake option `SNX_GAMES_DIR` | [gui] Recompiled games go to recompiled/, games/ still read | `recompiled/`, the dumps in `dumps/` beside it; `[folders] recompiled =`; `SNX_RECOMPILED_DIR` | the launcher lists `games/` as it opens and still lists and runs its games, the driver says so on stderr; `app.ini` is written again once, said; CMake says so as it configures |
 
+Settings > App > Move old files in the launcher, or `scarletnx --migrate=yes`, moves the rest of these, an entry at a
+time, each to the folder its line names; `scarletnx --migrate` says first what would move ([USAGE](USAGE.md#folders)).
+
 To move a game an older version laid out beside the others: run it from its dump once, which makes `games/<id>/`;
 move its saves, `<Game>_data/save/` and `<Game>_data/sdmc/`, into `games/<id>/<id>_data/`, and its settings,
 `<Game>.ini`, to `<id>.ini` where the table in [USAGE](USAGE.md#folders) says; then delete the older files. The
