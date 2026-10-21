@@ -583,6 +583,22 @@ msgid "Language"
 msgstr "Idioma"
 
 #: src/gui/main.c
+msgid "Animations"
+msgstr "Animações"
+
+#: src/gui/main.c
+msgid "A screen fading in, a box's shade coming and going, 0.15 s each. Off: at once"
+msgstr "Uma tela surgindo aos poucos, a sombra de uma caixa indo e vindo, 0,15 s cada. Desligado: na hora"
+
+#: src/gui/main.c
+msgid "Off"
+msgstr "Desligado"
+
+#: src/gui/main.c
+msgid "On"
+msgstr "Ligado"
+
+#: src/gui/main.c
 msgid "Install"
 msgstr "Instalação"
 

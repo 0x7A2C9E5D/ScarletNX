@@ -553,6 +553,7 @@ int main(void) {
         free(self);
     }
     assert(!strcmp(app.theme.id, "yorha") && app.theme.dialog == GUI_DIALOG_YORHA);
+    app.animations_off = true; /* each page read as it settles, not as it fades in */
     open_files(&app);
     test_first(&app);
     test_users(&app);

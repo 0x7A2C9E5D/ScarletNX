@@ -92,7 +92,7 @@ enum { GUI_PLACE_DATA, GUI_PLACE_GAMES, GUI_PLACE_WORK, GUI_PLACES };
 #define SNX_GUI_PLAYERS  8     /* Controllers' players, as the runtime's gamepad_p<N>_ keys */
 /* the App screen's values, as its rows show them, and the game folders' (recompiled/ first) */
 typedef struct {
-    char theme[64], text[16], language[64], folders[32], places[32], moves[32];
+    char theme[64], text[16], language[64], animations[16], folders[32], places[32], moves[32];
     char folder[GUI_FOLDERS_MAX + 2][16]; /* recompiled/, dumps/, then the player's folders */
     char place[GUI_PLACES][64];
 } GuiAppForm;
@@ -234,6 +234,12 @@ typedef struct {
     GuiCleaned cleaned; /* what it did, in a box over the screen while cleaned_shown, until a key closes it */
     bool cleaned_shown;
     bool report_move; /* the box shows what Move old files did, not Clean old settings */
+    /* app.ini's animations: a screen comes in from the page's colour and a box's shade comes and goes, GUI_FADE_MS
+       each; with it off (0) each shows at once */
+    bool animations_off;
+    unsigned screen_was; /* the screen drawn last (screen_mark), for when another comes */
+    bool boxed_was;      /* a box over it then */
+    Uint64 switch_ms, box_ms;
     bool look_only; /* scarletnx --migrate, =yes left out: nothing is written, app.ini's rewrite of an older key too */
     int files_top, files_shown; /* the box of files over the screen (render_files): its first file, and how many */
     char* folders[GUI_FOLDERS_MAX];     /* the player's game folders, listed after recompiled/ and dumps/ */
@@ -664,6 +670,7 @@ static int app_save(App* app) {
         n += snprintf(text + n, size - (size_t)n, "text_size = auto\n");
     n += snprintf(text + n, size - (size_t)n, "language = %s\n",
                   app->language ? snx_gui_languages[app->language - 1].code : "auto");
+    n += snprintf(text + n, size - (size_t)n, "animations = %d\n", !app->animations_off);
     /* Folders' section once one is picked; an empty key is the default */
     if (app->place[GUI_PLACE_DATA] || app->place[GUI_PLACE_GAMES] || app->place[GUI_PLACE_WORK]) {
         n += snprintf(text + n, size - (size_t)n, "[folders]\n");
@@ -719,6 +726,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
     char* places[GUI_PLACES] = {NULL, NULL, NULL};
     const char* const* dirs = (const char* const*)app->themes_dirs;
     int scale = app->menu.text_size, language = app->language, n = 0, count = 0, moved = 0;
+    bool still = app->animations_off;
     SnxIni ini;
     if (size) bad[0] = 0;
     if (renamed_size) renamed[0] = 0;
@@ -764,6 +772,11 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
                 scale = (int)number;
                 continue;
             }
+        } else if (!strcmp(ini.section, "app") && !strcmp(key, "animations")) {
+            if (!strcmp(value, "0") || !strcmp(value, "1")) {
+                still = !strcmp(value, "0");
+                continue;
+            }
         } else if (!strcmp(ini.section, "app") && !strcmp(key, "language")) {
             int found = snx_tr_find(value);
             if (!strcmp(value, "auto") || found >= 0) {
@@ -789,6 +802,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
         app->language = language;
         language_apply(app);
     }
+    if (apply) app->animations_off = still;
     for (i = 0; i < GUI_PLACES; ++i) {
         if (apply && (places[i] ? !app->place[i] || strcmp(places[i], app->place[i]) : app->place[i] != NULL)) {
             free(app->place[i]);
@@ -1261,6 +1275,16 @@ static void render_steps(App* app) {
         text(app, 1, app->rows - 1, snx_tr(SAY_ABORT), soft);
 }
 /* the whole window darkened, alpha of 255, the cutout beside the text too: the fades, and a box over the screen */
+#define GUI_FADE_MS 150 /* a screen's fade in, a box's shade coming or going */
+static void shade(App* app, Uint8 alpha);
+/* how far a fade from at is, 0 to GUI_FADE_MS long: 1 done (or none: animations off, never started) */
+static float faded(const App* app, Uint64 at) {
+    Uint64 now = now_ms(app);
+    if (app->animations_off || !at || now >= at + GUI_FADE_MS) return 1.0f;
+    return (float)(now > at ? now - at : 0) / (float)GUI_FADE_MS;
+}
+/* a box's shade over the screen under it, coming in as the box opens */
+static void box_shade(App* app) { shade(app, (Uint8)(128 * faded(app, app->box_ms))); }
 static void shade(App* app, Uint8 alpha) {
     static const GuiRgb black = {0, 0, 0};
     SDL_Rect safe;
@@ -1270,6 +1294,37 @@ static void shade(App* app, Uint8 alpha) {
     SDL_SetRenderViewport(app->renderer, NULL);
     fill(app, 0, 0, (float)width, (float)height, black, alpha);
     SDL_SetRenderViewport(app->renderer, &safe);
+}
+/* the screen as one number, which another screen changes: a tab, a form, a group, a load's screen, the setup's page;
+   never 0, which screen_was holds before the first frame */
+static unsigned screen_mark(const App* app) {
+    return (unsigned)app->editing | (unsigned)app->form << 1 | (unsigned)app->menu.view << 5 |
+           (unsigned)app->setup_on << 9 | (unsigned)app->setup_page << 10 | (unsigned)app->group << 16 |
+           (unsigned)(app->page + 1) << 22 | 1u << 31;
+}
+/* what changed since the last frame: a screen come, whose fade starts now, a box opened or closed, whose shade does */
+static void fades_mark(App* app) {
+    unsigned mark = screen_mark(app);
+    bool boxed = app->confirm.shown || app->sizes_shown || app->users_shown || app->addons_shown ||
+                 app->cleaned_shown || app->left_shown;
+    if (mark != app->screen_was && app->screen_was) app->switch_ms = SDL_max(now_ms(app), 1);
+    if (boxed != app->boxed_was) app->box_ms = SDL_max(now_ms(app), 1);
+    app->screen_was = mark;
+    app->boxed_was = boxed;
+}
+/* over the frame drawn: the new screen coming in from the page's colour, a box's shade going once it closed */
+static void fades_draw(App* app) {
+    float in = faded(app, app->switch_ms), out = faded(app, app->box_ms);
+    SDL_Rect safe;
+    int width, height;
+    if (in < 1.0f) {
+        SDL_GetRenderViewport(app->renderer, &safe);
+        SDL_GetRenderOutputSize(app->renderer, &width, &height);
+        SDL_SetRenderViewport(app->renderer, NULL);
+        fill(app, 0, 0, (float)width, (float)height, app->theme.page, (Uint8)(255 * (1.0f - in)));
+        SDL_SetRenderViewport(app->renderer, &safe);
+    }
+    if (out < 1.0f && !app->boxed_was) shade(app, (Uint8)(128 * (1.0f - out)));
 }
 /* the screen fading in from black, or the menu or the run fading out to it */
 static void overlay(App* app) {
@@ -1360,7 +1415,7 @@ static int pane(App* app, GuiRect r, const char* label) {
 }
 /* the box over the darkened screen, on the page colour whatever the theme's boxes, so nothing shows through it */
 static int over_box(App* app, GuiRect r, const char* label) {
-    shade(app, 128);
+    box_shade(app);
     fill_rect(app, r, app->theme.page);
     return pane(app, r, label);
 }
@@ -1630,7 +1685,7 @@ static void render_ask(App* app) {
     const char* labels[2];
     char second[96];
     int count = ask_place(app, &c, labels, second, sizeof second);
-    shade(app, 128); /* over another screen */
+    box_shade(app); /* over another screen */
     choices_draw(app, &c, ask_question(app), NULL, labels, count, app->confirm.selected);
 }
 /* the boot's splash: a drawing of Wimsy's, picked at random, drawn a third of the window's shorter side on a theme's
@@ -3326,6 +3381,9 @@ static const GuiThemeKey app_keys[] = {
      SNX_TR_NOOP("Picked in a box, kept once said so. Auto fits the screen, its parts are smaller")},
     {"", SNX_TR_NOOP("Language"), GUI_KEY_ACTION, offsetof(GuiAppForm, language), sizeof(((GuiAppForm*)0)->language),
      NULL, 0, SNX_TR_NOOP("The menu's words. Auto: the system's language, English when the menu has none of its")},
+    {"", SNX_TR_NOOP("Animations"), GUI_KEY_ACTION, offsetof(GuiAppForm, animations),
+     sizeof(((GuiAppForm*)0)->animations), NULL, 0,
+     SNX_TR_NOOP("A screen fading in, a box's shade coming and going, 0.15 s each. Off: at once")},
     {"", SNX_TR_NOOP("Theme editor"), GUI_KEY_ACTION, 0, 0, NULL, 0,
      SNX_TR_NOOP("This theme's keys with a preview, saved as themes/<name>/theme.ini")},
     {"", SNX_TR_NOOP("Library"), GUI_KEY_ACTION, offsetof(GuiAppForm, folders), sizeof(((GuiAppForm*)0)->folders), NULL,
@@ -3341,6 +3399,7 @@ enum {
     GUI_APP_THEME,
     GUI_APP_TEXT,
     GUI_APP_LANGUAGE,
+    GUI_APP_ANIMATIONS,
     GUI_APP_EDITOR,
     GUI_APP_FOLDERS,
     GUI_APP_PLACES,
@@ -3377,6 +3436,7 @@ static void app_values(App* app) {
         snprintf(f->language, sizeof f->language, "%s", snx_gui_languages[app->language - 1].name);
     else /* and what it is now */
         snprintf(f->language, sizeof f->language, snx_tr("Auto: %s"), snx_gui_languages[snx_tr_language()].name);
+    snprintf(f->animations, sizeof f->animations, "%s", app->animations_off ? snx_tr("Off") : snx_tr("On"));
     if (app->folder_count)
         snprintf(f->folders, sizeof f->folders, snx_tr("recompiled/, dumps/ and %d more"), app->folder_count);
     else
@@ -4207,7 +4267,7 @@ static void render_sizes(App* app) {
     GuiChoices c;
     const char* labels[GUI_TEXT_MAX + 4];
     sizes_place(app, &c, labels);
-    shade(app, 128); /* over the App's rows */
+    box_shade(app); /* over the App's rows */
     choices_draw(app, &c, snx_tr("Text size"), NULL, labels, app->sizes.count, app->sizes.focus);
 }
 static void text_left(App* app);
@@ -4279,6 +4339,8 @@ static void app_action(App* app, int row, int step) {
     else if (row == GUI_APP_TEXT) {
         sizes_open(app);
         return;
+    } else if (row == GUI_APP_ANIMATIONS) {
+        app->animations_off = !app->animations_off;
     } else if (row == GUI_APP_LANGUAGE) {
         app->language = (app->language + (step < 0 ? snx_gui_language_count : 1)) % (snx_gui_language_count + 1);
         language_apply(app);
@@ -4299,7 +4361,8 @@ static void app_action(App* app, int row, int step) {
         if (!step) move_row(app);
         return;
     }
-    if (row == GUI_APP_THEME || row == GUI_APP_TEXT || row == GUI_APP_LANGUAGE) app_save(app);
+    if (row == GUI_APP_THEME || row == GUI_APP_TEXT || row == GUI_APP_LANGUAGE || row == GUI_APP_ANIMATIONS)
+        app_save(app);
     app_values(app);
 }
 /* saved in themes/ of the data folder, and the menu's theme from then on */
@@ -6064,6 +6127,7 @@ static void setup_pointer(App* app, float x, float y, bool click) {
 static void render(App* app) {
     layout(app);
     if (splash_shown(app)) return;
+    fades_mark(app);
     if (app->setup_on && !app->editing) {
         draw_setup(app);
         overlay(app);
@@ -6080,6 +6144,7 @@ static void render(App* app) {
     } else
         draw_screen(app);
     if (app->cleaned_shown) render_files(app, 1); /* over the menu, or the App's rows it was started from */
+    fades_draw(app);
     SDL_RenderPresent(app->renderer);
 }
 /* the game's name as its run gave it, from the step that names it, for its recent game */

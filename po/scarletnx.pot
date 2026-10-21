@@ -883,6 +883,14 @@ msgid "The menu's words. Auto: the system's language, English when the menu has 
 msgstr ""
 
 #: src/gui/main.c
+msgid "Animations"
+msgstr ""
+
+#: src/gui/main.c
+msgid "A screen fading in, a box's shade coming and going, 0.15 s each. Off: at once"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Theme editor"
 msgstr ""
 
@@ -930,6 +938,14 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "Auto: %s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Off"
+msgstr ""
+
+#: src/gui/main.c
+msgid "On"
 msgstr ""
 
 #: src/gui/main.c

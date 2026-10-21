@@ -105,7 +105,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   and a press on a controller give it that one (ESC leaves it as it was, Del makes it *Any* again); its *Button
   map* is the page above on its own keys, its A and B as its *Swap A/B* says.
   **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **Text size**, which opens
-  its box of sizes (below), **Theme editor**, which comes back to App, and **Library**: first `recompiled/`,
+  its box of sizes (below), **Animations** (On by default, `animations = 1` in `app.ini`: a screen comes in from the
+  page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Theme editor**, which comes
+  back to App, and **Library**: first `recompiled/`,
   where recompiled games go: Enter there picks another, as **Folders > Recompiled** does; at its default it stays on the
   list (the foot's Del greyed), and Del asks before a folder picked goes back to the default, only the setting
   changing. Then the player's own folders, whose games the `recompiled/` browser lists after

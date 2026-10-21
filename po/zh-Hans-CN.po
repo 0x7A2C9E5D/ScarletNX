@@ -583,6 +583,22 @@ msgid "Language"
 msgstr "语言"
 
 #: src/gui/main.c
+msgid "Animations"
+msgstr "动画"
+
+#: src/gui/main.c
+msgid "A screen fading in, a box's shade coming and going, 0.15 s each. Off: at once"
+msgstr "画面淡入、框的阴影出现与退去，各约 0.15 秒。关：立即显示"
+
+#: src/gui/main.c
+msgid "Off"
+msgstr "关"
+
+#: src/gui/main.c
+msgid "On"
+msgstr "开"
+
+#: src/gui/main.c
 msgid "Install"
 msgstr "安装"
 

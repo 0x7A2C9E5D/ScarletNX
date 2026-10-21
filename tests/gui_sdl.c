@@ -957,6 +957,8 @@ int main(int argc, char** argv) {
     assert(!strcmp(app.drivers, "/nonexistent/snx-gui-test/bin"));
     assert(!strcmp(app.theme.id, "yorha"));    /* the menu opens in YoRHa everywhere */
     app.theme = *gui_theme_builtin("default"); /* the checks below read Default's colours */
+    assert(!app.animations_off);               /* on by default; the checks read each screen as it settles */
+    app.animations_off = true;
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(SDL_PLATFORM_ANDROID)
     /* no checkout and no games/ beside the test: recompiled/ and themes/ come from the user's data folder */
     assert(!strcmp(app.data_dir, "/nonexistent/snx-gui-test/scarletnx"));
@@ -1520,7 +1522,7 @@ int main(int argc, char** argv) {
     /* App: the theme and the letters, either way round, and the theme editor, which comes back here */
     app.editor.row = 0;
     key(&app, SDLK_RETURN);
-    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 8);
+    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 9);
     {
         char first[64], line[1024];
         snprintf(first, sizeof first, "%s", app.theme.name);
@@ -1623,7 +1625,8 @@ int main(int argc, char** argv) {
         assert(strcmp(id, first_id));
         snprintf(
             expected, sizeof expected,
-            "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = 1\nlanguage = auto\n",
+            "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = 1\nlanguage = auto\n"
+            "animations = 0\n",
             id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -1650,7 +1653,7 @@ int main(int argc, char** argv) {
         pick_size(&app, 0, true);
         snprintf(expected, sizeof expected,
                  "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = auto\n"
-                 "language = auto\n",
+                 "language = auto\nanimations = 0\n",
                  first_id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -1702,7 +1705,7 @@ int main(int argc, char** argv) {
         assert(app.language == 2 && snx_tr_language() == 1 && !strcmp(app.app_form.language, "Test\303\252s"));
         snprintf(expected, sizeof expected,
                  "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = auto\n"
-                 "language = xx\n",
+                 "language = xx\nanimations = 0\n",
                  app.theme.id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -2093,6 +2096,19 @@ int main(int argc, char** argv) {
         }
 #endif
     }
+    key(&app, SDLK_DOWN);
+    /* Animations: On or Off, either way, kept in app.ini as animations = 1 or 0 */
+    assert(app.editor.row == GUI_APP_ANIMATIONS && !strcmp(app.app_form.animations, "Off"));
+    key(&app, SDLK_RIGHT);
+    assert(!app.animations_off && !strcmp(app.app_form.animations, "On"));
+    {
+        size_t size;
+        char* kept = (char*)snx_read_file(app.app_file, &size);
+        assert(kept && strstr(kept, "\nanimations = 1\n"));
+        free(kept);
+    }
+    key(&app, SDLK_RETURN);
+    assert(app.animations_off && !strcmp(app.app_form.animations, "Off")); /* the checks below read settled screens */
     key(&app, SDLK_DOWN);
     key(&app, SDLK_RIGHT); /* the editor opens with Enter only */
     assert(app.form == GUI_FORM_APP);
@@ -3419,6 +3435,67 @@ int main(int argc, char** argv) {
     key(&app, SDLK_F5);
     assert(app.sampled > 1 && app.menu.view == GUI_LOAD_NONE);
     render(&app);
+    /* animations on: another screen comes in from the page's colour, a seventh of a second; a box's shade comes as it
+       opens and goes once it closed; off, each at once */
+    {
+        GuiGamesBoxes g;
+        GuiRect b;
+        SDL_Color page = rgb(app.theme.page), was, mid;
+        int x, y;
+        app.animations_off = false;
+        app.clock = 50000;
+        render(&app); /* the menu, as it settled */
+        go_tab(&app, GUI_TAB_GAMES);
+        render(&app);
+        games_boxes(&app, &g);
+        b = list_box(&g.add, 0);
+        x = b.x;
+        y = b.y + b.h / 2; /* Add a folder's frame */
+        assert(same_colour(pixel(&app, (float)x, (float)y), page));
+        app.clock += GUI_FADE_MS / 2;
+        render(&app);
+        mid = pixel(&app, (float)x, (float)y);
+        app.clock += GUI_FADE_MS / 2;
+        render(&app);
+        was = pixel(&app, (float)x, (float)y);
+        assert(!same_colour(was, page) && !same_colour(mid, page) && !same_colour(mid, was));
+        key(&app, SDLK_TAB); /* off: the next screen at once */
+        app.animations_off = true;
+        render(&app);
+        app.animations_off = false;
+        app.clock += GUI_FADE_MS;
+        render(&app);
+        assert(app.editing && app.form == GUI_FORM_SETTINGS);
+        key(&app, SDLK_ESCAPE);
+        go_tab(&app, GUI_TAB_MENU);
+        render(&app); /* the menu comes in */
+        app.clock += GUI_FADE_MS;
+        render(&app); /* and has settled */
+        {
+            GuiMenuBoxes m;
+            menu_boxes(&app, &m);
+            x = m.place.tabs.x + 1; /* the Menu tab's frame, which the box in the middle leaves */
+            y = m.place.tabs.y + m.place.tabs.h / 2;
+        }
+        was = pixel(&app, (float)x, (float)y);
+        key(&app, SDLK_ESCAPE); /* Exit? over the menu: its shade comes in */
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT);
+        render(&app);
+        assert(same_colour(pixel(&app, (float)x, (float)y), was));
+        app.clock += GUI_FADE_MS;
+        render(&app);
+        mid = pixel(&app, (float)x, (float)y);
+        assert(!same_colour(mid, was));
+        key(&app, SDLK_ESCAPE); /* Stay: the shade goes */
+        assert(!app.confirm.shown);
+        render(&app);
+        assert(same_colour(pixel(&app, (float)x, (float)y), mid));
+        app.clock += GUI_FADE_MS;
+        render(&app);
+        assert(same_colour(pixel(&app, (float)x, (float)y), was));
+        app.animations_off = true;
+        app.clock = 0;
+    }
     hides(&app, "- Games", normal);
     hides(&app, "Recent games", rgb(app.theme.soft));
     {
