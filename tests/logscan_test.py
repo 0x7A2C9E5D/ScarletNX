@@ -161,6 +161,33 @@ FATAL_ONLY = (
 """
 )
 
+# what the runtime missed, in its own formats: shaders (vk/pipeline.c, compute.c), the GPU's methods and operations
+# (gpu.c, maxwell/), the macros (maxwell/mme.c, mme_jit.c), SVCs (svc.c, svc_mem.c) and the JIT (guest_jit.c), with
+# the time stamp a comma locale writes
+MISSED = HEADER.replace('[   0.', '[   0,') + (
+    '[   0,40] jit: guest code the recompiler missed is compiled when a thread reaches it, on 4 threads. 32 pcs of '
+    'earlier runs queued\n'
+    '[   2,00] vulkan: shader 0123456789abcdef (stage 4) not translated: TEXS encoding 3, fp32 1\n'
+    '[   2,10] vulkan: shader 1111456789abcdef (stage 4) not translated: TEXS encoding 3, fp32 1\n'
+    '[   2,20] vulkan: compute 2222456789abcdef not translated: global memory base R4 not tracked at 1a0: no write '
+    'before\n'
+    '[   2,30] gpu: method 100 for class b1c0 on subchannel 2: no engine here runs that class\n'
+    '[   2,31] gpu: method 104 for class b1c0 on subchannel 2: no engine here runs that class\n'
+    '[   2,40] gpu: semaphore operation 3a400040 is unknown\n'
+    "[   2,50] gpu: a 2D blit from format c0 to ca isn't done\n"
+    '[   2,60] gpu: macro operation 7 is unknown\n'
+    '[   2,70] mme: macro 5 at word 1a0, 30 words uploaded together, hash bcbf04909857a72f: interpreted\n'
+    '[   2,71] mme: macro 6 at word 1c0, 12 words uploaded together, hash 00000000deadbeef: draw\n'
+    '[   2,80] mme: macro 5 (hash bcbf04909857a72f) is interpreted: its code is not one the compiler can follow\n'
+    '[   3,00] svc 7f (CallSecureMonitor): not implemented (x0=0 x1=0 x2=0), NotImplemented\n'
+    '[   3,10] svc 7f (CallSecureMonitor): not implemented (x0=1 x1=0 x2=0), NotImplemented\n'
+    '[   3,20] svcGetInfo 20 (sub-id 0): unknown, InvalidEnumValue\n'
+    '[   4,00] mme: 1000000 macro calls, 900000 native, 0 compiled and 100000 interpreted\n'
+    '[   4,00] mme: the macros interpreted most, by hash: bcbf04909857a72f 100000\n'
+    '[   9,00] jit: 2 batches compiled 5 pcs (1 failed, 0 still queued, 0 batches dropped by memory changes), 3 '
+    'functions, 80 instructions, 20 KiB of code, 0,10 s compiling, 32 units loaded from /home/someone/x.jitcache\n'
+)
+
 
 def check(cond, what):
     if not cond:
@@ -248,6 +275,49 @@ def main():
     check(scan(SVC_BREAK)['frames'] is None, 'no frame lines, no frames')
     md = run(['-', '--format', 'markdown'], FRAMES.encode())
     check('**Frames over 50 ms:** 8, the slowest 180 ms' in md, 'markdown frames')
+
+    m = scan(MISSED)
+    check(m['title'] == 'Some Game' and m['seconds'] == 9.0, f"a comma locale's time stamps: {m['title']!r}")
+    missed = {(g['area'], g['kind'], g['what']): g['count'] for g in m['missed']}
+    check(
+        missed
+        == {
+            ('gpu', 'shader', 'TEXS encoding 3, fp32 1'): 2,
+            ('gpu', 'compute shader', 'global memory base R4 not tracked at 1a0: no write before'): 1,
+            ('gpu', 'class', 'b1c0'): 2,
+            ('gpu', 'gpu', 'semaphore operation 3a400040 is unknown'): 1,
+            ('gpu', 'gpu', "a 2D blit from format c0 to ca isn't done"): 1,
+            ('mme', 'macro', 'bcbf04909857a72f'): 1,
+            ('mme', 'macro compile', 'bcbf04909857a72f: its code is not one the compiler can follow'): 1,
+            ('mme', 'mme', 'macro operation 7 is unknown'): 1,
+            ('cpu', 'svc', 'svc 7f (CallSecureMonitor)'): 2,
+            ('cpu', 'cpu', 'svcGetInfo 20 (sub-id 0)'): 1,
+        },
+        f'missed: {missed}',
+    )
+    check(
+        m['mme'] == {
+            'calls': '1000000 macro calls, 900000 native, 0 compiled and 100000 interpreted',
+            'interpreted_most': 'bcbf04909857a72f 100000',
+        },
+        f'mme: {m["mme"]}',
+    )
+    check(m['jit'] == {'earlier': 32, 'compiled': 5, 'failed': 1, 'queued': 0}, f'jit: {m["jit"]}')
+    check(m['warnings'] == scan(HEADER)['warnings'], f'what was missed is not a warning again: {m["warnings"]}')
+    md = run(['-', '--format', 'markdown'], MISSED.encode())
+    for want in (
+        '**What else the runtime missed:**',
+        '- **GPU:**\n  - shader not translated: `TEXS encoding 3, fp32 1` (2 shaders)',
+        '  - methods of class `b1c0`, which no engine runs (2x)',
+        '  - macro with no native form: `bcbf04909857a72f`',
+        '  - interpreted most, by hash: `bcbf04909857a72f 100000`',
+        '  - `svc 7f (CallSecureMonitor)` not implemented (2x)',
+        '  - guest code the recompiler missed, compiled at run time: 5 pcs (1 failed, 0 still queued)',
+    ):
+        check(want in md, f'markdown missed: {want!r} not in\n{md}')
+    check('someone' not in md, 'the JIT cache path is not quoted')
+    native = scan(HEADER + '[ 4.00] mme: 1000000 macro calls, 1000000 native, 0 compiled and 0 interpreted\n')
+    check(native['mme'] is None and native['missed'] == [], f'every macro native: {native["mme"]}')
 
     la = scan(LAUNCHER)
     check(

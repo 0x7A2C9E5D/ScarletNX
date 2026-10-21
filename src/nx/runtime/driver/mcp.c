@@ -650,7 +650,7 @@ done:
 /* ============================================================ the protocol */
 static const char instructions[] =
     "ScarletNX's logs and games on this machine. scan_log summarizes a game's log (how the run ended, where, the "
-    "services the runtime doesn't implement, slow frames); read_log reads parts of it by text or line; find_game "
+    "services the runtime doesn't implement, the shaders, macros and SVCs it missed, slow frames); read_log reads parts of it by text or line; find_game "
     "lists the extracted games; symbolize and disassemble read a game's code at the addresses a log names. "
     "A log's addresses match only the same game version (find_game gives it, the log's header names the log's). "
     "Nothing of a game (code, files) goes into an issue, a pull request or an edenprobe case: a case asks the "
@@ -699,7 +699,9 @@ static cJSON* tools(void) {
         "The summary of a game's .log or the launcher's Share log file: build, title ID, game version, system, GPU, how the "
         "run ended (crash, svcBreak, exception, BRK, an instruction the recompiler cannot run, fatal), the game "
         "function it is pinned on with its backtrace, "
-        "the service commands the runtime doesn't implement, warnings, the frames over 50 ms and what the slowest did, "
+        "the service commands the runtime doesn't implement, what else it missed (shaders not translated, GPU classes "
+        "and operations, macros with no native or compiled form, SVCs, guest code the JIT compiled), warnings, the "
+        "frames over 50 ms and what the slowest did, "
         "and a signature shared by every log that failed the same way.";
     static const char read_says[] =
         "Parts of a log with line numbers, never the whole of a large one: the lines holding pattern (plain text, "

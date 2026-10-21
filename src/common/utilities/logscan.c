@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* The log summary (logscan.h). The lines are matched by hand, prefix and substring, in the formats the runtime
    prints them: the header (main.c), the failure markers (crash.c, svc.c, rtapi.c, arm.c, plat_*.c), the register
-   dump and backtrace (hle/kernel/debug.c), and ipc.c's service command warnings */
+   dump and backtrace (hle/kernel/debug.c), ipc.c's service command warnings, and what the runtime missed (gap_line) */
 #include "common/utilities/logscan.h"
 #include <ctype.h>
 #include <stdint.h>
@@ -28,6 +28,10 @@ static Span skip(Span s, size_t k) { return k >= s.n ? span(s.p + s.n, 0) : span
 static int starts(Span s, const char* lit) {
     size_t n = strlen(lit);
     return s.n >= n && !memcmp(s.p, lit, n);
+}
+static int ends(Span s, const char* lit) {
+    size_t n = strlen(lit);
+    return s.n >= n && !memcmp(s.p + s.n - n, lit, n);
 }
 /* where lit is in s, or -1: memchr finds its first byte's candidates */
 static long find(Span s, const char* lit) {
@@ -88,14 +92,15 @@ static Span trim(Span s) {
 }
 static int blank(Span s) { return trim(s).n == 0; }
 
-/* "[   2.25] " before a line: its length, 0 without one, and the time in hundredths through *cs */
+/* "[   2.25] " before a line: its length, 0 without one, and the time in hundredths through *cs. The runtime prints it
+   with %f, so a library that set the process's locale makes it "[   2,25] " */
 static size_t stamp(Span s, long* cs) {
     size_t i = 1, d;
     long whole = 0, frac = 0, k;
     if (!s.n || s.p[0] != '[') return 0;
     while (i < s.n && s.p[i] == ' ') i++;
     d = dec_run(skip(s, i));
-    if (!d || d > 9 || i + d >= s.n || s.p[i + d] != '.') return 0;
+    if (!d || d > 9 || i + d >= s.n || (s.p[i + d] != '.' && s.p[i + d] != ',')) return 0;
     for (k = 0; k < (long)d; k++) whole = whole * 10 + (s.p[i + k] - '0');
     i += d + 1;
     d = dec_run(skip(s, i));
@@ -558,6 +563,147 @@ static void warning(SnxLogScan* s, Span line) {
         s->used = mark;
 }
 
+/* the number of decimal digits at the start of s, 0 without any */
+static unsigned long number(Span s) {
+    unsigned long v = 0;
+    size_t i, d = dec_run(s);
+    for (i = 0; i < d && i < 18; i++) v = v * 10 + (unsigned long)(s.p[i] - '0');
+    return v;
+}
+static void keep_line(char* raw, unsigned* len, Span line) {
+    size_t n = line.n < SNX_LOGSCAN_RAW ? line.n : SNX_LOGSCAN_RAW;
+    memcpy(raw, line.p, n);
+    *len = (unsigned)n;
+}
+
+/* A gap of kind, what its text, counted again when the same one comes back (compared as the pool keeps it, as a
+   warning is). 1: the line is taken either way */
+static int gap(SnxLogScan* s, int kind, Span what) {
+    size_t mark = s->used;
+    unsigned at = add(s, what);
+    int k;
+    if (!at) return 1;
+    for (k = 0; k < s->ngaps; k++)
+        if (s->gaps[k].kind == kind && !strcmp(snx_logscan_text(s, s->gaps[k].what), s->pool + at)) {
+            s->gaps[k].count++;
+            s->used = mark;
+            return 1;
+        }
+    if (s->ngaps < SNX_LOGSCAN_GAPS) {
+        s->gaps[s->ngaps].kind = kind;
+        s->gaps[s->ngaps].what = at;
+        s->gaps[s->ngaps].count = 1;
+        s->ngaps++;
+    } else
+        s->used = mark;
+    return 1;
+}
+/* "<a>: <b>" as one gap, for a reason that goes with the macro it is about */
+static int gap_pair(SnxLogScan* s, int kind, Span a, Span b) {
+    char text[SNX_LOGSCAN_LINE + 1];
+    int n = snprintf(text, sizeof text, "%.*s: %.*s", (int)(a.n < SNX_LOGSCAN_LINE ? a.n : SNX_LOGSCAN_LINE), a.p,
+                     (int)(b.n < SNX_LOGSCAN_LINE ? b.n : SNX_LOGSCAN_LINE), b.p);
+    return gap(s, kind, span(text, n < 0 ? 0 : (size_t)n < sizeof text ? (size_t)n : sizeof text - 1));
+}
+
+/* What the runtime missed, in the words it logs it: a shader the translator can't express (gpu/vk/pipeline.c,
+   compute.c), methods of a class no engine runs and the GPU operations it skips (gpu.c, maxwell/engines.c,
+   fermi2d.c), a macro with no native form, one the compiler can't follow and an operation the interpreter doesn't
+   know (maxwell/mme.c, mme_jit.c), an SVC with no handler or an argument it doesn't know (hle/svc/svc.c, svc_mem.c),
+   and the guest code the recompiler missed (runtime/guest_jit.c). 1 when line is one of them */
+static int gap_line(SnxLogScan* s, Span line) {
+    Span rest = line;
+    long at;
+    switch (line.p[0]) {
+        case 'v': /* "vulkan: shader <hash> (stage <n>) not translated: <why>", "vulkan: compute <hash> ..." */
+            if (!take_lit(&rest, "vulkan: ") || (at = find(rest, " not translated: ")) < 0) return 0;
+            if (starts(rest, "shader ")) return gap(s, SNX_GAP_SHADER, skip(rest, (size_t)at + 17));
+            if (starts(rest, "compute ")) return gap(s, SNX_GAP_COMPUTE, skip(rest, (size_t)at + 17));
+            return 0;
+        case 'g':
+            if (!take_lit(&rest, "gpu: ")) return 0;
+            if (take_lit(&rest,
+                         "method ")) { /* "<m> for class <c> on subchannel <n>: no engine here runs that class" */
+                at = find(rest, " for class ");
+                if (at < 0 || !ends(rest, ": no engine here runs that class")) return 0;
+                rest = skip(rest, (size_t)at + 11);
+                return gap(s, SNX_GAP_CLASS, span(rest.p, hex_run(rest)));
+            }
+            if (starts(rest, "macro ") && ends(rest, " is unknown")) return gap(s, SNX_GAP_MME, rest);
+            if (ends(rest, " is unknown") || ends(rest, " isn't done") || find(rest, " is not emulated") >= 0 ||
+                find(rest, " is skipped") >= 0)
+                return gap(s, SNX_GAP_GPU, rest);
+            return 0;
+        case 'm':
+            if (!take_lit(&rest, "mme: ")) return 0;
+            if (take_lit(&rest, "macros are interpreted: ")) /* no compiler at all */
+                return gap_pair(s, SNX_GAP_MACRO_COMPILE, cstr("every macro"), rest);
+            if (starts(rest, "macro ") && (at = find(rest, " (hash ")) > 0 && find(rest, ") is interpreted: ") > at) {
+                /* "macro <n> (hash <h>) is interpreted: <why>" */
+                Span hash = skip(rest, (size_t)at + 7);
+                hash.n = hex_run(hash);
+                return gap_pair(s, SNX_GAP_MACRO_COMPILE, hash,
+                                skip(rest, (size_t)find(rest, ") is interpreted: ") + 18));
+            }
+            if (starts(rest, "macro ") && ends(rest, ": interpreted") && (at = find(rest, ", hash ")) > 0) {
+                /* "macro <n> at word <w>, <n> words uploaded together, hash <h>: interpreted": no native form */
+                Span hash = skip(rest, (size_t)at + 7);
+                hash.n = hex_run(hash);
+                return gap(s, SNX_GAP_MACRO, hash);
+            }
+            if (dec_run(rest) && starts(skip(rest, dec_run(rest)), " macro calls, ")) {
+                keep_line(s->mme_raw, &s->mme_len, rest);
+                return 1;
+            }
+            if (starts(rest, "the macros interpreted most, by hash: ")) {
+                keep_line(s->mme_most_raw, &s->mme_most_len, skip(rest, 38));
+                return 1;
+            }
+            return 0;
+        case 's':
+            if (take_lit(&rest, "svc ") && (at = find(rest, "): not implemented")) > 0) /* "svc <n> (<name>): ..." */
+                return gap(s, SNX_GAP_SVC, span(line.p, (size_t)at + 5));
+            if (starts(line, "svcGetInfo ") && (at = find(line, ": unknown, InvalidEnumValue")) > 0)
+                return gap(s, SNX_GAP_CPU, span(line.p, (size_t)at));
+            return 0;
+        case 'j':
+            if (!take_lit(&rest, "jit: ")) return 0;
+            if (starts(rest, "guest code the recompiler missed ") && (at = find(rest, ". ")) > 0) {
+                /* "...on <n> threads. <n> pcs of earlier runs queued" */
+                rest = skip(rest, (size_t)at + 2);
+                if (!dec_run(rest) || !starts(skip(rest, dec_run(rest)), " pcs of earlier runs")) return 0;
+                s->jit_earlier = number(rest);
+                s->jit |= 1;
+                return 1;
+            }
+            if (dec_run(rest) && starts(skip(rest, dec_run(rest)), " batches compiled ")) {
+                /* "<n> batches compiled <n> pcs (<n> failed, <n> still queued, ..." */
+                rest = skip(rest, dec_run(rest) + 18);
+                s->jit_compiled = number(rest);
+                if ((at = find(rest, " pcs (")) < 0) return 0;
+                rest = skip(rest, (size_t)at + 6);
+                s->jit_failed = number(rest);
+                if ((at = find(rest, " failed, ")) >= 0) s->jit_queued = number(skip(rest, (size_t)at + 9));
+                s->jit |= 2;
+                return 1;
+            }
+            return 0;
+    }
+    return 0;
+}
+
+/* by kind, then the most first (an insertion sort: there are SNX_LOGSCAN_GAPS at most) */
+static void sort_gaps(SnxLogScan* s) {
+    int i, j;
+    for (i = 1; i < s->ngaps; i++)
+        for (j = i; j > 0; j--) {
+            SnxLogGap a = s->gaps[j - 1], b = s->gaps[j];
+            if (a.kind < b.kind || (a.kind == b.kind && a.count >= b.count)) break;
+            s->gaps[j - 1] = b;
+            s->gaps[j] = a;
+        }
+}
+
 /* A line of the report after the failure's marker: its detail lines (what, where, which thread), the pc's symbol and
    the first backtrace, up to a blank line, another marker or the thread list. 0 once the report ended */
 static int report_line(SnxLogScan* s, Span line) {
@@ -747,19 +893,6 @@ none:
     return 0;
 }
 
-/* the number of decimal digits at the start of s, 0 without any */
-static unsigned long number(Span s) {
-    unsigned long v = 0;
-    size_t i, d = dec_run(s);
-    for (i = 0; i < d && i < 18; i++) v = v * 10 + (unsigned long)(s.p[i] - '0');
-    return v;
-}
-static void keep_line(char* raw, unsigned* len, Span line) {
-    size_t n = line.n < SNX_LOGSCAN_RAW ? line.n : SNX_LOGSCAN_RAW;
-    memcpy(raw, line.p, n);
-    *len = (unsigned)n;
-}
-
 /* The renderer's frame lines (gpu/vk/renderer.c): "vulkan: a <ms> ms frame: <what it did>" for each frame over 50 ms,
    and every 600 presents "...; <n> frames over 50 ms in the last 600, the slowest <ms> ms" and "vulkan: memory used
    and budgeted: ...". 1 when line is one of them */
@@ -937,6 +1070,7 @@ void snx_logscan_line(SnxLogScan* s, const char* p, size_t n) {
             if (ipc_line(s, line)) return;
             break;
     }
+    if (gap_line(s, line)) return;
     if (!s->outcome && (find(line, "***") >= 0 || starts(line, "Unsupported ") || starts(line, "FATAL: ")) &&
         marker(line, &m)) {
         s->outcome = m.kind;
@@ -973,6 +1107,10 @@ static int from_ring(SnxLogScan* s, char (*raw)[SNX_LOGSCAN_RAW], const unsigned
 void snx_logscan_end(SnxLogScan* s) {
     int i;
     sort_ipc(s);
+    sort_gaps(s);
+    /* the macro calls' line only when some were interpreted: "..., <n> compiled and <n> interpreted" */
+    if (!ends(span(s->mme_raw, s->mme_len), " and 0 interpreted")) s->mme = add(s, span(s->mme_raw, s->mme_len));
+    s->mme_most = add(s, span(s->mme_most_raw, s->mme_most_len));
     s->noutput = from_ring(s, s->output_raw, s->output_len, s->output_seen, SNX_LOGSCAN_OUTPUT, s->output);
     s->ntail = from_ring(s, s->tail_raw, s->tail_len, s->tail_seen, SNX_LOGSCAN_TAIL, s->tail);
     for (i = 0; i < s->nslow; i++) s->slow_line[i] = add(s, span(s->slow_raw[i], s->slow_len[i]));
@@ -1107,9 +1245,20 @@ static void json_list(Buf* b, const SnxLogScan* s, const unsigned* items, int n)
     put(b, "]");
 }
 
+/* a gap's kind and the area it is in, by kind (SNX_GAP_*) */
+static const char* const gap_kinds[] = {
+    "shader", "compute shader", "class", "gpu", "macro", "macro compile", "mme", "svc", "cpu"};
+/* 0 the GPU, 1 the macros, 2 the CPU */
+static int gap_area(int kind) { return kind <= SNX_GAP_GPU ? 0 : kind <= SNX_GAP_MME ? 1 : 2; }
+/* the JIT compiled or queued guest code the recompiler missed, in this run or earlier ones */
+static int jit_missed(const SnxLogScan* s) {
+    return ((s->jit & 1) && s->jit_earlier) || ((s->jit & 2) && (s->jit_compiled || s->jit_failed || s->jit_queued));
+}
+
 char* snx_logscan_json(const SnxLogScan* s, SnxDemangle demangle) {
     static const char* const ipc_kinds[] = {"bad request", "undeclared", "unknown", "unknown control"};
     static const char* const place_kinds[] = {"", "game", "block", "runtime", "library"};
+    static const char* const area_names[] = {"gpu", "mme", "cpu"};
     Buf b = {0};
     char num[32];
     int i, n;
@@ -1209,7 +1358,45 @@ char* snx_logscan_json(const SnxLogScan* s, SnxDemangle demangle) {
         put_num(&b, s->ipc[i].count);
         put(&b, "}");
     }
-    put(&b, "], \"warnings\": [");
+    put(&b, "], \"missed\": [");
+    for (i = 0; i < s->ngaps; i++) {
+        put(&b, i ? ", {\"area\": " : "{\"area\": ");
+        json_string(&b, area_names[gap_area(s->gaps[i].kind)]);
+        put(&b, ", \"kind\": ");
+        json_string(&b, gap_kinds[s->gaps[i].kind]);
+        json_field(&b, s, "what", s->gaps[i].what, 0);
+        put(&b, ", \"count\": ");
+        put_num(&b, s->gaps[i].count);
+        put(&b, "}");
+    }
+    put(&b, "], \"mme\": ");
+    if (s->mme || s->mme_most) {
+        put(&b, "{");
+        json_field(&b, s, "calls", s->mme, 1);
+        json_field(&b, s, "interpreted_most", s->mme_most, 0);
+        put(&b, "}");
+    } else
+        put(&b, "null");
+    put(&b, ", \"jit\": ");
+    if (s->jit) {
+        put(&b, "{\"earlier\": ");
+        if (s->jit & 1)
+            put_num(&b, s->jit_earlier);
+        else
+            put(&b, "null");
+        put(&b, ", \"compiled\": ");
+        if (s->jit & 2) {
+            put_num(&b, s->jit_compiled);
+            put(&b, ", \"failed\": ");
+            put_num(&b, s->jit_failed);
+            put(&b, ", \"queued\": ");
+            put_num(&b, s->jit_queued);
+        } else
+            put(&b, "null, \"failed\": null, \"queued\": null");
+        put(&b, "}");
+    } else
+        put(&b, "null");
+    put(&b, ", \"warnings\": [");
     for (i = 0; i < s->nwarnings; i++) {
         put(&b, i ? ", {\"message\": " : "{\"message\": ");
         json_text(&b, s, s->warnings[i].message);
@@ -1234,6 +1421,18 @@ char* snx_logscan_json(const SnxLogScan* s, SnxDemangle demangle) {
 }
 
 /* ============================================================ markdown */
+/* A gap in the summary: what goes before its text and after it, by kind */
+static const char* const gap_before[] = {"shader not translated: ",
+                                         "compute shader not translated: ",
+                                         "methods of class ",
+                                         "",
+                                         "macro with no native form: ",
+                                         "macro not compiled: ",
+                                         "",
+                                         "",
+                                         ""};
+static const char* const gap_after[] = {"", "", ", which no engine runs", "", "", "", "", " not implemented", ""};
+
 /* Markdown of what a log says, which anyone can write: a summary a bot posts must not ping people, link, embed or close
    its own code blocks. GitHub links an issue reference (#N, GH-N, owner/repo#N), a URL or www. even escaped, but
    nothing in a code span: every value from the log is a code span, or a line of a fenced block */
@@ -1382,6 +1581,57 @@ char* snx_logscan_markdown(const SnxLogScan* s, const char* name, const char* he
             put(&b, ", ");
             put_num(&b, s->ipc[i].count);
             put(&b, "x)\n");
+        }
+    }
+    if (s->ngaps || s->mme || s->mme_most || jit_missed(s)) {
+        static const char* const areas[] = {"GPU", "Macros (MME)", "CPU"};
+        int area;
+        put(&b, "\n**What else the runtime missed:**\n\n");
+        for (area = 0; area < 3; area++) {
+            int any = (area == 1 && (s->mme || s->mme_most)) || (area == 2 && jit_missed(s));
+            for (i = 0; i < s->ngaps && !any; i++) any = gap_area(s->gaps[i].kind) == area;
+            if (!any) continue;
+            put(&b, "- **");
+            put(&b, areas[area]);
+            put(&b, ":**\n");
+            if (area == 1 && s->mme) {
+                put(&b, "  - macro calls: ");
+                md_code(&b, snx_logscan_text(s, s->mme));
+                put(&b, "\n");
+            }
+            if (area == 1 && s->mme_most) {
+                put(&b, "  - interpreted most, by hash: ");
+                md_code(&b, snx_logscan_text(s, s->mme_most));
+                put(&b, "\n");
+            }
+            if (area == 2 && (s->jit & 1) && s->jit_earlier) {
+                put(&b, "  - guest code the recompiler missed in earlier runs: ");
+                put_num(&b, s->jit_earlier);
+                put(&b, " pcs, queued for the JIT at startup\n");
+            }
+            if (area == 2 && (s->jit & 2) && (s->jit_compiled || s->jit_failed || s->jit_queued)) {
+                put(&b, "  - guest code the recompiler missed, compiled at run time: ");
+                put_num(&b, s->jit_compiled);
+                put(&b, " pcs (");
+                put_num(&b, s->jit_failed);
+                put(&b, " failed, ");
+                put_num(&b, s->jit_queued);
+                put(&b, " still queued)\n");
+            }
+            for (i = 0; i < s->ngaps; i++) {
+                int kind = s->gaps[i].kind;
+                if (gap_area(kind) != area) continue;
+                put(&b, "  - ");
+                put(&b, gap_before[kind]);
+                md_code(&b, snx_logscan_text(s, s->gaps[i].what));
+                put(&b, gap_after[kind]);
+                if (s->gaps[i].count > 1) {
+                    put(&b, " (");
+                    put_num(&b, s->gaps[i].count);
+                    put(&b, kind == SNX_GAP_SHADER || kind == SNX_GAP_COMPUTE ? " shaders)" : "x)");
+                }
+                put(&b, "\n");
+            }
         }
     }
     if (s->nwarnings) {

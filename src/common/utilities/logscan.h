@@ -2,8 +2,9 @@
    Copyright 2026 the ScarletNX contributors */
 /* A game's log read as a summary: which build ran which game on which GPU, how the run ended (a crash, svcBreak, an
    unhandled exception, BRK, an instruction the recompiler cannot run, a fatal error, or nothing logged), the game
-   function it ended in, the service commands the runtime doesn't implement, warnings, and a signature, the same for
-   every log that failed the same way.
+   function it ended in, the service commands the runtime doesn't implement, what else it missed (shaders, GPU
+   methods, macros, SVCs, guest code the recompiler missed), warnings, and a signature, the same for every log that
+   failed the same way.
 
    It reads a game's .log and the launcher's Share log file (its game log section). What it writes is meant for public
    reports: paths under a home folder become ~, a line is cut at SNX_LOGSCAN_LINE bytes, and the crash report's code
@@ -22,6 +23,7 @@
 #define SNX_LOGSCAN_FRAMES   16
 #define SNX_LOGSCAN_DETAILS  12
 #define SNX_LOGSCAN_IPC      64
+#define SNX_LOGSCAN_GAPS     64
 #define SNX_LOGSCAN_WARNINGS 30
 #define SNX_LOGSCAN_OUTPUT   10
 #define SNX_LOGSCAN_TAIL     15
@@ -42,6 +44,21 @@ enum {
 };
 /* the service command lines, in the order the summary sorts them */
 enum { SNX_IPC_BAD_REQUEST, SNX_IPC_UNDECLARED, SNX_IPC_UNKNOWN, SNX_IPC_UNKNOWN_CONTROL };
+/* what the runtime missed, in the order the summary lists them. The GPU's: a graphics or compute shader the translator
+   can't express, methods of a class no engine runs, another GPU operation skipped. The macros': one with no native
+   form, one the compiler can't follow, an operation the interpreter doesn't know. The CPU's: an SVC with no handler,
+   another SVC's unknown argument */
+enum {
+    SNX_GAP_SHADER,
+    SNX_GAP_COMPUTE,
+    SNX_GAP_CLASS,
+    SNX_GAP_GPU,
+    SNX_GAP_MACRO,
+    SNX_GAP_MACRO_COMPILE,
+    SNX_GAP_MME,
+    SNX_GAP_SVC,
+    SNX_GAP_CPU
+};
 /* where a crash report put the host pc */
 enum { SNX_PLACE_NONE, SNX_PLACE_GAME, SNX_PLACE_BLOCK, SNX_PLACE_RUNTIME, SNX_PLACE_LIBRARY };
 
@@ -60,6 +77,10 @@ typedef struct {
 typedef struct {
     unsigned message, count;
 } SnxLogWarning;
+typedef struct {
+    int kind;
+    unsigned what, count; /* count: the lines, for a shader the shaders */
+} SnxLogGap;
 
 typedef struct {
     char* pool; /* the texts, each terminated, grown as the scan adds them */
@@ -84,6 +105,15 @@ typedef struct {
     int nipc;
     SnxLogWarning warnings[SNX_LOGSCAN_WARNINGS];
     int nwarnings;
+    SnxLogGap gaps[SNX_LOGSCAN_GAPS];
+    int ngaps;
+    /* The macro calls by how they ran (mme.c's line every million calls, the last one, when some were interpreted) and
+       its line of the macros interpreted most, both from snx_logscan_end. The guest code the recompiler missed, which
+       the JIT compiles at run time (guest_jit.c): the pcs earlier runs missed, from its first line, and from its line
+       at the end the pcs compiled, failed and still queued. jit says which lines were read: 1 the first, 2 the end */
+    unsigned mme, mme_most;
+    int jit;
+    unsigned long jit_earlier, jit_compiled, jit_failed, jit_queued;
     /* The frames over 50 ms (gpu/vk/renderer.c): its stats line every 600 presents counts them, and each logs a line
        of what it did (200 at most): the counted ones, the lines since the last stats line, the slowest frame, and the
        slowest frames' lines with their times */
@@ -109,6 +139,8 @@ typedef struct {
     unsigned slow_len[SNX_LOGSCAN_SLOW];
     char frame_stats_raw[SNX_LOGSCAN_RAW], memory_raw[SNX_LOGSCAN_RAW]; /* as they are read */
     unsigned frame_stats_len, memory_len;
+    char mme_raw[SNX_LOGSCAN_RAW], mme_most_raw[SNX_LOGSCAN_RAW];
+    unsigned mme_len, mme_most_len;
     char output_raw[SNX_LOGSCAN_OUTPUT][SNX_LOGSCAN_RAW];
     unsigned output_len[SNX_LOGSCAN_OUTPUT];
     unsigned long output_seen;
