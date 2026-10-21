@@ -450,7 +450,7 @@ extern const unsigned long snx_armlib_bitcode_size;
 
 static int library_object(const char* name, const unsigned char* bitcode, unsigned long bitcode_size, char opt,
                           unsigned char** data, size_t* size, char* error, size_t error_size) {
-    static const char* const target_attributes[] = {"target-cpu", "target-features", "tune-cpu"};
+    static const char* const target_attributes[] = {"target-cpu", "target-features", "tune-cpu", "probe-stack"};
     SnxIr* ir;
     LLVMMemoryBufferRef buffer;
     LLVMModuleRef library;
@@ -472,7 +472,8 @@ static int library_object(const char* name, const unsigned char* bitcode, unsign
         return -1;
     }
     /* Clang wrote the build machine's baseline CPU into every function, which would override the target machine's:
-       without them the library is compiled for this CPU, as the generated code is */
+       without them the library is compiled for this CPU, as the generated code is.
+       Apple's Clang also names __chkstk_darwin as the probe, which LLVM's AArch64 backend rejects */
     for (fn = LLVMGetFirstFunction(library); fn; fn = LLVMGetNextFunction(fn))
         for (i = 0; i < sizeof(target_attributes) / sizeof(*target_attributes); ++i)
             LLVMRemoveStringAttributeAtIndex(fn, LLVMAttributeFunctionIndex, target_attributes[i],

@@ -629,7 +629,7 @@ static VkPipeline pipe_create(const Pipe* e) {
     u32 ndv = 0;
     for (u32 i = 0; i < k->nbind; i++) {
         vb[i] = (VkVertexInputBindingDescription){.binding = i,
-                                                  .stride = 0, /* dynamic */
+                                                  .stride = k->bind[i].stride, /* 0: dynamic */
                                                   .inputRate = k->bind[i].divisor ? VK_VERTEX_INPUT_RATE_INSTANCE
                                                                                   : VK_VERTEX_INPUT_RATE_VERTEX};
         if (k->bind[i].divisor > 1 && g_vk.has_divisor)
@@ -731,7 +731,7 @@ static VkPipeline pipe_create(const Pipe* e) {
     if (g_vk.has_feedback_dynamic) dyn[ndyn++] = VK_DYNAMIC_STATE_ATTACHMENT_FEEDBACK_LOOP_ENABLE_EXT;
     /* the stride is set by vkCmdBindVertexBuffers2, which a draw without vertex buffers never calls: a pipeline without
        bindings leaves it out */
-    if (k->nbind) dyn[ndyn++] = VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE;
+    if (k->nbind && g_vk.has_dynamic_stride) dyn[ndyn++] = VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE;
     VkPipelineDynamicStateCreateInfo dy = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
                                            .dynamicStateCount = ndyn,
                                            .pDynamicStates = dyn};
@@ -1167,6 +1167,7 @@ static void pf_key(char* out, size_t n) {
     size_t len = strlen(commit);
     char exe[64] = "", uuid[33];
     u32 caps[] = {(u32)g_vk.has_divisor,
+                  (u32)g_vk.has_dynamic_stride,
                   (u32)g_vk.has_shader_draw_parameters,
                   (u32)g_vk.has_feedback,
                   (u32)g_vk.has_feedback_dynamic,

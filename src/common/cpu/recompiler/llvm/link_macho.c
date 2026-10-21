@@ -22,6 +22,7 @@
 #define CPU_TYPE_ARM64   0x0100000Cu
 #define LC_SYMTAB        0x2
 #define LC_DYSYMTAB      0xB
+#define LC_LOAD_DYLIB    0xC
 #define LC_ID_DYLIB      0xD
 #define LC_SEGMENT_64    0x19
 #define LC_UUID          0x1B
@@ -788,6 +789,10 @@ static void nlist(SnxLinkBuffer* symtab, uint32_t name, unsigned type, unsigned 
     snx_link_append(symtab, s, sizeof(s));
 }
 
+/* dyld refuses an image that doesn't link libSystem, though nothing here calls into it */
+#define LIBSYSTEM "/usr/lib/libSystem.B.dylib"
+#define LIBSYSTEM_SIZE ((sizeof(LIBSYSTEM) + 24 + 7) & ~(size_t)7)
+
 /* load commands */
 static unsigned char* command(SnxLinkBuffer* b, uint32_t cmd, uint32_t size) {
     size_t at = b->size;
@@ -836,7 +841,7 @@ int snx_link_macho(const SnxLinkInput* inputs, size_t count, const char* const* 
         linkedit_offset, linkedit_address, rebase_offset, trie_offset, symtab_offset, strtab_offset, signature_offset,
         signature_size, hash_offset, headers, nslots;
     size_t i, nlocal = 0, id_size, uuid;
-    uint32_t j, sizeofcmds, ncmds = 10;
+    uint32_t j, sizeofcmds, ncmds = 11;
     unsigned char *h, *c, *signature;
     unsigned* export_section = NULL;
     int rc = -1;
@@ -872,7 +877,8 @@ int snx_link_macho(const SnxLinkInput* inputs, size_t count, const char* const* 
     layout_kinds(&l);
     /* the load commands' size, which the first section follows */
     id_size = align_up(24 + strlen(soname) + 1, 8);
-    sizeofcmds = (uint32_t)((72 + 80 * 2) + (72 + 80 * 3) + 72 + id_size + 48 + 24 + 80 + 24 + 24 + 16);
+    sizeofcmds =
+        (uint32_t)((72 + 80 * 2) + (72 + 80 * 3) + 72 + id_size + LIBSYSTEM_SIZE + 48 + 24 + 80 + 24 + 24 + 16);
     headers = 32 + sizeofcmds;
     /* addresses: __TEXT from the headers, __DATA and __LINKEDIT on the pages after it */
     text_address = align_up(headers, l.kind_align[K_TEXT]);
@@ -1003,6 +1009,12 @@ int snx_link_macho(const SnxLinkInput* inputs, size_t count, const char* const* 
     wr32(c + 16, 1 << 16); /* current and compatibility versions, 1.0.0 */
     wr32(c + 20, 1 << 16);
     memcpy(c + 24, soname, strlen(soname));
+    c = command(&commands, LC_LOAD_DYLIB, (uint32_t)LIBSYSTEM_SIZE);
+    wr32(c + 8, 24);
+    wr32(c + 12, 2);
+    wr32(c + 16, 1 << 16);
+    wr32(c + 20, 1 << 16);
+    memcpy(c + 24, LIBSYSTEM, sizeof(LIBSYSTEM) - 1);
     c = command(&commands, LC_DYLD_INFO_ONLY, 48);
     wr32(c + 8, (uint32_t)rebase_offset);
     wr32(c + 12, (uint32_t)linkedit_rebase.size);

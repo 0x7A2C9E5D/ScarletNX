@@ -77,6 +77,7 @@ typedef struct {
     /* optional features that were enabled */
     VkPhysicalDeviceFeatures feat;
     int has_divisor;      /* VK_EXT_vertex_attribute_divisor: instance divisors above 1 */
+    int has_dynamic_stride; /* a binding's stride is dynamic state, which MoltenVK refuses: a pipeline holds it then */
     int has_xfb;          /* VK_EXT_transform_feedback: draws capture their outputs into guest memory */
     int has_border_color; /* VK_EXT_custom_border_color */
     u32 border_color_max; /* maxCustomBorderColorSamplers: past it, samplers take the nearest built-in color */
@@ -824,6 +825,7 @@ typedef struct {
     } attr[32];
     struct {
         u32 divisor; /* 0: per vertex */
+        u32 stride;  /* only without has_dynamic_stride, else 0 */
     } bind[33];      /* bindings 0..nbind-1: a binding per attribute at most, and one for constant attributes */
     u32 ncolor;
     u32 color[8];
