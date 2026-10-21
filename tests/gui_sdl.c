@@ -3109,7 +3109,15 @@ int main(int argc, char** argv) {
         key(&app, SDLK_DOWN);
         key(&app, SDLK_RETURN);
         assert(!app.dests_shown && app.menu.running && !app.dest_out && app.menu.selected == GUI_SWITCH);
-        finish(&app, 0);                       /* status 0: the fake driver found its --outdir the folder taken */
+        finish(&app, 0); /* status 0: the fake driver found its --outdir the folder taken */
+        {
+            size_t size;
+            char* kept = (char*)snx_read_file(app.run_log, &size);
+            char* said = snx_format(" --outdir %s", extra); /* the run's line, written after the run started */
+            assert(kept && said && strstr(kept, said));
+            free(said);
+            free(kept);
+        }
         free(app.folders[--app.folder_count]); /* off the list, no screen of Folders opened for them */
         free(app.folders[--app.folder_count]);
         launch(&app, snx_strdup(dump), false); /* the Main alone: no box, its default */

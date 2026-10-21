@@ -7242,8 +7242,6 @@ static void launch(App* app, char* absolute, bool prepared) {
     pad_mappings_share(app);
 #endif
     bool started = gui_process_start(app->process, argv, app->message, sizeof(app->message));
-    free(app->dest_out); /* the run's: a next one asks again */
-    app->dest_out = NULL;
     if (started && app->run_log) {
         size_t k;
         if (app->run_out) fclose(app->run_out);
@@ -7253,6 +7251,8 @@ static void launch(App* app, char* absolute, bool prepared) {
     }
     free(argv);
     free(out);
+    free(app->dest_out); /* the run's, which argv held until here: a next one asks again */
+    app->dest_out = NULL;
     gui_steps_reset(&app->steps);
     app->native = native;
     /* the menu fades out, then the run fades in */
