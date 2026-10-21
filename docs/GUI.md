@@ -87,7 +87,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - **Settings** opens on its groups, Enter opening one and ESC coming back: **App**, then
   **Launch** (the launcher's own and the recompiler's, from `src/nx/runtime/settings.txt`), then a group per section of the game's `.ini` (Display,
   Graphics, Performance, On-screen controls, Controllers, Network, Debug), as `scarletnx --settings`
-  prints them from the runtime's own tables. The game's menu's settings have its names and words
+  prints them from the runtime's own tables: read from them in the same process where the menu is built into
+  scarletnx (iOS too), so every section shows at once; a menu built alone asks `scarletnx --settings`. The game's menu's settings have its names and words
   (*Scale* 100%, *Touch screen* Fingers), and its **Buttons** page, whose **All** steps every row;
   *Edit layout* and *Reset layout* stay in the game's menu, as the layout is each game's own.
   Controllers' **Button map** draws the pad as the game's menu does: each control in a box down either

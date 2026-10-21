@@ -3119,21 +3119,24 @@ static void settings_forget(App* app) {
     app->groups = 0;
     app->view_count = 0;
 }
-/* the Settings' rows: the runtime's list, read the first time from the program that runs Switch inputs, after the
-   launcher's own */
+char* (*snx_menu_settings)(void) = NULL;
+/* the Settings' rows: the runtime's list after the launcher's own, read the first time from the runtime the menu is
+   built into, else from the program that runs Switch inputs */
 static GuiSettings* settings_of(App* app) {
-    char* driver;
+    char* driver = NULL;
     char* list;
     if (app->settings.keys) return &app->settings;
-    driver = find_driver(app, GUI_SWITCH);
+    if (snx_menu_settings) /* this program's own: every section at once, with no program to ask */
+        list = snx_menu_settings();
+    else {
+        driver = find_driver(app, GUI_SWITCH);
 #ifdef SDL_PLATFORM_IOS /* no program to ask: the game's .ini keeps its settings */
-    list = NULL;
+        list = NULL;
 #else
-    {
         const char* argv[] = {driver, "--settings", NULL};
         list = driver ? capture(app, argv) : NULL;
-    }
 #endif
+    }
     gui_settings_read(&app->settings, list ? list : "");
     free(list);
     free(driver);

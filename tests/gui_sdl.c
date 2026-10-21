@@ -779,6 +779,11 @@ static void step_line(void) {
     clip_row(runs, lengths, 0, 17); /* 4 columns left for the detail: the second letter would end on the 5th */
     assert(!strcmp(runs[1], " \xe8\x8f\x9c") && lengths[1] == 3 && lengths[0] == 8 && lengths[2] == 5);
 }
+/* the runtime's list as the menu built into scarletnx reads it, with no program to ask (snx_menu_settings) */
+static char* built_in_settings(void) {
+    return snx_strdup("Display\tfullscreen\t0\tint\t0\t1\t1 = start in fullscreen\t\t0=0|1=1\n"
+                      "Network\tbuilt_in\t0\tint\t0\t1\tOne the program's own list has\t\t0=Off|1=On\n");
+}
 static int SDLCALL hang(void* unused) {
     (void)unused;
     for (;;) SDL_Delay(100);
@@ -2729,6 +2734,20 @@ int main(int argc, char** argv) {
         assert(setting_is(&app, "fullscreen", NULL) && settings_of(&app) && setting_is(&app, "fullscreen", "1"));
         /* the groups went with the list: the screens drawn later (the theme editor's width) read none of its names */
         assert(app.groups == 0);
+        /* built into scarletnx, the menu reads the runtime's list in its own process: no program asked, none found */
+        {
+            char* drivers = app.drivers;
+            app.drivers = snx_strdup("/nonexistent/snx-gui-test/drivers");
+            snx_menu_settings = built_in_settings;
+            settings_forget(&app);
+            assert(settings_of(&app) && setting_row(&app, "built_in") >= 0 && setting_is(&app, "fullscreen", "1"));
+            snx_menu_settings = NULL;
+            settings_forget(&app);
+            free(app.drivers);
+            app.drivers = drivers;
+            assert(settings_of(&app) && setting_row(&app, "built_in") < 0 && setting_row(&app, "user") >= 0);
+            app.groups = 0;
+        }
     }
     key(&app, SDLK_UP);
     key(&app, SDLK_LEFT);
