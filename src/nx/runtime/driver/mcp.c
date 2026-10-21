@@ -63,6 +63,7 @@ typedef struct {
        and loading one takes a second or more. game_folder NULL for none */
     char* game_folder;
     Game game;
+    char* gdb_game; /* the game folder gdb_attach named guest addresses by, or NULL */
 } Mcp;
 
 /* ============================================================ text (mcp_int.h) */
@@ -152,6 +153,8 @@ static int mcp_open(Mcp* m, int argc, char** argv) {
 static void game_free(Game* g);
 static void mcp_close(Mcp* m) {
     int i;
+    mcp_gdb_close(); /* the game runs on */
+    free(m->gdb_game);
     if (m->game_folder) game_free(&m->game);
     free(m->game_folder);
     for (i = 0; i < m->nroots; i++) free(m->roots[i]);
@@ -653,6 +656,9 @@ static const char instructions[] =
     "services the runtime doesn't implement, the shaders, macros and SVCs it missed, slow frames); read_log reads parts of it by text or line; find_game "
     "lists the extracted games; symbolize and disassemble read a game's code at the addresses a log names. "
     "A log's addresses match only the same game version (find_game gives it, the log's header names the log's). "
+    "For a game started with the GDB stub (-S, or -s to wait before the runtime starts), gdb_attach connects GDB; "
+    "gdb_command, gdb_threads, gdb_guest and gdb_memory then read the runtime and the guest, and gdb_detach lets the "
+    "game run on. "
     "Nothing of a game (code, files) goes into an issue, a pull request or an edenprobe case: a case asks the "
     "hardware a question the failure narrowed down to.";
 
@@ -750,6 +756,40 @@ static cJSON* tools(void) {
         "(it should fail on ScarletNX and pass on the reference), and the edenprobe pull request's text: "
         "the commit subject, the issue it comes from, what each machine answered, source (where the expected answer "
         "comes from), the tests, and what a case may not hold.";
+    static const char* const attach_names[] = {"port", "game"};
+    static const char* const attach_types[] = {"integer", "string"};
+    static const char* const command_names[] = {"command", "wait"};
+    static const char* const command_types[] = {"string", "integer"};
+    static const char* const guest_names[] = {"thread", "frames"};
+    static const char* const guest_types[] = {"integer", "integer"};
+    static const char* const memory_names[] = {"address", "size"};
+    static const char* const memory_types[] = {"string", "integer"};
+    static const char attach_says[] =
+        "Connects GDB to a game started with the GDB stub (-S: it runs until a debugger connects, -s: it waits "
+        "before the runtime starts), on localhost port (1234). The game stops; a breakpoint on the runtime's "
+        "crash_report stops it at a crash, and SIGSEGV and SIGBUS pass to the runtime, which traps guest memory with "
+        "them. game (a folder, a game of work/ or a title ID, of the same version) names guest addresses and the "
+        "recompiled code's A_/F_<address> symbols by the game's own symbols. GDB debugs the host process: the "
+        "runtime's C with its debug information, and the recompiled game code. The stub takes one connection per "
+        "run. UNIX only.";
+    static const char command_says[] =
+        "Runs a GDB command (bt, info threads, break svc_SendSyncRequest, p *kthread_cur(), x/8gx ADDR, frame 2, "
+        "info registers...) and answers its output, 400 lines at most. A command that resumes the game (continue, "
+        "next, step, finish) waits up to wait seconds (10) for it to stop, at a breakpoint or a crash, and "
+        "interrupts it after; wait 0 leaves it running. \"interrupt\" stops a running game. Shells, scripts and "
+        "commands that write files are refused.";
+    static const char threads_says[] =
+        "Every thread of the stopped game: the runtime's own, and each guest thread with its id, name, whether it is "
+        "in an SVC (its registers then exact; in game code they may be stale), its guest pc and lr, named with "
+        "gdb_attach's game, and where its host thread is.";
+    static const char guest_says[] =
+        "A guest thread's registers (X0-X30, SP, PC, NZCV and TPIDRRO_EL0, or a 32-bit game's R0-R15 and CPSR) and "
+        "its guest backtrace from the frame records its frame pointer leads to, named with gdb_attach's game. thread "
+        "is the GDB thread number gdb_threads lists (the selected thread when left out); frames at most 64.";
+    static const char memory_says[] =
+        "Guest memory at address (hexadecimal, a game address), size bytes (256, at most 4096), as hex and text. The "
+        "game must be stopped.";
+    static const char detach_says[] = "Detaches GDB, and the game runs on without it. Attaching again needs a new run.";
     cJSON* list = cJSON_CreateArray();
     tool(list, "scan_log", scan_says, schema(path, s1, 1, path, 1));
     tool(list, "read_log", read_says, schema(read_names, read_types, 6, path, 1));
@@ -760,6 +800,12 @@ static cJSON* tools(void) {
     tool(list, "edenprobe_check", check_says, schema(check_names, s2, 2, check_names, 1));
     tool(list, "edenprobe_run", run_says, schema(run_names, s3, 3, run_names, 3));
     tool(list, "edenprobe_finding", finding_says, schema(finding_names, finding_types, 6, finding_names, 4));
+    tool(list, "gdb_attach", attach_says, schema(attach_names, attach_types, 2, NULL, 0));
+    tool(list, "gdb_command", command_says, schema(command_names, command_types, 2, command_names, 1));
+    tool(list, "gdb_threads", threads_says, schema(NULL, NULL, 0, NULL, 0));
+    tool(list, "gdb_guest", guest_says, schema(guest_names, guest_types, 2, NULL, 0));
+    tool(list, "gdb_memory", memory_says, schema(memory_names, memory_types, 2, memory_names, 1));
+    tool(list, "gdb_detach", detach_says, schema(NULL, NULL, 0, NULL, 0));
     return list;
 }
 
@@ -770,6 +816,58 @@ static const char* arg_string(const cJSON* args, const char* key) {
 static long arg_number(const cJSON* args, const char* key, long otherwise) {
     const cJSON* v = cJSON_GetObjectItemCaseSensitive(args, key);
     return cJSON_IsNumber(v) ? (long)v->valuedouble : otherwise;
+}
+
+/* a guest address named by gdb_attach's game (mcp_int.h's McpNamer) */
+static void name_guest(Text* t, const void* ctx, SnxU64 a) { describe(t, (const Game*)ctx, a); }
+/* the GDB tools' namer: gdb_attach's game's, loaded as symbolize loads it, or none */
+static McpNamer gdb_namer(Mcp* m, const void** ctx) {
+    Text err = {0};
+    const Game* g = m->gdb_game ? game_get(m, m->gdb_game, &err) : NULL;
+    free(err.p);
+    *ctx = g;
+    return g ? name_guest : NULL;
+}
+static char* gdb_tool(Mcp* m, const char* name, const cJSON* args, Text* err) {
+    const void* ctx;
+    McpNamer namer;
+    if (!strcmp(name, "gdb_attach")) {
+        const char* game = arg_string(args, "game");
+        char* folder = game ? game_folder(m, game, err) : NULL;
+        char* text = NULL;
+        if (game && !folder) return NULL;
+        text = mcp_gdb_attach(arg_number(args, "port", 1234), err);
+        if (text) {
+            free(m->gdb_game);
+            m->gdb_game = folder;
+            folder = NULL;
+        }
+        free(folder);
+        return text;
+    }
+    namer = gdb_namer(m, &ctx);
+    if (!strcmp(name, "gdb_command")) {
+        const char* command = arg_string(args, "command");
+        if (command) return mcp_gdb_command(command, arg_number(args, "wait", 10), namer, ctx, err);
+        mcp_put(err, "command: a GDB command");
+    } else if (!strcmp(name, "gdb_threads"))
+        return mcp_gdb_threads(namer, ctx, err);
+    else if (!strcmp(name, "gdb_guest"))
+        return mcp_gdb_guest(arg_number(args, "thread", 0), (int)arg_number(args, "frames", 32), namer, ctx, err);
+    else if (!strcmp(name, "gdb_memory")) {
+        const char* address = arg_string(args, "address");
+        SnxU64 a;
+        if (address && parse_hex(address, &a)) return mcp_gdb_memory(a, arg_number(args, "size", 256), err);
+        mcp_put(err, "address: a hexadecimal game address");
+    } else if (!strcmp(name, "gdb_detach")) {
+        free(m->gdb_game);
+        m->gdb_game = NULL;
+        return mcp_gdb_detach(err);
+    } else {
+        mcp_put(err, "no tool ");
+        mcp_put(err, name);
+    }
+    return NULL;
 }
 
 /* the tool's answer as an MCP result: its text, or the error's with isError */
@@ -845,6 +943,8 @@ static cJSON* call(Mcp* m, const char* name, const cJSON* args) {
         text = mcp_edenprobe_finding(arg_number(args, "issue", 0), arg_string(args, "suite"), arg_string(args, "name"),
                                      arg_string(args, "scarletnx_report"), arg_string(args, "reference_report"),
                                      arg_string(args, "source"), &err);
+    } else if (!strncmp(name, "gdb_", 4)) {
+        text = gdb_tool(m, name, args, &err);
     } else {
         mcp_put(&err, "no tool ");
         mcp_put(&err, name);

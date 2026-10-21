@@ -287,6 +287,23 @@ connection per run. Local ptrace permissions must allow attachment. Binding fail
 missing `gdbserver` are reported instead of silently running without a debugger.
 No debugger flags or combined short flags are supported on Windows.
 
+The recompiled game module is a shared library with a symbol for each function (`F_<address>` in
+a 64-bit game, `A_<address>` for a 32-bit game's blocks), so GDB names game frames as it loads.
+Code the JIT compiles at run time lives in an anonymous code arena. With `--gdb_jit=1` (the
+`[Debug]` setting `gdb_jit`) the runtime hands each compile to GDB through its JIT interface,
+with its symbols. GDB then stops the whole game to read each one while it is
+attached, which slows a 32-bit game (its blocks compile one at a time) to a crawl, so it is off
+by default.
+
+The runtime passes SIGSEGV and SIGBUS to its own handler for guest memory it traps. Tell GDB
+`handle SIGSEGV SIGBUS nostop noprint pass` and break on `crash_report` to stop only at a crash.
+
+An agent can drive GDB through the MCP server (`scarletnx --mcp`): `gdb_attach`, `gdb_command`,
+`gdb_threads` (each host thread, and each guest thread's id, name and guest pc), `gdb_guest` (a
+guest thread's registers and its guest backtrace) and `gdb_memory` (guest memory), then
+`gdb_detach`. They read the guest state from the runtime's debug information, which the default
+RelWithDebInfo build has.
+
 ## Headless Vulkan / lavapipe
 
 The normal SDL3 build can run without initializing SDL video or opening a window:

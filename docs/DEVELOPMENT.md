@@ -68,7 +68,13 @@ build/scarletnx --scan-log "$games/<id>/<id>.log" [--format markdown]
   the data folder and its state, cache and settings folders), `find_game` (the extracted games in `work/` with their
   title IDs and versions), `symbolize` and `disassemble` (as `tools/symbols.py` and `tools/disasm.py`, A64 through
   LLVM's disassembler where LLVM has the AArch64 target). The last game loaded stays loaded for the next call. Its
-  edenprobe tools turn a confirmed report into an edenprobe case ([EDENPROBE.md](EDENPROBE.md)). The game reports
+  edenprobe tools turn a confirmed report into an edenprobe case ([EDENPROBE.md](EDENPROBE.md)). Its GDB tools
+  (`mcp_gdb.c`, UNIX only) run one GDB over its machine interface against a game started with `-S` or `-s`
+  ([USAGE.md](USAGE.md#gdb-unix-only)): `gdb_attach` (with a game to name guest addresses and the `A_`/`F_` symbols
+  by), `gdb_command` (any GDB command but shells, scripts and file writes, waiting for a resumed game to stop),
+  `gdb_threads`, `gdb_guest` (registers and the guest backtrace from the frame records), `gdb_memory` and
+  `gdb_detach`. They find a guest thread's `KThread` through its host thread's `tls_thread`, by the runtime's debug
+  information, and guest memory at `g_mem`. The game reports
   on GitHub come from GitHub's own MCP server or `scripts/game-reports.py index`.
 - Game reports: `.github/workflows/game-reports.yml` builds `snx-logscan` and runs `scripts/game-reports.py triage` on
   each issue and comment. An issue with a log attached (`.log`, `.txt`, `.gz`, `.zip`) or pasted in a fenced block gets

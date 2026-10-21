@@ -454,6 +454,15 @@ setting Vulkan validation layer
     words Off|On
     help 1 = the Vulkan validation layer (VK_LAYER_KHRONOS_validation, the Vulkan SDK's) checks every Vulkan call and
     help logs what it finds. It slows the game down a lot, and a missing layer is only a warning
+setting GDB JIT symbols
+    key gdb_jit
+    int 0 1
+    default 0
+    startup
+    words Off|On
+    help 1 = with the GDB stub (-S or -s), hands the code the JIT compiles at run time to GDB, which names it.
+    help While GDB is attached it stops the whole game to read each compile, which slows a 32-bit game (its blocks
+    help compile one at a time) to a crawl
 setting Profiler
     key profile
     int 0 1

@@ -8,6 +8,7 @@
 #define _DARWIN_C_SOURCE /* MAP_ANON, MAP_JIT and pthread_jit_write_protect_np besides POSIX */
 #endif
 #include "common/cpu/recompiler/llvm/code_loader_int.h"
+#include "common/cpu/recompiler/llvm/gdb_jit.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -368,6 +369,7 @@ static SnxCodeLoader* new_loader(size_t reserve, unsigned machine, uint64_t toc,
 
 void snx_code_loader_free(SnxCodeLoader* loader) {
     if (!loader) return;
+    snx_gdb_jit_remove(loader);
 #ifdef _WIN32
     /* each part of the arena goes as it was made: the views, the data reservation, a placeholder left over */
     {
@@ -932,6 +934,7 @@ static int load(SnxCodeLoader* loader, const SnxLinkInput* inputs, size_t count,
     /* a region the unit put nothing into keeps its next free byte, so an empty load uses nothing */
     for (i = 0; i < REGIONS; ++i)
         if (end[i] > start[i]) loader->region[i].used = (size_t)(end[i] - ld.arena_start - loader->region[i].start);
+    for (i = 0; i < count; ++i) snx_gdb_jit_register(loader, &ld.objs[i]);
     rc = 0;
 done:
     for (i = 0; i < count; ++i) snx_elf_free(&ld.objs[i]);

@@ -10,6 +10,7 @@ that isn't JSON. Offline.
     tests/mcp_test.py SCARLETNX"""
 
 import json
+import os
 import struct
 import subprocess
 import sys
@@ -161,6 +162,10 @@ def main():
             call(
                 'edenprobe_finding', 'passing', issue=345, suite='hid-style', name=NAME, scarletnx_report=str(passing)
             ),
+            call('gdb_threads', 'gdb_none'),
+            call('gdb_command', 'gdb_command_none', command='bt'),
+            call('gdb_attach', 'gdb_bad_port', port=0),
+            call('gdb_detach', 'gdb_detach_none'),
             call('nope'),
             {'jsonrpc': '2.0', 'id': 'method', 'method': 'resources/list'},
         ]
@@ -208,6 +213,12 @@ def main():
             'edenprobe_check',
             'edenprobe_run',
             'edenprobe_finding',
+            'gdb_attach',
+            'gdb_command',
+            'gdb_threads',
+            'gdb_guest',
+            'gdb_memory',
+            'gdb_detach',
         },
         f'tools: {sorted(tools)}',
     )
@@ -244,6 +255,12 @@ def main():
         check('svc' in dis and 'adr' in dis, f'the code disassembled:\n{dis}')
     check(failed('no_range') and 'name a function, or a range' in text('no_range'), 'disassemble without a target')
     check(failed('no_game') and 'title ID' in text('no_game'), 'a title ID with no game')
+    # without a game under the stub (and on Windows, where they are UNIX only) the GDB tools fail, saying why
+    unix = os.name != 'nt'
+    check(failed('gdb_none') and (not unix or 'gdb_attach' in text('gdb_none')), 'gdb_threads without GDB')
+    check(failed('gdb_command_none') and (not unix or 'gdb_attach' in text('gdb_command_none')), 'gdb_command too')
+    check(failed('gdb_bad_port') and (not unix or 'port' in text('gdb_bad_port')), 'gdb_attach checks the port')
+    check(failed('gdb_detach_none'), 'gdb_detach without GDB')
     check(failed('nope'), 'an unknown tool')
     check(by_id['method']['error']['code'] == -32601, 'an unknown method')
     # the scaffold: each part where edenprobe keeps it, the call at its runner's end, the new suite's ui.c row

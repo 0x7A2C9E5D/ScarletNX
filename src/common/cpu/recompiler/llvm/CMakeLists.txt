@@ -121,12 +121,12 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/armlib_bitcode.c"
 
 add_library(snx_llvm STATIC ir.c ir_state.c ir_emit.c ir_profile.c ir_helpers.c
     ir_a64.c ir_simd.c ir_fp.c ir_codegen.c link.c link_elf.c link_coff.c link_macho.c elf_object.c
-    code_loader.c code_loader_coff.c jit_service.c "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/exec.c"
+    code_loader.c code_loader_coff.c gdb_jit.c jit_service.c "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/exec.c"
     "${CMAKE_CURRENT_BINARY_DIR}/rtlib_object.c" "${CMAKE_CURRENT_BINARY_DIR}/rtlib_bitcode.c"
     "${CMAKE_CURRENT_BINARY_DIR}/armlib_bitcode.c")
 set_target_properties(snx_llvm PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS ON)
 # The object loader needs no LLVM headers: strict C99 (RFC #142), after the target's -std
-set_source_files_properties(elf_object.c code_loader.c code_loader_coff.c PROPERTIES COMPILE_OPTIONS "-std=c99;-pedantic-errors")
+set_source_files_properties(elf_object.c code_loader.c code_loader_coff.c gdb_jit.c PROPERTIES COMPILE_OPTIONS "-std=c99;-pedantic-errors")
 target_include_directories(snx_llvm SYSTEM PUBLIC "${SNX_LLVM_INCLUDE_DIR}")
 target_compile_options(snx_llvm PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 target_compile_definitions(snx_llvm PRIVATE _CRT_SECURE_NO_WARNINGS)

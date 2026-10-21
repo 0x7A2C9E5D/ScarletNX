@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* What the MCP server's files share (mcp.c, mcp_edenprobe.c): a growing text, and the edenprobe tools */
+/* What the MCP server's files share (mcp.c, mcp_edenprobe.c, mcp_gdb.c): a growing text, the edenprobe tools and the GDB
+   tools */
 #ifndef SNX_MCP_INT_H
 #define SNX_MCP_INT_H
+#include "common/utilities/common.h" /* SnxU64 */
 #include <stddef.h>
 
 /* text grown as it is written, p NULL until then; lines counts what a tool chose to count */
@@ -34,5 +36,26 @@ char* mcp_edenprobe_run(const char* self, const char* cache, const char* nro, co
    request's text: from which issue, what each machine answered, the tests run, and what a case may not hold */
 char* mcp_edenprobe_finding(long issue, const char* suite, const char* name, const char* ours, const char* theirs,
                             const char* source, Text* err);
+
+/* The GDB tools (mcp_gdb.c, UNIX only): one GDB connected to a game's GDB stub, each returning its answer, malloc'd,
+   or NULL with why in err. A namer writes a guest address's name (the game's module, function and offset) into t;
+   NULL leaves addresses unnamed */
+typedef void (*McpNamer)(Text* t, const void* ctx, SnxU64 address);
+/* GDB started and connected to the stub at localhost:port, the game stopped, a breakpoint on the runtime's
+   crash_report, and SIGSEGV and SIGBUS passed to the runtime unseen */
+char* mcp_gdb_attach(long port, Text* err);
+/* A GDB command and its output. One that resumes the game waits up to wait seconds for it to stop, then interrupts
+   it (0 leaves it running); "interrupt" stops it */
+char* mcp_gdb_command(const char* command, long wait, McpNamer name, const void* ctx, Text* err);
+/* Every host thread, and for a guest thread its id, name, whether it is in an SVC, and its guest pc and lr */
+char* mcp_gdb_threads(McpNamer name, const void* ctx, Text* err);
+/* GDB thread thread's (0: the selected one) guest registers and the guest backtrace from its frame pointer */
+char* mcp_gdb_guest(long thread, int frames, McpNamer name, const void* ctx, Text* err);
+/* size bytes of guest memory at address, as hex and text */
+char* mcp_gdb_memory(SnxU64 address, long size, Text* err);
+/* GDB detached from the game, which runs on, and ended */
+char* mcp_gdb_detach(Text* err);
+/* the same at the server's end, if a GDB is still connected */
+void mcp_gdb_close(void);
 
 #endif
