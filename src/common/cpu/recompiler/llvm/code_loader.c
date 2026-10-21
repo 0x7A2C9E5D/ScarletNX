@@ -29,10 +29,15 @@
 #endif
 /* macOS on Apple silicon: the arena is MAP_JIT memory, which each thread sees either writable or executable
    (apple_arena), and other threads are synchronized with new code through the kernel (sync_threads) */
-#if defined(__APPLE__) && defined(__aarch64__) && TARGET_OS_OSX
+#if defined(__APPLE__) && defined(__aarch64__) && (TARGET_OS_OSX || TARGET_OS_SIMULATOR)
 #define APPLE_JIT 1
 #include <mach/mach.h>
 #include <pthread.h>
+#if TARGET_OS_SIMULATOR
+/* The iOS simulator is a Mac process that has MAP_JIT as macOS does, but its SDK marks pthread_jit_write_protect_np
+   unavailable on iOS: the symbol is there, found by name */
+#include <dlfcn.h>
+#endif
 #endif
 /* iOS on a device: an app may not make memory executable, so a debugger does it for the app (ios_arena), and the other
    threads are synchronized with new code as on macOS (sync_threads) */
@@ -56,8 +61,8 @@ typedef char snx_code_loader_needs_64_bits[sizeof(size_t) >= 8 ? 1 : -1];
 
 /* the machine whose code this process runs, as an ELF e_machine: x86-64's 62, AArch64's 183; Windows' x86-64 COFF.
    macOS on Apple silicon loads ELF objects as well: the IR backend writes them for the loader with Darwin's calling
-   convention (snx_ir_new_jit), and so does iOS, with a debugger attached (ios_arena). 0 where the loader cannot run
-   what it loads: the iOS simulator, and Intel Macs, never tried */
+   convention (snx_ir_new_jit), and so does iOS, with a debugger attached (ios_arena), and the iOS simulator on Apple
+   silicon as macOS does. 0 where the loader cannot run what it loads: Intel Macs, never tried */
 #if defined(_WIN32) && (defined(__x86_64__) || defined(_M_X64))
 #define HOST_MACHINE SNX_CODE_COFF_X64
 #elif defined(APPLE_JIT) || defined(IOS_JIT)
@@ -621,7 +626,11 @@ int snx_code_publish(const SnxCodeLoader* loader, uint64_t start, uint64_t end, 
 }
 
 void snx_code_writable(int writable) {
-#ifdef APPLE_JIT
+#if defined(APPLE_JIT) && TARGET_OS_SIMULATOR
+    static void (*protect)(int);
+    if (!protect) *(void**)&protect = dlsym(RTLD_DEFAULT, "pthread_jit_write_protect_np");
+    if (protect) protect(!writable);
+#elif defined(APPLE_JIT)
     pthread_jit_write_protect_np(!writable);
 #else
     (void)writable; /* the loader writes through the read-write views */

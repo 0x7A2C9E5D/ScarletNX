@@ -55,7 +55,7 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
     if(IOS)
         # the triple carries the version: Clang refuses -miphoneos-version-min (SNX_APPLE_FLAGS') beside an -elf one
         list(FILTER snx_rtlib_object_base EXCLUDE REGEX "^-m(iphoneos|ios-simulator)-version-min=")
-        if(SNX_IOS_SIMULATOR) # never loaded (the simulator has no loader yet), but built as the device's is
+        if(SNX_IOS_SIMULATOR) # the simulator's loader runs it, as MAP_JIT memory like the Mac's
             set(snx_rtlib_object_flags --target=arm64-apple-ios${CMAKE_OSX_DEPLOYMENT_TARGET}-simulator-elf)
         else()
             set(snx_rtlib_object_flags --target=arm64-apple-ios${CMAKE_OSX_DEPLOYMENT_TARGET}-elf)
