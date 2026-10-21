@@ -46,6 +46,25 @@ typedef struct {
     u64 addr;
 } GpuI2m;
 
+/* Groups of the 3D engine's registers, a bit each in GpuChannel.r3d_dirty: maxwell3d_method sets a group's bit when
+   a method changes the value of one of its registers (g_m3d_group in maxwell/engines.c), after the shadow RAM's
+   replay. A group holds the registers one thing the renderer derives is read from, so that thing is made again only
+   when its groups changed. A register may be in several groups. A write that leaves a value as it was sets nothing */
+enum {
+    R3D_SHADER = 1u << 0,   /* the programs: code address 0x582-0x583, the slots 0x800-0x85F, early fragment tests
+                               0x084 */
+    R3D_VATTR = 1u << 1,    /* the vertex attributes 0x458-0x477 */
+    R3D_VFORMAT = 1u << 2,  /* the vertex streams' stride and enable (0x700 + 4 * i), divisor (0x703 + 4 * i), and
+                               whether each is per instance (0x620-0x63F): not their addresses or limits */
+    R3D_RTFORMAT = 1u << 3, /* RT_CONTROL 0x487 and each color target's format (0x204 + 0x10 * i) */
+    R3D_BLEND = 1u << 4,    /* blending 0x4B9, 0x4D0-0x4DF, 0x780-0x7BF, color masks 0x3E4 and
+                               0x680-0x687, sRGB writes 0x56E, the logic operation 0x671-0x672 */
+    R3D_PIPEMISC = 1u << 5, /* the rest of the pipeline key and the programs' keys: polygon mode 0x36B, patch size
+                               0x373, tessellation parameters 0xC8, user clip enable 0x544, the geometry passthrough
+                               mask 0x490-0x497, the provoking vertex 0x5A1, the clip mode 0x64F */
+    R3D_XFB = 1u << 6       /* transform feedback: enable 0x1D1, buffer controls 0x1C0-0x1CF, layouts 0xA00-0xA7F */
+};
+
 /* A GPU channel: an nvhost-gpu fd's state, named by its syncpoint id. It is made at the channel's first submission
    and dropped when nvdrv closes it (gpu_channel_close) */
 typedef struct GpuChannel {
@@ -55,6 +74,9 @@ typedef struct GpuChannel {
     u32 puller[0x40];
     /* the engines' registers, by method */
     u32 r3d[0x1000]; /* the 3D engine's. 0xE00 up are the macro calls' */
+    /* the register groups (R3D_*) a method changed a register of since the renderer last took them (all of them
+       after a reset): what it derived from the other groups' registers still holds */
+    u32 r3d_dirty;
     u32 r3d_shadow[0xE00]; /* the MME shadow RAM (SET_MME_SHADOW_RAM_CONTROL, 3D 0x49) */
     u32 shadow_mode;       /* 0 or 1 track, 2 passthrough, 3 replay */
     u32 rcomp[0x1000];

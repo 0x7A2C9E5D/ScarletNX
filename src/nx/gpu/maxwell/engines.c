@@ -338,20 +338,42 @@ static void macro_call(GpuChannel* ch, u32 m, u32 v, int last) {
     }
 }
 
-/* the methods below the macros' that do more than store their value: those the switch in maxwell3d_method acts on,
-   those keeps_draw names, the constant buffer's data, and those the shadow RAM leaves alone (shadowed). Every other
-   method, most of a stream, is a plain register: maxwell3d_method stores it without the switch, a call per method
-   word that was the GPU thread's biggest single cost */
-static const u8 g_m3d_acts[0xE00] = {
-    [0x44] = 1, [0x45] = 1, [0x46] = 1, [0x47] = 1, [0x48] = 1, [0x49] = 1, [0x6C] = 1, [0x6D] = 1, [0xB2] = 1,
-    [0xE4] = 1, [0xEC] = 1, [0xF4] = 1, [0xFC] = 1, [0x1D1] = 1,
-    [0x35D] = 1, [0x35E] = 1, [0x378] = 1, [0x3DD] = 1, [0x3DF] = 1, [0x42B] = 1, [0x485] = 1, [0x486] = 1,
-    [0x4C1] = 1, [0x4EB] = 1, [0x509] = 1, [0x50A] = 1, [0x545] = 1, [0x54C] = 1, [0x556] = 1, [0x57A] = 1,
-    [0x57C] = 1, [0x585] = 1, [0x586] = 1, [0x5F7] = 1, [0x5F8] = 1, [0x5F9] = 1, [0x5FA] = 1, [0x5FB] = 1,
-    [0x5FC] = 1, [0x5FD] = 1, [0x5FE] = 1, [0x651] = 1, [0x674] = 1, [0x6C3] = 1, [0x8C4] = 1, [0x8E4] = 1,
-    [0x8E5] = 1, [0x8E6] = 1, [0x8E7] = 1, [0x8E8] = 1, [0x8E9] = 1, [0x8EA] = 1, [0x8EB] = 1, [0x8EC] = 1,
-    [0x8ED] = 1, [0x8EE] = 1, [0x8EF] = 1, [0x8F0] = 1, [0x8F1] = 1, [0x8F2] = 1, [0x8F3] = 1, [0x904] = 1,
-    [0x90C] = 1, [0x914] = 1, [0x91C] = 1, [0x924] = 1};
+/* the methods below the macros': G_ACTS for those that do more than store their value (those the switch in
+   maxwell3d_method acts on, those keeps_draw names, the constant buffer's data, and those the shadow RAM leaves alone:
+   shadowed), and in the low bits the register groups (R3D_*, gpu.h) the method's register is in. Every other method,
+   most of a stream, is a plain register: maxwell3d_method stores it without the switch, a call per method word that
+   was the GPU thread's biggest single cost. The groups are the bits themselves, not an index into a table of masks,
+   as this runs for nearly every method word: more groups than 7 widen the table */
+enum { G_ACTS = 0x80 };
+_Static_assert(R3D_XFB < G_ACTS, "the 3D register groups fit below G_ACTS");
+/* a vertex stream's stride and enable word and its divisor, around its address (0x701-0x702) */
+#define M3D_STREAM(i) [0x700 + 4 * (i)] = R3D_VFORMAT, [0x703 + 4 * (i)] = R3D_VFORMAT
+static const u8 g_m3d_group[0xE00] = {
+    [0x44] = G_ACTS, [0x45] = G_ACTS, [0x46] = G_ACTS, [0x47] = G_ACTS, [0x48] = G_ACTS, [0x49] = G_ACTS,
+    [0x6C] = G_ACTS, [0x6D] = G_ACTS, [0xB2] = G_ACTS, [0xE4] = G_ACTS, [0xEC] = G_ACTS, [0xF4] = G_ACTS,
+    [0xFC] = G_ACTS, [0x1D1] = G_ACTS | R3D_XFB, [0x35D] = G_ACTS, [0x35E] = G_ACTS, [0x378] = G_ACTS,
+    [0x3DD] = G_ACTS, [0x3DF] = G_ACTS, [0x42B] = G_ACTS, [0x485] = G_ACTS, [0x486] = G_ACTS, [0x4C1] = G_ACTS,
+    [0x4EB] = G_ACTS, [0x509] = G_ACTS, [0x50A] = G_ACTS, [0x545] = G_ACTS, [0x54C] = G_ACTS, [0x556] = G_ACTS,
+    [0x57A] = G_ACTS, [0x57C] = G_ACTS, [0x585] = G_ACTS, [0x586] = G_ACTS, [0x5F7] = G_ACTS, [0x5F8] = G_ACTS,
+    [0x5F9] = G_ACTS, [0x5FA] = G_ACTS, [0x5FB] = G_ACTS, [0x5FC] = G_ACTS, [0x5FD] = G_ACTS, [0x5FE] = G_ACTS,
+    [0x651] = G_ACTS, [0x674] = G_ACTS, [0x6C3] = G_ACTS, [0x8C4] = G_ACTS, [0x8E4 ... 0x8F3] = G_ACTS,
+    [0x904] = G_ACTS, [0x90C] = G_ACTS, [0x914] = G_ACTS, [0x91C] = G_ACTS, [0x924] = G_ACTS,
+    /* the groups' plain registers */
+    [0x084] = R3D_SHADER, [0x582 ... 0x583] = R3D_SHADER, [0x800 ... 0x85F] = R3D_SHADER,
+    [0x458 ... 0x477] = R3D_VATTR,
+    [0x620 ... 0x63F] = R3D_VFORMAT, M3D_STREAM(0), M3D_STREAM(1), M3D_STREAM(2), M3D_STREAM(3), M3D_STREAM(4),
+    M3D_STREAM(5), M3D_STREAM(6), M3D_STREAM(7), M3D_STREAM(8), M3D_STREAM(9), M3D_STREAM(10), M3D_STREAM(11),
+    M3D_STREAM(12), M3D_STREAM(13), M3D_STREAM(14), M3D_STREAM(15), M3D_STREAM(16), M3D_STREAM(17), M3D_STREAM(18),
+    M3D_STREAM(19), M3D_STREAM(20), M3D_STREAM(21), M3D_STREAM(22), M3D_STREAM(23), M3D_STREAM(24), M3D_STREAM(25),
+    M3D_STREAM(26), M3D_STREAM(27), M3D_STREAM(28), M3D_STREAM(29), M3D_STREAM(30), M3D_STREAM(31),
+    [0x487] = R3D_RTFORMAT, [0x204] = R3D_RTFORMAT, [0x214] = R3D_RTFORMAT, [0x224] = R3D_RTFORMAT, [0x234] = R3D_RTFORMAT,
+    [0x244] = R3D_RTFORMAT, [0x254] = R3D_RTFORMAT, [0x264] = R3D_RTFORMAT, [0x274] = R3D_RTFORMAT,
+    [0x3E4] = R3D_BLEND, [0x4B9] = R3D_BLEND, [0x4D0 ... 0x4DF] = R3D_BLEND, [0x56E] = R3D_BLEND, [0x671 ... 0x672] = R3D_BLEND,
+    [0x680 ... 0x687] = R3D_BLEND, [0x780 ... 0x7BF] = R3D_BLEND,
+    [0x0C8] = R3D_PIPEMISC, [0x36B] = R3D_PIPEMISC, [0x373] = R3D_PIPEMISC, [0x490 ... 0x497] = R3D_PIPEMISC,
+    [0x544] = R3D_PIPEMISC, [0x5A1] = R3D_PIPEMISC, [0x64F] = R3D_PIPEMISC,
+    [0x1C0 ... 0x1CF] = R3D_XFB, [0xA00 ... 0xA7F] = R3D_XFB};
+#undef M3D_STREAM
 /* inline indices packed in one word, 32 / bits of them, the low ones first. Out of line: its array, inlined, made
    maxwell3d_method check a stack canary on every method */
 __attribute__((noinline)) static void inline_push_packed(GpuChannel* ch, u32 v, u32 bits) {
@@ -360,19 +382,47 @@ __attribute__((noinline)) static void inline_push_packed(GpuChannel* ch, u32 v, 
     inline_push(ch, idx, n);
 }
 
+/* a plain register's value v, after the draw held, which v changes or which is another channel's: out of line, so the
+   path that calls nothing (maxwell3d_method) saves no registers */
+__attribute__((noinline)) static void plain_flushed(GpuChannel* ch, u32 m, u32 v) {
+    r3d_pending_flush();
+    if (ch->r3d[m] == v) return;
+    ch->r3d_dirty |= g_m3d_group[m];
+    ch->r3d[m] = v;
+}
+/* the methods that act, the macros' and a plain register while constant buffer data is held */
+__attribute__((noinline)) static void method_acts(GpuChannel* ch, u32 m, u32 v, int last);
+/* A plain register (most method words) is stored without the switch, and a value as it was needs no store and changes
+   nothing a held draw or the renderer read. The rest goes out of line: with every call in this function, it saved and
+   restored five registers or more for each method word */
 void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
     u32* r = ch->r3d;
     m &= 0xFFF;
-    if (m < 0xE00 && !g_m3d_acts[m]) { /* a plain register, as the slow path below treats it */
-        if (ch->cb_n) r3d_const_flush(ch);
-        if (m >= 0x80) {
-            if (ch->shadow_mode == 3)
-                v = ch->r3d_shadow[m];
-            else if (ch->shadow_mode <= 1)
-                ch->r3d_shadow[m] = v;
+    if (m >= 0xE00 || (g_m3d_group[m] & G_ACTS) || ch->cb_n) {
+        method_acts(ch, m, v, last);
+        return;
+    }
+    if (m >= 0x80) {
+        if (ch->shadow_mode == 3)
+            v = ch->r3d_shadow[m];
+        else if (ch->shadow_mode <= 1)
+            ch->r3d_shadow[m] = v;
+    }
+    if (r[m] != v) {
+        if (g_pend.ch) {
+            plain_flushed(ch, m, v);
+            return;
         }
-        if (g_pend.ch && (g_pend.ch != ch || r[m] != v)) r3d_pending_flush();
+        ch->r3d_dirty |= g_m3d_group[m];
         r[m] = v;
+    } else if (g_pend.ch && g_pend.ch != ch)
+        plain_flushed(ch, m, v);
+}
+static void method_acts(GpuChannel* ch, u32 m, u32 v, int last) {
+    u32* r = ch->r3d;
+    if (m < 0xE00 && !(g_m3d_group[m] & G_ACTS)) { /* a plain register after the held constant buffer data */
+        r3d_const_flush(ch);
+        maxwell3d_method(ch, m, v, last);
         return;
     }
     if (m >= 0xE00) {
@@ -395,8 +445,9 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
             ch->r3d_shadow[m] = v; /* track, with or without the filter */
     }
     if (g_pend.ch && (g_pend.ch != ch || !keeps_draw(r, m, v))) r3d_pending_flush();
+    if (r[m] != v) ch->r3d_dirty |= g_m3d_group[m] & ~G_ACTS;
     r[m] = v;
-    switch (m) { /* a new case, or a new one in keeps_draw, needs its method in g_m3d_acts too */
+    switch (m) { /* a new case, or a new one in keeps_draw, needs G_ACTS in its g_m3d_group too */
         case 0x44: /* WAIT_FOR_IDLE */
             /* The idle wait and the texture cache invalidation below order GPU work, which method_barrier gives
                Vulkan. Neither is anything the game sees, so pending shader results don't land here: whatever reads
