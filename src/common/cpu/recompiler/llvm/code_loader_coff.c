@@ -549,10 +549,10 @@ int snx_code_load_coff(SnxCodeLoader* loader, const SnxLinkInput* inputs, size_t
             value = 0;
             if (ld.imports.keys[i][0] == '@') { /* a stub's: the table symbol's address, and the stub jumping there */
                 size_t stub = 0;
-                unsigned long hi = 0, lo = 0;
+                unsigned long long address = 0;
                 uint64_t at;
-                sscanf(ld.imports.keys[i], "@%lx:%lx", &hi, &lo);
-                value = (uint64_t)hi << 32 | lo;
+                sscanf(ld.imports.keys[i], "@%llx", &address); /* address_key's */
+                value = address;
                 snx_link_find(&ld.stubs, ld.imports.keys[i], &stub);
                 at = ld.stub_address + STUB_SIZE * (uint64_t)stub;
                 snx_code_at(loader, at)[0] = 0xFF;
