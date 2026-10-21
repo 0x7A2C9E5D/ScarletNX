@@ -65,7 +65,8 @@ typedef struct {
     char** dirs; /* "" none */
 } GuiSpace;
 /* the editor's screens: the Settings' groups, a group's settings, the App's rows, its game folders, the theme editor,
-   the Controllers' button map, the pad drawn (pad_screen.h), and the App's folders of data, games and extractions */
+   the Controllers' button map, the pad drawn (pad_screen.h), the App's folders of data, games and extractions, and
+   the User group's users */
 enum {
     GUI_FORM_SETTINGS,
     GUI_FORM_GROUP,
@@ -73,8 +74,14 @@ enum {
     GUI_FORM_FOLDERS,
     GUI_FORM_THEME,
     GUI_FORM_PAD,
-    GUI_FORM_PLACES
+    GUI_FORM_PLACES,
+    GUI_FORM_USERS
 };
+/* Settings > User's values: who the games play as, then each user's nickname as it is typed */
+typedef struct {
+    char plays[64];
+    char nick[SNX_USERS_MAX][SNX_USERS_NICKNAME_MAX + 1];
+} GuiUsersForm;
 /* Settings > App > Folders' rows, in the order of their keys in app.ini's [folders] */
 enum { GUI_PLACE_DATA, GUI_PLACE_GAMES, GUI_PLACE_WORK, GUI_PLACES };
 #define GUI_GROUPS_MAX   32
@@ -219,6 +226,9 @@ typedef struct {
     char group_name[GUI_GROUPS_MAX][64]; /* each one's key: a copy, the list it is from being freed apart */
     char group_about[GUI_GROUPS_MAX][128];
     GuiAppForm app_form;
+    GuiUsersForm users_form;
+    GuiThemeKey users_keys[SNX_USERS_MAX + 1]; /* Plays as, then a row a user */
+    char users_label[SNX_USERS_MAX][32];
     int language;       /* Settings > App's Language: 0 Auto (the system's), else snx_gui_languages' index + 1 */
     char* games_key;    /* [folders] games = as app.ini had it, recompiled = before it was named so: written again */
     GuiCleaned cleaned; /* what it did, in a box over the screen while cleaned_shown, until a key closes it */
@@ -335,6 +345,7 @@ static const char* const items[] = {SNX_TR_NOOP("Load Switch NSP/XCI/NRO"),
 #define SAY_FOLDERS_PICKED SAY_FOLDERS_GAMES
 #define SAY_PLACES         SNX_TR_KEYS("Tap a folder to pick another. Refresh: tap it. Back: go back.")
 #define SAY_PAD            SNX_TR_KEYS("Tap a control; tap it again for a press. Back: go back.")
+#define SAY_USERS          SNX_TR_KEYS("Tap a user to rename it. Back: go back.")
 #else
 #define SAY_MENU       SNX_TR_KEYS("Arrows/mouse: move. Space/Enter/click: select.")
 #define SAY_GAMES                                                                                                      \
@@ -361,6 +372,7 @@ static const char* const items[] = {SNX_TR_NOOP("Load Switch NSP/XCI/NRO"),
                 "refresh. ESC: back.")
 #define SAY_PLACES SNX_TR_KEYS("Up/Down: folder. Enter: pick another. Del: the default. F5: refresh. ESC: back.")
 #define SAY_PAD    SNX_TR_KEYS("Arrows/pad: move, change. Enter/A: select. Del: the .ini's. ESC: back.")
+#define SAY_USERS  SNX_TR_KEYS("Up/Down: user. Left/Right: plays as. Enter: type a nickname. ESC: back.")
 #endif
 /* a failure of the system's (a file not written, a picker that did not open): in a box over the screen, whole, until
    OK, once in the session; the tips or the note keep it after. Over a run or another question, those alone */
@@ -1728,6 +1740,7 @@ static const char* shown_keys(const App* app, char* out, size_t size) {
                    ? (app->place[GUI_PLACE_GAMES] ? SAY_FOLDERS_PICKED : SAY_FOLDERS_GAMES)
                : app->form == GUI_FORM_FOLDERS ? SAY_FOLDERS
                : app->form == GUI_FORM_PLACES  ? SAY_PLACES
+               : app->form == GUI_FORM_USERS   ? SAY_USERS
                                                : SAY_SETTINGS;
     else if (app->menu.view == GUI_LOAD_GAMES)
         keys = SAY_GAMES;
@@ -4015,9 +4028,90 @@ static void group_view(App* app, int g) {
     gui_editor_form(&app->editor, app->view_keys, app->view_count, app->settings.values, NULL);
     app->editor.flat = true;
 }
+#define SAY_SETUP_NICKNAME SNX_TR_NOOP("nickname 4 to 20 of A-Z a-z 0-9 space . _ -")
+/* the User group: its one setting, who the games play as, shown with every user of users.ini to rename */
+static bool users_group(const App* app, int g) {
+    return g > 0 && g < app->groups && !strcmp(app->group_keys[g].key, "User");
+}
+/* its rows, Plays as then a user each with its nickname: how many */
+static int users_fill(App* app) {
+    int i, plays = settings_user(app);
+    snprintf(app->users_form.plays, sizeof app->users_form.plays, snx_tr("User %d: %s"), plays,
+             plays >= 1 && plays <= g_user_count ? g_users[plays - 1].nickname : snx_tr("none in users.ini"));
+    app->users_keys[0] =
+        (GuiThemeKey){"",
+                      SNX_TR_NOOP("Plays as"),
+                      GUI_KEY_ACTION,
+                      offsetof(GuiUsersForm, plays),
+                      sizeof app->users_form.plays,
+                      NULL,
+                      0,
+                      SNX_TR_NOOP("The user the games play as: Left/Right, or Enter to pick by picture")};
+    for (i = 0; i < g_user_count && i < SNX_USERS_MAX; ++i) {
+        snprintf(app->users_label[i], sizeof app->users_label[i], snx_tr("User %d"), i + 1);
+        snprintf(app->users_form.nick[i], sizeof app->users_form.nick[i], "%s", g_users[i].nickname);
+        app->users_keys[i + 1] = (GuiThemeKey){
+            "",
+            app->users_label[i],
+            GUI_KEY_TEXT,
+            offsetof(GuiUsersForm, nick) + (size_t)i * sizeof app->users_form.nick[0],
+            sizeof app->users_form.nick[0],
+            NULL,
+            0,
+            SNX_TR_NOOP(
+                "Its nickname, as the games and Eden's rooms show it: Enter types it, 4 to 20 of A-Z a-z 0-9 space "
+                ". _ -")};
+    }
+    return i + 1;
+}
+static void open_users(App* app, int g, int row) {
+    int n = users_fill(app);
+    gui_editor_form(&app->editor, app->users_keys, n, &app->users_form, NULL);
+    app->editor.flat = true;
+    app->editor.row = SDL_clamp(row, 0, n - 1);
+    app->form = GUI_FORM_USERS;
+    app->group = g;
+    app->page = -1;
+    app->view_count = 0;
+    app->editing = true;
+}
+/* Plays as a step either way, round the users, kept as Settings' user */
+static void plays_as_step(App* app, int step) {
+    char value[16];
+    int n = SDL_max(g_user_count, 1), user = (settings_user(app) - 1 + n + (step < 0 ? -1 : 1)) % n + 1;
+    snprintf(value, sizeof value, "%d", user);
+    gui_settings_set(&app->settings, "user", value);
+    app->editor.dirty = true;
+}
+/* a nickname typed: users.ini written with it, the head's too; one the rule refuses or that cannot be written said, the
+   nickname as it was */
+static void users_commit(App* app) {
+    int number = app->editor.row;
+    char why[512], *nick;
+    app->editor.dirty = false;
+    if (number < 1 || number > g_user_count) return;
+    nick = app->users_form.nick[number - 1];
+    if (!strcmp(nick, g_users[number - 1].nickname)) return;
+    if (!snx_users_nickname_valid(nick))
+        snprintf(app->editor.note, sizeof app->editor.note, snx_tr("%s is not a nickname: %s"), nick,
+                 snx_tr(SAY_SETUP_NICKNAME));
+    else if (!app->users_dir || snx_users_rename(app->users_dir, number, nick, why, sizeof why)) {
+        snprintf(app->editor.note, sizeof app->editor.note, snx_tr("User %d keeps %s: %s"), number,
+                 g_users[number - 1].nickname, app->users_dir ? why : snx_tr("no users/ folder"));
+        say_failure(app, app->editor.note);
+    } else {
+        snprintf(app->editor.note, sizeof app->editor.note, snx_tr("User %d is %s now"), number, nick);
+        users_read(app); /* the head shows the nickname */
+    }
+    users_fill(app); /* the rows as users.ini says */
+}
 static void open_group(App* app, int g) {
     if (!g) {
         open_app(app, 0);
+        return;
+    }
+    if (users_group(app, g)) {
+        open_users(app, g, 0);
         return;
     }
     app->view_count = 0;
@@ -4068,7 +4162,7 @@ static void leave_form(App* app) {
         open_group(app, app->group);
         app->editor.row = SDL_max(row_of(app, row), 0);
         app->editing = true;
-    } else if (form == GUI_FORM_GROUP || form == GUI_FORM_APP)
+    } else if (form == GUI_FORM_GROUP || form == GUI_FORM_APP || form == GUI_FORM_USERS)
         settings_top(app, app->group);
     else if (form == GUI_FORM_FOLDERS)
         open_app(app, GUI_APP_FOLDERS);
@@ -4218,7 +4312,8 @@ static void save_editor(App* app) {
 }
 /* a Settings pick, kept at once */
 static void keep_settings(App* app) {
-    if ((app->form != GUI_FORM_GROUP && app->form != GUI_FORM_SETTINGS && app->form != GUI_FORM_PAD) ||
+    if ((app->form != GUI_FORM_GROUP && app->form != GUI_FORM_SETTINGS && app->form != GUI_FORM_PAD &&
+         app->form != GUI_FORM_USERS) ||
         !app->editor.dirty)
         return;
     app->editor.dirty = false;
@@ -4229,6 +4324,7 @@ static void keep_settings(App* app) {
         say_failure(app, app->editor.note);
     }
     if (app->user != settings_user(app)) users_read(app); /* the head shows the user picked */
+    if (app->form == GUI_FORM_USERS) users_fill(app);     /* Plays as says it too */
 }
 static int setting_row(const App* app, const char* key) {
     int i;
@@ -4692,6 +4788,14 @@ static void editor_key(App* app, GuiKey key) {
             places_reset_ask(app);
         if (what != GUI_EDITOR_LEAVE) return;
     }
+    if (app->form == GUI_FORM_USERS) { /* Plays as steps or picks; a nickname typed is written */
+        if (what == GUI_EDITOR_ACTION && app->editor.step)
+            plays_as_step(app, app->editor.step);
+        else if (what == GUI_EDITOR_ACTION)
+            users_open(app);
+        else if (app->editor.dirty && app->editor.row)
+            users_commit(app);
+    }
     if (what == GUI_EDITOR_SAVE && app->form == GUI_FORM_SETTINGS) /* the groups' last row */
         settings_reset_ask(app);
     else if (what == GUI_EDITOR_SAVE && app->form == GUI_FORM_THEME)
@@ -4801,7 +4905,7 @@ typedef struct {
 } GuiFormBoxes;
 /* the group the groups' list shows open, -1 for none: the one being edited, App for its folders */
 static int form_group(const App* app) {
-    if (app->form == GUI_FORM_GROUP) return app->group;
+    if (app->form == GUI_FORM_GROUP || app->form == GUI_FORM_USERS) return app->group;
     return app->form == GUI_FORM_APP || app->form == GUI_FORM_FOLDERS || app->form == GUI_FORM_PLACES ? 0 : -1;
 }
 /* the columns a form's row label takes, the widest's */
@@ -4844,7 +4948,9 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
         if (g == 0) {
             app_values(app);
             gui_editor_form(&f->peek, app_keys, GUI_APP_ROWS, &app->app_form, NULL);
-        } else if (g < app->groups) {
+        } else if (users_group(app, g))
+            gui_editor_form(&f->peek, app->users_keys, users_fill(app), &app->users_form, NULL);
+        else if (g < app->groups) {
             int n = player_rows(app, g, 0, app->peek_rows), r; /* Controllers: every player's */
             for (r = 0; r < n; ++r) app->peek_keys[r] = app->settings.keys[app->peek_rows[r]];
             if (n)
@@ -5194,7 +5300,6 @@ static void form_pointer(App* app, float x, float y, bool touch) {
 #define SAY_SETUP_ON         SNX_TR_KEYS("Up/Down: row. Enter: next. ESC: back.")
 #define SAY_SETUP_ON_FIRST   SNX_TR_KEYS("Up/Down: row. Enter: next. ESC: exit.")
 #endif
-#define SAY_SETUP_NICKNAME SNX_TR_NOOP("nickname 4 to 20 of A-Z a-z 0-9 space . _ -")
 #define GUI_SETUP_CHOICES  3 /* a page's, at most: Folders' and Keys' */
 static void open_files(App* app);
 static void left_behind(App* app);

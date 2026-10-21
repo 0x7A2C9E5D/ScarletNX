@@ -1232,6 +1232,58 @@ msgstr "nenhuma pasta para o setup.ini"
 msgid "%s is not a nickname: %s"
 msgstr "%s não é um apelido: %s"
 
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap a user to rename it. Back: go back."
+msgstr "Toque num usuário para renomeá-lo. Voltar: retornar."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: user. Left/Right: plays as. Enter: type a nickname. ESC: back."
+msgstr "Cima/Baixo: usuário. Esquerda/Direita: joga como. Enter: digitar um apelido. ESC: voltar."
+
+#: src/gui/main.c
+#, c-format
+msgid "User %d: %s"
+msgstr "Usuário %d: %s"
+
+#: src/gui/main.c
+msgid "none in users.ini"
+msgstr "nenhum no users.ini"
+
+#: src/gui/main.c
+msgid "Plays as"
+msgstr "Joga como"
+
+#: src/gui/main.c
+msgid "The user the games play as: Left/Right, or Enter to pick by picture"
+msgstr "O usuário com que os jogos rodam: Esquerda/Direita, ou Enter para escolher pela foto"
+
+#: src/gui/main.c
+#, c-format
+msgid "User %d"
+msgstr "Usuário %d"
+
+#: src/gui/main.c
+msgid "Its nickname, as the games and Eden's rooms show it: Enter types it, 4 to 20 of A-Z a-z 0-9 space . _ -"
+msgstr "O apelido, como os jogos e as salas do Eden mostram: Enter digita, 4 a 20 de A-Z a-z 0-9 espaço . _ -"
+
+#: src/gui/main.c
+#, c-format
+msgid "User %d keeps %s: %s"
+msgstr "Usuário %d continua %s: %s"
+
+#: src/gui/main.c
+msgid "no users/ folder"
+msgstr "sem pasta users/"
+
+#: src/gui/main.c
+#, c-format
+msgid "User %d is %s now"
+msgstr "Usuário %d agora é %s"
+
 #: src/gui/main.c
 #, c-format
 msgid "No user written: %s"

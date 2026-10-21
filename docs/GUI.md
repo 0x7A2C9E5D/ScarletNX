@@ -352,7 +352,9 @@ and to the run, which is **compiling** until the runner prints its `ScarletNX - 
 The screens are boxes side by side, nothing over another, the default framing them in thin lines and YoRHa
 filling them. At the top the tabs, Menu, Games and Settings, and the screen's title after them against the
 right (`[head] place = tabs`) or on a row of its own under them (`below`), and at its right the user games play as
-(Settings > User): a box framed as the others are holding their nickname and their picture, `users/<uid>.jpg` or Wimsy
+(Settings > User, which lists them under **Plays as**, Left/Right picking, and renames each: Enter types its
+nickname, the rule [USAGE](USAGE.md#users) gives checked, then written to `users.ini`): a box framed as the others are
+holding their nickname and their picture, `users/<uid>.jpg` or Wimsy
 without one ([USAGE](USAGE.md#users)), square or round (`[head] picture`; `none` for no box). A click on it opens
 the users over the screen, each with their picture; the one picked is Settings' user from then on, and ESC or a click
 off them leaves it as it was. The head is the same on every screen of one window: when the main screens' titles

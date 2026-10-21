@@ -5176,6 +5176,55 @@ int main(int argc, char** argv) {
             free(app.users_dir);
             app.users_dir = users;
             users_read(&app);
+            /* Settings > User: who the games play as, Left/Right round the users, then each user's nickname, which Enter
+               types and Enter writes to users.ini, the head's too; one the rule refuses is said, the nickname kept */
+            {
+                int g, user = app.user;
+                char* kept;
+                size_t size;
+                open_settings(&app);
+                for (g = 1; g < app.groups && strcmp(app.group_keys[g].key, "User"); ++g) {}
+                assert(g < app.groups);
+                app.editor.row = g;
+                render(&app);
+                shows(&app, "User 2", rgb(app.theme.ink)); /* the focused group's rows beside it */
+                key(&app, SDLK_RETURN);
+                assert(app.form == GUI_FORM_USERS && gui_editor_rows(&app.editor) == 3 &&
+                       !strcmp(app.users_form.plays, "User 1: Aogo"));
+                render(&app);
+                shows(&app, "Plays as User 1: Aogo", rgb(app.theme.page)); /* focused: on YoRHa's bar */
+                shows(&app, "Xuji", rgb(app.theme.ink));
+                key(&app, SDLK_RIGHT);
+                assert(setting_is(&app, "user", "2") && !strcmp(app.users_form.plays, "User 2: Xuji") && app.user == 2);
+                key(&app, SDLK_LEFT);
+                assert(setting_is(&app, "user", "1") && app.user == 1);
+                key(&app, SDLK_DOWN);
+                key(&app, SDLK_RETURN);
+                assert(app.editor.typing);
+                for (int i = 0; i < 8; ++i) key(&app, SDLK_BACKSPACE);
+                typed(&app, "Aogo 55");
+                key(&app, SDLK_RETURN);
+                assert(!app.editor.typing && !strcmp(app.editor.note, "User 1 is Aogo 55 now") &&
+                       !strcmp(app.user_name, "Aogo 55"));
+                kept = (char*)snx_read_file(ini, &size);
+                assert(kept && strstr(kept, "[user1]\nnickname=Aogo 55\n[user2]"));
+                free(kept);
+                key(&app, SDLK_RETURN);
+                for (int i = 0; i < 8; ++i) key(&app, SDLK_BACKSPACE);
+                typed(&app, "Ab");
+                key(&app, SDLK_RETURN);
+                assert(!strcmp(app.editor.note, "Ab is not a nickname: nickname 4 to 20 of A-Z a-z 0-9 space . _ -") &&
+                       !strcmp(app.users_form.nick[0], "Aogo 55"));
+                key(&app, SDLK_RETURN); /* back as the tests below know it */
+                for (int i = 0; i < 8; ++i) key(&app, SDLK_BACKSPACE);
+                typed(&app, "Aogo");
+                key(&app, SDLK_RETURN);
+                assert(!strcmp(app.user_name, "Aogo"));
+                key(&app, SDLK_ESCAPE);
+                assert(app.form == GUI_FORM_SETTINGS && app.editor.row == g);
+                key(&app, SDLK_ESCAPE);
+                assert(!app.editing && app.user == user);
+            }
             free(ini);
             render(&app);
             menu_boxes(&app, &m);

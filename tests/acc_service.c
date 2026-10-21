@@ -414,6 +414,47 @@ static void test_start(void) {
     puts("PASS users.ini started over with one user, the one before kept as users.ini.old");
 }
 
+/* a user's nickname changed in users.ini, its other lines as they were: a comment, the uid, a key after it; a section
+   with none gets one; a nickname the rule refuses, or no such user, changes nothing; with no users.ini, user 1 starts
+   one */
+static void test_rename(void) {
+    char why[512], *now;
+    put_ini("; mine\n[user1]\nuid=" UID2 "\nnickname = Aogo\n\n[user2]\nuid=" UID3 "\n  nickname=Xuji\n");
+    CHECK(snx_users_load(DIR, 1, why, sizeof why) == 0 && g_user_count == 2);
+    CHECK(snx_users_rename(DIR, 2, "Xuji Two", why, sizeof why) == 0 && !strcmp(g_users[1].nickname, "Xuji Two"));
+    now = got("users.ini");
+    CHECK(now &&
+          !strcmp(now, "; mine\n[user1]\nuid=" UID2 "\nnickname = Aogo\n\n[user2]\nuid=" UID3 "\nnickname=Xuji Two\n"));
+    free(now);
+    CHECK(snx_users_rename(DIR, 1, "Aogo.55", why, sizeof why) == 0);
+    now = got("users.ini");
+    CHECK(now && strstr(now, "[user1]\nuid=" UID2 "\nnickname=Aogo.55\n\n[user2]") && !got("users.ini.new"));
+    free(now);
+    CHECK(snx_users_load(DIR, 1, why, sizeof why) == 0 && !strcmp(g_users[0].nickname, "Aogo.55") &&
+          !strcmp(g_users[1].nickname, "Xuji Two"));
+    CHECK(snx_users_rename(DIR, 2, "Ada", why, sizeof why) == -1 && strstr(why, "nickname Ada is not 4 to 20"));
+    CHECK(snx_users_rename(DIR, 3, "Afugo", why, sizeof why) == -1 && strstr(why, "there is no user 3: 2 users"));
+    now = got("users.ini");
+    CHECK(now && strstr(now, "nickname=Xuji Two\n")); /* as it was */
+    free(now);
+    /* a [user1] whose nickname line is missing at the file's end, no line's end after it */
+    put_ini("[user1]");
+    CHECK(snx_users_load(DIR, 1, why, sizeof why) == 0 && g_user_count == 1);
+    CHECK(snx_users_rename(DIR, 1, "Afugo", why, sizeof why) == 0);
+    now = got("users.ini");
+    CHECK(now && !strcmp(now, "[user1]\nnickname=Afugo\n"));
+    free(now);
+    gone("users.ini");
+    CHECK(snx_users_load(DIR, 1, why, sizeof why) == 0 && g_user_count == 1);
+    CHECK(snx_users_rename(DIR, 1, "Wimsy", why, sizeof why) == 0);
+    now = got("users.ini");
+    CHECK(now && strstr(now, "[user1]\nuid=0123456789abcdeffedcba9876543210\nnickname=Wimsy\n"));
+    free(now);
+    gone("users.ini");
+    gone("users.ini.old");
+    puts("PASS a user renamed in users.ini, its other lines as they were");
+}
+
 static void test_refused(void) {
     char why[512];
     refused("[user1]\nnickname=Aogo\ncolour=red\n", 1, "colour is not a setting");
@@ -481,6 +522,7 @@ int main(void) {
     test_users();
     test_first_uid();
     test_start();
+    test_rename();
     test_refused();
     gone("users.ini");
     snx_remove_tree(DIR);

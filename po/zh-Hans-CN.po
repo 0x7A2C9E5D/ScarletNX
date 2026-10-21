@@ -1232,6 +1232,58 @@ msgstr "没有存放 setup.ini 的文件夹"
 msgid "%s is not a nickname: %s"
 msgstr "%s 不是有效的昵称：%s"
 
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap a user to rename it. Back: go back."
+msgstr "轻触用户以改名. 返回: 后退."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: user. Left/Right: plays as. Enter: type a nickname. ESC: back."
+msgstr "上/下: 用户. 左/右: 游玩用户. Enter: 输入昵称. ESC: 返回."
+
+#: src/gui/main.c
+#, c-format
+msgid "User %d: %s"
+msgstr "用户 %d：%s"
+
+#: src/gui/main.c
+msgid "none in users.ini"
+msgstr "users.ini 中没有"
+
+#: src/gui/main.c
+msgid "Plays as"
+msgstr "游玩用户"
+
+#: src/gui/main.c
+msgid "The user the games play as: Left/Right, or Enter to pick by picture"
+msgstr "游戏所用的用户：左/右，或 Enter 从头像中选择"
+
+#: src/gui/main.c
+#, c-format
+msgid "User %d"
+msgstr "用户 %d"
+
+#: src/gui/main.c
+msgid "Its nickname, as the games and Eden's rooms show it: Enter types it, 4 to 20 of A-Z a-z 0-9 space . _ -"
+msgstr "昵称，游戏和 Eden 中显示的名字：Enter 输入，4 到 20 个 A-Z a-z 0-9 空格 . _ -"
+
+#: src/gui/main.c
+#, c-format
+msgid "User %d keeps %s: %s"
+msgstr "用户 %d 保持 %s：%s"
+
+#: src/gui/main.c
+msgid "no users/ folder"
+msgstr "没有 users/ 文件夹"
+
+#: src/gui/main.c
+#, c-format
+msgid "User %d is %s now"
+msgstr "用户 %d 现在是 %s"
+
 #: src/gui/main.c
 #, c-format
 msgid "No user written: %s"

@@ -293,6 +293,12 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "Tap a user to rename it. Back: go back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "Arrows/mouse: move. Space/Enter/click: select."
 msgstr ""
 
@@ -390,6 +396,12 @@ msgstr ""
 #: src/gui/main.c
 #, snx-keys
 msgid "Arrows/pad: move, change. Enter/A: select. Del: the .ini's. ESC: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: user. Left/Right: plays as. Enter: type a nickname. ESC: back."
 msgstr ""
 
 #: src/gui/main.c
@@ -1172,6 +1184,55 @@ msgid "Each player's own, as Eden's tabs: Left/Right go round All and players 1 
 msgstr ""
 
 #: src/gui/main.c
+msgid "nickname 4 to 20 of A-Z a-z 0-9 space . _ -"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "User %d: %s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "none in users.ini"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Plays as"
+msgstr ""
+
+#: src/gui/main.c
+msgid "The user the games play as: Left/Right, or Enter to pick by picture"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "User %d"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Its nickname, as the games and Eden's rooms show it: Enter types it, 4 to 20 of A-Z a-z 0-9 space . _ -"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s is not a nickname: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "User %d keeps %s: %s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "no users/ folder"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "User %d is %s now"
+msgstr ""
+
+#: src/gui/main.c
 msgid "0.25 of Auto"
 msgstr ""
 
@@ -1372,10 +1433,6 @@ msgid "Up/Down: row. Enter: next. ESC: exit."
 msgstr ""
 
 #: src/gui/main.c
-msgid "nickname 4 to 20 of A-Z a-z 0-9 space . _ -"
-msgstr ""
-
-#: src/gui/main.c
 msgid "The system's random number generator failed: no uid for a new user"
 msgstr ""
 
@@ -1391,11 +1448,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "no folder for setup.ini"
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
-msgid "%s is not a nickname: %s"
 msgstr ""
 
 #: src/gui/main.c
