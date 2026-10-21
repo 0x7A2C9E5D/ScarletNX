@@ -2352,6 +2352,18 @@ msgstr ""
 msgid "Account saves"
 msgstr ""
 
+#: src/common/utilities/setup.c
+msgid "Recompiled games"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "games/ in the data folder"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "recompiled/, and dumps/ for the dumps"
+msgstr ""
+
 #: src/nx/runtime/settings.txt
 msgid "gdbstub"
 msgstr ""

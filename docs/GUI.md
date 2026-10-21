@@ -5,7 +5,7 @@
 ## Index
 
 * [Setup](#setup)
-* [Games: the games of games/ and the player's folders](#games-the-games-of-games-and-the-players-folders)
+* [Games: the games of recompiled/ and the player's folders](#games-the-games-of-recompiled-and-the-players-folders)
 * [Output and resource use](#output-and-resource-use)
 * [Themes](#themes)
   * [Theme formats](#theme-formats)
@@ -35,7 +35,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - Up/Down and Left/Right move the yellow focus, wrapping at the ends.
 - Tab and Shift+Tab go round the menu, Games and the Settings, the tabs at the top; a click on a tab
   opens it. A theme edited and not saved keeps its screen.
-- A list with rows out of sight (the menu with big letters, `games/`'s pages, the Settings, the theme
+- A list with rows out of sight (the menu with big letters, `recompiled/`'s pages, the Settings, the theme
   editor) shows an arrow past the right edge of its boxes, up on its first row and down on its last, in
   the soft colour.
 - Moving the mouse over an item focuses it in yellow without activating it; in the Settings, a row of the list the
@@ -51,7 +51,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   stays pink while another item is hovered in yellow. Mouse controls also work
   on Games' rows.
 - A finger taps an item anywhere on its row, as a click does on its label; a swipe across
-  turns the pages of `games/`; a tap on a finished run returns to the menu, and one on a
+  turns the pages of `recompiled/`; a tap on a finished run returns to the menu, and one on a
   running run's ESC line aborts it. Android's back button is ESC. On a screen packed with
   pixels (a phone) the text takes the display's own scale, as far as the menu still fits.
 - **Load Switch NSP/XCI/NRO**, **Load Linux ARM ELF** and **Load 3DS CIA** open a screen as the
@@ -62,7 +62,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   dump's extracted straight into its game's folder (as much again only with an **Extractions** folder picked, which
   keeps a copy, and in the temporary folder with *Extract to tmpfs*); when its disks have less free, the menu says how
   much it needs and *Run anyway* takes a second press.
-- **Load 3DS CIA** uses `scarletnx-3ds`. Its `games/` browser lists CIA inputs,
+- **Load 3DS CIA** uses `scarletnx-3ds`. Its `recompiled/` browser lists CIA inputs,
   not host executables. The driver reads supported decrypted application CIAs where they lie, or extracts them
   with *Extract game container*.
   A native Linux build with `SNX_3DS_AOT=ON` then performs static ARM11 integer
@@ -104,18 +104,18 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   and a press on a controller give it that one (ESC leaves it as it was, Del makes it *Any* again); its *Button
   map* is the page above on its own keys, its A and B as its *Swap A/B* says.
   **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **Text size**, which opens
-  its box of sizes (below), **Theme editor**, which comes back to App, and **Library**: first `games/`,
+  its box of sizes (below), **Theme editor**, which comes back to App, and **Library**: first `recompiled/`,
   where recompiled games go: Enter there picks another, as **Folders > Games** does; at its default it stays on the
   list (the foot's Del greyed), and a folder picked goes back to the default with Del pressed twice, only the setting
-  changing. Then the player's own folders, whose games the `games/` browser lists after
-  `games/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
+  changing. Then the player's own folders, whose games the `recompiled/` browser lists after
+  `recompiled/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
   or a path pasted with Ctrl+V is added too. A folder with folders in it asks first: *Only this
   folder*, or *With subfolders*, whose games are listed too, four levels down, hidden folders
   left alone (its row says *+ subfolders*). Del, or Enter twice, takes one off the list (the
   folder stays). They are kept in `folders.txt` beside `settings.ini`, a line each, `/**` after
   one kept with its subfolders; one that cannot be read is named when the games are listed. Under App's rows, the
   three folders in use: the data folder, the games' and the extractions'. **Folders** has a row for
-  the data folder (**Data**: `games/`, `themes/` and `prod.keys`), **Games** and **Extractions**, each its default or a
+  the data folder (**Data**: `recompiled/`, `themes/` and `prod.keys`), **Games** and **Extractions**, each its default or a
   folder picked. Enter opens the folder picker, a folder dropped or pasted with Ctrl+V takes the focused row, Del puts
   its default back and the last row, **All back to the defaults**, all three. A row says *default*, *picked* or why
   its folder cannot be; the line under the rows names the folder in use, the one above its disk's free space. A folder
@@ -125,7 +125,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   and games may run slower: *Use it* takes a second tap, and its row says *outside the app*.
   Nothing is moved, the folder before keeps what it has. The menu's own files stay where they are. **Clean old settings**, Enter twice (the first says what it
   would do), takes out the settings nothing reads any more: the `[Deprecated]` section the runtime
-  gives a game's `.ini` for the keys it no longer uses (in the config folder's `games/`, in `games/`
+  gives a game's `.ini` for the keys it no longer uses (in the config folder's `recompiled/`, in `recompiled/`
   and in the player's folders), the keys of `settings.ini` that no setting of the runtime's takes
   (only while the runtime lists its settings) and those of `app.ini` the menu does not know. A box
   over the screen then lists each file and what was done to it, or why not, Up/Down and the wheel going over those
@@ -160,7 +160,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   `--key=value` when the game is recompiled: by **R**, or by a run that has to (a dump played the first time, an NRO
   each time). A game made already keeps its code until then. The first two settings and these reach neither the Linux
   nor the 3DS driver.
-- The Status box, after the RAM and the CPU, says what ScarletNX's folders take (games/,
+- The Status box, after the RAM and the CPU, says what ScarletNX's folders take (recompiled/,
   work/ and themes/ of the data folder, and on Linux its config, state and cache folders, else
   the menu's own) and what is left on that disk, counted as the menu opens and after each run.
 - Settings > App's **Theme** switches to the next theme, or the one before: the built-in Default
@@ -207,7 +207,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - As it opens, the menu shows in a box what an older version left where this one no longer looks, a
   folder at a time: where it is (`- `, in the failure colour, a path too long for a row going on in the next) and
   under it the space it takes, counted as the box shows (*counting* until then). They are the menu's `gui/`, `work/`, each game laid out
-  beside the others in `games/` or a Library folder (`games/<id>/` now), a portable copy's `games/`
+  beside the others in `games/` or a Library folder (`games/<id>/` now), the data folder's `games/` (`recompiled/` now,
+  its games still listed until they are moved), a portable copy's `games/`
   beside the program, and a build tree's `games/`, `work/` and keys in its checkout
   ([USAGE](USAGE.md#folders)). Up/Down, PgUp/PgDn and the wheel go over those that do not fit (an arrow at the
   right of the first says some are above it, *and N more* the ones under), any other key, click or tap closes it;
@@ -225,7 +226,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   folder ([USAGE](USAGE.md#folders)): `$XDG_STATE_HOME/scarletnx/` on Linux, by default
   `~/.local/state/scarletnx/`, `%APPDATA%\scarletnx\state\` on Windows, or the data folder's `state/` on Android. An
   older version's, in a `gui/` folder, stay where they are. A line per
-  game: `switch`, `linux` or `3ds`, `file` or `games` (a program from games/, run as it is),
+  game: `switch`, `linux` or `3ds`, `file` or `games` (a program from recompiled/, run as it is: the token keeps its old name),
   the path and the name, separated by tabs. A list that cannot be written there is named in the
   message, after a run's end too, until it can be.
 
@@ -271,10 +272,10 @@ Once the last page is done the menu opens, `setup.ini` written. After an update 
 shows that notice alone (1/1), with OK, before the menu. `scarletnx --debug` (or `--skip --skip`) opens the menu with no
 setup, writing nothing.
 
-## Games: the games of games/ and the player's folders
+## Games: the games of recompiled/ and the player's folders
 
 **Games**, the tab, lists the games: the ones ready to run (a recompiled game runs directly), the dumps to prepare
-on Android, and CIA files, which go to the 3DS driver. It reads the `games/` of the
+on Android, and CIA files, which go to the 3DS driver. It reads the `recompiled/` of the
 folder the driver works in, which the menu passes it as `--repo`: a portable copy's `.scarletnx/` beside the
 AppImage (or the GUI), else the user's data folder, a build tree's menu's too ([USAGE](USAGE.md#folders)), then each
 folder of Settings > App > Library. Each game is shown by the name in its `control.nacp`, which the recompile copies into
@@ -296,7 +297,7 @@ cannot be read is named and the others still listed.
 - Resizing adjusts the page size while keeping the selected file visible.
 - Empty or missing directories show a diagnostic and still provide Add a folder.
 
-A recompiled game, in a folder of its own (`games/<id>/<id>`), runs with the Settings through the menu's own
+A recompiled game, in a folder of its own (`recompiled/<id>/<id>`), runs with the Settings through the menu's own
 `scarletnx` and is never extracted as a dump: it plays as it is when this build made it, and is recompiled first,
 where it is, when another build did ([USAGE](USAGE.md#extract--aot--run)), the run showing the recompile before the
 game loads. A game an older version laid out beside the others runs directly, as every game does on iOS. A CIA goes

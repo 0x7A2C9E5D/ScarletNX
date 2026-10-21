@@ -2447,3 +2447,12 @@ msgstr "Os dumps postos aqui são listados, os das subpastas também: arquivos .
 
 msgid "%s: [folders] games = %s is now recompiled = %s"
 msgstr "%s: [folders] games = %s agora é recompiled = %s"
+
+msgid "Recompiled games"
+msgstr "Jogos recompilados"
+
+msgid "games/ in the data folder"
+msgstr "games/ na pasta de dados"
+
+msgid "recompiled/, and dumps/ for the dumps"
+msgstr "recompiled/, e dumps/ para os dumps"

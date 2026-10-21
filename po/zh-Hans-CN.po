@@ -2447,3 +2447,12 @@ msgstr ""
 
 msgid "%s: [folders] games = %s is now recompiled = %s"
 msgstr "%s：[folders] games = %s 现在是 recompiled = %s"
+
+msgid "Recompiled games"
+msgstr "已重编译的游戏"
+
+msgid "games/ in the data folder"
+msgstr "数据文件夹中的 games/"
+
+msgid "recompiled/, and dumps/ for the dumps"
+msgstr "recompiled/，转储放在 dumps/"

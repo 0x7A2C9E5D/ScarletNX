@@ -2074,6 +2074,34 @@ int main(int argc, char** argv) {
             folder_remove(&app, 0);
             free(deep_as);
             free(deep);
+            /* the data folder's games/, where an older version made its games: still listed, and said as left behind
+               with where they go now, until the player moves them */
+            {
+                char *data_was = app.data_dir, *old_games, *old_game;
+                app.data_dir = snx_path_join(temporary, "older data");
+                old_games = snx_path_join(app.data_dir, "games");
+                old_game = snx_format("%s/Old/%s", old_games, GAME("Old"));
+                {
+                    char* dir = snx_dirname(old_game);
+                    assert(!snx_mkdirs(dir) && !snx_write_file(old_game, "fixture", 7) &&
+                           !snx_make_executable(old_game));
+                    free(dir);
+                }
+                games_scan(&app, &listed, said, sizeof said);
+                found = 0;
+                for (g = 0; g < listed.count; ++g) found |= !strcmp(listed.names[g], "Old");
+                assert(found && !strstr(said, old_games)); /* the test's own games/ is gone: said, not this */
+                gui_games_free(&listed);
+                left_behind(&app);
+                snprintf(line, sizeof line, "%s" SAY_LEFT_BY "%s\n", old_games, app.games_dir);
+                assert(app.left && strstr(app.left, line) && snx_is_file(old_game)); /* nothing moved */
+                assert(!snx_remove_tree(app.data_dir));
+                free(app.data_dir);
+                app.data_dir = data_was;
+                left_behind(&app);
+                free(old_game);
+                free(old_games);
+            }
 #undef GAME
         }
         e.drop.data = more;
