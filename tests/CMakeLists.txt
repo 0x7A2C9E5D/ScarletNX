@@ -1091,6 +1091,12 @@ add_executable(snx-test-variants variants.c)
 snx_test_target(snx-test-variants 11)
 target_link_libraries(snx-test-variants PRIVATE scarletnx-common)
 add_test(NAME variants COMMAND snx-test-variants)
+# the AOT build linking a profile cache's unit and emitting snx_variants
+add_executable(snx-test-aot-variants aot_variants.c)
+snx_test_target(snx-test-aot-variants 11)
+target_link_libraries(snx-test-aot-variants PRIVATE snx_driver_llvm ${CMAKE_DL_LIBS})
+add_test(NAME aot_variants COMMAND snx-test-aot-variants)
+set_tests_properties(aot_variants PROPERTIES TIMEOUT 120)
 # the build-side reader of the runtime JIT's cache
 add_executable(snx-test-jit-cache jit_cache.c)
 snx_test_target(snx-test-jit-cache 11)

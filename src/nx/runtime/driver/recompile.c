@@ -29,6 +29,7 @@ static void usage(void) {
          "  --outdir DIR           Where the game's folder goes (default: games/ in the data folder)\n"
          "  -O LEVEL               Optimization: 0,1,2,3,s,z (default: 2), the setting opt\n"
          "  --jobs N               Parallel compiles (default: CPU count), the setting aot_threads");
+    puts("  --jit-cache FILE       Link a profile run's .jitcache into the module as runtime code");
     puts("  --KEY=VALUE            A setting of the recompile: opt, aot_threads, and LLVM's (llvm_pass_<pass>=0\n"
          "                         turns that pass off; scarletnx --settings=recompile lists them)");
     printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",
@@ -317,7 +318,8 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs)
     return rc;
 }
 int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
-    const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *arg, *value;
+    const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *jit_cache = NULL,
+               *arg, *value;
     SnxU64 addon = 0, owner = 0, version = SNX_NO_VERSION; /* an update, its game and version, as its content meta
                                                                 names them */
     SnxLlvmBuild llvm;
@@ -395,7 +397,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             }
             if (strcmp(arg, "-o") && strcmp(arg, "--name") && strcmp(arg, "--out") && strcmp(arg, "--outname") &&
                 strcmp(arg, "--outdir") && strcmp(arg, "--runtime") && strcmp(arg, "--target") && strcmp(arg, "-O") &&
-                strcmp(arg, "--jobs") && strcmp(arg, "--chunk"))
+                strcmp(arg, "--jobs") && strcmp(arg, "--chunk") && strcmp(arg, "--jit-cache"))
                 return snx_error("unknown recompiler option: %s", arg);
             if (!value) {
                 if (++i == argc) return snx_error("%s requires a value", arg);
@@ -416,6 +418,8 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             } else if (!strcmp(arg, "--jobs")) {
                 g_settings.aot_threads = (int)number(value, 1024);
                 if (!g_settings.aot_threads) return snx_error("--jobs expects 1..1024");
+            } else if (!strcmp(arg, "--jit-cache")) {
+                jit_cache = value;
             } else {
                 gen.chunk_instrs = number(value, INT_MAX);
                 if (!gen.chunk_instrs) return snx_error("--chunk expects a positive instruction count");
@@ -542,6 +546,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         goto done;
     }
     gen.title = title;
+    gen.jit_cache = jit_cache;
     gen.hints = read_hints(base, program.npdm.is64, &gen.hint_count);
     if (!compile.quiet) printf("Recompiling %s (%zu modules)\n", title, program.module_count);
     /* an add-on's files: its dump, read in place, or what the driver extracts into its data folder */
