@@ -1199,6 +1199,7 @@ void vk_mem_trim(u64 extra, int force) {
         need = extra > gone ? extra - gone : 0;
     } else if (usage <= budget / 100 * 90)
         return;
+    SNX_ZONE_V(z, "vk mem trim", force);
     /* What goes first is what can be had again without loss: textures (loaded again from memory), own buffers (copied
        again), then render targets memory holds. Those unused for a second go down to 80% of the budget, room for what
        comes next. The working set itself (unused for two presents) goes only to stay under 95%: freeing it to 80%
@@ -1254,8 +1255,10 @@ int vk_cache_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocati
                                          .pCreateInfo = ii};
     VkMemoryRequirements2 req = {.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
     VkResult res;
+    SNX_ZONE(z, "vk image create");
     vkGetDeviceImageMemoryRequirements(g_vk.dev, &q, &req);
     *bytes = req.memoryRequirements.size;
+    SNX_ZONE_VALUE(z, *bytes);
     *img = VK_NULL_HANDLE;
     *mem = VK_NULL_HANDLE;
     /* one as big found no memory this present: neither will this one (what was freed meanwhile is released when the

@@ -34,6 +34,7 @@
 #include "common/cpu/aarch64/cpu.h"
 #include "common/utilities/endian.h"
 #include "nx/gpu/gpu.h"
+#include "nx/runtime/platform/tracy.h"
 #include "volk.h"
 #include "vk_mem_alloc.h"
 #include "nx/gpu/shader/shader.h"
@@ -131,6 +132,14 @@ int vk_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* me
 /* the same, with the result of the call that failed in res (VK_ERROR_OUT_OF_DEVICE_MEMORY: no memory for it) */
 int vk_image_create_r(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem, VkResult* res);
 void vk_image_destroy(VkImage img, VmaAllocation mem);
+/* Tracy memory events for VMA allocations. */
+#if defined(SNX_TRACY)
+void vk_mem_track(VmaAllocation a);
+void vk_mem_untrack(VmaAllocation a);
+#else
+static inline void vk_mem_track(VmaAllocation a) { (void)a; }
+static inline void vk_mem_untrack(VmaAllocation a) { (void)a; }
+#endif
 /* The caches of textures, render targets and buffers are kept within the driver's budget for the heap images go to
    (VK_EXT_memory_budget through VMA; vk_budget_mb lowers it, for testing): past it the driver pages memory out,
    which took 160 ms frames and then the device in one game. Ages are kept in presents, and measured in time as well

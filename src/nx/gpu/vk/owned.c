@@ -30,6 +30,7 @@ VkOwnRes* vk_own_res_new(u64 size) {
         free(r);
         return NULL;
     }
+    vk_mem_track(r->mem);
     r->size = size;
     r->refs = 1;
     return r;
@@ -97,6 +98,7 @@ int vk_own_cpu_read(u64 cpu, u64 size, u32 presents) {
 static void own_land(const OwnRange* r, u8* const* dst, u32 n) {
     u64 cap = g_vk.alloc_cap / 4, done = 0;
     u32 i = 0;
+    SNX_ZONE_V(z, "vk own land", n);
     vk_lock();
     for (u32 k = 0; k < n; k++) cpu_read_note(r[k].addr, r[k].size);
     vk_render_end();

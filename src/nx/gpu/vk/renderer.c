@@ -214,6 +214,7 @@ static void vkr_dispatch(GpuChannel* ch, const u32* q, u64 code) {
 }
 /* Pending shader results land before the stream signals or waits. */
 static void vkr_before_syncwait(void) {
+    SNX_ZONE(z, "vk before syncwait");
     vk_buf_land_syncwait();
     vk_gfx_image_land();
     vk_compute_land();
@@ -253,6 +254,7 @@ static Surf* cpu_frame(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout, u32 bh
             g_cpu_img = NULL;
             return NULL;
         }
+        vk_mem_track(g_cpu_img->mem);
     }
     /* its bytes, staged as they are: a block linear one's whole rows of blocks, a pitch linear one's rows (and
        16 bytes, as a conversion reads whole words and a row of 2 byte pixels may end inside one) */
@@ -335,11 +337,22 @@ static void flip_src(VkImageBlit* b, u32 transform) {
     }
 }
 
+#if defined(SNX_TRACY)
+/* The heap the caches manage, as vk_mem_use reads it for their own trimming, in MB. */
+static void gpu_memory_plots(void) {
+    u64 used, budget;
+    vk_mem_use(&used, &budget);
+    SNX_PLOT("gpu memory MB", (double)used / (1024.0 * 1024.0));
+    SNX_PLOT("gpu memory budget MB", (double)budget / (1024.0 * 1024.0));
+}
+#endif
+
 /* The window's image: src's g_last_ rectangle (a frame of fw x fh, flipped by transform) letterboxed on black, or
    black alone, with the on-screen controls and the game's menu over it; then the frame's commands are submitted and
    the image presented. A game's frame (game) also moves the per-present bookkeeping, and without src shows nothing.
    Under vk_lock */
 static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
+    SNX_ZONE(z_show, "vk show");
     /* the size the swapchain was made for, not the extent the surface clamped it to: that can stay different */
     int ww, wh, srgb = src ? is_srgb(src->f.vk) : g_sc_srgb, shown = backend_window_shown();
     backend_window_size(&ww, &wh);
@@ -438,6 +451,7 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
         /* the time from the last present, for the stats line: frames slower than 50 ms (a hitch at any pace a game
            runs at) and the slowest, since the last line */
         static u64 last_present_ns, slow_frames, slowest_ns;
+        static u64 was_drawn __attribute__((unused)); /* the draws plot's base; only the profiler reads it */
         /* the counters as of the last present: a slow frame says what it did, which names what a hitch waited for */
         static u64 was[10];
         u64 now_ns = plat_ns(), is[10];
@@ -447,6 +461,18 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
         is[9] = g_vk_finish_ns / 1000000;
         if (last_present_ns) {
             u64 d = now_ns - last_present_ns;
+            SNX_PLOT("frame ms", (double)d / 1e6);
+#if defined(SNX_TRACY)
+            gpu_memory_plots();
+#endif
+            SNX_PLOT("draws", (double)(g_vk_drawn - was_drawn));
+            SNX_PLOT("shaders", (double)(is[4] - was[4]));
+            SNX_PLOT("pipelines", (double)(is[0] - was[0]));
+            SNX_PLOT("pipeline cache hits", (double)(is[1] - was[1]));
+            SNX_PLOT("pipeline make ms", (double)(is[2] - was[2]));
+            SNX_PLOT("pipeline wait ms", (double)(is[3] - was[3]));
+            SNX_PLOT("texture MB", (double)(is[7] - was[7]) / (1024.0 * 1024.0));
+            was_drawn = g_vk_drawn;
             if (d > 50000000) {
                 slow_frames++;
                 LOG_LIMIT(200,
@@ -574,6 +600,7 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
    no image to draw to) is still submitted, with the per-present bookkeeping, so frames don't pile up */
 static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt, const i32 crop[4],
                                u32 transform) {
+    SNX_ZONE(z_present, "present");
     vk_lock();
     vk_buf_writable_abort(); /* a draw abandoned during setup has no shader writes to land */
     vk_render_end();
@@ -647,9 +674,11 @@ static u64 surf_save(Surf* s, u32 x, u32 y, u32 w, u32 h, u32 transform, const c
     VkImage tmp;
     VmaAllocation tmem;
     if (!VK_OK(vmaCreateImage(g_vk.vma, &ii, &aci, &tmp, &tmem, NULL))) return hash;
+    vk_mem_track(tmem);
     VkBuffer buf;
     u8* p = vk_readback_buffer((u64)w * h * 4, &buf);
     if (!p) {
+        vk_mem_untrack(tmem);
         vmaDestroyImage(g_vk.vma, tmp, tmem);
         return hash;
     }
@@ -680,6 +709,7 @@ static u64 surf_save(Surf* s, u32 x, u32 y, u32 w, u32 h, u32 transform, const c
     rec_CmdPipelineBarrier2(cb, &di);
     vk_finish();
     vk_readback_ready();
+    vk_mem_untrack(tmem);
     vmaDestroyImage(g_vk.vma, tmp, tmem);
     /* the pixels as the device wrote them, little-endian words: the hash is the same on every host */
     const u8* px = p;

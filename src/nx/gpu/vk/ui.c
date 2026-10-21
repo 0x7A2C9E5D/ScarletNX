@@ -180,6 +180,7 @@ static void atlas_upload(VkCommandBuffer cb) {
                               .imageExtent = {(u32)w, (u32)h, 1}};
     if (!px || version == g_atlas_version) return;
     if (!VK_OK(vmaCreateBuffer(g_vk.vma, &bci, &bai, &buf, &mem, &info))) return;
+    vk_mem_track(mem);
     memcpy(info.pMappedData, px, (size_t)w * (size_t)h * 4);
     vmaFlushAllocation(g_vk.vma, mem, 0, VK_WHOLE_SIZE);
     vk_defer_buffer(buf, mem);
@@ -189,8 +190,10 @@ static void atlas_upload(VkCommandBuffer cb) {
         g_atlas = VK_NULL_HANDLE;
         return;
     }
+    vk_mem_track(g_atlas_mem);
     vci.image = g_atlas;
     if (!VK_OK(vkCreateImageView(g_vk.dev, &vci, NULL, &g_atlas_view))) {
+        vk_mem_untrack(g_atlas_mem);
         vmaDestroyImage(g_vk.vma, g_atlas, g_atlas_mem);
         g_atlas = VK_NULL_HANDLE;
         return;

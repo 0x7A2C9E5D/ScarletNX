@@ -143,7 +143,10 @@ static void dead_free(Frame* f) {
         if (d->v2) vkDestroyImageView(g_vk.dev, d->v2, NULL);
         if (d->view) vkDestroyBufferView(g_vk.dev, d->view, NULL);
         if (d->img) vk_image_destroy(d->img, d->mem);
-        if (d->buf) vmaDestroyBuffer(g_vk.vma, d->buf, d->mem);
+        if (d->buf) {
+            vk_mem_untrack(d->mem);
+            vmaDestroyBuffer(g_vk.vma, d->buf, d->mem);
+        }
         if (d->fn) d->fn(d->arg);
     }
     f->ndead = 0;
@@ -236,6 +239,7 @@ static int ring_misplaced(const Ring* r, const VmaBudget* b) {
 static void ring_reset(Ring* r, const VmaBudget* budget) {
     r->small = r->cap > STAGE_MIN && r->used <= r->cap / 4 ? r->small + 1 : 0;
     if (r->small >= 300 || (budget && r->buf && ring_misplaced(r, budget))) {
+        vk_mem_untrack(r->mem);
         vmaDestroyBuffer(g_vk.vma, r->buf, r->mem);
         *r = (Ring){0};
     }
@@ -245,6 +249,7 @@ static void ring_reset(Ring* r, const VmaBudget* budget) {
 static void timeline_wait(u64 value) {
     VkSemaphoreWaitInfo wi = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &g_gsem, .pValues = &value};
+    SNX_ZONE(z_wait, "vk timeline wait");
     gpu_wait_note("a graphics submission", value);
     SNX_ZONE_V(z, "timeline wait", value);
     VK_OK(vkWaitSemaphores(g_vk.dev, &wi, UINT64_MAX));
@@ -262,6 +267,7 @@ static void land_through(u64 value) {
 /* the frame's previous use is done, its results landed and what it held freed, before it records again */
 static void frame_recycle(Frame* f) {
     u64 done = f->last > f->hold ? f->last : f->hold;
+    SNX_ZONE(z, "vk frame recycle");
     if (done) {
         timeline_wait(done);
         land_through(done);
@@ -384,6 +390,7 @@ static u8* ring_alloc(Frame* f, Ring* r, u64 size, u64 align, VkBufferUsageFlags
             r->cap = 0;
             return NULL;
         }
+        vk_mem_track(r->mem);
         r->ptr = info.pMappedData;
         r->cap = cap;
         at = 0;
@@ -440,7 +447,7 @@ u8* vk_stage_back(u64 size, VkBuffer* buf, u64* off, VmaAllocation* mem) {
 
 /* the frame's commands submitted, waiting for xw and signaling xs besides the graphics timeline (one each at most) */
 static void submit(const VkSemaphoreSubmitInfo* xw, const VkSemaphoreSubmitInfo* xs) {
-    SNX_ZONE(z, "submit");
+    SNX_ZONE(z_submit, "vk submit");
     vk_render_end();
     Frame* f = &g_fr[g_cur];
     VkCommandBuffer cb = vk_cmd(); /* a submit with nothing recorded still has to wait and signal */
@@ -476,11 +483,12 @@ static void submit(const VkSemaphoreSubmitInfo* xw, const VkSemaphoreSubmitInfo*
     g_sub_ns = plat_ns();
     f->recording = 0;
     f->icb++;
+    SNX_ZONE_VALUE(z_submit, f->icb);
     f->last = g_gval;
     /* results of submissions the GPU has finished land now, so a later release doesn't find them pending */
     u64 done = 0;
     if (VK_OK(vkGetSemaphoreCounterValue(g_vk.dev, g_gsem, &done))) land_through(done < g_gval ? done : g_gval);
-    SNX_ZONE_END(z);
+    SNX_ZONE_END(z_submit);
 }
 
 void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal) {
@@ -500,6 +508,7 @@ void vk_submit_after(VkSemaphore sem, u64 wait, u64 signal) {
 u64 g_vk_finishes, g_vk_finish_ns;
 void vk_finish(void) {
     u64 t0 = plat_ns();
+    SNX_ZONE(z_finish, "vk finish");
     vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
     timeline_wait(g_gval);
     land_through(g_gval);
@@ -682,6 +691,7 @@ u8* vk_readback_buffer(u64 size, VkBuffer* buf) {
             g_rb_cap = 0;
             return NULL;
         }
+        vk_mem_track(g_rb_mem);
         g_rb_ptr = info.pMappedData;
         g_rb_cap = cap;
     }

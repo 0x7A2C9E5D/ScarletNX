@@ -9,6 +9,7 @@
 #include "nx/hle/services/audren_dsp.h"
 #include "nx/hle/hle.h"
 #include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/tracy.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -2053,13 +2054,20 @@ static void sink_frame(ARState* s, ARSink* k, i16* stereo, int* device) {
 int audren_frame(ARState* s, i16* stereo) {
     u32 j;
     u32 n = s->frame;
+    u32 played = 0;
+    SNX_ZONE(z_frame, "audio frame");
     memset(s->buf, 0, (size_t)(s->buffers + SNX_AUDREN_CHANNELS) * n * sizeof *s->buf);
     u32 nsorted = sort_mixes(s);
     for (u32 i = 0; i < s->nvoices; i++) {
         ARVoice* v = &s->voice[i];
         if (!v->in_use || !v->wave_count) continue;
-        if (voice_prepare(s, v)) play_voice(s, v);
+        if (voice_prepare(s, v)) {
+            play_voice(s, v);
+            played++;
+        }
     }
+    SNX_ZONE_VALUE(z_frame, played);
+    (void)played;
     for (j = 0; j < s->ndest; j++) { /* the destinations voices sent through ramp from here next frame */
         ARDest* d = &s->dest[j];
         if (d->in_use && d->need_update) memcpy(d->prev, d->vol, sizeof d->prev);

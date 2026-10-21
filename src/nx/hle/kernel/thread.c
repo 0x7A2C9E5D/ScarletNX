@@ -6,6 +6,7 @@
 #include "nx/runtime/arm.h"
 #include "nx/runtime/loader.h"
 #include "nx/runtime/main.h"
+#include "nx/runtime/platform/tracy.h"
 #include "nx/hle/hle.h"
 
 /* ============================================================ the cores */
@@ -308,6 +309,7 @@ static void thread_main(void* p) {
     KThread* t = (KThread*)p;
     u64 pc = t->entry;
     tls_thread = t;
+    SNX_THREAD_NAME(t->name[0] ? t->name : "guest");
     core_enter(t);
     snx_fpcr_apply(&t->cpu);
     if (g_arm_mod)
@@ -380,5 +382,6 @@ void kernel_run_main(u64 entry, u64 stack_size, int prio, int core) {
 void process_exit(int code) {
     LOG("The game exited (code %d)\n", code);
     snx_save_before_exit();
+    snx_tracy_shutdown();
     plat_exit_now(code);
 }

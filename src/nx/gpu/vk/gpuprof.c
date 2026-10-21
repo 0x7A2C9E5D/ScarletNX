@@ -24,6 +24,8 @@ typedef struct {
     u32 xfers, barriers, dispatches; /* recorded since the pass before it ended: what the gap before it holds */
     u32 kind[3];
     u64 bytes;
+    u16 q0, q1; /* the Tracy query ids its begin and end went out with, 0 when it emitted none */
+    u8 emitted;
 } GpPass;
 typedef struct {
     VkQueryPool pool;
@@ -51,12 +53,26 @@ static u64 g_x_at_end, g_b_at_end, g_d_at_end, g_k_at_end[3], g_bytes_at_end;
 static const char* const g_mix_name[3] = {"buffer copies only", "with buffer-image copies", "with image copies"};
 static u64 g_mix_ns[3], g_mixes[3], g_mix_bytes[3], g_mix_n[3];
 static int g_in_pass;
+static int g_dead; /* the query pool was refused once: stop asking */
+
+#if defined(SNX_TRACY)
+/* Tracy's GPU track: the passes as zones on the GPU's clock, their timestamps read back with the frame's
+   results, the context announced once per connection. A profiling run asks for them: the setting, or the client
+   being up. */
+#define GP_CTX 1 /* the one GPU context this runtime announces */
+static u16 g_query_id;
+static int g_ctx_sent;
+#endif
 
 static int gp_on(void) {
     if (g_on < 0) {
         g_on = g_settings.gpu_profile && g_vk.props.limits.timestampComputeAndGraphics;
         if (g_settings.gpu_profile && !g_on) WARN("vulkan: vk_gpu_profile: the device has no timestamps on its graphics queue\n");
     }
+    if (g_dead) return 0;
+#if defined(SNX_TRACY)
+    if (TracyCIsStarted) return g_vk.props.limits.timestampComputeAndGraphics; /* the client's track, without the setting */
+#endif
     return g_on;
 }
 static GpSlot* gp_slot(void) {
@@ -67,7 +83,7 @@ static GpSlot* gp_slot(void) {
         GpSlot* g = calloc(1, sizeof *g);
         if (!g || !VK_OK(vkCreateQueryPool(g_vk.dev, &qi, NULL, &g->pool))) {
             free(g);
-            g_on = 0;
+            g_dead = 1;
             return NULL;
         }
         g_slot[s] = g;
@@ -101,14 +117,39 @@ void vk_gpuprof_pass_begin(VkCommandBuffer cb, const Surf* rt, const Surf* zt) {
     rec_CmdWriteTimestamp2(cb, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, g->pool, g->used);
     g_draws_at_begin = g_vk_drawn;
     g_in_pass = 1;
+#if defined(SNX_TRACY)
+    p->q0 = p->q1 = 0;
+    p->emitted = 0;
+    if (snx_tracy_enter()) {
+        if (TracyCIsConnected && g_ctx_sent) {
+            /* One allocation per pass, not a cached one: the client frees it when the begin is emitted (tracy_free in
+               ___tracy_emit_gpu_zone_begin_alloc), so a kept pointer would be used after free. */
+            char name[48];
+            int n = s ? snprintf(name, sizeof name, "gpu pass %ux%u fmt %u", s->w, s->h, (u32)s->f.vk)
+                      : snprintf(name, sizeof name, "gpu pass");
+            u64 srcloc = ___tracy_alloc_srcloc_name(0, "gpuprof", 7, "vk_gpuprof_pass_begin", 21, name,
+                                                    n > 0 ? (size_t)n : 0, 0);
+            if (srcloc) {
+                struct ___tracy_gpu_zone_begin_data d = {srcloc, 0, GP_CTX};
+                p->q0 = ++g_query_id;
+                d.queryId = p->q0;
+                ___tracy_emit_gpu_zone_begin_alloc_serial(d);
+                p->emitted = 1;
+            }
+        }
+        snx_tracy_leave();
+    }
+#endif
 }
 /* after vkCmdEndRendering */
 void vk_gpuprof_pass_end(VkCommandBuffer cb) {
     GpSlot* g;
+    GpPass* p;
     if (!g_in_pass) return;
     g_in_pass = 0;
     if (!(g = gp_slot())) return;
-    g->pass[g->used / 2].draws = (u32)(g_vk_drawn - g_draws_at_begin);
+    p = &g->pass[g->used / 2];
+    p->draws = (u32)(g_vk_drawn - g_draws_at_begin);
     rec_CmdWriteTimestamp2(cb, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, g->pool, g->used + 1);
     g->used += 2;
     g_x_at_end = g_rec_xfers;
@@ -116,6 +157,16 @@ void vk_gpuprof_pass_end(VkCommandBuffer cb) {
     g_d_at_end = g_vk_dispatches;
     for (int i = 0; i < 3; i++) g_k_at_end[i] = g_rec_xfer_kind[i];
     g_bytes_at_end = g_rec_buf_bytes;
+#if defined(SNX_TRACY)
+    /* The end goes out with the answer the begin had: the connection is not asked again. */
+    if (p->emitted && snx_tracy_enter()) {
+        struct ___tracy_gpu_zone_end_data d = {0, GP_CTX};
+        p->q1 = ++g_query_id;
+        d.queryId = p->q1;
+        ___tracy_emit_gpu_zone_end_serial(d);
+        snx_tracy_leave();
+    }
+#endif
 }
 static void gp_report(void);
 static GpKey* gp_key(const GpPass* p) {
@@ -132,13 +183,40 @@ static GpKey* gp_key(const GpPass* p) {
 }
 /* the slot's work is done (frame_recycle, before the slot records again): its times into the sums */
 void vk_gpuprof_frame_done(u32 slot) {
-    GpSlot* g = g_on > 0 ? g_slot[slot] : NULL;
+    GpSlot* g = gp_on() ? g_slot[slot] : NULL;
     if (!g || !g->reset) return;
     g->reset = 0;
     if (!g->used) return;
     static u64 ts[GP_QUERIES];
     if (vkGetQueryPoolResults(g_vk.dev, g->pool, 0, g->used, sizeof ts, ts, 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
         return;
+#if defined(SNX_TRACY)
+    /* the frame's timestamps onto the GPU track, and the GPU clock onto the CPU's: the last timestamp was
+       written before timeline_wait returned, so this moment is its CPU time. */
+    if (snx_tracy_enter()) {
+        if (TracyCIsConnected) {
+            if (!g_ctx_sent) {
+                struct ___tracy_gpu_new_context_data c = {(int64_t)ts[g->used - 1],
+                                                          g_vk.props.limits.timestampPeriod, GP_CTX, 0, 2};
+                ___tracy_emit_gpu_new_context_serial(c);
+                g_ctx_sent = 1;
+            }
+            struct ___tracy_gpu_time_sync_data sc = {(int64_t)ts[g->used - 1], GP_CTX};
+            ___tracy_emit_gpu_time_sync(sc);
+            for (u32 i = 0; i + 1 < g->used; i += 2) {
+                const GpPass* p = &g->pass[i / 2];
+                if (!p->emitted) continue;
+                struct ___tracy_gpu_time_data t0 = {(int64_t)ts[i], p->q0, GP_CTX};
+                struct ___tracy_gpu_time_data t1 = {(int64_t)ts[i + 1], p->q1, GP_CTX};
+                ___tracy_emit_gpu_time_serial(t0);
+                ___tracy_emit_gpu_time_serial(t1);
+            }
+        } else {
+            g_ctx_sent = 0;
+        }
+        snx_tracy_leave();
+    }
+#endif
     double period = g_vk.props.limits.timestampPeriod;
     for (u32 i = 0; i + 1 < g->used; i += 2) {
         u64 ns = (u64)((double)(ts[i + 1] - ts[i]) * period);

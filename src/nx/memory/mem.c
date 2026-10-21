@@ -12,7 +12,9 @@
 #include "nx/gpu/gpu.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/tracy.h"
 #include <errno.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -31,6 +33,73 @@ u64 g_as_size = AS_MAX;
 u8* g_mem;
 u64 g_heap_size, g_phys_mapped, g_heap_max, g_code_memory, g_main_stack_size;
 u64 g_pool_size = 64 * GIB; /* sparse: only the pages in use take memory */
+
+#if defined(SNX_TRACY)
+/* Guest mappings as Tracy events; g_events is kept under g_mem_lk. */
+typedef struct {
+    u64 addr, size;
+} GuestEvent;
+typedef struct {
+    GuestEvent* v;
+    u32 n, cap;
+} GuestEvents;
+static GuestEvents g_events;
+
+static void ev_reserve(u32 n) {
+    GuestEvent* v;
+    u32 cap;
+    if (n <= g_events.cap) return;
+    cap = g_events.cap ? g_events.cap : 32;
+    while (cap < n) cap *= 2;
+    v = (GuestEvent*)realloc(g_events.v, sizeof *v * (size_t)cap);
+    if (!v) fatal("Out of memory for the guest memory events");
+    g_events.v = v;
+    g_events.cap = cap;
+}
+static void ev_add(u64 addr, u64 size) {
+    u32 i;
+    if (!size) return;
+    ev_reserve(g_events.n + 1);
+    for (i = 0; i < g_events.n && g_events.v[i].addr < addr; i++) {}
+    memmove(&g_events.v[i + 1], &g_events.v[i], sizeof *g_events.v * (size_t)(g_events.n - i));
+    g_events.v[i] = (GuestEvent){addr, size};
+    g_events.n++;
+    SNX_MEM_ALLOC((const void*)(uintptr_t)addr, size, "guest");
+}
+static void ev_remove(u64 addr, u64 size) {
+    GuestEvent* old = g_events.v;
+    GuestEvent* out;
+    u32 n = g_events.n, i, m = 0;
+    u64 end = addr + size;
+    if (!n || !size) return;
+    /* n + 2: the range can split one allocation on each side. */
+    out = (GuestEvent*)malloc(sizeof *out * (size_t)(n + 2));
+    if (!out) fatal("Out of memory for the guest memory events");
+    for (i = 0; i < n; i++) {
+        u64 a = old[i].addr, e = a + old[i].size;
+        if (e <= addr || a >= end) {
+            out[m++] = old[i];
+            continue;
+        }
+        SNX_MEM_FREE((const void*)(uintptr_t)a, "guest");
+        if (a < addr) {
+            out[m++] = (GuestEvent){a, addr - a};
+            SNX_MEM_ALLOC((const void*)(uintptr_t)a, addr - a, "guest");
+        }
+        if (e > end) {
+            out[m++] = (GuestEvent){end, e - end};
+            SNX_MEM_ALLOC((const void*)(uintptr_t)end, e - end, "guest");
+        }
+    }
+    free(old);
+    g_events.v = out;
+    g_events.n = m;
+    g_events.cap = n + 2;
+}
+#else
+#define ev_add(addr, size)   ((void)0)
+#define ev_remove(addr, size) ((void)0)
+#endif
 
 /* The 32-bit layouts (Eden's 32-bit entries in k_address_space_info.cpp): the code region from 2 MiB to 1 GiB, which
    is the stack region too, then from 1 GiB the 1 GiB alias region and the 1 GiB heap region, or a 2 GiB heap region
@@ -611,8 +680,10 @@ int mem_map(u64 addr, u64 size, u32 state, u32 perm) {
         r = -1;
     else if (commit_nl(addr, size))
         r = -2;
-    else
+    else {
         blk_set_nl(addr, size, state, perm, 0);
+        ev_add(addr, size);
+    }
     mem_unlock();
     mapping_end();
     return r;
@@ -623,6 +694,7 @@ int mem_unmap(u64 addr, u64 size) {
     mapping_begin();
     mem_lock();
     unmap_nl(addr, size);
+    ev_remove(addr, size);
     mem_unlock();
     mapping_end();
     code_invalidate(addr, size);
@@ -736,10 +808,12 @@ u64 kmem_alloc(u64 size, u32 state, u32 perm) {
     size = (size + PAGE - 1) & ~(PAGE - 1);
     mem_lock();
     a = find_free_nl(KERN_BASE, KERN_END, size, PAGE, PAGE);
-    if (a && !commit_nl(a, size))
+    if (a && !commit_nl(a, size)) {
         blk_set_nl(a, size, state, perm, 0);
-    else
+        ev_add(a, size);
+    } else {
         a = 0;
+    }
     mem_unlock();
     if (!a) fatal("Out of guest memory for the kernel (%llu KiB)", (unsigned long long)(size >> 10));
     return a;
@@ -960,6 +1034,7 @@ int mem_map_pool(u64 addr, u64 off, u64 size, u32 state, u32 perm) {
         c.attr = 0;
         c.pool = off + 1;
         blk_change_nl(addr, size, &c);
+        ev_add(addr, size);
     }
     mem_unlock();
     mapping_end();
@@ -973,6 +1048,7 @@ int mem_unmap_pool(u64 addr, u64 off, u64 size, u32 state) {
     mem_lock();
     if (range_is_nl(addr, size, state, ANY, ANY) && pool_run_nl(addr, size) == off + 1) {
         unmap_nl(addr, size);
+        ev_remove(addr, size);
         r = 0;
     }
     mem_unlock();
@@ -1004,15 +1080,19 @@ int mem_heap_set(u64 size, u64 budget) {
             r = MEM_BADSTATE;
         else if (commit_nl(a, grow))
             r = MEM_NOMEM;
-        else
+        else {
             blk_set_nl(a, grow, MS_NORMAL, PERM_RW, 0);
+            ev_add(a, grow);
+        }
     } else if (size < cur) {
         lo = HEAP_BASE + size;
         n = cur - size;
         if (!range_is_nl(lo, n, MS_NORMAL, PERM_RW, 0))
             r = MEM_BADSTATE;
-        else
+        else {
             unmap_nl(lo, n);
+            ev_remove(lo, n);
+        }
     }
     if (!r) __atomic_store_n(&g_heap_size, size, __ATOMIC_RELEASE);
     mem_unlock();
@@ -1053,10 +1133,12 @@ int mem_map_physical(u64 addr, u64 size, u64 budget) {
             u32 k = blk_index_nl(a);
             u64 hi = blk_end(&g_blk[k]) < done ? blk_end(&g_blk[k]) : done;
             if (g_blk[k].state == MS_FREE) {
-                if (r)
+                if (r) {
                     decommit_nl(a, hi - a);
-                else
+                } else {
                     blk_set_nl(a, hi - a, MS_NORMAL, PERM_RW, 0);
+                    ev_add(a, hi - a);
+                }
             }
             a = hi;
         }
@@ -1098,6 +1180,7 @@ int mem_unmap_physical(u64 addr, u64 size) {
             if (b->pool) pool_free_nl(b->pool - 1 + lo - b->addr, hi - lo);
         }
         unmap_nl(addr, size);
+        ev_remove(addr, size);
         __atomic_store_n(&g_phys_mapped, freed < g_phys_mapped ? g_phys_mapped - freed : 0, __ATOMIC_RELEASE);
     }
     mem_unlock();

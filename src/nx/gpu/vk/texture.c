@@ -349,6 +349,8 @@ static int tex_upload(Surf* t) {
 }
 static int tex_upload_(Surf* t) {
     const VkFmt* f = &t->f;
+    SNX_ZONE_T(z_up, "texture upload", "%ux%u", t->w, t->h);
+    SNX_ZONE_VALUE(z_up, t->size);
     g_tex_uploads++;
     g_tex_upload_bytes += t->size;
     t->upload_valid = 0;
@@ -926,6 +928,7 @@ VkImageView vk_null_view(VkImageViewType type, int num) {
             free(s);
             return VK_NULL_HANDLE;
         }
+        vk_mem_track(s->mem);
         vk_render_end(); /* clears happen outside rendering passes */
         VkCommandBuffer cb = vk_cmd();
         vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_CLEAR_BIT,

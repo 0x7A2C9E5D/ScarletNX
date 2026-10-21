@@ -24,6 +24,8 @@ static u32 g_vk_owner; /* the thread holding it (plat_tid), 0 when none: a trap'
 void vk_lock(void) {
     if (!t_vkdepth++) {
         if (!pm_trylock(&g_vklock)) { /* held: the GPU thread says so for the stall report */
+            /* Only a contended acquisition gets a zone. */
+            SNX_ZONE(z_wait, "vk lock wait");
             gpu_wait_note("vk_lock, which another thread holds", 0);
             pm_lock(&g_vklock);
             gpu_wait_note(NULL, 0);

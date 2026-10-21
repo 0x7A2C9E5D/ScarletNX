@@ -19,6 +19,7 @@
    command buffers run under the engines' lock (the decoders and VIC are not reentrant); a host class wait lets go
    of it, since the job waited for may be another channel's */
 #include "nx/gpu/video/host1x_int.h"
+#include "nx/runtime/platform/tracy.h"
 
 enum { NV_OK = 0, NV_BAD_PARAMETER = 4, NV_INSUFFICIENT_MEMORY = 6 };
 
@@ -236,6 +237,7 @@ static void run_job(H1Ch* ch, const u32* job) {
 }
 static void worker(void* arg) {
     H1Ch* ch = arg;
+    SNX_THREAD_NAME("host1x");
     pm_lock(&ch->lk);
     for (;;) {
         u32* job;
@@ -243,7 +245,9 @@ static void worker(void* arg) {
         if (!ch->count) break; /* closing, and every queued job ran */
         job = ch->queue[ch->head];
         pm_unlock(&ch->lk);
+        SNX_ZONE(z_job, "host1x job");
         run_job(ch, job);
+        SNX_ZONE_END(z_job);
         free(job);
         pm_lock(&ch->lk);
         ch->head = (ch->head + 1) % H1_QUEUE;

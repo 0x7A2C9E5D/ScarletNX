@@ -227,6 +227,7 @@ static int arena_fit(u64 need) {
     g_ar = VK_NULL_HANDLE;
     g_ar_cap = 0;
     if (!VK_OK(vmaCreateBuffer(g_vk.vma, &bci, &aci, &g_ar, &g_ar_mem, &info))) return 0;
+    vk_mem_track(g_ar_mem);
     g_ar_ptr = info.pMappedData;
     g_ar_cap = cap;
     return org_fit();
@@ -270,6 +271,7 @@ static void cs_wait(u64 value) {
                               .pSemaphores = &g_vk_csem,
                               .pValues = &value};
     u64 t0 = plat_ns();
+    SNX_ZONE_V(z, "vk compute wait", value);
     gpu_wait_note("a compute batch", value);
     VK_OK(vkWaitSemaphores(g_vk.dev, &wi, UINT64_MAX));
     gpu_wait_note(NULL, 0);
@@ -324,6 +326,7 @@ static void cs_put_aside(void) {
     u8* org;
     u64 org_cap;
     if (!g_recording) return;
+    SNX_ZONE(z, "vk compute put aside");
     cs_submit();
     if (g_phead - g_ptail == CS_PENDING) cs_land_oldest();
     b = &g_pend[g_phead % CS_PENDING];
@@ -373,6 +376,7 @@ static void cs_put_aside(void) {
 /* every batch lands, the current one submitted and waited for */
 static void cs_land(void) {
     if (g_landing) return;
+    SNX_ZONE(z, "vk compute land");
     while (g_ptail != g_phead) cs_land_oldest();
     if (!g_recording && !g_inflight) return;
     g_landing = 1;
