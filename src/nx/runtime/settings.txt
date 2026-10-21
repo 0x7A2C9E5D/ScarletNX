@@ -460,9 +460,9 @@ setting GDB JIT symbols
     default 0
     startup
     words Off|On
-    help 1 = with the GDB stub (-S or -s), hands the code the JIT compiles at run time to GDB, which names it.
-    help While GDB is attached it stops the whole game to read each compile, which slows a 32-bit game (its blocks
-    help compile one at a time) to a crawl
+    help 1 = with the GDB stub (-S or -s, Linux only), hands the code the JIT compiles at run time to GDB, which
+    help names it. While GDB is attached it stops the whole game to read each compile, which slows a 32-bit game (its
+    help blocks compile one at a time) to a crawl. Each compile's object is also kept in memory for the whole run
 setting Profiler
     key profile
     int 0 1

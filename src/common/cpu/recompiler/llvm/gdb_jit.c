@@ -3,8 +3,8 @@
 /* GDB's JIT interface (gdb_jit.h), as GDB's manual ("JIT Compilation Interface") defines it: a descriptor GDB finds by
    name, holding a list of in-memory object files, and an empty function GDB breaks on, called after each change with
    the entry that changed. An object is a load's relocatable object with the loaded sections' sh_addr set to where the
-   load put them, so GDB's reader takes their symbols at those addresses (an ET_REL symbol is its section's address
-   plus st_value) and applies the object's relocations to .eh_frame itself */
+   load put them (code_loader.c writes them into the copy), so GDB's reader takes their symbols at those addresses (an
+   ET_REL symbol is its section's address plus st_value) and applies the object's relocations to .eh_frame itself */
 #include "common/cpu/recompiler/llvm/gdb_jit.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -26,30 +26,44 @@ struct jit_descriptor {
 };
 #ifdef _WIN32
 /* the GDB stub is UNIX only (nx/runtime/gdbstub.c), and the loader's objects are COFF here: nothing is registered */
-void snx_gdb_jit_enable(int on) { (void)on; }
+void snx_gdb_jit_enable(void) {}
+unsigned char* snx_gdb_jit_copy(const void* owner, const void* object, size_t size) {
+    (void)owner, (void)object, (void)size;
+    return NULL;
+}
+void snx_gdb_jit_add(unsigned char* copy) { (void)copy; }
 void snx_gdb_jit_remove(const void* owner) { (void)owner; }
 #else
 #include <pthread.h>
 
-/* Weak, so a program that links the recompiler library with LLVM's own GDB listener (which defines them too) has one
-   descriptor, as the interface requires. The breakpoint's call must stay, out of line, for GDB to stop at */
+/* Weak, so a program that also links a strong definition (a static LLVM's GDB listener, ExecutionEngine's) builds, the
+   descriptor then being that one. A shared libLLVM defines both too, and its references to the descriptor bind to the
+   executable's (exported for GDB: src/nx/CMakeLists.txt). Either way another JIT in the process may link its entries
+   into the same list, under its own lock: this file keeps its entries on a list of its own as well and only ever
+   unlinks those. The breakpoint's call must stay, out of line, for GDB to stop at, and the clobber keeps the
+   descriptor's stores before it */
 void __jit_debug_register_code(void);
 extern struct jit_descriptor __jit_debug_descriptor;
-__attribute__((weak, noinline)) void __jit_debug_register_code(void) { __asm__ __volatile__(""); }
+__attribute__((weak, noinline)) void __jit_debug_register_code(void) { __asm__ __volatile__("" ::: "memory"); }
 __attribute__((weak)) struct jit_descriptor __jit_debug_descriptor = {1, JIT_NOACTION, NULL, NULL};
 
 /* An entry and its object, one allocation: GDB reads the jit_code_entry at its start */
-typedef struct {
+typedef struct Entry {
     struct jit_code_entry entry;
     const void* owner;
+    struct Entry* next; /* this file's entries, newest first */
 } Entry;
 
 static struct {
-    pthread_mutex_t lock; /* loaders load on different threads, and the list is the process's */
+    pthread_mutex_t lock; /* loaders load on different threads, and the lists are the process's */
+    Entry* first;
+    /* 0 until snx_gdb_jit_enable, then 1 for good, read without the lock: a loader that saw it on at a load sees it on
+       at its free (it is stored once, and reads of one object keep their order), and one that saw it off registered
+       nothing. Never on, nothing takes the lock (nor finds it held by a thread a fork left behind) */
     int on;
-} g_gdb_jit = {PTHREAD_MUTEX_INITIALIZER, 0};
+} g_gdb_jit = {PTHREAD_MUTEX_INITIALIZER, NULL, 0};
 
-void snx_gdb_jit_enable(int on) { g_gdb_jit.on = on; }
+void snx_gdb_jit_enable(void) { __atomic_store_n(&g_gdb_jit.on, 1, __ATOMIC_RELAXED); }
 
 /* under the lock */
 static void notify(struct jit_code_entry* entry, uint32_t action) {
@@ -60,27 +74,24 @@ static void notify(struct jit_code_entry* entry, uint32_t action) {
     __jit_debug_descriptor.action_flag = JIT_NOACTION;
 }
 
-void snx_gdb_jit_register(const void* owner, const SnxElfObject* o) {
-    size_t size = o->input->size, i;
-    unsigned char* object;
+unsigned char* snx_gdb_jit_copy(const void* owner, const void* object, size_t size) {
     Entry* e;
-    if (!g_gdb_jit.on) return;
+    if (!__atomic_load_n(&g_gdb_jit.on, __ATOMIC_RELAXED) || size > SIZE_MAX - sizeof(Entry)) return NULL;
     e = (Entry*)malloc(sizeof(Entry) + size);
-    if (!e) return;
-    object = (unsigned char*)(e + 1);
-    memcpy(object, o->input->data, size);
-    for (i = 0; i < o->eh->e_shnum; ++i) {
-        Elf64_Shdr sh;
-        if (o->kind[i] < 0) continue;
-        memcpy(&sh, object + o->eh->e_shoff + i * sizeof(sh), sizeof(sh));
-        sh.sh_addr = o->address[i];
-        memcpy(object + o->eh->e_shoff + i * sizeof(sh), &sh, sizeof(sh));
-    }
-    e->entry.prev_entry = NULL;
-    e->entry.symfile_addr = (const char*)object;
+    if (!e) return NULL;
+    memcpy(e + 1, object, size);
+    e->entry.symfile_addr = (const char*)(e + 1);
     e->entry.symfile_size = size;
     e->owner = owner;
+    return (unsigned char*)(e + 1);
+}
+
+void snx_gdb_jit_add(unsigned char* copy) {
+    Entry* e = (Entry*)(void*)(copy - sizeof(Entry));
     pthread_mutex_lock(&g_gdb_jit.lock);
+    e->next = g_gdb_jit.first;
+    g_gdb_jit.first = e;
+    e->entry.prev_entry = NULL;
     e->entry.next_entry = __jit_debug_descriptor.first_entry;
     if (e->entry.next_entry) e->entry.next_entry->prev_entry = &e->entry;
     __jit_debug_descriptor.first_entry = &e->entry;
@@ -89,18 +100,22 @@ void snx_gdb_jit_register(const void* owner, const SnxElfObject* o) {
 }
 
 void snx_gdb_jit_remove(const void* owner) {
-    struct jit_code_entry *entry, *next;
+    Entry **link, *e;
+    if (!__atomic_load_n(&g_gdb_jit.on, __ATOMIC_RELAXED)) return;
     pthread_mutex_lock(&g_gdb_jit.lock);
-    for (entry = __jit_debug_descriptor.first_entry; entry; entry = next) {
-        next = entry->next_entry;
-        if (((Entry*)entry)->owner != owner) continue;
-        if (entry->prev_entry)
-            entry->prev_entry->next_entry = next;
+    for (link = &g_gdb_jit.first; (e = *link) != NULL;) {
+        if (e->owner != owner) {
+            link = &e->next;
+            continue;
+        }
+        *link = e->next;
+        if (e->entry.prev_entry)
+            e->entry.prev_entry->next_entry = e->entry.next_entry;
         else
-            __jit_debug_descriptor.first_entry = next;
-        if (next) next->prev_entry = entry->prev_entry;
-        notify(entry, JIT_UNREGISTER_FN);
-        free(entry);
+            __jit_debug_descriptor.first_entry = e->entry.next_entry;
+        if (e->entry.next_entry) e->entry.next_entry->prev_entry = e->entry.prev_entry;
+        notify(&e->entry, JIT_UNREGISTER_FN);
+        free(e);
     }
     pthread_mutex_unlock(&g_gdb_jit.lock);
 }

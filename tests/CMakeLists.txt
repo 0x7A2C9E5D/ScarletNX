@@ -1081,6 +1081,12 @@ add_executable(snx-test-code-loader-unwind code_loader_unwind.c)
 snx_test_target(snx-test-code-loader-unwind 11)
 target_link_libraries(snx-test-code-loader-unwind PRIVATE snx_llvm)
 add_test(NAME code_loader_unwind COMMAND snx-test-code-loader-unwind)
+# the loader's objects as GDB's JIT interface lists them (gdb_jit.c); skipped on Windows, which registers none
+add_executable(snx-test-gdb-jit gdb_jit.c)
+snx_test_target(snx-test-gdb-jit 11)
+target_link_libraries(snx-test-gdb-jit PRIVATE snx_llvm)
+add_test(NAME gdb_jit COMMAND snx-test-gdb-jit)
+set_tests_properties(gdb_jit PROPERTIES SKIP_RETURN_CODE 77)
 if(NOT WIN32)
     # the relocations both ELF paths share (elf_object.c), AArch64's included, checked on any ELF host and on macOS,
     # whose JIT loads ELF objects

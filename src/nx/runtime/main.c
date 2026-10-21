@@ -522,7 +522,7 @@ int snx_main(int argc, char** argv) {
     /* before the JIT's first load (jit_init, arm.c's blocks, the GPU's macros), and only when asked: GDB stops the
        game to read each one */
     if (g_opt_gdb && g_settings.gdb_jit_symbols) {
-        snx_gdb_jit_enable(1);
+        snx_gdb_jit_enable();
         LOG("gdb: the code the JIT compiles is named to GDB (gdb_jit=1): it stops the game for each compile while "
             "attached\n");
     }
