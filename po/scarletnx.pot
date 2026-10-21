@@ -435,6 +435,18 @@ msgid "Extractions"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Auto"
+msgstr ""
+
+#: src/gui/main.c
+msgid "On"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Off"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "Not kept for the next start: %s could not be written"
 msgstr ""
@@ -471,7 +483,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tab: screen."
+msgid "Tab: screen. F2: side box."
 msgstr ""
 
 #: src/gui/main.c
@@ -899,6 +911,14 @@ msgid "A screen fading in, a box's shade coming and going, 0.15 s each. Off: at 
 msgstr ""
 
 #: src/gui/main.c
+msgid "Side box"
+msgstr ""
+
+#: src/gui/main.c
+msgid "The box beside the list: Auto where both fit, On under the list where they do not, Off never. F2"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Theme editor"
 msgstr ""
 
@@ -940,20 +960,8 @@ msgid "%s of Auto: %dx"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Auto"
-msgstr ""
-
-#: src/gui/main.c
 #, c-format
 msgid "Auto: %s"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Off"
-msgstr ""
-
-#: src/gui/main.c
-msgid "On"
 msgstr ""
 
 #: src/gui/main.c
@@ -2096,6 +2104,12 @@ msgstr ""
 #: src/gui/main.c
 #, snx-key
 msgid "F5"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "F2"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word

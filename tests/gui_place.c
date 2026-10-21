@@ -225,6 +225,23 @@ int main(void) {
         f.fixed = 0;
         gui_place(&f, &b);
         assert(b.stacked && !empty(b.side)); /* adaptive: under it */
+        /* side_box on: under the list there too, fixed or not; off: never, the list the whole width, the status gone
+           with it, wide or narrow */
+        f.fixed = 1;
+        f.side = GUI_SIDE_ON;
+        gui_place(&f, &a);
+        sound(&a, 600, 800);
+        assert(a.stacked && !empty(a.side) && a.list.w == 600 - 32 && a.side.y > a.list.y + a.list.h);
+        f.side = GUI_SIDE_OFF;
+        gui_place(&f, &a);
+        assert(!a.stacked && empty(a.side) && empty(a.status) && a.list.w == 600 - 32);
+        f.width = 1280;
+        gui_place(&f, &b);
+        sound(&b, 1280, 800);
+        assert(!b.stacked && empty(b.side) && empty(b.status) && b.list.w == 1280 - 32 && b.list.h == a.list.h);
+        f.side = GUI_SIDE_ON; /* wide: beside it, as auto */
+        gui_place(&f, &b);
+        assert(!b.stacked && !empty(b.side) && b.side.x > b.list.x + b.list.w);
     }
     return 0;
 }

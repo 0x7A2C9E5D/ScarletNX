@@ -1522,7 +1522,7 @@ int main(int argc, char** argv) {
     /* App: the theme and the letters, either way round, and the theme editor, which comes back here */
     app.editor.row = 0;
     key(&app, SDLK_RETURN);
-    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 9);
+    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 10);
     {
         char first[64], line[1024];
         snprintf(first, sizeof first, "%s", app.theme.name);
@@ -1626,7 +1626,7 @@ int main(int argc, char** argv) {
         snprintf(
             expected, sizeof expected,
             "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = 1\nlanguage = auto\n"
-            "animations = 0\n",
+            "animations = 0\nside_box = auto\n",
             id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -1653,7 +1653,7 @@ int main(int argc, char** argv) {
         pick_size(&app, 0, true);
         snprintf(expected, sizeof expected,
                  "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = auto\n"
-                 "language = auto\nanimations = 0\n",
+                 "language = auto\nanimations = 0\nside_box = auto\n",
                  first_id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -1705,7 +1705,7 @@ int main(int argc, char** argv) {
         assert(app.language == 2 && snx_tr_language() == 1 && !strcmp(app.app_form.language, "Test\303\252s"));
         snprintf(expected, sizeof expected,
                  "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = auto\n"
-                 "language = xx\nanimations = 0\n",
+                 "language = xx\nanimations = 0\nside_box = auto\n",
                  app.theme.id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -2109,6 +2109,41 @@ int main(int argc, char** argv) {
     }
     key(&app, SDLK_RETURN);
     assert(app.animations_off && !strcmp(app.app_form.animations, "Off")); /* the checks below read settled screens */
+    key(&app, SDLK_DOWN);
+    /* Side box: Auto, On, Off either way round, kept in app.ini as side_box = auto, on or off */
+    assert(app.editor.row == GUI_APP_SIDE && !strcmp(app.app_form.side, "Auto"));
+    key(&app, SDLK_RIGHT);
+    assert(app.side_box == GUI_SIDE_ON && !strcmp(app.app_form.side, "On"));
+    key(&app, SDLK_RIGHT);
+    assert(app.side_box == GUI_SIDE_OFF && !strcmp(app.app_form.side, "Off"));
+    {
+        size_t size;
+        char* kept = (char*)snx_read_file(app.app_file, &size);
+        assert(kept && strstr(kept, "\nside_box = off\n"));
+        free(kept);
+    }
+    key(&app, SDLK_LEFT);
+    key(&app, SDLK_LEFT);
+    assert(app.side_box == GUI_SIDE_AUTO && !strcmp(app.app_form.side, "Auto"));
+    /* app.ini's side_box read back: on taken; a word it does not know named, the side box as the line before left it */
+    {
+        size_t size;
+        char *kept = (char*)snx_read_file(app.app_file, &size), *text, said[512];
+        assert(kept);
+        text = snx_format("%sside_box = on\nside_box = sideways\n", kept);
+        assert(!snx_write_file(app.app_file, text, strlen(text)));
+        app.message[0] = 0;
+        app_load(&app);
+        snprintf(said, sizeof said, "Not used from %s: side_box = sideways", app.app_file);
+        assert(app.side_box == GUI_SIDE_ON && strstr(app.message, said));
+        app.message[0] = 0;
+        app.side_box = GUI_SIDE_AUTO;
+        layout(&app);
+        assert(!app_save(&app));
+        app_values(&app);
+        free(text);
+        free(kept);
+    }
     key(&app, SDLK_DOWN);
     key(&app, SDLK_RIGHT); /* the editor opens with Enter only */
     assert(app.form == GUI_FORM_APP);
@@ -3547,6 +3582,46 @@ int main(int argc, char** argv) {
         app.animations_off = true;
         app.clock = 0;
     }
+    /* F2, or the foot's: the side box off where it shows, the list the whole width and the status gone with it; on
+       again; a group's rows the whole column with it off, the groups out; kept in app.ini */
+    {
+        GuiMenuBoxes m;
+        GuiFormBoxes f;
+        size_t size;
+        char* kept;
+        assert(app.side_box == GUI_SIDE_AUTO);
+        key(&app, SDLK_F2);
+        menu_boxes(&app, &m);
+        assert(app.side_box == GUI_SIDE_OFF && !m.place.side.w && !m.place.status.h &&
+               m.place.list.w == m.place.head.w);
+        kept = (char*)snx_read_file(app.app_file, &size);
+        assert(kept && strstr(kept, "\nside_box = off\n"));
+        free(kept);
+        render(&app);
+        hides(&app, "Status", normal);
+        open_settings(&app);
+        form_boxes(&app, &f);
+        assert(app.form == GUI_FORM_SETTINGS && f.left.shown == f.left.count && !f.right.shown);
+        render(&app);
+        hides(&app, "\x1f", rgb(app.theme.soft)); /* the rows' list, gone with the side box, marks nothing */
+        open_group(&app, 2);
+        form_boxes(&app, &f);
+        assert(app.form == GUI_FORM_GROUP && !f.left.shown && f.place.side.w == f.place.head.w && f.right.shown);
+        render(&app);
+        shows(&app, "Display", normal);
+        assert(f.right.shown == f.right.count);   /* Display's rows all fit: an arrow would be the groups' */
+        hides(&app, "\x1f", rgb(app.theme.soft)); /* nor the groups', gone */
+        press_key(&app, "F2", 0, false, yellow);
+        form_boxes(&app, &f);
+        assert(app.side_box == GUI_SIDE_ON && f.left.shown && f.place.side.x > f.place.list.x + f.place.list.w);
+        key(&app, SDLK_ESCAPE);
+        key(&app, SDLK_ESCAPE);
+        assert(!app.editing);
+        app.side_box = GUI_SIDE_AUTO;
+        app_save(&app);
+        render(&app);
+        shows(&app, "Status", normal);
+    }
     hides(&app, "- Games", normal);
     hides(&app, "Recent games", rgb(app.theme.soft));
     {
@@ -4610,8 +4685,8 @@ int main(int argc, char** argv) {
         assert(r.y == m.place.keys.y && r.x == m.place.list.x && r.w == m.place.list.w &&
                m.place.keys.x == m.place.side.x);
         assert(r.y > m.place.list.y + m.place.list.h && r.y + r.h <= 800 - 8 * s);
-        { /* the tips and the keys in the foot's letters, a size under the rest's; Tab's the last key, against the right
-             edge of the keys' last row */
+        { /* the tips and the keys in the foot's letters, a size under the rest's; F2's the last key, after Tab's,
+             against the right edge of the keys' last row */
             int fs = foot_scale(&app), rows;
             assert(fs == s - 1);
             foot_px_is(&app, r.x, r.y + 2 * fs, "Installs prod.keys", normal, black);
@@ -4621,7 +4696,7 @@ int main(int argc, char** argv) {
             shows_foot(&app, "ESC", yellow);
             shows_foot(&app, "exit", normal);
             hides(&app, "ESC", yellow);
-            foot_px_is(&app, r.x + r.w - 10 * 8 * fs, r.y + 2 * fs + (rows - 1) * 16 * fs, "Tab", yellow, black);
+            foot_px_is(&app, r.x + r.w - 11 * 8 * fs, r.y + 2 * fs + (rows - 1) * 16 * fs, "F2", yellow, black);
             app.menu.text_size = 1; /* 1x: the foot's too, never under it */
             render(&app);
             assert(app.scale == 1 && foot_scale(&app) == 1);

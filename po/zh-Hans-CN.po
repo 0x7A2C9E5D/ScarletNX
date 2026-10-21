@@ -399,8 +399,8 @@ msgstr "...显示更多"
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tab: screen."
-msgstr "Tab: 切换画面."
+msgid "Tab: screen. F2: side box."
+msgstr "Tab: 切换画面. F2: 侧框."
 
 #: src/gui/main.c
 msgid "Recent games"
@@ -609,6 +609,20 @@ msgstr "语言"
 #: src/gui/main.c
 msgid "Animations"
 msgstr "动画"
+
+#: src/gui/main.c
+msgid "Side box"
+msgstr "侧框"
+
+#: src/gui/main.c
+msgid "The box beside the list: Auto where both fit, On under the list where they do not, Off never. F2"
+msgstr "列表旁的框：自动：两者放得下时显示；开：放不下时显示在列表下方；关：不显示。F2"
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "F2"
+msgstr "F2"
 
 #: src/gui/main.c
 msgid "A screen fading in, a box's shade coming and going, 0.15 s each. Off: at once"

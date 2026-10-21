@@ -34,8 +34,8 @@ msgid "Up/Down: row. Left/Right: change. Enter: change or open. ESC: back."
 msgstr "Up/Down: linha. Left/Right: muda. Enter: muda ou abre. ESC: volta."
 
 #, snx-keys
-msgid "Tab: screen."
-msgstr "Tab: tela."
+msgid "Tab: screen. F2: side box."
+msgstr "Tab: tela. F2: caixa ao lado."
 
 msgid "Menu"
 msgstr "菜单"

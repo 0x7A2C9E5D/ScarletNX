@@ -106,7 +106,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   map* is the page above on its own keys, its A and B as its *Swap A/B* says.
   **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **Text size**, which opens
   its box of sizes (below), **Animations** (On by default, `animations = 1` in `app.ini`: a screen comes in from the
-  page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Theme editor**, which comes
+  page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Side box** (below, F2 too),
+**Theme editor**, which comes
   back to App, and **Library**: first `recompiled/`,
   where recompiled games go: Enter there picks another, as **Folders > Recompiled** does; at its default it stays on the
   list (the foot's Del greyed), and Del asks before a folder picked goes back to the default, only the setting
@@ -385,7 +386,10 @@ note go on saying it after. F5, or the foot's (Refresh on a phone), looks at the
 Games lists its folders again, the Library and Folders say how many of theirs are there, the menu counts the disk
 again, and the box of what an older version left looks again. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
 every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the
-column is as wide as its entries and the side box goes under the list. A text too long for its box wraps over
+column is as wide as its entries and the side box goes under the list. That is the **Side box**'s *Auto*, the
+default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
+not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2, or the
+foot's, shows it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over
 its rows, its last sliding what is left, or takes one that slides with `[body] text = slide`. A run of the console layout shows the driver's output in a box sized to it,
 beside it what runs and how it ended over the status, the file in the tips and the ESC line where the keys
 go, which a tap aborts. The button map draws the pad in the box between the head and the foot. A question comes

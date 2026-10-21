@@ -57,7 +57,9 @@ void gui_place(const GuiPlaceIn* in, GuiPlace* out) {
     if (in->foot) bottom -= in->foot + gap;
     content = gui_rect(mx, y, width, bottom - y);
     out->list = content;
-    if (in->list_cols) {
+    if (in->list_cols && in->side == GUI_SIDE_OFF) /* the list alone, the status with the side box gone */
+        out->list = content;
+    else if (in->list_cols) {
         cols = content.w / in->cw;
         if (cols >= GUI_PLACE_LIST_MIN + 1 + GUI_PLACE_SIDE_MIN) { /* the list gives way to the side box's least */
             int asks =
@@ -65,7 +67,7 @@ void gui_place(const GuiPlaceIn* in, GuiPlace* out) {
             int w = (asks < cols - 1 - GUI_PLACE_SIDE_MIN ? asks : cols - 1 - GUI_PLACE_SIDE_MIN) * in->cw;
             out->list = gui_rect(content.x, content.y, w, content.h);
             out->side = gui_rect(content.x + w + in->cw, content.y, content.w - w - in->cw, content.h);
-        } else if (in->fixed) { /* a phone held upright: the list alone */
+        } else if (in->fixed && in->side != GUI_SIDE_ON) { /* a phone held upright: the list alone */
             out->list = content;
         } else { /* the list over three fifths, the side box under it */
             int h = (content.h - gap) * 3 / 5;

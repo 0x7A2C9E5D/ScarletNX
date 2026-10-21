@@ -92,7 +92,7 @@ enum { GUI_PLACE_DATA, GUI_PLACE_GAMES, GUI_PLACE_WORK, GUI_PLACES };
 #define SNX_GUI_PLAYERS  8     /* Controllers' players, as the runtime's gamepad_p<N>_ keys */
 /* the App screen's values, as its rows show them, and the game folders' (recompiled/ first) */
 typedef struct {
-    char theme[64], text[16], language[64], animations[16], folders[32], places[32], moves[32];
+    char theme[64], text[16], language[64], animations[16], side[16], folders[32], places[32], moves[32];
     char folder[GUI_FOLDERS_MAX + 2][16]; /* recompiled/, dumps/, then the player's folders */
     char place[GUI_PLACES][64];
 } GuiAppForm;
@@ -237,6 +237,7 @@ typedef struct {
     /* app.ini's animations: a screen comes in from the page's colour and a box's shade comes and goes, GUI_FADE_MS
        each; with it off (0) each shows at once */
     bool animations_off;
+    int side_box;        /* app.ini's side_box (GuiSide): auto, on or off; F2 shows or hides it */
     unsigned screen_was; /* the screen drawn last (screen_mark), for when another comes */
     bool boxed_was;      /* a box over it then */
     Uint64 switch_ms, box_ms;
@@ -651,6 +652,9 @@ static bool full_path(const char* path) {
     return path[0] == '/';
 #endif
 }
+/* side_box's words in app.ini, GuiSide's order, and as Settings > App shows them */
+static const char* const side_words[] = {"auto", "on", "off"};
+static const char* const side_names[] = {SNX_TR_NOOP("Auto"), SNX_TR_NOOP("On"), SNX_TR_NOOP("Off")};
 /* text_size's quarters of Auto (-1 to -3) as app.ini names them */
 static const char* const text_quarters[] = {"0.25", "0.5", "0.75"};
 /* Settings > App's picks, kept at once in app_file for the next start. The App's note, or the menu's message, says when
@@ -672,6 +676,7 @@ static int app_save(App* app) {
     n += snprintf(text + n, size - (size_t)n, "language = %s\n",
                   app->language ? snx_gui_languages[app->language - 1].code : "auto");
     n += snprintf(text + n, size - (size_t)n, "animations = %d\n", !app->animations_off);
+    n += snprintf(text + n, size - (size_t)n, "side_box = %s\n", side_words[app->side_box]);
     /* Folders' section once one is picked; an empty key is the default */
     if (app->place[GUI_PLACE_DATA] || app->place[GUI_PLACE_GAMES] || app->place[GUI_PLACE_WORK]) {
         n += snprintf(text + n, size - (size_t)n, "[folders]\n");
@@ -728,6 +733,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
     const char* const* dirs = (const char* const*)app->themes_dirs;
     int scale = app->menu.text_size, language = app->language, n = 0, count = 0, moved = 0;
     bool still = app->animations_off;
+    int side = app->side_box;
     SnxIni ini;
     if (size) bad[0] = 0;
     if (renamed_size) renamed[0] = 0;
@@ -773,6 +779,13 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
                 scale = (int)number;
                 continue;
             }
+        } else if (!strcmp(ini.section, "app") && !strcmp(key, "side_box")) {
+            int w;
+            for (w = 0; w < 3 && strcmp(value, side_words[w]); ++w) {}
+            if (w < 3) {
+                side = w;
+                continue;
+            }
         } else if (!strcmp(ini.section, "app") && !strcmp(key, "animations")) {
             if (!strcmp(value, "0") || !strcmp(value, "1")) {
                 still = !strcmp(value, "0");
@@ -804,6 +817,10 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
         language_apply(app);
     }
     if (apply) app->animations_off = still;
+    if (apply && side != app->side_box) {
+        app->side_box = side;
+        layout(app);
+    }
     for (i = 0; i < GUI_PLACES; ++i) {
         if (apply && (places[i] ? !app->place[i] || strcmp(places[i], app->place[i]) : app->place[i] != NULL)) {
             free(app->place[i]);
@@ -935,7 +952,7 @@ enum { GUI_SHOWS_STATUS = 1, GUI_SHOWS_TABS = 2 };
 static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols, int shows);
 static const char* shown_keys(const App* app, char* out, size_t size);
 /* a screen's keys, Tab's after them */
-#define SAY_TAB SNX_TR_KEYS("Tab: screen.")
+#define SAY_TAB SNX_TR_KEYS("Tab: screen. F2: side box.")
 static const char* screen_keys(const App* app, const char* keys, char* out, size_t size) {
 #ifdef SDL_PLATFORM_ANDROID
     (void)app;
@@ -1863,8 +1880,9 @@ static void list_arrows(App* app, const GuiList* l, int first, int last, int up,
     if (up) text_in(app, l->at, x, item_text_y(app, list_box(l, first)), "\x1e", rgb(app->theme.soft));
     if (down) text_in(app, l->at, x, item_text_y(app, list_box(l, last)), "\x1f", rgb(app->theme.soft));
 }
-/* while entries are hidden above or below the ones shown */
+/* while entries are hidden above or below the ones shown; a list showing none (its column gone) has no entry to mark */
 static void list_marks(App* app, const GuiList* l) {
+    if (!l->shown) return;
     list_arrows(app, l, l->first, l->first + l->shown - 1, l->first > 0, l->first + l->shown < l->count);
 }
 /* The keys of a screen: "Keys: what they do." sentences, each drawn as the keys, inverted (the theme's focus bar) or in
@@ -2739,6 +2757,7 @@ static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols,
     if (t->tips_place == GUI_TIPS_TOP && !app->setup_on) in.tips = cell_h(app) + 4 * s; /* the setup's: the foot's */
     in.list_cols = list_cols ? SDL_min(SDL_max(list_cols, 20), SDL_max(20, (width / cell_w(app) - 2) * 3 / 5)) : 0;
     in.fixed = t->sizing == GUI_SIZING_FIXED && list_cols && list_cols < width / cell_w(app); /* a list, not a run */
+    in.side = app->side_box;
     app->scale = foot_scale(app);
     { /* the widest key, which a row cannot break */
         const char* at = keys;
@@ -3390,6 +3409,8 @@ static const GuiThemeKey app_keys[] = {
     {"", SNX_TR_NOOP("Animations"), GUI_KEY_ACTION, offsetof(GuiAppForm, animations),
      sizeof(((GuiAppForm*)0)->animations), NULL, 0,
      SNX_TR_NOOP("A screen fading in, a box's shade coming and going, 0.15 s each. Off: at once")},
+    {"", SNX_TR_NOOP("Side box"), GUI_KEY_ACTION, offsetof(GuiAppForm, side), sizeof(((GuiAppForm*)0)->side), NULL, 0,
+     SNX_TR_NOOP("The box beside the list: Auto where both fit, On under the list where they do not, Off never. F2")},
     {"", SNX_TR_NOOP("Theme editor"), GUI_KEY_ACTION, 0, 0, NULL, 0,
      SNX_TR_NOOP("This theme's keys with a preview, saved as themes/<name>/theme.ini")},
     {"", SNX_TR_NOOP("Library"), GUI_KEY_ACTION, offsetof(GuiAppForm, folders), sizeof(((GuiAppForm*)0)->folders), NULL,
@@ -3406,6 +3427,7 @@ enum {
     GUI_APP_TEXT,
     GUI_APP_LANGUAGE,
     GUI_APP_ANIMATIONS,
+    GUI_APP_SIDE,
     GUI_APP_EDITOR,
     GUI_APP_FOLDERS,
     GUI_APP_PLACES,
@@ -3443,6 +3465,7 @@ static void app_values(App* app) {
     else /* and what it is now */
         snprintf(f->language, sizeof f->language, snx_tr("Auto: %s"), snx_gui_languages[snx_tr_language()].name);
     snprintf(f->animations, sizeof f->animations, "%s", app->animations_off ? snx_tr("Off") : snx_tr("On"));
+    snprintf(f->side, sizeof f->side, "%s", snx_tr(side_names[app->side_box]));
     if (app->folder_count)
         snprintf(f->folders, sizeof f->folders, snx_tr("recompiled/, dumps/ and %d more"), app->folder_count);
     else
@@ -4347,6 +4370,9 @@ static void app_action(App* app, int row, int step) {
         return;
     } else if (row == GUI_APP_ANIMATIONS) {
         app->animations_off = !app->animations_off;
+    } else if (row == GUI_APP_SIDE) {
+        app->side_box = (app->side_box + (step < 0 ? 2 : 1)) % 3;
+        layout(app);
     } else if (row == GUI_APP_LANGUAGE) {
         app->language = (app->language + (step < 0 ? snx_gui_language_count : 1)) % (snx_gui_language_count + 1);
         language_apply(app);
@@ -4367,7 +4393,8 @@ static void app_action(App* app, int row, int step) {
         if (!step) move_row(app);
         return;
     }
-    if (row == GUI_APP_THEME || row == GUI_APP_TEXT || row == GUI_APP_LANGUAGE || row == GUI_APP_ANIMATIONS)
+    if (row == GUI_APP_THEME || row == GUI_APP_TEXT || row == GUI_APP_LANGUAGE || row == GUI_APP_ANIMATIONS ||
+        row == GUI_APP_SIDE)
         app_save(app);
     app_values(app);
 }
@@ -5011,6 +5038,10 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
                        : longest + 2 + gui_text_cols(app->theme.marker) + gui_text_cols(app->theme.cursor),
                  GUI_SHOWS_TABS);
     f->rows = &app->editor;
+    if (!theme && app->form != GUI_FORM_SETTINGS && (!f->place.side.w || !f->place.side.h)) {
+        f->place.side = f->place.list; /* no side box: the open group's rows the whole column, the groups out */
+        f->place.list = gui_rect(f->place.list.x, f->place.list.y, 0, 0);
+    }
     if (app->form == GUI_FORM_SETTINGS) { /* the focused group's rows, to see before opening it */
         int g = app->editor.row;
         memset(&f->peek, 0, sizeof f->peek);
@@ -7536,6 +7567,7 @@ static const struct {
                  {SNX_TR_KEY("Ctrl+S"), SDLK_S, SDL_KMOD_CTRL},
                  {SNX_TR_KEY("Ctrl+V"), SDLK_V, SDL_KMOD_CTRL},
                  {SNX_TR_KEY("F5"), SDLK_F5, 0},
+                 {SNX_TR_KEY("F2"), SDLK_F2, 0},
                  {SNX_TR_KEY("Refresh"), SDLK_F5, 0},
                  {SNX_TR_KEY("Add a folder"), SDLK_UNKNOWN, 0}};
 /* the hint_keys entry of the n bytes at word, -1 for none */
@@ -7887,6 +7919,17 @@ static void refresh(App* app) {
         space_start(app);
     }
 }
+static const char* shown_place(App* app, GuiPlace* p, char* keys, size_t size);
+/* F2: the side box of the screen shown off where it shows, on where it does not; the App's row says it */
+static void side_toggle(App* app) {
+    GuiPlace p;
+    char keys[256];
+    shown_place(app, &p, keys, sizeof keys); /* a form without it has its rows where the side box was, the list empty */
+    app->side_box = p.side.w && p.side.h && p.list.w && p.list.h ? GUI_SIDE_OFF : GUI_SIDE_ON;
+    layout(app);
+    app_save(app);
+    if (app->editing && app->form == GUI_FORM_APP) app_values(app);
+}
 static bool files_key(App* app, SDL_Keycode code) {
     int shown = SDL_max(1, app->files_shown);
     switch (code) {
@@ -7962,6 +8005,12 @@ static void event(App* app, const SDL_Event* e) {
     if (app->confirm.shown && !app->menu.running &&
         (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
         if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && menu_key_of(&e->key, &key)) ask_key(app, key);
+        return;
+    }
+    /* F2, or the foot's: the side box hidden where it shows, shown where it does not, kept in app.ini */
+    if (e->type == SDL_EVENT_KEY_DOWN && e->key.key == SDLK_F2 && !app->menu.running && !app->finished &&
+        !(app->editing && app->editor.typing)) {
+        if (!e->key.repeat) side_toggle(app);
         return;
     }
     if (e->type == SDL_EVENT_KEY_DOWN && e->key.key == SDLK_F5 && !app->menu.running && !app->finished &&
