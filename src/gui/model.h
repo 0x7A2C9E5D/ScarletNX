@@ -116,6 +116,11 @@ size_t gui_browser_pages(const GuiBrowser* browser);
 size_t gui_browser_items(const GuiBrowser* browser);
 void gui_browser_resize(GuiBrowser* browser, size_t page_size);
 GuiBrowserAction gui_browser_key(GuiBrowser* browser, GuiKey key);
+/* gui_browser_key over a list with items no one picks (a group's heading; skip says which, by the item's index): Up
+   and Down step over them, a page shown with its focus on one moves it to the next item that is not one (else the one
+   before), and Select on one asks nothing */
+GuiBrowserAction gui_browser_key_skip(GuiBrowser* browser, GuiKey key, bool (*skip)(size_t item, const void* user),
+                                      const void* user);
 
 #define GUI_MAX_COLS 240
 #define GUI_MAX_ROWS 100

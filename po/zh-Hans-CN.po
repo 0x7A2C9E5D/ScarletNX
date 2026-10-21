@@ -184,8 +184,8 @@ msgid "Tap here to abort and return to menu"
 msgstr "轻触此处中止并返回菜单"
 
 #: src/gui/main.c
-msgid "No games in games/: put a game's .nro, .xci or .nsp there."
-msgstr "games/ 中没有游戏：请把游戏的 .nro、.xci 或 .nsp 放进去。"
+msgid "No games in games/ or dumps/: put a game's .nro, .xci or .nsp in dumps/."
+msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -274,8 +274,8 @@ msgid "Press [ESC] to abort and return to menu"
 msgstr "按 [ESC] 中止并返回菜单"
 
 #: src/gui/main.c
-msgid "No games in games/ or the folders of Settings > App."
-msgstr "games/ 和「设置 > 应用」的文件夹中都没有游戏。"
+msgid "No games in games/, dumps/ or the folders of Settings > App > Library."
+msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -628,8 +628,8 @@ msgid "none"
 msgstr "无"
 
 #: src/gui/main.c
-msgid "Pick a folder of games, listed after games/"
-msgstr "选取一个游戏文件夹，列在 games/ 之后"
+msgid "Pick a folder of games or dumps, listed after games/ and dumps/"
+msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
@@ -774,8 +774,8 @@ msgstr "自动：%s"
 
 #: src/gui/main.c
 #, c-format
-msgid "games/ and %d more"
-msgstr "games/ 及另外 %d 个"
+msgid "games/, dumps/ and %d more"
+msgstr ""
 
 #: src/gui/main.c
 #, c-format
@@ -2435,3 +2435,12 @@ msgstr "上/下: 行. Enter: 下一步. ESC: 返回."
 #, snx-keys
 msgid "Up/Down: row. Enter: next. ESC: exit."
 msgstr "上/下: 行. Enter: 下一步. ESC: 退出."
+
+msgid "Recompiled"
+msgstr ""
+
+msgid "Not enough memory to list the games in their groups."
+msgstr ""
+
+msgid "Dumps put here are listed, its subfolders' too: .nsp, .xci and .nro files. It stays on the list"
+msgstr ""

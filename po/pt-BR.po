@@ -184,8 +184,8 @@ msgid "Tap here to abort and return to menu"
 msgstr "Toque aqui para abortar e voltar ao menu"
 
 #: src/gui/main.c
-msgid "No games in games/: put a game's .nro, .xci or .nsp there."
-msgstr "Nenhum jogo em games/: coloque lá o .nro, .xci ou .nsp de um jogo."
+msgid "No games in games/ or dumps/: put a game's .nro, .xci or .nsp in dumps/."
+msgstr "Nenhum jogo em games/ nem em dumps/: coloque o .nro, .xci ou .nsp de um jogo em dumps/."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -274,8 +274,8 @@ msgid "Press [ESC] to abort and return to menu"
 msgstr "Aperte [ESC] para abortar e voltar ao menu"
 
 #: src/gui/main.c
-msgid "No games in games/ or the folders of Settings > App."
-msgstr "Nenhum jogo em games/ nem nas pastas de Configurações > App."
+msgid "No games in games/, dumps/ or the folders of Settings > App > Library."
+msgstr "Nenhum jogo em games/, dumps/ nem nas pastas de Configurações > App > Biblioteca."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -628,8 +628,8 @@ msgid "none"
 msgstr "nenhuma"
 
 #: src/gui/main.c
-msgid "Pick a folder of games, listed after games/"
-msgstr "Escolha uma pasta de jogos, listada depois de games/"
+msgid "Pick a folder of games or dumps, listed after games/ and dumps/"
+msgstr "Escolha uma pasta de jogos ou dumps, listada depois de games/ e dumps/"
 
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
@@ -774,8 +774,8 @@ msgstr "Auto: %s"
 
 #: src/gui/main.c
 #, c-format
-msgid "games/ and %d more"
-msgstr "games/ e mais %d"
+msgid "games/, dumps/ and %d more"
+msgstr "games/, dumps/ e mais %d"
 
 #: src/gui/main.c
 #, c-format
@@ -2435,3 +2435,12 @@ msgstr "Cima/Baixo: linha. Enter: avançar. ESC: voltar."
 #, snx-keys
 msgid "Up/Down: row. Enter: next. ESC: exit."
 msgstr "Cima/Baixo: linha. Enter: avançar. ESC: sair."
+
+msgid "Recompiled"
+msgstr "Recompilados"
+
+msgid "Not enough memory to list the games in their groups."
+msgstr "Sem memória para listar os jogos em seus grupos."
+
+msgid "Dumps put here are listed, its subfolders' too: .nsp, .xci and .nro files. It stays on the list"
+msgstr "Os dumps postos aqui são listados, os das subpastas também: arquivos .nsp, .xci e .nro. Ela fica na lista"

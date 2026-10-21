@@ -5,11 +5,19 @@
 #include <assert.h>
 #include <errno.h>
 #ifndef _WIN32
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* gui_games_group's made: b.nsp is the dump of a game recompiled already */
+static bool made_b(const char* path, const void* user) {
+    size_t n = strlen(path);
+    (void)user;
+    return n >= 5 && !strcmp(path + n - 5, "b.nsp");
+}
 
 int main(void) {
     GuiGames games = {0};
@@ -211,5 +219,58 @@ int main(void) {
     free(subdir);
     free(dir);
     puts("GUI CIA browser filtering, sorting and refresh passed");
+    /* dumps listed with GUI_GAMES_DUMP, and the list in two groups: the ones ready to run, then the dumps and CIAs,
+       under their headings when both have games; a dump made already is left out, and grouping again gives the same
+       list */
+    {
+        GuiGames g = {0};
+        char* d = snx_temp_dir(NULL);
+        const char* dumps[] = {"b.nsp", "a.xci", "c.nro", "z.cia", "notes.txt"};
+        size_t k, ready = 0;
+        assert(d);
+        for (k = 0; k < sizeof dumps / sizeof *dumps; ++k) {
+            char* path = snx_path_join(d, dumps[k]);
+            assert(!snx_write_file(path, "fixture", 7));
+            free(path);
+        }
+        assert(gui_games_add(&g, d, GUI_GAMES_RUN, error, sizeof error) && g.count == 0); /* no dump unasked */
+        gui_games_free(&g);
+        assert(gui_games_add(&g, d, GUI_GAMES_DUMP | GUI_GAMES_CIA, error, sizeof error) && g.count == 4);
+        assert(gui_games_group(&g, "Recompiled", "Dumps", NULL, NULL) && g.count == 4); /* dumps alone: no heading */
+        for (k = 0; k < g.count; ++k) assert(!gui_games_heading(&g, k));
+        gui_games_free(&g);
+#ifndef _WIN32
+        {
+            char* folder = snx_path_join(d, "Ready");
+            char* program = snx_path_join(folder, "Ready");
+            assert(folder && program && !snx_mkdirs(folder) && !snx_write_file(program, "#!/bin/sh\n", 10));
+            assert(!chmod(program, 0755));
+            ready = 1;
+            free(program);
+            free(folder);
+        }
+#endif
+        assert(gui_games_add(&g, d, GUI_GAMES_RUN | GUI_GAMES_CIA | GUI_GAMES_DUMP, error, sizeof error));
+        assert(g.count == 4 + ready);
+        assert(gui_games_group(&g, "Recompiled", "Dumps", made_b, NULL));
+        for (int again = 0; again < 2; ++again) {
+            /* [Recompiled, Ready, Dumps,] then a.xci, c.nro and z.cia in their order; b.nsp made already. The headings
+               only with both groups: without Ready (Windows here) the dumps alone */
+            size_t at = 0;
+            assert(g.count == (ready ? 3 : 0) + 3);
+            if (ready) {
+                assert(gui_games_heading(&g, 0) && !strcmp(g.shown[0], "Recompiled"));
+                assert(!gui_games_heading(&g, 1) && !strcmp(g.names[1], "Ready"));
+                assert(gui_games_heading(&g, 2) && !strcmp(g.shown[2], "Dumps"));
+                at = 3;
+            }
+            for (k = at; k < g.count; ++k) assert(!gui_games_heading(&g, k) && strcmp(g.names[k], "b.nsp"));
+            assert(!gui_games_heading(&g, g.count));                          /* past the end: no heading */
+            assert(gui_games_group(&g, "Recompiled", "Dumps", made_b, NULL)); /* again: the same */
+        }
+        gui_games_free(&g);
+        snx_remove_tree(d);
+        free(d);
+    }
     return 0;
 }

@@ -200,7 +200,7 @@ msgid "Tap here to abort and return to menu"
 msgstr ""
 
 #: src/gui/main.c
-msgid "No games in games/: put a game's .nro, .xci or .nsp there."
+msgid "No games in games/ or dumps/: put a game's .nro, .xci or .nsp in dumps/."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -290,7 +290,7 @@ msgid "Press [ESC] to abort and return to menu"
 msgstr ""
 
 #: src/gui/main.c
-msgid "No games in games/ or the folders of Settings > App."
+msgid "No games in games/, dumps/ or the folders of Settings > App > Library."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -686,7 +686,7 @@ msgid "none"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Pick a folder of games, listed after games/"
+msgid "Pick a folder of games or dumps, listed after games/ and dumps/"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
@@ -841,7 +841,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "games/ and %d more"
+msgid "games/, dumps/ and %d more"
 msgstr ""
 
 #: src/gui/main.c
@@ -867,6 +867,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Where recompiled games go: Enter picks another, Del twice puts back the default"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Dumps put here are listed, its subfolders' too: .nsp, .xci and .nro files. It stays on the list"
 msgstr ""
 
 #: src/gui/main.c
@@ -967,6 +971,11 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Enter: pick another. Del: the default"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Could not make %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -1326,11 +1335,6 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "This copy is portable: to install it, first move away %s"
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
-msgid "Could not make %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -1718,6 +1722,14 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "%s It is in Settings > App > Library."
+msgstr ""
+
+#: src/gui/main.c
+msgid "Recompiled"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Not enough memory to list the games in their groups."
 msgstr ""
 
 #: src/gui/main.c

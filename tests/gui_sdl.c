@@ -1860,7 +1860,8 @@ int main(int argc, char** argv) {
     render(&app);
     shows(&app, "- Library            games/", yellow);
     key(&app, SDLK_RETURN);
-    assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 2 && app.editor.row == 0);
+    assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 3 &&
+           app.editor.row == 0); /* games/, dumps/, Add */
     /* Back over the rows, for a click or a finger: it does what ESC does, back on the App's row; the groups' list has
        none */
     {
@@ -1972,7 +1973,7 @@ int main(int argc, char** argv) {
             fprintf(stderr, "folders: %d, first \"%s\", expected \"%s\", note \"%s\"\n", app.folder_count,
                     app.folder_count ? app.folders[0] : "", kept_as, app.editor.note);
         assert(app.folder_count == 1 && same_path(app.folders[0], kept_as) && !strcmp(app.editor.note, "Added"));
-        assert(app.form == GUI_FORM_FOLDERS && app.editor.row == 1 && gui_editor_rows(&app.editor) == 3);
+        assert(app.form == GUI_FORM_FOLDERS && app.editor.row == 2 && gui_editor_rows(&app.editor) == 4);
         kept = (char*)snx_read_file(app.folders_file, &size);
         snprintf(line, sizeof line, "%s\n", kept_as);
         assert(kept && !strcmp(kept, line));
@@ -1982,7 +1983,7 @@ int main(int argc, char** argv) {
         render(&app);
         snprintf(line, sizeof line, "- %.20s", kept_as);
         shows(&app, line, yellow);
-        app.editor.row = 2;
+        app.editor.row = 3; /* Add a folder, after games/, dumps/ and the folder */
         key(&app, SDLK_RETURN);
         {
             SDL_Event answer;
@@ -1992,7 +1993,7 @@ int main(int argc, char** argv) {
         }
         assert(app.folder_count == 1 && (!strcmp(app.editor.note, "No folder was picked.") ||
                                          !strncmp(app.editor.note, "The folder picker could not open: ", 34)));
-        app.editor.row = 1;
+        app.editor.row = 2;
         key(&app, SDLK_RETURN);
         assert(app.folder_count == 1 && !strcmp(app.editor.note, "Enter again takes it off the list"));
         key(&app, SDLK_RETURN);
@@ -2048,7 +2049,7 @@ int main(int argc, char** argv) {
             snprintf(line, sizeof line, "%s" GUI_FOLDER_DEEP "\n", deep_as);
             assert(kept && !strcmp(kept, line));
             free(kept);
-            assert(!strcmp(app.app_form.folder[1], "+ subfolders"));
+            assert(!strcmp(app.app_form.folder[2], "+ subfolders"));
             games_scan(&app, &listed, said, sizeof said);
             found = 0;
             for (g = 0; g < listed.count; ++g) {
@@ -2079,7 +2080,7 @@ int main(int argc, char** argv) {
         event(&app, &e); /* back for the games below */
         key(&app, SDLK_ESCAPE);
         assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_FOLDERS);
-        assert(!strcmp(app.app_form.folders, "games/ and 1 more"));
+        assert(!strcmp(app.app_form.folders, "games/, dumps/ and 1 more"));
         free(file);
         free(kept_as);
         free(more);
@@ -2160,8 +2161,16 @@ int main(int argc, char** argv) {
         free(kept);
         app.message[0] = 0;
         app_load(&app);
-        snprintf(line, sizeof line, "Not used from %s: [folders] work = relative/work, [folders] shaders = /x",
-                 app.app_file);
+        /* what app.ini has that it does not take, named; and first, where /nonexistent cannot be made (a root CI container
+           can), that the data folder's dumps/ could not be */
+        {
+            char* dumps = snx_path_join(app.data_dir, "dumps");
+            char* unmade = snx_is_dir(dumps) ? snx_strdup("") : snx_format("Could not make %s ", dumps);
+            snprintf(line, sizeof line, "%sNot used from %s: [folders] work = relative/work, [folders] shaders = /x",
+                     unmade, app.app_file);
+            free(unmade);
+            free(dumps);
+        }
         assert(!strcmp(app.message, line) && app.place[GUI_PLACE_GAMES] && !strcmp(app.games_dir, app.place[1]));
         assert(!app.place[GUI_PLACE_WORK] && !strcmp(app.work_dir, work));
         app.message[0] = 0;
