@@ -188,7 +188,10 @@ static GfxOut *g_prep, *g_prep_tail, *g_out, *g_out_tail;
    change (WB_MAP) still checks every result, so one over a page about to be mapped lands first */
 static PendPages g_out_pages = {.also = &g_pend_any};
 static void out_pages(const GfxOut* o, int delta) {
-    for (u32 i = 0; i < o->npages && o->pages[i] != ~0ull; i++) pend_add_page(&g_out_pages, o->pages[i], delta);
+    for (u32 i = 0, j; i < o->npages && o->pages[i] != ~0ull; i = j) { /* in runs of consecutive pages, sorted */
+        for (j = i + 1; j < o->npages && o->pages[j] == o->pages[j - 1] + 1; j++) continue;
+        pend_add_pages(&g_out_pages, o->pages[i], o->pages[j - 1], delta);
+    }
 }
 /* where and how pending results were written: shader stores, copies, and transform feedback's captures when the device
    has it (its flags are invalid without the extension) */

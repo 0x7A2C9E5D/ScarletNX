@@ -54,8 +54,12 @@ static void vkr_gfx_mem_need(u64 gva, u64 size) {
     vk_buf_mem_need(gva, size);
     vk_gfx_image_mem_need(gva, size);
 }
+/* the GPU range a mapping change is changing, from its begin to its end (size 0 for a change of guest memory) */
+static u64 g_mapping_gva, g_mapping_size;
 static void vkr_mapping_begin(u64 gva, u64 size, int full) {
     vk_lock();
+    g_mapping_gva = gva;
+    g_mapping_size = full ? 0 : size;
     vk_release_drain();
     if (full) {
         vk_buf_land_map();
@@ -67,7 +71,13 @@ static void vkr_mapping_begin(u64 gva, u64 size, int full) {
         vk_compute_mem_need_map(gva, size);
     }
 }
-static void vkr_mapping_end(void) { vk_unlock(); }
+/* the pages changed count what is pending at the guest pages they show now. A change of guest memory (full) leaves
+   the GMMU as it was: pending pages are compared by address, and freed memory is landed first */
+static void vkr_mapping_end(void) {
+    pend_remap(g_mapping_gva, g_mapping_size);
+    g_mapping_size = 0;
+    vk_unlock();
+}
 
 /* 0 when Vulkan can't run here */
 static int vkr_start(void) {

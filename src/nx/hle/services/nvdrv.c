@@ -343,6 +343,18 @@ void gmmu_aliases(u64 cpu, u64 size, void (*fn)(void* ctx, u64 gva, u64 n), void
         }
     pm_unlock(&g_hle.nvdrv.alias_lock);
 }
+void gmmu_pieces(u64 gva, u64 size, void (*fn)(void* ctx, u64 gva, u64 cpu, u64 n), void* ctx) {
+    u64 g0 = gva >> GPAGE_BITS, g1;
+    if (!size) return;
+    g1 = ((gva + size - 1) >> GPAGE_BITS) + 1;
+    pm_lock(&g_hle.nvdrv.alias_lock);
+    for (u32 k = grun_find(g0); k < g_hle.nvdrv.ngruns && g_hle.nvdrv.gruns[k].gpage < g1; k++) {
+        const GRun* r = &g_hle.nvdrv.gruns[k];
+        u64 a = r->gpage > g0 ? r->gpage : g0, b = r->gpage + r->pages < g1 ? r->gpage + r->pages : g1;
+        fn(ctx, a << GPAGE_BITS, (r->cpage + (a - r->gpage)) << GPAGE_BITS, (b - a) << GPAGE_BITS);
+    }
+    pm_unlock(&g_hle.nvdrv.alias_lock);
+}
 void gmmu_map(u64 gva, u64 cpu, u64 size) {
     u64 first, last, p;
     if (!size) return;

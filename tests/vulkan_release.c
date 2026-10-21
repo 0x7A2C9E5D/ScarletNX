@@ -75,6 +75,10 @@ void fatal(const char* fmt, ...) {
     (void)fmt;
     abort();
 }
+void logf_(int level, const char* fmt, ...) {
+    (void)level;
+    (void)fmt;
+}
 void vk_lock(void) { lock_depth++; }
 /* as device.c's: the outermost unlock signals the event slots the releases under it reached */
 void vk_unlock(void) {
@@ -95,6 +99,19 @@ u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
     n = 0x1000 - (gva & 0xFFF);
     while (n < max && gmmu_translate(gva + n) == first + n) n += 0x1000;
     return n < max ? n : max;
+}
+/* nvdrv.c's index of mappings by guest address, by brute force over the pages above (the middle of each, as the last
+   range starts a few bytes in): each GPU page showing guest bytes of [cpu, cpu + size), clipped to them */
+void gmmu_aliases(u64 cpu, u64 size, void (*fn)(void* ctx, u64 gva, u64 n), void* ctx) {
+    for (u64 p = 0; p < 0x40; p++) {
+        u64 c = gmmu_translate((p << 12) + 0x800) & ~0xFFFull, a = c > cpu ? c : cpu;
+        u64 b = c + 0x1000 < cpu + size ? c + 0x1000 : cpu + size;
+        if (gmmu_translate((p << 12) + 0x800) && a < b) fn(ctx, (p << 12) + (a - c), b - a);
+    }
+}
+void gmmu_pieces(u64 gva, u64 size, void (*fn)(void* ctx, u64 gva, u64 cpu, u64 n), void* ctx) {
+    for (u64 p = gva >> 12; p <= (gva + size - 1) >> 12 && p < 0x40; p++)
+        if (gmmu_translate((p << 12) + 0x800)) fn(ctx, p << 12, gmmu_translate((p << 12) + 0x800) & ~0xFFFull, 0x1000);
 }
 u32 syncpt_read(u32 id) { return id < 128 ? completed[id] : 0; }
 /* under vk_lock, so the events it reaches wait for vk_unlock (memory/own.c's traps are answered under vk_lock) */
