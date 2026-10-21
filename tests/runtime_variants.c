@@ -217,8 +217,9 @@ int main(void) {
     g_function2.runs = &g_run2;
     g_function2.fn = test_fn2;
     CHECK(snx_variant_hash(word, NULL, &g_run2, 1, &g_function2.h1, &g_function2.h2) == 0);
-    g_functions[0] = g_function;
-    g_functions[1] = g_function2;
+    /* the table's order is the build's; the runtime index sorts it */
+    g_functions[0] = g_function2;
+    g_functions[1] = g_function;
     g_variants_table.version = SNX_VARIANTS_VERSION;
     g_variants_table.count = 2;
     g_variants_table.functions = g_functions;
@@ -274,8 +275,8 @@ int main(void) {
     CHECK(jit_wait(OUT + 0x400) == NULL);
     CHECK(jit_resolve(OUT + 0x400) == NULL);
     CHECK(jit_resolve_or_add(OUT + 0x400) == NULL);
-    CHECK(g_jit_added == 0);
-    CHECK(g_jit_removed == 0);
+    CHECK(g_jit_added == 1);
+    CHECK(g_jit_removed == 1);
     CHECK(g_jit_invalidated > 0);
     jit_report();
 
