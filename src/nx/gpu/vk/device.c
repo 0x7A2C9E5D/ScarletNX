@@ -260,6 +260,8 @@ static int create_device(void) {
             ? subgroup.supportedStages
             : 0;
     g_vk_preserve_infnan = p12.shaderSignedZeroInfNanPreserveFloat32 != 0;
+    /* MoltenVK fails every pipeline that lists VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE (Metal's dynamic stride) */
+    g_vk.has_dynamic_stride = p12.driverID != VK_DRIVER_ID_MOLTENVK;
     g_vk_preserve_infnan64 = p12.shaderSignedZeroInfNanPreserveFloat64 != 0;
     /* 32 bit alone: a device whose denorm modes can't differ per width would need 16 and 64 bit declared too */
     g_vk_flush_denorm = p12.shaderDenormFlushToZeroFloat32 &&
