@@ -33,6 +33,14 @@ void syncpt_free(u32 id);
 u32 syncpt_read(u32 id);
 void syncpt_incr(u32 id);
 void syncpt_add(u32 id, u32 n); /* n increments, one wakeup */
+/* syncpt_add for a thread holding the renderer's lock (vk_lock), and only inside such a hold: the event slots waiting
+   for the value are signaled by the same thread's syncpt_events, which its outermost vk_unlock calls as it lets the
+   lock go (vk_release_events). Signaling takes the kernel's lock, and a thread holding that may wait in a trap on
+   GPU-owned memory, which is answered under the renderer's lock (memory/own.c) */
+void syncpt_add_quiet(u32 id, u32 n);
+/* the event slots this thread's syncpt_add_quiet increments reached, signaled: with no renderer's lock held. Nothing
+   when there were none since the last call */
+void syncpt_events(void);
 /* A channel promises the next n increments it will make, in order. Returns the value they reach: the fence the ioctl
    hands back, and what nvhost-ctrl reads as the maximum */
 u32 syncpt_promise(u32 id, u32 n);
@@ -134,10 +142,10 @@ typedef struct {
     u32 ctrl_ev[NV_FDS];
     NvEventTable ctrl_evt[NV_CTRL_TABLES];
     u32 ctrl_evt_next;
-    /* a game thread arms a slot while GPU and video threads run nv_events_check after their increments. Arming
-       clears the event first and does both in one hold: an increment between a separate arm and clear would signal
-       and then lose its wakeup, leaving the game waiting for good. A mutex, not a spin: kevent_signal runs under
-       it */
+    /* a game thread arms a slot while GPU and video threads run nv_events_check after their increments: syncpt_add's
+       at once, syncpt_add_quiet's at the outermost vk_unlock, after vk_lock goes (syncpt_events). Arming clears the
+       event first and does both in one hold: an increment between a separate arm and clear would signal and then
+       lose its wakeup, leaving the game waiting for good. A mutex, not a spin: kevent_signal runs under it */
     PMutex nvev_lk;
     NvFile nvf[NV_FDS];
     /* nv_first_use's (device, ioctl) pairs, under seen_lock */

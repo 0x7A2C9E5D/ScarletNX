@@ -21,10 +21,14 @@ void fatal(const char* fmt, ...) {
     exit(2);
 }
 void log_crash_mode(void) {}
+static int g_reports;     /* crash reports made */
+static int g_report_exit; /* a child's: a report ends it with 42, which its parent checks */
 void crash_report(void* host_pc, void* fault, int sig) {
     (void)host_pc;
     (void)fault;
     (void)sig;
+    g_reports++;
+    if (g_report_exit) _exit(42);
 }
 
 static unsigned checks, failures;
@@ -172,6 +176,33 @@ int main(int argc, char** argv) {
     CHECK(!plat_thread(thread_fn, &arg, 0) && !plat_thread(thread_fn, &arg, 1024), "threads did not start");
     for (i = 0; i < 5000 && __atomic_load_n(&g_ran, __ATOMIC_ACQUIRE) != 14; i++) plat_sleep_ns(1000000);
     CHECK(__atomic_load_n(&g_ran, __ATOMIC_ACQUIRE) == 14, "a thread did not run");
+
+    /* last: the crash handler stays for the rest of the process. A SIGSEGV or SIGBUS sent (a debugger's leftover, a
+       kill) is ignored where the kernel says it was sent (Linux: sent_signal), and a real fault is still reported */
+    printf("sent signals\n");
+    plat_install_crash_handler();
+    {
+        union sigval v;
+        pid_t child;
+        int status = 0;
+        v.sival_int = 0;
+#if defined(__linux__)
+        CHECK(raise(SIGSEGV) == 0 && g_reports == 0, "a raised SIGSEGV was reported");
+        CHECK(pthread_kill(pthread_self(), SIGBUS) == 0 && g_reports == 0, "a SIGBUS sent to the thread was reported");
+        CHECK(sigqueue(getpid(), SIGSEGV, v) == 0 && g_reports == 0, "a queued SIGSEGV was reported");
+#else
+        (void)v;
+#endif
+        child = fork();
+        if (!child) {
+            volatile u8* p = (volatile u8*)mmap(NULL, 4096, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            g_report_exit = 1;
+            p[0] = 1; /* faults: the handler reports, which ends the child with 42 */
+            _exit(3);
+        }
+        CHECK(child > 0 && waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 42,
+              "a real fault in a child was not reported");
+    }
 
     printf("%u checks, %u failed\n", checks, failures);
     return failures != 0;

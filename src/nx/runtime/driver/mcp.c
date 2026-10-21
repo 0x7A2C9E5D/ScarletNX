@@ -13,11 +13,15 @@
      does, where this build has an A64 disassembler.
    - edenprobe_scaffold, edenprobe_check, edenprobe_run, edenprobe_finding (mcp_edenprobe.c): a confirmed failure as a
      new edenprobe case, written into a local checkout, checked on the host, run on this build, and written up.
+   - gdb_attach, gdb_command, gdb_threads, gdb_guest, gdb_memory, gdb_detach (mcp_gdb.c, UNIX only): GDB on a game
+     started with the GDB stub, the runtime's process read and driven through it.
 
    scan_log, read_log, symbolize and disassemble read only under the data folder (DIR, else snx_data_dir's) and its
    state, cache and settings folders: what a tool answers with is a log's text or a game's code, and those are where
    ScarletNX keeps them. The edenprobe tools work in the clone and on the NRO the person names, and answer only their
-   own results.
+   own results. The GDB tools reach the game's process only, on this machine's loopback: gdb_command runs a list of
+   GDB's reading, breakpoint and execution commands, none that runs a shell or a script or writes a file, though
+   print and call evaluate the game's own functions.
 
    A game's code goes to the agent's context the way a session's tools/disasm.py output does, and nowhere else. An
    answer is cut at MAX_LINES lines: the agent's context is the scarce part */
@@ -30,6 +34,7 @@
 #include "nx/runtime/driver/disasm.h"
 #include "nx/runtime/driver/hactool/cJSON.h"
 #include <ctype.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -63,6 +68,7 @@ typedef struct {
        and loading one takes a second or more. game_folder NULL for none */
     char* game_folder;
     Game game;
+    char* gdb_game; /* the game folder gdb_attach named guest addresses by, or NULL */
 } Mcp;
 
 /* ============================================================ text (mcp_int.h) */
@@ -88,7 +94,7 @@ static void hex(char* out, SnxU64 v) {
     while (n) *out++ = digits[--n];
     *out = 0;
 }
-static void put_hex(Text* t, SnxU64 v) {
+void mcp_put_hex(Text* t, SnxU64 v) {
     char h[17];
     hex(h, v);
     mcp_put(t, h);
@@ -152,6 +158,8 @@ static int mcp_open(Mcp* m, int argc, char** argv) {
 static void game_free(Game* g);
 static void mcp_close(Mcp* m) {
     int i;
+    mcp_gdb_close(); /* the game runs on */
+    free(m->gdb_game);
     if (m->game_folder) game_free(&m->game);
     free(m->game_folder);
     for (i = 0; i < m->nroots; i++) free(m->roots[i]);
@@ -507,12 +515,12 @@ static void describe(Text* t, const Game* g, SnxU64 a) {
     if (s && a - s->address < MAX_DISTANCE) {
         put_name(t, sym_name(g, s));
         mcp_put(t, "+");
-        put_hex(t, a - s->address);
+        mcp_put_hex(t, a - s->address);
     } else if (s) {
         mcp_put(t, "? (");
         put_name(t, sym_name(g, s));
         mcp_put(t, "+");
-        put_hex(t, a - s->address);
+        mcp_put_hex(t, a - s->address);
         mcp_put(t, " is past MAX_DISTANCE)");
     } else
         mcp_put(t, "?");
@@ -540,7 +548,7 @@ static char* symbolize(Mcp* m, const char* game, const cJSON* addresses, Text* e
             mcp_put(&t, " is not a hexadecimal address\n");
             continue;
         }
-        put_hex(&t, v);
+        mcp_put_hex(&t, v);
         mcp_put(&t, " ");
         describe(&t, g, v);
         mcp_put(&t, "\n");
@@ -559,14 +567,14 @@ static void listed(void* ctx, SnxU64 address, SnxU32 word, const char* text, Snx
     if (l->t->lines >= MAX_LINES) return;
     sprintf(w, "%08lx", (unsigned long)word);
     mcp_put(l->t, "  ");
-    put_hex(l->t, address);
+    mcp_put_hex(l->t, address);
     mcp_put(l->t, ":  ");
     mcp_put(l->t, w);
     mcp_put(l->t, "  ");
     mcp_put(l->t, text);
     if (target) {
         mcp_put(l->t, "  ; ");
-        put_hex(l->t, target);
+        mcp_put_hex(l->t, target);
         mcp_put(l->t, " ");
         describe(l->t, l->g, target);
     }
@@ -653,6 +661,9 @@ static const char instructions[] =
     "services the runtime doesn't implement, the shaders, macros and SVCs it missed, slow frames); read_log reads parts of it by text or line; find_game "
     "lists the extracted games; symbolize and disassemble read a game's code at the addresses a log names. "
     "A log's addresses match only the same game version (find_game gives it, the log's header names the log's). "
+    "For a game started with the GDB stub (-S, or -s to wait before the runtime starts), gdb_attach connects GDB; "
+    "gdb_command, gdb_threads, gdb_guest and gdb_memory then read the runtime and the guest, and gdb_detach lets the "
+    "game run on. "
     "Nothing of a game (code, files) goes into an issue, a pull request or an edenprobe case: a case asks the "
     "hardware a question the failure narrowed down to.";
 
@@ -750,6 +761,46 @@ static cJSON* tools(void) {
         "(it should fail on ScarletNX and pass on the reference), and the edenprobe pull request's text: "
         "the commit subject, the issue it comes from, what each machine answered, source (where the expected answer "
         "comes from), the tests, and what a case may not hold.";
+    static const char* const attach_names[] = {"port", "game"};
+    static const char* const attach_types[] = {"integer", "string"};
+    static const char* const command_names[] = {"command", "wait"};
+    static const char* const command_types[] = {"string", "integer"};
+    static const char* const guest_names[] = {"thread", "frames"};
+    static const char* const guest_types[] = {"integer", "integer"};
+    static const char* const memory_names[] = {"address", "size"};
+    static const char* const memory_types[] = {"string", "integer"};
+    static const char attach_says[] =
+        "Connects GDB to a game started with the GDB stub (-S: it runs until a debugger connects, -s: it waits "
+        "before the runtime starts), on the stub's port (1234). The game stops; a breakpoint on the runtime's "
+        "crash_report stops it at a crash, and SIGSEGV and SIGBUS pass to the runtime (memory it moves, its crash "
+        "report). game (a folder, a game of work/ or a title ID, of the same version) names guest addresses and the "
+        "recompiled code's symbols (F_<address> a 64-bit game's functions, A_ and T_<address> a 32-bit game's A32 and "
+        "Thumb blocks, a32_<address>_<thumb> the 32-bit JIT's) by the game's own symbols. GDB debugs the host "
+        "process: the runtime's C with its debug information, and the recompiled game code. The stub takes one "
+        "connection per run, so a second attach is refused. Needs gdb on PATH (GDB 9 or later). Linux.";
+    static const char command_says[] =
+        "Runs a GDB command and answers its output, 400 lines at most. Only reading, breakpoint and execution commands "
+        "run (backtrace, info, print, x, ptype, list, disassemble, frame, up, down, thread, break, tbreak, watch, "
+        "delete, disable, enable, condition, display, show, set var, set print, maintenance info, and the resumes), "
+        "by GDB's names, aliases and unambiguous prefixes: no shell, script, file write, command body (commands, "
+        "define, if, while) or session change (gdb_attach and gdb_detach do that). print, call and the like evaluate "
+        "the game's own functions, which can do anything the game can. A resume (continue, next, step, stepi, nexti, "
+        "finish, until, advance, jump) runs in the background and waits up to wait seconds (10, at most 600) for the "
+        "game to stop, at a breakpoint or a crash, then interrupts it; wait 0 leaves it running, and nothing else runs "
+        "until \"interrupt\" stops it. Example: p *(KThread*)tls_thread, the selected thread's guest thread.";
+    static const char threads_says[] =
+        "Every thread of the stopped game: the runtime's own, and each guest thread with its id, name (the SDK's), "
+        "whether it is in an SVC (its registers then exact; in game code they may be stale), its guest pc and lr, "
+        "named with gdb_attach's game, and where its host thread is. Each line starts with the thread's GDB number.";
+    static const char guest_says[] =
+        "A guest thread's registers (X0-X30, SP, PC, NZCV and TPIDRRO_EL0, or a 32-bit game's R0-R15 and CPSR) and "
+        "its guest backtrace from the frame records its frame pointer leads to, named with gdb_attach's game. thread "
+        "is the GDB thread number gdb_threads lists (the selected thread when left out); frames (32, at most 64).";
+    static const char memory_says[] =
+        "Guest memory at address (hexadecimal, a game address within the game's address space), size bytes (256, at "
+        "most 4096), as hex and text. The game must be stopped. A page the GPU holds can't be read: it is trapped "
+        "until the game's CPU touches it.";
+    static const char detach_says[] = "Detaches GDB, and the game runs on without it. Attaching again needs a new run.";
     cJSON* list = cJSON_CreateArray();
     tool(list, "scan_log", scan_says, schema(path, s1, 1, path, 1));
     tool(list, "read_log", read_says, schema(read_names, read_types, 6, path, 1));
@@ -760,6 +811,12 @@ static cJSON* tools(void) {
     tool(list, "edenprobe_check", check_says, schema(check_names, s2, 2, check_names, 1));
     tool(list, "edenprobe_run", run_says, schema(run_names, s3, 3, run_names, 3));
     tool(list, "edenprobe_finding", finding_says, schema(finding_names, finding_types, 6, finding_names, 4));
+    tool(list, "gdb_attach", attach_says, schema(attach_names, attach_types, 2, NULL, 0));
+    tool(list, "gdb_command", command_says, schema(command_names, command_types, 2, command_names, 1));
+    tool(list, "gdb_threads", threads_says, schema(NULL, NULL, 0, NULL, 0));
+    tool(list, "gdb_guest", guest_says, schema(guest_names, guest_types, 2, NULL, 0));
+    tool(list, "gdb_memory", memory_says, schema(memory_names, memory_types, 2, memory_names, 1));
+    tool(list, "gdb_detach", detach_says, schema(NULL, NULL, 0, NULL, 0));
     return list;
 }
 
@@ -767,9 +824,74 @@ static const char* arg_string(const cJSON* args, const char* key) {
     const cJSON* v = cJSON_GetObjectItemCaseSensitive(args, key);
     return cJSON_IsString(v) ? v->valuestring : NULL;
 }
+/* otherwise too for a number a long can't hold (converting it would be undefined), NaN included */
 static long arg_number(const cJSON* args, const char* key, long otherwise) {
     const cJSON* v = cJSON_GetObjectItemCaseSensitive(args, key);
-    return cJSON_IsNumber(v) ? (long)v->valuedouble : otherwise;
+    return cJSON_IsNumber(v) && v->valuedouble >= (double)LONG_MIN && v->valuedouble <= (double)LONG_MAX
+               ? (long)v->valuedouble
+               : otherwise;
+}
+
+/* a guest address named by gdb_attach's game (mcp_int.h's McpNamer) */
+static void name_guest(Text* t, const void* ctx, SnxU64 a) { describe(t, (const Game*)ctx, a); }
+/* the GDB tools' namer: gdb_attach's game's, loaded as symbolize loads it, or none */
+static McpNamer gdb_namer(Mcp* m, const void** ctx) {
+    Text err = {0};
+    const Game* g = m->gdb_game ? game_get(m, m->gdb_game, &err) : NULL;
+    free(err.p);
+    *ctx = g;
+    return g ? name_guest : NULL;
+}
+static char* gdb_tool(Mcp* m, const char* name, const cJSON* args, Text* err) {
+    const void* ctx;
+    McpNamer namer;
+    if (!strcmp(name, "gdb_attach")) {
+        const char* game = arg_string(args, "game");
+        char* folder = game ? game_folder(m, game, err) : NULL;
+        char* text = NULL;
+        if (game && !folder) return NULL;
+        if (folder && !game_get(m, folder, err)) { /* loaded now: names that won't come should say why at once */
+            free(folder);
+            return NULL;
+        }
+        text = mcp_gdb_attach(arg_number(args, "port", 1234), err);
+        if (text) {
+            free(m->gdb_game);
+            m->gdb_game = folder;
+            folder = NULL;
+        }
+        free(folder);
+        return text;
+    }
+    /* the game's symbols only for the tools that name: loading them evicts symbolize's game */
+    ctx = NULL;
+    namer = NULL;
+    if (!strcmp(name, "gdb_command") || !strcmp(name, "gdb_threads") || !strcmp(name, "gdb_guest"))
+        namer = gdb_namer(m, &ctx);
+    if (!strcmp(name, "gdb_command")) {
+        const char* command = arg_string(args, "command");
+        if (command) return mcp_gdb_command(command, arg_number(args, "wait", 10), namer, ctx, err);
+        mcp_put(err, "command: a GDB command");
+    } else if (!strcmp(name, "gdb_threads"))
+        return mcp_gdb_threads(namer, ctx, err);
+    else if (!strcmp(name, "gdb_guest")) {
+        long frames = arg_number(args, "frames", 32);
+        if (frames < 0 || frames > 64) frames = 64; /* in range before the int */
+        return mcp_gdb_guest(arg_number(args, "thread", 0), (int)frames, namer, ctx, err);
+    } else if (!strcmp(name, "gdb_memory")) {
+        const char* address = arg_string(args, "address");
+        SnxU64 a;
+        if (address && parse_hex(address, &a)) return mcp_gdb_memory(a, arg_number(args, "size", 256), err);
+        mcp_put(err, "address: a hexadecimal game address");
+    } else if (!strcmp(name, "gdb_detach")) {
+        free(m->gdb_game);
+        m->gdb_game = NULL;
+        return mcp_gdb_detach(err);
+    } else {
+        mcp_put(err, "no tool ");
+        mcp_put(err, name);
+    }
+    return NULL;
 }
 
 /* the tool's answer as an MCP result: its text, or the error's with isError */
@@ -845,6 +967,8 @@ static cJSON* call(Mcp* m, const char* name, const cJSON* args) {
         text = mcp_edenprobe_finding(arg_number(args, "issue", 0), arg_string(args, "suite"), arg_string(args, "name"),
                                      arg_string(args, "scarletnx_report"), arg_string(args, "reference_report"),
                                      arg_string(args, "source"), &err);
+    } else if (!strncmp(name, "gdb_", 4)) {
+        text = gdb_tool(m, name, args, &err);
     } else {
         mcp_put(&err, "no tool ");
         mcp_put(&err, name);
@@ -913,13 +1037,9 @@ static void send(cJSON* reply) {
 
 int snx_mcp(int argc, char** argv) {
     Mcp m;
-    Text line = {0};
-    char chunk[4096];
+    Text line = {0}, pending = {0};
     if (mcp_open(&m, argc, argv)) return 1;
-    while (fgets(chunk, sizeof chunk, stdin)) {
-        size_t n = strlen(chunk);
-        mcp_put_n(&line, chunk, n);
-        if (n && chunk[n - 1] != '\n' && !feof(stdin)) continue; /* the rest of a long message */
+    while (mcp_read_line(&pending, &line)) {
         if (line.n && strspn(line.p, " \t\r\n") != line.n) {
             cJSON* message = cJSON_Parse(line.p);
             if (!message) {
@@ -940,6 +1060,7 @@ int snx_mcp(int argc, char** argv) {
         if (line.p) line.p[0] = 0;
     }
     free(line.p);
+    free(pending.p);
     mcp_close(&m);
     return 0;
 }

@@ -50,6 +50,13 @@ the runtime writes, a buffer a device filled.
 Large functions: disassemble only the part you need. Use the `crash-triage` agent to do the walk in its own context
 when it takes many steps, and the `sdk-scout` agent to work out what an SDK function expects.
 
+When it reproduces, look at it live. Start the game with `-S` (or `-s`, to stop before the runtime starts), then use
+the `scarletnx` MCP server's GDB tools: `gdb_attach` with the game, `gdb_threads` (every host thread, and each guest
+thread's state and guest pc), `gdb_guest` (a guest thread's registers and guest backtrace) and `gdb_command`
+(`thread apply all bt` shows which lock each runtime thread waits on, for a hang). A crash stops at `crash_report`.
+Add `--gdb_jit=1` when the frames are in code the JIT compiled, at the cost of a stop per compile. The stub takes one
+connection per run.
+
 ## 3. Common shapes
 
 | Shape | Where to look |

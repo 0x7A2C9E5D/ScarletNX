@@ -165,6 +165,12 @@ else()
     # No -rdynamic: the game module gets the runtime through RtAPI and imports nothing from it, and exporting every
     # global would let a library loaded later (a GPU driver) bind its own symbols to ours by name
     target_link_libraries(scarletnx PRIVATE Threads::Threads ${CMAKE_DL_LIBS} m)
+    # but GDB's two JIT names (gdb_jit.c), which it finds by name: kept where a strip (quick-sharun's, the AppImage's)
+    # leaves no .symtab. A shared libLLVM's references to them bind to these already
+    if(NOT APPLE)
+        target_link_options(scarletnx PRIVATE "LINKER:--export-dynamic-symbol=__jit_debug_descriptor"
+                            "LINKER:--export-dynamic-symbol=__jit_debug_register_code")
+    endif()
 endif()
 
 # SDL3 is either the system package or the pinned static source build (cmake/dependencies.cmake)

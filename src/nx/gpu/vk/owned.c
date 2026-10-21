@@ -4,7 +4,8 @@
    device-local buffer holding guest bytes in their own layout; an engine that wrote it publishes it over those bytes,
    and the trap lands it when the CPU touches them: copied by the GPU into host-cached memory, waited for (that
    submission only), and copied into the pool's mirror. On a host without traps a publish lands at once. Landing runs
-   on whatever thread faulted or acquired, under vk_lock, which it takes itself */
+   on whatever thread faulted or acquired, under vk_lock, which own.c takes before it marks what lands (OwnHooks'
+   lock) and own_land again for itself (it is reentrant, and a publish without traps lands with no landing of own.c's) */
 #include <stdlib.h>
 #include <string.h>
 #include "nx/gpu/gpu.h"
@@ -121,7 +122,14 @@ static void own_land(const OwnRange* r, u8* const* dst, u32 n) {
 static u32 lock_owner(void) { return vk_lock_owner(); }
 
 int vk_own_init(void) {
-    OwnHooks h = {own_land, res_retain, res_release, lock_owner};
+    /* vk_lock and vk_unlock themselves, not g_vklock: the outermost unlock also signals what the hold's releases
+       reached (vk_release_events) */
+    OwnHooks h = {.land = own_land,
+                  .retain = res_retain,
+                  .release = res_release,
+                  .busy_tid = lock_owner,
+                  .lock = vk_lock,
+                  .unlock = vk_unlock};
     g_own_traps = !own_init(&h);
     return g_own_traps ? 0 : -1;
 }

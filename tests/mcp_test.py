@@ -5,15 +5,17 @@
 scan_log, read_log by text, by range and its last lines, and its refusal of a file outside the data folder, find_game
 on a made-up extracted game (its NPDM's program ID, its NACP's version), symbolize and disassemble on a made-up NRO
 (nx_runtime_smoke.py's), the errors a tool answers with, an unknown method, a notification left unanswered and a line
-that isn't JSON. Offline.
+that isn't JSON, and on UNIX the GDB tools against a made-up GDB (FAKE_GDB). Offline.
 
     tests/mcp_test.py SCARLETNX"""
 
 import json
+import os
 import struct
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -56,6 +58,245 @@ def report(result, detail):
         {'type': 'summary', 'passed': 1, 'failed': 0, 'skipped': 0, 'crashed': 0},
     ]
     return ''.join(json.dumps(line) + '\n' for line in lines)
+
+
+# A GDB that answers the MI commands the GDB tools send (mcp_gdb.c) as GDB 14 does, over a made-up game: thread 1 the
+# runtime's, thread 2 a guest thread whose KThread (at 0x5000, the layout below) names its SDK thread and frame
+# records in guest memory. It logs each command it reads to the file FAKE_GDB_LOG names
+FAKE_GDB = r'''
+import os, re, signal, sys, threading
+
+LOG = open(os.environ['FAKE_GDB_LOG'], 'a')
+MEM, BASE, END = 0x7F0000000000, 0x8000000, 0x10000000
+LAYOUT = {'sizeof(KThread)': 416, 'id': 0, 'name': 8, 'state': 40, 'in_svc': 44, 'tls': 48, 'arg': 56, 'cpu.x': 64,
+          'cpu.pc': 312, 'cpu.n': 320, 'cpu.tpidrro': 336, 'arm.r': 344, 'arm.cpsr': 408}
+TLS, TYPE, NAME, FP = 0x9000000, 0x9001000, 0x9002000, 0x9003000
+
+
+def q64(v):
+    return v.to_bytes(8, 'little')
+
+
+kthread = bytearray(416)
+kthread[0:8] = q64(72)
+kthread[8:13] = b'kname'
+kthread[44:48] = (1).to_bytes(4, 'little')
+kthread[48:56], kthread[56:64] = q64(TLS), q64(TYPE)
+kthread[64 + 29 * 8:64 + 31 * 8] = q64(FP) + q64(0x8000088)
+kthread[312:320] = q64(0x8000080)
+memory = {
+    0x5000: bytes(kthread),
+    MEM + TLS + 0x1F8: q64(TYPE),
+    MEM + TYPE + 0x46: (1).to_bytes(2, 'little'),
+    MEM + TYPE + 0x1A0: q64(NAME),
+    MEM + NAME: b'MainThread\0',
+    MEM + FP: q64(FP + 16) + q64(0x8000084),
+    MEM + FP + 16: q64(0) + q64(0x8000090),
+    MEM + 0x8000080: b'ABCD',
+}
+values = {'(unsigned long)g_mem': MEM, 'g_layout.base': BASE, 'g_layout.end': END, '(unsigned long)g_arm_mod': 0,
+          '$_thread': 2}
+lock = threading.Lock()
+continues = 0
+
+
+def say(*lines):
+    with lock:
+        sys.stdout.write(''.join(line + '\n' for line in lines))
+        sys.stdout.flush()
+
+
+def cstring(s):
+    return '"' + s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n') + '"'
+
+
+def unquote(s):
+    return re.sub(r'\\(.)', lambda m: '\n' if m.group(1) == 'n' else m.group(1), s[1:-1])
+
+
+def read(address, size):
+    for at, data in memory.items():
+        if at <= address and address + size <= at + len(data):
+            return data[address - at:address - at + size]
+    return None
+
+
+def later(seconds, *lines):
+    threading.Timer(seconds, say, lines).start()
+
+
+STOP_BREAK = ('*stopped,reason="breakpoint-hit",disp="keep",bkptno="7",frame={addr="0x1",func="crash_report",args=[],'
+              'file="/home/u/src/x/src/nx/runtime/crash.c",line="9"},thread-id="2",stopped-threads="all"')
+STOP_INT = ('*stopped,reason="signal-received",signal-name="SIGINT",signal-meaning="Interrupt",frame={addr="0x7f",'
+            'func="poll",args=[],from="/usr/lib/libc.so.6"},thread-id="1",stopped-threads="all"')
+# an interrupt is a SIGINT to the game, which gdbserver reports as a stop: this process plays the game
+signal.signal(signal.SIGINT, lambda *_: later(0.05, STOP_INT))
+say('=thread-group-added,id="i1"', '(gdb)')
+for raw in sys.stdin:
+    token, command = re.match(r'(\d*)(.*)', raw.rstrip('\n')).groups()
+    LOG.write(command + '\n')
+    LOG.flush()
+    done = token + '^done'
+    if command.startswith('-gdb-set debuginfod'):
+        say(token + '^error,msg="No symbol \\"debuginfod\\" in current context."', '(gdb)')
+    elif command.startswith('-gdb-set') or command.startswith('-break-insert') and 'crash_report' not in command:
+        say(done, '(gdb)')
+    elif command.startswith('-target-select'):
+        say('~"Remote debugging using 127.0.0.1\\n"', token + '^connected',
+            '*stopped,frame={addr="0x7f",func="poll",args=[],from="/usr/lib/libc.so.6"},thread-id="1"', '(gdb)')
+    elif command == '-list-thread-groups':
+        say(done + ',groups=[{id="i1",type="process",pid="%d",executable="/x/scarletnx"}]' % os.getpid(), '(gdb)')
+    elif command.startswith('-break-insert'):
+        say(done + ',bkpt={number="7",type="breakpoint",func="crash_report"}', '(gdb)')
+    elif command.startswith('-data-evaluate-expression'):
+        m = re.match(r'-data-evaluate-expression (?:--thread (\d+) )?(".*")$', command)
+        expr = unquote(m.group(2))
+        member = re.match(r'\(long\)\(&\(\(KThread\*\)0\)->(.*)\)$', expr)
+        size = re.match(r'\(long\)\((sizeof\(KThread\))\)$', expr)
+        if member or size:
+            value = LAYOUT[(member or size).group(1)]
+        elif expr == '(unsigned long)tls_thread':
+            value = 0x5000 if m.group(1) == '2' else 0
+        else:
+            value = values.get(expr)
+        if value is None:
+            say(token + '^error,msg=' + cstring('No symbol in current context.'), '(gdb)')
+        else:
+            say(done + ',value="%d"' % value, '(gdb)')
+    elif command.startswith('-data-read-memory-bytes'):
+        address, size = command.split()[1:3]
+        data = read(int(address, 16), int(size))
+        if data is None:
+            say(token + '^error,msg=' + cstring('Unable to read memory.'), '(gdb)')
+        else:
+            say(done + ',memory=[{begin="%s",offset="0x0000000000000000",end="0x0",contents="%s"}]'
+                % (address, data.hex()), '(gdb)')
+    elif command == '-thread-info':
+        frame = 'frame={level="0",addr="0x7f",func="poll",args=[],from="/usr/lib/libc.so.6"}'
+        say(done + ',threads=[{id="1",target-id="Thread 0x7f01 (LWP 100)",name="scarletnx",' + frame
+            + ',state="stopped"},{id="2",target-id="Thread 0x7f02 (LWP 101)",name="Guest 0",' + frame
+            + ',state="stopped"}],current-thread-id="1"', '(gdb)')
+    elif command.startswith('-stack-list-frames'):
+        say(done + ',stack=[frame={level="0",addr="0x7f",func="poll",from="/usr/lib/libc.so.6"},'
+            'frame={level="1",addr="0x2",func="kwait",file="/home/u/src/x/src/nx/hle/kernel/kernel.c",line="42"},'
+            'frame={level="2",addr="0x3",func="svc_WaitSynchronization",file="/home/u/src/x/src/nx/hle/svc/svc.c",'
+            'line="7"}]', '(gdb)')
+    elif command.startswith('-interpreter-exec console '):
+        cli = unquote(command[len('-interpreter-exec console '):])
+        if cli == 'print esc':
+            say(r'~"\101\tB\"q\"\\\n"', done, '(gdb)')
+        elif cli == 'backtrace':
+            say('~' + cstring('#0  F_8000080 () at /home/u/src/x/src/nx/a.c:1\n'), done, '(gdb)')
+        else:
+            say('~' + cstring('ran: ' + cli + '\n'), done, '(gdb)')
+    elif command.startswith('-exec-continue'):
+        continues += 1
+        say(token + '^running', '*running,thread-id="all"', '(gdb)')
+        if continues == 1:
+            later(0.3, STOP_BREAK)
+        elif continues == 2:
+            say('~"tick\\n"')
+        elif continues == 4:
+            later(0.3, '*stopped,reason="exited",exit-code="03"')
+    elif command.startswith('-exec-next'):
+        say(token + '^running', '*running,thread-id="all"', '(gdb)',
+            '*stopped,reason="end-stepping-range",frame={addr="0x8000084",func="F_8000080",args=[]},thread-id="2"')
+    elif command == '-target-detach':
+        say(done, '(gdb)')
+    elif command == '-gdb-exit':
+        say(token + '^exit')
+        break
+    else:
+        say(token + '^error,msg="unknown"', '(gdb)')
+'''
+
+
+def gdb_session(runtime, data, nro, tmp):
+    """The GDB tools against FAKE_GDB, a request at a time: attach, the commands gdb_command runs and those it refuses,
+    a resume that stops, one left running and interrupted, one interrupted when its wait ends, the game's end"""
+    bin_dir, log = tmp / 'bin', tmp / 'gdb.log'
+    bin_dir.mkdir()
+    (bin_dir / 'gdb').write_text(f'#!{sys.executable}\n' + FAKE_GDB)
+    (bin_dir / 'gdb').chmod(0o755)
+    env = dict(os.environ, PATH=f'{bin_dir}{os.pathsep}{os.environ.get("PATH", "")}', FAKE_GDB_LOG=str(log))
+    server = subprocess.Popen(
+        [runtime, '--mcp', '--repo', str(data)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env
+    )
+
+    def ask(tool, **arguments):
+        server.stdin.write(json.dumps(call(tool, **arguments)) + '\n')
+        server.stdin.flush()
+        reply = json.loads(server.stdout.readline())['result']
+        return reply.get('isError', False), reply['content'][0]['text']
+
+    def gdb(command, **arguments):
+        return ask('gdb_command', command=command, **arguments)
+
+    try:
+        bad, said = ask('gdb_attach', port=4321, game=str(nro))
+        check(not bad and '127.0.0.1:4321' in said and 'Breakpoint 7 is on crash_report' in said, f'attach: {said}')
+        check('threads can' not in said, f'the KThread layout read: {said}')
+        bad, said = ask('gdb_attach', port=4321)
+        check(bad and 'already attached' in said, f'a second attach: {said}')
+        for refused in ('she echo x', 'shell ls', 'commands 1', 'thread apply all bt', 'frame apply 2 p 1',
+                        'set logging file x', 'maint set x', 'p $_shell("id")', 'p 1\nshell ls', 'dis', 'c 3',
+                        'n x', 'advance', 'interrupt'):
+            bad, said = gdb(refused)
+            check(bad, f'{refused!r} refused: {said}')
+        bad, said = gdb('p 1+1')
+        check(not bad and 'ran: print 1+1' in said, f'an alias run by its word: {said}')
+        check(gdb('inf threads')[1].startswith('ran: info threads'), 'a prefix run as the full word')
+        check(gdb('set var x = 1')[1].startswith('ran: set var x = 1'), 'set var')
+        bad, said = gdb('bt')
+        check(not bad and said.startswith('#0  F_8000080 [main') and ' at src/nx/a.c:1' in said, f'named, cut: {said}')
+        check(gdb('print esc')[1] == 'A\tB"q"\\\n', f'MI escapes: {gdb("print esc")[1]!r}')
+
+        bad, said = ask('gdb_threads')
+        check(not bad and "2 Thread 0x7f02 (LWP 101) 'Guest 0': guest thread 72 'MainThread', in an SVC" in said, said)
+        check('pc=8000080 [main' in said and 'lr=8000088 [main' in said, f'guest pc and lr, named: {said}')
+        check('kwait (src/nx/hle/kernel/kernel.c:42) < svc_WaitSynchronization (src/nx/hle/svc/svc.c:7)' in said, said)
+        check("1 Thread 0x7f01 (LWP 100) 'scarletnx': the runtime's, at kwait (src/nx/" in said, said)
+        check('1 guest threads, 1 of the runtime' in said, said)
+        bad, said = ask('gdb_guest')
+        check(not bad and said.startswith("guest thread 72 'MainThread' (GDB thread 2), in an SVC"), said)
+        check('x29=0000000009003000' in said and '  #1 8000084 [main' in said and '  #2 8000090 [main' in said, said)
+        bad, said = ask('gdb_guest', thread=1)
+        check(bad and 'not a guest thread' in said, f'the runtime thread: {said}')
+        bad, said = ask('gdb_memory', address='8000080', size=4)
+        check(not bad and said == '0008000080  41 42 43 44' + ' ' * 38 + 'ABCD\n', f'memory: {said!r}')
+        check('outside the guest' in ask('gdb_memory', address='7000000', size=4)[1], 'below the guest')
+        check('Unable to read' in ask('gdb_memory', address='9100000', size=4)[1], 'unreadable')
+
+        bad, said = gdb('continue', wait=5)
+        check(not bad and 'stopped (breakpoint-hit 7) in thread 2 at crash_report (src/nx/runtime/crash.c:9)' in said,
+              f'a resume that stops: {said}')
+        bad, said = gdb('continue', wait=0)
+        check(not bad and 'The game is running' in said, f'left running: {said}')
+        time.sleep(0.5)
+        check('running' in gdb('p 1')[1] and 'running' in ask('gdb_threads')[1], 'nothing runs while it runs')
+        bad, said = gdb('interrupt')
+        check(not bad and said.startswith('tick\n') and 'stopped (signal-received SIGINT) in thread 1' in said,
+              f'interrupted, with what GDB said meanwhile: {said}')
+        bad, said = gdb('continue', wait=1)
+        check(not bad and 'Still running after 1 s: interrupted.' in said and 'SIGINT' in said, f'the wait: {said}')
+        bad, said = gdb('n 2')
+        check(not bad and 'stopped (end-stepping-range) in thread 2 at F_8000080 [main' in said, f'next: {said}')
+        bad, said = gdb('continue', wait=5)
+        check(not bad and 'the game exited with code 03' in said, f'the end: {said}')
+        bad, said = gdb('bt')
+        check(bad and 'exited' in said, f'after the end: {said}')
+        bad, said = ask('gdb_detach')
+        check(not bad and 'Detached' in said, said)
+        check('gdb_attach' in ask('gdb_threads')[1], 'no GDB after the detach')
+    finally:
+        server.stdin.close()
+        server.wait(timeout=30)
+    sent = log.read_text().splitlines()
+    check('-interpreter-exec console "print 1+1"' in sent and '-exec-next 2' in sent, f'what GDB was sent: {sent}')
+    check('-target-select remote 127.0.0.1:4321' in sent and sent[-1] == '-gdb-exit', 'connected, ended')
+    check('-target-detach' not in sent, 'no detach from a game that exited')
+    check('-exec-interrupt' not in sent, 'interrupts signal the game')
+    check(not any('shell' in s or 'apply' in s or 'logging' in s for s in sent), 'nothing refused reached GDB')
 
 
 def check(cond, what):
@@ -161,6 +402,12 @@ def main():
             call(
                 'edenprobe_finding', 'passing', issue=345, suite='hid-style', name=NAME, scarletnx_report=str(passing)
             ),
+            call('gdb_threads', 'gdb_none'),
+            call('gdb_command', 'gdb_command_none', command='bt'),
+            call('gdb_attach', 'gdb_bad_port', port=0),
+            call('gdb_guest', 'gdb_guest_none', thread=2),
+            call('gdb_memory', 'gdb_memory_bad', address='zz'),
+            call('gdb_detach', 'gdb_detach_none'),
             call('nope'),
             {'jsonrpc': '2.0', 'id': 'method', 'method': 'resources/list'},
         ]
@@ -178,6 +425,8 @@ def main():
         untouched = all(
             (broken / rel).read_bytes() == text.encode() for rel, text in CHECKOUT.items() if 'serviceref.h' not in rel
         )
+        if os.name != 'nt':  # the GDB tools are UNIX only
+            gdb_session(runtime, data, nro, Path(tmp))
     replies = [json.loads(line) for line in run.stdout.splitlines()]
     by_id = {r['id']: r for r in replies}
     check(
@@ -208,6 +457,12 @@ def main():
             'edenprobe_check',
             'edenprobe_run',
             'edenprobe_finding',
+            'gdb_attach',
+            'gdb_command',
+            'gdb_threads',
+            'gdb_guest',
+            'gdb_memory',
+            'gdb_detach',
         },
         f'tools: {sorted(tools)}',
     )
@@ -244,6 +499,16 @@ def main():
         check('svc' in dis and 'adr' in dis, f'the code disassembled:\n{dis}')
     check(failed('no_range') and 'name a function, or a range' in text('no_range'), 'disassemble without a target')
     check(failed('no_game') and 'title ID' in text('no_game'), 'a title ID with no game')
+    # without a game under the stub (and on Windows, where they are UNIX only) the GDB tools fail, saying why
+    def gdb_fails(name, why):
+        return failed(name) and (why if os.name != 'nt' else 'UNIX only') in text(name)
+
+    check(gdb_fails('gdb_none', 'gdb_attach'), 'gdb_threads without GDB')
+    check(gdb_fails('gdb_command_none', 'gdb_attach'), 'gdb_command too')
+    check(gdb_fails('gdb_guest_none', 'gdb_attach'), 'gdb_guest too')
+    check(failed('gdb_memory_bad') and 'hexadecimal' in text('gdb_memory_bad'), 'gdb_memory checks the address')
+    check(gdb_fails('gdb_bad_port', 'port'), 'gdb_attach checks the port')
+    check(gdb_fails('gdb_detach_none', 'gdb_attach'), 'gdb_detach without GDB')
     check(failed('nope'), 'an unknown tool')
     check(by_id['method']['error']['code'] == -32601, 'an unknown method')
     # the scaffold: each part where edenprobe keeps it, the call at its runner's end, the new suite's ui.c row

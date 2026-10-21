@@ -4,6 +4,7 @@
    order they depend on each other, the shaders made before the game draws (prepare_wait), the game's main thread;
    then the frontend's loop at the display's rate until the run ends, saving what outlives it */
 #include "nx/runtime/main.h"
+#include "common/cpu/recompiler/llvm/gdb_jit.h"
 #include "common/utilities/build_info.h"
 #include "common/utilities/common.h"
 #include "common/utilities/ini_lines.h"
@@ -670,6 +671,13 @@ int snx_main(int argc, char** argv) {
         LOG("system: %s\n", sys);
     }
     say_old_layout();
+    /* before the JIT's first load (jit_init, arm.c's blocks, the GPU's macros), and only when asked: GDB stops the
+       game to read each one */
+    if (g_opt_gdb && g_settings.gdb_jit_symbols) {
+        snx_gdb_jit_enable();
+        LOG("gdb: the code the JIT compiles is named to GDB (gdb_jit=1): it stops the game for each compile while "
+            "attached\n");
+    }
     if (g_addon) LOG("game: the update of the game in %s, with its settings and saves\n", base);
 
     fs_init(); /* the npdm is read through it, and mem_init's layout comes before */

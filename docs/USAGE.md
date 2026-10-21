@@ -7,7 +7,8 @@
 * [Extract → AOT → run](#extract--aot--run)
   * [Updates and DLC](#updates-and-dlc)
   * [NRO applications](#nro-applications)
-* [GDB (UNIX only)](#gdb-unix-only)
+* [GDB (Linux)](#gdb-linux)
+  * [GDB through the MCP server](#gdb-through-the-mcp-server)
 * [Headless Vulkan / lavapipe](#headless-vulkan--lavapipe)
 * [AppImage / display](#appimage--display)
 * [Folders](#folders)
@@ -262,9 +263,9 @@ With `--out work/Game` and `--outdir games` as above (without them, see [Folders
 | `recompiled/<id>/shader_cache/<id>.vkshaders` | Translated shaders and the pipelines made, made again at the next start |
 | `recompiled/<id>/shader_cache/<id>.vkshipped` | The shaders found in the game's own files and executables, prepared ahead of time (`prepare_shaders`), each read when the game first draws with it. It can be large: one game's 2,700 shaders took 245 MB, another's 18,500 took 2 GB |
 
-## GDB (UNIX only)
+## GDB (Linux)
 
-Install `gdbserver` on PATH. `-S` enables the native-code stub on loopback port **1234**
+Install `gdbserver` on PATH (and `gdb` for the MCP tools below). `-S` enables the native-code stub on loopback port **1234**
 (the QEMU default port). The game runs until a debugger connects.
 `-s` enables the stub and waits before runtime initialization. It implies `-S`.
 
@@ -287,6 +288,48 @@ The stub debugs host/native registers and code, not an emulated ARM64 CPU. It su
 connection per run. Local ptrace permissions must allow attachment. Binding failures and
 missing `gdbserver` are reported instead of silently running without a debugger.
 No debugger flags or combined short flags are supported on Windows.
+
+The recompiled game module is a shared library with a symbol for each function, so GDB names game
+frames as it loads. A 64-bit game's functions are `F_<address>`, and a 32-bit game's blocks are
+`A_<address>` (A32) and `T_<address>` (Thumb). Code the JIT compiles at run time lives in an
+anonymous code arena. With `--gdb_jit=1` (the `[Debug]` setting `gdb_jit`) and the stub (`-S` or
+`-s`), the runtime hands each compile to GDB through its JIT interface, with its symbols. A 32-bit
+game's are `a32_<address>_<thumb>`. GDB stops the whole game to read each compile while it is
+attached, and again for each at the game's end. That slows a 32-bit game (its blocks compile one
+at a time) to a crawl, so it is off by default. Without the stub the setting does nothing.
+
+The runtime handles SIGSEGV and SIGBUS itself: memory it moves while a thread writes to it stops
+that thread on a fault, and a crash's fault writes the crash report. Tell GDB
+`handle SIGSEGV SIGBUS nostop noprint pass` and break on `crash_report` to stop only at a crash.
+A SIGSEGV or SIGBUS another process sends (`kill -SEGV`, or GDB's `signal SIGSEGV`) is not a
+crash. The runtime prints a line saying so and runs on.
+
+### GDB through the MCP server
+
+An agent can drive GDB through the MCP server (`scarletnx --mcp`). It needs `gdb` (9 or later)
+on PATH as well as `gdbserver`, and a runtime with its debug information (the default
+RelWithDebInfo build, not one built with `-g0`).
+
+- `gdb_attach` connects to a game started with `-S` or `-s` and stops it. It sets the `handle`
+  line above and a breakpoint on `crash_report`. Given the game (a folder, a game of `work/` or a
+  title ID, of the same version), the other tools name guest addresses and the symbols above by
+  the game's own symbols. The stub takes one connection per run, so a second attach is refused.
+- `gdb_command` runs one GDB command from a list of reading, breakpoint and execution commands
+  (`backtrace`, `info`, `print`, `x`, `frame`, `thread`, `break`, `watch`, `set var` and the
+  like), by GDB's names, aliases and unambiguous prefixes. Shells, scripts, file writes, command
+  bodies (`commands`, `define`, `if`, `while`) and session changes are refused. `print` and
+  `call` still run the game's own functions. A resume (`continue`, `next`, `step`, `finish` and
+  the rest) runs in the background and waits up to `wait` seconds for the game to stop at a
+  breakpoint or a crash, then interrupts it. With `wait` 0 the game runs on, and only
+  `interrupt` is taken until it stops.
+- `gdb_threads` lists each host thread, and each guest thread's id, its SDK name, whether it is
+  in an SVC and its guest pc and lr. It finds a guest thread through its host thread's TLS, which
+  GDB reads with the C library's `libthread_db`. Without it (a musl build) every thread is listed
+  as the runtime's.
+- `gdb_guest` shows a guest thread's registers and its guest backtrace from its frame records.
+- `gdb_memory` reads guest memory. A page the GPU holds can't be read until the game's CPU
+  touches it.
+- `gdb_detach` lets the game run on without the debugger.
 
 ## Headless Vulkan / lavapipe
 
@@ -518,6 +561,7 @@ type, range and help, tab-separated. Every setting, the recompiler's too, is des
 | `auto_stub_ipc` | `1` | A service command the runtime doesn't know answers success, logged as `[undeclared]`, and a service it doesn't have answers every command that way. `0` answers them with the console's UnknownCommandId instead, which shows the gap where the game makes the call |
 | `diag` | `0` | `1` saves the data of each new compute shader to `captures/compute`, and each new shader's snx-shaderc corpus entry to `captures/shaders`, for debugging |
 | `vk_validation` | `0` | `1` turns on the Vulkan validation layer (`VK_LAYER_KHRONOS_validation`, from the Vulkan SDK or the distribution's validation layers package), which logs each misuse of Vulkan it finds. It slows the game down a lot. Without the layer installed the run only warns |
+| `gdb_jit` | `0` | `1`, with the GDB stub (`-S` or `-s`), hands the code the JIT compiles to GDB ([GDB](#gdb-linux)). GDB stops the game for each compile while it is attached, and each compile's object stays in memory for the run |
 | `profile` | `0` | `1` writes `profile.txt` every 10 seconds. The CPU profiler is Windows only |
 | `nvn_trace` | `0` | `1` logs each NVN function the game resolves and, at exit, how often each was called ([DEVELOPMENT.md](DEVELOPMENT.md)). The game runs slower |
 | `shader_corpus` | empty | A folder that keeps each translated shader for `snx-shaderc`. With it every shader is translated, and none is kept for the next run |
