@@ -11,7 +11,8 @@ typedef struct VicGpuJob VicGpuJob;
 #define uint u32
 #include "nx/gpu/video/vic_params.glsl"
 #undef uint
-/* the uniform buffer, as vic.comp declares it */
+/* the uniform buffer, as vic.comp declares it. vic_gpu_params fills it with host numbers: the upload converts its
+   32-bit words to the GPU's little-endian order */
 typedef struct {
     VicGpuJob job;
     VicGpuSlot slots[8];

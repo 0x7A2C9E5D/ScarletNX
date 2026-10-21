@@ -746,13 +746,13 @@ static void tex_resolve(GpuChannel* ch, u32 handle, TexRes* x) {
             memset(x->tic, 0, sizeof x->tic);
             x->t = NULL;
         } else {
-            gmem_read(tic_at, x->tic, 32);
+            vk_gmem_words(tic_at, x->tic, 8);
             x->t = vk_tex_from_tic(x->tic);
         }
         if (((handle >> 20) & 0xFFF) > r[0x559])
             memset(x->tsc, 0, sizeof x->tsc);
         else
-            gmem_read(tsc_at, x->tsc, 32);
+            vk_gmem_words(tsc_at, x->tsc, 8);
         LOG_LIMIT(1, "vulkan: a texture handle %08x names headers past the pools' limits (%x, %x): no texture there\n",
                   handle, r[0x55F], r[0x559]);
         return;
@@ -768,8 +768,8 @@ static void tex_resolve(GpuChannel* ch, u32 handle, TexRes* x) {
         if (!x->t) m->t = NULL;
         return;
     }
-    gmem_read(tic_at, x->tic, 32);
-    gmem_read(tsc_at, x->tsc, 32);
+    vk_gmem_words(tic_at, x->tic, 8);
+    vk_gmem_words(tsc_at, x->tsc, 8);
     x->t = vk_tex_from_tic(x->tic);
     m->t = NULL;
     if (x->t && !x->t->is_rt && !vk_rt_find(x->t->gva)) {
@@ -874,7 +874,7 @@ static VkSh* fs_get_keyed(GpuChannel* ch, u64 addr, TexRes* res, u32 last_out) {
         ShTex handle_info = {
             .cbuf_off = s0->si.img[i].cbuf_off, .bindless = s0->si.img[i].bindless, .bl_cbuf = s0->si.img[i].bl_cbuf};
         u32 handle = tex_handle(ch, 4, r[0x982], &handle_info), tic[8];
-        gmem_read(tic_base + (handle & 0xFFFFF) * 32ull, tic, sizeof tic);
+        vk_gmem_words(tic_base + (handle & 0xFFFFF) * 32ull, tic, 8);
         if (vk_image_key(&s0->si, i, tic)) rm |= 1u << (8 + i);
     }
     if (!tm && !rm && !dm && !unfed) return s0;
@@ -995,6 +995,7 @@ static int frame_consts(VkBuffer* buf, u64* off) {
         memcpy(p, rs, 16);
         memcpy(p + 16, fa, 16);
         memcpy(p + 32, ia, 16);
+        snx_le32_array(p, 12); /* the device reads them little-endian */
         frame = vk_submit_number();
     }
     *buf = b;
@@ -1363,6 +1364,7 @@ static int tex_tables_set(GpuChannel* ch, int stage, const VkSh* s, const int* f
         u8* data = vk_stage(sizeof funcs, vk_stage_align(), &buffer, &offset);
         if (!data) return 0;
         memcpy(data, funcs, sizeof funcs);
+        snx_le32_array(data, SNX_TEX_ARRAY);
         dw_buffer(d, set, SNX_VKB_TEXFUNCS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, buffer, offset, sizeof funcs);
     }
     if (count) {
@@ -1371,6 +1373,7 @@ static int tex_tables_set(GpuChannel* ch, int stage, const VkSh* s, const int* f
         u8* data = vk_stage(sizeof map, vk_stage_align(), &buffer, &offset);
         if (!data) return 0;
         memcpy(data, map, sizeof map);
+        snx_le32_array(data, sizeof map / 4);
         dw_buffer(d, set, SNX_VKB_TEXMAP, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, buffer, offset, sizeof map);
     }
     return 1;
@@ -1388,7 +1391,7 @@ static void draw_storage_read(const GpuChannel* ch, VkDrawStorage* draw, VkSh* v
         for (int i = 0; i < draw->n[s]; i++) {
             VkDrawGbuf* b = &draw->b[s][i];
             u32 v[3] = {0, 0, 0};
-            if (cb0) gmem_read(cb0 + sh[s]->si.gbuf_cbuf_off[i], v, sizeof v);
+            if (cb0) vk_gmem_words(cb0 + sh[s]->si.gbuf_cbuf_off[i], v, 3);
             b->size = vk_gbuf_desc(stage, sh[s]->si.gbuf_cbuf_off[i], v, &b->addr);
             b->writable = (sh[s]->si.gbuf_wmask >> i) & 1;
         }
@@ -1594,7 +1597,7 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         u32 handle = gmem_r32(cba + (u64)s->si.img[i].cbuf_off * 4);
         u64 tic_base = ((u64)r[0x55D] << 32) | r[0x55E];
         u32 tic[8];
-        gmem_read(tic_base + (handle & 0xFFFFF) * 32ull, tic, sizeof tic);
+        vk_gmem_words(tic_base + (handle & 0xFFFFF) * 32ull, tic, 8);
         Surf* surf = vk_tex_from_tic(tic);
         u64 size = vk_surf_guest_size(surf);
         int kind = s->si.img[i].kind;
@@ -2143,20 +2146,27 @@ retry:
             draw_images_discard(&images);
             return;
         }
+        /* guest indices are little-endian, the inline ones host words (already widened), and what the device reads
+           is little-endian again */
         for (u32 q = 0; q < nq; q++) {
             u32 v[4];
             for (int j = 0; j < 4; j++) {
                 u32 e = q * 4 + j;
+                u8 g[4] = {0};
                 if (!indexed)
                     v[j] = first + e;
-                else if (src)
-                    v[j] = isz == 1 ? src[e] : isz == 2 ? ((const u16*)src)[e] : ((const u32*)src)[e];
+                else if (indexed == 3)
+                    v[j] = ch->inline_indices[first + e];
                 else {
-                    v[j] = 0;
-                    gmem_read(ia + ((u64)first + e) * isz, &v[j], isz);
+                    if (src)
+                        memcpy(g, src + (u64)e * isz, isz);
+                    else
+                        gmem_read(ia + ((u64)first + e) * isz, g, isz);
+                    v[j] = isz == 1 ? g[0] : isz == 2 ? snx_ld_le16(g) : snx_ld_le32(g);
                 }
             }
             u32 t6[6] = {v[0], v[1], v[2], v[0], v[2], v[3]};
+            snx_le32_array(t6, 6);
             memcpy(idx + q * 6, t6, 24);
         }
         icount = nq * 6;
@@ -2173,6 +2183,7 @@ retry:
             if (restart && r[0x592] != 0xFFFFFFFFu)
                 for (u32 j = 0; j < count; j++)
                     if (o[j] == r[0x592]) o[j] = 0xFFFFFFFFu;
+            snx_le32_array(o, count); /* host words, read by the device little-endian */
             itype = VK_INDEX_TYPE_UINT32;
         } else if (ifmt == 0) { /* 8-bit indices need an extension: widen them */
             const u8* src = gmem_ptr(ia + first, count);
@@ -2187,7 +2198,8 @@ retry:
                     v = src[j];
                 else
                     gmem_read(ia + first + j, &v, 1);
-                o[j] = r[0x591] && v == (r[0x592] & 0xFF) ? 0xFFFF : v; /* the index type's bits, as below */
+                /* the index type's bits, as below, little-endian for the device */
+                o[j] = snx_le16(r[0x591] && v == (r[0x592] & 0xFF) ? 0xFFFF : v);
             }
             itype = VK_INDEX_TYPE_UINT16;
         } else {
@@ -2201,10 +2213,10 @@ retry:
                 }
                 gmem_read(ia + (u64)first * isz, o, bytes);
                 for (u32 j = 0; j < count; j++)
-                    if (isz == 2 && ((u16*)o)[j] == ri)
-                        ((u16*)o)[j] = 0xFFFF;
-                    else if (isz == 4 && ((u32*)o)[j] == ri)
-                        ((u32*)o)[j] = 0xFFFFFFFFu;
+                    if (isz == 2 && snx_ld_le16(o + (u64)j * 2) == ri)
+                        memset(o + (u64)j * 2, 0xFF, 2);
+                    else if (isz == 4 && snx_ld_le32(o + (u64)j * 4) == ri)
+                        memset(o + (u64)j * 4, 0xFF, 4);
             } else if (!vk_buf_get(ia + (u64)first * isz, bytes, &ibuf, &ioff)) {
                 draw_images_discard(&images);
                 return;

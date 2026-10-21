@@ -16,28 +16,22 @@
 #include <stdlib.h>
 #include <string.h>
 
-static u16 rd16(const u8* p) {
-    u16 v;
-    memcpy(&v, p, 2);
-    return v;
-}
-static u32 rd32(const u8* p) {
-    u32 v;
-    memcpy(&v, p, 4);
-    return v;
-}
-static u64 rd64(const u8* p) {
-    u64 v;
-    memcpy(&v, p, 8);
-    return v;
-}
+/* guest words: the update's input and output, the effects' and sinks' parameters kept as the game wrote them, and
+   the rings, wave buffers and contexts in guest memory are all little-endian */
+static u16 rd16(const u8* p) { return snx_ld_le16(p); }
+static u32 rd32(const u8* p) { return snx_ld_le32(p); }
+static u64 rd64(const u8* p) { return snx_ld_le64(p); }
 static float rdf(const u8* p) {
+    u32 w = snx_ld_le32(p);
     float v;
-    memcpy(&v, p, 4);
+    memcpy(&v, &w, 4);
     return v;
 }
-static void wr32(u8* p, u32 v) { memcpy(p, &v, 4); }
-static void wr64(u8* p, u64 v) { memcpy(p, &v, 8); }
+static void rdf_array(float* out, const u8* p, u32 n) {
+    for (u32 i = 0; i < n; i++) out[i] = rdf(p + i * 4);
+}
+static void wr32(u8* p, u32 v) { snx_st_le32(p, v); }
+static void wr64(u8* p, u64 v) { snx_st_le64(p, v); }
 static i16 sat16(float x) { return x >= 32767.0f ? 32767 : x <= -32768.0f ? -32768 : (i16)lrintf(x); }
 static i32 sat32(float x) {
     return x >= 2147483520.0f ? 2147483647 : x <= -2147483648.0f ? (i32)0x80000000u : (i32)lrintf(x);
@@ -128,9 +122,11 @@ ARState* audren_state_new(const u8* params) {
     size_t at, voice, chan, mix, effect, sink, buf, temp, order, split, dest, stack, seen;
     ARState* s;
     u8* base;
-    u32 rate = rd32(params), frame = rd32(params + 4), buffers = rd32(params + 8), submixes = rd32(params + 0xC);
-    u32 voices = rd32(params + 0x10), sinks = rd32(params + 0x14), effects = rd32(params + 0x18);
-    u32 splitters = rd32(params + 0x24), dests = rd32(params + 0x28);
+    u32 w[11]; /* host numbers: the IPC layer converted OpenAudioRenderer's raw parameters */
+    memcpy(w, params, sizeof w);
+    u32 rate = w[0], frame = w[1], buffers = w[2], submixes = w[3];
+    u32 voices = w[4], sinks = w[5], effects = w[6];
+    u32 splitters = w[9], dests = w[10];
     if (!rate || !frame || frame > 1024 || buffers > 0x400 || submixes > 0x100 || voices > 0x400 || sinks > 0x40 ||
         effects > 0x100)
         return NULL;
@@ -220,9 +216,7 @@ void audren_state_free(ARState* s) {
 
 /* a wave buffer the game hands over, checked against its own size as Eden's VoiceInfo::UpdateWaveBuffer does */
 static void take_wave(ARWave* w, const u8* wb, u8 format) {
-    i32 st, en;
-    memcpy(&st, wb + 0x10, 4);
-    memcpy(&en, wb + 0x14, 4);
+    i32 st = (i32)rd32(wb + 0x10), en = (i32)rd32(wb + 0x14);
     u64 size = rd64(wb + 8);
     if (st < 0 || en < 0) return;
     if (format == SNX_AUDREN_ADPCM) {
@@ -239,11 +233,11 @@ static void take_wave(ARWave* w, const u8* wb, u8 format) {
     w->end = en;
     w->loop = wb[0x18];
     w->ended = wb[0x19];
-    memcpy(&w->loop_count, wb + 0x1C, 4);
+    w->loop_count = (i32)rd32(wb + 0x1C);
     w->ctx = rd64(wb + 0x20);
     w->ctx_size = rd64(wb + 0x28);
-    memcpy(&w->loop_start, wb + 0x30, 4);
-    memcpy(&w->loop_end, wb + 0x34, 4);
+    w->loop_start = (i32)rd32(wb + 0x30);
+    w->loop_end = (i32)rd32(wb + 0x34);
     w->sent = 0;
 }
 
@@ -364,7 +358,7 @@ static void update_splitters(ARState* s, const u8* p, u64 size, int revn) {
         if (id >= s->ndest) break;
         d = &s->dest[id];
         d->mix_id = rd32(p + off + 0x68);
-        memcpy(d->vol, p + off + 8, sizeof d->vol);
+        rdf_array(d->vol, p + off + 8, SNX_AUDREN_MIX_OUTS);
         if (!d->in_use && p[off + use]) { /* newly in use: no ramp */
             memcpy(d->prev, d->vol, sizeof d->prev);
             d->need_update = 0;
@@ -405,6 +399,7 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
     if (is < 0x40) return -41; /* InvalidUpdateInfo, the caller makes it a result */
     u32 ih[16];
     memcpy(ih, in, 64);
+    snx_le32_array(ih, 16);
     u32 rev = ih[0];
     int revn = rev_number(rev);
     u64 need = 0x40 + (u64)ih[1] + ih[2] + ih[3] + ih[4] + ih[5] + ih[6] + ih[7] + ih[8] + ih[9];
@@ -477,6 +472,7 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
     oh[8] = o_pf;
     oh[10] = o_ri;
     oh[15] = (u32)total;
+    snx_le32_array(oh, 16);
     memcpy(out, oh, 64);
     u8* q = out + 0x40;
     /* pools: RequestAttach(4)->Attached(5), RequestDetach(2)->Detached(3). Guest memory needs no mapping here */
@@ -490,7 +486,7 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
         const u8* r = res + i * 0x70;
         ARChannel* c = &s->chan[i];
         c->in_use = r[0x64];
-        if (c->in_use) memcpy(c->mix, r + 4, sizeof c->mix);
+        if (c->in_use) rdf_array(c->mix, r + 4, SNX_AUDREN_MIX_OUTS);
     }
     for (u32 i = 0; i < s->nvoices; i++) update_voice(s, &s->voice[i], voices + i * voice_size, q + i * 0x10, voice_v2);
     q += o_vo;
@@ -538,8 +534,9 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
         m->volume = rdf(mi);
         m->buffers = rd32(mi + 8);
         if (m->buffers > SNX_AUDREN_MIX_OUTS) m->buffers = SNX_AUDREN_MIX_OUTS;
-        memcpy(m->vol, mi + 0x24, sizeof m->vol);
-        memcpy(&m->dest, mi + 0x924, 4);
+        for (u32 b = 0; b < SNX_AUDREN_MIX_OUTS; b++)
+            rdf_array(m->vol[b], mi + 0x24 + b * SNX_AUDREN_MIX_OUTS * 4, SNX_AUDREN_MIX_OUTS);
+        m->dest = (i32)rd32(mi + 0x924);
         m->dest_splitter = rd32(mi + 0x928);
     }
     /* sinks: type 0, in_use 1, the type's parameters from 0x20. Out: a circular buffer sink's write offset, two
@@ -594,7 +591,7 @@ static u32 decode_adpcm(const ARVoice* v, ARChannel* c, const ARWave* w, i32 st,
     u64 avail = w->size - pos / 2;
     const u8* wb = GP(w->addr + pos / 2);
     i16 coef[16];
-    memcpy(coef, GP(v->data), sizeof coef);
+    for (int k = 0; k < 16; k++) coef[k] = (i16)rd16(GP(v->data + (u64)k * 2));
     u16 header = c->adpcm_header;
     i32 scale = header & 0xF, ci = (header >> 4) & 7, c0 = coef[ci * 2], c1 = coef[ci * 2 + 1];
     i32 yn0 = c->yn0, yn1 = c->yn1;
@@ -937,9 +934,7 @@ static void effect_limiter(ARState* s, ARMix* m, AREffect* e) {
     const u8* p = e->p;
     u32 channels = rd16(p + 0xE), n = s->frame;
     if (channels > SNX_AUDREN_CHANNELS) channels = SNX_AUDREN_CHANNELS;
-    i32 la_min, la_max;
-    memcpy(&la_min, p + 0x38, 4);
-    memcpy(&la_max, p + 0x3C, 4);
+    i32 la_min = (i32)rd32(p + 0x38), la_max = (i32)rd32(p + 0x3C);
     if (la_max < 1) la_max = 1;
     if (la_max > 4800) la_max = 4800;
     if (la_min < 1) la_min = 1;
@@ -2018,7 +2013,7 @@ static void sink_frame(ARState* s, ARSink* k, i16* stereo, int* device) {
         for (u32 c = 0; c < count; c++)
             if (!(in[c] = mixbuf(s, f, (i8)k->p[0x104 + c]))) return;
         float coef[4] = {1.0f, 0.707f, 0.251f, 0.707f};
-        if (k->p[0x10B]) memcpy(coef, k->p + 0x10C, sizeof coef);
+        if (k->p[0x10B]) rdf_array(coef, k->p + 0x10C, 4);
         for (u32 i = 0; i < n; i++) {
             float l, r;
             if (count >= 6) { /* front left, front right, centre, LFE, back left, back right */
@@ -2043,11 +2038,8 @@ static void sink_frame(ARState* s, ARSink* k, i16* stereo, int* device) {
         for (u32 c = 0; c < count; c++) {
             const float* in = mixbuf(s, f, (i8)k->p[0x1C + c]);
             if (pos + n * 2 <= size) {
-                i16* dst = (i16*)(void*)GP(addr + pos);
-                for (u32 i = 0; i < n; i++) {
-                    i16 v = in ? sat16(in[i]) : 0;
-                    memcpy(dst + i, &v, 2);
-                }
+                u8* dst = GP(addr + pos);
+                for (u32 i = 0; i < n; i++) snx_st_le16(dst + (u64)i * 2, (u16)(in ? sat16(in[i]) : 0));
             }
             pos += n * 2;
             if (pos >= size) pos = 0;

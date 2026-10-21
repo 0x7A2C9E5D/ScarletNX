@@ -150,7 +150,7 @@ void vic_execute(const u32* r) {
 
 /* ---- ioctls */
 static u8 buf[0x400];
-static void put(u32 off, u32 v) { memcpy(buf + off, &v, 4); }
+static void put(u32 off, u32 v) { snx_st_le32(buf + off, v); }
 static u32 map(H1Ch* ch, u32 h, u32* iova) {
     u32 r;
     memset(buf, 0, sizeof buf);
@@ -214,7 +214,7 @@ static void iova_tests(H1Ch* ch) {
 static u32 submit_job(H1Ch* ch, const u32* words, u32 nwords, u32 declared, const u32* inc, u32 ninc, u32 nfe,
                       u32* fences) {
     u32 i, o = 16, r;
-    memcpy(g_mem + 0x1000 + 0x100 * 10, words, nwords * 4);
+    for (i = 0; i < nwords; i++) snx_st_le32(g_mem + 0x1000 + 0x100 * 10 + 4 * i, words[i]);
     size_of[10] = 0x100;
     memset(buf, 0, sizeof buf);
     put(0, 1);

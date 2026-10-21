@@ -154,24 +154,33 @@ static nn_time_SystemClockContext system_context(void) {
     return c;
 }
 
+/* a time point and a clock context as the game's memory holds them (little-endian), at p */
+static void put_point(u8* p, const nn_time_SteadyClockTimePoint* t) {
+    snx_st_le64(p, (u64)t->value);
+    memcpy(p + 8, t->source_id.v, 16);
+}
+static void put_context(u8* p, const nn_time_SystemClockContext* c) {
+    snx_st_le64(p, (u64)c->offset);
+    put_point(p + 8, &c->timestamp);
+}
+
 /* one of the shared memory's values the SDK reads without locks: a counter, and two copies the counter's parity
    picks between, at value bytes in */
 static void shm_write(u32 at, u32 value, const void* v, u32 size) {
     u8* p = kshmem_ptr(g_hle.time.shm) + at;
     u32 counter;
-    memcpy(&counter, p, 4);
-    counter++;
+    counter = snx_ld_le32(p) + 1;
     memcpy(p + value + (counter % 2) * size, v, size);
     __atomic_thread_fence(__ATOMIC_RELEASE);
-    memcpy(p, &counter, 4);
+    snx_st_le32(p, counter);
 }
 
 void time_init(void) {
     time_t now = time(NULL);
     struct tm* lt = localtime(&now);
     nn_time_SteadyClockTimePoint start;
-    u8 adjustment[0x38], automatic = TIME_AUTOMATIC_CORRECTION;
-    i64 offset = 0, zero = 0;
+    u8 adjustment[0x38], automatic = TIME_AUTOMATIC_CORRECTION, value[0x20];
+    i64 offset = 0;
 
     if (RAND_bytes(g_hle.time.source_id, 16) != 1) memcpy(g_hle.time.source_id, "ScarletNX steady", 16);
     g_hle.time.source_id[6] = (u8)(0x40 | (g_hle.time.source_id[6] & 0x0f)); /* a version 4 UUID */
@@ -200,20 +209,21 @@ void time_init(void) {
         nn_time_SteadyClockTimePoint base;
         base.value = g_hle.time.base_ns;
         memcpy(base.source_id.v, g_hle.time.source_id, 16);
-        shm_write(0x00, 8, &base, sizeof base);
+        put_point(value, &base);
+        shm_write(0x00, 8, value, 0x18);
     }
     {
         nn_time_SystemClockContext context = system_context();
-        shm_write(0x38, 8, &context, sizeof context);
-        shm_write(0x80, 8, &context, sizeof context);
+        put_context(value, &context);
+        shm_write(0x38, 8, value, 0x20);
+        shm_write(0x80, 8, value, 0x20);
     }
     shm_write(0xC8, 4, &automatic, 1);
     memset(adjustment, 0, sizeof adjustment);
     offset = (i64)guest_ns();
-    memcpy(adjustment, &offset, 8); /* the uptime it was set at */
-    memcpy(adjustment + 8, &zero, 8); /* no drift: scale 0, shift 0 */
-    memcpy(adjustment + 0x18, &g_hle.time.base_ns, 8); /* the lower and upper bounds */
-    memcpy(adjustment + 0x20, &g_hle.time.base_ns, 8);
+    snx_st_le64(adjustment, (u64)offset); /* the uptime it was set at; no drift (scale 0, shift 0) */
+    snx_st_le64(adjustment + 0x18, (u64)g_hle.time.base_ns); /* the lower and upper bounds */
+    snx_st_le64(adjustment + 0x20, (u64)g_hle.time.base_ns);
     memcpy(adjustment + 0x28, g_hle.time.source_id, 16);
     shm_write(0xD0, 8, adjustment, sizeof adjustment);
     LOG("time: the time zone is %s (UTC%s)\n", g_hle.time.location, g_hle.time.rule.abbreviation);
@@ -358,7 +368,7 @@ static int to_posix(const nn_time_CalendarTime* calendar, const TimeRule* r, Ipc
     i64 t;
     R_TRY(calendar_to_time(calendar, r, &t));
     R_UNLESS(times.size >= 8, TIME_INVALID_ARGUMENT);
-    memcpy(GP(times.addr), &t, 8);
+    gw64(times.addr, (u64)t);
     *count = 1;
     R_SUCCEED();
 }
@@ -471,6 +481,16 @@ static int nn_timesrv_detail_service_IStaticService_CalculateMonotonicSystemCloc
 #define SNAP_AUTOMATIC       0xCC
 #define SNAP_TYPE            0xCD
 
+/* a calendar time and its additional information in a snapshot, little-endian */
+static void put_calendar(u8* p, const nn_time_CalendarTime* cal, const nn_time_sf_CalendarAdditionalInfo* info,
+                         u8* q) {
+    memcpy(p, cal, sizeof *cal);
+    snx_st_le16(p, (u16)cal->year);
+    memcpy(q, info, sizeof *info);
+    snx_st_le32(q + offsetof(nn_time_sf_CalendarAdditionalInfo, day_of_week), (u32)info->day_of_week);
+    snx_st_le32(q + offsetof(nn_time_sf_CalendarAdditionalInfo, day_of_year), (u32)info->day_of_year);
+    snx_st_le32(q + offsetof(nn_time_sf_CalendarAdditionalInfo, utc_offset), (u32)info->utc_offset);
+}
 static int snapshot(u8 type, const nn_time_SystemClockContext* user, const nn_time_SystemClockContext* network,
                     IpcBuf out) {
     u8 s[0xd0];
@@ -479,26 +499,24 @@ static int snapshot(u8 type, const nn_time_SystemClockContext* user, const nn_ti
     nn_time_sf_CalendarAdditionalInfo info;
     i64 user_time, network_time;
     memset(s, 0, sizeof s);
-    memcpy(s + SNAP_USER_CONTEXT, user, sizeof *user);
-    memcpy(s + SNAP_NETWORK_CONTEXT, network, sizeof *network);
+    put_context(s + SNAP_USER_CONTEXT, user);
+    put_context(s + SNAP_NETWORK_CONTEXT, network);
     steady_point(&now);
-    memcpy(s + SNAP_STEADY, &now, sizeof now);
+    put_point(s + SNAP_STEADY, &now);
     s[SNAP_AUTOMATIC] = TIME_AUTOMATIC_CORRECTION;
     memcpy(s + SNAP_LOCATION, g_hle.time.location, sizeof g_hle.time.location);
     R_TRY(context_time(user, &now, &user_time));
-    memcpy(s + SNAP_USER_TIME, &user_time, 8);
+    snx_st_le64(s + SNAP_USER_TIME, (u64)user_time);
     memset(&cal, 0, sizeof cal);
     memset(&info, 0, sizeof info);
     R_TRY(time_to_calendar(user_time, &g_hle.time.rule, &cal, &info));
-    memcpy(s + SNAP_USER_CALENDAR, &cal, sizeof cal);
-    memcpy(s + SNAP_USER_INFO, &info, sizeof info);
+    put_calendar(s + SNAP_USER_CALENDAR, &cal, &info, s + SNAP_USER_INFO);
     if (R_FAILED(context_time(network, &now, &network_time))) network_time = 0;
-    memcpy(s + SNAP_NETWORK_TIME, &network_time, 8);
+    snx_st_le64(s + SNAP_NETWORK_TIME, (u64)network_time);
     memset(&cal, 0, sizeof cal);
     memset(&info, 0, sizeof info);
     R_TRY(time_to_calendar(network_time, &g_hle.time.rule, &cal, &info));
-    memcpy(s + SNAP_NETWORK_CALENDAR, &cal, sizeof cal);
-    memcpy(s + SNAP_NETWORK_INFO, &info, sizeof info);
+    put_calendar(s + SNAP_NETWORK_CALENDAR, &cal, &info, s + SNAP_NETWORK_INFO);
     s[SNAP_TYPE] = type;
     memcpy(GP(out.addr), s, (size_t)(out.size < sizeof s ? out.size : sizeof s));
     R_SUCCEED();
@@ -529,8 +547,8 @@ static int nn_timesrv_detail_service_IStaticService_CalculateStandardUserSystemC
     (void)self;
     read_snapshot(a, sa);
     read_snapshot(b, sb);
-    memcpy(&oa, sa + SNAP_USER_CONTEXT, 8);
-    memcpy(&ob, sb + SNAP_USER_CONTEXT, 8);
+    oa = (i64)snx_ld_le64(sa + SNAP_USER_CONTEXT);
+    ob = (i64)snx_ld_le64(sb + SNAP_USER_CONTEXT);
     if (!memcmp(sa + SNAP_USER_CONTEXT, sb + SNAP_USER_CONTEXT, 0x20) ||
         !same_source(sa + SNAP_USER_CONTEXT + 8, sb + SNAP_USER_CONTEXT + 8))
         *difference = 0;
@@ -552,13 +570,13 @@ static int nn_timesrv_detail_service_IStaticService_CalculateSpanBetween(SvcObj*
     read_snapshot(a, sa);
     read_snapshot(b, sb);
     if (same_source(sa + SNAP_STEADY, sb + SNAP_STEADY)) {
-        memcpy(&ta, sa + SNAP_STEADY, 8);
-        memcpy(&tb, sb + SNAP_STEADY, 8);
+        ta = (i64)snx_ld_le64(sa + SNAP_STEADY);
+        tb = (i64)snx_ld_le64(sb + SNAP_STEADY);
         if ((tb > 0 && ta < tb - 0x7fffffffffffffffll) || (tb < 0 && ta > tb + 0x7fffffffffffffffll))
             R_THROW(TIME_OVERFLOW);
     } else {
-        memcpy(&ta, sa + SNAP_NETWORK_TIME, 8);
-        memcpy(&tb, sb + SNAP_NETWORK_TIME, 8);
+        ta = (i64)snx_ld_le64(sa + SNAP_NETWORK_TIME);
+        tb = (i64)snx_ld_le64(sb + SNAP_NETWORK_TIME);
         R_UNLESS(ta && tb, TIME_NOT_FOUND);
     }
     s = tb - ta;

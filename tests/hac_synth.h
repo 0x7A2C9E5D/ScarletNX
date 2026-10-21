@@ -225,6 +225,7 @@ static inline blob_t dnca_build(uint8_t content_type, uint64_t title_id, const r
         free(sections[i].data);
     }
     header.nca_size = 0xC00 + body.size;
+    nca_header_swap(&header); /* little-endian, as a file has it */
     blob_t nca = {zalloc(0xC00 + body.size), 0xC00 + body.size};
     memcpy(nca.data, &header, sizeof(header));
     memcpy(nca.data + 0xC00, body.data, body.size);
@@ -241,9 +242,9 @@ static inline blob_t gamecard_build(const romfs_file_t* files, unsigned count, i
     size_t lead = key_area ? 0x1000 : 0;
     xci_header_t header;
     memset(&header, 0, sizeof(header));
-    header.magic = MAGIC_DXCI;
-    header.hfs0_offset = 0xF000;
-    header.hfs0_header_size = root_header;
+    header.magic = snx_le32(MAGIC_DXCI); /* little-endian, as a file has it */
+    header.hfs0_offset = snx_le64(0xF000);
+    header.hfs0_header_size = snx_le64(root_header);
     sha256_hash_buffer(header.hfs0_header_hash, root.data, root_header);
     blob_t card = {zalloc(lead + 0xF000 + root.size), lead + 0xF000 + root.size};
     memcpy(card.data + lead, &header, sizeof(header));

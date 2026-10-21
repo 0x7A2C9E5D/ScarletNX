@@ -65,7 +65,11 @@ static unsigned checks, failures;
     } while (0)
 
 #define HANDLES 0x100ull /* where the guest's handle array is */
-static void put_handles(const u32* h, int n) { memcpy(g_mem + HANDLES, h, 4 * (size_t)n); }
+/* little-endian, as the guest writes them */
+static void put_handles(const u32* h, int n) {
+    int i;
+    for (i = 0; i < n; i++) snx_st_le32(g_mem + HANDLES + 4 * (u64)i, h[i]);
+}
 static u32 kernel_timeouted_wait(u32 n, i64 timeout, u32* idx) {
     *idx = 77;
     return svc_wait_sync(&g_self, HANDLES, n, timeout, idx);

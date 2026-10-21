@@ -97,7 +97,7 @@ typedef struct GpuChannel {
     u64 counter_base[32];
     u32 counter_reset;
     u32 instance_count; /* the instance the next draw is: BEGIN's next-instance bit and the SUBSEQUENT methods count */
-    u32* inline_indices; /* the 3D inline index methods' indices, widened to u32, until END draws them */
+    u32* inline_indices; /* the 3D inline index methods' indices, widened to u32 (host numbers), until END draws them */
     u32 inline_n, inline_cap;
     /* the copy engine's launches of the job running: a submission-time copy of a linear source belongs to one */
     u64 dma_job_id;
@@ -225,6 +225,7 @@ u8* gmem_ptr_untracked(u64 gva, u64 size);
 /* the host address of [gva, gva + size) when contiguous, nothing landed and nothing acquired: only to name the range
    (a write-watch scan), never to read or write through, as GPU-owned bytes there are trapped (memory/own.c) */
 u8* gmem_host(u64 gva, u64 size);
+/* a word of guest memory as a number (little-endian there) */
 u32 gmem_r32(u64 gva);
 void gmem_w32(u64 gva, u32 v);
 /* the byte offset of (x_bytes, y, z) in a block linear surface width_bytes wide and height rows high, with blocks of
@@ -236,7 +237,8 @@ void i2m_launch(GpuChannel* ch, u32* regs, int base);
 void i2m_data(GpuChannel* ch, u32 v);
 u32 gpu_color_bpp(u32 format); /* bytes per pixel of a color format (render targets and 2D surfaces share them) */
 void gpu_signal_point(void);   /* the GPU is about to do something the game can observe */
-/* a semaphore or report payload the game can poll: it happens once everything before it in the stream is done */
+/* a semaphore or report payload the game can poll: it happens once everything before it in the stream is done. data is
+   the bytes as guest memory gets them, so its numbers are little-endian already */
 void gpu_release_write(u64 gva, const void* data, u32 len);
 
 /* the engines' methods (engines.c, compute.c, fermi2d.c, dma.c): m is the method, last marks a batch's last word */

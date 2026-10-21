@@ -106,16 +106,15 @@ static ViLayer* vi_binder(i32 binder_id) {
    magic 2, process 1, the binder id, "dispdrv"), with a zero in its object list */
 static int vi_native_window(IpcBuf out, int binder, i64* size) {
     u8 p[0x3c];
-    u32 hdr[4] = {0x28, 0x10, 4, 0x38}, v;
-    u64 id = (u64)binder;
     R_UNLESS(binder, VI_OPERATION_FAILED);
     memset(p, 0, sizeof p);
-    memcpy(p, hdr, sizeof hdr);
-    v = 2;
-    memcpy(p + 0x10, &v, 4);
-    v = 1;
-    memcpy(p + 0x14, &v, 4);
-    memcpy(p + 0x18, &id, 8);
+    snx_st_le32(p, 0x28); /* the parcel's header: data size and offset, objects' size and offset */
+    snx_st_le32(p + 4, 0x10);
+    snx_st_le32(p + 8, 4);
+    snx_st_le32(p + 0xc, 0x38);
+    snx_st_le32(p + 0x10, 2);
+    snx_st_le32(p + 0x14, 1);
+    snx_st_le64(p + 0x18, (u64)binder);
     memcpy(p + 0x28, "dispdrv", 8);
     *size = (i64)sizeof p; /* the size it needs, even when the buffer is short of it */
     if (out.size < sizeof p) {
@@ -143,16 +142,16 @@ static void parcel_open(ParcelIn* p, const u8* d, u32 size) {
     u32 off = 0, len = 0;
     p->d = d;
     p->size = size;
-    if (size >= 16) memcpy(&off, d + 4, 4);
+    if (size >= 16) off = snx_ld_le32(d + 4);
     p->pos = off < size ? off : size;
     if (p->pos + 8 <= size) {
-        memcpy(&len, d + p->pos + 4, 4);
+        len = snx_ld_le32(d + p->pos + 4);
         p->pos += 8;
         if (len < size) p->pos += ((len + 1) * 2 + 3) & ~3u;
         if (p->pos > size) p->pos = size;
     }
 }
-/* n bytes, then aligned to 4 as Parcel reads; zeros past the end */
+/* n bytes, then aligned to 4 as Parcel reads; zeros past the end. A parcel's numbers are little-endian, the guest's */
 static void parcel_read(ParcelIn* p, void* out, u32 n) {
     if (p->pos + n <= p->size)
         memcpy(out, p->d + p->pos, n);
@@ -161,9 +160,9 @@ static void parcel_read(ParcelIn* p, void* out, u32 n) {
     p->pos = (p->pos + n + 3) & ~3u;
 }
 static u32 parcel_u32(ParcelIn* p) {
-    u32 v;
-    parcel_read(p, &v, 4);
-    return v;
+    u8 v[4];
+    parcel_read(p, v, 4);
+    return snx_ld_le32(v);
 }
 static void parcel_write(ParcelOut* p, const void* v, u32 n) {
     if (p->n + ((n + 3) & ~3u) > sizeof p->d) return;
@@ -171,12 +170,17 @@ static void parcel_write(ParcelOut* p, const void* v, u32 n) {
     memset(p->d + p->n + n, 0, ((n + 3) & ~3u) - n);
     p->n += (n + 3) & ~3u;
 }
-static void parcel_w32(ParcelOut* p, u32 v) { parcel_write(p, &v, 4); }
+static void parcel_w32(ParcelOut* p, u32 v) {
+    u8 b[4];
+    snx_st_le32(b, v);
+    parcel_write(p, b, 4);
+}
 /* a flattened object: present, its size as Flattenable's length and fd count, then its bytes */
 static void parcel_flat(ParcelOut* p, const void* v, u32 n) {
-    u64 len = n;
+    u8 len[8];
+    snx_st_le64(len, n);
     parcel_w32(p, 1);
-    parcel_write(p, &len, 8);
+    parcel_write(p, len, 8);
     parcel_write(p, v, n);
 }
 /* the reply: a parcel header, the data, no objects */
@@ -188,6 +192,7 @@ static void parcel_reply(IpcBuf reply, const ParcelOut* p) {
     hdr[1] = 16;
     hdr[2] = 0;
     hdr[3] = 16 + p->n;
+    snx_le32_array(hdr, 4);
     memcpy(out, hdr, 16);
     memcpy(out + 16, p->d, p->n);
     if (n > reply.size) {
@@ -199,11 +204,8 @@ static void parcel_reply(IpcBuf reply, const ParcelOut* p) {
 }
 
 /* ============================================================ presenting */
-static u32 gb32(const ViSlot* s, u32 off) {
-    u32 v;
-    memcpy(&v, s->gbuf + off, 4);
-    return v;
-}
+/* the NvGraphicBuffer is kept as the game flattened it, its words little-endian */
+static u32 gb32(const ViSlot* s, u32 off) { return snx_ld_le32(s->gbuf + off); }
 /* on the GPU thread once the frame's fences are reached: shown if its layer is the display's, then free for the game.
    key is the layer's generation, its index and the slot (vi_key): a frame of a layer closed meanwhile is dropped, as
    its queue is gone */
@@ -255,8 +257,9 @@ static void vi_queue(ViLayer* l, int slot, const u8* in, ParcelOut* out) {
     u32 transform = 0;
     if (in) {
         memcpy(crop, in + 12, 16);
-        memcpy(&transform, in + 32, 4);
-        memcpy(&swap, in + 44, 4);
+        snx_le32_array(crop, 4);
+        transform = snx_ld_le32(in + 32);
+        swap = (i32)snx_ld_le32(in + 44);
     }
     /* the SDK's intervals are 0 to 4; a negative one is the default */
     interval = swap < 0 ? 1 : swap > 4 ? 4 : (u32)swap;
@@ -430,10 +433,10 @@ static void vi_transact(ViLayer* l, u32 code, IpcBuf parcel, IpcBuf reply) {
         /* shown once the GPU reaches the fences the frame was queued with: nvdrv waits for those it can't leave to
            the GPU thread */
         u32 fences, i, ids[4], vals[4], n = 0;
-        memcpy(&fences, qbi + 48, 4);
+        fences = snx_ld_le32(qbi + 48);
         for (i = 0; i < 4 && i < fences; i++) {
-            memcpy(&ids[n], qbi + 52 + 8 * i, 4);
-            memcpy(&vals[n], qbi + 56 + 8 * i, 4);
+            ids[n] = snx_ld_le32(qbi + 52 + 8 * i);
+            vals[n] = snx_ld_le32(qbi + 56 + 8 * i);
             if (ids[n] != ~0u) n++;
         }
         nv_gpu_call_after(n, ids, vals, vi_present, (void*)qkey);
@@ -536,18 +539,14 @@ static int nn_visrv_sf_IApplicationDisplayService_GetIndirectDisplayTransactionS
 /* the one display: "Default", one layer, 1920x1080 at most */
 static int nn_visrv_sf_IApplicationDisplayService_ListDisplays(SvcObj* self, IpcBuf displays, i64* count) {
     u8 info[0x60];
-    u64 v;
     (void)self;
     if (displays.size < sizeof info) R_SUCCEED();
     memset(info, 0, sizeof info);
     memcpy(info, "Default", 8);
     info[0x40] = 1; /* has_limited_layers */
-    v = 1;
-    memcpy(info + 0x48, &v, 8);
-    v = 1920;
-    memcpy(info + 0x50, &v, 8);
-    v = 1080;
-    memcpy(info + 0x58, &v, 8);
+    snx_st_le64(info + 0x48, 1);
+    snx_st_le64(info + 0x50, 1920);
+    snx_st_le64(info + 0x58, 1080);
     memcpy(GP(displays.addr), info, sizeof info);
     *count = 1;
     R_SUCCEED();

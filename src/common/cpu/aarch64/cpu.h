@@ -49,7 +49,8 @@ typedef double f64;
 #define SNX_EXPORT __attribute__((visibility("default")))
 #endif
 
-/* one 128-bit vector register, lane 0 in the lowest bytes (the host is little-endian, as the guest) */
+/* one 128-bit vector register holding the guest's bytes, lane 0 in the lowest-addressed ones: on a big-endian host the
+   views wider than a byte are byte-swapped numbers, read and written as numbers through SNX_VS and its kin */
 typedef union V128 {
     u8 b[16];
     i8 sb[16];
@@ -127,6 +128,16 @@ typedef char snx_check_cpu_tail[sizeof(void*) != 8 || (offsetof(CPU, disp) == 85
 #define SNX_GUEST32(v) (v)
 #define SNX_GUEST64(v) (v)
 #endif
+/* a vector register's lane as a number: V128 holds the guest's bytes (lane 0 lowest-addressed, as in memory), so on a
+   big-endian host each 16, 32 or 64-bit lane read or written as a number is swapped (the IR's ir_vd and ir_ve) */
+#define SNX_VB(v, i)         ((v).b[i])
+#define SNX_VH(v, i)         ((u16)SNX_GUEST16((v).h[i]))
+#define SNX_VS(v, i)         ((u32)SNX_GUEST32((v).s[i]))
+#define SNX_VD(v, i)         ((u64)SNX_GUEST64((v).d[i]))
+#define SNX_VSET_B(v, i, x)  ((v).b[i] = (u8)(x))
+#define SNX_VSET_H(v, i, x)  ((v).h[i] = (u16)SNX_GUEST16((u16)(x)))
+#define SNX_VSET_S(v, i, x)  ((v).s[i] = (u32)SNX_GUEST32((u32)(x)))
+#define SNX_VSET_D(v, i, x)  ((v).d[i] = (u64)SNX_GUEST64((u64)(x)))
 #define RD8(a)      (*(u8*)MP(a))
 #define RD16(a)     ((u16)SNX_GUEST16(*(u16*)MP(a)))
 #define RD32(a)     ((u32)SNX_GUEST32(*(u32*)MP(a)))
@@ -426,7 +437,7 @@ SNX_INLINE u32 snx_cas8(u8* p, u8 expected, u8 desired) {
     return __atomic_compare_exchange_n(p, &expected, desired, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 }
 /* one atomic 16-byte compare-and-swap of both halves (p[0] the low one): cmpxchg16b on x86-64, lqarx/stqcx. on
-   POWER8, c->rt->cas128 on RISC-V and LoongArch */
+   POWER8, c->rt->cas128 on RISC-V, LoongArch and PowerPC64 builds for an older baseline */
 u32 snx_cas128(CPU* c, u64* p, u64 o0, u64 o1, u64 n0, u64 n1);
 #define SNX_FENCE()    __atomic_thread_fence(__ATOMIC_SEQ_CST)
 /* ABI 3 made these and snx_cas128 atomic, so modules from before are refused */
@@ -524,21 +535,21 @@ void snx_msr(CPU* c, u32 sysreg, u64 v);
         u32 t__ = (u32)(E_);                                                                                           \
         V128* p__ = &c->v[D_];                                                                                         \
         p__->d[1] = 0;                                                                                                 \
-        p__->d[0] = t__;                                                                                               \
+        SNX_VSET_D(*p__, 0, t__);                                                                                      \
     } while (0)
 #define SETDB(D_, E_)                                                                                                  \
     do {                                                                                                               \
         u64 t__ = (u64)(E_);                                                                                           \
         V128* p__ = &c->v[D_];                                                                                         \
         p__->d[1] = 0;                                                                                                 \
-        p__->d[0] = t__;                                                                                               \
+        SNX_VSET_D(*p__, 0, t__);                                                                                      \
     } while (0)
 #define SETH(D_, E_)                                                                                                   \
     do {                                                                                                               \
         u16 t__ = (u16)(E_);                                                                                           \
         V128* p__ = &c->v[D_];                                                                                         \
         p__->d[1] = 0;                                                                                                 \
-        p__->d[0] = t__;                                                                                               \
+        SNX_VSET_D(*p__, 0, t__);                                                                                      \
     } while (0)
 #define SETHB(d, e) SETH(d, e)
 #define FPRM        ((int)((c->fpcr >> 22) & 3)) /* FPCR.RMode */

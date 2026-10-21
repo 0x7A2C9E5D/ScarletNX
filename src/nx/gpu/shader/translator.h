@@ -5,6 +5,7 @@
 #ifndef SNX_TRANSLATOR_H
 #define SNX_TRANSLATOR_H
 #include "nx/gpu/shader/shader.h"
+#include "common/utilities/endian.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,6 +32,10 @@ typedef struct {
 #define CRS_KIND(id)                                                                                                   \
     ((id) == O_SSY || (id) == O_SYNC ? 0 : (id) == O_PBK || (id) == O_BRK ? 1 : (id) == O_PEXIT ? 3 : 2)
 
+/* A program's bytes are guest memory's, so its words are little-endian: the instruction words as host numbers, which
+   the decoder and the translator read. code itself on a little-endian host; on a big-endian one a malloc'd copy of
+   bytes / 8 words, in *copy for the caller to free (NULL without memory) */
+const u64* shader_words(const u8* code, u32 bytes, u64** copy);
 /* the opcode of instruction w, or NULL when no encoding matches */
 const Op* decode(u64 w);
 /* the word a relative branch (BRA, SSY, PBK, PCNT, CAL, PRET, PEXIT) at word idx goes to */

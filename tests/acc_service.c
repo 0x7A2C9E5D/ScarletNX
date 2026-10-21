@@ -107,10 +107,8 @@ static IpcCtx* request(Request* r, u32 cmd) {
     return &r->c;
 }
 static u32 reply32(Request* r, u32 off) {
-    u32 v;
     CHECK(off + 4 <= r->c.out_size);
-    memcpy(&v, r->c.out + off, 4);
-    return v;
+    return snx_ld_le32(r->c.out + off); /* the dispatcher writes the reply as the guest reads it */
 }
 static void call(SvcObj* o, Request* r) { CHECK(o->dispatch(o, &r->c) == 0); }
 
@@ -139,7 +137,7 @@ static void test_picture(void) {
     u32 size, loaded, width = 0, height = 0, components = 0;
     const u8* picture = g_mem + 0x1000;
     request(&r, 5);
-    memcpy(r.raw, g_user_id, 16);
+    acc_uid_put(r.raw, g_user_id);
     call(acc, &r);
     CHECK(r.c.nout_objs == 1);
     profile = r.c.out_objs[0];
@@ -215,7 +213,13 @@ static void uid_of(const char* text, nn_account_Uid* uid) {
     CHECK(strlen(text) == 32 && sscanf(text, "%16llx%16llx", &hi, &lo) == 2);
     v[0] = hi;
     v[1] = lo;
-    memcpy(uid->v, v, 16);
+    acc_uid_put(uid->v, v);
+}
+/* uid bytes as the game holds them (each half little-endian), against users.c's halves */
+static int same_uid(const u8* bytes, const u64 v[2]) {
+    u8 b[16];
+    acc_uid_put(b, v);
+    return !memcmp(bytes, b, 16);
 }
 
 static void test_one_user(void) {
@@ -236,12 +240,12 @@ static void test_one_user(void) {
     list.addr = 0x100;
     list.size = 0xA0;
     CHECK(nn_account_IAccountServiceForApplication_ListAllUsers(NULL, list) == 0);
-    CHECK(!memcmp(memory + 0x100, g_user_id, 16));
+    CHECK(same_uid(memory + 0x100, g_user_id));
     for (count = 16; count < 0xA0; count++) CHECK(memory[0x100 + count] == 0);
     CHECK(memory[0x1A0] == 0xAA);
     /* one user is chosen without asking */
     CHECK(nn_account_IAccountServiceForApplication_TrySelectUserWithoutInteraction(NULL, 0, &uid) == 0);
-    CHECK(!memcmp(uid.v, g_user_id, 16));
+    CHECK(same_uid(uid.v, g_user_id));
     uid_of(UID2, &uid);
     CHECK(nn_account_IAccountServiceForApplication_GetUserExistence(NULL, &uid, &exists) == 0 && !exists);
     /* without users.ini, user=2 names nobody */
@@ -278,7 +282,7 @@ static void test_users(void) {
     list.addr = 0x100;
     list.size = 0xA0;
     CHECK(nn_account_IAccountServiceForApplication_ListAllUsers(NULL, list) == 0);
-    CHECK(!memcmp(memory + 0x100, g_user_id, 16));
+    CHECK(same_uid(memory + 0x100, g_user_id));
     uid_of(UID2, &uid);
     CHECK(!memcmp(memory + 0x110, uid.v, 16));
     uid_of(UID3, &uid);
@@ -296,7 +300,7 @@ static void test_users(void) {
     CHECK(nn_account_IAccountServiceForApplication_ListOpenUsers(NULL, list) == 0);
     CHECK(!memcmp(memory + 0x100, uid.v, 16) && memory[0x110] == 0 && memory[0x19F] == 0);
     CHECK(nn_account_IAccountServiceForApplication_GetLastOpenedUser(NULL, &got) == 0 && !memcmp(got.v, uid.v, 16));
-    CHECK(!memcmp(snx_users_selected()->uid, uid.v, 16));
+    CHECK(same_uid(uid.v, snx_users_selected()->uid));
     /* with three users nobody is chosen without asking: the game asks the user selector (am.c) */
     memset(&got, 0xAA, sizeof got);
     CHECK(nn_account_IAccountServiceForApplication_TrySelectUserWithoutInteraction(NULL, 1, &got) == 0);
@@ -354,9 +358,9 @@ static void test_first_uid(void) {
     list.size = 0x20;
     CHECK(nn_account_IAccountServiceForApplication_ListAllUsers(NULL, list) == 0);
     uid_of(UID3, &uid);
-    CHECK(!memcmp(memory + 0x100, uid.v, 16) && !memcmp(memory + 0x110, g_user_id, 16));
+    CHECK(!memcmp(memory + 0x100, uid.v, 16) && same_uid(memory + 0x110, g_user_id));
     CHECK(nn_account_IAccountServiceForApplication_GetLastOpenedUser(NULL, &uid) == 0);
-    memcpy(v, uid.v, 16);
+    acc_uid_get(&uid, v);
     snx_users_uid_text(v, text);
     CHECK(!strcmp(text, UID3));
     /* a [user1] that names no uid has the fixed one */

@@ -9,8 +9,10 @@
 * [Host pages larger than 4 KiB](#host-pages-larger-than-4-kib)
 * [What differs from the other hosts](#what-differs-from-the-other-hosts)
 * [Big-endian hosts](#big-endian-hosts)
+* [The PowerPC 970 and POWER4](#the-powerpc-970-and-power4)
 
-ScarletNX builds for 64-bit PowerPC Linux from POWER8 on. The little-endian port (ppc64le) works: the test suite
+ScarletNX builds for 64-bit PowerPC Linux from POWER8 on, and big-endian builds from the PowerPC 970 (the PowerMac
+G5) and POWER4 on. The little-endian port (ppc64le) works: the test suite
 passes under qemu-user, and Super Haxagon, recompiled under qemu, played a level to its game over screen there with
 lavapipe as the Vulkan driver. No real POWER machine has run it yet. CI cross-builds its AppImage
 (`ScarletNX-linux-ppc64le.AppImage`, the `appimage-cross` job in `.github/workflows/build.yml`) against an Arch POWER
@@ -18,11 +20,12 @@ system root and runs it under qemu as installed; the test suite's job, `linux-pp
 The big-endian port has a job of its own, `linux-ppc64`, which builds the Linux runtime and runs its tests under
 qemu-ppc64.
 
-On a big-endian host the Linux runtime runs AArch64 programs, with Debian ports' glibc (`linux-ppc64-cross`, ELFv1)
-and with Arch POWER's (`linux-ppc64-elfv2-cross`, ELFv2): under qemu-ppc64, an AArch64-hosted GCC compiles a C file
-and the program it made runs, both dynamically linked against glibc. CI packages the Arch POWER build as
-`ScarletNX-linux-ppc64.AppImage`, the Linux runtime alone (`ScarletNX-linux-ppc64.AppImage ./program`). The Switch
-runtime builds there but refuses to start a game. See [Big-endian hosts](#big-endian-hosts).
+On a big-endian host the Linux runtime runs AArch64 and 32-bit Arm programs, with Debian ports' glibc
+(`linux-ppc64-cross`, ELFv1) and with Arch POWER's (`linux-ppc64-elfv2-cross`, ELFv2): under qemu-ppc64, an
+AArch64-hosted GCC compiles a C file and the program it made runs, both dynamically linked against glibc. The Switch
+runtime is ported to big-endian ELFv2 too, its services, IPC, memory, GPU front end and video, and the renderer
+treats the Vulkan device as little-endian, as the drivers for big-endian PowerPC64 are. Its test suite passes under
+qemu-ppc64, but no game has run on a big-endian machine yet. See [Big-endian hosts](#big-endian-hosts).
 
 ## Building on an x86-64 Debian machine
 
@@ -86,12 +89,14 @@ and CI check these paths on 4 KiB hosts (`ldr_service_64k_pages`, `gnuabi_memory
 
 ## What differs from the other hosts
 
-- **The baseline is POWER8** (`cmake/cross.cmake`). Before it there is no `lqarx`/`stqcx.`, and the 128-bit
+- **The baseline is POWER8** unless a big-endian build names an older machine (`SNX_PPC64_CPU` in
+  `cmake/cross.cmake`, [below](#the-powerpc-970-and-power4)). Before it there is no `lqarx`/`stqcx.`, and the 128-bit
   compare-and-swap that STXP becomes would be a libatomic call, which a module doesn't link.
 - **Guest tail calls go through stubs.** Without POWER10's PC-relative code, LLVM refuses a guaranteed tail call to a
   function it can't see shares the caller's TOC: another unit's function, or a pointer. A module has one TOC, so the
   jump is safe, and `ppc_tail_calls` in `src/common/cpu/recompiler/llvm/ir.c` sends those calls to a naked stub of the
-  same module that branches on.
+  same module that branches on. A pointer's stub that misses calls `RtAPI.miss` from a frame of its own and keeps r2
+  in that frame: r1 may still be the runtime's frame that called into the module, whose saved TOC it reloads.
 - **The linker** (`src/common/cpu/recompiler/llvm/link_elf.c`, with the relocations in `elf_object.c`) handles the
   TOC relocations, ELFv2's local entry points, ELFv1's `.opd` descriptors, and 16-byte stubs for a call past `bl`'s
   32 MiB.
@@ -101,9 +106,13 @@ and CI check these paths on 4 KiB hosts (`ldr_service_64k_pages`, `gnuabi_memory
   that gave each step its own TOC, and a guest's jump from one step into another came back to its caller with the
   other step's TOC. Loaded code calls the runtime only through pointers (RtAPI), which LLVM calls with r2 saved. A
   forked child copies the arena's pages, which are shared memory, into its own (`snx_recompiler_forked`).
-- **No runtime JIT for Switch games.** Its units call the AOT module's functions directly, and the module has a TOC
-  of its own (`module_jit` in `library.c`). The A32 executor is off too: its blocks call the runtime's functions
-  directly (`common/cpu/arm/exec.c`), so the Linux runtime runs no 32-bit programs on PowerPC64.
+- **The runtime JIT shares the game module's TOC.** Its units call the AOT module's functions directly, so their
+  arena is placed within 32-bit reach of the module's TOC, which every unit keeps in r2
+  (`snx_code_loader_new_toc` in `code_loader.c`, `aot_toc` in `jit_service.c`, which reads the TOC from an ELFv1
+  descriptor or an ELFv2 global entry).
+- **A32 blocks call the 32-bit runtime library in their arena.** The executor (`common/cpu/arm/exec.c`) loads
+  `armlib` into its code arena first, as `arena_load` does with `rtlib` for A64, so blocks share one TOC and reach
+  the runtime only through `cpu->rt`. The Linux runtime runs 32-bit programs on PowerPC64 with it.
 - **Rounding stays on the slow path.** LLVM 19 lowers `llvm.roundeven` to a libm call on POWER8, and fails on its
   vector form, so FRINTN and the rounding conversions use the software path. Fused multiply-add is a fast path, as
   POWER always has it.
@@ -119,7 +128,9 @@ or writes a guest value as a number converts it:
   `ir_state.c`) and where it compares in memory (`cas` in `ir_helpers.c`, `snx_cas128`). LLVM folds the swaps into
   POWER's byte-reversed loads and stores. The vector registers hold the guest's bytes too: the views that read a lane
   as a number swap it (`ir_vd`, `ir_ve`, the lane helpers of `ir_simd.c`), and Q loads, LD1 to LD4, TBL and EXT stay
-  byte copies. The emitters decide by the target's data layout, so a little-endian host's code is what it was.
+  byte copies. The emitters decide by the target's data layout, so a little-endian host's code is what it was. The
+  templates' C and the reference interpreter's helpers, which the tests hold the emitters to, read and write a lane
+  as a number through `SNX_VS` and its kin in `cpu.h`, which swap on a big-endian host.
 - The Linux runtime's system calls read and write the guest's structures through `common/utilities/endian.h`
   (`snx_ld_le32`, `snx_st_le64` and their kin), which compile to plain copies on a little-endian host.
 - `scripts/le-unchanged.sh` builds a base commit and the working tree on a little-endian machine and lists every
@@ -149,9 +160,61 @@ What was run under qemu-ppc64: the Linux runtime's tests (`gnuabi_*`, `endian`, 
 --suite all` against qemu-aarch64 (the CPU suite covers SIMD, floating point, exclusives and unaligned accesses), a
 glibc program, and the AArch64-hosted GCC 16.2 compiling a C file with a glibc system root.
 
-The Switch runtime is not ported: its services, IPC, the GPU and the shader translator read guest memory as host
-numbers. What it needs: `mem.h`'s accessors and the
-synchronization primitives' atomics, the IPC generator's arguments and structures, the services' local `rd32`/`wr32`
-helpers, hactool's headers, and the GPU's data, which stays in the guest's byte order in buffers and is converted
-where it is read as typed values (the translated shaders, image uploads and readbacks, vertex input). Until then the
-runtime refuses to start a game on a big-endian host.
+### The Switch runtime
+
+Everything the Switch runtime reads or writes in guest memory as a number converts it, with converting helpers that
+compile to nothing on a little-endian host:
+
+- `gr16`/`gr32`/`gr64` and `gw16`/`gw32`/`gw64` (`memory/mem.h`) for a guest address, endian.h's `snx_ld_le32` and
+  kin for a pointer into guest memory, and `snx_le32_array` and kin for a structure of words copied out of it or
+  about to be copied in. Bitfields over guest words are shifts and masks of the converted word.
+- IPC (`docs/IPC.md`): the generated dispatchers convert raw arguments and outputs, so a handler's are host
+  numbers, while buffers keep the guest's order and the handler converts what it reads in them. The kernel converts
+  the HIPC and CMIF headers and descriptors, and the compare-and-swaps on guest words (mutex tags, condition
+  variables, address arbitration) take converted operands.
+- Shared memory the runtime writes (HID, time, applets) is little-endian. The services' formats that are big-endian
+  on the console, such as the shared fonts' header and the Opus packet header, keep the console's order.
+- The GPU's command processor converts GPFIFO entries and push buffer words where it reads them, the shader
+  translator reads instructions and the SPH as little-endian words, texture headers and samplers too, and what the
+  engines write to guest memory (semaphores, reports, constant buffer updates, I2M data) is little-endian.
+- **The Vulkan device is taken to be little-endian**, as Mesa's drivers on big-endian PowerPC64 are, while the API
+  (structs, command arguments, SPIR-V words) is the host's order. Guest data goes to the device as its bytes; what
+  the CPU computes for the device (push constants, uniform and index buffers it builds, indirect commands) is
+  written little-endian, and what it reads back is converted. lavapipe on a big-endian host is not little-endian,
+  so it doesn't show a game's rendering there.
+- hactool's headers are converted as they are read, or at each field where they are signed or written back, so
+  extraction and recompiling work on a big-endian machine.
+
+The build (the Arch POWER system root of the `appimage-cross` job, with GCC's runtime and LLVM installed):
+
+```bash
+export SNX_SYSROOT=/path/to/arch-power-ppc64
+cmake --preset linux-ppc64-elfv2-cross
+cmake --build --preset linux-ppc64-elfv2-cross
+ctest --preset linux-ppc64-elfv2-cross -j"$(nproc)"
+```
+
+A rebuild that runs CMake again needs the preset's `PKG_CONFIG_LIBDIR` and `PKG_CONFIG_SYSROOT_DIR` in the
+environment: `cmake --build --preset` sets them, a plain `cmake --build` of the folder doesn't, and SDL then finds the
+build machine's Wayland and DRM.
+
+## The PowerPC 970 and POWER4
+
+`SNX_PPC64_CPU` names the oldest CPU a big-endian build runs on: `power8` (the default), `power7` to `power4`, or
+`970` for the PowerPC 970 of the PowerMac G5. The `linux-ppc64-g5-cross` preset is the ELFv2 build for the 970.
+Clang, FFmpeg and the recompiler's runtime library are built for it, and the recompiler builds a game's module for
+the host's CPU, or for this one where the host's name isn't known. What changes before POWER8:
+
+- **STXP's 16-byte compare-and-swap goes through the runtime** (`RtAPI.cas128`, `common/runtime/cas128.c`), as on
+  RISC-V and LoongArch. It runs POWER8's `lqarx`/`stqcx.` where the kernel reports ISA 2.07, and takes a lock of the
+  address's stripe elsewhere, which keeps the 16 bytes atomic against other STXPs but not against plain stores.
+- **Single-precision vector lanes take the slow path** (`altivec_lanes` in `ir_fp.c`). Without VSX, LLVM puts them
+  on AltiVec, whose VSCR[NJ] is set when Linux starts a thread, so denormals flush to zero. Double lanes and scalars
+  use the FPU.
+- Rounding, `floor`, `trunc`, `rint`, `minnum` and the half conversions would be libm calls on these CPUs, which the
+  emitters already avoid on PowerPC64.
+
+The PowerMac G5's own graphics cards have no Vulkan driver, so the 970 build needs a later card that Mesa drives.
+Under `qemu-ppc64 -cpu 970` the build stops in Arch POWER's `libLLVM`, in its static constructors before `main`, while
+a program without LLVM runs there: the 970 build is checked for instructions the 970 lacks (none outside OpenSSL's
+routines for later CPUs, which it picks by the machine's capabilities), and runs under qemu as a POWER8.

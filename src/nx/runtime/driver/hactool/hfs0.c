@@ -10,6 +10,7 @@ void hfs0_process(hfs0_ctx_t *ctx) {
         exit(EXIT_FAILURE);
     }
 
+    hfs0_header_from_le(&raw_header, 0);
     if (raw_header.magic != MAGIC_HFS0) {
         memdump(stdout, "Sanity: ", &raw_header, sizeof(raw_header));
         printf("Error: HFS0 is corrupt!\n");
@@ -28,6 +29,7 @@ void hfs0_process(hfs0_ctx_t *ctx) {
         fprintf(stderr, "Failed to read HFS0 header!\n");
         exit(EXIT_FAILURE);
     }
+    hfs0_header_from_le(ctx->header, 1);
 
     /* Weak file validation. */
     uint64_t max_size = 0x1ULL;

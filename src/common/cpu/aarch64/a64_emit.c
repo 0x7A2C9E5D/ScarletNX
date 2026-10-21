@@ -195,7 +195,7 @@ int snx_a64_fast_simd(FILE* out, SnxU32 w) {
             hi = size >> 1;
             if (sz && !q) return 0;
             lanes = sz ? 2 : (q ? 4 : 2);
-            type = sz ? "d" : "s";
+            type = sz ? "D" : "S";
             operation = NULL;
             acc = NULL;
             if (!u && !hi && op == 0x1A)
@@ -214,11 +214,11 @@ int snx_a64_fast_simd(FILE* out, SnxU32 w) {
             fputs("; ", out);
             for (i = 0; i < lanes; ++i) {
                 if (acc)
-                    fprintf(out, "r.%s[%u]=snx_fp_fma(c,r.%s[%u],a.%s[%u]%s,b.%s[%u],%u); ", type, i, type, i, type, i,
-                            acc, type, i, sz ? 64 : 32);
+                    fprintf(out, "SNX_VSET_%s(r,%u,snx_fp_fma(c,SNX_V%s(r,%u),SNX_V%s(a,%u)%s,SNX_V%s(b,%u),%u)); ", type,
+                            i, type, i, type, i, acc, type, i, sz ? 64 : 32);
                 else
-                    fprintf(out, "r.%s[%u]=snx_fp_binary(c,a.%s[%u],b.%s[%u],%u,%s); ", type, i, type, i, type, i,
-                            sz ? 64 : 32, operation);
+                    fprintf(out, "SNX_VSET_%s(r,%u,snx_fp_binary(c,SNX_V%s(a,%u),SNX_V%s(b,%u),%u,%s)); ", type, i, type,
+                            i, type, i, sz ? 64 : 32, operation);
             }
             if (!q) fputs("r.d[1]=0; ", out);
             fprintf(out, "c->v[%u]=r; }", rd);
@@ -226,10 +226,11 @@ int snx_a64_fast_simd(FILE* out, SnxU32 w) {
         }
         if (op == 0x10 && (q || size < 3)) {
             lanes = (q ? 16 : 8) >> size;
-            lane = "bhsd"[size];
+            lane = "BHSD"[size];
             fprintf(out, "{ V128 a=c->v[%u],b=c->v[%u],r; ", rn, rm);
             for (i = 0; i < lanes; ++i)
-                fprintf(out, "r.%c[%u]=a.%c[%u]%cb.%c[%u]; ", lane, i, lane, i, u ? '-' : '+', lane, i);
+                fprintf(out, "SNX_VSET_%c(r,%u,SNX_V%c(a,%u)%cSNX_V%c(b,%u)); ", lane, i, lane, i, u ? '-' : '+', lane,
+                        i);
             if (!q) fputs("r.d[1]=0; ", out);
             fprintf(out, "c->v[%u]=r; }", rd);
             return 1;
@@ -249,23 +250,24 @@ int snx_a64_fast_simd(FILE* out, SnxU32 w) {
         m = (mb << 4) | ((w >> 16) & 15);
         if (!scalar && sz && !q) return 0;
         lanes = scalar ? 1 : (sz ? 2 : (q ? 4 : 2));
-        type = sz ? "d" : "s";
+        type = sz ? "D" : "S";
         fprintf(out, "{ V128 a=c->v[%u],r", rn);
         if (!scalar && op != 9) fprintf(out, "=c->v[%u]", rd);
         fputs("; ", out);
-        if (scalar && op != 9) fprintf(out, "%s d0=c->v[%u].%s[0]; ", sz ? "u64" : "u32", rd, type);
+        if (scalar && op != 9) fprintf(out, "%s d0=SNX_V%s(c->v[%u],0); ", sz ? "u64" : "u32", type, rd);
         if (scalar || op == 9) fputs("r.d[0]=0; r.d[1]=0; ", out);
-        fprintf(out, "%s e=c->v[%u].%s[%u]; ", sz ? "u64" : "u32", m, type, index);
+        fprintf(out, "%s e=SNX_V%s(c->v[%u],%u); ", sz ? "u64" : "u32", type, m, index);
         for (i = 0; i < lanes; ++i) {
             if (op == 9)
-                fprintf(out, "r.%s[%u]=snx_fp_binary(c,a.%s[%u],e,%u,SNX_FP_MUL); ", type, i, type, i, sz ? 64 : 32);
+                fprintf(out, "SNX_VSET_%s(r,%u,snx_fp_binary(c,SNX_V%s(a,%u),e,%u,SNX_FP_MUL)); ", type, i, type, i,
+                        sz ? 64 : 32);
             else {
-                fprintf(out, "r.%s[%u]=snx_fp_fma(c,", type, i);
+                fprintf(out, "SNX_VSET_%s(r,%u,snx_fp_fma(c,", type, i);
                 if (scalar)
                     fputs("d0", out);
                 else
-                    fprintf(out, "r.%s[%u]", type, i);
-                fprintf(out, ",a.%s[%u]%s,e,%u); ", type, i,
+                    fprintf(out, "SNX_V%s(r,%u)", type, i);
+                fprintf(out, ",SNX_V%s(a,%u)%s,e,%u)); ", type, i,
                         op == 5 ? (sz ? "^0x8000000000000000ull" : "^0x80000000u") : "", sz ? 64 : 32);
             }
         }
@@ -283,16 +285,16 @@ int snx_a64_fast_simd(FILE* out, SnxU32 w) {
         index = imm5 >> (sz + 1);
         lane = "bhsd"[sz];
         lanes = (q ? 16 : 8) >> sz;
+        /* a lane to or from a general register is a number (SNX_VS and kin); one lane to others, its bytes */
         if (!u && imm4 == 7 && ((sz == 3) == !!q)) {
-            if (rd != 31) fprintf(out, "c->x[%u]=(u64)c->v[%u].%c[%u];", rd, rn, lane, index);
+            if (rd != 31) fprintf(out, "c->x[%u]=(u64)SNX_V%c(c->v[%u],%u);", rd, "BHSD"[sz], rn, index);
             return 1;
         }
         if (!u && imm4 == 3 && q) {
-            fprintf(out, "c->v[%u].%c[%u]=", rd, lane, index);
             if (rn == 31)
-                fputs("0;", out);
+                fprintf(out, "c->v[%u].%c[%u]=0;", rd, lane, index);
             else
-                fprintf(out, "c->x[%u];", rn);
+                fprintf(out, "SNX_VSET_%c(c->v[%u],%u,c->x[%u]);", "BHSD"[sz], rd, index, rn);
             return 1;
         }
         if (u && q) {
@@ -305,8 +307,10 @@ int snx_a64_fast_simd(FILE* out, SnxU32 w) {
                 fprintf(out, "c->v[%u].%c[%u]; ", rn, lane, index);
             else if (rn == 31)
                 fputs("0; ", out);
-            else
-                fprintf(out, "(u%u)c->x[%u]; ", 8U << sz, rn);
+            else if (!sz)
+                fprintf(out, "(u8)c->x[%u]; ", rn);
+            else /* the general register's low bits, as the lanes' bytes */
+                fprintf(out, "(u%u)SNX_GUEST%u((u%u)c->x[%u]); ", 8U << sz, 8U << sz, 8U << sz, rn);
             for (i = 0; i < lanes; ++i) fprintf(out, "r.%c[%u]=e; ", lane, i);
             if (!q) fputs("r.d[1]=0; ", out);
             fprintf(out, "c->v[%u]=r; }", rd);

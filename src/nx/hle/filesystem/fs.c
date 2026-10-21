@@ -446,8 +446,8 @@ int fs_add_virtual_file(const char* path, const void* data, u64 size) {
 #define ROM_DIR_ENTRY 0x18 /* parent, sibling, first child, first file, next in bucket, name length; the name */
 #define ROM_FILE_ENTRY                                                                                                 \
     0x20 /* parent, sibling, u64 data offset, u64 size, next in bucket, name length; the name */
-static void put32(u8* p, u32 v) { memcpy(p, &v, 4); }
-static void put64(u8* p, u64 v) { memcpy(p, &v, 8); }
+static void put32(u8* p, u32 v) { snx_st_le32(p, v); } /* the image is the guest's: little-endian */
+static void put64(u8* p, u64 v) { snx_st_le64(p, v); }
 /* the bucket of an entry named name in the directory at table offset parent. The name's bytes count unsigned */
 static u32 rhash(u32 parent, const char* name) {
     const unsigned char* p = (const unsigned char*)name;
@@ -1015,7 +1015,7 @@ static int nn_fssrv_sf_IDirectory_Read(SvcObj* self, IpcBuf entries, i64* count)
             memset(entry, 0, 0x310);
             strncpy((char*)entry, node->name, 0x300);
             entry[0x304] = node->is_dir ? 0 : 1;
-            memcpy(entry + 0x308, &size, 8);
+            snx_st_le64(entry + 0x308, size);
         }
         node = node->next;
     }
@@ -1105,9 +1105,9 @@ static int nn_fssrv_sf_IFileSystem_GetFileTimeStampRaw(SvcObj* self, IpcBuf path
     R_TRY(tree_result(fs_tree_mtime(&g_hle.fs.tree, node, &ms)));
     s = ms / 1000;
     memset(timestamp->v, 0, sizeof timestamp->v);
-    memcpy(timestamp->v, &s, 8);
-    memcpy(timestamp->v + 8, &s, 8);
-    memcpy(timestamp->v + 16, &s, 8);
+    snx_st_le64(timestamp->v, s); /* bytes in the guest's order, as the console lays them out */
+    snx_st_le64(timestamp->v + 8, s);
+    snx_st_le64(timestamp->v + 16, s);
     timestamp->v[24] = 1;
     R_SUCCEED();
 }
@@ -1308,7 +1308,8 @@ static u32 save_user(const nn_fs_SaveDataAttribute* attribute, char* p, size_t n
     u64 uid[2];
     char text[33];
     int mine;
-    memcpy(uid, attribute->uid.v, 16);
+    uid[0] = snx_ld_le64(attribute->uid.v); /* a Uid is bytes: two little-endian words */
+    uid[1] = snx_ld_le64(attribute->uid.v + 8);
     snx_users_uid_text(uid, text);
     snprintf(p, n, "save/user.%s", text);
     *both = 0;

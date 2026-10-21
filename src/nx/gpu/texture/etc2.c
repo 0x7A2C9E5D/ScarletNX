@@ -3,6 +3,7 @@
 /* ETC2 and EAC decoding, from the Khronos Data Format Specification's ETC2 chapter. A block is read as big-endian
    64 bit words; a pixel (x, y) of a 4x4 block is number x * 4 + y in the index bits (columns first). */
 #include "nx/gpu/texture/etc2.h"
+#include "common/utilities/endian.h"
 #include <string.h>
 
 /* the ETC1 intensity modifiers, per table codeword, for pixel indices 0 to 3 */
@@ -187,8 +188,8 @@ void etc2_decode_image(const u8* src, u32 w, u32 h, int kind, u8* dst) {
                     if (kind <= ETC2_RGBA)
                         memcpy(o, rgba[i], 4);
                     else {
-                        memcpy(o, &ch[0][i], 2);
-                        if (pb == 4) memcpy(o + 2, &ch[1][i], 2);
+                        snx_st_le16(o, ch[0][i]); /* R16 and R16G16 texels, little-endian as the GPU reads them */
+                        if (pb == 4) snx_st_le16(o + 2, ch[1][i]);
                     }
                 }
         }

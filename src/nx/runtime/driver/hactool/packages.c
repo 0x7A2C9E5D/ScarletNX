@@ -38,13 +38,13 @@ void pk11_process(pk11_ctx_t *ctx) {
     if (ctx->is_mariko) {
         fseeko64(ctx->file, sizeof(ctx->mariko_oem_header), SEEK_SET);
 
-        if (ctx->mariko_oem_header.bl_size < sizeof(ctx->metadata)) {
+        if (snx_le32(ctx->mariko_oem_header.bl_size) < sizeof(ctx->metadata)) {
             fprintf(stderr, "PK11 seems corrupt!\n");
             exit(EXIT_FAILURE);
         }
 
-        ctx->mariko_bl = calloc(1, ctx->mariko_oem_header.bl_size);
-        if (fread(ctx->mariko_bl, 1, ctx->mariko_oem_header.bl_size, ctx->file) != ctx->mariko_oem_header.bl_size) {
+        ctx->mariko_bl = calloc(1, snx_le32(ctx->mariko_oem_header.bl_size));
+        if (fread(ctx->mariko_bl, 1, snx_le32(ctx->mariko_oem_header.bl_size), ctx->file) != snx_le32(ctx->mariko_oem_header.bl_size)) {
             fprintf(stderr, "Failed to read Mariko PK11!\n");
             exit(EXIT_FAILURE);
         }
@@ -54,7 +54,7 @@ void pk11_process(pk11_ctx_t *ctx) {
         ctx->is_decrypted = memcmp(&ctx->metadata, ctx->mariko_bl + 0x20, sizeof(ctx->metadata)) == 0;
 
         if (!ctx->is_decrypted) {
-            uint32_t enc_size = ctx->mariko_oem_header.bl_size - sizeof(ctx->metadata);
+            uint32_t enc_size = snx_le32(ctx->mariko_oem_header.bl_size) - sizeof(ctx->metadata);
             if (enc_size > 0) {
                 aes_ctx_t *crypt_ctx = new_aes_ctx(ctx->tool_ctx->settings.keyset.mariko_bek, 0x10, AES_MODE_CBC);
 
@@ -81,16 +81,16 @@ void pk11_process(pk11_ctx_t *ctx) {
         if (ctx->is_decrypted) {
             if (ctx->is_modern) {
                 memcpy(&ctx->stage1.modern, ctx->mariko_bl + 0x20, sizeof(ctx->stage1.modern));
-                ctx->pk11_size = ctx->stage1.modern.pk11_size;
+                ctx->pk11_size = snx_le32(ctx->stage1.modern.pk11_size);
             } else {
                 memcpy(&ctx->stage1.legacy, ctx->mariko_bl + 0x20, sizeof(ctx->stage1.legacy));
-                ctx->pk11_size = ctx->stage1.legacy.pk11_size;
+                ctx->pk11_size = snx_le32(ctx->stage1.legacy.pk11_size);
             }
         } else {
             if (ctx->is_modern) {
-                ctx->pk11_size = ctx->mariko_oem_header.bl_size - 0x20 - sizeof(ctx->stage1.modern);
+                ctx->pk11_size = snx_le32(ctx->mariko_oem_header.bl_size) - 0x20 - sizeof(ctx->stage1.modern);
             } else {
-                ctx->pk11_size = ctx->mariko_oem_header.bl_size - 0x20 - sizeof(ctx->stage1.legacy);
+                ctx->pk11_size = snx_le32(ctx->mariko_oem_header.bl_size) - 0x20 - sizeof(ctx->stage1.legacy);
             }
         }
     } else {
@@ -99,13 +99,13 @@ void pk11_process(pk11_ctx_t *ctx) {
                 fprintf(stderr, "Failed to read PK11 Stage1!\n");
                 exit(EXIT_FAILURE);
             }
-            ctx->pk11_size = ctx->stage1.modern.pk11_size;
+            ctx->pk11_size = snx_le32(ctx->stage1.modern.pk11_size);
         } else {
             if (fread(&ctx->stage1.legacy, 1, sizeof(ctx->stage1.legacy), ctx->file) != sizeof(ctx->stage1.legacy)) {
                 fprintf(stderr, "Failed to read PK11 Stage1!\n");
                 exit(EXIT_FAILURE);
             }
-            ctx->pk11_size = ctx->stage1.legacy.pk11_size;
+            ctx->pk11_size = snx_le32(ctx->stage1.legacy.pk11_size);
         }
     }
 
@@ -135,7 +135,7 @@ void pk11_process(pk11_ctx_t *ctx) {
         }
     }
 
-    ctx->is_decrypted = ctx->pk11->magic == MAGIC_PK11;
+    ctx->is_decrypted = snx_le32(ctx->pk11->magic) == MAGIC_PK11;
     if (!ctx->is_mariko && !ctx->is_decrypted) {
         pk11_t dec_header;
         aes_ctx_t *crypt_ctx = NULL;
@@ -145,7 +145,7 @@ void pk11_process(pk11_ctx_t *ctx) {
                 crypt_ctx = new_aes_ctx(ctx->tool_ctx->settings.keyset.package1_keys[i], 0x10, AES_MODE_CBC);
                 aes_setiv(crypt_ctx, ctx->stage1.modern.iv, 0x10);
                 aes_decrypt(crypt_ctx, &dec_header, ctx->pk11, sizeof(dec_header));
-                if (dec_header.magic == MAGIC_PK11) {
+                if (snx_le32(dec_header.magic) == MAGIC_PK11) {
                     aes_setiv(crypt_ctx, ctx->stage1.modern.iv, 0x10);
                     aes_decrypt(crypt_ctx, ctx->pk11, ctx->pk11, ctx->pk11_size);
                     ctx->is_decrypted = 1;
@@ -159,7 +159,7 @@ void pk11_process(pk11_ctx_t *ctx) {
                 crypt_ctx = new_aes_ctx(ctx->tool_ctx->settings.keyset.package1_keys[i], 0x10, AES_MODE_CTR);
                 aes_setiv(crypt_ctx, ctx->stage1.legacy.ctr, 0x10);
                 aes_decrypt(crypt_ctx, &dec_header, ctx->pk11, sizeof(dec_header));
-                if (dec_header.magic == MAGIC_PK11) {
+                if (snx_le32(dec_header.magic) == MAGIC_PK11) {
                     aes_setiv(crypt_ctx, ctx->stage1.legacy.ctr, 0x10);
                     aes_decrypt(crypt_ctx, ctx->pk11, ctx->pk11, ctx->pk11_size);
                     ctx->is_decrypted = 1;
@@ -194,10 +194,10 @@ void pk11_print(pk11_ctx_t *ctx) {
         memdump(stdout, "    Signature:                      ", &ctx->mariko_oem_header.rsa_sig, sizeof(ctx->mariko_oem_header.rsa_sig));
         memdump(stdout, "    Random Salt:                    ", &ctx->mariko_oem_header.salt, sizeof(ctx->mariko_oem_header.salt));
         memdump(stdout, "    OEM Bootloader Hash:            ", &ctx->mariko_oem_header.hash, sizeof(ctx->mariko_oem_header.hash));
-        printf("    OEM Bootloader Version:         %02"PRIx32"\n", ctx->mariko_oem_header.bl_version);
-        printf("    OEM Bootloader Size:            %08"PRIx32"\n", ctx->mariko_oem_header.bl_size);
-        printf("    OEM Bootloader Load Address:    %08"PRIx32"\n", ctx->mariko_oem_header.bl_load_addr);
-        printf("    OEM Bootloader Entrypoint:      %08"PRIx32"\n", ctx->mariko_oem_header.bl_entrypoint);
+        printf("    OEM Bootloader Version:         %02"PRIx32"\n", snx_le32(ctx->mariko_oem_header.bl_version));
+        printf("    OEM Bootloader Size:            %08"PRIx32"\n", snx_le32(ctx->mariko_oem_header.bl_size));
+        printf("    OEM Bootloader Load Address:    %08"PRIx32"\n", snx_le32(ctx->mariko_oem_header.bl_load_addr));
+        printf("    OEM Bootloader Entrypoint:      %08"PRIx32"\n", snx_le32(ctx->mariko_oem_header.bl_entrypoint));
     }
     printf("Package1 Metadata:\n");
     {
@@ -237,14 +237,14 @@ void pk11_save(pk11_ctx_t *ctx) {
         /* Save Decrypted.bin */
         printf("Saving decrypted binary to %s/Decrypted.bin\n", dirpath->char_path);
         if (ctx->is_mariko) {
-            char *decrypted_bin = malloc(sizeof(ctx->mariko_oem_header) + ctx->mariko_oem_header.bl_size);
+            char *decrypted_bin = malloc(sizeof(ctx->mariko_oem_header) + snx_le32(ctx->mariko_oem_header.bl_size));
             if (decrypted_bin == NULL) {
                 fprintf(stderr, "Failed to allocate buffer!\n");
                 exit(EXIT_FAILURE);
             }
             memcpy(decrypted_bin, &ctx->mariko_oem_header, sizeof(ctx->mariko_oem_header));
-            memcpy(decrypted_bin + sizeof(ctx->mariko_oem_header), ctx->mariko_bl, ctx->mariko_oem_header.bl_size);
-            save_buffer_to_directory_file(decrypted_bin, sizeof(ctx->mariko_oem_header) + ctx->mariko_oem_header.bl_size, dirpath, "Decrypted.bin");
+            memcpy(decrypted_bin + sizeof(ctx->mariko_oem_header), ctx->mariko_bl, snx_le32(ctx->mariko_oem_header.bl_size));
+            save_buffer_to_directory_file(decrypted_bin, sizeof(ctx->mariko_oem_header) + snx_le32(ctx->mariko_oem_header.bl_size), dirpath, "Decrypted.bin");
             free(decrypted_bin);
         } else {
             char *decrypted_bin = malloc(sizeof(ctx->stage1) + ctx->pk11_size);
@@ -261,7 +261,7 @@ void pk11_save(pk11_ctx_t *ctx) {
         /* Save Mariko_OEM_Bootloader.bin */
         if (ctx->is_mariko) {
             printf("Saving Mariko_OEM_Bootloader.bin to %s/Mariko_OEM_Bootloader.bin...\n", dirpath->char_path);
-            save_buffer_to_directory_file(ctx->mariko_bl, ctx->mariko_oem_header.bl_size, dirpath, "Mariko_OEM_Bootloader.bin");
+            save_buffer_to_directory_file(ctx->mariko_bl, snx_le32(ctx->mariko_oem_header.bl_size), dirpath, "Mariko_OEM_Bootloader.bin");
         }
 
         /* Save Warmboot.bin */
@@ -309,6 +309,7 @@ void pk11_save(pk11_ctx_t *ctx) {
 
 static bool pk21_is_valid_kernel_map(const kernel_map_t *raw_map, uint32_t max_size, uint32_t adj) {
     kernel_map_t adjusted_map = *raw_map;
+    snx_le32_array(&adjusted_map, sizeof(adjusted_map) / 4); /* ScarletNX: the map is little-endian */
     adjusted_map.text_start_offset       += adj;
     adjusted_map.text_end_offset         += adj;
     adjusted_map.rodata_start_offset     += adj;
@@ -354,7 +355,7 @@ void pk21_process(pk21_ctx_t *ctx) {
             is_encrypted = true;
         }
     }
-    is_encrypted &= ctx->header.magic != MAGIC_PK21;
+    is_encrypted &= snx_le32(ctx->header.magic) != MAGIC_PK21;
 
     if (is_encrypted) {
         if (rsa2048_pss_verify(&ctx->header.ctr, 0x100, ctx->header.signature, ctx->tool_ctx->settings.keyset.package2_fixed_key_modulus)) {
@@ -368,7 +369,7 @@ void pk21_process(pk21_ctx_t *ctx) {
 
 
     /* the console's layout here is odd */
-    ctx->package_size = ctx->header.ctr_dwords[0] ^ ctx->header.ctr_dwords[2] ^ ctx->header.ctr_dwords[3];
+    ctx->package_size = snx_le32(ctx->header.ctr_dwords[0]) ^ snx_le32(ctx->header.ctr_dwords[2]) ^ snx_le32(ctx->header.ctr_dwords[3]);
     if (ctx->package_size > 0x7FC000) {
         fprintf(stderr, "Error: Package2 Header is corrupt!\n");
         exit(EXIT_FAILURE);
@@ -386,7 +387,7 @@ void pk21_process(pk21_ctx_t *ctx) {
             crypt_ctx = new_aes_ctx(&ctx->tool_ctx->settings.keyset.package2_keys[i], 0x10, AES_MODE_CTR);
             aes_setiv(crypt_ctx, ctr, 0x10);
             aes_decrypt(crypt_ctx, &temp_header.ctr[0], &temp_header.ctr[0], 0x100);
-            if (temp_header.magic == MAGIC_PK21) {
+            if (snx_le32(temp_header.magic) == MAGIC_PK21) {
                 memcpy(&ctx->header, &temp_header, sizeof(temp_header));
                 memcpy(ctx->header.ctr, ctr, sizeof(ctr));
                 break;
@@ -401,7 +402,7 @@ void pk21_process(pk21_ctx_t *ctx) {
         }
     }
 
-    if (ctx->package_size != 0x200 + ctx->header.section_sizes[0] + ctx->header.section_sizes[1] + ctx->header.section_sizes[2]) {
+    if (ctx->package_size != 0x200 + snx_le32(ctx->header.section_sizes[0]) + snx_le32(ctx->header.section_sizes[1]) + snx_le32(ctx->header.section_sizes[2])) {
         fprintf(stderr, "Error: Package2 Header is corrupt!\n");
         exit(EXIT_FAILURE);
     }
@@ -420,7 +421,7 @@ void pk21_process(pk21_ctx_t *ctx) {
     uint64_t offset = 0;
     for (unsigned int i = 0; i < 3; i++) {
         unsigned char calc_hash[0x20];
-        sha256_hash_buffer(calc_hash, ctx->sections + offset, ctx->header.section_sizes[i]);
+        sha256_hash_buffer(calc_hash, ctx->sections + offset, snx_le32(ctx->header.section_sizes[i]));
         if (memcmp(calc_hash, ctx->header.section_hashes[i], 0x20) == 0) {
             ctx->section_validities[i] = VALIDITY_VALID;
         } else {
@@ -428,26 +429,27 @@ void pk21_process(pk21_ctx_t *ctx) {
         }
         if (is_encrypted) {
             aes_setiv(crypt_ctx, ctx->header.section_ctrs[i], 0x10);
-            aes_decrypt(crypt_ctx, ctx->sections + offset, ctx->sections + offset, ctx->header.section_sizes[i]);
+            aes_decrypt(crypt_ctx, ctx->sections + offset, ctx->sections + offset, snx_le32(ctx->header.section_sizes[i]));
         }
-        offset += ctx->header.section_sizes[i];
+        offset += snx_le32(ctx->header.section_sizes[i]);
     }
 
     ctx->ini1_ctx.tool_ctx = ctx->tool_ctx;
     /* Support 8.0.0 INI1 embedded in Kernel */
-    if (ctx->header.section_sizes[1] > 0) {
-        ctx->ini1_ctx.header = (ini1_header_t *)(ctx->sections + ctx->header.section_sizes[0]);
+    if (snx_le32(ctx->header.section_sizes[1]) > 0) {
+        ctx->ini1_ctx.header = (ini1_header_t *)(ctx->sections + snx_le32(ctx->header.section_sizes[0]));
     } else {
         ctx->ini1_ctx.header = calloc(1, sizeof(ini1_header_t));
 
         /* 17.0.0+ branch-to-rodata */
-        if (((*(const uint64_t *)ctx->sections) & UINT64_C(0xFFFFFFFFFF000000)) == UINT64_C(0x0000000014000000)) {
-            uint32_t branch_target = ((*(const uint32_t *)ctx->sections) & 0x00FFFFFF) << 2;
+        if ((snx_ld_le64(ctx->sections) & UINT64_C(0xFFFFFFFFFF000000)) == UINT64_C(0x0000000014000000)) {
+            uint32_t branch_target = (snx_ld_le32(ctx->sections) & 0x00FFFFFF) << 2;
             for (offset = branch_target; offset < branch_target + 0x1000; offset += 4) {
                 kernel_map_t *kernel_map = (kernel_map_t *)(ctx->sections + offset);
-                if (pk21_is_valid_kernel_map(kernel_map, ctx->header.section_sizes[0], offset) && *(const uint32_t *)(ctx->sections + offset + kernel_map->ini1_start_offset) == MAGIC_INI1) {
+                if (pk21_is_valid_kernel_map(kernel_map, snx_le32(ctx->header.section_sizes[0]), offset) && snx_ld_le32(ctx->sections + offset + snx_le32(kernel_map->ini1_start_offset)) == MAGIC_INI1) {
                     ctx->kernel_map = calloc(1, sizeof(kernel_map_t));
                     *(ctx->kernel_map) = *kernel_map;
+                    snx_le32_array(ctx->kernel_map, sizeof(*ctx->kernel_map) / 4); /* ScarletNX: kept in the host's order */
 
                     ctx->kernel_map->text_start_offset       += offset;
                     ctx->kernel_map->text_end_offset         += offset;
@@ -470,8 +472,11 @@ void pk21_process(pk21_ctx_t *ctx) {
         } else {
             for (offset = 0; offset < 0x1000; offset += 4) {
                 kernel_map_t *kernel_map = (kernel_map_t *)(ctx->sections + offset);
-                if (pk21_is_valid_kernel_map(kernel_map, ctx->header.section_sizes[0], 0) && *(const uint32_t *)(ctx->sections + kernel_map->ini1_start_offset) == MAGIC_INI1) {
-                    ctx->kernel_map = kernel_map;
+                if (pk21_is_valid_kernel_map(kernel_map, snx_le32(ctx->header.section_sizes[0]), 0) && snx_ld_le32(ctx->sections + snx_le32(kernel_map->ini1_start_offset)) == MAGIC_INI1) {
+                    /* ScarletNX: a copy in the host's order, as the branch above keeps */
+                    ctx->kernel_map = calloc(1, sizeof(kernel_map_t));
+                    *(ctx->kernel_map) = *kernel_map;
+                    snx_le32_array(ctx->kernel_map, sizeof(*ctx->kernel_map) / 4);
                     ctx->ini1_ctx.header = (ini1_header_t *)(ctx->sections + ctx->kernel_map->ini1_start_offset);
                     break;
                 }
@@ -479,12 +484,12 @@ void pk21_process(pk21_ctx_t *ctx) {
         }
 
     }
-    if (ctx->ini1_ctx.header->magic == MAGIC_INI1 && ctx->ini1_ctx.header->num_processes <= INI1_MAX_KIPS) {
+    if (snx_le32(ctx->ini1_ctx.header->magic) == MAGIC_INI1 && snx_le32(ctx->ini1_ctx.header->num_processes) <= INI1_MAX_KIPS) {
         offset = 0;
-        for (unsigned int i = 0; i < ctx->ini1_ctx.header->num_processes; i++) {
+        for (unsigned int i = 0; i < snx_le32(ctx->ini1_ctx.header->num_processes); i++) {
             ctx->ini1_ctx.kips[i].tool_ctx = ctx->tool_ctx;
             ctx->ini1_ctx.kips[i].header = (kip1_header_t *)&ctx->ini1_ctx.header->kip_data[offset];
-            if (ctx->ini1_ctx.kips[i].header->magic != MAGIC_KIP1) {
+            if (snx_le32(ctx->ini1_ctx.kips[i].header->magic) != MAGIC_KIP1) {
                 fprintf(stderr, "INI1 is corrupted!\n");
                 exit(EXIT_FAILURE);
             }
@@ -527,9 +532,9 @@ void pk21_print(pk21_ctx_t *ctx) {
     }
 
     /* What the fuck? */
-    printf("    Header Version:                 %02"PRIx32"\n", (ctx->header.ctr_dwords[1] ^ (ctx->header.ctr_dwords[1] >> 16) ^ (ctx->header.ctr_dwords[1] >> 24)) & 0xFF);
+    printf("    Header Version:                 %02"PRIx32"\n", (snx_le32(ctx->header.ctr_dwords[1]) ^ (snx_le32(ctx->header.ctr_dwords[1]) >> 16) ^ (snx_le32(ctx->header.ctr_dwords[1]) >> 24)) & 0xFF);
 
-    bool is_ini1_embedded = ctx->header.section_sizes[1] == 0;
+    bool is_ini1_embedded = snx_le32(ctx->header.section_sizes[1]) == 0;
     for (unsigned int i = 0; i < 3; i++) {
         printf("    Section %"PRId32" (%s):\n", i, pk21_get_section_name(i, is_ini1_embedded));
         if (ctx->tool_ctx->action & ACTION_VERIFY) {
@@ -542,8 +547,8 @@ void pk21_print(pk21_ctx_t *ctx) {
             memdump(stdout, "        Hash:                       ", ctx->header.section_hashes[i], 0x20);
         }
         memdump(stdout, "        CTR:                        ", ctx->header.section_ctrs[i], 0x20);
-        printf("        Load Address:               %08"PRIx32"\n", ctx->header.section_offsets[i] + 0x80000000);
-        printf("        Size:                       %08"PRIx32"\n", ctx->header.section_sizes[i]);
+        printf("        Load Address:               %08"PRIx32"\n", snx_le32(ctx->header.section_offsets[i]) + 0x80000000);
+        printf("        Size:                       %08"PRIx32"\n", snx_le32(ctx->header.section_sizes[i]));
     }
 
     printf("\n");
@@ -576,14 +581,14 @@ void pk21_save(pk21_ctx_t *ctx) {
 
         /* Save Kernel.bin */
         printf("Saving Kernel.bin to %s/Kernel.bin...\n", dirpath->char_path);
-        save_buffer_to_directory_file(ctx->sections, ctx->header.section_sizes[0], dirpath, "Kernel.bin");
+        save_buffer_to_directory_file(ctx->sections, snx_le32(ctx->header.section_sizes[0]), dirpath, "Kernel.bin");
 
         /* Save INI1.bin */
         printf("Saving INI1.bin to %s/INI1.bin...\n", dirpath->char_path);
-        if (ctx->header.section_sizes[1] > 0)
-            save_buffer_to_directory_file(ctx->sections + ctx->header.section_sizes[0], ctx->header.section_sizes[1], dirpath, "INI1.bin");
+        if (snx_le32(ctx->header.section_sizes[1]) > 0)
+            save_buffer_to_directory_file(ctx->sections + snx_le32(ctx->header.section_sizes[0]), snx_le32(ctx->header.section_sizes[1]), dirpath, "INI1.bin");
         else
-            save_buffer_to_directory_file(ctx->sections + ctx->kernel_map->ini1_start_offset, ctx->ini1_ctx.header->size, dirpath, "INI1.bin");
+            save_buffer_to_directory_file(ctx->sections + ctx->kernel_map->ini1_start_offset, snx_le32(ctx->ini1_ctx.header->size), dirpath, "INI1.bin");
     }
     if (ctx->ini1_ctx.header != NULL && (ctx->tool_ctx->action & ACTION_EXTRACTINI1 || ctx->tool_ctx->settings.ini1_dir_path.valid == VALIDITY_VALID)) {
         filepath_t *ini1_dirpath = &ctx->tool_ctx->settings.ini1_dir_path;

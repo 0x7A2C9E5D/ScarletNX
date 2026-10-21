@@ -51,6 +51,8 @@ typedef struct {
     uint64_t cup_title_id;
 } xci_gamecard_info_t;
 
+/* ScarletNX: kept as the file has it, little-endian, since its signature covers it: its words are read through
+   snx_le32 and snx_le64, and so are the gamecard info's. */
 typedef struct {
     uint8_t header_sig[0x100];
     uint32_t magic;

@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "common/utilities/common.h"
+#include "common/utilities/endian.h"
 #include "nx/gpu/gpu.h"
 #include "nx/memory/own.h"
 #include "nx/gpu/maxwell/engines_int.h"
@@ -132,11 +133,15 @@ u8* gmem_ptr(u64 gva, u64 size) {
     return p;
 }
 u32 gmem_r32(u64 gva) {
-    u32 v = 0;
-    gmem_read(gva, &v, 4);
-    return v;
+    u8 b[4] = {0};
+    gmem_read(gva, b, 4);
+    return snx_ld_le32(b);
 }
-void gmem_w32(u64 gva, u32 v) { gmem_write(gva, &v, 4); }
+void gmem_w32(u64 gva, u32 v) {
+    u8 b[4];
+    snx_st_le32(b, v);
+    gmem_write(gva, b, 4);
+}
 /* Hardware fetches a program only up to its end, and TotK has compute programs ending next to an uncommitted page:
    the read stops at the first page that has no GPU mapping or no guest memory behind it */
 void gmem_read_code(u64 gva, void* dst, u64 size) {
@@ -291,8 +296,10 @@ void i2m_data(GpuChannel* ch, u32 v) {
     GpuI2m* t = &ch->i2m;
     u32 n;
     if (t->pos >= t->len) return;
+    u8 b[4];
     n = t->len - t->pos < 4 ? t->len - t->pos : 4;
-    memcpy(t->buf + t->pos, &v, n);
+    snx_st_le32(b, v); /* a data word's bytes go to memory low byte first */
+    memcpy(t->buf + t->pos, b, n);
     t->pos += n;
     if (t->pos == t->len) i2m_store(t);
 }
@@ -427,14 +434,15 @@ static void puller_method(GpuChannel* ch, u32 sub, u32 m, u32 v) {
                 case 1: gpu_park(ch, GPU_PARK_SEMAPHORE, a, payload, 0); break;
                 case 4: gpu_park(ch, GPU_PARK_SEMAPHORE, a, payload, 1); break;
                 case 2:
-                    if (v & (1u << 24)) /* RELEASE_SIZE 4 bytes */
-                        gpu_release_write(a, &payload, 4);
-                    else { /* 16 bytes: the payload, 0, and the timestamp */
-                        u32 rel[4];
-                        u64 t = gpu_ticks();
-                        rel[0] = payload;
-                        rel[1] = 0;
-                        memcpy(&rel[2], &t, 8);
+                    if (v & (1u << 24)) { /* RELEASE_SIZE 4 bytes */
+                        u8 rel[4];
+                        snx_st_le32(rel, payload);
+                        gpu_release_write(a, rel, 4);
+                    } else { /* 16 bytes: the payload, 0, and the timestamp */
+                        u8 rel[16];
+                        snx_st_le32(rel, payload);
+                        snx_st_le32(rel + 4, 0);
+                        snx_st_le64(rel + 8, gpu_ticks());
                         gpu_release_write(a, rel, 16);
                     }
                     break;
@@ -613,6 +621,7 @@ static int fetch_late(GpuItem* j, u32 e) {
         u32 n = entry_words(job_ent(j)[k]);
         job_off(j)[k] = (u32)total;
         gmem_read(entry_addr(job_ent(j)[k]), j->late + total, (u64)n * 4);
+        snx_le32_array(j->late + total, n); /* the stream's words, read as numbers from here on */
         total += n;
     }
     j->late_first = e;
@@ -936,8 +945,7 @@ static GpuItem* job_new(const void* entries, u32 n, u32 wait_id) {
     const u8* src = (const u8*)entries;
     if (wait_id == ~0u)
         for (pf = 0; pf < n; pf++) {
-            u64 en;
-            memcpy(&en, src + (size_t)pf * 8, 8);
+            u64 en = snx_ld_le64(src + (size_t)pf * 8);
             if (en >> 63) break; /* SYNC: this entry and the rest wait until the stream gets there */
             if (words + entry_words(en) > (64u << 20) / 4) break; /* the rest is fetched when reached */
             words += entry_words(en);
@@ -948,12 +956,14 @@ static GpuItem* job_new(const void* entries, u32 n, u32 wait_id) {
         fatal("gpu: out of memory queueing %u entries\n", n);
     j->n = n;
     if (n) memcpy(job_ent(j), entries, (size_t)n * 8);
+    snx_le64_array(job_ent(j), n); /* the entries are guest words, the stream's words below too */
     j->pf = pf;
     words = 0;
     for (e = 0; e < pf; e++) {
         u32 k = entry_words(job_ent(j)[e]);
         job_off(j)[e] = (u32)words;
         gmem_read_raw(entry_addr(job_ent(j)[e]), job_prefetched(j) + words, (u64)k * 4);
+        snx_le32_array(job_prefetched(j) + words, k);
         words += k;
     }
     return j;

@@ -49,11 +49,15 @@ int gmem_write(u64 gva, const void* src, u64 size) {
     return 0;
 }
 u32 gmem_r32(u64 gva) {
-    u32 v = 0;
-    gmem_read(gva, &v, 4);
-    return v;
+    u8 b[4] = {0};
+    gmem_read(gva, b, 4);
+    return snx_ld_le32(b);
 }
-void gmem_w32(u64 gva, u32 v) { gmem_write(gva, &v, 4); }
+void gmem_w32(u64 gva, u32 v) {
+    u8 b[4];
+    snx_st_le32(b, v);
+    gmem_write(gva, b, 4);
+}
 u64 gmmu_translate(u64 gva) { return gva; }
 /* maxwell3d.c's runs of contiguous pages, from the translation above */
 u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
@@ -99,7 +103,7 @@ void logf_(int lvl, const char* fmt, ...) { (void)lvl, (void)fmt; }
 static GpuChannel ch;
 static int failures;
 
-static void put64(u32 off, u64 v) { memcpy(vram + off, &v, 8); }
+static void put64(u32 off, u64 v) { snx_st_le64(vram + off, v); }
 static void render_enable(u64 addr, u32 mode) {
     maxwell3d_method(&ch, 0x554, (u32)(addr >> 32), 0);
     maxwell3d_method(&ch, 0x555, (u32)addr, 0);
@@ -227,14 +231,14 @@ int main(void) {
     maxwell3d_method(&ch, 0x54C, 1, 1); /* samples-passed counter reset */
     report(VA, 0x15);
     u64 samples = 1;
-    memcpy(&samples, vram, sizeof samples);
+    samples = snx_ld_le64(vram); /* a report's count, little-endian in memory */
     if (samples != 0) {
         fprintf(stderr, "FAIL: counter report after reset is %llu, expected zero\n", (unsigned long long)samples);
         failures++;
     }
     g_draws = 10;
     report(VA, 0x15);
-    memcpy(&samples, vram, sizeof samples);
+    samples = snx_ld_le64(vram); /* a report's count, little-endian in memory */
     if (!samples) {
         fprintf(stderr, "FAIL: counter report stayed zero after another draw\n");
         failures++;
@@ -249,7 +253,7 @@ int main(void) {
         g_draws = 12;
         maxwell3d_method(&ch, 0x54C, reset_pairs[i].reset, 1);
         report(VA, reset_pairs[i].report);
-        memcpy(&samples, vram, sizeof samples);
+        samples = snx_ld_le64(vram);
         if (samples) {
             fprintf(stderr, "FAIL: reset selector %x for report %x\n", reset_pairs[i].reset, reset_pairs[i].report);
             failures++;

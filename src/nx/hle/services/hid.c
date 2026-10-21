@@ -108,7 +108,7 @@ static u32 hid_style_of(int e, const HidSource* s) {
     }
 }
 
-static void w32(u8* p, u32 v) { memcpy(p, &v, 4); }
+static void w32(u8* p, u32 v) { snx_st_le32(p, v); }
 /* an Npad's header for its new style: colors, assignment, device type, properties, as the console sets them */
 static void hid_write_header(int e, u32 style) {
     u8* n = hid_npad(e);
@@ -160,7 +160,7 @@ static void hid_write_header(int e, u32 style) {
     default: break;
     }
     w32(n + HO_HidNpadInternalState_device_type, device);
-    memcpy(n + HO_HidNpadInternalState_system_properties, &props, 8);
+    snx_st_le64(n + HO_HidNpadInternalState_system_properties, props);
     for (i = 0; i < 3; i++) w32(n + HO_HidNpadInternalState_battery_level + 4 * i, style ? 4 : 0); /* Full */
     n[HO_HidNpadInternalState_applet_footer_ui_type] = (u8)footer;
     /* each sensor of the new style is newly assigned (SixAxisSensorProperties, after the lark and lucia types) */
@@ -217,21 +217,20 @@ static void hid_layout(void) {
 static void hid_lifo_push(u8* lifo, u32 n, const void* state, u32 state_size) {
     u64 tail, count, stamp;
     u8* entry;
-    memcpy(&tail, lifo + HO_HidCommonLifoHeader_tail, 8);
-    memcpy(&count, lifo + HO_HidCommonLifoHeader_count, 8);
+    tail = snx_ld_le64(lifo + HO_HidCommonLifoHeader_tail);
+    count = snx_ld_le64(lifo + HO_HidCommonLifoHeader_count);
     tail = (tail + 1) % HID_LIFO_N;
     entry = lifo + 0x20 + tail * n;
     stamp = g_hle.hid.samp << 1 | 1;
-    __atomic_store_n((u64*)entry, stamp, __ATOMIC_SEQ_CST);
+    __atomic_store_n((u64*)entry, snx_le64(stamp), __ATOMIC_SEQ_CST);
     __atomic_thread_fence(__ATOMIC_RELEASE);
     memcpy(entry + 8, state, state_size);
-    __atomic_store_n((u64*)entry, g_hle.hid.samp << 1, __ATOMIC_RELEASE);
+    __atomic_store_n((u64*)entry, snx_le64(g_hle.hid.samp << 1), __ATOMIC_RELEASE);
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
-    stamp = HID_LIFO_N;
-    memcpy(lifo + HO_HidCommonLifoHeader_buffer_count, &stamp, 8);
+    snx_st_le64(lifo + HO_HidCommonLifoHeader_buffer_count, HID_LIFO_N);
     if (count < HID_LIFO_N - 1) count++;
-    memcpy(lifo + HO_HidCommonLifoHeader_count, &count, 8);
-    __atomic_store_n((u64*)(lifo + HO_HidCommonLifoHeader_tail), tail, __ATOMIC_RELEASE);
+    snx_st_le64(lifo + HO_HidCommonLifoHeader_count, count);
+    __atomic_store_n((u64*)(lifo + HO_HidCommonLifoHeader_tail), snx_le64(tail), __ATOMIC_RELEASE);
 }
 
 /* a sideways single Joy-Con's stick (as the host reports it) held upright, and back */
@@ -307,10 +306,11 @@ static void hid_npad_state(const HidSource* s, u32 style, u8* out) {
     case STYLE_JOY_RIGHT: attr = 1 | 16; break;
     default: attr = 1; break;
     }
-    memcpy(out + HO_HidNpadCommonState_sampling_number, &g_hle.hid.samp, 8);
-    memcpy(out + HO_HidNpadCommonState_buttons, &buttons, 8);
+    snx_st_le64(out + HO_HidNpadCommonState_sampling_number, g_hle.hid.samp);
+    snx_st_le64(out + HO_HidNpadCommonState_buttons, buttons);
+    snx_le32_array(st, 4);
     memcpy(out + HO_HidNpadCommonState_analog_stick_l, st, 16);
-    memcpy(out + HO_HidNpadCommonState_attributes, &attr, 4);
+    snx_st_le32(out + HO_HidNpadCommonState_attributes, attr);
 }
 
 /* the player and the sensor or motor behind an Npad's left (0) or right (1) device; 0 when there is none */
@@ -390,7 +390,7 @@ void hid_update(void) {
         u8* n = hid_npad(e);
         hid_npad_state(&src[e], style, state);
         memset(none, 0, sizeof none);
-        memcpy(none, &g_hle.hid.samp, 8);
+        snx_st_le64(none, g_hle.hid.samp);
         /* the handheld Npad's full-key LIFO carries its state too, for a game reading it as a full-key one */
         for (i = 0; i < 5; i++)
             hid_lifo_push(n + lifos[i], HS_HidNpadCommonStateAtomicStorage,
@@ -425,7 +425,7 @@ void hid_update(void) {
     hid_lifo_push(shm + HO_HidSharedMemory_touchscreen + HO_HidTouchScreenSharedMemoryFormat_lifo,
                   HS_HidTouchScreenStateAtomicStorage, other, HS_HidTouchScreenState);
     memset(other, 0, sizeof other);
-    memcpy(other, &g_hle.hid.samp, 8);
+    snx_st_le64(other, g_hle.hid.samp);
     hid_lifo_push(shm + HO_HidSharedMemory_debug_pad, 8 + HS_HidDebugPadState, other, HS_HidDebugPadState);
     hid_lifo_push(shm + HO_HidSharedMemory_mouse + HO_HidMouseSharedMemoryFormat_lifo, 8 + HS_HidMouseState, other,
                   HS_HidMouseState);
@@ -531,7 +531,7 @@ static int nn_hid_IHidServer_SetSupportedNpadIdType(SvcObj* self, u64 aruid, Ipc
     int e;
     (void)self, (void)aruid;
     for (i = 0; i + 4 <= ids.size; i += 4) {
-        memcpy(&id, GP(ids.addr + i), 4);
+        id = gr32(ids.addr + i);
         if ((e = hid_entry(id)) >= 0) mask |= 1u << e;
     }
     pm_lock(&g_hle.hid.lock);
@@ -746,8 +746,9 @@ static int nn_hid_IHidServer_SendVibrationValues(SvcObj* self, nn_applet_AppletR
     (void)self, (void)aruid;
     pm_lock(&g_hle.hid.lock);
     for (i = 0; i < n; i++) {
-        memcpy(&h, GP(handles.addr + 4 * i), 4);
+        h = gr32(handles.addr + 4 * i);
         memcpy(&v, GP(values.addr + sizeof v * i), sizeof v);
+        snx_le32_array(&v, sizeof v / 4); /* four floats */
         hid_vibrate(h, &v);
     }
     pm_unlock(&g_hle.hid.lock);

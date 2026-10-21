@@ -60,6 +60,17 @@ static inline char *pfs0_get_file_name(pfs0_header_t *hdr, uint32_t i) {
     return pfs0_get_string_table(hdr) + pfs0_get_file_entry(hdr, i)->string_table_offset;
 }
 
+/* ScarletNX: a header read from its little-endian file put in the host's order, and with entries its file entries too,
+   which follow it as num_files counts them (in the host's order by then) */
+static inline void pfs0_header_from_le(pfs0_header_t *hdr, int entries) {
+    snx_le32_array(hdr, sizeof(*hdr) / 4);
+    for (uint32_t i = 0; SNX_HOST_BE && entries && i < hdr->num_files; i++) {
+        pfs0_file_entry_t *entry = pfs0_get_file_entry(hdr, i);
+        snx_le64_array(entry, 2);
+        snx_le32_array(&entry->string_table_offset, 2);
+    }
+}
+
 void pfs0_process(pfs0_ctx_t *ctx);
 void pfs0_save(pfs0_ctx_t *ctx);
 void pfs0_print(pfs0_ctx_t *ctx);

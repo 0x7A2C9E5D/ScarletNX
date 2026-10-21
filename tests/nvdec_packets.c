@@ -58,7 +58,7 @@ u64 bl_offset(u32 x, u32 y, u32 z, u32 pitch, u32 height, u32 bh, u32 bd) {
             ((u64)(z % bdn) * bhn + gy % bhn) * 512;
     return o + (xb / 32) * 256 + (yb / 2) * 64 + ((xb % 32) / 16) * 32 + (yb % 2) * 16 + xb % 16;
 }
-static void put32(u32 off, u32 value) { memcpy(setup + off, &value, 4); }
+static void put32(u32 off, u32 value) { snx_st_le32(setup + off, value); }
 static void fixture(void) {
     memset(memory, 0, MEMORY);
     memset(regs, 0, sizeof regs);

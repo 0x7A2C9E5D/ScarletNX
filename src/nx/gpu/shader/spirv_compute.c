@@ -92,14 +92,14 @@ static void unsupported(ShaderInfo* si, const char* name) {
     snprintf(si->first_unsupported, sizeof si->first_unsupported, "%s", name);
 }
 
-u32* shader_compute_to_spirv(const u8* code, u32 max_bytes, ShaderInfo* si, size_t* word_count, int can_flush,
-                             int can_preserve) {
+/* words: code's as host numbers (shader_words) */
+static u32* compute_to_spirv(const u8* code, const u64* words, u32 max_bytes, ShaderInfo* si, size_t* word_count,
+                             int can_flush, int can_preserve) {
     if (!code || !si || !word_count || max_bytes < 96 || !si->cs_local[0] || !si->cs_local[1] || !si->cs_local[2])
         return NULL;
     u32 len;
     shader_hash(code, max_bytes, &len);
     u32 n = len / 8;
-    const u64* words = (const u64*)code;
     u8 used[255] = {0}, pred_used[7] = {0}, cb_used[18] = {0};
     u32 cb_max[18] = {0};
     int tags[255] = {0}, gb_at[(0x10000 + 80) / 8] = {0};
@@ -417,4 +417,16 @@ u32* shader_compute_to_spirv(const u8* code, u32 max_bytes, ShaderInfo* si, size
     free(c);
     *si = meta;
     return result;
+}
+u32* shader_compute_to_spirv(const u8* code, u32 max_bytes, ShaderInfo* si, size_t* word_count, int can_flush,
+                             int can_preserve) {
+    u64* copy;
+    const u64* words;
+    u32* r;
+    if (!code) return NULL;
+    words = shader_words(code, max_bytes, &copy);
+    if (!words) return NULL;
+    r = compute_to_spirv(code, words, max_bytes, si, word_count, can_flush, can_preserve);
+    free(copy);
+    return r;
 }

@@ -84,7 +84,7 @@ static void proc_trace(CPU* c, u64 entry) {
     }
     if (!strcmp(p->name, "nvnQueueSubmitCommands")) {
         u64 list = 0, ptr = c->x[2]; /* nvnQueueSubmitCommands(queue, count, lists) */
-        if (c->x[1] && ptr < AS_SIZE - 8 && readable(ptr) && readable(ptr + 7)) memcpy(&list, GP(ptr), 8);
+        if (c->x[1] && ptr < AS_SIZE - 8 && readable(ptr) && readable(ptr + 7)) list = gr64(ptr);
         LOG("nvn-submit: queue=%llx count=%u lists=%llx first=%llx\n", (unsigned long long)c->x[0], (u32)c->x[1],
             (unsigned long long)ptr, (unsigned long long)list);
     }

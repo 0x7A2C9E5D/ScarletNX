@@ -32,10 +32,16 @@
 //   meet at a std::barrier, so a body that races on shared memory races in the test too (ThreadSanitizer sees it).
 //   As in GLSL, every invocation reaches each barrier();
 // - no images, samplers or floating point: the layer covers the integer compute shaders the tests need.
+//
+// A buffer is the device's memory, which is little-endian (the GPU's order) on any host: the test's struct declares
+// a buffer's array as leuint (or leuvec4) rather than uint, each word held in the device's byte order and converted
+// as the body loads and stores it, so the bytes the test hands a CPU reference, or reads back, are the device's. On a
+// little-endian host these are plain words.
 #ifndef SNX_TESTS_GLSL_HPP
 #define SNX_TESTS_GLSL_HPP
 #include <atomic>
 #include <barrier>
+#include <bit>
 #include <cstdint>
 #include <thread>
 #include <type_traits>
@@ -93,6 +99,37 @@ using ivec2 = vec<int, 2>;
 using ivec3 = vec<int, 3>;
 using ivec4 = vec<int, 4>;
 using bvec2 = vec<bool, 2>;
+
+// a buffer's 32-bit word: the device's (little-endian) bytes, read and written as a uint
+inline uint le_order(uint v) {
+    if constexpr (std::endian::native == std::endian::big)
+        return __builtin_bswap32(v);
+    else
+        return v;
+}
+struct leuint {
+    uint raw; // the word's bytes in the device's order
+    leuint() = default;
+    leuint(uint v) : raw(le_order(v)) {}
+    operator uint() const { return le_order(raw); }
+    leuint& operator=(uint v) {
+        raw = le_order(v);
+        return *this;
+    }
+    leuint& operator|=(uint v) { return *this = uint(*this) | v; }
+    leuint& operator&=(uint v) { return *this = uint(*this) & v; }
+    leuint& operator^=(uint v) { return *this = uint(*this) ^ v; }
+    leuint& operator+=(uint v) { return *this = uint(*this) + v; }
+};
+static_assert(sizeof(leuint) == 4, "a buffer word is 4 bytes");
+// a buffer's uvec4, four such words
+struct leuvec4 {
+    leuint x, y, z, w;
+    leuvec4() = default;
+    leuvec4(const uvec4& v) : x(v.x), y(v.y), z(v.z), w(v.w) {}
+    operator uvec4() const { return uvec4(uint(x), uint(y), uint(z), uint(w)); }
+};
+static_assert(sizeof(leuvec4) == 16, "a buffer uvec4 is 16 bytes");
 
 // component-wise operators, vector with vector and vector with scalar
 #define SNX_GLSL_BINARY(op)                                                                                            \
@@ -249,6 +286,11 @@ struct Invocation {
 // the atomic read-modify-writes on a buffer's word (GLSL 4.60 section 8.11), which return the old value
 inline uint atomicAnd(uint& mem, uint data) { return std::atomic_ref<uint>(mem).fetch_and(data); }
 inline uint atomicOr(uint& mem, uint data) { return std::atomic_ref<uint>(mem).fetch_or(data); }
+// on a buffer word in the device's order: a bitwise operation is the same on the bytes in either order
+inline uint atomicAnd(leuint& mem, uint data) {
+    return le_order(std::atomic_ref<uint>(mem.raw).fetch_and(le_order(data)));
+}
+inline uint atomicOr(leuint& mem, uint data) { return le_order(std::atomic_ref<uint>(mem.raw).fetch_or(le_order(data))); }
 
 // runs main() of every invocation of groups workgroups of local_size each, in order. setup(shader) fills in each
 // invocation's push constants and buffers before it runs

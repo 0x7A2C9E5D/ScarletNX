@@ -26,6 +26,7 @@ static void capture(const u32* q, u64 code) {
     buf = (u8*)malloc(0x100 + 0x10000);
     if (!buf) return;
     memcpy(buf, q, 0x100);
+    snx_le32_array(buf, 64); /* the description as guest memory held it */
     gmem_read_code(pa, buf + 0x100, 0x10000); /* up to where guest memory ends */
     snprintf(path, sizeof path, "%scaptures", g_exedir);
     plat_mkdir(path);
@@ -46,6 +47,7 @@ static void launch(GpuChannel* ch) {
     u32 q[64];
     u64 code = ((u64)(r[0x582] & 0xFF) << 32) | r[0x583];
     gmem_read((u64)r[0xAD] << 8, q, sizeof q);
+    snx_le32_array(q, 64); /* the renderer reads its words and bitfields as numbers */
     if (g_settings.shader_captures) capture(q, code);
     if (g_renderer->dispatch) g_renderer->dispatch(ch, q, code);
 }

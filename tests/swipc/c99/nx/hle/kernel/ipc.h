@@ -14,6 +14,9 @@ typedef int8_t i8;
 typedef int16_t i16;
 typedef int32_t i32;
 typedef int64_t i64;
+void snx_le16_array(void* p, size_t n);
+void snx_le32_array(void* p, size_t n);
+void snx_le64_array(void* p, size_t n);
 typedef struct {
     u64 addr, size;
     u32 flags;

@@ -1,8 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* RtAPI.cas128 (interface.h): STXP's 16-byte compare-and-swap, for the modules of the hosts that have no such
-   instruction on every machine (RISC-V before Zacas, LoongArch before v1.1) */
+   instruction on every machine (RISC-V before Zacas, LoongArch before v1.1, PowerPC64 before POWER8) */
 #include "common/runtime/interface.h"
+#if defined(__powerpc64__) && !defined(_ARCH_PWR8)
+#include <sys/auxv.h> /* AT_HWCAP2's PPC_FEATURE2_ARCH_2_07: whether the machine has lqarx/stqcx. */
+#endif
 #if defined(__riscv)
 #include <asm/hwprobe.h> /* riscv_hwprobe: whether every core has Zacas */
 #include <sys/syscall.h>
@@ -33,6 +36,34 @@ static uint32_t cas_native(uint64_t* p, uint64_t o0, uint64_t o1, uint64_t n0, u
                          : "r"(new_lo), "r"(new_hi), "r"(p)
                          : "memory");
     return lo == o0 && hi == o1;
+#elif defined(__powerpc64__) && !defined(_ARCH_PWR8)
+    /* A baseline before POWER8 (cmake/cross.cmake's SNX_PPC64_CPU) makes a 16-byte __atomic a libatomic call, so
+       POWER8's lqarx and stqcx. are written out, and run only where the machine has them (native_cas). They take an
+       even-odd register pair, whose even register is the doubleword at p in big-endian mode and the one at p + 8 in
+       little-endian mode */
+    const int be = __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__;
+    uint64_t want_even = be ? o0 : o1, want_odd = be ? o1 : o0;
+    register uint64_t new_even __asm__("r8") = be ? n0 : n1;
+    register uint64_t new_odd __asm__("r9") = be ? n1 : n0;
+    register uint64_t old_even __asm__("r10");
+    register uint64_t old_odd __asm__("r11");
+    uint32_t stored;
+    __asm__ __volatile__("sync\n"
+                         "1:\tlqarx 10, 0, %[p]\n\t"
+                         "cmpld 10, %[we]\n\t"
+                         "bne- 2f\n\t"
+                         "cmpld 11, %[wo]\n\t"
+                         "bne- 2f\n\t"
+                         "stqcx. 8, 0, %[p]\n\t"
+                         "bne- 1b\n\t"
+                         "li %[ok], 1\n\t"
+                         "b 3f\n"
+                         "2:\tli %[ok], 0\n"
+                         "3:\tisync"
+                         : [ok] "=&r"(stored), "=&r"(old_even), "=&r"(old_odd)
+                         : [p] "r"(p), [we] "r"(want_even), [wo] "r"(want_odd), "r"(new_even), "r"(new_odd)
+                         : "cr0", "memory");
+    return stored;
 #elif defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
     /* p[0] is the integer's high half on a big-endian host */
     snx_cas_u128 expected = ((snx_cas_u128)o0 << 64) | o1, desired = ((snx_cas_u128)n0 << 64) | n1;
@@ -44,8 +75,9 @@ static uint32_t cas_native(uint64_t* p, uint64_t o0, uint64_t o1, uint64_t n0, u
 }
 #pragma clang diagnostic pop
 
-/* whether this machine has cas_native's instruction: RISC-V's Zacas as the kernel reports it for every core, and
-   LoongArch's SCQ, bit 30 of CPUCFG word 2 (LLVM's host detection reads the same) */
+/* whether this machine has cas_native's instruction: RISC-V's Zacas as the kernel reports it for every core,
+   LoongArch's SCQ, bit 30 of CPUCFG word 2 (LLVM's host detection reads the same), and PowerPC64's ISA 2.07
+   (POWER8) as the kernel reports it */
 static int native_cas(void) {
 #if defined(__riscv)
     struct riscv_hwprobe probe;
@@ -56,6 +88,8 @@ static int native_cas(void) {
     uint32_t word = 2;
     __asm__ __volatile__("cpucfg %0, %0" : "+r"(word));
     return (word >> 30) & 1;
+#elif defined(__powerpc64__) && !defined(_ARCH_PWR8)
+    return (getauxval(AT_HWCAP2) & PPC_FEATURE2_ARCH_2_07) != 0;
 #else
     return 1;
 #endif

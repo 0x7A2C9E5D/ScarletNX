@@ -127,11 +127,7 @@ static nn_time_CalendarTime calendar(int y, int mo, int d, int h, int mi, int s)
     c.second = (i8)s;
     return c;
 }
-static i64 rd64(const u8* p) {
-    i64 v;
-    memcpy(&v, p, 8);
-    return v;
-}
+static i64 rd64(const u8* p) { return (i64)snx_ld_le64(p); }
 
 int kobj_never_signaled(KObj* o) {
     (void)o;
@@ -150,6 +146,7 @@ int main(void) {
     i32 count;
     i64 t, span;
     u32 counter;
+    u8 ctx_le[0x20];
     time_t host;
     char z[0x25];
 
@@ -170,12 +167,13 @@ int main(void) {
     CHECK(ctx.offset + tp.value == t);
 
     /* the shared memory: the steady clock's base in ns and the contexts, each in the copy its counter picks */
-    memcpy(&counter, shm_host, 4);
+    counter = snx_ld_le32(shm_host);
     CHECK(counter == 1 && rd64(shm_host + 8 + 0x18) == 1000000000000ll);
     CHECK(!memcmp(shm_host + 8 + 0x18 + 8, tp.source_id.v, 16));
-    memcpy(&counter, shm_host + 0x38, 4);
-    CHECK(counter == 1 && !memcmp(shm_host + 0x40 + 0x20, &ctx, sizeof ctx));
-    CHECK(!memcmp(shm_host + 0x88 + 0x20, &ctx, sizeof ctx));
+    counter = snx_ld_le32(shm_host + 0x38);
+    put_context(ctx_le, &ctx); /* the context as the game reads it */
+    CHECK(counter == 1 && !memcmp(shm_host + 0x40 + 0x20, ctx_le, sizeof ctx_le));
+    CHECK(!memcmp(shm_host + 0x88 + 0x20, ctx_le, sizeof ctx_le));
     CHECK(shm_host[0xCC + 1] == 1);
 
     /* zones: UTC, then Etc/GMT+12 (UTC-12) to Etc/GMT-14 (UTC+14) */

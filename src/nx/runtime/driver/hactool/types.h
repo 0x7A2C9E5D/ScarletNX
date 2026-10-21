@@ -5,6 +5,8 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
+/* ScarletNX: the formats are little-endian, read and written through these on a big-endian host too */
+#include "common/utilities/endian.h"
 
 typedef uint8_t byte;
 

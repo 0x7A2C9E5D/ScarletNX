@@ -3,6 +3,7 @@
 /* The emulated network stack (src/common/network) over the host's loopback: blocking emulated on non-blocking host
    sockets, timeouts, poll, options, eventfd, cancellation and the ICMP emulation's fallback. */
 #include "common/network/net.h"
+#include "common/utilities/endian.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,7 +48,7 @@ static SnxSockAddr loopback(void) {
 static void tcp(void) {
     SnxSocket *l, *c, *s;
     SnxSockAddr a = loopback(), peer;
-    int one = 1;
+    int one = (int)snx_le32(1); /* option values are the guest's, little-endian (net.h) */
     CHECK(!snx_socket_open(&l, SNX_AF_INET, SNX_SOCK_STREAM, 0));
     CHECK(!snx_socket_setsockopt(l, SNX_SOL_SOCKET, SNX_SO_REUSEADDR, &one, sizeof one));
     CHECK(!snx_socket_bind(l, &a));
@@ -57,7 +58,7 @@ static void tcp(void) {
     snx_socket_set_nonblocking(l, 1);
     CHECK(snx_socket_accept(l, &s, NULL, 0) == -SNX_EAGAIN);
     snx_socket_set_nonblocking(l, 0);
-    SnxTimeval tv = {0, 100000};
+    SnxTimeval tv = {0, (int64_t)snx_le64(100000)};
     CHECK(!snx_socket_setsockopt(l, SNX_SOL_SOCKET, SNX_SO_RCVTIMEO, &tv, sizeof tv));
     double t0 = now();
     CHECK(snx_socket_accept(l, &s, NULL, 0) == -SNX_EAGAIN);
@@ -83,16 +84,18 @@ static void tcp(void) {
 
     int32_t v = 0;
     size_t len = sizeof v;
-    CHECK(!snx_socket_getsockopt(s, SNX_SOL_SOCKET, SNX_SO_TYPE, &v, &len) && v == SNX_SOCK_STREAM && len == 4);
+    CHECK(!snx_socket_getsockopt(s, SNX_SOL_SOCKET, SNX_SO_TYPE, &v, &len) &&
+          (int32_t)snx_le32((uint32_t)v) == SNX_SOCK_STREAM && len == 4);
     len = sizeof v;
     CHECK(!snx_socket_getsockopt(s, SNX_SOL_SOCKET, SNX_SO_ERROR, &v, &len) && v == 0);
     CHECK(!snx_socket_setsockopt(s, SNX_SOL_TCP, SNX_TCP_NODELAY, &one, sizeof one));
     len = sizeof v;
     CHECK(!snx_socket_getsockopt(s, SNX_SOL_TCP, SNX_TCP_NODELAY, &v, &len) && v);
-    SnxLinger lg = {1, 3}, lg2;
+    SnxLinger lg = {(int32_t)snx_le32(1), (int32_t)snx_le32(3)}, lg2;
     len = sizeof lg2;
     CHECK(!snx_socket_setsockopt(s, SNX_SOL_SOCKET, SNX_SO_LINGER, &lg, sizeof lg));
-    CHECK(!snx_socket_getsockopt(s, SNX_SOL_SOCKET, SNX_SO_LINGER, &lg2, &len) && lg2.onoff && lg2.linger == 3);
+    CHECK(!snx_socket_getsockopt(s, SNX_SOL_SOCKET, SNX_SO_LINGER, &lg2, &len) && lg2.onoff &&
+          snx_le32((uint32_t)lg2.linger) == 3);
     CHECK(snx_socket_setsockopt(s, SNX_SOL_SOCKET, 12345, &one, sizeof one) == -SNX_ENOPROTOOPT);
 
     CHECK(!snx_socket_shutdown(c, SNX_SHUT_WR));
@@ -113,7 +116,8 @@ static void tcp(void) {
         CHECK(snx_net_poll(&w, 1, 10000) == 1);
         CHECK(w.revents & (SNX_POLLOUT | SNX_POLLERR | SNX_POLLHUP));
         len = sizeof v;
-        CHECK(!snx_socket_getsockopt(c, SNX_SOL_SOCKET, SNX_SO_ERROR, &v, &len) && v == SNX_ECONNREFUSED);
+        CHECK(!snx_socket_getsockopt(c, SNX_SOL_SOCKET, SNX_SO_ERROR, &v, &len) &&
+              (int32_t)snx_le32((uint32_t)v) == SNX_ECONNREFUSED);
     }
     snx_socket_unref(c);
 }
@@ -217,7 +221,7 @@ static void icmp(void) {
         echo[2] = (uint8_t)(c >> 8);
         echo[3] = (uint8_t)c;
     }
-    SnxTimeval tv = {2, 0};
+    SnxTimeval tv = {(int64_t)snx_le64(2), 0};
     snx_socket_setsockopt(s, SNX_SOL_SOCKET, SNX_SO_RCVTIMEO, &tv, sizeof tv);
     CHECK(snx_socket_send(s, echo, sizeof echo, 0, &to) == sizeof echo);
     uint8_t buf[128];

@@ -657,8 +657,9 @@ static u64 surf_save(Surf* s, u32 x, u32 y, u32 w, u32 h, u32 transform, const c
     vk_finish();
     vk_readback_ready();
     vmaDestroyImage(g_vk.vma, tmp, tmem);
-    const u32* px = (const u32*)p;
-    for (u64 i = 0; i < (u64)w * h; i++) hash = (hash ^ px[i]) * 1099511628211ull;
+    /* the pixels as the device wrote them, little-endian words: the hash is the same on every host */
+    const u8* px = p;
+    for (u64 i = 0; i < (u64)w * h; i++) hash = (hash ^ snx_ld_le32(px + i * 4)) * 1099511628211ull;
     if (path) {
         char fn[1100];
         snprintf(fn, sizeof fn, "%s.ppm", path);
@@ -667,7 +668,7 @@ static u64 surf_save(Surf* s, u32 x, u32 y, u32 w, u32 h, u32 transform, const c
         if (f) {
             fprintf(f, "P6\n%u %u\n255\n", w, h);
             for (u64 i = 0; i < (u64)w * h && ok; i++) {
-                u8 rgb[3] = {(u8)px[i], (u8)(px[i] >> 8), (u8)(px[i] >> 16)};
+                u8 rgb[3] = {px[i * 4], px[i * 4 + 1], px[i * 4 + 2]};
                 ok = fwrite(rgb, 1, 3, f) == 3;
             }
             ok = fclose(f) == 0 && ok;

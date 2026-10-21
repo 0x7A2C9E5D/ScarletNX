@@ -15,6 +15,9 @@
      numbered in declaration order, and an AutoSelect buffer takes the next index of both of its lists
    - copy handles in, copy and move handles out, each in declaration order. Out objects become move handles ahead of
      the declared ones (ipc.c)
+   - the raw data is little-endian, and a handler's raw arguments and outputs are host numbers: the unpacker converts
+     scalars, and structs field by field, with a function the header defines for each struct (swipc_le_<type>). The
+     contents of buffers are the guest's bytes, which their handler converts
    It is strict C99 and depends on nothing, so a cross build can build it for the machine it runs on.
 
    Usage: swipc --root DIR --out DIR FILE.swipc...
@@ -846,6 +849,62 @@ static void ctype(char* out, int t) {
         default: fail("internal: no C type for kind %d", ty->kind);
     }
 }
+/* Byte order. The message is little-endian, as the guest is, and a handler's raw arguments and outputs are host
+   numbers: the unpacker converts each after ipc_in and before ipc_out, scalars and the fields of structs. On a
+   little-endian host the conversions (endian.h's snx_le*_array, which ipc.h gives) do nothing. Buffers stay guest
+   bytes for their handlers. 1 when a value of type t has words to convert */
+static int needs_conv(int t) {
+    const Type* ty = &types[t];
+    int i;
+    switch (ty->kind) {
+        case TK_INT:
+        case TK_FLOAT:
+        case TK_PID:
+        case TK_ARUID: return ty->size > 1;
+        case TK_ALIAS:
+        case TK_ARRAY: return needs_conv(ty->base);
+        case TK_STRUCT:
+            for (i = ty->field0; i < ty->field0 + ty->nfields; i++)
+                if (needs_conv(fields[i].type)) return 1;
+            return 0;
+        default: return 0;
+    }
+}
+/* the statement converting n values of type t in place at p, an expression of a pointer type: scalars and arrays of
+   them a run of words, a struct its function (emit_struct_conv) for each. ind is the indentation */
+static void emit_conv(int t, const char* p, unsigned long n, const char* ind) {
+    const Type* ty = &types[t];
+    char cn[NAME_LEN];
+    if (!needs_conv(t)) return;
+    switch (ty->kind) {
+        case TK_ALIAS: emit_conv(ty->base, p, n, ind); return;
+        case TK_ARRAY: emit_conv(ty->base, p, n * ty->count, ind); return;
+        case TK_STRUCT:
+            mangle(cn, ty->name);
+            if (n == 1)
+                emit("%sswipc_le_%s(%s);\n", ind, cn, p);
+            else
+                emit("%s{\n%s    size_t i_;\n%s    for (i_ = 0; i_ < %lu; i_++) swipc_le_%s((u8*)(%s) + i_ * 0x%lx);\n%s}\n",
+                     ind, ind, ind, n, cn, p, ty->size, ind);
+            return;
+        default: emit("%ssnx_le%lu_array(%s, %lu);\n", ind, ty->size * 8, p, n); return;
+    }
+}
+/* a struct's fields converted in place, the same conversion both ways */
+static void emit_struct_conv(int t) {
+    const Type* ty = &types[t];
+    char cn[NAME_LEN], p[64];
+    int i;
+    mangle(cn, ty->name);
+    emit("/* %s's words between little-endian and the host's order */\nstatic inline void swipc_le_%s(void* p) {\n",
+         ty->name, cn);
+    emit("    u8* b = (u8*)p;\n");
+    for (i = ty->field0; i < ty->field0 + ty->nfields; i++) {
+        sprintf(p, "b + 0x%lx", fields[i].offset);
+        emit_conv(fields[i].type, p, 1, "    ");
+    }
+    emit("}\n\n");
+}
 /* anonymous bytes and arrays are passed as a pointer to their elements */
 static int is_inline_array(int t) {
     return !types[t].name[0] && (types[t].kind == TK_BYTES || types[t].kind == TK_ARRAY);
@@ -891,6 +950,7 @@ static void emit_type(int t) {
         default: return;
     }
     emit("typedef char %s_is_%lu_bytes_[sizeof(%s) == %lu ? 1 : -1];\n\n", cn, ty->size, cn, ty->size);
+    if (ty->kind == TK_STRUCT && needs_conv(t)) emit_struct_conv(t);
 }
 /* the handler's parameter for an argument */
 static void param(char* out, const Arg* a) {
@@ -1042,12 +1102,16 @@ static void emit_unpacker(const Iface* f, const Cmd* c) {
             case TK_HANDLE: /* a copy handle: check_cmd refuses a move handle in */
                 emit("    a_%s = %d < c->ncopy ? c->copy_h[%d] : 0;\n", a->name, a->index, a->index);
                 break;
-            default:
+            default: {
+                char p[NAME_LEN + 8];
                 if (a->tipc_offset != a->offset)
                     emit("    ipc_in(c, c->tipc ? 0x%lx : 0x%lx, %sa_%s, sizeof a_%s);\n", a->tipc_offset, a->offset,
                          amp, a->name, a->name);
                 else
                     emit("    ipc_in(c, 0x%lx, %sa_%s, sizeof a_%s);\n", a->offset, amp, a->name, a->name);
+                sprintf(p, "%sa_%s", amp, a->name);
+                emit_conv(a->type, p, 1, "    ");
+            }
         }
     }
     emit(direct ? "    return %s(self" : "    rc = %s(self", name);
@@ -1073,9 +1137,12 @@ static void emit_unpacker(const Iface* f, const Cmd* c) {
     emit("    if (rc) return rc;\n");
     for (i = c->arg0; i < c->arg0 + c->nargs; i++) {
         Arg* a = &args[i];
-        if (a->out && is_raw(a->type))
-            emit("    ipc_out(c, 0x%lx, %sa_%s, sizeof a_%s);\n", a->offset, is_inline_array(a->type) ? "" : "&",
-                 a->name, a->name);
+        if (a->out && is_raw(a->type)) {
+            char p[NAME_LEN + 8];
+            sprintf(p, "%sa_%s", is_inline_array(a->type) ? "" : "&", a->name);
+            emit_conv(a->type, p, 1, "    ");
+            emit("    ipc_out(c, 0x%lx, %s, sizeof a_%s);\n", a->offset, p, a->name);
+        }
     }
     if (c->out_size) emit("    c->out_size = 0x%lx;\n", c->out_size);
     emit("    return 0;\n}\n");

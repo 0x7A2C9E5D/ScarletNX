@@ -452,7 +452,7 @@ static int sock_bind(SnxSocket* s, const SnxSockAddr* a) {
     static const uint8_t any[4] = {0, 0, 0, 0};
     if (a->family != SNX_AF_INET) return -SNX_EAFNOSUPPORT;
     if (memcmp(a->addr, any, 4) && memcmp(a->addr, k->room->fake_ip, 4)) return -SNX_EADDRNOTAVAIL;
-    return sock_bind_to(k, a->addr, (uint16_t)(a->port >> 8 | a->port << 8));
+    return sock_bind_to(k, a->addr, snx_ld_be16(&a->port)); /* the port's bytes are in network order */
 }
 static int bound(RoomSock* k) {
     static const uint8_t any[4] = {0, 0, 0, 0};
@@ -474,7 +474,7 @@ static int sock_connect(SnxSocket* s, const SnxSockAddr* a) {
     if (!bound(k)) return -SNX_EADDRINUSE;
     snx_lock(&k->lk);
     memcpy(k->peer_ip, a->addr, 4);
-    k->peer_port = (uint16_t)(a->port >> 8 | a->port << 8);
+    k->peer_port = snx_ld_be16(&a->port);
     k->connected = 1;
     snx_unlock(&k->lk);
     return 0;
@@ -508,7 +508,7 @@ static int64_t sock_send(SnxSocket* s, const void* data, size_t size, int flags,
     else {
         e = 0;
         memcpy(d.remote_ip, to ? to->addr : k->peer_ip, 4);
-        d.remote_port = to ? (uint16_t)(to->port >> 8 | to->port << 8) : k->peer_port;
+        d.remote_port = to ? snx_ld_be16(&to->port) : k->peer_port;
         /* Eden's rule: any address ending in 255 is a broadcast, which needs SO_BROADCAST as on a LAN */
         d.broadcast = d.remote_ip[3] == 255;
         if (d.broadcast && !k->broadcast) e = -SNX_EACCES;
@@ -561,7 +561,7 @@ static int64_t sock_recv(SnxSocket* s, void* data, size_t size, int flags, SnxSo
             if (from) {
                 memset(from, 0, sizeof *from);
                 from->family = SNX_AF_INET;
-                from->port = (uint16_t)(d->port >> 8 | d->port << 8);
+                snx_st_be16(&from->port, d->port);
                 memcpy(from->addr, d->ip, 4);
             }
             if (out_flags && d->size > size) *out_flags |= SNX_MSG_TRUNC;
@@ -595,8 +595,7 @@ static int sock_name(SnxSocket* s, SnxSockAddr* out, int peer) {
         e = -SNX_ENOTCONN;
     else {
         memcpy(out->addr, peer ? k->peer_ip : k->ip, 4);
-        out->port = peer ? k->peer_port : k->port;
-        out->port = (uint16_t)(out->port >> 8 | out->port << 8);
+        snx_st_be16(&out->port, peer ? k->peer_port : k->port);
     }
     snx_unlock(&k->lk);
     return e;

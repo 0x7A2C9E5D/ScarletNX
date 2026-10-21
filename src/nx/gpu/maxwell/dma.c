@@ -223,13 +223,10 @@ static void dma_launch(GpuChannel* ch, u32 v) {
     /* the completion semaphore, after the copy: one word, or four (the payload, 0, and the timestamp) */
     if (sem == 1 || sem == 2) {
         u64 a = ((u64)(r[0x90] & 0xFF) << 32) | r[0x91];
-        u32 w[4];
-        w[0] = r[0x92];
-        w[1] = 0;
-        if (sem == 2) {
-            u64 t = gpu_ticks();
-            memcpy(&w[2], &t, 8);
-        }
+        u8 w[16]; /* guest memory's bytes, little-endian */
+        snx_st_le32(w, r[0x92]);
+        snx_st_le32(w + 4, 0);
+        if (sem == 2) snx_st_le64(w + 8, gpu_ticks());
         gpu_release_write(a, w, sem == 1 ? 4 : 16);
     }
 }

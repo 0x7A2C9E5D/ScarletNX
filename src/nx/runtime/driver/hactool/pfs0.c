@@ -10,6 +10,7 @@ void pfs0_process(pfs0_ctx_t *ctx) {
         exit(EXIT_FAILURE);
     }
 
+    pfs0_header_from_le(&raw_header, 0);
     if (raw_header.magic != MAGIC_PFS0) {
         printf("Error: PFS0 is corrupt!\n");
         exit(EXIT_FAILURE);
@@ -27,6 +28,7 @@ void pfs0_process(pfs0_ctx_t *ctx) {
         fprintf(stderr, "Failed to read PFS0 header!\n");
         exit(EXIT_FAILURE);
     }
+    pfs0_header_from_le(ctx->header, 1);
 
     /* Weak file validation. */
     uint64_t max_size = 0x1ULL;
@@ -53,7 +55,7 @@ void pfs0_process(pfs0_ctx_t *ctx) {
                 exit(EXIT_FAILURE);
             }
 
-            if (ctx->npdm->magic == MAGIC_META) {
+            if (ctx->npdm->magic == SNX_LE32(MAGIC_META)) {
                 ctx->is_exefs = 1;
             }
         }
@@ -115,7 +117,7 @@ void pfs0_print(pfs0_ctx_t *ctx) {
     printf("\n%s:\n", ctx->is_exefs ? "ExeFS" : "PFS0");
     print_magic("Magic:                              ", ctx->header->magic);
     if (ctx->is_exefs) {
-        printf("Title ID:                           %016"PRIx64"\n", npdm_get_aci0(ctx->npdm)->title_id);
+        printf("Title ID:                           %016"PRIx64"\n", snx_ld_le64(&npdm_get_aci0(ctx->npdm)->title_id));
     }
     printf("Number of files:                    %"PRId32"\n", ctx->header->num_files);
     if (ctx->header->num_files > 0 && ctx->header->num_files < 15) { /* Arbitrary. */

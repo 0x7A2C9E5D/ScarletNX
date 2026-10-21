@@ -47,6 +47,19 @@ typedef struct {
     uint8_t salt_source[0x20];
 } ivfc_save_hdr_t;
 
+/* ScarletNX: an IVFC header's words between its file's little-endian order and the host's (the same both ways) */
+static inline void ivfc_levels_swap(ivfc_level_hdr_t *levels, unsigned int count) {
+    for (unsigned int i = 0; SNX_HOST_BE && i < count; i++) {
+        snx_le64_array(&levels[i].logical_offset, 2);
+        snx_le32_array(&levels[i].block_size, 2);
+    }
+}
+
+static inline void ivfc_hdr_swap(ivfc_hdr_t *hdr) {
+    snx_le32_array(&hdr->magic, 4);
+    ivfc_levels_swap(hdr->level_headers, IVFC_MAX_LEVEL);
+}
+
 /* RomFS structs. */
 #define ROMFS_HEADER_SIZE 0x00000050
 
@@ -102,15 +115,25 @@ typedef struct {
 
 #define ROMFS_ENTRY_EMPTY 0xFFFFFFFF
 
-static inline romfs_direntry_t *romfs_get_direntry(romfs_direntry_t *directories, uint32_t offset) {
-    return (romfs_direntry_t *)((char *)directories + offset);
+/* the directory entry at offset: its fields copied into *entry in the host's order; its name, name_size bytes long and
+   unterminated, at the address returned */
+static inline const char *romfs_get_direntry(const romfs_direntry_t *directories, uint32_t offset, romfs_direntry_t *entry) {
+    const char *at = (const char *)directories + offset;
+    memcpy(entry, at, offsetof(romfs_direntry_t, name));
+    snx_le32_array(entry, offsetof(romfs_direntry_t, name) / 4);
+    return at + offsetof(romfs_direntry_t, name);
 }
 
-/* the file entry at offset: its fields copied into *entry, as the table keeps entries 4 bytes apart and two of them are
-   64-bit; its name, name_size bytes long and unterminated, at the address returned */
+/* the file entry at offset: its fields copied into *entry in the host's order, as the table keeps entries 4 bytes apart
+   and two of them are 64-bit; its name, name_size bytes long and unterminated, at the address returned */
 static inline const char *romfs_get_fentry(const romfs_fentry_t *files, uint32_t offset, romfs_fentry_t *entry) {
     const char *at = (const char *)files + offset;
-    memcpy(entry, at, offsetof(romfs_fentry_t, name));
+    entry->parent = snx_ld_le32(at);
+    entry->sibling = snx_ld_le32(at + 4);
+    entry->offset = snx_ld_le64(at + 8);
+    entry->size = snx_ld_le64(at + 0x10);
+    entry->hash = snx_ld_le32(at + 0x18);
+    entry->name_size = snx_ld_le32(at + 0x1C);
     return at + offsetof(romfs_fentry_t, name);
 }
 

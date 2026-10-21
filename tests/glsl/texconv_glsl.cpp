@@ -23,8 +23,8 @@ using namespace glsl;
 struct Conv : Invocation {
     uint mode, units, rows, in_pitch, out_pitch, st_pitch, in_bias, out_bias, st_bias, zfloat;
     uint remap, const_a, const_b, line_out;
-    const uint* src;
-    uint* dst;
+    const leuint* src;
+    leuint* dst;
 #include "nx/gpu/texture/texconv_modes.glsl"
 #include "nx/gpu/texture/texconv.glsl"
 };
@@ -63,11 +63,13 @@ static Shape shape(uint32_t mode, uint32_t w) {
     if (mode <= 7) return {(w + 3) / 4, (w + 3) / 4 * 4, 4, 1, 1};
     return {(w + 3) / 4, (w + 3) / 4 * 4, mode == 11 || mode == 12 ? 2u : 4u, 4, 0};
 }
-static std::vector<uint32_t> convert(uint32_t mode, uint32_t zfloat, uint32_t w, uint32_t rows, uint32_t slices,
-                                     const std::vector<uint32_t>& in, uint32_t in_pitch) {
+// the buffers are the device's words, little-endian (glsl.hpp): the bytes a test hands a reference are the same
+// on any host
+static std::vector<glsl::leuint> convert(uint32_t mode, uint32_t zfloat, uint32_t w, uint32_t rows, uint32_t slices,
+                                         const std::vector<glsl::leuint>& in, uint32_t in_pitch) {
     Shape s = shape(mode, w);
     uint64_t texels = (uint64_t)s.out_texels * s.out_rows * rows * slices;
-    std::vector<uint32_t> out((texels * s.out_bpp + (s.stencil ? texels : 0)) / 4, 0xDEADBEEFu);
+    std::vector<glsl::leuint> out((texels * s.out_bpp + (s.stencil ? texels : 0)) / 4, 0xDEADBEEFu);
     glsl::dispatch<Conv>(glsl::uvec3((s.units + 63) / 64, rows, slices), glsl::uvec3(64, 1, 1), [&](Conv& c) {
         c.mode = mode;
         c.units = s.units;
@@ -83,6 +85,13 @@ static std::vector<uint32_t> convert(uint32_t mode, uint32_t zfloat, uint32_t w,
         c.dst = out.data();
     });
     return out;
+}
+
+// the n byte little-endian number at p: a texel as the device's memory holds it
+static uint32_t le_bytes(const uint8_t* p, uint32_t n) {
+    uint32_t v = 0;
+    for (uint32_t i = 0; i < n; i++) v |= (uint32_t)p[i] << (8 * i);
+    return v;
 }
 
 // texture.c's conversion of a 2 byte texel before it moved to the GPU
@@ -116,13 +125,12 @@ static void two_byte_texels() {
                   ref16(mode, v));
         // an odd row in rows padded to 16 bytes: every texel where it goes, two slices
         uint32_t w = 13, rows = 3, pitch = 32;
-        std::vector<uint32_t> in(pitch / 4 * rows * 2);
+        std::vector<glsl::leuint> in(pitch / 4 * rows * 2);
         for (auto& x : in) x = random_word();
-        std::vector<uint32_t> out = convert(mode, 0, w, rows, 2, in, pitch);
+        std::vector<glsl::leuint> out = convert(mode, 0, w, rows, 2, in, pitch);
         for (uint32_t y = 0; y < rows * 2; y++)
             for (uint32_t x = 0; x < w; x++) {
-                uint16_t v;
-                std::memcpy(&v, (const uint8_t*)in.data() + y * pitch + x * 2, 2);
+                uint32_t v = le_bytes((const uint8_t*)in.data() + y * pitch + x * 2, 2);
                 CHECK(out[y * 14 + x] == ref16(mode, v), "mode %u (%u, %u)", mode, x, y);
             }
     }
@@ -155,14 +163,13 @@ static void vi_frames() {
             for (uint32_t v = 0; v < 65536; v++)
                 CHECK(c.tc_16to32(v) == to_rgba8(fmt, v), "vi format %u pixel %04x", fmt, v);
         uint32_t w = 15, rows = 4, pitch = 64;
-        std::vector<uint32_t> in(pitch / 4 * rows);
+        std::vector<glsl::leuint> in(pitch / 4 * rows);
         for (auto& x : in) x = random_word();
-        std::vector<uint32_t> out = convert(mode, 0, w, rows, 1, in, pitch);
+        std::vector<glsl::leuint> out = convert(mode, 0, w, rows, 1, in, pitch);
         uint32_t ow = shape(mode, w).out_texels;
         for (uint32_t y = 0; y < rows; y++)
             for (uint32_t x = 0; x < w; x++) {
-                uint32_t p = 0;
-                std::memcpy(&p, (const uint8_t*)in.data() + y * pitch + x * bpp, bpp);
+                uint32_t p = le_bytes((const uint8_t*)in.data() + y * pitch + x * bpp, bpp);
                 CHECK(out[y * ow + x] == to_rgba8(fmt, p), "vi format %u (%u, %u)", fmt, x, y);
             }
     }
@@ -171,7 +178,7 @@ static void vi_frames() {
 // NVDEC's chroma: U and V rows interleaved, U first, in rows of whole words
 static void nv12_uv() {
     const uint32_t pairs = 13, rows = 5, in_pitch = 16, out_pitch = 32;
-    std::vector<uint32_t> in(in_pitch / 4 * rows * 2), out(out_pitch / 4 * rows, 0xDEADBEEFu);
+    std::vector<glsl::leuint> in(in_pitch / 4 * rows * 2), out(out_pitch / 4 * rows, 0xDEADBEEFu);
     for (auto& x : in) x = random_word();
     const uint8_t* ub = (const uint8_t*)in.data();
     const uint8_t* vb = ub + in_pitch * rows;
@@ -212,8 +219,8 @@ static void dma_remap_case(uint32_t cs, uint32_t ns, uint32_t nd, const uint32_t
             for (uint32_t k = 0; k < nd; k++) {
                 uint8_t* d = &want[y * out_pitch + (e * nd + k) * cs];
                 const uint8_t* src = &inb[in_at + y * in_pitch + e * cs * ns];
-                if (sel[k] == 4 || sel[k] == 5)
-                    std::memcpy(d, sel[k] == 4 ? (const void*)&ca : (const void*)&cb, cs);
+                if (sel[k] == 4 || sel[k] == 5) // the constant's low bytes, as the device's memory holds them
+                    for (uint32_t i = 0; i < cs; i++) d[i] = (uint8_t)((sel[k] == 4 ? ca : cb) >> (8 * i));
                 else if (sel[k] < 4) {
                     if (sel[k] < ns)
                         std::memcpy(d, src + sel[k] * cs, cs);
@@ -221,7 +228,7 @@ static void dma_remap_case(uint32_t cs, uint32_t ns, uint32_t nd, const uint32_t
                         std::memset(d, 0, cs);
                 }
             }
-    std::vector<uint32_t> in((inb.size() + 3) / 4), out(old.size() / 4);
+    std::vector<glsl::leuint> in((inb.size() + 3) / 4), out(old.size() / 4);
     std::memcpy(in.data(), inb.data(), inb.size());
     std::memcpy(out.data(), old.data(), old.size());
     uint32_t remap = cs | ns << 4 | nd << 8;
@@ -263,19 +270,18 @@ static void depth_float() {
 
 static void rgb32f() {
     uint32_t w = 7, rows = 5, pitch = 96; // 84 bytes a row, padded to 48
-    std::vector<uint32_t> in(pitch / 4 * rows);
+    std::vector<glsl::leuint> in(pitch / 4 * rows);
     for (auto& x : in) x = random_word();
-    std::vector<uint32_t> out = convert(3, 0, w, rows, 1, in, pitch);
+    std::vector<glsl::leuint> out = convert(3, 0, w, rows, 1, in, pitch);
     for (uint32_t y = 0; y < rows; y++)
         for (uint32_t x = 0; x < w; x++)
             for (uint32_t k = 0; k < 4; k++)
-                CHECK(out[(y * w + x) * 4 + k] == (k < 3 ? in[y * pitch / 4 + x * 3 + k] : 0x3F800000u), "rgb32f");
+                CHECK(out[(y * w + x) * 4 + k] == (k < 3 ? uint32_t(in[y * pitch / 4 + x * 3 + k]) : 0x3F800000u), "rgb32f");
 }
 
 // format.c's vk_depth_unpack before it moved to the GPU: the texel's depth and stencil
 static void ref_depth(uint32_t mode, int zfloat, const uint8_t* t, uint32_t* depth, uint8_t* stencil) {
-    uint32_t v;
-    std::memcpy(&v, t, 4);
+    uint32_t v = le_bytes(t, 4);
     if (mode == 7) {
         *depth = v;
         *stencil = t[4];
@@ -294,9 +300,9 @@ static void depth_stencil() {
         for (int zfloat = 0; zfloat < 2; zfloat++) {
             uint32_t bpp = mode == 7 ? 8 : 4, w = 9, rows = 4, slices = 2;
             uint32_t pitch = (w * bpp + 31) / 32 * 32;
-            std::vector<uint32_t> in(pitch / 4 * rows * slices);
+            std::vector<glsl::leuint> in(pitch / 4 * rows * slices);
             for (auto& x : in) x = random_word();
-            std::vector<uint32_t> out = convert(mode, mode == 7 ? 0 : (uint32_t)zfloat, w, rows, slices, in, pitch);
+            std::vector<glsl::leuint> out = convert(mode, mode == 7 ? 0 : (uint32_t)zfloat, w, rows, slices, in, pitch);
             uint32_t ow = 12, st = ow * rows * slices;
             const uint8_t* stencil = (const uint8_t*)(out.data() + st);
             for (uint32_t y = 0; y < rows * slices; y++)
@@ -331,11 +337,11 @@ static void etc2_kinds() {
                 random_block(&tight[i * 8]);
                 if (random_word() % 4 == 0) tight[i * 8 + 3] &= ~2; // individual, or punch-through's see-through
             }
-            std::vector<uint32_t> in(pitch / 4 * bh);
+            std::vector<glsl::leuint> in(pitch / 4 * bh);
             for (uint32_t y = 0; y < bh; y++) std::memcpy((uint8_t*)in.data() + y * pitch, &tight[y * bw * bb], bw * bb);
             std::vector<uint8_t> want((size_t)w * h * pb);
             etc2_decode_image(tight.data(), w, h, kind, want.data());
-            std::vector<uint32_t> out = convert(8 + kind, 0, w, bh, 1, in, pitch);
+            std::vector<glsl::leuint> out = convert(8 + kind, 0, w, bh, 1, in, pitch);
             uint32_t ow = bw * 4;
             for (uint32_t y = 0; y < h; y++)
                 for (uint32_t x = 0; x < w; x++)

@@ -39,6 +39,7 @@ typedef struct {
     LLVMValueRef ch, rec, np, start; /* the function's parameters */
     LLVMValueRef regs[8], carry, method, incr, next, steps; /* the macro's state, as values */
     LLVMValueRef out, reg, cutoff;                          /* mme_out, mme_reg, mme_jit_cutoff */
+    LLVMTypeRef out_type, reg_type, cutoff_type;            /* their function types */
     const u32* code;                                        /* the channel's macro memory */
     u32 start_word, n;                                      /* the macro's first word and length in it */
     JitNode* nodes;
@@ -47,6 +48,25 @@ typedef struct {
     LLVMBasicBlockRef bad;
     int failed;
 } Jit;
+
+/* A function of the runtime the macro calls. PowerPC64: loaded code keeps the arena's TOC in r2 and calls nothing
+   outside the arena by name (code_loader.h), so it calls the runtime's functions through their addresses, which LLVM
+   does with r2 saved around the call and the callee's own TOC set up. Elsewhere a call by name the loader resolves */
+static LLVMValueRef jit_callee(SnxIr* ir, const char* name, SnxU64 address, LLVMTypeRef* type, LLVMTypeRef ret,
+                               LLVMTypeRef* params, unsigned count) {
+    *type = LLVMFunctionType(ret, params, count, 0);
+#if defined(__powerpc64__)
+    (void)name;
+    return LLVMConstIntToPtr(ir_i64(ir, address), ir->t_ptr);
+#else
+    (void)address;
+    return ir_extern(ir, name, ret, params, count);
+#endif
+}
+static LLVMValueRef jit_call(Jit* j, LLVMValueRef callee, LLVMTypeRef type, LLVMValueRef* args, unsigned count) {
+    ir_state_invalidate(j->ir);
+    return LLVMBuildCall2(j->ir->b, type, callee, args, count, "");
+}
 
 #define MME_FIELD(field) (offsetof(GpuChannel, mme) + offsetof(GpuMme, field))
 
@@ -100,7 +120,7 @@ static void jit_send(Jit* j, LLVMValueRef value) {
     args[1] = j->rec;
     args[2] = at;
     args[3] = value;
-    ir_call(j->ir, j->out, args, 4);
+    jit_call(j, j->out, j->out_type, args, 4);
 }
 
 static LLVMValueRef jit_reg(Jit* j, u32 r) { return r ? jit_get(j, j->regs[r]) : ir_i32(j->ir, 0); }
@@ -383,7 +403,7 @@ static void jit_node(Jit* j, u32 index) {
         LLVMBuildCondBr(b, LLVMBuildICmp(b, LLVMIntUGT, steps, ir_i32(ir, MME_STEPS), ""), cut, body);
         LLVMPositionBuilderAtEnd(b, cut);
         args[0] = j->ch;
-        ir_call(ir, j->cutoff, args, 1);
+        jit_call(j, j->cutoff, j->cutoff_type, args, 1);
         jit_state_out(j, node.off, node.target, node.mode, 0);
         LLVMBuildRet(b, ir_i32(ir, 1));
         LLVMPositionBuilderAtEnd(b, body);
@@ -438,7 +458,7 @@ static void jit_node(Jit* j, u32 index) {
                 args[0] = j->ch;
                 args[1] = j->rec;
                 args[2] = LLVMBuildAdd(b, a, ir_i32(ir, (u32)imm), "");
-                jit_set_reg(j, dst, ir_call(ir, j->reg, args, 3));
+                jit_set_reg(j, dst, jit_call(j, j->reg, j->reg_type, args, 3));
             }
             LLVMBuildBr(b, jit_block(j, jit_next(node, insn)));
             return;
@@ -478,9 +498,10 @@ static int jit_emit(Jit* j, u32 start_word, const u32* code, u32 n, LLVMValueRef
     reg_params[1] = ir->t_ptr;
     reg_params[2] = ir->t_i32;
     cutoff_params[0] = ir->t_ptr;
-    j->out = ir_extern(ir, "mme_out", ir->t_void, out_params, 4);
-    j->reg = ir_extern(ir, "mme_reg", ir->t_i32, reg_params, 3);
-    j->cutoff = ir_extern(ir, "mme_jit_cutoff", ir->t_void, cutoff_params, 1);
+    j->out = jit_callee(ir, "mme_out", (SnxU64)(uintptr_t)mme_out, &j->out_type, ir->t_void, out_params, 4);
+    j->reg = jit_callee(ir, "mme_reg", (SnxU64)(uintptr_t)mme_reg, &j->reg_type, ir->t_i32, reg_params, 3);
+    j->cutoff = jit_callee(ir, "mme_jit_cutoff", (SnxU64)(uintptr_t)mme_jit_cutoff, &j->cutoff_type, ir->t_void,
+                           cutoff_params, 1);
     entry = ir_block(ir, "entry");
     LLVMPositionBuilderAtEnd(b, entry);
     for (r = 1; r < 8; r++) {

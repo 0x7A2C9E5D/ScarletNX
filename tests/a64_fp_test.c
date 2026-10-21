@@ -97,15 +97,15 @@ static void selection_and_comparison(void) {
 
 static void vector_rounding(void) {
     CPU c = {0};
-    c.v[0].s[0] = 0x7F800123;
-    c.v[0].s[1] = 0xBF000000;
-    c.v[0].s[2] = 0x3FC00000;
-    c.v[0].s[3] = 0xFFC00456;
+    SNX_VSET_S(c.v[0], 0, 0x7F800123);
+    SNX_VSET_S(c.v[0], 1, 0xBF000000);
+    SNX_VSET_S(c.v[0], 2, 0x3FC00000);
+    SNX_VSET_S(c.v[0], 3, 0xFFC00456);
     check(snx_simd(&c, NULL, 0x4E218800), 1, "FRINTN V0.4S,V0.4S");
-    check(c.v[0].s[0], 0x7FC00123, "vector SNaN");
-    check(c.v[0].s[1], 0x80000000, "vector signed zero");
-    check(c.v[0].s[2], 0x40000000, "vector tie");
-    check(c.v[0].s[3], 0xFFC00456, "vector QNaN");
+    check(SNX_VS(c.v[0], 0), 0x7FC00123, "vector SNaN");
+    check(SNX_VS(c.v[0], 1), 0x80000000, "vector signed zero");
+    check(SNX_VS(c.v[0], 2), 0x40000000, "vector tie");
+    check(SNX_VS(c.v[0], 3), 0xFFC00456, "vector QNaN");
     check(c.fpsr, 1, "vector cumulative IOC");
     check(snx_simd(&c, NULL, 0x5E218820), 0, "reserved scalar SIMD FRINT");
     check(snx_simd(&c, NULL, 0x0E618820), 0, "reserved FRINT .1D");

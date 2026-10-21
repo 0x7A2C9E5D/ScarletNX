@@ -135,13 +135,15 @@ int new_event(u32* event, const char* name, int signaled) {
 /* guest memory: the request's buffers */
 enum { IN0 = 0x1000, IN1 = 0x2000, IN2 = 0x3000, OUT0 = 0x4000 };
 static IpcCtx ctx;
-static u32 raw[8];
+static u8 raw[32];
+/* the request is the guest's: little-endian */
+static void arg32(unsigned i, u32 v) { snx_st_le32(raw + i * 4, v); }
 static void request(u32 cmd) {
     memset(&ctx, 0, sizeof ctx);
     memset(raw, 0, sizeof raw);
     memset(&test_reads, 0, sizeof test_reads);
     ctx.cmd = cmd;
-    ctx.raw = (const u8*)raw;
+    ctx.raw = raw;
     ctx.raw_size = sizeof raw;
 }
 /* a resolver request: every one of them sends the pid, and each AutoSelect buffer goes in both its lists (A and X
@@ -160,10 +162,8 @@ static IpcBuf buf(u64 addr, u64 size) {
     return b;
 }
 static u32 reply(u32 off) {
-    u32 v;
     CHECK(off + 4 <= ctx.out_size);
-    memcpy(&v, ctx.out + off, 4);
-    return v;
+    return snx_ld_le32(ctx.out + off);
 }
 static void reads(unsigned n, const u32* expected) {
     CHECK(test_reads.n == n);
@@ -180,9 +180,9 @@ static IpcBuf text(u64 at, const char* s) {
 static void test_host_by_name(SvcObj* r) {
     static const u32 offsets[2] = {0, 4};
     resolver(10);
-    raw[0] = 1;
-    raw[1] = 7;
-    raw[2] = 0xDEADBEEF; /* the pid's slot: the kernel's pid, not these bytes */
+    arg32(0, 1);
+    arg32(1, 7);
+    arg32(2, 0xDEADBEEF); /* the pid's slot: the kernel's pid, not these bytes */
     ctx.x[0] = text(IN0, "127.0.0.1");
     ctx.x[1] = buf(IN1, 0); /* no options */
     ctx.c[0] = buf(OUT0, 0x400);
@@ -215,9 +215,9 @@ static void test_host_by_addr(SvcObj* r) {
     static const u32 offsets[4] = {0, 4, 8, 12};
     static const u8 google[4] = {8, 8, 8, 8};
     resolver(11);
-    raw[0] = 4;
-    raw[1] = 2;
-    raw[3] = 1;
+    arg32(0, 4);
+    arg32(1, 2);
+    arg32(3, 1);
     memcpy(GP(IN0), google, 4);
     ctx.a[0] = buf(IN0, 4);
     ctx.b[0] = buf(OUT0, 0x400);
@@ -228,8 +228,8 @@ static void test_host_by_addr(SvcObj* r) {
     static const u8 lo[4] = {127, 0, 0, 1};
     memcpy(GP(IN0), lo, 4);
     resolver(11);
-    raw[0] = 4;
-    raw[1] = 2;
+    arg32(0, 4);
+    arg32(1, 2);
     ctx.x[0] = buf(IN0, 4);
     ctx.c[0] = buf(OUT0, 0x400);
     CHECK(r->dispatch(r, &ctx) == 0 && ctx.out_size == 12 && reply(8) == 0);
@@ -248,7 +248,7 @@ static void test_addr_info(SvcObj* r) {
     static const u32 offsets[2] = {0, 4};
     hints(1); /* SOCK_STREAM */
     resolver(12);
-    raw[1] = 3;
+    arg32(1, 3);
     ctx.a[0] = text(IN0, "127.0.0.1");
     ctx.a[1] = text(IN1, "80");
     ctx.a[2] = buf(IN2, 24);
@@ -381,7 +381,7 @@ int main(void) {
     test_addr_info(r);
     /* ResolverSetOptionRequest (14) is a stub: success, a result of 0 and no errno */
     resolver(14);
-    raw[0] = 0x12345678;
+    arg32(0, 0x12345678);
     ctx.a[0] = buf(IN0, 16);
     CHECK(r->dispatch(r, &ctx) == 0 && ctx.out_size == 8 && reply(0) == 0 && reply(4) == 0);
     svcobj_unref(r);

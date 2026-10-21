@@ -84,5 +84,39 @@ static inline void snx_st_be32(void* p, uint32_t v) {
     v = SNX_BE32(v);
     memcpy(p, &v, sizeof v);
 }
+static inline uint64_t snx_ld_be64(const void* p) {
+    uint64_t v;
+    memcpy(&v, p, sizeof v);
+    return SNX_BE64(v);
+}
+static inline void snx_st_be64(void* p, uint64_t v) {
+    v = SNX_BE64(v);
+    memcpy(p, &v, sizeof v);
+}
+
+/* n words at p converted in place between little-endian and the host's order (the same conversion both ways): a
+   structure of guest words copied out of guest memory before its fields are read, or before it is copied back. They
+   do nothing on a little-endian host */
+static inline void snx_le16_array(void* p, size_t n) {
+    unsigned char* b = (unsigned char*)p;
+    for (; SNX_HOST_BE && n; --n, b += 2) {
+        uint16_t v = snx_ld_le16(b);
+        memcpy(b, &v, sizeof v);
+    }
+}
+static inline void snx_le32_array(void* p, size_t n) {
+    unsigned char* b = (unsigned char*)p;
+    for (; SNX_HOST_BE && n; --n, b += 4) {
+        uint32_t v = snx_ld_le32(b);
+        memcpy(b, &v, sizeof v);
+    }
+}
+static inline void snx_le64_array(void* p, size_t n) {
+    unsigned char* b = (unsigned char*)p;
+    for (; SNX_HOST_BE && n; --n, b += 8) {
+        uint64_t v = snx_ld_le64(b);
+        memcpy(b, &v, sizeof v);
+    }
+}
 
 #endif

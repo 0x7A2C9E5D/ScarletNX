@@ -8,6 +8,7 @@
 #include "common/cpu/aarch64/cpu.h"
 #include "nx/hle/kernel/kernel.h"
 #include "nx/hle/result.h" /* RC, RC_OK and the R_ helpers */
+#include "common/utilities/endian.h"
 #include <string.h>
 
 #define MAX_BUFS 8 /* descriptors of one kind a request may carry */
@@ -148,13 +149,15 @@ static inline int out_fits(IpcCtx* c, u32 n) {
     ipc_out_overflow(c);
     return 0;
 }
-/* appends v to the reply's raw data when it fits; dropped (and logged) otherwise */
+/* appends v, a host number, to the reply's raw data (little-endian) when it fits; dropped (and logged) otherwise */
 static inline void out32(IpcCtx* c, u32 v) {
     if (!out_fits(c, 4)) return;
-    memcpy(c->out + c->out_size, &v, 4);
+    snx_st_le32(c->out + c->out_size, v);
     c->out_size += 4;
 }
-/* n bytes of the request's raw data at off, zeros when they are not all there */
+/* n bytes of the request's raw data at off, zeros when they are not all there. The bytes are the guest's
+   (little-endian): the generated dispatchers convert what they read with ipc_in, and what they write with ipc_out, to
+   and from the host's order, so a handler's raw arguments and outputs are host numbers. Buffers stay guest bytes */
 static inline void ipc_in(IpcCtx* c, u32 off, void* dst, u32 n) {
     if (!n) return;
     if (off > c->raw_size || n > c->raw_size - off)

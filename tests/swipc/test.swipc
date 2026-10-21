@@ -16,6 +16,12 @@ type test::Tail = struct {
     test::Uid a;
     u8 b;
 };
+# words of each width, an array of them and a nested struct, each converted to and from the host's order
+type test::Nest = struct {
+    u16[3] h;
+    test::Pair p;
+    f32 f;
+};
 
 interface test::IThing is test:t, test:u {
     [0] Layout(u32 a, u64 b, u8 c, u16 d, test::Small e, u32 f) -> (u8 x, u64 y, u16 z);
@@ -37,6 +43,7 @@ interface test::IThing is test:t, test:u {
     # declaration order, as the SDK lays out a few commands
     @unsorted [14] Unsorted(test::Uid u, u32 a, u8 b) -> (test::Tail t, u8 c);
     [15] FixedOut(buffer<test::Uid, 0x1a> uid);
+    [16] Nested(test::Nest n, i16[2] s) -> (test::Nest m, u32[2] w);
 }
 
 @fallback(ipc_unknown) interface test::IStrict {

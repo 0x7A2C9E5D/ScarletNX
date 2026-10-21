@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "nx/hle/services/hid_motion.h"
+#include "common/utilities/endian.h"
 #include <math.h>
 #include <string.h>
 
@@ -121,4 +122,7 @@ void hid_motion_sample(HidMotionState* state, const PadMotion* motion, u64 dt_ns
     memcpy(out + HO_HidSixAxisSensorState_acceleration + 24, state->angle, sizeof state->angle);
     memcpy(out + HO_HidSixAxisSensorState_direction, dir, sizeof dir);
     memcpy(out + HO_HidSixAxisSensorState_attributes, &attr, 4);
+    /* the game reads it little-endian: the two counts, then words (floats and the attributes) to the end */
+    snx_le64_array(out, 2);
+    snx_le32_array(out + 16, (HS_HidSixAxisSensorState - 16) / 4);
 }

@@ -1258,6 +1258,7 @@ int vk_buf_draw_prepare(VkDrawStorage* draw) {
                 b->off = atlas_off;
                 b->range = atlas_size;
             }
+        snx_le32_array(map, words); /* the shader reads the table little-endian */
     }
     if (alias)
         for (size_t i = 0; i < unique; i++)

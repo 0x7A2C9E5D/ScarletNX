@@ -57,7 +57,7 @@ typedef struct {
     u32 pitch_y, pitch_c, bh, w, h; /* bh: the GOB block height log2; w, h: the surface's picture size */
 } PicOut;
 
-static void wr32(u8* p, u32 off, u32 v) { memcpy(p + off, &v, 4); }
+static void wr32(u8* p, u32 off, u32 v) { snx_st_le32(p + off, v); }
 static u32 rd16(const u8* p, u32 off) { return (u32)p[off] | (u32)p[off + 1] << 8; }
 static u32 min_u32(u32 a, u32 b) { return a < b ? a : b; }
 

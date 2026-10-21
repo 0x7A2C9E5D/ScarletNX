@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #include "nx/hle/services/hid_touch.h"
 #include "nx/hle/services/hid_layout.h"
+#include "common/utilities/endian.h"
 #include <string.h>
 
 #define SNX_HID_TOUCH_STARTED  1u
@@ -37,19 +38,19 @@ void hid_touch_sample(HidFingers* f, const TouchState* seen, u64 sampling, u8* o
         }
     }
     memset(out, 0, HS_HidTouchScreenState);
-    memcpy(out, &sampling, 8);
+    snx_st_le64(out, sampling);
     for (i = 0; i < SNX_HID_TOUCHES; ++i) {
         bit = 1u << i;
         if (!(f->pressed & bit)) continue;
         t = out + HO_HidTouchScreenState_touches + (u32)count * HS_HidTouchState;
         attribute = (f->start & bit ? SNX_HID_TOUCH_STARTED : 0) | (f->end & bit ? SNX_HID_TOUCH_ENDED : 0);
-        memcpy(t + HO_HidTouchState_attribute, &attribute, 4);
-        memcpy(t + HO_HidTouchState_finger, &i, 4);
-        memcpy(t + HO_HidTouchState_position_x, &f->x[i], 4);
-        memcpy(t + HO_HidTouchState_position_y, &f->y[i], 4);
-        memcpy(t + HO_HidTouchState_diameter_x, &diameter, 4);
-        memcpy(t + HO_HidTouchState_diameter_y, &diameter, 4);
+        snx_st_le32(t + HO_HidTouchState_attribute, attribute);
+        snx_st_le32(t + HO_HidTouchState_finger, i);
+        snx_st_le32(t + HO_HidTouchState_position_x, f->x[i]);
+        snx_st_le32(t + HO_HidTouchState_position_y, f->y[i]);
+        snx_st_le32(t + HO_HidTouchState_diameter_x, diameter);
+        snx_st_le32(t + HO_HidTouchState_diameter_y, diameter);
         ++count;
     }
-    memcpy(out + HO_HidTouchScreenState_count, &count, 4);
+    snx_st_le32(out + HO_HidTouchScreenState_count, (u32)count);
 }

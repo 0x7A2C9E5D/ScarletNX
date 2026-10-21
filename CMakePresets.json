@@ -93,7 +93,7 @@
     },
     {
       "name": "linux-ppc64-elfv2-cross",
-      "displayName": "Linux ppc64 big-endian with glibc (ELFv2, Arch POWER), cross-built with Clang: the Linux runtime only, as the Switch and 3DS runtimes need a little-endian host",
+      "displayName": "Linux ppc64 big-endian with glibc (ELFv2, Arch POWER), cross-built with Clang: the Switch and Linux runtimes, as the 3DS one needs a little-endian host",
       "inherits": "linux-cross-base",
       "environment": {
         "PKG_CONFIG_LIBDIR": "$env{SNX_SYSROOT}/usr/lib/pkgconfig:$env{SNX_SYSROOT}/usr/share/pkgconfig",
@@ -106,9 +106,16 @@
         "CMAKE_CXX_COMPILER_TARGET": "powerpc64-unknown-linux-gnu",
         "CMAKE_CROSSCOMPILING_EMULATOR": "qemu-ppc64;-L;$env{SNX_SYSROOT}",
         "SNX_PPC64_ELFV2": "ON",
-        "SNX_BUILD_NX": "OFF",
         "SNX_BUILD_3DS": "OFF",
         "SNX_BUILD_GUI": "OFF"
+      }
+    },
+    {
+      "name": "linux-ppc64-g5-cross",
+      "displayName": "Linux ppc64 big-endian with glibc (ELFv2), for the PowerPC 970 (PowerMac G5) and POWER4 on, cross-built with Clang",
+      "inherits": "linux-ppc64-elfv2-cross",
+      "cacheVariables": {
+        "SNX_PPC64_CPU": "970"
       }
     },
     {
@@ -217,6 +224,10 @@
       "configurePreset": "linux-ppc64-elfv2-cross"
     },
     {
+      "name": "linux-ppc64-g5-cross",
+      "configurePreset": "linux-ppc64-g5-cross"
+    },
+    {
       "name": "linux-ppc64-musl-cross",
       "configurePreset": "linux-ppc64-musl-cross"
     },
@@ -261,6 +272,16 @@
     {
       "name": "linux-ppc64-elfv2-cross",
       "configurePreset": "linux-ppc64-elfv2-cross",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 900
+      }
+    },
+    {
+      "name": "linux-ppc64-g5-cross",
+      "configurePreset": "linux-ppc64-g5-cross",
       "output": {
         "outputOnFailure": true
       },

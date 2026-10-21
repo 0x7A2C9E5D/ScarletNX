@@ -30,6 +30,9 @@ struct SnxCodeLoader {
        the table, past ELFv2's global entry (which computes r2 from r12, unset by a branch), or at the code an ELFv1
        descriptor names */
     uint64_t toc;
+    /* PowerPC64: the TOC is another's, an AOT module's (snx_code_loader_new_toc), whose functions loads call and jump
+       to directly */
+    int toc_shared;
     unsigned abi;
     SnxLinkNames entries;
     SnxU64 (*resolver)(void* user, const char* name); /* snx_code_set_resolver's */

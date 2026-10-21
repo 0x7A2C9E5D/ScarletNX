@@ -154,6 +154,7 @@ static int compose(const VicJob* j) {
     cp.n = 0;
     memset(host, 0, total); /* the padding between planes, which the shader may load and never uses */
     memcpy(host, &p, sizeof p);
+    snx_le32_array(host, sizeof p / 4); /* host numbers, all 32 bit words (vic_params.glsl), read little-endian */
     for (int s = 0; s < 8; s++) {
         const VicSlot* sl = &j->slots[s];
         if (!sl->on) continue;

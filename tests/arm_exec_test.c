@@ -25,7 +25,8 @@ int main(void) {
     static const uint32_t code[] = {0xE3A00102, 0xE3E01000, 0xE3A07007, 0xEF000000};
     unsigned char mem[0x10000];
     memset(mem, 0, sizeof mem);
-    memcpy(mem + 0x1000, code, sizeof code);
+    /* the guest's code is little-endian whatever the host's byte order */
+    for (unsigned i = 0; i < sizeof code; i++) mem[0x1000 + i] = (unsigned char)(code[i / 4] >> (i % 4 * 8));
     SnxArmCPU cpu;
     memset(&cpu, 0, sizeof cpu);
     cpu.mem = mem;

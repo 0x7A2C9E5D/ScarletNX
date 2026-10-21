@@ -87,10 +87,18 @@ static u32 sha_choose(u32 x, u32 y, u32 z) { return (x & (y ^ z)) ^ z; }
 static u32 sha_parity(u32 x, u32 y, u32 z) { return x ^ y ^ z; }
 static u32 sha_majority(u32 x, u32 y, u32 z) { return (x & y) | ((x | y) & z); }
 
+/* the register's 32-bit words as numbers in place (SHA works on them): a swap of each on a big-endian host, where
+   V128 holds the guest's bytes, and nothing on a little-endian one. Its own inverse */
+static V128 sha_words(V128 v) {
+    u32 i;
+    for (i = 0; i < 4; ++i) v.s[i] = SNX_VS(v, i);
+    return v;
+}
+
 /* SHA1C/SHA1P/SHA1M: four rounds on the hash in Qd (words 0-3) and e in Sn, with the schedule words of Vm;
    SHA1SU0, SHA1H, SHA1SU1: the schedule updates. Operands are read before Vd is written (they may alias). */
 void v_sha1(CPU* c, u32 op, u32 d, u32 n, u32 m) {
-    V128 x = c->v[d], y = c->v[n], z = c->v[m];
+    V128 x = sha_words(c->v[d]), y = sha_words(c->v[n]), z = sha_words(c->v[m]);
     u32 i, t, e;
     switch (op) {
         case 0:
@@ -114,8 +122,8 @@ void v_sha1(CPU* c, u32 op, u32 d, u32 n, u32 m) {
             x.d[1] = y.d[0] ^ x.d[1] ^ z.d[1];
             break;
         case 0x10: /* SHA1H: ROL(Sn, 30) */
-            x.d[0] = sha_ror(y.s[0], 2);
-            x.d[1] = 0;
+            x.s[0] = sha_ror(y.s[0], 2);
+            x.s[1] = x.s[2] = x.s[3] = 0;
             break;
         case 0x11: /* SHA1SU1 */
             x.s[0] = sha_rol(x.s[0] ^ y.s[1], 1);
@@ -125,7 +133,7 @@ void v_sha1(CPU* c, u32 op, u32 d, u32 n, u32 m) {
             break;
         default: return;
     }
-    c->v[d] = x;
+    c->v[d] = sha_words(x);
 }
 
 static u32 sha_sigma0(u32 x) { return sha_ror(x, 2) ^ sha_ror(x, 13) ^ sha_ror(x, 22); }
@@ -136,7 +144,7 @@ static u32 sha_small1(u32 x) { return sha_ror(x, 17) ^ sha_ror(x, 19) ^ (x >> 10
 /* SHA256H (Qd = a..d, Qn = e..h), SHA256H2 (Qd = e..h, Qn = a..d): four rounds with Vm's words; SHA256SU0 and
    SHA256SU1: the schedule updates */
 void v_sha256(CPU* c, u32 op, u32 d, u32 n, u32 m) {
-    V128 x = c->v[d], y = c->v[n], z = c->v[m];
+    V128 x = sha_words(c->v[d]), y = sha_words(c->v[n]), z = sha_words(c->v[m]);
     u32 i, t;
     switch (op) {
         case 4: /* SHA256H: Vd gets the new a..d */
@@ -176,18 +184,18 @@ void v_sha256(CPU* c, u32 op, u32 d, u32 n, u32 m) {
             break;
         default: return;
     }
-    c->v[d] = x;
+    c->v[d] = sha_words(x);
 }
 
 /* PMULL/PMULL2 of 64-bit lanes: the carry-less product of the low (or high) doublewords, 128 bits */
 void v_pmull(V128* d, const V128* a, const V128* b, int hi) {
-    u64 x = a->d[hi ? 1 : 0], y = b->d[hi ? 1 : 0], lo = 0, high = 0;
+    u64 x = SNX_VD(*a, hi ? 1 : 0), y = SNX_VD(*b, hi ? 1 : 0), lo = 0, high = 0;
     int i;
     for (i = 0; i < 64; ++i)
         if ((y >> i) & 1) {
             lo ^= x << i;
             if (i) high ^= x >> (64 - i);
         }
-    d->d[0] = lo;
-    d->d[1] = high;
+    SNX_VSET_D(*d, 0, lo);
+    SNX_VSET_D(*d, 1, high);
 }

@@ -30,6 +30,7 @@
 #ifndef SNX_VK_H
 #define SNX_VK_H
 #include "common/cpu/aarch64/cpu.h"
+#include "common/utilities/endian.h"
 #include "nx/gpu/gpu.h"
 #include "volk.h"
 #include "vk_mem_alloc.h"
@@ -253,6 +254,7 @@ void rec_CmdEndConditionalRenderingEXT(VkCommandBuffer cb);
 void rec_CmdCopyQueryPoolResults(VkCommandBuffer cb, VkQueryPool pool, u32 first, u32 count, VkBuffer dst,
                                  VkDeviceSize off, VkDeviceSize stride, VkQueryResultFlags flags);
 void rec_CmdSetBlendConstants(VkCommandBuffer cb, const float c[4]);
+/* data is host-order 32-bit words (every block the runtime pushes is), stored little-endian for the device */
 void rec_CmdPushConstants(VkCommandBuffer cb, VkPipelineLayout layout, VkShaderStageFlags stages, u32 offset, u32 size,
                           const void* data);
 void rec_CmdBindDescriptorSets(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipelineLayout layout, u32 first, u32 n,
@@ -618,9 +620,16 @@ int vk_dma_copy(const GpuDmaOp* o);
 /* blit.c: a 2D blit from memory on the GPU (gpu.h's GpuBlit), its destination published: 1 when done. Takes vk_lock */
 int vk_blit_mem(const GpuBlit* b);
 
+/* n little-endian words of guest memory at gva as host numbers (texture and sampler headers, constant buffer words),
+   as gmem_read reads them */
+static inline void vk_gmem_words(u64 gva, u32* w, u32 n) {
+    gmem_read(gva, w, (u64)n * 4);
+    snx_le32_array(w, n);
+}
+
 /* texture.c */
 void vk_render_forget_state(void); /* the next draw sets all its state again (another pipeline or state was set) */
-Surf* vk_tex_from_tic(const u32* tic);
+Surf* vk_tex_from_tic(const u32* tic); /* tic: the header's words as host numbers */
 /* a texture vk_tex_from_tic returned for an unchanged header, checked again as it would be: memory written since, what
    targets drew into it. NULL when it can't be drawn now */
 Surf* vk_tex_recheck(Surf* t);

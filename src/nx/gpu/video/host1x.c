@@ -68,7 +68,7 @@ struct H1Ch {
     u32 regs[H1_REGS];
 };
 
-static void wr32(u8* p, u32 off, u32 v) { memcpy(p + off, &v, 4); }
+static void wr32(u8* p, u32 off, u32 v) { snx_st_le32(p + off, v); }
 
 /* ---- the IOVA table */
 u8* iova_ptr(u64 iova, u64 len) {
@@ -320,6 +320,7 @@ static u32 submit(H1Ch* ch, u8* d, u32 n) {
         u32 words = addr[i] ? rd32(d, (u32)(o_cb + 12ull * i + 8)) : 0;
         job[k++] = words;
         if (words) memcpy(job + k, GP(addr[i]), (size_t)words * 4);
+        snx_le32_array(job + k, words); /* the stream's words, read as numbers on the worker */
         k += words;
     }
     free(addr);

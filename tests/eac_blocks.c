@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* EAC R11 and RG11 blocks from rEden's decode_eac.cpp: the KDFS 1.3 examples and edenprobe's */
 #include "nx/gpu/texture/etc2.h"
+#include "common/utilities/endian.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -31,6 +32,7 @@ static u16 decode_one(int kind, u32 base, u32 multiplier, u32 table, u8 index, u
     fill(indices, index);
     block(blk, base, multiplier, table, indices);
     etc2_decode_image(blk, 4, 4, kind, (u8*)texels);
+    snx_le16_array(texels, 16); /* the texels are little-endian, as the GPU reads them */
     return texels[texel];
 }
 
@@ -65,6 +67,7 @@ static void every_index(void) {
     block(both, 0x80, 11, 0, forward);
     block(both + 8, 0x30, 0, 13, backward);
     etc2_decode_image(both, 4, 4, EAC_RG, (u8*)texels);
+    snx_le16_array(texels, 32);
     for (t = 0; t < 16; ++t) {
         const u32 r = red11[t % 8], g = green11[t % 8];
         snprintf(what, sizeof(what), "RG11 texel %u red", t);
@@ -93,6 +96,7 @@ static void partial_blocks(void) {
     for (layer = 0; layer < 2; ++layer)
         etc2_decode_image(input[layer][0], SNX_EACB_W, SNX_EACB_H, EAC_R,
                           (u8*)(texels + layer * SNX_EACB_W * SNX_EACB_H));
+    snx_le16_array(texels, sizeof(texels) / sizeof(texels[0])); /* the guard reads the same either way */
     for (layer = 0; layer < 2; ++layer)
         for (y = 0; y < SNX_EACB_H; ++y)
             for (x = 0; x < SNX_EACB_W; ++x) {

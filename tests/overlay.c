@@ -14,6 +14,7 @@
 #include "gui_theme_colors.h"
 #include "common/utilities/users.h"
 #include "gui/splash.h"
+#include "common/utilities/endian.h"
 /* the menu's page colour, its letters on the head's band, as R G B A bytes */
 #define LIGHT_RGBA                                                                                                     \
     (0xFFu << 24 | (SNX_GUI_THEME_YORHA_PAGE & 0xFFu) << 16 | (SNX_GUI_THEME_YORHA_PAGE & 0xFF00u) |                   \
@@ -514,7 +515,7 @@ int main(void) {
         int w, h;
         u32 version;
         assert(sprites);
-        sprites[0] = 0x80FF8040u; /* half alpha */
+        sprites[0] = snx_le32(0x80FF8040u); /* half alpha, in the bytes R G B A as SDL's RGBA32 has them */
         assert(!ui_atlas(&w, &h, &version) && !version);
         ui_atlas_set(sprites, 4, 4); /* not the atlas the header is for */
         assert(!ui_atlas(&w, &h, &version));
@@ -524,7 +525,7 @@ int main(void) {
         /* no user read yet: the picture's rows are transparent */
         for (y = 0; y < SNX_UI_PICTURE; ++y)
             for (x = 0; x < SNX_UI_PICTURE; ++x) assert(!a[(SNX_CONTROLS_ATLAS_HEIGHT + y) * w + x]);
-        assert(a[0] == 0x80804020u);
+        assert(snx_le32(a[0]) == 0x80804020u); /* the texels are the GPU's bytes */
         /* every glyph, white where its bit is: 'A' has both */
         for (sc = 0; sc < 256; ++sc)
             for (y = 0; y < 16; ++y)
@@ -716,7 +717,7 @@ int main(void) {
         assert(a && h == SNX_CONTROLS_ATLAS_HEIGHT + SNX_UI_PICTURE);
         for (y = 0; y < SNX_UI_PICTURE; ++y)
             for (x = 0; x < SNX_UI_PICTURE; ++x) {
-                u32 p = a[(SNX_CONTROLS_ATLAS_HEIGHT + y) * w + x];
+                u32 p = snx_le32(a[(SNX_CONTROLS_ATLAS_HEIGHT + y) * w + x]); /* the GPU's bytes R G B A */
                 assert(p >> 24 == 0xFF); /* square: every texel opaque */
                 white += p == 0xFFFFFFFFu;
             }
@@ -731,7 +732,7 @@ int main(void) {
                 for (x = 0; x < SNX_UI_PICTURE; ++x) {
                     u32 p = argb[y * SNX_UI_PICTURE + x];
                     unlike += (p >> 16 & 0xFFu) != (p & 0xFFu);
-                    assert(a[(SNX_CONTROLS_ATLAS_HEIGHT + y) * w + x] ==
+                    assert(snx_le32(a[(SNX_CONTROLS_ATLAS_HEIGHT + y) * w + x]) ==
                            ((p & 0xFF00FF00u) | (p >> 16 & 0xFFu) | (p & 0xFFu) << 16));
                 }
             assert(unlike > 0);

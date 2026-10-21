@@ -111,7 +111,8 @@ static void request(u32 cmd) {
     ctx.raw_size = sizeof raw;
     ctx.cmd = cmd;
 }
-static void arg32(u32 off, u32 v) { memcpy(raw + off, &v, 4); }
+/* the request and the reply are the guest's: little-endian */
+static void arg32(u32 off, u32 v) { snx_st_le32(raw + off, v); }
 static void in_buf(u64 addr, u64 size) {
     ctx.a[ctx.na].addr = addr;
     ctx.a[ctx.na++].size = size;
@@ -121,14 +122,10 @@ static void out_buf(u64 addr, u64 size) {
     ctx.b[ctx.nb++].size = size;
 }
 static u32 reply32(u32 off) {
-    u32 v;
-    memcpy(&v, ctx.out + off, 4);
-    return v;
+    return snx_ld_le32(ctx.out + off);
 }
 static u64 reply64(u32 off) {
-    u64 v;
-    memcpy(&v, ctx.out + off, 8);
-    return v;
+    return snx_ld_le64(ctx.out + off);
 }
 static int call(SvcObj* o) { return o->dispatch(o, &ctx); }
 #define SSL_RESULT(desc) RC(123, desc)

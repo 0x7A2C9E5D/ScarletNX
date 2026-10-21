@@ -17,9 +17,18 @@
 #define ACC_NOT_CONNECTED   RC(110, 300) /* nifm's: there is no network to reach the account server */
 #define ACC_LAST_EDIT       1546300800   /* the user's profile was last changed on the first day of 2019 */
 
+/* a Uid's bytes are its two halves, little-endian as the game keeps them, and users.c's are host numbers */
+static void acc_uid_get(const nn_account_Uid* uid, u64 v[2]) {
+    v[0] = snx_ld_le64(uid->v);
+    v[1] = snx_ld_le64(uid->v + 8);
+}
+static void acc_uid_put(u8* out, const u64 v[2]) {
+    snx_st_le64(out, v[0]);
+    snx_st_le64(out + 8, v[1]);
+}
 static const SnxUser* acc_user(const nn_account_Uid* uid) {
     u64 v[2];
-    memcpy(v, uid->v, 16);
+    acc_uid_get(uid, v);
     return snx_users_find(v);
 }
 
@@ -27,14 +36,14 @@ static const SnxUser* acc_user(const nn_account_Uid* uid) {
 static void acc_list(IpcBuf users, const SnxUser* first, int count) {
     u64 i;
     memset(GP(users.addr), 0, (size_t)users.size);
-    for (i = 0; i < (u64)count && (i + 1) * 16 <= users.size; i++) memcpy(GP(users.addr + i * 16), first[i].uid, 16);
+    for (i = 0; i < (u64)count && (i + 1) * 16 <= users.size; i++) acc_uid_put(GP(users.addr + i * 16), first[i].uid);
 }
 static void acc_list_all(IpcBuf users) { acc_list(users, g_users, g_user_count); }
 static void acc_list_open(IpcBuf users) { acc_list(users, snx_users_selected(), 1); }
 
 /* an object that keeps the user it was made for, in an AccUser of g_hle.acc's */
 static SvcObj* acc_for_user(SvcObj* o, const nn_account_Uid* uid) {
-    memcpy(((AccUser*)o->data)->uid, uid->v, 16);
+    acc_uid_get(uid, ((AccUser*)o->data)->uid);
     return o;
 }
 
@@ -62,7 +71,7 @@ static int nn_account_IAccountServiceForApplication_ListOpenUsers(SvcObj* self, 
 }
 static int nn_account_IAccountServiceForApplication_GetLastOpenedUser(SvcObj* self, nn_account_Uid* uid) {
     (void)self;
-    memcpy(uid->v, snx_users_selected()->uid, 16);
+    acc_uid_put(uid->v, snx_users_selected()->uid);
     R_SUCCEED();
 }
 static int nn_account_IAccountServiceForApplication_GetProfile(SvcObj* self, const nn_account_Uid* uid,
@@ -78,7 +87,7 @@ static int nn_account_IAccountServiceForApplication_TrySelectUserWithoutInteract
     SvcObj* self, u8 is_network_service_account_required, nn_account_Uid* uid) {
     (void)self, (void)is_network_service_account_required;
     memset(uid->v, 0, 16);
-    if (g_user_count == 1) memcpy(uid->v, g_users[0].uid, 16);
+    if (g_user_count == 1) acc_uid_put(uid->v, g_users[0].uid);
     R_SUCCEED();
 }
 static int nn_account_IAccountServiceForApplication_TrySelectUserWithoutInteraction(
@@ -128,7 +137,7 @@ static const SnxUser* acc_profile_user(SvcObj* self) {
 static void acc_profile_base(SvcObj* self, nn_account_profile_ProfileBase* base) {
     const SnxUser* u = acc_profile_user(self);
     memset(base, 0, sizeof *base);
-    memcpy(base->uid.v, ((const AccUser*)self->data)->uid, 16);
+    acc_uid_put(base->uid.v, ((const AccUser*)self->data)->uid);
     base->last_edit_timestamp = ACC_LAST_EDIT;
     memcpy(base->nickname, u->nickname, strlen(u->nickname)); /* 32 bytes at most: the field's, with no NUL then */
 }

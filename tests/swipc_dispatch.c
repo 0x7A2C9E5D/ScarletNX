@@ -103,7 +103,7 @@ static int test_IThing_Layout(SvcObj* self, u32 a, u64 b, u8 c, u16 d, const tes
     (void)self;
     got.a = a, got.b = b, got.c = c, got.d = d, got.f = f;
     memcpy(got.e, e->v, 3);
-    *x = 0x11, *y = 0x2222222222222222ull, *z = 0x3333;
+    *x = 0x11, *y = 0x2122232425262728ull, *z = 0x3334;
     return 0;
 }
 static int test_IThing_Pid(SvcObj* self, u32 a, u64 pid, u64 b, u64* pid_out) {
@@ -150,7 +150,7 @@ static int test_IThing_Struct(SvcObj* self, const test_Pair* p, u8 q, const test
     (void)self;
     got.p = *p, got.q = q, got.u = *u;
     memcpy(got.raw, raw, 6);
-    r->a = 0xA1, r->b = 0xB2B2B2B2, r->c = 0xC3C3C3C3C3C3C3C3ull;
+    r->a = 0xA1, r->b = 0xB2B3B4B5, r->c = 0xC3C4C5C6C7C8C9CAull;
     quad[0] = 1, quad[1] = 2, quad[2] = 3, quad[3] = 4;
     return 0;
 }
@@ -194,6 +194,13 @@ static int test_IThing_FixedOut(SvcObj* self, IpcBuf uid) {
     got.bufs[0] = uid;
     return 0;
 }
+static int test_IThing_Nested(SvcObj* self, const test_Nest* n, const i16* s, test_Nest* m, u32* w) {
+    (void)self;
+    *m = *n;
+    m->h[0] = (u16)(n->h[0] + 1), m->p.b = n->p.b ^ 0xFF, m->p.c = n->p.c + 1, m->f = n->f * 2;
+    w[0] = (u32)(i32)s[0], w[1] = (u32)(i32)s[1];
+    return 0;
+}
 static int test_fallback(SvcObj* self, IpcCtx* c) {
     (void)self, (void)c;
     got.fallbacks++;
@@ -215,10 +222,16 @@ static void request(u32 cmd) {
     ctx.raw = raw;
     ctx.raw_size = sizeof raw;
 }
+/* the message is little-endian whatever the host's order: numbers go in and come out byte by byte */
 static void put(u32 off, const void* p, u32 n) { memcpy(raw + off, p, n); }
+static void put_u(u32 off, u64 v, u32 n) {
+    u32 i;
+    for (i = 0; i < n; i++) raw[off + i] = (u8)(v >> 8 * i);
+}
 static u64 out_u(u32 off, u32 n) {
     u64 v = 0;
-    memcpy(&v, ctx.out + off, n);
+    u32 i;
+    for (i = 0; i < n; i++) v |= (u64)ctx.out[off + i] << 8 * i;
     return v;
 }
 static IpcBuf buf(u64 addr, u64 size) {
@@ -229,9 +242,6 @@ static int same(IpcBuf a, u64 addr, u64 size) { return a.addr == addr && a.size 
 
 int main(void) {
     SvcObj* thing = test_IThing_new();
-    u32 v32;
-    u64 v64;
-    u16 v16;
     CHECK(!strcmp(thing->name, "test::IThing"));
     test_IThing_register(ctor);
     CHECK(nregistered == 2 && !strcmp(registered[0], "test:t") && !strcmp(registered[1], "test:u"));
@@ -241,21 +251,21 @@ int main(void) {
     memset(raw, 0, sizeof raw);
     raw[0] = 0xCC;
     put(1, "\x01\x02\x03", 3);
-    v16 = 0xDDDD, put(4, &v16, 2);
-    v32 = 0xAAAAAAAA, put(8, &v32, 4);
-    v32 = 0xFFFFFFFF, put(12, &v32, 4);
-    v64 = 0xBBBBBBBBBBBBBBBBull, put(16, &v64, 8);
+    put_u(4, 0xDDEE, 2);
+    put_u(8, 0xAAAAAAAA, 4);
+    put_u(12, 0xFFFFFFFF, 4);
+    put_u(16, 0xBBBBBBBBBBBBBBBBull, 8);
     CHECK(thing->dispatch(thing, &ctx) == 0);
-    CHECK(got.a == 0xAAAAAAAA && got.b == 0xBBBBBBBBBBBBBBBBull && got.c == 0xCC && got.d == 0xDDDD &&
+    CHECK(got.a == 0xAAAAAAAA && got.b == 0xBBBBBBBBBBBBBBBBull && got.c == 0xCC && got.d == 0xDDEE &&
           got.f == 0xFFFFFFFF && !memcmp(got.e, "\x01\x02\x03", 3));
-    CHECK(ctx.out_size == 16 && out_u(0, 1) == 0x11 && out_u(2, 2) == 0x3333 && out_u(8, 8) == 0x2222222222222222ull);
+    CHECK(ctx.out_size == 16 && out_u(0, 1) == 0x11 && out_u(2, 2) == 0x3334 && out_u(8, 8) == 0x2122232425262728ull);
 
     /* [1] (u32 a, pid, u64 b): a 0, the pid's slot 8, b 16. The pid is the kernel's, not the slot's */
     request(1);
     memset(raw, 0, sizeof raw);
-    v32 = 5, put(0, &v32, 4);
-    v64 = 0xDEAD, put(8, &v64, 8);
-    v64 = 6, put(16, &v64, 8);
+    put_u(0, 5, 4);
+    put_u(8, 0xDEAD, 8);
+    put_u(16, 6, 8);
     ctx.pid = 0x51, ctx.has_pid = 1;
     CHECK(thing->dispatch(thing, &ctx) == 0);
     CHECK(got.a == 5 && got.pid == 0x51 && got.b == 6 && ctx.out_size == 8 && out_u(0, 8) == 0x51);
@@ -266,8 +276,8 @@ int main(void) {
     /* [2] (aruid, u32 v): v 0, the aruid 8, its raw value kept */
     request(2);
     memset(raw, 0, sizeof raw);
-    v32 = 3, put(0, &v32, 4);
-    v64 = 0x77, put(8, &v64, 8);
+    put_u(0, 3, 4);
+    put_u(8, 0x77, 8);
     ctx.pid = 0x51, ctx.has_pid = 1;
     CHECK(thing->dispatch(thing, &ctx) == 0);
     CHECK(got.v == 3 && got.aruid == 0x77 && out_u(0, 8) == 0x99);
@@ -363,14 +373,14 @@ int main(void) {
     raw[0] = 0x42;
     put(1, "abcdef", 6);
     raw[8] = 0x0A;
-    v32 = 0x0B0B0B0B, put(12, &v32, 4);
-    v64 = 0x0C0C0C0C0C0C0C0Cull, put(16, &v64, 8);
+    put_u(12, 0x0B0C0D0E, 4);
+    put_u(16, 0x0102030405060708ull, 8);
     put(24, "0123456789abcdef", 16);
     CHECK(thing->dispatch(thing, &ctx) == 0);
-    CHECK(got.q == 0x42 && !memcmp(got.raw, "abcdef", 6) && got.p.a == 0x0A && got.p.b == 0x0B0B0B0B &&
-          got.p.c == 0x0C0C0C0C0C0C0C0Cull && !memcmp(got.u.v, "0123456789abcdef", 16));
-    CHECK(ctx.out_size == 24 && out_u(0, 4) == 0x04030201 && out_u(8, 1) == 0xA1 && out_u(12, 4) == 0xB2B2B2B2 &&
-          out_u(16, 8) == 0xC3C3C3C3C3C3C3C3ull);
+    CHECK(got.q == 0x42 && !memcmp(got.raw, "abcdef", 6) && got.p.a == 0x0A && got.p.b == 0x0B0C0D0E &&
+          got.p.c == 0x0102030405060708ull && !memcmp(got.u.v, "0123456789abcdef", 16));
+    CHECK(ctx.out_size == 24 && out_u(0, 4) == 0x04030201 && out_u(8, 1) == 0xA1 && out_u(12, 4) == 0xB2B3B4B5 &&
+          out_u(16, 8) == 0xC3C4C5C6C7C8C9CAull);
 
     /* [9] no outputs: the handler's result is the request's */
     request(9);
@@ -387,8 +397,8 @@ int main(void) {
     /* a TIPC request has no raw slot for its pid: [1] (u32 a, pid, u64 b) is a 0, b 8, 16 bytes in all */
     request(1);
     memset(raw, 0, sizeof raw);
-    v32 = 5, put(0, &v32, 4);
-    v64 = 6, put(8, &v64, 8);
+    put_u(0, 5, 4);
+    put_u(8, 6, 8);
     ctx.tipc = 1, ctx.has_pid = 1, ctx.pid = 0x51, ctx.raw_size = 16;
     CHECK(thing->dispatch(thing, &ctx) == 0 && got.a == 5 && got.b == 6 && got.pid == 0x51);
     request(1);
@@ -411,7 +421,7 @@ int main(void) {
     /* [13] a failed request with raw outputs only answers no data */
     request(13);
     memset(raw, 0, sizeof raw);
-    v32 = 9, put(0, &v32, 4);
+    put_u(0, 9, 4);
     CHECK(thing->dispatch(thing, &ctx) == 0x5678 && got.a == 9 && ctx.out_size == 0 && out_u(0, 4) == 0);
 
     /* [14] @unsorted (Uid u, u32 a, u8 b): u 0, a 16, b 20. Out (Tail t, u8 c): t 0 (x 0, a 8, b 24), c 32 */
@@ -419,7 +429,7 @@ int main(void) {
     request(14);
     memset(raw, 0, sizeof raw);
     put(0, "0123456789abcdef", 16);
-    v32 = 0x12345678, put(16, &v32, 4);
+    put_u(16, 0x12345678, 4);
     raw[20] = 0x9A;
     CHECK(thing->dispatch(thing, &ctx) == 0);
     CHECK(!memcmp(got.u.v, "0123456789abcdef", 16) && got.a == 0x12345678 && got.c == 0x9A);
@@ -435,12 +445,25 @@ int main(void) {
     ctx.nc = 1, ctx.c[0] = buf(0x9000, 8);
     CHECK(thing->dispatch(thing, &ctx) == 0 && same(got.bufs[0], 0x9000, 8));
 
+    /* [16] (Nest n, i16[2] s): s 0, n 8 (h 8, p 16 with a 16 b 20 c 24, f 32). Out (Nest m, u32[2] w): w 0, m 8.
+       Each word is a host number in the handler, and little-endian in the message */
+    request(16);
+    memset(raw, 0, sizeof raw);
+    put_u(0, 0xFFFE, 2), put_u(2, 0x0102, 2);
+    put_u(8, 0x1112, 2), put_u(10, 0x1314, 2), put_u(12, 0x1516, 2);
+    raw[16] = 0x21, put_u(20, 0x22232425, 4), put_u(24, 0x262728292A2B2C2Dull, 8);
+    put_u(32, 0x3FC00000, 4); /* 1.5f */
+    CHECK(thing->dispatch(thing, &ctx) == 0 && ctx.out_size == 0x28);
+    CHECK(out_u(0, 4) == 0xFFFFFFFE && out_u(4, 4) == 0x0102);
+    CHECK(out_u(8, 2) == 0x1113 && out_u(10, 2) == 0x1314 && out_u(12, 2) == 0x1516 && out_u(16, 1) == 0x21);
+    CHECK(out_u(20, 4) == 0x222324DA && out_u(24, 8) == 0x262728292A2B2C2Eull && out_u(32, 4) == 0x40400000);
+
     /* an interface of another file, with this file's types */
     {
         SvcObj* o = test_IOther_new();
         request(0);
         memset(raw, 0, sizeof raw);
-        v64 = 0xC0FFEE, put(8, &v64, 8);
+        put_u(8, 0xC0FFEE, 8);
         CHECK(o->dispatch(o, &ctx) == 0 && ctx.out_size == 8 && out_u(0, 8) == 0xC0FFEE);
         svcobj_unref(o);
     }

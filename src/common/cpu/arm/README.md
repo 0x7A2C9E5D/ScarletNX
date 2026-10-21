@@ -37,7 +37,7 @@ Generated code doesn't decide two things itself. It calls the runtime library, w
 - An instruction the block compiler doesn't implement, or can't with the block's memory model, calls `snx_arm_undefined(cpu, word, reason)`. The backend runs it and returns with `exit` clear, and the block goes on after it, or it sets `exit` and the block stops at it. Without a backend, `exit` is `reason` (`SNX_ARM_UNDEFINED`, `SNX_ARM_BACKEND_UNSUPPORTED`) and `syndrome` the word, as before.
 - MRC, MCR, MRRC and MCRR to coprocessors 14 and 15 call `snx_arm_coproc(cpu, word)`: which system registers user mode reaches, and what they hold, is the system's. The NX runtime gives the generic timer's CNTPCT, CNTVCT and CNTFRQ (the SDK's system tick) and the CP15 barriers. Without a backend, `snx_arm_coproc_user` gives TPIDRURW and TPIDRURO from the CPU's fields, and anything else is `SNX_ARM_UNDEFINED`.
 
-Programs linking blocks link `snx_arm_rt`. The executor (`exec.h`, built into `snx_llvm`) compiles each block to an object and loads it with the runtime JIT's loader (`recompiler/llvm/code_loader.c`), which it gives those functions by name.
+Programs linking blocks link `snx_arm_rt`. The executor (`exec.h`, built into `snx_llvm`) compiles each block to an object and loads it with the runtime JIT's loader (`recompiler/llvm/code_loader.c`), which it gives those functions by name. On PowerPC64 the runtime's copies have a TOC of their own, so the executor loads the 32-bit modules' library (`armlib.c`) into its arena first and blocks call that one, with the arena's TOC, as a 32-bit game module links it.
 
 ## Thumb32 instructions with A32 twins
 
@@ -187,7 +187,7 @@ Thumb16 and Thumb32 are supported (see `thumb_decode.c`, `llvm_thumb.inc`): inte
 - ARMv8.1+ extensions that Cortex-A57 lacks (FP16
   arithmetic, dot-product, RDM) and privileged VFP state are not implemented. Unsupported and rejected
   unpredictable encodings trap rather than using an A64 fallback.
-- Little-endian Normal guest memory only. CPSR.E is rejected. Host-endian conversion is separate from the guest byte order.
+- Little-endian Normal guest memory only. CPSR.E is rejected. Host-endian conversion is separate from the guest byte order: on a big-endian target (the module's data layout) every load and store of a value, exclusives, LDRD/STRD and VFP/NEON transfers included, swaps it, and the register file (`r`, `d`) holds host numbers.
 - Effective addresses wrap at 32 bits before host pointer construction. Transfers outside the supplied flat mapping, or crossing its end, abort. Unaligned ordinary scalar accesses are supported. Multiple transfers, doubleword transfers, PC loads and atomics enforce their alignment constraints.
 - LDM/STM and doubleword bounds are checked as a group before any transfer. This is a deterministic flat-memory fault policy, not emulation of partial transfers on an MMU abort.
 - Acquire/release accesses and exclusives use LLVM sequentially consistent atomics. Barrier scopes are conservatively strengthened to a full fence. Hints may complete without waiting.

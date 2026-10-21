@@ -4,18 +4,15 @@
    HID writes from them (hle/services/hid_touch.c), as the console's driver reports a finger's start and end */
 #include "nx/runtime/platform/touch.h"
 #include "nx/hle/services/hid_layout.h"
+#include "common/utilities/endian.h"
 #include <assert.h>
 #include <string.h>
 
 static u32 field(const u8* state, int entry, int offset) {
-    u32 v;
-    memcpy(&v, state + HO_HidTouchScreenState_touches + entry * HS_HidTouchState + offset, 4);
-    return v;
+    return snx_ld_le32(state + HO_HidTouchScreenState_touches + entry * HS_HidTouchState + offset);
 }
 static i32 count(const u8* state) {
-    i32 n;
-    memcpy(&n, state + HO_HidTouchScreenState_count, 4);
-    return n;
+    return (i32)snx_ld_le32(state + HO_HidTouchScreenState_count);
 }
 
 int main(void) {
@@ -53,7 +50,7 @@ int main(void) {
     t.y[3] = 200;
     sampling = 41;
     hid_touch_sample(&f, &t, sampling, s);
-    assert(!memcmp(s, &sampling, 8) && count(s) == 1);
+    assert(snx_ld_le64(s) == sampling && count(s) == 1);
     assert(field(s, 0, HO_HidTouchState_attribute) == 1 && field(s, 0, HO_HidTouchState_finger) == 3);
     assert(field(s, 0, HO_HidTouchState_position_x) == 100 && field(s, 0, HO_HidTouchState_position_y) == 200);
     assert(field(s, 0, HO_HidTouchState_diameter_x) == 90 && field(s, 0, HO_HidTouchState_diameter_y) == 90);

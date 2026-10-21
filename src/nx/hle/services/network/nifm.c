@@ -88,7 +88,8 @@ static void network_profile(const SnxNetInterface* i, u8* p) {
         h[0] = (h[0] ^ (u8)*s) * 0x100000001b3ull;
         h[1] = (h[1] ^ (u8)(*s ^ 0x5A)) * 0x100000001b3ull;
     }
-    memcpy(p + 0xC2, h, 16);
+    snx_st_le64(p + 0xC2, h[0]); /* the same id as a little-endian host's */
+    snx_st_le64(p + 0xCA, h[1]);
     snprintf((char*)p + 0xD2, 0x40, "%s", i->name);
     p[0x112] = 0;                   /* profile type: user */
     p[0x113] = i->wireless ? 1 : 2; /* interface type: Wi-Fi or Ethernet */

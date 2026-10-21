@@ -5,6 +5,7 @@
 #ifndef SNX_MEM_H
 #define SNX_MEM_H
 #include "common/cpu/aarch64/cpu.h"
+#include "common/utilities/endian.h"
 #include <string.h>
 
 /* The host reservation (128 GiB). A guest address of either width is an offset below it */
@@ -140,17 +141,13 @@ extern u64 g_pool_size;
 /* charged once, before guest threads start */
 extern u64 g_code_memory, g_main_stack_size;
 
-/* Guest memory is byte-addressed, so these go through memcpy */
-static inline u32 gr32(u64 a) {
-    u32 v;
-    memcpy(&v, GP(a), sizeof v);
-    return v;
-}
-static inline u64 gr64(u64 a) {
-    u64 v;
-    memcpy(&v, GP(a), sizeof v);
-    return v;
-}
-static inline void gw32(u64 a, u32 v) { memcpy(GP(a), &v, sizeof v); }
-static inline void gw64(u64 a, u64 v) { memcpy(GP(a), &v, sizeof v); }
+/* Guest memory is byte-addressed and little-endian whatever the host's order (common/utilities/endian.h), so these
+   go through memcpy and convert: a value read from or written to guest memory as a number goes through them or
+   endian.h's snx_ld_le32 and kin, never a plain load or a cast pointer (docs/PPC64.md#big-endian-hosts) */
+static inline u16 gr16(u64 a) { return snx_ld_le16(GP(a)); }
+static inline u32 gr32(u64 a) { return snx_ld_le32(GP(a)); }
+static inline u64 gr64(u64 a) { return snx_ld_le64(GP(a)); }
+static inline void gw16(u64 a, u16 v) { snx_st_le16(GP(a), v); }
+static inline void gw32(u64 a, u32 v) { snx_st_le32(GP(a), v); }
+static inline void gw64(u64 a, u64 v) { snx_st_le64(GP(a), v); }
 #endif

@@ -18,7 +18,6 @@ static void nacp_reset(void) {
 int main(void) {
     static u8 nacp[0x4000];
     u32 flags;
-    u64 v;
     nn_oe_DisplayVersion version;
     i64 normal = 0, journal = 0, required;
     hle_init(); /* am_service_main runs it again, which keeps what this left (the NACP reset) */
@@ -38,13 +37,10 @@ int main(void) {
     /* GetDisplayVersion and GetSaveDataSize from the NACP, and without one */
     memcpy(nacp + 0x3060, "2.0.0", 6);
     flags = 1u << 2;
-    memcpy(nacp + 0x302c, &flags, 4);
-    v = 0x4000000;
-    memcpy(nacp + 0x3080, &v, 8);
-    v = 0x1000000;
-    memcpy(nacp + 0x3088, &v, 8);
-    v = 0x200000;
-    memcpy(nacp + 0x3090, &v, 8);
+    snx_st_le32(nacp + 0x302c, flags);
+    snx_st_le64(nacp + 0x3080, 0x4000000);
+    snx_st_le64(nacp + 0x3088, 0x1000000);
+    snx_st_le64(nacp + 0x3090, 0x200000);
     g_test_nacp = nacp;
     g_test_nacp_size = sizeof nacp;
     CHECK(nn_am_service_IApplicationFunctions_GetDisplayVersion(NULL, &version) == 0);

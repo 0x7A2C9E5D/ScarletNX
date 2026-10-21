@@ -188,13 +188,11 @@ static IpcCtx* request(Request* r, u32 cmd) {
     r->c.raw_size = sizeof r->raw;
     return &r->c;
 }
-static void argument32(Request* r, u32 off, u32 v) { memcpy(r->raw + off, &v, 4); }
-static void argument64(Request* r, u32 off, u64 v) { memcpy(r->raw + off, &v, 8); }
+static void argument32(Request* r, u32 off, u32 v) { snx_st_le32(r->raw + off, v); }
+static void argument64(Request* r, u32 off, u64 v) { snx_st_le64(r->raw + off, v); }
 static u32 reply32(Request* r, u32 off) {
-    u32 v;
     CHECK(off + 4 <= r->c.out_size);
-    memcpy(&v, r->c.out + off, 4);
-    return v;
+    return snx_ld_le32(r->c.out + off); /* the dispatcher writes the reply as the guest reads it */
 }
 static void call(SvcObj* o, Request* r) { CHECK(o->dispatch(o, &r->c) == 0); }
 
@@ -267,53 +265,42 @@ static void test_mm(void) {
 /* hid IHidServer: SetSupportedNpadStyleSet (100) {u32 style set, aruid at 8}, GetSupportedNpadStyleSet (101) {aruid}
    and AcquireNpadStyleSetUpdateEventHandle (106) {u32 npad id, aruid at 8, u64 event pointer at 16} */
 static u32 no1_style(void) {
-    u32 style;
-    memcpy(&style, kshmem_ptr(g_hle.hid.shm) + HO_HidSharedMemory_npad + HO_HidNpadInternalState_style_set, 4);
-    return style;
+    return snx_ld_le32(kshmem_ptr(g_hle.hid.shm) + HO_HidSharedMemory_npad + HO_HidNpadInternalState_style_set);
 }
 static u32 npad_style_at(int id) {
-    u32 style;
     u8* e = kshmem_ptr(g_hle.hid.shm) + HO_HidSharedMemory_npad + id * HS_HidNpadSharedMemoryEntry;
-    memcpy(&style, e + HO_HidNpadInternalState_style_set, 4);
-    return style;
+    return snx_ld_le32(e + HO_HidNpadInternalState_style_set);
 }
 static u64 npad_latest_buttons(int id, u32 lifo_offset) {
     u8* lifo = kshmem_ptr(g_hle.hid.shm) + HO_HidSharedMemory_npad + id * HS_HidNpadSharedMemoryEntry + lifo_offset;
-    u64 tail, buttons;
-    memcpy(&tail, lifo + HO_HidCommonLifoHeader_tail, 8);
-    memcpy(&buttons,
-           lifo + HO_HidNpadCommonLifo_storage + tail * HS_HidNpadCommonStateAtomicStorage + 8 +
-               HO_HidNpadCommonState_buttons,
-           8);
-    return buttons;
+    u64 tail = snx_ld_le64(lifo + HO_HidCommonLifoHeader_tail);
+    return snx_ld_le64(lifo + HO_HidNpadCommonLifo_storage + tail * HS_HidNpadCommonStateAtomicStorage + 8 +
+                       HO_HidNpadCommonState_buttons);
 }
 static void check_npad_latest_sample(int id, u32 lifo_offset, u64 sample) {
     u8* lifo = kshmem_ptr(g_hle.hid.shm) + HO_HidSharedMemory_npad + id * HS_HidNpadSharedMemoryEntry + lifo_offset;
-    u64 tail, stamp, state_sample;
-    memcpy(&tail, lifo + HO_HidCommonLifoHeader_tail, 8);
+    u64 tail = snx_ld_le64(lifo + HO_HidCommonLifoHeader_tail), stamp, state_sample;
     u8* entry = lifo + HO_HidNpadCommonLifo_storage + tail * HS_HidNpadCommonStateAtomicStorage;
-    memcpy(&stamp, entry, 8);
-    memcpy(&state_sample, entry + HO_HidNpadCommonStateAtomicStorage_state, 8);
+    stamp = snx_ld_le64(entry);
+    state_sample = snx_ld_le64(entry + HO_HidNpadCommonStateAtomicStorage_state);
     CHECK((stamp & 1) == 0 && stamp == sample << 1 && state_sample == sample);
 }
 static void npad_latest_sticks(int id, u32 lifo_offset, i32 sticks[4]) {
     u8* lifo = kshmem_ptr(g_hle.hid.shm) + HO_HidSharedMemory_npad + id * HS_HidNpadSharedMemoryEntry + lifo_offset;
-    u64 tail;
-    memcpy(&tail, lifo + HO_HidCommonLifoHeader_tail, 8);
+    u64 tail = snx_ld_le64(lifo + HO_HidCommonLifoHeader_tail);
     memcpy(sticks,
            lifo + HO_HidNpadCommonLifo_storage + tail * HS_HidNpadCommonStateAtomicStorage + 8 +
                HO_HidNpadCommonState_analog_stick_l,
            16);
+    snx_le32_array(sticks, 4);
 }
 static float npad_latest_direction(int id, u32 lifo_offset, u32 direction_offset) {
     u8* lifo = kshmem_ptr(g_hle.hid.shm) + HO_HidSharedMemory_npad + id * HS_HidNpadSharedMemoryEntry + lifo_offset;
-    u64 tail;
+    u64 tail = snx_ld_le64(lifo + HO_HidCommonLifoHeader_tail);
+    u32 bits = snx_ld_le32(lifo + HO_HidNpadSixAxisSensorLifo_storage + tail * HS_HidSixAxisSensorStateAtomicStorage +
+                           8 + HO_HidSixAxisSensorState_direction + direction_offset);
     float direction;
-    memcpy(&tail, lifo + HO_HidCommonLifoHeader_tail, 8);
-    memcpy(&direction,
-           lifo + HO_HidNpadSixAxisSensorLifo_storage + tail * HS_HidSixAxisSensorStateAtomicStorage + 8 +
-               HO_HidSixAxisSensorState_direction + direction_offset,
-           sizeof direction);
+    memcpy(&direction, &bits, sizeof direction);
     return direction;
 }
 static void set_ids(SvcObj* h, const u32* ids, u32 n) {
@@ -322,6 +309,7 @@ static void set_ids(SvcObj* h, const u32* ids, u32 n) {
     r.c.has_pid = 1;
     argument64(&r, 0, 0x55);
     memcpy(g_mem + 0x3000, ids, n * 4);
+    snx_le32_array(g_mem + 0x3000, n);
     r.c.nx = 1;
     r.c.x[0].addr = 0x3000;
     r.c.x[0].size = n * 4;
@@ -402,6 +390,7 @@ static void vibration(SvcObj* h, u32 handle, float amp_low, float amp_high) {
     request(&r, 201);
     r.c.has_pid = 1; /* the aruid */
     argument32(&r, 0, handle);
+    snx_le32_array(v, 4);
     memcpy(r.raw + 4, v, sizeof v);
     argument64(&r, 0x18, 0x55);
     call(h, &r);
@@ -413,6 +402,8 @@ static void vibrations(SvcObj* h, const u32* handles, const float (*values)[4], 
     argument64(&r, 0, 0x55);
     memcpy(g_mem + 0x1000, handles, n * 4);
     memcpy(g_mem + 0x2000, values, n * 16);
+    snx_le32_array(g_mem + 0x1000, n);
+    snx_le32_array(g_mem + 0x2000, n * 4);
     r.c.nx = 2;
     r.c.x[0].addr = 0x1000;
     r.c.x[0].size = n * 4;
@@ -491,18 +482,18 @@ static void test_npad_players(SvcObj* h) {
     g_hle.hid.pad_extra[0].motion[0].valid = 0;
     /* upright, a single Joy-Con's header says so (footer JoyLeftVertical, ABXY oriented); held sideways, the other */
     CHECK(e1[HO_HidNpadInternalState_applet_footer_ui_type] == 9);
-    memcpy(&props, e1 + HO_HidNpadInternalState_system_properties, 8);
+    props = snx_ld_le64(e1 + HO_HidNpadInternalState_system_properties);
     CHECK((props & (3u << 11)) == 1u << 11 && (props & (1u << 14)));
     joy_hold(h, 1);
     hid_update();
     npad_latest_sticks(1, HO_HidNpadInternalState_joy_left_lifo, sticks);
     CHECK(sticks[0] == 1000 && sticks[1] == 0);
     CHECK(e1[HO_HidNpadInternalState_applet_footer_ui_type] == 8);
-    memcpy(&props, e1 + HO_HidNpadInternalState_system_properties, 8);
+    props = snx_ld_le64(e1 + HO_HidNpadInternalState_system_properties);
     CHECK((props & (3u << 11)) == 1u << 12);
     joy_hold(h, 0);
     CHECK(e1[HO_HidNpadInternalState_applet_footer_ui_type] == 9);
-    memcpy(&assignment, e1 + HO_HidNpadInternalState_joy_assignment_mode, 4);
+    assignment = snx_ld_le32(e1 + HO_HidNpadInternalState_joy_assignment_mode);
     CHECK(assignment == 1);
     set_ids(h, fewer_ids, 4);
     CHECK(npad_style_at(2) == 0 && npad_style_at(1) == 1u << 3);
@@ -659,13 +650,12 @@ static void test_ngc(void) {
     memcpy(g_mem + 0x100, text, sizeof text);
     ngc_request(&r, 0);
     CHECK(ngc->dispatch(ngc, &r.c) == 0 && r.c.out_size == 4);
-    memcpy(&v, r.c.out, 4);
+    v = snx_ld_le32(r.c.out);
     CHECK(v == 1);
     for (cmd = 1; cmd <= 5; cmd++) {
         if (cmd == 3) continue;
         ngc_request(&r, cmd);
-        v = 2; /* American English */
-        memcpy(r.raw, &v, 4);
+        snx_st_le32(r.raw, 2); /* American English */
         r.c.na = 1;
         r.c.a[0].addr = 0x100;
         r.c.a[0].size = sizeof text;
@@ -676,7 +666,7 @@ static void test_ngc(void) {
             r.c.b[0].size = sizeof text - 4; /* room for less than the text */
         }
         CHECK(ngc->dispatch(ngc, &r.c) == 0 && r.c.out_size == 4);
-        memcpy(&v, r.c.out, 4);
+        v = snx_ld_le32(r.c.out);
         CHECK(v == 0);
         if (cmd == 2 || cmd == 5)
             CHECK(!memcmp(g_mem + 0x200, text, sizeof text - 4) && g_mem[0x200 + sizeof text - 4] == 0xEE);
@@ -750,7 +740,7 @@ static void test_acc_thumbnail(void) {
     static const u8 nobody[16];
     nn_account_Uid uid;
     IpcBuf image = {0x1000, 0x24000, 0};
-    memcpy(uid.v, g_user_id, 16);
+    acc_uid_put(uid.v, g_user_id);
     CHECK(nn_account_IAccountServiceForApplication_StoreSaveDataThumbnail(NULL, &uid, image) == 0);
     image.size = 0x1000;
     CHECK(nn_account_IAccountServiceForApplication_StoreSaveDataThumbnail(NULL, &uid, image) == RC(124, 32));
@@ -810,7 +800,7 @@ static void test_mii_default(void) {
         call(db, &r);
         memcpy(built, r.c.out, sizeof built);
         CHECK(memcmp(g_mem + 0x4000 + i * 0x5c + 0x10, built + 0x10, 0x48) == 0);
-        memcpy(&source, g_mem + 0x4000 + i * 0x5c + 0x58, 4);
+        source = gr32(0x4000 + i * 0x5c + 0x58);
         CHECK(source == 1);
     }
     CHECK(g_mem[0x4000 + 6 * 0x5c] == 0xee);
@@ -898,7 +888,9 @@ static void test_acc_select(void) {
     for (u32 cmd = 51; cmd <= 52; cmd++) {
         request(&r, cmd);
         call(acc, &r);
-        CHECK(r.c.out_size == 16 && !memcmp(r.c.out, g_user_id, 16));
+        u8 uid[16];
+        acc_uid_put(uid, g_user_id);
+        CHECK(r.c.out_size == 16 && !memcmp(r.c.out, uid, 16));
     }
     svcobj_unref(acc);
 }
@@ -996,7 +988,7 @@ static void test_aoc_content(void) {
         CHECK((u32)aoc->dispatch(aoc, &r.c) == lists[i].rc);
         if (lists[i].rc) continue;
         CHECK(reply32(&r, 0) == lists[i].n);
-        memcpy(&v, g_mem + 0x4000, 4);
+        v = gr32(0x4000);
         CHECK(!lists[i].n || v == lists[i].first);
     }
     request(&r, 7);
@@ -1019,7 +1011,7 @@ static void test_aoc_content(void) {
     r.c.b[0].addr = 0x4000;
     r.c.b[0].size = 4;
     call(aoc, &r);
-    memcpy(&v, g_mem + 0x4000, 4);
+    v = gr32(0x4000);
     CHECK(reply32(&r, 0) == 1 && v == 2);
     test_aoc_dump = 0;
     /* a game whose control.nacp numbers its DLCs from a base ID of its own, not its ID's 0x1000: its DLCs counted from
@@ -1036,7 +1028,7 @@ static void test_aoc_content(void) {
     call(aoc, &r);
     {
         u64 got;
-        memcpy(&got, r.c.out, 8);
+        got = snx_ld_le64(r.c.out);
         CHECK(got == test_aoc_base);
     }
     test_aoc_base = 0;

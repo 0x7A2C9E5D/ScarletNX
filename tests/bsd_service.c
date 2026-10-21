@@ -69,14 +69,14 @@ void svc_register(const char* name, SvcCtor ctor) { (void)name, (void)ctor; }
 enum { IN0 = 0x1000, IN1 = 0x2000, OUT0 = 0x3000, OUT1 = 0x4000, BUFSIZE = 0x1000 };
 static SvcObj* bsd;
 static IpcCtx ctx;
-static u32 raw[16]; /* more than any bsd command takes: sf refuses a request shorter than its arguments */
+static u8 raw[64]; /* more than any bsd command takes: sf refuses a request shorter than its arguments */
 static void request(u32 cmd, u32 a0, u32 a1, u32 a2) {
     memset(&ctx, 0, sizeof ctx);
     memset(raw, 0, sizeof raw);
-    raw[0] = a0;
-    raw[1] = a1;
-    raw[2] = a2;
-    ctx.raw = (const u8*)raw;
+    snx_st_le32(raw, a0); /* the request is the guest's: little-endian */
+    snx_st_le32(raw + 4, a1);
+    snx_st_le32(raw + 8, a2);
+    ctx.raw = raw;
     ctx.raw_size = sizeof raw;
     ctx.cmd = cmd;
 }
@@ -98,15 +98,11 @@ static i32 call(u32* err) {
                    : (ctx.cmd == 9 || ctx.cmd == 12 || ctx.cmd == 15 || ctx.cmd == 16 || ctx.cmd == 17) ? 12
                                                                                                         : 8;
     CHECK(ctx.out_size == expected);
-    i32 r;
-    memcpy(&r, ctx.out, 4);
-    if (err) memcpy(err, ctx.out + 4, 4);
-    return r;
+    if (err) *err = snx_ld_le32(ctx.out + 4);
+    return (i32)snx_ld_le32(ctx.out);
 }
 static u32 word(int i) {
-    u32 v;
-    memcpy(&v, ctx.out + i * 4, 4);
-    return v;
+    return snx_ld_le32(ctx.out + i * 4);
 }
 /* FreeBSD's sockaddr_in for 127.0.0.1 */
 static void sockaddr_lo(u64 at, u16 port_be) {
@@ -135,8 +131,7 @@ int main(void) {
     request(2, 2, 1, 0); /* Socket(AF_INET, SOCK_STREAM) */
     i32 l = call(&e);
     CHECK(l >= 0 && !e);
-    u32 one = 1;
-    memcpy(GP(IN0), &one, 4);
+    gw32(IN0, 1);
     request(21, (u32)l, 0xFFFF, 0x4); /* SetSockOpt SO_REUSEADDR */
     in(IN0, 4);
     CHECK(call(&e) == 0);
@@ -178,7 +173,7 @@ int main(void) {
 
     /* Poll: the client writable, then readable */
     u8 pfd[8] = {0};
-    memcpy(pfd, &c, 4);
+    snx_st_le32(pfd, (u32)c); /* guest memory: little-endian */
     pfd[4] = 0x04; /* POLLOUT */
     memcpy(GP(IN0), pfd, 8);
     request(6, 1, 2000, 0);
@@ -233,22 +228,21 @@ int main(void) {
     request(17, (u32)s, 0xFFFF, 0x1007); /* SO_ERROR */
     out(OUT0, 4);
     CHECK(call(&e) == 0 && gr32(OUT0) == 0);
-    u64 tv[2] = {0, 250000};
-    memcpy(GP(IN0), tv, 16);
+    gw64(IN0, 0);
+    gw64(IN0 + 8, 250000);
     request(21, (u32)s, 0xFFFF, 0x1006); /* SO_RCVTIMEO */
     in(IN0, 16);
     CHECK(call(&e) == 0);
     request(8, (u32)s, 0, 0); /* a blocking Recv gives up after it */
     out(OUT0, BUFSIZE);
     CHECK(call(&e) == -1 && e == SNX_EAGAIN);
-    u64 range[2] = {0, 1000000}; /* a tv_usec of a second, then a tv_sec before zero: EDOM, as a BSD stack answers */
-    memcpy(GP(IN0), range, 16);
+    gw64(IN0, 0); /* a tv_usec of a second, then a tv_sec before zero: EDOM, as a BSD stack answers */
+    gw64(IN0 + 8, 1000000);
     request(21, (u32)s, 0xFFFF, 0x1006);
     in(IN0, 16);
     CHECK(call(&e) == -1 && e == SNX_EDOM);
-    range[0] = (u64)-1;
-    range[1] = 0;
-    memcpy(GP(IN0), range, 16);
+    gw64(IN0, (u64)-1);
+    gw64(IN0 + 8, 0);
     request(21, (u32)s, 0xFFFF, 0x1005); /* SO_SNDTIMEO */
     in(IN0, 16);
     CHECK(call(&e) == -1 && e == SNX_EDOM);
@@ -313,7 +307,7 @@ int main(void) {
        socket a moment after SendTo returns (Linux before) */
     {
         u8 ready[8] = {0};
-        memcpy(ready, &u1, 4);
+        snx_st_le32(ready, (u32)u1);
         ready[4] = 0x01; /* POLLIN */
         memcpy(GP(IN0), ready, 8);
         request(6, 1, 2000, 0);

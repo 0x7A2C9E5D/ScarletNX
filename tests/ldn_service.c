@@ -195,10 +195,8 @@ static u32 simple(SvcObj* o, u32 cmd) {
     return call(o, &r);
 }
 static u32 reply32(Request* r, u32 off) {
-    u32 v;
     CHECK(off + 4 <= r->c.out_size);
-    memcpy(&v, r->c.out + off, 4);
-    return v;
+    return snx_ld_le32(r->c.out + off); /* the reply is the guest's: little-endian */
 }
 static u32 get_state(SvcObj* o) {
     Request r;
@@ -208,11 +206,9 @@ static u32 get_state(SvcObj* o) {
 }
 static i16 disconnect_reason(SvcObj* o) {
     Request r;
-    i16 v;
     request(&r, 3);
     CHECK(call(o, &r) == 0 && r.c.out_size == 4);
-    memcpy(&v, r.c.out, 2);
-    return v;
+    return (i16)snx_ld_le16(r.c.out);
 }
 static u32 network_info(SvcObj* o, SnxLdnNetworkInfo* info) {
     Request r;
@@ -297,7 +293,7 @@ static void in_a_room(SvcObj* creator, SvcObj* bsd) {
        network option off, at a socket of its protocol there (Eden's protocol byte) */
     {
         static const int protocols[2] = {0, SNX_IPPROTO_UDP};
-        SnxTimeval tv = {2, 0};
+        SnxTimeval tv = {(int64_t)snx_le64(2), 0}; /* option values are the guest's (net.h) */
         int k;
         for (k = 0; k < 2; k++) {
             SnxSocket* rx;
@@ -307,7 +303,7 @@ static void in_a_room(SvcObj* creator, SvcObj* bsd) {
             CHECK(snx_room_socket_open(rb, &rx, SNX_AF_INET, SNX_SOCK_DGRAM, protocols[k]) == 0);
             memset(&at, 0, sizeof at);
             at.family = SNX_AF_INET;
-            at.port = (u16)(to[2] | to[3] << 8);
+            memcpy(&at.port, to + 2, 2); /* network order, as the guest's bytes */
             CHECK(snx_socket_bind(rx, &at) == 0);
             snx_socket_setsockopt(rx, SNX_SOL_SOCKET, SNX_SO_RCVTIMEO, &tv, sizeof tv);
             request(&r, 2); /* Socket(AF_INET, SOCK_DGRAM, protocol) */
@@ -319,7 +315,7 @@ static void in_a_room(SvcObj* creator, SvcObj* bsd) {
             fd = reply32(&r, 0);
             request(&r, 11); /* SendTo(fd, 0, "ping", 192.168.1.2:1234 or 1235) */
             memset(r.raw, 0, 8);
-            memcpy(r.raw, &fd, 4);
+            snx_st_le32(r.raw, fd);
             memcpy(GP(BUF0), "ping", 4);
             memcpy(GP(BUF1), to, 16);
             in_auto(&r, BUF0, 4);
@@ -328,7 +324,7 @@ static void in_a_room(SvcObj* creator, SvcObj* bsd) {
             CHECK(snx_socket_recv(rx, got, sizeof got, 0, &from, NULL) == 4 && !memcmp(got, "ping", 4));
             CHECK(from.addr[0] == 192 && from.addr[3] == 1); /* from this console's address in the room */
             request(&r, 26);                                 /* Close */
-            memcpy(r.raw, &fd, 4);
+            snx_st_le32(r.raw, fd);
             CHECK(call(bsd, &r) == 0);
             snx_socket_unref(rx);
         }
@@ -466,11 +462,11 @@ int main(void) {
         fd = reply32(&r, 0);
         memcpy(GP(BUF0), any, 16);
         request(&r, 13); /* Bind(fd, addr) */
-        memcpy(r.raw, &fd, 4);
+        snx_st_le32(r.raw, fd);
         in_auto(&r, BUF0, 16);
         CHECK(call(bsd, &r) == 0 && reply32(&r, 0) == 0);
         request(&r, 16); /* GetSockName(fd) -> addr */
-        memcpy(r.raw, &fd, 4);
+        snx_st_le32(r.raw, fd);
         out_auto(&r, BUF1, 16);
         CHECK(call(bsd, &r) == 0 && reply32(&r, 0) == 0);
         memcpy(name, GP(BUF1), 16);
@@ -483,7 +479,7 @@ int main(void) {
             SnxSocket* peer;
             SnxSockAddr to;
             u8 port[2] = {name[2], name[3]};
-            int one = 1, k;
+            int one = (int)snx_le32(1), k;
             CHECK(snx_socket_open(&peer, SNX_AF_INET, SNX_SOCK_DGRAM, 0) == 0);
             snx_socket_setsockopt(peer, SNX_SOL_SOCKET, SNX_SO_BROADCAST, &one, sizeof one);
             memset(&to, 0, sizeof to);
@@ -496,7 +492,7 @@ int main(void) {
             CHECK(snx_socket_send(peer, "broadcast", 9, 0, &to) == 9);
             for (k = 0; k < 2; k++) {
                 request(&r, 9); /* RecvFrom(fd, flags) -> (ret, errno, addrlen), the message and the sender */
-                memcpy(r.raw, &fd, 4);
+                snx_st_le32(r.raw, fd);
                 out_auto(&r, BUF1, 64);
                 out_auto(&r, BUF2, 16);
                 CHECK(call(bsd, &r) == 0);
@@ -506,7 +502,7 @@ int main(void) {
             }
             request(&r, 6); /* Poll(nfds, timeout) with the fd for POLLIN: nothing left to read */
             r.raw[0] = 1;
-            memcpy(GP(BUF1), &fd, 4);
+            snx_st_le32(GP(BUF1), fd);
             ((u8*)GP(BUF1))[4] = 1; /* POLLIN */
             ((u8*)GP(BUF1))[5] = 0;
             in_auto(&r, BUF1, 8);
@@ -537,8 +533,9 @@ int main(void) {
     CHECK(call(a, &r) == 0 && get_state(a) == 3 && took_signal(ev_a, 0));
     CHECK(latest_update(a, &info, updates, 8) == 0);
     CHECK(info.node_count == 1 && info.nodes[0].is_connected && !strcmp((char*)info.nodes[0].user_name, "Host"));
-    CHECK(info.local_communication_id == 0x0100ABCD12345000ull && info.scene_id == 3 && info.channel == 6);
-    CHECK(info.ssid_length == 32 && info.nodes[0].version == 4 && info.node_count_max == 8);
+    CHECK(snx_le64(info.local_communication_id) == 0x0100ABCD12345000ull && snx_le16(info.scene_id) == 3 &&
+          snx_le16((u16)info.channel) == 6); /* the guest's little-endian structure */
+    CHECK(info.ssid_length == 32 && (int16_t)snx_le16((uint16_t)info.nodes[0].version) == 4 && info.node_count_max == 8);
     CHECK(info.nodes[0].ipv4[0] == 1 && info.nodes[0].ipv4[3] == 127 && info.nodes[0].mac[0] == 2);
     CHECK(updates[0] == 1 && updates[1] == 0); /* node 0 connected */
     CHECK(latest_update(a, &info, updates, 2) == 0 && updates[0] == 0);
@@ -563,8 +560,8 @@ int main(void) {
     CHECK(call(b, &r) == 0 && r.c.out_size == 4);
     CHECK((i16)reply32(&r, 0) == 1);
     memcpy(found, GP(BUF0), sizeof found);
-    CHECK(found[0].local_communication_id == 0x0100ABCD12345000ull && found[0].scene_id == 3);
-    CHECK(found[0].advertise_data_size == 4 && !memcmp(found[0].advertise_data, "game", 4));
+    CHECK(snx_le64(found[0].local_communication_id) == 0x0100ABCD12345000ull && snx_le16(found[0].scene_id) == 3);
+    CHECK(snx_le16(found[0].advertise_data_size) == 4 && !memcmp(found[0].advertise_data, "game", 4));
     CHECK(!strcmp((char*)found[0].nodes[0].user_name, "Host") && found[0].node_count == 1);
     request(&r, 102);
     r.raw[8] = 1; /* another game's id */
@@ -590,12 +587,12 @@ int main(void) {
     CHECK(took_signal(ev_a, 2000));
     CHECK(latest_update(a, &info, updates, 8) == 0);
     CHECK(info.node_count == 2 && info.nodes[1].is_connected && !strcmp((char*)info.nodes[1].user_name, "Station"));
-    CHECK(info.nodes[1].ipv4[0] == 2 && info.nodes[1].version == 4 && updates[1] == 1 && updates[0] == 0);
+    CHECK(info.nodes[1].ipv4[0] == 2 && (int16_t)snx_le16((uint16_t)info.nodes[1].version) == 4 && updates[1] == 1 && updates[0] == 0);
     CHECK(latest_update(b, &info, updates, 8) == 0);
     CHECK(info.node_count == 2 && !strcmp((char*)info.nodes[0].user_name, "Host") &&
           !strcmp((char*)info.nodes[1].user_name, "Station"));
     CHECK(updates[0] == 1 && updates[1] == 1 && updates[2] == 0);
-    CHECK(info.advertise_data_size == 4 && !memcmp(info.advertise_data, "game", 4));
+    CHECK(snx_le16(info.advertise_data_size) == 4 && !memcmp(info.advertise_data, "game", 4));
     request(&r, 4); /* GetSecurityParameter: the session id the host made */
     CHECK(call(b, &r) == 0 && r.c.out_size == 0x20 && !memcmp(r.c.out + 16, info.session_id, 16));
     CHECK(call(b, &r) == 0); /* and the same once more */
@@ -646,11 +643,11 @@ int main(void) {
         fd = reply32(&r, 0);
         memcpy(GP(BUF0), any, 16);
         request(&r, 13);
-        memcpy(r.raw, &fd, 4);
+        snx_st_le32(r.raw, fd);
         in_auto(&r, BUF0, 16);
         CHECK(call(bsd, &r) == 0 && reply32(&r, 0) == 0);
         request(&r, 16);
-        memcpy(r.raw, &fd, 4);
+        snx_st_le32(r.raw, fd);
         out_auto(&r, BUF1, 16);
         CHECK(call(bsd, &r) == 0);
         memcpy(name, GP(BUF1), 16);

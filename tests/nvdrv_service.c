@@ -146,6 +146,7 @@ static struct {
 void gpu_submit(const void* entries, u32 n, u32 channel, u32 incs, u32 wait_id, u32 wait_val, u32 expect) {
     CHECK(n <= 8);
     memcpy(test_gpu.entries, entries, n * sizeof *test_gpu.entries);
+    snx_le64_array(test_gpu.entries, n); /* the entries as nvdrv found them in guest memory, little-endian */
     test_gpu.n = n;
     test_gpu.channel = channel;
     test_gpu.incs = incs;
@@ -194,7 +195,7 @@ u32 host1x_ioctl(H1Ch* t, u32 cmd, u8* d, u32 n) {
         hook();
     }
     CHECK(!t->closed); /* the channel outlives a Close made during its ioctl */
-    if (n >= 4) memcpy(d, &cmd, 4);
+    if (n >= 4) snx_st_le32(d, cmd);
     return 0;
 }
 void host1x_forget_handle(u32 h) { (void)h; }
@@ -208,8 +209,8 @@ static u32 raw[4];
    B and C for an output), and the test fills in the ones it uses */
 static void request(u32 cmd, u32 a0, u32 a1) {
     memset(&ctx, 0, sizeof ctx);
-    raw[0] = a0;
-    raw[1] = a1;
+    raw[0] = snx_le32(a0); /* the message's words are little-endian */
+    raw[1] = snx_le32(a1);
     ctx.cmd = cmd;
     ctx.raw = (const u8*)raw;
     ctx.raw_size = sizeof raw;
@@ -222,10 +223,8 @@ static IpcBuf buf(u64 addr, u64 size) {
     return b;
 }
 static u32 reply(u32 off) {
-    u32 v;
     CHECK(off + 4 <= ctx.out_size);
-    memcpy(&v, ctx.out + off, 4);
-    return v;
+    return snx_ld_le32(ctx.out + off);
 }
 /* Open (0): the path in A, the fd and the NvError back */
 static u32 nv_open(const char* path, u32* error) {
@@ -255,13 +254,13 @@ static u32 nv_ioctl1(u32 fd, u32 cmd, u64 size) {
 static void submit_header(u32 num, u32 flags) {
     u8 h[0x18];
     memset(h, 0, sizeof h);
-    memcpy(h + 8, &num, 4);
-    memcpy(h + 12, &flags, 4);
+    snx_st_le32(h + 8, num);
+    snx_st_le32(h + 12, flags);
     memcpy(GP(IN0), h, sizeof h);
 }
 static void test_ioctl2(u32 gpu) {
     const u64 entries[3] = {0x0000000100200000ull, 0x0000000100300000ull, 0x0000000400400000ull};
-    memcpy(GP(IN1), entries, sizeof entries);
+    for (u32 i = 0; i < 3; i++) gw64(IN1 + 8 * i, entries[i]);
     submit_header(3, 2); /* FenceIncrement: the host adds two increments after the entries */
     memset(GP(OUT0), 0xCC, 0x18);
     request(11, gpu, SUBMIT_GPFIFO_EX);
@@ -308,9 +307,10 @@ static void test_ioctl2(u32 gpu) {
     u8 h[0x18];
     u32 fence[2] = {7, 0x1234}, flags = 1, one = 1;
     memset(h, 0, sizeof h);
-    memcpy(h + 8, &one, 4);
-    memcpy(h + 12, &flags, 4);
-    memcpy(h + 16, fence, 8);
+    snx_st_le32(h + 8, one);
+    snx_st_le32(h + 12, flags);
+    snx_st_le32(h + 16, fence[0]);
+    snx_st_le32(h + 20, fence[1]);
     memcpy(GP(IN0), h, sizeof h);
     request(11, gpu, SUBMIT_GPFIFO_EX);
     ctx.a[0] = buf(IN0, 0x18);
@@ -322,8 +322,9 @@ static void test_ioctl2(u32 gpu) {
        the host's two, while the fence promises all five */
     fence[1] = 3;
     flags = 0x102;
-    memcpy(h + 12, &flags, 4);
-    memcpy(h + 16, fence, 8);
+    snx_st_le32(h + 12, flags);
+    snx_st_le32(h + 16, fence[0]);
+    snx_st_le32(h + 20, fence[1]);
     memcpy(GP(IN0), h, sizeof h);
     request(11, gpu, SUBMIT_GPFIFO_EX);
     ctx.a[0] = buf(IN0, 0x18);
@@ -340,7 +341,7 @@ static void test_ioctl2(u32 gpu) {
 #define EVENT_WAIT_AS 0xC010001Eu
 #define EVENT_REG     0xC004001Fu
 #define EVENT_UNREG   0xC0040020u
-static void put(u32 off, u32 v) { memcpy(GP(IN0 + off), &v, 4); }
+static void put(u32 off, u32 v) { gw32(IN0 + off, v); }
 static void test_ctrl_syncpoints(u32 ctrl) {
     u32 kicks = test_gpu.kicks;
     put(0, 40);
@@ -425,7 +426,8 @@ static void test_ctrl_event_fds(u32 ctrl) {
 #define GET_CHARACTERISTICS 0xC0B04705u
 static void test_ioctl3(u32 ctrlgpu) {
     u64 header[2] = {0xA0, 0x7000};
-    memcpy(GP(IN0), header, sizeof header);
+    gw64(IN0, header[0]);
+    gw64(IN0 + 8, header[1]);
     memset(GP(OUT1), 0xCC, 0xB0);
     request(12, ctrlgpu, GET_CHARACTERISTICS);
     ctx.a[0] = buf(IN0, 0xB0);
@@ -508,33 +510,33 @@ static u32 nvmap_call(u32 cmd, u8* d) { return ioctl_nvmap(cmd, d, 32); }
 static u32 nvmap_new(u32 size, u64 addr) {
     u8 d[32] = {0};
     u32 h;
-    memcpy(d, &size, 4);
+    snx_st_le32(d, size);
     CHECK(nvmap_call(0x01, d) == 0);
-    memcpy(&h, d + 4, 4);
+    h = snx_ld_le32(d + 4);
     memset(d, 0, sizeof d);
-    memcpy(d, &h, 4);
-    memcpy(d + 24, &addr, 8);
+    snx_st_le32(d, h);
+    snx_st_le64(d + 24, addr);
     CHECK(nvmap_call(0x04, d) == 0);
     return h;
 }
 static u32 nvmap_param(u32 h, u32 param, u32* value) {
     u8 d[32] = {0};
     u32 r;
-    memcpy(d, &h, 4);
-    memcpy(d + 4, &param, 4);
+    snx_st_le32(d, h);
+    snx_st_le32(d + 4, param);
     r = nvmap_call(0x09, d);
-    memcpy(value, d + 8, 4);
+    *value = snx_ld_le32(d + 8);
     return r;
 }
 static u32 as_call(u32 cmd, u8* d, u32 n) { return ioctl_as(cmd, d, n, NULL, 0); }
 static u64 as_map(u32 flags, u32 h, u64 size, u64 gva) {
     u8 d[40] = {0};
-    memcpy(d, &flags, 4);
-    memcpy(d + 8, &h, 4);
-    memcpy(d + 24, &size, 8);
-    memcpy(d + 32, &gva, 8);
+    snx_st_le32(d, flags);
+    snx_st_le32(d + 8, h);
+    snx_st_le64(d + 24, size);
+    snx_st_le64(d + 32, gva);
     CHECK(as_call(0x06, d, sizeof d) == 0);
-    memcpy(&gva, d + 32, 8);
+    gva = snx_ld_le64(d + 32);
     return gva;
 }
 static void test_nvmap_as(void) {
@@ -543,29 +545,29 @@ static void test_nvmap_as(void) {
     u64 gva, fixed, addr, size;
     /* CREATE and FROM_ID take a reference each, FREE gives one back; the number is handed out again after the last */
     h = nvmap_new(0x2000, 0x8000);
-    memcpy(d, &h, 4);
-    CHECK(nvmap_call(0x03, d) == 0 && !memcmp(d + 4, &h, 4)); /* FROM_ID: the id is the handle's number */
+    snx_st_le32(d, h);
+    CHECK(nvmap_call(0x03, d) == 0 && snx_ld_le32(d + 4) == h); /* FROM_ID: the id is the handle's number */
     memset(d, 0, sizeof d);
-    memcpy(d, &h, 4);
+    snx_st_le32(d, h);
     CHECK(nvmap_call(0x05, d) == 0); /* FREE reports the address, size and flags */
-    memcpy(&addr, d + 8, 8);
-    memcpy(&v, d + 16, 4);
+    addr = snx_ld_le64(d + 8);
+    v = snx_ld_le32(d + 16);
     CHECK(addr == 0x8000 && v == 0x2000 && g_hle.nvdrv.nvh[h].alive);
     CHECK(nvmap_param(h, 4, &v) == 0 && v == 0x40000000u); /* Eden's heap for an allocated handle */
     CHECK(nvmap_param(h, 3, &v) == 0 && v == 0x8000);       /* Base: the address's low bits */
     CHECK(nvmap_param(h, 2, &v) == 0 && v == 0x1000);       /* no alignment given */
     CHECK(nvmap_param(h, 1, &v) == 0 && v == 0x2000);
     memset(d, 0, sizeof d);
-    memcpy(d + 4, &h, 4);
-    CHECK(nvmap_call(0x0E, d) == 0 && !memcmp(d, &h, 4)); /* GET_ID */
+    snx_st_le32(d + 4, h);
+    CHECK(nvmap_call(0x0E, d) == 0 && snx_ld_le32(d) == h); /* GET_ID */
     memset(d, 0, sizeof d);
-    memcpy(d, &h, 4);
+    snx_st_le32(d, h);
     CHECK(nvmap_call(0x05, d) == 0 && !g_hle.nvdrv.nvh[h].alive);
     CHECK(nvmap_call(0x05, d) == 1 && nvmap_param(h, 1, &v) == 1);
     memset(d, 0, sizeof d);
-    memcpy(d + 4, &h, 4);
+    snx_st_le32(d + 4, h);
     CHECK(nvmap_call(0x0E, d) == 1);
-    memcpy(d, &h, 4);
+    snx_st_le32(d, h);
     CHECK(nvmap_call(0x03, d) == 1); /* no live handle with that id */
     again = nvmap_new(0x3000, 0x9000);
     CHECK(again == h);
@@ -573,14 +575,14 @@ static void test_nvmap_as(void) {
     /* ALLOC_SPACE: allocator VA at a multiple of the alignment, from VA_BASE up */
     memset(d, 0, sizeof d);
     v = 4;
-    memcpy(d, &v, 4);
+    snx_st_le32(d, v);
     v = 0x10000;
-    memcpy(d + 4, &v, 4);
+    snx_st_le32(d + 4, v);
     CHECK(as_call(0x02, d, 24) == 0);
-    memcpy(&gva, d + 16, 8);
+    gva = snx_ld_le64(d + 16);
     CHECK(gva >= VA_BASE && !(gva & 0xFFFF));
     v = 3; /* a page size that isn't a power of two */
-    memcpy(d + 4, &v, 4);
+    snx_st_le32(d + 4, v);
     memset(d + 16, 0, 8);
     CHECK(as_call(0x02, d, 24) == 4);
 
@@ -592,30 +594,30 @@ static void test_nvmap_as(void) {
     fixed = as_map(1, h, 0x1000, gva + 0x1000);
     CHECK(fixed == gva + 0x1000 && gmmu_translate(fixed) == 0xC000);
     memset(d, 0, sizeof d);
-    memcpy(d, &gva, 8);
+    snx_st_le64(d, gva);
     CHECK(as_call(0x05, d, 8) == 0);
     CHECK(!gmmu_translate(gva) && gmmu_translate(fixed) == 0xC000);
     CHECK(as_map(0, again, 0x1000, 0) == gva); /* first fit takes the freed VA again */
     /* FREE_SPACE clears every page of its range */
     memset(d, 0, sizeof d);
-    memcpy(d, &gva, 8);
+    snx_st_le64(d, gva);
     v = 2;
-    memcpy(d + 8, &v, 4);
+    snx_st_le32(d + 8, v);
     v = 0x1000;
-    memcpy(d + 12, &v, 4);
+    snx_st_le32(d + 12, v);
     CHECK(as_call(0x03, d, 16) == 0 && !gmmu_translate(gva) && !gmmu_translate(fixed));
     addr = VA_END - 0x1000;
-    memcpy(d, &addr, 8);
+    snx_st_le64(d, addr);
     CHECK(as_call(0x03, d, 16) == 4); /* past the 40-bit space */
 
     /* REMAP in big pages: map, a bad handle skipped, then handle 0 unmaps */
     memset(d, 0, sizeof d);
     v = (u32)((VA_BASE + 0x1000000) >> 16);
-    memcpy(d + 4, &h, 4);
-    memcpy(d + 12, &v, 4);
-    memcpy(d + 16, &one, 4);
+    snx_st_le32(d + 4, h);
+    snx_st_le32(d + 12, v);
+    snx_st_le32(d + 16, one);
     v = 0x1FFF; /* no such handle */
-    memcpy(d + 24, &v, 4);
+    snx_st_le32(d + 24, v);
     CHECK(as_call(0x14, d, 40) == 0 && gmmu_translate(VA_BASE + 0x1000000) == 0xC000);
     memset(d + 4, 0, 4);
     CHECK(as_call(0x14, d, 20) == 0 && !gmmu_translate(VA_BASE + 0x1000000));
@@ -623,17 +625,17 @@ static void test_nvmap_as(void) {
     /* GET_VA_REGIONS: the big-page region starts where the allocator does */
     memset(d, 0, sizeof d);
     CHECK(as_call(0x08, d, 64) == 0);
-    memcpy(&v, d + 8, 4);
-    memcpy(&addr, d + 40, 8);
-    memcpy(&size, d + 16, 8);
+    v = snx_ld_le32(d + 8);
+    addr = snx_ld_le64(d + 40);
+    size = snx_ld_le64(d + 16);
     CHECK(v == 48 && addr == VA_BASE && size == 0x10000ull << 10);
-    memcpy(&v, d + 48, 4);
+    v = snx_ld_le32(d + 48);
     CHECK(v == 0x10000);
     /* ALLOC_AS_EX: 0 is 128K big pages */
     memset(d, 0, sizeof d);
     CHECK(as_call(0x09, d, 24) == 0 && g_hle.nvdrv.big_page_bits == 17);
     v = 0x10000;
-    memcpy(d + 8, &v, 4);
+    snx_st_le32(d + 8, v);
     CHECK(as_call(0x09, d, 24) == 0 && g_hle.nvdrv.big_page_bits == 16);
 }
 
@@ -706,24 +708,24 @@ int main(void) {
         u8 request[40] = {0};
         u32 size = 0x2000, handle, align = 0x1000;
         u64 addr = 0x2000;
-        memcpy(request, &size, 4);
+        snx_st_le32(request, size);
         CHECK(ioctl_nvmap(0x01, request, sizeof request) == 0);
-        memcpy(&handle, request + 4, 4);
+        handle = snx_ld_le32(request + 4);
         CHECK(handle != 0);
         u64 mapped;
         u32 mapped_size;
         CHECK(!nvmap_get(handle, &mapped, &mapped_size));
-        memcpy(request, &handle, 4);
-        memcpy(request + 12, &align, 4);
-        memcpy(request + 24, &addr, 8);
+        snx_st_le32(request, handle);
+        snx_st_le32(request + 12, align);
+        snx_st_le64(request + 24, addr);
         CHECK(ioctl_nvmap(0x04, request, sizeof request) == 0);
         CHECK(nvmap_get(handle, &mapped, &mapped_size) && mapped == addr && mapped_size == size);
         addr = AS_SIZE;
-        memcpy(request + 24, &addr, 8);
+        snx_st_le64(request + 24, addr);
         CHECK(ioctl_nvmap(0x04, request, sizeof request) == 4);
         CHECK(nvmap_get(handle, &mapped, &mapped_size) && mapped == 0x2000);
         addr = 0x2001;
-        memcpy(request + 24, &addr, 8);
+        snx_st_le64(request + 24, addr);
         CHECK(ioctl_nvmap(0x04, request, sizeof request) == 4);
     }
     {
@@ -732,33 +734,33 @@ int main(void) {
         u8 request[40] = {0};
         u32 size = 0x1000, handle, flags = 1;
         u64 addr = AS_SIZE - 0x1000, offset = 0xFFE, bytes = 1, gva = VA_BASE;
-        memcpy(request, &size, 4);
+        snx_st_le32(request, size);
         CHECK(ioctl_nvmap(0x01, request, sizeof request) == 0);
-        memcpy(&handle, request + 4, 4);
-        memcpy(request, &handle, 4);
-        memcpy(request + 24, &addr, 8);
+        handle = snx_ld_le32(request + 4);
+        snx_st_le32(request, handle);
+        snx_st_le64(request + 24, addr);
         CHECK(ioctl_nvmap(0x04, request, sizeof request) == 0);
         memset(request, 0, sizeof request);
-        memcpy(request, &flags, 4);
-        memcpy(request + 8, &handle, 4);
-        memcpy(request + 16, &offset, 8);
-        memcpy(request + 24, &bytes, 8);
-        memcpy(request + 32, &gva, 8);
+        snx_st_le32(request, flags);
+        snx_st_le32(request + 8, handle);
+        snx_st_le64(request + 16, offset);
+        snx_st_le64(request + 24, bytes);
+        snx_st_le64(request + 32, gva);
         CHECK(ioctl_as(0x06, request, sizeof request, NULL, 0) == 4);
         CHECK(!gmmu_translate(gva) && !gmmu_translate(gva + 0xFFF));
         offset = 0;
-        memcpy(request + 16, &offset, 8);
+        snx_st_le64(request + 16, offset);
         gva++;
-        memcpy(request + 32, &gva, 8);
+        snx_st_le64(request + 32, gva);
         CHECK(ioctl_as(0x06, request, sizeof request, NULL, 0) == 4);
         gva--;
-        memcpy(request + 32, &gva, 8);
+        snx_st_le64(request + 32, gva);
         bytes = 0x1001;
-        memcpy(request + 24, &bytes, 8);
+        snx_st_le64(request + 24, bytes);
         CHECK(ioctl_as(0x06, request, sizeof request, NULL, 0) == 4);
         CHECK(!gmmu_translate(gva));
         bytes = 1;
-        memcpy(request + 24, &bytes, 8);
+        snx_st_le64(request + 24, bytes);
         CHECK(ioctl_as(0x06, request, sizeof request, NULL, 0) == 0);
         CHECK(gmmu_translate(gva) == addr && gmmu_translate(gva + 0xFFF) == AS_SIZE - 1);
     }

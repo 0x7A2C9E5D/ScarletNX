@@ -48,13 +48,13 @@ static void madeup_set(u64 a, int made) {
 /* ------------------------------------------------------------ report semaphores */
 /* one word (STRUCTURE_SIZE ONE_WORD, bit 28), or the value as 64 bits and the timestamp */
 static void report_write(u64 a, u64 value, int one) {
+    u8 d[16]; /* guest memory's bytes, little-endian */
     if (one) {
-        u32 w = (u32)value;
-        gpu_release_write(a, &w, 4);
+        snx_st_le32(d, (u32)value);
+        gpu_release_write(a, d, 4);
     } else {
-        u64 d[2];
-        d[0] = value;
-        d[1] = gpu_ticks();
+        snx_st_le64(d, value);
+        snx_st_le64(d + 8, gpu_ticks());
         gpu_release_write(a, d, 16);
     }
 }

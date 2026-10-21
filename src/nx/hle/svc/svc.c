@@ -231,7 +231,9 @@ static u32 set_thread_activity(KThread* cur, u32 h, u32 act) {
     thread_put(t);
     return r;
 }
-static void put64(u8* p, u64 v) { memcpy(p, &v, 8); }
+/* the context is the guest's structure, little-endian: the registers go in as numbers, but for the vector registers,
+   which hold the guest's bytes (cpu.h's V128) */
+static void put64(u8* p, u64 v) { snx_st_le64(p, v); }
 /* svcGetThreadContext3: the console's ThreadContext (x0 to x28 at 0, fp, lr and sp at 0xE8, pc at 0x100, pstate at
    0x108, the 32 vector registers at 0x110, fpcr and fpsr at 0x310, tpidr at 0x318) of a paused thread (InvalidState
    otherwise; a pause still settling is waited for), zeros for one that has exited. A thread paused while blocked
@@ -241,7 +243,6 @@ static void put64(u8* p, u64 v) { memcpy(p, &v, 8); }
 static u32 get_thread_context(KThread* cur, u64 out, u32 h) {
     KThread* t = thread_of(h);
     u8 ctx[0x320];
-    u32 w[2];
     int i, inside, at_svc;
     u32 r = 0;
     R_UNLESS(t, R_BADHANDLE);
@@ -275,33 +276,35 @@ static u32 get_thread_context(KThread* cur, u64 out, u32 h) {
         put64(ctx + 0xF0, a->r[14]);
         put64(ctx + 0xF8, a->r[13]);
         put64(ctx + 0x100, pc);
-        w[0] = a->cpsr;
-        memcpy(ctx + 0x108, w, 4);
-        if (inside)
+        snx_st_le32(ctx + 0x108, a->cpsr);
+        if (inside) {
             memcpy(ctx + 0x110 + 8 * 8, a->d + 8, 8 * 8);
-        else
+            snx_le64_array(ctx + 0x110 + 8 * 8, 8);
+        } else {
             memcpy(ctx + 0x110, a->d, sizeof a->d);
-        w[0] = a->fpscr & 0x07FF9F00u; /* FPSCR's FPCR and FPSR fields */
-        w[1] = a->fpscr & 0xF800009Fu;
-        memcpy(ctx + 0x310, w, 8);
+            snx_le64_array(ctx + 0x110, 32);
+        }
+        snx_st_le32(ctx + 0x310, a->fpscr & 0x07FF9F00u); /* FPSCR's FPCR and FPSR fields */
+        snx_st_le32(ctx + 0x314, a->fpscr & 0xF800009Fu);
         put64(ctx + 0x318, a->tpidrurw);
     } else {
         const CPU* c = &t->cpu;
         if (inside) {
             memcpy(ctx + 8 * 19, c->x + 19, 10 * 8);
             memcpy(ctx + 8 * 29, c->x + 29, 3 * 8); /* fp, lr, sp */
+            snx_le64_array(ctx + 8 * 19, 13);
             memcpy(ctx + 0x110 + 16 * 8, c->v + 8, 8 * sizeof c->v[0]);
         } else {
             memcpy(ctx, c->x, 32 * 8); /* x0 to x28, fp, lr, sp */
+            snx_le64_array(ctx, 32);
             memcpy(ctx + 0x110, c->v, sizeof c->v);
         }
         put64(ctx + 0x100, at_svc ? c->pc - 4 : c->pc);
-        w[0] = (c->n ? 1u << 31 : 0) | (c->z ? 1u << 30 : 0) | (c->cf ? 1u << 29 : 0) | (c->vf ? 1u << 28 : 0);
-        memcpy(ctx + 0x108, w, 4);
-        w[0] = c->fpcr;
-        w[1] = c->fpsr;
-        memcpy(ctx + 0x310, w, 8);
-        memcpy(ctx + 0x318, &c->tpidr, 8);
+        snx_st_le32(ctx + 0x108,
+                    (c->n ? 1u << 31 : 0) | (c->z ? 1u << 30 : 0) | (c->cf ? 1u << 29 : 0) | (c->vf ? 1u << 28 : 0));
+        snx_st_le32(ctx + 0x310, c->fpcr);
+        snx_st_le32(ctx + 0x314, c->fpsr);
+        put64(ctx + 0x318, c->tpidr);
     }
     pm_unlock(&g_hle.kernel.klock);
     thread_put(t);

@@ -130,11 +130,7 @@ void vi_show_buffer(u32 nvmap_id, u32 offset, u32 w, u32 h, u32 pitch, u32 layou
 }
 void present_pace(u32 interval) { paced = interval; }
 
-static u32 rd32(u64 a) {
-    u32 v;
-    memcpy(&v, g_mem + a, 4);
-    return v;
-}
+static u32 rd32(u64 a) { return snx_ld_le32(g_mem + a); } /* the parcels' words are the guest's, little-endian */
 /* a request parcel at 0x2000: the header, the interface token, then the payload */
 static IpcBuf parcel(const void* payload, u32 n) {
     static const char token[] = "android.gui.IGraphicBufferProducer";
@@ -143,9 +139,10 @@ static IpcBuf parcel(const void* payload, u32 n) {
     IpcBuf b;
     memset(p, 0, 0x1000);
     hdr[0] = data, hdr[1] = 16, hdr[2] = 0, hdr[3] = 16 + data;
+    snx_le32_array(hdr, 4);
     memcpy(p, hdr, 16);
-    memcpy(p + 16, &(u32){0x100}, 4);
-    memcpy(p + 20, &len, 4);
+    snx_st_le32(p + 16, 0x100);
+    snx_st_le32(p + 20, len);
     for (i = 0; i < len; i++) p[24 + 2 * i] = (u8)token[i];
     memcpy(p + 16 + data - n, payload, n);
     b.addr = 0x2000, b.size = 16 + data, b.flags = 0;
@@ -190,16 +187,16 @@ int main(void) {
 
     /* SetPreallocatedBuffer(slot 0): present, its flattened size and fd count, the NvGraphicBuffer */
     memset(gbuf, 0, sizeof gbuf);
-    memcpy(gbuf + 0x04, &(u32){1280}, 4);
-    memcpy(gbuf + 0x08, &(u32){720}, 4);
-    memcpy(gbuf + 0x10, &(u32){1}, 4);
-    memcpy(gbuf + 0x2c, &(u32){7}, 4);
-    memcpy(gbuf + 0x6c, &(u32){3}, 4);
-    memcpy(gbuf + 0x70, &(u32){5120}, 4);
-    memcpy(gbuf + 0x80, &(u32){4}, 4);
+    snx_st_le32(gbuf + 0x04, 1280);
+    snx_st_le32(gbuf + 0x08, 720);
+    snx_st_le32(gbuf + 0x10, 1);
+    snx_st_le32(gbuf + 0x2c, 7);
+    snx_st_le32(gbuf + 0x6c, 3);
+    snx_st_le32(gbuf + 0x70, 5120);
+    snx_st_le32(gbuf + 0x80, 4);
     memset(req, 0, sizeof req);
-    memcpy(req + 4, &(u32){1}, 4);
-    memcpy(req + 8, &(u32){VI_GBUF}, 4);
+    snx_st_le32(req + 4, 1);
+    snx_st_le32(req + 8, VI_GBUF);
     memcpy(req + 16, gbuf, VI_GBUF);
     CHECK(transact(BQ_SET_PREALLOCATED_BUFFER, req, sizeof req) == 4 && rd32(0x4010) == 0);
 
@@ -219,12 +216,12 @@ int main(void) {
 
     /* QueueBuffer: swap interval 1 and one fence (syncpoint 5 at 10); shown, and free again */
     memset(q, 0, sizeof q);
-    memcpy(q + 4, &(u32){VI_QBI}, 4);
-    memcpy(q + 12 + 44, &(u32){1}, 4);
-    memcpy(q + 12 + 48, &(u32){1}, 4);
-    memcpy(q + 12 + 52, &(u32){5}, 4);
-    memcpy(q + 12 + 56, &(u32){10}, 4);
-    for (v = 1; v < 4; v++) memcpy(q + 12 + 52 + 8 * v, &(u32){~0u}, 4);
+    snx_st_le32(q + 4, VI_QBI);
+    snx_st_le32(q + 12 + 44, 1);
+    snx_st_le32(q + 12 + 48, 1);
+    snx_st_le32(q + 12 + 52, 5);
+    snx_st_le32(q + 12 + 56, 10);
+    for (v = 1; v < 4; v++) snx_st_le32(q + 12 + 52 + 8 * v, ~0u);
     CHECK(transact(BQ_QUEUE_BUFFER, q, sizeof q) == 20);
     CHECK(rd32(0x4010) == 1280 && rd32(0x4014) == 720 && rd32(0x401c) == 1 && rd32(0x4020) == 0);
     CHECK(fence_n == 1 && fence_id == 5 && shown_n == 1 && shown_nvmap == 7 && shown_w == 1280 && shown_h == 720);
@@ -274,13 +271,13 @@ int main(void) {
     CHECK(transact(BQ_QUEUE_BUFFER, q, sizeof q) == 20 && shown_n == v + 1);
 
     /* the swap interval queued is the next dequeue's pace: 0 to 4, a negative one 1, past 4 capped */
-    memcpy(q + 12 + 44, &(u32){9}, 4);
+    snx_st_le32(q + 12 + 44, 9);
     CHECK(transact(BQ_DEQUEUE_BUFFER, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20) == 56);
     CHECK(transact(BQ_QUEUE_BUFFER, q, sizeof q) == 20 && g_hle.vi.layer[0].interval == 4);
-    memcpy(q + 12 + 44, &(u32){~0u}, 4);
+    snx_st_le32(q + 12 + 44, ~0u);
     CHECK(transact(BQ_DEQUEUE_BUFFER, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20) == 56);
     CHECK(transact(BQ_QUEUE_BUFFER, q, sizeof q) == 20 && g_hle.vi.layer[0].interval == 1);
-    memcpy(q + 12 + 44, &(u32){0}, 4);
+    snx_st_le32(q + 12 + 44, 0);
     CHECK(transact(BQ_DEQUEUE_BUFFER, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20) == 56);
     CHECK(transact(BQ_QUEUE_BUFFER, q, sizeof q) == 20 && g_hle.vi.layer[0].interval == 0);
     /* a QueueBufferInput cut short: the whole buffer at interval 1 */
@@ -293,8 +290,8 @@ int main(void) {
         u8 short_req[16 + 0x40];
         CHECK(nns_hosbinder_IHOSBinderDriver_TransactParcel(NULL, 1, BQ_QUERY, tiny, reply, 0) == RC(114, 1));
         memset(short_req, 0, sizeof short_req);
-        memcpy(short_req + 4, &(u32){1}, 4);
-        memcpy(short_req + 8, &(u32){0x40}, 4);
+        snx_st_le32(short_req + 4, 1);
+        snx_st_le32(short_req + 8, 0x40);
         memcpy(short_req + 16, gbuf, 0x40);
         CHECK(transact(BQ_SET_PREALLOCATED_BUFFER, short_req, sizeof short_req) == 4 && rd32(0x4010) == 0);
         CHECK(!g_hle.vi.layer[0].slot[0].has_buffer);

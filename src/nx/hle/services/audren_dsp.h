@@ -135,7 +135,8 @@ enum { SNX_AUDREN_SINK_DEVICE = 1, SNX_AUDREN_SINK_CIRCULAR = 2 };
 #define SNX_AUDREN_FINAL_MIX  0
 #define SNX_AUDREN_UNUSED_MIX 0x7FFFFFFF
 
-/* AudioRendererParameter (OpenAudioRenderer's 0x34 bytes) as the state's sizes. NULL when they are out of range */
+/* AudioRendererParameter (OpenAudioRenderer's 0x34 bytes, host numbers as the IPC layer gives its raw arguments) as
+   the state's sizes. NULL when they are out of range */
 ARState* audren_state_new(const u8* params);
 void audren_state_free(ARState* s);
 /* RequestUpdate's input into the state, and its output written: 0, or the result code to return */

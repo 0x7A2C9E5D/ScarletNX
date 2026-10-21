@@ -31,12 +31,10 @@
    one in a domain message (SendMessage), whose reply is a domain one */
 enum { IPC_DOMAIN_SESSION = 1, IPC_DOMAIN_MESSAGE = 2 };
 
-static u32 rd32(const u8* p) {
-    u32 v;
-    memcpy(&v, p, 4);
-    return v;
-}
-static void wr32(u8* p, u32 v) { memcpy(p, &v, 4); }
+/* the message's words are little-endian, as every field of HIPC and CMIF is: the descriptors' packed bitfields are
+   taken apart from the converted word */
+static u32 rd32(const u8* p) { return snx_ld_le32(p); }
+static void wr32(u8* p, u32 v) { snx_st_le32(p, v); }
 
 /* ipc.c's state is g_hle.ipc (ipc.h): the service objects, sessions and domains, each a pool (hle.h), the warned
    pairs, the registry and the crash report's ring */
@@ -480,6 +478,7 @@ static void serve(IpcCtx* c, SvcObj* o, u32 seq) {
     u32 in[2];
     ipc_in(c, 0, &in[0], 4);
     ipc_in(c, 4, &in[1], 4);
+    snx_le32_array(in, 2);
     ring_set(seq, IPC_REC_RUNNING, o->name, c->type, c->cmd, in, 0, NULL);
     LOGV("IPC %s cmd %u\n", o->name, c->cmd);
     c->rc = (u32)o->dispatch(o, c);
@@ -514,7 +513,7 @@ static u32 control(IpcCtx* c, KSession* s) {
             SvcObj* o;
             R_UNLESS(d, RC_TARGETNOTDOMAIN);
             ipc_in(c, 0, &id, 4);
-            o = domain_get(d, id);
+            o = domain_get(d, snx_le32(id));
             R_UNLESS(o, RC_DOMAINOBJNOTFOUND);
             out_move_h(c, session_new(o));
             R_SUCCEED();

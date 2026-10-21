@@ -118,7 +118,8 @@ typedef struct {
     };
 } nca_fs_header_t;
 
-/* Content archive (NCA) header. */
+/* Content archive (NCA) header. ScarletNX: nca_decrypt_header leaves its words, and its FS headers', in the host's
+   order. */
 typedef struct {
     uint8_t fixed_key_sig[0x100]; /* RSA-PSS signature over header with fixed key. */
     uint8_t npdm_key_sig[0x100]; /* RSA-PSS signature over header with key in NPDM. */
@@ -130,15 +131,7 @@ typedef struct {
     uint64_t nca_size; /* Entire archive size. */
     uint64_t title_id;
     uint8_t _0x218[0x4]; /* Padding. */
-    union {
-        uint32_t sdk_version; /* What SDK was this built with? */
-        struct {
-            uint8_t sdk_revision;
-            uint8_t sdk_micro;
-            uint8_t sdk_minor;
-            uint8_t sdk_major;
-        };
-    };
+    uint32_t sdk_version; /* What SDK was this built with? Major, minor, micro, revision, from the top byte down. */
     uint8_t crypto_type2; /* Which keyblob (field 2) */
     uint8_t fixed_key_generation;
     uint8_t _0x222[0xE]; /* Padding. */
@@ -242,6 +235,9 @@ typedef struct nca_ctx {
 void nca_init(nca_ctx_t *ctx);
 void nca_process(nca_ctx_t *ctx);
 int nca_decrypt_header(nca_ctx_t *ctx);
+/* ScarletNX: a header's words, its FS headers' included, between little-endian and the host's order (the same both
+   ways; nothing on a little-endian host). */
+void nca_header_swap(nca_header_t *header);
 void nca_decrypt_key_area(nca_ctx_t *ctx);
 void nca_print(nca_ctx_t *ctx);
 

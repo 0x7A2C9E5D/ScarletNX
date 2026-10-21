@@ -241,12 +241,8 @@ static SnxJitService* module_jit(struct snx_recompiled* m) {
     char error[512];
     if (s) return s == JIT_NONE ? NULL : s;
     if (!m->view_count) return NULL; /* snx_recompile_from's: the caller compiles what the module lacks */
-#if defined(__powerpc64__)
-    /* the JIT's units call the AOT module's functions directly (snx_aot_<address>) and share its table, but the
-       module has a TOC of its own, the loader's arena another: no runtime JIT there, as before PowerPC64 had a
-       loader */
-    return NULL;
-#endif
+    /* PowerPC64: the units call the module's functions directly (snx_aot_<address>) and share its table, so their
+       arena shares the TOC of the module's, near it (jit_service.c's aot_toc) */
     memset(&config, 0, sizeof(config));
     config.images = m->views;
     config.image_count = m->view_count;

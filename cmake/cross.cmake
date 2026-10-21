@@ -4,10 +4,14 @@
 # The target's flags for what is compiled outside CMake's own compiles (FFmpeg's and OpenSSL's builds and the
 # recompiler's runtime library), as cmake/apple.cmake gives them for Apple's: SNX_TARGET_FLAGS. It holds:
 #   - SNX_ARCH_FLAGS, the CPU baseline the whole build compiles for, which CMake's compiles get too (added here).
-#     PowerPC64 builds for POWER8: before it there is no lqarx/stqcx., and Clang calls libatomic's
-#     __atomic_compare_exchange_16 for snx_cas128 (helpers/integer.c), which a module links no library to have.
-#     ppc64le starts at POWER8 anyway; the BE machines before it (970) have no Vulkan driver. SNX_PPC64_ELFV2 builds
-#     big-endian glibc for ELFv2 (Arch POWER's), as Clang builds it for ELFv1 (Debian ports'). RISC-V builds rv64gc and
+#     PowerPC64 builds for SNX_PPC64_CPU, POWER8 unless the build names an older big-endian machine (970 for the
+#     PowerPC G5, power4 to power7). ppc64le starts at POWER8. Before it there is no lqarx/stqcx., and Clang would call
+#     libatomic's __atomic_compare_exchange_16 for snx_cas128 (helpers/integer.c), which a module links no library to
+#     have: such a build's modules call RtAPI.cas128 (common/runtime/cas128.c), which takes POWER8's instructions where
+#     the machine has them and a lock elsewhere. The recompiler builds modules for the same CPU when the host's name
+#     isn't known (SNX_PPC64_LLVM_CPU, LLVM's name for it). SNX_PPC64_ELFV2 builds big-endian glibc for ELFv2 (Arch
+#     POWER's), as Clang builds it for ELFv1 (Debian ports'). The flags go into CMAKE_C_FLAGS and CMAKE_CXX_FLAGS,
+#     so the configure checks (the libraries' among them) compile for the same CPU and ABI. RISC-V builds rv64gc and
 #     LoongArch LA64 v1.0, as the recompiler's modules are (ir.c), and both without linker relaxation: the runtime
 #     library is merged into each module with its functions' own target features, and the module's linker (link_elf.c)
 #     moves no code.
@@ -18,21 +22,35 @@
 # All are empty for the other hosts and builds.
 include_guard(GLOBAL)
 option(SNX_PPC64_ELFV2 "Build big-endian PowerPC64 glibc for ELFv2 (Arch POWER), not ELFv1 (Debian ports)" OFF)
+set(SNX_PPC64_CPU "power8" CACHE STRING "The PowerPC64 CPU the build runs on at least: power8, or for big-endian power7, power6, power5, power4 or 970 (the PowerPC G5)")
+set_property(CACHE SNX_PPC64_CPU PROPERTY STRINGS power8 power7 power6 power5 power4 970)
 set(SNX_ARCH_FLAGS "")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64|ppc64le|powerpc64|powerpc64le)$")
-    set(SNX_ARCH_FLAGS -mcpu=power8)
+    if(NOT SNX_PPC64_CPU MATCHES "^(power[4-8]|970)$")
+        message(FATAL_ERROR "SNX_PPC64_CPU=${SNX_PPC64_CPU}: one of power8, power7, power6, power5, power4 and 970")
+    endif()
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "le$" AND NOT SNX_PPC64_CPU STREQUAL "power8")
+        message(FATAL_ERROR "SNX_PPC64_CPU=${SNX_PPC64_CPU}: little-endian PowerPC64 starts at POWER8")
+    endif()
+    set(SNX_ARCH_FLAGS -mcpu=${SNX_PPC64_CPU})
     if(SNX_PPC64_ELFV2)
         list(APPEND SNX_ARCH_FLAGS -mabi=elfv2)
     endif()
+    string(REPLACE "power" "pwr" snx_llvm_cpu "${SNX_PPC64_CPU}")
+    add_compile_definitions(SNX_PPC64_LLVM_CPU="${snx_llvm_cpu}")
 elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "riscv64")
     set(SNX_ARCH_FLAGS -march=rv64gc -mno-relax)
 elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "loongarch64")
     set(SNX_ARCH_FLAGS -march=la64v1.0 -mno-relax)
 endif()
-add_compile_options(${SNX_ARCH_FLAGS})
+list(JOIN SNX_ARCH_FLAGS " " snx_arch_flags)
+string(APPEND CMAKE_C_FLAGS " ${snx_arch_flags}")
+string(APPEND CMAKE_CXX_FLAGS " ${snx_arch_flags}")
 # the links' too: Clang names the program's loader by it (ELFv2's ld64.so.2, ELFv1's ld64.so.1)
 if(SNX_PPC64_ELFV2)
-    add_link_options(-mabi=elfv2)
+    foreach(kind EXE SHARED MODULE)
+        string(APPEND CMAKE_${kind}_LINKER_FLAGS " -mabi=elfv2")
+    endforeach()
 endif()
 
 set(SNX_TARGET_FLAGS "")

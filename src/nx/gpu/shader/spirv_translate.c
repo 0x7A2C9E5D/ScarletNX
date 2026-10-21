@@ -1987,8 +1987,9 @@ static void global_dynamic(DirectCtx* c, int stage, u64 w, int op, const u32* gb
     }
 }
 
-u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count, int can_flush,
-                     int can_preserve, int can_preserve_f64, int can_subgroup) {
+/* insn: code's words as host numbers (shader_words) */
+static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count,
+                     int can_flush, int can_preserve, int can_preserve_f64, int can_subgroup) {
     u32 clip;
     if (!code || !si || !word_count || max_bytes < 96 || stage < ST_VS || stage > ST_CS) return NULL;
     if (stage == ST_CS) {
@@ -2001,9 +2002,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     u32 len;
     shader_hash(code, max_bytes, &len);
     u32 n = len / 8;
-    const u64* insn = (const u64*)code;
     u32 sph[20];
-    memcpy(sph, code, sizeof sph);
+    for (u32 i = 0; i < 20; i++) sph[i] = snx_ld_le32(code + i * 4);
     u32 target = stage == ST_CS ? 0 : sph[18];
     if (stage == ST_FS && (sph[19] & ~3u)) return direct_reject(si, "fragment output beyond depth and mask");
     /* the sample mask (SPH word 19 bit 0) and depth (bit 1) follow the colours, in that order */
@@ -3397,7 +3397,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         if (stage == ST_FS && (si->in_unfed_mask >> i & 1)) continue; /* read as 0, 0, 0, 1 (ShaderInfo) */
         u32 interpolation = 0;
         if (stage == ST_FS) {
-            u32 mode_byte = ((const u8*)sph)[0x18 + i];
+            u32 mode_byte = (sph[6 + i / 4] >> (i % 4 * 8)) & 0xFF; /* the header's byte 0x18 + i */
             u32 k = 0;
             while (k < 3 && !((mode_byte >> (k * 2)) & 3)) k++;
             u32 mode = (mode_byte >> (k * 2)) & 3;
@@ -6720,4 +6720,17 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     memcpy(next.sph, sph, sizeof sph);
     *si = next;
     return result;
+}
+u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count, int can_flush,
+                     int can_preserve, int can_preserve_f64, int can_subgroup) {
+    u64* copy;
+    const u64* insn;
+    u32* r;
+    if (!code) return NULL;
+    insn = shader_words(code, max_bytes, &copy);
+    if (!insn) return NULL;
+    r = to_spirv(code, insn, max_bytes, stage, si, word_count, can_flush, can_preserve, can_preserve_f64,
+                 can_subgroup);
+    free(copy);
+    return r;
 }

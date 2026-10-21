@@ -10,6 +10,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* the PowerPC64 CPU the runtime library is built for (cmake/cross.cmake), and a module for another host's */
+#ifdef SNX_PPC64_LLVM_CPU
+#define SNX_PPC_CPU SNX_PPC64_LLVM_CPU
+#else
+#define SNX_PPC_CPU "pwr8"
+#endif
+
 /* ---- setup ---- */
 
 SnxIrFeatures snx_ir_host;
@@ -144,15 +151,15 @@ static SnxIr* new_ir(const char* name, char opt, const char* target_triple, int 
         cpu = LLVMCreateMessage("x86-64");
         features = LLVMCreateMessage("+cx16");
     } else {
-        cpu = LLVMCreateMessage(ppc ? "pwr8" : "generic");
+        cpu = LLVMCreateMessage(ppc ? SNX_PPC_CPU : "generic");
         features = LLVMCreateMessage("");
     }
-    /* POWER8 at least, as cmake/cross.cmake builds the runtime library: before it there is no lqarx/stqcx., and the
-       128-bit cmpxchg becomes a libatomic call no module links. The host's name is "generic" where /proc/cpuinfo has
-       no POWER line, as under qemu-user */
+    /* The CPU cmake/cross.cmake builds the runtime library for at least (POWER8 unless the build names an older
+       big-endian machine), whose modules then call RtAPI.cas128 for the 16-byte compare-and-swap. The host's name is
+       "generic" where /proc/cpuinfo has no POWER line, as under qemu-user */
     if (ppc && (!strcmp(cpu, "generic") || !strcmp(cpu, "ppc64") || !strcmp(cpu, "ppc64le") || !*cpu)) {
         LLVMDisposeMessage(cpu);
-        cpu = LLVMCreateMessage("pwr8");
+        cpu = LLVMCreateMessage(SNX_PPC_CPU);
     }
     /* RISC-V and LoongArch: rv64gc and LA64 with double floats at least, as the runtime is built, so a module's float
        ABI (lp64d) is the runtime's whatever the host reports (qemu-user may report nothing), and no linker relaxation:
@@ -293,16 +300,19 @@ static LLVMValueRef ppc_dynamic_stub(SnxIr* ir, LLVMTypeRef type) {
     int v2 = ir->elfv2;
     const char* jump = v2 ? "mtctr 12\n bctr" : "ld 0, 0(12)\n ld 2, 8(12)\n mtctr 0\n bctr";
     const char* call = v2 ? "mtctr 12\n bctrl" : "ld 0, 0(12)\n ld 2, 8(12)\n mtctr 0\n bctrl";
-    /* the ABI's TOC save doubleword in the caller's frame: 24(r1) in ELFv2, 40(r1) in ELFv1 */
+    /* the ABI's TOC save doubleword of a frame: 24(r1) in ELFv2, 40(r1) in ELFv1 */
     unsigned toc_save = v2 ? 24 : 40;
     /* r3 the CPU, r4 the pc: f = disp[(pc - code_lo) >> 2] when inside and aligned, jumped to. Else c->rt->miss, the
        runtime's, with a TOC of its own: it is called, not jumped to, from a frame of the stub's (ELFv1's minimum, 112
-       bytes) with the link register and r2 saved around it, so the guest's caller gets r2 back as it gave it */
+       bytes), the link register saved in the caller's frame as a callee may and r2 in the stub's own frame, so the
+       guest's caller gets the module's r2 back. Not in the caller's TOC save doubleword: the stub was jumped to, so
+       r1 may still be the frame of the runtime's call into the module, whose saved TOC the runtime reloads after it
+       (stored there, the module's TOC came back to the runtime in place of its own) */
     sprintf(text,
             "ld 11, %u(3)\n ld 12, %u(3)\n subf 12, 11, 12\n subf 11, 11, 4\n cmpld 11, 12\n bge 1f\n"
             " andi. 0, 4, 3\n bne 1f\n ld 12, %u(3)\n sldi 11, 11, 1\n ldx 12, 12, 11\n cmpdi 12, 0\n beq 1f\n"
-            " %s\n1:\n mflr 0\n std 0, 16(1)\n std 2, %u(1)\n stdu 1, -112(1)\n ld 12, %u(3)\n ld 12, %u(12)\n"
-            " %s\n addi 1, 1, 112\n ld 2, %u(1)\n ld 0, 16(1)\n mtlr 0\n blr",
+            " %s\n1:\n mflr 0\n std 0, 16(1)\n stdu 1, -112(1)\n std 2, %u(1)\n ld 12, %u(3)\n ld 12, %u(12)\n"
+            " %s\n ld 2, %u(1)\n addi 1, 1, 112\n ld 0, 16(1)\n mtlr 0\n blr",
             (unsigned)offsetof(CPU, code_lo), (unsigned)offsetof(CPU, code_hi), (unsigned)offsetof(CPU, disp), jump,
             toc_save, (unsigned)offsetof(CPU, rt), (unsigned)offsetof(RtAPI, miss), call, toc_save);
     return ppc_stub(ir, type, "snx_ppc_tail_dynamic", text);

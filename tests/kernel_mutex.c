@@ -41,7 +41,7 @@ static u32 g_watched = ~0u;
 void wake(KThread* t, int result) {
     t->woken = 1;
     t->wait_result = result;
-    if (g_watch) memcpy(&g_watched, g_mem + g_watch, 4);
+    if (g_watch) g_watched = snx_ld_le32(g_mem + g_watch);
 }
 void core_set_prio(KThread* t, int prio) { t->prio = prio; }
 
@@ -83,12 +83,13 @@ static KThread* reset(const int* prio) {
     }
     return snx_kmt_thread;
 }
-static u32 word(u64 addr) { return *(u32*)(void*)(g_mem + addr); }
+/* guest words are little-endian, as sync.c reads and writes them */
+static u32 word(u64 addr) { return snx_ld_le32(g_mem + addr); }
 /* t blocks on the mutex at addr, which owner holds: the word names owner with the waiters bit, as the SDK leaves it
    before it asks the kernel */
 static void lock(KThread* t, KThread* owner, u64 addr) {
     u32 v = handle(owner) | HANDLE_WAIT;
-    memcpy(g_mem + addr, &v, 4);
+    snx_st_le32(g_mem + addr, v);
     CHECK(svc_arbitrate_lock(t, handle(owner), addr, handle(t)) == 0, "lock");
 }
 
@@ -149,10 +150,10 @@ int main(void) {
     t = reset((const int[]){46, 44, 45, 40, 50, 30});
     a = &t[0], b = &t[1];
     u32 mine = handle(b);
-    memcpy(g_mem + SNX_KMT_M, &mine, 4);
+    snx_st_le32(g_mem + SNX_KMT_M, mine);
     CHECK(svc_wait_cv(b, SNX_KMT_M, SNX_KMT_CV, handle(b), -1) == 0, "wait on the condition variable");
     u32 held = handle(a);
-    memcpy(g_mem + SNX_KMT_M, &held, 4);
+    snx_st_le32(g_mem + SNX_KMT_M, held);
     svc_signal_cv(SNX_KMT_CV, 1);
     CHECK(b->wait_kind == 2 && b->lock_owner == a && a->prio == 44, "signalled into a held mutex: owner at %d",
           a->prio);
@@ -173,7 +174,7 @@ int main(void) {
     b->id = 82;
     b->o.is_signaled = ended_after_a_sleep;
     u32 joined = handle(b), at = 9;
-    memcpy(g_mem + 0x400, &joined, 4);
+    snx_st_le32(g_mem + 0x400, joined);
     g_slept = 0;
     CHECK(svc_wait_sync(a, 0x400, 1, -1, &at) == 0 && at == 0 && g_slept == 1, "join: index %u after %u sleeps", at,
           g_slept);
@@ -186,7 +187,7 @@ int main(void) {
     b->o.is_signaled = ended_after_a_sleep;
     t[2].o.is_signaled = ended_after_a_sleep;
     u32 two[2] = {handle(b), handle(&t[2])};
-    memcpy(g_mem + 0x400, two, 8);
+    snx_st_le32(g_mem + 0x400, two[0]), snx_st_le32(g_mem + 0x404, two[1]);
     g_slept = 0;
     CHECK(svc_wait_sync(a, 0x400, 2, -1, &at) == 0 && at == 0 && g_joining == 83, "join of two: thread %lu",
           (unsigned long)g_joining);
@@ -198,13 +199,13 @@ int main(void) {
     a = &t[0], b = &t[1];
     g_slept = 0;
     u32 v = handle(a);
-    memcpy(g_mem + SNX_KMT_M, &v, 4); /* no waiters bit: it was unlocked and taken again */
+    snx_st_le32(g_mem + SNX_KMT_M, v); /* no waiters bit: it was unlocked and taken again */
     CHECK(svc_arbitrate_lock(b, handle(a), SNX_KMT_M, handle(b)) == 0 && !g_slept && !g_hle.sync.mwait, "word changed");
     v = 0xFFFF8000u | HANDLE_WAIT;
-    memcpy(g_mem + SNX_KMT_M, &v, 4);
+    snx_st_le32(g_mem + SNX_KMT_M, v);
     CHECK(svc_arbitrate_lock(b, 0xFFFF8000u, SNX_KMT_M, handle(b)) == R_BADHANDLE && !g_slept, "pseudo-handle owner");
     v = 0x999u | HANDLE_WAIT;
-    memcpy(g_mem + SNX_KMT_M, &v, 4);
+    snx_st_le32(g_mem + SNX_KMT_M, v);
     CHECK(svc_arbitrate_lock(b, 0x999u, SNX_KMT_M, handle(b)) == R_BADHANDLE && !g_slept, "closed handle owner");
     CHECK(svc_arbitrate_lock(b, handle(a), SNX_KMT_M + 2, handle(b)) == R_BADADDR, "unaligned mutex");
 
@@ -213,10 +214,10 @@ int main(void) {
     a = &t[0], b = &t[1];
     memset(g_hle.sync.cvwait, 0, sizeof g_hle.sync.cvwait);
     mine = handle(b);
-    memcpy(g_mem + SNX_KMT_M, &mine, 4);
+    snx_st_le32(g_mem + SNX_KMT_M, mine);
     CHECK(svc_wait_cv(b, SNX_KMT_M, SNX_KMT_CV, handle(b), -1) == 0, "wait on the condition variable");
     v = 0x999u;
-    memcpy(g_mem + SNX_KMT_M, &v, 4);
+    snx_st_le32(g_mem + SNX_KMT_M, v);
     b->woken = 0;
     svc_signal_cv(SNX_KMT_CV, 1);
     CHECK(b->woken && b->wait_result == R_BADSTATE && !g_hle.sync.mwait, "woken with %x", b->wait_result);
@@ -233,7 +234,7 @@ int main(void) {
             u32 five = 5;
             t = reset(start_prio);
             memset(g_hle.sync.arbwait, 0, sizeof g_hle.sync.arbwait);
-            memcpy(g_mem + SNX_KMT_ARB, &five, 4);
+            snx_st_le32(g_mem + SNX_KMT_ARB, five);
             for (int w = 0; w < k[i].waiters; w++)
                 CHECK(svc_wait_addr(&t[w], SNX_KMT_ARB, 0, 6, -1) == 0, "waiter %d", w);
             for (int w = 0; w < k[i].waiters; w++) t[w].woken = 0;
@@ -245,7 +246,7 @@ int main(void) {
         u32 seven = 7;
         t = reset(start_prio);
         memset(g_hle.sync.arbwait, 0, sizeof g_hle.sync.arbwait);
-        memcpy(g_mem + SNX_KMT_ARB, &seven, 4);
+        snx_st_le32(g_mem + SNX_KMT_ARB, seven);
         CHECK(svc_wait_addr(&t[0], SNX_KMT_ARB, 2, 7, -1) == 0, "wait if equal");
         t[0].woken = 0;
         CHECK(svc_signal_addr(SNX_KMT_ARB, 2, 5, 1) == R_BADSTATE && !t[0].woken && word(SNX_KMT_ARB) == 7,

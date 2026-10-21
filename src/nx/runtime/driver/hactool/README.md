@@ -31,6 +31,11 @@ What ScarletNX changed, each change marked `ScarletNX` where it is not a file of
   sections' storage chains read from (`storage_memory_new`) instead of the file, so the runtime can read from several
   threads with no file position between them. `snx_hac_fs_open` keeps a program NCA's ExeFS and RomFS open, an
   update's over its base, for the runtime and the recompiler to read a dump they did not extract.
+- **Big-endian hosts.** The formats are little-endian, and a big-endian host reads them through `snx_le32` and its kin
+  (`types.h` includes `common/utilities/endian.h`). The NCA header (with its FS headers), PFS0 and HFS0 tables, RomFS
+  headers, NSO headers and a save's header are put in the host's order once read (`nca_header_swap` and the `_swap` and
+  `_from_le` helpers), and the RSA signatures and saved files see the bytes as stored. The XCI, NPDM, KIP, package and
+  NAX0 headers stay as stored and their words are converted where they are read.
 - **Keys by name.** `extkeys_set_key` sets one prod.keys key, which `extkeys_initialize_settings` calls for each line
   of a file and the driver for each line it kept.
 - **Comments.** Five comments in `aes.c`, `nca.h` and `packages.c` say "the console" or "content archive" instead of the

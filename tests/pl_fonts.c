@@ -70,11 +70,9 @@ void logf_(int lvl, const char* fmt, ...) {
 static u8 shm[0x1100000];
 /* the size the SDK reads from the 8 bytes before a font */
 static u32 header_size(u32 off) {
-    u32 h0, h1, key = bswap32_(0x7f9a0218u ^ 0x36f81a1eu);
-    memcpy(&h0, shm + off - 8, 4);
-    memcpy(&h1, shm + off - 4, 4);
-    CHECK(h0 == bswap32_(0x7f9a0218u)); /* the decrypted magic, not the .bfttf's own */
-    return bswap32_(h1 ^ key);
+    u32 key = 0x7f9a0218u ^ 0x36f81a1eu;
+    CHECK(snx_ld_be32(shm + off - 8) == 0x7f9a0218u); /* the decrypted magic, not the .bfttf's own */
+    return snx_ld_be32(shm + off - 4) ^ key;
 }
 static int truetype(u32 off) { return !memcmp(shm + off, "\0\1\0\0", 4); }
 /* memmem is a GNU extension, which Windows' C library lacks */

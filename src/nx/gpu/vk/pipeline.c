@@ -46,7 +46,7 @@ static int sh_cb_read(u32 idx, u32 off, u32* out) {
     u32 sz = g_sh_ch->cbind_size[g_sh_bind][idx];
     u32 limit = sz ? sz : 65536;
     if (!a || limit < 4 || off > limit - 4) return 0;
-    gmem_read(a + off, out, 4);
+    *out = gmem_r32(a + off);
     return 1;
 }
 static VkCbReader g_rec_read;

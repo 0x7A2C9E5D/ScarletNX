@@ -64,6 +64,10 @@ static int test_IThing_Unsorted(SvcObj* self, const test_Uid* u, u32 a, u8 b, te
     (void)self, (void)u, (void)a, (void)b, (void)t, (void)c;
     return 0;
 }
+static int test_IThing_Nested(SvcObj* self, const test_Nest* n, const i16* s, test_Nest* m, u32* w) {
+    (void)self, (void)n, (void)s, (void)m, (void)w;
+    return 0;
+}
 static int test_IThing_FixedOut(SvcObj* self, IpcBuf uid) {
     (void)self, (void)uid;
     return 0;

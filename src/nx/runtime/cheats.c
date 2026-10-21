@@ -43,17 +43,23 @@ static int guest_ok(u64 addr, u64 size, u32 perm) {
     }
     return 1;
 }
+/* a value of w bytes in guest memory, which is little-endian */
 static u64 rd(u64 a, u32 w) {
-    u64 v = 0;
     if (w != 1 && w != 2 && w != 4 && w != 8) return 0;
     if (!guest_ok(a, w, PERM_R)) return 0;
-    memcpy(&v, GP(a), w);
-    return v;
+    return w == 1 ? *GP(a) : w == 2 ? gr16(a) : w == 4 ? gr32(a) : gr64(a);
 }
 static void wr(u64 a, u32 w, u64 v) {
     if (w != 1 && w != 2 && w != 4 && w != 8) return;
     if (!guest_ok(a, w, PERM_W)) return;
-    memcpy(GP(a), &v, w);
+    if (w == 1)
+        *GP(a) = (u8)v;
+    else if (w == 2)
+        gw16(a, (u16)v);
+    else if (w == 4)
+        gw32(a, (u32)v);
+    else
+        gw64(a, v);
 }
 
 static void cheats_load(void) {

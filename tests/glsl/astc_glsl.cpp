@@ -24,8 +24,8 @@ struct Tile {
 struct Decoder : WorkgroupInvocation {
     uint width, height, blocks_x, blocks_y, srgb, tile_shift;
     uvec2 block_dims;
-    const uvec4* astc_data;
-    uint* texels;
+    const leuvec4* astc_data;
+    leuint* texels;
     uint* astc_tile;
 #define TILE(field, slot) astc_tile[(field) * 64u + (slot)]
 #include "nx/gpu/texture/astc_decode.glsl"
@@ -42,11 +42,10 @@ static uint32_t random_word() {
 }
 
 // random blocks with every block mode, and void extents valid and not (as tests/astc_vulkan.c makes them)
-static std::vector<glsl::uvec4> blocks_new(uint32_t count) {
-    std::vector<glsl::uvec4> blocks(count);
+static std::vector<glsl::leuvec4> blocks_new(uint32_t count) {
+    std::vector<glsl::leuvec4> blocks(count);
     for (uint32_t i = 0; i < count; i++) {
-        glsl::uvec4& b = blocks[i];
-        b = glsl::uvec4(random_word(), random_word(), random_word(), random_word());
+        glsl::uvec4 b = glsl::uvec4(random_word(), random_word(), random_word(), random_word());
         b.x = (b.x & ~2047u) | (i & 2047u);
         if (i % 29 == 0) {
             b.x = 0xfffffdfcu;
@@ -54,6 +53,7 @@ static std::vector<glsl::uvec4> blocks_new(uint32_t count) {
         } else if (i % 31 == 0) {
             b.x = 0xfffff9fcu; // invalid reserved bit
         }
+        blocks[i] = b;
     }
     return blocks;
 }
@@ -65,8 +65,9 @@ static int failures;
 static void check(uint32_t bw, uint32_t bh, int srgb, uint32_t w, uint32_t h, uint32_t depth, uint32_t tile_shift) {
     const uint32_t nx = (w + bw - 1) / bw, ny = (h + bh - 1) / bh;
     const uint32_t tw = 1u << tile_shift, th = 64u >> tile_shift;
-    std::vector<glsl::uvec4> blocks = blocks_new(nx * ny * depth);
-    std::vector<uint32_t> gpu((size_t)w * h * depth, 0xdeadbeefu), cpu((size_t)w * h * depth);
+    std::vector<glsl::leuvec4> blocks = blocks_new(nx * ny * depth);
+    // the reference decodes into bytes: both images read as the device's little-endian words
+    std::vector<glsl::leuint> gpu((size_t)w * h * depth, 0xdeadbeefu), cpu((size_t)w * h * depth);
     glsl::dispatch_workgroups<astc_shader::Decoder, astc_shader::Tile>(
         glsl::uvec3((nx + tw - 1) / tw, (ny + th - 1) / th, depth), glsl::uvec3(64u, 1u, 1u),
         [&](astc_shader::Decoder& d, astc_shader::Tile& tile) {
@@ -87,7 +88,7 @@ static void check(uint32_t bw, uint32_t bh, int srgb, uint32_t w, uint32_t h, ui
     for (size_t i = 0; i < cpu.size(); i++)
         if (gpu[i] != cpu[i]) {
             std::fprintf(stderr, "FAIL %ux%u srgb=%d %ux%ux%u tiles of %u: texel %zu is %08x, the reference %08x\n",
-                         bw, bh, srgb, w, h, depth, 1u << tile_shift, i, gpu[i], cpu[i]);
+                         bw, bh, srgb, w, h, depth, 1u << tile_shift, i, uint32_t(gpu[i]), uint32_t(cpu[i]));
             failures++;
             return;
         }

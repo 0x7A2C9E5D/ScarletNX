@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "nx/gpu/shader/shader.h"
+#include "common/utilities/endian.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,9 +25,17 @@
 
 static u64 mov32i(u32 reg, u32 value) { return 0x0100000000000000ull | ((u64)value << 20) | 0x71000ull | reg; }
 
-static int save(const char* path, const u32* spv, size_t words) {
+/* code is the program's 64-bit words as host numbers: the translator takes guest memory's bytes, little-endian */
+static u32* translate(const u64* code, int stage, ShaderInfo* info, size_t* words) {
+    u8 guest[64 * 8];
+    for (int i = 0; i < 64; i++) snx_st_le64(guest + i * 8, code[i]);
+    return shader_to_spirv(guest, sizeof guest, stage, info, words, 1, 1, 1, 1);
+}
+
+static int save(const char* path, u32* spv, size_t words) {
     FILE* out = fopen(path, "wb");
     if (!out) return 0;
+    snx_le32_array(spv, words); /* a .spv file is little-endian, the same bytes from any host */
     int ok = fwrite(spv, sizeof *spv, words, out) == words;
     if (fclose(out)) ok = 0;
     return ok;
@@ -37,8 +46,8 @@ int main(int argc, char** argv) {
     int check_only = argc == 2 && !strcmp(argv[1], "--check-only");
     if (argc == 2 && !check_only) return 2;
     u64 code[64] = {0};
-    ((u32*)code)[18] = 15; /* one RGBA fragment output */
-    ((u8*)code)[0x18] = 3; /* input location 0 is screen linear */
+    code[9] = 15; /* SPH word 18: one RGBA fragment output */
+    code[3] = 3;  /* SPH byte 0x18: input location 0 is screen linear */
     code[10] = SCHED;
     code[11] = IPA | (0x20ull << 30);    /* r0 = location 0, x */
     code[12] = mov32i(1, 0x3f000000);    /* 0.5 */
@@ -59,7 +68,7 @@ int main(int argc, char** argv) {
     code[27] = EXIT;
     ShaderInfo info = {0};
     size_t words = 0;
-    u32* spv = shader_to_spirv((const u8*)code, sizeof code, ST_FS, &info, &words, 1, 1, 1, 1);
+    u32* spv = translate(code, ST_FS, &info, &words);
     if (!spv || info.stage != ST_FS || info.sph[18] != 15 || info.cbuf_mask != 1 || info.cbuf_max[0] != 16 ||
         info.ntex != 2 || !info.tex[1].shadow) {
         free(spv);
@@ -72,21 +81,21 @@ int main(int argc, char** argv) {
     code[11] = AST | (0x70ull << 20) | (255ull << 8); /* position.x = r0; W retains its default 1 */
     code[12] = EXIT;
     info = (ShaderInfo){0};
-    spv = shader_to_spirv((const u8*)code, sizeof code, ST_VS, &info, &words, 1, 1, 1, 1);
+    spv = translate(code, ST_VS, &info, &words);
     if (!spv || info.stage != ST_VS || (!check_only && !save(argv[2], spv, words))) ok = 0;
     free(spv);
     memset(code, 0, sizeof code);
-    ((u32*)code)[18] = 15;
+    code[9] = 15;
     code[10] = SCHED;
     code[11] = FADD32I | (1ull << 57); /* right-operand absolute value needs GLSL.std.450 */
     code[12] = EXIT;
     info = (ShaderInfo){0};
-    spv = shader_to_spirv((const u8*)code, sizeof code, ST_FS, &info, &words, 1, 1, 1, 1);
+    spv = translate(code, ST_FS, &info, &words);
     if (!spv || (!check_only && !save(argv[3], spv, words))) ok = 0;
     free(spv);
     code[11] = SYNC;
     info = (ShaderInfo){0};
-    spv = shader_to_spirv((const u8*)code, sizeof code, ST_FS, &info, &words, 1, 1, 1, 1);
+    spv = translate(code, ST_FS, &info, &words);
     if (!spv || (!check_only && !save(argv[4], spv, words))) ok = 0;
     free(spv);
     memset(code, 0, sizeof code);
@@ -97,7 +106,7 @@ int main(int argc, char** argv) {
     info = (ShaderInfo){0};
     info.cs_local[0] = 32;
     info.cs_local[1] = info.cs_local[2] = 1;
-    spv = shader_to_spirv((const u8*)code, sizeof code, ST_CS, &info, &words, 1, 1, 1, 1);
+    spv = translate(code, ST_CS, &info, &words);
     if (!spv || (!check_only && !save(argv[5], spv, words))) ok = 0;
     free(spv);
     return ok ? 0 : 1;
