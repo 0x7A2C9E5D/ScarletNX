@@ -93,10 +93,13 @@ void gui_place(const GuiPlaceIn* in, GuiPlace* out) {
         out->keys = gui_rect(mx + w + in->cw, foot_y, width - w - in->cw, in->foot);
     }
 }
-int gui_place_list(int height, int item, int pitch, int count, int focus, int* first) {
+int gui_place_list(int height, int item, int pitch, int count, int focus, int center, int* first) {
     int fit = height >= item && pitch > 0 ? (height - item) / pitch + 1 : 0, shown = fit < count ? fit : count;
     *first = 0;
-    if (shown > 0 && focus >= shown) *first = focus - shown + 1;
+    if (shown > 0 && focus >= 0 && center)
+        *first = focus - (shown - 1) / 2;
+    else if (shown > 0 && focus >= shown)
+        *first = focus - shown + 1;
     if (*first > count - shown) *first = count - shown;
     if (*first < 0) *first = 0;
     return shown;

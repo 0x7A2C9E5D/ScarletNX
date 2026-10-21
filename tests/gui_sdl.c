@@ -4020,10 +4020,27 @@ int main(int argc, char** argv) {
         assert(app.scale == GUI_TEXT_MAX && app.rows == 16 && m.list.shown < m.list.count && !m.list.first);
         hides(&app, "\x1e", soft);
         shows(&app, "\x1f", soft); /* items below the last box */
+        /* scroll = center, the built-ins': each focus in the middle of the boxes shown, the ends where the list has no
+           more to move */
+        assert(app.theme.scroll == GUI_SCROLL_CENTER);
+        for (int at = 0; at < m.list.count; ++at) {
+            int want = SDL_clamp(at - (m.list.shown - 1) / 2, 0, m.list.count - m.list.shown);
+            app.menu.selected = at;
+            menu_boxes(&app, &m);
+            assert(m.list.first == want);
+        }
+        app.menu.selected = (m.list.shown - 1) / 2 + 1;
+        render(&app);
+        menu_boxes(&app, &m);
+        assert(m.list.first == 1 && m.list.first + m.list.shown < m.list.count); /* hidden above and below */
+        shows(&app, "\x1e", soft);
+        shows(&app, "\x1f", soft);
+        app.theme.scroll = GUI_SCROLL_EDGE; /* the list moving once the focus reaches its end */
         app.menu.selected = GUI_LOG;
         render(&app);
         menu_boxes(&app, &m);
-        assert(m.list.first > 0 && m.list.first + m.list.shown < m.list.count);
+        assert(m.list.first == GUI_LOG - m.list.shown + 1 && m.list.first > 0 &&
+               m.list.first + m.list.shown < m.list.count);
         shows(&app, "\x1e", soft);
         shows(&app, "\x1f", soft);
         app.menu.selected = GUI_EXIT;
@@ -4036,6 +4053,7 @@ int main(int argc, char** argv) {
         render(&app);
         menu_boxes(&app, &m);
         assert(!m.list.first);
+        app.theme.scroll = GUI_SCROLL_CENTER;
         /* a drag down moves the focus down row by row while the finger goes, not all at once when it lifts */
         {
             SDL_Event e = {0};

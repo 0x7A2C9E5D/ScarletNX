@@ -388,7 +388,9 @@ Games lists its folders again, the Library and Folders say how many of theirs ar
 again, and the box of what an older version left looks again. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
 every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the
 column is as wide as its entries and the side box goes under the list. A list's boxes spread over its column, at
-most `[body] gap` pixels apart, times the text's size (0 to 14; 6 in the built-ins). That is the **Side box**'s *Auto*, the
+most `[body] gap` pixels apart, times the text's size (0 to 14; 6 in the built-ins), and one longer than its column
+keeps the focused box in its middle, the list moving around it (`[body] scroll = center`, the built-ins'), or moves
+once the focus reaches its end (`edge`). That is the **Side box**'s *Auto*, the
 default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
 not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2, or the
 foot's, shows it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over
@@ -471,6 +473,9 @@ sizing = fixed
 text = wrap
 ; the most pixels between two boxes of a list, times the text's size (0 to 14): they spread up to it
 gap = 6
+; a list longer than its column: center (the focused box in its middle, the list moving around it) | edge (the
+; list moving once the focus reaches its end)
+scroll = center
 ; in the list's margin, beside the focused box
 cursor = "> "
 ; a question and its choices: default (a box in the middle) | yorha (the question in a box at the foot, the

@@ -987,7 +987,7 @@ static void list_place(const App* app, GuiList* l, GuiRect at, int count, int fo
     l->margin = app->theme.cursor[0] ? (gui_text_cols(app->theme.cursor) * cell_w(app)) : 0;
     l->item = item_h(app);
     l->pitch = gui_place_pitch(at.h, count, l->item + SDL_min(2, gap) * s, l->item + gap * s);
-    l->shown = gui_place_list(at.h, l->item, l->pitch, count, focus, &l->first);
+    l->shown = gui_place_list(at.h, l->item, l->pitch, count, focus, app->theme.scroll == GUI_SCROLL_CENTER, &l->first);
     l->arrows = l->shown < count ? cell_w(app) : 0;
 }
 /* Add a folder's box over the list, and the wider gap under it */

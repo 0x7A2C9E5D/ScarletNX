@@ -195,12 +195,23 @@ int main(void) {
         assert(p.list.h == 0 && p.list.w >= 0 && p.side.w >= 0 && p.status.h == 0);
     }
     /* a list: as many items as fit, the focus among them, from the first while it is in view */
-    assert(gui_place_list(100, 20, 30, 10, -1, &first) == 3 && first == 0);
-    assert(gui_place_list(100, 20, 30, 10, 2, &first) == 3 && first == 0);
-    assert(gui_place_list(100, 20, 30, 10, 5, &first) == 3 && first == 3);
-    assert(gui_place_list(100, 20, 30, 10, 9, &first) == 3 && first == 7);
-    assert(gui_place_list(100, 20, 30, 2, 1, &first) == 2 && first == 0);
-    assert(gui_place_list(10, 20, 30, 5, 3, &first) == 0 && first == 0); /* not even one fits */
+    assert(gui_place_list(100, 20, 30, 10, -1, 0, &first) == 3 && first == 0);
+    assert(gui_place_list(100, 20, 30, 10, 2, 0, &first) == 3 && first == 0);
+    assert(gui_place_list(100, 20, 30, 10, 5, 0, &first) == 3 && first == 3);
+    assert(gui_place_list(100, 20, 30, 10, 9, 0, &first) == 3 && first == 7);
+    assert(gui_place_list(100, 20, 30, 2, 1, 0, &first) == 2 && first == 0);
+    assert(gui_place_list(10, 20, 30, 5, 3, 0, &first) == 0 && first == 0); /* not even one fits */
+    /* centered: the focus in the middle of the three shown, but for the first and the last, which the ends hold; four
+       shown, the one above the middle; a list that fits whole, or no focus, from its top */
+    assert(gui_place_list(100, 20, 30, 10, 0, 1, &first) == 3 && first == 0);
+    assert(gui_place_list(100, 20, 30, 10, 1, 1, &first) == 3 && first == 0);
+    assert(gui_place_list(100, 20, 30, 10, 2, 1, &first) == 3 && first == 1);
+    assert(gui_place_list(100, 20, 30, 10, 5, 1, &first) == 3 && first == 4);
+    assert(gui_place_list(100, 20, 30, 10, 8, 1, &first) == 3 && first == 7);
+    assert(gui_place_list(100, 20, 30, 10, 9, 1, &first) == 3 && first == 7);
+    assert(gui_place_list(130, 20, 30, 10, 5, 1, &first) == 4 && first == 4);
+    assert(gui_place_list(100, 20, 30, 2, 1, 1, &first) == 2 && first == 0);
+    assert(gui_place_list(100, 20, 30, 10, -1, 1, &first) == 3 && first == 0);
     /* the pitch spreads few items, keeps many to the least */
     assert(gui_place_pitch(300, 10, 20, 50) == 30);
     assert(gui_place_pitch(300, 2, 20, 50) == 50 && gui_place_pitch(300, 30, 20, 50) == 20);

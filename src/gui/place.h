@@ -40,8 +40,8 @@ void gui_place(const GuiPlaceIn* in, GuiPlace* out);
 /* a box at x, y, w by h, of no size rather than a negative one */
 GuiRect gui_rect(int x, int y, int w, int h);
 /* count items item pixels high, pitch apart from the top of a box height high: as many as fit, the first of them
-   chosen so focus (-1: none) is among them */
-int gui_place_list(int height, int item, int pitch, int count, int focus, int* first);
+   chosen so focus (-1: none) is among them, in their middle with center while the list has entries left to move */
+int gui_place_list(int height, int item, int pitch, int count, int focus, int center, int* first);
 /* the pitch that spreads count items over height, from least to most */
 int gui_place_pitch(int height, int count, int least, int most);
 #endif

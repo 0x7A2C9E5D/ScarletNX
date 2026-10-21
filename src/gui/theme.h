@@ -19,6 +19,8 @@ typedef enum { GUI_PANELS_OUTLINE, GUI_PANELS_FILL } GuiPanels; /* the boxes fra
 typedef enum { GUI_SIZING_FIXED, GUI_SIZING_ADAPTIVE } GuiSizing;
 /* a text too long for its box: over as many rows as it takes, or on one that slides */
 typedef enum { GUI_TEXT_WRAP, GUI_TEXT_SLIDE } GuiTextFlow;
+/* a list longer than its column: the focused box kept in its middle, or the list moving once the focus reaches an end */
+typedef enum { GUI_SCROLL_CENTER, GUI_SCROLL_EDGE } GuiScroll;
 /* the title in the row of tabs, after them, or on a row of its own under them */
 typedef enum { GUI_HEAD_TABS, GUI_HEAD_BELOW } GuiHeadPlace;
 /* the user's picture at the head's right, by their nickname: none (and no nickname), square or round */
@@ -71,7 +73,8 @@ typedef struct {
     GuiPanels panels;
     GuiSizing sizing;
     GuiTextFlow text;
-    uint32_t gap;    /* the most pixels between two boxes of a list, times the scale: they spread up to it */
+    uint32_t gap; /* the most pixels between two boxes of a list, times the scale: they spread up to it */
+    GuiScroll scroll;
     char cursor[16]; /* in the list's margin, beside the focused box */
     GuiDialog dialog;
     int grid;        /* a faint grid on the page behind the boxes, in the dim colour */
