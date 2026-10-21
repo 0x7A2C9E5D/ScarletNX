@@ -6,7 +6,7 @@
    from astc.comp and blocklinear.comp. No game assets. Run with
    VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation and
    VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT
-   to check synchronization too (docs/ASTC.md). SNX_VK_MAX_ALLOCATION_MB lowers
+   to check synchronization too (docs/ASTC.md). --vk_max_allocation_mb=N lowers
    the allocation cap, so images in pieces are tested at small sizes; --large
    decodes a 2D and a 3D texture of 512 MiB each. */
 #include <stdarg.h>
@@ -18,6 +18,7 @@
 #include "nx/gpu/texture/etc2.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
 #include "nx/runtime/platform/plat.h"
 
 VkState g_vk;
@@ -540,8 +541,13 @@ static void tc_case(void) {
 }
 
 int main(int argc, char** argv) {
+    int large = 0;
+    /* --vk_max_allocation_mb=N as the runtime takes it (ctest's astc_vulkan_pieces: 4), and --large */
+    for (int i = 1; i < argc; i++)
+        if (!strncmp(argv[i], "--vk_max_allocation_mb=", 23)) g_settings.vulkan_allocation_cap = atoi(argv[i] + 23);
+        else if (!strcmp(argv[i], "--large")) large = 1;
     init();
-    if (argc > 1 && !strcmp(argv[1], "--large")) {
+    if (large) {
         /* 512 MiB each once decoded, as some games' textures are: a square 2D one (11584 is a multiple of 4 and 8)
            and a cube of slices, both past the 256 MiB allocation cap, so their memory is in pieces where the device
            has sparse binding, and strips go through scratch, staging rings and readbacks of at most the cap */
@@ -592,7 +598,7 @@ int main(int argc, char** argv) {
     run(4, 4, 0, 2051, 1055, 1, 1, 1, 1, NULL, NULL);
     run(12, 12, 1, 2051, 1055, 1, 1, 1, 0, NULL, NULL);
     /* a 3D texture whose slices share strips, and one past the cap (8.6 MiB: in pieces under ctest's
-       SNX_VK_MAX_ALLOCATION_MB=4) */
+       --vk_max_allocation_mb=4) */
     run(6, 6, 0, 301, 97, 37, 1, 1, 0, NULL, NULL);
     run(4, 4, 1, 2051, 1101, 1, 1, 1, 0, NULL, NULL);
     if (errors) fatal("%u validation errors\n", errors);

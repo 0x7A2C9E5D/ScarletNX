@@ -144,7 +144,7 @@ int main(void) {
     call(ch, 3);
     CHECK(a_runs == runs + 1 && sent_a());
 
-    /* SNX_MME_HLE=0's mode: everything interpreted */
+    /* mme_hle=0's mode: everything interpreted */
     mme_mode = 0;
     call(ch, 3);
     CHECK(a_runs == runs + 1 && sent_a());

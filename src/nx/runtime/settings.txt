@@ -444,6 +444,106 @@ setting Profiler
     startup
     words Off|On
     help 1 = writes profile.txt every 10 seconds (the CPU profiler is Windows only)
+setting NVN trace
+    key nvn_trace
+    int 0 1
+    default 0
+    startup
+    words Off|On
+    help 1 = logs each NVN function the game resolves, the GPFIFO submissions during each queue call, and at exit
+    help the calls of every function used (gpu/nvn_trace.c). Calls by direct branch are counted only in a game
+    help recompiled with --hook-direct-calls. The game runs slower
+setting Shader corpus
+    key shader_corpus
+    text 1024
+    default ""
+    startup
+    help A folder that keeps each translated shader for snx-shaderc (gpu/shader/corpus.c). With it every shader is
+    help translated, and none is kept for the next run. Empty: none, or captures/shaders with Shader captures
+setting GPU trace target
+    key gpu_trace_target
+    text 64
+    default ""
+    startup
+    help address[:bytes]: logs the clears and draws that write a render target starting in that GPU address range
+    help (0x for hex, one byte without a size), to find what produced a wrong target. Empty: none
+setting GPU profile
+    key vk_gpu_profile
+    int 0 1
+    default 0
+    startup
+    words Off|On
+    help 1 = the GPU's time per rendering pass, summed per target and logged every 10 seconds (Vulkan timestamps)
+setting Buffer copy stats
+    key vk_buffer_stats
+    int 0 1
+    default 0
+    startup
+    words Off|On
+    help 1 = logs what the renderer copies between guest memory and its buffers, and why it waits for their results
+setting Vulkan recording thread
+    key vk_record
+    int 0 1
+    default 1
+    startup
+    words Off|On
+    help 1 = Vulkan commands are recorded on a thread of their own; 0 = on the GPU thread, as they are made
+setting Compute dispatches
+    key compute
+    int 0 1
+    default 1
+    startup
+    words Off|On
+    help 0 = skips every compute shader dispatch, to see whether a bug is in one
+setting Vulkan allocation cap
+    key vk_max_allocation_mb
+    int 0 INT_MAX
+    default 0
+    startup
+    help The largest Vulkan allocation in MiB, below the device's own (larger images in pieces with sparse binding),
+    help to test the pieces on a driver that takes anything (lavapipe). 0 = the default
+setting Vulkan memory budget
+    key vk_budget_mb
+    int 0 INT_MAX
+    default 0
+    startup
+    help The caches keep within this many MiB of the GPU's heap, below the driver's budget, for testing. 0 = the
+    help driver's budget alone
+setting Native macros
+    key mme_hle
+    int 0 1
+    default 1
+    startup
+    words Off|On
+    help 1 = the GPU macros the runtime knows run natively (gpu/maxwell/mme_hle.c); 0 = every macro is interpreted
+setting Compiled macros
+    key mme_jit
+    int 0 1
+    default 1
+    startup
+    words Off|On
+    help 1 = GPU macros without a native version are compiled with LLVM; 0 = they are interpreted
+setting Verify macros
+    key mme_verify
+    int 0 1
+    default 0
+    startup
+    words Off|On
+    help 1 = runs each native and compiled macro against the interpreter too, and logs where they differ
+setting RenderDoc captures
+    key renderdoc
+    text 1024
+    default ""
+    startup
+    help The path's stem of RenderDoc captures (RenderDoc's library is loaded before the Vulkan instance), of the
+    help presents RenderDoc frames names. Empty: RenderDoc isn't loaded
+setting RenderDoc frames
+    key renderdoc_frames
+    text 512
+    default ""
+    startup
+    help The presents RenderDoc captures takes, a comma between: N is the Nth present, Ns the first after N seconds of
+    help the scripted input's clock. Empty: none
 
 # the unattended runs' (platform/unattended.c): read as the .ini's settings are, from the command line, but in no section,
 # so never written back
@@ -485,6 +585,12 @@ setting Script
     once
     set unattended_script_set
     help The scripted input: when:buttons, comma between, when in ms or a present's number and f (300f)
+setting Keyboard text
+    key swkbd_text
+    text 2004
+    default ""
+    once
+    help The text the software keyboard answers instead of asking (shorter than the game's minimum: cancelled)
 
 section Game: g_game_ini
 section Display: g_display_ini

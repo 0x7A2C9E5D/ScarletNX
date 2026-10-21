@@ -80,6 +80,7 @@ build/scarletnx --scan-log "$games/<id>/<id>.log" [--format markdown]
 
 - Runtime: `--seconds=N` / `--frames=N`; `--shot=out` → CWD `out.ppm`; `--shot_every=N` → every N frames.
   `--script=ms:hexbuttons,...` (or `Nf:hexbuttons` to press at present N), `--press_len=ms` (default 300).
+  `--swkbd_text=TEXT`: the software keyboard answers TEXT instead of opening the host's dialog.
   Masks: A/B/X/Y `1/2/4/8`, L/R `40/80`, ZL/ZR `100/200`, Plus/Minus `400/800`,
   left/up/right/down `1000/2000/4000/8000`.
 - `run_game.py`: Catherine New Game sequence by default; **`--script ""` disables it**.
@@ -90,11 +91,15 @@ build/scarletnx --scan-log "$games/<id>/<id>.log" [--format markdown]
   `build/scarletnx --dump-modules PROGRAM DIR` (`SNX_SCARLETNX` names another binary), cached per game folder in
   `~/.cache/scarletnx/module-dumps`. The dump's format is described in `src/nx/loader/loader.h`.
   `--log=2`: verbose; Windows `--profile=1`: `profile.txt` every 10 s.
-- `SNX_GPU_TRACE_TARGET=0x5acf62e00[:bytes]`: logs (`gpu-trace-target:`, at most 64 lines of each kind) the clears
+
+The game's `[Debug]` settings ([USAGE.md](USAGE.md#settings--input)) are for investigating. Each is also given for one run as
+`--key=value` on the game's command line:
+
+- `--gpu_trace_target=0x5acf62e00[:bytes]`: logs (`gpu-trace-target:`, at most 64 lines of each kind) the clears
   and draws that write a render target starting in that GPU address range, with its size, vertex or index count and
   shader addresses. A color clear lists every bound target in the range. Write the address with `0x`; without a size
   the range is one byte. It finds what produced a wrong intermediate target.
-- `SNX_NVN_TRACE=1`: logs each NVN function the game resolves (`nvn: NAME -> ADDRESS`), the number of GPFIFO
+- `--nvn_trace=1`: logs each NVN function the game resolves (`nvn: NAME -> ADDRESS`), the number of GPFIFO
   submissions (by any thread) during each queue call, and at exit the call count of every function used
   (`nvn-used:`). Calls by direct branch are counted only in a game recompiled with `--hook-direct-calls`.
   [NVN_HLE.md](NVN_HLE.md) has what the traces have shown.
@@ -102,7 +107,7 @@ build/scarletnx --scan-log "$games/<id>/<id>.log" [--format markdown]
 ## Shaders
 
 ```sh
-SNX_SHADER_CORPUS=corpus "$games/Game/Game"
+"$games/Game/Game" --shader_corpus="$PWD/corpus"
 build/snx-shaderc corpus --validate --out translated
 ```
 
@@ -114,8 +119,8 @@ machine in a cross build, as swipc is) checks it and writes the opcode enum and 
 build folder, so nothing is set up at run time. Two patterns may overlap only when one is strictly narrower, and
 that one is tried first. A new opcode is a row there (its `O_` name then exists for the translator), and
 `ctest -R 'shaderdec|shader_decode'` checks the spec and decodes every row back to itself.
-PowerShell: `$env:SNX_SHADER_CORPUS='corpus'`. Where the game gets no environment (Android), its INI's `[Debug]
-diag=1` keeps each shader's entry in `captures/shaders` beside the game, for the same `snx-shaderc`.
+`[Debug] shader_corpus=` in the game's INI does the same for every run. Where the game gets no command line
+(Android), its INI's `[Debug] diag=1` keeps each shader's entry in `captures/shaders` beside the game, for the same `snx-shaderc`.
 
 ## SVCs
 

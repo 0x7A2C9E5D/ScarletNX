@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* SNX_VK_GPU_PROFILE=1: where the GPU's time goes. A scene can be bound by the GPU while every CPU thread idles (one
+/* vk_gpu_profile=1: where the GPU's time goes. A scene can be bound by the GPU while every CPU thread idles (one
    game's lookout ran at 6 frames a second with the GPU 91% busy and no thread past 20%), and the CPU's profilers can't
    say which work it is. Each rendering pass of the frame's command buffers gets a timestamp at its start and its end,
    with its first color target (or its depth target), its draws, and what was recorded between it and the pass before
@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "nx/gpu/vk/vk.h"
+#include "nx/runtime/options.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
 
@@ -53,9 +54,8 @@ static int g_in_pass;
 
 static int gp_on(void) {
     if (g_on < 0) {
-        const char* e = getenv("SNX_VK_GPU_PROFILE");
-        g_on = e && strcmp(e, "0") != 0 && g_vk.props.limits.timestampComputeAndGraphics;
-        if (e && !g_on) WARN("vulkan: SNX_VK_GPU_PROFILE: the device has no timestamps on its graphics queue\n");
+        g_on = g_settings.gpu_profile && g_vk.props.limits.timestampComputeAndGraphics;
+        if (g_settings.gpu_profile && !g_on) WARN("vulkan: vk_gpu_profile: the device has no timestamps on its graphics queue\n");
     }
     return g_on;
 }

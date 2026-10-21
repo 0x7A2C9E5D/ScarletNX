@@ -6,7 +6,7 @@
    command buffer is begun, ended and submitted from the ring too, in order with its commands.
 
    Only the frame's command buffer (vk_cmd) goes through the ring. A command for any other one (compute's, VIC's)
-   is made at once, as are commands while SNX_VK_RECORD=0. Whoever adds to the ring holds vk_lock, so there is one
+   is made at once, as are commands while vk_record=0. Whoever adds to the ring holds vk_lock, so there is one
    producer at a time. What has to happen after the queued commands are recorded and submitted waits for the ring to
    drain (vk_rec_sync): a present waiting on a submission's semaphore, a new command buffer from the frame's pool,
    a device wait. Waits on the graphics timeline need none, as a timeline value can be waited for before its
@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "common/utilities/common.h"
+#include "nx/runtime/options.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/runtime/platform/plat.h"
@@ -67,8 +68,7 @@ static void rec_thread(void* arg) {
 
 static int rec_enabled(void) {
     if (g_rec < 0) {
-        const char* opt = getenv("SNX_VK_RECORD");
-        g_rec = !opt || strcmp(opt, "0") != 0;
+        g_rec = g_settings.vulkan_recording_thread;
         if (g_rec) {
             g_ring = malloc(REC_CAP);
             pm_init(&g_m);

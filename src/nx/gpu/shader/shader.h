@@ -143,7 +143,7 @@ extern int (*g_shader_cb_read)(u32 idx, u32 off, u32* out);
 int shader_brx_targets(const u64* words, u32 index, u32 count, u32* targets, int max_targets);
 /* the program's hash, and its length in bytes in out_len */
 u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len);
-/* The shader corpus (SNX_SHADER_CORPUS=dir): each translated program's code and ShaderInfo, so tools/snx_shaderc.c
+/* The shader corpus (shader_corpus=dir): each translated program's code and ShaderInfo, so tools/snx_shaderc.c
    can translate it again offline. A file only loads into a build with the same ShaderInfo. */
 int shader_corpus_save(const char* dir, const u8* code, u32 len, u32 max_bytes, int stage, const ShaderInfo* si,
                        u64 key);

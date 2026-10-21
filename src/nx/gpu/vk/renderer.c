@@ -178,9 +178,7 @@ static void vkr_rt_reload(u64 gva) {
     vk_unlock();
 }
 static void vkr_dispatch(GpuChannel* ch, const u32* q, u64 code) {
-    static int off = -1;
-    if (off < 0) off = getenv("SNX_NO_COMPUTE") != NULL;
-    if (off) return;
+    if (!g_settings.compute_dispatches) return;
     r3d_pending_flush(); /* a merged draw the front end is holding comes first */
     vk_lock();
     vk_dispatch(ch, q, code);

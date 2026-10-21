@@ -371,7 +371,7 @@ static int clear_masked(u32 slot, u32 mask, const float* cc, VkRect2D rect, u32 
     return 1;
 }
 
-/* SNX_GPU_TRACE_TARGET=address[:bytes]: log the clears and draws that write a render target starting in [address,
+/* gpu_trace_target=address[:bytes]: log the clears and draws that write a render target starting in [address,
    address + bytes) (one byte without a size), to find what produced a wrong target. Read on first use: draws and
    clears run on the GPU thread */
 static int trace_target(const Surf* s) {
@@ -379,13 +379,13 @@ static int trace_target(const Surf* s) {
     static u64 lo, bytes;
     if (!read) {
         read = 1;
-        const char* v = getenv("SNX_GPU_TRACE_TARGET");
-        if (v) {
+        const char* v = g_settings.gpu_trace_target;
+        if (*v) {
             char *end, *size_end = NULL;
             lo = strtoull(v, &end, 0);
             bytes = *end == ':' ? strtoull(end + 1, &size_end, 0) : 1;
             if (end == v || (*end && *end != ':') || (size_end && (*size_end || size_end == end + 1)) || !bytes) {
-                WARN("SNX_GPU_TRACE_TARGET=%s isn't address[:bytes] with a nonzero size (0x for hex): no trace\n", v);
+                WARN("gpu_trace_target=%s isn't address[:bytes] with a nonzero size (0x for hex): no trace\n", v);
                 bytes = 0;
             }
         }

@@ -34,8 +34,8 @@ the same methods as the interpreter.
 pushbuffer words the GPU thread fetched before the call (`gpu.c`), so the indirect draws read their records and count
 as the interpreter does: Eden's indirect path (the rasterizer drawing from the buffer's GPU address, with the shaders'
 constant buffer reads of the base vertex, base instance and draw index replaced) has no counterpart here yet.
-`SNX_MME_VERIFY=1` runs both for every call of a known
-macro and logs where they differ, `SNX_MME_HLE=0` interprets everything, and the log names each macro's hash when it
+`mme_verify=1` (the `[Debug]` setting, or `--mme_verify=1`) runs both for every call of a known
+macro and logs where they differ, `mme_hle=0` interprets everything, and the log names each macro's hash when it
 is first called and counts native and interpreted calls every million. `nvn_control.c` decodes the arguments of two
 macros and `nvn_command_gap.c` classifies what methods write, both checked against packets captured in their tests.
 
@@ -63,17 +63,17 @@ reached byte-exact intermediate targets in all four titles, but the approach cou
 
 | File | What it is | Built into |
 | --- | --- | --- |
-| `src/nx/gpu/nvn_trace.c` | `SNX_NVN_TRACE=1` inventory of resolved and called NVN functions | the runtime |
+| `src/nx/gpu/nvn_trace.c` | `nvn_trace=1` inventory of resolved and called NVN functions | the runtime |
 | `src/nx/gpu/nvn_control.c` | decoders for the 12-word macro 38 indexed draw and the macro 12 program bind | `tests/nvn_control.c` |
 | `src/nx/gpu/nvn_command_gap.c` | classifier of Maxwell method write effects in a span of command words | `tests/nvn_command_gap.c` |
 
-Every other `SNX_NVN_*` variable is gone. `SNX_GPU_TRACE_TARGET=address[:bytes]` (`vk/render.c`) logs the clears and
+Every `SNX_NVN_*` variable is gone: these are `[Debug]` settings now. `gpu_trace_target=address[:bytes]` (`vk/render.c`) logs the clears and
 draws that write a render target starting in that range, and replaced the older GPU trace variables.
 
 ## Observing NVN calls
 
 The SDK exports `nvnBootstrapLoader`, which returns a guest function pointer for an NVN function name. With
-`SNX_NVN_TRACE=1`, `nvn_trace.c` replaces that function's entry in the recompiler's dispatch table `g_disp`, then the
+`nvn_trace=1`, `nvn_trace.c` replaces that function's entry in the recompiler's dispatch table `g_disp`, then the
 entry of the `nvnDeviceGetProcAddress` pointer it returns, then the entry of every address either of them resolves. The
 wrappers count calls and always call the original, so rendering is unchanged.
 
@@ -325,7 +325,7 @@ Techniques that worked:
 - **Prove coverage with a sentinel.** Clear to an unusual value per component, draw, and accept a target as fully
   written only if every component of every pixel changed.
 - **Trace the executed MME** to learn a macro's arguments, rather than guessing from the call site.
-- **`SNX_GPU_TRACE_TARGET`** narrows a wrong target to the clears and draws that wrote it.
+- **`gpu_trace_target`** narrows a wrong target to the clears and draws that wrote it.
 
 Pitfalls:
 

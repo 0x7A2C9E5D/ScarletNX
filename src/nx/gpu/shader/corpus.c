@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The shader corpus (SNX_SHADER_CORPUS): one file per translated program, <dir>/<key>_<stage>.snxs, holding a header,
+/* The shader corpus (shader_corpus): one file per translated program, <dir>/<key>_<stage>.snxs, holding a header,
    the ShaderInfo the translation started from and the program's code, for tools/snx_shaderc.c. */
 #include "nx/gpu/shader/shader.h"
 #include <stdio.h>

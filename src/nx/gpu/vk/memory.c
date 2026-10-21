@@ -14,6 +14,7 @@
    command buffers submitted after it, on that queue or on the compute queue, without a semaphore each of them would
    have to wait on, and an image this big is made once. */
 #include <stdlib.h>
+#include "nx/runtime/options.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
 #include "nx/gpu/vk/vk.h"
@@ -35,8 +36,7 @@ void vk_mem_init(int sparse_queue) {
     vkGetPhysicalDeviceProperties2(g_vk.phys, &p2);
     u64 cap = ALLOC_CAP_DEFAULT;
     /* a smaller cap for testing the pieces on a driver that takes anything (lavapipe) */
-    const char* env = getenv("SNX_VK_MAX_ALLOCATION_MB");
-    if (env && strtoull(env, NULL, 10)) cap = strtoull(env, NULL, 10) << 20;
+    if (g_settings.vulkan_allocation_cap) cap = (u64)g_settings.vulkan_allocation_cap << 20;
     if (m3.maxMemoryAllocationSize && cap > m3.maxMemoryAllocationSize) cap = m3.maxMemoryAllocationSize;
     g_vk.alloc_cap = cap;
     g_vk.sparse = sparse_queue && g_vk.feat.sparseBinding;
@@ -164,7 +164,7 @@ void vk_image_destroy(VkImage img, VmaAllocation mem) {
 /* The heap images go to: the biggest device-local one (the only one on a GPU sharing system memory). The BAR window,
    device local too, holds the staging rings, which keep within its budget themselves (cmd.c ring_misplaced) */
 static int g_heap = -1;
-static u64 g_budget_cap; /* SNX_VK_BUDGET_MB, 0 when unset */
+static u64 g_budget_cap; /* vk_budget_mb, 0 when unset */
 
 static void heap_find(void) {
     const VkPhysicalDeviceMemoryProperties* mp;
@@ -175,10 +175,9 @@ static void heap_find(void) {
             (!(mp->memoryHeaps[g_heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) ||
              mp->memoryHeaps[h].size > mp->memoryHeaps[g_heap].size))
             g_heap = (int)h;
-    const char* env = getenv("SNX_VK_BUDGET_MB");
-    if (env && strtoull(env, NULL, 10)) {
-        g_budget_cap = strtoull(env, NULL, 10) << 20;
-        LOG("vulkan: the caches keep within %llu MB of heap %d (SNX_VK_BUDGET_MB)\n",
+    if (g_settings.vulkan_memory_budget) {
+        g_budget_cap = (u64)g_settings.vulkan_memory_budget << 20;
+        LOG("vulkan: the caches keep within %llu MB of heap %d (vk_budget_mb)\n",
             (unsigned long long)(g_budget_cap >> 20), g_heap);
     }
 }

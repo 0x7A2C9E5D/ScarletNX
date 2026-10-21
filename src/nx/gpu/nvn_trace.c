@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* SNX_NVN_TRACE=1: the NVN functions a game resolves through nvnBootstrapLoader and nvnDeviceGetProcAddress, how
+/* nvn_trace=1: the NVN functions a game resolves through nvnBootstrapLoader and nvnDeviceGetProcAddress, how
    often each is called, and how many GPFIFO submissions (by any thread) happen during each queue call. The wrappers
    replace the functions' entries in the recompiler's dispatch table, so they see calls through it (function pointers,
    which is how NVN is called) but not direct branches, unless the game module was recompiled with
@@ -9,6 +9,7 @@
 #include "nx/gpu/nvn_trace.h"
 #include "nx/gpu/gpu.h"
 #include "nx/runtime/loader.h"
+#include "nx/runtime/options.h"
 #include "nx/runtime/rtapi.h"
 #include "nx/hle/kernel/kernel.h"
 #include "nx/memory/mem.h"
@@ -155,8 +156,7 @@ static void bootstrap_trace(CPU* c, u64 entry) {
 }
 
 void nvn_trace_init(void) {
-    const char* env = getenv("SNX_NVN_TRACE");
-    tracing = env && !strcmp(env, "1");
+    tracing = g_settings.nvn_trace;
     if (!tracing) return;
     u64 entry = kernel_find_symbol_exact("nvnBootstrapLoader");
     if (!entry || entry < g_code_lo || entry >= g_code_hi || (entry & 3)) {

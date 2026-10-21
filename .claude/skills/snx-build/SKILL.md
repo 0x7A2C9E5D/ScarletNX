@@ -46,9 +46,9 @@ with Vulkan. The interface is the `Renderer` table in `gpu/renderer.h`, which `v
 `g_renderer->draw(...)` and so on.
 
 The build also makes `snx-shaderc`. A translator change is checked on a shader corpus before rendering: record one
-with `SNX_SHADER_CORPUS=dir`, then run `build/snx-shaderc dir --validate` (`spirv-val` on PATH). Use `--out`
+with `--shader_corpus=dir`, then run `build/snx-shaderc dir --validate` (`spirv-val` on PATH). Use `--out`
 to save direct SPIR-V modules for disassembly or comparison between builds. A corpus is the game's own shaders: keep it
-under `games/` or in the scratchpad, never in a tracked folder of the repo. `SNX_VK_VALIDATION=1`
+under `games/` or in the scratchpad, never in a tracked folder of the repo. `--vk_validation=1`
 turns on the Khronos validation layer when it is installed (Arch: `vulkan-validation-layers`, which the user
 installs). A screenshot (`--shot`) reads back the frame Vulkan presented, and its hash is in the
 log: compare a change against the build before it at the same frame (a boot logo, `--seconds 4 --script

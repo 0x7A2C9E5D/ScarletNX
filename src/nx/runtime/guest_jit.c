@@ -77,7 +77,7 @@ void jit_init(void) {
     config.aot_addresses = g_mod->entry_addr;
     config.aot_functions = g_mod->entry_fn;
     config.aot_count = g_mod->nentries;
-    /* with SNX_NVN_TRACE, wrappers sit in dispatch slots, which only calls through the table see */
+    /* with nvn_trace, wrappers sit in dispatch slots, which only calls through the table see */
     config.hook_direct_calls = nvn_trace_active();
     config.direct_svc = 1; /* g_rtapi's svcs, as the AOT module calls them */
     config.threads = (unsigned)g_settings.jit_threads;
