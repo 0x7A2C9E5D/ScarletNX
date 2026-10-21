@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -261,6 +262,9 @@ static void test_view(void) {
 static int busy_child(void) {
     u64 a = region(R0 + 0x500000, 0x2000);
     Res* r = res_new(0x1000, 0x10);
+    /* no core of the abort it expects: its address space is the guest's whole reservation, which a core_pattern pipe
+       (systemd-coredump) takes minutes to read, and the test waits for the abort */
+    prctl(PR_SET_DUMPABLE, 0);
     alarm(10);
     if (own_begin(a, 0x1000, r, 0)) return 2;
     g_busy_tid = plat_tid();
