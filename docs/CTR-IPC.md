@@ -38,11 +38,12 @@ for that separate profile, and [3DS status](3DS.md) for outstanding work.
   calls publish a result-only response. Malformed requests return a transport
   error without changing the command buffer or invoking the handler. Moved handles
   leave the caller's table once a handler has taken the request, even when it
-  answers with a transport error. Unknown commands stop the run, unless
-  `--ipc-stubs` names their service (`all`, or `srv`, `fs`, `apt`, `ptm`, `hid`,
-  `gsp`, `cfg`, `dsp`, where `fs` covers file sessions too). Then they answer
-  success with one normal word, as Azahar's ReportUnimplementedFunction does, and
-  each is logged the first time it is answered.
+  answers with a transport error. Unknown commands answer success with one normal
+  word, as Azahar's ReportUnimplementedFunction does and a Switch game's do, and
+  each is logged the first time it is answered. With `--ctr_auto_stub_ipc=0` they
+  stop the run, unless `--ipc-stubs` names their service (`all`, or `srv`, `fs`,
+  `apt`, `ptm`, `hid`, `gsp`, `cfg`, `dsp`, `system`, `am`, where `fs` covers file
+  sessions too).
 - Sessions are real typed kernel objects. Duplicates share state and retain a
   reference; final close frees the object. Output handles are newly owned client
   references, published with the declared copy/move descriptor and relinquished

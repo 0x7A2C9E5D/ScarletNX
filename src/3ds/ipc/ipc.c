@@ -167,6 +167,9 @@ int snx_ctr_ipc_stub_mask(const char* list, uint32_t* mask) {
     *mask |= names;
     return 1;
 }
+bool snx_ctr_ipc_stubbed(const SnxCtrProcess* p, uint32_t service) {
+    return g_settings.ctr_answer_unknown_commands || (service < 32 && (p->ipc_stubs >> service & 1));
+}
 SnxCtrSvcResult snx_ctr_ipc_send(SnxCtrProcess* p, uint32_t handle, uint32_t* result) {
     *result = 0;
     uint32_t id = snx_ctr_handle_object(p, handle);
@@ -233,10 +236,10 @@ SnxCtrSvcResult snx_ctr_ipc_send(SnxCtrProcess* p, uint32_t handle, uint32_t* re
             p->last_ipc_service < sizeof families / sizeof *families ? families[p->last_ipc_service] : "?";
         const char* kind = p->last_ipc_service == SNX_CTR_SERVICE_FILE ? " file" : "";
         uint32_t key = p->last_ipc_service << 16 | c.in[0] >> 16, seen = 0;
-        if (!(p->ipc_stubs & (1u << p->last_ipc_service))) {
+        if (!snx_ctr_ipc_stubbed(p, p->last_ipc_service)) {
             fprintf(stderr,
-                    "3ds ipc: %s%s has no command 0x%04x (header 0x%08x). Run with --ipc-stubs %s to answer it with "
-                    "success.\n",
+                    "3ds ipc: %s%s has no command 0x%04x (header 0x%08x). Run with --ipc-stubs %s (or "
+                    "--ctr_auto_stub_ipc=1) to answer it with success.\n",
                     family, kind, c.in[0] >> 16, c.in[0], family);
             return SNX_CTR_SVC_UNSUPPORTED;
         }
@@ -270,7 +273,7 @@ SnxCtrSvcResult snx_ctr_ipc_send(SnxCtrProcess* p, uint32_t handle, uint32_t* re
     if (g_settings.ctr_ipc_trace) { /* the request and its answer: the reply's header and result, or the transport's */
         uint32_t service = p->last_ipc_service;
         fprintf(stderr, "3ds ipc trace: thread %u %s 0x%08x -> 0x%08x %s0x%08x\n", (unsigned)p->current_thread,
-                service == SNX_CTR_SERVICE_SYSTEM ? snx_ctr_system_name(p->objects[id].data.session.name)
+                service == SNX_CTR_SERVICE_SYSTEM ? snx_ctr_system_name(p, p->objects[id].data.session.name)
                 : service < sizeof families / sizeof *families ? families[service]
                                                                : "?",
                 c.in[0], *result ? 0 : c.out[0], *result ? "transport " : "", *result ? *result : c.out[1]);

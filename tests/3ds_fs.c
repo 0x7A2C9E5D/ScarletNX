@@ -3,6 +3,7 @@
 #include "3ds/runtime/internal.h"
 #include "3ds/ipc/ctr_ipc.h"
 #include "common/utilities/common.h"
+#include "snx_settings.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -326,6 +327,7 @@ static void sd_area(SnxCtrProcess* p, uint32_t fs, const char* directory) {
 }
 int main(int argc, char** argv) {
     assert(argc == 4);
+    g_settings.ctr_answer_unknown_commands = 0; /* an unknown command stops, as the tests expect */
 #if defined(__unix__) || defined(__APPLE__)
     if (!strcmp(argv[3], "fallback")) {
         struct rlimit limit = {64, 64};

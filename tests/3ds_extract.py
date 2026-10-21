@@ -106,8 +106,9 @@ def main():
 
         empty, _ = run(cia(application=ncch(patch_exefs=empty_icon)))
         assert (empty / 'exefs/icon').read_bytes() == b''
-        # The default path is named after the CIA in the data folder's work/3ds, in the Switch driver's alphabet
-        name = 'input with spacesliteral'
+        # The default folder is the data folder's recompiled/<title ID>, a Switch game's layout: the module, the copy of
+        # the runtime that plays it, and the .ini naming the CIA
+        name = f'{TITLE:016X}'
         data = root / 'data'
         # AOT is always on: the same launch also compiles and runs the tiny witness.
         run_status = 0
@@ -119,8 +120,19 @@ def main():
             extra=('--repo', str(data)),
             explicit=False,
         )
-        expected = data.resolve() / 'work/3ds' / name
+        expected = data.resolve() / 'recompiled' / name
         assert expected.is_dir() and str(expected) in text
+        assert (expected / f'{name}_code.so').is_file() and os.access(expected / name, os.X_OK)
+        ini = dict(line.split('=', 1) for line in (expected / f'{name}.ini').read_text().splitlines())
+        assert ini == {'source': str(source.resolve()), 'model': 'old'}, ini
+        assert not (data / 'work/3ds/input with spacesliteral').exists()
+        # the copy plays its game alone, from the CIA its .ini names, with what --script= and --seconds= set
+        env = {**os.environ, 'HOME': str(root), 'USERPROFILE': str(root)}
+        p = subprocess.run([str(expected / name), '--script=100:1', '--seconds=20'], capture_output=True, text=True,
+                           cwd=root, timeout=30, env=env)
+        assert p.returncode == 0 and run_message in p.stdout + p.stderr, (p.returncode, p.stdout + p.stderr)
+        p = subprocess.run([driver, f'--game={expected}'], capture_output=True, text=True, cwd=root, timeout=30, env=env)
+        assert p.returncode == 0 and run_message in p.stdout + p.stderr, (p.returncode, p.stdout + p.stderr)
         if sys.platform != 'win32' and sys.platform != 'darwin':
             # An installed build's (its folder is the user's data folder) is in the XDG cache folder
             env = {**os.environ, 'XDG_DATA_HOME': str(root / 'xdg-data'), 'XDG_CACHE_HOME': str(root / 'xdg-cache')}
@@ -132,7 +144,7 @@ def main():
                 explicit=False,
                 env=env,
             )
-            expected = (root / 'xdg-cache').resolve() / 'scarletnx/work/3ds' / name
+            expected = (root / 'xdg-data').resolve() / 'scarletnx/recompiled' / name
             assert expected.is_dir() and str(expected) in text
             assert not (root / 'xdg-data/scarletnx/work').exists()
         # Requested extraction alone may succeed without a runtime; normal launches stop before AOT.

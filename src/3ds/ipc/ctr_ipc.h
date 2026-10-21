@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_CTR_IPC_H
 #define SNX_CTR_IPC_H
+#include <stdbool.h>
 #include <stdint.h>
 #define SNX_CTR_IPC_WORDS          64u
 #define SNX_CTR_IPC_BAD_DESCRIPTOR 0xd9001830u
@@ -35,9 +36,10 @@ struct SnxCtrProcess;
 /* Serialized stack-owned request/reply copies. Never a flat guest pointer.
    Header: command[31:16], normal words[11:6], translation words[5:0].
    Result is reply normal word 1. PID descriptors are kernel supplied, not the
-   raw client's claimed PID. Unknown commands stop the run, unless the process's
-   IPC stub list names the service: then they answer success, as Azahar's
-   ReportUnimplementedFunction does. */
+   raw client's claimed PID. Unknown commands answer success, as Azahar's
+   ReportUnimplementedFunction does and a Switch game's do (auto_stub_ipc), unless
+   the ctr_auto_stub_ipc setting is off: then they stop the run, except for the
+   services the process's IPC stub list names. */
 typedef struct {
     struct SnxCtrProcess* process;
     uint32_t object, caller_pid, transport_result;
@@ -51,6 +53,9 @@ typedef struct {
 /* Adds the --ipc-stubs list ("all", or service families: srv, fs, apt, ptm, hid, gsp, cfg, dsp, comma separated)
    to a mask over SNX_CTR_SERVICE_*; false, with the mask unchanged, for an empty list or a name it does not know */
 int snx_ctr_ipc_stub_mask(const char* list, uint32_t* mask);
+/* whether an unknown command of the service (SNX_CTR_SERVICE_*) answers success: ctr_auto_stub_ipc, else the process's
+   stub list */
+bool snx_ctr_ipc_stubbed(const struct SnxCtrProcess* p, uint32_t service);
 int snx_ctr_ipc_expect(SnxCtrIpc* c, uint32_t normal, uint32_t translated);
 void snx_ctr_ipc_bad(SnxCtrIpc* c);
 void snx_ctr_ipc_get_bytes(SnxCtrIpc* c, uint32_t first, uint8_t* bytes, uint32_t size);

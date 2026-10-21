@@ -9,6 +9,7 @@
    screen up (libctru's console draws pixel (x, y) at x * 240 + 239 - y); the window and the dumps show it that way
    round. */
 #include "3ds/gpu/present.h"
+#include "3ds/input/input.h"
 #include "3ds/gpu/vk/vk.h"
 #include "3ds/gpu/vk/shaders/present_spv.h"
 #include "3ds/gpu/vk/vk_transfer.h"
@@ -215,8 +216,10 @@ static void write_ppm(unsigned screen, unsigned width, unsigned height, const un
 }
 static void pump(void) {
     SDL_Event event;
-    while (SDL_PollEvent(&event))
+    while (SDL_PollEvent(&event)) {
         if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) g_present.closed = 1;
+        snx_ctr_input_event(&event); /* the gamepads connected and gone */
+    }
 }
 /* SDL turns SIGINT and SIGTERM into a quit event too, so this is also how Ctrl+C ends a run, with or without a window
    (the audio output initializes SDL's events) */

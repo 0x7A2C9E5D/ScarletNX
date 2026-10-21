@@ -245,7 +245,7 @@ done:
 /* The title's hints (snx_ctr_jit_save_hints): the blocks earlier runs compiled at run time, one pc a line in hex, | 1
    for Thumb. *count of them, the caller's to free; none (NULL) without the file */
 static uint32_t* read_hints(const char* directory, size_t* count) {
-    char* path = snx_path_join(directory, SNX_CTR_HINTS);
+    char* path = snx_ctr_game_file(directory, SNX_CTR_HINTS);
     FILE* f = path ? fopen(path, "r") : NULL;
     uint32_t* hints = NULL;
     size_t capacity = 0;
@@ -435,7 +435,7 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
         snprintf(error, error_size, "cannot resolve %s: %s", extracted, snx_os_error(why, sizeof why));
         goto done;
     }
-    target = snx_path_join(directory, "native");
+    target = snx_ctr_game_file(directory, SNX_CTR_MODULE_SUFFIX);
     bool exhaustive = image.segment[0].bytes <= SNX_CTR_AOT_EXHAUSTIVE_LIMIT;
     unsigned capacity = image.segment[0].bytes / 4 + image.segment[0].bytes / 2;
     size_t hint_count = 0;
@@ -566,33 +566,18 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
         snprintf(error, error_size, "extracted image changed during compilation");
         goto done;
     }
-    /* A module from an earlier compile is replaced only once the new one is complete. If the new one cannot take
-       its place the old one goes back, so a failed publish leaves what was there. On Windows a folder whose DLL a
-       running copy of the game has loaded cannot be moved. */
-    previous = snx_path_join(directory, "native.previous");
-    {
-        bool had_target = snx_path_exists(target);
-        const char *from = NULL, *to = NULL;
+    /* A module from an earlier compile is replaced only once the new one is complete, by a rename over it, so a
+       failed publish leaves what was there. On Windows a DLL a running copy of the game has loaded cannot be
+       replaced. */
+    if (snx_replace(module, target)) {
         char why[256];
-        if (snx_path_exists(previous) && snx_remove_tree(previous))
-            from = previous;
-        else if (had_target && snx_replace(target, previous))
-            from = target, to = previous;
-        else if (snx_replace(stage, target)) {
-            from = stage, to = target;
-            snx_os_error(why, sizeof why);
-            if (had_target) (void)snx_replace(previous, target);
-        }
-        if (from) {
-            if (from != stage) snx_os_error(why, sizeof why);
-            if (to)
-                snprintf(error, error_size, "cannot move %s to %s: %s", from, to, why);
-            else
-                snprintf(error, error_size, "cannot remove %s: %s", from, why);
-            goto done;
-        }
+        snprintf(error, error_size, "cannot move %s to %s: %s", module, target, snx_os_error(why, sizeof why));
+        goto done;
     }
-    (void)snx_remove_tree(previous);
+    /* an older version's module, in native/ */
+    previous = snx_path_join(directory, "native");
+    if (previous && snx_is_dir(previous)) (void)snx_remove_tree(previous);
+    (void)snx_remove_tree(stage);
     free(stage);
     stage = NULL;
     printf("Compiled ARM11 static module: %u blocks in %u objects\n", count, files);

@@ -140,6 +140,15 @@ typedef struct {
     uint16_t semaphore_mask;
     uint64_t next_frame_ns; /* host monotonic deadline of the next audio frame */
 } SnxCtrDspService;
+/* hid:USER's sampling (services/hid.c): each update's next deadline, host monotonic ns (0: not running), the index
+   each writes next, how many times the game enabled each sensor, and the circle pad's last two raw positions, which
+   each sample averages with */
+typedef struct {
+    uint64_t next_pad_ns, next_accelerometer_ns, next_gyroscope_ns;
+    uint32_t pad_index, touch_index, accelerometer_index, gyroscope_index;
+    uint32_t accelerometer_users, gyroscope_users;
+    int32_t circle_history[2][2];
+} SnxCtrHid;
 struct SnxCtrProcess {
     SnxCtrRomfs* romfs; /* runtime-owned immutable host filesystem view */
     FsTree* tree;       /* the shared NX-style tree: romfs/exefs read-only, sdmc read-write */
@@ -163,7 +172,8 @@ struct SnxCtrProcess {
     uint32_t last_ipc_service, last_ipc_header;
     uint32_t apt_lock; /* manager-owned object index; independent of client sessions */
     uint32_t apt_phase, apt_notification, apt_parameter;
-    uint32_t hid_objects[6];
+    uint32_t hid_objects[6]; /* the shared memory, then the events: pad 1, pad 2, accelerometer, gyroscope, debug pad */
+    SnxCtrHid hid;
     uint32_t shell_closed; /* virtual console starts with its shell open */
     double clock_origin;   /* host monotonic origin for the base ARM11 tick domain */
     CtrSelfArchive self_archives[CTR_SELF_ARCHIVES];
@@ -179,7 +189,12 @@ struct SnxCtrProcess {
     char name[8];
     uint32_t region_lockout; /* the SMDH's regions the title runs in, bit per CFG region (0 JPN ... 6 TWN), 0 unknown */
     uint32_t resource_limit; /* CTR_OBJ_RESOURCE_LIMIT object, 0 until the first GetResourceLimit */
-    uint32_t ipc_stubs;      /* services whose unknown commands answer success (bit per SNX_CTR_SERVICE_*) */
+    uint32_t ipc_stubs;      /* services whose unknown commands answer success (bit per SNX_CTR_SERVICE_*), with
+                                ctr_auto_stub_ipc off */
+    /* the services the runtime has no model of and does not know, which the game asked for: each a stand-in
+       session's name (services/system.c) */
+    char stand_ins[16][9];
+    uint32_t stand_in_count;
     /* the stubbed commands already reported, service << 16 | command, so each is logged once */
     uint32_t stub_logged[256], stub_logged_count;
     uint64_t time_update_ns; /* host monotonic deadline of the shared page's next hourly time entry */

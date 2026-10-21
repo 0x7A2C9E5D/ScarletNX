@@ -259,6 +259,11 @@ class Descriptor(C.Structure):
     ]
 
 
+def module_of(folder):
+    """the game folder's module, named after it as a Switch game's is"""
+    return folder / f'{folder.name}_code.{"dll" if sys.platform == "win32" else "so"}'
+
+
 def main():
     # absolute, not resolved: scarletnx-3ds may be a link to scarletnx, which runs the driver its name says
     driver, probe = [str(Path(p).absolute()) for p in sys.argv[1:3]]
@@ -292,10 +297,10 @@ def main():
         assert (basic / 'romfs/hello.txt').read_bytes() == b'hello'
         assert (basic / 'contents/00002222.app').is_file()
         # the module alone is published, not the objects it was linked from
-        assert (basic / 'native/code.so').is_file() and [p.name for p in (basic / 'native').iterdir()] == ['code.so']
+        assert module_of(basic).is_file() and not list(basic.rglob('*.o')) and not (basic / "native").exists()
         subprocess.run([probe, str(basic), 'basic'], check=True, capture_output=True)
         # Like the Switch driver, the extraction and the module are used again, with no error and no recompile
-        before = (basic / 'native/code.so').read_bytes()
+        before = module_of(basic).read_bytes()
         source = root / 'repeat.cia'
         source.write_bytes(application([0xE3A0002A, 0xEF000003]))
         p = subprocess.run(
@@ -303,7 +308,7 @@ def main():
         )
         assert p.returncode == 0 and 'Guest ExitProcess: r0=42' in p.stdout, p.stdout + p.stderr
         assert 'Using the extraction' in p.stdout and 'Extracting' not in p.stdout and 'Recompiling' not in p.stdout
-        assert (basic / 'native/code.so').read_bytes() == before
+        assert module_of(basic).read_bytes() == before
         # -r compiles again and does not play
         p = subprocess.run(
             [driver, *extract, '-r', '--output', str(basic), str(source)], text=True, capture_output=True, timeout=20
@@ -315,8 +320,8 @@ def main():
                       'certificates.bin', 'ncch.bin', 'exheader.bin', 'manifest.ini'}
         direct, text = run(application([0xE3A0002A, 0xEF000003]), message='Guest ExitProcess: r0=42 blocks=2')
         assert 'Extracting' not in text and text.index('Recompiling ARM11') < text.index('Running ARM11')
-        assert not extraction & {p.name for p in direct.iterdir()} and (direct / 'native/code.so').is_file()
-        module = (direct / 'native/code.so').read_bytes()
+        assert not extraction & {p.name for p in direct.iterdir()} and module_of(direct).is_file()
+        module = module_of(direct).read_bytes()
         # -r reads the CIA too, and a run uses the module again
         p = subprocess.run([driver, '-r', '--output', str(direct), str(source)], text=True, capture_output=True,
                            timeout=20)
@@ -328,12 +333,12 @@ def main():
         # run takes the extraction away, and an extraction asked for again lands beside the module
         p = subprocess.run([driver, '--output', str(basic), str(source)], text=True, capture_output=True, timeout=20)
         assert p.returncode == 0 and 'Removing the extraction' in p.stdout and 'Recompiling' not in p.stdout, p.stdout
-        assert not extraction & {p.name for p in basic.iterdir()} and (basic / 'native/code.so').is_file()
+        assert not extraction & {p.name for p in basic.iterdir()} and module_of(basic).is_file()
         p = subprocess.run(
             [driver, *extract, '--output', str(direct), str(source)], text=True, capture_output=True, timeout=20
         )
         assert p.returncode == 0 and 'Extracting' in p.stdout and 'Recompiling' not in p.stdout, p.stdout + p.stderr
-        assert (direct / 'romfs/hello.txt').read_bytes() == b'hello' and (direct / 'native/code.so').read_bytes() == module
+        assert (direct / 'romfs/hello.txt').read_bytes() == b'hello' and module_of(direct).read_bytes() == module
         assert not list(root.rglob('.snx-*')) and not list(root.glob('*.extracting'))
         basic = direct  # the extraction the checks below read
         run(application([0xE3A0002A, 0xEF000003]), message='r0=42', extra=('--model', 'new'))
@@ -411,7 +416,10 @@ def main():
         run(fs_program(), message='Guest ExitProcess: r0=42')
         run(thread_program(), message='Guest ExitProcess: r0=42')
         run(ipc_program(), message='Guest ExitProcess: r0=42')
-        run(ipc_program(wait=True), 3, 'wait_service=MISSING')
+        # a service the runtime does not know: a stand-in answering success, the default, else a wait forever as
+        # the console's for a service never registered
+        run(ipc_program(wait=True), message=('the runtime has no service MISSING: its commands answer success',))
+        run(ipc_program(wait=True), 3, 'wait_service=MISSING', extra=('--ctr_auto_stub_ipc=0',))
         run(application([0xEE300A01, 0xE3A0002A, 0xEF000003]), message='Guest ExitProcess: r0=42')  # VFPv2 VADD.F32
         run(application([0xE3010234]), 1, FAULT)  # MOVW is not ARM11
         run(application([0xE3A01000, 0xE5910000]), 1, FAULT)  # unmapped data
@@ -443,16 +451,16 @@ def main():
         put(uncovered, 0, '<3I', 0xE3A01601, 0xE2811C01, 0xE12FFF11)
         put(uncovered, 0x100, '<I', 0xEF000003)
         hinted, text = run(application(raw=uncovered), message='Compiled at run time: 1 blocks, 1 new')
-        assert (hinted / 'hints').read_text().split() == ['00100100']
+        assert (hinted / f'{hinted.name}.hints').read_text().split() == ['00100100']
         source = root / f'input {cases};literal.cia'
         p = subprocess.run([driver, '-r', '--output', str(hinted), str(source)], text=True, capture_output=True, timeout=90)
         assert p.returncode == 0 and 'Seeding ARM11 discovery with 1 blocks' in p.stdout, p.stdout + p.stderr
         p = subprocess.run([driver, '--output', str(hinted), str(source)], text=True, capture_output=True, timeout=90)
         assert 'Guest ExitProcess' in p.stdout and 'Compiled at run time' not in p.stdout, p.stdout + p.stderr
         too_large, _ = run(application([0xEF000003], text_size=16 * 1024 * 1024 + 4), 3, 'static AOT text limit')
-        assert not (too_large / 'native').exists()
+        assert not module_of(too_large).exists()
         extracted, text = run(application([0xE3A0002A, 0xEF000003]), message='Extracted', extra=('-x',))
-        assert 'Running ARM11' not in text and not (extracted / 'native').exists()
+        assert 'Running ARM11' not in text and not module_of(extracted).exists()
         # Compiler input is revalidated from raw files, never trusted manifest fields.
         (extracted / 'exefs/.code').write_bytes(b'truncated')
         p = subprocess.run(
@@ -461,10 +469,10 @@ def main():
             capture_output=True,
             timeout=20,
         )
-        assert p.returncode == 1 and 'bounded expanded .code' in p.stderr and not (extracted / 'native').exists()
+        assert p.returncode == 1 and 'bounded expanded .code' in p.stderr and not module_of(extracted).exists()
         assert not list(root.rglob('.snx-*'))
         # Real dlopen/dlsym ABI validation against freshly generated, trusted ELF copies.
-        original = (basic / 'native/code.so').read_bytes()
+        original = module_of(basic).read_bytes()
         offset = descriptor_offset(original)
         assert C.sizeof(Descriptor) == 112
         identity = hashlib.sha256(
@@ -496,7 +504,7 @@ def main():
         subprocess.run([probe, str(workload), 'reject', str(root / 'missing.so')], check=True, capture_output=True)
         readelf = shutil.which('readelf')
         if readelf:
-            deps = subprocess.check_output([readelf, '-d', str(workload / 'native/code.so')], text=True)
+            deps = subprocess.check_output([readelf, '-d', str(module_of(workload))], text=True)
             assert 'LLVM' not in deps and 'scarletnx' not in deps
     print(f'CTR end-to-end static AOT: {cases} pipelines, native ABI mutations and image identity checks passed')
 

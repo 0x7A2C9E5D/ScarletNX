@@ -107,7 +107,7 @@ SnxCtrJit* snx_ctr_jit_new(SnxCtrProcess* process, char* error, size_t error_siz
     return j;
 }
 size_t snx_ctr_jit_save_hints(SnxCtrJit* j, const char* directory) {
-    char* path = j && j->count ? snx_path_join(directory, SNX_CTR_HINTS) : NULL;
+    char* path = j && j->count ? snx_ctr_game_file(directory, SNX_CTR_HINTS) : NULL;
     if (!path) return 0;
     FILE* f = fopen(path, "r");
     unsigned value;

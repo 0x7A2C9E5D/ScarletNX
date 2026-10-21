@@ -6,6 +6,7 @@
 #include "3ds/services/gsp.h"
 #include "3ds/services/dsp.h"
 #include "3ds/services/file.h"
+#include "3ds/services/hid.h"
 #include "common/utilities/common.h"
 #include <string.h>
 #if defined(_WIN32)
@@ -388,6 +389,7 @@ SnxCtrSchedule snx_ctr_schedule(SnxCtrProcess* p) {
         uint64_t now = now_ns(), earliest = UINT64_MAX;
         if (p->gsp.shared_object && now >= p->gsp.next_vblank_ns) snx_ctr_gsp_vblank(p);
         if (p->dsp.core && now >= p->dsp.next_frame_ns) snx_ctr_dsp_frame(p, now);
+        if (now >= snx_ctr_hid_deadline(p)) snx_ctr_hid_update(p, now);
         if (now >= p->time_update_ns) snx_ctr_shared_page_time(p);
         for (uint32_t i = 1; i < CTR_OBJECTS; ++i) {
             CtrObject* o = &p->objects[i];
@@ -454,6 +456,7 @@ SnxCtrSchedule snx_ctr_schedule(SnxCtrProcess* p) {
         uint64_t deadline = earliest;
         if (p->gsp.shared_object && p->gsp.next_vblank_ns < deadline) deadline = p->gsp.next_vblank_ns;
         if (p->dsp.core && p->dsp.next_frame_ns < deadline) deadline = p->dsp.next_frame_ns;
+        if (snx_ctr_hid_deadline(p) < deadline) deadline = snx_ctr_hid_deadline(p);
         /* nothing to wake for (a thread sleeping forever included) */
         if (deadline >= UINT64_MAX - 1) return SNX_CTR_SCHED_BLOCKED;
         slept_for_device = deadline < earliest;

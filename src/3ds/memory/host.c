@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #if !defined(_WIN32) && !defined(_GNU_SOURCE)
-#define _GNU_SOURCE /* memfd_create, MAP_NORESERVE */
+#define _GNU_SOURCE /* syscall, MAP_NORESERVE */
 #endif
 #include "3ds/memory/host.h"
 #include "3ds/memory/ctr_memory.h"
@@ -14,6 +14,9 @@
 #include <signal.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#if defined(__linux__) || defined(__ANDROID__)
+#include <sys/syscall.h>
+#endif
 #endif
 
 #ifndef MAP_NORESERVE
@@ -152,7 +155,9 @@ bool ctr_host_memory_new(CtrHostMemory* m, uint64_t size) {
     memset(m, 0, sizeof *m);
     int fd = -1;
 #if defined(__linux__) || defined(__ANDROID__)
-    fd = memfd_create("snx-ctr-ram", MFD_CLOEXEC);
+    /* the system call itself: Android's C library has memfd_create only from Android 11 (API 30), as code_loader.c
+       says */
+    fd = (int)syscall(SYS_memfd_create, "snx-ctr-ram", 1u /* MFD_CLOEXEC */);
 #else
     char name[64];
     snprintf(name, sizeof name, "/snx-ctr-%ld-%p", (long)getpid(), (void*)m);

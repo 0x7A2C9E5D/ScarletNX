@@ -15,10 +15,11 @@ add_library(snx_ctr_loader STATIC loader/loader.c loader/cia.c loader/ncch.c loa
 target_link_libraries(snx_ctr_loader PUBLIC scarletnx-common scarletnx-filesystem OpenSSL::Crypto)
 target_compile_definitions(snx_ctr_loader PRIVATE _FILE_OFFSET_BITS=64 _CRT_SECURE_NO_WARNINGS)
 add_library(snx_ctr_process STATIC runtime/process.c kernel/kernel.c kernel/thread.c aot/dispatch.c ipc/ipc.c services/srv.c services/fs.c services/apt.c services/ptm.c services/hid.c services/romfs.c services/file.c services/gsp.c services/dsp.c services/cfg.c services/system.c services/am.c)
-add_library(snx_ctr_gpu STATIC gpu/present.c gpu/transfer.c gpu/vk/device.c gpu/vk/transfer.c gpu/vk/spirv.c
+# the player's input lives beside the presenter, whose window's events it reads
+add_library(snx_ctr_gpu STATIC gpu/present.c input/input.c gpu/transfer.c gpu/vk/device.c gpu/vk/transfer.c gpu/vk/spirv.c
             gpu/vk/vsgen.c gpu/vk/fsgen.c gpu/vk/render.c gpu/pica.c "${volk_SOURCE_DIR}/volk.c")
 target_include_directories(snx_ctr_gpu PUBLIC "${volk_SOURCE_DIR}")
-target_link_libraries(snx_ctr_gpu PUBLIC snx_ctr_memory Vulkan::Headers SDL3::SDL3 ${CMAKE_DL_LIBS})
+target_link_libraries(snx_ctr_gpu PUBLIC snx_ctr_memory Vulkan::Headers SDL3::SDL3 snx_settings ${CMAKE_DL_LIBS})
 set_source_files_properties("${volk_SOURCE_DIR}/volk.c" PROPERTIES COMPILE_OPTIONS "${snx_third_party_flags}")
 # the GPU's compute shaders, compiled at build time (cmake/glsl.cmake)
 include("${PROJECT_SOURCE_DIR}/cmake/glsl.cmake")
@@ -67,18 +68,27 @@ else()
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
     target_compile_options(scarletnx-3ds PRIVATE -Wall -Wextra -Werror=missing-prototypes)
     set(SNX_CTR_PROGRAM "$<TARGET_FILE:scarletnx-3ds>" PARENT_SCOPE)
+    # after each build the program is copied beside every 3DS game (recompiled/<title ID>/<title ID>), as scarletnx
+    # is beside every Switch game (cmake/deploy.cmake), so a runtime fix reaches them without recompiling. A sanitized
+    # test build's stays here
+    if(SNX_DEPLOY AND NOT (SNX_TEST_SANITIZERS AND BUILD_TESTING))
+        add_custom_command(TARGET scarletnx-3ds POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" "-DCTR_RUNTIME=$<TARGET_FILE:scarletnx-3ds>" "-DGAMES=${SNX_RECOMPILED_DIR}"
+                    "-DWINDOWS=${WIN32}" "-DMACOS=${APPLE}" -P "${PROJECT_SOURCE_DIR}/cmake/deploy.cmake"
+            VERBATIM)
+    endif()
     # Windows: the runtime's application manifest, as scarletnx has it (src/nx/runtime/driver/CMakeLists.txt). Its
     # longPathAware lets the native linker start in a staging folder past MAX_PATH (aot/compiler.c), its UTF-8 code
     # page lets a CIA's path hold any character
     if(WIN32)
         if(CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
             target_link_options(scarletnx-3ds PRIVATE
-                                "LINKER:/MANIFESTINPUT:${CMAKE_SOURCE_DIR}/src/nx/runtime/platform/runtime.manifest")
+                                "LINKER:/MANIFESTINPUT:${CMAKE_SOURCE_DIR}/src/common/platform/runtime.manifest")
         else()
             enable_language(RC)
-            target_sources(scarletnx-3ds PRIVATE "${CMAKE_SOURCE_DIR}/src/nx/runtime/platform/runtime.rc")
+            target_sources(scarletnx-3ds PRIVATE "${CMAKE_SOURCE_DIR}/src/common/platform/runtime.rc")
             target_include_directories(scarletnx-3ds PRIVATE
-                                       "$<$<COMPILE_LANGUAGE:RC>:${CMAKE_SOURCE_DIR}/src/nx/runtime/platform>")
+                                       "$<$<COMPILE_LANGUAGE:RC>:${CMAKE_SOURCE_DIR}/src/common/platform>")
         endif()
     endif()
 endif()

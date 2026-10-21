@@ -1175,7 +1175,7 @@ int main(int argc, char** argv) {
         rc = snx_run(probe, NULL, NULL, &output);
         CHECK(rc != 0 && strstr(output, "Probe"));
 #ifndef _WIN32
-        CHECK(strstr(output, "chdir to game directory"));
+        CHECK(strstr(output, "chdir to the child's working directory"));
 #endif
         free(output);
         probe[2] = "exec";

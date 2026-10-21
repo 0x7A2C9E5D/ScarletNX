@@ -638,6 +638,21 @@ setting CTR run-time compile trace
     words Off|On
     help 1 = logs each block the 3DS runtime compiles while the game runs (the static module lacked it), Thumb ones
     help with the pc's low bit set as the hints file writes them
+setting CTR answer unknown commands
+    key ctr_auto_stub_ipc
+    int 0 1
+    default 1
+    words Off|On
+    help 1 = a command of a 3DS service the runtime doesn't know answers success, and a service it doesn't have is a
+    help stand-in that answers each command so (each logged the first time), as auto_stub_ipc does for a Switch game;
+    help 0 = the run stops at the first, saying which, except for the services --ipc-stubs names
+setting CTR script
+    key ctr_script
+    text 4096
+    default ""
+    help The 3DS game's scripted input (--script= too): when:buttons, comma between, when in ms from the start and
+    help buttons in hex as hid:USER's pad has them (1 A, 2 B, 4 Select, 8 Start, 10 Right, 20 Left, 40 Up, 80 Down,
+    help 100 R, 200 L, 400 X, 800 Y), each held for press_len ms
 
 section Game: g_game_ini
 section Display: g_display_ini

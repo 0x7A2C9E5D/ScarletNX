@@ -3,6 +3,8 @@
 #include "3ds/aot/ctr_module.h"
 #include "3ds/runtime/internal.h"
 #include "3ds/ipc/ctr_ipc.h"
+#include "3ds/services/system.h"
+#include "snx_settings.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -53,6 +55,8 @@ static void lookup(SnxCtrProcess* p, uint32_t handle, uint32_t flags) {
     sync(p, handle, SNX_CTR_SVC_RETURN, 0);
 }
 int main(void) {
+    /* the console's answers: an unknown command or service stops, but where the tests below answer it */
+    g_settings.ctr_answer_unknown_commands = 0;
     unsigned char code[0x3000] = {0};
     SnxCtrImage image = {.segment = {{0x100000, 1, 16}, {0x200000, 1, 4}, {0x300000, 1, 4}},
                          .stack_size = 0x4000,
@@ -241,7 +245,26 @@ int main(void) {
         request(p, absent, 5);
         sync(p, srv, SNX_CTR_SVC_RETURN, 0);
         assert(word(p, 0) == 0x00050040 && word(p, 1) == 0xd0406401 && !snx_ctr_kernel_blocked(p));
+        /* answering unknown commands, the runtime's default (ctr_auto_stub_ipc): a service it does not know is a
+           stand-in, each command of which answers success and nothing else, and so is an unknown command of a known
+           service, with no stub list */
+        g_settings.ctr_answer_unknown_commands = 1;
         absent[4] = 0;
+        request(p, absent, 5);
+        sync(p, srv, SNX_CTR_SVC_RETURN, 0);
+        assert(word(p, 0) == 0x00050042 && !word(p, 1) && word(p, 2) == 0x10 && !snx_ctr_kernel_blocked(p));
+        uint32_t stand_in = word(p, 3), command[] = {0x12340080, 7, 8};
+        assert(!strcmp(snx_ctr_system_name(p, p->objects[snx_ctr_handle_object(p, stand_in)].data.session.name),
+                       "MISSING"));
+        request(p, command, 3);
+        sync(p, stand_in, SNX_CTR_SVC_RETURN, 0);
+        assert(word(p, 0) == 0x12340040 && !word(p, 1) && !word(p, 2));
+        close_handle(p, stand_in);
+        uint32_t unknown_srv[] = {0x7fff0000};
+        request(p, unknown_srv, 1);
+        sync(p, srv, SNX_CTR_SVC_RETURN, 0);
+        assert(word(p, 0) == 0x7fff0040 && !word(p, 1));
+        g_settings.ctr_answer_unknown_commands = 0;
         request(p, absent, 5);
         sync(p, srv, SNX_CTR_SVC_BLOCKED, 0);
         assert(word(p, 0) == absent[0] && !strcmp(snx_ctr_thread(p)->waiting_service, "MISSING") &&

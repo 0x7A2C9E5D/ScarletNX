@@ -281,7 +281,12 @@ def check_target_sources(repo, build):
                 if not path.is_absolute():
                     path = repo / path
                 path = path.resolve()
-                if path.is_relative_to(src) and path.relative_to(src).parts[0] != owner:
+                # the Windows programs' manifest and icon (src/common/platform/runtime.rc), which each program
+                # compiles into itself as a source of its own
+                if not path.is_relative_to(src):
+                    continue
+                boundary = path.relative_to(src).parts[0]
+                if boundary != owner and not (boundary == 'common' and path.suffix == '.rc'):
                     errors.append(f'{entry["name"]} compiles a source owned by another runtime: {path}')
     return errors
 

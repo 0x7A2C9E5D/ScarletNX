@@ -27,9 +27,24 @@ with the compiler built into the driver. A launch reuses a finished extraction
 and module and runs until the game exits or its window closes (or for `--seconds N`,
 after which it reports where each thread is).
 
+A CIA's game is a folder of the data folder's `recompiled/`, named after its title
+ID as a Switch game's is named (`recompiled/0004000000123400/`). It holds the compiled
+module (`<title ID>_code.so`, `_code.dll` on Windows), the blocks runs compiled at
+run time (`<title ID>.hints`), the game's state (`sdmc/`, `savedata/`, frames,
+audio), `<title ID>.ini` and a copy of the runtime named `<title ID>`. The `.ini`
+names the CIA (`source=`) and the console (`model=`). Running the copy plays the
+game, as a Switch game's copy does: `recompiled/<title ID>/<title ID> --seconds=60
+--script=15000:1`, or `scarletnx-3ds --game=recompiled/<title ID>`. Where scarletnx is
+also the 3DS driver (`SNX_MULTICALL`), the copy is scarletnx, which runs a 3DS game
+under a 3DS title ID's name. A build copies its runtime beside every game again
+(`cmake/deploy.cmake`): a 3DS title ID's folder gets the 3DS driver. `--outdir DIR`
+names another folder of games, and `--output DIR` the game's folder itself. A game
+an older version kept in `work/3ds/<the CIA's name>` moves into its new folder the
+first time it is played, its module and hints renamed.
+
 An encrypted CIA, as a console dump is, is decrypted once with the user's own keys
-into `<title folder>.decrypted.cia` beside the title's folder, which is read from
-then on (`src/3ds/loader/decrypt.c`). The keys are an `aes_keys.txt` in Azahar's
+into `work/3ds/<the CIA's name>.decrypted.cia` (beside the folder `--output` names),
+which is read from then on (`src/3ds/loader/decrypt.c`). The keys are an `aes_keys.txt` in Azahar's
 format, looked for in `~/.3ds/aes_keys.txt` (`%USERPROFILE%\.3ds` on Windows) as
 the Switch driver looks in `~/.switch`, or named with `--keys FILE`. They are
 never part of ScarletNX. Both layers come off: each content's AES-CBC under the
@@ -42,7 +57,7 @@ supported yet.
 
 Code the static discovery misses (an indirect call's target, a return into it)
 compiles when the dispatch first reaches it (`src/3ds/aot/jit.c`, through the ARM
-backend's executor), and goes in the title folder's `hints`, which the next
+backend's executor), and goes in the game's `<title ID>.hints`, which the next
 recompile (`-r`) seeds discovery with, so it is static from then on. A
 commercial title's 7 MiB of text compiles to about 340000 blocks in about six
 and a half minutes on six cores (the chunks compile in parallel).
@@ -104,14 +119,13 @@ shader interpreter, rasterizer, texturing, combiners, lighting) and plays its
 title music through a port of Azahar's HLE DSP. A run of about 2 billion native
 blocks presented frames until it was ended. It is **not playable** yet:
 
-- There is no input, because HID gives handles and no samples.
+- Input is the pad alone: the touch screen is not read, and the sensors are at
+  rest (`hid:USER`, below).
 - Only the top screen is shown in the window.
 - The music has a gap after every rendered frame, because rendering and presenting
   run inside the guest's GSP call.
-- Unknown service commands (unless `--ipc-stubs` names their service), geometry
-  shaders, procedural textures, shadows and the DSP's AAC pipe still stop the run
-  explicitly, and a service the runtime lacks makes the thread asking for it wait
-  forever, with a message that names it.
+- Geometry shaders, procedural textures, shadows and the DSP's AAC pipe still stop
+  the run explicitly.
 
 The [parity roadmap](#parity-roadmap-azahar) lists the remaining work, and the
 [SuperTux integration target](3DS-SUPERTUX.md) holds the pinned input.
@@ -267,11 +281,29 @@ GET_TIMESTAMP (`0x80d`) resolves a bounded UTF-16 archive path and returns the r
 backing file's host modification time as a 3DS datetime (milliseconds since 1900
 UTC). Missing paths return `0xc8804478` and stale tokens `0xc8804465`.
 COMMIT_SAVE_DATA on the SDMC area succeeds, since every write has already reached
-the host, and other actions stop. Unknown commands stop the run, unless
-`--ipc-stubs` names their service: then they answer success with one word, as
-Azahar's ReportUnimplementedFunction does, and each is logged the first time. A
-service the runtime lacks makes the thread asking for it wait forever, as no
-other process can register it, and the runtime says which service it was.
+the host, and other actions stop. Unknown commands answer success with one word, as
+Azahar's ReportUnimplementedFunction does and a Switch game's do (`auto_stub_ipc`),
+each logged the first time. A service the runtime does not know at all is a stand-in
+whose commands answer so, as a Switch game's is (`sm.c`). With
+`--ctr_auto_stub_ipc=0` both stop instead: an unknown command stops the run unless
+`--ipc-stubs` names its service, and a service the runtime lacks makes the thread
+asking for it wait forever, as no other process can register it, with a message
+that names it.
+
+`hid:USER` and `hid:SPVR` (`services/hid.c`, ported from Azahar's `hid.cpp`) write
+the pad's samples into HID's shared memory 234 times a second from the first
+GetIPCHandles, each with both pad events signalled, and the accelerometer's (104 a
+second) and the gyroscope's (101) between their enable and disable. Each pad entry
+has the buttons, what was pressed and released since the one before, and the circle
+pad's position, averaged over three samples, with its direction bits. The input
+(`src/3ds/input/input.c`) is a Switch game's: X or Space A, Z B, C X, V Y, Q L, E R,
+Enter Start, Backspace Select, the arrows the D-pad and WASD the circle pad, or a
+gamepad's buttons by position (`gamepad_swap_ab`) with its left stick, and the
+scripted presses of `--script=ms:hex,...` (`ctr_script`), in the pad's bits (1 A,
+2 B, 4 Select, 8 Start, 10 Right, 20 Left, 40 Up, 80 Down, 100 R, 200 L, 400 X,
+800 Y), each held for `press_len` ms. The touch entries say no touch, and the
+sensors give a console lying still. ZL, ZR and the C-stick are the New 3DS's
+`ir:rst`, which the runtime does not have yet.
 
 `gsp::Gpu` is modeled with real bounded resources: RegisterInterruptRelayQueue
 returns the genuine `0x2a07` first-initialization result, one writable 0x1000
@@ -352,14 +384,14 @@ output mode (stereo, Azahar's default), which ndsp reads, and stop on any other 
 See [CTR IPC](CTR-IPC.md) for the strict generator subset, descriptor/permission
 checks, quotas, malformed-request policy, tests and unimplemented operations.
 Unknown SVCs still stop explicitly. No service or device success is fabricated,
-except for the unknown commands of the services `--ipc-stubs` names, which answer
-success because the user asked for it.
+except for unknown commands and services, which answer success as a Switch game's
+do unless `--ctr_auto_stub_ipc=0` asks for the console's answers.
 
 By default nothing of the CIA is extracted. `scarletnx-3ds game.cia` maps the CIA read-only and checks it as the
 extraction would (the CIA and TMD tables, every content's SHA-256, the NCCH and ExHeader hashes, each ExeFS file's
 hash, the RomFS superblock and its metadata). The game's ExeFS files and its RomFS (level 3, the image the game reads)
-are then read where they lie in the mapping, and only the decompressed `.code` is copied into memory. The title's
-folder keeps its state alone: `native/`, `sdmc/` and the frames and audio it writes. An extraction an earlier
+are then read where they lie in the mapping, and only the decompressed `.code` is copied into memory. The game's
+folder keeps its module, its copy of the runtime and its state alone: `sdmc/` and the frames and audio it writes. An extraction an earlier
 `--extract-container` left there is taken away, its compiled module and saves kept. The image's identity is the same
 either way, so a module compiled in one mode loads in the other.
 
@@ -373,10 +405,10 @@ build/3ds/scarletnx-3ds -x --output work/my-title game.cia
 The output is a directory containing `contents/*.app`, `exefs/` (with
 expanded/page-padded `.code`), `romfs/`, raw container/NCCH/ExHeader metadata and
 `manifest.ini` with source/code hashes and segment layout. The default directory
-is `work/3ds/<name>`, named after the CIA's file as the Switch driver names a dump's.
-It lives in the data folder the Switch driver uses (`--repo DIR`, else a portable
-copy's folder, else the user's data folder, from a build tree too). On Linux the
-user's data folder keeps `work/` in `~/.cache/scarletnx/work/3ds/`. No source CIA
+is the game's folder, `recompiled/<title ID>`, in the data folder the Switch driver uses
+(`--repo DIR`, else a portable copy's folder, else the user's data folder, from a
+build tree too). On Linux the user's data folder keeps `work/` (the decrypted CIAs)
+in `~/.cache/scarletnx/work/3ds/`. No source CIA
 needs to be mounted by the future guest FS. Extraction is privately staged, then
 published only after all checks succeed, and a failure removes the staging files.
 As in the Switch driver, a folder already at the output path is taken as a
@@ -386,13 +418,13 @@ processes racing parent directory changes.
 
 `-x`/`--extract` stops after extraction and `-r`/`--recomp` compiles without
 playing, as the Switch driver's do. Otherwise the driver loads
-`<extracted>/native/code.so` and compiles it first only when needed: when it is
+`<title ID>_code.so` and compiles it first only when needed: when it is
 missing, or no longer loads or matches the build's module ABI or the extracted
 image's identity (a changed `.code`). `-r` always compiles again. A new module
-replaces the old one only once it is complete. `native/code.o` holds the
-descriptor/index; `native/block-*.o` hold the guest code. All objects are retained
-for review. There is no compilation during dispatch. A failed compile removes
-private native staging; the extracted tree remains. The GUI uses this same
+replaces the old one only once it is complete, and the objects it was linked from
+are removed. A failed compile removes private native staging; the extracted tree
+remains. Once the module is ready the driver copies itself into the folder as the
+game's runtime, unless the copy there is the same program. The GUI uses this same
 driver path, not a separate engine.
 
 A launch runs until the game exits or its window is closed, as a Switch game does.
@@ -401,9 +433,10 @@ execute up to 32 instructions, so this is not a cycle or exact instruction budge
 Each instruction still checks fetch, identity and permissions.
 `--model old|new` selects RAM backing (default Old), not a different ISA or
 compiler. `--board-info` prints physical regions without allocating RAM.
-`--ipc-stubs L` answers the unknown commands of the services in L (`all`, or a
-comma list of `srv`, `fs`, `apt`, `ptm`, `hid`, `gsp`, `cfg`, `dsp`) with success
-instead of stopping. Given more than once, the lists add up. It only changes a
+`--ipc-stubs L`, with `--ctr_auto_stub_ipc=0`, still answers the unknown commands of
+the services in L (`all`, or a comma list of `srv`, `fs`, `apt`, `ptm`, `hid`, `gsp`,
+`cfg`, `dsp`, `system`, `am`) with success instead of stopping. Given more than once,
+the lists add up. It only changes a
 run, so it is refused with `--board-info`, `-x` and `-r`.
 `Guest ExitProcess: r0=...` prints a register diagnostic, **not a POSIX guest exit
 status**. When the last thread ends with ExitThread the driver prints
@@ -437,8 +470,8 @@ cost seconds on a retail title; an extraction to a folder given hashes no input.
 internal IVFC hash tree is not separately verified.
 AOT execution is **not a host security sandbox**. Run only images you trust:
 compiler correctness is not isolation, and native loading can execute host
-constructors before descriptor validation. A launch loads the `native/code.so` an
-earlier compile published in the extraction when it still matches the build's
+constructors before descriptor validation. A launch loads the `<title ID>_code.so` an
+earlier compile published in the game's folder when it still matches the build's
 module ABI and the image's identity, so the extraction folder must be as trusted
 as the program itself. Do not treat ABI/hash checks, host native modules or an
 editable extraction manifest as authenticated permissions.

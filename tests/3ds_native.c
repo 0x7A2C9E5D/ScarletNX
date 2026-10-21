@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
     char error[512];
     SnxCtrImage image;
     assert(snx_ctr_image_load(argv[1], &image, error, sizeof error));
-    char* path = argc == 4 ? snx_strdup(argv[3]) : snx_format("%s/native/code.so", argv[1]);
+    char* path = argc == 4 ? snx_strdup(argv[3]) : snx_ctr_game_file(argv[1], SNX_CTR_MODULE_SUFFIX);
     SnxCtrNative native;
     bool ok = snx_ctr_native_open(path, &image, &native, error, sizeof error);
     if (!strcmp(argv[2], "reject")) {

@@ -155,9 +155,9 @@ if(WIN32)
     # advapi32 the registry (the log's system line); winmm is loaded at run time, and the
     # static SDL3 brings the libraries it needs
     target_link_libraries(scarletnx PRIVATE user32 advapi32)
-    # The application manifest (runtime/platform/runtime.manifest): UTF-8 as the process's code page, long paths
+    # The application manifest (src/common/platform/runtime.manifest): UTF-8 as the process's code page, long paths
     enable_language(RC)
-    target_sources(scarletnx PRIVATE runtime/platform/runtime.rc)
+    target_sources(scarletnx PRIVATE "${CMAKE_SOURCE_DIR}/src/common/platform/runtime.rc")
     target_link_options(scarletnx PRIVATE -static)
     target_link_options(scarletnx PRIVATE -mwindows)
 else()
@@ -267,9 +267,15 @@ endif()
 if(SNX_DEPLOY AND SNX_TEST_SANITIZERS AND BUILD_TESTING)
     message(STATUS "SNX_TEST_SANITIZERS: the runtime is not deployed to the games")
 elseif(SNX_DEPLOY)
+    # where scarletnx is also the 3DS driver (src/multicall), the 3DS games' copies are of it too; else scarletnx-3ds
+    # deploys them (src/3ds/CMakeLists.txt)
+    set(snx_ctr_deployed "")
+    if(SNX_MULTICALL AND SNX_BUILD_3DS)
+        set(snx_ctr_deployed "$<TARGET_FILE:scarletnx>")
+    endif()
     add_custom_command(TARGET scarletnx POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" "-DRUNTIME=$<TARGET_FILE:scarletnx>" "-DGAMES=${SNX_RECOMPILED_DIR}" "-DWINDOWS=${WIN32}"
-                "-DMACOS=${APPLE}"
+        COMMAND "${CMAKE_COMMAND}" "-DRUNTIME=$<TARGET_FILE:scarletnx>" "-DCTR_RUNTIME=${snx_ctr_deployed}"
+                "-DGAMES=${SNX_RECOMPILED_DIR}" "-DWINDOWS=${WIN32}" "-DMACOS=${APPLE}"
                 -P "${CMAKE_SOURCE_DIR}/cmake/deploy.cmake"
         VERBATIM)
 endif()

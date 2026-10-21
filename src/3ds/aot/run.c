@@ -3,15 +3,18 @@
 #include "3ds/aot/ctr_module.h"
 #include "3ds/aot/ctr_compile.h"
 #include "3ds/aot/ctr_jit.h"
+#include "3ds/aot/ctr_discover.h"
 #include "3ds/memory/host.h"
 #include "common/utilities/common.h"
 #include "3ds/runtime/internal.h"
 #include "3ds/gpu/present.h"
 #include "3ds/audio/output.h"
+#include "3ds/input/input.h"
 #include "common/filesystem/host.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SNX_CTR_RUN_SLICE 1000000u
 
@@ -97,8 +100,49 @@ static void report_threads(SnxCtrProcess* p) {
     }
     putchar('\n');
 }
+/* 1 when the files at a and b hold the same bytes */
+static bool same_bytes(const char* a, const char* b) {
+    FILE *x = fopen(a, "rb"), *y = fopen(b, "rb");
+    unsigned char p[16384], q[16384];
+    size_t n;
+    bool same = x && y;
+    while (same && (n = fread(p, 1, sizeof p, x)) > 0) same = fread(q, 1, n, y) == n && !memcmp(p, q, n);
+    same = same && !ferror(x) && fread(q, 1, 1, y) == 0 && !ferror(y);
+    if (x) fclose(x);
+    if (y) fclose(y);
+    return same;
+}
+/* The game folder's copy of the runtime, named after it, which plays the game as a Switch game's copy does: runtime
+   copied there through a temporary file and a rename (a copy that is running keeps its old file), when it is not there
+   or holds another build. Nothing when runtime is the copy itself */
+static bool deploy_runtime(const char* directory, const char* runtime, char* error, size_t error_size) {
+#ifdef _WIN32
+    char* copy = snx_ctr_game_file(directory, ".exe");
+#else
+    char* copy = snx_ctr_game_file(directory, "");
+#endif
+    char *own = runtime ? snx_absolute(runtime) : NULL, *mine = copy ? snx_absolute(copy) : NULL, why[256];
+    char* staged = copy ? snx_format("%s.tmp", copy) : NULL;
+    bool ok = !runtime || (own && mine && !strcmp(own, mine)) || (snx_is_file(copy) && same_bytes(runtime, copy));
+    if (!ok && staged) {
+        ok = !snx_copy_file(runtime, staged) && !snx_make_executable(staged) && !snx_replace(staged, copy);
+        if (ok)
+            printf("The game's runtime is %s\n", copy);
+        else {
+            snprintf(error, error_size, "cannot copy the runtime %s to %s: %s", runtime, copy,
+                     snx_os_error(why, sizeof why));
+            if (snx_is_file(staged)) (void)remove(staged);
+        }
+    } else if (!ok)
+        snprintf(error, error_size, "out of memory for the game's runtime");
+    free(staged);
+    free(mine);
+    free(own);
+    free(copy);
+    return ok;
+}
 int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel model, uint64_t limit, double seconds,
-                    unsigned flags, uint32_t ipc_stubs, char* error, size_t error_size) {
+                    unsigned flags, uint32_t ipc_stubs, const char* runtime, char* error, size_t error_size) {
     SnxCtrImage image = {0};
     SnxCtrProcess* process = NULL;
     SnxCtrJit* jit = NULL;
@@ -108,7 +152,21 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
     if (!(cia ? snx_ctr_image_from_cia(cia, &image, error, error_size)
               : snx_ctr_image_load(directory, &image, error, error_size)))
         goto done;
-    module_path = snx_format("%s/native/code.so", directory);
+    module_path = snx_ctr_game_file(directory, SNX_CTR_MODULE_SUFFIX);
+    {
+        /* an older version's hints and module (native/code.so), under the names a Switch game's have: the module is
+           checked against the image as any is when it loads */
+        char *old = snx_path_join(directory, "hints"), *hints = snx_ctr_game_file(directory, SNX_CTR_HINTS);
+        char *native = snx_path_join(directory, "native"), *code = native ? snx_path_join(native, "code.so") : NULL;
+        if (old && hints && snx_is_file(old) && !snx_path_exists(hints)) (void)snx_replace(old, hints);
+        if (code && module_path && snx_is_file(code) && !snx_path_exists(module_path) &&
+            !snx_replace(code, module_path))
+            (void)snx_remove_tree(native);
+        free(code);
+        free(native);
+        free(hints);
+        free(old);
+    }
     /* like the Switch driver's recompile: only when needed, an existing module is no error */
     if ((flags & SNX_CTR_RECOMPILE) || !snx_ctr_native_open(module_path, &image, &native, error, error_size)) {
         snx_ctr_native_close(&native);
@@ -120,6 +178,8 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
         }
         if (!snx_ctr_native_open(module_path, &image, &native, error, error_size)) goto done;
     }
+    /* last, as the Switch driver deploys it: a copy beside its module is a game ready to play */
+    if (!deploy_runtime(directory, runtime, error, error_size)) goto done;
     if (flags & SNX_CTR_COMPILE_ONLY) {
         result = 0;
         goto done;
@@ -150,6 +210,7 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
     /* the DSP's output plays on the default device, and its first two minutes go to <output>/audio.wav */
     wav = snx_path_join(directory, "audio.wav");
     if (!snx_ctr_audio_init(wav)) printf("No audio output: the DSP's frames will not be heard or saved\n");
+    snx_ctr_input_init(); /* the scripted presses count from here */
     /* Runs until the game exits or its window is closed, as a Switch game does, or for the --max-blocks budget. The
        dispatch goes in slices so the window's events are seen between them */
     uint64_t executed = 0;
@@ -204,6 +265,7 @@ done:
     snx_ctr_jit_free(jit);
     snx_ctr_present_free();
     snx_ctr_audio_free();
+    snx_ctr_input_free();
     snx_ctr_process_free(process);
     free(wav);
     free(frames);

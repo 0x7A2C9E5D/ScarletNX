@@ -55,13 +55,25 @@ typedef struct {
 bool snx_ctr_native_open(const char* path, const SnxCtrImage* image, SnxCtrNative* native, char* error,
                          size_t error_size);
 void snx_ctr_native_close(SnxCtrNative* native);
-/* The title's module (in directory/native) is compiled when it is missing, when it no longer loads or matches the
+/* A game's folder is laid out as a Switch game's is: recompiled/<title ID>/ holds <title ID>_code.so (_code.dll on
+   Windows), the module, <title ID>.hints, the blocks runs compiled at run time, <title ID>.ini, what a copy of the
+   runtime named <title ID> beside them plays, and the copy itself. The file of the folder's own name with suffix, the
+   caller's to free; NULL out of memory */
+#ifdef _WIN32
+#define SNX_CTR_MODULE_SUFFIX "_code.dll"
+#else
+#define SNX_CTR_MODULE_SUFFIX "_code.so"
+#endif
+char* snx_ctr_game_file(const char* directory, const char* suffix);
+/* The title's module (snx_ctr_game_file's SNX_CTR_MODULE_SUFFIX) is compiled when it is missing, when it no longer loads or matches the
    image (an older build, a changed .code), or when SNX_CTR_RECOMPILE asks, then run unless SNX_CTR_COMPILE_ONLY: until
    the game exits or its window closes, for limit blocks when limit is not 0, or for seconds when it is above 0. The title is the extraction in
    directory, or with cia the CIA read where it lies, directory then its state folder. The module is
    trusted as code the driver compiled itself, never as a sandbox. */
 enum { SNX_CTR_RECOMPILE = 1, SNX_CTR_COMPILE_ONLY = 2 };
-/* ipc_stubs: the services whose unknown commands answer success instead of stopping (snx_ctr_ipc_stub_mask) */
+/* ipc_stubs: the services whose unknown commands answer success instead of stopping when the ctr_auto_stub_ipc setting
+   is off (snx_ctr_ipc_stub_mask). runtime: the program copied into the folder as the game's own once its module is
+   ready (snx_ctr_game_file's name, .exe on Windows), NULL for none */
 int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel model, uint64_t limit, double seconds,
-                    unsigned flags, uint32_t ipc_stubs, char* error, size_t error_size);
+                    unsigned flags, uint32_t ipc_stubs, const char* runtime, char* error, size_t error_size);
 #endif

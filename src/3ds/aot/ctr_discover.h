@@ -4,8 +4,9 @@
 #define SNX_CTR_DISCOVER_H
 #include "3ds/loader/ctr_image.h"
 #define SNX_CTR_AOT_BLOCK_WORDS 32u
-/* the title folder's file of blocks runs compiled at run time, which the next static compile starts from */
-#define SNX_CTR_HINTS "hints"
+/* the game folder's file of blocks runs compiled at run time, which the next static compile starts from: <title
+   ID>.hints (snx_ctr_game_file) */
+#define SNX_CTR_HINTS ".hints"
 #define SNX_CTR_PLAN_VISITED 1u
 #define SNX_CTR_PLAN_ENTRY 2u
 #define SNX_CTR_PLAN_STOP 4u

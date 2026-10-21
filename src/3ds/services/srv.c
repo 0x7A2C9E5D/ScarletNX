@@ -28,7 +28,8 @@ static uint32_t snx_ctr_srv_GetServiceHandle(SnxCtrIpc* c, const uint8_t* name, 
         return snx_ctr_session_create(p, SNX_CTR_SERVICE_APT, session);
     if ((length == 8 && !memcmp(name, "ptm:sysm", 8)) || (length == 5 && !memcmp(name, "ptm:u", 5)))
         return snx_ctr_session_create(p, SNX_CTR_SERVICE_PTM, session);
-    if (length == 8 && !memcmp(name, "hid:USER", 8)) return snx_ctr_session_create(p, SNX_CTR_SERVICE_HID, session);
+    if (length == 8 && (!memcmp(name, "hid:USER", 8) || !memcmp(name, "hid:SPVR", 8)))
+        return snx_ctr_session_create(p, SNX_CTR_SERVICE_HID, session);
     if (length == 8 && !memcmp(name, "gsp::Gpu", 8)) return snx_ctr_session_create(p, SNX_CTR_SERVICE_GSP, session);
     if (length == 5 && (!memcmp(name, "cfg:u", 5) || !memcmp(name, "cfg:s", 5) || !memcmp(name, "cfg:i", 5)))
         return snx_ctr_session_create(p, SNX_CTR_SERVICE_CFG, session);
@@ -40,6 +41,8 @@ static uint32_t snx_ctr_srv_GetServiceHandle(SnxCtrIpc* c, const uint8_t* name, 
     uint32_t system = snx_ctr_system_open(p, name, length, session);
     if (system != SNX_CTR_SYSTEM_UNKNOWN) return system;
     if (flags & 1) return 0xd0406401u;
+    system = snx_ctr_system_stand_in(p, name, length, session);
+    if (system != SNX_CTR_SYSTEM_UNKNOWN) return system;
     /* The console waits for the service to be registered (Azahar's GetServiceHandle). No other process runs here
        to register it, so the thread waits forever: say which service it was. */
     snx_ctr_thread_block(p, c->object, 0);
