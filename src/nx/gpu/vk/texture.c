@@ -600,6 +600,20 @@ static VkImageViewType tic_view_type(u32 type, u32 d) {
 
 static u32 g_bud_frame;
 static i64 g_bud;
+/* a texture that stayed the same over its last 40 frames' checks: the schedule below checks it by samples */
+static int tex_settled(const Surf* t) { return t->stable >= 40 && t->size >= 16384; }
+/* a whole-texture check's outcome (tex_rehash's) in its stability: a change starts it over, an unchanged texture
+   counts once a frame (count: its first check in this one). Settling, it takes its samples' hash */
+static void tex_settle(Surf* t, u64 gva, int changed, int count) {
+    if (changed)
+        t->stable = 0;
+    else if (count && t->stable < 100000)
+        t->stable++;
+    if (count && t->stable >= 39 && t->size >= 16384) {
+        t->shash = vk_sample_hash(gva, t->size);
+        t->tfull = g_vk_present;
+    }
+}
 /* t, a texture found for a header: still as guest memory has it (re-uploaded where it changed), or NULL when its
    upload failed. gva is its address */
 static Surf* tex_check(Surf* t, u64 gva) {
@@ -635,14 +649,17 @@ static Surf* tex_check(Surf* t, u64 gva) {
             t->wseen = wnow + 1; /* this scan's marks are stamped with the clock after wnow */
             return t->upload_valid ? t : NULL;
         }
-        /* without it, hashed whole once in each epoch it is used in: what the CPU wrote before a submission or the end
-           of a stream wait reaches the next sample, as with write tracking. The frame's schedule below alone misses
-           that (the write and the sample come between two presents, and a headless run presents nothing). Expiring
-           every texture at the cache invalidation methods did it before, and isn't enough either: edenprobe rewrites
-           texels with only the sampler and header caches invalidated after, never the texture data cache */
-        if (epoch) {
+        /* without it, hashed whole once in each epoch it is used in until it settles: what the CPU wrote before a
+           submission or the end of a stream wait reaches the next sample, as with write tracking. The frame's schedule
+           below alone misses that (the write and the sample come between two presents, and a headless run presents
+           nothing). Expiring every texture at the cache invalidation methods did it before, and isn't enough either:
+           edenprobe rewrites texels with only the sampler and header caches invalidated after, never the texture data
+           cache. A settled texture is left to the schedule: epochs start at every submission, and hashing every
+           texture in each took half the GPU thread (FreeBSD) */
+        if (epoch && !tex_settled(t)) {
+            int first = t->checked != g_vk_present;
             t->checked = g_vk_present;
-            if (!fresh && tex_rehash(t)) t->stable = 0;
+            if (!fresh) tex_settle(t, gva, tex_rehash(t), first);
             return t->upload_valid ? t : NULL;
         }
     }
@@ -652,7 +669,7 @@ static Surf* tex_check(Surf* t, u64 gva) {
             g_bud_frame = g_vk_present;
             g_bud = 24 << 20;
         }
-        if (t->stable >= 40 && t->size >= 16384 && (i32)(g_vk_present - t->tfull) < 120) {
+        if (tex_settled(t) && (i32)(g_vk_present - t->tfull) < 120) {
             t->checked = g_vk_present;
             if (vk_sample_hash(gva, t->size) == t->shash) {
                 t->next_check = g_vk_present + 20 + ((u32)(gva >> 9) & 7);
@@ -663,14 +680,7 @@ static Surf* tex_check(Surf* t, u64 gva) {
         if (g_bud > 0 || t->stable < 4) {
             t->checked = g_vk_present;
             g_bud -= (i64)(t->size >> (t->size > 65536 ? 1 : 0));
-            if (tex_rehash(t))
-                t->stable = 0;
-            else if (t->stable < 100000)
-                t->stable++;
-            if (t->stable >= 39 && t->size >= 16384) {
-                t->shash = vk_sample_hash(gva, t->size);
-                t->tfull = g_vk_present;
-            }
+            tex_settle(t, gva, tex_rehash(t), 1);
             t->next_check = g_vk_present + (t->stable < 4 ? 4 : t->stable < 12 ? 8 : 20) + ((u32)(gva >> 9) & 3);
         }
     }
