@@ -22,6 +22,12 @@
 #endif
 #endif
 #endif
+#ifdef SNX_MENU_THEN_GAME
+/* UIKit's app is SDL's: this makes the main below SDL_main, run from the real main SDL provides, which starts the app
+   (UIApplicationMain) whose run loop the menu's window needs. Without it SDL_Init fails with "Application didn't
+   initialize properly" and the screen stays black */
+#include <SDL3/SDL_main.h>
+#endif
 
 #ifdef SNX_WITH_GUI
 /* the game's settings as scarletnx --settings prints them, for the menu built into this program (snx_menu_settings) */
