@@ -8792,6 +8792,18 @@ int snx_gui_main(const char* self) {
     App app;
     if (!initialize(&app, self)) {
         fprintf(stderr, "scarletnx: %s\n", SDL_GetError());
+#ifdef SDL_PLATFORM_IOS
+        /* a phone shows no stderr, and a message box needs the window that may be what failed: the Files app shows
+           this file, in the app's Documents (gui_apple_start's folder) */
+        {
+            FILE* file = fopen("scarletnx-error.log", "w");
+            if (file) {
+                fprintf(file, "%s\n", SDL_GetError());
+                fclose(file);
+            }
+        }
+        if (app.window)
+#endif
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", SDL_GetError(), app.window);
         cleanup(&app);
         return 1;
