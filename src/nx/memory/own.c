@@ -10,8 +10,9 @@
    across landing,
    a resource's release or a wait for the GPU. An entry being landed is marked, and whoever else needs it waits for
    g_own_cv; the landing itself runs with no lock of ours held, so a thread holding mem.c's or the kernel's locks may
-   fault on owned memory. One holding the producer's lock may not (the fault is answered on another thread, which
-   needs it): own_fault ends the process with the address, as that is a bug in the runtime */
+   fault on owned memory, as long as no holder of the producer's lock waits for those (nvdrv.c's syncpt_add_quiet).
+   One holding the producer's lock may not (the fault is answered on another thread, which needs it): own_fault ends
+   the process with the address, as that is a bug in the runtime */
 #include <stdlib.h>
 #include <string.h>
 #include "nx/memory/own.h"
@@ -210,8 +211,10 @@ static void land_pages(u64 lo, u64 hi) {
         pm_unlock(&g_own_lk);
         free(r);
         free(dst);
-        res_release(&rel);
+        /* the pages go before the resources: a release takes the producer's lock, and a thread holding it may read
+           these pages now that no entry is on them (own_stage), faulting until they go */
         let_go(elo & ~(g_page - 1), (ehi + g_page - 1) & ~(g_page - 1));
+        res_release(&rel);
     }
 }
 
@@ -222,6 +225,19 @@ static void own_fault(u8* p, int write, u32 tid) {
     if (p < g_mem || a >= AS_SIZE) { /* not the guest's memory: nothing of ours, let it go */
         plat_trap_continue(p, g_page);
         return;
+    }
+    /* The producer's lock holder faulted. On a page no entry is on any more, landed and cut but not let go yet, it
+       waits only for let_go, which needs no lock of its (and may have woken it already, this message being late): the
+       page goes on. On an owned page nothing can land it */
+    if (tid && g_hooks.busy_tid && tid == g_hooks.busy_tid()) {
+        int owned;
+        pm_lock(&g_own_lk);
+        owned = page_owned_nl(a & ~(g_page - 1));
+        pm_unlock(&g_own_lk);
+        if (!owned) {
+            plat_trap_continue(p, g_page);
+            return;
+        }
     }
     if (tid && g_hooks.busy_tid && tid == g_hooks.busy_tid())
         fatal("Thread %u touched GPU-owned guest memory at %llx while it held the renderer: the runtime must call "
@@ -363,8 +379,8 @@ void own_drop(u64 addr, u64 size) {
     while (landing_nl(addr, addr + size)) pc_wait(&g_own_cv, &g_own_lk, -1);
     cut_nl(addr, addr + size, &rel);
     pm_unlock(&g_own_lk);
+    let_go(addr & ~(g_page - 1), (addr + size + g_page - 1) & ~(g_page - 1)); /* before the release, as land_pages */
     res_release(&rel);
-    let_go(addr & ~(g_page - 1), (addr + size + g_page - 1) & ~(g_page - 1));
 }
 u64 own_landings(void) { return __atomic_load_n(&g_own_lands, __ATOMIC_RELAXED); }
 int own_traps(void) { return g_traps; }

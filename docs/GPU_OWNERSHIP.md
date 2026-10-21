@@ -74,7 +74,10 @@ rather than landing in the signal handler.
   interval tree under a leaf lock, an atomic "anything owned" flag and a page bitmap keep the common path (nothing
   owned) a load and a branch in `gmem_*`.
 - Lock order: `vk_lock`, then the map's lock. The handler takes `vk_lock`, marks the trap landing, lands, and takes the
-  map's lock again to finish. It takes no kernel, memory or service lock, so a thread holding those may fault.
+  map's lock again to finish. It takes no kernel, memory or service lock, so a thread holding those may fault. That
+  holds only while no thread holding `vk_lock` waits for one of those locks: a guest thread holding the kernel's lock
+  faults, the handler waits for `vk_lock`, and its holder waits for the kernel's lock. A syncpoint a release performs
+  under `vk_lock` signals the kernel events waiting for it once `vk_lock` is let go (`syncpt_add_quiet`).
 - A fault on the thread holding `vk_lock` (the GPU thread touching an owned range) is a bug in the runtime: fatal, with
   the range and the PC.
 - Landing is a memcpy into the mirror. A producer's GPU copy keeps the range's layout (block linear surfaces are

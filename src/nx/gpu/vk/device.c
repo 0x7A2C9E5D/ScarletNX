@@ -10,6 +10,7 @@
 #include "nx/runtime/platform/plat.h"
 #include "nx/gpu/gpu.h"
 #include "nx/gpu/vk/vk.h"
+#include "nx/hle/services/nvdrv.h"
 
 int g_vk_preserve_infnan;
 int g_vk_preserve_infnan64;
@@ -35,6 +36,7 @@ void vk_unlock(void) {
     if (!--t_vkdepth) {
         __atomic_store_n(&g_vk_owner, 0, __ATOMIC_RELAXED);
         pm_unlock(&g_vklock);
+        syncpt_events(); /* the event slots this thread's releases under it reached (syncpt_add_quiet) */
     }
 }
 int vk_trylock(void) {
@@ -686,6 +688,7 @@ int vk_window_release(void) {
     /* every hold of this thread's at once: it won't return to the callers that took them */
     t_vkdepth = 0;
     pm_unlock(&g_vklock);
+    syncpt_events();
     return 1;
 }
 

@@ -319,15 +319,33 @@ static u64 va_alloc(u64 size, u64 align) {
 
 /* syncpoints */
 u32 syncpt_read(u32 id) { return id < SYNCPT_IDS ? __atomic_load_n(&g_hle.nvdrv.syncpt[id], __ATOMIC_SEQ_CST) : 0; }
-void syncpt_add(u32 id, u32 n) {
-    if (id >= SYNCPT_IDS || !n) return;
+/* the value moved and its waiters woken: 0 for no increment */
+static int syncpt_bump(u32 id, u32 n) {
+    if (id >= SYNCPT_IDS || !n) return 0;
     pm_lock(&g_hle.nvdrv.sync_lk);
     u32 v = __atomic_add_fetch(&g_hle.nvdrv.syncpt[id], n, __ATOMIC_SEQ_CST);
     if ((i32)(v - g_hle.nvdrv.syncpt_max[id]) > 0) g_hle.nvdrv.syncpt_max[id] = v; /* the CPU promises nothing first */
     pc_broadcast(&g_hle.nvdrv.sync_cv);
     pm_unlock(&g_hle.nvdrv.sync_lk);
+    return 1;
+}
+void syncpt_add(u32 id, u32 n) {
+    if (!syncpt_bump(id, n)) return;
     nv_events_check();
     gpu_kick(); /* a GPU channel's stream may wait for it */
+}
+/* this thread's syncpt_add_quiet moved a syncpoint: its syncpt_events checks the event slots, where syncpt_add would
+   have, so no other thread takes the kernel's lock for it */
+static __thread int t_events_due;
+void syncpt_add_quiet(u32 id, u32 n) {
+    if (!syncpt_bump(id, n)) return;
+    t_events_due = 1;
+    gpu_kick();
+}
+void syncpt_events(void) {
+    if (!t_events_due) return;
+    t_events_due = 0;
+    nv_events_check();
 }
 void syncpt_incr(u32 id) { syncpt_add(id, 1); }
 u32 syncpt_promise(u32 id, u32 n) {

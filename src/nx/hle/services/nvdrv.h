@@ -33,6 +33,12 @@ void syncpt_free(u32 id);
 u32 syncpt_read(u32 id);
 void syncpt_incr(u32 id);
 void syncpt_add(u32 id, u32 n); /* n increments, one wakeup */
+/* syncpt_add for a thread holding the renderer's lock (vk_lock): the event slots waiting for the value are signaled
+   by the same thread's syncpt_events, once it lets the lock go. Signaling takes the kernel's lock, and a thread holding
+   that may wait in a trap on GPU-owned memory, which is answered under the renderer's lock (memory/own.c) */
+void syncpt_add_quiet(u32 id, u32 n);
+/* the event slots this thread's syncpt_add_quiet increments reached, signaled: with no renderer's lock held */
+void syncpt_events(void);
 /* A channel promises the next n increments it will make, in order. Returns the value they reach: the fence the ioctl
    hands back, and what nvhost-ctrl reads as the maximum */
 u32 syncpt_promise(u32 id, u32 n);

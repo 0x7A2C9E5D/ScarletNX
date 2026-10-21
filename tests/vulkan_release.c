@@ -94,9 +94,10 @@ u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
     return n < max ? n : max;
 }
 u32 syncpt_read(u32 id) { return id < 128 ? completed[id] : 0; }
-void syncpt_incr(u32 id) {
+/* under vk_lock, so the events it reaches wait for vk_unlock (memory/own.c's traps are answered under vk_lock) */
+void syncpt_add_quiet(u32 id, u32 n) {
     assert(lock_depth && vk_result_landing());
-    completed[id]++;
+    completed[id] += n;
 }
 int gmem_write(u64 address, const void* data, u64 size) {
     assert(lock_depth && vk_result_landing());
