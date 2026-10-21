@@ -45,6 +45,9 @@ else
 fi
 # The runtime exits at once without a game module, so tracing it for dlopened libraries finds nothing: name them
 export STRACE_MODE=0 DEPLOY_SDL=1 DEPLOY_OPENGL=1
+# mkdwarfs's default preset (zstd:level=22) is much slower; this keeps its
+# block size and is about 15% larger
+export DWARFS_COMP="zstd:level=7 -S26 -B2"
 
 # The AppDir is bundled: appimagetool makes it, with this machine's compressor and the target's runtime
 if [ "${MAKE_APPIMAGE_ONLY:-0}" = 1 ]; then
