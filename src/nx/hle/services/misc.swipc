@@ -109,7 +109,12 @@ interface nn::ns::detail::IServiceGetterInterface is ns:am2, ns:ec, ns:rid, ns:r
 @fallback(quiet_ok) interface nn::ns::detail::IDocumentInterface {}
 
 # ================================================================ prepo, caps, ectx: nothing served
+# play reports, which the console uploads to its maker: kept nowhere here (Switchbrew's "Play Report services")
 interface nn::prepo::detail::ipc::IPrepoService is prepo:u, prepo:a, prepo:a2 {
+    # the user's id and the process's, with no pid placeholder word before them (the game's request: 0x10 raw bytes)
+    @stub [10105] SaveReportWithUser(bytes<0x10, 8> uid, pid, buffer<u8, 9> event_id, buffer<u8, 5> report);
+    @stub [10200] RequestImmediateTransmission();
+    @stub [10400] GetSystemSessionId() -> u64 id;
 }
 # caps:u, caps:a, caps:su and caps:ss are four interfaces on the console
 interface nn::capsrv::sf::IAlbumApplicationService is caps:u, caps:a, caps:su, caps:ss {
