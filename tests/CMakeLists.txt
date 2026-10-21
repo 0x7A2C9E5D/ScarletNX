@@ -1086,6 +1086,11 @@ if(SNX_TEST_LLVM_SWEEP)
         set_tests_properties(llvm_differential_sweep_${shard} PROPERTIES TIMEOUT 1800 COST 100)
     endforeach()
 endif()
+# the variant table's hash, which must match jit_service.c's cache hash
+add_executable(snx-test-variants variants.c)
+snx_test_target(snx-test-variants 11)
+target_link_libraries(snx-test-variants PRIVATE scarletnx-common)
+add_test(NAME variants COMMAND snx-test-variants)
 # the runtime JIT (jit_service.c): misses compiled, published and shared between threads, on that loader
 add_executable(snx-test-jit-service jit_service.c)
 snx_test_target(snx-test-jit-service 11)
