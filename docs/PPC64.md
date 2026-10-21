@@ -194,6 +194,9 @@ cmake --build --preset linux-ppc64-elfv2-cross
 ctest --preset linux-ppc64-elfv2-cross -j"$(nproc)"
 ```
 
+The 3DS runtime is built too, as the AppImage carries every runtime, but it isn't ported: its board, services and
+GPU read the guest's memory as host numbers, so it doesn't run 3DS games on a big-endian host.
+
 A rebuild that runs CMake again needs the preset's `PKG_CONFIG_LIBDIR` and `PKG_CONFIG_SYSROOT_DIR` in the
 environment: `cmake --build --preset` sets them, a plain `cmake --build` of the folder doesn't, and SDL then finds the
 build machine's Wayland and DRM.

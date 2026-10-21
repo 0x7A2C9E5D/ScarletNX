@@ -650,9 +650,9 @@ jobs:
   # with the runner's Docker (its files only: it never runs), so the job runs on the runner and enters pkgforge's x86-64
   # container with docker exec, the workspace mounted at /src. platform is Docker's name of the architecture (loong64
   # for LoongArch). No POWER, RISC-V or LoongArch machine has run the AppImages yet, so like the macOS and iOS jobs they
-  # may fail without failing the run (scripts/publish-builds.py, OPTIONAL). Big-endian ppc64's has the Switch and Linux
-  # runtimes (its preset's), as the 3DS one needs a little-endian host: Arch POWER's glibc there is ELFv2, not Debian
-  # ports' ELFv1, which the linux-ppc64 job tests
+  # may fail without failing the run (scripts/publish-builds.py, OPTIONAL). Big-endian ppc64's has every runtime (the 3DS
+  # one builds there but isn't ported to a big-endian host): Arch POWER's glibc there is ELFv2, not Debian ports' ELFv1,
+  # which the linux-ppc64 job tests
   appimage-cross:
     name: Linux AppImage (${{ matrix.arch }})
     runs-on: ubuntu-26.04
