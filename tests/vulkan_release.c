@@ -340,8 +340,12 @@ int main(void) {
     vk_release_need(0x10100, 4);
     assert(g_rtail == seq_b && g_rix[home].word == 0x7ab4 && g_rix[home].seq == seq_b && g_rix[home].n == 1);
     assert(!g_rix[(home + 1) & (RIX_N - 1)].word && count_queued(0x10100) == -1 && count_queued(0x37ab4) == -2);
+    /* the slot it left holds no count: a word of that home (guest 0x5254) queued there goes when it is performed */
+    assert(rix_home(0x5254) == ((home + 1) & (RIX_N - 1)) && !g_rix[(home + 1) & (RIX_N - 1)].n);
+    vk_release_write(0x35254, &word4, 4);
+    assert(g_rix[(home + 1) & (RIX_N - 1)].word == 0x5254 && g_rix[(home + 1) & (RIX_N - 1)].n == 1);
     vk_release_drain();
-    assert(!g_rix[home].word && count_queued(0x37ab4) == -1);
+    assert(!g_rix[home].word && !g_rix[(home + 1) & (RIX_N - 1)].word && count_queued(0x37ab4) == -1);
     assert(lock_depth == 0);
     return 0;
 }
