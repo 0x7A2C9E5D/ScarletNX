@@ -356,8 +356,9 @@ size smaller, down to the text's, else leaves out the same first parts (`SCARLET
 screen deeper in
 the Settings leaves out what more it must. Under them the list, each entry a box
 of its own, the focused one framed in the focus colour or inverted, with the theme's cursor in the margin;
-beside it a box with what the focus is about (a recent game's path, Games' folders, the keys in use, the last
-run's output) and under that one the Status box. The tips have a row of their own under the head (`[tips] place =
+beside it a box with what the focus is about (a game's path whole, Games' folders, the keys in use, the last
+run's output), never what the tips already say (what the row does, a game's kind), and under that one the Status
+box. The tips have a row of their own under the head (`[tips] place =
 top`, both built-ins'), or go to the foot under the list's column with `bottom`, where they take one row, a long one
 sliding, or wrap over its rows with `[tips] wrap`, the last sliding what does not fit. At the foot the screen's keys, the whole width, or under the side
 box's column beside the tips, in letters a size under the rest's; the tips and the keys each in a box with a bar down

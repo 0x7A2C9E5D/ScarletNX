@@ -2691,7 +2691,8 @@ static void last_output(App* app, GuiRect r, int y) {
             if (app->console.cells[i][x] != ' ')
                 glyph(app, (float)(r.x + x * cell_w(app)), (float)y, app->console.cells[i][x]);
 }
-/* the side box: the focused item, what it is about, and for the keys the ones in use; the last run's output under it */
+/* the side box: the focused item, and for the keys the ones in use; the last run's output under it. What the item
+   does is the tips', not said twice */
 static void menu_side(App* app, const GuiMenuBoxes* m) {
     int item = m->list.focus, y;
     GuiRect r = inner(app, m->place.side);
@@ -2699,7 +2700,6 @@ static void menu_side(App* app, const GuiMenuBoxes* m) {
     if (!m->place.side.h) return;
     y = pane(app, m->place.side, snx_tr(items[item]));
     r = gui_rect(r.x, y, r.w, m->place.side.y + m->place.side.h - y);
-    y += wrap_in(app, r, r.x, y, item_about(app, item), 0, rgb(app->theme.ink)) * cell_h(app);
     if (item == GUI_KEYS) {
         char* in_use = keys_in_use(app);
         snprintf(line, sizeof line, snx_tr("In use: %s"), in_use ? in_use : snx_tr("none"));
@@ -2834,15 +2834,14 @@ static void draw_games(App* app) {
                       app->browser.activated && app->browser.active == g.start + i);
         }
     }
-    /* beside it the focused row: what it is and about it; the page, and where the games are looked for */
+    /* beside it the focused row: what it is and its path, whole; the page, and where the games are looked for. The
+       tips say what it is (a game's kind) or does, which the box does not say again */
     name = games_focus(app, &g, &about, kind, sizeof kind);
     r = inner(app, g.place.side);
     if (g.place.side.h) {
         y = pane(app, g.place.side, name);
         r = gui_rect(r.x, y, r.w, g.place.side.y + g.place.side.h - y);
-        y += wrap_in(app, r, r.x, y, about, app->browser.selected != 0, ink) * cell_h(app);
-        if (kind[0]) y += wrap_in(app, r, r.x, y, kind, 0, soft) * cell_h(app);
-        y += cell_h(app);
+        if (kind[0]) y += wrap_in(app, r, r.x, y, about, 1, ink) * cell_h(app) + cell_h(app);
         if (!app->games.count)
             y += wrap_in(app, r, r.x, y, snx_tr(SAY_NO_GAMES), 0, soft) * cell_h(app);
         else {
@@ -2864,7 +2863,7 @@ static void draw_games(App* app) {
         list_arrows(app, &g.list, g.lead, g.lead + (int)items - 1, app->browser.page > 0,
                     app->browser.page + 1 < gui_browser_pages(&app->browser));
     status_box(app, g.place.status);
-    screen_foot(app, &g.place, about, shown_keys(app, keys, sizeof keys));
+    screen_foot(app, &g.place, kind[0] ? kind : about, shown_keys(app, keys, sizeof keys));
 }
 /* a line that waits on the user, at pixel row y of r: plain at its left, or framed, placed and blinking as the theme's
    prompt says */

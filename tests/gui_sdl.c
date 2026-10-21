@@ -2843,9 +2843,16 @@ int main(int argc, char** argv) {
             shows(&app, "- ...show more", normal);
             hides(&app, "- d", normal);
             app.browser.selected = 4; /* the row that shows the rest */
+            app.message[0] = 0;       /* the gone game's, over the tips */
             render(&app);
             shows(&app, "- ...show more", yellow);
-            shows(&app, "The recent games not shown", normal); /* beside the list */
+            { /* in the tips under the head, not again beside the list */
+                GuiGamesBoxes g;
+                int tx, ty;
+                games_boxes(&app, &g);
+                assert(find_text(&app, "The recent games not shown", normal, 1, &tx, &ty) && ty >= g.place.tips.y &&
+                       ty < g.place.tips.y + g.place.tips.h);
+            }
             key(&app, SDLK_RETURN);                            /* all five, the focus on the first that was hidden */
             assert(!app.menu.running && app.recent_all && app.browser.head == 6 && app.browser.selected == 4);
             render(&app);
@@ -4198,11 +4205,12 @@ int main(int argc, char** argv) {
         b = list_box(&m.list, exit_entry);
         assert(same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), dim)); /* the others in the dim one */
         text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Exit", normal, black);
-        /* the side box: the focus's name over a rule, what it is about and the keys in use; the status box under it */
+        /* the side box: the focus's name over a rule and the keys in use, what it does left to the tips; the status
+           box under it */
         r = m.place.side;
         assert(r.x >= m.place.list.x + m.place.list.w && r.h > 0 && m.place.status.y >= r.y + r.h);
         text_px_is(&app, r.x + cw, r.y + 2 * s, "Setup device keys", normal, black);
-        text_px_is(&app, r.x + cw, r.y + head_h(&app) + 2 * s, "Installs prod.keys", normal, black);
+        text_px_is(&app, r.x + cw, r.y + head_h(&app) + 2 * s, "In use: ", rgb(app.theme.soft), black);
         text_px_is(&app, m.place.status.x + cw, m.place.status.y + 2 * s, "Status", normal, black);
         /* the tips on a row of their own under the head, what the focus is about or the screen's message, a failure's
            in its colour; the keys alone at the foot, the whole width */
@@ -4309,10 +4317,15 @@ int main(int argc, char** argv) {
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- ", yellow, black);
             text_px_is(&app, b.x + cw / 2 + 2 * cw, item_text_y(&app, b), app.games.names[0], yellow, black);
             text_px_is(&app, g.place.side.x + cw, g.place.side.y + 2 * s, app.games.names[0], normal, black);
-            {
-                char start[9]; /* its path, from a drive's letter on Windows */
-                snprintf(start, sizeof start, "%s", app.games.paths[0]);
+            { /* its kind in the tips, its path in the box under its name, from a drive's letter on Windows */
+                char start[9], kind[96];
+                const char* about;
+                games_focus(&app, &g, &about, kind, sizeof kind);
+                assert(kind[0] && about == app.games.paths[0]);
+                snprintf(start, sizeof start, "%s", kind);
                 foot_px_is(&app, g.place.tips.x, g.place.tips.y + 2 * foot_scale(&app), start, normal, black);
+                snprintf(start, sizeof start, "%s", app.games.paths[0]);
+                text_px_is(&app, g.place.side.x + cw, g.place.side.y + head_h(&app) + 2 * s, start, normal, black);
             }
             key(&app, SDLK_RIGHT);
             assert(app.browser.page == 1);
