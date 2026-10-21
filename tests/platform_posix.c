@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
     CHECK(__atomic_load_n(&g_ran, __ATOMIC_ACQUIRE) == 14, "a thread did not run");
 
     /* last: the crash handler stays for the rest of the process. A SIGSEGV or SIGBUS sent (a debugger's leftover, a
-       kill) is ignored, and a real fault is still reported */
+       kill) is ignored where the kernel says it was sent (Linux: sent_signal), and a real fault is still reported */
     printf("sent signals\n");
     plat_install_crash_handler();
     {
@@ -186,9 +186,9 @@ int main(int argc, char** argv) {
         pid_t child;
         int status = 0;
         v.sival_int = 0;
+#if defined(__linux__)
         CHECK(raise(SIGSEGV) == 0 && g_reports == 0, "a raised SIGSEGV was reported");
         CHECK(pthread_kill(pthread_self(), SIGBUS) == 0 && g_reports == 0, "a SIGBUS sent to the thread was reported");
-#if defined(__linux__)
         CHECK(sigqueue(getpid(), SIGSEGV, v) == 0 && g_reports == 0, "a queued SIGSEGV was reported");
 #else
         (void)v;

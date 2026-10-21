@@ -745,7 +745,10 @@ static int frozen_wait(void* a, int access);
 /* A SIGSEGV or SIGBUS no access raised but sent (kill, tgkill, sigqueue), told by its code's name: si_code <= 0 is
    Linux's alone, and on Darwin x86_64 a real fault may carry 0. A debugger has one sent when it detaches passing a
    fault it held: the kernel then delivers it as SI_USER from the tracer, si_addr holding the sender's pid and uid
-   instead of the fault's address. The access behind it, if any, faults again as the thread goes on */
+   instead of the fault's address. The access behind it, if any, faults again as the thread goes on. Darwin can't
+   tell: its sendsig fills every SIGSEGV's and SIGBUS's code and address from the thread's last fault, sent or not
+   (SEGV_ACCERR and BUS_ADRALN on arm64), so there one sent is reported as a crash. Its debuggers take faults as Mach exceptions
+   and leave none behind */
 static int sent_signal(const siginfo_t* si) {
     return si->si_code == SI_USER || si->si_code == SI_QUEUE
 #ifdef SI_TKILL
