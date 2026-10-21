@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
             executed = cpu_gate(native.module, process, 0x21, 0);
             assert(cpu->exit == SNX_ARM_SVC && cpu->syndrome == 0x21);
             assert(cpu->r[15] == 0x1deea8 && cpu->r[13] == SNX_CTR_STACK_TOP - 12);
-            assert(cpu->r[0] == 0x2a4744 && cpu->r[14] == 0x1deca0 && !cpu->mem);
+            assert(cpu->r[0] == 0x2a4744 && cpu->r[14] == 0x1deca0);
             assert(read_word(snx_ctr_process_space(process), 0x28d754) == 0);
             printf("SuperTux CPU-only gate before CreateAddressArbiter: pc=0x001deea8 blocks=%llu\n",
                    (unsigned long long)executed);
@@ -159,7 +159,7 @@ int main(int argc, char** argv) {
         } else if (!strcmp(argv[2], "kernel")) {
             assert(state == SNX_CTR_RUN_EXIT && executed == 14 && cpu->r[0] == 42);
             assert(read_word(snx_ctr_process_space(process), 0x08000000) == 1);
-            assert(!cpu->exclusive_valid && !cpu->mem);
+            assert(!cpu->exclusive_valid && cpu->mem == snx_ctr_space_base(snx_ctr_process_space(process)));
         } else if (!strcmp(argv[2], "workload")) {
             assert(state == SNX_CTR_RUN_EXIT);
             assert(executed == 17 && cpu->r[0] == 43 && !(cpu->cpsr & SNX_ARM_T));

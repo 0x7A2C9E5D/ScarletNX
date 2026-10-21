@@ -24,6 +24,7 @@ size_t snx_ctr_jit_save_hints(SnxCtrJit* jit, const char* directory) {
     return 0;
 }
 #else
+#include "3ds/aot/ctr_module.h"
 #include "3ds/aot/ctr_discover.h"
 #include "3ds/runtime/internal.h"
 #include "common/cpu/arm/exec.h"
@@ -78,7 +79,8 @@ static SnxArmBlock compile(void* context, uint32_t pc, bool thumb, bool stale) {
     if (!count) return NULL;
     size_t consumed = 0;
     SnxArmBlock block = snx_arm_exec_compile(j->exec, thumb ? (const void*)halves : (const void*)words, count, pc,
-                                             thumb, SNX_ARM_PROFILE_ARM11, 1, &consumed);
+                                             thumb, SNX_ARM_PROFILE_ARM11,
+                                             snx_ctr_module_memory() == SNX_CTR_MODULE_CHECKED_MODE, &consumed);
     if (!block) {
         fprintf(stderr, "3ds jit: cannot compile the %s block at 0x%08x\n", thumb ? "Thumb" : "ARM", pc);
         return NULL;

@@ -441,7 +441,12 @@ SnxCtrSchedule snx_ctr_schedule(SnxCtrProcess* p) {
             p->next_core = (core + 1) & 3;
             p->core_thread[core] = next;
             p->current_thread = next;
+            /* the space's flat view is the core's, not a thread's: it stays as a thread's registers come in */
+            uint8_t* mem = p->cpu.state.cpu.mem;
+            uint64_t mem_size = p->cpu.state.cpu.mem_size;
             p->cpu.state.cpu = snx_ctr_thread(p)->context;
+            p->cpu.state.cpu.mem = mem;
+            p->cpu.state.cpu.mem_size = mem_size;
             if (next == current) p->cpu.state.cpu.exclusive_valid = exclusive;
             return SNX_CTR_SCHED_RUN;
         }

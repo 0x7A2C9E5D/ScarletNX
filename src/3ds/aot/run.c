@@ -3,6 +3,7 @@
 #include "3ds/aot/ctr_module.h"
 #include "3ds/aot/ctr_compile.h"
 #include "3ds/aot/ctr_jit.h"
+#include "3ds/memory/host.h"
 #include "common/utilities/common.h"
 #include "3ds/runtime/internal.h"
 #include "3ds/gpu/present.h"
@@ -154,7 +155,9 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
     bool closed = false, timed = false;
     double deadline = seconds > 0 ? snx_seconds() + seconds : 0;
     SnxCtrRunResult state;
-    printf("Running ARM11 static AOT\n");
+    printf("Running ARM11 static AOT%s\n", snx_ctr_space_base(process->space) ? " in a flat 4 GiB space" : "");
+    /* a host fault in the flat space is the guest's data abort, reported with the block it happened in */
+    ctr_host_faults(snx_ctr_space_base(process->space), &snx_ctr_process_cpu(process)->r[15]);
     for (;;) {
         uint64_t slice = SNX_CTR_RUN_SLICE, n = 0;
         if (limit && limit - executed < slice) slice = limit - executed;
@@ -196,6 +199,7 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
         putchar('\n');
     }
 done:
+    ctr_host_faults(NULL, NULL);
     snx_ctr_jit_free(jit);
     snx_ctr_present_free();
     snx_ctr_audio_free();

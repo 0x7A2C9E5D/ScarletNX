@@ -52,6 +52,18 @@ Since 2026-10-21 a commercial title, decrypted this way, runs its startup
 generically), creates its save data and stops at its first prompt for the A
 button, drawn through the PICA renderer. Input is the next gap.
 
+Compiled code addresses the guest flat: a 4 GiB host reservation where guest
+address `va` is `base + va`, each mapping a view of the board's RAM held in one
+host memory object (`src/3ds/memory/host.c`: a memfd on Linux and Android, an
+unlinked `shm_open` object on the other POSIX systems, a pagefile section mapped
+into placeholders on Windows 10 1803 and later). Every guest address of a physical
+page (a heap page and its MAP mirror, shared memory, the linear heap) is the same
+memory, and the HLE and the GPU read and write that object directly. Blocks read and
+write `cpu->mem + va` with no callback; a host fault in the reservation is the
+guest's data abort, reported with the block it happened in. A host whose pages are
+not 4 KiB (Apple silicon, some AArch64 and PowerPC64 kernels) keeps the checked
+bus, and its modules are compiled for it.
+
 The cores take turns on the one host thread, each scheduling its own threads (a
 slice ends at an SVC or after `SNX_CTR_POLL_BLOCKS` blocks), so a busy thread on the
 system core leaves the application core's threads their time, as on the console.

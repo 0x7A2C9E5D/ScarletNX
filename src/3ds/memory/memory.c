@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "3ds/memory/ctr_memory.h"
+#include "3ds/memory/host.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -11,7 +12,10 @@ typedef struct {
 } Page;
 struct SnxCtrMemory {
     const SnxCtrProfile* profile;
+    /* each RAM region's memory: its part of host's view on a host with a flat space (ctr_host_flat), the regions one
+       after another, else its own allocation */
     unsigned char* backing[8];
+    CtrHostMemory host;
     void* mmio_context;
     SnxCtrMmioRead read;
     SnxCtrMmioWrite write;
@@ -20,6 +24,9 @@ struct SnxCtrMemory {
 struct SnxCtrAddressSpace {
     SnxCtrMemory* memory;
     Page* tables[1024];
+    /* the flat space: every guest address an offset into it, the mappings views of the memory's host object; NULL
+       without one */
+    unsigned char* base;
 };
 
 SnxCtrMemory* snx_ctr_memory_new(SnxCtrModel model) {
@@ -29,6 +36,23 @@ SnxCtrMemory* snx_ctr_memory_new(SnxCtrModel model) {
     if (!m) return NULL;
     m->profile = p;
     m->epoch = 1;
+    uint64_t ram = 0;
+    for (size_t i = 0; i < p->region_count; ++i)
+        if (p->regions[i].kind != SNX_CTR_MMIO) ram += p->regions[i].size;
+    /* a host that has a flat space always gives one, as its modules are compiled for it (snx_ctr_module_memory) */
+    if (ctr_host_flat()) {
+        if (!ctr_host_memory_new(&m->host, ram)) {
+            free(m);
+            return NULL;
+        }
+        uint64_t offset = 0;
+        for (size_t i = 0; i < p->region_count; ++i) {
+            if (p->regions[i].kind == SNX_CTR_MMIO) continue;
+            m->backing[i] = m->host.view + offset;
+            offset += p->regions[i].size;
+        }
+        return m;
+    }
     for (size_t i = 0; i < p->region_count; ++i) {
         if (p->regions[i].kind == SNX_CTR_MMIO) continue;
         m->backing[i] = calloc(1, p->regions[i].size);
@@ -42,7 +66,10 @@ SnxCtrMemory* snx_ctr_memory_new(SnxCtrModel model) {
 const SnxCtrProfile* snx_ctr_memory_profile(const SnxCtrMemory* m) { return m ? m->profile : NULL; }
 void snx_ctr_memory_free(SnxCtrMemory* m) {
     if (!m) return;
-    for (size_t i = 0; i < 8; ++i) free(m->backing[i]);
+    if (m->host.view)
+        ctr_host_memory_free(&m->host);
+    else
+        for (size_t i = 0; i < 8; ++i) free(m->backing[i]);
     free(m);
 }
 void snx_ctr_memory_mmio(SnxCtrMemory* m, void* context, SnxCtrMmioRead read, SnxCtrMmioWrite write) {
@@ -54,11 +81,23 @@ void snx_ctr_memory_mmio(SnxCtrMemory* m, void* context, SnxCtrMmioRead read, Sn
 SnxCtrAddressSpace* snx_ctr_space_new(SnxCtrMemory* m) {
     if (!m) return NULL;
     SnxCtrAddressSpace* s = calloc(1, sizeof *s);
-    if (s) s->memory = m;
+    if (!s) return NULL;
+    s->memory = m;
+    if (m->host.view && !(s->base = ctr_host_reserve())) {
+        free(s);
+        return NULL;
+    }
     return s;
+}
+unsigned char* snx_ctr_space_base(const SnxCtrAddressSpace* s) { return s ? s->base : NULL; }
+/* the host object's offset of a physical RAM address, the region's: its backing's place in the view */
+static uint64_t host_offset(const SnxCtrMemory* m, const SnxCtrRegion* region, uint32_t pa) {
+    size_t i = (size_t)(region - m->profile->regions);
+    return (uint64_t)(m->backing[i] - m->host.view) + (pa - region->base);
 }
 void snx_ctr_space_free(SnxCtrAddressSpace* s) {
     if (!s) return;
+    if (s->base) ctr_host_release(s->base);
     for (size_t i = 0; i < 1024; ++i) free(s->tables[i]);
     free(s);
 }
@@ -92,10 +131,36 @@ SnxCtrMemResult snx_ctr_map(SnxCtrAddressSpace* s, uint32_t va, uint32_t pa, uin
         if (!s->tables[index]) s->tables[index] = calloc(1024, sizeof(Page));
         if (!s->tables[index]) return SNX_CTR_MEM_NOMEM;
     }
+    /* the flat space's view of the pages, before they are published: MMIO stays inaccessible there, and an access
+       from compiled code faults (ctr_host_faults) */
+    if (s->base && region->kind != SNX_CTR_MMIO &&
+        !ctr_host_map(&s->memory->host, s->base, va, host_offset(s->memory, region, pa), size, permissions))
+        return SNX_CTR_MEM_NOMEM;
     for (uint64_t offset = 0; offset < size; offset += 4096)
         *page(s, va + (uint32_t)offset) = (Page){pa + (uint32_t)offset, (unsigned char)permissions, 1};
     changed(s->memory);
     return SNX_CTR_MEM_OK;
+}
+/* the flat space's side of a protect or an unmap, over the runs of RAM pages in the range: an MMIO page was never
+   mapped there and stays inaccessible */
+static bool host_change(SnxCtrAddressSpace* s, uint32_t va, uint32_t size, unsigned permissions, bool unmap) {
+    uint32_t run = 0, start = va;
+    for (uint64_t at = va; at <= (uint64_t)va + size; at += 4096) {
+        bool ram = false;
+        if (at < (uint64_t)va + size) {
+            const SnxCtrRegion* r = snx_ctr_physical_region(s->memory->profile, page(s, (uint32_t)at)->pa, 4096);
+            ram = r && r->kind != SNX_CTR_MMIO;
+        }
+        if (ram) {
+            if (!run) start = (uint32_t)at;
+            run += 4096;
+            continue;
+        }
+        if (run && !(unmap ? ctr_host_unmap(s->base, start, run) : ctr_host_protect(s->base, start, run, permissions)))
+            return false;
+        run = 0;
+    }
+    return true;
 }
 static SnxCtrMemResult change(SnxCtrAddressSpace* s, uint32_t va, uint32_t size, unsigned permissions, bool unmap) {
     if (!s || !valid_range(va, size) || !permissions_valid(permissions)) return SNX_CTR_MEM_INVALID;
@@ -105,6 +170,7 @@ static SnxCtrMemResult change(SnxCtrAddressSpace* s, uint32_t va, uint32_t size,
         const SnxCtrRegion* r = snx_ctr_physical_region(s->memory->profile, p->pa, 4096);
         if (!unmap && (permissions & SNX_CTR_EXEC) && r->kind == SNX_CTR_MMIO) return SNX_CTR_MEM_PERMISSION;
     }
+    if (s->base && !host_change(s, va, size, permissions, unmap)) return SNX_CTR_MEM_NOMEM;
     for (uint64_t at = va; at < (uint64_t)va + size; at += 4096) {
         Page* p = page(s, (uint32_t)at);
         if (unmap)

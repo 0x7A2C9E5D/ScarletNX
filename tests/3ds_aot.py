@@ -15,6 +15,10 @@ import tempfile
 from ctr_fixtures import cia, ncch, put
 
 
+# a guest's bad access: the checked bus's fault, or the flat space's host fault (memory/host.c) where the host has one
+FAULT = ('guest fault', 'guest data abort')
+
+
 def application(words=None, raw=None, text_size=None, ro=None):
     if raw is None:
         raw = struct.pack('<' + 'I' * len(words), *words)
@@ -272,7 +276,9 @@ def main():
             )
             text = p.stdout + p.stderr
             assert p.returncode == status, (cases, p.returncode, text)
-            assert message in text and 'AddressSanitizer' not in text and 'runtime error:' not in text, (cases, text)
+            messages = message if isinstance(message, tuple) else (message,)
+            assert any(m in text for m in messages), (cases, text)
+            assert 'AddressSanitizer' not in text and 'runtime error:' not in text, (cases, text)
             assert not list(root.rglob('.snx-*')), (cases, 'private staging leaked')
             if status:
                 assert 'Guest ExitProcess' not in text
@@ -369,7 +375,7 @@ def main():
         blocked.mkdir()
         (blocked / 'frames').write_bytes(b'')
         run(application([0xE3A0002A, 0xEF000003]), 1, f'cannot create {blocked.resolve() / "frames"}: ')
-        run(application([0xE1900F9F]), 1, 'guest fault')  # checked LDREX on unmapped VA, no flat fallback
+        run(application([0xE1900F9F]), 1, FAULT)  # LDREX of an unmapped address
         run(application([0xEF000021, 0xE1A00001, 0xEF000023, 0xEF000003]), message='Guest ExitProcess: r0=0 blocks=4')
         commit = [0xE3A00003, 0xE3A01302, 0xE3A02000, 0xE3A03A01, 0xE3A04003, 0xEF000001]
         locked, _ = run(
@@ -407,9 +413,9 @@ def main():
         run(ipc_program(), message='Guest ExitProcess: r0=42')
         run(ipc_program(wait=True), 3, 'wait_service=MISSING')
         run(application([0xEE300A01, 0xE3A0002A, 0xEF000003]), message='Guest ExitProcess: r0=42')  # VFPv2 VADD.F32
-        run(application([0xE3010234]), 1, 'guest fault')  # MOVW is not ARM11
-        run(application([0xE3A01000, 0xE5910000]), 1, 'guest fault')  # unmapped data
-        run(application([0xE59F1004, 0xE5810000, 0xEF000003, 0x200000]), 1, 'guest fault')  # RO store
+        run(application([0xE3010234]), 1, FAULT)  # MOVW is not ARM11
+        run(application([0xE3A01000, 0xE5910000]), 1, FAULT)  # unmapped data
+        run(application([0xE59F1004, 0xE5810000, 0xEF000003, 0x200000]), 1, FAULT)  # RO store
         run(application([0xE59FF000, 0xE1A00000, 0x200000]), 1, 'exit=11')  # non-X branch
         # the RX page's padding, outside the declared text, runs as the console runs it (compiled at run time) up to
         # the read-only page after it, whose fetch faults

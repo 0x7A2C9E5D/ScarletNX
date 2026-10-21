@@ -195,6 +195,22 @@ int main(void) {
         send(p, cfg, SNX_CTR_SVC_RETURN, 0);
         assert(get(p, 1) == 0xd90103fa); /* NotFound */
         assert(!snx_ctr_handle_close(p, cfg) && endpoint(p, srv, "cfg:u") && endpoint(p, srv, "cfg:s"));
+        /* am:app on a console with no add-on content: one content info for a DLC title, none listed, a title ID that
+           is no DLC's refused (Azahar am.cpp) */
+        uint32_t am = endpoint(p, srv, "am:app");
+        uint32_t dlc_count[] = {0x100100c0, 1, 0x00095000, 0x0004008c};
+        request(p, dlc_count, 4);
+        send(p, am, SNX_CTR_SVC_RETURN, 0);
+        assert(get(p, 0) == 0x10010080 && !get(p, 1) && get(p, 2) == 1);
+        dlc_count[3] = 0x00040000;
+        request(p, dlc_count, 4);
+        send(p, am, SNX_CTR_SVC_RETURN, 0);
+        assert(get(p, 1) == 0xe0e0801f && !get(p, 2));
+        uint32_t dlc_list[] = {0x10030142, 0, 1, 0x00095000, 0x0004008c, 0, 0xc, 0x300000};
+        request(p, dlc_list, 8);
+        send(p, am, SNX_CTR_SVC_RETURN, 0);
+        assert(get(p, 0) == 0x10030080 && !get(p, 1) && !get(p, 2));
+        assert(!snx_ctr_handle_close(p, am));
         uint32_t hid = endpoint(p, srv, "hid:USER"), hid_args[] = {0xa0000};
         n = 0;
         while (n < CTR_HANDLES && !snx_ctr_handle_add(p, snx_ctr_handle_object(p, srv), &duplicates[n])) ++n;

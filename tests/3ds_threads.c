@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "3ds/runtime/internal.h"
+#include "3ds/memory/host.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -171,7 +172,9 @@ int main(void) {
         assert(snx_ctr_svc(p, 3) == SNX_CTR_SVC_BLOCKED && p->svc_count == calls);
         assert(snx_ctr_schedule(p) && p->current_thread == tid);
         assert(r[0] == 37 && r[15] == 0x100004 && cpu->tpidruro == SNX_CTR_INITIAL_TLS + 512);
-        assert(!cpu->mem && !cpu->mem_size && p->cpu.state.context == &p->cpu);
+        /* the flat space stays the core's across the switch, where the host has one */
+        assert(cpu->mem == snx_ctr_space_base(p->space) && p->cpu.state.context == &p->cpu);
+        assert(cpu->mem_size == (cpu->mem ? CTR_HOST_SPACE : 0));
         assert(!snx_ctr_handle_close(p, h) && p->objects[eid].refs == 2); /* wait owns its own reference */
         r[0] = duplicate;
         assert(snx_ctr_svc(p, 0x18) == SNX_CTR_SVC_RETURN && !r[0]);

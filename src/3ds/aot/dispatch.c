@@ -3,16 +3,18 @@
 #include "3ds/aot/ctr_module.h"
 #include "3ds/kernel/ctr_kernel.h"
 #include "3ds/runtime/internal.h"
+#include "3ds/memory/host.h"
 #include "snx_settings.h"
 #include <stdio.h>
 #include <string.h>
 
+unsigned snx_ctr_module_memory(void) { return ctr_host_flat() ? SNX_CTR_MODULE_FLAT_MODE : SNX_CTR_MODULE_CHECKED_MODE; }
 bool snx_ctr_module_compatible(const SnxCtrModule* m, const SnxCtrImage* image) {
     return m && image && m->magic == SNX_CTR_MODULE_MAGIC && m->abi == SNX_CTR_MODULE_ABI &&
            m->descriptor_size == sizeof *m && m->cpu_size == sizeof(SnxArmCPU) &&
            m->checked_size == sizeof(SnxArmCheckedCPU) && m->arm_abi == SNX_ARM_ABI &&
            m->checked_abi == SNX_ARM_CHECKED_ABI && m->codegen_abi == SNX_CTR_MODULE_CODEGEN_ABI &&
-           m->profile == SNX_ARM_PROFILE_ARM11 && m->memory_mode == SNX_CTR_MODULE_CHECKED_MODE &&
+           m->profile == SNX_ARM_PROFILE_ARM11 && m->memory_mode == snx_ctr_module_memory() &&
            m->pointer_size == sizeof(void*) && m->text_address == image->segment[0].address &&
            m->text_bytes == image->segment[0].bytes && m->text_bytes && !(m->text_bytes & 3) &&
            m->text_bytes <= SNX_CTR_AOT_TEXT_LIMIT && m->arm_count == m->text_bytes / 4 &&

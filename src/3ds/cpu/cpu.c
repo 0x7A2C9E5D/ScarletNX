@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "3ds/cpu/ctr_cpu.h"
+#include "3ds/memory/host.h"
 #include <string.h>
 
 static uint32_t access_memory(void* context, uint32_t op, uint32_t va, uint32_t size, void* bytes) {
@@ -46,5 +47,9 @@ bool snx_ctr_cpu_init(SnxCtrCpu* cpu, SnxCtrAddressSpace* space, uint32_t pc, ui
     cpu->space = space;
     cpu->state.context = cpu;
     cpu->state.access = access_memory;
+    /* a flat space: compiled code reads and writes it directly (SNX_ARM_MEMORY_FLAT), and a host fault there is the
+       guest's data abort (memory/host.c) */
+    cpu->state.cpu.mem = snx_ctr_space_base(space);
+    cpu->state.cpu.mem_size = cpu->state.cpu.mem ? CTR_HOST_SPACE : 0;
     return true;
 }

@@ -24,6 +24,7 @@
 
 _Static_assert(SNX_ARM_CODEGEN_OPTIONS_ABI == SNX_CTR_MODULE_CODEGEN_ABI, "codegen ABI");
 _Static_assert(SNX_ARM_MEMORY_CHECKED == SNX_CTR_MODULE_CHECKED_MODE, "memory ABI");
+_Static_assert(SNX_ARM_MEMORY_FLAT == SNX_CTR_MODULE_FLAT_MODE, "memory ABI");
 #define CHUNK_ENTRIES 512u
 #define OBJECT_LIMIT  (1024u * 1024u * 1024u) /* a commercial title's 330000 blocks take about 300 MiB */
 #define MODULE_LIMIT  (1024u * 1024u * 1024u)
@@ -74,7 +75,7 @@ static bool descriptor(LLVMModuleRef mod, LLVMTargetDataRef layout, const SnxCtr
                            SNX_ARM_CHECKED_ABI,
                            SNX_ARM_CODEGEN_OPTIONS_ABI,
                            SNX_ARM_PROFILE_ARM11,
-                           SNX_ARM_MEMORY_CHECKED,
+                           snx_ctr_module_memory(),
                            sizeof(void*),
                            image->segment[0].address,
                            image->segment[0].bytes,
@@ -158,7 +159,8 @@ static bool chunk(Host* h, const SnxCtrImage* image, const Entry* entries, unsig
     LLVMModuleRef mod = new_module(h, c);
     bool ok = false;
     unsigned capacity = 0;
-    SnxArmCodegenOptions options = {SNX_ARM_CODEGEN_OPTIONS_ABI, SNX_ARM_PROFILE_ARM11, SNX_ARM_MEMORY_CHECKED};
+    SnxArmCodegenOptions options = {SNX_ARM_CODEGEN_OPTIONS_ABI, SNX_ARM_PROFILE_ARM11,
+                                    (SnxArmMemoryMode)snx_ctr_module_memory()};
     *rest = NULL;
     *rest_count = 0;
     for (unsigned i = 0; i < count; ++i) {
