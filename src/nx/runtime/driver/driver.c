@@ -8,6 +8,7 @@
 #include "nx/runtime/driver/game_name.h"
 #include "nx/runtime/driver/recompile.h"
 #include "nx/runtime/driver/setup.h"
+#include "common/utilities/mods.h"
 #include "common/utilities/setup.h"
 #include "nx/runtime/cli.h"
 #include <ctype.h>
@@ -34,11 +35,11 @@ static void usage(void) {
          "  --controls=0|1         The on-screen controls: hidden or shown (the game's menu sets them)\n"
          "  --KEY=VALUE            Any setting of the game's .ini, for this run (--settings lists them)");
     puts("  --update FILE          Played or prepared, an update's or a DLC's dump, given once each: recorded\n"
-         "                         beside the game (an update's program games/<ID>/<ID>_<its title ID>), checked in\n"
-         "                         addons= of the game's .ini, and the game played with what it checks. Its dump\n"
-         "                         alone does the same for a game made already");
+         "                         beside the game (an update's program recompiled/<ID>/<ID>_<its title ID>),\n"
+         "                         checked in addons= of the game's .ini, and the game played with what it checks.\n"
+         "                         Its dump alone does the same for a game made already");
     puts("  -x -h / -r -h          Extraction / recompilation options\n"
-         "  --game=games/Game      Run a compiled game");
+         "  --game=recompiled/Game Run a compiled game");
     puts("  --extract-container    Played or prepared, extract the dump into the game's data folder. Without it\n"
          "                         nothing is extracted: the game reads its ExeFS and RomFS from the dump, which\n"
          "                         source= in the game's .ini names");
@@ -48,9 +49,9 @@ static void usage(void) {
          "                         system has emptied it");
     puts("  -O LEVEL               Played or prepared, the recompile's optimization: 0,1,2,3,s,z (default: 2).\n"
          "                         A game made already keeps its code until it is recompiled (-r)");
-    puts("  --outdir DIR           Played or prepared, where the game's folder goes (default: games/)\n"
+    puts("  --outdir DIR           Played or prepared, where the game's folder goes (default: recompiled/)\n"
          "  --out DIR              Played or prepared, the dump's extraction (default: work/<its name>)\n"
-         "  --repo DIR             The data folder: games/, work/ and the keys (default: a\n"
+         "  --repo DIR             The data folder: recompiled/, work/ and the keys (default: a\n"
          "                         .scarletnx folder beside the AppImage or the program,\n"
          "                         else the user's data folder,\n"
 #ifdef _WIN32
@@ -109,11 +110,20 @@ static int refresh_runtime(const SnxPaths* paths, const char* game) {
     free(run);
     return rc;
 }
-/* whether this build made the game at base: its stamp says what this build writes, a partial write or anything after
-   it being no completed build */
+/* whether this build made the game at base (<folder>/<name>, a game's or its update's), with the mods its game plays
+   now: its stamp says what this build writes, a partial write or anything after it being no completed build */
 static int stamped(const char* base) {
-    char *stamp = snx_format("%s.abi", base), *expected = snx_game_stamp();
+    char *folder = snx_dirname(base), *off = NULL, *mods, *made, *stamp = snx_format("%s.abi", base), *expected;
+    const char* game = folder + strlen(folder);
     size_t size = 0;
+    while (game > folder && game[-1] != '/' && game[-1] != '\\') --game; /* the game's folder is named as it is */
+    mods = snx_game_mods(folder, game, &off);
+    made = snx_mods_stamp(mods, off);
+    expected = snx_game_stamp(made);
+    free(made);
+    free(mods);
+    free(off);
+    free(folder);
     unsigned char* found = snx_read_file(stamp, &size);
     int same = found && size == strlen(expected) && !memcmp(found, expected, size);
     free(found);
@@ -121,8 +131,9 @@ static int stamped(const char* base) {
     free(stamp);
     return same;
 }
-/* a game the recompile made, named by its folder (games/<id>) or its program there (games/<id>/<id>, .exe on Windows):
-   1 with its folder and name, owned when asked for. A game an older version laid out beside the others is not one */
+/* a game the recompile made, named by its folder (recompiled/<id>) or its program there (recompiled/<id>/<id>, .exe on
+   Windows): 1 with its folder and name, owned when asked for. A game an older version laid out beside the others is not
+   one */
 static int prepared_game(const char* input, char** folder, char** name) {
     char *path = snx_absolute(input), *dir = NULL, *own = NULL, *program = NULL, *data = NULL;
     const char* leaf;
@@ -165,7 +176,7 @@ static int prepared_game(const char* input, char** folder, char** name) {
     free(data);
     return found;
 }
-/* an add-on the recompile made, named by its program in its game's folder (games/<id>/<id>_<add-on's id>, .exe on
+/* an add-on the recompile made, named by its program in its game's folder (recompiled/<id>/<id>_<add-on's id>, .exe on
    Windows): 1 with that folder, its name and its title ID, owned */
 static int prepared_addon(const char* input, char** folder, char** name, SnxU64* addon) {
     char *path = snx_absolute(input), *dir, *own;
@@ -518,10 +529,20 @@ static int drop_dlc_program(const char* folder, const char* name) {
     }
     return rc;
 }
-/* games/ of the data folder, else the folder outdir names. A dump is extracted straight into its game's data folder,
-   games/<title ID>/<title ID>_data (its title ID read from its NCAs' headers first), or with --tmpfs into tmpfs, and
-   its game made from it there: no copy is kept. --out names a folder the extraction is kept in instead, the game made
-   from a copy. A game made already stays where it is */
+/* game name's folder: in the folder outdir names, else the data folder's recompiled/ (games/ of an older version while
+   the game is there, snx_recompiled_game) */
+static char* game_folder(const char* outdir, const char* repo, const char* name) {
+    char *games, *folder;
+    if (!outdir) return snx_recompiled_game(repo, name);
+    games = snx_absolute(outdir);
+    folder = games ? snx_path_join(games, name) : NULL;
+    free(games);
+    return folder;
+}
+/* recompiled/ of the data folder, else the folder outdir names. A dump is extracted straight into its game's data
+   folder, recompiled/<title ID>/<title ID>_data (its title ID read from its NCAs' headers first), or with --tmpfs into
+   tmpfs, and its game made from it there: no copy is kept. --out names a folder the extraction is kept in instead, the
+   game made from a copy. A game made already stays where it is */
 static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* outdir, const char* out,
                      const char* opt, int recompiling, char** recompile, int settings, char** setting, int game_argc,
                      char** game_argv, const char* const* updates, int nupdates) {
@@ -568,9 +589,8 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
                                NULL, 0, NULL, NULL, 0);
         }
         if (rc || (flags & (SNX_RECOMP | PLAY_PREPARE))) goto done;
-        games = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
         snx_title_text(title, of);
-        folder = snx_path_join(games, of);
+        folder = game_folder(outdir, paths->repo, of);
         program = game_program(folder, of);
         rc = play_dump(program, paths, flags, NULL, NULL, opt, recompiling, recompile, settings, setting, game_argc,
                        game_argv, NULL, 0);
@@ -600,14 +620,14 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
             snx_error("Input dump is missing or is not a file: %s", input);
             goto done;
         }
-        games = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
+        games = outdir ? snx_absolute(outdir) : snx_recompiled_dir(paths->repo);
         if (!games || snx_extract_title(dump, paths, &title, &owner, &version)) goto done;
-        if (snx_addon_kind(owner, title) != SNX_ADDON_NONE) { /* games/<game>/<game>_<its entry> */
+        if (snx_addon_kind(owner, title) != SNX_ADDON_NONE) { /* recompiled/<game>/<game>_<its entry> */
             char of[17], own[32];
             snx_title_text(owner, of);
             snx_addon_entry(owner, title, version, own);
             addon = title;
-            folder = snx_path_join(games, of);
+            folder = game_folder(outdir, paths->repo, of);
             name = snx_format("%s_%s", of, own);
             source = snx_strdup(dump);
             goto addon;
@@ -619,7 +639,9 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
             snx_error("%s has no title ID of its own to extract it to tmpfs by", input);
             goto done;
         }
-        folder = snx_path_join(games, name);
+        folder = game_folder(outdir, paths->repo, name);
+        free(games); /* its parent, games/ of an older version while the game is there */
+        games = folder ? snx_dirname(folder) : NULL;
         base = snx_path_join(folder, name);
         data = snx_format("%s_data", base);
         extracting = snx_format("%s.extracting", base);
@@ -676,7 +698,7 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
         goto made;
     }
     dumped = snx_dump_name(input);
-    games = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
+    games = outdir ? snx_absolute(outdir) : snx_recompiled_dir(paths->repo);
     extracted = out ? snx_absolute(out) : NULL;
     work = extracted ? snx_dirname(extracted) : NULL;
     pending = extracted ? snx_format("%s.extracting", extracted) : NULL;
@@ -724,7 +746,9 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
         goto done;
     }
     name = snx_game_name(NULL, &npdm, nro ? dump : extracted);
-    folder = snx_path_join(games, name); /* the game's own, as the recompile makes it */
+    folder = game_folder(outdir, paths->repo, name); /* the game's own, as the recompile makes it */
+    free(games);
+    games = folder ? snx_dirname(folder) : NULL;
     base = snx_path_join(folder, name);
     source = snx_strdup(nro ? dump : extracted);
 addon:
@@ -1096,8 +1120,8 @@ int snx_driver(int argc, char** argv) {
     if (!automatic)
         for (i = separator; i < argc; ++i) rest[n++] = argv[i];
     rest[n] = NULL;
-    /* work/, games/ and prod.keys are in the data folder (snx_data_dir), unless --repo names one (the menu does), for
-       a build tree's driver as for an installed one. Not the current folder: a desktop entry or Explorer start the
+    /* work/, recompiled/ and prod.keys are in the data folder (snx_data_dir), unless --repo names one (the menu does),
+       for a build tree's driver as for an installed one. Not the current folder: a desktop entry or Explorer start the
        driver wherever they happen to be, often somewhere read-only (/, the AppImage's mount, Program Files) */
     self = snx_executable(argv[0]);
     exe = self ? snx_dirname(self) : NULL;
@@ -1115,6 +1139,7 @@ int snx_driver(int argc, char** argv) {
     exe = NULL;
     snx_tool_console();
     if (data && source) snx_checkout_left(source, data);
+    if (data) snx_recompiled_left(data);
     /* what the setup has left, before the first run a terminal makes and the first after an update, or all of it */
     if (!snx_setup_skip && (snx_setup_again || snx_terminal()) && setup_run(argv[0], snx_setup_again)) {
         result = 1;

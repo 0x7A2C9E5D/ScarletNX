@@ -29,7 +29,8 @@
    READ/FETCH fill bytes; WRITE consumes bytes without changing them. A failed
    RAM transaction must not change memory; a failed READ must not expose partial
    results. Callbacks must not modify CPU state, recurse or retain bytes. Device
-   callbacks own their fault/side-effect policy. Size is 1..64 for this ABI.
+   callbacks own their fault/side-effect policy. Size is 1..128 for this ABI: a
+   VLDM or VSTM of all sixteen double registers is 128 bytes.
    FETCH checks execute permission, independently of read permission. */
 typedef uint32_t (*SnxArmAccess)(void* context, uint32_t operation, uint32_t address, uint32_t size, void* bytes);
 typedef struct {

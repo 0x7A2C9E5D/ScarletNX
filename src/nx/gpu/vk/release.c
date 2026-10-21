@@ -87,7 +87,10 @@ static void rix_remove(u64 word) {
         /* it stays when its home is cyclically within (i, j] */
         if (i <= j ? i < k && k <= j : i < k || k <= j) continue;
         g_rix[i] = g_rix[j];
+        /* emptied whole: rix_add counts up from the slot's n, and a count left here made the next word there never
+           go, until the full table left rix_find probing forever (the GPU thread hung in release) */
         g_rix[j].word = 0;
+        g_rix[j].n = 0;
         i = j;
     }
 }

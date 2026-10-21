@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # A language for the tests (tests/gui_i18n.c, tests/gui_sdl.c), not the menu's: a few phrases of po/scarletnx.pot,
 # a plain one, one not ASCII, formats, a foot's keys and a key of theirs, and wide letters (two columns each): a tab, a
-# row of App and keys.
+# row of App and keys; and a title far longer than its English, for the head's size.
 msgid ""
 msgstr ""
 "Project-Id-Version: ScarletNX\n"
@@ -13,6 +13,9 @@ msgstr ""
 
 msgid "Settings"
 msgstr "Ajustes"
+
+msgid "SCARLETNX  /  SETTINGS"
+msgstr "SCARLETNX  /  CONFIGURATIONS OF EVERY GROUP AND ITS SETTINGS"
 
 msgid "Language"
 msgstr "Língua"
@@ -34,8 +37,8 @@ msgid "Up/Down: row. Left/Right: change. Enter: change or open. ESC: back."
 msgstr "Up/Down: linha. Left/Right: muda. Enter: muda ou abre. ESC: volta."
 
 #, snx-keys
-msgid "Tab: screen."
-msgstr "Tab: tela."
+msgid "Tab: screen. F2: side box."
+msgstr "Tab: tela. F2: caixa ao lado."
 
 msgid "Menu"
 msgstr "菜单"

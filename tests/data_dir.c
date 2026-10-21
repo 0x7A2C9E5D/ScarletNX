@@ -33,6 +33,18 @@ static char* left_said(const char* checkout, const char* data, const char* file)
     assert(text);
     return text;
 }
+/* what snx_recompiled_left says on stderr for data, read back from file */
+static char* recompiled_said(const char* data, const char* file) {
+    char* text;
+    size_t size;
+    fflush(stderr);
+    assert(freopen(file, "w", stderr));
+    snx_recompiled_left(data);
+    fflush(stderr);
+    text = (char*)snx_read_file(file, &size);
+    assert(text);
+    return text;
+}
 
 int main(void) {
     char *root = snx_temp_dir(NULL), *checkout, *build, *built, *program, *mount, *copy, *data, *xdg, *expected, *file;
@@ -142,11 +154,13 @@ int main(void) {
     for (i = 0; i < SNX_CHECKOUT_FILES; ++i) {
         now = snx_checkout_now(expected, i);
 #ifdef SNX_XDG
-        line = !strcmp(snx_checkout_files[i], "work") ? snx_format("%s/scarletnx/work", cache)
-                                                      : join(expected, snx_checkout_files[i]);
+        line = !strcmp(snx_checkout_files[i], "work")    ? snx_format("%s/scarletnx/work", cache)
+               : !strcmp(snx_checkout_files[i], "games") ? join(expected, "recompiled")
+                                                         : join(expected, snx_checkout_files[i]);
 #else
-        line = !strcmp(snx_checkout_files[i], "work") ? join(expected, "cache/work")
-                                                      : join(expected, snx_checkout_files[i]);
+        line = !strcmp(snx_checkout_files[i], "work")    ? join(expected, "cache/work")
+               : !strcmp(snx_checkout_files[i], "games") ? join(expected, "recompiled")
+                                                         : join(expected, snx_checkout_files[i]);
 #endif
         assert(now && !strcmp(now, line));
         free(line);
@@ -164,7 +178,7 @@ int main(void) {
     assert(!snx_write_file(old, "", 0));
     free(old);
     said = left_said(checkout, expected, file);
-    line = snx_format("scarletnx: %s/games was left by an older version: this one keeps it in %s/games "
+    line = snx_format("scarletnx: %s/games was left by an older version: this one keeps it in %s/recompiled "
                       "(docs/DEPRECATIONS.md)\n"
                       "scarletnx: %s/prod.keys was left by an older version: this one keeps it in %s/prod.keys "
                       "(docs/DEPRECATIONS.md)\n",
@@ -179,6 +193,38 @@ int main(void) {
     said = left_said(checkout, checkout, file);
     assert(!said[0]);
     free(said);
+    /* recompiled/ of a data folder, and the games/ an older version made its games in: where a game it made is still
+       found until the player moves it, said on stderr while it is there; nothing is moved */
+    {
+        char *dir = join(root, "made"), *old_games = join(dir, "games"), *new_games = join(dir, "recompiled");
+        char *made = join(old_games, "0100ABCD12345000"), *fresh = join(new_games, "0100ABCD12345000"), *found;
+        found = snx_recompiled_game(dir, "0100ABCD12345000"); /* neither: the new one */
+        assert(found && !strcmp(found, fresh));
+        free(found);
+        said = recompiled_said(dir, file);
+        assert(!said[0]);
+        free(said);
+        assert(!snx_mkdirs(made));
+        found = snx_recompiled_game(dir, "0100ABCD12345000"); /* only the old one */
+        assert(found && !strcmp(found, made));
+        free(found);
+        said = recompiled_said(dir, file);
+        line = snx_format("scarletnx: %s was left by an older version: this one makes games in %s, and still runs the "
+                          "ones in it until they are moved there (docs/DEPRECATIONS.md)\n",
+                          old_games, new_games);
+        assert(!strcmp(said, line) && snx_is_dir(made));
+        free(line);
+        free(said);
+        assert(!snx_mkdirs(fresh));
+        found = snx_recompiled_game(dir, "0100ABCD12345000"); /* both: the new one */
+        assert(found && !strcmp(found, fresh));
+        free(found);
+        free(fresh);
+        free(made);
+        free(new_games);
+        free(old_games);
+        free(dir);
+    }
     free(file);
 
     /* snx_folder_unfit: how the menu's Folders and each run check a folder picked for the drivers */

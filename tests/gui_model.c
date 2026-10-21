@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* gui_browser_key_skip's skip: the items the bools mark */
+static bool is_heading(size_t item, const void* user) { return ((const bool*)user)[item]; }
+
 int main(void) {
     GuiMenu menu = {0};
     GuiConfirm confirm = {0};
@@ -130,6 +133,35 @@ int main(void) {
     assert(gui_wrap("a/\xe8\x8f\x9c", 3) == 2 && gui_wrap("\xe8\x8f\x9c\xe5\x8d\x95", 1) == 3);
 
     /* the head (Add a folder and two recent games) over each page of the games, one ring with the page */
+    /* items no one picks (headings): the focus steps over them, Select on one asks nothing, a page that opens with
+       its focus on one moves it off */
+    {
+        GuiBrowser b = {.count = 7, .head = 1};
+        const bool heading[7] = {true, false, false, true, false, false, true};
+        gui_browser_resize(&b, 4);                               /* page 0: items 0-3, page 1: items 4-6 */
+        gui_browser_key_skip(&b, GUI_DOWN, is_heading, heading); /* past item 0 */
+        assert(b.selected == 2);
+        gui_browser_key_skip(&b, GUI_DOWN, is_heading, heading);
+        gui_browser_key_skip(&b, GUI_DOWN, is_heading, heading); /* past item 3: round to the head */
+        assert(b.selected == 0);
+        gui_browser_key_skip(&b, GUI_UP, is_heading, heading); /* round to the page's last, item 3: the one before */
+        assert(b.selected == 3);
+        gui_browser_key_skip(&b, GUI_UP, is_heading, heading);
+        gui_browser_key_skip(&b, GUI_UP, is_heading, heading); /* past item 0 to the head */
+        assert(b.selected == 0);
+        b.selected = 1; /* put on item 0 another way (a tap) */
+        assert(gui_browser_key_skip(&b, GUI_SELECT, is_heading, heading) == GUI_BROWSER_NONE && !b.activated);
+        assert(gui_browser_key(&b, GUI_SELECT) == GUI_BROWSER_OPEN); /* without skip it is a game like any */
+        b.activated = false;
+        b.selected = 4; /* row 4, then the next page, whose row 4 is no more and row 3 is item 6, a heading */
+        gui_browser_key_skip(&b, GUI_RIGHT, is_heading, heading);
+        assert(b.page == 1 && b.selected == 2); /* item 5: no item after 6, so the one before */
+        GuiBrowser all = {.count = 2, .head = 0};
+        const bool both[2] = {true, true};
+        gui_browser_resize(&all, 4);
+        gui_browser_key_skip(&all, GUI_DOWN, is_heading, both); /* nothing to land on: it ends, on one */
+        assert(all.selected < 2);
+    }
     GuiBrowser browser = {.count = 23, .head = 3};
     gui_browser_resize(&browser, 10);
     assert(gui_browser_pages(&browser) == 3 && gui_browser_items(&browser) == 10);
@@ -251,6 +283,44 @@ int main(void) {
                gui_cols_skip(menu, 2) == menu + 3);
         assert(gui_cols_skip(menu, 3) == menu + 6 && gui_cols_skip(menu, 5) == menu + 7 &&
                gui_cols_skip(menu, 9) == menu + 7);
+    }
+    /* a path in a row's columns: whole when it fits, else the root and its first folder, "...", and as many of the last
+       folders as fit; a last name too long alone keeps its last letters; never wider than asked, a wide letter whole */
+    {
+        const char* data = "/home/dravee/.local/share/scarletnx/recompiled"; /* 46 */
+        const char* paths[] = {
+            data,
+            "C:\\Users\\me\\AppData\\Roaming\\scarletnx\\recompiled",
+            "relative/to/here",
+            "/x/averyveryverylongfilename.nsp",
+            "nameonlynoseparatorsatall",
+            "/\xe8\x8f\x9c\xe5\x8d\x95/\xe8\x8f\x9c\xe5\x8d\x95\xe8\x8f\x9c/\xe6\xb8\xb8\xe6\x88\x8f.nsp"};
+        char out[128];
+        gui_path_fit(data, 46, out, sizeof out);
+        assert(!strcmp(out, data));
+        gui_path_fit(data, 30, out, sizeof out);
+        assert(!strcmp(out, "/home/.../scarletnx/recompiled"));
+        gui_path_fit(data, 29, out, sizeof out); /* the end's room first, then the start up to a separator */
+        assert(!strcmp(out, "/home/dravee/.../recompiled"));
+        gui_path_fit(data, 33, out, sizeof out);
+        assert(!strcmp(out, "/home/.../scarletnx/recompiled"));
+        gui_path_fit(paths[1], 30, out, sizeof out);
+        assert(!strcmp(out, "C:\\...\\scarletnx\\recompiled"));
+        gui_path_fit(paths[3], 16, out, sizeof out);
+        assert(!strcmp(out, "/x/...lename.nsp"));
+        gui_path_fit(paths[4], 12, out, sizeof out);
+        assert(!strcmp(out, "nam...satall")); /* no separator: a third of the room for the start */
+        gui_path_fit(data, 4, out, sizeof out);
+        assert(!strcmp(out, "/hom"));
+        gui_path_fit(data, 0, out, sizeof out);
+        assert(!out[0]);
+        for (size_t p = 0; p < sizeof paths / sizeof *paths; ++p)
+            for (int cols = -1; cols < 60; ++cols) {
+                gui_path_fit(paths[p], cols, out, sizeof out);
+                assert(gui_text_cols(out) <= (cols < 0 ? 0 : cols));
+                assert(gui_text_cols(paths[p]) > cols || !strcmp(out, paths[p]));
+                assert(cols < 5 || gui_text_cols(paths[p]) <= cols || strstr(out, "..."));
+            }
     }
     for (int i = 0; i < 1000000; ++i) gui_console_feed(&screen, "z", 1);
     assert(screen.row < screen.rows && screen.col <= screen.cols);

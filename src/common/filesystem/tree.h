@@ -47,6 +47,9 @@ typedef struct {
    All other calls and direct node access require tree->lock to be held. Children are sorted by strcmp(name).
    Close open handles before destroy; retain/release keep removed entries alive while their handles exist. */
 FsTreeResult fs_tree_init(FsTree* tree, const char* directory);
+/* fs_tree_init with the data directory's own entries named in skipped (NULL-terminated, or NULL) left out of the index,
+   as if they weren't there: folders read apart from it (a game's mods) */
+FsTreeResult fs_tree_init_skipping(FsTree* tree, const char* directory, const char* const* skipped);
 /* Startup only: name, a child of the data directory it doesn't have, indexed from another host directory, as
    fs_tree_init indexes its own and with the same rejections, and readonly. The game's RomFS kept in tmpfs */
 FsTreeResult fs_tree_graft(FsTree* tree, const char* name, const char* directory);

@@ -136,7 +136,7 @@ bool ctr_cia_load(CtrReader* r, CtrCia* cia) {
     if (!ok) return false;
     if (!have_boot || at != content.size || memcmp(present, h + 0x20, sizeof present))
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "CIA bitmap/content sizes or boot content do not match TMD");
-    return ctr_hash(r, (CtrSpan){0, r->size}, cia->input_hash);
+    return r->quick || (cia->input_hashed = ctr_hash(r, (CtrSpan){0, r->size}, cia->input_hash));
 }
 bool ctr_cia_contents(CtrReader* r, const CtrCia* cia, const char* stage) {
     char* path = stage ? snx_path_join(stage, "contents") : NULL;
@@ -148,10 +148,11 @@ bool ctr_cia_contents(CtrReader* r, const CtrCia* cia, const char* stage) {
         unsigned index = ctr_be16(chunk + 4);
         if (!(cia->header[0x20 + (index >> 3)] & (0x80u >> (index & 7)))) continue;
         CtrSpan span = {at, ctr_be64(chunk + 8)};
-        if (!stage) { /* the content's hash, which the copy checks */
+        if (!stage) { /* the content's hash, which the copy checks; none in a quick read */
             unsigned char hash[32];
-            ok = ctr_hash(r, span, hash) &&
-                 (!memcmp(hash, chunk + 16, 32) || ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "content SHA-256 mismatch"));
+            if (!r->quick)
+                ok = ctr_hash(r, span, hash) &&
+                     (!memcmp(hash, chunk + 16, 32) || ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "content SHA-256 mismatch"));
             at += span.size;
             continue;
         }

@@ -23,11 +23,10 @@ Source map: [CLAUDE.md](../CLAUDE.md).
 | `src/gnuabi/` / `scarletnx-gnuabi` | Linux syscall/errno/structure translation, ELF loading, isolated VFS, Linux process/memory/signal/futex compatibility |
 
 The experimental `src/3ds/` / `scarletnx-3ds` target supplies board profiles,
-decrypted CIA/NCCH/ExeFS/RomFS extraction, or the same read in place from the mapped CIA, and an independent
-checked page-memory
-controller. `SNX_3DS_AOT=ON` adds a native Linux static-AOT pipeline:
+decrypted CIA/NCCH/ExeFS/RomFS extraction, or the same read in place from the mapped CIA, an independent checked page-memory
+controller and a static-AOT pipeline for Linux and Windows hosts:
 extraction -> the driver's offline LLVM compiler/host linker (only when the module is missing or stale) ->
-native ELF -> checked process/ARM/Thumb dispatch. `snx_ctr_process` maps raw
+a native module (an ELF shared object, or a DLL on Windows) -> checked process/ARM/Thumb dispatch. `snx_ctr_process` maps raw
 ExHeader segments/BSS/stack/TLS; `snx_ctr_native` validates/loads module ABI 1.
 The driver links LLVM for its compiler, the modules do not. The runtime uses neither MCJIT nor NX/GNU
 ABI code. `common/filesystem/` / `scarletnx-filesystem` owns NX and CTR's shared
@@ -35,7 +34,7 @@ indexed host tree, immutable file mappings and on-demand opens. CTR uses its own
 level-3 RomFS serializer/file objects and wire protocol, not Switch FS IPC.
 Host staging/process utilities are also reused.
 
-The shared A32 backend's A57/flat defaults and CPU ABI 2 are unchanged. ARM11 ISA
+The shared A32 backend's A57/flat defaults are unchanged, and its CPU ABI is 3. ARM11 ISA
 and callback memory are explicit codegen options, never global 3DS defines. The
 shared backend CMake target is initialized once when several runtimes request it.
 The compiler exhaustively emits one-instruction entries for images up to 4 KiB.
@@ -43,8 +42,8 @@ Larger images use bounded offline CFG discovery, code-pointer candidates and a
 bounded PC-relative ADD jump window, with blocks of at most 32 instructions.
 It emits 128 entries per LLVM chunk and links all PIC objects with a separate
 ABI-1 full-geometry index object; unproven targets remain NULL. There is no
-runtime discovery or compilation. SuperTux reaches its first SVC through this
-path, not gameplay. See [3DS port](3DS.md) for coverage limits, absent HLE/devices
+runtime discovery or compilation. SuperTux draws its title screen and plays its
+music through this path, without input yet. See [3DS port](3DS.md) for coverage limits, absent HLE/devices
 and remaining cache/ISA work.
 
 The common target has no runtime-specific imports. NX and GNU ABI each link
@@ -85,6 +84,14 @@ update's program with the game's `.ini` and data folder, and `fs.c` lays the che
 update's over that folder (`fs_tree_overlay`, which takes only their ExeFS, RomFS, control data and `system/`). It
 reads an update's dump with the game's in one `SnxDump` (its Patch RomFS reads the game's NCA), and each checked DLC's
 in one of its own (`HleFs.aocs`), whose image `OpenDataStorageByDataId` serves by its title ID.
+
+A game's mods are the folders of `<id>_data/mods/` (`common/utilities/mods.c`), each played unless the game's
+`mods_off=` names it. The data folder's index leaves `mods/` out (`fs_tree_init_skipping`). The recompile loads the
+program with the played mods' ExeFS files over its own (`snx_exefs_mods`) and records their stamp in `<id>.abi`, which
+the driver compares (`stamped`) to recompile a game whose mods changed. The runtime's `fs.c` serves those files in
+place of the game's when the stamp matches, grafts each played mod's `romfs/` as `mods.<i>`, and `romfs_init` makes
+the RomFS image up from the game's (its `romfs/` folder, or its image's tables) with the mods' laid over it, a file of
+the game's image read from that image.
 
 - `driver.c`: CLI dispatch only; `extract.c` and `recompile.c` own their workflows.
 - `container.c`: a dump opened with hactool, its keys loaded and its NCAs picked, shared by the extraction, the

@@ -3,6 +3,7 @@
 /* The program's entry: the MCP server (--mcp) and the host driver's commands (extract, recompile) first, and anything
    else is a game to run */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "common/utilities/setup.h"
@@ -10,6 +11,7 @@
 #include "nx/runtime/driver/mcp.h"
 #include "nx/runtime/entry.h"
 #include "nx/runtime/main.h"
+#include "nx/runtime/options.h" /* g_ini_sections, ini_list_text */
 #ifdef SNX_WITH_GUI
 #include "gui/gui.h"
 #include "gui/theme.h"
@@ -22,6 +24,15 @@
 #endif
 #endif
 
+#ifdef SNX_WITH_GUI
+/* the game's settings as scarletnx --settings prints them, for the menu built into this program (snx_menu_settings) */
+static char* runtime_settings(void) {
+    size_t n = ini_list_text(g_ini_sections, g_ini_sections_count, NULL, 0);
+    char* text = (char*)malloc(n + 1);
+    if (text) ini_list_text(g_ini_sections, g_ini_sections_count, text, n + 1);
+    return text;
+}
+#endif
 int snx_switch_main(int argc, char** argv) {
     int result;
     char why[160];
@@ -37,8 +48,18 @@ int snx_switch_main(int argc, char** argv) {
 #ifdef SNX_WITH_GUI
     snx_menu = snx_gui_main;
     snx_menu_run_theme = gui_run_theme;
+    snx_menu_settings = runtime_settings;
 #endif
     if (argc > 1 && !strcmp(argv[1], "--mcp")) return snx_mcp(argc, argv);
+#if defined(SNX_WITH_GUI) && !defined(__ANDROID__) && !defined(SNX_MENU_THEN_GAME)
+    if (argc > 1 && !strncmp(argv[1], "--migrate", 9) && (!argv[1][9] || argv[1][9] == '=')) {
+        if (argc > 2) {
+            fprintf(stderr, "scarletnx: %s takes nothing after it: %s\n", argv[1], argv[2]);
+            return 2;
+        }
+        return snx_gui_migrate(argv[0], argv[1]);
+    }
+#endif
     result = snx_driver(argc, argv);
     if (result >= 0) return result;
 #ifdef SNX_MENU_THEN_GAME

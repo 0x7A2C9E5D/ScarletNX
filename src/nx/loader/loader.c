@@ -962,6 +962,27 @@ static int folder_read(void* source, const char* name, unsigned char** data, siz
     return !found ? 1 : *data ? 0 : -1;
 }
 
+/* a mod's file in place of the ExeFS's of its name, else the ExeFS's (SnxExefsMods) */
+static int mods_read(void* source, const char* name, unsigned char** data, size_t* size) {
+    const SnxExefsMods* mods = (const SnxExefsMods*)source;
+    size_t i;
+    for (i = 0; i < mods->count; ++i)
+        if (!strcmp(mods->names[i], name)) {
+            *data = snx_read_file(mods->paths[i], size);
+            return *data ? 0 : -1;
+        }
+    return mods->under->read(mods->under->source, name, data, size);
+}
+void snx_exefs_mods(SnxExefsMods* mods, const SnxExefsReader* under, char* const* names, char* const* paths,
+                    size_t count) {
+    mods->reader.read = mods_read;
+    mods->reader.source = mods;
+    mods->under = under;
+    mods->names = names;
+    mods->paths = paths;
+    mods->count = count;
+}
+
 /* main.npdm beside the modules, parsed, and its bytes (NULL without one); where names the ExeFS in messages */
 static int read_npdm(const SnxExefsReader* exefs, const char* where, SnxNpdm* npdm, unsigned char** data, size_t* size,
                      char* error, size_t error_size) {
@@ -1101,8 +1122,10 @@ static int load_modules(const SnxExefsReader* exefs, const char* where, SnxProgr
     return 0;
 }
 
-static int load_exefs_program(const char* entry, SnxProgram* program, char* error, size_t error_size) {
+static int load_exefs_program(const char* entry, char* const* names, char* const* paths, size_t count,
+                              SnxProgram* program, char* error, size_t error_size) {
     SnxExefsReader folder;
+    SnxExefsMods mods;
     char *exefs, *root, *romfs = NULL, *path, *nacp_path;
     const char* name;
     size_t length;
@@ -1125,7 +1148,8 @@ static int load_exefs_program(const char* entry, SnxProgram* program, char* erro
     set_paths(program, entry, exefs, root, romfs);
     folder.read = folder_read;
     folder.source = exefs;
-    if (load_modules(&folder, exefs, program, error, error_size)) goto done;
+    snx_exefs_mods(&mods, &folder, names, paths, count);
+    if (load_modules(&mods.reader, exefs, program, error, error_size)) goto done;
     nacp_path = snx_path_join(root, "control.nacp");
     if (snx_is_file(nacp_path)) {
         program->nacp = snx_read_file(nacp_path, &program->nacp_size);
@@ -1161,12 +1185,16 @@ int snx_load_program_from(const SnxExefsReader* exefs, const char* entry, unsign
 }
 
 int snx_load_program(const char* entry, SnxProgram* program, char* error, size_t error_size) {
+    return snx_load_program_mods(entry, NULL, NULL, 0, program, error, error_size);
+}
+int snx_load_program_mods(const char* entry, char* const* names, char* const* paths, size_t count, SnxProgram* program,
+                          char* error, size_t error_size) {
     int rc;
     memset(program, 0, sizeof(*program));
     if (nro_name(entry) && snx_is_file(entry))
         rc = load_nro_program(entry, program, error, error_size);
     else
-        rc = load_exefs_program(entry, program, error, error_size);
+        rc = load_exefs_program(entry, names, paths, count, program, error, error_size);
     if (rc) snx_free_program(program);
     return rc;
 }

@@ -3,6 +3,7 @@
 #include "3ds/runtime/internal.h"
 #include "3ds/ipc/ctr_ipc.h"
 #include "common/utilities/common.h"
+#include "snx_settings.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -244,6 +245,11 @@ static void sd_area(SnxCtrProcess* p, uint32_t fs, const char* directory) {
     static const uint16_t file16[] = {'d', '/', 'f', '.', 'b', 'i', 'n', 0};
     static const uint16_t moved16[] = {'d', '/', 'm', '.', 'b', 'i', 'n', 0};
     utf16(p, 0x300400, dir16, 4);
+    /* the path's static buffer descriptor must name buffer 0 with the path's size */
+    uint32_t bad_mkdir[] = {0x8090182, 0, lo, hi, 4, 4, 0, 0x10402, 0x300400};
+    request(p, fs, bad_mkdir, 9, SNX_CTR_SVC_RETURN, SNX_CTR_IPC_BAD_DESCRIPTOR);
+    uint32_t bad_rmdir[] = {0x8060142, 0, lo, hi, 4, 4, 0x20002, 0x300400};
+    request(p, fs, bad_rmdir, 8, SNX_CTR_SVC_RETURN, SNX_CTR_IPC_BAD_DESCRIPTOR);
     uint32_t mkdir[] = {0x8090182, 0, lo, hi, 4, 4, 0, 0x10002, 0x300400};
     request(p, fs, mkdir, 9, SNX_CTR_SVC_RETURN, 0);
     assert(!get(p, 1));
@@ -321,6 +327,7 @@ static void sd_area(SnxCtrProcess* p, uint32_t fs, const char* directory) {
 }
 int main(int argc, char** argv) {
     assert(argc == 4);
+    g_settings.ctr_answer_unknown_commands = 0; /* an unknown command stops, as the tests expect */
 #if defined(__unix__) || defined(__APPLE__)
     if (!strcmp(argv[3], "fallback")) {
         struct rlimit limit = {64, 64};
@@ -330,6 +337,7 @@ int main(int argc, char** argv) {
     unsigned char code[0x3000] = {0};
     SnxCtrImage image = {.segment = {{0x100000, 1, 16}, {0x200000, 1, 4}, {0x300000, 1, 4}},
                          .stack_size = 0x4000,
+                         .main_priority = 0x30,
                          .bss_size = 0x3000,
                          .code = code,
                          .code_size = sizeof code};
@@ -444,8 +452,8 @@ int main(int argc, char** argv) {
         read[5] = 0x300800;
         read[4] = 16 << 4 | 12;
         request(p, file, read, 6, SNX_CTR_SVC_RETURN, SNX_CTR_IPC_BAD_DESCRIPTOR);
-        read[4] = 512 << 4 | 10;
-        request(p, file, read, 6, SNX_CTR_SVC_UNSUPPORTED, 0);
+        read[4] = 512 << 4 | 10; /* a buffer the service may only read, for a Read */
+        request(p, file, read, 6, SNX_CTR_SVC_RETURN, SNX_CTR_IPC_BAD_DESCRIPTOR);
         uint32_t unknown[] = {0x8090000};
         request(p, file, unknown, 1, SNX_CTR_SVC_UNSUPPORTED, 0);
         uint32_t close[] = {0x8080000};

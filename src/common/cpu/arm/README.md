@@ -64,7 +64,7 @@ The ARM11 profile implements a **conservative ARMv6K integer subset**, rejecting
 MOVW/MOVT, MLS, divide, RBIT, bitfields, ARMv7 barrier encodings, acquire/release,
 NEON, VFPv3/v4 and D16..D31. It recognizes the ARM11 CP15 barrier forms.
 Scalar VFPv2 F32/F64 arithmetic, non-fused multiply/accumulate, compares,
-conversions, register/status transfers and up-to-64-byte memory transfers are
+conversions, register/status transfers and up-to-128-byte memory transfers are
 implemented. Arithmetic uses the shared raw-bit integer FP primitives, not host
 floating point or ARMv8 fused replacements. LEN/STRIDE and exception enables must
 be zero for arithmetic. FPSCR writes outside NZCV, rounding mode, DN/FZ and
@@ -112,7 +112,7 @@ closed. ABI layouts and existing operations are unchanged. A57 checked exclusive
 acquire/release, vectors and Thumb table branches remain explicitly unsupported.
 The A57 flat path, including its existing atomic operations, is unchanged.
 
-Asset-free native tests (LLVM SDK required; no NX/SDL dependencies):
+Asset-free native tests (LLVM SDK required, and SDL3, which the 3DS driver uses and CMake fetches):
 
 ```sh
 cmake -S . -B build/arm11 -DSNX_BUILD_NX=OFF -DSNX_BUILD_GNUABI=OFF \
@@ -128,11 +128,11 @@ for both profiles at both optimization levels (55,068 comparisons). With
 `SNX_TEST_ARM_DIFF=ON` and Python `unicorn==2.1.4`, the isolated build also runs
 independent ARM11 MPCore integer comparisons and the existing A57 integer,
 VFP/NEON and Thumb regression suites. ARM11 Thumb BL halves have C golden tests,
-not a claimed independent differential oracle. The optional CTR pipeline
-supplies process setup, offline conservative CFG discovery/chunking and native
-module loading/dispatch under `src/3ds/`; see `docs/3DS.md`. The pinned external
-SuperTux bootstrap retains the first-SVC CPU-only gate and continues through
-real kernel initialization to ConnectToPort. Differential tests compare GPRs,
+not a claimed independent differential oracle. The CTR pipeline, built with
+`SNX_BUILD_3DS`, supplies process setup, offline conservative CFG discovery/chunking
+and native module loading/dispatch under `src/3ds/`; see `docs/3DS.md`. The pinned
+external SuperTux bootstrap retains the first-SVC CPU-only gate, continues through
+real kernel initialization to ConnectToPort and APT lookup, and runs on past main. Differential tests compare GPRs,
 CPSR and RAM at both boundaries. The second CPU reference uses a test-scripted
 HLE transcript, not independent hardware validation of kernel policy. Neither
 reference is an execution fallback. Broader target coverage, full ARM11 semantics and

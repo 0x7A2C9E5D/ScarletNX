@@ -81,6 +81,13 @@ int main(void) {
     e.row = row_of("head", "rule");
     gui_editor_key(&e, GUI_SELECT);
     assert(e.theme.head_rule == !def->head_rule);
+    e.row = row_of("body", "gap"); /* 0 to 14 */
+    assert(e.theme.gap == 6);
+    for (r = 0; r < 8; ++r) gui_editor_key(&e, GUI_LEFT);
+    assert(e.theme.gap == 0);
+    for (r = 0; r < 14; ++r) gui_editor_key(&e, GUI_RIGHT);
+    assert(e.theme.gap == 14);
+    e.theme.gap = 6;
     e.row = row_of("transitions", "blink_ms");
     e.theme.blink_ms = 5;
     gui_editor_key(&e, GUI_LEFT);
@@ -240,7 +247,10 @@ int main(void) {
     assert(dir && !gui_editor_save(&e, dir) && !e.dirty && strstr(e.note, "Saved in"));
     path = snx_format("%s/Night ink_2/theme.ini", dir);
     text = (char*)snx_read_file(path, &size);
-    assert(text && gui_theme_parse(&back, "Night ink_2", text, size));
+    {
+        char said[1024];
+        assert(text && gui_theme_parse(&back, "Night ink_2", text, size, said, sizeof said) && !said[0]);
+    }
     for (r = 2; r <= keys + 1; ++r) {
         char a[96], b[96];
         gui_theme_get(&e.theme, gui_editor_key_of(&e, r), a, sizeof a);

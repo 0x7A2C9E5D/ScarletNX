@@ -5,6 +5,7 @@
 #include "nx/hle/kernel/ipc.h"
 #include "nx/memory/mem.h"
 #include "nx/runtime/platform/log.h"
+#include "common/utilities/mods.h"
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -1314,6 +1315,172 @@ static void test_overlay(void) {
     puts("PASS an update's and a checked DLC's extractions laid over their game's data folder");
 }
 
+/* Mods in the game's data folder, mods/<mod>/: the played ones' exefs/ files read in place of the game's when the program
+   was recompiled with them (its stamp, <program>.abi, says so), else the game's own, said; and their romfs/ folders
+   laid over the game's RomFS in their names' order, a file of a later one over an earlier one's and the game's. A mod
+   mods_off= names, a hidden folder and a file are no mods played, and nothing under mods/ is indexed with the data
+   folder: a link in a mod left out doesn't stop the game. image: the game's RomFS a romfs.bin image instead of its
+   romfs/ folder. stale: the program was recompiled without the mods' ExeFS files */
+static const char* const mod_made[][2] = {
+    {"mods-data/0100000000AB0000_data/exefs/main", "the game's main"},
+    {"mods-data/0100000000AB0000_data/exefs/main.npdm", "the game's npdm"},
+    {"mods-data/0100000000AB0000_data/mods/1 first/romfs/a.bin", "first's a"},
+    {"mods-data/0100000000AB0000_data/mods/1 first/romfs/new/n.bin", "first's new"},
+    {"mods-data/0100000000AB0000_data/mods/2 second/romfs/a.bin", "second's a"},
+    {"mods-data/0100000000AB0000_data/mods/2 second/romfs/dir/b.bin", "second's b"},
+    {"mods-data/0100000000AB0000_data/mods/2 second/exefs/main", "second's main"},
+    {"mods-data/0100000000AB0000_data/mods/2 second/exefs/notes.txt", "no part of the program"},
+    {"mods-data/0100000000AB0000_data/mods/3 off/romfs/a.bin", "off's a"},
+    {"mods-data/0100000000AB0000_data/mods/3 off/exefs/subsdk0", "off's subsdk0"},
+    {"mods-data/0100000000AB0000_data/mods/.hidden/romfs/a.bin", "hidden's a"},
+    {"mods-data/0100000000AB0000_data/mods/readme.txt", "no mod"},
+};
+/* the bytes of the file at path (folders split by /) in the RomFS image, with header its header: NULL for none */
+static const u8* image_file(const u8* image, const u64* header, const char* path, u64* size) {
+    char part[64];
+    u32 parent = 0, entry;
+    const char* slash;
+    while ((slash = strchr(path, '/'))) {
+        CHECK((size_t)(slash - path) < sizeof part);
+        memcpy(part, path, (size_t)(slash - path));
+        part[slash - path] = 0;
+        if ((parent = romfs_find(image, header, 1, parent, part)) == UINT32_MAX) return NULL;
+        path = slash + 1;
+    }
+    if ((entry = romfs_find(image, header, 0, parent, path)) == UINT32_MAX) return NULL;
+    *size = snx_ld_le64(image + header[7] + entry + 16);
+    return image + header[9] + snx_ld_le64(image + header[7] + entry + 8);
+}
+static void image_has(const u8* image, const u64* header, const char* path, const char* contents) {
+    u64 size = 0;
+    const u8* data = image_file(image, header, path, &size);
+    if (!data || size != strlen(contents) || memcmp(data, contents, size))
+        fprintf(stderr, "%s: expected \"%s\"\n", path, contents);
+    CHECK(data && size == strlen(contents) && !memcmp(data, contents, size));
+}
+static void test_mods(SvcObj* proxy, int image, int stale) {
+    Request r;
+    u64 size = 0, header[10], total;
+    u8* data = fs_read_file("exefs/main", &size);
+    const u8* bytes;
+    FsNode* node;
+    if (stale) { /* the program's own ExeFS, said */
+        CHECK(data && size == 15 && !memcmp(data, "the game's main", 15));
+        CHECK(strstr(test_fs_text, "the program was recompiled with none of them") != NULL && g_hle.fs.nmexefs == 0);
+    } else {
+        CHECK(data && size == 13 && !memcmp(data, "second's main", 13) && g_hle.fs.nmexefs == 1);
+    }
+    free(data);
+    data = fs_read_file("exefs/main.npdm", &size);
+    CHECK(data && size == 15 && !memcmp(data, "the game's npdm", 15));
+    free(data);
+    CHECK(fs_read_file("exefs/subsdk0", &size) == NULL && fs_read_file("exefs/notes.txt", &size) == NULL);
+    { /* mapped, as the loader takes a module */
+        PFileMap map;
+        CHECK(!fs_map_file("exefs/main", &map) && map.size == (stale ? 15u : 13u));
+        plat_file_unmap(&map);
+    }
+    pm_lock(&g_hle.fs.tree.lock);
+    CHECK(fs_tree_lookup(&g_hle.fs.tree, NULL, "mods", &node) == FS_TREE_NOTFOUND);
+    CHECK(!fs_tree_lookup(&g_hle.fs.tree, NULL, "mods.1/a.bin", &node) && node->readonly);
+    CHECK(fs_tree_lookup(&g_hle.fs.tree, NULL, image ? "mods.3" : "mods.2", &node) == FS_TREE_NOTFOUND);
+    pm_unlock(&g_hle.fs.tree.lock);
+    CHECK(g_hle.fs.nmromfs == (image ? 3u : 2u) && g_hle.fs.rlayered);
+    request(&r, 200);
+    dispatch(proxy, &r, 0);
+    CHECK(r.c.nout_objs == 1);
+    SvcObj* storage = r.c.out_objs[0];
+    total = get_size(storage);
+    CHECK(total > 0x200 && total <= 0x8000);
+    test_storage_contracts(storage, total);
+    request(&r, 0);
+    argument64(&r, 8, total);
+    output_buffer(&r, total);
+    dispatch(storage, &r, 0);
+    const u8* view = GP(0x5000);
+    memcpy(header, view, sizeof header);
+    snx_le64_array(header, 10);
+    image_has(view, header, "a.bin", "second's a");
+    image_has(view, header, "dir/b.bin", "second's b");
+    image_has(view, header, "dir/c.bin", "the game's c");
+    image_has(view, header, "new/n.bin", "first's new");
+    image_has(view, header, "z.bin", "the game's z");
+    CHECK(!image_file(view, header, "link", &size)); /* the mod left out's */
+    bytes = image_file(view, header, "empty.bin", &size);
+    CHECK(bytes && size == 0);
+    { /* a read across a mod's file and the game's, from where each is */
+        u64 a_size = 0, z_size = 0;
+        const u8* a = image_file(view, header, "a.bin", &a_size);
+        const u8* z = image_file(view, header, "z.bin", &z_size);
+        u64 from = (u64)(a - view) + a_size - 3, length = (u64)(z - view) + z_size - from;
+        u8 expect[64];
+        CHECK(z > a && length <= sizeof expect);
+        memcpy(expect, view + from, (size_t)length);
+        request(&r, 0);
+        argument64(&r, 0, from);
+        argument64(&r, 8, length);
+        output_buffer(&r, length);
+        dispatch(storage, &r, 0);
+        CHECK(!memcmp(GP(0x5000), expect, (size_t)length) && !memcmp(GP(0x5000), "s a", 3) &&
+              !memcmp(GP(0x5000) + length - z_size, "the game's z", 12));
+    }
+    svcobj_unref(storage);
+    puts(stale ? "PASS mods' RomFS laid over the game's, their ExeFS left out of a program made without it"
+               : image ? "PASS mods' ExeFS and RomFS laid over the game's RomFS image"
+                       : "PASS mods' ExeFS and RomFS laid over the game's extracted files");
+}
+static void mods_write(int image, int stale) {
+    char *mods, *stamp, *text;
+    for (size_t i = 0; i < sizeof mod_made / sizeof mod_made[0]; i++) {
+        char* folder = snx_dirname(mod_made[i][0]);
+        CHECK(!snx_mkdirs(folder) && !snx_write_file(mod_made[i][0], mod_made[i][1], strlen(mod_made[i][1])));
+        free(folder);
+    }
+    if (image) {
+#if !defined(_WIN32)
+        static const char* const names[] = {"a.bin", "empty.bin", "z.bin"};
+        static const char* const contents[] = {"the game's a", "", "the game's z"};
+        romfs_file_t files[3];
+        blob_t made;
+        for (int i = 0; i < 3; i++) {
+            files[i].name = names[i];
+            files[i].content.data = (unsigned char*)contents[i];
+            files[i].content.size = strlen(contents[i]);
+        }
+        made = synth_romfs_build(files, 3);
+        CHECK(!snx_write_file("mods-data/0100000000AB0000_data/romfs.bin", made.data, made.size));
+        free(made.data);
+        /* the game's folder dir/ is only in the mods' then: c.bin from a mod of its own */
+        CHECK(!snx_mkdirs("mods-data/0100000000AB0000_data/mods/0 c/romfs/dir") &&
+              !snx_write_file("mods-data/0100000000AB0000_data/mods/0 c/romfs/dir/c.bin", "the game's c", 12));
+#endif
+    } else {
+        CHECK(!snx_mkdirs("mods-data/0100000000AB0000_data/romfs/dir") &&
+              !snx_write_file("mods-data/0100000000AB0000_data/romfs/a.bin", "the game's a", 12) &&
+              !snx_write_file("mods-data/0100000000AB0000_data/romfs/empty.bin", "", 0) &&
+              !snx_write_file("mods-data/0100000000AB0000_data/romfs/z.bin", "the game's z", 12) &&
+              !snx_write_file("mods-data/0100000000AB0000_data/romfs/dir/b.bin", "the game's b", 12) &&
+              !snx_write_file("mods-data/0100000000AB0000_data/romfs/dir/c.bin", "the game's c", 12));
+    }
+#if !defined(_WIN32)
+    CHECK(!symlink("a.bin", "mods-data/0100000000AB0000_data/mods/3 off/romfs/link"));
+#endif
+    strcpy(g_exedir, "mods-data/");
+    strcpy(g_exename, "0100000000AB0000");
+    strcpy(g_gamename, "0100000000AB0000");
+    strcpy(g_confdir, "mods-data/");
+    strcpy(g_settings.game_mods_off, "3 off");
+    mods = snx_mods_folder("mods-data/0100000000AB0000_data");
+    stamp = snx_mods_stamp(mods, g_settings.game_mods_off);
+    CHECK(strlen(stamp) == 16);
+    text = stale ? snx_strdup("1") : snx_format("1 mods %s", stamp);
+    CHECK(!snx_write_file("mods-data/0100000000AB0000.abi", text, strlen(text)));
+    free(text);
+    free(stamp);
+    free(mods);
+    strcpy(g_datadir, "mods-data/0100000000AB0000_data/");
+}
+
 /* OpenSaveDataFileSystem (51): the SaveDataSpaceId (u8) at 0 and the 0x40 byte SaveDataAttribute at 8, whose
    SaveDataType is at 0x20 in it, 0x28 in the request. The other bytes are filled with types that would pick another
    folder if they were read instead */
@@ -1534,7 +1701,10 @@ static void cleanup_service(void) {
     for (unsigned i = 0; i < NOPEN; i++)
         if (g_hle.fs.openf[i].f) fclose(g_hle.fs.openf[i].f);
     if (g_hle.fs.rraw) fclose(g_hle.fs.rraw);
-    for (int i = 0; i < g_hle.fs.nrfiles; i++) fs_tree_release(g_hle.fs.rfiles[i].node);
+    for (int i = 0; i < g_hle.fs.nrfiles; i++)
+        if (g_hle.fs.rfiles[i].node) fs_tree_release(g_hle.fs.rfiles[i].node);
+    snx_free_strings(g_hle.fs.mexefs_names, g_hle.fs.nmexefs);
+    snx_free_strings(g_hle.fs.mexefs_paths, g_hle.fs.nmexefs);
     free(g_hle.fs.rmeta);
     free(g_hle.fs.rfiles);
     fs_tree_destroy(&g_hle.fs.tree);
@@ -1627,6 +1797,22 @@ int main(int argc, char** argv) {
         return 0;
     }
 #endif
+    if (argc == 4 && (!strcmp(argv[3], "mods") || !strcmp(argv[3], "mods-image") || !strcmp(argv[3], "mods-stale"))) {
+        int image = !strcmp(argv[3], "mods-image"), stale = !strcmp(argv[3], "mods-stale");
+        mods_write(image, stale);
+        fs_init();
+        test_scans_allowed = 0;
+        svc_fs_init();
+        romfs_init();
+        SvcObj* proxy = new_fsp();
+        test_mods(proxy, image, stale);
+        svcobj_unref(proxy);
+        CHECK(test_objects == 0);
+        cleanup_service();
+        free(g_mem);
+        printf("PASS %u mod checks\n", test_checks);
+        return 0;
+    }
     if (argc == 4 && !strcmp(argv[3], "addon-overlay")) {
         test_overlay();
         cleanup_service();

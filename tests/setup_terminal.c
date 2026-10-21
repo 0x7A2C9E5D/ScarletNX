@@ -99,7 +99,8 @@ static void test_defaults(void) {
     fresh();
     assert(!run("\n\n\n\n\n\n", 0));
     said("Changed in older versions\n  Game settings\n    before  removed or renamed keys");
-    said("    now     <id>_data/save/user.<uid>\n  Not moved. See docs/DEPRECATIONS.md\n[Enter] OK ");
+    said("    now     each folder in the recompiled or the dumps library, as its games say\n  Not moved. See "
+         "docs/DEPRECATIONS.md\n[Enter] OK "); /* the last notice, then the steps */
     said("[1/5] Language (the launcher's)\n  1) English 2) Portugu\xc3\xaas (Brasil) 3) "
          "\xe7\xae\x80\xe4\xbd\x93\xe4\xb8\xad\xe6\x96\x87\n  [1] ");
     said_with("[2/5] Install type\n  Installed: settings %s, data %s", config, data);
@@ -108,7 +109,7 @@ static void test_defaults(void) {
          "  [2] ");
     said("[5/5] First user\n  uid ");
     said_with("Done: %s/setup.ini\n", config, NULL);
-    expect(config, "setup.ini", "[setup]\nversion = 1\nnotices = 9\n");
+    expect(config, "setup.ini", "[setup]\nversion = 1\nnotices = 11\n");
     assert(!text_of(config, "app.ini")); /* the language it had: app.ini as it was */
     text = text_of(users, "users.ini");
     assert(text && sscanf(strstr(text, "uid=") + 4, "%32s", uid) == 1 && strstr(text, "\nnickname=Player\n"));
@@ -238,11 +239,11 @@ static void test_language(void) {
 static void test_notice(void) {
     char* file = join(config, "setup.ini");
     fresh();
-    put(file, "[setup]\nversion = 1\nnotices = 8\n");
+    put(file, "[setup]\nversion = 1\nnotices = 10\n");
     assert(!run("\n", 0));
-    said("Changed since the last version\n  Account saves\n");
+    said("Changed since the last version\n  The launcher's folders of games\n");
     assert(!strstr(output, "Game settings") && !strstr(output, "[1/"));
-    expect(config, "setup.ini", "notices = 9\n");
+    expect(config, "setup.ini", "notices = 11\n");
     free(file);
     puts("PASS a notice alone after an update");
 }

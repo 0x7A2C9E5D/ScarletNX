@@ -28,8 +28,15 @@ const SnxCtrProfile* snx_ctr_memory_profile(const SnxCtrMemory* memory);
 /* Address spaces must be destroyed first. No internal locking: caller serializes
    mappings/accesses/devices. Physical RAM is shared by all spaces on this board. */
 void snx_ctr_memory_free(SnxCtrMemory* memory);
+/* The board's region index's RAM, as the host holds it (page-aligned, the region's size), which the GPU imports and
+   reads and writes in place; NULL for an MMIO region */
+unsigned char* snx_ctr_memory_region(const SnxCtrMemory* memory, size_t index);
 void snx_ctr_memory_mmio(SnxCtrMemory* memory, void* context, SnxCtrMmioRead read, SnxCtrMmioWrite write);
 SnxCtrAddressSpace* snx_ctr_space_new(SnxCtrMemory* memory);
+/* The flat space, on a host that has one (memory/host.h): guest address va is base + va for compiled code, which
+   reads and writes it directly (SNX_ARM_MEMORY_FLAT), its mappings views of the board's RAM, so this API and the
+   generated code see the same bytes. NULL without one: compiled code then goes through the checked bus */
+unsigned char* snx_ctr_space_base(const SnxCtrAddressSpace* space);
 void snx_ctr_space_free(SnxCtrAddressSpace* space);
 /* Page-aligned nonempty ranges; mapping requires one physical board region.
    Failed map/protect/unmap leave all mappings unchanged. No automatic user VA

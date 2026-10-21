@@ -195,12 +195,23 @@ int main(void) {
         assert(p.list.h == 0 && p.list.w >= 0 && p.side.w >= 0 && p.status.h == 0);
     }
     /* a list: as many items as fit, the focus among them, from the first while it is in view */
-    assert(gui_place_list(100, 20, 30, 10, -1, &first) == 3 && first == 0);
-    assert(gui_place_list(100, 20, 30, 10, 2, &first) == 3 && first == 0);
-    assert(gui_place_list(100, 20, 30, 10, 5, &first) == 3 && first == 3);
-    assert(gui_place_list(100, 20, 30, 10, 9, &first) == 3 && first == 7);
-    assert(gui_place_list(100, 20, 30, 2, 1, &first) == 2 && first == 0);
-    assert(gui_place_list(10, 20, 30, 5, 3, &first) == 0 && first == 0); /* not even one fits */
+    assert(gui_place_list(100, 20, 30, 10, -1, 0, &first) == 3 && first == 0);
+    assert(gui_place_list(100, 20, 30, 10, 2, 0, &first) == 3 && first == 0);
+    assert(gui_place_list(100, 20, 30, 10, 5, 0, &first) == 3 && first == 3);
+    assert(gui_place_list(100, 20, 30, 10, 9, 0, &first) == 3 && first == 7);
+    assert(gui_place_list(100, 20, 30, 2, 1, 0, &first) == 2 && first == 0);
+    assert(gui_place_list(10, 20, 30, 5, 3, 0, &first) == 0 && first == 0); /* not even one fits */
+    /* centered: the focus in the middle of the three shown, but for the first and the last, which the ends hold; four
+       shown, the one above the middle; a list that fits whole, or no focus, from its top */
+    assert(gui_place_list(100, 20, 30, 10, 0, 1, &first) == 3 && first == 0);
+    assert(gui_place_list(100, 20, 30, 10, 1, 1, &first) == 3 && first == 0);
+    assert(gui_place_list(100, 20, 30, 10, 2, 1, &first) == 3 && first == 1);
+    assert(gui_place_list(100, 20, 30, 10, 5, 1, &first) == 3 && first == 4);
+    assert(gui_place_list(100, 20, 30, 10, 8, 1, &first) == 3 && first == 7);
+    assert(gui_place_list(100, 20, 30, 10, 9, 1, &first) == 3 && first == 7);
+    assert(gui_place_list(130, 20, 30, 10, 5, 1, &first) == 4 && first == 4);
+    assert(gui_place_list(100, 20, 30, 2, 1, 1, &first) == 2 && first == 0);
+    assert(gui_place_list(100, 20, 30, 10, -1, 1, &first) == 3 && first == 0);
     /* the pitch spreads few items, keeps many to the least */
     assert(gui_place_pitch(300, 10, 20, 50) == 30);
     assert(gui_place_pitch(300, 2, 20, 50) == 50 && gui_place_pitch(300, 30, 20, 50) == 20);
@@ -225,6 +236,23 @@ int main(void) {
         f.fixed = 0;
         gui_place(&f, &b);
         assert(b.stacked && !empty(b.side)); /* adaptive: under it */
+        /* side_box on: under the list there too, fixed or not; off: never, the list the whole width, the status gone
+           with it, wide or narrow */
+        f.fixed = 1;
+        f.side = GUI_SIDE_ON;
+        gui_place(&f, &a);
+        sound(&a, 600, 800);
+        assert(a.stacked && !empty(a.side) && a.list.w == 600 - 32 && a.side.y > a.list.y + a.list.h);
+        f.side = GUI_SIDE_OFF;
+        gui_place(&f, &a);
+        assert(!a.stacked && empty(a.side) && empty(a.status) && a.list.w == 600 - 32);
+        f.width = 1280;
+        gui_place(&f, &b);
+        sound(&b, 1280, 800);
+        assert(!b.stacked && empty(b.side) && empty(b.status) && b.list.w == 1280 - 32 && b.list.h == a.list.h);
+        f.side = GUI_SIDE_ON; /* wide: beside it, as auto */
+        gui_place(&f, &b);
+        assert(!b.stacked && !empty(b.side) && b.side.x > b.list.x + b.list.w);
     }
     return 0;
 }

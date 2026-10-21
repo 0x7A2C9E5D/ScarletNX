@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-# Copies the runtime to games/<Game>/<Name> for every games/<Game>/<Name>_code.so (<Name>.exe for every _code.dll on
-# Windows): the game's own and its update's (<Game>_<update>), which a player may start as directly. And to
-# games/<Game> for an older version's game beside the others. The runtime finds its game module by its own file name,
-# so each game gets a copy under its name. GAMES empty: games/ of the folder the driver beside the
-# runtime works in when no --repo names one (snx_data_dir): a .scarletnx/ beside it, else the user's data folder.
+# Copies the runtime to <games>/<Game>/<Name> for every <games>/<Game>/<Name>_code.so (<Name>.exe for every _code.dll
+# on Windows): the game's own and its update's (<Game>_<update>), which a player may start as directly. And to
+# <games>/<Game> for an older version's game beside the others. The runtime finds its game module
+# by its own file name, so each game gets a copy under its name. GAMES empty: recompiled/ of the folder the driver
+# beside the runtime works in when no --repo names one (snx_data_dir): a .scarletnx/ beside it, else the user's data
+# folder.
+# A 3DS game's folder is named after its title ID (0004 and 12 more hex digits) and gets CTR_RUNTIME, scarletnx-3ds,
+# which is RUNTIME too where scarletnx is also the 3DS driver (SNX_MULTICALL). Either one empty: its games keep theirs.
 if(WINDOWS)
     set(module_ext dll)
     set(exe_ext .exe)
@@ -13,7 +16,11 @@ else()
     set(exe_ext "")
 endif()
 if(NOT GAMES)
-    get_filename_component(program_dir "${RUNTIME}" DIRECTORY)
+    if(RUNTIME)
+        get_filename_component(program_dir "${RUNTIME}" DIRECTORY)
+    else()
+        get_filename_component(program_dir "${CTR_RUNTIME}" DIRECTORY)
+    endif()
     if(IS_DIRECTORY "${program_dir}/.scarletnx")
         set(data "${program_dir}/.scarletnx")
     elseif(WINDOWS AND DEFINED ENV{APPDATA} AND NOT "$ENV{APPDATA}" STREQUAL "")
@@ -25,18 +32,28 @@ if(NOT GAMES)
     elseif(NOT WINDOWS AND NOT MACOS AND DEFINED ENV{HOME} AND NOT "$ENV{HOME}" STREQUAL "")
         set(data "$ENV{HOME}/.local/share/scarletnx")
     else()
-        message(STATUS "Runtime not deployed: no home folder to find the games in (set SNX_GAMES_DIR)")
+        message(STATUS "Runtime not deployed: no home folder to find the games in (set SNX_RECOMPILED_DIR)")
         return()
     endif()
-    set(GAMES "${data}/games")
+    set(GAMES "${data}/recompiled")
 endif()
 # Through a temporary file and a rename, so a game that is running keeps its old copy
 function(deploy folder game)
-    file(COPY_FILE "${RUNTIME}" "${folder}/.${game}.tmp")
+    if(game MATCHES "^0004[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$")
+        set(runtime "${CTR_RUNTIME}")
+    else()
+        set(runtime "${RUNTIME}")
+    endif()
+    if(NOT runtime)
+        return()
+    endif()
+    file(COPY_FILE "${runtime}" "${folder}/.${game}.tmp")
     file(CHMOD "${folder}/.${game}.tmp" FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
          WORLD_READ WORLD_EXECUTE)
     file(RENAME "${folder}/.${game}.tmp" "${folder}/${game}${exe_ext}")
     message(STATUS "Runtime deployed to ${folder}/${game}${exe_ext}")
+    math(EXPR deployed "${deployed} + 1")
+    set(deployed "${deployed}" PARENT_SCOPE)
 endfunction()
 # the folder's own path in the patterns with its [, * and ? in brackets, read as themselves
 string(REGEX REPLACE "([][*?])" "[\\1]" games_glob "${GAMES}")
@@ -46,7 +63,6 @@ foreach(module IN LISTS modules)
     get_filename_component(name "${module}" NAME)
     string(REGEX REPLACE "_code\\.${module_ext}$" "" game "${name}")
     deploy("${GAMES}" "${game}")
-    math(EXPR deployed "${deployed} + 1")
 endforeach()
 # one glob over every folder: a folder's own name in a pattern would be read as one (Game [JP] matching nothing)
 file(GLOB modules "${games_glob}/*/*_code.${module_ext}")
@@ -55,7 +71,6 @@ foreach(module IN LISTS modules)
     get_filename_component(name "${module}" NAME)
     string(REGEX REPLACE "_code\\.${module_ext}$" "" game "${name}")
     deploy("${folder}" "${game}")
-    math(EXPR deployed "${deployed} + 1")
 endforeach()
 if(deployed EQUAL 0)
     message(STATUS "Runtime not deployed: no game module in ${GAMES}")

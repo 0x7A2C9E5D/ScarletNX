@@ -85,23 +85,24 @@ bool ctr_copy(CtrReader* r, CtrSpan span, const char* path, const unsigned char*
     FILE* out = snx_fopen(path, "wbx");
     if (!out) return ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot create new output file: %s", path);
     unsigned char bytes[32768], hash[32];
-    EVP_MD_CTX* context = EVP_MD_CTX_new();
-    bool hashed = context && EVP_DigestInit_ex(context, EVP_sha256(), NULL);
+    bool check = expected && !r->quick; /* the copy is hashed only when there is a hash to check it against */
+    EVP_MD_CTX* context = check ? EVP_MD_CTX_new() : NULL;
+    bool hashed = !check || (context && EVP_DigestInit_ex(context, EVP_sha256(), NULL));
     bool ok = true;
     for (uint64_t at = 0; at < span.size && ok;) {
         size_t n = span.size - at > sizeof bytes ? sizeof bytes : (size_t)(span.size - at);
         ok = ctr_read(r, span, at, bytes, n);
         if (ok) {
-            hashed = hashed && EVP_DigestUpdate(context, bytes, n);
+            hashed = hashed && (!check || EVP_DigestUpdate(context, bytes, n));
             ok = fwrite(bytes, 1, n, out) == n;
         }
         at += n;
     }
     if (fclose(out)) ok = false;
-    hashed = hashed && EVP_DigestFinal_ex(context, hash, NULL);
+    hashed = hashed && (!check || EVP_DigestFinal_ex(context, hash, NULL));
     EVP_MD_CTX_free(context);
     if (ok && !hashed) return ctr_fail(r, SNX_CTR_EXTRACT_LIMIT, "SHA-256 failed (out of memory)");
-    if (ok && expected && memcmp(hash, expected, 32))
+    if (ok && check && memcmp(hash, expected, 32))
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "content SHA-256 mismatch");
     return ok || ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot copy archive section");
 }
@@ -186,7 +187,12 @@ SnxCtrExtractResult snx_ctr_extract(const char* input, const char* destination, 
 #else
     r.size = (uint64_t)ftello(r.input);
 #endif
+    /* the input's own hash only names a default output, and checks the input did not change under the extraction:
+       with an output given it is not taken (the contents' and ExeFS files' hashes still are, as they are copied) */
+    r.quick = destination != NULL;
+    bool input_hashed = !r.quick;
     if (!ctr_cia_load(&r, &cia)) goto done;
+    r.quick = false;
     if (!destination) {
         char hex[65];
         for (size_t i = 0; i < 32; ++i) snprintf(hex + i * 2, 3, "%02x", cia.input_hash[i]);
@@ -214,7 +220,7 @@ SnxCtrExtractResult snx_ctr_extract(const char* input, const char* destination, 
     }
     if (!ctr_cia_contents(&r, &cia, stage) || !ctr_ncch_extract(&r, &cia, stage)) goto done;
     /* Detect normal concurrent input edits, including after content validation. */
-    if (!ctr_hash_matches(&r, (CtrSpan){0, r.size}, cia.input_hash)) goto done;
+    if (input_hashed && !ctr_hash_matches(&r, (CtrSpan){0, r.size}, cia.input_hash)) goto done;
     if (snx_path_exists(target) || snx_replace(stage, target)) {
         ctr_fail(&r, SNX_CTR_EXTRACT_IO, "cannot publish extraction without overwriting an existing output");
         goto done;

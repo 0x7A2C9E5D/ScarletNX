@@ -216,18 +216,37 @@ void gui_browser_resize(GuiBrowser* browser, size_t page_size) {
     if (on_game) browser->selected = browser->head + anchor % page_size;
     browser_clamp(browser);
 }
+/* whether row is an item skip leaves out */
+static bool skipped(const GuiBrowser* browser, size_t row, bool (*skip)(size_t, const void*), const void* user) {
+    return skip && row >= browser->head && row < browser->head + gui_browser_items(browser) &&
+           skip(browser->page * browser->page_size + row - browser->head, user);
+}
 GuiBrowserAction gui_browser_key(GuiBrowser* browser, GuiKey key) {
-    size_t rows = browser->head + gui_browser_items(browser);
+    return gui_browser_key_skip(browser, key, NULL, NULL);
+}
+GuiBrowserAction gui_browser_key_skip(GuiBrowser* browser, GuiKey key, bool (*skip)(size_t item, const void* user),
+                                      const void* user) {
+    size_t rows = browser->head + gui_browser_items(browser), tries, r;
     switch (key) {
         case GUI_CANCEL: return GUI_BROWSER_BACK;
         case GUI_SELECT:
             if (browser->selected < browser->head) return GUI_BROWSER_HEAD;
-            if (browser->selected >= rows) return GUI_BROWSER_NONE;
+            if (browser->selected >= rows || skipped(browser, browser->selected, skip, user)) return GUI_BROWSER_NONE;
             browser->active = browser->page * browser->page_size + browser->selected - browser->head;
             browser->activated = true;
             return GUI_BROWSER_OPEN;
-        case GUI_UP: browser->selected = browser->selected ? browser->selected - 1 : rows ? rows - 1 : 0; break;
-        case GUI_DOWN: browser->selected = browser->selected + 1 < rows ? browser->selected + 1 : 0; break;
+        case GUI_UP:
+            for (tries = 0; tries <= rows; ++tries) {
+                browser->selected = browser->selected ? browser->selected - 1 : rows ? rows - 1 : 0;
+                if (!skipped(browser, browser->selected, skip, user)) break;
+            }
+            break;
+        case GUI_DOWN:
+            for (tries = 0; tries <= rows; ++tries) {
+                browser->selected = browser->selected + 1 < rows ? browser->selected + 1 : 0;
+                if (!skipped(browser, browser->selected, skip, user)) break;
+            }
+            break;
         case GUI_LEFT:
         case GUI_PAGE_UP:
             if (browser->page) --browser->page;
@@ -239,6 +258,13 @@ GuiBrowserAction gui_browser_key(GuiBrowser* browser, GuiKey key) {
         default: break;
     }
     browser_clamp(browser);
+    if (skipped(browser, browser->selected, skip, user)) { /* a page whose focus fell on a heading */
+        rows = browser->head + gui_browser_items(browser);
+        for (r = browser->selected; r + 1 < rows && skipped(browser, r, skip, user); ++r) {}
+        if (skipped(browser, r, skip, user))
+            for (r = browser->selected; r > 0 && skipped(browser, r, skip, user); --r) {}
+        browser->selected = r;
+    }
     return GUI_BROWSER_NONE;
 }
 static int clamp(int n, int maximum) { return n < 1 ? 1 : n > maximum ? maximum : n; }

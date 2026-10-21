@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-# cmake/deploy.cmake copies the runtime beside each game of SNX_GAMES_DIR, else of the data folder a build tree's
+# cmake/deploy.cmake copies the runtime beside each game of SNX_RECOMPILED_DIR, else of the data folder a build tree's
 # driver uses (snx_data_dir): a .scarletnx/ beside the runtime, else the user's ($XDG_DATA_HOME/scarletnx, a relative
 # one ignored). Without a home folder it deploys nothing and says so. Run by ctest as runtime_deploy, with no
 # runtime: any file is copied the same way
@@ -15,7 +15,7 @@ function(game games)
     file(WRITE "${games}/Game/Game_01000000000AB800_code.so" "")
     file(WRITE "${games}/Game [JP]/Game [JP]_code.so" "")
 endfunction()
-# deploy.cmake with SNX_GAMES_DIR games, in an environment without HOME and XDG_DATA_HOME but for ARGN's NAME=VALUE
+# deploy.cmake with SNX_RECOMPILED_DIR games, in an environment without HOME and XDG_DATA_HOME but for ARGN's NAME=VALUE
 function(deploy games)
     execute_process(COMMAND "${CMAKE_COMMAND}" -E env --unset=XDG_DATA_HOME --unset=HOME ${ARGN}
                             "${CMAKE_COMMAND}" "-DRUNTIME=${dir}/bin/scarletnx" "-DGAMES=${games}" -DWINDOWS=0 -DMACOS=0
@@ -34,19 +34,38 @@ endfunction()
 
 game("${dir}/named")
 deploy("${dir}/named")
-deployed("${dir}/named" "SNX_GAMES_DIR")
+deployed("${dir}/named" "SNX_RECOMPILED_DIR")
 game("${dir}/na[me]d*")
 deploy("${dir}/na[me]d*")
-deployed("${dir}/na[me]d*" "an SNX_GAMES_DIR whose name a glob would read as a pattern")
-game("${dir}/xdg/scarletnx/games")
+deployed("${dir}/na[me]d*" "an SNX_RECOMPILED_DIR whose name a glob would read as a pattern")
+# a 3DS game, named after its title ID: the 3DS runtime's (CTR_RUNTIME), never the Switch runtime's
+set(ctr "0004000000ABCD00")
+file(WRITE "${dir}/bin/scarletnx-3ds" "3ds runtime")
+file(WRITE "${dir}/ctr/${ctr}/${ctr}_code.so" "")
+deploy("${dir}/ctr")
+if(NOT result EQUAL 0 OR EXISTS "${dir}/ctr/${ctr}/${ctr}")
+    file(REMOVE_RECURSE "${dir}")
+    message(FATAL_ERROR "the Switch runtime was deployed to a 3DS game (${result}):\n${out}")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" "-DCTR_RUNTIME=${dir}/bin/scarletnx-3ds" "-DGAMES=${dir}/ctr" -DWINDOWS=0
+                        -DMACOS=0 -P "${script}"
+                RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE out)
+if(EXISTS "${dir}/ctr/${ctr}/${ctr}")
+    file(READ "${dir}/ctr/${ctr}/${ctr}" copied)
+endif()
+if(NOT result EQUAL 0 OR NOT copied STREQUAL "3ds runtime")
+    file(REMOVE_RECURSE "${dir}")
+    message(FATAL_ERROR "the 3DS runtime is not in ${dir}/ctr/${ctr}/ (${result}):\n${out}")
+endif()
+game("${dir}/xdg/scarletnx/recompiled")
 deploy("" "XDG_DATA_HOME=${dir}/xdg" "HOME=${dir}/home")
-deployed("${dir}/xdg/scarletnx/games" "the user's data folder")
-game("${dir}/home/.local/share/scarletnx/games")
+deployed("${dir}/xdg/scarletnx/recompiled" "the user's data folder")
+game("${dir}/home/.local/share/scarletnx/recompiled")
 deploy("" "XDG_DATA_HOME=relative" "HOME=${dir}/home")
-deployed("${dir}/home/.local/share/scarletnx/games" "a relative XDG_DATA_HOME")
-game("${dir}/bin/.scarletnx/games")
+deployed("${dir}/home/.local/share/scarletnx/recompiled" "a relative XDG_DATA_HOME")
+game("${dir}/bin/.scarletnx/recompiled")
 deploy("" "XDG_DATA_HOME=${dir}/xdg")
-deployed("${dir}/bin/.scarletnx/games" "a portable copy's")
+deployed("${dir}/bin/.scarletnx/recompiled" "a portable copy's")
 file(REMOVE_RECURSE "${dir}/bin/.scarletnx")
 deploy("")
 file(REMOVE_RECURSE "${dir}")

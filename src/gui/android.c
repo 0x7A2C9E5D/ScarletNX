@@ -25,7 +25,7 @@ const char* gui_android_own_folder(void) {
     if (!files || snprintf(folder, sizeof folder, "%s/" SNX_PORTABLE_DIR, files) >= (int)sizeof folder) return NULL;
     mkdir(folder, 0770);
     if (access(folder, W_OK) || chdir(folder)) return NULL;
-    mkdir("games", 0770);
+    mkdir("recompiled", 0770);
     return folder;
 }
 

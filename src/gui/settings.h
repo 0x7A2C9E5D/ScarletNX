@@ -56,6 +56,8 @@ int gui_settings_save(const GuiSettings* settings, const char* path);
 int gui_settings_unread(GuiSettings* settings, const char* path, char* out, size_t size);
 /* row back to its start (a page's or an All's: their rows), every row for -1 */
 void gui_settings_reset(GuiSettings* settings, int row);
+/* the rows whose value is not their start: what a reset of every row changes */
+int gui_settings_changed(const GuiSettings* settings);
 /* an All's row stepped (-1 or 1, 0 for a select) with every row it steps: 1, else 0 */
 int gui_settings_step_all(GuiSettings* settings, int row, int step);
 /* the Alls' values after a change: their rows' word when they share one */

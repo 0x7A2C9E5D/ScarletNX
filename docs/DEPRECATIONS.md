@@ -14,7 +14,7 @@ What an older version used that this one replaced, how a run tells you, and how 
   launcher's box for files an older version left. The line names what replaced it.
 - **You remove it**: a setting by hand or with the launcher's **Settings > App > Clean old settings**, which takes
   the `[Deprecated]` section out of every game's `.ini` the launcher reaches (the games' config folder, `games/` and
-  the folders of Settings > App > Library); a file an older version left, by moving it where the line says.
+  the libraries of Settings > App > Folders); a file an older version left, by moving it where the line says.
 - **It is listed below** until the code that reads it goes, which is a change of its own named in the table.
 
 A game's `.ini` keeps its deprecated keys last, under what became of each:
@@ -46,6 +46,11 @@ renderer=opengl
 | Android: the menu's `settings.ini`, `app.ini`, `folders.txt`, `gamecontrollerdb.txt`, `recent.txt`, `last-run.log` in the app's own files, outside its data folder, where the Files app does not reach | [gui, runtime] Keep the menu's files in the data folder on Android | the data folder's `config/` and `state/` | the launcher lists each as it opens, with its size; nothing reads them. Out of the player's reach, the box says that while the app is in testing clearing its storage takes them (Settings > Apps > ScarletNX > Storage > Clear storage), with all else of the app's. The check goes in a change of its own once the app is out of testing |
 | A build tree's checkout as its data folder: `games/`, `work/`, `prod.keys`, `title.keys`, `linux/`; `SNX_GAMES_DIR`'s default, the checkout's `games/` | #318 | the user's data folder, as an installed copy's ([USAGE](USAGE.md#folders)); `--repo DIR` keeps a run's files in DIR | the drivers on stderr each run and the launcher as it opens, each with where it goes; CMake's configure for `SNX_GAMES_DIR`, set back to empty |
 | A game's Account saves in `<id>_data/save/user` (before there were other users) or, with none there, in `save/system` (the versions that read the save type from a byte that is always 0) | [filesystem] a folder of Account saves per user | `save/user.<uid>`, here the uid `0123456789abcdeffedcba9876543210`'s, user 1's without a users.ini that gives it another ([USAGE](USAGE.md#users)) | played where they are while that uid has no folder, the game's log and stderr naming both folders once a run; with `save/user` and the user's folder both there the game stops, for you to keep one |
+| A line of `folders.txt` with a path alone (before the recompiled and the dumps libraries) | [gui] A folder of the player's is in the recompiled or the dumps library | `recompiled <path>` or `dumps <path>`: each such folder goes in the library of what it holds, in both for both, in the dumps one with neither | the launcher as it opens, naming each folder with its library; `folders.txt` is written again so, once |
+| The data folder's `games/` of recompiled games, `[folders] games =` in `app.ini`, the CMake option `SNX_GAMES_DIR` | [gui] Recompiled games go to recompiled/, games/ still read | `recompiled/`, the dumps in `dumps/` beside it; `[folders] recompiled =`; `SNX_RECOMPILED_DIR` | the launcher lists `games/` as it opens and still lists and runs its games, the driver says so on stderr; `app.ini` is written again once, said; CMake says so as it configures |
+
+Settings > App > Move old files in the launcher, or `scarletnx --migrate=yes`, moves the rest of these, an entry at a
+time, each to the folder its line names; `scarletnx --migrate` says first what would move ([USAGE](USAGE.md#folders)).
 
 To move a game an older version laid out beside the others: run it from its dump once, which makes `games/<id>/`;
 move its saves, `<Game>_data/save/` and `<Game>_data/sdmc/`, into `games/<id>/<id>_data/`, and its settings,

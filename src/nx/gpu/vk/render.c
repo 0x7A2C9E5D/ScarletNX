@@ -2021,6 +2021,7 @@ retry:
             u32 div = r[0x620 + sbuf] ? (va[3] ? va[3] : 1) : 0;
             if (div > 1 && !g_vk.has_divisor) div = 1;
             k.bind[b].divisor = div;
+            k.bind[b].stride = g_vk.has_dynamic_stride ? 0 : stride;
             k.nbind++;
         }
         k.attr[k.nattr].loc = i;
@@ -2325,7 +2326,7 @@ retry:
             g_dyn.sets[2 + b] = bset[b];
             rec_CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, (u32)b + 2, 1, &bset[b], 0, NULL);
         }
-    if (k.nbind) rec_CmdBindVertexBuffers2(cb, 0, k.nbind, vbuf, voff, NULL, vstride);
+    if (k.nbind) rec_CmdBindVertexBuffers2(cb, 0, k.nbind, vbuf, voff, NULL, g_vk.has_dynamic_stride ? vstride : NULL);
 
     VkViewport vp = vk_render_viewport(r);
     if (!(vp.width > 0) || !(vp.height != 0)) {

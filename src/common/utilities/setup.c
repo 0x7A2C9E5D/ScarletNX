@@ -35,6 +35,11 @@ const SnxNotice snx_notices[SNX_NOTICES] = {
     {SNX_TR_NOOP("A build tree's files"), SNX_TR_NOOP("games/, work/ and the keys in its checkout"),
      SNX_TR_NOOP("the user's data folder"), "A build tree's checkout", SNX_NOTICE_ALL},
     {SNX_TR_NOOP("Account saves"), "<id>_data/save/user", "<id>_data/save/user.<uid>", "Account saves in",
+     SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("Recompiled games"), SNX_TR_NOOP("games/ in the data folder"),
+     SNX_TR_NOOP("recompiled/, and dumps/ for the dumps"), "The data folder's `games/`", SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("The launcher's folders of games"), SNX_TR_NOOP("a line of folders.txt, a path alone"),
+     SNX_TR_NOOP("each folder in the recompiled or the dumps library, as its games say"), "A line of `folders.txt`",
      SNX_NOTICE_ALL}};
 int snx_notice_here(int notice) {
     int systems = snx_notices[notice].systems;

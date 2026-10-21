@@ -43,4 +43,7 @@ void snx_users_uid_text(const uint64_t uid[2], char text[33]);
    kept as users.ini.old, which replaces the one an earlier start left. 0, else -1 with why: nothing changed, unless why
    says users.ini is gone and its users are in users.ini.old */
 int snx_users_start(const char* dir, const uint64_t uid[2], const char* nickname, char* why, size_t why_size);
+/* user number's (1-based, of those loaded) nickname in users.ini of dir made nickname (the rule's), the file's other
+   lines as they were; without users.ini user 1's starts it (snx_users_start). 0, else -1 with why: nothing changed */
+int snx_users_rename(const char* dir, int number, const char* nickname, char* why, size_t why_size);
 #endif

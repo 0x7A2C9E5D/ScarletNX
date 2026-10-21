@@ -465,6 +465,7 @@ static int remove_one(const char* path, int dir) {
     return (dir ? rmdir(path) : unlink(path)) != 0;
 #endif
 }
+int snx_remove_empty_dir(const char* path) { return !snx_is_dir(path) || snx_is_link(path) || remove_one(path, 1); }
 int snx_remove_tree(const char* path) {
     char **names, *p;
     size_t i, n;
@@ -895,6 +896,31 @@ char* snx_work_dir(const char* data_dir) {
     free(old);
     return work;
 }
+char* snx_recompiled_dir(const char* data_dir) { return snx_path_join(data_dir, "recompiled"); }
+char* snx_recompiled_game(const char* data_dir, const char* name) {
+    char *dir = snx_recompiled_dir(data_dir), *now = dir ? snx_path_join(dir, name) : NULL, *old_dir, *old;
+    free(dir);
+    if (!now || snx_is_dir(now)) return now;
+    old_dir = snx_path_join(data_dir, "games");
+    old = old_dir ? snx_path_join(old_dir, name) : NULL;
+    free(old_dir);
+    if (old && snx_is_dir(old)) {
+        free(now);
+        return old;
+    }
+    free(old);
+    return now;
+}
+void snx_recompiled_left(const char* data_dir) {
+    char *old = snx_path_join(data_dir, "games"), *now = snx_recompiled_dir(data_dir);
+    if (old && now && snx_left_behind(old, now))
+        fprintf(stderr,
+                "scarletnx: %s was left by an older version: this one makes games in %s, and still runs the ones "
+                "in it until they are moved there (docs/DEPRECATIONS.md)\n",
+                old, now);
+    free(old);
+    free(now);
+}
 char* snx_portable_dir(const char* program_dir) {
     const char *appimage = getenv("APPIMAGE"), *appdir = getenv("APPDIR");
     char *dir = NULL, *copy;
@@ -924,8 +950,9 @@ char* snx_checkout(const char* checkout, const char* build, const char* program_
 }
 const char* const snx_checkout_files[SNX_CHECKOUT_FILES] = {"games", "work", "prod.keys", "title.keys", "linux"};
 char* snx_checkout_now(const char* data, int file) {
-    char* path = snx_path_join(data, snx_checkout_files[file]);
-    char* now;
+    char *path, *now;
+    if (!strcmp(snx_checkout_files[file], "games")) return snx_recompiled_dir(data);
+    path = snx_path_join(data, snx_checkout_files[file]);
     if (strcmp(snx_checkout_files[file], "work")) return path;
     now = snx_user_path(path, SNX_USER_CACHE);
     free(path);
@@ -934,6 +961,7 @@ char* snx_checkout_now(const char* data, int file) {
 void snx_checkout_left(const char* checkout, const char* data) {
     char *old, *now;
     int i;
+    if (same_folder(checkout, data)) return; /* the data folder's own older files: snx_recompiled_left, snx_work_dir */
     for (i = 0; i < SNX_CHECKOUT_FILES; ++i) {
         old = snx_path_join(checkout, snx_checkout_files[i]);
         now = snx_checkout_now(data, i);

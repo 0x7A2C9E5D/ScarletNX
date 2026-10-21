@@ -52,7 +52,7 @@ if(SNX_TEST_SANITIZERS)
         scarletnx-gnuabi scarletnx-gnuabi-run snx_gnuabi_program
         # the 3DS runtime
         scarletnx-3ds snx_ctr_program snx_ctr_board snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process snx_ctr_native
-        snx_ctr_audio snx_ctr_gpu
+        snx_ctr_audio snx_ctr_gpu snx_ctr_gpu_reference
         # scarletnx's main where it is the other drivers too
         snx_multicall
         # the menu, its splash, icon and pads
@@ -145,6 +145,10 @@ if(TARGET snx_ctr_board)
     snx_test_target(snx-test-3ds-ipc 11)
     target_link_libraries(snx-test-3ds-ipc PRIVATE snx_ctr_process)
     add_test(NAME 3ds_ipc COMMAND snx-test-3ds-ipc)
+    add_executable(snx-test-3ds-hid 3ds_hid.c)
+    snx_test_target(snx-test-3ds-hid 11)
+    target_link_libraries(snx-test-3ds-hid PRIVATE snx_ctr_process)
+    add_test(NAME 3ds_hid COMMAND snx-test-3ds-hid)
     add_executable(snx-test-ctr-swipc ctr_swipc.c)
     if(NOT WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
         snx_test_target(snx-test-ctr-swipc 99)
@@ -162,15 +166,48 @@ if(TARGET snx_ctr_board)
         "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/vector_decode.c" "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/profile.c")
     snx_test_target(snx-test-3ds-discover 11)
     add_test(NAME 3ds_static_discovery COMMAND snx-test-3ds-discover)
-    if(TARGET snx_ctr_native)
-        add_executable(snx-test-3ds-native 3ds_native.c)
-        snx_test_target(snx-test-3ds-native 11)
-        target_link_libraries(snx-test-3ds-native PRIVATE snx_ctr_native)
-    endif()
+    add_executable(snx-test-3ds-native 3ds_native.c)
+    snx_test_target(snx-test-3ds-native 11)
+    target_link_libraries(snx-test-3ds-native PRIVATE snx_ctr_native)
     add_executable(snx-test-3ds-blz 3ds_blz.c)
     snx_test_target(snx-test-3ds-blz 11)
-        target_link_libraries(snx-test-3ds-blz PRIVATE snx_ctr_loader)
+    target_link_libraries(snx-test-3ds-blz PRIVATE snx_ctr_loader)
     add_test(NAME 3ds_blz COMMAND snx-test-3ds-blz)
+
+    # The GPU, presentation and DSP tests need neither Python nor POSIX, and Windows is a 3DS target too
+    # the GPU's transfer engine against the CPU reference (gpu/transfer.c), on whatever Vulkan device there is
+    add_executable(snx-test-3ds-vk-transfer 3ds_vk_transfer.c)
+    snx_test_target(snx-test-3ds-vk-transfer 11)
+    target_link_libraries(snx-test-3ds-vk-transfer PRIVATE snx_ctr_gpu)
+    add_test(NAME 3ds_vk_transfer COMMAND snx-test-3ds-vk-transfer)
+    set_tests_properties(3ds_vk_transfer PROPERTIES SKIP_RETURN_CODE 77)
+    # the GPU's draws against the software renderer, the CPU reference they replaced, scene by scene
+    add_executable(snx-test-3ds-vk-draw 3ds_vk_draw.c)
+    snx_test_target(snx-test-3ds-vk-draw 11)
+    target_link_libraries(snx-test-3ds-vk-draw PRIVATE snx_ctr_gpu_reference)
+    add_test(NAME 3ds_vk_draw COMMAND snx-test-3ds-vk-draw)
+    set_tests_properties(3ds_vk_draw PROPERTIES SKIP_RETURN_CODE 77)
+    add_executable(snx-test-3ds-gsp 3ds_gsp.c)
+    snx_test_target(snx-test-3ds-gsp 11)
+    target_link_libraries(snx-test-3ds-gsp PRIVATE snx_ctr_process)
+    add_test(NAME 3ds_gsp_gpu COMMAND snx-test-3ds-gsp "${CMAKE_CURRENT_BINARY_DIR}/gsp-frames")
+    # No Vulkan loader/ICD: presentation cannot run here; the probe skips, never fakes a frame.
+    set_tests_properties(3ds_gsp_gpu PROPERTIES SKIP_RETURN_CODE 77)
+    # the transfer engine alone: fills, display transfers, texture copies against hand-written goldens
+    add_executable(snx-test-3ds-transfer 3ds_transfer.c)
+    snx_test_target(snx-test-3ds-transfer 11)
+    target_link_libraries(snx-test-3ds-transfer PRIVATE snx_ctr_gpu)
+    add_test(NAME 3ds_transfer COMMAND snx-test-3ds-transfer)
+    # the PICA command processor: lists in FCRAM, uploads, interrupts, jumps, draw and immediate hooks
+    add_executable(snx-test-3ds-pica 3ds_pica.c)
+    snx_test_target(snx-test-3ds-pica 11)
+    target_link_libraries(snx-test-3ds-pica PRIVATE snx_ctr_gpu_reference m)
+    add_test(NAME 3ds_pica COMMAND snx-test-3ds-pica)
+    # the HLE DSP and dsp::DSP: pipes, regions, sources, mixing, decoding, the service as ndsp drives it
+    add_executable(snx-test-3ds-dsp 3ds_dsp.c)
+    snx_test_target(snx-test-3ds-dsp 11)
+    target_link_libraries(snx-test-3ds-dsp PRIVATE snx_ctr_process)
+    add_test(NAME 3ds_dsp COMMAND snx-test-3ds-dsp)
 
     if(NOT WIN32)
         if(Python3_Interpreter_FOUND)
@@ -178,27 +215,6 @@ if(TARGET snx_ctr_board)
             snx_test_target(snx-test-3ds-fs 11)
             target_link_libraries(snx-test-3ds-fs PRIVATE snx_ctr_process)
             add_test(NAME 3ds_filesystem COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_fs.py" $<TARGET_FILE:snx-test-3ds-fs>)
-            add_executable(snx-test-3ds-gsp 3ds_gsp.c)
-            snx_test_target(snx-test-3ds-gsp 11)
-            target_link_libraries(snx-test-3ds-gsp PRIVATE snx_ctr_process)
-            add_test(NAME 3ds_gsp_gpu COMMAND snx-test-3ds-gsp "${CMAKE_CURRENT_BINARY_DIR}/gsp-frames")
-            # the transfer engine alone: fills, display transfers, texture copies against hand-written goldens
-            add_executable(snx-test-3ds-transfer 3ds_transfer.c)
-            snx_test_target(snx-test-3ds-transfer 11)
-            target_link_libraries(snx-test-3ds-transfer PRIVATE snx_ctr_gpu)
-            add_test(NAME 3ds_transfer COMMAND snx-test-3ds-transfer)
-            # the PICA command processor: lists in FCRAM, uploads, interrupts, jumps, draw and immediate hooks
-            add_executable(snx-test-3ds-pica 3ds_pica.c)
-            snx_test_target(snx-test-3ds-pica 11)
-            target_link_libraries(snx-test-3ds-pica PRIVATE snx_ctr_gpu m)
-            add_test(NAME 3ds_pica COMMAND snx-test-3ds-pica)
-            # the HLE DSP and dsp::DSP: pipes, regions, sources, mixing, decoding, the service as ndsp drives it
-            add_executable(snx-test-3ds-dsp 3ds_dsp.c)
-            snx_test_target(snx-test-3ds-dsp 11)
-            target_link_libraries(snx-test-3ds-dsp PRIVATE snx_ctr_process)
-            add_test(NAME 3ds_dsp COMMAND snx-test-3ds-dsp)
-    # No Vulkan loader/ICD: presentation cannot run here; the probe skips, never fakes a frame.
-    set_tests_properties(3ds_gsp_gpu PROPERTIES SKIP_RETURN_CODE 77)
             add_test(NAME ctr_swipc_validation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/ctr_swipc.py"
                 $<TARGET_FILE:snx-swipc>)
             add_test(NAME 3ds_driver COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_driver.py"
@@ -218,21 +234,24 @@ if(TARGET snx_ctr_board)
                     "${SNX_CTR_PROGRAM}" $<TARGET_FILE:snx-test-3ds-native>)
                 set_tests_properties(3ds_static_pipeline PROPERTIES TIMEOUT 180)
             endif()
-            if(SNX_TEST_3DS_SUPERTUX)
-                get_filename_component(snx_supertux_cia "${SNX_TEST_3DS_SUPERTUX}" ABSOLUTE)
-                set(snx_supertux_oracle_args "")
-                if(SNX_TEST_ARM_DIFF)
-                    set(snx_supertux_oracle_args --oracle)
-                endif()
-                add_test(NAME 3ds_supertux_bootstrap COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_supertux.py"
-                    "${SNX_CTR_PROGRAM}" "${snx_supertux_cia}" $<TARGET_FILE:snx-test-3ds-native> ${snx_supertux_oracle_args})
-                set_tests_properties(3ds_supertux_bootstrap PROPERTIES TIMEOUT 1800 LABELS "external;bootstrap")
-            endif()
-            
+            add_test(NAME 3ds_decrypt COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_decrypt.py"
+                "${SNX_CTR_PROGRAM}")
+            set_tests_properties(3ds_decrypt PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
             add_test(NAME 3ds_extract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_extract.py"
                 "${SNX_CTR_PROGRAM}" ${snx_ctr_extract_test_args})
             set_tests_properties(3ds_extract PROPERTIES TIMEOUT 120)
         endif()
+    endif()
+    # The pinned SuperTux gate runs on Windows too, the other Python tests not yet
+    if(SNX_TEST_3DS_SUPERTUX AND Python3_Interpreter_FOUND)
+        get_filename_component(snx_supertux_cia "${SNX_TEST_3DS_SUPERTUX}" ABSOLUTE)
+        set(snx_supertux_oracle_args "")
+        if(SNX_TEST_ARM_DIFF)
+            set(snx_supertux_oracle_args --oracle)
+        endif()
+        add_test(NAME 3ds_supertux_bootstrap COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_supertux.py"
+            "${SNX_CTR_PROGRAM}" "${snx_supertux_cia}" $<TARGET_FILE:snx-test-3ds-native> ${snx_supertux_oracle_args})
+        set_tests_properties(3ds_supertux_bootstrap PROPERTIES TIMEOUT 1800 LABELS "external;bootstrap")
     endif()
 endif()
 # the 3DS tests that present through Vulkan, sanitized: the Vulkan driver stays loaded (vulkan_drivers_kept.c), as its
@@ -297,12 +316,15 @@ if(TARGET hactool_internals)
     target_link_libraries(snx-test-fs-service PRIVATE scarletnx-common hactool_internals)
     add_test(NAME filesystem_raw COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> raw)
     add_test(NAME filesystem_addon_overlay COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> addon-overlay)
+    add_test(NAME filesystem_mods COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> mods)
+    add_test(NAME filesystem_mods_stale COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> mods-stale)
     if(NOT WIN32) # the dump's link: Windows makes one only with the right to
         add_test(NAME filesystem_dump COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump)
         add_test(NAME filesystem_dump_source COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump-source)
         add_test(NAME filesystem_dump_none COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump-none)
         add_test(NAME filesystem_dump_gone COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump-gone)
         add_test(NAME filesystem_dump_update COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump-update)
+        add_test(NAME filesystem_mods_image COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> mods-image)
         add_test(NAME filesystem_dump_update_extracted
                  COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump-update-extracted)
         add_test(NAME filesystem_dump_dlc COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump-dlc)
