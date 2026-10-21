@@ -2604,8 +2604,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             u32 bank, off, handle;
             int bindless;
             if (buffer && stage != ST_CS) return direct_reject(si, "buffer surface outside compute");
-            if (stage != ST_CS && (stage != ST_FS || op->id == O_SULD))
-                return direct_reject(si, "surface operation outside supported stage");
+            /* a fragment program's 2D loads are texel fetches, as a compute program's are: render.c binds the raw
+               view their slot asks for */
+            if (stage != ST_CS && stage != ST_FS) return direct_reject(si, "surface operation outside supported stage");
             bank = 0;
             off = B(insn[i], 36, 13);
             handle = B(insn[i], 39, 8);
