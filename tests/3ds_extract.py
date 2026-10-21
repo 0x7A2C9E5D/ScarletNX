@@ -53,7 +53,7 @@ def main():
         assert len(code) == 0x3000 and code[:8] == struct.pack('<II', 0xE3A0002A, 0xEF000003)
         manifest = dict(line.split('=', 1) for line in (output / 'manifest.ini').read_text().splitlines())
         assert manifest['state'] == 'extracted' and manifest['title_id'] == f'{TITLE:016x}'
-        assert manifest['input_sha256'] == hashlib.sha256(plain).hexdigest()
+        assert 'input_sha256' not in manifest  # an extraction to a folder given does not hash its input
         assert manifest['code_sha256'] == hashlib.sha256(code).hexdigest()
         assert sorted(p.name for p in (output / 'contents').iterdir()) == ['00001111.app', '00002222.app']
         assert (output / 'contents/00002222.app').read_bytes() == ncch()

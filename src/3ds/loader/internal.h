@@ -20,11 +20,15 @@ typedef struct {
     SnxCtrExtractResult result;
     char* error;
     size_t error_size;
+    /* the whole-data hashes left out: the input's, each content's and each ExeFS file's, which cost seconds on a
+       retail title every launch. The headers' and superblocks' own small hashes are still checked */
+    bool quick;
 } CtrReader;
 typedef struct {
     uint64_t title_id;
     uint16_t version;
     unsigned char input_hash[32];
+    bool input_hashed; /* input_hash taken: not in a quick read */
     CtrSpan cert, ticket, tmd, meta, boot;
     unsigned char *header, *metadata;
     size_t chunks, body;

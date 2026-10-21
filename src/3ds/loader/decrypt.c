@@ -284,7 +284,9 @@ static bool cia_layers(CtrReader* r, const unsigned char* header, const unsigned
 /* the decrypted CIA checked as the loader checks any (hashes, bounds, the boot NCCH): keys that are not the console's
    decrypt to nonsense, which is never published */
 static bool verified(CtrReader* r, const char* path) {
-    CtrReader check = {.error = r->error, .error_size = r->error_size};
+    /* the headers' and superblocks' hashes and every bound: wrong keys fail those. The contents' hashes are the ones the
+       decryption itself just wrote */
+    CtrReader check = {.error = r->error, .error_size = r->error_size, .quick = true};
     CtrCia cia = {0};
     CtrNcch ncch = {0};
     if (!(check.input = fopen(path, "rb"))) return ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot read %s", path);

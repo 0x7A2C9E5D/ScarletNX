@@ -33,7 +33,13 @@ def main():
             p = subprocess.run(args, capture_output=True, text=True, timeout=20)
             text = x.stdout + x.stderr + p.stdout + p.stderr
             assert 'AddressSanitizer' not in text and 'runtime error:' not in text, text
-            # accepted by both or refused by both, refused as unsupported by both or neither
+            # accepted by both, or refused by both, refused as unsupported by both or neither. The read in place takes no
+            # whole-data hash (a content's, an ExeFS file's), so it also accepts a CIA whose only fault is one of those
+            if x.returncode and not p.returncode:
+                assert 'SHA-256 mismatch' in text, (name, text)
+                source.unlink()
+                shutil.rmtree(out, ignore_errors=True)
+                return x.returncode
             assert (x.returncode == 0) == (p.returncode == 0), (name, x.returncode, p.returncode, text)
             if x.returncode:
                 assert x.returncode in (1, 3) and p.returncode in range(21, 26), (name, text)

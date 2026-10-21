@@ -402,8 +402,12 @@ are refused to prevent log/banner injection. Larger/unsupported inputs fail clos
 
 **Hashes are integrity checks, not signature authentication.** RSA/ECDSA
 signatures, certificate trust, ticket rights and ExHeader access-descriptor
-signatures are not authenticated. RomFS superblock and entire CIA-content
-hashes are checked, but the internal IVFC hash tree is not separately verified.
+signatures are not authenticated. The headers' and superblocks' hashes (NCCH
+ExHeader, ExeFS and RomFS superblocks, the TMD's tables) are checked every time.
+The whole-data ones (each content, each ExeFS file, the input itself) are checked
+by an extraction only, not by the launch that reads a CIA where it lies, where they
+cost seconds on a retail title; an extraction to a folder given hashes no input. The
+internal IVFC hash tree is not separately verified.
 AOT execution is **not a host security sandbox**. Run only images you trust:
 compiler correctness is not isolation, and native loading can execute host
 constructors before descriptor validation. A launch loads the `native/code.so` an
