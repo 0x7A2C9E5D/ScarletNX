@@ -1062,6 +1062,10 @@ msgid "Not added"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Overlay"
+msgstr ""
+
+#: src/gui/main.c
 msgid "App"
 msgstr ""
 

@@ -1381,7 +1381,8 @@ int main(int argc, char** argv) {
     shows(&app, "- Launch", normal);
     shows(&app, "- Display", normal);
     shows(&app, "- Graphics", normal);
-    shows(&app, "- On-screen controls", normal);
+    shows(&app, "- Overlay", normal); /* the runtime's On-screen controls */
+    hides(&app, "On-screen controls", normal);
     shows(&app, "- User", normal);
     shows(&app, "Reset all", normal);         /* App's last row, beside: none among the groups */
     hides(&app, "\x1e", rgb(app.theme.soft)); /* every row shows: no arrows */
@@ -1452,7 +1453,7 @@ int main(int argc, char** argv) {
         key(&app, SDLK_DOWN);
         key(&app, SDLK_RETURN);
         render(&app);
-        shows(&app, "On-screen controls", normal);
+        shows(&app, "Overlay", normal);
         snprintf(line, sizeof line, "- %-13s %s", "Show controls", "Off"); /* the launcher's choice, 0 */
         shows(&app, line, yellow);
         snprintf(line, sizeof line, "- %-13s %s", "Buttons", ">");

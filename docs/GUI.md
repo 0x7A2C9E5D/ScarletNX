@@ -86,7 +86,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   (10 after a failure, while another file can still be picked); ESC cancels without changing them.
 - **Settings** opens on its groups, Enter opening one and ESC coming back: **App**, then
   **Launch** (the launcher's own and the recompiler's, from `src/nx/runtime/settings.txt`), then a group per section of the game's `.ini` (Display,
-  Graphics, Performance, On-screen controls, Controllers, Network, Debug), as `scarletnx --settings`
+  Graphics, Performance, Overlay, Controllers, Network, Debug; Overlay is the runtime's On-screen controls, the
+  name its page in the game and `settings.ini` keep), as `scarletnx --settings`
   prints them from the runtime's own tables: read from them in the same process where the menu is built into
   scarletnx (iOS too), so every section shows at once; a menu built alone asks `scarletnx --settings`. The game's menu's settings have its names and words
   (*Scale* 100%, *Touch screen* Fingers), and its **Buttons** page, whose **All** steps every row;

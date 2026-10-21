@@ -3647,6 +3647,11 @@ static void group_add(App* app, const char* name, int first, const char* about) 
     app->group_first[g] = first;
     app->group_rows[g] = 0;
 }
+/* the name a section's group has in the launcher: Overlay for the runtime's On-screen controls, whose page in the game
+   and settings.ini's [header] keep that name */
+static const char* group_title(const char* section) {
+    return strcmp(section, "On-screen controls") ? section : SNX_TR_NOOP("Overlay");
+}
 static void settings_groups(App* app) {
     GuiSettings* s = settings_of(app);
     int r;
@@ -3660,7 +3665,7 @@ static void settings_groups(App* app) {
         /* past the most groups the rest go in the last one: every row is still reached */
         if (g == 0 ||
             (strcmp(s->keys[r].section, s->keys[app->group_first[g]].section) && app->groups < GUI_GROUPS_MAX)) {
-            group_add(app, s->keys[r].section, r, "");
+            group_add(app, group_title(s->keys[r].section), r, "");
             g = app->groups - 1;
             about = app->group_about[g];
             n = 0;
