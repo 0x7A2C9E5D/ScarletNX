@@ -5543,10 +5543,27 @@ int main(int argc, char** argv) {
                 if (wide == 2)
                     assert(!strcmp(seen[0], "MENU") && !strcmp(seen[1], "GAMES") && !strcmp(seen[2], "SETTINGS") &&
                            sizes[0] == 1);
-                else if (wide == 1)
+                else if (wide == 1) {
+                    /* a translation too long for the size the English titles take: that size still, the same first
+                       parts left out of every screen's */
+                    const char* xx_title = "SCARLETNX  /  CONFIGURATIONS OF EVERY GROUP AND ITS SETTINGS";
+                    char seen_xx[3][160];
+                    int sizes_xx[3];
                     assert(!strcmp(seen[0], "SCARLETNX  /  MENU") && !strcmp(seen[1], "SCARLETNX  /  GAMES") &&
                            !strcmp(seen[2], "SCARLETNX  /  SETTINGS") && sizes[0] == 2);
-                else if (
+                    assert(title_px(&app, xx_title, 2) > head_room(&app, 2) &&
+                           title_px(&app, title_tail(xx_title, 1), 2) <= head_room(&app, 2));
+                    snx_tr_use(1); /* xx */
+                    for (int tab = 0; tab < 3; ++tab) {
+                        go_tab(&app, tab);
+                        layout(&app);
+                        head_title(&app, true, seen_xx[tab], sizeof seen_xx[tab], &sizes_xx[tab]);
+                        assert(sizes_xx[tab] == 2);
+                    }
+                    assert(!strcmp(seen_xx[0], "MENU") && !strcmp(seen_xx[1], "GAMES") &&
+                           !strcmp(seen_xx[2], title_tail(xx_title, 1)));
+                    snx_tr_use(0);
+                } else if (
                     !wide) /* too narrow for SCARLETNX  /  SETTINGS big beside the tabs: every one whole, smaller */
                     assert(!strcmp(seen[0], "SCARLETNX  /  MENU") && !strcmp(seen[1], "SCARLETNX  /  GAMES") &&
                            !strcmp(seen[2], "SCARLETNX  /  SETTINGS") && sizes[0] == 1);

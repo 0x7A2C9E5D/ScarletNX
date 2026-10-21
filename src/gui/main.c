@@ -2688,24 +2688,26 @@ static int head_room(const App* app, int size) {
 /* The head's title over the tabs' screens and its letters' size: a window too narrow for the main screens' titles
    (the menu's, Games', the keys' and the Settings') whole at the theme's size takes a size smaller, down to the
    text's, and only then leaves out the same first parts of every one, "SCARLETNX  /" first, so the head stays one
-   and the same from screen to screen; a screen deeper in the Settings leaves out what more it must, and a last part
-   still too wide is cut. The setup's head, its steps for tabs, keeps its title as it is */
+   and the same from screen to screen. The size is the English titles', so the head is as big in every language: a
+   translation too long for it leaves out first parts too. A screen deeper in the Settings leaves out what more it
+   must, and a last part still too wide is cut. The setup's head, its steps for tabs, keeps its title as it is */
 static const char* head_title(const App* app, bool tabs, char* out, size_t size, int* letters) {
-    const char* titles[4];
+    const char *titles[4], *english[4];
     char own[160];
     const char* title = screen_title(app, own, sizeof own);
     int big = title_size(app), parts = 0, room = 0, i;
     *letters = big;
     snprintf(out, size, "%s", title);
     if (!tabs || !title[0] || (app->setup_on && !app->editing)) return out; /* the setup's steps are its tabs */
-    titles[0] = app->theme.title[GUI_SCREEN_MENU];
-    titles[1] = app->theme.title[GUI_SCREEN_GAMES];
-    titles[2] = app->theme.title[GUI_SCREEN_KEYS];
+    titles[0] = english[0] = app->theme.title[GUI_SCREEN_MENU];
+    titles[1] = english[1] = app->theme.title[GUI_SCREEN_GAMES];
+    titles[2] = english[2] = app->theme.title[GUI_SCREEN_KEYS];
+    english[3] = SAY_SETTINGS_TITLE;
     titles[3] = snx_tr(SAY_SETTINGS_TITLE);
     for (parts = 0; parts < 4; ++parts) {
         for (*letters = big; *letters >= 1; --*letters) {
             room = head_room(app, *letters);
-            for (i = 0; i < 4 && title_px(app, title_tail(titles[i], parts), *letters) <= room; ++i) {}
+            for (i = 0; i < 4 && title_px(app, title_tail(english[i], parts), *letters) <= room; ++i) {}
             if (i == 4) break;
         }
         if (*letters >= 1) break;
@@ -2714,6 +2716,10 @@ static const char* head_title(const App* app, bool tabs, char* out, size_t size,
         *letters = 1;
         out[0] = 0;
         return out;
+    }
+    for (parts = 0; parts < 3; ++parts) { /* at that size, the first parts the translations leave out, alike */
+        for (i = 0; i < 4 && title_px(app, title_tail(titles[i], parts), *letters) <= room; ++i) {}
+        if (i == 4) break;
     }
     title = title_tail(title, parts);
     while (title_px(app, title, *letters) > room && strchr(title, '/')) title = title_tail(title, 1);

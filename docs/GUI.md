@@ -365,7 +365,9 @@ without one ([USAGE](USAGE.md#users)), square or round (`[head] picture`; `none`
 the users over the screen, each with their picture; the one picked is Settings' user from then on, and ESC or a click
 off them leaves it as it was. The head is the same on every screen of one window: when the main screens' titles
 (the menu's, Games', the keys' and `SCARLETNX  /  SETTINGS`) do not all fit beside the tabs, every one takes letters a
-size smaller, down to the text's, else leaves out the same first parts (`SCARLETNX  /` first), else shows no title; a
+size smaller, down to the text's, else leaves out the same first parts (`SCARLETNX  /` first), else shows no title.
+The size is the one the English titles take, so the head is as big in every language, and a translation too long for
+it leaves out first parts too (its last part alone, big, where `SCARLETNX  /  SETTINGS` fits whole); a
 screen deeper in
 the Settings leaves out what more it must. Under them the list, each entry a box
 of its own, the focused one framed in the focus colour or inverted, with the theme's cursor in the margin;
