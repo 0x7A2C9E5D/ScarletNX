@@ -211,8 +211,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   data folder's `state/` and is shared.
 - **Open data folder**, on Android, opens the data folder, the app's own storage, in the
   system's Files app ([ANDROID](ANDROID.md)).
-- **Exit** closes the launcher. Closing its window during a run terminates the
-  entire owned process tree, so let the game exit normally to preserve its saves.
+- **Exit** closes the launcher, once asked (ESC on the menu asks too), a screen saying for half a second which of its
+  files it keeps for the next start (Settings, the picks of Settings > App, the Library, the recent games), a second
+  close skipping it. Closing its window during a run asks first: Exit terminates the entire owned process tree (a
+  recompile's work lost), so let the game exit normally to preserve its saves.
 - As it opens, the menu shows in a box what an older version left where this one no longer looks, a
   folder at a time: where it is (`- `, in the failure colour, a path too long for a row going on in the next) and
   under it the space it takes, counted as the box shows (*counting* until then). They are the menu's `gui/`, `work/`, each game laid out

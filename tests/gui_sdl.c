@@ -3218,6 +3218,17 @@ int main(int argc, char** argv) {
     key(&app, SDLK_DOWN);
     key(&app, SDLK_RETURN);
     assert(app.menu.running && app.menu.selected == selected);
+    { /* the window closed while it runs: asked first; Back keeps it running */
+        SDL_Event close = {0};
+        close.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+        event(&app, &close);
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_CLOSE && !app.closing_ms && !app.menu.quit);
+        assert(strstr(ask_question(&app), ": exiting ScarletNX "));
+        render(&app);
+        shows(&app, "- Exit", normal);
+        key(&app, SDLK_ESCAPE);
+        assert(!app.confirm.shown && app.menu.running && !app.closing_ms && !app.aborting);
+    }
     Uint64 started = SDL_GetTicks();
     key(&app, SDLK_ESCAPE);
     assert(app.aborting && SDL_GetTicks() - started < 1000);
@@ -3266,6 +3277,46 @@ int main(int argc, char** argv) {
         SDL_Delay(5);
     }
     assert(!app.menu.running && app.abnormal_exit);
+    /* closed while it runs, Exit: the run ends, then the screen of what the menu keeps for half a second, then out */
+    assert(!snx_write_file(hung, "", 0));
+    launch(&app, snx_strdup(hung), false);
+    for (until = SDL_GetTicks() + 5000, ready = false; !ready && SDL_GetTicks() < until; SDL_Delay(5)) {
+        unsigned char* data = snx_read_file(hung, &size);
+        ready = data && size == 5 && !memcmp(data, "ready", 5);
+        free(data);
+        pump(&app);
+    }
+    assert(ready && app.menu.running);
+    {
+        SDL_Event close = {0};
+        Uint64 closing;
+        close.type = SDL_EVENT_QUIT;
+        event(&app, &close);
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_CLOSE);
+        int folders = app.folder_count;
+        key(&app, SDLK_DOWN);
+        key(&app, SDLK_RETURN);
+        assert(!app.confirm.shown && app.aborting && app.closing_ms && !app.menu.quit);
+        assert(app.folder_count == folders); /* its answer is the run's alone: no other box's (a folder taken off) */
+        closing = app.closing_ms;
+        render(&app);
+        shows(&app, "Closing ScarletNX", rgb(app.theme.panels == GUI_PANELS_FILL ? app.theme.page : app.theme.ink));
+        shows(&app, "Kept for the next start:", rgb(app.theme.soft));
+        key(&app, SDLK_RETURN); /* nothing else is taken meanwhile */
+        assert(app.closing_ms == closing && !app.menu.quit);
+        app.clock = closing + GUI_CLOSING_MS - 1;
+        pump(&app);
+        assert(!app.menu.quit);
+        app.clock = closing + GUI_CLOSING_MS;
+        pump(&app);
+        assert(app.menu.quit);
+        for (until = SDL_GetTicks() + 2000; app.menu.running && SDL_GetTicks() < until; SDL_Delay(5)) pump(&app);
+        assert(!app.menu.running);
+        app.menu.quit = false;
+        app.closing_ms = 0;
+        app.clock = 0;
+        app.message[0] = 0;
+    }
     /* where ESC is a back gesture made by mistake (ask_abort, Android's) it asks first: ESC again, a click off the box
        or Keep going leave the run going; Abort aborts it. The ESC line's tap asks too, and a held key answers nothing */
     {
@@ -4883,8 +4934,8 @@ int main(int argc, char** argv) {
             key(&app, SDLK_ESCAPE);
             render(&app);
             mouse_px(&app, list_box(&choices, 1).x + 4, list_box(&choices, 1).y + 4, true);
-            assert(!app.confirm.shown && app.menu.quit);
-            app.menu.quit = false;
+            assert(!app.confirm.shown && app.closing_ms && !app.menu.quit); /* the screen of what is kept, first */
+            app.closing_ms = 0;
             {
                 char* elsewhere[] = {"/elsewhere"}; /* a count for another list is not this one's */
                 space_count(&app.left_space, &app.left_counter, elsewhere, 1, true);
@@ -5615,9 +5666,18 @@ int main(int argc, char** argv) {
     assert(!app.confirm.shown && !app.menu.quit);
     key(&app, SDLK_ESCAPE);
     key(&app, SDLK_DOWN);
-    key(&app, SDLK_RETURN);
-    assert(!app.confirm.shown && app.menu.quit);
+    key(&app, SDLK_RETURN); /* Exit: the screen of what is kept first, a second close at once */
+    assert(!app.confirm.shown && app.closing_ms && !app.menu.quit);
+    key(&app, SDLK_ESCAPE); /* taken by nothing meanwhile: no Exit? again */
+    assert(app.closing_ms && !app.menu.quit && !app.confirm.shown);
+    {
+        SDL_Event close = {0};
+        close.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+        event(&app, &close);
+    }
+    assert(app.menu.quit);
     app.menu.quit = false;
+    app.closing_ms = 0;
     /* fingers: a tap takes an entry anywhere across the list, the cursor's margin too, which a mouse does on the box
        only; a drag is no tap, nor a second finger; a swipe across turns the games' pages; back is ESC */
     {
@@ -6271,6 +6331,8 @@ int main(int argc, char** argv) {
         app.theme = *gui_theme_builtin("default");
     }
     e.type = SDL_EVENT_QUIT;
+    event(&app, &e);
+    assert(app.closing_ms && !app.menu.quit);
     event(&app, &e);
     assert(app.menu.quit);
     cleanup(&app);

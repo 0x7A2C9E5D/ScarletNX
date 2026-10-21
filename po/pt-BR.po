@@ -427,6 +427,30 @@ msgid "Exit ScarletNX?"
 msgstr "Sair do ScarletNX?"
 
 #: src/gui/main.c
+msgid "A recompile goes: exiting ScarletNX stops it, its work lost."
+msgstr "Uma recompilação está rodando: sair do ScarletNX a interrompe, e o trabalho se perde."
+
+#: src/gui/main.c
+msgid "A game runs: exiting ScarletNX ends it."
+msgstr "Um jogo está rodando: sair do ScarletNX o encerra."
+
+#: src/gui/main.c
+msgid "Picks of Settings > App"
+msgstr "Escolhas de Configurações > App"
+
+#: src/gui/main.c
+msgid "Closing ScarletNX"
+msgstr "Fechando o ScarletNX"
+
+#: src/gui/main.c
+msgid "Kept for the next start:"
+msgstr "Guardado para a próxima vez:"
+
+#: src/gui/main.c
+msgid "Nothing to keep: no file of the menu's"
+msgstr "Nada a guardar: nenhum arquivo do menu"
+
+#: src/gui/main.c
 msgid "Outside the app, Android checks every file access: games may run slower."
 msgstr "Fora do app, o Android confere cada acesso a arquivo: os jogos podem rodar mais devagar."
 

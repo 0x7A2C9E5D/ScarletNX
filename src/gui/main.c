@@ -240,6 +240,7 @@ typedef struct {
     unsigned screen_was; /* the screen drawn last (screen_mark), for when another comes */
     bool boxed_was;      /* a box over it then */
     Uint64 switch_ms, box_ms;
+    Uint64 closing_ms; /* the short screen of what the menu keeps, shown as it closes, from then; 0 for none */
     bool look_only; /* scarletnx --migrate, =yes left out: nothing is written, app.ini's rewrite of an older key too */
     int files_top, files_shown; /* the box of files over the screen (render_files): its first file, and how many */
     char* folders[GUI_FOLDERS_MAX];     /* the player's game folders, listed after recompiled/ and dumps/ */
@@ -1353,6 +1354,10 @@ static const char* ask_question(const App* app) {
         case GUI_ASK_FOLDER:
         case GUI_ASK_MOVE: return app->ask_line;
         case GUI_ASK_ERROR: return app->error_line;
+        case GUI_ASK_CLOSE:
+            return screen(app) == GUI_SCREEN_COMPILING
+                       ? snx_tr("A recompile goes: exiting ScarletNX stops it, its work lost.")
+                       : snx_tr("A game runs: exiting ScarletNX ends it.");
         default:
             return screen(app) == GUI_SCREEN_COMPILING ? snx_tr("Abort the recompile? Its work is lost.")
                                                        : snx_tr("Abort the run?");
@@ -1660,6 +1665,7 @@ static const char* const ask_choices[][2] = {{SNX_TR_NOOP("Keep going"), SNX_TR_
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Reset")},
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Take it off")},
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Move")},
+                                             {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Exit")},
                                              {SNX_TR_NOOP("OK"), NULL}};
 /* the question shown, over the whole screen in the middle or at its foot, a choice asked twice saying so once pressed
    (its label in second): how many choices it has, one for a failure's OK */
@@ -5368,6 +5374,16 @@ static void open_files(App* app);
 static void left_behind(App* app);
 static void ask_key(App* app, GuiKey key);
 static bool menu_key_of(const SDL_KeyboardEvent* k, GuiKey* key);
+#define GUI_CLOSING_MS 500 /* the screen of what the menu keeps, as it closes */
+/* the menu closing: on a computer the short screen of what it keeps first, then out; on a phone at once */
+static void closing_start(App* app) {
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+    app->menu.quit = true;
+#else
+    if (app->closing_ms) app->menu.quit = true; /* closed again meanwhile: out now */
+    app->closing_ms = SDL_max(now_ms(app), 1);
+#endif
+}
 static int setup_page_of(const App* app) { return app->setup_pages[app->setup_page]; }
 static int setup_steps(const App* app) { return app->setup_count - (app->setup_pages[0] == SETUP_NOTICE); }
 /* a portable copy's folder beside the program (snx_portable_dir), and whether it is there: owned */
@@ -6124,9 +6140,44 @@ static void setup_pointer(App* app, float x, float y, bool click) {
         appearance_change(app, i, x >= (float)arrow && x < (float)(arrow + cell_w(app)) ? -1 : 1);
     }
 }
+/* what the menu keeps for the next start, as it closes: each of its files there and its folder, in a box */
+static void draw_closing(App* app) {
+    const char* files[4] = {app->settings_file, app->app_file, app->folders_file, app->recent_file};
+    static const char* const what[4] = {SNX_TR_NOOP("Settings"), SNX_TR_NOOP("Picks of Settings > App"),
+                                        SNX_TR_NOOP("Library"), SNX_TR_NOOP("Recent games")};
+    char line[4400];
+    int cols, rows = 1, i, y;
+    GuiRect r, text;
+    SDL_SetRenderDrawColor(app->renderer, app->theme.page.r, app->theme.page.g, app->theme.page.b, 255);
+    SDL_RenderClear(app->renderer);
+    backdrop(app);
+    cols = app->cols - 6;
+    for (i = 0; i < 4; ++i)
+        if (files[i] && snx_is_file(files[i])) {
+            snprintf(line, sizeof line, "%s: %s", snx_tr(what[i]), files[i]);
+            rows += wrap_rows(app, line, cols - 2, 1);
+        }
+    r = over_rect(app, cols, head_h(app) + rows * cell_h(app) + 8 * app->scale);
+    y = pane(app, r, snx_tr("Closing ScarletNX"));
+    text = inner(app, r);
+    y += wrap_in(app, text, text.x, y,
+                 rows > 1 ? snx_tr("Kept for the next start:") : snx_tr("Nothing to keep: no file of the menu's"), 0,
+                 rgb(app->theme.soft)) *
+         cell_h(app);
+    for (i = 0; i < 4; ++i)
+        if (files[i] && snx_is_file(files[i])) {
+            snprintf(line, sizeof line, "%s: %s", snx_tr(what[i]), files[i]);
+            y += wrap_in(app, text, text.x, y, line, 1, rgb(app->theme.ink)) * cell_h(app);
+        }
+}
 static void render(App* app) {
     layout(app);
     if (splash_shown(app)) return;
+    if (app->closing_ms) {
+        draw_closing(app);
+        SDL_RenderPresent(app->renderer);
+        return;
+    }
     fades_mark(app);
     if (app->setup_on && !app->editing) {
         draw_setup(app);
@@ -6630,7 +6681,7 @@ static void change_answer(App* app, GuiAsk ask, bool taken) {
         places_reset(app);
     else if (ask == GUI_ASK_PLACE)
         place_use(app, app->place_off, NULL);
-    else
+    else if (ask == GUI_ASK_FOLDER)
         folder_remove(app, app->folder_off);
 }
 static void pump(App* app) {
@@ -6708,6 +6759,7 @@ static void pump(App* app) {
         app->left_shown = app->lefts > 0;
     }
     if (app->leaving_ms && now_ms(app) - app->leaving_ms >= app->theme.fade_out_ms) leave_run(app);
+    if (app->closing_ms && now_ms(app) - app->closing_ms >= GUI_CLOSING_MS) app->menu.quit = true;
     /* games put in or taken out of the folders while the menu is open, looked for once a second: Games and its list
        follow, the list on the file it had */
     if (!app->menu.running && !app->finished && now_ms(app) - app->games_checked >= 1000) {
@@ -7372,11 +7424,15 @@ static void ask_key(App* app, GuiKey key) {
         room_answer(app, second);
     else if (ask == GUI_ASK_TEXT)
         size_answer(app, second);
-    else if (ask >= GUI_ASK_CLEAN)
+    else if (ask == GUI_ASK_CLEAN || ask == GUI_ASK_RESET || ask == GUI_ASK_PLACES || ask == GUI_ASK_PLACE ||
+             ask == GUI_ASK_FOLDER || ask == GUI_ASK_MOVE)
         change_answer(app, ask, second);
-    else if (second && ask == GUI_ASK_EXIT)
-        app->menu.quit = true;
-    else if (second)
+    else if (ask == GUI_ASK_CLOSE && second) { /* the run ends with the menu */
+        abort_run(app);
+        closing_start(app);
+    } else if (ask == GUI_ASK_EXIT && second)
+        closing_start(app);
+    else if (ask == GUI_ASK_ABORT && second)
         abort_run(app);
 }
 /* the pointer on the question, at pixel x, y: a choice under it takes the focus, a click presses it; a click off the
@@ -7843,10 +7899,21 @@ static bool files_key(App* app, SDL_Keycode code) {
 }
 static void event(App* app, const SDL_Event* e) {
     GuiKey key;
+    /* the window closed: asked first while a run goes, unless it asks already; else the screen of what is kept */
     if (e->type == SDL_EVENT_QUIT || e->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
-        app->menu.quit = true;
+        if ((app->menu.running || app->finished) && !app->aborting && !app->closing_ms &&
+            !(app->confirm.shown && app->confirm.ask == GUI_ASK_CLOSE)) {
+            if (app->finished) {
+                closing_start(app);
+                return;
+            }
+            gui_confirm_open(&app->confirm, GUI_ASK_CLOSE, false);
+            return;
+        }
+        closing_start(app);
         return;
     }
+    if (app->closing_ms) return; /* closing: nothing else is taken */
     /* the setup, while it shows, takes the keys and the typing; the pointer goes to it through pointer() */
     if (app->setup_on && !app->splash && setup_event(app, e)) return;
     /* what Clean old settings did, and the box of an older version's files: Up/Down and the wheel go over their files,

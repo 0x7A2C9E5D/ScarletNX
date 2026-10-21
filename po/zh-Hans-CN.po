@@ -427,6 +427,30 @@ msgid "Exit ScarletNX?"
 msgstr "退出 ScarletNX？"
 
 #: src/gui/main.c
+msgid "A recompile goes: exiting ScarletNX stops it, its work lost."
+msgstr "正在重新编译：退出 ScarletNX 会中止它，工作丢失。"
+
+#: src/gui/main.c
+msgid "A game runs: exiting ScarletNX ends it."
+msgstr "游戏正在运行：退出 ScarletNX 会结束它。"
+
+#: src/gui/main.c
+msgid "Picks of Settings > App"
+msgstr "设置 > App 的选择"
+
+#: src/gui/main.c
+msgid "Closing ScarletNX"
+msgstr "正在关闭 ScarletNX"
+
+#: src/gui/main.c
+msgid "Kept for the next start:"
+msgstr "保留到下次启动："
+
+#: src/gui/main.c
+msgid "Nothing to keep: no file of the menu's"
+msgstr "无需保留：菜单没有任何文件"
+
+#: src/gui/main.c
 msgid "Outside the app, Android checks every file access: games may run slower."
 msgstr "在应用之外，Android 会检查每次文件访问：游戏可能运行得更慢。"
 

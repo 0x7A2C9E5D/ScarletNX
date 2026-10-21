@@ -503,6 +503,14 @@ msgid "Outside the app, Android checks every file access: games may run slower."
 msgstr ""
 
 #: src/gui/main.c
+msgid "A recompile goes: exiting ScarletNX stops it, its work lost."
+msgstr ""
+
+#: src/gui/main.c
+msgid "A game runs: exiting ScarletNX ends it."
+msgstr ""
+
+#: src/gui/main.c
 msgid "Abort the recompile? Its work is lost."
 msgstr ""
 
@@ -1713,6 +1721,22 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "old file: users.ini.old"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Picks of Settings > App"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Closing ScarletNX"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Kept for the next start:"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Nothing to keep: no file of the menu's"
 msgstr ""
 
 #: src/gui/main.c
