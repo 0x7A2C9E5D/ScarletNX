@@ -331,8 +331,7 @@ static const char* const items[] = {SNX_TR_NOOP("Load Switch NSP/XCI/NRO"),
    a computer has the picker too (on Linux the desktop's portal, else zenity), on a screen of its own as the keys' */
 #ifdef SDL_PLATFORM_ANDROID
 #define SAY_MENU SNX_TR_KEYS("Tap: select. Refresh: tap it. Back: go back.")
-#define SAY_GAMES                                                                                                      \
-    SNX_TR_KEYS("Tap: open. Swipe across: turn the page. Recompile: tap it. Refresh: tap it. Back: go back.")
+#define SAY_GAMES SNX_TR_KEYS("Tap: open. Swipe: turn the page. Recompile: tap it. Refresh: tap it. Back: go back.")
 #define SAY_KEYS_HOW   SNX_TR_KEYS("Back: go back.")
 #define SAY_KEYS_WAIT  SNX_TR_NOOP("Pick prod.keys")
 #define SAY_PICK_BOX   SNX_TR_NOOP("tap the box to open the file picker")
@@ -7577,7 +7576,7 @@ static const struct {
                  {SNX_TR_KEY("PgUp"), SDLK_PAGEUP, 0},
                  {SNX_TR_KEY("PgDn"), SDLK_PAGEDOWN, 0},
                  {SNX_TR_KEY("PgDown"), SDLK_PAGEDOWN, 0},
-                 {SNX_TR_KEY("Swipe across"), SDLK_PAGEDOWN, 0},
+                 {SNX_TR_KEY("Swipe"), SDLK_PAGEDOWN, 0},
                  {SNX_TR_KEY("Del"), SDLK_DELETE, 0},
                  {SNX_TR_KEY("R"), SDLK_R, 0},
                  {SNX_TR_KEY("Recompile"), SDLK_R, 0},
@@ -7819,14 +7818,18 @@ static void drag(App* app, float y) {
         app->finger_mark += row;
     }
 }
-/* a finger lifted at x, y (0 to 1 across the window): a swipe across turns the games' pages; a tap clicks there, is ESC
-   on a finished run and on a running one's ESC line */
+/* a finger lifted at x, y (0 to 1 across the window): a swipe turns the games' pages, left or up to the next as a
+   phone's lists scroll; a tap clicks there, is ESC on a finished run and on a running one's ESC line */
 static void touch(App* app, float x, float y) {
     float dx = x - app->finger_x, dy = y - app->finger_y, rx, ry;
     int w, h;
+    bool games = app->menu.view == GUI_LOAD_GAMES && !app->menu.running && !app->finished;
     if (SDL_fabsf(dx) > 0.1f && SDL_fabsf(dx) > 2 * SDL_fabsf(dy)) {
-        if (app->menu.view == GUI_LOAD_GAMES && !app->menu.running && !app->finished)
-            menu_key(app, dx < 0 ? GUI_PAGE_DOWN : GUI_PAGE_UP);
+        if (games) menu_key(app, dx < 0 ? GUI_PAGE_DOWN : GUI_PAGE_UP);
+        return;
+    }
+    if (games && SDL_fabsf(dy) > 0.1f && SDL_fabsf(dy) > 2 * SDL_fabsf(dx)) { /* Games has no drag: its pages */
+        menu_key(app, dy < 0 ? GUI_PAGE_DOWN : GUI_PAGE_UP);
         return;
     }
     if (drags(app, x, y)) {

@@ -41,7 +41,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - Moving the mouse over an item focuses it in yellow without activating it; in the Settings, a row of the list the
   keys move in (the groups, or the rows of the one open), the other list, a tab and Back waiting for a click.
 - The keys at the foot are buttons: a click or a tap on one presses it, as the keyboard does (ESC or
-  Back goes back, Tab to the next screen, Enter or Tap selects, Swipe across turns the page). A key of
+  Back goes back, Tab to the next screen, Enter or Tap selects, Swipe turns the page). A key of
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
   presses the key when its words all press one. `Arrows`, `mouse` and `pad` press nothing.
 - The menu, top to bottom: the three loads, **Setup device keys**, **Settings**, **Share log**, on
@@ -50,8 +50,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   pink. Activation is tracked separately from hover/focus, so the activated item
   stays pink while another item is hovered in yellow. Mouse controls also work
   on Games' rows.
-- A finger taps an item anywhere on its row, as a click does on its label; a swipe across
-  turns the pages of `recompiled/`; a tap on a finished run returns to the menu, and one on a
+- A finger taps an item anywhere on its row, as a click does on its label; a swipe turns Games'
+  pages, left or up to the next as a phone's lists scroll, right or down back; a tap on a finished run returns to the menu, and one on a
   running run's ESC line aborts it. Android's back button is ESC. On a screen packed with
   pixels (a phone) the text takes the display's own scale, as far as the menu still fits.
 - **Load Switch NSP/XCI/NRO**, **Load Linux ARM ELF** and **Load 3DS CIA** open a screen as the

@@ -209,7 +209,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: open. Swipe across: turn the page. Recompile: tap it. Refresh: tap it. Back: go back."
+msgid "Tap: open. Swipe: turn the page. Recompile: tap it. Refresh: tap it. Back: go back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -2071,7 +2071,7 @@ msgstr ""
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
 #, snx-key
-msgid "Swipe across"
+msgid "Swipe"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word

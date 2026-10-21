@@ -5265,9 +5265,9 @@ int main(int argc, char** argv) {
             assert(app.browser.selected == 1);
             press_key(&app, "Up/Down", 0, false, yellow);
             assert(app.browser.selected == 0);
-            /* Android's words: a swipe across turns the page, Back goes back as ESC, a tap selects; Tap outside, the
+            /* Android's words: a swipe turns the page, Back goes back as ESC, a tap selects; Tap outside, the
                picker's, presses nothing (a tap off the picker keeps the colour) */
-            assert(hint_press(&app, "Swipe across", 0) && app.browser.page == 1);
+            assert(hint_press(&app, "Swipe", 0) && app.browser.page == 1);
             assert(!hint_press(&app, "Tap outside", 0));
             go_tab(&app, GUI_TAB_MENU);
             assert(hint_press(&app, "Back", 0) && app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT);
@@ -5865,6 +5865,17 @@ int main(int argc, char** argv) {
         assert(app.browser.page == 1);
         swipe_px(&app, 10 * 8 * app.scale, 10 * ch, 60 * 8 * app.scale, 10 * ch);
         assert(app.browser.page == 0);
+        { /* up or down too, as a phone's lists scroll: up to the next page, down back; a short one turns none */
+            int h, w;
+            area(&app, &w, &h); /* the render's pixels, as swipe_px takes them */
+            swipe_px(&app, 30 * 8 * app.scale, 3 * h / 4, 31 * 8 * app.scale, h / 4);
+            assert(app.browser.page == 1);
+            swipe_px(&app, 30 * 8 * app.scale, h / 4, 30 * 8 * app.scale, 3 * h / 4);
+            assert(app.browser.page == 0);
+            swipe_px(&app, 30 * 8 * app.scale, h / 2, 30 * 8 * app.scale, h / 2 - h / 20);
+            assert(app.browser.page == 0);
+            (void)w;
+        }
         app.menu.view = GUI_LOAD_NONE;
         app.browser = (GuiBrowser){0};
         app.theme = *gui_theme_builtin("default");

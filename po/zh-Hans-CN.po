@@ -154,8 +154,8 @@ msgstr "轻触: 选择. 更新: 轻触它. 返回: 后退."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: open. Swipe across: turn the page. Recompile: tap it. Refresh: tap it. Back: go back."
-msgstr "轻触: 打开. 横向滑动: 翻页. 重新编译: 轻触它. 更新: 轻触它. 返回: 后退."
+msgid "Tap: open. Swipe: turn the page. Recompile: tap it. Refresh: tap it. Back: go back."
+msgstr "轻触: 打开. 滑动: 翻页. 重新编译: 轻触它. 更新: 轻触它. 返回: 后退."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -1986,8 +1986,8 @@ msgstr "PgDown"
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
 #, snx-key
-msgid "Swipe across"
-msgstr "横向滑动"
+msgid "Swipe"
+msgstr "滑动"
 
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
