@@ -227,6 +227,12 @@ void gui_settings_reset(GuiSettings* s, int row) {
     for (i = first; i < end && i < s->count; ++i) set(s, i, s->values[i].start);
     gui_settings_sync(s);
 }
+int gui_settings_changed(const GuiSettings* s) {
+    int i, n = 0;
+    for (i = 0; i < s->count; ++i)
+        n += strcmp(kept(s, i), s->values[i].start) != 0; /* an action's, a page's or an All's is always "" */
+    return n;
+}
 /* row i's pick, NULL for the .ini's (the launcher's: off) */
 static const char* picked(const GuiSettings* s, int i) {
     const GuiSetting* v = &s->values[i];

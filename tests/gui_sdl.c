@@ -1403,10 +1403,33 @@ int main(int argc, char** argv) {
         key(&app, SDLK_ESCAPE);
         assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 4);
     }
-    /* the groups' last row puts every setting back as it started */
-    app.editor.row = gui_editor_rows(&app.editor) - 1;
-    key(&app, SDLK_RETURN);
-    assert(!gui_settings_value(&app.settings, "gdbstub") && setting_is(&app, "fullscreen", "0"));
+    /* the groups' last row asks first, with how many settings change; Back changes none, Reset puts every one back as
+       it started and says how many; none left to change, no box */
+    {
+        int changed = gui_settings_changed(&app.settings);
+        char* asked = snx_format("Reset all to the defaults? %d settings change", changed);
+        char* done = snx_format("%d settings back to their defaults", changed);
+        assert(changed >= 2); /* gdbstub and fullscreen */
+        app.editor.row = gui_editor_rows(&app.editor) - 1;
+        key(&app, SDLK_RETURN);
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_RESET && !strcmp(app.ask_line, asked));
+        render(&app);
+        shows(&app, asked, rgb(app.theme.warning));
+        shows(&app, "- Back", yellow);
+        shows(&app, "- Reset", normal);
+        key(&app, SDLK_RETURN); /* Back, in focus */
+        assert(!app.confirm.shown && setting_is(&app, "gdbstub", "on") && app.form == GUI_FORM_SETTINGS);
+        key(&app, SDLK_RETURN);
+        key(&app, SDLK_DOWN);
+        key(&app, SDLK_RETURN);
+        assert(!app.confirm.shown && !gui_settings_value(&app.settings, "gdbstub") &&
+               setting_is(&app, "fullscreen", "0") && !gui_settings_changed(&app.settings));
+        assert(!strcmp(app.editor.note, done));
+        key(&app, SDLK_RETURN);
+        assert(!app.confirm.shown && !strcmp(app.editor.note, "Every setting is at its default"));
+        free(asked);
+        free(done);
+    }
     app.editor.row = 2; /* fullscreen 1 again, for the runs below */
     key(&app, SDLK_RETURN);
     key(&app, SDLK_RIGHT);
@@ -1773,8 +1796,8 @@ int main(int argc, char** argv) {
         assert(wrap_at("\xe8\x8f\x9c\xe5\x8d\x95 \xe8\x8f\x9c\xe5\x8d\x95\xe8\x8f\x9c\xe5\x8d\x95", 7, 0) == 10);
         assert(wrap_at("\xe8\x8f\x9c\xe5\x8d\x95\xe8\x8f\x9c", 5, 0) == 6 && wrap_at("ab cd", 4, 0) == 2);
     }
-    /* Clean old settings, Enter twice: the first says what it would do, another key in between starts again, the
-       second does it and shows what it did over the screen, until a key closes it; then there is nothing left */
+    /* Clean old settings: a box says what it would do, Clean does it and shows what it did over the screen, until a
+       key closes it; then there is nothing left. The tips say a box asks */
     {
         char *old_ini = snx_path_join(app.games_dir, "Old game.ini"), *kept, unread[64], expected[512];
         const char* game_ini =
@@ -1794,18 +1817,24 @@ int main(int argc, char** argv) {
         assert(settings_unread(&app, unread, sizeof unread) == 1 && !strcmp(unread, "renderer=opengl"));
         assert(!snx_write_file(app.app_file, gone, strlen(gone)));
         app.editor.row = GUI_APP_CLEAN;
-        key(&app, SDLK_RETURN);
-        assert(app.clean_armed && !app.cleaned_shown && snx_is_file(old_ini));
-        assert(!strcmp(app.editor.note, "Enter again to clean: [Deprecated] in 1 .ini, 2 old keys"));
         render(&app);
-        shows(&app, "- Clean old settings", yellow);
-        shows(&app, "Enter again to clean:", yellow);
-        key(&app, SDLK_UP);
+        shows(&app, "no longer read, taken out once asked", normal);
+        key(&app, SDLK_RETURN); /* a box says what it would take out, Back in focus */
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_CLEAN && !app.cleaned_shown && snx_is_file(old_ini));
+        assert(!strcmp(app.ask_line, "Clean old settings? [Deprecated] in 1 .ini, 2 old keys"));
+        render(&app);
+        shows(&app, "Clean old settings? [Deprecated] in 1 .ini, 2 old keys", rgb(app.theme.warning));
+        shows(&app, "- Back", yellow);
+        shows(&app, "- Clean", normal);
+        key(&app, SDLK_ESCAPE); /* Back: nothing taken out */
+        assert(!app.confirm.shown && !app.cleaned_shown && app.editor.row == GUI_APP_CLEAN);
+        kept = (char*)snx_read_file(old_ini, &size);
+        assert(kept && !strcmp(kept, game_ini));
+        free(kept);
+        key(&app, SDLK_RETURN);
         key(&app, SDLK_DOWN);
-        assert(!app.clean_armed && app.editor.row == GUI_APP_CLEAN);
         key(&app, SDLK_RETURN);
-        key(&app, SDLK_RETURN);
-        assert(!app.clean_armed && app.cleaned_shown && app.cleaned.count == 3 && app.cleaned.done == 3);
+        assert(!app.confirm.shown && app.cleaned_shown && app.cleaned.count == 3 && app.cleaned.done == 3);
         assert(!strcmp(app.editor.note, "Cleaned: 3 done, 0 not"));
         kept = (char*)snx_read_file(old_ini, &size);
         assert(kept && !strcmp(kept, "[Other]\nlanguage=en\n"));
@@ -1830,7 +1859,7 @@ int main(int argc, char** argv) {
         render(&app);
         hides(&app, "Clean old settings: 3 done", title);
         key(&app, SDLK_RETURN);
-        assert(!app.clean_armed && !strncmp(app.editor.note, "Nothing to clean", 16));
+        assert(!app.confirm.shown && !strncmp(app.editor.note, "Nothing to clean", 16));
         /* a runtime that listed no settings: every key of settings.ini would look old, and none is taken out */
         {
             GuiSettings listed = app.settings;
@@ -1855,7 +1884,7 @@ int main(int argc, char** argv) {
     key(&app, SDLK_ESCAPE);
     assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_EDITOR);
     /* the game folders: games/ first, always; one dropped is added and kept, once; the picker answers none here
-       (SDL_FILE_DIALOG_DRIVER=none); Del or Enter twice takes one off, the folder staying */
+       (SDL_FILE_DIALOG_DRIVER=none); Del or Enter asks before it takes one off, the folder staying */
     key(&app, SDLK_DOWN);
     render(&app);
     shows(&app, "- Library            recompiled/", yellow);
@@ -1914,8 +1943,8 @@ int main(int argc, char** argv) {
         shows_foot(&app, "take one off", rgb(app.theme.soft));
         key(&app, SDLK_DELETE);
         assert(!strcmp(app.editor.note, games_row) && !app.folder_count && !app.place[GUI_PLACE_GAMES]);
-        /* Enter on it picks where games go, as Folders > Games: the picker's own answer first (none here), then a
-           folder; that folder is the row, and Del twice puts back the default, only the setting changing */
+        /* Enter on it picks where games go, as Folders > Recompiled: the picker's own answer first (none here), then a
+           folder; that folder is the row, and Del asks before it puts back the default, only the setting changing */
         key(&app, SDLK_RETURN);
         assert(app.place_row == GUI_PLACE_GAMES);
         {
@@ -1945,14 +1974,32 @@ int main(int argc, char** argv) {
                    !strncmp(app.editor.note, "Recompiled: ", 12));
             assert(app.form == GUI_FORM_FOLDERS && !app.editor.row && same_path(app.folder_keys[0].key, elsewhere));
             assert(app.folder_keys[0].about == games_row_picked);
+            {
+                char note[sizeof app.editor.note];
+                snprintf(note, sizeof note, "%s", app.editor.note);
+                app.editor.note[0] = 0; /* the tips say the row while no note covers them */
+                render(&app);
+                shows(&app, "Enter picks another, Del asks", normal);
+                snprintf(app.editor.note, sizeof app.editor.note, "%s", note);
+            }
             assert(strstr(shown_keys(&app, keys, sizeof keys), "Del: back to the default"));
             render(&app);
             hides_foot(&app, "take one off", rgb(app.theme.soft));
-            key(&app, SDLK_DELETE);
-            assert(app.place[GUI_PLACE_GAMES] &&
-                   !strncmp(app.editor.note, "Del again: Games goes back to the default, ", 43));
             fallback = snx_recompiled_dir(app.data_dir);
+            {
+                char* asked = snx_format("Recompiled back to its default, %s? %s keeps what it has.", fallback,
+                                         app.place[GUI_PLACE_GAMES]);
+                key(&app, SDLK_DELETE);
+                assert(app.confirm.shown && app.confirm.ask == GUI_ASK_PLACE && !strcmp(app.ask_line, asked));
+                render(&app);
+                shows(&app, "- Reset", normal); /* the question names the default: the choice says no word for it */
+                free(asked);
+            }
+            key(&app, SDLK_ESCAPE);
+            assert(!app.confirm.shown && app.place[GUI_PLACE_GAMES] && same_path(app.games_dir, elsewhere));
             key(&app, SDLK_DELETE);
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN);
             assert(!app.place[GUI_PLACE_GAMES] && same_path(app.games_dir, fallback) &&
                    strstr(app.editor.note, ", the default"));
             assert(snx_is_dir(elsewhere) && same_path(app.folder_keys[0].key, fallback));
@@ -1993,11 +2040,27 @@ int main(int argc, char** argv) {
         }
         assert(app.folder_count == 1 && (!strcmp(app.editor.note, "No folder was picked.") ||
                                          !strncmp(app.editor.note, "The folder picker could not open: ", 34)));
-        app.editor.row = 2;
-        key(&app, SDLK_RETURN);
-        assert(app.folder_count == 1 && !strcmp(app.editor.note, "Enter again takes it off the list"));
-        key(&app, SDLK_RETURN);
-        assert(!app.folder_count && !strcmp(app.editor.note, "Taken off the list; the folder stays"));
+        app.editor.row = 2; /* Enter or Del on a folder asks before it is taken off, as the tips say; Back keeps it */
+        app.editor.note[0] = 0; /* the picker's answer above, over the tips */
+        render(&app);
+        shows(&app, "Del or Enter asks to take it off the list", normal);
+        {
+            char *asked = snx_format("Take %s off the Library? The folder keeps its games.", app.folders[0]),
+                 *done = snx_format("%s taken off the list. The folder keeps its games", app.folders[0]);
+            key(&app, SDLK_RETURN);
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_FOLDER && !strcmp(app.ask_line, asked));
+            render(&app);
+            shows(&app, "- Take it off", normal);
+            key(&app, SDLK_ESCAPE);
+            assert(!app.confirm.shown && app.folder_count == 1);
+            key(&app, SDLK_DELETE);
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_FOLDER && !strcmp(app.ask_line, asked));
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN);
+            assert(!app.confirm.shown && !app.folder_count && !strcmp(app.editor.note, done));
+            free(asked);
+            free(done);
+        }
         assert(snx_is_dir(more) && (kept = (char*)snx_read_file(app.folders_file, &size)) && !size);
         free(kept);
         /* a folder with folders in it asks whether their games are listed too: Cancel adds nothing, Only this folder
@@ -2231,10 +2294,16 @@ int main(int argc, char** argv) {
                !strcmp(app.place_line[GUI_PLACE_GAMES], line));
         assert(!places_fit(&app, line, sizeof line) && strstr(line, "Recompiled folder ") &&
                strstr(line, " is not there. "));
-        /* Del: the default again, kept */
+        /* Del: the default again once asked, kept */
         key(&app, SDLK_DELETE);
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_PLACE && app.place[GUI_PLACE_GAMES]);
+        key(&app, SDLK_DOWN);
+        key(&app, SDLK_RETURN);
         assert(!app.place[GUI_PLACE_GAMES] && !strcmp(app.games_dir, games_default) &&
                strstr(app.editor.note, ", the default"));
+        key(&app, SDLK_DELETE); /* at its default: said, no box */
+        snprintf(line, sizeof line, "Recompiled: %s, the default", games_default);
+        assert(!app.confirm.shown && !strcmp(app.editor.note, line));
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && !strstr(kept, "[folders]"));
         free(kept);
@@ -2291,6 +2360,8 @@ int main(int argc, char** argv) {
             assert(!strcmp(app.app_form.place[GUI_PLACE_WORK], "outside the app"));
             /* a finger: the first tap on Use it arms it, the second takes it */
             key(&app, SDLK_DELETE);
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN);
             assert(!app.place[GUI_PLACE_WORK]);
             place_set(&app, GUI_PLACE_WORK, temporary);
             ask_boxes(&app, &r, &l);
@@ -2299,6 +2370,9 @@ int main(int argc, char** argv) {
             touch_box(&app, list_box(&l, 1));
             assert(!app.confirm.shown && app.place[GUI_PLACE_WORK]);
             key(&app, SDLK_DELETE);
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN);
+            assert(!app.confirm.shown && !app.place[GUI_PLACE_WORK]);
             place_set(&app, GUI_PLACE_GAMES, inside);
             assert(!app.confirm.shown && app.place[GUI_PLACE_GAMES] &&
                    !strcmp(app.app_form.place[GUI_PLACE_GAMES], "picked"));
@@ -2310,10 +2384,34 @@ int main(int argc, char** argv) {
         place_set(&app, GUI_PLACE_DATA, temporary);
         assert(app.place[GUI_PLACE_DATA] && snx_path_within(app.data_dir, temporary) &&
                snx_path_within(app.games_dir, app.data_dir));
-        app.editor.row = GUI_PLACES;
+        app.editor.row = GUI_PLACES; /* asked first, the folders picked named: data, and recompiled/ inside it above */
+        snprintf(line, sizeof line,
+                 "Back to the defaults: Data: %s, Recompiled: %s? The folders before keep what they have.",
+                 app.place[GUI_PLACE_DATA], app.place[GUI_PLACE_GAMES]);
+        key(&app, SDLK_RETURN);
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_PLACES && !strcmp(app.ask_line, line));
+        render(&app);
+        shows(&app, "- Reset", normal);
+        key(&app, SDLK_ESCAPE);
+        assert(!app.confirm.shown && app.place[GUI_PLACE_DATA]);
+        key(&app, SDLK_RETURN);
+        key(&app, SDLK_DOWN);
         key(&app, SDLK_RETURN);
         assert(!app.place[0] && !app.place[1] && !app.place[2] && !strcmp(app.data_dir, data));
         assert(!strcmp(app.editor.note, "All back to the defaults. The folders before keep what they have"));
+        key(&app, SDLK_RETURN); /* none picked: the defaults named, no box */
+        snprintf(line, sizeof line, "They are the defaults: Data: %s, Recompiled: %s, Extractions: %s", app.data_dir,
+                 app.games_dir, app.work_dir);
+        assert(!app.confirm.shown && !strcmp(app.editor.note, line));
+        place_set(&app, GUI_PLACE_DATA, temporary); /* the data folder alone asked about too */
+        snprintf(line, sizeof line, "Back to the defaults: Data: %s? The folders before keep what they have.",
+                 app.place[GUI_PLACE_DATA]);
+        app.editor.row = GUI_PLACES;
+        key(&app, SDLK_RETURN);
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_PLACES && !strcmp(app.ask_line, line));
+        key(&app, SDLK_DOWN);
+        key(&app, SDLK_RETURN);
+        assert(!app.place[GUI_PLACE_DATA] && !strcmp(app.data_dir, data));
         free(app.games_dir); /* the test's own games/ and the rest, as before */
         app.games_dir = games;
         free(app.keys_path);

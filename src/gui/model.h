@@ -47,7 +47,13 @@ typedef enum {
     GUI_ASK_DEEP,    /* a folder picked with folders in it: are their games listed too */
     GUI_ASK_OUTSIDE, /* a folder picked in Folders outside the app's own storage, which Android slows */
     GUI_ASK_ROOM,    /* a run whose extraction may not fit (gui_room) */
-    GUI_ASK_TEXT     /* a text size just picked: kept, or the one before it back */
+    GUI_ASK_TEXT,    /* a text size just picked: kept, or the one before it back */
+    /* a change to the player's settings or folders, what it changes in the question (main.c's ask_line) */
+    GUI_ASK_CLEAN,  /* App's Clean old settings: the [Deprecated] sections and old keys taken out */
+    GUI_ASK_RESET,  /* Settings' Reset all to the defaults: the settings not at their default */
+    GUI_ASK_PLACES, /* Folders' All back to the defaults: the folders picked */
+    GUI_ASK_PLACE,  /* a folder picked in Folders, or the Library's recompiled/, back to its default */
+    GUI_ASK_FOLDER  /* a game folder taken off the Library */
 } GuiAsk;
 typedef struct {
     bool shown;

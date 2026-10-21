@@ -214,14 +214,14 @@ msgstr "轻触一行以更改或打开. 返回: 后退."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: tap it. Tap a folder twice to take it off. Back: go back."
-msgstr "添加文件夹: 轻触它. 轻触文件夹两次将其移除. 返回: 后退."
+msgid "Add a folder: tap it. Tap a folder to take it off. Back: go back."
+msgstr "添加文件夹: 轻触它. 轻触文件夹将其移除. 返回: 后退."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder twice to take it off. Back: go back."
-msgstr "轻触: 选择游戏存放处. 添加文件夹: 轻触它. ~轻触文件夹两次将其移除. 返回: 后退."
+msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Back: go back."
+msgstr "轻触: 选择游戏存放处. 添加文件夹: 轻触它. ~轻触文件夹将其移除. 返回: 后退."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -515,6 +515,18 @@ msgstr "仍然运行"
 msgid "Keep"
 msgstr "保留"
 
+#: src/gui/main.c
+msgid "Clean"
+msgstr "清理"
+
+#: src/gui/main.c
+msgid "Reset"
+msgstr "重置"
+
+#: src/gui/main.c
+msgid "Take it off"
+msgstr "移除"
+
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -755,8 +767,8 @@ msgid "Clean old settings"
 msgstr "清理旧设置"
 
 #: src/gui/main.c
-msgid "The settings the runtime and the launcher no longer read: Enter twice"
-msgstr "运行时和启动器不再读取的设置：按两次 Enter"
+msgid "The settings the runtime and the launcher no longer read, taken out once asked"
+msgstr "运行时和启动器不再读取的设置，确认后移除"
 
 #: src/gui/main.c
 #, c-format
@@ -799,8 +811,8 @@ msgid "Where recompiled games go: Enter picks another. It stays on the list"
 msgstr "重新编译的游戏存放处：Enter 另选一个。它仍留在列表中"
 
 #: src/gui/main.c
-msgid "Where recompiled games go: Enter picks another, Del twice puts back the default"
-msgstr "重新编译的游戏存放处：Enter 另选一个，按两次 Del 恢复默认"
+msgid "Where recompiled games go: Enter picks another, Del asks to put back the default"
+msgstr "重新编译的游戏存放处：Enter 另选一个，Del 确认后恢复默认"
 
 #: src/gui/main.c
 #, c-format
@@ -835,8 +847,14 @@ msgid "Library: %s"
 msgstr "游戏库：%s"
 
 #: src/gui/main.c
-msgid "Taken off the list; the folder stays"
-msgstr "已从列表移除；文件夹本身保留"
+#, c-format
+msgid "%s taken off the list. The folder keeps its games"
+msgstr "已将 %s 从列表移除。该文件夹保留其游戏"
+
+#: src/gui/main.c
+#, c-format
+msgid "Take %s off the Library? The folder keeps its games."
+msgstr "将 %s 从游戏库移除？该文件夹保留其游戏。"
 
 #: src/gui/main.c
 msgid "Not added"
@@ -855,8 +873,8 @@ msgid "Reset all to the defaults"
 msgstr "全部恢复默认"
 
 #: src/gui/main.c
-msgid "Del, or Enter twice: take it off the list; the folder stays"
-msgstr "Del，或按两次 Enter：从列表移除；文件夹本身保留"
+msgid "Del or Enter asks to take it off the list; the folder keeps its games"
+msgstr "Del 或 Enter 确认后从列表移除；该文件夹保留其游戏"
 
 #: src/gui/main.c
 msgid "not found"
@@ -953,8 +971,14 @@ msgid "Not changed"
 msgstr "未更改"
 
 #: src/gui/main.c
-msgid "They are the defaults"
-msgstr "已是默认"
+#, c-format
+msgid "They are the defaults: %s"
+msgstr "已是默认：%s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Back to the defaults: %s? The folders before keep what they have."
+msgstr "全部恢复默认：%s？原来的文件夹保留其内容。"
 
 #: src/gui/main.c
 msgid "All back to the defaults. The folders before keep what they have"
@@ -981,13 +1005,9 @@ msgid "Library: the folder picker could not open: %s"
 msgstr "游戏库：文件夹选择器无法打开：%s"
 
 #: src/gui/main.c
-msgid "Enter again takes it off the list"
-msgstr "再按 Enter 将其从列表移除"
-
-#: src/gui/main.c
 #, c-format
-msgid "Del again: Games goes back to the default, %s. The folder keeps what it has"
-msgstr "再按 Del：「游戏」恢复为默认的 %s。该文件夹保留其内容"
+msgid "%s back to its default, %s? %s keeps what it has."
+msgstr "「%s」恢复为默认的 %s？%s 保留其内容。"
 
 #: src/gui/main.c src/gui/settings.c
 msgid "All"
@@ -1494,33 +1514,57 @@ msgid "Cleaned: %d done, %d not"
 msgstr "已清理：%d 项完成，%d 项未完成"
 
 #: src/gui/main.c
+#, c-format
+msgid "%d settings back to their defaults"
+msgstr "%d 项设置已恢复默认"
+
+#: src/gui/main.c
+#, c-format
+msgid "%d setting back to its default"
+msgstr "%d 项设置已恢复默认"
+
+#: src/gui/main.c
 msgid "Nothing to clean: no [Deprecated] in a game's .ini, no old keys"
 msgstr "无需清理：游戏的 .ini 中没有 [Deprecated]，也没有旧键"
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: [Deprecated] in %d .ini, %d old keys"
-msgstr "再按 Enter 清理：%d 个 .ini 中的 [Deprecated]，%d 个旧键"
+msgid "Clean old settings? [Deprecated] in %d .ini, %d old keys"
+msgstr "清理旧设置？%d 个 .ini 中的 [Deprecated]，%d 个旧键"
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: [Deprecated] in %d .ini, %d old key"
-msgstr "再按 Enter 清理：%d 个 .ini 中的 [Deprecated]，%d 个旧键"
+msgid "Clean old settings? [Deprecated] in %d .ini, %d old key"
+msgstr "清理旧设置？%d 个 .ini 中的 [Deprecated]，%d 个旧键"
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: [Deprecated] in %d .ini"
-msgstr "再按 Enter 清理：%d 个 .ini 中的 [Deprecated]"
+msgid "Clean old settings? [Deprecated] in %d .ini"
+msgstr "清理旧设置？%d 个 .ini 中的 [Deprecated]"
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: %d old keys"
-msgstr "再按 Enter 清理：%d 个旧键"
+msgid "Clean old settings? %d old keys"
+msgstr "清理旧设置？%d 个旧键"
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: %d old key"
-msgstr "再按 Enter 清理：%d 个旧键"
+msgid "Clean old settings? %d old key"
+msgstr "清理旧设置？%d 个旧键"
+
+#: src/gui/main.c
+msgid "Every setting is at its default"
+msgstr "全部设置已是默认"
+
+#: src/gui/main.c
+#, c-format
+msgid "Reset all to the defaults? %d settings change"
+msgstr "全部恢复默认？%d 项设置将更改"
+
+#: src/gui/main.c
+#, c-format
+msgid "Reset all to the defaults? %d setting changes"
+msgstr "全部恢复默认？%d 项设置将更改"
 
 #: src/gui/main.c
 msgid "Program ended abnormally (force-terminated by ESC)."

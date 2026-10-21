@@ -106,25 +106,26 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **Text size**, which opens
   its box of sizes (below), **Theme editor**, which comes back to App, and **Library**: first `recompiled/`,
   where recompiled games go: Enter there picks another, as **Folders > Recompiled** does; at its default it stays on the
-  list (the foot's Del greyed), and a folder picked goes back to the default with Del pressed twice, only the setting
+  list (the foot's Del greyed), and Del asks before a folder picked goes back to the default, only the setting
   changing. Then the player's own folders, whose games the `recompiled/` browser lists after
   `recompiled/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
   or a path pasted with Ctrl+V is added too. A folder with folders in it asks first: *Only this
   folder*, or *With subfolders*, whose games are listed too, four levels down, hidden folders
-  left alone (its row says *+ subfolders*). Del, or Enter twice, takes one off the list (the
-  folder stays). They are kept in `folders.txt` beside `settings.ini`, a line each, `/**` after
+  left alone (its row says *+ subfolders*). Del or Enter asks before it takes one off the list (the
+  folder keeps its games). They are kept in `folders.txt` beside `settings.ini`, a line each, `/**` after
   one kept with its subfolders; one that cannot be read is named when the games are listed. Under App's rows, the
   three folders in use: the data folder, the games' and the extractions'. **Folders** has a row for
   the data folder (**Data**: `recompiled/`, `themes/` and `prod.keys`), **Recompiled** and **Extractions**, each its default or a
   folder picked. Enter opens the folder picker, a folder dropped or pasted with Ctrl+V takes the focused row, Del puts
-  its default back and the last row, **All back to the defaults**, all three. A row says *default*, *picked* or why
+  its default back and the last row, **All back to the defaults**, all three, each asking first with the folders it
+  changes. A row says *default*, *picked* or why
   its folder cannot be; the line under the rows names the folder in use, the one above its disk's free space. A folder
   not there, not a folder, that cannot be written or, for the games, on a disk that runs no programs (`noexec`) is
   refused, and a run whose picked folder no longer can be stops, naming it: the default never takes its place. On
   Android a folder outside the app's own storage is asked about first, since Android checks every file access there
   and games may run slower: *Use it* takes a second tap, and its row says *outside the app*.
-  Nothing is moved, the folder before keeps what it has. The menu's own files stay where they are. **Clean old settings**, Enter twice (the first says what it
-  would do), takes out the settings nothing reads any more: the `[Deprecated]` section the runtime
+  Nothing is moved, the folder before keeps what it has. The menu's own files stay where they are. **Clean old settings** asks first, with
+  how many it would take out, then takes out the settings nothing reads any more: the `[Deprecated]` section the runtime
   gives a game's `.ini` for the keys it no longer uses (in the config folder's `recompiled/`, in `recompiled/`
   and in the player's folders), the keys of `settings.ini` that no setting of the runtime's takes
   (only while the runtime lists its settings) and those of `app.ini` the menu does not know. A box
@@ -138,7 +139,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Linux (`~/.config/scarletnx/`), else the data folder's `config/`. A run takes a setting from what that
   run picks, then from the game's own picks (to come), then from these, and last from the game's
   `.ini`. Del puts a setting back to its default, and the groups' last row, **Reset all to the
-  defaults**, every one. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
+  defaults**, every one, asking first with how many change. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
   and `fullscreen` puts the launcher itself on the whole screen too).
   **gdbstub** passes `-S` and `-s`, the
   runtime's stub on port 1234 waiting for the debugger at startup (UNIX only), and **Extract to tmpfs**

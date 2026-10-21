@@ -214,14 +214,14 @@ msgstr "Toque numa linha para mudar ou abrir. Voltar: retornar."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: tap it. Tap a folder twice to take it off. Back: go back."
-msgstr "Adicionar pasta: toque nele. Toque duas vezes numa pasta para tirá-la. Voltar: retornar."
+msgid "Add a folder: tap it. Tap a folder to take it off. Back: go back."
+msgstr "Adicionar pasta: toque nele. Toque numa pasta para tirá-la. Voltar: retornar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder twice to take it off. Back: go back."
-msgstr "Toque: escolher para onde vão os jogos. Adicionar pasta: toque nele. ~Toque duas vezes numa pasta para tirá-la. Voltar: retornar."
+msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Back: go back."
+msgstr "Toque: escolher para onde vão os jogos. Adicionar pasta: toque nele. ~Toque numa pasta para tirá-la. Voltar: retornar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -515,6 +515,18 @@ msgstr "Rodar assim mesmo"
 msgid "Keep"
 msgstr "Manter"
 
+#: src/gui/main.c
+msgid "Clean"
+msgstr "Limpar"
+
+#: src/gui/main.c
+msgid "Reset"
+msgstr "Redefinir"
+
+#: src/gui/main.c
+msgid "Take it off"
+msgstr "Tirar"
+
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -755,8 +767,8 @@ msgid "Clean old settings"
 msgstr "Limpar obsoletos"
 
 #: src/gui/main.c
-msgid "The settings the runtime and the launcher no longer read: Enter twice"
-msgstr "Os ajustes que o runtime e o launcher não leem mais: Enter duas vezes"
+msgid "The settings the runtime and the launcher no longer read, taken out once asked"
+msgstr "Os ajustes que o runtime e o launcher não leem mais, tirados depois de perguntar"
 
 #: src/gui/main.c
 #, c-format
@@ -799,8 +811,8 @@ msgid "Where recompiled games go: Enter picks another. It stays on the list"
 msgstr "Para onde vão os jogos recompilados: Enter escolhe outra. Ela fica na lista"
 
 #: src/gui/main.c
-msgid "Where recompiled games go: Enter picks another, Del twice puts back the default"
-msgstr "Para onde vão os jogos recompilados: Enter escolhe outra, Del duas vezes volta ao padrão"
+msgid "Where recompiled games go: Enter picks another, Del asks to put back the default"
+msgstr "Para onde vão os jogos recompilados: Enter escolhe outra, Del pergunta antes de voltar ao padrão"
 
 #: src/gui/main.c
 #, c-format
@@ -835,8 +847,14 @@ msgid "Library: %s"
 msgstr "Biblioteca: %s"
 
 #: src/gui/main.c
-msgid "Taken off the list; the folder stays"
-msgstr "Tirada da lista; a pasta continua lá"
+#, c-format
+msgid "%s taken off the list. The folder keeps its games"
+msgstr "%s tirada da lista. A pasta continua com seus jogos"
+
+#: src/gui/main.c
+#, c-format
+msgid "Take %s off the Library? The folder keeps its games."
+msgstr "Tirar %s da Biblioteca? A pasta continua com seus jogos."
 
 #: src/gui/main.c
 msgid "Not added"
@@ -855,8 +873,8 @@ msgid "Reset all to the defaults"
 msgstr "Tudo de volta ao padrão"
 
 #: src/gui/main.c
-msgid "Del, or Enter twice: take it off the list; the folder stays"
-msgstr "Del, ou Enter duas vezes: tirar da lista; a pasta continua lá"
+msgid "Del or Enter asks to take it off the list; the folder keeps its games"
+msgstr "Del ou Enter pergunta antes de tirar da lista; a pasta continua com seus jogos"
 
 #: src/gui/main.c
 msgid "not found"
@@ -953,8 +971,14 @@ msgid "Not changed"
 msgstr "Não mudou"
 
 #: src/gui/main.c
-msgid "They are the defaults"
-msgstr "Já estão no padrão"
+#, c-format
+msgid "They are the defaults: %s"
+msgstr "Já estão no padrão: %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Back to the defaults: %s? The folders before keep what they have."
+msgstr "Tudo de volta ao padrão: %s? As pastas de antes ficam com o que têm."
 
 #: src/gui/main.c
 msgid "All back to the defaults. The folders before keep what they have"
@@ -981,13 +1005,9 @@ msgid "Library: the folder picker could not open: %s"
 msgstr "Biblioteca: o seletor de pastas não abriu: %s"
 
 #: src/gui/main.c
-msgid "Enter again takes it off the list"
-msgstr "Enter de novo tira da lista"
-
-#: src/gui/main.c
 #, c-format
-msgid "Del again: Games goes back to the default, %s. The folder keeps what it has"
-msgstr "Del de novo: Jogos volta ao padrão, %s. A pasta fica com o que tem"
+msgid "%s back to its default, %s? %s keeps what it has."
+msgstr "%s de volta ao padrão, %s? %s fica com o que tem."
 
 #: src/gui/main.c src/gui/settings.c
 msgid "All"
@@ -1494,33 +1514,57 @@ msgid "Cleaned: %d done, %d not"
 msgstr "Limpo: %d feitos, %d não"
 
 #: src/gui/main.c
+#, c-format
+msgid "%d settings back to their defaults"
+msgstr "%d configurações de volta ao padrão"
+
+#: src/gui/main.c
+#, c-format
+msgid "%d setting back to its default"
+msgstr "%d configuração de volta ao padrão"
+
+#: src/gui/main.c
 msgid "Nothing to clean: no [Deprecated] in a game's .ini, no old keys"
 msgstr "Nada a limpar: nenhum [Deprecated] no .ini de um jogo, nenhuma chave antiga"
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: [Deprecated] in %d .ini, %d old keys"
-msgstr "Enter de novo para limpar: [Deprecated] em %d .ini, %d chaves antigas"
+msgid "Clean old settings? [Deprecated] in %d .ini, %d old keys"
+msgstr "Limpar obsoletos? [Deprecated] em %d .ini, %d chaves antigas"
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: [Deprecated] in %d .ini, %d old key"
-msgstr "Enter de novo para limpar: [Deprecated] em %d .ini, %d chave antiga"
+msgid "Clean old settings? [Deprecated] in %d .ini, %d old key"
+msgstr "Limpar obsoletos? [Deprecated] em %d .ini, %d chave antiga"
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: [Deprecated] in %d .ini"
-msgstr "Enter de novo para limpar: [Deprecated] em %d .ini"
+msgid "Clean old settings? [Deprecated] in %d .ini"
+msgstr "Limpar obsoletos? [Deprecated] em %d .ini"
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: %d old keys"
-msgstr "Enter de novo para limpar: %d chaves antigas"
+msgid "Clean old settings? %d old keys"
+msgstr "Limpar obsoletos? %d chaves antigas"
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: %d old key"
-msgstr "Enter de novo para limpar: %d chave antiga"
+msgid "Clean old settings? %d old key"
+msgstr "Limpar obsoletos? %d chave antiga"
+
+#: src/gui/main.c
+msgid "Every setting is at its default"
+msgstr "Todas as configurações já estão no padrão"
+
+#: src/gui/main.c
+#, c-format
+msgid "Reset all to the defaults? %d settings change"
+msgstr "Tudo de volta ao padrão? %d configurações mudam"
+
+#: src/gui/main.c
+#, c-format
+msgid "Reset all to the defaults? %d setting changes"
+msgstr "Tudo de volta ao padrão? %d configuração muda"
 
 #: src/gui/main.c
 msgid "Program ended abnormally (force-terminated by ESC)."

@@ -230,13 +230,13 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: tap it. Tap a folder twice to take it off. Back: go back."
+msgid "Add a folder: tap it. Tap a folder to take it off. Back: go back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder twice to take it off. Back: go back."
+msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Back: go back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -536,6 +536,18 @@ msgstr ""
 msgid "Keep"
 msgstr ""
 
+#: src/gui/main.c
+msgid "Clean"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Reset"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Take it off"
+msgstr ""
+
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -831,7 +843,7 @@ msgid "Clean old settings"
 msgstr ""
 
 #: src/gui/main.c
-msgid "The settings the runtime and the launcher no longer read: Enter twice"
+msgid "The settings the runtime and the launcher no longer read, taken out once asked"
 msgstr ""
 
 #: src/gui/main.c
@@ -875,7 +887,7 @@ msgid "Where recompiled games go: Enter picks another. It stays on the list"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Where recompiled games go: Enter picks another, Del twice puts back the default"
+msgid "Where recompiled games go: Enter picks another, Del asks to put back the default"
 msgstr ""
 
 #: src/gui/main.c
@@ -915,7 +927,13 @@ msgid "Library: %s"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Taken off the list; the folder stays"
+#, c-format
+msgid "%s taken off the list. The folder keeps its games"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Take %s off the Library? The folder keeps its games."
 msgstr ""
 
 #: src/gui/main.c
@@ -935,7 +953,7 @@ msgid "Reset all to the defaults"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Del, or Enter twice: take it off the list; the folder stays"
+msgid "Del or Enter asks to take it off the list; the folder keeps its games"
 msgstr ""
 
 #: src/gui/main.c
@@ -1030,6 +1048,11 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "%s back to its default, %s? %s keeps what it has."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "Not changed: %s %s"
 msgstr ""
 
@@ -1038,7 +1061,13 @@ msgid "Not changed"
 msgstr ""
 
 #: src/gui/main.c
-msgid "They are the defaults"
+#, c-format
+msgid "They are the defaults: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Back to the defaults: %s? The folders before keep what they have."
 msgstr ""
 
 #: src/gui/main.c
@@ -1063,15 +1092,6 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "Library: the folder picker could not open: %s"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Enter again takes it off the list"
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
-msgid "Del again: Games goes back to the default, %s. The folder keeps what it has"
 msgstr ""
 
 #: src/gui/main.c src/gui/settings.c
@@ -1569,37 +1589,61 @@ msgid "Took out %s"
 msgstr ""
 
 #: src/gui/main.c
-#, c-format
-msgid "Cleaned: %d done, %d not"
-msgstr ""
-
-#: src/gui/main.c
 msgid "Nothing to clean: no [Deprecated] in a game's .ini, no old keys"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: [Deprecated] in %d .ini, %d old keys"
+msgid "Clean old settings? [Deprecated] in %d .ini, %d old keys"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: [Deprecated] in %d .ini, %d old key"
+msgid "Clean old settings? [Deprecated] in %d .ini, %d old key"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: [Deprecated] in %d .ini"
+msgid "Clean old settings? [Deprecated] in %d .ini"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: %d old keys"
+msgid "Clean old settings? %d old keys"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Enter again to clean: %d old key"
+msgid "Clean old settings? %d old key"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Every setting is at its default"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Reset all to the defaults? %d settings change"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Reset all to the defaults? %d setting changes"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Cleaned: %d done, %d not"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%d settings back to their defaults"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%d setting back to its default"
 msgstr ""
 
 #: src/gui/main.c
