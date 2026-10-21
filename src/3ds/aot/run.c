@@ -14,7 +14,7 @@
 #define SNX_CTR_RUN_SLICE 1000000u
 
 int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel model, uint64_t limit, unsigned flags,
-                    char* error, size_t error_size) {
+                    uint32_t ipc_stubs, char* error, size_t error_size) {
     SnxCtrImage image = {0};
     SnxCtrProcess* process = NULL;
     SnxCtrNative native = {0};
@@ -44,6 +44,7 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
         snprintf(error, error_size, "cannot create checked ARM11 process mappings");
         goto done;
     }
+    process->ipc_stubs = ipc_stubs;
     if (!(cia ? snx_ctr_process_mount_cia(process, directory, cia) : snx_ctr_process_mount_fs(process, directory))) {
         snprintf(error, error_size, cia ? "cannot mount the CIA's filesystem" : "cannot index extracted title filesystem");
         goto done;
@@ -76,7 +77,11 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
     }
     SnxArmCPU* cpu = snx_ctr_process_cpu(process);
     if (state == SNX_CTR_RUN_EXIT) {
-        printf("Guest ExitProcess: r0=%" PRIu32 " blocks=%" PRIu64 "\n", cpu->r[0], executed);
+        /* ExitThread ends the process when it was the last thread, and its r0 means nothing then */
+        if (process->last_svc == 0x09)
+            printf("Guest's last thread exited: blocks=%" PRIu64 "\n", executed);
+        else
+            printf("Guest ExitProcess: r0=%" PRIu32 " blocks=%" PRIu64 "\n", cpu->r[0], executed);
         result = 0;
     } else if (closed) {
         printf("Closed: blocks=%" PRIu64 "\n", executed);

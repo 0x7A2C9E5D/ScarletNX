@@ -35,6 +35,13 @@ static uint32_t little(const unsigned char* p, unsigned size) {
     for (unsigned i = 0; i < size; ++i) result |= (uint32_t)p[i] << (i * 8);
     return result;
 }
+/* a staged file's name inside the staging directory */
+static const char* leaf(const char* path) {
+    const char* last = path;
+    for (const char* p = path; *p; ++p)
+        if (*p == '/' || *p == '\\') last = p + 1;
+    return last;
+}
 static void name(char out[40], unsigned mode, unsigned index) {
     snprintf(out, 40, "ctr_%c_%u", mode ? 't' : 'a', index);
 }
@@ -94,6 +101,14 @@ static bool descriptor(LLVMModuleRef mod, LLVMTargetDataRef layout, const SnxCtr
     LLVMValueRef global = LLVMAddGlobal(mod, structure, "snx_ctr_module_v1");
     LLVMSetInitializer(global, LLVMConstNamedStruct(structure, values, 18));
     LLVMSetGlobalConstant(global, 1);
+#ifdef _WIN32
+    /* COFF has no hidden visibility. A DLL without any explicit export gets every global exported by lld, one per
+       block function, past the 65535 exports PE allows. Once one symbol is exported explicitly lld exports nothing
+       else, so the descriptor, the only symbol the loader looks up, is marked. The module is built for the host the
+       compiler runs on, so the compiler's own _WIN32 says the module is a DLL (an MSYS2 or Cygwin build of the
+       compiler targets Windows too and defines it). */
+    LLVMSetDLLStorageClass(global, LLVMDLLExportStorageClass);
+#endif
     return true;
 }
 static LLVMModuleRef new_module(Host* h, LLVMContextRef c) {
@@ -309,21 +324,32 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
         snprintf(error, error_size, "out of memory for native linker arguments");
         goto done;
     }
-    command[0] = SNX_CTR_HOST_CC;
-    command[1] = "-shared";
+    unsigned arg = 0;
+    command[arg++] = SNX_CTR_HOST_CC;
+    command[arg++] = "-shared";
 #ifdef __APPLE__
     /* ld64's: a dylib refuses undefined symbols, as -z defs does (its default, said); its stacks aren't executable and
        its constant data is kept read-only without being asked, which noexecstack, relro and now ask GNU ld for */
-    command[2] = "-Wl,-undefined,error";
+    command[arg++] = "-Wl,-undefined,error";
+#elif !defined(_WIN32)
+    command[arg++] = "-Wl,-z,defs,-z,noexecstack,-z,relro,-z,now";
 #else
-    command[2] = "-Wl,-z,defs,-z,noexecstack,-z,relro,-z,now";
+    /* A PE DLL needs none of those: an unresolved symbol is always a link error, and it has no lazily bound PLT for
+       relro and now to protect (lld's MinGW driver refuses -z). It is asked for DEP and ASLR compatibility outright
+       rather than through the linker's defaults. lld writes no import library unless asked (--out-implib), so the
+       published folder holds the DLL alone. */
+    command[arg++] = "-Wl,--nxcompat,--dynamicbase";
 #endif
-    for (unsigned i = 0; i < files; ++i) command[3 + i] = objects[i];
-    command[3 + files] = runtime;
-    command[4 + files] = "-o";
-    command[5 + files] = module;
-    if (snx_run_stage(command, NULL, "native linking")) {
-        snprintf(error, error_size, "native linker failed; no runnable module published");
+    /* The linker runs in the staging directory and is given the files' names alone. With full paths a large image's
+       hundreds of chunks pass the 32767 characters a Windows command line holds (CreateProcessW fails with
+       ERROR_FILENAME_EXCED_RANGE). 1024 chunks, the most the entry limit allows, take about 16500 by name, quotes
+       included. */
+    for (unsigned i = 0; i < files; ++i) command[arg++] = leaf(objects[i]);
+    command[arg++] = leaf(runtime);
+    command[arg++] = "-o";
+    command[arg++] = leaf(module);
+    if (snx_run_stage(command, stage, "native linking")) {
+        snprintf(error, error_size, "the native linker failed, so no module was published");
         goto done;
     }
     if (!snx_is_file(module) || snx_is_link(module) || !snx_file_size(module)) {
@@ -336,24 +362,31 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
         goto done;
     }
     if (!(cia ? snx_ctr_image_from_cia(cia, &check, error, error_size)
-              : snx_ctr_image_load(directory, &check, error, error_size)) ||
-        memcmp(image.identity, check.identity, 32)) {
+              : snx_ctr_image_load(directory, &check, error, error_size)))
+        goto done; /* its own error says why */
+    if (memcmp(image.identity, check.identity, 32)) {
         snprintf(error, error_size, "extracted image changed during compilation");
         goto done;
     }
-    /* a module from an earlier compile is replaced, only once the new one is complete */
+    /* A module from an earlier compile is replaced only once the new one is complete. If the new one cannot take
+       its place the old one goes back, so a failed publish leaves what was there. On Windows a folder whose DLL a
+       running copy of the game has loaded cannot be moved. */
     previous = snx_path_join(directory, "native.previous");
     {
+        bool had_target = snx_path_exists(target);
         const char *from = NULL, *to = NULL;
         char why[256];
         if (snx_path_exists(previous) && snx_remove_tree(previous))
             from = previous;
-        else if (snx_path_exists(target) && snx_replace(target, previous))
+        else if (had_target && snx_replace(target, previous))
             from = target, to = previous;
-        else if (snx_replace(stage, target))
+        else if (snx_replace(stage, target)) {
             from = stage, to = target;
-        if (from) {
             snx_os_error(why, sizeof why);
+            if (had_target) (void)snx_replace(previous, target);
+        }
+        if (from) {
+            if (from != stage) snx_os_error(why, sizeof why);
             if (to)
                 snprintf(error, error_size, "cannot move %s to %s: %s", from, to, why);
             else

@@ -32,10 +32,14 @@ typedef enum {
     SNX_CTR_RUN_BUDGET,
     SNX_CTR_RUN_BLOCKED
 } SnxCtrRunResult;
+/* Blocks between the dispatcher's scheduler polls: at about 2 million blocks a second, about 2 ms, inside the DSP's
+   4.9 ms audio frame and the display's 16.7 ms */
+#define SNX_CTR_POLL_BLOCKS 4096u
 /* Requires a compatible module and its matching freshly initialized process.
    Bounded static blocks; no discovery, compiler, interpreter or JIT here.
    Process-owned kernel HLE handles a bounded SVC subset. Unknown calls stop.
-   Pending waits stop as BLOCKED and cannot be resumed past the pending call. */
+   A thread that waits gives the core to another; BLOCKED means no thread can
+   ever run again (no deadline and nothing left to signal). */
 SnxCtrRunResult snx_ctr_dispatch(const SnxCtrModule* module, SnxCtrProcess* process, uint64_t limit,
                                  uint64_t* executed);
 typedef struct {
@@ -53,6 +57,7 @@ void snx_ctr_native_close(SnxCtrNative* native);
    directory, or with cia the CIA read where it lies, directory then its state folder. The module is
    trusted as code the driver compiled itself, never as a sandbox. */
 enum { SNX_CTR_RECOMPILE = 1, SNX_CTR_COMPILE_ONLY = 2 };
+/* ipc_stubs: the services whose unknown commands answer success instead of stopping (snx_ctr_ipc_stub_mask) */
 int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel model, uint64_t limit, unsigned flags,
-                    char* error, size_t error_size);
+                    uint32_t ipc_stubs, char* error, size_t error_size);
 #endif

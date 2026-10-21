@@ -4,6 +4,7 @@
 #include "3ds/loader/ctr_loader.h"
 #include "3ds/aot/ctr_module.h"
 #include "3ds/runtime/main.h"
+#include "3ds/ipc/ctr_ipc.h"
 #include "common/utilities/common.h"
 #include <ctype.h>
 #include <errno.h>
@@ -34,6 +35,9 @@ static void usage(FILE* out) {
           "                  work/3ds/<the CIA's name>)\n"
           "  --max-blocks N  Stop after N native blocks (default: run until the game exits or its window\n"
           "                  closes)\n"
+          "  --ipc-stubs L   Answer a service command the runtime lacks with success instead of stopping, for\n"
+          "                  the services in L: all, or a comma list of srv, fs, apt, ptm, hid, gsp, cfg, dsp.\n"
+          "                  Given more than once, the lists add up\n"
           "Without --extract-container nothing of the CIA is extracted: its ExeFS and RomFS are read from the\n"
           "CIA itself, mapped read-only. An extraction and a compiled module already there are used as they\n"
           "are: the ARM11 code is compiled again only when its module is missing or no longer matches the\n"
@@ -130,7 +134,7 @@ out:
    where they lie, and folder keeps the title's state alone: an extraction an earlier --extract-container left there
    is taken away, as the CIA has all of it */
 static int play_cia(const char* input, const char* folder, SnxCtrModel model, uint64_t max_blocks, unsigned flags,
-                    char* error, size_t error_size) {
+                    uint32_t ipc_stubs, char* error, size_t error_size) {
     SnxCtrCia* cia = NULL;
     printf("Reading %s\n", input);
     SnxCtrExtractResult opened = snx_ctr_cia_open(input, &cia, error, error_size);
@@ -159,7 +163,7 @@ static int play_cia(const char* input, const char* folder, SnxCtrModel model, ui
             if (failed) goto done;
         }
     }
-    status = snx_ctr_aot_run(state, cia, model, max_blocks, flags, error, error_size);
+    status = snx_ctr_aot_run(state, cia, model, max_blocks, flags, ipc_stubs, error, error_size);
     if (status) fprintf(stderr, "scarletnx-3ds: %s\n", error);
 done:
     free(state);
@@ -172,6 +176,7 @@ int snx_ctr_main(int argc, char** argv) {
     bool info = false, positional = false, extract_only = false, recompile = false, budget_set = false;
     bool extract_container = false;
     uint64_t max_blocks = 0; /* no budget */
+    uint32_t ipc_stubs = 0;  /* every unknown service command stops the run */
     SnxCtrBoard board;
     snx_tool_console();
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -216,6 +221,13 @@ int snx_ctr_main(int argc, char** argv) {
             }
             max_blocks = (uint64_t)n;
             budget_set = true;
+        } else if (!positional && !strcmp(arg, "--ipc-stubs")) {
+            if (++i == argc || !snx_ctr_ipc_stub_mask(argv[i], &ipc_stubs)) {
+                fputs("scarletnx-3ds: --ipc-stubs requires all or a comma list of srv, fs, apt, ptm, hid, gsp, cfg, "
+                      "dsp\n",
+                      stderr);
+                return 2;
+            }
         } else if (!positional && !strcmp(arg, "--model")) {
             if (++i == argc || (strcmp(argv[i], "old") && strcmp(argv[i], "new"))) {
                 fputs("scarletnx-3ds: --model requires old or new\n", stderr);
@@ -229,9 +241,11 @@ int snx_ctr_main(int argc, char** argv) {
         } else
             input = arg;
     }
+    /* --ipc-stubs only changes a run: with an option that does not run the game it is a mistake to report */
     if ((!input && !info) ||
         (info && (input || extract_only || extract_container || recompile || output || budget_set)) ||
-        (extract_only && (budget_set || recompile)) || (recompile && budget_set)) {
+        (extract_only && (budget_set || recompile)) || (recompile && budget_set) ||
+        (ipc_stubs && (info || extract_only || recompile))) {
         usage(stderr);
         return 2;
     }
@@ -272,7 +286,7 @@ int snx_ctr_main(int argc, char** argv) {
     if (!extracted) return 1; /* work_folder said why */
     unsigned flags = recompile ? SNX_CTR_RECOMPILE | SNX_CTR_COMPILE_ONLY : 0;
     if (!extract_container && !extract_only) { /* the CIA read where it lies, the folder keeping only the title's state */
-        int status = play_cia(input, extracted, model, max_blocks, flags, error, sizeof error);
+        int status = play_cia(input, extracted, model, max_blocks, flags, ipc_stubs, error, sizeof error);
         free(extracted);
         return status;
     }
@@ -295,7 +309,7 @@ int snx_ctr_main(int argc, char** argv) {
         free(extracted);
         return 0;
     }
-    int status = snx_ctr_aot_run(extracted, NULL, model, max_blocks, flags, error, sizeof error);
+    int status = snx_ctr_aot_run(extracted, NULL, model, max_blocks, flags, ipc_stubs, error, sizeof error);
     free(extracted);
     if (status) fprintf(stderr, "scarletnx-3ds: %s\n", error);
     return status;
