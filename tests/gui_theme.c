@@ -128,7 +128,10 @@ static int key_lines(const char* text, size_t size, char* keys, size_t keys_size
     return count;
 }
 static int rgb_is(GuiRgb a, int r, int g, int b) { return a.r == r && a.g == g && a.b == b; }
-static void parse(GuiTheme* theme, const char* text) { assert(gui_theme_parse(theme, "mine", text, strlen(text))); }
+static char said[1024]; /* what the last parse said */
+static void parse(GuiTheme* theme, const char* text) {
+    assert(gui_theme_parse(theme, "mine", text, strlen(text), said, sizeof said));
+}
 static void write(const char* dir, const char* name, const char* text) {
     char* folder = snx_path_join(dir, name);
     char* file = snx_path_join(folder, "theme.ini");
@@ -211,13 +214,15 @@ int main(void) {
        as 14 as every number past its most; scroll center or edge */
     assert(def->gap == 6 && yorha->gap == 6 && def->scroll == GUI_SCROLL_CENTER && yorha->scroll == GUI_SCROLL_CENTER);
     parse(&theme, "[body]\ngap = 0\nscroll = edge\n");
-    assert(theme.gap == 0 && theme.scroll == GUI_SCROLL_EDGE);
-    parse(&theme, "[body]\ngap = 99\nscroll = middle\n");
+    assert(theme.gap == 0 && theme.scroll == GUI_SCROLL_EDGE && !said[0]);
+    parse(&theme, "[body]\ngap = 99\nscroll = middle\n"); /* each said, with the value it has instead */
     assert(theme.gap == 14 && theme.scroll == GUI_SCROLL_CENTER &&
            !gui_theme_set(&theme, gui_theme_key("body", "scroll"), "middle"));
+    assert(!strcmp(said, "[body] gap = 99 is more than 14: it takes 14; [body] scroll = middle is not center or edge: "
+                         "it keeps center"));
 
     parse(&theme, ""); /* nothing: the default, named after its folder */
-    assert(same(theme.ink, def->ink) && !strcmp(theme.id, "mine") && !strcmp(theme.name, "mine"));
+    assert(same(theme.ink, def->ink) && !strcmp(theme.id, "mine") && !strcmp(theme.name, "mine") && !said[0]);
 
     /* the base first, wherever it is, then each key over it; what cannot be read keeps the base's */
     parse(&theme, "; a comment\r\n[colors]\r\npage = #0a0B0c\r\nink = #12345\r\nsoft = # 12 34\r\nfocus = #GG0000\r\n"
@@ -226,6 +231,19 @@ int main(void) {
                   "[body]\r\nmarker = \"* \"\r\nfocus = color\r\n[nowhere]\r\nink = #FFFFFF\r\nstray line\r\n");
     assert(!strcmp(theme.name, "Mine") && !strcmp(theme.id, "mine"));
     assert(theme.scroll_ms == yorha->scroll_ms);
+    { /* every line not taken said, with the base's value it keeps: not a colour, a word or a flag, no key; a line with no
+         = is no setting */
+        char want[160];
+        snprintf(want, sizeof want, "[colors] ink = #12345 is not a colour as #RRGGBB: it keeps #%02X%02X%02X",
+                 yorha->ink.r, yorha->ink.g, yorha->ink.b);
+        assert(strstr(said, want) && strstr(said, "[colors] soft = # 12 34 is not a colour as #RRGGBB: it keeps #"));
+        assert(strstr(said, "[colors] focus = #GG0000 is not a colour as #RRGGBB: it keeps #"));
+        assert(strstr(said, "[head] style = none is not plain or bar: it keeps plain"));
+        snprintf(want, sizeof want, "[head] rule = maybe is not true or false: it keeps %s",
+                 yorha->head_rule ? "true" : "false");
+        assert(strstr(said, want) && strstr(said, "[nowhere] ink = #FFFFFF is not a key of a theme"));
+        assert(!strstr(said, "stray") && !strstr(said, "page") && !strstr(said, "marker"));
+    }
     assert(rgb_is(theme.page, 0x0A, 0x0B, 0x0C));
     assert(same(theme.ink, yorha->ink) && same(theme.soft, yorha->soft) && same(theme.focus, yorha->focus));
     assert(theme.head == yorha->head && theme.head_rule == yorha->head_rule); /* the head has no none */
@@ -254,6 +272,7 @@ int main(void) {
     assert(same(theme.page, yorha->page) && theme.format == 2 && !strcmp(theme.author, "rEden"));
     assert(theme.texture && theme.ring == GUI_RING_NEAR_TEXT && theme.typing_sync);
     assert(rgb_is(theme.warning, 0xD9, 0xB2, 0x4A) && !strcmp(theme.title[GUI_SCREEN_LOADING], "WAKING"));
+    assert(!said[0]); /* ErET's own keys, [loading] header to [sizes], no mistakes of the file */
     /* ErET's loading layout is YoRHa's runs: its [colors] are the run's, the menus keep YoRHa's */
     parse(&theme, "[theme]\nlayout = loading\n[colors]\npage = #101010\nink = #F0F0F0\ntexture = false\n");
     assert(rgb_is(theme.run_colors.page, 16, 16, 16) && rgb_is(theme.run_colors.ink, 240, 240, 240));
@@ -263,8 +282,11 @@ int main(void) {
     assert(rgb_is(theme.page, 16, 16, 16) && same(theme.run_colors.page, yorha->run_colors.page));
     parse(&theme, "[theme]\nbase = default\nlayout = menu\nformat = 0\n"); /* base wins; no format 0 */
     assert(same(theme.page, def->page) && theme.format == GUI_THEME_FORMAT);
+    assert(strstr(said, "[theme] format = 0 is not a whole number from 1: it keeps "));
     parse(&theme, "[header]\nring_side = nowhere\n[run]\nring = right-near-text\n[transitions]\ntyping = later\n");
     assert(theme.ring == GUI_RING_NEAR_TEXT && !theme.typing_sync);
+    assert(strstr(said, "[header] ring_side = nowhere is not none, left, right or right-near-text: it keeps ") &&
+           strstr(said, "[transitions] typing = later is not async or sync: it keeps async"));
 
     /* the lines that wait on the user: each one's switch, and their look; what cannot be read keeps the base's */
     parse(&theme, "[prompt]\nalign = right\nopen = \"<< \"\nclose = \"\"\nblink = false\nfailed = true\n"
@@ -304,6 +326,9 @@ int main(void) {
     memset(longer + strlen(longer), 'x', 40);
     parse(&theme, longer);
     assert(!strcmp(theme.marker, def->marker) && same(theme.page, def->page));
+    assert(strstr(said, "[theme] base = elsewhere is not a built-in theme (default or yorha): it starts from default; "
+                        "[body] marker = xxxx"));
+    assert(strstr(said, "x is not one line of at most 15 characters: it keeps - "));
 
     dir = snx_temp_dir(NULL);
     second = snx_temp_dir(NULL);
@@ -321,14 +346,26 @@ int main(void) {
     gui_themes_scan(&themes, dirs, 3);
     assert(themes.count == 4 && !strcmp(themes.ids[0], "default") && !strcmp(themes.ids[1], "yorha") &&
            !strcmp(themes.ids[2], "alpha") && !strcmp(themes.ids[3], "gamma"));
-    gui_theme_load(&theme, dirs, 3, "alpha");
-    assert(!strcmp(theme.name, "Alpha") && same(theme.page, yorha->page));
-    gui_theme_load(&theme, dirs, 3, "gamma");
-    assert(!strcmp(theme.name, "Gamma") && same(theme.page, def->page));
-    gui_theme_load(&theme, dirs, 3, "yorha");
-    assert(rgb_is(theme.page, 255, 255, 255) && same(theme.ink, yorha->ink));
-    gui_theme_load(&theme, dirs, 3, "beta");
-    assert(!strcmp(theme.id, "default"));
+    gui_theme_load(&theme, dirs, 3, "alpha", said, sizeof said);
+    assert(!strcmp(theme.name, "Alpha") && same(theme.page, yorha->page) && !said[0]);
+    gui_theme_load(&theme, dirs, 3, "gamma", said, sizeof said);
+    assert(!strcmp(theme.name, "Gamma") && same(theme.page, def->page) && !said[0]);
+    gui_theme_load(&theme, dirs, 3, "yorha", said, sizeof said);
+    assert(rgb_is(theme.page, 255, 255, 255) && same(theme.ink, yorha->ink) && !said[0]);
+    gui_theme_load(&theme, dirs, 3, "beta", said, sizeof said);
+    assert(!strcmp(theme.id, "default") && !strcmp(said, "No themes/beta/theme.ini could be read: it shows default"));
+    write(dir, "delta", "[body]\nscroll = middle\n"); /* its file named, then what it does not take */
+    gui_theme_load(&theme, dirs, 3, "delta", said, sizeof said);
+    {
+        char* folder = snx_path_join(dir, "delta");
+        char* file = snx_path_join(folder, "theme.ini");
+        char want[600];
+        snprintf(want, sizeof want, "%s: [body] scroll = middle is not center or edge: it keeps center", file);
+        assert(!strcmp(theme.id, "delta") && !strcmp(said, want));
+        free(file);
+        free(folder);
+    }
+    gui_theme_load(&theme, dirs, 3, "alpha", NULL, 0); /* nothing said where nothing is asked */
     gui_themes_free(&themes);
     missing = snx_path_join(dir, "missing");
     none[0] = missing;
@@ -346,7 +383,8 @@ int main(void) {
         int s;
         const GuiTheme* b = gui_theme_builtin(ids[i]);
         GuiTheme f;
-        gui_theme_load(&f, shipped, 1, ids[i]);
+        gui_theme_load(&f, shipped, 1, ids[i], said, sizeof said);
+        assert(!said[0]); /* the shipped files say nothing a theme does not take */
         assert(!strcmp(f.id, b->id) && !strcmp(f.name, b->name) && !strcmp(f.marker, b->marker));
         assert(same(f.page, b->page) && same(f.ink, b->ink) && same(f.soft, b->soft) && same(f.focus, b->focus));
         assert(same(f.active, b->active) && same(f.failure, b->failure) && same(f.dim, b->dim));
@@ -431,7 +469,8 @@ int main(void) {
         to = from ? strstr(from, "\n```") : NULL;
         assert(from && to);
         ++from;
-        assert(gui_theme_parse(&theme, "doc", from, (size_t)(to - from)) && !strcmp(theme.name, "Night ink"));
+        assert(gui_theme_parse(&theme, "doc", from, (size_t)(to - from), said, sizeof said) &&
+               !strcmp(theme.name, "Night ink") && !said[0]);
         n = key_lines(from, (size_t)(to - from), keys, sizeof keys);
         assert(n > 40);
         for (key = keys; n-- > 0; key += strlen(key) + 1) {

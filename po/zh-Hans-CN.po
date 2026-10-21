@@ -2316,6 +2316,68 @@ msgid "a list longer than its column: center keeps the focus in its middle, edge
 msgstr "超出一列的列表：center 使焦点在中间，edge 到两端时移动"
 
 #: src/gui/theme.c
+msgid "a colour as #RRGGBB"
+msgstr "#RRGGBB 的颜色"
+
+#: src/gui/theme.c
+msgid "true or false"
+msgstr "true 或 false"
+
+#: src/gui/theme.c
+#, c-format
+msgid "a whole number from 0 to %lu"
+msgstr "0 到 %lu 的整数"
+
+#: src/gui/theme.c
+#, c-format
+msgid "one line of at most %lu characters"
+msgstr "最多 %lu 个字的一行"
+
+#: src/gui/theme.c
+msgid " or "
+msgstr " 或 "
+
+#: src/gui/theme.c
+#, c-format
+msgid "[%s] %s = %s is not %s: it keeps %s"
+msgstr "[%s] %s = %s 不是%s：保留 %s"
+
+#: src/gui/theme.c
+#, c-format
+msgid "[%s] %s = %s is more than %lu: it takes %lu"
+msgstr "[%s] %s = %s 大于 %lu：取 %lu"
+
+#: src/gui/theme.c
+#, c-format
+msgid "[theme] format = %s is not a whole number from 1: it keeps %lu"
+msgstr "[theme] format = %s 不是 1 或更大的整数：保留 %lu"
+
+#: src/gui/theme.c
+#, c-format
+msgid "[theme] base = %s is not a built-in theme (default or yorha): it starts from %s"
+msgstr "[theme] base = %s 不是内置主题（default 或 yorha）：从 %s 开始"
+
+#: src/gui/theme.c
+#, c-format
+msgid "[theme] layout = %s is not menu, loading, plain, debug or skip: it starts from %s"
+msgstr "[theme] layout = %s 不是 menu、loading、plain、debug 或 skip：从 %s 开始"
+
+#: src/gui/theme.c
+#, c-format
+msgid "[%s] %s = %s is not a key of a theme"
+msgstr "[%s] %s = %s 不是主题的键"
+
+#: src/gui/theme.c
+#, c-format
+msgid "%s could not be read (out of memory): it shows %s"
+msgstr "%s 无法读取（内存不足）：显示 %s"
+
+#: src/gui/theme.c
+#, c-format
+msgid "No themes/%s/theme.ini could be read: it shows %s"
+msgstr "无法读取 themes/%s/theme.ini：显示 %s"
+
+#: src/gui/theme.c
 msgid "in the margin, beside the focused box"
 msgstr "在边距中，焦点框旁边"
 

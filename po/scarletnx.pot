@@ -2575,6 +2575,68 @@ msgstr ""
 msgid "the boots in 100 that show this theme's, the default's the others"
 msgstr ""
 
+#: src/gui/theme.c
+msgid "a colour as #RRGGBB"
+msgstr ""
+
+#: src/gui/theme.c
+msgid "true or false"
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
+msgid "a whole number from 0 to %lu"
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
+msgid "one line of at most %lu characters"
+msgstr ""
+
+#: src/gui/theme.c
+msgid " or "
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
+msgid "[%s] %s = %s is not %s: it keeps %s"
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
+msgid "[%s] %s = %s is more than %lu: it takes %lu"
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
+msgid "[theme] format = %s is not a whole number from 1: it keeps %lu"
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
+msgid "[theme] base = %s is not a built-in theme (default or yorha): it starts from %s"
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
+msgid "[theme] layout = %s is not menu, loading, plain, debug or skip: it starts from %s"
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
+msgid "[%s] %s = %s is not a key of a theme"
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
+msgid "%s could not be read (out of memory): it shows %s"
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
+msgid "No themes/%s/theme.ini could be read: it shows %s"
+msgstr ""
+
 #: src/common/utilities/setup.c
 msgid "Game settings"
 msgstr ""

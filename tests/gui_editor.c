@@ -247,7 +247,10 @@ int main(void) {
     assert(dir && !gui_editor_save(&e, dir) && !e.dirty && strstr(e.note, "Saved in"));
     path = snx_format("%s/Night ink_2/theme.ini", dir);
     text = (char*)snx_read_file(path, &size);
-    assert(text && gui_theme_parse(&back, "Night ink_2", text, size));
+    {
+        char said[1024];
+        assert(text && gui_theme_parse(&back, "Night ink_2", text, size, said, sizeof said) && !said[0]);
+    }
     for (r = 2; r <= keys + 1; ++r) {
         char a[96], b[96];
         gui_theme_get(&e.theme, gui_editor_key_of(&e, r), a, sizeof a);

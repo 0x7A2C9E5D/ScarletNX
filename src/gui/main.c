@@ -629,6 +629,20 @@ static GuiScreen screen(const App* app) {
                    : GUI_SCREEN_COMPILING;
     return menu_screen(app);
 }
+/* the theme of that id; what its theme.ini has that it does not take said in the open form's note, else in the
+   message: added to it as the menu opens (add), else in its place, so a theme that takes all says nothing */
+static void theme_load(App* app, const char* id, bool add) {
+    char said[sizeof app->message];
+    gui_theme_load(&app->theme, (const char* const*)app->themes_dirs, 2, id, said, sizeof said);
+    if (app->editing) {
+        if (said[0]) snprintf(app->editor.note, sizeof app->editor.note, "%s", said);
+    } else if (add) {
+        size_t m = strlen(app->message);
+        if (said[0]) snprintf(app->message + m, sizeof app->message - m, "%s%s", m ? " " : "", said);
+    } else
+        snprintf(app->message, sizeof app->message, "%s", said);
+    if (said[0] && app->setup_on) app->setup_failed = true; /* the setup's foot in the failure colour */
+}
 /* the theme step themes after or before the one shown, round the list */
 static void next_theme(App* app, int step) {
     size_t i;
@@ -636,8 +650,7 @@ static void next_theme(App* app, int step) {
     gui_themes_scan(&app->themes, dirs, 2);
     i = 0;
     while (i < app->themes.count && strcmp(app->themes.ids[i], app->theme.id)) ++i;
-    if (app->themes.count)
-        gui_theme_load(&app->theme, dirs, 2, app->themes.ids[(i + app->themes.count + step) % app->themes.count]);
+    if (app->themes.count) theme_load(app, app->themes.ids[(i + app->themes.count + step) % app->themes.count], false);
 }
 /* app.ini's [folders] keys, in the order of Settings > App > Folders' rows */
 static const char* const place_names[GUI_PLACES] = {"data", "recompiled", "work"};
@@ -761,7 +774,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
             gui_themes_scan(&app->themes, dirs, 2);
             for (i = 0; i < app->themes.count && strcmp(app->themes.ids[i], value); ++i) {}
             if (i < app->themes.count) {
-                if (apply) gui_theme_load(&app->theme, dirs, 2, value);
+                if (apply) theme_load(app, value, true);
                 continue;
             }
         } else if (!strcmp(ini.section, "app") && !strcmp(key, "text_size")) {
@@ -4414,7 +4427,7 @@ static void save_editor(App* app) {
     const char* const* dirs = (const char* const*)app->themes_dirs;
     if (gui_editor_save(&app->editor, app->themes_dirs[0])) return;
     gui_themes_scan(&app->themes, dirs, 2);
-    gui_theme_load(&app->theme, dirs, 2, app->editor.id);
+    theme_load(app, app->editor.id, false);
     app_save(app);
 }
 /* settings.ini written as the settings are, a failure in the note and its box; the head and Plays as after it */

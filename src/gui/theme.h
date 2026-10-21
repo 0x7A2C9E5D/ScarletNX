@@ -147,13 +147,18 @@ const GuiTheme* gui_theme_builtin(const char* id);
 /* the theme whose splash a boot shows: this one when roll (0 to 99) is under its chance, else the default */
 const GuiTheme* gui_splash_theme(const GuiTheme* theme, int roll);
 /* A theme.ini's text over the built-in its [theme] base names (default when absent): a key it lacks, or cannot
-   read, keeps the base's value. Returns false only when out of memory. */
-int gui_theme_parse(GuiTheme* theme, const char* id, const char* text, size_t size);
+   read, keeps the base's value. What it does not take as written goes in said (said_size bytes; NULL for nothing),
+   each "[section] key = value", why and the value the theme has instead, joined by "; ", empty when it takes all;
+   a number past its key's most takes the most, said too. Returns false only when out of memory. */
+int gui_theme_parse(GuiTheme* theme, const char* id, const char* text, size_t size, char* said, size_t said_size);
 /* the text of the first dirs[i]/id/theme.ini that can be read; owned, NULL for none */
 char* gui_theme_text(const char* const* dirs, size_t count, const char* id, size_t* size);
 /* The first dirs[i]/id/theme.ini that can be read, else the built-in of that id, else the default theme: a folder
-   named like a built-in replaces it */
-void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, const char* id);
+   named like a built-in replaces it. said (said_size bytes; NULL for nothing) gets "<file>: " and what parsing
+   said, or why no file of a theme that is no built-in could be read and the theme shown instead; empty when all is
+   taken */
+void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, const char* id, char* said,
+                    size_t said_size);
 /* the built-ins, then each other folder of dirs with a theme.ini, once */
 void gui_themes_scan(GuiThemes* themes, const char* const* dirs, size_t count);
 void gui_themes_free(GuiThemes* themes);

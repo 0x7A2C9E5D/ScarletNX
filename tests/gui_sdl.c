@@ -1645,7 +1645,7 @@ int main(int argc, char** argv) {
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
         free(kept);
         /* a start with them: the theme and the letters as they were left, and nothing to say */
-        gui_theme_load(&app.theme, (const char* const*)app.themes_dirs, 2, first_id);
+        gui_theme_load(&app.theme, (const char* const*)app.themes_dirs, 2, first_id, NULL, 0);
         app.menu.text_size = 0;
         app.message[0] = 0;
         app_load(&app);
@@ -4168,7 +4168,19 @@ int main(int argc, char** argv) {
         }
         app_select(&app, GUI_APP_THEME);
         assert(!strcmp(app.theme.id, "custom") && !strcmp(app.theme.name, "Custom test"));
-        assert(app.theme.panels == GUI_PANELS_FILL && !app.editor.note[0]); /* its base's boxes */
+        assert(app.theme.panels == GUI_PANELS_FILL); /* its base's boxes */
+        { /* its ink, no colour, said with the base's it keeps and the file */
+            const GuiTheme* y = gui_theme_builtin("yorha");
+            char want[600];
+            snprintf(want, sizeof want,
+                     "%s: [colors] ink = not a colour is not a colour as #RRGGBB: it keeps #%02X%02X%02X", custom_ini,
+                     y->ink.r, y->ink.g, y->ink.b);
+            assert(!strcmp(app.editor.note, want) && !app.editing);
+            app.message[0] = 0; /* as the menu opens with app.ini's theme = custom: said in its message */
+            app_load(&app);
+            assert(strstr(app.message, want) && !strcmp(app.theme.id, "custom"));
+            app.message[0] = 0;
+        }
         render(&app);
         page.r = 0x10; /* its own page; its ink, unreadable, is YoRHa's */
         page.g = 0x20;
@@ -4369,7 +4381,7 @@ int main(int argc, char** argv) {
         /* YoRHa loading: a run as steps, typed in, with the ring, the dots and the bar; the run fades in, and out */
         steps_input = snx_path_join(temporary, "option flags steps.nro");
         assert(!snx_write_file(steps_input, "fixture", 7));
-        gui_theme_load(&app.theme, (const char* const*)app.themes_dirs, 2, "yorha");
+        gui_theme_load(&app.theme, (const char* const*)app.themes_dirs, 2, "yorha", NULL, 0);
         app.menu.selected = GUI_SWITCH;
         launcher(&app, true);
         launch(&app, snx_strdup(steps_input), false);

@@ -2316,6 +2316,68 @@ msgid "a list longer than its column: center keeps the focus in its middle, edge
 msgstr "uma lista maior que a coluna: center mantém o foco no meio, edge rola nas pontas"
 
 #: src/gui/theme.c
+msgid "a colour as #RRGGBB"
+msgstr "uma cor como #RRGGBB"
+
+#: src/gui/theme.c
+msgid "true or false"
+msgstr "true ou false"
+
+#: src/gui/theme.c
+#, c-format
+msgid "a whole number from 0 to %lu"
+msgstr "um número inteiro de 0 a %lu"
+
+#: src/gui/theme.c
+#, c-format
+msgid "one line of at most %lu characters"
+msgstr "uma linha de até %lu caracteres"
+
+#: src/gui/theme.c
+msgid " or "
+msgstr " ou "
+
+#: src/gui/theme.c
+#, c-format
+msgid "[%s] %s = %s is not %s: it keeps %s"
+msgstr "[%s] %s = %s não é %s: fica %s"
+
+#: src/gui/theme.c
+#, c-format
+msgid "[%s] %s = %s is more than %lu: it takes %lu"
+msgstr "[%s] %s = %s passa de %lu: fica %lu"
+
+#: src/gui/theme.c
+#, c-format
+msgid "[theme] format = %s is not a whole number from 1: it keeps %lu"
+msgstr "[theme] format = %s não é um número inteiro a partir de 1: fica %lu"
+
+#: src/gui/theme.c
+#, c-format
+msgid "[theme] base = %s is not a built-in theme (default or yorha): it starts from %s"
+msgstr "[theme] base = %s não é um tema embutido (default ou yorha): parte de %s"
+
+#: src/gui/theme.c
+#, c-format
+msgid "[theme] layout = %s is not menu, loading, plain, debug or skip: it starts from %s"
+msgstr "[theme] layout = %s não é menu, loading, plain, debug ou skip: parte de %s"
+
+#: src/gui/theme.c
+#, c-format
+msgid "[%s] %s = %s is not a key of a theme"
+msgstr "[%s] %s = %s não é uma chave de tema"
+
+#: src/gui/theme.c
+#, c-format
+msgid "%s could not be read (out of memory): it shows %s"
+msgstr "%s não pôde ser lido (sem memória): mostra %s"
+
+#: src/gui/theme.c
+#, c-format
+msgid "No themes/%s/theme.ini could be read: it shows %s"
+msgstr "Nenhum themes/%s/theme.ini pôde ser lido: mostra %s"
+
+#: src/gui/theme.c
 msgid "in the margin, beside the focused box"
 msgstr "na margem, ao lado da caixa em foco"
 

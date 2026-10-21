@@ -424,7 +424,11 @@ nothing else: each folder of `src/gui/themes/` is one, its `theme.ini` compiled 
 takes YoRHa's colours from the same file at build time. The files are copied beside the GUI
 in the build and installed in `share/scarletnx/themes`: copy one under a new name to make a theme, or edit one
 to change the built-in. `[theme] base` picks the built-in a file starts from, and a key it
-leaves out, or that cannot be read, keeps the base's value. The menu's **Theme editor**
+leaves out, or that cannot be read, keeps the base's value. What a file has that the theme does not take as written
+is said, the file named, in the menu's message as it opens and in Settings > App's note when the theme is picked: a
+value it cannot read with the one it keeps (`[body] scroll = middle is not center or edge: it keeps center`), a number
+past its most with the most it takes, a base that is no built-in with the one it starts from, and a key no theme has
+(an ErET file's own keys aside). A line with no `=` is no setting. The menu's **Theme editor**
 writes one with every key.
 
 ```ini
