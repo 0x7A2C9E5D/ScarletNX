@@ -131,3 +131,62 @@ int gui_clean_inis(GuiCleaned* done, const char* folder) {
     snx_free_strings(names, count);
     return found;
 }
+/* whether name is one of only's (NULL: every name is) */
+static bool among(const char* const* only, const char* name) {
+    if (!only) return true;
+    for (; *only; ++only)
+        if (!strcmp(*only, name)) return true;
+    return false;
+}
+/* from into to, in the folder now: moved, would be, or why not; 1 when it moves */
+static int move_entry(GuiCleaned* done, const char* from, const char* to, const char* now, bool apply) {
+    char what[4400], why[256];
+    int ok = 0;
+    if (snx_path_exists(to))
+        snprintf(what, sizeof what, snx_tr("Stays: %s is there"), to);
+    else if (!snx_same_disk(from, now))
+        snprintf(what, sizeof what, snx_tr("Not moved: %s is on another disk"), now);
+    else if (apply && snx_replace(from, to))
+        snprintf(what, sizeof what, snx_tr("Not moved to %s: %s"), to, snx_os_error(why, sizeof why));
+    else {
+        snprintf(what, sizeof what, apply ? snx_tr("Moved to %s") : snx_tr("Moves to %s"), to);
+        ok = 1;
+    }
+    gui_cleaned_add(done, ok, from, what);
+    return ok;
+}
+int gui_move_entries(GuiCleaned* done, const char* old, const char* now, const char* const* only, bool apply) {
+    char **names = NULL, *from, *to, what[4400], why[256];
+    const char* slash;
+    size_t count = 0, i;
+    int moves = 0;
+    if (!snx_path_exists(old)) return 0;
+    if (apply && snx_mkdirs(now)) {
+        snprintf(what, sizeof what, snx_tr("Not moved: %s could not be made: %s"), now, snx_os_error(why, sizeof why));
+        gui_cleaned_add(done, false, old, what);
+        return 0;
+    }
+    if (!snx_is_dir(old) || snx_is_link(old)) { /* a file, or a link: by its own name in now */
+        for (slash = old + strlen(old); slash > old && slash[-1] != '/' && slash[-1] != '\\';) --slash;
+        to = snx_path_join(now, slash);
+        if (to) moves = move_entry(done, old, to, now, apply);
+        free(to);
+        return moves;
+    }
+    if (snx_list_dir(old, &names, &count)) {
+        snprintf(what, sizeof what, snx_tr("Not moved: it cannot be read: %s"), snx_os_error(why, sizeof why));
+        gui_cleaned_add(done, false, old, what);
+        return 0;
+    }
+    for (i = 0; i < count; ++i) {
+        if (!among(only, names[i])) continue;
+        from = snx_path_join(old, names[i]);
+        to = snx_path_join(now, names[i]);
+        if (from && to) moves += move_entry(done, from, to, now, apply);
+        free(from);
+        free(to);
+    }
+    snx_free_strings(names, count);
+    if (apply && !snx_remove_empty_dir(old)) gui_cleaned_add(done, true, old, snx_tr("Taken away: empty now"));
+    return moves;
+}

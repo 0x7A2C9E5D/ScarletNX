@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
     GuiSettings s = {0};
     GuiEditor form;
     const char* options[64];
-    int fullscreen, touch, stub, tmpfs, extract, launch, page, all;
+    int fullscreen, touch, stub, tmpfs, extract, launch, page, all, changed;
     assert(!gui_settings_read(&s, list));
 
     /* the launcher's own and the recompiler's (settings.txt's launcher sections), then a row a setting in the list's
@@ -234,10 +234,14 @@ int main(int argc, char** argv) {
         assert(!gui_settings_value(&s, "fullscreen") && !strcmp(gui_settings_value(&s, "touch"), "2"));
         assert(!gui_settings_value(&s, "log") && !strcmp(gui_settings_value(&s, "controls_b_shown"), "0"));
         assert(!strcmp(shown(&s, "All"), "Mixed") && gui_settings_options(&s, 1, options) == 5);
-        /* a row back to where it started, then every one */
+        /* a row back to where it started, then every one; how many a reset of every one changes, counted */
+        changed = gui_settings_changed(&s); /* gdbstub, language, fullscreen, touch, B; not the All made Mixed */
+        assert(changed == 5);
         gui_settings_reset(&s, at(&s, "language"));
         assert(!gui_settings_value(&s, "language") && !strcmp(gui_settings_value(&s, "touch"), "2"));
+        assert(gui_settings_changed(&s) == changed - 1);
         gui_settings_reset(&s, -1);
+        assert(!gui_settings_changed(&s));
         assert(!strcmp(gui_settings_value(&s, "fullscreen"), "0") && !gui_settings_value(&s, "touch"));
         assert(!gui_settings_value(&s, "gdbstub") && gui_settings_options(&s, 1, options) == 1);
         assert(!strcmp(shown(&s, "All"), ".ini"));

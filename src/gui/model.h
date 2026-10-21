@@ -47,7 +47,16 @@ typedef enum {
     GUI_ASK_DEEP,    /* a folder picked with folders in it: are their games listed too */
     GUI_ASK_OUTSIDE, /* a folder picked in Folders outside the app's own storage, which Android slows */
     GUI_ASK_ROOM,    /* a run whose extraction may not fit (gui_room) */
-    GUI_ASK_TEXT     /* a text size just picked: kept, or the one before it back */
+    GUI_ASK_TEXT,    /* a text size just picked: kept, or the one before it back */
+    /* a change to the player's settings or folders, what it changes in the question (main.c's ask_line) */
+    GUI_ASK_CLEAN,  /* App's Clean old settings: the [Deprecated] sections and old keys taken out */
+    GUI_ASK_RESET,  /* Settings' Reset all to the defaults: the settings not at their default */
+    GUI_ASK_PLACES, /* Folders' All back to the defaults: the folders picked */
+    GUI_ASK_PLACE,  /* a folder picked in Folders, or the Library's recompiled/, back to its default */
+    GUI_ASK_FOLDER, /* a game folder taken off the Library */
+    GUI_ASK_MOVE,   /* App's Move old files: how many entries move, how many stay */
+    GUI_ASK_CLOSE,  /* the window closed while a run goes: it ends with the menu */
+    GUI_ASK_ERROR   /* a failure of the system's, said whole (main.c's say_failure): OK alone, which closes it */
 } GuiAsk;
 typedef struct {
     bool shown;
@@ -116,6 +125,11 @@ size_t gui_browser_pages(const GuiBrowser* browser);
 size_t gui_browser_items(const GuiBrowser* browser);
 void gui_browser_resize(GuiBrowser* browser, size_t page_size);
 GuiBrowserAction gui_browser_key(GuiBrowser* browser, GuiKey key);
+/* gui_browser_key over a list with items no one picks (a group's heading; skip says which, by the item's index): Up
+   and Down step over them, a page shown with its focus on one moves it to the next item that is not one (else the one
+   before), and Select on one asks nothing */
+GuiBrowserAction gui_browser_key_skip(GuiBrowser* browser, GuiKey key, bool (*skip)(size_t item, const void* user),
+                                      const void* user);
 
 #define GUI_MAX_COLS 240
 #define GUI_MAX_ROWS 100

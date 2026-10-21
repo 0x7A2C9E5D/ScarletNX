@@ -56,12 +56,24 @@ if(SNX_BUILD_NX AND DEFINED SNX_BACKEND AND NOT SNX_BACKEND STREQUAL "sdl3")
                         "Configure a new build folder, or remove SNX_BACKEND with -USNX_BACKEND. "
                         "Use -H/--headless at runtime to run without a window.")
 endif()
-option(SNX_DEPLOY "Copy the runtime next to every recompiled game in SNX_GAMES_DIR after building" ON)
-set(SNX_GAMES_DIR "" CACHE PATH "Folder holding the recompiled games (empty: games/ of the drivers' data folder)")
+option(SNX_DEPLOY "Copy the runtime next to every recompiled game in SNX_RECOMPILED_DIR after building" ON)
+set(SNX_RECOMPILED_DIR "" CACHE PATH
+    "Folder holding the recompiled games (empty: recompiled/ of the drivers' data folder)")
+# SNX_GAMES_DIR, its name before (docs/DEPRECATIONS.md): taken while SNX_RECOMPILED_DIR is empty, and said
+if(DEFINED SNX_GAMES_DIR)
+    if(NOT SNX_GAMES_DIR STREQUAL "" AND SNX_RECOMPILED_DIR STREQUAL "")
+        message(STATUS "SNX_GAMES_DIR=${SNX_GAMES_DIR} is now SNX_RECOMPILED_DIR=${SNX_GAMES_DIR}")
+        set_property(CACHE SNX_RECOMPILED_DIR PROPERTY VALUE "${SNX_GAMES_DIR}")
+    elseif(NOT SNX_GAMES_DIR STREQUAL "")
+        message(STATUS "SNX_GAMES_DIR=${SNX_GAMES_DIR} is not used: SNX_RECOMPILED_DIR=${SNX_RECOMPILED_DIR} is set")
+    endif()
+    unset(SNX_GAMES_DIR CACHE)
+endif()
 # the checkout's games/ was the default while the drivers of a build tree worked in it (docs/DEPRECATIONS.md)
-if(SNX_GAMES_DIR STREQUAL "${CMAKE_SOURCE_DIR}/games")
-    message(STATUS "SNX_GAMES_DIR was the checkout's games/, an older version's default: the data folder's from now on")
-    set_property(CACHE SNX_GAMES_DIR PROPERTY VALUE "")
+if(SNX_RECOMPILED_DIR STREQUAL "${CMAKE_SOURCE_DIR}/games")
+    message(STATUS "SNX_RECOMPILED_DIR=${SNX_RECOMPILED_DIR} was the checkout's games/, an older version's default: "
+                   "the data folder's recompiled/ from now on")
+    set_property(CACHE SNX_RECOMPILED_DIR PROPERTY VALUE "")
 endif()
 
 # RelWithDebInfo builds with -O2 and adds symbols for crash reports. It leaves out -DNDEBUG, which keeps the runtime's

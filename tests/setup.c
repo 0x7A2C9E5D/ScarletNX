@@ -70,10 +70,10 @@ static void test_file(const char* root) {
     assert(!snx_setup_read(path, &setup, why, sizeof why) && setup.version == SNX_SETUP_VERSION &&
            setup.notices == SNX_NOTICES && !snx_setup_due(&setup));
     /* a notice added since: it alone */
-    put(path, "[setup]\nversion = 1\nnotices = 8\n");
+    put(path, "[setup]\nversion = 1\nnotices = 9\n");
     assert(!snx_setup_read(path, &setup, why, sizeof why) && snx_setup_due(&setup));
     for (i = 0; i < SNX_SETUP_STEPS; ++i) assert(!snx_setup_asks(&setup, i));
-    for (i = 0; i < SNX_NOTICES; ++i) assert(snx_setup_shows(&setup, i) == (i == 8));
+    for (i = 0; i < SNX_NOTICES; ++i) assert(snx_setup_shows(&setup, i) == (i == 9));
     /* a newer version's: nothing to ask, its own keys left alone, its numbers kept when done */
     put(path, "[setup]\nversion = 3\nnotices = 40\ncolour = red\n[later]\nkey = 1\n");
     assert(!snx_setup_read(path, &setup, why, sizeof why) && setup.version == 3 && setup.notices == 40);

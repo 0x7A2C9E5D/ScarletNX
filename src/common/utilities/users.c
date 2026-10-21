@@ -180,6 +180,75 @@ done:
     free(path);
     return rc;
 }
+int snx_users_rename(const char* dir, int number, const char* nickname, char* why, size_t why_size) {
+    char *path = snx_path_join(dir, USERS_FILE), *staged = snx_format("%s.new", path), *text = NULL, *out = NULL;
+    const char *line, *end, *p, *q;
+    size_t size = 0, len, n, cut = 0, cut_end = 0, after = 0;
+    int section = 0, rc = -1;
+    if (!snx_users_nickname_valid(nickname)) {
+        snprintf(why, why_size, "nickname %.40s is not %d to %d letters, digits, spaces, '.', '_' or '-'", nickname,
+                 SNX_USERS_NICKNAME_MIN, SNX_USERS_NICKNAME_MAX);
+        goto done;
+    }
+    if (number < 1 || number > g_user_count) {
+        snprintf(why, why_size, "there is no user %d: %d user%s", number, g_user_count, g_user_count > 1 ? "s" : "");
+        goto done;
+    }
+    if (!snx_is_file(path)) {
+        if (number == 1) rc = snx_users_start(dir, g_users[0].uid, nickname, why, why_size);
+        if (number != 1) snprintf(why, why_size, "%s is not there: only user 1 is", path);
+        goto done;
+    }
+    text = (char*)snx_read_file(path, &size);
+    if (!text) {
+        snprintf(why, why_size, "%s could not be read", path);
+        goto done;
+    }
+    /* [userN]'s nickname= line, else where one goes after its section line */
+    for (line = text; *line; line += len) {
+        end = strchr(line, '\n');
+        len = end ? (size_t)(end - line) + 1 : strlen(line);
+        for (p = line; *p == ' ' || *p == '\t'; ++p) {}
+        if (*p == '[' && (q = strchr(p, ']')) != NULL && q < line + len) {
+            section = users_section(p + 1, (size_t)(q - p - 1));
+            if (section == number) after = (size_t)(line - text) + len;
+            continue;
+        }
+        if (section != number || cut_end) continue;
+        for (q = p; *q && *q != '=' && *q != '\n'; ++q) {}
+        for (n = (size_t)(q - p); n && (p[n - 1] == ' ' || p[n - 1] == '\t'); --n) {}
+        if (*q == '=' && n == 8 && !strncmp(p, "nickname", 8)) {
+            cut = (size_t)(line - text);
+            cut_end = cut + len;
+        }
+    }
+    if (!after) {
+        snprintf(why, why_size, "%s has no [user%d]", path, number);
+        goto done;
+    }
+    if (!cut_end) cut = cut_end = after;
+    out = snx_format("%.*s%snickname=%s\n%s", (int)cut, text, cut && text[cut - 1] != '\n' ? "\n" : "", nickname,
+                     text + cut_end);
+    /* written beside it first: a full disk leaves users.ini as it was */
+    if (!out || snx_write_file(staged, out, strlen(out))) {
+        snprintf(why, why_size, "%s could not be written", staged);
+        remove(staged);
+        goto done;
+    }
+    if (snx_replace(staged, path)) {
+        snprintf(why, why_size, "%s could not be put in place of %s", staged, path);
+        remove(staged);
+        goto done;
+    }
+    snprintf(g_users[number - 1].nickname, sizeof g_users[number - 1].nickname, "%s", nickname);
+    rc = 0;
+done:
+    free(out);
+    free(text);
+    free(staged);
+    free(path);
+    return rc;
+}
 int snx_users_load(const char* dir, int selected, char* why, size_t why_size) {
     char *path = snx_path_join(dir, USERS_FILE), *text, *key, *value;
     const char* bad;

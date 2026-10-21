@@ -29,14 +29,16 @@ static int same_theme(const GuiTheme* a, const GuiTheme* b, const char* what) {
 }
 /* text as a file of folder id reads, written and read again: the same theme, and the written text read again writes
    the same text */
+static char said[1024]; /* what the last parse said */
 static int round_trip(const char* text, size_t size, const char* id, const char* what, char** written) {
     GuiTheme read, again;
     GuiThemeFile file, file_again;
     char* text_again;
     int ok;
-    assert(gui_theme_parse(&read, id, text, size) && gui_theme_file_read(&file, text, size));
+    assert(gui_theme_parse(&read, id, text, size, NULL, 0) && gui_theme_file_read(&file, text, size));
     *written = gui_theme_write(&read, &file);
-    assert(*written && gui_theme_parse(&again, id, *written, strlen(*written)));
+    assert(*written && gui_theme_parse(&again, id, *written, strlen(*written), said, sizeof said));
+    assert(!said[0]); /* what the GUI writes it reads whole */
     assert(gui_theme_file_read(&file_again, *written, strlen(*written)));
     text_again = gui_theme_write(&again, &file_again);
     ok = same_theme(&read, &again, what);
@@ -65,7 +67,7 @@ int main(void) {
         GuiThemeFile file = {"", "", 0, 0, 0, NULL};
         snprintf(file.base, sizeof file.base, "%s", builtins[i]);
         written = gui_theme_write(b, &file);
-        assert(written && gui_theme_parse(&t, builtins[i], written, strlen(written)));
+        assert(written && gui_theme_parse(&t, builtins[i], written, strlen(written), said, sizeof said) && !said[0]);
         fails += !same_theme(b, &t, builtins[i]);
         assert(strstr(written, "base = ") && strstr(written, builtins[i]));
         free(written);

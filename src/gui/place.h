@@ -24,7 +24,11 @@ typedef struct {
     int list_cols;      /* the columns the list asks for; 0: one box, the whole width */
     int fixed;          /* the list two fifths of the width whatever it asks, the side box gone where both do not fit */
     int status;         /* the status box's height, 0 for none */
+    int side;           /* the side box (GuiSide): where it fits, always (under the list when it does not), or never */
 } GuiPlaceIn;
+/* app.ini's side_box: the side box beside the list where both fit (auto), else none with fixed sizing; always, under the
+   list where they do not fit side by side (on); never, the list the whole width (off) */
+typedef enum { GUI_SIDE_AUTO, GUI_SIDE_ON, GUI_SIDE_OFF } GuiSide;
 typedef struct {
     GuiRect head; /* the tabs and the title, the whole width */
     GuiRect tabs, title, badge, tips, list, side, status, keys;
@@ -36,8 +40,8 @@ void gui_place(const GuiPlaceIn* in, GuiPlace* out);
 /* a box at x, y, w by h, of no size rather than a negative one */
 GuiRect gui_rect(int x, int y, int w, int h);
 /* count items item pixels high, pitch apart from the top of a box height high: as many as fit, the first of them
-   chosen so focus (-1: none) is among them */
-int gui_place_list(int height, int item, int pitch, int count, int focus, int* first);
+   chosen so focus (-1: none) is among them, in their middle with center while the list has entries left to move */
+int gui_place_list(int height, int item, int pitch, int count, int focus, int center, int* first);
 /* the pitch that spreads count items over height, from least to most */
 int gui_place_pitch(int height, int count, int least, int most);
 #endif

@@ -36,6 +36,8 @@ int snx_is_link(const char* path);
 int snx_path_exists(const char* path);
 int snx_mkdirs(const char* path);
 int snx_remove_tree(const char* path);
+/* the folder at path taken away when it is empty, and only then (0); nonzero, and nothing touched, when it is not */
+int snx_remove_empty_dir(const char* path);
 int snx_copy_file(const char* src, const char* dst);
 /* size bytes of src from offset into a new dst, in pieces: never the whole range in memory */
 int snx_copy_file_range(const char* src, SnxU64 offset, SnxU64 size, const char* dst);
@@ -112,6 +114,13 @@ extern const SnxGameFile snx_game_files[SNX_GAME_FILES];
 /* work/ of a data folder, the drivers' extractions: the user's is in its cache folder. An older build's
    work/ in the data folder stays, a line on stdout saying so */
 char* snx_work_dir(const char* data_dir);
+/* recompiled/ of a data folder, where the drivers make its games. An older version made them in games/, which stays
+   and is still run from until the player moves it (docs/DEPRECATIONS.md): snx_recompiled_game is game name's folder,
+   recompiled/<name>, else games/<name> when only that one is there; snx_recompiled_left says on stderr that games/ is
+   still there */
+char* snx_recompiled_dir(const char* data_dir);
+char* snx_recompiled_game(const char* data_dir, const char* name);
+void snx_recompiled_left(const char* data_dir);
 /* The folder work/, games/ and the keys are in when a run names none (--repo), and the menu's games/: SNX_PORTABLE_DIR
    beside the AppImage or the program, when it is there (a portable copy); else the user's data folder. NULL when none
    can be named */

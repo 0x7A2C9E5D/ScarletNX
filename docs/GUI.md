@@ -5,7 +5,7 @@
 ## Index
 
 * [Setup](#setup)
-* [Games: the games of games/ and the player's folders](#games-the-games-of-games-and-the-players-folders)
+* [Games: the games of recompiled/ and the player's folders](#games-the-games-of-recompiled-and-the-players-folders)
 * [Output and resource use](#output-and-resource-use)
 * [Themes](#themes)
   * [Theme formats](#theme-formats)
@@ -35,13 +35,13 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - Up/Down and Left/Right move the yellow focus, wrapping at the ends.
 - Tab and Shift+Tab go round the menu, Games and the Settings, the tabs at the top; a click on a tab
   opens it. A theme edited and not saved keeps its screen.
-- A list with rows out of sight (the menu with big letters, `games/`'s pages, the Settings, the theme
+- A list with rows out of sight (the menu with big letters, `recompiled/`'s pages, the Settings, the theme
   editor) shows an arrow past the right edge of its boxes, up on its first row and down on its last, in
   the soft colour.
 - Moving the mouse over an item focuses it in yellow without activating it; in the Settings, a row of the list the
   keys move in (the groups, or the rows of the one open), the other list, a tab and Back waiting for a click.
 - The keys at the foot are buttons: a click or a tap on one presses it, as the keyboard does (ESC or
-  Back goes back, Tab to the next screen, Enter or Tap selects, Swipe across turns the page). A key of
+  Back goes back, Tab to the next screen, Enter or Tap selects, Swipe turns the page). A key of
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
   presses the key when its words all press one. `Arrows`, `mouse` and `pad` press nothing.
 - The menu, top to bottom: the three loads, **Setup device keys**, **Settings**, **Share log**, on
@@ -50,8 +50,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   pink. Activation is tracked separately from hover/focus, so the activated item
   stays pink while another item is hovered in yellow. Mouse controls also work
   on Games' rows.
-- A finger taps an item anywhere on its row, as a click does on its label; a swipe across
-  turns the pages of `games/`; a tap on a finished run returns to the menu, and one on a
+- A finger taps an item anywhere on its row, as a click does on its label; a swipe turns Games'
+  pages, left or up to the next as a phone's lists scroll, right or down back; a tap on a finished run returns to the menu, and one on a
   running run's ESC line aborts it. Android's back button is ESC. On a screen packed with
   pixels (a phone) the text takes the display's own scale, as far as the menu still fits.
 - **Load Switch NSP/XCI/NRO**, **Load Linux ARM ELF** and **Load 3DS CIA** open a screen as the
@@ -62,7 +62,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   dump's extracted straight into its game's folder (as much again only with an **Extractions** folder picked, which
   keeps a copy, and in the temporary folder with *Extract to tmpfs*); when its disks have less free, the menu says how
   much it needs and *Run anyway* takes a second press.
-- **Load 3DS CIA** uses `scarletnx-3ds`. Its `games/` browser lists CIA inputs,
+- **Load 3DS CIA** uses `scarletnx-3ds`. Its `recompiled/` browser lists CIA inputs,
   not host executables. The driver reads supported decrypted application CIAs where they lie, or extracts them
   with *Extract game container*.
   A native Linux build with `SNX_3DS_AOT=ON` then performs static ARM11 integer
@@ -86,8 +86,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   (10 after a failure, while another file can still be picked); ESC cancels without changing them.
 - **Settings** opens on its groups, Enter opening one and ESC coming back: **App**, then
   **Launch** (the launcher's own and the recompiler's, from `src/nx/runtime/settings.txt`), then a group per section of the game's `.ini` (Display,
-  Graphics, Performance, On-screen controls, Controllers, Network, Debug), as `scarletnx --settings`
-  prints them from the runtime's own tables. The game's menu's settings have its names and words
+  Graphics, Performance, Overlay, Controllers, Network, Debug; Overlay is the runtime's On-screen controls, the
+  name its page in the game and `settings.ini` keep), as `scarletnx --settings`
+  prints them from the runtime's own tables: read from them in the same process where the menu is built into
+  scarletnx (iOS too), so every section shows at once; a menu built alone asks `scarletnx --settings`. The game's menu's settings have its names and words
   (*Scale* 100%, *Touch screen* Fingers), and its **Buttons** page, whose **All** steps every row;
   *Edit layout* and *Reset layout* stay in the game's menu, as the layout is each game's own.
   Controllers' **Button map** draws the pad as the game's menu does: each control in a box down either
@@ -104,41 +106,50 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   and a press on a controller give it that one (ESC leaves it as it was, Del makes it *Any* again); its *Button
   map* is the page above on its own keys, its A and B as its *Swap A/B* says.
   **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **Text size**, which opens
-  its box of sizes (below), **Theme editor**, which comes back to App, and **Library**: first `games/`,
-  where recompiled games go: Enter there picks another, as **Folders > Games** does; at its default it stays on the
-  list (the foot's Del greyed), and a folder picked goes back to the default with Del pressed twice, only the setting
-  changing. Then the player's own folders, whose games the `games/` browser lists after
-  `games/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
+  its box of sizes (below), **Animations** (On by default, `animations = 1` in `app.ini`: a screen comes in from the
+  page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Side box** (below, F2 too),
+**Theme editor**, which comes
+  back to App, and **Library**: first `recompiled/`,
+  where recompiled games go: Enter there picks another, as **Folders > Recompiled** does; at its default it stays on the
+  list (the foot's Del greyed), and Del asks before a folder picked goes back to the default, only the setting
+  changing. Then the player's own folders, whose games the `recompiled/` browser lists after
+  `recompiled/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
   or a path pasted with Ctrl+V is added too. A folder with folders in it asks first: *Only this
   folder*, or *With subfolders*, whose games are listed too, four levels down, hidden folders
-  left alone (its row says *+ subfolders*). Del, or Enter twice, takes one off the list (the
-  folder stays). They are kept in `folders.txt` beside `settings.ini`, a line each, `/**` after
-  one kept with its subfolders; one that cannot be read is named when the games are listed. Under App's rows, the
+  left alone (its row says *+ subfolders*). Del or Enter asks before it takes one off the list (the
+  folder keeps its games). A folder too long for its row is cut in its middle (its root and first folder, `...`, as many of its
+  last folders as fit), the whole path under the rows. They are kept in `folders.txt` beside `settings.ini`, a line
+  each, `/**` after one kept with its subfolders; one that cannot be read is named when the games are listed. Under App's rows, the
   three folders in use: the data folder, the games' and the extractions'. **Folders** has a row for
-  the data folder (**Data**: `games/`, `themes/` and `prod.keys`), **Games** and **Extractions**, each its default or a
+  the data folder (**Data**: `recompiled/`, `themes/` and `prod.keys`), **Recompiled** and **Extractions**, each its default or a
   folder picked. Enter opens the folder picker, a folder dropped or pasted with Ctrl+V takes the focused row, Del puts
-  its default back and the last row, **All back to the defaults**, all three. A row says *default*, *picked* or why
+  its default back and the last row, **All back to the defaults**, all three, each asking first with the folders it
+  changes. A row says *default*, *picked* or why
   its folder cannot be; the line under the rows names the folder in use, the one above its disk's free space. A folder
   not there, not a folder, that cannot be written or, for the games, on a disk that runs no programs (`noexec`) is
   refused, and a run whose picked folder no longer can be stops, naming it: the default never takes its place. On
   Android a folder outside the app's own storage is asked about first, since Android checks every file access there
   and games may run slower: *Use it* takes a second tap, and its row says *outside the app*.
-  Nothing is moved, the folder before keeps what it has. The menu's own files stay where they are. **Clean old settings**, Enter twice (the first says what it
-  would do), takes out the settings nothing reads any more: the `[Deprecated]` section the runtime
-  gives a game's `.ini` for the keys it no longer uses (in the config folder's `games/`, in `games/`
+  Nothing is moved, the folder before keeps what it has. The menu's own files stay where they are. **Clean old settings** asks first, with
+  how many it would take out, then takes out the settings nothing reads any more: the `[Deprecated]` section the runtime
+  gives a game's `.ini` for the keys it no longer uses (in the config folder's `recompiled/`, in `recompiled/`
   and in the player's folders), the keys of `settings.ini` that no setting of the runtime's takes
   (only while the runtime lists its settings) and those of `app.ini` the menu does not know. A box
   over the screen then lists each file and what was done to it, or why not, Up/Down and the wheel going over those
   that do not fit, until another key closes it;
-  Share log lists them too. A group of settings shows
+  Share log lists them too. **Move old files** (its value how many folders an older version left) asks first, with
+  how many entries would move and how many stay, then moves what *Left by older versions* lists an entry at a time
+  (`scarletnx --migrate=yes` without the menu, [USAGE](USAGE.md#folders)), the same box saying what moved and why the
+  rest did not: one already there, one on another disk, a game laid out beside others, which moves from its dump.
+  **Reset all**, the last row, puts every setting of the groups after App back to its default, asking first with how
+  many change. A group of settings shows
   a row each, its help above, Left/Right going round its values, Enter typing one. A setting not picked shows the runtime's default and `[default]` (*Off [default]*):
   the run takes the game's `.ini`'s, which starts as that; one picked goes to every
   Switch run as `--key=value`, over the `.ini` ([USAGE](USAGE.md)), and is kept for every game:
   what was changed, by the `.ini`'s sections and keys, in `settings.ini` of the config folder on
   Linux (`~/.config/scarletnx/`), else the data folder's `config/`. A run takes a setting from what that
   run picks, then from the game's own picks (to come), then from these, and last from the game's
-  `.ini`. Del puts a setting back to its default, and the groups' last row, **Reset all to the
-  defaults**, every one. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
+  `.ini`. Del puts a setting back to its default, and App's **Reset all** every one. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
   and `fullscreen` puts the launcher itself on the whole screen too).
   **gdbstub** passes `-S` and `-s`, the
   runtime's stub on port 1234 waiting for the debugger at startup (UNIX only), and **Extract to tmpfs**
@@ -160,7 +171,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   `--key=value` when the game is recompiled: by **R**, or by a run that has to (a dump played the first time, an NRO
   each time). A game made already keeps its code until then. The first two settings and these reach neither the Linux
   nor the 3DS driver.
-- The Status box, after the RAM and the CPU, says what ScarletNX's folders take (games/,
+- The Status box, after the RAM and the CPU, says what ScarletNX's folders take (recompiled/,
   work/ and themes/ of the data folder, and on Linux its config, state and cache folders, else
   the menu's own) and what is left on that disk, counted as the menu opens and after each run.
 - Settings > App's **Theme** switches to the next theme, or the one before: the built-in Default
@@ -202,12 +213,15 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   data folder's `state/` and is shared.
 - **Open data folder**, on Android, opens the data folder, the app's own storage, in the
   system's Files app ([ANDROID](ANDROID.md)).
-- **Exit** closes the launcher. Closing its window during a run terminates the
-  entire owned process tree, so let the game exit normally to preserve its saves.
+- **Exit** closes the launcher, once asked (ESC on the menu asks too), a screen saying for half a second which of its
+  files it keeps for the next start (Settings, the picks of Settings > App, the Library, the recent games), a second
+  close skipping it. Closing its window during a run asks first: Exit terminates the entire owned process tree (a
+  recompile's work lost), so let the game exit normally to preserve its saves.
 - As it opens, the menu shows in a box what an older version left where this one no longer looks, a
   folder at a time: where it is (`- `, in the failure colour, a path too long for a row going on in the next) and
   under it the space it takes, counted as the box shows (*counting* until then). They are the menu's `gui/`, `work/`, each game laid out
-  beside the others in `games/` or a Library folder (`games/<id>/` now), a portable copy's `games/`
+  beside the others in `games/` or a Library folder (`games/<id>/` now), the data folder's `games/` (`recompiled/` now,
+  its games still listed, each row marked `(games/)`, until they are moved), a portable copy's `games/`
   beside the program, and a build tree's `games/`, `work/` and keys in its checkout
   ([USAGE](USAGE.md#folders)). Up/Down, PgUp/PgDn and the wheel go over those that do not fit (an arrow at the
   right of the first says some are above it, *and N more* the ones under), any other key, click or tap closes it;
@@ -225,7 +239,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   folder ([USAGE](USAGE.md#folders)): `$XDG_STATE_HOME/scarletnx/` on Linux, by default
   `~/.local/state/scarletnx/`, `%APPDATA%\scarletnx\state\` on Windows, or the data folder's `state/` on Android. An
   older version's, in a `gui/` folder, stay where they are. A line per
-  game: `switch`, `linux` or `3ds`, `file` or `games` (a program from games/, run as it is),
+  game: `switch`, `linux` or `3ds`, `file` or `games` (a program from recompiled/, run as it is: the token keeps its old name),
   the path and the name, separated by tabs. A list that cannot be written there is named in the
   message, after a run's end too, until it can be.
 
@@ -259,8 +273,9 @@ second) the one before, and OK on the last.
   while that folder is there, the focus then on Portable, else `Now: installed, its files in` the user's data folder.
   Installed is refused while a `.scarletnx/` is there, which keeps the copy portable. An app (Android, iOS) has no such
   page.
-- **Folders**: Keep, Change games folder (Settings > App > Folders' Games) or Add dumps folder (a folder of
-  Settings > App > Library), each through the folder picker, the page showing what they are now.
+- **Folders**: Keep, Change recompiled folder (Settings > App > Folders' Recompiled) or Add a folder (a folder of
+  Settings > App > Library), each through the folder picker, the page listing what is there now: Recompiled, Dumps
+  (the data folder's `dumps/`, with its subfolders), then the player's folders.
 - **Keys**: `prod.keys` and `title.keys` where the driver reads them; Use these, Choose folder (a folder with
   `prod.keys`, and `title.keys` if it has one, installed where Setup device keys installs them) or Later.
 - **User**: with `users/users.ini` there, its users with their pictures and uids, then Keep or Overwrite; without one,
@@ -271,10 +286,10 @@ Once the last page is done the menu opens, `setup.ini` written. After an update 
 shows that notice alone (1/1), with OK, before the menu. `scarletnx --debug` (or `--skip --skip`) opens the menu with no
 setup, writing nothing.
 
-## Games: the games of games/ and the player's folders
+## Games: the games of recompiled/ and the player's folders
 
 **Games**, the tab, lists the games: the ones ready to run (a recompiled game runs directly), the dumps to prepare
-on Android, and CIA files, which go to the 3DS driver. It reads the `games/` of the
+on Android, and CIA files, which go to the 3DS driver. It reads the `recompiled/` of the
 folder the driver works in, which the menu passes it as `--repo`: a portable copy's `.scarletnx/` beside the
 AppImage (or the GUI), else the user's data folder, a build tree's menu's too ([USAGE](USAGE.md#folders)), then each
 folder of Settings > App > Library. Each game is shown by the name in its `control.nacp`, which the recompile copies into
@@ -296,7 +311,7 @@ cannot be read is named and the others still listed.
 - Resizing adjusts the page size while keeping the selected file visible.
 - Empty or missing directories show a diagnostic and still provide Add a folder.
 
-A recompiled game, in a folder of its own (`games/<id>/<id>`), runs with the Settings through the menu's own
+A recompiled game, in a folder of its own (`recompiled/<id>/<id>`), runs with the Settings through the menu's own
 `scarletnx` and is never extracted as a dump: it plays as it is when this build made it, and is recompiled first,
 where it is, when another build did ([USAGE](USAGE.md#extract--aot--run)), the run showing the recompile before the
 game loads. A game an older version laid out beside the others runs directly, as every game does on iOS. A CIA goes
@@ -343,24 +358,44 @@ and to the run, which is **compiling** until the runner prints its `ScarletNX - 
 The screens are boxes side by side, nothing over another, the default framing them in thin lines and YoRHa
 filling them. At the top the tabs, Menu, Games and Settings, and the screen's title after them against the
 right (`[head] place = tabs`) or on a row of its own under them (`below`), and at its right the user games play as
-(Settings > User): a box framed as the others are holding their nickname and their picture, `users/<uid>.jpg` or Wimsy
+(Settings > User, which lists them under **Plays as**, Left/Right picking, and renames each: Enter types its
+nickname, the rule [USAGE](USAGE.md#users) gives checked, then written to `users.ini`): a box framed as the others are
+holding their nickname and their picture, `users/<uid>.jpg` or Wimsy
 without one ([USAGE](USAGE.md#users)), square or round (`[head] picture`; `none` for no box). A click on it opens
 the users over the screen, each with their picture; the one picked is Settings' user from then on, and ESC or a click
-off them leaves it as it was. Under them the list, each entry a box
+off them leaves it as it was. The head is the same on every screen of one window: when the main screens' titles
+(the menu's, Games', the keys' and `SCARLETNX  /  SETTINGS`) do not all fit beside the tabs, every one takes letters a
+size smaller, down to the text's, else leaves out the same first parts (`SCARLETNX  /` first), else shows no title.
+The size is the one the English titles take, so the head is as big in every language, and a translation too long for
+it leaves out first parts too (its last part alone, big, where `SCARLETNX  /  SETTINGS` fits whole); a
+screen deeper in
+the Settings leaves out what more it must. Under them the list, each entry a box
 of its own, the focused one framed in the focus colour or inverted, with the theme's cursor in the margin;
-beside it a box with what the focus is about (a recent game's path, Games' folders, the keys in use, the last
-run's output) and under that one the Status box. The tips have a row of their own under the head (`[tips] place =
+beside it a box with what the focus is about (a game's path whole, Games' folders, the keys in use, the last
+run's output), never what the tips already say (what the row does, a game's kind), and under that one the Status
+box. The tips have a row of their own under the head (`[tips] place =
 top`, both built-ins'), or go to the foot under the list's column with `bottom`, where they take one row, a long one
 sliding, or wrap over its rows with `[tips] wrap`, the last sliding what does not fit. At the foot the screen's keys, the whole width, or under the side
 box's column beside the tips, in letters a size under the rest's; the tips and the keys each in a box with a bar down
 its left (`[tips] box`, `[footer] box`) or on the page. Games lists Add a folder, the recent games and a
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
-opens the picker) and Back at its foot. The Settings list their groups, and beside them the focused group's
-rows: Enter, or a click on a row, opens the group, its rows taking the focus under a Back that a click or a finger
-takes as ESC, the group shown as the focused one; a click on another group opens that one. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
+opens the picker). The Settings list their groups, and beside them the focused group's
+rows: Enter, or a click on a row, opens the group, its rows taking the focus, the group shown as the focused one; a
+click on another group opens that one. No screen has a Back row: ESC goes back, and so does a click or a tap on the
+foot's ESC. A failure of the system's (a file not written, a folder not made, a picker that did not open, the driver
+not found, the log not saved) shows whole in a box over the screen until OK, once in a session; the tips or the
+note go on saying it after. F5, or the foot's (Refresh on a phone), looks at the disk again at once rather than at the next look:
+Games lists its folders again, the Library and Folders say how many of theirs are there, the menu counts the disk
+again, and the box of what an older version left looks again. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
 every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the
-column is as wide as its entries and the side box goes under the list. A text too long for its box wraps over
+column is as wide as its entries and the side box goes under the list. A list's boxes spread over its column, at
+most `[body] gap` pixels apart, times the text's size (0 to 14; 6 in the built-ins), and one longer than its column
+keeps the focused box in its middle, the list moving around it (`[body] scroll = center`, the built-ins'), or moves
+once the focus reaches its end (`edge`). That is the **Side box**'s *Auto*, the
+default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
+not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2, or the
+foot's, shows it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over
 its rows, its last sliding what is left, or takes one that slides with `[body] text = slide`. A run of the console layout shows the driver's output in a box sized to it,
 beside it what runs and how it ended over the status, the file in the tips and the ESC line where the keys
 go, which a tap aborts. The button map draws the pad in the box between the head and the foot. A question comes
@@ -368,7 +403,7 @@ over the screen darkened, in a box in its middle, or with `[body] options-dialog
 foot, a tab with its label on the box's edge, the choices at its right above it, as the game's dialogs. The files an
 older version left come in a box over the screen darkened.
 
-The built-ins are `default`, the look above, and `yorha`: paper and ink, a title twice the text's size, a faint
+The built-ins are `default`, the look above, and `yorha`: paper and ink, a title twice the text's size where it fits whole, a faint
 grid on the page, square markers, the focused box inverted, the tips in a box under the head, the keys in one on a
 band of ink at the foot, and a run drawn as a
 dark loading screen in its own colours (`[run]`): the title, the game's name with turning
@@ -391,7 +426,11 @@ nothing else: each folder of `src/gui/themes/` is one, its `theme.ini` compiled 
 takes YoRHa's colours from the same file at build time. The files are copied beside the GUI
 in the build and installed in `share/scarletnx/themes`: copy one under a new name to make a theme, or edit one
 to change the built-in. `[theme] base` picks the built-in a file starts from, and a key it
-leaves out, or that cannot be read, keeps the base's value. The menu's **Theme editor**
+leaves out, or that cannot be read, keeps the base's value. What a file has that the theme does not take as written
+is said, the file named, in the menu's message as it opens and in Settings > App's note when the theme is picked: a
+value it cannot read with the one it keeps (`[body] scroll = middle is not center or edge: it keeps center`), a number
+past its most with the most it takes, a base that is no built-in with the one it starts from, and a key no theme has
+(an ErET file's own keys aside). A line with no `=` is no setting. The menu's **Theme editor**
 writes one with every key.
 
 ```ini
@@ -438,6 +477,11 @@ panels = fill
 sizing = fixed
 ; a text too long for its box: wrap (over its rows) | slide (on one row)
 text = wrap
+; the most pixels between two boxes of a list, times the text's size (0 to 14): they spread up to it
+gap = 6
+; a list longer than its column: center (the focused box in its middle, the list moving around it) | edge (the
+; list moving once the focus reaches its end)
+scroll = center
 ; in the list's margin, beside the focused box
 cursor = "> "
 ; a question and its choices: default (a box in the middle) | yorha (the question in a box at the foot, the

@@ -293,14 +293,14 @@ static void test_first(App* app) {
     assert(page(app) == SNX_SETUP_FOLDERS && app->place[GUI_PLACE_GAMES] && same_path(app->games_dir, games));
     config = config_of(app);
     holds(config, "app.ini", "[folders]\n");
-    holds(config, "app.ini", "games = ");
+    holds(config, "app.ini", "recompiled = ");
     key(app, SDLK_DOWN);
     key(app, SDLK_RETURN);
     folder_answer_is(app, dumps);
     assert(app->folder_count == 1 && same_path(app->folders[0], dumps));
     holds(config, "folders.txt", "dumps\n");
     render(app);
-    shows(app, "Games", rgb(app->theme.ink));
+    shows(app, "Recompiled", rgb(app->theme.ink));
     key(app, SDLK_DOWN); /* round to Keep */
     key(app, SDLK_RETURN);
     /* the keys: none, Later in focus; a folder of them installed where the menu keeps them, Use these then */
@@ -309,7 +309,7 @@ static void test_first(App* app) {
     key(app, SDLK_RETURN);
     assert(app->setup_keys);
     folder_answer_is(app, NULL);
-    assert(page(app) == SNX_SETUP_KEYS && app->setup_failed && !app->setup_keys);
+    assert(page(app) == SNX_SETUP_KEYS && app->setup_failed && !app->setup_keys && !app->confirm.shown);
     {
         char* keys_path = app->keys_path; /* NULL when snx_keys_dir finds no home: the variable it reads is named */
         app->keys_path = NULL;
@@ -321,6 +321,10 @@ static void test_first(App* app) {
 #else
         assert(app->setup_failed && !strcmp(app->message, "Cannot install prod.keys: HOME is not set"));
 #endif
+        /* a failure, unlike none picked: in the box too, whole, until OK */
+        assert(app->confirm.shown && app->confirm.ask == GUI_ASK_ERROR && !strcmp(app->error_line, app->message));
+        key(app, SDLK_RETURN);
+        assert(!app->confirm.shown && page(app) == SNX_SETUP_KEYS);
         app->keys_path = keys_path;
     }
     key(app, SDLK_RETURN);
@@ -354,7 +358,7 @@ static void test_first(App* app) {
     assert(!app->setup_on && !app->message[0] && app->user == 1 && !strcmp(app->user_name, "Adam"));
     users = join(portable, "users");
     holds(users, "users.ini", "nickname=Adam\n");
-    holds(config, "setup.ini", "[setup]\nversion = 1\nnotices = 9\n");
+    holds(config, "setup.ini", "[setup]\nversion = 1\nnotices = 10\n");
     holds(config, "app.ini", "language = xx\n");
     holds(config, "app.ini", "theme = yorha\ntext_size = 1\n");
     path = join(home, ".config/scarletnx/setup.ini");
@@ -427,19 +431,19 @@ static void test_users(App* app) {
 /* after an update: the notice it brings, alone; --debug: nothing */
 static void test_notice(App* app) {
     char *config = config_of(app), *file = join(config, "setup.ini");
-    put(file, "[setup]\nversion = 1\nnotices = 8\n");
+    put(file, "[setup]\nversion = 1\nnotices = 9\n");
     setup_start(app);
     assert(app->setup_on && app->setup_count == 1 && page(app) == SETUP_NOTICE);
     render(app);
     shows(app, "Changed since the last version", rgb(app->theme.page));
     shows(app, "Changed 1/1", rgb(head_ink(app)));
     assert(!strcmp(choice_label(app), "OK"));
-    shows(app, "Account saves", rgb(app->theme.ink));
+    shows(app, "Recompiled games", rgb(app->theme.ink));
     hides(app, "Game settings", rgb(app->theme.ink));
     hides(app, "1 Appearance", rgb(app->theme.ink));
     key(app, SDLK_RETURN);
     assert(!app->setup_on);
-    holds(config, "setup.ini", "notices = 9\n");
+    holds(config, "setup.ini", "notices = 10\n");
     remove(file);
     snx_setup_skip = 1;
     setup_start(app);
@@ -549,6 +553,7 @@ int main(void) {
         free(self);
     }
     assert(!strcmp(app.theme.id, "yorha") && app.theme.dialog == GUI_DIALOG_YORHA);
+    app.animations_off = true; /* each page read as it settles, not as it fades in */
     open_files(&app);
     test_first(&app);
     test_users(&app);

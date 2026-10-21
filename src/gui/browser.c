@@ -78,6 +78,12 @@ static bool playable(const char* directory, char* name, int kinds) {
         free(path);
         return listed;
     }
+    if ((kinds & GUI_GAMES_DUMP) && gui_is_dump(name)) {
+        path = snx_path_join(directory, name);
+        listed = path && snx_is_file(path);
+        free(path);
+        return listed;
+    }
     if (!(kinds & GUI_GAMES_RUN)) return false;
 #if defined(__ANDROID__) || defined(SNX_IOS)
     { /* a game's code or a dump, a file: a folder named so is neither. An app's games have no runtime copy */
@@ -362,6 +368,61 @@ bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* erro
 bool gui_games_add_deep(GuiGames* games, const char* directory, int kinds, int depth, char* error, size_t size) {
     if (size) error[0] = 0;
     return add_games(games, directory, kinds, games->count, depth, error, size);
+}
+bool gui_games_heading(const GuiGames* games, size_t i) { return i < games->count && !games->paths[i]; }
+static bool dump_entry(const GuiGames* games, size_t i) {
+    return gui_is_dump(games->names[i]) || gui_is_cia(games->names[i]);
+}
+bool gui_games_group(GuiGames* games, const char* ready, const char* dumps,
+                     bool (*made)(const char* path, const void* user), const void* user) {
+    size_t room = games->count + 2, n = 0, i, in[2] = {0, 0};
+    char* heading[2][2] = {{NULL, NULL}, {NULL, NULL}}; /* each group's name and text */
+    GuiGames out;
+    int group;
+    bool ok;
+    for (i = 0; i < games->count; ++i)
+        if (games->paths[i] && !(dump_entry(games, i) && made && made(games->paths[i], user)))
+            in[dump_entry(games, i)]++;
+    memset(&out, 0, sizeof out);
+    out.names = (char**)calloc(room, sizeof *out.names);
+    out.shown = (char**)calloc(room, sizeof *out.shown);
+    out.paths = (char**)calloc(room, sizeof *out.paths);
+    out.addons = (size_t*)calloc(room, sizeof *out.addons);
+    ok = out.names && out.shown && out.paths && out.addons;
+    for (group = 0; group < 2 && ok; ++group)
+        if (in[0] && in[1]) { /* one group alone has nothing to be told apart from */
+            heading[group][0] = snx_strdup("");
+            heading[group][1] = snx_strdup(group ? dumps : ready);
+            ok = heading[group][0] && heading[group][1];
+        }
+    if (!ok) { /* nothing moved yet: games stays as it was */
+        for (group = 0; group < 2; ++group) {
+            free(heading[group][0]);
+            free(heading[group][1]);
+        }
+        gui_games_free(&out);
+        return false;
+    }
+    for (group = 0; group < 2; ++group) {
+        if (!in[group]) continue;
+        if (heading[group][1]) {
+            out.names[n] = heading[group][0];
+            out.shown[n++] = heading[group][1];
+        }
+        for (i = 0; i < games->count; ++i) {
+            if (!games->paths[i] || (int)dump_entry(games, i) != group) continue; /* an earlier heading goes */
+            if (group && made && made(games->paths[i], user)) continue;
+            out.names[n] = games->names[i];
+            out.shown[n] = games->shown[i];
+            out.paths[n] = games->paths[i];
+            out.addons[n++] = games->addons[i];
+            games->names[i] = games->shown[i] = games->paths[i] = NULL; /* moved to out */
+        }
+    }
+    out.count = n;
+    gui_games_free(games); /* what was left out: dumps made already, earlier headings */
+    *games = out;
+    return true;
 }
 bool gui_has_folders(const char* directory, int kinds) {
     char** names = NULL;
