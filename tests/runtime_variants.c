@@ -2,13 +2,16 @@
    Copyright 2026 the ScarletNX contributors */
 /* The runtime's side of the AOT pack: the variant table is looked up by the current
    guest bytes, a hit fills the dispatch slot, a changed word is refused, and
-   invalidation clears the slot. No compiler is involved. */
+   invalidation clears the slot. A miss falls through to the JIT: the fake service
+   here proves the runtime asks it only when no variant matches. */
+#include "common/cpu/recompiler/llvm/jit_service.h"
 #include "common/cpu/recompiler/variants.h"
 #include "nx/loader/module_abi.h"
 #include "nx/memory/mem.h"
 #include "nx/runtime/guest_jit.h"
 #include "nx/runtime/loader.h"
 #include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
 #include "nx/runtime/platform/log.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -18,6 +21,7 @@
 #define CODE_LO 0x1000
 #define CODE_HI 0x3000
 #define START   0x2000
+#define JIT_PC  0x2800
 #define OUT     0x3000
 #define OUT_SIZE 0x800
 
@@ -49,6 +53,9 @@ static SnxVariantFunction g_functions[2];
 static SnxVariants g_variants_table;
 const SnxVariants* g_variants = &g_variants_table;
 
+char g_cachedir[1024];
+char g_exename[256] = "runtime_variants";
+
 static int g_called;
 static void test_fn(CPU* c, u64 entry) {
     (void)c;
@@ -62,6 +69,89 @@ static void test_fn2(CPU* c, u64 entry) {
     (void)entry;
     ++g_called2;
 }
+
+/* ---- the JIT as much of it as guest_jit.c uses ---- */
+
+static int g_jit_started, g_jit_added, g_jit_removed, g_jit_invalidated, g_jit_called;
+static u64 g_jit_fallback_pc;
+
+static void test_jit_fn(CPU* c, u64 entry) {
+    (void)c;
+    (void)entry;
+    ++g_jit_called;
+}
+
+/* only the pc under test is compiled, so the existing AOT checks stay honest */
+static int jit_can_code(u64 pc) {
+    if (g_jit_fallback_pc && pc == g_jit_fallback_pc) {
+        if (pc >= OUT && pc < OUT + OUT_SIZE) return g_block.state == MS_CODE && (g_block.perm & PERM_X);
+        return 1;
+    }
+    return pc == JIT_PC;
+}
+
+SnxJitService* snx_jit_service_new(const SnxJitConfig* config, char* error, size_t error_size) {
+    static int sentinel;
+    (void)config;
+    if (error && error_size) error[0] = 0;
+    g_jit_started = 1;
+    return (SnxJitService*)(void*)&sentinel;
+}
+
+GuestFn snx_jit_resolve(SnxJitService* service, SnxU64 pc) {
+    (void)service;
+    return jit_can_code(pc) ? test_jit_fn : NULL;
+}
+
+GuestFn snx_jit_wait(SnxJitService* service, SnxU64 pc) { return snx_jit_resolve(service, pc); }
+
+int snx_jit_covers(const SnxJitService* service, SnxU64 pc) {
+    (void)service;
+    (void)pc;
+    return 0;
+}
+
+int snx_jit_add_image(SnxJitService* service, const SnxCodeImage* image) {
+    (void)service;
+    (void)image;
+    ++g_jit_added;
+    return 0;
+}
+
+void snx_jit_remove_image(SnxJitService* service, SnxU64 base) {
+    (void)service;
+    (void)base;
+    ++g_jit_removed;
+}
+
+void snx_jit_invalidate(SnxJitService* service, SnxU64 addr, SnxU64 size) {
+    (void)service;
+    (void)addr;
+    (void)size;
+    ++g_jit_invalidated;
+}
+
+size_t snx_jit_warm(SnxJitService* service, const SnxU64* pcs, size_t count) {
+    (void)service;
+    (void)pcs;
+    (void)count;
+    return 0;
+}
+
+void snx_jit_stats(SnxJitService* service, SnxJitStats* stats) {
+    (void)service;
+    memset(stats, 0, sizeof(*stats));
+    stats->threads = 1;
+}
+
+void snx_jit_service_free(SnxJitService* service) { (void)service; }
+
+u64* hints_copy(size_t* count) {
+    *count = 0;
+    return NULL;
+}
+
+int nvn_trace_active(void) { return 0; }
 
 static int word(void* user, SnxU64 address, SnxU32* out) {
     (void)user;
@@ -132,8 +222,12 @@ int main(void) {
     g_variants_table.version = SNX_VARIANTS_VERSION;
     g_variants_table.count = 2;
     g_variants_table.functions = g_functions;
+    g_settings.jit_optimization[0] = '0';
+    g_settings.jit_optimization[1] = 0;
+    g_settings.jit_threads = 1;
 
     jit_init();
+    CHECK(g_jit_started == 1);
     CHECK(g_invalidate == jit_code_invalidate);
     CHECK(g_disp[(START - CODE_LO) / 4] == NULL);
     fn = jit_wait(START);
@@ -144,13 +238,24 @@ int main(void) {
     CHECK(jit_resolve(START) == test_fn);
     CHECK(jit_wait(START) == test_fn);
 
+    /* no variant for JIT_PC: the runtime asks the JIT and runs its function */
+    fn = jit_wait(JIT_PC);
+    CHECK(fn == test_jit_fn);
+    if (fn) fn(NULL, JIT_PC);
+    CHECK(g_jit_called == 1);
+    CHECK(jit_resolve(JIT_PC) == test_jit_fn);
+
+    /* a variant whose bytes changed is refused, and the JIT compiles the current bytes */
+    g_jit_fallback_pc = START;
     g_memory[START] ^= 1;
     jit_code_invalidate(START, 4);
     CHECK(g_disp[(START - CODE_LO) / 4] == NULL);
-    CHECK(jit_wait(START) == NULL);
-    CHECK(jit_resolve(START) == NULL);
+    CHECK(jit_wait(START) == test_jit_fn);
+    CHECK(jit_resolve(START) == test_jit_fn);
 
     g_memory[START] ^= 1;
+    g_jit_fallback_pc = 0;
+    jit_code_invalidate(START, 4);
     CHECK(jit_wait(START) == test_fn);
     /* a pc outside code_lo..hi is looked up through a block the game mapped */
     CHECK(jit_wait(OUT) == NULL);
@@ -169,6 +274,9 @@ int main(void) {
     CHECK(jit_wait(OUT + 0x400) == NULL);
     CHECK(jit_resolve(OUT + 0x400) == NULL);
     CHECK(jit_resolve_or_add(OUT + 0x400) == NULL);
+    CHECK(g_jit_added == 0);
+    CHECK(g_jit_removed == 0);
+    CHECK(g_jit_invalidated > 0);
     jit_report();
 
     if (failures) {

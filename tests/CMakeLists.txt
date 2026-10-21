@@ -1100,7 +1100,7 @@ set_tests_properties(aot_variants PROPERTIES TIMEOUT 120)
 # the runtime looking a pc up in the AOT variant table instead of compiling it
 add_executable(snx-test-runtime-variants runtime_variants.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/guest_jit.c")
 snx_test_target(snx-test-runtime-variants 11)
-target_link_libraries(snx-test-runtime-variants PRIVATE scarletnx-common scarletnx-filesystem)
+target_link_libraries(snx-test-runtime-variants PRIVATE scarletnx-common scarletnx-filesystem snx_settings)
 add_test(NAME runtime_variants COMMAND snx-test-runtime-variants)
 # the build-side reader of the runtime JIT's cache
 add_executable(snx-test-jit-cache jit_cache.c)
