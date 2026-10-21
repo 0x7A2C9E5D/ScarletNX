@@ -16,6 +16,7 @@ typedef struct {
 void mcp_put_n(Text* t, const char* p, size_t n);
 void mcp_put(Text* t, const char* p);
 void mcp_put_num(Text* t, unsigned long v);
+void mcp_put_hex(Text* t, SnxU64 v); /* lower case, no prefix */
 
 /* The edenprobe tools (mcp_edenprobe.c): each returns its answer, malloc'd, or NULL with why in err */
 
@@ -41,11 +42,13 @@ char* mcp_edenprobe_finding(long issue, const char* suite, const char* name, con
    or NULL with why in err. A namer writes a guest address's name (the game's module, function and offset) into t;
    NULL leaves addresses unnamed */
 typedef void (*McpNamer)(Text* t, const void* ctx, SnxU64 address);
-/* GDB started and connected to the stub at localhost:port, the game stopped, a breakpoint on the runtime's
-   crash_report, and SIGSEGV and SIGBUS passed to the runtime unseen */
+/* GDB started and connected to the stub at 127.0.0.1:port, the game stopped, a breakpoint on the runtime's
+   crash_report, and SIGSEGV and SIGBUS (memory the runtime moves, its crash report) passed to the runtime unseen.
+   Refused while a GDB is attached */
 char* mcp_gdb_attach(long port, Text* err);
-/* A GDB command and its output. One that resumes the game waits up to wait seconds for it to stop, then interrupts
-   it (0 leaves it running); "interrupt" stops it */
+/* One of the commands gdb_command runs (mcp_gdb.c's list) and its output. One that resumes the game runs it in the
+   background and waits up to wait seconds (at most 600) for it to stop, then interrupts it (0 leaves it running);
+   "interrupt" stops it, and nothing else runs while it runs */
 char* mcp_gdb_command(const char* command, long wait, McpNamer name, const void* ctx, Text* err);
 /* Every host thread, and for a guest thread its id, name, whether it is in an SVC, and its guest pc and lr */
 char* mcp_gdb_threads(McpNamer name, const void* ctx, Text* err);
@@ -57,5 +60,9 @@ char* mcp_gdb_memory(SnxU64 address, long size, Text* err);
 char* mcp_gdb_detach(Text* err);
 /* the same at the server's end, if a GDB is still connected */
 void mcp_gdb_close(void);
+/* The server's next message from stdin into line (pending: what was read past it, the caller's too), while GDB's
+   output is taken as it comes (a running game's stops, its end), so GDB never waits for its pipe to drain: 1, or 0 at
+   stdin's end */
+int mcp_read_line(Text* pending, Text* line);
 
 #endif
