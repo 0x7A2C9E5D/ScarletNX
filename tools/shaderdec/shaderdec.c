@@ -7,7 +7,7 @@
    - the decoder's data and matcher, included by decode.c after translator.h: the rows as Op, most fixed bits first
      (so a more specific pattern is tried before the one it narrows), each opcode's first row, and a table indexed
      by the top 12 bits of the word that names the few rows that can match it, which shaderdec_match() checks.
-   Nothing is built at run time. It is strict C90 and depends on nothing, so a cross build can build it for the
+   Nothing is built at run time. It is strict C99 and depends on nothing, so a cross build can build it for the
    machine it runs on.
 
    Usage: shaderdec --enum OUT.h --decoder OUT.inc SPEC

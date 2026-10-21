@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #define NONE  UINT32_MAX
-#define LIMIT UINT64_C(1073741824)
+#define LIMIT 1073741824ull
 typedef struct {
     FsNode* node;
     uint32_t parent, next, child, file, off;
@@ -42,7 +42,7 @@ static void put32(unsigned char* b, uint32_t v) {
 static void put64(unsigned char* b, uint64_t v) {
     for (unsigned i = 0; i < 8; ++i) b[i] = (unsigned char)(v >> (i * 8));
 }
-static uint64_t align16(uint64_t n) { return (n + 15) & ~UINT64_C(15); }
+static uint64_t align16(uint64_t n) { return (n + 15) & ~15ull; }
 static uint32_t buckets(uint32_t n) { return n < 3 ? 3 : n | 1; }
 static bool name16(const char* s, uint16_t out[256], uint32_t* bytes) {
     unsigned n = 0;
@@ -322,7 +322,7 @@ static bool image_has(const SnxCtrRomfs* r, const char* path) {
 }
 /* 3DS datetime milliseconds since 1900-01-01; the Unix epoch starts
    2208988800 seconds later. */
-#define UNIX_EPOCH_1900_MS UINT64_C(2208988800000)
+#define UNIX_EPOCH_1900_MS 2208988800000ull
 bool snx_ctr_utf16_path(const unsigned char* path16, size_t bytes, char* out, size_t out_size) {
     if (!path16 || !out || out_size < 2 || !bytes || (bytes & 1) || bytes > 256 || out_size > 768) return false;
     unsigned n = 0;

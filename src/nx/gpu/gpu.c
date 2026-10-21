@@ -601,7 +601,7 @@ static int fetch_late(GpuItem* j, u32 e) {
     while (end < j->n && !(job_ent(j)[end] >> 63)) total += entry_words(job_ent(j)[end++]);
     if (total > j->late_cap) {
         u32* b;
-        if (total > ((size_t)-1) / 4 || !(b = (u32*)realloc(j->late, (size_t)total * 4))) {
+        if (total > SIZE_MAX / 4 || !(b = (u32*)realloc(j->late, (size_t)total * 4))) {
             WARN_LIMIT(4, "gpu: no memory to fetch %llu pushbuffer words\n", (unsigned long long)total);
             return 0;
         }
@@ -944,7 +944,7 @@ static GpuItem* job_new(const void* entries, u32 n, u32 wait_id) {
         }
     /* the item, the entries (8-byte aligned after it), their offsets, the words */
     size = sizeof(GpuItem) + (u64)n * 8 + (u64)n * 4 + words * 4;
-    if (size > (size_t)-1 || !(j = (GpuItem*)calloc(1, (size_t)size)))
+    if (size > SIZE_MAX || !(j = (GpuItem*)calloc(1, (size_t)size)))
         fatal("gpu: out of memory queueing %u entries\n", n);
     j->n = n;
     if (n) memcpy(job_ent(j), entries, (size_t)n * 8);

@@ -23,13 +23,13 @@ endif()
 # snx_demangle (utilities/demangle.h): C++ names through the C++ runtime's demangler, for the log summary. C, but what
 # links it links the C++ runtime (LINKER_LANGUAGE CXX)
 add_library(snx_demangle STATIC utilities/demangle.c)
-set_target_properties(snx_demangle PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+set_target_properties(snx_demangle PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_compile_options(snx_demangle PRIVATE -pedantic-errors -Wall -Wextra -Werror -Werror=missing-prototypes)
 # snx-logscan: the log summary (utilities/logscan.h) as a program, as scarletnx --scan-log, for the game reports
 # workflow and the tests: only the C library and the demangler. Not for the phones, which run no programs of their own
 if(NOT ANDROID AND NOT IOS)
     add_executable(snx-logscan utilities/logscan_main.c utilities/logscan.c)
-    set_target_properties(snx-logscan PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+    set_target_properties(snx-logscan PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
                                                  LINKER_LANGUAGE CXX RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
     target_compile_options(snx-logscan PRIVATE -pedantic-errors -Wall -Wextra -Werror -Werror=missing-prototypes)
     target_link_libraries(snx-logscan PRIVATE snx_demangle)
@@ -59,7 +59,7 @@ target_compile_options(scarletnx-filesystem PRIVATE -Wall -Wextra -Werror=missin
 target_link_libraries(scarletnx-filesystem PUBLIC Threads::Threads)
 
 # The emulated network stack (network/net.h), shared by nx's bsd and sfdnsres and the GNU ABI's socket syscalls. A
-# library of its own so the C90 tools don't link Winsock
+# library of its own so the C99 tools don't link Winsock
 add_library(scarletnx-net STATIC network/net.c network/net_icmp.c network/net_event.c network/net_dns.c
     network/net_iface.c)
 target_compile_options(scarletnx-net PRIVATE -fno-strict-aliasing -Wall -Wextra -Werror=missing-prototypes)

@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The runtime JIT (jit_service.h). C90 in style; the target's C11 is for the LLVM-C headers and cpu.h's inline
-   functions */
+/* The runtime JIT (jit_service.h). C99 in style; the target's C11 is for the LLVM-C headers */
 #if defined(__linux__) && !defined(_GNU_SOURCE)
 #define _GNU_SOURCE 1 /* sched_getaffinity: the CPUs this process may run on */
 #endif
@@ -228,7 +227,7 @@ static Entry* add(SnxJitService* s, SnxU64 pc, int state) {
     if ((s->entry_count + 1) * 2 > s->entry_capacity) {
         size_t capacity = s->entry_capacity ? s->entry_capacity * 2 : 1024, j;
         Entry* grown;
-        if (capacity > ((size_t)-1) / sizeof(*grown)) return NULL;
+        if (capacity > SIZE_MAX / sizeof(*grown)) return NULL;
         grown = (Entry*)calloc(capacity, sizeof(*grown));
         if (!grown) return NULL;
         for (j = 0; j < s->entry_capacity; ++j)
@@ -256,7 +255,7 @@ static int push(Queue* q, SnxU64 pc) {
     size_t capacity, i;
     if (q->count == q->capacity) {
         capacity = q->capacity ? q->capacity * 2 : 256;
-        if (capacity > ((size_t)-1) / sizeof(*grown)) return -1;
+        if (capacity > SIZE_MAX / sizeof(*grown)) return -1;
         grown = (SnxU64*)malloc(capacity * sizeof(*grown));
         if (!grown) return -1;
         for (i = 0; i < q->count; ++i) grown[i] = q->pcs[(q->head + i) & (q->capacity - 1)];
@@ -549,10 +548,9 @@ static char* cache_key(const SnxJitService* s) {
     size_t n = strlen(cpu) + strlen(features) + 160;
     key = (char*)malloc(n);
     if (key)
-        sprintf(key, "abi=%d llvm=%s rtlib=%08lx%08lx cpu=%s opt=%c hook=%d svc=%d features=%s", SNX_ABI,
+        sprintf(key, "abi=%d llvm=%s rtlib=%016llx cpu=%s opt=%c hook=%d svc=%d features=%s", SNX_ABI,
                 LLVM_VERSION_STRING,
-                (unsigned long)(fnv(snx_rtlib_object, snx_rtlib_object_size, 0xCBF29CE484222325ULL) >> 32),
-                (unsigned long)(fnv(snx_rtlib_object, snx_rtlib_object_size, 0xCBF29CE484222325ULL) & 0xFFFFFFFFu), cpu,
+                (unsigned long long)fnv(snx_rtlib_object, snx_rtlib_object_size, 0xCBF29CE484222325ULL), cpu,
                 s->config.opt, s->config.hook_direct_calls, s->config.direct_svc, features);
     LLVMDisposeMessage(cpu);
     LLVMDisposeMessage(features);
@@ -1346,7 +1344,7 @@ int snx_jit_add_image(SnxJitService* s, const SnxCodeImage* image) {
     GuestFn* slots;
     unsigned char* pending;
     Region* r = NULL;
-    if (!image->text_size || (lo & 3) || hi < lo || n > ((size_t)-1) / sizeof(*slots)) return -1;
+    if (!image->text_size || (lo & 3) || hi < lo || n > SIZE_MAX / sizeof(*slots)) return -1;
     slots = (GuestFn*)calloc(n, sizeof(*slots));
     pending = (unsigned char*)calloc(n / 8 + 1, 1);
     if (!slots || !pending) {
@@ -1510,7 +1508,7 @@ SnxJitService* snx_jit_service_new(const SnxJitConfig* config, char* error, size
     {
         SnxU64 seed = (SnxU64)time(NULL) << 20 ^ (SnxU64)clock() ^ (SnxU64)(size_t)s ^ (SnxU64)(size_t)&seed;
         seed = fnv((const unsigned char*)&seed, sizeof(seed), 0xCBF29CE484222325ULL);
-        sprintf(s->run, "%08lx%08lx", (unsigned long)(seed >> 32), (unsigned long)(seed & 0xFFFFFFFFu));
+        sprintf(s->run, "%016llx", (unsigned long long)seed);
     }
     if (s->config.cache_path) cache_open(s);
     lock_init(&s->lock);

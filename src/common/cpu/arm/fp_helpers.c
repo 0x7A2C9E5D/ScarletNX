@@ -43,7 +43,7 @@ uint64_t snx_arm_fp(SnxArmCPU* cpu, uint64_t x, uint64_t y, uint64_t add, uint32
     c.fpsr = 0;
     unsigned rm = (param >> 24) & 15, iw = (param >> 8) & 255, fb = (param >> 16) & 255;
     int uns = !!(param & (1u << 28));
-    uint64_t sign = UINT64_C(1) << (width - 1), result = 0, product;
+    uint64_t sign = 1ull << (width - 1), result = 0, product;
     if (rm == 8) rm = (c.fpcr >> 22) & 3;
     switch (op) {
         case AV_FADD: result = snx_fp_binary(&c, x, y, width, SNX_FP_ADD); break;

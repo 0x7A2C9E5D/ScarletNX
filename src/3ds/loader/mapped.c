@@ -24,7 +24,7 @@ static uint64_t modified(const char* path) {
     if (!GetFileAttributesExA(path, GetFileExInfoStandard, &attributes)) return 0;
     ULARGE_INTEGER time = {.LowPart = attributes.ftLastWriteTime.dwLowDateTime,
                            .HighPart = attributes.ftLastWriteTime.dwHighDateTime};
-    return time.QuadPart < UINT64_C(116444736000000000) ? 0 : (time.QuadPart - UINT64_C(116444736000000000)) / 10000;
+    return time.QuadPart < 116444736000000000ull ? 0 : (time.QuadPart - 116444736000000000ull) / 10000;
 #else
     struct stat st;
     if (stat(path, &st) || st.st_mtime < 0) return 0;

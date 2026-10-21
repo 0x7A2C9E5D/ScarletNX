@@ -28,7 +28,7 @@ static void vset(ArmIR* a, unsigned offset, unsigned width, LLVMValueRef x) {
     LLVMValueRef result = vcast(a, x, 64, 0);
     if (width < 64) {
         unsigned shift = (offset & 7) * 8;
-        uint64_t mask = ((UINT64_C(1) << width) - 1) << shift;
+        uint64_t mask = ((1ull << width) - 1) << shift;
         LLVMValueRef old = get(a, offsetof(SnxArmCPU, d) + (offset & ~7u), a->i64);
         result = bor(a, band(a, old, c64(a, ~mask)),
                      LLVMBuildShl(a->b, band(a, result, c64(a, mask >> shift)), c64(a, shift), ""));
@@ -139,8 +139,8 @@ static void vector_fp(ArmIR* a, const SnxArmVector* v) {
     for (unsigned i = 0; i < lanes; i++) {
         switch (v->op) {
             case AV_MOV: r[i] = x[i]; break;
-            case AV_FABS: r[i] = band(a, x[i], vk(a, width, (UINT64_C(1) << (width - 1)) - 1)); break;
-            case AV_FNEG: r[i] = bxor(a, x[i], vk(a, width, UINT64_C(1) << (width - 1))); break;
+            case AV_FABS: r[i] = band(a, x[i], vk(a, width, (1ull << (width - 1)) - 1)); break;
+            case AV_FNEG: r[i] = bxor(a, x[i], vk(a, width, 1ull << (width - 1))); break;
             case AV_FSELECT: r[i] = choose(a, condition(a, (unsigned[]){0, 6, 10, 12}[v->aux]), x[i], y[i]); break;
             default: r[i] = fp_call(a, v->op, width, param, x[i], y[i], z[i]); break;
         }
@@ -205,9 +205,9 @@ static void vector_instruction(ArmIR* a) {
 /* Integer NEON and structure transfers are defined below. */
 static LLVMValueRef vsat(ArmIR* a, LLVMValueRef x, unsigned bits, int uns) {
     unsigned wide = LLVMGetIntTypeWidth(LLVMTypeOf(x));
-    uint64_t max = uns ? (bits == 64 ? UINT64_MAX : (UINT64_C(1) << bits) - 1) : (UINT64_C(1) << (bits - 1)) - 1;
+    uint64_t max = uns ? (bits == 64 ? UINT64_MAX : (1ull << bits) - 1) : (1ull << (bits - 1)) - 1;
     LLVMValueRef hi = vk(a, wide, max),
-                 lo = uns ? vk(a, wide, 0) : LLVMConstNeg(vk(a, wide, UINT64_C(1) << (bits - 1)));
+                 lo = uns ? vk(a, wide, 0) : LLVMConstNeg(vk(a, wide, 1ull << (bits - 1)));
     LLVMValueRef r = choose(a, cmp(a, LLVMIntSLT, x, lo), lo, choose(a, cmp(a, LLVMIntSGT, x, hi), hi, x));
     PUT(a, fpscr, bor(a, GET(a, fpscr), choose(a, cmp(a, LLVMIntNE, x, r), c32(a, 1u << 27), c32(a, 0))));
     return r;
@@ -437,7 +437,7 @@ static void vector_integer(ArmIR* a, const SnxArmVector* v) {
             case AV_ADDHN:
             case AV_SUBHN:
                 rr = op == AV_ADDHN ? add(a, x[i], y[i]) : sub(a, x[i], y[i]);
-                if (v->flags & AV_ROUND) rr = add(a, rr, vk(a, nx, UINT64_C(1) << (width - 1)));
+                if (v->flags & AV_ROUND) rr = add(a, rr, vk(a, nx, 1ull << (width - 1)));
                 rr = LLVMBuildLShr(a->b, rr, vk(a, nx, width), "");
                 break;
             case AV_ABS:
@@ -492,7 +492,7 @@ static void vector_integer(ArmIR* a, const SnxArmVector* v) {
                 if (op == AV_SRI && shift == width)
                     rr = z[i];
                 else {
-                    uint64_t mask = op == AV_SLI ? (UINT64_C(1) << shift) - 1 : ~(UINT64_MAX >> (64 - width + shift));
+                    uint64_t mask = op == AV_SLI ? (1ull << shift) - 1 : ~(UINT64_MAX >> (64 - width + shift));
                     rr = op == AV_SLI ? LLVMBuildShl(a->b, x[i], vk(a, width, shift), "")
                                       : LLVMBuildLShr(a->b, x[i], vk(a, width, shift), "");
                     rr = bor(a, rr, band(a, z[i], vk(a, width, mask)));

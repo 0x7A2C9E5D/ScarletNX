@@ -1012,7 +1012,7 @@ bool gnu_hostfs_syscall(GnuVfsState* s, GnuMemory* memory, uint64_t number, cons
         error = two_paths(s, memory, a[0], a[1], number == 37 && (a[4] & 0x400) ? GNU_HOST_FOLLOW : 0, a[2], a[3],
                           &pair[0], &pair[1]);
         if (!error && !pair[0].exists) error = -GNU_ENOENT;
-        if (!error && number == 276 && (a[4] & ~UINT64_C(1))) error = -GNU_EINVAL; /* RENAME_NOREPLACE only */
+        if (!error && number == 276 && (a[4] & ~1ull)) error = -GNU_EINVAL; /* RENAME_NOREPLACE only */
         if (!error && (number == 37 || (number == 276 && (a[4] & 1))) && pair[1].exists) error = -GNU_EEXIST;
         if (!error && number == 37) {
 #ifdef _WIN32
@@ -1106,7 +1106,7 @@ bool gnu_hostfs_syscall(GnuVfsState* s, GnuMemory* memory, uint64_t number, cons
             break;
         case 48:
         case 439:
-            if (a[2] & ~UINT64_C(7))
+            if (a[2] & ~7ull)
                 error = -GNU_EINVAL;
             else {
 #ifdef _WIN32

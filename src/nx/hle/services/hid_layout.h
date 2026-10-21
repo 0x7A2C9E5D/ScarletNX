@@ -119,7 +119,7 @@
 #define HS_HidMouseState                      0x28
 #define HS_HidDebugPadState                   0x20
 
-/* ---- consistency, checked at compile time (C90: a negative array size fails). A ring holds 17 entries, each an
+/* ---- consistency, checked at compile time (without C11's static assert: a negative array size fails). A ring holds 17 entries, each an
    8-byte sampling number before its state; the npad's rings follow each other; ten npad entries end where the
    gesture block starts; sixteen touches fill a touch screen state */
 #define HID_LAYOUT_ENTRIES 17

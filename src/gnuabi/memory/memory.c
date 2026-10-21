@@ -82,7 +82,7 @@ int gnu_memory_init(GnuMemory* m) {
         if (host > (long)GNU_PAGE_SIZE) m->host_page = (uint64_t)host;
         if (forced) {
             uint64_t v = strtoull(forced, NULL, 0);
-            if (v > m->host_page && v <= (UINT64_C(1) << 20) && !(v & (v - 1))) m->host_page = v;
+            if (v > m->host_page && v <= (1ull << 20) && !(v & (v - 1))) m->host_page = v;
         }
         extra = m->host_page - (host > 0 ? (uint64_t)host : GNU_PAGE_SIZE);
         m->base = mmap(NULL, (size_t)(m->size + extra), PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -97,7 +97,7 @@ int gnu_memory_init(GnuMemory* m) {
     }
 #endif
     m->pages = calloc((size_t)(m->size / GNU_PAGE_SIZE), 1);
-    m->mmap_next = UINT64_C(0x40000000);
+    m->mmap_next = 0x40000000ull;
     if (!m->base || !m->pages) {
         gnu_memory_destroy(m);
         return -GNU_ENOMEM;
@@ -217,7 +217,7 @@ int64_t gnu_memory_mmap(GnuMemory* m, uint64_t a, uint64_t n, unsigned p, uint64
     const uint64_t fixed = 0x10, noreplace = 0x100000;
     if (!n || n > m->size - GNU_PAGE_SIZE || p & ~7u || (flags & 3) == 0 || (flags & 3) == 3) return -GNU_EINVAL;
     if (!(flags & 0x20)) return -GNU_ENODEV; /* file mappings are handled by the VFS caller */
-    if (flags & ~(UINT64_C(3) | 0x10 | 0x20 | 0x100 | 0x800 | 0x1000 | 0x2000 | 0x8000 | 0x10000 | 0x20000 | 0x100000))
+    if (flags & ~(3ull | 0x10 | 0x20 | 0x100 | 0x800 | 0x1000 | 0x2000 | 0x8000 | 0x10000 | 0x20000 | 0x100000))
         return -GNU_EINVAL;
     n = up(n);
     if (flags & (fixed | noreplace)) {
@@ -230,7 +230,7 @@ int64_t gnu_memory_mmap(GnuMemory* m, uint64_t a, uint64_t n, unsigned p, uint64
         if (!r) return (int64_t)a;
     }
     /* Keep mappings below the fixed stack region; search wraps for freed holes. */
-    const uint64_t low = UINT64_C(0x40000000), high = UINT64_C(0xe0000000);
+    const uint64_t low = 0x40000000ull, high = 0xe0000000ull;
     if (n > high - low) return -GNU_ENOMEM;
     for (unsigned pass = 0; pass < 2; pass++) {
         uint64_t start = pass ? low : m->mmap_next;

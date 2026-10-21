@@ -1,6 +1,6 @@
 # snx-code-quality: the rules with their wrong and right forms
 
-Every C block here is strict ANSI C (`-std=c90 -pedantic-errors`), and each wrong/right pair gives the same
+Every C block here is strict ISO C99 (`-std=c99 -pedantic-errors`), and each wrong/right pair gives the same
 results under ASan and UBSan except where the right form is meant to differ. Read the rule in doubt.
 
 ## 1. No state another value already says
@@ -98,7 +98,7 @@ int belongs_to(const FsTree* tree, u32 n) {
 **Do:** an object's arrays come from one allocation carved by offsets, and are freed with one `free`.
 When the sizes are fixed, a struct holding the arrays is the simplest block. When they are known only
 at run time, put each array at a multiple of its type's size: a size is always a multiple of the
-alignment, and C90 has no `alignof`.
+alignment, and C99 has no `alignof`.
 
 **Why:** one block keeps an owner's data together and leaves less to fragment. It also turns a
 cleanup path with one `free` per array into a single `free`.
@@ -127,12 +127,11 @@ typedef struct {
     Mix* mix;     /* after the voices, at a multiple of sizeof(Mix) */
 } Mixer;
 int mixer_init(Mixer* m, size_t voices, size_t mixes) {
-    const size_t most = (size_t)-1; /* SIZE_MAX is C99 */
     size_t mix_at, total;
     char* block;
-    if (voices > (most - sizeof(Mix)) / sizeof(Voice) || mixes > most / sizeof(Mix)) return 0;
+    if (voices > (SIZE_MAX - sizeof(Mix)) / sizeof(Voice) || mixes > SIZE_MAX / sizeof(Mix)) return 0;
     mix_at = (voices * sizeof(Voice) + sizeof(Mix) - 1) / sizeof(Mix) * sizeof(Mix);
-    if (mixes * sizeof(Mix) > most - mix_at) return 0;
+    if (mixes * sizeof(Mix) > SIZE_MAX - mix_at) return 0;
     total = mix_at + mixes * sizeof(Mix);
     block = (char*)calloc(1, total ? total : 1);
     if (!block) return 0;
@@ -144,7 +143,7 @@ void mixer_free(Mixer* m) { free(m->voice); }
 ```
 
 `calloc(n, size)` checked each product for overflow. Products and sums of your own do not, hence the checks
-against `(size_t)-1`, which matter when a size comes from the guest.
+against `SIZE_MAX`, which matter when a size comes from the guest.
 
 **Does not apply when:**
 - One of the arrays grows on its own. A `realloc` moves the whole block, so give that array a block of
@@ -181,7 +180,7 @@ typedef struct {
     char apart[SNX_CACHE_LINE - sizeof(u32)];
     u32 completed; /* the GPU thread's */
 } Queue;
-/* C90's static assert: an array of negative size if they would share a line */
+/* C99 has no static assert: an array of negative size if they would share a line */
 typedef char snx_queue_apart[offsetof(Queue, completed) - offsetof(Queue, submitted) >= SNX_CACHE_LINE ? 1 : -1];
 ```
 

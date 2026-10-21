@@ -69,7 +69,7 @@ other translation units include the generated `.h`.
   64-word envelope; unsupported wire types and `@stub`, `@unsorted`, `@fallback`
   are refused. Unspecified commands stop; there is no default successful stub.
 - The host generator and dedicated hand-encoded generator fixture compile as
-  strict C90 on the tested LP64 host. The CTR runtime target remains C11.
+  strict C99. The CTR runtime target remains C11.
 
 ## Implemented services
 
@@ -151,7 +151,7 @@ See [the exact witness](3DS-SUPERTUX.md). No first frame is claimed.
 `3ds_ipc` executes real sessions/handlers against checked memory on both models,
 including forged PID replacement, malformed counts/descriptors, read-only,
 unmapped/misaligned/MMIO TLS, stale/duplicate handles, endpoint/handle exhaustion,
-rollback and non-resumable waits. `ctr_swipc_dispatch` is a generator-only C90
+rollback and non-resumable waits. `ctr_swipc_dispatch` is a generator-only C99
 fixture with deliberately test-local resource accounting; it checks declaration
 order, 64-bit/byte/PID layout, reply packing and failed-output rollback.
 `ctr_swipc_validation` rejects unsupported schemas, checks full-envelope bounds

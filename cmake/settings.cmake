@@ -34,7 +34,7 @@ if(CMAKE_CROSSCOMPILING)
     add_dependencies(snx-settingsgen snx_settingsgen_host)
 else()
     add_executable(snx-settingsgen "${PROJECT_SOURCE_DIR}/tools/settingsgen/settingsgen.c")
-    set_target_properties(snx-settingsgen PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON
+    set_target_properties(snx-settingsgen PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON
                                                      C_EXTENSIONS OFF RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
     target_compile_options(snx-settingsgen PRIVATE -pedantic-errors -Wall -Wextra -Werror)
 endif()

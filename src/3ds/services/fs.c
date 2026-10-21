@@ -446,7 +446,7 @@ static void control_archive(SnxCtrIpc* c) {
             snx_ctr_ipc_error_reply(c, tree_result(rc));
             return;
         }
-        datetime = unix_ms + UINT64_C(2208988800000);
+        datetime = unix_ms + 2208988800000ull;
     }
     for (unsigned i = 0; i < 8; ++i) out[i] = (unsigned char)(datetime >> (i * 8));
     if (snx_ctr_write_ram(p->space, c->in[9], out, sizeof out) != SNX_CTR_MEM_OK) {

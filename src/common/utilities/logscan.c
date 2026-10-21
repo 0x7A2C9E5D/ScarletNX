@@ -5,6 +5,7 @@
    dump and backtrace (hle/kernel/debug.c), and ipc.c's service command warnings */
 #include "common/utilities/logscan.h"
 #include <ctype.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -117,7 +118,7 @@ static void put_n(Buf* b, const char* p, size_t n) {
     char* grown;
     size_t cap;
     if (b->failed) return;
-    if (n > ((size_t)-1) / 2 - b->n - 1) {
+    if (n > SIZE_MAX / 2 - b->n - 1) {
         b->failed = 1;
         return;
     }

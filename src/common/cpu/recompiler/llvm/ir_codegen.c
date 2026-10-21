@@ -28,10 +28,7 @@ static void function_attributes(SnxIr* ir, LLVMValueRef function) {
 LLVMValueRef snx_ir_guest_function(SnxIr* ir, SnxU64 address) {
     char name[32];
     LLVMValueRef function;
-    if (address >> 32)
-        sprintf(name, "F_%lX%08lX", (unsigned long)(address >> 32), (unsigned long)(address & 0xFFFFFFFFUL));
-    else
-        sprintf(name, "F_%lX", (unsigned long)address);
+    sprintf(name, "F_%llX", (unsigned long long)address);
     function = LLVMGetNamedFunction(ir->mod, name);
     if (function) return function;
     function = LLVMAddFunction(ir->mod, name, ir->t_guest);
@@ -84,7 +81,7 @@ static void call(SnxIr* ir, const SnxCodegen* codegen, SnxU64 target, int tail) 
     if (snx_codegen_function(codegen, target) && !codegen->hook_direct_calls)
         site = LLVMBuildCall2(B, ir->t_guest, snx_ir_guest_function(ir, target), args, 2, "");
     else if (!codegen->hook_direct_calls && ir->direct && ir->direct(ir->direct_user, target) != 0) {
-        sprintf(name, "snx_aot_%lx%08lx", (unsigned long)(target >> 32), (unsigned long)(target & 0xFFFFFFFFu));
+        sprintf(name, "snx_aot_%llx", (unsigned long long)target);
         aot = LLVMGetNamedFunction(ir->mod, name);
         if (!aot) aot = LLVMAddFunction(ir->mod, name, ir->t_guest);
         site = LLVMBuildCall2(B, ir->t_guest, aot, args, 2, "");

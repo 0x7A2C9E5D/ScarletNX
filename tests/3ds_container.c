@@ -173,7 +173,7 @@ int main(int argc, char** argv) {
         printf("refused: %s\n", error);
         return 20 + (int)result;
     }
-    assert(snx_ctr_cia_title(cia) == UINT64_C(0x0004000001234500));
+    assert(snx_ctr_cia_title(cia) == 0x0004000001234500ull);
     if (argc == 3) compare(cia, argv[2]);
     snx_ctr_cia_close(cia);
     return 0;

@@ -152,9 +152,9 @@ static u64 g_hash;    /* the file as this run last read or wrote it */
 static u64 g_seen;    /* a changed file seen by the last poll, read once a second poll sees it unchanged */
 
 static u64 fnv1a(const unsigned char* p, size_t n) {
-    u64 h = SNX_U64C(0xCBF29CE4u, 0x84222325u);
+    u64 h = 0xCBF29CE484222325ull;
     size_t i;
-    for (i = 0; i < n; i++) h = (h ^ p[i]) * SNX_U64C(0x100u, 0x000001B3u);
+    for (i = 0; i < n; i++) h = (h ^ p[i]) * 0x100000001B3ull;
     return h;
 }
 

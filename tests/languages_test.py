@@ -115,7 +115,7 @@ class Formats(unittest.TestCase):
         self.refused('%.*s of %d', '%d de %.*s')  # in another order
         self.refused('Page %zu/%zu, %zu game(s)', 'P\u00e1gina %d/%d, %d jogo(s)')  # another type
         self.refused('%.*s of %d', '%s de %d')  # the precision's int gone
-        self.refused('Cannot open %s: %s', 'N\u00e3o abre %2$s: %1$s')  # numbered: C90's printf has none
+        self.refused('Cannot open %s: %s', 'N\u00e3o abre %2$s: %1$s')  # numbered: ISO C's printf has none
         self.refused('Cannot open %s: %s', 'N\u00e3o abre %s: %s%n')
 
     def test_a_percent_the_english_does_not_have(self):

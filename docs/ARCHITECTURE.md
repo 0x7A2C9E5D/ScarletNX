@@ -122,7 +122,7 @@ in one of its own (`HleFs.aocs`), whose image `OpenDataStorageByDataId` serves b
 - `src/common/utilities/common.c` and `process.c`: host files/processes; argv-based subprocesses.
   NX extraction retains its isolated key environment.
 
-Host tooling uses C90 syntax with SDK fixed-width types, formatting and OS APIs.
+Host tooling is strict C99 with SDK fixed-width types, formatting and OS APIs.
 The runtime and generated guest code retain their existing Clang/ABI requirements.
 Normal builds link the driver into the runtime; `SNX_TOOLS_ONLY` builds the same CLI independently.
 

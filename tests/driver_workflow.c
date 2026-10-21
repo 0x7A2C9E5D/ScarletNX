@@ -72,8 +72,8 @@ static int event(char stage) {
     return 7;
 }
 /* SNX_WORKFLOW_ADDON's dumps: the game's, its update's ("Update" in the name) and a DLC's ("Dlc"), by their file */
-#define ADDON_GAME (((SnxU64)0x0100ABCDUL << 32) | 0x12340000UL)
-#define ADDON_DLC  (((SnxU64)0x0100ABCDUL << 32) | 0x5555A001UL)
+#define ADDON_GAME 0x0100ABCD12340000ull
+#define ADDON_DLC  0x0100ABCD5555A001ull
 static SnxU64 addon_title(const char* dump) {
     const char* leaf = strrchr(dump, '/') ? strrchr(dump, '/') + 1 : dump;
     /* a DLC numbered otherwise than its game's 0x1000: its content meta names its game all the same */
@@ -85,7 +85,7 @@ int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title, Sn
     const char* kind = getenv("SNX_WORKFLOW_NPDM");
     (void)paths;
     CHECK(snx_is_file(dump));
-    *title = addon_mode() ? addon_title(dump) : kind && !strcmp(kind, "id") ? ((SnxU64)0x0100ABCDUL << 32) | 0x12345000UL : 0;
+    *title = addon_mode() ? addon_title(dump) : kind && !strcmp(kind, "id") ? 0x0100ABCD12345000ull : 0;
     *game = addon_mode() ? ADDON_GAME : *title;
     /* an update's version from its name: "Update" 65536, "Update old" 0 */
     if (version) *version = strstr(dump, "Update old") ? 0 : strstr(dump, "Update") ? 65536 : SNX_NO_VERSION;
@@ -129,7 +129,7 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
         char *main = snx_path_join(partial, "main"), *npdm = snx_path_join(partial, "main.npdm");
         const char* kind = getenv("SNX_WORKFLOW_NPDM");
         unsigned char meta[0xa0];
-        SnxU64 id = ((SnxU64)0x0100ABCDUL << 32) | 0x12345000UL;
+        SnxU64 id = 0x0100ABCD12345000ull;
         int i;
         memset(meta, 0, sizeof meta);
         memcpy(meta, "META", 4);

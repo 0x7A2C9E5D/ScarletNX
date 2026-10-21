@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SNX_EVENT_COUNT_MAX UINT64_C(0xFFFFFFFFFFFFFFFE)
+#define SNX_EVENT_COUNT_MAX 0xFFFFFFFFFFFFFFFEull
 typedef struct Event {
     SnxLock lock;
     uint64_t count;

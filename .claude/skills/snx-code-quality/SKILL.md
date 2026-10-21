@@ -1,17 +1,20 @@
 ---
 name: snx-code-quality
-description: "RFC #142's C rules: strict ANSI C, no redundant state, indices not pointer chains, one allocation per owner, atomics apart, no stored pointers, one global struct per file. Use when writing or reviewing C in src/."
+description: "RFC #142's C rules: strict ISO C99, no redundant state, indices not pointer chains, one allocation per owner, atomics apart, no stored pointers, one global struct per file. Use when writing or reviewing C in src/."
 ---
 
 # Code quality (#142)
 
-Write strict ANSI C: C90, as the driver builds (`-std=c90 -pedantic-errors`), unless the target needs more.
-Declarations at the top of a block, `/* */` comments, `int` flags (`bool` is tolerated), `SnxU32`/`SnxU64`,
-`printf` through `(unsigned long)`. In place of C11 and C23: `__atomic_*` builtins on plain integers, a `char`
-padding array, `n > ((size_t)-1) / size`. A file's build flags plus `-std=c90 -pedantic` list what is not.
-A local that starts zeroed is declared `= {0}` (C90 allows it), not zeroed by a `memset` after its declaration; a
-`memset` stays for an object reached through a pointer. `strdup` is not C90: `snx_strdup` (common.h) is, and fails
-the way the rest of the code does when memory runs out.
+Write strict ISO C: C99, as the driver builds (`-std=c99 -pedantic-errors`), unless the target needs more.
+C99 is the baseline, so use what it has: `static inline` functions, `<stdint.h>` types (`SnxU32`/`SnxU64` in the
+driver), 64-bit literals as `0x...ull` (not `UINT64_C`, not two halves), `SIZE_MAX` in size checks
+(`n > SIZE_MAX / size`), `%zu` for a `size_t`, `%llu`/`%llx` through `(unsigned long long)` for a 64-bit value
+(never `(unsigned long)`: `long` is 32 bits on Windows), `bool` or `int` flags, `strtoull`, `snprintf`. A
+declaration may follow statements and open a `for`; comments stay `/* */`, as the code has them. In place of C11
+and C23: `__atomic_*` builtins on plain integers, a `char` padding array, a negative-size array typedef as the static
+assert. A file's build flags plus `-std=c99 -pedantic` list what is not. A local that starts zeroed is declared
+`= {0}`, not zeroed by a `memset` after its declaration; a `memset` stays for an object reached through a pointer.
+`strdup` is not C99: `snx_strdup` (common.h) is, and fails the way the rest of the code does when memory runs out.
 
 1. **No state another value already says.** A NULL pointer is absent: no `is_present` beside it.
    Not when NULL means something itself, or the flag says something else.

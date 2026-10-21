@@ -15,7 +15,7 @@
      numbered in declaration order, and an AutoSelect buffer takes the next index of both of its lists
    - copy handles in, copy and move handles out, each in declaration order. Out objects become move handles ahead of
      the declared ones (ipc.c)
-   It is strict C90 and depends on nothing, so a cross build can build it for the machine it runs on.
+   It is strict C99 and depends on nothing, so a cross build can build it for the machine it runs on.
 
    Usage: swipc --root DIR --out DIR FILE.swipc...
    Each FILE is relative to --root, and its outputs are --out/FILE.h and --out/FILE.inc. The header has the types

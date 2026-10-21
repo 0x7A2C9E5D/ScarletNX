@@ -45,8 +45,8 @@ static Renderer test_renderer;
 const Renderer* g_renderer = &test_renderer;
 
 static void ticks(void) {
-    static const u64 at[] = {0, 1, 9999, 10000, 52083, 1000000000u, SNX_U64C(0x2D79883u, 0xD2000000u) /* 10 years */,
-                             SNX_U64C(0x7FFFFFFFu, 0xFFFFFFFFu)};
+    static const u64 at[] = {0, 1, 9999, 10000, 52083, 1000000000u, 0x02D79883D2000000ull /* 10 years */,
+                             0x7FFFFFFFFFFFFFFFull};
     size_t i;
     for (i = 0; i < sizeof at / sizeof *at; i++) {
         unsigned __int128 exact = (unsigned __int128)at[i] * 192 / 10000;

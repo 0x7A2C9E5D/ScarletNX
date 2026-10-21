@@ -159,7 +159,7 @@ static bool extract(RomFs* fs, CtrSpan rom, const char* stage, CtrSpan* found) {
     uint32_t master = ctr_le32(ivfc + 8), shift = ctr_le32(ivfc + 0x4c);
     if (!master || (master & 31) || master > CTR_METADATA_LIMIT || shift < 9 || shift > 20)
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "invalid RomFS IVFC geometry");
-    uint64_t block = UINT64_C(1) << shift;
+    uint64_t block = 1ull << shift;
     uint64_t start = (0x60 + (uint64_t)master + block - 1) & ~(block - 1);
     uint64_t size = ctr_le64(ivfc + 0x44);
     if (!size || !ctr_fits(rom.size, start, size))

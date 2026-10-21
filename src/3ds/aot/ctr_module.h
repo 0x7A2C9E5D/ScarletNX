@@ -3,7 +3,7 @@
 #ifndef SNX_CTR_MODULE_H
 #define SNX_CTR_MODULE_H
 #include "3ds/runtime/ctr_process.h"
-#define SNX_CTR_MODULE_MAGIC         UINT64_C(0x31525443584e5353)
+#define SNX_CTR_MODULE_MAGIC         0x31525443584e5353ull
 #define SNX_CTR_MODULE_ABI           1u
 #define SNX_CTR_MODULE_CODEGEN_ABI   1u
 #define SNX_CTR_MODULE_CHECKED_MODE  1u

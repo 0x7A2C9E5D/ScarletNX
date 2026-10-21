@@ -7,8 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* 0100ABCD12345000, without C99's long long constants */
-#define TITLE (((SnxU64)0x0100ABCDUL << 32) | 0x12345000UL)
+#define TITLE 0x0100ABCD12345000ull
 
 int main(void) {
     unsigned char meta[0xa0];

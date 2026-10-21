@@ -172,7 +172,7 @@ static void dispatch_init(void) {
     g_code_hi = g_mod->code_hi;
     if (g_code_hi <= g_code_lo) return;
     words = (g_code_hi - g_code_lo) / 4;
-    if (words > ((size_t)-1) / sizeof *g_disp) fatal("The game's code range is too large");
+    if (words > SIZE_MAX / sizeof *g_disp) fatal("The game's code range is too large");
     g_disp = (GuestFn*)calloc((size_t)words, sizeof *g_disp);
     if (!g_disp)
         fatal("Out of memory for the game's dispatch table (%llu MiB)",

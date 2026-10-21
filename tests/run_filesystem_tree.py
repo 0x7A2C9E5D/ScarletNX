@@ -118,7 +118,7 @@ def main():
         if args.only != 'tree':
             swipc = scratch / ('swipc.exe' if os.name == 'nt' else 'swipc')
             subprocess.run(
-                [args.cc, '-std=c90', str(repo / 'tools/swipc/swipc.c'), '-o', str(swipc)], check=True, cwd=scratch
+                [args.cc, '-std=c99', str(repo / 'tools/swipc/swipc.c'), '-o', str(swipc)], check=True, cwd=scratch
             )
             swipc_files = ['hle/services/types.swipc', 'hle/filesystem/fs.swipc']
             for f in swipc_files:

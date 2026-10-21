@@ -39,7 +39,7 @@ int main(void) {
         uint32_t h = event(p, 0), eid = snx_ctr_handle_object(p, h), duplicate;
         assert(!snx_ctr_handle_add(p, eid, &duplicate));
         cpu->tpidrurw = 0x12345678;
-        cpu->d[7] = UINT64_C(0x12345678abcdef01);
+        cpu->d[7] = 0x12345678abcdef01ull;
         cpu->fpscr = 0x80000000;
         r[5] = 0x55555555;
         r[0] = h;
@@ -67,7 +67,7 @@ int main(void) {
         assert(snx_ctr_schedule(p) && p->current_thread == 2);
         assert(!r[0] && r[5] == 0x55555555 && !cpu->exit && !cpu->syndrome && !cpu->exclusive_valid);
         assert(cpu->tpidruro == SNX_CTR_INITIAL_TLS && cpu->tpidrurw == 0x12345678 && cpu->fpscr == 0x80000000);
-        assert(cpu->d[7] == UINT64_C(0x12345678abcdef01));
+        assert(cpu->d[7] == 0x12345678abcdef01ull);
         assert(!snx_ctr_handle_close(p, duplicate) && !p->objects[eid].type);
         r[0] = mutex;
         assert(snx_ctr_svc(p, 0x14) == SNX_CTR_SVC_RETURN && r[0] == 0xd8e0041f &&

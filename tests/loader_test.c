@@ -331,7 +331,7 @@ static void test_nro_npdm(void) {
     CHECK(program.modules[0].base == SNX_CODE_BASE && program.romfs_size == 5 &&
           !memcmp(file_bytes + program.romfs_offset, "ROMFS", 5));
     CHECK(program.npdm.stack == 0x100000 && program.npdm.prio == 44 && program.npdm.is64);
-    CHECK(program.npdm.title_id == (((SnxU64)0x01000000UL << 32) | 0x1000));
+    CHECK(program.npdm.title_id == 0x0100000000001000ull);
     snx_free_program(&program);
     /* ASET is optional and never part of the executable mapping. */
     CHECK(!snx_write_file(path, file_bytes, 0x400));
@@ -367,10 +367,10 @@ static void test_nro_npdm(void) {
     put32(meta + 0x70, 0x80);
     put32(meta + 0x74, 0x20);
     memcpy(meta + 0x80, "ACI0", 4);
-    put64(meta + 0x90, ((SnxU64)0x12345678UL << 32) | 0x9abcdef0UL);
+    put64(meta + 0x90, 0x123456789abcdef0ull);
     CHECK(!snx_parse_npdm(meta, sizeof meta, &npdm, error, sizeof error));
     CHECK(npdm.stack == 0x200000 && npdm.prio == 37 && npdm.core == 2 && npdm.aspace == 3 && npdm.is64);
-    CHECK(!strcmp(npdm.name, "Synthetic Loader") && npdm.title_id == (((SnxU64)0x12345678UL << 32) | 0x9abcdef0UL));
+    CHECK(!strcmp(npdm.name, "Synthetic Loader") && npdm.title_id == 0x123456789abcdef0ull);
     path = fixture("npdm.bin", meta, sizeof meta);
     free(path);
     CHECK(snx_parse_npdm(meta, 0x7f, &npdm, error, sizeof error) == -1 && !npdm.stack);
@@ -440,7 +440,7 @@ static void test_npdm_of(const char* root, const char* exefs) {
     size_t size;
     CHECK(!snx_load_npdm(root, &npdm, error, sizeof error) && npdm.prio == 37);
     CHECK(!snx_load_npdm(exefs, &npdm, error, sizeof error));
-    CHECK(npdm.title_id == (((SnxU64)0x12345678UL << 32) | 0x9abcdef0UL));
+    CHECK(npdm.title_id == 0x123456789abcdef0ull);
     name = snx_game_name(NULL, &npdm, root);
     CHECK(!strcmp(name, "123456789ABCDEF0"));
     free(name);

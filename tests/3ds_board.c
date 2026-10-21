@@ -19,7 +19,7 @@ int main(void) {
         assert(p->fcram_size == (m ? 0x10000000u : 0x08000000u));
         for (size_t i = 0; i < p->region_count; ++i) {
             const SnxCtrRegion* r = &p->regions[i];
-            assert(r->size && (uint64_t)r->base + r->size <= UINT64_C(0x100000000));
+            assert(r->size && (uint64_t)r->base + r->size <= 0x100000000ull);
             if (i) assert((uint64_t)p->regions[i - 1].base + p->regions[i - 1].size <= r->base);
             assert(snx_ctr_physical_region(p, r->base, r->size) == r);
             assert(snx_ctr_physical_region(p, r->base + r->size - 1, 1) == r);

@@ -293,7 +293,7 @@ int main(void) {
     run(F_exclusive_store, SNX_ARM_DATA_ABORT);
     assert(c->r[3] == 0x87654321 && !get32(0x4000));
     c = start(F_vfp_store);
-    c->d[0] = UINT64_C(0x1122334455667788);
+    c->d[0] = 0x1122334455667788ull;
     run(F_vfp_store, SNX_ARM_OK);
     assert(get32(0x4000) == 0x55667788 && get32(0x4004) == 0x11223344 && c->r[0] == 0x4000);
     c = start(F_vfp_load);
@@ -301,14 +301,14 @@ int main(void) {
     put32(0x4004, 0x55667788);
     put32(0x4008, 0x11223344);
     run(F_vfp_load, SNX_ARM_OK);
-    assert(c->d[0] == UINT64_C(0x1122334455667788));
+    assert(c->d[0] == 0x1122334455667788ull);
     for (unsigned id = F_vfp_load; id <= F_vfp_store; ++id) {
         c = start(id);
         c->r[0] = 0x5ffc;
-        c->d[0] = UINT64_C(0x1122334455667788);
+        c->d[0] = 0x1122334455667788ull;
         put32(0x5ffc, 0xaabbccdd);
         run(id, SNX_ARM_DATA_ABORT);
-        assert(c->r[0] == 0x5ffc && c->d[0] == UINT64_C(0x1122334455667788) && get32(0x5ffc) == 0xaabbccdd);
+        assert(c->r[0] == 0x5ffc && c->d[0] == 0x1122334455667788ull && get32(0x5ffc) == 0xaabbccdd);
         c = start(id);
         c->r[0] = 0xa000;
         run(id, SNX_ARM_DATA_ABORT);
@@ -316,7 +316,7 @@ int main(void) {
     }
     c = start(F_vfp_store);
     c->r[0] = 0x4ffc;
-    c->d[0] = UINT64_C(0x1122334455667788);
+    c->d[0] = 0x1122334455667788ull;
     put32(0x4ffc, 0xaabbccdd);
     put32(0x5000, 0x12345678);
     assert(snx_ctr_protect(space, 0x5000, 4096, 1) == SNX_CTR_MEM_OK);

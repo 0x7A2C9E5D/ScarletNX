@@ -489,7 +489,7 @@ static int neon(uint32_t w, SnxArmVector* v) {
                 v->width = 64;
                 v->imm = 0;
                 for (unsigned i = 0; i < 8; i++)
-                    if (imm & (1u << i)) v->imm |= UINT64_C(255) << (i * 8);
+                    if (imm & (1u << i)) v->imm |= 255ull << (i * 8);
             }
             return 1;
         } else {

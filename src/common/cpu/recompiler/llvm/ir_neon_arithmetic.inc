@@ -508,7 +508,7 @@ static int shift_immediate(SnxIr* ir, SnxU32 w, unsigned scalar) {
 static int fp_sign_misc(SnxIr* ir, SnxU32 w) {
     unsigned q = (w >> 30) & 1, u = (w >> 29) & 1, size = (w >> 22) & 3, op = (w >> 12) & 31, rn = (w >> 5) & 31,
              rd = w & 31, sz = size & 1;
-    SnxU64 sign = sz ? (SnxU64)1 << 63 : ((SnxU64)0x80000000UL << 32) | 0x80000000UL;
+    SnxU64 sign = sz ? (SnxU64)1 << 63 : 0x8000000080000000ull;
     V lo, hi;
     if (op != 0x0F || !(size >> 1) || (sz && !q)) return 0;
     lo = ir_vd(ir, rn, 0);

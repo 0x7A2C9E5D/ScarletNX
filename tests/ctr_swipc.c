@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors
-   Generator-only C90 fixture. Fake resource accounting is deliberately local
+   Generator-only C99 fixture. Fake resource accounting is deliberately local
    to this fixture; tests/3ds_ipc.c separately executes real kernel sessions. */
 #include "tests/ctr_swipc.swipc.inc"
 #include <assert.h>
@@ -48,7 +48,7 @@ static uint32_t test_ctr_RoundTrip(SnxCtrIpc* c, uint32_t tag, uint64_t value, c
                                    uint64_t* echoed, uint8_t* copy, uint32_t* identity) {
     (void)c;
     ++calls;
-    assert(tag == 0x89abcdef && value == (UINT64_C(0xfedcba98) << 32 | 0x76543210));
+    assert(tag == 0x89abcdef && value == (0xfedcba98ull << 32 | 0x76543210));
     assert(!memcmp(name, "12345678", 8) && process == 0x10);
     *echoed = value;
     memcpy(copy, name, 8);
@@ -106,6 +106,6 @@ int main(void) {
     calls = 0;
     test_ctr_dispatch(&c);
     assert(!calls && !owned && c.state == SNX_CTR_IPC_UNSUPPORTED && !c.out[0]);
-    puts("CTR generated wire ordering, 32-bit caller PID, replies and owned-output rollback passed (C90 fixture)");
+    puts("CTR generated wire ordering, 32-bit caller PID, replies and owned-output rollback passed (C99 fixture)");
     return 0;
 }

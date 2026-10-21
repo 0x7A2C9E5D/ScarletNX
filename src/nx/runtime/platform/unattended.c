@@ -74,7 +74,7 @@ void unattended_script_set(const IniOpt* o, const char* v) {
         return;
     }
     for (c = v; *c; c++) max += *c == ',';
-    if (max > ((size_t)-1 - len - 1) / sizeof *press) {
+    if (max > (SIZE_MAX - len - 1) / sizeof *press) {
         WARN("unattended: the script is too long, the current one stays\n");
         return;
     }

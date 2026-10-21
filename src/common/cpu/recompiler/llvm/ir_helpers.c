@@ -201,7 +201,7 @@ static void build_rbit32(SnxIr* ir, LLVMValueRef function) {
     LLVMBuildRet(B, ir_u32(ir, LLVMBuildLShr(B, x, ir_i64(ir, 32), "")));
 }
 static void build_rev16_64(SnxIr* ir, LLVMValueRef function) {
-    LLVMBuildRet(B, swap_pairs(ir, P(0), 8, ((SnxU64)0x00FF00FFUL << 32) | 0x00FF00FFUL));
+    LLVMBuildRet(B, swap_pairs(ir, P(0), 8, 0x00FF00FF00FF00FFull));
 }
 static void build_rev32_64(SnxIr* ir, LLVMValueRef function) {
     LLVMValueRef x = P(0), y = ir_call(ir, ir_helper(ir, SNX_IR_BSWAP64), &x, 1);

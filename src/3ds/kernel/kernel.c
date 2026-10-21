@@ -435,7 +435,7 @@ SnxCtrSvcResult snx_ctr_svc(SnxCtrProcess* p, uint32_t number) {
                         no thread can run. Zero yields at the next dispatch boundary;
                         negative (sleep forever) is not modeled and stops. */
             int64_t ns = (int64_t)((uint64_t)r[0] | (uint64_t)r[1] << 32);
-            if (ns < 0 || ns > INT64_C(3600) * 1000000000) return SNX_CTR_SVC_UNSUPPORTED;
+            if (ns < 0 || ns > 3600ll * 1000000000) return SNX_CTR_SVC_UNSUPPORTED;
             if (!ns) return SNX_CTR_SVC_RETURN;
             snx_ctr_thread(p)->wake_ns = (uint64_t)(snx_seconds() * 1e9) + (uint64_t)ns;
             cpu->exit = SNX_ARM_OK; /* resumes after the SVC when it wakes */

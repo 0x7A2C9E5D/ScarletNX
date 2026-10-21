@@ -44,14 +44,8 @@ set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
-# The strict ANSI C (RFC #142: the driver, swipc, the build info and their tests) builds as C90 with -pedantic-errors,
-# but as C11 on macOS and iOS: Apple's headers use long long where C90 has none (stdint.h's UINT64_C), which
-# -pedantic-errors refuses. Still ISO C, without extensions
-if(APPLE)
-    set(SNX_C90_STANDARD 11)
-else()
-    set(SNX_C90_STANDARD 90)
-endif()
+# The strict ISO C (RFC #142: the driver, swipc, the build info and their tests) builds as C99 with -pedantic-errors
+# and without extensions (C_STANDARD 99, C_EXTENSIONS OFF on those targets)
 
 option(SNX_BUILD_NX "Build the Switch Horizon/Maxwell runtime" ON)
 option(SNX_BUILD_GNUABI "Build the CPU-only Linux AArch64 runtime" ON)
@@ -83,7 +77,7 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${SNX_OPT_FLAGS}")
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
-option(SNX_TOOLS_ONLY "Build the C90 extraction/recompilation driver without the runtime" OFF)
+option(SNX_TOOLS_ONLY "Build the C99 extraction/recompilation driver without the runtime" OFF)
 set(snx_gui_default OFF)
 if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
     set(snx_gui_default ON)
@@ -108,7 +102,7 @@ if(SNX_BUILD_GUI AND SNX_TOOLS_ONLY)
 endif()
 # Before the dependencies: the tests' network fixtures link ENet and zstd, whatever the build
 include(CTest)
-# Before the sources: the C90 driver of a tools-only build links LZ4 too
+# Before the sources: the C99 driver of a tools-only build links LZ4 too
 include(cmake/dependencies.cmake)
 # every local include is a path from src/ ("nx/hle/kernel/ipc.h"); generated and third-party headers come with their
 # targets

@@ -42,7 +42,7 @@ static void extract_help(void) {
 
 static char* text_copy(const char* text, size_t size) {
     char* copy;
-    if (size == (size_t)-1) return NULL;
+    if (size == SIZE_MAX) return NULL;
     copy = (char*)malloc(size + 1);
     if (copy) {
         memcpy(copy, text, size);

@@ -70,8 +70,8 @@ int gui_settings_read(GuiSettings* s, const char* runtime) {
         bars += *c == '|';
     }
     pool = 2 * bars + 5 * n;
-    if (n > ((size_t)-1 - size) / (sizeof *s->keys + sizeof *s->values + 5 * sizeof(char*)) ||
-        bars > ((size_t)-1 - size) / 4 / sizeof(char*)) {
+    if (n > (SIZE_MAX - size) / (sizeof *s->keys + sizeof *s->values + 5 * sizeof(char*)) ||
+        bars > (SIZE_MAX - size) / 4 / sizeof(char*)) {
         free(list);
         return 1;
     }

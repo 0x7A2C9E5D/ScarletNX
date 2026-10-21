@@ -554,7 +554,7 @@ static int resolve(const SnxCodeLoader* loader, const Load* ld, size_t object, s
     if (where < 0) return -1;
     if (where == SNX_ELF_HERE) {
         t->address = snx_elf_symbol_address(ld->objs, def_object, def_index, &absolute);
-        sprintf(t->key, "%lu:%lu", (unsigned long)def_object, (unsigned long)def_index);
+        sprintf(t->key, "%zu:%zu", def_object, def_index);
         t->here = 1;
         t->def_object = def_object;
         t->def_index = def_index;
@@ -569,8 +569,7 @@ static int resolve(const SnxCodeLoader* loader, const Load* ld, size_t object, s
     if (snx_code_find(loader, name, &address)) {
         t->address = address;
         t->far = t->address < ld->arena_start || t->address >= ld->arena_end;
-        /* in hexadecimal by halves: unsigned long is 32 bits on LLP64 systems */
-        sprintf(t->key, "@%lx:%08lx", (unsigned long)(t->address >> 32), (unsigned long)(t->address & 0xFFFFFFFFu));
+        sprintf(t->key, "@%llx", (unsigned long long)t->address);
         return 0;
     }
     if (!strcmp(name, "_GLOBAL_OFFSET_TABLE_")) {

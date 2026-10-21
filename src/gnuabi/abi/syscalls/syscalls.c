@@ -14,14 +14,14 @@
 #include <unistd.h>
 #endif
 static int64_t file_mmap(GnuProcess* p, const uint64_t a[6]) {
-    if (a[2] & ~UINT64_C(7)) return -GNU_EINVAL;
+    if (a[2] & ~7ull) return -GNU_EINVAL;
     if (a[5] & 4095) return -GNU_EINVAL;
     /* Shared file writeback needs a coherent VFS mapping. A shared mapping nothing writes to is its copy */
     if ((a[3] & 3) != 2 && ((a[3] & 3) != 1 || (a[2] & 2))) return -GNU_ENOTSUP;
     unsigned char probe;
     int64_t r = gnu_vfs_pread(&p->vfs, (int)a[4], &probe, 0, a[5]);
     if (r < 0) return r;
-    int64_t mapped = gnu_memory_mmap(&p->memory, a[0], a[1], 3, (a[3] & ~UINT64_C(3)) | 0x22);
+    int64_t mapped = gnu_memory_mmap(&p->memory, a[0], a[1], 3, (a[3] & ~3ull) | 0x22);
     if (mapped < 0) return mapped;
     r = gnu_vfs_pread(&p->vfs, (int)a[4], p->memory.base + (uint64_t)mapped, (size_t)a[1], a[5]);
     if (r >= 0) r = gnu_memory_protect(&p->memory, (uint64_t)mapped, a[1], (unsigned)a[2]);
@@ -120,8 +120,8 @@ static int64_t dispatch(GnuProcess* p, uint64_t number, const uint64_t a[6]) {
             if (!gnu_clock_gettime(1, &sec, &ns)) snx_st_le64(info, (uint64_t)sec);
             info[32] = 0; /* totalram etc.: an 8 GiB machine with 4 GiB free, in units of one byte */
             {
-                snx_st_le64(info + 32, UINT64_C(8) << 30);
-                snx_st_le64(info + 40, UINT64_C(4) << 30);
+                snx_st_le64(info + 32, 8ull << 30);
+                snx_st_le64(info + 40, 4ull << 30);
                 snx_st_le16(info + 80, 1);  /* procs */
                 snx_st_le32(info + 104, 1); /* mem_unit */
             }
@@ -134,10 +134,10 @@ static int64_t dispatch(GnuProcess* p, uint64_t number, const uint64_t a[6]) {
         case GNU_NR_brk: return (int64_t)gnu_memory_brk(&p->memory, a[0]);
         case GNU_NR_munmap: return gnu_memory_unmap(&p->memory, a[0], a[1]);
         case GNU_NR_mprotect:
-            if (a[2] & ~UINT64_C(7)) return -GNU_EINVAL;
+            if (a[2] & ~7ull) return -GNU_EINVAL;
             return gnu_memory_protect(&p->memory, a[0], a[1], (unsigned)a[2]);
         case GNU_NR_mmap:
-            if (a[2] & ~UINT64_C(7)) return -GNU_EINVAL;
+            if (a[2] & ~7ull) return -GNU_EINVAL;
             if (!(a[3] & 0x20)) return file_mmap(p, a);
             if (a[5] & 4095) return -GNU_EINVAL;
             return gnu_memory_mmap(&p->memory, a[0], a[1], (unsigned)a[2], a[3]);
@@ -168,8 +168,8 @@ static int64_t dispatch(GnuProcess* p, uint64_t number, const uint64_t a[6]) {
             return gnu_memory_write(&p->memory, a[1], resolution, sizeof resolution);
         }
         case GNU_NR_getrandom: {
-            if ((a[2] & ~UINT64_C(7)) || ((a[2] & 6) == 6)) return -GNU_EINVAL;
-            size_t count = a[1] > UINT64_C(0x2000000) ? 0x2000000 : (size_t)a[1];
+            if ((a[2] & ~7ull) || ((a[2] & 6) == 6)) return -GNU_EINVAL;
+            size_t count = a[1] > 0x2000000ull ? 0x2000000 : (size_t)a[1];
             void* destination = gnu_memory_access(&p->memory, a[0], count, GNU_PROT_WRITE);
             if (!destination) return -GNU_EFAULT;
             result = gnu_random_bytes(destination, count);
@@ -180,7 +180,7 @@ static int64_t dispatch(GnuProcess* p, uint64_t number, const uint64_t a[6]) {
             if (a[1] >= 16) return -GNU_EINVAL;
             if (a[2]) return 0; /* setting a limit: nothing here enforces one */
             uint64_t limits[2] = {UINT64_MAX, UINT64_MAX};
-            if (a[1] == 3) limits[0] = UINT64_C(0x800000);
+            if (a[1] == 3) limits[0] = 0x800000ull;
             if (a[1] == 7) limits[0] = limits[1] = 256;
             limits[0] = snx_le64(limits[0]);
             limits[1] = snx_le64(limits[1]);

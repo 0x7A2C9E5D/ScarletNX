@@ -5,11 +5,11 @@
    selecting source bit j: the identity is 0x0102040810204080. Shifting the identity right by 8n bytes is a logical
    shift left by n, left by 8n a logical shift right; an arithmetic shift right also ORs n bytes of 0x80 back in,
    replicating bit 7. x86 has no 8-bit shifts, so each of these replaces a shift-and-mask sequence. */
-#define GF_IDENTITY ((SnxU64)0x01020408UL << 32 | 0x10204080UL)
+#define GF_IDENTITY 0x0102040810204080ull
 static SnxU64 gf_shl(unsigned n) { return n >= 8 ? 0 : GF_IDENTITY >> (8 * n); }
 static SnxU64 gf_lshr(unsigned n) { return n >= 8 ? 0 : GF_IDENTITY << (8 * n); }
 static SnxU64 gf_ashr(unsigned n) {
-    SnxU64 sign = (SnxU64)0x80808080UL << 32 | 0x80808080UL;
+    SnxU64 sign = 0x8080808080808080ull;
     if (n > 7) n = 7;
     return n ? (GF_IDENTITY << (8 * n)) | (~(~(SnxU64)0 << (8 * n)) & sign) : GF_IDENTITY;
 }
@@ -53,7 +53,7 @@ static int byte_misc(SnxIr* ir, SnxU32 w) {
     else if (!size)
         r = LLVMBuildNot(B, a, "");
     else if (host_gfni(ir)) /* wunkolo, "gf2p8affineqb: Bit reversal": the matrix 0x8040201008040201 */
-        r = low_lanes(ir, gf_affine(ir, v128_type_load(ir, vreg(ir, rn)), ((SnxU64)0x80402010UL << 32) | 0x08040201UL),
+        r = low_lanes(ir, gf_affine(ir, v128_type_load(ir, vreg(ir, rn)), 0x8040201008040201ull),
                       n);
     else
         r = ir_intrinsic(ir, "llvm.bitreverse", t, &a, 1);
@@ -93,7 +93,7 @@ static SnxU64 expand_imm(unsigned op, unsigned cmode, unsigned imm8) {
                     (SnxU32)((i & 0x80) << 24) | ((i & 0x40) ? 0x3E000000u : 0x40000000u) | ((SnxU32)(i & 0x3F) << 19);
                 r = b | ((SnxU64)b << 32);
             } else {
-                r = ((i & 0x80) << 56) | ((i & 0x40) ? ((SnxU64)0x3FC00000UL << 32) : ((SnxU64)0x40000000UL << 32)) |
+                r = ((i & 0x80) << 56) | ((i & 0x40) ? 0x3FC0000000000000ull : 0x4000000000000000ull) |
                     ((i & 0x3F) << 48);
             }
             break;
@@ -231,7 +231,7 @@ static int aes(SnxIr* ir, SnxU32 w) {
    class), so it never carries into the next position of its class: XORing the products of the class pairs and
    masking to the class gives that class of the product. 32 multiplies of 64 by 64 bits to 128 */
 static V carryless_multiply(SnxIr* ir, V x, V y) {
-    static const SnxU64 m = (SnxU64)0x11111111UL << 32 | 0x11111111UL;
+    static const SnxU64 m = 0x1111111111111111ull;
     V yb[4], xa[4], r = NULL, half, part, z, k;
     unsigned h, a, c;
     for (a = 0; a < 4; ++a) yb[a] = LLVMBuildZExt(B, LLVMBuildAnd(B, y, ir_i64(ir, m << a), ""), ir->t_i128, "");

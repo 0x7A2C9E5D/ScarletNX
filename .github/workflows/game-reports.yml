@@ -56,7 +56,7 @@ jobs:
       # C on the C library, and the C++ runtime for its demangler: the runner's compiler builds it in seconds
       - name: Build the log summary
         run: |
-          cc -std=c90 -O2 -Isrc -c src/common/utilities/logscan.c src/common/utilities/logscan_main.c \
+          cc -std=c99 -O2 -Isrc -c src/common/utilities/logscan.c src/common/utilities/logscan_main.c \
             src/common/utilities/demangle.c
           cc -o snx-logscan logscan.o logscan_main.o demangle.o -lstdc++
       - name: Summarize

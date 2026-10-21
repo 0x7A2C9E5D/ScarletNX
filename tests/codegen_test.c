@@ -73,7 +73,7 @@ static void setup_program(SnxProgram* program, SnxModuleImage* module, unsigned 
     module->text_size = (SnxU32)size;
     program->modules = module;
     program->module_count = 1;
-    program->npdm.title_id = ((SnxU64)0x12345678UL << 32) | 0x9ABCDEF0UL;
+    program->npdm.title_id = 0x123456789ABCDEF0ull;
     program->npdm.stack = 0x100000;
     program->npdm.prio = 44;
     program->npdm.core = 2;
@@ -252,12 +252,12 @@ static void emit_semantic_fixture(FILE* out) {
     char function[32];
     fputs("#include \"cpu.h\"\n#define SNX_A64_REFERENCE\n#include \"cpu_helpers.c\"\n#include <stdio.h>\nGuestFn snx_missing_entry;\n", out);
     for (i = 0; i < sizeof(words) / sizeof(words[0]); ++i) {
-        sprintf(function, "step_%lu", (unsigned long)i);
+        sprintf(function, "step_%zu", i);
         snx_a64_static_step(out, words[i], 0x1000, function);
     }
     snx_a64_interp(out, 1);
     fputs("typedef u64(*Step)(CPU*);\nstatic const Step steps[]={", out);
-    for (i = 0; i < sizeof(words) / sizeof(words[0]); ++i) fprintf(out, "%sstep_%lu", i ? "," : "", (unsigned long)i);
+    for (i = 0; i < sizeof(words) / sizeof(words[0]); ++i) fprintf(out, "%sstep_%zu", i ? "," : "", i);
     fputs("};\nstatic const u32 words[]={", out);
     for (i = 0; i < sizeof(words) / sizeof(words[0]); ++i)
         fprintf(out, "%s0x%08lXu", i ? "," : "", (unsigned long)words[i]);
@@ -473,8 +473,8 @@ static void hook_test(const char* directory) {
     module.fde_count = 1;
     /* the call site's two forms; the entry check (CALLDYN(e)) and the dispatcher (CALLDYN(c->pc)) dispatch too, so the
        target's literal tells the call apart */
-    sprintf(call, "F_%lX(c,", (unsigned long)(SNX_CODE_BASE + 8));
-    sprintf(dispatch, "CALLDYN(%lu)", (unsigned long)(SNX_CODE_BASE + 8));
+    sprintf(call, "F_%llX(c,", (unsigned long long)(SNX_CODE_BASE + 8));
+    sprintf(dispatch, "CALLDYN(%llu)", (unsigned long long)(SNX_CODE_BASE + 8));
     check(!snx_nx_codegen_analyze(&codegen, &program, NULL, 0, 1), "analyze the hooked call");
     function = snx_codegen_function(&codegen, SNX_CODE_BASE);
     check(function && snx_codegen_function(&codegen, SNX_CODE_BASE + 8), "caller and callee are functions");

@@ -181,7 +181,7 @@ SnxCtrSvcResult snx_ctr_ipc_send(SnxCtrProcess* p, uint32_t handle, uint32_t* re
     /* A 0x200-aligned TLS slot contains the entire 0x100-byte command buffer.
        Preflight RAM read AND write before a handler can change state/handles.
        All mappings, handlers and writes are serialized by the runtime. */
-    if ((tls & 511) || (uint64_t)tls + 0x180 > UINT64_C(0x100000000) ||
+    if ((tls & 511) || (uint64_t)tls + 0x180 > 0x100000000ull ||
         snx_ctr_query(p->space, address, NULL, &permissions) != SNX_CTR_MEM_OK || (permissions & 3) != 3 ||
         snx_ctr_read_ram(p->space, address, bytes, sizeof bytes) != SNX_CTR_MEM_OK) {
         *result = 0xe0e01bf5u;
