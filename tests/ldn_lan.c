@@ -4,6 +4,7 @@
    consoles on the host's loopback (127.0.0.1 and 127.0.0.2) finding and joining each other: the scan with its
    filter, the host's nodes, the station's sync, leaving and the host going away */
 #include "common/network/net_ldn.h"
+#include "common/utilities/endian.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -158,7 +159,7 @@ static void two_consoles(void) {
     CHECK(snx_ldn_network_info(a, &info, updates) == 1);
     CHECK(info.node_count == 1 && info.nodes[0].is_connected && !strcmp((char*)info.nodes[0].user_name, "Host"));
     CHECK(info.nodes[0].ipv4[0] == 1 && info.nodes[0].ipv4[3] == 127); /* host order */
-    CHECK(info.advertise_data_size == 6 && !memcmp(info.advertise_data, "before", 6));
+    CHECK(snx_le16(info.advertise_data_size) == 6 && !memcmp(info.advertise_data, "before", 6));
     CHECK(updates[0] == SNX_LDN_NODE_CONNECT && updates[1] == 0);
     CHECK(snx_ldn_network_info(a, &info, updates) == 1 && updates[0] == 0); /* read once */
     CHECK(snx_ldn_set_advertise_data(a, "after!!", 7) == 0);
@@ -166,16 +167,16 @@ static void two_consoles(void) {
 
     /* the station finds it, filtered by what the game asks for */
     memset(&filter, 0, sizeof filter);
-    filter.flag = SNX_LDN_FILTER_LOCAL_COMMUNICATION_ID;
+    filter.flag = snx_le32(SNX_LDN_FILTER_LOCAL_COMMUNICATION_ID); /* the structures are little-endian */
     filter.local_communication_id = 0x0100ABCD12345000ull;
     n = snx_ldn_scan(b, &filter, found, 4, 1000);
     CHECK(n == 1);
     CHECK(found[0].local_communication_id == 0x0100ABCD12345000ull && found[0].scene_id == 3);
-    CHECK(found[0].advertise_data_size == 7 && !memcmp(found[0].advertise_data, "after!!", 7));
+    CHECK(snx_le16(found[0].advertise_data_size) == 7 && !memcmp(found[0].advertise_data, "after!!", 7));
     CHECK(!memcmp(found[0].bssid, net.bssid, 6) && found[0].node_count == 1);
     filter.local_communication_id = 0x0100000000010000ull; /* another game's */
     CHECK(snx_ldn_scan(b, &filter, found, 4, 300) == 0);
-    filter.flag = SNX_LDN_FILTER_SESSION_ID | SNX_LDN_FILTER_SCENE_ID;
+    filter.flag = snx_le32(SNX_LDN_FILTER_SESSION_ID | SNX_LDN_FILTER_SCENE_ID); /* the structures are little-endian */
     filter.session_id[0] = net.session_id[0];
     filter.session_id[1] = net.session_id[1];
     filter.scene_id = 3;
@@ -194,7 +195,7 @@ static void two_consoles(void) {
     CHECK(wait_for(&changes_a, 1, 2000) && wait_for(&changes_b, 1, 2000));
     CHECK(snx_ldn_network_info(a, &info, updates) == 1);
     CHECK(info.node_count == 2 && info.nodes[1].is_connected && info.nodes[1].node_id == 1);
-    CHECK(!strcmp((char*)info.nodes[1].user_name, "Station") && info.nodes[1].version == 4);
+    CHECK(!strcmp((char*)info.nodes[1].user_name, "Station") && (int16_t)snx_le16((uint16_t)info.nodes[1].version) == 4);
     CHECK(info.nodes[1].ipv4[0] == 2 && info.nodes[1].ipv4[3] == 127);
     CHECK(updates[1] == SNX_LDN_NODE_CONNECT && updates[0] == 0);
     CHECK(snx_ldn_network_info(b, &info, updates) == 1);
@@ -207,7 +208,7 @@ static void two_consoles(void) {
     changes_b = 0;
     CHECK(snx_ldn_set_advertise_data(a, "third", 5) == 0);
     CHECK(wait_for(&changes_b, 1, 2000));
-    CHECK(snx_ldn_network_info(b, &info, NULL) == 1 && info.advertise_data_size == 5);
+    CHECK(snx_ldn_network_info(b, &info, NULL) == 1 && snx_le16(info.advertise_data_size) == 5);
 
     /* the station leaves: the host's node 1 empties */
     changes_a = 0;

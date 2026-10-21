@@ -179,17 +179,14 @@ int plat_text_input(char* out, size_t cap, const char* initial) {
     snprintf(out, cap, "%s", dialog_calls++ && dialog_then ? dialog_then : dialog_text);
     return dialog_cancel;
 }
-static void put32(u8* dst, u32 v) { memcpy(dst, &v, 4); }
-static u32 get32(const u8* src) {
-    u32 v;
-    memcpy(&v, src, 4);
-    return v;
-}
+/* a storage's numbers, little-endian as the game has them */
+static void put32(u8* dst, u32 v) { snx_st_le32(dst, v); }
+static u32 get32(const u8* src) { return snx_ld_le32(src); }
 static void send_request(SvcObj* a, u32 request, u64 flags, int utf8) {
     u8 packet[0x4EC] = {0};
     SvcObj* storage;
     put32(packet, request);
-    memcpy(packet + 12, &flags, 8);
+    snx_st_le64(packet + 12, flags);
     put32(packet + 4 + (modern_packet ? 0x38 : 0x40), 20);
     packet[4 + (modern_packet ? 0x484 : 0x45C)] = (u8)utf8;
     storage = am_storage_new(modern_packet ? sizeof packet : 0x4A4, packet);
@@ -357,8 +354,8 @@ static SvcObj* run_applet(u32 id, SvcObj* const* in, int nin) {
 static SvcObj* swkbd(u32 max, u32 min, int utf8) {
     u8 config[0x3e0] = {0};
     SvcObj *in[2], *out;
-    memcpy(config + 0x3ac, &max, 4);
-    memcpy(config + 0x3b0, &min, 4);
+    put32(config + 0x3ac, max);
+    put32(config + 0x3b0, min);
     config[0x3bd] = (u8)utf8;
     in[0] = am_storage_new(0x20, NULL);
     in[1] = am_storage_new(sizeof config, config);

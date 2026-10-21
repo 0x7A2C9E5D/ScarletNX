@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* Translate a captured shader corpus directly to SPIR-V and optionally validate the modules. */
 #include "nx/gpu/shader/shader.h"
+#include "common/utilities/endian.h"
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -108,6 +109,8 @@ int main(int argc, char** argv) {
                 snprintf(output, sizeof output, "%s/%s.spv", out, base);
             else
                 snprintf(output, sizeof output, "%s/snx-shaderc-%d-%s.spv", tmp, (int)SNX_PID, base);
+            /* the module's words as a .spv file has them, little-endian, so builds on any host diff the same */
+            snx_le32_array(spv, words);
             int written = write_file(output, spv, words * sizeof *spv);
             if (written && validate) {
                 char quoted[4500], command[4600];

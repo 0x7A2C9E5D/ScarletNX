@@ -230,6 +230,7 @@ u32 svc_query(u64 info, u64 addr) {
     w[3] = b.ipc;
     w[4] = b.dev;
     w[5] = 0;
+    snx_le32_array(w, 6);
     gw64(info, b.addr);
     gw64(info + 8, b.size);
     memcpy(GP(info + 16), w, sizeof w);

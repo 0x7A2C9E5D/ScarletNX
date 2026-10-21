@@ -10,6 +10,7 @@
 #include "common/cpu/arm/llvm.h"
 #include "common/cpu/arm/simd.h"
 #include <limits.h>
+#include <llvm-c/Target.h>
 
 /* All guest arithmetic is i32 without nsw/nuw. In particular address arithmetic
    wraps BEFORE extending to a host pointer. Never use inbounds GEP for guests. */
@@ -448,13 +449,11 @@ static LLVMValueRef intrinsic(ArmIR* a, const char* name, size_t len, LLVMTypeRe
     LLVMValueRef fn = LLVMGetIntrinsicDeclaration(a->mod, id, &type, 1);
     return LLVMBuildCall2(a->b, LLVMGlobalGetValueType(fn), fn, args, count, "");
 }
+/* a value the guest's little-endian memory holds, as the target's number: swapped for a big-endian target, which the
+   module's data layout says (the code is the target's, which a recompiler may build for another machine) */
 static LLVMValueRef host_order(ArmIR* a, LLVMValueRef v, unsigned bytes) {
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-    if (bytes > 1) return intrinsic(a, "llvm.bswap", 10, LLVMTypeOf(v), &v, 1);
-#else
-    (void)a;
-    (void)bytes;
-#endif
+    if (bytes > 1 && LLVMByteOrder(LLVMGetModuleDataLayout(a->mod)) == LLVMBigEndian)
+        return intrinsic(a, "llvm.bswap", 10, LLVMTypeOf(v), &v, 1);
     return v;
 }
 /* ABI-1 optional RAM reservation operations. The bus owns the write epoch,

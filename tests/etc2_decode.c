@@ -3,6 +3,7 @@
 /* ETC2 and EAC blocks built by hand, one per mode, against values worked out from the Khronos Data Format
    Specification's ETC2 chapter */
 #include "nx/gpu/texture/etc2.h"
+#include "common/utilities/endian.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -25,6 +26,7 @@ static void rgba(const u8* blk, int kind, u32 x, u32 y, int r, int g, int b, int
 static void r16(const u8* blk, int kind, u32 x, u32 y, u16 want, const char* what) {
     u16 px[16 * 2];
     etc2_decode_image(blk, 4, 4, kind, (u8*)px);
+    snx_le16_array(px, 16 * 2); /* the texels are little-endian, as the GPU reads them */
     u16 got = px[(y * 4 + x) * (etc2_pixel_bytes(kind) / 2)];
     if (got != want) {
         fprintf(stderr, "FAIL: %s: (%u,%u) is %u, expected %u\n", what, x, y, got, want);
@@ -79,6 +81,7 @@ int main(void) {
     {
         u16 px[16 * 2];
         etc2_decode_image(blk, 4, 4, EAC_RG, (u8*)px);
+        snx_le16_array(px, 16 * 2);
         if (px[1] != 32912) {
             fprintf(stderr, "FAIL: EAC RG11: green is %u, expected 32912\n", px[1]);
             failures++;

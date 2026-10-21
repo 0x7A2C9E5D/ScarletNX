@@ -123,17 +123,10 @@ static u32 event_handle(void) {
    INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
    AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
    PERFORMANCE OF THIS SOFTWARE. */
-static void put32(u8* p, u32 v) { memcpy(p, &v, 4); }
-static u32 get32(const u8* p) {
-    u32 v;
-    memcpy(&v, p, 4);
-    return v;
-}
-static u64 get64(const u8* p) {
-    u64 v;
-    memcpy(&v, p, 8);
-    return v;
-}
+/* the message is little-endian whatever the host's order */
+static void put32(u8* p, u32 v) { snx_st_le32(p, v); }
+static u32 get32(const u8* p) { return snx_ld_le32(p); }
+static u64 get64(const u8* p) { return snx_ld_le64(p); }
 typedef struct {
     u32 type, num_send_statics, num_send_buffers, num_recv_buffers, num_exch_buffers, num_data_words, num_recv_statics,
         send_pid, num_copy_handles, num_move_handles;
@@ -358,8 +351,8 @@ static int test_dispatch(SvcObj* self, IpcCtx* c) {
             u64 k = 0x1122334455667788ull;
             ipc_in(c, 0, &a, 4);
             ipc_in(c, 4, &b, 4);
-            out32(c, a + b);
-            memcpy(c->out + c->out_size, &k, 8);
+            out32(c, snx_le32(a) + snx_le32(b));
+            snx_st_le64(c->out + c->out_size, k);
             c->out_size += 8;
             return 0;
         }

@@ -35,7 +35,8 @@ static void romfs_visit_file(romfs_ctx_t *ctx, uint32_t file_offset, filepath_t 
 }
 
 static void romfs_visit_dir(romfs_ctx_t *ctx, uint32_t dir_offset, filepath_t *parent_path) {
-    romfs_direntry_t *entry = romfs_get_direntry(ctx->directories, dir_offset);
+    romfs_direntry_t fields, *entry = &fields;
+    const char *name = romfs_get_direntry(ctx->directories, dir_offset, entry);
     filepath_t *cur_path = calloc(1, sizeof(filepath_t));
     if (cur_path == NULL) {
         fprintf(stderr, "Failed to allocate filepath!\n");
@@ -44,7 +45,7 @@ static void romfs_visit_dir(romfs_ctx_t *ctx, uint32_t dir_offset, filepath_t *p
 
     filepath_copy(cur_path, parent_path);
     if (entry->name_size) {
-        filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, entry->name);
+        filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, name);
     }
 
     /* If we're actually extracting the romfs, make directory. */
@@ -72,6 +73,7 @@ void romfs_process(romfs_ctx_t *ctx) {
         fprintf(stderr, "Failed to read RomFS header!\n");
         return;
     }
+    snx_le64_array(&ctx->header, sizeof(ctx->header) / 8);
 
     if ((ctx->tool_ctx->action & (ACTION_EXTRACT | ACTION_LISTROMFS)) && ctx->header.header_size == ROMFS_HEADER_SIZE) {
         /* Pre-load the file/data entry caches. */

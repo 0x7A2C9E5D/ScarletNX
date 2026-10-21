@@ -36,6 +36,14 @@ typedef struct {
     validity_t segment_validities[3];
 } nso0_ctx_t;
 
+/* ScarletNX: a header's words between its file's little-endian order and the host's (the same both ways). nso0_process
+   leaves the headers it keeps in the host's order. */
+static inline void nso_header_swap(nso0_header_t *header) {
+    snx_le32_array(header, 4 + 3 * 4); /* through the segments */
+    snx_le32_array(header->compressed_sizes, 3);
+    snx_le32_array(&header->dynstr_extents, 4); /* offset and size of each, 32-bit */
+}
+
 void nso0_process(nso0_ctx_t *ctx);
 void nso0_print(nso0_ctx_t *ctx);
 void nso0_save(nso0_ctx_t *ctx);

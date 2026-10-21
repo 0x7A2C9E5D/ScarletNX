@@ -62,6 +62,17 @@ static u32 check_word(u64 addr) {
     R_SUCCEED();
 }
 static u32* uword(u64 addr) { return (u32*)(void*)GP(addr); }
+/* The words are little-endian, the guest's order: these take and give host numbers, and convert at the access (nothing
+   on a little-endian host). A compare-and-swap's expected value is converted in and out, so a failed one gives the
+   word's current value as a host number */
+static u32 word_load(const u32* p) { return snx_le32(__atomic_load_n(p, __ATOMIC_SEQ_CST)); }
+static void word_store(u32* p, u32 v) { __atomic_store_n(p, snx_le32(v), __ATOMIC_SEQ_CST); }
+static int word_cas(u32* p, u32* cur, u32 nv, int weak) {
+    u32 e = snx_le32(*cur);
+    int ok = __atomic_compare_exchange_n(p, &e, snx_le32(nv), weak, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    *cur = snx_le32(e);
+    return ok;
+}
 
 /* ============================================================ priority inheritance */
 /* Eden's KThread::RestorePriority: t runs at the best of its base priority and the priorities of the threads waiting
@@ -140,7 +151,7 @@ u32 svc_arbitrate_lock(KThread* t, u32 owner, u64 addr, u32 tag) {
     u32 r;
     R_TRY(check_word(addr));
     pm_lock(&g_hle.kernel.klock);
-    if (__atomic_load_n(uword(addr), __ATOMIC_SEQ_CST) != (owner | HANDLE_WAIT)) {
+    if (word_load(uword(addr)) != (owner | HANDLE_WAIT)) {
         pm_unlock(&g_hle.kernel.klock);
         R_SUCCEED();
     }
@@ -166,7 +177,7 @@ u32 svc_arbitrate_unlock(u64 addr) {
     R_TRY(check_word(addr));
     pm_lock(&g_hle.kernel.klock);
     n = mutex_next_nl(addr, &more);
-    __atomic_store_n(uword(addr), mutex_tag(n, more), __ATOMIC_SEQ_CST);
+    word_store(uword(addr), mutex_tag(n, more));
     if (n) wake(n, 0);
     pm_unlock(&g_hle.kernel.klock);
     R_SUCCEED();
@@ -176,11 +187,11 @@ u32 svc_arbitrate_unlock(u64 addr) {
 /* Eden's KConditionVariable::SignalImpl: a signaled waiter takes its mutex if it is free, or waits for its owner */
 static void cv_take_mutex_nl(KThread* w) {
     u32* p = uword(w->wait_addr);
-    u32 old = __atomic_load_n(p, __ATOMIC_SEQ_CST), nv;
+    u32 old = word_load(p), nv;
     KObj* o;
     do
         nv = old ? old | HANDLE_WAIT : w->wait_tag;
-    while (!__atomic_compare_exchange_n(p, &old, nv, 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST));
+    while (!word_cas(p, &old, nv, 1));
     if (!old) {
         wake(w, 0);
         return;
@@ -203,8 +214,8 @@ u32 svc_wait_cv(KThread* t, u64 maddr, u64 key, u32 tag, i64 timeout) {
     R_UNLESS(key <= AS_SIZE - 4, R_BADMEMSTATE);
     pm_lock(&g_hle.kernel.klock);
     n = mutex_next_nl(maddr, &more);
-    __atomic_store_n(uword(key), 1u, __ATOMIC_SEQ_CST);
-    __atomic_store_n(uword(maddr), mutex_tag(n, more), __ATOMIC_SEQ_CST);
+    word_store(uword(key), 1u);
+    word_store(uword(maddr), mutex_tag(n, more));
     if (n) wake(n, 0);
     if (!timeout) {
         pm_unlock(&g_hle.kernel.klock);
@@ -243,7 +254,7 @@ u32 svc_signal_cv(u64 key, i32 count) {
         cv_take_mutex_nl(w);
         n++;
     }
-    if (!list_best(*l, 1, key) && key <= AS_SIZE - 4) __atomic_store_n(uword(key), 0u, __ATOMIC_SEQ_CST);
+    if (!list_best(*l, 1, key) && key <= AS_SIZE - 4) word_store(uword(key), 0u);
     pm_unlock(&g_hle.kernel.klock);
     R_SUCCEED();
 }
@@ -259,11 +270,9 @@ u32 svc_wait_addr(KThread* t, u64 addr, u32 type, i32 value, i64 timeout) {
     R_UNLESS(type <= 2, R_BADENUM);
     p = uword(addr);
     pm_lock(&g_hle.kernel.klock);
-    cur = __atomic_load_n(p, __ATOMIC_SEQ_CST);
+    cur = word_load(p);
     if (type == 1)
-        while ((i32)cur < value && !__atomic_compare_exchange_n(p, &cur, cur - 1u, 1, __ATOMIC_SEQ_CST,
-                                                                 __ATOMIC_SEQ_CST)) {
-        }
+        while ((i32)cur < value && !word_cas(p, &cur, cur - 1u, 1)) {}
     if (type == 2 ? (i32)cur != value : (i32)cur >= value) {
         pm_unlock(&g_hle.kernel.klock);
         R_THROW(R_BADSTATE);
@@ -315,9 +324,9 @@ u32 svc_signal_addr(u64 addr, u32 type, i32 value, i32 count) {
                 nv = waiting <= count ? (u32)value - 1u : (u32)value;
         }
         if (nv != (u32)value)
-            __atomic_compare_exchange_n(p, &cur, nv, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+            word_cas(p, &cur, nv, 0);
         else
-            cur = __atomic_load_n(p, __ATOMIC_SEQ_CST);
+            cur = word_load(p);
         if (cur != (u32)value) {
             pm_unlock(&g_hle.kernel.klock);
             R_THROW(R_BADSTATE);
@@ -348,6 +357,7 @@ u32 svc_wait_sync(KThread* t, u64 hptr, u32 n, i64 timeout, u32* out_idx) {
     R_UNLESS(n <= 64, R_OUTOFRANGE);
     if (n && (hptr > AS_SIZE || AS_SIZE - hptr < 4ull * n)) R_THROW(R_BADPOINTER);
     if (n) memcpy(hs, GP(hptr), 4 * (size_t)n);
+    snx_le32_array(hs, n);
     pm_lock(&g_hle.kernel.klock);
     for (i = 0; i < n; i++) {
         objs[i] = h_get_nl(hs[i]);

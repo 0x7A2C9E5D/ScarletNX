@@ -10,21 +10,21 @@
 
 #define FPSR_QC (1u << 27)
 
-/* ---- lanes: size 0-3 is 8 << size bits ---- */
+/* ---- lanes: size 0-3 is 8 << size bits, as numbers (cpu.h's SNX_VS and kin: swapped on a big-endian host) ---- */
 static u64 eget(const V128* v, u32 size, u32 i) {
     switch (size) {
         case 0: return v->b[i];
-        case 1: return v->h[i];
-        case 2: return v->s[i];
-        default: return v->d[i];
+        case 1: return SNX_VH(*v, i);
+        case 2: return SNX_VS(*v, i);
+        default: return SNX_VD(*v, i);
     }
 }
 static void eset(V128* v, u32 size, u32 i, u64 x) {
     switch (size) {
         case 0: v->b[i] = (u8)x; break;
-        case 1: v->h[i] = (u16)x; break;
-        case 2: v->s[i] = (u32)x; break;
-        default: v->d[i] = x; break;
+        case 1: SNX_VSET_H(*v, i, x); break;
+        case 2: SNX_VSET_S(*v, i, x); break;
+        default: SNX_VSET_D(*v, i, x); break;
     }
 }
 static u64 zx(u64 x, u32 size) { return x & bmask(8u << size); }
@@ -312,7 +312,7 @@ static int simd_3same(CPU* c, u32 w) {
         int pairwise = key == 0x10 || key == 0x12 || key == 0x16 || key == 0x18 || key == 0x1E;
         if (scalar ? !scalar_ok[key] : !vector_ok[key] || (sz && !q)) return 0;
         if (scalar) {
-            u64 a = sz ? n.d[0] : n.s[0], b = sz ? m.d[0] : m.s[0];
+            u64 a = eget(&n, 2 + sz, 0), b = eget(&m, 2 + sz, 0);
             eset(&r, 2 + sz, 0, same_fp(c, key, sz, a, b, 0));
             vwrite(c, rd, r, 0);
             return 1;
@@ -444,7 +444,7 @@ static int simd_3diff(CPU* c, u32 w) {
                 u32 a = n.b[i + 8 * q], b = m.b[i + 8 * q], k, p = 0;
                 for (k = 0; k < 8; ++k)
                     if ((b >> k) & 1) p ^= a << k;
-                r.h[i] = (u16)p;
+                eset(&r, 1, i, p);
             }
         }
         vwrite(c, rd, r, 1);
@@ -643,7 +643,7 @@ static int simd_2misc(CPU* c, u32 w) {
         if (op == 0x17) {
             if (u || scalar) return 0;
             for (i = 0; i < (sz ? 2u : 4u); ++i) {
-                u64 x = sz ? n.s[i + 2 * q] : n.h[i + 4 * q];
+                u64 x = sz ? eget(&n, 2, i + 2 * q) : eget(&n, 1, i + 4 * q);
                 eset(&r, 2 + sz, i, snx_fp_convert(c, x, sz ? 32 : 16, sz ? 64 : 32, FPRM));
             }
             vwrite(c, rd, r, 1);
@@ -652,16 +652,16 @@ static int simd_2misc(CPU* c, u32 w) {
         if (u && !sz) return 0;
         if (scalar) {
             if (!u) return 0;
-            r.s[0] = (u32)snx_fp_convert(c, n.d[0], 64, 32, 5);
+            eset(&r, 2, 0, snx_fp_convert(c, eget(&n, 3, 0), 64, 32, 5));
             vwrite(c, rd, r, 0);
             return 1;
         }
         if (q) r.d[0] = d.d[0];
         for (i = 0; i < (sz ? 2u : 4u); ++i) {
             if (sz)
-                r.s[i + 2 * q] = (u32)snx_fp_convert(c, n.d[i], 64, 32, u ? 5 : FPRM);
+                eset(&r, 2, i + 2 * q, snx_fp_convert(c, eget(&n, 3, i), 64, 32, u ? 5 : FPRM));
             else
-                r.h[i + 4 * q] = (u16)snx_fp_convert(c, n.s[i], 32, 16, FPRM);
+                eset(&r, 1, i + 4 * q, snx_fp_convert(c, eget(&n, 2, i), 32, 16, FPRM));
         }
         vwrite(c, rd, r, 1);
         return 1;
@@ -756,8 +756,8 @@ lanewise:
 /* ---- across lanes and scalar pairwise ---- */
 static u64 fp_reduce(CPU* c, const V128* n, u32 key) {
     int minimum = (key & 8) != 0, numeric = (key & 7) == 4;
-    u64 lo = snx_fp_minmax(c, n->s[0], n->s[1], 32, minimum, numeric);
-    u64 hi = snx_fp_minmax(c, n->s[2], n->s[3], 32, minimum, numeric);
+    u64 lo = snx_fp_minmax(c, eget(n, 2, 0), eget(n, 2, 1), 32, minimum, numeric);
+    u64 hi = snx_fp_minmax(c, eget(n, 2, 2), eget(n, 2, 3), 32, minimum, numeric);
     return snx_fp_minmax(c, lo, hi, 32, minimum, numeric); /* the architecture's tree, not a running reduction */
 }
 
@@ -768,7 +768,7 @@ static int simd_across(CPU* c, u32 w) {
     vzero(&r);
     if (op == 0x0C || op == 0x0F) { /* FMAXNMV FMINNMV FMAXV FMINV */
         if (!u || (size & 1) || !q) return 0;
-        r.s[0] = (u32)fp_reduce(c, &n, ((size >> 1) << 3) | (op & 7));
+        eset(&r, 2, 0, fp_reduce(c, &n, ((size >> 1) << 3) | (op & 7)));
         vwrite(c, rd, r, 0);
         return 1;
     }
@@ -803,12 +803,12 @@ static int simd_scalar_pairwise(CPU* c, u32 w) {
     vzero(&r);
     if (!u) {
         if (op != 0x1B || size != 3) return 0; /* ADDP */
-        r.d[0] = n.d[0] + n.d[1];
+        eset(&r, 3, 0, eget(&n, 3, 0) + eget(&n, 3, 1));
         vwrite(c, rd, r, 0);
         return 1;
     }
-    a = sz ? n.d[0] : n.s[0];
-    b = sz ? n.d[1] : n.s[1];
+    a = eget(&n, 2 + sz, 0);
+    b = eget(&n, 2 + sz, 1);
     switch (((size >> 1) << 5) | op) {
         case 0x0C: a = snx_fp_minmax(c, a, b, fwidth(sz), 0, 1); break;
         case 0x2C: a = snx_fp_minmax(c, a, b, fwidth(sz), 1, 1); break;
@@ -908,7 +908,8 @@ static int simd_modimm(CPU* c, u32 w) {
     V128 r;
     if ((w >> 11) & 1) return 0; /* o2: FMOV (half) is ARMv8.2 */
     if (cmode == 15 && op && !q) return 0;
-    imm = v_expand_imm(op, cmode, imm8);
+    /* the lanes' bytes, as the register holds them: the bitwise operations below commute with the swap */
+    imm = SNX_GUEST64(v_expand_imm(op, cmode, imm8));
     r = c->v[rd];
     if (cmode < 12 && (cmode & 1)) { /* ORR, BIC */
         r.d[0] = op ? r.d[0] & ~imm : r.d[0] | imm;

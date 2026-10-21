@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* Test-only host FP environment, matching nx/runtime/rtapi.c. Restored before
    returning to Python so guest rounding/FZ cannot contaminate the oracle. */
+#include <fenv.h>
 static u64 audit_host_save(void) {
 #if defined(__x86_64__)
     u32 value;
@@ -12,15 +13,18 @@ static u64 audit_host_save(void) {
     __asm__ __volatile__("mrs %0, fpcr" : "=r"(value));
     return value;
 #else
-#error "The audit harness needs the same host FP mapping as the runtime"
+    /* the others' generated code leaves the host's FP control alone: only its rounding mode to keep */
+    return (u64)fegetround();
 #endif
 }
 static void audit_host_restore(u64 value) {
 #if defined(__x86_64__)
     u32 mx = (u32)value;
     __asm__ __volatile__("ldmxcsr %0" : : "m"(mx));
-#else
+#elif defined(__aarch64__)
     __asm__ __volatile__("msr fpcr, %0" : : "r"(value));
+#else
+    fesetround((int)value);
 #endif
 }
 static void audit_fpcr(CPU* c) {

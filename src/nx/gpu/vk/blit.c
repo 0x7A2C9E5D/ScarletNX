@@ -48,6 +48,7 @@ static int blit(const GpuBlit* b) {
     if (!t || !stage_range(b->src.addr, sspan, &sb, &sat)) return 0;
     memcpy(t, b->scol, 4ull * n);
     memcpy(t + n, b->srow, 4ull * rows);
+    snx_le32_array(t, (size_t)n + rows); /* the device reads the tables' words little-endian */
     d = vk_own_res_new(dspan);
     if (!d || !stage_range(b->dst.addr, dspan, &db, &dat)) {
         if (d) vk_own_res_unref(d);

@@ -61,6 +61,7 @@ static void plaintext_headers(void) {
         if (i == 0) header._0x340[0] = 1;
         nca_init(&ctx);
         ctx.tool_ctx = &tool;
+        nca_header_swap(&header); /* stored little-endian */
         ctx.file = archive(&header, sizeof(header), NULL, 0);
         nca_process(&ctx);
         CHECK(ctx.is_decrypted);
@@ -75,6 +76,7 @@ static void plaintext_headers(void) {
     header.magic = MAGIC_DNCA;
     nca_init(&ctx);
     ctx.tool_ctx = &tool;
+    nca_header_swap(&header);
     ctx.file = archive(&header, 0xA00, NULL, 0);
     CHECK(!nca_decrypt_header(&ctx));
     CHECK(!fclose(ctx.file));
@@ -91,7 +93,7 @@ static void pfs_sections(void) {
         unsigned char section_keys[0x40];
         pfs0_header_t pfs = {0};
         pfs0_superblock_t* sb = &header.fs_headers[0].pfs0_superblock;
-        pfs.magic = MAGIC_PFS0;
+        pfs.magic = snx_le32(MAGIC_PFS0); /* stored little-endian, as the archive's header below */
         memcpy(body + 0x20, &pfs, sizeof(pfs));
         sha256_hash_buffer(body, &pfs, sizeof(pfs));
         sha256_hash_buffer(sb->master_hash, body, 0x20);
@@ -110,6 +112,7 @@ static void pfs_sections(void) {
             tool.settings.keyset.header_key[i] = (unsigned char)(i + 1);
         for (unsigned i = 0; i < sizeof(section_keys); i++) section_keys[i] = (unsigned char)(i + 0x31);
         memcpy(stored_body, body, sizeof(body));
+        nca_header_swap(&header);
         if (encrypted) {
             unsigned char ctr[0x10] = {0};
             aes_ctx_t* aes = new_aes_ctx(tool.settings.keyset.key_area_keys[0][0], 16, AES_MODE_ECB);
@@ -160,21 +163,21 @@ static void plaintext_patch(unsigned crypto, size_t gap, size_t trailing) {
     bktr_subsection_block_t* subs = (bktr_subsection_block_t*)(body + subsection_offset);
     if (gap) memset(body + 0x8200, 0x6D, gap);
     if (trailing) memset(body + subsection_offset + 0x8000, 0xA9, trailing);
-    relocs->num_buckets = 1;
-    relocs->total_size = 16;
-    relocs->buckets[0].num_entries = 3;
-    relocs->buckets[0].virtual_offset_end = 16;
-    relocs->buckets[0].entries[0].phys_offset = 4;
-    relocs->buckets[0].entries[1].virt_offset = 5;
-    relocs->buckets[0].entries[1].phys_offset = 0x23;
-    relocs->buckets[0].entries[1].is_patch = 1;
-    relocs->buckets[0].entries[2].virt_offset = 10;
-    relocs->buckets[0].entries[2].phys_offset = 20;
-    subs->num_buckets = 1;
-    subs->total_size = gap || trailing ? 0x200 : subsection_offset;
-    subs->buckets[0].num_entries = 1;
-    subs->buckets[0].physical_offset_end = 0x200;
-    subs->buckets[0].entries[0].ctr_val = 0x12345678;
+    relocs->num_buckets = snx_le32(1); /* the tables are little-endian */
+    relocs->total_size = snx_le64(16);
+    relocs->buckets[0].num_entries = snx_le32(3);
+    relocs->buckets[0].virtual_offset_end = snx_le64(16);
+    relocs->buckets[0].entries[0].phys_offset = snx_le64(4);
+    relocs->buckets[0].entries[1].virt_offset = snx_le64(5);
+    relocs->buckets[0].entries[1].phys_offset = snx_le64(0x23);
+    relocs->buckets[0].entries[1].is_patch = snx_le32(1);
+    relocs->buckets[0].entries[2].virt_offset = snx_le64(10);
+    relocs->buckets[0].entries[2].phys_offset = snx_le64(20);
+    subs->num_buckets = snx_le32(1);
+    subs->total_size = snx_le64(gap || trailing ? 0x200 : subsection_offset);
+    subs->buckets[0].num_entries = snx_le32(1);
+    subs->buckets[0].physical_offset_end = snx_le64(0x200);
+    subs->buckets[0].entries[0].ctr_val = snx_le32(0x12345678);
 
     hactool_ctx_t tool = {0};
     nca_header_t header = {0};
@@ -207,6 +210,7 @@ static void plaintext_patch(unsigned crypto, size_t gap, size_t trailing) {
     tool.base_file_type = BASEFILE_ROMFS;
     nca_init(&ctx);
     ctx.tool_ctx = &tool;
+    nca_header_swap(&header);
     ctx.file = archive(&header, sizeof(header), body, body_size);
     nca_process(&ctx);
     nca_section_ctx_t* section = &ctx.section_contexts[0];
@@ -315,10 +319,10 @@ static void gamecard_headers(void) {
         xci_ctx_t ctx = {0};
         xci_header_t header = {0};
         hfs0_header_t root = {0};
-        header.magic = magics[i];
-        header.hfs0_offset = sizeof(header);
-        header.hfs0_header_size = sizeof(root);
-        root.magic = MAGIC_HFS0;
+        header.magic = snx_le32(magics[i]); /* the header and the partition's are little-endian */
+        header.hfs0_offset = snx_le64(sizeof(header));
+        header.hfs0_header_size = snx_le64(sizeof(root));
+        root.magic = snx_le32(MAGIC_HFS0);
         sha256_hash_buffer(header.hfs0_header_hash, &root, sizeof(root));
         if (i == 0) {
             /* DXCI keeps encrypted gamecard info while its root hash uses no regional suffix. */
@@ -336,7 +340,7 @@ static void gamecard_headers(void) {
         ctx.tool_ctx = &tool;
         ctx.file = archive(&header, sizeof(header), &root, sizeof(root));
         xci_process(&ctx);
-        CHECK(ctx.header.magic == magics[i]);
+        CHECK(snx_le32(ctx.header.magic) == magics[i]);
         CHECK(!ctx.has_decrypted_header);
         CHECK(ctx.hfs0_hash_validity == VALIDITY_VALID);
         CHECK(ctx.partition_ctx.header != NULL);

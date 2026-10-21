@@ -371,8 +371,8 @@ jobs:
   #       run: ctest --preset linux-ppc64le-cross --parallel "$(getconf _NPROCESSORS_ONLN)"
 
   # Big-endian ppc64 (ELFv1, Debian ports' glibc), cross-built as the ppc64le job above would be and tested under
-  # qemu-ppc64: the Linux runtime only, as the Switch runtime refuses a big-endian host (docs/PPC64.md), so no
-  # package. Debian ports' unstable is the system root, which can break for a day, so like the cross-built AppImages
+  # qemu-ppc64: the Linux runtime only (the Switch runtime is ported to big-endian ELFv2, which appimage-cross builds),
+  # so no package. Debian ports' unstable is the system root, which can break for a day, so like the cross-built AppImages
   # it may fail without failing the run. Its card field says what the tests did (ReiWimsy's CHECKS, in
   # scarletnx/discord-bots)
   linux-ppc64:
@@ -650,9 +650,9 @@ jobs:
   # with the runner's Docker (its files only: it never runs), so the job runs on the runner and enters pkgforge's x86-64
   # container with docker exec, the workspace mounted at /src. platform is Docker's name of the architecture (loong64
   # for LoongArch). No POWER, RISC-V or LoongArch machine has run the AppImages yet, so like the macOS and iOS jobs they
-  # may fail without failing the run (scripts/publish-builds.py, OPTIONAL). Big-endian ppc64's is the Linux runtime alone
-  # (linux-only, its preset's runtimes), as the Switch and 3DS ones need a little-endian host: Arch POWER's glibc there
-  # is ELFv2, not Debian ports' ELFv1, which the linux-ppc64 job tests
+  # may fail without failing the run (scripts/publish-builds.py, OPTIONAL). Big-endian ppc64's has every runtime (the 3DS
+  # one builds there but isn't ported to a big-endian host): Arch POWER's glibc there is ELFv2, not Debian ports' ELFv1,
+  # which the linux-ppc64 job tests
   appimage-cross:
     name: Linux AppImage (${{ matrix.arch }})
     runs-on: ubuntu-26.04
@@ -675,7 +675,6 @@ jobs:
           - arch: ppc64
             platform: ppc64
             preset: linux-ppc64-elfv2-cross
-            linux-only: true
     steps:
       # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
       - name: Name the commit

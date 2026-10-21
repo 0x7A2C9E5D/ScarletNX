@@ -18,6 +18,15 @@
 #endif
 #if defined(__riscv) || defined(__loongarch__)
 u32 snx_cas128(CPU* c, u64* p, u64 o0, u64 o1, u64 n0, u64 n1) { return c->rt->cas128(p, o0, o1, n0, n1); }
+#elif defined(__powerpc64__) && !defined(_ARCH_PWR8)
+/* a PowerPC64 baseline before POWER8 (cmake/cross.cmake's SNX_PPC64_CPU, the PowerPC 970): RtAPI.cas128 too, which
+   takes the doublewords as the host reads p[0] and p[1], each byte-reversed on a big-endian host */
+u32 snx_cas128(CPU* c, u64* p, u64 o0, u64 o1, u64 n0, u64 n1) {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    o0 = __builtin_bswap64(o0), o1 = __builtin_bswap64(o1), n0 = __builtin_bswap64(n0), n1 = __builtin_bswap64(n1);
+#endif
+    return c->rt->cas128(p, o0, o1, n0, n1);
+}
 #else
 __extension__ typedef unsigned __int128 snx_u128;
 #if defined(__x86_64__)

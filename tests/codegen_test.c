@@ -251,6 +251,11 @@ static void emit_semantic_fixture(FILE* out) {
     size_t i;
     char function[32];
     fputs("#include \"cpu.h\"\n#define SNX_A64_REFERENCE\n#include \"cpu_helpers.c\"\n#include <stdio.h>\nGuestFn snx_missing_entry;\n", out);
+    /* the cases set and check lanes as numbers: SNX_VS and its kin, and these for floats, swap them where V128 holds the
+       guest's bytes on a big-endian host */
+    fputs("static void snx_t_setf(V128* v, unsigned i, float x) { u32 b; memcpy(&b, &x, 4); SNX_VSET_S(*v, i, b); }\n"
+          "static float snx_t_f(const V128* v, unsigned i) { u32 b = SNX_VS(*v, i); float x; memcpy(&x, &b, 4); return x; }\n",
+          out);
     for (i = 0; i < sizeof(words) / sizeof(words[0]); ++i) {
         sprintf(function, "step_%zu", i);
         snx_a64_static_step(out, words[i], 0x1000, function);
@@ -270,52 +275,52 @@ static void emit_semantic_fixture(FILE* out) {
           out);
     fputs(" case 0:c.x[1]=0xFFFFFFFFULL;break; case 1:c.cf=1;break; case 2:c.cf=0;break;\n", out);
     fputs(" case 3:c.x[1]=0x12345678;break;case 4:c.x[1]=0x80;break;case 5:c.x[1]=0x123456789ABCDEF0ULL;break;\n", out);
-    fputs(" case 6:c.x[1]=16777217;break;case 7:c.v[1].d[0]=0x7FF8000000001234ULL;break;\n", out);
-    fputs(" case 8:c.z=1;c.v[1].d[0]=0x7FF8000000001234ULL;c.v[2].d[0]=0x3FF0000000000000ULL;break;\n", out);
-    fputs(" case 9:for(j=0;j<4;j++){c.v[1].s[j]=0xFFFFFFFFu;c.v[2].s[j]=j+1;}break;\n", out);
-    fputs(" case 10:for(j=0;j<4;j++){c.v[0].f[j]=3;c.v[1].f[j]=4;c.v[2].f[j]=5;}break;\n", out);
-    fputs(" case 11:c.x[1]=0x123456789ABCDEF0ULL;break;case 12:c.v[1].d[1]=0xFEDCBA9876543210ULL;break;\n", out);
-    fputs(" case 13:c.v[0].d[1]=~0ULL;c.v[0].f[0]=3;c.v[1].f[0]=4;c.v[2].f[3]=5;break;\n", out);
-    fputs(" case 14:c.x[31]=16;value=0x123456789ABCDEF0ULL;memcpy(memory+24,&value,8);break;\n", out);
-    fputs(" case 15:c.x[1]=16;c.x[31]=0xFFFFFFFF;break;case 18:c.v[2].s[0]=0x80000000;break;\n", out);
-    fputs(" case 19:c.v[1].s[0]=0xFFC00456;c.v[2].s[0]=0x7FC00789;c.v[3].s[0]=0x7FC00123;break;\n", out);
-    fputs(" case 20:c.v[1].s[0]=0x7F800456;break;case 21:c.x[0]=~0ULL;c.v[1].s[0]=0xFFC00123;break;\n", out);
-    fputs(" case 22:c.fpcr=1u<<22;for(j=0;j<4;j++){c.v[1].s[j]=0x3F800000;c.v[2].s[j]=0x33800000;}break;\n", out);
+    fputs(" case 6:c.x[1]=16777217;break;case 7:SNX_VSET_D(c.v[1],0,0x7FF8000000001234ULL);break;\n", out);
+    fputs(" case 8:c.z=1;SNX_VSET_D(c.v[1],0,0x7FF8000000001234ULL);SNX_VSET_D(c.v[2],0,0x3FF0000000000000ULL);break;\n", out);
+    fputs(" case 9:for(j=0;j<4;j++){SNX_VSET_S(c.v[1],j,0xFFFFFFFFu);SNX_VSET_S(c.v[2],j,j+1);}break;\n", out);
+    fputs(" case 10:for(j=0;j<4;j++){snx_t_setf(&c.v[0],j,3);snx_t_setf(&c.v[1],j,4);snx_t_setf(&c.v[2],j,5);}break;\n", out);
+    fputs(" case 11:c.x[1]=0x123456789ABCDEF0ULL;break;case 12:SNX_VSET_D(c.v[1],1,0xFEDCBA9876543210ULL);break;\n", out);
+    fputs(" case 13:SNX_VSET_D(c.v[0],1,~0ULL);snx_t_setf(&c.v[0],0,3);snx_t_setf(&c.v[1],0,4);snx_t_setf(&c.v[2],3,5);break;\n", out);
+    fputs(" case 14:c.x[31]=16;value=SNX_GUEST64(0x123456789ABCDEF0ULL);memcpy(memory+24,&value,8);break;\n", out);
+    fputs(" case 15:c.x[1]=16;c.x[31]=0xFFFFFFFF;break;case 18:SNX_VSET_S(c.v[2],0,0x80000000);break;\n", out);
+    fputs(" case 19:SNX_VSET_S(c.v[1],0,0xFFC00456);SNX_VSET_S(c.v[2],0,0x7FC00789);SNX_VSET_S(c.v[3],0,0x7FC00123);break;\n", out);
+    fputs(" case 20:SNX_VSET_S(c.v[1],0,0x7F800456);break;case 21:c.x[0]=~0ULL;SNX_VSET_S(c.v[1],0,0xFFC00123);break;\n", out);
+    fputs(" case 22:c.fpcr=1u<<22;for(j=0;j<4;j++){SNX_VSET_S(c.v[1],j,0x3F800000);SNX_VSET_S(c.v[2],j,0x33800000);}break;\n", out);
     fputs(
-        " case 23:c.v[0].s[0]=0x7FC00123;c.v[0].d[1]=~0ULL;c.v[1].s[0]=0xFF800456;c.v[2].s[3]=0x7FC00ABC;c.fpsr=0x08000010;break;\n",
+        " case 23:SNX_VSET_S(c.v[0],0,0x7FC00123);SNX_VSET_D(c.v[0],1,~0ULL);SNX_VSET_S(c.v[1],0,0xFF800456);SNX_VSET_S(c.v[2],3,0x7FC00ABC);c.fpsr=0x08000010;break;\n",
         out);
-    fputs(" case 24:c.fpcr=1u<<26;c.v[1].d[0]=0x7FF0000000000000ULL;break;\n", out);
+    fputs(" case 24:c.fpcr=1u<<26;SNX_VSET_D(c.v[1],0,0x7FF0000000000000ULL);break;\n", out);
     fputs(
-        " case 25:c.v[1].d[0]=0x3FE0000000000000ULL;break;case 26:c.fpcr=3u<<22;c.v[1].d[0]=0x4000000000000000ULL;break;\n",
+        " case 25:SNX_VSET_D(c.v[1],0,0x3FE0000000000000ULL);break;case 26:c.fpcr=3u<<22;SNX_VSET_D(c.v[1],0,0x4000000000000000ULL);break;\n",
         out);
-    fputs(" case 27:c.v[2].s[0]=0x7F800000;break;\n", out);
+    fputs(" case 27:SNX_VSET_S(c.v[2],0,0x7F800000);break;\n", out);
     /* FCVT and FCVTN to half: the FPCR mode, overflow and FZ */
-    fputs(" case 28:c.fpcr=0x400000;c.v[1].s[0]=0x3F800001u;break;\n", out);
-    fputs(" case 29:c.fpcr=0x400000;c.v[1].d[0]=0xC202A05F20000000ULL;break;\n", out);
-    fputs(" case 30:c.fpcr=0xC00000;c.v[0].d[0]=c.v[0].d[1]=~0ULL;c.v[1].s[0]=0x3F801FFFu;c.v[1].s[1]=0x477FF000u;\n",
+    fputs(" case 28:c.fpcr=0x400000;SNX_VSET_S(c.v[1],0,0x3F800001u);break;\n", out);
+    fputs(" case 29:c.fpcr=0x400000;SNX_VSET_D(c.v[1],0,0xC202A05F20000000ULL);break;\n", out);
+    fputs(" case 30:c.fpcr=0xC00000;SNX_VSET_D(c.v[0],0,~0ULL);SNX_VSET_D(c.v[0],1,~0ULL);SNX_VSET_S(c.v[1],0,0x3F801FFFu);SNX_VSET_S(c.v[1],1,0x477FF000u);\n",
           out);
-    fputs(" c.v[1].s[2]=0x33000001u;c.v[1].s[3]=0x80000000u;break;case 31:c.fpcr=0x1400000;c.v[1].s[0]=1;break;\n",
+    fputs(" SNX_VSET_S(c.v[1],2,0x33000001u);SNX_VSET_S(c.v[1],3,0x80000000u);break;case 31:c.fpcr=0x1400000;SNX_VSET_S(c.v[1],0,1);break;\n",
           out);
     /* fused multiply-add NaNs in f64 */
-    fputs(" case 32:c.v[1].d[0]=0x7FF0000000000000ULL;c.v[3].d[0]=0x3FF0000000000000ULL;break;\n", out);
-    fputs(" case 33:c.v[1].d[0]=0x7FF8000000000000ULL;c.v[2].d[0]=~0ULL;c.v[3].d[0]=0x3FF0000000000000ULL;break;\n",
+    fputs(" case 32:SNX_VSET_D(c.v[1],0,0x7FF0000000000000ULL);SNX_VSET_D(c.v[3],0,0x3FF0000000000000ULL);break;\n", out);
+    fputs(" case 33:SNX_VSET_D(c.v[1],0,0x7FF8000000000000ULL);SNX_VSET_D(c.v[2],0,~0ULL);SNX_VSET_D(c.v[3],0,0x3FF0000000000000ULL);break;\n",
           out);
-    fputs(" case 34:c.v[0].d[0]=c.v[0].d[1]=0x3FF0000000000000ULL;c.v[1].d[0]=0x7FF0000000000000ULL;\n", out);
-    fputs(" c.v[1].d[1]=0x7FF8000000000001ULL;c.v[2].d[1]=0xFFF8000000000002ULL;break;\n", out);
+    fputs(" case 34:SNX_VSET_D(c.v[0],0,0x3FF0000000000000ULL);SNX_VSET_D(c.v[0],1,0x3FF0000000000000ULL);SNX_VSET_D(c.v[1],0,0x7FF0000000000000ULL);\n", out);
+    fputs(" SNX_VSET_D(c.v[1],1,0x7FF8000000000001ULL);SNX_VSET_D(c.v[2],1,0xFFF8000000000002ULL);break;\n", out);
     /* FRECPE and FRSQRTE: FZ and the FPCR mode */
-    fputs(" case 35:c.fpcr=0x1000000;c.v[1].d[0]=1;break;\n", out);
-    fputs(" case 36:case 37:c.fpcr=i==36?0x1000000:0;c.v[1].s[0]=0x00400000u;c.v[1].s[1]=0x80400000u;\n", out);
-    fputs(" c.v[1].s[2]=0x007FFFFFu;c.v[1].s[3]=0x3F800000u;break;\n", out);
-    fputs(" case 38:c.fpcr=0x1000000;c.v[1].s[0]=0x7E800000u;c.v[1].s[1]=0xFF000000u;c.v[1].s[2]=0x7E7FFFFFu;\n", out);
-    fputs(" c.v[1].s[3]=0x3F800000u;break;case 39:c.fpcr=0x400000;c.v[1].s[0]=1;c.v[1].s[1]=0x80000001u;\n", out);
-    fputs(" c.v[1].s[2]=0x001FFFFFu;c.v[1].s[3]=0x00200000u;break;case 40:c.fpcr=0xC00000;c.v[1].d[0]=1;\n", out);
+    fputs(" case 35:c.fpcr=0x1000000;SNX_VSET_D(c.v[1],0,1);break;\n", out);
+    fputs(" case 36:case 37:c.fpcr=i==36?0x1000000:0;SNX_VSET_S(c.v[1],0,0x00400000u);SNX_VSET_S(c.v[1],1,0x80400000u);\n", out);
+    fputs(" SNX_VSET_S(c.v[1],2,0x007FFFFFu);SNX_VSET_S(c.v[1],3,0x3F800000u);break;\n", out);
+    fputs(" case 38:c.fpcr=0x1000000;SNX_VSET_S(c.v[1],0,0x7E800000u);SNX_VSET_S(c.v[1],1,0xFF000000u);SNX_VSET_S(c.v[1],2,0x7E7FFFFFu);\n", out);
+    fputs(" SNX_VSET_S(c.v[1],3,0x3F800000u);break;case 39:c.fpcr=0x400000;SNX_VSET_S(c.v[1],0,1);SNX_VSET_S(c.v[1],1,0x80000001u);\n", out);
+    fputs(" SNX_VSET_S(c.v[1],2,0x001FFFFFu);SNX_VSET_S(c.v[1],3,0x00200000u);break;case 40:c.fpcr=0xC00000;SNX_VSET_D(c.v[1],0,1);\n", out);
     fputs(
-        " c.v[1].d[1]=0x7FD0000000000000ULL;break;case 41:c.fpcr=0x1000000;c.v[1].d[0]=0xFFD0000000000000ULL;break;\n",
+        " SNX_VSET_D(c.v[1],1,0x7FD0000000000000ULL);break;case 41:c.fpcr=0x1000000;SNX_VSET_D(c.v[1],0,0xFFD0000000000000ULL);break;\n",
         out);
-    fputs(" case 42:c.fpcr=0x800000;c.v[1].s[0]=1;c.v[1].s[1]=0x80000001u;c.v[1].s[2]=0x7E800000u;\n", out);
-    fputs(" c.v[1].s[3]=0x3F800000u;break;\n", out);
+    fputs(" case 42:c.fpcr=0x800000;SNX_VSET_S(c.v[1],0,1);SNX_VSET_S(c.v[1],1,0x80000001u);SNX_VSET_S(c.v[1],2,0x7E800000u);\n", out);
+    fputs(" SNX_VSET_S(c.v[1],3,0x3F800000u);break;\n", out);
     /* UCVTF of 0 and of 2^63+1 in the directed modes */
-    fputs(" case 43:c.fpcr=0x800000;break;case 44:c.fpcr=0x800000;c.v[1].d[1]=0x8000000000000001ULL;break;\n", out);
+    fputs(" case 43:c.fpcr=0x800000;break;case 44:c.fpcr=0x800000;SNX_VSET_D(c.v[1],1,0x8000000000000001ULL);break;\n", out);
     fputs(" case 45:c.fpcr=0x400000;c.x[1]=0x8000000000000001ULL;break;\n", out);
     fputs(" default:break;}\n", out);
     fputs(" pc=mode?snx_step(&c,words[i],0x1000):steps[i](&c);ok=pc==(i==16?0xFFC:i==17?0x1000:0x1004);\n switch(i){\n",
@@ -323,56 +328,56 @@ static void emit_semantic_fixture(FILE* out) {
     fputs(" case 0:ok&=c.x[0]==0&&c.z==1&&c.cf==1&&!c.n&&!c.vf;break;case 1:ok&=c.x[0]==1;break;\n", out);
     fputs(" case 2:ok&=c.x[0]==~0ULL;break;case 3:ok&=c.x[0]==0x3456;break;case 4:ok&=c.x[0]==~127ULL;break;\n", out);
     fputs(
-        " case 5:ok&=c.x[0]==0xF0123456789ABCDEULL;break;case 6:ok&=c.v[0].s[0]==0x4B800000u&&!c.v[0].d[1]&&c.fpsr==0x10;break;\n",
+        " case 5:ok&=c.x[0]==0xF0123456789ABCDEULL;break;case 6:ok&=SNX_VS(c.v[0],0)==0x4B800000u&&!SNX_VD(c.v[0],1)&&c.fpsr==0x10;break;\n",
         out);
     fputs(
-        " case 7:ok&=c.x[0]==0x7FF8000000001234ULL;break;case 8:ok&=c.v[0].d[0]==0x7FF8000000001234ULL&&!c.v[0].d[1];break;\n",
+        " case 7:ok&=c.x[0]==0x7FF8000000001234ULL;break;case 8:ok&=SNX_VD(c.v[0],0)==0x7FF8000000001234ULL&&!SNX_VD(c.v[0],1);break;\n",
         out);
-    fputs(" case 9:for(j=0;j<4;j++)ok&=c.v[0].s[j]==j;break;case 10:for(j=0;j<4;j++)ok&=c.v[0].f[j]==23;break;\n", out);
+    fputs(" case 9:for(j=0;j<4;j++)ok&=SNX_VS(c.v[0],j)==j;break;case 10:for(j=0;j<4;j++)ok&=snx_t_f(&c.v[0],j)==23;break;\n", out);
     fputs(
-        " case 11:for(j=0;j<4;j++)ok&=c.v[0].s[j]==0x9ABCDEF0u;break;case 12:ok&=c.x[0]==0xFEDCBA9876543210ULL;break;\n",
+        " case 11:for(j=0;j<4;j++)ok&=SNX_VS(c.v[0],j)==0x9ABCDEF0u;break;case 12:ok&=c.x[0]==0xFEDCBA9876543210ULL;break;\n",
         out);
     fputs(
-        " case 13:ok&=c.v[0].f[0]==23&&!c.v[0].s[1]&&!c.v[0].d[1];break;case 14:ok&=c.x[0]==0x123456789ABCDEF0ULL;break;\n",
+        " case 13:ok&=snx_t_f(&c.v[0],0)==23&&!SNX_VS(c.v[0],1)&&!SNX_VD(c.v[0],1);break;case 14:ok&=c.x[0]==0x123456789ABCDEF0ULL;break;\n",
         out);
     fputs(" case 15:memcpy(&value,memory+24,8);ok&=value==0&&c.x[31]==0xFFFFFFFF;break;case 17:ok&=traps==1;break;\n",
           out);
     fputs(
-        " case 18:ok&=c.v[0].s[0]==0x7FC00000&&c.fpsr==1;break;case 19:ok&=c.v[0].s[0]==0x7FC00123&&c.fpsr==0;break;\n",
+        " case 18:ok&=SNX_VS(c.v[0],0)==0x7FC00000&&c.fpsr==1;break;case 19:ok&=SNX_VS(c.v[0],0)==0x7FC00123&&c.fpsr==0;break;\n",
         out);
-    fputs(" case 20:ok&=c.v[0].d[0]==0x7FF8008AC0000000ULL&&c.fpsr==1;break;case 21:ok&=c.x[0]==0&&c.fpsr==1;break;\n",
+    fputs(" case 20:ok&=SNX_VD(c.v[0],0)==0x7FF8008AC0000000ULL&&c.fpsr==1;break;case 21:ok&=c.x[0]==0&&c.fpsr==1;break;\n",
           out);
-    fputs(" case 22:for(j=0;j<4;j++)ok&=c.v[0].s[j]==0x3F800001;ok&=c.fpsr==0x10;break;\n", out);
-    fputs(" case 23:ok&=c.v[0].s[0]==0xFFC00456&&!c.v[0].s[1]&&!c.v[0].d[1]&&c.fpsr==0x08000011;break;\n", out);
+    fputs(" case 22:for(j=0;j<4;j++)ok&=SNX_VS(c.v[0],j)==0x3F800001;ok&=c.fpsr==0x10;break;\n", out);
+    fputs(" case 23:ok&=SNX_VS(c.v[0],0)==0xFFC00456&&!SNX_VS(c.v[0],1)&&!SNX_VD(c.v[0],1)&&c.fpsr==0x08000011;break;\n", out);
     fputs(
-        " case 24:ok&=c.v[0].d[0]==0x7FFF&&!c.v[0].d[1]&&c.fpsr==1;break;case 25:ok&=c.x[0]==0x7FFFFFFFFFFFFFFFULL&&c.fpsr==1;break;\n",
+        " case 24:ok&=SNX_VD(c.v[0],0)==0x7FFF&&!SNX_VD(c.v[0],1)&&c.fpsr==1;break;case 25:ok&=c.x[0]==0x7FFFFFFFFFFFFFFFULL&&c.fpsr==1;break;\n",
         out);
     fputs(
-        " case 26:ok&=c.v[0].d[0]==0x3FF6A09E667F3BCCULL&&c.fpsr==0x10;break;case 27:ok&=c.v[0].s[0]==0xFFC00000&&c.fpsr==1;break;\n",
+        " case 26:ok&=SNX_VD(c.v[0],0)==0x3FF6A09E667F3BCCULL&&c.fpsr==0x10;break;case 27:ok&=SNX_VS(c.v[0],0)==0xFFC00000&&c.fpsr==1;break;\n",
         out);
-    fputs(" case 28:ok&=c.v[0].d[0]==0x3C01&&!c.v[0].d[1];break;case 29:ok&=c.v[0].d[0]==0xFBFF&&!c.v[0].d[1];break;\n",
+    fputs(" case 28:ok&=SNX_VD(c.v[0],0)==0x3C01&&!SNX_VD(c.v[0],1);break;case 29:ok&=SNX_VD(c.v[0],0)==0xFBFF&&!SNX_VD(c.v[0],1);break;\n",
           out);
-    fputs(" case 30:ok&=c.v[0].d[0]==0x800000007BFF3C00ULL&&!c.v[0].d[1];break;\n", out);
-    fputs(" case 31:ok&=!c.v[0].d[0]&&!c.v[0].d[1]&&(c.fpsr&0x80);break;\n", out);
-    fputs(" case 32:ok&=c.v[0].d[0]==0x7FF8000000000000ULL&&!c.v[0].d[1];break;\n", out);
-    fputs(" case 33:ok&=c.v[0].d[0]==0xFFF8000000000000ULL&&!c.v[0].d[1];break;\n", out);
-    fputs(" case 34:ok&=c.v[0].d[0]==0x7FF8000000000000ULL&&c.v[0].d[1]==0x7FF8000000000001ULL;break;\n", out);
-    fputs(" case 35:ok&=c.v[0].d[0]==0x7FF0000000000000ULL&&!c.v[0].d[1]&&(c.fpsr&0x80);break;\n", out);
-    fputs(" case 36:ok&=c.v[0].d[0]==0xFF8000007F800000ULL&&c.v[0].d[1]==0x3F7F80007F800000ULL&&(c.fpsr&0x80);break;\n",
+    fputs(" case 30:ok&=SNX_VD(c.v[0],0)==0x800000007BFF3C00ULL&&!SNX_VD(c.v[0],1);break;\n", out);
+    fputs(" case 31:ok&=!SNX_VD(c.v[0],0)&&!SNX_VD(c.v[0],1)&&(c.fpsr&0x80);break;\n", out);
+    fputs(" case 32:ok&=SNX_VD(c.v[0],0)==0x7FF8000000000000ULL&&!SNX_VD(c.v[0],1);break;\n", out);
+    fputs(" case 33:ok&=SNX_VD(c.v[0],0)==0xFFF8000000000000ULL&&!SNX_VD(c.v[0],1);break;\n", out);
+    fputs(" case 34:ok&=SNX_VD(c.v[0],0)==0x7FF8000000000000ULL&&SNX_VD(c.v[0],1)==0x7FF8000000000001ULL;break;\n", out);
+    fputs(" case 35:ok&=SNX_VD(c.v[0],0)==0x7FF0000000000000ULL&&!SNX_VD(c.v[0],1)&&(c.fpsr&0x80);break;\n", out);
+    fputs(" case 36:ok&=SNX_VD(c.v[0],0)==0xFF8000007F800000ULL&&SNX_VD(c.v[0],1)==0x3F7F80007F800000ULL&&(c.fpsr&0x80);break;\n",
           out);
-    fputs(" case 37:ok&=c.v[0].d[0]==0xFEFF80007EFF8000ULL&&c.v[0].d[1]==0x3F7F80007E800000ULL&&!c.fpsr;break;\n", out);
-    fputs(" case 38:ok&=c.v[0].d[0]==0x8000000000000000ULL&&c.v[0].d[1]==0x3F7F800000800000ULL&&c.fpsr==8;break;\n",
+    fputs(" case 37:ok&=SNX_VD(c.v[0],0)==0xFEFF80007EFF8000ULL&&SNX_VD(c.v[0],1)==0x3F7F80007E800000ULL&&!c.fpsr;break;\n", out);
+    fputs(" case 38:ok&=SNX_VD(c.v[0],0)==0x8000000000000000ULL&&SNX_VD(c.v[0],1)==0x3F7F800000800000ULL&&c.fpsr==8;break;\n",
           out);
-    fputs(" case 39:ok&=c.v[0].d[0]==0xFF7FFFFF7F800000ULL&&c.v[0].d[1]==0x7F7F80007F800000ULL&&c.fpsr==0x14;break;\n",
+    fputs(" case 39:ok&=SNX_VD(c.v[0],0)==0xFF7FFFFF7F800000ULL&&SNX_VD(c.v[0],1)==0x7F7F80007F800000ULL&&c.fpsr==0x14;break;\n",
           out);
-    fputs(" case 40:ok&=c.v[0].d[0]==0x7FEFFFFFFFFFFFFFULL&&c.v[0].d[1]==0x000FF80000000000ULL&&c.fpsr==0x14;break;\n",
+    fputs(" case 40:ok&=SNX_VD(c.v[0],0)==0x7FEFFFFFFFFFFFFFULL&&SNX_VD(c.v[0],1)==0x000FF80000000000ULL&&c.fpsr==0x14;break;\n",
           out);
-    fputs(" case 41:ok&=c.v[0].d[0]==0x8000000000000000ULL&&!c.v[0].d[1]&&c.fpsr==8;break;\n", out);
-    fputs(" case 42:ok&=c.v[0].d[0]==0xFF8000007F7FFFFFULL&&c.v[0].d[1]==0x3F7F8000007FC000ULL&&c.fpsr==0x14;break;\n",
+    fputs(" case 41:ok&=SNX_VD(c.v[0],0)==0x8000000000000000ULL&&!SNX_VD(c.v[0],1)&&c.fpsr==8;break;\n", out);
+    fputs(" case 42:ok&=SNX_VD(c.v[0],0)==0xFF8000007F7FFFFFULL&&SNX_VD(c.v[0],1)==0x3F7F8000007FC000ULL&&c.fpsr==0x14;break;\n",
           out);
-    fputs(" case 43:ok&=!c.v[0].d[0]&&!c.v[0].d[1];break;\n", out);
-    fputs(" case 44:ok&=!c.v[0].d[0]&&c.v[0].d[1]==0x43E0000000000000ULL;break;\n", out);
-    fputs(" case 45:ok&=c.v[0].d[0]==0x43E0000000000001ULL&&!c.v[0].d[1];break;\n", out);
+    fputs(" case 43:ok&=!SNX_VD(c.v[0],0)&&!SNX_VD(c.v[0],1);break;\n", out);
+    fputs(" case 44:ok&=!SNX_VD(c.v[0],0)&&SNX_VD(c.v[0],1)==0x43E0000000000000ULL;break;\n", out);
+    fputs(" case 45:ok&=SNX_VD(c.v[0],0)==0x43E0000000000001ULL&&!SNX_VD(c.v[0],1);break;\n", out);
     fputs(" default:break;}\n", out);
     fputs(" if(!ok||(i!=17&&traps)){fprintf(stderr,\"semantic case %u mode %u failed\\n\",i,mode);return 1;}}\n", out);
     fputs(" puts(\"Static/interpreted scalar, FP, SIMD, memory and trap semantics passed\");return 0;}\n", out);
@@ -540,10 +545,11 @@ static void poll_test(const char* compiler, const char* repo, const char* direct
     fputs("(&c,", file);
     snx_a64_literal(file, SNX_CODE_BASE);
     fputs(");\n return c.x[0]==0 && c.pc==0x2000 ? polls : -1; }\n", file);
-    /* the loop's words in guest memory at 0x1000, no dispatch table: every lookup lands in the interpreter */
+    /* the loop's words in guest memory at 0x1000 (little-endian), no dispatch table: every lookup lands in the
+       interpreter */
     fputs("static int interp(u64 count, u32 flag){ static u32 mem[0x1000]; CPU c; RtAPI rt;\n"
-          " memset(&c,0,sizeof c); memset(&rt,0,sizeof rt); mem[0x400]=0xF1000400u; mem[0x401]=0x54FFFFE1u;\n"
-          " mem[0x402]=0xD65F03C0u; rt.miss=snx_interp; rt.poll=poll; c.rt=&rt; c.mem=(u8*)mem;\n"
+          " memset(&c,0,sizeof c); memset(&rt,0,sizeof rt); mem[0x400]=SNX_GUEST32(0xF1000400u);\n"
+          " mem[0x401]=SNX_GUEST32(0x54FFFFE1u); mem[0x402]=SNX_GUEST32(0xD65F03C0u); rt.miss=snx_interp; rt.poll=poll; c.rt=&rt; c.mem=(u8*)mem;\n"
           " c.x[0]=count; c.x[30]=0x2000; c.poll=flag; polls=0; snx_interp(&c,0x1000);\n"
           " return c.x[0]==0 && c.pc==0x2000 ? polls : -1; }\n",
           file);

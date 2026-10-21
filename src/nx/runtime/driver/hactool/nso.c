@@ -58,6 +58,7 @@ void nso0_process(nso0_ctx_t *ctx) {
         exit(EXIT_FAILURE);
     }
 
+    nso_header_swap(&raw_header);
     if (raw_header.magic != MAGIC_NSO0) {
         printf("Error: NSO0 is corrupt!\n");
         exit(EXIT_FAILURE);
@@ -75,6 +76,7 @@ void nso0_process(nso0_ctx_t *ctx) {
         fprintf(stderr, "Failed to read NSO0!\n");
         exit(EXIT_FAILURE);
     }
+    nso_header_swap(ctx->header);
 
     ctx->uncompressed_header = nso_uncompress(ctx);
 
@@ -117,10 +119,13 @@ void nso0_save(nso0_ctx_t *ctx) {
             fprintf(stderr, "Failed to open %s!\n", uncmp_path->char_path);
             return;
         }
-        if (fwrite(ctx->uncompressed_header, 1, nso_get_size(ctx->uncompressed_header), f_uncmp) != nso_get_size(ctx->uncompressed_header)) {
+        uint64_t size = nso_get_size(ctx->uncompressed_header);
+        nso_header_swap(ctx->uncompressed_header); /* ScarletNX: written as the file format has it */
+        if (fwrite(ctx->uncompressed_header, 1, size, f_uncmp) != size) {
             fprintf(stderr, "Failed to write uncompressed nso!\n");
             exit(EXIT_FAILURE);
         }
+        nso_header_swap(ctx->uncompressed_header);
         fclose(f_uncmp);
     }
 }

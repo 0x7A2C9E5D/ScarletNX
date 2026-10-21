@@ -7,6 +7,7 @@
    datagram sockets (to a member, broadcasts, Eden's protocol byte, poll, timeouts, truncation, a big datagram); and the
    room closing */
 #include "common/network/net_ldn.h"
+#include "common/utilities/endian.h"
 #include "common/network/net_room.h"
 #include "common/network/net_internal.h"
 #include "fake_room.h"
@@ -220,7 +221,7 @@ static void networks(void) {
         CHECK(snx_net_now_us() - t0 >= 380000);
     }
     CHECK(snx_ldn_scan(b, NULL, found, 4, 1000) == 1);
-    CHECK(!memcmp(found[0].bssid, net.bssid, 6) && found[0].advertise_data_size == 5);
+    CHECK(!memcmp(found[0].bssid, net.bssid, 6) && snx_le16(found[0].advertise_data_size) == 5);
     CHECK(snx_ldn_scan(a, NULL, found, 4, 200) == 0); /* the host doesn't find itself */
     name_of(name, "Xuji");
     changes_a = changes_b = 0;
@@ -278,11 +279,11 @@ static SnxSockAddr to_of(const uint8_t ip[4], uint16_t port) {
     memset(&a, 0, sizeof a);
     a.family = SNX_AF_INET;
     memcpy(a.addr, ip, 4);
-    a.port = (uint16_t)(port >> 8 | port << 8);
+    snx_st_be16(&a.port, port);
     return a;
 }
 static int64_t recv_wait(SnxSocket* s, void* buf, size_t size, SnxSockAddr* from, int* flags) {
-    SnxTimeval tv = {2, 0};
+    SnxTimeval tv = {(int64_t)snx_le64(2), 0}; /* option values are the guest's (net.h) */
     snx_socket_setsockopt(s, SNX_SOL_SOCKET, SNX_SO_RCVTIMEO, &tv, sizeof tv);
     return snx_socket_recv(s, buf, size, 0, from, flags);
 }
@@ -292,9 +293,9 @@ static void datagrams(void) {
     SnxSocket *a, *a2, *a17, *b, *b17, *c;
     SnxSockAddr addr, from;
     SnxPollEntry e;
-    SnxTimeval tv = {0, 100000};
+    SnxTimeval tv = {0, (int64_t)snx_le64(100000)};
     uint8_t ip_a[4], ip_b[4], buf[64], *big;
-    int why, one = 1, flags, value;
+    int why, one = (int)snx_le32(1), flags, value;
     size_t size;
     int64_t n;
     CHECK(join(&ra, "Aogo", "secret", &why) == 0 && join(&rb, "Xuji", "secret", &why) == 0);
@@ -316,7 +317,7 @@ static void datagrams(void) {
     CHECK(snx_room_socket_open(ra, &a2, SNX_AF_INET, SNX_SOCK_DGRAM, 0) == 0);
     addr = to_of(any, 1236);
     CHECK(snx_socket_bind(a2, &addr) == 0);
-    CHECK(snx_socket_name(a, &addr) == 0 && addr.port == (uint16_t)(1234 >> 8 | 1234 << 8) &&
+    CHECK(snx_socket_name(a, &addr) == 0 && snx_ld_be16(&addr.port) == 1234 &&
           !memcmp(addr.addr, any, 4));
     /* to a member: from the sender's address and the port its first send took; poll says so first */
     addr = to_of(ip_a, 1234);
@@ -353,7 +354,7 @@ static void datagrams(void) {
     CHECK(snx_socket_recv(a, buf, sizeof buf, 0, NULL, NULL) == -SNX_EAGAIN); /* a hasn't SO_BROADCAST */
     CHECK(snx_socket_setsockopt(a, SNX_SOL_SOCKET, SNX_SO_BROADCAST, &one, sizeof one) == 0);
     size = sizeof value;
-    CHECK(snx_socket_getsockopt(a, SNX_SOL_SOCKET, SNX_SO_BROADCAST, &value, &size) == 0 && value == 1);
+    CHECK(snx_socket_getsockopt(a, SNX_SOL_SOCKET, SNX_SO_BROADCAST, &value, &size) == 0 && snx_le32((uint32_t)value) == 1);
     CHECK(snx_socket_send(b, "all", 3, 0, &addr) == 3);
     n = recv_wait(a, buf, sizeof buf, &from, NULL);
     CHECK(n == 3 && !memcmp(buf, "all", 3) && !memcmp(from.addr, ip_b, 4));

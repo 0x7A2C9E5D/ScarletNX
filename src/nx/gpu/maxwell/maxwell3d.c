@@ -147,8 +147,8 @@ static void clear_in_memory(GpuChannel* ch, u32 v) {
         px[0] = unorm8(r, 2), px[1] = unorm8(r, 1), px[2] = unorm8(r, 0), px[3] = unorm8(r, 3);
     else if (bpp == 4) /* A8B8G8R8 and the other 4-byte formats taken as it */
         px[0] = unorm8(r, 0), px[1] = unorm8(r, 1), px[2] = unorm8(r, 2), px[3] = unorm8(r, 3);
-    else if (bpp == 16)
-        memcpy(px, &r[0x360], 16);
+    else if (bpp == 16) /* the four floats as they are, low byte first */
+        for (x = 0; x < 4; x++) snx_st_le32(px + x * 4, r[0x360 + x]);
     else
         LOG_LIMIT(2, "gpu: a clear of format %x before the renderer runs writes zeros\n", fmt);
     for (x = 0; x < sizeof row; x += bpp) memcpy(row + x, px, bpp);
@@ -208,6 +208,7 @@ void r3d_const_upload(GpuChannel* ch, u32 v, int last) {
 }
 void r3d_const_flush(GpuChannel* ch) {
     if (!ch->cb_n) return;
+    snx_le32_array(ch->cb_words, ch->cb_n); /* guest memory's order: the words aren't read again */
     gmem_write(ch->cb_addr, ch->cb_words, (u64)ch->cb_n * 4);
     ch->cb_n = 0;
 }

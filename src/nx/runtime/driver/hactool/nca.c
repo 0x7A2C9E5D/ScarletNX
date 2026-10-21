@@ -24,6 +24,51 @@ static void nca_update_ctr(unsigned char *ctr, uint64_t ofs) {
     }
 }
 
+/* ScarletNX: the FS header's words between the file's little-endian order and the host's (the same conversion both
+   ways), its superblock as its file system type lays it out. The section counter is bytes, and stays. */
+static void nca_fs_header_swap(nca_fs_header_t *h) {
+    if (!SNX_HOST_BE) return;
+    if (h->fs_type == FS_TYPE_PFS0) {
+        /* An NCA0 RomFS superblock has the same layout. */
+        snx_le32_array(&h->pfs0_superblock.block_size, 2);
+        snx_le64_array(&h->pfs0_superblock.hash_table_offset, 4);
+    } else if (h->fs_type == FS_TYPE_ROMFS) {
+        /* A RomFS superblock is its IVFC header, which a patch's follows with its two tables (padding otherwise). */
+        ivfc_hdr_swap(&h->bktr_superblock.ivfc_header);
+        bktr_header_swap(&h->bktr_superblock.relocation_header);
+        bktr_header_swap(&h->bktr_superblock.subsection_header);
+    }
+    snx_le64_array(&h->sparse_info.meta_offset, 2);
+    snx_le32_array(&h->sparse_info.meta_header, 4);
+    h->sparse_info.physical_offset = snx_le64(h->sparse_info.physical_offset);
+    h->sparse_info.generation = snx_le16(h->sparse_info.generation);
+    snx_le64_array(&h->compression_info.table_offset, 2);
+    snx_le32_array(&h->compression_info.table_header, 4);
+    h->compression_info._0x20 = snx_le64(h->compression_info._0x20);
+    snx_le64_array(&h->metadata_hash_info.offset, 2);
+}
+
+/* ScarletNX: the header's words between the file's order and the host's, the same way. */
+void nca_header_swap(nca_header_t *h) {
+    if (!SNX_HOST_BE) return;
+    h->magic = snx_le32(h->magic);
+    h->nca_size = snx_le64(h->nca_size);
+    h->title_id = snx_le64(h->title_id);
+    h->sdk_version = snx_le32(h->sdk_version);
+    for (unsigned int i = 0; i < 4; i++) {
+        snx_le32_array(&h->section_entries[i].media_start_offset, 2);
+        nca_fs_header_swap(&h->fs_headers[i]);
+    }
+}
+
+/* ScarletNX: the header as its file has it, ctx's own on a little-endian host, else converted into copy. */
+static const nca_header_t *nca_header_le(const nca_ctx_t *ctx, nca_header_t *copy) {
+    if (!SNX_HOST_BE) return &ctx->header;
+    *copy = ctx->header;
+    nca_header_swap(copy);
+    return copy;
+}
+
 /* ScarletNX: sections are read through storage chains ported from LibHac (storage.c), built as its Nca.OpenStorage
    builds them: sparse layer, decryption, indirect (patch) layer, then decompression past the hash layers. */
 
@@ -265,7 +310,8 @@ static void nca_save(nca_ctx_t *ctx) {
         FILE *f_hdr = os_fopen(header_path->os_path, OS_MODE_WRITE);
 
         if (f_hdr != NULL) {
-            fwrite(&ctx->header, 1, 0xC00, f_hdr);
+            nca_header_t copy;
+            fwrite(nca_header_le(ctx, &copy), 1, 0xC00, f_hdr);
             fclose(f_hdr);
         } else {
             fprintf(stderr, "Failed to open %s!\n", header_path->char_path);
@@ -289,7 +335,8 @@ static void nca_save(nca_ctx_t *ctx) {
         FILE *f_dec = os_fopen(dec_path->os_path, OS_MODE_WRITE);
 
         if (f_dec != NULL) {
-            if (fwrite(&ctx->header, 1, 0xC00, f_dec) != 0xC00) {
+            nca_header_t copy;
+            if (fwrite(nca_header_le(ctx, &copy), 1, 0xC00, f_dec) != 0xC00) {
                 fprintf(stderr, "Failed to write header!\n");
                 exit(EXIT_FAILURE);
             }
@@ -342,8 +389,10 @@ void nca_process(nca_ctx_t *ctx) {
         return;
     }
 
+    nca_header_t copy;
+    const nca_header_t *signed_header = nca_header_le(ctx, &copy); /* the signatures cover the bytes as stored */
     if (ctx->header.fixed_key_generation < sizeof(ctx->tool_ctx->settings.keyset.nca_hdr_fixed_key_moduli) / sizeof(ctx->tool_ctx->settings.keyset.nca_hdr_fixed_key_moduli[0])) {
-        if (rsa2048_pss_verify(&ctx->header.magic, 0x200, ctx->header.fixed_key_sig, ctx->tool_ctx->settings.keyset.nca_hdr_fixed_key_moduli[ctx->header.fixed_key_generation])) {
+        if (rsa2048_pss_verify(&signed_header->magic, 0x200, ctx->header.fixed_key_sig, ctx->tool_ctx->settings.keyset.nca_hdr_fixed_key_moduli[ctx->header.fixed_key_generation])) {
             ctx->fixed_sig_validity = VALIDITY_VALID;
         } else {
             ctx->fixed_sig_validity = VALIDITY_INVALID;
@@ -499,7 +548,7 @@ void nca_process(nca_ctx_t *ctx) {
                     /* Verify NPDM sig now, if we can... */
                     if (ctx->section_contexts[i].pfs0_ctx.is_exefs) {
                         ctx->npdm = ctx->section_contexts[i].pfs0_ctx.npdm;
-                        if (rsa2048_pss_verify(&ctx->header.magic, 0x200, ctx->header.npdm_key_sig, npdm_get_acid(ctx->npdm)->modulus)) {
+                        if (rsa2048_pss_verify(&signed_header->magic, 0x200, ctx->header.npdm_key_sig, npdm_get_acid(ctx->npdm)->modulus)) {
                             ctx->npdm_sig_validity = VALIDITY_VALID;
                         } else {
                             ctx->npdm_sig_validity = VALIDITY_INVALID;
@@ -531,8 +580,8 @@ void nca_process(nca_ctx_t *ctx) {
     }
 }
 
-/* Decrypt NCA header. */
-int nca_decrypt_header(nca_ctx_t *ctx) {
+/* Decrypt NCA header, left as the file has it: little-endian. */
+static int nca_decrypt_header_le(nca_ctx_t *ctx) {
     fseeko64(ctx->file, ctx->base_offset, SEEK_SET);
     
     size_t read_size = fread(&ctx->header, 1, 0xC00, ctx->file);
@@ -543,7 +592,7 @@ int nca_decrypt_header(nca_ctx_t *ctx) {
     }
 
     /* DNCA explicitly marks a complete decrypted NCA3 header and all section payloads. */
-    if (ctx->header.magic == SNX_MAGIC_DNCA) {
+    if (snx_le32(ctx->header.magic) == SNX_MAGIC_DNCA) {
         if (read_size != 0xC00) {
             fprintf(stderr, "Failed to read DNCA header!\n");
             return 0;
@@ -554,10 +603,10 @@ int nca_decrypt_header(nca_ctx_t *ctx) {
     }
 
     /* Try to support decrypted NCA headers. */
-    if (ctx->header.magic == MAGIC_NCA3 || ctx->header.magic == MAGIC_NCA2) {
+    if (snx_le32(ctx->header.magic) == MAGIC_NCA3 || snx_le32(ctx->header.magic) == MAGIC_NCA2) {
         if (ctx->header._0x340[0] == 0 && !memcmp(ctx->header._0x340, ctx->header._0x340 + 1, 0xBF)) {
             ctx->is_decrypted = 1;
-            if (ctx->header.magic == MAGIC_NCA3) {
+            if (snx_le32(ctx->header.magic) == MAGIC_NCA3) {
                 ctx->format_version = NCAVERSION_NCA3;
             } else {
                 ctx->format_version = NCAVERSION_NCA2;
@@ -575,16 +624,16 @@ int nca_decrypt_header(nca_ctx_t *ctx) {
     aes_ctx_t *hdr_aes_ctx = new_aes_ctx(ctx->tool_ctx->settings.keyset.header_key, 32, AES_MODE_XTS);
     aes_xts_decrypt(hdr_aes_ctx, &dec_header, &ctx->header, 0x400, 0, 0x200);
 
-    if(read_size == 0xA00 && dec_header.magic != MAGIC_NCA0) {
+    if(read_size == 0xA00 && snx_le32(dec_header.magic) != MAGIC_NCA0) {
         fprintf(stderr, "Failed to read NCA header!\n");
         return 0;
     }
     
-    if (dec_header.magic == MAGIC_NCA3) {
+    if (snx_le32(dec_header.magic) == MAGIC_NCA3) {
         ctx->format_version = NCAVERSION_NCA3;
         aes_xts_decrypt(hdr_aes_ctx, &dec_header, &ctx->header, 0xC00, 0, 0x200);
         ctx->header = dec_header;
-    } else if (dec_header.magic == MAGIC_NCA2) {
+    } else if (snx_le32(dec_header.magic) == MAGIC_NCA2) {
         ctx->format_version = NCAVERSION_NCA2;
         for (unsigned int i = 0; i < 4; i++) {
             if (dec_header.fs_headers[i]._0x148[0] != 0 || memcmp(dec_header.fs_headers[i]._0x148, dec_header.fs_headers[i]._0x148 + 1, 0xB7)) {
@@ -594,7 +643,7 @@ int nca_decrypt_header(nca_ctx_t *ctx) {
             }
         }
         ctx->header = dec_header;
-    } else if (dec_header.magic == MAGIC_NCA0) {
+    } else if (snx_le32(dec_header.magic) == MAGIC_NCA0) {
         memset(ctx->decrypted_keys, 0, 0x40);
         unsigned char out_keydata[0x100];
         size_t out_len = 0;
@@ -621,8 +670,8 @@ int nca_decrypt_header(nca_ctx_t *ctx) {
             memset(dec_header.fs_headers, 0, sizeof(dec_header.fs_headers));
             aes_ctx_t *aes_ctx = new_aes_ctx(ctx->decrypted_keys, 32, AES_MODE_XTS);
             for (unsigned int i = 0; i < 4; i++) {
-                if (dec_header.section_entries[i].media_start_offset) { /* Section exists. */
-                    uint64_t offset = media_to_real(dec_header.section_entries[i].media_start_offset);
+                if (snx_le32(dec_header.section_entries[i].media_start_offset)) { /* Section exists. */
+                    uint64_t offset = media_to_real(snx_le32(dec_header.section_entries[i].media_start_offset));
                     fseeko64(ctx->file, ctx->base_offset + offset, SEEK_SET);
                     if (fread(&dec_header.fs_headers[i], sizeof(dec_header.fs_headers[i]), 1, ctx->file) != 1) {
                         fprintf(stderr, "Failed to read NCA0 FS header at %" PRIx64"!\n", offset);
@@ -638,6 +687,14 @@ int nca_decrypt_header(nca_ctx_t *ctx) {
 
     free_aes_ctx(hdr_aes_ctx);
     return ctx->format_version != NCAVERSION_UNKNOWN;
+}
+
+/* ScarletNX: the decrypted header in the host's order, which the RSA signatures and a saved header see as the file has
+   it: nca_header_le. */
+int nca_decrypt_header(nca_ctx_t *ctx) {
+    if (!nca_decrypt_header_le(ctx)) return 0;
+    nca_header_swap(&ctx->header);
+    return 1;
 }
 
 /* Decrypt key area. */
@@ -823,7 +880,7 @@ void nca_print(nca_ctx_t *ctx) {
     }
     printf("Content Size:                       0x%012"PRIx64"\n", ctx->header.nca_size);
     printf("Title ID:                           %016"PRIx64"\n", ctx->header.title_id);
-    printf("SDK Version:                        %"PRIu8".%"PRIu8".%"PRIu8".%"PRIu8"\n", ctx->header.sdk_major, ctx->header.sdk_minor, ctx->header.sdk_micro, ctx->header.sdk_revision);
+    printf("SDK Version:                        %"PRIu8".%"PRIu8".%"PRIu8".%"PRIu8"\n", (uint8_t)(ctx->header.sdk_version >> 24), (uint8_t)(ctx->header.sdk_version >> 16), (uint8_t)(ctx->header.sdk_version >> 8), (uint8_t)ctx->header.sdk_version);
     printf("Distribution type:                  %s\n", nca_get_distribution_type(ctx));
     printf("Content Type:                       %s\n", nca_get_content_type(ctx));
     printf("Master Key Revision:                0x%"PRIX8" (%s)\n", ctx->crypto_type, get_key_revision_summary(ctx->crypto_type));
@@ -982,6 +1039,7 @@ void nca_process_pfs0_section(nca_section_ctx_t *ctx) {
         fprintf(stderr, "Failed to read PFS0 header!\n");
         exit(EXIT_FAILURE);
     }
+    pfs0_header_from_le(&raw_header, 0);
 
     uint64_t header_size = pfs0_get_header_size(&raw_header);
     ctx->pfs0_ctx.header = malloc(header_size);
@@ -994,6 +1052,7 @@ void nca_process_pfs0_section(nca_section_ctx_t *ctx) {
         fprintf(stderr, "Failed to read PFS0 header!\n");
         exit(EXIT_FAILURE);
     }
+    pfs0_header_from_le(ctx->pfs0_ctx.header, 1);
 
     for (unsigned int i = 0; i < ctx->pfs0_ctx.header->num_files; i++) {
         pfs0_file_entry_t *cur_file = pfs0_get_file_entry(ctx->pfs0_ctx.header, i);
@@ -1015,7 +1074,7 @@ void nca_process_pfs0_section(nca_section_ctx_t *ctx) {
                 exit(EXIT_FAILURE);
             }
 
-            if (ctx->pfs0_ctx.npdm->magic == MAGIC_META) {
+            if (ctx->pfs0_ctx.npdm->magic == SNX_LE32(MAGIC_META)) {
                 ctx->pfs0_ctx.is_exefs = 1;
             }
         }
@@ -1056,6 +1115,7 @@ void nca_process_ivfc_section(nca_section_ctx_t *ctx) {
     if (nca_section_fread(ctx, &ctx->romfs_ctx.header, sizeof(romfs_hdr_t)) != sizeof(romfs_hdr_t)) {
         fprintf(stderr, "Failed to read RomFS header!\n");
     }
+    snx_le64_array(&ctx->romfs_ctx.header, sizeof(ctx->romfs_ctx.header) / 8);
 
     if ((ctx->tool_ctx->action & (ACTION_EXTRACT | ACTION_LISTROMFS)) && ctx->romfs_ctx.header.header_size == ROMFS_HEADER_SIZE) {
         /* Pre-load the file/data entry caches. */
@@ -1100,6 +1160,7 @@ void nca_process_nca0_romfs_section(nca_section_ctx_t *ctx) {
     if (nca_section_fread(ctx, &ctx->nca0_romfs_ctx.header, sizeof(nca0_romfs_hdr_t)) != sizeof(nca0_romfs_hdr_t)) {
         fprintf(stderr, "Failed to read NCA0 RomFS header!\n");
     }
+    snx_le32_array(&ctx->nca0_romfs_ctx.header, sizeof(ctx->nca0_romfs_ctx.header) / 4);
 
     if ((ctx->tool_ctx->action & (ACTION_EXTRACT | ACTION_LISTROMFS)) && ctx->nca0_romfs_ctx.header.header_size == NCA0_ROMFS_HEADER_SIZE) {
         /* Pre-load the file/data entry caches. */
@@ -1228,6 +1289,7 @@ void nca_process_bktr_section(nca_section_ctx_t *ctx) {
             if (nca_section_fread(ctx, &ctx->bktr_ctx.header, sizeof(romfs_hdr_t)) != sizeof(romfs_hdr_t)) {
                 fprintf(stderr, "Failed to read BKTR Virtual RomFS header!\n");
             }
+            snx_le64_array(&ctx->bktr_ctx.header, sizeof(ctx->bktr_ctx.header) / 8);
 
             if ((ctx->tool_ctx->action & (ACTION_EXTRACT | ACTION_LISTROMFS)) && ctx->bktr_ctx.header.header_size == ROMFS_HEADER_SIZE) {
                 /* Pre-load the file/data entry caches. */
@@ -1615,11 +1677,12 @@ static int nca_visit_nca0_romfs_file(nca_section_ctx_t *ctx, uint32_t file_offse
 }
 
 static int nca_visit_romfs_dir(nca_section_ctx_t *ctx, uint32_t dir_offset, filepath_t *parent_path) {
-    romfs_direntry_t *entry;
+    romfs_direntry_t fields, *entry = &fields;
+    const char *name;
     if (ctx->type == ROMFS) {
-        entry = romfs_get_direntry(ctx->romfs_ctx.directories, dir_offset);
+        name = romfs_get_direntry(ctx->romfs_ctx.directories, dir_offset, entry);
     } else {
-        entry = romfs_get_direntry(ctx->bktr_ctx.directories, dir_offset);
+        name = romfs_get_direntry(ctx->bktr_ctx.directories, dir_offset, entry);
     }
     filepath_t *cur_path = calloc(1, sizeof(filepath_t));
     if (cur_path == NULL) {
@@ -1629,7 +1692,7 @@ static int nca_visit_romfs_dir(nca_section_ctx_t *ctx, uint32_t dir_offset, file
 
     filepath_copy(cur_path, parent_path);
     if (entry->name_size) {
-        filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, entry->name);
+        filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, name);
     }
 
     /* If we're actually extracting the romfs, make directory. */
@@ -1660,7 +1723,8 @@ static int nca_visit_romfs_dir(nca_section_ctx_t *ctx, uint32_t dir_offset, file
 }
 
 static int nca_visit_nca0_romfs_dir(nca_section_ctx_t *ctx, uint32_t dir_offset, filepath_t *parent_path) {
-    romfs_direntry_t *entry = romfs_get_direntry(ctx->nca0_romfs_ctx.directories, dir_offset);
+    romfs_direntry_t fields, *entry = &fields;
+    const char *name = romfs_get_direntry(ctx->nca0_romfs_ctx.directories, dir_offset, entry);
     filepath_t *cur_path = calloc(1, sizeof(filepath_t));
     if (cur_path == NULL) {
         fprintf(stderr, "Failed to allocate filepath!\n");
@@ -1669,7 +1733,7 @@ static int nca_visit_nca0_romfs_dir(nca_section_ctx_t *ctx, uint32_t dir_offset,
 
     filepath_copy(cur_path, parent_path);
     if (entry->name_size) {
-        filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, entry->name);
+        filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, name);
     }
 
     /* If we're actually extracting the romfs, make directory. */

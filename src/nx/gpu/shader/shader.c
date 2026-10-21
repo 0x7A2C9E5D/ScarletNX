@@ -16,6 +16,16 @@
 
 int (*g_shader_cb_read)(u32 idx, u32 off, u32* out);
 
+const u64* shader_words(const u8* code, u32 bytes, u64** copy) {
+    u32 i, n = bytes / 8;
+    *copy = NULL;
+    if (!SNX_HOST_BE) return (const u64*)(const void*)code;
+    *copy = (u64*)malloc((size_t)n * 8 + 8);
+    if (!*copy) return NULL;
+    for (i = 0; i < n; i++) (*copy)[i] = snx_ld_le64(code + (size_t)i * 8);
+    return *copy;
+}
+
 /* each stage binds its own constant buffers in its own descriptor set; compute runs alone and shares the vertex
    stage's number */
 int shader_vk_set(int stage) {
@@ -312,11 +322,14 @@ int shader_brx_targets(const u64* words, u32 index, u32 count, u32* targets, int
    programs into one pool, so the window goes on past that padding into the next program, which an unknown jump
    table would otherwise take for its own code. */
 u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
-    const u64* words = (const u64*)code;
+    const u64* words;
+    u64* copy;
     u32 n = max_bytes / 8, i, last = 10, furthest = 0, len;
     int resolved = 1, calls = 0;
     u64 h = 1469598103934665603ull;
     if (n > SH_SCAN_WORDS) n = SH_SCAN_WORDS;
+    words = shader_words(code, n * 8, &copy);
+    if (!words) n = 0; /* no memory for the words (a big-endian host): the length is the header's */
     for (i = 11; i < n; i++) {
         const Op* op;
         u64 w;
@@ -357,9 +370,10 @@ u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
         }
     }
 done:
+    free(copy);
     len = (last + 1) * 8;
     if (len > max_bytes) len = max_bytes;
-    for (i = 0; i < len; i++) {
+    for (i = 0; i < len; i++) { /* over the guest's bytes, the same hash on any host */
         h ^= code[i];
         h *= 1099511628211ull;
     }
@@ -544,7 +558,6 @@ int shader_resolve_crs(const u64* words, u32 count, u32* pop_targets) {
    so both halves keep working where they land. Returns 0 when the result doesn't fit in max_bytes. */
 int shader_merge_dual(const u8* a, const u8* b, u8* out, u32 max_bytes) {
     u32 len_a, len_b, words_a, start, i;
-    u64* code = (u64*)out;
     if (!a || !b || !out || max_bytes < 96) return 0;
     shader_hash(a, max_bytes, &len_a);
     shader_hash(b, max_bytes, &len_b);
@@ -558,16 +571,16 @@ int shader_merge_dual(const u8* a, const u8* b, u8* out, u32 max_bytes) {
        here, would read as an unknown instruction (each of a bundle's three is decoded) */
     memcpy(out + 80, a + 80, (size_t)start * 8 - 80);
     memcpy(out + (size_t)start * 8, b + 80, len_b - 80);
-    for (i = 11; i < start; i++) {
-        u64 w = code[i];
+    for (i = 11; i < start; i++) { /* the program stays guest bytes: its words little-endian */
+        u64 w = snx_ld_le64(out + (size_t)i * 8);
         const Op* op;
         if (!IDX_OK(i)) continue;
         /* a zero after A's end, its padding, would end the merged program there (shader_hash): a NOP instead */
-        if (!w) code[i] = w = 0x50B0000000070F00ull;
+        if (!w) snx_st_le64(out + (size_t)i * 8, w = 0x50B0000000070F00ull);
         op = decode(w);
         if (!op || op->id != O_EXIT) continue;
         /* BRA (opcode 0xE24) to B's first instruction, keeping the EXIT's predicate (16-19) and condition (0-4) */
-        code[i] = 0xE24ull << 52 | (u64)((start - i) * 8 & 0xFFFFFF) << 20 | (w & 0xF001Full);
+        snx_st_le64(out + (size_t)i * 8, 0xE24ull << 52 | (u64)((start - i) * 8 & 0xFFFFFF) << 20 | (w & 0xF001Full));
     }
     return 1;
 }

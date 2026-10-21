@@ -226,7 +226,7 @@ u64 vk_query_value(u32 ci, u64 first, u64 end) {
         c->sum = 0;
     }
     for (u64 s = c->sum_end; s < end; s++)
-        if (g_qown[s % QN] == ci % QCH + 1) c->sum += g_qres[s % QN] * g_qmul[s % QN];
+        if (g_qown[s % QN] == ci % QCH + 1) c->sum += snx_le64(g_qres[s % QN]) * g_qmul[s % QN]; /* the device's */
     if (end > c->sum_end) c->sum_end = end;
     if (c->whead != c->wtail) c->wtail++;
     double area = (double)g_vk_scale * (double)g_vk_scale;
@@ -441,6 +441,7 @@ int vk_query_pred_flush(void) {
         memcpy(words + len, b->w, (size_t)b->len * sizeof(u32));
         len += b->len;
     }
+    snx_le32_array(words, len); /* the shader reads them little-endian */
     pred_batch_reset(0);
     VkDescriptorBufferInfo bufs[3] = {{g_qbuf, 0, VK_WHOLE_SIZE}, {jobs, off, size}, {g_pbuf, 0, VK_WHOLE_SIZE}};
     VkWriteDescriptorSet w[3];

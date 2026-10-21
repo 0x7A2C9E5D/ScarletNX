@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "spirv_emitter_fixture.h"
+#include "common/utilities/endian.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,7 @@ int main(int argc, char** argv) {
         free(code);
         return 1;
     }
+    snx_le32_array(code, words); /* a .spv file is little-endian, the same bytes from any host */
     int ok = fwrite(code, sizeof(uint32_t), words, file) == words;
     if (fclose(file)) ok = 0;
     free(code);

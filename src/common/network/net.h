@@ -112,8 +112,9 @@ int64_t snx_socket_send(SnxSocket* s, const void* data, size_t size, int flags, 
 int64_t snx_socket_recv(SnxSocket* s, void* data, size_t size, int flags, SnxSockAddr* from, int* out_flags);
 int snx_socket_name(SnxSocket* s, SnxSockAddr* out);
 int snx_socket_peer(SnxSocket* s, SnxSockAddr* out);
-/* level and name are SNX_SOL_* and SNX_SO_*, SNX_IP_*...; the value is laid out as abi/sockopt.inc says.
-   getsockopt's *size is the buffer's size on entry and the value's on return */
+/* level and name are SNX_SOL_* and SNX_SO_*, SNX_IP_*...; the value is laid out as abi/sockopt.inc says, its
+   numbers in the guests' byte order (little-endian) also when the runtime sets an option itself: the stack converts
+   them on a big-endian host. getsockopt's *size is the buffer's size on entry and the value's on return */
 int snx_socket_setsockopt(SnxSocket* s, int level, int name, const void* value, size_t size);
 int snx_socket_getsockopt(SnxSocket* s, int level, int name, void* value, size_t* size);
 int snx_socket_readable_bytes(SnxSocket* s, int* bytes); /* FIONREAD */

@@ -174,6 +174,7 @@ static void request(u32 cmd, u64 a, u64 b, u64 c, u64 d) {
     raw[2] = b;
     raw[3] = c;
     raw[4] = d;
+    snx_le64_array(raw, 5); /* as the guest sends them */
     ctx.cmd = cmd;
     ctx.raw = (const u8*)raw;
     ctx.raw_size = sizeof raw;
@@ -184,10 +185,8 @@ static void request(u32 cmd, u64 a, u64 b, u64 c, u64 d) {
 }
 static int call(SvcObj* o) { return o->dispatch(o, &ctx); }
 static u64 output(void) {
-    u64 v;
     CHECK(ctx.out_size == 8);
-    memcpy(&v, ctx.out, 8);
-    return v;
+    return snx_ld_le64(ctx.out);
 }
 static void block_is(u64 a, u32 state, u32 perm, u32 attr) {
     MemBlock b;
@@ -263,7 +262,7 @@ static void execute(u64 base) {
     CHECK(cpu.x[0] == 42 && cpu.pc == 0x1234);
     /* NRO -> AOT dispatch -> NRO -> caller, with a saved link register. */
     const u32 code[] = {0xaa1e03f3, 0xd2804001, 0xd63f0020, 0xaa1303fe, 0x91000400, 0xd65f03c0};
-    memcpy(GP(base + 0x90), code, sizeof code);
+    for (size_t i = 0; i < sizeof code / sizeof code[0]; i++) gw32(base + 0x90 + i * 4, code[i]); /* little-endian */
     dispatch[0] = compiled_callee;
     cpu.code_lo = 0x200;
     cpu.code_hi = 0x204;
@@ -296,9 +295,10 @@ static void* race_load(void* arg) {
     LoadRace* r = arg;
     u64 args[] = {0, r->source, 0x3000, r->bss, 0x1000};
     IpcCtx c = {.cmd = 0, .raw = (const u8*)args, .raw_size = sizeof args, .has_pid = 1, .pid = K_PROCESS_ID};
+    snx_le64_array(args, 5);
     gate_wait(r->gate);
     r->result = r->service->dispatch(r->service, &c);
-    if (!r->result) memcpy(&r->base, c.out, 8);
+    if (!r->result) r->base = snx_ld_le64(c.out);
     return NULL;
 }
 static void concurrency(void) {

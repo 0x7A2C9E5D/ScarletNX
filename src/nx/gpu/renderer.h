@@ -42,7 +42,8 @@ typedef struct Renderer {
     int (*blit_mem)(const GpuBlit* b);
     void (*rt_flush)(u64 gva);  /* a render target at gva is about to be read from guest memory: write it back */
     void (*rt_reload)(u64 gva); /* guest memory under a render target changed: load it again */
-    void (*dispatch)(GpuChannel* ch, const u32* q, u64 code); /* a compute launch (q: its QMD) */
+    /* a compute launch (q: its QMD's 64 words, converted to host numbers by compute.c) */
+    void (*dispatch)(GpuChannel* ch, const u32* q, u64 code);
     /* gmem_read and gmem_ptr land pending compute or graphics storage writes before reading memory */
     void (*cs_mem_need)(u64 a, u64 n);
     /* 0 when no pending result or queued release covers [a, a + n): a read needs none of the mem_need hooks */
@@ -51,7 +52,8 @@ typedef struct Renderer {
     void (*before_syncwait)(void); /* the stream is about to wait on a syncpoint: flush everything in flight */
     void (*stream_incr)(u32 id);   /* a syncpoint increment in the stream, after everything before it is done */
     /* a semaphore or report the game can poll: len bytes written at gva once everything before it is done (it may
-       happen later, in order with the other releases). NULL: written now, after landing everything */
+       happen later, in order with the other releases). data is guest bytes, its numbers little-endian already: the
+       front end converted them. NULL: written now, after landing everything */
     void (*release_write)(u64 gva, const void* data, u32 len);
     /* the stream reads or writes [a, a + n): a release still waiting to write there happens first */
     void (*release_need)(u64 a, u64 n);
@@ -59,7 +61,7 @@ typedef struct Renderer {
        payloads of the releases queued over it, without waiting for them; 0 when no queued release is there (the caller
        reads as usual, nothing to wait for from them); -1 when one is there that can't be read past now (a samples-passed
        count not known yet, another pending result there, the same memory through another GPU address), and the caller
-       waits for it (release_need) */
+       waits for it (release_need). dst gets guest bytes, as from gmem_read */
     int (*release_read)(u64 a, void* dst, u64 n);
     u32 (*release_value)(u32 id); /* completed and queued increments, read consistently */
     /* the render enable (3D 0x556 IF_EQUAL when equal is set, else IF_NOT_EQUAL) compares the count at a with the one

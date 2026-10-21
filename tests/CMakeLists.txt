@@ -1134,7 +1134,7 @@ add_executable(snx-test-llvm-module llvm_module.c)
 snx_test_target(snx-test-llvm-module 11)
 target_link_libraries(snx-test-llvm-module PRIVATE snx_driver snx_a64_reference ${CMAKE_DL_LIBS})
 add_test(NAME llvm_module COMMAND snx-test-llvm-module $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}"
-    "${CMAKE_C_COMPILER}")
+    "${SNX_TARGET_C_COMPILER}")
 # the recompiler as a library (snx_recompiler.h): A64 on every backend built, A32, from code in memory
 add_executable(snx-test-recompiler-library recompiler_library.c)
 snx_test_target(snx-test-recompiler-library 11)
@@ -1192,7 +1192,7 @@ add_test(NAME native_codegen COMMAND snx_codegen_test "${SNX_TARGET_C_COMPILER}"
 add_executable(snx-test-a64-ported a64_ported.c)
 snx_test_target(snx-test-a64-ported 11)
 target_link_libraries(snx-test-a64-ported PRIVATE snx_driver snx_a64_reference)
-add_test(NAME a64_ported_cases COMMAND snx-test-a64-ported "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}")
+add_test(NAME a64_ported_cases COMMAND snx-test-a64-ported "${SNX_TARGET_C_COMPILER}" "${PROJECT_SOURCE_DIR}")
 
 add_executable(snx-test-astc astc_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/astc.c")
 snx_test_target(snx-test-astc 23)

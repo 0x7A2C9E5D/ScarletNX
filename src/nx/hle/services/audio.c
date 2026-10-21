@@ -204,6 +204,7 @@ static int audout_append(SvcObj* self, u64 tag, IpcBuf b) {
     memset(&d, 0, sizeof d);
     R_UNLESS(b.addr && (!n || guest_ok(b.addr, n, PERM_R)), AUDIO_OPERATION_FAILED);
     if (n >= 0x20) memcpy(&d, GP(b.addr), (size_t)n);
+    snx_le64_array(&d, sizeof d / 8); /* a buffer's contents: the guest's words */
     q = audout_lock(self);
     if (q->nreleased + q->nqueued >= AUDOUT_BUFFERS) {
         pm_unlock(&g_hle.audio.lk);
@@ -878,6 +879,7 @@ static int hwopus_decode(HwOpus* h, const u8* in, u64 in_size, i16* out, u64 out
         pad = want > h->queued ? want - h->queued : 0;
         memset(out, 0, (size_t)pad * h->channels * sizeof *out);
         memcpy(out + (size_t)pad * h->channels, h->queue, (size_t)(want - pad) * h->channels * sizeof *out);
+        snx_le16_array(out, (size_t)want * h->channels); /* the guest's samples are little-endian */
         h->queued -= want - pad;
         memmove(h->queue, h->queue + (size_t)(want - pad) * h->channels, (size_t)h->queued * h->channels * sizeof *out);
     }
@@ -982,6 +984,7 @@ static int multi_params(IpcBuf b, int ex, u32 v[4], const u8** mapping) {
     u64 need = ex ? 0x118 : 0x110;
     if (!b.addr || b.size < need || !guest_ok(b.addr, need, PERM_R)) return 0;
     memcpy(v, GP(b.addr), 16);
+    snx_le32_array(v, 4);
     *mapping = GP(b.addr + (ex ? 0x18 : 0x10));
     return 1;
 }

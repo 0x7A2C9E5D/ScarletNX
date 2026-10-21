@@ -23,8 +23,12 @@ int main() {
     std::array<uint32_t, 0x1000 / 4> regs{};
     const uint32_t body_size = body.size();
     const int16_t dimensions[] = {64, 64, 64, 64};
-    std::memcpy(picture.data() + 0x30, &body_size, sizeof body_size);
-    std::memcpy(picture.data() + 0x60, dimensions, sizeof dimensions);
+    // the setup is guest memory: its numbers little-endian
+    for (int i = 0; i < 4; i++) picture[0x30 + i] = static_cast<uint8_t>(body_size >> (8 * i));
+    for (int i = 0; i < 4; i++) {
+        picture[0x60 + 2 * i] = static_cast<uint8_t>(dimensions[i] & 0xFF);
+        picture[0x61 + 2 * i] = static_cast<uint8_t>((dimensions[i] >> 8) & 0xFF);
+    }
     picture[0x68] = 1;  // key frame
     picture[0x70] = 8;  // loop filter level
     picture[0x72] = 20; // quantizer

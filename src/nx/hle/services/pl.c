@@ -27,28 +27,17 @@ static const char* const pl_names[PL_FONTS] = {"FontStandard",        "FontChine
                                                "FontKorean",          "FontNintendoExtended"};
 
 
-static u32 bswap32_(u32 v) { return v >> 24 | (v >> 8 & 0xff00u) | (v << 8 & 0xff0000u) | v << 24; }
-/* big-endian words, on the little-endian hosts the runtime runs on */
-static u32 rd_be32(const u8* p) {
-    u32 v;
-    memcpy(&v, p, 4);
-    return bswap32_(v);
-}
-static void wr_be32(u8* p, u32 v) {
-    v = bswap32_(v);
-    memcpy(p, &v, 4);
-}
 
 /* a .bfttf into the TrueType font it holds, in place: each big-endian word XORed with the key, the 8 byte header
    (magic, size) dropped. Returns the font's size, 0 if it isn't one */
 static u64 pl_decrypt(u8* d, u64 size) {
     u32 key, n;
     u64 i;
-    if (size < 8 || rd_be32(d) != PL_MAGIC) return 0;
+    if (size < 8 || snx_ld_be32(d) != PL_MAGIC) return 0;
     key = PL_MAGIC ^ PL_DECRYPTED;
-    n = rd_be32(d + 4) ^ key;
+    n = snx_ld_be32(d + 4) ^ key;
     if (n > size - 8) n = (u32)(size - 8);
-    for (i = 0; i + 4 <= (u64)n; i += 4) wr_be32(d + i, rd_be32(d + 8 + i) ^ key);
+    for (i = 0; i + 4 <= (u64)n; i += 4) snx_st_be32(d + i, snx_ld_be32(d + 8 + i) ^ key);
     for (; i < (u64)n; i++) d[i] = d[8 + i]; /* a tail shorter than a word: there is none in a real .bfttf */
     return n;
 }
@@ -80,8 +69,8 @@ static int pl_place(u8* shm, u32 shm_size, u32* at, const u8* font, u64 size, in
     u32 padded, key = PL_MAGIC ^ PL_DECRYPTED;
     if (size > shm_size || (size + 3) / 4 * 4 + 8 > shm_size - *at) return 0;
     padded = (u32)((size + 3) & ~3ull);
-    wr_be32(shm + *at, PL_MAGIC ^ key);
-    wr_be32(shm + *at + 4, padded ^ key);
+    snx_st_be32(shm + *at, PL_MAGIC ^ key);
+    snx_st_be32(shm + *at + 4, padded ^ key);
     memcpy(shm + *at + 8, font, (size_t)size);
     memset(shm + *at + 8 + size, 0, padded - (u32)size);
     g_hle.pl.font_off[slot] = *at + 8;
@@ -160,10 +149,9 @@ static int pl_in_order(IpcBuf codes, IpcBuf offsets, IpcBuf sizes, u8* loaded, u
     if (offsets.size / 4 < n) n = offsets.size / 4;
     if (sizes.size / 4 < n) n = sizes.size / 4;
     for (i = 0; i < n; i++) {
-        u32 code = (u32)i;
-        memcpy(GP(codes.addr + 4 * i), &code, 4);
-        memcpy(GP(offsets.addr + 4 * i), &g_hle.pl.font_off[i], 4);
-        memcpy(GP(sizes.addr + 4 * i), &g_hle.pl.font_size[i], 4);
+        gw32(codes.addr + 4 * i, (u32)i);
+        gw32(offsets.addr + 4 * i, g_hle.pl.font_off[i]);
+        gw32(sizes.addr + 4 * i, g_hle.pl.font_size[i]);
     }
     *loaded = 1;
     *count = (u32)n;

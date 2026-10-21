@@ -249,6 +249,7 @@ static void vertex(Vertex* v, float x, float y, float u, float t, u32 rgba) {
     v->u = u;
     v->v = t;
     v->rgba = rgba;
+    snx_le32_array(v, sizeof *v / 4); /* the device reads the words little-endian: the colour's low byte is R */
 }
 void vk_ui_draw(VkCommandBuffer cb, VkImage sc, const int safe[4]) {
     SnxUiList list = {g_quads, 0, MAX_QUADS};

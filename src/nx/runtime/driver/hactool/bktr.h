@@ -14,6 +14,12 @@ typedef struct {
     uint32_t _0x1C; /* Reserved? */
 } bktr_header_t;
 
+/* ScarletNX: the header's words between its file's little-endian order and the host's (the same both ways) */
+static inline void bktr_header_swap(bktr_header_t *hdr) {
+    snx_le64_array(&hdr->offset, 2);
+    snx_le32_array(&hdr->magic, 4);
+}
+
 #pragma pack(push, 1)
 typedef struct {
     uint64_t virt_offset;

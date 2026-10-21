@@ -385,14 +385,14 @@ static int create_network(Ldn* d, const u8* security, const u8* user, const u8* 
     for (i = 0; i < 32; i++) n.ssid[i] = (u8)("0123456789abcdef"[n.ssid[i] & 15]); /* 32 hex digits, as a console's */
     n.ssid_length = 32;
     snx_ldn_fake_mac(d->ip, n.bssid);
-    memcpy(&n.channel, network + NET_CHANNEL, 2);
-    if (!n.channel) n.channel = 6;
+    memcpy(&n.channel, network + NET_CHANNEL, 2); /* the network keeps the config's little-endian fields */
+    if (!n.channel) n.channel = (i16)snx_le16(6);
     n.link_level = 3;   /* Excellent */
     n.network_type = 2; /* Ldn */
     memcpy(&n.security_mode, security + CFG_SECURITY_MODE, 2);
     n.node_count_max = network[NET_NODE_COUNT_MAX];
     n.node_count = 1;
-    memcpy(&version, network + NET_VERSION, 2);
+    version = snx_ld_le16(network + NET_VERSION);
     for (i = 0; i < SNX_LDN_NODES; i++) n.nodes[i].node_id = (i8)i;
     snx_ldn_node_init(d->lan, &n.nodes[0], user, (i16)version);
     r = snx_ldn_create_network(d->lan, &n);
@@ -491,7 +491,7 @@ static int nn_ldn_detail_IUserLocalCommunicationService_Connect(SvcObj* self, co
     int ok, r;
     R_UNLESS(info.addr && info.size >= sizeof n, LDN_BAD_INPUT);
     memcpy(&n, GP(info.addr), sizeof n);
-    memcpy(&version, data->v + CONNECT_VERSION, 4);
+    version = (i32)snx_ld_le32(data->v + CONNECT_VERSION);
     pm_lock(&d->lk);
     ok = d->state == LDN_STATION_OPENED;
     pm_unlock(&d->lk);

@@ -382,24 +382,19 @@ static u32 server_certs(SslConn* c, u8* out, u32* count) {
     for (i = 0; i < n; i++) {
         X509* x = sk_X509_value(chain, i);
         int len = i2d_X509(x, NULL);
-        u32 entry[2];
         if (len < 0) len = 0;
-        entry[0] = (u32)len;
-        entry[1] = at;
         if (out) {
             u8* p = out + at;
-            memcpy(out + 16 + 8 * i, entry, 8);
+            snx_st_le32(out + 16 + 8 * i, (u32)len);
+            snx_st_le32(out + 20 + 8 * i, at);
             if (len) i2d_X509(x, &p);
         }
         at += (u32)len;
     }
     if (out) {
-        u64 magic = CERT_CHAIN_MAGIC;
-        u32 header[2];
-        header[0] = (u32)n;
-        header[1] = 0;
-        memcpy(out, &magic, 8);
-        memcpy(out + 8, header, 8);
+        snx_st_le64(out, CERT_CHAIN_MAGIC);
+        snx_st_le32(out + 8, (u32)n);
+        snx_st_le32(out + 12, 0);
     }
     *count = (u32)n;
     return at;

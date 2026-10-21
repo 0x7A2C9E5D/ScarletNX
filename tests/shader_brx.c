@@ -31,6 +31,13 @@ static void hoisted_program(u64* code) {
     code[20] = code[21] = code[23] = EXIT;
 }
 
+/* shader_hash reads a program as guest memory holds it, little-endian: the host words laid out so first */
+static u64 hash_words(const u64* words, u32 bytes, u32* len) {
+    u8 b[64 * 8];
+    for (u32 i = 0; i < bytes / 8; i++) snx_st_le64(b + 8 * i, words[i]);
+    return shader_hash(b, bytes, len);
+}
+
 static int table(u32 bank, u32 offset, u32* value) {
     if (bank || offset > 8) return 0;
     reads++;
@@ -53,7 +60,7 @@ int main(void) {
     int (*old)(u32, u32, u32*) = g_shader_cb_read;
     g_shader_cb_read = table;
     u32 len = 0;
-    shader_hash((const u8*)code, sizeof code, &len);
+    hash_words(code, sizeof code, &len);
     check(len == 20 * 8 && reads == 2, "clamped BRX reads only its two live table entries");
     u32 targets[64];
     reads = 0;
@@ -64,14 +71,14 @@ int main(void) {
     invalid_second = 1;
     code[20] = code[21] = NOP;
     code[23] = EXIT;
-    shader_hash((const u8*)code, sizeof code, &len);
+    hash_words(code, sizeof code, &len);
     check(len == 24 * 8 && reads == 2, "invalid clamped target leaves BRX unresolved");
     invalid_second = 0;
     code[20] = code[21] = code[23] = 0;
 
     reads = 0;
     code[13] |= 1ull << 49; /* LDC.B64: 8-byte entries whose low words the BRX would take, not a word table */
-    shader_hash((const u8*)code, sizeof code, &len);
+    hash_words(code, sizeof code, &len);
     check(len == 20 * 8 && reads == 0, "a non-B32 load leaves the BRX unresolved");
 
     memset(code, 0, sizeof code);
@@ -79,15 +86,15 @@ int main(void) {
     code[11] = 0xe250000000070d0full; /* unresolved BRX */
     code[12] = EXIT;
     g_shader_cb_read = NULL;
-    shader_hash((const u8*)code, sizeof code, &len);
+    hash_words(code, sizeof code, &len);
     check(len == 13 * 8, "unresolved BRX stops after the final exit before zero padding");
     code[13] = NOP;
     code[15] = EXIT;
-    shader_hash((const u8*)code, sizeof code, &len);
+    hash_words(code, sizeof code, &len);
     check(len == 16 * 8, "unresolved BRX includes live code beyond an earlier exit");
     /* NVN's pool puts the next program after the padding: an unknown table mustn't take it for this one's code */
     code[13] = 0;
-    shader_hash((const u8*)code, sizeof code, &len);
+    hash_words(code, sizeof code, &len);
     check(len == 13 * 8, "unresolved BRX ends at the zero padding before the next program");
 
     u64 distant[64] = {0};
@@ -99,16 +106,16 @@ int main(void) {
     distant[49] = EXIT;
     g_shader_cb_read = table;
     reads = 0;
-    shader_hash((const u8*)distant, sizeof distant, &len);
+    hash_words(distant, sizeof distant, &len);
     check(len == 50 * 8 && reads == 2, "straight-line distant LDC resolves clamped BRX");
     distant[31] = 0x5c9807800ff7000dull; /* MOV R13, RZ invalidates the table value */
     reads = 0;
-    shader_hash((const u8*)distant, sizeof distant, &len);
+    hash_words(distant, sizeof distant, &len);
     check(reads == 0, "a later write to the BRX register rejects distant LDC");
     distant[31] = NOP;
     distant[13] |= 1ull << 49;
     reads = 0;
-    shader_hash((const u8*)distant, sizeof distant, &len);
+    hash_words(distant, sizeof distant, &len);
     check(reads == 0, "distant BRX needs a verified 32-bit table load");
 
     /* The compiler loads the entry inside an if-else (SSY ... SYNC) and branches after it reconverges */
@@ -126,7 +133,7 @@ int main(void) {
     check(shader_brx_targets(hoisted, 19, 64, targets, 64) == 2 && reads == 2 && targets[0] == 23 &&
               targets[1] == 23,
           "a table loaded before an if-else reaches the BRX after it");
-    shader_hash((const u8*)hoisted, sizeof hoisted, &len);
+    hash_words(hoisted, sizeof hoisted, &len);
     check(len == 24 * 8, "a resolved table loaded before an if-else bounds the program");
     hoisted[15] = 0xf0f800000000000full; /* @P0 SYNC: one side skips the load */
     hoisted[16] = 0xef94000000070d0dull;

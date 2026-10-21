@@ -108,6 +108,30 @@ static int host_fma(SnxIr* ir) {
     if (ir->features->x86) return ir->features->fma;
     return !strncmp(target, "aarch64", 7) || !strncmp(target, "powerpc64", 9) || !strncmp(target, "ppc64", 5);
 }
+/* PowerPC64 before POWER7 (the PowerPC 970, cmake/cross.cmake's SNX_PPC64_CPU) has no VSX, and LLVM gives 32-bit
+   float lanes to AltiVec there (vaddfp, vmaddfp, vcmpgtfp, vctsxs). Its arithmetic and compares take denormal operands
+   and results as zeros in the non-Java mode Linux starts every thread in (VSCR[NJ]), so a fast path would accept a
+   zero where the architecture has a denormal (a difference of two normals, a residual): those lanes take the slow
+   path. 64-bit lanes are the FPU's, one at a time, and a scalar is the FPU's too */
+static int altivec_lanes(SnxIr* ir, unsigned width, unsigned lanes) {
+    const char* target = LLVMGetTarget(ir->mod);
+    char *cpu, *features;
+    int vsx;
+    if (lanes < 2 || width != 32 || (strncmp(target, "powerpc64", 9) && strncmp(target, "ppc64", 5))) return 0;
+    cpu = LLVMGetTargetMachineCPU(ir->tm);
+    features = LLVMGetTargetMachineFeatureString(ir->tm);
+    if (strstr(features, "+vsx"))
+        vsx = 1;
+    else if (strstr(features, "-vsx"))
+        vsx = 0;
+    else /* LLVM's names: from pwr7 (pwr10 on has two digits, pwr5x and pwr6x a letter), and ppc64le's POWER8 */
+        vsx = (!strncmp(cpu, "pwr", 3) && cpu[3] >= '1' && cpu[3] <= '9' &&
+               (cpu[3] >= '7' || (cpu[4] >= '0' && cpu[4] <= '9'))) ||
+              !strcmp(cpu, "ppc64le") || !strcmp(cpu, "future");
+    LLVMDisposeMessage(cpu);
+    LLVMDisposeMessage(features);
+    return !vsx;
+}
 static V fp_intrinsic(SnxIr* ir, const char* name, const Shape* s, V* args, unsigned count) {
     return ir_intrinsic(ir, name, s->ft, args, count);
 }
@@ -240,6 +264,7 @@ void ir_fp_fast(SnxIr* ir, unsigned op, unsigned width, unsigned lanes, V a, V b
         lane_or(ir, lane_exponent_in(ir, &s, out->value, 2, top), lane_and(ir, lane_zero(ir, &s, out->value), zero_ok));
     out->ok = LLVMBuildAnd(B, LLVMBuildAnd(B, rounds_to_nearest(ir), all(ir, &s, lane_and(ir, lane_in, result)), ""),
                            exact_ok, "");
+    if (altivec_lanes(ir, width, lanes)) out->ok = LLVMConstInt(ir->t_i1, 0, 0);
 }
 
 LLVMBasicBlockRef ir_fp_branch(SnxIr* ir, V ok, LLVMBasicBlockRef* slow) {
@@ -503,7 +528,7 @@ void ir_fp_minmax_fast(SnxIr* ir, unsigned width, unsigned lanes, V a, V b, unsi
     tie = minimum ? LLVMBuildOr(B, a, b, "") : LLVMBuildAnd(B, a, b, "");
     out->value = minimum ? LLVMBuildSelect(B, lt, a, LLVMBuildSelect(B, gt, b, tie, ""), "")
                          : LLVMBuildSelect(B, gt, a, LLVMBuildSelect(B, lt, b, tie, ""), "");
-    out->ok = no_nan_no_flush(ir, &s, a, b, fa, fb);
+    out->ok = altivec_lanes(ir, width, lanes) ? LLVMConstInt(ir->t_i1, 0, 0) : no_nan_no_flush(ir, &s, a, b, fa, fb);
     out->inexact = LLVMConstInt(ir->t_i1, 0, 0);
 }
 
@@ -515,7 +540,7 @@ void ir_fp_compare_fast(SnxIr* ir, unsigned cmp, unsigned width, unsigned lanes,
     fa = LLVMBuildBitCast(B, a, s.ft, "");
     fb = LLVMBuildBitCast(B, b, s.ft, "");
     out->value = LLVMBuildSExt(B, LLVMBuildFCmp(B, predicates[cmp], fa, fb, ""), s.it, "");
-    out->ok = no_nan_no_flush(ir, &s, a, b, fa, fb);
+    out->ok = altivec_lanes(ir, width, lanes) ? LLVMConstInt(ir->t_i1, 0, 0) : no_nan_no_flush(ir, &s, a, b, fa, fb);
     out->inexact = LLVMConstInt(ir->t_i1, 0, 0);
 }
 
@@ -634,7 +659,7 @@ int ir_fp_to_int_fast(SnxIr* ir, unsigned width, unsigned lanes, V bits, unsigne
     V f, scaled, rounded, fz, limit, low, result, e, mantissa, ok;
     LLVMTypeRef it = LLVMIntTypeInContext(ir->ctx, integer);
     double top = integer == 64 ? 9223372036854775808.0 : 2147483648.0;
-    if (rm != 3 && !host_round(ir)) return 0;
+    if ((rm != 3 && !host_round(ir)) || altivec_lanes(ir, width, lanes)) return 0;
     shape(ir, width, lanes, &s);
     if (lanes > 1) it = LLVMVectorType(it, lanes);
     f = LLVMBuildBitCast(B, bits, s.ft, "");

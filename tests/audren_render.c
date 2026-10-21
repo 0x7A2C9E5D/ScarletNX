@@ -69,9 +69,19 @@ static u32 art_rev = 4;     /* the revision layout() writes */
 static ARState* st;
 
 static void w8(u8* p, u32 off, u8 v) { p[off] = v; }
-static void w32(u8* p, u32 off, u32 v) { memcpy(p + off, &v, 4); }
-static void w64(u8* p, u32 off, u64 v) { memcpy(p + off, &v, 8); }
-static void wf(u8* p, u32 off, float v) { memcpy(p + off, &v, 4); }
+/* the update and guest memory hold little-endian words, as the game writes them */
+static void w16(u8* p, u32 off, u16 v) { snx_st_le16(p + off, v); }
+static void w32(u8* p, u32 off, u32 v) { snx_st_le32(p + off, v); }
+static void w64(u8* p, u32 off, u64 v) { snx_st_le64(p + off, v); }
+static void wf(u8* p, u32 off, float v) {
+    u32 bits;
+    memcpy(&bits, &v, 4);
+    w32(p, off, bits);
+}
+/* an update's header of host numbers into its first 0x40 bytes */
+static void put_header(u8* p, const u32* h) {
+    for (u32 i = 0; i < 16; i++) w32(p, i * 4, h[i]);
+}
 static u8* voice(int i) { return u_voice + i * (art_rev >= 15 ? 0x188 : 0x170); }
 static u8* res(int i) { return u_res + i * 0x70; }
 static u8* eff(int i) { return u_eff + i * 0xC0; }
@@ -95,7 +105,7 @@ static void layout(void) {
                  0x10,
                  SNX_ART_SPLIT_BYTES};
     h[15] = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[6] + h[7] + h[8] + h[9];
-    memcpy(in, h, sizeof h);
+    put_header(in, h);
     w32(in, 0x40, rev);
     u8* p = in + 0x50;
     u_pool = p;
@@ -207,7 +217,8 @@ static void frames(int n) {
 /* a tone of whole periods in each frame, looping over one second of PCM16 at 48 kHz */
 static void tone(int v, double hz, double amp, u8 quality, int channel, float gain) {
     i16* pcm = (i16*)(void*)(g_mem + SNX_ART_G_PCM + (u64)v * SNX_ART_RATE * 2);
-    for (int i = 0; i < SNX_ART_RATE; i++) pcm[i] = (i16)lrint(amp * 32767.0 * sin(2.0 * M_PI * hz * i / SNX_ART_RATE));
+    for (int i = 0; i < SNX_ART_RATE; i++)
+        snx_st_le16(pcm + i, (u16)(i16)lrint(amp * 32767.0 * sin(2.0 * M_PI * hz * i / SNX_ART_RATE)));
     u8* vi = voice(v);
     memset(vi + 8, 0, 0x170 - 8);
     w8(vi, 8, 1);
@@ -245,7 +256,8 @@ static void tone_stereo(int v, double hz0, double hz1, double amp) {
     pcm = (i16*)(void*)(g_mem + SNX_ART_G_PCM + (u64)v * SNX_ART_RATE * 2);
     for (i = 0; i < SNX_ART_RATE; i++)
         for (c = 0; c < 2; c++)
-            pcm[i * 2 + c] = (i16)lrint(amp * 32767.0 * sin(2.0 * M_PI * (c ? hz1 : hz0) * i / SNX_ART_RATE));
+            snx_st_le16(pcm + i * 2 + c,
+                        (u16)(i16)lrint(amp * 32767.0 * sin(2.0 * M_PI * (c ? hz1 : hz0) * i / SNX_ART_RATE)));
     w32(voice(v), 0x18, 2);
     w64(voice(v), 0x68, SNX_ART_RATE * 4);
     w32(voice(v), 0x144, (u32)v + 1);
@@ -300,10 +312,15 @@ static double level_i16(const i16* x, int n, double hz) {
     for (int i = 0; i < n; i++) tmp[i] = x[i];
     return level_i32(tmp, n, hz);
 }
-/* the left (ch 0) or right channel the first circular buffer sink wrote in frame f since the reset */
+/* the left (ch 0) or right channel the first circular buffer sink wrote in frame f since the reset, as host numbers
+   in one of a few buffers that outlive the next calls */
 static const i16* sink_frame_at(int f, int ch) {
-    return (const i16*)(const void*)(g_mem + SNX_ART_G_RING) + (f % SNX_ART_RING_FRAMES) * 2 * SNX_ART_FRAME +
-           ch * SNX_ART_FRAME;
+    static i16 frames_read[4][SNX_ART_FRAME];
+    static unsigned next;
+    i16* x = frames_read[next++ % 4];
+    const u8* at = g_mem + SNX_ART_G_RING + ((size_t)(f % SNX_ART_RING_FRAMES) * 2 + (size_t)ch) * SNX_ART_FRAME * 2;
+    for (int i = 0; i < SNX_ART_FRAME; i++) x[i] = (i16)rd16(at + i * 2);
+    return x;
 }
 
 /* a 1 kHz voice at 0.3 alone on the final mix's left, recorded by the first circular buffer sink */
@@ -315,8 +332,8 @@ static void bq_voice(void) {
 static void bq_set(int f, u8 on, const i16* b, const i16* a) {
     u8* bq = voice(0) + 0x24 + f * 0xC;
     w8(bq, 0, on);
-    memcpy(bq + 2, b, 6);
-    memcpy(bq + 8, a, 4);
+    for (int k = 0; k < 3; k++) w16(bq, 2 + k * 2, (u16)b[k]);
+    for (int k = 0; k < 2; k++) w16(bq, 8 + k * 2, (u16)a[k]);
 }
 /* Eden's ApplyBiquadFilterInt, or ApplyBiquadFilterFloat when dbl, over n samples from a clear state */
 static void ref_biquad(const i16* in, i16* out, int n, const i16* b, const i16* a, int dbl) {
@@ -373,7 +390,7 @@ static void delay_set(u8* p, u16 channels, u32 ms, i32 in_gain, i32 fb, i32 wet,
     g[3] = dry;
     g[4] = spread;
     g[5] = lp;
-    memcpy(p + 0x1C, g, sizeof g);
+    for (int k = 0; k < 6; k++) w32(p, 0x1C + k * 4, (u32)g[k]);
 }
 /* Eden's InitializeDelayEffect, SetDelayEffectParameter and ApplyDelay, one or two channels */
 static void ref_delay(int nch, const i16* const* in, i16* const* out, int n, int len, i32 in_gain, i32 fb, i32 wet,
@@ -424,7 +441,7 @@ static i16 tsat(i32 v) { return (i16)(v > 32767 ? 32767 : v < -32768 ? -32768 : 
 static void reverb_set(u8* p, u16 ch, const i32* v) {
     w32(p, 0xC, (u32)ch << 16 | ch);
     w32(p, 0x10, 48 << 14);
-    memcpy(p + 0x14, v, 11 * 4);
+    for (int k = 0; k < 11; k++) w32(p, 0x14 + k * 4, (u32)v[k]);
 }
 
 /* Eden's reverb tables (renderer/command/effect/reverb.cpp), mode 0 to 4 */
@@ -594,7 +611,7 @@ static void rv_ref(const i16* x, i16* y, int frames_n, const u8* state, const i3
 static void i3dl2_set(u8* p, u16 ch, const float* v) {
     w32(p, 0xC, (u32)ch << 16 | ch);
     w32(p, 0x14, SNX_ART_RATE);
-    memcpy(p + 0x18, v, 12 * 4);
+    for (int k = 0; k < 12; k++) wf(p, 0x18 + k * 4, v[k]);
 }
 
 /* Eden's I3DL2 tables (renderer/command/effect/i3dl2_reverb.cpp) */
@@ -768,7 +785,7 @@ static void compressor_set(u8* p, const float* v) {
     w32(p, 0x10, SNX_ART_RATE);
     wf(p, 0x14, v[0]);
     wf(p, 0x18, v[1]);
-    memcpy(p + 0x24, v + 2, 4 * 4);
+    for (int k = 0; k < 4; k++) wf(p, 0x24 + k * 4, v[2 + k]);
     w8(p, 0x35, v[6] != 0.0f);
 }
 /* Eden's compressor (renderer/command/effect/compressor.cpp) for one channel */
@@ -821,11 +838,12 @@ static int first_diff(const i16* a, const i16* b, int n) {
 
 /* the aux ring's channel ch in its most recent full frame */
 static double captured(int ch, double hz) {
-    u32 woff;
-    memcpy(&woff, g_mem + SNX_ART_G_AUX_SEND + 0x40 + 4, 4);
+    u32 woff = rd32(g_mem + SNX_ART_G_AUX_SEND + 0x40 + 4);
     u32 frame_at = (woff + SNX_ART_AUX_COUNT - 2 * SNX_ART_FRAME) % SNX_ART_AUX_COUNT;
-    const i32* ring = (const i32*)(const void*)(g_mem + SNX_ART_G_AUX_SEND + 0x80);
-    return level_i32(ring + frame_at + ch * SNX_ART_FRAME, SNX_ART_FRAME, hz);
+    const u8* ring = g_mem + SNX_ART_G_AUX_SEND + 0x80 + (size_t)(frame_at + ch * SNX_ART_FRAME) * 4;
+    i32 x[SNX_ART_FRAME];
+    for (int i = 0; i < SNX_ART_FRAME; i++) x[i] = (i32)rd32(ring + i * 4);
+    return level_i32(x, SNX_ART_FRAME, hz);
 }
 
 static void reset(void) {
@@ -888,7 +906,7 @@ static void update_output_counts(void) {
             if (input) {
                 int rc;
                 output = input + size;
-                memcpy(input, h, sizeof h);
+                put_header(input, h);
                 for (i = 0; i < counts[c][0]; i++) w32(input, 0x40 + h[1] + i * 0x20 + 0x10, 4);
                 memset(output, 0xA5, reply + 32);
                 rc = audren_state_update(state, input, size, output, reply);
@@ -960,7 +978,7 @@ static void update_voice_v2(void) {
         return;
     }
     h[15] = size;
-    memcpy(input, h, sizeof h);
+    put_header(input, h);
     for (i = 0; i < pools; i++) w32(input, 0x40 + h[1] + i * 0x20 + 0x10, 4);
     voices_in = input + 0x40 + h[1] + h[2] + h[4];
     vi = voices_in + stride; /* voice 1: new, in use, every field set */
@@ -1051,7 +1069,7 @@ static void update_mix_dirty_only(void) {
         return;
     }
     h[15] = size;
-    memcpy(input, h, sizeof h);
+    put_header(input, h);
     for (i = 0; i < pools; i++) w32(input, 0x40 + h[1] + i * 0x20 + 0x10, 4);
     mixes = input + 0x40 + h[1] + h[2] + h[4] + h[3] + h[5];
     w32(mixes, 4, entries);
@@ -1097,7 +1115,7 @@ static void update_voice_rev14(void) {
         return;
     }
     h[15] = size;
-    memcpy(input, h, sizeof h);
+    put_header(input, h);
     vi = input + 0x40 + h[1] + h[2] + h[4] + stride; /* voice 1 */
     w8(vi, 8, 1);
     w8(vi, 9, 1);
@@ -1149,15 +1167,14 @@ int main(void) {
     wf(mix(SNX_ART_SUBMIX), 0x24 + (24 + 1) * 4, 1.0f); /* submix 1 -> final 1 */
     w8(sink(1), 1, 1);
     frames(50);
-    const i16* ring = (const i16*)(const void*)(g_mem + SNX_ART_G_RING);
-    double l1k = level_i16(ring, SNX_ART_FRAME, 1000), l16 = level_i16(ring, SNX_ART_FRAME, 1600);
-    double r1k = level_i16(ring + SNX_ART_FRAME, SNX_ART_FRAME, 1000),
-           r16 = level_i16(ring + SNX_ART_FRAME, SNX_ART_FRAME, 1600);
+    const i16 *ring_l = sink_frame_at(0, 0), *ring_r = sink_frame_at(0, 1);
+    double l1k = level_i16(ring_l, SNX_ART_FRAME, 1000), l16 = level_i16(ring_l, SNX_ART_FRAME, 1600);
+    double r1k = level_i16(ring_r, SNX_ART_FRAME, 1000), r16 = level_i16(ring_r, SNX_ART_FRAME, 1600);
     CHECK(fabs(l1k - 0.25) < 0.005 && l16 < 0.005, "left channel: 1 kHz %.4f, 1.6 kHz %.4f", l1k, l16);
     CHECK(fabs(r16 - 0.25) < 0.005 && r1k < 0.005, "right channel: 1.6 kHz %.4f, 1 kHz %.4f", r16, r1k);
     u32 woff;
     update();
-    memcpy(&woff, out + 0x40 + SNX_ART_POOLS * 0x10 + SNX_ART_VOICES * 0x10 + SNX_ART_EFFECTS * 0x10 + 0x20, 4);
+    woff = rd32(out + 0x40 + SNX_ART_POOLS * 0x10 + SNX_ART_VOICES * 0x10 + SNX_ART_EFFECTS * 0x10 + 0x20);
     CHECK(woff != 0 && woff % (2 * SNX_ART_FRAME * 2) == 0, "write offset %u", woff);
 
     /* the limiter switched off keeps a tone's level; in mode 1 the tone comes out at threshold over the detector:
@@ -1190,8 +1207,8 @@ int main(void) {
     update();
     u64 played;
     u32 consumed;
-    memcpy(&played, out + 0x40 + SNX_ART_POOLS * 0x10, 8);
-    memcpy(&consumed, out + 0x40 + SNX_ART_POOLS * 0x10 + 8, 4);
+    played = rd64(out + 0x40 + SNX_ART_POOLS * 0x10);
+    consumed = rd32(out + 0x40 + SNX_ART_POOLS * 0x10 + 8);
     CHECK(played == 480 && consumed == 1, "played %llu, consumed %u", (unsigned long long)played, consumed);
     /* a stop consumes what was queued and starts the count over */
     tone(1, 1000, 0.25, 0, 0, 1.0f);
@@ -1199,8 +1216,8 @@ int main(void) {
     silence(1);
     frames(2);
     update();
-    memcpy(&played, out + 0x40 + SNX_ART_POOLS * 0x10 + 0x10, 8);
-    memcpy(&consumed, out + 0x40 + SNX_ART_POOLS * 0x10 + 0x10 + 8, 4);
+    played = rd64(out + 0x40 + SNX_ART_POOLS * 0x10 + 0x10);
+    consumed = rd32(out + 0x40 + SNX_ART_POOLS * 0x10 + 0x10 + 8);
     CHECK(played == 0 && consumed == 1, "after a stop: played %llu, consumed %u", (unsigned long long)played, consumed);
 
     /* the resampler tables made from their windowed sincs, against the console's: phase 0 of default quality's
@@ -1222,7 +1239,7 @@ int main(void) {
     ARWave w = {0};
     i16 coef[16] = {0};
     coef[2] = 2048; /* pair 1: the last sample, times 1.0 */
-    memcpy(g_mem + SNX_ART_G_ADPCM + 0x100, coef, sizeof coef);
+    for (int k = 0; k < 16; k++) w16(g_mem + SNX_ART_G_ADPCM + 0x100, (u32)k * 2, (u16)coef[k]);
     u8 frame0[8] = {0x02, 0x12, 0x34, 0x56, 0x7F, 0xED, 0xCB, 0xA9}; /* pair 0, scale 2 */
     u8 frame1[8] = {0x10, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11}; /* pair 1, scale 0: +1 each sample */
     memcpy(g_mem + SNX_ART_G_ADPCM, frame0, 8);
@@ -1292,7 +1309,7 @@ int main(void) {
     tone(0, 1000, 0.5, 0, 0, 1.0f);
     {
         int i;
-        for (i = 0; i < SNX_ART_RATE; i++) ((i16*)(void*)(g_mem + SNX_ART_G_PCM))[i] = 16384;
+        for (i = 0; i < SNX_ART_RATE; i++) w16(g_mem + SNX_ART_G_PCM, (u32)i * 2, 16384);
     }
     w32(voice(0), 0x58, SNX_AUDREN_UNUSED_MIX);
     w32(voice(0), 0x5C, 0);
@@ -1391,12 +1408,12 @@ int main(void) {
             p[0] = 0, p[6] = 1;
             if (art_rev >= 9) {
                 const float fb[3] = {0.25f, 0.4f, 0.25f}, fa[2] = {0.5f, -0.3f};
-                memcpy(p + 0x10, fb, sizeof fb);
-                memcpy(p + 0x1C, fa, sizeof fa);
+                for (int k = 0; k < 3; k++) wf(p, 0x10 + k * 4, fb[k]);
+                for (int k = 0; k < 2; k++) wf(p, 0x1C + k * 4, fa[k]);
                 w8(p, 0x24, 1);
             } else {
-                memcpy(p + 0xC, qb, sizeof qb);
-                memcpy(p + 0x12, qa, sizeof qa);
+                for (int k = 0; k < 3; k++) w16(p, 0xC + k * 2, (u16)qb[k]);
+                for (int k = 0; k < 2; k++) w16(p, 0x12 + k * 2, (u16)qa[k]);
                 w8(p, 0x16, 1);
             }
             st_at = art_rev >= 9 ? 0x25 : 0x17;
@@ -1512,8 +1529,8 @@ int main(void) {
                 delay_set(p, 1, 1, 16384, 0, 16384, 0, 0, 0);
             } else {
                 w8(eff(0), 0, SNX_AUDREN_EFFECT_BIQUAD);
-                memcpy(p + 0xC, qb, sizeof qb);
-                memcpy(p + 0x12, qa, sizeof qa);
+                for (int k = 0; k < 3; k++) w16(p, 0xC + k * 2, (u16)qb[k]);
+                for (int k = 0; k < 2; k++) w16(p, 0x12 + k * 2, (u16)qa[k]);
                 w8(p, 0x16, 1);
                 w8(p, 0x17, f == 0 ? SNX_AUDREN_PARAM_INITIALIZED : SNX_AUDREN_PARAM_UPDATED);
             }
@@ -1792,7 +1809,7 @@ int main(void) {
         u32 span, k, c, i, wo, lost, total, lost_frames, rd;
         static i16 x0[25 * SNX_ART_FRAME], x1[25 * SNX_ART_FRAME];
         const u8* dsp = g_mem + SNX_ART_G_AUX_SEND + 0x40;
-        const i32* ring = (const i32*)(const void*)(g_mem + SNX_ART_G_AUX_SEND + 0x80);
+        const u8* ring = g_mem + SNX_ART_G_AUX_SEND + 0x80;
         reset();
         p = fx_voice(SNX_AUDREN_EFFECT_CAPTURE);
         if (nch == 2) tone(1, 1600, 0.3, 0, 1, 1.0f);
@@ -1809,9 +1826,10 @@ int main(void) {
         for (k = 25 - 4800 / span; k < 25 && bad < 0; k++)
             for (c = 0; c < nch; c++)
                 for (i = 0; i < SNX_ART_FRAME; i++)
-                    if (ring[(k * span + c * SNX_ART_FRAME + i) % 4800] != (c ? x1 : x0)[k * SNX_ART_FRAME + i])
+                    if ((i32)rd32(ring + (k * span + c * SNX_ART_FRAME + i) % 4800 * 4) !=
+                        (c ? x1 : x0)[k * SNX_ART_FRAME + i])
                         bad = (int)(k * span + c * SNX_ART_FRAME + i);
-        memcpy(&wo, dsp + 4, 4), memcpy(&lost, dsp + 8, 4), memcpy(&total, dsp + 0xC, 4);
+        wo = rd32(dsp + 4), lost = rd32(dsp + 8), total = rd32(dsp + 0xC);
         lost_frames = 25 - 4800 / span;
         CHECK(bad < 0, "capture of %u: ring sample %d", nch, bad);
         CHECK(wo == 25 * span % 4800 && total == 25 * span && lost == lost_frames * span,
@@ -1822,7 +1840,7 @@ int main(void) {
         }
         w8(eff(0), 2, 0);
         frames(1);
-        memcpy(&rd, dsp, 4), memcpy(&wo, dsp + 4, 4), memcpy(&total, dsp + 0xC, 4), memcpy(&lost, dsp + 8, 4);
+        rd = rd32(dsp), wo = rd32(dsp + 4), total = rd32(dsp + 0xC), lost = rd32(dsp + 8);
         CHECK(rd == 0 && wo == 0 && total == 0 && lost == lost_frames * span,
               "capture switched off: read %u, write %u, total %u, lost %u", rd, wo, total, lost);
     }
@@ -1842,16 +1860,16 @@ int main(void) {
             memcpy(g_mem + SNX_ART_G_AUX_SEND + 0xC, g_mem + SNX_ART_G_AUX_SEND + 0x40 + 0xC, 4);
             frames(1);
         }
-        memcpy(&lost, g_mem + SNX_ART_G_AUX_SEND + 0x40 + 8, 4), memcpy(&total, g_mem + SNX_ART_G_AUX_SEND + 0x4C, 4);
+        lost = rd32(g_mem + SNX_ART_G_AUX_SEND + 0x40 + 8), total = rd32(g_mem + SNX_ART_G_AUX_SEND + 0x4C);
         CHECK(lost == 0 && total == 25 * SNX_ART_FRAME, "a capture read in time: lost %u, total %u", lost, total);
 
         /* near the wrap, Eden's WriteAuxBufferDsp holds both counts one short of the game's */
         edge = 0xFFFFFFF0u;
         zero = 0;
-        memcpy(g_mem + SNX_ART_G_AUX_SEND + 0x40 + 8, &edge, 4), memcpy(g_mem + SNX_ART_G_AUX_SEND + 0x4C, &edge, 4);
-        memcpy(g_mem + SNX_ART_G_AUX_SEND + 8, &zero, 4), memcpy(g_mem + SNX_ART_G_AUX_SEND + 0xC, &zero, 4);
+        wr32(g_mem + SNX_ART_G_AUX_SEND + 0x40 + 8, edge), wr32(g_mem + SNX_ART_G_AUX_SEND + 0x4C, edge);
+        wr32(g_mem + SNX_ART_G_AUX_SEND + 8, zero), wr32(g_mem + SNX_ART_G_AUX_SEND + 0xC, zero);
         frames(1);
-        memcpy(&lost, g_mem + SNX_ART_G_AUX_SEND + 0x40 + 8, 4), memcpy(&total, g_mem + SNX_ART_G_AUX_SEND + 0x4C, 4);
+        lost = rd32(g_mem + SNX_ART_G_AUX_SEND + 0x40 + 8), total = rd32(g_mem + SNX_ART_G_AUX_SEND + 0x4C);
         CHECK(lost == 0xFFFFFFFFu && total == 0xFFFFFFFFu, "capture counts at the wrap: lost %08x, total %08x", lost,
               total);
     }

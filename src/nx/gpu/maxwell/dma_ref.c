@@ -8,6 +8,7 @@
    (vk/dma.c, docs/GPU_OWNERSHIP.md), so this file isn't built into it */
 #include <stdlib.h>
 #include <string.h>
+#include "common/utilities/endian.h"
 #include "nx/gpu/gpu.h"
 
 static u64 span_of(const GpuDmaSide* s, u32 lines, u32 line) {
@@ -71,9 +72,11 @@ static void ref_remap(const GpuDmaOp* o, const u8* in, u8* out) {
         u8* d = out + i * o->cs * o->nd;
         for (k = 0; k < o->nd; k++) {
             u32 sel = o->sel[k];
-            if (sel == 4 || sel == 5)
-                memcpy(d + k * o->cs, sel == 4 ? &o->const_a : &o->const_b, o->cs); /* the constant's low bytes */
-            else if (sel < 4) {
+            if (sel == 4 || sel == 5) { /* the constant's low bytes, as guest memory orders them */
+                u8 c[4];
+                snx_st_le32(c, sel == 4 ? o->const_a : o->const_b);
+                memcpy(d + k * o->cs, c, o->cs);
+            } else if (sel < 4) {
                 if (s && sel < o->ns)
                     memcpy(d + k * o->cs, s + sel * o->cs, o->cs);
                 else

@@ -37,6 +37,7 @@ typedef struct {
     unsigned char data[];
 } kip1_header_t;
 
+/* ScarletNX: the headers stay as their files have them, little-endian, and their words are read through snx_le32 */
 typedef struct {
     FILE *file;
     hactool_ctx_t *tool_ctx;
@@ -61,12 +62,12 @@ void kip1_save(kip1_ctx_t *ctx);
 
 static inline uint64_t kip1_get_size(kip1_ctx_t *ctx) {
     /* Header + .text + .rodata + .rwdata */
-    return 0x100 + ctx->header->section_headers[0].compressed_size + ctx->header->section_headers[1].compressed_size + ctx->header->section_headers[2].compressed_size;
+    return 0x100 + snx_le32(ctx->header->section_headers[0].compressed_size) + snx_le32(ctx->header->section_headers[1].compressed_size) + snx_le32(ctx->header->section_headers[2].compressed_size);
 }
 
 static inline uint64_t kip1_get_size_from_header(kip1_header_t *header) {
     /* Header + .text + .rodata + .rwdata */
-    return 0x100 + header->section_headers[0].compressed_size + header->section_headers[1].compressed_size + header->section_headers[2].compressed_size;
+    return 0x100 + snx_le32(header->section_headers[0].compressed_size) + snx_le32(header->section_headers[1].compressed_size) + snx_le32(header->section_headers[2].compressed_size);
 }
 
 #endif

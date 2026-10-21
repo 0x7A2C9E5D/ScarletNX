@@ -94,7 +94,7 @@ static int nn_lm_ILogger_Log(SvcObj* self, IpcBuf message) {
     u32 payload, text_n = 0, file_n = 0, line = 0;
     (void)self;
     if (message.size < 0x18) R_SUCCEED();
-    memcpy(&payload, p + 0x14, 4);
+    payload = snx_ld_le32(p + 0x14);
     end = p + 0x18 + (payload < message.size - 0x18 ? payload : message.size - 0x18);
     p += 0x18;
     while (p < end) {
@@ -115,7 +115,7 @@ static int nn_lm_ILogger_Log(SvcObj* self, IpcBuf message) {
             file = p;
             file_n = (u32)n;
         } else if (type == 3 && n >= 4)
-            memcpy(&line, p, 4);
+            line = snx_ld_le32(p);
         p += n;
     }
     while (text_n && (text[text_n - 1] == '\n' || !text[text_n - 1])) text_n--;
@@ -298,6 +298,7 @@ static int nn_fatalsrv_IService_ThrowFatalWithCpuContext(SvcObj* self, u32 resul
     if (context.size >= 0x108) {
         u64 r[4];
         memcpy(r, GP(context.addr + 0xe8), sizeof r);
+        snx_le64_array(r, 4);
         WARN("fatal: fp %016llx lr %016llx sp %016llx pc %016llx\n", (unsigned long long)r[0],
              (unsigned long long)r[1], (unsigned long long)r[2], (unsigned long long)r[3]);
     }
@@ -704,10 +705,9 @@ static int nn_bcat_detail_ipc_IDeliveryCacheProgressService_GetEvent(SvcObj* sel
 }
 /* DeliveryCacheProgressImpl: status Done, result success, nothing downloaded */
 static int nn_bcat_detail_ipc_IDeliveryCacheProgressService_GetImpl(SvcObj* self, IpcBuf impl) {
-    i32 status = BCAT_DONE;
     (void)self;
     memset(GP(impl.addr), 0, (size_t)impl.size);
-    if (impl.size >= 4) memcpy(GP(impl.addr), &status, 4);
+    if (impl.size >= 4) gw32(impl.addr, (u32)BCAT_DONE);
     R_SUCCEED();
 }
 static int nn_bcat_detail_ipc_IDeliveryCacheStorageService_CreateFileService(SvcObj* self, SvcObj** file) {
@@ -965,14 +965,14 @@ static int nn_mii_detail_IDatabaseService_GetCount(SvcObj* self, i32 source_flag
    then for Get its source (1, Default). A buffer with no room for the next one is InvalidArgumentSize */
 static int mii_give_defaults(i32 source_flag, IpcBuf out, u32 size, i32* count) {
     nn_mii_CharInfo info;
-    u32 i, source = 1;
+    u32 i;
     *count = 0;
     if (!(source_flag & MII_SOURCE_DEFAULT)) R_SUCCEED();
     for (i = 0; i < 6; i++) {
         if (out.size < (u64)(i + 1) * size) R_THROW(MII_INVALID_ARGUMENT_SIZE);
         nn_mii_detail_IDatabaseService_BuildDefault(NULL, i, &info);
         memcpy(GP(out.addr + (u64)i * size), info.v, sizeof info.v);
-        if (size > sizeof info.v) memcpy(GP(out.addr + (u64)i * size + sizeof info.v), &source, 4);
+        if (size > sizeof info.v) gw32(out.addr + (u64)i * size + sizeof info.v, 1);
         (*count)++;
     }
     R_SUCCEED();

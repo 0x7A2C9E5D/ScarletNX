@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "nx/gpu/shader/shader.h"
+#include "common/utilities/endian.h"
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,12 +66,47 @@ static void check_refused(const u32* code, const ShaderInfo* info, const char* r
     check(!code && info->unsupported && !strncmp(info->first_unsupported, reason, strlen(reason)), what);
 }
 
+/* The programs here are built as 64-bit words in host numbers. The translator takes guest memory's bytes, where
+   the words are little-endian, so every call gets a little-endian copy; the header's 32-bit words are halves of the
+   first ten (word 2k the low half of program word k, as in guest memory). */
+static void set_sph(u64* code, u32 index, u32 value) {
+    u32 shift = index % 2 * 32;
+    code[index / 2] = (code[index / 2] & ~(0xFFFFFFFFull << shift)) | (u64)value << shift;
+}
+static u8* guest_bytes(const u64* code, size_t bytes) {
+    u8* guest = malloc(bytes ? bytes : 1);
+    if (!guest) return NULL;
+    for (size_t i = 0; i < bytes / 8; i++) snx_st_le64(guest + i * 8, code[i]);
+    return guest;
+}
+static u32* spirv_of(const u64* code, size_t bytes, int stage, ShaderInfo* info, size_t* words, int flush,
+                     int can_preserve, int can_preserve_f64, int can_subgroup) {
+    u8* guest = guest_bytes(code, bytes);
+    u32* result = guest ? shader_to_spirv(guest, (u32)bytes, stage, info, words, flush, can_preserve,
+                                          can_preserve_f64, can_subgroup)
+                        : NULL;
+    free(guest);
+    return result;
+}
+static u32* compute_spirv_of(const u64* code, size_t bytes, ShaderInfo* info, size_t* words, int flush,
+                             int can_preserve) {
+    u8* guest = guest_bytes(code, bytes);
+    u32* result = guest ? shader_compute_to_spirv(guest, (u32)bytes, info, words, flush, can_preserve) : NULL;
+    free(guest);
+    return result;
+}
+static void hash_of(const u64* code, size_t bytes, u32* len) {
+    u8* guest = guest_bytes(code, bytes);
+    if (guest) shader_hash(guest, (u32)bytes, len);
+    free(guest);
+}
+
 static u64* guest_program(const u64* instructions, int count, const u32* sph, size_t* slots_out) {
     if (count < 0 || count > (INT_MAX - 14) / 2) return NULL;
     size_t slots = 10 + (size_t)count + 1 + ((size_t)count + 3) / 3;
     u64* code = calloc(slots, sizeof *code);
     if (!code) return NULL;
-    if (sph) memcpy((u8*)code + 2 * sizeof(u32), sph, 3 * sizeof *sph);
+    for (u32 i = 0; sph && i < 3; i++) set_sph(code, 2 + i, sph[i]);
     int at = 10;
     for (int i = 0; i <= count; i++) {
         if ((at - 10) % 4 == 0) code[at++] = SCHED;
@@ -92,7 +128,7 @@ static u32* translate_with_rt_mask(const u64* instructions, int count, int stage
         info->cs_local[0] = info->cs_local[1] = info->cs_local[2] = 1;
         info->shared_size = 16;
     }
-    u32* result = shader_to_spirv((const u8*)code, slots * sizeof *code, stage, info, words, flush, 1, 1, 1);
+    u32* result = spirv_of(code, slots * sizeof *code, stage, info, words, flush, 1, 1, 1);
     free(code);
     return result;
 }
@@ -490,7 +526,12 @@ static void save_fixture(const char* path, const u32* code, size_t words) {
         check(0, "shader fixture opened");
         return;
     }
-    int written = fwrite(code, sizeof *code, words, out) == words;
+    int written = 1; /* a .spv file is little-endian, the same bytes from any host */
+    for (size_t i = 0; i < words && written; i++) {
+        u8 le[4];
+        snx_st_le32(le, code[i]);
+        written = fwrite(le, 1, sizeof le, out) == sizeof le;
+    }
     int closed = fclose(out) == 0;
     check(written && closed, "shader fixture written");
 }
@@ -820,7 +861,7 @@ static void brx_length(void) {
     u32 targets[64], len = 0;
     int (*old)(u32, u32, u32*) = g_shader_cb_read;
     g_shader_cb_read = brx_table;
-    shader_hash((const u8*)code, sizeof code, &len);
+    hash_of(code, sizeof code, &len);
     int count = shader_brx_targets(code, 12, 64, targets, 64);
     check(count == 1 && targets[0] == 15, "BRX table stops at out-of-range trailing constant");
     check(len == 16 * 8, "BRX program length ends after its last reachable exit");
@@ -838,7 +879,7 @@ static void brx_length(void) {
     code[18] = code[10];
     code[19] = code[16];
     g_shader_cb_read = clamped_brx_table;
-    shader_hash((const u8*)code, sizeof code, &len);
+    hash_of(code, sizeof code, &len);
     count = shader_brx_targets(code, 15, 64, targets, 64);
     check(count == 2 && targets[0] == 19 && targets[1] == 19,
           "BRX reads only the entries permitted by its IMNMX clamp");
@@ -848,14 +889,14 @@ static void brx_length(void) {
     code[11] = 0xe250000000070d0full; /* dynamic BRX with no readable jump table */
     code[12] = 0xe30000000007000full;
     g_shader_cb_read = NULL;
-    shader_hash((const u8*)code, sizeof code, &len);
+    hash_of(code, sizeof code, &len);
     check(len == 13 * 8, "unresolved BRX stops at the exit before an all-zero tail");
     code[13] = 0x50B0000000070F00ull; /* NOP */
     code[15] = code[12];
-    shader_hash((const u8*)code, sizeof code, &len);
+    hash_of(code, sizeof code, &len);
     check(len == 16 * 8, "unresolved BRX keeps nonzero instructions beyond an earlier exit");
     code[13] = 0; /* padding, then the next program of the pool */
-    shader_hash((const u8*)code, sizeof code, &len);
+    hash_of(code, sizeof code, &len);
     check(len == 13 * 8, "unresolved BRX ends at the zero padding before the next program");
     g_shader_cb_read = old;
 }
@@ -1079,7 +1120,7 @@ static u32* translate_stage(const u64* instructions, int count, int stage, const
     memset(info, 0, sizeof *info);
     info->rt_int_mask = primitive;
     if (stage == ST_TCS) info->clip_enable = SNX_SH_NOT_LAST;
-    u32* result = shader_to_spirv((const u8*)code, slots * sizeof *code, stage, info, words, 1, 1, 1, 1);
+    u32* result = spirv_of(code, slots * sizeof *code, stage, info, words, 1, 1, 1, 1);
     free(code);
     return result;
 }
@@ -1245,7 +1286,7 @@ static void cbuf_integer_loads(void) {
     info.cs_local[0] = info.cs_local[1] = info.cs_local[2] = 1;
     size_t words = 0;
     int integer, other;
-    u32* code = shader_compute_to_spirv((const u8*)compute, sizeof compute, &info, &words, 1, 1);
+    u32* code = compute_spirv_of(compute, sizeof compute, &info, &words, 1, 1);
     if (!code || info.unsupported) fprintf(stderr, "compute constant buffer read: %s\n", info.first_unsupported);
     check(code != NULL, "compute constant buffer read translates");
     if (code) {
@@ -1419,13 +1460,13 @@ static void eden_forms(void) {
     {
         u64 program[64] = {0};
         const u32 passthrough = 1u << 24; /* geometry passthrough */
-        memcpy(program, &passthrough, sizeof passthrough);
-        memcpy((u8*)program + 8, geometry_sph, sizeof geometry_sph);
+        set_sph(program, 0, passthrough);
+        for (u32 i = 0; i < 3; i++) set_sph(program, 2 + i, geometry_sph[i]);
         program[10] = SCHED;
         program[11] = EXIT;
         memset(&info, 0, sizeof info);
         info.rt_int_mask = 3;
-        code = shader_to_spirv((const u8*)program, sizeof program, ST_GS, &info, &words, 1, 1, 1, 1);
+        code = spirv_of(program, sizeof program, ST_GS, &info, &words, 1, 1, 1, 1);
         check_translated(code, &info, "triangle passthrough translates");
         if (code) {
             check(count_opcode(code, words, 218, 0xffffffffu) == 3, "passthrough emits three vertices");
@@ -1440,7 +1481,7 @@ static void eden_forms(void) {
             memset(info.gp_skip_mask, 0xff, sizeof info.gp_skip_mask);
             info.gp_skip_mask[0] &= ~(15u << 28); /* position */
             info.gp_skip_mask[1] &= ~5u; /* only x and z of attribute 0 */
-            code = shader_to_spirv((const u8*)program, sizeof program, ST_GS, &info, &words, 1, 1, 1, 1);
+            code = spirv_of(program, sizeof program, ST_GS, &info, &words, 1, 1, 1, 1);
             check_translated(code, &info, "point, line and adjacency passthrough translate");
             if (code) {
                 u32 expected = counts[i] == 4 ? 2 : counts[i] == 6 ? 3 : counts[i];
@@ -1459,7 +1500,7 @@ static void eden_forms(void) {
         info.rt_int_mask = 3;
         memset(info.gp_skip_mask, 0xff, sizeof info.gp_skip_mask);
         info.gp_skip_mask[0] &= ~(15u << 28);
-        code = shader_to_spirv((const u8*)program, sizeof program, ST_GS, &info, &words, 1, 1, 1, 1);
+        code = spirv_of(program, sizeof program, ST_GS, &info, &words, 1, 1, 1, 1);
         check_translated(code, &info, "passthrough preserves generated layer across conditional exits");
         if (code) {
             check(has_builtin(code, words, 9), "generated Layer is declared");
@@ -1479,18 +1520,18 @@ static void pexit_flow(void) {
     program[14] = SCHED;
     program[15] = EXIT;
     u32 len = 0;
-    shader_hash((const u8*)program, sizeof program, &len);
+    hash_of(program, sizeof program, &len);
     check(len == 16 * 8, "PEXIT target extends the shader past an earlier EXIT");
     ShaderInfo info = {0};
     size_t words = 0;
-    u32* code = shader_to_spirv((const u8*)program, sizeof program, ST_FS, &info, &words, 0, 1, 1, 1);
+    u32* code = spirv_of(program, sizeof program, ST_FS, &info, &words, 0, 1, 1, 1);
     check_translated(code, &info, "PEXIT branches to its target");
     if (code) check(count_opcode(code, words, 250, 0xffffffffu) > 0, "PEXIT EXIT tests the CRS token");
     if (code) save_fixture(pexit_path, code, words);
     free(code);
     program[12] = EXIT & ~(7ull << 16); /* EXIT under P0 */
     memset(&info, 0, sizeof info);
-    code = shader_to_spirv((const u8*)program, sizeof program, ST_FS, &info, &words, 0, 1, 1, 1);
+    code = spirv_of(program, sizeof program, ST_FS, &info, &words, 0, 1, 1, 1);
     check(!code && info.unsupported && !strcmp(info.first_unsupported, "conditional EXIT with PEXIT token"),
           "conditional EXIT with a PEXIT token is refused");
     free(code);
@@ -1917,7 +1958,7 @@ static void transform_feedback(void) {
     info.xfb.layout[1][0] = 32;
     info.xfb.count[1] = 1;
     info.xfb.stride[1] = 4;
-    u32* spv = shader_to_spirv((const u8*)code, slots * sizeof *code, ST_VS, &info, &words, 0, 1, 1, 1);
+    u32* spv = spirv_of(code, slots * sizeof *code, ST_VS, &info, &words, 0, 1, 1, 1);
     free(code);
     check_translated(spv, &info, "a transform feedback capture translates");
     if (spv) {
@@ -1977,12 +2018,13 @@ static void system_values(void) {
     ShaderInfo info;
     size_t words = 0;
     const u32 sph_output[2] = {0xf, 3}; /* RGBA in R0-R3, then sample mask in R4 and depth in R5 */
-    memcpy((u8*)program + 18 * sizeof(u32), sph_output, sizeof sph_output);
+    set_sph(program, 18, sph_output[0]);
+    set_sph(program, 19, sph_output[1]);
     program[10] = SCHED;
     program[11] = mov32i(4, 0xff);
     program[12] = EXIT;
     memset(&info, 0, sizeof info);
-    u32* code = shader_to_spirv((const u8*)program, sizeof program, ST_FS, &info, &words, 0, 1, 1, 1);
+    u32* code = spirv_of(program, sizeof program, ST_FS, &info, &words, 0, 1, 1, 1);
     check_translated(code, &info, "sample-mask and depth output translates");
     check(code && has_builtin(code, words, 20) == 1 && has_builtin(code, words, 22) == 1,
           "a fragment program writes its sample mask and depth");
@@ -2134,7 +2176,7 @@ static void audit_shader_regressions(void) {
         memset(&info, 0, sizeof info);
         info.tex_int_mask = 1;
         info.tex_sint_mask = sign;
-        code = shader_to_spirv((const u8*)guest, slots * sizeof *guest, ST_FS, &info, &words, 1, 1, 1, 1);
+        code = spirv_of(guest, slots * sizeof *guest, ST_FS, &info, &words, 1, 1, 1, 1);
         check_translated(code, &info, "integer TLDS half output translates");
         if (code) {
             check(count_opcode(code, words, sign ? 111 : 112, 0xffffffffu) > 0,
@@ -2206,7 +2248,7 @@ static void dc_color_compare(void) {
         info.tex_dc_color_mask = (u32)color;
         info.tex_dc_color_funcs = 4; /* GREATER */
         size_t words = 0;
-        u32* spv = shader_to_spirv((const u8*)code, sizeof code, ST_FS, &info, &words, 1, 1, 1, 1);
+        u32* spv = spirv_of(code, sizeof code, ST_FS, &info, &words, 1, 1, 1, 1);
         check(spv && info.ntex == 1 && info.tex[0].shadow, "a TEXS shadow sample translates");
         if (!spv) continue;
         /* OpImageSampleDrefImplicitLod 89, OpImageSampleImplicitLod 87, OpSelect 169 */
@@ -2224,8 +2266,8 @@ static void dc_color_compare(void) {
    Vulkan's interface matches, and IPA reads it as 0, 0, 0, 1 */
 static void unfed_fragment_input(void) {
     u64 code[64] = {0};
-    ((u32*)code)[18] = 15;        /* one RGBA output */
-    ((u8*)code)[0x18 + 4] = 0xff; /* generic input 4, all components, perspective */
+    set_sph(code, 18, 15);  /* one RGBA output */
+    set_sph(code, 7, 0xff); /* byte 0x18 + 4: generic input 4, all components, perspective */
     code[10] = SCHED;
     code[11] = 0xE000000000070000ull | (0xC0ull << 28) | 0xFF00; /* IPA R0, a[0xc0]: input 4's x */
     code[12] = EXIT;
@@ -2234,7 +2276,7 @@ static void unfed_fragment_input(void) {
         ShaderInfo info = {0};
         size_t words = 0;
         info.in_unfed_mask = unfed ? 1u << 4 : 0;
-        u32* spv = shader_to_spirv((const u8*)code, sizeof code, ST_FS, &info, &words, 1, 1, 1, 1);
+        u32* spv = spirv_of(code, sizeof code, ST_FS, &info, &words, 1, 1, 1, 1);
         check(spv && !info.unsupported && (info.in_mask >> 4 & 1), "IPA of a generic input translates");
         if (!spv) continue;
         locations[unfed] = count_opcode(spv, words, 71, 30); /* OpDecorate ... Location */

@@ -63,7 +63,7 @@ void nax0_process(nax0_ctx_t *ctx) {
     }
 
     nax0_read(ctx, 0, &ctx->header, sizeof(ctx->header));
-    if (ctx->header.magic != MAGIC_NAX0) {
+    if (snx_le32(ctx->header.magic) != MAGIC_NAX0) {
         printf("Error: File has invalid NAX0 magic!\n");
         return;
     }
@@ -121,7 +121,7 @@ void nax0_save(nax0_ctx_t *ctx) {
     }
 
     uint64_t ofs = 0x4000;
-    uint64_t end_ofs = ofs + ctx->header.size;
+    uint64_t end_ofs = ofs + snx_le64(ctx->header.size);
     unsigned char *buf = malloc(0x400000);
     if (buf == NULL) {
         fprintf(stderr, "Failed to allocate file-save buffer!\n");
@@ -164,9 +164,9 @@ static const char *nax0_get_key_summary(unsigned int k) {
 
 void nax0_print(nax0_ctx_t *ctx) {
     printf("\nNAX0:\n");
-    print_magic("    Magic:                          ", ctx->header.magic);
+    print_magic("    Magic:                          ", snx_le32(ctx->header.magic));
     printf("    Content Type:                   %s\n", nax0_get_key_summary(ctx->k));
-    printf("    Content Size:                   %012"PRIx64"\n", ctx->header.size);
+    printf("    Content Size:                   %012"PRIx64"\n", snx_le64(ctx->header.size));
     memdump(stdout, "    Header HMAC:                    ", ctx->header.hmac_header, 0x20);
     memdump(stdout, "    Encrypted Keys:                 ", ctx->encrypted_keys, 0x20);
     memdump(stdout, "    Decrypted Keys:                 ", ctx->header.keys, 0x20);

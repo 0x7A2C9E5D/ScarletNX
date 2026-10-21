@@ -121,9 +121,9 @@ static inline pk11_section_id_t pk11_get_section_id(pk11_ctx_t *ctx, int id) {
 
 static inline uint32_t pk11_get_section_size(pk11_ctx_t *ctx, pk11_section_id_t section_id) {
     switch (section_id) {
-        case PK11_SECTION_BL: return ctx->pk11->bl_size;
-        case PK11_SECTION_SM: return ctx->pk11->sm_size;
-        case PK11_SECTION_WB: return ctx->pk11->wb_size;
+        case PK11_SECTION_BL: return snx_le32(ctx->pk11->bl_size);
+        case PK11_SECTION_SM: return snx_le32(ctx->pk11->sm_size);
+        case PK11_SECTION_WB: return snx_le32(ctx->pk11->wb_size);
     }
 
     return 0;

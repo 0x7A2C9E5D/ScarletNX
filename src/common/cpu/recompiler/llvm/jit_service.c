@@ -406,6 +406,39 @@ static SnxU64 resolve_aot(void* user, const char* name) {
     return direct(user, target);
 }
 
+#if defined(__powerpc64__)
+/* The TOC the AOT module's code keeps in r2, its one (link_elf.c, or library.c's arena), which the JIT's arena shares
+   (snx_code_loader_new_toc): units call and jump into the module's functions directly, and the module's jumps through
+   the dispatch table reach the units, each side with r2 as it left it. An ELFv1 function's descriptor holds it, and an
+   ELFv2 global entry computes it from r12 (addis r2, r12, hi; addi r2, r2, lo), which a function that uses no TOC
+   leaves out: the first function that shows it. When none does, none uses r2, and any address near them will do
+   for the arena's own (the first function's: the loader's veneers reach the others from it) */
+static uint64_t aot_toc(const SnxJitConfig* config) {
+    size_t i;
+    for (i = 0; i < config->aot_count; ++i) {
+        const unsigned char* f = (const unsigned char*)(size_t)config->aot_functions[i];
+        uint64_t toc;
+        if (!f) continue;
+#if defined(_CALL_ELF) && _CALL_ELF == 2
+        {
+            uint32_t hi, lo;
+            memcpy(&hi, f, 4);
+            memcpy(&lo, f + 4, 4);
+            if ((hi & 0xFFFF0000u) != 0x3C4C0000u || (lo & 0xFFFF0000u) != 0x38420000u) continue;
+            toc = (uint64_t)(size_t)f + (uint64_t)((int64_t)(int16_t)(hi & 0xFFFFu) * 65536) +
+                  (uint64_t)(int64_t)(int16_t)(lo & 0xFFFFu);
+        }
+#else
+        memcpy(&toc, f + 8, 8);
+#endif
+        if (toc) return toc;
+    }
+    for (i = 0; i < config->aot_count; ++i)
+        if (config->aot_functions[i]) return (uint64_t)(size_t)config->aot_functions[i];
+    return 0;
+}
+#endif
+
 /* The unit's object: every function of codegen, internal to it, and table_name, an array of their addresses in
    codegen's order, its only global. Internal functions give two units the same F_<address> without a clash in the
    loader's table, where every global stays */
@@ -1486,7 +1519,12 @@ SnxJitService* snx_jit_service_new(const SnxJitConfig* config, char* error, size
     s->regions[0].hi = s->config.code_hi > s->config.code_lo ? s->config.code_hi : s->config.code_lo;
     s->regions[0].slots = s->config.dispatch;
     s->regions[0].pending = (unsigned char*)calloc(bits / 8 + 1, 1);
-    s->loader = s->regions[0].pending ? snx_code_loader_new(0, error, error_size) : NULL;
+#if defined(__powerpc64__)
+    if (s->regions[0].pending && s->config.aot_count)
+        s->loader = snx_code_loader_new_toc(0, aot_toc(&s->config), error, error_size);
+    else
+#endif
+        s->loader = s->regions[0].pending ? snx_code_loader_new(0, error, error_size) : NULL;
     if (!s->loader) {
         if (!s->regions[0].pending) snprintf(error, error_size, "out of memory");
         free(s->regions[0].pending);

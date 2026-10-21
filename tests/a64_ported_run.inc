@@ -68,6 +68,15 @@ static u8* snx_a64p_at(u64 address, u64 size) {
     return snx_a64p_window + (address - snx_a64p_base);
 }
 
+/* a V register as two numbers, its low and high 64 bits: V128 holds the guest's bytes (lane 0 lowest-addressed, as
+   in memory), so on a big-endian host its d[] views are byte-swapped numbers */
+static void snx_a64p_vset(V128* v, u64 lo, u64 hi) {
+    v->d[0] = SNX_GUEST64(lo);
+    v->d[1] = SNX_GUEST64(hi);
+}
+static u64 snx_a64p_vlo(const V128* v) { return SNX_GUEST64(v->d[0]); }
+static u64 snx_a64p_vhi(const V128* v) { return SNX_GUEST64(v->d[1]); }
+
 /* interpreter_visitor.cpp's Initial(), its region at address 0: no zero byte in memory, so a stored zero shows; SP
    ends in 0xee0, so SP stored in place of zero shows at every size */
 static void snx_a64p_preset_nce(CPU* c) {
@@ -79,10 +88,7 @@ static void snx_a64p_preset_nce(CPU* c) {
     c->x[1] = 0x1800;
     c->x[2] = 0x30;
     c->x[31] = 0x2EE0;
-    for (i = 0; i < 32; ++i) {
-        c->v[i].d[0] = 0x5555000000000000ull | i;
-        c->v[i].d[1] = 0xAAAA000000000000ull | i;
-    }
+    for (i = 0; i < 32; ++i) snx_a64p_vset(&c->v[i], 0x5555000000000000ull | i, 0xAAAA000000000000ull | i);
 }
 
 /* a u64 in hex as %0<digits>llx, in one of four buffers so a message can hold several */
@@ -134,8 +140,7 @@ static int snx_a64p_script_run(int interp) {
                 break;
             case SNX_A64P_OP_SET_X: c.x[op->reg] = op->a; break;
             case SNX_A64P_OP_SET_V:
-                c.v[op->reg].d[0] = op->a;
-                c.v[op->reg].d[1] = op->b;
+                snx_a64p_vset(&c.v[op->reg], op->a, op->b);
                 break;
             case SNX_A64P_OP_SET_FPCR: c.fpcr = (u32)op->a; break;
             case SNX_A64P_OP_SET_FPSR: c.fpsr = (u32)op->a; break;
@@ -169,8 +174,8 @@ static int snx_a64p_script_run(int interp) {
                 break;
             case SNX_A64P_OP_V:
                 snprintf(what, sizeof(what), "V%u", op->reg);
-                snx_a64p_expect(c.v[op->reg].d[0] == op->a && c.v[op->reg].d[1] == op->b, what, c.v[op->reg].d[1],
-                                c.v[op->reg].d[0], op->b, op->a);
+                snx_a64p_expect(snx_a64p_vlo(&c.v[op->reg]) == op->a && snx_a64p_vhi(&c.v[op->reg]) == op->b, what,
+                                snx_a64p_vhi(&c.v[op->reg]), snx_a64p_vlo(&c.v[op->reg]), op->b, op->a);
                 break;
             case SNX_A64P_OP_PC: snx_a64p_expect(pc == op->a, "PC", 0, pc, 0, op->a); break;
             case SNX_A64P_OP_FPSR:
@@ -182,6 +187,7 @@ static int snx_a64p_script_run(int interp) {
                 u64 v = 0;
                 p = snx_a64p_at(op->a, 8);
                 if (p) memcpy(&v, p, 8);
+                v = SNX_GUEST64(v); /* guest memory is little-endian */
                 snprintf(what, sizeof(what), "the 64 bits at %s", snx_a64p_hex(op->a, 16));
                 snx_a64p_expect(p && v == op->b, what, 0, v, 0, op->b);
                 break;
@@ -203,11 +209,10 @@ static int snx_a64p_script_run(int interp) {
                 break;
             case SNX_A64P_OP_WANT_X: snx_a64p_want.x[op->reg] = op->a; break;
             case SNX_A64P_OP_WANT_V:
-                snx_a64p_want.v[op->reg].d[0] = op->a;
-                snx_a64p_want.v[op->reg].d[1] = op->b;
+                snx_a64p_vset(&snx_a64p_want.v[op->reg], op->a, op->b);
                 break;
             case SNX_A64P_OP_WANT_MEM: {
-                const u64 v = op->b;
+                const u64 v = SNX_GUEST64(op->b); /* its low bytes first, as the guest stores them */
                 p = snx_a64p_at(op->a, op->reg);
                 snx_a64p_expect(p != NULL && op->reg <= 8, "the script: an expectation outside the window", 0, op->a, 0,
                                 0);
@@ -226,8 +231,8 @@ static int snx_a64p_script_run(int interp) {
                 for (n = 0; n < 32 && same; ++n) {
                     snprintf(what, sizeof(what), "V%u", n);
                     same = !memcmp(&c.v[n], &snx_a64p_want.v[n], 16);
-                    snx_a64p_expect(same, what, c.v[n].d[1], c.v[n].d[0], snx_a64p_want.v[n].d[1],
-                                    snx_a64p_want.v[n].d[0]);
+                    snx_a64p_expect(same, what, snx_a64p_vhi(&c.v[n]), snx_a64p_vlo(&c.v[n]),
+                                    snx_a64p_vhi(&snx_a64p_want.v[n]), snx_a64p_vlo(&snx_a64p_want.v[n]));
                 }
                 for (k = 0; k < SNX_A64P_WINDOW && same; ++k) {
                     snprintf(what, sizeof(what), "the byte at %s", snx_a64p_hex(snx_a64p_base + k, 0));
@@ -276,9 +281,9 @@ static int snx_a64p_minmax_run(void) {
                             snx_a64p_reset(&c, &rt);
                             snx_a64p_memory(&c, 0, 0);
                             c.fpcr = bases[b] | (dn ? SNX_A64P_DN : 0);
-                            c.v[0].d[0] = 42;
-                            c.v[1].d[0] = swap ? row->b : row->a;
-                            c.v[2].d[0] = swap ? row->a : row->b;
+                            snx_a64p_vset(&c.v[0], 42, 0);
+                            snx_a64p_vset(&c.v[1], swap ? row->b : row->a, 0);
+                            snx_a64p_vset(&c.v[2], swap ? row->a : row->b, 0);
                             host = audit_host_save();
                             audit_fpcr(&c);
                             if (interp)
@@ -287,8 +292,9 @@ static int snx_a64p_minmax_run(void) {
                                 snx_a64p_minmax_aot[w](&c);
                             audit_host_restore(host);
                             snprintf(what, sizeof(what), "V0[63:0] for %s, %s under FPCR %08x",
-                                     snx_a64p_hex(c.v[1].d[0], 8), snx_a64p_hex(c.v[2].d[0], 8), c.fpcr);
-                            snx_a64p_expect(c.v[0].d[0] == want && !snx_a64p_traps, what, 0, c.v[0].d[0], 0, want);
+                                     snx_a64p_hex(snx_a64p_vlo(&c.v[1]), 8), snx_a64p_hex(snx_a64p_vlo(&c.v[2]), 8), c.fpcr);
+                            snx_a64p_expect(snx_a64p_vlo(&c.v[0]) == want && !snx_a64p_traps, what, 0,
+                                            snx_a64p_vlo(&c.v[0]), 0, want);
                             ++runs;
                         }
         }

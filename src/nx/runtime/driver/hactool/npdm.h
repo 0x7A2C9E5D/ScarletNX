@@ -125,12 +125,13 @@ typedef struct {
     uint32_t acid_size;
 } npdm_t;
 
+/* ScarletNX: an NPDM stays as its file has it, little-endian, and its words are read through snx_le32 */
 static inline npdm_acid_t *npdm_get_acid(npdm_t *npdm) {
-    return (npdm_acid_t *)((char *)npdm + npdm->acid_offset);
+    return (npdm_acid_t *)((char *)npdm + snx_le32(npdm->acid_offset));
 }
 
 static inline npdm_aci0_t *npdm_get_aci0(npdm_t *npdm) {
-    return (npdm_aci0_t *)((char *)npdm + npdm->aci0_offset);
+    return (npdm_aci0_t *)((char *)npdm + snx_le32(npdm->aci0_offset));
 }
 
 void npdm_process(npdm_t *npdm, hactool_ctx_t *tool_ctx);

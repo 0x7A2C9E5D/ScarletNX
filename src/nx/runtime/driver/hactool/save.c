@@ -34,7 +34,7 @@ void save_duplex_storage_init(duplex_storage_ctx_t *ctx, duplex_fs_layer_info_t 
     uint32_t *buffer_pos = (uint32_t *)bitmap;
     while (bits_remaining) {
         uint32_t bits_to_read = bits_remaining < 32 ? bits_remaining : 32;
-        uint32_t val = *buffer_pos;
+        uint32_t val = snx_ld_le32(buffer_pos);
         for (uint32_t i = 0; i < bits_to_read; i++) {
             if (val & 0x80000000)
                 save_bitmap_set_bit(ctx->bitmap.bitmap, bitmap_pos);
@@ -449,11 +449,17 @@ uint32_t save_allocation_table_storage_read(allocation_table_storage_ctx_t *ctx,
 uint32_t save_fs_list_get_capacity(save_filesystem_list_ctx_t *ctx) {
     uint32_t capacity;
     save_allocation_table_storage_read(&ctx->storage, &capacity, 4, 4);
-    return capacity;
+    return snx_le32(capacity);
 }
 
+/* ScarletNX: the entry's words in the host's order but for its value's union, which only the table's kind tells apart:
+   its readers convert it */
 uint32_t save_fs_list_read_entry(save_filesystem_list_ctx_t *ctx, uint32_t index, save_fs_list_entry_t *entry) {
-    return save_allocation_table_storage_read(&ctx->storage, entry, index * SAVE_FS_LIST_ENTRY_SIZE, SAVE_FS_LIST_ENTRY_SIZE);
+    uint32_t read = save_allocation_table_storage_read(&ctx->storage, entry, index * SAVE_FS_LIST_ENTRY_SIZE, SAVE_FS_LIST_ENTRY_SIZE);
+    entry->parent = snx_le32(entry->parent);
+    entry->value.next_sibling = snx_le32(entry->value.next_sibling);
+    entry->next = snx_le32(entry->next);
+    return read;
 }
 
 int save_fs_list_get_value(save_filesystem_list_ctx_t *ctx, uint32_t index, save_fs_list_entry_t *value) {
@@ -513,6 +519,9 @@ int save_hierarchical_file_table_find_next_file(hierarchical_save_file_table_ctx
     position->next_file = entry.value.next_sibling;
     memcpy(name, &entry.name, SAVE_FS_LIST_MAX_NAME_LENGTH);
     memcpy(info, &entry.value.save_file_info, sizeof(save_file_info_t));
+    info->start_block = snx_le32(info->start_block);
+    snx_le64_array(&info->length, 1);
+    snx_le32_array(info->_0xC, 2);
     return 1;
 }
 
@@ -608,6 +617,46 @@ validity_t save_filesystem_verify(save_ctx_t *ctx) {
     return journal_validity;
 }
 
+/* ScarletNX: the header's structures, read little-endian, in the host's order. The CMAC and the hashes cover the bytes as
+   stored, so they are checked first; the duplex master bitmaps it holds stay as stored. */
+static void save_ivfc_header_swap(ivfc_save_hdr_t *ivfc) {
+    snx_le32_array(&ivfc->magic, 4);
+    ivfc_levels_swap(ivfc->level_headers, IVFC_MAX_LEVEL);
+}
+
+static void save_header_swap(save_header_t *header) {
+    if (!SNX_HOST_BE) return;
+    snx_le32_array(&header->layout.magic, 2);
+    snx_le64_array(&header->layout.file_map_entry_offset, (offsetof(fs_layout_t, _0x190) - offsetof(fs_layout_t, file_map_entry_offset)) / 8);
+    snx_le32_array(&header->duplex_header.magic, 2);
+    for (unsigned int i = 0; i < 3; i++) {
+        snx_le64_array(&header->duplex_header.layers[i].offset, 2);
+        snx_le32_array(&header->duplex_header.layers[i].block_size_power, 1);
+    }
+    save_ivfc_header_swap(&header->data_ivfc_header);
+    save_ivfc_header_swap(&header->fat_ivfc_header);
+    snx_le32_array(&header->journal_header.magic, 2);
+    snx_le64_array(&header->journal_header.total_size, 3);
+    snx_le32_array(&header->map_header, 4);
+    snx_le32_array(&header->save_header.magic, 2);
+    snx_le64_array(&header->save_header.block_count, 2);
+    snx_le64_array(&header->fat_header.block_size, 2);
+    snx_le32_array(&header->fat_header.allocation_table_block_count, 2);
+    snx_le64_array(&header->fat_header.data_offset, 1);
+    snx_le32_array(&header->fat_header.data_block_count, 4);
+    snx_le32_array(&header->main_remap_header.magic, 5);
+    snx_le32_array(&header->meta_remap_header.magic, 5);
+    snx_le64_array(&header->extra_data.title_id, 1);
+    snx_le64_array(&header->extra_data.save_id, 1);
+    snx_le64_array(&header->extra_data.save_owner_id, 6);
+}
+
+/* ScarletNX: a remap entry as stored (REMAP_ENTRY_LENGTH bytes), in the host's order. */
+static void save_remap_entry_swap(remap_entry_ctx_t *entry) {
+    snx_le64_array(&entry->virtual_offset, 3);
+    snx_le32_array(&entry->alignment, 2);
+}
+
 void save_process(save_ctx_t *ctx) {
     /* Try to parse Header A. */
     fseeko64(ctx->file, 0, SEEK_SET);
@@ -642,6 +691,7 @@ void save_process(save_ctx_t *ctx) {
     } else {
         ctx->header_cmac_validity = VALIDITY_INVALID;
     }
+    save_header_swap(&ctx->header);
 
     /* Initialize remap storages. */
     ctx->data_remap_storage.type = STORAGE_BYTES;
@@ -652,6 +702,7 @@ void save_process(save_ctx_t *ctx) {
     fseeko64(ctx->file, ctx->header.layout.file_map_entry_offset, SEEK_SET);
     for (unsigned int i = 0; i < ctx->data_remap_storage.header->map_entry_count; i++) {
         fread(&ctx->data_remap_storage.map_entries[i], 0x20, 1, ctx->file);
+        save_remap_entry_swap(&ctx->data_remap_storage.map_entries[i]);
         ctx->data_remap_storage.map_entries[i].physical_offset_end = ctx->data_remap_storage.map_entries[i].physical_offset + ctx->data_remap_storage.map_entries[i].size;
         ctx->data_remap_storage.map_entries[i].virtual_offset_end = ctx->data_remap_storage.map_entries[i].virtual_offset + ctx->data_remap_storage.map_entries[i].size;
     }
@@ -697,6 +748,7 @@ void save_process(save_ctx_t *ctx) {
     fseeko64(ctx->file, ctx->header.layout.meta_map_entry_offset, SEEK_SET);
     for (unsigned int i = 0; i < ctx->meta_remap_storage.header->map_entry_count; i++) {
         fread(&ctx->meta_remap_storage.map_entries[i], 0x20, 1, ctx->file);
+        save_remap_entry_swap(&ctx->meta_remap_storage.map_entries[i]);
         ctx->meta_remap_storage.map_entries[i].physical_offset_end = ctx->meta_remap_storage.map_entries[i].physical_offset + ctx->meta_remap_storage.map_entries[i].size;
         ctx->meta_remap_storage.map_entries[i].virtual_offset_end = ctx->meta_remap_storage.map_entries[i].virtual_offset + ctx->meta_remap_storage.map_entries[i].size;
     }
@@ -718,7 +770,7 @@ void save_process(save_ctx_t *ctx) {
     uint32_t *pos = (uint32_t *)ctx->journal_storage.map.map_storage;
     for (unsigned int i = 0; i < ctx->journal_storage.map.header->main_data_block_count; i++) {
         ctx->journal_storage.map.entries[i].virtual_index = i;
-        ctx->journal_storage.map.entries[i].physical_index = *pos & 0x7FFFFFFF;
+        ctx->journal_storage.map.entries[i].physical_index = snx_ld_le32(pos) & 0x7FFFFFFF;
         pos += 2;
     }
     ctx->journal_storage.block_size = ctx->journal_storage.header->block_size;
@@ -742,6 +794,8 @@ void save_process(save_ctx_t *ctx) {
         ctx->fat_storage = malloc(ctx->fat_ivfc_storage._length);
         save_remap_read(&ctx->meta_remap_storage, ctx->fat_storage, ctx->header.fat_ivfc_header.level_headers[ctx->header.fat_ivfc_header.num_levels - 2].logical_offset, ctx->fat_ivfc_storage._length);
     }
+    /* ScarletNX: the allocation table's words in the host's order */
+    snx_le32_array(ctx->fat_storage, (ctx->header.layout.version < 0x50000 ? ctx->header.layout.fat_size : ctx->fat_ivfc_storage._length) / 4);
 
     if (ctx->tool_ctx->action & ACTION_VERIFY) {
         save_filesystem_verify(ctx);
@@ -761,21 +815,22 @@ void save_process(save_ctx_t *ctx) {
 }
 
 void save_process_header(save_ctx_t *ctx) {
-    if (ctx->header.layout.magic != MAGIC_DISF || ctx->header.duplex_header.magic != MAGIC_DPFS ||
-        ctx->header.data_ivfc_header.magic != MAGIC_IVFC || ctx->header.journal_header.magic != MAGIC_JNGL ||
-        ctx->header.save_header.magic != MAGIC_SAVE || ctx->header.main_remap_header.magic != MAGIC_RMAP ||
-        ctx->header.meta_remap_header.magic != MAGIC_RMAP) {
+    /* ScarletNX: the header as stored, little-endian, until save_process has checked it */
+    if (snx_le32(ctx->header.layout.magic) != MAGIC_DISF || snx_le32(ctx->header.duplex_header.magic) != MAGIC_DPFS ||
+        snx_le32(ctx->header.data_ivfc_header.magic) != MAGIC_IVFC || snx_le32(ctx->header.journal_header.magic) != MAGIC_JNGL ||
+        snx_le32(ctx->header.save_header.magic) != MAGIC_SAVE || snx_le32(ctx->header.main_remap_header.magic) != MAGIC_RMAP ||
+        snx_le32(ctx->header.meta_remap_header.magic) != MAGIC_RMAP) {
         fprintf(stderr, "Error: Save header is corrupt!\n");
         exit(EXIT_FAILURE);
     }
 
-    ctx->data_ivfc_master = (uint8_t *)&ctx->header + ctx->header.layout.ivfc_master_hash_offset_a;
-    ctx->fat_ivfc_master = (uint8_t *)&ctx->header + ctx->header.layout.fat_ivfc_master_hash_a;
+    ctx->data_ivfc_master = (uint8_t *)&ctx->header + snx_le64(ctx->header.layout.ivfc_master_hash_offset_a);
+    ctx->fat_ivfc_master = (uint8_t *)&ctx->header + snx_le64(ctx->header.layout.fat_ivfc_master_hash_a);
 
-    ctx->header.data_ivfc_header.num_levels = 5;
+    ctx->header.data_ivfc_header.num_levels = snx_le32(5);
 
-    if (ctx->header.layout.version >= 0x50000) {
-        ctx->header.fat_ivfc_header.num_levels = 4;
+    if (snx_le32(ctx->header.layout.version) >= 0x50000) {
+        ctx->header.fat_ivfc_header.num_levels = snx_le32(4);
     }
 
     ctx->header_hash_validity = check_memory_hash_table(ctx->file, ctx->header.layout.hash, 0x300, 0x3D00, 0x3D00, 0);
@@ -869,7 +924,7 @@ static int save_visit_save_file(save_ctx_t *ctx, uint32_t file_index, filepath_t
 
     if ((ctx->tool_ctx->action & ACTION_LISTFILES) == 0) {
         printf("Saving %s...\n", cur_path->char_path);
-        save_save_file(ctx, 0, entry.value.save_file_info.length, entry.value.save_file_info.start_block, cur_path);
+        save_save_file(ctx, 0, snx_ld_le64(&entry.value.save_file_info.length), snx_le32(entry.value.save_file_info.start_block), cur_path);
     } else {
         printf("save:%s\n", cur_path->char_path);
     }
@@ -912,10 +967,10 @@ static int save_visit_save_dir(save_ctx_t *ctx, uint32_t dir_index, filepath_t *
         any_files |= save_visit_save_dir(ctx, entry.value.next_sibling, parent_path);
     }
     if (entry.value.save_find_position.next_directory) {
-        any_files |= save_visit_save_dir(ctx, entry.value.save_find_position.next_directory, cur_path);
+        any_files |= save_visit_save_dir(ctx, snx_le32(entry.value.save_find_position.next_directory), cur_path);
     }
     if (entry.value.save_find_position.next_file) {
-        any_files |= save_visit_save_file(ctx, entry.value.save_find_position.next_file, cur_path);
+        any_files |= save_visit_save_file(ctx, snx_le32(entry.value.save_find_position.next_file), cur_path);
     }
 
     free(cur_path);

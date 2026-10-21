@@ -81,7 +81,7 @@ static void see(u32 v) {
 static void record_clear(GpuChannel* ch, u32 v) {
     (void)ch;
     if (rewrite_on_clear) {
-        *rewrite_on_clear = rewrite_value;
+        *rewrite_on_clear = snx_le32(rewrite_value);
         rewrite_on_clear = NULL;
     }
     see(v);
@@ -183,7 +183,7 @@ static u32 npush;
 /* a GPFIFO entry for these words */
 static u64 push(const u32* w, u32 n) {
     u64 va = PUSH + (u64)npush++ * 256;
-    memcpy(g_mem + va, w, (u64)n * 4);
+    for (u32 i = 0; i < n; i++) snx_st_le32(g_mem + va + 4 * i, w[i]); /* guest memory is little-endian */
     return va | ((u64)n << 42);
 }
 static u32 inc(u32 m, u32 n) { return (1u << 29) | (n << 16) | m; } /* subchannel 0, incrementing */
@@ -198,7 +198,13 @@ static u64 mark(u32 m) {
     u32 w[1] = {imm(CLEAR, m)};
     return push(w, 1);
 }
-static void submit(const u64* e, u32 n, u32 channel) { gpu_submit(e, n, channel, 0, ~0u, 0, 0); }
+/* the entries as the guest's ring holds them, little-endian */
+static void submit_wait(const u64* e, u32 n, u32 channel, u32 wait_id, u32 wait_val) {
+    u8 ring[8 * 8];
+    for (u32 i = 0; i < n && i < 8; i++) snx_st_le64(ring + 8 * i, e[i]);
+    gpu_submit(ring, n, channel, 0, wait_id, wait_val, 0);
+}
+static void submit(const u64* e, u32 n, u32 channel) { submit_wait(e, n, channel, ~0u, 0); }
 static void submit1(u64 e, u32 channel) { submit(&e, 1, channel); }
 static u32 marks(void) {
     pthread_mutex_lock(&seen_lk);
@@ -244,7 +250,7 @@ static void held_call(void* arg) {
 }
 /* a release the game's CPU code writes: it stands in for the guest's plain store, which the GPU thread reads with a
    plain read, racing as it does on the console */
-static void cpu_store(u64 addr, u32 v) { __atomic_store_n((u32*)guest + addr / 4, v, __ATOMIC_SEQ_CST); }
+static void cpu_store(u64 addr, u32 v) { __atomic_store_n((u32*)guest + addr / 4, snx_le32(v), __ATOMIC_SEQ_CST); }
 
 static int failures;
 static void expect(int ok, const char* what) {
@@ -317,7 +323,7 @@ int main(void) {
     wait_marks(2);
     const u32 fetched_order[] = {41, 42};
     expect(marks_are(fetched_order, 2), "entry execution uses the fetched commands after backing memory changes");
-    expect(backing[1] == rewrite_value, "the first command changed the second command's backing memory");
+    expect(snx_le32(backing[1]) == rewrite_value, "the first command changed the second command's backing memory");
     forget_marks();
 
     /* Commands before SYNC are fetched at submission; the SYNC entry and everything after it see writes
@@ -397,7 +403,7 @@ int main(void) {
     /* a submission waiting for a syncpoint's fence, incremented off the GPU thread */
     forget_marks();
     u64 e = mark(0xE1);
-    gpu_submit(&e, 1, 23, 0, 30, 1, 0);
+    submit_wait(&e, 1, 23, 30, 1);
     nanosleep(&ms20, NULL);
     expect(marks() == 0, "a submission waits for its fence");
     syncpt_incr(30);
@@ -461,9 +467,9 @@ int main(void) {
         u32 half = k == 1 ? 4 : 2; /* words before the page's end, the same after it */
         for (u32 i = 0; i < half; i++) {
             u32 wi = imm(CLEAR, 0x8A0 + k * 16 + i);
-            memcpy(g_mem + 0x4000 - 4 * half + 4 * i, &wi, 4);
+            snx_st_le32(g_mem + 0x4000 - 4 * half + 4 * i, wi);
             wi = imm(CLEAR, 0x8B0 + k * 16 + i);
-            memcpy(g_mem + 0x5000 + 4 * i, &wi, 4);
+            snx_st_le32(g_mem + 0x5000 + 4 * i, wi);
         }
         submit1((0xB000 - 4 * half) | ((u64)(2 * half) << 42), 28);
         took = wait_marks(2 * half);

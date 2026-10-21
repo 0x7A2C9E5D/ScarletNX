@@ -132,7 +132,7 @@ static u8 g_cb[8][0x10000];
 static u32 g_cbn[8];
 static int cs_cb_read(u32 idx, u32 off, u32* out) {
     if (idx < 8 && off + 4 <= g_cbn[idx]) {
-        memcpy(out, g_cb[idx] + off, 4);
+        *out = snx_ld_le32(g_cb[idx] + off); /* g_cb keeps the guest's bytes, for the uniform buffers */
         return 1;
     }
     return 0;
@@ -668,9 +668,7 @@ static void cs_read_code(u64 pa, u8* dst) {
     if (pa >= 0x100) {
         const u8* header = gmem_ptr_untracked(pa - 0x100, 8);
         if (header) {
-            u32 magic, declared;
-            memcpy(&magic, header, sizeof magic);
-            memcpy(&declared, header + 4, sizeof declared);
+            u32 magic = snx_ld_le32(header), declared = snx_ld_le32(header + 4);
             if (magic == 0x12345679 && declared >= 0x80 && declared <= 0x10000 && !(declared & 7) &&
                 gmem_ptr_untracked(pa, declared))
                 code_size = declared;
@@ -745,7 +743,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
             if (st->shadow || st->flags) continue; /* raw and multisample textures are declared on their own */
             if (!cs_cb_read(st->bindless ? (st->bl_cbuf & 7) : tcb_key, st->cbuf_off * 4, &h)) continue;
             if (st->bindless && st->bl2 && cs_cb_read(st->bl2_cbuf & 7, st->bl2_off * 4, &h2)) h |= h2;
-            gmem_read(tic_key_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
+            vk_gmem_words(tic_key_base + (h & 0xFFFFF) * 32ull, tic, 8);
             /* by the header alone: textures are resolved only when bound, a color texture's surface has its header's
                number type, and depth isn't sampled here */
             num = vk_tex_num(tic, NULL);
@@ -759,7 +757,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
             if (!cs_cb_read(p->si.img[i].bindless ? (p->si.img[i].bl_cbuf & 7) : tcb_key, p->si.img[i].cbuf_off * 4,
                             &h))
                 continue;
-            gmem_read(tic_key_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
+            vk_gmem_words(tic_key_base + (h & 0xFFFFF) * 32ull, tic, 8);
             if (vk_image_key(&p->si, i, tic)) ck.image |= 1u << i;
         }
     if (ck.tex_int || ck.image) {
@@ -810,7 +808,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
             g_cs_skips[CS_SKIP_BUFFER_IMAGE]++;
             return;
         }
-        gmem_read(tic_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
+        vk_gmem_words(tic_base + (h & 0xFFFFF) * 32ull, tic, 8);
         if (!cs_buffer_image(tic, p->si.img[i].kind, &bimg[i])) {
             LOG_LIMIT(4, "vulkan: unsupported compute buffer image (header word 0 %08x, skipped)\n", tic[0]);
             g_cs_skips[CS_SKIP_BUFFER_IMAGE]++;
@@ -983,8 +981,8 @@ rebind:
             cs_cb_read(st->bindless ? (st->bl_cbuf & 7) : tcb, st->cbuf_off * 4, &h);
             if (st->bindless && st->bl2 && cs_cb_read(st->bl2_cbuf & 7, st->bl2_off * 4, &h2)) h |= h2;
             u32 tic[8], tsc[8];
-            gmem_read(tic_base + (h & 0xFFFFF) * 32ull, tic, 32);
-            gmem_read(tsc_base + ((h >> 20) & 0xFFF) * 32ull, tsc, 32);
+            vk_gmem_words(tic_base + (h & 0xFFFFF) * 32ull, tic, 8);
+            vk_gmem_words(tsc_base + ((h >> 20) & 0xFFF) * 32ull, tsc, 8);
             VkImageViewType want = vk_tex_view_type(st);
             if (st->flags & 2) {
                 LOG_LIMIT(4, "vulkan: multisample texture upload is unavailable (skipped)\n");
@@ -1046,7 +1044,7 @@ rebind:
                 cs_abandon_binding(originals);
                 return;
             }
-            gmem_read(tic_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
+            vk_gmem_words(tic_base + (h & 0xFFFFF) * 32ull, tic, 8);
             Surf* t = vk_tex_from_tic(tic);
             u64 image_bytes;
             VkImageView view = vk_storage_image_view(t, &p->si, i, &image_bytes);
@@ -1150,6 +1148,7 @@ rebind:
                 dst = g_ar_ptr + o;
             }
             memcpy(dst, fmt, sizeof fmt);
+            snx_le32_array(dst, sizeof fmt / 4); /* the shader reads the words little-endian */
             bi[nw] = (VkDescriptorBufferInfo){fbuf, o, sizeof fmt};
             w[nw] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                            .dstSet = set,

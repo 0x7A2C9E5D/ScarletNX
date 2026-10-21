@@ -270,8 +270,9 @@ static void request(Request* r, u32 cmd) {
     r->c.raw = r->raw;
     r->c.raw_size = sizeof r->raw;
 }
-static void argument32(Request* r, unsigned off, u32 value) { memcpy(r->raw + off, &value, sizeof value); }
-static void argument64(Request* r, unsigned off, u64 value) { memcpy(r->raw + off, &value, sizeof value); }
+/* the request is the guest's, little-endian whatever the host's order */
+static void argument32(Request* r, unsigned off, u32 value) { snx_st_le32(r->raw + off, value); }
+static void argument64(Request* r, unsigned off, u64 value) { snx_st_le64(r->raw + off, value); }
 static void argument_path(Request* r, int idx, const char* path) {
     size_t size = strlen(path) + 1;
     CHECK(idx < 2 && size <= 0x1000);
@@ -287,10 +288,8 @@ static void output_buffer(Request* r, u64 size) {
     memset(GP(0x5000), 0xcc, (size_t)size);
 }
 static u64 output64(Request* r) {
-    u64 value;
     CHECK(r->c.out_size >= 8);
-    memcpy(&value, r->c.out, sizeof value);
-    return value;
+    return snx_ld_le64(r->c.out);
 }
 /* the dispatcher, then what ipc.c does with a failed request's reply: no data, handles or objects */
 static void dispatch(SvcObj* obj, Request* r, u32 expected) {
@@ -406,7 +405,7 @@ static void test_file_services(SvcObj* fs) {
         u8* entry = GP(0x5000 + i * 0x310);
         if (!strcmp((char*)entry, "work.bin")) {
             u64 size;
-            memcpy(&size, entry + 0x308, sizeof size);
+            size = snx_ld_le64(entry + 0x308);
             CHECK(size == 8192 && entry[0x304] == 1);
             found = 1;
         }
@@ -428,6 +427,7 @@ static void test_file_services(SvcObj* fs) {
         dispatch(fs, &r, 0);
         CHECK(r.c.out_size == 0x20);
         memcpy(t, r.c.out, sizeof t);
+        snx_le64_array(t, 3);
         CHECK(t[0] == t[1] && t[1] == t[2] && t[0] + 60 >= now && t[0] <= now + 60 && r.c.out[0x18] == 1);
         request(&r, 14);
         argument_path(&r, 0, "/work.bin");
@@ -691,14 +691,14 @@ static u32 romfs_find(const u8* image, const u64* header, int dir, u32 parent, c
         hash = (hash >> 5) | (hash << 27);
         hash ^= *p++;
     }
-    memcpy(&entry, image + (dir ? header[1] : header[5]) + (hash % buckets) * 4, 4);
+    entry = snx_ld_le32(image + (dir ? header[1] : header[5]) + (hash % buckets) * 4);
     while (entry != UINT32_MAX) {
         const u8* e = image + table + entry;
         u32 entry_parent, length;
-        memcpy(&entry_parent, e, 4);
-        memcpy(&length, e + fixed - 4, 4);
+        entry_parent = snx_ld_le32(e);
+        length = snx_ld_le32(e + fixed - 4);
         if (entry_parent == parent && length == strlen(name) && !memcmp(e + fixed, name, length)) return entry;
-        memcpy(&entry, e + fixed - 8, 4);
+        entry = snx_ld_le32(e + fixed - 8);
     }
     return UINT32_MAX;
 }
@@ -743,16 +743,18 @@ static void test_virtual_services(SvcObj* fs, SvcObj* proxy) {
     output_buffer(&r, 0x200);
     dispatch(archive, &r, 0);
     u64 header_size;
-    memcpy(&header_size, GP(0x5000), sizeof header_size);
+    header_size = snx_ld_le64(GP(0x5000));
     CHECK(header_size == 0x50);
     {
         /* a valid empty image: the root alone, in its bucket, with no folders or files under it */
         u64 header[10];
         u32 links[3];
         memcpy(header, GP(0x5000), sizeof header);
+        snx_le64_array(header, 10);
         CHECK(header[9] == 0x200 && header[4] == 0x18 && header[8] == 0 && header[7] <= 0x200);
         CHECK(romfs_find(GP(0x5000), header, 1, 0, "") == 0);
         memcpy(links, GP(0x5000) + header[3] + 4, sizeof links);
+        snx_le32_array(links, 3);
         CHECK(links[0] == UINT32_MAX && links[1] == UINT32_MAX && links[2] == UINT32_MAX);
     }
     request(&r, 1); /* Write (offset 0, size at 8) of one byte from its A buffer: the archive's backend refuses it */
@@ -779,14 +781,15 @@ static void test_virtual_services(SvcObj* fs, SvcObj* proxy) {
         dispatch(ngword, &a, 0);
         u8* image = GP(0x5000);
         u64 header[10];
-        memcpy(header, image, sizeof header);
+            memcpy(header, image, sizeof header);
+        snx_le64_array(header, 10);
         CHECK(header[0] == 0x50 && header[9] < ngword_size && header[7] < ngword_size);
         {
             u32 entry, count = 0;
-            memcpy(&entry, image + header[3] + 12, 4); /* the root's first file, then the sibling chain */
+            entry = snx_ld_le32(image + header[3] + 12); /* the root's first file, then the sibling chain */
             while (entry != UINT32_MAX) {
                 CHECK(++count <= sizeof ngword2_names / sizeof ngword2_names[0]);
-                memcpy(&entry, image + header[7] + entry + 4, 4);
+                entry = snx_ld_le32(image + header[7] + entry + 4);
             }
             CHECK(count == sizeof ngword2_names / sizeof ngword2_names[0]);
         }
@@ -794,8 +797,8 @@ static void test_virtual_services(SvcObj* fs, SvcObj* proxy) {
             u32 entry = romfs_find(image, header, 0, 0, "version.dat");
             u64 offset, size;
             CHECK(entry != UINT32_MAX);
-            memcpy(&offset, image + header[7] + entry + 8, 8);
-            memcpy(&size, image + header[7] + entry + 16, 8);
+            offset = snx_ld_le64(image + header[7] + entry + 8);
+            size = snx_ld_le64(image + header[7] + entry + 16);
             CHECK(size == 4 && offset + 4 <= ngword_size - header[9]);
             CHECK(!memcmp(image + header[9] + offset, "\0\0\0\x1a", 4));
         }
@@ -803,8 +806,8 @@ static void test_virtual_services(SvcObj* fs, SvcObj* proxy) {
             u32 entry = romfs_find(image, header, 0, 0, "ac_common_b1_nx");
             u64 offset, size;
             CHECK(entry != UINT32_MAX);
-            memcpy(&offset, image + header[7] + entry + 8, 8);
-            memcpy(&size, image + header[7] + entry + 16, 8);
+            offset = snx_ld_le64(image + header[7] + entry + 8);
+            size = snx_ld_le64(image + header[7] + entry + 16);
             CHECK(size == 44 && offset + 44 <= ngword_size - header[9]);
             CHECK(image[header[9] + offset] == 0x1f && image[header[9] + offset + 1] == 0x8b);
         }
@@ -815,8 +818,8 @@ static void test_virtual_services(SvcObj* fs, SvcObj* proxy) {
                 u32 entry = romfs_find(image, header, 0, 0, ngword2_names[i]);
                 u64 offset = 0, size = 0;
                 CHECK(entry != UINT32_MAX);
-                memcpy(&offset, image + header[7] + entry + 8, 8);
-                memcpy(&size, image + header[7] + entry + 16, 8);
+                offset = snx_ld_le64(image + header[7] + entry + 8);
+                size = snx_ld_le64(image + header[7] + entry + 16);
                 CHECK(size == (strcmp(ngword2_names[i], "version.dat") ? 44 : 4));
                 CHECK(!memcmp(image + header[9] + offset, body, (size_t)size));
             }
@@ -835,22 +838,22 @@ static void test_romfs_names(const u8* image, const u64* header) {
     dir = romfs_find(image, header, 1, 0, "dir");
     mu = romfs_find(image, header, 1, 0, "mu");
     CHECK(dir != UINT32_MAX && mu != UINT32_MAX);
-    memcpy(&link, image + header[3] + 8, 4); /* the root's first folder, then its sibling */
+    link = snx_ld_le32(image + header[3] + 8); /* the root's first folder, then its sibling */
     CHECK(link == dir);
-    memcpy(&link, image + header[3] + dir + 4, 4);
+    link = snx_ld_le32(image + header[3] + dir + 4);
     CHECK(link == mu);
-    memcpy(&link, image + header[3] + mu + 4, 4);
+    link = snx_ld_le32(image + header[3] + mu + 4);
     CHECK(link == UINT32_MAX);
     file = romfs_find(image, header, 0, dir, "\xc3\xa9t\xc3\xa9.bin");
     CHECK(file != UINT32_MAX);
-    memcpy(&link, image + header[3] + dir + 12, 4);
+    link = snx_ld_le32(image + header[3] + dir + 12);
     CHECK(link == file);
-    memcpy(&offset, image + header[7] + file + 8, 8);
-    memcpy(&size, image + header[7] + file + 16, 8);
+    offset = snx_ld_le64(image + header[7] + file + 8);
+    size = snx_ld_le64(image + header[7] + file + 16);
     CHECK(offset == 32 && size == 6 && !memcmp(image + header[9] + offset, "summer", 6));
     file = romfs_find(image, header, 0, mu, "\xce\xbc.bin");
     CHECK(file != UINT32_MAX);
-    memcpy(&offset, image + header[7] + file + 8, 8);
+    offset = snx_ld_le64(image + header[7] + file + 8);
     CHECK(offset == 48 && !memcmp(image + header[9] + offset, "mu", 2));
     CHECK(romfs_find(image, header, 0, dir, "\xce\xbc.bin") == UINT32_MAX);
 }
@@ -872,26 +875,27 @@ static void test_extracted_romfs(SvcObj* proxy) {
     u8* image = GP(0x5000);
     u64 header[10];
     memcpy(header, image, sizeof header);
+    snx_le64_array(header, 10);
     CHECK(header[0] == 0x50 && header[3] < image_size && header[7] < image_size && header[9] < image_size);
     u32 entry;
-    memcpy(&entry, image + header[3] + 12, sizeof entry);
+    entry = snx_ld_le32(image + header[3] + 12);
     u64 data_offsets[3] = {0}, sizes[3] = {0};
     unsigned found = 0;
     while (entry != UINT32_MAX) {
         CHECK((u64)entry + 0x20 <= header[8]);
         const u8* file = image + header[7] + entry;
         u32 length;
-        memcpy(&length, file + 0x1c, sizeof length);
+        length = snx_ld_le32(file + 0x1c);
         CHECK((u64)entry + 0x20 + length <= header[8]);
         int which = -1;
         if (length == 9 && !memcmp(file + 0x20, "asset.bin", 9)) which = 0;
         if (length == 9 && !memcmp(file + 0x20, "empty.bin", 9)) which = 1;
         if (length == 8 && !memcmp(file + 0x20, "zulu.bin", 8)) which = 2;
         CHECK(which >= 0 && !(found & (1u << which)));
-        memcpy(&data_offsets[which], file + 8, 8);
-        memcpy(&sizes[which], file + 16, 8);
+        data_offsets[which] = snx_ld_le64(file + 8);
+        sizes[which] = snx_ld_le64(file + 16);
         found |= 1u << which;
-        memcpy(&entry, file + 4, sizeof entry);
+        entry = snx_ld_le32(file + 4);
     }
     CHECK(found == 7 && sizes[0] == 10 && sizes[1] == 0 && sizes[2] == 4);
     CHECK(data_offsets[0] == 0 && data_offsets[1] == data_offsets[2] && data_offsets[2] == 16);
@@ -1049,13 +1053,13 @@ static void test_dump(SvcObj* proxy) {
     dispatch(storage, &r, 0);
     const u8* image = GP(0x5000);
     u64 file_table = 0, data_offset = 0, at, name_size;
-    memcpy(&file_table, image + 0x38, 8);
-    memcpy(&data_offset, image + 0x48, 8);
+    file_table = snx_ld_le64(image + 0x38);
+    data_offset = snx_ld_le64(image + 0x48);
     CHECK(file_table + 0x20 + 9 <= total && !memcmp(image + file_table + 0x20, "asset.bin", 9));
-    memcpy(&at, image + file_table + 8, 8);
-    memcpy(&size, image + file_table + 0x10, 8);
+    at = snx_ld_le64(image + file_table + 8);
+    size = snx_ld_le64(image + file_table + 0x10);
     name_size = 0;
-    memcpy(&name_size, image + file_table + 0x1c, 4);
+    name_size = snx_ld_le32(image + file_table + 0x1c);
     CHECK(name_size == 9 && size == sizeof dump_asset - 1 && data_offset + at + size <= total);
     CHECK(!memcmp(image + data_offset + at, dump_asset, size));
     svcobj_unref(storage);
@@ -1075,12 +1079,12 @@ static void image_holds(SvcObj* storage, const char* name, const char* contents)
     argument64(&r, 8, total);
     output_buffer(&r, total);
     dispatch(storage, &r, 0);
-    memcpy(&file_table, image + 0x38, 8);
-    memcpy(&data_offset, image + 0x48, 8);
+    file_table = snx_ld_le64(image + 0x38);
+    data_offset = snx_ld_le64(image + 0x48);
     CHECK(file_table + 0x20 + strlen(name) <= total && !memcmp(image + file_table + 0x20, name, strlen(name)));
-    memcpy(&at, image + file_table + 8, 8);
-    memcpy(&size, image + file_table + 0x10, 8);
-    memcpy(&name_size, image + file_table + 0x1c, 4);
+    at = snx_ld_le64(image + file_table + 8);
+    size = snx_ld_le64(image + file_table + 0x10);
+    name_size = snx_ld_le32(image + file_table + 0x1c);
     CHECK(name_size == strlen(name) && size == strlen(contents) && data_offset + at + size <= total);
     CHECK(!memcmp(image + data_offset + at, contents, size));
 }
@@ -1258,7 +1262,10 @@ static void save_request(Request* r, u32 command, u8 type, const u64* uid) {
     r->raw[0] = 1;                           /* User */
     memset(r->raw + 8, 4, 0x20);             /* program id, uid and system save data id: Temporary */
     memset(r->raw + 0x29, 2, 0x48 - 0x29);   /* rank, index and reserved: Bcat */
-    if (uid) memcpy(r->raw + 0x10, uid, 16); /* the attribute's user */
+    if (uid) { /* the attribute's user */
+        snx_st_le64(r->raw + 0x10, uid[0]);
+        snx_st_le64(r->raw + 0x18, uid[1]);
+    }
     r->raw[0x28] = type;
 }
 static SvcObj* open_save_data(SvcObj* proxy, u32 command, u8 type) {
@@ -1446,15 +1453,15 @@ static void test_save_data(SvcObj* proxy) {
     dispatch(proxy, &r, 0);
     u32 v;
     CHECK(r.c.out_size == 4);
-    memcpy(&v, r.c.out, 4);
+    v = snx_ld_le32(r.c.out);
     CHECK(v == 1);
     /* GetProgramIndexForAccessLog (1011): program 0 of 1 */
     request(&r, 1011);
     dispatch(proxy, &r, 0);
     CHECK(r.c.out_size == 8);
-    memcpy(&v, r.c.out, 4);
+    v = snx_ld_le32(r.c.out);
     CHECK(v == 0);
-    memcpy(&v, r.c.out + 4, 4);
+    v = snx_ld_le32(r.c.out + 4);
     CHECK(v == 1);
     puts(
         "PASS SaveDataType folders, a folder per user, save/user and save/system played where they are, two saves of one "

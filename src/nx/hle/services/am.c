@@ -76,6 +76,12 @@ static void am_storage_destroy(SvcObj* o) {
 }
 static void am_accessor_destroy(SvcObj* o) { svcobj_unref(((AmAccessor*)o->data)->storage); }
 
+/* a storage's numbers are little-endian, as the game reads them; a uid is its two halves */
+static void am_put32(u8* p, u32 v) { snx_st_le32(p, v); }
+static void am_put_uid(u8* p, const u64 uid[2]) {
+    snx_st_le64(p, uid[0]);
+    snx_st_le64(p + 8, uid[1]);
+}
 static u8* am_storage_bytes(SvcObj* o) {
     StorageData* s = (StorageData*)o->data;
     return s->guest ? GP(s->guest) : s->d;
@@ -536,11 +542,9 @@ static int nn_am_service_IApplicationFunctions_PopLaunchParameter(SvcObj* self, 
     /* AccountPreselectedUser: the user the game plays as, selected */
     *storage = am_storage_new(0x88, NULL);
     d = am_storage_bytes(*storage);
-    v = AM_PRESELECTED_USER_MAGIC;
-    memcpy(d, &v, 4);
-    v = 1;
-    memcpy(d + 4, &v, 4);
-    memcpy(d + 8, snx_users_selected()->uid, 16);
+    am_put32(d, AM_PRESELECTED_USER_MAGIC);
+    am_put32(d + 4, 1);
+    am_put_uid(d + 8, snx_users_selected()->uid);
     R_SUCCEED();
 }
 
@@ -600,7 +604,7 @@ u64 am_aoc_base_id(void) {
 static u64 am_nacp_u64(u64 off) {
     const u8* p = am_nacp(off, 8);
     u64 v = 0;
-    if (p) memcpy(&v, p, 8);
+    if (p) v = snx_ld_le64(p);
     return v;
 }
 #define NACP_SUPPORTED_LANGUAGES 0x302c
@@ -646,7 +650,7 @@ static int nn_am_service_IApplicationFunctions_GetDesiredLanguage(SvcObj* self, 
     const u8* p = am_nacp(NACP_SUPPORTED_LANGUAGES, 4);
     u32 supported = 0;
     (void)self;
-    if (p) memcpy(&supported, p, 4);
+    if (p) supported = snx_ld_le32(p);
     set_language_code(am_desired_language(g_settings.language, supported), code->v);
     R_SUCCEED();
 }
@@ -711,8 +715,8 @@ static int nn_am_service_IApplicationFunctions_GetLimitedApplicationLicenseUpgra
 /* the same for every run of the game on this machine */
 static int nn_am_service_IApplicationFunctions_GetPseudoDeviceId(SvcObj* self, nn_util_Uuid* id) {
     (void)self;
-    memcpy(id->v, &g_hle.kernel.title_id, 8);
-    memcpy(id->v + 8, g_user_id, 8);
+    snx_st_le64(id->v, g_hle.kernel.title_id);
+    snx_st_le64(id->v + 8, g_user_id[0]);
     R_SUCCEED();
 }
 static int nn_am_service_IApplicationFunctions_GetGpuErrorDetectedSystemEvent(SvcObj* self, u32* event) {
@@ -960,7 +964,6 @@ static u32 am_utf8_to_16(const char* in, u16* out, u32 max) {
     }
     return n;
 }
-static void am_put32(u8* p, u32 v) { memcpy(p, &v, 4); }
 
 /* the software keyboard as a whole applet: the host's text dialog with the game's initial text, or the text of
    swkbd_text (--swkbd_text=, for scripted runs). KeyboardConfig (SwkbdConfigCommon, the second storage) gives the
@@ -981,14 +984,14 @@ static SvcObj* am_swkbd(LibApplet* a) {
         u64 size = ((StorageData*)a->in[1]->data)->size;
         const u8* cfg = am_storage_bytes(a->in[1]);
         if (size >= 0x3b4) {
-            memcpy(&v, cfg + 0x3ac, 4); /* max_text_length: 0 for no limit */
+            v = snx_ld_le32(cfg + 0x3ac); /* max_text_length: 0 for no limit */
             if (v && v < max) max = v;
-            memcpy(&min, cfg + 0x3b0, 4); /* min_text_length */
+            min = snx_ld_le32(cfg + 0x3b0); /* min_text_length */
         }
         if (size >= 0x3d4) {
             utf8 = cfg[0x3bd];
-            memcpy(&off, cfg + 0x3c0, 4); /* initial_string_offset and _length, in the work buffer */
-            memcpy(&len, cfg + 0x3c4, 4);
+            off = snx_ld_le32(cfg + 0x3c0); /* initial_string_offset and _length, in the work buffer */
+            len = snx_ld_le32(cfg + 0x3c4);
         }
     }
     if (min > max) {
@@ -999,6 +1002,7 @@ static SvcObj* am_swkbd(LibApplet* a) {
         u64 size = ((StorageData*)a->in[2]->data)->size;
         if (off < size && len <= (size - off) / 2 && len <= AM_SWKBD_UNITS) {
             memcpy(wide, am_storage_bytes(a->in[2]) + off, (size_t)len * 2);
+            snx_le16_array(wide, len);
             am_utf16_to_8(wide, len, initial, sizeof initial);
         }
     }
@@ -1025,8 +1029,10 @@ static SvcObj* am_swkbd(LibApplet* a) {
     if (!r) {
         if (utf8)
             am_utf16_to_8(wide, n, (char*)d + 4, AM_SWKBD_OUT - 4);
-        else
+        else {
             memcpy(d + 4, wide, (size_t)n * 2);
+            snx_le16_array(d + 4, n);
+        }
     }
     LOG("am: swkbd %s with %u UTF-16 code units\n", r ? "cancelled" : "accepted", r ? 0 : n);
     return out;
@@ -1059,8 +1065,11 @@ static void kb_text_reply(LibApplet* a, int decided) {
     if (!d) return;
     if (a->kb_utf8)
         am_utf16_to_8(a->kb_text, a->kb_len, (char*)d, SWKBD_UTF8_SIZE);
-    else
-        memcpy(d, a->kb_text, (size_t)(a->kb_len < SWKBD_UTF16_SIZE / 2 ? a->kb_len : SWKBD_UTF16_SIZE / 2 - 1) * 2);
+    else {
+        u32 units = a->kb_len < SWKBD_UTF16_SIZE / 2 ? a->kb_len : SWKBD_UTF16_SIZE / 2 - 1;
+        memcpy(d, a->kb_text, (size_t)units * 2);
+        snx_le16_array(d, units);
+    }
     am_put32(d + text, a->kb_len);
     if (!decided) {
         am_put32(d + text + 4, ~0u);
@@ -1096,7 +1105,7 @@ static void kb_calc(LibApplet* a, const u8* req, u64 size) {
     u64 flags;
     u32 appear, cursor, text, max, i;
     if (size < 4 + 0x18) return;
-    memcpy(&flags, arg + 8, 8);
+    flags = snx_ld_le64(arg + 8);
     if (size >= 4 + SWKBD_CALC_NEW_SIZE) {
         appear = 0x18; /* SwkbdCalcArgNew: appear argument, volume, cursor, text, utf8 mode */
         cursor = 0x8c;
@@ -1109,12 +1118,12 @@ static void kb_calc(LibApplet* a, const u8* req, u64 size) {
         return;
     if (flags & SWKBD_SET_TEXT) {
         for (i = 0; i < SWKBD_TEXT_CHARS - 1; i++) {
-            memcpy(&a->kb_text[i], arg + text + 2 * i, 2);
+            a->kb_text[i] = snx_ld_le16(arg + text + 2 * i);
             if (!a->kb_text[i]) break;
         }
         a->kb_len = i;
     }
-    if (flags & SWKBD_SET_CURSOR) memcpy(&a->kb_cursor, arg + cursor, 4);
+    if (flags & SWKBD_SET_CURSOR) a->kb_cursor = (i32)snx_ld_le32(arg + cursor);
     if (flags & SWKBD_SET_UTF8) a->kb_utf8 = arg[text + 2 * SWKBD_TEXT_CHARS] != 0;
     if (a->kb_state == SWKBD_NOT_INITIALIZED && (flags & SWKBD_SET_INIT)) {
         a->kb_state = SWKBD_HIDDEN;
@@ -1123,7 +1132,7 @@ static void kb_calc(LibApplet* a, const u8* req, u64 size) {
     if (!(flags & SWKBD_SET_INIT) && (flags & (SWKBD_SET_TEXT | SWKBD_SET_CURSOR)) && a->kb_state != SWKBD_NOT_INITIALIZED)
         kb_text_reply(a, 0);
     if (a->kb_state == SWKBD_HIDDEN && (flags & SWKBD_APPEAR)) {
-        memcpy(&max, arg + appear + 0x20, 4); /* max_text_length */
+        max = snx_ld_le32(arg + appear + 0x20); /* max_text_length */
         a->kb_max = max && max < SWKBD_TEXT_CHARS - 1 ? max : SWKBD_TEXT_CHARS - 1;
         kb_appear(a);
     } else if (a->kb_state == SWKBD_SHOWN && (flags & SWKBD_DISAPPEAR))
@@ -1138,7 +1147,7 @@ static int nn_am_service_ILibraryAppletAccessor_PushInteractiveInData(SvcObj* se
     s = (StorageData*)storage->data;
     if (s->size < 4) R_SUCCEED();
     req = am_storage_bytes(storage);
-    memcpy(&cmd, req, 4);
+    cmd = snx_ld_le32(req);
     pm_lock(&g_hle.am.lock);
     switch (cmd) {
     case SWKBD_REQ_FINALIZE:
@@ -1174,18 +1183,18 @@ static SvcObj* am_mii_edit(LibApplet* a) {
     int i;
     for (i = 0; i < a->nin && !in; i++)
         if (((StorageData*)a->in[i]->data)->size >= MII_EDIT_INPUT_SIZE) in = am_storage_bytes(a->in[i]);
-    if (in) memcpy(&mode, in + 4, 4);
+    if (in) mode = snx_ld_le32(in + 4);
     if (mode == MII_EDIT_CREATE || mode == MII_EDIT_EDIT) {
         result = mode == MII_EDIT_EDIT && in ? MII_EDIT_SUCCESS : MII_EDIT_CANCEL;
         out = am_storage_new(0x80, NULL);
-        memcpy(am_storage_bytes(out), &result, 4);
+        am_put32(am_storage_bytes(out), result);
         if (result == MII_EDIT_SUCCESS)
             memcpy(am_storage_bytes(out) + 4, in + MII_EDIT_CHARINFO, MII_EDIT_CHARINFO_LEN);
         return out;
     }
     result = mode == MII_EDIT_APPEND || mode > MII_EDIT_EDIT ? MII_EDIT_CANCEL : MII_EDIT_SUCCESS;
     out = am_storage_new(0x20, NULL);
-    memcpy(am_storage_bytes(out), &result, 4);
+    am_put32(am_storage_bytes(out), result);
     LOG("am: Mii editor mode %u answered %s\n", mode, result == MII_EDIT_SUCCESS ? "success" : "cancel");
     return out;
 }
@@ -1207,7 +1216,7 @@ static int nn_am_service_ILibraryAppletAccessor_PopOutData(SvcObj* self, SvcObj*
         *storage = am_storage_new(0xc, NULL);
         d = am_storage_bytes(*storage);
         d[0] = (u8)players;
-        memcpy(d + 4, &first, 4);
+        am_put32(d + 4, first);
         if (players < least) { /* nobody to pick: the player closed the applet */
             LOG("am: the controller applet wants %d players, %d are connected: cancelled\n", least, players);
             am_put32(d + 8, 2); /* the result: cancelled */
@@ -1216,7 +1225,7 @@ static int nn_am_service_ILibraryAppletAccessor_PopOutData(SvcObj* self, SvcObj*
     }
     case AM_APPLET_PROFILE_SELECT: /* UiReturnArg: success, the user the game plays as */
         *storage = am_storage_new(0x18, NULL);
-        memcpy(am_storage_bytes(*storage) + 8, snx_users_selected()->uid, 16);
+        am_put_uid(am_storage_bytes(*storage) + 8, snx_users_selected()->uid);
         break;
     case AM_APPLET_SWKBD: *storage = am_swkbd(a); break;
     case AM_APPLET_MII_EDIT: *storage = am_mii_edit(a); break;

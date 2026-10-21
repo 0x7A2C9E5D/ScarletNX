@@ -249,8 +249,7 @@ int main(void) {
     vk_release_samples(0x10010, 16, 3, 2, 5, 0x77);
     assert(submits == before && g_rhead == g_rtail + 1 && g_rq[g_rtail % RQ_N].gate == recording && !query_reads);
     vk_release_need(0x10010, 16);
-    u64 report[2];
-    memcpy(report, memory + 1 + 0x10, 16);
+    u64 report[2] = {snx_ld_le64(memory + 1 + 0x10), snx_ld_le64(memory + 1 + 0x18)}; /* guest memory's order */
     assert(submits == before + 1 && vk_last_submit() == recording);
     assert(query_reads == 1 && report[0] == 302 && report[1] == 0x77 && g_rhead == g_rtail);
     /* the end of the GPFIFO submission submits it too, and a second stream end has nothing to submit; the count's low
@@ -260,8 +259,7 @@ int main(void) {
     vk_release_submit();
     assert(submits == before + 2);
     vk_release_drain();
-    u32 word;
-    memcpy(&word, memory + 1 + 0x30, 4);
+    u32 word = snx_ld_le32(memory + 1 + 0x30);
     assert(query_reads == 2 && word == 207 && memory[1 + 0x34] == 0);
     /* a release after storage results in the submit being recorded waits for that submit the same way, without
        submitting it: the end of the GPFIFO submission does */

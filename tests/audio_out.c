@@ -192,6 +192,32 @@ static int ipc_result(IpcCtx* c, int rc) {
     c->out_size = 0;
     return rc;
 }
+/* a request's raw data is the message's, little-endian as the guest writes it: these give a command's arguments in
+   that order, from a ring of buffers that outlives the requests a check makes at once */
+static u8 test_raw[8][0x48];
+static unsigned test_raw_next;
+static u8* raw_slot(void) { return test_raw[test_raw_next++ % 8]; }
+static const void* le32s(const u32* v, u32 n) {
+    u8* p = raw_slot();
+    for (u32 i = 0; i < n; i++) snx_st_le32(p + i * 4, v[i]);
+    return p;
+}
+static const void* le64(u64 v) {
+    u8* p = raw_slot();
+    snx_st_le64(p, v);
+    return p;
+}
+static const void* lef(float v) {
+    u32 bits;
+    memcpy(&bits, &v, 4);
+    return le32s(&bits, 1);
+}
+/* an AudioOutParameter as the message holds it */
+static void put_out_parameter(u8* raw, const nn_audio_AudioOutParameter* p) {
+    snx_st_le32(raw, p->sample_rate);
+    snx_st_le16(raw + 4, p->channel_count);
+    snx_st_le16(raw + 6, p->reserved);
+}
 static IpcCtx request(u32 cmd, const void* raw, u32 size) {
     IpcCtx c;
     memset(&c, 0, sizeof c);
@@ -201,17 +227,19 @@ static IpcCtx request(u32 cmd, const void* raw, u32 size) {
     return c;
 }
 static u32 reply32(IpcCtx* c, u32 off) {
-    u32 v;
     CHECK(off + 4 <= c->out_size);
-    memcpy(&v, c->out + off, sizeof v);
+    return snx_ld_le32(c->out + off);
+}
+static float reply_f(IpcCtx* c, u32 off) {
+    u32 bits = reply32(c, off);
+    float v;
+    memcpy(&v, &bits, 4);
     return v;
 }
 static u64 query64(SvcObj* o, u32 cmd) {
     IpcCtx c = request(cmd, NULL, 0);
-    u64 v;
     CHECK(o->dispatch(o, &c) == 0 && c.out_size == 8);
-    memcpy(&v, c.out, sizeof v);
-    return v;
+    return snx_ld_le64(c.out);
 }
 static void command(SvcObj* o, u32 cmd) {
     IpcCtx c = request(cmd, NULL, 0);
@@ -225,7 +253,7 @@ static void auto_descriptors(IpcCtx* c, int ins, int outs) {
 }
 static SvcObj* open_output(SvcObj* manager) {
     u32 args[4] = {48000, 2};
-    IpcCtx c = request(3, args, sizeof args);
+    IpcCtx c = request(3, le32s(args, 4), sizeof args);
     auto_descriptors(&c, 1, 1); /* the name in and the name out, both empty */
     c.has_pid = 1;              /* the aruid */
     c.ncopy = 1;                /* the process */
@@ -237,7 +265,8 @@ static SvcObj* open_output(SvcObj* manager) {
 static int append(SvcObj* o, u32 cmd, u64 tag, u64 sample_addr, u64 capacity, u64 bytes, u64 offset) {
     u64 descriptor[5] = {0, sample_addr, capacity, bytes, offset};
     memcpy(GP(0x100), descriptor, sizeof descriptor);
-    IpcCtx c = request(cmd, &tag, sizeof tag);
+    snx_le64_array(GP(0x100), 5);
+    IpcCtx c = request(cmd, le64(tag), sizeof tag);
     c.na = 1;
     c.nx = cmd == 7; /* AppendAudioOutBufferAuto: an empty X beside it */
     c.a[0].addr = 0x100;
@@ -281,17 +310,17 @@ static void test_audout_queries(SvcObj* manager) {
     CHECK(append(o, 3, 0x22, 0x400, 196, 192, 0) == 0);
     CHECK(query32(o, 9) == 2);
     u64 tag = 0x22;
-    IpcCtx c = request(6, &tag, sizeof tag);
+    IpcCtx c = request(6, le64(tag), sizeof tag);
     CHECK(o->dispatch(o, &c) == 0 && c.out_size == 4 && reply32(&c, 0) == 1);
     tag = 0x33;
-    c = request(6, &tag, sizeof tag);
+    c = request(6, le64(tag), sizeof tag);
     CHECK(o->dispatch(o, &c) == 0 && c.out_size == 4 && reply32(&c, 0) == 0);
     /* played: not counted any more, still contained until GetReleasedAudioOutBuffers takes it back */
     command(o, 1);
     test_now += 1500000;
     CHECK(query32(o, 9) == 1);
     tag = 0x11;
-    c = request(6, &tag, sizeof tag);
+    c = request(6, le64(tag), sizeof tag);
     CHECK(o->dispatch(o, &c) == 0 && reply32(&c, 0) == 1);
     /* GetReleasedAudioOutBuffers without a buffer takes nothing: the tag waits for the next call */
     c = request(5, NULL, 0);
@@ -299,13 +328,13 @@ static void test_audout_queries(SvcObj* manager) {
     c.b[0] = buffer(0, 64 * 8);
     CHECK(o->dispatch(o, &c) == 0 && c.out_size == 4 && reply32(&c, 0) == 0);
     CHECK(released(o, 5) == 1 && gr64(0x200) == 0x11);
-    c = request(6, &tag, sizeof tag);
+    c = request(6, le64(tag), sizeof tag);
     CHECK(o->dispatch(o, &c) == 0 && reply32(&c, 0) == 0);
     /* Stop hands the one still queued back: no longer counted, contained until taken */
     command(o, 2);
     CHECK(query32(o, 0) == 1 && query32(o, 9) == 0);
     tag = 0x22;
-    c = request(6, &tag, sizeof tag);
+    c = request(6, le64(tag), sizeof tag);
     CHECK(o->dispatch(o, &c) == 0 && reply32(&c, 0) == 1);
     /* RegisterBufferEvent: the IAudioOut's event, as a copy handle and no raw data */
     c = request(4, NULL, 0);
@@ -319,8 +348,8 @@ static void test_open_audio_out(SvcObj* manager) {
     u8 raw[16] = {0};
     nn_audio_AudioOutParameter params = {44100, 6, 0};
     u64 aruid = 0x1234;
-    memcpy(raw, &params, sizeof params);
-    memcpy(raw + 8, &aruid, sizeof aruid);
+    put_out_parameter(raw, &params);
+    snx_st_le64(raw + 8, aruid);
     memset(GP(0x1000), 0, 0x100);
     sentinel(0x1100, 0x120);
     IpcCtx c = request(1, raw, sizeof raw);
@@ -369,6 +398,7 @@ static void test_audout_layouts(SvcObj* manager) {
     PAudio* host = q->output;
     u64 old[4] = {0, 0x2000, 96, 96};
     memcpy(GP(0x100), old, sizeof old);
+    snx_le64_array(GP(0x100), 4);
     CHECK(nn_audio_detail_IAudioOut_AppendAudioOutBuffer(o, 0x31, buffer(0x100, sizeof old)) == 0);
     CHECK(q->nqueued == 1 && q->frames[(q->first + q->nreleased) % AUDOUT_BUFFERS] == 24 && host->bytes == 96);
     CHECK(nn_audio_detail_IAudioOut_AppendAudioOutBuffer(o, 0x32, buffer(0x100, 0x18)) == 0); /* holds nothing */
@@ -406,7 +436,7 @@ static void test_audout_partial_frame(SvcObj* manager) {
 static void test_auto_pointer_buffers(SvcObj* manager) {
     u8 raw[16] = {0};
     nn_audio_AudioOutParameter params = {48000, 2, 0};
-    memcpy(raw, &params, sizeof params);
+    put_out_parameter(raw, &params);
     sentinel(0x1100, 0x120);
     IpcCtx c = request(3, raw, sizeof raw); /* OpenAudioOutAuto, the name back through C */
     auto_descriptors(&c, 1, 1);
@@ -430,8 +460,9 @@ static void test_auto_pointer_buffers(SvcObj* manager) {
     for (u32 i = 0; i < 96; i++) GP(0x2000)[i] = (u8)(0x80 + i);
     u64 descriptor[5] = {0, 0x2000, 96, 96, 0};
     memcpy(GP(0x1300), descriptor, sizeof descriptor);
+    snx_le64_array(GP(0x1300), 5);
     u64 tag = 0x5A5A;
-    c = request(7, &tag, sizeof tag);
+    c = request(7, le64(tag), sizeof tag);
     auto_descriptors(&c, 1, 0);
     c.x[0] = buffer(0x1300, sizeof descriptor);
     unsigned before = host->queued;
@@ -440,8 +471,9 @@ static void test_auto_pointer_buffers(SvcObj* manager) {
     /* a mapped descriptor with an address is the buffer, whatever X says */
     u64 other[5] = {0, 0x2000, 96, 48, 0};
     memcpy(GP(0x1340), other, sizeof other);
+    snx_le64_array(GP(0x1340), 5);
     tag = 0xA5A5;
-    c = request(7, &tag, sizeof tag);
+    c = request(7, le64(tag), sizeof tag);
     auto_descriptors(&c, 1, 0);
     c.a[0] = buffer(0x1340, sizeof other);
     c.x[0] = buffer(0x1300, sizeof descriptor);
@@ -472,8 +504,10 @@ static void test_renderer(void) {
     params.sink_count = 1;
     params.revision = 0x38564552; /* REV8: "REV8" in memory */
     memcpy(raw, &params, sizeof params);
+    snx_le32_array(raw, 8);        /* the counts, then the flag bytes at 0x20 */
+    snx_le32_array(raw + 0x24, 4); /* the splitters, the external context and the revision */
     u64 work = 0x20000;
-    memcpy(raw + 0x38, &work, sizeof work);
+    snx_st_le64(raw + 0x38, work);
     IpcCtx c = request(0, raw, sizeof raw);
     c.has_pid = 1;
     c.ncopy = 2;
@@ -502,7 +536,7 @@ static void test_renderer(void) {
     CHECK(query32(r, 3) == 1);
     CHECK(query32(r, 9) == 100); /* the rendering time limit starts at 100% */
     u32 limit = 75;
-    c = request(8, &limit, sizeof limit);
+    c = request(8, le32s(&limit, 1), sizeof limit);
     CHECK(r->dispatch(r, &c) == 0 && query32(r, 9) == 75);
     /* the voice drop parameter starts at 1 and reads back as set */
     float drop;
@@ -510,7 +544,7 @@ static void test_renderer(void) {
     memcpy(&drop, &bits, sizeof drop);
     CHECK(drop == 1.0f);
     drop = 0.5f;
-    c = request(12, &drop, sizeof drop);
+    c = request(12, lef(drop), sizeof drop);
     CHECK(r->dispatch(r, &c) == 0);
     bits = query32(r, 13);
     memcpy(&drop, &bits, sizeof drop);
@@ -552,7 +586,7 @@ static void test_renderer(void) {
 static void test_device(void) {
     SvcObj* manager = new_audren();
     u64 aruid = 0;
-    IpcCtx c = request(2, &aruid, sizeof aruid);
+    IpcCtx c = request(2, le64(aruid), sizeof aruid);
     CHECK(manager->dispatch(manager, &c) == 0 && c.nout_objs == 1);
     SvcObj* d = c.out_objs[0];
     /* its system, input and output events: three, each signaled from the start */
@@ -608,28 +642,28 @@ static void test_device(void) {
     memset(GP(0x1000), 0, 0x200);
     strcpy((char*)GP(0x1000), "AudioTvOutput");
     strcpy((char*)GP(0x1100), "AudioBuiltInSpeakerOutput");
-    c = request(1, &half, sizeof half);
+    c = request(1, lef(half), sizeof half);
     c.na = 1;
     c.a[0] = buffer(0x1000, 0x100);
     CHECK(d->dispatch(d, &c) == 0 && c.out_size == 0);
-    c = request(1, &quarter, sizeof quarter);
+    c = request(1, lef(quarter), sizeof quarter);
     c.na = 1;
     c.a[0] = buffer(0x1100, 0x100);
     CHECK(d->dispatch(d, &c) == 0);
     c = request(2, NULL, 0);
     c.na = 1;
     c.a[0] = buffer(0x1000, 0x100);
-    CHECK(d->dispatch(d, &c) == 0 && c.out_size == 4 && (memcpy(&got, c.out, 4), got == 0.5f));
+    CHECK(d->dispatch(d, &c) == 0 && c.out_size == 4 && (got = reply_f(&c, 0)) == 0.5f);
     c.a[0] = buffer(0x1100, 0x100);
-    CHECK(d->dispatch(d, &c) == 0 && (memcpy(&got, c.out, 4), got == 1.0f));
-    c = request(7, &quarter, sizeof quarter);
+    CHECK(d->dispatch(d, &c) == 0 && (got = reply_f(&c, 0)) == 1.0f);
+    c = request(7, lef(quarter), sizeof quarter);
     auto_descriptors(&c, 1, 0);
     c.x[0] = buffer(0x1000, 0x100);
     CHECK(d->dispatch(d, &c) == 0);
     c = request(8, NULL, 0);
     auto_descriptors(&c, 1, 0);
     c.x[0] = buffer(0x1000, 0x100);
-    CHECK(d->dispatch(d, &c) == 0 && (memcpy(&got, c.out, 4), got == 0.25f));
+    CHECK(d->dispatch(d, &c) == 0 && (got = reply_f(&c, 0)) == 0.25f);
     svcobj_unref(d);
     svcobj_unref(manager);
 }
@@ -637,7 +671,7 @@ static void test_device(void) {
 /* the output device's volume on what plays: every audio out's host stream at its own volume times the device's, the
    ones opened later too, and the renderers' (audren.c) at the device's */
 static void set_device_volume(SvcObj* d, float volume) {
-    IpcCtx c = request(1, &volume, sizeof volume);
+    IpcCtx c = request(1, lef(volume), sizeof volume);
     c.na = 1;
     c.a[0] = buffer(0x1000, 0x100);
     CHECK(d->dispatch(d, &c) == 0);
@@ -645,7 +679,7 @@ static void set_device_volume(SvcObj* d, float volume) {
 static void test_device_gain(void) {
     SvcObj* renderers = new_audren();
     u64 aruid = 0;
-    IpcCtx c = request(2, &aruid, sizeof aruid);
+    IpcCtx c = request(2, le64(aruid), sizeof aruid);
     CHECK(renderers->dispatch(renderers, &c) == 0 && c.nout_objs == 1);
     SvcObj* d = c.out_objs[0];
     memset(GP(0x1000), 0, 0x100);
@@ -655,14 +689,14 @@ static void test_device_gain(void) {
     SvcObj* first = open_output(manager);
     PAudio* host = ((AudOut*)first->data)->output;
     float half = 0.5f;
-    c = request(12, &half, sizeof half); /* SetAudioOutVolume */
+    c = request(12, lef(half), sizeof half); /* SetAudioOutVolume */
     CHECK(first->dispatch(first, &c) == 0 && host->volume == 0.5f);
     set_device_volume(d, 0.5f);
     CHECK(host->volume == 0.25f && test_renderer_gain == 0.5f);
     float full = 1.0f;
-    c = request(12, &full, sizeof full); /* the out's own volume, under the device's */
+    c = request(12, lef(full), sizeof full); /* the out's own volume, under the device's */
     CHECK(first->dispatch(first, &c) == 0 && host->volume == 0.5f);
-    c = request(12, &half, sizeof half);
+    c = request(12, lef(half), sizeof half);
     CHECK(first->dispatch(first, &c) == 0 && host->volume == 0.25f);
     SvcObj* second = open_output(manager);
     PAudio* later = ((AudOut*)second->data)->output;
@@ -680,7 +714,7 @@ static void test_device_gain(void) {
    work buffer's size at 8. The SDK's decoder takes one or two channels: more is the multistream commands' */
 static int open_opus(SvcObj* manager, u32 rate, u32 channels, SvcObj** decoder) {
     u32 raw[3] = {rate, channels, 0x10000};
-    IpcCtx c = request(0, raw, sizeof raw);
+    IpcCtx c = request(0, le32s(raw, 3), sizeof raw);
     c.ncopy = 1;
     c.copy_h[0] = 0x200;
     int rc = manager->dispatch(manager, &c);
@@ -729,7 +763,10 @@ static void test_opus_decode(void) {
             off += len;
         }
         int loud = 0;
-        for (u32 i = 0; i < 320; i++) loud |= out[i] > 2000 || out[i] < -2000;
+        for (u32 i = 0; i < 320; i++) {
+            i16 v = (i16)snx_ld_le16(&out[i]); /* the guest's samples */
+            loud |= v > 2000 || v < -2000;
+        }
         CHECK(loud); /* the tone, still there after the switch to CELT */
     }
     CHECK(hwopus_decode(&h, opus_tone, 8, out, sizeof out, 0, &consumed, &samples) == RC(111, 17)); /* no payload */
@@ -739,12 +776,13 @@ static void test_opus_decode(void) {
 static void test_hwopus(void) {
     SvcObj* manager = new_hwopus();
     u32 params[2] = {48000, 2};
-    IpcCtx c = request(1, params, sizeof params);
+    IpcCtx c = request(1, le32s(params, 2), sizeof params);
     CHECK(manager->dispatch(manager, &c) == 0 && c.out_size == 4 && reply32(&c, 0) == 0x10000);
     /* multistream: 32 KiB, and 32 KiB a stream; parameters too short to read are one stream's */
     u32 multi[4] = {48000, 6, 4, 2}, size = 0;
     memset(GP(0x3000), 0, 0x110);
     memcpy(GP(0x3000), multi, sizeof multi);
+    snx_le32_array(GP(0x3000), 4);
     CHECK(nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeForMultiStream(NULL, buffer(0x3000, 0x110),
                                                                                      &size) == 0 &&
           size == 0x28000);
@@ -832,10 +870,10 @@ int main(void) {
     CHECK(query64(o, 10) == played + 48);
 
     float volume = 0.25f;
-    IpcCtx c = request(12, &volume, sizeof volume);
+    IpcCtx c = request(12, lef(volume), sizeof volume);
     CHECK(o->dispatch(o, &c) == 0 && host->volume == volume);
     c = request(13, NULL, 0);
-    CHECK(o->dispatch(o, &c) == 0 && c.out_size == 4 && !memcmp(c.out, &volume, 4));
+    CHECK(o->dispatch(o, &c) == 0 && c.out_size == 4 && reply_f(&c, 0) == volume);
     CHECK(append(o, 3, 0xBEEF, 0x400, 196, 192, 0) == 0);
     command(o, 11);
     CHECK(host->cleared == 2 && host->bytes == 0);

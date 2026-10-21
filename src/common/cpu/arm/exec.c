@@ -3,12 +3,15 @@
 /* AArch32 blocks compiled while a program runs: each block is emitted into a module of the executor's LLVM context,
    compiled to an object with its target machine (snx_ir_module_object) and loaded into a code arena by the runtime
    JIT's loader (code_loader.c), as the A64 JIT's units are. The objects call the runtime library's helpers, which the
-   loader is given by name: no MCJIT, and no symbols the program must export */
+   loader is given by name: no MCJIT, and no symbols the program must export. On PowerPC64 the helpers are the 32-bit
+   modules' own (armlib.c), loaded into the arena first, as library.c's arena_load loads rtlib.c with the A64 code:
+   the arena has one TOC, which a direct call into the runtime's copies (another TOC) would leave behind */
 #include "common/cpu/arm/exec.h"
 #include "common/cpu/arm/llvm.h"
 #include "common/cpu/arm/simd.h"
 #include "common/cpu/recompiler/llvm/code_loader.h"
 #include "common/cpu/recompiler/llvm/ir.h"
+#include "common/utilities/endian.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,8 +74,26 @@ SnxArmBlock snx_arm_exec_block(SnxArmExec* e, const SnxArmExecRange* ranges, siz
     LLVMModuleRef module = LLVMModuleCreateWithNameInContext(name, e->ir->ctx);
     LLVMSetTarget(module, LLVMGetTarget(e->ir->mod));
     LLVMSetDataLayout(module, LLVMGetDataLayoutStr(e->ir->mod));
-    LLVMValueRef fn = thumb ? snx_thumb_llvm_block(module, name, (const uint16_t*)(base + pc), span, pc, &consumed)
-                            : snx_arm_llvm_block(module, name, (const uint32_t*)(base + pc), span, pc, &consumed);
+    /* the block compiler reads host integers, and the guest's code is little-endian */
+    const void* code = base + pc;
+    void* swapped = NULL;
+    if (SNX_HOST_BE) {
+        size_t i;
+        swapped = malloc(span * (thumb ? 2 : 4));
+        if (!swapped) {
+            LLVMDisposeModule(module);
+            return NULL;
+        }
+        for (i = 0; i < span; ++i)
+            if (thumb)
+                ((uint16_t*)swapped)[i] = snx_ld_le16(base + pc + i * 2);
+            else
+                ((uint32_t*)swapped)[i] = snx_ld_le32(base + pc + i * 4);
+        code = swapped;
+    }
+    LLVMValueRef fn = thumb ? snx_thumb_llvm_block(module, name, (const uint16_t*)code, span, pc, &consumed)
+                            : snx_arm_llvm_block(module, name, (const uint32_t*)code, span, pc, &consumed);
+    free(swapped);
     unsigned char* object = NULL;
     int rc = fn ? snx_ir_module_object(e->ir, module, BLOCK_OPT, &object, &size, error, sizeof error) : -1;
     LLVMDisposeModule(module);
@@ -103,7 +124,9 @@ static int run_syscall(SnxArmSyscallFn syscall, void* context, SnxArmCPU* cpu, u
 }
 
 SnxArmExec* snx_arm_exec_new(char* error, size_t error_size) {
-    if (error_size) error[0] = 0;
+    char ignored[512]; /* for a caller that wants no reason: the loader writes one whatever its size */
+    if (!error_size) error = ignored, error_size = sizeof ignored;
+    error[0] = 0;
     if (snx_ir_init(error, error_size)) return NULL;
     SnxArmExec* e = calloc(1, sizeof *e);
     if (!e) {
@@ -111,18 +134,35 @@ SnxArmExec* snx_arm_exec_new(char* error, size_t error_size) {
         return NULL;
     }
     e->ir = snx_ir_new_jit("a32exec", BLOCK_OPT, error, error_size);
-#if defined(__powerpc64__)
-    /* blocks call the runtime's functions below directly, which have a TOC of their own: the loader takes no call out
-       of its arena there (code_loader.h) */
-    if (e->ir) snprintf(error, error_size, "the A32 executor's blocks can't call the runtime on PowerPC64 hosts yet");
-#else
     if (e->ir) e->loader = snx_code_loader_new(0, error, error_size);
-#endif
+#if defined(__powerpc64__)
+    /* the helpers blocks call, loaded into the arena, whose globals they resolve to. They reach the runtime only
+       through cpu->rt, pointer calls that LLVM makes with r2 saved */
+    if (e->loader) {
+        SnxLinkInput armlib;
+        unsigned char* object = NULL;
+        memset(&armlib, 0, sizeof armlib);
+        armlib.name = "armlib";
+        if (snx_ir_armlib_object(BLOCK_OPT, &object, &armlib.size, error, error_size)) {
+            snx_arm_exec_free(e);
+            return NULL;
+        }
+        armlib.data = object;
+        int rc = snx_code_load(e->loader, &armlib, 1, NULL, 0, NULL, error, error_size);
+        free(object);
+        if (rc) {
+            snx_arm_exec_free(e);
+            return NULL;
+        }
+    }
+    if (!e->loader) {
+#else
     /* the runtime library's functions blocks call (simd.h, arm.h), by the names the block compiler declares */
     if (!e->loader || snx_code_define(e->loader, "snx_arm_fp", (SnxU64)(uintptr_t)snx_arm_fp) ||
         snx_code_define(e->loader, "snx_arm_crypto", (SnxU64)(uintptr_t)snx_arm_crypto) ||
         snx_code_define(e->loader, "snx_arm_undefined", (SnxU64)(uintptr_t)snx_arm_undefined) ||
         snx_code_define(e->loader, "snx_arm_coproc", (SnxU64)(uintptr_t)snx_arm_coproc)) {
+#endif
         if (error_size && !error[0]) snprintf(error, error_size, "cannot name the runtime library's functions");
         snx_arm_exec_free(e);
         return NULL;

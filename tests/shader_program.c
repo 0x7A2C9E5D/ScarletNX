@@ -24,6 +24,20 @@ static u64 flow(u64 top12, u32 at, u32 to) {
     return top12 << 52 | (u64)(((to - (at + 1)) * 8) & 0xFFFFFF) << 20 | 0x7000Full;
 }
 
+/* the program words as guest memory holds them, little-endian, for the functions that read guest bytes */
+static void to_guest(u8* dst, const u64* words, u32 n) {
+    for (u32 i = 0; i < n; i++) snx_st_le64(dst + 8 * i, words[i]);
+}
+static int merge_words(const u64* a, const u64* b, u64* out, u32 max_bytes) {
+    u8 ga[64 * 8], gb[64 * 8], go[64 * 8] = {0};
+    int r;
+    to_guest(ga, a, 64);
+    to_guest(gb, b, 64);
+    r = shader_merge_dual(ga, gb, go, max_bytes);
+    for (u32 i = 0; i < 64; i++) out[i] = i < max_bytes / 8 ? snx_ld_le64(go + 8 * i) : 0;
+    return r;
+}
+
 static void merge(void) {
     u64 a[64] = {0}, b[64] = {0}, out[64];
     int i;
@@ -38,7 +52,7 @@ static void merge(void) {
     a[13] = EXIT;
     b[11] = MOV32I | 2;
     b[12] = EXIT;
-    check(shader_merge_dual((const u8*)a, (const u8*)b, (u8*)out, sizeof out) == 1, "VertexA and VertexB merge");
+    check(merge_words(a, b, out, sizeof out) == 1, "VertexA and VertexB merge");
     for (i = 0; i < 10; i++) check(out[i] == b[i], "the merged program has VertexB's header");
     check(out[10] == SCHED && out[11] == MOV32I, "VertexA's code comes first");
     check(decode(out[12])->id == O_BRA && bra_target(out[12], 12) == 15 && B(out[12], 16, 4) == 3 &&
@@ -47,20 +61,24 @@ static void merge(void) {
     check(decode(out[13])->id == O_BRA && bra_target(out[13], 13) == 15 && flow_always(out[13]),
           "VertexA's final EXIT branches to VertexB");
     check(out[14] == SCHED && out[15] == b[11] && out[16] == b[12] && !out[17], "VertexB follows at the next bundle");
-    check(shader_merge_dual((const u8*)a, (const u8*)b, (u8*)out, 16 * 8) == 0, "a merge that doesn't fit fails");
+    check(merge_words(a, b, out, 16 * 8) == 0, "a merge that doesn't fit fails");
     /* VertexA ending before its last bundle does: the bundle's word after the EXIT is VertexA's, never zero, which no
        instruction is (a game's dual vertex programs end in a BRA to itself with a word left in the bundle) */
     a[12] = EXIT;
     a[13] = NOP;
-    check(shader_merge_dual((const u8*)a, (const u8*)b, (u8*)out, sizeof out) == 1 && out[13] == NOP &&
+    check(merge_words(a, b, out, sizeof out) == 1 && out[13] == NOP &&
               out[14] == SCHED && out[15] == b[11],
           "VertexA's last bundle is copied whole");
     /* a zero after VertexA's end would end the merged program before VertexB (shader_hash): it becomes a NOP */
     a[13] = 0;
-    check(shader_merge_dual((const u8*)a, (const u8*)b, (u8*)out, sizeof out) == 1 && out[13] == NOP &&
+    check(merge_words(a, b, out, sizeof out) == 1 && out[13] == NOP &&
               out[15] == b[11],
           "a zero word after VertexA becomes a NOP");
-    shader_hash((const u8*)out, sizeof out, &len);
+    {
+        u8 g[sizeof out];
+        to_guest(g, out, 64);
+        shader_hash(g, sizeof out, &len);
+    }
     check(len == 17 * 8, "the merged program's length takes in VertexB");
 }
 

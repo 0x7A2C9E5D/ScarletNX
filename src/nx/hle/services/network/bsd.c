@@ -100,7 +100,7 @@ static int bind_address(SnxSockAddr* a, u8 bcast[4]) {
 static SnxSocket* bcast_companion(SnxSocket* s, const u8 bcast[4]) {
     SnxSocket* c;
     SnxSockAddr a;
-    int one = 1, r = snx_socket_name(s, &a);
+    int one = (int)snx_le32(1), r = snx_socket_name(s, &a); /* option values are the guest's (net.h) */
     if (r) return NULL;
     r = snx_socket_open(&c, SNX_AF_INET, SNX_SOCK_DGRAM, 0);
     if (r) return NULL;
@@ -197,7 +197,7 @@ static int addr_in(u64 a, u64 n, SnxSockAddr* out) {
         memcpy(&out->port, p + 2, 2);
         memcpy(&out->flowinfo, p + 4, 4);
         memcpy(out->addr, p + 8, 16);
-        if (n >= 28) memcpy(&out->scope_id, p + 24, 4);
+        if (n >= 28) out->scope_id = snx_ld_le32(p + 24); /* a number, where the port and flowinfo are bytes */
         return 0;
     }
     return -SNX_EAFNOSUPPORT;
@@ -214,7 +214,7 @@ static u32 addr_out(const SnxSockAddr* a, u64 dst, u64 cap) {
     if (n == BSD_SOCKADDR_IN6) {
         memcpy(p + 4, &a->flowinfo, 4);
         memcpy(p + 8, a->addr, 16);
-        memcpy(p + 24, &a->scope_id, 4);
+        snx_st_le32(p + 24, a->scope_id);
     } else
         memcpy(p + 4, a->addr, 4);
     if (!dst) return 0;
@@ -225,7 +225,7 @@ static u32 addr_out(const SnxSockAddr* a, u64 dst, u64 cap) {
 
 /* an address for the log, at level 2: "127.0.0.1:1234", "[v6]:1234" or "?" */
 static const char* addr_text(const SnxSockAddr* a, char* buf, size_t n) {
-    u16 port = (u16)((a->port >> 8) | (a->port << 8));
+    u16 port = snx_ld_be16(&a->port);
     if (a->family == SNX_AF_INET)
         snprintf(buf, n, "%u.%u.%u.%u:%u", a->addr[0], a->addr[1], a->addr[2], a->addr[3], port);
     else if (a->family == SNX_AF_INET6)
@@ -470,8 +470,8 @@ static int nn_socket_sf_IClient_Poll(SvcObj* self, i32 nfds, i32 timeout, IpcBuf
     for (i32 i = 0; i < nfds; i++) {
         i32 fd;
         u16 ev;
-        memcpy(&fd, in + i * 8, 4);
-        memcpy(&ev, in + i * 8 + 4, 2);
+        fd = (i32)snx_ld_le32(in + i * 8);
+        ev = snx_ld_le16(in + i * 8 + 4);
         e[i].host_fd = -1;
         e[i].events = poll_in(ev);
         if (fd < 0) continue; /* ignored, as POSIX says */
@@ -499,13 +499,12 @@ static int nn_socket_sf_IClient_Poll(SvcObj* self, i32 nfds, i32 timeout, IpcBuf
         snx_socket_unref(e[k].socket);
     }
     for (i32 i = 0; i < nfds; i++) {
-        i32 fd;
-        memcpy(&fd, in + i * 8, 4);
+        i32 fd = (i32)snx_ld_le32(in + i * 8);
         u16 rev = r >= 0 ? poll_out(e[i].revents) : 0;
         if (r >= 0 && fd >= 0 && !e[i].socket) rev = 0x0020; /* POLLNVAL */
         if (out) {
             memmove(out + i * 8, in + i * 8, 6);
-            memcpy(out + i * 8 + 6, &rev, 2);
+            snx_st_le16(out + i * 8 + 6, rev);
         }
         snx_socket_unref(e[i].socket);
     }
@@ -522,8 +521,11 @@ static int64_t recv_either(SnxSocket* s, SnxSocket* c, void* data, size_t n, int
         SnxTimeval tv = {0, 0};
         size_t size = sizeof tv;
         int ms = -1;
-        if (!snx_socket_getsockopt(s, SNX_SOL_SOCKET, SNX_SO_RCVTIMEO, &tv, &size) && (tv.sec || tv.usec))
-            ms = (int)(tv.sec * 1000 + tv.usec / 1000);
+        if (!snx_socket_getsockopt(s, SNX_SOL_SOCKET, SNX_SO_RCVTIMEO, &tv, &size)) { /* the guest's order */
+            tv.sec = (int64_t)snx_le64((uint64_t)tv.sec);
+            tv.usec = (int64_t)snx_le64((uint64_t)tv.usec);
+            if (tv.sec || tv.usec) ms = (int)(tv.sec * 1000 + tv.usec / 1000);
+        }
         e[0].socket = s;
         e[1].socket = c;
         e[0].host_fd = e[1].host_fd = -1;
@@ -717,7 +719,7 @@ static int nn_socket_sf_IClient_SetSockOpt(SvcObj* self, i32 fd, i32 level_in, i
         i64 sec;
         memset(v, 0, sizeof v);
         if (a) memcpy(v, GP(a), n < sizeof v ? n : sizeof v);
-        memcpy(&sec, v, sizeof sec);
+        sec = (i64)snx_ld_le64(v); /* the value stays in the guest's order: the stack converts it (net.h) */
         /* FreeBSD's sosetopt: a timeout before zero is out of range, where Linux (and the stack) take it as expired */
         if (level == SNX_SOL_SOCKET && (name == SNX_SO_RCVTIMEO || name == SNX_SO_SNDTIMEO) && n >= 16 && sec < 0)
             r = -SNX_EDOM;

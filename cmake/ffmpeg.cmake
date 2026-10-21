@@ -20,9 +20,18 @@ if(snx_ffmpeg_src MATCHES "[ \t]")
 endif()
 set(snx_ffmpeg_patch "${CMAKE_SOURCE_DIR}/cmake/ffmpeg-vp9-nvdec.patch")
 file(SHA256 "${snx_ffmpeg_patch}" snx_ffmpeg_patch_sha256)
+set(snx_ffmpeg_patched libavcodec/vp9.c 459e8ca79e45680c98ba70ac574172e2389b177c6d19e5466fa63c3f0ff652e1)
+if(CMAKE_C_BYTE_ORDER STREQUAL "BIG_ENDIAN")
+    # the H.264 decoder's byte swaps, which only a big-endian host's build calls
+    set(snx_ffmpeg_be_patch "${CMAKE_SOURCE_DIR}/cmake/ffmpeg-h264-bigendian.patch")
+    file(SHA256 "${snx_ffmpeg_be_patch}" snx_ffmpeg_be_patch_sha256)
+    list(APPEND snx_ffmpeg_patch "${snx_ffmpeg_be_patch}")
+    string(APPEND snx_ffmpeg_patch_sha256 " ${snx_ffmpeg_be_patch_sha256}")
+    list(APPEND snx_ffmpeg_patched configure f718d0d3a53e6f905299f21938d2f22332a9046f43c6f94dfc867efdfcc0ecef)
+endif()
 include("${CMAKE_SOURCE_DIR}/cmake/patched_copy.cmake")
-snx_patched_copy(SOURCE "${FFmpeg_SOURCE_DIR}" DEST "${snx_ffmpeg_src}" PATCHES "${snx_ffmpeg_patch}"
-                 FILES libavcodec/vp9.c 459e8ca79e45680c98ba70ac574172e2389b177c6d19e5466fa63c3f0ff652e1)
+snx_patched_copy(SOURCE "${FFmpeg_SOURCE_DIR}" DEST "${snx_ffmpeg_src}" PATCHES ${snx_ffmpeg_patch}
+                 FILES ${snx_ffmpeg_patched})
 # sh before bash: on Windows a bash.exe in System32 is WSL's launcher, and w64devkit's sh is the one to use
 find_program(SNX_FFMPEG_SH NAMES sh bash)
 find_program(SNX_FFMPEG_MAKE NAMES gmake make)
@@ -113,8 +122,9 @@ if(SNX_TARGET_FLAGS)
          "--extra-ldflags=${snx_ffmpeg_target_flags} ${snx_ffmpeg_target_ldflags}")
 endif()
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64|ppc64le|powerpc64|powerpc64le)$")
-    # configure's name for both byte orders; its AltiVec and VSX code is chosen by --cpu
-    list(APPEND snx_ffmpeg_args --cpu=power8)
+    # configure's name for both byte orders (cmake/cross.cmake's SNX_PPC64_CPU); its AltiVec and VSX code is chosen
+    # by --cpu
+    list(APPEND snx_ffmpeg_args --cpu=${SNX_PPC64_CPU})
 endif()
 if(CMAKE_CROSSCOMPILING)
     # configure builds a few helper programs for the machine doing the build, which needs its own C compiler
@@ -174,6 +184,10 @@ else()
     # a changed patch rewrites the patched file at configure time, which the build step doesn't see on its own: an
     # existing tree kept linking the FFmpeg built from the old one
     ExternalProject_Add_StepDependencies(ffmpeg_build build "${snx_ffmpeg_src}/libavcodec/vp9.c")
+    if(snx_ffmpeg_be_patch)
+        # and the big-endian patch changes configure itself, which only the configure step reads
+        ExternalProject_Add_StepDependencies(ffmpeg_build configure "${snx_ffmpeg_src}/configure")
+    endif()
     # the configuration FFmpeg was built with, which make install leaves out, kept with the install (and so in the
     # dependency cache) for the tests that read a decoder's private state
     ExternalProject_Add_Step(ffmpeg_build private

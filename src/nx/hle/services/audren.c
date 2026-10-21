@@ -67,7 +67,7 @@ int audren_update(SvcObj* o, IpcBuf in, IpcBuf out) {
     pm_unlock(&g_hle.audren.lk);
     if (rc == -41 || rc == -4) R_THROW(RC(153, -rc));
     R_UNLESS(rc >= 0, RC(153, 2)); /* OperationFailed */
-    memcpy(&rev, GP(in.addr), 4);
+    rev = snx_ld_le32(GP(in.addr));
     /* the magic "REV" and the revision as a number (REV11 and the like) */
     LOG_LIMIT(1, "audren: the first update, revision %c%c%c%u\n", (char)(rev & 0xff), (char)(rev >> 8 & 0xff),
               (char)(rev >> 16 & 0xff), (unsigned)(rev >> 24));
@@ -92,6 +92,7 @@ void audren_tick(void) {
         if (!r->out) continue;
         bytes = r->s->frame * 4;
         if (plat_audio_queued(r->out) > r->s->rate * 4 / 1000 * AUDREN_MAX_QUEUED_MS) continue;
+        snx_le16_array(stereo, (size_t)r->s->frame * 2); /* the host plays little-endian samples, as audout's are */
         plat_audio_queue(r->out, stereo, bytes);
         if (!r->out_started) {
             r->out_started = 1;

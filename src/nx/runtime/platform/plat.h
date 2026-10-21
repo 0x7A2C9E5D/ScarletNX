@@ -155,9 +155,10 @@ int plat_replace_file(const char* tmp, const char* dst);
    (cap bytes with its terminator), 1 when the player cancelled, -1 when the host has no way to ask */
 int plat_text_input(char* out, size_t cap, const char* initial);
 
-/* Host audio output of interleaved signed 16-bit samples, implemented by the window backend. plat_audio_open gives
-   a paused stream, or NULL when there is no device (always when headless). plat_audio_queue takes whole frames (SDL
-   refuses a call ending in part of one) and copies them before it returns, so the guest may reuse its buffer at once */
+/* Host audio output of interleaved signed 16-bit samples, little-endian as the guest's are, implemented by the window
+   backend. plat_audio_open gives a paused stream, or NULL when there is no device (always when headless).
+   plat_audio_queue takes whole frames (SDL refuses a call ending in part of one) and copies them before it returns, so
+   the guest may reuse its buffer at once */
 typedef struct PAudio PAudio;
 PAudio* plat_audio_open(u32 rate, u32 channels);
 void plat_audio_close(PAudio* a);

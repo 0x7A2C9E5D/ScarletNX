@@ -46,7 +46,11 @@ static unsigned misses, wrapped;
 /* the batches the report saw, and the first after which 0x3800 had code */
 static unsigned batch_count, live_batch;
 
-static void put(u64 address, const u32* words, size_t count) { memcpy(memory + address, words, count * 4); }
+/* the guest's code is little-endian whatever the host's byte order */
+static void put(u64 address, const u32* words, size_t count) {
+    size_t i;
+    for (i = 0; i < count * 4; ++i) memory[address + i] = (unsigned char)(words[i / 4] >> (i % 4 * 8));
+}
 static GuestFn* slot(u64 address) { return &dispatch[(address - CODE_LO) / 4]; }
 static GuestFn get(u64 address) { return __atomic_load_n(slot(address), __ATOMIC_RELAXED); }
 
@@ -559,7 +563,7 @@ static void test_image_map(void) {
     image.text_size = 8;
     CHECK(snx_jit_add_image(service, &image) == 0);
     memset(&image, 0, sizeof(image));
-    image.image = (const unsigned char*)far_words; /* the same code, in another chunk: the map has to cover both */
+    image.image = memory + 0x38000; /* the same code, in another chunk: the map has to cover both */
     image.image_size = 8;
     image.base = 0x2100000;
     image.text_size = 8;

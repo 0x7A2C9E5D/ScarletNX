@@ -1,24 +1,22 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "nx/hle/services/hid_motion.h"
+#include "common/utilities/endian.h"
 #include <assert.h>
 #include <math.h>
 #include <string.h>
 
 static float f32_at(const u8* state, int offset) {
+    u32 bits = snx_ld_le32(state + offset);
     float value;
-    memcpy(&value, state + offset, 4);
+    memcpy(&value, &bits, 4);
     return value;
 }
 static u64 u64_at(const u8* state, int offset) {
-    u64 value;
-    memcpy(&value, state + offset, 8);
-    return value;
+    return snx_ld_le64(state + offset);
 }
 static u32 u32_at(const u8* state, int offset) {
-    u32 value;
-    memcpy(&value, state + offset, 4);
-    return value;
+    return snx_ld_le32(state + offset);
 }
 static int float_close(float a, float b) { return fabsf(a - b) < 0.0005f; }
 static void check_direction(const u8* state, const float expected[9]) {

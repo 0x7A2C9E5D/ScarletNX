@@ -4,6 +4,7 @@
 #include "nx/runtime/platform/controls_atlas.h"
 #include "nx/runtime/platform/plat.h"
 #include "nx/runtime/platform/log.h"
+#include "common/utilities/endian.h"
 #include "common/utilities/font.h"
 #include "common/utilities/users.h"
 #include "gui/splash.h"
@@ -91,7 +92,7 @@ void ui_atlas_set(const u32* sprites, int w, int h) {
     a = (u32*)calloc((size_t)w * (size_t)(h + SNX_UI_PICTURE), 4);
     if (!a) return;
     for (i = 0; i < w * h; ++i) { /* premultiplied: a blend between a sprite's edge and the clear texels around it */
-        u32 p = sprites[i], al = p >> 24;
+        u32 p = snx_le32(sprites[i]), al = p >> 24;
         a[i] = ((p & 0xFFu) * al / 255) | ((p >> 8 & 0xFFu) * al / 255) << 8 | ((p >> 16 & 0xFFu) * al / 255) << 16 |
                al << 24;
     }
@@ -103,6 +104,7 @@ void ui_atlas_set(const u32* sprites, int w, int h) {
     for (y = 0; y < 4; ++y)
         for (x = 0; x < 4; ++x) a[(SNX_CONTROLS_WHITE_Y + y) * w + SNX_CONTROLS_WHITE_X + x] = 0xFFFFFFFFu;
     user_picture(a, w);
+    snx_le32_array(a, (size_t)w * (size_t)(h + SNX_UI_PICTURE)); /* the texels' bytes R G B A, as the GPU reads them */
     ui_lock();
     free(g_atlas);
     g_atlas = a;

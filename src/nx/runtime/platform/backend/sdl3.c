@@ -107,8 +107,7 @@ int plat_audio_queue(PAudio* a, const void* samples, u32 bytes) {
         u32 peak = 0;
         u32 inspect = bytes < 65536 ? bytes : 65536;
         for (u32 i = 0; i + 1 < inspect; i += 2) {
-            i16 sample;
-            memcpy(&sample, (const u8*)samples + i, sizeof sample);
+            i16 sample = (i16)snx_ld_le16((const u8*)samples + i);
             u32 magnitude = sample < 0 ? (u32) - (i32)sample : (u32)sample;
             if (magnitude > peak) peak = magnitude;
         }

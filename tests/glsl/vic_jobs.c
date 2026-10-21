@@ -100,6 +100,7 @@ static int shader_compose(const VicJob* j) {
         if (!b && !vic_gpu_aligned(j)) continue;
         memset(in, 0xA5, at); /* what isn't a plane's isn't read */
         memcpy(in, &p, sizeof p);
+        snx_le32_array(in, sizeof p / 4); /* as gpu/vk/vic.c uploads it, in the GPU's order */
         for (s = 0; s < 8; s++) {
             if (!j->slots[s].on) continue;
             memcpy(in + in_base[2 * s], j->slots[s].iy.p, j->slots[s].iy.lim);
@@ -108,7 +109,7 @@ static int shader_compose(const VicJob* j) {
         memset(out, 0x5A, g_oc_base + g_oc_lim + 8);
         memcpy(out, g_ol, g_ol_lim);
         if (g_oc) memcpy(out + g_oc_base, g_oc, g_oc_lim);
-        vic_glsl_run(&p, g_buf[b][0], g_buf[b][1], b);
+        vic_glsl_run(in, g_buf[b][0], g_buf[b][1], b);
         g_ran[b] = 1;
     }
     g_unaligned += !g_ran[0];
@@ -124,8 +125,8 @@ int g_renderer_up = 1;
 /* ------------------------------------------------ a random job's config and registers */
 #define CFG 0x0000u
 static u32 regs[0x800 / 4];
-static void w32(u32 off, u32 v) { memcpy(arena + off, &v, 4); }
-static void w64(u32 off, u64 v) { memcpy(arena + off, &v, 8); }
+static void w32(u32 off, u32 v) { snx_st_le32(arena + off, v); }
+static void w64(u32 off, u64 v) { snx_st_le64(arena + off, v); }
 static u64 f20(int v) { return (u64)(u32)v & 0xFFFFF; }
 /* BT.601 limited range in the 10 bit domain, S12.8 */
 static const int M601[3][4] = {

@@ -186,6 +186,7 @@ static u8* blocks_new(u32 w, u32 h, u32 depth, u32 bw, u32 bh) {
             blocks[i * 4] = 0xfffff9fc; /* invalid reserved bit */
         }
     }
+    snx_le32_array(blocks, (size_t)count * 4); /* the words as a little-endian guest's bytes: the modes above hold */
     return (u8*)blocks;
 }
 
@@ -515,6 +516,7 @@ static void tc_case(void) {
     texels[0] = 0xFFFFFFFF, texels[1] = 0;
     p = vk_stage((u64)dpitch * rows, vk_stage_align(), &staged, &at);
     memcpy(p, texels, (size_t)dpitch * rows);
+    snx_le32_array(p, (size_t)dpitch * rows / 4); /* the guest's bytes, little-endian words */
     s = vk_tc_shape(&d, dw);
     out_size = vk_tc_out_size(&s, rows, 1);
     scratch = vk_bl_scratch(out_size, &cap);
@@ -531,7 +533,7 @@ static void tc_case(void) {
         for (u32 x = 0; x < dw; x++) {
             u32 v = texels[y * dpitch / 4 + x], got;
             float z = (float)(v & 0xFFFFFF) / 16777215.0f;
-            memcpy(&got, out + ((u64)y * s.out_texels + x) * 4, 4);
+            got = snx_ld_le32(out + ((u64)y * s.out_texels + x) * 4); /* the device's float, little-endian */
             if (memcmp(&got, &z, 4) || stencil[y * s.out_texels + x] != v >> 24)
                 fatal("texconv D24S8: texel (%u, %u) differs from the CPU's\n", x, y);
         }

@@ -197,8 +197,10 @@ static blob_t nca_build(nca_header_t* header, const blob_t* body) {
     aes_encrypt(aes, header->encrypted_keys, section_keys, sizeof(section_keys));
     free_aes_ctx(aes);
     blob_t nca = {zalloc(0xC00 + body->size), 0xC00 + body->size};
+    nca_header_t stored = *header; /* little-endian, as a file has it: header stays in the host's order */
+    nca_header_swap(&stored);
     aes = new_aes_ctx(header_key, 32, AES_MODE_XTS);
-    aes_xts_encrypt(aes, nca.data, header, 0xC00, 0, 0x200);
+    aes_xts_encrypt(aes, nca.data, &stored, 0xC00, 0, 0x200);
     free_aes_ctx(aes);
     memcpy(nca.data + 0xC00, body->data, body->size);
     return nca;
@@ -650,7 +652,7 @@ static void xts_partition(void) {
     synthetic_keys(&tool);
     blob_t section = {zalloc(0x1000), 0x1000};
     pfs0_header_t* pfs = (pfs0_header_t*)(section.data + 0x200);
-    pfs->magic = MAGIC_PFS0;
+    pfs->magic = snx_le32(MAGIC_PFS0); /* in the section, little-endian */
     noise(section.data + 0x200 + sizeof(*pfs), 0x900, 21); /* past the empty partition, in the hashed data */
     pfs0_superblock_t* sb = &fs->pfs0_superblock;
     sb->block_size = 0x400;
@@ -701,10 +703,10 @@ static void gamecard_key_area(void) {
     xci_header_t* header = (xci_header_t*)(card.data + XCI_KEY_AREA_SIZE);
     hfs0_header_t* root = (hfs0_header_t*)(card.data + XCI_KEY_AREA_SIZE + 0x200);
     noise(card.data, 0x200, 11); /* the initial data */
-    root->magic = MAGIC_HFS0;
-    header->magic = MAGIC_HEAD;
-    header->hfs0_offset = 0x200;
-    header->hfs0_header_size = sizeof(*root);
+    root->magic = snx_le32(MAGIC_HFS0); /* in the file, little-endian */
+    header->magic = snx_le32(MAGIC_HEAD);
+    header->hfs0_offset = snx_le64(0x200);
+    header->hfs0_header_size = snx_le64(sizeof(*root));
     sha256_hash_buffer(header->hfs0_header_hash, root, sizeof(*root));
     sha256_hash_buffer(header->crypto_header_hash, card.data, 0x200);
     ctx.tool_ctx = &tool;
@@ -712,7 +714,7 @@ static void gamecard_key_area(void) {
     xci_process(&ctx);
     CHECK(ctx.key_area_size == XCI_KEY_AREA_SIZE);
     CHECK(ctx.initial_data_validity == VALIDITY_VALID);
-    CHECK(ctx.header.magic == MAGIC_HEAD);
+    CHECK(snx_le32(ctx.header.magic) == MAGIC_HEAD);
     CHECK(ctx.hfs0_hash_validity == VALIDITY_VALID);
     CHECK(ctx.partition_ctx.offset == XCI_KEY_AREA_SIZE + 0x200);
     CHECK(ctx.partition_ctx.header != NULL && ctx.partition_ctx.header->magic == MAGIC_HFS0);

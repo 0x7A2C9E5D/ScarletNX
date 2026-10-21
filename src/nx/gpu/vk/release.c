@@ -11,6 +11,7 @@
    fragment programs' storage images (their copies recorded at the release, vk_gfx_image_put_aside). */
 #include <string.h>
 #include "common/utilities/common.h"
+#include "common/utilities/endian.h"
 #include "nx/gpu/gpu.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/vk/pending_pages.h"
@@ -111,11 +112,10 @@ static void rix_track(Release* r, u64 seq, int delta) {
 static void perform(Release* r) {
     if (r->samples) { /* the count, as the report's structure size says: one word, or the value and the timestamp */
         u64 v = vk_query_value(r->qch, r->qfirst, r->qend);
-        u32 w = (u32)v;
         if (r->len == 4)
-            memcpy(r->data, &w, 4);
+            snx_st_le32(r->data, (u32)v);
         else
-            memcpy(r->data, &v, 8);
+            snx_st_le64(r->data, v);
     }
     vk_result_begin();
     if (r->gva)
@@ -259,7 +259,7 @@ void vk_release_samples(u64 gva, u32 len, u32 counter, u64 first, u64 end, u64 t
     r.qch = counter;
     r.qfirst = first;
     r.qend = end;
-    memcpy(r.data + 8, &ticks, 8);
+    snx_st_le64(r.data + 8, ticks); /* guest bytes, as release_write's payloads are */
     release(&r);
 }
 /* the releases queued, and the submissions the oldest waits for: read unlocked, for the stall report */

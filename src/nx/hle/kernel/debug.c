@@ -39,11 +39,6 @@ static int sym_cmp(const void* a, const void* b) {
     return x < y ? -1 : x > y;
 }
 static u64 rd(u64 a, int wide) { return wide ? gr64(a) : gr32(a); }
-static u16 gr16(u64 a) {
-    u16 v;
-    memcpy(&v, GP(a), 2);
-    return v;
-}
 static void module_symbols(const SnxModInfo* mi, int wide) {
     u64 base = mi->base, end = mi->base + mi->size, mod0, dyn, symtab = 0, strtab = 0, syment = wide ? 24 : 16, s;
     u32 cap = g_hle.debug.nsyms;

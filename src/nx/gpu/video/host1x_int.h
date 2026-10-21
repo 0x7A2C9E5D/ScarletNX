@@ -7,22 +7,15 @@
 #include "nx/gpu/gpu.h"
 #include "nx/hle/services/nvdrv.h"
 #include "nx/memory/mem.h"
+#include "common/utilities/endian.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
 #include <stdlib.h>
 #include <string.h>
 
 /* The little-endian u32 or u64 at byte off of p, at any alignment */
-static inline u32 rd32(const u8* p, u32 off) {
-    u32 v;
-    memcpy(&v, p + off, 4);
-    return v;
-}
-static inline u64 rd64(const u8* p, u32 off) {
-    u64 v;
-    memcpy(&v, p + off, 8);
-    return v;
-}
+static inline u32 rd32(const u8* p, u32 off) { return snx_ld_le32(p + off); }
+static inline u64 rd64(const u8* p, u32 off) { return snx_ld_le64(p + off); }
 
 /* host1x.c: the guest memory behind [iova, iova + len), or NULL unless one mapping holds all of it (len 0 is NULL
    too). Callable from any thread */

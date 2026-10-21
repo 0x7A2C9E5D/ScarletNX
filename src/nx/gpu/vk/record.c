@@ -418,13 +418,21 @@ static void push_run(const void* p) {
 }
 void rec_CmdPushConstants(VkCommandBuffer cb, VkPipelineLayout layout, VkShaderStageFlags stages, u32 offset, u32 size,
                           const void* data) {
+    /* the device reads push constants as it reads memory, little-endian: a big-endian host swaps the words */
     if (!rec_on(cb)) {
+        u32 le[64];
+        if (SNX_HOST_BE && size <= sizeof le) {
+            memcpy(le, data, size);
+            snx_le32_array(le, size / 4);
+            data = le;
+        }
         vkCmdPushConstants(cb, layout, stages, offset, size, data);
         return;
     }
     PushArgs* x = rec_push(push_run, REC_AL(sizeof *x) + size);
     *x = (PushArgs){cb, layout, stages, offset, size};
     memcpy((u8*)x + REC_AL(sizeof *x), data, size);
+    snx_le32_array((u8*)x + REC_AL(sizeof *x), size / 4);
     rec_commit();
 }
 

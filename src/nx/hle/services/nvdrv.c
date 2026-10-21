@@ -15,6 +15,7 @@
 #include "hle/services/nvdrv.swipc.inc"
 #include "nx/hle/kernel/kernel.h"
 #include "nx/memory/mem.h"
+#include "common/utilities/endian.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
 #include "nx/gpu/video/host1x.h"
@@ -503,18 +504,11 @@ static void nv_events_check(void) {
    it whatever n says), n the bytes the device may use, and answers an NvError: 0 Success, 1 BadValue, 4 BadParameter,
    5 Timeout, 6 InsufficientMemory (8, a bad fd, is nv_ioctl's). Layouts are Switchbrew's ("NV services") */
 enum { DEV_NONE, DEV_NVMAP, DEV_AS, DEV_CTRL, DEV_CTRLGPU, DEV_GPU, DEV_NVDEC, DEV_VIC, DEV_OTHER };
-static u32 rd32(const u8* d, u32 off) {
-    u32 v;
-    memcpy(&v, d + off, 4);
-    return v;
-}
-static u64 rd64(const u8* d, u32 off) {
-    u64 v;
-    memcpy(&v, d + off, 8);
-    return v;
-}
-static void wr32(u8* d, u32 off, u32 v) { memcpy(d + off, &v, 4); }
-static void wr64(u8* d, u32 off, u64 v) { memcpy(d + off, &v, 8); }
+/* an ioctl's argument block is a copy of the guest's buffer, so its words are little-endian */
+static u32 rd32(const u8* d, u32 off) { return snx_ld_le32(d + off); }
+static u64 rd64(const u8* d, u32 off) { return snx_ld_le64(d + off); }
+static void wr32(u8* d, u32 off, u32 v) { snx_st_le32(d + off, v); }
+static void wr64(u8* d, u32 off, u64 v) { snx_st_le64(d + off, v); }
 /* an ioctl's second output (Ioctl3), up to its size */
 static void copy_extra(u8* extra, u32 nextra, const void* src, u32 size) {
     if (extra) memcpy(extra, src, size < nextra ? size : nextra);
@@ -918,7 +912,7 @@ static void gpu_characteristics(u8* c) { /* 0xA0 bytes */
         0x30326D67, 0x62,                                      /* the chip's name, "gm20b" (u64) */
         0,          0                                          /* compression bit store base (u64) */
     };
-    memcpy(c, words, 0xA0);
+    for (u32 i = 0; i < 0xA0 / 4; i++) wr32(c, i * 4, words[i]); /* a u64's halves are low then high, as stored */
 }
 static u32 ioctl_ctrlgpu(u32 cmd, u8* d, u32 n, u8* extra, u32 nextra) {
     static const u8 sms[4] = {0, 0, 0, 1}; /* {gpc, tpc} of each of the two SMs */
@@ -927,7 +921,7 @@ static u32 ioctl_ctrlgpu(u32 cmd, u8* d, u32 n, u8* extra, u32 nextra) {
         case 0x01: wr32(d, 0, 1); return 0; /* ZCULL_GET_CTX_SIZE */
         case 0x02: {                        /* ZCULL_GET_INFO */
             static const u32 info[10] = {0x20, 0x20, 0x400, 0x800, 0x20, 0x20, 0xC0, 0x20, 0x40, 0x10};
-            memcpy(d, info, sizeof info);
+            for (u32 i = 0; i < 10; i++) wr32(d, i * 4, info[i]);
             return 0;
         }
         case 0x03: /* ZBC_SET_TABLE */
@@ -941,9 +935,8 @@ static u32 ioctl_ctrlgpu(u32 cmd, u8* d, u32 n, u8* extra, u32 nextra) {
             return 0;
         }
         case 0x06: { /* GET_TPC_MASKS {u32 mask_buf_size, pad, u64 mask_buf_addr; u32 mask at 16} */
-            u32 mask = 3;
-            wr32(d, 16, mask);
-            if (nextra >= 4) copy_extra(extra, nextra, &mask, 4);
+            wr32(d, 16, 3);
+            if (nextra >= 4) copy_extra(extra, nextra, d + 16, 4);
             return 0;
         }
         case 0x13: /* NUM_VSMS {u32 num_vsms, u32 reserved} */

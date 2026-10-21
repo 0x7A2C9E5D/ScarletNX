@@ -136,8 +136,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                      int can_preserve, int can_preserve_f64, int can_subgroup);
 u32* shader_compute_to_spirv(const u8* code, u32 max_bytes, ShaderInfo* si, size_t* word_count, int can_flush,
                              int can_preserve);
-/* reads word off (bytes) of constant buffer idx for jump tables: 1 when it could. Set by whoever translates, NULL
-   offline */
+/* reads word off (bytes) of constant buffer idx for jump tables, into *out as a host number: 1 when it could. Set by
+   whoever translates, NULL offline */
 extern int (*g_shader_cb_read)(u32 idx, u32 off, u32* out);
 /* the targets of the BRX at word index from its jump table, at most max_targets, or -1 */
 int shader_brx_targets(const u64* words, u32 index, u32 count, u32* targets, int max_targets);

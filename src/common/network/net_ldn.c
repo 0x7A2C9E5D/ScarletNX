@@ -19,6 +19,7 @@
 #include "common/network/net_ldn.h"
 #include "common/network/net_room.h"
 #include "common/network/net_internal.h"
+#include "common/utilities/endian.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -172,7 +173,7 @@ void snx_ldn_fake_mac(const uint8_t ip[4], uint8_t mac[6]) {
 static void addr_of(SnxSockAddr* a, const uint8_t ip[4], uint16_t port) {
     memset(a, 0, sizeof *a);
     a->family = SNX_AF_INET;
-    a->port = (uint16_t)((port >> 8) | (port << 8)); /* network order */
+    snx_st_be16(&a->port, port); /* network order */
     memcpy(a->addr, ip, 4);
 }
 static void signal_event(SnxSocket* ev) {
@@ -208,7 +209,7 @@ static int listen_socket(SnxSocket** out, const uint8_t ip[4]) {
 #ifndef _WIN32
     { /* to listen again on a port a closed session left in TIME_WAIT. Windows' SO_REUSEADDR lets a second socket take
          a port in use, so the second console would never be told to look for another address */
-        int one = 1;
+        int one = (int)snx_le32(1); /* option values are the guest's (net.h) */
         snx_socket_setsockopt(s, SNX_SOL_SOCKET, SNX_SO_REUSEADDR, &one, sizeof one);
     }
 #endif
@@ -226,7 +227,7 @@ static int listen_socket(SnxSocket** out, const uint8_t ip[4]) {
 static int udp_socket(SnxSocket** out, const uint8_t ip[4]) {
     SnxSocket* s;
     SnxSockAddr a;
-    int one = 1, r = snx_socket_open(&s, SNX_AF_INET, SNX_SOCK_DGRAM, 0);
+    int one = (int)snx_le32(1), r = snx_socket_open(&s, SNX_AF_INET, SNX_SOCK_DGRAM, 0); /* the guest's order */
     if (r) return r;
     snx_socket_setsockopt(s, SNX_SOL_SOCKET, SNX_SO_REUSEADDR, &one, sizeof one);
     snx_socket_setsockopt(s, SNX_SOL_SOCKET, SNX_SO_BROADCAST, &one, sizeof one);
@@ -389,8 +390,8 @@ static void accept_station(SnxLdn* l) {
         snx_socket_unref(c); /* full, or no network here: closing is ldn_mitm's answer too */
         return;
     }
-    tv.sec = LDN_SEND_TIMEOUT_US / 1000000;
-    tv.usec = LDN_SEND_TIMEOUT_US % 1000000;
+    tv.sec = (int64_t)snx_le64(LDN_SEND_TIMEOUT_US / 1000000); /* the guest's order, as every option value */
+    tv.usec = (int64_t)snx_le64(LDN_SEND_TIMEOUT_US % 1000000);
     snx_socket_setsockopt(c, SNX_SOL_SOCKET, SNX_SO_SNDTIMEO, &tv, sizeof tv);
     l->st[i].s = c;
     l->st[i].node = 0;
@@ -695,7 +696,7 @@ void snx_ldn_node_init(const SnxLdn* l, SnxLdnNodeInfo* node, const uint8_t user
     node->is_connected = 1;
     memcpy(node->user_name, user_name, SNX_LDN_USER_NAME);
     node->user_name[SNX_LDN_USER_NAME - 1] = 0;
-    node->version = version;
+    node->version = (int16_t)snx_le16((uint16_t)version); /* the structures stay little-endian */
 }
 
 int snx_ldn_create_network(SnxLdn* l, const SnxLdnNetworkInfo* info) {
@@ -706,7 +707,7 @@ int snx_ldn_create_network(SnxLdn* l, const SnxLdnNetworkInfo* info) {
     }
     l->info = *info;
     memcpy(l->info.advertise_data, l->adv, sizeof l->adv);
-    l->info.advertise_data_size = (uint16_t)l->adv_size;
+    l->info.advertise_data_size = snx_le16((uint16_t)l->adv_size);
     memset(l->updates, 0, sizeof l->updates);
     l->updates[0] |= SNX_LDN_NODE_CONNECT;
     l->role = ROLE_HOST;
@@ -735,25 +736,28 @@ int snx_ldn_set_advertise_data(SnxLdn* l, const void* data, size_t size) {
     l->adv_size = size;
     if (l->role == ROLE_HOST) {
         memcpy(l->info.advertise_data, l->adv, sizeof l->adv);
-        l->info.advertise_data_size = (uint16_t)size;
+        l->info.advertise_data_size = snx_le16((uint16_t)size);
         sync_stations(l);
     }
     snx_unlock(&l->lk);
     return 0;
 }
 
+/* the fields compared are little-endian on both sides: only the flags and the wider network type are numbers */
 static int filter_accepts(const SnxLdnScanFilter* f, const SnxLdnNetworkInfo* i) {
+    uint32_t flag;
     if (!f) return 1;
-    if ((f->flag & SNX_LDN_FILTER_LOCAL_COMMUNICATION_ID) && f->local_communication_id != i->local_communication_id)
+    flag = snx_le32(f->flag);
+    if ((flag & SNX_LDN_FILTER_LOCAL_COMMUNICATION_ID) && f->local_communication_id != i->local_communication_id)
         return 0;
-    if ((f->flag & SNX_LDN_FILTER_SESSION_ID) &&
+    if ((flag & SNX_LDN_FILTER_SESSION_ID) &&
         (f->session_id[0] != i->session_id[0] || f->session_id[1] != i->session_id[1]))
         return 0;
-    if ((f->flag & SNX_LDN_FILTER_NETWORK_TYPE) && f->network_type != i->network_type) return 0;
-    if ((f->flag & SNX_LDN_FILTER_SSID) &&
+    if ((flag & SNX_LDN_FILTER_NETWORK_TYPE) && snx_le32(f->network_type) != i->network_type) return 0;
+    if ((flag & SNX_LDN_FILTER_SSID) &&
         (f->ssid_length != i->ssid_length || memcmp(f->ssid, i->ssid, f->ssid_length)))
         return 0;
-    if ((f->flag & SNX_LDN_FILTER_SCENE_ID) && f->scene_id != i->scene_id) return 0;
+    if ((flag & SNX_LDN_FILTER_SCENE_ID) && f->scene_id != i->scene_id) return 0;
     return 1;
 }
 int snx_ldn_scan(SnxLdn* l, const SnxLdnScanFilter* filter, SnxLdnNetworkInfo* out, int max, int wait_ms) {
@@ -851,8 +855,8 @@ int snx_ldn_connect(SnxLdn* l, const SnxLdnNetworkInfo* info, const uint8_t user
     if (l->room) return room_connect(l, &me, host, wait_ms);
     r = snx_socket_open(&s, SNX_AF_INET, SNX_SOCK_STREAM, 0);
     if (r) return r;
-    tv.sec = wait_ms / 1000;
-    tv.usec = (wait_ms % 1000) * 1000;
+    tv.sec = (int64_t)snx_le64((uint64_t)(wait_ms / 1000)); /* the guest's order, as every option value */
+    tv.usec = (int64_t)snx_le64((uint64_t)((wait_ms % 1000) * 1000));
     snx_socket_setsockopt(s, SNX_SOL_SOCKET, SNX_SO_SNDTIMEO, &tv, sizeof tv);
     addr_of(&a, host, SNX_LDN_PORT);
     r = snx_socket_connect(s, &a);

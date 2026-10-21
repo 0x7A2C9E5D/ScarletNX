@@ -67,8 +67,8 @@ u64 bl_offset(u32 x, u32 y, u32 z, u32 wb, u32 h, u32 bh, u32 bd) {
 #define SENT  0xEE /* what the output holds before the job: a byte still SENT was not written */
 
 static u32 regs[0x800 / 4];
-static void w32(u32 off, u32 v) { memcpy(arena + off, &v, 4); }
-static void w64(u32 off, u64 v) { memcpy(arena + off, &v, 8); }
+static void w32(u32 off, u32 v) { snx_st_le32(arena + off, v); }
+static void w64(u32 off, u64 v) { snx_st_le64(arena + off, v); }
 static u32 pitch(u32 wbytes) { return (wbytes + 255) & ~255u; }
 
 typedef struct {

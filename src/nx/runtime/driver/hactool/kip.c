@@ -13,28 +13,28 @@ void ini1_process(ini1_ctx_t *ctx) {
         exit(EXIT_FAILURE);
     }
 
-    if (raw_header.magic != MAGIC_INI1 || raw_header.num_processes > INI1_MAX_KIPS) {
+    if (snx_le32(raw_header.magic) != MAGIC_INI1 || snx_le32(raw_header.num_processes) > INI1_MAX_KIPS) {
         printf("Error: INI1 is corrupt!\n");
         exit(EXIT_FAILURE);
     }
 
-    ctx->header = malloc(raw_header.size);
+    ctx->header = malloc(snx_le32(raw_header.size));
     if (ctx->header == NULL) {
         fprintf(stderr, "Failed to allocate INI1 header!\n");
         exit(EXIT_FAILURE);
     }
 
     fseeko64(ctx->file, 0, SEEK_SET);
-    if (fread(ctx->header, 1, raw_header.size, ctx->file) != raw_header.size) {
+    if (fread(ctx->header, 1, snx_le32(raw_header.size), ctx->file) != snx_le32(raw_header.size)) {
         fprintf(stderr, "Failed to read INI1!\n");
         exit(EXIT_FAILURE);
     }
 
     uint64_t offset = 0;
-    for (unsigned int i = 0; i < ctx->header->num_processes; i++) {
+    for (unsigned int i = 0; i < snx_le32(ctx->header->num_processes); i++) {
         ctx->kips[i].tool_ctx = ctx->tool_ctx;
         ctx->kips[i].header = (kip1_header_t *)&ctx->header->kip_data[offset];
-        if (ctx->kips[i].header->magic != MAGIC_KIP1) {
+        if (snx_le32(ctx->kips[i].header->magic) != MAGIC_KIP1) {
             fprintf(stderr, "INI1 is corrupted!\n");
             exit(EXIT_FAILURE);
         }
@@ -52,10 +52,10 @@ void ini1_process(ini1_ctx_t *ctx) {
 
 void ini1_print(ini1_ctx_t *ctx) {
     printf("INI1:\n");
-    printf("    Number of Processes:            %02"PRIx32"\n", ctx->header->num_processes);
-    printf("    Size:                           %08"PRIx32"\n", ctx->header->size);
+    printf("    Number of Processes:            %02"PRIx32"\n", snx_le32(ctx->header->num_processes));
+    printf("    Size:                           %08"PRIx32"\n", snx_le32(ctx->header->size));
     printf("\n");
-    for (unsigned int i = 0; i < ctx->header->num_processes; i++) {
+    for (unsigned int i = 0; i < snx_le32(ctx->header->num_processes); i++) {
         printf("Process %02"PRIx32":\n", i);
         kip1_print(&ctx->kips[i], 1);
         printf("\n");
@@ -73,7 +73,7 @@ void ini1_save(ini1_ctx_t *ctx) {
     }
     if (dirpath != NULL && dirpath->valid == VALIDITY_VALID) {
         os_makedir(dirpath->os_path);
-        for (unsigned int i = 0; i < ctx->header->num_processes; i++) {
+        for (unsigned int i = 0; i < snx_le32(ctx->header->num_processes); i++) {
             char padded_name[0x20];
             memset(&padded_name, 0, sizeof(padded_name));
             memcpy(&padded_name, ctx->kips[i].header->name, sizeof(ctx->kips[i].header->name));
@@ -113,11 +113,11 @@ char *kip1_get_json(kip1_ctx_t *ctx) {
     /* Add KIP1 header fields. */
     strcpy(work_buffer, ctx->header->name);
     cJSON_AddStringToObject(kip_json, "name", work_buffer);
-    cJSON_AddU64ToObject(kip_json, "title_id", ctx->header->title_id);
-    cJSON_AddU32ToObject(kip_json, "main_thread_stack_size", ctx->header->section_headers[1].attribute);
+    cJSON_AddU64ToObject(kip_json, "title_id", snx_le64(ctx->header->title_id));
+    cJSON_AddU32ToObject(kip_json, "main_thread_stack_size", snx_le32(ctx->header->section_headers[1].attribute));
     cJSON_AddNumberToObject(kip_json, "main_thread_priority", ctx->header->main_thread_priority);
     cJSON_AddNumberToObject(kip_json, "default_cpu_id", ctx->header->default_core);
-    cJSON_AddNumberToObject(kip_json, "process_category", ctx->header->process_category);
+    cJSON_AddNumberToObject(kip_json, "process_category", snx_le32(ctx->header->process_category));
 
      /* Add KAC. */
     cJSON *kac_json = kac_get_json(ctx->header->capabilities, sizeof(ctx->header->capabilities) / sizeof(uint32_t));
@@ -130,9 +130,9 @@ char *kip1_get_json(kip1_ctx_t *ctx) {
 }
 
 static void kip1_blz_uncompress(void *hdr_end) {
-    uint32_t addl_size = ((uint32_t *)hdr_end)[-1];
-    uint32_t header_size = ((uint32_t *)hdr_end)[-2];
-    uint32_t cmp_and_hdr_size = ((uint32_t *)hdr_end)[-3];
+    uint32_t addl_size = snx_ld_le32((unsigned char *)hdr_end - 4);
+    uint32_t header_size = snx_ld_le32((unsigned char *)hdr_end - 8);
+    uint32_t cmp_and_hdr_size = snx_ld_le32((unsigned char *)hdr_end - 12);
 
     unsigned char *cmp_start = (unsigned char *)(((uintptr_t)hdr_end) - cmp_and_hdr_size);
     uint32_t cmp_ofs = cmp_and_hdr_size - header_size;
@@ -179,6 +179,7 @@ static void *kip1_uncompress(kip1_ctx_t *ctx, uint64_t *size) {
     /* Make new header with correct sizes, fixed flags. */
     kip1_header_t new_header = *ctx->header;
     for (unsigned int i = 0; i < 3; i++) {
+        /* ScarletNX: words copied as stored, little-endian */
         new_header.section_headers[i].compressed_size = new_header.section_headers[i].out_size;
     }
     new_header.flags &= 0xF8;
@@ -195,12 +196,12 @@ static void *kip1_uncompress(kip1_ctx_t *ctx, uint64_t *size) {
     uint64_t old_offset = 0x100;
     for (unsigned int i = 0; i < 3; i++) {
         // Copy in section data */
-        memcpy(new_kip + new_offset, (unsigned char *)ctx->header + old_offset, ctx->header->section_headers[i].compressed_size);
+        memcpy(new_kip + new_offset, (unsigned char *)ctx->header + old_offset, snx_le32(ctx->header->section_headers[i].compressed_size));
         if (ctx->header->flags & (1 << i)) {
-            kip1_blz_uncompress(new_kip + new_offset + ctx->header->section_headers[i].compressed_size);
+            kip1_blz_uncompress(new_kip + new_offset + snx_le32(ctx->header->section_headers[i].compressed_size));
         }
-        new_offset += ctx->header->section_headers[i].out_size;
-        old_offset += ctx->header->section_headers[i].compressed_size;
+        new_offset += snx_le32(ctx->header->section_headers[i].out_size);
+        old_offset += snx_le32(ctx->header->section_headers[i].compressed_size);
     }
 
     return new_kip;
@@ -215,7 +216,7 @@ void kip1_process(kip1_ctx_t *ctx) {
         exit(EXIT_FAILURE);
     }
 
-    if (raw_header.magic != MAGIC_KIP1) {
+    if (snx_le32(raw_header.magic) != MAGIC_KIP1) {
         printf("Error: KIP1 is corrupt!\n");
         exit(EXIT_FAILURE);
     }
@@ -244,21 +245,21 @@ void kip1_process(kip1_ctx_t *ctx) {
 
 void kip1_print(kip1_ctx_t *ctx, int suppress) {
     if (!suppress) printf("KIP1:\n");
-    printf("    Title ID:                       %016"PRIx64"\n", ctx->header->title_id);
+    printf("    Title ID:                       %016"PRIx64"\n", snx_le64(ctx->header->title_id));
     char padded_name[13];
     memset(&padded_name, 0, sizeof(padded_name));
     memcpy(&padded_name, ctx->header->name, sizeof(ctx->header->name));
     printf("    Name:                           %s\n", padded_name);
-    printf("    Process Category:               %s\n", npdm_get_proc_category(ctx->header->process_category));
+    printf("    Process Category:               %s\n", npdm_get_proc_category(snx_le32(ctx->header->process_category)));
     printf("    Main Thread Priority:           %"PRId8"\n", ctx->header->main_thread_priority);
     printf("    Default CPU Core:               %"PRId8"\n", ctx->header->default_core);
     printf("    Is 64 Bit:                      %s\n", (ctx->header->flags & (1 << 3)) ? "True" : "False");
     printf("    Is Address Space 64 Bit:        %s\n", (ctx->header->flags & (1 << 4)) ? "True" : "False");
     printf("    Sections:\n");
-    printf("        .text:                      %08"PRIx32"-%08"PRIx32"\n", ctx->header->section_headers[0].out_offset, ctx->header->section_headers[0].out_offset + align(ctx->header->section_headers[0].out_size, 0x1000));
-    printf("        .rodata:                    %08"PRIx32"-%08"PRIx32"\n", ctx->header->section_headers[1].out_offset, ctx->header->section_headers[1].out_offset + align(ctx->header->section_headers[1].out_size, 0x1000));
-    printf("        .rwdata:                    %08"PRIx32"-%08"PRIx32"\n", ctx->header->section_headers[2].out_offset, ctx->header->section_headers[2].out_offset + ctx->header->section_headers[2].out_size);
-    printf("        .bss:                       %08"PRIx32"-%08"PRIx32"\n", ctx->header->section_headers[2].out_offset + ctx->header->section_headers[2].out_size, align(ctx->header->section_headers[3].out_offset + ctx->header->section_headers[3].out_size, 0x1000));
+    printf("        .text:                      %08"PRIx32"-%08"PRIx32"\n", snx_le32(ctx->header->section_headers[0].out_offset), snx_le32(ctx->header->section_headers[0].out_offset) + align(snx_le32(ctx->header->section_headers[0].out_size), 0x1000));
+    printf("        .rodata:                    %08"PRIx32"-%08"PRIx32"\n", snx_le32(ctx->header->section_headers[1].out_offset), snx_le32(ctx->header->section_headers[1].out_offset) + align(snx_le32(ctx->header->section_headers[1].out_size), 0x1000));
+    printf("        .rwdata:                    %08"PRIx32"-%08"PRIx32"\n", snx_le32(ctx->header->section_headers[2].out_offset), snx_le32(ctx->header->section_headers[2].out_offset) + snx_le32(ctx->header->section_headers[2].out_size));
+    printf("        .bss:                       %08"PRIx32"-%08"PRIx32"\n", snx_le32(ctx->header->section_headers[2].out_offset) + snx_le32(ctx->header->section_headers[2].out_size), align(snx_le32(ctx->header->section_headers[3].out_offset) + snx_le32(ctx->header->section_headers[3].out_size), 0x1000));
     printf("    Kernel Access Control:\n");
     kac_print(ctx->header->capabilities, 0x20);
     printf("\n");

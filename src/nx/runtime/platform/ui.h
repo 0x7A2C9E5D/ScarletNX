@@ -32,9 +32,10 @@ int ui_picture(SnxUiList* l, float x, float y, float side);
 /* ASCII text, 0xFE the font's square, in 8x16 glyphs at a whole scale; returns the width drawn */
 float ui_text(SnxUiList* l, float x, float y, int scale, const char* s, u32 rgba);
 
-/* The atlas, R G B A from the low byte with alpha premultiplied, made from the sprites' image when the window opens
-   (sdl3.c decodes it), the users read by then, and freed by ui_atlas_done once the renderer has it, both under
-   ui_lock. It is the image's width and SNX_UI_PICTURE rows taller. version counts the images given, 0 for none yet */
+/* The atlas, each texel the bytes R G B A (a little-endian u32) with alpha premultiplied, made from the sprites'
+   image when the window opens (sdl3.c decodes it to the same bytes, SDL's RGBA32), the users read by then, and freed
+   by ui_atlas_done once the renderer has it, both under ui_lock. It is the image's width and SNX_UI_PICTURE rows
+   taller. version counts the images given, 0 for none yet */
 void ui_atlas_set(const u32* sprites, int w, int h);
 const u32* ui_atlas(int* w, int* h, u32* version);
 void ui_atlas_done(void);

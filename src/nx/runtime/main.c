@@ -241,10 +241,6 @@ static void game_dirs(void) {
             WARN("%s: %s=%s is none of config=, state= and cache=, the folders the game reads from it\n", record, key,
                  value);
     }
-#if SNX_HOST_BE
-    /* the services, IPC and the GPU read the guest's memory as this machine's numbers (docs/PPC64.md) */
-    fatal("Switch games don't run on big-endian machines yet. The Linux runtime (scarletnx-gnuabi) does.");
-#endif
     kind_dir(g_confdir, sizeof g_confdir, SNX_USER_CONFIG, "settings", recorded[SNX_USER_CONFIG], record);
     kind_dir(g_statedir, sizeof g_statedir, SNX_USER_STATE, "log and threads.txt", recorded[SNX_USER_STATE], record);
     kind_dir(g_cachedir, sizeof g_cachedir, SNX_USER_CACHE, "caches", recorded[SNX_USER_CACHE], record);
