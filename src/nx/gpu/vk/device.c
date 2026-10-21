@@ -92,6 +92,16 @@ static int has_layer(const char* name) {
     return found;
 }
 
+/* VkPhysicalDevicePortabilitySubsetFeaturesKHR, which vulkan_beta.h holds back */
+#define PORTABILITY_FEATURES_STYPE ((VkStructureType)1000163000)
+typedef struct {
+    VkStructureType sType;
+    void* pNext;
+    VkBool32 constantAlphaColorBlendFactors, events, imageViewFormatReinterpretation, imageViewFormatSwizzle,
+        imageView2DOn3DImage, multisampleArrayImage, mutableComparisonSamplers, pointPolygons, samplerMipLodBias,
+        separateStencilMaskRef, shaderSampleRateInterpolationFunctions, tessellationIsolines, tessellationPointMode,
+        triangleFans, vertexAttributeAccessBeyondStride;
+} PortabilityFeatures;
 /* MoltenVK (macOS, iOS) is a portability driver: the loader lists it only for an instance that asks for those */
 static int has_instance_extension(const char* name) {
     u32 n = 0;
@@ -337,6 +347,7 @@ static int create_device(void) {
     int has_budget = 0;
     u32 next = 0;
     int has_shader_clock = 0, has_feedback_dynamic = 0, has_cond = 0, has_provoking = 0, video_exts = 0;
+    int has_portability = 0;
     if (!g_opt_headless) ext[next++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
     {
         u32 n = 0;
@@ -360,7 +371,10 @@ static int create_device(void) {
                80% of a heap's size as its budget, blind to what the desktop and other programs hold */
             if (!strcmp(e[i].extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) has_budget = 1;
             /* a portability driver's subset must be enabled when it has one (MoltenVK) */
-            if (!strcmp(e[i].extensionName, "VK_KHR_portability_subset")) ext[next++] = "VK_KHR_portability_subset";
+            if (!strcmp(e[i].extensionName, "VK_KHR_portability_subset")) {
+                ext[next++] = "VK_KHR_portability_subset";
+                has_portability = 1;
+            }
             if (!strcmp(e[i].extensionName, VK_KHR_VIDEO_QUEUE_EXTENSION_NAME) ||
                 !strcmp(e[i].extensionName, VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) ||
                 !strcmp(e[i].extensionName, VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME))
@@ -432,6 +446,12 @@ static int create_device(void) {
     if (has_provoking) {
         *tail = &qprov;
         tail = &qprov.pNext;
+    }
+    /* with the subset enabled, each of its features is off until the device asks for it: a view's swizzle, for one */
+    PortabilityFeatures qport = {.sType = PORTABILITY_FEATURES_STYPE};
+    if (has_portability) {
+        *tail = &qport;
+        tail = &qport.pNext;
     }
     if (has_shader_clock) *tail = &qclock;
     vkGetPhysicalDeviceFeatures2(g_vk.phys, &f2);
@@ -516,6 +536,9 @@ static int create_device(void) {
         chain = &fclock;
         ext[next++] = VK_KHR_SHADER_CLOCK_EXTENSION_NAME;
     }
+    PortabilityFeatures fport = qport;
+    fport.pNext = chain;
+    if (has_portability) chain = &fport;
     VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT floop = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT,
         .pNext = chain,
