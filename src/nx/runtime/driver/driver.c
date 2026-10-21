@@ -1095,6 +1095,26 @@ int snx_driver(int argc, char** argv) {
             n -= 1 + own;
             --i;
         }
+    /* -r's AOT build names the profile cache and hooks direct calls; both are the recompiler's, not the game's.
+       Left in rest they count as extra dump inputs */
+    for (i = 0; automatic && (flags & SNX_RECOMP) && i < n; ++i) {
+        if (!strcmp(rest[i], "--jit-cache")) {
+            if (i + 1 == n) {
+                result = snx_error("--jit-cache requires a file");
+                goto done;
+            }
+            recompile[recompiling++] = rest[i];
+            recompile[recompiling++] = rest[i + 1];
+            memmove(rest + i, rest + i + 2, (size_t)(n - i - 2) * sizeof(*rest));
+            n -= 2;
+            --i;
+        } else if (!strcmp(rest[i], "--hook-direct-calls")) {
+            recompile[recompiling++] = rest[i];
+            memmove(rest + i, rest + i + 1, (size_t)(n - i - 1) * sizeof(*rest));
+            --n;
+            --i;
+        }
+    }
     if (automatic && (n != 1 + tmpfs_args || help)) {
         result = snx_error("automatic preparation accepts one dump file. Pass game arguments after --");
         goto done;
