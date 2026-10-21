@@ -57,13 +57,16 @@ static void read_targets(GpuChannel* ch, Surf** rt, Surf** zt, u32* n) {
         if (a && t[2] && t[3] && t[4]) {
             /* a pitch-linear target (bit 12 of the memory layout) holds its row pitch in bytes where the width is */
             u32 bpp = vk_rt_format(t[4]).bpp, linear = (t[5] >> 12) & 1, w = linear ? t[2] / bpp : t[2];
-            /* COLOR_TARGET_THIRD_DIMENSION names the number of renderable array slices. Vertex shaders may
-               select one with their layer output (the color LUT passes render all slices in one draw). */
-            u32 layers = t[6] & 0xffff;
+            /* COLOR_TARGET_THIRD_DIMENSION (bits 0-27) names the number of renderable array slices, or a volume's
+               depth when the memory word's THIRD_DIMENSION_CONTROL (bit 16, NVIDIA's clb197.h) says so: its slices
+               are then GOB slices of a 3D surface, and the array pitch says nothing. One game's 64x64x64 light
+               volume taken as 64 layers its 1 MiB array pitch apart covered 63 MiB of other memory. Vertex shaders
+               may select one with their layer output (the color LUT passes render all slices in one draw). */
+            u32 layers = t[6] & 0x0fffffff;
             if (!layers || layers > g_vk.props.limits.maxImageArrayLayers) layers = 1;
             if (w)
                 rt[i] = vk_rt_array(a, w, t[3], t[4], t[5], linear ? t[2] : w * bpp, layers, (u64)t[7] * 4,
-                                    (t[6] >> 16) & 1);
+                                    (t[5] >> 16) & 1);
             if (rt[i]) *n = i + 1;
         }
     }

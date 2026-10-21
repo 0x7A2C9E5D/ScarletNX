@@ -159,6 +159,10 @@ comments and developer docs under `.claude/` are out of scope.
   descriptor pools and staging live until its next present now, but a wait lands storage results into guest memory
   the setup may already have read, so the draw starts its setup over when `vk_submit_number()` changed. Copy on the
   GPU instead.
+- A render target with a wrong guest extent is a memory corruptor, not a local bug. A 3D color target taken as an
+  array (its volume bit read from the wrong register) spanned 63 MB: its write-backs replaced a game's movie frames
+  and its temporal-upscaler history, and its flushes cost 24 GPU waits a frame. When rendering breaks in places that
+  share nothing and the frame rate collapses with it, log rt_bytes() of the targets being flushed first.
 - Submodule pins went wrong for a week of commits (a `git submodule add` records the default branch's tip, not the
   tag checked out afterwards). The libraries are CPM packages now (`cmake/dependencies.cmake`), each a release URL with
   its SHA-256: a bump changes both, and the hash is checked against the download. CPM's `OPTIONS` become cache
