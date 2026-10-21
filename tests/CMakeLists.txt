@@ -49,10 +49,12 @@ if(SNX_TEST_SANITIZERS)
         # the Switch runtime: its components, the shader translator and the Vulkan backend
         scarletnx snx_core snx_kernel snx_hle snx_video snx_gpu snx_platform snx_shader snx_vk
         # the GNU ABI runtime
-        scarletnx-gnuabi scarletnx-gnuabi-run
+        scarletnx-gnuabi scarletnx-gnuabi-run snx_gnuabi_program
         # the 3DS runtime
-        scarletnx-3ds snx_ctr_board snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process snx_ctr_native
+        scarletnx-3ds snx_ctr_program snx_ctr_board snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process snx_ctr_native
         snx_ctr_audio snx_ctr_gpu
+        # scarletnx's main where it is the other drivers too
+        snx_multicall
         # the menu, its splash, icon and pads
         scarletnx-gui snx_gui_support snx_i18n snx_gui_languages snx_gui_languages_test snx_splash snx-test-splash
         snx_window_icon snx-test-window-icon snx_pad_sdl
@@ -201,20 +203,20 @@ if(TARGET snx_ctr_board)
             add_test(NAME ctr_swipc_validation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/ctr_swipc.py"
                 $<TARGET_FILE:snx-swipc>)
             add_test(NAME 3ds_driver COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_driver.py"
-                $<TARGET_FILE:scarletnx-3ds>)
+                "${SNX_CTR_PROGRAM}")
             # a CIA read where it lies (snx_ctr_cia_open) against its extraction, on the same fixtures and mutants
             add_executable(snx-test-3ds-container 3ds_container.c)
             snx_test_target(snx-test-3ds-container 11)
             target_link_libraries(snx-test-3ds-container PRIVATE snx_ctr_process)
             add_test(NAME 3ds_container COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_container.py"
-                $<TARGET_FILE:scarletnx-3ds> $<TARGET_FILE:snx-test-3ds-container>)
+                "${SNX_CTR_PROGRAM}" $<TARGET_FILE:snx-test-3ds-container>)
             set(snx_ctr_extract_test_args "")
 
             set(snx_ctr_extract_test_args --aot)
             # TODO: fix this
             if (NOT APPLE)
                 add_test(NAME 3ds_static_pipeline COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_aot.py"
-                    $<TARGET_FILE:scarletnx-3ds> $<TARGET_FILE:snx-test-3ds-native>)
+                    "${SNX_CTR_PROGRAM}" $<TARGET_FILE:snx-test-3ds-native>)
                 set_tests_properties(3ds_static_pipeline PROPERTIES TIMEOUT 180)
             endif()
             if(SNX_TEST_3DS_SUPERTUX)
@@ -224,12 +226,12 @@ if(TARGET snx_ctr_board)
                     set(snx_supertux_oracle_args --oracle)
                 endif()
                 add_test(NAME 3ds_supertux_bootstrap COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_supertux.py"
-                    $<TARGET_FILE:scarletnx-3ds> "${snx_supertux_cia}" $<TARGET_FILE:snx-test-3ds-native> ${snx_supertux_oracle_args})
+                    "${SNX_CTR_PROGRAM}" "${snx_supertux_cia}" $<TARGET_FILE:snx-test-3ds-native> ${snx_supertux_oracle_args})
                 set_tests_properties(3ds_supertux_bootstrap PROPERTIES TIMEOUT 1800 LABELS "external;bootstrap")
             endif()
             
             add_test(NAME 3ds_extract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_extract.py"
-                $<TARGET_FILE:scarletnx-3ds> ${snx_ctr_extract_test_args})
+                "${SNX_CTR_PROGRAM}" ${snx_ctr_extract_test_args})
             set_tests_properties(3ds_extract PROPERTIES TIMEOUT 120)
         endif()
     endif()

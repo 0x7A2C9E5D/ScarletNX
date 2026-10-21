@@ -10,7 +10,8 @@ import tempfile
 
 
 def main():
-    driver = pathlib.Path(sys.argv[1]).resolve()
+    # absolute, not resolved: scarletnx-3ds may be a link to scarletnx, which runs the driver its name says
+    driver = pathlib.Path(sys.argv[1]).absolute()
 
     def run(args, status, contains, cwd=None):
         p = subprocess.run([str(driver), *args], capture_output=True, text=True, cwd=cwd, timeout=10)

@@ -21,10 +21,12 @@
 # cross-compiled and installed into the sysroot (an Arch root of that architecture), and the libraries and licenses
 # to bundle come from there. CI makes the ppc64le, riscv64 and loongarch64 ones this way (.github/workflows/build.yml,
 # appimage-cross). quick-sharun runs natively, and the appimagetool it fetches is the target's: the kernel's binfmt
-# handler for the target runs it and the mkdwarfs inside it, as it runs the plain ELF programs the AppImage starts, so
-# it has to be registered. The target's loader behind `ldd` runs through qemu-user, and the checks at the end run the
-# AppImage itself through qemu-$ARCH: that handler never takes an AppImage, since its runtime's ELF header carries the
-# AppImage magic ("AI\x02" at byte 8) where qemu's mask wants zeros.
+# handler for the target runs it, as it runs the plain ELF programs the AppImage starts, so it has to be registered.
+# appimagetool takes a mkdwarfs on PATH before the target's it would fetch, and a DwarFS image is the same whichever
+# machine makes it: CI puts this machine's there, as the target's compresses many times slower under qemu. The
+# target's loader behind `ldd` runs through qemu-user, the target's files are stripped with llvm-strip, and the checks
+# at the end run the AppImage itself through qemu-$ARCH: that handler never takes an AppImage, since its runtime's ELF
+# header carries the AppImage magic ("AI\x02" at byte 8) where qemu's mask wants zeros.
 set -euo pipefail
 
 SYSROOT=${SYSROOT:-} # the target's system root; empty packages this machine's own /usr
@@ -104,7 +106,15 @@ out=\$(qemu-$ARCH -L "$SYSROOT" "$SYSROOT$interp" --list "\$1" 2>&1) || {
 }
 printf '%s\n' "\$out" | awk -v root="$SYSROOT" '{ for (i = 1; i <= NF; i++) if (\$i ~ /^\//) \$i = root \$i; print }'
 EOF
-    chmod +x "$shim/uname" "$shim/ldd"
+    # quick-sharun strips what it bundles with `strip`, and this machine's knows its own architecture only: it fails on
+    # every file of the target, which quick-sharun lets pass, and the AppImage would carry their symbols and debug
+    # information. llvm-strip takes any
+    llvm_strip=$(command -v llvm-strip) || {
+        echo "llvm-strip strips the $ARCH files, and it is not on PATH" >&2
+        exit 1
+    }
+    printf '#!/bin/sh\nexec %s "$@"\n' "$llvm_strip" >"$shim/strip"
+    chmod +x "$shim/uname" "$shim/ldd" "$shim/strip"
     PATH=$shim:$PATH
     export PATH
     # without the runtime's own libraries from the sysroot the AppImage would start nowhere: stop here, saying why
@@ -206,5 +216,12 @@ for program in scarletnx-3ds scarletnx-gnuabi; do
         echo "The AppImage has no bin/$program, which the launcher runs" >&2
         exit 1
     fi
+    # a name of scarletnx's where it is that driver too (SNX_MULTICALL): sharun has to start it under its own name
+    out=$("${launch[@]}" "$appdir/bin/$program" --help 2>&1 || true)
+    if ! grep -q "^Usage: $program" <<<"$out"; then
+        echo "The AppImage's bin/$program --help is not $program's. It printed:" >&2
+        echo "$out" >&2
+        exit 1
+    fi
 done
-echo "AppImage checked: it looks for its game module next to itself or where --game says, and has the launcher"
+echo "AppImage checked: it looks for its game module next to itself or where --game says, and has the launcher's drivers"

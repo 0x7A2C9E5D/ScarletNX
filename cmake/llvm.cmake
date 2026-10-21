@@ -3,13 +3,16 @@
 # LLVM's C API is required by the recompiler on every platform. SNX_LLVM_CONFIG selects an llvm-config that runs
 # on the build machine and describes the LLVM development files for the target, including when cross-compiling.
 include("${CMAKE_CURRENT_LIST_DIR}/llvm_components.cmake")
-if(ANDROID OR IOS OR (APPLE AND LLVM_DIR AND NOT SNX_LLVM_CONFIG))
+# scarletnx --mcp's A64 disassembler (src/nx/runtime/driver/disasm.c), where LLVM has the AArch64 target. A release
+# leaves it out: it is for working on the runtime, and a static LLVM then links no AArch64 code into a host of another
+option(SNX_A64_DISASM "Build scarletnx --mcp's A64 disassembler, where LLVM has the AArch64 target" ON)
+if(ANDROID OR IOS OR (LLVM_DIR AND NOT SNX_LLVM_CONFIG))
     # Android's and iOS's LLVM (scripts/android-llvm.sh, scripts/apple-llvm.sh) have an llvm-config that only runs on the
-    # device, and the Mac's from scripts/apple-llvm.sh none: their CMake package instead, named by LLVM_DIR
+    # device, and the Mac's from scripts/apple-llvm.sh and Linux's from scripts/linux-llvm.sh none: their CMake package
+    # instead, named by LLVM_DIR
     find_package(LLVM REQUIRED CONFIG)
     llvm_map_components_to_libnames(SNX_LLVM_LIBS ${SNX_LLVM_COMPONENTS})
-    # scarletnx --mcp's A64 disassembler (src/nx/runtime/driver/disasm.c): only an LLVM with the AArch64 target has it
-    if("AArch64" IN_LIST LLVM_TARGETS_TO_BUILD AND TARGET LLVMAArch64Disassembler)
+    if(SNX_A64_DISASM AND "AArch64" IN_LIST LLVM_TARGETS_TO_BUILD AND TARGET LLVMAArch64Disassembler)
         llvm_map_components_to_libnames(SNX_LLVM_DISASM_LIBS aarch64disassembler aarch64desc aarch64info)
         set(SNX_LLVM_A64_DISASM ON)
     endif()
@@ -17,6 +20,7 @@ if(ANDROID OR IOS OR (APPLE AND LLVM_DIR AND NOT SNX_LLVM_CONFIG))
     set(SNX_LLVM_INCLUDE_DIR "${LLVM_INCLUDE_DIRS}")
     set(SNX_LLVM_LIBRARY_DIR "${LLVM_LIBRARY_DIRS}")
     set(SNX_LLVM_SYSTEM_LIBS "")
+    set(SNX_LLVM_SHARED OFF) # their libraries, each static
     message(STATUS "LLVM backend: LLVM ${SNX_LLVM_VERSION} (${LLVM_DIR})")
     return()
 endif()
@@ -50,6 +54,14 @@ if(NOT SNX_LLVM_VERSION OR NOT EXISTS "${SNX_LLVM_INCLUDE_DIR}/llvm-c/Core.h" OR
                         "installation. Check its headers and libraries or select another SNX_LLVM_CONFIG.")
 endif()
 separate_arguments(SNX_LLVM_LIBS UNIX_COMMAND "${SNX_LLVM_LIBS}")
+# a distribution's libLLVM, whose own dependencies the program's search path has to find (src/3ds)
+execute_process(COMMAND "${SNX_LLVM_CONFIG}" --shared-mode OUTPUT_VARIABLE snx_llvm_mode OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET)
+if(snx_llvm_mode STREQUAL "shared")
+    set(SNX_LLVM_SHARED ON)
+else()
+    set(SNX_LLVM_SHARED OFF)
+endif()
 separate_arguments(SNX_LLVM_SYSTEM_LIBS UNIX_COMMAND "${SNX_LLVM_SYSTEM_LIBS}")
 
 function(snx_llvm_windows_libraries output)
@@ -78,7 +90,7 @@ function(snx_llvm_windows_libraries output)
     set(${output} "${libraries}" PARENT_SCOPE)
 endfunction()
 snx_llvm_query(snx_llvm_targets --targets-built)
-if(snx_llvm_targets MATCHES "(^| )AArch64( |$)")
+if(SNX_A64_DISASM AND snx_llvm_targets MATCHES "(^| )AArch64( |$)")
     snx_llvm_query(SNX_LLVM_DISASM_LIBS --libs aarch64disassembler aarch64desc aarch64info)
     separate_arguments(SNX_LLVM_DISASM_LIBS UNIX_COMMAND "${SNX_LLVM_DISASM_LIBS}")
     set(SNX_LLVM_A64_DISASM ON)

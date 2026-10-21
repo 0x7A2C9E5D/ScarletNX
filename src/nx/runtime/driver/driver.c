@@ -1137,7 +1137,7 @@ int snx_driver(int argc, char** argv) {
                       separator < argc ? argc - separator - 1 : 0, argv + (separator < argc ? separator + 1 : argc),
                       updates, nupdates);
     else
-        result = (flags & SNX_RECOMP) ? snx_recompile(n, rest, &paths) : snx_extract(n, rest, &paths);
+        result = (flags & SNX_RECOMP) ? snx_recompile_game(n, rest, &paths) : snx_extract(n, rest, &paths);
 done:
     free((void*)updates);
     free(rest);

@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #include "gnuabi/process/process.h"
 #include "gnuabi/runtime/execution.h"
+#include "gnuabi/runtime/main.h"
 #include "common/utilities/common.h"
 #include "common/cpu/recompiler/snx_recompiler.h"
 #include <openssl/crypto.h>
@@ -121,7 +122,7 @@ static void options_free(char** changes, size_t change_count, char* sysroot) {
     free(sysroot);
 }
 
-int main(int argc, char** argv) {
+int snx_gnuabi_main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IOLBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
     const char *argv0 = NULL, *cache_option = NULL, *opt = "2";
@@ -281,3 +282,8 @@ int main(int argc, char** argv) {
 #endif
     return run_status; /* not reached: the guest's thread ends the process */
 }
+#ifndef SNX_MULTICALL
+int main(int argc, char** argv) {
+    return snx_gnuabi_main(argc, argv);
+}
+#endif

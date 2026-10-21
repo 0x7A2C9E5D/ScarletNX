@@ -44,7 +44,8 @@ It runs static and dynamically linked programs, which start other processes, tal
 through pipes and read and write files through a sysroot, as QEMU's `-L` gives one
 (`linux/` of the data folder by default). See [Linux ABI execution and QEMU validation](docs/GNUABI.md)
 for the sysroot, the JIT and AOT modes, supported syscalls, and current limits. The NX executable is
-also installed as `scarletnx-switch`.
+also installed as `scarletnx-switch`, and on Linux and macOS as `scarletnx-3ds` and `scarletnx-gnuabi`, the one
+program running the driver its name says.
 
 The recompiler is also a library on its own, `libscarletnx-recompiler`: a program hands
 it ARM64 or AArch32 code in memory and runs the result in its own process with its own

@@ -28,13 +28,32 @@ foreach(target snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process snx_ctr
     set_target_properties(${target} PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 endforeach()
-add_executable(scarletnx-3ds runtime/main.c)
-target_link_libraries(scarletnx-3ds PRIVATE snx_ctr_board snx_ctr_loader)
+# The driver: the offline compiler and the runner, and its command line (runtime/main.c's snx_ctr_main), which is
+# scarletnx-3ds's own program, or in a build where scarletnx is also this driver (SNX_MULTICALL, src/multicall) part
+# of this library, the name scarletnx-3ds a link to scarletnx
+add_library(snx_ctr_program STATIC)
+target_link_libraries(snx_ctr_program PUBLIC snx_ctr_board snx_ctr_loader)
+set_target_properties(snx_ctr_program PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+target_compile_options(snx_ctr_program PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 # its checkout, where an older version kept work/ (snx_checkout)
-target_compile_definitions(scarletnx-3ds PRIVATE SNX_SOURCE_DIR="${CMAKE_SOURCE_DIR}" SNX_BUILD_DIR="${CMAKE_BINARY_DIR}")
-set_target_properties(scarletnx-3ds PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-target_compile_options(scarletnx-3ds PRIVATE -Wall -Wextra -Werror=missing-prototypes)
+set(ctr_main_definitions SNX_SOURCE_DIR="${CMAKE_SOURCE_DIR}" SNX_BUILD_DIR="${CMAKE_BINARY_DIR}")
+if(WIN32)
+    target_compile_definitions(snx_ctr_program PRIVATE _CRT_SECURE_NO_WARNINGS)
+    list(APPEND ctr_main_definitions _CRT_SECURE_NO_WARNINGS)
+endif()
+if(SNX_MULTICALL)
+    target_sources(snx_ctr_program PRIVATE runtime/main.c)
+    target_compile_definitions(snx_ctr_program PRIVATE ${ctr_main_definitions} SNX_MULTICALL)
+    set(SNX_CTR_PROGRAM "${PROJECT_BINARY_DIR}/scarletnx-3ds" PARENT_SCOPE) # what the tests run
+else()
+    add_executable(scarletnx-3ds runtime/main.c)
+    target_link_libraries(scarletnx-3ds PRIVATE snx_ctr_program)
+    target_compile_definitions(scarletnx-3ds PRIVATE ${ctr_main_definitions})
+    set_target_properties(scarletnx-3ds PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+    target_compile_options(scarletnx-3ds PRIVATE -Wall -Wextra -Werror=missing-prototypes)
+    set(SNX_CTR_PROGRAM "$<TARGET_FILE:scarletnx-3ds>" PARENT_SCOPE)
+endif()
 include(GNUInstallDirs)
 include("${PROJECT_SOURCE_DIR}/cmake/llvm.cmake")
 if(NOT TARGET snx_arm_llvm)
@@ -46,45 +65,47 @@ add_custom_command(OUTPUT "${ctr_runtime_source}"
         -P "${PROJECT_SOURCE_DIR}/cmake/ctr-runtime.cmake"
     DEPENDS snx_arm_rt "${PROJECT_SOURCE_DIR}/cmake/ctr-runtime.cmake" VERBATIM)
 # The offline compiler is part of the driver, as the Switch driver's recompiler is part of scarletnx
-target_sources(scarletnx-3ds PRIVATE aot/compiler.c aot/discover.c "${ctr_runtime_source}")
-target_link_libraries(scarletnx-3ds PRIVATE snx_arm_llvm)
+target_sources(snx_ctr_program PRIVATE aot/compiler.c aot/discover.c "${ctr_runtime_source}")
+target_link_libraries(snx_ctr_program PUBLIC snx_arm_llvm)
 # The compiler loads the LLVM toolchain's own libraries (including its z3)
-# at startup: resolve them without a caller-provided environment.
-set(ctr_llvm_rpath "${SNX_LLVM_LIBRARY_DIR}")
-find_library(SNX_Z3_LIBRARY NAMES z3 libz3.so.4
-    HINTS "${SNX_LLVM_LIBRARY_DIR}" "${SNX_LLVM_LIBRARY_DIR}/../.."
-    PATH_SUFFIXES lib x86_64-linux-gnu)
-if(SNX_Z3_LIBRARY)
-    get_filename_component(ctr_z3_dir "${SNX_Z3_LIBRARY}" DIRECTORY)
-    string(APPEND ctr_llvm_rpath ":${ctr_z3_dir}")
-    # Forced into the dependency table (--as-needed would drop unreferenced
-    # libraries): libLLVM's own z3/xml2 dependencies then resolve through
-    # the binary's search path instead of the caller's environment.
-    find_library(SNX_XML2_LIBRARY NAMES xml2 libxml2.so.2 HINTS "${ctr_z3_dir}" "${SNX_LLVM_LIBRARY_DIR}"
-                    PATH_SUFFIXES lib x86_64-linux-gnu)
-    if(APPLE) # ld64 keeps every library named, and has no --as-needed
-        target_link_libraries(scarletnx-3ds PRIVATE "${SNX_Z3_LIBRARY}" ${SNX_XML2_LIBRARY})
+# at startup: resolve them without a caller-provided environment. A static
+# LLVM (SNX_LLVM_SHARED off, cmake/llvm.cmake) has none to load.
+if(SNX_LLVM_SHARED)
+    set(ctr_llvm_rpath "${SNX_LLVM_LIBRARY_DIR}")
+    find_library(SNX_Z3_LIBRARY NAMES z3 libz3.so.4
+        HINTS "${SNX_LLVM_LIBRARY_DIR}" "${SNX_LLVM_LIBRARY_DIR}/../.."
+        PATH_SUFFIXES lib x86_64-linux-gnu)
+    if(SNX_Z3_LIBRARY)
+        get_filename_component(ctr_z3_dir "${SNX_Z3_LIBRARY}" DIRECTORY)
+        string(APPEND ctr_llvm_rpath ":${ctr_z3_dir}")
+        # Forced into the dependency table (--as-needed would drop unreferenced
+        # libraries): libLLVM's own z3/xml2 dependencies then resolve through
+        # the binary's search path instead of the caller's environment.
+        find_library(SNX_XML2_LIBRARY NAMES xml2 libxml2.so.2 HINTS "${ctr_z3_dir}" "${SNX_LLVM_LIBRARY_DIR}"
+                        PATH_SUFFIXES lib x86_64-linux-gnu)
+        if(APPLE) # ld64 keeps every library named, and has no --as-needed
+            target_link_libraries(snx_ctr_program INTERFACE "${SNX_Z3_LIBRARY}" ${SNX_XML2_LIBRARY})
+        else()
+            target_link_libraries(snx_ctr_program INTERFACE "-Wl,--no-as-needed" "${SNX_Z3_LIBRARY}"
+                                  ${SNX_XML2_LIBRARY} "-Wl,--as-needed")
+        endif()
+    endif()
+    if(APPLE) # ld64 takes one folder per -rpath
+        string(REPLACE ":" ";" ctr_llvm_rpaths "${ctr_llvm_rpath}")
+        foreach(path IN LISTS ctr_llvm_rpaths)
+            target_link_options(snx_ctr_program INTERFACE "-Wl,-rpath,${path}")
+        endforeach()
     else()
-        target_link_libraries(scarletnx-3ds PRIVATE "-Wl,--no-as-needed" "${SNX_Z3_LIBRARY}" ${SNX_XML2_LIBRARY}
-                            "-Wl,--as-needed")
+        target_link_options(snx_ctr_program INTERFACE "-Wl,-rpath,${ctr_llvm_rpath}")
     endif()
 endif()
-if(APPLE) # ld64 takes one folder per -rpath
-    string(REPLACE ":" ";" ctr_llvm_rpaths "${ctr_llvm_rpath}")
-    foreach(path IN LISTS ctr_llvm_rpaths)
-        target_link_options(scarletnx-3ds PRIVATE "-Wl,-rpath,${path}")
-    endforeach()
-else()
-    target_link_options(scarletnx-3ds PRIVATE "-Wl,-rpath,${ctr_llvm_rpath}")
-endif()
-target_compile_definitions(scarletnx-3ds PRIVATE "SNX_CTR_HOST_CC=\"${CMAKE_C_COMPILER}\"")
+target_compile_definitions(snx_ctr_program PRIVATE "SNX_CTR_HOST_CC=\"${CMAKE_C_COMPILER}\"")
 add_library(snx_ctr_native STATIC aot/load.c)
 target_link_libraries(snx_ctr_native PUBLIC snx_ctr_process ${CMAKE_DL_LIBS})
 set_target_properties(snx_ctr_native PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_compile_options(snx_ctr_native PRIVATE -Wall -Wextra -Werror=missing-prototypes)
-target_sources(scarletnx-3ds PRIVATE aot/run.c)
-target_link_libraries(scarletnx-3ds PRIVATE snx_ctr_native)
-install(TARGETS scarletnx-3ds RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-if(WIN32)
-    target_compile_definitions(scarletnx-3ds PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_sources(snx_ctr_program PRIVATE aot/run.c)
+target_link_libraries(snx_ctr_program PUBLIC snx_ctr_native)
+if(NOT SNX_MULTICALL)
+    install(TARGETS scarletnx-3ds RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()

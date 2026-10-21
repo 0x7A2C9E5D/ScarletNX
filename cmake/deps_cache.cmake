@@ -26,6 +26,9 @@ function(snx_deps_headers_hash out)
     if(CMAKE_SYSROOT)
         list(APPEND flags "--sysroot=${CMAKE_SYSROOT}")
     endif()
+    # the CPU and ABI the dependencies are built for (cmake/cross.cmake): big-endian PowerPC64 glibc is ELFv1 to Clang
+    # without -mabi=elfv2, and an ELFv2 root (Arch POWER's) has no ELFv1 headers
+    list(APPEND flags ${SNX_ARCH_FLAGS})
     # -P: the text without line markers, which would put this tree's path in it
     execute_process(COMMAND "${CMAKE_C_COMPILER}" ${flags} -E -P "${probe}" OUTPUT_VARIABLE text ERROR_VARIABLE err
                     RESULT_VARIABLE rc)

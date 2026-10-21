@@ -55,6 +55,17 @@ jobs:
         env:
           SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+      - name: Name the week
+        id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      # pacman's packages, which it takes before its mirrors: this week's cache, else last week's. linux-sanitizers
+      # shares x86-64's, the same image and list
+      - uses: actions/cache/restore@v5
+        id: pacman
+        with:
+          path: /var/cache/pacman/pkg
+          key: pacman-linux-${{ matrix.arch }}-${{ steps.week.outputs.week }}
+          restore-keys: pacman-linux-${{ matrix.arch }}-
       # llvm: llvm-config and LLVM-C for the recompiler (llvm-libs alone has no headers). gdb: the gdbserver gdbstub_native drives. jq: scripts/pr-builds.sh, which pr_builds tests. Mirrors drop a connection now
       # and then (pkgforge's for aarch64 most), so each pacman install is tried 3 times, 5 s apart
       - name: Install tools
@@ -64,6 +75,16 @@ jobs:
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
+      # Saved once a week, by its first run: what it installed, without the versions nothing installs any more. The
+      # other runs of the week download only what changed since
+      - name: Keep the installed packages
+        if: steps.pacman.outputs.cache-hit != 'true'
+        run: pacman -Sc --noconfirm >/dev/null
+      - if: steps.pacman.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: /var/cache/pacman/pkg
+          key: ${{ steps.pacman.outputs.cache-primary-key }}
       # two commits: a pull request's merge commit and the base it is diffed against below
       - uses: actions/checkout@v7
         with:
@@ -187,6 +208,17 @@ jobs:
       # read, what a leak check finds depends on what the stack happened to hold at exit
       LSAN_OPTIONS: use_stacks=0:use_registers=0
     steps:
+      - name: Name the week
+        id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      # pacman's packages, which it takes before its mirrors: this week's cache, else last week's. The linux job's on
+      # x86-64, the same image and list
+      - uses: actions/cache/restore@v5
+        id: pacman
+        with:
+          path: /var/cache/pacman/pkg
+          key: pacman-linux-x86_64-${{ steps.week.outputs.week }}
+          restore-keys: pacman-linux-x86_64-
       - name: Install tools
         run: |
           for try in 1 2 3; do
@@ -194,6 +226,16 @@ jobs:
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
+      # Saved once a week, by its first run: what it installed, without the versions nothing installs any more. The
+      # other runs of the week download only what changed since
+      - name: Keep the installed packages
+        if: steps.pacman.outputs.cache-hit != 'true'
+        run: pacman -Sc --noconfirm >/dev/null
+      - if: steps.pacman.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: /var/cache/pacman/pkg
+          key: ${{ steps.pacman.outputs.cache-primary-key }}
       - uses: actions/checkout@v7
       - uses: actions/cache/restore@v5
         with:
@@ -441,7 +483,8 @@ jobs:
   appimage:
     name: Linux AppImage (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    # LLVM's build (scripts/linux-llvm.sh) adds about half an hour where its cache misses
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -460,6 +503,16 @@ jobs:
         env:
           SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+      - name: Name the week
+        id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      # pacman's packages, which it takes before its mirrors: this week's cache, else last week's
+      - uses: actions/cache/restore@v5
+        id: pacman
+        with:
+          path: /var/cache/pacman/pkg
+          key: pacman-appimage-${{ matrix.arch }}-${{ steps.week.outputs.week }}
+          restore-keys: pacman-appimage-${{ matrix.arch }}-
       # Before the checkout: without git, actions/checkout downloads the files without the history, and the AppImage's
       # version (git describe) is unknown. Each pacman install is tried 3 times, as in the linux job
       - name: Install git
@@ -515,7 +568,7 @@ jobs:
           217ff68aafe085d2d4ab34a50e267805af43736ad8ef880c01ef88e52db8589f  /usr/local/bin/get-debloated-pkgs
           86afbf5045b78020c93fcd35bf0f642765a8dc339bb2dce534a0461ce3d3508d  /usr/local/bin/make-aur-package
           EOF
-      # llvm for the recompiler; quick-sharun bundles the libLLVM the runtime links, with its own dependencies
+      # llvm: Clang's own, and the opt of the LLVM settings; the runtime links LLVM's libraries statically (below)
       - name: Install the build tools and the debloated Mesa
         run: |
           for try in 1 2 3; do
@@ -524,10 +577,38 @@ jobs:
             sleep 5
           done
           get-debloated-pkgs mesa-nano opus-mini icu-mini
+      # Saved once a week, by its first run: what it installed, without the versions nothing installs any more. The
+      # other runs of the week download only what changed since
+      - name: Keep the installed packages
+        if: steps.pacman.outputs.cache-hit != 'true'
+        run: pacman -Sc --noconfirm >/dev/null
+      - if: steps.pacman.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: /var/cache/pacman/pkg
+          key: ${{ steps.pacman.outputs.cache-primary-key }}
+      # LLVM's libraries linked into the runtime, with the host's code generator alone (scripts/linux-llvm.sh), where
+      # Arch's libLLVM is one library with every target. Built once for each version, the image's LLVM's,
+      # whose opt prints the pipelines of the LLVM settings (cmake/settings.cmake)
+      - name: Name the LLVM version
+        id: llvm
+        run: echo "version=$(llvm-config --version)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v5
+        id: llvm-cache
+        with:
+          path: .cache/llvm/${{ matrix.arch }}
+          key: linux-llvm-${{ matrix.arch }}-${{ hashFiles('scripts/linux-llvm.sh', 'scripts/llvm-libraries/CMakeLists.txt', 'cmake/llvm_components.cmake') }}-${{ steps.llvm.outputs.version }}
+      - name: Build LLVM
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        env:
+          LLVM_VERSION: ${{ steps.llvm.outputs.version }}
+        run: scripts/linux-llvm.sh ${{ matrix.arch }} "$PWD/.cache/llvm/${{ matrix.arch }}"
+      # A release leaves out scarletnx --mcp's A64 disassembler (SNX_A64_DISASM), which is for working on the runtime
       - name: Build and install into /usr
         run: |
           git config --global --add safe.directory '*'
           cmake --preset default -DSNX_DEPLOY=OFF -DCMAKE_INSTALL_PREFIX=/usr \
+            -DLLVM_DIR="$PWD/.cache/llvm/${{ matrix.arch }}/lib/cmake/llvm" -DSNX_A64_DISASM=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build --preset default --parallel "$(getconf _NPROCESSORS_ONLN)"
           cmake --install build/default
@@ -575,7 +656,8 @@ jobs:
   appimage-cross:
     name: Linux AppImage (${{ matrix.arch }})
     runs-on: ubuntu-26.04
-    timeout-minutes: 120
+    # LLVM's cross build (scripts/linux-llvm.sh) adds about half an hour where its cache misses
+    timeout-minutes: 180
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -609,6 +691,19 @@ jobs:
         with:
           path: .cache/cpm
           key: cpm-${{ github.job }}-${{ matrix.arch }}-${{ hashFiles('cmake/dependencies.cmake') }}
+      # ccache and the dependency builds, as in the linux job. The container builds as root: what it makes in them
+      # goes back to the runner's user before each is saved
+      - uses: actions/cache/restore@v5
+        with:
+          path: .cache/ccache
+          key: ccache-${{ github.job }}-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ccache-${{ github.job }}-${{ matrix.arch }}-
+      - uses: actions/cache/restore@v5
+        id: deps
+        with:
+          path: .cache/deps
+          key: deps-${{ github.job }}-${{ matrix.arch }}-${{ github.run_id }}
+          restore-keys: deps-${{ github.job }}-${{ matrix.arch }}-
       # The script's checks run the AppImage it made: the kernel runs the target's programs through qemu once their
       # binfmt handlers are registered, in the container too
       - name: Set up qemu emulation for ${{ matrix.arch }}
@@ -631,10 +726,32 @@ jobs:
             '\xff\xff\xff\xff\xff\xff\xff\xfc\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff' \
             "$(command -v qemu-ppc64)" | sudo tee /proc/sys/fs/binfmt_misc/register
           head -n 3 /proc/sys/fs/binfmt_misc/qemu-ppc64
+      # The system root with the target's libraries installed (scripts/appimage-sysroot.sh), made again each week and
+      # whenever the script changes: Arch moves on, and the root's packages with it
+      - name: Name the week
+        id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v5
+        id: sysroot
+        with:
+          path: sysroot
+          key: sysroot-${{ matrix.arch }}-${{ hashFiles('scripts/appimage-sysroot.sh') }}-${{ steps.week.outputs.week }}
+      # The build container's packages of this week's cache, else last week's, which pacman takes before its mirrors:
+      # mounted as its package cache
+      - uses: actions/cache/restore@v5
+        id: pacman
+        with:
+          path: ${{ runner.temp }}/pacman
+          key: pacman-${{ github.job }}-${{ steps.week.outputs.week }}
+          restore-keys: pacman-${{ github.job }}-
       # Started before the target's image is pulled, which takes the same tag
       - name: Start the build container
-        run: docker run --detach --name build --volume "$PWD:/src" --workdir /src ghcr.io/pkgforge-dev/archlinux:latest sleep infinity
+        run: |
+          mkdir -p "$RUNNER_TEMP/pacman"
+          docker run --detach --name build --volume "$PWD:/src" --volume "$RUNNER_TEMP/pacman:/var/cache/pacman/pkg" \
+            --workdir /src ghcr.io/pkgforge-dev/archlinux:latest sleep infinity
       - name: Unpack the ${{ matrix.arch }} system root
+        if: steps.sysroot.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           image=ghcr.io/pkgforge-dev/archlinux:latest
@@ -658,6 +775,21 @@ jobs:
           echo '4e97072095e80a46203a1cd711eface00de1b028be3e66ef30cc9ccd728501e5  /tmp/anylinux-setup.sh' | sha256sum -c
           sh /tmp/anylinux-setup.sh
           EOF
+      # appimagetool takes a mkdwarfs on PATH before the target's it would fetch, which compresses many times slower
+      # under qemu: this machine's, of the DwarFS release appimagetool pins, checked against the SHA-256 it pins
+      # (pinned.rs, MKDWARFS_CHECKSUMS). dwarfs-universal is mkdwarfs by that name
+      - name: Install this machine's mkdwarfs
+        env:
+          MKDWARFS: https://github.com/mhx/dwarfs/releases/download/v0.15.6/dwarfs-universal-0.15.6-Linux-x86_64
+        run: |
+          docker exec -i -e MKDWARFS build sh -s <<'EOF'
+          set -eu
+          curl -fsSL --retry 3 -o /usr/local/bin/dwarfs-universal "$MKDWARFS"
+          echo '50891c38ba359db8271819a6cbf6aaa8068681523f0c4f2b8242007a45edaa28  /usr/local/bin/dwarfs-universal' |
+            sha256sum -c
+          chmod +x /usr/local/bin/dwarfs-universal
+          ln -sf dwarfs-universal /usr/local/bin/mkdwarfs
+          EOF
       - name: Check the packaging tools
         run: |
           docker exec -i build sh -s <<'EOF'
@@ -668,50 +800,106 @@ jobs:
           86afbf5045b78020c93fcd35bf0f642765a8dc339bb2dce534a0461ce3d3508d  /usr/local/bin/make-aur-package
           SUMS
           EOF
-      # The build machine's: Clang and LLD build for the target (cmake/cross.cmake), glslang the shaders, qemu-user runs
-      # the target's llvm-config (scripts/cross-llvm-config.sh) and its loader behind the packaging's ldd, wayland's
-      # wayland-scanner the protocols SDL3 builds (appimagetool brings its own compressor, as in the appimage job). The
-      # target's: the libraries the runtime links and bundles, gcc for the crt files, libgcc and libstdc++ Clang links
-      # the target's programs with, and what the pinned SDL3's build needs, as Arch POWER's SDL3 is older than the pin
-      # (its X11, Wayland and audio backends). The Linux runtime alone needs LLVM and the GCC runtime only.
-      # They go into the system root by its own pacman.conf (its architecture, repositories and mirrors, under the root)
-      # and its own keys; install scriptlets are the target's programs, left out. Each pacman is tried 3 times, as in
-      # the linux job
-      - name: Install the build tools and the target's libraries
-        env:
-          LINUX_ONLY: ${{ matrix.linux-only && '1' || '' }}
-        run: |
-          docker exec -i -e LINUX_ONLY build sh -s <<'EOF'
-          set -eu
-          libraries="gcc llvm llvm-libs"
-          [ -n "$LINUX_ONLY" ] || libraries="$libraries libx11 mesa vulkan-icd-loader vulkan-radeon vulkan-swrast
-            libxext libxcursor libxfixes libxi libxinerama libxrandr libxrender libxss libxtst libxkbcommon wayland
-            wayland-protocols libdecor alsa-lib libpulse libpipewire hidapi libusb"
-          retry() { for try in 1 2 3; do "$@" && return; [ "$try" = 3 ] && return 1; sleep 5; done; }
-          retry pacman -Syu --noconfirm --needed cmake ninja make patch perl python clang lld llvm glslang qemu-user \
-            patchelf wayland
-          root=/src/sysroot
-          mkdir -p /tmp/target-pkg
-          sed "s#/etc/pacman.d/#$root/etc/pacman.d/#g" "$root/etc/pacman.conf" >/tmp/target-pacman.conf
-          pacman-key --gpgdir "$root/etc/pacman.d/gnupg" --init
-          pacman-key --gpgdir "$root/etc/pacman.d/gnupg" --populate-from "$root/usr/share/pacman/keyrings" --populate
-          retry pacman --root "$root" --dbpath "$root/var/lib/pacman" --config /tmp/target-pacman.conf \
-            --gpgdir "$root/etc/pacman.d/gnupg" --cachedir /tmp/target-pkg --noscriptlet -Syu --noconfirm --needed \
-            $libraries
-          # without them CMake's first test link fails, its message deep in the configure's output
-          ls "$root"/usr/lib/gcc/*/*/crtbeginS.o >/dev/null 2>&1 ||
-            { echo "the system root has no GCC runtime (crtbeginS.o, libgcc) for Clang to link with" >&2; exit 1; }
-          EOF
-      - name: Cross-build and install into the system root
+      # The build machine's: Clang and LLD build for the target (cmake/cross.cmake) and LLVM's libraries for it
+      # (scripts/linux-llvm.sh), llvm-strip strips what the AppImage bundles, ccache caches the compiles, glslang
+      # builds the shaders, qemu-user runs the target's loader behind the packaging's ldd, wayland's wayland-scanner the
+      # protocols SDL3 builds. Each pacman is tried 3 times, as in the linux job
+      - name: Install the build tools
         run: |
           docker exec -i build sh -s <<'EOF'
           set -eu
+          retry() { for try in 1 2 3; do "$@" && return; [ "$try" = 3 ] && return 1; sleep 5; done; }
+          retry pacman -Syu --noconfirm --needed cmake ninja make patch perl python clang lld llvm glslang qemu-user \
+            patchelf wayland ccache
+          EOF
+      # Saved once a week, as in the linux job. Every architecture's job installs the same, so one of them saves it
+      - name: Keep the installed packages
+        if: steps.pacman.outputs.cache-hit != 'true'
+        run: docker exec build pacman -Sc --noconfirm >/dev/null
+      - if: steps.pacman.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/pacman
+          key: ${{ steps.pacman.outputs.cache-primary-key }}
+      # The target's libraries, where the root wasn't in the cache, saved before anything of this build goes in. The
+      # runner's user saves it, and the root's files are root's
+      - name: Install the target's libraries
+        if: steps.sysroot.outputs.cache-hit != 'true'
+        env:
+          LINUX_ONLY: ${{ matrix.linux-only && '--linux-only' || '' }}
+        run: |
+          docker exec -i -e LINUX_ONLY build sh -s <<'EOF'
+          set -eu
+          scripts/appimage-sysroot.sh /src/sysroot $LINUX_ONLY
+          chown -R "$(stat -c %u:%g /src)" /src/sysroot
+          chmod -R u+rwX /src/sysroot
+          EOF
+      - if: steps.sysroot.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: sysroot
+          key: ${{ steps.sysroot.outputs.cache-primary-key }}
+      # LLVM's libraries for the target, as the appimage job builds its own, cross-built against the system root
+      - name: Name the LLVM version
+        id: llvm
+        run: echo "version=$(docker exec build llvm-config --version)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v5
+        id: llvm-cache
+        with:
+          path: .cache/llvm/${{ matrix.arch }}
+          key: linux-llvm-cross-${{ matrix.arch }}-${{ hashFiles('scripts/linux-llvm.sh', 'scripts/llvm-libraries/CMakeLists.txt', 'cmake/llvm_components.cmake') }}-${{ steps.llvm.outputs.version }}
+      - name: Cross-build LLVM
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: |
+          docker exec -i -e LLVM_VERSION=${{ steps.llvm.outputs.version }} build sh -s <<'EOF'
+          set -eu
+          SNX_SYSROOT=/src/sysroot scripts/linux-llvm.sh ${{ matrix.arch }} /src/.cache/llvm/${{ matrix.arch }}
+          chown -R "$(stat -c %u:%g /src)" /src/.cache/llvm
+          EOF
+      - if: steps.llvm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .cache/llvm/${{ matrix.arch }}
+          key: ${{ steps.llvm-cache.outputs.cache-primary-key }}
+      # Through ccache, without debug information, which no one reads in these builds and the AppImage would carry.
+      # LLVM is the one built above (-DSNX_LLVM_CONFIG= drops the preset's, the system root's), and a release leaves
+      # out scarletnx --mcp's A64 disassembler (SNX_A64_DISASM)
+      - name: Cross-build and install into the system root
+        run: |
+          docker exec -i -e CCACHE_DIR=/src/.cache/ccache -e CCACHE_BASEDIR=/src -e CCACHE_NOHASHDIR=true \
+            -e SNX_DEPS_CACHE=/src/.cache/deps build sh -s <<'EOF'
+          set -eu
           git config --global --add safe.directory '*'
           export SNX_SYSROOT=/src/sysroot
-          cmake --preset ${{ matrix.preset }} -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
+          start=$(date +%s)
+          cmake --preset ${{ matrix.preset }} -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF \
+            -DSNX_OPT_FLAGS="-O2 -g0" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DLLVM_DIR=/src/.cache/llvm/${{ matrix.arch }}/lib/cmake/llvm -DSNX_LLVM_CONFIG= -DSNX_A64_DISASM=OFF
           cmake --build --preset ${{ matrix.preset }} --parallel "$(getconf _NPROCESSORS_ONLN)"
           DESTDIR=/src/sysroot cmake --install build/${{ matrix.preset }}
+          # only what this run used is kept, as in the linux job
+          ccache --show-stats --verbose
+          ccache --evict-older-than "$(( $(date +%s) - start ))s"
+          ccache --zero-stats
+          du -sh "$CCACHE_DIR"
+          mkdir -p /src/.cache/deps
+          chown -R "$(stat -c %u:%g /src)" /src/.cache/ccache /src/.cache/deps
           EOF
+      - uses: actions/cache/save@v5
+        with:
+          path: .cache/ccache
+          key: ccache-${{ github.job }}-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Name the dependency builds
+        id: deps-used
+        run: |
+          used=$(find build -path '*/snx-deps/*.dir' -exec cat {} + | sort -u)
+          for d in .cache/deps/*; do grep -qxF "${d##*/}" <<<"$used" || rm -rf "$d"; done
+          echo "key=deps-${{ github.job }}-${{ matrix.arch }}-$(sha256sum <<<"$used" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - if: steps.deps-used.outputs.key != steps.deps.outputs.cache-matched-key
+        uses: actions/cache/save@v5
+        with:
+          path: .cache/deps
+          key: ${{ steps.deps-used.outputs.key }}
       - name: Make the AppImage
         run: |
           docker exec -i -e GITHUB_REPOSITORY -e GITHUB_REF_TYPE build sh -s <<'EOF'

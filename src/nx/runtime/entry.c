@@ -8,6 +8,7 @@
 #include "common/utilities/setup.h"
 #include "nx/runtime/driver/driver.h"
 #include "nx/runtime/driver/mcp.h"
+#include "nx/runtime/entry.h"
 #include "nx/runtime/main.h"
 #ifdef SNX_WITH_GUI
 #include "gui/gui.h"
@@ -20,10 +21,7 @@
 #endif
 #endif
 
-/* Android's game activity finds it by name in libscarletnx.so (platform/android_run.c does the same) */
-__attribute__((visibility("default"))) int main(int argc, char** argv);
-
-int main(int argc, char** argv) {
+int snx_switch_main(int argc, char** argv) {
     int result;
     char why[160];
     /* a launcher reads our progress through pipes: lines as they end, errors at once */
@@ -54,3 +52,11 @@ int main(int argc, char** argv) {
 #endif
     return snx_main(argc, argv);
 }
+#ifndef SNX_MULTICALL
+/* Android's game activity finds it by name in libscarletnx.so (platform/android_run.c does the same) */
+__attribute__((visibility("default"))) int main(int argc, char** argv);
+
+int main(int argc, char** argv) {
+    return snx_switch_main(argc, argv);
+}
+#endif

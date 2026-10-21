@@ -158,6 +158,8 @@ void snx_vm_flush_code(void* p, size_t size);
 void snx_tool_console(void);
 /* 1 when stdin and stdout are a terminal's, which a person types into and reads */
 int snx_terminal(void);
+/* The program name names: a path, or a file of that name in a folder of PATH (with .exe on Windows). Its folder is
+   resolved and its name kept, as a link's name can say what the program does; NULL when there is none */
 char* snx_find_tool(const char* name);
 /* argv is NULL terminated. No shell. Captured output is heap-owned by caller.
    home isolates HOME/USERPROFILE and removes XDG_CONFIG_HOME in the child. */
