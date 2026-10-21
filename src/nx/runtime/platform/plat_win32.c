@@ -304,6 +304,10 @@ void plat_alias_host_free(u8* p, u64 size) {
 /* no pool, so no mirror and no traps yet: a GPU result lands at its own fence (docs/GPU_OWNERSHIP.md) */
 u8* plat_alias_mirror(void) { return NULL; }
 u32 plat_tid(void) { return (u32)GetCurrentThreadId(); }
+int plat_thread_in_fault(u32 tid) {
+    (void)tid;
+    return -1; /* no traps here */
+}
 int plat_trap_init(void (*fault)(u8* p, int write, u32 tid)) {
     (void)fault;
     return -1;
