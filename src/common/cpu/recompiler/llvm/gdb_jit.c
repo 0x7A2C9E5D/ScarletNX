@@ -25,12 +25,8 @@ struct jit_descriptor {
     struct jit_code_entry* first_entry;
 };
 #ifdef _WIN32
-/* the GDB stub is UNIX only (nx/runtime/gdbstub.c), so nothing is ever registered */
+/* the GDB stub is UNIX only (nx/runtime/gdbstub.c), and the loader's objects are COFF here: nothing is registered */
 void snx_gdb_jit_enable(int on) { (void)on; }
-void snx_gdb_jit_register(const void* owner, const SnxElfObject* o) {
-    (void)owner;
-    (void)o;
-}
 void snx_gdb_jit_remove(const void* owner) { (void)owner; }
 #else
 #include <pthread.h>

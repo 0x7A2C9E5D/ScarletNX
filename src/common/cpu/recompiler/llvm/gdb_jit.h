@@ -10,9 +10,12 @@
 
 /* Registrations from here on, until snx_gdb_jit_enable(0); before any loader loads */
 void snx_gdb_jit_enable(int on);
+#if !defined(_WIN32)
 /* Registers a copy of o, a load's object, with its loaded sections at the addresses the load gave them, for owner (a
-   loader) to remove with snx_gdb_jit_remove. Nothing when registration is off or out of memory */
+   loader) to remove with snx_gdb_jit_remove. Nothing when registration is off or out of memory. ELF objects only:
+   Windows' loader takes COFF (code_loader_coff.c), and elf_object.h has nothing there */
 void snx_gdb_jit_register(const void* owner, const SnxElfObject* o);
+#endif
 /* Removes every object owner registered: before its code goes */
 void snx_gdb_jit_remove(const void* owner);
 #endif
