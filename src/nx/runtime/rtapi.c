@@ -30,7 +30,7 @@ static u64* hints_order(void) { return g_hints.slot + g_hints.cap; }
 static u64 hint_hash(u64 pc, u64 cap) {
     unsigned bits = 0;
     while (((u64)1 << bits) < cap) bits++;
-    return ((pc >> 2) * SNX_U64C(0x9E3779B9u, 0x7F4A7C15u)) >> (64 - bits); /* Fibonacci hashing: cap is a power of two */
+    return ((pc >> 2) * 0x9E3779B97F4A7C15ull) >> (64 - bits); /* Fibonacci hashing: cap is a power of two */
 }
 /* 1 when pc was put in, 0 when it was there already */
 static int set_put_nl(u64* slot, u64 cap, u64 pc) {
@@ -45,7 +45,7 @@ static int set_put_nl(u64* slot, u64 cap, u64 pc) {
 static int grow_nl(void) {
     u64 cap = g_hints.cap ? g_hints.cap * 2 : 1024, i;
     u64 *block, *order;
-    if (cap > ((size_t)-1) / sizeof(u64) / 2) return -1;
+    if (cap > SIZE_MAX / sizeof(u64) / 2) return -1;
     block = (u64*)calloc((size_t)(cap + cap / 2), sizeof(u64));
     if (!block) return -1;
     order = block + cap;

@@ -140,7 +140,7 @@ int main(void) {
     uint64_t a[6] = {0};
     CHECK(gnu_syscall(p, UINT64_MAX, a) == -GNU_ENOSYS);
     CHECK(gnu_syscall(p, 172, a) == 1000);
-    CHECK(gnu_syscall(p, UINT64_C(0x1000000ac), a) == 1000);
+    CHECK(gnu_syscall(p, 0x1000000acull, a) == 1000);
     a[0] = p->cpu.x[31] - 512;
     CHECK(gnu_syscall(p, 160, a) == 0);
     CHECK(gnu_memory_read(&p->memory, a[0] + 4 * 65, error, 65) == 0 && !strcmp(error, "aarch64"));

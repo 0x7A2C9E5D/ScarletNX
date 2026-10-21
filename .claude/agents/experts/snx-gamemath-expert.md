@@ -86,7 +86,7 @@ efficient.
 
 ## What to prefer
 - Integer or fixed-point arithmetic where the console uses it, conversions done as quotient and remainder or with a
-  portable 64-by-64 multiply (strict C90 per RFC #142, LP64 and LLP64 alike).
+  portable 64-by-64 multiply (strict C99 per RFC #142, LP64 and LLP64 alike).
 - Quaternions for orientation, integrated with the exponential map (exact for a constant rate over the step) or a
   first-order step followed by renormalization.
 - Polynomials in Horner form with a stated error bound, compensated or pairwise sums where accumulation error

@@ -8,10 +8,10 @@ else()
     message(FATAL_ERROR "scarletnx-gui currently supports Linux, FreeBSD, macOS, iOS and Windows")
 endif()
 include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
-# The menu's languages (i18n.h): snx_tr and the catalogs' reader, strict ANSI C as the build info; each po/*.po a
+# The menu's languages (i18n.h): snx_tr and the catalogs' reader, strict ISO C99 as the build info; each po/*.po a
 # catalog compiled in, checked and made by scripts/build-languages.py against po/scarletnx.pot
 add_library(snx_i18n STATIC i18n.c)
-set_target_properties(snx_i18n PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+set_target_properties(snx_i18n PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_compile_options(snx_i18n PRIVATE -pedantic-errors -Wall -Wextra -Werror=missing-prototypes)
 target_link_libraries(snx_i18n PUBLIC scarletnx-common) # the tags' fit (common/utilities/language_tag.h)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)

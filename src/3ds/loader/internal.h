@@ -8,7 +8,7 @@
 #include <stdio.h>
 #define CTR_METADATA_LIMIT (16u * 1024u * 1024u)
 #define CTR_CODE_LIMIT     (64u * 1024u * 1024u)
-#define CTR_OUTPUT_LIMIT   UINT64_C(1073741824)
+#define CTR_OUTPUT_LIMIT   1073741824ull
 typedef struct {
     uint64_t offset, size;
 } CtrSpan;

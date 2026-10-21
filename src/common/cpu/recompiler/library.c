@@ -775,8 +775,8 @@ static void key_bytes(CacheKey* k, const void* data, size_t size) {
     const unsigned char* p = (const unsigned char*)data;
     size_t i;
     for (i = 0; i < size; ++i) {
-        k->a = (k->a ^ p[i]) * UINT64_C(0x100000001b3);
-        k->b = (k->b ^ p[i]) * UINT64_C(0x100000001b3);
+        k->a = (k->a ^ p[i]) * 0x100000001b3ull;
+        k->b = (k->b ^ p[i]) * 0x100000001b3ull;
     }
 }
 static void key_u64(CacheKey* k, uint64_t v) {
@@ -790,8 +790,8 @@ static char* cache_path(struct snx_recompiler* r, SnxCodegen* codegen) {
     char *cpu, *features, name[64];
     size_t i, j;
     SnxU32 word;
-    k.a = UINT64_C(0xcbf29ce484222325);
-    k.b = UINT64_C(0x84222325cbf29ce4);
+    k.a = 0xcbf29ce484222325ull;
+    k.b = 0x84222325cbf29ce4ull;
     key_bytes(&k, "snx-module-cache-1", 18);
     key_u64(&k, SNX_ABI);
     key_u64(&k, (uint64_t)(unsigned char)r->opt);
@@ -843,8 +843,8 @@ static void save_cached(const char* path, const unsigned char* data, size_t size
 static char* rtlib_cache_path(const char* cache, char opt) {
     CacheKey k;
     char *cpu, *features, name[80];
-    k.a = UINT64_C(0xcbf29ce484222325);
-    k.b = UINT64_C(0x84222325cbf29ce4);
+    k.a = 0xcbf29ce484222325ull;
+    k.b = 0x84222325cbf29ce4ull;
     key_bytes(&k, "snx-rtlib-cache-1", 17);
     key_u64(&k, SNX_ABI);
     key_u64(&k, (uint64_t)(unsigned char)opt);
@@ -1146,13 +1146,13 @@ static int keep_code(struct snx_recompiler* r, struct snx_recompiled* m, const s
     size_t i, total = 0, at;
     unsigned char* bytes;
     for (i = 0; i < count; ++i) {
-        if (ranges[i].size > ((size_t)-1) / 2 - total) {
+        if (ranges[i].size > SIZE_MAX / 2 - total) {
             fail(r, "the code ranges are too large");
             return -1;
         }
         total += ranges[i].size;
     }
-    if (count > (((size_t)-1) / 2 - total) / sizeof(SnxCodeImage)) {
+    if (count > (SIZE_MAX / 2 - total) / sizeof(SnxCodeImage)) {
         fail(r, "the code ranges are too large");
         return -1;
     }

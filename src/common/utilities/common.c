@@ -253,7 +253,7 @@ char* snx_absolute(const char* path) {
             cwd = (char*)snx_alloc(n);
             if (getcwd(cwd, n)) break;
             free(cwd);
-            if (errno != ERANGE || n > (size_t)-1 / 2) return NULL;
+            if (errno != ERANGE || n > SIZE_MAX / 2) return NULL;
             n *= 2;
         }
         out = snx_path_join(cwd, path);
@@ -486,7 +486,7 @@ unsigned char* snx_read_file(const char* path, size_t* size) {
         got = fread(p + n, 1, cap - n, f);
         n += got;
         if (n < cap) break;
-        if (cap > ((size_t)-1 - 1) / 2) {
+        if (cap > (SIZE_MAX - 1) / 2) {
             free(p);
             fclose(f);
             return NULL;
@@ -1501,7 +1501,7 @@ SnxU64 snx_npdm_title(const unsigned char* npdm, size_t size) {
 int snx_title_text(SnxU64 id, char* out) {
     out[0] = 0;
     if (!id || id == SNX_NPDM_DEFAULT_TITLE) return 0;
-    sprintf(out, "%08lX%08lX", (unsigned long)(id >> 32), (unsigned long)(id & 0xFFFFFFFFUL));
+    sprintf(out, "%016llX", (unsigned long long)id);
     return 1;
 }
 int snx_title_parse(const char* text, SnxU64* id) {
@@ -1542,10 +1542,10 @@ int snx_addon_entry_id(SnxU64 game, const char* entry, SnxU64* id) {
 void snx_addon_entry(SnxU64 game, SnxU64 id, SnxU64 version, char entry[32]) {
     snx_title_text(id, entry);
     if (snx_addon_kind(game, id) == SNX_ADDON_UPDATE && version != SNX_NO_VERSION)
-        sprintf(entry + 16, "v%lu", (unsigned long)(version & 0xFFFFFFFFUL));
+        sprintf(entry + 16, "v%llu", (unsigned long long)(version & 0xFFFFFFFFu));
 }
 SnxU64 snx_addon_version(const char* entry) {
-    return strlen(entry) > 17 && entry[16] == 'v' ? (SnxU64)strtoul(entry + 17, NULL, 10) : SNX_NO_VERSION;
+    return strlen(entry) > 17 && entry[16] == 'v' ? (SnxU64)strtoull(entry + 17, NULL, 10) : SNX_NO_VERSION;
 }
 int snx_addon_kind(SnxU64 game, SnxU64 id) {
     /* the console's rule: an application's patch is its ID with 0x800 added; any other add-on of it is content */

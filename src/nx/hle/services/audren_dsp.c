@@ -101,9 +101,9 @@ static void make_luts(ARState* s) {
     make_lut(s->lut8[2], 8, 1024.0 / 1023, 32735.86, 0, 5.9); /* up to 1 */
 }
 
-/* max_align_t's alignment in C90: where the widest types land after a char */
+/* max_align_t's alignment without C11: where the widest types land after a char */
 typedef union {
-    long l;
+    long long l;
     double d;
     long double ld;
     void* p;

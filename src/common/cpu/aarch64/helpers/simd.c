@@ -62,7 +62,7 @@ static u64 sqadd_(CPU* c, u64 a, u64 b, u32 size) {
     r = a + b;
     if (((a ^ r) & (b ^ r)) >> 63) {
         qc(c);
-        return (a >> 63) ? SNX_U64C(0x80000000u, 0) : SNX_U64C(0x7FFFFFFFu, 0xFFFFFFFFu);
+        return (a >> 63) ? 0x8000000000000000ull : 0x7FFFFFFFFFFFFFFFull;
     }
     return r;
 }
@@ -72,7 +72,7 @@ static u64 sqsub_(CPU* c, u64 a, u64 b, u32 size) {
     r = a - b;
     if (((a ^ b) & (a ^ r)) >> 63) {
         qc(c);
-        return (a >> 63) ? SNX_U64C(0x80000000u, 0) : SNX_U64C(0x7FFFFFFFu, 0xFFFFFFFFu);
+        return (a >> 63) ? 0x8000000000000000ull : 0x7FFFFFFFFFFFFFFFull;
     }
     return r;
 }
@@ -97,9 +97,9 @@ static u64 uqsub_(CPU* c, u64 a, u64 b, u32 size) {
 /* SUQADD: signed accumulator d plus unsigned n, saturated signed */
 static u64 suqadd_(CPU* c, u64 d, u64 n, u32 size) {
     if (size < 3) return ssat(c, sx(d, size) + (i64)zx(n, size), size);
-    if (n > SNX_U64C(0x7FFFFFFFu, 0xFFFFFFFFu) - d) { /* the bound doesn't wrap for any signed d */
+    if (n > 0x7FFFFFFFFFFFFFFFull - d) { /* the bound doesn't wrap for any signed d */
         qc(c);
-        return SNX_U64C(0x7FFFFFFFu, 0xFFFFFFFFu);
+        return 0x7FFFFFFFFFFFFFFFull;
     }
     return d + n;
 }
@@ -138,7 +138,7 @@ static u64 sqdmull_(CPU* c, u64 a, u64 b, u32 size) {
     i64 x = sx(a, size), y = sx(b, size);
     if (size == 2 && x == y && x == -((i64)1 << 31)) {
         qc(c);
-        return SNX_U64C(0x7FFFFFFFu, 0xFFFFFFFFu);
+        return 0x7FFFFFFFFFFFFFFFull;
     }
     return ssat(c, x * y * 2, size + 1);
 }
@@ -884,14 +884,14 @@ u64 v_expand_imm(u32 op, u32 cmode, u32 imm8) {
         case 1: return (imm << 8) | (imm << 40);
         case 2: return (imm << 16) | (imm << 48);
         case 3: return (imm << 24) | (imm << 56);
-        case 4: return (imm | imm << 16) * SNX_U64C(0x00000001u, 0x00000001u);
-        case 5: return ((imm << 8) | (imm << 24)) * SNX_U64C(0x00000001u, 0x00000001u);
+        case 4: return (imm | imm << 16) * 0x0000000100000001ull;
+        case 5: return ((imm << 8) | (imm << 24)) * 0x0000000100000001ull;
         case 6:
             r = (cmode & 1) ? (imm << 16) | 0xFFFF : (imm << 8) | 0xFF;
             return r | r << 32;
         default:
             if (!(cmode & 1)) {
-                if (!op) return imm * SNX_U64C(0x01010101u, 0x01010101u);
+                if (!op) return imm * 0x0101010101010101ull;
                 for (i = 0; i < 8; ++i)
                     if ((imm >> i) & 1) r |= (u64)0xFF << (8 * i);
                 return r;

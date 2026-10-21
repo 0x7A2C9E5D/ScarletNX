@@ -74,7 +74,7 @@ static void changed(SnxCtrMemory* m) {
 }
 uint64_t snx_ctr_memory_epoch(const SnxCtrAddressSpace* s) { return s ? s->memory->epoch : 0; }
 static bool valid_range(uint32_t va, uint32_t size) {
-    return size && !((va | size) & 4095) && (uint64_t)va + size <= UINT64_C(0x100000000);
+    return size && !((va | size) & 4095) && (uint64_t)va + size <= 0x100000000ull;
 }
 static bool permissions_valid(unsigned permissions) { return !(permissions & ~7u); }
 SnxCtrMemResult snx_ctr_map(SnxCtrAddressSpace* s, uint32_t va, uint32_t pa, uint32_t size, unsigned permissions) {
@@ -141,7 +141,7 @@ static unsigned char* physical(SnxCtrMemory* m, uint32_t pa, bool* mmio) {
     return NULL;
 }
 SnxCtrMemResult snx_ctr_check_ram(SnxCtrAddressSpace* s, uint32_t va, size_t size, unsigned access) {
-    if (!s || !access || !permissions_valid(access) || size > UINT64_C(0x100000000) - va) return SNX_CTR_MEM_INVALID;
+    if (!s || !access || !permissions_valid(access) || size > 0x100000000ull - va) return SNX_CTR_MEM_INVALID;
     for (size_t off = 0; off < size;) {
         uint32_t at = va + (uint32_t)off;
         Page* p = page(s, at);
@@ -158,7 +158,7 @@ SnxCtrMemResult snx_ctr_check_ram(SnxCtrAddressSpace* s, uint32_t va, size_t siz
 }
 static SnxCtrMemResult transfer(SnxCtrAddressSpace* s, uint32_t va, void* buffer, size_t size, unsigned access,
                                 bool ram_only) {
-    if (!s || !buffer || !size || size > UINT64_C(0x100000000) - va) return SNX_CTR_MEM_INVALID;
+    if (!s || !buffer || !size || size > 0x100000000ull - va) return SNX_CTR_MEM_INVALID;
     size_t offset = 0;
     while (offset < size) {
         uint32_t at = va + (uint32_t)offset;

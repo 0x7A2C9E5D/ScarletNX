@@ -15,7 +15,7 @@ typedef struct {
 
 static char* text_copy(const char* text, size_t size) {
     char* copy;
-    if (size == (size_t)-1) return NULL;
+    if (size == SIZE_MAX) return NULL;
     copy = (char*)malloc(size + 1);
     if (copy) {
         memcpy(copy, text, size);
@@ -171,7 +171,7 @@ void snx_size_text(SnxU64 bytes, char* text, size_t size) {
     double value = (double)bytes;
     int unit = -1;
     if (bytes < 1024) {
-        sprintf(text, "%lu bytes", (unsigned long)bytes);
+        sprintf(text, "%llu bytes", (unsigned long long)bytes);
         return;
     }
     while (value >= 1024 && unit < 3) {

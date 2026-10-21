@@ -25,7 +25,7 @@
 #define GSP_ERR_REGS_ALIGN     0xe0e02bf2u
 #define GSP_FIRST_INIT         0x2a07u
 #define GSP_TIMED_OUT          0x09401bfeu
-#define GSP_VBLANK_NS          UINT64_C(16666667)
+#define GSP_VBLANK_NS          16666667ull
 
 static CtrSharedMap* shared_map(SnxCtrProcess* p, uint32_t object) {
     for (unsigned i = 0; i < 8; ++i)
@@ -264,7 +264,7 @@ static void cache_op(SnxCtrIpc* c) {
         snx_ctr_ipc_error_reply(c, GSP_ERR_INVALID_HANDLE);
         return;
     }
-    if ((uint64_t)c->in[1] + c->in[2] > UINT64_C(0x100000000)) {
+    if ((uint64_t)c->in[1] + c->in[2] > 0x100000000ull) {
         snx_ctr_ipc_error_reply(c, GSP_ERR_REGS_RANGE);
         return;
     }
@@ -425,8 +425,8 @@ static bool gx_resolve(SnxCtrProcess* p, uint32_t va, uint32_t size, unsigned ch
 static GxStep gx_dma(SnxCtrIpc* c, const uint32_t* a, GxInterrupts* irq) {
     SnxCtrProcess* p = c->process;
     uint32_t source = a[0], dest = a[1], size = a[2];
-    if (size > GX_STAGE_LIMIT || (uint64_t)source + size > UINT64_C(0x100000000) ||
-        (uint64_t)dest + size > UINT64_C(0x100000000)) {
+    if (size > GX_STAGE_LIMIT || (uint64_t)source + size > 0x100000000ull ||
+        (uint64_t)dest + size > 0x100000000ull) {
         c->state = SNX_CTR_IPC_UNSUPPORTED;
         return GX_STOP;
     }

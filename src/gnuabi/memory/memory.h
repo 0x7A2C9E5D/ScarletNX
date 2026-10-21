@@ -10,7 +10,7 @@
 #define GNU_PROT_EXEC     4u
 #define GNU_PAGE_MAPPED   8u
 #define GNU_PAGE_CODE     16u /* writable, and compiled from: the host's copy is read-only until a write (watch_code) */
-#define GNU_ADDRESS_LIMIT UINT64_C(0x100000000)
+#define GNU_ADDRESS_LIMIT 0x100000000ull
 typedef struct GnuMemory {
     unsigned char* base;
     unsigned char* pages;

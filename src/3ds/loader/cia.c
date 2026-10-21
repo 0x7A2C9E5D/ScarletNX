@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static uint64_t align64(uint64_t n) { return (n + 63) & ~UINT64_C(63); }
+static uint64_t align64(uint64_t n) { return (n + 63) & ~63ull; }
 static size_t body_offset(uint32_t signature) {
     switch (signature) {
         case 0x10000:

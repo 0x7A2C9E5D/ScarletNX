@@ -15,7 +15,7 @@ It prints one line per candidate, file:line: rule: what it saw. Five rules can b
   globals two or more variables of static duration in one file (at file scope, or static in a function) that
           aren't const: one struct holds the file's state, in one global. Under src/nx/hle/, any one: the
           state is a member of g_hle (hle/hle.h)
-  zero    a local zeroed by memset(&x, 0, sizeof x) in the function that declares it: `= {0}` (C90 has it) says
+  zero    a local zeroed by memset(&x, 0, sizeof x) in the function that declares it: `= {0}` says
           so where it is declared. A memset stays for an object reached through a pointer
 Exit status 0 whatever it finds; 2 when a path cannot be read.
 """

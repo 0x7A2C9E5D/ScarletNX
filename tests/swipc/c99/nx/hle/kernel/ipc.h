@@ -1,18 +1,19 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* What the generated dispatchers use of hle/kernel/ipc.h, in C90: tests/CMakeLists.txt compiles the generated test
-   dispatcher against it with -std=c90 -pedantic-errors, so the generator's output stays ANSI C */
+/* What the generated dispatchers use of hle/kernel/ipc.h, in C99: tests/CMakeLists.txt compiles the generated test
+   dispatcher against it with -std=c99 -pedantic-errors, so the generator's output stays ISO C */
 #ifndef SNX_IPC_H
 #define SNX_IPC_H
+#include <stdint.h>
 #include <string.h>
-typedef unsigned char u8;
-typedef unsigned short u16;
-typedef unsigned int u32;
-typedef unsigned long u64;
-typedef signed char i8;
-typedef short i16;
-typedef int i32;
-typedef long i64;
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
+typedef int8_t i8;
+typedef int16_t i16;
+typedef int32_t i32;
+typedef int64_t i64;
 typedef struct {
     u64 addr, size;
     u32 flags;

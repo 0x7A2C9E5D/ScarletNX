@@ -12,8 +12,8 @@
 static uint16_t rd16(const unsigned char* p) { return (uint16_t)(p[0] | (unsigned)p[1] << 8); }
 static uint32_t rd32(const unsigned char* p) { return (uint32_t)rd16(p) | (uint32_t)rd16(p + 2) << 16; }
 static uint64_t rd64(const unsigned char* p) { return (uint64_t)rd32(p) | (uint64_t)rd32(p + 4) << 32; }
-static uint64_t down(uint64_t n) { return n & ~UINT64_C(4095); }
-static uint64_t up(uint64_t n) { return (n + 4095) & ~UINT64_C(4095); }
+static uint64_t down(uint64_t n) { return n & ~4095ull; }
+static uint64_t up(uint64_t n) { return (n + 4095) & ~4095ull; }
 /* One program header, normalized across ELF32 and ELF64 layouts. */
 typedef struct {
     uint32_t pt, flags;
@@ -108,7 +108,7 @@ int gnu_elf_load_at(GnuElf* elf, GnuMemory* m, const void* source, size_t size, 
             (h.align > 1 && ((h.align & (h.align - 1)) || (h.va & (h.align - 1)) != (h.offset & (h.align - 1)))))
             return fail(error, cap, "PT_LOAD %u is invalid or outside the bounded guest address space", i);
         uint64_t va = h.va + elf->bias;
-        if (va < GNU_PAGE_SIZE || up(va + h.memsz) > UINT64_C(0x40000000))
+        if (va < GNU_PAGE_SIZE || up(va + h.memsz) > 0x40000000ull)
             return fail(error, cap, "PT_LOAD %u overlaps reserved guest regions", i);
         if ((va & 4095) != (h.offset & 4095)) return fail(error, cap, "PT_LOAD %u has inconsistent page offsets", i);
         if (va + h.memsz > end) end = va + h.memsz;
@@ -186,7 +186,7 @@ int gnu_elf_load_at(GnuElf* elf, GnuMemory* m, const void* source, size_t size, 
         }
     }
     free(permissions);
-    elf->entry = (entry & (bits == 32 ? ~1u : ~UINT64_C(0))) + elf->bias;
+    elf->entry = (entry & (bits == 32 ? ~1u : ~0ull)) + elf->bias;
     unsigned entry_mask = bits == 64 ? 3u : (elf->thumb ? 1u : 3u);
     if (!gnu_memory_access(m, elf->entry, 4, GNU_PROT_EXEC) || (elf->entry & entry_mask)) {
         gnu_elf_destroy(elf);
@@ -207,8 +207,8 @@ int gnu_elf_load_at(GnuElf* elf, GnuMemory* m, const void* source, size_t size, 
     elf->image_end = up(end);
     if (program) {
         m->brk_base = m->brk_current = up(end);
-        m->brk_limit = up(end) + UINT64_C(0x04000000);
-        if (m->brk_limit > UINT64_C(0x40000000)) m->brk_limit = UINT64_C(0x40000000);
+        m->brk_limit = up(end) + 0x04000000ull;
+        if (m->brk_limit > 0x40000000ull) m->brk_limit = 0x40000000ull;
         /* below the dynamic linker */
         if (m->brk_base < GNU_ELF_INTERP_BIAS && m->brk_limit > GNU_ELF_INTERP_BIAS) m->brk_limit = GNU_ELF_INTERP_BIAS;
     }
@@ -224,7 +224,7 @@ int gnu_elf_load(GnuElf* elf, GnuMemory* memory, const char* path, char* error, 
         return fail(error, cap, "Cannot size ELF '%s': %s", path, strerror(why));
     }
     long size = ftell(file);
-    if (size < 64 || (uint64_t)size > UINT64_C(0x10000000)) {
+    if (size < 64 || (uint64_t)size > 0x10000000ull) {
         fclose(file);
         return fail(error, cap, "ELF '%s' is %ld bytes, not 64 to 256 MiB", path, size);
     }

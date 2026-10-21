@@ -85,16 +85,12 @@ static void snx_a64p_preset_nce(CPU* c) {
     }
 }
 
-/* a u64 in hex as %0<digits>llx prints it, through two unsigned longs: C90 has no long long */
+/* a u64 in hex as %0<digits>llx, in one of four buffers so a message can hold several */
 static const char* snx_a64p_hex(u64 v, int digits) {
     static char ring[4][24];
     static unsigned at;
     char* out = ring[at++ % 4];
-    unsigned long hi = (unsigned long)(v >> 32), lo = (unsigned long)(v & 0xFFFFFFFFu);
-    if (hi || digits > 8)
-        sprintf(out, "%0*lx%08lx", digits > 8 ? digits - 8 : 1, hi, lo);
-    else
-        sprintf(out, "%0*lx", digits, lo);
+    sprintf(out, "%0*llx", digits, (unsigned long long)v);
     return out;
 }
 

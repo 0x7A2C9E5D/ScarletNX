@@ -660,8 +660,8 @@ FsTreeResult fs_tree_mtime(FsTree* tree, const FsNode* node, uint64_t* unix_ms) 
     ULARGE_INTEGER time = {.LowPart = attributes.ftLastWriteTime.dwLowDateTime,
                            .HighPart = attributes.ftLastWriteTime.dwHighDateTime};
     /* FILETIME is 100ns since 1601; the Unix epoch is 116444736000000000 of them. */
-    if (time.QuadPart < UINT64_C(116444736000000000)) return FS_TREE_IO;
-    *unix_ms = (time.QuadPart - UINT64_C(116444736000000000)) / 10000;
+    if (time.QuadPart < 116444736000000000ull) return FS_TREE_IO;
+    *unix_ms = (time.QuadPart - 116444736000000000ull) / 10000;
 #else
     struct stat st;
     if (stat(path, &st) || st.st_mtime < 0) return FS_TREE_IO;

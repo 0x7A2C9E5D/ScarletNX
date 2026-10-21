@@ -282,7 +282,7 @@ static void bounds(ArmIR* a, LLVMValueRef addr, unsigned bytes, unsigned alignme
         require(a, cmp(a, LLVMIntEQ, band(a, addr, c32(a, alignment - 1)), c32(a, 0)), SNX_ARM_ALIGNMENT, addr);
     end = add(a, z64(a, addr), c64(a, bytes));
     size = get(a, offsetof(SnxArmCPU, mem_size), a->i64);
-    require(a, band(a, cmp(a, LLVMIntULE, end, size), cmp(a, LLVMIntULE, end, c64(a, UINT64_C(1) << 32))),
+    require(a, band(a, cmp(a, LLVMIntULE, end, size), cmp(a, LLVMIntULE, end, c64(a, 1ull << 32))),
             SNX_ARM_DATA_ABORT, addr);
 }
 /* Checked callbacks never see host guest pointers, only a bounded transaction
@@ -327,7 +327,7 @@ static void transfer_begin(ArmIR* a, LLVMValueRef addr, unsigned bytes, unsigned
     }
     if (alignment > 1)
         require(a, cmp(a, LLVMIntEQ, band(a, addr, c32(a, alignment - 1)), c32(a, 0)), SNX_ARM_ALIGNMENT, addr);
-    require(a, cmp(a, LLVMIntULE, add(a, z64(a, addr), c64(a, bytes)), c64(a, UINT64_C(1) << 32)), SNX_ARM_DATA_ABORT,
+    require(a, cmp(a, LLVMIntULE, add(a, z64(a, addr), c64(a, bytes)), c64(a, 1ull << 32)), SNX_ARM_DATA_ABORT,
             addr);
     a->transfer_base = addr;
     a->transfer_bytes = bytes;

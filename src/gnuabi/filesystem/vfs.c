@@ -1344,7 +1344,7 @@ int gnu_vfs_load(GnuVfs* vfs, int dirfd, const char* path, unsigned char** bytes
     }
     if (!error && (st.mode & 0170000) != 0100000) error = -GNU_EACCES;
     if (!error && !(st.mode & 0111)) error = -GNU_EACCES;
-    if (!error && st.size > UINT64_C(0x10000000)) error = -GNU_ENOMEM;
+    if (!error && st.size > 0x10000000ull) error = -GNU_ENOMEM;
     while (!error) {
         int64_t n;
         if (used == capacity) {

@@ -648,21 +648,13 @@ done:
 }
 
 /* ============================================================ the protocol */
-/* C90 takes string literals of 509 characters: a longer text is parts, joined when it is sent */
-static char* joined(const char* const* parts) {
-    Text t = {0};
-    for (; *parts; parts++) mcp_put(&t, *parts);
-    return t.p;
-}
-
-static const char* const instructions[] = {
+static const char instructions[] =
     "ScarletNX's logs and games on this machine. scan_log summarizes a game's log (how the run ended, where, the "
     "services the runtime doesn't implement, slow frames); read_log reads parts of it by text or line; find_game "
-    "lists the extracted games; symbolize and disassemble read a game's code at the addresses a log names. ",
+    "lists the extracted games; symbolize and disassemble read a game's code at the addresses a log names. "
     "A log's addresses match only the same game version (find_game gives it, the log's header names the log's). "
     "Nothing of a game (code, files) goes into an issue, a pull request or an edenprobe case: a case asks the "
-    "hardware a question the failure narrowed down to.",
-    NULL};
+    "hardware a question the failure narrowed down to.";
 
 static cJSON* schema(const char* const* names, const char* const* types, int n, const char* const* required, int r) {
     cJSON *s = cJSON_CreateObject(), *props = cJSON_CreateObject(), *req = cJSON_CreateArray();
@@ -685,12 +677,10 @@ static cJSON* schema(const char* const* names, const char* const* types, int n, 
     cJSON_AddBoolToObject(s, "additionalProperties", 0);
     return s;
 }
-static void tool(cJSON* list, const char* name, const char* const* description, cJSON* input) {
+static void tool(cJSON* list, const char* name, const char* description, cJSON* input) {
     cJSON* t = cJSON_CreateObject();
-    char* text = joined(description);
     cJSON_AddStringToObject(t, "name", name);
-    cJSON_AddStringToObject(t, "description", text);
-    free(text);
+    cJSON_AddStringToObject(t, "description", description);
     cJSON_AddItemToObject(t, "inputSchema", input);
     cJSON_AddItemToArray(list, t);
 }
@@ -705,31 +695,26 @@ static cJSON* tools(void) {
     static const char* const dis_names[] = {"game", "function", "start", "end"};
     static const char* const dis_types[] = {"string", "string", "string", "string"};
     static const char* const game[] = {"game"};
-    static const char* const scan_says[] = {
+    static const char scan_says[] =
         "The summary of a game's .log or the launcher's Share log file: build, title ID, game version, system, GPU, how the "
         "run ended (crash, svcBreak, exception, BRK, an instruction the recompiler cannot run, fatal), the game "
-        "function it is pinned on with its backtrace, ",
+        "function it is pinned on with its backtrace, "
         "the service commands the runtime doesn't implement, warnings, the frames over 50 ms and what the slowest did, "
-        "and a signature shared by every log that failed the same way.",
-        NULL};
-    static const char* const read_says[] = {
+        "and a signature shared by every log that failed the same way.";
+    static const char read_says[] =
         "Parts of a log with line numbers, never the whole of a large one: the lines holding pattern (plain text, "
-        "alternatives separated by |, ignore_case to match any case) with context lines around each (0 to 20), ",
+        "alternatives separated by |, ignore_case to match any case) with context lines around each (0 to 20), "
         "or count lines from start (1-based), or the last count lines. 400 lines at most. Reads files under "
-        "ScarletNX's data folder and its state, cache and settings folders.",
-        NULL};
-    static const char* const find_says[] = {
+        "ScarletNX's data folder and its state, cache and settings folders.";
+    static const char find_says[] =
         "The extracted games on this machine (the data folder's work/) with their title IDs and versions, or only "
-        "title_id's. A log's addresses match only a game of the version its header names.",
-        NULL};
-    static const char* const sym_says[] = {
+        "title_id's. A log's addresses match only a game of the version its header names.";
+    static const char sym_says[] =
         "Names game addresses (a backtrace's, a crash report's, hexadecimal) by the game's symbols: module, function "
-        "and offset. game is a folder, a game folder of work/, or a title ID.",
-        NULL};
-    static const char* const dis_says[] = {
+        "and offset. game is a folder, a game folder of work/, or a title ID.";
+    static const char dis_says[] =
         "Disassembles a game function named by a part of its symbol (demangled or not), or the range start to end "
-        "(hexadecimal), with each branch's target named. 400 instructions at most. game as for symbolize.",
-        NULL};
+        "(hexadecimal), with each branch's target named. 400 instructions at most. game as for symbolize.";
     static const char* const scaffold_names[] = {"checkout", "suite", "id", "name", "tier", "issue", "family"};
     static const char* const scaffold_types[] = {"string", "string", "string", "string", "string", "integer", "string"};
     static const char* const check_names[] = {"checkout", "suite"};
@@ -739,34 +724,30 @@ static cJSON* tools(void) {
     static const char* const finding_names[] = {"issue", "suite", "name", "scarletnx_report", "reference_report",
                                                 "source"};
     static const char* const finding_types[] = {"integer", "string", "string", "string", "string", "string"};
-    static const char* const scaffold_says[] = {
+    static const char scaffold_says[] =
         "For a confirmed game report (the `status: confirmed` label): writes a new edenprobe service case's "
-        "mechanical parts into a local edenprobe checkout (git clone of scarletnx/edenprobe), every file or none: ",
+        "mechanical parts into a local edenprobe checkout (git clone of scarletnx/edenprobe), every file or none: "
         "the case's enum entry and CASES[] row (suite, name), a judge and its reference check to fill in, the device "
         "side asking nothing yet, and a new suite's ui.c row. family is service (the only one it writes yet); id is "
-        "the enum name without SERVICE_ (HID_HOLD_TYPE); ",
+        "the enum name without SERVICE_ (HID_HOLD_TYPE); "
         "name is one sentence about the hardware's behaviour; tier is none, exact, ulp, position or level; issue is "
         "the ScarletNX issue. It answers what is left to write: the service call, the judge, the expected answer's "
-        "source, the docs. Nothing of the game goes into a case.",
-        NULL};
-    static const char* const check_says[] = {
+        "source, the docs. Nothing of the game goes into a case.";
+    static const char check_says[] =
         "Runs edenprobe's host check in a checkout (make -f host.mk host-run: every judge and its reference check, "
-        "with the host's compiler, no Switch toolchain): its lines about suite, its failures and its end.",
-        NULL};
-    static const char* const run_says[] = {
+        "with the host's compiler, no Switch toolchain): its lines about suite, its failures and its end.";
+    static const char run_says[] =
         "Recompiles an edenprobe NRO (built from the checkout with devkitPro's image, or a pull request's CI "
         "artifact) with this program, runs it headless in the mode's words (\"quick notime service\", plus \"fatal\" "
-        "for a case that may crash) until its summary, ",
+        "for a case that may crash) until its summary, "
         "relaunching after a crash, and answers the report's build, the cases filter names (\"suite\" or \"suite: "
         "name\") and its summary. The recompile is kept while the NRO is unchanged; nothing of the person's "
-        "ScarletNX folders is touched. The report stays in the cache for edenprobe_finding.",
-        NULL};
-    static const char* const finding_says[] = {
+        "ScarletNX folders is touched. The report stays in the cache for edenprobe_finding.";
+    static const char finding_says[] =
         "The case's lines in ScarletNX's report.jsonl and the reference's (Eden's run, or a console's), checked "
-        "(it should fail on ScarletNX and pass on the reference), and the edenprobe pull request's text: ",
+        "(it should fail on ScarletNX and pass on the reference), and the edenprobe pull request's text: "
         "the commit subject, the issue it comes from, what each machine answered, source (where the expected answer "
-        "comes from), the tests, and what a case may not hold.",
-        NULL};
+        "comes from), the tests, and what a case may not hold.";
     cJSON* list = cJSON_CreateArray();
     tool(list, "scan_log", scan_says, schema(path, s1, 1, path, 1));
     tool(list, "read_log", read_says, schema(read_names, read_types, 6, path, 1));
@@ -893,11 +874,7 @@ static cJSON* handle(Mcp* m, const cJSON* message) {
         cJSON_AddStringToObject(info, "name", "scarletnx");
         cJSON_AddStringToObject(info, "version", "1");
         cJSON_AddItemToObject(result, "serverInfo", info);
-        {
-            char* text = joined(instructions);
-            cJSON_AddStringToObject(result, "instructions", text);
-            free(text);
-        }
+        cJSON_AddStringToObject(result, "instructions", instructions);
     } else if (!strcmp(method, "tools/list")) {
         result = cJSON_CreateObject();
         cJSON_AddItemToObject(result, "tools", tools());

@@ -10,16 +10,8 @@
 #include "nx/loader/loader.h"
 #include <stdlib.h>
 #include <string.h>
-/* OpenSSL's headers use long long on LLP64 hosts, which C90 lacks; only they are let off */
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlong-long"
-#endif
 #include <lz4.h>
 #include <openssl/evp.h>
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
 
 #define NSO_HEADER_SIZE  0x100
 #define NRO_HEADER_SIZE  0x80
@@ -27,7 +19,7 @@
 #define MOD0_SIZE        0x18
 #define GUARD_SIZE       SNX_PAGE_SIZE
 /* where each kind of program's code region ends */
-#define CODE_END64 ((SnxU64)0x20 << 32)
+#define CODE_END64 0x2000000000ull
 #define CODE_END32 ((SnxU64)0x40000000UL)
 
 /* ELF dynamic tags read (the ones below DT_COUNT by number) */
@@ -77,7 +69,7 @@ static SnxU32 rd32(const unsigned char* p) {
 }
 static SnxU64 rd64(const unsigned char* p) { return (SnxU64)rd32(p) | (SnxU64)rd32(p + 4) << 32; }
 /* a signed 32-bit field widened to 64 bits, two's complement */
-static SnxU64 sext32(SnxU32 v) { return (SnxU64)v | (v & 0x80000000UL ? (SnxU64)0xFFFFFFFFUL << 32 : 0); }
+static SnxU64 sext32(SnxU32 v) { return (SnxU64)v | (v & 0x80000000UL ? 0xFFFFFFFF00000000ull : 0); }
 
 /* whether [offset, offset + length) lies inside [0, total) */
 static int inside(SnxU64 offset, SnxU64 length, SnxU64 total) { return offset <= total && length <= total - offset; }
@@ -338,7 +330,7 @@ static int read_symbols(Parse* p, const Dynamic* d) {
             free(defined);
             free(imported);
             return fail(p->error, p->error_size,
-                        snx_format("%s: symbol %lu: symbol name outside the string table", m->path, (unsigned long)i));
+                        snx_format("%s: symbol %zu: symbol name outside the string table", m->path, i));
         }
         if (!shndx) {
             imported[imported_n++] = name;
@@ -608,7 +600,7 @@ static void read_unwind(Parse* p) {
             fde = start + sext32(rd32(image + at + i * 8 + 4));
             why = read_fde(image, m->image_size, fde, &value, &size);
             if (why) {
-                detail = snx_format("FDE %lu: %s", (unsigned long)i, why);
+                detail = snx_format("FDE %zu: %s", i, why);
                 break;
             }
             if (!code_address(p, value)) continue;
@@ -618,7 +610,7 @@ static void read_unwind(Parse* p) {
         }
     }
     if (why)
-        m->eh_error = snx_format("stopped after %lu functions (%s)", (unsigned long)(p->fdes.n / 2),
+        m->eh_error = snx_format("stopped after %zu functions (%s)", p->fdes.n / 2,
                                  detail ? detail : why);
     free(detail);
 }
@@ -1191,18 +1183,10 @@ void snx_free_program(SnxProgram* program) {
 
 /* ------------------------------------------------------------------ dump for tools */
 
-/* value in hex without 0x and without long long */
-static void hex(char* out, SnxU64 value) {
-    unsigned long high = (unsigned long)(value >> 32), low = (unsigned long)(value & 0xFFFFFFFFUL);
-    if (high)
-        sprintf(out, "%lx%08lx", high, low);
-    else
-        sprintf(out, "%lx", low);
-}
 
 int snx_dump_program(const char* entry, const char* outdir, char* error, size_t error_size) {
     SnxProgram program;
-    char *path = NULL, *index = NULL, *partial = NULL, *file_name, a[24], b[24], c[24], d[24];
+    char *path = NULL, *index = NULL, *partial = NULL, *file_name;
     FILE* f = NULL;
     size_t i, j;
     int rc = -1;
@@ -1234,16 +1218,12 @@ int snx_dump_program(const char* entry, const char* outdir, char* error, size_t 
     fprintf(f, "program 1 %d\n", program.npdm.is64 ? 1 : 0);
     for (i = 0; i < program.module_count; ++i) {
         const SnxModuleImage* m = &program.modules[i];
-        hex(a, m->base);
-        hex(b, m->size);
-        hex(c, m->image_size);
-        fprintf(f, "module %s %s %s %s\n", m->name, a, b, c);
-        for (j = 0; j < m->symbol_count; ++j) {
-            hex(a, m->symbols[j].value);
-            hex(b, m->symbols[j].size);
-            hex(d, m->symbols[j].type);
-            fprintf(f, "symbol %s %s %s %s\n", a, b, d, m->symbols[j].name);
-        }
+        fprintf(f, "module %s %llx %llx %llx\n", m->name, (unsigned long long)m->base, (unsigned long long)m->size,
+                (unsigned long long)m->image_size);
+        for (j = 0; j < m->symbol_count; ++j)
+            fprintf(f, "symbol %llx %llx %llx %s\n", (unsigned long long)m->symbols[j].value,
+                    (unsigned long long)m->symbols[j].size, (unsigned long long)m->symbols[j].type,
+                    m->symbols[j].name);
     }
     if (fclose(f) || snx_replace(partial, index)) {
         f = NULL;

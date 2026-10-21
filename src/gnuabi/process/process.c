@@ -9,7 +9,6 @@
 #include "common/utilities/common.h"
 #include "common/utilities/endian.h"
 #include <openssl/rand.h>
-#include <inttypes.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -40,7 +39,7 @@ int gnu_clock_gettime(int id, int64_t* seconds, int64_t* nanos) {
         FILETIME ft;
         GetSystemTimeAsFileTime(&ft);
         uint64_t ticks = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
-        ticks -= UINT64_C(116444736000000000);
+        ticks -= 116444736000000000ull;
         *seconds = (int64_t)(ticks / 10000000);
         *nanos = (int64_t)(ticks % 10000000) * 100;
     } else if (id == 2 || id == 3) {
@@ -82,12 +81,12 @@ void gnu_sleep(int64_t seconds, int64_t nanoseconds) {
 #endif
 }
 static int push(GnuProcess* p, uint64_t* sp, const void* data, size_t n) {
-    if (n > *sp || *sp - n < UINT64_C(0xef800000)) return -GNU_E2BIG;
+    if (n > *sp || *sp - n < 0xef800000ull) return -GNU_E2BIG;
     *sp -= n;
     return gnu_memory_write(&p->memory, *sp, data, n);
 }
 int gnu_process_stack(GnuProcess* p, int argc, const char* const* argv, const char* const* env) {
-    uint64_t sp = UINT64_C(0xf0000000), stack_low = UINT64_C(0xef800000);
+    uint64_t sp = 0xf0000000ull, stack_low = 0xef800000ull;
     if (argc < 1 || argc > 65536) return -GNU_EINVAL;
     size_t envc = 0;
     if (env)
@@ -140,7 +139,7 @@ int gnu_process_stack(GnuProcess* p, int argc, const char* const* argv, const ch
     };
     size_t words = 1 + (size_t)argc + 1 + envc + 1 + sizeof auxiliary / sizeof auxiliary[0];
     uint64_t bytes = (uint64_t)words * 8;
-    uint64_t initial = (sp - bytes) & ~UINT64_C(15);
+    uint64_t initial = (sp - bytes) & ~15ull;
     if (initial < stack_low) {
         result = -GNU_E2BIG;
         goto done;
@@ -165,7 +164,7 @@ int gnu_process_stack(GnuProcess* p, int argc, const char* const* argv, const ch
         /* a dynamic program starts in its dynamic linker, which finds the program through AT_PHDR and AT_ENTRY */
         p->cpu.pc = p->interp.image ? p->interp.entry : p->elf.entry;
         /* Linux starts all general registers at zero; argc/argv live on the stack. */
-        result = gnu_memory_protect(&p->memory, stack_low, UINT64_C(0x800000), p->elf.stack_permissions);
+        result = gnu_memory_protect(&p->memory, stack_low, 0x800000ull, p->elf.stack_permissions);
     }
 done:
     free(arguments); /* and the environment after them */
@@ -227,7 +226,7 @@ int gnu_process_stack32(GnuProcess* p, int argc, const char* const* argv, const 
                                   0,  0};
     size_t words = 1 + (size_t)argc + 1 + envc + 1 + sizeof auxiliary / sizeof auxiliary[0];
     uint64_t bytes = (uint64_t)words * 4;
-    uint64_t initial = (s64 - bytes) & ~UINT64_C(7);
+    uint64_t initial = (s64 - bytes) & ~7ull;
     if (initial < stack_low) {
         result = -GNU_E2BIG;
         goto done;
@@ -269,7 +268,7 @@ int gnu_process_load(GnuProcess* p, const char* path, const unsigned char* image
     if (cap) error[0] = 0;
     if (r) {
         char why[256];
-        snprintf(error, cap, "Cannot reserve %" PRIu64 " GiB of guest address space: %s", GNU_ADDRESS_LIMIT >> 30,
+        snprintf(error, cap, "Cannot reserve %llu GiB of guest address space: %s", GNU_ADDRESS_LIMIT >> 30,
                  snx_os_error(why, sizeof why));
         return r;
     }

@@ -237,7 +237,7 @@ int snx_ctr_main(int argc, char** argv) {
     }
     if (!snx_ctr_board_init(&board, model)) return 1;
     if (info) {
-        printf("3DS board: %s\nARM11 cores: %u\nBase clock: %" PRIu64 " Hz\nFCRAM: %u MiB\n", board.profile->name,
+        printf("3DS board: %s\nARM11 cores: %u\nBase clock: %llu Hz\nFCRAM: %u MiB\n", board.profile->name,
                board.profile->arm11_cores, SNX_CTR_BASE_CLOCK_HZ, board.profile->fcram_size / (1024u * 1024u));
         for (size_t i = 0; i < board.profile->region_count; ++i) {
             const SnxCtrRegion* r = &board.profile->regions[i];

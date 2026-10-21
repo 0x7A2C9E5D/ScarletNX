@@ -126,15 +126,15 @@ static uint64_t host_datetime(const char* path) {
     assert(GetFileAttributesExA(path, GetFileExInfoStandard, &data));
     ULARGE_INTEGER time = {.LowPart = data.ftLastWriteTime.dwLowDateTime,
                            .HighPart = data.ftLastWriteTime.dwHighDateTime};
-    assert(time.QuadPart >= UINT64_C(116444736000000000));
-    return (time.QuadPart - UINT64_C(116444736000000000)) / 10000 + UINT64_C(2208988800000);
+    assert(time.QuadPart >= 116444736000000000ull);
+    return (time.QuadPart - 116444736000000000ull) / 10000 + 2208988800000ull;
 #else
     struct stat st;
     assert(!stat(path, &st) && st.st_mtime >= 0);
 #if defined(__APPLE__) /* as fs/tree.c reads it */
-    return (uint64_t)st.st_mtime * 1000 + (uint64_t)st.st_mtimespec.tv_nsec / 1000000 + UINT64_C(2208988800000);
+    return (uint64_t)st.st_mtime * 1000 + (uint64_t)st.st_mtimespec.tv_nsec / 1000000 + 2208988800000ull;
 #else
-    return (uint64_t)st.st_mtime * 1000 + (uint64_t)st.st_mtim.tv_nsec / 1000000 + UINT64_C(2208988800000);
+    return (uint64_t)st.st_mtime * 1000 + (uint64_t)st.st_mtim.tv_nsec / 1000000 + 2208988800000ull;
 #endif
 #endif
 }

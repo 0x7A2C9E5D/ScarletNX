@@ -28,12 +28,7 @@ static void emit_validity(FILE* out, unsigned validation) {
     }
 }
 
-void snx_a64_hex(FILE* out, SnxU64 value) {
-    if (value >> 32)
-        fprintf(out, "%lX%08lX", (unsigned long)(value >> 32), (unsigned long)(value & 0xFFFFFFFFUL));
-    else
-        fprintf(out, "%lX", (unsigned long)value);
-}
+void snx_a64_hex(FILE* out, SnxU64 value) { fprintf(out, "%llX", (unsigned long long)value); }
 
 void snx_a64_literal(FILE* out, SnxU64 value) {
     if (value < 0x80000000UL)

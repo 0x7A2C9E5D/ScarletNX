@@ -21,8 +21,8 @@ typedef struct GnuElf {
     char interp[256]; /* PT_INTERP: the dynamic linker's guest path, "" for a static program */
 } GnuElf;
 /* ET_DYN load addresses: a position-independent program, and the dynamic linker beside it */
-#define GNU_ELF_PROGRAM_BIAS UINT64_C(0x10000000)
-#define GNU_ELF_INTERP_BIAS  UINT64_C(0x38000000)
+#define GNU_ELF_PROGRAM_BIAS 0x10000000ull
+#define GNU_ELF_INTERP_BIAS  0x38000000ull
 int gnu_elf_load(GnuElf* elf, GnuMemory* memory, const char* path, char* error, size_t error_capacity);
 int gnu_elf_load_image(GnuElf* elf, GnuMemory* memory, const void* image, size_t size, char* error,
                        size_t error_capacity);

@@ -6,7 +6,7 @@
 
 static uint64_t mix(uint64_t hash, uint64_t value) {
     for (unsigned k = 0; k != 8; ++k) {
-        hash = (hash ^ (uint8_t)(value >> (k * 8))) * UINT64_C(1099511628211);
+        hash = (hash ^ (uint8_t)(value >> (k * 8))) * 1099511628211ull;
     }
     return hash;
 }
@@ -14,7 +14,7 @@ static uint64_t mix(uint64_t hash, uint64_t value) {
 int main(void) {
     size_t count, cases = 0;
     const SnxA64Pattern* patterns = snx_a64_patterns(&count);
-    uint64_t hash = UINT64_C(14695981039346656037);
+    uint64_t hash = 14695981039346656037ull;
     for (size_t i = 0; i < count; ++i) {
         cases += patterns[i].case_count;
         hash = mix(hash, patterns[i].case_count);

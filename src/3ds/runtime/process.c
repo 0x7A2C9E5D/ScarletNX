@@ -94,7 +94,7 @@ SnxCtrProcess* snx_ctr_process_new(const SnxCtrImage* image, SnxCtrModel model) 
     for (unsigned i = 0; i < 3; ++i) {
         const SnxCtrSegment* s = &image->segment[i];
         uint64_t bytes = (uint64_t)s->pages * 4096;
-        uint64_t size = bytes + (i == 2 ? ((uint64_t)image->bss_size + 4095) & ~UINT64_C(4095) : 0);
+        uint64_t size = bytes + (i == 2 ? ((uint64_t)image->bss_size + 4095) & ~4095ull : 0);
         if (size > UINT32_MAX || bytes > image->code_size - offset ||
             !map(p, s->address, (uint32_t)size, SNX_CTR_READ | SNX_CTR_WRITE))
             goto fail;
@@ -145,15 +145,15 @@ SnxCtrProcess* snx_ctr_process_new(const SnxCtrImage* image, SnxCtrModel model) 
 #else
         !timespec_get(&now, TIME_UTC)
 #endif
-        || now.tv_sec < 0 || (uint64_t)now.tv_sec > (UINT64_MAX - 999) / 1000 - UINT64_C(2208988800))
+        || now.tv_sec < 0 || (uint64_t)now.tv_sec > (UINT64_MAX - 999) / 1000 - 2208988800ull)
         goto fail;
     p->clock_origin = snx_seconds();
-    uint64_t rtc = ((uint64_t)now.tv_sec + UINT64_C(2208988800)) * 1000 + (uint64_t)now.tv_nsec / 1000000;
+    uint64_t rtc = ((uint64_t)now.tv_sec + 2208988800ull) * 1000 + (uint64_t)now.tv_nsec / 1000000;
     unsigned char shared[4096] = {0};
     for (unsigned bank = 0; bank < 2; ++bank) {
         for (unsigned i = 0; i < 8; ++i) {
             shared[0x20 + bank * 0x20 + i] = (unsigned char)(rtc >> (i * 8));
-            shared[0x30 + bank * 0x20 + i] = (unsigned char)(UINT64_C(268111856) >> (i * 8));
+            shared[0x30 + bank * 0x20 + i] = (unsigned char)(268111856ull >> (i * 8));
         }
     }
     if (snx_ctr_map(p->space, 0x1ff81000, 0x1ff81000, 4096, 3) != SNX_CTR_MEM_OK ||

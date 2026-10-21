@@ -62,7 +62,7 @@ not write.
 
 ## C code
 
-New C follows the rules of [RFC #142](https://github.com/scarletnx/ScarletNX/issues/142): strict ANSI C, no state
+New C follows the rules of [RFC #142](https://github.com/scarletnx/ScarletNX/issues/142): strict ISO C99, no state
 another value already says, indices instead of pointer chains, one allocation per owner. The
 `.claude/skills/snx-code-quality/SKILL.md` skill is the reference, with the exceptions to each rule.
 

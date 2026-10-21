@@ -27,13 +27,7 @@ typedef double f64;
 #define RESTRICT    __restrict__
 #define LIKELY(x)   __builtin_expect(!!(x), 1)
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
 #define SNX_INLINE static inline __attribute__((always_inline))
-#else /* C90 has no inline: unused copies must not warn in every file that includes this one */
-#define SNX_INLINE static __attribute__((always_inline, unused))
-#endif
-/* a 64-bit constant from two 32-bit halves, since C90 has no long long literals */
-#define SNX_U64C(hi, lo) (((u64)(hi) << 32) | (u64)(lo))
 
 /* The version of the contract between a game module and the runtime: this header (the CPU layout, the SNX_FP_*
    numbers), the helpers in cpu_helpers.c, RtAPI and the module descriptor. The recompiler writes it into each
@@ -286,8 +280,8 @@ SNX_INLINE u64 bswap64(u64 x) { return __builtin_bswap64(x); }
 SNX_INLINE u32 cls64(u64 x) { return clz64(x ^ (u64)((i64)x >> 1)) - 1; }
 SNX_INLINE u32 cls32(u32 x) { return clz32(x ^ (u32)((i32)x >> 1)) - 1; }
 SNX_INLINE u64 rbit64(u64 x) {
-    const u64 m1 = SNX_U64C(0x55555555u, 0x55555555u), m2 = SNX_U64C(0x33333333u, 0x33333333u),
-              m4 = SNX_U64C(0x0F0F0F0Fu, 0x0F0F0F0Fu);
+    const u64 m1 = 0x5555555555555555ull, m2 = 0x3333333333333333ull,
+              m4 = 0x0F0F0F0F0F0F0F0Full;
     x = ((x & m1) << 1) | ((x >> 1) & m1); /* swap neighbouring bits, then pairs, then nibbles: bytes reversed */
     x = ((x & m2) << 2) | ((x >> 2) & m2);
     x = ((x & m4) << 4) | ((x >> 4) & m4);
@@ -296,7 +290,7 @@ SNX_INLINE u64 rbit64(u64 x) {
 SNX_INLINE u32 rbit32(u32 x) { return (u32)(rbit64(x) >> 32); }
 /* REV16: the bytes of each halfword swapped */
 SNX_INLINE u64 rev16_64(u64 x) {
-    const u64 m = SNX_U64C(0x00FF00FFu, 0x00FF00FFu);
+    const u64 m = 0x00FF00FF00FF00FFull;
     return ((x & m) << 8) | ((x >> 8) & m);
 }
 /* REV32: the bytes of each word reversed */
@@ -388,7 +382,7 @@ u32 ursqrte32(u32 x);
 
 /* ---- saturation of a value to a signed or unsigned bits-wide integer ---- */
 SNX_INLINE i64 sat_s(i64 v, int bits) {
-    i64 hi = bits >= 64 ? (i64)SNX_U64C(0x7FFFFFFFu, 0xFFFFFFFFu) : (i64)(((u64)1 << (bits - 1)) - 1);
+    i64 hi = bits >= 64 ? (i64)0x7FFFFFFFFFFFFFFFull : (i64)(((u64)1 << (bits - 1)) - 1);
     i64 lo = -hi - 1;
     return v > hi ? hi : v < lo ? lo : v;
 }

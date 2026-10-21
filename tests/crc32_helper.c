@@ -50,9 +50,8 @@ int main(void) {
                 want = reference(acc, used, widths[w], c);
                 checks++;
                 if (got != want && failures++ < 8)
-                    fprintf(stderr, "%s, %d bytes, acc %08x, value %08lx%08lx: %08x, expected %08x\n",
-                            c ? "CRC32C" : "CRC32", widths[w], acc, (unsigned long)(val >> 32),
-                            (unsigned long)(val & 0xFFFFFFFFu), got, want);
+                    fprintf(stderr, "%s, %d bytes, acc %08x, value %016llx: %08x, expected %08x\n",
+                            c ? "CRC32C" : "CRC32", widths[w], acc, (unsigned long long)val, got, want);
             }
     printf("snx_crc32: %u checks, %d failed\n", checks, failures);
     return failures != 0;

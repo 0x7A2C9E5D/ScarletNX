@@ -18,7 +18,7 @@ SnxModuleEntry* snx_module_entries(const SnxCodegen* codegen, size_t* count) {
     for (i = 0; i < codegen->function_count; ++i) total += codegen->functions[i].leader_count;
     *count = 0;
     if (!total) return NULL;
-    if (total > ((size_t)-1) / sizeof(*entries)) return NULL;
+    if (total > SIZE_MAX / sizeof(*entries)) return NULL;
     entries = (SnxModuleEntry*)snx_alloc(total * sizeof(*entries));
     for (i = 0; i < codegen->function_count; ++i) {
         const SnxFunction* f = &codegen->functions[i];
@@ -37,19 +37,10 @@ SnxModuleEntry* snx_module_entries(const SnxCodegen* codegen, size_t* count) {
     return entries;
 }
 
-/* A 64-bit value in hex without long long (C90), whose printf lacks it */
-static void hex64(char* out, SnxU64 value) {
-    unsigned long high = (unsigned long)(value >> 32), low = (unsigned long)(value & 0xFFFFFFFFUL);
-    if (high)
-        sprintf(out, "0x%lX%08lX", high, low);
-    else
-        sprintf(out, "0x%lX", low);
-}
 
 char* snx_chunk_label(const SnxCodegen* codegen, size_t first, size_t last) {
     SnxU64 lo = ~(SnxU64)0, hi = 0;
     size_t instructions = 0, functions = 0, i;
-    char from[24], to[24];
     for (i = first; i < last && i < codegen->function_count; ++i) {
         const SnxFunction* f = &codegen->functions[i];
         SnxU64 end;
@@ -62,17 +53,14 @@ char* snx_chunk_label(const SnxCodegen* codegen, size_t first, size_t last) {
     }
     if (!functions) return snx_strdup("no functions");
     if (lo > hi) lo = hi = 0;
-    hex64(from, lo);
-    hex64(to, hi);
-    return snx_format("%s-%s, %lu function%s, %lu instructions", from, to, (unsigned long)functions,
-                      functions == 1 ? "" : "s", (unsigned long)instructions);
+    return snx_format("0x%llX-0x%llX, %zu function%s, %zu instructions", (unsigned long long)lo,
+                      (unsigned long long)hi, functions, functions == 1 ? "" : "s", instructions);
 }
 
 void snx_report_unit(size_t done, size_t count, const char* name, const char* label, int cached, double seconds) {
     if (cached)
-        printf("  compiled block %lu/%lu: %s, %s (cached)\n", (unsigned long)done, (unsigned long)count, name, label);
+        printf("  compiled block %zu/%zu: %s, %s (cached)\n", done, count, name, label);
     else
-        printf("  compiled block %lu/%lu: %s, %s (%.1f s)\n", (unsigned long)done, (unsigned long)count, name, label,
-               seconds);
+        printf("  compiled block %zu/%zu: %s, %s (%.1f s)\n", done, count, name, label, seconds);
     fflush(stdout);
 }

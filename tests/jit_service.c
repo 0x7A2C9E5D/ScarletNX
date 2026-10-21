@@ -489,32 +489,40 @@ static void test_invalidate(void) {
    and its pcs go back to their queue. Before, they were left GONE with their pending bit set, which snx_jit_resolve's
    fast path reads as "queued, wait for it": nothing queued them again, and the pc was never compiled (rt_miss's fatal,
    DQ7 at 98f1fc4). Each round invalidates elsewhere until its batch ends, so the batch reads the epoch before one of
-   them and is dropped, unless it was quicker than the first; a run where none was dropped proves nothing and fails */
+   them and is dropped, unless it was quicker than the first; a run where none was dropped proves nothing and fails.
+   The function is long so its batch outlasts a scheduler slice: on one CPU (a loaded runner, taskset -c 0) the woken
+   compile thread ran a short batch to its end before this thread ran again, and no round dropped one */
+#define IN_FLIGHT_PC   0x10000
+#define IN_FLIGHT_ADDS 4000
 static void test_invalidate_in_flight(void) {
     static const u32 words[] = {0x91000400, 0xD65F03C0}; /* add x0, x0, #1; ret */
     static const SnxU64 warm_pc[] = {0x4800};
+    static u32 long_words[IN_FLIGHT_ADDS + 1];
     SnxJitStats stats;
     unsigned long batches, dropped, spins;
     unsigned round;
+    size_t i;
     service = start(1, 1);
     if (!service) {
         ++failures;
         return;
     }
-    put(0x4000, words, 2);
+    for (i = 0; i < IN_FLIGHT_ADDS; ++i) long_words[i] = words[0];
+    long_words[IN_FLIGHT_ADDS] = words[1];
+    put(IN_FLIGHT_PC, long_words, IN_FLIGHT_ADDS + 1);
     snx_jit_stats(service, &stats);
     dropped = stats.dropped;
     for (round = 0; round < 8; ++round) {
-        snx_jit_invalidate(service, 0x4000, 4); /* 0x4000 is new to the service again */
+        snx_jit_invalidate(service, IN_FLIGHT_PC, 4); /* the pc is new to the service again */
         snx_jit_stats(service, &stats);
         batches = stats.batches;
-        CHECK(snx_jit_resolve(service, 0x4000) == NULL);
+        CHECK(snx_jit_resolve(service, IN_FLIGHT_PC) == NULL);
         for (spins = 0; stats.batches == batches && spins < 100000000; ++spins) {
             snx_jit_invalidate(service, 0x8000, 0x10);
             snx_jit_stats(service, &stats);
         }
         CHECK(stats.batches != batches);
-        CHECK(snx_jit_wait(service, 0x4000) != NULL); /* queued again, and compiled once nothing changes */
+        CHECK(snx_jit_wait(service, IN_FLIGHT_PC) != NULL); /* queued again, and compiled once nothing changes */
     }
     /* a warm pc goes back to the warm queue, and is compiled from there */
     put(0x4800, words, 2);

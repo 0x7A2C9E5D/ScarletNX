@@ -4,9 +4,5 @@
 cmake_minimum_required(VERSION 3.25)
 project(svcgen LANGUAGES C)
 add_executable(svcgen svcgen.c)
-# C11 on a Mac, as the main build's strict C (SNX_C90_STANDARD): Apple's headers use long long
-if(APPLE)
-    set_target_properties(svcgen PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
-else()
-    set_target_properties(svcgen PROPERTIES C_STANDARD 90 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
-endif()
+# strict ISO C99, as the main build's strict C
+set_target_properties(svcgen PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)

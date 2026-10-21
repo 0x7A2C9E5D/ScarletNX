@@ -100,9 +100,8 @@ endfunction()
 # a test's checks are asserts too: -UNDEBUG keeps them in any build type
 function(snx_test_target target standard)
     set(strict OFF)
-    if(standard EQUAL 90) # strict ANSI C: C11 on Apple systems (SNX_C90_STANDARD, CMakeLists.txt)
+    if(standard EQUAL 99) # strict ISO C99, without extensions
         set(strict ON)
-        set(standard ${SNX_C90_STANDARD})
     endif()
     set_target_properties(${target} PROPERTIES C_STANDARD ${standard} C_STANDARD_REQUIRED ON)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
@@ -148,7 +147,7 @@ if(TARGET snx_ctr_board)
     add_test(NAME 3ds_ipc COMMAND snx-test-3ds-ipc)
     add_executable(snx-test-ctr-swipc ctr_swipc.c)
     if(NOT WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
-        snx_test_target(snx-test-ctr-swipc 90)
+        snx_test_target(snx-test-ctr-swipc 99)
             else()
         snx_test_target(snx-test-ctr-swipc 11)
     endif()
@@ -275,7 +274,7 @@ include("${PROJECT_SOURCE_DIR}/cmake/swipc.cmake")
 # Exercise NX's real FS tree and service adapters even in the independent CTR
 # build. These fixtures supply their own platform/kernel boundary stubs.
 add_executable(snx-test-fs-fixture filesystem_fixture.c)
-snx_test_target(snx-test-fs-fixture 90)
+snx_test_target(snx-test-fs-fixture 99)
 target_link_libraries(snx-test-fs-fixture PRIVATE scarletnx-common)
 add_library(snx_test_fs_tree OBJECT "${PROJECT_SOURCE_DIR}/src/common/filesystem/tree.c")
 snx_test_target(snx_test_fs_tree 11)
@@ -316,14 +315,14 @@ if(UNIX)
     target_link_libraries(snx-test-fs-host PRIVATE Threads::Threads)
     add_test(NAME filesystem_host COMMAND snx-test-fs-host WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
     add_executable(snx-test-data-dir data_dir.c)
-    snx_test_target(snx-test-data-dir 90)
+    snx_test_target(snx-test-data-dir 99)
     target_link_libraries(snx-test-data-dir PRIVATE scarletnx-common)
     add_test(NAME data_dir COMMAND snx-test-data-dir)
     add_test(NAME runtime_deploy COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/deploy.cmake")
 endif()
 # snx_os_error: the system's reason a message names, Windows' GetLastError where its calls leave errno
 add_executable(snx-test-os-error os_error.c)
-snx_test_target(snx-test-os-error 90)
+snx_test_target(snx-test-os-error 99)
 target_link_libraries(snx-test-os-error PRIVATE scarletnx-common)
 add_test(NAME os_error COMMAND snx-test-os-error)
 # RtAPI.cas128: the host's 16-byte compare-and-swap and the locked one, a pair stored whole or not at all
@@ -331,9 +330,9 @@ add_executable(snx-test-cas128 cas128.c)
 snx_test_target(snx-test-cas128 11)
 target_link_libraries(snx-test-cas128 PRIVATE scarletnx-common Threads::Threads)
 add_test(NAME cas128 COMMAND snx-test-cas128)
-# guest byte order on any host (src/common/utilities/endian.h), strict C90 as the code that includes it
+# guest byte order on any host (src/common/utilities/endian.h), strict C99 as the code that includes it
 add_executable(snx-test-endian endian.c)
-snx_test_target(snx-test-endian 90)
+snx_test_target(snx-test-endian 99)
 add_test(NAME endian COMMAND snx-test-endian)
 if(NOT SNX_BUILD_NX AND NOT SNX_BUILD_GNUABI)
     include(architecture.cmake)
@@ -422,20 +421,18 @@ add_test(NAME network_icmp COMMAND snx-test-network-icmp)
 set_tests_properties(network_icmp PROPERTIES TIMEOUT 30)
 
 # swipc (tools/swipc): the dispatchers generated from tests/swipc/test.swipc and other.swipc, driven with hand-made
-# requests; the same output compiled as C90 against a stand-in for ipc.h (LP64 hosts, where its u64 is unsigned long);
+# requests; the same output compiled as strict C99 against a stand-in for ipc.h;
 # and definitions the generator has to refuse, each with its line and message
 include("${PROJECT_SOURCE_DIR}/cmake/swipc.cmake")
 add_executable(snx-test-swipc-dispatch swipc_dispatch.c)
 snx_test_target(snx-test-swipc-dispatch 23)
 snx_swipc(snx-test-swipc-dispatch ROOT "${PROJECT_SOURCE_DIR}" FILES tests/swipc/test.swipc tests/swipc/other.swipc)
 add_test(NAME swipc_dispatch COMMAND snx-test-swipc-dispatch)
-if(NOT WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
-    add_library(snx-test-swipc-c90 OBJECT swipc/c90/c90.c)
-    set_target_properties(snx-test-swipc-c90 PROPERTIES C_STANDARD 90 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
-    target_compile_options(snx-test-swipc-c90 PRIVATE -pedantic-errors -Wall -Wextra -Werror)
-    target_include_directories(snx-test-swipc-c90 BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/swipc/c90")
-    snx_swipc(snx-test-swipc-c90 ROOT "${PROJECT_SOURCE_DIR}" FILES tests/swipc/test.swipc tests/swipc/other.swipc)
-endif()
+add_library(snx-test-swipc-c99 OBJECT swipc/c99/c99.c)
+set_target_properties(snx-test-swipc-c99 PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_compile_options(snx-test-swipc-c99 PRIVATE -pedantic-errors -Wall -Wextra -Werror)
+target_include_directories(snx-test-swipc-c99 BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/swipc/c99")
+snx_swipc(snx-test-swipc-c99 ROOT "${PROJECT_SOURCE_DIR}" FILES tests/swipc/test.swipc tests/swipc/other.swipc)
 foreach(bad IN ITEMS
         array_of_arrays 5 "give the element a name"
         bad_number 4 "bad number 12ab"
@@ -690,11 +687,11 @@ add_executable(snx-test-ini ini.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-ini 11)
 add_test(NAME ini COMMAND snx-test-ini)
 add_executable(snx-test-ini-lines ini_lines.c "${PROJECT_SOURCE_DIR}/src/common/utilities/ini_lines.c")
-snx_test_target(snx-test-ini-lines 90)
+snx_test_target(snx-test-ini-lines 99)
 add_test(NAME ini_lines COMMAND snx-test-ini-lines)
-# the R_ result helpers (src/nx/hle/result.h), strict C90 as the code that may use them
+# the R_ result helpers (src/nx/hle/result.h), strict C99 as the code that may use them
 add_executable(snx-test-result-macros result_macros.c)
-snx_test_target(snx-test-result-macros 90)
+snx_test_target(snx-test-result-macros 99)
 add_test(NAME result_macros COMMAND snx-test-result-macros)
 
 # generated and checked in (the controls' atlas, their shaders): their sources must still make them
@@ -773,12 +770,12 @@ endif()
 add_test(NAME hid_motion COMMAND snx-test-hid-motion)
 
 add_executable(snx-test-startup startup_options.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/startup.c")
-snx_test_target(snx-test-startup 90)
+snx_test_target(snx-test-startup 99)
 add_test(NAME startup_options COMMAND snx-test-startup)
 
 add_library(snx_test_common STATIC "${PROJECT_SOURCE_DIR}/src/common/utilities/common.c"
     "${PROJECT_SOURCE_DIR}/src/common/utilities/ini_lines.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/game_ini.c")
-snx_test_target(snx_test_common 90)
+snx_test_target(snx_test_common 99)
 if(WIN32)
     target_link_libraries(snx_test_common PUBLIC advapi32)
 endif()
@@ -787,7 +784,7 @@ add_executable(snx-test-driver driver_workflow.c
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/driver.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/game_name.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/setup.c" "${PROJECT_SOURCE_DIR}/src/nx/loader/loader.c"
     "${PROJECT_SOURCE_DIR}/src/common/utilities/process.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/logscan.c")
-snx_test_target(snx-test-driver 90)
+snx_test_target(snx-test-driver 99)
 target_link_libraries(snx-test-driver PRIVATE snx_test_common snx_setup snx_lz4 OpenSSL::Crypto snx_demangle)
 set_target_properties(snx-test-driver PROPERTIES LINKER_LANGUAGE CXX)
 if(APPLE) # driver/setup.c's weak snx_menu_language, as snx_driver has it: ld64 wants it named
@@ -796,22 +793,22 @@ endif()
 add_test(NAME driver_workflow COMMAND snx-test-driver)
 set_tests_properties(driver_workflow PROPERTIES TIMEOUT 60)
 add_executable(snx-test-link-file link_file.c)
-snx_test_target(snx-test-link-file 90)
+snx_test_target(snx-test-link-file 99)
 target_link_libraries(snx-test-link-file PRIVATE snx_test_common)
 add_test(NAME link_file COMMAND snx-test-link-file)
 add_executable(snx-test-launcher-name launcher_name.c)
-snx_test_target(snx-test-launcher-name 90)
+snx_test_target(snx-test-launcher-name 99)
 target_link_libraries(snx-test-launcher-name PRIVATE scarletnx-common)
 add_test(NAME launcher_name COMMAND snx-test-launcher-name)
 add_executable(snx-test-game-title game_title.c)
-snx_test_target(snx-test-game-title 90)
+snx_test_target(snx-test-game-title 99)
 target_link_libraries(snx-test-game-title PRIVATE scarletnx-common)
 add_test(NAME game_title COMMAND snx-test-game-title)
 if(UNIX)
     foreach(name user_dirs left_behind)
         string(REPLACE "_" "-" target "snx-test-${name}")
         add_executable(${target} ${name}.c)
-        snx_test_target(${target} 90)
+        snx_test_target(${target} 99)
         target_link_libraries(${target} PRIVATE scarletnx-common)
         add_test(NAME ${name} COMMAND ${target})
     endforeach()
@@ -819,13 +816,13 @@ endif()
 # the setup's files and choices (common/utilities/setup.c), its notices against docs/DEPRECATIONS.md
 if(UNIX AND TARGET snx_setup)
     add_executable(snx-test-setup setup.c)
-    snx_test_target(snx-test-setup 90)
+    snx_test_target(snx-test-setup 99)
     target_link_libraries(snx-test-setup PRIVATE snx_setup)
     target_compile_definitions(snx-test-setup PRIVATE SNX_DEPRECATIONS="${PROJECT_SOURCE_DIR}/docs/DEPRECATIONS.md")
     add_test(NAME setup COMMAND snx-test-setup)
     # the driver's setup in a terminal, its answers from a file
     add_executable(snx-test-setup-terminal setup_terminal.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/setup.c")
-    snx_test_target(snx-test-setup-terminal 90)
+    snx_test_target(snx-test-setup-terminal 99)
     target_link_libraries(snx-test-setup-terminal PRIVATE snx_setup)
     add_test(NAME setup_terminal COMMAND snx-test-setup-terminal)
 endif()
@@ -842,11 +839,11 @@ if(UNIX)
 endif()
 
 add_executable(snx-test-run-ticking run_ticking.c)
-snx_test_target(snx-test-run-ticking 90)
+snx_test_target(snx-test-run-ticking 99)
 target_link_libraries(snx-test-run-ticking PRIVATE snx_test_common)
 add_test(NAME run_ticking COMMAND snx-test-run-ticking)
 
-# C11 for hactool's headers, which build the synthetic dumps (hac_synth.h); extract.c itself stays C90 in the driver
+# C11 for hactool's headers, which build the synthetic dumps (hac_synth.h); extract.c itself stays C99 in the driver
 add_executable(snx-test-extract extract.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/extract.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/container.c")
 snx_test_target(snx-test-extract 11)
@@ -855,7 +852,7 @@ add_test(NAME extraction_native COMMAND snx-test-extract)
 
 add_executable(snx-test-loader loader_test.c "${PROJECT_SOURCE_DIR}/src/nx/loader/loader.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/game_name.c")
-snx_test_target(snx-test-loader 90)
+snx_test_target(snx-test-loader 99)
 target_link_libraries(snx-test-loader PRIVATE snx_test_common snx_lz4 OpenSSL::Crypto)
 add_test(NAME loader_native COMMAND snx-test-loader)
 
@@ -1187,7 +1184,7 @@ if(APPLE)
 endif()
 
 add_executable(snx_codegen_test codegen_test.c)
-snx_test_target(snx_codegen_test 90)
+snx_test_target(snx_codegen_test 99)
 target_link_libraries(snx_codegen_test PRIVATE snx_driver snx_a64_reference)
 add_test(NAME native_codegen COMMAND snx_codegen_test "${SNX_TARGET_C_COMPILER}" "${PROJECT_SOURCE_DIR}")
 

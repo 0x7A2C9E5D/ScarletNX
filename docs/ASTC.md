@@ -2,7 +2,7 @@
 
 ASTC textures are decoded on the GPU by a compute shader, `src/nx/gpu/texture/astc.comp` with its body in
 `astc_decode.glsl`. It is a GLSL port of Eden's `src/video_core/host_shaders/astc_decoder.comp` (GPL-3.0-or-later, with yuzu's GPL-2.0-or-later parts). The
-CPU decoder in `src/nx/gpu/texture/astc.c` is a C90 port of Eden's `src/video_core/textures/astc.cpp`, which
+CPU decoder in `src/nx/gpu/texture/astc.c` is a C port of Eden's `src/video_core/textures/astc.cpp`, which
 carries the University of North Carolina at Chapel Hill's Apache-2.0 decoder (FasTC). The runtime does not link
 the CPU decoder. The tests use it as the reference the shader must match byte for byte.
 

@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-/* C90 implementation; fixed-width types come from the host SDK. */
+/* C99 implementation; fixed-width types come from <stdint.h>. */
 typedef uint32_t SnxU32;
 typedef uint64_t SnxU64;
 typedef struct {
@@ -180,7 +180,7 @@ int snx_seek(FILE* f, SnxU64 offset);
    control characters. 1 when it has one, else 0 and "" */
 int snx_nacp_name(const unsigned char* nacp, size_t size, char* name, size_t name_size);
 /* The title ID of a program without an NPDM (an NRO, an ExeFS without main.npdm): none of its own */
-#define SNX_NPDM_DEFAULT_TITLE (((SnxU64)0x01000000UL << 32) | 0x1000)
+#define SNX_NPDM_DEFAULT_TITLE 0x0100000000001000ull
 /* The title ID a main.npdm's ACI0 gives its program, as the loader reads it, for one not loaded; SNX_NPDM_DEFAULT_TITLE
    for none */
 SnxU64 snx_npdm_title(const unsigned char* npdm, size_t size);

@@ -167,7 +167,7 @@ bool snx_ctr_display_spans(const SnxCtrDisplayTransfer* t, size_t* input_bytes, 
             if (src + source_reach(&d) > in_end) in_end = src + source_reach(&d);
             if (dst + d.out_bpp > out_end) out_end = dst + d.out_bpp;
         }
-    if (in_end > (uint64_t)(size_t)-1 || out_end > (uint64_t)(size_t)-1) return false;
+    if (in_end > SIZE_MAX || out_end > SIZE_MAX) return false;
     *input_bytes = (size_t)in_end;
     *output_bytes = (size_t)out_end;
     return true;

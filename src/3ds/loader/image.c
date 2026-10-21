@@ -41,7 +41,7 @@ static bool image_parse(const unsigned char* ex, bool (*code)(const void*, unsig
         SnxCtrSegment* s = &image->segment[i];
         *s = (SnxCtrSegment){le32(p), le32(p + 4), le32(p + 8)};
         uint64_t bytes = (uint64_t)s->pages * 4096;
-        sizes[i] = bytes + (i == 2 ? ((uint64_t)image->bss_size + 4095) & ~UINT64_C(4095) : 0);
+        sizes[i] = bytes + (i == 2 ? ((uint64_t)image->bss_size + 4095) & ~4095ull : 0);
         /* Match extraction: some homebrew .data byte counts include BSS. */
         uint64_t initialized = s->bytes;
         if (i == 2 && initialized > bytes && initialized >= image->bss_size) initialized -= image->bss_size;

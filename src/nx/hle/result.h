@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Horizon results and the helpers that return them. A result is a 32-bit value, 0 for success, otherwise a module in
-   bits 0-8 and a description from bit 9. The helpers are the idiom of Atmosphère's R_ macros, written anew in C90:
+   bits 0-8 and a description from bit 9. The helpers are the idiom of Atmosphère's R_ macros, written anew in C99:
    each statement macro is one statement (do { } while (0)), safe as the body of an if or else, and evaluates each
-   argument at most once. Self-contained, so strict C90 code can use it */
+   argument at most once. Self-contained, so strict C99 code can use it */
 #ifndef SNX_RESULT_H
 #define SNX_RESULT_H
 

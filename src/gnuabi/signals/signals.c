@@ -23,7 +23,7 @@ int64_t gnu_sigaction(GnuProcess* p, const uint64_t a[6]) {
         return -GNU_EFAULT;
     if (a[1]) {
         if (SNX_HOST_BE) action = guest_action(action);
-        action.mask &= ~((UINT64_C(1) << 8) | (UINT64_C(1) << 18));
+        action.mask &= ~((1ull << 8) | (1ull << 18));
         p->actions[a[0]] = action;
         gnu_spawn_signal_disposition((int)a[0], action.handler);
     }
@@ -38,7 +38,7 @@ int64_t gnu_sigprocmask(GnuProcess* p, const uint64_t a[6]) {
         gnu_memory_write(&p->memory, a[2], SNX_HOST_BE ? (old = snx_le64(p->signal_mask), &old) : &p->signal_mask, 8))
         return -GNU_EFAULT;
     mask = snx_le64(mask);
-    mask &= ~((UINT64_C(1) << 8) | (UINT64_C(1) << 18));
+    mask &= ~((1ull << 8) | (1ull << 18));
     if (a[1]) {
         if (a[0] == 0)
             p->signal_mask |= mask;

@@ -29,7 +29,7 @@ if(CMAKE_CROSSCOMPILING)
     add_dependencies(snx-shaderdec snx_shaderdec_host)
 else()
     add_executable(snx-shaderdec "${PROJECT_SOURCE_DIR}/tools/shaderdec/shaderdec.c")
-    set_target_properties(snx-shaderdec PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON
+    set_target_properties(snx-shaderdec PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON
                                                    C_EXTENSIONS OFF RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
     target_compile_options(snx-shaderdec PRIVATE -pedantic-errors -Wall -Wextra -Werror)
 endif()

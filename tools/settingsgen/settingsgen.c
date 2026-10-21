@@ -6,7 +6,7 @@
    filled with what the LLVM being built against has: every pass of the pipelines its opt prints for -O0 to -Oz (a
    file of "<level> <pipeline>" lines, --pipelines), on unless turned off, and each option its C API sets on the pass
    builder (LLVMPassBuilderOptionsSet*) and the target machine (LLVMSetTargetMachine*) taking a bool or an integer,
-   read from its headers (--llvm-include), LLVM's own value until it is set. It is strict C90 and depends on nothing,
+   read from its headers (--llvm-include), LLVM's own value until it is set. It is strict C99 and depends on nothing,
    so a cross build can build it for the machine it runs on.
 
    Usage: settingsgen --out DIR [--pipelines FILE] [--llvm-include DIR] SETTINGS
@@ -119,44 +119,34 @@ static char* cat3(const char* a, const char* b, const char* c) {
     return d;
 }
 
-static void outs_n(const char* s, size_t n) {
+/* room for n more characters and the terminator */
+static void reserve(size_t n) {
     if (olen + n + 1 > ocap) {
         ocap = (olen + n + 1) * 2;
         obuf = (char*)realloc(obuf, ocap);
         if (!obuf) fail(0, "out of memory");
     }
+}
+static void outs_n(const char* s, size_t n) {
+    reserve(n);
     memcpy(obuf + olen, s, n);
     olen += n;
     obuf[olen] = 0;
 }
 static void outs(const char* s) { outs_n(s, strlen(s)); }
-/* fmt with %s, %d, %c and %% only, straight to the output: C90 has no vsnprintf, and a buffer could not be sized for a
-   name of any length */
+/* fmt, as printf formats it, onto the output */
 static void out(const char* fmt, ...) {
-    char number[32];
     va_list ap;
-    const char* p;
+    int n;
     va_start(ap, fmt);
-    for (p = fmt; *p; p++) {
-        const char* run = p;
-        while (*p && *p != '%') p++;
-        outs_n(run, (size_t)(p - run));
-        if (!*p) break;
-        p++;
-        if (*p == 's')
-            outs(va_arg(ap, const char*));
-        else if (*p == 'd') {
-            sprintf(number, "%d", va_arg(ap, int));
-            outs(number);
-        } else if (*p == 'c') {
-            number[0] = (char)va_arg(ap, int);
-            outs_n(number, 1);
-        } else if (*p == '%')
-            outs_n("%", 1);
-        else
-            fail(0, "out: a %%%c conversion", *p);
-    }
+    n = vsnprintf(NULL, 0, fmt, ap);
     va_end(ap);
+    if (n < 0) fail(0, "out: cannot format %s", fmt);
+    reserve((size_t)n);
+    va_start(ap, fmt);
+    vsnprintf(obuf + olen, (size_t)n + 1, fmt, ap);
+    va_end(ap);
+    olen += (size_t)n;
 }
 /* s as a C string literal, NULL as NULL */
 static void out_string(const char* s) {

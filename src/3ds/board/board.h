@@ -26,8 +26,8 @@ typedef struct {
 
 /* Timing uses Azahar's base ARM11 tick domain, including on New 3DS.
    CPU overclock/scaling and actual device event scheduling are not wired yet. */
-#define SNX_CTR_BASE_CLOCK_HZ   UINT64_C(268111856)
-#define SNX_CTR_TICKS_PER_FRAME UINT64_C(4481136)
+#define SNX_CTR_BASE_CLOCK_HZ   268111856ull
+#define SNX_CTR_TICKS_PER_FRAME 4481136ull
 
 typedef struct {
     const SnxCtrProfile* profile;

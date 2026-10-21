@@ -337,10 +337,8 @@ static int find_imports(const SnxCodeLoader* loader, Load* ld, char* error, size
     return 0;
 }
 
-/* "@address" in halves: unsigned long is 32 bits on LLP64 systems */
-static void address_key(char* key, uint64_t address) {
-    sprintf(key, "@%lx:%08lx", (unsigned long)(address >> 32), (unsigned long)(address & 0xFFFFFFFFu));
-}
+/* "@address" in hexadecimal */
+static void address_key(char* key, uint64_t address) { sprintf(key, "@%llx", (unsigned long long)address); }
 
 /* The table symbol object's symbol index names when it is outside the arena (its address in *address), else 0: the
    load's own definitions are in the arena */
@@ -551,10 +549,10 @@ int snx_code_load_coff(SnxCodeLoader* loader, const SnxLinkInput* inputs, size_t
             value = 0;
             if (ld.imports.keys[i][0] == '@') { /* a stub's: the table symbol's address, and the stub jumping there */
                 size_t stub = 0;
-                unsigned long hi = 0, lo = 0;
+                unsigned long long address = 0;
                 uint64_t at;
-                sscanf(ld.imports.keys[i], "@%lx:%lx", &hi, &lo);
-                value = (uint64_t)hi << 32 | lo;
+                sscanf(ld.imports.keys[i], "@%llx", &address); /* address_key's */
+                value = address;
                 snx_link_find(&ld.stubs, ld.imports.keys[i], &stub);
                 at = ld.stub_address + STUB_SIZE * (uint64_t)stub;
                 snx_code_at(loader, at)[0] = 0xFF;
@@ -577,7 +575,7 @@ int snx_code_load_coff(SnxCodeLoader* loader, const SnxLinkInput* inputs, size_t
     /* the table where exceptions and longjmp find it: in the arena, read-only, for as long as the code lives */
     if (pdata_count && loader->machine == SNX_CODE_COFF_X64 &&
         !RtlAddFunctionTable((PRUNTIME_FUNCTION)(size_t)kind_address[K_PDATA], (DWORD)pdata_count, (DWORD64)ld.base)) {
-        snprintf(error, error_size, "cannot register the function table of %lu functions", (unsigned long)pdata_count);
+        snprintf(error, error_size, "cannot register the function table of %zu functions", pdata_count);
         goto done;
     }
 #endif

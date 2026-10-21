@@ -178,7 +178,7 @@ static int dump_read(void* source, const char* name, unsigned char** data, size_
     size_t count = snx_hac_fs_files(fs, &files), i;
     for (i = 0; i < count; ++i) {
         if (strcmp(files[i].name, name)) continue;
-        if (files[i].size > (size_t)-1) return -1;
+        if (files[i].size > SIZE_MAX) return -1;
         *size = (size_t)files[i].size;
         *data = (unsigned char*)malloc(*size ? *size : 1);
         if (*data && !snx_hac_fs_read(fs, i, 0, *data, *size)) return 0;
@@ -516,7 +516,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     }
     gen.title = title;
     gen.hints = read_hints(base, program.npdm.is64, &gen.hint_count);
-    if (!compile.quiet) printf("Recompiling %s (%lu modules)\n", title, (unsigned long)program.module_count);
+    if (!compile.quiet) printf("Recompiling %s (%zu modules)\n", title, program.module_count);
     /* an add-on's files: its dump, read in place, or what the driver extracts into its data folder */
     if (addon ? snx_mkdirs(data)
               : dump ? drop_extraction(data, compile.quiet) : copy_data(&program, data, compile.quiet, tmpfs)) {
