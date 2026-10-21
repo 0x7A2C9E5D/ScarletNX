@@ -4,6 +4,9 @@
 #define SNX_CTR_DISCOVER_H
 #include "3ds/loader/ctr_image.h"
 #define SNX_CTR_AOT_BLOCK_WORDS 32u
+/* the game folder's file of blocks runs compiled at run time, which the next static compile starts from: <title
+   ID>.hints (snx_ctr_game_file) */
+#define SNX_CTR_HINTS ".hints"
 #define SNX_CTR_PLAN_VISITED 1u
 #define SNX_CTR_PLAN_ENTRY 2u
 #define SNX_CTR_PLAN_STOP 4u
@@ -15,7 +18,10 @@ typedef struct {
     uint32_t address, bytes, entries, instructions;
     unsigned char *arm, *thumb;
 } SnxCtrPlan;
-bool snx_ctr_discover(const SnxCtrImage* image, SnxCtrPlan* plan, char* error, size_t error_size);
+/* seeds: count more entries, each pc | 1 for Thumb, the blocks an earlier run compiled at run time (its hints); those
+   outside the text are passed over */
+bool snx_ctr_discover(const SnxCtrImage* image, const uint32_t* seeds, size_t count, SnxCtrPlan* plan, char* error,
+                      size_t error_size);
 void snx_ctr_plan_free(SnxCtrPlan* plan);
 unsigned snx_ctr_plan_length(const SnxCtrPlan* plan, uint32_t pc, bool thumb);
 #endif

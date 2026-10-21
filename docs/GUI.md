@@ -65,14 +65,11 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   take a game (its Main, and each Extra that can be written and runs programs), a box asks which the dump's game goes
   in, **Recompile** on its tab: each folder with what it is and its free room, the Main first and in focus; ESC runs
   nothing. The one taken is the run's `--outdir`, and the room asked about is that folder's.
-- **Load 3DS CIA** uses `scarletnx-3ds`. Its `recompiled/` browser lists CIA inputs,
-  not host executables. The driver reads supported decrypted application CIAs where they lie, or extracts them
-  with *Extract game container*.
-  A native Linux build with `SNX_3DS_AOT=ON` then performs static ARM11 integer
-  compilation/execution; the default build reports missing AOT support. Larger
-  images use bounded conservative discovery (16 MiB text cap). SuperTux now
-  connects/registers `srv:`, then waits for absent `APT:S`, before main,
-  graphics or audio. No service/session success is invented to bypass that wait.
+- **Load 3DS CIA** uses `scarletnx-3ds`. Its `games/` browser lists CIA inputs,
+  not host executables. The driver reads supported decrypted application CIAs where they lie, or extracts them with *Extract game container*.
+  The driver then compiles the ARM11 code ahead of time and runs it, on Linux and
+  Windows. Larger images use bounded conservative discovery (16 MiB text cap).
+  SuperTux shows its title screen and plays its music, but takes no input yet.
   Full HLE/devices remain incomplete. Like the Switch driver, it uses an
   extraction (or the CIA itself) and a compiled module already there, and recompiles only when needed.
   See [3DS port](3DS.md) for limits.

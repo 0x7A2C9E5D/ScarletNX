@@ -170,12 +170,15 @@ static SnxCtrPicaResult special(SnxCtrPica* p, SnxCtrMemory* memory, uint32_t id
                 return SNX_CTR_PICA_OK;
             }
             p->immediate_attribute = 0;
-            return snx_ctr_pica_draw_immediate(p, memory);
+            if (!host || !host->vertex) return SNX_CTR_PICA_OK;
+            p->immediate_given = true;
+            return host->vertex(p, memory);
         }
         case SNX_PICA_CMDBUF_TRIGGER:
         case SNX_PICA_CMDBUF_TRIGGER + 1: return jump(p, memory, id - SNX_PICA_CMDBUF_TRIGGER);
         case SNX_PICA_TRIGGER_DRAW:
-        case SNX_PICA_TRIGGER_DRAW_INDEXED: return snx_ctr_pica_draw(p, memory, id == SNX_PICA_TRIGGER_DRAW_INDEXED);
+        case SNX_PICA_TRIGGER_DRAW_INDEXED:
+            return host && host->draw ? host->draw(p, memory, id == SNX_PICA_TRIGGER_DRAW_INDEXED) : SNX_CTR_PICA_OK;
         case SNX_PICA_GS + SNX_PICA_SH_BOOL: uniform_bools(&p->gs, p->regs[id]); return SNX_CTR_PICA_OK;
         case SNX_PICA_VS + SNX_PICA_SH_BOOL:
             uniform_bools(&p->vs, p->regs[id]);
@@ -203,6 +206,7 @@ static SnxCtrPicaResult special(SnxCtrPica* p, SnxCtrMemory* memory, uint32_t id
         if (*offset < 4096) p->gs.code[(*offset)++] = value;
     } else if (id >= SNX_PICA_VS + SNX_PICA_SH_PROGRAM_WORD && id < SNX_PICA_VS + SNX_PICA_SH_PROGRAM_WORD + 8) {
         uint32_t* offset = &p->regs[SNX_PICA_VS + SNX_PICA_SH_PROGRAM_OFFSET];
+        ++p->vs_version;
         if (*offset < 512) { /* the vertex units hold 512 instructions */
             p->vs.code[*offset] = value;
             if (share) p->gs.code[*offset] = value;
@@ -213,6 +217,7 @@ static SnxCtrPicaResult special(SnxCtrPica* p, SnxCtrMemory* memory, uint32_t id
         if (*offset < 4096) p->gs.swizzle[(*offset)++] = value;
     } else if (id >= SNX_PICA_VS + SNX_PICA_SH_SWIZZLE_WORD && id < SNX_PICA_VS + SNX_PICA_SH_SWIZZLE_WORD + 8) {
         uint32_t* offset = &p->regs[SNX_PICA_VS + SNX_PICA_SH_SWIZZLE_OFFSET];
+        ++p->vs_version;
         if (*offset < 4096) {
             p->vs.swizzle[*offset] = value;
             if (share) p->gs.swizzle[*offset] = value;
@@ -242,10 +247,20 @@ static SnxCtrPicaResult special(SnxCtrPica* p, SnxCtrMemory* memory, uint32_t id
     return SNX_CTR_PICA_OK;
 }
 
+static SnxCtrPicaResult end_vertices(SnxCtrPica* p, SnxCtrMemory* memory, const SnxCtrPicaHost* host) {
+    p->immediate_given = false;
+    return host && host->vertices_end ? host->vertices_end(p, memory) : SNX_CTR_PICA_OK;
+}
+
 SnxCtrPicaResult snx_ctr_pica_write(SnxCtrPica* p, SnxCtrMemory* memory, uint32_t id, uint32_t value, uint32_t mask,
                                     const SnxCtrPicaHost* host, bool* stop) {
     uint32_t m;
     if (id >= SNX_CTR_PICA_REGS) return SNX_CTR_PICA_OK; /* writes past the register file do nothing */
+    /* the immediate vertices given are drawn with the state they were given in */
+    if (p->immediate_given && (id < SNX_PICA_DEFAULT_ATTR_VALUE || id > SNX_PICA_DEFAULT_ATTR_VALUE + 2)) {
+        SnxCtrPicaResult r = end_vertices(p, memory, host);
+        if (r != SNX_CTR_PICA_OK) return r;
+    }
     m = byte_mask[mask & 15];
     p->regs[id] = (p->regs[id] & ~m) | (value & m);
     /* the handlers take the unmasked value, as WriteInternalReg passes it */
@@ -296,5 +311,5 @@ SnxCtrPicaResult snx_ctr_pica_run(SnxCtrPica* p, SnxCtrMemory* memory, uint32_t 
             if (p->list_index == 0) break;
         }
     }
-    return SNX_CTR_PICA_OK;
+    return p->immediate_given ? end_vertices(p, memory, host) : SNX_CTR_PICA_OK;
 }

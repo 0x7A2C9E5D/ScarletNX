@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "3ds/aot/ctr_module.h"
+#include "3ds/memory/host.h"
 #include "common/utilities/common.h"
 #include <openssl/evp.h>
 #include <assert.h>
@@ -91,7 +92,7 @@ int main(void) {
                       .checked_abi = SNX_ARM_CHECKED_ABI,
                       .codegen_abi = SNX_CTR_MODULE_CODEGEN_ABI,
                       .profile = SNX_ARM_PROFILE_ARM11,
-                      .memory_mode = SNX_CTR_MODULE_CHECKED_MODE,
+                      .memory_mode = snx_ctr_module_memory(),
                       .pointer_size = sizeof(void*),
                       .text_address = 0x100000,
                       .text_bytes = 8,
@@ -126,7 +127,9 @@ int main(void) {
         SnxCtrAddressSpace* s = snx_ctr_process_space(p);
         SnxArmCPU* c = snx_ctr_process_cpu(p);
         assert(c->r[15] == 0x100000 && c->r[13] == SNX_CTR_STACK_TOP && c->cpsr == 0x10);
-        assert(!c->mem && !c->mem_size && c->tpidruro == SNX_CTR_INITIAL_TLS);
+        /* compiled code's flat view of the space, where the host has one */
+        assert(c->mem == snx_ctr_space_base(s) && c->mem_size == (c->mem ? CTR_HOST_SPACE : 0));
+        assert(c->tpidruro == SNX_CTR_INITIAL_TLS);
         unsigned permissions;
         assert(snx_ctr_query(s, 0x100000, NULL, &permissions) == SNX_CTR_MEM_OK && permissions == 5);
         assert(snx_ctr_query(s, 0x200000, NULL, &permissions) == SNX_CTR_MEM_OK && permissions == 1);

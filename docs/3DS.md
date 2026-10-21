@@ -11,7 +11,8 @@
   * [Build and test](#build-and-test)
 * [Source provenance and licensing](#source-provenance-and-licensing)
 * [Boundaries and prerequisites for stage 2b](#boundaries-and-prerequisites-for-stage-2b)
-* [Staged roadmap (2a implemented; 2b partially implemented)](#staged-roadmap-2a-implemented-2b-partially-implemented)
+* [Parity roadmap (Azahar)](#parity-roadmap-azahar)
+* [Staged roadmap (stages 2–6, superseded by the parity roadmap)](#staged-roadmap-stages-26-superseded-by-the-parity-roadmap)
   * [2. CIA extraction, memory controller and static execution](#2-cia-extraction-memory-controller-and-static-execution)
   * [3. Basic HLE OS and a SwIPC-derived generator](#3-basic-hle-os-and-a-swipc-derived-generator)
   * [4. Audio DSP](#4-audio-dsp)
@@ -20,16 +21,114 @@
 
 ## Status: stage 1 + stage 2a + stages 2b1–2b4 + initial 3a/3b/FS
 
-`scarletnx-3ds` extracts **decrypted application CIAs**. With `SNX_3DS_AOT=ON`,
-it performs **extract -> offline static AOT -> native module -> checked ARM/Thumb
-execution**. Both asset-free witnesses and the supplied SuperTux CIA's native
-startup gate pass. SuperTux completes minimal APT startup, creates a native
-background thread, initializes HID and **reaches and executes main** at
-`0x00167d88` (50,489 blocks), then opens its reconstructed RomFS. It stops at
-FS `ControlArchive` (timestamp) after 50,629 blocks / 61 SVCs, having executed
-scalar VFP in `gettimeofday`, but before its first
-file read. It is **not playable**; no first frame or audio yet. See the
-[SuperTux integration target](3DS-SUPERTUX.md) for the pinned input and next blockers.
+`scarletnx-3ds` runs **application CIAs** through
+**offline static AOT -> native module -> checked ARM/Thumb execution**,
+with the compiler built into the driver. A launch reuses a finished extraction
+and module and runs until the game exits or its window closes (or for `--seconds N`,
+after which it reports where each thread is).
+
+A CIA's game is a folder of the data folder's `recompiled/`, named after its title
+ID as a Switch game's is named (`recompiled/0004000000123400/`). It holds the compiled
+module (`<title ID>_code.so`, `_code.dll` on Windows), the blocks runs compiled at
+run time (`<title ID>.hints`), the game's state (`sdmc/`, `savedata/`, frames,
+audio), `<title ID>.ini` and a copy of the runtime named `<title ID>`. The `.ini`
+names the CIA (`source=`) and the console (`model=`). Running the copy plays the
+game, as a Switch game's copy does: `recompiled/<title ID>/<title ID> --seconds=60
+--script=15000:1`, or `scarletnx-3ds --game=recompiled/<title ID>`. Where scarletnx is
+also the 3DS driver (`SNX_MULTICALL`), the copy is scarletnx, which runs a 3DS game
+under a 3DS title ID's name. A build copies its runtime beside every game again
+(`cmake/deploy.cmake`): a 3DS title ID's folder gets the 3DS driver. `--outdir DIR`
+names another folder of games, and `--output DIR` the game's folder itself. A game
+an older version kept in `work/3ds/<the CIA's name>` moves into its new folder the
+first time it is played, its module and hints renamed.
+
+An encrypted CIA, as a console dump is, is decrypted once with the user's own keys
+into `work/3ds/<the CIA's name>.decrypted.cia` (beside the folder `--output` names),
+which is read from then on (`src/3ds/loader/decrypt.c`). The keys are an `aes_keys.txt` in Azahar's
+format, looked for in `~/.3ds/aes_keys.txt` (`%USERPROFILE%\.3ds` on Windows) as
+the Switch driver looks in `~/.switch`, or named with `--keys FILE`. They are
+never part of ScarletNX. Both layers come off: each content's AES-CBC under the
+ticket's title key (itself under the common key), and the NCCH's AES-CTR under
+the primary key (slot 0x2C) and the secondary one its crypto method names (0x2C,
+0x25, 0x18, 0x1B). The decrypted CIA says NoCrypto and carries the decrypted
+contents' hashes, and it is checked as any CIA is before it is published, so keys
+that are not the console's never leave a CIA behind. Seed crypto (seeddb) is not
+supported yet.
+
+Code the static discovery misses (an indirect call's target, a return into it)
+compiles when the dispatch first reaches it (`src/3ds/aot/jit.c`, through the ARM
+backend's executor), and goes in the game's `<title ID>.hints`, which the next
+recompile (`-r`) seeds discovery with, so it is static from then on. A
+commercial title's 7 MiB of text compiles to about 340000 blocks in about six
+and a half minutes on six cores (the chunks compile in parallel).
+
+Since 2026-10-21 a commercial title, decrypted this way, runs its startup
+(cfg, FS with its save data, APT, and the system services the runtime answers
+generically), creates its save data and stops at its first prompt for the A
+button, drawn through the PICA renderer. Input is the next gap.
+
+The GPU's work runs on one Vulkan device (`src/3ds/gpu/vk/`), which needs Vulkan
+1.3, 8-bit storage buffers and `VK_EXT_external_memory_host`: the board's RAM
+regions are imported as buffers, so the GPU reads and writes the guest's memory
+in place and nothing of it is copied by the CPU. Memory fills, display transfers
+and texture copies are compute shaders (`gpu/vk/shaders/`), held byte for byte to
+the CPU reference `gpu/transfer.c` by `tests/3ds_vk_transfer.c`. PICA draws run
+on the GPU too (`gpu/vk/render.c`). The vertex program is decompiled (`gpu/vk/vsgen.c`)
+and the fragment pipeline generated (`gpu/vk/fsgen.c`), both ported from Azahar's
+shader generators and both written as SPIR-V words directly (`gpu/vk/spirv.c`), with no
+shader compiler at run time. The output merger is the pipeline's fixed state. A render
+target is loaded from guest memory into an image by a compute shader when a draw first
+uses it, and stored back before anything else reads or writes memory. Textures are
+decoded from guest memory by a compute shader once in a recording. Vertex and index
+data are read in place. `tests/3ds_vk_draw.c` holds the draws to the software renderer
+they replaced, which stays only as that reference. The shown
+framebuffers are decoded and turned to the landscape screen by a compute shader
+straight from guest memory into the window's swapchain; the frame dumps are the
+one readback. The work is submitted, and waited for, at the end of each GX queue
+run, before its interrupts reach the guest.
+
+Compiled code addresses the guest flat: a 4 GiB host reservation where guest
+address `va` is `base + va`, each mapping a view of the board's RAM held in one
+host memory object (`src/3ds/memory/host.c`: a memfd on Linux and Android, an
+unlinked `shm_open` object on the other POSIX systems, a pagefile section mapped
+into placeholders on Windows 10 1803 and later). Every guest address of a physical
+page (a heap page and its MAP mirror, shared memory, the linear heap) is the same
+memory, and the HLE and the GPU read and write that object directly. Blocks read and
+write `cpu->mem + va` with no callback; a host fault in the reservation is the
+guest's data abort, reported with the block it happened in. A host whose pages are
+not 4 KiB (Apple silicon, some AArch64 and PowerPC64 kernels) keeps the checked
+bus, and its modules are compiled for it.
+
+The cores take turns on the one host thread, each scheduling its own threads (a
+slice ends at an SVC or after `SNX_CTR_POLL_BLOCKS` blocks), so a busy thread on the
+system core leaves the application core's threads their time, as on the console.
+TLS pages come from the BASE region, outside the application's pool, as Azahar
+allocates them: a game that commits all of its pool still starts threads.
+
+Debug switches are settings of `g_ctr_debug_ini` in `src/nx/runtime/settings.txt`,
+given as `--key=value`: `--ctr_ipc_trace=1` logs each service request with the
+thread and its answer, `--ctr_svc_trace=1` each SVC that fails (2: every SVC),
+`--ctr_gpu_trace=1` each GX command and framebuffer swap, `--ctr_jit_trace=1` each
+block compiled at run time. A run ended by `--seconds` (or a stop) reports each
+thread's core, priority, pc, what it waits on (whose event it is) and the return
+addresses on its stack, how long the process sat idle, and its most frequent SVCs.
+
+Since 2026-10-16, SuperTux runs past `main` and its RomFS reads. It draws its title and loading
+screens through a software port of Azahar's PICA pipeline (command processor,
+shader interpreter, rasterizer, texturing, combiners, lighting) and plays its
+title music through a port of Azahar's HLE DSP. A run of about 2 billion native
+blocks presented frames until it was ended. It is **not playable** yet:
+
+- Input is the pad alone: the touch screen is not read, and the sensors are at
+  rest (`hid:USER`, below).
+- Only the top screen is shown in the window.
+- The music has a gap after every rendered frame, because rendering and presenting
+  run inside the guest's GSP call.
+- Geometry shaders, procedural textures, shadows and the DSP's AAC pipe still stop
+  the run explicitly.
+
+The [parity roadmap](#parity-roadmap-azahar) lists the remaining work, and the
+[SuperTux integration target](3DS-SUPERTUX.md) holds the pinned input.
 
 Text is bounded at **16 MiB**, using conservative static CFG discovery for larger
 images. This is not complete indirect-target coverage or a general 3DS runtime.
@@ -40,7 +139,9 @@ a bounded kernel-bootstrap subset. Stage 2 still needs broader discovery/ISA
 validation and cache/resume. Initial stage 3a adds a SwIPC-derived CTR generator,
 checked transport and bounded service sessions. Initial 3b adds the minimal
 APT/thread/event/mutex/PTM/HID startup personality and ARM11 UADD8/SEL.
-Full HLE/IPC and stages 4–6 remain pending. No firmware, keys, title assets or Azahar CPU engine are included.
+The HLE DSP, the software PICA renderer and the F1 kernel work since then are
+described below. Full HLE/IPC, input and the other peripherals remain pending. No
+firmware, keys, title assets or Azahar CPU engine are included.
 
 Implemented:
 
@@ -108,11 +209,15 @@ Implemented:
   waiting peers, signed predicates, conditional decrement and immediate timeout.
   Initial 3b adds priority-ordered peer signaling. A required wait blocks the
   actual thread and pins its object until a genuine wakeup. A native peer can
-  run; dispatch alone never completes a pending call. Finite pending deadlines
-  remain unsupported before mutation; timers are not implemented.
-- SVC `0x23` closes handles and `0x27` duplicates them. SVC `0x2a`, type 0, reports
-  actual allocated FCRAM pages for the modeled memory regions. Other queries
-  return an explicit unsupported result. ExitProcess (`0x03`) remains handled.
+  run, and dispatch alone never completes a pending call. Since F1 waits can have
+  finite deadlines that time out with `0x09401BFE`, and timers exist (SVC
+  `0x1a`–`0x1d`, one-shot, sticky and pulse).
+- SVC `0x23` closes handles and `0x27` duplicates them. SVC `0x2a` (GetSystemInfo)
+  answers type 0 with the application's allocated FCRAM, type 26 with the kernel's
+  process count, and Luma's type `0x10000` queries for the application region's size
+  and the model. Other queries answer zero, as Azahar does for the ones it lacks.
+  ExitProcess (`0x03`) and ExitThread (`0x09`) end the process, the latter at its
+  last thread.
 - Read-only configuration page at `0x1ff80000`, backed by board AXI WRAM rather
   than charged to application FCRAM. The limited kernel personality reports
   version 2.58 and memory mode 0 (Old, 64 MiB application) or 6 (New, 124 MiB).
@@ -123,14 +228,32 @@ Implemented:
   VAs in `0x08000000..0x10000000` and may span discontiguous physical holes.
   Linear memory is physically contiguous with `PA = VA - 0x14000000 + 0x20000000`.
   Recycled pages are zeroed. Requests are preflighted and failed publication is
-  rolled back. Aliases, region flags and executable heap permissions are refused.
-  This is not full ControlMemory behavior for static image/shared mappings.
+  rolled back. MAP and UNMAP alias the application's own heap (an UNMAP that does
+  not match a MAP returns `0xD8E007F5`), the region bits of the operation are
+  ignored as the application's region is the only one, and executable heap
+  permissions are refused. FREE of a range a memory block or a mapping holds is
+  refused. This is not full ControlMemory behavior for static image/shared mappings.
 - ARM11 checked LDREX/STREX B/H/word/double and CLREX use optional checked-ABI-1
   reservation transactions. The bus owns a saturating board-wide write/mapping
   epoch, so kernel writes, aliases and other address spaces invalidate reservations
   even after an ABA write. Unrelated writes may fail exclusives conservatively.
   MMIO is rejected. All execution and mutations remain serialized, with no host
   concurrent/multicore scheduler claim. A57 defaults and both CPU ABIs are unchanged.
+- The scheduler (F1) runs the ready thread with the best effective priority. A
+  thread waiting on a mutex lends its priority to the holder, as Azahar's
+  UpdatePriority does. On a tie the running thread keeps the core unless it
+  yielded (SleepThread 0), and otherwise the thread ready longest runs. Waiters
+  are woken by effective priority, then by how long they have waited. Threads
+  start with FPSCR `0x03C00000` (default NaN, flush to zero, round toward zero)
+  and the main thread with `0x03C00010`, as Azahar sets them. The main thread's
+  priority comes from the ExHeader. CreateThread accepts processors -2 to 3, all
+  run by the same serialized scheduler.
+- The APPLICATION resource limit is enforced: 32 threads, events, mutexes, 8
+  semaphores and timers, 16 shared memory blocks and 2 address arbiters, each
+  failing with its own OutOf result when exhausted.
+- QueryMemory (SVC `0x02`) returns the base, size, permissions and the memory
+  state of the page's region in r1 to r4 (Free, IO, Code, Private, Shared,
+  Continuous, Aliased, Alias, Locked), as Azahar's VMManager classifies them.
 
 ### Initial CTR IPC/services (3a)
 
@@ -141,29 +264,57 @@ TLS command words; `0x35` identifies the actual process root. A separate SwIPC
 ownership. Initial 3b adds a one-application APT startup lifecycle, real recursive
 lock/events, serialized thread contexts/waits/wakeups, PTM base/model queries
 and HID handles/read-only mapping. HID sampling is not implemented. FS supports
-PID/SDK initialization, an actual missing-SD error and read-only SelfNCCH RomFS
-OpenFileDirectly, bounded OpenArchive/OpenFile/CloseArchive and FSFILE
-Read/GetSize/Close. Archive tokens are FS-private monotonic 64-bit identifiers,
-not kernel handles; 32 live bindings are allowed and stale IDs never revive.
-NX and CTR share `common/filesystem/`
+PID/SDK initialization, read-only SelfNCCH RomFS OpenFileDirectly, and the
+read-write SDMC archive (9) on the title's folder: OpenArchive, OpenFile,
+CloseArchive, CreateFile, DeleteFile, CreateDirectory, DeleteDirectory, Rename,
+OpenDirectory, and FSFILE Read, Write, GetSize, SetSize and Close. Archive tokens
+are FS-private monotonic 64-bit identifiers, not kernel handles. 32 live bindings
+are allowed and stale IDs never revive. NX and CTR share `common/filesystem/`
 indexing, immutable file mappings and fallback opens, not their IPC protocols or
-RomFS metadata. Only extracted `romfs/` is exposed; no original container reads.
-Writes, general archives/paths and SD/save backing remain unsupported. Reads
-preflight the complete guest destination and stage host IO before publication.
-Host-paced GetSystemTick and a read-only UTC shared-page snapshot support time
-queries, not cycle accuracy or timers. FSUSER ControlArchive GET_TIMESTAMP
-(`0x80d`) resolves a bounded UTF-16 archive path and returns the real backing
-file's host modification time as a 3DS datetime (milliseconds since 1900 UTC);
-missing paths return `0xc8804478`, stale tokens `0xc8804465`, and save-commit or
-unknown actions stop. Unknown commands stop; absent-service
-waits block without a fake response. SuperTux's next blocker is the archive
-timestamp control request; no timestamp is fabricated.
+RomFS metadata. Only extracted `romfs/` is exposed, with no original container reads.
+Save data, extdata and other archives remain unsupported (F3). Reads preflight
+the complete guest destination and stage host IO before publication.
+Host-paced GetSystemTick and the shared page's date and time (the host's local
+time, rewritten every hour into the entry the counter does not select, as
+Azahar does) serve time queries, without cycle accuracy. FSUSER ControlArchive
+GET_TIMESTAMP (`0x80d`) resolves a bounded UTF-16 archive path and returns the real
+backing file's host modification time as a 3DS datetime (milliseconds since 1900
+UTC). Missing paths return `0xc8804478` and stale tokens `0xc8804465`.
+COMMIT_SAVE_DATA on the SDMC area succeeds, since every write has already reached
+the host, and other actions stop. Unknown commands answer success with one word, as
+Azahar's ReportUnimplementedFunction does and a Switch game's do (`auto_stub_ipc`),
+each logged the first time. A service the runtime does not know at all is a stand-in
+whose commands answer so, as a Switch game's is (`sm.c`). With
+`--ctr_auto_stub_ipc=0` both stop instead: an unknown command stops the run unless
+`--ipc-stubs` names its service, and a service the runtime lacks makes the thread
+asking for it wait forever, as no other process can register it, with a message
+that names it.
+
+`hid:USER` and `hid:SPVR` (`services/hid.c`, ported from Azahar's `hid.cpp`) write
+the pad's samples into HID's shared memory 234 times a second from the first
+GetIPCHandles, each with both pad events signalled, and the accelerometer's (104 a
+second) and the gyroscope's (101) between their enable and disable. Each pad entry
+has the buttons, what was pressed and released since the one before, and the circle
+pad's position, averaged over three samples, with its direction bits. The input
+(`src/3ds/input/input.c`) is a Switch game's: X or Space A, Z B, C X, V Y, Q L, E R,
+Enter Start, Backspace Select, the arrows the D-pad and WASD the circle pad, or a
+gamepad's buttons by position (`gamepad_swap_ab`) with its left stick, and the
+scripted presses of `--script=ms:hex,...` (`ctr_script`), in the pad's bits (1 A,
+2 B, 4 Select, 8 Start, 10 Right, 20 Left, 40 Up, 80 Down, 100 R, 200 L, 400 X,
+800 Y), each held for `press_len` ms. The touch entries say no touch, and the
+sensors give a console lying still. ZL, ZR and the C-stick are the New 3DS's
+`ir:rst`, which the runtime does not have yet.
 
 `gsp::Gpu` is modeled with real bounded resources: RegisterInterruptRelayQueue
 returns the genuine `0x2a07` first-initialization result, one writable 0x1000
 GX/interrupt shared block and up to four relay threads with real interrupt-queue
 slots and guest-created events. AcquireRight/TryAcquireRight/ReleaseRight own a
-single right; WriteHWRegs/WithMask update a checked 4 KiB GX/LCD register file;
+single right, and WriteHWRegs, WriteHWRegsWithMask and SetBufferSwap fail with
+`0xD8202A06` without it, as in Azahar. WriteHWRegs and WithMask take the forms
+libctru sends (data in static buffer 0, mask in 1) and check them as Azahar does:
+an address below `0x420000`, at most `0x80` bytes in whole words. No register
+they could change is modeled (framebuffers come from SetBufferSwap and the shared
+FrameBufferUpdate blocks, transfers from GX commands), so the values are not kept.
 FlushDataCache/InvalidateDataCache are coherent no-ops behind a real process
 handle check. TriggerCmdReqQueue executes RequestDma and MemoryFill as whole-span
 checked transactions and CacheFlush as a coherent no-op. DisplayTransfer and
@@ -175,7 +326,8 @@ for the linear heaps, VRAM and New 3DS extra RAM), and the engine reads and writ
 physical memory as a bus master, so a VRAM the CPU maps read-only still receives
 transfers. RequestDma resolves the application's pages to physical ones the same way.
 MemoryFill honors its control halfwords (trigger bit, 16/24/32-bit width) and fills from
-start to end rounded down to 8 bytes. Each command raises its own interrupt (DMA, PSC0 or
+start to end rounded down to 8 bytes, the end being an open bound that may be its
+memory region's end. Each command raises its own interrupt (DMA, PSC0 or
 PSC1, PPF) on the right holder's relay queue, a failing command stores its error and the
 FAILED status as GSP does, and the queue goes on. SubmitCmdList writes the list's
 address and size to the first command buffer channel and runs it on the PICA command
@@ -183,26 +335,28 @@ processor (`src/3ds/gpu/pica.c`, ported from Azahar's `PicaCore`): masked regist
 writes, batched and sequential extra data, shader program, swizzle and uniform uploads,
 the lighting, fog and procedural-texture LUTs, default attributes and immediate mode,
 command buffer jumps and the P3D interrupt request with autostop. A list outside memory
-raises P3D without running. Draws run in software, ported from Azahar's software
-renderer: the shader interpreter (`gpu/shader.c`), vertex loading with the indexed
-vertex cache and primitive assembly (`gpu/draw.c`), and clipping, rasterization,
-texturing in the fourteen texture formats with cube and projected textures, fragment
-lighting, the six texture combiner stages, fog, the alpha, stencil and depth tests,
-blending and logic ops into the tiled framebuffer in physical memory (`gpu/raster.c`,
-`gpu/lighting.c`, `gpu/texture.c`). Geometry shaders, procedural textures and shadow
-textures and rendering are not ported yet: a draw that needs one stops the run and
-names it. The ExHeader's address-mapping capabilities
+raises P3D without running. Draws go to the GPU (see above). The software renderer
+ported from Azahar's (`gpu/shader.c`, `gpu/draw.c`, `gpu/raster.c`, `gpu/lighting.c`,
+`gpu/texture.c`) is only built into the tests, as the reference the GPU's draws are
+compared with. It samples the nearest texel only, as Azahar's does, so texture
+filtering has no reference. Geometry shaders and shadow textures and rendering are not
+drawn yet: a draw that needs one stops the run and names it. The ExHeader's address-mapping capabilities
 are applied at process creation (VRAM, DSP RAM, New 3DS extra RAM), as Azahar's
-`HandleSpecialMapping` does; MMIO areas stay unmapped. SetBufferSwap latches real
-framebuffer descriptors (RGBA8/RGB565; other layouts stop rather than being
-shown with invented colors). Display timing is host-paced 60 Hz: latched frames
-present at vblank waits and overdue swaps, and waits on the relay event complete
-only at real vblank deliveries. QueryMemory (SVC `0x02`) reports actual mapping
-regions with coarse free/IO/static/code/private/shared classes, MapMemoryBlock
-accepts the guest mappable range and registers mappings, and HLE shared pages
-are reserved from board FCRAM past the application pool.
+`HandleSpecialMapping` does; MMIO areas stay unmapped. SetBufferSwap and the shared
+FrameBufferUpdate blocks latch real framebuffer descriptors in the five formats
+the presenter converts (RGBA8, RGB8, RGB565, RGB5A1, RGBA4). A swap through
+SetBufferSwap in another format stops rather than being shown with invented
+colors. The LCD shows the left eye of the pair `shown_fb` (one bit) selects. A
+swap whose shown pair has no address, a stride too short for a row or memory the
+guest cannot read is dropped and the screen keeps its last frame. Display timing
+is host-paced 60 Hz: latched frames present at vblank waits and overdue swaps, and
+waits on the relay event complete only at real vblank deliveries. MapMemoryBlock
+maps a block another process owns (an HLE service's) into the application's
+range, or an application's own block as a mirror within the permissions it was
+created with. Each mapping holds a reference to the block. HLE shared pages are
+reserved from board FCRAM past the application pool.
 
-Presentation is **Vulkan only** (volk; no linked Vulkan library, no shaders):
+Presentation is **Vulkan only** (volk, with no linked Vulkan library):
 the device converts the guest framebuffer to RGBA8 and shows the landscape-
 rotated frame live in an SDL3 Vulkan window through a real swapchain. Bounded
 PPM snapshots land in `<output>/frames` in every mode. Without a display the
@@ -226,18 +380,18 @@ minutes are recorded to `<output>/audio.wav`. libctru's ndsp loads
 when the title's SD has none: the HLE DSP never runs the component, and a dumped file is
 used as it is. cfg:u, cfg:s and cfg:i (`services/cfg.c`) answer GetConfig for the sound
 output mode (stereo, Azahar's default), which ndsp reads, and stop on any other block.
-With the software renderer below full speed, the audio has gaps after rendered frames:
-the guest's mixing threads get no time while a frame renders.
 
 See [CTR IPC](CTR-IPC.md) for the strict generator subset, descriptor/permission
 checks, quotas, malformed-request policy, tests and unimplemented operations.
-Unknown SVCs still stop explicitly. No service/device success is fabricated.
+Unknown SVCs still stop explicitly. No service or device success is fabricated,
+except for unknown commands and services, which answer success as a Switch game's
+do unless `--ctr_auto_stub_ipc=0` asks for the console's answers.
 
 By default nothing of the CIA is extracted. `scarletnx-3ds game.cia` maps the CIA read-only and checks it as the
 extraction would (the CIA and TMD tables, every content's SHA-256, the NCCH and ExHeader hashes, each ExeFS file's
 hash, the RomFS superblock and its metadata). The game's ExeFS files and its RomFS (level 3, the image the game reads)
-are then read where they lie in the mapping, and only the decompressed `.code` is copied into memory. The title's
-folder keeps its state alone: `native/`, `sdmc/` and the frames and audio it writes. An extraction an earlier
+are then read where they lie in the mapping, and only the decompressed `.code` is copied into memory. The game's
+folder keeps its module, its copy of the runtime and its state alone: `sdmc/` and the frames and audio it writes. An extraction an earlier
 `--extract-container` left there is taken away, its compiled module and saves kept. The image's identity is the same
 either way, so a module compiled in one mode loads in the other.
 
@@ -251,45 +405,55 @@ build/3ds/scarletnx-3ds -x --output work/my-title game.cia
 The output is a directory containing `contents/*.app`, `exefs/` (with
 expanded/page-padded `.code`), `romfs/`, raw container/NCCH/ExHeader metadata and
 `manifest.ini` with source/code hashes and segment layout. The default directory
-is `work/3ds/<name>`, named after the CIA's file as the Switch driver names a dump's, in the data folder the Switch driver uses
-(`--repo DIR`, else a portable copy's folder, else the user's data folder, from a build tree too),
-which the user's on Linux keeps in `~/.cache/scarletnx/work/3ds/`. An extraction needs no source CIA mounted by
-the future guest FS. Extraction is privately staged, then published only after
-all checks succeed; failures remove staging files. As in the Switch driver, a
-finished extraction already there is used as it is, never extracted again or
-hashed. Keep the input and output parent trusted and
+is the game's folder, `recompiled/<title ID>`, in the data folder the Switch driver uses
+(`--repo DIR`, else a portable copy's folder, else the user's data folder, from a
+build tree too). On Linux the user's data folder keeps `work/` (the decrypted CIAs)
+in `~/.cache/scarletnx/work/3ds/`. No source CIA
+needs to be mounted by the future guest FS. Extraction is privately staged, then
+published only after all checks succeed, and a failure removes the staging files.
+As in the Switch driver, a folder already at the output path is taken as a
+finished extraction and used as it is, never extracted again or hashed. Keep the input and output parent trusted and
 not concurrently modified; extraction is not a sandbox against hostile host
 processes racing parent directory changes.
 
 `-x`/`--extract` stops after extraction and `-r`/`--recomp` compiles without
 playing, as the Switch driver's do. Otherwise the driver loads
-`<extracted>/native/code.so` and compiles it first only when needed: when it is
+`<title ID>_code.so` and compiles it first only when needed: when it is
 missing, or no longer loads or matches the build's module ABI or the extracted
 image's identity (a changed `.code`). `-r` always compiles again. A new module
-replaces the old one only once it is complete. `native/code.o` holds the
-descriptor/index; `native/block-*.o` hold the guest code. All objects are retained
-for review. There is no compilation during dispatch. A failed compile removes
-private native staging; the extracted tree remains. The GUI uses this same
+replaces the old one only once it is complete, and the objects it was linked from
+are removed. A failed compile removes private native staging; the extracted tree
+remains. Once the module is ready the driver copies itself into the folder as the
+game's runtime, unless the copy there is the same program. The GUI uses this same
 driver path, not a separate engine.
 
 A launch runs until the game exits or its window is closed, as a Switch game does.
-`--max-blocks N` stops it after N native blocks instead. A larger-image block may execute up to 32 instructions; this is not a cycle or
-exact instruction budget. Each instruction still checks fetch/identity/permissions.
+`--max-blocks N` stops it after N native blocks instead. A larger-image block may
+execute up to 32 instructions, so this is not a cycle or exact instruction budget.
+Each instruction still checks fetch, identity and permissions.
 `--model old|new` selects RAM backing (default Old), not a different ISA or
 compiler. `--board-info` prints physical regions without allocating RAM.
+`--ipc-stubs L`, with `--ctr_auto_stub_ipc=0`, still answers the unknown commands of
+the services in L (`all`, or a comma list of `srv`, `fs`, `apt`, `ptm`, `hid`, `gsp`,
+`cfg`, `dsp`, `system`, `am`) with success instead of stopping. Given more than once,
+the lists add up. It only changes a
+run, so it is refused with `--board-info`, `-x` and `-r`.
 `Guest ExitProcess: r0=...` prints a register diagnostic, **not a POSIX guest exit
-status**. Successful handling of SVC 0x03 returns host status zero. Exit codes:
+status**. When the last thread ends with ExitThread the driver prints
+`Guest's last thread exited` instead. Exit codes:
 
-- 0: help/info, extract-only success, or handled guest ExitProcess.
-- 1: malformed data, IO/limit/existing-output failure, ABI mismatch or guest fault.
+- 0: help/info, extract-only or compile-only (`-r`) success, a guest that exited
+  or a window that was closed.
+- 1: malformed data, IO or limit failure, ABI mismatch or guest fault.
 - 2: invalid CLI arguments or missing/non-CIA file path.
-- 3: unsupported format/ISA-backend/SVC, disabled/missing compiler, text-size cap,
-  missing static target, exhausted execution budget or a pending unsupported wait.
+- 3: unsupported format, ISA or SVC, a failed compile, the text-size cap, a
+  missing static target, an exhausted block budget or a guest with no thread that
+  can ever run again.
 
 ### Current limits and trust
 
-Only decrypted application CIA/NCCH content is supported, not encrypted layers,
-updates, DLC, system titles or nonstandard NCCH media units/platforms. Input and
+Only application CIA/NCCH content is supported (encrypted ones decrypted with the
+user's keys as above, without seed crypto), not updates, DLC, system titles or nonstandard NCCH media units/platforms. Input and
 total materialized output are each capped at 1 GiB; metadata tables at 16 MiB,
 code at 64 MiB, entries at 100000, and RomFS nesting at 64. Host filenames must
 be portable safe components (maximum 255 UTF-8 bytes); unsafe/reserved names
@@ -298,13 +462,19 @@ are refused to prevent log/banner injection. Larger/unsupported inputs fail clos
 
 **Hashes are integrity checks, not signature authentication.** RSA/ECDSA
 signatures, certificate trust, ticket rights and ExHeader access-descriptor
-signatures are not authenticated. RomFS superblock and entire CIA-content
-hashes are checked, but the internal IVFC hash tree is not separately verified.
-AOT execution is opt-in and **not a host security sandbox**. Run only images you
-trust: compiler correctness is not isolation, and native loading can execute host
-constructors before descriptor validation. The CLI only loads its freshly built
-private output, never a preexisting cache. Do not treat ABI/hash checks, host
-native modules or an editable extraction manifest as authenticated permissions.
+signatures are not authenticated. The headers' and superblocks' hashes (NCCH
+ExHeader, ExeFS and RomFS superblocks, the TMD's tables) are checked every time.
+The whole-data ones (each content, each ExeFS file, the input itself) are checked
+by an extraction only, not by the launch that reads a CIA where it lies, where they
+cost seconds on a retail title; an extraction to a folder given hashes no input. The
+internal IVFC hash tree is not separately verified.
+AOT execution is **not a host security sandbox**. Run only images you trust:
+compiler correctness is not isolation, and native loading can execute host
+constructors before descriptor validation. A launch loads the `<title ID>_code.so` an
+earlier compile published in the game's folder when it still matches the build's
+module ABI and the image's identity, so the extraction folder must be as trusted
+as the program itself. Do not treat ABI/hash checks, host native modules or an
+editable extraction manifest as authenticated permissions.
 
 The image loader derives layout from raw ExHeader and requires exact page-packed
 expanded `.code`; it ignores `manifest.ini` for execution. Its compatibility hash
@@ -312,33 +482,32 @@ covers a versioned domain, full ExHeader and full expanded code. It is not yet a
 complete cache key (CIA/resources, compiler/build/configuration versions and
 resume policy still need a separate design). Initial AOT also requires a
 word-multiple declared text length. Text-page padding beyond declared text has
-no static entry, even if its page is executable. Larger images also have NULL
-slots for unproven indirect targets; these fail explicitly without recompilation.
-The static graph is capped at 524288 discovered instructions and 131072 entries;
-the entry cap was raised for genuine scalar-VFP fallthrough coverage, not runtime discovery.
-exceeding either aborts compilation, never silently truncates the graph. Objects
-together are capped at 256 MiB and the linked module at 512 MiB. Tiny-image code
-uses O2; larger-image chunks use O1, with 128 entries per LLVM module.
-No scheduling, events, service
-IPC, resource mappings, handles or device support are implied by the initial
-private TLS/stack setup.
+no static entry, even if its page is executable: it compiles at run time, as any
+code the static graph lacks does. The static graph is bounded by the text itself
+(each instruction slot is visited once in each instruction set). Objects together
+are capped at 1 GiB and the linked module at 1 GiB, and only the module is kept in
+`native/`. Tiny-image code uses O2, and larger-image chunks use O1, with 512
+entries per LLVM module, compiled by a worker per host core.
 
 ### Build and test
 
-With the normal Clang/CMake prerequisites (no LLVM SDK, SDL or media dependencies
-needed for the extraction/memory-only configuration):
+`scarletnx-3ds` holds the AOT compiler, so it links LLVM, and its presenter and
+audio output use SDL3 and Vulkan headers, which CMake fetches as for the Switch
+runtime. With the normal Clang, CMake and LLVM SDK prerequisites:
 
 ```sh
 cmake -S . -B build/3ds -DSNX_BUILD_NX=OFF -DSNX_BUILD_GNUABI=OFF -DSNX_BUILD_GUI=OFF
 cmake --build build/3ds
 ctest --test-dir build/3ds --output-on-failure
 build/3ds/scarletnx-3ds --model new --board-info
+build/3ds/scarletnx-3ds --output work/small-title --max-blocks 100000 small.cia
 ```
 
-Use `-DSNX_BUILD_GUI=ON` to include the launcher and its regression tests; SDL3
-is then required/fetched as usual. `-DSNX_BUILD_3DS=OFF` omits the driver (the
-GUI diagnoses its absence). The profile decoder test needs no LLVM. Additional
-static AOT tests are explicitly opt-in:
+The 3DS tests are named `3ds_*` and `ctr_*` (`ctest -R "3ds|ctr"`), and the ARM
+CPU tests the 3DS shares with the Switch's 32-bit games `arm_*`. Use `-DSNX_BUILD_GUI=ON` to include the launcher and its
+regression tests. `-DSNX_BUILD_3DS=OFF` omits the driver with its compiler and
+runtime (the GUI diagnoses its absence). The profile decoder test needs no LLVM.
+Additional static AOT tests are explicitly opt-in:
 
 ```sh
 cmake -S . -B build/arm11 -DSNX_BUILD_NX=OFF -DSNX_BUILD_GNUABI=OFF \
@@ -351,22 +520,12 @@ This requires a native LLVM SDK (select with `SNX_LLVM_CONFIG` if needed).
 `SNX_TEST_ARM_DIFF=ON` additionally requires Python `unicorn==2.1.4`, and enables
 ARM11 MPCore plus shared A57 integer/VFP/NEON/Thumb regressions. See
 `src/common/cpu/arm/README.md` for the codegen contract and exact limitations.
-Those test options alone do not enable the pipeline. To build/run it on a
-**native 64-bit Linux host** with Clang and the LLVM SDK:
-
-```sh
-cmake -S . -B build/ctr-aot -DSNX_BUILD_NX=OFF -DSNX_BUILD_GNUABI=OFF \
-  -DSNX_BUILD_GUI=OFF -DSNX_3DS_AOT=ON
-cmake --build build/ctr-aot
-ctest --test-dir build/ctr-aot --output-on-failure
-build/ctr-aot/scarletnx-3ds --output work/small-title --max-blocks 100000 small.cia
-```
-
-The compiler calls the host C compiler selected by CMake to link its PIC object;
-that compiler must remain installed at the configured path. The compiler is part of
-`scarletnx-3ds`, which links LLVM as `scarletnx` does; the compiled modules need no
-LLVM library.
-Use both `SNX_3DS_AOT=ON` and `SNX_TEST_ARM_AOT=ON` for pipeline plus CPU tests.
+The compiler calls the host C compiler selected by CMake to link its PIC objects,
+and that compiler must remain installed at the configured path. The compiled
+modules need no LLVM library. On Windows `scarletnx-3ds` carries the runtime's
+application manifest (long paths, UTF-8 code page), and the module is a DLL linked
+with DEP and ASLR compatibility, exporting only its descriptor.
+Add `SNX_TEST_ARM_AOT=ON` for the CPU tests as well as the pipeline's.
 The bounded CFG unit test needs no LLVM. To run the optional external SuperTux
 bootstrap gate, set `SNX_TEST_3DS_SUPERTUX=/absolute/path/to/Supertux.cia`.
 `SNX_TEST_ARM_DIFF=ON` additionally compares its first-SVC GPR/CPSR and complete
@@ -378,7 +537,8 @@ scripted `srv:` connection/registration effects to before APT lookup, again matc
 all GPRs/CPSR and complete RAM snapshots without independently proving IPC policy.
 Unicorn is never a runtime engine. The same native witness subsequently observes
 CRT entry into main, successful RomFS file/archive opens, scalar VFP execution
-and the next unsupported archive timestamp request.
+and the archive timestamp request answered with success, then runs a fixed number
+of blocks more one at a time and a few of the driver's polled slices.
 Separate native CIA and unit tests exercise actual worker wakeups, resources
 and rollback. Service policy is not independently hardware-validated.
 No sample binaries are downloaded or distributed.
@@ -431,6 +591,13 @@ Stage 3a references GPL-2.0-or-later `core/hle/ipc.h`, `kernel/hle_ipc.cpp`,
 `kernel/svc.cpp`, `service/sm/{srv.cpp,sm.h}` and `service/fs/fs_user.cpp` at that
 revision for wire/result/initialization facts. Its new C transport/services and
 separate SwIPC emitter are project code; see [CTR IPC](CTR-IPC.md).
+The parity roadmap's F1 and its audit read Azahar at `987f18405073960622e1043bb44005989135c6e1`
+(master on 2026-10-17) for kernel and service semantics, without porting code:
+`core/hle/kernel/{svc,thread,timer,mutex,semaphore,address_arbiter,resource_limit,shared_memory,shared_page,process,vm_manager}.cpp`
+and `errors.h` (GPL-2.0-or-later, except `svc.cpp`, which is GPL-3.0-or-later at that revision),
+`service/service.cpp`'s ReportUnimplementedFunction and `service/gsp/gsp_gpu.cpp` (GPL-3.0-or-later) for the
+GPU right and the register writes. SVC register layouts and IPC descriptor forms are checked against libctru's
+`source/svc.s`, `include/3ds/ipc.h` and `source/services/gspgpu.c` (zlib).
 Azahar is not a build dependency.
 Azahar's root license is GPLv3; individual files carry GPLv2-or-later or
 GPLv3-or-later notices. Future adaptations must retain each source's notices
@@ -477,11 +644,91 @@ The adapter is not linked to the legacy execution runner. The A32 runner in
 options; shared A57 emission and CPU ABI defaults remain unchanged.
 
 The tick domain remains 268,111,856 Hz, with 4,481,136 base ticks per frame, as
-in Azahar. New 3DS CPU scaling is a separate future scheduler concern. There is
-still no interrupt scheduling, ARM9 emulation or boot ROM. Synthetic CIAs and
+in Azahar. New 3DS CPU scaling is a separate future scheduler concern. Interrupts
+are delivered at the scheduler's deadlines (vblank, DSP frames, timers), paced by
+the host clock rather than by guest cycles. There is no ARM9 emulation or boot ROM. Synthetic CIAs and
 the supplied SuperTux startup execute natively, not complete games/retail titles.
 
-## Staged roadmap (2a implemented; 2b partially implemented)
+## Parity roadmap (Azahar)
+
+The goal is general parity with Azahar, area by area, on Linux x86-64 and Windows.
+The software renderer is finished first and a Vulkan one follows. Each phase names the Azahar
+files it ports or reads. Each ported file keeps its notice, and its origin and revision are
+recorded under [Source provenance and licensing](#source-provenance-and-licensing).
+
+| Phase | Work | Azahar references |
+| --- | --- | --- |
+| F0 Base (done 2026-10-17) | The 3DS driver builds, compiles and runs SuperTux on Windows. The module links by file name in its staging folder (a full-path command line passed Windows' 32767 characters), without ELF's `-z` options, and exports only its descriptor (COFF has no hidden visibility). The GSP, transfer, PICA, DSP and SuperTux tests run there too. The SuperTux baseline is in [its page](3DS-SUPERTUX.md). GSP shows the left eye of the pair `shown_fb` selects and takes RGB5A1 and RGBA4 framebuffers. These docs were brought up to date | `video_core/gpu.cpp`, `service/gsp/gsp_gpu.cpp` |
+| F1 Kernel and time (done 2026-10-17, audited 2026-10-19) | The scheduler delivers every deadline (vblank, DSP frame, timers, wait timeouts, sleeps, the shared page's hourly time). The dispatcher reaches it every 4096 blocks, so a thread a deadline wakes with a better priority preempts one that makes no SVC. Priorities are effective ones, with mutex priority inheritance. WaitSynchronization1 and N and the arbiter take finite timeouts. SleepThread 0 yields and -1 sleeps forever. ExitThread ends the process at its last thread. Timers and pulse events exist. CreateThread runs threads on processors -2 to 3 within the APPLICATION limit's priority, and the resource limit's counts are enforced. Also implemented: GetHandleInfo, GetSystemInfo (Luma's queries too), GetProcessInfo, GetThreadInfo, GetProcessIdOfThread, the resource limit SVCs, Break, the cache SVCs and Luma's 0x93 and 0x94, QueryMemory with the console's register layout and memory states, CreateMemoryBlock, UnmapMemoryBlock, MapMemoryBlock of the application's own blocks and ControlMemory MAP and UNMAP. Any well-formed IPC descriptor is translated, buffers are checked against the caller's memory and moved handles are closed. `--ipc-stubs` answers the unknown commands of the services it names. The shared page has its retail, battery, Wi-Fi and hourly local time fields. Guest time stays host time. Subtracting slow HLE work from it waits for the GPU thread (F2), since the audio device plays in host time | `core_timing.*`, `kernel/{svc,thread,timer,mutex,semaphore,address_arbiter,resource_limit,shared_memory,process,shared_page,vm_manager,hle_ipc}.cpp`, `service/service.cpp`, `service/gsp/gsp_gpu.cpp` |
+| F2 SuperTux playable | Presenter without readback or queue waits, on its own thread; both screens and the Default, Single, Large, Side-by-side and Hybrid layouts; keyboard, SDL3 gamepad, touch and motion input; full `hid:USER`/`hid:SPVR` rings and `ir:rst`; GX work on a GPU thread with interrupts delivered by the poll; banded raster threads; audio prebuffer and hold-last-frame | `frontend/framebuffer_layout.cpp`, `frontend/emu_window.cpp`, `service/hid/hid.*`, `service/ir/ir_rst.*`, `renderer_software/sw_rasterizer.cpp`, `audio_core/dsp_interface.cpp` |
+| F3 OS for retail titles | cfg blocks; APT:U/APT:A and the `aptMainLoop` lifecycle; shared font; HLE applets (swkbd first); FS save data, extdata, system save data, the NCCH archive and the SDMC write-only archive; ptm:u, ac:u and registered stubs for the small services; err:f | `service/{cfg,apt,fs,ptm,ac,err}/`, `hle/applets/`, `file_sys/archive_*` |
+| F4 Software GPU | Geometry shaders, procedural textures, shadow textures and rendering, VRAM save and restore, the stereo right eye | `pica/geometry_pipeline.cpp`, `pica/shader_unit.cpp`, `renderer_software/{sw_proctex,sw_framebuffer,sw_rasterizer}.cpp` |
+| F5 Dynamic code | ldr:ro CROs compiled ahead of time, with a design for their run-time base and relocations; a log of missed targets for a second discovery pass; an explicit result for self-modifying code | `service/ldr_ro/` |
+| F6 Audio | The DSP's AAC pipe on FFmpeg; CSND; time stretching if gaps remain | `audio_core/hle/aac_decoder.cpp`, `audio_core/csnd.cpp`, `service/csnd/`, `audio_core/time_stretch.cpp` |
+| F7 Peripherals and network | y2r, mic, cam (no camera), ir:USER, soc:U, then ssl and http | `service/{cam,mic,ir,soc,ssl,http}/`, `hw/y2r.cpp` |
+| F8 Loader | Encrypted content with the user's keys; CCI, CXI, 3DSX and ELF; updates and DLC; a complete module cache key | `file_sys/`, `loader/` |
+| F9 Vulkan renderer | A Vulkan device shared with NX; the PICA fragment shader generator on `spirv_emit.c`; the surface cache with page-level coherence in the memory controller; host vertex and geometry shaders. The software renderer stays as the reference and fallback | `renderer_vulkan/`, `rasterizer_cache/`, `shader/generator/` |
+| F10 Performance | Shader JIT if profiles call for it; the syscore CPU limiter; GUI settings for layouts and controls | `shader/shader_jit_*`, `core.cpp` |
+
+F3 and F4 can run in parallel after F2. Every phase is checked by asset-free tests
+(`ctest -R "3ds|ctr"`) and by a run of the title it affects.
+
+### Gaps the F0/F1 audit left to later phases
+
+The audit of 2026-10-19 fixed what F0 and F1 introduced. It also found places where
+code older than F0 differs from Azahar or from the console. Each belongs to the
+phase that reworks its area:
+
+- F2 (gsp::Gpu, with the GPU thread):
+  - FlushDataCache and InvalidateDataCache take only the process pseudo-handle, and
+    do not check the range as Azahar's IsValidCacheRange does (`0xE0E02BF5`). DSP's
+    FlushDataCache and InvalidateDCache have the same limits.
+  - RegisterInterruptRelayQueue returns the shared memory as a moved handle where
+    Azahar copies it. It does not reset the queue header, a second registration
+    keeps the old event, and a failure while adding the shared handle leaves the
+    registration's side effects.
+  - The GPU right: AcquireRight takes it from its holder and TryAcquireRight acts
+    as AcquireRight with that command's wire form, where Azahar blocks or fails busy
+    (`0xC8402BF0`). ReleaseRight from a session that does not hold it fails, where
+    Azahar succeeds. The flags check of AcquireRight is invented, and granting the
+    right does not clear the holder's FrameBufferUpdate flags.
+  - The GSP thread index is assigned at registration rather than when the session
+    connects, so a right holder that never registered stops TriggerCmdReqQueue.
+  - Relay events are signaled when nothing was queued, and interrupts are queued
+    for a holder with no event. The latch walks every registered thread rather
+    than only the right holder's.
+  - SetLcdForceBlack invents an error above 1, and the presenter ignores it.
+  - `relay_flags` and `frame_seq` are written and never read.
+  - A memory fill with its start at or past its end fails without raising PSC.
+    Azahar may still signal it, which needs checking.
+  - Framebuffers are kept as virtual addresses. Azahar translates them to physical
+    ones, so a framebuffer outside the linear heap may show differently.
+  - The session limits per service are invented (Azahar's default is 10, and GSP's
+    must not exceed its four threads).
+  - Without a Vulkan device the whole GSP test is skipped, not only its
+    presentation checks, and it keeps two inline copies of `frame_pixel`.
+- F3 (kernel and IPC, with the services retail titles use):
+  - Every reply writes back all 64 command words, where the console copies only
+    the reply's length (to be checked on hardware).
+  - GetProcessInfo type 20 always gives the old linear heap's offset. Azahar picks
+    `0x30000000` for kernels from `0x22C` by the ExHeader's descriptor, while the
+    configuration page reports `0x23A`.
+  - A wait-all that succeeds at once writes -1 to r1 where Azahar leaves it, and a
+    timed arbiter wait that is signaled leaves the timeout result in r0 in Azahar.
+    What the console does in both cases is unknown.
+- F6 (audio): ReadPipe consumes the pipe's data before it checks that the receive
+  buffer is writable and uses a 64 KiB stack buffer per call, `semaphore_mask` is
+  kept but never read, `SNX_CTR_DSP_RAM` is both a macro and an enumerator, and
+  ReadPipe (`0x0e`) and Flush/Invalidate with a real process handle are untested.
+- F8 (loader and module cache):
+  - The host C compiler's path is fixed at configure time, which breaks installed
+    and cross builds.
+  - No default test covers the Windows link and export, and the static pipeline
+    test parses only ELF modules, not the Windows DLL.
+  - The staging folder's ACL, meant for keys, may become `native/`'s in an
+    elevated run (to be checked).
+
+## Staged roadmap (stages 2–6, superseded by the parity roadmap)
 
 Each stage should be one independently reviewable commit/diff, with all earlier
 stages as its base. Stubs must return explicit unsupported errors, not pretend
@@ -500,7 +747,8 @@ serialized ARM11 exclusives. That checkpoint reached ConnectToPort before `main`
 initial 3a passed `srv:` registration and stopped at absent APT:S. Initial 3b
 passes the bounded APT startup/thread/HID path and reaches main. The minimal
 shared-backed FS increment opens RomFS. Scalar VFPv2 and its offline CFG
-fallthrough now pass `gettimeofday`; the next stop is archive timestamp control.
+fallthrough pass `gettimeofday`, and the archive timestamp control was answered
+later, before the parity roadmap took over.
 **Stage 2 is not complete**: broader discovery/ISA coverage, full VFP, concurrent
 reservation/scheduling semantics, validated resume/cache and wider runtime
 validation remain pending.
@@ -543,7 +791,7 @@ APT startup, native threads and bounded PTM/HID resources, not a full applet or
 input subsystem. The minimal FS increment reuses NX's common indexed/mapped
 host backing for read-only SelfNCCH access. A synthetic native CIA reads and
 resolves a real extracted file; the full stage/OS/filesystem witness below
-remains unfinished. Archive timestamp control blocks the title before its first FS read.
+remains unfinished.
 
 - Threads, handles, events, waits, scheduling, SVCs, TLS, shared memory and result
   codes; checked guest buffers and handle lifetimes at every IPC boundary.

@@ -15,6 +15,10 @@ import tempfile
 from ctr_fixtures import cia, ncch, put
 
 
+# a guest's bad access: the checked bus's fault, or the flat space's host fault (memory/host.c) where the host has one
+FAULT = ('guest fault', 'guest data abort')
+
+
 def application(words=None, raw=None, text_size=None, ro=None):
     if raw is None:
         raw = struct.pack('<' + 'I' * len(words), *words)
@@ -255,6 +259,11 @@ class Descriptor(C.Structure):
     ]
 
 
+def module_of(folder):
+    """the game folder's module, named after it as a Switch game's is"""
+    return folder / f'{folder.name}_code.{"dll" if sys.platform == "win32" else "so"}'
+
+
 def main():
     # absolute, not resolved: scarletnx-3ds may be a link to scarletnx, which runs the driver its name says
     driver, probe = [str(Path(p).absolute()) for p in sys.argv[1:3]]
@@ -272,7 +281,9 @@ def main():
             )
             text = p.stdout + p.stderr
             assert p.returncode == status, (cases, p.returncode, text)
-            assert message in text and 'AddressSanitizer' not in text and 'runtime error:' not in text, (cases, text)
+            messages = message if isinstance(message, tuple) else (message,)
+            assert any(m in text for m in messages), (cases, text)
+            assert 'AddressSanitizer' not in text and 'runtime error:' not in text, (cases, text)
             assert not list(root.rglob('.snx-*')), (cases, 'private staging leaked')
             if status:
                 assert 'Guest ExitProcess' not in text
@@ -285,10 +296,11 @@ def main():
         assert text.index('Extracting ') < text.index('Recompiling ARM11') < text.index('Running ARM11')
         assert (basic / 'romfs/hello.txt').read_bytes() == b'hello'
         assert (basic / 'contents/00002222.app').is_file()
-        assert (basic / 'native/code.o').is_file() and (basic / 'native/code.so').is_file()
+        # the module alone is published, not the objects it was linked from
+        assert module_of(basic).is_file() and not list(basic.rglob('*.o')) and not (basic / "native").exists()
         subprocess.run([probe, str(basic), 'basic'], check=True, capture_output=True)
         # Like the Switch driver, the extraction and the module are used again, with no error and no recompile
-        before = (basic / 'native/code.so').read_bytes()
+        before = module_of(basic).read_bytes()
         source = root / 'repeat.cia'
         source.write_bytes(application([0xE3A0002A, 0xEF000003]))
         p = subprocess.run(
@@ -296,7 +308,7 @@ def main():
         )
         assert p.returncode == 0 and 'Guest ExitProcess: r0=42' in p.stdout, p.stdout + p.stderr
         assert 'Using the extraction' in p.stdout and 'Extracting' not in p.stdout and 'Recompiling' not in p.stdout
-        assert (basic / 'native/code.so').read_bytes() == before
+        assert module_of(basic).read_bytes() == before
         # -r compiles again and does not play
         p = subprocess.run(
             [driver, *extract, '-r', '--output', str(basic), str(source)], text=True, capture_output=True, timeout=20
@@ -308,8 +320,8 @@ def main():
                       'certificates.bin', 'ncch.bin', 'exheader.bin', 'manifest.ini'}
         direct, text = run(application([0xE3A0002A, 0xEF000003]), message='Guest ExitProcess: r0=42 blocks=2')
         assert 'Extracting' not in text and text.index('Recompiling ARM11') < text.index('Running ARM11')
-        assert not extraction & {p.name for p in direct.iterdir()} and (direct / 'native/code.so').is_file()
-        module = (direct / 'native/code.so').read_bytes()
+        assert not extraction & {p.name for p in direct.iterdir()} and module_of(direct).is_file()
+        module = module_of(direct).read_bytes()
         # -r reads the CIA too, and a run uses the module again
         p = subprocess.run([driver, '-r', '--output', str(direct), str(source)], text=True, capture_output=True,
                            timeout=20)
@@ -321,12 +333,12 @@ def main():
         # run takes the extraction away, and an extraction asked for again lands beside the module
         p = subprocess.run([driver, '--output', str(basic), str(source)], text=True, capture_output=True, timeout=20)
         assert p.returncode == 0 and 'Removing the extraction' in p.stdout and 'Recompiling' not in p.stdout, p.stdout
-        assert not extraction & {p.name for p in basic.iterdir()} and (basic / 'native/code.so').is_file()
+        assert not extraction & {p.name for p in basic.iterdir()} and module_of(basic).is_file()
         p = subprocess.run(
             [driver, *extract, '--output', str(direct), str(source)], text=True, capture_output=True, timeout=20
         )
         assert p.returncode == 0 and 'Extracting' in p.stdout and 'Recompiling' not in p.stdout, p.stdout + p.stderr
-        assert (direct / 'romfs/hello.txt').read_bytes() == b'hello' and (direct / 'native/code.so').read_bytes() == module
+        assert (direct / 'romfs/hello.txt').read_bytes() == b'hello' and module_of(direct).read_bytes() == module
         assert not list(root.rglob('.snx-*')) and not list(root.glob('*.extracting'))
         basic = direct  # the extraction the checks below read
         run(application([0xE3A0002A, 0xEF000003]), message='r0=42', extra=('--model', 'new'))
@@ -368,7 +380,7 @@ def main():
         blocked.mkdir()
         (blocked / 'frames').write_bytes(b'')
         run(application([0xE3A0002A, 0xEF000003]), 1, f'cannot create {blocked.resolve() / "frames"}: ')
-        run(application([0xE1900F9F]), 1, 'guest fault')  # checked LDREX on unmapped VA, no flat fallback
+        run(application([0xE1900F9F]), 1, FAULT)  # LDREX of an unmapped address
         run(application([0xEF000021, 0xE1A00001, 0xEF000023, 0xEF000003]), message='Guest ExitProcess: r0=0 blocks=4')
         commit = [0xE3A00003, 0xE3A01302, 0xE3A02000, 0xE3A03A01, 0xE3A04003, 0xEF000001]
         locked, _ = run(
@@ -404,13 +416,18 @@ def main():
         run(fs_program(), message='Guest ExitProcess: r0=42')
         run(thread_program(), message='Guest ExitProcess: r0=42')
         run(ipc_program(), message='Guest ExitProcess: r0=42')
-        run(ipc_program(wait=True), 3, 'wait_service=MISSING')
-        run(application([0xEE300A01]), 3, 'unsupported guest operation')  # VFPv2
-        run(application([0xE3010234]), 1, 'guest fault')  # MOVW is not ARM11
-        run(application([0xE3A01000, 0xE5910000]), 1, 'guest fault')  # unmapped data
-        run(application([0xE59F1004, 0xE5810000, 0xEF000003, 0x200000]), 1, 'guest fault')  # RO store
+        # a service the runtime does not know: a stand-in answering success, the default, else a wait forever as
+        # the console's for a service never registered
+        run(ipc_program(wait=True), message=('the runtime has no service MISSING: its commands answer success',))
+        run(ipc_program(wait=True), 3, 'wait_service=MISSING', extra=('--ctr_auto_stub_ipc=0',))
+        run(application([0xEE300A01, 0xE3A0002A, 0xEF000003]), message='Guest ExitProcess: r0=42')  # VFPv2 VADD.F32
+        run(application([0xE3010234]), 1, FAULT)  # MOVW is not ARM11
+        run(application([0xE3A01000, 0xE5910000]), 1, FAULT)  # unmapped data
+        run(application([0xE59F1004, 0xE5810000, 0xEF000003, 0x200000]), 1, FAULT)  # RO store
         run(application([0xE59FF000, 0xE1A00000, 0x200000]), 1, 'exit=11')  # non-X branch
-        run(application([0xEA000002]), 3, 'missing static entry')  # RX page padding, outside declared text
+        # the RX page's padding, outside the declared text, runs as the console runs it (compiled at run time) up to
+        # the read-only page after it, whose fetch faults
+        run(application([0xEA000002]), 1, 'exit=11 syndrome=0x00101000')
         # Exhaustive discovery includes the last valid ARM word at the cap.
         maximum = bytearray(4096)
         put(maximum, 0, '<I', 0xEA0003FD)
@@ -422,22 +439,28 @@ def main():
         put(sparse, 0, '<6I', 0xE59F300C, 0xE5933000, 0xE12FFF33, 0xEF000003, 0xE1A00000, 0x200000)
         put(sparse, 0x2000, '<HH', 0x202F, 0x4770)
         run(application(raw=sparse, ro=struct.pack('<I', 0x102001)), message='Guest ExitProcess: r0=47 blocks=3')
-        # More than 128 block entries forces multiple independent LLVM chunks.
-        chained = bytearray(0x1800)
-        for i in range(129):
+        # More than 512 block entries make several LLVM chunks, which the workers compile in parallel.
+        chained = bytearray(0x5000)
+        for i in range(600):
             put(chained, i * 32, '<I', 0xEA000006)
-        put(chained, 129 * 32, '<II', 0xE3A00031, 0xEF000003)
-        chain, _ = run(application(raw=chained), message='Guest ExitProcess: r0=49 blocks=130')
-        assert len(list((chain / 'native').glob('block-*.o'))) >= 2
-        # Unproven dynamic targets do not trigger discovery/compilation at run time.
+        put(chained, 600 * 32, '<II', 0xE3A00031, 0xEF000003)
+        run(application(raw=chained), message='Guest ExitProcess: r0=49 blocks=601')
+        # A target the static discovery can't prove (a register's) compiles at run time, and goes in the title's
+        # hints, which the next recompile starts from: then it is a static block.
         uncovered = bytearray(0x1800)
         put(uncovered, 0, '<3I', 0xE3A01601, 0xE2811C01, 0xE12FFF11)
         put(uncovered, 0x100, '<I', 0xEF000003)
-        run(application(raw=uncovered), 3, 'missing static entry')
+        hinted, text = run(application(raw=uncovered), message='Compiled at run time: 1 blocks, 1 new')
+        assert (hinted / f'{hinted.name}.hints').read_text().split() == ['00100100']
+        source = root / f'input {cases};literal.cia'
+        p = subprocess.run([driver, '-r', '--output', str(hinted), str(source)], text=True, capture_output=True, timeout=90)
+        assert p.returncode == 0 and 'Seeding ARM11 discovery with 1 blocks' in p.stdout, p.stdout + p.stderr
+        p = subprocess.run([driver, '--output', str(hinted), str(source)], text=True, capture_output=True, timeout=90)
+        assert 'Guest ExitProcess' in p.stdout and 'Compiled at run time' not in p.stdout, p.stdout + p.stderr
         too_large, _ = run(application([0xEF000003], text_size=16 * 1024 * 1024 + 4), 3, 'static AOT text limit')
-        assert not (too_large / 'native').exists()
+        assert not module_of(too_large).exists()
         extracted, text = run(application([0xE3A0002A, 0xEF000003]), message='Extracted', extra=('-x',))
-        assert 'Running ARM11' not in text and not (extracted / 'native').exists()
+        assert 'Running ARM11' not in text and not module_of(extracted).exists()
         # Compiler input is revalidated from raw files, never trusted manifest fields.
         (extracted / 'exefs/.code').write_bytes(b'truncated')
         p = subprocess.run(
@@ -446,10 +469,10 @@ def main():
             capture_output=True,
             timeout=20,
         )
-        assert p.returncode == 1 and 'bounded expanded .code' in p.stderr and not (extracted / 'native').exists()
+        assert p.returncode == 1 and 'bounded expanded .code' in p.stderr and not module_of(extracted).exists()
         assert not list(root.rglob('.snx-*'))
         # Real dlopen/dlsym ABI validation against freshly generated, trusted ELF copies.
-        original = (basic / 'native/code.so').read_bytes()
+        original = module_of(basic).read_bytes()
         offset = descriptor_offset(original)
         assert C.sizeof(Descriptor) == 112
         identity = hashlib.sha256(
@@ -481,7 +504,7 @@ def main():
         subprocess.run([probe, str(workload), 'reject', str(root / 'missing.so')], check=True, capture_output=True)
         readelf = shutil.which('readelf')
         if readelf:
-            deps = subprocess.check_output([readelf, '-d', str(workload / 'native/code.so')], text=True)
+            deps = subprocess.check_output([readelf, '-d', str(module_of(workload))], text=True)
             assert 'LLVM' not in deps and 'scarletnx' not in deps
     print(f'CTR end-to-end static AOT: {cases} pipelines, native ABI mutations and image identity checks passed')
 

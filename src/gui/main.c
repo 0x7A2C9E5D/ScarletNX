@@ -7225,16 +7225,18 @@ static void launch(App* app, char* absolute, bool prepared) {
         argv[n++] = "--repo";
         argv[n++] = app->data_dir;
     }
-    if (folders && app->menu.selected == GUI_SWITCH && (app->place[GUI_PLACE_GAMES] || app->dest_out)) {
+    /* a CIA's game is a folder of the recompiled library as a Switch game is, named after its title ID, its saves in
+       it */
+    if (folders && (app->place[GUI_PLACE_GAMES] || app->dest_out)) {
         argv[n++] = "--outdir";
         argv[n++] = app->dest_out ? app->dest_out : app->games_dir;
     }
     /* the picked extractions folder, which Extract to tmpfs leaves for the temporary one, and a Switch dump read in
-       place (Extract game container off) has no use for. A CIA's title folder is there either way, its saves in it */
-    if (folders && app->place[GUI_PLACE_WORK] &&
-        (app->menu.selected == GUI_3DS || (!nro_file(absolute) && !gui_settings_tmpfs(s) && gui_settings_extract(s)))) {
-        out = dump_out(app, absolute, app->menu.selected == GUI_3DS ? "3ds" : NULL); /* an NRO has no extraction */
-        argv[n++] = app->menu.selected == GUI_3DS ? "--output" : "--out";
+       place (Extract game container off) has no use for */
+    if (folders && app->place[GUI_PLACE_WORK] && app->menu.selected == GUI_SWITCH && !nro_file(absolute) &&
+        !gui_settings_tmpfs(s) && gui_settings_extract(s)) {
+        out = dump_out(app, absolute, NULL); /* an NRO has no extraction */
+        argv[n++] = "--out";
         argv[n++] = out;
     }
     argv[n] = NULL;

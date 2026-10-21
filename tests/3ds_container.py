@@ -4,6 +4,7 @@
 """A CIA read where it lies against its extraction: the same CIAs accepted and refused, the same bytes read."""
 
 import random
+import os
 import shutil
 import subprocess
 import sys
@@ -24,13 +25,21 @@ def main():
             checked += 1
             source, out = root / f'{name}.cia', root / name
             source.write_bytes(blob)
+            # the home folder is the test's: no 3DS keys of the user's decrypt an encrypted case
+            env = {**os.environ, 'HOME': str(root), 'USERPROFILE': str(root)}
             x = subprocess.run([driver, '-x', '--output', str(out), str(source)], capture_output=True, text=True,
-                               timeout=20)
+                               timeout=20, env=env)
             args = [probe, str(source)] + ([str(out)] if x.returncode == 0 else [])
             p = subprocess.run(args, capture_output=True, text=True, timeout=20)
             text = x.stdout + x.stderr + p.stdout + p.stderr
             assert 'AddressSanitizer' not in text and 'runtime error:' not in text, text
-            # accepted by both or refused by both, refused as unsupported by both or neither
+            # accepted by both, or refused by both, refused as unsupported by both or neither. The read in place takes no
+            # whole-data hash (a content's, an ExeFS file's), so it also accepts a CIA whose only fault is one of those
+            if x.returncode and not p.returncode:
+                assert 'SHA-256 mismatch' in text, (name, text)
+                source.unlink()
+                shutil.rmtree(out, ignore_errors=True)
+                return x.returncode
             assert (x.returncode == 0) == (p.returncode == 0), (name, x.returncode, p.returncode, text)
             if x.returncode:
                 assert x.returncode in (1, 3) and p.returncode in range(21, 26), (name, text)

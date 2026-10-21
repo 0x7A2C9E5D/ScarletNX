@@ -285,8 +285,13 @@ SNX_INLINE u64 ext64(u64 x, u32 opt, u32 sh) {
 SNX_INLINE u32 clz64(u64 x) { return x ? (u32)__builtin_clzll(x) : 64; }
 SNX_INLINE u32 clz32(u32 x) { return x ? (u32)__builtin_clz(x) : 32; }
 SNX_INLINE u32 popc8(u8 x) { return (u32)__builtin_popcount(x); }
+/* FreeBSD defines these */
+#ifndef bswap32
 SNX_INLINE u32 bswap32(u32 x) { return __builtin_bswap32(x); }
+#endif
+#ifndef bswap64
 SNX_INLINE u64 bswap64(u64 x) { return __builtin_bswap64(x); }
+#endif
 /* CLS: the leading bits equal to the sign bit, the sign bit itself not counted */
 SNX_INLINE u32 cls64(u64 x) { return clz64(x ^ (u64)((i64)x >> 1)) - 1; }
 SNX_INLINE u32 cls32(u32 x) { return clz32(x ^ (u32)((i32)x >> 1)) - 1; }

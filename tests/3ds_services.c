@@ -47,6 +47,7 @@ int main(void) {
     unsigned char code[0x3000] = {0};
     SnxCtrImage image = {.segment = {{0x100000, 1, 16}, {0x200000, 1, 4}, {0x300000, 1, 4}},
                          .stack_size = 0x4000,
+                         .main_priority = 0x30,
                          .bss_size = 4096,
                          .code = code,
                          .code_size = sizeof code};
@@ -184,11 +185,32 @@ int main(void) {
         send(p, cfg, SNX_CTR_SVC_RETURN, 0);
         assert(get(p, 1) == 0xd90103ec); /* InvalidSize */
         sound[1] = 1;
-        sound[2] = 0x50005;
+        sound[2] = 0x50005; /* the stereo camera settings: 32 bytes, not 1 */
         sound[3] = 1 << 4 | 0xc;
         request(p, sound, 5);
-        send(p, cfg, SNX_CTR_SVC_UNSUPPORTED, 0);
+        send(p, cfg, SNX_CTR_SVC_RETURN, 0);
+        assert(get(p, 1) == 0xd90103ec);
+        sound[2] = 0x12345678; /* a block no console has */
+        request(p, sound, 5);
+        send(p, cfg, SNX_CTR_SVC_RETURN, 0);
+        assert(get(p, 1) == 0xd90103fa); /* NotFound */
         assert(!snx_ctr_handle_close(p, cfg) && endpoint(p, srv, "cfg:u") && endpoint(p, srv, "cfg:s"));
+        /* am:app on a console with no add-on content: one content info for a DLC title, none listed, a title ID that
+           is no DLC's refused (Azahar am.cpp) */
+        uint32_t am = endpoint(p, srv, "am:app");
+        uint32_t dlc_count[] = {0x100100c0, 1, 0x00095000, 0x0004008c};
+        request(p, dlc_count, 4);
+        send(p, am, SNX_CTR_SVC_RETURN, 0);
+        assert(get(p, 0) == 0x10010080 && !get(p, 1) && get(p, 2) == 1);
+        dlc_count[3] = 0x00040000;
+        request(p, dlc_count, 4);
+        send(p, am, SNX_CTR_SVC_RETURN, 0);
+        assert(get(p, 1) == 0xe0e0801f && !get(p, 2));
+        uint32_t dlc_list[] = {0x10030142, 0, 1, 0x00095000, 0x0004008c, 0, 0xc, 0x300000};
+        request(p, dlc_list, 8);
+        send(p, am, SNX_CTR_SVC_RETURN, 0);
+        assert(get(p, 0) == 0x10030080 && !get(p, 1) && !get(p, 2));
+        assert(!snx_ctr_handle_close(p, am));
         uint32_t hid = endpoint(p, srv, "hid:USER"), hid_args[] = {0xa0000};
         n = 0;
         while (n < CTR_HANDLES && !snx_ctr_handle_add(p, snx_ctr_handle_object(p, srv), &duplicates[n])) ++n;
@@ -212,11 +234,12 @@ int main(void) {
         uint32_t physical;
         unsigned permissions;
         assert(snx_ctr_query(p->space, 0x10000000, &physical, &permissions) == SNX_CTR_MEM_OK &&
-               physical == p->physical_end && permissions == 1);
+               physical >= p->physical_end && permissions == 1); /* past the application's pool */
         assert(snx_ctr_write_ram(p->space, 0x10000000, fill, 1) == SNX_CTR_MEM_PERMISSION);
         for (unsigned i = 0; i < 6; ++i) {
             assert(!snx_ctr_handle_close(p, get(p, 3 + i)));
-            assert(p->objects[p->hid_objects[i]].refs == 1); /* device retains resources */
+            /* the device retains its resources; the shared page mapped above is also kept by its mapping */
+            assert(p->objects[p->hid_objects[i]].refs == (i == 0 ? 2u : 1u));
         }
         request(p, hid_args, 1);
         send(p, hid, SNX_CTR_SVC_RETURN, 0);
