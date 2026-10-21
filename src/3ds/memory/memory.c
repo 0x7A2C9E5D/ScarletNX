@@ -12,8 +12,7 @@ typedef struct {
 } Page;
 struct SnxCtrMemory {
     const SnxCtrProfile* profile;
-    /* each RAM region's memory: its part of host's view on a host with a flat space (ctr_host_flat), the regions one
-       after another, else its own allocation */
+    /* each RAM region's memory: its part of host's view, the regions one after another (NULL for MMIO) */
     unsigned char* backing[8];
     CtrHostMemory host;
     void* mmio_context;
@@ -39,37 +38,27 @@ SnxCtrMemory* snx_ctr_memory_new(SnxCtrModel model) {
     uint64_t ram = 0;
     for (size_t i = 0; i < p->region_count; ++i)
         if (p->regions[i].kind != SNX_CTR_MMIO) ram += p->regions[i].size;
-    /* a host that has a flat space always gives one, as its modules are compiled for it (snx_ctr_module_memory) */
-    if (ctr_host_flat()) {
-        if (!ctr_host_memory_new(&m->host, ram)) {
-            free(m);
-            return NULL;
-        }
-        uint64_t offset = 0;
-        for (size_t i = 0; i < p->region_count; ++i) {
-            if (p->regions[i].kind == SNX_CTR_MMIO) continue;
-            m->backing[i] = m->host.view + offset;
-            offset += p->regions[i].size;
-        }
-        return m;
+    /* one host memory object, whatever the host: its view is page-aligned (the GPU imports each region's part, and a
+       flat space maps its pages) */
+    if (!ctr_host_memory_new(&m->host, ram)) {
+        free(m);
+        return NULL;
     }
+    uint64_t offset = 0;
     for (size_t i = 0; i < p->region_count; ++i) {
         if (p->regions[i].kind == SNX_CTR_MMIO) continue;
-        m->backing[i] = calloc(1, p->regions[i].size);
-        if (!m->backing[i]) {
-            snx_ctr_memory_free(m);
-            return NULL;
-        }
+        m->backing[i] = m->host.view + offset;
+        offset += p->regions[i].size;
     }
     return m;
+}
+unsigned char* snx_ctr_memory_region(const SnxCtrMemory* m, size_t index) {
+    return m && index < m->profile->region_count ? m->backing[index] : NULL;
 }
 const SnxCtrProfile* snx_ctr_memory_profile(const SnxCtrMemory* m) { return m ? m->profile : NULL; }
 void snx_ctr_memory_free(SnxCtrMemory* m) {
     if (!m) return;
-    if (m->host.view)
-        ctr_host_memory_free(&m->host);
-    else
-        for (size_t i = 0; i < 8; ++i) free(m->backing[i]);
+    ctr_host_memory_free(&m->host);
     free(m);
 }
 void snx_ctr_memory_mmio(SnxCtrMemory* m, void* context, SnxCtrMmioRead read, SnxCtrMmioWrite write) {
@@ -83,7 +72,7 @@ SnxCtrAddressSpace* snx_ctr_space_new(SnxCtrMemory* m) {
     SnxCtrAddressSpace* s = calloc(1, sizeof *s);
     if (!s) return NULL;
     s->memory = m;
-    if (m->host.view && !(s->base = ctr_host_reserve())) {
+    if (ctr_host_flat() && !(s->base = ctr_host_reserve())) {
         free(s);
         return NULL;
     }

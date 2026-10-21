@@ -145,7 +145,8 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
         snprintf(error, error_size, "cannot create %s: %s", frames, snx_os_error(why, sizeof why));
         goto done;
     }
-    if (!snx_ctr_present_init(frames)) printf("Vulkan presenter unavailable: no frames will be shown or saved\n");
+    if (!snx_ctr_present_init(process->memory, frames))
+        printf("No Vulkan device: no frames will be drawn, shown or saved\n");
     /* the DSP's output plays on the default device, and its first two minutes go to <output>/audio.wav */
     wav = snx_path_join(directory, "audio.wav");
     if (!snx_ctr_audio_init(wav)) printf("No audio output: the DSP's frames will not be heard or saved\n");

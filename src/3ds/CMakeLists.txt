@@ -15,10 +15,16 @@ add_library(snx_ctr_loader STATIC loader/loader.c loader/cia.c loader/ncch.c loa
 target_link_libraries(snx_ctr_loader PUBLIC scarletnx-common scarletnx-filesystem OpenSSL::Crypto)
 target_compile_definitions(snx_ctr_loader PRIVATE _FILE_OFFSET_BITS=64 _CRT_SECURE_NO_WARNINGS)
 add_library(snx_ctr_process STATIC runtime/process.c kernel/kernel.c kernel/thread.c aot/dispatch.c ipc/ipc.c services/srv.c services/fs.c services/apt.c services/ptm.c services/hid.c services/romfs.c services/file.c services/gsp.c services/dsp.c services/cfg.c services/system.c services/am.c)
-add_library(snx_ctr_gpu STATIC gpu/present.c gpu/transfer.c gpu/pica.c gpu/shader.c gpu/draw.c gpu/raster.c gpu/lighting.c gpu/texture.c "${volk_SOURCE_DIR}/volk.c")
+add_library(snx_ctr_gpu STATIC gpu/present.c gpu/transfer.c gpu/vk/device.c gpu/vk/transfer.c gpu/pica.c gpu/shader.c gpu/draw.c gpu/raster.c gpu/lighting.c gpu/texture.c "${volk_SOURCE_DIR}/volk.c")
 target_include_directories(snx_ctr_gpu PUBLIC "${volk_SOURCE_DIR}")
 target_link_libraries(snx_ctr_gpu PUBLIC snx_ctr_memory Vulkan::Headers SDL3::SDL3 ${CMAKE_DL_LIBS})
 set_source_files_properties("${volk_SOURCE_DIR}/volk.c" PROPERTIES COMPILE_OPTIONS "${snx_third_party_flags}")
+# the GPU's compute shaders, compiled at build time (cmake/glsl.cmake)
+include("${PROJECT_SOURCE_DIR}/cmake/glsl.cmake")
+foreach(shader fill display_transfer texture_copy present)
+    snx_glsl_spirv(snx_ctr_gpu SOURCE gpu/vk/shaders/${shader}.comp NAME snx_ctr_${shader}_spv
+                   HEADER 3ds/gpu/vk/shaders/${shader}_spv.h)
+endforeach()
 # the HLE DSP and its SDL3 output
 add_library(snx_ctr_audio STATIC audio/dsp.c audio/source.c audio/mixers.c audio/output.c)
 target_link_libraries(snx_ctr_audio PUBLIC snx_ctr_memory SDL3::SDL3)

@@ -171,6 +171,12 @@ if(TARGET snx_ctr_board)
     add_test(NAME 3ds_blz COMMAND snx-test-3ds-blz)
 
     # The GPU, presentation and DSP tests need neither Python nor POSIX, and Windows is a 3DS target too
+    # the GPU's transfer engine against the CPU reference (gpu/transfer.c), on whatever Vulkan device there is
+    add_executable(snx-test-3ds-vk-transfer 3ds_vk_transfer.c)
+    snx_test_target(snx-test-3ds-vk-transfer 11)
+    target_link_libraries(snx-test-3ds-vk-transfer PRIVATE snx_ctr_gpu)
+    add_test(NAME 3ds_vk_transfer COMMAND snx-test-3ds-vk-transfer)
+    set_tests_properties(3ds_vk_transfer PROPERTIES SKIP_RETURN_CODE 77)
     add_executable(snx-test-3ds-gsp 3ds_gsp.c)
     snx_test_target(snx-test-3ds-gsp 11)
     target_link_libraries(snx-test-3ds-gsp PRIVATE snx_ctr_process)

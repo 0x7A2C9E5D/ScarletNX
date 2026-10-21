@@ -52,6 +52,17 @@ Since 2026-10-21 a commercial title, decrypted this way, runs its startup
 generically), creates its save data and stops at its first prompt for the A
 button, drawn through the PICA renderer. Input is the next gap.
 
+The GPU's work runs on one Vulkan device (`src/3ds/gpu/vk/`), which needs Vulkan
+1.3, 8-bit storage buffers and `VK_EXT_external_memory_host`: the board's RAM
+regions are imported as buffers, so the GPU reads and writes the guest's memory
+in place and nothing of it is copied by the CPU. Memory fills, display transfers
+and texture copies are compute shaders (`gpu/vk/shaders/`), held byte for byte to
+the CPU reference `gpu/transfer.c` by `tests/3ds_vk_transfer.c`. The shown
+framebuffers are decoded and turned to the landscape screen by a compute shader
+straight from guest memory into the window's swapchain; the frame dumps are the
+one readback. The work is submitted, and waited for, at the end of each GX queue
+run, before its interrupts reach the guest.
+
 Compiled code addresses the guest flat: a 4 GiB host reservation where guest
 address `va` is `base + va`, each mapping a view of the board's RAM held in one
 host memory object (`src/3ds/memory/host.c`: a memfd on Linux and Android, an

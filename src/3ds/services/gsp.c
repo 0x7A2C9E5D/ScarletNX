@@ -13,6 +13,8 @@
 #include "3ds/gpu/present.h"
 #include "3ds/gpu/pica.h"
 #include "3ds/gpu/transfer.h"
+#include "3ds/gpu/vk/vk.h"
+#include "3ds/gpu/vk/vk_transfer.h"
 #include <stdio.h>
 #include "common/utilities/common.h"
 #include <stdlib.h>
@@ -127,20 +129,20 @@ static void present_screen(SnxCtrProcess* p, uint32_t screen) {
                 (unsigned)address, (unsigned)format, (unsigned)stride,
                 !address || format > 4 || stride < width * bpp_of(format) || stride > 0x40000 ? ": dropped" : "");
     if (!address || format > 4 || stride < width * bpp_of(format) || stride > 0x40000) return;
+    /* the GPU reads it where it is: one physical span, which a framebuffer in VRAM or the linear heap is */
     uint64_t span = (uint64_t)stride * height;
-    unsigned char* pixels = malloc((size_t)span);
-    if (!pixels) return;
-    if (snx_ctr_check_ram(p->space, address, (size_t)span, SNX_CTR_READ) != SNX_CTR_MEM_OK ||
-        snx_ctr_read_ram(p->space, address, pixels, (size_t)span) != SNX_CTR_MEM_OK) {
-        free(pixels);
-        return;
+    uint32_t pa = 0;
+    for (uint64_t at = 0; at < span + 4096; at += 4096) {
+        if (at >= span) at = span - 1; /* the span's last byte, whose page the steps may not reach */
+        uint32_t page_pa;
+        unsigned permissions;
+        if (snx_ctr_query(p->space, address + (uint32_t)at, &page_pa, &permissions) != SNX_CTR_MEM_OK ||
+            !(permissions & SNX_CTR_READ) || (at && page_pa != pa + (uint32_t)at))
+            return;
+        if (!at) pa = page_pa;
+        if (at == span - 1) break;
     }
-    uint64_t hash = 0;
-    if (!snx_ctr_present_frame(screen, width, height, format, stride, pixels, &hash)) {
-        free(pixels);
-        return;
-    }
-    free(pixels);
+    if (!snx_ctr_present_frame(screen, pa, width, height, format, stride, NULL)) return;
     ++p->gsp.frame_seq;
 }
 /* Host-paced display timing: one vblank delivers both PDC interrupts to every
@@ -442,17 +444,10 @@ static GxStep gx_fill_region(SnxCtrIpc* c, uint32_t start, uint32_t end, uint32_
     uint32_t pa_start = start & ~7u, pa_end = end & ~7u;
     if (!(control & 1)) return GX_DONE; /* not triggered: no fill, no interrupt */
     if (pa_end > pa_start && gx_valid(p, pa_start) && gx_valid(p, pa_end - 1)) {
-        uint32_t size = pa_end - pa_start;
-        unsigned char* staged = size <= GX_STAGE_LIMIT ? malloc(size) : NULL;
-        if (!staged) {
-            c->state = SNX_CTR_IPC_UNSUPPORTED;
-            return GX_STOP;
-        }
-        snx_ctr_fill(staged, size, value, control);
-        SnxCtrMemResult r = snx_ctr_phys_write(p->memory, pa_start, staged, size);
-        free(staged);
-        if (r != SNX_CTR_MEM_OK) { /* the span leaves its region */
-            c->state = SNX_CTR_IPC_FAULT;
+        /* on the GPU, in place (vk/transfer.c) */
+        SnxCtrXferResult r = snx_ctr_vk_fill(pa_start, pa_end - pa_start, value, control);
+        if (r != SNX_CTR_XFER_OK) { /* the span leaves its region, or there is no device */
+            c->state = r == SNX_CTR_XFER_BOUNDS ? SNX_CTR_IPC_FAULT : SNX_CTR_IPC_UNSUPPORTED;
             return GX_STOP;
         }
     }
@@ -490,45 +485,20 @@ static GxStep gx_fill(SnxCtrIpc* c, const uint32_t* a, uint32_t* error, GxInterr
 static GxStep gx_transfer(SnxCtrIpc* c, GxInterrupts* irq) {
     SnxCtrProcess* p = c->process;
     SnxCtrGsp* g = &p->gsp;
-    size_t in_bytes = 0, out_bytes = 0;
     bool copy = (g->transfer.flags & SNX_CTR_XFER_TEXCOPY) != 0;
     SnxCtrDisplayTransfer display = {g->transfer.input_size, g->transfer.output_size, g->transfer.flags};
     SnxCtrTextureCopy texture = {g->transfer.copy_size, g->transfer.copy_input, g->transfer.copy_output};
     if (gx_valid(p, g->transfer.input) && gx_valid(p, g->transfer.output)) {
-        bool spans = copy ? snx_ctr_texture_spans(&texture, &in_bytes, &out_bytes)
-                          : snx_ctr_display_spans(&display, &in_bytes, &out_bytes);
-        if (!spans) {
-            /* no span: an empty transfer does nothing, an unsupported one stops */
-            SnxCtrXferResult r = copy ? snx_ctr_texture_copy(&texture, NULL, 0, NULL, 0)
-                                      : snx_ctr_display_transfer(&display, NULL, 0, NULL, 0);
-            if (r != SNX_CTR_XFER_EMPTY) {
-                c->state = SNX_CTR_IPC_UNSUPPORTED;
-                return GX_STOP;
-            }
-        } else {
-            unsigned char *in = NULL, *out = NULL;
-            SnxCtrXferResult r = SNX_CTR_XFER_BOUNDS;
-            if (in_bytes > GX_STAGE_LIMIT || out_bytes > GX_STAGE_LIMIT) {
-                c->state = SNX_CTR_IPC_UNSUPPORTED;
-                return GX_STOP;
-            }
-            in = malloc(in_bytes);
-            out = malloc(out_bytes);
-            /* the output is read first so the bytes a transfer leaves alone (texture copy gaps) keep their values */
-            if (in && out && snx_ctr_phys_read(p->memory, g->transfer.input, in, in_bytes) == SNX_CTR_MEM_OK &&
-                snx_ctr_phys_read(p->memory, g->transfer.output, out, out_bytes) == SNX_CTR_MEM_OK) {
-                r = copy ? snx_ctr_texture_copy(&texture, in, in_bytes, out, out_bytes)
-                         : snx_ctr_display_transfer(&display, in, in_bytes, out, out_bytes);
-                if (r == SNX_CTR_XFER_OK &&
-                    snx_ctr_phys_write(p->memory, g->transfer.output, out, out_bytes) != SNX_CTR_MEM_OK)
-                    r = SNX_CTR_XFER_BOUNDS;
-            }
-            free(in);
-            free(out);
-            if (r != SNX_CTR_XFER_OK) { /* a span leaving its memory region, or out of host memory */
-                c->state = SNX_CTR_IPC_FAULT;
-                return GX_STOP;
-            }
+        /* on the GPU, in place (vk/transfer.c) */
+        SnxCtrXferResult r = copy ? snx_ctr_vk_texture_copy(&texture, g->transfer.input, g->transfer.output)
+                                  : snx_ctr_vk_display_transfer(&display, g->transfer.input, g->transfer.output);
+        if (r == SNX_CTR_XFER_UNSUPPORTED) {
+            c->state = SNX_CTR_IPC_UNSUPPORTED;
+            return GX_STOP;
+        }
+        if (r == SNX_CTR_XFER_BOUNDS) { /* a span leaving its memory region */
+            c->state = SNX_CTR_IPC_FAULT;
+            return GX_STOP;
         }
     }
     gx_raise(irq, GX_PPF);
@@ -555,7 +525,10 @@ static GxStep gx_submit(SnxCtrIpc* c, const uint32_t* a, GxInterrupts* irq) {
     g->pica->regs[SNX_PICA_CMDBUF_SIZE] = (a[1] >> 3) & 0xfffffu;
     g->pica->regs[SNX_PICA_CMDBUF_TRIGGER] = 1;
     SnxCtrPicaResult r = SNX_CTR_PICA_OK;
-    if (pa)
+    /* the software renderer reads and writes guest memory on the CPU: the GPU's fills and transfers before it land
+       first */
+    if (pa && !snx_ctr_vk_finish()) r = SNX_CTR_PICA_UNSUPPORTED;
+    if (pa && r == SNX_CTR_PICA_OK)
         r = snx_ctr_pica_run(g->pica, c->process->memory, g->pica->regs[SNX_PICA_CMDBUF_ADDR] * 8,
                              g->pica->regs[SNX_PICA_CMDBUF_SIZE] * 8, &host);
     else
@@ -646,6 +619,8 @@ static void trigger_queue(SnxCtrIpc* c) {
         }
         if (cmd[2]) queue[2] = GX_STATUS_STOPPED; /* the command's stop flag */
     }
+    /* the GPU's work done before the interrupts say so: the guest's CPU may read what it wrote then */
+    if (!snx_ctr_vk_finish()) stopped = true;
     queue[0] = (unsigned char)index;
     queue[1] = (unsigned char)pending;
     memcpy(queue + 4, &last_error, 4);

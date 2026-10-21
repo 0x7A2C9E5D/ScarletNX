@@ -103,15 +103,15 @@ int main(int argc, char** argv) {
                          .bss_size = 0x3000,
                          .code = code,
                          .code_size = sizeof code};
-    bool ready = snx_ctr_present_init(argv[1]);
-    if (!ready) {
-        printf("no Vulkan device: presentation checks skipped\n");
-        return 77;
-    }
     for (unsigned model = 0; model < 2; ++model) {
-        assert(snx_ctr_present_init(argv[1]));
         SnxCtrProcess* p = snx_ctr_process_new(&image, (SnxCtrModel)model);
         assert(p);
+        if (!snx_ctr_present_init(p->memory, argv[1])) {
+            assert(!model);
+            printf("no Vulkan device: presentation checks skipped\n");
+            snx_ctr_process_free(p);
+            return 77;
+        }
         uint32_t gsp;
         assert(!snx_ctr_session_create(p, SNX_CTR_SERVICE_GSP, &gsp));
         uint32_t event = 0;
@@ -460,28 +460,33 @@ int main(int argc, char** argv) {
             uint32_t bad_screen[] = {0x00050200, 2, 0, fb, fb, 960, 0, 0, 0};
             request(p, gsp, bad_screen, 9, SNX_CTR_SVC_RETURN, 0);
             assert(!get(p, 1));
-            /* Presenter contract: RGB565 converts to RGBA8 on the device and
-               the hash covers exactly the converted pixels. */
+            /* Presenter contract: the framebuffer is read where the guest has it (here VRAM's start), decoded on the
+               device, and the hash covers exactly the decoded pixels */
+            const uint32_t vram = 0x18000000u;
             unsigned short low[2] = {0xffffu, 0xf800u};
             unsigned char raw[4];
             memcpy(raw, low, sizeof raw);
             uint64_t hash = 0;
-            assert(snx_ctr_present_frame(1, 2, 1, 2, 4, raw, &hash));
+            assert(snx_ctr_phys_write(p->memory, vram, raw, sizeof raw) == SNX_CTR_MEM_OK);
+            assert(snx_ctr_present_frame(1, vram, 2, 1, 2, 4, &hash));
             const unsigned char expect[8] = {255, 255, 255, 255, 255, 0, 0, 255};
             assert(hash == fnv(expect, sizeof expect));
-            /* RGB8 (libctru BGR8_OES: B,G,R bytes) converts on the device too */
+            /* RGB8 (libctru BGR8_OES: B,G,R bytes) */
             unsigned char bgr[3] = {0x10, 0x20, 0x30};
             uint64_t hash2 = 0;
-            assert(snx_ctr_present_frame(1, 1, 1, 1, 3, bgr, &hash2));
+            assert(snx_ctr_phys_write(p->memory, vram, bgr, sizeof bgr) == SNX_CTR_MEM_OK);
+            assert(snx_ctr_present_frame(1, vram, 1, 1, 1, 3, &hash2));
             const unsigned char expect2[4] = {0x30, 0x20, 0x10, 255};
             assert(hash2 == fnv(expect2, sizeof expect2));
-            /* RGBA8 (A,B,G,R bytes) and RGBA4 decode on the host */
+            /* RGBA8 (A,B,G,R bytes) and RGBA4 */
             unsigned char abgr[4] = {0x40, 0x30, 0x20, 0x10}, rgba4[2] = {0x8c, 0x1f};
             uint64_t hash3 = 0, hash4 = 0;
-            assert(snx_ctr_present_frame(1, 1, 1, 0, 4, abgr, &hash3));
+            assert(snx_ctr_phys_write(p->memory, vram, abgr, sizeof abgr) == SNX_CTR_MEM_OK);
+            assert(snx_ctr_present_frame(1, vram, 1, 1, 0, 4, &hash3));
             const unsigned char expect3[4] = {0x10, 0x20, 0x30, 0x40};
             assert(hash3 == fnv(expect3, sizeof expect3));
-            assert(snx_ctr_present_frame(1, 1, 1, 4, 2, rgba4, &hash4)); /* 0x1f8c: R 1, G 15, B 8, A 12 */
+            assert(snx_ctr_phys_write(p->memory, vram, rgba4, sizeof rgba4) == SNX_CTR_MEM_OK);
+            assert(snx_ctr_present_frame(1, vram, 1, 1, 4, 2, &hash4)); /* 0x1f8c: R 1, G 15, B 8, A 12 */
             const unsigned char expect4[4] = {0x11, 0xff, 0x88, 0xcc};
             assert(hash4 == fnv(expect4, sizeof expect4));
         }
