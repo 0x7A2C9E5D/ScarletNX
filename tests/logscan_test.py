@@ -22,7 +22,8 @@ LINE = 300
 
 def run(args, text=None):
     out = subprocess.run(PROGRAM + args, input=text, capture_output=True, check=True)
-    return out.stdout.decode('utf-8')
+    # Windows' stdout is in text mode: its \r\n as \n, for the checks that span lines
+    return out.stdout.decode('utf-8').replace('\r\n', '\n')
 
 
 def scan(text):
