@@ -8,6 +8,7 @@
 #include "nx/runtime/driver/game_name.h"
 #include "nx/runtime/driver/recompile.h"
 #include "nx/runtime/driver/setup.h"
+#include "common/utilities/mods.h"
 #include "common/utilities/setup.h"
 #include "nx/runtime/cli.h"
 #include <ctype.h>
@@ -109,11 +110,20 @@ static int refresh_runtime(const SnxPaths* paths, const char* game) {
     free(run);
     return rc;
 }
-/* whether this build made the game at base: its stamp says what this build writes, a partial write or anything after
-   it being no completed build */
+/* whether this build made the game at base (<folder>/<name>, a game's or its update's), with the mods its game plays
+   now: its stamp says what this build writes, a partial write or anything after it being no completed build */
 static int stamped(const char* base) {
-    char *stamp = snx_format("%s.abi", base), *expected = snx_game_stamp();
+    char *folder = snx_dirname(base), *off = NULL, *mods, *made, *stamp = snx_format("%s.abi", base), *expected;
+    const char* game = folder + strlen(folder);
     size_t size = 0;
+    while (game > folder && game[-1] != '/' && game[-1] != '\\') --game; /* the game's folder is named as it is */
+    mods = snx_game_mods(folder, game, &off);
+    made = snx_mods_stamp(mods, off);
+    expected = snx_game_stamp(made);
+    free(made);
+    free(mods);
+    free(off);
+    free(folder);
     unsigned char* found = snx_read_file(stamp, &size);
     int same = found && size == strlen(expected) && !memcmp(found, expected, size);
     free(found);

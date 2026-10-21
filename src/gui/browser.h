@@ -9,7 +9,7 @@ typedef struct {
     char** names; /* basenames: a game's folder, or an older version's file */
     char** shown; /* what each is shown as, sorted in each folder: the name in its control.nacp, else names' */
     char** paths; /* where each is */
-    size_t* addons; /* how many updates and DLCs each has beside it (gui_game_addons) */
+    size_t* addons; /* how many updates and DLCs each has beside it (gui_game_addons), and mods (gui_game_mods) */
     size_t count;
 } GuiGames;
 /* what a folder's games are: ready to run (executables; on Android a game's code or a dump), CIA files */
@@ -41,6 +41,10 @@ bool gui_game_folder(const char* path);
    ("Update 1.2.0" from its control.nacp, "DLC 1"), paths an update's program or a DLC's data folder, an update
    first. True when it has any; false, addons empty, when it has none or memory ran out */
 bool gui_game_addons(const char* path, GuiGames* addons);
+/* The mods folder of the game at path, a program in a folder of its own (<name>/<name>_data/mods/, snx_mods_folder),
+   into *folder (owned, NULL for any other game), and its mods (snx_mods_list) into *names when names is not NULL:
+   their count */
+size_t gui_game_mods(const char* path, char** folder, char*** names);
 /* A 3DS CIA by its name */
 bool gui_is_cia(const char* name);
 #endif

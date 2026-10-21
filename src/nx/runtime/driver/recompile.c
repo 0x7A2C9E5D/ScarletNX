@@ -11,6 +11,7 @@
 #include "nx/runtime/driver/toolchain.h"
 #include "snx_settings.h"
 #include "common/utilities/build_info.h"
+#include "common/utilities/mods.h"
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -57,7 +58,9 @@ static unsigned number(const char* text, unsigned max) {
 unsigned snx_game_abi(void) { return snx_module_abi(); }
 /* the ABI alone: a game made by another build of it keeps its code, and its copy of the runtime is replaced by the
    driver that plays it (driver.c's refresh_runtime) */
-char* snx_game_stamp(void) { return snx_format("%u", snx_game_abi()); }
+char* snx_game_stamp(const char* mods) {
+    return mods[0] ? snx_format("%u mods %s", snx_game_abi(), mods) : snx_format("%u", snx_game_abi());
+}
 char* snx_own_runtime(const SnxPaths* paths) {
 #ifdef SNX_WITH_RUNTIME
     /* In an AppImage this program is a launcher in its mount, which runs nothing once copied out: the AppImage is the
@@ -188,13 +191,14 @@ static int dump_read(void* source, const char* name, unsigned char** data, size_
     }
     return 1;
 }
-/* a dump's program, its ExeFS read in place and its control.nacp out of its Control NCA: nothing is extracted. 0, else
-   nonzero, said why */
-static int load_dump(const char* dump, const char* update, const SnxPaths* paths, int quiet, SnxProgram* program,
-                     char* error, size_t error_size) {
+/* a dump's program, its ExeFS read in place with the mods' files names[i] from paths[i] over it (count of them), and
+   its control.nacp out of its Control NCA: nothing is extracted. 0, else nonzero, said why */
+static int load_dump(const char* dump, const char* update, const SnxPaths* paths, int quiet, char* const* names,
+                     char* const* files, size_t count, SnxProgram* program, char* error, size_t error_size) {
     SnxDump opened;
     SnxHacFs* fs = NULL;
     SnxExefsReader reader;
+    SnxExefsMods mods;
     unsigned char* nacp;
     const char* why;
     size_t nacp_size = 0;
@@ -208,7 +212,8 @@ static int load_dump(const char* dump, const char* update, const SnxPaths* paths
         if (!nacp && !quiet) printf("The game keeps the name of its file: %s\n", why);
         reader.read = dump_read;
         reader.source = fs;
-        rc = snx_load_program_from(&reader, update ? update : dump, nacp, nacp_size, program, error, error_size);
+        snx_exefs_mods(&mods, &reader, names, files, count);
+        rc = snx_load_program_from(&mods.reader, update ? update : dump, nacp, nacp_size, program, error, error_size);
         if (rc) snx_error("%s", error);
     }
     snx_hac_fs_free(fs);
@@ -320,7 +325,9 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     SnxCodegenOptions gen;
     SnxProgram program;
     char *title = NULL, *game = NULL, *out = NULL, *folder = NULL, *base = NULL, *data = NULL, *code = NULL;
-    char *ini = NULL, *ini_text = NULL, *run = NULL, *exe = NULL;
+    char *ini = NULL, *ini_text = NULL, *run = NULL, *exe = NULL, *mods = NULL, *mods_off = NULL, *mods_stamp = NULL;
+    char **mod_names = NULL, **mod_files = NULL;
+    size_t mod_count = 0;
     char error[1024], option[64], why[256];
     const char* equal;
     size_t option_size;
@@ -448,7 +455,8 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     if (addon && snx_addon_kind(owner, addon) == SNX_ADDON_DLC)
         return snx_error("a DLC runs its game's code and has no program of its own: play its dump, which checks it "
                          "in the game's list of updates and DLCs");
-    if (dump ? load_dump(input, addon ? input : NULL, paths, compile.quiet, &program, error, sizeof(error))
+    if (dump ? load_dump(input, addon ? input : NULL, paths, compile.quiet, NULL, NULL, 0, &program, error,
+                         sizeof(error))
              : snx_load_program(input, &program, error, sizeof(error)))
         return dump ? 1 : snx_error("%s", error);
     if (addon && program.npdm.title_id != owner) {
@@ -499,6 +507,25 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     if (snx_mkdirs(folder)) {
         snx_error("cannot create the game's folder %s: %s", folder, snx_os_error(why, sizeof why));
         goto done;
+    }
+    /* the mods played, in the game's data folder: the program made with their ExeFS files over its own, loaded again */
+    {
+        char of[17];
+        snx_title_text(owner, of);
+        mods = snx_game_mods(folder, addon ? of : game, &mods_off);
+        mods_stamp = snx_mods_stamp(mods, mods_off);
+        mod_count = snx_mods_exefs(mods, mods_off, &mod_names, &mod_files);
+    }
+    if (mod_count) {
+        snx_free_program(&program);
+        if (dump ? load_dump(input, addon ? input : NULL, paths, compile.quiet, mod_names, mod_files, mod_count,
+                             &program, error, sizeof error)
+                 : snx_load_program_mods(input, mod_names, mod_files, mod_count, &program, error, sizeof error)) {
+            if (!dump) snx_error("%s", error);
+            goto done;
+        }
+        if (!compile.quiet)
+            for (i = 0; i < (int)mod_count; ++i) printf("ExeFS %s from the mod's %s\n", mod_names[i], mod_files[i]);
     }
     base = snx_path_join(folder, game);
     /* Invalidate the completion stamp before touching an existing game's data
@@ -593,7 +620,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     exe = snx_format("%s%s", base, compile.target_win ? ".exe" : "");
     if (snx_deploy_runtime(run, exe)) goto done;
     {
-        char *stamp = snx_format("%s.abi", base), *version = snx_game_stamp();
+        char *stamp = snx_format("%s.abi", base), *version = snx_game_stamp(mods_stamp);
         i = snx_write_file(stamp, version, strlen(version));
         free(stamp);
         free(version);
@@ -606,6 +633,11 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     rc = 0;
 done:
     snx_free_program(&program);
+    snx_free_strings(mod_names, mod_count);
+    snx_free_strings(mod_files, mod_count);
+    free(mods);
+    free(mods_off);
+    free(mods_stamp);
     free((void*)gen.hints);
     free(title);
     free(game);

@@ -165,7 +165,9 @@ static int dump_input(const char* input) {
 }
 /* this build's stamp: ABI 4, made from commit abc1234 */
 #define SNX_WORKFLOW_STAMP "4\nabc1234\n"
-char* snx_game_stamp(void) { return snx_strdup(SNX_WORKFLOW_STAMP); }
+char* snx_game_stamp(const char* mods) {
+    return mods[0] ? snx_format("%s mods %s", SNX_WORKFLOW_STAMP, mods) : snx_strdup(SNX_WORKFLOW_STAMP);
+}
 /* recompile.c's: the runtime a game's folder gets, this program (which the recompile below copies as the game), and
    its deploy, as recompile.c's: a copy made executable that replaces the game's program, a new file */
 char* snx_own_runtime(const SnxPaths* paths) { return snx_strdup(paths->executable); }

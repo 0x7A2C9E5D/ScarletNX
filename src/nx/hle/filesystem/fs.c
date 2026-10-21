@@ -21,6 +21,7 @@
 #include "common/utilities/common.h"
 #include "nx/runtime/driver/container.h"
 #include "common/utilities/game_ini.h"
+#include "common/utilities/mods.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -266,6 +267,65 @@ static void dlcs_open(void) {
     free(repo);
 }
 
+/* The mods played (common/utilities/mods.h), from the game's mods folder, which the data folder's index leaves out:
+   the files of their exefs/ that the game's program was recompiled with, read in place of its own, and their romfs/
+   folders grafted as mods.0, mods.1... in the order they are laid, which romfs_init lays over the game's RomFS. A
+   program recompiled with other mods' files (what its stamp, <program>.abi, records after " mods ") keeps its own
+   ExeFS, which its code was made from, a line saying so. A mod whose files can't be indexed is left out, said. At
+   startup, under tree.lock */
+static void mods_open(void) {
+    char *folder = snx_mods_folder(g_datadir), *stamp = snx_mods_stamp(folder, g_settings.game_mods_off), **romfs;
+    char path[sizeof g_exedir + sizeof g_exename + 8], *built, *recorded;
+    size_t count, i, size = 0;
+    snprintf(path, sizeof path, "%s%s.abi", g_exedir, g_exename);
+    built = (char*)snx_read_file(path, &size);
+    recorded = built ? strstr(built, " mods ") : NULL;
+    recorded = recorded ? recorded + 6 : "";
+    if (!strcmp(recorded, stamp)) {
+        g_hle.fs.nmexefs =
+            snx_mods_exefs(folder, g_settings.game_mods_off, &g_hle.fs.mexefs_names, &g_hle.fs.mexefs_paths);
+        for (i = 0; i < g_hle.fs.nmexefs; i++)
+            LOG("fs: exefs/%s from the mod's %s\n", g_hle.fs.mexefs_names[i], g_hle.fs.mexefs_paths[i]);
+    } else if (stamp[0])
+        WARN("fs: the mods played replace ExeFS files, and the program was recompiled with %s: it runs the ExeFS it "
+             "was made from until it is recompiled, which playing it from the launcher does\n",
+             recorded[0] ? "other ones" : "none of them");
+    else
+        WARN("fs: the program was recompiled with ExeFS files of mods not played now: recompile it, which playing it "
+             "from the launcher does\n");
+    count = snx_mods_played(folder, g_settings.game_mods_off, "romfs", &romfs);
+    for (i = 0; i < count; i++) {
+        char name[32];
+        FsTreeResult r;
+        snprintf(name, sizeof name, "mods.%u", (unsigned)g_hle.fs.nmromfs);
+        r = fs_tree_graft(&g_hle.fs.tree, name, romfs[i]);
+        if (r == FS_TREE_OK) {
+            g_hle.fs.nmromfs++;
+            LOG("fs: the mod's RomFS %s laid over the game's\n", romfs[i]);
+        } else
+            WARN("fs: the mod's RomFS %s can't be indexed (error %d), and is left out: a link or a name the system "
+                 "can't take\n",
+                 romfs[i], r);
+    }
+    snx_free_strings(romfs, count);
+    free(built);
+    free(stamp);
+    free(folder);
+}
+
+/* a mod's file played in place of path, exefs/<name>, malloc'd: NULL for none, or one that can't be read */
+static u8* mod_exefs(const char* path, u64* size) {
+    size_t i, n = 0;
+    u8* data;
+    if (strncmp(path, "exefs/", 6)) return NULL;
+    for (i = 0; i < g_hle.fs.nmexefs && strcmp(g_hle.fs.mexefs_names[i], path + 6); i++) continue;
+    if (i == g_hle.fs.nmexefs) return NULL;
+    data = snx_read_file(g_hle.fs.mexefs_paths[i], &n);
+    if (!data) WARN("fs: could not read the mod's %s\n", g_hle.fs.mexefs_paths[i]);
+    *size = n;
+    return data;
+}
+
 /* an ExeFS file of the dump read in place, malloc'd: path is exefs/<name>. NULL when the game has no dump open or
    the dump no such file */
 static u8* dump_exefs(const char* path, u64* size) {
@@ -323,7 +383,8 @@ static void overlays(void) {
 static int dump_has_exefs(const char* path) { return g_hle.fs.dfs && !strncmp(path, "exefs/", 6); }
 
 void fs_init(void) {
-    FsTreeResult r = fs_tree_init(&g_hle.fs.tree, g_datadir);
+    static const char* const apart[] = {"mods", NULL}; /* mods_open's */
+    FsTreeResult r = fs_tree_init_skipping(&g_hle.fs.tree, g_datadir, apart);
     if (r != FS_TREE_OK) fatal("Could not index game filesystem %s (error %d)", g_datadir, r);
     size_t n = strlen(g_hle.fs.tree.base);
     if (n + 2 > sizeof g_datadir) fatal("Game filesystem path is too long");
@@ -343,6 +404,7 @@ void fs_init(void) {
     dump_open();
     dlcs_open();
     if (!g_hle.fs.dfs) romfs_from_tmpfs();
+    mods_open();
     for (size_t i = 0; i < sizeof shared_paths / sizeof shared_paths[0]; i++) {
         FsNode* node;
         if (g_hle.fs.dump.patch.found) break; /* an update's, read over the game's dump: the game's files unread */
@@ -380,7 +442,8 @@ int fs_map_file(const char* path, PFileMap* map) {
     char host[FS_TREE_PATH_MAX];
     int r = -1;
     memset(map, 0, sizeof *map);
-    if ((map->data = dump_exefs(path, &map->size))) { /* read out of the dump: plat_file_unmap frees it */
+    if ((map->data = mod_exefs(path, &map->size)) || (map->data = dump_exefs(path, &map->size))) {
+        /* a mod's, or read out of the dump: plat_file_unmap frees it */
         map->heap = 1;
         return 0;
     }
@@ -404,7 +467,7 @@ u8* fs_read_file(const char* path, u64* size) {
     u64 got;
     u8* data = NULL;
     if (size) *size = 0;
-    if ((data = dump_exefs(path, &got))) {
+    if ((data = mod_exefs(path, &got)) || (data = dump_exefs(path, &got))) {
         if (size) *size = got;
         return data;
     }
@@ -467,9 +530,66 @@ static u32 hcount(u32 n) {
     return c;
 }
 static u64 entry_size(u32 fixed, const char* name) { return fixed + ((strlen(name) + 3) & ~(size_t)3); }
-/* adds the folders and files under dir to the counts and table sizes */
-static void scan(const FsNode* dir, u32* ndirs, u32* nfiles, u64* dir_bytes, u64* file_bytes) {
+/* A folder or file of the RomFS while its image is laid out: the game's, from the romfs/ folder (node) or from its own
+   image (at base in it), or a mod's laid over it. Children in strcmp order, as the index keeps them */
+typedef struct RNode {
+    char* name;
+    struct RNode *children, *next;
+    FsNode* node; /* a file of a folder, else NULL */
+    u64 base, size;
+    int is_dir;
+} RNode;
+static RNode* rnode_new(const char* name, int is_dir) {
+    RNode* n = calloc(1, sizeof *n);
+    if (!n) fatal("RomFS: out of memory for its layout\n");
+    n->name = snx_strdup(name);
+    n->is_dir = is_dir;
+    return n;
+}
+static void rnode_free(RNode* n) {
+    while (n) {
+        RNode* next = n->next;
+        rnode_free(n->children);
+        free(n->name);
+        free(n);
+        n = next;
+    }
+}
+/* dir's child named name, made where it has none. One of the other kind is replaced, everything under it gone: a mod's
+   file over the game's folder of its name, or its folder over a file */
+static RNode* rnode_child(RNode* dir, const char* name, int is_dir) {
+    RNode **at = &dir->children, *n;
+    int c = 1;
+    while (*at && (c = strcmp((*at)->name, name)) < 0) at = &(*at)->next;
+    if (*at && !c) {
+        if ((*at)->is_dir == is_dir) return *at;
+        n = *at;
+        *at = n->next;
+        n->next = NULL;
+        rnode_free(n);
+    }
+    n = rnode_new(name, is_dir);
+    n->next = *at;
+    *at = n;
+    return n;
+}
+/* the folder tree under dir laid over into (tree.lock held): a file over the one of its name, a folder's files and
+   folders over those of the folder of its name */
+static void rnode_lay(RNode* into, const FsNode* dir) {
     const FsNode* c;
+    for (c = dir->children; c; c = c->next) {
+        RNode* n = rnode_child(into, c->name, c->is_dir);
+        if (c->is_dir)
+            rnode_lay(n, c);
+        else {
+            n->node = (FsNode*)c;
+            n->size = c->size;
+        }
+    }
+}
+/* adds the folders and files under dir to the counts and table sizes */
+static void scan(const RNode* dir, u32* ndirs, u32* nfiles, u64* dir_bytes, u64* file_bytes) {
+    const RNode* c;
     for (c = dir->children; c; c = c->next) {
         if (*ndirs >= INT32_MAX || *nfiles >= INT32_MAX) fatal("RomFS: too many entries in romfs/\n");
         if (c->is_dir) {
@@ -484,16 +604,17 @@ static void scan(const FsNode* dir, u32* ndirs, u32* nfiles, u64* dir_bytes, u64
 }
 /* a folder while the image is made: its table offset and its entry's links */
 typedef struct {
-    const FsNode* node;
+    const RNode* node;
     u32 parent; /* index in the folder list */
     u32 off, child, file;
 } RDir;
 
-/* Makes the image from the folder tree under dir (tree.lock held). Folders are listed breadth first, so each folder's
-   subfolders are consecutive and chain as siblings, then each folder's files, folder by folder, in the index's strcmp
-   order. File data follows the file table's order, each file at a multiple of 16: the file list is in offset order as
-   it is made, and must not be sorted (a zero-size file shares its offset with the next file) */
-static void romfs_build(FsNode* dir) {
+/* Makes the image from the tree under dir (tree.lock held), what saying in the log what it is made of. Folders are
+   listed breadth first, so each folder's subfolders are consecutive and chain as siblings, then each folder's files,
+   folder by folder, in the index's strcmp order. File data follows the file table's order, each file at a multiple of
+   16: the file list is in offset order as it is made, and must not be sorted (a zero-size file shares its offset with
+   the next file) */
+static void romfs_build(const RNode* dir, const char* what) {
     u32 ndirs = 1, nfiles = 0, i, nd, nf, dbuckets, fbuckets;
     u64 dir_bytes = ROM_DIR_ENTRY, file_bytes = 0, dhash, dtab, fhash, ftab, end, data = 0;
     RDir* dirs;
@@ -525,7 +646,7 @@ static void romfs_build(FsNode* dir) {
     {
         u32 off = ROM_DIR_ENTRY;
         for (i = 0; i < nd; i++) {
-            const FsNode* c;
+            const RNode* c;
             dirs[i].child = dirs[i].file = ROM_NONE;
             for (c = dirs[i].node->children; c; c = c->next) {
                 if (!c->is_dir) continue;
@@ -543,7 +664,7 @@ static void romfs_build(FsNode* dir) {
     {
         u32 off = 0;
         for (i = 0; i < nd; i++) {
-            FsNode* c;
+            const RNode* c;
             u8* e = NULL;
             for (c = dirs[i].node->children; c; c = c->next) {
                 u32 len = (u32)strlen(c->name), b;
@@ -562,10 +683,12 @@ static void romfs_build(FsNode* dir) {
                 put32(m + fhash + (u64)b * 4, off);
                 put32(e + 28, len);
                 memcpy(e + ROM_FILE_ENTRY, c->name, len);
-                g_hle.fs.rfiles[nf].node = c;
+                g_hle.fs.rfiles[nf].node = c->node;
+                g_hle.fs.rfiles[nf].base = c->base;
+                g_hle.fs.rfiles[nf].size = c->size;
                 g_hle.fs.rfiles[nf].off = data; /* relative for now */
                 g_hle.fs.rfiles[nf].logged = g_hle.fs.rfiles[nf].warned = 0;
-                fs_tree_retain(c);
+                if (c->node) fs_tree_retain(c->node);
                 nf++;
                 data += c->size;
                 off += (u32)entry_size(ROM_FILE_ENTRY, c->name);
@@ -607,12 +730,149 @@ static void romfs_build(FsNode* dir) {
     put64(m + 56, ftab);
     put64(m + 64, file_bytes);
     put64(m + 72, g_hle.fs.rdata_off);
-    LOG("RomFS: built from romfs/ (%u folders, %u files, %.1f MB)\n", nd, nf, (double)g_hle.fs.rtotal / 1048576.0);
+    LOG("RomFS: built from %s (%u folders, %u files, %.1f MB)\n", what, nd, nf, (double)g_hle.fs.rtotal / 1048576.0);
 }
 
+/* size bytes of the game's own image at off into dst: romfs.bin, mapped or not, or the dump's. The caller checked the
+   range against the image's size, and holds tree.lock when locked is set. 0, or -1 with the part that couldn't be read
+   zeroed */
+static int image_read(u64 off, void* dst, u64 size, int locked) {
+    u8* out = dst;
+    int rc;
+    if (g_hle.fs.rimage) {
+        memcpy(out, g_hle.fs.rimage->map + off, (size_t)size);
+        return 0;
+    }
+    if (g_hle.fs.dfs) {
+        pm_lock(&g_hle.fs.dlock);
+        rc = size > SIZE_MAX ? -1 : snx_hac_fs_read_romfs(g_hle.fs.dfs, off, out, (size_t)size);
+        pm_unlock(&g_hle.fs.dlock);
+        if (rc) {
+            memset(out, 0, (size_t)size);
+            WARN("RomFS: could not read the dump at %llx (%llx bytes): the game gets zeros\n", (unsigned long long)off,
+                 (unsigned long long)size);
+        }
+        return rc;
+    }
+    if (g_hle.fs.rraw) {
+        i64 got;
+        if (!locked) pm_lock(&g_hle.fs.tree.lock);
+        got = plat_pread(g_hle.fs.rraw, out, size, off);
+        if (!locked) pm_unlock(&g_hle.fs.tree.lock);
+        if (got == (i64)size) return 0;
+        if (got < 0) got = 0;
+        memset(out + got, 0, (size_t)(size - (u64)got));
+        return -1;
+    }
+    memset(out, 0, (size_t)size);
+    return -1;
+}
+/* the game's image's tables while its folders and files are laid out (image_dir): the folder and file tables, where
+   its file data starts, its size, and how many more entries of each may be met, so that no loop in a broken image
+   goes on */
+typedef struct {
+    const u8 *dirs, *files;
+    u64 dir_bytes, file_bytes, data, total, dirs_left, files_left;
+} RImage;
+#define ROM_DEPTH_MAX 256
+/* the name of length bytes at p, malloc'd: NULL for one that is no file's or folder's name */
+static char* image_name(const u8* p, u32 length) {
+    char* name;
+    if (!length || memchr(p, 0, length) || memchr(p, '/', length)) return NULL;
+    name = malloc((size_t)length + 1);
+    if (!name) fatal("RomFS: out of memory for its layout\n");
+    memcpy(name, p, length);
+    name[length] = 0;
+    return name;
+}
+/* the folder at off in the image's folder table laid out into into, its files and folders under it. 0, or -1 for one
+   the tables don't hold */
+static int image_dir(RImage* im, u32 off, RNode* into, unsigned depth) {
+    u32 child, file;
+    if (depth > ROM_DEPTH_MAX || (u64)off + ROM_DIR_ENTRY > im->dir_bytes) return -1;
+    child = snx_ld_le32(im->dirs + off + 8);
+    file = snx_ld_le32(im->dirs + off + 12);
+    while (file != ROM_NONE) {
+        const u8* e = im->files + file;
+        u64 at, size;
+        u32 length;
+        char* name;
+        RNode* n;
+        if (!im->files_left-- || (u64)file + ROM_FILE_ENTRY > im->file_bytes) return -1;
+        length = snx_ld_le32(e + 28);
+        at = snx_ld_le64(e + 8);
+        size = snx_ld_le64(e + 16);
+        if (length > im->file_bytes - file - ROM_FILE_ENTRY || !(name = image_name(e + ROM_FILE_ENTRY, length)))
+            return -1;
+        if (at > im->total - im->data || size > im->total - im->data - at) {
+            free(name);
+            return -1;
+        }
+        n = rnode_child(into, name, 0);
+        free(name);
+        n->node = NULL;
+        n->base = im->data + at;
+        n->size = size;
+        file = snx_ld_le32(e + 4);
+    }
+    while (child != ROM_NONE) {
+        const u8* e = im->dirs + child;
+        u32 length;
+        char* name;
+        RNode* n;
+        if (!im->dirs_left-- || (u64)child + ROM_DIR_ENTRY > im->dir_bytes) return -1;
+        length = snx_ld_le32(e + 20);
+        if (length > im->dir_bytes - child - ROM_DIR_ENTRY || !(name = image_name(e + ROM_DIR_ENTRY, length)))
+            return -1;
+        n = rnode_child(into, name, 1);
+        free(name);
+        if (image_dir(im, child, n, depth + 1)) return -1;
+        child = snx_ld_le32(e + 4);
+    }
+    return 0;
+}
+/* the game's own image, total bytes of it, laid out into root (tree.lock held), each file's data where the image has
+   it. 0, or -1 for an image whose tables can't be read */
+static int rnode_image(RNode* root, u64 total) {
+    u8 head[0x50];
+    u64 h[10];
+    RImage im;
+    u8 *dirs = NULL, *files = NULL;
+    int rc = -1, i;
+    if (total < sizeof head || image_read(0, head, sizeof head, 1)) return -1;
+    for (i = 0; i < 10; i++) h[i] = snx_ld_le64(head + i * 8);
+    /* the header's size, then each table's offset and size (the folder hash table, the folder table, the file hash
+       table, the file table), then where the file data starts */
+    if (h[0] != sizeof head || h[3] > total || h[4] > total - h[3] || h[7] > total || h[8] > total - h[7] ||
+        h[9] > total || h[4] < ROM_DIR_ENTRY || h[4] > UINT32_MAX || h[8] > UINT32_MAX)
+        return -1;
+    dirs = malloc((size_t)h[4]);
+    files = malloc(h[8] ? (size_t)h[8] : 1);
+    if (!dirs || !files) fatal("RomFS: out of memory for the game's image's tables\n");
+    if (!image_read(h[3], dirs, h[4], 1) && (!h[8] || !image_read(h[7], files, h[8], 1))) {
+        im.dirs = dirs;
+        im.files = files;
+        im.dir_bytes = h[4];
+        im.file_bytes = h[8];
+        im.data = h[9];
+        im.total = total;
+        im.dirs_left = h[4] / ROM_DIR_ENTRY;
+        im.files_left = h[8] / ROM_FILE_ENTRY;
+        rc = image_dir(&im, 0, root, 0);
+    }
+    free(dirs);
+    free(files);
+    return rc;
+}
+
+/* The RomFS the game reads: the game's own image, else the image made up from its romfs/ folder; with mods played, made
+   up from either with the mods' romfs/ folders laid over it (mods_open grafts them as mods.<i>) */
 void romfs_init(void) {
     pm_lock(&g_hle.fs.tree.lock);
-    FsNode* node;
+    FsNode *node, *folder = NULL;
+    RNode* root;
+    size_t i;
+    int image = 0;
     if (!fs_tree_lookup(&g_hle.fs.tree, NULL, "romfs.bin", &node) && !node->is_dir) {
         if (node->fd >= 0)
             g_hle.fs.rimage = node;
@@ -625,15 +885,18 @@ void romfs_init(void) {
             fatal("Could not open the game's romfs.bin: %s", why);
         }
         g_hle.fs.rtotal = node->size;
+        image = 1;
         LOG("RomFS: image (%.1f MB)\n", (double)g_hle.fs.rtotal / 1048576.0);
     } else if (g_hle.fs.dump.patch.found && g_hle.fs.dfs && snx_hac_fs_romfs_size(g_hle.fs.dfs)) {
         g_hle.fs.rtotal = snx_hac_fs_romfs_size(g_hle.fs.dfs); /* an update's over the game's, which it is made of */
+        image = 1;
         LOG("RomFS: the update's over the game's dump, read in place (%.1f MB)\n",
             (double)g_hle.fs.rtotal / 1048576.0);
     } else if (!fs_tree_lookup(&g_hle.fs.tree, NULL, "romfs:/", &node) && node->is_dir) {
-        romfs_build(node);
+        folder = node;
     } else if (g_hle.fs.dfs && snx_hac_fs_romfs_size(g_hle.fs.dfs)) {
         g_hle.fs.rtotal = snx_hac_fs_romfs_size(g_hle.fs.dfs);
+        image = 1;
         LOG("RomFS: the dump's, read in place (%.1f MB)\n", (double)g_hle.fs.rtotal / 1048576.0);
     } else if (g_hle.fs.dfs) {
         LOG("RomFS: none in the game's dump\n");
@@ -642,6 +905,32 @@ void romfs_init(void) {
         if (fs_tree_lookup(&g_hle.fs.tree, NULL, "exefs/main.nro", &node))
             WARN("Extract the game's RomFS into %sromfs/ before running it\n", g_datadir);
     }
+    if (!folder && !g_hle.fs.nmromfs) {
+        pm_unlock(&g_hle.fs.tree.lock);
+        return;
+    }
+    root = rnode_new("", 1);
+    if (folder)
+        rnode_lay(root, folder);
+    else if (image && rnode_image(root, g_hle.fs.rtotal)) {
+        WARN("RomFS: the game's image has tables that can't be read, and the mods' RomFS is left out\n");
+        rnode_free(root);
+        pm_unlock(&g_hle.fs.tree.lock);
+        return;
+    }
+    for (i = 0; i < g_hle.fs.nmromfs; i++) {
+        char name[32];
+        snprintf(name, sizeof name, "mods.%u", (unsigned)i);
+        if (!fs_tree_lookup(&g_hle.fs.tree, NULL, name, &node)) rnode_lay(root, node);
+    }
+    if (g_hle.fs.nmromfs) {
+        char what[64];
+        snprintf(what, sizeof what, "the game's RomFS and %u mods' over it", (unsigned)g_hle.fs.nmromfs);
+        g_hle.fs.rlayered = 1;
+        romfs_build(root, what);
+    } else
+        romfs_build(root, "romfs/");
+    rnode_free(root);
     pm_unlock(&g_hle.fs.tree.lock);
 }
 
@@ -671,6 +960,7 @@ static FILE* rf_open(FsNode* node) {
 static int rfile_read(RFile* rf, u64 rel, u8* dst, u64 size) {
     FsNode* node = rf->node;
     i64 got = (i64)size;
+    if (!node) return image_read(rf->base + rel, dst, size, 0); /* the game's image's, under the mods' */
     if (!__atomic_exchange_n(&rf->logged, 1, __ATOMIC_RELAXED))
         LOG("RomFS: reading %s (%.1f KB)\n", node->name, (double)node->size / 1024.0);
     if (node->fd >= 0) { /* mapped for the whole run, and never changes */
@@ -699,31 +989,7 @@ static int romfs_read(u64 off, void* dst, u64 size) {
     u8* out = dst;
     int rc = 0;
     int lo, hi, k;
-    if (g_hle.fs.rimage) {
-        memcpy(out, g_hle.fs.rimage->map + off, (size_t)size);
-        return 0;
-    }
-    if (g_hle.fs.dfs) {
-        pm_lock(&g_hle.fs.dlock);
-        rc = size > SIZE_MAX ? -1 : snx_hac_fs_read_romfs(g_hle.fs.dfs, off, out, (size_t)size);
-        pm_unlock(&g_hle.fs.dlock);
-        if (rc) {
-            memset(out, 0, (size_t)size);
-            WARN("RomFS: could not read the dump at %llx (%llx bytes): the game gets zeros\n", (unsigned long long)off,
-                 (unsigned long long)size);
-        }
-        return rc;
-    }
-    if (g_hle.fs.rraw) {
-        i64 got;
-        pm_lock(&g_hle.fs.tree.lock);
-        got = plat_pread(g_hle.fs.rraw, out, size, off);
-        pm_unlock(&g_hle.fs.tree.lock);
-        if (got == (i64)size) return 0;
-        if (got < 0) got = 0;
-        memset(out + got, 0, (size_t)(size - (u64)got));
-        return -1;
-    }
+    if (!g_hle.fs.rlayered && (g_hle.fs.rimage || g_hle.fs.dfs || g_hle.fs.rraw)) return image_read(off, dst, size, 0);
     if (off < g_hle.fs.rmeta_size) {
         u64 n = size < g_hle.fs.rmeta_size - off ? size : g_hle.fs.rmeta_size - off;
         memcpy(out, g_hle.fs.rmeta + off, (size_t)n);
@@ -745,9 +1011,9 @@ static int romfs_read(u64 off, void* dst, u64 size) {
     while (size) {
         u64 n;
         while (k + 1 < g_hle.fs.nrfiles && g_hle.fs.rfiles[k + 1].off <= off) k++; /* past the end of file k */
-        if (k >= 0 && off - g_hle.fs.rfiles[k].off < g_hle.fs.rfiles[k].node->size) { /* inside file k */
+        if (k >= 0 && off - g_hle.fs.rfiles[k].off < g_hle.fs.rfiles[k].size) { /* inside file k */
             RFile* rf = &g_hle.fs.rfiles[k];
-            n = rf->off + rf->node->size - off;
+            n = rf->off + rf->size - off;
             if (n > size) n = size;
             if (rfile_read(rf, off - rf->off, out, n)) rc = -1;
         } else { /* padding up to the next file, or past the last */

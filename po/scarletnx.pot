@@ -260,7 +260,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: select. Enter/Space: open. R: recompile. Left/Right/PgUp/PgDown: page."
+msgid "Up/Down: select. Enter/Space: open. R: recompile. M: mods folder. Left/Right/PgUp/PgDown: page."
 msgstr ""
 
 #: src/gui/main.c
@@ -556,7 +556,30 @@ msgid "No user picked: the Settings have no user"
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "Cannot make %s: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Opened %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Could not open %s: %s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "out of memory"
+msgstr ""
+
+#: src/gui/main.c
 msgid "No update"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Open mods folder"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
@@ -571,7 +594,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s: its updates and DLCs kept"
+msgid "%s: its updates, DLCs and mods kept"
 msgstr ""
 
 #: src/gui/main.c
@@ -686,7 +709,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Ready to run, with %zu update(s) or DLC(s) to pick from"
+msgid "Ready to run, with %zu update(s), DLC(s) or mod(s) to pick from"
 msgstr ""
 
 #: src/gui/main.c
@@ -1623,6 +1646,10 @@ msgid "R recompiles Switch games only."
 msgstr ""
 
 #: src/gui/main.c
+msgid "M opens the mods folder of a recompiled Switch game in focus."
+msgstr ""
+
+#: src/gui/main.c
 msgid "prod.keys installed: games can be extracted now."
 msgstr ""
 
@@ -1797,6 +1824,12 @@ msgstr ""
 #: src/gui/main.c
 #, snx-key
 msgid "R"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "M"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word

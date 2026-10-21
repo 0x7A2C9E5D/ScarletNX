@@ -696,9 +696,17 @@ FsTreeResult fs_tree_share(FsTree* tree, FsNode* node, unsigned* shared, unsigne
     return FS_TREE_OK;
 }
 
+/* whether name is one of names (NULL-terminated, or NULL for none) */
+static int named(const char* const* names, const char* name) {
+    for (size_t i = 0; names && names[i]; i++)
+        if (!strcmp(names[i], name)) return 1;
+    return 0;
+}
 /* The initial scan uses native directory APIs because PDir cannot distinguish end-of-directory from failures,
-   and its POSIX implementation follows symlinks and skips failed stats. Neither behavior can build a full index. */
-static FsTreeResult scan_directory(FsTree* tree, FsNode* parent, char* host, unsigned depth) {
+   and its POSIX implementation follows symlinks and skips failed stats. Neither behavior can build a full index.
+   host's entries named in skipped are left out, as if they weren't there; its folders' are all scanned */
+static FsTreeResult scan_directory(FsTree* tree, FsNode* parent, char* host, unsigned depth,
+                                   const char* const* skipped) {
     if (depth > FS_TREE_DEPTH_MAX) return FS_TREE_TOOLONG;
     size_t parent_len = strlen(host);
     FsTreeResult rc = FS_TREE_OK;
@@ -723,7 +731,7 @@ static FsTreeResult scan_directory(FsTree* tree, FsNode* parent, char* host, uns
         }
         const char* name = entry->d_name;
 #endif
-        if (strcmp(name, ".") && strcmp(name, "..")) {
+        if (strcmp(name, ".") && strcmp(name, "..") && !named(skipped, name)) {
             size_t len = strlen(name);
             if (!valid_name(name, len)) {
                 rc = FS_TREE_INVALID;
@@ -789,7 +797,7 @@ static FsTreeResult scan_directory(FsTree* tree, FsNode* parent, char* host, uns
             n->attached = 1;
             n->next = parent->children;
             parent->children = n;
-            if (is_dir) rc = scan_directory(tree, n, host, depth + 1);
+            if (is_dir) rc = scan_directory(tree, n, host, depth + 1, NULL);
             host[parent_len] = 0;
             if (rc) break;
         }
@@ -862,7 +870,7 @@ FsTreeResult fs_tree_graft(FsTree* tree, const char* name, const char* directory
         return FS_TREE_NOMEM;
     }
     n->attached = 1;
-    rc = scan_directory(tree, n, absolute, 1);
+    rc = scan_directory(tree, n, absolute, 1, NULL);
     if (rc) {
         subtree_discard(n);
         return rc;
@@ -873,12 +881,6 @@ FsTreeResult fs_tree_graft(FsTree* tree, const char* name, const char* directory
 }
 
 /* src's children (an overlay's scan, host its host folder) laid over dst's: see fs_tree_overlay. src is left empty */
-/* whether name is one of names (NULL-terminated, or NULL for none) */
-static int named(const char* const* names, const char* name) {
-    for (size_t i = 0; names && names[i]; i++)
-        if (!strcmp(names[i], name)) return 1;
-    return 0;
-}
 static FsTreeResult overlay_merge(FsNode* dst, FsNode* src, char* host, const char* const* whole,
                                   const char* const* merged, unsigned depth) {
     size_t host_len = strlen(host);
@@ -929,7 +931,7 @@ FsTreeResult fs_tree_overlay(FsTree* tree, const char* directory, const char* co
     top->attached = 1;
     char host[FS_TREE_PATH_MAX];
     memcpy(host, absolute, strlen(absolute) + 1);
-    rc = scan_directory(tree, top, host, 1);
+    rc = scan_directory(tree, top, host, 1, NULL);
     if (!rc) {
         make_readonly(top);
         memcpy(host, absolute, strlen(absolute) + 1);
@@ -940,7 +942,8 @@ FsTreeResult fs_tree_overlay(FsTree* tree, const char* directory, const char* co
     return rc;
 }
 
-FsTreeResult fs_tree_init(FsTree* tree, const char* directory) {
+FsTreeResult fs_tree_init(FsTree* tree, const char* directory) { return fs_tree_init_skipping(tree, directory, NULL); }
+FsTreeResult fs_tree_init_skipping(FsTree* tree, const char* directory, const char* const* skipped) {
     if (!tree || !directory || !*directory) return FS_TREE_INVALID;
     memset(tree, 0, sizeof *tree);
     pm_init(&tree->lock);
@@ -954,7 +957,7 @@ FsTreeResult fs_tree_init(FsTree* tree, const char* directory) {
         return FS_TREE_NOMEM;
     }
     tree->root->attached = 1;
-    rc = scan_directory(tree, tree->root, absolute, 0);
+    rc = scan_directory(tree, tree->root, absolute, 0, skipped);
     if (!rc) {
         FsNode* root = child_find(tree->root, "root");
         if (root && !root->is_dir) rc = FS_TREE_INVALID;

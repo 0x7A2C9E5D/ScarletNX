@@ -27,11 +27,15 @@ int fs_add_virtual_file(const char* path, const void* data, u64 size);
 void romfs_init(void);
 /* ---- HLE state in g_hle (hle.h) */
 /* RomFS. With no romfs.bin, the image is made up from the romfs/ folder: its header and tables in memory (rmeta), the
-   files' data read from the files themselves when the game reads that part of the image */
+   files' data read from the files themselves when the game reads that part of the image. With mods' romfs/ folders
+   played, it is made up the same way from the game's RomFS with theirs laid over it (rlayered), a file of the game's
+   image read from that image */
 typedef struct {
-    FsNode* node; /* retained for the run: the image keeps its files */
-    u64 off;      /* where its data starts in the image */
-    int logged;   /* its first read was logged, and its first failure warned (atomics: game threads read at once) */
+    FsNode* node; /* retained for the run: the image keeps its files. NULL for a file of the image under the mods */
+    u64 base;     /* where that one's data is in that image */
+    u64 size;
+    u64 off;    /* where its data starts in the image */
+    int logged; /* its first read was logged, and its first failure warned (atomics: game threads read at once) */
     int warned;
 } RFile;
 /* unmapped RomFS files open on the host, least recently used closed first */
@@ -104,6 +108,11 @@ typedef struct {
     size_t naocs;
     u64* dlcs; /* the checked DLCs the game plays with, extracted or read in place, ndlcs of them (fs_dlcs) */
     size_t ndlcs;
+    /* the mods played (snx_mods_played): the files of their exefs/ the program was recompiled with, read in place of
+       the game's (mexefs_names, mexefs_paths, nmexefs of them), and how many romfs/ folders are grafted as mods.<i> */
+    char **mexefs_names, **mexefs_paths;
+    size_t nmexefs, nmromfs;
+    int rlayered; /* the RomFS image is made up with the mods' over the game's (romfs_init) */
 } HleFs;
 /* all zero: fs_init sets the tree up */
 #endif

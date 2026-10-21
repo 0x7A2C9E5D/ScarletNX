@@ -3144,16 +3144,31 @@ int main(int argc, char** argv) {
             assert(!snx_copy_file(self, older) && !snx_make_executable(older));
             ini = snx_game_ini(own, "0100ABCD12340000");
             assert(!snx_ini_record(ini, "addons", "0100ABCD12341001")); /* the DLC checked, no update */
+            /* two mods in its data folder's mods/, the second left out; a file there is no mod */
+            for (i = 0; i < 2; i++) {
+                file = snx_format("%s/mods/%s", dirs[0], i ? "B mod/exefs" : "A mod/romfs");
+                assert(!snx_mkdirs(file));
+                free(file);
+            }
+            file = snx_format("%s/mods/readme.txt", dirs[0]);
+            assert(!snx_write_file(file, "no mod", 6));
+            free(file);
+            assert(!snx_ini_record(ini, "mods_off", "B mod"));
             app.menu.selected = GUI_SWITCH;
             go_tab(&app, GUI_TAB_GAMES);
             focus_game(&app, "0100ABCD12340000");
             assert(app.games.addons[app.browser.page * app.browser.page_size + app.browser.selected - app.browser.head] ==
-                   3);
+                   5);
             key(&app, SDLK_RETURN);
-            /* rows: Update 1.2.0, Update 1.0.0, No update, DLC 1, Save, Play */
-            assert(app.addons_shown && !app.menu.running && app.addons.count == 3 && addons_rows(&app) == 6);
+            /* rows: Update 1.2.0, Update 1.0.0, No update, DLC 1, A mod, B mod, Open mods folder, Save, Play */
+            assert(app.addons_shown && !app.menu.running && app.addons.count == 3 && app.mods_count == 2 &&
+                   addons_rows(&app) == 9);
             assert(!app.addons_checked[0] && !app.addons_checked[1] && app.addons_checked[2]);
+            assert(app.mods_on[0] && !app.mods_on[1] && !strcmp(app.mods[0], "A mod"));
             render(&app);
+            assert(find_text(&app, "[x] A mod", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "[ ] B mod", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "Open mods folder", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "( ) Update 1.2.0", rgb(app.theme.ink), 1, &nx, &ny) ||
                    find_text(&app, "( ) Update 1.2.0", yellow, 1, &nx, &ny));
             assert(find_text(&app, "(*) No update", rgb(app.theme.ink), 1, &nx, &ny));
@@ -3168,16 +3183,25 @@ int main(int argc, char** argv) {
             checked = snx_ini_value(ini, "addons");
             assert(checked && !strcmp(checked, "0100ABCD12341001"));
             free(checked);
-            /* Save: the older update picked and kept, nothing run */
+            /* Save: the older update picked and kept, the first mod left out and the second played, nothing run */
             key(&app, SDLK_RETURN);
             key(&app, SDLK_DOWN);
             key(&app, SDLK_RETURN);
             for (i = 0; i < 3; i++) key(&app, SDLK_DOWN);
             assert(app.addons_focus == 4);
             key(&app, SDLK_RETURN);
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN);
+            assert(!app.mods_on[0] && app.mods_on[1]);
+            for (i = 0; i < 2; i++) key(&app, SDLK_DOWN);
+            assert(app.addons_focus == 7);
+            key(&app, SDLK_RETURN);
             assert(!app.addons_shown && !app.menu.running && strstr(app.message, "kept"));
             checked = snx_ini_value(ini, "addons");
             assert(checked && !strcmp(checked, "0100ABCD12340800v0,0100ABCD12341001"));
+            free(checked);
+            checked = snx_ini_value(ini, "mods_off");
+            assert(checked && !strcmp(checked, "A mod"));
             free(checked);
             /* Play: the older update's program run, as kept */
             key(&app, SDLK_RETURN);
@@ -3201,8 +3225,8 @@ int main(int argc, char** argv) {
             key(&app, SDLK_DOWN);
             key(&app, SDLK_DOWN);
             key(&app, SDLK_RETURN);
-            for (i = 0; i < 3; i++) key(&app, SDLK_DOWN);
-            assert(app.addons_focus == 5);
+            for (i = 0; i < 6; i++) key(&app, SDLK_DOWN);
+            assert(app.addons_focus == 8);
             key(&app, SDLK_RETURN);
             assert(!app.addons_shown && app.menu.running && !app.recompile);
             {

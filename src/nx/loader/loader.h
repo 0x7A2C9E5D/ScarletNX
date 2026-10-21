@@ -95,6 +95,21 @@ typedef struct {
    romfs_path */
 int snx_load_program_from(const SnxExefsReader* exefs, const char* entry, unsigned char* nacp, size_t nacp_size,
                           SnxProgram* program, char* error, size_t error_size);
+/* exefs with mods' files over it (common/utilities/mods.h): its file names[i] read from paths[i] instead, count of
+   them, any other from under. reader reads it; the arrays are the caller's, kept while it is read */
+typedef struct {
+    SnxExefsReader reader;
+    const SnxExefsReader* under;
+    char* const* names;
+    char* const* paths;
+    size_t count;
+} SnxExefsMods;
+void snx_exefs_mods(SnxExefsMods* mods, const SnxExefsReader* under, char* const* names, char* const* paths,
+                    size_t count);
+/* snx_load_program with the ExeFS of an extracted program read through snx_exefs_mods: names[i] from paths[i]. An NRO
+   takes none */
+int snx_load_program_mods(const char* entry, char* const* names, char* const* paths, size_t count, SnxProgram* program,
+                          char* error, size_t error_size);
 void snx_free_program(SnxProgram* program);
 int snx_load_nso(const char* path, const char* name, SnxModuleImage* module, char* error, size_t error_size);
 /* An NSO of a 32-bit program: an ELF32 dynamic table, 16-byte symbols, REL and RELA relocations. Code addresses among
