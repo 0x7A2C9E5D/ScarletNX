@@ -738,6 +738,25 @@ static void tex_resolve(GpuChannel* ch, u32 handle, TexRes* x) {
     u64 gw = gpu_mem_generation();
     x->handle = handle;
     x->have = 1;
+    /* an index past its pool's limit (0x55F the headers', 0x559 the samplers') names no header: no texture, or the
+       default sampler, as Eden's VisitImageView and the sampler table have it. One game's movie overlay hands
+       texture indices 0x2000 past a 2048-entry pool, where shader code lies */
+    if ((handle & 0xFFFFF) > r[0x55F] || ((handle >> 20) & 0xFFF) > r[0x559]) {
+        if ((handle & 0xFFFFF) > r[0x55F]) {
+            memset(x->tic, 0, sizeof x->tic);
+            x->t = NULL;
+        } else {
+            gmem_read(tic_at, x->tic, 32);
+            x->t = vk_tex_from_tic(x->tic);
+        }
+        if (((handle >> 20) & 0xFFF) > r[0x559])
+            memset(x->tsc, 0, sizeof x->tsc);
+        else
+            gmem_read(tsc_at, x->tsc, 32);
+        LOG_LIMIT(1, "vulkan: a texture handle %08x names headers past the pools' limits (%x, %x): no texture there\n",
+                  handle, r[0x55F], r[0x559]);
+        return;
+    }
     if (m->t && m->ch == ch && m->handle == handle && m->tic_base == tic_base && m->tsc_base == tsc_base &&
         m->surf_epoch == g_vk_surf_epoch && m->ww_epoch == vk_ww_epoch() && !g_gfx_img_any &&
         m->adds == __atomic_load_n(&g_pend_any.adds, __ATOMIC_RELAXED) &&
