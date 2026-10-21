@@ -189,6 +189,14 @@ setting JIT threads
     words Auto|#
     help Threads compiling the code the recompiler missed: 0 = every CPU the game may use but two (at most 8).
     help They yield to the game
+setting JIT optimization
+    key jit_opt
+    text 2
+    default 2
+    startup
+    words 0=O0|1=O1|2=O2|3=O3|s=Os|z=Oz
+    help LLVM's optimization of the code the runtime JIT compiles when the game reaches code the recompiler missed:
+    help 0 none, 3 the most, s or z the smallest. It applies to the next run, which compiles its JIT code again
 
 # the on-screen controls' (platform/vpad.c): their settings in the game's menu's order, then a control's place in the
 # order of SNX_VPAD_ (VPAD_CONTROLS, which the list controls follows)

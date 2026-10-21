@@ -51,6 +51,7 @@ void jit_init(void) {
     SnxJitConfig config;
     SnxJitStats stats;
     char error[512];
+    char opt;
     u64* hints;
     size_t hint_count, warm = 0;
     u32 i;
@@ -69,6 +70,9 @@ void jit_init(void) {
         g_jit_images[i].text_size = m->text_size;
     }
     memset(&config, 0, sizeof(config));
+    opt = g_settings.jit_optimization[0];
+    if (!opt || !strchr("0123sz", opt)) opt = '2'; /* an empty or hand-edited .ini */
+    config.opt = opt;
     config.images = g_jit_images;
     config.image_count = g_mod->nmods;
     config.dispatch = g_disp;
