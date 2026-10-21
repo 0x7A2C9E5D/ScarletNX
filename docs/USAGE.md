@@ -440,7 +440,7 @@ only said, nothing is moved), then asks:
 2. **Install type**: installed, in the user's folders ([Folders](#folders)), or portable, everything in
    `.scarletnx/` beside the program (or the AppImage), which it makes. An app (Android, iOS) has no other.
 3. **Folders**, the launcher's: where its recompiled games go and the folders of dumps it lists (Settings > App >
-   Folders and Library).
+   Folders).
 4. **Keys**: `prod.keys` and `title.keys` where the driver reads them, or installed from a folder that has them.
 5. **First user**: a `users/users.ini` there is kept, or overwritten, the one before kept as `users.ini.old`. A new one
    has one user, the nickname given (`Player` by default), its uid random, of a v4 UUID's form as Ryujinx's are; or

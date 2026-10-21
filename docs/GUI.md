@@ -61,7 +61,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   and takes no room, unless *Extract game container* is on. Then one not extracted yet takes about its size, a Switch
   dump's extracted straight into its game's folder (as much again only with an **Extractions** folder picked, which
   keeps a copy, and in the temporary folder with *Extract to tmpfs*); when its disks have less free, the menu says how
-  much it needs and *Run anyway* takes a second press.
+  much it needs and *Run anyway* takes a second press. With more than one folder of the recompiled library that can
+  take a game (its Main, and each Extra that can be written and runs programs), a box asks which the dump's game goes
+  in, **Recompile** on its tab: each folder with what it is and its free room, the Main first and in focus; ESC runs
+  nothing. The one taken is the run's `--outdir`, and the room asked about is that folder's.
 - **Load 3DS CIA** uses `scarletnx-3ds`. Its `recompiled/` browser lists CIA inputs,
   not host executables. The driver reads supported decrypted application CIAs where they lie, or extracts them
   with *Extract game container*.
@@ -109,27 +112,31 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   its box of sizes (below), **Animations** (On by default, `animations = 1` in `app.ini`: a screen comes in from the
   page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Side box** (below, F2 too),
 **Theme editor**, which comes
-  back to App, and **Library**: first `recompiled/`,
-  where recompiled games go: Enter there picks another, as **Folders > Recompiled** does; at its default it stays on the
-  list (the foot's Del greyed), and Del asks before a folder picked goes back to the default, only the setting
-  changing. Then the player's own folders, whose games the `recompiled/` browser lists after
-  `recompiled/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
-  or a path pasted with Ctrl+V is added too. A folder with folders in it asks first: *Only this
-  folder*, or *With subfolders*, whose games are listed too, four levels down, hidden folders
-  left alone (its row says *+ subfolders*). Del or Enter asks before it takes one off the list (the
-  folder keeps its games). A folder too long for its row is cut in its middle (its root and first folder, `...`, as many of its
-  last folders as fit), the whole path under the rows. They are kept in `folders.txt` beside `settings.ini`, a line
-  each, `/**` after one kept with its subfolders; one that cannot be read is named when the games are listed. Under App's rows, the
-  three folders in use: the data folder, the games' and the extractions'. **Folders** has a row for
-  the data folder (**Data**: `recompiled/`, `themes/` and `prod.keys`), **Recompiled** and **Extractions**, each its default or a
-  folder picked. Enter opens the folder picker, a folder dropped or pasted with Ctrl+V takes the focused row, Del puts
-  its default back and the last row, **All back to the defaults**, all three, each asking first with the folders it
-  changes. A row says *default*, *picked* or why
-  its folder cannot be; the line under the rows names the folder in use, the one above its disk's free space. A folder
-  not there, not a folder, that cannot be written or, for the games, on a disk that runs no programs (`noexec`) is
-  refused, and a run whose picked folder no longer can be stops, naming it: the default never takes its place. On
-  Android a folder outside the app's own storage is asked about first, since Android checks every file access there
-  and games may run slower: *Use it* takes a second tap, and its row says *outside the app*.
+  back to App, and **Folders**, every folder on one screen, the whole of it, a box a group:
+  - **The app's folders**: **Data** (`recompiled/`, `dumps/`, `themes/` and `prod.keys`) and **Extractions**;
+  - **Recompiled library**: its **Main**, `recompiled/`, where recompiled games go, then its **Extra** folders, whose games
+    ready to run Games lists too, and **Add a folder**;
+  - **Dumps library**: its **Main**, the data folder's `dumps/` (with its subfolders, going with the data folder), then its
+    **Extra** folders, whose dumps Games lists, and **Add a folder**;
+  - **All back to the defaults**, last.
+
+  A row is its name, its folder (one too long for the row cut in its middle: its root and first folder, `...`, as
+  many of its last folders as fit; the whole path under the boxes) and what it is. Data, Extractions and the
+  recompiled Main are each their default or a folder picked: Enter opens the folder picker, a folder dropped or pasted
+  with Ctrl+V takes the row, Del puts the default back (asking first with the folders it changes) and the last row all
+  three; the row says *default*, *picked* or why its folder cannot be, the tips what it holds and its disk's free
+  space. A folder not there, not a folder, that cannot be written or, for the games, on a disk that runs no programs
+  (`noexec`) is refused, and a run whose picked folder no longer can be stops, naming it: the default never takes its
+  place. On Android a folder outside the app's own storage is asked about first, since Android checks every file
+  access there and games may run slower: *Use it* takes a second tap, and its row says *outside the app*. A library's
+  **Add a folder** opens the folder picker, and a folder dropped on, or pasted on, a row of a library is added to it; one
+  with folders in it asks first: *Only this folder*, or *With subfolders*, whose games are listed too, four levels
+  down, hidden folders left alone (its row says *+ subfolders*). Del or Enter asks before an Extra is taken off its
+  library (the folder keeps its games). A folder added from Games goes in the library of what it holds, in both for
+  both, the dumps one with no games of either. The Extras are kept in `folders.txt` beside `settings.ini`, a line each,
+  the library's word, a space and the path (`recompiled /mnt/games`, `dumps /mnt/dumps/**`), `/**` after one kept with
+  its subfolders; one that cannot be read is named when the games are listed. Under App's rows, the three folders in
+  use: the data folder, the games' and the extractions'.
   Nothing is moved, the folder before keeps what it has. The menu's own files stay where they are. **Clean old settings** asks first, with
   how many it would take out, then takes out the settings nothing reads any more: the `[Deprecated]` section the runtime
   gives a game's `.ini` for the keys it no longer uses (in the config folder's `recompiled/`, in `recompiled/`
@@ -214,13 +221,13 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - **Open data folder**, on Android, opens the data folder, the app's own storage, in the
   system's Files app ([ANDROID](ANDROID.md)).
 - **Exit** closes the launcher, once asked (ESC on the menu asks too), a screen saying for half a second which of its
-  files it keeps for the next start (Settings, the picks of Settings > App, the Library, the recent games), a second
+  files it keeps for the next start (Settings, the picks of Settings > App, the libraries' folders, the recent games), a second
   close skipping it. Closing its window during a run asks first: Exit terminates the entire owned process tree (a
   recompile's work lost), so let the game exit normally to preserve its saves.
 - As it opens, the menu shows in a box what an older version left where this one no longer looks, a
   folder at a time: where it is (`- `, in the failure colour, a path too long for a row going on in the next) and
   under it the space it takes, counted as the box shows (*counting* until then). They are the menu's `gui/`, `work/`, each game laid out
-  beside the others in `games/` or a Library folder (`games/<id>/` now), the data folder's `games/` (`recompiled/` now,
+  beside the others in `games/` or a library's Extra (`games/<id>/` now), the data folder's `games/` (`recompiled/` now,
   its games still listed, each row marked `(games/)`, until they are moved), a portable copy's `games/`
   beside the program, and a build tree's `games/`, `work/` and keys in its checkout
   ([USAGE](USAGE.md#folders)). Up/Down, PgUp/PgDn and the wheel go over those that do not fit (an arrow at the
@@ -273,8 +280,8 @@ second) the one before, and OK on the last.
   while that folder is there, the focus then on Portable, else `Now: installed, its files in` the user's data folder.
   Installed is refused while a `.scarletnx/` is there, which keeps the copy portable. An app (Android, iOS) has no such
   page.
-- **Folders**: Keep, Change recompiled folder (Settings > App > Folders' Recompiled) or Add a folder (a folder of
-  Settings > App > Library), each through the folder picker, the page listing what is there now: Recompiled, Dumps
+- **Folders**: Keep, Change recompiled folder (Settings > App > Folders, the recompiled library's Main) or Add a folder
+  (an Extra of Settings > App > Folders), each through the folder picker, the page listing what is there now: Recompiled, Dumps
   (the data folder's `dumps/`, with its subfolders), then the player's folders.
 - **Keys**: `prod.keys` and `title.keys` where the driver reads them; Use these, Choose folder (a folder with
   `prod.keys`, and `title.keys` if it has one, installed where Setup device keys installs them) or Later.
@@ -292,7 +299,7 @@ setup, writing nothing.
 on Android, and CIA files, which go to the 3DS driver. It reads the `recompiled/` of the
 folder the driver works in, which the menu passes it as `--repo`: a portable copy's `.scarletnx/` beside the
 AppImage (or the GUI), else the user's data folder, a build tree's menu's too ([USAGE](USAGE.md#folders)), then each
-folder of Settings > App > Library. Each game is shown by the name in its `control.nacp`, which the recompile copies into
+Extra of Settings > App > Folders. Each game is shown by the name in its `control.nacp`, which the recompile copies into
 its data, else by its folder's or file's name, sorted by it in each folder. Only immediate files are listed:
 executables (execute permission on UNIX, `.exe` on Windows) and `.cia` files (case-insensitive,
 no execute permission needed), which run with the 3DS driver. Hidden files, shared libraries and
@@ -300,8 +307,8 @@ directories are excluded. The folders are looked at once a second while the menu
 names only), so a game put in or taken out shows in the open list; a folder that
 cannot be read is named and the others still listed.
 
-- **Add a folder** is the first row on every page, a wider gap under it: it opens the folder picker of Settings >
-  App > Library. Under it the recent games, then the page's games. ESC returns to the menu.
+- **Add a folder** is the first row on every page, a wider gap under it: it opens the folder picker, the folder going in
+  the library of what it holds (Settings > App > Folders). Under it the recent games, then the page's games. ESC returns to the menu.
 - Up/Down go round Add a folder, the recent games and the page's files. Enter/Space opens one.
 - **R** (on Android a tap on *Recompile* at the foot) recompiles the Switch game in focus, recent or on the page,
   where it is, or prepares its dump again: `scarletnx -r`. It plays nothing;
@@ -386,7 +393,7 @@ click on another group opens that one. No screen has a Back row: ESC goes back, 
 foot's ESC. A failure of the system's (a file not written, a folder not made, a picker that did not open, the driver
 not found, the log not saved) shows whole in a box over the screen until OK, once in a session; the tips or the
 note go on saying it after. F5, or the foot's (Refresh on a phone), looks at the disk again at once rather than at the next look:
-Games lists its folders again, the Library and Folders say how many of theirs are there, the menu counts the disk
+Games lists its folders again, Folders says which of its folders are there, the menu counts the disk
 again, and the box of what an older version left looks again. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
 every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the
 column is as wide as its entries and the side box goes under the list. A list's boxes spread over its column, at

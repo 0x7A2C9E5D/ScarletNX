@@ -214,14 +214,8 @@ msgstr "轻触一行以更改或打开. 返回: 后退."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: tap it. Tap a folder to take it off. Refresh: tap it. Back: go back."
-msgstr "添加文件夹: 轻触它. 轻触文件夹将其移除. 更新: 轻触它. 返回: 后退."
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Refresh: tap it. Back: go back."
-msgstr "轻触: 选择游戏存放处. 添加文件夹: 轻触它. ~轻触文件夹将其移除. 更新: 轻触它. 返回: 后退."
+msgid "Add a folder: tap it. Tap an Extra to take it off. Refresh: tap it. Back: go back."
+msgstr "添加文件夹: 轻触它. 轻触另外的文件夹将其移除. 更新: 轻触它. 返回: 后退."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -274,8 +268,8 @@ msgid "Press [ESC] to abort and return to menu"
 msgstr "按 [ESC] 中止并返回菜单"
 
 #: src/gui/main.c
-msgid "No games in recompiled/, dumps/ or the folders of Settings > App > Library."
-msgstr ""
+msgid "No games in recompiled/, dumps/ or the libraries of Settings > App > Folders."
+msgstr "recompiled/、dumps/ 和「设置 > 应用 > 文件夹」的游戏库中都没有游戏。"
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -310,20 +304,8 @@ msgstr "上/下: 行. 左/右: 更改. Enter: 更改或打开. ESC: 返回."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: pick, drop or paste one. Del: take one off. F5: refresh. ESC: back."
-msgstr "添加文件夹: 选取、拖入或粘贴一个. Del: 移除一个. F5: 更新. ESC: 返回."
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Enter: pick where games go. Add a folder: pick, drop or paste one. ~Del: take one off. F5: refresh. ESC: back."
-msgstr "Enter: 选择游戏存放处. 添加文件夹: 选取、拖入或粘贴一个. ~Del: 移除一个. F5: 更新. ESC: 返回."
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Enter: pick where games go. Del: back to the default. Add a folder: pick, drop or paste one. F5: refresh. ESC: back."
-msgstr "Enter: 选择游戏存放处. Del: 恢复默认. 添加文件夹: 选取、拖入或粘贴一个. F5: 更新. ESC: 返回."
+msgid "Add a folder: pick, drop or paste one. Del: take an Extra off. F5: refresh. ESC: back."
+msgstr "添加文件夹: 选取、拖入或粘贴一个. Del: 移除另外的文件夹. F5: 更新. ESC: 返回."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -645,6 +627,68 @@ msgid "Folders"
 msgstr "文件夹"
 
 #: src/gui/main.c
+#, c-format
+msgid "%s: into which folder of the recompiled library?"
+msgstr "%s：选择放入已重编译游戏库中的文件夹"
+
+#: src/gui/main.c
+#, c-format
+msgid "  %s free"
+msgstr "  %s 可用"
+
+#: src/gui/main.c
+#, c-format
+msgid "  picked, %s free"
+msgstr "  已选，%s 可用"
+
+#: src/gui/main.c
+#, c-format
+msgid "  default, %s free"
+msgstr "  默认，%s 可用"
+
+#: src/gui/main.c
+msgid "SCARLETNX  /  SETTINGS  /  FOLDERS"
+msgstr "SCARLETNX  /  设置  /  文件夹"
+
+#: src/gui/main.c
+#, c-format
+msgid "%d picked, %d Extra(s)"
+msgstr "已选 %d 个，%d 个另外的文件夹"
+
+#: src/gui/main.c
+#, c-format
+msgid "Take %s off the recompiled library? The folder keeps its games."
+msgstr "将 %s 从已重编译游戏库移除？该文件夹保留其游戏。"
+
+#: src/gui/main.c
+msgid "The app's folders"
+msgstr "应用的文件夹"
+
+#: src/gui/main.c
+msgid "Recompiled library"
+msgstr "已重编译游戏库"
+
+#: src/gui/main.c
+msgid "Dumps library"
+msgstr "转储游戏库"
+
+#: src/gui/main.c
+msgid "Pick, drop or paste a folder of recompiled games: Games lists them too"
+msgstr "选取、拖入或粘贴一个已重编译游戏的文件夹：游戏也会列出它们"
+
+#: src/gui/main.c
+msgid "Extra"
+msgstr "另外"
+
+#: src/gui/main.c
+msgid "Each library's Extras are listed after its Main"
+msgstr "每个游戏库的另外的文件夹列在主文件夹之后"
+
+#: src/gui/main.c
+msgid "The libraries' folders"
+msgstr "游戏库的文件夹"
+
+#: src/gui/main.c
 msgid "Keys"
 msgstr "密钥"
 
@@ -805,16 +849,12 @@ msgid "This theme's keys with a preview, saved as themes/<name>/theme.ini"
 msgstr "此主题的各项及预览，保存为 themes/<名称>/theme.ini"
 
 #: src/gui/main.c
-msgid "Library"
-msgstr "游戏库"
+msgid "Main"
+msgstr "主文件夹"
 
 #: src/gui/main.c
-msgid "The folders Games lists, recompiled/ and dumps/ first"
-msgstr "「游戏」页列出的文件夹，recompiled/ 和 dumps/ 在最前"
-
-#: src/gui/main.c
-msgid "Where the data, the games and the extractions are"
-msgstr "数据、游戏和提取文件所在的位置"
+msgid "The data and the extractions, and the libraries Games lists: recompiled games and dumps"
+msgstr "数据和提取，以及游戏列出的游戏库：已重编译的游戏和转储"
 
 #: src/gui/main.c
 msgid "Clean old settings"
@@ -840,8 +880,8 @@ msgstr "自动：%s"
 
 #: src/gui/main.c
 #, c-format
-msgid "recompiled/, dumps/ and %d more"
-msgstr ""
+msgid "Defaults, %d Extra(s)"
+msgstr "默认，%d 个另外的文件夹"
 
 #: src/gui/main.c
 #, c-format
@@ -851,22 +891,6 @@ msgstr "已选 %d 个"
 #: src/gui/main.c
 msgid "Defaults"
 msgstr "默认"
-
-#: src/gui/main.c
-msgid "Where recompiled games go: tap to pick another. It stays on the list"
-msgstr "重新编译的游戏存放处：轻触以另选一个。它仍留在列表中"
-
-#: src/gui/main.c
-msgid "Where recompiled games go: tap to pick another. Folders puts back the default"
-msgstr "重新编译的游戏存放处：轻触以另选一个。「文件夹」中可恢复默认"
-
-#: src/gui/main.c
-msgid "Where recompiled games go: Enter picks another. It stays on the list"
-msgstr "重新编译的游戏存放处：Enter 另选一个。它仍留在列表中"
-
-#: src/gui/main.c
-msgid "Where recompiled games go: Enter picks another, Del asks to put back the default"
-msgstr "重新编译的游戏存放处：Enter 另选一个，Del 确认后恢复默认"
 
 #: src/gui/main.c
 #, c-format
@@ -879,8 +903,43 @@ msgstr "（无）"
 
 #: src/gui/main.c
 #, c-format
-msgid "Already listed: %s"
-msgstr "已在列表中：%s"
+msgid "Already in the dumps library: %s"
+msgstr "已在转储游戏库中：%s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Already in the recompiled library: %s"
+msgstr "已在已重编译游戏库中：%s"
+
+#: src/gui/main.c
+msgid "Added to the dumps library, with its subfolders"
+msgstr "已添加到转储游戏库，包括子文件夹"
+
+#: src/gui/main.c
+msgid "Added to the dumps library"
+msgstr "已添加到转储游戏库"
+
+#: src/gui/main.c
+msgid "recompiled"
+msgstr "已重编译"
+
+#: src/gui/main.c
+msgid "dumps"
+msgstr "转储"
+
+#: src/gui/main.c
+msgid "recompiled and dumps"
+msgstr "已重编译和转储"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: each folder of an older version's lines read as %s, not written: %s"
+msgstr "%s：旧版本各行的文件夹按 %s 读取，未写入：%s"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: each folder of an older version's lines is in a library now: %s"
+msgstr "%s：旧版本各行的文件夹现已放入游戏库：%s"
 
 #: src/gui/main.c
 #, c-format
@@ -888,17 +947,12 @@ msgid "At most %d folders"
 msgstr "最多 %d 个文件夹"
 
 #: src/gui/main.c
-msgid "Added, with its subfolders"
-msgstr "已添加，包括子文件夹"
+msgid "Added to the recompiled library, with its subfolders"
+msgstr "已添加到已重编译游戏库，包括子文件夹"
 
 #: src/gui/main.c
-msgid "Added"
-msgstr "已添加"
-
-#: src/gui/main.c
-#, c-format
-msgid "Library: %s"
-msgstr "游戏库：%s"
+msgid "Added to the recompiled library"
+msgstr "已添加到已重编译游戏库"
 
 #: src/gui/main.c
 #, c-format
@@ -907,8 +961,8 @@ msgstr "已将 %s 从列表移除。该文件夹保留其游戏"
 
 #: src/gui/main.c
 #, c-format
-msgid "Take %s off the Library? The folder keeps its games."
-msgstr "将 %s 从游戏库移除？该文件夹保留其游戏。"
+msgid "Take %s off the dumps library? The folder keeps its games."
+msgstr "将 %s 从转储游戏库移除？该文件夹保留其游戏。"
 
 #: src/gui/main.c
 msgid "Not added"
@@ -927,8 +981,8 @@ msgid "Reset all"
 msgstr "全部重置"
 
 #: src/gui/main.c
-msgid "Del or Enter asks to take it off the list; the folder keeps its games"
-msgstr "Del 或 Enter 确认后从列表移除；该文件夹保留其游戏"
+msgid "Del or Enter asks to take it off the library; the folder keeps its games"
+msgstr "Del 或 Enter 确认后从游戏库移除；该文件夹保留其游戏"
 
 #: src/gui/main.c
 msgid "not found"
@@ -1055,8 +1109,8 @@ msgstr "文件夹选择器无法打开：%s"
 
 #: src/gui/main.c
 #, c-format
-msgid "Library: the folder picker could not open: %s"
-msgstr "游戏库：文件夹选择器无法打开：%s"
+msgid "Folders: the folder picker could not open: %s"
+msgstr "文件夹：文件夹选择器无法打开：%s"
 
 #: src/gui/main.c
 #, c-format
@@ -1135,8 +1189,8 @@ msgid "Paste one local folder's path"
 msgstr "粘贴一个本地文件夹的路径"
 
 #: src/gui/main.c
-msgid "Data, games and extractions"
-msgstr "数据、游戏和提取文件"
+msgid "Data, Extractions and the recompiled library's Main"
+msgstr "数据、提取和已重编译游戏库的主文件夹"
 
 #: src/gui/main.c
 msgid "For the next runs. [default]: as the game's .ini says"
@@ -1155,8 +1209,8 @@ msgid "As All >"
 msgstr "同「全部」>"
 
 #: src/gui/main.c
-msgid "Pick, drop or paste a folder of games"
-msgstr "选取、拖入或粘贴一个游戏文件夹"
+msgid "Pick, drop or paste a folder of dumps: Games lists them too"
+msgstr "选取、拖入或粘贴一个转储文件夹：游戏也会列出它们"
 
 #: src/gui/main.c
 msgid "Each folder back to its default. What is in them stays"
@@ -1892,8 +1946,8 @@ msgstr "日志已保存到 %s（已复制路径）"
 
 #: src/gui/main.c
 #, c-format
-msgid "%s It is in Settings > App > Library."
-msgstr "%s 它在「设置 > 应用 > 游戏库」中。"
+msgid "%s It is in Settings > App > Folders."
+msgstr "%s 它在「设置 > 应用 > 文件夹」中。"
 
 #: src/gui/main.c
 msgid "Not saved: Ctrl+S saves it, ESC twice leaves without it"
@@ -2033,8 +2087,8 @@ msgstr "更新"
 
 #: src/gui/main.c
 #, c-format
-msgid "Refreshed: %d folders, %d not found"
-msgstr "已更新：%d 个文件夹，%d 个未找到"
+msgid "Refreshed: %s; dumps/ and %d Extra(s), %d not found"
+msgstr "已更新：%s；dumps/ 和 %d 个另外的文件夹，%d 个未找到"
 
 #: src/gui/main.c
 #, c-format
@@ -2047,13 +2101,8 @@ msgid "%s%s %s, made when needed"
 msgstr "%s%s %s，需要时创建"
 
 #: src/gui/main.c
-#, c-format
-msgid "Refreshed: %s"
-msgstr "已更新：%s"
-
-#: src/gui/main.c
-msgid "Refreshed: Data, Recompiled and Extractions are there"
-msgstr "已更新：数据、已重编译和提取都存在"
+msgid "Data, Recompiled and Extractions are there"
+msgstr "数据、已重编译和提取都存在"
 
 #: src/gui/main.c
 #, c-format
@@ -2069,8 +2118,8 @@ msgid "Drop one local folder"
 msgstr "请拖入一个本地文件夹"
 
 #: src/gui/main.c
-msgid "Drop it on the folder it takes the place of"
-msgstr "把它拖到要替换的文件夹上"
+msgid "Drop it on the folder it takes the place of, or on a library's row"
+msgstr "把它拖到要替换的文件夹上，或游戏库的一行上"
 
 #: src/gui/main.c
 msgid "no reason given"
@@ -2821,3 +2870,15 @@ msgstr "数据文件夹中的 games/"
 
 msgid "recompiled/, and dumps/ for the dumps"
 msgstr "recompiled/，转储放在 dumps/"
+
+#: src/common/utilities/setup.c
+msgid "The launcher's folders of games"
+msgstr "启动器的游戏文件夹"
+
+#: src/common/utilities/setup.c
+msgid "a line of folders.txt, a path alone"
+msgstr "folders.txt 中只有路径的一行"
+
+#: src/common/utilities/setup.c
+msgid "each folder in the recompiled or the dumps library, as its games say"
+msgstr "每个文件夹按其游戏放入已重编译或转储游戏库"

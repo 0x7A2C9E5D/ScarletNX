@@ -214,14 +214,8 @@ msgstr "Toque numa linha para mudar ou abrir. Voltar: retornar."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: tap it. Tap a folder to take it off. Refresh: tap it. Back: go back."
-msgstr "Adicionar pasta: toque nele. Toque numa pasta para tirá-la. Atualizar: toque nele. Voltar: retornar."
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Refresh: tap it. Back: go back."
-msgstr "Toque: escolher para onde vão os jogos. Adicionar pasta: toque nele. ~Toque numa pasta para tirá-la. Atualizar: toque nele. Voltar: retornar."
+msgid "Add a folder: tap it. Tap an Extra to take it off. Refresh: tap it. Back: go back."
+msgstr "Adicionar pasta: toque nele. Toque numa Extra para tirá-la. Atualizar: toque nele. Voltar: retornar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -274,8 +268,8 @@ msgid "Press [ESC] to abort and return to menu"
 msgstr "Aperte [ESC] para abortar e voltar ao menu"
 
 #: src/gui/main.c
-msgid "No games in recompiled/, dumps/ or the folders of Settings > App > Library."
-msgstr "Nenhum jogo em recompiled/, dumps/ nem nas pastas de Configurações > App > Biblioteca."
+msgid "No games in recompiled/, dumps/ or the libraries of Settings > App > Folders."
+msgstr "Nenhum jogo em recompiled/, dumps/ nem nas bibliotecas de Configurações > App > Pastas."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -310,20 +304,8 @@ msgstr "Cima/Baixo: linha. Esquerda/Direita: mudar. Enter: mudar ou abrir. ESC: 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: pick, drop or paste one. Del: take one off. F5: refresh. ESC: back."
-msgstr "Adicionar pasta: escolher, soltar ou colar uma. Del: tirar uma. F5: atualizar. ESC: voltar."
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Enter: pick where games go. Add a folder: pick, drop or paste one. ~Del: take one off. F5: refresh. ESC: back."
-msgstr "Enter: escolher para onde vão os jogos. Adicionar pasta: escolher, soltar ou colar uma. ~Del: tirar uma. F5: atualizar. ESC: voltar."
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Enter: pick where games go. Del: back to the default. Add a folder: pick, drop or paste one. F5: refresh. ESC: back."
-msgstr "Enter: escolher para onde vão os jogos. Del: voltar ao padrão. Adicionar pasta: escolher, soltar ou colar uma. F5: atualizar. ESC: voltar."
+msgid "Add a folder: pick, drop or paste one. Del: take an Extra off. F5: refresh. ESC: back."
+msgstr "Adicionar pasta: escolher, soltar ou colar uma. Del: tirar uma Extra. F5: atualizar. ESC: voltar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -645,6 +627,68 @@ msgid "Folders"
 msgstr "Pastas"
 
 #: src/gui/main.c
+#, c-format
+msgid "%s: into which folder of the recompiled library?"
+msgstr "%s: em qual pasta da biblioteca de recompilados?"
+
+#: src/gui/main.c
+#, c-format
+msgid "  %s free"
+msgstr "  %s livres"
+
+#: src/gui/main.c
+#, c-format
+msgid "  picked, %s free"
+msgstr "  escolhida, %s livres"
+
+#: src/gui/main.c
+#, c-format
+msgid "  default, %s free"
+msgstr "  padrão, %s livres"
+
+#: src/gui/main.c
+msgid "SCARLETNX  /  SETTINGS  /  FOLDERS"
+msgstr "SCARLETNX  /  CONFIGURAÇÕES  /  PASTAS"
+
+#: src/gui/main.c
+#, c-format
+msgid "%d picked, %d Extra(s)"
+msgstr "%d escolhidas, %d Extra(s)"
+
+#: src/gui/main.c
+#, c-format
+msgid "Take %s off the recompiled library? The folder keeps its games."
+msgstr "Tirar %s da biblioteca de recompilados? A pasta continua com seus jogos."
+
+#: src/gui/main.c
+msgid "The app's folders"
+msgstr "Pastas do app"
+
+#: src/gui/main.c
+msgid "Recompiled library"
+msgstr "Biblioteca de recompilados"
+
+#: src/gui/main.c
+msgid "Dumps library"
+msgstr "Biblioteca de dumps"
+
+#: src/gui/main.c
+msgid "Pick, drop or paste a folder of recompiled games: Games lists them too"
+msgstr "Escolha, solte ou cole uma pasta de jogos recompilados: o Games também lista"
+
+#: src/gui/main.c
+msgid "Extra"
+msgstr "Extra"
+
+#: src/gui/main.c
+msgid "Each library's Extras are listed after its Main"
+msgstr "As Extras de cada biblioteca vêm depois da Principal"
+
+#: src/gui/main.c
+msgid "The libraries' folders"
+msgstr "As pastas das bibliotecas"
+
+#: src/gui/main.c
 msgid "Keys"
 msgstr "Chaves"
 
@@ -805,16 +849,12 @@ msgid "This theme's keys with a preview, saved as themes/<name>/theme.ini"
 msgstr "As chaves deste tema com uma prévia, salvas como themes/<nome>/theme.ini"
 
 #: src/gui/main.c
-msgid "Library"
-msgstr "Biblioteca"
+msgid "Main"
+msgstr "Principal"
 
 #: src/gui/main.c
-msgid "The folders Games lists, recompiled/ and dumps/ first"
-msgstr "As pastas que Jogos lista, recompiled/ e dumps/ primeiro"
-
-#: src/gui/main.c
-msgid "Where the data, the games and the extractions are"
-msgstr "Onde ficam os dados, os jogos e as extrações"
+msgid "The data and the extractions, and the libraries Games lists: recompiled games and dumps"
+msgstr "Os dados e as extrações, e as bibliotecas que o Games lista: jogos recompilados e dumps"
 
 #: src/gui/main.c
 msgid "Clean old settings"
@@ -840,8 +880,8 @@ msgstr "Auto: %s"
 
 #: src/gui/main.c
 #, c-format
-msgid "recompiled/, dumps/ and %d more"
-msgstr "recompiled/, dumps/ e mais %d"
+msgid "Defaults, %d Extra(s)"
+msgstr "Padrões, %d Extra(s)"
 
 #: src/gui/main.c
 #, c-format
@@ -851,22 +891,6 @@ msgstr "%d escolhidas"
 #: src/gui/main.c
 msgid "Defaults"
 msgstr "Padrões"
-
-#: src/gui/main.c
-msgid "Where recompiled games go: tap to pick another. It stays on the list"
-msgstr "Para onde vão os jogos recompilados: toque para escolher outra. Ela fica na lista"
-
-#: src/gui/main.c
-msgid "Where recompiled games go: tap to pick another. Folders puts back the default"
-msgstr "Para onde vão os jogos recompilados: toque para escolher outra. Pastas volta ao padrão"
-
-#: src/gui/main.c
-msgid "Where recompiled games go: Enter picks another. It stays on the list"
-msgstr "Para onde vão os jogos recompilados: Enter escolhe outra. Ela fica na lista"
-
-#: src/gui/main.c
-msgid "Where recompiled games go: Enter picks another, Del asks to put back the default"
-msgstr "Para onde vão os jogos recompilados: Enter escolhe outra, Del pergunta antes de voltar ao padrão"
 
 #: src/gui/main.c
 #, c-format
@@ -879,8 +903,43 @@ msgstr "(nenhuma)"
 
 #: src/gui/main.c
 #, c-format
-msgid "Already listed: %s"
-msgstr "Já na lista: %s"
+msgid "Already in the dumps library: %s"
+msgstr "Já está na biblioteca de dumps: %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Already in the recompiled library: %s"
+msgstr "Já está na biblioteca de recompilados: %s"
+
+#: src/gui/main.c
+msgid "Added to the dumps library, with its subfolders"
+msgstr "Adicionada à biblioteca de dumps, com as subpastas"
+
+#: src/gui/main.c
+msgid "Added to the dumps library"
+msgstr "Adicionada à biblioteca de dumps"
+
+#: src/gui/main.c
+msgid "recompiled"
+msgstr "recompilados"
+
+#: src/gui/main.c
+msgid "dumps"
+msgstr "dumps"
+
+#: src/gui/main.c
+msgid "recompiled and dumps"
+msgstr "recompilados e dumps"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: each folder of an older version's lines read as %s, not written: %s"
+msgstr "%s: cada pasta das linhas de uma versão antiga lida como %s, não gravado: %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: each folder of an older version's lines is in a library now: %s"
+msgstr "%s: cada pasta das linhas de uma versão antiga agora está numa biblioteca: %s"
 
 #: src/gui/main.c
 #, c-format
@@ -888,17 +947,12 @@ msgid "At most %d folders"
 msgstr "No máximo %d pastas"
 
 #: src/gui/main.c
-msgid "Added, with its subfolders"
-msgstr "Adicionada, com as subpastas"
+msgid "Added to the recompiled library, with its subfolders"
+msgstr "Adicionada à biblioteca de recompilados, com as subpastas"
 
 #: src/gui/main.c
-msgid "Added"
-msgstr "Adicionada"
-
-#: src/gui/main.c
-#, c-format
-msgid "Library: %s"
-msgstr "Biblioteca: %s"
+msgid "Added to the recompiled library"
+msgstr "Adicionada à biblioteca de recompilados"
 
 #: src/gui/main.c
 #, c-format
@@ -907,8 +961,8 @@ msgstr "%s tirada da lista. A pasta continua com seus jogos"
 
 #: src/gui/main.c
 #, c-format
-msgid "Take %s off the Library? The folder keeps its games."
-msgstr "Tirar %s da Biblioteca? A pasta continua com seus jogos."
+msgid "Take %s off the dumps library? The folder keeps its games."
+msgstr "Tirar %s da biblioteca de dumps? A pasta continua com seus jogos."
 
 #: src/gui/main.c
 msgid "Not added"
@@ -927,8 +981,8 @@ msgid "Reset all"
 msgstr "Restaurar tudo"
 
 #: src/gui/main.c
-msgid "Del or Enter asks to take it off the list; the folder keeps its games"
-msgstr "Del ou Enter pergunta antes de tirar da lista; a pasta continua com seus jogos"
+msgid "Del or Enter asks to take it off the library; the folder keeps its games"
+msgstr "Del ou Enter pergunta antes de tirar da biblioteca; a pasta continua com seus jogos"
 
 #: src/gui/main.c
 msgid "not found"
@@ -1055,8 +1109,8 @@ msgstr "O seletor de pastas não abriu: %s"
 
 #: src/gui/main.c
 #, c-format
-msgid "Library: the folder picker could not open: %s"
-msgstr "Biblioteca: o seletor de pastas não abriu: %s"
+msgid "Folders: the folder picker could not open: %s"
+msgstr "Pastas: o seletor de pastas não abriu: %s"
 
 #: src/gui/main.c
 #, c-format
@@ -1135,8 +1189,8 @@ msgid "Paste one local folder's path"
 msgstr "Cole o caminho de uma pasta local"
 
 #: src/gui/main.c
-msgid "Data, games and extractions"
-msgstr "Dados, jogos e extrações"
+msgid "Data, Extractions and the recompiled library's Main"
+msgstr "Dados, Extrações e a Principal da biblioteca de recompilados"
 
 #: src/gui/main.c
 msgid "For the next runs. [default]: as the game's .ini says"
@@ -1155,8 +1209,8 @@ msgid "As All >"
 msgstr "Como Todos >"
 
 #: src/gui/main.c
-msgid "Pick, drop or paste a folder of games"
-msgstr "Escolha, solte ou cole uma pasta de jogos"
+msgid "Pick, drop or paste a folder of dumps: Games lists them too"
+msgstr "Escolha, solte ou cole uma pasta de dumps: o Games também lista"
 
 #: src/gui/main.c
 msgid "Each folder back to its default. What is in them stays"
@@ -1892,8 +1946,8 @@ msgstr "Log salvo em %s (caminho copiado)"
 
 #: src/gui/main.c
 #, c-format
-msgid "%s It is in Settings > App > Library."
-msgstr "%s Ela está em Configurações > App > Biblioteca."
+msgid "%s It is in Settings > App > Folders."
+msgstr "%s Ela está em Configurações > App > Pastas."
 
 #: src/gui/main.c
 msgid "Not saved: Ctrl+S saves it, ESC twice leaves without it"
@@ -2033,8 +2087,8 @@ msgstr "Atualizar"
 
 #: src/gui/main.c
 #, c-format
-msgid "Refreshed: %d folders, %d not found"
-msgstr "Atualizado: %d pastas, %d não encontradas"
+msgid "Refreshed: %s; dumps/ and %d Extra(s), %d not found"
+msgstr "Atualizado: %s; dumps/ e %d Extra(s), %d não encontradas"
 
 #: src/gui/main.c
 #, c-format
@@ -2047,13 +2101,8 @@ msgid "%s%s %s, made when needed"
 msgstr "%s%s %s, criada quando precisar"
 
 #: src/gui/main.c
-#, c-format
-msgid "Refreshed: %s"
-msgstr "Atualizado: %s"
-
-#: src/gui/main.c
-msgid "Refreshed: Data, Recompiled and Extractions are there"
-msgstr "Atualizado: Dados, Recompilados e Extrações estão lá"
+msgid "Data, Recompiled and Extractions are there"
+msgstr "Dados, Recompilados e Extrações estão lá"
 
 #: src/gui/main.c
 #, c-format
@@ -2069,8 +2118,8 @@ msgid "Drop one local folder"
 msgstr "Solte uma pasta local"
 
 #: src/gui/main.c
-msgid "Drop it on the folder it takes the place of"
-msgstr "Solte-a na pasta cujo lugar ela toma"
+msgid "Drop it on the folder it takes the place of, or on a library's row"
+msgstr "Solte-a na pasta cujo lugar ela toma, ou numa linha de uma biblioteca"
 
 #: src/gui/main.c
 msgid "no reason given"
@@ -2821,3 +2870,15 @@ msgstr "games/ na pasta de dados"
 
 msgid "recompiled/, and dumps/ for the dumps"
 msgstr "recompiled/, e dumps/ para os dumps"
+
+#: src/common/utilities/setup.c
+msgid "The launcher's folders of games"
+msgstr "As pastas de jogos do launcher"
+
+#: src/common/utilities/setup.c
+msgid "a line of folders.txt, a path alone"
+msgstr "uma linha do folders.txt, só um caminho"
+
+#: src/common/utilities/setup.c
+msgid "each folder in the recompiled or the dumps library, as its games say"
+msgstr "cada pasta na biblioteca de recompilados ou na de dumps, conforme seus jogos"

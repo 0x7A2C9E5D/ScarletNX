@@ -269,13 +269,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: tap it. Tap a folder to take it off. Refresh: tap it. Back: go back."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Refresh: tap it. Back: go back."
+msgid "Add a folder: tap it. Tap an Extra to take it off. Refresh: tap it. Back: go back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -335,7 +329,7 @@ msgid "Press [ESC] to abort and return to menu"
 msgstr ""
 
 #: src/gui/main.c
-msgid "No games in recompiled/, dumps/ or the folders of Settings > App > Library."
+msgid "No games in recompiled/, dumps/ or the libraries of Settings > App > Folders."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -371,19 +365,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: pick, drop or paste one. Del: take one off. F5: refresh. ESC: back."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Enter: pick where games go. Add a folder: pick, drop or paste one. ~Del: take one off. F5: refresh. ESC: back."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Enter: pick where games go. Del: back to the default. Add a folder: pick, drop or paste one. F5: refresh. ESC: back."
+msgid "Add a folder: pick, drop or paste one. Del: take an Extra off. F5: refresh. ESC: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -718,6 +700,10 @@ msgid "SCARLETNX  /  SETTINGS  /  %s  /  %s"
 msgstr ""
 
 #: src/gui/main.c
+msgid "SCARLETNX  /  SETTINGS  /  FOLDERS"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Menu"
 msgstr ""
 
@@ -927,15 +913,7 @@ msgid "This theme's keys with a preview, saved as themes/<name>/theme.ini"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Library"
-msgstr ""
-
-#: src/gui/main.c
-msgid "The folders Games lists, recompiled/ and dumps/ first"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Where the data, the games and the extractions are"
+msgid "The data and the extractions, and the libraries Games lists: recompiled games and dumps"
 msgstr ""
 
 #: src/gui/main.c
@@ -974,12 +952,17 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "recompiled/, dumps/ and %d more"
+msgid "%d picked, %d Extra(s)"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
 msgid "%d picked"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Defaults, %d Extra(s)"
 msgstr ""
 
 #: src/gui/main.c
@@ -996,19 +979,25 @@ msgid "Nothing left"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Where recompiled games go: tap to pick another. It stays on the list"
+msgid "recompiled"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Where recompiled games go: tap to pick another. Folders puts back the default"
+msgid "dumps"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Where recompiled games go: Enter picks another. It stays on the list"
+msgid "recompiled and dumps"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Where recompiled games go: Enter picks another, Del asks to put back the default"
+#, c-format
+msgid "%s: each folder of an older version's lines read as %s, not written: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: each folder of an older version's lines is in a library now: %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -1026,7 +1015,12 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Already listed: %s"
+msgid "Already in the dumps library: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Already in the recompiled library: %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -1035,16 +1029,24 @@ msgid "At most %d folders"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Added, with its subfolders"
+msgid "Added to the recompiled library, with its subfolders"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Added"
+msgid "Added to the recompiled library"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Added to the dumps library, with its subfolders"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Added to the dumps library"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Library: %s"
+msgid "Folders: %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -1054,7 +1056,12 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Take %s off the Library? The folder keeps its games."
+msgid "Take %s off the recompiled library? The folder keeps its games."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Take %s off the dumps library? The folder keeps its games."
 msgstr ""
 
 #: src/gui/main.c
@@ -1071,18 +1078,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "The theme, the menu's letters, the theme editor and the folders"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Del or Enter asks to take it off the list; the folder keeps its games"
-msgstr ""
-
-#: src/gui/main.c
-msgid "not found"
-msgstr ""
-
-#: src/gui/main.c
-msgid "+ subfolders"
 msgstr ""
 
 #: src/gui/main.c
@@ -1127,6 +1122,34 @@ msgid "Could not make %s"
 msgstr ""
 
 #: src/gui/main.c
+msgid "The app's folders"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Recompiled library"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Dumps library"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Del or Enter asks to take it off the library; the folder keeps its games"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Pick, drop or paste a folder of recompiled games: Games lists them too"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Pick, drop or paste a folder of dumps: Games lists them too"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Main"
+msgstr ""
+
+#: src/gui/main.c
 msgid "outside the app"
 msgstr ""
 
@@ -1144,12 +1167,19 @@ msgid "%s, %s free. %s"
 msgstr ""
 
 #: src/gui/main.c
-msgid "All back to the defaults"
+msgid "Extra"
 msgstr ""
 
 #: src/gui/main.c
-#, c-format
-msgid "Folders: %s"
+msgid "not found"
+msgstr ""
+
+#: src/gui/main.c
+msgid "+ subfolders"
+msgstr ""
+
+#: src/gui/main.c
+msgid "All back to the defaults"
 msgstr ""
 
 #: src/gui/main.c
@@ -1212,7 +1242,11 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Library: the folder picker could not open: %s"
+msgid "Folders: the folder picker could not open: %s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Drop it on the folder it takes the place of, or on a library's row"
 msgstr ""
 
 #: src/gui/main.c src/gui/settings.c
@@ -1336,7 +1370,11 @@ msgid "Paste one local folder's path"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Data, games and extractions"
+msgid "Each library's Extras are listed after its Main"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Data, Extractions and the recompiled library's Main"
 msgstr ""
 
 #: src/gui/main.c
@@ -1353,10 +1391,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "As All >"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Pick, drop or paste a folder of games"
 msgstr ""
 
 #: src/gui/main.c
@@ -1740,6 +1774,10 @@ msgid "Picks of Settings > App"
 msgstr ""
 
 #: src/gui/main.c
+msgid "The libraries' folders"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Closing ScarletNX"
 msgstr ""
 
@@ -1876,6 +1914,26 @@ msgid "Ready"
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "%s: into which folder of the recompiled library?"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "  %s free"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "  picked, %s free"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "  default, %s free"
+msgstr ""
+
+#: src/gui/main.c
 msgid "That path is not a readable file. Try again or press ESC."
 msgstr ""
 
@@ -1973,7 +2031,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s It is in Settings > App > Library."
+msgid "%s It is in Settings > App > Folders."
 msgstr ""
 
 #: src/gui/main.c
@@ -2128,11 +2186,6 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Refreshed: %d folders, %d not found"
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
 msgid "%s%s %s is not there"
 msgstr ""
 
@@ -2142,12 +2195,12 @@ msgid "%s%s %s, made when needed"
 msgstr ""
 
 #: src/gui/main.c
-#, c-format
-msgid "Refreshed: %s"
+msgid "Data, Recompiled and Extractions are there"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Refreshed: Data, Recompiled and Extractions are there"
+#, c-format
+msgid "Refreshed: %s; dumps/ and %d Extra(s), %d not found"
 msgstr ""
 
 #: src/gui/main.c
@@ -2157,10 +2210,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Drop one local folder"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Drop it on the folder it takes the place of"
 msgstr ""
 
 #: src/gui/main.c
@@ -2727,6 +2776,18 @@ msgstr ""
 
 #: src/common/utilities/setup.c
 msgid "recompiled/, and dumps/ for the dumps"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "The launcher's folders of games"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "a line of folders.txt, a path alone"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "each folder in the recompiled or the dumps library, as its games say"
 msgstr ""
 
 #: src/nx/runtime/settings.txt
