@@ -665,6 +665,9 @@ int mem_alias_map(u64 dst, u64 src, u64 size, u32 state, u32 perm) {
 int mem_alias_unmap(u64 dst, u64 size, u64 back) {
     if (!page_range(&dst, &size) || (back && (back >= AS_END || size > AS_END - back))) return MEM_BADSTATE;
     mapping_begin();
+    /* what the GPU holds of back lands before the copy writes it (an alias that is a copy leaves back mapped alone,
+       so an engine may own it), with the producer's lock held but not mem.c's */
+    if (back) own_acquire(back, size);
     mem_lock();
     if (back && !any_pool_nl(dst, size)) memcpy(GP(back), GP(dst), size);
     unmap_nl(dst, size);

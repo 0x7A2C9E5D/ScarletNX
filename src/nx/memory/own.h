@@ -16,12 +16,17 @@ typedef struct {
 /* the producer's side (the renderer's): what owning, landing and letting go of a resource does */
 typedef struct {
     /* the n ranges' contents from their resources written to dst[i] (host memory that isn't trapped), done when it
-       returns: it waits for the GPU. Called with no lock of own.c's held, on any thread */
+       returns: it waits for the GPU. Called with the producer's lock held (lock) and none of own.c's, on any thread */
     void (*land)(const OwnRange* r, u8* const* dst, u32 n);
     void (*retain)(void* res);
-    void (*release)(void* res); /* may take the lock land takes */
-    /* the thread (plat_tid) holding the lock land needs, or 0: a fault on that thread can't be answered */
+    void (*release)(void* res); /* may take the producer's lock */
+    /* the thread (plat_tid) holding the producer's lock, or 0: its fault on an owned page can't be answered (the
+       landing needs that lock), and ends the process; one on a page no entry is on any more goes on */
     u32 (*busy_tid)(void);
+    /* the producer's lock (the renderer's vk_lock), reentrant: a landing takes it before it marks its entries, and
+       every own_begin and own_drop caller holds it */
+    void (*lock)(void);
+    void (*unlock)(void);
 } OwnHooks;
 
 /* 0 when the host can trap guest memory (plat_trap_init): own_begin can work from then on. -1: producers land their

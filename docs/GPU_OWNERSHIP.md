@@ -61,7 +61,7 @@ rather than landing in the signal handler.
 
 ## The ownership map
 
-`src/nx/gpu/own.c` (planned), over a `plat_trap_*` layer per host:
+`src/nx/memory/own.c`, over a `plat_trap_*` layer per host:
 
 | Call | What |
 | --- | --- |
@@ -73,13 +73,21 @@ rather than landing in the signal handler.
 - Ranges are byte exact, keyed by their pool offset so every alias of a page finds the same owner. A sorted array or
   interval tree under a leaf lock, an atomic "anything owned" flag and a page bitmap keep the common path (nothing
   owned) a load and a branch in `gmem_*`.
-- Lock order: `vk_lock`, then the map's lock. The handler takes `vk_lock`, marks the trap landing, lands, and takes the
-  map's lock again to finish. It takes no kernel, memory or service lock, so a thread holding those may fault. That
-  holds only while no thread holding `vk_lock` waits for one of those locks: a guest thread holding the kernel's lock
-  faults, the handler waits for `vk_lock`, and its holder waits for the kernel's lock. A syncpoint a release performs
-  under `vk_lock` signals the kernel events waiting for it once `vk_lock` is let go (`syncpt_add_quiet`).
-- A fault on the thread holding `vk_lock` (the GPU thread touching an owned range) is a bug in the runtime: fatal, with
-  the range and the PC.
+- Lock order: `vk_lock`, then mem.c's lock, then the trap lock, then the map's lock. A landing takes `vk_lock` before
+  it marks its entries, lands them, lets their pages go and releases their resources, then lets `vk_lock` go. Every
+  thread that waits for a mark (publishing, dropping or landing the same bytes) holds `vk_lock` too, so the mark it
+  waits for is never another thread's that waits for `vk_lock` in turn.
+- Who may fault on owned memory: a thread holding the kernel's lock may, since a landing takes none. That holds only
+  while no thread holding `vk_lock` waits for the kernel's lock: the guest thread faults, the handler waits for
+  `vk_lock`, and its holder waits for the kernel's lock. A syncpoint a release performs under `vk_lock` signals the
+  kernel events waiting for it once `vk_lock` is let go (`syncpt_add_quiet`, `syncpt_events`). Leaf locks such as
+  nvdrv's `sync_lk` and the GPU queue's lock are taken under `vk_lock`, and no holder of one faults. A thread holding
+  mem.c's lock may not fault, since `vk_lock` holders wait for it (publishing, every mapping change): mem.c lands what
+  it touches first (`own_acquire`).
+- A fault by the thread holding `vk_lock` on an owned range is a bug in the runtime (the GPU thread touching it
+  without `own_acquire`): fatal, with the range, when that thread is waiting in the fault. A late fault message, from a
+  thread that has taken `vk_lock` since, lands as any other. Its fault on a page no entry is on any more (landed, not
+  let go yet) goes on.
 - Landing is a memcpy into the mirror. A producer's GPU copy keeps the range's layout (block linear surfaces are
   swizzled on the GPU), and covers the range's padding: it is filled from guest memory when the producer takes the
   range.

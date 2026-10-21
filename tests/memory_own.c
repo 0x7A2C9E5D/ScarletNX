@@ -17,8 +17,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/prctl.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
 #include <unistd.h>
 
 static unsigned checks;
@@ -75,8 +78,17 @@ static void land(const OwnRange* r, u8* const* dst, u32 n) {
     __atomic_add_fetch(&g_lands, 1, __ATOMIC_RELAXED);
 }
 static void retain(void* res) { __atomic_add_fetch(&((Res*)res)->refs, 1, __ATOMIC_RELAXED); }
-static void release(void* res) { __atomic_sub_fetch(&((Res*)res)->refs, 1, __ATOMIC_RELAXED); }
+static u64 g_release_touch; /* a guest address the release reads, 0 for none: test_release_order's */
+static int g_release_read;
+static void release(void* res) {
+    __atomic_sub_fetch(&((Res*)res)->refs, 1, __ATOMIC_RELAXED);
+    if (g_release_touch) g_release_read = *(volatile u8*)GP(g_release_touch);
+}
 static u32 busy_tid(void) { return g_busy_tid; }
+/* the producer's lock: recursive, as the renderer's */
+static pthread_mutex_t g_producer;
+static void producer_lock(void) { pthread_mutex_lock(&g_producer); }
+static void producer_unlock(void) { pthread_mutex_unlock(&g_producer); }
 static Res* res_new(u64 size, u8 fill) {
     Res* r = (Res*)calloc(1, sizeof *r);
     u64 i;
@@ -263,8 +275,13 @@ static int busy_child(void) {
     u64 a = region(R0 + 0x500000, 0x2000);
     Res* r = res_new(0x1000, 0x10);
     /* no core of the abort it expects: its address space is the guest's whole reservation, which a core_pattern pipe
-       (systemd-coredump) takes minutes to read, and the test waits for the abort */
-    prctl(PR_SET_DUMPABLE, 0);
+       (systemd-coredump) takes minutes to read, and the test waits for the abort. A zero limit for a core written to
+       a file, and on Linux not dumpable at all, as a pipe takes the core whatever the limit */
+    struct rlimit none = {0, 0};
+    CHECK(setrlimit(RLIMIT_CORE, &none) == 0);
+#if defined(__linux__)
+    CHECK(prctl(PR_SET_DUMPABLE, 0) == 0);
+#endif
     alarm(10);
     if (own_begin(a, 0x1000, r, 0)) return 2;
     g_busy_tid = plat_tid();
@@ -280,6 +297,36 @@ static void test_busy(const char* self) {
         _exit(5);
     }
     CHECK(waitpid(pid, &status, 0) == pid && WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
+}
+
+/* a landing lets its pages go before it releases the resources: the trap thread lands this one (the main thread's
+   read faults), and its release reads the landed page, which would fault on the trap thread itself, with nothing to
+   answer it, if the page were still armed */
+static void test_release_order(void) {
+    u64 a = region(R0 + 0x700000, 0x2000);
+    Res* r = res_new(0x1000, 0x50);
+    CHECK(own_begin(a, 0x1000, r, 0) == 0);
+    g_release_touch = a + 7;
+    CHECK(GP(a)[7] == 0x57 && g_release_read == 0x57 && r->refs == 0);
+    g_release_touch = 0;
+    CHECK(mem_unmap(a, 0x2000) == 0);
+    res_free(r);
+}
+
+/* the producer's lock holder faulting on a page that is armed with no entry on it (a landing's, cut and not let go
+   yet) goes on: nothing has to land there */
+static void test_busy_unowned(void) {
+    u64 a = region(R0 + 0x800000, 0x2000);
+    Res* r = res_new(0x1000, 0x60);
+    CHECK(own_begin(a, 0x1000, r, 0) == 0);
+    own_drop(a, 0x1000); /* the pool keeps the CPU's bytes, and the page is let go */
+    CHECK(r->refs == 0 && plat_trap_arm(GP(a), 0x1000) == 0);
+    g_busy_tid = plat_tid();
+    CHECK(GP(a)[9] == 0x1A); /* the CPU's byte, 0x11 + 9 */
+    g_busy_tid = 0;
+    plat_trap_disarm(GP(a), 0x1000);
+    CHECK(mem_unmap(a, 0x2000) == 0);
+    res_free(r);
 }
 
 /* many threads fault on many owned pages at once while the owners change between rounds */
@@ -318,7 +365,17 @@ static void test_stress(void) {
 }
 
 int main(int argc, char** argv) {
-    OwnHooks h = {land, retain, release, busy_tid};
+    OwnHooks h = {.land = land,
+                  .retain = retain,
+                  .release = release,
+                  .busy_tid = busy_tid,
+                  .lock = producer_lock,
+                  .unlock = producer_unlock};
+    pthread_mutexattr_t recursive;
+    pthread_mutexattr_init(&recursive);
+    pthread_mutexattr_settype(&recursive, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&g_producer, &recursive);
+    pthread_mutexattr_destroy(&recursive);
     if (sysconf(_SC_PAGESIZE) != 4096) {
         printf("skipped: this host's pages are %ld bytes, and the pool needs 4 KiB ones\n", sysconf(_SC_PAGESIZE));
         return 77;
@@ -336,6 +393,8 @@ int main(int argc, char** argv) {
     test_stage();
     test_view();
     test_busy("/proc/self/exe");
+    test_release_order();
+    test_busy_unowned();
     test_stress();
     CHECK(!g_own_any);
     printf("memory_own: %u checks passed (%d landings, %d bytes)\n", checks, g_lands, g_landed_bytes);

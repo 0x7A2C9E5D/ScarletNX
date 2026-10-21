@@ -7,12 +7,15 @@
    only (mem_own_prepare): a second mapping of them lands them first, so a fault has one entry to find.
 
    Locks: the producer's (the renderer's vk_lock), then mem.c's, then g_trap_lk, then g_own_lk, which is never held
-   across landing,
-   a resource's release or a wait for the GPU. An entry being landed is marked, and whoever else needs it waits for
-   g_own_cv; the landing itself runs with no lock of ours held, so a thread holding mem.c's or the kernel's locks may
-   fault on owned memory, as long as no holder of the producer's lock waits for those (nvdrv.c's syncpt_add_quiet).
-   One holding the producer's lock may not (the fault is answered on another thread, which needs it): own_fault ends
-   the process with the address, as that is a bug in the runtime */
+   across landing, a resource's release or a wait for the GPU; the producer's lock is never taken under g_trap_lk or
+   g_own_lk. A landing takes the producer's lock before it marks its entries, and holds it until they are let go and
+   released: every thread that waits on g_own_cv for a mark (own_begin, own_drop, a landing) holds that lock too, so
+   the mark is its own, never one of a thread that waits for the lock in turn. The landing runs with no lock of ours
+   held, so a thread holding the kernel's lock may fault on owned memory, as long as no holder of the producer's lock
+   waits for the kernel's (nvdrv.c's syncpt_add_quiet). One holding mem.c's lock may not: holders of the producer's
+   lock wait for it (own_begin, every mapping change), so mem.c lands what it touches first (own_acquire). Nor may one
+   holding the producer's lock, on an owned page (its landing needs the lock): own_fault ends the process with the
+   address, as that is a bug in the runtime. Its fault on a page no entry is on any more goes on */
 #include <stdlib.h>
 #include <string.h>
 #include "nx/memory/own.h"
@@ -163,7 +166,21 @@ static void let_go(u64 lo, u64 hi) {
     pm_unlock(&g_trap_lk);
 }
 
-/* every entry on the host pages [lo, hi) landed and let go, the pages with them */
+/* whether an entry is on [lo, hi) */
+static int owned_nl(u64 lo, u64 hi) {
+    u32 i = first_after_nl(lo);
+    return i < g_nown && g_own[i].lo < hi;
+}
+static void producer_lock(void) {
+    if (g_hooks.lock) g_hooks.lock();
+}
+static void producer_unlock(void) {
+    if (g_hooks.unlock) g_hooks.unlock();
+}
+
+/* every entry on the host pages [lo, hi) landed and let go, the pages with them. The producer's lock is taken only
+   when entries are there (a fault with none, the trap thread's, never waits for it), before any is marked, then the
+   entries are looked for again: they may have landed or changed while it waited */
 static void land_pages(u64 lo, u64 hi) {
     for (;;) {
         OwnRange* r;
@@ -171,13 +188,20 @@ static void land_pages(u64 lo, u64 hi) {
         u8* mirror = plat_alias_mirror();
         u64 elo = lo, ehi = hi;
         u32 i, first, n = 0;
+        int any;
         ResList rel = {0};
+        pm_lock(&g_own_lk);
+        any = owned_nl(lo, hi);
+        pm_unlock(&g_own_lk);
+        if (!any) return;
+        producer_lock();
         pm_lock(&g_own_lk);
         while (landing_nl(lo, hi)) pc_wait(&g_own_cv, &g_own_lk, -1);
         first = first_after_nl(lo);
         for (i = first; i < g_nown && g_own[i].lo < hi; i++) n++;
         if (!n) {
             pm_unlock(&g_own_lk);
+            producer_unlock();
             return;
         }
         /* what one publish made lands whole (it is split by the pool's runs): the entries beside these that continue
@@ -211,41 +235,45 @@ static void land_pages(u64 lo, u64 hi) {
         pm_unlock(&g_own_lk);
         free(r);
         free(dst);
-        /* the pages go before the resources: a release takes the producer's lock, and a thread holding it may read
-           these pages now that no entry is on them (own_stage), faulting until they go */
+        /* the pages go before the resources: no page is left armed with no entry on it past this landing (own_stage
+           reads such a page directly) */
         let_go(elo & ~(g_page - 1), (ehi + g_page - 1) & ~(g_page - 1));
         res_release(&rel);
+        producer_unlock();
     }
 }
 
 /* ---------------------------------------------------------------- traps */
 static void own_fault(u8* p, int write, u32 tid) {
-    u64 a = (u64)(p - g_mem);
+    u64 a = (u64)(p - g_mem), page = a & ~(g_page - 1);
     (void)write;
     if (p < g_mem || a >= AS_SIZE) { /* not the guest's memory: nothing of ours, let it go */
         plat_trap_continue(p, g_page);
         return;
     }
-    /* The producer's lock holder faulted. On a page no entry is on any more, landed and cut but not let go yet, it
-       waits only for let_go, which needs no lock of its (and may have woken it already, this message being late): the
-       page goes on. On an owned page nothing can land it */
-    if (tid && g_hooks.busy_tid && tid == g_hooks.busy_tid()) {
+    for (;;) {
         int owned;
+        /* A page no entry is on goes on: landed meanwhile (the message is late), or cut and not let go yet. Checked
+           and let go under g_trap_lk, so an owner can't arm it between the two: own_begin arms under it */
+        pm_lock(&g_trap_lk);
         pm_lock(&g_own_lk);
-        owned = page_owned_nl(a & ~(g_page - 1));
+        owned = page_owned_nl(page);
         pm_unlock(&g_own_lk);
-        if (!owned) {
-            plat_trap_continue(p, g_page);
-            return;
-        }
+        if (!owned) plat_trap_continue(p, g_page);
+        pm_unlock(&g_trap_lk);
+        if (!owned) return;
+        /* An owned page faulted by the producer's lock holder: nothing can land it while that thread waits here. The
+           holder is asked now, not when it faulted: a late message's thread may have taken the lock since, and
+           republished the page, so it ends the process only when that thread is waiting in a fault (or it can't be
+           told); otherwise the landing waits for the lock as any other */
+        if (tid && g_hooks.busy_tid && tid == g_hooks.busy_tid() && plat_thread_in_fault(tid) != 0)
+            fatal("Thread %u touched GPU-owned guest memory at %llx while it held the renderer: the runtime must call "
+                  "own_acquire first",
+                  tid, (unsigned long long)a);
+        /* never under g_trap_lk: the landing takes the producer's lock. A page owned again by the time it is done (a
+           republish) lands again */
+        land_pages(page, page + g_page);
     }
-    if (tid && g_hooks.busy_tid && tid == g_hooks.busy_tid())
-        fatal("Thread %u touched GPU-owned guest memory at %llx while it held the renderer: the runtime must call "
-              "own_acquire first",
-              tid, (unsigned long long)a);
-    land_pages(a, a + g_page);
-    /* a page an entry no longer covered when the fault came (landed meanwhile) */
-    plat_trap_continue(p, g_page);
 }
 
 int own_init(const OwnHooks* h) {
@@ -323,7 +351,9 @@ u32 own_stage(u64 addr, u64 size, u8* dst, OwnRange* out, u32 max) {
     trapped = __atomic_load_n(&g_own_any, __ATOMIC_ACQUIRE) && first_after_nl(lo) < g_nown &&
               g_own[first_after_nl(lo)].lo < hi;
     pm_unlock(&g_own_lk);
-    if (!trapped) { /* no owner on its pages: nothing is trapped there */
+    /* No owner on its pages: read as they are. One just landed may still be armed until its landing lets it go; the
+       caller holds the producer's lock, which that landing holds until then, so none is armed here */
+    if (!trapped) {
         memcpy(dst, GP(addr), (size_t)size);
         return n;
     }
