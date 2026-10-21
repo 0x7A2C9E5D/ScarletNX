@@ -1068,6 +1068,10 @@ static void* context_pc(void* ctx) {
 static void crash_signal(int sig, siginfo_t* si, void* ctx) {
     int idle = 0;
     void* fault;
+    /* A SIGSEGV or SIGBUS no access raised: sent (kill, tgkill, sigqueue: si_code <= 0, si_addr then the sender's pid
+       and uid). A debugger sends one so when it detaches holding a fault it stopped a thread for (gdbserver: one of
+       the runtime's own traps below), and the access behind it, if any, faults again as the thread goes on */
+    if ((sig == SIGSEGV || sig == SIGBUS) && si->si_code <= 0) return;
     /* a write to memory frozen while it moves (plat_freeze): it goes on once the move is done */
     if ((sig == SIGSEGV || sig == SIGBUS) && frozen_wait(si->si_addr)) return;
     /* a fault inside the report itself */
