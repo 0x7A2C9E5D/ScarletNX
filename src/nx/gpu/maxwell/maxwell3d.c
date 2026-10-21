@@ -12,16 +12,31 @@
 #include "nx/hle/services/nvdrv.h"
 
 /* ------------------------------------------------------------ the record of GPU-side writes */
-/* Each write stamps a new generation on every 4 KiB page it covers, by GPU address and by the guest pages behind
-   them, since other GPU addresses can map the same guest memory. Exact per page: a texture is dirty only when a write
-   touched one of its own pages. Writers take the lock, readers don't (gpu_mem_dirty_since); the generation is
-   published with release order for those reads */
+/* Each write stamps a new generation on every 4 KiB page it covers, by GPU address: the pages written and every other
+   GPU page showing the same guest memory, found through the GMMU's index of mappings by guest address (gmmu_aliases)
+   when the write is recorded. Writes are recorded a few thousand times a frame and asked about tens of thousands of
+   times, so the aliasing is resolved on the side asked less, and a question reads one table with no translation. A
+   mapping change stamps the pages it changes (nvdrv.c's gmmu_change_end), so a GPU page newly showing guest memory
+   reads as written after anything asked before. Exact per page: a texture is dirty only when a write touched one of
+   its own pages. Writers take the lock, readers don't (gpu_mem_dirty_since); the generation is published with
+   release order for those reads.
+   SNX_ALIAS_CHECK keeps the guest-address table as well and has gpu_mem_dirty_since answer the old way too,
+   translating the range, warning when only that way finds a write */
 static PMutex g_wlk = PMUTEX_INIT;
 static WritePages g_wgpu, g_wcpu;
 static u64 g_wgen;
-/* calls fn on each run of contiguous guest memory behind [gva, gva + size), from gmmu_run: every draw asks this of
-   each render target, texture and buffer it binds, megabytes each, and a translation per page was the GPU thread's
-   largest cost in one game */
+static int g_wcheck = -1; /* SNX_ALIAS_CHECK, -1 until read */
+static int wcheck_on(void) {
+    int c = __atomic_load_n(&g_wcheck, __ATOMIC_RELAXED);
+    if (c < 0) { /* threads reading it at once all read the same */
+        const char* e = getenv("SNX_ALIAS_CHECK");
+        c = e && *e && *e != '0';
+        if (__atomic_exchange_n(&g_wcheck, c, __ATOMIC_RELAXED) < 0 && c)
+            LOG("gpu: SNX_ALIAS_CHECK: GPU-side writes are checked through the GMMU too\n");
+    }
+    return c;
+}
+/* calls fn on each run of contiguous guest memory behind [gva, gva + size), from gmmu_run */
 static void guest_runs(u64 gva, u64 size, int (*fn)(u64 cpu, u64 n, void* ctx), void* ctx) {
     u64 left = gva + size < gva ? ~(u64)0 - gva : size;
     while (left) {
@@ -34,8 +49,14 @@ static void guest_runs(u64 gva, u64 size, int (*fn)(u64 cpu, u64 n, void* ctx), 
         left -= n;
     }
 }
+static void stamp_alias(void* ctx, u64 gva, u64 n) { write_pages_stamp(&g_wgpu, gva, n, *(const u64*)ctx); }
+/* guest memory written: the GPU pages showing it */
+static void stamp_cpu(u64 cpu, u64 n, u64 gen) {
+    gmmu_aliases(cpu, n, stamp_alias, &gen);
+    if (wcheck_on()) write_pages_stamp(&g_wcpu, cpu, n, gen);
+}
 static int stamp_run(u64 cpu, u64 n, void* ctx) {
-    write_pages_stamp(&g_wcpu, cpu, n, *(const u64*)ctx);
+    stamp_cpu(cpu, n, *(const u64*)ctx);
     return 0;
 }
 void gpu_mem_written(u64 gva, u64 size) {
@@ -54,7 +75,7 @@ void gpu_mem_written_cpu(u64 cpu, u64 size) {
     if (!size) return;
     pm_lock(&g_wlk);
     gen = g_wgen + 1;
-    write_pages_stamp(&g_wcpu, cpu, size, gen);
+    stamp_cpu(cpu, size, gen);
     __atomic_store_n(&g_wgen, gen, __ATOMIC_RELEASE);
     pm_unlock(&g_wlk);
 }
@@ -75,9 +96,14 @@ static int dirty_run(u64 cpu, u64 n, void* ctx) {
 int gpu_mem_dirty_since(u64 since, u64 a, u64 sz) {
     DirtyAsk q;
     if (!sz || since >= __atomic_load_n(&g_wgen, __ATOMIC_ACQUIRE)) return 0;
+    if (write_pages_since(&g_wgpu, since, a, sz)) return 1;
+    if (!wcheck_on()) return 0;
     q.since = since;
-    q.dirty = write_pages_since(&g_wgpu, since, a, sz);
-    if (!q.dirty) guest_runs(a, sz, dirty_run, &q);
+    q.dirty = 0;
+    guest_runs(a, sz, dirty_run, &q);
+    if (q.dirty)
+        WARN_LIMIT(16, "gpu: guest memory behind GPU range %llx+%llx was written, but not stamped at its GPU pages\n",
+                   (unsigned long long)a, (unsigned long long)sz);
     return q.dirty;
 }
 
