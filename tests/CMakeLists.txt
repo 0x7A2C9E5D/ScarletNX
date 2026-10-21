@@ -1091,6 +1091,11 @@ add_executable(snx-test-variants variants.c)
 snx_test_target(snx-test-variants 11)
 target_link_libraries(snx-test-variants PRIVATE scarletnx-common)
 add_test(NAME variants COMMAND snx-test-variants)
+# the build-side reader of the runtime JIT's cache
+add_executable(snx-test-jit-cache jit_cache.c)
+snx_test_target(snx-test-jit-cache 11)
+target_link_libraries(snx-test-jit-cache PRIVATE snx_llvm)
+add_test(NAME jit_cache COMMAND snx-test-jit-cache)
 # the runtime JIT (jit_service.c): misses compiled, published and shared between threads, on that loader
 add_executable(snx-test-jit-service jit_service.c)
 snx_test_target(snx-test-jit-service 11)

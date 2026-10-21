@@ -6,6 +6,7 @@
 #endif
 #include "common/cpu/recompiler/llvm/jit_service.h"
 #include "common/utilities/common.h"
+#include "common/cpu/recompiler/llvm/jit_cache.h"
 #include "common/cpu/recompiler/llvm/code_loader.h"
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/llvm/rtlib_object.h"
@@ -486,10 +487,6 @@ static GuestFn unit_function(SnxU64 table, size_t i) {
 
 /* ---- the cache (Cache) ---- */
 
-#define CACHE_MAGIC  "SNXJIT01"
-#define RECORD_MAGIC 0x524A4E53u         /* "SNJR" */
-#define CACHE_MAX    ((size_t)256 << 20) /* a larger file starts over */
-
 static SnxU32 get32(const unsigned char* p) {
     return (SnxU32)p[0] | (SnxU32)p[1] << 8 | (SnxU32)p[2] << 16 | (SnxU32)p[3] << 24;
 }
@@ -577,17 +574,7 @@ static int hash_runs(const SnxCodeImage* images, size_t image_count, const unsig
 /* What the objects depend on beyond the code: the ABI, LLVM, the runtime library, the host CPU and its features (the
    code is compiled for them), the -O level, hooked direct calls and direct SVCs */
 static char* cache_key(const SnxJitService* s) {
-    char *cpu = LLVMGetHostCPUName(), *features = LLVMGetHostCPUFeatures(), *key;
-    size_t n = strlen(cpu) + strlen(features) + 160;
-    key = (char*)malloc(n);
-    if (key)
-        sprintf(key, "abi=%d llvm=%s rtlib=%016llx cpu=%s opt=%c hook=%d svc=%d features=%s", SNX_ABI,
-                LLVM_VERSION_STRING,
-                (unsigned long long)fnv(snx_rtlib_object, snx_rtlib_object_size, 0xCBF29CE484222325ULL), cpu,
-                s->config.opt, s->config.hook_direct_calls, s->config.direct_svc, features);
-    LLVMDisposeMessage(cpu);
-    LLVMDisposeMessage(features);
-    return key;
+    return snx_jit_cache_key(s->config.opt, s->config.hook_direct_calls, s->config.direct_svc);
 }
 
 /* the records of buffer (size bytes after the header), parsed until the first that isn't whole: their count, and the
@@ -599,7 +586,7 @@ static size_t cache_parse(Cache* c, size_t start, size_t size, size_t* used) {
         const unsigned char *body = c->buffer + at + 12, *p;
         CacheRecord* r;
         size_t name_length;
-        if (get32(c->buffer + at) != RECORD_MAGIC || length > size - at - 12 || size - at - 12 - length < 8 ||
+        if (get32(c->buffer + at) != SNX_JIT_RECORD_MAGIC || length > size - at - 12 || size - at - 12 - length < 8 ||
             fnv(body, (size_t)length, 0xCBF29CE484222325ULL) != get64(body + length))
             break;
         r = &c->records[count];
@@ -684,7 +671,7 @@ static void cache_open(SnxJitService* s) {
     key_length = strlen(key);
     header = 8 + 4 + key_length;
     if (f && !fseek(f, 0, SEEK_END)) length = ftell(f);
-    if (f && length >= (long)header && (size_t)length <= CACHE_MAX && !fseek(f, 0, SEEK_SET)) {
+    if (f && length >= (long)header && (size_t)length <= SNX_JIT_CACHE_MAX && !fseek(f, 0, SEEK_SET)) {
         size = (size_t)length;
         c->buffer = (unsigned char*)malloc(size);
         if (c->buffer && fread(c->buffer, 1, size, f) != size) {
@@ -693,7 +680,7 @@ static void cache_open(SnxJitService* s) {
         }
     }
     if (f) fclose(f);
-    if (c->buffer && (memcmp(c->buffer, CACHE_MAGIC, 8) || get32(c->buffer + 8) != key_length ||
+    if (c->buffer && (memcmp(c->buffer, SNX_JIT_CACHE_MAGIC, 8) || get32(c->buffer + 8) != key_length ||
                       memcmp(c->buffer + 12, key, key_length))) {
         free(c->buffer); /* another build or host's: of no use here */
         c->buffer = NULL;
@@ -721,7 +708,7 @@ static void cache_open(SnxJitService* s) {
             if (c->file) {
                 Out o;
                 memset(&o, 0, sizeof(o));
-                out_bytes(&o, CACHE_MAGIC, 8);
+                out_bytes(&o, SNX_JIT_CACHE_MAGIC, 8);
                 out32(&o, (SnxU32)key_length);
                 out_bytes(&o, key, key_length);
                 if (c->buffer) out_bytes(&o, c->buffer + header, used - header);
@@ -808,10 +795,10 @@ static void cache_append(SnxJitService* s, const SnxCodegen* codegen, const char
     out_bytes(&body, object, size);
     if (!body.failed) {
         h1 = fnv(body.bytes, body.size, 0xCBF29CE484222325ULL);
-        head[0] = (unsigned char)RECORD_MAGIC;
-        head[1] = (unsigned char)(RECORD_MAGIC >> 8);
-        head[2] = (unsigned char)(RECORD_MAGIC >> 16);
-        head[3] = (unsigned char)(RECORD_MAGIC >> 24);
+        head[0] = (unsigned char)SNX_JIT_RECORD_MAGIC;
+        head[1] = (unsigned char)(SNX_JIT_RECORD_MAGIC >> 8);
+        head[2] = (unsigned char)(SNX_JIT_RECORD_MAGIC >> 16);
+        head[3] = (unsigned char)(SNX_JIT_RECORD_MAGIC >> 24);
         for (i = 0; i < 8; ++i) head[4 + i] = (unsigned char)((SnxU64)body.size >> (8 * i));
         out64(&body, h1);
         if (!body.failed && (fwrite(head, 1, 12, s->cache.file) != 12 ||
