@@ -374,6 +374,7 @@ typedef struct Surf {
     VkPipelineStageFlags2 stage;
     VkAccessFlags2 access;
     u64 last_used;
+    u64 touched; /* when it last went to the recent end of its recency list: ties of last_used in the lists' order */
     u32 wgen;       /* render targets: bumped when drawn to */
     u64 wseq;       /* when its image last changed, counted across surfaces: of two over the same bytes, the higher
                        holds them (vk_surf_wrote) */

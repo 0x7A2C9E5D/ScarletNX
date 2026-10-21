@@ -59,10 +59,12 @@ static void lru_unlink(Surf* s) {
         g_lru[list].tail = s->lru_prev;
     s->lru = VK_LRU_NONE;
 }
+static u64 g_touched;
 void vk_surf_touch(Surf* s) {
     if (s->last_used == g_vk_present) return;
     s->last_used = g_vk_present;
     if (!s->lru) return;
+    s->touched = ++g_touched;
     int kind = lru_kind(s);
     lru_unlink(s);
     lru_link(s, kind);
@@ -78,6 +80,7 @@ void vk_surf_relist(Surf* s) {
     while (at && (i32)((u32)at->last_used - (u32)s->last_used) <= 0) at = at->lru_next;
     lru_unlink(s);
     s->lru = kind;
+    s->touched = ++g_touched; /* past the others of its last_used */
     s->lru_next = at;
     s->lru_prev = at ? at->lru_prev : g_lru[kind].tail;
     if (s->lru_prev)
@@ -91,6 +94,7 @@ void vk_surf_relist(Surf* s) {
 }
 static void lru_add(Surf* s, int kind) {
     s->last_used = g_vk_present;
+    s->touched = ++g_touched;
     lru_link(s, kind);
     g_held[kind].n++;
     g_held[kind].bytes += s->bytes;
@@ -844,10 +848,49 @@ void vk_rt_note_read(Surf* s) {
                   (unsigned long long)s->gva);
 }
 
+/* the GPU addresses showing a guest address (gmmu_aliases), up to RT_CPU_MAX: one more says there were more */
+#define RT_CPU_MAX 32
+typedef struct {
+    u64 gva[RT_CPU_MAX];
+    u32 n;
+} RtCpuAt;
+static void rt_cpu_at(void* ctx, u64 gva, u64 n) {
+    RtCpuAt* q = ctx;
+    (void)n;
+    if (q->n < RT_CPU_MAX)
+        q->gva[q->n++] = gva;
+    else
+        q->n = RT_CPU_MAX + 1;
+}
+/* whether s, a target showing the frame, is a better one than best: of the frame's size, else any; the most recently
+   used of those, and of two used in the same present the one first used later, as the recency lists order them */
+static int rt_cpu_better(const Surf* s, int exact, const Surf* best, int best_exact) {
+    if (!best || exact != best_exact) return !best || exact > best_exact;
+    i32 d = (i32)((u32)s->last_used - (u32)best->last_used);
+    return d > 0 || (d == 0 && s->touched > best->touched);
+}
 Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h) {
-    /* the one of the frame's size, else any; the most recently used of those */
     Surf* best = NULL;
     int best_exact = 0;
+    RtCpuAt q;
+    /* Each present asked this of every render target, translating its address: 3,600 of them in one game, 1.5% of
+       its GPU thread. The GPU addresses showing the frame, from the guest side, find the live targets there instead */
+    q.n = 0;
+    gmmu_aliases(cpu_addr, 1, rt_cpu_at, &q);
+    if (q.n <= RT_CPU_MAX) {
+        for (u32 i = 0; i < q.n; i++) {
+            Surf* s = vk_rt_find(q.gva[i]);
+            if (!s || s->f.depth || s->layout == VK_IMAGE_LAYOUT_UNDEFINED || gmmu_translate(s->gva) != cpu_addr)
+                continue;
+            int exact = s->w == w && s->h == h;
+            if (rt_cpu_better(s, exact, best, best_exact)) {
+                best = s;
+                best_exact = exact;
+            }
+        }
+        if (best) vk_rt_note_read(best);
+        return best && best->layout != VK_IMAGE_LAYOUT_UNDEFINED ? best : NULL;
+    }
     for (int list = VK_LRU_RT + LRU_AGED; list >= VK_LRU_RT; list -= LRU_AGED)
         for (Surf* s = g_lru[list].head; s; s = s->lru_next) {
             if (s->f.depth || (s->gva >> 63) || s->layout == VK_IMAGE_LAYOUT_UNDEFINED ||
