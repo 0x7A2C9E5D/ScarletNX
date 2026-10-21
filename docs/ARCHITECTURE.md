@@ -161,7 +161,7 @@ bump `SNX_ABI` for ABI changes. Version mismatches reject loading.
 | `hle/services/`, `hle/filesystem/` | Services, nvdrv, guest filesystem services |
 | `gpu/` and `gpu/maxwell/` | GPFIFO, Maxwell engine implementation, shaders, Vulkan renderer |
 | `gpu/video/` | host1x, NVDEC H.264 and VP9 decoding through FFmpeg, VIC |
-| `runtime/platform/` | Host APIs, SDL3/headless, input, screenshots, timed exit |
+| `runtime/platform/` | Host APIs, SDL3/headless, input, screenshots, timed exit, the in-game menu, the shader loading screen |
 
 ### Guest exec
 
@@ -187,9 +187,7 @@ service the runtime doesn't have gets sm's stand-in object, which answers every 
 2. Copy entries to GPU queue. `nv.submit_lk` orders fence promises and cross-channel submits. A submission's fence
    is the stream's first wait on the GPU thread, whoever increments it, and the ioctl returns at once, as nvgpu's does.
 3. GPU-thread dispatch: 3D, MME, compute, 2D, DMA, inline-to-memory. Draws -> `g_renderer` (`gpu/renderer.h`).
-   Shaders: Maxwell SASS -> SPIR-V (`gpu/shader/`). Before the game's first thread, `gpu/vk/pipeline.c` translates the
-   programs the game ships, found by NVN's code wrapper in its RomFS and executables (`gpu/shader/shipped.c`), into
-   `<id>.vkshipped`, which a draw's lookup reads from when it has no shader. Each channel's jobs run in order. A stream that waits (a semaphore
+   Shaders: Maxwell SASS -> SPIR-V (`gpu/shader/`). Each channel's jobs run in order. A stream that waits (a semaphore
    acquire, a syncpoint wait, its fence) parks its channel (`gpu_park`), even inside a macro, and the thread runs the
    other channels' jobs until the wait is met or times out. A release from another stream or a syncpoint increment
    wakes it, and a release the CPU writes is polled every 0.5 ms while nothing else can run.
@@ -197,6 +195,13 @@ service the runtime doesn't have gets sm's stand-in object, which answers every 
 5. vi waits on the fences no submission promised (a host1x engine's, the CPU's), then queues present (`gpu_call`)
    after the jobs of the channels that promised the others. Other channels' jobs don't hold it. The GPU thread checks
    the remaining fences. `present_buffer` uses the matching RT and vi's crop, or converts guest memory.
+
+The shader programs a game ships are translated at startup, on the renderer's shader file thread rather than the GPU
+thread, into `<id>.vkshipped` (`prepare_shaders`: before the game's first thread runs, behind main.c's loading screen,
+or in the background as it runs). `gpu/shipped_pass.c` walks the RomFS and the executables' segments, and
+`gpu/shader/shipped.c` finds the programs by NVN's code wrapper (or a bare NVN shader file's layout) in their bytes,
+and in the Yaz0 SARCs whose names list a shader container. `gpu/vk/pipeline.c` translates each into the file, which a
+draw's lookup reads from when it has no shader of its own.
 
 ### Renderer coherence + lifetime
 

@@ -19,7 +19,6 @@
 #include "nx/runtime/platform/vpad.h"
 #include "nx/runtime/platform/gamepad.h"
 #include "common/utilities/pad_sdl.h"
-#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,7 +37,7 @@
 static SDL_Window* g_win;
 /* the window's size in pixels, width | height << 32: the renderer reads it on its own thread, and one atomic keeps
    a width from one resize from pairing with the height of another */
-static _Atomic u64 g_wsize = 1280 | (720ull << 32);
+static u64 g_wsize = 1280 | (720ull << 32); /* atomic */
 static u64 keys_held;
 static u64 g_menu_held;      /* keyboard, scripted and on-screen buttons held while the menu had them */
 static u64 g_menu_held_pad0; /* No1's physical pad, tracked separately so a replacement has fresh presses */
@@ -47,10 +46,27 @@ static int g_fullscreen;
 static void set_fullscreen(int on);
 static int g_shot_req;
 static int g_audio_ready;
-static int g_hidden;         /* the app is in the background (Android) */
-static int g_given_up;       /* the window went to a fatal error's screen: the renderer presents nothing more */
-static char g_pressed[48];   /* backend_pressed's: the press since its last call, "" for none */
-static char g_title[256];    /* the game's name, for that screen */
+static int g_hidden;      /* the app is in the background (Android) */
+static int g_given_up;    /* the window went to a fatal error's screen: the renderer presents nothing more */
+static char g_title[256]; /* the game's name, for that screen */
+/* The press that skips main.c's prepare screen (backend_pressed), taken while that screen asks for one: from its
+   first call until the frontend's first pass once the game's first thread runs (frontend_frame), before the game
+   has drawn. It is that screen's alone: the press doesn't reach the menu or the game, nor do the moves and the lift
+   of a finger that pressed, and a pad's buttons held then reach the game only once let go. A pad's buttons and
+   triggers count from up to down only, so one held as the pad came (from the launcher) doesn't skip when SDL knew it
+   held as the screen began to listen (press_pad_held) */
+enum { PRESS_NONE, PRESS_KEY, PRESS_TOUCH, PRESS_BUTTON, PRESS_TRIGGER };
+static struct {
+    int listening;
+    int kind, code;      /* the press since the last call: PRESS_*, and the key's scancode or the pad's button */
+    SDL_TouchID touch;   /* a finger that pressed, by its device and id, whose moves and lift are the screen's too */
+    SDL_FingerID finger; /* (0 for none) */
+    struct {
+        SDL_JoystickID id; /* 0 for a free slot */
+        u32 held;          /* its buttons down (bit by SDL_GamepadButton), and its triggers past half (bits 30, 31) */
+    } pad[SNX_GAMEPADS];
+    char said[64];
+} g_press;
 static SDL_Haptic* g_buzzer; /* the phone's vibrator, for the on-screen controls' taps (Android) */
 static u32 g_generation;     /* the window's surface came back this many times */
 
@@ -143,11 +159,32 @@ void plat_audio_volume(PAudio* a, float volume) {
 /* the game's touch screen is g_settings.touch_screen: 0 nothing, 1 the fingers, 2 the fingers and the mouse's left
    button (ini key touch) */
 static u64 g_touch_ids[SNX_HID_TOUCHES]; /* the finger in each slot of g_hle.hid.touch */
+/* a finger (or the mouse) down, moved or up on the game's touch screen: under input_lock, which hid's update reads
+   the touch screen under (hid_take_input) */
+enum { TOUCH_DOWN, TOUCH_MOVE, TOUCH_UP };
+static void touch_set(int how, u64 id, const int picture[4], float px, float py) {
+    pm_lock(&g_hle.hid.input_lock);
+    if (how == TOUCH_DOWN)
+        touch_down(&g_hle.hid.touch, g_touch_ids, id, picture, px, py);
+    else if (how == TOUCH_MOVE)
+        touch_move(&g_hle.hid.touch, g_touch_ids, id, picture, px, py);
+    else
+        touch_up(&g_hle.hid.touch, g_touch_ids, id);
+    pm_unlock(&g_hle.hid.input_lock);
+}
 
-/* the touch screen's setting changed: the fingers or the mouse it no longer takes are lifted */
+/* the touch screen's setting changed (the .ini's setter, on the main thread): the fingers or the mouse it no longer
+   takes are lifted by the next video_poll, under the input_lock it holds already. Not here: the in-game menu sets it
+   from inside video_poll (overlay_controls), where taking the lock again would hang the thread */
+static int g_touch_lift;
 void backend_touch_mode_set(const IniOpt* o, const char* v) {
     (void)o;
     (void)v;
+    g_touch_lift = 1;
+}
+static void touch_lift(void) { /* under input_lock */
+    if (!g_touch_lift) return;
+    g_touch_lift = 0;
     if (!g_settings.touch_screen) g_hle.hid.touch.down = 0;
     if (g_settings.touch_screen != 2) touch_up(&g_hle.hid.touch, g_touch_ids, SNX_TOUCH_MOUSE);
 }
@@ -172,7 +209,7 @@ int backend_ini(const char* k, const char* v) {
 }
 
 static void wsize_set(int w, int h) {
-    if (w > 0 && h > 0) g_wsize = (u64)(u32)w | (u64)(u32)h << 32;
+    if (w > 0 && h > 0) __atomic_store_n(&g_wsize, (u64)(u32)w | (u64)(u32)h << 32, __ATOMIC_RELAXED);
 }
 /* the window's part clear of the system's bars, in pixels, x | y << 16 | w << 32 | h << 48, or 0 for all of it: set
    on the main thread with the size, read by the renderer on its own */
@@ -216,7 +253,7 @@ int backend_window_shown(void) {
 }
 u32 backend_window_generation(void) { return __atomic_load_n(&g_generation, __ATOMIC_ACQUIRE); }
 void backend_window_size(int* w, int* h) {
-    u64 s = g_opt_headless ? 0 : g_wsize;
+    u64 s = g_opt_headless ? 0 : __atomic_load_n(&g_wsize, __ATOMIC_RELAXED);
     *w = (int)(u32)s;
     *h = (int)(u32)(s >> 32);
 }
@@ -480,8 +517,8 @@ static int fatal_screen(const char* msg) {
     static const char* const how = "The game's log has what ran last: ";
     char log_url[3608];
 #endif
-    static SnxUiQuad quads[1024];
-    SnxUiList l = {quads, 0, 1024};
+    static SnxUiQuad quads[4096]; /* as many as the renderer's list: a long message's rows on a wide window */
+    SnxUiList l = {quads, 0, 4096};
     char name[256], what[1400], log_path[1200], said[1400], saved[1300] = "", *full;
     SnxOverlayError panel;
     SDL_FingerID finger = 0;
@@ -867,12 +904,10 @@ static void touch_finger(const SDL_Event* e) {
     ui_unlock();
     if (taken || !g_settings.touch_screen) return;
     touch_window(picture);
-    if (e->type == SDL_EVENT_FINGER_DOWN)
-        touch_down(&g_hle.hid.touch, g_touch_ids, finger_id(&e->tfinger), picture, px, py);
-    else if (e->type == SDL_EVENT_FINGER_MOTION)
-        touch_move(&g_hle.hid.touch, g_touch_ids, finger_id(&e->tfinger), picture, px, py);
-    else
-        touch_up(&g_hle.hid.touch, g_touch_ids, finger_id(&e->tfinger));
+    touch_set(e->type == SDL_EVENT_FINGER_DOWN     ? TOUCH_DOWN
+              : e->type == SDL_EVENT_FINGER_MOTION ? TOUCH_MOVE
+                                                   : TOUCH_UP,
+              finger_id(&e->tfinger), picture, px, py);
 }
 /* the mouse's left button as one more finger: on the on-screen controls when they are on, and on the touch screen
    when the touch option asks for it; positions come in window points */
@@ -887,7 +922,7 @@ static void touch_mouse(const SDL_Event* e) {
         ui_unlock();
         touch_window(picture);
         if (g_settings.touch_screen == 2 && (e->motion.state & SDL_BUTTON_LMASK))
-            touch_move(&g_hle.hid.touch, g_touch_ids, SNX_TOUCH_MOUSE, picture, e->motion.x * d, e->motion.y * d);
+            touch_set(TOUCH_MOVE, SNX_TOUCH_MOUSE, picture, e->motion.x * d, e->motion.y * d);
     } else if (e->button.which != SDL_TOUCH_MOUSEID && e->button.button == SDL_BUTTON_LEFT) {
         ui_lock();
         if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN)
@@ -897,11 +932,133 @@ static void touch_mouse(const SDL_Event* e) {
         ui_unlock();
         if (taken || g_settings.touch_screen != 2) return;
         touch_window(picture);
-        if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN)
-            touch_down(&g_hle.hid.touch, g_touch_ids, SNX_TOUCH_MOUSE, picture, e->button.x * d, e->button.y * d);
-        else
-            touch_up(&g_hle.hid.touch, g_touch_ids, SNX_TOUCH_MOUSE);
+        touch_set(e->type == SDL_EVENT_MOUSE_BUTTON_DOWN ? TOUCH_DOWN : TOUCH_UP, SNX_TOUCH_MOUSE, picture,
+                  e->button.x * d, e->button.y * d);
     }
+}
+/* the keys that skip: the letters, digits, Return, Backspace, Tab, Space and the punctuation after them, the arrows
+   and the keypad. Not Esc, which quits, the function keys (the runtime's own: F2 opens the menu), Home and the keys
+   around it, the lock and modifier keys, media keys or Android's back; nor a key with Ctrl, Alt or the system key, the
+   desktop's shortcuts (the system key alone skipped one run) */
+static int press_key(const SDL_KeyboardEvent* k) {
+    SDL_Scancode c = k->scancode;
+    return !k->repeat && !(k->mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
+           ((c >= SDL_SCANCODE_A && c <= SDL_SCANCODE_SLASH && c != SDL_SCANCODE_ESCAPE) ||
+            c == SDL_SCANCODE_NONUSBACKSLASH || /* the ISO layouts' key beside left shift */
+            c == SDL_SCANCODE_INTERNATIONAL1 || c == SDL_SCANCODE_INTERNATIONAL3 || /* JIS's Ro and Yen */
+            (c >= SDL_SCANCODE_RIGHT && c <= SDL_SCANCODE_UP) ||
+            (c >= SDL_SCANCODE_KP_DIVIDE && c <= SDL_SCANCODE_KP_PERIOD));
+}
+/* a pad's slot in g_press, by its id: a free one taken for one not seen yet (NULL when none is) */
+static u32* press_pad(SDL_JoystickID id) {
+    int i, free_at = -1;
+    for (i = 0; i < SNX_GAMEPADS; ++i) {
+        if (g_press.pad[i].id == id) return &g_press.pad[i].held;
+        if (!g_press.pad[i].id && free_at < 0) free_at = i;
+    }
+    if (free_at < 0) return NULL;
+    g_press.pad[free_at].id = id;
+    g_press.pad[free_at].held = 0;
+    return &g_press.pad[free_at].held;
+}
+/* What a pad holds as SDL knows it, which doesn't press until let go: from nothing for a pad just opened
+   (gamepad_open), else added to what was followed. SDL starts an opened pad at nothing and sends what it holds as
+   presses with the pad's first report. What SDL knows is taken when the screen begins to listen and when gamepad_close
+   opens a waiting pad (press_pads_held), so a report that came before then doesn't press. One that comes after does:
+   no event tells a pad's first report from a press */
+static void press_pad_held(SDL_JoystickID id, int opened) {
+    SDL_Gamepad* pad = SDL_GetGamepadFromID(id);
+    u32* held = pad ? press_pad(id) : NULL;
+    if (!held) return;
+    if (opened) *held = 0;
+    for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT && b < 30; ++b)
+        if (SDL_GetGamepadButton(pad, (SDL_GamepadButton)b)) *held |= 1u << b;
+    if (SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) >= SNX_PAD_TRIGGER) *held |= 1u << 30;
+    if (SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) >= SNX_PAD_TRIGGER) *held |= 1u << 31;
+}
+/* every open pad's (gamepad_close opens a waiting one in a freed slot without an event of its own) */
+static void press_pads_held(void) {
+    int n = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&n);
+    for (int i = 0; ids && i < n; i++) press_pad_held(ids[i], 0);
+    SDL_free(ids);
+}
+/* What the event is to the prepare screen's press: 1 when the screen takes it. Every pad's buttons and triggers are
+   followed, listening or not, so one held from before counts only once let go. While the menu or the controls' edit
+   mode is over the screen, they take what they would take over the game, and nothing presses */
+static int press_event(const SDL_Event* e) {
+    u32* held;
+    int bit, listening = g_press.listening && !overlay_shown() && !vpad_editing();
+    switch (e->type) {
+        case SDL_EVENT_GAMEPAD_REMOVED:
+            for (bit = 0; bit < SNX_GAMEPADS; ++bit)
+                if (g_press.pad[bit].id == e->gdevice.which) g_press.pad[bit].id = 0;
+            return 0;
+        case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+        case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+            int was;
+            if (e->gbutton.button >= 30 || !(held = press_pad(e->gbutton.which))) return 0;
+            was = (*held >> e->gbutton.button) & 1;
+            if (e->type == SDL_EVENT_GAMEPAD_BUTTON_UP) {
+                *held &= ~(1u << e->gbutton.button);
+                return 0;
+            }
+            *held |= 1u << e->gbutton.button;
+            /* not Home (the guide button), which opens the menu */
+            if (!listening || was || e->gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE) return 0;
+            g_press.kind = PRESS_BUTTON;
+            g_press.code = e->gbutton.button;
+            return 1;
+        }
+        case SDL_EVENT_GAMEPAD_AXIS_MOTION: { /* ZL and ZR, as far as the game holds them (SNX_PAD_TRIGGER) */
+            int over = e->gaxis.value >= SNX_PAD_TRIGGER;
+            if (e->gaxis.axis != SDL_GAMEPAD_AXIS_LEFT_TRIGGER && e->gaxis.axis != SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)
+                return 0;
+            if (!(held = press_pad(e->gaxis.which))) return 0;
+            bit = e->gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? 30 : 31;
+            if (!over) {
+                *held &= ~(1u << bit);
+                return 0;
+            }
+            if ((*held >> bit) & 1) return 0;
+            *held |= 1u << bit;
+            if (!listening) return 0;
+            g_press.kind = PRESS_TRIGGER;
+            g_press.code = bit == 30 ? 'L' : 'R';
+            return 1;
+        }
+        case SDL_EVENT_KEY_DOWN:
+            if (!listening || !press_key(&e->key)) return 0;
+            g_press.kind = PRESS_KEY;
+            g_press.code = e->key.scancode;
+            return 1;
+        /* A finger on the screen itself presses, or a pen's tip (SDL makes it a touch of a direct device,
+           SDL_PEN_TOUCHID), not a trackpad's (an indirect device), nor the mouse: the click that gives the window the
+           focus arrives as one, and so does the pen's. While the screen listens every pointer is its own: the
+           on-screen controls it hides (Home, Capture) take none */
+        case SDL_EVENT_FINGER_DOWN:
+            if (!listening) return 0;
+            if (!g_press.finger && SDL_GetTouchDeviceType(e->tfinger.touchID) == SDL_TOUCH_DEVICE_DIRECT) {
+                g_press.kind = PRESS_TOUCH;
+                g_press.touch = e->tfinger.touchID;
+                g_press.finger = e->tfinger.fingerID;
+            }
+            return 1;
+        case SDL_EVENT_FINGER_MOTION:
+        case SDL_EVENT_FINGER_UP:
+        case SDL_EVENT_FINGER_CANCELED:
+            if (g_press.finger && e->tfinger.fingerID == g_press.finger && e->tfinger.touchID == g_press.touch) {
+                if (e->type != SDL_EVENT_FINGER_MOTION) g_press.finger = 0;
+                return 1;
+            }
+            /* a lift goes on, so a finger that went down before the screen listened doesn't stay down in the game
+               (touch_up and vpad_up pass over one they don't know) */
+            return listening && e->type == SDL_EVENT_FINGER_MOTION;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_MOTION:
+        case SDL_EVENT_MOUSE_WHEEL: return listening;
+    }
+    return 0;
 }
 void video_poll(void) {
     SDL_Event e;
@@ -914,17 +1071,7 @@ void video_poll(void) {
     /* the menu had the controls when this poll began: the press that closes it (B) is in this poll's state */
     int menu_had = overlay_shown() || vpad_editing();
     while (!g_opt_headless && SDL_PollEvent(&e)) {
-        /* not the mouse's: the click that gives the window the focus arrives as one */
-        /* not a modifier, nor a key with Ctrl, Alt or the system key: the desktop's shortcuts (the system key alone
-           skipped one run) */
-        if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && e.key.key != SDLK_ESCAPE &&
-            !(e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
-            !(e.key.key >= SDLK_LCTRL && e.key.key <= SDLK_RGUI))
-            snprintf(g_pressed, sizeof g_pressed, "the key %s", SDL_GetKeyName(e.key.key));
-        else if (e.type == SDL_EVENT_FINGER_DOWN)
-            snprintf(g_pressed, sizeof g_pressed, "%s", "a touch");
-        else if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)
-            snprintf(g_pressed, sizeof g_pressed, "a gamepad's button %d", (int)e.gbutton.button);
+        if (press_event(&e)) continue;
         if (overlay_event(&e)) continue;
         switch (e.type) {
             case SDL_EVENT_QUIT: g_quit = 1; break;
@@ -981,11 +1128,17 @@ void video_poll(void) {
                 ui_unlock();
                 /* SDL leaves a held mouse button to the system's implicit grab, whose release may go to the window
                    that took the focus: the game's touch from the mouse lifts now (a later release finds it up) */
-                touch_up(&g_hle.hid.touch, g_touch_ids, SNX_TOUCH_MOUSE);
+                touch_set(TOUCH_UP, SNX_TOUCH_MOUSE, NULL, 0, 0);
                 break;
             case SDL_EVENT_JOYSTICK_ADDED: gamepad_detect(e.jdevice.which); break;
-            case SDL_EVENT_GAMEPAD_ADDED: gamepad_open(e.gdevice.which); break;
-            case SDL_EVENT_GAMEPAD_REMOVED: gamepad_close(e.gdevice.which); break;
+            case SDL_EVENT_GAMEPAD_ADDED:
+                gamepad_open(e.gdevice.which);
+                press_pad_held(e.gdevice.which, 1);
+                break;
+            case SDL_EVENT_GAMEPAD_REMOVED:
+                gamepad_close(e.gdevice.which);
+                press_pads_held();
+                break;
         }
     }
     /* the scripted presses act like keys, stick keys included. Bits 16..23 (the stick directions as buttons) can be
@@ -997,6 +1150,7 @@ void video_poll(void) {
     input_key_sticks(k, st);
     i32 lx = st[0], ly = st[1], rx = st[2], ry = st[3];
     pm_lock(&g_hle.hid.input_lock);
+    touch_lift();
     /* Each SDL slot is one guest Npad. Keyboard, scripted and on-screen input also drive No1. */
     static u32 previous_ids[SNX_GAMEPADS];
     pad0[0] = pad0[1] = pad0[2] = pad0[3] = 0;
@@ -1067,6 +1221,10 @@ void video_poll(void) {
     }
     input_stick_clamp(&lx, &ly);
     input_stick_clamp(&rx, &ry);
+    if (g_press.listening) { /* the loading screen's: a pad's buttons held then reach the game only once let go */
+        g_menu_held_pad0 |= g_hle.hid.pad1.buttons;
+        for (int i = 0; i < SNX_GAMEPADS - 1; i++) g_menu_held_extra[i] |= g_hle.hid.pad_extra[i].buttons;
+    }
     if (menu_had || overlay_shown() || vpad_editing()) { /* the game's menu, or the controls' edit mode, has them */
         g_menu_held = nonpad;
         g_menu_held_pad0 = g_hle.hid.pad1.buttons;
@@ -1104,15 +1262,39 @@ void video_poll(void) {
     pm_unlock(&g_hle.hid.input_lock);
 }
 
+char* backend_launcher_folder(void) {
+#ifdef SDL_PLATFORM_ANDROID
+    const char* files = SDL_GetAndroidInternalStoragePath();
+    return files ? snx_path_join(files, SNX_PORTABLE_DIR) : NULL;
+#else
+    return snx_strdup(g_exedir[0] ? g_exedir : ".");
+#endif
+}
 const char* backend_pressed(void) {
-    static char was[sizeof g_pressed];
-    if (!g_pressed[0]) return NULL;
-    memcpy(was, g_pressed, sizeof was);
-    g_pressed[0] = 0;
-    return was;
+    if (g_opt_headless) return NULL; /* no window, and SDL isn't started for one */
+    if (!g_press.listening) press_pads_held();
+    g_press.listening = 1;
+    switch (g_press.kind) {
+        case PRESS_KEY:
+            snprintf(g_press.said, sizeof g_press.said, "the key %s",
+                     SDL_GetKeyName(SDL_GetKeyFromScancode((SDL_Scancode)g_press.code, SDL_KMOD_NONE, false)));
+            break;
+        case PRESS_TOUCH: snprintf(g_press.said, sizeof g_press.said, "a touch"); break;
+        case PRESS_BUTTON: {
+            const char* name = SDL_GetGamepadStringForButton((SDL_GamepadButton)g_press.code);
+            snprintf(g_press.said, sizeof g_press.said, "a gamepad's button %s", name ? name : "?");
+            break;
+        }
+        case PRESS_TRIGGER: snprintf(g_press.said, sizeof g_press.said, "a gamepad's Z%c", (char)g_press.code); break;
+        default: return NULL;
+    }
+    g_press.kind = PRESS_NONE;
+    return g_press.said;
 }
 void frontend_frame(void) {
     char p[1200];
+    g_press.listening = 0; /* the game's first thread runs: its presses are its own */
+    g_press.kind = PRESS_NONE;
     /* the controls and the menu stay on the window while the game shows nothing new */
     if (g_renderer->refresh &&
         (overlay_shown() || vpad_shown() || __atomic_load_n(&g_settings.showcase, __ATOMIC_RELAXED)))

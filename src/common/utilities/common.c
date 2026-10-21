@@ -171,6 +171,14 @@ FILE* snx_fopen(const char* path, const char* mode) {
     return fopen(path, mode);
 #endif
 }
+int snx_path_is_full(const char* path) {
+#ifdef _WIN32
+    if (isalpha((unsigned char)path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) return 1;
+    return path[0] == '\\' && path[1] == '\\';
+#else
+    return path[0] == '/';
+#endif
+}
 char* snx_absolute(const char* path) {
 #ifdef _WIN32
     wchar_t *p = wide(path), *result, *final_path;

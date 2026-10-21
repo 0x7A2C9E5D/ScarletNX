@@ -155,7 +155,9 @@ void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, cons
 void gui_themes_scan(GuiThemes* themes, const char* const* dirs, size_t count);
 void gui_themes_free(GuiThemes* themes);
 /* The loading screen's look of the theme the launcher of a program in folder picked (its app.ini's [app] theme, from
-   the built-ins and its data folder's themes/; YoRHa, the launcher's own, until one is picked), for the runtime's
-   screens (main.h's snx_menu_run_theme) */
+   the built-ins, the themes/ of its data folder (Folders' pick, else the default) and those shipped beside the
+   running program, which is the launcher's own when the launcher started the run; YoRHa, the launcher's own, until
+   one is picked or when the picked one is no longer there), for the runtime's screens
+   (main.h's snx_menu_run_theme). out is all zeros, ink and page alike, when out of memory */
 void gui_run_theme(const char* folder, SnxRunTheme* out);
 #endif

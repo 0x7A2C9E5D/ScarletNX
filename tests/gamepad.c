@@ -4,6 +4,7 @@
    SDL mappings, per-slot and legacy combined input, common layouts, focus behavior, motion sensors, and a waiting pad
    taking a freed slot */
 #include "nx/runtime/platform/gamepad.h"
+#include "nx/runtime/platform/backend.h"
 #include "nx/runtime/options.h"
 #include "nx/runtime/platform/plat.h"
 #include "common/utilities/common.h"
@@ -15,6 +16,8 @@
 #include <stdarg.h>
 
 char g_confdir[1024], g_exedir[1024];
+/* sdl3.c's, as on the desktop: the launcher's files beside the program */
+char* backend_launcher_folder(void) { return snx_strdup(g_exedir[0] ? g_exedir : "."); }
 /* the last warning the backend logged */
 static char warned[512];
 void logf_(int lvl, const char* fmt, ...) {

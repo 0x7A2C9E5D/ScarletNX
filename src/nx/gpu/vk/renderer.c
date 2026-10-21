@@ -472,11 +472,6 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
                         "still to make\n",
                         (unsigned long long)early_made, (unsigned long long)early_hits,
                         (unsigned long long)early_left);
-                u64 shipped, shipped_used;
-                vk_pipeline_shipped_stats(&shipped, &shipped_used);
-                if (shipped)
-                    LOG("vulkan: %llu of the %llu shaders translated from the game's files found by its draws\n",
-                        (unsigned long long)shipped_used, (unsigned long long)shipped);
             }
             {
                 /* each memory heap's use and the driver's budget for it (VK_EXT_memory_budget), and our own memory in
@@ -743,6 +738,5 @@ const Renderer vk_renderer = {
     .save = vk_pipeline_save,
     .release_window = vk_window_release,
     .prepare = vk_pipeline_prepare,
-    .prepare_stop = vk_pipeline_prepare_stop,
 };
 const Renderer* g_renderer = &vk_renderer;

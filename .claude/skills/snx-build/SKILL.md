@@ -21,7 +21,8 @@ description: "Build the ScarletNX runtime and recompile games correctly, avoidin
    policy runs no scripts, so run `Set-ExecutionPolicy -Scope Process Bypass` in that window first.
 2. hactool is ours, in the tree (`src/nx/runtime/driver/hactool`, built by `cmake/hactool.cmake`), and runs inside
    `build/scarletnx -x Game.xci`.
-3. The build's last step copies the runtime to `games/<id>/<id>` for every `games/<id>/<id>_code.so`, and to
+3. The build's last step copies the runtime to `games/<id>/<name>` for every `games/<id>/<name>_code.so` (the game's
+   and its update's, `<id>_<update id>`), and to
    `games/<Game>` for an older version's `games/<Game>_code.so` (`cmake/deploy.cmake`). That is the binary that runs.
    The build prints `Runtime deployed to ...` for each: no line means no game got the new runtime.
 
@@ -52,8 +53,11 @@ under `games/` or in the scratchpad, never in a tracked folder of the repo. `--v
 turns on the Khronos validation layer when it is installed (Arch: `vulkan-validation-layers`, which the user
 installs). A screenshot (`--shot`) reads back the frame Vulkan presented, and its hash is in the
 log: compare a change against the build before it at the same frame (a boot logo, `--seconds 4 --script
-""`), on a quiet machine, since logos animate per frame. The first run after a translator change compiles every shader to SPIR-V and starts slower, which can make a
-script's timed presses miss; run again with the cache warm before suspecting the renderer.
+""`), on a quiet machine, since logos animate per frame. The first run after a rebuild that changes the
+runtime (a new commit, or any change in a tree with edits: `pf_key`) starts the shader files over, so it translates
+the game's own shaders again behind the loading screen (`prepare_shaders=2`) before `--seconds` starts counting, and
+every shader its draws use again; a script's timed presses can miss. Run again with the files warm before suspecting
+the renderer.
 
 ## Windows
 

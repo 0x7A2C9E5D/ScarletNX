@@ -589,15 +589,6 @@ static void next_theme(App* app, int step) {
 static const char* const place_names[GUI_PLACES] = {"data", "games", "work"};
 static const char* const place_labels[GUI_PLACES] = {SNX_TR_NOOP("Data"), SNX_TR_NOOP("Games"),
                                                      SNX_TR_NOOP("Extractions")};
-/* a path from the root: '/' first, or on Windows a drive's (C:\ or C:/) or a share's (\\host) */
-static bool full_path(const char* path) {
-#ifdef _WIN32
-    if (SDL_isalpha((unsigned char)path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) return true;
-    return path[0] == '\\' && path[1] == '\\';
-#else
-    return path[0] == '/';
-#endif
-}
 /* text_size's quarters of Auto (-1 to -3) as app.ini names them */
 static const char* const text_quarters[] = {"0.25", "0.5", "0.75"};
 /* Settings > App's picks, kept at once in app_file for the next start. The App's note, or the menu's message, says when
@@ -680,7 +671,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
         int place = GUI_PLACES;
         if (!strcmp(ini.section, "folders"))
             for (place = 0; place < GUI_PLACES && strcmp(key, place_names[place]); ++place) {}
-        if (place < GUI_PLACES && (!*value || full_path(value))) { /* nothing is the default */
+        if (place < GUI_PLACES && (!*value || snx_path_is_full(value))) { /* nothing is the default */
             free(places[place]);
             places[place] = *value ? snx_strdup(value) : NULL;
             continue;

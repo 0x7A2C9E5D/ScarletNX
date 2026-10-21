@@ -4,6 +4,7 @@
 #include "nx/runtime/platform/backend.h"
 #include "nx/runtime/platform/fatal_screen.h"
 #include "nx/runtime/platform/gamepad.h"
+#include "nx/runtime/platform/prepare_screen.h"
 #include "nx/runtime/platform/vpad.h"
 #include "gui_theme_colors.h"
 #include "common/utilities/pad_screen.h"
@@ -271,9 +272,10 @@ static int act(int i, int step) {
             g_settings.control_shown[c] = !all;
             vpad_store_shown(c);
         }
-    } else if (page == PAGE_CONTROLS && i == C_EDIT)
-        return OVERLAY_EDIT;
-    else if (page == PAGE_CONTROLS && i == C_BUTTONS)
+    } else if (page == PAGE_CONTROLS && i == C_EDIT) {
+        /* not over the loading screen, which hides the controls: they would be moved unseen */
+        if (!prepare_screen_shown()) return OVERLAY_EDIT;
+    } else if (page == PAGE_CONTROLS && i == C_BUTTONS)
         page_open(PAGE_BUTTONS);
     else if (page == PAGE_CONTROLS && i == C_RESET)
         vpad_reset_layout();
@@ -295,6 +297,7 @@ static int display_percent = 100; /* set on the event thread, read by the render
 void overlay_set_display_scale(float scale) {
     __atomic_store_n(&display_percent, scale > 0.0f ? (int)(scale * 100.0f) : 100, __ATOMIC_RELAXED);
 }
+int overlay_display_percent(void) { return __atomic_load_n(&display_percent, __ATOMIC_RELAXED); }
 void overlay_place(int sw, int sh, int* x, int* y, int* scale) {
     /* the tallest page sets the scale, so the letters keep their size from page to page: half the picture, or twice
        the display's scale as the menu's Text size Auto (src/gui) if that is more, within three quarters of it. A
@@ -492,7 +495,7 @@ int overlay_controls(u64 buttons, const i32 sticks[4], u64 ms) {
         seen = now;
         return OVERLAY_NONE;
     }
-    if (pressed & dirs)
+    if ((pressed & dirs) || !shown) /* a direction held as the menu opens waits as a fresh press would */
         next = ms + SNX_OVERLAY_REPEAT_DELAY;
     else if (shown && (now & dirs) && ms >= next) { /* held: the lowest direction again */
         pressed |= now & dirs & (~(now & dirs) + 1);
@@ -556,14 +559,16 @@ int overlay_tap(float x, float y, int sw, int sh) {
     if (r == d.shown) return OVERLAY_NONE;
     focus = d.top + r;
     col = (int)((x - at.box.x) / (8.0f * (float)at.scale));
-    /* a value's arrows: the left half of its last ten columns steps it down */
+    /* a value's row: a tap on its last five columns (the right arrow's) steps it up, a tap anywhere left of them
+       down */
     if (arrows(setting(focus))) return act(focus, col < at.cols - 5 ? -1 : 1);
     return act(focus, 0);
 }
 static u64 tap_id;   /* what went down off the on-screen controls, */
 static int tap_down; /* whose lift taps the menu */
 void overlay_pointer_down(u64 id, float x, float y, const int safe[4]) {
-    if (vpad_down(id, x, y, safe)) return;
+    /* the on-screen controls take no finger under the loading screen, where they aren't drawn (vk/ui.c) */
+    if (!prepare_screen_shown() && vpad_down(id, x, y, safe)) return;
     tap_id = id;
     tap_down = 1;
 }
@@ -588,150 +593,11 @@ static const char* pads_hint(char* out, size_t size) {
         snprintf(out, size, "%s", gamepad_name(0));
     return out;
 }
-/* ---- the shaders prepared before the game starts: the launcher's loading screen (src/gui/main.c render_steps) ---- */
-static struct {
-    SnxRunTheme theme;
-    char name[96], foot[96];
-    SnxPrepareStep step[SNX_PREPARE_STEPS];
-    char label[SNX_PREPARE_STEPS][32];
-    char note[SNX_PREPARE_NOTES][SNX_PREPARE_NOTE_SIZE];
-    int notes;
-    int steps;  /* 0: not shown */
-    u64 now_ms; /* the last update's, for the dots after the name and the time left */
-} prep;
-/* the YoRHa theme's [run] look, its colours from its theme.ini (gui_theme_colors.h) and the rest as it says them:
-   the launcher's own theme, for a runtime without the launcher to ask */
-static const SnxRunTheme prep_yorha = {SNX_GUI_THEME_YORHA_RUN_PAGE,
-                                       SNX_GUI_THEME_YORHA_RUN_INK,
-                                       SNX_GUI_THEME_YORHA_RUN_SOFT,
-                                       SNX_GUI_THEME_YORHA_RUN_DIM,
-                                       SNX_GUI_THEME_YORHA_RUN_FAILURE,
-                                       "YoRHa",
-                                       "BOOTING",
-                                       1,
-                                       1,
-                                       0,
-                                       1};
-void overlay_prepare(const SnxRunTheme* theme, const char* name, const SnxPrepareStep* steps, int n,
-                     const char (*notes)[SNX_PREPARE_NOTE_SIZE], int nnotes, const char* foot, u64 now_ms) {
-    int i;
-    prep.steps = n < 0 ? 0 : n > SNX_PREPARE_STEPS ? SNX_PREPARE_STEPS : n;
-    if (!prep.steps) return;
-    prep.theme = theme ? *theme : prep_yorha;
-    prep.now_ms = now_ms;
-    snprintf(prep.name, sizeof prep.name, "%s", name);
-    snprintf(prep.foot, sizeof prep.foot, "%s", foot);
-    prep.notes = nnotes < 0 ? 0 : nnotes > SNX_PREPARE_NOTES ? SNX_PREPARE_NOTES : nnotes;
-    for (i = 0; i < prep.notes; ++i) snprintf(prep.note[i], sizeof prep.note[i], "%s", notes[i]);
-    for (i = 0; i < prep.steps; ++i) {
-        prep.step[i] = steps[i];
-        snprintf(prep.label[i], sizeof prep.label[i], "%s", steps[i].label);
-        prep.step[i].label = prep.label[i];
-    }
-}
-static u32 prep_rgba(u32 rgb, u32 a) { return SNX_OVERLAY_RGBA(rgb, a); }
-/* text in the font's bytes, capitals as the launcher's loading screen writes the game's name and a step's detail */
-static float prep_text(SnxUiList* l, float x, float y, int s, const char* text, int upper, u32 rgb) {
-    char line[256], *q;
-    fatal_cp437(text, line, sizeof line);
-    for (q = line; upper && *q; ++q)
-        if (*q >= 'a' && *q <= 'z') *q = (char)(*q - 32);
-    return ui_text(l, x, y, s, line, prep_rgba(rgb, 0xFFu));
-}
-/* a step's progress as the theme's [run] progress says (steps.c gui_step_progress): "3 / 6", "50%", "01:23 left" */
-static void prep_progress(const SnxPrepareStep* st, u64 now_ms, char* out, size_t size) {
-    u32 done = st->value < st->total ? st->value : st->total;
-    u64 spent = now_ms > st->started_ms ? now_ms - st->started_ms : 0;
-    if (!st->total)
-        out[0] = 0;
-    else if (prep.theme.progress == 1)
-        snprintf(out, size, "%u%%", (unsigned)((u64)done * 100 / st->total));
-    else if (prep.theme.progress == 2 && (spent < 1000 || !done))
-        snprintf(out, size, "--:-- left");
-    else if (prep.theme.progress == 2) {
-        u64 left = spent * (st->total - done) / done / 1000;
-        snprintf(out, size, "%02u:%02u left", (unsigned)(left / 60 % 100), (unsigned)(left % 60));
-    } else
-        snprintf(out, size, "%u / %u", (unsigned)done, (unsigned)st->total);
-}
-static void prepare_draw(SnxUiList* l, int sw, int sh) {
-    const SnxRunTheme* t = &prep.theme;
-    static const char* const turn[] = {"", ".", "..", "..."};
-    u64 now = prep.now_ms;
-    int percent = 100; /* the step at work's, as the launcher's bar (gui_steps_percent): 100 once every one is done */
-    int s = sh / (16 * 30) > 1 ? sh / (16 * 30) : 1, i, rows;
-    float cw = 8.0f * (float)s, ch = 16.0f * (float)s, x, y;
-    char line[160], progress[32];
-    rows = sh / (int)ch;
-    ui_fill(l, 0, 0, (float)sw, (float)sh, prep_rgba(t->page, 0xFFu));
-    if (t->texture) /* the launcher's faint lines, white at 14 of 255, every four pixels */
-        for (y = 3; y < (float)sh; y += 4) ui_fill(l, 0, y, (float)sw, 1, prep_rgba(0xFFFFFFu, 14));
-    x = cw + prep_text(l, cw, ch, s, t->title, 0, t->ink);
-    snprintf(line, sizeof line, "%s%s", prep.name, turn[now / 400 % 4]);
-    prep_text(l, x + (t->title[0] ? cw : 0), ch, s, line, 1, t->soft);
-    for (i = 0; i < prep.steps; ++i) {
-        const SnxPrepareStep* st = &prep.step[i];
-        int last = i == prep.steps - 1;
-        u32 ink = st->done && !last ? t->soft : t->ink;
-        y = ch * (float)(3 + i);
-        prep_progress(st, now, progress, sizeof progress);
-        if (t->steps) { /* LABEL: DETAIL progress, ...OK once done */
-            snprintf(line, sizeof line, "%s:", st->label);
-            x = cw + prep_text(l, cw, y, s, line, 0, ink);
-            x += prep_text(l, x + cw, y, s, st->detail, 1, ink) + cw;
-            prep_text(l, x + cw, y, s, st->done ? "...OK" : progress, 0, t->ink);
-        } else { /* the console's: the line as the runtime says it */
-            snprintf(line, sizeof line, "%s %s%s%s", st->label, st->detail, progress[0] && !st->done ? ": " : "",
-                     st->done ? "" : progress);
-            prep_text(l, cw, y, s, line, 0, ink);
-        }
-        if (!st->done && percent == 100)
-            percent = st->total ? (int)((u64)(st->value < st->total ? st->value : st->total) * 100 / st->total) : 0;
-    }
-    { /* the latest lines under the steps, as the launcher's detailed loading screen shows a step's: as many as fit
-         above the bar, the newest last, each cut to the screen's width */
-        int first = 3 + prep.steps, room = rows - 5 - first + 1, k, from; /* to the row over the bar's divider */
-        int cols = sw / (int)cw - 4;
-        from = prep.notes - room > 0 ? prep.notes - room : 0;
-        for (k = from; k < prep.notes && cols > 3; ++k) {
-            char cut[SNX_PREPARE_NOTE_SIZE];
-            int len = (int)strlen(prep.note[k]);
-            if (len > cols) /* the launcher's way with a line too long for its row: cut, ending in ... */
-                snprintf(cut, sizeof cut, "%.*s...", cols - 3, prep.note[k]);
-            else
-                snprintf(cut, sizeof cut, "%s", prep.note[k]);
-            prep_text(l, 3 * cw, ch * (float)(first + k - from), s, cut, 0, t->soft);
-        }
-    }
-    { /* forty segments, filled for what the step at work has done, and the percentage: in every theme, as the screen
-         is there for its progress (the launcher's loading screen draws one only when its theme says bar) */
-        enum { SEGMENTS = 40 };
-        int cols = sw / (int)cw, k, filled = (percent * SEGMENTS + 50) / 100;
-        float span = (float)(cols - 8) * cw, gap = 2.0f * (float)s, seg = (span - gap * (SEGMENTS - 1)) / SEGMENTS;
-        float sy = ch * (float)(rows - 3) + ch * 0.3f;
-        ui_fill(l, cw, ch * (float)(rows - 4) + ch / 2, (float)(cols - 2) * cw, (float)s, prep_rgba(t->dim, 0xFFu));
-        for (k = 0; k < SEGMENTS; ++k) {
-            float sx = cw + (float)k * (seg + gap), sh4 = ch * 0.4f;
-            if (k < filled)
-                ui_fill(l, sx, sy, seg, sh4, prep_rgba(t->ink, 0xFFu));
-            else { /* framed in the dim colour */
-                ui_fill(l, sx, sy, seg, (float)s, prep_rgba(t->dim, 0xFFu));
-                ui_fill(l, sx, sy + sh4 - (float)s, seg, (float)s, prep_rgba(t->dim, 0xFFu));
-                ui_fill(l, sx, sy, (float)s, sh4, prep_rgba(t->dim, 0xFFu));
-                ui_fill(l, sx + seg - (float)s, sy, (float)s, sh4, prep_rgba(t->dim, 0xFFu));
-            }
-        }
-        snprintf(line, sizeof line, "%3d%%", percent);
-        prep_text(l, cw * (float)(cols - 6), ch * (float)(rows - 3), s, line, 0, t->ink);
-    }
-    prep_text(l, cw, ch * (float)(rows - 1), s, prep.foot, 0, t->soft);
-}
 void overlay_draw(SnxUiList* l, int sw, int sh) {
     static DialogRows rows_of; /* the renderer's */
     char text[VISIBLE][OVERLAY_COLS_MAX + 1], value[VISIBLE][OVERLAY_COLS_MAX + 1], pads[OVERLAY_COLS_MAX];
     Dialog d;
     DialogDrawn at;
-    if (prep.steps) prepare_draw(l, sw, sh);
     if (!shown) return;
     if (page == PAGE_MAP) {
         map_draw(l, sw, sh);

@@ -103,7 +103,15 @@ int unattended_ini(const char* k, const char* v) {
     return 1;
 }
 
-void unattended_start(void) { g_t0 = plat_ns(); }
+/* the presses start over too: a look at them before (the backend's, during main.c's prepare_wait) began a present
+   press, which would end before the game's presents reach it */
+void unattended_start(void) {
+    g_t0 = plat_ns();
+    for (size_t i = 0; i < g_script.n; i++) {
+        g_script.press[i].held_since = 0;
+        g_script.press[i].done = 0;
+    }
+}
 u64 unattended_ms(void) { return (plat_ns() - g_t0) / 1000000ull; }
 int unattended_active(void) { return g_settings.seconds > 0 || g_settings.frames >= 0; }
 

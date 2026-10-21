@@ -6,7 +6,6 @@
 #ifndef SNX_OVERLAY_H
 #define SNX_OVERLAY_H
 #include "nx/runtime/platform/ui.h"
-#include "common/utilities/run_theme.h"
 
 #define OVERLAY_COLS     40 /* the panel, in cells of the 8x16 font: the narrowest */
 #define OVERLAY_COLS_MAX 72 /* and the widest, as far as three quarters of the picture let it */
@@ -18,6 +17,7 @@ int overlay_shown(void);
 void overlay_toggle(void);
 /* the display's own scale (SDL's: dpi / 160 on a phone), which the panel's letters follow; 1 until told */
 void overlay_set_display_scale(float scale);
+int overlay_display_percent(void); /* that scale, in percent */
 /* where the panel goes on a picture of sw x sh pixels: its corner and the whole number it is scaled by */
 void overlay_place(int sw, int sh, int* x, int* y, int* scale);
 int overlay_select(void);      /* the focused item's action: a page, a setting changed, or an OVERLAY_ for the caller */
@@ -50,24 +50,6 @@ int overlay_pointer_up(u64 id, float x, float y, int sw, int sh);
 void overlay_pointer_cancel(u64 id);
 void overlay_pointers_reset(void);
 void overlay_draw(SnxUiList* l, int sw, int sh);
-/* The screen of the shaders prepared before the game starts (main.c's), drawn under the menu as the launcher draws its
-   loading screen, in its theme's [run] look: the theme's title and the game's name, a row for each step (a label, a
-   detail, value of total or none for total 0, done), a bar of the step at work, and foot at the bottom. theme
-   NULL is the YoRHa theme's look; n 0 hides the screen. notes: the latest lines of the work (oldest first), under
-   the steps as the launcher shows a step's, scrolling. now_ms: the time of the update, a monotonic clock's. Under
-   ui_lock; the strings are copied */
-#define SNX_PREPARE_NOTES     48
-#define SNX_PREPARE_NOTE_SIZE 256 /* a line's bytes, the row's width cutting it */
-#define SNX_PREPARE_STEPS     4
-typedef struct {
-    const char* label;
-    char detail[64];
-    u32 value, total;
-    u64 started_ms; /* when it began, for the theme's time left */
-    int done;
-} SnxPrepareStep;
-void overlay_prepare(const SnxRunTheme* theme, const char* name, const SnxPrepareStep* steps, int n,
-                     const char (*notes)[SNX_PREPARE_NOTE_SIZE], int nnotes, const char* foot, u64 now_ms);
 /* the columns the menu's pages and the stopped panel take at scale on a picture sw wide: as many as three quarters of it
    holds, within OVERLAY_COLS and OVERLAY_COLS_MAX */
 int overlay_cols(int sw, int scale);

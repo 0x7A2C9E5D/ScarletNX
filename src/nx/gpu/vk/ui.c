@@ -1,14 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The on-screen controls and the game's menu (runtime/platform/ui.h) over a presented frame: the quads they give,
-   blended onto the swapchain image in a pass of their own after the frame's blit. Nothing is recorded while neither
-   shows */
+/* The on-screen controls, the game's menu (runtime/platform/ui.h) and the shader loading screen before the game
+   (runtime/platform/prepare_screen.h) over a presented frame: the quads they give, blended onto the swapchain image
+   in a pass of their own after the frame's blit. Nothing is recorded while none shows */
 #include <stdlib.h>
 #include <string.h>
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/vk/ui_spv.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/overlay.h"
+#include "nx/runtime/platform/prepare_screen.h"
 #include "nx/runtime/platform/plat.h"
 #include "nx/runtime/platform/vpad.h"
 
@@ -265,8 +266,14 @@ void vk_ui_draw(VkCommandBuffer cb, VkImage sc, const int safe[4]) {
     if (!layout_make()) return;
     ui_lock();
     atlas_upload(cb);
-    vpad_draw(&list, safe);
-    vpad_showcase_draw(&list, safe, vpad_showcase_fps(g_vk_present, plat_ns()));
+    /* the screen before the game starts, under the menu, hides the on-screen controls: they aren't drawn under it,
+       where they would take quads for nothing (nor do they take fingers then, sdl3.c's press_event) */
+    if (prepare_screen_shown())
+        prepare_screen_draw(&list, sw, sh, safe, overlay_display_percent());
+    else {
+        vpad_draw(&list, safe);
+        vpad_showcase_draw(&list, safe, vpad_showcase_fps(g_vk_present, plat_ns()));
+    }
     overlay_draw(&list, sw, sh);
     ui_unlock();
     n = list.n;

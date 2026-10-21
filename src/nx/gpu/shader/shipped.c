@@ -27,12 +27,13 @@ static int ends_with(const char* s, const char* end);
 int shipped_name_skips(const char* name) {
     /* formats of their own, none a container of other files: sound (bars, bfstm, bfwav, bwav, bfsar, Wwise's bnk and
        wem), textures and pictures, models (bfres keeps its shaders in a bfsha), collision (kcl), parameters (byaml),
-       rumble (bnvib), messages, fonts, movies and text */
-    static const char* const ends[] = {".bars",  ".barslist", ".bfstm", ".bfwav", ".bwav",  ".bfsar", ".bnk",
-                                       ".wem",   ".bntx",     ".png",   ".jpg",   ".jpeg",  ".gif",   ".bmp",
-                                       ".bfres", ".kcl",      ".byaml", ".byml",  ".bnvib", ".msbt",  ".msbp",
-                                       ".bffnt", ".ttf",      ".otf",   ".mp4",   ".webm",  ".bk2",   ".usm",
-                                       ".ogg",   ".opus",     ".wav",   ".txt",   ".json",  ".xml",   ".csv"};
+       rumble (bnvib), messages, fonts, movies and text. And zstd streams (zs), which the walk doesn't decompress: one
+       game packs nearly all of its 304,251 files so, and opening each cost the walk 29 seconds */
+    static const char* const ends[] = {".bars",  ".barslist", ".bfstm", ".bfwav", ".bwav", ".bfsar", ".bnk",   ".wem",
+                                       ".bntx",  ".png",      ".jpg",   ".jpeg",  ".gif",  ".bmp",   ".bfres", ".kcl",
+                                       ".byaml", ".byml",     ".bnvib", ".msbt",  ".msbp", ".bffnt", ".ttf",   ".otf",
+                                       ".mp4",   ".webm",     ".bk2",   ".usm",   ".ogg",  ".opus",  ".wav",   ".txt",
+                                       ".json",  ".xml",      ".csv",   ".zs"};
     for (size_t k = 0; k < sizeof ends / sizeof *ends; k++)
         if (ends_with(name, ends[k])) return 1;
     return 0;
@@ -88,21 +89,31 @@ int shipped_sarc_count(const u8* d, size_t n) {
     size_t nodes, names, data;
     return sarc_tables(d, n, &count, &nodes, &names, &data) ? -1 : (int)count;
 }
-int shipped_sarc_entry(const u8* d, size_t n, int i, size_t* off, size_t* size, const char** name) {
+/* entry i's place in the data and its name, from the tables alone */
+static int sarc_node(const u8* d, size_t n, int i, u32* begin, u32* end, const char** name) {
     u32 count;
     size_t nodes, names, data;
     if (sarc_tables(d, n, &count, &nodes, &names, &data) || i < 0 || (u32)i >= count) return -1;
     const u8* node = d + nodes + (size_t)i * 16;
-    u32 attr = le32(node + 4), begin = le32(node + 8), end = le32(node + 12);
-    if (end < begin || end > n - data) return -1;
-    *off = data + begin;
-    *size = end - begin;
+    u32 attr = le32(node + 4);
+    *begin = le32(node + 8);
+    *end = le32(node + 12);
     *name = "";
-    if (attr >> 24 == 1) { /* a named node: its name at a multiple of 4 in SFNT's, ending before the data */
+    /* named when its top byte isn't 0 (it counts the names before it that hash alike): the name at a multiple of 4 in
+       SFNT's, ending before the data */
+    if (attr >> 24) {
         size_t at = names + (size_t)(attr & 0xFFFFu) * 4;
         if (at >= data || !memchr(d + at, 0, data - at)) return -1;
         *name = (const char*)d + at;
     }
+    return 0;
+}
+int shipped_sarc_entry(const u8* d, size_t n, int i, size_t* off, size_t* size, const char** name) {
+    u32 begin, end;
+    size_t data = shipped_sarc_head(d, n); /* within n once sarc_node read the tables */
+    if (sarc_node(d, n, i, &begin, &end, name) || end < begin || end > n - data) return -1;
+    *off = data + begin;
+    *size = end - begin;
     return 0;
 }
 static int ends_with(const char* s, const char* end) {
@@ -115,21 +126,30 @@ int shipped_sarc_wants(const u8* d, size_t n) {
     static const char* const ends[] = {".bnsh", ".bfsha", ".sharcb"};
     int count = shipped_sarc_count(d, n);
     if (count < 0) return -1;
-    for (int i = 0; i < count; i++) {
-        size_t off, size;
+    for (int i = 0; i < count; i++) { /* by the names alone: a Yaz0 one is decompressed as far as its tables to tell */
+        u32 begin, end;
         const char* name;
-        if (shipped_sarc_entry(d, n, i, &off, &size, &name)) return -1;
+        if (sarc_node(d, n, i, &begin, &end, &name)) return -1;
         for (size_t k = 0; k < sizeof ends / sizeof *ends; k++)
             if (ends_with(name, ends[k])) return 1;
     }
     return 0;
 }
 
+const char* shipped_stage_name(int stage) {
+    static const char* const names[] = {
+        "vertex", "tessellation control", "tessellation evaluation", "geometry", "fragment", "compute"};
+    return stage == SHIPPED_VERTEX_A                                   ? "paired vertex"
+           : stage >= 0 && stage < (int)(sizeof names / sizeof *names) ? names[stage]
+                                                                       : "?";
+}
 int shipped_sph_stage(const u8* sph) {
     u32 w = le32(sph), type = w & 0x1Fu, version = w >> 5 & 0x1Fu, shader = w >> 10 & 0xFu;
     if (version != 3) return -1;
     if (type == 2) return shader == 5 ? ST_FS : -1;
     if (type != 1) return -1;
+    /* type 0 a VertexA, as one game's runs showed: each of its programs of that type has a VertexB in a 256-byte slot
+       after it, and its draws found the shaders the pass merged from the two (gpu/vk/pipeline.c ship_dual) */
     return shader == 0   ? SHIPPED_VERTEX_A
            : shader == 1 ? ST_VS
            : shader == 2 ? ST_TCS

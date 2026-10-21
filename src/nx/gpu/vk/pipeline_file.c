@@ -9,10 +9,12 @@
 #include "nx/runtime/platform/log.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/vk/pipeline_file.h"
+#if !defined(_WIN32)
+#include <unistd.h> /* getpid */
+#endif
 
 #define PF_MAGIC   "SNXVKSH\n"
-#define PF_VERSION 2
-#define PF_REC     16 /* a record's header: type, payload bytes, check */
+#define PF_VERSION 1
 
 /* the check of a payload: words of it after its type and size (FNV-1a over 32-bit words, with a last mix) */
 static u64 pf_mix(u64 h, const void* p, size_t n) {
@@ -178,6 +180,21 @@ void pf_pipe(PFile* pf, const u64 modules[5], const void* key, u32 keylen) {
     pm_unlock(&pf->lock);
 }
 
+void pf_shipref(PFile* pf, u64 module, u64 at, u64 check) {
+    u64 words[2], c;
+    const void* piece[1];
+    size_t len[1];
+    words[0] = at;
+    words[1] = check;
+    piece[0] = words;
+    len[0] = sizeof words;
+    pm_lock(&pf->lock);
+    if (!pf_append(pf, PF_SHIPREF, piece, len, 1, &c)) {
+        pf->nsh++;
+        pf_map_add(pf, module, pf->nsh, c);
+    }
+    pm_unlock(&pf->lock);
+}
 void pf_scan(PFile* pf, u64 what, u64 id) {
     u64 words[2], check;
     const void* piece[1];
@@ -193,8 +210,11 @@ void pf_scan(PFile* pf, u64 what, u64 id) {
 
 /* the records in buf[at, size) in order, to load: how far they go while they check out */
 static size_t pf_read(PFile* pf, const u8* buf, size_t at, size_t size, const PfLoad* load, u32 loaded[2]) {
-    /* by shader record number (from 1): its check and module, for the pipeline records after it */
-    u64 *check = NULL, *module = NULL;
+    /* by shader record number (from 1, a PF_SHADER or a PF_SHIPREF): its check and module, for the pipeline records
+       after it */
+    struct {
+        u64 check, module;
+    }* rec = NULL;
     u32 cap = 0, n = 0;
     while (size - at >= PF_REC) {
         u32 type = pf_get32(buf + at), len = pf_get32(buf + at + 4);
@@ -203,29 +223,31 @@ static size_t pf_read(PFile* pf, const u8* buf, size_t at, size_t size, const Pf
         if (len % 8 || len > size - at - PF_REC) break;
         h = pf_end(pf_mix(pf_start(type, len), p, len));
         if (h != pf_get64(buf + at + 8)) break;
-        if (type == PF_SHADER) {
+        if (type == PF_SHADER || (type == PF_SHIPREF && len == 16)) {
             PfShader s;
-            u64 need, made;
-            if (len < sizeof s) break;
-            memcpy(&s, p, sizeof s);
-            need = sizeof s + (u64)s.ncbr * 16 + (u64)s.nspv * 4;
-            if (need > len || len - need >= 8 || s.stage > ST_FS || s.nspv < 5) break;
+            u64 made;
+            if (type == PF_SHADER) {
+                u64 need;
+                if (len < sizeof s) break;
+                memcpy(&s, p, sizeof s);
+                need = sizeof s + (u64)s.ncbr * 16 + (u64)s.nspv * 4;
+                if (need > len || len - need >= 8 || s.stage > ST_FS || s.nspv < 5) break;
+            }
             if (n + 1 >= cap) {
                 u32 c = cap ? cap * 2 : 1024;
-                u64* a = (u64*)realloc(check, c * sizeof *a);
-                if (!a) break;
-                check = a;
-                a = (u64*)realloc(module, c * sizeof *a);
-                if (!a) break;
-                module = a;
+                void* grown = realloc(rec, c * sizeof *rec);
+                if (!grown) break;
+                rec = grown;
                 cap = c;
             }
-            /* the reads and the words are 8-byte aligned in buf (malloc'd), past the fixed part's multiple of 8 */
-            made = load->shader(load->ctx, &s, (const u32*)(const void*)(p + sizeof s),
-                                (const u32*)(const void*)(p + sizeof s + (size_t)s.ncbr * 16));
+            /* the reads and the words are 8-byte aligned in buf (malloc'd), past the fixed part's multiple of 8. A
+               PF_SHIPREF names a shader record of the shipped file, by where it starts there and its check */
+            made = type == PF_SHADER ? load->shader(load->ctx, &s, (const u32*)(const void*)(p + sizeof s),
+                                                    (const u32*)(const void*)(p + sizeof s + (size_t)s.ncbr * 16))
+                                     : load->shipref(load->ctx, pf_get64(p), pf_get64(p + 8));
             n++;
-            check[n] = h;
-            module[n] = made;
+            rec[n].check = h;
+            rec[n].module = made;
             if (made) {
                 pf_map_add(pf, made, n, h);
                 loaded[0]++;
@@ -241,24 +263,21 @@ static size_t pf_read(PFile* pf, const u8* buf, size_t at, size_t size, const Pf
                 mods[i] = 0;
                 if (!q.sh[i]) continue;
                 /* a shader record before it, the one it names (by its check), that was made */
-                if (q.sh[i] > n || check[q.sh[i]] != q.check[i] || !module[q.sh[i]])
+                if (q.sh[i] > n || rec[q.sh[i]].check != q.check[i] || !rec[q.sh[i]].module)
                     ok = 0;
                 else
-                    mods[i] = module[q.sh[i]];
+                    mods[i] = rec[q.sh[i]].module;
             }
             if (ok) {
                 load->pipe(load->ctx, mods, p + sizeof q, q.keylen);
                 loaded[1]++;
             }
-        } else if (type == PF_SCAN && len == 16) {
-            load->scan(load->ctx, pf_get64(p), pf_get64(p + 8));
         } else
             break;
         at += PF_REC + len;
     }
     pf->nsh = n;
-    free(check);
-    free(module);
+    free(rec);
     return at;
 }
 
@@ -320,57 +339,80 @@ void pf_open(PFile* pf, const char* path, const char* key, const PfLoad* load, u
     pm_unlock(&pf->lock);
 }
 
+unsigned pf_pid(void) {
+#if defined(_WIN32)
+    return (unsigned)GetCurrentProcessId();
+#else
+    return (unsigned)getpid();
+#endif
+}
 void pf_open_mapped(PFile* pf, const char* path, const char* key, PfEach each, void* ctx) {
     size_t hsize = 0;
     u8* head = pf_header(key, &hsize);
     u64 at = 0, size = 0;
     char why[256] = "";
+    int mapped;
+    FILE* probe;
     pm_lock(&pf->lock);
     snprintf(pf->path, sizeof pf->path, "%s", path);
     if (!head) {
         pm_unlock(&pf->lock);
         return;
     }
-    if (!plat_file_map(&pf->view, path) && pf->view.data) size = pf->view.size;
+    mapped = !plat_file_map(&pf->view, path);
+    if (!mapped) snx_os_error(why, sizeof why); /* the map's reason, before the probe's calls */
+    if (mapped && pf->view.data) size = pf->view.size;
+    if (!mapped && (probe = fopen(path, "rb")) != NULL) { /* there, but not mapped: kept as it is, for a later run */
+        fclose(probe);
+        WARN("vulkan: cannot map %s (%s): its shaders aren't used this run, nor added to\n", path, why);
+        pf->kept = 1;
+        free(head);
+        pm_unlock(&pf->lock);
+        return;
+    }
     if (size >= hsize && !memcmp(pf->view.data, head, hsize)) {
         const u8* d = pf->view.data;
         for (at = hsize; size - at >= PF_REC;) {
             u32 type = pf_get32(d + at), len = pf_get32(d + at + 4);
-            if (len % 8 || len > size - at - PF_REC) break;
+            /* a tail of no known type (zeros a lost write left) ends the records as one cut short does */
+            if (len % 8 || len > size - at - PF_REC || type < PF_SHADER || type > PF_SHIPREF) break;
             each(ctx, type, d + at + PF_REC, len, at);
             at += PF_REC + len;
         }
     } else if (size)
         LOG("vulkan: %s is of another build, GPU or driver: started over\n", path);
-    if (at > hsize && at == size)
-        pf->f = fopen(path, "ab");
-    else if (at > hsize) { /* the records that are whole, without the one a crash cut short */
-        char* tmp = snx_format("%s.tmp", path);
+    if (!at || at < size) {
+        /* started over (its header alone), or rewritten without what a crash cut short: written beside it and moved
+           over it, so another run that has it mapped keeps reading the old one */
+        char* tmp = snx_format("%s.%u.tmp", path, pf_pid());
         FILE* t = tmp ? fopen(tmp, "wb") : NULL;
-        int ok = t && fwrite(pf->view.data, 1, (size_t)at, t) == (size_t)at;
-        if (t && fclose(t)) ok = 0;
-        plat_file_unmap(&pf->view);
-        ok = ok && !plat_replace_file(tmp, path);
-        free(tmp);
-        if (ok && !plat_file_map(&pf->view, path)) pf->f = fopen(path, "ab");
-    } else { /* started over */
-        plat_file_unmap(&pf->view);
-        at = hsize;
-        pf->f = fopen(path, "wb");
-        if (pf->f && (fwrite(head, 1, hsize, pf->f) != hsize || fflush(pf->f))) {
-            fclose(pf->f);
-            pf->f = NULL;
+        const u8* keep = at ? pf->view.data : head;
+        size_t n = at ? (size_t)at : hsize;
+        int ok = t && fwrite(keep, 1, n, t) == n;
+        if (!ok) snx_os_error(why, sizeof why); /* each failure's reason where it happened, before the cleanup's */
+        if (t && fclose(t) && ok) {
+            snx_os_error(why, sizeof why);
+            ok = 0;
         }
-    }
-    if (!pf->f) {
-        snx_os_error(why, sizeof why);
-        WARN("vulkan: cannot write %s (%s): what is made is not kept for the next run\n", path, why);
+        plat_file_unmap(&pf->view);
+        if (ok && plat_replace_file(tmp, path)) {
+            snx_os_error(why, sizeof why);
+            ok = 0;
+        }
+        if (!ok && tmp) remove(tmp);
+        free(tmp);
+        if (!at) at = hsize;
+        if (!ok) { /* as it was: nothing is appended after what it holds */
+            WARN("vulkan: cannot write %s (%s): what is made is not kept for the next run\n", path, why);
+            pf->kept = 1;
+        }
+        if (plat_file_map(&pf->view, path)) memset(&pf->view, 0, sizeof pf->view);
     }
     pf->size = at;
     free(head);
     pm_unlock(&pf->lock);
 }
-const u8* pf_payload(const PFile* pf, u64 at, u32* len) {
+const u8* pf_payload(const PFile* pf, u64 at, u32* len, u64* check) {
     const u8* d = pf->view.data;
     u32 type, n;
     if (!d || at > pf->view.size || pf->view.size - at < PF_REC) return NULL;
@@ -380,10 +422,27 @@ const u8* pf_payload(const PFile* pf, u64 at, u32* len) {
         pf_end(pf_mix(pf_start(type, n), d + at + PF_REC, n)) != pf_get64(d + at + 8))
         return NULL;
     *len = n;
+    *check = pf_get64(d + at + 8);
     return d + at + PF_REC;
 }
-void pf_remap(PFile* pf) {
+void pf_unseal(PFile* pf) {
     pm_lock(&pf->lock);
+    plat_file_unmap(&pf->view);
+    if (!pf->kept && !pf->f) {
+        char why[256];
+        pf->f = fopen(pf->path, "ab");
+        if (!pf->f)
+            WARN("vulkan: cannot write %s (%s): what is made is not kept for the next run\n", pf->path,
+                 snx_os_error(why, sizeof why));
+    }
+    pm_unlock(&pf->lock);
+}
+void pf_seal(PFile* pf) {
+    pm_lock(&pf->lock);
+    if (pf->f) {
+        fclose(pf->f);
+        pf->f = NULL;
+    }
     plat_file_unmap(&pf->view);
     if (plat_file_map(&pf->view, pf->path)) memset(&pf->view, 0, sizeof pf->view);
     pm_unlock(&pf->lock);

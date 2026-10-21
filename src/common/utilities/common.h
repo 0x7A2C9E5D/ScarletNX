@@ -28,6 +28,8 @@ char* snx_os_error(char* out, size_t size);
 char* snx_path_join(const char* a, const char* b);
 char* snx_dirname(const char* path);
 char* snx_absolute(const char* path);
+/* whether path is a full one, from a root (a drive's or a share's on Windows), not one relative to a working folder */
+int snx_path_is_full(const char* path);
 char* snx_executable(const char* argv0);
 int snx_is_file(const char* path);
 int snx_is_dir(const char* path);

@@ -186,11 +186,12 @@ setting Prepare shaders
     int 0 2
     default 2
     startup
-    words Off|In background|Before the game
-    help The shaders the game ships in its files, read and translated before it draws with them, once for each
-    help build: Off = none. In background = while the game starts, until its first picture. Before the game = a screen
-    help that waits for them and for the pipelines of earlier runs, so an opening movie doesn't stutter; any button
-    help skips it
+    words Off|While playing|Before starting
+    help Prepares the game's shaders ahead of time so it stutters less, and again after ScarletNX, the GPU or its driver
+    help is updated. Off = shaders are made only when the game first draws with them. While playing = prepared in the
+    help background, used once all are ready. Before starting = a loading screen waits for them and for the shader cache
+    help of earlier sessions. Any key, button or tap starts the game at once and the rest is prepared while you play.
+    help Esc quits (on Android, back opens the menu)
 setting JIT threads
     key jit_threads
     int 0 8

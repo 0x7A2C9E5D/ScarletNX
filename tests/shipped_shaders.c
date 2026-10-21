@@ -145,7 +145,11 @@ static void archive(void) {
     CHECK(shipped_sarc_entry(d, n, 2, &off, &size, &name) == -1);
     CHECK(shipped_sarc_entry(d, 0x150, 1, &off, &size, &name) == -1); /* its data past what was read */
     CHECK(shipped_sarc_wants(d, n) == 1);
-    CHECK(shipped_sarc_wants(d, 0x30) == -1); /* its tables past what was read */
+    CHECK(shipped_sarc_wants(d, 0x100) == 1);         /* its tables alone, as a Yaz0 one is read */
+    CHECK(shipped_sarc_wants(d, 0x30) == -1);         /* its tables past what was read */
+    put32(d + 0x14 + 0xC + 16 + 4, 0x02000000u | 2u); /* a name after one that hashes alike: still a name */
+    CHECK(!shipped_sarc_entry(d, n, 1, &off, &size, &name) && !strcmp(name, "b.bnsh"));
+    CHECK(shipped_sarc_wants(d, n) == 1);
     s.base = d;
     CHECK(shipped_programs(d, n, seen, &s) == 1 && s.at[0] == 0x330); /* scanned as it is */
     sarc(d, sizeof d, "b.bflyt");
@@ -175,7 +179,9 @@ static void yaz0(void) {
     CHECK(shipped_yaz0_size(z, zn) == n);
     CHECK(shipped_yaz0(z, zn, back, n) == n && !memcmp(back, d, n));
     CHECK(shipped_yaz0(z, zn, back, 0x20) == 0x20); /* a part, from the start */
-    CHECK(shipped_yaz0(z, 0x30, back, n) < n);      /* the stream cut short: what it holds */
+    /* decompressed as far as its tables, as the walk does: they say it holds a shader container */
+    CHECK(shipped_yaz0(z, zn, back, shipped_sarc_head(d, n)) == 0x100 && shipped_sarc_wants(back, 0x100) == 1);
+    CHECK(shipped_yaz0(z, 0x30, back, n) < n); /* the stream cut short: what it holds */
     {
         /* "ab", then a copy of 10 from 2 back (two bytes: count 10 - 2 = 8) and one of 0x14 from 1 back (three
            bytes: count 0x14 - 0x12 = 2): copies that read what they write */
