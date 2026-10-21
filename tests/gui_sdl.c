@@ -2292,17 +2292,20 @@ int main(int argc, char** argv) {
         assert(app.folder_count == 0 && !strncmp(app.editor.note, "Not a folder: ", 14));
         e.drop.data = more;
         event(&app, &e);
-        if (app.folder_count != 1 || !same_path(app.folders[0], kept_as) || strcmp(app.editor.note, "Added"))
+        /* an empty folder, dropped: to the dumps library, as one of no games of either goes; kept with its library */
+        if (app.folder_count != 1 || !same_path(app.folders[0], kept_as) ||
+            strcmp(app.editor.note, "Added to the dumps library"))
             fprintf(stderr, "folders: %d, first \"%s\", expected \"%s\", note \"%s\"\n", app.folder_count,
                     app.folder_count ? app.folders[0] : "", kept_as, app.editor.note);
-        assert(app.folder_count == 1 && same_path(app.folders[0], kept_as) && !strcmp(app.editor.note, "Added"));
+        assert(app.folder_count == 1 && same_path(app.folders[0], kept_as) &&
+               app.folders_library[0] == GUI_LIBRARY_DUMPS && !strcmp(app.editor.note, "Added to the dumps library"));
         assert(app.form == GUI_FORM_FOLDERS && app.editor.row == 2 && gui_editor_rows(&app.editor) == 4);
         kept = (char*)snx_read_file(app.folders_file, &size);
-        snprintf(line, sizeof line, "%s\n", kept_as);
+        snprintf(line, sizeof line, "dumps %s\n", kept_as);
         assert(kept && !strcmp(kept, line));
         free(kept);
         event(&app, &e);
-        assert(app.folder_count == 1 && !strncmp(app.editor.note, "Already listed: ", 16));
+        assert(app.folder_count == 1 && !strncmp(app.editor.note, "Already in the dumps library: ", 30));
         render(&app);
         row_start(kept_as, line, sizeof line);
         shows(&app, line, yellow);
@@ -2326,7 +2329,7 @@ int main(int argc, char** argv) {
         {
             char* deep = snx_format("%s/a folder name long enough to be cut in its row/games", temporary);
             assert(!snx_mkdirs(deep));
-            folder_add(&app, deep, false);
+            folder_add(&app, deep, GUI_LIBRARY_DUMPS, false);
             assert(app.folder_count == 2 && app.editor.row == 3 && !strcmp(form_note(&app), app.folders[1]));
             render(&app);
             { /* its end as the system wrote the path: a backslash before games on Windows */
@@ -2408,8 +2411,9 @@ int main(int argc, char** argv) {
             assert(!app.folder_asked && !app.confirm.shown && !app.folder_count &&
                    !strcmp(app.editor.note, "Not added"));
             event(&app, &e);
-            key(&app, SDLK_RETURN); /* Only this folder */
-            assert(app.folder_count == 1 && !app.folders_deep[0] && !strcmp(app.editor.note, "Added"));
+            key(&app, SDLK_RETURN); /* Only this folder: games ready to run, so the recompiled library */
+            assert(app.folder_count == 1 && !app.folders_deep[0] && app.folders_library[0] == GUI_LIBRARY_RECOMPILED &&
+                   !strcmp(app.editor.note, "Added to the recompiled library"));
             games_scan(&app, &listed, said, sizeof said);
             for (g = 0; g < listed.count; ++g)
                 found |= !strcmp(listed.names[g], GAME("Top")) | !strcmp(listed.names[g], GAME("One")) << 1;
@@ -2420,12 +2424,12 @@ int main(int argc, char** argv) {
             key(&app, SDLK_DOWN);
             key(&app, SDLK_RETURN); /* With subfolders */
             assert(app.folder_count == 1 && app.folders_deep[0] &&
-                   !strcmp(app.editor.note, "Added, with its subfolders"));
+                   !strcmp(app.editor.note, "Added to the recompiled library, with its subfolders"));
             kept = (char*)snx_read_file(app.folders_file, &size);
-            snprintf(line, sizeof line, "%s" GUI_FOLDER_DEEP "\n", deep_as);
+            snprintf(line, sizeof line, "recompiled %s" GUI_FOLDER_DEEP "\n", deep_as);
             assert(kept && !strcmp(kept, line));
             free(kept);
-            assert(!strcmp(app.app_form.folder[2], "+ subfolders"));
+            assert(!strcmp(app.app_form.folder[2], "recompiled + subfolders"));
             games_scan(&app, &listed, said, sizeof said);
             found = 0;
             for (g = 0; g < listed.count; ++g) {
@@ -2446,10 +2450,57 @@ int main(int argc, char** argv) {
             free(app.folders[0]);
             app.folder_count = 0;
             folders_load(&app);
-            assert(app.folder_count == 1 && app.folders_deep[0] && same_path(app.folders[0], deep_as));
+            assert(app.folder_count == 1 && app.folders_deep[0] && same_path(app.folders[0], deep_as) &&
+                   app.folders_library[0] == GUI_LIBRARY_RECOMPILED);
             folder_remove(&app, 0);
             free(deep_as);
             free(deep);
+            /* folders.txt as an older version wrote it, a path a line: each folder in the library of what it holds,
+               both for both, none or gone the dumps'; written again with them, said once naming each */
+            {
+                char *ready = snx_path_join(temporary, "old ready"), *dumped = snx_path_join(temporary, "old dumps"),
+                     *both = snx_path_join(temporary, "old both"), *empty = snx_path_join(temporary, "old empty");
+                char *game = snx_path_join(ready, GAME("Ready")), *nsp = snx_path_join(dumped, "a.nsp"),
+                     *both_game = snx_path_join(both, GAME("Ready")), *both_nsp = snx_path_join(both, "b.xci");
+                char *old_text, *want, *read;
+                assert(!snx_mkdirs(ready) && !snx_mkdirs(dumped) && !snx_mkdirs(both) && !snx_mkdirs(empty));
+                assert(!snx_write_file(game, "fixture", 7) && !snx_make_executable(game));
+                assert(!snx_write_file(both_game, "fixture", 7) && !snx_make_executable(both_game));
+                assert(!snx_write_file(nsp, "fixture", 7) && !snx_write_file(both_nsp, "fixture", 7));
+                old_text = snx_format("%s\n%s" GUI_FOLDER_DEEP "\n%s\n%s\n", ready, dumped, both, empty);
+                assert(!snx_write_file(app.folders_file, old_text, strlen(old_text)));
+                assert(!app.folder_count);
+                app.message[0] = 0;
+                folders_load(&app);
+                assert(app.folder_count == 5);
+                assert(!strcmp(app.folders[0], ready) && app.folders_library[0] == GUI_LIBRARY_RECOMPILED);
+                assert(!strcmp(app.folders[1], dumped) && app.folders_library[1] == GUI_LIBRARY_DUMPS &&
+                       app.folders_deep[1]);
+                assert(!strcmp(app.folders[2], both) && app.folders_library[2] == GUI_LIBRARY_RECOMPILED);
+                assert(!strcmp(app.folders[3], both) && app.folders_library[3] == GUI_LIBRARY_DUMPS);
+                assert(!strcmp(app.folders[4], empty) && app.folders_library[4] == GUI_LIBRARY_DUMPS);
+                want =
+                    snx_format("%s: each folder of an older version's lines is in a library now: %s: recompiled, %s: "
+                               "dumps, %s: recompiled and dumps, %s: dumps",
+                               app.folders_file, ready, dumped, both, empty);
+                assert(!strcmp(app.message, want));
+                free(want);
+                read = (char*)snx_read_file(app.folders_file, &size);
+                want = snx_format("recompiled %s\ndumps %s" GUI_FOLDER_DEEP "\nrecompiled %s\ndumps %s\ndumps %s\n",
+                                  ready, dumped, both, both, empty);
+                assert(read && !strcmp(read, want));
+                free(want);
+                free(read);
+                while (app.folder_count) free(app.folders[--app.folder_count]);
+                app.message[0] = 0;
+                folders_load(&app); /* once: its lines name their libraries now */
+                assert(app.folder_count == 5 && !app.message[0]);
+                while (app.folder_count) free(app.folders[--app.folder_count]);
+                assert(!snx_write_file(app.folders_file, "", 0));
+                free(old_text);
+                free(game), free(nsp), free(both_game), free(both_nsp);
+                free(ready), free(dumped), free(both), free(empty);
+            }
             /* the data folder's games/, where an older version made its games: still listed, and said as left behind
                with where they go now, until the player moves them */
             {
@@ -3677,7 +3728,8 @@ int main(int argc, char** argv) {
     go_tab(&app, GUI_TAB_GAMES);
     assert(app.menu.view == GUI_LOAD_GAMES && app.games.count == 35 && !app.message[0]);
     assert(!strncmp(app.games.names[0], "Game00", 6));
-    /* the player's folders' games after games/'s, each run from where it is; a folder gone is named */
+    /* the player's folders' games after games/'s, each run from where it is, each library's own: a game ready to run
+       in a dumps folder is not listed; a folder gone is named */
     {
 #ifdef _WIN32
         char* zed = snx_path_join(app.folders[0], "Zed.exe");
@@ -3685,9 +3737,14 @@ int main(int argc, char** argv) {
         char* zed = snx_path_join(app.folders[0], "Zed");
 #endif
         assert(app.folder_count == 1 && !snx_write_file(zed, "fixture", 7) && !snx_make_executable(zed));
+        assert(app.folders_library[0] == GUI_LIBRARY_DUMPS);
+        list_games(&app);
+        assert(app.games.count == 35 && !app.message[0]);
+        app.folders_library[0] = GUI_LIBRARY_RECOMPILED;
         list_games(&app);
         assert(app.games.count == 36 && !strcmp(app.games.paths[35], zed) && !app.message[0]);
         app.folders[1] = snx_strdup("/nonexistent/snx-games");
+        app.folders_library[1] = GUI_LIBRARY_DUMPS;
         app.folder_count = 2;
         list_games(&app);
         assert(app.games.count == 36 && strstr(app.message, "/nonexistent/snx-games") &&

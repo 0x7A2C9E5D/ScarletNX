@@ -118,8 +118,12 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   folder*, or *With subfolders*, whose games are listed too, four levels down, hidden folders
   left alone (its row says *+ subfolders*). Del or Enter asks before it takes one off the list (the
   folder keeps its games). A folder too long for its row is cut in its middle (its root and first folder, `...`, as many of its
-  last folders as fit), the whole path under the rows. They are kept in `folders.txt` beside `settings.ini`, a line
-  each, `/**` after one kept with its subfolders; one that cannot be read is named when the games are listed. Under App's rows, the
+  last folders as fit), the whole path under the rows. Each folder is in a library: the recompiled one, whose games ready to run Games
+  lists, or the dumps one, whose dumps it lists (a CIA in either). A folder added from Games goes in the library of
+  what it holds, in both for both, a dumps one with no games of either. They are kept in `folders.txt` beside
+  `settings.ini`, a line each, the library's word, a space and the path (`recompiled /mnt/games`,
+  `dumps /mnt/dumps/**`), `/**` after one kept with its subfolders; one that cannot be read is named when the games
+  are listed. Under App's rows, the
   three folders in use: the data folder, the games' and the extractions'. **Folders** has a row for
   the data folder (**Data**: `recompiled/`, `themes/` and `prod.keys`), **Recompiled** and **Extractions**, each its default or a
   folder picked. Enter opens the folder picker, a folder dropped or pasted with Ctrl+V takes the focused row, Del puts

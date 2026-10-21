@@ -996,6 +996,28 @@ msgid "Nothing left"
 msgstr ""
 
 #: src/gui/main.c
+msgid "recompiled"
+msgstr ""
+
+#: src/gui/main.c
+msgid "dumps"
+msgstr ""
+
+#: src/gui/main.c
+msgid "recompiled and dumps"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: each folder of an older version's lines read as %s, not written: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: each folder of an older version's lines is in a library now: %s"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Where recompiled games go: tap to pick another. It stays on the list"
 msgstr ""
 
@@ -1026,7 +1048,12 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Already listed: %s"
+msgid "Already in the dumps library: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Already in the recompiled library: %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -1035,11 +1062,19 @@ msgid "At most %d folders"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Added, with its subfolders"
+msgid "Added to the recompiled library, with its subfolders"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Added"
+msgid "Added to the recompiled library"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Added to the dumps library, with its subfolders"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Added to the dumps library"
 msgstr ""
 
 #: src/gui/main.c
@@ -1083,6 +1118,14 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "+ subfolders"
+msgstr ""
+
+#: src/gui/main.c
+msgid "recompiled + subfolders"
+msgstr ""
+
+#: src/gui/main.c
+msgid "dumps + subfolders"
 msgstr ""
 
 #: src/gui/main.c
@@ -2727,6 +2770,18 @@ msgstr ""
 
 #: src/common/utilities/setup.c
 msgid "recompiled/, and dumps/ for the dumps"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "The launcher's folders of games"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "a line of folders.txt, a path alone"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "each folder in the recompiled or the dumps library, as its games say"
 msgstr ""
 
 #: src/nx/runtime/settings.txt

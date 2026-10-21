@@ -879,8 +879,51 @@ msgstr "（无）"
 
 #: src/gui/main.c
 #, c-format
-msgid "Already listed: %s"
-msgstr "已在列表中：%s"
+msgid "Already in the dumps library: %s"
+msgstr "已在转储游戏库中：%s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Already in the recompiled library: %s"
+msgstr "已在已重编译游戏库中：%s"
+
+#: src/gui/main.c
+msgid "Added to the dumps library, with its subfolders"
+msgstr "已添加到转储游戏库，包括子文件夹"
+
+#: src/gui/main.c
+msgid "Added to the dumps library"
+msgstr "已添加到转储游戏库"
+
+#: src/gui/main.c
+msgid "recompiled"
+msgstr "已重编译"
+
+#: src/gui/main.c
+msgid "dumps"
+msgstr "转储"
+
+#: src/gui/main.c
+msgid "recompiled and dumps"
+msgstr "已重编译和转储"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: each folder of an older version's lines read as %s, not written: %s"
+msgstr "%s：旧版本各行的文件夹按 %s 读取，未写入：%s"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: each folder of an older version's lines is in a library now: %s"
+msgstr "%s：旧版本各行的文件夹现已放入游戏库：%s"
+
+#: src/gui/main.c
+msgid "recompiled + subfolders"
+msgstr "已重编译 + 子文件夹"
+
+#: src/gui/main.c
+msgid "dumps + subfolders"
+msgstr "转储 + 子文件夹"
 
 #: src/gui/main.c
 #, c-format
@@ -888,12 +931,12 @@ msgid "At most %d folders"
 msgstr "最多 %d 个文件夹"
 
 #: src/gui/main.c
-msgid "Added, with its subfolders"
-msgstr "已添加，包括子文件夹"
+msgid "Added to the recompiled library, with its subfolders"
+msgstr "已添加到已重编译游戏库，包括子文件夹"
 
 #: src/gui/main.c
-msgid "Added"
-msgstr "已添加"
+msgid "Added to the recompiled library"
+msgstr "已添加到已重编译游戏库"
 
 #: src/gui/main.c
 #, c-format
@@ -2821,3 +2864,15 @@ msgstr "数据文件夹中的 games/"
 
 msgid "recompiled/, and dumps/ for the dumps"
 msgstr "recompiled/，转储放在 dumps/"
+
+#: src/common/utilities/setup.c
+msgid "The launcher's folders of games"
+msgstr "启动器的游戏文件夹"
+
+#: src/common/utilities/setup.c
+msgid "a line of folders.txt, a path alone"
+msgstr "folders.txt 中只有路径的一行"
+
+#: src/common/utilities/setup.c
+msgid "each folder in the recompiled or the dumps library, as its games say"
+msgstr "每个文件夹按其游戏放入已重编译或转储游戏库"

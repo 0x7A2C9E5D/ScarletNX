@@ -879,8 +879,51 @@ msgstr "(nenhuma)"
 
 #: src/gui/main.c
 #, c-format
-msgid "Already listed: %s"
-msgstr "Já na lista: %s"
+msgid "Already in the dumps library: %s"
+msgstr "Já está na biblioteca de dumps: %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Already in the recompiled library: %s"
+msgstr "Já está na biblioteca de recompilados: %s"
+
+#: src/gui/main.c
+msgid "Added to the dumps library, with its subfolders"
+msgstr "Adicionada à biblioteca de dumps, com as subpastas"
+
+#: src/gui/main.c
+msgid "Added to the dumps library"
+msgstr "Adicionada à biblioteca de dumps"
+
+#: src/gui/main.c
+msgid "recompiled"
+msgstr "recompilados"
+
+#: src/gui/main.c
+msgid "dumps"
+msgstr "dumps"
+
+#: src/gui/main.c
+msgid "recompiled and dumps"
+msgstr "recompilados e dumps"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: each folder of an older version's lines read as %s, not written: %s"
+msgstr "%s: cada pasta das linhas de uma versão antiga lida como %s, não gravado: %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: each folder of an older version's lines is in a library now: %s"
+msgstr "%s: cada pasta das linhas de uma versão antiga agora está numa biblioteca: %s"
+
+#: src/gui/main.c
+msgid "recompiled + subfolders"
+msgstr "recompilados + subpastas"
+
+#: src/gui/main.c
+msgid "dumps + subfolders"
+msgstr "dumps + subpastas"
 
 #: src/gui/main.c
 #, c-format
@@ -888,12 +931,12 @@ msgid "At most %d folders"
 msgstr "No máximo %d pastas"
 
 #: src/gui/main.c
-msgid "Added, with its subfolders"
-msgstr "Adicionada, com as subpastas"
+msgid "Added to the recompiled library, with its subfolders"
+msgstr "Adicionada à biblioteca de recompilados, com as subpastas"
 
 #: src/gui/main.c
-msgid "Added"
-msgstr "Adicionada"
+msgid "Added to the recompiled library"
+msgstr "Adicionada à biblioteca de recompilados"
 
 #: src/gui/main.c
 #, c-format
@@ -2821,3 +2864,15 @@ msgstr "games/ na pasta de dados"
 
 msgid "recompiled/, and dumps/ for the dumps"
 msgstr "recompiled/, e dumps/ para os dumps"
+
+#: src/common/utilities/setup.c
+msgid "The launcher's folders of games"
+msgstr "As pastas de jogos do launcher"
+
+#: src/common/utilities/setup.c
+msgid "a line of folders.txt, a path alone"
+msgstr "uma linha do folders.txt, só um caminho"
+
+#: src/common/utilities/setup.c
+msgid "each folder in the recompiled or the dumps library, as its games say"
+msgstr "cada pasta na biblioteca de recompilados ou na de dumps, conforme seus jogos"

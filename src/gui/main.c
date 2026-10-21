@@ -88,12 +88,16 @@ enum { GUI_PLACE_DATA, GUI_PLACE_GAMES, GUI_PLACE_WORK, GUI_PLACES };
 #define GUI_FOLDERS_MAX  16    /* the player's game folders, past recompiled/ and dumps/ */
 #define GUI_FOLDER_DEPTH 4     /* how deep the games of a folder kept with its subfolders are looked for */
 #define GUI_FOLDER_DEEP  "/**" /* after such a folder's path, in the file of folders */
+/* the library a folder of the player's is in, the word that starts its line in folders.txt: Games lists the games
+   ready to run of the recompiled ones, the dumps of the dumps ones, and the CIAs (run as they are) of both */
+enum { GUI_LIBRARY_RECOMPILED, GUI_LIBRARY_DUMPS, GUI_LIBRARIES };
+static const char* const library_words[GUI_LIBRARIES] = {"recompiled", "dumps"};
 #define GUI_VIEW_ROWS    24    /* a group's rows shown as a view of them */
 #define SNX_GUI_PLAYERS  8     /* Controllers' players, as the runtime's gamepad_p<N>_ keys */
 /* the App screen's values, as its rows show them, and the game folders' (recompiled/ first) */
 typedef struct {
     char theme[64], text[16], language[64], animations[16], side[16], folders[32], places[32], moves[32];
-    char folder[GUI_FOLDERS_MAX + 2][16]; /* recompiled/, dumps/, then the player's folders */
+    char folder[GUI_FOLDERS_MAX + 2][40]; /* recompiled/, dumps/, then the player's folders, each with its library */
     char place[GUI_PLACES][64];
 } GuiAppForm;
 typedef struct {
@@ -246,6 +250,9 @@ typedef struct {
     int files_top, files_shown; /* the box of files over the screen (render_files): its first file, and how many */
     char* folders[GUI_FOLDERS_MAX];     /* the player's game folders, listed after recompiled/ and dumps/ */
     bool folders_deep[GUI_FOLDERS_MAX]; /* each with its subfolders' games too */
+    int folders_library[GUI_FOLDERS_MAX]; /* each one's GUI_LIBRARY_* */
+    int adding;                           /* the library Add a folder adds to, -1: the one its games say */
+    int asked_holds;                      /* folder_asked's libraries, 1 << GUI_LIBRARY_* */
     int folder_count;
     char* folder_asked; /* a folder picked with folders in it, asked whether their games are listed too */
     char* folders_file; /* where they are kept; NULL keeps none */
@@ -3509,20 +3516,86 @@ static void app_values(App* app) {
              app->data_dir ? app->data_dir : "", snx_tr(place_labels[1]), games, snx_tr(place_labels[2]), work);
 }
 /* ---- the player's game folders: listed after recompiled/ and dumps/, kept a line each in folders_file ---- */
+/* what a folder holds, as Games lists it: 1 << GUI_LIBRARY_RECOMPILED for games ready to run, 1 << GUI_LIBRARY_DUMPS
+   for dumps or CIAs (down its subfolders with deep); nothing, or no such folder, the dumps' */
+static int folder_holds(const char* path, bool deep) {
+    GuiGames games;
+    char error[8];
+    int holds = 0;
+    memset(&games, 0, sizeof games);
+    if (gui_games_add_deep(&games, path, GUI_GAMES_RUN, deep ? GUI_FOLDER_DEPTH : 0, error, sizeof error) &&
+        games.count)
+        holds |= 1 << GUI_LIBRARY_RECOMPILED;
+    gui_games_free(&games);
+    memset(&games, 0, sizeof games);
+    if (gui_games_add_deep(&games, path, GUI_GAMES_DUMP | GUI_GAMES_CIA, deep ? GUI_FOLDER_DEPTH : 0, error,
+                           sizeof error) &&
+        games.count)
+        holds |= 1 << GUI_LIBRARY_DUMPS;
+    gui_games_free(&games);
+    return holds ? holds : 1 << GUI_LIBRARY_DUMPS;
+}
+static void folder_keep(App* app, const char* path, int library, bool deep) {
+    if (app->folder_count == GUI_FOLDERS_MAX) return;
+    app->folders_deep[app->folder_count] = deep;
+    app->folders_library[app->folder_count] = library;
+    app->folders[app->folder_count++] = snx_strdup(path);
+}
+static int folders_save(App* app);
+/* folders.txt, a line a folder: its library's word, a space and its path, GUI_FOLDER_DEEP after a folder kept with
+   its subfolders. A line an older version wrote has the path alone: the folder goes in the library of what it holds, in
+   both for both, the file written again so and said once, each folder named with where it went */
 static void folders_load(App* app) {
-    size_t size = 0;
+    size_t size = 0, said = 0;
     char *text = app->folders_file ? (char*)snx_read_file(app->folders_file, &size) : NULL, *line, *next;
+    char moved[sizeof app->message];
+    moved[0] = 0;
     for (line = text; line && *line && app->folder_count < GUI_FOLDERS_MAX; line = next) {
+        size_t n, deep_n = sizeof GUI_FOLDER_DEEP - 1;
+        int library = -1, l;
+        bool deep;
         next = line + strcspn(line, "\n");
         if (*next) *next++ = 0;
-        if (*line) {
-            size_t n = strlen(line), deep = sizeof GUI_FOLDER_DEEP - 1;
-            app->folders_deep[app->folder_count] = n > deep && !strcmp(line + n - deep, GUI_FOLDER_DEEP);
-            if (app->folders_deep[app->folder_count]) line[n - deep] = 0;
-            app->folders[app->folder_count++] = snx_strdup(line);
+        if (!*line) continue;
+        for (l = 0; l < GUI_LIBRARIES; ++l) {
+            n = strlen(library_words[l]);
+            if (!strncmp(line, library_words[l], n) && line[n] == ' ') {
+                library = l;
+                line += n + 1;
+                break;
+            }
+        }
+        n = strlen(line);
+        deep = n > deep_n && !strcmp(line + n - deep_n, GUI_FOLDER_DEEP);
+        if (deep) line[n - deep_n] = 0;
+        if (library >= 0) {
+            folder_keep(app, line, library, deep);
+            continue;
+        }
+        { /* an older version's line */
+            int holds = folder_holds(line, deep);
+            for (l = 0; l < GUI_LIBRARIES; ++l)
+                if (holds & (1 << l)) folder_keep(app, line, l, deep);
+            if (said < sizeof moved)
+                said += (size_t)snprintf(moved + said, sizeof moved - said, "%s%s: %s", said ? ", " : "", line,
+                                         holds == (1 << GUI_LIBRARY_RECOMPILED) ? snx_tr("recompiled")
+                                         : holds == (1 << GUI_LIBRARY_DUMPS)    ? snx_tr("dumps")
+                                                                                : snx_tr("recompiled and dumps"));
         }
     }
     free(text);
+    if (moved[0]) {
+        size_t m = strlen(app->message);
+        char note[sizeof app->message];
+        if (folders_save(app))
+            snprintf(note, sizeof note,
+                     snx_tr("%s: each folder of an older version's lines read as %s, not written: %s"),
+                     app->folders_file, moved, app->editor.note);
+        else
+            snprintf(note, sizeof note, snx_tr("%s: each folder of an older version's lines is in a library now: %s"),
+                     app->folders_file, moved);
+        snprintf(app->message + m, sizeof app->message - m, "%s%s", m ? " " : "", note);
+    }
 }
 /* 0, else the note says why not */
 static int folders_save(App* app) {
@@ -3530,10 +3603,10 @@ static int folders_save(App* app) {
     char *text, *dir;
     int i, failed;
     if (!app->folders_file) return 0;
-    for (i = 0; i < app->folder_count; ++i) size += strlen(app->folders[i]) + sizeof GUI_FOLDER_DEEP;
+    for (i = 0; i < app->folder_count; ++i) size += strlen(app->folders[i]) + sizeof GUI_FOLDER_DEEP + 12;
     text = (char*)malloc(size);
     for (i = 0, n = 0; text && i < app->folder_count; ++i)
-        n += (size_t)snprintf(text + n, size - n, "%s%s\n", app->folders[i],
+        n += (size_t)snprintf(text + n, size - n, "%s %s%s\n", library_words[app->folders_library[i]], app->folders[i],
                               app->folders_deep[i] ? GUI_FOLDER_DEEP : "");
     dir = snx_dirname(app->folders_file);
     failed = !text || !dir || snx_mkdirs(dir) || snx_write_file(app->folders_file, text, n);
@@ -3569,26 +3642,33 @@ static bool is_dumps_dir(const App* app, const char* path) {
 }
 /* a folder the player picked, dropped or pasted: a folder that is there, once. What happened goes on the folders'
    screen, or in the menu's message when the picker answered after the player left it */
-static void folder_add(App* app, const char* path, bool deep) {
+static void folder_add(App* app, const char* path, int library, bool deep) {
     char *absolute = path ? snx_absolute(path) : NULL, note[sizeof app->editor.note];
     int i, added = 0, here = app->editing && app->form == GUI_FORM_FOLDERS;
-    for (i = 0; absolute && i < app->folder_count && strcmp(app->folders[i], absolute); ++i) {}
+    for (i = 0;
+         absolute && i < app->folder_count && (strcmp(app->folders[i], absolute) || app->folders_library[i] != library);
+         ++i) {}
     if (!absolute || !snx_is_dir(absolute))
         snprintf(note, sizeof note, snx_tr("Not a folder: %s"), path ? path : snx_tr("(none)"));
-    else if (i < app->folder_count || (app->games_dir && !strcmp(absolute, app->games_dir)) ||
-             is_dumps_dir(app, absolute))
-        snprintf(note, sizeof note, snx_tr("Already listed: %s"), absolute);
+    else if (i < app->folder_count ||
+             (library == GUI_LIBRARY_RECOMPILED && app->games_dir && !strcmp(absolute, app->games_dir)) ||
+             (library == GUI_LIBRARY_DUMPS && is_dumps_dir(app, absolute)))
+        snprintf(note, sizeof note,
+                 library == GUI_LIBRARY_DUMPS ? snx_tr("Already in the dumps library: %s")
+                                              : snx_tr("Already in the recompiled library: %s"),
+                 absolute);
     else if (app->folder_count == GUI_FOLDERS_MAX)
         snprintf(note, sizeof note, snx_tr("At most %d folders"), GUI_FOLDERS_MAX);
     else {
-        app->folders_deep[app->folder_count] = deep;
-        app->folders[app->folder_count++] = absolute;
-        absolute = NULL;
+        folder_keep(app, absolute, library, deep);
         added = 1;
         snprintf(note, sizeof note, "%s",
                  folders_save(app) ? app->editor.note
-                 : deep            ? snx_tr("Added, with its subfolders")
-                                   : snx_tr("Added"));
+                 : library == GUI_LIBRARY_RECOMPILED
+                     ? (deep ? snx_tr("Added to the recompiled library, with its subfolders")
+                             : snx_tr("Added to the recompiled library"))
+                     : (deep ? snx_tr("Added to the dumps library, with its subfolders")
+                             : snx_tr("Added to the dumps library")));
     }
     free(absolute);
     if (here && added) open_folders(app, app->folder_count + 1); /* its row: recompiled/ and dumps/ come first */
@@ -3602,6 +3682,8 @@ static void folder_remove(App* app, int folder) {
     memmove(app->folders + folder, app->folders + folder + 1, (size_t)(app->folder_count - folder - 1) * sizeof(char*));
     memmove(app->folders_deep + folder, app->folders_deep + folder + 1,
             (size_t)(app->folder_count - folder - 1) * sizeof(bool));
+    memmove(app->folders_library + folder, app->folders_library + folder + 1,
+            (size_t)(app->folder_count - folder - 1) * sizeof(int));
     --app->folder_count;
     if (folders_save(app))
         snprintf(note, sizeof note, "%s", app->editor.note);
@@ -3618,25 +3700,34 @@ static void folder_off_ask(App* app, int folder) {
              app->folders[folder]);
     gui_confirm_open(&app->confirm, GUI_ASK_FOLDER, false);
 }
-/* a folder picked: one with folders in it asks first whether their games are listed too (Only this folder, With
-   subfolders); another is added as it is */
+/* path into each library holds names, with its subfolders (deep) or not */
+static void folder_add_to(App* app, const char* path, int holds, bool deep) {
+    int l;
+    for (l = 0; l < GUI_LIBRARIES; ++l)
+        if (holds & (1 << l)) folder_add(app, path, l, deep);
+}
+/* a folder picked, to the library Add a folder was for, else to the one of what it holds (both for both): one with
+   folders in it asks first whether their games are listed too (Only this folder, With subfolders); another is added
+   as it is */
 static void folder_ask(App* app, const char* path) {
     char* absolute = path ? snx_absolute(path) : NULL;
+    int holds = app->adding >= 0 ? 1 << app->adding : absolute ? folder_holds(absolute, true) : 1 << GUI_LIBRARY_DUMPS;
     if (absolute && snx_is_dir(absolute) && gui_has_folders(absolute, GUI_GAMES_RUN | GUI_GAMES_CIA)) {
         free(app->folder_asked);
         app->folder_asked = absolute;
+        app->asked_holds = holds;
         gui_confirm_open(&app->confirm, GUI_ASK_DEEP, false);
         return;
     }
     free(absolute);
-    folder_add(app, path, false);
+    folder_add_to(app, path, holds, false);
 }
 /* its answer: a choice taken adds the folder as it says, with its subfolders (deep) or not; Back adds nothing */
 static void folder_answer(App* app, bool taken, bool deep) {
     char* path = app->folder_asked;
     app->folder_asked = NULL;
     if (taken)
-        folder_add(app, path, deep);
+        folder_add_to(app, path, app->asked_holds, deep);
     else if (app->editing && app->form == GUI_FORM_FOLDERS)
         snprintf(app->editor.note, sizeof app->editor.note, "%s", snx_tr("Not added"));
     free(path);
@@ -3730,9 +3821,13 @@ static void open_folders(App* app, int row) {
                    : app->place[GUI_PLACE_GAMES] ? games_row_picked
                                                  : games_row;
         snprintf(app->app_form.folder[i], sizeof app->app_form.folder[i], "%s",
-                 !path || !snx_is_dir(path)                      ? snx_tr("not found")
-                 : i == 1 || (i > 1 && app->folders_deep[i - 2]) ? snx_tr("+ subfolders")
-                                                                 : "");
+                 !path || !snx_is_dir(path) ? snx_tr("not found")
+                 : i == 1                   ? snx_tr("+ subfolders")
+                 : i < 2                    ? ""
+                 : app->folders_library[i - 2] == GUI_LIBRARY_RECOMPILED
+                     ? (app->folders_deep[i - 2] ? snx_tr("recompiled + subfolders") : snx_tr("recompiled"))
+                 : app->folders_deep[i - 2] ? snx_tr("dumps + subfolders")
+                                            : snx_tr("dumps"));
     }
     gui_editor_form(&app->editor, app->folder_keys, app->folder_count + 2, &app->app_form, SNX_TR_NOOP("Add a folder"));
     app->editor.flat = true;
@@ -6116,10 +6211,12 @@ static void setup_panes(App* app, GuiRect r) {
             free(path);
             SETUP_LINE("%s%s%s%s", m, setup_pad(pad, sizeof pad, folder_names[1], setup_cols(folder_names, 2, 2)),
                        shown, snx_tr(" + subfolders"));
-            for (i = 0; i < app->folder_count; ++i) {
+            for (i = 0; i < app->folder_count; ++i) { /* each under its library's name */
                 snx_home_short(app->folders[i], shown, sizeof shown);
-                SETUP_LINE("%s%s%s%s", m, setup_pad(pad, sizeof pad, "", setup_cols(folder_names, 2, 2)), shown,
-                           app->folders_deep[i] ? snx_tr(" + subfolders") : "");
+                SETUP_LINE(
+                    "%s%s%s%s", m,
+                    setup_pad(pad, sizeof pad, folder_names[app->folders_library[i]], setup_cols(folder_names, 2, 2)),
+                    shown, app->folders_deep[i] ? snx_tr(" + subfolders") : "");
             }
             setup_box(app, r, snx_tr("Folders"), lines, n);
             break;
@@ -7291,22 +7388,26 @@ static bool made_dump(const char* path, const void* app) { return made_from((con
    games ready to run, then the dumps not made already. The first folder that cannot be read is named, the others still
    listed */
 static void games_scan(App* app, GuiGames* games, char* message, size_t size) {
-    int kinds = GUI_GAMES_RUN | GUI_GAMES_CIA | GUI_GAMES_DUMP, i;
+    int kinds = GUI_GAMES_RUN | GUI_GAMES_CIA | GUI_GAMES_DUMP, i; /* the old games/'s: it held both */
     char error[sizeof app->message];
     char *dumps = app->data_dir ? snx_path_join(app->data_dir, "dumps") : NULL, *old;
     gui_games_free(games);
     message[0] = 0;
-    if (!gui_games_add(games, app->games_dir, kinds, error, sizeof error)) snprintf(message, size, "%s", error);
+    if (!gui_games_add(games, app->games_dir, GUI_GAMES_RUN | GUI_GAMES_CIA, error, sizeof error))
+        snprintf(message, size, "%s", error);
     old = games_old(app);
     if (old && !gui_games_add(games, old, kinds, error, sizeof error) && !message[0])
         snprintf(message, size, "%s", error);
     free(old);
     if (dumps && snx_is_dir(dumps) && /* none: places_apply said it could not be made */
-        !gui_games_add_deep(games, dumps, kinds, GUI_FOLDER_DEPTH, error, sizeof error) && !message[0])
+        !gui_games_add_deep(games, dumps, GUI_GAMES_DUMP | GUI_GAMES_CIA, GUI_FOLDER_DEPTH, error, sizeof error) &&
+        !message[0])
         snprintf(message, size, "%s", error);
-    for (i = 0; i < app->folder_count; ++i)
-        if (!gui_games_add_deep(games, app->folders[i], kinds, app->folders_deep[i] ? GUI_FOLDER_DEPTH : 0, error,
-                                sizeof error) &&
+    for (i = 0; i < app->folder_count; ++i) /* a library's folder, its library's games */
+        if (!gui_games_add_deep(games, app->folders[i],
+                                (app->folders_library[i] == GUI_LIBRARY_RECOMPILED ? GUI_GAMES_RUN : GUI_GAMES_DUMP) |
+                                    GUI_GAMES_CIA,
+                                app->folders_deep[i] ? GUI_FOLDER_DEPTH : 0, error, sizeof error) &&
             !message[0])
             snprintf(message, size, snx_tr("%s It is in Settings > App > Library."), error);
     if (!gui_games_group(games, snx_tr("Recompiled"), snx_tr("Dumps"), made_dump, app) && !message[0])
@@ -8254,6 +8355,7 @@ static bool paths_start(App* app, const char* self) {
     app->checkout = snx_checkout(GUI_CHECKOUT, GUI_BUILD, app->drivers);
     app->home_dir = snx_strdup(app->data_dir);
     app->place_row = -1;
+    app->adding = -1;
     places_apply(app); /* recompiled/, themes/, work/ and the keys, by the data folder */
     app->themes_dirs[1] = shipped_themes(app->drivers);
     return true;
@@ -8321,6 +8423,7 @@ static bool initialize(App* app, const char* self) {
     }
     app->home_dir = snx_strdup(app->data_dir);
     app->place_row = -1;
+    app->adding = -1;
     places_apply(app); /* recompiled/, themes/, work/ and the keys, by the data folder */
     app->themes_dirs[1] = shipped_themes(app->drivers);
 #else
