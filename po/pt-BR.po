@@ -715,10 +715,6 @@ msgid "Keys in use: %s. Keys dropped here are read before them"
 msgstr "Chaves em uso: %s. As soltas aqui são lidas antes delas"
 
 #: src/gui/main.c
-msgid "Back [ESC]"
-msgstr "Voltar [ESC]"
-
-#: src/gui/main.c
 msgid "Output"
 msgstr "Saída"
 

@@ -715,10 +715,6 @@ msgid "Keys in use: %s. Keys dropped here are read before them"
 msgstr "使用中的密钥：%s。拖到这里的密钥会先于它们读取"
 
 #: src/gui/main.c
-msgid "Back [ESC]"
-msgstr "返回 [ESC]"
-
-#: src/gui/main.c
 msgid "Output"
 msgstr "输出"
 

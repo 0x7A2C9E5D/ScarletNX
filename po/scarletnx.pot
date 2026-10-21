@@ -787,10 +787,6 @@ msgid "Keys in use: %s. Keys dropped here are read before them"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Back [ESC]"
-msgstr ""
-
-#: src/gui/main.c
 msgid "Output"
 msgstr ""
 

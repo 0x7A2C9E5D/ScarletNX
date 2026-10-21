@@ -2820,22 +2820,14 @@ static void prompt_in(App* app, GuiRect r, int y, GuiPromptLine line, const char
     text_in(app, r, SDL_max(r.x, x), y, value, color);
 }
 /* ---- the screen a file is picked or dropped on: one box with where the keys go and the ones in use, the line that
-   waits in its middle, Back at its foot */
+   waits in its middle; ESC, or the foot's, goes back */
 typedef struct {
     GuiPlace place;
-    GuiList back;
     int prompt; /* the waiting line's pixel row */
 } GuiPickBoxes;
 static void pick_boxes(App* app, GuiPickBoxes* k) {
-    GuiRect r;
-    int item = item_h(app);
     char keys[256];
     place_screen(app, &k->place, shown_keys(app, keys, sizeof keys), 0, GUI_SHOWS_TABS);
-    r = inner(app, k->place.list);
-    list_place(
-        app, &k->back,
-        gui_rect(r.x, k->place.list.y + k->place.list.h - item - 4 * app->scale, SDL_min(r.w, 24 * cell_w(app)), item),
-        1, -1);
     k->prompt = k->place.list.y + k->place.list.h / 2;
 }
 static void draw_pick(App* app) {
@@ -2848,7 +2840,7 @@ static void draw_pick(App* app) {
     chrome(app, &k.place);
     y = pane(app, k.place.list, snx_tr(items[keys ? GUI_KEYS : app->menu.active]));
     r = inner(app, k.place.list);
-    r = gui_rect(r.x, y, r.w, k.back.at.y - y);
+    r = gui_rect(r.x, y, r.w, r.y + r.h - y);
     if (keys) {
         snprintf(line, sizeof line, snx_tr("Installs to: %s"),
                  app->keys_path ? app->keys_path : snx_tr("Home directory unavailable."));
@@ -2882,7 +2874,6 @@ static void draw_pick(App* app) {
     if (!keys || !app->keys_done || !app->keys_ok)
         prompt_in(app, r, SDL_max(y, k.prompt), GUI_PROMPT_KEYS, snx_tr(keys ? SAY_KEYS_WAIT : SAY_FILE_WAIT),
                   rgb(app->theme.focus));
-    list_item(app, &k.back, 0, snx_tr("Back [ESC]"), false, false); /* nothing to move to: ESC's */
     snprintf(line, sizeof line, "%s: %s", snx_tr(items[keys ? GUI_KEYS : app->menu.active]), snx_tr(SAY_PICK_BOX));
     screen_foot(app, &k.place, line, shown_keys(app, hints_line, sizeof hints_line));
 }
@@ -4654,7 +4645,6 @@ static void editor_input(App* app, const SDL_Event* e) {
 typedef struct {
     GuiPlace place;
     GuiList left, right;
-    GuiList back;          /* Back over the open group's rows, for a click or a finger: ESC's */
     GuiEditor peek;        /* the focused group's rows, shown while the focus is on the groups */
     const GuiEditor* rows; /* the right box's rows: the editor's, or peek */
     GuiRect info;          /* the right box's foot, for a line about its rows */
@@ -4686,7 +4676,7 @@ static const char* form_note(const App* app) {
 static void form_boxes(App* app, GuiFormBoxes* f) {
     const char* note = form_note(app);
     char keys[256];
-    int rows, top, back;
+    int rows, top;
     int theme = app->form == GUI_FORM_THEME, width, height, g;
     int longest = gui_text_cols(snx_tr("Reset all to the defaults"));
     area(app, &width, &height);
@@ -4725,13 +4715,9 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
     f->info = gui_rect(f->place.side.x, f->place.side.y + f->place.side.h - rows * cell_h(app) - 4 * app->scale,
                        f->place.side.w, rows * cell_h(app) + 2 * app->scale);
     top = f->place.side.y + head_h(app) + 4 * app->scale;
-    back = !theme && app->form != GUI_FORM_SETTINGS ? item_h(app) + 24 * app->scale : 0; /* wider than the rows' */
-    list_place(app, &f->back,
-               gui_rect(f->place.side.x + cell_w(app), top, f->place.side.w - 2 * cell_w(app), item_h(app)),
-               back ? 1 : 0, -1);
     list_place(app, &f->right,
-               gui_rect(f->place.side.x + cell_w(app), top + back, f->place.side.w - 2 * cell_w(app),
-                        f->info.y - top - back - 2 * app->scale),
+               gui_rect(f->place.side.x + cell_w(app), top, f->place.side.w - 2 * cell_w(app),
+                        f->info.y - top - 2 * app->scale),
                theme ? 0 : gui_editor_rows(f->rows), app->form == GUI_FORM_SETTINGS ? -1 : f->rows->row);
 }
 /* a row of a form as its box shows it: its label, the value past the widest label; one being typed ends where the
@@ -4837,10 +4823,6 @@ static void draw_form(App* app) {
              : app->form == GUI_FORM_GROUP && app->page >= 0 ? snx_tr(app->settings.keys[app->page].key)
              : g < app->groups                               ? snx_tr(app->group_keys[g].key)
                                                              : snx_tr("Reset all to the defaults"));
-        if (f.back.count) {
-            snprintf(line, sizeof line, "%s%s", app->theme.marker, snx_tr("Back [ESC]"));
-            list_item(app, &f.back, 0, line, false, false);
-        }
         labels = form_labels(f.rows);
         for (r = f.right.first; r < f.right.first + f.right.shown; ++r)
             form_row(app, &f.right, f.rows, r, labels, f.rows == &app->editor && r == app->editor.row);
@@ -5014,11 +4996,6 @@ static void form_pointer(App* app, float x, float y, bool touch) {
         leave_editor(app);
         settings_top(app, i); /* another group: from its row, as Enter there */
         if (i < app->groups) open_group(app, i);
-        return;
-    }
-    if (f.back.count && list_hit(&f.back, x, y, touch) >= 0) { /* as ESC: a typed value first, then the rows */
-        if (app->editor.typing) editor_key(app, GUI_CANCEL);
-        editor_key(app, GUI_CANCEL);
         return;
     }
     if ((i = list_hit(&f.right, x, y, touch)) < 0) return;
@@ -7015,10 +6992,8 @@ static void screen_pointer(App* app, float x, float y, bool click, bool touch) {
     if (pick_screen(app)) {
         GuiPickBoxes k;
         pick_boxes(app, &k);
-        if (click && list_hit(&k.back, x, y, touch) == 0)
-            menu_key(app, GUI_CANCEL);
-        else if (click && y >= (float)k.place.list.y && y < (float)k.back.at.y && x >= (float)k.place.list.x &&
-                 x < (float)(k.place.list.x + k.place.list.w))
+        if (click && y >= (float)k.place.list.y && y < (float)(k.place.list.y + k.place.list.h) &&
+            x >= (float)k.place.list.x && x < (float)(k.place.list.x + k.place.list.w))
             menu_key(app, GUI_SELECT); /* the box the waiting line is in */
         return;
     }

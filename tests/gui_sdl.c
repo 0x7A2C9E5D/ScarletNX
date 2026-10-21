@@ -1891,15 +1891,13 @@ int main(int argc, char** argv) {
     key(&app, SDLK_RETURN);
     assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 3 &&
            app.editor.row == 0); /* games/, dumps/, Add */
-    /* Back over the rows, for a click or a finger: it does what ESC does, back on the App's row; the groups' list has
-       none */
+    /* no Back row over the rows: the foot's ESC, clicked, does what the key does, back on the App's row */
     {
         GuiFormBoxes f;
         render(&app);
-        shows(&app, "- Back [ESC]", normal);
+        hides(&app, "Back [ESC]", normal);
         form_boxes(&app, &f);
-        assert(f.back.count == 1 &&
-               list_box(&f.right, 0).y - (list_box(&f.back, 0).y + list_box(&f.back, 0).h) > 14 * app.scale);
+        assert(list_box(&f.right, 0).y == f.place.side.y + head_h(&app) + 4 * app.scale);
         /* a row with no value has no padding to the widest label: short, it stays whole while a long one slides */
         {
             Uint32 kept = app.theme.scroll_ms;
@@ -1910,14 +1908,10 @@ int main(int argc, char** argv) {
             app.theme.scroll_ms = kept;
             app.clock = 0;
         }
-        point(&app, list_box(&f.back, 0), true);
+        press_key(&app, "ESC", 0, false, yellow);
         assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_FOLDERS);
-        render(&app);
-        shows(&app, "- Back [ESC]", normal);
         key(&app, SDLK_ESCAPE);
         assert(app.form == GUI_FORM_SETTINGS);
-        render(&app);
-        hides(&app, "- Back [ESC]", normal);
         key(&app, SDLK_RETURN);
         app.editor.row = GUI_APP_FOLDERS;
         key(&app, SDLK_RETURN);
@@ -4259,8 +4253,7 @@ int main(int argc, char** argv) {
             render(&app);
             foot_px_is(&app, k.place.tips.x, k.place.tips.y + 2 * foot_scale(&app), "No file was picked.", yellow,
                        black);
-            b = list_box(&k.back, 0);
-            mouse_px(&app, b.x + 4, b.y + 4, true);
+            press_key(&app, "ESC", 0, false, yellow); /* the foot's: no Back in the box */
             assert(app.menu.view == GUI_LOAD_NONE);
             app.message[0] = 0;
         }
