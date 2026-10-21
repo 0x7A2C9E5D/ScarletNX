@@ -652,15 +652,34 @@ int plat_trap_arm(u8* p, u64 size) {
 int plat_trap_continue(u8* p, u64 size) {
 #if SNX_UFFD_MINOR
     u64 page = (u64)sysconf(_SC_PAGESIZE), at = (u64)(uintptr_t)p, end = at + size;
+    int one = 0; /* page by page: a range over two runs of pool pages is two mappings, which one call can't span */
     while (at < end) {
         struct uffdio_continue c;
+        struct uffdio_range w;
         memset(&c, 0, sizeof c);
         c.range.start = at;
-        c.range.len = end - at;
-        if (!ioctl(g_uffd, UFFDIO_CONTINUE, &c)) break;
+        c.range.len = one ? page : end - at;
+        if (!ioctl(g_uffd, UFFDIO_CONTINUE, &c)) {
+            at += c.range.len;
+            one = 0;
+            continue;
+        }
+        if (c.mapped > 0) { /* the kernel stopped partway (EAGAIN): the rest is asked for again */
+            at += (u64)c.mapped;
+            continue;
+        }
         if (errno == EAGAIN) continue;
-        /* a page mapped already (EEXIST), or not in the pool (a hole, which faults in as zero by itself): past it */
-        at += (c.mapped > 0 ? (u64)c.mapped : 0) + page;
+        if (!one) {
+            one = 1;
+            continue;
+        }
+        /* a page mapped already (EEXIST), registered no more (ENOENT), or not in the pool (a hole, which faults in as
+           zero by itself): past it, waking whoever waits on it to fault again. A waiter left there sleeps for good */
+        w.start = at;
+        w.len = page;
+        ioctl(g_uffd, UFFDIO_WAKE, &w);
+        at += page;
+        one = 0;
     }
     return 0;
 #else
