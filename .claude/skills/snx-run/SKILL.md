@@ -34,6 +34,7 @@ The runtime options behind it, for a run by hand from `games/<id>/` (`./<id> --s
 | `--shot=PATH` | Screenshot to `PATH.ppm` at exit |
 | `--shot_every=N` | Also a numbered screenshot every N frames (`PATH_0000.ppm`, ...), needs `--shot` |
 | `--script=ms:hex,...` | Press buttons at those times, each held 300 ms (`--press_len=ms` changes it). `Nf:hex` presses at the Nth presented frame instead. One press is a script of one entry: `--script=5000:1` |
+| `--swkbd_text=TEXT` | The software keyboard answers TEXT instead of opening a dialog |
 | `-v` | Log every IPC call (`IPC <interface> cmd N`, `nn::audio::detail::IAudioOut` for an audout): huge, grep it |
 | `--fps_limit=0` | Unlimited frame rate |
 | `--game=PATH` | Run the game PATH names (`games/<id>`, the folder, runs `games/<id>/<id>_code.so`) instead of the one the runtime is named after. Its log, caches and captures still go to that game's folders |
@@ -66,7 +67,7 @@ The game's log, `games/<id>/<id>.log` in a checkout (a data folder keeps it in i
 - `threads.txt`, next to the game's log: every guest thread's state and wait, rewritten every 15 s. A hang is read from here.
 - `diag=1` in the game's `.ini` saves the QMD and program of each new compute shader (the first 32) to
   `games/<id>/captures/compute/`. F5 writes every game thread's state to the log at any time.
-- RenderDoc (installed by the user): `SNX_RENDERDOC=$SCRATCH/cap SNX_RENDERDOC_FRAMES=500,800` captures those
+- RenderDoc (installed by the user): `--renderdoc=$SCRATCH/cap --renderdoc_frames=500,800` captures those
   presents (one guest frame each; `45s` is the first frame after 45 s on the `--script` clock, steadier on a loaded machine) to `$SCRATCH/cap_capture*.rdc`, and the log says `renderdoc: captured present N`.
   Run it with `SDL_VIDEO_DRIVER=x11`: RenderDoc has no Wayland surface, and on Wayland `vkCreateInstance` fails with
   VK_ERROR_EXTENSION_NOT_PRESENT. The capture layer slows the game (to about 20 fps in one test), so pick presents the run

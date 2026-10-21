@@ -436,9 +436,8 @@ static void test_swkbd(void) {
     CHECK(am_utf8_to_16("a\xE2\x82", units, 4) == 2 && units[0] == 'a' && units[1] == 0xFFFD);
     CHECK(am_utf8_to_16("\xF4\x90\x80\x80", units, 4) == 4); /* past U+10FFFF */
     CHECK(am_utf8_to_16("\xF0\x9F\x98\x80", units, 4) == 2 && units[0] == 0xD83D && units[1] == 0xDE00);
-#ifndef _WIN32
     /* a scripted run's text, cancelled when it is shorter than the minimum */
-    setenv("SNX_SWKBD_TEXT", "hi", 1);
+    strcpy(g_settings.keyboard_text, "hi");
     out = swkbd(0, 0, 1);
     CHECK(dialog_calls == 0 && get32(((StorageData*)out->data)->d) == 0);
     CHECK(!strcmp((char*)((StorageData*)out->data)->d + 4, "hi"));
@@ -446,8 +445,7 @@ static void test_swkbd(void) {
     out = swkbd(0, 3, 1);
     CHECK(get32(((StorageData*)out->data)->d) == 1);
     svcobj_unref(out);
-    unsetenv("SNX_SWKBD_TEXT");
-#endif
+    g_settings.keyboard_text[0] = 0;
 }
 /* the other applets' outputs: the controller applet's players against the game's minimum, a web applet's return
    value, and zeros from the rest */

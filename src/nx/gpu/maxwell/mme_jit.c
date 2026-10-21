@@ -4,7 +4,7 @@
    (mme_choose), and the first call of a hash emits the macro's instructions as a function, compiles it with the LLVM
    backend (common/cpu/recompiler/llvm) and loads it into this process with the runtime JIT's loader. The function
    calls mme_out and mme_reg, as the interpreter does, so the methods it sends and the registers it reads are the ones
-   the stream and the engine see from the interpreter, and SNX_MME_VERIFY can compare the two.
+   the stream and the engine see from the interpreter, and mme_verify can compare the two.
    The control flow is the interpreter's, not a dispatch loop: the instruction words are constants, so a branch is a
    direct jump, the registers are values, r0 is zero and a fetch past the last parameter is zero. An exit's delay slot
    ends the call, a taken branch's delay slot runs before the branch's target, and a branch in a delay slot fetches
@@ -13,10 +13,11 @@
    the interpreter from there, so a compiled macro needs no resume machinery of its own.
    A macro whose code the compiler can't follow (an unknown operation or ALU, a branch outside the upload batch, a
    different upload in the middle of it) has no compiled form and the interpreter runs it, as it did every macro
-   before. SNX_MME_JIT=0 turns the compiled forms off. */
+   before. mme_jit=0 turns the compiled forms off. */
 #include "nx/gpu/maxwell/engines_int.h"
 #include "common/cpu/recompiler/llvm/code_loader.h"
 #include "common/cpu/recompiler/llvm/ir.h"
+#include "nx/runtime/options.h"
 
 /* the functions' -O level: they are small, and the first call of a macro waits for its compilation */
 #define MME_JIT_OPT '1'
@@ -586,7 +587,7 @@ static struct {
     MmeJitEntry* entries;
     size_t count, capacity;
 } mme_jit;
-static int mme_jit_state = -1; /* -1 not tried, 0 off (no LLVM, no loader, SNX_MME_JIT=0), 1 on */
+static int mme_jit_state = -1; /* -1 not tried, 0 off (no LLVM, no loader, mme_jit=0), 1 on */
 
 static MmeJitEntry* mme_jit_entry(u64 hash) {
     size_t i;
@@ -619,9 +620,8 @@ static void mme_jit_shutdown(void) {
 
 static void mme_jit_start(void) {
     char error[512];
-    const char* off = getenv("SNX_MME_JIT");
     mme_jit_state = 0;
-    if (off && !strcmp(off, "0")) return;
+    if (!g_settings.compiled_macros) return;
     if (snx_ir_init(error, sizeof error)) {
         LOG_LIMIT(1, "mme: macros are interpreted: no LLVM: %s\n", error);
         return;

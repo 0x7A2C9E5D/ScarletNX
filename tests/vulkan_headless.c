@@ -802,6 +802,8 @@ int main(int argc, char** argv) {
     char *root = snx_temp_dir(NULL), *shot, *ppm;
     CHECK(root);
     CHECK(!snx_startup_options(argc, argv));
+    for (int i = 1; i < argc; i++) /* --vk_validation=1 as the runtime takes it: the Khronos validation layer */
+        if (!strcmp(argv[i], "--vk_validation=1")) g_settings.vulkan_validation_layer = 1;
     snprintf(g_exedir, 1024, "%s/", root);
     shot = snx_path_join(root, "frame");
     ppm = snx_format("%s.ppm", shot);

@@ -20,7 +20,7 @@
    render.c    the render target set (dynamic rendering), clears and draws
    compute.c   compute dispatches (on a queue of their own when there is one), landing their results in guest memory
    renderer.c  the renderer interface the GPU front end calls (gpu/renderer.h) and presenting
-   renderdoc.c RenderDoc captures of chosen frames (SNX_RENDERDOC)
+   renderdoc.c RenderDoc captures of chosen frames (renderdoc)
    ui.c        the on-screen controls and the game's menu, drawn over the swapchain image
    vma.cpp     VulkanMemoryAllocator's implementation
 
@@ -124,7 +124,7 @@ int vk_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* me
 int vk_image_create_r(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem, VkResult* res);
 void vk_image_destroy(VkImage img, VmaAllocation mem);
 /* The caches of textures, render targets and buffers are kept within the driver's budget for the heap images go to
-   (VK_EXT_memory_budget through VMA; SNX_VK_BUDGET_MB lowers it, for testing): past it the driver pages memory out,
+   (VK_EXT_memory_budget through VMA; vk_budget_mb lowers it, for testing): past it the driver pages memory out,
    which took 160 ms frames and then the device in one game. Ages are kept in presents, and measured in time as well
    as presents, the frame rate being anything from 5 to 144 a second.
    vk_mem_use: that heap's use as the caches count it, and its budget. vk_mem_present: at each present, after
@@ -669,8 +669,8 @@ int vk_buf_pending(u64 gva, u64 len); /* a pending graphics result overlaps the 
 u64 vk_buf_adds(void);                /* graphics results committed so far: as vk_compute_adds */
 int vk_buf_pending_any(void);         /* any graphics result is pending */
 int vk_buf_pending_unsubmitted(void); /* one is in the commands recorded since the last submit */
-/* renderdoc.c: with SNX_RENDERDOC set, RenderDoc loaded before the instance exists (load) and the frames
-   SNX_RENDERDOC_FRAMES names captured (present, at each present under vk_lock) */
+/* renderdoc.c: with renderdoc set, RenderDoc loaded before the instance exists (load) and the frames
+   renderdoc_frames names captured (present, at each present under vk_lock) */
 void vk_renderdoc_load(void);
 void vk_renderdoc_present(u64 present);
 
@@ -755,7 +755,7 @@ u32* vk_translate_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si
 /* why the device can't take the module: a capability it declares (Float64, Int64) whose feature is off, or NULL */
 const char* vk_spirv_unavailable(const u32* spv, size_t words);
 u64 vk_shader_hash(const u8* code, u32 max_bytes, u32* out_len, VkCbReader read); /* BRX tables through read */
-/* where each new shader's snx-shaderc corpus entry goes: SNX_SHADER_CORPUS, else with diag=1 captures/shaders beside
+/* where each new shader's snx-shaderc corpus entry goes: shader_corpus, else with diag=1 captures/shaders beside
    the games; NULL for neither */
 const char* vk_corpus_dir(void);
 int vk_cb_reads_hold(const VkCbReads* reads, VkCbReader read);
@@ -925,7 +925,7 @@ extern u64 g_vk_drawn, g_vk_skipped; /* draws recorded, and draws skipped (unsup
    through a copy instead (gpu/vk/render.c) */
 extern u64 g_vk_fb_draws, g_vk_fb_barriers, g_vk_fb_restarts, g_vk_rt_copies;
 
-/* gpuprof.c, SNX_VK_GPU_PROFILE=1: GPU time per rendering pass, summed per target and logged every 10 s */
+/* gpuprof.c, vk_gpu_profile=1: GPU time per rendering pass, summed per target and logged every 10 s */
 void vk_gpuprof_pass_begin(VkCommandBuffer cb, const Surf* rt, const Surf* zt);
 void vk_gpuprof_pass_end(VkCommandBuffer cb);
 void vk_gpuprof_frame_done(u32 slot);

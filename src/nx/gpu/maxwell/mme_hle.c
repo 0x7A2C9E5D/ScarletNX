@@ -7,7 +7,7 @@
 /* Native implementations of the macros NVN uploads, chosen by the hash of their code (mme.c's mme_choose). Each one
    sends the methods the macro's code sends, in the same order with the same values, through mme_out, as the
    interpreter does: what it reads (its parameters and the shadow scratch registers, 0xD00 on) it reads before it
-   sends anything, as the code does. They were derived from the code, and SNX_MME_VERIFY compares them with the
+   sends anything, as the code does. They were derived from the code, and mme_verify compares them with the
    interpreter call by call.
    The parameters are the macro's: a fetch past the last one reads 0, as in the interpreter. An implementation leaves a
    call to the interpreter (returns 0, before sending) where the interpreter would do something it doesn't: a loop
@@ -449,50 +449,58 @@ static int render_target_reset(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np
     return 1;
 }
 
-typedef struct {
-    u64 hash;
-    int (*run)(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np);
-    const char* name;
-} MmeNative;
-static const MmeNative mme_natives[] = {
-    {0x771BB18C62444DA0ull, draw_indexed, "indexed draw"},
-    {0x0217920100488FF7ull, draw_indexed_cb, "indexed draw with constants"},
-    {0x0D61FC9FAAC9FCADull, draw_arrays, "draw"},
-    {0x8A4D173EB99A8603ull, draw_arrays_cb, "draw with constants"},
-    {0xD7333D26E0A93EDEull, cb_select, "constant buffer select"},
-    {0xC713C83D8F63CCF3ull, cb_select_offset, "constant buffer select at offset"},
-    {0xEB29B2A09AA06D38ull, bind_program, "program bind"},
-    {0x42B97BFB33086347ull, scratch_d38, "scratch 0xD38 and 0x0D8"},
-    {0x176ED6F0009E577Aull, blend_enables, "blend enables"},
-    {0xE8FCEAF999995860ull, color_masks, "color masks"},
-    {0x2DB33AADB741839Cull, draw_indexed_inline, "indexed draw, buffer inline"},
-    {0x5DA7C45099120734ull, scratch_d3b, "scratch 0xD3B-0xD3D"},
-    {0x88EEF6578DA4695Dull, scratch_d28, "scratch 0xD28"},
-    {0xEAD26C3E2109B06Bull, multi_layer_clear, "clear of every layer"},
-    {0x71F722B9118625E7ull, multi_layer_clear_depth, "clear of every layer, the depth target's count"},
-    {0xDB1341DBEB4C8AF7ull, raster_bounding_box, "raster bounding box"},
-    {0x290BBC50F4AE637Full, stencil_ops, "stencil operations"},
-    {0xDD6A7FA92A7D2674ull, draw_once, "draw of one instance"},
-    {0x81C197B87D4DF426ull, scratch_d36, "scratch 0xD36 and 0x376"},
-    {0xD246FDDF3A6173D7ull, clear_const_buffer, "constant buffer clear"},
-    {0xEE4D0004BEC8ECF4ull, clear_memory, "memory clear"},
-    {0xFC0CF27F5FFAA661ull, transform_feedback_setup, "transform feedback setup"},
-    {0x9E3CA7054D12D63Cull, firmware_call4, "firmware call 4"},
-    {0xD207959154DCA521ull, render_target_reset, "render target 0 and state reset"},
-    {0x3F5E74B9C9A50164ull, multi_draw_indexed_count, "indexed draws from records, with a count"},
-    {0xB5F74EDB717278ECull, draw_byte_count, "draw of a byte count"},
-    {0x6C97861D891EDF7Eull, cb_clear_5f00, "constant buffer clear, 0x5F00 bytes"},
-    {0xDBCD08D629ABC472ull, cb_select_offset_5f00, "constant buffer select at offset, 0x5F00 bytes"},
-    {0xAE29BDE4BD4C7ED1ull, scratch_d29, "scratch 0xD29"},
-};
+/* The native implementations by the hash of their code: X(hash, function, name). mme_native_find is a switch on the
+   hash, which the compiler makes a lookup rather than a scan, and a hash listed twice is a duplicate case */
+#define MME_NATIVES(X) \
+    X(0x771BB18C62444DA0ull, draw_indexed, "indexed draw") \
+    X(0x0217920100488FF7ull, draw_indexed_cb, "indexed draw with constants") \
+    X(0x0D61FC9FAAC9FCADull, draw_arrays, "draw") \
+    X(0x8A4D173EB99A8603ull, draw_arrays_cb, "draw with constants") \
+    X(0xD7333D26E0A93EDEull, cb_select, "constant buffer select") \
+    X(0xC713C83D8F63CCF3ull, cb_select_offset, "constant buffer select at offset") \
+    X(0xEB29B2A09AA06D38ull, bind_program, "program bind") \
+    X(0x42B97BFB33086347ull, scratch_d38, "scratch 0xD38 and 0x0D8") \
+    X(0x176ED6F0009E577Aull, blend_enables, "blend enables") \
+    X(0xE8FCEAF999995860ull, color_masks, "color masks") \
+    X(0x2DB33AADB741839Cull, draw_indexed_inline, "indexed draw, buffer inline") \
+    X(0x5DA7C45099120734ull, scratch_d3b, "scratch 0xD3B-0xD3D") \
+    X(0x88EEF6578DA4695Dull, scratch_d28, "scratch 0xD28") \
+    X(0xEAD26C3E2109B06Bull, multi_layer_clear, "clear of every layer") \
+    X(0x71F722B9118625E7ull, multi_layer_clear_depth, "clear of every layer, the depth target's count") \
+    X(0xDB1341DBEB4C8AF7ull, raster_bounding_box, "raster bounding box") \
+    X(0x290BBC50F4AE637Full, stencil_ops, "stencil operations") \
+    X(0xDD6A7FA92A7D2674ull, draw_once, "draw of one instance") \
+    X(0x81C197B87D4DF426ull, scratch_d36, "scratch 0xD36 and 0x376") \
+    X(0xD246FDDF3A6173D7ull, clear_const_buffer, "constant buffer clear") \
+    X(0xEE4D0004BEC8ECF4ull, clear_memory, "memory clear") \
+    X(0xFC0CF27F5FFAA661ull, transform_feedback_setup, "transform feedback setup") \
+    X(0x9E3CA7054D12D63Cull, firmware_call4, "firmware call 4") \
+    X(0xD207959154DCA521ull, render_target_reset, "render target 0 and state reset") \
+    X(0x3F5E74B9C9A50164ull, multi_draw_indexed_count, "indexed draws from records, with a count") \
+    X(0xB5F74EDB717278ECull, draw_byte_count, "draw of a byte count") \
+    X(0x6C97861D891EDF7Eull, cb_clear_5f00, "constant buffer clear, 0x5F00 bytes") \
+    X(0xDBCD08D629ABC472ull, cb_select_offset_5f00, "constant buffer select at offset, 0x5F00 bytes") \
+    X(0xAE29BDE4BD4C7ED1ull, scratch_d29, "scratch 0xD29")
+
+#define MME_ID(hash, run, name) MME_N_##run,
+enum { MME_NATIVES(MME_ID) MME_N_COUNT };
+#define MME_HASH(hash, run, name) hash,
+static const u64 mme_native_hashes[MME_N_COUNT] = {MME_NATIVES(MME_HASH)};
+#define MME_RUN(hash, run, name) run,
+static int (*const mme_native_runs[MME_N_COUNT])(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) = {
+    MME_NATIVES(MME_RUN)};
+#define MME_NAME(hash, run, name) name,
+static const char* const mme_native_names[MME_N_COUNT] = {MME_NATIVES(MME_NAME)};
+#define MME_CASE(hash, run, name) \
+    case hash: return MME_N_##run;
 int mme_native_find(u64 hash) {
-    int k;
-    for (k = 0; k < (int)(sizeof mme_natives / sizeof mme_natives[0]); k++)
-        if (mme_natives[k].hash == hash) return k;
-    return -1;
+    switch (hash) {
+        MME_NATIVES(MME_CASE)
+    default: return -1;
+    }
 }
-const char* mme_native_name(int k) { return mme_natives[k].name; }
-u64 mme_native_hash(int k) { return mme_natives[k].hash; }
+const char* mme_native_name(int k) { return mme_native_names[k]; }
+u64 mme_native_hash(int k) { return mme_native_hashes[k]; }
 int mme_native_run(int k, GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
-    return mme_natives[k].run(ch, rec, p, np);
+    return mme_native_runs[k](ch, rec, p, np);
 }

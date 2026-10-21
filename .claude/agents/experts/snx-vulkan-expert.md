@@ -14,7 +14,7 @@ frame.
   flight and staging; `surface.c`, `format.c`; `texture.c`; `astc.c`; `buffer.c` guest memory as buffers;
   `pipeline.c`; `render.c` passes, clears, draws; `compute.c` the compute queue; `writeback.c`; `renderer.c`
   presenting). The shader translator is `src/nx/gpu/shader/` (`spirv_translate.c`, `spirv_compute.c`).
-- `SNX_SHADER_CORPUS=dir` records translated shaders and `snx-shaderc dir --validate` rechecks them offline with
+- `--shader_corpus=dir` records translated shaders and `snx-shaderc dir --validate` rechecks them offline with
   `spirv-val`, which must be on PATH. `spirv-dis` shows a module as text.
 - **Nothing in a draw's setup may submit or wait for the GPU** (`vk_finish`, a readback like `vk_rt_flush`): the
   frame's descriptor pools and staging reset after it and the draw's sets already allocated turn to garbage. Copy
@@ -30,9 +30,9 @@ Every renderer change is run under the Khronos validation layer before it is cal
 part of the result.
 - The layer comes from the host: the distribution's package (`vulkan-validation-layers` on Arch and Fedora,
   `vulkan-validationlayers` on Debian and Ubuntu) or the LunarG Vulkan SDK on Windows. Check with
-  `vulkaninfo --summary` or the runtime's own warning ("SNX_VK_VALIDATION is set but VK_LAYER_KHRONOS_validation is
-  not installed"). If it is missing, ask the user to install it rather than skipping the check.
-- `SNX_VK_VALIDATION=1` makes `src/nx/gpu/vk/device.c` enable the layer with a debug messenger. Errors are logged
+  `vulkaninfo --summary` or the runtime's own warning ("validation was asked for (vk_validation), but
+  VK_LAYER_KHRONOS_validation is not installed"). If it is missing, ask the user to install it rather than skipping the check.
+- `--vk_validation=1` (or `[Debug] vk_validation=1` in the game's `.ini`) makes `src/nx/gpu/vk/device.c` enable the layer with a debug messenger. Errors are logged
   with `WARN` and everything else with `LOG`, each line starting `vulkan validation:`. Count them with
   `grep -c 'vulkan validation:' games/<id>/<id>.log` and read the distinct ones with
   `grep 'vulkan validation:' games/<id>/<id>.log | sort | uniq -c | sort -rn | head`. Never print the whole log.
@@ -47,8 +47,8 @@ part of the result.
   up in the specification before deciding the fix.
 - The layer slows the frame loop a lot, so timing-dependent behavior (movies, audio sync) can differ under it.
   Judge performance only on runs without it.
-- The headless integration test runs under it too: `SNX_VK_VALIDATION=1 ctest --test-dir build/headless-vk -R
-  vulkan_headless --output-on-failure` (`docs/BUILD.md`).
+- The headless integration test runs under it too: `(cd build/headless-vk && src/nx/snx-test-vulkan -H
+  --vk_validation=1)`, from the build tree, where it keeps its shader cache (`docs/BUILD.md`).
 
 ## Expertise to apply
 - **Sync**: execution versus memory dependencies, stage and access masks with synchronization2, write-after-read

@@ -70,7 +70,7 @@ const char* vk_corpus_dir(void) {
     static char dir[sizeof g_exedir + sizeof "captures/shaders"];
     static const char* at = (const char*)-1;
     if (at != (const char*)-1) return at;
-    at = getenv("SNX_SHADER_CORPUS");
+    at = g_settings.shader_corpus[0] ? g_settings.shader_corpus : NULL;
     if (!at && g_settings.shader_captures) { /* a phone's game has no environment to set */
         snprintf(dir, sizeof dir, "%scaptures", g_exedir);
         plat_mkdir(dir);
@@ -555,7 +555,7 @@ static VkShaderModule null_fs(void) {
 /* ------------------------------------------------------------ pipelines */
 /* A draw's new pipeline is made on the worker threads (pipeline_threads, vk_pipeline_worker_count): the GPU thread hands
    the recording thread a stand-in for it and decodes on, and the recording thread waits for the pipeline at its bind
-   (vk_pipeline_resolve; without that thread, SNX_VK_RECORD=0, the draw waits on the GPU thread). The shader file's
+   (vk_pipeline_resolve; without that thread, vk_record=0, the draw waits on the GPU thread). The shader file's
    pipelines (pf_merge) are made on the workers from startup, and a draw that asks for one before then waits for it
    too, at the head of the workers' queue. Skipping a draw whose pipeline was still being made, as Eden's asynchronous
    shaders do, left
@@ -586,7 +586,7 @@ static Pipe* g_pipeh[PIPEH];
 static struct {
     PFile file;
     char path[1400];
-    int on;          /* the file is used (not with SNX_SHADER_CORPUS, which wants every shader translated) */
+    int on;          /* the file is used (not with shader_corpus, which wants every shader translated) */
     PMutex lock;     /* loaded, and done's */
     PCond done;
     int loaded;      /* the reading thread is done with what follows (lock) */
@@ -1225,8 +1225,8 @@ static void pf_start_load(void) {
     pm_init(&g_pf.file.lock);
     pm_init(&g_pf.lock);
     pc_init(&g_pf.done);
-    if (getenv("SNX_SHADER_CORPUS")) {
-        LOG("vulkan: SNX_SHADER_CORPUS is set, so every shader is translated and none is kept for the next run\n");
+    if (g_settings.shader_corpus[0]) {
+        LOG("vulkan: shader_corpus is set, so every shader is translated and none is kept for the next run\n");
         return;
     }
     g_pf.on = 1;

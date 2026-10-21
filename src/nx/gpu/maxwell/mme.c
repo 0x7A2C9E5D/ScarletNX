@@ -8,6 +8,7 @@
    and the macro goes on from there (mme_resume) when the wait ends, before the stream's next word. A delay slot is a
    step of its own, so such a stop can come between a branch or exit and its slot */
 #include "nx/gpu/maxwell/engines_int.h"
+#include "nx/runtime/options.h"
 
 static u32 fetch_param(GpuChannel* ch) {
     GpuMme* m = &ch->mme;
@@ -245,9 +246,9 @@ static int mme_choose(GpuChannel* ch, u32 idx) {
     }
     return (int)c - 2;
 }
-/* SNX_MME_HLE=0 runs every macro through the interpreter; SNX_MME_VERIFY=1 runs a known macro both ways, recorded,
+/* mme_hle=0 runs every macro through the interpreter; mme_verify=1 runs a known macro both ways, recorded,
    compares what they send, and sends what the interpreter does. A macro with no implementation has a compiled form
-   (mme_jit.c) after the native ones, and SNX_MME_VERIFY compares it with the interpreter too */
+   (mme_jit.c) after the native ones, and mme_verify compares it with the interpreter too */
 enum { MME_NATIVE = 1, MME_VERIFY = 2 };
 static int mme_mode = -1;
 /* calls, counted on the GPU thread (the only one running macros): native, compiled, interpreted, and in verify mode
@@ -321,7 +322,7 @@ static void mme_verify(GpuChannel* ch, u32 idx, int k, u32 np) {
         WARN_LIMIT(32, "mme: macro %u (%s) differs from the interpreter after send %u (%u and %u sends)\n", idx,
                    mme_native_name(k), i, nat->total, in->total);
 }
-/* the compiled form of macro idx against the interpreter, recorded: SNX_MME_VERIFY's check for the macros mme_hle.c
+/* the compiled form of macro idx against the interpreter, recorded: mme_verify's check for the macros mme_hle.c
    has no implementation for. The interpreter's sends are what the call then does */
 static void mme_verify_jit(GpuChannel* ch, u32 idx, u32 np) {
     static MmeRec rec[2]; /* GPU thread only */
@@ -361,8 +362,7 @@ void mme_run(GpuChannel* ch, u32 idx, u32 np) {
     int k = -1;
     idx &= 0x7F;
     if (mme_mode < 0) {
-        const char *hle = getenv("SNX_MME_HLE"), *verify = getenv("SNX_MME_VERIFY");
-        mme_mode = (hle && !strcmp(hle, "0") ? 0 : MME_NATIVE) | (verify && strcmp(verify, "0") ? MME_VERIFY : 0);
+        mme_mode = (g_settings.native_macros ? MME_NATIVE : 0) | (g_settings.verify_macros ? MME_VERIFY : 0);
     }
     if (mme_mode & MME_NATIVE) k = mme_choose(ch, idx);
     if (k >= 0) {

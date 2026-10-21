@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* RenderDoc captures of chosen frames, for unattended runs: SNX_RENDERDOC=PREFIX loads RenderDoc's library before the
+/* RenderDoc captures of chosen frames, for unattended runs: renderdoc=PREFIX ([Debug] or --renderdoc=) loads RenderDoc's library before the
    Vulkan instance exists (its capture layer is an implicit one, which the loader enables with
-   ENABLE_VULKAN_RENDERDOC_CAPTURE), and SNX_RENDERDOC_FRAMES=N,M,... names the frames to capture: a number is a
+   ENABLE_VULKAN_RENDERDOC_CAPTURE), and renderdoc_frames=N,M,... names the frames to capture: a number is a
    present, a number with s a time in seconds on the clock --script counts from (the first frame after it), which a
    loaded machine doesn't move. A capture holds one guest frame: everything recorded after present N-1 up to present
    N, written to PREFIX_capture.rdc and then numbered ones. Frames that never reach the swapchain (offscreen, headless)
@@ -12,6 +12,7 @@
 #include <string.h>
 #include "nx/gpu/vk/vk.h"
 #include "renderdoc_app.h"
+#include "nx/runtime/options.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
 #include "nx/runtime/platform/unattended.h"
@@ -27,17 +28,17 @@ static RdFrame g_rd_frames[RD_FRAMES];
 static int g_rd_nframes, g_rd_open;
 
 void vk_renderdoc_load(void) {
-    const char *prefix = getenv("SNX_RENDERDOC"), *frames = getenv("SNX_RENDERDOC_FRAMES"), *p;
+    const char *prefix = g_settings.render_doc_captures, *frames = g_settings.render_doc_frames, *p;
     pRENDERDOC_GetAPI get_api;
     void* lib;
-    if (!prefix || !*prefix) return;
+    if (!*prefix) return;
 #ifdef _WIN32
     lib = plat_dl_open("renderdoc.dll");
 #else
     lib = plat_dl_open("librenderdoc.so");
 #endif
     if (!lib) {
-        WARN("renderdoc: SNX_RENDERDOC is set but RenderDoc's library didn't load: %s\n", plat_dl_error());
+        WARN("renderdoc: renderdoc is set but RenderDoc's library didn't load: %s\n", plat_dl_error());
         return;
     }
     get_api = (pRENDERDOC_GetAPI)plat_dl_sym(lib, "RENDERDOC_GetAPI");
@@ -52,7 +53,7 @@ void vk_renderdoc_load(void) {
     /* no overlay in the captured frames, and nothing taken but the presents asked for */
     g_rd->MaskOverlayBits(eRENDERDOC_Overlay_None, eRENDERDOC_Overlay_None);
     g_rd->SetCaptureKeys(NULL, 0);
-    for (p = frames; p && *p && g_rd_nframes < RD_FRAMES;) {
+    for (p = frames; *p && g_rd_nframes < RD_FRAMES;) {
         char* e;
         unsigned long long n = strtoull(p, &e, 10);
         if (e == p) break;
@@ -62,8 +63,8 @@ void vk_renderdoc_load(void) {
         if (g_rd_frames[g_rd_nframes].at) g_rd_nframes++;
         p = *e == ',' ? e + 1 : e;
     }
-    if (p && *p)
-        WARN("renderdoc: SNX_RENDERDOC_FRAMES: \"%s\" is no frame (N, or Ns for seconds): it captures the %d "
+    if (*p)
+        WARN("renderdoc: renderdoc_frames: \"%s\" is no frame (N, or Ns for seconds): it captures the %d "
              "before it\n",
              p, g_rd_nframes);
     LOG("renderdoc: loaded, %d frame(s) to capture to %s\n", g_rd_nframes, prefix);

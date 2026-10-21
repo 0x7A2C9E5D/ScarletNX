@@ -331,7 +331,9 @@ Offscreen integration test, with an installed Vulkan 1.3 ICD (lavapipe works):
 cmake --preset default -B build/headless-vk -DSNX_BUILD_GUI=OFF \
   -DSNX_DEPLOY=OFF -DSNX_TEST_VULKAN=ON && cmake --build build/headless-vk
 # Set VK_DRIVER_FILES to your lavapipe manifest to force CPU rendering.
-SNX_VK_VALIDATION=1 ctest --test-dir build/headless-vk -R vulkan_headless --output-on-failure
+ctest --test-dir build/headless-vk -R vulkan_headless --output-on-failure
+# the same with the validation layer
+(cd build/headless-vk && src/nx/snx-test-vulkan -H --vk_validation=1)
 ```
 
 The test uses synthetic pixels, not a game. It checks offscreen submissions, frame recycling, cropping,

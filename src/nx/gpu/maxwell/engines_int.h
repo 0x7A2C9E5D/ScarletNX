@@ -30,7 +30,7 @@ void mme_run(GpuChannel* ch, u32 idx, u32 np);
 void mme_upload_ptr(GpuChannel* ch, u32 v);
 void mme_upload(GpuChannel* ch, u32 v);
 void mme_bind(GpuChannel* ch, u32 v);
-/* the methods a macro sends, recorded instead of sent: SNX_MME_VERIFY records a native implementation and the
+/* the methods a macro sends, recorded instead of sent: mme_verify records a native implementation and the
    interpreter, and compares them. The first MME_REC_N are kept, and the hash covers them all */
 #define MME_REC_N 1024
 typedef struct MmeRec {
@@ -46,7 +46,7 @@ void mme_out(GpuChannel* ch, MmeRec* rec, u32 m, u32 v);
 u32 mme_reg(GpuChannel* ch, MmeRec* rec, u32 a);
 
 /* mme_jit.c: the compiled form of a macro's code, chosen by its hash after the native ones: 1 when it ran the macro
-   (a wait may have stopped it, ch->mme.running), 0 when it has none and the interpreter runs it. SNX_MME_JIT=0 turns
+   (a wait may have stopped it, ch->mme.running), 0 when it has none and the interpreter runs it. mme_jit=0 turns
    the compiled forms off */
 int mme_jit_run(GpuChannel* ch, MmeRec* rec, u32 idx, u32 np);
 void mme_jit_free(void);

@@ -226,7 +226,7 @@ Remaining examples: POSIX.
   `--chunk N` sets instructions per code unit. Nothing is cached between runs.
   `--keep-ir` saves the generated code (LLVM IR) in `<outdir>/<NAME>/<NAME>_build/`.
   `--hook-direct-calls` sends calls and branches between guest functions through the dispatch table too, so
-  `SNX_NVN_TRACE` also counts calls made by direct branch. The game runs slower, so use it only for investigating.
+  `nvn_trace=1` also counts calls made by direct branch. The game runs slower, so use it only for investigating.
 - **Data updates:** ExeFS refreshes; `<id>_data/romfs` is reused.
   Replace cached RomFS after asset changes; preserve `<id>_data/save/`.
 
@@ -439,7 +439,7 @@ written, so a data folder with no users.ini plays as `Player`, uid `0123456789ab
 
 `Game.ini`: help rewritten at startup, most settings hot-reload. `--key=value` overrides one run.
 Restart for `docked`, `fullscreen`, `language`, `resolution`, `anisotropy`, `memory_gb`, `heap_max_mb`, `airplane_mode`,
-`ldn`, `room`, `profile`, `pipeline_threads`, `jit_threads`.
+`ldn`, `room`, `pipeline_threads`, `jit_threads`, and the `[Debug]` settings other than `log`, `auto_stub_ipc` and `diag`.
 `scarletnx --settings` prints each setting the launcher's Settings offer, one a line: its section, key, default,
 type, range and help, tab-separated. Every setting, the recompiler's too, is described once in
 `src/nx/runtime/settings.txt`, which the build generates the tables and `g_settings` from.
@@ -482,8 +482,18 @@ type, range and help, tab-separated. Every setting, the recompiler's too, is des
 | `log` | `1` | Log detail. `2` logs everything, which adds runtime overhead |
 | `auto_stub_ipc` | `1` | A service command the runtime doesn't know answers success, logged as `[undeclared]`, and a service it doesn't have answers every command that way. `0` answers them with the console's UnknownCommandId instead, which shows the gap where the game makes the call |
 | `diag` | `0` | `1` saves the data of each new compute shader to `captures/compute`, and each new shader's snx-shaderc corpus entry to `captures/shaders`, for debugging |
-| `vk_validation` | `0` | `1` turns on the Vulkan validation layer (`VK_LAYER_KHRONOS_validation`, from the Vulkan SDK or the distribution's validation layers package), which logs each misuse of Vulkan it finds. It slows the game down a lot. Without the layer installed the run only warns. `SNX_VK_VALIDATION=1` does the same |
+| `vk_validation` | `0` | `1` turns on the Vulkan validation layer (`VK_LAYER_KHRONOS_validation`, from the Vulkan SDK or the distribution's validation layers package), which logs each misuse of Vulkan it finds. It slows the game down a lot. Without the layer installed the run only warns |
 | `profile` | `0` | `1` writes `profile.txt` every 10 seconds. The CPU profiler is Windows only |
+| `nvn_trace` | `0` | `1` logs each NVN function the game resolves and, at exit, how often each was called ([DEVELOPMENT.md](DEVELOPMENT.md)). The game runs slower |
+| `shader_corpus` | empty | A folder that keeps each translated shader for `snx-shaderc`. With it every shader is translated, and none is kept for the next run |
+| `gpu_trace_target` | empty | `address[:bytes]`: logs the clears and draws that write a render target starting in that GPU address range |
+| `vk_gpu_profile` | `0` | `1` logs the GPU's time per rendering pass every 10 seconds |
+| `vk_buffer_stats` | `0` | `1` logs what the renderer copies between guest memory and its buffers |
+| `vk_record` | `1` | `0` records Vulkan commands on the GPU thread instead of a thread of their own |
+| `compute` | `1` | `0` skips every compute shader dispatch |
+| `vk_max_allocation_mb`, `vk_budget_mb` | `0`, `0` | A smaller cap on each Vulkan allocation and on the GPU memory the caches keep, in MiB, for testing. `0` is the device's |
+| `mme_hle`, `mme_jit`, `mme_verify` | `1`, `1`, `0` | The GPU macros run natively, compiled, and checked against the interpreter. `0`, `0` interprets them all |
+| `renderdoc`, `renderdoc_frames` | empty | RenderDoc captures to that path's stem of the presents listed (`500,800`, or `45s` for the first after 45 seconds) |
 
 A gamepad's motion sensors, a Joy-Con's among them, go to the game when SDL exposes them. No setting turns them off.
 

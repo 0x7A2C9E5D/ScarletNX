@@ -962,8 +962,8 @@ static u32 am_utf8_to_16(const char* in, u16* out, u32 max) {
 }
 static void am_put32(u8* p, u32 v) { memcpy(p, &v, 4); }
 
-/* the software keyboard as a whole applet: the host's text dialog with the game's initial text, or the text of the
-   environment's SNX_SWKBD_TEXT (for scripted runs). KeyboardConfig (SwkbdConfigCommon, the second storage) gives the
+/* the software keyboard as a whole applet: the host's text dialog with the game's initial text, or the text of
+   swkbd_text (--swkbd_text=, for scripted runs). KeyboardConfig (SwkbdConfigCommon, the second storage) gives the
    length limits, whether the answer is UTF-8, and where the initial text is in the work buffer (the third). The
    dialog is asked again until the text is long enough, or cancelled */
 #define AM_SWKBD_OUT   0x7d8                       /* SwkbdResult and the 0x7d4 byte string buffer */
@@ -973,7 +973,7 @@ static SvcObj* am_swkbd(LibApplet* a) {
     u16 wide[AM_SWKBD_UNITS + 1];
     u32 max = AM_SWKBD_UNITS, min = 0, off = 0, len = 0, n = 0, v;
     int utf8 = 0, r;
-    const char* env = getenv("SNX_SWKBD_TEXT");
+    const char* env = g_settings.keyboard_text[0] ? g_settings.keyboard_text : NULL;
     SvcObj* out;
     u8* d;
     initial[0] = 0;
