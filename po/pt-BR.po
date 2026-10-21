@@ -829,8 +829,8 @@ msgid "Built-in themes, then each themes/<name>/theme.ini"
 msgstr "Os temas embutidos, depois cada themes/<nome>/theme.ini"
 
 #: src/gui/main.c
-msgid "Text size"
-msgstr "Tamanho do texto"
+msgid "UI scale"
+msgstr "Escala da interface"
 
 #: src/gui/main.c
 msgid "Picked in a box, kept once said so. Auto fits the screen, its parts are smaller"
@@ -1139,8 +1139,8 @@ msgstr "0.75 do Auto"
 
 #: src/gui/main.c
 #, c-format
-msgid "Keep this text size? Back to %s in %d s"
-msgstr "Manter este tamanho de texto? Volta para %s em %d s"
+msgid "Keep this UI scale? Back to %s in %d s"
+msgstr "Manter esta escala da interface? Volta para %s em %d s"
 
 #: src/gui/main.c
 #, c-format
@@ -2862,6 +2862,11 @@ msgstr "Os dumps postos aqui são listados, os das subpastas também: arquivos .
 msgid "%s: [folders] games = %s is now recompiled = %s"
 msgstr "%s: [folders] games = %s agora é recompiled = %s"
 
+#: src/gui/main.c
+#, c-format
+msgid "%s: text_size = %s is now ui_scale = %s"
+msgstr "%s: text_size = %s agora é ui_scale = %s"
+
 msgid "Recompiled games"
 msgstr "Jogos recompilados"
 
@@ -2882,3 +2887,15 @@ msgstr "uma linha do folders.txt, só um caminho"
 #: src/common/utilities/setup.c
 msgid "each folder in the recompiled or the dumps library, as its games say"
 msgstr "cada pasta na biblioteca de recompilados ou na de dumps, conforme seus jogos"
+
+#: src/common/utilities/setup.c
+msgid "The launcher's Text size"
+msgstr "O Tamanho do texto do launcher"
+
+#: src/common/utilities/setup.c
+msgid "text_size = in app.ini"
+msgstr "text_size = no app.ini"
+
+#: src/common/utilities/setup.c
+msgid "ui_scale =, shown as UI scale"
+msgstr "ui_scale =, mostrada como Escala da interface"

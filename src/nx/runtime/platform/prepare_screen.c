@@ -103,7 +103,7 @@ static void screen_progress(const Row* r, u64 now_ms, char* out, size_t size) {
     else
         snprintf(out, size, "%u / %u", (unsigned)done, (unsigned)r->total);
 }
-/* the letters' scale: the launcher's 30 rows on the height, or twice the display's scale (its Auto text size) when
+/* the letters' scale: the launcher's 30 rows on the height, or twice the display's scale (its UI scale Auto) when
    that is more, as the menu's (overlay_place); smaller while it would leave under 24 rows or 64 columns */
 static int screen_scale(int w, int h, int display_percent) {
     int s = h / (16 * 30), dense = 2 * display_percent / 100;

@@ -813,7 +813,7 @@ static void set_env(const char* name, const char* value) {
 #endif
     assert(!(value ? SDL_setenv_unsafe(name, value, 1) : SDL_unsetenv_unsafe(name)));
 }
-/* Settings > App's Text size, its row in focus, made size through its box, then kept or not */
+/* Settings > App's UI scale, its row in focus, made size through its box, then kept or not */
 static void pick_size(App* app, int size, bool keep) {
     key(app, SDLK_RETURN);
     assert(app->sizes_shown);
@@ -1553,7 +1553,7 @@ int main(int argc, char** argv) {
         shows(&app, "- App", yellow); /* the group open, as focused while its rows have the focus */
         snprintf(line, sizeof line, "- %-18s %s", "Theme", first);
         shows(&app, line, yellow);
-        shows(&app, "- Text size          Auto", normal);
+        shows(&app, "- UI scale           Auto", normal);
         shows(&app, "- Language           Auto: English", normal); /* SDL_PREFERRED_LOCALES, the test's */
         shows(&app, "- Theme editor", normal);
         /* under the rows, the three folders Folders moves, whole: the extractions too */
@@ -1586,7 +1586,7 @@ int main(int argc, char** argv) {
         assert(!strcmp(app.theme.name, first));
     }
     key(&app, SDLK_DOWN);
-    /* Text size: its sizes in a box, Auto's parts first; the one picked is used at once and asked about: Keep keeps it,
+    /* UI scale: its sizes in a box, Auto's parts first; the one picked is used at once and asked about: Keep keeps it,
        Back, ESC or no answer in 15 s bring the one before it back */
     key(&app, SDLK_RIGHT);
     assert(app.sizes_shown && app.sizes.count == GUI_TEXT_MAX + 4 && app.sizes.focus == 3 && !app.menu.text_size);
@@ -1648,7 +1648,7 @@ int main(int argc, char** argv) {
         assert(strcmp(id, first_id));
         snprintf(
             expected, sizeof expected,
-            "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = 1\nlanguage = auto\n"
+            "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\nui_scale = 1\nlanguage = auto\n"
             "animations = 0\nside_box = auto\n",
             id);
         kept = (char*)snx_read_file(app.app_file, &size);
@@ -1668,19 +1668,38 @@ int main(int argc, char** argv) {
         /* a part of Auto kept as app.ini names it, and read back */
         pick_size(&app, -3, true);
         kept = (char*)snx_read_file(app.app_file, &size);
-        assert(kept && strstr(kept, "\ntext_size = 0.75\n"));
+        assert(kept && strstr(kept, "\nui_scale = 0.75\n"));
         free(kept);
         app.menu.text_size = 0;
         app_load(&app);
         assert(app.menu.text_size == -3);
         pick_size(&app, 0, true);
         snprintf(expected, sizeof expected,
-                 "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = auto\n"
+                 "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\nui_scale = auto\n"
                  "language = auto\nanimations = 0\nside_box = auto\n",
                  first_id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
         free(kept);
+        /* text_size =, as an older version named ui_scale =: read, the file written again with ui_scale = in its
+           place, said once with the value; the next start says nothing */
+        {
+            char* old = snx_format("[app]\ntheme = %s\ntext_size = 2\n", first_id);
+            assert(old && !snx_write_file(app.app_file, old, strlen(old)));
+            free(old);
+            app.menu.text_size = 0;
+            app.message[0] = 0;
+            app_load(&app);
+            snprintf(expected, sizeof expected, "%s: text_size = 2 is now ui_scale = 2", app.app_file);
+            assert(app.menu.text_size == 2 && !strcmp(app.message, expected));
+            kept = (char*)snx_read_file(app.app_file, &size);
+            assert(kept && strstr(kept, "\nui_scale = 2\n") && !strstr(kept, "text_size"));
+            free(kept);
+            app.message[0] = 0;
+            app_load(&app);
+            assert(app.menu.text_size == 2 && !app.message[0]);
+            pick_size(&app, 0, true);
+        }
         /* a file a hand broke: what it does not know is left, named, and the menu keeps what it has */
         assert(!snx_write_file(app.app_file, broken, strlen(broken)));
         app_load(&app);
@@ -1727,7 +1746,7 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RETURN); /* Enter goes round too */
         assert(app.language == 2 && snx_tr_language() == 1 && !strcmp(app.app_form.language, "Test\303\252s"));
         snprintf(expected, sizeof expected,
-                 "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = auto\n"
+                 "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\nui_scale = auto\n"
                  "language = xx\nanimations = 0\nside_box = auto\n",
                  app.theme.id);
         kept = (char*)snx_read_file(app.app_file, &size);
@@ -1737,7 +1756,7 @@ int main(int argc, char** argv) {
         /* the labels' columns as they read: xx's Language, its i accented, is 6 of them in 7 bytes (the font's one) */
         snprintf(line, sizeof line, "- L\241ngua%12s Test", "");
         shows(&app, line, yellow);
-        shows(&app, "- Text size", normal); /* not translated in xx: English */
+        shows(&app, "- UI scale", normal);  /* not translated in xx: English */
         shows(&app, "Ajustes", yellow);     /* the tab */
         shows_foot(&app, "linha", normal);
         shows_foot(&app, "tela", normal);
@@ -4139,7 +4158,7 @@ int main(int argc, char** argv) {
     assert(app.games.count == 34);
     key(&app, SDLK_ESCAPE);
     assert(app.menu.view == GUI_LOAD_NONE && !app.confirm.shown);
-    /* Compact and spacious layouts share the renderer's mouse hit coordinates. Text size Auto keeps the letters of
+    /* Compact and spacious layouts share the renderer's mouse hit coordinates. UI scale Auto keeps the letters of
        the window it opened in (1280x800: 2x), however the window is resized, and the window keeps 16 rows of them */
     const int sizes[][4] = {{2560, 1440, 45, 160}, {1280, 960, 30, 80}, {800, 480, 16, 50}, {1280, 800, 25, 80}};
     assert(app.auto_scale == 2);

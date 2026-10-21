@@ -99,8 +99,12 @@ static void test_defaults(void) {
     fresh();
     assert(!run("\n\n\n\n\n\n", 0));
     said("Changed in older versions\n  Game settings\n    before  removed or renamed keys");
-    said("    now     each folder in the recompiled or the dumps library, as its games say\n  Not moved. See "
-         "docs/DEPRECATIONS.md\n[Enter] OK "); /* the last notice, then the steps */
+    {
+        char last[256]; /* the last notice, then the steps */
+        snprintf(last, sizeof last, "    now     %s\n  Not moved. See docs/DEPRECATIONS.md\n[Enter] OK ",
+                 snx_notices[SNX_NOTICES - 1].now);
+        said(last);
+    }
     said("[1/5] Language (the launcher's)\n  1) English 2) Portugu\xc3\xaas (Brasil) 3) "
          "\xe7\xae\x80\xe4\xbd\x93\xe4\xb8\xad\xe6\x96\x87\n  [1] ");
     said_with("[2/5] Install type\n  Installed: settings %s, data %s", config, data);
@@ -109,7 +113,11 @@ static void test_defaults(void) {
          "  [2] ");
     said("[5/5] First user\n  uid ");
     said_with("Done: %s/setup.ini\n", config, NULL);
-    expect(config, "setup.ini", "[setup]\nversion = 1\nnotices = 11\n");
+    {
+        char seen[64]; /* every notice there is, seen */
+        snprintf(seen, sizeof seen, "[setup]\nversion = 1\nnotices = %d\n", SNX_NOTICES);
+        expect(config, "setup.ini", seen);
+    }
     assert(!text_of(config, "app.ini")); /* the language it had: app.ini as it was */
     text = text_of(users, "users.ini");
     assert(text && sscanf(strstr(text, "uid=") + 4, "%32s", uid) == 1 && strstr(text, "\nnickname=Player\n"));
@@ -237,13 +245,17 @@ static void test_language(void) {
 
 /* after an update: the notice it brings, alone, and OK */
 static void test_notice(void) {
-    char* file = join(config, "setup.ini");
+    char *file = join(config, "setup.ini"), before[64], after[64], newest[160];
+    /* the newest notice unseen, all the others seen */
+    snprintf(before, sizeof before, "[setup]\nversion = 1\nnotices = %d\n", SNX_NOTICES - 1);
+    snprintf(after, sizeof after, "notices = %d\n", SNX_NOTICES);
+    snprintf(newest, sizeof newest, "Changed since the last version\n  %s\n", snx_notices[SNX_NOTICES - 1].what);
     fresh();
-    put(file, "[setup]\nversion = 1\nnotices = 10\n");
+    put(file, before);
     assert(!run("\n", 0));
-    said("Changed since the last version\n  The launcher's folders of games\n");
+    said(newest);
     assert(!strstr(output, "Game settings") && !strstr(output, "[1/"));
-    expect(config, "setup.ini", "notices = 11\n");
+    expect(config, "setup.ini", after);
     free(file);
     puts("PASS a notice alone after an update");
 }

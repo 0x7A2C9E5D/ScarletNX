@@ -300,7 +300,7 @@ void overlay_set_display_scale(float scale) {
 int overlay_display_percent(void) { return __atomic_load_n(&display_percent, __ATOMIC_RELAXED); }
 void overlay_place(int sw, int sh, int* x, int* y, int* scale) {
     /* the tallest page sets the scale, so the letters keep their size from page to page: half the picture, or twice
-       the display's scale as the menu's Text size Auto (src/gui) if that is more, within three quarters of it. A
+       the display's scale as the menu's UI scale Auto (src/gui) if that is more, within three quarters of it. A
        phone's short picture held its letters at 2x by the half alone */
     int w = OVERLAY_COLS * 8, h = OVERLAY_ROWS * 16;
     int s = sw / 2 / w < sh / 2 / h ? sw / 2 / w : sh / 2 / h;

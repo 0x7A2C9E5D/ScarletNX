@@ -105,7 +105,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   dead zone, background input, Joy-Cons). A player's *Controller* is *Any*, the next to connect, until Enter on it
   and a press on a controller give it that one (ESC leaves it as it was, Del makes it *Any* again); its *Button
   map* is the page above on its own keys, its A and B as its *Swap A/B* says.
-  **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **Text size**, which opens
+  **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **UI scale**, which opens
   its box of sizes (below), **Animations** (On by default, `animations = 1` in `app.ini`: a screen comes in from the
   page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Side box** (below, F2 too),
 **Theme editor**, which comes
@@ -181,8 +181,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - Settings > App's **Theme** switches to the next theme, or the one before: the built-in Default
   and YoRHa, then each folder of `themes/` (see [Themes](#themes)). The menu opens in YoRHa until one is picked.
   It is kept for the next start,
-  as are Text size and Language, in `app.ini` beside `settings.ini`: `[app]` with `theme` (a theme's folder
-  name), `text_size` (`auto`, `0.25`, `0.5`, `0.75` or 1 to 4) and `language` (`auto`, `en` or a language's BCP 47
+  as are UI scale and Language, in `app.ini` beside `settings.ini`: `[app]` with `theme` (a theme's folder
+  name), `ui_scale` (`auto`, `0.25`, `0.5`, `0.75` or 1 to 4; `text_size` before, still read and written again
+  as `ui_scale`, said once) and `language` (`auto`, `en` or a language's BCP 47
   tag, as `pt-BR` or `zh-Hans-CN`), and once one
   is picked `[folders]` with Folders' `data`, `games` and
   `work` (a full path, nothing for the default). A value the
@@ -200,7 +201,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Save (or Ctrl+S) writes `themes/<folder>/theme.ini` in the data folder and switches to it;
   a built-in is saved as a new theme, `mytheme` until renamed. ESC leaves, asking first if
   there are unsaved changes.
-- Settings > App's **Text size** opens a box of sizes: a quarter, half or three quarters of Auto (Auto's scale times
+- Settings > App's **UI scale** opens a box of sizes: a quarter, half or three quarters of Auto (Auto's scale times
   it, rounded, 1x at the least), Auto (fit the screen), then 1x to 4x. The size picked is used at once, and a question
   asks to keep it: Keep keeps it in `app.ini`; Back, ESC or no answer in 15 s bring the one before it back. Bigger
   letters scroll the menu. The foot's letters (its keys, and the tips when they are
@@ -266,10 +267,10 @@ move between the choices, Enter takes one and ESC goes back a page, on the first
 notices come one a page, numbered (Changed 1/8), each read before the setup goes on: Next the next one, Back (from the
 second) the one before, and OK on the last.
 
-- **Appearance**: a box of Settings > App's Language, Theme and Text size, a row each, and Next under
+- **Appearance**: a box of Settings > App's Language, Theme and UI scale, a row each, and Next under
   them. Up/Down go over the rows and Next; Left/Right (or a click, on the left arrow back) change the language among
-  the menu's and the theme, at once, the screen with them; Text size opens its box of sizes, the size picked asked
-  about for 15 s as App's is; Enter does as App's (the language or the theme a step on, Text size's box), and on
+  the menu's and the theme, at once, the screen with them; UI scale opens its box of sizes, the size picked asked
+  about for 15 s as App's is; Enter does as App's (the language or the theme a step on, UI scale's box), and on
   Next goes on. What was changed is kept in `app.ini` once the setup is done, in the folders Install picks; Auto
   stays Auto while the language is the system's.
 - **Install**: Installed, or Portable, which makes `.scarletnx/` beside the program and moves the menu's own files
