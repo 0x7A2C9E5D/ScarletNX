@@ -40,8 +40,10 @@ typedef double f64;
   11: the reworked LLVM backend's modules. Old 10 was taken twice, by our engine and upstream's, and a module built
       for the wrong one must not load.
   12: snx_cas128 takes the CPU, and RtAPI.cas128 is the 16-byte compare-and-swap of the RISC-V and LoongArch
-      modules. */
-#define SNX_ABI 12
+      modules.
+  13: the AOT module's snx_variants() table, which the runtime reads for code the recompiler missed instead of
+      compiling it at run time. */
+#define SNX_ABI 13
 
 #if defined(_WIN32)
 #define SNX_EXPORT __declspec(dllexport)
