@@ -926,9 +926,9 @@ int main(int argc, char** argv) {
     assert(!strcmp(app.theme.id, "yorha"));    /* the menu opens in YoRHa everywhere */
     app.theme = *gui_theme_builtin("default"); /* the checks below read Default's colours */
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(SDL_PLATFORM_ANDROID)
-    /* no checkout and no games/ beside the test: games/ and themes/ come from the user's data folder */
+    /* no checkout and no games/ beside the test: recompiled/ and themes/ come from the user's data folder */
     assert(!strcmp(app.data_dir, "/nonexistent/snx-gui-test/scarletnx"));
-    assert(!strcmp(app.games_dir, "/nonexistent/snx-gui-test/scarletnx/games"));
+    assert(!strcmp(app.games_dir, "/nonexistent/snx-gui-test/scarletnx/recompiled"));
     assert(!strcmp(app.themes_dirs[0], "/nonexistent/snx-gui-test/scarletnx/themes"));
     /* and the keys go in it, where the driver reads them first, not in ~/.switch */
     assert(!strcmp(app.keys_path, "/nonexistent/snx-gui-test/scarletnx/prod.keys"));
@@ -1437,9 +1437,9 @@ int main(int argc, char** argv) {
                      app.work_dir);
             assert(!strcmp(app.places_note, line));
             /* one in the data folder, from it: the note stays short on a phone, whose data folder is a long path */
-            app.games_dir = snx_path_join(app.data_dir, "games");
+            app.games_dir = snx_recompiled_dir(app.data_dir);
             app_values(&app);
-            snprintf(line, sizeof line, "Data: %s  Games: games%c  Extractions: %s", app.data_dir,
+            snprintf(line, sizeof line, "Data: %s  Games: recompiled%c  Extractions: %s", app.data_dir,
                      app.games_dir[strlen(app.data_dir)], app.work_dir);
             assert(!strcmp(app.places_note, line));
             free(app.games_dir);
@@ -1858,7 +1858,7 @@ int main(int argc, char** argv) {
        (SDL_FILE_DIALOG_DRIVER=none); Del or Enter twice takes one off, the folder staying */
     key(&app, SDLK_DOWN);
     render(&app);
-    shows(&app, "- Library            games/", yellow);
+    shows(&app, "- Library            recompiled/", yellow);
     key(&app, SDLK_RETURN);
     assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 3 &&
            app.editor.row == 0); /* games/, dumps/, Add */
@@ -1951,7 +1951,7 @@ int main(int argc, char** argv) {
             key(&app, SDLK_DELETE);
             assert(app.place[GUI_PLACE_GAMES] &&
                    !strncmp(app.editor.note, "Del again: Games goes back to the default, ", 43));
-            fallback = snx_path_join(app.data_dir, "games");
+            fallback = snx_recompiled_dir(app.data_dir);
             key(&app, SDLK_DELETE);
             assert(!app.place[GUI_PLACE_GAMES] && same_path(app.games_dir, fallback) &&
                    strstr(app.editor.note, ", the default"));
@@ -2080,7 +2080,7 @@ int main(int argc, char** argv) {
         event(&app, &e); /* back for the games below */
         key(&app, SDLK_ESCAPE);
         assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_FOLDERS);
-        assert(!strcmp(app.app_form.folders, "games/, dumps/ and 1 more"));
+        assert(!strcmp(app.app_form.folders, "recompiled/, dumps/ and 1 more"));
         free(file);
         free(kept_as);
         free(more);
@@ -2089,7 +2089,7 @@ int main(int argc, char** argv) {
        [folders]. A folder that cannot take what goes there is refused, never swapped for the default */
     {
         char *data = snx_strdup(app.data_dir), *games = snx_strdup(app.games_dir), *work = snx_strdup(app.work_dir);
-        char* games_default = snx_path_join(data, "games"); /* the test's own games/ is elsewhere, set by hand */
+        char* games_default = snx_recompiled_dir(data); /* the test's own games/ is elsewhere, set by hand */
         char *keys = snx_strdup(app.keys_path), *themes = snx_strdup(app.themes_dirs[0]); /* so are these */
         char *picked = snx_path_join(temporary, "picked games"), *file = snx_path_join(temporary, "not a folder.txt");
         char *kept, line[512];
@@ -2138,7 +2138,7 @@ int main(int argc, char** argv) {
         snprintf(line, sizeof line, "Games: %s. The folder before keeps what it has", app.games_dir);
         assert(!strcmp(app.editor.note, line) && app.editor.row == GUI_PLACE_GAMES);
         kept = (char*)snx_read_file(app.app_file, &size);
-        snprintf(line, sizeof line, "[folders]\ndata = \ngames = %s\nwork = \n", app.games_dir);
+        snprintf(line, sizeof line, "[folders]\ndata = \nrecompiled = %s\nwork = \n", app.games_dir);
         assert(kept && strstr(kept, "[app]\ntheme = ") && strstr(kept, line));
         free(kept);
         render(&app);
@@ -2174,6 +2174,27 @@ int main(int argc, char** argv) {
         assert(!strcmp(app.message, line) && app.place[GUI_PLACE_GAMES] && !strcmp(app.games_dir, app.place[1]));
         assert(!app.place[GUI_PLACE_WORK] && !strcmp(app.work_dir, work));
         app.message[0] = 0;
+        /* app.ini as an older version wrote it, [folders] games =: read as recompiled =, written again so, said once */
+        {
+            char *was = snx_strdup(app.games_dir), *old_text = snx_format("[folders]\ngames = %s\n", was);
+            assert(!snx_write_file(app.app_file, old_text, strlen(old_text)));
+            free(app.place[GUI_PLACE_GAMES]);
+            app.place[GUI_PLACE_GAMES] = NULL;
+            app_load(&app);
+            assert(app.place[GUI_PLACE_GAMES] && !strcmp(app.place[GUI_PLACE_GAMES], was));
+            snprintf(line, sizeof line, "%s: [folders] games = %s is now recompiled = %s", app.app_file, was, was);
+            assert(strstr(app.message, line));
+            kept = (char*)snx_read_file(app.app_file, &size);
+            snprintf(line, sizeof line, "\nrecompiled = %s\n", was);
+            assert(kept && strstr(kept, line) && !strstr(kept, "\ngames = "));
+            free(kept);
+            app.message[0] = 0;
+            app_load(&app); /* once: the file says recompiled = now */
+            assert(!strstr(app.message, "is now recompiled") && !strcmp(app.place[GUI_PLACE_GAMES], was));
+            app.message[0] = 0;
+            free(old_text);
+            free(was);
+        }
         /* a folder picked once and gone since: its row says so, as a run would refuse it */
         assert(!snx_remove_tree(picked));
         open_places(&app, GUI_PLACE_GAMES);
@@ -5218,7 +5239,7 @@ int main(int argc, char** argv) {
             set_env("XDG_CONFIG_HOME", config);
             set_env("XDG_CACHE_HOME", cache);
             app.data_dir = snx_path_join(data, "scarletnx");
-            app.games_dir = snx_path_join(app.data_dir, "games");
+            app.games_dir = snx_recompiled_dir(app.data_dir);
             app.recent_file = snx_path_join(expected, "recent.txt");
             loose = snx_path_join(app.games_dir, LONG);
             loose_data = snx_format("%s_data", loose);
@@ -5251,7 +5272,7 @@ int main(int argc, char** argv) {
             lines[3][0] = snx_strdup(named);
             lines[3][1] = snx_format("%s/0100ABCD12345000/", app.games_dir);
             lines[4][0] = snx_path_join(app.drivers, "games"); /* a portable copy's games/ beside the program */
-            lines[4][1] = snx_format("%s/.scarletnx/games", app.drivers);
+            lines[4][1] = snx_format("%s/.scarletnx/recompiled", app.drivers);
             left_behind(&app);
             assert(app.lefts == 5 && snx_is_dir(lines[4][0]));
             for (i = 0, at = app.left; i < 5; ++i, at = strchr(at, '\n') + 1) {

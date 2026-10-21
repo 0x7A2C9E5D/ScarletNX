@@ -23,7 +23,7 @@ void gui_apple_start(void) {
         NSFileManager* files = NSFileManager.defaultManager;
         NSURL* documents = [files URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
         /* the user copies prepared games there, through the Files app or the Finder */
-        [files createDirectoryAtURL:[documents URLByAppendingPathComponent:@"games" isDirectory:YES]
+        [files createDirectoryAtURL:[documents URLByAppendingPathComponent:@"recompiled" isDirectory:YES]
             withIntermediateDirectories:YES
                              attributes:nil
                                   error:NULL];

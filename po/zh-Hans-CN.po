@@ -184,7 +184,7 @@ msgid "Tap here to abort and return to menu"
 msgstr "轻触此处中止并返回菜单"
 
 #: src/gui/main.c
-msgid "No games in games/ or dumps/: put a game's .nro, .xci or .nsp in dumps/."
+msgid "No games in recompiled/ or dumps/: put a game's .nro, .xci or .nsp in dumps/."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -274,7 +274,7 @@ msgid "Press [ESC] to abort and return to menu"
 msgstr "按 [ESC] 中止并返回菜单"
 
 #: src/gui/main.c
-msgid "No games in games/, dumps/ or the folders of Settings > App > Library."
+msgid "No games in recompiled/, dumps/ or the folders of Settings > App > Library."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -628,7 +628,7 @@ msgid "none"
 msgstr "无"
 
 #: src/gui/main.c
-msgid "Pick a folder of games or dumps, listed after games/ and dumps/"
+msgid "Pick a folder of games or dumps, listed after recompiled/ and dumps/"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
@@ -743,8 +743,8 @@ msgid "Library"
 msgstr "游戏库"
 
 #: src/gui/main.c
-msgid "The folders Games lists, games/ first"
-msgstr "「游戏」页列出的文件夹，games/ 在最前"
+msgid "The folders Games lists, recompiled/ and dumps/ first"
+msgstr "「游戏」页列出的文件夹，recompiled/ 和 dumps/ 在最前"
 
 #: src/gui/main.c
 msgid "Where the data, the games and the extractions are"
@@ -774,7 +774,7 @@ msgstr "自动：%s"
 
 #: src/gui/main.c
 #, c-format
-msgid "games/, dumps/ and %d more"
+msgid "recompiled/, dumps/ and %d more"
 msgstr ""
 
 #: src/gui/main.c
@@ -883,8 +883,8 @@ msgid "is on a disk that runs no programs (noexec)"
 msgstr "位于不能运行程序的磁盘上（noexec）"
 
 #: src/gui/main.c
-msgid "games/, themes/ and prod.keys"
-msgstr "games/、themes/ 和 prod.keys"
+msgid "recompiled/, dumps/, themes/ and prod.keys"
+msgstr "recompiled/、dumps/、themes/ 和 prod.keys"
 
 #: src/gui/main.c
 msgid "The recompiled games"
@@ -2444,3 +2444,6 @@ msgstr ""
 
 msgid "Dumps put here are listed, its subfolders' too: .nsp, .xci and .nro files. It stays on the list"
 msgstr ""
+
+msgid "%s: [folders] games = %s is now recompiled = %s"
+msgstr "%s：[folders] games = %s 现在是 recompiled = %s"

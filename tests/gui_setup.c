@@ -293,7 +293,7 @@ static void test_first(App* app) {
     assert(page(app) == SNX_SETUP_FOLDERS && app->place[GUI_PLACE_GAMES] && same_path(app->games_dir, games));
     config = config_of(app);
     holds(config, "app.ini", "[folders]\n");
-    holds(config, "app.ini", "games = ");
+    holds(config, "app.ini", "recompiled = ");
     key(app, SDLK_DOWN);
     key(app, SDLK_RETURN);
     folder_answer_is(app, dumps);

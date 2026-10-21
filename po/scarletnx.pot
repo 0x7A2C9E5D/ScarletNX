@@ -200,7 +200,7 @@ msgid "Tap here to abort and return to menu"
 msgstr ""
 
 #: src/gui/main.c
-msgid "No games in games/ or dumps/: put a game's .nro, .xci or .nsp in dumps/."
+msgid "No games in recompiled/ or dumps/: put a game's .nro, .xci or .nsp in dumps/."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -290,7 +290,7 @@ msgid "Press [ESC] to abort and return to menu"
 msgstr ""
 
 #: src/gui/main.c
-msgid "No games in games/, dumps/ or the folders of Settings > App > Library."
+msgid "No games in recompiled/, dumps/ or the folders of Settings > App > Library."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -401,6 +401,11 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "Not used from %s: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: [folders] games = %s is now recompiled = %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -686,7 +691,7 @@ msgid "none"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Pick a folder of games or dumps, listed after games/ and dumps/"
+msgid "Pick a folder of games or dumps, listed after recompiled/ and dumps/"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
@@ -810,7 +815,7 @@ msgid "Library"
 msgstr ""
 
 #: src/gui/main.c
-msgid "The folders Games lists, games/ first"
+msgid "The folders Games lists, recompiled/ and dumps/ first"
 msgstr ""
 
 #: src/gui/main.c
@@ -841,7 +846,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "games/, dumps/ and %d more"
+msgid "recompiled/, dumps/ and %d more"
 msgstr ""
 
 #: src/gui/main.c
@@ -954,7 +959,7 @@ msgid "is on a disk that runs no programs (noexec)"
 msgstr ""
 
 #: src/gui/main.c
-msgid "games/, themes/ and prod.keys"
+msgid "recompiled/, dumps/, themes/ and prod.keys"
 msgstr ""
 
 #: src/gui/main.c
