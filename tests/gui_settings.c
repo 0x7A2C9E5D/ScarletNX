@@ -69,11 +69,15 @@ int main(int argc, char** argv) {
     GuiEditor form;
     const char* options[64];
     int fullscreen, touch, stub, tmpfs, extract, launch, page, all, changed;
+    size_t tracy_n;
     assert(!gui_settings_read(&s, list));
 
     /* the launcher's own and the recompiler's (settings.txt's launcher sections), then a row a setting in the list's
        order, the other line left out; a page's row and its All before its settings */
-    assert(s.own > 5 && s.count == s.own + 15 && !strcmp(s.keys[0].key, "gdbstub"));
+    int tracy = at(&s, "tracy_capture") >= 0; /* the row a runtime without SNX_TRACY does not list */
+    int opt = 3 + tracy;                      /* the optimization level's row, after it */
+    assert(s.own > 5 && s.count == s.own + 15 + tracy && !strcmp(s.keys[0].key, "gdbstub"));
+    assert(!tracy || at(&s, "tracy_capture") == 3); /* after Extract game container, before the optimization level */
     assert(!strcmp(s.keys[0].section, "Launch") && !strcmp(s.keys[0].about, "Enables gdbstub on port 1234") &&
            words(&s.keys[0]) == 2 && !strcmp(s.values[0].key, "gdbstub"));
     /* shown by its name, kept by its key */
@@ -81,22 +85,24 @@ int main(int argc, char** argv) {
            !strcmp(s.values[1].key, "tmpfs") && words(&s.keys[1]) == 2 && strstr(s.keys[1].about, "RomFS"));
     assert(!strcmp(s.keys[2].section, "Launch") && !strcmp(s.keys[2].key, "Extract game container") &&
            !strcmp(s.values[2].key, "extract") && words(&s.keys[2]) == 2 && strstr(s.keys[2].about, "dump"));
+    assert(!tracy || (!strcmp(s.keys[3].section, "Launch") && !strcmp(s.values[3].key, "tracy_capture") &&
+                      words(&s.keys[3]) == 2 && strstr(s.keys[3].about, "PATH")));
     assert(!gui_settings_extract(&s)); /* off: a dump read in place */
     /* the recompiler's: none passed until picked, then --key=value; the optimization level takes 0 to 3 and z, the
        AOT threads a number (0 the cores), the unit cache limit a number of GB (0 none), and LLVM Internals is a page of
        its own */
-    assert(!strcmp(s.keys[3].section, "Launch") && !strcmp(s.keys[3].key, "Optimization level") &&
-           !strcmp(s.values[3].key, "opt") && words(&s.keys[3]) == 6 && !gui_settings_recompile(&s, options));
+    assert(!strcmp(s.keys[opt].section, "Launch") && !strcmp(s.keys[opt].key, "Optimization level") &&
+           !strcmp(s.values[opt].key, "opt") && words(&s.keys[opt]) == 6 && !gui_settings_recompile(&s, options));
     assert(gui_settings_set(&s, "opt", "z") && gui_settings_recompile(&s, options) == 1 && !strcmp(options[0], "--opt=z"));
     assert(!gui_settings_set(&s, "opt", "s") && gui_settings_set(&s, "aot_threads", "4"));
     assert(gui_settings_recompile(&s, options) == 2 && !strcmp(options[1], "--aot_threads=4"));
-    assert(!strcmp(s.keys[5].section, "Launch") && !strcmp(s.keys[5].key, "Unit cache limit") &&
-           !strcmp(s.values[5].key, "unit_cache_gb") && strstr(s.keys[5].about, "0 = no limit"));
-    assert(!strcmp(s.values[5].def, "0") && strstr(s.keys[5].about, "a tenth of its disk free")); /* no limit */
+    assert(!strcmp(s.keys[opt + 2].section, "Launch") && !strcmp(s.keys[opt + 2].key, "Unit cache limit") &&
+           !strcmp(s.values[opt + 2].key, "unit_cache_gb") && strstr(s.keys[opt + 2].about, "0 = no limit"));
+    assert(!strcmp(s.values[opt + 2].def, "0") && strstr(s.keys[opt + 2].about, "a tenth of its disk free")); /* no limit */
     assert(gui_settings_set(&s, "unit_cache_gb", "50") && gui_settings_recompile(&s, options) == 3 &&
            !strcmp(options[2], "--unit_cache_gb=50") && gui_settings_set(&s, "unit_cache_gb", ""));
-    assert(!strcmp(s.keys[6].section, "Launch") && s.values[6].kind == GUI_SETTING_PAGE &&
-           !strcmp(s.keys[6].key, "LLVM Internals"));
+    assert(!strcmp(s.keys[opt + 3].section, "Launch") && s.values[opt + 3].kind == GUI_SETTING_PAGE &&
+           !strcmp(s.keys[opt + 3].key, "LLVM Internals"));
     assert(gui_settings_set(&s, "opt", ".ini") && gui_settings_set(&s, "aot_threads", "") &&
            !gui_settings_recompile(&s, options));
     assert(!strcmp(s.keys[s.own].section, "Display") && !strcmp(s.keys[s.own].key, "docked"));
@@ -212,6 +218,18 @@ int main(int argc, char** argv) {
                         }
                         assert(i == n);
                     }
+    /* the launcher's Tracy capture is passed to a run, never to the recompiler */
+    if (tracy) {
+        assert(gui_settings_set(&s, "tracy_capture", "on") && !gui_settings_recompile(&s, options));
+        tracy_n = gui_settings_options(&s, 1, options);
+        assert(tracy_n && !strcmp(options[tracy_n - 1], "--tracy-capture"));
+        assert(gui_settings_set(&s, "tracy_capture", "off"));
+        {
+            size_t i;
+            tracy_n = gui_settings_options(&s, 1, options);
+            for (i = 0; i < tracy_n; ++i) assert(strcmp(options[i], "--tracy-capture"));
+        }
+    }
     gui_settings_free(&s);
 
     /* kept in a file of the game's sections and keys: what changed from where the rows started, read back over a

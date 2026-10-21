@@ -3105,6 +3105,14 @@ msgid "Extract a dump's ExeFS and RomFS into its game's folder. Off, the game re
 msgstr ""
 
 #: src/nx/runtime/settings.txt
+msgid "Tracy capture"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Records Switch runs to captures/ beside the game, and opens the trace in the profiler when the run ends. Off, the client does not start; F7 starts a 60-second capture. tracy-capture must be on PATH, and the runtime must be built with SNX_TRACY"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
 msgid "Optimization level"
 msgstr ""
 

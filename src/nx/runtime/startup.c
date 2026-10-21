@@ -6,7 +6,7 @@
 #include <stdio.h>
 
 int g_opt_headless, g_cli_fullscreen = -1;
-int g_opt_gdb, g_opt_gdb_stop;
+int g_opt_gdb, g_opt_gdb_stop, g_opt_tracy_capture, g_opt_tracy_client;
 
 int snx_startup_options(int argc, char** argv) {
     unsigned flags = 0;
@@ -26,5 +26,13 @@ int snx_startup_options(int argc, char** argv) {
     g_cli_fullscreen = flags & SNX_FULLSCREEN ? 1 : flags & SNX_WINDOWED ? 0 : -1;
     g_opt_gdb = !!(flags & SNX_GDB);
     g_opt_gdb_stop = !!(flags & SNX_STOP);
+    g_opt_tracy_capture = !!(flags & SNX_TRACY_CAPTURE);
+    g_opt_tracy_client = !!(flags & SNX_TRACY_CLIENT);
+#if !defined(SNX_TRACY)
+    if (g_opt_tracy_capture || g_opt_tracy_client) {
+        fputs("scarletnx: --tracy and --tracy-capture need a runtime built with SNX_TRACY\n", stderr);
+        return 2;
+    }
+#endif
     return 0;
 }

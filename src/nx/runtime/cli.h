@@ -15,7 +15,11 @@ enum {
     SNX_TMPFS = 128,   /* the driver's --tmpfs (the launcher's Extract to tmpfs), which snx_cli_flag leaves to it */
     /* the driver's --extract-container (the launcher's Extract game container): a dump played is extracted into its
        game's data folder, instead of read in place. snx_cli_flag leaves it to the driver too */
-    SNX_EXTRACT_CONTAINER = 256
+    SNX_EXTRACT_CONTAINER = 256,
+    /* --tracy-capture: record this run with tracy-capture (SNX_TRACY builds only) */
+    SNX_TRACY_CAPTURE = 512,
+    /* --tracy: start the Tracy client for a GUI connection (SNX_TRACY builds only) */
+    SNX_TRACY_CLIENT = 1024
 };
 /* Shared by the driver and standalone game runtime (startup.c), which refuses SNX_EXTRACT and SNX_RECOMP: only the
    driver extracts and recompiles. Windows accepts individual short options, but deliberately not POSIX-style
@@ -37,6 +41,10 @@ static int snx_cli_flag(const char* arg, unsigned* flags) {
         bits = SNX_WINDOWED;
     else if (!strncmp(arg, "--fullscreen=", 13))
         return -1;
+    else if (!strcmp(arg, "--tracy-capture"))
+        bits = SNX_TRACY_CAPTURE;
+    else if (!strcmp(arg, "--tracy"))
+        bits = SNX_TRACY_CLIENT;
     else if (arg[0] == '-' && arg[1] && arg[1] != '-') {
 #ifdef _WIN32
         if (arg[2]) return 0;

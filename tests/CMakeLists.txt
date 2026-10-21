@@ -807,6 +807,10 @@ add_test(NAME hid_motion COMMAND snx-test-hid-motion)
 
 add_executable(snx-test-startup startup_options.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/startup.c")
 snx_test_target(snx-test-startup 99)
+if(SNX_TRACY)
+    # startup.c must see SNX_TRACY so its Tracy flag checks match the runtime.
+    target_compile_definitions(snx-test-startup PRIVATE SNX_TRACY=1)
+endif()
 add_test(NAME startup_options COMMAND snx-test-startup)
 
 add_library(snx_test_common STATIC "${PROJECT_SOURCE_DIR}/src/common/utilities/common.c"
@@ -1053,7 +1057,7 @@ if(NOT SNX_TOOLS_ONLY)
     # the file of shaders and pipelines kept across runs (gpu/vk/pipeline_file.c): records back as written, pipelines
     # by their shaders' records (a shipped shader's reference among them), a cut or changed record ending the reading,
     # another key starting over, a full file; and the shipped shaders' file read through its mapping
-    add_executable(snx-test-pipeline-file pipeline_file.c)
+    add_executable(snx-test-pipeline-file pipeline_file.c tracy_stubs.c)
     snx_test_target(snx-test-pipeline-file 23)
     target_link_libraries(snx-test-pipeline-file PRIVATE snx_nx_flags scarletnx-common)
     add_test(NAME pipeline_file COMMAND snx-test-pipeline-file)

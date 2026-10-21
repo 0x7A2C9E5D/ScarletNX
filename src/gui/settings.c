@@ -320,7 +320,9 @@ size_t gui_settings_recompile(GuiSettings* s, const char** argv) {
     for (i = 0; i < s->own; ++i) {
         const char* value = s->values[i].kind ? NULL : picked(s, i);
         const char* key = s->values[i].key;
-        if (!value || !strcmp(key, "gdbstub") || !strcmp(key, "tmpfs") || !strcmp(key, "extract")) continue;
+        if (!value || !strcmp(key, "gdbstub") || !strcmp(key, "tmpfs") || !strcmp(key, "extract") ||
+            !strcmp(key, "tracy_capture"))
+            continue;
         snprintf(s->values[i].option, sizeof s->values[i].option, "--%s=%s", key, value);
         argv[n++] = s->values[i].option;
     }
@@ -341,5 +343,6 @@ size_t gui_settings_options(GuiSettings* s, int launch, const char** argv) {
         argv[n++] = "-S";
         argv[n++] = "-s";
     }
+    if (launch && own_on(s, "tracy_capture")) argv[n++] = "--tracy-capture";
     return n;
 }

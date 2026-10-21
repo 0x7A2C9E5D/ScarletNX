@@ -41,7 +41,21 @@ endif()
 
 set(snx_settings_out "${CMAKE_BINARY_DIR}/settingsgen")
 file(MAKE_DIRECTORY "${snx_settings_out}")
-set(snx_settings_spec "${PROJECT_SOURCE_DIR}/src/nx/runtime/settings.txt")
+set(snx_settings_source "${PROJECT_SOURCE_DIR}/src/nx/runtime/settings.txt")
+set(snx_settings_spec "${snx_settings_source}")
+# Leave the Tracy rows out when the runtime has no profiler.
+if(NOT SNX_TRACY)
+    file(READ "${snx_settings_source}" snx_settings_text)
+    foreach(snx_tracy_marker SNX_TRACY SNX_TRACY_DEBUG)
+        string(REGEX REPLACE "# ${snx_tracy_marker}_BEGIN[^#]*# ${snx_tracy_marker}_END\r?\n" "" snx_settings_text
+                             "${snx_settings_text}")
+    endforeach()
+    if(snx_settings_text MATCHES "SNX_TRACY[^\n]*_BEGIN")
+        message(FATAL_ERROR "settings.txt: a Tracy block has no end marker")
+    endif()
+    set(snx_settings_spec "${snx_settings_out}/settings.txt")
+    file(WRITE "${snx_settings_spec}" "${snx_settings_text}")
+endif()
 set(snx_settings_args "")
 
 # LLVM's: the headers of the LLVM the backend links, and the pipelines its opt prints (llvm_opt.cmake). An opt of
@@ -98,7 +112,7 @@ endif()
 
 # a file for each runtime table (settings_<name>.c, settingsgen's table_file), named from settings.txt's table lines
 file(STRINGS "${snx_settings_spec}" snx_settings_tables REGEX "^table ")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${snx_settings_spec}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${snx_settings_source}")
 set(snx_settings_runtime_files settings_runtime.c)
 foreach(line IN LISTS snx_settings_tables)
     # nested: if() evaluates a parenthesized condition before the MATCHES that sets CMAKE_MATCH_<n>
