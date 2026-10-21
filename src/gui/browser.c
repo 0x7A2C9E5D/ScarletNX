@@ -146,6 +146,23 @@ static char* shown_name(const char* path, const char* name) {
     free(folder);
     return shown ? shown : snx_strdup(name);
 }
+/* whether the add-on named a (<game>_<entry>) is listed before b: updates first, the newest version first (one
+   without a version last), then the DLCs by title ID */
+static bool addon_before(SnxU64 game, const char* a, const char* b) {
+    const char *ea = strchr(a, '_') + 1, *eb = strchr(b, '_') + 1;
+    SnxU64 ia = 0, ib = 0, va, vb;
+    int ua, ub;
+    snx_addon_entry_id(game, ea, &ia);
+    snx_addon_entry_id(game, eb, &ib);
+    ua = snx_addon_kind(game, ia) == SNX_ADDON_UPDATE;
+    ub = snx_addon_kind(game, ib) == SNX_ADDON_UPDATE;
+    if (ua != ub) return ua;
+    if (!ua) return strcmp(ea, eb) < 0;
+    va = snx_addon_version(ea);
+    vb = snx_addon_version(eb);
+    if (va == SNX_NO_VERSION || vb == SNX_NO_VERSION) return vb == SNX_NO_VERSION && va != SNX_NO_VERSION;
+    return va > vb;
+}
 /* the updates and DLCs made beside the game at path, in its folder (snx_addon_name): each a data folder, an update's
    with its program beside it. Their count, and with addons not NULL each added to it, in their names' order (an
    update's title ID before a DLC's) */
@@ -211,7 +228,7 @@ static size_t addons_of(const char* path, GuiGames* addons) {
                 snprintf(text, sizeof text, "%s", snx_tr("Update"));
             free(nacp);
             free(own);
-            for (j = addons->count; j > 0 && strcmp(stem, addons->names[j - 1]) < 0; --j) {
+            for (j = addons->count; j > 0 && addon_before(game, stem, addons->names[j - 1]); --j) {
                 addons->names[j] = addons->names[j - 1];
                 addons->shown[j] = addons->shown[j - 1];
                 addons->paths[j] = addons->paths[j - 1];

@@ -15,12 +15,16 @@ char* snx_ini_value(const char* path, const char* key);
    it is when it has the value already. value has no line break. 0, or nonzero with a line saying why */
 int snx_ini_record(const char* path, const char* key, const char* value);
 
-/* addons=: the game's updates and DLCs played with it, their title IDs as snx_title_text writes them, a comma between
-   two. The most a list holds */
+/* addons=: the game's updates and DLCs played with it, their entries (snx_addon_name: a title ID, an update's with
+   its version), a comma between two. The most a list holds */
 #define SNX_ADDONS_MAX 2048
-/* text's IDs that are add-ons of the game named game (snx_addon_kind), into ids (max of them), each once: their count.
-   Its update is the one ID with 0x800, so one at most. Anything else in text is left out */
-size_t snx_addons_parse(const char* text, const char* game, SnxU64* ids, size_t max);
-/* ids as addons= writes them, malloc'd */
-char* snx_addons_text(const SnxU64* ids, size_t count);
+typedef struct {
+    char entry[32]; /* 0100ABCD12341001, 0100ABCD12340800v65536 */
+    SnxU64 id;
+} SnxAddon;
+/* text's entries that are add-ons of the game named game, into list (max of them), each title ID once: an update at
+   most, the last one listed, as one runs at a time. Their count; anything else in text is left out */
+size_t snx_addons_parse(const char* text, const char* game, SnxAddon* list, size_t max);
+/* list as addons= writes it, malloc'd */
+char* snx_addons_text(const SnxAddon* list, size_t count);
 #endif

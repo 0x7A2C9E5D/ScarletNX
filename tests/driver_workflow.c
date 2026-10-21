@@ -81,12 +81,14 @@ static SnxU64 addon_title(const char* dump) {
 }
 static int addon_mode(void) { return getenv("SNX_WORKFLOW_ADDON") && *getenv("SNX_WORKFLOW_ADDON"); }
 /* the title ID the extraction's NPDM gives (SNX_WORKFLOW_NPDM "id"), else none */
-int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title, SnxU64* game) {
+int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title, SnxU64* game, SnxU64* version) {
     const char* kind = getenv("SNX_WORKFLOW_NPDM");
     (void)paths;
     CHECK(snx_is_file(dump));
     *title = addon_mode() ? addon_title(dump) : kind && !strcmp(kind, "id") ? ((SnxU64)0x0100ABCDUL << 32) | 0x12345000UL : 0;
     *game = addon_mode() ? ADDON_GAME : *title;
+    /* an update's version from its name: "Update" 65536, "Update old" 0 */
+    if (version) *version = strstr(dump, "Update old") ? 0 : strstr(dump, "Update") ? 65536 : SNX_NO_VERSION;
     return 0;
 }
 int snx_extract(int argc, char** argv, const SnxPaths* paths) {
@@ -181,12 +183,12 @@ const IniOpt* snx_recompile_setting(const char* key) {
 /* SNX_WORKFLOW_ADDON's recompile: --outdir GAMES -- DUMP [NAME]. A game's dump is named by its title ID, an update
    goes into its game's folder as <game>_<its own>; a DLC is never recompiled */
 static int addon_recompile(int argc, char** argv, const SnxPaths* paths) {
-    char of[17], own[17], *folder, *name, *game, *stamp, *code, *data;
+    char of[17], own[32], *folder, *name, *game, *stamp, *code, *data;
     SnxU64 title;
     CHECK((argc == 4 || argc == 5) && !strcmp(argv[0], "--outdir") && !strcmp(argv[2], "--"));
     title = addon_title(argv[3]);
     snx_title_text(ADDON_GAME, of);
-    snx_title_text(title, own);
+    snx_addon_entry(ADDON_GAME, title, strstr(argv[3], "Update old") ? 0 : 65536, own); /* each version its own */
     CHECK(snx_addon_kind(ADDON_GAME, title) != SNX_ADDON_DLC &&
           argc == (snx_addon_kind(ADDON_GAME, title) == SNX_ADDON_NONE ? 5 : 4));
     folder = snx_path_join(argv[1], of);
@@ -1067,7 +1069,7 @@ int main(int argc, char** argv) {
         char *dlc = snx_path_join(repo, "Game Dlc.nsp"), *folder = snx_path_join(repo, "games/0100ABCD12340000");
         char *image = snx_path_join(folder, "0100ABCD12340000_0100ABCD5555A001_data/system/archives/"
                                             "0100ABCD5555A001.romfs");
-        char *own = snx_path_join(folder, "0100ABCD12340000_0100ABCD12340800");
+        char *own = snx_path_join(folder, "0100ABCD12340000_0100ABCD12340800v65536");
         char *old_dlc = snx_path_join(folder, "0100ABCD12340000_0100ABCD5555A001"), *both, *ini, *checked;
         set_env("SNX_WORKFLOW_ADDON", "1");
         set_env("SNX_WORKFLOW_GAMES", folder);
@@ -1079,11 +1081,11 @@ int main(int argc, char** argv) {
         set_env("SNX_WORKFLOW_UPDATE", update);
         run(exe, repo, game_dump, log, 0, "RRA", NULL);
         set_env("SNX_WORKFLOW_UPDATE", "");
-        CHECK(snx_is_file(own) && records_dump(folder, "0100ABCD12340000_0100ABCD12340800", update));
+        CHECK(snx_is_file(own) && records_dump(folder, "0100ABCD12340000_0100ABCD12340800v65536", update));
         CHECK(records_dump(folder, "0100ABCD12340000", game_dump));
         ini = snx_game_ini(folder, "0100ABCD12340000");
         checked = snx_ini_value(ini, "addons");
-        CHECK(checked && !strcmp(checked, "0100ABCD12340800"));
+        CHECK(checked && !strcmp(checked, "0100ABCD12340800v65536"));
         free(checked);
         run(exe, repo, update, log, 0, "A", NULL);
         run(exe, repo, own, log, 0, "A", NULL);
@@ -1100,7 +1102,7 @@ int main(int argc, char** argv) {
         }
         CHECK(!snx_path_exists(old_dlc) && records_dump(folder, "0100ABCD12340000_0100ABCD5555A001", dlc));
         checked = snx_ini_value(ini, "addons");
-        CHECK(checked && !strcmp(checked, "0100ABCD12340800,0100ABCD5555A001") && !snx_path_exists(image));
+        CHECK(checked && !strcmp(checked, "0100ABCD12340800v65536,0100ABCD5555A001") && !snx_path_exists(image));
         free(checked);
         set_env("SNX_WORKFLOW_EXTRACT", "1");
         run(exe, repo, game_dump, log, 0, "EEEA", NULL); /* the game's extraction, the update's, then the DLC's */
@@ -1119,8 +1121,26 @@ int main(int argc, char** argv) {
         set_env("SNX_WORKFLOW_UPDATE", both);
         run(exe, repo, game_dump, log, 0, "A", NULL);
         checked = snx_ini_value(ini, "addons");
-        CHECK(checked && !strcmp(checked, "0100ABCD12340800,0100ABCD5555A001"));
+        CHECK(checked && !strcmp(checked, "0100ABCD12340800v65536,0100ABCD5555A001"));
         free(checked);
+        set_env("SNX_WORKFLOW_UPDATE", "");
+        {   /* an older update installed: made into its own program beside the newer one's, and picked in its place,
+               the DLCs checked kept; the newer one played again picked back */
+            char *old_update = snx_path_join(repo, "Game Update old.nsp");
+            char *old_program = snx_path_join(folder, "0100ABCD12340000_0100ABCD12340800v0");
+            CHECK(!snx_write_file(old_update, "old update", 10));
+            run(exe, repo, old_update, log, 0, "RA", NULL);
+            checked = snx_ini_value(ini, "addons");
+            CHECK(checked && !strcmp(checked, "0100ABCD12340800v0,0100ABCD5555A001"));
+            free(checked);
+            CHECK(snx_is_file(old_program) && snx_is_file(own));
+            run(exe, repo, update, log, 0, "A", NULL);
+            checked = snx_ini_value(ini, "addons");
+            CHECK(checked && !strcmp(checked, "0100ABCD12340800v65536,0100ABCD5555A001"));
+            free(checked);
+            free(old_update);
+            free(old_program);
+        }
         set_env("SNX_WORKFLOW_UPDATE", dlc); /* given with another game: that game made, the DLC refused */
         set_env("SNX_WORKFLOW_ADDON", "");
         set_env("SNX_WORKFLOW_DUMP", dump);

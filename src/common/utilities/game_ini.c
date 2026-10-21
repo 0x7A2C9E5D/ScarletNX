@@ -94,33 +94,41 @@ done:
     free(out);
     return rc;
 }
-size_t snx_addons_parse(const char* text, const char* game, SnxU64* ids, size_t max) {
-    char word[17];
-    size_t count = 0, n, i;
+size_t snx_addons_parse(const char* text, const char* game, SnxAddon* list, size_t max) {
+    char word[32];
+    size_t count = 0, n, i, update = (size_t)-1;
     SnxU64 own, id;
     if (!snx_title_parse(game, &own)) return 0;
     while (text && *text) {
         while (*text == ',' || *text == ' ' || *text == '\t') text++;
         for (n = 0; text[n] && text[n] != ',' && text[n] != ' ' && text[n] != '\t'; n++) continue;
-        if (n == 16) {
-            for (i = 0; i < 16; i++) word[i] = (char)toupper((unsigned char)text[i]);
-            word[16] = 0;
-            if (snx_title_parse(word, &id) && snx_addon_kind(own, id) != SNX_ADDON_NONE) {
-                for (i = 0; i < count && ids[i] != id; i++) continue;
-                if (i == count && count < max) ids[count++] = id;
+        if (n >= 16 && n < sizeof word) {
+            for (i = 0; i < n; i++) word[i] = i < 16 ? (char)toupper((unsigned char)text[i]) : text[i];
+            word[n] = 0;
+            if (snx_addon_entry_id(own, word, &id)) {
+                for (i = 0; i < count && list[i].id != id; i++) continue;
+                if (i < count && snx_addon_kind(own, id) == SNX_ADDON_UPDATE)
+                    i = update; /* one update: the last one listed */
+                if (i == update && update != (size_t)-1)
+                    memcpy(list[i].entry, word, n + 1);
+                else if (i == count && count < max) {
+                    if (snx_addon_kind(own, id) == SNX_ADDON_UPDATE) update = count;
+                    memcpy(list[count].entry, word, n + 1);
+                    list[count++].id = id;
+                }
             }
         }
         text += n;
     }
     return count;
 }
-char* snx_addons_text(const SnxU64* ids, size_t count) {
-    char* text = (char*)snx_alloc(count * 17 + 1);
+char* snx_addons_text(const SnxAddon* list, size_t count) {
+    char* text = (char*)snx_alloc(count * 32 + 1);
     size_t i;
     text[0] = 0;
     for (i = 0; i < count; i++) {
         if (i) strcat(text, ",");
-        snx_title_text(ids[i], text + strlen(text));
+        strcat(text, list[i].entry);
     }
     return text;
 }

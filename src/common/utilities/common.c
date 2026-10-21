@@ -1499,12 +1499,34 @@ int snx_title_parse(const char* text, SnxU64* id) {
 }
 int snx_addon_name(const char* base, const char* name, SnxU64* id) {
     size_t n = strlen(base);
-    SnxU64 game, value;
-    if (!snx_title_parse(base, &game) || strncmp(name, base, n) || name[n] != '_' ||
-        !snx_title_parse(name + n + 1, &value) || snx_addon_kind(game, value) == SNX_ADDON_NONE)
-        return 0;
+    SnxU64 game;
+    if (!snx_title_parse(base, &game) || strncmp(name, base, n) || name[n] != '_') return 0;
+    return snx_addon_entry_id(game, name + n + 1, id);
+}
+int snx_addon_entry_id(SnxU64 game, const char* entry, SnxU64* id) {
+    char text[17];
+    SnxU64 value;
+    size_t digits;
+    if (strlen(entry) < 16) return 0;
+    memcpy(text, entry, 16);
+    text[16] = 0;
+    if (!snx_title_parse(text, &value) || snx_addon_kind(game, value) == SNX_ADDON_NONE) return 0;
+    if (entry[16]) { /* an update's version: v and up to ten digits */
+        digits = strspn(entry + 17, "0123456789");
+        if (entry[16] != 'v' || !digits || digits > 10 || entry[17 + digits] ||
+            snx_addon_kind(game, value) != SNX_ADDON_UPDATE)
+            return 0;
+    }
     if (id) *id = value;
     return 1;
+}
+void snx_addon_entry(SnxU64 game, SnxU64 id, SnxU64 version, char entry[32]) {
+    snx_title_text(id, entry);
+    if (snx_addon_kind(game, id) == SNX_ADDON_UPDATE && version != SNX_NO_VERSION)
+        sprintf(entry + 16, "v%lu", (unsigned long)(version & 0xFFFFFFFFUL));
+}
+SnxU64 snx_addon_version(const char* entry) {
+    return strlen(entry) > 17 && entry[16] == 'v' ? (SnxU64)strtoul(entry + 17, NULL, 10) : SNX_NO_VERSION;
 }
 int snx_addon_kind(SnxU64 game, SnxU64 id) {
     /* the console's rule: an application's patch is its ID with 0x800 added; any other add-on of it is content */
