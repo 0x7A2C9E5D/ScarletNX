@@ -181,7 +181,7 @@ install(FILES LICENSE DESTINATION ${licenses})
 # FFmpeg's with the change made to it (cmake/ffmpeg-vp9-nvdec.patch), which its LGPL wants carried with the binaries
 install(FILES "${FFmpeg_SOURCE_DIR}/COPYING.LGPLv2.1" "${FFmpeg_SOURCE_DIR}/LICENSE.md" cmake/ffmpeg-vp9-nvdec.patch
         DESTINATION ${licenses}/FFmpeg)
-install(FILES dist/licenses/OpenSans/LICENSE DESTINATION ${licenses}/OpenSans) # the shared fonts' stand-in (pl.c)
+install(FILES dist/licenses/DejaVu/LICENSE DESTINATION ${licenses}/DejaVu) # the shared fonts' stand-in (pl.c)
 install(FILES dist/licenses/Ryujinx/LICENSE.txt DESTINATION ${licenses}/Ryujinx) # the default Miis (misc.c)
 install(FILES "${Vulkan-Headers_SOURCE_DIR}/LICENSE.md" DESTINATION ${licenses}/Vulkan-Headers)
 install(DIRECTORY "${Vulkan-Headers_SOURCE_DIR}/LICENSES" DESTINATION ${licenses}/Vulkan-Headers)

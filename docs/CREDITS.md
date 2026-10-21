@@ -12,7 +12,7 @@ Generated modules include runtime ABI code. Game assets, keys and firmware are e
 | hactool / cJSON / ConvertUTF (`src/nx/runtime/driver/hactool`, with ScarletNX's changes) | ISC / MIT / Unicode license |
 | LibHac storage code, ported into hactool (`src/nx/runtime/driver/hactool/storage.c`) | MIT |
 | OpenSSL | Apache 2.0 |
-| Open Sans 1.101 (the shared fonts' stand-in, `cmake/shared_fonts.cmake`) | Apache 2.0 ([text](../dist/licenses/OpenSans/LICENSE)) |
+| DejaVu Sans 2.37 (the shared fonts' stand-in, `cmake/shared_fonts.cmake`) | the Bitstream Vera license ([text](../dist/licenses/DejaVu/LICENSE)) |
 | yuzu's controller button glyphs (`font_nintendo_extended.cpp`, as Eden carries it) | GPL-2.0-or-later |
 | LZ4 (the library, `lib/`) | BSD-2-Clause |
 | Vulkan-Headers | Apache 2.0 |
