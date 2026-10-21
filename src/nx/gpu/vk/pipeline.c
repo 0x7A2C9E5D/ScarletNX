@@ -650,7 +650,11 @@ static VkPipeline pipe_create(const Pipe* e) {
     VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
                                                  .topology = (VkPrimitiveTopology)k->topo_class};
     VkPipelineViewportStateCreateInfo vp = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+    VkPipelineRasterizationProvokingVertexStateCreateInfoEXT provoking = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT,
+        .provokingVertexMode = VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT};
     VkPipelineRasterizationStateCreateInfo rs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+                                                 .pNext = k->provoking_last ? &provoking : NULL,
                                                  .depthClampEnable = k->depth_clamp,
                                                  .polygonMode = (VkPolygonMode)k->polygon,
                                                  .lineWidth = 1.0f};
@@ -692,7 +696,11 @@ static VkPipeline pipe_create(const Pipe* e) {
         LOG_LIMIT(
             1, "vulkan: blending that needs dual-source or independent blend, which this GPU lacks, is simplified\n");
     }
+    /* a logic operation takes the place of blending on integer and normalized targets; float and sRGB ones pass
+       their color through, as the 3D engine's LOGIC_OP does */
     VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+                                              .logicOpEnable = k->logic_op != 0,
+                                              .logicOp = k->logic_op ? (VkLogicOp)(k->logic_op - 1) : VK_LOGIC_OP_COPY,
                                               .attachmentCount = k->ncolor,
                                               .pAttachments = cba};
     VkDynamicState dyn[21 + 2] = {VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
@@ -1171,6 +1179,7 @@ static void pf_key(char* out, size_t n) {
                   (u32)g_vk_preserve_infnan,
                   (u32)g_vk_preserve_infnan64,
                   (u32)g_vk_subgroup_stages,
+                  (u32)g_vk.has_provoking_last,
                   g_vk_stage_sets,
                   g_vk_buffer_image_slots,
                   d->limits.maxPerStageDescriptorStorageImages,

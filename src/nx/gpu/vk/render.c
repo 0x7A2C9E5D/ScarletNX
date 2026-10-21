@@ -1888,6 +1888,17 @@ retry:
     k.vs = vs->mod;
     k.fs = fs ? fs->mod : VK_NULL_HANDLE;
     k.depth_clamp = g_vk.feat.depthClamp && vk_render_depth_clamp(r);
+    /* PROVOKING_VERTEX (0x5A1): 1 the last vertex, GL's and NVN's default, 0 the first, Vulkan's */
+    k.provoking_last = (r[0x5A1] & 1) && g_vk.has_provoking_last;
+    if ((r[0x5A1] & 1) && !g_vk.has_provoking_last)
+        LOG_LIMIT(1, "vulkan: flat inputs take the first vertex of a primitive, not the last the game asks for\n");
+    /* LOGIC_OP (0x671 on, 0x672 the operation as GL numbers it from CLEAR 0x1500 to SET 0x150F, VkLogicOp's order) */
+    if (r[0x671] & 1) {
+        if (g_vk.feat.logicOp)
+            k.logic_op = (r[0x672] & 15) + 1;
+        else
+            LOG_LIMIT(1, "vulkan: this GPU has no logic operations: targets are blended instead\n");
+    }
     VkPrimitiveTopology topo;
     switch (topology) {
         case 0: topo = VK_PRIMITIVE_TOPOLOGY_POINT_LIST; break;

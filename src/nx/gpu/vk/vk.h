@@ -91,6 +91,9 @@ typedef struct {
     /* VK_EXT_conditional_rendering: a render enable comparing a samples-passed count not known yet with zero
        predicates its draws on the GPU (gpu/vk/query.c) instead of waiting for the count */
     int has_cond_render;
+    /* VK_EXT_provoking_vertex's provokingVertexLast: flat inputs take a primitive's last vertex, as the 3D engine's
+       PROVOKING_VERTEX (0x5A1) can ask */
+    int has_provoking_last;
 } VkState;
 extern VkState g_vk;
 
@@ -820,6 +823,8 @@ typedef struct {
         u32 en, sc, dc, cop, sa, da, aop, mask;
     } blend[8];
     u32 feedback; /* VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT, without the dynamic state for it */
+    u32 provoking_last; /* the last vertex provokes (has_provoking_last) */
+    u32 logic_op;       /* 0, or the VkLogicOp the color targets take in place of blending, plus 1 */
     u32 arrays;   /* the sets with texture arrays: its layout, vk_playout(arrays) */
 } PipeKey;
 /* the pipeline for k, made when new and waited for while a worker makes it: NULL only when it can't be made */
