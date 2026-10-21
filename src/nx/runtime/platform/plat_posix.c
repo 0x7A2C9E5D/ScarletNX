@@ -568,7 +568,11 @@ void plat_alias_host_free(u8* p, u64 size) { munmap(p, (size_t)size); }
 static u64 g_alias_size;
 u32 plat_tid(void) {
 #if defined(__linux__)
-    return (u32)syscall(SYS_gettid);
+    /* kept per thread: vk_lock asks it on every acquire, thousands of times a frame in one game, and each was a
+       system call */
+    static __thread u32 t_tid;
+    if (!t_tid) t_tid = (u32)syscall(SYS_gettid);
+    return t_tid;
 #else
     return (u32)(uintptr_t)pthread_self();
 #endif
