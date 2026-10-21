@@ -361,6 +361,7 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
                     (u32)(dc_color >> 32),
                     dc_funcs,
                     unfed};
+    if (stage == ST_FS && ch) mask[11] = ch->r3d[0x084] & 1; /* MANDATED_EARLY_Z */
     if (stage == ST_GS && ch) memcpy(mask + 12, ch->r3d + 0x490, 8 * sizeof(u32));
     /* a capture's layout, in the words only the fragment stage's key uses otherwise */
     if (stage != ST_FS && xfb) {
@@ -461,6 +462,7 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
             s->si.tex_dc_color_mask = dc_color;
             s->si.tex_dc_color_funcs = dc_funcs;
             s->si.in_unfed_mask = unfed;
+            s->si.early_fragment_tests = mask[11];
         } else {
             s->si.attr_int_mask = int_mask;
             s->si.attr_sint_mask = sint_mask;

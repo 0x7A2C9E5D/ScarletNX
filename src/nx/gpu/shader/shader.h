@@ -84,6 +84,10 @@ typedef struct {
        them (GPL-2.0-or-later, shader_recompiler emit_spirv_context_get_set.cpp): Vulkan leaves an unfed input
        undefined */
     u32 in_unfed_mask;
+    /* FS key: MANDATED_EARLY_Z (0x084) on, so the depth and stencil tests run before the program, as Eden's
+       force_early_z has them: a program that stores to images or buffers then leaves no trace for fragments they
+       reject */
+    u32 early_fragment_tests;
     ShXfb xfb; /* key: transform feedback's capture of this program's outputs */
 } ShaderInfo;
 #define SH_DC_COLOR_MAX  10 /* slots tex_dc_color_funcs has room for */
