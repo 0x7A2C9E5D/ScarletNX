@@ -707,6 +707,27 @@ msgid "none"
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "Ready to run, with %zu update(s), DLC(s) or mod(s) to pick from"
+msgstr ""
+
+#: src/gui/main.c
+msgid "3DS CIA, opened with scarletnx-3ds"
+msgstr ""
+
+#: src/gui/main.c
+msgid "A dump, prepared when it runs"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Ready to run"
+msgstr ""
+
+#: src/gui/main.c
+msgid ", in the games/ an older version made: new games go to recompiled/"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Pick a folder of games or dumps, listed after recompiled/ and dumps/"
 msgstr ""
 
@@ -729,20 +750,7 @@ msgid "The recent games not shown"
 msgstr ""
 
 #: src/gui/main.c
-#, c-format
-msgid "Ready to run, with %zu update(s), DLC(s) or mod(s) to pick from"
-msgstr ""
-
-#: src/gui/main.c
-msgid "3DS CIA, opened with scarletnx-3ds"
-msgstr ""
-
-#: src/gui/main.c
-msgid "A dump, prepared when it runs"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Ready to run"
+msgid "  (games/)"
 msgstr ""
 
 #: src/gui/main.c

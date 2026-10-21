@@ -2267,7 +2267,20 @@ int main(int argc, char** argv) {
                 }
                 games_scan(&app, &listed, said, sizeof said);
                 found = 0;
-                for (g = 0; g < listed.count; ++g) found |= !strcmp(listed.names[g], "Old");
+                for (g = 0; g < listed.count; ++g)
+                    if (!strcmp(listed.names[g], "Old")) { /* its row marked, as no other game's */
+                        char row[256];
+                        found = 1;
+                        game_label(&app, &listed, g, row, sizeof row);
+                        assert(strstr(row, "Old  (games/)") && game_was_old(&app, listed.paths[g]));
+                        game_kind(&app, &listed, g, row, sizeof row); /* and the tips say why */
+                        assert(!strcmp(row, "Ready to run, in the games/ an older version made: new games go to "
+                                            "recompiled/"));
+                    } else if (!gui_games_heading(&listed, g)) {
+                        char row[256];
+                        game_label(&app, &listed, g, row, sizeof row);
+                        assert(!strstr(row, "(games/)"));
+                    }
                 assert(found && !strstr(said, old_games)); /* the test's own games/ is gone: said, not this */
                 gui_games_free(&listed);
                 left_behind(&app);

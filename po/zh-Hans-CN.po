@@ -674,6 +674,10 @@ msgid "Ready to run"
 msgstr "可以运行"
 
 #: src/gui/main.c
+msgid ", in the games/ an older version made: new games go to recompiled/"
+msgstr "，位于旧版本创建的 games/：新游戏放入 recompiled/"
+
+#: src/gui/main.c
 #, c-format
 msgid "Page %zu/%zu, %zu game(s)"
 msgstr "第 %zu/%zu 页，%zu 个游戏"

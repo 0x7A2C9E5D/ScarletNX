@@ -674,6 +674,10 @@ msgid "Ready to run"
 msgstr "Pronto para rodar"
 
 #: src/gui/main.c
+msgid ", in the games/ an older version made: new games go to recompiled/"
+msgstr ", na games/ que uma versão antiga fez: jogos novos vão para recompiled/"
+
+#: src/gui/main.c
 #, c-format
 msgid "Page %zu/%zu, %zu game(s)"
 msgstr "Página %zu/%zu, %zu jogo(s)"

@@ -2794,6 +2794,24 @@ static void games_boxes(App* app, GuiGamesBoxes* g) {
     if (gui_browser_pages(&app->browser) > 1) g->list.arrows = cell_w(app); /* the pages' */
 }
 /* the focused row of Games: what it is, about it, and a line more for a recent game's or a game's kind */
+static bool game_was_old(const App* app, const char* path);
+/* game i's kind, by its file's name: ready, a dump or a CIA; its updates, DLCs and mods; the games/ of an older
+   version that holds it, as its row's (games/) says */
+static void game_kind(const App* app, const GuiGames* games, size_t i, char* kind, size_t size) {
+    const char* name = games->names[i];
+    size_t n;
+    if (games->addons[i])
+        snprintf(kind, size, snx_tr("Ready to run, with %zu update(s), DLC(s) or mod(s) to pick from"), games->addons[i]);
+    else
+        snprintf(kind, size, "%s",
+                 gui_is_cia(name)    ? snx_tr("3DS CIA, opened with scarletnx-3ds")
+                 : gui_is_dump(name) ? snx_tr("A dump, prepared when it runs")
+                                     : snx_tr("Ready to run"));
+    n = strlen(kind);
+    if (game_was_old(app, games->paths[i]))
+        snprintf(kind + n, size - n, "%s",
+                 snx_tr(", in the games/ an older version made: new games go to recompiled/"));
+}
 static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** about, char* kind, size_t size) {
     static const char* const kinds[] = {"Switch", "Linux ARM", "3DS"}; /* names, never translated */
     size_t selected = app->browser.selected, head = app->browser.head;
@@ -2817,24 +2835,23 @@ static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** ab
         *about = "";
         return app->games.shown[g->start + selected - head];
     }
-    {
-        const char* name = app->games.names[g->start + selected - head]; /* its file's: what kind it is */
-        size_t addons = app->games.addons[g->start + selected - head];
-        if (addons)
-            snprintf(kind, size, snx_tr("Ready to run, with %zu update(s), DLC(s) or mod(s) to pick from"), addons);
-        else
-            snprintf(kind, size, "%s",
-                     gui_is_cia(name)    ? snx_tr("3DS CIA, opened with scarletnx-3ds")
-                     : gui_is_dump(name) ? snx_tr("A dump, prepared when it runs")
-                                         : snx_tr("Ready to run"));
-        *about = app->games.paths[g->start + selected - head];
-        return app->games.shown[g->start + selected - head];
-    }
+    game_kind(app, &app->games, g->start + selected - head, kind, size);
+    *about = app->games.paths[g->start + selected - head];
+    return app->games.shown[g->start + selected - head];
+}
+/* a game's row in Games: its name, how many updates, DLCs and mods it has, and (games/) when an older version's
+   games/ holds it */
+static void game_label(const App* app, const GuiGames* games, size_t i, char* out, size_t size) {
+    const char* was = game_was_old(app, games->paths[i]) ? snx_tr("  (games/)") : "";
+    if (games->addons[i]) /* its updates, DLCs and mods, which opening it offers */
+        snprintf(out, size, "%s%s  +%zu%s", app->theme.marker, games->shown[i], games->addons[i], was);
+    else
+        snprintf(out, size, "%s%s%s", app->theme.marker, games->shown[i], was);
 }
 static void draw_games(App* app) {
     GuiGamesBoxes g;
     GuiRect r;
-    char label[400], line[1100], keys[256], kind[96];
+    char label[400], line[1100], keys[256], kind[192];
     const char *about, *name;
     size_t i, items = gui_browser_items(&app->browser), head = app->browser.head;
     SDL_Color soft = rgb(app->theme.soft), ink = rgb(app->theme.ink);
@@ -2855,11 +2872,7 @@ static void draw_games(App* app) {
                 list_label(app, &g.list, e, app->games.shown[g.start + i]);
                 continue;
             }
-            if (app->games.addons[g.start + i]) /* its updates, DLCs and mods, which opening it offers */
-                snprintf(label, sizeof label, "%s%s  +%zu", app->theme.marker, app->games.shown[g.start + i],
-                         app->games.addons[g.start + i]);
-            else
-                snprintf(label, sizeof label, "%s%s", app->theme.marker, app->games.shown[g.start + i]);
+            game_label(app, &app->games, g.start + i, label, sizeof label);
             list_item(app, &g.list, e, label, app->browser.selected == head + i,
                       app->browser.activated && app->browser.active == g.start + i);
         }
@@ -6079,6 +6092,13 @@ static char* games_old(const App* app) {
     if (old && snx_is_dir(old) && (!app->games_dir || !snx_same_file(old, app->games_dir))) return old;
     free(old);
     return NULL;
+}
+/* whether that games/ holds the game at path */
+static bool game_was_old(const App* app, const char* path) {
+    char* old = games_old(app);
+    bool was = old && path && snx_path_within(path, old);
+    free(old);
+    return was;
 }
 #ifdef SDL_PLATFORM_ANDROID
 /* what older versions kept elsewhere on Android: /sdcard/ScarletNX's games and keys (a shared storage the app no longer

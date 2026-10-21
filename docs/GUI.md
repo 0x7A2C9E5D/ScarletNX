@@ -210,7 +210,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   folder at a time: where it is (`- `, in the failure colour, a path too long for a row going on in the next) and
   under it the space it takes, counted as the box shows (*counting* until then). They are the menu's `gui/`, `work/`, each game laid out
   beside the others in `games/` or a Library folder (`games/<id>/` now), the data folder's `games/` (`recompiled/` now,
-  its games still listed until they are moved), a portable copy's `games/`
+  its games still listed, each row marked `(games/)`, until they are moved), a portable copy's `games/`
   beside the program, and a build tree's `games/`, `work/` and keys in its checkout
   ([USAGE](USAGE.md#folders)). Up/Down, PgUp/PgDn and the wheel go over those that do not fit (an arrow at the
   right of the first says some are above it, *and N more* the ones under), any other key, click or tap closes it;
