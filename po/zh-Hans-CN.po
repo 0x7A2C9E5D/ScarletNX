@@ -923,8 +923,8 @@ msgid "The theme, the menu's letters, the theme editor and the folders"
 msgstr "主题、菜单文字、主题编辑器和文件夹"
 
 #: src/gui/main.c
-msgid "Reset all to the defaults"
-msgstr "全部恢复默认"
+msgid "Reset all"
+msgstr "全部重置"
 
 #: src/gui/main.c
 msgid "Del or Enter asks to take it off the list; the folder keeps its games"
@@ -1153,10 +1153,6 @@ msgstr "独立设置 >"
 #: src/gui/main.c
 msgid "As All >"
 msgstr "同「全部」>"
-
-#: src/gui/main.c
-msgid "Every setting back to its default"
-msgstr "每项设置恢复默认"
 
 #: src/gui/main.c
 msgid "Pick, drop or paste a folder of games"
@@ -1674,6 +1670,10 @@ msgstr "移动旧文件"
 #: src/gui/main.c
 msgid "What an older version left where this one no longer looks, moved where it keeps it once asked"
 msgstr "旧版本留在本版本不再读取之处的内容，确认后移到本版本存放的位置"
+
+#: src/gui/main.c
+msgid "Every setting of the groups after App back to its default, once asked"
+msgstr "App 之后各组的每项设置恢复默认，确认后进行"
 
 #: src/gui/main.c
 #, c-format

@@ -3421,7 +3421,9 @@ static const GuiThemeKey app_keys[] = {
      SNX_TR_NOOP("The settings the runtime and the launcher no longer read, taken out once asked")},
     {"", SNX_TR_NOOP("Move old files"), GUI_KEY_ACTION, offsetof(GuiAppForm, moves), sizeof(((GuiAppForm*)0)->moves),
      NULL, 0,
-     SNX_TR_NOOP("What an older version left where this one no longer looks, moved where it keeps it once asked")}};
+     SNX_TR_NOOP("What an older version left where this one no longer looks, moved where it keeps it once asked")},
+    {"", SNX_TR_NOOP("Reset all"), GUI_KEY_ACTION, 0, 0, NULL, 0,
+     SNX_TR_NOOP("Every setting of the groups after App back to its default, once asked")}};
 enum {
     GUI_APP_THEME,
     GUI_APP_TEXT,
@@ -3433,6 +3435,7 @@ enum {
     GUI_APP_PLACES,
     GUI_APP_CLEAN,
     GUI_APP_MOVE,
+    GUI_APP_RESET,
     GUI_APP_ROWS
 };
 /* path as App's note says it: from the data folder when it is in it (recompiled/), else whole */
@@ -3669,8 +3672,7 @@ static void settings_groups(App* app) {
 /* the groups, row on the focus */
 static void settings_top(App* app, int row) {
     settings_groups(app);
-    gui_editor_form(&app->editor, app->group_keys, app->groups, &app->app_form,
-                    SNX_TR_NOOP("Reset all to the defaults"));
+    gui_editor_form(&app->editor, app->group_keys, app->groups, &app->app_form, NULL);
     app->editor.flat = true;
     app->editor.row = SDL_min(row, gui_editor_rows(&app->editor) - 1);
     app->form = GUI_FORM_SETTINGS;
@@ -4392,6 +4394,9 @@ static void app_action(App* app, int row, int step) {
     } else if (row == GUI_APP_MOVE) {
         if (!step) move_row(app);
         return;
+    } else if (row == GUI_APP_RESET) {
+        if (!step) settings_reset_ask(app);
+        return;
     }
     if (row == GUI_APP_THEME || row == GUI_APP_TEXT || row == GUI_APP_LANGUAGE || row == GUI_APP_ANIMATIONS ||
         row == GUI_APP_SIDE)
@@ -4406,13 +4411,8 @@ static void save_editor(App* app) {
     gui_theme_load(&app->theme, dirs, 2, app->editor.id);
     app_save(app);
 }
-/* a Settings pick, kept at once */
-static void keep_settings(App* app) {
-    if ((app->form != GUI_FORM_GROUP && app->form != GUI_FORM_SETTINGS && app->form != GUI_FORM_PAD &&
-         app->form != GUI_FORM_USERS) ||
-        !app->editor.dirty)
-        return;
-    app->editor.dirty = false;
+/* settings.ini written as the settings are, a failure in the note and its box; the head and Plays as after it */
+static void write_settings(App* app) {
     gui_settings_sync(&app->settings);
     if (app->settings_file && gui_settings_save(&app->settings, app->settings_file)) {
         snprintf(app->editor.note, sizeof app->editor.note, snx_tr("Not saved: %s could not be written"),
@@ -4421,6 +4421,15 @@ static void keep_settings(App* app) {
     }
     if (app->user != settings_user(app)) users_read(app); /* the head shows the user picked */
     if (app->form == GUI_FORM_USERS) users_fill(app);     /* Plays as says it too */
+}
+/* a Settings pick, kept at once */
+static void keep_settings(App* app) {
+    if ((app->form != GUI_FORM_GROUP && app->form != GUI_FORM_SETTINGS && app->form != GUI_FORM_PAD &&
+         app->form != GUI_FORM_USERS) ||
+        !app->editor.dirty)
+        return;
+    app->editor.dirty = false;
+    write_settings(app);
 }
 static int setting_row(const App* app, const char* key) {
     int i;
@@ -4892,10 +4901,7 @@ static void editor_key(App* app, GuiKey key) {
         else if (app->editor.dirty && app->editor.row)
             users_commit(app);
     }
-    if (what == GUI_EDITOR_SAVE && app->form == GUI_FORM_SETTINGS) /* the groups' last row */
-        settings_reset_ask(app);
-    else if (what == GUI_EDITOR_SAVE && app->form == GUI_FORM_THEME)
-        save_editor(app);
+    if (what == GUI_EDITOR_SAVE && app->form == GUI_FORM_THEME) save_editor(app);
     keep_settings(app);
     if (what == GUI_EDITOR_LEAVE) {
         leave_form(app);
@@ -5030,7 +5036,7 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
     char keys[256];
     int rows, top;
     int theme = app->form == GUI_FORM_THEME, width, height, g;
-    int longest = gui_text_cols(snx_tr("Reset all to the defaults"));
+    int longest = 0;
     area(app, &width, &height);
     for (g = 0; g < app->groups; ++g) longest = SDL_max(longest, gui_text_cols(snx_tr(app->group_keys[g].key)));
     place_screen(app, &f->place, shown_keys(app, keys, sizeof keys),
@@ -5050,7 +5056,7 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
             gui_editor_form(&f->peek, app_keys, GUI_APP_ROWS, &app->app_form, NULL);
         } else if (users_group(app, g))
             gui_editor_form(&f->peek, app->users_keys, users_fill(app), &app->users_form, NULL);
-        else if (g < app->groups) {
+        else {
             int n = player_rows(app, g, 0, app->peek_rows), r; /* Controllers: every player's */
             for (r = 0; r < n; ++r) app->peek_keys[r] = app->settings.keys[app->peek_rows[r]];
             if (n)
@@ -5058,8 +5064,7 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
             else
                 gui_editor_form(&f->peek, app->settings.keys + app->group_first[g], app->group_rows[g],
                                 app->settings.values, NULL);
-        } else /* Reset all: a form of no rows, where an editor of none would be a theme's (its folder and Save) */
-            gui_editor_form(&f->peek, NULL, 0, &app->app_form, NULL);
+        }
         f->peek.flat = true;
         f->peek.row = -1;
         f->rows = &f->peek;
@@ -5067,8 +5072,7 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
     if (theme)
         list_place(app, &f->left, f->place.list, gui_editor_rows(&app->editor), app->editor.row);
     else
-        list_place(app, &f->left, f->place.list, app->groups + 1,
-                   app->form == GUI_FORM_SETTINGS ? app->editor.row : -1);
+        list_place(app, &f->left, f->place.list, app->groups, app->form == GUI_FORM_SETTINGS ? app->editor.row : -1);
     rows = note ? wrap_rows(app, note, inner(app, f->place.side).w / cell_w(app), 0) : 1; /* the note whole */
     f->info = gui_rect(f->place.side.x, f->place.side.y + f->place.side.h - rows * cell_h(app) - 4 * app->scale,
                        f->place.side.w, rows * cell_h(app) + 2 * app->scale);
@@ -5134,7 +5138,6 @@ static const char* form_about(const App* app, SDL_Color* color) {
     *color = rgb(e->note[0] ? (e->leaving ? app->theme.failure : app->theme.focus) : app->theme.ink);
     if (e->note[0]) return e->note;
     if (k) return snx_tr(k->about);
-    if (app->form == GUI_FORM_SETTINGS) return snx_tr("Every setting back to its default");
     if (app->form == GUI_FORM_FOLDERS) return snx_tr("Pick, drop or paste a folder of games");
     if (app->form == GUI_FORM_PLACES) return snx_tr("Each folder back to its default. What is in them stays");
     return e->object                     ? ""
@@ -5156,8 +5159,7 @@ static void draw_form(App* app) {
             form_row(app, &f.left, &app->editor, r, labels, r == app->editor.row);
     } else
         for (r = f.left.first; r < f.left.first + f.left.shown; ++r) {
-            snprintf(line, sizeof line, "%s%s", app->theme.marker,
-                     r < app->groups ? snx_tr(app->group_keys[r].key) : snx_tr("Reset all to the defaults"));
+            snprintf(line, sizeof line, "%s%s", app->theme.marker, snx_tr(app->group_keys[r].key));
             list_item(app, &f.left, r, line,
                       app->form == GUI_FORM_SETTINGS ? r == app->editor.row : 2 * (r == form_group(app)), false);
         }
@@ -5184,8 +5186,7 @@ static void draw_form(App* app) {
              app->form == GUI_FORM_FOLDERS                   ? snx_tr("Library")
              : app->form == GUI_FORM_PLACES                  ? snx_tr("Folders")
              : app->form == GUI_FORM_GROUP && app->page >= 0 ? snx_tr(app->settings.keys[app->page].key)
-             : g < app->groups                               ? snx_tr(app->group_keys[g].key)
-                                                             : snx_tr("Reset all to the defaults"));
+                                                             : snx_tr(app->group_keys[g].key));
         labels = form_labels(f.rows);
         for (r = f.right.first; r < f.right.first + f.right.shown; ++r)
             form_row(app, &f.right, f.rows, r, labels, f.rows == &app->editor && r == app->editor.row);
@@ -5358,12 +5359,11 @@ static void form_pointer(App* app, float x, float y, bool touch) {
         keep_settings(app);
         leave_editor(app);
         settings_top(app, i); /* another group: from its row, as Enter there */
-        if (i < app->groups) open_group(app, i);
+        open_group(app, i);
         return;
     }
     if ((i = list_hit(&f.right, x, y, touch)) < 0) return;
     if (app->form == GUI_FORM_SETTINGS) { /* a row of the focused group: it opens, on that row */
-        if (app->editor.row >= app->groups) return;
         open_group(app, app->editor.row);
         app->editor.row = SDL_min(i, gui_editor_rows(&app->editor) - 1);
         return;
@@ -6667,7 +6667,7 @@ static void clean_row(App* app) {
                  keys > 1 ? snx_tr("Clean old settings? %d old keys") : snx_tr("Clean old settings? %d old key"), keys);
     gui_confirm_open(&app->confirm, GUI_ASK_CLEAN, false);
 }
-/* Settings' Reset all to the defaults: how many settings it changes, in a box (GUI_ASK_RESET), else that none */
+/* Settings > App's Reset all: how many settings it changes, in a box (GUI_ASK_RESET), else that none */
 static void settings_reset_ask(App* app) {
     int changed = gui_settings_changed(&app->settings);
     if (!changed) {
@@ -6691,11 +6691,10 @@ static void change_answer(App* app, GuiAsk ask, bool taken) {
     } else if (ask == GUI_ASK_RESET) {
         int changed = gui_settings_changed(&app->settings);
         gui_settings_reset(&app->settings, -1);
-        app->editor.dirty = true;
         snprintf(app->editor.note, sizeof app->editor.note,
                  changed > 1 ? snx_tr("%d settings back to their defaults") : snx_tr("%d setting back to its default"),
                  changed);
-        keep_settings(app); /* a save that fails says so over the count */
+        write_settings(app);          /* a save that fails says so over the count */
     } else if (ask == GUI_ASK_MOVE) { /* done: what it did over the screen, and the menu as the files are now */
         int moved;
         gui_cleaned_free(&app->cleaned);

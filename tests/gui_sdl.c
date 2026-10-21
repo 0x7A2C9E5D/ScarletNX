@@ -1371,10 +1371,10 @@ int main(int argc, char** argv) {
         free(bytes);
         free(big);
     }
-    /* the groups first: App, then a group per section the runtime lists, and the reset of them all; beside them the
+    /* the groups first: App, then a group per section the runtime lists (their reset is App's); beside them the
        focused group's rows, in the tips what it holds */
     render(&app);
-    assert(app.form == GUI_FORM_SETTINGS && app.groups == 6 && gui_editor_rows(&app.editor) == 7);
+    assert(app.form == GUI_FORM_SETTINGS && app.groups == 6 && gui_editor_rows(&app.editor) == 6);
     shows(&app, "SETTINGS", normal);
     shows(&app, "The theme, the menu's", normal);
     shows(&app, "- App", yellow);
@@ -1383,7 +1383,7 @@ int main(int argc, char** argv) {
     shows(&app, "- Graphics", normal);
     shows(&app, "- On-screen controls", normal);
     shows(&app, "- User", normal);
-    shows(&app, "- Reset all to the defaults", normal);
+    shows(&app, "Reset all", normal);         /* App's last row, beside: none among the groups */
     hides(&app, "\x1e", rgb(app.theme.soft)); /* every row shows: no arrows */
     hides(&app, "\x1f", rgb(app.theme.soft));
     key(&app, SDLK_DOWN);
@@ -1487,14 +1487,21 @@ int main(int argc, char** argv) {
         key(&app, SDLK_ESCAPE);
         assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 4);
     }
-    /* the groups' last row asks first, with how many settings change; Back changes none, Reset puts every one back as
-       it started and says how many; none left to change, no box */
+    /* App's Reset all, its last row, asks first, with how many settings change; Back changes none, Reset puts every one
+       back as it started, written to settings.ini, and says how many; none left to change, no box */
     {
         int changed = gui_settings_changed(&app.settings);
         char* asked = snx_format("Reset all to the defaults? %d settings change", changed);
         char* done = snx_format("%d settings back to their defaults", changed);
+        size_t size;
+        char* kept;
         assert(changed >= 2); /* gdbstub and fullscreen */
-        app.editor.row = gui_editor_rows(&app.editor) - 1;
+        app.editor.row = 0;
+        key(&app, SDLK_RETURN);
+        app.editor.row = GUI_APP_RESET;
+        assert(app.form == GUI_FORM_APP && GUI_APP_RESET == GUI_APP_ROWS - 1);
+        render(&app);
+        shows(&app, "- Reset all", yellow);
         key(&app, SDLK_RETURN);
         assert(app.confirm.shown && app.confirm.ask == GUI_ASK_RESET && !strcmp(app.ask_line, asked));
         render(&app);
@@ -1502,15 +1509,20 @@ int main(int argc, char** argv) {
         shows(&app, "- Back", yellow);
         shows(&app, "- Reset", normal);
         key(&app, SDLK_RETURN); /* Back, in focus */
-        assert(!app.confirm.shown && setting_is(&app, "gdbstub", "on") && app.form == GUI_FORM_SETTINGS);
+        assert(!app.confirm.shown && setting_is(&app, "gdbstub", "on") && app.form == GUI_FORM_APP);
         key(&app, SDLK_RETURN);
         key(&app, SDLK_DOWN);
         key(&app, SDLK_RETURN);
         assert(!app.confirm.shown && !gui_settings_value(&app.settings, "gdbstub") &&
                setting_is(&app, "fullscreen", "0") && !gui_settings_changed(&app.settings));
-        assert(!strcmp(app.editor.note, done));
+        assert(!strcmp(app.editor.note, done) && app.form == GUI_FORM_APP);
+        kept = (char*)snx_read_file(app.settings_file, &size);
+        assert(kept && !strstr(kept, "gdbstub"));
+        free(kept);
         key(&app, SDLK_RETURN);
         assert(!app.confirm.shown && !strcmp(app.editor.note, "Every setting is at its default"));
+        key(&app, SDLK_ESCAPE);
+        assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 0);
         free(asked);
         free(done);
     }
@@ -1522,7 +1534,7 @@ int main(int argc, char** argv) {
     /* App: the theme and the letters, either way round, and the theme editor, which comes back here */
     app.editor.row = 0;
     key(&app, SDLK_RETURN);
-    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 10);
+    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 11);
     {
         char first[64], line[1024];
         snprintf(first, sizeof first, "%s", app.theme.name);
@@ -4822,15 +4834,17 @@ int main(int argc, char** argv) {
         {
             GuiFormBoxes f;
             int launch, row;
+            char last[80];
             open_settings(&app);
             assert(app.editing && app.form == GUI_FORM_SETTINGS && !app.editor.row && app.groups > 3);
             render(&app);
             form_boxes(&app, &f);
-            assert(f.place.side.x > f.place.list.x + f.place.list.w && f.left.count == app.groups + 1);
+            assert(f.place.side.x > f.place.list.x + f.place.list.w && f.left.count == app.groups);
             b = list_box(&f.left, 0);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- App", yellow, black);
-            b = list_box(&f.left, app.groups); /* the last row, whole */
-            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Reset all to the defaults", normal, black);
+            b = list_box(&f.left, app.groups - 1); /* the last group, whole */
+            snprintf(last, sizeof last, "- %s", app.group_keys[app.groups - 1].key);
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), last, normal, black);
             text_px_is(&app, f.place.side.x + cw, f.place.side.y + 2 * s, "App", normal, black);
             /* the note at the foot of the rows whole, wrapped to the box: at 2x and at 1x */
             for (int size = 2; size >= 1; --size) {
@@ -6373,13 +6387,15 @@ int main(int argc, char** argv) {
         app.theme = *gui_theme_builtin("yorha");
         app.theme.grid = false;
         open_settings(&app);
-        app.editor.row = app.groups; /* the last row */
+        app.editor.row = app.groups - 1; /* the last group */
         render(&app);
         form_boxes(&app, &f);
-        b = list_box(&f.left, app.groups);
-        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe Reset all to the defaults", rgb(app.theme.page),
-                   rgb(app.theme.focus));
-        assert(!gui_editor_rows(f.rows) && !f.right.shown); /* no rows beside it: not a theme's Folder and Save */
+        b = list_box(&f.left, app.groups - 1);
+        {
+            char last[80];
+            snprintf(last, sizeof last, "\xfe %s", app.group_keys[app.groups - 1].key);
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), last, rgb(app.theme.page), rgb(app.theme.focus));
+        }
         for (row = 0; row < app.groups && strcmp(app.group_keys[row].key, "Display"); ++row) {}
         app.editor.row = row;
         key(&app, SDLK_RETURN);

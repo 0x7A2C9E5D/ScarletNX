@@ -140,15 +140,15 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   how many entries would move and how many stay, then moves what *Left by older versions* lists an entry at a time
   (`scarletnx --migrate=yes` without the menu, [USAGE](USAGE.md#folders)), the same box saying what moved and why the
   rest did not: one already there, one on another disk, a game laid out beside others, which moves from its dump.
-  A group of settings shows
+  **Reset all**, the last row, puts every setting of the groups after App back to its default, asking first with how
+  many change. A group of settings shows
   a row each, its help above, Left/Right going round its values, Enter typing one. A setting not picked shows the runtime's default and `[default]` (*Off [default]*):
   the run takes the game's `.ini`'s, which starts as that; one picked goes to every
   Switch run as `--key=value`, over the `.ini` ([USAGE](USAGE.md)), and is kept for every game:
   what was changed, by the `.ini`'s sections and keys, in `settings.ini` of the config folder on
   Linux (`~/.config/scarletnx/`), else the data folder's `config/`. A run takes a setting from what that
   run picks, then from the game's own picks (to come), then from these, and last from the game's
-  `.ini`. Del puts a setting back to its default, and the groups' last row, **Reset all to the
-  defaults**, every one, asking first with how many change. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
+  `.ini`. Del puts a setting back to its default, and App's **Reset all** every one. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
   and `fullscreen` puts the launcher itself on the whole screen too).
   **gdbstub** passes `-S` and `-s`, the
   runtime's stub on port 1234 waiting for the debugger at startup (UNIX only), and **Extract to tmpfs**

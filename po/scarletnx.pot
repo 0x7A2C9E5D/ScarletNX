@@ -955,6 +955,14 @@ msgid "What an older version left where this one no longer looks, moved where it
 msgstr ""
 
 #: src/gui/main.c
+msgid "Reset all"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Every setting of the groups after App back to its default, once asked"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "%s of Auto: %dx"
 msgstr ""
@@ -1059,10 +1067,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "The theme, the menu's letters, the theme editor and the folders"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Reset all to the defaults"
 msgstr ""
 
 #: src/gui/main.c
@@ -1345,10 +1349,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "As All >"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Every setting back to its default"
 msgstr ""
 
 #: src/gui/main.c

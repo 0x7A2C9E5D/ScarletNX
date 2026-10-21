@@ -923,8 +923,8 @@ msgid "The theme, the menu's letters, the theme editor and the folders"
 msgstr "O tema, as letras do menu, o editor de tema e as pastas"
 
 #: src/gui/main.c
-msgid "Reset all to the defaults"
-msgstr "Tudo de volta ao padrão"
+msgid "Reset all"
+msgstr "Restaurar tudo"
 
 #: src/gui/main.c
 msgid "Del or Enter asks to take it off the list; the folder keeps its games"
@@ -1153,10 +1153,6 @@ msgstr "Próprio >"
 #: src/gui/main.c
 msgid "As All >"
 msgstr "Como Todos >"
-
-#: src/gui/main.c
-msgid "Every setting back to its default"
-msgstr "Cada ajuste de volta ao padrão"
 
 #: src/gui/main.c
 msgid "Pick, drop or paste a folder of games"
@@ -1674,6 +1670,10 @@ msgstr "Mover arquivos antigos"
 #: src/gui/main.c
 msgid "What an older version left where this one no longer looks, moved where it keeps it once asked"
 msgstr "O que uma versão antiga deixou onde esta não olha mais, movido para onde ela guarda, depois de perguntar"
+
+#: src/gui/main.c
+msgid "Every setting of the groups after App back to its default, once asked"
+msgstr "Cada ajuste dos grupos depois de App de volta ao padrão, depois de perguntar"
 
 #: src/gui/main.c
 #, c-format
