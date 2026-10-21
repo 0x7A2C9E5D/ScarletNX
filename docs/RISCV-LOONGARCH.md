@@ -11,7 +11,8 @@ PowerPC64 LE's.
 ## Building
 
 As PowerPC64 LE's, with the `linux-riscv64-cross` or `linux-loongarch64-cross` preset and an Arch root of the
-architecture in `SNX_SYSROOT` (its pkg-config files, its LLVM and its GCC runtime):
+architecture in `SNX_SYSROOT` (its pkg-config files, its LLVM and its GCC runtime). `scripts/appimage-sysroot.sh ROOT`
+installs what the AppImage links into an unpacked Arch root, as CI does, which keeps the root it makes for a week:
 
 ```bash
 export SNX_SYSROOT=/path/to/the/root
