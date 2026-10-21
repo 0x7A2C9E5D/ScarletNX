@@ -10,6 +10,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -141,7 +142,7 @@ static int run_stage(const char* const* argv, const char* cwd, const char* stage
     struct sigaction action, old[4], ignore, old_ttou;
     sigset_t blocked, previous;
     pid_t pid, waited, foreground = -1;
-    int status = 0, rc = 1, sig = 0, installed = 0, tty = 0;
+    int status = 0, rc = 1, sig = 0, installed = 0, tty = 0, group[2] = {-1, -1}, made;
     size_t i;
     sigemptyset(&blocked);
     for (i = 0; i < 4; ++i) sigaddset(&blocked, signals[i]);
@@ -167,15 +168,19 @@ static int run_stage(const char* const* argv, const char* cwd, const char* stage
         if (sigaction(SIGTTOU, &ignore, &old_ttou)) goto setup_failed;
         tty = 1;
     }
+    /* The stage leads a process group of its own, which the parent alone makes, and the child waits on this pipe for
+       it before going on: both sides making the same group at once had macOS refuse one of them with EPERM, the
+       group not made yet as the loser saw it. The child reads the parent's errno, 0 when the group is made */
+    if (pipe(group) || fcntl(group[0], F_SETFD, FD_CLOEXEC) || fcntl(group[1], F_SETFD, FD_CLOEXEC)) goto setup_failed;
     fflush(NULL);
     pid = fork();
     if (!pid) {
-        /* The parent's setpgid below may have made this group already, and macOS can then refuse this one with
-           EPERM: what the stage needs is to lead its own group, whichever call made it */
-        if (setpgid(0, 0) && getpgrp() != getpid()) {
-            int error = errno;
+        int error = EPIPE;
+        close(group[1]);
+        while (read(group[0], &error, sizeof error) < 0 && errno == EINTR) continue;
+        if (error || getpgrp() != getpid()) {
             fprintf(stderr, "scarletnx: creating child process group: %s (pid %ld, group %ld, session %ld)\n",
-                    strerror(error), (long)getpid(), (long)getpgrp(), (long)getsid(0));
+                    strerror(error ? error : EPERM), (long)getpid(), (long)getpgrp(), (long)getsid(0));
             _exit(126);
         }
         if (tty && tcsetpgrp(STDIN_FILENO, getpgrp())) {
@@ -197,8 +202,11 @@ static int run_stage(const char* const* argv, const char* cwd, const char* stage
         _exit(127);
     }
     if (pid < 0) goto setup_failed;
-    /* Either side may win the race to setpgid. The child also does it before exec. */
-    setpgid(pid, pid);
+    made = setpgid(pid, pid) ? errno : 0;
+    while (write(group[1], &made, sizeof made) < 0 && errno == EINTR) continue;
+    close(group[0]);
+    close(group[1]);
+    group[0] = group[1] = -1;
     stage_pid = (sig_atomic_t)pid;
     sigprocmask(SIG_SETMASK, &previous, NULL);
     /* Debugger stops are intentional, unlike a suspended extraction/compiler. */
@@ -227,6 +235,8 @@ static int run_stage(const char* const* argv, const char* cwd, const char* stage
     goto done;
 setup_failed:
     perror("scarletnx: starting child process");
+    if (group[0] >= 0) close(group[0]);
+    if (group[1] >= 0) close(group[1]);
 done:
     if (tty) {
         if (tcsetpgrp(STDIN_FILENO, foreground)) perror("scarletnx: restoring terminal");
