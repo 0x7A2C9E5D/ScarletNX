@@ -30,7 +30,7 @@ endforeach()
 # the PICA's software renderer, ported from Azahar's: the CPU reference the GPU's draws are tested against, which the
 # runtime does not draw with
 add_library(snx_ctr_gpu_reference STATIC gpu/shader.c gpu/draw.c gpu/raster.c gpu/lighting.c gpu/texture.c)
-target_link_libraries(snx_ctr_gpu_reference PUBLIC snx_ctr_gpu)
+target_link_libraries(snx_ctr_gpu_reference PUBLIC snx_ctr_gpu m)
 # the HLE DSP and its SDL3 output
 add_library(snx_ctr_audio STATIC audio/dsp.c audio/source.c audio/mixers.c audio/output.c)
 target_link_libraries(snx_ctr_audio PUBLIC snx_ctr_memory SDL3::SDL3)
