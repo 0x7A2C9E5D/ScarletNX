@@ -362,7 +362,9 @@ screen, and a load's, is one box with where the keys go, the waiting line in its
 opens the picker). The Settings list their groups, and beside them the focused group's
 rows: Enter, or a click on a row, opens the group, its rows taking the focus, the group shown as the focused one; a
 click on another group opens that one. No screen has a Back row: ESC goes back, and so does a click or a tap on the
-foot's ESC. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
+foot's ESC. F5, or the foot's (Refresh on a phone), looks at the disk again at once rather than at the next look:
+Games lists its folders again, the Library and Folders say how many of theirs are there, the menu counts the disk
+again, and the box of what an older version left looks again. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
 every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the
 column is as wide as its entries and the side box goes under the list. A text too long for its box wraps over
 its rows, its last sliding what is left, or takes one that slides with `[body] text = slide`. A run of the console layout shows the driver's output in a box sized to it,

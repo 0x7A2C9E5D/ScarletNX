@@ -2024,6 +2024,22 @@ int main(int argc, char** argv) {
         render(&app);
         snprintf(line, sizeof line, "- %.20s", kept_as);
         shows(&app, line, yellow);
+        /* F5 looks at the folders again: one gone from the disk says so on its row, and the note counts them */
+        {
+            char *moved = snx_format("%s moved", more), *dumps = snx_path_join(app.data_dir, "dumps");
+            int gone = !snx_is_dir(app.games_dir) + !snx_is_dir(dumps);
+            char* said = snx_format("Refreshed: 3 folders, %d not found", gone + 1);
+            assert(!rename(more, moved));
+            key(&app, SDLK_F5);
+            assert(app.editor.row == 2 && !strcmp(app.app_form.folder[2], "not found") &&
+                   !strcmp(app.editor.note, said));
+            assert(!rename(moved, more));
+            press_key(&app, "F5", 0, false, yellow);
+            assert(strcmp(app.app_form.folder[2], "not found") && app.folder_count == 1);
+            free(said);
+            free(dumps);
+            free(moved);
+        }
         app.editor.row = 3; /* Add a folder, after games/, dumps/ and the folder */
         key(&app, SDLK_RETURN);
         {
@@ -2226,6 +2242,36 @@ int main(int argc, char** argv) {
         snprintf(line, sizeof line, "[folders]\ndata = \nrecompiled = %s\nwork = \n", app.games_dir);
         assert(kept && strstr(kept, "[app]\ntheme = ") && strstr(kept, line));
         free(kept);
+        /* F5 looks at the three again: all there, said so; a default not there yet is made when a run needs it */
+        { /* the test's data folder is not there: a temporary one in its place, and the extractions' */
+            char *data_was = app.data_dir, *work_was = app.work_dir;
+            app.data_dir = snx_strdup(temporary);
+            app.work_dir = snx_strdup(temporary);
+            key(&app, SDLK_F5);
+            assert(app.form == GUI_FORM_PLACES && app.editor.row == GUI_PLACE_GAMES &&
+                   !strcmp(app.editor.note, "Refreshed: Data, Recompiled and Extractions are there"));
+            free(app.work_dir);
+            app.work_dir = snx_path_join(temporary, "no work yet");
+            assert(!app.place[GUI_PLACE_WORK]);
+            key(&app, SDLK_F5);
+            snprintf(line, sizeof line, "Refreshed: Extractions %s, made when needed", app.work_dir);
+            assert(!strcmp(app.editor.note, line));
+            { /* a picked one gone is not made again: it is not there */
+                char* moved = snx_format("%s moved", app.games_dir);
+                assert(app.place[GUI_PLACE_GAMES] && !rename(app.games_dir, moved));
+                key(&app, SDLK_F5);
+                snprintf(line, sizeof line, "Refreshed: Recompiled %s is not there, Extractions %s, made when needed",
+                         app.games_dir, app.work_dir);
+                assert(!strcmp(app.editor.note, line));
+                assert(!rename(moved, app.games_dir));
+                free(moved);
+            }
+            free(app.work_dir);
+            free(app.data_dir);
+            app.work_dir = work_was;
+            app.data_dir = data_was;
+            key(&app, SDLK_F5); /* the rows as the folders are again */
+        }
         render(&app);
         shows(&app, "- Recompiled", yellow);
         shows(&app, "picked", yellow);
@@ -3073,18 +3119,28 @@ int main(int argc, char** argv) {
     char* directory = snx_path_join(app.games_dir, "directory.exe");
     assert(!snx_mkdirs(directory));
     free(directory);
-    /* Games finds them itself, looking once a second while it is open */
+    /* Games finds them itself, looking once a second while it is open; F5, or the foot's, looks at once */
     app.clock = 50000;
     app.games_checked = app.clock;
     pump(&app);
     assert(!app.games.count);
+    key(&app, SDLK_F5);
+    assert(app.games.count == 35 && app.browser.count == 35 && !strcmp(app.message, "Refreshed: 35 games"));
+    app.message[0] = 0;
+    press_key(&app, "F5", 0, false, yellow);
+    assert(app.games.count == 35 && !strcmp(app.message, "Refreshed: 35 games"));
+    app.message[0] = 0;
     app.clock += 1000;
     pump(&app);
     assert(app.games.count == 35 && app.browser.count == 35);
     app.clock = 0;
     app.games_checked = 0;
-    /* the menu: the loads, the keys, Settings, Share log and Exit, a box each with none between; no games in it */
+    /* the menu: the loads, the keys, Settings, Share log and Exit, a box each with none between; no games in it. F5
+       samples the status again */
     go_tab(&app, GUI_TAB_MENU);
+    app.sampled = 1;
+    key(&app, SDLK_F5);
+    assert(app.sampled > 1 && app.menu.view == GUI_LOAD_NONE);
     render(&app);
     hides(&app, "- Games", normal);
     hides(&app, "Recent games", rgb(app.theme.soft));
@@ -5575,6 +5631,10 @@ int main(int argc, char** argv) {
                     app.drivers = snx_path_join(temporary, "program alone");
                     app.left_shown = true;
                     assert(!snx_remove_tree(app.data_dir)); /* its gui/ too */
+                    app.left_at = SDL_GetTicks();           /* pump looks again in 5 s; F5 now */
+                    key(&app, SDLK_F5);
+                    assert(!app.left_shown && !app.lefts && !app.left);
+                    app.left_shown = true;
                     app.left_at = 0;
                     pump(&app);
                     assert(!app.left_shown && !app.lefts && !app.left);

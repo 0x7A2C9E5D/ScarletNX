@@ -164,13 +164,13 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: select. Back: go back."
+msgid "Tap: select. Refresh: tap it. Back: go back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: open. Swipe across: turn the page. Recompile: tap it. Back: go back."
+msgid "Tap: open. Swipe across: turn the page. Recompile: tap it. Refresh: tap it. Back: go back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -230,19 +230,19 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: tap it. Tap a folder to take it off. Back: go back."
+msgid "Add a folder: tap it. Tap a folder to take it off. Refresh: tap it. Back: go back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Back: go back."
+msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Refresh: tap it. Back: go back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap a folder to pick another. Back: go back."
+msgid "Tap a folder to pick another. Refresh: tap it. Back: go back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -260,7 +260,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: select. Enter/Space: open. R: recompile. M: mods folder. Left/Right/PgUp/PgDown: page."
+msgid "Up/Down: select. Enter/Space: open. R: recompile. M: mods folder. Left/Right/PgUp/PgDown: page. F5: refresh."
 msgstr ""
 
 #: src/gui/main.c
@@ -326,25 +326,25 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: pick, drop or paste one. Del: take one off. ESC: back."
+msgid "Add a folder: pick, drop or paste one. Del: take one off. F5: refresh. ESC: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Enter: pick where games go. Add a folder: pick, drop or paste one. ~Del: take one off. ESC: back."
+msgid "Enter: pick where games go. Add a folder: pick, drop or paste one. ~Del: take one off. F5: refresh. ESC: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Enter: pick where games go. Del: back to the default. Add a folder: pick, drop or paste one. ESC: back."
+msgid "Enter: pick where games go. Del: back to the default. Add a folder: pick, drop or paste one. F5: refresh. ESC: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: folder. Enter: pick another. Del: the default. ESC: back."
+msgid "Up/Down: folder. Enter: pick another. Del: the default. F5: refresh. ESC: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -551,7 +551,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Arrows/mouse: move. Space/Enter/click: select. ESC: exit."
+msgid "Arrows/mouse: move. Space/Enter/click: select. F5: refresh. ESC: exit."
 msgstr ""
 
 #: src/gui/main.c
@@ -1893,8 +1893,49 @@ msgstr ""
 msgid "Ctrl+V"
 msgstr ""
 
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "F5"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Refresh"
+msgstr ""
+
 #: src/gui/main.c
 msgid "No file was picked."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Refreshed: %d folders, %d not found"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s%s %s is not there"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s%s %s, made when needed"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Refreshed: %s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Refreshed: Data, Recompiled and Extractions are there"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Refreshed: %zu games"
 msgstr ""
 
 #: src/gui/main.c

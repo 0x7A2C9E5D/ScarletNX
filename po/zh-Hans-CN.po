@@ -148,14 +148,14 @@ msgstr "退出"
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: select. Back: go back."
-msgstr "轻触: 选择. 返回: 后退."
+msgid "Tap: select. Refresh: tap it. Back: go back."
+msgstr "轻触: 选择. 更新: 轻触它. 返回: 后退."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: open. Swipe across: turn the page. Recompile: tap it. Back: go back."
-msgstr "轻触: 打开. 横向滑动: 翻页. 重新编译: 轻触它. 返回: 后退."
+msgid "Tap: open. Swipe across: turn the page. Recompile: tap it. Refresh: tap it. Back: go back."
+msgstr "轻触: 打开. 横向滑动: 翻页. 重新编译: 轻触它. 更新: 轻触它. 返回: 后退."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -214,20 +214,20 @@ msgstr "轻触一行以更改或打开. 返回: 后退."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: tap it. Tap a folder to take it off. Back: go back."
-msgstr "添加文件夹: 轻触它. 轻触文件夹将其移除. 返回: 后退."
+msgid "Add a folder: tap it. Tap a folder to take it off. Refresh: tap it. Back: go back."
+msgstr "添加文件夹: 轻触它. 轻触文件夹将其移除. 更新: 轻触它. 返回: 后退."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Back: go back."
-msgstr "轻触: 选择游戏存放处. 添加文件夹: 轻触它. ~轻触文件夹将其移除. 返回: 后退."
+msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Refresh: tap it. Back: go back."
+msgstr "轻触: 选择游戏存放处. 添加文件夹: 轻触它. ~轻触文件夹将其移除. 更新: 轻触它. 返回: 后退."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap a folder to pick another. Back: go back."
-msgstr "轻触文件夹以另选一个. 返回: 后退."
+msgid "Tap a folder to pick another. Refresh: tap it. Back: go back."
+msgstr "轻触文件夹以另选一个. 更新: 轻触它. 返回: 后退."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -244,8 +244,8 @@ msgstr "方向键/鼠标: 移动. 空格/Enter/点击: 选择."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: select. Enter/Space: open. R: recompile. Left/Right/PgUp/PgDown: page."
-msgstr "上/下: 选择. Enter/空格: 打开. R: 重新编译. 左/右/PgUp/PgDown: 翻页."
+msgid "Up/Down: select. Enter/Space: open. R: recompile. M: mods folder. Left/Right/PgUp/PgDown: page. F5: refresh."
+msgstr "上/下: 选择. Enter/空格: 打开. R: 重新编译. M: mods 文件夹. 左/右/PgUp/PgDown: 翻页. F5: 更新."
 
 #: src/gui/main.c
 msgid "click the box (or Enter) to open the file picker"
@@ -310,26 +310,26 @@ msgstr "上/下: 行. 左/右: 更改. Enter: 更改或打开. ESC: 返回."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: pick, drop or paste one. Del: take one off. ESC: back."
-msgstr "添加文件夹: 选取、拖入或粘贴一个. Del: 移除一个. ESC: 返回."
+msgid "Add a folder: pick, drop or paste one. Del: take one off. F5: refresh. ESC: back."
+msgstr "添加文件夹: 选取、拖入或粘贴一个. Del: 移除一个. F5: 更新. ESC: 返回."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Enter: pick where games go. Add a folder: pick, drop or paste one. ~Del: take one off. ESC: back."
-msgstr "Enter: 选择游戏存放处. 添加文件夹: 选取、拖入或粘贴一个. ~Del: 移除一个. ESC: 返回."
+msgid "Enter: pick where games go. Add a folder: pick, drop or paste one. ~Del: take one off. F5: refresh. ESC: back."
+msgstr "Enter: 选择游戏存放处. 添加文件夹: 选取、拖入或粘贴一个. ~Del: 移除一个. F5: 更新. ESC: 返回."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Enter: pick where games go. Del: back to the default. Add a folder: pick, drop or paste one. ESC: back."
-msgstr "Enter: 选择游戏存放处. Del: 恢复默认. 添加文件夹: 选取、拖入或粘贴一个. ESC: 返回."
+msgid "Enter: pick where games go. Del: back to the default. Add a folder: pick, drop or paste one. F5: refresh. ESC: back."
+msgstr "Enter: 选择游戏存放处. Del: 恢复默认. 添加文件夹: 选取、拖入或粘贴一个. F5: 更新. ESC: 返回."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: folder. Enter: pick another. Del: the default. ESC: back."
-msgstr "上/下: 文件夹. Enter: 另选一个. Del: 默认. ESC: 返回."
+msgid "Up/Down: folder. Enter: pick another. Del: the default. F5: refresh. ESC: back."
+msgstr "上/下: 文件夹. Enter: 另选一个. Del: 默认. F5: 更新. ESC: 返回."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -530,8 +530,8 @@ msgstr "移除"
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Arrows/mouse: move. Space/Enter/click: select. ESC: exit."
-msgstr "方向键/鼠标: 移动. 空格/Enter/点击: 选择. ESC: 退出."
+msgid "Arrows/mouse: move. Space/Enter/click: select. F5: refresh. ESC: exit."
+msgstr "方向键/鼠标: 移动. 空格/Enter/点击: 选择. F5: 更新. ESC: 退出."
 
 #: src/gui/main.c
 #, c-format
@@ -1804,6 +1804,47 @@ msgstr "Ctrl+S"
 #, snx-key
 msgid "Ctrl+V"
 msgstr "Ctrl+V"
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "F5"
+msgstr "F5"
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Refresh"
+msgstr "更新"
+
+#: src/gui/main.c
+#, c-format
+msgid "Refreshed: %d folders, %d not found"
+msgstr "已更新：%d 个文件夹，%d 个未找到"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s%s %s is not there"
+msgstr "%s%s %s 不存在"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s%s %s, made when needed"
+msgstr "%s%s %s，需要时创建"
+
+#: src/gui/main.c
+#, c-format
+msgid "Refreshed: %s"
+msgstr "已更新：%s"
+
+#: src/gui/main.c
+msgid "Refreshed: Data, Recompiled and Extractions are there"
+msgstr "已更新：数据、已重编译和提取都存在"
+
+#: src/gui/main.c
+#, c-format
+msgid "Refreshed: %zu games"
+msgstr "已更新：%zu 个游戏"
 
 #: src/gui/main.c
 msgid "No file was picked."

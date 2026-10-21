@@ -307,8 +307,9 @@ static const char* const items[] = {SNX_TR_NOOP("Load Switch NSP/XCI/NRO"),
 /* what the screens say to press: a phone has a finger, the back button and the system's file picker, nothing to drop;
    a computer has the picker too (on Linux the desktop's portal, else zenity), on a screen of its own as the keys' */
 #ifdef SDL_PLATFORM_ANDROID
-#define SAY_MENU       SNX_TR_KEYS("Tap: select. Back: go back.")
-#define SAY_GAMES      SNX_TR_KEYS("Tap: open. Swipe across: turn the page. Recompile: tap it. Back: go back.")
+#define SAY_MENU SNX_TR_KEYS("Tap: select. Refresh: tap it. Back: go back.")
+#define SAY_GAMES                                                                                                      \
+    SNX_TR_KEYS("Tap: open. Swipe across: turn the page. Recompile: tap it. Refresh: tap it. Back: go back.")
 #define SAY_KEYS_HOW   SNX_TR_KEYS("Back: go back.")
 #define SAY_KEYS_WAIT  SNX_TR_NOOP("Pick prod.keys")
 #define SAY_PICK_BOX   SNX_TR_NOOP("tap the box to open the file picker")
@@ -321,16 +322,19 @@ static const char* const items[] = {SNX_TR_NOOP("Load Switch NSP/XCI/NRO"),
 #define SAY_SETTINGS   SAY_EDITOR
 #define SAY_GROUPS     SNX_TR_KEYS("Tap a group to open it. Back: go back.")
 #define SAY_APP        SNX_TR_KEYS("Tap a row to change or open it. Back: go back.")
-#define SAY_FOLDERS    SNX_TR_KEYS("Add a folder: tap it. Tap a folder to take it off. Back: go back.")
+#define SAY_FOLDERS    SNX_TR_KEYS("Add a folder: tap it. Tap a folder to take it off. Refresh: tap it. Back: go back.")
 #define SAY_FOLDERS_GAMES                                                                                              \
-    SNX_TR_KEYS("Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Back: go back.")
+    SNX_TR_KEYS(                                                                                                       \
+        "Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Refresh: tap it. Back: "        \
+        "go back.")
 #define SAY_FOLDERS_PICKED SAY_FOLDERS_GAMES
-#define SAY_PLACES         SNX_TR_KEYS("Tap a folder to pick another. Back: go back.")
+#define SAY_PLACES         SNX_TR_KEYS("Tap a folder to pick another. Refresh: tap it. Back: go back.")
 #define SAY_PAD            SNX_TR_KEYS("Tap a control; tap it again for a press. Back: go back.")
 #else
 #define SAY_MENU       SNX_TR_KEYS("Arrows/mouse: move. Space/Enter/click: select.")
 #define SAY_GAMES                                                                                                      \
-    SNX_TR_KEYS("Up/Down: select. Enter/Space: open. R: recompile. M: mods folder. Left/Right/PgUp/PgDown: page.")
+    SNX_TR_KEYS("Up/Down: select. Enter/Space: open. R: recompile. M: mods folder. Left/Right/PgUp/PgDown: page. "  \
+                "F5: refresh.")
 #define SAY_PICK_BOX   SNX_TR_NOOP("click the box (or Enter) to open the file picker")
 #define SAY_KEYS_HOW   SNX_TR_KEYS("Ctrl+V: paste a path, or drop the file on the window. ESC: back.")
 #define SAY_KEYS_WAIT  SNX_TR_NOOP("Pick or drop prod.keys")
@@ -343,13 +347,14 @@ static const char* const items[] = {SNX_TR_NOOP("Load Switch NSP/XCI/NRO"),
 #define SAY_SETTINGS   SNX_TR_KEYS("Up/Down: setting. Left/Right: change. Enter: type. Del: default. ESC: back.")
 #define SAY_GROUPS     SNX_TR_KEYS("Up/Down: group. Enter: open. ESC: back.")
 #define SAY_APP        SNX_TR_KEYS("Up/Down: row. Left/Right: change. Enter: change or open. ESC: back.")
-#define SAY_FOLDERS    SNX_TR_KEYS("Add a folder: pick, drop or paste one. Del: take one off. ESC: back.")
+#define SAY_FOLDERS    SNX_TR_KEYS("Add a folder: pick, drop or paste one. Del: take one off. F5: refresh. ESC: back.")
 #define SAY_FOLDERS_GAMES                                                                                              \
-    SNX_TR_KEYS("Enter: pick where games go. Add a folder: pick, drop or paste one. ~Del: take one off. ESC: back.")
+    SNX_TR_KEYS("Enter: pick where games go. Add a folder: pick, drop or paste one. ~Del: take one off. F5: refresh. " \
+                "ESC: back.")
 #define SAY_FOLDERS_PICKED                                                                                             \
-    SNX_TR_KEYS("Enter: pick where games go. Del: back to the default. Add a folder: pick, drop or paste one. ESC: "   \
-                "back.")
-#define SAY_PLACES SNX_TR_KEYS("Up/Down: folder. Enter: pick another. Del: the default. ESC: back.")
+    SNX_TR_KEYS("Enter: pick where games go. Del: back to the default. Add a folder: pick, drop or paste one. F5: "    \
+                "refresh. ESC: back.")
+#define SAY_PLACES SNX_TR_KEYS("Up/Down: folder. Enter: pick another. Del: the default. F5: refresh. ESC: back.")
 #define SAY_PAD    SNX_TR_KEYS("Arrows/pad: move, change. Enter/A: select. Del: the .ini's. ESC: back.")
 #endif
 static SDL_Color rgb(GuiRgb c) {
@@ -1677,7 +1682,7 @@ static int splash_shown(App* app) {
 #ifdef SDL_PLATFORM_ANDROID
 #define SAY_MENU_KEYS SAY_MENU
 #else
-#define SAY_MENU_KEYS SNX_TR_KEYS("Arrows/mouse: move. Space/Enter/click: select. ESC: exit.")
+#define SAY_MENU_KEYS SNX_TR_KEYS("Arrows/mouse: move. Space/Enter/click: select. F5: refresh. ESC: exit.")
 #endif
 /* the keys the foot of the screen shown says, Tab's after them: what it draws, and what a click on one presses */
 static const char* shown_keys(const App* app, char* out, size_t size) {
@@ -7031,6 +7036,8 @@ static const struct {
                  {SNX_TR_KEY("M"), SDLK_M, 0},
                  {SNX_TR_KEY("Ctrl+S"), SDLK_S, SDL_KMOD_CTRL},
                  {SNX_TR_KEY("Ctrl+V"), SDLK_V, SDL_KMOD_CTRL},
+                 {SNX_TR_KEY("F5"), SDLK_F5, 0},
+                 {SNX_TR_KEY("Refresh"), SDLK_F5, 0},
                  {SNX_TR_KEY("Add a folder"), SDLK_UNKNOWN, 0}};
 /* the hint_keys entry of the n bytes at word, -1 for none */
 static int hint_word(const char* word, size_t n) {
@@ -7333,6 +7340,54 @@ static void files_step(App* app, int step) {
     app->files_top = SDL_max(0, app->files_top + step);
 }
 /* a key that goes over its files, Up/Down a file and PgUp/PgDn as many as show: true for those, another closing it */
+/* F5, or the foot's Refresh: what the screen shows of the folders and the disks looked at again now, not at pump's
+   next look; the Library and Folders say how many of their folders are there, Games how many games it lists */
+static void refresh(App* app) {
+    if (app->left_shown) {
+        left_behind(app);
+        app->left_shown = app->lefts > 0;
+    } else if (app->editing && app->form == GUI_FORM_FOLDERS) {
+        char* dumps = app->data_dir ? snx_path_join(app->data_dir, "dumps") : NULL;
+        int missing = !snx_is_dir(app->games_dir) + !(dumps && snx_is_dir(dumps));
+        for (int i = 0; i < app->folder_count; ++i) missing += !snx_is_dir(app->folders[i]);
+        free(dumps);
+        open_folders(app, app->editor.row);
+        snprintf(app->editor.note, sizeof app->editor.note, snx_tr("Refreshed: %d folders, %d not found"),
+                 app->folder_count + 2, missing);
+    } else if (app->editing && app->form == GUI_FORM_PLACES) {
+        char gone[sizeof app->editor.note];
+        size_t n = 0;
+        space_start(app);
+        open_places(app, app->editor.row);
+        for (int i = 0; i < GUI_PLACES; ++i) { /* a default is made when a run needs it; a picked one is not */
+            const char* path = place_path(app, i);
+            if ((!path || !snx_is_dir(path)) && n < sizeof gone)
+                n += (size_t)snprintf(gone + n, sizeof gone - n,
+                                      app->place[i] ? snx_tr("%s%s %s is not there")
+                                                    : snx_tr("%s%s %s, made when needed"),
+                                      n ? ", " : "", snx_tr(place_labels[i]), path ? path : snx_tr("(none)"));
+        }
+        if (n)
+            snprintf(app->editor.note, sizeof app->editor.note, snx_tr("Refreshed: %s"), gone);
+        else
+            snprintf(app->editor.note, sizeof app->editor.note, "%s",
+                     snx_tr("Refreshed: Data, Recompiled and Extractions are there"));
+    } else if (!app->editing && app->menu.view == GUI_LOAD_GAMES) {
+        GuiBrowser was = app->browser;
+        size_t games = 0;
+        list_games(app);
+        app->browser.page = was.page;
+        app->browser.selected = was.selected;
+        gui_browser_resize(&app->browser, app->browser.page_size);
+        for (size_t i = 0; i < app->games.count; ++i) games += !gui_games_heading(&app->games, i);
+        if (!app->message[0]) snprintf(app->message, sizeof app->message, snx_tr("Refreshed: %zu games"), games);
+    } else if (!app->editing &&
+               app->menu.view == GUI_LOAD_NONE) { /* the status: the usage and the disk counted again */
+        app->usage = gui_process_usage(app->process);
+        app->sampled = SDL_GetTicks();
+        space_start(app);
+    }
+}
 static bool files_key(App* app, SDL_Keycode code) {
     int shown = SDL_max(1, app->files_shown);
     switch (code) {
@@ -7356,6 +7411,10 @@ static void event(App* app, const SDL_Event* e) {
     if (!app->setup_on && (app->cleaned_shown || (app->left_shown && !app->splash)) &&
         ((e->type == SDL_EVENT_KEY_DOWN && files_key(app, e->key.key)) || e->type == SDL_EVENT_MOUSE_WHEEL)) {
         if (e->type == SDL_EVENT_MOUSE_WHEEL) files_step(app, -e->wheel.integer_y); /* a notch a file, as a row */
+        return;
+    }
+    if (app->left_shown && !app->splash && !app->setup_on && e->type == SDL_EVENT_KEY_DOWN && e->key.key == SDLK_F5) {
+        if (!e->key.repeat) refresh(app);
         return;
     }
     if (app->cleaned_shown &&
@@ -7393,6 +7452,11 @@ static void event(App* app, const SDL_Event* e) {
     if (app->confirm.shown && !app->menu.running &&
         (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
         if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && menu_key_of(&e->key, &key)) ask_key(app, key);
+        return;
+    }
+    if (e->type == SDL_EVENT_KEY_DOWN && e->key.key == SDLK_F5 && !app->menu.running && !app->finished &&
+        !(app->editing && app->editor.typing)) {
+        if (!e->key.repeat) refresh(app);
         return;
     }
     if (app->editing && app->form == GUI_FORM_PAD && pad_event(app, e)) return;

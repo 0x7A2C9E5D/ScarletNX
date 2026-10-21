@@ -148,14 +148,14 @@ msgstr "Sair"
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: select. Back: go back."
-msgstr "Toque: escolher. Voltar: retornar."
+msgid "Tap: select. Refresh: tap it. Back: go back."
+msgstr "Toque: escolher. Atualizar: toque nele. Voltar: retornar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: open. Swipe across: turn the page. Recompile: tap it. Back: go back."
-msgstr "Toque: abrir. Deslize: virar a página. Recompilar: toque nele. Voltar: retornar."
+msgid "Tap: open. Swipe across: turn the page. Recompile: tap it. Refresh: tap it. Back: go back."
+msgstr "Toque: abrir. Deslize: virar a página. Recompilar: toque nele. Atualizar: toque nele. Voltar: retornar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -214,20 +214,20 @@ msgstr "Toque numa linha para mudar ou abrir. Voltar: retornar."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: tap it. Tap a folder to take it off. Back: go back."
-msgstr "Adicionar pasta: toque nele. Toque numa pasta para tirá-la. Voltar: retornar."
+msgid "Add a folder: tap it. Tap a folder to take it off. Refresh: tap it. Back: go back."
+msgstr "Adicionar pasta: toque nele. Toque numa pasta para tirá-la. Atualizar: toque nele. Voltar: retornar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Back: go back."
-msgstr "Toque: escolher para onde vão os jogos. Adicionar pasta: toque nele. ~Toque numa pasta para tirá-la. Voltar: retornar."
+msgid "Tap: pick where games go. Add a folder: tap it. ~Tap a folder to take it off. Refresh: tap it. Back: go back."
+msgstr "Toque: escolher para onde vão os jogos. Adicionar pasta: toque nele. ~Toque numa pasta para tirá-la. Atualizar: toque nele. Voltar: retornar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap a folder to pick another. Back: go back."
-msgstr "Toque numa pasta para escolher outra. Voltar: retornar."
+msgid "Tap a folder to pick another. Refresh: tap it. Back: go back."
+msgstr "Toque numa pasta para escolher outra. Atualizar: toque nele. Voltar: retornar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -244,8 +244,8 @@ msgstr "Setas/mouse: mover. Espaço/Enter/clique: escolher."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: select. Enter/Space: open. R: recompile. Left/Right/PgUp/PgDown: page."
-msgstr "Cima/Baixo: escolher. Enter/Espaço: abrir. R: recompilar. Esquerda/Direita/PgUp/PgDown: página."
+msgid "Up/Down: select. Enter/Space: open. R: recompile. M: mods folder. Left/Right/PgUp/PgDown: page. F5: refresh."
+msgstr "Cima/Baixo: escolher. Enter/Espaço: abrir. R: recompilar. M: pasta de mods. Esquerda/Direita/PgUp/PgDown: página. F5: atualizar."
 
 #: src/gui/main.c
 msgid "click the box (or Enter) to open the file picker"
@@ -310,26 +310,26 @@ msgstr "Cima/Baixo: linha. Esquerda/Direita: mudar. Enter: mudar ou abrir. ESC: 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: pick, drop or paste one. Del: take one off. ESC: back."
-msgstr "Adicionar pasta: escolher, soltar ou colar uma. Del: tirar uma. ESC: voltar."
+msgid "Add a folder: pick, drop or paste one. Del: take one off. F5: refresh. ESC: back."
+msgstr "Adicionar pasta: escolher, soltar ou colar uma. Del: tirar uma. F5: atualizar. ESC: voltar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Enter: pick where games go. Add a folder: pick, drop or paste one. ~Del: take one off. ESC: back."
-msgstr "Enter: escolher para onde vão os jogos. Adicionar pasta: escolher, soltar ou colar uma. ~Del: tirar uma. ESC: voltar."
+msgid "Enter: pick where games go. Add a folder: pick, drop or paste one. ~Del: take one off. F5: refresh. ESC: back."
+msgstr "Enter: escolher para onde vão os jogos. Adicionar pasta: escolher, soltar ou colar uma. ~Del: tirar uma. F5: atualizar. ESC: voltar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Enter: pick where games go. Del: back to the default. Add a folder: pick, drop or paste one. ESC: back."
-msgstr "Enter: escolher para onde vão os jogos. Del: voltar ao padrão. Adicionar pasta: escolher, soltar ou colar uma. ESC: voltar."
+msgid "Enter: pick where games go. Del: back to the default. Add a folder: pick, drop or paste one. F5: refresh. ESC: back."
+msgstr "Enter: escolher para onde vão os jogos. Del: voltar ao padrão. Adicionar pasta: escolher, soltar ou colar uma. F5: atualizar. ESC: voltar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: folder. Enter: pick another. Del: the default. ESC: back."
-msgstr "Cima/Baixo: pasta. Enter: escolher outra. Del: o padrão. ESC: voltar."
+msgid "Up/Down: folder. Enter: pick another. Del: the default. F5: refresh. ESC: back."
+msgstr "Cima/Baixo: pasta. Enter: escolher outra. Del: o padrão. F5: atualizar. ESC: voltar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -530,8 +530,8 @@ msgstr "Tirar"
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Arrows/mouse: move. Space/Enter/click: select. ESC: exit."
-msgstr "Setas/mouse: mover. Espaço/Enter/clique: escolher. ESC: sair."
+msgid "Arrows/mouse: move. Space/Enter/click: select. F5: refresh. ESC: exit."
+msgstr "Setas/mouse: mover. Espaço/Enter/clique: escolher. F5: atualizar. ESC: sair."
 
 #: src/gui/main.c
 #, c-format
@@ -1804,6 +1804,47 @@ msgstr "Ctrl+S"
 #, snx-key
 msgid "Ctrl+V"
 msgstr "Ctrl+V"
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "F5"
+msgstr "F5"
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Refresh"
+msgstr "Atualizar"
+
+#: src/gui/main.c
+#, c-format
+msgid "Refreshed: %d folders, %d not found"
+msgstr "Atualizado: %d pastas, %d não encontradas"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s%s %s is not there"
+msgstr "%s%s %s não está lá"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s%s %s, made when needed"
+msgstr "%s%s %s, criada quando precisar"
+
+#: src/gui/main.c
+#, c-format
+msgid "Refreshed: %s"
+msgstr "Atualizado: %s"
+
+#: src/gui/main.c
+msgid "Refreshed: Data, Recompiled and Extractions are there"
+msgstr "Atualizado: Dados, Recompilados e Extrações estão lá"
+
+#: src/gui/main.c
+#, c-format
+msgid "Refreshed: %zu games"
+msgstr "Atualizado: %zu jogos"
 
 #: src/gui/main.c
 msgid "No file was picked."
