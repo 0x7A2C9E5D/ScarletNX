@@ -557,22 +557,22 @@ msgstr "SCARLETNX  /  CONFIGURAÇÃO"
 
 #: src/gui/main.c
 #, c-format
-msgid "THEME EDITOR  /  %s"
-msgstr "EDITOR DE TEMA  /  %s"
+msgid "SCARLETNX  /  THEME EDITOR  /  %s"
+msgstr "SCARLETNX  /  EDITOR DE TEMA  /  %s"
 
 #: src/gui/main.c
 #, c-format
-msgid "SETTINGS  /  %s  /  PLAYER %d  /  %s"
-msgstr "CONFIGURAÇÕES  /  %s  /  JOGADOR %d  /  %s"
+msgid "SCARLETNX  /  SETTINGS  /  %s  /  PLAYER %d  /  %s"
+msgstr "SCARLETNX  /  CONFIGURAÇÕES  /  %s  /  JOGADOR %d  /  %s"
 
 #: src/gui/main.c
 #, c-format
-msgid "SETTINGS  /  %s  /  %s"
-msgstr "CONFIGURAÇÕES  /  %s  /  %s"
+msgid "SCARLETNX  /  SETTINGS  /  %s  /  %s"
+msgstr "SCARLETNX  /  CONFIGURAÇÕES  /  %s  /  %s"
 
 #: src/gui/main.c
-msgid "SETTINGS"
-msgstr "CONFIGURAÇÕES"
+msgid "SCARLETNX  /  SETTINGS"
+msgstr "SCARLETNX  /  CONFIGURAÇÕES"
 
 #: src/gui/main.c
 msgid "Menu"

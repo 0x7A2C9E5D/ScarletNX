@@ -615,26 +615,26 @@ msgid "%s: its updates, DLCs and mods kept"
 msgstr ""
 
 #: src/gui/main.c
+msgid "SCARLETNX  /  SETTINGS"
+msgstr ""
+
+#: src/gui/main.c
 msgid "SCARLETNX  /  SETUP"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "THEME EDITOR  /  %s"
+msgid "SCARLETNX  /  THEME EDITOR  /  %s"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "SETTINGS  /  %s  /  PLAYER %d  /  %s"
+msgid "SCARLETNX  /  SETTINGS  /  %s  /  PLAYER %d  /  %s"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "SETTINGS  /  %s  /  %s"
-msgstr ""
-
-#: src/gui/main.c
-msgid "SETTINGS"
+msgid "SCARLETNX  /  SETTINGS  /  %s  /  %s"
 msgstr ""
 
 #: src/gui/main.c

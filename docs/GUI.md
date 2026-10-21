@@ -350,7 +350,11 @@ right (`[head] place = tabs`) or on a row of its own under them (`below`), and a
 (Settings > User): a box framed as the others are holding their nickname and their picture, `users/<uid>.jpg` or Wimsy
 without one ([USAGE](USAGE.md#users)), square or round (`[head] picture`; `none` for no box). A click on it opens
 the users over the screen, each with their picture; the one picked is Settings' user from then on, and ESC or a click
-off them leaves it as it was. Under them the list, each entry a box
+off them leaves it as it was. The head is the same on every screen of one window: when the main screens' titles
+(the menu's, Games', the keys' and `SCARLETNX  /  SETTINGS`) do not all fit beside the tabs, every one takes letters a
+size smaller, down to the text's, else leaves out the same first parts (`SCARLETNX  /` first), else shows no title; a
+screen deeper in
+the Settings leaves out what more it must. Under them the list, each entry a box
 of its own, the focused one framed in the focus colour or inverted, with the theme's cursor in the margin;
 beside it a box with what the focus is about (a recent game's path, Games' folders, the keys in use, the last
 run's output) and under that one the Status box. The tips have a row of their own under the head (`[tips] place =
@@ -375,7 +379,7 @@ over the screen darkened, in a box in its middle, or with `[body] options-dialog
 foot, a tab with its label on the box's edge, the choices at its right above it, as the game's dialogs. The files an
 older version left come in a box over the screen darkened.
 
-The built-ins are `default`, the look above, and `yorha`: paper and ink, a title twice the text's size, a faint
+The built-ins are `default`, the look above, and `yorha`: paper and ink, a title twice the text's size where it fits whole, a faint
 grid on the page, square markers, the focused box inverted, the tips in a box under the head, the keys in one on a
 band of ink at the foot, and a run drawn as a
 dark loading screen in its own colours (`[run]`): the title, the game's name with turning

@@ -2404,6 +2404,7 @@ static void big_text(App* app, GuiRect r, int x, int y, const char* value, int s
         x += n * (int)w;
     }
 }
+#define SAY_SETTINGS_TITLE SNX_TR_NOOP("SCARLETNX  /  SETTINGS")
 static const char* screen_title(const App* app, char* out, size_t size) {
     char* c;
     if (app->setup_on && !app->editing) return snx_tr("SCARLETNX  /  SETUP");
@@ -2411,17 +2412,18 @@ static const char* screen_title(const App* app, char* out, size_t size) {
         return app->theme
             .title[(app->menu.running || app->finished) && !entering(app) ? screen(app) : menu_screen(app)];
     if (app->form == GUI_FORM_THEME)
-        snprintf(out, size, snx_tr("THEME EDITOR  /  %s"), app->editor.id);
+        snprintf(out, size, snx_tr("SCARLETNX  /  THEME EDITOR  /  %s"), app->editor.id);
     else if (app->form == GUI_FORM_PAD) {
         if (app->pad_player) /* a player's own */
-            snprintf(out, size, snx_tr("SETTINGS  /  %s  /  PLAYER %d  /  %s"), snx_tr(app->group_keys[app->group].key),
-                     app->pad_player, snx_tr(app->settings.keys[app->page].key));
+            snprintf(out, size, snx_tr("SCARLETNX  /  SETTINGS  /  %s  /  PLAYER %d  /  %s"),
+                     snx_tr(app->group_keys[app->group].key), app->pad_player,
+                     snx_tr(app->settings.keys[app->page].key));
         else
-            snprintf(out, size, snx_tr("SETTINGS  /  %s  /  %s"), snx_tr(app->group_keys[app->group].key),
+            snprintf(out, size, snx_tr("SCARLETNX  /  SETTINGS  /  %s  /  %s"), snx_tr(app->group_keys[app->group].key),
                      snx_tr(app->settings.keys[app->page].key));
         for (c = out; *c; ++c) *c = (char)SDL_toupper((unsigned char)*c);
     } else
-        snprintf(out, size, "%s", snx_tr("SETTINGS"));
+        snprintf(out, size, "%s", snx_tr(SAY_SETTINGS_TITLE));
     return out;
 }
 /* the status box: the usage, the disk and the working folder, wrapped to width columns; with draw, drawn in r */
@@ -2514,11 +2516,67 @@ static void backdrop(App* app) {
     for (y = 0; y < height; y += 6 * s) SDL_RenderLine(app->renderer, 0, (float)y, (float)width, (float)y);
     SDL_SetRenderDrawBlendMode(app->renderer, SDL_BLENDMODE_NONE);
 }
+/* title past its first n parts, each ending at a '/' (the spaces after it left out), or its last part */
+static const char* title_tail(const char* title, int n) {
+    const char* slash;
+    for (; n > 0 && (slash = strchr(title, '/')) != NULL; --n)
+        for (title = slash + 1; *title == ' ';) ++title;
+    return title;
+}
+static int title_px(const App* app, const char* title, int size) {
+    return gui_text_cols(title) * size * cell_w(app) + (app->theme.title_shadow ? size * app->scale : 0);
+}
+/* the pixels a title of letters size times the text's has in the head, as gui_place gives them: beside the tabs and
+   the user, or with the user on a row under the tabs */
+static int head_room(const App* app, int size) {
+    GuiRect none = {0, 0, 0, 0}, last = tab_rect(app, none, tab_count(app) - 1);
+    int width, height, tabs = cell_h(app) + 4 * app->scale, title = size * cell_h(app), badge;
+    if (app->theme.title_shadow) title += size * app->scale;
+    area(app, &width, &height);
+    badge = user_width(app, app->theme.head_place == GUI_HEAD_TABS ? SDL_max(title, tabs) : title);
+    width -= 2 * cell_w(app) + (badge ? badge + 2 * cell_w(app) : 0);
+    return app->theme.head_place == GUI_HEAD_TABS ? width - (last.x + last.w) - 2 * cell_w(app) : width;
+}
+/* The head's title over the tabs' screens and its letters' size: a window too narrow for the main screens' titles
+   (the menu's, Games', the keys' and the Settings') whole at the theme's size takes a size smaller, down to the
+   text's, and only then leaves out the same first parts of every one, "SCARLETNX  /" first, so the head stays one
+   and the same from screen to screen; a screen deeper in the Settings leaves out what more it must, and a last part
+   still too wide is cut. The setup's head, its steps for tabs, keeps its title as it is */
+static const char* head_title(const App* app, bool tabs, char* out, size_t size, int* letters) {
+    const char* titles[4];
+    char own[160];
+    const char* title = screen_title(app, own, sizeof own);
+    int big = title_size(app), parts = 0, room = 0, i;
+    *letters = big;
+    snprintf(out, size, "%s", title);
+    if (!tabs || !title[0] || (app->setup_on && !app->editing)) return out; /* the setup's steps are its tabs */
+    titles[0] = app->theme.title[GUI_SCREEN_MENU];
+    titles[1] = app->theme.title[GUI_SCREEN_GAMES];
+    titles[2] = app->theme.title[GUI_SCREEN_KEYS];
+    titles[3] = snx_tr(SAY_SETTINGS_TITLE);
+    for (parts = 0; parts < 4; ++parts) {
+        for (*letters = big; *letters >= 1; --*letters) {
+            room = head_room(app, *letters);
+            for (i = 0; i < 4 && title_px(app, title_tail(titles[i], parts), *letters) <= room; ++i) {}
+            if (i == 4) break;
+        }
+        if (*letters >= 1) break;
+    }
+    if (parts == 4) { /* not even their last parts fit: no title on any, the tabs say which screen it is */
+        *letters = 1;
+        out[0] = 0;
+        return out;
+    }
+    title = title_tail(title, parts);
+    while (title_px(app, title, *letters) > room && strchr(title, '/')) title = title_tail(title, 1);
+    snprintf(out, size, "%.*s", (int)gui_cols_fit(title, SDL_max(room, 0) / (*letters * cell_w(app))), title);
+    return out;
+}
 static void chrome(App* app, const GuiPlace* p) {
     const GuiTheme* t = &app->theme;
-    int band = t->head == GUI_STYLE_BAR, size = title_size(app), s = app->scale;
+    int band = t->head == GUI_STYLE_BAR, size, s = app->scale;
     char out[160];
-    const char* title = screen_title(app, out, sizeof out);
+    const char* title = head_title(app, p->tabs.h > 0, out, sizeof out, &size);
     SDL_SetRenderDrawColor(app->renderer, t->page.r, t->page.g, t->page.b, 255);
     SDL_RenderClear(app->renderer);
     backdrop(app);
@@ -2537,9 +2595,9 @@ static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols,
     const GuiTheme* t = &app->theme;
     GuiPlaceIn in;
     GuiRect none = {0, 0, 0, 0};
-    int width, height, s = app->scale, size = title_size(app);
+    int width, height, s = app->scale, size;
     char out[160];
-    const char* title = screen_title(app, out, sizeof out);
+    const char* title = head_title(app, shows & GUI_SHOWS_TABS, out, sizeof out, &size);
     area(app, &width, &height);
     memset(&in, 0, sizeof in);
     in.width = width;

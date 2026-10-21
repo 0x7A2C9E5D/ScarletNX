@@ -452,7 +452,13 @@ static void players_view(App* app) {
     assert(app->form == GUI_FORM_PAD && app->pad_player == 1 && app->pad_map == setting_row(app, "gamepad_p1_map"));
     assert(app->pad.swap_ab); /* As All: on */
     render(app);
-    shows(app, "SETTINGS  /  CONTROLLERS  /  PLAYER 1  /  BUTTON MAP", normal);
+    { /* the page's place in the Settings, as much of it as fits beside the tabs */
+        char title[160];
+        int letters;
+        head_title(app, true, title, sizeof title, &letters);
+        assert(strlen(title) >= 23 && !strcmp(title + strlen(title) - 23, "PLAYER 1  /  BUTTON MAP"));
+        shows(app, title, normal);
+    }
     /* a change keeps the player's map, every player's untouched */
     app->pad.focus = SNX_PAD_LT;
     key(app, SDLK_RIGHT);
@@ -524,7 +530,13 @@ static void button_map(App* app) {
     /* two Joy-Cons one pad, as gamepad_joycon_pair has it when not picked */
     assert(!strcmp(SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS), "1"));
     render(app);
-    shows(app, "SETTINGS  /  CONTROLLERS  /  BUTTON MAP", normal);
+    { /* the page's place in the Settings, as much of it as fits beside the tabs */
+        char title[160];
+        int letters;
+        head_title(app, true, title, sizeof title, &letters);
+        assert(strlen(title) >= 26 && !strcmp(title + strlen(title) - 26, "CONTROLLERS  /  BUTTON MAP"));
+        shows(app, title, normal);
+    }
     assert(drawn_text(app, "No controller") && !drawn_text(app, "By position") && !drawn_text(app, "By label"));
     assert(drawn(app, SNX_PAD_LT, SNX_PAD_SHAPE_BOX, SNX_PAD_STYLE_FOCUS) && drawn_text(app, "LT sends ZL"));
     /* its texts in the font's own glyphs, a byte each */
@@ -4906,12 +4918,70 @@ int main(int argc, char** argv) {
             render(&app);
             menu_boxes(&app, &m);
         }
-        /* its title twice the text's size, in the row of tabs against its right, or two columns before the user
-           there; with its shadow, in the dim colour a big pixel down and right */
+        /* its title whole at 1280x800, at the text's size (twice it 2400 wide, below), in the row of tabs against its
+           right, two columns before the user there, its foot on the tabs'; with its shadow, in the dim colour a big
+           pixel down and right */
         r = m.place.title;
-        assert(app.user == 1 && !strcmp(app.user_name, "Aogo") && m.place.badge.h == r.h);
+        assert(app.user == 1 && !strcmp(app.user_name, "Aogo") && m.place.badge.h == SDL_max(r.h, m.place.tabs.h));
         assert(m.place.badge.x + m.place.badge.w == m.place.head.x + m.place.head.w);
-        assert(r.h == 2 * 16 * s && r.x + r.w == m.place.badge.x - 2 * cw && r.y < m.place.tabs.y);
+        assert(r.h == 16 * s && r.x + r.w == m.place.badge.x - 2 * cw && r.y + r.h == m.place.tabs.y + m.place.tabs.h);
+        /* the head the same on the menu, Games and the Settings: the title on the tabs' row, in letters of one size,
+           each whole a size smaller before the same first parts are left out for the widest of their titles to fit;
+           2400 wide, each whole and big; at 800 wide their last parts; with a nickname that leaves too little room,
+           none */
+        {
+            int w0, h0;
+            char name[sizeof app.user_name];
+            SDL_GetWindowSize(app.window, &w0, &h0);
+            snprintf(name, sizeof name, "%s", app.user_name);
+            for (int wide = 0; wide < 4; ++wide) {
+                char seen[3][160];
+                int sizes[3];
+                if (wide) {
+                    assert(SDL_SetWindowSize(app.window, wide == 1 ? 2400 : 800, h0));
+                    SDL_SyncWindow(app.window);
+                }
+                if (wide == 3) { /* a nickname that leaves the title some room, too little for the shortest last part */
+                    int n = 0;
+                    do {
+                        memset(app.user_name, 'x', (size_t)++n);
+                        app.user_name[n] = 0;
+                    } while (n < SNX_USERS_NICKNAME &&
+                             !(head_room(&app, 1) > 0 && head_room(&app, 1) < title_px(&app, "MENU", 1)));
+                    assert(head_room(&app, 1) > 0 && head_room(&app, 1) < title_px(&app, "MENU", 1));
+                }
+                for (int tab = 0; tab < 3; ++tab) {
+                    GuiPlace p;
+                    go_tab(&app, tab);
+                    layout(&app);
+                    place_screen(&app, &p, "", 0, GUI_SHOWS_TABS);
+                    head_title(&app, true, seen[tab], sizeof seen[tab], &sizes[tab]);
+                    if (wide == 3) {
+                        assert(!seen[tab][0] && !p.title.h);
+                        continue;
+                    }
+                    assert(p.title.h && p.title.y + p.title.h == p.tabs.y + p.tabs.h && sizes[tab] == sizes[0]);
+                    assert(p.title.w == gui_text_cols(seen[tab]) * sizes[tab] * cw);
+                }
+                if (wide == 2)
+                    assert(!strcmp(seen[0], "MENU") && !strcmp(seen[1], "GAMES") && !strcmp(seen[2], "SETTINGS") &&
+                           sizes[0] == 1);
+                else if (wide == 1)
+                    assert(!strcmp(seen[0], "SCARLETNX  /  MENU") && !strcmp(seen[1], "SCARLETNX  /  GAMES") &&
+                           !strcmp(seen[2], "SCARLETNX  /  SETTINGS") && sizes[0] == 2);
+                else if (
+                    !wide) /* too narrow for SCARLETNX  /  SETTINGS big beside the tabs: every one whole, smaller */
+                    assert(!strcmp(seen[0], "SCARLETNX  /  MENU") && !strcmp(seen[1], "SCARLETNX  /  GAMES") &&
+                           !strcmp(seen[2], "SCARLETNX  /  SETTINGS") && sizes[0] == 1);
+            }
+            snprintf(app.user_name, sizeof app.user_name, "%s", name);
+            assert(SDL_SetWindowSize(app.window, w0, h0));
+            SDL_SyncWindow(app.window);
+            go_tab(&app, GUI_TAB_MENU);
+            layout(&app);
+            render(&app);
+            menu_boxes(&app, &m);
+        }
         { /* the box framed in the dim colour and filled with the page's, as YoRHa's boxes; the nickname a column in, in
              ink; Wimsy (no users/<uid>.jpg) against its right, two pixels in */
             GuiRect b = m.place.badge;
@@ -5024,12 +5094,16 @@ int main(int argc, char** argv) {
         }
         assert(m.place.tabs.y + m.place.tabs.h == r.y + r.h && r.y + r.h <= m.place.list.y);
         for (int pass = 0; pass < 2; ++pass) {
-            const unsigned char* g = &gui_vga_font['S' * 16];
-            int big = 2 * s, shadowed = 0;
+            char shown[160];
+            const unsigned char* g;
+            int big, letters, shadowed = 0;
             app.theme.title_shadow = pass;
             render(&app);
             menu_boxes(&app, &m);
             r = m.place.title;
+            head_title(&app, true, shown, sizeof shown, &letters); /* its first letter, at its size */
+            g = &gui_vga_font[(unsigned char)shown[0] * 16];
+            big = letters * s;
             for (int fy = 0; fy < 15; ++fy)
                 for (int fx = 0; fx < 7; ++fx) {
                     int here = g[fy] & (0x80 >> fx), under = g[fy + 1] & (0x80 >> (fx + 1));
@@ -5047,7 +5121,7 @@ int main(int argc, char** argv) {
         menu_boxes(&app, &m);
         assert(same_colour(pixel(&app, (float)(m.place.head.x + m.place.head.w / 2), (float)(m.place.head.y)), ink));
         shows(&app, "Games", page);
-        shows_big(&app, "SCARLETNX  /  MENU", page, 2);
+        shows_big(&app, "SCARLETNX  /  MENU", page, 1); /* too wide big beside the user: whole, at the text's size */
         app.theme.head = GUI_STYLE_PLAIN;
         render(&app);
         assert(same_colour(pixel(&app, (float)(m.place.head.x + m.place.head.w / 2),
@@ -5110,9 +5184,11 @@ int main(int argc, char** argv) {
             recent_changed(&app);
         }
         /* letters too big for the screen: the list scrolls, the focus in view, an arrow where entries are hidden. At
-           800 high the whole menu fits 3x, its foot's letters 2x: 768 keeps 3x and one entry fewer */
+           800 high the whole menu fits 3x, its foot's letters 2x: 768 keeps 3x and one entry fewer, with the title on
+           a row of its own (on the tabs' row, the whole menu fits there too) */
         assert(SDL_SetWindowSize(app.window, 1280, 768));
         SDL_SyncWindow(app.window);
+        app.theme.head_place = GUI_HEAD_BELOW;
         app.menu.text_size = GUI_TEXT_MAX;
         app.menu.selected = GUI_EXIT;
         render(&app);

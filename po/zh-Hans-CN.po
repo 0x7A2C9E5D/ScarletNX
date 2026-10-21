@@ -557,22 +557,22 @@ msgstr "SCARLETNX  /  初始设置"
 
 #: src/gui/main.c
 #, c-format
-msgid "THEME EDITOR  /  %s"
-msgstr "主题编辑器  /  %s"
+msgid "SCARLETNX  /  THEME EDITOR  /  %s"
+msgstr "SCARLETNX  /  主题编辑器  /  %s"
 
 #: src/gui/main.c
 #, c-format
-msgid "SETTINGS  /  %s  /  PLAYER %d  /  %s"
-msgstr "设置  /  %s  /  玩家 %d  /  %s"
+msgid "SCARLETNX  /  SETTINGS  /  %s  /  PLAYER %d  /  %s"
+msgstr "SCARLETNX  /  设置  /  %s  /  玩家 %d  /  %s"
 
 #: src/gui/main.c
 #, c-format
-msgid "SETTINGS  /  %s  /  %s"
-msgstr "设置  /  %s  /  %s"
+msgid "SCARLETNX  /  SETTINGS  /  %s  /  %s"
+msgstr "SCARLETNX  /  设置  /  %s  /  %s"
 
 #: src/gui/main.c
-msgid "SETTINGS"
-msgstr "设置"
+msgid "SCARLETNX  /  SETTINGS"
+msgstr "SCARLETNX  /  设置"
 
 #: src/gui/main.c
 msgid "Menu"
