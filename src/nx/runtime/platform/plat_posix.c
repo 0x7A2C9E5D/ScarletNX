@@ -672,6 +672,12 @@ int plat_trap_init(void (*fault)(u8* p, int write, u32 tid)) {
 int plat_trap_arm(u8* p, u64 size) {
 #if SNX_UFFD_MINOR
     struct uffdio_register reg;
+    struct uffdio_range unreg;
+    /* the write watch registered this range first; the kernel won't add minor mode to a WP registration (EBUSY), so
+       let that go before the trap's own */
+    unreg.start = (u64)(uintptr_t)p;
+    unreg.len = size;
+    if (ioctl(g_uffd, UFFDIO_UNREGISTER, &unreg) && errno != ENOENT) return -1;
     memset(&reg, 0, sizeof reg);
     reg.range.start = (u64)(uintptr_t)p;
     reg.range.len = size;
