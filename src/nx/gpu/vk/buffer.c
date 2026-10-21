@@ -1586,6 +1586,20 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
 }
 
 int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off) { return buf_get(gva, len, buf, off, 0); }
+/* A draw looks its buffers up one after another, and each lookup waited on two cache misses in a row, its index slot
+   and then the entry the slot names: 88% of buf_get's own time in one game. A caller that knows its ranges first
+   fetches every slot (step 0), then every entry they name (step 1), so the misses overlap */
+void vk_buf_prefetch(u64 gva, u64 len, int step) {
+    u32 sl;
+    if (!g_vbi || !len || len > 0xFFFFFFFFull) return;
+    sl = vb_home(gva, (u32)len);
+    if (!step) {
+        __builtin_prefetch(&g_vbi[sl]);
+        return;
+    }
+    if (g_vbi[sl].idx && g_vbi[sl].start == gva && g_vbi[sl].len == (u32)len)
+        for (size_t o = 0; o < sizeof(Vb); o += 64) __builtin_prefetch((const char*)&g_vb[g_vbi[sl].idx] + o);
+}
 /* Constant buffers cannot accept the delayed checks used for stable vertex data: a changed word affects this draw. */
 int vk_buf_get_strict(u64 gva, u64 len, VkBuffer* buf, u64* off) { return buf_get(gva, len, buf, off, 1); }
 

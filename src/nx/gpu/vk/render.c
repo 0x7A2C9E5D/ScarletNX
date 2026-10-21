@@ -1974,6 +1974,12 @@ retry:
     VkBuffer vbuf[33];
     VkDeviceSize voff[33], vstride[33];
     u32 vkey[33]; /* guest stream | base offset << 5 */
+    /* each new binding's buffer, looked up after the loop: all of them prefetched first (vk_buf_prefetch) */
+    struct {
+        u64 gva, len;
+        u32 b, base;
+    } vq[33];
+    u32 nvq = 0;
     int cbind = -1, over = 0;
     for (u32 i = 0; i < nloc && !over; i++) {
         if (!(vs->si.in_mask & (1u << i))) continue;
@@ -2027,11 +2033,11 @@ retry:
             }
             /* the stream's limit covers its last vertex's stride: an attribute reaching past the stride reads past it */
             u32 pad = stride && base + asz > stride ? base + asz - stride : 0;
-            if (!vk_buf_get(start, len + pad, &vbuf[b], &voff[b])) {
-                g_vk_skipped++;
-                return;
-            }
-            voff[b] += base;
+            vq[nvq].gva = start;
+            vq[nvq].len = len + pad;
+            vq[nvq].b = b;
+            vq[nvq].base = base;
+            nvq++;
             vstride[b] = stride;
             vkey[b] = key;
             u32 div = r[0x620 + sbuf] ? (va[3] ? va[3] : 1) : 0;
@@ -2050,6 +2056,15 @@ retry:
         LOG_LIMIT(1, "vulkan: a draw needs more vertex bindings than the %u this GPU has (draw skipped)\n", maxbind);
         g_vk_skipped++;
         return;
+    }
+    for (u32 q = 0; q < nvq; q++) vk_buf_prefetch(vq[q].gva, vq[q].len, 0);
+    for (u32 q = 0; q < nvq; q++) vk_buf_prefetch(vq[q].gva, vq[q].len, 1);
+    for (u32 q = 0; q < nvq; q++) {
+        if (!vk_buf_get(vq[q].gva, vq[q].len, &vbuf[vq[q].b], &voff[vq[q].b])) {
+            g_vk_skipped++;
+            return;
+        }
+        voff[vq[q].b] += vq[q].base;
     }
 
     /* attachments and blending */
