@@ -52,7 +52,7 @@ if(SNX_TEST_SANITIZERS)
         scarletnx-gnuabi scarletnx-gnuabi-run snx_gnuabi_program
         # the 3DS runtime
         scarletnx-3ds snx_ctr_program snx_ctr_board snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process snx_ctr_native
-        snx_ctr_audio snx_ctr_gpu
+        snx_ctr_audio snx_ctr_gpu snx_ctr_gpu_reference
         # scarletnx's main where it is the other drivers too
         snx_multicall
         # the menu, its splash, icon and pads
@@ -177,6 +177,12 @@ if(TARGET snx_ctr_board)
     target_link_libraries(snx-test-3ds-vk-transfer PRIVATE snx_ctr_gpu)
     add_test(NAME 3ds_vk_transfer COMMAND snx-test-3ds-vk-transfer)
     set_tests_properties(3ds_vk_transfer PROPERTIES SKIP_RETURN_CODE 77)
+    # the GPU's draws against the software renderer, the CPU reference they replaced, scene by scene
+    add_executable(snx-test-3ds-vk-draw 3ds_vk_draw.c)
+    snx_test_target(snx-test-3ds-vk-draw 11)
+    target_link_libraries(snx-test-3ds-vk-draw PRIVATE snx_ctr_gpu_reference)
+    add_test(NAME 3ds_vk_draw COMMAND snx-test-3ds-vk-draw)
+    set_tests_properties(3ds_vk_draw PROPERTIES SKIP_RETURN_CODE 77)
     add_executable(snx-test-3ds-gsp 3ds_gsp.c)
     snx_test_target(snx-test-3ds-gsp 11)
     target_link_libraries(snx-test-3ds-gsp PRIVATE snx_ctr_process)
@@ -191,7 +197,7 @@ if(TARGET snx_ctr_board)
     # the PICA command processor: lists in FCRAM, uploads, interrupts, jumps, draw and immediate hooks
     add_executable(snx-test-3ds-pica 3ds_pica.c)
     snx_test_target(snx-test-3ds-pica 11)
-    target_link_libraries(snx-test-3ds-pica PRIVATE snx_ctr_gpu m)
+    target_link_libraries(snx-test-3ds-pica PRIVATE snx_ctr_gpu_reference m)
     add_test(NAME 3ds_pica COMMAND snx-test-3ds-pica)
     # the HLE DSP and dsp::DSP: pipes, regions, sources, mixing, decoding, the service as ndsp drives it
     add_executable(snx-test-3ds-dsp 3ds_dsp.c)

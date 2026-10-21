@@ -57,7 +57,16 @@ The GPU's work runs on one Vulkan device (`src/3ds/gpu/vk/`), which needs Vulkan
 regions are imported as buffers, so the GPU reads and writes the guest's memory
 in place and nothing of it is copied by the CPU. Memory fills, display transfers
 and texture copies are compute shaders (`gpu/vk/shaders/`), held byte for byte to
-the CPU reference `gpu/transfer.c` by `tests/3ds_vk_transfer.c`. The shown
+the CPU reference `gpu/transfer.c` by `tests/3ds_vk_transfer.c`. PICA draws run
+on the GPU too (`gpu/vk/render.c`). The vertex program is decompiled (`gpu/vk/vsgen.c`)
+and the fragment pipeline generated (`gpu/vk/fsgen.c`), both ported from Azahar's
+shader generators and both written as SPIR-V words directly (`gpu/vk/spirv.c`), with no
+shader compiler at run time. The output merger is the pipeline's fixed state. A render
+target is loaded from guest memory into an image by a compute shader when a draw first
+uses it, and stored back before anything else reads or writes memory. Textures are
+decoded from guest memory by a compute shader once in a recording. Vertex and index
+data are read in place. `tests/3ds_vk_draw.c` holds the draws to the software renderer
+they replaced, which stays only as that reference. The shown
 framebuffers are decoded and turned to the landscape screen by a compute shader
 straight from guest memory into the window's swapchain; the frame dumps are the
 one readback. The work is submitted, and waited for, at the end of each GX queue
@@ -294,15 +303,12 @@ processor (`src/3ds/gpu/pica.c`, ported from Azahar's `PicaCore`): masked regist
 writes, batched and sequential extra data, shader program, swizzle and uniform uploads,
 the lighting, fog and procedural-texture LUTs, default attributes and immediate mode,
 command buffer jumps and the P3D interrupt request with autostop. A list outside memory
-raises P3D without running. Draws run in software, ported from Azahar's software
-renderer: the shader interpreter (`gpu/shader.c`), vertex loading with the indexed
-vertex cache and primitive assembly (`gpu/draw.c`), and clipping, rasterization,
-texturing in the fourteen texture formats with cube and projected textures, fragment
-lighting, the six texture combiner stages, fog, the alpha, stencil and depth tests,
-blending and logic ops into the tiled framebuffer in physical memory (`gpu/raster.c`,
-`gpu/lighting.c`, `gpu/texture.c`). Geometry shaders, procedural textures and shadow
-textures and rendering are not ported yet: a draw that needs one stops the run and
-names it. The ExHeader's address-mapping capabilities
+raises P3D without running. Draws go to the GPU (see above). The software renderer
+ported from Azahar's (`gpu/shader.c`, `gpu/draw.c`, `gpu/raster.c`, `gpu/lighting.c`,
+`gpu/texture.c`) is only built into the tests, as the reference the GPU's draws are
+compared with. It samples the nearest texel only, as Azahar's does, so texture
+filtering has no reference. Geometry shaders and shadow textures and rendering are not
+drawn yet: a draw that needs one stops the run and names it. The ExHeader's address-mapping capabilities
 are applied at process creation (VRAM, DSP RAM, New 3DS extra RAM), as Azahar's
 `HandleSpecialMapping` does; MMIO areas stay unmapped. SetBufferSwap and the shared
 FrameBufferUpdate blocks latch real framebuffer descriptors in the five formats
@@ -318,7 +324,7 @@ range, or an application's own block as a mirror within the permissions it was
 created with. Each mapping holds a reference to the block. HLE shared pages are
 reserved from board FCRAM past the application pool.
 
-Presentation is **Vulkan only** (volk; no linked Vulkan library, no shaders):
+Presentation is **Vulkan only** (volk, with no linked Vulkan library):
 the device converts the guest framebuffer to RGBA8 and shows the landscape-
 rotated frame live in an SDL3 Vulkan window through a real swapchain. Bounded
 PPM snapshots land in `<output>/frames` in every mode. Without a display the
@@ -342,8 +348,6 @@ minutes are recorded to `<output>/audio.wav`. libctru's ndsp loads
 when the title's SD has none: the HLE DSP never runs the component, and a dumped file is
 used as it is. cfg:u, cfg:s and cfg:i (`services/cfg.c`) answer GetConfig for the sound
 output mode (stereo, Azahar's default), which ndsp reads, and stop on any other block.
-With the software renderer below full speed, the audio has gaps after rendered frames:
-the guest's mixing threads get no time while a frame renders.
 
 See [CTR IPC](CTR-IPC.md) for the strict generator subset, descriptor/permission
 checks, quotas, malformed-request policy, tests and unimplemented operations.

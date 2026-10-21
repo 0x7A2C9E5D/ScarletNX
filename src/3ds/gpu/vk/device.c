@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "3ds/gpu/vk/vk.h"
+#include "3ds/gpu/vk/vk_render.h"
 #include <SDL3/SDL_vulkan.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -102,6 +103,11 @@ static bool make_device(SnxCtrVk* v, VkPhysicalDevice phys, uint32_t family) {
     v->family = family;
     v->index8 = index8 && index_features.indexTypeUint8;
     v->logic_op = features.features.logicOp;
+    v->clip_distance = features.features.shaderClipDistance;
+    VkPhysicalDeviceVulkan12Properties p12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
+    VkPhysicalDeviceProperties2 properties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &p12};
+    vkGetPhysicalDeviceProperties2(phys, &properties);
+    v->preserve_infnan = p12.shaderSignedZeroInfNanPreserveFloat32;
     return true;
 }
 static bool import_ram(SnxCtrVk* v, SnxCtrMemory* memory, char* error, size_t error_size) {
@@ -244,13 +250,15 @@ bool snx_ctr_vk_init(SnxCtrMemory* memory, char* error, size_t error_size) {
                                   .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
                                   .queueFamilyIndex = v->family};
     VkFenceCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    /* a recording's sets: a draw takes two (three uniform blocks, three LUTs and three textures), a compute dispatch
+       one; running out finishes the recording early (vk/render.c) */
     VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8192},
-                                    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4096},
-                                    {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2048},
-                                    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4096},
-                                    {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 2048}};
+                                    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3 * 4096},
+                                    {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4096},
+                                    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3 * 4096},
+                                    {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 3 * 4096}};
     VkDescriptorPoolCreateInfo dp = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-                                     .maxSets = 4096,
+                                     .maxSets = 12288,
                                      .poolSizeCount = sizeof sizes / sizeof *sizes,
                                      .pPoolSizes = sizes};
     VkCommandBufferAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -274,6 +282,7 @@ bool snx_ctr_vk_init(SnxCtrMemory* memory, char* error, size_t error_size) {
 void snx_ctr_vk_free(void) {
     SnxCtrVk* v = &g_device.vk;
     if (v->device) {
+        snx_ctr_vk_render_free();
         vkDeviceWaitIdle(v->device);
         for (unsigned i = 0; i < v->ram_count; ++i) {
             vkDestroyBuffer(v->device, v->ram[i].buffer, NULL);
@@ -303,7 +312,9 @@ VkCommandBuffer snx_ctr_vk_commands(void) {
 bool snx_ctr_vk_finish(void) { return snx_ctr_vk_finish_with(VK_NULL_HANDLE, VK_NULL_HANDLE); }
 bool snx_ctr_vk_finish_with(VkSemaphore wait, VkSemaphore signal) {
     SnxCtrVk* v = &g_device.vk;
-    if (!g_device.up || (!v->recording && !wait && !signal)) return true;
+    if (!g_device.up) return true;
+    snx_ctr_vk_render_flush(); /* the draws' targets stored to guest memory with the rest */
+    if (!v->recording && !wait && !signal) return true;
     snx_ctr_vk_commands();
     v->recording = false;
     /* everything written is the host's to read once the fence is signaled */
@@ -326,6 +337,7 @@ bool snx_ctr_vk_finish_with(VkSemaphore wait, VkSemaphore signal) {
     vkResetFences(v->device, 1, &v->fence);
     vkResetCommandBuffer(v->cb, 0);
     vkResetDescriptorPool(v->device, v->descriptors, 0);
+    snx_ctr_vk_render_done();
     return ok;
 }
 VkDescriptorSet snx_ctr_vk_set(VkDescriptorSetLayout layout) {

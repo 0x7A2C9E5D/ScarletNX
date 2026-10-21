@@ -12,6 +12,7 @@
 #include "3ds/gpu/vk/vk.h"
 #include "3ds/gpu/vk/shaders/present_spv.h"
 #include "3ds/gpu/vk/vk_transfer.h"
+#include "3ds/gpu/vk/vk_render.h"
 #include "common/utilities/common.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -253,6 +254,7 @@ bool snx_ctr_present_frame(unsigned screen, uint32_t pa, unsigned width, unsigne
         if (!frame_make(f, height, width)) return false;
     }
     bool dump = dump_due(), readback = dump || hash;
+    snx_ctr_vk_render_flush(); /* the draws before it in guest memory first */
     VkCommandBuffer cb = snx_ctr_vk_commands();
     snx_ctr_vk_barrier(cb); /* after what the GPU wrote to the framebuffer */
     image_barrier(cb, f->image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);

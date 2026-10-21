@@ -6,7 +6,7 @@
    register file and host-paced 60 Hz display timing. The GX queue's DMA, memory
    fills, display transfers and texture copies run on physical memory through the
    transfer engine (gpu/transfer.c), PICA command lists (SubmitCmdList) through the
-   command processor (gpu/pica.c) and its software draws; the save-VRAM paths stop. */
+   command processor (gpu/pica.c), which draws on the GPU (gpu/vk/render.c); the save-VRAM paths stop. */
 #include "3ds/runtime/internal.h"
 #include "snx_settings.h"
 #include "3ds/services/gsp.h"
@@ -15,6 +15,7 @@
 #include "3ds/gpu/transfer.h"
 #include "3ds/gpu/vk/vk.h"
 #include "3ds/gpu/vk/vk_transfer.h"
+#include "3ds/gpu/vk/vk_render.h"
 #include <stdio.h>
 #include "common/utilities/common.h"
 #include <stdlib.h>
@@ -511,7 +512,7 @@ static GxStep gx_transfer(SnxCtrIpc* c, GxInterrupts* irq) {
 static void gx_p3d(void* context) { gx_raise((GxInterrupts*)context, GX_P3D); }
 static GxStep gx_submit(SnxCtrIpc* c, const uint32_t* a, GxInterrupts* irq) {
     SnxCtrGsp* g = &c->process->gsp;
-    SnxCtrPicaHost host = {irq, gx_p3d};
+    SnxCtrPicaHost host = {irq, gx_p3d, snx_ctr_vk_draw, snx_ctr_vk_vertex, snx_ctr_vk_vertices_end};
     uint32_t pa = gx_physical(a[0], a[1]);
     if (!g->pica) {
         g->pica = (SnxCtrPica*)malloc(sizeof *g->pica);
@@ -525,10 +526,7 @@ static GxStep gx_submit(SnxCtrIpc* c, const uint32_t* a, GxInterrupts* irq) {
     g->pica->regs[SNX_PICA_CMDBUF_SIZE] = (a[1] >> 3) & 0xfffffu;
     g->pica->regs[SNX_PICA_CMDBUF_TRIGGER] = 1;
     SnxCtrPicaResult r = SNX_CTR_PICA_OK;
-    /* the software renderer reads and writes guest memory on the CPU: the GPU's fills and transfers before it land
-       first */
-    if (pa && !snx_ctr_vk_finish()) r = SNX_CTR_PICA_UNSUPPORTED;
-    if (pa && r == SNX_CTR_PICA_OK)
+    if (pa)
         r = snx_ctr_pica_run(g->pica, c->process->memory, g->pica->regs[SNX_PICA_CMDBUF_ADDR] * 8,
                              g->pica->regs[SNX_PICA_CMDBUF_SIZE] * 8, &host);
     else

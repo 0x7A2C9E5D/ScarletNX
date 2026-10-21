@@ -3,7 +3,8 @@
 // The framebuffer and transfer pixel formats (Pica::PixelFormat) as common/color.h decodes and encodes them, and the
 // Morton order of video_core/utils.h: the CPU reference is src/3ds/gpu/transfer.c (ported from Azahar, GPL-2.0-or-
 // later, Copyright 2014-2023 Citra Emulator Project). Components are stored most significant first.
-// The including shader declares SRC and DST, the byte arrays pixels are read from and written to.
+// The including shader declares SRC and DST, the byte arrays pixels are read from and written to (NO_ENCODE: no DST,
+// for a shader that only decodes).
 #define PIX_RGBA8  0u
 #define PIX_RGB8   1u
 #define PIX_RGB565 2u
@@ -26,6 +27,7 @@ uvec4 decode(uint format, uint at) {
     default: return uvec4(c4to8((v >> 12) & 15u), c4to8((v >> 8) & 15u), c4to8((v >> 4) & 15u), c4to8(v & 15u));
     }
 }
+#ifndef NO_ENCODE
 void encode(uint format, uvec4 c, uint at) {
     uint v;
     switch (format) {
@@ -39,6 +41,7 @@ void encode(uint format, uvec4 c, uint at) {
     }
     DST[at] = uint8_t(v), DST[at + 1u] = uint8_t(v >> 8);
 }
+#endif
 // the byte offset of pixel (x, y) in its 8-pixel-high tile row, as VideoCore::GetMortonOffset
 uint morton(uint x, uint y, uint bpp) {
     uint i = (x & 1u) | ((y & 1u) << 1) | ((x & 2u) << 1) | ((y & 2u) << 2) | ((x & 4u) << 2) | ((y & 4u) << 3);

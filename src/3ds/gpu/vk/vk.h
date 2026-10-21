@@ -27,6 +27,8 @@ typedef struct {
     VkPhysicalDeviceProperties properties;
     VkPhysicalDeviceMemoryProperties memory_properties;
     bool index8, logic_op; /* VK_EXT_index_type_uint8; the logicOp feature */
+    bool clip_distance;    /* shaderClipDistance */
+    bool preserve_infnan;  /* shaderSignedZeroInfNanPreserveFloat32: the generated shaders keep infinities and NaNs */
     SnxCtrVkRam ram[8];
     unsigned ram_count;
     SDL_Window* window;
