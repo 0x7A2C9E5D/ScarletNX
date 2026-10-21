@@ -258,6 +258,9 @@ typedef struct {
     bool room_ok;       /* asked and answered: the run goes */
     char room_line[96]; /* the question: what it takes, what is free */
     char ask_line[4400]; /* GUI_ASK_CLEAN's to GUI_ASK_FOLDER's question, with what the change takes or where */
+    char error_line[4400];    /* GUI_ASK_ERROR's: the failure, whole */
+    uint32_t errors_said[16]; /* the failures it said in the session, by their text's FNV-1a: each said once */
+    int errors_count;
     int place_off;       /* the folder GUI_ASK_PLACE puts back to its default */
     uint64_t room_free; /* fixed free space for tests; 0 asks the disk */
 
@@ -357,6 +360,20 @@ static const char* const items[] = {SNX_TR_NOOP("Load Switch NSP/XCI/NRO"),
 #define SAY_PLACES SNX_TR_KEYS("Up/Down: folder. Enter: pick another. Del: the default. F5: refresh. ESC: back.")
 #define SAY_PAD    SNX_TR_KEYS("Arrows/pad: move, change. Enter/A: select. Del: the .ini's. ESC: back.")
 #endif
+/* a failure of the system's (a file not written, a picker that did not open): in a box over the screen, whole, until
+   OK, once in the session; the tips or the note keep it after. Over a run or another question, those alone */
+static void say_failure(App* app, const char* text) {
+    uint32_t hash = 2166136261u;
+    const char* c;
+    int i;
+    if (app->menu.running || app->finished || app->confirm.shown) return;
+    for (c = text; *c; ++c) hash = (hash ^ (unsigned char)*c) * 16777619u;
+    for (i = 0; i < app->errors_count && i < (int)SDL_arraysize(app->errors_said); ++i)
+        if (app->errors_said[i] == hash) return;
+    app->errors_said[app->errors_count++ % (int)SDL_arraysize(app->errors_said)] = hash;
+    snprintf(app->error_line, sizeof app->error_line, "%s", text);
+    gui_confirm_open(&app->confirm, GUI_ASK_ERROR, false);
+}
 static SDL_Color rgb(GuiRgb c) {
     SDL_Color out = {c.r, c.g, c.b, 255};
     return out;
@@ -645,12 +662,15 @@ static int app_save(App* app) {
     failed = !dir || !staged || snx_mkdirs(dir) || snx_write_file(staged, text, (size_t)n) ||
              snx_replace(staged, app->app_file);
     if (failed && staged) remove(staged);
-    if (failed && app->editing)
+    if (failed && app->editing) {
         snprintf(app->editor.note, sizeof app->editor.note,
                  snx_tr("Not kept for the next start: %s could not be written"), app->app_file);
-    else if (failed)
+        say_failure(app, app->editor.note);
+    } else if (failed) {
         snprintf(app->message, sizeof app->message, snx_tr("Not kept for the next start: %s could not be written"),
                  app->app_file);
+        say_failure(app, app->message);
+    }
     free(dir);
     free(staged);
     free(text);
@@ -1262,6 +1282,7 @@ static const char* ask_question(const App* app) {
         case GUI_ASK_PLACES:
         case GUI_ASK_PLACE:
         case GUI_ASK_FOLDER: return app->ask_line;
+        case GUI_ASK_ERROR: return app->error_line;
         default:
             return screen(app) == GUI_SCREEN_COMPILING ? snx_tr("Abort the recompile? Its work is lost.")
                                                        : snx_tr("Abort the run?");
@@ -1565,30 +1586,34 @@ static const char* const ask_choices[][2] = {{SNX_TR_NOOP("Keep going"), SNX_TR_
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Reset")},
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Reset")},
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Reset")},
-                                             {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Take it off")}};
+                                             {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Take it off")},
+                                             {SNX_TR_NOOP("OK"), NULL}};
 /* the question shown, over the whole screen in the middle or at its foot, a choice asked twice saying so once pressed
-   (its label in second) */
-static void ask_place(App* app, GuiChoices* c, const char** labels, char* second, size_t size) {
-    int width, height;
+   (its label in second): how many choices it has, one for a failure's OK */
+static int ask_place(App* app, GuiChoices* c, const char** labels, char* second, size_t size) {
+    int width, height, count;
     GuiAsk ask = app->confirm.ask;
     area(app, &width, &height);
     labels[0] = snx_tr(ask_choices[ask][0]);
-    snprintf(second, size, "%s%s%s", snx_tr(ask_choices[ask][1]), app->confirm.armed ? ": " : "",
-             app->confirm.armed ? snx_tr(SAY_AGAIN) : "");
-    labels[1] = second;
+    count = ask_choices[ask][1] ? 2 : 1;
+    if (count == 2)
+        snprintf(second, size, "%s%s%s", snx_tr(ask_choices[ask][1]), app->confirm.armed ? ": " : "",
+                 app->confirm.armed ? snx_tr(SAY_AGAIN) : "");
+    labels[1] = count == 2 ? second : NULL;
     choices_place(app,
                   app->theme.dialog == GUI_DIALOG_YORHA
                       ? gui_rect(cell_w(app), cell_h(app) / 2, width - 2 * cell_w(app), height - cell_h(app))
                       : gui_rect(0, 0, width, height),
-                  ask_question(app), NULL, labels, 2, app->confirm.selected, c);
+                  ask_question(app), NULL, labels, count, app->confirm.selected, c);
+    return count;
 }
 static void render_ask(App* app) {
     GuiChoices c;
     const char* labels[2];
     char second[96];
-    ask_place(app, &c, labels, second, sizeof second);
+    int count = ask_place(app, &c, labels, second, sizeof second);
     shade(app, 128); /* over another screen */
-    choices_draw(app, &c, ask_question(app), NULL, labels, 2, app->confirm.selected);
+    choices_draw(app, &c, ask_question(app), NULL, labels, count, app->confirm.selected);
 }
 /* the boot's splash: a drawing of Wimsy's, picked at random, drawn a third of the window's shorter side on a theme's
    splash page, then the menu as the theme brings it in */
@@ -2078,9 +2103,11 @@ static void users_pick(App* app, int n) {
         snprintf(app->message, sizeof app->message, "%s", snx_tr("No user picked: the Settings have no user"));
     else {
         gui_settings_sync(settings);
-        if (app->settings_file && gui_settings_save(settings, app->settings_file))
+        if (app->settings_file && gui_settings_save(settings, app->settings_file)) {
             snprintf(app->message, sizeof app->message, snx_tr("Not saved: %s could not be written"),
                      app->settings_file);
+            say_failure(app, app->message);
+        }
     }
     users_close(app);
     users_read(app);
@@ -2320,7 +2347,10 @@ static int addons_save(App* app, char** program) {
     ini = snx_game_ini(folder, name);
     text = list ? snx_addons_text(list, count) : NULL;
     saved = text && !snx_ini_record(ini, "addons", text) && !snx_ini_record(ini, "mods_off", off);
-    if (!saved) snprintf(app->message, sizeof app->message, snx_tr("Not saved: %s could not be written"), ini);
+    if (!saved) {
+        snprintf(app->message, sizeof app->message, snx_tr("Not saved: %s could not be written"), ini);
+        say_failure(app, app->message);
+    }
     free(off);
     free(text);
     free(ini);
@@ -3346,9 +3376,11 @@ static int folders_save(App* app) {
                               app->folders_deep[i] ? GUI_FOLDER_DEEP : "");
     dir = snx_dirname(app->folders_file);
     failed = !text || !dir || snx_mkdirs(dir) || snx_write_file(app->folders_file, text, n);
-    if (failed)
+    if (failed) {
         snprintf(app->editor.note, sizeof app->editor.note, snx_tr("Not saved: %s could not be written"),
                  app->folders_file);
+        say_failure(app, app->editor.note);
+    }
     free(dir);
     free(text);
     return failed;
@@ -3587,8 +3619,10 @@ static void places_apply(App* app) {
     app->themes_dirs[0] = snx_path_join(app->data_dir, "themes");
     { /* where dumps go to be listed: made here, so the player finds it; one that cannot be made is said here, once */
         char* dumps = snx_path_join(app->data_dir, "dumps");
-        if (dumps && !snx_is_dir(dumps) && snx_mkdirs(dumps))
+        if (dumps && !snx_is_dir(dumps) && snx_mkdirs(dumps)) {
             snprintf(app->message, sizeof app->message, snx_tr("Could not make %s"), dumps);
+            say_failure(app, app->message);
+        }
         free(dumps);
     }
     free(app->work_dir);
@@ -3654,10 +3688,11 @@ static void place_use(App* app, int place, char* absolute) {
     if (app->editing && app->form == GUI_FORM_PLACES) open_places(app, place);
     if (app->editing && app->form == GUI_FORM_FOLDERS)
         open_folders(app, 0); /* the Library's recompiled/ row, picked there */
-    if (app->app_file && app_save(app))
+    if (app->app_file && app_save(app)) {
         snprintf(note, sizeof note, snx_tr("Used, not kept for the next start: %s could not be written"),
                  app->app_file);
-    else
+        say_failure(app, note);
+    } else
         snprintf(note, sizeof note,
                  absolute ? snx_tr("%s: %s. The folder before keeps what it has") : snx_tr("%s: %s, the default"),
                  snx_tr(place_labels[place]), place_path(app, place));
@@ -3748,6 +3783,7 @@ static void places_reset(App* app) {
         snprintf(note, sizeof note, snx_tr("Used, not kept for the next start: %s could not be written"),
                  app->app_file);
         place_note(app, note);
+        say_failure(app, note);
     } else
         place_note(app, snx_tr("All back to the defaults. The folders before keep what they have"));
 }
@@ -3830,24 +3866,30 @@ static void open_folder_picker(App* app) {
         char message[sizeof app->editor.note - 40];
         if (gui_android_pick_folder(folder_picked, &app->picked_folder, message, sizeof message))
             ;
-        else if (app->editing)
+        else if (app->editing) {
             snprintf(app->editor.note, sizeof app->editor.note, snx_tr("The folder picker could not open: %s"),
                      message);
-        else /* Games' Add a folder */
+            say_failure(app, app->editor.note);
+        } else { /* Games' Add a folder */
             snprintf(app->message, sizeof app->message, snx_tr("Library: the folder picker could not open: %s"),
                      message);
+            say_failure(app, app->message);
+        }
     }
 #elif defined(SDL_PLATFORM_IOS)
     { /* nor there: the document picker (dist/apple) */
         char message[sizeof app->editor.note - 40];
         if (gui_apple_pick(app->window, 1, folder_picked, &app->picked_folder, message, sizeof message))
             ;
-        else if (app->editing)
+        else if (app->editing) {
             snprintf(app->editor.note, sizeof app->editor.note, snx_tr("The folder picker could not open: %s"),
                      message);
-        else
+            say_failure(app, app->editor.note);
+        } else {
             snprintf(app->message, sizeof app->message, snx_tr("Library: the folder picker could not open: %s"),
                      message);
+            say_failure(app, app->message);
+        }
     }
 #else
     SDL_ShowOpenFolderDialog(folder_picked, &app->picked_folder, app->window, NULL, false);
@@ -4140,9 +4182,11 @@ static void keep_settings(App* app) {
         return;
     app->editor.dirty = false;
     gui_settings_sync(&app->settings);
-    if (app->settings_file && gui_settings_save(&app->settings, app->settings_file))
+    if (app->settings_file && gui_settings_save(&app->settings, app->settings_file)) {
         snprintf(app->editor.note, sizeof app->editor.note, snx_tr("Not saved: %s could not be written"),
                  app->settings_file);
+        say_failure(app, app->editor.note);
+    }
     if (app->user != settings_user(app)) users_read(app); /* the head shows the user picked */
 }
 static int setting_row(const App* app, const char* key) {
@@ -4254,9 +4298,11 @@ static void pad_load_mappings(App* app) {
     char* path;
     if (named && *named) return; /* SDL loaded the explicit file at subsystem startup */
     path = pad_mappings_file(app);
-    if (path && snx_is_file(path) && SDL_AddGamepadMappingsFromFile(path) < 0)
+    if (path && snx_is_file(path) && SDL_AddGamepadMappingsFromFile(path) < 0) {
         snprintf(app->editor.note, sizeof app->editor.note, snx_tr("SDL mappings could not be read: %s"),
                  SDL_GetError());
+        say_failure(app, app->editor.note);
+    }
     free(path);
 }
 static void render(App* app);
@@ -4402,6 +4448,7 @@ static const char* device_shown(const GuiSetting* v) { return v->text[0] ? v->te
 static void device_listen(App* app, int row) {
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
         snprintf(app->editor.note, sizeof app->editor.note, snx_tr("Controllers cannot be read: %s"), SDL_GetError());
+        say_failure(app, app->editor.note);
         return;
     }
     pad_load_mappings(app);
@@ -5138,6 +5185,7 @@ static void setup_type(App* app) {
         app->setup_failed = true;
         snprintf(app->message, sizeof app->message, "%s",
                  snx_tr("The system's random number generator failed: no uid for a new user"));
+        say_failure(app, app->message);
         return;
     }
     app->setup_typing = true;
@@ -5221,9 +5269,11 @@ static void setup_finish(App* app) {
     app->message[0] = 0;
     users_read(app);
     if (app->setup_save) app_save(app);
-    if (!file || snx_setup_done(file, &app->setup, why, sizeof why))
+    if (!file || snx_setup_done(file, &app->setup, why, sizeof why)) {
         snprintf(app->message, sizeof app->message, snx_tr("The setup was not kept, so it asks again: %s"),
                  file ? why : snx_tr("no folder for setup.ini"));
+        say_failure(app, app->message);
+    }
     app->setup_failed = false;
     if (app->setup_moved) { /* in the folders it has now */
         left_behind(app);
@@ -5279,17 +5329,19 @@ static void setup_user_done(App* app) {
     } else if (snx_users_start(app->users_dir, app->setup_uid, app->setup_name, why, sizeof why)) {
         snprintf(note, sizeof note, snx_tr("No user written: %s"), why);
         setup_fail(app, note);
+        say_failure(app, note);
     } else
         setup_next(app);
 }
 /* the folder of keys the picker gave (NULL: none, error why it could not open), installed where the menu keeps them */
 static void setup_keys_from(App* app, const char* folder, const char* error) {
     char *dir = app->keys_path ? snx_dirname(app->keys_path) : NULL, why[1024], note[1200], shown[1024];
-    int titles, ok = 0;
+    int titles, ok = 0, failure = 1; /* none picked is no failure */
     app->setup_keys = false;
-    if (!folder)
+    if (!folder) {
         snprintf(note, sizeof note, "%s", error ? error : snx_tr("No folder was picked."));
-    else if (!dir) /* snx_keys_dir's: the variables it reads are unset */
+        failure = error != NULL;
+    } else if (!dir) /* snx_keys_dir's: the variables it reads are unset */
 #ifdef _WIN32
         snprintf(note, sizeof note, "%s", snx_tr("Cannot install prod.keys: neither USERPROFILE nor HOME is set"));
 #else
@@ -5311,6 +5363,7 @@ static void setup_keys_from(App* app, const char* folder, const char* error) {
     } else {
         app->setup_choice.focus = app->setup_choice.count == 3;
         setup_fail(app, note);
+        if (failure) say_failure(app, note);
     }
     free(dir);
 }
@@ -5331,6 +5384,7 @@ static void setup_take(App* app) {
             } else if (choice && !there && (!portable || snx_mkdirs(portable))) {
                 snprintf(note, sizeof note, snx_tr("Could not make %s"), portable ? shown : "(?)");
                 setup_fail(app, note);
+                say_failure(app, note);
             } else {
                 if (choice && !there) data_moved(app);
                 setup_next(app);
@@ -6374,6 +6428,7 @@ static void launch(App* app, char* absolute, bool prepared) {
     if (!direct && !driver) {
         snprintf(app->message, sizeof(app->message), snx_tr("Cannot find %s beside the GUI or on PATH."),
                  driver_name(app->menu.selected) ? driver_name(app->menu.selected) : snx_tr("the selected driver"));
+        say_failure(app, app->message);
         free(absolute);
         return;
     }
@@ -6594,7 +6649,7 @@ static void keys_write(App* app, const char* data, size_t size) {
 #else
         snprintf(app->message, sizeof(app->message), "%s", snx_tr("Cannot install prod.keys: HOME is not set"));
 #endif
-        keys_result(app, false);
+        keys_result(app, false); /* the keys' screen says it whole in its box, Not installed over it */
         return;
     }
     /* staged beside them first: a failed copy (or dropping the installed file itself) must not destroy existing keys */
@@ -6603,7 +6658,7 @@ static void keys_write(App* app, const char* data, size_t size) {
         snprintf(app->message, sizeof(app->message), "%s", snx_tr("prod.keys installed: games can be extracted now."));
     else
         snprintf(app->message, sizeof(app->message), snx_tr("Cannot install %s: %s"), app->keys_path, why);
-    keys_result(app, ok);
+    keys_result(app, ok); /* the keys' screen says it whole in its box */
 }
 static void install_keys(App* app, const char* source) {
     const char* name = source;
@@ -6778,12 +6833,14 @@ static void share_log(App* app) {
                       app->cleaned.count ? "Clean old settings:\n" : "", app->cleaned.text ? app->cleaned.text : "",
                       summary, app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
-    if (!saved)
+    if (!saved) {
         snprintf(app->message, sizeof(app->message), "%s", snx_tr("The log could not be saved: no working folder"));
-    else if (snx_write_file(saved, text, strlen(text))) {
+        say_failure(app, app->message);
+    } else if (snx_write_file(saved, text, strlen(text))) {
         char why[256];
         snprintf(app->message, sizeof(app->message), snx_tr("The log could not be saved to %s: %s"), saved,
                  snx_os_error(why, sizeof why));
+        say_failure(app, app->message);
     }
 #ifdef SDL_PLATFORM_ANDROID
     else if (gui_android_share(saved, app->message, sizeof(app->message)))
@@ -6983,7 +7040,12 @@ static void abort_run(App* app) {
    started, a folder added or used as the choice says */
 static void ask_key(App* app, GuiKey key) {
     GuiAsk ask = app->confirm.ask;
-    bool second = gui_confirm_key(&app->confirm, key);
+    bool second;
+    if (ask == GUI_ASK_ERROR) { /* its one choice: OK or Back close it, the focus never leaves it */
+        if (key == GUI_SELECT || key == GUI_CANCEL) app->confirm.shown = false;
+        return;
+    }
+    second = gui_confirm_key(&app->confirm, key);
     if (app->confirm.shown) return;
     if (ask == GUI_ASK_DEEP)
         folder_answer(app, key == GUI_SELECT, second);
@@ -7569,10 +7631,11 @@ static void event(App* app, const SDL_Event* e) {
             folder_ask(app, (const char*)e->user.data1);
         else {
             char note[sizeof app->editor.note];
-            if (e->user.code)
+            if (e->user.code) {
                 snprintf(note, sizeof note, snx_tr("The folder picker could not open: %s"),
                          error ? error : snx_tr("no reason given"));
-            else
+                say_failure(app, note);
+            } else
                 snprintf(note, sizeof note, "%s", snx_tr("No folder was picked."));
             if (app->editing && (app->form == GUI_FORM_FOLDERS || app->form == GUI_FORM_PLACES))
                 snprintf(app->editor.note, sizeof app->editor.note, "%s", note);
@@ -7866,7 +7929,10 @@ static void open_files(App* app) {
         app_load(app);
     }
     app->users_dir = snx_users_dir(app->home_dir ? app->home_dir : app->data_dir);
-    if (!app->users_dir) snprintf(app->message, sizeof app->message, "%s", snx_tr("No user shown: out of memory"));
+    if (!app->users_dir) {
+        snprintf(app->message, sizeof app->message, "%s", snx_tr("No user shown: out of memory"));
+        say_failure(app, app->message);
+    }
     users_read(app);
     free(config);
     free(prefs);

@@ -368,7 +368,9 @@ screen, and a load's, is one box with where the keys go, the waiting line in its
 opens the picker). The Settings list their groups, and beside them the focused group's
 rows: Enter, or a click on a row, opens the group, its rows taking the focus, the group shown as the focused one; a
 click on another group opens that one. No screen has a Back row: ESC goes back, and so does a click or a tap on the
-foot's ESC. F5, or the foot's (Refresh on a phone), looks at the disk again at once rather than at the next look:
+foot's ESC. A failure of the system's (a file not written, a folder not made, a picker that did not open, the driver
+not found, the log not saved) shows whole in a box over the screen until OK, once in a session; the tips or the
+note go on saying it after. F5, or the foot's (Refresh on a phone), looks at the disk again at once rather than at the next look:
 Games lists its folders again, the Library and Folders say how many of theirs are there, the menu counts the disk
 again, and the box of what an older version left looks again. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
 every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the

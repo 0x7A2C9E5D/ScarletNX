@@ -309,7 +309,7 @@ static void test_first(App* app) {
     key(app, SDLK_RETURN);
     assert(app->setup_keys);
     folder_answer_is(app, NULL);
-    assert(page(app) == SNX_SETUP_KEYS && app->setup_failed && !app->setup_keys);
+    assert(page(app) == SNX_SETUP_KEYS && app->setup_failed && !app->setup_keys && !app->confirm.shown);
     {
         char* keys_path = app->keys_path; /* NULL when snx_keys_dir finds no home: the variable it reads is named */
         app->keys_path = NULL;
@@ -321,6 +321,10 @@ static void test_first(App* app) {
 #else
         assert(app->setup_failed && !strcmp(app->message, "Cannot install prod.keys: HOME is not set"));
 #endif
+        /* a failure, unlike none picked: in the box too, whole, until OK */
+        assert(app->confirm.shown && app->confirm.ask == GUI_ASK_ERROR && !strcmp(app->error_line, app->message));
+        key(app, SDLK_RETURN);
+        assert(!app->confirm.shown && page(app) == SNX_SETUP_KEYS);
         app->keys_path = keys_path;
     }
     key(app, SDLK_RETURN);

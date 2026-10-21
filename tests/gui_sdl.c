@@ -225,6 +225,14 @@ static void row_start(const char* path, char* out, size_t size) {
     n += strcspn(path + n, "/\\");
     snprintf(out, size, "- %.*s", (int)n + (path[n] != 0), path);
 }
+/* the folder picker's answer where it could not open (none on the test's display): the box that says so whole, which
+   OK closes; none when it answered no folder */
+static void picker_box_closed(App* app) {
+    if (!app->confirm.shown) return;
+    assert(app->confirm.ask == GUI_ASK_ERROR && strstr(app->error_line, "The folder picker could not open: "));
+    key(app, SDLK_ESCAPE); /* Back closes it as OK does */
+    assert(!app->confirm.shown);
+}
 /* a path the GUI keeps against one the test made: on Windows the system hands paths back with backslashes, where
    snx_path_join put a '/' */
 static bool same_path(const char* a, const char* b) {
@@ -1044,6 +1052,56 @@ int main(int argc, char** argv) {
     app.settings_file = snx_path_join(temporary, "config/settings.ini"); /* the Settings' picks, kept */
     app.folders_file = snx_path_join(temporary, "config/folders.txt");   /* the player's game folders */
     app.app_file = snx_path_join(temporary, "config/app.ini");           /* Settings > App's picks */
+    /* a start's failure is said in the box over the menu: /nonexistent's dumps/ cannot be made here, but a root that
+       can make it (a CI container) has none */
+    while (app.confirm.shown) {
+        assert(app.confirm.ask == GUI_ASK_ERROR);
+        key(&app, SDLK_RETURN);
+    }
+    app.message[0] = 0;
+    /* a data folder whose dumps/ cannot be made, under a file whoever runs this: said in the box, whole, until OK; the
+       tips keep it */
+    {
+        char *blocker = snx_path_join(temporary, "a file"), *data = app.data_dir, *games = app.games_dir;
+        char *themes = app.themes_dirs[0], *work = app.work_dir, *keys = app.keys_path, *home = app.home_dir, *said;
+        assert(!snx_write_file(blocker, "", 0));
+        app.home_dir = snx_path_join(blocker, "data"); /* the data folder places_apply takes, none picked */
+        app.data_dir = NULL;
+        app.games_dir = app.themes_dirs[0] = app.work_dir = app.keys_path = NULL;
+        places_apply(&app);
+        said = snx_format("Could not make %s/dumps", app.data_dir);
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR && !strcmp(app.error_line, said));
+        render(&app);
+        shows(&app, said, rgb(app.theme.warning));
+        free(app.data_dir), free(app.games_dir), free(app.themes_dirs[0]), free(app.work_dir), free(app.keys_path);
+        free(app.home_dir);
+        app.data_dir = data, app.games_dir = games, app.themes_dirs[0] = themes, app.work_dir = work;
+        app.keys_path = keys, app.home_dir = home;
+        assert(!remove(blocker));
+        free(blocker);
+        free(said);
+    }
+    shows(&app, "- OK", yellow);
+    {
+        GuiChoices c;
+        const char* labels[2];
+        char second[96];
+        assert(ask_place(&app, &c, labels, second, sizeof second) == 1 && c.list.count == 1); /* OK alone */
+    }
+    key(&app, SDLK_DOWN); /* its one choice: nothing to move to, nothing closes */
+    assert(app.confirm.shown && !app.confirm.selected);
+    key(&app, SDLK_RETURN);
+    assert(!app.confirm.shown && !strcmp(app.message, app.error_line));
+    { /* the same failure again: said whole once in the session, the tips go on saying it; another, said */
+        char said[sizeof app.error_line];
+        snprintf(said, sizeof said, "%s", app.error_line);
+        say_failure(&app, said);
+        assert(!app.confirm.shown);
+        say_failure(&app, "Not saved: x could not be written");
+        assert(app.confirm.shown && !strcmp(app.error_line, "Not saved: x could not be written"));
+        key(&app, SDLK_RETURN);
+        assert(!app.confirm.shown);
+    }
     render(&app);
     shows(&app, "- Load Switch NSP/XCI/NRO", yellow);
     assert(!app.menu.activated);
@@ -1605,14 +1663,20 @@ int main(int argc, char** argv) {
         /* a file that cannot be written: the pick holds for the session, and the note says it is not kept */
         assert(!snx_write_file(blocker, "file", 4));
         app.app_file = snx_path_join(blocker, "app.ini");
-        pick_size(&app, 1, true);
-        assert(app.menu.text_size == 1 && !snx_is_file(app.app_file));
         snprintf(expected, sizeof expected, "Not kept for the next start: %s could not be written", app.app_file);
+        key(&app, SDLK_RETURN);
+        app.sizes.focus = 1 + 3;
+        key(&app, SDLK_RETURN);
+        key(&app, SDLK_RIGHT);
+        key(&app, SDLK_RETURN); /* kept: a box says it is not, whole, until OK; the note after */
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR && !strcmp(app.error_line, expected));
+        key(&app, SDLK_RETURN);
+        assert(!app.confirm.shown && app.menu.text_size == 1 && !snx_is_file(app.app_file));
         assert(!strcmp(app.editor.note, expected));
-        pick_size(&app, 0, true);
-        assert(!app.menu.text_size);
         free(app.app_file);
         app.app_file = kept_file;
+        pick_size(&app, 0, true);
+        assert(!app.menu.text_size);
         remove(blocker);
         free(blocker);
         app.editor.note[0] = 0;
@@ -1967,6 +2031,7 @@ int main(int argc, char** argv) {
                 while (SDL_PollEvent(&answer)) event(&app, &answer);
             assert(app.place_row == -1 && !app.place[GUI_PLACE_GAMES]);
         }
+        picker_box_closed(&app);
         { /* the folders as the tests before set them, put back after: Folders' default is not theirs */
             char *data = app.data_dir, *games = app.games_dir, *themes = app.themes_dirs[0], *work = app.work_dir;
             char *keys_path = app.keys_path, *elsewhere = snx_path_join(temporary, "games elsewhere"), *fallback;
@@ -2087,6 +2152,7 @@ int main(int argc, char** argv) {
             while (!app.editor.note[0] && SDL_GetTicks() < until) /* its answer comes on the picker's thread */
                 while (SDL_PollEvent(&answer)) event(&app, &answer);
         }
+        picker_box_closed(&app);
         assert(app.folder_count == 1 && (!strcmp(app.editor.note, "No folder was picked.") ||
                                          !strncmp(app.editor.note, "The folder picker could not open: ", 34)));
         app.editor.row = 2; /* Enter or Del on a folder asks before it is taken off, as the tips say; Back keeps it */
@@ -2591,6 +2657,9 @@ int main(int argc, char** argv) {
         set_env("PATH", "/nonexistent");
         launch(&app, snx_strdup(input), false);
         assert(!app.menu.running && !strcmp(app.message, "Cannot find scarletnx beside the GUI or on PATH."));
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR && !strcmp(app.error_line, app.message));
+        key(&app, SDLK_RETURN); /* in the box too, whole, until OK */
+        assert(!app.confirm.shown);
         set_env("PATH", path);
         SDL_free(path);
         app.self = own;
@@ -3139,6 +3208,7 @@ int main(int argc, char** argv) {
         while (!app.message[0] && SDL_GetTicks() < until) /* its answer comes on the picker's thread */
             while (SDL_PollEvent(&answer)) event(&app, &answer);
     }
+    picker_box_closed(&app);
     assert(app.menu.view == GUI_LOAD_GAMES && !app.editing &&
            (!strcmp(app.message, "Library: No folder was picked.") ||
             !strncmp(app.message, "Library: The folder picker could not open: ", 43)));
@@ -4813,6 +4883,7 @@ int main(int argc, char** argv) {
                 while (!app.editor.note[0] && SDL_GetTicks() < until) /* its answer comes on the picker's thread */
                     while (SDL_PollEvent(&answer)) event(&app, &answer);
             }
+            picker_box_closed(&app);
             assert(!strcmp(app.editor.note, "No folder was picked.") ||
                    !strncmp(app.editor.note, "The folder picker could not open: ", 34));
             leave_editor(&app);
@@ -5369,6 +5440,8 @@ int main(int argc, char** argv) {
             app.cwd = gone;
             key(&app, SDLK_RETURN);
             assert(!strncmp(app.message, said, strlen(said)) && app.message[strlen(said)] && !snx_path_exists(log));
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR && !strcmp(app.error_line, app.message));
+            key(&app, SDLK_RETURN); /* in the box too, whole, until OK */
             app.cwd = cwd;
             free(said);
             free(log);
