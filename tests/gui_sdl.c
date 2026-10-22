@@ -1175,6 +1175,39 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RETURN);
         assert(!app.confirm.shown);
     }
+    /* the menu's pads stay open through a run until its game loads (LAUNCH, the runner's banner), so a pad can stop a
+       recompile; open again once it ends. SDL failing to start them is said with its reason, once */
+    {
+        app.menu.running = true;
+        gui_steps_reset(&app.steps);
+        pads_follow(&app);
+        assert(app.pads.started);
+        gui_steps_feed(&app.steps, "Recompiling pad game (1 modules)\n", 33, 0);
+        pads_follow(&app);
+        assert(app.pads.started);
+        gui_steps_feed(&app.steps, "ScarletNX - pad game\n", 21, 0);
+        pads_follow(&app);
+        assert(!app.pads.started);
+        app.menu.running = false;
+        pads_follow(&app);
+        assert(app.pads.started && !app.confirm.shown);
+        gui_pads_stop(&app.pads);
+        gui_steps_reset(&app.steps);
+        SDL_SetError("no pad driver here");
+        pads_fail(&app);
+        app.menu.running = true; /* not over a run: said once it ends */
+        pads_follow(&app);
+        assert(!app.confirm.shown);
+        app.menu.running = false;
+        pads_follow(&app);
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR &&
+               !strcmp(app.error_line, "Controllers cannot be read: no pad driver here"));
+        key(&app, SDLK_RETURN);
+        pads_follow(&app);
+        assert(!app.confirm.shown && !app.pads.started); /* not asked again, nor said */
+        app.pads_failed = false;
+        app.message[0] = 0;
+    }
     render(&app);
     shows(&app, "- Load Switch NSP/XCI/NRO", yellow);
     assert(!app.menu.activated);
@@ -1866,17 +1899,18 @@ int main(int argc, char** argv) {
            (U+4E3B U+9898) lined up with the others, a foot's keys (Up/Down as U+4E0A/U+4E0B) found by their columns */
         {
             GuiRect none = {0, 0, 0, 0};
-            int x, y, up = hint_word("Up", 2), down = hint_word("Down", 4);
+            int x, y, up = hint_word("Up", 2, false), down = hint_word("Down", 4, false);
             assert(tab_rect(&app, none, GUI_TAB_MENU).w == 6 * cell_w(&app));
             assert(tab_rect(&app, none, GUI_TAB_GAMES).x == 7 * cell_w(&app));
             assert(find_letters(&app, "\xe8\x8f\x9c\xe5\x8d\x95", normal, 1, &x, &y));
             snprintf(line, sizeof line, "- \xe4\xb8\xbb\xe9\xa2\x98%14s %.4s", "", app.app_form.theme);
             assert(find_letters(&app, line, normal, 1, &x, &y));
             assert(hint_width("\xe4\xb8\x8a/\xe4\xb8\x8b", "linha") == 11 && up >= 0 && down >= 0 && up != down);
-            assert(hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 1) == up && hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 2) == up);
-            assert(hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 3) == down &&
-                   hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 4) == down);
-            assert(hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 5) == -1); /* past them: no one key for both */
+            assert(hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 1, false) == up &&
+                   hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 2, false) == up);
+            assert(hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 3, false) == down &&
+                   hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 4, false) == down);
+            assert(hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 5, false) == -1); /* past them: no one key for both */
         }
         key(&app, SDLK_RIGHT);
         assert(app.language == 3 && snx_tr_language() == 2 &&
@@ -4393,8 +4427,16 @@ int main(int argc, char** argv) {
             render(&app);
             shows_foot(&app, "R", yellow); /* its key, then what it does */
             shows_foot(&app, "recompile", normal);
-            assert(hint_keys[hint_pick("R", 0)].key == SDLK_R && hint_keys[hint_pick("R", 5)].key == SDLK_R);
-            assert(hint_keys[hint_pick("Recompile", 3)].key == SDLK_R); /* Android's: no R to name */
+            assert(hint_keys[hint_pick("R", 0, false)].key == SDLK_R &&
+                   hint_keys[hint_pick("R", 5, false)].key == SDLK_R);
+            assert(hint_keys[hint_pick("Recompile", 3, false)].key == SDLK_R); /* Android's: no R to name */
+            /* B: AOT pack from the keyboard, back from a pad */
+            assert(hint_keys[hint_pick("B", 0, false)].key == SDLK_B &&
+                   hint_keys[hint_pick("B", 0, true)].key == SDLK_ESCAPE);
+            assert(hint_keys[hint_pick("LB", 0, true)].key == SDLK_TAB && hint_keys[hint_pick("LB", 0, true)].mod);
+            assert(hint_pick("LB", 0, false) < 0);
+            assert(hint_keys[hint_pick("L3", 0, true)].key == SDLK_M &&
+                   hint_keys[hint_pick("R3", 0, true)].key == SDLK_B);
             app.browser.selected = 0;
             key(&app, SDLK_R);
             assert(!app.menu.running && !strcmp(app.message, "No game in focus to recompile."));
@@ -5955,10 +5997,15 @@ int main(int argc, char** argv) {
            between slashes its own; its text, when its words all press one key, that key. A word of every screen's keys
            presses one, or is one that names none */
         {
-            static const char* const says[] = {SAY_MENU_KEYS, SAY_GAMES,    SAY_KEYS_HOW, SAY_EDITOR,
-                                               SAY_PICKER,    SAY_SETTINGS, SAY_GROUPS,   SAY_APP,
-                                               SAY_FOLDERS,   SAY_PLACES,   SAY_PAD,      " Tab: screen."};
-            static const char* const none[] = {"Arrows", "mouse", "pad"};
+            static const char* const says[] = {
+                SAY_MENU_KEYS, SAY_GAMES, SAY_KEYS_HOW, SAY_EDITOR, SAY_PICKER, SAY_SETTINGS, SAY_GROUPS, SAY_APP,
+                SAY_FOLDERS, SAY_PLACES, SAY_PAD, " Tab: screen.",
+                /* and while a pad drives the menu, its words found first from here */
+                SAY_PAD_MENU, SAY_PAD_GAMES, SAY_PAD_KEYS_HOW, SAY_PAD_EDITOR, SAY_PAD_PICKER, SAY_PAD_SETTINGS,
+                SAY_PAD_GROUPS, SAY_PAD_APP, SAY_PAD_FOLDERS, SAY_PAD_PLACES, SAY_PAD_USERS, SAY_PAD_TAB,
+                SAY_PAD_GAMES_AOT};
+            const size_t pads = 12; /* the first of the pad's */
+            static const char* const none[] = {"Arrows", "mouse", "pad", "D-pad"};
             char key_of[128], what[128];
             Uint8 was;
             int launch;
@@ -5971,9 +6018,9 @@ int main(int argc, char** argv) {
                         n = (size_t)(end - word);
                         for (k = 0; k < SDL_arraysize(none) && (strlen(none[k]) != n || strncmp(none[k], word, n));
                              ++k) {}
-                        if (hint_word(word, n) < 0 && k == SDL_arraysize(none))
+                        if (hint_word(word, n, i >= pads) < 0 && k == SDL_arraysize(none))
                             fprintf(stderr, "gui_sdl.c: the foot's key \"%.*s\" presses nothing\n", (int)n, word);
-                        assert(hint_word(word, n) >= 0 || k < SDL_arraysize(none));
+                        assert(hint_word(word, n, i >= pads) >= 0 || k < SDL_arraysize(none));
                     }
             app.theme = *gui_theme_builtin("default");
             app.menu.view = GUI_LOAD_NONE;

@@ -39,10 +39,19 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   editor) shows an arrow at the right end of its first row, up, and of its last, down, in the soft colour.
 - Moving the mouse over an item focuses it in yellow without activating it; in the Settings, a row of the list the
   keys move in (the groups, or the rows of the one open), the other list, a tab and Back waiting for a click.
+- A gamepad drives the menu as the keys do (`src/gui/pad_menu.c`): the D-pad and the left stick are the arrows, the
+  button labelled A (or Cross) is Enter, B (or Circle) ESC, X (or Square) Del and Y (or Triangle) R, wherever the pad
+  has them (a Switch pad's A is east, its X north), LB and RB are Shift+Tab and Tab, LT and RT are PgUp and PgDn, L3
+  and R3 are M and B (Games' mods folder and AOT pack), Start is F5 and Back (View, Minus, Select) F2. A held arrow or
+  page repeats. A press on the pad hides the mouse's cursor and the foot names the pad's buttons, a PlayStation pad's
+  by their shapes; a key or the mouse moving past a few pixels shows the keyboard's again, and so do a click and a
+  finger once they have pressed what the foot showed under them: the press that switched does what it does. The Button
+  map page and a Controller row waiting for a press read the pads themselves. While a run goes the menu lets go of the
+  pads, for the game.
 - The keys at the foot are buttons: a click or a tap on one presses it, as the keyboard does (ESC or
   Back goes back, Tab to the next screen, Enter or Tap selects, Swipe turns the page). A key of
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
-  presses the key when its words all press one. `Arrows`, `mouse` and `pad` press nothing.
+  presses the key when its words all press one. `Arrows`, `mouse`, `pad` and `D-pad` press nothing.
 - The menu, top to bottom: the three loads, **Setup device keys**, **Settings**, **Share log**, on
   Android **Open data folder**, and **Exit**. The games, and the recent ones, are the Games tab's.
 - Space, Enter or a left click explicitly activates an item, marking it bright
