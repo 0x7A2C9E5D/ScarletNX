@@ -157,6 +157,7 @@ typedef struct App {
     Uint64 sampled;
     bool has_output, finished, aborting, abnormal_exit;
     bool log_due; /* the last run ended abnormally, not by ESC, and its log is not saved since: Share log blinks */
+    char row_text[700]; /* the text of the row a list of ui.txt asked for last, until it is drawn (get_row_info) */
     GuiConfirm confirm; /* the question before a run is aborted, when ask_abort says to ask it */
     bool ask_abort;     /* ESC asks first: on a phone it is Back, an edge swipe easily made by mistake */
     int native;
@@ -2983,7 +2984,7 @@ static size_t games_selected(const App* app, size_t row) {
 /* Rows' row: "Recent games", the recent rows and their show more, a page's headings and games; a game in the active
    colour once activated, the pages before and after marked on the first game and the last */
 bool ui_games_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
-    static char label[400];
+    char* label = app->row_text;
     size_t lead = (size_t)games_lead(app), items = gui_browser_items(&app->browser), i, start;
     (void)width; /* a game's name slides when it is too long, as the menu's rows */
     start = app->browser.page * app->browser.page_size;
@@ -2994,7 +2995,7 @@ bool ui_games_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info
     }
     if (row < lead) {
         int index = (int)row - 1;
-        snprintf(label, sizeof label, "%s",
+        snprintf(label, sizeof app->row_text, "%s",
                  index < recent_shown(app) ? app->recent.game[index].name : snx_tr("...show more"));
         info->label = label;
         return true;
@@ -3006,7 +3007,7 @@ bool ui_games_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info
         info->attr = UI_ATTR_LABEL;
         return true;
     }
-    game_label(app, &app->games, start + i, label, sizeof label);
+    game_label(app, &app->games, start + i, label, sizeof app->row_text);
     info->label = label + strlen(app->theme.marker); /* ui_draw_row puts the marker */
     if (app->browser.activated && app->browser.active == start + i) info->attr |= UI_ATTR_ACTIVE;
     if (i == 0 && app->browser.page > 0) info->attr |= UI_ATTR_MORE_UP;
@@ -5407,9 +5408,9 @@ static void form_line(App* app, const GuiEditor* e, int r, int labels, int room,
 }
 /* row r of e as a list of ui.txt asks for it, in a row width pixels wide: false past its last */
 static bool form_row_info(App* app, const GuiEditor* e, size_t r, int labels, int width, UiRowInfo* info) {
-    static char line[700];
+    char* line = app->row_text;
     if (r >= (size_t)gui_editor_rows(e)) return false;
-    form_line(app, e, (int)r, labels, form_room(app, width), line, sizeof line);
+    form_line(app, e, (int)r, labels, form_room(app, width), line, sizeof app->row_text);
     info->label = line + strlen(app->theme.marker); /* ui_draw_row puts the marker */
     return true;
 }
