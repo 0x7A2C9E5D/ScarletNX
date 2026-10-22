@@ -334,10 +334,14 @@ int main(void) {
 #else
 #define SUFFIX ".so"
 #endif
-    /* a module of its own for each run: one loaded before is not loaded again from a file of its name */
-    static const char* const out[] = {"snx-test-unit-cache-0" SUFFIX, "snx-test-unit-cache-1" SUFFIX,
-                                      "snx-test-unit-cache-2" SUFFIX, "snx-test-unit-cache-3" SUFFIX,
-                                      "snx-test-unit-cache-4" SUFFIX, "snx-test-unit-cache-5" SUFFIX};
+    /* a module of its own for each run, as one loaded before is not loaded again from a file of its name: one file
+       name in a folder each, as a Windows module names its file in its exports, and two names are never the same
+       bytes */
+    static const char* const dirs[] = {"snx-test-unit-cache.0", "snx-test-unit-cache.1", "snx-test-unit-cache.2",
+                                       "snx-test-unit-cache.3", "snx-test-unit-cache.4", "snx-test-unit-cache.5"};
+    static const char* const out[] = {"snx-test-unit-cache.0/module" SUFFIX, "snx-test-unit-cache.1/module" SUFFIX,
+                                      "snx-test-unit-cache.2/module" SUFFIX, "snx-test-unit-cache.3/module" SUFFIX,
+                                      "snx-test-unit-cache.4/module" SUFFIX, "snx-test-unit-cache.5/module" SUFFIX};
     const char* folder = "snx-test-unit-cache.d";
     SnxUnitIdentity identity = {"any", '2', NULL};
     SnxUnitCache* cache;
@@ -352,7 +356,10 @@ int main(void) {
     keys();
     trim();
     snx_remove_tree(folder);
-    for (i = 0; i < sizeof out / sizeof *out; ++i) remove(out[i]);
+    for (i = 0; i < sizeof dirs / sizeof *dirs; ++i) {
+        snx_remove_tree(dirs[i]);
+        CHECK(!snx_mkdirs(dirs[i]));
+    }
 
     /* cold: both units compiled and kept */
     program(1);
@@ -430,7 +437,7 @@ int main(void) {
     free(path_a);
     free(path_b);
     snx_remove_tree(folder);
-    for (i = 0; i < sizeof out / sizeof *out; ++i) remove(out[i]);
+    for (i = 0; i < sizeof dirs / sizeof *dirs; ++i) snx_remove_tree(dirs[i]);
     snx_error_sink(NULL);
     if (g_unit_cache.failures) {
         fprintf(stderr, "%d failure(s)\n", g_unit_cache.failures);
