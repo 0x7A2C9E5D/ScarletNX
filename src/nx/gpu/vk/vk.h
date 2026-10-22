@@ -47,6 +47,7 @@ typedef struct {
     VkSurfaceKHR surface;
     VkPhysicalDevice phys;
     VkPhysicalDeviceProperties props;
+	u64 shader_generation; /* shader instruction invalidations, separate from memory epochs */
     VkDevice dev;
     VmaAllocator vma;
     /* compute is a second queue of the graphics family, or of a compute-only family, when the device has one; else
@@ -145,10 +146,13 @@ u32 vk_present_before(u64 ago_ns, u32 presents);
 /* cmd.c */
 void vk_cmd_init(void);
 VkCommandBuffer vk_cmd(void); /* the current frame's command buffer, begun on first use */
-/* size bytes of the current frame's staging memory (host visible, flushed when the frame is submitted), valid until
+/* size bytes of the current frame's mapped staging memory (flushed when the frame is submitted), valid until
    that frame's work is done. NULL past g_vk.alloc_cap: a big upload stages in parts */
 u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off);
-/* As vk_stage, with the allocation for GPU-written data that must be invalidated after its frame fence. */
+/* Streamed buffer snapshots in host RAM, with the same frame lifetime as vk_stage. */
+u8* vk_stage_upload(u64 size, u64 align, VkBuffer* buf, u64* off);
+/* GPU-written storage, device-local when host-visible memory and its budget allow;
+   includes the allocation for invalidation after its frame fence. */
 u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation* mem);
 /* Host-cached memory for the current frame's GPU -> host copies, read after its fence once invalidated. */
 u8* vk_stage_back(u64 size, VkBuffer* buf, u64* off, VmaAllocation* mem);
@@ -455,6 +459,8 @@ int vk_gfx_image_holds(const Surf* s); /* s has a storage result waiting to land
 u64 vk_surf_guest_size(const Surf* s);
 int vk_surf_can_writeback(const Surf* s);
 void vk_surf_flush(Surf* s, const u8* original); /* original preserves newer guest writes for storage images */
+/* s's pixels published over its guest bytes, GPU-owned and not waited for: 1, or 0 when only vk_surf_flush can */
+int vk_surf_publish(Surf* s);
 void vk_surf_wrote(Surf* s); /* its image changed: its copies are out of date (wgen), and it is the newest (wseq) */
 /* vk_surf_flush in two halves, the GPU not waited for: the bytes a write-back of s copies (0 for none), its copy
    recorded into buf at at (host-readable once the submit being recorded is done), and its landing from those bytes p,
@@ -872,6 +878,8 @@ VkPipeline vk_pipeline_get_deferred(const PipeKey* k);
 VkPipeline vk_pipeline_resolve(VkPipeline h);
 /* the pipeline h names when it is ready, else h itself, without waiting: a stand-in and its pipeline are one */
 VkPipeline vk_pipeline_ready(VkPipeline h);
+/* h's pipeline if it is ready, else VK_NULL_HANDLE, *pending saying whether a worker still makes it */
+VkPipeline vk_pipeline_now(VkPipeline h, int* pending);
 /* so far: pipelines made, how many of them the pipeline cache had, ms the workers took making them, ms the GPU thread
    waited for new ones, shaders translated, ms translating them */
 void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* shaders, u64* shader_ms);

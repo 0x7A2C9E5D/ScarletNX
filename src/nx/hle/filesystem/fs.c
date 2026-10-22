@@ -350,6 +350,24 @@ static u8* dump_exefs(const char* path, u64* size) {
     *size = files[i].size;
     return data;
 }
+u8* fs_html_document(const char* path, u64* size) {
+    char* full;
+    u8* data = NULL;
+    size_t n = 0;
+    if (!g_hle.fs.dfs) return NULL;
+    full = snx_format("html-document/%s", path);
+    if (!full) return NULL;
+    pm_lock(&g_hle.fs.dlock);
+    if (!g_hle.fs.html_tried) { /* opened when a page is first asked for, and kept, as the program's is */
+        g_hle.fs.html_tried = 1;
+        g_hle.fs.hfs = snx_dump_html_fs(&g_hle.fs.dump);
+    }
+    if (g_hle.fs.hfs) data = snx_romfs_file(g_hle.fs.hfs, full, &n);
+    pm_unlock(&g_hle.fs.dlock);
+    free(full);
+    if (data) *size = n;
+    return data;
+}
 
 /* The checked DLCs' data folders, then the update's, laid over the game's, each read-only: what their extractions
    hold, a DLC's image in system/archives, an update's ExeFS and RomFS and its control.nacp, which replace the game's

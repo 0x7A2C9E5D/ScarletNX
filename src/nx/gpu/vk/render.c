@@ -811,7 +811,7 @@ int vk_tex_num(const u32* tic, const Surf* t) {
 }
 
 int vk_image_keyable(const ShaderInfo* si, int i) {
-    return (si->img[i].type == 3 || si->img[i].type == 4) && si->img[i].kind != 1;
+    return (si->img[i].type == 3 || si->img[i].type == 4 || si->img[i].type == 5) && si->img[i].kind != 1;
 }
 
 int vk_image_key(const ShaderInfo* si, int i, const u32* tic) {
@@ -821,13 +821,20 @@ int vk_image_key(const ShaderInfo* si, int i, const u32* tic) {
 VkImageView vk_storage_image_view(Surf* t, const ShaderInfo* si, int i, u64* bytes) {
     VkComponentMapping identity = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
                                    VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+    int volume = si->img[i].type == 5;
     *bytes = vk_surf_guest_size(t);
-    if (!t || !t->storage_capable || !vk_surf_can_writeback(t) || t->levels != 1 || t->depth3d != 1 ||
-        (si->img[i].type != 3 && si->img[i].type != 4) || !*bytes || *bytes > UINT32_MAX ||
-        (si->img[i].kind ? t->f.vk != VK_FORMAT_R32_UINT : t->f.is_int))
+    /* a 3D surface is a block linear 3D texture at its own size, written back as one volume (vk_surf_flush) */
+    if (!t || !t->storage_capable || !vk_surf_can_writeback(t) || t->levels != 1 ||
+        (volume ? t->type != VK_IMAGE_VIEW_TYPE_3D || !t->bl || t->sw != t->w || t->sh != t->h
+                : t->depth3d != 1 || (si->img[i].type != 3 && si->img[i].type != 4)) ||
+        !*bytes || *bytes > UINT32_MAX || (si->img[i].kind ? t->f.vk != VK_FORMAT_R32_UINT : t->f.is_int))
         return VK_NULL_HANDLE;
     /* a 2D array surface sees every layer of the image, a single layer one too */
-    return vk_tex_view(t, si->img[i].type == 4 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D, 0, &identity, 0);
+    return vk_tex_view(t,
+                       volume                    ? VK_IMAGE_VIEW_TYPE_3D
+                       : si->img[i].type == 4    ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                                                 : VK_IMAGE_VIEW_TYPE_2D,
+                       0, &identity, 0);
 }
 
 u32 vk_gbuf_desc(int stage, u32 off, const u32* v, u64* addr) {
@@ -1813,8 +1820,8 @@ typedef struct {
 } TargetFormats;
 /* What the last draw made from the registers, kept for the next draw while nothing it was made from changed: the
    register groups (pend: those a method changed since, all of them when another channel draws), the draw's topology,
-   the shaders' code (trusted within an epoch, as vk_shader_get trusts it) and the constant buffer words their
-   translation read (checked each draw, as vk_shader_get checks them on a hit). What else goes into it is found each
+   the shaders' code (trusted within an epoch and shader generation, as vk_shader_get trusts it) and the constant
+   buffer words their translation read (checked each draw, as vk_shader_get checks them on a hit). What else goes into it is found each
    draw and compared: the fragment variant's key (its textures' formats), the targets' formats, which vertex streams
    are empty, and whether the draw samples a target it renders to. Draws made all of it again, a 1 KiB key built and
    compared included, for each of the ~3,400 draws a frame in one game, most of them with the state of the draw
@@ -1824,6 +1831,7 @@ static struct {
     u32 ch_id, pend;
     u32 topology; /* the draw's argument, before tessellation makes it a patch list */
     u32 epoch;    /* g_vk_epoch */
+	u64 shader_generation; /* instruction invalidations also expire kept draws */
     DrawShaders sh; /* the rest holds when sh.vs is set */
     FsKey fkey;
     VkSh* fs;
@@ -1888,6 +1896,8 @@ static int vertex_regs_hold(const u32* r, const DrawShaders* s) {
 static int draw_kept(const GpuChannel* ch, u32 topology, u32 epoch) {
     const DrawShaders* s = &g_draw.sh;
     u32 pend = g_draw.pend & DRAW_GROUPS;
+	if (g_draw.shader_generation != g_vk.shader_generation)
+		return 0;
     if (!s->vs || (pend & ~(R3D_VATTR | R3D_VFORMAT)) || g_draw.topology != topology || g_draw.epoch != epoch)
         return 0;
     if (pend) { /* the vertex registers changed: those the state read may not have */
@@ -2597,6 +2607,7 @@ retry:
     else if (pipe) {
         g_draw.topology = draw_topo;
         g_draw.epoch = epoch;
+		g_draw.shader_generation = g_vk.shader_generation;
         g_draw.sh = sh;
         g_draw.fkey = fk;
         g_draw.fs = fs;

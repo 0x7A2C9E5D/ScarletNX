@@ -22,6 +22,30 @@ void apm_set_configuration(u32 mode, u32 config) {
 }
 void apm_cpu_boost(u32 boost) { g_test_apm_boost = boost; }
 
+/* the game's HtmlDocument content: a page that loads its script beside it, whose A button goes to a callback URL
+   (its B button, assigned first, to another), and a page that assigns no A button */
+u8* fs_html_document(const char* path, u64* size) {
+    static const char* const files[][2] = {
+        {"pages.htdocs/index.html", "<html><head><script src=\"main.js\"></script></head><body>Text</body></html>"},
+        {"pages.htdocs/main.js",
+         "var goBack = function() {\n  location.href = \"http://localhost/?ret=No\";\n};\n"
+         "function goOn() { location.href = \"http://localhost/?ret=Yes\"; }\n"
+         "window.nx.footer.setAssign('B', 'Back', goBack, {});\n"
+         "window.nx.footer.setAssign('A', 'OK', goOn, {});\n"},
+        {"plain.htdocs/index.html", "<html><script>window.nx.footer.setAssign('B', 'Back', x, {});</script></html>"}};
+    size_t i;
+    for (i = 0; i < sizeof files / sizeof files[0]; i++)
+        if (!strcmp(path, files[i][0])) {
+            size_t n = strlen(files[i][1]);
+            u8* d = malloc(n);
+            if (!d) return NULL;
+            memcpy(d, files[i][1], n);
+            *size = n;
+            return d;
+        }
+    return NULL;
+}
+
 u8* fs_read_file(const char* path, u64* size) {
     u8* d;
     if (size) *size = 0;

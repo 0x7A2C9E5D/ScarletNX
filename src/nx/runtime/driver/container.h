@@ -29,8 +29,9 @@ typedef struct {
     SnxU64 version;   /* the picked content's version, its content meta's: SNX_NO_VERSION without one */
     int base, update; /* the containers, either -1 without one; update is the add-on's (an update or a DLC) */
     /* the base's Program NCA, the update's (the patch an NSP of both has, else found 0), the Control NCA, the
-       update's when it has one, and a DLC's Data NCA (aoc) */
-    SnxNcaRef program, patch, control, aoc;
+       update's when it has one, a DLC's Data NCA (aoc), and the HtmlDocument NCA, the offline pages the web applet
+       shows (the update's when it has one; found 0 without a content meta naming it) */
+    SnxNcaRef program, patch, control, aoc, html;
 } SnxDump;
 
 /* prod.keys or title.keys: given, else in repo (NULL for none), else in ~/.switch; the path in repo when it is in
@@ -59,12 +60,14 @@ void snx_dump_close(SnxDump* dump);
 SnxHacFs* snx_dump_fs(SnxDump* dump);
 /* a DLC's RomFS image (aoc) read in place, or NULL, said why */
 SnxHacFs* snx_dump_aoc_fs(SnxDump* dump);
+/* the HtmlDocument NCA's RomFS read in place (html-document/ in it), or NULL without one */
+SnxHacFs* snx_dump_html_fs(SnxDump* dump);
 /* 0 when the keys an NCA picked needs are there, else nonzero with a line saying which are missing and where they come
    from, what names it ("The game's Program NCA"); no key itself is said */
 int snx_nca_keys(const SnxNcaRef* nca, const char* what);
 /* bytes as a size the player reads: "512 bytes", "35 KB", "4.1 GB" */
 void snx_size_text(SnxU64 bytes, char* text, size_t size);
-/* a file at the root of a RomFS read in place (control.nacp in the Control NCA's), malloc'd, or NULL */
+/* a file of a RomFS read in place, by its path (control.nacp in the Control NCA's), malloc'd, or NULL */
 unsigned char* snx_romfs_file(SnxHacFs* fs, const char* name, size_t* size);
 /* the Control NCA's control.nacp, malloc'd, or NULL with why in *why */
 unsigned char* snx_dump_nacp(SnxDump* dump, size_t* size, const char** why);

@@ -289,9 +289,11 @@ VkResult vk_rec_present_result(void) {
 
 /* A graphics pipeline may be a stand-in for one a worker is still making (vk_pipeline_get_deferred): it is waited for
    here, at its bind. One that couldn't be made binds nothing, and the draws after it until the next graphics bind are
-   dropped, as the GPU thread drops a draw without its pipeline (the recording thread's own flag) */
+   dropped, as the GPU thread drops a draw without its pipeline (the recording thread's own flag: 1). With
+   async_pipelines one still being made isn't waited for: its draws are dropped the same way (2) until a later frame
+   binds it made. A new shader's compile, 60 to 400 ms on one driver, stalled the frame it first appeared in */
 static int g_rec_unbound;
-static u64 g_rec_dropped;
+static u64 g_rec_dropped, g_rec_skipped;
 typedef struct {
     VkCommandBuffer cb;
     VkPipelineBindPoint bp;
@@ -299,8 +301,10 @@ typedef struct {
 } BindPipelineArgs;
 static void bind_pipeline_run(const void* p) {
     const BindPipelineArgs* x = p;
-    VkPipeline pipe = vk_pipeline_resolve(x->p);
-    if (x->bp == VK_PIPELINE_BIND_POINT_GRAPHICS) g_rec_unbound = !pipe;
+    int graphics = x->bp == VK_PIPELINE_BIND_POINT_GRAPHICS, pending = 0;
+    VkPipeline pipe =
+        graphics && g_settings.async_pipelines ? vk_pipeline_now(x->p, &pending) : vk_pipeline_resolve(x->p);
+    if (graphics) g_rec_unbound = pipe ? 0 : pending ? 2 : 1;
     if (pipe) vkCmdBindPipeline(x->cb, x->bp, pipe);
 }
 void rec_CmdBindPipeline(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipeline p) {
@@ -315,7 +319,12 @@ void rec_CmdBindPipeline(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipeline 
 }
 static int rec_drop_draw(void) {
     if (!g_rec_unbound) return 0;
-    if (!g_rec_dropped++) WARN("vulkan: a pipeline couldn't be made: its draws are dropped\n");
+    if (g_rec_unbound == 2) {
+        if (g_rec_skipped++ % 1000 == 0)
+            LOG("vulkan: %llu draws skipped while their pipelines were made (async_pipelines)\n",
+                (unsigned long long)g_rec_skipped);
+    } else if (!g_rec_dropped++)
+        WARN("vulkan: a pipeline couldn't be made: its draws are dropped\n");
     return 1;
 }
 typedef struct {

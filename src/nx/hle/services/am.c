@@ -12,6 +12,7 @@
    focus message queued. Library applets answer what the game asked with the console's one user, the connected
    players, or the host's text dialog: at once, but for the inline software keyboard, which lives until the game
    finalizes it and answers its requests through the interactive channels */
+#include <ctype.h>
 #include "nx/hle/services/services_int.h"
 #include "nx/hle/hle.h"
 #include "nx/hle/services/hid.h"
@@ -1198,6 +1199,140 @@ static SvcObj* am_mii_edit(LibApplet* a) {
     LOG("am: Mii editor mode %u answered %s\n", mode, result == MII_EDIT_SUCCESS ? "success" : "cancel");
     return out;
 }
+/* A web applet's arguments (Switchbrew's "Web applet"): a storage starting with a WebArgHeader (u16 count, u16
+   padding, u32 shim kind) and count entries, each a u16 type, a u16 size, 4 bytes of padding and size bytes. The
+   data of the first entry of type, or NULL */
+#define WEB_ARG_DOCUMENT_PATH 0x6 /* the SDK's ShowOfflinePageArgDetail::SetDocumentPath */
+#define WEB_ARG_DOCUMENT_KIND 0x7 /* u32: 1 an offline page of the game's HtmlDocument content (SetDocumentKind) */
+static const u8* am_web_arg(LibApplet* a, u16 type, u16* size) {
+    int i;
+    for (i = 0; i < a->nin; i++) {
+        u64 n = ((StorageData*)a->in[i]->data)->size, at = 8;
+        const u8* p = am_storage_bytes(a->in[i]);
+        u32 count, k;
+        if (n < 8) continue;
+        count = snx_ld_le16(p);
+        for (k = 0; k < count && at + 8 <= n; k++) {
+            u16 t = snx_ld_le16(p + at), s = snx_ld_le16(p + at + 2);
+            if (s > n - at - 8) break;
+            if (t == type) {
+                *size = s;
+                return p + at + 8;
+            }
+            at += 8 + s;
+        }
+    }
+    return NULL;
+}
+/* the text of a quoted string at s (' or "), copied into out (cap bytes with its 0): its end, or NULL */
+static const char* am_js_string(const char* s, char* out, size_t cap) {
+    char q = *s;
+    size_t n = 0;
+    if (q != '\'' && q != '"') return NULL;
+    for (s++; *s && *s != q; s++)
+        if (n + 1 < cap) out[n++] = *s;
+    out[n] = 0;
+    return *s ? s + 1 : NULL;
+}
+static const char* am_skip_space(const char* s) {
+    while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
+    return s;
+}
+/* the URL the script function name sends the page to, from its body in text (var name = function() {...}, name =
+   function() {...} or function name() {...}: its first location.href = "..."), into url: 0 without one */
+static int am_handler_url(const char* text, const char* name, char* url, size_t cap) {
+    size_t n = strlen(name);
+    const char* h;
+    for (h = strstr(text, name); h; h = strstr(h + 1, name)) {
+        const char *after = am_skip_space(h + n), *body, *end, *l;
+        int depth = 0;
+        if ((h > text && (isalnum((unsigned char)h[-1]) || h[-1] == '_' || h[-1] == '$')) ||
+            isalnum((unsigned char)h[n]) || h[n] == '_' || h[n] == '$')
+            continue; /* a longer name */
+        if (*after == '=' && after[1] != '=') {
+            after = am_skip_space(after + 1);
+            if (strncmp(after, "function", 8)) continue;
+        } else if (h - text < 9 || strncmp(h - 9, "function ", 9))
+            continue;
+        if (!(body = strchr(after, '{'))) return 0;
+        for (end = body; *end; end++) { /* the body's end, its braces balanced */
+            if (*end == '{') depth++;
+            if (*end == '}' && !--depth) break;
+        }
+        for (l = strstr(body, "location.href"); l && l < end; l = strstr(l + 1, "location.href")) {
+            const char* v = am_skip_space(l + 13);
+            if (*v == '=' && v[1] != '=' && am_js_string(am_skip_space(v + 1), url, cap)) return 1;
+        }
+        return 0;
+    }
+    return 0;
+}
+/* The page's A button, as the console's offline pages assign it (window.nx.footer.setAssign('A', label, handler)):
+   the URL its handler sends the page to (location.href = "..."), from the page and the scripts it loads, into url
+   (cap bytes). 0 when the page or such an assignment isn't found */
+static int am_page_a_url(const char* page, char* url, size_t cap) {
+    u64 size = 0;
+    char *text = NULL, *dir, *path;
+    const char* s;
+    size_t total = 0, keep;
+    u8* html = fs_html_document(page, &size);
+    int found = 0;
+    if (!html) return 0;
+    /* the page and each script it loads (<script src="..."> beside it) as one text */
+    keep = (size_t)(strrchr(page, '/') ? strrchr(page, '/') - page + 1 : 0);
+    dir = (char*)malloc(keep + 1);
+    text = (char*)malloc((size_t)size + 1);
+    if (!dir || !text) goto done;
+    memcpy(dir, page, keep);
+    dir[keep] = 0;
+    memcpy(text, html, (size_t)size);
+    text[size] = 0;
+    total = (size_t)size;
+    for (s = strstr((char*)text, "<script"); s; s = strstr(s + 1, "<script")) {
+        char src[256];
+        const char *attr = strstr(s, "src="), *end = strchr(s, '>');
+        u64 n = 0;
+        u8* js;
+        char* grown;
+        if (!attr || !end || attr > end || !am_js_string(attr + 4, src, sizeof src)) continue;
+        path = snx_format("%s%s", dir, src);
+        js = path ? fs_html_document(path, &n) : NULL;
+        free(path);
+        if (!js) continue;
+        keep = (size_t)(s - text);
+        grown = (char*)realloc(text, total + (size_t)n + 2);
+        if (grown) {
+            text = grown;
+            text[total] = '\n';
+            memcpy(text + total + 1, js, (size_t)n);
+            total += (size_t)n + 1;
+            text[total] = 0;
+        }
+        free(js);
+        s = text + keep;
+    }
+    for (s = strstr(text, "setAssign("); s && !found; s = strstr(s + 1, "setAssign(")) {
+        char button[8], name[64];
+        const char* at = am_js_string(am_skip_space(s + 10), button, sizeof button);
+        size_t n = 0;
+        if (!at || strcmp(button, "A") || *(at = am_skip_space(at)) != ',') continue;
+        at = am_skip_space(at + 1); /* the label, a string (which may hold a comma) or a name, then the handler */
+        if (*at == '\'' || *at == '"') at = am_js_string(at, name, sizeof name);
+        if (!at || !(at = strchr(at, ','))) continue;
+        at = am_skip_space(at + 1);
+        while ((isalnum((unsigned char)at[n]) || at[n] == '_' || at[n] == '$') && n + 1 < sizeof name) n++;
+        if (!n) continue;
+        memcpy(name, at, n);
+        name[n] = 0;
+        found = am_handler_url(text, name, url, cap);
+    }
+done:
+    free(text);
+    free(dir);
+    free(html);
+    return found;
+}
+
 static int nn_am_service_ILibraryAppletAccessor_PopOutData(SvcObj* self, SvcObj** storage) {
     LibApplet* a = (LibApplet*)self->data;
     u8* d;
@@ -1233,9 +1368,29 @@ static int nn_am_service_ILibraryAppletAccessor_PopOutData(SvcObj* self, SvcObj*
     case AM_APPLET_SHOP:
     case AM_APPLET_OFFLINE_WEB:
     case AM_APPLET_LOGIN_SHARE:
-    case AM_APPLET_WEB_AUTH: /* WebCommonReturnValue: the page was closed (0), no last URL */
+    case AM_APPLET_WEB_AUTH: { /* WebCommonReturnValue: the page was closed (0), no last URL */
+        /* An offline page of the game's own is answered as the player pressing A on it: the URL its A button sends
+           it to, which ends the applet with CallbackUrl (3) when it is a callback URL. One game's online agreement
+           page sends Accept to http://localhost/?ret=Yes, and the game takes nothing else (exit reason 3 and that
+           prefix) as an answer: closed, it asked again, for ever */
+        u16 n = 0, k = 0;
+        const u8* path = a->applet_id == AM_APPLET_OFFLINE_WEB ? am_web_arg(a, WEB_ARG_DOCUMENT_PATH, &n) : NULL;
+        const u8* kind = path ? am_web_arg(a, WEB_ARG_DOCUMENT_KIND, &k) : NULL;
+        char page[0x301], url[0x1000];
         *storage = am_storage_new(0x1010, NULL);
+        d = am_storage_bytes(*storage);
+        if (!path || !kind || k < 4 || snx_ld_le32(kind) != 1) break;
+        memcpy(page, path, n < sizeof page - 1 ? n : sizeof page - 1);
+        page[n < sizeof page - 1 ? n : sizeof page - 1] = 0;
+        if (am_page_a_url(page, url, sizeof url) && !strncmp(url, "http://localhost/", 17)) {
+            am_put32(d, 3);
+            memcpy(d + 8, url, strlen(url) + 1);
+            snx_st_le64(d + 0x1008, strlen(url) + 1);
+            LOG_LIMIT(4, "am: offline page %s: its A button sends it to %s, the applet's answer\n", page, url);
+        } else
+            LOG_LIMIT(4, "am: offline page %s: closed (no callback URL found for its A button)\n", page);
         break;
+    }
     default: /* the other applets' results start with a zero result code */
         *storage = am_storage_new(0x10, NULL);
         break;

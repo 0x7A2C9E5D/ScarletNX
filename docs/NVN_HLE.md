@@ -61,6 +61,15 @@ reached byte-exact intermediate targets in all four titles, but the approach cou
 
 ## What remains in the tree
 
+### GPU compatibility coverage
+
+Shader instruction invalidation reaches the Vulkan shader address caches from the 3D engine's `0x87` and `0x369`
+methods and the compute engine's `0x87` and `0x5a6` methods. Bit 0 advances a shader generation independent of the
+memory epoch. The next lookup reloads code, while content-addressed modules remain reusable. This does not expire
+texture caches or force a host wait. Repeated invalidations flush any held draw before advancing the generation.
+The method encodings are documented in NVIDIA's public [3D class](https://github.com/NVIDIA/open-gpu-doc/blob/master/classes/3d/clb197.h)
+and [compute class](https://github.com/NVIDIA/open-gpu-doc/blob/master/classes/compute/clb1c0.h) headers.
+
 | File | What it is | Built into |
 | --- | --- | --- |
 | `src/nx/gpu/nvn_trace.c` | `nvn_trace=1` inventory of resolved and called NVN functions | the runtime |

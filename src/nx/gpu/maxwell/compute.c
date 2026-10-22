@@ -58,6 +58,11 @@ void compute_method(GpuChannel* ch, u32 m, u32 v, int last) {
     switch (m) {
         case 0x6C: i2m_launch(ch, ch->rcomp, 0x60); break;
         case 0x6D: i2m_data(ch, v); break;
+	case 0x87: /* INVALIDATE_SHADER_CACHES */
+	case 0x5A6: /* INVALIDATE_SHADER_CACHES_NO_WFI */
+		if ((v & 1) && g_renderer->method_barrier)
+			g_renderer->method_barrier(5);
+		break;
         case 0xAF: launch(ch); break;
         case 0x6C3: query_get(ch, ch->rcomp, 0x6C0, v); break; /* the report semaphore, the 3D engine's */
         default: break;

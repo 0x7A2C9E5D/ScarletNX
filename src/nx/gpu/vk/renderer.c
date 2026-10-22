@@ -144,26 +144,39 @@ static int vkr_samples_report(GpuChannel* ch, u64 gva, u32 len, u64 ticks) {
     vk_unlock();
     return r;
 }
-static void vkr_method_barrier(int kind) {
-    /* Nothing for TILED_CACHE_BARRIER (kind 1) or the sampler and texture header cache invalidations (kind 3), as in
-       Eden: a target sampled afterwards gets its barrier when it is bound (vk_surf_use), and headers and samplers are
-       read from guest memory at each bind. Nor does any invalidation expire the cached textures: their checks see the
-       CPU's writes through the epoch each submission and stream wait starts, and the GPU's through write generations.
-       Expiring them at each texture cache invalidation, about a hundred a frame in one game, had every texture bound
-       after one check its memory again */
-    if (kind == 1 || kind == 3) return;
-    vk_lock();
-    vk_render_end();
-    /* The GPU queue orders work across this barrier, including WAIT_FOR_IDLE. CPU-visible releases are gated on GPU
-       completion by the release path instead of stalling this command stream. */
-    VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-                           .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                           .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-                           .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                           .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
-    VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &mb};
-    rec_CmdPipelineBarrier2(vk_cmd(), &di);
-    vk_unlock();
+static void vkr_method_barrier(int kind)
+{
+	VkMemoryBarrier2 mb = {
+		.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+		.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+		.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+		.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+		.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT |
+				 VK_ACCESS_2_MEMORY_WRITE_BIT,
+	};
+	VkDependencyInfo di = {
+		.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+		.memoryBarrierCount = 1,
+		.pMemoryBarriers = &mb,
+	};
+
+	/* Texture descriptors are read at every bind. Surface transitions and
+	 * memory write tracking supply their ordering without expiring caches.
+	 */
+	if (kind == 1 || kind == 3)
+		return;
+
+	vk_lock();
+	if (kind == 5) {
+		/* Content caches keep their modules. Only address shortcuts expire. */
+		g_vk.shader_generation++;
+		vk_unlock();
+		return;
+	}
+	vk_render_end();
+	/* CPU-visible releases wait for completion in the release path. */
+	rec_CmdPipelineBarrier2(vk_cmd(), &di);
+	vk_unlock();
 }
 static int vkr_blit(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy, double sdx,
                     double sdy) {

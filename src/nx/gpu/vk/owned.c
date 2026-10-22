@@ -230,7 +230,15 @@ void vk_guest_peek(u64 gva, void* dst, u64 size) {
                 for (i = 0; i < k; i++) { /* the owner's identity in place of its stale bytes */
                     u64 tag = ((u64)(uintptr_t)r[i].res * 0x9E3779B97F4A7C15ull) ^ (r[i].res_off - (r[i].addr - cpu));
                     u8* t = d + o + (r[i].addr - cpu);
-                    for (u64 b = 0; b < r[i].size; b++) t[b] = (u8)(tag >> (8 * ((r[i].addr + b) & 7)));
+                    u8 word[8];
+                    u64 b = 0;
+                    /* the byte at an address is the tag's byte of the address modulo 8: whole words of guest memory
+                       take the tag's 8 bytes in order, written as such. Byte by byte took a third of the GPU
+                       thread hashing textures over GPU-owned memory (mem_hash) */
+                    for (u32 j = 0; j < 8; j++) word[j] = (u8)(tag >> (8 * j));
+                    for (; b < r[i].size && ((r[i].addr + b) & 7); b++) t[b] = word[(r[i].addr + b) & 7];
+                    for (; b + 8 <= r[i].size; b += 8) memcpy(t + b, word, 8);
+                    for (; b < r[i].size; b++) t[b] = word[(r[i].addr + b) & 7];
                 }
         }
         o += n;

@@ -339,6 +339,7 @@ static VkSh* g_shh[1024];
    by write tracking since then, or else by the hash of its code */
 typedef struct {
     u64 gva, gva_a, gw;
+	u64 shader_generation;
     u32 mask[20], epoch, wseen;
     int stage;
     VkSh* s;
@@ -490,9 +491,11 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
             ca = &set[w];
     if (ca) {
         VkSh* s = ca->s;
-        int same = ca->epoch == g_vk_epoch ||
-                   (code_same(ca, gva, s->clen, s->qh) && (!gva_a || code_same(ca, gva_a, s->clen_a, s->qh_a)));
-        if (same && ca->epoch != g_vk_epoch) {
+	int same = (ca->epoch == g_vk_epoch && ca->shader_generation == g_vk.shader_generation) ||
+		(code_same(ca, gva, s->clen, s->qh) &&
+		 (!gva_a || code_same(ca, gva_a, s->clen_a, s->qh_a)));
+        if (same && (ca->epoch != g_vk_epoch || ca->shader_generation != g_vk.shader_generation)) {
+            ca->shader_generation = g_vk.shader_generation;
             ca->epoch = g_vk_epoch;
             ca->wseen = vk_ww_now();
             ca->gw = gpu_mem_generation();
@@ -577,6 +580,7 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
     ca->epoch = g_vk_epoch;
     ca->wseen = wseen;
     ca->gw = gw;
+	ca->shader_generation = g_vk.shader_generation;
     ca->s = s;
     return s;
 }
@@ -916,12 +920,15 @@ static void pipe_worker(void* arg) {
     }
 }
 int vk_pipeline_worker_count(int setting, int cpus) {
-    int n = cpus / 4;
+    int n = cpus - 2;
     if (setting > 0) return setting;
-    /* a quarter of the CPUs, two to six: the driver's compile is the CPU's work, which the game's threads need too,
-       and a first run's bursts of new pipelines go to them side by side (vk_pipeline_get_deferred) */
+    /* all the CPUs but two, two to twelve. A first run's burst of new pipelines goes to the workers side by side
+       (vk_pipeline_get_deferred), and the frame waits for them at its binds, so the game's threads have little to do
+       meanwhile, and an idle worker costs nothing. A quarter of 8 CPUs (two workers) froze one game's first scene for
+       4.6 s with its caches empty, where six took 1.7 s and eight 1.5 s: past six the CPUs the game's own threads use
+       take back what more would give */
     if (n < 2) n = 2;
-    if (n > 6) n = 6;
+    if (n > 12) n = 12;
     return n;
 }
 /* the workers, started the first time one is needed: how many there are (g_pj_lock) */
@@ -1097,6 +1104,13 @@ VkPipeline vk_pipeline_ready(VkPipeline h) {
     u32 i = (u32)v - 1;
     Pipe* p = g_pstand[i / PSTAND_PAGE][i % PSTAND_PAGE];
     return __atomic_load_n(&p->ready, __ATOMIC_ACQUIRE) ? p->p : h;
+}
+/* the pipeline h names without waiting for it: VK_NULL_HANDLE with *pending set while a worker still makes it, and
+   VK_NULL_HANDLE alone when it couldn't be made */
+VkPipeline vk_pipeline_now(VkPipeline h, int* pending) {
+    VkPipeline p = vk_pipeline_ready(h);
+    *pending = (((u64)(uintptr_t)p) & ~(u64)0xFFFFFFFFull) == PIPE_STANDIN;
+    return *pending ? VK_NULL_HANDLE : p;
 }
 void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* shaders, u64* shader_ms) {
     *pipes = g_pipes_new;
