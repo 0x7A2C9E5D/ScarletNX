@@ -1,31 +1,64 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-name: PR title
+name: Title
 
-# A pull request whose title still holds a donotmerge mark ([donotmerge needs #N]) fails this check until the mark is
-# out, and it runs again whenever the title is edited. As a required check of main it keeps the merge button off.
+# What a title says, in one job: a pull request whose title still holds a donotmerge mark ([donotmerge needs #N]) fails
+# this check until the mark is out, and it runs again whenever the title is edited; as a required check of main it keeps
+# the merge button off. An issue or pull request opened, or whose title changed, gets the labels its [area] prefix and
+# words ask for (scripts/area-labels.py); labels are only added, so one a maintainer took off stays off until the title
+# changes again. pull_request_target takes this workflow and its scripts from the base branch, so a pull request can't
+# change the check it is held by, and its token can label a pull request from a fork; nothing of the pull request is
+# checked out or run: the title reaches the scripts as an argument through the environment
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, edited, reopened, synchronize]
+  issues:
+    types: [opened, edited]
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
 
-# one at a time per pull request: of a burst of edits the newest waits and those before it are dropped. Never skipped
-# on an edit, as a skipped required check passes
+# one at a time per issue or pull request: of a burst of edits the newest waits and those before it are dropped. Never
+# skipped on an edit, as a skipped required check passes
 concurrency:
-  group: pr-title-${{ github.event.pull_request.number }}
+  group: title-${{ github.event.pull_request.number || github.event.issue.number }}
 
 jobs:
   title:
-    name: No donotmerge in the title
+    # the required check's name on a pull request; an issue only gets its labels
+    name: ${{ github.event_name == 'issues' && 'Label the area' || 'No donotmerge in the title' }}
     runs-on: ubuntu-26.04
     steps:
+      # the base branch as it is now (the default branch for an issue), never the pull request
       - uses: actions/checkout@v7
         with:
-          sparse-checkout: scripts/pr-title.py
+          sparse-checkout: |
+            scripts/pr-title.py
+            scripts/area-labels.py
           sparse-checkout-cone-mode: false
       - name: Check the title
+        if: github.event_name == 'pull_request_target'
         env:
           TITLE: ${{ github.event.pull_request.title }}
         run: python3 scripts/pr-title.py "$TITLE"
+      # also under a donotmerge mark, whose check failed above
+      - name: Add the area labels
+        if: ${{ !cancelled() && (github.event.action == 'opened' || github.event.changes.title) }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          TITLE: ${{ github.event.pull_request.title || github.event.issue.title }}
+        run: |
+          wanted=$(python3 scripts/area-labels.py "$TITLE")
+          [ -n "$wanted" ] || exit 0
+          have=$(gh api --paginate "repos/$GITHUB_REPOSITORY/labels" --jq '.[].name')
+          add=()
+          while IFS= read -r label; do
+            # a label the repository lacks is made in the areas' colour; one it has keeps its own
+            grep -qxF "$label" <<<"$have" ||
+              gh api "repos/$GITHUB_REPOSITORY/labels" -f name="$label" -f color=1d76db >/dev/null
+            add+=(-f "labels[]=$label")
+          done <<<"$wanted"
+          gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/labels" "${add[@]}" >/dev/null
