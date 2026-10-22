@@ -1485,6 +1485,11 @@ static int nv_first_use(int dev, u32 cmd) {
 }
 /* a guest buffer, or none when it lies outside guest memory */
 static u8* nv_buffer(IpcBuf b) { return b.addr && b.size <= AS_SIZE && b.addr <= AS_SIZE - b.size ? GP(b.addr) : NULL; }
+void nv_ioctl_abandon(u32 fd) {
+    pm_lock(&g_host.nvdrv.lock);
+    if (fd < NV_FDS && g_hle.nvdrv.nvf[fd].users) g_hle.nvdrv.nvf[fd].users--;
+    pm_unlock(&g_host.nvdrv.lock);
+}
 /* Ioctl, Ioctl2 (extra is a second input) and Ioctl3 (extra is a second output): the ioctl's in and out buffers go
    through the scratch buffer, the extra one straight to the device. A GPU channel takes Ioctl2's and Ioctl3's, as-gpu
    and ctrl-gpu only Ioctl3's. ipc is the command, for the log */
@@ -1505,6 +1510,7 @@ static u32 nv_ioctl(u32 fd, u32 cmd, IpcBuf in, IpcBuf out, IpcBuf extra, int ex
     f = &g_hle.nvdrv.nvf[fd];
     f->users++; /* the entry and its channel stay until this ioctl leaves (Close) */
     dev = f->dev;
+    if (kthread_cur()) kthread_cur()->req_nvfd = fd + 1;
     pm_unlock(&g_host.nvdrv.lock);
     if (nv_first_use(dev, cmd))
         LOG("nvdrv: ioctl %08x on device %d (command %u), buffers %llx/%llx/%llx\n", cmd, dev, ipc,
@@ -1543,6 +1549,7 @@ static u32 nv_ioctl(u32 fd, u32 cmd, IpcBuf in, IpcBuf out, IpcBuf extra, int ex
     }
     if (nout) memcpy(dst, d, (size_t)nout);
     pm_lock(&g_host.nvdrv.lock);
+    if (kthread_cur()) kthread_cur()->req_nvfd = 0;
     if (!--f->users && f->closed) { /* closed meanwhile: this was the last one using it */
         old = *f;
         memset(f, 0, sizeof *f);
