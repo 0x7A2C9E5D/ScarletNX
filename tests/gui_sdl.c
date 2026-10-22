@@ -4244,9 +4244,10 @@ int main(int argc, char** argv) {
         hides(&app, "\x1e", soft);
         shows(&app, "\x1f", soft); /* items below the last row */
         assert(shown - 1 == GUI_KEYS);
-        app.clock = 2 * app.theme.blink_ms; /* its red half: the arrow in the page's colour, as its text */
+        app.clock = 2 * app.theme.blink_ms; /* the red half where no keys are in use: the arrow as its text, page */
         render(&app);
-        shows(&app, "\x1f", rgb(app.theme.page));
+        shows(&app, "\x1f",
+              rgb(ui_menu_entries_attr_cb(&app, GUI_KEYS) & UI_ATTR_FAILURE ? app.theme.page : app.theme.soft));
         app.clock = app.theme.blink_ms;
         /* ui.txt's scroll, center: each focus in the middle of the rows shown, the ends where the list has no more to
            move; the theme's scroll is the other lists' */
