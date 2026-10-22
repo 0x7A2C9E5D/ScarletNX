@@ -217,8 +217,10 @@ void mme_out(GpuChannel* ch, MmeRec* rec, u32 m, u32 v) {
                               over the parameters the running macro is still reading is nothing the hardware does
                               (Eden would nest one) */
         ch->r3d[m] = v;
-    else
-        maxwell3d_method(ch, m, v, 1);
+    else /* constant buffer data stays held for the words after it (r3d_const_upload), and the next method of any
+            other kind writes it: a draw macro's base vertex and base instance went to guest memory as two writes,
+            each with its renderer checks and stamps, before the draw and two more after it */
+        maxwell3d_method(ch, m, v, !(m >= 0x8E4 && m <= 0x8F3));
 }
 u32 mme_reg(GpuChannel* ch, MmeRec* rec, u32 a) {
     if (rec && rec->total) rec->read_after_send = 1;
