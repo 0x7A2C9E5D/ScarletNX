@@ -88,14 +88,14 @@ static uint32_t new_file(VitaProcess* p, void* host, int directory) {
         }
     return 0;
 }
-static int seek(FILE* f, int64_t offset, int whence) {
+static int io_seek(FILE* f, int64_t offset, int whence) {
 #ifdef _WIN32
     return _fseeki64(f, offset, whence);
 #else
     return fseeko(f, (off_t)offset, whence);
 #endif
 }
-static int64_t tell(FILE* f) {
+static int64_t io_tell(FILE* f) {
 #ifdef _WIN32
     return _ftelli64(f);
 #else
@@ -188,10 +188,10 @@ static uint32_t io_pread(VitaProcess* p, VitaThread* t) {
     if (!size) return 0;
     if (!vita_mapped(p, buffer, size)) return SCE_ERRNO(EINVAL);
     FILE* f = p->files[i].host;
-    int64_t was = tell(f);
-    if (seek(f, offset, SEEK_SET)) return SCE_ERRNO(EINVAL);
+    int64_t was = io_tell(f);
+    if (io_seek(f, offset, SEEK_SET)) return SCE_ERRNO(EINVAL);
     uint32_t got = (uint32_t)fread(vita_ptr(p, buffer), 1, size, f);
-    (void)seek(f, was, SEEK_SET);
+    (void)io_seek(f, was, SEEK_SET);
     return got;
 }
 static uint32_t io_sync_by_fd(VitaProcess* p, VitaThread* t) {
@@ -206,17 +206,17 @@ static uint32_t io_lseek(VitaProcess* p, VitaThread* t) {
     int64_t offset = (int64_t)((uint64_t)vita_arg(p, t, 2) | (uint64_t)vita_arg(p, t, 3) << 32);
     int whence = (int)vita_arg(p, t, 4);
     if (i < 0) return vita_return64(t, (uint64_t)(int64_t)(int32_t)SCE_ERRNO(EBADF));
-    if (whence < 0 || whence > 2 || seek(p->files[i].host, offset, whence))
+    if (whence < 0 || whence > 2 || io_seek(p->files[i].host, offset, whence))
         return vita_return64(t, (uint64_t)(int64_t)(int32_t)SCE_ERRNO(EINVAL));
-    return vita_return64(t, (uint64_t)tell(p->files[i].host));
+    return vita_return64(t, (uint64_t)io_tell(p->files[i].host));
 }
 static uint32_t io_lseek32(VitaProcess* p, VitaThread* t) {
     int i = file_index(p, vita_arg(p, t, 0), false);
     int whence = (int)vita_arg(p, t, 2);
     if (i < 0) return SCE_ERRNO(EBADF);
-    if (whence < 0 || whence > 2 || seek(p->files[i].host, (int32_t)vita_arg(p, t, 1), whence))
+    if (whence < 0 || whence > 2 || io_seek(p->files[i].host, (int32_t)vita_arg(p, t, 1), whence))
         return SCE_ERRNO(EINVAL);
-    return (uint32_t)tell(p->files[i].host);
+    return (uint32_t)io_tell(p->files[i].host);
 }
 static uint32_t io_remove(VitaProcess* p, VitaThread* t) {
     bool writable;
@@ -297,8 +297,8 @@ static uint32_t io_getstat_by_fd(VitaProcess* p, VitaThread* t) {
     int i = file_index(p, vita_arg(p, t, 0), false);
     if (i < 0) return SCE_ERRNO(EBADF);
     FILE* f = p->files[i].host;
-    int64_t at = tell(f), size = seek(f, 0, SEEK_END) ? 0 : tell(f);
-    seek(f, at, SEEK_SET);
+    int64_t at = io_tell(f), size = io_seek(f, 0, SEEK_END) ? 0 : io_tell(f);
+    io_seek(f, at, SEEK_SET);
     uint32_t out = vita_arg(p, t, 1);
     memset(vita_ptr(p, out), 0, 88);
     vita_write32(p, out, 0x2000u | 0x1b6u);

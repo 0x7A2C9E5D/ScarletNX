@@ -206,6 +206,7 @@
         "SNX_DEPLOY": "OFF",
         "SNX_BUILD_GNUABI": "OFF",
         "SNX_BUILD_3DS": "OFF",
+        "SNX_BUILD_VITA": "OFF",
         "BUILD_TESTING": "OFF"
       }
     },

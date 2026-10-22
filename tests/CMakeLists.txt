@@ -53,6 +53,8 @@ if(SNX_TEST_SANITIZERS)
         # the 3DS runtime
         scarletnx-3ds snx_ctr_program snx_ctr_board snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process snx_ctr_native
         snx_ctr_audio snx_ctr_gpu snx_ctr_gpu_reference
+        # the Vita runtime, its loader and USSE translator
+        scarletnx-vita snx_vita_program snx_vita_loader snx_vita_usse snx-vita-usse
         # scarletnx's main where it is the other drivers too
         snx_multicall
         # the menu, its splash, icon and pads

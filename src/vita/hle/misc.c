@@ -93,7 +93,11 @@ static uint32_t rtc_get_current_tick(VitaProcess* p, VitaThread* t) {
     uint32_t out = vita_arg(p, t, 0);
     if (!out) return SCE_RTC_ERROR_INVALID_POINTER;
     struct timespec now;
+#if defined(__ANDROID__) && __ANDROID_API__ < 29
+    clock_gettime(CLOCK_REALTIME, &now);
+#else
     timespec_get(&now, TIME_UTC);
+#endif
     vita_write64(p, out, UNIX_EPOCH_TICK + (uint64_t)now.tv_sec * 1000000u + (uint64_t)now.tv_nsec / 1000u);
     return 0;
 }
@@ -133,7 +137,11 @@ static uint32_t rtc_current_local(VitaProcess* p, VitaThread* t) {
     uint32_t out = vita_arg(p, t, 0);
     if (!out) return SCE_RTC_ERROR_INVALID_POINTER;
     struct timespec now;
+#if defined(__ANDROID__) && __ANDROID_API__ < 29
+    clock_gettime(CLOCK_REALTIME, &now);
+#else
     timespec_get(&now, TIME_UTC);
+#endif
     time_t seconds = now.tv_sec;
     struct tm tm;
 #ifdef _WIN32

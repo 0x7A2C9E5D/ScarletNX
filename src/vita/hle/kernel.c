@@ -587,7 +587,11 @@ static uint32_t get_process_time_low(VitaProcess* p, VitaThread* t) {
 static uint32_t libc_gettimeofday(VitaProcess* p, VitaThread* t) {
     uint32_t tv = arg(p, t, 0);
     struct timespec now;
+#if defined(__ANDROID__) && __ANDROID_API__ < 29
+    clock_gettime(CLOCK_REALTIME, &now);
+#else
     timespec_get(&now, TIME_UTC);
+#endif
     if (tv) {
         vita_write32(p, tv, (uint32_t)now.tv_sec);
         vita_write32(p, tv + 4, (uint32_t)(now.tv_nsec / 1000));

@@ -109,8 +109,8 @@ games from running:
 - **Preparing on Windows or Linux.** Their x86 builds carry x86's code generator alone, to keep their size, so
   `--target ios` fails there. The iPhone prepares games itself now.
 - **JIT without StikDebug.** The app still needs a debugger attached, which StikDebug gives ([#598](https://github.com/scarletnx/ScarletNX/issues/598)).
-- **The 3DS and Linux drivers** are not built for iOS (`SNX_BUILD_3DS`, `SNX_BUILD_GNUABI`), nor the Linux one for
-  macOS.
+- **The 3DS, Vita and Linux drivers** are not built for iOS (`SNX_BUILD_3DS`, `SNX_BUILD_VITA`, `SNX_BUILD_GNUABI`),
+  nor the Linux one for macOS.
 
 ## Building
 
