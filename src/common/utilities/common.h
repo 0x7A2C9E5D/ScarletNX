@@ -183,6 +183,10 @@ int snx_terminal(void);
 /* The program name names: a path, or a file of that name in a folder of PATH (with .exe on Windows). Its folder is
    resolved and its name kept, as a link's name can say what the program does; NULL when there is none */
 char* snx_find_tool(const char* name);
+/* The C compiler to run, owned: built (the path the build's own compiler had, on the machine that built it) where it is
+   a file here, else a clang in the folder beside (NULL: none), else one on PATH. NULL, the places looked at in error,
+   when there is none: a release runs on machines without the build's own */
+char* snx_find_compiler(const char* built, const char* beside, char* error, size_t error_size);
 /* argv is NULL terminated. No shell. Captured output is heap-owned by caller.
    home isolates HOME/USERPROFILE and removes XDG_CONFIG_HOME in the child. */
 int snx_run(const char* const* argv, const char* cwd, const char* home, char** output);

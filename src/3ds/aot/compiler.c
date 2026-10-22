@@ -415,7 +415,7 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
     SnxCtrPlan plan = {0};
     Host host = {0};
     char *directory = NULL, *target = NULL, *stage = NULL, *module = NULL, *runtime = NULL, **objects = NULL;
-    char* previous = NULL;
+    char *previous = NULL, *cc = NULL;
     Entry* entries = NULL;
     unsigned count = 0, files = 0;
     const char** command = NULL;
@@ -436,6 +436,20 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
         goto done;
     }
     target = snx_ctr_game_file(directory, SNX_CTR_MODULE_SUFFIX);
+    /* the compiler the link runs, found before the minutes of compiling: a release runs where the build's is not */
+    {
+        char *self = snx_executable("scarletnx"), *folder = self ? snx_dirname(self) : NULL, why[384];
+        cc = snx_find_compiler(SNX_CTR_HOST_CC, folder, why, sizeof why);
+        free(folder);
+        free(self);
+        if (!cc) {
+            snprintf(error, error_size,
+                     "no C compiler to link the native module: %s. Put Clang's bin folder on PATH (LLVM-MinGW's on "
+                     "Windows), or clang beside this program",
+                     why);
+            goto done;
+        }
+    }
     bool exhaustive = image.segment[0].bytes <= SNX_CTR_AOT_EXHAUSTIVE_LIMIT;
     unsigned capacity = image.segment[0].bytes / 4 + image.segment[0].bytes / 2;
     size_t hint_count = 0;
@@ -519,7 +533,7 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
         goto done;
     }
     unsigned arg = 0;
-    command[arg++] = SNX_CTR_HOST_CC;
+    command[arg++] = cc;
     command[arg++] = "-shared";
 #ifdef __APPLE__
     /* ld64's: a dylib refuses undefined symbols, as -z defs does (its default, said); its stacks aren't executable and
@@ -595,6 +609,7 @@ done:
     free(stage);
     free(target);
     free(previous);
+    free(cc);
     free(directory);
     host_free(&host);
     snx_ctr_plan_free(&plan);
