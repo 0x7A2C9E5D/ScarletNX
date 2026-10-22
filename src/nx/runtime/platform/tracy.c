@@ -8,6 +8,7 @@
 #include "nx/runtime/startup.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include "snx_settings.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +34,7 @@ static __thread char t_name[64];
 static SDL_Process* g_tracy_capture;
 static char g_tracy_capture_path[sizeof g_exedir + sizeof g_exename + 64];
 static char g_tracy_title[256];
+static char g_tracy_port[16]; /* the port the client listens on, and the capture connects to */
 #define SNX_TRACY_RUN_SECONDS 3600
 #define SNX_TRACY_NOW_SECONDS 60
 
@@ -41,11 +43,13 @@ static PMutex g_tracy_capture_lock = PMUTEX_INIT;
 static void tracy_capture_lock(void) { pm_lock(&g_tracy_capture_lock); }
 static void tracy_capture_unlock(void) { pm_unlock(&g_tracy_capture_lock); }
 
-/* The sampler starts when a GUI or a capture connects, and stops with the client. */
+/* The sampler starts when the run asks for it, tracy_sampling, at the connect. Its samples land on the timeline as
+   gray sample zones, which with JIT'd guest code and the drivers' own threads (the NVIDIA helpers', MangoHud's) reads
+   as a wall of [unknown]; the instrumented zones alone don't, so the sampler is off unless the trace wants the flame
+   graphs. */
 static int g_tracy_sampling;
 static void tracy_sampling_start(void) {
-    const char* off = getenv("SNX_TRACY_NO_SAMPLING");
-    if (off && !strcmp(off, "0")) return;
+    if (!g_settings.tracy_sampling) return;
     if (__atomic_exchange_n(&g_tracy_sampling, 1, __ATOMIC_ACQ_REL)) return;
     if (TracyCBeginSamplingProfiling()) LOG("tracy: sampling the run's stacks\n");
 }
@@ -67,29 +71,47 @@ static void tracy_attach_thread(void) {
     if (t_name[0]) TracyCSetThreadName(t_name);
 }
 
-/* the capture connects to the client once, so the client has to be listening before the capture starts */
-static void tracy_capture_port(void) {
-    char mine[16];
-    if (getenv("TRACY_PORT")) return; /* the one asked for */
-    /* A capture of its own port, so an earlier capture (or a GUI) on 8086 is not in the way. The client reads the
-       port when it starts, so this is set before that. */
-    snprintf(mine, sizeof mine, "%d", 18086 + (int)(plat_tid() % 1000));
-    setenv("TRACY_PORT", mine, 1);
+/* The client listens on the port it reads as it starts: the setting's, or, when a capture is asked for, one of the
+   run's own so an earlier capture (or a GUI) on 8086 is not in the way. Without either the client keeps Tracy's 8086.
+   Tracy's client still reads TRACY_PORT from the environment, so that one variable is set for it; nothing here reads
+   the environment back. */
+static void tracy_port_setup(int capture) {
+    const char* port = g_settings.tracy_port;
+    if (g_tracy_port[0]) return;
+    if (port[0]) {
+        /* A port Tracy's client can bind: it takes the setting as it is, and a value that is not a number makes
+           it exit and leave the capture connecting to nothing, so it is checked here rather than passed on. */
+        char* end;
+        unsigned long n = strtoul(port, &end, 10);
+        if (*port && !*end && end != port && n > 0 && n < 65536)
+            snprintf(g_tracy_port, sizeof g_tracy_port, "%s", port);
+        else {
+            WARN("tracy: Tracy port %s is not a port number\n", port);
+            port = "";
+        }
+    }
+    if (!g_tracy_port[0]) {
+        /* none named, or an unusable one: only a capture needs a port of its own, and without one the client
+           keeps Tracy's 8086 */
+        if (!capture) return;
+        snprintf(g_tracy_port, sizeof g_tracy_port, "%d", 18086 + (int)(plat_tid() % 1000));
+    }
+    if (plat_setenv("TRACY_PORT", g_tracy_port)) WARN("tracy: cannot set the client's port %s\n", g_tracy_port);
 }
 
 static int tracy_capture_start(int seconds, int launch) {
     char dir[sizeof g_exedir + 16], seconds_text[16], *tool;
-    const char* named = getenv("TRACY_CAPTURE");
-    const char* port = getenv("TRACY_PORT");
+    const char* named = g_settings.tracy_capture_tool;
     const char* argv[9];
     const char* suffix = launch ? "; the run was not started" : "";
     int n = 0;
     struct tm t;
     time_t now;
     snprintf(dir, sizeof dir, "%scaptures", g_exedir);
-    tool = named && *named ? snx_find_tool(named) : tracy_tool("tracy-capture");
+    tool = named[0] ? snx_find_tool(named) : tracy_tool("tracy-capture");
     if (!tool) {
-        WARN("tracy: %s needs tracy-capture 0.14.1 on PATH%s\n", launch ? "--tracy-capture" : "a capture", suffix);
+        WARN("tracy: %s needs tracy-capture 0.14.1 beside the runtime or on PATH%s\n",
+             launch ? "--tracy-capture" : "a capture", suffix);
         return 0;
     }
     if (snx_mkdirs(dir)) {
@@ -113,9 +135,9 @@ static int tracy_capture_start(int seconds, int launch) {
     argv[n++] = "-s";
     snprintf(seconds_text, sizeof seconds_text, "%d", seconds);
     argv[n++] = seconds_text;
-    if (port && *port) {
+    if (g_tracy_port[0]) {
         argv[n++] = "-p";
-        argv[n++] = port;
+        argv[n++] = g_tracy_port;
     }
     argv[n] = NULL;
     g_tracy_capture = SDL_CreateProcess(argv, false);
@@ -125,8 +147,6 @@ static int tracy_capture_start(int seconds, int launch) {
         g_tracy_capture_path[0] = 0;
         return 0;
     }
-    /* the capture binds its port a moment after it starts */
-    plat_sleep_ns(500000000);
     LOG("tracy: recording to %s\n", g_tracy_capture_path);
     return 1;
 }
@@ -135,10 +155,8 @@ static int tracy_capture_start(int seconds, int launch) {
 static void tracy_open_trace(const char* path) {
     char* tool;
     const char* argv[3];
-    const char* off = getenv("SNX_TRACY_NO_OPEN");
-    if (!path || !*path) return;
-    if (off && !strcmp(off, "0")) return;
-    if (!getenv("DISPLAY") && !getenv("WAYLAND_DISPLAY")) return; /* no screen to open it on */
+    if (!path || !*path || !g_settings.tracy_open_trace) return;
+    if (g_opt_headless) return; /* no screen to open it on */
     tool = tracy_tool("tracy-profiler");
     if (!tool) return;
     argv[0] = tool;
@@ -180,7 +198,6 @@ static void tracy_capture_finish(int clean) {
 
 static void tracy_start_client(void) {
     char info[512];
-    const char* port = getenv("TRACY_PORT");
     int n;
     if (__atomic_load_n(&g_tracy_started, __ATOMIC_ACQUIRE)) return;
     ___tracy_startup_profiler();
@@ -196,7 +213,7 @@ static void tracy_start_client(void) {
         LOG("tracy: profiling this run to its capture\n");
     else
         LOG("tracy: profiling this run; connect the GUI with: tracy-profiler -a 127.0.0.1 -p %s\n",
-            port && *port ? port : "8086");
+            g_tracy_port[0] ? g_tracy_port : "8086");
 }
 
 /* Starts a capture and waits for it to connect. The capture's handshake has a couple of seconds to be answered, and
@@ -243,7 +260,7 @@ void snx_tracy_capture_now(void) {
         !__atomic_load_n(&g_tracy_emit, __ATOMIC_ACQUIRE))
         goto out;
     if (!__atomic_load_n(&g_tracy_started, __ATOMIC_ACQUIRE)) {
-        tracy_capture_port();
+        tracy_port_setup(1); /* before the client reads it, which is when it starts */
         tracy_start_client();
         if (!tracy_capture_start(SNX_TRACY_NOW_SECONDS, 0)) goto out;
         tracy_capture_connected(); /* the game waits that long for it */
@@ -341,9 +358,9 @@ void snx_tracy_thread_name(const char* name) {
 int snx_tracy_init(const char* title) {
     snprintf(g_tracy_title, sizeof g_tracy_title, "%s", title && title[0] ? title : "ScarletNX");
     if (!g_opt_tracy_capture && !g_opt_tracy_client) return 0;
-    /* The client before the capture: the capture connects once, so it has to find the client listening. The port is
-       set before the client starts, which is when it reads it. */
-    if (g_opt_tracy_capture) tracy_capture_port();
+    /* The client before the capture: the capture connects once, so it has to find the client listening. The client
+       reads its port as it starts, so it is set before that. */
+    tracy_port_setup(g_opt_tracy_capture);
     tracy_start_client();
     if (g_opt_tracy_capture && !tracy_capture_wait()) return 1;
     return 0;

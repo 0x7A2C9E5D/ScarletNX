@@ -619,6 +619,34 @@ setting Tracy profiler
     help 1 = starts the run with the Tracy client up; connect the GUI to 127.0.0.1:8086 (discovery is off, so its
     help "connect to the next instrumented process" does not find it). A capture and the GUI cannot both
     help have the run: the capture takes its one connection
+setting Tracy sampling
+    key tracy_sampling
+    int 0 1
+    default 0
+    startup
+    words Off|On
+    help 1 = starts the sampler at the first connection, for the trace's flame graphs. With JIT'd guest code and the
+    help drivers' own threads, the sample stacks read as [unknown] over the instrumented zones
+setting Tracy port
+    key tracy_port
+    text 6
+    default ""
+    startup
+    help The port the client listens on and the capture connects to, a number of 1 to 65535. Empty: one of the
+    help run's own, so an earlier capture or GUI on 8086 is not in the way
+setting Tracy capture tool
+    key tracy_capture_tool
+    text 1024
+    default ""
+    startup
+    help The tracy-capture to start: a path, or a name on PATH. Empty: beside the runtime, then on PATH
+setting Tracy open trace
+    key tracy_open_trace
+    int 0 1
+    default 1
+    startup
+    words Off|On
+    help 1 = opens the trace in tracy-profiler when the run ends
 # SNX_TRACY_DEBUG_END
 
 # the unattended runs' (platform/unattended.c): read as the .ini's settings are, from the command line, but in no section,
