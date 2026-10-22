@@ -204,6 +204,15 @@ int main(void) {
     CHECK(transact(BQ_CONNECT, "\0\0\0\0\2\0\0\0\0\0\0\0", 12) == 20);
     CHECK(rd32(0x4010) == 1280 && rd32(0x4014) == 720 && rd32(0x4020) == 0);
 
+    /* The queue's buffer count: 2 by default, SetBufferCount changes it, 0 puts the default back. The NVN window
+       initializes as many textures as this query answers, so it must be the count requested, not the 64 slots */
+    CHECK(transact(BQ_QUERY, "\x0c\0\0\0", 4) == 8 && rd32(0x4010) == 2 && rd32(0x4014) == 0);
+    CHECK(transact(BQ_SET_BUFFER_COUNT, "\x03\0\0\0", 4) == 4 && rd32(0x4010) == 0);
+    CHECK(transact(BQ_QUERY, "\x0c\0\0\0", 4) == 8 && rd32(0x4010) == 3 && rd32(0x4014) == 0);
+    CHECK(transact(BQ_SET_BUFFER_COUNT, "\0\0\0\0", 4) == 4 && rd32(0x4010) == 0);
+    CHECK(transact(BQ_QUERY, "\x0c\0\0\0", 4) == 8 && rd32(0x4010) == 2 && rd32(0x4014) == 0);
+    CHECK(transact(BQ_SET_BUFFER_COUNT, "\x41\0\0\0", 4) == 4 && (i32)rd32(0x4010) == BQ_BAD_VALUE);
+
     /* DequeueBuffer: the slot, a flattened Fence with none in it, the status */
     CHECK(transact(BQ_DEQUEUE_BUFFER, "\0\0\0\0\0\5\0\0\xd0\2\0\0\1\0\0\0\0\0\0\0", 20) == 56);
     CHECK(rd32(0x4010) == 0 && rd32(0x4014) == 1 && rd32(0x4018) == VI_FENCE && rd32(0x401c) == 0);
