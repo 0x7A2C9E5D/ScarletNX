@@ -31,7 +31,9 @@ typedef double f64;
 
 /* The version of the contract between a game module and the runtime: this header (the CPU layout, the SNX_FP_*
    numbers), the helpers in cpu_helpers.c, RtAPI and the module descriptor. The recompiler writes it into each
-   module and the runtime refuses any other. Bump it for any change of layout or of a helper's results.
+   module and the runtime refuses any other. Bump it for any change of layout or of a helper's results:
+   docs/ARCHITECTURE.md's Module ABI says what changes it, and tests/module_contract.c fails when the layout moves
+   while it stays.
    7: CPU.poll and RtAPI.poll, read on the backward branches of generated code.
    8: the FP/SIMD emitters and discovery changes.
    9: RtAPI.svcs, which the NX modules call each SVC through by its number.

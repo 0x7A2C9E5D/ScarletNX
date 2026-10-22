@@ -784,6 +784,9 @@ add_test(NAME patched_copy COMMAND "${CMAKE_COMMAND}" "-DSRC=${PROJECT_SOURCE_DI
 # the dependency cache's keys and how a build is published to it (cmake/deps_cache.cmake)
 add_test(NAME deps_cache COMMAND "${CMAKE_COMMAND}" "-DCC=${CMAKE_C_COMPILER}" "-DSRC=${PROJECT_SOURCE_DIR}"
          "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/deps-cache-test" -P "${CMAKE_CURRENT_SOURCE_DIR}/deps_cache_test.cmake")
+# LLVM's revision for the unit cache's key, read by CMake from its C++ header (cmake/llvm_revision.cmake)
+add_test(NAME llvm_revision COMMAND "${CMAKE_COMMAND}" "-DSRC=${PROJECT_SOURCE_DIR}"
+         "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/llvm-revision-test" -P "${CMAKE_CURRENT_SOURCE_DIR}/llvm_revision_test.cmake")
 
 # hid's shared memory layout (src/nx/hle/services/hid_layout.h) is checked against Eden's declarations at a pinned
 # revision by check_hid_layout.py, run by hand: `python3 tests/check_hid_layout.py --eden <an Eden checkout>`. It
@@ -1107,11 +1110,35 @@ snx_test_target(snx-test-aot-variants 11)
 target_link_libraries(snx-test-aot-variants PRIVATE snx_driver_llvm ${CMAKE_DL_LIBS})
 add_test(NAME aot_variants COMMAND snx-test-aot-variants)
 set_tests_properties(aot_variants PROPERTIES TIMEOUT 120)
+# the code units' cache (nx/loader/unit_cache.c) under the LLVM module build: reuse, keys, broken objects, the limit
+add_executable(snx-test-unit-cache unit_cache.c)
+snx_test_target(snx-test-unit-cache 11)
+target_link_libraries(snx-test-unit-cache PRIVATE snx_driver_llvm ${CMAKE_DL_LIBS})
+add_test(NAME unit_cache COMMAND snx-test-unit-cache)
+set_tests_properties(unit_cache PROPERTIES TIMEOUT 120)
 # the runtime looking a pc up in the AOT variant table instead of compiling it
 add_executable(snx-test-runtime-variants runtime_variants.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/guest_jit.c")
 snx_test_target(snx-test-runtime-variants 11)
 target_link_libraries(snx-test-runtime-variants PRIVATE scarletnx-common scarletnx-filesystem snx_settings)
 add_test(NAME runtime_variants COMMAND snx-test-runtime-variants)
+# the runtime taking a module of SNX_ABI and refusing any other, on modules that are a descriptor alone (the fixture,
+# also built as a 32-bit program's): plain C99, without sanitizers the runtime may lack
+foreach(snx_fixture module-abi module-abi-arm)
+    add_library(snx-test-${snx_fixture} MODULE module_abi_fixture.c)
+    set_target_properties(snx-test-${snx_fixture} PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    target_compile_options(snx-test-${snx_fixture} PRIVATE -Wall -Wextra -Werror -pedantic-errors)
+    target_include_directories(snx-test-${snx_fixture} PRIVATE "${PROJECT_SOURCE_DIR}/src")
+endforeach()
+target_compile_definitions(snx-test-module-abi-arm PRIVATE SNX_TEST_MODULE_ARM)
+add_executable(snx-test-runtime-module-abi module_abi.c)
+snx_test_target(snx-test-runtime-module-abi 99)
+target_link_libraries(snx-test-runtime-module-abi PRIVATE snx_test_common)
+add_test(NAME runtime_module_abi COMMAND snx-test-runtime-module-abi $<TARGET_FILE:scarletnx>
+    $<TARGET_FILE:snx-test-module-abi> $<TARGET_FILE:snx-test-module-abi-arm>)
+# the module contract's layout as recorded when SNX_ABI last rose (docs/ARCHITECTURE.md, Module ABI)
+add_executable(snx-test-module-contract module_contract.c)
+snx_test_target(snx-test-module-contract 99)
+add_test(NAME module_contract COMMAND snx-test-module-contract)
 # the build-side reader of the runtime JIT's cache
 add_executable(snx-test-jit-cache jit_cache.c)
 snx_test_target(snx-test-jit-cache 11)
@@ -1241,7 +1268,7 @@ if(APPLE)
     # on Linux only (the link_macho test and docs/APPLE.md), and these wait for a run on a Mac. The in-process
     # loader's tests run: it loads ELF objects on macOS too (code_loader.c). aot_variants also links a JIT cache unit,
     # and Darwin's JIT writes ELF objects for that loader where the AOT module is Mach-O.
-    set_tests_properties(native_recompiler llvm_module recompiler_library aot_variants llvm_differential_0
+    set_tests_properties(native_recompiler llvm_module recompiler_library aot_variants unit_cache llvm_differential_0
                          llvm_differential_1 llvm_differential_2 PROPERTIES DISABLED TRUE)
 endif()
 
@@ -1553,4 +1580,11 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
     snx_test_target(snx-test-vulkan-backing 11)
     add_test(NAME vulkan_backing COMMAND snx-test-vulkan-backing)
 endif()
+# these recompile with --repo of the checkout, which keeps the code units (nx/loader/unit_cache.c) in the user's cache
+# folder: a folder of the build tree's instead, where XDG names it
+foreach(snx_test native_recompiler llvm_module nx_runtime_homebrew nx_runtime_homebrew_64k_pages)
+    if(TEST ${snx_test})
+        set_property(TEST ${snx_test} APPEND PROPERTY ENVIRONMENT "XDG_CACHE_HOME=${CMAKE_CURRENT_BINARY_DIR}/xdg-cache")
+    endif()
+endforeach()
 snx_sanitizer_path()

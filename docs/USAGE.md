@@ -166,7 +166,8 @@ Run the same command again to retry after a failure or interruption:
   using `work/Game.extracting/` while running. An incomplete staging directory is discarded on retry.
 - A complete `recompiled/<id>/<id>` (`<id>.exe` on Windows), code module and `<id>.abi` stamp naming this build's
   ABI skip recompilation. The stamp holds `SNX_ABI`: a game a build of another ABI made is recompiled
-  automatically, as is one with a missing or invalid stamp. One another build of the same ABI made keeps its code,
+  automatically, as is one with a missing or invalid stamp, and that recompile takes from the unit cache (below) every
+  code unit whose code is the same. One another build of the same ABI made keeps its code,
   and its `recompiled/<id>/<id>` is replaced by this build's runtime when the two differ, so a newer build's fixes reach
   it. Failed builds never publish a valid ABI checkpoint. A change to the recompiler that keeps `SNX_ABI` isn't
   seen: there `-r` recompiles.
@@ -244,7 +245,16 @@ Remaining examples: POSIX.
   its checkout's `build/native-recomp` (`build/win64-recomp` on Windows). `-q` (`--quiet`) prints no progress.
   `--keep-c` is the deprecated spelling of `--keep-ir`.
 - **Codegen:** `--no-build` stages data/INI only; `--interp-only` omits AOT functions.
-  `--chunk N` sets instructions per code unit. Nothing is cached between runs.
+  `--chunk N` sets instructions per code unit. Each unit's object is kept in `units/` of the cache folder
+  ([Folders](#folders)), which every game's recompile shares, under the SHA-256 of the unit's LLVM IR, the LLVM, the
+  CPU and its features, the optimization level and the LLVM Internals: a unit found there is not compiled again (a
+  recompile after an `SNX_ABI` change that leaves the unit's IR alone, or of a game whose code changed in a few units),
+  and the last line says how many were (`unit cache: 241 of 259 units reused (310.2 MB) from ...`). The module
+  descriptor and the link are made each time. A kept object that is not whole is compiled again, and said. The cache
+  always leaves a tenth of its disk free: when a new unit would take that, the units reused longest ago are removed
+  for it, and a unit there is still no room for is not kept (said, with the disk's free bytes). `--unit_cache_gb=N`
+  (0, no limit, by default) also holds the folder to N GB after each recompile, the units reused longest ago removed
+  first. A cache folder that cannot be made stops the recompile, saying why.
   `--keep-ir` saves the generated code (LLVM IR) in `<outdir>/<NAME>/<NAME>_build/`.
   `--hook-direct-calls` sends calls and branches between guest functions through the dispatch table too, so
   `nvn_trace=1` also counts calls made by direct branch. The game runs slower, so use it only for investigating.
@@ -412,6 +422,7 @@ list). The user's data folder and a portable copy's keep each kind of file apart
 | its `<id>.log` and `threads.txt` | `recompiled/<id>/` | `~/.local/state/scarletnx/recompiled/<id>/` | `state/recompiled/<id>/` |
 | its pipeline cache | `recompiled/<id>/shader_cache/` | `~/.cache/scarletnx/recompiled/<id>/shader_cache/` | `cache/recompiled/<id>/shader_cache/` |
 | extractions (`3ds/` for the 3DS driver) | `work/` | `~/.cache/scarletnx/work/` | `cache/work/` |
+| the recompile's code units, `<key>.o`, every game's | `units/` of the user's cache folder | `~/.cache/scarletnx/units/` | `cache/units/` |
 | the menu's themes, `<name>/theme.ini` | - | `~/.local/share/scarletnx/themes/` | `themes/` |
 | the menu's `settings.ini`, `app.ini`, `folders.txt`, `gamecontrollerdb.txt` | - | `~/.config/scarletnx/` | `config/` |
 | the setup's `setup.ini` ([Setup](#setup)) | - | `~/.config/scarletnx/` | `config/` |

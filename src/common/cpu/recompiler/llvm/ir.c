@@ -386,6 +386,7 @@ static void size_attributes(LLVMModuleRef module, char opt) {
     }
 }
 
+/* a change here, or to new_ir's target machine, that changes the object of the same IR bumps SNX_IR_OBJECT_VERSION */
 int snx_ir_module_object(SnxIr* ir, LLVMModuleRef module, char opt, unsigned char** data, size_t* size, char* error,
                          size_t error_size) {
     char pipeline[16], *message = NULL;

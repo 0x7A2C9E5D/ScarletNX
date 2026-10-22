@@ -4,6 +4,7 @@
 
 * [Runtime boundaries](#runtime-boundaries)
 * [Recompiler + module ABI](#recompiler--module-abi)
+  * [Module ABI](#module-abi)
 * [Runtime ownership](#runtime-ownership)
   * [Guest exec](#guest-exec)
   * [GPU submit/present](#gpu-submitpresent)
@@ -155,9 +156,44 @@ compares the live instruction against the compiled word. Modified code falls
 back to shared interpreter semantics. NX leaves this callback unset and keeps
 its existing execution path.
 
-NX module ABI is in `src/nx/loader/module_abi.h`; the shared CPU layout is in
-`src/common/cpu/aarch64/cpu.h`. Rebuild game modules after shared ABI changes;
-bump `SNX_ABI` for ABI changes. Version mismatches reject loading.
+### Module ABI
+
+A game module (`<id>_code.so`, `.dll` on Windows) is code the recompiler made for one contract with the runtime:
+- the `CPU` layout and the `SNX_FP_*` numbers in `src/common/cpu/aarch64/cpu.h`;
+- the results of the helpers generated code calls (`cpu_helpers.c`);
+- `RtAPI` and `SNX_SVC_COUNT` in `src/common/runtime/interface.h`;
+- the module descriptor in `src/nx/loader/module_abi.h`.
+
+`SNX_ABI` in cpu.h versions it. The recompiler writes it into each module (`SnxModule.abi`) and into its game's
+`<id>.abi` stamp; the runtime refuses a module of any other, its message naming both ("ABI 12, where this one runs
+13"), and the driver recompiles a game stamped with another when it is played.
+
+Bump `SNX_ABI` for any change to the contract: a field of `CPU`, `RtAPI`, `SnxModule` or `SnxModInfo` added, removed,
+moved or resized; a helper's results; an `SNX_FP_*` number; `SNX_SVC_COUNT`; an RtAPI function's arguments. Bump it
+too for an addition the games should get though older modules would run without it (13's `snx_variants()` table). A
+change to the recompiler's own output for the same contract leaves it alone, and every game keeps its old code until
+it is recompiled (`-r`, or R in Games).
+
+A bump costs little. The recompile it starts takes each code unit's object from the unit cache
+(`src/nx/loader/unit_cache.c`), which keys it on the unit's IR, not on `SNX_ABI`: a bump that leaves the IR alone
+reuses every unit, and one that changes it (a field moved) compiles them again, as it must. For a game of 255 units
+that recompile takes 24 to 28 s, against 740 s with an empty cache. `SNX_IR_OBJECT_VERSION` (`ir.h`) rises when
+`snx_ir_module_object` makes another object from the same IR.
+
+`ctest -R module_contract` (`tests/module_contract.c`) holds the contract's layout as it was at the last bump: each
+field's offset and size, the structs' sizes and the numbers above. A change to any of them fails it, naming the field,
+until `SNX_ABI` rises and the table the failure prints is recorded there. It cannot see a helper's results, an RtAPI
+function's arguments, or a field added into a struct's tail padding: for those the list above is the rule.
+
+| `SNX_ABI` | What changed (cpu.h) |
+| --- | --- |
+| 7 | `CPU.poll` and `RtAPI.poll` |
+| 8 | the FP/SIMD emitters and discovery |
+| 9 | `RtAPI.svcs` |
+| 10 | `RtAPI.miss`, and `CPU.disp` read with relaxed atomic loads |
+| 11 | the reworked LLVM backend's modules |
+| 12 | `RtAPI.cas128`, and `snx_cas128` takes the CPU |
+| 13 | the AOT module's `snx_variants()` table, read as optional |
 
 ## Runtime ownership
 

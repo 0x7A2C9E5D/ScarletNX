@@ -96,6 +96,28 @@ static void size_levels(void) {
     }
 }
 
+/* the tuning's text, which the unit cache keys objects with (nx/loader/unit_cache.c): the pipeline that runs and every
+   LLVM Internals value, so an option set changes it */
+static void tuning_text(void) {
+    const IniOpt* threshold = ini_find(g_llvm_ini, "llvm_inliner_threshold");
+    const SnxIrTuning* t;
+    char error[256], *before;
+    int saved;
+    CHECK(threshold != NULL);
+    if (!threshold) return;
+    saved = *(const int*)threshold->var;
+    t = snx_llvm_tuning('2', error, sizeof error);
+    CHECK(t && t->text && !strncmp(t->text, "pipeline=", 9) && strstr(t->text, "\nllvm_inliner_threshold="));
+    before = t && t->text ? snx_strdup(t->text) : NULL;
+    ini_read(threshold, "50");
+    t = snx_llvm_tuning('2', error, sizeof error);
+    CHECK(t && t->text && before && strstr(t->text, "\nllvm_inliner_threshold=50\n") && strcmp(before, t->text));
+    *(int*)threshold->var = saved;
+    t = snx_llvm_tuning('2', error, sizeof error);
+    CHECK(t && t->text && before && !strcmp(before, t->text));
+    free(before);
+}
+
 int main(void) {
     static const char levels[] = "0123sz";
     const IniOpt* instcombine = ini_find(g_llvm_ini, "llvm_pass_instcombine");
@@ -103,6 +125,7 @@ int main(void) {
     char error[256];
     int i;
     size_levels();
+    tuning_text();
     if (failures) return 1;
     if (!settings_llvm_pipeline('2')) {
         puts("SKIP no pipelines: no opt of this LLVM ran where it was built");

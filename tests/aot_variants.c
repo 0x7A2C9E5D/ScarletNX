@@ -181,6 +181,7 @@ int main(void) {
     const SnxVariantFunction *function, *second;
     CPU cpu;
     int built;
+    size_t wrappers = 0;
 
     remove(cache_path);
     remove(wrong_path);
@@ -236,9 +237,11 @@ int main(void) {
     build.opt = '2';
     build.jobs = 1;
     build.quiet = 1;
+    build.wrappers = &wrappers;
     error[0] = 0;
     built = snx_build_module_llvm(&program, &options, &build);
     CHECK(built == 0);
+    CHECK(wrappers > 0); /* the profile cache's units call the module's functions through them */
     if (built) {
         fprintf(stderr, "build: %s\n", error);
         remove(cache_path);
