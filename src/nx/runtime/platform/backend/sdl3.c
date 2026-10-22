@@ -237,6 +237,17 @@ void backend_window_safe(int* x, int* y, int* w, int* h) {
    background, and presenting must stop before that */
 static bool SDLCALL lifecycle(void* unused, SDL_Event* e) {
     (void)unused;
+    /* what the system did to the app, in the log: a GPU lost after a minute with nobody touching the screen was the
+       system locking it (the app goes to the background and loses the GPU), and a low memory event comes before a kill */
+    switch (e->type) {
+        case SDL_EVENT_WILL_ENTER_BACKGROUND: LOG("lifecycle: the app will enter the background\n"); break;
+        case SDL_EVENT_DID_ENTER_BACKGROUND: LOG("lifecycle: the app is in the background\n"); break;
+        case SDL_EVENT_WILL_ENTER_FOREGROUND: LOG("lifecycle: the app will enter the foreground\n"); break;
+        case SDL_EVENT_DID_ENTER_FOREGROUND: LOG("lifecycle: the app is in the foreground\n"); break;
+        case SDL_EVENT_LOW_MEMORY: LOG("lifecycle: the system warns of low memory\n"); break;
+        case SDL_EVENT_TERMINATING: LOG("lifecycle: the system is ending the app\n"); break;
+        default: break;
+    }
     if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND) __atomic_store_n(&g_hidden, 1, __ATOMIC_RELEASE);
     if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND) {
         __atomic_add_fetch(&g_generation, 1, __ATOMIC_RELEASE);
@@ -331,6 +342,8 @@ void video_init(const char* title, const char* addons) {
         SDL_VERSIONNUM_MICRO(SDL_GetVersion()), SDL_GetCurrentVideoDriver());
     unattended_start();
     SDL_AddEventWatch(lifecycle, NULL);
+    /* a game runs for minutes with nobody touching the screen: a phone that locks it takes the GPU from the app */
+    SDL_DisableScreenSaver();
     int w, h;
     char header[768];
     snprintf(g_title, sizeof g_title, "%s", title);
