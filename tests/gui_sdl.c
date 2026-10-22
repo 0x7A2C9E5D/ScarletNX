@@ -4166,6 +4166,18 @@ int main(int argc, char** argv) {
                     app.games.count, app.browser.page, app.browser.selected, app.watch.set, app.watch.stamped,
                     (unsigned long long)app.watch.stamp, (unsigned long long)app.games_stamp,
                     app.games_fresh ? ", fresh" : "");
+        if (app.games.count != 36) { /* each folder watched, as many names as it holds now, and the list's */
+            for (int d = 0; d < app.watch.count; ++d) {
+                char** names = NULL;
+                size_t n = 0;
+                int failed = !app.watch.dirs[d] || snx_list_dir(app.watch.dirs[d], &names, &n);
+                fprintf(stderr, "watched %s (depth %d): %s %zu names\n",
+                        app.watch.dirs[d] ? app.watch.dirs[d] : "(none)", app.watch.depths[d],
+                        failed ? "unreadable," : "", n);
+                if (names) snx_free_strings(names, n);
+            }
+            fprintf(stderr, "games_dir %s, the game put in %s\n", app.games_dir, late);
+        }
         assert(app.games.count == 36 && app.browser.page == 1 && app.browser.selected == 1);
         assert(!snx_remove_tree(late));
         watch_pass(&app.watch);
