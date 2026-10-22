@@ -247,7 +247,26 @@ done:
     return rc;
 }
 #endif
+static int (*stage_runner)(int argc, char** argv);
+void snx_set_stage_runner(int (*run)(int argc, char** argv)) {
+    stage_runner = run;
+}
+/* a stage run in this process: its own copy of argv, as a driver's main may rearrange it */
+static int run_stage_here(const char* const* argv, const char* stage) {
+    int argc = 0, rc, i;
+    char** copy;
+    while (argv[argc]) ++argc;
+    copy = (char**)snx_alloc((size_t)(argc + 1) * sizeof(*copy));
+    for (i = 0; i < argc; ++i) copy[i] = snx_strdup(argv[i]);
+    copy[argc] = NULL;
+    rc = stage_runner(argc, copy);
+    for (i = 0; i < argc; ++i) free(copy[i]);
+    free(copy);
+    if (rc) snx_error("%s failed (exit status %d). You can run the same command again.", stage, rc);
+    return rc;
+}
 int snx_run_stage(const char* const* argv, const char* cwd, const char* stage) {
+    if (stage_runner && !cwd) return run_stage_here(argv, stage);
     return run_stage(argv, cwd, stage, 0);
 }
 int snx_run_debug_stage(const char* const* argv, const char* cwd, const char* stage) {

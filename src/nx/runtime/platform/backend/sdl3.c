@@ -15,6 +15,9 @@
 #include "nx/runtime/platform/overlay.h"
 #include "nx/runtime/platform/fatal_screen.h"
 #include "nx/runtime/platform/touch.h"
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 #include "nx/runtime/platform/ui.h"
 #include "nx/runtime/platform/vpad.h"
 #include "nx/runtime/platform/gamepad.h"
@@ -707,7 +710,9 @@ void win_fatal_box(const char* msg) {
 #ifdef SDL_PLATFORM_IOS
     /* a phone shows no stderr and no log of the app's: the Files app shows this file, in the app's Documents */
     {
-        FILE* file = fopen("scarletnx-error.log", "a");
+        FILE* file;
+        mkdir("logs", 0755);
+        file = fopen("logs/scarletnx-error.log", "a");
         if (file) {
             fprintf(file, "%s\n", msg);
             fclose(file);

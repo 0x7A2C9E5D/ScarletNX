@@ -34,6 +34,9 @@ bool gui_game_folder(const char* path) {
 #ifdef _WIN32
     if (suffix(name, ".exe")) name[strlen(name) - 4] = 0;
 #endif
+#ifdef SNX_IOS
+    if (suffix(name, "_code.snxobj")) name[strlen(name) - 12] = 0; /* the pack is the game's program there */
+#endif
     data = snx_format("%s/%s_data", folder, name);
     found = *name && (!strcmp(leaf, name) || snx_addon_name(leaf, name, NULL)) && snx_is_file(path) && snx_is_dir(data);
     free(data);

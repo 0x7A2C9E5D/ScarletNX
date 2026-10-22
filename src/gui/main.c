@@ -38,6 +38,11 @@
 #ifdef SDL_PLATFORM_ANDROID
 #include "gui/android.h"
 #endif
+/* a screen of fingers: the texts and the layout Android's phones take, and iOS's, whose own texts leave out the system's
+   Back button (it has none) */
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+#define SNX_TOUCH_UI 1
+#endif
 #ifdef SDL_PLATFORM_APPLE
 #include "gui/apple.h"
 #endif
@@ -422,25 +427,69 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 /* what the screens say to press: a phone has a finger, the back button and the system's file picker, nothing to drop;
    a computer has the picker too (on Linux the desktop's portal, else zenity), on a screen of its own as the keys' */
 #ifdef SDL_PLATFORM_ANDROID
+#ifdef SNX_TOUCH_UI
 #define SAY_MENU      SNX_TR_KEYS("Tap: select. Refresh: tap it. Back: go back.")
+#else
+#define SAY_MENU      SNX_TR_KEYS("Tap: select. Refresh: tap it.")
+#endif
+#ifdef SDL_PLATFORM_ANDROID
 #define SAY_GAMES     SNX_TR_KEYS("Tap: open. Swipe: turn the page. Recompile: tap it. Refresh: tap it. Back: go back.")
+#else
+#define SAY_GAMES     SNX_TR_KEYS("Tap: open. Swipe: turn the page. Recompile: tap it. Refresh: tap it.")
+#endif
 #define SAY_GAMES_AOT SNX_TR_KEYS("AOT pack: tap it.")
+#ifdef SDL_PLATFORM_ANDROID
 #define SAY_KEYS_HOW   SNX_TR_KEYS("Back: go back.")
+#else
+#define SAY_KEYS_HOW   SNX_TR_KEYS("Pick the prod.keys file.")
+#endif
 #define SAY_KEYS_WAIT  SNX_TR_NOOP("Pick prod.keys")
 #define SAY_PICK_BOX   SNX_TR_NOOP("tap the box to open the file picker")
 #define SAY_FILE_WAIT  SNX_TR_NOOP("Pick a file")
 #define SAY_DONE       SNX_TR_NOOP("Tap to return to menu")
 #define SAY_ABORT      SNX_TR_NOOP("Tap here to abort and return to menu")
 #define SAY_NO_GAMES   SNX_TR_NOOP("No games in recompiled/ or dumps/: put a game's .nro, .xci or .nsp in dumps/.")
+#ifdef SDL_PLATFORM_ANDROID
 #define SAY_EDITOR     SNX_TR_KEYS("Tap a key to change, type or pick it. Back: go back.")
+#else
+#define SAY_EDITOR     SNX_TR_KEYS("Tap a key to change, type or pick it.")
+#endif
+#ifdef SDL_PLATFORM_ANDROID
 #define SAY_PICKER     SNX_TR_KEYS("Drag a bar, or tap #RRGGBB to type it. Tap outside: keep. Back: put back.")
+#else
+#define SAY_PICKER     SNX_TR_KEYS("Drag a bar, or tap #RRGGBB to type it. Tap outside: keep.")
+#endif
 #define SAY_SETTINGS   SAY_EDITOR
+#ifdef SDL_PLATFORM_ANDROID
 #define SAY_GROUPS     SNX_TR_KEYS("Tap a group to open it. Back: go back.")
+#else
+#define SAY_GROUPS     SNX_TR_KEYS("Tap a group to open it.")
+#endif
+#ifdef SDL_PLATFORM_ANDROID
 #define SAY_APP        SNX_TR_KEYS("Tap a row to change or open it. Back: go back.")
+#else
+#define SAY_APP        SNX_TR_KEYS("Tap a row to change or open it.")
+#endif
+#ifdef SDL_PLATFORM_ANDROID
 #define SAY_FOLDERS    SNX_TR_KEYS("Add a folder: tap it. Tap an Extra to take it off. Refresh: tap it. Back: go back.")
+#else
+#define SAY_FOLDERS    SNX_TR_KEYS("Add a folder: tap it. Tap an Extra to take it off. Refresh: tap it.")
+#endif
+#ifdef SDL_PLATFORM_ANDROID
 #define SAY_PLACES     SNX_TR_KEYS("Tap a folder to pick another. Refresh: tap it. Back: go back.")
+#else
+#define SAY_PLACES     SNX_TR_KEYS("Tap a folder to pick another. Refresh: tap it.")
+#endif
+#ifdef SDL_PLATFORM_ANDROID
 #define SAY_PAD            SNX_TR_KEYS("Tap a control; tap it again for a press. Back: go back.")
+#else
+#define SAY_PAD            SNX_TR_KEYS("Tap a control; tap it again for a press.")
+#endif
+#ifdef SDL_PLATFORM_ANDROID
 #define SAY_USERS          SNX_TR_KEYS("Tap a user to rename it. Back: go back.")
+#else
+#define SAY_USERS          SNX_TR_KEYS("Tap a user to rename it.")
+#endif
 #else
 #define SAY_MENU       SNX_TR_KEYS("Arrows/mouse: move. Space/Enter/click: select.")
 #define SAY_GAMES                                                                                                      \
@@ -1035,7 +1084,7 @@ static int entering(const App* app) {
     return app->entering_ms && now_ms(app) < app->entering_ms + app->theme.fade_out_ms;
 }
 /* the rows Auto keeps at the least: a phone held wide is short, and its menu needs room for its items */
-#ifdef SDL_PLATFORM_ANDROID
+#ifdef SNX_TOUCH_UI
 #define GUI_AUTO_ROWS 20
 #else
 #define GUI_AUTO_ROWS 16
@@ -1061,7 +1110,7 @@ static bool aot_said(const App* app) {
 }
 static const char* screen_keys(const App* app, const char* keys, char* out, size_t size) {
     bool aot = aot_said(app);
-#ifdef SDL_PLATFORM_ANDROID
+#ifdef SNX_TOUCH_UI
     if (aot) {
         snprintf(out, size, "%s %s", snx_tr(keys), snx_tr(SAY_GAMES_AOT));
         return out; /* a tap on a tab */
@@ -1919,7 +1968,7 @@ static int splash_shown(App* app) {
     SDL_RenderPresent(app->renderer);
     return 1;
 }
-#ifdef SDL_PLATFORM_ANDROID
+#ifdef SNX_TOUCH_UI
 #define SAY_MENU_KEYS SAY_MENU
 #else
 #define SAY_MENU_KEYS SNX_TR_KEYS("Arrows/mouse: move. Space/Enter/click: select. F5: refresh. ESC: exit.")
@@ -4298,7 +4347,7 @@ static const char* unfit_text(const char* why) {
 static const char* const place_holds[GUI_PLACES] = {SNX_TR_NOOP("recompiled/, dumps/, themes/ and prod.keys"),
                                                     SNX_TR_NOOP("The recompiled games"),
                                                     SNX_TR_NOOP("Each dump's extraction")};
-#ifdef SDL_PLATFORM_ANDROID
+#ifdef SNX_TOUCH_UI
 #define PLACE_HOW SNX_TR_NOOP("Tap: pick another. The last row: all back to the defaults")
 #else
 #define PLACE_HOW SNX_TR_NOOP("Enter: pick another. Del: the default")
@@ -4698,6 +4747,14 @@ static void recent_as_games(App* app) {
         if (program && gui_recent_made(&app->recent, i, program)) changed = true;
     }
     made_free(&made);
+    for (i = 0; i < app->recent.count; ++i) /* one file under two spellings (/var and /private/var) is one game */
+        for (int j = i + 1; j < app->recent.count;)
+            if (app->recent.game[i].driver == app->recent.game[j].driver &&
+                snx_same_file(app->recent.game[i].path, app->recent.game[j].path)) {
+                gui_recent_remove(&app->recent, j);
+                changed = true;
+            } else
+                ++j;
     for (i = 0; i < app->recent.count; ++i) {
         char* shown = app->recent.game[i].driver == GUI_SWITCH && gui_game_folder(app->recent.game[i].path)
                           ? gui_game_shown(app->recent.game[i].path)
@@ -5634,7 +5691,7 @@ static void editor_key(App* app, GuiKey key) {
         leave_form(app);
         return;
     }
-#ifdef SDL_PLATFORM_ANDROID
+#ifdef SNX_TOUCH_UI
     if (app->form == GUI_FORM_GROUP) { /* the menu on the whole screen too, as the games, unless fullscreen is 0 */
         const char* fullscreen = gui_settings_value(&app->settings, "fullscreen");
         SDL_SetWindowFullscreen(app->window, !fullscreen || strcmp(fullscreen, "0"));
@@ -6203,9 +6260,17 @@ static void form_pointer(App* app, float x, float y) {
    question and choices come as the theme's options-dialog places them, its tip in the foot. What a step does is done
    as it is taken; setup.ini is written once the last one is ---- */
 #ifdef SDL_PLATFORM_ANDROID
+#ifdef SNX_TOUCH_UI
 #define SAY_SETUP        SNX_TR_KEYS("Tap: choose. Back: go back.")
+#else
+#define SAY_SETUP        SNX_TR_KEYS("Tap: choose.")
+#endif
 #define SAY_SETUP_FIRST  SAY_SETUP
+#ifdef SDL_PLATFORM_ANDROID
 #define SAY_SETUP_TYPING SNX_TR_KEYS("Type the nickname. Back: go back.")
+#else
+#define SAY_SETUP_TYPING SNX_TR_KEYS("Type the nickname.")
+#endif
 #define SAY_SETUP_NOTICE SAY_SETUP
 #else
 #define SAY_SETUP        SNX_TR_KEYS("Up/Down: choose. Enter: next. ESC: back.")
@@ -6213,7 +6278,7 @@ static void form_pointer(App* app, float x, float y) {
 #define SAY_SETUP_TYPING SNX_TR_KEYS("Type the nickname. Enter: done. ESC: back.")
 #define SAY_SETUP_NOTICE SNX_TR_KEYS("Left/Right: choose. Enter: take it. ESC: exit.")
 #endif
-#ifdef SDL_PLATFORM_ANDROID
+#ifdef SNX_TOUCH_UI
 #define SAY_SETUP_LOOK       SAY_SETUP
 #define SAY_SETUP_LOOK_FIRST SAY_SETUP
 #define SAY_SETUP_SIZE       SAY_SETUP
@@ -7134,6 +7199,22 @@ static void recent_name(App* app, const char* label) {
     app->recent_named = 1;
     if (gui_recent_rename(&app->recent, app->file, named->detail)) recent_changed(app);
 }
+#ifdef SDL_PLATFORM_IOS
+/* a dump picked outside dumps/ is prepared from its copy there, so the game's recorded source is not the file the recent
+   list has: that entry becomes the game made, and the one the game already has stays alone */
+static void recent_made_here(App* app) {
+    const GuiStep* made = gui_steps_last(&app->steps, "READY");
+    char* program = made && app->file && app->games_dir ? gui_folder_game(app->games_dir, made->detail) : NULL;
+    int i;
+    if (!program) return;
+    for (i = 0; i < app->recent.count; ++i)
+        if (!strcmp(app->recent.game[i].path, app->file) || snx_same_file(app->recent.game[i].path, app->file)) {
+            if (gui_recent_made(&app->recent, i, program)) recent_changed(app);
+            break;
+        }
+    free(program);
+}
+#endif
 static void list_games(App* app);
 /* back to the menu from a finished run, which fades in */
 static void leave_run(App* app) {
@@ -7697,6 +7778,14 @@ static void pump(App* app) {
                 leave_run(app);
             /* seen here, the end needs no word; behind other apps one stays until the menu shows */
             gui_android_ran(!app->hidden ? NULL : app->abnormal_exit ? snx_tr("Failed") : snx_tr("Ready"));
+#elif defined(SDL_PLATFORM_IOS)
+            /* a phone has no ESC to dismiss the end of the run: a prepared game goes back to the menu, where it is
+               listed; a failure stays on the screen with its messages */
+            if (!app->abnormal_exit) {
+                recent_made_here(app);
+                recent_as_games(app); /* the game's name, now that it is the entry */
+                leave_run(app);
+            }
 #endif
         }
     }
@@ -7859,6 +7948,9 @@ static void launch(App* app, char* absolute, bool prepared) {
     bool direct = native && !app->recompile && !gui_game_folder(absolute);
 #endif
     char* driver = direct ? NULL : find_driver(app, app->menu.selected);
+#ifdef SDL_PLATFORM_IOS /* the app's own driver, which gui_process_start runs on a thread: its name is only argv[0] */
+    if (!direct && !driver && app->menu.selected == GUI_SWITCH) driver = snx_strdup("scarletnx");
+#endif
     if (!direct && !driver) {
         snprintf(app->message, sizeof(app->message), snx_tr("Cannot find %s beside the GUI or on PATH."),
                  driver_name(app->menu.selected) ? driver_name(app->menu.selected) : snx_tr("the selected driver"));
@@ -9945,7 +10037,9 @@ int snx_gui_main(const char* self) {
         /* a phone shows no stderr, and a message box needs the window that may be what failed: the Files app shows
            this file, in the app's Documents (gui_apple_start's folder) */
         {
-            FILE* file = fopen("scarletnx-error.log", "w");
+            FILE* file;
+            mkdir("logs", 0755);
+            file = fopen("logs/scarletnx-error.log", "w");
             if (file) {
                 fprintf(file, "%s\n", SDL_GetError());
                 fclose(file);

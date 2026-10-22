@@ -51,7 +51,12 @@ void gui_apple_log_start(void) {
     @autoreleasepool {
         NSURL* documents = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory
                                                                 inDomains:NSUserDomainMask].firstObject;
-        const char* path = documents ? [documents URLByAppendingPathComponent:@"scarletnx-console.log"].path.fileSystemRepresentation : NULL;
+        NSURL* logs = [documents URLByAppendingPathComponent:@"logs" isDirectory:YES];
+        const char* path = NULL;
+        if (logs) {
+            [NSFileManager.defaultManager createDirectoryAtURL:logs withIntermediateDirectories:YES attributes:nil error:NULL];
+            path = [logs URLByAppendingPathComponent:@"scarletnx-console.log"].path.fileSystemRepresentation;
+        }
         time_t now = time(NULL);
         if (!path || !freopen(path, "a", stderr)) return;
         freopen(path, "a", stdout);
@@ -103,11 +108,13 @@ void gui_apple_start(void) {
     @autoreleasepool {
         NSFileManager* files = NSFileManager.defaultManager;
         NSURL* documents = [files URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
-        /* the user copies prepared games there, through the Files app or the Finder */
-        [files createDirectoryAtURL:[documents URLByAppendingPathComponent:@"recompiled" isDirectory:YES]
-            withIntermediateDirectories:YES
-                             attributes:nil
-                                  error:NULL];
+        /* what the player sees: dumps to put a game's .nsp or .xci in, keys for prod.keys, recompiled for what the app
+           makes of them, logs for what it prints */
+        for (NSString* name in @[ @"dumps", @"keys", @"recompiled", @"logs" ])
+            [files createDirectoryAtURL:[documents URLByAppendingPathComponent:name isDirectory:YES]
+                withIntermediateDirectories:YES
+                                 attributes:nil
+                                      error:NULL];
         if (documents) chdir(documents.fileSystemRepresentation);
     }
 #endif

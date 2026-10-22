@@ -7,7 +7,7 @@
 #include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_video.h>
 
-/* iOS: from here on stdout and stderr go to scarletnx-console.log in the app's Documents, which the Files app shows,
+/* iOS: from here on stdout and stderr go to logs/scarletnx-console.log in the app's Documents, which the Files app shows,
    after a banner naming the device, the system and the limits it puts on the app (a phone shows no console) */
 void gui_apple_log_start(void);
 /* iOS: the working folder is the app's Documents (the data folder, which the Files app shows), with its games/ */

@@ -192,6 +192,9 @@ int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, 
 /* Foreground workflow stage with inherited stdio, interruption forwarding and diagnostics.
    A stopped POSIX child is aborted so a rerun can restart that stage. Not thread safe. */
 int snx_run_stage(const char* const* argv, const char* cwd, const char* stage);
+/* iOS starts no process: a stage then calls run(argc, argv) in this one, argv[0] being the program a child would be.
+   Set once by the driver, whose own main it is */
+void snx_set_stage_runner(int (*run)(int argc, char** argv));
 /* As above, but intentional debugger stops do not abort the game. */
 int snx_run_debug_stage(const char* const* argv, const char* cwd, const char* stage);
 FILE* snx_fopen(const char* path, const char* mode);
