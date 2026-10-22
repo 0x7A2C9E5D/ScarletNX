@@ -245,15 +245,21 @@ static int emit_module(AgbRecomp* recomp, AgbBoard* board, const char* path, siz
         block->instructions = (uint16_t)(consumed > 0xFFFF ? 0xFFFF : consumed);
     }
     if (LLVMVerifyModule(module, LLVMReturnStatusAction, &message)) goto done;
+    LLVMDisposeMessage(message); /* an empty one on success, still allocated */
+    message = NULL;
     options = LLVMCreatePassBuilderOptions();
     {
         LLVMErrorRef pass = LLVMRunPasses(module, "default<O2>", machine, options);
         if (pass) {
-            message = LLVMGetErrorMessage(pass);
+            char* failure = LLVMGetErrorMessage(pass);
+            snprintf(error, error_size, "%.300s", failure);
+            LLVMDisposeErrorMessage(failure);
             goto done;
         }
     }
     if (LLVMVerifyModule(module, LLVMReturnStatusAction, &message)) goto done;
+    LLVMDisposeMessage(message); /* an empty one on success, still allocated */
+    message = NULL;
     object = (char*)malloc(strlen(path) + 8);
     runtime = (char*)malloc(strlen(path) + 8);
     library = (char*)malloc(strlen(path) + 8);
@@ -294,6 +300,7 @@ static int emit_module(AgbRecomp* recomp, AgbBoard* board, const char* path, siz
     result = 0;
 done:
     if (result && message && !error[0]) snprintf(error, error_size, "%.300s", message);
+    LLVMDisposeMessage(message);
     free(object);
     free(runtime);
     free(library);
