@@ -198,10 +198,11 @@ int agb_map_init(AgbMap* map, AgbBoard* board, char* error, size_t error_size) {
                 }
             }
         }
-        if (backing < 0) { /* the window is RAM */
-            memcpy(map->base + 0x08000000, board->cartridge.data, rom);
-            for (uint32_t i = (uint32_t)rom; i < AGB_ROM_MAX; ++i) map->base[0x08000000 + i] = agb_rom_open_bus8(i);
-        }
+        if (backing < 0) /* no shared backing (Windows, macOS): each window is RAM that holds its own copy */
+            for (uint32_t window = 0x08000000; window < 0x0E000000; window += AGB_ROM_MAX) {
+                memcpy(map->base + window, board->cartridge.data, rom);
+                for (uint32_t i = (uint32_t)rom; i < AGB_ROM_MAX; ++i) map->base[window + i] = agb_rom_open_bus8(i);
+            }
     }
     /* the board's devices read and write the regions through these pointers */
     agb_memory_free(&board->memory);
