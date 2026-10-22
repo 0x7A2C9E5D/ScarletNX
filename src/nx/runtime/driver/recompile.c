@@ -30,8 +30,10 @@ static void usage(void) {
          "  -O LEVEL               Optimization: 0,1,2,3,s,z (default: 2), the setting opt\n"
          "  --jobs N               Parallel compiles (default: CPU count), the setting aot_threads");
     puts("  --jit-cache FILE       Link a profile run's .jitcache into the module as runtime code");
-    puts("  --KEY=VALUE            A setting of the recompile: opt, aot_threads, and LLVM's (llvm_pass_<pass>=0\n"
-         "                         turns that pass off; scarletnx --settings=recompile lists them)");
+    puts("  --KEY=VALUE            A setting of the recompile: opt, aot_threads, unit_cache_gb (the most GB the\n"
+         "                         cache of compiled code units holds: 20, 0 for no limit), and LLVM's\n"
+         "                         (llvm_pass_<pass>=0 turns that pass off); scarletnx --settings=recompile\n"
+         "                         lists them");
     printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",
            SNX_CHUNK_INSTRUCTIONS);
     puts("  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
@@ -590,7 +592,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     }
     code = snx_format("%s_code.%s", base, compile.target_win ? "dll" : "so");
     {
-        char* kept = keep_c ? snx_format("%s_build", base) : NULL;
+        char *kept = keep_c ? snx_format("%s_build", base) : NULL, *units = NULL;
         llvm.output = code;
         llvm.opt = compile.opt[0];
         llvm.tuning = snx_llvm_tuning(llvm.opt, error, sizeof error);
@@ -601,6 +603,17 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         llvm.jobs = compile.jobs;
         llvm.quiet = compile.quiet;
         llvm.keep_ir = kept;
+        {
+            /* the user's cache folder, or a portable copy's: every game's recompile shares it */
+            char* folder = snx_menu_dir(paths->repo, SNX_USER_CACHE);
+            units = folder ? snx_path_join(folder, "units") : NULL;
+            free(folder);
+            if (!units)
+                snx_error("unit cache: no cache folder, as the environment names no home: every unit is compiled, "
+                          "and none kept");
+            llvm.unit_cache = units;
+            llvm.unit_cache_limit = (SnxU64)g_settings.unit_cache_limit * 1000000000ull;
+        }
         i = kept && (snx_is_link(kept) || snx_mkdirs(kept));
         if (i) snx_error("cannot save the generated code in %s", kept);
         if (!i && !program.npdm.is64)
@@ -608,6 +621,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         else if (!i)
             i = snx_build_module_llvm(&program, &gen, &llvm);
         free(kept);
+        free(units);
         if (i) goto done;
     }
     if (runtime) run = snx_absolute(runtime);

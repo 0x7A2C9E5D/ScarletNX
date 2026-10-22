@@ -1493,8 +1493,9 @@ int main(int argc, char** argv) {
     assert(app.form == GUI_FORM_SETTINGS);
     key(&app, SDLK_RETURN);
     /* a group's settings on the right, a row each with its help in the tips; the group named over them */
-    /* gdbstub, Extract to tmpfs, Extract game container, Optimization level, AOT threads and the LLVM Internals page */
-    assert(app.form == GUI_FORM_GROUP && app.group == 1 && app.editor.count == 6);
+    /* gdbstub, Extract to tmpfs, Extract game container, Optimization level, AOT threads, Unit cache limit and the
+       LLVM Internals page */
+    assert(app.form == GUI_FORM_GROUP && app.group == 1 && app.editor.count == 7);
     render(&app);
     shows(&app, "Launch", normal);
     shows(&app, "Enables gdbstub", normal); /* in the tips */

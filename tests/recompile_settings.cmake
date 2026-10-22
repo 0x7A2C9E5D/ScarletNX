@@ -12,8 +12,10 @@ foreach(case "--aot_threads=abc|aot_threads=abc is not a whole number from 0 to 
              "--aot_threads=|aot_threads= is not a whole number from 0 to 1024"
              "--llvm_inliner_threshold=50x|llvm_inliner_threshold=50x is not a whole number from -2147483647 to 2147483647"
              "--opt=5|opt expects 0,1,2,3,s,z"
+             "--unit_cache_gb=-1|unit_cache_gb=-1 is not a whole number from 0 to 100000"
+             "--unit_cache_gb=2.5|unit_cache_gb=2.5 is not a whole number from 0 to 100000"
              "--aot_threads=4|holds no exefs/main" "--llvm_inliner_threshold=50|holds no exefs/main"
-             "--opt=z|holds no exefs/main")
+             "--opt=z|holds no exefs/main" "--unit_cache_gb=0|holds no exefs/main")
     string(REPLACE "|" ";" case "${case}")
     list(GET case 0 option)
     list(GET case 1 expected)

@@ -1559,4 +1559,11 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
     snx_test_target(snx-test-vulkan-backing 11)
     add_test(NAME vulkan_backing COMMAND snx-test-vulkan-backing)
 endif()
+# these recompile with --repo of the checkout, which keeps the code units (nx/loader/unit_cache.c) in the user's cache
+# folder: a folder of the build tree's instead, where XDG names it
+foreach(snx_test native_recompiler llvm_module nx_runtime_homebrew nx_runtime_homebrew_64k_pages)
+    if(TEST ${snx_test})
+        set_property(TEST ${snx_test} APPEND PROPERTY ENVIRONMENT "XDG_CACHE_HOME=${CMAKE_CURRENT_BINARY_DIR}/xdg-cache")
+    endif()
+endforeach()
 snx_sanitizer_path()

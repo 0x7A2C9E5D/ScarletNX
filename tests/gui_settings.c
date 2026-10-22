@@ -83,14 +83,19 @@ int main(int argc, char** argv) {
            !strcmp(s.values[2].key, "extract") && words(&s.keys[2]) == 2 && strstr(s.keys[2].about, "dump"));
     assert(!gui_settings_extract(&s)); /* off: a dump read in place */
     /* the recompiler's: none passed until picked, then --key=value; the optimization level takes 0 to 3 and z, the
-       AOT threads a number (0 the cores), and LLVM Internals is a page of its own */
+       AOT threads a number (0 the cores), the unit cache limit a number of GB (0 none), and LLVM Internals is a page of
+       its own */
     assert(!strcmp(s.keys[3].section, "Launch") && !strcmp(s.keys[3].key, "Optimization level") &&
            !strcmp(s.values[3].key, "opt") && words(&s.keys[3]) == 6 && !gui_settings_recompile(&s, options));
     assert(gui_settings_set(&s, "opt", "z") && gui_settings_recompile(&s, options) == 1 && !strcmp(options[0], "--opt=z"));
     assert(!gui_settings_set(&s, "opt", "s") && gui_settings_set(&s, "aot_threads", "4"));
     assert(gui_settings_recompile(&s, options) == 2 && !strcmp(options[1], "--aot_threads=4"));
-    assert(!strcmp(s.keys[5].section, "Launch") && s.values[5].kind == GUI_SETTING_PAGE &&
-           !strcmp(s.keys[5].key, "LLVM Internals"));
+    assert(!strcmp(s.keys[5].section, "Launch") && !strcmp(s.keys[5].key, "Unit cache limit") &&
+           !strcmp(s.values[5].key, "unit_cache_gb") && strstr(s.keys[5].about, "0 = no limit"));
+    assert(gui_settings_set(&s, "unit_cache_gb", "50") && gui_settings_recompile(&s, options) == 3 &&
+           !strcmp(options[2], "--unit_cache_gb=50") && gui_settings_set(&s, "unit_cache_gb", ""));
+    assert(!strcmp(s.keys[6].section, "Launch") && s.values[6].kind == GUI_SETTING_PAGE &&
+           !strcmp(s.keys[6].key, "LLVM Internals"));
     assert(gui_settings_set(&s, "opt", ".ini") && gui_settings_set(&s, "aot_threads", "") &&
            !gui_settings_recompile(&s, options));
     assert(!strcmp(s.keys[s.own].section, "Display") && !strcmp(s.keys[s.own].key, "docked"));

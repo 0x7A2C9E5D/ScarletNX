@@ -3121,6 +3121,14 @@ msgid "The threads compiling the game's code when it is recompiled: 0 = one for 
 msgstr ""
 
 #: src/nx/runtime/settings.txt
+msgid "Unit cache limit"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "The most the cache of compiled code units may hold, in GB: units/ of the cache folder, where every recompile finds the units it compiled before. Past it the units reused longest ago are removed. 0 = no limit"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
 msgid "Instruction combining"
 msgstr ""
 
