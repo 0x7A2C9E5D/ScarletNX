@@ -17,6 +17,7 @@
 #define VITA_RUNTIME_PAGE  0x80000000u
 #define VITA_TLS_BASE      0x80010000u
 #define VITA_TLS_SIZE      0x1000u /* each thread's: sceKernelGetTLSAddr's slots, then the TLS register's */
+#define VITA_TLS_ERRNO     0xffcu  /* in each thread's: its errno (SceLibc's _sceLibcErrnoLoc) */
 #define VITA_USER_BASE     0x82000000u
 #define VITA_USER_END      0xa0000000u
 #define VITA_CDRAM_BASE    0x60000000u
@@ -25,6 +26,7 @@
 #define VITA_OBJECTS       1024u
 #define VITA_FILES         128u
 #define VITA_ALLOCATIONS   1024u
+#define VITA_FIBERS        128u
 
 /* The runtime's SVCs (immediates from VITA_SVC_RUNTIME, below which an SVC is an import's), from its trampolines at
    VITA_RUNTIME_PAGE: a thread's entry returning (lr), a display queue entry's callback being due and returning */
@@ -32,10 +34,13 @@ enum {
     VITA_SVC_THREAD_RETURN = VITA_SVC_RUNTIME,
     VITA_SVC_DISPLAY_NEXT,
     VITA_SVC_DISPLAY_DONE,
+    VITA_SVC_FIBER_RETURN,
 };
 /* the trampolines' addresses, A32 code */
 #define VITA_THREAD_RETURN   (VITA_RUNTIME_PAGE + 0x00u)
 #define VITA_DISPLAY_LOOP    (VITA_RUNTIME_PAGE + 0x10u)
+#define VITA_RETURN          (VITA_RUNTIME_PAGE + 0x20u) /* bx lr: a function that does nothing */
+#define VITA_FIBER_RETURN    (VITA_RUNTIME_PAGE + 0x24u) /* a fiber's entry returning (its lr) */
 
 /* SceKernel's error codes (psp2/kernel/error.h), and errno's as the libraries return them (0x80010000 | errno) */
 #define SCE_OK                              0
@@ -73,6 +78,7 @@ enum {
     VITA_WAIT_DISPLAY,    /* the display queue's thread, for its next entry (vita/hle/gxm.c) */
     VITA_WAIT_GXM,        /* object-less: the GPU's queue drained (vita/hle/gxm.c) */
     VITA_WAIT_COND,       /* object, a = the mutex it relocks */
+    VITA_WAIT_RWLOCK,     /* object, a = 1 to write, 0 to read */
 };
 typedef struct {
     uint32_t kind, object, a, b, out;
@@ -84,6 +90,12 @@ typedef struct {
     uint32_t state, uid;
     char name[32];
     uint32_t entry, priority, attr, stack, stack_size, stack_block, tls;
+    /* the module's thread-local data for this thread (VitaImage.tls_*), made at its first use; 0 until then */
+    uint32_t module_tls;
+    /* the fiber it runs (an index in VitaProcess.fibers plus 1, 0 for its own code), and its own registers meanwhile,
+       with where sceFiberRun writes what the fiber returns to it */
+    uint32_t fiber, fiber_out;
+    SnxArmCPU own;
     int32_t exit_status;
     VitaWait wait;
     uint64_t seq; /* when it last ran: the scheduler takes the ready thread that waited longest */
@@ -97,6 +109,7 @@ enum {
     VITA_OBJ_EVENT_FLAG,
     VITA_OBJ_MEMBLOCK,
     VITA_OBJ_COND,
+    VITA_OBJ_RWLOCK,
 };
 typedef struct {
     uint32_t type;
@@ -121,6 +134,11 @@ typedef struct {
         struct {
             uint32_t mutex; /* the mutex's UID */
         } cond;
+        struct {
+            uint32_t writer; /* the writing thread's UID, 0 for none */
+            int32_t writes, reads; /* the writer's locks (recursive ones), the readers' */
+            uint32_t attr;
+        } rwlock;
     } u;
 } VitaObject;
 
@@ -136,6 +154,16 @@ typedef struct VitaFile {
     int directory;
 } VitaFile;
 
+/* A SceFiber (vita/hle/fiber.c): its registers while it doesn't run */
+typedef struct {
+    uint32_t address; /* the game's SceFiber, 0 for a free slot */
+    uint32_t entry, argument, context, context_size;
+    uint32_t running;   /* the thread running it's UID, 0 for none */
+    uint32_t started;   /* its registers hold where it stopped */
+    uint32_t in_out;    /* where sceFiberReturnToThread writes what the next sceFiberRun brings */
+    SnxArmCPU cpu;
+} VitaFiber;
+
 struct VitaGxm;
 struct VitaAudio;
 typedef struct VitaProcess {
@@ -144,6 +172,7 @@ typedef struct VitaProcess {
     const VitaModule* module;
     char* folder;  /* the game's folder */
     char* app;     /* app0: in it */
+    char* patch;   /* the update's files, which app0: shows over app's */
     char* ux0;     /* ux0: in it */
     VitaThread threads[VITA_THREADS];
     VitaObject objects[VITA_OBJECTS];
@@ -165,6 +194,12 @@ typedef struct VitaProcess {
     /* the run-time compiler: blocks the module lacks (vita/runtime/jit.c), NULL without one */
     struct VitaJit* jit;
     uint64_t hle_calls;
+    /* SceLibc's (vita/hle/libc.c): malloc's heap and its data (the ctype tables, gmtime's result), made at their first
+       use; rand's state */
+    struct {
+        uint32_t heap, data, rand;
+    } libc;
+    VitaFiber fibers[VITA_FIBERS];
     /* each import's function (vita/hle/hle.c), looked up at its first call; unknown_logged: reported as missing */
     const void** hle;
     uint32_t* unknown_logged;

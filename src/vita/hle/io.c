@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* SceIofilemgr and SceLibKernel's sceIo*: the game's files. app0: is the application's folder as the VPK holds it (the
-   game folder's app/), read-only on the console and here; ux0: the memory card, the game folder's ux0/, which the game
+   game folder's app/, with the update's files in patch/ over it), read-only on the console and here; ux0: the memory card, the game folder's ux0/, which the game
    writes its data to (ux0:data/...). A path leaving its device ("..") is refused */
 #if !defined(_WIN32) && !defined(_FILE_OFFSET_BITS)
 #define _FILE_OFFSET_BITS 64
@@ -46,9 +46,10 @@ static char* host_path(VitaProcess* p, uint32_t address, bool* writable) {
     if (!colon) return NULL;
     *colon = 0;
     const char* root;
+    bool app = false;
     *writable = false;
     if (!strcmp(path, "app0"))
-        root = p->app;
+        root = p->app, app = true;
     else if (!strcmp(path, "ux0") || !strcmp(path, "uma0")) {
         root = p->ux0;
         *writable = true;
@@ -64,7 +65,12 @@ static char* host_path(VitaProcess* p, uint32_t address, bool* writable) {
         if (!slash) break;
         q = slash + 1;
     }
-    return *rest ? snx_path_join(root, rest) : snx_strdup(root);
+    if (!*rest) return snx_strdup(root);
+    /* the update's file or folder, when it has the path */
+    char* patched = app ? snx_path_join(p->patch, rest) : NULL;
+    if (patched && snx_path_exists(patched)) return patched;
+    free(patched);
+    return snx_path_join(root, rest);
 }
 static int file_index(VitaProcess* p, uint32_t fd, bool directory) {
     if (fd < 1 || fd > VITA_FILES || !p->files[fd - 1].host || p->files[fd - 1].directory != directory) return -1;
@@ -98,10 +104,9 @@ static void close_directory(Directory* d) {
     free(d);
 }
 
-static uint32_t io_open(VitaProcess* p, VitaThread* t) {
+uint32_t vita_io_open(VitaProcess* p, uint32_t address, uint32_t flags) {
     bool writable;
-    uint32_t flags = vita_arg(p, t, 1);
-    char* path = host_path(p, vita_arg(p, t, 0), &writable);
+    char* path = host_path(p, address, &writable);
     if (!path) return SCE_ERRNO(ENOENT);
     bool write = (flags & SCE_O_WRONLY) || (flags & (SCE_O_CREAT | SCE_O_TRUNC | SCE_O_APPEND));
     uint32_t result;
@@ -133,13 +138,19 @@ static uint32_t io_open(VitaProcess* p, VitaThread* t) {
     free(path);
     return result;
 }
-static uint32_t io_close(VitaProcess* p, VitaThread* t) {
-    int i = file_index(p, vita_arg(p, t, 0), false);
+static uint32_t io_open(VitaProcess* p, VitaThread* t) { return vita_io_open(p, vita_arg(p, t, 0), vita_arg(p, t, 1)); }
+FILE* vita_io_file(VitaProcess* p, uint32_t fd) {
+    int i = file_index(p, fd, false);
+    return i < 0 ? NULL : p->files[i].host;
+}
+uint32_t vita_io_close(VitaProcess* p, uint32_t fd) {
+    int i = file_index(p, fd, false);
     if (i < 0) return SCE_ERRNO(EBADF);
     fclose(p->files[i].host);
     p->files[i] = (VitaFile){0};
     return 0;
 }
+static uint32_t io_close(VitaProcess* p, VitaThread* t) { return vita_io_close(p, vita_arg(p, t, 0)); }
 static uint32_t io_read(VitaProcess* p, VitaThread* t) {
     int i = file_index(p, vita_arg(p, t, 0), false);
     uint32_t buffer = vita_arg(p, t, 1), size = vita_arg(p, t, 2);
@@ -163,6 +174,27 @@ static uint32_t io_write(VitaProcess* p, VitaThread* t) {
         return SCE_ERRNO(EBADF);
     }
     return (uint32_t)fwrite(vita_ptr(p, buffer), 1, size, p->files[i].host);
+}
+/* sceIoPread(fd, buffer, size, SceOff offset): the offset in the stack's first two words; the file's position kept */
+static uint32_t io_pread(VitaProcess* p, VitaThread* t) {
+    int i = file_index(p, vita_arg(p, t, 0), false);
+    uint32_t buffer = vita_arg(p, t, 1), size = vita_arg(p, t, 2);
+    int64_t offset = (int64_t)((uint64_t)vita_arg(p, t, 4) | (uint64_t)vita_arg(p, t, 5) << 32);
+    if (i < 0) return SCE_ERRNO(EBADF);
+    if (!size) return 0;
+    if (!vita_mapped(p, buffer, size)) return SCE_ERRNO(EINVAL);
+    FILE* f = p->files[i].host;
+    int64_t was = tell(f);
+    if (seek(f, offset, SEEK_SET)) return SCE_ERRNO(EINVAL);
+    uint32_t got = (uint32_t)fread(vita_ptr(p, buffer), 1, size, f);
+    (void)seek(f, was, SEEK_SET);
+    return got;
+}
+static uint32_t io_sync_by_fd(VitaProcess* p, VitaThread* t) {
+    int i = file_index(p, vita_arg(p, t, 0), false);
+    if (i < 0) return SCE_ERRNO(EBADF);
+    fflush(p->files[i].host);
+    return 0;
 }
 /* sceIoLseek(fd, SceOff offset, whence): the offset in r2 and r3, whence on the stack */
 static uint32_t io_lseek(VitaProcess* p, VitaThread* t) {
@@ -335,6 +367,8 @@ const VitaHle vita_hle_io[] = {
     {0x6c60ac61u, "sceIoOpen", io_open},
     {0xc70b8886u, "sceIoClose", io_close},
     {0xfdb32293u, "sceIoRead", io_read},
+    {0x52315ad7u, "sceIoPread", io_pread},
+    {0x16512f59u, "sceIoSyncByFd", io_sync_by_fd},
     {0x34efd876u, "sceIoWrite", io_write},
     {0x99ba173eu, "sceIoLseek", io_lseek},
     {0x49252b9bu, "sceIoLseek32", io_lseek32},

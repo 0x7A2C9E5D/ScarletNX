@@ -10,9 +10,19 @@ kept as hints (`<title ID>.hints`) for the next offline compile.
 
 ```sh
 build/scarletnx-vita game.vpk                    # extract, compile and play
+build/scarletnx-vita ux0/app/PCSE00001           # a dumped game: linked, its update from ux0/patch/PCSE00001
 build/scarletnx-vita -x game.vpk                 # extract only
 build/scarletnx-vita --game=~/.local/share/scarletnx/recompiled/LVBT00001 --seconds=30 --shot=/tmp/frame
 ```
+
+A dumped game's folder (decrypted, as a console's `ux0:app/<title ID>`) is linked into the game's folder rather than
+copied: `app/` names it and `patch/` its update (`ux0:patch/<title ID>` beside it, or `--patch DIR`), whose files app0:
+shows over the game's and whose eboot.bin is the one compiled. A retail eboot is a fixed-address module (ET_SCE_EXEC)
+without relocations, so discovery starts at every word of the image and every MOVW and MOVT pair that makes a Thumb
+function's address. The libraries the game brings in `sce_module/` (libc, libfios2, libult) aren't loaded: like the
+system's, their functions are the runtime's, by NID. Variables the eboot imports (SceLibc's `_Ctype` and `_Stdout`,
+the C++ exceptions' vtables) get slots in the runtime's page, which the loader relocates the code to and the runtime
+fills.
 
 The first homebrew it targets is the Lua Vita Tester (lpp-vita with vita2d). It draws its screen, reads the buttons
 and plays its sound test.
@@ -24,7 +34,8 @@ and plays its sound test.
 | VPK, SELF and ELF loading (zip and zlib, relocations, imports patched to SVCs by index) | `src/vita/loader/` |
 | The offline compiler and the module it makes (the A57-profile AArch32 backend, `src/common/cpu/arm/`) | `src/vita/aot/` |
 | Process, threads (cooperative, one host thread), waits, memory, the dispatcher, run-time compiles | `src/vita/runtime/` |
-| The system libraries, answered by NID | `src/vita/hle/` (`kernel.c`, `io.c`, `ctrl.c`, `display.c`, `audio.c`, `misc.c`, `gxm.c`) |
+| The system libraries, answered by NID | `src/vita/hle/` (`kernel.c`, `io.c`, `ctrl.c`, `display.c`, `audio.c`, `misc.c`, `gxm.c`, `fiber.c`, `ngs.c`) |
+| The game's own C and C++ libraries (SceLibc, SceLibm, SceLibstdcxx) and the Clib, malloc on a heap in guest memory | `src/vita/hle/libc.c`, `heap.c` |
 | sceGxm on Vulkan: guest memory imported with `VK_EXT_external_memory_host`, USSE programs translated to SPIR-V through `src/common/utilities/spirv_emit.c` | `src/vita/gpu/` (`render.c`, `usse.c`, `vk.c`, `present.c`) |
 | Keyboard, mouse (touch), gamepads and scripted presses (`--script=ms:hex,...`, SceCtrl's button bits) | `src/vita/platform/input.c` |
 
@@ -46,6 +57,7 @@ bugs this driver ran into were found.
   reads). Any other instruction makes the program fail to translate with its name in the log.
 - One guest thread runs at a time.
 - PGF fonts, networking and the common dialogs answer as unavailable.
+- SceNgs is silent: its voices finish at once. A C++ exception the game throws ends it.
 
 ## Sources
 

@@ -87,6 +87,7 @@ typedef struct {
 } GxmContext;
 typedef struct VitaGxm {
     bool initialized;
+    uint32_t notification_region; /* sceGxmGetNotificationRegion's, made at its first call */
     uint32_t callback, data_size, max_pending;
     /* the display queue: entries' copies of the game's data in guest memory, oldest first, each with the GPU
        submission it shows the results of */

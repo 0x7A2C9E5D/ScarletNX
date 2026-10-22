@@ -81,7 +81,8 @@ static void faults_install(unsigned char* base) {
 
 static const char* wait_name(uint32_t kind) {
     static const char* const names[] = {"a delay", "a semaphore", "a mutex", "a thread's end", "an event flag",
-                                        "a vblank", "audio output", "the display queue", "the GPU", "a condition"};
+                                        "a vblank", "audio output", "the display queue", "the GPU", "a condition",
+                                        "a reader-writer lock"};
     return kind < sizeof names / sizeof *names ? names[kind] : "?";
 }
 static void report_threads(VitaProcess* p) {
@@ -207,6 +208,7 @@ static bool svc(VitaProcess* p, VitaThread* t, uint32_t imm) {
         case VITA_SVC_THREAD_RETURN: vita_thread_end(p, t, (int32_t)t->cpu.r[0]); return true;
         case VITA_SVC_DISPLAY_NEXT: vita_gxm_display_next(p, t); return true;
         case VITA_SVC_DISPLAY_DONE: vita_gxm_display_done(p, t); return true;
+        case VITA_SVC_FIBER_RETURN: vita_fiber_ended(p, t); return true;
         default: report_fault(p, t, "unknown SVC", imm); return false;
     }
 }

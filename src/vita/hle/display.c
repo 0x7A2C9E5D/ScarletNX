@@ -50,5 +50,6 @@ const VitaHle vita_hle_display[] = {
     {0x78b41b92u, "sceDisplayWaitVblankStartCB", wait_vblank_start},
     {0xdd0a13b8u, "sceDisplayWaitVblankStartMulti", wait_vblank_start_multi},
     {0x9423560cu, "sceDisplayWaitSetFrameBuf", wait_vblank_start},
+    {0x7d9864a8u, "sceDisplayWaitSetFrameBufMulti", wait_vblank_start_multi},
     {0, NULL, NULL},
 };

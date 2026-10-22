@@ -16,6 +16,11 @@
 #define SCE_KERNEL_ERROR_ILLEGAL_MEMBLOCK_TYPE 0x80024b01u
 #define SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW 0x09408060u
 #define MUTEX_RECURSIVE 0x02u
+#define RW_LOCK_RECURSIVE 0x02u
+#define SCE_KERNEL_ERROR_UNKNOWN_RW_LOCK_ID   0x800281e1u
+#define SCE_KERNEL_ERROR_RW_LOCK_RECURSIVE    0x800281e2u
+#define SCE_KERNEL_ERROR_RW_LOCK_NOT_OWNED    0x800281e4u
+#define SCE_KERNEL_ERROR_RW_LOCK_UNLOCK_UDF   0x800281e5u
 #define EVF_WAITMODE_OR        0x01u
 #define EVF_WAITMODE_CLEAR_ALL 0x02u
 #define EVF_WAITMODE_CLEAR_PAT 0x04u
@@ -49,6 +54,7 @@ static uint32_t exit_thread(VitaProcess* p, VitaThread* t) {
 }
 static void release_thread(VitaProcess* p, VitaThread* t) {
     vita_free(p, t->stack);
+    if (t->module_tls) vita_free(p, t->module_tls);
     vita_object_delete(p, t->uid);
     t->state = VITA_THREAD_FREE;
 }
@@ -375,6 +381,90 @@ static uint32_t delete_cond(VitaProcess* p, VitaThread* t) {
     return delete_object(p, t, VITA_OBJ_COND, SCE_KERNEL_ERROR_UNKNOWN_COND_ID);
 }
 
+/* ---- reader-writer locks ---- */
+static uint32_t create_rw_lock(VitaProcess* p, VitaThread* t) {
+    char name[32];
+    VitaObject* o;
+    name_of(p, arg(p, t, 0), name);
+    uint32_t uid = vita_object_new(p, VITA_OBJ_RWLOCK, name, &o);
+    if (!uid) return SCE_KERNEL_ERROR_NO_MEMORY;
+    o->u.rwlock.attr = arg(p, t, 1);
+    return uid;
+}
+/* a lock now: 0, or the error, or 1 when the caller must wait. A writer may also read what it writes */
+static uint32_t try_rw_lock(VitaThread* t, VitaObject* o, bool write) {
+    if (write) {
+        if (o->u.rwlock.writer == t->uid) {
+            if (!(o->u.rwlock.attr & RW_LOCK_RECURSIVE)) return SCE_KERNEL_ERROR_RW_LOCK_RECURSIVE;
+            ++o->u.rwlock.writes;
+            return 0;
+        }
+        if (o->u.rwlock.writer || o->u.rwlock.reads) return 1;
+        o->u.rwlock.writer = t->uid, o->u.rwlock.writes = 1;
+        return 0;
+    }
+    if (o->u.rwlock.writer && o->u.rwlock.writer != t->uid) return 1;
+    ++o->u.rwlock.reads;
+    return 0;
+}
+static uint32_t lock_rw_lock(VitaProcess* p, VitaThread* t, bool write) {
+    uint32_t uid = arg(p, t, 0);
+    VitaObject* o = vita_object(p, uid, VITA_OBJ_RWLOCK);
+    if (!o) return SCE_KERNEL_ERROR_UNKNOWN_RW_LOCK_ID;
+    uint32_t r = try_rw_lock(t, o, write);
+    if (r != 1) return r;
+    vita_wait(p, (VitaWait){.kind = VITA_WAIT_RWLOCK, .object = uid, .a = write, .timeout = arg(p, t, 1),
+                            .deadline = vita_deadline(p, arg(p, t, 1))});
+    return 0;
+}
+static uint32_t lock_read_rw_lock(VitaProcess* p, VitaThread* t) { return lock_rw_lock(p, t, false); }
+static uint32_t lock_write_rw_lock(VitaProcess* p, VitaThread* t) { return lock_rw_lock(p, t, true); }
+static uint32_t unlock_read_rw_lock(VitaProcess* p, VitaThread* t) {
+    VitaObject* o = vita_object(p, arg(p, t, 0), VITA_OBJ_RWLOCK);
+    if (!o) return SCE_KERNEL_ERROR_UNKNOWN_RW_LOCK_ID;
+    if (!o->u.rwlock.reads) return SCE_KERNEL_ERROR_RW_LOCK_UNLOCK_UDF;
+    --o->u.rwlock.reads;
+    return 0;
+}
+static uint32_t unlock_write_rw_lock(VitaProcess* p, VitaThread* t) {
+    VitaObject* o = vita_object(p, arg(p, t, 0), VITA_OBJ_RWLOCK);
+    if (!o) return SCE_KERNEL_ERROR_UNKNOWN_RW_LOCK_ID;
+    if (o->u.rwlock.writer != t->uid) return SCE_KERNEL_ERROR_RW_LOCK_NOT_OWNED;
+    if (!--o->u.rwlock.writes) o->u.rwlock.writer = 0;
+    return 0;
+}
+static uint32_t delete_rw_lock(VitaProcess* p, VitaThread* t) {
+    return delete_object(p, t, VITA_OBJ_RWLOCK, SCE_KERNEL_ERROR_UNKNOWN_RW_LOCK_ID);
+}
+
+/* sceKernelGetThreadInfo(uid, SceKernelThreadInfo*): uid 0 the calling thread's */
+static uint32_t get_thread_info(VitaProcess* p, VitaThread* t) {
+    uint32_t uid = arg(p, t, 0), info = arg(p, t, 1);
+    VitaThread* target = uid ? vita_thread(p, uid) : t;
+    if (!target) return SCE_KERNEL_ERROR_UNKNOWN_THREAD_ID;
+    if (!info || !vita_mapped(p, info, 0x80)) return SCE_KERNEL_ERROR_INVALID_ARGUMENT;
+    uint32_t size = vita_read32(p, info);
+    if (size < 0x60 || size > 0x80) return SCE_KERNEL_ERROR_INVALID_ARGUMENT;
+    memset(vita_ptr(p, info + 4), 0, size - 4);
+    /* SceKernelThreadStatus: running 1, ready 2, waiting 8, dormant 0x10, dead 0x40 */
+    uint32_t status = target == t ? 1 : target->state == VITA_THREAD_READY ? 2 : target->state == VITA_THREAD_WAITING ? 8
+                      : target->state == VITA_THREAD_DORMANT ? 0x10 : 0x40;
+    vita_write32(p, info + 4, 0x10005);
+    memcpy(vita_ptr(p, info + 8), target->name, sizeof target->name);
+    const uint32_t fields[] = {target->attr, status, target->entry, target->stack, target->stack_size,
+                               target->priority, target->priority, 0, 0, 0, 0};
+    for (unsigned i = 0; i < sizeof fields / sizeof *fields; ++i) vita_write32(p, info + 0x28 + i * 4, fields[i]);
+    vita_write32(p, info + 0x5c, (uint32_t)target->exit_status);
+    return 0;
+}
+static uint32_t get_thread_cpu_affinity_mask(VitaProcess* p, VitaThread* t) {
+    return arg(p, t, 0) && !vita_thread(p, arg(p, t, 0)) ? SCE_KERNEL_ERROR_UNKNOWN_THREAD_ID : 0;
+}
+static uint32_t close_object(VitaProcess* p, VitaThread* t) {
+    (void)p, (void)t;
+    return 0;
+}
+
 bool vita_kernel_wait_try(VitaProcess* p, VitaThread* t, uint64_t now) {
     (void)now;
     VitaWait* w = &t->wait;
@@ -385,6 +475,13 @@ bool vita_kernel_wait_try(VitaProcess* p, VitaThread* t, uint64_t now) {
             if (o->u.sema.count < (int32_t)w->a) return false;
             o->u.sema.count -= (int32_t)w->a;
             return t->cpu.r[0] = 0, true;
+        }
+        case VITA_WAIT_RWLOCK: {
+            VitaObject* o = vita_object(p, w->object, VITA_OBJ_RWLOCK);
+            if (!o) return t->cpu.r[0] = SCE_KERNEL_ERROR_WAIT_DELETE, true;
+            uint32_t r = try_rw_lock(t, o, w->a);
+            if (r == 1) return false;
+            return t->cpu.r[0] = r, true;
         }
         case VITA_WAIT_MUTEX: {
             VitaObject* o = vita_object(p, w->object, VITA_OBJ_MUTEX);
@@ -557,5 +654,14 @@ const VitaHle vita_hle_kernel[] = {
     {0xf4ee4fa9u, "sceKernelGetSystemTimeWide", get_process_time_wide},
     {0x4b879059u, "sceKernelLibcGettimeofday", libc_gettimeofday},
     {0x2252890cu, "sceKernelPowerTick", power_tick},
+    {0x8667951du, "sceKernelCreateRWLock", create_rw_lock},
+    {0xfa670f0fu, "sceKernelLockReadRWLock", lock_read_rw_lock},
+    {0x67a187bbu, "sceKernelLockWriteRWLock", lock_write_rw_lock},
+    {0x3ef91145u, "sceKernelUnlockReadRWLock", unlock_read_rw_lock},
+    {0xb4151397u, "sceKernelUnlockWriteRWLock", unlock_write_rw_lock},
+    {0xe73649cau, "sceKernelDeleteRWLock", delete_rw_lock},
+    {0x8d9c5461u, "sceKernelGetThreadInfo", get_thread_info},
+    {0xf1ae5654u, "sceKernelGetThreadCpuAffinityMask", get_thread_cpu_affinity_mask},
+    {0x03e23af6u, "sceKernelCloseMutex", close_object},
     {0, NULL, NULL},
 };

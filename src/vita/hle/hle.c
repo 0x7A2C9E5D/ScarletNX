@@ -12,7 +12,8 @@ uint32_t vita_arg(VitaProcess* p, VitaThread* t, unsigned n) {
 }
 static const VitaHle* find(uint32_t nid) {
     static const VitaHle* const tables[] = {vita_hle_kernel, vita_hle_io,    vita_hle_ctrl, vita_hle_display,
-                                            vita_hle_audio,  vita_hle_misc, vita_hle_gxm};
+                                            vita_hle_audio,  vita_hle_misc, vita_hle_gxm, vita_hle_libc,
+                                            vita_hle_fiber, vita_hle_ngs};
     for (size_t i = 0; i < sizeof tables / sizeof *tables; ++i)
         for (const VitaHle* h = tables[i]; h->name; ++h)
             if (h->nid == nid) return h;
@@ -45,4 +46,15 @@ void vita_hle_call(VitaProcess* p, VitaThread* t, uint32_t index) {
                " (sp 0x%08" PRIx32 ", lr 0x%08" PRIx32 ")\n",
                t->name, h->name, r[0], r[1], r[2], r[3], t->state == VITA_THREAD_WAITING ? " waits," : " ->",
                t->cpu.r[0], t->cpu.r[13], t->cpu.r[14]);
+}
+void vita_hle_variables(VitaProcess* p) {
+    for (uint32_t i = 0; i < p->image.variable_count; ++i) {
+        const VitaImport* v = &p->image.variables[i];
+        const VitaHleVariable* h = vita_hle_libc_variables;
+        while (h->name && h->nid != v->nid) ++h;
+        if (h->name)
+            h->init(p, v->stub);
+        else
+            printf("vita: %s's variable 0x%08" PRIx32 " is not implemented (left zero)\n", v->library, v->nid);
+    }
 }

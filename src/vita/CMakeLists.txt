@@ -10,7 +10,7 @@ target_compile_definitions(snx_vita_loader PRIVATE _FILE_OFFSET_BITS=64 _CRT_SEC
 add_library(snx_vita_program STATIC
     aot/compiler.c aot/load.c
     runtime/process.c runtime/run.c runtime/jit.c runtime/lockstep.c
-    hle/hle.c hle/kernel.c hle/io.c hle/ctrl.c hle/display.c hle/audio.c hle/misc.c hle/gxm.c
+    hle/hle.c hle/kernel.c hle/io.c hle/ctrl.c hle/display.c hle/audio.c hle/misc.c hle/gxm.c hle/heap.c hle/libc.c hle/fiber.c hle/ngs.c
     gpu/present.c gpu/render.c gpu/usse.c gpu/vk.c "${volk_SOURCE_DIR}/volk.c"
     platform/input.c)
 target_link_libraries(snx_vita_program PUBLIC snx_vita_loader snx_settings_runtime snx_build_info SDL3::SDL3

@@ -220,6 +220,9 @@ static bool trampolines(VitaProcess* p) {
         0xe12fff31u,                          /* blx r1 */
         0xef000000u | VITA_SVC_DISPLAY_DONE,  /* svc DISPLAY_DONE */
         0xeafffffbu,                          /* b 0x10 */
+        0xe12fff1eu,                          /* 0x20: bx lr */
+        0xef000000u | VITA_SVC_FIBER_RETURN,  /* 0x24: svc FIBER_RETURN */
+        0xeafffffeu,                          /* b . */
     };
     if (!commit(p, VITA_RUNTIME_PAGE, VITA_TLS_BASE + VITA_THREADS * VITA_TLS_SIZE - VITA_RUNTIME_PAGE)) return false;
     for (size_t i = 0; i < sizeof code / sizeof *code; ++i) vita_write32(p, VITA_RUNTIME_PAGE + (uint32_t)i * 4, code[i]);
@@ -235,6 +238,7 @@ VitaProcess* vita_process_new(const VitaImage* image, const char* folder, char* 
     p->folder = snx_absolute(folder);
     p->app = p->folder ? snx_path_join(p->folder, "app") : NULL;
     p->ux0 = p->folder ? snx_path_join(p->folder, "ux0") : NULL;
+    p->patch = p->folder ? snx_path_join(p->folder, "patch") : NULL;
     p->user = (VitaRegion){VITA_USER_BASE, VITA_USER_END, VITA_USER_BASE};
     p->cdram = (VitaRegion){VITA_CDRAM_BASE, VITA_CDRAM_END, VITA_CDRAM_BASE};
     p->start_ns = vita_now_ns();
@@ -242,7 +246,7 @@ VitaProcess* vita_process_new(const VitaImage* image, const char* folder, char* 
     p->hle = calloc(image->import_count ? image->import_count : 1, sizeof *p->hle);
     /* the guest's 4 GiB and a guard page past it, inaccessible until committed */
     p->mem = snx_vm_reserve(VITA_SPACE + 0x10000);
-    if (!p->app || !p->ux0 || !p->unknown_logged || !p->hle || !p->mem || !trampolines(p)) {
+    if (!p->app || !p->ux0 || !p->patch || !p->unknown_logged || !p->hle || !p->mem || !trampolines(p)) {
         snprintf(error, error_size, "cannot reserve the guest's address space");
         goto fail;
     }
@@ -258,6 +262,7 @@ VitaProcess* vita_process_new(const VitaImage* image, const char* folder, char* 
         }
         memcpy(p->mem + s->address, s->bytes, s->size);
     }
+    vita_hle_variables(p);
     /* the main thread, at module_start, with the stack and priority the process parameters name (sceProcessParam's
        main_thread_priority and main_thread_stacksize, pointers when set) */
     uint32_t stack = MAIN_STACK, priority = MAIN_PRIORITY;
@@ -287,6 +292,7 @@ void vita_process_free(VitaProcess* p) {
     free(p->hle);
     free(p->folder);
     free(p->app);
+    free(p->patch);
     free(p->ux0);
     free(p);
 }

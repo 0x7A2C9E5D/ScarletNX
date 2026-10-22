@@ -61,17 +61,48 @@ static bool fail(Loader* l, const char* format, uint32_t a, uint32_t b) {
     snprintf(l->error, l->error_size, format, a, b);
     return false;
 }
-static void seed(Loader* l, uint32_t pointer) {
+/* key, an address in executable memory with bit 0 for Thumb, where discovery starts */
+static void seed_code(Loader* l, uint32_t key) {
     VitaImage* image = l->image;
-    const VitaSegment* s = vita_image_segment(image, pointer & ~1u, 2);
-    if (!(pointer & 1) || !s || !(s->flags & 1)) return; /* a Thumb function's address in executable memory */
+    const VitaSegment* s = vita_image_segment(image, key & ~1u, key & 1 ? 2 : 4);
+    if (!s || !(s->flags & 1)) return;
     if (image->seed_count == l->seed_capacity) {
         size_t capacity = l->seed_capacity ? l->seed_capacity * 2 : 1024;
         uint32_t* grown = realloc(image->seeds, capacity * sizeof *grown);
         if (!grown) return;
         image->seeds = grown, l->seed_capacity = capacity;
     }
-    image->seeds[image->seed_count++] = pointer;
+    image->seeds[image->seed_count++] = key;
+}
+/* a pointer the image holds, when a Thumb function's address */
+static void seed(Loader* l, uint32_t pointer) {
+    if (pointer & 1) seed_code(l, pointer);
+}
+static uint32_t thumb_imm16(uint32_t hw1, uint32_t hw2) {
+    return (hw1 & 15) << 12 | ((hw1 >> 10) & 1) << 11 | ((hw2 >> 12) & 7) << 8 | (hw2 & 0xff);
+}
+/* A fixed-address module has no relocations to say where its code pointers are: each word of the image and each
+   Thumb MOVW and MOVT of one register a few instructions apart (how the SDK's compiler calls far) that makes a Thumb
+   function's address is taken as one. One that isn't code is refused by discovery */
+static void seed_pointers(Loader* l) {
+    const VitaImage* image = l->image;
+    for (unsigned i = 0; i < image->segment_count; ++i) {
+        const VitaSegment* s = &image->segment[i];
+        for (uint32_t at = 0; at + 4 <= s->size; at += 4) seed(l, le32(s->bytes + at));
+        if (!(s->flags & 1)) continue;
+        for (uint32_t at = 0; at + 4 <= s->size; at += 2) {
+            uint32_t hw1 = le16(s->bytes + at), hw2 = le16(s->bytes + at + 2);
+            if ((hw1 & 0xfbf0) != 0xf240 || (hw2 & 0x8000)) continue; /* MOVW (T3) */
+            uint32_t rd = (hw2 >> 8) & 15, low = thumb_imm16(hw1, hw2);
+            for (uint32_t next = at + 4; next + 4 <= s->size && next <= at + 16; next += 2) {
+                uint32_t h1 = le16(s->bytes + next), h2 = le16(s->bytes + next + 2);
+                if ((h1 & 0xfbf0) == 0xf2c0 && !(h2 & 0x8000) && ((h2 >> 8) & 15) == rd) { /* MOVT (T1) */
+                    seed(l, thumb_imm16(h1, h2) << 16 | low);
+                    break;
+                }
+            }
+        }
+    }
 }
 
 /* One relocation: code (ARM ELF's relocation types) at P in segment datseg, the symbol's segment's base S (0 for
@@ -148,40 +179,81 @@ static bool relocate_all(Loader* l, const unsigned char* r, size_t size) {
     }
     return true;
 }
-/* Fills each imported function's stub: "svc #index; bx lr", in the stub's instruction set */
+/* An imported variable's references: a header word (0x40, then the count from bit 7), then two words for each, the
+   relocation's type in the first's second byte and its offset from the module's first segment in the second. Each is
+   relocated to the variable's slot */
+static bool variable_references(Loader* l, uint32_t references, uint32_t slot) {
+    uint32_t header, count, first = 16;
+    for (unsigned i = 0; i < 16 && first == 16; ++i)
+        if (l->loaded[i] >= 0) first = i;
+    if (!word(l->image, references, &header) || (header & 0x7f) != 0x40 || first == 16)
+        return fail(l, "bad variable import references at 0x%08x", references, 0);
+    count = (header >> 7) & 0x1ffff;
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t kind, offset;
+        if (!word(l->image, references + 4 + i * 8, &kind) || !word(l->image, references + 8 + i * 8, &offset))
+            return fail(l, "bad variable import references at 0x%08x", references, 0);
+        if ((kind & 0xff) != 1) return fail(l, "variable import reference of form %u at 0x%08x", kind & 0xff, references);
+        if (!relocate(l, (kind >> 8) & 0xff, 15, first, offset, slot)) return false;
+    }
+    return true;
+}
+/* Fills each imported function's stub: "svc #index; bx lr", in the stub's instruction set; gives each imported
+   variable its slot */
 static bool imports(Loader* l, uint32_t top, uint32_t end) {
     VitaImage* image = l->image;
-    uint32_t count = 0;
+    uint32_t count = 0, variable_capacity = 0;
     for (int pass = 0; pass < 2; ++pass) {
         uint32_t index = 0;
         for (uint32_t p = top; p < end;) {
             const unsigned char* e = at(image, p, 0x24);
             if (!e || (le16(e) != 0x24 && le16(e) != 0x34) || !at(image, p, le16(e)))
                 return fail(l, "bad import table entry at 0x%08x", p, 0);
-            uint32_t functions = le16(e + 6), variables, library_nid, name, nids, entries;
+            uint32_t functions = le16(e + 6), variables, library_nid, name, nids, entries, variable_nids,
+                     variable_entries;
             if (le16(e) == 0x34) { /* the older layout, with TLS variables */
-                variables = le16(e + 8) + le16(e + 10);
+                if (le16(e + 10)) return fail(l, "the module imports %u TLS variables (at 0x%08x), which isn't "
+                                                 "supported yet", le16(e + 10), p);
+                variables = le16(e + 8);
                 library_nid = le32(e + 16), name = le32(e + 20), nids = le32(e + 28), entries = le32(e + 32);
+                variable_nids = le32(e + 36), variable_entries = le32(e + 40);
             } else {
                 variables = le32(e + 8);
                 library_nid = le32(e + 12), name = le32(e + 16), nids = le32(e + 20), entries = le32(e + 24);
+                variable_nids = le32(e + 28), variable_entries = le32(e + 32);
             }
-            if (variables) return fail(l, "the module imports %u variables (at 0x%08x), which isn't supported yet",
-                                       variables, p);
+            VitaImport named = {.library_nid = library_nid};
+            for (unsigned c = 0; c + 1 < sizeof named.library; ++c) {
+                const unsigned char* ch = at(image, name + c, 1);
+                if (!ch || !*ch) break;
+                named.library[c] = (char)*ch;
+            }
+            if (!pass) variable_capacity += variables;
+            for (uint32_t i = 0; pass && i < variables; ++i) {
+                uint32_t nid, references, v = 0;
+                if (!word(image, variable_nids + i * 4, &nid) || !word(image, variable_entries + i * 4, &references))
+                    return fail(l, "bad import table at 0x%08x", p, 0);
+                while (v < image->variable_count && image->variables[v].nid != nid) ++v;
+                if (v == image->variable_count) {
+                    if (v == VITA_VARIABLE_COUNT) return fail(l, "more than %u imported variables", v, 0);
+                    image->variables[v] = named;
+                    image->variables[v].nid = nid;
+                    image->variables[v].stub = VITA_VARIABLES + v * VITA_VARIABLE_SIZE;
+                    ++image->variable_count;
+                }
+                if (!variable_references(l, references, image->variables[v].stub)) return false;
+            }
             for (uint32_t i = 0; i < functions; ++i, ++index) {
                 uint32_t nid, stub;
                 if (!word(image, nids + i * 4, &nid) || !word(image, entries + i * 4, &stub))
                     return fail(l, "bad import table at 0x%08x", p, 0);
                 if (!pass) continue;
                 VitaImport* import = &image->imports[index];
-                import->nid = nid, import->library_nid = library_nid, import->stub = stub;
-                for (unsigned c = 0; c + 1 < sizeof import->library; ++c) {
-                    const unsigned char* ch = at(image, name + c, 1);
-                    if (!ch || !*ch) break;
-                    import->library[c] = (char)*ch;
-                }
+                *import = named;
+                import->nid = nid, import->stub = stub;
                 unsigned char* code = at(image, stub & ~1u, 4);
                 if (!code) return fail(l, "import stub 0x%08x outside the module", stub, 0);
+                seed_code(l, stub);
                 if (stub & 1) {
                     if (index > 255) return fail(l, "Thumb import stub 0x%08x for import %u", stub, index);
                     put16(code, 0xdf00 | index); /* svc #index */
@@ -198,7 +270,8 @@ static bool imports(Loader* l, uint32_t top, uint32_t end) {
             count = index;
             if (count >= VITA_SVC_RUNTIME) return fail(l, "%u imports", count, 0);
             image->imports = calloc(count ? count : 1, sizeof *image->imports);
-            if (!image->imports) return fail(l, "out of memory", 0, 0);
+            image->variables = calloc(variable_capacity ? variable_capacity : 1, sizeof *image->variables);
+            if (!image->imports || !image->variables) return fail(l, "out of memory", 0, 0);
             image->import_count = count;
         }
     }
@@ -295,23 +368,24 @@ bool vita_image_load(const char* path, VitaImage* image, char* error, size_t err
     }
     ok = ok && programs(&l, file, size, ph, &count, &elf);
     uint32_t type = ok ? le16(elf + 16) : 0, entry = ok ? le32(elf + 24) : 0;
-    if (ok && type != ET_SCE_RELEXEC)
-        ok = fail(&l, type == ET_SCE_EXEC ? "eboot.bin is a fixed-address module (ET_SCE_EXEC), not supported yet"
-                                          : "eboot.bin is not a Vita module (ELF type 0x%x)",
-                  type, 0);
-    /* the loaded segments keep their places relative to each other, the first at VITA_LOAD_BASE */
-    uint32_t first = UINT32_MAX;
+    if (ok && type != ET_SCE_RELEXEC && type != ET_SCE_EXEC)
+        ok = fail(&l, "eboot.bin is not a Vita module (ELF type 0x%x)", type, 0);
+    /* the loaded segments keep their places relative to each other, the first at VITA_LOAD_BASE, or where a
+       fixed-address module's are: within the image's range either way */
+    uint32_t first = UINT32_MAX, origin = VITA_LOAD_BASE;
     for (unsigned i = 0; ok && i < count; ++i)
         if (ph[i].type == PT_LOAD && ph[i].vaddr < first) first = ph[i].vaddr & ~(PAGE - 1);
+    if (type == ET_SCE_EXEC) origin = first;
     for (unsigned i = 0; ok && i < count; ++i) {
         if (ph[i].type != PT_LOAD) continue;
+        uint64_t address = (uint64_t)origin + (ph[i].vaddr - first);
         if (image->segment_count == VITA_SEGMENTS || ph[i].memsz < ph[i].filesz || !ph[i].memsz ||
-            ph[i].vaddr - first > 0x10000000u || ph[i].memsz > 0x10000000u) {
-            ok = fail(&l, "bad loadable segment %u", i, 0);
+            address < VITA_LOAD_BASE || address + ph[i].memsz > VITA_IMAGE_END) {
+            ok = fail(&l, "bad loadable segment %u (at 0x%08x)", i, ph[i].vaddr);
             break;
         }
         VitaSegment* s = &image->segment[image->segment_count];
-        s->address = VITA_LOAD_BASE + (ph[i].vaddr - first);
+        s->address = (uint32_t)address;
         s->size = ph[i].memsz;
         s->flags = ph[i].flags;
         s->bytes = calloc(1, s->size);
@@ -342,9 +416,14 @@ bool vita_image_load(const char* path, VitaImage* image, char* error, size_t err
              imports(&l, base + le32(info + 44), base + le32(info + 48));
         if (ok && !image->module_start && le32(info + 68)) image->module_start = base + le32(info + 68);
         if (ok && !image->module_start) ok = fail(&l, "the module has no module_start", 0, 0);
-        if (ok && le32(info + 64)) ok = fail(&l, "the module has thread-local data (%u bytes), not supported yet",
-                                             le32(info + 64), 0);
+        /* the thread-local data: its image, the bytes it starts with and its size */
+        image->tls_image = le32(info + 64) ? base + le32(info + 56) : 0;
+        image->tls_filesz = le32(info + 60), image->tls_memsz = le32(info + 64);
+        if (ok && image->tls_memsz && (image->tls_filesz > image->tls_memsz || image->tls_memsz > 0x100000u ||
+                                       !at(image, image->tls_image, image->tls_filesz)))
+            ok = fail(&l, "bad thread-local data (%u bytes at 0x%08x)", image->tls_memsz, image->tls_image);
     }
+    if (ok && type == ET_SCE_EXEC) seed_pointers(&l);
     if (ok) {
         seed(&l, image->module_start);
         if (image->module_stop) seed(&l, image->module_stop);
@@ -358,6 +437,7 @@ bool vita_image_load(const char* path, VitaImage* image, char* error, size_t err
 void vita_image_free(VitaImage* image) {
     for (unsigned i = 0; i < image->segment_count; ++i) free(image->segment[i].bytes);
     free(image->imports);
+    free(image->variables);
     free(image->seeds);
     memset(image, 0, sizeof *image);
 }

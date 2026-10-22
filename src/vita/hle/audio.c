@@ -2,11 +2,13 @@
    Copyright 2026 the ScarletNX contributors */
 /* SceAudio: the output ports, each an SDL3 stream on the default playback device, which mixes them. A buffer is
    queued when output, and the call returns when the one before it has played, as the console's double-buffered port
-   does: the game stays a buffer ahead of what is heard. Without a device the time still passes the same way */
+   does: the game stays a buffer ahead of what is heard. Without a device the time still passes the same way.
+   SceAudioIn: a microphone that hears silence, each grain taking its time as the console's does */
 #include "vita/hle/hle.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SCE_AUDIO_OUT_ERROR_NOT_OPENED          0x80260001u
 #define SCE_AUDIO_OUT_ERROR_PORT_FULL           0x80260005u
@@ -17,6 +19,10 @@
 #define SCE_AUDIO_OUT_ERROR_INVALID_PORT_TYPE   0x8026000au
 #define SCE_AUDIO_OUT_ERROR_INVALID_CONF_TYPE   0x8026000cu
 #define PORTS 8u
+#define SCE_AUDIO_IN_ERROR_INVALID_PORT_PARAM 0x80260106u
+#define SCE_AUDIO_IN_ERROR_NOT_OPENED         0x80260109u
+#define SCE_AUDIO_IN_ERROR_PORT_FULL          0x80260107u
+#define AUDIO_IN_PORT 0x100u /* the input port's handle */
 
 typedef struct {
     bool open;
@@ -26,6 +32,7 @@ typedef struct {
 } Port;
 struct VitaAudio {
     Port ports[PORTS];
+    Port input; /* type, grain (len) and freq; never a stream */
     bool sdl;
 };
 
@@ -156,6 +163,48 @@ void vita_audio_free(VitaProcess* p) {
     p->audio = NULL;
 }
 
+/* sceAudioInOpenPort(type, grain, freq, param): one port, mono */
+static uint32_t in_open_port(VitaProcess* p, VitaThread* t) {
+    uint32_t type = vita_arg(p, t, 0), grain = vita_arg(p, t, 1), freq = vita_arg(p, t, 2);
+    struct VitaAudio* a = audio(p);
+    if (!a) return SCE_AUDIO_IN_ERROR_NOT_OPENED;
+    if (a->input.open) return SCE_AUDIO_IN_ERROR_PORT_FULL;
+    if (!grain || grain > 4096 || (freq != 16000 && freq != 48000)) return SCE_AUDIO_IN_ERROR_INVALID_PORT_PARAM;
+    a->input = (Port){.open = true, .type = type, .len = grain, .freq = freq};
+    return AUDIO_IN_PORT;
+}
+static Port* in_port(VitaProcess* p, uint32_t id) {
+    return id == AUDIO_IN_PORT && p->audio && p->audio->input.open ? &p->audio->input : NULL;
+}
+static uint32_t in_release_port(VitaProcess* p, VitaThread* t) {
+    Port* port = in_port(p, vita_arg(p, t, 0));
+    if (!port) return SCE_AUDIO_IN_ERROR_NOT_OPENED;
+    *port = (Port){0};
+    return 0;
+}
+/* sceAudioInInput(port, dest): a grain of silence, once a grain's time after the last */
+static uint32_t in_input(VitaProcess* p, VitaThread* t) {
+    Port* port = in_port(p, vita_arg(p, t, 0));
+    uint32_t dest = vita_arg(p, t, 1);
+    if (!port) return SCE_AUDIO_IN_ERROR_NOT_OPENED;
+    if (!dest || !vita_mapped(p, dest, port->len * 2)) return SCE_AUDIO_IN_ERROR_INVALID_PORT_PARAM;
+    memset(vita_ptr(p, dest), 0, port->len * 2);
+    uint64_t now = vita_now_ns(), start = port->busy_until > now ? port->busy_until : now;
+    port->busy_until = start + (uint64_t)port->len * 1000000000u / port->freq;
+    vita_wait(p, (VitaWait){.kind = VITA_WAIT_AUDIO, .deadline = port->busy_until});
+    return 0;
+}
+/* sceAudioInGetStatus(select): nothing muted or in use elsewhere */
+static uint32_t in_get_status(VitaProcess* p, VitaThread* t) {
+    (void)p, (void)t;
+    return 0;
+}
+/* sceAudioOutGetAdopt and sceAudioInGetAdopt(type): every port type is there */
+static uint32_t get_adopt(VitaProcess* p, VitaThread* t) {
+    (void)p, (void)t;
+    return 1;
+}
+
 const VitaHle vita_hle_audio[] = {
     {0x5bc341e4u, "sceAudioOutOpenPort", open_port},
     {0x69e2e6b5u, "sceAudioOutReleasePort", release_port},
@@ -164,5 +213,11 @@ const VitaHle vita_hle_audio[] = {
     {0x9c8edaeau, "sceAudioOutGetConfig", get_config},
     {0x64167f11u, "sceAudioOutSetVolume", set_volume},
     {0x9a5370c4u, "sceAudioOutGetRestSample", get_rest_sample},
+    {0x12fb1767u, "sceAudioOutGetAdopt", get_adopt},
+    {0x39b50dc1u, "sceAudioInOpenPort", in_open_port},
+    {0x3a61b8c4u, "sceAudioInReleasePort", in_release_port},
+    {0x638add2du, "sceAudioInInput", in_input},
+    {0x2f940377u, "sceAudioInGetStatus", in_get_status},
+    {0x566ac433u, "sceAudioInGetAdopt", get_adopt},
     {0, NULL, NULL},
 };

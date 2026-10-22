@@ -2,7 +2,9 @@
    Copyright 2026 the ScarletNX contributors */
 /* scarletnx-vita: a VPK extracted into its game's folder, recompiled/<title ID>/ as a Switch or 3DS game's (its app0:
    in app/, its memory card in ux0/, the module <title ID>_code.so, the hints, a copy of the runtime named after the
-   title that plays it), compiled when the module is missing or no longer matches, then played */
+   title that plays it), compiled when the module is missing or no longer matches, then played. A game dumped as a
+   folder (a console's ux0:app/<title ID>, its update in ux0:patch/<title ID>) is linked there instead: app/ and patch/
+   name the dump's folders, whose files stay where they are */
 #include "vita/runtime/main.h"
 #include "vita/aot/module.h"
 #include "vita/gpu/present.h"
@@ -20,12 +22,14 @@
 
 static void usage(FILE* out) {
     fputs("Usage: scarletnx-vita [OPTIONS] game.vpk\n"
+          "       scarletnx-vita [OPTIONS] app/<title ID>   (a dumped game's folder)\n"
           "       scarletnx-vita [OPTIONS] --game=recompiled/<title ID>\n"
           "       <title ID> [OPTIONS]   (the game's copy of the runtime, in its folder)\n"
           "  game.vpk        Extract the VPK into its game's folder (recompiled/<its title ID> of the data folder),\n"
           "                  compile its code if needed, then play. The folder holds app/ (app0:), ux0/ (the\n"
           "                  memory card), the module <title ID>_code.so and the copy of the runtime that plays it\n"
           "  --game=DIR      Play the game in its folder DIR, as its copy of the runtime does\n"
+          "  --patch DIR     The dumped game's update (default: patch/<title ID> beside its app/<title ID>)\n"
           "  -x, --extract   Extract only\n"
           "  -r, --recomp    Compile again, without playing\n"
           "  --repo DIR      The data folder (default: a portable copy's folder, else the user's data folder)\n"
@@ -99,6 +103,46 @@ static bool extract(const char* vpk, const char* folder) {
     free(stage);
     return ok;
 }
+/* folder/name naming target, the dump's folder: a link, else a copy */
+static bool link_dump(const char* folder, const char* name, const char* target) {
+    char *link = snx_path_join(folder, name), *full = snx_absolute(target);
+    bool ok = link && full;
+    if (ok && snx_is_link(link)) {
+        char* old = snx_absolute(link);
+        bool same = old && !strcmp(old, full);
+        free(old);
+        if (!same) ok = !snx_remove_tree(link);
+    }
+    if (ok && !snx_path_exists(link)) {
+        printf("Linking %s to %s\n", link, full);
+        if (snx_symlink(full, link)) {
+            printf("Cannot link it: copying %s instead\n", full);
+            ok = !snx_copy_tree(full, link);
+        }
+    }
+    if (!ok) fprintf(stderr, "scarletnx-vita: cannot give %s the dump's %s\n", folder, target);
+    free(link);
+    free(full);
+    return ok;
+}
+/* a dumped game's update: patch/<title ID> beside its app/<title ID> */
+static char* dump_patch(const char* app, const char* title) {
+    char *full = snx_absolute(app), *parent = full ? snx_dirname(full) : NULL, *root = parent ? snx_dirname(parent) : NULL;
+    char* patch = root ? snx_format("%s/patch/%s", root, title) : NULL;
+    free(full);
+    free(parent);
+    free(root);
+    if (patch) {
+        char* eboot = snx_path_join(patch, "eboot.bin");
+        bool there = eboot && snx_is_file(eboot);
+        free(eboot);
+        if (!there) {
+            free(patch);
+            patch = NULL;
+        }
+    }
+    return patch;
+}
 static bool same_bytes(const char* a, const char* b) {
     size_t x = 0, y = 0;
     unsigned char *p = snx_read_file(a, &x), *q = snx_read_file(b, &y);
@@ -133,8 +177,13 @@ static int play(const char* folder, bool recompile, double seconds, const char* 
     VitaImage image;
     VitaNative native = {0};
     VitaProcess* process = NULL;
-    char error[512], *eboot = snx_format("%s/app/eboot.bin", folder), *module = vita_game_file(folder, VITA_MODULE_SUFFIX);
+    /* the update's eboot.bin when there is one */
+    char error[512], *eboot = snx_format("%s/patch/eboot.bin", folder), *module = vita_game_file(folder, VITA_MODULE_SUFFIX);
     int status = 1;
+    if (eboot && !snx_is_file(eboot)) {
+        free(eboot);
+        eboot = snx_format("%s/app/eboot.bin", folder);
+    }
     if (!eboot || !module || !vita_image_load(eboot, &image, error, sizeof error)) {
         fprintf(stderr, "scarletnx-vita: %s\n", eboot && module ? error : "out of memory");
         free(eboot);
@@ -162,7 +211,8 @@ static int play(const char* folder, bool recompile, double seconds, const char* 
         goto done;
     }
     process->module = native.module;
-    char *sfo_path = snx_format("%s/app/sce_sys/param.sfo", folder), *title = NULL;
+    char *sfo_path = snx_format("%s/%s/sce_sys/param.sfo", folder, snx_is_dir(process->patch) ? "patch" : "app"),
+         *title = NULL;
     size_t sfo_size = 0;
     unsigned char* sfo = sfo_path ? snx_read_file(sfo_path, &sfo_size) : NULL;
     title = sfo ? vita_sfo_string(sfo, sfo_size, "TITLE") : NULL;
@@ -188,7 +238,7 @@ static bool parse_seconds(const char* text, double* seconds) {
     return text && (*seconds = strtod(text, &end)) > 0 && !*end && *seconds <= 1e9;
 }
 int snx_vita_main(int argc, char** argv) {
-    const char *input = NULL, *output = NULL, *outdir = NULL, *repo = NULL, *game = NULL, *shot = NULL;
+    const char *input = NULL, *output = NULL, *outdir = NULL, *repo = NULL, *game = NULL, *shot = NULL, *patch = NULL;
     bool extract_only = false, recompile = false;
     double seconds = 0;
     snx_tool_console();
@@ -202,12 +252,15 @@ int snx_vita_main(int argc, char** argv) {
             extract_only = true;
         else if (!strcmp(a, "-r") || !strcmp(a, "--recomp"))
             recompile = true;
-        else if (!strcmp(a, "--output") || !strcmp(a, "--outdir") || !strcmp(a, "--repo")) {
+        else if (!strcmp(a, "--output") || !strcmp(a, "--outdir") || !strcmp(a, "--repo") || !strcmp(a, "--patch")) {
             if (++i == argc || !*argv[i]) {
                 fprintf(stderr, "scarletnx-vita: %s requires a directory\n", a);
                 return 2;
             }
-            *(!strcmp(a, "--output") ? &output : !strcmp(a, "--outdir") ? &outdir : &repo) = argv[i];
+            *(!strcmp(a, "--output")   ? &output
+              : !strcmp(a, "--outdir") ? &outdir
+              : !strcmp(a, "--patch")  ? &patch
+                                       : &repo) = argv[i];
         } else if (!strncmp(a, "--game=", 7) && a[7])
             game = a + 7;
         else if (!strncmp(a, "--shot=", 7) && a[7])
@@ -248,14 +301,18 @@ int snx_vita_main(int argc, char** argv) {
         return 2;
     }
     if (input) {
-        if (!vpk_path(input) || !snx_is_file(input)) {
-            fprintf(stderr, "scarletnx-vita: %s is not a .vpk file\n", input);
+        bool dump = snx_is_dir(input);
+        if (!dump && (!vpk_path(input) || !snx_is_file(input))) {
+            fprintf(stderr, "scarletnx-vita: %s is neither a .vpk file nor a dumped game's folder\n", input);
             free(runtime);
             return 2;
         }
-        char error[512];
+        char error[512] = "no sce_sys/param.sfo";
         size_t size = 0;
-        unsigned char* sfo = vita_vpk_member(input, "sce_sys/param.sfo", &size, error, sizeof error);
+        char* sfo_path = dump ? snx_format("%s/sce_sys/param.sfo", input) : NULL;
+        unsigned char* sfo = dump ? (sfo_path ? snx_read_file(sfo_path, &size) : NULL)
+                                  : vita_vpk_member(input, "sce_sys/param.sfo", &size, error, sizeof error);
+        free(sfo_path);
         char* title = sfo ? vita_sfo_string(sfo, size, "TITLE_ID") : NULL;
         free(sfo);
         if (!vita_title_id(title)) {
@@ -266,8 +323,14 @@ int snx_vita_main(int argc, char** argv) {
             return 2;
         }
         folder = output ? snx_strdup(output) : game_folder(repo, outdir, argv[0], title);
+        char* update = !dump ? NULL : patch ? snx_strdup(patch) : dump_patch(input, title);
         free(title);
-        if (!folder || snx_mkdirs(folder) || !extract(input, folder)) goto done;
+        bool ready = folder && !snx_mkdirs(folder) &&
+                     (dump ? link_dump(folder, "app", input) && (!update || link_dump(folder, "patch", update))
+                           : extract(input, folder));
+        if (ready && update) printf("The update is %s\n", update);
+        free(update);
+        if (!ready) goto done;
         if (extract_only) {
             status = 0;
             goto done;

@@ -252,7 +252,7 @@ static uint32_t map_memory(VitaProcess* p, VitaThread* t) {
     VitaGxm* g = gxm(p);
     if (!g || !base) return SCE_GXM_ERROR_INVALID_POINTER;
     if ((base | size) & 0xfff) return SCE_GXM_ERROR_INVALID_ALIGNMENT;
-    if (!vita_mapped(p, base, size)) return SCE_GXM_ERROR_INVALID_VALUE;
+    if (!size || !vita_mapped(p, base, size)) return SCE_GXM_ERROR_INVALID_VALUE;
     for (uint32_t i = 0; i < GXM_MAPPINGS; ++i)
         if (!g->mappings[i].size) {
             g->mappings[i].address = base, g->mappings[i].size = size;
@@ -397,7 +397,7 @@ static uint32_t begin_scene(VitaProcess* p, VitaThread* t) {
     if (target < GXM_HANDLE_TARGET || index >= GXM_TARGETS || !p->gxm->targets[index].width)
         return SCE_GXM_ERROR_INVALID_POINTER;
     c->target = index;
-    c->has_color = color != 0;
+    c->has_color = color && vita_read32(p, color + 16); /* a disabled surface has no data */
     if (color) {
         uint32_t w[8];
         for (unsigned i = 0; i < 8; ++i) w[i] = vita_read32(p, color + i * 4);
@@ -769,6 +769,133 @@ void vita_gxm_free(VitaProcess* p) {
     p->gxm = NULL;
 }
 
+/* ---- a program's parameters, read from its GXP ---- */
+static uint32_t program_get_type(VitaProcess* p, VitaThread* t) {
+    return gxp_fragment(vita_ptr(p, arg(p, t, 0))) ? 1 : 0; /* SCE_GXM_FRAGMENT_PROGRAM, SCE_GXM_VERTEX_PROGRAM */
+}
+static uint32_t program_get_parameter_count(VitaProcess* p, VitaThread* t) {
+    return gxp_u32(vita_ptr(p, arg(p, t, 0) + GXP_PARAMETER_COUNT));
+}
+static uint32_t program_get_parameter(VitaProcess* p, VitaThread* t) {
+    uint32_t program = arg(p, t, 0), index = arg(p, t, 1);
+    const unsigned char* g = vita_ptr(p, program);
+    if (index >= gxp_u32(g + GXP_PARAMETER_COUNT)) return 0;
+    return program + (uint32_t)(gxp_parameter(g, index) - g);
+}
+/* the default uniform buffer's bytes: its 32-bit words */
+static uint32_t program_get_default_uniform_buffer_size(VitaProcess* p, VitaThread* t) {
+    return gxp_u32(vita_ptr(p, arg(p, t, 0) + GXP_DEFAULT_UNIFORM_COUNT)) * 4;
+}
+/* _sceGxmProgramFindParameterBySemantic(program, semantic, index): the attribute with that semantic and index */
+static uint32_t program_find_parameter_by_semantic(VitaProcess* p, VitaThread* t) {
+    uint32_t program = arg(p, t, 0), semantic = arg(p, t, 1), index = arg(p, t, 2);
+    const unsigned char* g = vita_ptr(p, program);
+    for (uint32_t i = 0, n = gxp_u32(g + GXP_PARAMETER_COUNT); i < n; ++i) {
+        const unsigned char* q = gxp_parameter(g, i);
+        if (gxp_parameter_category(q) == GXP_CATEGORY_ATTRIBUTE && gxp_parameter_semantic(q) == semantic &&
+            gxp_parameter_semantic_index(q) == index)
+            return program + (uint32_t)(q - g);
+    }
+    return 0;
+}
+static uint32_t parameter_get_name(VitaProcess* p, VitaThread* t) {
+    uint32_t q = arg(p, t, 0);
+    return q ? q + gxp_u32(vita_ptr(p, q)) : 0;
+}
+static uint32_t parameter_get_category(VitaProcess* p, VitaThread* t) {
+    return gxp_parameter_category(vita_ptr(p, arg(p, t, 0)));
+}
+static uint32_t parameter_get_type(VitaProcess* p, VitaThread* t) {
+    return gxp_parameter_type(vita_ptr(p, arg(p, t, 0)));
+}
+static uint32_t vertex_program_get_program(VitaProcess* p, VitaThread* t) {
+    GxmVertexProgram* v = p->gxm ? vertex_of(p->gxm, arg(p, t, 0)) : NULL;
+    return v ? v->program : 0;
+}
+static uint32_t fragment_program_get_program(VitaProcess* p, VitaThread* t) {
+    GxmFragmentProgram* f = p->gxm ? fragment_of(p->gxm, arg(p, t, 0)) : NULL;
+    return f ? f->program : 0;
+}
+
+/* ---- more of the context's state ---- */
+static uint32_t set_back_depth_func(VitaProcess* p, VitaThread* t) {
+    (void)p, (void)t; /* the back face's depth state is the front's: two-sided depth isn't drawn */
+    return 0;
+}
+static uint32_t set_front_stencil_func(VitaProcess* p, VitaThread* t) {
+    GxmContext* c = context_of(p, arg(p, t, 0));
+    if (!c) return 0;
+    c->stencil_func[0] = arg(p, t, 1);
+    c->stencil_ops[0][0] = arg(p, t, 2), c->stencil_ops[0][1] = arg(p, t, 3), c->stencil_ops[0][2] = arg(p, t, 4);
+    c->stencil_masks[0][0] = arg(p, t, 5), c->stencil_masks[0][1] = arg(p, t, 6);
+    return 0;
+}
+static uint32_t set_front_stencil_ref(VitaProcess* p, VitaThread* t) {
+    GxmContext* c = context_of(p, arg(p, t, 0));
+    if (c) c->stencil_ref[0] = arg(p, t, 1);
+    return 0;
+}
+/* sceGxmSet{Vertex,Fragment}UniformBuffer(context, index, buffer) */
+static uint32_t set_uniform_buffer(VitaProcess* p, VitaThread* t, bool fragment) {
+    GxmContext* c = context_of(p, arg(p, t, 0));
+    uint32_t index = arg(p, t, 1);
+    if (!c) return SCE_GXM_ERROR_INVALID_POINTER;
+    if (index >= GXP_DEFAULT_CONTAINER) return SCE_GXM_ERROR_INVALID_VALUE;
+    (fragment ? c->fragment_uniform : c->vertex_uniform)[index] = arg(p, t, 2);
+    return 0;
+}
+static uint32_t set_vertex_uniform_buffer(VitaProcess* p, VitaThread* t) { return set_uniform_buffer(p, t, false); }
+static uint32_t set_fragment_uniform_buffer(VitaProcess* p, VitaThread* t) { return set_uniform_buffer(p, t, true); }
+
+/* ---- surfaces: the words color_surface_init writes ---- */
+static uint32_t color_surface_init_disabled(VitaProcess* p, VitaThread* t) {
+    uint32_t surface = arg(p, t, 0);
+    if (!surface) return SCE_GXM_ERROR_INVALID_POINTER;
+    memset(vita_ptr(p, surface), 0, 48);
+    return 0;
+}
+static uint32_t color_surface_get_data(VitaProcess* p, VitaThread* t) { return vita_read32(p, arg(p, t, 0) + 16); }
+static uint32_t color_surface_get_stride(VitaProcess* p, VitaThread* t) { return vita_read32(p, arg(p, t, 0) + 12); }
+
+/* ---- textures ---- */
+static uint32_t texture_get_type(VitaProcess* p, VitaThread* t) { return vita_read32(p, arg(p, t, 0) + 4) & 0xe0000000u; }
+static uint32_t texture_get_mipmap_count(VitaProcess* p, VitaThread* t) {
+    GxmTexture x;
+    memcpy(x.w, vita_ptr(p, arg(p, t, 0)), sizeof x.w);
+    return gxm_texture_mip_count(&x);
+}
+static uint32_t texture_get_stride(VitaProcess* p, VitaThread* t) {
+    GxmTexture x;
+    memcpy(x.w, vita_ptr(p, arg(p, t, 0)), sizeof x.w);
+    return gxm_texture_type(&x) == GXM_TEXTURE_LINEAR_STRIDED ? gxm_texture_stride(&x) : 0;
+}
+
+/* ---- notifications: written when the scene that names them ends, which is at once here ---- */
+static uint32_t get_notification_region(VitaProcess* p, VitaThread* t) {
+    (void)t;
+    VitaGxm* g = gxm(p);
+    if (!g) return 0;
+    if (!g->notification_region) g->notification_region = vita_alloc(p, &p->user, 0x1000, 0x1000);
+    return g->notification_region;
+}
+/* sceGxmNotificationWait(notification): met once its address holds its value, which the scene's end wrote */
+static uint32_t notification_wait(VitaProcess* p, VitaThread* t) {
+    uint32_t n = arg(p, t, 0);
+    if (!n) return SCE_GXM_ERROR_INVALID_POINTER;
+    vita_render_idle(p, true);
+    return 0;
+}
+/* sceGxmGetRenderTargetMemSize(params, size*): the driver memory a render target takes, which the game allocates
+   and maps; the console's driver asks for some, this one leaves it unused (2 MiB, as Vita3K answers) */
+static uint32_t get_render_target_mem_size(VitaProcess* p, VitaThread* t) {
+    if (arg(p, t, 1)) vita_write32(p, arg(p, t, 1), 0x200000);
+    return 0;
+}
+static uint32_t render_target_get_driver_mem_block(VitaProcess* p, VitaThread* t) {
+    if (arg(p, t, 1)) vita_write32(p, arg(p, t, 1), 0);
+    return 0;
+}
+
 const VitaHle vita_hle_gxm[] = {
     {0xb0f1e4ecu, "sceGxmInitialize", initialize},
     {0xb627de66u, "sceGxmTerminate", terminate},
@@ -836,5 +963,42 @@ const VitaHle vita_hle_gxm[] = {
     {0xb98c5b0du, "sceGxmDisplayQueueFinish", display_queue_finish},
     {0x0733d8aeu, "sceGxmFinish", finish},
     {0x3d25fce9u, "sceGxmPadHeartbeat", ok},
+    {0x04bb3c59u, "sceGxmProgramGetType", program_get_type},
+    {0xd5d5fccdu, "sceGxmProgramGetParameterCount", program_get_parameter_count},
+    {0x06ff9151u, "sceGxmProgramGetParameter", program_get_parameter},
+    {0x8fa3f9c3u, "sceGxmProgramGetDefaultUniformBufferSize", program_get_default_uniform_buffer_size},
+    {0x7fffdd7au, "_sceGxmProgramFindParameterBySemantic", program_find_parameter_by_semantic},
+    {0x6af88a5du, "sceGxmProgramParameterGetName", parameter_get_name},
+    {0x1997dc17u, "sceGxmProgramParameterGetCategory", parameter_get_category},
+    {0x7b9023c3u, "sceGxmProgramParameterGetType", parameter_get_type},
+    {0xbc52320eu, "sceGxmVertexProgramGetProgram", vertex_program_get_program},
+    {0xe0e3b3f8u, "sceGxmFragmentProgramGetProgram", fragment_program_get_program},
+    {0xb042a4d2u, "sceGxmSetBackDepthFunc", set_back_depth_func},
+    {0xc18b706bu, "sceGxmSetBackDepthWriteEnable", ok},
+    {0xb8645a9au, "sceGxmSetFrontStencilFunc", set_front_stencil_func},
+    {0x8fa6fe44u, "sceGxmSetFrontStencilRef", set_front_stencil_ref},
+    {0x06752183u, "sceGxmSetFrontPointLineWidth", ok},
+    {0x575958a8u, "sceGxmSetFrontFragmentProgramEnable", ok},
+    {0xe26b4834u, "sceGxmSetBackFragmentProgramEnable", ok},
+    {0xc68015e4u, "sceGxmSetVertexUniformBuffer", set_vertex_uniform_buffer},
+    {0xea0fc310u, "sceGxmSetFragmentUniformBuffer", set_fragment_uniform_buffer},
+    {0x613639fau, "sceGxmColorSurfaceInitDisabled", color_surface_init_disabled},
+    {0x2db6026cu, "sceGxmColorSurfaceGetData", color_surface_get_data},
+    {0xf33d9980u, "sceGxmColorSurfaceGetStrideInPixels", color_surface_get_stride},
+    {0x86456f7bu, "sceGxmColorSurfaceSetClip", ok},
+    {0xf5c89643u, "sceGxmColorSurfaceSetGammaMode", ok},
+    {0x0c44acd7u, "sceGxmDepthStencilSurfaceSetForceLoadMode", ok},
+    {0x12aaa7afu, "sceGxmDepthStencilSurfaceSetForceStoreMode", ok},
+    {0xf65d4917u, "sceGxmTextureGetType", texture_get_type},
+    {0xf7b7b1e4u, "sceGxmTextureGetMipmapCount", texture_get_mipmap_count},
+    {0xb0bd52f3u, "sceGxmTextureGetStride", texture_get_stride},
+    {0xf23fce81u, "sceGxmTextureGetGammaMode", ok},
+    {0xa6d9f4dau, "sceGxmTextureSetGammaMode", ok},
+    {0x8bde825au, "sceGxmGetNotificationRegion", get_notification_region},
+    {0x9f448e79u, "sceGxmNotificationWait", notification_wait},
+    {0x3276c475u, "sceGxmPushUserMarker", ok},
+    {0x4fa073a6u, "sceGxmPopUserMarker", ok},
+    {0xb291c959u, "sceGxmGetRenderTargetMemSize", get_render_target_mem_size},
+    {0x49553737u, "sceGxmRenderTargetGetDriverMemBlock", render_target_get_driver_mem_block},
     {0, NULL, NULL},
 };
