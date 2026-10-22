@@ -149,6 +149,10 @@ void logf_(int lvl, const char* fmt, ...) {
     pm_unlock(&g_log_lock);
 }
 
+void log_error_line(const char* line) {
+    WARN("%s\n", line);
+}
+
 void fatal(const char* fmt, ...) {
     char msg[LINE_MAX_];
     va_list ap;
