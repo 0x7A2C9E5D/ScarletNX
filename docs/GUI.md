@@ -41,7 +41,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   keys move in (the groups, or the rows of the one open), the other list, a tab and Back waiting for a click.
 - A gamepad drives the menu as the keys do (`src/gui/pad_menu.c`): the D-pad and the left stick are the arrows, the
   button labelled A (or Cross) is Enter, B (or Circle) ESC, X (or Square) Del and Y (or Triangle) R, wherever the pad
-  has them (a Nintendo pad's A is east, its X north), LB and RB are Shift+Tab and Tab, LT and RT are PgUp and PgDn, L3
+  has them (a Switch pad's A is east, its X north), LB and RB are Shift+Tab and Tab, LT and RT are PgUp and PgDn, L3
   and R3 are M and B (Games' mods folder and AOT pack), Start is F5 and Back (View, Minus, Select) F2. A held arrow or
   page repeats. A press on the pad hides the mouse's cursor and the foot names the pad's buttons, a PlayStation pad's
   by their shapes; a key or the mouse moving past a few pixels shows the keyboard's again, and so do a click and a

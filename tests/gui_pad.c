@@ -66,7 +66,7 @@ int main(void) {
     assert(key_of(SNX_PAD_SOUTH, SWITCH) == SDLK_ESCAPE && key_of(SNX_PAD_EAST, SWITCH) == SDLK_RETURN);
     assert(key_of(SNX_PAD_SOUTH, PS) == SDLK_RETURN && key_of(SNX_PAD_EAST, PS) == SDLK_ESCAPE);
     assert(key_of(SNX_PAD_SOUTH, NONE) == SDLK_RETURN && key_of(SNX_PAD_EAST, NONE) == SDLK_ESCAPE);
-    /* X or Square is Del and Y or Triangle R, wherever they are: a Nintendo pad has X north */
+    /* X or Square is Del and Y or Triangle R, wherever they are: a Switch pad has X north */
     assert(key_of(SNX_PAD_WEST, XBOX) == SDLK_DELETE && key_of(SNX_PAD_NORTH, XBOX) == SDLK_R);
     assert(key_of(SNX_PAD_WEST, SWITCH) == SDLK_R && key_of(SNX_PAD_NORTH, SWITCH) == SDLK_DELETE);
     assert(key_of(SNX_PAD_WEST, PS) == SDLK_DELETE && key_of(SNX_PAD_NORTH, PS) == SDLK_R);

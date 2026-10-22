@@ -19,7 +19,7 @@ bool gui_pad_key(int control, const int labels[4], SDL_Keycode* key, SDL_Keymod*
             return true;
         }
         case SNX_PAD_WEST:
-        case SNX_PAD_NORTH: { /* as their labels, X or Square, Y or Triangle, which a Nintendo pad has the other way */
+        case SNX_PAD_NORTH: { /* as their labels, X or Square, Y or Triangle, which a Switch pad has the other way */
             int label = labels[control];
             bool x = label == SNX_PAD_LABEL_X || label == SNX_PAD_LABEL_SQUARE;
             if (!x && label != SNX_PAD_LABEL_Y && label != SNX_PAD_LABEL_TRIANGLE) x = control == SNX_PAD_WEST;

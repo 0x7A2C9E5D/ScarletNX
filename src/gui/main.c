@@ -427,7 +427,7 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_USERS  SNX_TR_KEYS("Up/Down: user. Left/Right: plays as. Enter: type a nickname. ESC: back.")
 #endif
 /* and what they say while a pad drives the menu (pad_menu.h's keys), on every system: its face's letters as an Xbox
-   pad's and a Nintendo one's name them, a PlayStation pad's shapes in their place (gui_pad_keys_named) */
+   pad's and a Switch one's name them, a PlayStation pad's shapes in their place (gui_pad_keys_named) */
 #define SAY_PAD_MENU SNX_TR_KEYS("D-pad: move. A: select. Start: refresh. B: back.")
 #define SAY_PAD_GAMES                                                                                                  \
     SNX_TR_KEYS("D-pad: select. A: open. Y: recompile. L3: mods folder. LT/RT: page. Start: refresh. B: back.")
