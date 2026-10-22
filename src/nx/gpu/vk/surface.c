@@ -373,12 +373,16 @@ static u64 rt_layer_bytes(const Surf* s) {
     u64 row = (u64)s->w * s->f.bpp;
     return s->bl ? bl_size((u32)row, s->h, s->bh) : (u64)s->pitch * (s->h - 1) + row;
 }
+/* whether s's slices are one 3D volume in guest memory (a 3D render target's layers, a 3D texture's depth, written
+   to as a storage image), not layers a layer_size apart */
+static int surf_volume(const Surf* s) { return s->volume || s->type == VK_IMAGE_VIEW_TYPE_3D; }
+static u32 surf_slices(const Surf* s) { return s->type == VK_IMAGE_VIEW_TYPE_3D ? s->depth3d : s->layers; }
 /* a target's guest bytes, all layers: kept in rt_size once rt_create has made it, as its shape doesn't change */
 static u64 rt_bytes(const Surf* s) {
     if (s->rt_size) return s->rt_size;
-    if (s->volume && s->bl) {
+    if (surf_volume(s) && s->bl) {
         u64 slice = rt_layer_bytes(s);
-        u32 depth = (s->layers + (1u << s->bd) - 1) & ~((1u << s->bd) - 1);
+        u32 depth = (surf_slices(s) + (1u << s->bd) - 1) & ~((1u << s->bd) - 1);
         return slice * depth;
     }
     return s->layer_size * (s->layers - 1) + rt_layer_bytes(s);
@@ -436,9 +440,9 @@ static void rt_loaded(Surf* s) {
    at layer_size from the last, where the layout starts again) */
 static VkBlMove rt_bl_move(const Surf* s, u32 pitch) {
     VkBlMove m = {s->w * s->f.bpp, s->h, bl_height(s->h, s->bh), 0, 0, s->h, 0, 1, pitch};
-    if (s->volume) {
+    if (surf_volume(s)) {
         m.bd = s->bd;
-        m.slices = s->layers;
+        m.slices = surf_slices(s);
     }
     return m;
 }
@@ -520,9 +524,11 @@ static u64 flush_bytes(const Surf* s) {
     if (s->mem_wgen == s->wgen || !moves_scaled(s)) return 0;
     return s->bl ? rt_bytes(s) : (u64)s->w * s->f.bpp * s->h * s->layers;
 }
-/* s's pixels copied into buf at at, in rows of pitch bytes, a layer after another, at the guest's size */
+/* s's pixels copied into buf at at, in rows of pitch bytes, a layer (or a 3D image's slice) after another, at the
+   guest's size */
 static void flush_copy(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 at, u32 pitch) {
     u64 slice = (u64)pitch * s->h;
+    u32 depth = s->type == VK_IMAGE_VIEW_TYPE_3D ? s->depth3d : 1; /* a 3D image's slices in one copy */
     vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
     for (u32 layer = 0; layer < s->layers; layer++) {
@@ -530,7 +536,7 @@ static void flush_copy(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 at, u32 pi
             .bufferOffset = at + (u64)layer * slice,
             .bufferRowLength = pitch / s->f.bpp,
             .imageSubresource = {s->f.depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1},
-            .imageExtent = {s->w, s->h, 1}};
+            .imageExtent = {s->w, s->h, depth}};
         VmaAllocation tm;
         VkImage t = s->sw == s->w && s->sh == s->h ? VK_NULL_HANDLE : vk_unscaled_image(s, 1, &tm);
         if (!t)
@@ -557,10 +563,10 @@ static int flush_record(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 at) {
         flush_copy(cb, s, buf, at, row);
         return 1;
     }
-    u32 pitch = (row + 15) & ~15u, moves = s->volume ? 1 : s->layers;
+    u32 pitch = (row + 15) & ~15u, moves = surf_volume(s) ? 1 : s->layers;
     u64 cap;
     VkBlMove m = rt_bl_move(s, pitch);
-    VkBuffer scratch = vk_bl_scratch((u64)pitch * s->h * s->layers, &cap);
+    VkBuffer scratch = vk_bl_scratch((u64)pitch * s->h * surf_slices(s), &cap);
     if (!scratch) return 0;
     flush_copy(cb, s, scratch, 0, pitch);
     vk_bl_barrier(cb, 1);
@@ -598,8 +604,8 @@ static void flush_land(Surf* s, const u8* p, const u8* original, u64 wgen) {
             gmem_read(gva, tmp, sz);
         dst = tmp;
     }
-    if (s->bl && s->volume)
-        bl_land(dst, p, (u32)row, s->h, s->layers, bl_height(s->h, s->bh), s->bd);
+    if (s->bl && surf_volume(s))
+        bl_land(dst, p, (u32)row, s->h, surf_slices(s), bl_height(s->h, s->bh), s->bd);
     else
         for (u32 layer = 0; layer < s->layers; layer++) {
             u8* layer_dst = dst + (u64)layer * s->layer_size;

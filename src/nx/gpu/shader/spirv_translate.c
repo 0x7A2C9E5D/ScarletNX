@@ -1529,8 +1529,10 @@ static int supported(u64 w, int op) {
         case O_SULD:
             return (B(w, 33, 3) == 3 && (!B(w, 52, 1) || B(w, 20, 4) == 4)) ||
                    (B(w, 33, 3) == 1 && B(w, 52, 1) && B(w, 20, 4) == 4);
-        /* stores and atomics also reach 2D array surfaces (4), the layer in the coordinates' third register */
-        case O_SUST: return !B(w, 52, 1) && (B(w, 33, 3) == 3 || B(w, 33, 3) == 4 || B(w, 33, 3) == 1);
+        /* stores and atomics also reach 2D array surfaces (4), the layer in the coordinates' third register; stores
+           reach 3D surfaces (5) too, z in that register */
+        case O_SUST:
+            return !B(w, 52, 1) && (B(w, 33, 3) == 3 || B(w, 33, 3) == 4 || B(w, 33, 3) == 5 || B(w, 33, 3) == 1);
         /* 32-bit atomics other than INC and DEC, which wrap at the operand. Bindless is bit 54 here. */
         case O_SUATOM:
             return (B(w, 33, 3) == 3 || B(w, 33, 3) == 4 || B(w, 33, 3) == 1) &&
@@ -1598,7 +1600,7 @@ static int supported(u64 w, int op) {
 }
 
 /* The storage image slot for a surface operation: images of one handle share a slot when they have the same
-   dimension (3 a 2D image, 4 a 2D array, 1 a buffer) and are both R32ui (atomics, and loads from buffers) or both
+   dimension (3 a 2D image, 4 a 2D array, 5 a 3D image, 1 a buffer) and are both R32ui (atomics, and loads from buffers) or both
    not. */
 static int direct_image_slot(const ShaderInfo* info, u32 off, int bindless, u32 bank, int r32ui, int type) {
     int slot = 0;
@@ -2615,7 +2617,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 return direct_reject(si, "untracked surface handle");
             if (a < 255) used[a] = 1;
             if (!buffer && a + 1 < 255) used[a + 1] = 1;
-            if (dim == 4 && a + 2 < 255) used[a + 2] = 1;
+            if ((dim == 4 || dim == 5) && a + 2 < 255) used[a + 2] = 1;
             if (bindless && handle < 255) used[handle] = 1;
             int raw = op->id == O_SULD && B(insn[i], 52, 1);
             u32 mask = raw ? 1u : B(insn[i], 20, 4), target = d;
@@ -2634,7 +2636,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                16384 texels, and the dispatch's own stores and atomics wouldn't reach it */
             if (op->id != O_SULD || buffer) {
                 int r32ui = op->id != O_SUST;
-                int type = dim; /* 1, 3 or 4: the forms supported() takes here */
+                int type = dim; /* 1, 3, 4 or 5: the forms supported() takes here */
                 int slot = direct_image_slot(&image_info, off, bindless, bank, r32ui, type);
                 if (slot == image_info.nimg) {
                     if (slot >= 8) return direct_reject(si, "storage image descriptor count");
@@ -3521,7 +3523,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         int integer = image_info.img[i].kind != 0, buffer = image_info.img[i].type == 1;
         c->image[i] = spv_emit_storage_image(
             &c->emit, integer ? c->u32_type : c->f32_type, shader_vk_set(stage),
-            (buffer ? SNX_VKB_IMGBUF : SNX_VKB_IMG) + (u32)i, buffer ? 5 : 1, image_info.img[i].type == 4,
+            (buffer ? SNX_VKB_IMGBUF : SNX_VKB_IMG) + (u32)i, buffer ? 5 : image_info.img[i].type == 5 ? 2 : 1,
+            image_info.img[i].type == 4,
             integer && (!buffer || image_info.img[i].kind == 1) ? 33 : 0, &c->image_type[i]);
         interfaces[count++] = c->image[i];
     }
@@ -6019,15 +6022,17 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             u32 x = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a)), coord = x;
             if (!buffer) {
                 u32 y = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + 1));
-                /* a 2D array's layer is the low 16 bits of the third register, as TLD's is (Eden's MakeCoords in
-                   surface_load_store.cpp reads it the same way) */
+                /* a 2D array's layer is the low 16 bits of the third register, as TLD's is, and a 3D surface's z the
+                   whole register (Eden's MakeCoords in surface_load_store.cpp reads them the same way) */
                 coord = dim == 4 ? spv_emit_vec3_construct(
                                        &c->emit, vec3_i32, x, y,
                                        spv_emit_bitcast(&c->emit, i32_type,
                                                         spv_emit_bitwise_and_u32(
                                                             &c->emit, c->u32_type, reg_read(c, a + 2),
                                                             spv_emit_constant_u32(&c->emit, c->u32_type, 0xffff))))
-                                 : spv_emit_vec2_construct(&c->emit, vec2_i32, x, y);
+                        : dim == 5 ? spv_emit_vec3_construct(&c->emit, vec3_i32, x, y,
+                                                             spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + 2)))
+                                   : spv_emit_vec2_construct(&c->emit, vec2_i32, x, y);
             }
             u32 mask = op == O_SULD && B(w, 52, 1) ? 1u : B(w, 20, 4), source = d;
             if (op != O_SULD || buffer) {

@@ -152,6 +152,17 @@ static int count_opcode(const u32* code, size_t words, u32 opcode, u32 operand) 
     return found;
 }
 
+/* an OpTypeImage of that Dim read and written without a sampler (Sampled 2): a storage image */
+static int has_storage_image_dim(const u32* code, size_t words, u32 dim) {
+    for (size_t i = 5; i < words;) {
+        u32 width = code[i] >> 16;
+        if (!width || i + width > words) return 0;
+        if ((code[i] & 0xffff) == 25 && width > 7 && code[i + 3] == dim && code[i + 7] == 2) return 1;
+        i += width;
+    }
+    return 0;
+}
+
 static int has_image_operands(const u32* code, size_t words, u32 opcode, u32 mask) {
     u32 at = opcode == 95 ? 5 : 6;
     for (size_t i = 5; i < words;) {
@@ -1060,6 +1071,23 @@ static void issue126_shader_modes(void) {
         free(code);
     }
     g_shader_texture_arrays = 0;
+    /* One game's froxel volume: SUST.P.RGBA on a 3D surface (dimension 5), x, y and z in R0-R2, the texel from
+       R8-R11, on the bindless handle MOV R4, c[0x2][0x128] */
+    {
+        const u64 volume_store[] = {
+            0x4c98078804a70004ull,
+            (unguarded(0xeb203a0200f77614ull, 8, 0, 4) & ~(7ull << 33)) | (5ull << 33),
+        };
+        ShaderInfo info;
+        size_t words = 0;
+        u32* code = translate(volume_store, 2, ST_CS, &info, &words, 1);
+        check_translated(code, &info, "a 3D surface store translates");
+        if (code)
+            check(info.nimg == 1 && info.img[0].type == 5 && count_opcode(code, words, 99, 0xffffffffu) == 1 &&
+                      has_storage_image_dim(code, words, 2),
+                  "a 3D surface store writes a 3D storage image");
+        free(code);
+    }
     /* A TEX.B with all four results (mask 15) to R4-R7 overwrites the handle in R6. */
     const u64 clobbered_handle[] = {
         0x4c98078800070006ull,

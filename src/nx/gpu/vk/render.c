@@ -811,7 +811,7 @@ int vk_tex_num(const u32* tic, const Surf* t) {
 }
 
 int vk_image_keyable(const ShaderInfo* si, int i) {
-    return (si->img[i].type == 3 || si->img[i].type == 4) && si->img[i].kind != 1;
+    return (si->img[i].type == 3 || si->img[i].type == 4 || si->img[i].type == 5) && si->img[i].kind != 1;
 }
 
 int vk_image_key(const ShaderInfo* si, int i, const u32* tic) {
@@ -821,13 +821,20 @@ int vk_image_key(const ShaderInfo* si, int i, const u32* tic) {
 VkImageView vk_storage_image_view(Surf* t, const ShaderInfo* si, int i, u64* bytes) {
     VkComponentMapping identity = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
                                    VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+    int volume = si->img[i].type == 5;
     *bytes = vk_surf_guest_size(t);
-    if (!t || !t->storage_capable || !vk_surf_can_writeback(t) || t->levels != 1 || t->depth3d != 1 ||
-        (si->img[i].type != 3 && si->img[i].type != 4) || !*bytes || *bytes > UINT32_MAX ||
-        (si->img[i].kind ? t->f.vk != VK_FORMAT_R32_UINT : t->f.is_int))
+    /* a 3D surface is a block linear 3D texture at its own size, written back as one volume (vk_surf_flush) */
+    if (!t || !t->storage_capable || !vk_surf_can_writeback(t) || t->levels != 1 ||
+        (volume ? t->type != VK_IMAGE_VIEW_TYPE_3D || !t->bl || t->sw != t->w || t->sh != t->h
+                : t->depth3d != 1 || (si->img[i].type != 3 && si->img[i].type != 4)) ||
+        !*bytes || *bytes > UINT32_MAX || (si->img[i].kind ? t->f.vk != VK_FORMAT_R32_UINT : t->f.is_int))
         return VK_NULL_HANDLE;
     /* a 2D array surface sees every layer of the image, a single layer one too */
-    return vk_tex_view(t, si->img[i].type == 4 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D, 0, &identity, 0);
+    return vk_tex_view(t,
+                       volume                    ? VK_IMAGE_VIEW_TYPE_3D
+                       : si->img[i].type == 4    ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                                                 : VK_IMAGE_VIEW_TYPE_2D,
+                       0, &identity, 0);
 }
 
 u32 vk_gbuf_desc(int stage, u32 off, const u32* v, u64* addr) {
