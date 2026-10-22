@@ -16,6 +16,10 @@ typedef struct {
     u32 reg_val[255], reg_alt[255], reg_alt_type[255], reg_block[255];
     u8* ftz; /* a bit per id: values with no subnormal (float_ftz's, and reads of registers not tainted) */
     size_t ftz_bytes;
+    /* each value's flush in the block it was made in (by id, ftz_of_cap of them): a value read once and used by
+       several FTZ instructions is flushed once a block */
+    u32 *ftz_of, *ftz_of_block;
+    size_t ftz_of_cap;
     /* Registers that may hold a subnormal on the per-instruction FTZ path: written by anything but an FTZ float
        instruction whose result is flushed. A float read of one that isn't is flushed already */
     u8 tainted[256];
@@ -761,8 +765,21 @@ static u32 float_ftz(DirectCtx* c, u32 value) {
     if (spv_emit_constant_bits(&c->emit, value, &type, &constant) && type == c->f32_type)
         return spv_emit_constant_u32(&c->emit, c->f32_type,
                                      constant & 0x7f800000u ? constant : constant & 0x80000000u);
+    if (value < c->ftz_of_cap && c->ftz_of[value] && c->ftz_of_block[value] == c->emit.block) return c->ftz_of[value];
     u32 result = spv_emit_flush_subnormal(&c->emit, c->f32_type, c->u32_type, c->bool_type, c->glsl, value, c->ftz_float);
     ftz_mark(c, result);
+    if (value >= c->ftz_of_cap) {
+        size_t cap = ((size_t)value + 1) * 2;
+        u32* of = (u32*)realloc(c->ftz_of, cap * sizeof *of);
+        u32* block = of ? (u32*)realloc(c->ftz_of_block, cap * sizeof *block) : NULL;
+        if (of) c->ftz_of = of;
+        if (!block) return result; /* not noted: flushed again where it is used */
+        memset(of + c->ftz_of_cap, 0, (cap - c->ftz_of_cap) * sizeof *of);
+        c->ftz_of_block = block;
+        c->ftz_of_cap = cap;
+    }
+    c->ftz_of[value] = result;
+    c->ftz_of_block[value] = c->emit.block;
     return result;
 }
 
@@ -7014,6 +7031,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     u32* result = spv_emit_finish(&c->emit, word_count);
     spv_emit_destroy(&c->emit);
     free(c->ftz);
+    free(c->ftz_of);
+    free(c->ftz_of_block);
     free(c);
     free(case_labels); /* the literals and block starts too */
     free(pop_targets);
