@@ -4205,6 +4205,10 @@ int main(int argc, char** argv) {
         GuiMenuBoxes m;
         SDL_Color soft = rgb(app.theme.soft);
         int shown;
+        /* Setup device keys blinks, no keys being in use: the clock on a half where it has its usual look, so an
+           arrow in its row is drawn soft wherever the row lands */
+        assert(app.theme.blink_ms);
+        app.clock = app.theme.blink_ms;
         assert(SDL_SetWindowSize(app.window, 1280, 1024));
         SDL_SyncWindow(app.window);
         app.menu.text_size = GUI_TEXT_MAX;
@@ -4223,6 +4227,11 @@ int main(int argc, char** argv) {
                !m.lists[UI_MENU_ENTRIES].first);
         hides(&app, "\x1e", soft);
         shows(&app, "\x1f", soft); /* items below the last row */
+        assert(shown - 1 == GUI_KEYS);
+        app.clock = 2 * app.theme.blink_ms; /* its red half: the arrow in the page's colour, as its text */
+        render(&app);
+        shows(&app, "\x1f", rgb(app.theme.page));
+        app.clock = app.theme.blink_ms;
         /* ui.txt's scroll, center: each focus in the middle of the rows shown, the ends where the list has no more to
            move; the theme's scroll is the other lists' */
         app.theme.scroll = GUI_SCROLL_EDGE;
@@ -4249,6 +4258,7 @@ int main(int argc, char** argv) {
         render(&app);
         menu_boxes(&app, &m);
         assert(!m.lists[UI_MENU_ENTRIES].first);
+        app.clock = 0;
         /* a drag down moves the focus down row by row while the finger goes, not all at once when it lifts */
         {
             SDL_Event e = {0};
