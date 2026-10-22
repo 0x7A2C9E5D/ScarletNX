@@ -256,10 +256,12 @@ typedef struct App {
     bool pads_read;            /* SDL's gamepads started for it */
     unsigned pad_pushed;       /* the triggers and the left stick's directions past half way, a bit each */
     /* the menu's own pads, whose presses are its keys (pad_menu.h), open until a run's game loads; pads_failed: SDL
-       could not start them, not asked again. pad_driven: a pad pressed last, not the keyboard, the mouse or a finger,
-       so the cursor is hidden and a mouse moving less than pointer_travel's GUI_PAD_TRAVEL moves nothing */
+       could not start them, for pads_error, not asked again. pad_driven: a pad pressed last, not the keyboard, the
+       mouse or a finger, so the cursor is hidden and a mouse moving less than pointer_travel's GUI_PAD_TRAVEL moves
+       nothing */
     GuiPads pads;
     bool pads_failed, pad_driven;
+    char pads_error[256];
     float pointer_travel;
     /* the Settings' groups: App, then a group per section of the settings, its first row and rows; a row each */
     int groups, group_first[GUI_GROUPS_MAX], group_rows[GUI_GROUPS_MAX];
@@ -8951,6 +8953,11 @@ static bool pads_event(App* app, const SDL_Event* e) {
     event(app, &key);
     return true;
 }
+/* SDL could not start the menu's pads: why, from SDL */
+static void pads_fail(App* app) {
+    app->pads_failed = true;
+    snprintf(app->pads_error, sizeof app->pads_error, snx_tr("Controllers cannot be read: %s"), SDL_GetError());
+}
 /* the menu's pads open until a run's game loads (its LAUNCH), as the game may want them: a pad stops a recompile
    too. The first time once the menu shows, as SDL may take most of a second looking for them */
 static void pads_follow(App* app) {
@@ -8958,10 +8965,14 @@ static void pads_follow(App* app) {
         gui_pads_stop(&app->pads);
         return;
     }
-    if (app->pads.started || app->pads_failed) return;
-    joycon_pairs(app);
-    app->pads_failed = !gui_pads_start(&app->pads);
-    if (!app->pads_failed) pad_load_mappings(app);
+    if (!app->pads.started && !app->pads_failed) {
+        joycon_pairs(app);
+        if (gui_pads_start(&app->pads))
+            pad_load_mappings(app);
+        else
+            pads_fail(app);
+    }
+    if (app->pads_failed) say_failure(app, app->pads_error); /* each frame until the box can show it, then once */
 }
 /* the arrow or the page a pad holds pressed again */
 static void pads_repeat(App* app) {

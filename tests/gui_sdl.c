@@ -1161,7 +1161,7 @@ int main(int argc, char** argv) {
         assert(!app.confirm.shown);
     }
     /* the menu's pads stay open through a run until its game loads (LAUNCH, the runner's banner), so a pad can stop a
-       recompile; open again once it ends */
+       recompile; open again once it ends. SDL failing to start them is said with its reason, once */
     {
         app.menu.running = true;
         gui_steps_reset(&app.steps);
@@ -1178,6 +1178,20 @@ int main(int argc, char** argv) {
         assert(app.pads.started && !app.confirm.shown);
         gui_pads_stop(&app.pads);
         gui_steps_reset(&app.steps);
+        SDL_SetError("no pad driver here");
+        pads_fail(&app);
+        app.menu.running = true; /* not over a run: said once it ends */
+        pads_follow(&app);
+        assert(!app.confirm.shown);
+        app.menu.running = false;
+        pads_follow(&app);
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR &&
+               !strcmp(app.error_line, "Controllers cannot be read: no pad driver here"));
+        key(&app, SDLK_RETURN);
+        pads_follow(&app);
+        assert(!app.confirm.shown && !app.pads.started); /* not asked again, nor said */
+        app.pads_failed = false;
+        app.message[0] = 0;
     }
     render(&app);
     shows(&app, "- Load Switch NSP/XCI/NRO", yellow);
