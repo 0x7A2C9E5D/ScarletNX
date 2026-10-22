@@ -14,7 +14,9 @@
 #define LANDED 0x5a
 static struct {
     SnxCtrMemory* m;
-    unsigned owned, watched; /* steps the handler took */
+    /* steps the handler took. Volatile: through the flat space the handler runs in the middle of a load or a store
+       (its fault), which the compiler does not take for a call, so it would reuse the counts it read before */
+    volatile unsigned owned, watched;
 } g;
 static void handler(void* context, uint32_t pa, SnxCtrTrackLevel level) {
     (void)context;
