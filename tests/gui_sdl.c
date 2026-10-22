@@ -4160,6 +4160,12 @@ int main(int argc, char** argv) {
         assert(app.games.count == 35);
         watch_pass(&app.watch);
         pump(&app);
+        if (app.games.count != 36 || app.browser.page != 1 || app.browser.selected != 1) /* what CI alone shows */
+            fprintf(stderr,
+                    "games %zu, page %zu, focus %zu; watcher: set %u, stamped %u, hash %llx, the list's %llx%s\n",
+                    app.games.count, app.browser.page, app.browser.selected, app.watch.set, app.watch.stamped,
+                    (unsigned long long)app.watch.stamp, (unsigned long long)app.games_stamp,
+                    app.games_fresh ? ", fresh" : "");
         assert(app.games.count == 36 && app.browser.page == 1 && app.browser.selected == 1);
         assert(!snx_remove_tree(late));
         watch_pass(&app.watch);
