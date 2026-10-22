@@ -1229,9 +1229,10 @@ endif()
 if(APPLE)
     # these build a game module and load it, which no Mac has done yet: the Mach-O linker (link_macho.c) is checked
     # on Linux only (the link_macho test and docs/APPLE.md), and these wait for a run on a Mac. The in-process
-    # loader's tests run: it loads ELF objects on macOS too (code_loader.c)
-    set_tests_properties(native_recompiler llvm_module recompiler_library llvm_differential_0 llvm_differential_1
-                         llvm_differential_2 PROPERTIES DISABLED TRUE)
+    # loader's tests run: it loads ELF objects on macOS too (code_loader.c). aot_variants also links a JIT cache unit,
+    # and Darwin's JIT writes ELF objects for that loader where the AOT module is Mach-O.
+    set_tests_properties(native_recompiler llvm_module recompiler_library aot_variants llvm_differential_0
+                         llvm_differential_1 llvm_differential_2 PROPERTIES DISABLED TRUE)
 endif()
 
 add_executable(snx_codegen_test codegen_test.c)

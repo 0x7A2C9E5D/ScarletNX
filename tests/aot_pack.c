@@ -17,6 +17,13 @@ static void put32(unsigned char* p, uint32_t v) {
     p[2] = (unsigned char)((v >> 16) & 0xff);
     p[3] = (unsigned char)((v >> 24) & 0xff);
 }
+/* gui_aot_cache_path resolves the folder first (realpath on Unix, the final path on Windows), so expect that path */
+static char* expected_cache_path(const char* dir, const char* name) {
+    char* absolute = snx_absolute(dir);
+    char* path = absolute ? snx_format("%s/%s.jitcache", absolute, name) : NULL;
+    free(absolute);
+    return path;
+}
 static void write_cache(const char* path, const char* magic, const char* key) {
     unsigned char head[12];
     size_t n = strlen(key);
@@ -55,7 +62,7 @@ int main(void) {
     recorded = snx_format("cache=%s\n", cache_dir);
     assert(recorded && !snx_write_file(folders, recorded, strlen(recorded)));
     path = gui_aot_cache_path(folder, "010069401ADB8000");
-    expected = snx_format("%s/010069401ADB8000.jitcache", cache_dir);
+    expected = expected_cache_path(cache_dir, "010069401ADB8000");
     assert(path && expected && !strcmp(path, expected));
 
     /* a readable header gives the cache's level and hook, not the whole cache */
@@ -76,7 +83,7 @@ int main(void) {
     {
         char* moved = snx_user_path(folder, SNX_USER_CACHE);
         char* dir = moved && strcmp(moved, folder) && snx_is_dir(moved) ? moved : folder;
-        expected = snx_format("%s/010069401ADB8000.jitcache", dir);
+        expected = expected_cache_path(dir, "010069401ADB8000");
         free(moved);
     }
     path = gui_aot_cache_path(folder, "010069401ADB8000");
@@ -93,7 +100,7 @@ int main(void) {
         free(path);
         free(expected);
         path = gui_aot_cache_path(game, "0100");
-        expected = snx_format("%s/0100.jitcache", cache);
+        expected = expected_cache_path(cache, "0100");
         assert(path && expected && !strcmp(path, expected));
         free(cache);
         free(game);
