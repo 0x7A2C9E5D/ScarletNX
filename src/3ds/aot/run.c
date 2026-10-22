@@ -57,6 +57,8 @@ static void report_stack(SnxCtrProcess* p, const SnxArmCPU* cpu) {
     }
     putchar('\n');
 }
+/* the flat space's fault resolver (memory/host.h): write tracking's */
+static bool track_fault(void* context, uint32_t va) { return snx_ctr_track_fault(context, va); }
 /* Every live thread, where it is and what it waits on, as the run ended */
 static void report_threads(SnxCtrProcess* p) {
     static const char* const types[] = {"free",  "process", "thread",    "arbiter", "session",       "mutex",
@@ -234,7 +236,8 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
     SnxCtrRunResult state;
     printf("Running ARM11 static AOT%s\n", snx_ctr_space_base(process->space) ? " in a flat 4 GiB space" : "");
     /* a host fault in the flat space is the guest's data abort, reported with the block it happened in */
-    ctr_host_faults(snx_ctr_space_base(process->space), &snx_ctr_process_cpu(process)->r[15]);
+    ctr_host_faults(snx_ctr_space_base(process->space), &snx_ctr_process_cpu(process)->r[15], track_fault,
+                    process->space);
     for (;;) {
         uint64_t slice = SNX_CTR_RUN_SLICE, n = 0;
         if (limit && limit - executed < slice) slice = limit - executed;
@@ -276,7 +279,7 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
         putchar('\n');
     }
 done:
-    ctr_host_faults(NULL, NULL);
+    ctr_host_faults(NULL, NULL, NULL, NULL);
     snx_ctr_jit_free(jit);
     snx_ctr_present_free();
     snx_ctr_audio_free();

@@ -27,10 +27,13 @@
 static struct {
     unsigned char* base;
     const uint32_t* pc;
+    bool (*resolve)(void* context, uint32_t va);
+    void* context;
 #ifdef _WIN32
     void* handler;
 #else
     struct sigaction segv, bus; /* the handlers before, which a fault elsewhere goes on to */
+    stack_t stack, before_stack; /* the guest thread's alternate signal stack, and the one it had */
 #endif
     /* Windows 10 1803's placeholder calls, looked up (an older Windows has none, and no flat space) */
 #ifdef _WIN32
@@ -130,6 +133,8 @@ static LONG CALLBACK fault(EXCEPTION_POINTERS* e) {
         return EXCEPTION_CONTINUE_SEARCH;
     unsigned char* at = (unsigned char*)r->ExceptionInformation[1];
     if (at < g_host.base || at >= g_host.base + CTR_HOST_SPACE + CTR_HOST_GUARD) return EXCEPTION_CONTINUE_SEARCH;
+    if (at < g_host.base + CTR_HOST_SPACE && g_host.resolve && g_host.resolve(g_host.context, (uint32_t)(at - g_host.base)))
+        return EXCEPTION_CONTINUE_EXECUTION;
     fprintf(stderr, "3ds: guest data abort: %s 0x%08llx in the block at 0x%08x\n",
             r->ExceptionInformation[0] ? "write to" : "read of", (unsigned long long)(at - g_host.base),
             g_host.pc ? (unsigned)*g_host.pc : 0u);
@@ -137,7 +142,8 @@ static LONG CALLBACK fault(EXCEPTION_POINTERS* e) {
     TerminateProcess(GetCurrentProcess(), 1);
     return EXCEPTION_CONTINUE_SEARCH;
 }
-void ctr_host_faults(unsigned char* base, const uint32_t* pc) {
+void ctr_host_faults(unsigned char* base, const uint32_t* pc, bool (*resolve)(void* context, uint32_t va),
+                     void* context) {
     if (base && !g_host.handler) g_host.handler = AddVectoredExceptionHandler(1, fault);
     if (!base && g_host.handler) {
         RemoveVectoredExceptionHandler(g_host.handler);
@@ -145,6 +151,12 @@ void ctr_host_faults(unsigned char* base, const uint32_t* pc) {
     }
     g_host.base = base;
     g_host.pc = pc;
+    g_host.resolve = base ? resolve : NULL;
+    g_host.context = context;
+}
+void ctr_host_say(const char* text, size_t size) {
+    DWORD written;
+    WriteFile(GetStdHandle(STD_ERROR_HANDLE), text, (DWORD)size, &written, NULL);
 }
 #else
 static int protection(unsigned permissions) {
@@ -205,6 +217,11 @@ static void hex(char* out, uint64_t value, unsigned digits) {
 }
 static void fault(int signal, siginfo_t* info, void* context) {
     unsigned char* at = info->si_addr;
+    /* a tracked page (SIGSEGV on Linux and FreeBSD, SIGBUS where a protection fault is one): resolved, the access is
+       made again on return */
+    if (g_host.base && at >= g_host.base && at < g_host.base + CTR_HOST_SPACE && g_host.resolve &&
+        g_host.resolve(g_host.context, (uint32_t)(at - g_host.base)))
+        return;
     if (g_host.base && at >= g_host.base && at < g_host.base + CTR_HOST_SPACE + CTR_HOST_GUARD) {
         char line[] = "3ds: guest data abort at 0x000000000 in the block at 0x00000000\n";
         hex(line + 27, (uint64_t)(at - g_host.base), 9);
@@ -224,8 +241,20 @@ static void fault(int signal, siginfo_t* info, void* context) {
         raise(signal);
     }
 }
-void ctr_host_faults(unsigned char* base, const uint32_t* pc) {
+/* the alternate stack a resolution runs on: it may submit to the GPU and wait for it, which the few kilobytes of a
+   usual signal stack would not hold */
+#define FAULT_STACK (1u << 20)
+void ctr_host_faults(unsigned char* base, const uint32_t* pc, bool (*resolve)(void* context, uint32_t va),
+                     void* context) {
     if (base && !g_host.base) {
+        void* stack = mmap(NULL, FAULT_STACK, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (stack != MAP_FAILED) {
+            g_host.stack = (stack_t){.ss_sp = stack, .ss_size = FAULT_STACK};
+            if (sigaltstack(&g_host.stack, &g_host.before_stack)) {
+                munmap(stack, FAULT_STACK);
+                g_host.stack.ss_sp = NULL;
+            }
+        }
         struct sigaction action;
         memset(&action, 0, sizeof action);
         action.sa_sigaction = fault;
@@ -236,8 +265,19 @@ void ctr_host_faults(unsigned char* base, const uint32_t* pc) {
     } else if (!base && g_host.base) {
         sigaction(SIGSEGV, &g_host.segv, NULL);
         sigaction(SIGBUS, &g_host.bus, NULL);
+        if (g_host.stack.ss_sp) {
+            sigaltstack(&g_host.before_stack, NULL);
+            munmap(g_host.stack.ss_sp, FAULT_STACK);
+            g_host.stack.ss_sp = NULL;
+        }
     }
     g_host.base = base;
     g_host.pc = pc;
+    g_host.resolve = base ? resolve : NULL;
+    g_host.context = context;
+}
+void ctr_host_say(const char* text, size_t size) {
+    ssize_t written = write(2, text, size);
+    (void)written;
 }
 #endif

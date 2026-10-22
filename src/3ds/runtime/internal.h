@@ -155,6 +155,7 @@ typedef struct {
     uint8_t spacial_dithering, temporal_dithering, transfer_end_interrupt;
     uint32_t event;   /* the transfer end event (retained), made at the first GetTransferEndEvent or DriverInitialize */
     uint64_t done_ns; /* host monotonic end of the conversion running, 0 when none is */
+    uint64_t serial;  /* the GPU submission it runs in: it ends no sooner than that is done */
 } SnxCtrY2rService;
 /* hid:USER's sampling (services/hid.c): each update's next deadline, host monotonic ns (0: not running), the index
    each writes next, how many times the game enabled each sensor, and the circle pad's last two raw positions, which

@@ -42,7 +42,8 @@ static struct {
     VkImage swap_images[8];
     uint32_t swap_count;
     VkExtent2D swap_extent;
-    VkSemaphore acquire, presented;
+    /* each submission slot's: a slot is free again only once its submission is done, and so are they */
+    VkSemaphore acquire[SNX_CTR_VK_SLOTS], presented[SNX_CTR_VK_SLOTS];
     const char* frame_dir;
     unsigned dumps;
     uint64_t presents; /* past the first dumps, two presents (one a screen) of every 120 are kept as the latest */
@@ -144,6 +145,13 @@ static void frame_free(Frame* f) {
     memset(f, 0, sizeof *f);
 }
 
+static bool semaphores(const SnxCtrVk* v, const VkSemaphoreCreateInfo* si) {
+    for (unsigned i = 0; i < SNX_CTR_VK_SLOTS; ++i)
+        if (vkCreateSemaphore(v->device, si, NULL, &g_present.acquire[i]) != VK_SUCCESS ||
+            vkCreateSemaphore(v->device, si, NULL, &g_present.presented[i]) != VK_SUCCESS)
+            return false;
+    return true;
+}
 bool snx_ctr_present_init(SnxCtrMemory* memory, const char* frame_dir) {
     if (g_present.up) return true;
     char why[256];
@@ -176,8 +184,7 @@ bool snx_ctr_present_init(SnxCtrMemory* memory, const char* frame_dir) {
     if (type == UINT32_MAX || vkAllocateMemory(v->device, &ai, NULL, &g_present.readback_memory) != VK_SUCCESS ||
         vkBindBufferMemory(v->device, g_present.readback, g_present.readback_memory, 0) != VK_SUCCESS ||
         vkMapMemory(v->device, g_present.readback_memory, 0, VK_WHOLE_SIZE, 0, &mapped) != VK_SUCCESS ||
-        vkCreateSemaphore(v->device, &si, NULL, &g_present.acquire) != VK_SUCCESS ||
-        vkCreateSemaphore(v->device, &si, NULL, &g_present.presented) != VK_SUCCESS)
+        !semaphores(v, &si))
         return false;
     g_present.readback_view = mapped;
     if (v->surface) {
@@ -310,8 +317,9 @@ bool snx_ctr_present_frame(unsigned screen, uint32_t pa, unsigned width, unsigne
         if (!frame_make(f, height, width)) return false;
     }
     bool dump = dump_due(), readback = dump || hash;
-    snx_ctr_vk_render_flush(); /* the draws before it in guest memory first */
+    snx_ctr_vk_sync(pa, pitch * (height - 1) + width * bytes, false); /* the draws over it stored first, on the GPU */
     VkCommandBuffer cb = snx_ctr_vk_commands();
+    unsigned slot = snx_ctr_vk_slot(); /* the open recording's, whose semaphores it takes */
     snx_ctr_vk_barrier(cb); /* after what the GPU wrote to the framebuffer */
     image_barrier(cb, f->image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL); /* the shader writes all of it */
     f->layout = VK_IMAGE_LAYOUT_GENERAL;
@@ -349,7 +357,7 @@ bool snx_ctr_present_frame(unsigned screen, uint32_t pa, unsigned width, unsigne
     g_present.bottom_alone = screen ? g_present.bottom_alone + 1 : 0;
     bool show = (screen == 0 || g_present.bottom_alone >= 2) && g_present.windowed;
     if (show) {
-        VkResult acquired = vkAcquireNextImageKHR(v->device, g_present.swapchain, UINT64_MAX, g_present.acquire,
+        VkResult acquired = vkAcquireNextImageKHR(v->device, g_present.swapchain, UINT64_MAX, g_present.acquire[slot],
                                                   VK_NULL_HANDLE, &index);
         if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
             g_present.windowed = swap_create();
@@ -361,11 +369,17 @@ bool snx_ctr_present_frame(unsigned screen, uint32_t pa, unsigned width, unsigne
         g_present.bottom_alone = 0;
         show_screens(cb, g_present.swap_images[index]);
     }
-    bool ok = show ? snx_ctr_vk_finish_with(g_present.acquire, g_present.presented) : !readback || snx_ctr_vk_finish();
+    /* submitted, waited for only when the host reads the frame (a dump, a test's hash) */
+    bool ok = true;
+    if (show) {
+        uint64_t serial = snx_ctr_vk_submit_with(g_present.acquire[slot], g_present.presented[slot]);
+        ok = !readback || snx_ctr_vk_wait(serial, UINT64_MAX);
+    } else if (readback)
+        ok = snx_ctr_vk_finish();
     if (show && ok) {
         VkPresentInfoKHR present = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
                                     .waitSemaphoreCount = 1,
-                                    .pWaitSemaphores = &g_present.presented,
+                                    .pWaitSemaphores = &g_present.presented[slot],
                                     .swapchainCount = 1,
                                     .pSwapchains = &g_present.swapchain,
                                     .pImageIndices = &index};
@@ -391,8 +405,10 @@ void snx_ctr_present_free(void) {
     vkDeviceWaitIdle(v->device);
     swap_destroy();
     for (unsigned i = 0; i < 2; ++i) frame_free(&g_present.frames[i]);
-    if (g_present.acquire) vkDestroySemaphore(v->device, g_present.acquire, NULL);
-    if (g_present.presented) vkDestroySemaphore(v->device, g_present.presented, NULL);
+    for (unsigned i = 0; i < SNX_CTR_VK_SLOTS; ++i) {
+        if (g_present.acquire[i]) vkDestroySemaphore(v->device, g_present.acquire[i], NULL);
+        if (g_present.presented[i]) vkDestroySemaphore(v->device, g_present.presented[i], NULL);
+    }
     if (g_present.readback) vkDestroyBuffer(v->device, g_present.readback, NULL);
     if (g_present.readback_memory) vkFreeMemory(v->device, g_present.readback_memory, NULL);
     snx_ctr_vk_compute_free(&g_present.decode);

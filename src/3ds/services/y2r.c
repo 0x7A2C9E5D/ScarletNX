@@ -5,6 +5,7 @@
    2015-2024 Citra Emulator Project / Azahar Emulator Project, azahar-emu/azahar a4b335e): its answers, its checks,
    and the end it signals a while after a conversion starts, whether the application asked for the interrupt or not. */
 #include "3ds/services/y2r.h"
+#include "3ds/gpu/vk/vk.h"
 #include "3ds/gpu/vk/vk_y2r.h"
 #include "3ds/runtime/internal.h"
 #include <stdio.h>
@@ -109,11 +110,14 @@ static void start(SnxCtrIpc* c) {
                                               : "the conversion needs the GPU, which is not there");
         return;
     }
-    /* a conversion started again before its end replaces it: one end is signaled, the last one's */
+    /* a conversion started again before its end replaces it: one end is signaled, the last one's. It runs now, and
+       ends when the GPU has done it (the application may reuse its inputs then), and not before the engine's time */
+    y->serial = snx_ctr_vk_submit();
     y->done_ns = snx_ctr_now_ns() + Y2R_DELAY_NS;
     reply(c, 1);
 }
 void snx_ctr_y2r_done(SnxCtrProcess* p) {
+    (void)snx_ctr_vk_wait(p->y2r.serial, UINT64_MAX); /* the GPU's conversion, done by now nearly always */
     p->y2r.done_ns = 0;
     if (!p->y2r.event) return;
     p->objects[p->y2r.event].data.event.signaled = 1;
