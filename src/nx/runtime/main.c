@@ -46,7 +46,8 @@
 #define MODULE_PACK 1
 #include "common/cpu/recompiler/llvm/code_loader.h"
 #include "common/cpu/recompiler/llvm/objects_pack.h"
-#include "gui/apple.h"
+/* src/gui/apple.m's (gui/apple.h pulls in SDL's headers, which this part of the runtime is not built with) */
+void gui_apple_stats(char* out, size_t size);
 #include "common/cpu/recompiler/llvm/rtlib_object.h"
 #endif
 
