@@ -190,9 +190,17 @@ static size_t objects(const char* folder, char f1[2][80]) {
 }
 
 static int same_file(const char* a, const char* b) {
-    size_t na = 0, nb = 0;
+    size_t na = 0, nb = 0, at = 0, i;
     unsigned char *x = snx_read_file(a, &na), *y = snx_read_file(b, &nb);
     int same = x && y && na == nb && !memcmp(x, y, na);
+    if (!same) { /* where they part and the bytes there, for a platform only CI runs */
+        while (x && y && at < na && at < nb && x[at] == y[at]) ++at;
+        fprintf(stderr, "%s: %zu bytes, %s: %zu bytes, the first difference at %zu:", a, x ? na : 0, b, y ? nb : 0, at);
+        for (i = at; i < at + 16 && x && i < na; ++i) fprintf(stderr, " %02x", x[i]);
+        fprintf(stderr, " /");
+        for (i = at; i < at + 16 && y && i < nb; ++i) fprintf(stderr, " %02x", y[i]);
+        fprintf(stderr, "\n");
+    }
     free(x);
     free(y);
     return same;
@@ -352,7 +360,10 @@ int main(void) {
     CHECK(objects(folder, f1) == 2 && f1[0][0] && !f1[1][0]);
     strcpy(f1a, f1[0]);
     /* warm: the same module, byte for byte, from the same two objects */
-    CHECK(!build(folder, out[1], 0) && same_file(out[0], out[1]) && objects(folder, NULL) == 2);
+    CHECK(!build(folder, out[1], 0));
+    if (objects(folder, NULL) != 2) fprintf(stderr, "%zu objects after the warm build\n", objects(folder, NULL));
+    CHECK(objects(folder, NULL) == 2);
+    CHECK(same_file(out[0], out[1]));
     /* f1 changed: its unit compiled and kept beside the old one, f0's reused */
     program(5);
     CHECK(!build(folder, out[1], 0) && run(out[1]) == 46);
