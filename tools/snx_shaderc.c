@@ -41,7 +41,7 @@ static void shell_quote(char* out, size_t size, const char* path) {
 }
 int main(int argc, char** argv) {
     const char *dir = NULL, *out = NULL;
-    int validate = 0, verbose = 0;
+    int validate = 0, verbose = 0, flush = 1;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--out") && i + 1 < argc)
             out = argv[++i];
@@ -49,16 +49,18 @@ int main(int argc, char** argv) {
             validate = 1;
         else if (!strcmp(argv[i], "--verbose"))
             verbose = 1;
+        else if (!strcmp(argv[i], "--no-flush")) /* a device without DenormFlushToZero: FTZ done per instruction */
+            flush = 0;
         else if (!strcmp(argv[i], "--direct")) { /* accepted for older corpus commands */
         } else if (argv[i][0] != '-' && !dir)
             dir = argv[i];
         else {
-            fprintf(stderr, "usage: %s CORPUS_DIR [--out DIR] [--validate] [--verbose]\n", argv[0]);
+            fprintf(stderr, "usage: %s CORPUS_DIR [--out DIR] [--validate] [--verbose] [--no-flush]\n", argv[0]);
             return 2;
         }
     }
     if (!dir) {
-        fprintf(stderr, "usage: %s CORPUS_DIR [--out DIR] [--validate] [--verbose]\n", argv[0]);
+        fprintf(stderr, "usage: %s CORPUS_DIR [--out DIR] [--validate] [--verbose] [--no-flush]\n", argv[0]);
         return 2;
     }
     /* Match a renderer with non-uniform sampled image array indexing. Otherwise indexed
@@ -96,7 +98,7 @@ int main(int argc, char** argv) {
             continue;
         }
         size_t words = 0;
-        u32* spv = shader_to_spirv(code, max_bytes, stage, &info, &words, 1, 1, 1, 1);
+        u32* spv = shader_to_spirv(code, max_bytes, stage, &info, &words, flush, 1, 1, 1);
         free(code);
         if (!spv) {
             unsupported++;
