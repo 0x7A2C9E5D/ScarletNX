@@ -15,6 +15,10 @@ typedef struct {
     int quiet;
     const char* keep_ir; /* when set, each unit's IR is saved there as .ll */
     const struct SnxIrTuning* tuning; /* the game code's LLVM settings (snx_llvm_tuning), NULL for LLVM's own */
+    /* the code units' cache (unit_cache.h), a folder every game shares: a unit kept there is not compiled again. NULL:
+       every unit is compiled, and none kept */
+    const char* unit_cache;
+    SnxU64 unit_cache_limit; /* the bytes the folder is held to after the build, its oldest objects removed; 0: none */
 } SnxLlvmBuild;
 /* g_settings' LLVM Internals (settings.txt's llvm table) for -O<opt>: the pipeline with the passes turned off cut
    out, the options set. Static, made again at each call. NULL with the reason in error when nothing at all is left

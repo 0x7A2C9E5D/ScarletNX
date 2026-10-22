@@ -1107,6 +1107,12 @@ snx_test_target(snx-test-aot-variants 11)
 target_link_libraries(snx-test-aot-variants PRIVATE snx_driver_llvm ${CMAKE_DL_LIBS})
 add_test(NAME aot_variants COMMAND snx-test-aot-variants)
 set_tests_properties(aot_variants PROPERTIES TIMEOUT 120)
+# the code units' cache (nx/loader/unit_cache.c) under the LLVM module build: reuse, keys, broken objects, the limit
+add_executable(snx-test-unit-cache unit_cache.c)
+snx_test_target(snx-test-unit-cache 11)
+target_link_libraries(snx-test-unit-cache PRIVATE snx_driver_llvm ${CMAKE_DL_LIBS})
+add_test(NAME unit_cache COMMAND snx-test-unit-cache)
+set_tests_properties(unit_cache PROPERTIES TIMEOUT 120)
 # the runtime looking a pc up in the AOT variant table instead of compiling it
 add_executable(snx-test-runtime-variants runtime_variants.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/guest_jit.c")
 snx_test_target(snx-test-runtime-variants 11)
@@ -1241,7 +1247,7 @@ if(APPLE)
     # on Linux only (the link_macho test and docs/APPLE.md), and these wait for a run on a Mac. The in-process
     # loader's tests run: it loads ELF objects on macOS too (code_loader.c). aot_variants also links a JIT cache unit,
     # and Darwin's JIT writes ELF objects for that loader where the AOT module is Mach-O.
-    set_tests_properties(native_recompiler llvm_module recompiler_library aot_variants llvm_differential_0
+    set_tests_properties(native_recompiler llvm_module recompiler_library aot_variants unit_cache llvm_differential_0
                          llvm_differential_1 llvm_differential_2 PROPERTIES DISABLED TRUE)
 endif()
 

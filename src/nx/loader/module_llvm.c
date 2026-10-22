@@ -7,6 +7,7 @@
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/llvm/link.h"
 #include "nx/loader/module_abi.h"
+#include "nx/loader/unit_cache.h"
 #include "common/cpu/recompiler/llvm/rtlib_object.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,11 +23,13 @@ typedef struct {
     size_t first, last; /* functions */
     unsigned char* object;
     size_t size;
+    int reused; /* the object came from the unit cache */
 } Unit;
 
 typedef struct {
     SnxCodegen* codegen;
     const SnxLlvmBuild* build;
+    const SnxUnitCache* cache; /* NULL: every unit compiled */
     Unit* units;
     size_t count, next, done;
     int failed;
@@ -76,7 +79,10 @@ static int compile_unit(Queue* q, size_t index, char* error, size_t error_size) 
     for (i = u->first; i < u->last; ++i) snx_ir_emit(ir, q->codegen, &q->codegen->functions[i]);
     rc = q->build->keep_ir && save_ir(ir, q->build->keep_ir, name);
     if (rc) snprintf(error, error_size, "cannot save the IR of %s", name);
-    if (!rc) rc = snx_ir_object(ir, q->build->opt, &u->object, &u->size, error, error_size);
+    if (!rc && q->cache)
+        rc = snx_unit_cache_object(q->cache, ir, &u->object, &u->size, &u->reused, error, error_size);
+    else if (!rc)
+        rc = snx_ir_object(ir, q->build->opt, &u->object, &u->size, error, error_size);
     snx_ir_free(ir);
     return rc;
 }
@@ -108,7 +114,7 @@ static void worker(Queue* q) {
         if (label) {
             /* every unit: a line every few seconds or minutes, whichever the machine manages */
             sprintf(name, "code_%03lu", (unsigned long)i);
-            snx_report_unit(q->done, q->count + 1, name, label, 0, seconds); /* + the descriptor */
+            snx_report_unit(q->done, q->count + 1, name, label, q->units[i].reused, seconds); /* + the descriptor */
         }
         unlock(q);
         free(label);
@@ -383,11 +389,37 @@ static const char* base_name(const char* path) {
     return name;
 }
 
+/* the unit cache's line, then the folder held to its limit */
+static void report_units(const Queue* q, const SnxLlvmBuild* build, int quiet) {
+    SnxUnitTrim trim;
+    SnxU64 bytes = 0;
+    size_t i, reused = 0;
+    char error[512];
+    for (i = 0; i < q->count; ++i)
+        if (q->units[i].reused) {
+            ++reused;
+            bytes += q->units[i].size;
+        }
+    if (!quiet)
+        printf("unit cache: %zu of %zu units reused (%.1f MB) from %s\n", reused, q->count, (double)bytes / 1000000.0,
+               build->unit_cache);
+    if (!build->unit_cache_limit) return;
+    if (snx_unit_cache_trim(build->unit_cache, build->unit_cache_limit, &trim, error, sizeof error))
+        snx_error("unit cache: %s: its size is left over the limit of %.1f MB", error,
+                  (double)build->unit_cache_limit / 1000000.0);
+    else if (trim.removed && !quiet)
+        printf("unit cache: %zu files held %.1f MB, over the limit of %.1f MB: the %zu oldest removed (%.1f MB), %.1f "
+               "MB left\n",
+               trim.files, (double)trim.held / 1000000.0, (double)build->unit_cache_limit / 1000000.0, trim.removed,
+               (double)trim.removed_bytes / 1000000.0, (double)(trim.held - trim.removed_bytes) / 1000000.0);
+}
+
 int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, const SnxLlvmBuild* build) {
     SnxCodegen codegen;
     Queue q;
     SnxIr* ir = NULL;
     SnxJitCache* cache = NULL;
+    SnxUnitCache* unit_cache = NULL;
     SnxLinkInput* inputs = NULL;
     SnxLinkOutput linked;
     unsigned char *module_object = NULL, *rtlib_object = NULL;
@@ -434,6 +466,18 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     }
     q.codegen = &codegen;
     q.build = build;
+    if (build->unit_cache) {
+        char llvm[128];
+        SnxUnitIdentity identity;
+        snx_unit_cache_llvm(llvm, sizeof llvm);
+        identity.llvm = llvm;
+        identity.opt = build->opt;
+        identity.tuning = build->tuning ? build->tuning->text : NULL;
+        unit_cache = snx_unit_cache_open(build->unit_cache, &identity, error, sizeof error);
+        /* a build without it makes the same module */
+        if (!unit_cache) snx_error("unit cache: %s: every unit is compiled, and none kept", error);
+        q.cache = unit_cache;
+    }
     if (!options->quiet)
         printf("LLVM: %lu code unit%s and the module descriptor\n", (unsigned long)q.count, q.count == 1 ? "" : "s");
     if (q.count) run(&q, build->jobs);
@@ -508,6 +552,7 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     if (!options->quiet) {
         printf("LLVM module: %.1f MB, %lu entries\n", (double)linked.size / 1000000.0, (unsigned long)entry_count);
     }
+    if (unit_cache) report_units(&q, build, options->quiet);
     rc = 0;
 done:
     for (i = 0; i < q.count; ++i) free(q.units[i].object);
@@ -519,6 +564,7 @@ done:
     free(tmp);
     snx_ir_free(ir);
     snx_jit_cache_close(cache);
+    snx_unit_cache_close(unit_cache);
     snx_codegen_free(&codegen);
     return rc;
 }

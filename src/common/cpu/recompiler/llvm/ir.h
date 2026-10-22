@@ -108,6 +108,8 @@ typedef struct SnxIrTuning {
     const char* pipeline;
     void (*builder)(LLVMPassBuilderOptionsRef options);
     void (*machine)(LLVMTargetMachineRef machine);
+    /* every value the three above are made from, as text: what the unit cache keys objects with (unit_cache.c) */
+    const char* text;
 } SnxIrTuning;
 
 typedef struct SnxIr {
@@ -168,6 +170,10 @@ void snx_ir_free(SnxIr* ir);
 void snx_ir_tune(SnxIr* ir, const SnxIrTuning* tuning);
 /* Optimizes the module as Clang does at the -O level and returns the host object file (malloc'd) */
 int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char* error, size_t error_size);
+/* What makes an object of a module besides its IR, LLVM, the target machine's triple, CPU and features, the -O letter
+   and the tuning: new_ir's other target machine settings and what snx_ir_module_object does around LLVM's passes. The
+   unit cache's key holds it (unit_cache.c), so a change there that changes the object of the same IR bumps it */
+#define SNX_IR_OBJECT_VERSION 1
 /* The same for another module of the SnxIr's context, made with its target and data layout (the A32 executor's
    blocks, common/cpu/arm/exec.c): verified, optimized and compiled with its target machine. The module stays the
    caller's */

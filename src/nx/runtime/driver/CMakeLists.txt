@@ -31,10 +31,11 @@ include("${CMAKE_SOURCE_DIR}/cmake/llvm.cmake")
 add_subdirectory("${CMAKE_SOURCE_DIR}/src/common/cpu/recompiler/llvm" llvm-backend)
 # the NX game module through the LLVM backend; C11 for the LLVM-C headers, the driver itself stays C99
 add_library(snx_driver_llvm STATIC ../../loader/module_llvm.c ../../loader/module_variants.c ../../loader/module_arm.c
-                                   llvm_tuning.c disasm.c "${SNX_SETTINGS_LLVM}")
+                                   ../../loader/unit_cache.c llvm_tuning.c disasm.c "${SNX_SETTINGS_LLVM}")
 set_target_properties(snx_driver_llvm PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS ON)
 target_compile_options(snx_driver_llvm PRIVATE -Wall -Wextra -Werror=missing-prototypes)
-target_link_libraries(snx_driver_llvm PUBLIC snx_llvm snx_arm_llvm snx_nx_module snx_settings)
+# OpenSSL: the unit cache's SHA-256 (unit_cache.c)
+target_link_libraries(snx_driver_llvm PUBLIC snx_llvm snx_arm_llvm snx_nx_module snx_settings OpenSSL::Crypto)
 # scarletnx --mcp's disassembler (disasm.c), where LLVM has its AArch64 target (cmake/llvm.cmake)
 if(SNX_LLVM_A64_DISASM)
     target_compile_definitions(snx_driver_llvm PRIVATE SNX_A64_DISASM)

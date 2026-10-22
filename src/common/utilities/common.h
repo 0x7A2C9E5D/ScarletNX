@@ -156,6 +156,11 @@ int snx_same_disk(const char* a, const char* b);
 /* a and b name the same file, through links: 1, else 0 (one of them missing too) */
 int snx_same_file(const char* a, const char* b);
 SnxU64 snx_file_size(const char* path);
+/* path's last modification in seconds since 1970; 0 when there is no file to give one */
+SnxU64 snx_file_time(const char* path);
+/* path's last modification and access set to seconds since 1970: 0, or nonzero with the system's reason
+   (snx_os_error) */
+int snx_set_file_time(const char* path, SnxU64 seconds);
 int snx_make_executable(const char* path);
 unsigned snx_cpu_count(void);
 /* seconds on a monotonic clock, for durations */
