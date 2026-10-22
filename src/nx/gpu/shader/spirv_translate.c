@@ -3496,6 +3496,10 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     if (converge) spv_emit_subgroup_arithmetic_capability(&c->emit);
     if (needs_gather_extended) spv_emit_image_gather_extended_capability(&c->emit);
     if (needs_image_query) spv_emit_image_query_capability(&c->emit);
+    /* the per-instruction flush to zero tests the absolute value, GLSL.std.450's FAbs, where the module keeps signed
+       zeros (float_ftz): without the import its OpExtInst named id 0, which NVIDIA's SPIR-V front end (615.78)
+       crashed on, a shader of FADD and FMUL with nothing else from the set */
+    if (fp32_flush && (!can_flush || fp32_preserve) && can_preserve) needs_glsl = 1;
     if (needs_glsl) c->glsl = spv_emit_glsl450_import(&c->emit);
     u32 fn = spv_emit_id(&c->emit), label = spv_emit_id(&c->emit);
     u32 void_type = spv_emit_type_void(&c->emit);

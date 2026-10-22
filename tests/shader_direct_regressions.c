@@ -152,6 +152,25 @@ static int count_opcode(const u32* code, size_t words, u32 opcode, u32 operand) 
     return found;
 }
 
+/* whether every OpExtInst names an instruction set the module imports: one naming id 0 crashed NVIDIA's SPIR-V front
+   end (615.78) */
+static int ext_sets_imported(const u32* code, size_t words) {
+    u32 imported[4];
+    int n = 0;
+    for (size_t i = 5; i < words;) {
+        u32 width = code[i] >> 16;
+        if (!width || i + width > words) return 0;
+        if ((code[i] & 0xffff) == 11 && n < 4) imported[n++] = code[i + 1];
+        if ((code[i] & 0xffff) == 12 && width > 3) {
+            int found = 0;
+            for (int k = 0; k < n; k++) found |= imported[k] == code[i + 3];
+            if (!found) return 0;
+        }
+        i += width;
+    }
+    return 1;
+}
+
 /* an OpTypeImage of that Dim read and written without a sampler (Sampled 2): a storage image */
 static int has_storage_image_dim(const u32* code, size_t words, u32 dim) {
     for (size_t i = 5; i < words;) {
@@ -680,6 +699,7 @@ static void float_controls(void) {
                 check(info.fp32_flush == (i == 0 || i == 1) && info.fp32_preserve == (i != 0),
                       "FP32 modes recorded");
                 check((count_opcode(code, words, 17, 4465) > 0) == flush, "FP32 flush capability");
+                check(ext_sets_imported(code, words), "every OpExtInst names an imported instruction set");
                 /* the translation keeps signed zeros here: the flush is a float test (FOrdLessThan on the magnitude) */
                 check((count_opcode(code, words, 184, 0xffffffffu) > 0) == soft_ftz &&
                           count_opcode(code, words, 199, 0xffffffffu) == 0,
