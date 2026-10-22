@@ -138,7 +138,14 @@ static char* folder_game(const char* directory, const char* name, int kinds) {
 #else
         own = snx_strdup(name);
 #endif
-        if (own && playable(folder, own, GUI_GAMES_RUN)) path = snx_path_join(folder, own);
+        if (own && playable(folder, own, GUI_GAMES_RUN)) {
+#ifdef SNX_IOS
+            /* playable() cut the suffix: the runtime takes the pack itself, there is no program named <name> */
+            path = snx_format("%s/%s" GAME_CODE, folder, own);
+#else
+            path = snx_path_join(folder, own);
+#endif
+        }
     }
     free(own);
     free(folder);
