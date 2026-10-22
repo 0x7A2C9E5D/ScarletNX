@@ -7,11 +7,14 @@
 /* the guest address space: the host reservation every guest address is an offset into, its regions, and the list of
    memory blocks with the state, permission and attributes QueryMemory reports */
 #include "nx/memory/mem.h"
+#include "common/utilities/common.h"
 #include "nx/memory/own.h"
 #include "nx/gpu/gpu.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define GIB  (1ull << 30)
 #define PAGE 0x1000ull
@@ -22,8 +25,9 @@
    address space (the ASLR region of GetInfo 12 and 13) ends there, and the kernel map region, 64 GiB on the console,
    is the 1 GiB the kernel's own pages (TLS) need. The alias region starts at 4 GiB, which leaves the code below it
    up to 3.9 GiB, as the end of the code isn't known yet when the layout is made */
-MemLayout g_layout = {0x8000000ull,  AS_SIZE,     0x1100000000ull, 8 * GIB, 0x100000000ull, 64 * GIB,
+MemLayout g_layout = {0x8000000ull,  AS_MAX,      0x1100000000ull, 8 * GIB, 0x100000000ull, 64 * GIB,
                       0x1300000000ull, 2 * GIB, 0x1380000000ull, 0x13C0000000ull};
+u64 g_as_size = AS_MAX;
 u8* g_mem;
 u64 g_heap_size, g_phys_mapped, g_heap_max, g_code_memory, g_main_stack_size;
 u64 g_pool_size = 64 * GIB; /* sparse: only the pages in use take memory */
@@ -477,10 +481,112 @@ static int alias_map_nl(u64 dst, u64 src, u64 size, u32 state, u32 perm) {
     return 0;
 }
 
+#ifdef SNX_IOS
+#include <mach/mach.h>
+#include <mach/vm_map.h>
+/* The layout in size bytes of address space, smaller than the console's: the alias and heap regions shrink, in the
+   same order and below the stack, with the kernel's pages in the last GiB. The game finds the sizes it asks of
+   GetInfo (the alias region 4 GiB to 32 GiB, the heap region 4 GiB to 8 GiB) */
+static void layout_for(u64 size) {
+    g_layout.end = size;
+    if (size >= 16 * GIB) {
+        u64 alias = size >= 64 * GIB ? 32 * GIB : size >= 32 * GIB ? 8 * GIB : 4 * GIB;
+        u64 heap = size >= 24 * GIB ? 8 * GIB : 4 * GIB;
+        g_layout.alias = 4 * GIB;
+        g_layout.alias_size = alias;
+        g_layout.heap = g_layout.alias + alias;
+        g_layout.heap_size = heap;
+        g_layout.stack = g_layout.heap + heap;
+        g_layout.stack_size = 2 * GIB;
+        g_layout.kern = size - GIB;
+    } else if (size >= 12 * GIB) {
+        g_layout.alias = 4 * GIB;
+        g_layout.alias_size = 2 * GIB;
+        g_layout.heap = 6 * GIB;
+        g_layout.heap_size = 4 * GIB;
+        g_layout.stack = 10 * GIB;
+        g_layout.stack_size = GIB;
+        g_layout.kern = 11 * GIB;
+    } else {
+        /* under 12 GiB: no alias region (as a 32-bit layout without one), the heap region from 1 GiB, which leaves
+           the code that room, then a 256 MiB stack and the kernel's 256 MiB */
+        g_layout.alias = GIB;
+        g_layout.alias_size = 0;
+        g_layout.heap = GIB;
+        g_layout.heap_size = size - GIB - GIB / 2;
+        g_layout.stack = g_layout.heap + g_layout.heap_size;
+        g_layout.stack_size = GIB / 4;
+        g_layout.kern = size - GIB / 4;
+    }
+    g_layout.kern_end = size;
+}
+/* The largest run of address space in the task that nothing maps, from its range (TASK_VM_INFO) and its regions
+   (vm_region): what a reservation can be at most, whatever the system would say to a bigger one */
+static u64 largest_hole(void) {
+    task_vm_info_data_t info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    vm_address_t at = 0;
+    u64 lo = 0, hi = 0, end, best = 0, best_at = 0;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) {
+        lo = info.min_address;
+        hi = info.max_address;
+    }
+    end = lo;
+    for (;;) {
+        vm_size_t size = 0;
+        vm_region_basic_info_data_64_t region;
+        mach_msg_type_number_t n = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object;
+        if (vm_region_64(mach_task_self(), &at, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&region, &n,
+                         &object) != KERN_SUCCESS)
+            break;
+        if (at > end && at - end > best) best = at - end, best_at = end;
+        end = (u64)at + size;
+        at += size;
+        if (end >= hi) break;
+    }
+    if (hi > end && hi - end > best) best = hi - end, best_at = end;
+    fprintf(stderr, "memory: the task's address space is %#llx to %#llx, its largest free run %llu MiB at %#llx\n",
+            (unsigned long long)lo, (unsigned long long)hi, (unsigned long long)(best >> 20),
+            (unsigned long long)best_at);
+    return best;
+}
+/* An app without the paid extended-virtual-addressing entitlement may reserve less than the console's layout wants:
+   the largest of these that the system gives is the guest's address space */
+static u8* reserve_ios(void) {
+    static const u64 tiers[] = {128 * GIB, 64 * GIB, 48 * GIB, 32 * GIB, 24 * GIB, 16 * GIB, 12 * GIB, 8 * GIB, 7 * GIB, 6 * GIB, 5 * GIB};
+    const char* cap = getenv("SNX_ADDRESS_SPACE_GIB"); /* a smaller layout on purpose, to try one on a host with room */
+    u64 hole = largest_hole(), most = cap ? (u64)strtoull(cap, NULL, 10) * GIB : AS_MAX;
+    size_t i;
+    for (i = 0; i < sizeof tiers / sizeof *tiers; ++i) {
+        int skipped = tiers[i] > most || tiers[i] > hole;
+        u8* p = skipped ? NULL : plat_vm_reserve(tiers[i]);
+        fprintf(stderr, "memory: %llu GiB of address space: %s%s\n", (unsigned long long)(tiers[i] >> 30),
+                tiers[i] > most ? "skipped (SNX_ADDRESS_SPACE_GIB)"
+                : tiers[i] > hole ? "skipped (no free run that large)"
+                : p ? "reserved" : "refused: ",
+                !p && !skipped ? strerror(errno) : "");
+        if (!p) continue;
+        g_as_size = tiers[i];
+        if (tiers[i] < AS_MAX) layout_for(tiers[i]);
+        return p;
+    }
+    return NULL;
+}
+#endif
+
 void mem_init(void) {
     g_host_page = plat_vm_page();
+#ifdef SNX_IOS
+    g_mem = reserve_ios();
+    if (!g_mem) fatal("Could not reserve even 5 GiB of address space for the game's memory");
+    LOG("memory: %llu GiB of address space reserved%s\n", (unsigned long long)(g_as_size >> 30),
+        g_as_size < AS_MAX ? " (a smaller layout: this app has no extended virtual addressing)" : "");
+#else
     g_mem = plat_vm_reserve(AS_SIZE);
-    if (!g_mem) fatal("Could not reserve %llu GiB of address space for the game's memory", AS_SIZE >> 30);
+    if (!g_mem) fatal("Could not reserve %llu GiB of address space for the game's memory",
+                      (unsigned long long)(AS_SIZE >> 30));
+#endif
     mem_lock();
     blk_reserve_nl(1);
     memset(&g_blk[0], 0, sizeof *g_blk);

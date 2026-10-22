@@ -36,12 +36,18 @@ An iOS app runs one process and may not start another, so the iOS app works like
 menu's driver:
 
 - **The data folder** is the app's Documents, which the Files app (*On My iPhone > ScarletNX*) and the Finder show.
-  Games go in its `games/`, each as `games/<game>/<game>_code.so` with its `_data/`, prepared on a computer.
-- **The menu** lists those games. *Load* and the folder settings open the system's document picker. Preparing a
-  dump says it needs a computer: extraction and recompilation run the driver as a program of its own.
+  It holds `dumps/` (a game's `.nsp` or `.xci`), `keys/` (`prod.keys`), `recompiled/` (what the app makes, each game as
+  `recompiled/<id>/<id>_code.snxobj` with `_data/`) and `logs/`. The menu's settings, state and caches are in the app's
+  `Library/scarletnx/`, which the Files app does not show ([Running a game on iOS](#running-a-game-on-ios)).
+- **The menu** lists those games. *Load* and the folder settings open the system's document picker. Preparing a dump
+  runs the driver on a thread of the app, since an app may not start a process. A dump picked outside `dumps/` is
+  copied into it first. The thread has a 64 MiB stack, which LLVM's passes need.
 - **A game** runs in the app's process once the menu closes (`src/nx/runtime/entry.c`): the runtime starts once per
   process, so the app ends with the game.
 - **Share log** opens the share sheet with `scarletnx.log`.
+- **Logs.** Everything the app prints goes to `logs/scarletnx-console.log` in its Documents, after a banner with the
+  device, the system and the limits the app has, and a fatal error is also written to `logs/scarletnx-error.log`. A
+  phone shows no console, so these are what to read when a run fails.
 
 The IPA is unsigned: AltStore, SideStore or a developer account signs it for the device, with
 `dist/apple/ScarletNX.entitlements` (the larger address space and memory limit a game needs). It holds MoltenVK's
@@ -51,6 +57,38 @@ Code compiled while a game runs on macOS, 32-bit games' blocks and the runtime J
 runtime's own loader (`src/common/cpu/recompiler/llvm/code_loader.c`). LLVM writes it as ELF objects with Darwin's
 calling convention, and the loader places them in `MAP_JIT` memory, which each thread sees either writable or
 executable. The app is signed without the hardened runtime, so `MAP_JIT` needs no entitlement.
+
+### Running a game on iOS
+
+The iPhone prepares the game itself: it extracts the dump and recompiles it with its own LLVM. Super Meat Boy takes
+about two minutes on an iPhone 14 Pro, with the app in the foreground and the screen on.
+
+You do not need to put files in the right folders. The app copies the `prod.keys` you pick into `keys/` and a dump you
+pick into `dumps/`, then makes the game in `recompiled/`. Pick them from wherever they are (Files, Downloads, iCloud).
+
+1. **Install the app.** Take `ScarletNX-ios-arm64-<commit>.ipa` from a CI run, or build it (`cmake --preset ios`,
+   [Building](#building)), and install it with a sideloading tool that signs it with an Apple ID: iloader or
+   SideStore. A free account signs an app for 7 days, up to three apps at a time (the app, SideStore and StikDebug).
+2. **Set up JIT once.** iOS makes memory executable only for an app with a debugger attached. Install StikDebug and
+   LocalDevVPN, give StikDebug the pairing file (SideStore keeps one: *Storage Explorer*,
+   `ALTPairingFile.mobiledevicepairing`), hold ScarletNX in StikDebug's list and *Assign Script* `universal.js`. The
+   runtime checks for the debugger first and says what to enable when there is none.
+3. **Add your keys.** Open ScarletNX, *Setup device keys*, and pick the `prod.keys` of your Switch.
+4. **Prepare the game.** In *Games*, pick the `.nsp` or `.xci` and prepare it. The app extracts it and writes
+   `recompiled/<id>/` with `<id>_code.snxobj` and `<id>_data/`. 64-bit games only. Keep the app in the foreground
+   until it ends: iOS stops its GPU and its threads in the background.
+5. **Play.** *Enable JIT* for ScarletNX in StikDebug, open ScarletNX, *Games*, and pick the game. Do this before each
+   run, and do not leave the app while the game runs.
+
+The folders the app makes in *On My iPhone > ScarletNX* are `dumps/` (your games' dumps), `keys/`, `recompiled/` (the
+games it made) and `logs/` (what to send when a run fails). Reinstalling the app can remove them with some tools.
+
+A Mac still prepares a game the same way (`scarletnx -x "Game.nsp" --name Game`, then
+`scarletnx -r work/Game --target ios --outdir recompiled`), and its `recompiled/<id>/` can be copied into the app.
+
+Limits found on an iPhone 14 Pro (iOS 26.6.1): without the paid extended-virtual-addressing entitlement the app has
+about 13 GiB of address space and about 3 GB of memory, so the runtime takes the largest free run it can (128 GiB
+down to 5 GiB) and lays the guest out to fit, with no alias region below 12 GiB.
 
 ## What is missing
 
@@ -62,11 +100,15 @@ games from running:
   (`src/common/cpu/recompiler/llvm/link_macho.c`) with the ad hoc signature ld64 gives one, which Apple silicon
   needs to run it. Its layout, rebases, exports and signature were checked on Linux against LLVM's tools and
   `ld64.lld`, and its code was run there under qemu. No Mac has loaded one yet.
-- **Game modules on iOS.** iOS loads no code it did not ship with, so its games would have to be linked into the app
-  (`snx_module_static`, `src/nx/runtime/main.c`) or loaded into JIT memory on a device that allows it.
+- **Game modules on iOS, untested on a device.** iOS loads no code it did not ship with, so a game's code is a pack of
+  objects (`scarletnx -r Game --target ios` writes `<id>_code.snxobj`, 64-bit games only) that the app loads into
+  memory a debugger made executable (`load_pack` in `src/nx/runtime/main.c`, the JIT loader's iOS arena in
+  `code_loader.c`). The app makes it itself, or a Mac does.
 - **32-bit games on iOS.** Their blocks are compiled at run time (`src/nx/runtime/arm.c`,
   `src/common/cpu/arm/exec.c`), which needs memory that becomes executable. iOS gives that only to an app that may JIT.
-- **Preparing on iOS**, for the reasons above, until the driver runs in the app's process.
+- **Preparing on Windows or Linux.** Their x86 builds carry x86's code generator alone, to keep their size, so
+  `--target ios` fails there. The iPhone prepares games itself now.
+- **JIT without StikDebug.** The app still needs a debugger attached, which StikDebug gives ([#598](https://github.com/scarletnx/ScarletNX/issues/598)).
 - **The 3DS and Linux drivers** are not built for iOS (`SNX_BUILD_3DS`, `SNX_BUILD_GNUABI`), nor the Linux one for
   macOS.
 

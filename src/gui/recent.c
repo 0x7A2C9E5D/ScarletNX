@@ -61,7 +61,7 @@ int gui_recent_made(GuiRecent* recent, int index, const char* path) {
     int i;
     if (index < 0 || index >= recent->count || !fits(path, sizeof recent->game[index].path)) return 0;
     for (i = 0; i < recent->count; ++i)
-        if (i != index && !strcmp(recent->game[i].path, path)) {
+        if (i != index && (!strcmp(recent->game[i].path, path) || snx_same_file(recent->game[i].path, path))) {
             gui_recent_remove(recent, i < index ? index : i); /* the program's own entry, when newer, stays */
             if (i < index) return 1;
             break;

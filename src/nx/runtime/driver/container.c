@@ -88,7 +88,15 @@ char* snx_find_keys(const char* given, const char* name, const char* repo) {
     const char* home;
     char *in_repo, *directory, *in_home, *absolute;
     if (given) return snx_absolute(given);
+#ifdef SNX_IOS
+    { /* the data folder keeps the keys in keys/ (snx_keys_dir) */
+        char* keys = repo ? snx_path_join(repo, "keys") : NULL;
+        in_repo = keys ? snx_path_join(keys, name) : NULL;
+        free(keys);
+    }
+#else
     in_repo = repo ? snx_path_join(repo, name) : NULL;
+#endif
     if (in_repo && snx_is_file(in_repo)) return in_repo;
 #if defined(_WIN32)
     home = getenv("USERPROFILE");

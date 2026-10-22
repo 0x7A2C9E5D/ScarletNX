@@ -241,7 +241,8 @@ Remaining examples: POSIX.
   when it has to be, and a game made already keeps its code until `-r` recompiles it. A value a setting does not take
   (`--aot_threads=abc`) stops the recompile. The code the runtime compiles while the game runs keeps LLVM's own.
   `--target auto|linux|win64` takes only this host's own system: modules are built for the machine that builds
-  them. `--runtime FILE` deploys that runtime instead of the running one, or of the one a tools-only build builds in
+  them. `--target ios` writes `<id>_code.snxobj` instead, a pack of the code's objects for the iOS app to load into JIT
+  memory (64-bit games only, [APPLE](APPLE.md)); it makes no runtime copy. `--runtime FILE` deploys that runtime instead of the running one, or of the one a tools-only build builds in
   its checkout's `build/native-recomp` (`build/win64-recomp` on Windows). `-q` (`--quiet`) prints no progress.
   `--keep-c` is the deprecated spelling of `--keep-ir`.
 - **Codegen:** `--no-build` stages data/INI only; `--interp-only` omits AOT functions.

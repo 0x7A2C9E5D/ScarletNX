@@ -34,6 +34,9 @@ bool gui_game_folder(const char* path) {
 #ifdef _WIN32
     if (suffix(name, ".exe")) name[strlen(name) - 4] = 0;
 #endif
+#ifdef SNX_IOS
+    if (suffix(name, "_code.snxobj")) name[strlen(name) - 12] = 0; /* the pack is the game's program there */
+#endif
     data = snx_format("%s/%s_data", folder, name);
     found = *name && (!strcmp(leaf, name) || snx_addon_name(leaf, name, NULL)) && snx_is_file(path) && snx_is_dir(data);
     free(data);
@@ -64,6 +67,13 @@ uint64_t gui_tree_size(const char* path, const int* stop) {
     snx_free_strings(names, count);
     return total;
 }
+/* a game's code on an app that runs no program of its own: Android's library, or iOS's pack of objects
+   (recompile --target ios), which the loader places in memory */
+#ifdef SNX_IOS
+#define GAME_CODE "_code.snxobj"
+#else
+#define GAME_CODE "_code.so"
+#endif
 /* whether a folder's entry is a game of kinds: a CIA, or one ready to run. Libraries often carry executable bits but
    are not games, and hidden files are not shown. On Android the shared storage runs nothing: a game is <name> beside
    <name>_code.so (name is cut there), and a dump put there, to be prepared, shows with its own name */
@@ -87,12 +97,12 @@ static bool playable(const char* directory, char* name, int kinds) {
     if (!(kinds & GUI_GAMES_RUN)) return false;
 #if defined(__ANDROID__) || defined(SNX_IOS)
     { /* a game's code or a dump, a file: a folder named so is neither. An app's games have no runtime copy */
-        bool code = suffix(name, "_code.so");
+        bool code = suffix(name, GAME_CODE);
         if (!code && !gui_is_dump(name)) return false;
         path = snx_path_join(directory, name);
         listed = path && snx_is_file(path);
         free(path);
-        if (listed && code) name[strlen(name) - 8] = 0;
+        if (listed && code) name[strlen(name) - strlen(GAME_CODE)] = 0;
         return listed;
     }
 #else
@@ -125,13 +135,20 @@ static char* folder_game(const char* directory, const char* name, int kinds) {
     folder = snx_path_join(directory, name);
     if (folder && snx_is_dir(folder) && !snx_is_link(folder)) {
 #if defined(__ANDROID__) || defined(SNX_IOS)
-        own = snx_format("%s_code.so", name);
+        own = snx_format("%s" GAME_CODE, name);
 #elif defined(_WIN32)
         own = snx_format("%s.exe", name);
 #else
         own = snx_strdup(name);
 #endif
-        if (own && playable(folder, own, GUI_GAMES_RUN)) path = snx_path_join(folder, own);
+        if (own && playable(folder, own, GUI_GAMES_RUN)) {
+#ifdef SNX_IOS
+            /* playable() cut the suffix: the runtime takes the pack itself, there is no program named <name> */
+            path = snx_format("%s/%s" GAME_CODE, folder, own);
+#else
+            path = snx_path_join(folder, own);
+#endif
+        }
     }
     free(own);
     free(folder);
@@ -229,7 +246,7 @@ static size_t addons_of(const char* path, GuiGames* addons) {
         listed = listed && snx_addon_name(leaf, stem, &id);
         if (listed && snx_addon_kind(game, id) == SNX_ADDON_UPDATE) {
 #if defined(__ANDROID__) || defined(SNX_IOS)
-            char* file = snx_format("%s_code.so", stem);
+            char* file = snx_format("%s" GAME_CODE, stem);
 #elif defined(_WIN32)
             char* file = snx_format("%s.exe", stem);
 #else

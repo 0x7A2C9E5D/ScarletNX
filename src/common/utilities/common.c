@@ -901,6 +901,16 @@ char* snx_user_dir(int kind) {
     if (kind == SNX_USER_STATE) return home_folder("XDG_STATE_HOME", ".local/state");
     if (kind == SNX_USER_CACHE) return home_folder("XDG_CACHE_HOME", ".cache");
 #endif
+#ifdef SNX_IOS
+    /* the Files app shows Documents: what is not the player's to move (settings, state, caches) is in Library, which the system makes */
+    if (kind != SNX_USER_DATA) {
+        const char* home = getenv("HOME");
+        char* base = home && home[0] ? snx_path_join(home, "Library/scarletnx") : NULL;
+        dir = base ? snx_path_join(base, kind_names[kind]) : NULL;
+        free(base);
+        return dir;
+    }
+#endif
     data = snx_user_data_dir();
     if (!data || kind == SNX_USER_DATA) return data;
     dir = snx_path_join(data, kind_names[kind]);
