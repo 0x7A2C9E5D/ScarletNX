@@ -690,6 +690,14 @@ static void copy_end(CopyBatch* c) {
 
 /* guest bytes without landing pending results (they are copied over them on the GPU); unmapped pages read as zero */
 static void read_untracked(u64 gva, u8* dst, u64 len) {
+    const u8* contiguous;
+
+    if (!len) return;
+    contiguous = gmem_ptr_untracked(gva, len);
+    if (contiguous) {
+        memcpy(dst, contiguous, len);
+        return;
+    }
     while (len) {
         u64 n = 4096 - (gva & 4095);
         const u8* p;
@@ -1462,7 +1470,7 @@ static int make_own(u32 i, const u8* src) {
     VmaAllocation m;
     u64 so;
     if (vmaCreateBuffer(g_vk.vma, &bci, &aci, &b, &m, NULL) != VK_SUCCESS) return 0;
-    u8* p = vk_stage(len, vk_stage_align(), &sb, &so);
+    u8* p = vk_stage_upload(len, vk_stage_align(), &sb, &so);
     if (!p) {
         vmaDestroyBuffer(g_vk.vma, b, m);
         return 0;
@@ -1593,7 +1601,7 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
     if (!e->own && !(e->stable >= 2 && make_own(i, src))) {
         /* changing (or new) data: this frame's staging ring */
         e->buf = VK_NULL_HANDLE; /* a failed allocation must not leave the old snapshot reusable */
-        u8* p = vk_stage(len, vk_stage_align(), &e->buf, &e->off);
+        u8* p = vk_stage_upload(len, vk_stage_align(), &e->buf, &e->off);
         if (!p) return 0;
         memcpy(p, src, len);
         if (copy_stats_on()) g_copy_stage += len;

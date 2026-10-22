@@ -25,6 +25,64 @@
         }                                                                                                              \
     } while (0)
 
+/* Overflow blocks remain live through submission, then return with their slot. */
+static int check_staging_overflow(void)
+{
+	VkBuffer seen[VK_FRAMES][3] = {{0}};
+	u64 saved_cap = g_vk.alloc_cap;
+
+	g_vk.alloc_cap = 1u << 20;
+	for (u32 frame = 0; frame < VK_FRAMES * 3; frame++) {
+		VkBuffer rb, output, next_output;
+		VmaAllocation memory;
+		VkBufferCopy output_copy;
+		u64 output_offset, next_offset;
+		u8* result = vk_readback_buffer(80, &rb);
+		u8* writable = vk_stage_output(g_vk.alloc_cap, 16, &output, &output_offset, &memory);
+		u32 slot = vk_frame_slot();
+
+		CHECK(result && writable && memory);
+		memset(writable, 0xa0 + frame, 16);
+		output_copy = (VkBufferCopy){output_offset, 48, 16};
+		rec_CmdCopyBuffer(vk_cmd(), output, rb, 1, &output_copy);
+		for (u32 block = 0; block < 3; block++) {
+			VkBuffer buffer;
+			u64 offset;
+			u8* data = vk_stage_upload(g_vk.alloc_cap, 16, &buffer, &offset);
+			VkBufferCopy copy = {offset, block * 16, 16};
+
+			CHECK(data);
+			CHECK(buffer != output);
+			memset(data, frame * 3 + block + 1, 16);
+			if (frame < VK_FRAMES) {
+				for (u32 before = 0; before < block; before++)
+					CHECK(seen[slot][before] != buffer);
+				seen[slot][block] = buffer;
+			} else {
+				CHECK(buffer == seen[slot][0] || buffer == seen[slot][1] ||
+				      buffer == seen[slot][2]);
+			}
+			rec_CmdCopyBuffer(vk_cmd(), buffer, rb, 1, &copy);
+		}
+		writable = vk_stage_output(16, 16, &next_output, &next_offset, &memory);
+		CHECK(writable && next_output != output);
+		memset(writable, 0xb0 + frame, 16);
+		output_copy = (VkBufferCopy){next_offset, 64, 16};
+		rec_CmdCopyBuffer(vk_cmd(), next_output, rb, 1, &output_copy);
+		vk_finish();
+		vk_readback_ready();
+		for (u32 i = 0; i < 48; i++)
+			CHECK(result[i] == frame * 3 + i / 16 + 1);
+		for (u32 i = 48; i < 64; i++)
+			CHECK(result[i] == 0xa0 + frame);
+		for (u32 i = 64; i < 80; i++)
+			CHECK(result[i] == 0xb0 + frame);
+		vk_frame_next();
+	}
+	g_vk.alloc_cap = saved_cap;
+	return 0;
+}
+
 static int check_viewport_orientation(void) {
     u32 r[0xE00] = {0};
     for (u32 mode = 0; mode <= 6; mode++) {
@@ -855,6 +913,7 @@ int main(int argc, char** argv) {
     g_settings.vulkan_video_decode = 1; /* a Vulkan Video decode queue where the device has one (lavapipe has none) */
     video_init("Headless Vulkan fixture", "");
     CHECK(g_opt_headless && g_renderer_up && g_vk.dev && !g_vk.surface && !g_vk.swapchain && !g_vk.sc_count);
+    CHECK(!check_staging_overflow());
     CHECK(!check_viewport_orientation());
     CHECK(!check_packed_depth());
     CHECK(!check_depth_array());

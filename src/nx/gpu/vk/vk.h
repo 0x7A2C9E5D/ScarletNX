@@ -146,10 +146,13 @@ u32 vk_present_before(u64 ago_ns, u32 presents);
 /* cmd.c */
 void vk_cmd_init(void);
 VkCommandBuffer vk_cmd(void); /* the current frame's command buffer, begun on first use */
-/* size bytes of the current frame's staging memory (host visible, flushed when the frame is submitted), valid until
+/* size bytes of the current frame's mapped staging memory (flushed when the frame is submitted), valid until
    that frame's work is done. NULL past g_vk.alloc_cap: a big upload stages in parts */
 u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off);
-/* As vk_stage, with the allocation for GPU-written data that must be invalidated after its frame fence. */
+/* Streamed buffer snapshots in host RAM, with the same frame lifetime as vk_stage. */
+u8* vk_stage_upload(u64 size, u64 align, VkBuffer* buf, u64* off);
+/* GPU-written storage, device-local when host-visible memory and its budget allow;
+   includes the allocation for invalidation after its frame fence. */
 u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation* mem);
 /* Host-cached memory for the current frame's GPU -> host copies, read after its fence once invalidated. */
 u8* vk_stage_back(u64 size, VkBuffer* buf, u64* off, VmaAllocation* mem);

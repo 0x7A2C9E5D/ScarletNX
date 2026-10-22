@@ -42,7 +42,10 @@ typedef struct {
     u64 hold;             /* the next frame's submission that reads buffers in this one's rings (vk_frame_hold), or 0 */
     int recording, fresh; /* fresh: just ended up current, not yet reset for its new use */
     Ring stage;           /* uploads and draw data, written by the CPU and read by the GPU */
+    Ring output;          /* GPU-written storage and draw state, near the GPU when its budget allows */
     Ring back;            /* storage results copied back by the GPU for the CPU to read (vk_stage_back) */
+    Ring* stage_spare; /* full-size overflow blocks, owned by this frame slot */
+    u32 nstage, capstage, istage;
     /* destroyed once this frame's work is done */
     Dead* dead;
     int ndead, capdead;
@@ -155,11 +158,11 @@ void vk_cmd_init(void) {
 
 /* a ring grown for a burst goes once it has been mostly unused for a while (the frame's work is done, nothing reads
    it); the next allocation makes one of the usual size */
-/* The staging rings go in device-local memory the CPU maps when there is room for them, else in host memory. Without
+/* GPU-written storage goes in device-local memory the CPU maps when there is room for it, else in host memory. Without
    resizable BAR that memory is a window of its own heap, 246 MiB on an RTX 2080, which the whole desktop shares, and
    past its room the driver moves the memory: every CPU write to it then faulted in the kernel, and one game crawled at
-   10 frames a second for twenty seconds, its GPU thread half in the kernel. All of staging in host memory instead
-   costs a quarter of the frame rate (the GPU reads draws' buffers across PCIe), so only what doesn't fit goes there.
+   10 frames a second for twenty seconds, its GPU thread half in the kernel. Streamed buffer snapshots use host memory
+   instead: their large sequential writes must not cross that window. Stable input buffers get device-local copies.
 
    The room is the driver's budget (VK_EXT_memory_budget through VMA) less the use it counts, except where the driver
    counts the whole system's use of the window: NVIDIA's (615.78) does, and budgets what is left of it, so that use and
@@ -256,7 +259,10 @@ static void frame_recycle(Frame* f) {
         VmaBudget budget[VK_MAX_MEMORY_HEAPS];
         vmaSetCurrentFrameIndex(g_vk.vma, (u32)g_frame_id); /* VMA asks the driver for its budgets again */
         vmaGetHeapBudgets(g_vk.vma, budget);
-        ring_reset(&f->stage, budget);
+        ring_reset(&f->stage, NULL);
+        ring_reset(&f->output, budget);
+        for (u32 i = 0; i < f->nstage; i++) ring_reset(&f->stage_spare[i], NULL);
+        f->istage = 0;
     }
     ring_reset(&f->back, NULL);
     vk_rec_frame_reset((u32)(f - g_fr)); /* the slot's sets made on the recording thread too */
@@ -289,21 +295,53 @@ VkCommandBuffer vk_cmd(void) {
     return f->cbs[f->icb];
 }
 
+/* A full block at the allocation limit is needed again by the next use of this
+ * frame slot. Keep it until that use has passed the slot's completion wait. */
+static int stage_rotate(Frame* f)
+{
+	Ring previous;
+
+	if (f->istage == f->nstage) {
+		if (f->nstage == f->capstage) {
+			u32 cap = f->capstage ? f->capstage * 2 : 4;
+			Ring* spare;
+
+			if (cap < f->capstage || (u64)cap > SIZE_MAX / sizeof *spare)
+				return 0;
+			spare = realloc(f->stage_spare, cap * sizeof *spare);
+			if (!spare)
+				return 0;
+			f->stage_spare = spare;
+			f->capstage = cap;
+		}
+		f->stage_spare[f->nstage++] = (Ring){0};
+	}
+	previous = f->stage;
+	f->stage = f->stage_spare[f->istage];
+	f->stage_spare[f->istage++] = previous;
+	return 1;
+}
+
 /* bar: the ring may go in device-local memory the CPU maps, when that has room (bar_room), else it is host memory */
 static u8* ring_alloc(Frame* f, Ring* r, u64 size, u64 align, VkBufferUsageFlags usage, VmaAllocationCreateFlags flags,
                       int bar, VkBuffer* buf, u64* off, VmaAllocation* mem) {
     if (align < 16) align = 16;
     u64 at = (r->used + align - 1) & ~(align - 1);
     if (size > g_vk.alloc_cap) return NULL; /* no allocation is bigger (memory.c) */
+    if (r == &f->stage && r->buf && at + size > r->cap && r->cap == g_vk.alloc_cap) {
+        vmaFlushAllocation(g_vk.vma, r->mem, 0, VK_WHOLE_SIZE);
+        if (stage_rotate(f)) at = 0;
+    }
     if (!r->buf || at + size > r->cap) {
         /* a bigger buffer; the old one stays alive until this frame's work is done */
         if (r->buf) {
             /* The submit only flushes the current staging ring. Flush a retired one too: earlier copies and ASTC
                dispatches still read its host writes (the readback ring has none) */
-            if (r == &f->stage) vmaFlushAllocation(g_vk.vma, r->mem, 0, VK_WHOLE_SIZE);
+            if (r == &f->stage || r == &f->output) vmaFlushAllocation(g_vk.vma, r->mem, 0, VK_WHOLE_SIZE);
             dead_push(f, (Dead){.buf = r->buf, .mem = r->mem});
         }
         u64 cap = r->cap ? r->cap * 2 : STAGE_MIN;
+        if (r == &f->stage && f->istage) cap = g_vk.alloc_cap;
         while (cap < size) cap *= 2;
         /* at the cap a full ring is followed by another of the same size: a frame's big uploads take several */
         if (cap > g_vk.alloc_cap) cap = g_vk.alloc_cap;
@@ -335,20 +373,37 @@ static u8* ring_alloc(Frame* f, Ring* r, u64 size, u64 align, VkBufferUsageFlags
     return r->ptr + at;
 }
 
-u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation* mem) {
-    vk_cmd(); /* the ring is only reused once this frame's previous work is done */
-    /* written once from the CPU, read by the GPU: device-local memory the CPU maps while it has room (bar_room),
-       uncached and write-combined either way (VMA's choice for HOST_ACCESS_SEQUENTIAL_WRITE) */
-    return ring_alloc(&g_fr[g_cur], &g_fr[g_cur].stage, size, align,
-                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                          VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT |
-                          /* a draw's transform feedback captures into a writable copy (vk_buf_copy_writable) */
-                          (g_vk.has_xfb ? VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT : 0),
-                      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, 1, buf, off, mem);
+static u8* stage_alloc(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation* mem, int output)
+{
+	Frame* f;
+
+	vk_cmd(); /* completion of the slot's previous use precedes any reuse */
+	f = &g_fr[g_cur];
+	return ring_alloc(f, output ? &f->output : &f->stage, size, align,
+		VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+		VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT |
+		(g_vk.has_xfb ? VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT : 0),
+		VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, output, buf, off, mem);
 }
-u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off) { return vk_stage_output(size, align, buf, off, NULL); }
+u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation* mem)
+{
+	return stage_alloc(size, align, buf, off, mem, 1);
+}
+
+u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off)
+{
+	return stage_alloc(size, align, buf, off, NULL, 1);
+}
+
+/* Streamed uploads can be hundreds of megabytes per frame. CPU writes through
+ * a mapped device-memory window are slower than writes to host RAM. Keep these
+ * snapshots in host memory; stable buffers get their own device-local copies. */
+u8* vk_stage_upload(u64 size, u64 align, VkBuffer* buf, u64* off)
+{
+	return stage_alloc(size, align, buf, off, NULL, 0);
+}
 
 /* The staging ring can be device-local memory behind the BAR, where every CPU read crosses PCIe uncached: comparing
    a frame's storage results there cost one game most of its GPU thread. The frame's results are copied
@@ -370,6 +425,7 @@ static void submit(const VkSemaphoreSubmitInfo* xw, const VkSemaphoreSubmitInfo*
     vk_buf_host_barrier(cb, g_gval + 1);
     /* staging memory may not be host coherent: the host writes are made visible to the GPU here */
     if (f->stage.mem) vmaFlushAllocation(g_vk.vma, f->stage.mem, 0, VK_WHOLE_SIZE);
+    if (f->output.mem) vmaFlushAllocation(g_vk.vma, f->output.mem, 0, VK_WHOLE_SIZE);
     VkSemaphoreSubmitInfo w[2];
     u32 nw = 0;
     if (g_after[0].semaphore) { /* at most one of the two: vk_submit_after's comes with no other */
