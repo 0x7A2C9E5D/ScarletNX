@@ -156,6 +156,7 @@ typedef struct App {
     int auto_scale; /* UI scale Auto's scale, chosen when the window opens: a resize keeps the letters as they were */
     Uint64 sampled;
     bool has_output, finished, aborting, abnormal_exit;
+    bool log_due; /* the last run ended abnormally, not by ESC, and its log is not saved since: Share log blinks */
     GuiConfirm confirm; /* the question before a run is aborted, when ask_abort says to ask it */
     bool ask_abort;     /* ESC asks first: on a phone it is Back, an edge swipe easily made by mistake */
     int native;
@@ -2927,8 +2928,9 @@ static void menu_side(App* app, const GuiMenuBoxes* m) {
     }
     last_output(app, r, y);
 }
-/* the entries' attributes: the one activated last in the active colour; Setup device keys while no prod.keys is in
-   use blinking in the failure colour, so a first start shows what to do first */
+/* the entries' attributes: the one activated last in the active colour; blinking in the failure colour, Setup device
+   keys while no prod.keys is in use, so a first start shows what to do first, and Share log after a run crashed until
+   its log is saved */
 unsigned ui_menu_entries_attr_cb(App* app, size_t row) {
     unsigned attr = app->menu.activated && (size_t)app->menu.active == row ? UI_ATTR_ACTIVE : 0;
     if (row == GUI_KEYS) {
@@ -2936,6 +2938,7 @@ unsigned ui_menu_entries_attr_cb(App* app, size_t row) {
         if (!in_use) attr |= UI_ATTR_FAILURE | UI_ATTR_BLINK;
         free(in_use);
     }
+    if (row == GUI_LOG && app->log_due) attr |= UI_ATTR_FAILURE | UI_ATTR_BLINK;
     return attr;
 }
 static void draw_menu(App* app) {
@@ -7025,6 +7028,7 @@ static void pump(App* app) {
                an abort, so return straight to the menu after nonblocking reaping. */
             app->finished = !app->aborting;
             app->abnormal_exit = app->aborting || status != 0;
+            if (!app->aborting) app->log_due = status != 0; /* an ESC is no crash, and keeps what was due */
             users_read(app); /* users.ini may have changed while it ran */
             gui_steps_finish(&app->steps, !app->abnormal_exit);
             if (app->run_out) {
@@ -7616,6 +7620,7 @@ static char* log_summary(const char* path) {
 static void share_log(App* app) {
     char *game, *run, *played, *summary, *text, *saved, *state = NULL;
     const char* folder;
+    bool written;
     folder = app->cwd;
     if (app->data_dir && snx_app_dir(app->data_dir)) state = snx_app_kind_dir(app->data_dir, SNX_USER_STATE);
     if (state && snx_mkdirs(state)) {
@@ -7633,10 +7638,12 @@ static void share_log(App* app) {
                       app->cleaned.count ? "Clean old settings:\n" : "", app->cleaned.text ? app->cleaned.text : "",
                       summary, app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
+    written = saved && !snx_write_file(saved, text, strlen(text));
+    if (written) app->log_due = false; /* the crash's log is out */
     if (!saved) {
         snprintf(app->message, sizeof(app->message), "%s", snx_tr("The log could not be saved: no working folder"));
         say_failure(app, app->message);
-    } else if (snx_write_file(saved, text, strlen(text))) {
+    } else if (!written) {
         char why[256];
         snprintf(app->message, sizeof(app->message), snx_tr("The log could not be saved to %s: %s"), saved,
                  snx_os_error(why, sizeof why));

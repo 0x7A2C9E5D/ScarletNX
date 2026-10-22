@@ -309,6 +309,7 @@ static void finish(App* app, int status) {
     snprintf(expected, sizeof(expected),
              status ? "Program ended abnormally (status %d)." : "Driver exited with status %d.", status);
     assert(!strcmp(app->message, expected) && app->abnormal_exit == (status != 0) && app->has_output);
+    assert(app->log_due == (status != 0)); /* Share log blinks after a crash, and stops after a run that ends well */
     shows_foot(app, "Press [ESC] to return to menu", red);   /* where the keys go, in their letters */
     if (status) shows(app, "Program ended abnormally", red); /* beside the output, how it ended */
     /* a theme can make that line a prompt: framed and placed, the done and the failed one apart */
@@ -6290,7 +6291,11 @@ int main(int argc, char** argv) {
         shows(&app, SAY_LEFT_TITLE, rgb(app.theme.ink));
         shows(&app, "While the app is in testing,", rgb(app.theme.ink));
         app.left_shown = false;
+        app.log_due = true; /* a crash's log: Share log blinks in the failure colour until it is saved */
+        assert((ui_menu_entries_attr_cb(&app, GUI_LOG) & (UI_ATTR_FAILURE | UI_ATTR_BLINK)) ==
+               (UI_ATTR_FAILURE | UI_ATTR_BLINK));
         share_log(&app);
+        assert(!app.log_due && !(ui_menu_entries_attr_cb(&app, GUI_LOG) & UI_ATTR_FAILURE));
         path = snx_path_join(state, "scarletnx.log");
         text = (char*)snx_read_file(path, &size);
         assert(text && strstr(text, SAY_LEFT_CLEAR "\n"));

@@ -213,7 +213,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   which it took. A language written in two scripts goes by its script, written or implied by its country (`zh-CN`,
   `zh-SG` simplified, `zh-TW`, `zh-HK`, `zh-MO` traditional): a system in one never takes a catalog of the other. The
   words change at once; a phrase the language has not translated stays English.
-- **Share log** saves the last run's output and game log to `scarletnx.log`. On the
+- **Share log** saves the last run's output and game log to `scarletnx.log`. After a run that ended abnormally (not
+  by ESC) it blinks red, as Setup device keys does, until its log is saved or a run ends well. On the
   desktop it goes in the working folder with its path copied. On Android it goes to the
   data folder's `state/` and is shared.
 - **Open data folder**, on Android, opens the data folder, the app's own storage, in the
