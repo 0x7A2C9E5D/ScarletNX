@@ -162,6 +162,7 @@ static struct {
     size_t olen, ocap;
     int olines; /* the output's newlines so far */
     int away;   /* the lines written last came from ui.txt's (#line) */
+    char* spec; /* ui.txt's text while it is read, here so a refusal's exit leaves nothing unreached */
 } g_uigen;
 
 static void fail(int line, const char* fmt, ...) {
@@ -573,7 +574,7 @@ static int parse_opener(char* p, int parent, int depth, int line, int* closed) {
 }
 
 static void read_ui(void) {
-    char* text = read_spec();
+    char* text = g_uigen.spec = read_spec();
     char *line, *next;
     int number = 0, depth = 0, stack[MAX_DEPTH];
     for (line = text; line && *line; line = next) {
@@ -629,6 +630,7 @@ static void read_ui(void) {
              g_uigen.items[stack[depth - 1]].name ? g_uigen.items[stack[depth - 1]].name
                                                   : g_uigen.items[stack[depth - 1]].text);
     free(text);
+    g_uigen.spec = NULL;
 }
 
 /* what the items must have together: a hotkey once in its scene and platform; a list's rows its items or a callback's;
