@@ -48,7 +48,8 @@ typedef double f64;
 /* The oldest SNX_ABI whose modules this runtime still runs, and whose games the driver plays without recompiling them.
    An addition the runtime reads as optional (13's table, found by its symbol and versioned on its own) bumps SNX_ABI
    alone; a change to the contract above (the CPU's layout, a helper's results, RtAPI, the module descriptor) raises
-   this to SNX_ABI too, as an older module would run wrong */
+   this to SNX_ABI too, as an older module would run wrong. docs/ARCHITECTURE.md's Module ABI says which change raises
+   which, and tests/module_contract.c fails when the layout moves while this stays */
 #define SNX_ABI_OLDEST 12
 #if SNX_ABI_OLDEST > SNX_ABI
 #error "SNX_ABI_OLDEST is an SNX_ABI already reached"

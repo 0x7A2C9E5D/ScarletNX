@@ -1135,6 +1135,10 @@ snx_test_target(snx-test-runtime-module-abi 99)
 target_link_libraries(snx-test-runtime-module-abi PRIVATE snx_test_common)
 add_test(NAME runtime_module_abi COMMAND snx-test-runtime-module-abi $<TARGET_FILE:scarletnx>
     $<TARGET_FILE:snx-test-module-abi> $<TARGET_FILE:snx-test-module-abi-arm>)
+# the module contract's layout as recorded when SNX_ABI_OLDEST last rose (docs/ARCHITECTURE.md, Module ABI)
+add_executable(snx-test-module-contract module_contract.c)
+snx_test_target(snx-test-module-contract 99)
+add_test(NAME module_contract COMMAND snx-test-module-contract)
 # the build-side reader of the runtime JIT's cache
 add_executable(snx-test-jit-cache jit_cache.c)
 snx_test_target(snx-test-jit-cache 11)

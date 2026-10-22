@@ -4,6 +4,7 @@
 
 * [Runtime boundaries](#runtime-boundaries)
 * [Recompiler + module ABI](#recompiler--module-abi)
+  * [Module ABI](#module-abi)
 * [Runtime ownership](#runtime-ownership)
   * [Guest exec](#guest-exec)
   * [GPU submit/present](#gpu-submitpresent)
@@ -155,13 +156,54 @@ compares the live instruction against the compiled word. Modified code falls
 back to shared interpreter semantics. NX leaves this callback unset and keeps
 its existing execution path.
 
-NX module ABI is in `src/nx/loader/module_abi.h`; the shared CPU layout is in
-`src/common/cpu/aarch64/cpu.h`. Rebuild game modules after shared ABI changes;
-bump `SNX_ABI` for ABI changes, and raise `SNX_ABI_OLDEST` to it when older
-modules would run wrong (the CPU's layout, a helper's results, RtAPI, the module
-descriptor). An addition the runtime reads as optional bumps `SNX_ABI` alone,
-and games made by the older ABI keep their code. The runtime refuses a module
-outside the two, and the driver recompiles its game.
+### Module ABI
+
+A game module (`<id>_code.so`, `.dll` on Windows) is code the recompiler made for one contract with the runtime:
+- the `CPU` layout and the `SNX_FP_*` numbers in `src/common/cpu/aarch64/cpu.h`;
+- the results of the helpers generated code calls (`cpu_helpers.c`);
+- `RtAPI` and `SNX_SVC_COUNT` in `src/common/runtime/interface.h`;
+- the module descriptor in `src/nx/loader/module_abi.h`.
+
+Two numbers in cpu.h version it:
+- `SNX_ABI`, written into each module (`SnxModule.abi`) and into its game's `<id>.abi` stamp;
+- `SNX_ABI_OLDEST`, the oldest `SNX_ABI` whose modules this runtime still runs.
+
+A module from `SNX_ABI_OLDEST` to `SNX_ABI` is loaded, and the driver plays its game without recompiling it: only the
+game's copy of the runtime is replaced. The runtime refuses a module outside them, its message naming both ABIs
+("ABI 11, where this one runs 12 to 13"), and the driver recompiles that game when it is played.
+
+Which number a change raises:
+
+| The change | `SNX_ABI` | `SNX_ABI_OLDEST` |
+| --- | --- | --- |
+| An export the runtime looks up by name, treats as optional and versions on its own (13's `snx_variants()`) | +1 | stays |
+| A field of `CPU`, `RtAPI`, `SnxModule` or `SnxModInfo` added, removed, moved or resized | +1 | raised to `SNX_ABI` |
+| A helper's results; an `SNX_FP_*` number; `SNX_SVC_COUNT`; an RtAPI function's arguments | +1 | raised to `SNX_ABI` |
+| The recompiler's own output for the same contract (better code) | stays | stays |
+
+The last row leaves every game with its old code until it is recompiled (`-r`, or R in Games). A fix that games
+need is a contract change only when their old code would run wrong under the new runtime. When unsure, raise both:
+a game recompiled once costs minutes, and a wrong `SNX_ABI_OLDEST` runs code that reads the wrong fields.
+
+`ctest -R module_contract` (`tests/module_contract.c`) holds the contract's layout as it was when `SNX_ABI_OLDEST`
+last rose: each field's offset and size, the structs' sizes and the numbers above. A change to any of them fails it,
+naming the field, until `SNX_ABI_OLDEST` rises and the table the failure prints is recorded there. It cannot see a
+helper's results, an RtAPI function's arguments, or a field added into a struct's tail padding: for those the table
+above is the rule.
+
+The unit cache (`src/nx/loader/unit_cache.c`) keys a unit's object on its IR, not on `SNX_ABI`, so a recompile after
+a bump that leaves the IR alone reuses every unit. `SNX_IR_OBJECT_VERSION` (`ir.h`) rises instead when
+`snx_ir_module_object` makes another object from the same IR.
+
+| `SNX_ABI` | What changed (cpu.h) | Runs modules from |
+| --- | --- | --- |
+| 7 | `CPU.poll` and `RtAPI.poll` | 7 |
+| 8 | the FP/SIMD emitters and discovery | 8 |
+| 9 | `RtAPI.svcs` | 9 |
+| 10 | `RtAPI.miss`, and `CPU.disp` read with relaxed atomic loads | 10 |
+| 11 | the reworked LLVM backend's modules | 11 |
+| 12 | `RtAPI.cas128`, and `snx_cas128` takes the CPU | 12 |
+| 13 | the AOT module's `snx_variants()` table, read as optional | 12 |
 
 ## Runtime ownership
 
