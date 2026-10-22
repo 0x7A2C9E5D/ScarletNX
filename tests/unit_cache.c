@@ -478,6 +478,14 @@ int main(void) {
     g_unit_cache.disk = NULL;
     g_unit_cache.disk_fails = 0;
 
+    /* a cache folder that cannot be made stops the build, saying why */
+    CHECK(!snx_write_file("snx-test-unit-cache.file", "x", 1));
+    remove(out[2]);
+    forget();
+    CHECK(build("snx-test-unit-cache.file/units", out[2], 0) && !snx_is_file(out[2]));
+    CHECK(said("unit cache: cannot make the folder snx-test-unit-cache.file/units", NULL));
+    remove("snx-test-unit-cache.file");
+
     snx_unit_cache_close(cache);
     free(path_a);
     free(path_b);

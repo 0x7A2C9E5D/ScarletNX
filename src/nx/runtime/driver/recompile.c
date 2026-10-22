@@ -610,9 +610,12 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             char* folder = snx_menu_dir(paths->repo, SNX_USER_CACHE);
             units = folder ? snx_path_join(folder, "units") : NULL;
             free(folder);
-            if (!units)
-                snx_error("unit cache: no cache folder, as the environment names no home: every unit is compiled, "
-                          "and none kept");
+            if (!units) {
+                snx_error("unit cache: no cache folder, as the environment names no home (HOME, or APPDATA on "
+                          "Windows): the game is not recompiled");
+                free(kept);
+                goto done;
+            }
             llvm.unit_cache = units;
             llvm.unit_cache_limit = (SnxU64)g_settings.unit_cache_limit * 1000000000ull;
         }

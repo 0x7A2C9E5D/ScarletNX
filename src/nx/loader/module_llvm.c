@@ -476,11 +476,11 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
         identity.opt = build->opt;
         identity.tuning = build->tuning ? build->tuning->text : NULL;
         unit_cache = snx_unit_cache_open(build->unit_cache, &identity, error, sizeof error);
-        /* a build without it makes the same module */
-        if (!unit_cache)
-            snx_error("unit cache: %s: every unit is compiled, and none kept", error);
-        else if (build->unit_cache_disk)
-            snx_unit_cache_disk(unit_cache, build->unit_cache_disk);
+        if (!unit_cache) {
+            snx_error("unit cache: %s", error);
+            goto done;
+        }
+        if (build->unit_cache_disk) snx_unit_cache_disk(unit_cache, build->unit_cache_disk);
         q.cache = unit_cache;
     }
     if (!options->quiet)
