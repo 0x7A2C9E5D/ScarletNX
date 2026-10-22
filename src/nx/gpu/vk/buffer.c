@@ -904,7 +904,7 @@ static void gfx_overlay(u64 gva, u64 len, VkBuffer dst, u64 dst_off) {
 /* A draw or dispatch can read an earlier one's storage result without a round trip through guest RAM. Returns 1 with
    that result's buffer itself in *buf, *off when the newest result over the range covers all of it, unchanged since,
    at an offset bindings accept, from this submit when the reader writes it (its copy back for landing was recorded at
-   its submit's end) or this frame otherwise. Returns 2 when pending results cover the range and can all be copied over
+   its submit's end) or this frame otherwise, at an offset that is a multiple of align. Returns 2 when pending results cover the range and can all be copied over
    guest memory on the GPU (gfx_overlay), 0 when none do, or after landing them because one can't: it maps the range
    through another virtual address, or the guest wrote its original bytes since. A result of the frame before is read
    where it is too (transform feedback captures the same buffers every frame, over the last frame's capture), its
@@ -921,7 +921,7 @@ static int out_still_copyable(const GfxOut* o, u64 gva, u64 len, u64** rmap, u64
     if (c.ok) out_spans(o, gva, len, *rmap, copyable_span, &c);
     return c.ok;
 }
-static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off, int writable) {
+static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off, int writable, u64 align) {
     GfxOut *match = NULL, *newest = NULL;
     int count = 0, before = 0;
     RangePages q;
@@ -965,7 +965,7 @@ static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off, int writable) 
     if (!count) return 0;
     if (before) vk_frame_hold(vk_frame_id() - 1);
     if (count == 1 && gva >= match->addr && gva + len <= match->addr + match->size &&
-        !((match->off + (gva - match->addr)) & (vk_stage_align() - 1)) &&
+        !((match->off + (gva - match->addr)) & (align - 1)) &&
         (!writable || match->frame == vk_submit_number())) {
         /* one barrier per draw or dispatch that reads an earlier one's result: either may have written it, and
            either may read it next (a dispatch on the graphics queue binds like a draw) */
@@ -1142,7 +1142,7 @@ static const u8* guest_bytes(u64 gva, u64 len) {
 }
 
 int vk_buf_copy(u64 gva, u64 len, VkBuffer* buf, u64* off) {
-    int src = gva ? gfx_gpu_src(gva, len, buf, off, 0) : 0;
+    int src = gva ? gfx_gpu_src(gva, len, buf, off, 0, vk_stage_align()) : 0;
     if (src == 1) return 1;
     if (src == 2) return gfx_composed(gva, len, buf, off);
     u8* p = vk_stage(len ? len : 16, vk_stage_align(), buf, off);
@@ -1170,7 +1170,7 @@ int vk_buf_copy_writable(u64 gva, u32 len, VkBuffer* buf, u64* off) {
             *off = p->off;
             return 1;
         }
-    int pending = gfx_gpu_src(gva, len, buf, off, 1);
+    int pending = gfx_gpu_src(gva, len, buf, off, 1, vk_stage_align());
     if (pending == 1) return 1;
     o = gfx_out_new((u32)(((gva & 0xFFF) + len + 0xFFF) >> 12), len);
     if (!o) return 0;
@@ -1558,7 +1558,7 @@ static const u8* entry_host(Vb* e, u64 gva, u64 len) {
     }
     return e->host_cpu == ~0ull ? NULL : GP(e->host_cpu);
 }
-static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
+static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict, u64 align) {
     int pending;
     u32 i = 0;
     Vb* e = NULL;
@@ -1570,7 +1570,7 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
     /* Pending results over the range, unless none was added since they were last checked for here (only the sweep in
        vk_buf_frame frees entries, and only this function adds them, so e stays good meanwhile) */
     if (!e || e->cs_adds != vk_compute_adds() || e->gfx_adds != vk_buf_adds()) {
-        pending = gfx_gpu_src(gva, len, buf, off, 0);
+        pending = gfx_gpu_src(gva, len, buf, off, 0, align);
         if (pending == 1) return 1;
         if (pending == 2) return gfx_composed(gva, len, buf, off); /* newer than any cached copy */
         if (vk_compute_gpu_src(gva, len, buf, off)) return 1;      /* a compute result that hasn't landed yet */
@@ -1685,7 +1685,14 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
     return 1;
 }
 
-int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off) { return buf_get(gva, len, buf, off, 0); }
+int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off) { return buf_get(gva, len, buf, off, 0, vk_stage_align()); }
+/* Vertex and index buffers bind at any offset that keeps their elements aligned, not only at the uniform and storage
+   bindings' alignment: a draw reading an earlier draw's storage result at another offset reads its buffer in place
+   instead of composing it over guest memory. In one game 216,000 vertex buffer bindings in 600 frames were composed
+   that way, each a copy of its range into staging and a GPU copy of the result over it */
+int vk_buf_get_input(u64 gva, u64 len, u64 align, VkBuffer* buf, u64* off) {
+    return buf_get(gva, len, buf, off, 0, align);
+}
 /* A draw looks its buffers up one after another, and each lookup waited on two cache misses in a row, its index slot
    and then the entry the slot names: 88% of buf_get's own time in one game. A caller that knows its ranges first
    fetches every slot (step 0), then every entry they name (step 1), so the misses overlap */
@@ -1701,7 +1708,9 @@ void vk_buf_prefetch(u64 gva, u64 len, int step) {
         for (size_t o = 0; o < sizeof(Vb); o += 64) __builtin_prefetch((const char*)&g_vb[g_vbi[sl].idx] + o);
 }
 /* Constant buffers cannot accept the delayed checks used for stable vertex data: a changed word affects this draw. */
-int vk_buf_get_strict(u64 gva, u64 len, VkBuffer* buf, u64* off) { return buf_get(gva, len, buf, off, 1); }
+int vk_buf_get_strict(u64 gva, u64 len, VkBuffer* buf, u64* off) {
+    return buf_get(gva, len, buf, off, 1, vk_stage_align());
+}
 
 u64 vk_buf_reclaim(u32 before, u64 want) {
     u64 freed = 0;

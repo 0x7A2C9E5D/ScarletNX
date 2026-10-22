@@ -2462,7 +2462,8 @@ retry:
     for (u32 q = 0; q < nvq; q++) vk_buf_prefetch(vq[q].gva, vq[q].len, 0);
     for (u32 q = 0; q < nvq; q++) vk_buf_prefetch(vq[q].gva, vq[q].len, 1);
     for (u32 q = 0; q < nvq; q++) {
-        if (!vk_buf_get(vq[q].gva, vq[q].len, &vbuf[vq[q].b], &voff[vq[q].b])) {
+        /* vertex formats have components of up to 4 bytes, which each attribute's address must be a multiple of */
+        if (!vk_buf_get_input(vq[q].gva, vq[q].len, 4, &vbuf[vq[q].b], &voff[vq[q].b])) {
             g_vk_skipped++;
             return;
         }
@@ -2618,7 +2619,7 @@ retry:
                         memset(o + (u64)j * 2, 0xFF, 2);
                     else if (isz == 4 && snx_ld_le32(o + (u64)j * 4) == ri)
                         memset(o + (u64)j * 4, 0xFF, 4);
-            } else if (!vk_buf_get(ia + (u64)first * isz, bytes, &ibuf, &ioff)) {
+            } else if (!vk_buf_get_input(ia + (u64)first * isz, bytes, isz, &ibuf, &ioff)) {
                 draw_images_discard(&images);
                 return;
             }
