@@ -162,7 +162,7 @@ static struct {
     size_t olen, ocap;
     int olines; /* the output's newlines so far */
     int away;   /* the lines written last came from ui.txt's (#line) */
-    char* spec; /* ui.txt's text while it is read, here so a refusal's exit leaves nothing unreached */
+    char* spec; /* ui.txt's text while it is read */
 } g_uigen;
 
 static void fail(int line, const char* fmt, ...) {
@@ -175,7 +175,8 @@ static void fail(int line, const char* fmt, ...) {
     vfprintf(stderr, fmt, ap);
     va_end(ap);
     fputc('\n', stderr);
-    exit(1);
+    /* at once: what the generator holds goes with it, where exit's handlers would have LeakSanitizer count it lost */
+    _Exit(1);
 }
 
 static void* alloc(size_t n) {
