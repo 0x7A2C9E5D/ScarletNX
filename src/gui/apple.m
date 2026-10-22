@@ -46,7 +46,6 @@ static void limit_line(const char* name, int resource) {
         fprintf(stderr, "  rlimit %s = soft %llu hard %llu\n", name, (unsigned long long)r.rlim_cur,
                 (unsigned long long)r.rlim_max);
 }
-#endif
 /* the entitlements the signed app carries, from the provisioning profile in the bundle: which of the ones that matter
    to a game the sideloading tool gave this app (a profile is a signed plist, its keys readable in the file) */
 static void entitlement_lines(void) {
@@ -65,6 +64,7 @@ static void entitlement_lines(void) {
     for (i = 0; i < sizeof keys / sizeof *keys; ++i)
         fprintf(stderr, "  %s: %s\n", keys[i], memmem(data.bytes, data.length, keys[i], strlen(keys[i])) ? "yes" : "no");
 }
+#endif
 
 void gui_apple_stats(char* out, size_t size) {
 #if TARGET_OS_IPHONE
