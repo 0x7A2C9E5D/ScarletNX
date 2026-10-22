@@ -1098,6 +1098,13 @@ VkPipeline vk_pipeline_ready(VkPipeline h) {
     Pipe* p = g_pstand[i / PSTAND_PAGE][i % PSTAND_PAGE];
     return __atomic_load_n(&p->ready, __ATOMIC_ACQUIRE) ? p->p : h;
 }
+/* the pipeline h names without waiting for it: VK_NULL_HANDLE with *pending set while a worker still makes it, and
+   VK_NULL_HANDLE alone when it couldn't be made */
+VkPipeline vk_pipeline_now(VkPipeline h, int* pending) {
+    VkPipeline p = vk_pipeline_ready(h);
+    *pending = (((u64)(uintptr_t)p) & ~(u64)0xFFFFFFFFull) == PIPE_STANDIN;
+    return *pending ? VK_NULL_HANDLE : p;
+}
 void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* shaders, u64* shader_ms) {
     *pipes = g_pipes_new;
     *hits = __atomic_load_n(&g_pipe_hits, __ATOMIC_RELAXED);

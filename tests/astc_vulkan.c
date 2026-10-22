@@ -72,6 +72,10 @@ void vk_lock(void) {}
 void vk_unlock(void) {}
 /* record.c resolves stand-ins for pipelines still being made (pipeline.c, not here): the test binds real ones */
 VkPipeline vk_pipeline_resolve(VkPipeline h) { return h; }
+VkPipeline vk_pipeline_now(VkPipeline h, int* pending) {
+    *pending = 0;
+    return h;
+}
 /* cmd.c reads the frame's GPU timestamps for gpuprof.c, which isn't here */
 void vk_gpuprof_frame_done(u32 slot) { (void)slot; }
 /* cmd.c's waits note themselves for gpu.c's stall report, which isn't here */

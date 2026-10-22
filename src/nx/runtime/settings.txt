@@ -190,6 +190,13 @@ setting Pipeline threads
     help The threads that make the GPU's new pipelines while the game goes on: 0 = a quarter of the computer's
     help threads, two to six; 1 to 32 = that many. More make a first run's new pipelines sooner, with less CPU left
     help for the game
+setting Async pipelines
+    key async_pipelines
+    int 0 1
+    default 0
+    words Off|On
+    help 1 = what a new shader draws is skipped while its pipeline is made, instead of the game waiting for it: no
+    help pause where a new shader first appears, and the things it draws show up a few frames late
 setting Prepare shaders
     key prepare_shaders
     int 0 2
