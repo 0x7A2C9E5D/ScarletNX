@@ -44,3 +44,12 @@
 		attr = callback
 	}
 }
+[scene]Touch {
+	[list]Big {
+		android.row_height = 30px
+		desktop.max_rows = 2
+		[button]"A" {}
+		[button]"B" {}
+		[button]"C" {}
+	}
+}

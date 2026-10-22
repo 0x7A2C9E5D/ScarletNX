@@ -77,6 +77,9 @@ void ui_main_status_update_cb(App* app, char* text, size_t size) {
 }
 void ui_row_ok_action_cb(App* app, uint32_t hit) { called(app, OK, hit, 0); }
 void ui_row_back_action_cb(App* app, uint32_t hit) { called(app, BACK, hit, 0); }
+void ui_touch_big_a_action_cb(App* app, uint32_t hit) { called(app, OK, hit, 0); }
+void ui_touch_big_b_action_cb(App* app, uint32_t hit) { called(app, OK, hit, 0); }
+void ui_touch_big_c_action_cb(App* app, uint32_t hit) { called(app, OK, hit, 0); }
 unsigned ui_row_back_attr_cb(App* app) {
     (void)app;
     return UI_ATTR_FAILURE;
@@ -109,7 +112,19 @@ static void test_layout(void) {
     ui_row_layout(gui_rect(0, 0, 400, 100), 1, o);
     is(o[UI_ROW_OK], 120, 40, 60, 20);
     is(o[UI_ROW_BACK], 180, 0, 100, 100);
-    puts("PASS the layouts at 1x and 2x, the rows that fit");
+    /* a platform's own row metrics: Android's rows 30px high, the desktop's at most 2, the plain ones elsewhere */
+    {
+        GuiRect t[UI_TOUCH_ITEMS];
+        ui_touch_layout(gui_rect(0, 0, 100, 100), 1, t);
+#ifdef SDL_PLATFORM_ANDROID
+        is(ui_touch_row(t, 1, UI_TOUCH_BIG, 1), 0, 32, 100, 30);
+        assert(ui_touch_shown(t, 1, UI_TOUCH_BIG) == 3); /* 100 / 32: 3 */
+#else
+        is(ui_touch_row(t, 1, UI_TOUCH_BIG, 1), 0, 19, 100, 17);
+        assert(ui_touch_shown(t, 1, UI_TOUCH_BIG) == 2); /* 5 fit, max_rows 2 */
+#endif
+    }
+    puts("PASS the layouts at 1x and 2x, the rows that fit, a platform's own metrics");
 }
 
 static void test_draw(void) {

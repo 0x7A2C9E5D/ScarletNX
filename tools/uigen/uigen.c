@@ -39,7 +39,8 @@
    An item of a list is a row: it takes attr, color, key and for-platform alone, and shows its "Text". attr = callback:
    the code gives the button or row its UI_ATTR_* bits as it is drawn (failure, blink, active); on a list with items,
    any row's by its index. for-platform (android or desktop) is a row's alone: a scene's items keep their places on
-   every platform. color is a theme colour by its theme.ini name. key is an ASCII character or f1 to f12 after ctrl-
+   every platform, though a list's row_height, row_gap and max_rows may take a platform's own value
+   (android.row_height = 40px; desktop. too). color is a theme colour by its theme.ini name. key is an ASCII character or f1 to f12 after ctrl-
    or alt- (alt-f4), a hotkey of its scene (Enter is the click's).
    The callbacks, main.c's: a button's ui_<symbol>_action_cb(App*, uint32_t hit); a named label's
    ui_<symbol>_update_cb(App*, char* text, size_t size); a list without items' ui_<symbol>_get_row_info(App*, size_t
@@ -144,6 +145,8 @@ typedef struct {
     int color, platform;                /* color: an index in colors + 1, 0 for none */
     int key, fkey, mods;                /* key: an ASCII character; fkey: 1 to 12 for F1 to F12 */
     int key_line;
+    int plat_value[3][P_COUNT]; /* a platform's own row metrics (android.row_height), by PLATFORM_* */
+    unsigned plat_set[3];
     int children, offset;
     Lin x, y, w, h; /* its rectangle in its scene's area, a scene's own item */
 } Item;
@@ -400,9 +403,31 @@ static void parse_key(Item* it, const char* value, int line) {
              value);
     it->key_line = line;
 }
+static void set_property(Item* it, char* word, char* value, int line);
+/* a platform's own row metric, android.row_height = 40px: checked as the plain one is, the list's rows take it there */
+static void set_platform_property(Item* it, int on, char* word, char* value, int line) {
+    static const char* const platforms[] = {"", "android", "desktop"};
+    unsigned metrics = BIT(P_ROW_HEIGHT) | BIT(P_ROW_GAP) | BIT(P_MAX_ROWS);
+    int p = property_of(word);
+    Item checked = {0};
+    if (it->type != T_LIST || p < 0 || !(metrics & BIT(p)))
+        fail(line, "%s.%s: a platform's own value is a list's row_height, row_gap or max_rows", platforms[on], word);
+    if (it->plat_set[on] & BIT(p)) fail(line, "%s.%s is set twice for one list", platforms[on], word);
+    checked.type = it->type;
+    checked.parent = it->parent;
+    set_property(&checked, word, value, line);
+    it->plat_value[on][p] = checked.value[p];
+    it->plat_set[on] |= BIT(p);
+}
 static void set_property(Item* it, char* word, char* value, int line) {
-    int p = property_of(word), i;
-    unsigned taken = is_row(it) ? properties_of[it->type] & ROW_TAKES : properties_of[it->type];
+    int p, i;
+    unsigned taken;
+    if (!strncmp(word, "android.", 8) || !strncmp(word, "desktop.", 8)) {
+        set_platform_property(it, word[0] == 'a' ? PLATFORM_ANDROID : PLATFORM_DESKTOP, word + 8, value, line);
+        return;
+    }
+    p = property_of(word);
+    taken = is_row(it) ? properties_of[it->type] & ROW_TAKES : properties_of[it->type];
     if (p < 0 || !(taken & BIT(p))) {
         char* list = words_of(taken);
         fail(line, "%s is not a property of a %s%s: it takes %s", word, is_row(it) ? "row's " : "",
@@ -836,12 +861,51 @@ static void out_bound(const Item* list, int p, const char* rect) {
     else
         out("%s.w * %d / 100", rect, list->value[p]);
 }
+/* a list's row metric (row_height, row_gap, max_rows) on a platform: its own there, else the list's, else the default */
+static int metric(const Item* list, int on, int p) {
+    if (on != PLATFORM_ANY && (list->plat_set[on] & BIT(p))) return list->plat_value[on][p];
+    if (list->set & BIT(p)) return list->value[p];
+    return p == P_ROW_HEIGHT ? ROW_HEIGHT : p == P_ROW_GAP ? ROW_GAP : MAX_ROWS;
+}
+static int metric_varies(const Item* list, int p) {
+    return ((list->plat_set[PLATFORM_ANDROID] | list->plat_set[PLATFORM_DESKTOP]) & BIT(p)) != 0;
+}
+static const char* metric_name(int p) {
+    return p == P_ROW_HEIGHT ? "ROW_HEIGHT" : p == P_ROW_GAP ? "ROW_GAP" : "MAX_ROWS";
+}
+/* a metric as the code uses it: its number, or the macro out_metrics defines where a platform sets its own */
+static void out_metric(const Item* list, int p) {
+    if (metric_varies(list, p))
+        out("%s__%s", list->upper, metric_name(p));
+    else
+        out("%d", metric(list, PLATFORM_ANY, p));
+}
+/* the macros of a scene's lists' metrics that a platform sets: android's, desktop's (out_platform's), else iOS's */
+static void out_metrics(int scene) {
+    static const int metrics[] = {P_ROW_HEIGHT, P_ROW_GAP, P_MAX_ROWS};
+    int i, k;
+    for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++) {
+        const Item* l = &g_uigen.items[i];
+        for (k = 0; k < 3; k++) {
+            int p = metrics[k];
+            if (!metric_varies(l, p)) continue;
+            out("#ifdef SDL_PLATFORM_ANDROID\n#define %s__%s %d\n", l->upper, metric_name(p),
+                metric(l, PLATFORM_ANDROID, p));
+            out("#elif !defined(SDL_PLATFORM_IOS)\n#define %s__%s %d\n", l->upper, metric_name(p),
+                metric(l, PLATFORM_DESKTOP, p));
+            out("#else\n#define %s__%s %d\n#endif\n", l->upper, metric_name(p), metric(l, PLATFORM_ANY, p));
+        }
+    }
+}
 /* row i of list item l (its rows' metrics as ui.txt sets them), in its rectangle r[l] */
 static void out_row(const Item* list, int l, const char* i) {
     char rect[64];
     snprintf(rect, sizeof rect, "r[%s]", g_uigen.items[l].upper);
-    out("ui_row(%s, %s, %d, %d, ", rect, i, (list->set & BIT(P_ROW_HEIGHT)) ? list->value[P_ROW_HEIGHT] : ROW_HEIGHT,
-        (list->set & BIT(P_ROW_GAP)) ? list->value[P_ROW_GAP] : ROW_GAP);
+    out("ui_row(%s, %s, ", rect, i);
+    out_metric(list, P_ROW_HEIGHT);
+    outs(", ");
+    out_metric(list, P_ROW_GAP);
+    outs(", ");
     out_bound(list, P_MIN_ROW_WIDTH, rect);
     outs(", ");
     out_bound(list, P_MAX_ROW_WIDTH, rect);
@@ -894,6 +958,7 @@ static void write_scene(int scene) {
         out_here();
         outs("};\n");
     }
+    out_metrics(scene);
     /* the layout: each item of the scene at its fractions of the area and its pixels times the scale */
     out("void %s_layout(GuiRect at, int scale, GuiRect* r) {\n    int s = scale;\n", s->symbol);
     for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++) {
@@ -925,10 +990,13 @@ static void write_scene(int scene) {
         const Item* l = &g_uigen.items[i];
         if (l->type != T_LIST) continue;
         out_from(l->line);
-        out("        case %s: return ui_shown(r[%s].h, %d, %d, %d, scale);\n", l->upper, l->upper,
-            (l->set & BIT(P_ROW_HEIGHT)) ? l->value[P_ROW_HEIGHT] : ROW_HEIGHT,
-            (l->set & BIT(P_ROW_GAP)) ? l->value[P_ROW_GAP] : ROW_GAP,
-            (l->set & BIT(P_MAX_ROWS)) ? l->value[P_MAX_ROWS] : MAX_ROWS);
+        out("        case %s: return ui_shown(r[%s].h, ", l->upper, l->upper);
+        out_metric(l, P_ROW_HEIGHT);
+        outs(", ");
+        out_metric(l, P_ROW_GAP);
+        outs(", ");
+        out_metric(l, P_MAX_ROWS);
+        outs(", scale);\n");
     }
     out_here();
     outs("        default: return 0;\n    }\n}\n");

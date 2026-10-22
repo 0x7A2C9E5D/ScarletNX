@@ -49,6 +49,8 @@ ${T}${T}key = D
 ${T}}
 ${T}[list]More {
 ${T}${T}attr = callback
+${T}${T}android.row_height = 40px
+${T}${T}desktop.max_rows = 4
 ${T}${T}[button]\"One\" {}
 ${T}}
 }
@@ -115,6 +117,10 @@ foreach(line
         "        unsigned attr = ui_main_attr(app, item);\n        if (i == 0 && row > 0) attr |= UI_ATTR_MORE_UP;\n        if (i + 1 == n && row + 1 < sizeof ui_main_load_list_rows / sizeof *ui_main_load_list_rows) attr |= UI_ATTR_MORE_DOWN;\n"
         "        if (i + 1 == n && ui_main_games_get_row_info(app, row + 1, &next)) info.attr |= UI_ATTR_MORE_DOWN;\n"
         "        unsigned attr = ui_other_more_attr_cb(app, row);\n"
+        # a platform's own metric: a macro each platform defines, the plain value or the default where it sets none
+        "#ifdef SDL_PLATFORM_ANDROID\n#define UI_OTHER_MORE__ROW_HEIGHT 40\n#elif !defined(SDL_PLATFORM_IOS)\n#define UI_OTHER_MORE__ROW_HEIGHT 17\n#else\n#define UI_OTHER_MORE__ROW_HEIGHT 17\n#endif\n"
+        "#ifdef SDL_PLATFORM_ANDROID\n#define UI_OTHER_MORE__MAX_ROWS 8\n#elif !defined(SDL_PLATFORM_IOS)\n#define UI_OTHER_MORE__MAX_ROWS 4\n#else\n#define UI_OTHER_MORE__MAX_ROWS 8\n#endif\n"
+        "case UI_OTHER_MORE: return ui_shown(r[UI_OTHER_MORE].h, UI_OTHER_MORE__ROW_HEIGHT, 2, UI_OTHER_MORE__MAX_ROWS, scale);\n"
         "bool ui_main_spare_get_row_info(App* app, size_t row, UiRowInfo* info) {\n    (void)app;\n    (void)row;\n    (void)info;\n    return false;\n}\n")
     string(FIND "${c}" "${line}" at)
     if(at LESS 0)
@@ -197,6 +203,10 @@ refused(row_bounds "${S}${T}[list]L {\n${T}${T}min_row_width = 300px\n${T}${T}ma
 refused(label_attr "${S}${T}[label]\"A\" {\n${T}${T}attr = callback\n${T}}\n}\n" "3: attr is not a property of a label: it takes width, height, grow, color, for-platform")
 refused(attr "${S}${T}[button]\"A\" {\n${T}${T}attr = always\n${T}}\n}\n" "3: attr = always: it is callback")
 refused(rows_attr "${S}${T}[list]L {\n${T}${T}attr = callback\n${T}}\n}\n" "2: attr = callback on a list without items: its get_row_info gives each row's attr")
+refused(platform_width "${S}${T}[list]L {\n${T}${T}android.width = 10px\n${T}}\n}\n" "3: android.width: a platform's own value is a list's row_height, row_gap or max_rows")
+refused(platform_button "${S}${T}[button]\"A\" {\n${T}${T}desktop.row_gap = 4px\n${T}}\n}\n" "3: desktop.row_gap: a platform's own value is a list's row_height, row_gap or max_rows")
+refused(platform_value "${S}${T}[list]L {\n${T}${T}android.row_height = 5%\n${T}}\n}\n" "3: row_height = 5%: pixels end in px")
+refused(platform_twice "${S}${T}[list]L {\n${T}${T}android.row_gap = 4px\n${T}${T}android.row_gap = 6px\n${T}}\n}\n" "4: android.row_gap is set twice for one list")
 refused(table_name "${S}${T}[list]Layout {}\n}\n" "2: ui_s_layout is the scene's own table or function: name it otherwise")
 # the same key on two platforms is two keys
 file(WRITE "${WORK}/platforms.txt" "${S}${T}[list]L {\n${T}${T}[button]\"A\" {\n${T}${T}${T}key = r\n${T}${T}${T}for-platform = android\n${T}${T}}\n${T}${T}[button]\"B\" {\n${T}${T}${T}key = r\n${T}${T}${T}for-platform = desktop\n${T}${T}}\n${T}}\n}\n")
