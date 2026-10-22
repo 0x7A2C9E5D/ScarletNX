@@ -1,11 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The layout of the contract between a game module and the runtime as it was when SNX_ABI_OLDEST last rose: cpu.h's
-   CPU and its SNX_FP_* numbers, interface.h's RtAPI and SNX_SVC_COUNT, module_abi.h's descriptor. A module from
-   SNX_ABI_OLDEST on reads its fields where they are, so a change to any of them fails here until SNX_ABI_OLDEST rises
-   to a new SNX_ABI and the table below is recorded again (docs/ARCHITECTURE.md, "Module ABI"); the failure prints the
-   table to record. Not seen: a helper's results (cpu_helpers.c), and a field added into a struct's tail padding, which
-   moves nothing; those stay a rule */
+/* The layout of the contract between a game module and the runtime as it was when SNX_ABI last rose: cpu.h's CPU and
+   its SNX_FP_* numbers, interface.h's RtAPI and SNX_SVC_COUNT, module_abi.h's descriptor. A module of SNX_ABI reads its
+   fields where they are, so a change to any of them fails here until SNX_ABI rises and the table below is recorded
+   again (docs/ARCHITECTURE.md, "Module ABI"); the failure prints the table to record. Not seen: a helper's results
+   (cpu_helpers.c), and a field added into a struct's tail padding, which moves nothing; those stay a rule */
 #include "common/cpu/aarch64/cpu.h"
 #include "common/runtime/interface.h"
 #include "nx/loader/module_abi.h"
@@ -24,8 +23,8 @@ typedef struct {
 #define SIZE(type)      {"sizeof(" #type ")", sizeof(type), 0}
 #define VALUE(name)     {#name, (unsigned long long)(name), 0}
 
-/* the SNX_ABI_OLDEST the table below was recorded at, and the table */
-#define RECORDED_OLDEST 12
+/* the SNX_ABI the table below was recorded at, and the table */
+#define RECORDED_ABI 13
 static const Field g_recorded[] = {
     {"sizeof(V128)", 16, 0},
     {"sizeof(CPU)", 904, 0},
@@ -201,37 +200,34 @@ int main(void) {
     }
     for (i = 0; i < count || i < recorded; ++i) {
         if (i >= count)
-            fprintf(stderr, "%s, recorded at SNX_ABI_OLDEST %d, is gone\n", g_recorded[i].name, RECORDED_OLDEST);
+            fprintf(stderr, "%s, recorded at SNX_ABI %d, is gone\n", g_recorded[i].name, RECORDED_ABI);
         else if (i >= recorded || strcmp(now[i].name, g_recorded[i].name))
-            fprintf(stderr, "%s is %llu, where the table recorded at SNX_ABI_OLDEST %d has %s\n", now[i].name,
-                    now[i].value, RECORDED_OLDEST, i < recorded ? g_recorded[i].name : "nothing");
+            fprintf(stderr, "%s is %llu, where the table recorded at SNX_ABI %d has %s\n", now[i].name, now[i].value,
+                    RECORDED_ABI, i < recorded ? g_recorded[i].name : "nothing");
         else if (now[i].value != g_recorded[i].value || now[i].size != g_recorded[i].size) {
             if (now[i].size || g_recorded[i].size)
-                fprintf(stderr, "%s is at %llu, %llu bytes, and at %llu, %llu bytes, at SNX_ABI_OLDEST %d\n",
-                        now[i].name, now[i].value, now[i].size, g_recorded[i].value, g_recorded[i].size,
-                        RECORDED_OLDEST);
+                fprintf(stderr, "%s is at %llu, %llu bytes, and at %llu, %llu bytes, at SNX_ABI %d\n", now[i].name,
+                        now[i].value, now[i].size, g_recorded[i].value, g_recorded[i].size, RECORDED_ABI);
             else
-                fprintf(stderr, "%s is %llu, %llu at SNX_ABI_OLDEST %d\n", now[i].name, now[i].value,
-                        g_recorded[i].value, RECORDED_OLDEST);
+                fprintf(stderr, "%s is %llu, %llu at SNX_ABI %d\n", now[i].name, now[i].value, g_recorded[i].value,
+                        RECORDED_ABI);
         } else
             continue;
         moved = 1;
     }
-    if (!moved && SNX_ABI_OLDEST == RECORDED_OLDEST) {
-        printf("module_contract: %zu fields and numbers as recorded at SNX_ABI_OLDEST %d\n", count, RECORDED_OLDEST);
+    if (!moved && SNX_ABI == RECORDED_ABI) {
+        printf("module_contract: %zu fields and numbers as recorded at SNX_ABI %d\n", count, RECORDED_ABI);
         return 0;
     }
     if (moved)
         fprintf(stderr,
-                "The module contract moved: a module from SNX_ABI %d to %d reads it as above. Raise SNX_ABI past %d "
-                "and SNX_ABI_OLDEST to it (cpu.h, docs/ARCHITECTURE.md's Module ABI), then record this table here "
-                "(tests/module_contract.c) with RECORDED_OLDEST the new SNX_ABI_OLDEST:\n",
-                SNX_ABI_OLDEST, SNX_ABI, SNX_ABI);
+                "The module contract moved: a module of SNX_ABI %d reads it as above. Raise SNX_ABI past %d (cpu.h, "
+                "docs/ARCHITECTURE.md's Module ABI), then record this table here (tests/module_contract.c) with "
+                "RECORDED_ABI the new SNX_ABI:\n",
+                SNX_ABI, SNX_ABI);
     else
-        fprintf(stderr,
-                "SNX_ABI_OLDEST is %d, and the table here was recorded at %d: record it again with "
-                "RECORDED_OLDEST %d:\n",
-                SNX_ABI_OLDEST, RECORDED_OLDEST, SNX_ABI_OLDEST);
+        fprintf(stderr, "SNX_ABI is %d, and the table here was recorded at %d: record it again with RECORDED_ABI %d:\n",
+                SNX_ABI, RECORDED_ABI, SNX_ABI);
     for (i = 0; i < count; ++i) fprintf(stderr, "    {\"%s\", %llu, %llu},\n", now[i].name, now[i].value, now[i].size);
     return 1;
 }

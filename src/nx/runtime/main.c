@@ -649,11 +649,11 @@ int snx_main(int argc, char** argv) {
     snx_error_sink(log_error_line);
     /* the code before anything is written: a mistyped --game leaves no .ini and no log behind */
     mod = load_module(module);
-    if (mod->abi < SNX_ABI_OLDEST || mod->abi > SNX_ABI) {
+    if (mod->abi != SNX_ABI) {
         WARN("game: its code is %s\n", module);
-        fatal("The recompiled code is from another ScarletNX version (ABI %u, where this one runs %u to %u): recompile "
-              "the game with this one",
-              (unsigned)mod->abi, (unsigned)SNX_ABI_OLDEST, (unsigned)SNX_ABI);
+        fatal("The recompiled code is from another ScarletNX version (ABI %u, where this one runs %u): recompile the "
+              "game with this one",
+              (unsigned)mod->abi, (unsigned)SNX_ABI);
     }
     game_dirs();
     if (g_arm_mod) mem_layout32(g_arm_mod->aspace); /* before anything sizes or reads guest memory */

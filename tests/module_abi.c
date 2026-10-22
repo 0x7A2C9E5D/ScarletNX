@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The runtime's check of a game module's version (runtime/main.c), on modules that are a descriptor alone
-   (module_abi_fixture.c): one of an ABI from SNX_ABI_OLDEST to SNX_ABI is taken, and the run goes on to load the game,
-   whose program the fixture's data folder doesn't hold; one outside them, or a 32-bit one of another SNX_ARM_MODULE_ABI,
-   is refused before the game's settings or log are written, the message saying its ABI and the ones this runtime runs.
+   (module_abi_fixture.c): one of SNX_ABI is taken, and the run goes on to load the game, whose program the fixture's
+   data folder doesn't hold; one of another ABI, or a 32-bit one of another SNX_ARM_MODULE_ABI, is refused before the
+   game's settings or log are written, the message saying its ABI and the one this runtime runs.
      runtime_module_abi SCARLETNX MODULE ARM_MODULE */
 #define _POSIX_C_SOURCE 200809L
 #include "common/utilities/common.h"
@@ -123,39 +123,33 @@ int main(int argc, char** argv) {
         free(home);
     }
 
-    /* the oldest ABI this runtime runs, and its own: taken, the run stopping where the game's program is missing */
-    rc = play(argv[1], root, "oldest", argv[2], SNX_ABI_OLDEST, &output);
-    check(rc != 0 && strstr(output, "The game's module main is missing") &&
-              strstr(output, "Could not load the game executables") && !strstr(output, "another ScarletNX version"),
-          "a module of SNX_ABI_OLDEST is taken", output);
-    check(wrote(root, "oldest", "config", ".ini") && wrote(root, "oldest", "state", ".log"),
-          "a module taken runs the game, which writes its settings and log", output);
-    free(output);
+    /* its own ABI: taken, the run stopping where the game's program is missing */
     rc = play(argv[1], root, "current", argv[2], SNX_ABI, &output);
     check(rc != 0 && strstr(output, "The game's module main is missing") &&
-              !strstr(output, "another ScarletNX version"),
+              strstr(output, "Could not load the game executables") && !strstr(output, "another ScarletNX version"),
           "a module of SNX_ABI is taken", output);
+    check(wrote(root, "current", "config", ".ini") && wrote(root, "current", "state", ".log"),
+          "a module taken runs the game, which writes its settings and log", output);
     free(output);
 
-    /* older than the oldest, newer than this runtime: refused, saying the module's ABI and the ones it runs */
-    rc = play(argv[1], root, "older", argv[2], SNX_ABI_OLDEST - 1, &output);
-    expected = snx_format("from another ScarletNX version (ABI %u, where this one runs %u to %u): recompile the game",
-                          (unsigned)SNX_ABI_OLDEST - 1, (unsigned)SNX_ABI_OLDEST, (unsigned)SNX_ABI);
+    /* the ABI before it and the one after: refused, saying the module's ABI and the one this runtime runs */
+    rc = play(argv[1], root, "older", argv[2], SNX_ABI - 1, &output);
+    expected = snx_format("from another ScarletNX version (ABI %u, where this one runs %u): recompile the game",
+                          (unsigned)SNX_ABI - 1, (unsigned)SNX_ABI);
     check(rc != 0 && refused(output, expected, root, "older") && !strstr(output, "The game's module main is missing"),
-          "a module older than SNX_ABI_OLDEST is refused, saying its ABI", output);
+          "a module of an older SNX_ABI is refused, saying its ABI", output);
     check(!wrote(root, "older", "config", ".ini") && !wrote(root, "older", "state", ".log"),
           "a module refused leaves no settings and no log", output);
     free(expected);
     free(output);
     rc = play(argv[1], root, "newer", argv[2], SNX_ABI + 1, &output);
-    expected = snx_format("(ABI %u, where this one runs %u to %u)", (unsigned)SNX_ABI + 1, (unsigned)SNX_ABI_OLDEST,
-                          (unsigned)SNX_ABI);
+    expected = snx_format("(ABI %u, where this one runs %u)", (unsigned)SNX_ABI + 1, (unsigned)SNX_ABI);
     check(rc != 0 && refused(output, expected, root, "newer"), "a module newer than SNX_ABI is refused, saying its ABI",
           output);
     free(expected);
     free(output);
 
-    /* a 32-bit module has its own version, SNX_ABI's range left alone: another one is refused, saying both */
+    /* a 32-bit module has its own version, SNX_ABI left alone: another one is refused, saying both */
     rc = play(argv[1], root, "arm", argv[3], SNX_ARM_MODULE_ABI + 1, &output);
     expected = snx_format("from another ScarletNX version (32-bit ABI %08x, where this one runs %08x)",
                           (unsigned)SNX_ARM_MODULE_ABI + 1, (unsigned)SNX_ARM_MODULE_ABI);

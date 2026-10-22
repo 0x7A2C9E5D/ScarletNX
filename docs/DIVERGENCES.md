@@ -120,8 +120,8 @@ merely from execution without an undefined-instruction exception.
 
 `SNX_ABI` is **13** (9 added `RtAPI.svcs`, 10 moved the dispatch miss to `RtAPI.miss`, 11 is the reworked LLVM
 backend's modules, 12 added `RtAPI.cas128`, which `snx_cas128` takes the CPU for, and 13 the AOT module's
-`snx_variants()` table, which the runtime reads as optional), and `SNX_ABI_OLDEST` **12**. Rebuild the runtime and
-regenerate game modules; stale AOT code must not retain the old decoder/operation semantics.
+`snx_variants()` table, which the runtime reads as optional). Rebuild the runtime and regenerate game modules; stale
+AOT code must not retain the old decoder/operation semantics.
 
 ## Remaining base-instruction failures
 
