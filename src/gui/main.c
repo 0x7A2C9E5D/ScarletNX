@@ -103,6 +103,13 @@ enum { GUI_GROUP_APP, GUI_GROUP_RECOMPILED, GUI_GROUP_DUMPS, GUI_FOLDER_GROUPS }
 #define GUI_FOLDER_ROWS  (GUI_PLACES + 1 + GUI_FOLDERS_MAX + 2)
 /* the focused game's runtime JIT cache: none to show, no cache yet, one read, one unreadable */
 enum { GUI_AOT_NONE, GUI_AOT_NO_CACHE, GUI_AOT_CACHE, GUI_AOT_BAD };
+#define GUI_ICONS     96  /* the games' icons kept drawn: a page's rows and the recent ones, with room */
+#define GUI_ICON_SIDE 128 /* the pixels square they are drawn at, scaled to their rows */
+/* a game's icon as its rows show it: its program's path, and its texture; NULL for a game without one */
+typedef struct {
+    char* path;
+    SDL_Texture* texture;
+} GuiIcon;
 /* the App screen's values, as its rows show them, and Folders' (what each row's folder is, past its path) */
 typedef struct {
     char theme[64], text[16], language[64], animations[16], side[16], places[48], moves[32];
@@ -196,6 +203,8 @@ typedef struct App {
     unsigned char* user_jpeg; /* users/<uid>.jpg, user_jpeg_size bytes; NULL for Wimsy */
     size_t user_jpeg_size;
     SDL_Texture* user_picture; /* drawn user_side pixels square, in the shape it was drawn for */
+    GuiIcon icons[GUI_ICONS];  /* the games' icons drawn so far (game_icon), the oldest replaced first */
+    size_t icons_next;
     int user_side, user_shape;
     /* the box a click on the user opens (users_open): each user of users.ini, the focused one picked as Settings' user */
     bool users_shown;
@@ -2196,6 +2205,50 @@ static SDL_Texture* picture_texture(App* app, const unsigned char* jpeg, size_t 
     free(pixels);
     return texture;
 }
+/* the icon of the game whose program is at path, as its row shows it: its icon.jpg drawn once, then kept; NULL for
+   a game without one. One that does not draw is said, with its file, and shows none */
+static SDL_Texture* game_icon(App* app, const char* path) {
+    GuiIcon* icon;
+    char* file;
+    unsigned char* jpeg;
+    void* pixels;
+    size_t size = 0, i;
+    for (i = 0; i < GUI_ICONS; ++i)
+        if (app->icons[i].path && !strcmp(app->icons[i].path, path)) return app->icons[i].texture;
+    icon = &app->icons[app->icons_next];
+    app->icons_next = (app->icons_next + 1) % GUI_ICONS;
+    free(icon->path);
+    SDL_DestroyTexture(icon->texture);
+    *icon = (GuiIcon){snx_strdup(path), NULL};
+    file = gui_game_icon(path);
+    jpeg = file ? snx_read_file(file, &size) : NULL;
+    pixels = jpeg ? malloc((size_t)GUI_ICON_SIDE * GUI_ICON_SIDE * 4) : NULL;
+    if (pixels && snx_splash_picture(jpeg, size, GUI_ICON_SIDE, 0, pixels, GUI_ICON_SIDE * 4))
+        snprintf(app->message, sizeof app->message, snx_tr("%s could not be drawn: the game shows no icon"), file);
+    else if (pixels) {
+        icon->texture = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
+                                          GUI_ICON_SIDE, GUI_ICON_SIDE);
+        if (icon->texture && (!SDL_UpdateTexture(icon->texture, NULL, pixels, GUI_ICON_SIDE * 4) ||
+                              !SDL_SetTextureBlendMode(icon->texture, SDL_BLENDMODE_BLEND_PREMULTIPLIED))) {
+            SDL_DestroyTexture(icon->texture);
+            icon->texture = NULL;
+        }
+    }
+    free(pixels);
+    free(jpeg);
+    free(file);
+    return icon->texture;
+}
+/* every icon game_icon kept: drawn again from their files when shown, as a game's may have changed */
+static void icons_free(App* app) {
+    size_t i;
+    for (i = 0; i < GUI_ICONS; ++i) {
+        free(app->icons[i].path);
+        SDL_DestroyTexture(app->icons[i].texture);
+        app->icons[i] = (GuiIcon){NULL, NULL};
+    }
+    app->icons_next = 0;
+}
 /* the head's user's picture, side pixels square, kept while its size and the theme's shape are the same. A JPEG that
    does not draw shows Wimsy, said. The preview's, at its own size and theme, is a texture of its own that the caller
    destroys: the app it draws on is put back after it, so nothing the app keeps is touched */
@@ -3034,6 +3087,8 @@ bool ui_games_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info
         snprintf(label, sizeof app->row_text, "%s",
                  index < recent_shown(app) ? app->recent.game[index].name : snx_tr("...show more"));
         info->label = label;
+        if (index < recent_shown(app) && app->recent.game[index].driver == GUI_SWITCH)
+            info->image = game_icon(app, app->recent.game[index].path);
         return true;
     }
     i = row - lead;
@@ -3045,6 +3100,7 @@ bool ui_games_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info
     }
     game_label(app, &app->games, start + i, label, sizeof app->row_text);
     info->label = label + strlen(app->theme.marker); /* ui_draw_row puts the marker */
+    info->image = game_icon(app, app->games.paths[start + i]);
     if (app->browser.activated && app->browser.active == start + i) info->attr |= UI_ATTR_ACTIVE;
     if (i == 0 && app->browser.page > 0) info->attr |= UI_ATTR_MORE_UP;
     if (i + 1 == items && app->browser.page + 1 < gui_browser_pages(&app->browser)) info->attr |= UI_ATTR_MORE_DOWN;
@@ -8143,6 +8199,7 @@ static uint64_t games_stamp(const App* app) {
     return h;
 }
 static void list_games(App* app) {
+    icons_free(app); /* a game made since has one now */
     games_scan(app, &app->games, app->message, sizeof app->message);
     app->games_stamp = games_stamp(app);
     memset(&app->browser, 0, sizeof(app->browser));
@@ -9202,6 +9259,7 @@ static void forget(App* app) {
     SDL_DestroyTexture(app->splash);
     snx_splash_close(app->splash_drawing);
     SDL_DestroyTexture(app->user_picture);
+    icons_free(app);
     users_close(app);
     free(app->user_jpeg);
     free(app->users_dir);
