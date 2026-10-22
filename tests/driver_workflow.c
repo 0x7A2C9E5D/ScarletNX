@@ -784,7 +784,8 @@ int main(int argc, char** argv) {
             free(directory);
         }
     }
-    /* a game with a title ID of its own is named by it, whatever its dump is called; a broken NPDM stops the run */
+    /* a game with a title ID of its own is named by it, whatever its dump is called, its recompile given no name; a
+       broken NPDM stops the run */
     {
 #ifdef _WIN32
         char* named = snx_path_join(repo, "recompiled/0100ABCD12345000/0100ABCD12345000.exe");
@@ -792,11 +793,15 @@ int main(int argc, char** argv) {
         char* named = snx_path_join(repo, "recompiled/0100ABCD12345000/0100ABCD12345000");
 #endif
         char* folder = snx_path_join(repo, "recompiled/0100ABCD12345000");
+        char* extracted = snx_path_join(folder, "0100ABCD12345000_data");
         reset(repo, dump);
         set_env("SNX_WORKFLOW_MODE", "exit");
         set_env("SNX_WORKFLOW_NPDM", "id");
         set_env("SNX_WORKFLOW_GAMES", folder);
+        set_env("SNX_WORKFLOW_SOURCE", extracted); /* given no name: shown by its control.nacp's, not its ID */
         run(exe, repo, dump, log, 0, "ERG", NULL);
+        set_env("SNX_WORKFLOW_SOURCE", "");
+        free(extracted);
         CHECK(snx_is_file(named) && !snx_is_file(game));
         run(exe, repo, dump, log, 0, "G", NULL);
         { /* made already, recompiled where it is with no name given: shown again by its control.nacp, not its ID */

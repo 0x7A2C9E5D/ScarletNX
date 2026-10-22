@@ -4258,20 +4258,84 @@ static char* dump_out(const App* app, const char* file, const char* kind) {
     free(dir);
     return out;
 }
-/* a game of recompiled/ made from file already, which its folder's link to the dump names (the driver's <name>.source)
-*/
-static bool made_from(const App* app, const char* file) {
+/* the games of recompiled/ made from a dump: each one's program, as Games lists it, and the dump its .ini's source=
+   names, else its folder's <name>.source, the link an older version made (snx_game_source) */
+typedef struct {
+    char* program;
+    char* dump;
+} MadeGame;
+typedef struct {
+    MadeGame* game;
+    size_t count;
+} MadeGames;
+static void made_read(const App* app, MadeGames* made) {
     char** names = NULL;
     size_t count = 0, i;
-    bool found = false;
-    if (snx_list_dir(app->games_dir, &names, &count)) return false;
-    for (i = 0; i < count && !found; ++i) {
-        char* link = snx_format("%s/%s/%s.source", app->games_dir, names[i], names[i]);
-        found = snx_same_file(link, file);
-        free(link);
+    *made = (MadeGames){0};
+    if (!app->games_dir || snx_list_dir(app->games_dir, &names, &count) || !count) return;
+    made->game = (MadeGame*)snx_alloc(count * sizeof *made->game);
+    for (i = 0; i < count; ++i) {
+        char *program = gui_folder_game(app->games_dir, names[i]), *folder, *dump;
+        int recorded = 0;
+        if (!program) continue;
+        folder = snx_path_join(app->games_dir, names[i]);
+        dump = snx_game_source(folder, names[i], &recorded);
+        free(folder);
+        if (!recorded) {
+            free(program);
+            free(dump);
+            continue;
+        }
+        made->game[made->count++] = (MadeGame){program, dump};
     }
     snx_free_strings(names, count);
+}
+/* the program of the game made from dump, else NULL */
+static const char* made_program(const MadeGames* made, const char* dump) {
+    size_t i;
+    for (i = 0; i < made->count; ++i)
+        if (snx_same_file(made->game[i].dump, dump)) return made->game[i].program;
+    return NULL;
+}
+static void made_free(MadeGames* made) {
+    size_t i;
+    for (i = 0; i < made->count; ++i) {
+        free(made->game[i].program);
+        free(made->game[i].dump);
+    }
+    free(made->game);
+    *made = (MadeGames){0};
+}
+/* a game of recompiled/ made from file already */
+static bool made_from(const App* app, const char* file) {
+    MadeGames made;
+    bool found;
+    made_read(app, &made);
+    found = made_program(&made, file) != NULL;
+    made_free(&made);
     return found;
+}
+/* the recent rows as Games has their games: a dump made into a game of recompiled/ since runs that game's program
+   from then on, and a game of a folder of its own goes by the name Games shows it by, its control.nacp's */
+static void recent_as_games(App* app) {
+    MadeGames made;
+    bool changed = false;
+    int i;
+    made_read(app, &made);
+    for (i = app->recent.count - 1; i >= 0; --i) { /* from the oldest: an entry dropped moves none still to look at */
+        const GuiRecentGame* r = &app->recent.game[i];
+        const char* program = r->driver == GUI_SWITCH && !r->prepared ? made_program(&made, r->path) : NULL;
+        if (program && gui_recent_made(&app->recent, i, program)) changed = true;
+    }
+    made_free(&made);
+    for (i = 0; i < app->recent.count; ++i) {
+        char* shown = app->recent.game[i].driver == GUI_SWITCH && gui_game_folder(app->recent.game[i].path)
+                          ? gui_game_shown(app->recent.game[i].path)
+                          : NULL;
+        if (shown && gui_recent_rename(&app->recent, app->recent.game[i].path, shown)) changed = true;
+        free(shown);
+    }
+    if (changed) recent_changed(app);
 }
 /* room on the disks for file's run (gui_room), not extracted yet; else room_line says what it takes. With Extract game
    container off a dump is read in place and takes no room. On, a Switch dump is extracted straight into its game's
@@ -7165,6 +7229,7 @@ static void pump(App* app) {
             }
             recent_name(app, "LAUNCH");
             recent_name(app, "RECOMPILE"); /* a run that ended before its game loaded */
+            recent_as_games(app);          /* a dump's run made its game */
             app->menu.view = GUI_LOAD_NONE;
             if (app->aot_pack && app->aborting)
                 snprintf(app->message, sizeof(app->message), "%s", snx_tr("AOT pack build aborted."));
@@ -7231,6 +7296,7 @@ static void pump(App* app) {
         app->games_checked = now_ms(app);
         if (games_stamp(app) != app->games_stamp) {
             app->games_stamp = games_stamp(app);
+            recent_as_games(app);
             if (app->menu.view == GUI_LOAD_GAMES) {
                 GuiBrowser was = app->browser;
                 list_games(app);
@@ -7983,14 +8049,15 @@ static void share_log(App* app) {
     free(game);
     free(state);
 }
-/* gui_games_group's made: a dump a game of recompiled/ was made from already */
-static bool made_dump(const char* path, const void* app) { return made_from((const App*)app, path); }
+/* gui_games_group's made: a dump a game of recompiled/ was made from already, of made_read's */
+static bool made_dump(const char* path, const void* made) { return made_program((const MadeGames*)made, path) != NULL; }
 /* the Games list: recompiled/, dumps/ (with its subfolders) and the Library's folders, every kind, in two groups: the
    games ready to run, then the dumps not made already. The first folder that cannot be read is named, the others still
    listed */
 static void games_scan(App* app, GuiGames* games, char* message, size_t size) {
     int kinds = GUI_GAMES_RUN | GUI_GAMES_CIA | GUI_GAMES_DUMP, i; /* the old games/'s: it held both */
     char error[sizeof app->message];
+    MadeGames made;
     char *dumps = app->data_dir ? snx_path_join(app->data_dir, "dumps") : NULL, *old;
     gui_games_free(games);
     message[0] = 0;
@@ -8011,8 +8078,10 @@ static void games_scan(App* app, GuiGames* games, char* message, size_t size) {
                                 app->folders_deep[i] ? GUI_FOLDER_DEPTH : 0, error, sizeof error) &&
             !message[0])
             snprintf(message, size, snx_tr("%s It is in Settings > App > Folders."), error);
-    if (!gui_games_group(games, snx_tr("Recompiled"), snx_tr("Dumps"), made_dump, app) && !message[0])
+    made_read(app, &made);
+    if (!gui_games_group(games, snx_tr("Recompiled"), snx_tr("Dumps"), made_dump, &made) && !message[0])
         snprintf(message, size, "%s", snx_tr("Not enough memory to list the games in their groups."));
+    made_free(&made);
     free(dumps);
 }
 /* gui_browser_key_skip's skip on Games: a group's heading */
@@ -9147,6 +9216,7 @@ static void open_files(App* app) {
         folders_load(app);
         app_load(app);
     }
+    if (prefs) recent_as_games(app); /* by the recompiled/ app.ini picked */
     app->users_dir = snx_users_dir(app->home_dir ? app->home_dir : app->data_dir);
     if (!app->users_dir) {
         snprintf(app->message, sizeof app->message, "%s", snx_tr("No user shown: out of memory"));

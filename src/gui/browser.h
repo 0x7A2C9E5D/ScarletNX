@@ -45,6 +45,12 @@ bool gui_is_dump(const char* name);
    plays it, and recompiles it first when another build made it. A game an older version laid out beside the others
    is not one */
 bool gui_game_folder(const char* path);
+/* The program of the game in directory/name, a folder of its own as gui_game_folder has it (<name>/<name>, .exe on
+   Windows, <name>_code.so on Android), as Games lists it: owned, else NULL */
+char* gui_folder_game(const char* directory, const char* name);
+/* What Games shows the game whose program is at path as, a game of a folder of its own: the name in its
+   <name>_data/control.nacp, else its folder's name. Owned */
+char* gui_game_shown(const char* path);
 /* The updates and DLCs of the game at path, made beside it in its folder (<name>/<name>_<add-on's title ID>_data/, an
    update's program beside it), into addons (emptied first): names <name>_<its title ID>, shown what the player reads
    ("Update 1.2.0" from its control.nacp, "DLC 1"), paths an update's program or a DLC's data folder, an update

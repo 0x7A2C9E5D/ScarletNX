@@ -45,19 +45,6 @@ char* snx_game_name(const char* name, const SnxNpdm* npdm, const char* input) {
     if (name || !snx_title_text(npdm->title_id, id)) return snx_game_title(name, npdm, input);
     return snx_strdup(id);
 }
-char* snx_game_source(const char* folder, const char* name, int* recorded) {
-    char *ini = snx_game_ini(folder, name), *source = snx_ini_value(ini, "source");
-    char* path = source ? source : snx_format("%s/%s.source", folder, name);
-    if (recorded) *recorded = source || snx_is_link(path) || snx_path_exists(path);
-    free(ini);
-    return path;
-}
-int snx_record_source(const char* folder, const char* name, const char* dump) {
-    char* ini = snx_game_ini(folder, name);
-    int rc = snx_ini_record(ini, "source", dump);
-    free(ini);
-    return rc;
-}
 int snx_record_folders(const char* folder, const char* name) {
     static const char* const keys[] = {"config", "state", "cache"};
     char *base = snx_path_join(folder, name), *record = snx_format("%s.folders", base), *text = snx_strdup("");

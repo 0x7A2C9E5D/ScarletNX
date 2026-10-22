@@ -23,6 +23,10 @@ int gui_recent_add(GuiRecent* recent, const char* path, int driver, int prepared
 void gui_recent_remove(GuiRecent* recent, int index);
 /* The name the run gave the game at path; 1 when it changed */
 int gui_recent_rename(GuiRecent* recent, const char* path, const char* name);
+/* The dump at index made since into the game whose program is at path: the entry runs that program from then on, its
+   place and name kept, and an entry of the program already there is dropped, the newer of the two places kept. A path
+   that would not fit one line of the file is left out, as gui_recent_add does. 1 when the list changed */
+int gui_recent_made(GuiRecent* recent, int index, const char* path);
 /* The file: a line per game, "<switch|linux|3ds> <file|games> <path> <name>" separated by tabs. Loading keeps the games
    whose file is still there and skips a line it cannot read; a missing list is an empty one */
 void gui_recent_load(GuiRecent* recent, const char* file);
