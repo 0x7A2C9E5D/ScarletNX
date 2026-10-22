@@ -77,3 +77,12 @@
 		android.row_height = 40px
 	}
 }
+# the OK under the files of a box over the screen (what an older version left, what Clean old settings did): any key,
+# button or finger closes the box before a row is hit, so the row's own action is none (@)
+[scene]Files {
+	[list]Ok {
+		max_rows = 1
+		android.row_height = 40px
+		@[button]"OK" {}
+	}
+}

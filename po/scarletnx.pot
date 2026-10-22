@@ -526,10 +526,6 @@ msgid "and %d more, which Share log lists"
 msgstr ""
 
 #: src/gui/main.c
-msgid "OK"
-msgstr ""
-
-#: src/gui/main.c
 msgid "tap again"
 msgstr ""
 
@@ -593,6 +589,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Move"
+msgstr ""
+
+#: src/gui/main.c src/gui/ui.txt
+msgid "OK"
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~

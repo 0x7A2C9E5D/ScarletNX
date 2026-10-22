@@ -398,16 +398,14 @@ note go on saying it after. F5, or the foot's (Refresh on a phone), looks at the
 Games lists its folders again, Folders says which of its folders are there, the menu counts the disk
 again, and the box of what an older version left looks again. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
 every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the
-column is as wide as its entries and the side box goes under the list. A list's boxes spread over its column, at
-most `[body] gap` pixels apart, times the text's size (0 to 14; 6 in the built-ins), and one longer than its column
-keeps the focused box in its middle, the list moving around it (`[body] scroll = center`, the built-ins'), or moves
-once the focus reaches its end (`edge`). The menu's list, Games', the Settings' two, the theme editor's, the
-choices of a question, of UI scale's box, of the Recompile box and of the setup's pages, the setup's Appearance
-rows, the box of users and that of a game's updates, DLCs and mods are laid out by `src/gui/ui.txt` instead,
-whatever the theme says: their rows 2 pixels apart times the text's size (on Android 40 pixels high, about Android's
-48 dp touch target at the 3x a phone held wide gets, where the desktop's are 17), the
-focused one kept in the middle (on a group's screen, the group open in the groups' list), the cursor and the arrows
-of hidden rows inside each row, which a click takes whole as a tap does. That is the **Side box**'s *Auto*, the
+column is as wide as its entries and the side box goes under the list. Every list is laid out by `src/gui/ui.txt`,
+whatever the theme says (`[body] gap` and `[body] scroll` are still read, and lay out no list): the menu's, Games',
+the Settings' two, the theme editor's, the choices of a question, of UI scale's box, of the Recompile box and of the
+setup's pages, the setup's Appearance rows, the box of users, that of a game's updates, DLCs and mods, and the OK of
+a box of files. Their rows are 2 pixels apart times the text's size (on Android 40 pixels high, about Android's 48 dp
+touch target at the 3x a phone held wide gets, where the desktop's are 17), the focused one kept in the middle (on a
+group's screen, the group open in the groups' list), the cursor and the arrows of hidden rows inside each row, which a
+click takes whole as a tap does. That is the **Side box**'s *Auto*, the
 default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
 not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2, or the
 foot's, shows it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over
@@ -680,8 +678,8 @@ SDL3 handles window creation, keyboard/mouse input, rendering, clipboard and dra
 on every host. The platform-specific code only handles child processes and resource
 accounting. See [BUILD](BUILD.md) for SDL3's desktop dependencies.
 
-The menu's list, Games', the Settings', the setup's Appearance, the choices of the questions and the setup, and the
-boxes of users and of a game's add-ons are scenes of `src/gui/ui.txt`, which `tools/uigen` turns into `gui/ui.h` and
+The menu's list, Games', the Settings', the setup's Appearance, the choices of the questions and the setup, the
+boxes of users and of a game's add-ons, and the OK of a box of files are scenes of `src/gui/ui.txt`, which `tools/uigen` turns into `gui/ui.h` and
 `gui/ui.c` as the GUI builds (the format is in `tools/uigen/uigen.c`'s first comment): their layout computed at build
 time, the drawing and callbacks main.c's. `uigen` tests the generator's output and refusals, `gui_ui` runs what it
 makes of `tests/ui_test.txt`.

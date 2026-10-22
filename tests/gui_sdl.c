@@ -1969,15 +1969,13 @@ int main(int argc, char** argv) {
             int user = app.user, side = 3 * h;
             GuiAsk ask = app.confirm.ask;
             GuiPicture picture = app.theme.picture;
-            GuiList l;
             GuiChoices choices;
             GuiRect asked, ascii;
             memcpy(cursor, app.theme.cursor, sizeof cursor);
             memcpy(name, app.user_name, sizeof name);
             memcpy(room, app.room_line, sizeof room);
             snprintf(app.theme.cursor, sizeof app.theme.cursor, "%s", cai);
-            list_place(&app, &l, gui_rect(0, 0, 40 * w, 10 * h), 3, 0);
-            assert(l.margin == 2 * w);
+            assert(ui_row_box(&app, gui_rect(0, 0, 40 * w, h)).x == 2 * w); /* a row's box past the cursor's margin */
             app.user = 1;
             app.theme.picture = GUI_PICTURE_SQUARE;
             snprintf(app.user_name, sizeof app.user_name, "%s", menu);
@@ -5453,15 +5451,7 @@ int main(int argc, char** argv) {
                 b = form_row_box(&app, &f, false, 1);
                 assert(b.y - form_row_box(&app, &f, false, 0).y == item_h(&app) + 2 * s && b.h == item_h(&app));
             }
-            { /* a list the theme lays out, in a column too short for them all: 2 pixels apart, the least, unless the
-                 gap is under it */
-                GuiList l;
-                list_place(&app, &l, gui_rect(0, 0, 100 * s, 3 * item_h(&app)), 10, 0);
-                assert(l.pitch == l.item && l.shown == 3);
-                app.theme.gap = 6;
-                list_place(&app, &l, gui_rect(0, 0, 100 * s, 3 * item_h(&app)), 10, 0);
-                assert(l.pitch == l.item + 2 * s && l.shown == 2);
-            }
+            app.theme.gap = 6; /* the built-ins' */
             form_boxes(&app, &f);
             b = form_row_box(&app, &f, false, 0);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- App", yellow, black);
@@ -5698,6 +5688,8 @@ int main(int argc, char** argv) {
                 /* its space, not counted: the menu counts what it looked for itself */
                 text_px_is(&app, r.x + cw + 2 * cw, r.y + head_h(&app) + 4 * s + 16 * s, "counting",
                            rgb(app.theme.soft), black);
+                /* OK, ui.txt's scene Files: a row as the menu's at the box's foot, in focus */
+                text_px_is(&app, r.x + cw + cw / 2, r.y + r.h - item_h(&app) - 6 * s + s, "- OK", yellow, black);
             }
             key(&app, SDLK_DOWN); /* one file: nothing to go to */
             assert(app.left_shown && app.menu.selected == GUI_EXIT);

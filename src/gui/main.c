@@ -977,12 +977,6 @@ static int pick_auto_scale(float display_scale, int height, int rows) {
     while (scale > 1 && height / (16 * scale) < rows) --scale;
     return scale;
 }
-/* a list of boxes in a column of the screen: its box, the cursor's margin before the boxes and the arrows' column after
-   them when entries are hidden, each box's height and the pitch from one to the next, the first shown and how many */
-typedef struct {
-    GuiRect at;
-    int count, focus, margin, arrows, item, pitch, first, shown;
-} GuiList;
 /* what a screen has besides its title, list and foot: the status box (unless the footer's style is none), the tabs
    (a run has none) */
 enum { GUI_SHOWS_STATUS = 1, GUI_SHOWS_TABS = 2 };
@@ -1018,21 +1012,6 @@ static void games_place(App* app, GuiPlace* p) {
     place_screen(app, p, shown_keys(app, keys, sizeof keys),
                  longest + 2 + gui_text_cols(app->theme.marker) + gui_text_cols(app->theme.cursor),
                  GUI_SHOWS_STATUS | GUI_SHOWS_TABS);
-}
-/* a list entry's box: its text under a frame's width, the frame at its foot over the font's last row, which is empty,
-   so many fit; its text's row in it */
-static int item_h(const App* app) { return cell_h(app) + app->scale; }
-/* the boxes spread over the column, the theme's gap at most between two */
-static void list_place(const App* app, GuiList* l, GuiRect at, int count, int focus) {
-    int s = app->scale, gap = (int)app->theme.gap;
-    l->at = at;
-    l->count = count;
-    l->focus = focus;
-    l->margin = app->theme.cursor[0] ? (gui_text_cols(app->theme.cursor) * cell_w(app)) : 0;
-    l->item = item_h(app);
-    l->pitch = gui_place_pitch(at.h, count, l->item + SDL_min(2, gap) * s, l->item + gap * s);
-    l->shown = gui_place_list(at.h, l->item, l->pitch, count, focus, app->theme.scroll == GUI_SCROLL_CENTER, &l->first);
-    l->arrows = l->shown < count ? cell_w(app) : 0;
 }
 /* the list's entries before the page's games: "Recent games" and the recent rows, none without recent games */
 static int games_lead(const App* app) { return app->browser.head > 1 ? (int)app->browser.head : 0; }
@@ -1438,7 +1417,6 @@ static void left_paths(const char* line, char* old, char* now, size_t size) {
     by += strlen(SAY_LEFT_BY);
     snprintf(now, size, "%.*s", (int)strcspn(by, "\n"), by);
 }
-static void list_item(App* app, const GuiList* l, int i, const char* label, int focused, int activated);
 static void fill_rect(App* app, GuiRect r, GuiRgb c) {
     if (r.w > 0 && r.h > 0) fill(app, (float)r.x, (float)r.y, (float)r.w, (float)r.h, c, 255);
 }
@@ -1571,14 +1549,17 @@ static const char* files_entry(const App* app, int report, int i, const char* at
     *path = 0;
     return next;
 }
+static int rows_h(void (*layout)(GuiRect, int, GuiRect*), GuiRect (*row)(const GuiRect*, int, int, size_t),
+                  GuiRect* rects, int item, int scale, int count);
 static void render_files(App* app, int report) {
     char a[4400], b[4400], label[96];
     const char *first = report ? app->cleaned.text : app->left, *at = first;
-    int width, height, cols, room, used = 0, shown, i, y, path, s = app->scale, item = item_h(app), hint;
+    int width, height, cols, room, used = 0, shown, i, y, path, s = app->scale, ok_h, hint;
     int count = report ? app->cleaned.count : app->lefts, done = app->cleaned.done, top;
     SDL_Color ca, cb;
     GuiRect r, text;
-    GuiList ok;
+    GuiRect ok[UI_FILES_ITEMS];
+    UiList oks[UI_FILES_ITEMS] = {{0}}; /* OK in focus */
     area(app, &width, &height);
     cols = width / cell_w(app) - 6;
     hint = !report && app->left_clear ? wrap_rows(app, snx_tr(SAY_LEFT_CLEAR), cols, 0) : 0; /* under them, before OK */
@@ -1587,7 +1568,8 @@ static void render_files(App* app, int report) {
     for (i = 0; at && i < top; ++i) at = files_entry(app, report, i, at, a, b, sizeof a, &ca, &cb, &path);
     first = at;
     /* the files' rows, and one for how many more */
-    room = (height - head_h(app) - item - 24 * s) / cell_h(app) - 2 - hint;
+    ok_h = rows_h(ui_files_layout, ui_files_row, ok, UI_FILES_OK, s, 1); /* ui.txt's scene Files: OK's row */
+    room = (height - head_h(app) - ok_h - 24 * s) / cell_h(app) - 2 - hint;
     for (shown = 0; at && top + shown < count; ++shown) {
         int need;
         at = files_entry(app, report, top + shown, at, a, b, sizeof a, &ca, &cb, &path);
@@ -1596,7 +1578,7 @@ static void render_files(App* app, int report) {
         used += need;
     }
     app->files_shown = shown;
-    r = over_rect(app, cols, head_h(app) + (used + (top + shown < count) + hint) * cell_h(app) + item + 16 * s);
+    r = over_rect(app, cols, head_h(app) + (used + (top + shown < count) + hint) * cell_h(app) + ok_h + 16 * s);
     if (!report)
         snprintf(label, sizeof label, "%s", snx_tr(SAY_LEFT_TITLE));
     else if (app->report_move)
@@ -1620,9 +1602,8 @@ static void render_files(App* app, int report) {
         y += cell_h(app);
     }
     if (hint) wrap_in(app, text, text.x, y, snx_tr(SAY_LEFT_CLEAR), 0, rgb(app->theme.ink));
-    list_place(app, &ok, gui_rect(text.x, r.y + r.h - item - 6 * s, SDL_min(text.w, 26 * cell_w(app)), item), 1, 0);
-    snprintf(label, sizeof label, "%s%s", app->theme.marker, snx_tr("OK"));
-    list_item(app, &ok, 0, label, true, false);
+    ui_files_layout(gui_rect(text.x, r.y + r.h - ok_h - 6 * s, SDL_min(text.w, 26 * cell_w(app)), ok_h), s, ok);
+    ui_files_draw(app, ok, s, oks);
 }
 /* ---- a question and its choices, as the theme's options-dialog places them: in a box in the middle of their area, the
    question over the choices; or the question in a box at the area's foot, a tab with its label on the box's top edge,
@@ -1894,33 +1875,7 @@ typedef struct {
     GuiRect box, rows[GUI_PICK_ROWS], bars[3];
 } GuiPicker;
 static int item_text_y(const App* app, GuiRect b) { return b.y + app->scale; }
-static GuiRect list_box(const GuiList* l, int i) {
-    return gui_rect(l->at.x + l->margin, l->at.y + (i - l->first) * l->pitch, l->at.w - l->margin - l->arrows, l->item);
-}
 static void touch(App* app, float x, float y);
-/* an entry as a box of its own: on the dim colour (fill) or framed in it (line); the focused one inverted on the focus
-   colour with a rule over and under it (fill), or framed and written in it; the cursor in the margin. focused 2: that
-   look without the cursor, for the group whose rows have the focus */
-static void list_item(App* app, const GuiList* l, int i, const char* label, int focused, int activated) {
-    const GuiTheme* t = &app->theme;
-    GuiRect b = list_box(l, i);
-    int s = app->scale, filled = t->panels == GUI_PANELS_FILL, inverted = focused && t->focus_bar;
-    if (inverted)
-        fill_rect(app, b, t->focus);
-    else if (filled)
-        fill_rect(app, b, t->dim);
-    if (!inverted && (!filled || focused)) outline(app, b, focused ? t->focus : t->dim);
-    if (focused && filled && l->pitch - l->item >= 6 * s) { /* where the gap has room for them */
-        fill_rect(app, gui_rect(b.x, b.y - 3 * s, b.w, s), t->focus);
-        fill_rect(app, gui_rect(b.x, b.y + b.h + 2 * s, b.w, s), t->focus);
-    }
-    text_in(app, inner(app, b), b.x + cell_w(app) / 2, item_text_y(app, b), label,
-            rgb(inverted    ? t->page
-                : activated ? t->active
-                : focused   ? t->focus
-                            : t->ink));
-    if (focused == 1 && t->cursor[0]) text_in(app, l->at, l->at.x, item_text_y(app, b), t->cursor, rgb(t->focus));
-}
 /* a theme colour by ui.txt's name (UiColor), else dflt */
 static GuiRgb ui_colour(const App* app, unsigned color, GuiRgb dflt) {
     const GuiTheme* t = &app->theme;
@@ -1932,7 +1887,8 @@ static GuiRect ui_row_box(const App* app, GuiRect r) {
     int margin = app->theme.cursor[0] ? gui_text_cols(app->theme.cursor) * cell_w(app) : 0;
     return gui_rect(r.x + margin, r.y, r.w - margin, r.h);
 }
-/* a row of a scene of ui.txt, in list_item's look: the theme's cursor and the arrows of hidden rows inside it, the box
+/* a row of a scene of ui.txt, a box of its own on the dim colour (fill) or framed in it (line), the focused one inverted
+   on the focus colour or framed and written in it: the theme's cursor and the arrows of hidden rows inside it, the box
    between them; the failure colour fills it (every other blink_ms with UI_ATTR_BLINK, steady with 0), the active
    colour writes the one activated last, and an open one (UI_ATTR_OPEN) has the focus's look without the cursor; a
    title (UI_ATTR_TITLE) is on a band of ink in a theme of filled boxes, else over a rule */

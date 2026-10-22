@@ -141,6 +141,8 @@ static inline void tap_px(App* app, int x, int y) {
     event(app, &e);
 }
 static inline void point(App* app, GuiRect b, bool click) { mouse_px(app, b.x + b.w / 2, b.y + b.h / 2, click); }
+/* a row of a scene of ui.txt on a computer, as high as ui.txt's row_height of 17px: a cell and a pixel */
+static inline int item_h(const App* app) { return cell_h(app) + app->scale; }
 /* choice i's box in the dialog placed (ui.txt's scene Choices), as drawn: its row past the cursor's margin; none while it
    is scrolled out */
 static inline GuiRect choice_box(const App* app, const GuiChoices* c, int i) {
