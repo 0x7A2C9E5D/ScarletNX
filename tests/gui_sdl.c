@@ -2251,6 +2251,14 @@ int main(int argc, char** argv) {
             mouse_px(&app, b.x + b.w / 2, b.y + b.h / 2, true);
             assert(app.editor.row == FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED));
             app.editor.row = 0;
+            /* the pointer over a row takes the focus to that row, not to the row its place in the list numbers
+               (the groups' titles are in the list): over a title, nowhere */
+            mouse_px(&app, b.x + b.w / 2, b.y + b.h / 2, false);
+            assert(app.editor.row == FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED));
+            b = list_box(&f.right, folder_entry(&app, FOLDER_ROW(GUI_ROW_DUMPS, -1)) - 1);
+            mouse_px(&app, b.x + b.w / 2, b.y + b.h / 2, false);
+            assert(app.editor.row == FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED));
+            app.editor.row = 0;
         }
         /* a row with no value has no padding to the widest label: short, it stays whole while a long one slides */
         {

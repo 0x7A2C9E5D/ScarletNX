@@ -5617,6 +5617,10 @@ static void form_hover(App* app, float x, float y) {
     if (app->editor.typing) return;
     form_boxes(app, &f);
     i = list_hit(app->form == GUI_FORM_THEME || app->form == GUI_FORM_SETTINGS ? &f.left : &f.right, x, y, false);
+    if (i >= 0 && app->form == GUI_FORM_FOLDERS) { /* an entry of its list, the groups' titles among them */
+        int group;
+        i = folder_entry_row(app, i, &group);
+    }
     if (i >= 0 && i < gui_editor_rows(&app->editor)) app->editor.row = i;
 }
 static void form_row_pointer(App* app, int r) {
