@@ -293,6 +293,11 @@ add_executable(snx-test-arm-profile arm_profile.c "${PROJECT_SOURCE_DIR}/src/com
     "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/profile.c")
 snx_test_target(snx-test-arm-profile 11)
 add_test(NAME arm_isa_profiles COMMAND snx-test-arm-profile)
+# the C compiler a 3DS game's native link runs: the build's own, else a clang beside the program, else one on PATH
+add_executable(snx-test-find-compiler find_compiler.c)
+snx_test_target(snx-test-find-compiler 99)
+target_link_libraries(snx-test-find-compiler PRIVATE scarletnx-common)
+add_test(NAME find_compiler COMMAND snx-test-find-compiler)
 if(SNX_TEST_ARM_AOT)
     include(arm_checked.cmake)
 endif()
