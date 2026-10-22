@@ -423,6 +423,17 @@ static void write_threads(u64 second) {
     fclose(f);
 }
 
+/* the host threads blocked on a mutex or waiting on a condition variable: the caller as an offset from pm_lock and the
+   mutex as one from pm_wait_base, which the runtime's symbols name (nm, addr2line). The watchdog's own report of a
+   deadlock, where no thread notes what it waits for in game terms */
+static void report_lock_waits(void) {
+    PmWait w[64];
+    int n = pm_waits(w, 64), i;
+    for (i = 0; i < n; i++)
+        WARN("  host thread %llu %s mutex base%+lld, called from pm_lock%+lld\n", (unsigned long long)w[i].tid,
+             w[i].cond ? "waits on a condition with" : "waits for", (long long)((intptr_t)w[i].m - (intptr_t)pm_wait_base()),
+             (long long)((intptr_t)w[i].at - (intptr_t)pm_lock));
+}
 static void frontend_loop(void) {
     const u64 period = 1000000000u / VI_REFRESH_HZ;
     u64 tick = 0, next = plat_ns(), now, changed = next;
@@ -472,6 +483,7 @@ static void frontend_loop(void) {
                  (unsigned long long)(STALL_NS / 1000000000u), frames, (unsigned long long)g_gpu_submits);
             kernel_dump_threads();
             gpu_report_stall();
+            report_lock_waits();
         }
         /* paced at the display's rate, from a schedule: one far behind (a stop in the debugger) starts again */
         next += period;
