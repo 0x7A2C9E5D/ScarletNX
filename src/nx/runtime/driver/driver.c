@@ -30,6 +30,8 @@ static void usage(void) {
          "  -x, --extract          Extract XCI/NSP/DXCI/DNSP\n"
          "  -r, --recomp           Recompile ExeFS/NRO or prepare a dump without playing\n"
          "  -H, --headless         Run without a window or swapchain");
+    puts("  --tracy                Start the Tracy client for a GUI connection (SNX_TRACY builds)\n"
+         "  --tracy-capture        Record the run with tracy-capture, from Tracy 0.14.1 on PATH (SNX_TRACY builds)");
     puts("  -f, --fullscreen       Start fullscreen for this run (--fullscreen=0: windowed)\n"
          "                         Without either, the game's .ini decides\n"
          "  --touch=0|1|2          The game's touch screen: off, fingers, or fingers and the mouse\n"
@@ -909,6 +911,8 @@ made:
         command[n++] = "-s";
     else if (flags & SNX_GDB)
         command[n++] = "-S";
+    if (flags & SNX_TRACY_CLIENT) command[n++] = "--tracy";
+    if (flags & SNX_TRACY_CAPTURE) command[n++] = "--tracy-capture";
     /* Keep the boundary so the deployed launcher cannot interpret game
        arguments as another extraction/recompilation request. */
     if (game_argc) command[n++] = "--";
@@ -1215,8 +1219,9 @@ int snx_driver(int argc, char** argv) {
         result = snx_error("automatic preparation accepts one dump file. Pass game arguments after --");
         goto done;
     }
-    if ((flags & (SNX_EXTRACT | SNX_RECOMP)) && (flags & (SNX_HEADLESS | SNX_GDB | SNX_FULLSCREEN | SNX_WINDOWED))) {
-        result = snx_error("window and debugger options apply to game execution, not preparation");
+    if ((flags & (SNX_EXTRACT | SNX_RECOMP)) &&
+        (flags & (SNX_HEADLESS | SNX_GDB | SNX_TRACY_CLIENT | SNX_TRACY_CAPTURE | SNX_FULLSCREEN | SNX_WINDOWED))) {
+        result = snx_error("window, debugger and profiling options apply to game execution, not preparation");
         goto done;
     }
     if (!automatic && !(flags & (SNX_EXTRACT | SNX_RECOMP))) {

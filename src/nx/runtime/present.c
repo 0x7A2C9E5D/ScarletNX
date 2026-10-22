@@ -10,6 +10,7 @@
 #include "nx/runtime/options.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/tracy.h"
 
 int g_frames;
 
@@ -24,6 +25,7 @@ void vi_show_buffer(u32 nvmap_id, u32 offset, u32 w, u32 h, u32 pitch, u32 layou
     g_renderer->present_buffer(a + offset, w, h, pitch, layout, bhl, fmt, crop, transform);
     __atomic_add_fetch(&g_frames, 1, __ATOMIC_RELAXED);
     cheats_frame(); /* the cheats run once per frame shown, as dmnt's run on the console */
+    SNX_FRAME_MARK();
 }
 
 /* Several threads may queue frames, so the schedule is under a lock; the wait itself is outside it. Called on the

@@ -293,6 +293,11 @@ add_executable(snx-test-arm-profile arm_profile.c "${PROJECT_SOURCE_DIR}/src/com
     "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/profile.c")
 snx_test_target(snx-test-arm-profile 11)
 add_test(NAME arm_isa_profiles COMMAND snx-test-arm-profile)
+# the C compiler a 3DS game's native link runs: the build's own, else a clang beside the program, else one on PATH
+add_executable(snx-test-find-compiler find_compiler.c)
+snx_test_target(snx-test-find-compiler 99)
+target_link_libraries(snx-test-find-compiler PRIVATE scarletnx-common)
+add_test(NAME find_compiler COMMAND snx-test-find-compiler)
 if(SNX_TEST_ARM_AOT)
     include(arm_checked.cmake)
 endif()
@@ -747,6 +752,8 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME trim_caches COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/trim_caches_test.py")
     # the check that keeps a pull request red while its title says donotmerge (scripts/pr-title.py, pr-title.yml)
     add_test(NAME pr_title COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/pr_title_test.py")
+    # the labels a title's [area] prefix asks for, which the same job adds (scripts/area-labels.py, pr-title.yml)
+    add_test(NAME area_labels COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/area_labels_test.py")
     # the check that holds a pull request until its assignees, its author aside, approve it (scripts/pr-assignees.py,
     # pr-assignees.yml)
     add_test(NAME pr_assignees COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/pr_assignees_test.py")
@@ -807,6 +814,10 @@ add_test(NAME hid_motion COMMAND snx-test-hid-motion)
 
 add_executable(snx-test-startup startup_options.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/startup.c")
 snx_test_target(snx-test-startup 99)
+if(SNX_TRACY)
+    # startup.c must see SNX_TRACY so its Tracy flag checks match the runtime.
+    target_compile_definitions(snx-test-startup PRIVATE SNX_TRACY=1)
+endif()
 add_test(NAME startup_options COMMAND snx-test-startup)
 
 add_library(snx_test_common STATIC "${PROJECT_SOURCE_DIR}/src/common/utilities/common.c"
@@ -1053,7 +1064,7 @@ if(NOT SNX_TOOLS_ONLY)
     # the file of shaders and pipelines kept across runs (gpu/vk/pipeline_file.c): records back as written, pipelines
     # by their shaders' records (a shipped shader's reference among them), a cut or changed record ending the reading,
     # another key starting over, a full file; and the shipped shaders' file read through its mapping
-    add_executable(snx-test-pipeline-file pipeline_file.c)
+    add_executable(snx-test-pipeline-file pipeline_file.c tracy_stubs.c)
     snx_test_target(snx-test-pipeline-file 23)
     target_link_libraries(snx-test-pipeline-file PRIVATE snx_nx_flags scarletnx-common)
     add_test(NAME pipeline_file COMMAND snx-test-pipeline-file)

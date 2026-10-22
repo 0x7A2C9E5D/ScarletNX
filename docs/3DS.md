@@ -218,6 +218,9 @@ Implemented:
   CMP / LDRLS PC-indexed tables with at most 256 entries; no unbounded sweep.
   Blocks contain at most 32 guest instructions;
   bounded LLVM chunks are disposed between emissions, then statically linked.
+  The link runs a C compiler: the one the build used where it is on the machine,
+  else a clang beside the program, else one on PATH (on Windows LLVM-MinGW's). With
+  none, the compile stops before compiling anything, naming each place it looked.
   There is no runtime discovery/compilation. Uncovered targets stop explicitly.
 - Homebrew `.data` byte counts including BSS are accepted only if subtracting
   BSS fits initialized pages; BSS never becomes required input `.code` bytes.

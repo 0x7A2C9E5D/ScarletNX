@@ -12,6 +12,7 @@
 #include "nx/hle/services/services_int.h"
 #include "nx/hle/kernel/ipc.h"
 #include "nx/hle/hle.h"
+#include "nx/runtime/platform/tracy.h"
 #include "hle/filesystem/fs.swipc.inc"
 #include "nx/memory/mem.h"
 #include "nx/memory/own.h"
@@ -1255,6 +1256,9 @@ static int file_truncate(FILE* f, u64 n, u64* actual) {
    dir_disp and fs_disp hold it around the commands. So these objects are made with those dispatchers (file_new,
    OpenDirectory, hostfs_new), never by the generated _new. ipc.c drops a failed request's objects once the dispatcher
    returned, outside the lock an IFile's destroy takes */
+/* the game's own file I/O: the file and the bytes, as a zone, and the bytes as a counter for the rate */
+u64 g_fs_bytes_read, g_fs_bytes_written;
+
 static int nn_fssrv_sf_IFile_Read(SvcObj* self, nn_fs_ReadOption option, i64 offset, IpcBuf buffer, i64 size,
                                   i64* bytes_read) {
     FileData* f = self->data;
@@ -1268,6 +1272,7 @@ static int nn_fssrv_sf_IFile_Read(SvcObj* self, nn_fs_ReadOption option, i64 off
     if (sz > f->node->size - off) sz = f->node->size - off;
     R_UNLESS(buffer_valid(a, sz), FS_OUT_OF_RANGE);
     own_acquire(a, sz); /* read() can't wait on memory the GPU holds: it lands first */
+    SNX_ZONE_TV(z, "fs read", sz, "%s", f->node->name);
     u64 n = sz;
     if (node_in_memory(f->node)) {
         if (sz) memcpy(GP(a), node_memory(f->node) + off, (size_t)sz);
@@ -1277,6 +1282,7 @@ static int nn_fssrv_sf_IFile_Read(SvcObj* self, nn_fs_ReadOption option, i64 off
         n = fread(GP(a), 1, (size_t)sz, f->f);
         R_UNLESS(!ferror(f->f), FS_OUT_OF_RANGE);
     }
+    __atomic_add_fetch(&g_fs_bytes_read, n, __ATOMIC_RELAXED);
     *bytes_read = (i64)n;
     R_SUCCEED();
 }
@@ -1292,7 +1298,9 @@ static int nn_fssrv_sf_IFile_Write(SvcObj* self, nn_fs_WriteOption option, i64 o
     if (off + sz > f->node->size && !(f->mode & 4)) R_THROW(FS_NO_APPEND);
     R_UNLESS(!file_seek(f->f, off), FS_OUT_OF_RANGE);
     own_acquire(a, sz); /* write() can't wait on memory the GPU holds: it lands first */
+    SNX_ZONE_TV(z, "fs write", sz, "%s", f->node->name);
     size_t n = fwrite(GP(a), 1, (size_t)sz, f->f);
+    __atomic_add_fetch(&g_fs_bytes_written, n, __ATOMIC_RELAXED);
     if (n && off + n > f->node->size) f->node->size = off + n;
     R_UNLESS(n == sz && !fflush(f->f), FS_NO_SPACE);
     R_SUCCEED();

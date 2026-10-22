@@ -112,6 +112,40 @@ endif()
 if(SNX_BUILD_GUI AND SNX_TOOLS_ONLY)
     message(FATAL_ERROR "SNX_BUILD_GUI requires a runtime build, not a tools-only build")
 endif()
+option(SNX_TRACY "Build the runtime with the Tracy profiler client (development builds)" OFF)
+if(SNX_TRACY AND NOT SNX_BUILD_NX)
+    message(FATAL_ERROR "SNX_TRACY requires SNX_BUILD_NX")
+endif()
+if(SNX_TRACY AND SNX_TOOLS_ONLY)
+    message(FATAL_ERROR "SNX_TRACY requires the runtime, not a tools-only build")
+endif()
+if(SNX_TRACY AND IOS)
+    message(FATAL_ERROR "SNX_TRACY is not available on iOS")
+endif()
+if(SNX_TRACY AND (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"))
+    # The sampler's stacks are walked by the frame pointers, which -O2 drops.
+    add_compile_options(-fno-omit-frame-pointer)
+endif()
+# No post-build copy of the profiled runtime over every game. The driver still hands a game the runtime that plays it,
+# so the first run through a profiled build puts it beside that game, and a later run through a normal build puts that
+# one back (cmake/deploy.cmake, driver.c's refresh_runtime).
+if(SNX_TRACY AND SNX_DEPLOY)
+    set(SNX_DEPLOY OFF CACHE BOOL "Copy the runtime next to every recompiled game in SNX_GAMES_DIR after building" FORCE)
+    message(STATUS "SNX_TRACY: no post-build deploy of the profiling runtime (a run of the profiled driver still puts "
+                   "it beside its game)")
+endif()
+# The client makes dlclose a no-op on Linux (a library unload would leave its symbols stale in the profiler), and the
+# 3DS driver unloads the AOT module it recompiled before loading the new one. So the profiled build keeps the drivers
+# as their own programs instead of names of scarletnx, and only scarletnx has the client.
+if(SNX_TRACY AND SNX_MULTICALL)
+    set(SNX_MULTICALL OFF)
+    foreach(name scarletnx-3ds scarletnx-gnuabi)
+        if(IS_SYMLINK "${CMAKE_BINARY_DIR}/${name}")
+            file(REMOVE "${CMAKE_BINARY_DIR}/${name}") # a link of an earlier configure would be written through
+        endif()
+    endforeach()
+    message(STATUS "SNX_TRACY: the drivers are their own programs (the client makes dlclose a no-op on Linux)")
+endif()
 # Before the dependencies: the tests' network fixtures link ENet and zstd, whatever the build
 include(CTest)
 # Before the sources: the C99 driver of a tools-only build links LZ4 too
@@ -195,6 +229,7 @@ elseif(NOT ANDROID) # src/nx puts Android's in the app's libraries
 endif()
 if(NOT WIN32)
     install(FILES dist/scarletnx.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications COMPONENT desktop)
+    install(FILES dist/io.github.scarletnx.scarletnx.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo COMPONENT desktop)
 endif()
 if(ANDROID) # the app's launcher icon (dist/android)
     install(FILES dist/icons/hicolor/256x256/apps/wimsy.png DESTINATION res/mipmap-xxxhdpi RENAME ic_launcher.png)
@@ -230,6 +265,9 @@ if(TARGET snx_enet)
 endif()
 if(SNX_SDL3_FROM_SOURCE)
     install(FILES "${SDL3_SOURCE_DIR}/LICENSE.txt" DESTINATION ${licenses}/SDL3)
+endif()
+if(TARGET Tracy::TracyClient)
+    install(FILES "${tracy_SOURCE_DIR}/LICENSE" DESTINATION ${licenses}/Tracy)
 endif()
 if(TARGET hactool_lib)
     install(FILES "${hactool_src}/LICENSE" DESTINATION ${licenses}/hactool)

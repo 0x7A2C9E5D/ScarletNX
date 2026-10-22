@@ -11,6 +11,7 @@
 #include "nx/runtime/platform/backend.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/tracy.h"
 #include "nx/runtime/platform/unattended.h"
 #include "nx/runtime/platform/overlay.h"
 #include "nx/runtime/platform/fatal_screen.h"
@@ -253,7 +254,11 @@ static bool SDLCALL lifecycle(void* unused, SDL_Event* e) {
     }
     if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND) __atomic_store_n(&g_hidden, 1, __ATOMIC_RELEASE);
     if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND) {
+#ifndef SDL_PLATFORM_IOS
+        /* Android makes the window's surface anew when the app comes back. iOS keeps it: making another from the
+           renderer's thread is UIKit work off the main thread, which aborts the app */
         __atomic_add_fetch(&g_generation, 1, __ATOMIC_RELEASE);
+#endif
         __atomic_store_n(&g_hidden, 0, __ATOMIC_RELEASE);
     }
     return true;
@@ -395,7 +400,11 @@ static const char* HELP = "Controller: A, B, X and Y where the console's are (ga
                           "  X / Space = A    Z = B    C = X    V = Y\n"
                           "  Q = L   E = R   1 = ZL   3 = ZR   Enter = +   Backspace = -\n\n"
                           "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
-                          "F5 = thread dump   F6 = showcase on / off   F11 / Alt+Enter = fullscreen\n"
+                          "F5 = thread dump   F6 = showcase on / off   "
+#if defined(SNX_TRACY)
+                          "F7 = 60 s Tracy capture   "
+#endif
+                          "F11 / Alt+Enter = fullscreen\n"
                           "Esc = quit";
 
 static PadKind gamepad_kind(int type) {
@@ -793,6 +802,9 @@ static void hotkey(SDL_Keycode k) {
                 LOG("showcase: off\n");
             break;
         }
+#if defined(SNX_TRACY)
+        case SDLK_F7: snx_tracy_capture_now(); break;
+#endif
         case SDLK_F11: set_fullscreen(!g_fullscreen); break;
     }
 }

@@ -6,6 +6,7 @@
 #include "nx/runtime/main.h"
 #include "nx/runtime/platform/backend.h"
 #include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/tracy.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -125,6 +126,7 @@ void logf_(int lvl, const char* fmt, ...) {
         log_crash_write(text);
         return;
     }
+    snx_tracy_log(lvl, text);
     pm_lock(&g_log_lock);
     log_create_nl();
     n = log_compose(out, sizeof out, text);

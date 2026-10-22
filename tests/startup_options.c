@@ -15,9 +15,16 @@ int main(void) {
     char *bad[] = {"game", "--headless=yes"}, *empty[] = {"game", "--headless="};
     char *other[] = {"game", "--seconds=1"}, *boundary[] = {"game", "--", "-Hs", "--headless=0"};
     char *combined[] = {"game", "-Hs"}, *server[] = {"game", "-S"};
+    char *tracy[] = {"game", "--tracy-capture"}, *client[] = {"game", "--tracy"};
     if (check(2, on, 0, 1) || check(2, short_on, 0, 1) || check(2, explicit_on, 2, 0) || check(2, off, 2, 0) ||
         check(2, bad, 2, 0) || check(2, empty, 2, 0) || check(2, other, 0, 0) || check(4, boundary, 0, 0))
         return 1;
+#if defined(SNX_TRACY)
+    if (check(2, tracy, 0, 0) || !g_opt_tracy_capture || g_opt_tracy_client) return 1;
+    if (check(2, client, 0, 0) || !g_opt_tracy_client || g_opt_tracy_capture) return 1;
+#else
+    if (check(2, tracy, 2, 0) || check(2, client, 2, 0)) return 1;
+#endif
     if (g_opt_gdb || g_opt_gdb_stop) return 1;
 #ifdef _WIN32
     if (check(2, combined, 2, 0) || check(2, server, 2, 0)) return 1;

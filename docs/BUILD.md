@@ -282,6 +282,9 @@ cmake --preset default -B build -DSNX_FFMPEG_ASM=OFF && cmake --build build
 - `-DSNX_FFMPEG_ASM=OFF`: omit x86-64 NASM assembly; slower FFmpeg decoding.
 - `-DCPM_DOWNLOAD_SDL3=ON`: build the pinned SDL3 instead of using a system SDL3 development package.
 - `-DSNX_DEPLOY=OFF`: disable runtime deployment.
+- `-DSNX_TRACY=ON`: build the runtime with the pinned Tracy profiler client (default OFF). For development builds
+  only; not available on iOS. It turns `SNX_DEPLOY` off, since the profiling runtime must not be copied over a
+  game; the `tracy` preset sets both. See [profiling](DEVELOPMENT.md#profiling).
 - `-DSNX_RECOMPILED_DIR=/path`: override deployment dir (default: empty, the data folder's `recompiled/` the build
   tree's driver uses). `SNX_GAMES_DIR`, its name before, is still taken while it is empty, said as it configures. A
   tree whose value is the checkout's `games/`, the default before, is set back to empty.
