@@ -30,7 +30,10 @@ static Surf* g_cpu_img;
 static Surf* g_last;
 static u32 g_last_x, g_last_y, g_last_w, g_last_h;
 static u32 g_last_transform;
+/* vk_lock once around the hooks: each takes it again only as a depth count. Each took and dropped it on its own, and
+   every drop let the lock go (vk_let_go) on the GPU thread's writes, the constant buffer uploads before most draws */
 static void vkr_before_write(u64 gva, u64 size) {
+    vk_lock();
     if (size) vk_release_need(gva, size);
     vk_buf_before_write(gva, size);
     if (size)
@@ -39,6 +42,7 @@ static void vkr_before_write(u64 gva, u64 size) {
         vk_gfx_image_land();
     vk_compute_before_write(gva, size);
     vk_rt_before_write(gva, size);
+    vk_unlock();
 }
 /* pending compute and graphics results and queued releases all count their pages in g_pend_any (pending_pages.h);
    storage images don't, so any of them pending answers yes */
