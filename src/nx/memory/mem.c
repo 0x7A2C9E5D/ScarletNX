@@ -7,11 +7,14 @@
 /* the guest address space: the host reservation every guest address is an offset into, its regions, and the list of
    memory blocks with the state, permission and attributes QueryMemory reports */
 #include "nx/memory/mem.h"
+#include "common/utilities/common.h"
 #include "nx/memory/own.h"
 #include "nx/gpu/gpu.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define GIB  (1ull << 30)
 #define PAGE 0x1000ull
@@ -492,9 +495,14 @@ static void layout_for(u64 size) {
    the largest of these that the system gives is the guest's address space */
 static u8* reserve_ios(void) {
     static const u64 tiers[] = {128 * GIB, 64 * GIB, 48 * GIB, 32 * GIB, 24 * GIB, 16 * GIB};
+    const char* cap = getenv("SNX_ADDRESS_SPACE_GIB"); /* a smaller layout on purpose, to try one on a host with room */
+    u64 most = cap ? (u64)strtoull(cap, NULL, 10) * GIB : AS_MAX;
     size_t i;
     for (i = 0; i < sizeof tiers / sizeof *tiers; ++i) {
-        u8* p = plat_vm_reserve(tiers[i]);
+        u8* p = tiers[i] > most ? NULL : plat_vm_reserve(tiers[i]);
+        fprintf(stderr, "memory: %llu GiB of address space: %s%s%s\n", (unsigned long long)(tiers[i] >> 30),
+                tiers[i] > most ? "skipped (SNX_ADDRESS_SPACE_GIB)" : p ? "reserved" : "refused: ",
+                !p && tiers[i] <= most ? strerror(errno) : "", "");
         if (!p) continue;
         g_as_size = tiers[i];
         if (tiers[i] < AS_MAX) layout_for(tiers[i]);

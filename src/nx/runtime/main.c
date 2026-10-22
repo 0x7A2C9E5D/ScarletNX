@@ -579,6 +579,9 @@ int snx_main(int argc, char** argv) {
             "the update", base);
 
     fs_init(); /* the npdm is read through it, and mem_init's layout comes before */
+#ifdef MODULE_PACK
+    g_settings.log_level = 2; /* a phone's log is the only way to see what a run did: everything, until it is steadier */
+#endif
     mem_init();
     kernel_init();
     dispatch_init();

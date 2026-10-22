@@ -11,11 +11,80 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/resource.h>
+#include <sys/sysctl.h>
+#include <time.h>
 #import <Foundation/Foundation.h>
 
 /* dist/apple/Frontend.swift. window is the SDL window's UIWindow or NSWindow; done gets the path picked, NULL for none */
 extern bool snx_apple_pick(void* window, bool folder, void (*done)(void* data, const char* path), void* data);
 extern bool snx_apple_share(void* window, const char* path);
+
+#if TARGET_OS_IPHONE
+extern size_t os_proc_available_memory(void); /* <os/proc.h>, which not every SDK header set declares the same way */
+static void sysctl_line(const char* name) {
+    char text[256] = "?";
+    size_t n = sizeof text;
+    if (sysctlbyname(name, text, &n, NULL, 0)) snprintf(text, sizeof text, "(unavailable)");
+    fprintf(stderr, "  %s = %s\n", name, text);
+}
+static void sysctl_number(const char* name) {
+    unsigned long long v = 0;
+    size_t n = sizeof v;
+    if (sysctlbyname(name, &v, &n, NULL, 0))
+        fprintf(stderr, "  %s = (unavailable)\n", name);
+    else
+        fprintf(stderr, "  %s = %llu\n", name, n == 4 ? (unsigned long long)(unsigned)v : v);
+}
+static void limit_line(const char* name, int resource) {
+    struct rlimit r;
+    if (getrlimit(resource, &r))
+        fprintf(stderr, "  rlimit %s = (unavailable)\n", name);
+    else
+        fprintf(stderr, "  rlimit %s = soft %llu hard %llu\n", name, (unsigned long long)r.rlim_cur,
+                (unsigned long long)r.rlim_max);
+}
+#endif
+void gui_apple_log_start(void) {
+#if TARGET_OS_IPHONE
+    @autoreleasepool {
+        NSURL* documents = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory
+                                                                inDomains:NSUserDomainMask].firstObject;
+        const char* path = documents ? [documents URLByAppendingPathComponent:@"scarletnx-console.log"].path.fileSystemRepresentation : NULL;
+        time_t now = time(NULL);
+        if (!path || !freopen(path, "a", stderr)) return;
+        freopen(path, "a", stdout);
+        setvbuf(stdout, NULL, _IONBF, 0);
+        setvbuf(stderr, NULL, _IONBF, 0);
+        fprintf(stderr, "\n===== ScarletNX starts %s", ctime(&now));
+        fprintf(stderr, "device:\n");
+        sysctl_line("hw.machine");
+        sysctl_line("hw.model");
+        sysctl_line("kern.osversion");
+        sysctl_line("kern.osrelease");
+        sysctl_number("hw.memsize");
+        sysctl_number("hw.pagesize");
+        sysctl_number("hw.ncpu");
+        sysctl_number("hw.logicalcpu");
+        sysctl_number("hw.optional.arm.FEAT_LSE");
+        sysctl_number("vm.pagesize");
+        sysctl_number("kern.maxfilesperproc");
+        fprintf(stderr, "system: iOS %s, physical memory %llu MiB, thermal state %ld, low power %d\n",
+                NSProcessInfo.processInfo.operatingSystemVersionString.UTF8String,
+                (unsigned long long)(NSProcessInfo.processInfo.physicalMemory >> 20),
+                (long)NSProcessInfo.processInfo.thermalState, (int)NSProcessInfo.processInfo.lowPowerModeEnabled);
+        fprintf(stderr, "limits:\n");
+        limit_line("AS", RLIMIT_AS);
+        limit_line("DATA", RLIMIT_DATA);
+        limit_line("RSS", RLIMIT_RSS);
+        limit_line("NOFILE", RLIMIT_NOFILE);
+        fprintf(stderr, "  available memory before the first allocation: %llu MiB\n",
+                (unsigned long long)(os_proc_available_memory() >> 20));
+        fprintf(stderr, "app: %s\n", NSBundle.mainBundle.bundleIdentifier.UTF8String);
+        fprintf(stderr, "documents: %s\n", documents.fileSystemRepresentation);
+    }
+#endif
+}
 
 void gui_apple_start(void) {
 #if TARGET_OS_IPHONE

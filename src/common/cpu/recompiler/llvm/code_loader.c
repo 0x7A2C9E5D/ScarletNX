@@ -220,7 +220,11 @@ static int ios_arena(SnxCodeLoader* loader, char* error, size_t error_size) {
                  "universal.js assigned to it) before opening a game");
         return -1;
     }
+    fprintf(stderr, "jit arena: debugger attached, asking it for %lu MiB (CODE %lu, RODATA %lu, DATA %lu MiB)\n",
+            (unsigned long)(loader->reserved >> 20), (unsigned long)(loader->region[CODE].size >> 20),
+            (unsigned long)(loader->region[RODATA].size >> 20), (unsigned long)(loader->region[DATA].size >> 20));
     base = (unsigned char*)ios_jit_prepare(NULL, loader->reserved);
+    fprintf(stderr, "jit arena: the debugger answered %p\n", (void*)base);
     if (!base || base == (unsigned char*)(size_t)-1 || (size_t)base % loader->page) {
         snprintf(error, error_size, "the debugger did not prepare %lu MiB of code memory",
                  (unsigned long)(loader->reserved >> 20));
@@ -234,6 +238,7 @@ static int ios_arena(SnxCodeLoader* loader, char* error, size_t error_size) {
         snprintf(error, error_size, "cannot map the prepared code memory writable (%d)", (int)kr);
         return -1;
     }
+    fprintf(stderr, "jit arena: write alias at %p (current %d, maximum %d)\n", (void*)alias, (int)cur, (int)max);
     for (i = CODE; i <= RODATA; ++i) loader->region[i].write = (unsigned char*)alias + loader->region[i].start;
     data = (vm_address_t)(base + loader->region[DATA].start);
     /* the tail as read-write where it is first (it drops the execute right only), and when the system refuses, given
@@ -259,6 +264,7 @@ static int ios_arena(SnxCodeLoader* loader, char* error, size_t error_size) {
         snprintf(error, error_size, "cannot protect the code arena's data (%d)", (int)kr);
         return -1;
     }
+    fprintf(stderr, "jit arena: data at %p ready\n", (void*)data);
     loader->region[DATA].write = base + loader->region[DATA].start;
     return 0;
 }

@@ -41,6 +41,9 @@ static char* runtime_settings(void) {
 int snx_switch_main(int argc, char** argv) {
     int result;
     char why[160];
+#ifdef SNX_MENU_THEN_GAME
+    gui_apple_log_start(); /* before anything prints: a phone has no console */
+#endif
     /* a launcher reads our progress through pipes: lines as they end, errors at once */
     setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
     setvbuf(stderr, NULL, _IONBF, 0);
