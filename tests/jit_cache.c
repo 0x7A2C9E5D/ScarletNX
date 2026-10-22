@@ -26,8 +26,8 @@ static GuestFn dispatch[(CODE_HI - CODE_LO) / 4];
 
 static SnxJitService* profile(const char* path) {
     static const SnxU32 words[] = {0x91000400u, 0xD65F03C0u}; /* add x0, x0, #1; ret */
-    SnxJitConfig config;
-    SnxCodeImage image;
+    static SnxJitConfig config;
+    static SnxCodeImage image;
     char error[512];
     SnxJitService* service;
     memset(memory, 0, sizeof(memory));

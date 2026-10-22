@@ -41,6 +41,7 @@ static void free_record(Record* r) {
         free(r->functions);
     }
     free((void*)r->pub.name);
+    free((void*)r->pub.object);
     memset(r, 0, sizeof(*r));
 }
 
@@ -144,7 +145,14 @@ static int parse_record(const unsigned char* body, size_t length, Record* r, cha
         snprintf(error, error_size, "record object size does not match the body");
         return -1;
     }
-    r->pub.object = p;
+    /* the object starts at whatever offset the record's metadata ends at: ELF reads it as Elf64_* structs, which
+       need the alignment a malloc gives, not the file's */
+    r->pub.object = (const unsigned char*)malloc(r->pub.object_size ? r->pub.object_size : 1);
+    if (!r->pub.object) {
+        snprintf(error, error_size, "out of memory");
+        return -1;
+    }
+    memcpy((void*)r->pub.object, p, r->pub.object_size);
     return 0;
 }
 
