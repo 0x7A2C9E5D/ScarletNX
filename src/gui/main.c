@@ -255,9 +255,9 @@ typedef struct App {
     SDL_Gamepad* gamepad;      /* the pad it shows, the first one plugged in, while it is open */
     bool pads_read;            /* SDL's gamepads started for it */
     unsigned pad_pushed;       /* the triggers and the left stick's directions past half way, a bit each */
-    /* the menu's own pads, whose presses are its keys (pad_menu.h), open while no run goes; pads_failed: SDL could not
-       start them, not asked again. pad_driven: a pad pressed last, not the keyboard, the mouse or a finger, so the
-       cursor is hidden and a mouse moving less than pointer_travel's GUI_PAD_TRAVEL moves nothing */
+    /* the menu's own pads, whose presses are its keys (pad_menu.h), open until a run's game loads; pads_failed: SDL
+       could not start them, not asked again. pad_driven: a pad pressed last, not the keyboard, the mouse or a finger,
+       so the cursor is hidden and a mouse moving less than pointer_travel's GUI_PAD_TRAVEL moves nothing */
     GuiPads pads;
     bool pads_failed, pad_driven;
     float pointer_travel;
@@ -8951,10 +8951,10 @@ static bool pads_event(App* app, const SDL_Event* e) {
     event(app, &key);
     return true;
 }
-/* the menu's pads open while no run goes, which may play a game wanting them; the first time once the menu shows, as
-   SDL may take most of a second looking for them */
+/* the menu's pads open until a run's game loads (its LAUNCH), as the game may want them: a pad stops a recompile
+   too. The first time once the menu shows, as SDL may take most of a second looking for them */
 static void pads_follow(App* app) {
-    if (app->menu.running) {
+    if (app->menu.running && gui_steps_last(&app->steps, "LAUNCH")) {
         gui_pads_stop(&app->pads);
         return;
     }

@@ -1160,6 +1160,25 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RETURN);
         assert(!app.confirm.shown);
     }
+    /* the menu's pads stay open through a run until its game loads (LAUNCH, the runner's banner), so a pad can stop a
+       recompile; open again once it ends */
+    {
+        app.menu.running = true;
+        gui_steps_reset(&app.steps);
+        pads_follow(&app);
+        assert(app.pads.started);
+        gui_steps_feed(&app.steps, "Recompiling pad game (1 modules)\n", 33, 0);
+        pads_follow(&app);
+        assert(app.pads.started);
+        gui_steps_feed(&app.steps, "ScarletNX - pad game\n", 21, 0);
+        pads_follow(&app);
+        assert(!app.pads.started);
+        app.menu.running = false;
+        pads_follow(&app);
+        assert(app.pads.started && !app.confirm.shown);
+        gui_pads_stop(&app.pads);
+        gui_steps_reset(&app.steps);
+    }
     render(&app);
     shows(&app, "- Load Switch NSP/XCI/NRO", yellow);
     assert(!app.menu.activated);
