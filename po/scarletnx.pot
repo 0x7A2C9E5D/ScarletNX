@@ -2897,6 +2897,18 @@ msgstr ""
 msgid "ui_scale =, shown as UI scale"
 msgstr ""
 
+#: src/common/utilities/setup.c
+msgid "A theme's lists"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "[body] gap and scroll in its theme.ini"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "nothing: ui.txt lays out every list"
+msgstr ""
+
 #: src/nx/runtime/settings.txt
 msgid "gdbstub"
 msgstr ""

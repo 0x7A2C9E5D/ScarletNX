@@ -2896,6 +2896,15 @@ msgstr "cada pasta na biblioteca de recompilados ou na de dumps, conforme seus j
 msgid "The launcher's Text size"
 msgstr "O Tamanho do texto do launcher"
 
+msgid "A theme's lists"
+msgstr "As listas de um tema"
+
+msgid "[body] gap and scroll in its theme.ini"
+msgstr "[body] gap e scroll no theme.ini dele"
+
+msgid "nothing: ui.txt lays out every list"
+msgstr "nada: o ui.txt dispõe todas as listas"
+
 #: src/common/utilities/setup.c
 msgid "text_size = in app.ini"
 msgstr "text_size = no app.ini"

@@ -2896,6 +2896,15 @@ msgstr "每个文件夹按其游戏放入已重编译或转储游戏库"
 msgid "The launcher's Text size"
 msgstr "启动器的文字大小"
 
+msgid "A theme's lists"
+msgstr "主题的列表"
+
+msgid "[body] gap and scroll in its theme.ini"
+msgstr "theme.ini 中的 [body] gap 和 scroll"
+
+msgid "nothing: ui.txt lays out every list"
+msgstr "不再有作用：所有列表由 ui.txt 布局"
+
 #: src/common/utilities/setup.c
 msgid "text_size = in app.ini"
 msgstr "app.ini 中的 text_size ="
