@@ -158,12 +158,19 @@ static GuiRect entry_box(App* app, int item) {
     menu_boxes(app, &m);
     return menu_entry_box(app, &m, item);
 }
+/* Games' Add a folder, and Rows' row (the label and recent rows under the lead, then the page's), as drawn */
+static GuiRect games_add_box(const App* app, const GuiGamesBoxes* g) {
+    return ui_row_box(app, ui_games_row(g->rects, app->scale, UI_GAMES_ADD, 0));
+}
+static GuiRect games_row_box(const App* app, const GuiGamesBoxes* g, int row) {
+    return ui_row_box(app, ui_games_row(g->rects, app->scale, UI_GAMES_ROWS, (size_t)row));
+}
 static GuiRect game_box(App* app, int i, bool recent) {
     GuiGamesBoxes g;
     layout(app);
     games_boxes(app, &g);
     assert(app->menu.view == GUI_LOAD_GAMES && (!recent || i < g.lead - 1));
-    return recent ? list_box(&g.list, i + 1) : i ? list_box(&g.list, g.lead + i - 1) : list_box(&g.add, 0);
+    return recent ? games_row_box(app, &g, i + 1) : i ? games_row_box(app, &g, g.lead + i - 1) : games_add_box(app, &g);
 }
 static GuiRect row_box(App* app, int row, bool right) {
     GuiFormBoxes f;
@@ -3739,7 +3746,7 @@ int main(int argc, char** argv) {
         go_tab(&app, GUI_TAB_GAMES);
         render(&app);
         games_boxes(&app, &g);
-        b = list_box(&g.add, 0);
+        b = games_add_box(&app, &g);
         x = b.x;
         y = b.y + b.h / 2; /* Add a folder's frame */
         assert(same_colour(pixel(&app, (float)x, (float)y), page));
@@ -3861,8 +3868,8 @@ int main(int argc, char** argv) {
     {
         GuiGamesBoxes g;
         games_boxes(&app, &g);
-        assert(list_box(&g.list, 0).y - (list_box(&g.add, 0).y + list_box(&g.add, 0).h) > 14 * app.scale &&
-               g.list.pitch - g.list.item <= 14 * app.scale); /* the list's widest */
+        GuiRect add = games_add_box(&app, &g), first = games_row_box(&app, &g, 0), second = games_row_box(&app, &g, 1);
+        assert(first.y - (add.y + add.h) == 24 * app.scale && second.y - (first.y + first.h) == 2 * app.scale);
     }
     key(&app, SDLK_ESCAPE);
     assert(app.menu.view == GUI_LOAD_NONE);
@@ -5045,17 +5052,18 @@ int main(int argc, char** argv) {
             assert(app.menu.view == GUI_LOAD_GAMES && !app.browser.selected && app.games.count > 12);
             render(&app);
             games_boxes(&app, &g);
-            b = list_box(&g.add, 0);
+            b = games_add_box(&app, &g);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Add a folder", yellow,
                        black); /* the focus, first */
             key(&app, SDLK_DOWN);
             render(&app);
             games_boxes(&app, &g);
             page = games_page(&app);
-            assert(app.browser.page_size == page && g.list.count == g.lead + (int)page && g.list.shown == g.list.count);
-            b = list_box(&g.add, 0);
+            assert(app.browser.page_size == page &&
+                   ui_games_shown(g.rects, app.scale, UI_GAMES_ROWS) >= (size_t)g.lead + page);
+            b = games_add_box(&app, &g);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Add a folder", normal, black);
-            b = list_box(&g.list, g.lead);
+            b = games_row_box(&app, &g, g.lead);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- ", yellow, black);
             text_px_is(&app, b.x + cw / 2 + 2 * cw, item_text_y(&app, b), app.games.names[0], yellow, black);
             text_px_is(&app, g.place.side.x + cw, g.place.side.y + 2 * s, app.games.names[0], normal, black);
@@ -6019,7 +6027,7 @@ int main(int argc, char** argv) {
                 GuiGamesBoxes g;
                 render(&app);
                 games_boxes(&app, &g);
-                assert(g.lead == 5 && g.list.shown == g.list.count && g.list.count > g.lead);
+                assert(g.lead == 5 && ui_games_shown(g.rects, app.scale, UI_GAMES_ROWS) > (size_t)g.lead);
                 shows(&app, "Recent games", rgb(app.theme.soft));
                 shows(&app, "\xfe ...show more", rgb(app.theme.ink));
             }

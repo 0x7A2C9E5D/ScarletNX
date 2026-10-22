@@ -431,10 +431,6 @@ msgstr ""
 msgid "Recent games not kept: %s could not be written."
 msgstr ""
 
-#: src/gui/main.c
-msgid "...show more"
-msgstr ""
-
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -754,6 +750,10 @@ msgid "none"
 msgstr ""
 
 #: src/gui/main.c
+msgid "...show more"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "Ready to run, with %zu update(s), DLC(s) or mod(s) to pick from"
 msgstr ""
@@ -779,7 +779,7 @@ msgid "Pick a folder of games or dumps, listed after recompiled/ and dumps/"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
+#: src/gui/main.c src/gui/ui.txt
 #, snx-key
 msgid "Add a folder"
 msgstr ""

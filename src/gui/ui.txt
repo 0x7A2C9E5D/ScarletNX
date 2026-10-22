@@ -18,3 +18,19 @@
 		[button]"Exit" {}
 	}
 }
+[scene]Games {
+	# Add a folder over the page, a wider gap under it than between the games
+	gap = 24px
+	[list]Add {
+		height = 17px
+		android.height = 40px
+		android.row_height = 40px
+		max_rows = 1
+		[button]"Add a folder" {}
+	}
+	# Recent games over the recent rows, then a page of the games, as many as fit, each group under its heading
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}

@@ -926,13 +926,6 @@ static int recent_shown(const App* app) {
 static int recent_more(const App* app) { return recent_shown(app) < app->recent.count; }
 /* the rows over Games' games: Add a folder, then the recent games and the row that shows the rest */
 static size_t games_head(const App* app) { return 1 + (size_t)(recent_shown(app) + recent_more(app)); }
-/* a recent row: a game, or under the ones shown the row that shows the rest */
-static void recent_label(const App* app, int index, char* label, size_t size) {
-    if (index < recent_shown(app))
-        snprintf(label, size, "%s%s", app->theme.marker, app->recent.game[index].name);
-    else
-        snprintf(label, size, "%s%s", app->theme.marker, snx_tr("...show more"));
-}
 /* the list as the menu and the file have it */
 static void recent_changed(App* app) {
     app->browser.head = games_head(app);
@@ -1016,18 +1009,15 @@ static void list_place(const App* app, GuiList* l, GuiRect at, int count, int fo
     l->shown = gui_place_list(at.h, l->item, l->pitch, count, focus, app->theme.scroll == GUI_SCROLL_CENTER, &l->first);
     l->arrows = l->shown < count ? cell_w(app) : 0;
 }
-/* Add a folder's box over the list, and the wider gap under it */
-static int games_add_h(const App* app) { return item_h(app) + 24 * app->scale; } /* wider than the list's gaps */
 /* the list's entries before the page's games: "Recent games" and the recent rows, none without recent games */
 static int games_lead(const App* app) { return app->browser.head > 1 ? (int)app->browser.head : 0; }
 /* the games a page of the boxed list holds: those that fit under Add a folder and the recent games */
 static size_t games_page(App* app) {
     GuiPlace p;
-    GuiList l;
+    GuiRect rects[UI_GAMES_ITEMS];
     games_place(app, &p);
-    list_place(app, &l, gui_rect(p.list.x, p.list.y + games_add_h(app), p.list.w, p.list.h - games_add_h(app)), 1 << 16,
-               -1);
-    return (size_t)SDL_max(1, l.shown - games_lead(app));
+    ui_games_layout(p.list, app->scale, rects);
+    return (size_t)SDL_max(1, (int)ui_games_shown(rects, app->scale, UI_GAMES_ROWS) - games_lead(app));
 }
 /* a box head's height: its label, two pixels of the text above and below */
 static int head_h(const App* app) { return cell_h(app) + 4 * app->scale; }
@@ -1895,11 +1885,6 @@ static void list_item(App* app, const GuiList* l, int i, const char* label, int 
                             : t->ink));
     if (focused == 1 && t->cursor[0]) text_in(app, l->at, l->at.x, item_text_y(app, b), t->cursor, rgb(t->focus));
 }
-/* a label between a list's boxes, as "Recent games" */
-static void list_label(App* app, const GuiList* l, int i, const char* label) {
-    GuiRect b = list_box(l, i);
-    text_in(app, b, b.x, item_text_y(app, b), label, rgb(app->theme.soft));
-}
 /* arrows past the boxes' right edge: up beside entry first, down beside entry last */
 static void list_arrows(App* app, const GuiList* l, int first, int last, int up, int down) {
     int x = l->at.x + l->at.w - cell_w(app);
@@ -1933,8 +1918,12 @@ void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned
     int failing =
         (attr & UI_ATTR_FAILURE) && !((attr & UI_ATTR_BLINK) && t->blink_ms && (now_ms(app) / t->blink_ms) % 2);
     GuiRect b = ui_row_box(app, r);
-    char label[160];
-    snprintf(label, sizeof label, "%s%s", t->marker, snx_tr(text));
+    char label[400];
+    if (attr & UI_ATTR_LABEL) { /* between rows, as "Recent games": no box, no marker */
+        text_in(app, b, b.x, ui_text_y(app, b), text, rgb(t->soft));
+        return;
+    }
+    snprintf(label, sizeof label, "%s%s", t->marker, text);
     if (failing || inverted)
         fill_rect(app, b, failing ? t->failure : t->focus);
     else if (filled)
@@ -1955,8 +1944,9 @@ void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned
 }
 /* a label of a scene of ui.txt, in the soft colour unless it names one */
 void ui_draw_label(App* app, GuiRect r, const char* text, unsigned color) {
-    text_in(app, r, r.x, item_text_y(app, r), snx_tr(text), rgb(ui_colour(app, color, app->theme.soft)));
+    text_in(app, r, r.x, item_text_y(app, r), text, rgb(ui_colour(app, color, app->theme.soft)));
 }
+const char* ui_tr(const char* english) { return snx_tr(english); }
 /* The keys of a screen: "Keys: what they do." sentences, each drawn as the keys, inverted (the theme's focus bar) or in
    the focus colour, and what they do; a row holds as many as fit, against its right edge */
 static int hint_next(const char** s, char* key, char* what, size_t size) {
@@ -2956,25 +2946,72 @@ static void draw_menu(App* app) {
    box holds ---- */
 typedef struct {
     GuiPlace place;
-    GuiList add;  /* Add a folder, a wider gap under it */
-    GuiList list; /* entry i: the label and the recent rows under games_lead, then the page's games */
-    size_t start; /* the page's first game */
-    int lead;     /* games_lead */
+    GuiRect rects[UI_GAMES_ITEMS];
+    UiList
+        lists[UI_GAMES_ITEMS]; /* Add's, and Rows': the label and the recent rows under games_lead, then the page's */
+    size_t start;              /* the page's first game */
+    int lead;                  /* games_lead */
 } GuiGamesBoxes;
 static void games_boxes(App* app, GuiGamesBoxes* g) {
-    GuiRect r;
     size_t selected = app->browser.selected, head = app->browser.head;
     games_place(app, &g->place);
-    r = g->place.list;
+    ui_games_layout(g->place.list, app->scale, g->rects);
     g->start = app->browser.page * app->browser.page_size;
     g->lead = games_lead(app);
-    list_place(app, &g->add, gui_rect(r.x, r.y, r.w, item_h(app)), 1, selected ? -1 : 0);
-    list_place(app, &g->list, gui_rect(r.x, r.y + games_add_h(app), r.w, r.h - games_add_h(app)),
-               g->lead + (int)gui_browser_items(&app->browser),
-               !selected         ? -1
-               : selected < head ? (int)selected
-                                 : g->lead + (int)(selected - head));
-    if (gui_browser_pages(&app->browser) > 1) g->list.arrows = cell_w(app); /* the pages' */
+    memset(g->lists, 0, sizeof g->lists);
+    g->lists[UI_GAMES_ADD].focus = selected ? SIZE_MAX : 0;
+    g->lists[UI_GAMES_ROWS].focus = !selected         ? SIZE_MAX
+                                    : selected < head ? selected
+                                                      : (size_t)g->lead + selected - head;
+}
+static void game_label(const App* app, const GuiGames* games, size_t i, char* out, size_t size);
+static void menu_key(App* app, GuiKey key);
+/* Rows' row i as the browser counts it (0 is Add a folder): a recent row, else a game of the page */
+static size_t games_selected(const App* app, size_t row) {
+    size_t lead = (size_t)games_lead(app);
+    return row < lead ? row : app->browser.head + row - lead;
+}
+/* Rows' row: "Recent games", the recent rows and their show more, a page's headings and games; a game in the active
+   colour once activated, the pages before and after marked on the first game and the last */
+bool ui_games_rows_get_row_info(App* app, size_t row, UiRowInfo* info) {
+    static char label[400];
+    size_t lead = (size_t)games_lead(app), items = gui_browser_items(&app->browser), i, start;
+    start = app->browser.page * app->browser.page_size;
+    if (row == 0 && lead) {
+        info->label = snx_tr("Recent games");
+        info->attr = UI_ATTR_LABEL;
+        return true;
+    }
+    if (row < lead) {
+        int index = (int)row - 1;
+        snprintf(label, sizeof label, "%s",
+                 index < recent_shown(app) ? app->recent.game[index].name : snx_tr("...show more"));
+        info->label = label;
+        return true;
+    }
+    i = row - lead;
+    if (i >= items) return false;
+    if (gui_games_heading(&app->games, start + i)) { /* Recompiled, Dumps */
+        info->label = app->games.shown[start + i];
+        info->attr = UI_ATTR_LABEL;
+        return true;
+    }
+    game_label(app, &app->games, start + i, label, sizeof label);
+    info->label = label + strlen(app->theme.marker); /* ui_draw_row puts the marker */
+    if (app->browser.activated && app->browser.active == start + i) info->attr |= UI_ATTR_ACTIVE;
+    if (i == 0 && app->browser.page > 0) info->attr |= UI_ATTR_MORE_UP;
+    if (i + 1 == items && app->browser.page + 1 < gui_browser_pages(&app->browser)) info->attr |= UI_ATTR_MORE_DOWN;
+    return true;
+}
+/* a row hit: the focus on it, and a click opens it; "Recent games" is no row to take */
+void ui_games_rows_row_action_cb(App* app, size_t row, uint32_t hit) {
+    if (row == 0 && games_lead(app)) return;
+    app->browser.selected = games_selected(app, row);
+    if (hit & UI_HIT_CLICK) menu_key(app, GUI_SELECT);
+}
+void ui_games_add_add_a_folder_action_cb(App* app, uint32_t hit) {
+    app->browser.selected = 0;
+    if (hit & UI_HIT_CLICK) menu_key(app, GUI_SELECT);
 }
 /* the focused row of Games: what it is, about it, and a line more for a recent game's or a game's kind */
 static bool game_was_old(const App* app, const char* path);
@@ -3034,32 +3071,14 @@ static void game_label(const App* app, const GuiGames* games, size_t i, char* ou
 static void draw_games(App* app) {
     GuiGamesBoxes g;
     GuiRect r;
-    char label[400], line[1100], keys[256], kind[192];
+    char line[1100], keys[256], kind[192];
     const char *about, *name;
-    size_t i, items = gui_browser_items(&app->browser), head = app->browser.head;
+    size_t i;
     SDL_Color soft = rgb(app->theme.soft), ink = rgb(app->theme.ink);
-    int y, e;
+    int y;
     games_boxes(app, &g);
     chrome(app, &g.place);
-    snprintf(label, sizeof label, "%s%s", app->theme.marker, snx_tr("Add a folder"));
-    list_item(app, &g.add, 0, label, app->browser.selected == 0, false);
-    for (e = g.list.first; e < g.list.first + g.list.shown; ++e) {
-        if (e == 0 && g.lead)
-            list_label(app, &g.list, e, snx_tr("Recent games"));
-        else if (e < g.lead) {
-            recent_label(app, e - 1, label, sizeof label);
-            list_item(app, &g.list, e, label, app->browser.selected == (size_t)e, false);
-        } else {
-            i = (size_t)(e - g.lead);
-            if (gui_games_heading(&app->games, g.start + i)) { /* Recompiled, Dumps */
-                list_label(app, &g.list, e, app->games.shown[g.start + i]);
-                continue;
-            }
-            game_label(app, &app->games, g.start + i, label, sizeof label);
-            list_item(app, &g.list, e, label, app->browser.selected == head + i,
-                      app->browser.activated && app->browser.active == g.start + i);
-        }
-    }
+    ui_games_draw(app, g.rects, app->scale, g.lists);
     /* beside it the focused row: what it is and its path, whole; the page, and where the games are looked for. The
        tips say what it is (a game's kind) or does, which the box does not say again */
     name = games_focus(app, &g, &about, kind, sizeof kind);
@@ -3085,9 +3104,6 @@ static void draw_games(App* app) {
             y += wrap_in(app, r, r.x, y, app->folders[i], 1, soft) * cell_h(app);
         last_output(app, r, y);
     }
-    if (items) /* games on the pages before and after */
-        list_arrows(app, &g.list, g.lead, g.lead + (int)items - 1, app->browser.page > 0,
-                    app->browser.page + 1 < gui_browser_pages(&app->browser));
     status_box(app, g.place.status);
     screen_foot(app, &g.place, kind[0] ? kind : about, shown_keys(app, keys, sizeof keys));
 }
@@ -7915,6 +7931,7 @@ static int tab_hit(App* app, float x, float y) {
 static void screen_pointer(App* app, float x, float y, bool click, bool touch) {
     GuiMenuBoxes m;
     int i;
+    (void)touch; /* a finger takes a row anywhere on it, as a click does: the scenes' rows are whole */
     if ((i = tab_hit(app, x, y)) >= 0) {
         if (click) go_tab(app, i);
         return;
@@ -7925,14 +7942,11 @@ static void screen_pointer(App* app, float x, float y, bool click, bool touch) {
     }
     if (app->menu.view == GUI_LOAD_GAMES) {
         GuiGamesBoxes g;
+        size_t row;
+        uint32_t hit;
         games_boxes(app, &g);
-        if (list_hit(&g.add, x, y, touch) == 0)
-            app->browser.selected = 0;
-        else if ((i = list_hit(&g.list, x, y, touch)) > 0 || (i == 0 && !g.lead))
-            app->browser.selected = i < g.lead ? (size_t)i : app->browser.head + (size_t)(i - g.lead);
-        else
-            return; /* off them, or on the label */
-        if (click) menu_key(app, GUI_SELECT);
+        hit = ui_games_hit(app, g.rects, app->scale, g.lists, (int)x, (int)y, click ? UI_HIT_CLICK : 0, &i, &row);
+        if (hit) ui_games_act(app, i, row, hit);
         return;
     }
     if (pick_screen(app)) {
