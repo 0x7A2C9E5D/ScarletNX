@@ -1454,8 +1454,9 @@ static void drop_own(u32 i) {
 /* An own buffer is device memory the GPU reads at full speed, filled by a copy from this frame's staging ring. Mapped
    memory for it is the BAR's window on most GPUs (256 MB, which VMA prefers for host writes), and thousands of own
    buffers there crowded out the staging rings: one game's rings, made again in the window as they grew after loading,
-   took writes at a twentieth of their speed for minutes (18 to 25 fps against 43) */
-static int make_own(u32 i, const u8* src) {
+   took writes at a twentieth of their speed for minutes (18 to 25 fps against 43). sb at so is the entry's bytes, in
+   the staging ring already */
+static int make_own(u32 i, VkBuffer sb, u64 so) {
     Vb* e = &g_vb[i];
     u64 len = e->len;
     VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -1466,16 +1467,9 @@ static int make_own(u32 i, const u8* src) {
                                        VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                               .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
     VmaAllocationCreateInfo aci = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
-    VkBuffer b, sb;
+    VkBuffer b;
     VmaAllocation m;
-    u64 so;
     if (vmaCreateBuffer(g_vk.vma, &bci, &aci, &b, &m, NULL) != VK_SUCCESS) return 0;
-    u8* p = vk_stage_upload(len, vk_stage_align(), &sb, &so);
-    if (!p) {
-        vmaDestroyBuffer(g_vk.vma, b, m);
-        return 0;
-    }
-    memcpy(p, src, len);
     if (copy_stats_on()) g_copy_owned += len;
     vk_render_end(); /* copies happen outside rendering passes */
     VkBufferCopy r = {so, 0, len};
@@ -1575,7 +1569,17 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
     u32 wnow = vk_ww_now();
     const u8* src = guest_bytes(gva, len);
     if (!src) return 0;
-    u64 h = vk_hash(src, len);
+    /* Data without a buffer of its own goes into this frame's staging ring whatever its hash says, so it is copied as
+       it is hashed and read once: reading it twice, for the hash and then the copy, was half of one game's GPU thread */
+    VkBuffer sb = VK_NULL_HANDLE;
+    u64 so = 0, h;
+    u8* staged = NULL;
+    if (!e || !e->own) {
+        if (e) e->buf = VK_NULL_HANDLE; /* a failed allocation must not leave the old snapshot reusable */
+        if (!(staged = vk_stage_upload(len, vk_stage_align(), &sb, &so))) return 0;
+        h = vk_hash_copy(staged, src, len);
+    } else
+        h = vk_hash(src, len);
     if (!e) {
         if (!(i = vb_new(gva, (u32)len))) return 0;
         e = &g_vb[i];
@@ -1598,14 +1602,18 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
         e->shash = vk_sample_hash(gva, len);
         e->schk = g_vk_epoch;
     }
-    if (!e->own && !(e->stable >= 2 && make_own(i, src))) {
-        /* changing (or new) data: this frame's staging ring */
-        e->buf = VK_NULL_HANDLE; /* a failed allocation must not leave the old snapshot reusable */
-        u8* p = vk_stage_upload(len, vk_stage_align(), &e->buf, &e->off);
-        if (!p) return 0;
-        memcpy(p, src, len);
-        if (copy_stats_on()) g_copy_stage += len;
-        e->frame = vk_submit_number();
+    if (!e->own) {
+        if (!staged) { /* its own buffer was dropped above: the bytes changed */
+            if (!(staged = vk_stage_upload(len, vk_stage_align(), &sb, &so))) return 0;
+            memcpy(staged, src, len);
+        }
+        if (!(e->stable >= 2 && make_own(i, sb, so))) {
+            /* changing (or new) data: read from this frame's staging ring */
+            e->buf = sb;
+            e->off = so;
+            if (copy_stats_on()) g_copy_stage += len;
+            e->frame = vk_submit_number();
+        }
     }
     use(i, buf, off);
     return 1;

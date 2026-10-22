@@ -205,6 +205,7 @@ extern u32 g_vk_buffer_image_slots; /* storage texel buffer bindings in the comp
 /* the staging alignment that suits every use: uniform, storage, vertex and index buffers */
 u64 vk_stage_align(void);
 u64 vk_hash(const void* p, u64 size);
+u64 vk_hash_copy(void* dst, const void* src, u64 size); /* vk_hash(src, size), with src copied into dst on the way */
 /* a hash of guest memory: all of it when small, else its ends and 62 samples between them */
 u64 vk_sample_hash(u64 gva, u64 len);
 /* guest submits processed so far, and frames presented: what the caches check memory against */

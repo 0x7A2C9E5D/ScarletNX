@@ -87,6 +87,30 @@ u64 vk_hash(const void* p, u64 size) {
     for (u64 k = n * 8; k < size; k++) b = (b ^ ((const u8*)p)[k]) * 0x100000001B3ull;
     return a ^ (b << 1) ^ (c << 2) ^ (d << 3) ^ size;
 }
+u64 vk_hash_copy(void* dst, const void* src, u64 size) {
+    const u8* s = src;
+    u8* o = dst;
+    u64 n = size / 8, i = 0, w[4];
+    u64 a = 0x9E3779B97F4A7C15ull, b = 0xC2B2AE3D27D4EB4Full, c = 0x165667B19E3779F9ull, d = 0x27D4EB2F165667C5ull;
+    for (; i + 3 < n; i += 4) {
+        memcpy(w, s + 8 * i, sizeof w);
+        memcpy(o + 8 * i, w, sizeof w);
+        a = (a ^ w[0]) * 0x100000001B3ull;
+        b = (b ^ w[1]) * 0x100000001B3ull;
+        c = (c ^ w[2]) * 0x100000001B3ull;
+        d = (d ^ w[3]) * 0x100000001B3ull;
+    }
+    for (; i < n; i++) {
+        memcpy(w, s + 8 * i, 8);
+        memcpy(o + 8 * i, w, 8);
+        a = (a ^ w[0]) * 0x100000001B3ull;
+    }
+    for (u64 k = n * 8; k < size; k++) {
+        o[k] = s[k];
+        b = (b ^ s[k]) * 0x100000001B3ull;
+    }
+    return a ^ (b << 1) ^ (c << 2) ^ (d << 3) ^ size;
+}
 
 u64 vk_sample_hash(u64 gva, u64 len) {
     u8 tmp[2048 + 128];
