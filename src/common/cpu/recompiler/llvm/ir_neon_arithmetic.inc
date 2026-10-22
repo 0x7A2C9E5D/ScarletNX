@@ -184,7 +184,7 @@ static V long_op(SnxIr* ir, unsigned op, unsigned u, V a, V b, V z) {
     }
 }
 
-/* SSHL, USHL, SRSHL, URSHL, SQSHL, UQSHL, SQRSHL, UQRSHL (register): vshl (helpers/simd.c) on 64-bit copies of the
+/* SSHL, USHL, SRSHL, URSHL, SQSHL, UQSHL, SQRSHL, UQRSHL (register): vshl (tests/a64_reference/simd.c) on 64-bit copies of the
    lanes, the shift the signed low byte of b's lane. Every shift amount is clamped below 64 and the cases it would
    change are selected away: LLVM's shifts by the width or more are poison. QC lanes go to *saturated */
 static V register_shift(SnxIr* ir, V a, V b, unsigned u, unsigned round, unsigned sat) {
@@ -569,7 +569,7 @@ static V u32_helper(SnxIr* ir, const char* name, V x) {
     return ir_call(ir, ir_extern(ir, name, ir->t_i32, p, 1), &x, 1);
 }
 
-/* one lane through the helper simd_3same's and simd_2misc's loops call (helpers/simd.c), as iN */
+/* one lane through the helper simd_3same's and simd_2misc's loops call (tests/a64_reference/simd.c), as iN */
 static V fp_lane(SnxIr* ir, const FpOp* op, V a, V b, unsigned width) {
     switch (op->kind) {
         case FP_LANES_ADD: return ir_fp_binary(ir, a, b, width, 0);  /* SNX_FP_ADD */

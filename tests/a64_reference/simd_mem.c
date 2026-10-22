@@ -2,6 +2,13 @@
    Copyright 2026 the ScarletNX contributors
    Ported from QEMU (target/arm/tcg/translate-a64.c), LGPL-2.1-or-later:
    Copyright (c) 2013 Alexander Graf <agraf@suse.de> */
+/* ================================================================================================
+   TEST ONLY. NOT IN PRODUCTION.
+   tests/a64_reference/reference.inc includes this file; cpu_helpers.c includes that only under
+   SNX_A64_REFERENCE. It is the C reference interpreter the differential tests compare the LLVM
+   backend against. No game module compiles it, no runtime path calls it. Its job is to be the slow,
+   obvious oracle, so do not optimize it for speed.
+   ================================================================================================ */
 /* AdvSIMD loads and stores for the C reference interpreter (SNX_A64_REFERENCE): LD1-LD4/ST1-ST4 of multiple
    structures, of a single structure, and LD1R-LD4R, with no offset or post-indexed. Lanes are little-endian in guest
    memory as in the registers. This file also has the reference dispatcher, snx_simd, below simd_ldst. */

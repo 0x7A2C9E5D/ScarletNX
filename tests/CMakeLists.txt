@@ -84,8 +84,10 @@ function(snx_sanitizer_path)
     endif()
 endfunction()
 # cpu_helpers.c built as the game's helpers are (snx_rtlib_flags in src/common/cpu/recompiler/llvm/CMakeLists.txt),
-# with -mcx16 on x86-64: its 16-byte compare-and-swap is then lock cmpxchg16b, not a libatomic call
+# with -mcx16 on x86-64: its 16-byte compare-and-swap is then lock cmpxchg16b, not a libatomic call. Under
+# SNX_A64_REFERENCE it includes a64_reference/reference.inc from here, so the tests directory is on the path.
 function(snx_cpu_helpers_flags target)
+    target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     if(snx_test_x86)
         target_compile_options(${target} PRIVATE -mcx16)
     endif()

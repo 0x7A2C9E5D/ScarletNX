@@ -2,6 +2,14 @@
    Copyright 2026 the ScarletNX contributors
    Ported from QEMU (target/arm/tcg/crypto_helper.c), LGPL-2.1-or-later:
    Copyright (C) 2013 - 2018 Linaro Ltd <ard.biesheuvel@linaro.org> */
+/* ================================================================================================
+   BUILD SCOPE. READ BEFORE OPTIMIZING.
+   NOT in a 64-bit game module's runtime library: tests/a64_reference/reference.inc includes it, and
+   cpu_helpers.c includes that only under SNX_A64_REFERENCE, so for A64 it is the reference
+   interpreter and the differential tests' oracle.
+   It IS production for 32-bit games: arm/crypto_helpers.c includes it, and armlib.c links that into
+   every 32-bit module. The 64-bit production crypto path is ir_neon_crypto.inc, not this file.
+   ================================================================================================ */
 /* The Cortex-A57's crypto extension: AESE/AESD/AESMC/AESIMC, SHA-1, SHA-256 and the 64-bit PMULL, on the vector
    registers in plain C. The A32 backend compiles this file again under other names (arm/crypto_helpers.c). */
 
@@ -187,15 +195,27 @@ void v_sha256(CPU* c, u32 op, u32 d, u32 n, u32 m) {
     c->v[d] = sha_words(x);
 }
 
-/* PMULL/PMULL2 of 64-bit lanes: the carry-less product of the low (or high) doublewords, 128 bits */
+/* PMULL/PMULL2 of 64-bit lanes: the carry-less product of the low (or high) doublewords, 128 bits. With x split into
+   two 32-bit halves and y into four classes (one bit in four), each 8-by-16-bit product's output bit counts at most 8
+   pairs, so a class's counts fit in four bits and no carry reaches the next position of that class; the classes and
+   halves are XORed back. 32 multiplies, no data-dependent branches */
 void v_pmull(V128* d, const V128* a, const V128* b, int hi) {
-    u64 x = SNX_VD(*a, hi ? 1 : 0), y = SNX_VD(*b, hi ? 1 : 0), lo = 0, high = 0;
-    int i;
-    for (i = 0; i < 64; ++i)
-        if ((y >> i) & 1) {
-            lo ^= x << i;
-            if (i) high ^= x >> (64 - i);
+    __extension__ typedef unsigned __int128 u128;
+    static const u64 m = 0x1111111111111111ULL;
+    u64 x = SNX_VD(*a, hi ? 1 : 0), y = SNX_VD(*b, hi ? 1 : 0);
+    u128 r = 0;
+    int h, c, i;
+    for (h = 0; h < 2; ++h) {
+        u64 half = h ? x >> 32 : x & 0xFFFFFFFFULL;
+        u128 part = 0;
+        for (c = 0; c < 4; ++c) {
+            u128 z = 0;
+            for (i = 0; i < 4; ++i) z ^= (u128)(half & (m << i)) * (y & (m << ((c - i) & 3)));
+            z &= (u128)(m << c) | ((u128)(m << c) << 64);
+            part |= z;
         }
-    SNX_VSET_D(*d, 0, lo);
-    SNX_VSET_D(*d, 1, high);
+        r ^= h ? part << 32 : part;
+    }
+    SNX_VSET_D(*d, 0, (u64)r);
+    SNX_VSET_D(*d, 1, (u64)(r >> 64));
 }
