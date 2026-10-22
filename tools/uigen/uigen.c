@@ -39,12 +39,13 @@
    An item of a list is a row: it takes attr, color, key and for-platform alone, and shows its "Text". attr = callback:
    the code gives the button or row its UI_ATTR_* bits as it is drawn (failure, blink, active); on a list with items,
    any row's by its index. for-platform (android or desktop) is a row's alone: a scene's items keep their places on
-   every platform, though a list's row_height, row_gap and max_rows may take a platform's own value
-   (android.row_height = 40px; desktop. too). color is a theme colour by its theme.ini name. key is an ASCII character or f1 to f12 after ctrl-
+   every platform, though an item's width and height, and a list's row_height, row_gap and max_rows, may take a
+   platform's own value (android.row_height = 40px; desktop. too), the scene laid out for each platform. color is a theme colour by its theme.ini name. key is an ASCII character or f1 to f12 after ctrl-
    or alt- (alt-f4), a hotkey of its scene (Enter is the click's).
    The callbacks, main.c's: a button's ui_<symbol>_action_cb(App*, uint32_t hit); a named label's
    ui_<symbol>_update_cb(App*, char* text, size_t size); a list without items' ui_<symbol>_get_row_info(App*, size_t
-   row, UiRowInfo*) (false past its last row: the row and those after it are not shown) and
+   row, UiRowInfo*) (false past its last row: the row and those after it are not shown; its label is used before
+   the next call, so a buffer of the code's does) and
    ui_<symbol>_row_action_cb(App*, size_t row, uint32_t hit); with attr = callback, unsigned ui_<symbol>_attr_cb(App*),
    a list's with size_t row after it.
    A hover calls the same action as a click: hit has UI_HIT_HOVER, and UI_HIT_CLICK or UI_HIT_RELEASE when one made
@@ -145,10 +146,11 @@ typedef struct {
     int color, platform;                /* color: an index in colors + 1, 0 for none */
     int key, fkey, mods;                /* key: an ASCII character; fkey: 1 to 12 for F1 to F12 */
     int key_line;
-    int plat_value[3][P_COUNT]; /* a platform's own row metrics (android.row_height), by PLATFORM_* */
+    int plat_value[3][P_COUNT]; /* a platform's own values (android.height), by PLATFORM_* */
+    int plat_unit[3][P_COUNT];
     unsigned plat_set[3];
     int children, offset;
-    Lin x, y, w, h; /* its rectangle in its scene's area, a scene's own item */
+    Lin x[3], y[3], w[3], h[3]; /* its rectangle in its scene's area, a scene's own item, by PLATFORM_* */
 } Item;
 
 static struct {
@@ -404,19 +406,24 @@ static void parse_key(Item* it, const char* value, int line) {
     it->key_line = line;
 }
 static void set_property(Item* it, char* word, char* value, int line);
-/* a platform's own row metric, android.row_height = 40px: checked as the plain one is, the list's rows take it there */
+/* a platform's own width, height, or list's row metric, android.row_height = 40px: checked as the plain one is, its
+   layout and rows take it there */
 static void set_platform_property(Item* it, int on, char* word, char* value, int line) {
     static const char* const platforms[] = {"", "android", "desktop"};
-    unsigned metrics = BIT(P_ROW_HEIGHT) | BIT(P_ROW_GAP) | BIT(P_MAX_ROWS);
+    unsigned own =
+        BIT(P_WIDTH) | BIT(P_HEIGHT) | (it->type == T_LIST ? BIT(P_ROW_HEIGHT) | BIT(P_ROW_GAP) | BIT(P_MAX_ROWS) : 0);
     int p = property_of(word);
     Item checked = {0};
-    if (it->type != T_LIST || p < 0 || !(metrics & BIT(p)))
-        fail(line, "%s.%s: a platform's own value is a list's row_height, row_gap or max_rows", platforms[on], word);
-    if (it->plat_set[on] & BIT(p)) fail(line, "%s.%s is set twice for one list", platforms[on], word);
+    if (it->type == T_SCENE || p < 0 || !(own & BIT(p)))
+        fail(line, "%s.%s: a platform's own value is a width, a height, or a list's row_height, row_gap or max_rows",
+             platforms[on], word);
+    if (it->plat_set[on] & BIT(p))
+        fail(line, "%s.%s is set twice for one %s", platforms[on], word, type_words[it->type]);
     checked.type = it->type;
     checked.parent = it->parent;
     set_property(&checked, word, value, line);
     it->plat_value[on][p] = checked.value[p];
+    it->plat_unit[on][p] = checked.unit[p];
     it->plat_set[on] |= BIT(p);
 }
 static void set_property(Item* it, char* word, char* value, int line) {
@@ -663,14 +670,21 @@ static Lin lin_add(Lin x, Lin y) { return lin(x.a + y.a, x.c + y.c); }
 static Lin lin_sub(Lin x, Lin y) { return lin(x.a - y.a, x.c - y.c); }
 static Lin lin_times(Lin x, double k) { return lin(x.a * k, x.c * k); }
 
-/* an item's length on an axis: a property set (px, or a % of the parent's inside), else none (-1 in *has) */
-static Lin length_of(const Item* it, int p, Lin inside, int* has) {
+/* an item's length on an axis on platform on: its own there, else the property set (px, or a % of the parent's
+   inside), else none (0 in *has) */
+static Lin length_of(const Item* it, int p, Lin inside, int* has, int on) {
+    int value = it->value[p], unit = it->unit[p];
     *has = (it->set & BIT(p)) != 0;
+    if (on != PLATFORM_ANY && (it->plat_set[on] & BIT(p))) {
+        *has = 1;
+        value = it->plat_value[on][p];
+        unit = it->plat_unit[on][p];
+    }
     if (!*has) return lin(0, 0);
-    if (it->unit[p] == UNIT_PX) return lin(0, it->value[p]);
-    return lin_times(inside, it->value[p] / 100.0);
+    if (unit == UNIT_PX) return lin(0, value);
+    return lin_times(inside, value / 100.0);
 }
-static void layout_scene(int scene) {
+static void layout_scene(int scene, int on) {
     Item* s = &g_uigen.items[scene];
     int dir = s->value[P_DIRECTION], align = s->value[P_ALIGN], justify = s->value[P_JUSTIFY];
     double gap = s->value[P_GAP], pad = s->value[P_PADDING];
@@ -682,7 +696,7 @@ static void layout_scene(int scene) {
         Item* it = &g_uigen.items[i];
         int has;
         if (it->parent != scene) continue;
-        size[i] = length_of(it, main_p, inside, &has);
+        size[i] = length_of(it, main_p, inside, &has, on);
         grow[i] = (it->set & BIT(P_GROW)) ? it->value[P_GROW] : !has && it->type == T_LIST;
         if (!has && !grow[i]) size[i] = lin(0, ROW_HEIGHT); /* a button's or a label's row */
         if (grow[i] && has)
@@ -702,21 +716,21 @@ static void layout_scene(int scene) {
         int has;
         if (it->parent != scene) continue;
         if (grow[i]) size[i] = lin_times(free_len, grow[i] / grows);
-        cross = length_of(it, cross_p, inside, &has);
+        cross = length_of(it, cross_p, inside, &has, on);
         if (!has) cross = inside; /* stretched, and the whole inside whatever the align when it has no length */
         offset = lin(0, pad);
         if (align == A_CENTER) offset = lin_add(offset, lin_times(lin_sub(inside, cross), 0.5));
         if (align == A_END) offset = lin_add(offset, lin_sub(inside, cross));
         if (dir == COLUMN) {
-            it->y = at;
-            it->h = size[i];
-            it->x = offset;
-            it->w = cross;
+            it->y[on] = at;
+            it->h[on] = size[i];
+            it->x[on] = offset;
+            it->w[on] = cross;
         } else {
-            it->x = at;
-            it->w = size[i];
-            it->y = offset;
-            it->h = cross;
+            it->x[on] = at;
+            it->w[on] = size[i];
+            it->y[on] = offset;
+            it->h[on] = cross;
         }
         at = lin_add(lin_add(at, size[i]), lin(0, gap));
     }
@@ -779,14 +793,18 @@ static void write_h(const char* path) {
         "   how it is drawn */\ntypedef struct {\n    const char* label;\n    unsigned attr;\n} UiRowInfo;\n");
     outs(
         "/* how a row is drawn, a bit each: in the failure colour, every other blink, an arrow up (rows above it are\n"
-        "   hidden) or down (rows below) at its right, in the active colour (the one activated last) */\nenum { "
-        "UI_ATTR_FAILURE = 1, UI_ATTR_BLINK = 2, UI_ATTR_MORE_UP = 4, UI_ATTR_MORE_DOWN = 8, UI_ATTR_ACTIVE = 16 };\n");
+        "   hidden) or down (rows below) at its right, in the active colour (the one activated last), a label between\n"
+        "   rows (no box) */\nenum { UI_ATTR_FAILURE = 1, UI_ATTR_BLINK = 2, UI_ATTR_MORE_UP = 4, UI_ATTR_MORE_DOWN = 8, "
+        "UI_ATTR_ACTIVE = 16, UI_ATTR_LABEL = 32 };\n");
     outs("enum { UI_MOD_CTRL = 1, UI_MOD_ALT = 2 };\n");
     outs("/* what the hit test says of a point, a bit each: on an item, pressed on it, released on it */\nenum { "
          "UI_HIT_HOVER = 1, UI_HIT_CLICK = 2, UI_HIT_RELEASE = 4 };\n");
-    outs("/* the drawing, main.c's: a row (a list's, or a button) and a label, in the theme's look */\n"
-         "void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned attr, bool focused);\n"
-         "void ui_draw_label(App* app, GuiRect r, const char* text, unsigned color);\n");
+    outs(
+        "/* the drawing, main.c's: a row (a list's, or a button) and a label, in the theme's look, their text as given; a\n"
+        "   text of ui.txt as shown (translated) */\n"
+        "void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned attr, bool focused);\n"
+        "void ui_draw_label(App* app, GuiRect r, const char* text, unsigned color);\n"
+        "const char* ui_tr(const char* english);\n");
     for (i = 0; i < g_uigen.nitems; i++) {
         const Item* s = &g_uigen.items[i];
         if (s->type != T_SCENE) continue;
@@ -897,6 +915,43 @@ static void out_metrics(int scene) {
         }
     }
 }
+/* whether a scene's layout differs on a platform, one setting its own lengths */
+static int layout_varies(int scene) {
+    int i, on;
+    for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++) {
+        const Item* it = &g_uigen.items[i];
+        for (on = PLATFORM_ANDROID; on <= PLATFORM_DESKTOP; on++)
+            if (fixed(it->x[on].a) != fixed(it->x[0].a) || fixed(it->x[on].c) != fixed(it->x[0].c) ||
+                fixed(it->y[on].a) != fixed(it->y[0].a) || fixed(it->y[on].c) != fixed(it->y[0].c) ||
+                fixed(it->w[on].a) != fixed(it->w[0].a) || fixed(it->w[on].c) != fixed(it->w[0].c) ||
+                fixed(it->h[on].a) != fixed(it->h[0].a) || fixed(it->h[on].c) != fixed(it->h[0].c))
+                return 1;
+    }
+    return 0;
+}
+/* a scene's rectangles on platform on */
+static void out_layout(int scene, int on) {
+    int i;
+    for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++) {
+        const Item* it = &g_uigen.items[i];
+        if (it->parent != scene) {
+            out_platform(it);
+            out("    r[%s] = gui_rect(0, 0, 0, 0);\n", it->upper);
+            out_platform_end(it);
+            continue;
+        }
+        out_from(it->line);
+        out("    r[%s] = gui_rect(", it->upper);
+        out_at("at.x", "at.w", it->x[on]);
+        outs(", ");
+        out_at("at.y", "at.h", it->y[on]);
+        outs(", ");
+        out_at("", "at.w", it->w[on]);
+        outs(", ");
+        out_at("", "at.h", it->h[on]);
+        outs(");\n");
+    }
+}
 /* row i of list item l (its rows' metrics as ui.txt sets them), in its rectangle r[l] */
 static void out_row(const Item* list, int l, const char* i) {
     char rect[64];
@@ -959,26 +1014,19 @@ static void write_scene(int scene) {
         outs("};\n");
     }
     out_metrics(scene);
-    /* the layout: each item of the scene at its fractions of the area and its pixels times the scale */
+    /* the layout: each item of the scene at its fractions of the area and its pixels times the scale; a platform's
+       own where one sets its own lengths */
     out("void %s_layout(GuiRect at, int scale, GuiRect* r) {\n    int s = scale;\n", s->symbol);
-    for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++) {
-        const Item* it = &g_uigen.items[i];
-        if (it->parent != scene) {
-            out_platform(it);
-            out("    r[%s] = gui_rect(0, 0, 0, 0);\n", it->upper);
-            out_platform_end(it);
-            continue;
-        }
-        out_from(it->line);
-        out("    r[%s] = gui_rect(", it->upper);
-        out_at("at.x", "at.w", it->x);
-        outs(", ");
-        out_at("at.y", "at.h", it->y);
-        outs(", ");
-        out_at("", "at.w", it->w);
-        outs(", ");
-        out_at("", "at.h", it->h);
-        outs(");\n");
+    if (!layout_varies(scene))
+        out_layout(scene, PLATFORM_ANY);
+    else {
+        outs("#ifdef SDL_PLATFORM_ANDROID\n");
+        out_layout(scene, PLATFORM_ANDROID);
+        outs("#elif !defined(SDL_PLATFORM_IOS)\n");
+        out_layout(scene, PLATFORM_DESKTOP);
+        outs("#else\n");
+        out_layout(scene, PLATFORM_ANY);
+        outs("#endif\n");
     }
     out_here();
     outs("}\n");
@@ -1068,34 +1116,35 @@ static void write_scene(int scene) {
                 it->symbol, it->symbol);
             out("        ui_draw_row(app, ");
             out_row(it, i, "i");
-            out(", %s_texts + %s_items[item].text, %s_items[item].color ? %s_items[item].color : %s_items[%s].color, "
-                "attr,\n                    row == lists[%s].focus);\n    }\n",
+            out(", ui_tr(%s_texts + %s_items[item].text), %s_items[item].color ? %s_items[item].color : "
+                "%s_items[%s].color, attr,\n                    row == lists[%s].focus);\n    }\n",
                 s->symbol, s->symbol, s->symbol, s->symbol, s->symbol, it->upper, it->upper);
         } else if (it->type == T_LIST) {
             out("    n = %s_shown(r, scale, %s);\n", s->symbol, it->upper);
             out("    for (i = 0; i < n; i++) {\n        size_t row = lists[%s].first + i;\n        UiRowInfo next;\n",
                 it->upper);
+            /* the row after it asked first: the row's own label may be a buffer of the code's the next call writes */
+            out("        bool more = i + 1 == n && %s_get_row_info(app, row + 1, &next);\n", it->symbol);
             out("        info.label = NULL;\n        info.attr = 0;\n        if (!%s_get_row_info(app, row, &info)) "
                 "break;\n",
                 it->symbol);
             outs("        if (i == 0 && row > 0) info.attr |= UI_ATTR_MORE_UP;\n");
-            out("        if (i + 1 == n && %s_get_row_info(app, row + 1, &next)) info.attr |= UI_ATTR_MORE_DOWN;\n",
-                it->symbol);
+            outs("        if (more) info.attr |= UI_ATTR_MORE_DOWN;\n");
             outs("        ui_draw_row(app, ");
             out_row(it, i, "i");
             out(", info.label ? info.label : \"(null)\", %s_items[%s].color, info.attr,\n                    row == "
                 "lists[%s].focus);\n    }\n",
                 s->symbol, it->upper, it->upper);
         } else if (it->type == T_BUTTON) {
-            out("    ui_draw_row(app, r[%s], %s_texts + %d, %s_items[%s].color, ", it->upper, s->symbol, it->offset,
-                s->symbol, it->upper);
+            out("    ui_draw_row(app, r[%s], ui_tr(%s_texts + %d), %s_items[%s].color, ", it->upper, s->symbol,
+                it->offset, s->symbol, it->upper);
             if (has_attr(it))
                 out("%s_attr_cb(app), false);\n", it->symbol);
             else
                 outs("0, false);\n");
         } else if (it->text)
-            out("    ui_draw_label(app, r[%s], %s_texts + %d, %s_items[%s].color);\n", it->upper, s->symbol, it->offset,
-                s->symbol, it->upper);
+            out("    ui_draw_label(app, r[%s], ui_tr(%s_texts + %d), %s_items[%s].color);\n", it->upper, s->symbol,
+                it->offset, s->symbol, it->upper);
         else
             out("    %s_update_cb(app, text, sizeof text);\n    ui_draw_label(app, r[%s], text, %s_items[%s].color);\n",
                 it->symbol, it->upper, s->symbol, it->upper);
@@ -1248,7 +1297,11 @@ int main(int argc, char** argv) {
     for (i = 0; i < g_uigen.nitems && g_uigen.items[i].type != T_SCENE; i++) continue;
     if (i == g_uigen.nitems) fail(0, "no scene in %s", g_uigen.spec_path);
     for (i = 0; i < g_uigen.nitems; i++)
-        if (g_uigen.items[i].type == T_SCENE) layout_scene(i);
+        if (g_uigen.items[i].type == T_SCENE) {
+            layout_scene(i, PLATFORM_ANY);
+            layout_scene(i, PLATFORM_ANDROID);
+            layout_scene(i, PLATFORM_DESKTOP);
+        }
     h = cat3(dir, "/", "gui/ui.h");
     c = cat3(dir, "/", "gui/ui.c");
     write_h(h);

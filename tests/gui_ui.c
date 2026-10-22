@@ -41,6 +41,7 @@ void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned
     d->focused = focused;
     d->label = 0;
 }
+const char* ui_tr(const char* english) { return english; }
 void ui_draw_label(App* app, GuiRect r, const char* text, unsigned color) {
     ui_draw_row(app, r, text, color, 0, false);
     g_gui_ui.drawn[g_gui_ui.ndrawn - 1].label = 1;

@@ -49,6 +49,7 @@ ${T}${T}key = D
 ${T}}
 ${T}[list]More {
 ${T}${T}attr = callback
+${T}${T}android.height = 40px
 ${T}${T}android.row_height = 40px
 ${T}${T}desktop.max_rows = 4
 ${T}${T}[button]\"One\" {}
@@ -115,12 +116,20 @@ foreach(line
         "static unsigned ui_main_attr(App* app, int item) {\n    (void)app;\n    switch (item) {\n"
         "        case UI_MAIN_LOAD_LIST_DROP: return ui_main_load_list_drop_attr_cb(app);\n"
         "        unsigned attr = ui_main_attr(app, item);\n        if (i == 0 && row > 0) attr |= UI_ATTR_MORE_UP;\n        if (i + 1 == n && row + 1 < sizeof ui_main_load_list_rows / sizeof *ui_main_load_list_rows) attr |= UI_ATTR_MORE_DOWN;\n"
-        "        if (i + 1 == n && ui_main_games_get_row_info(app, row + 1, &next)) info.attr |= UI_ATTR_MORE_DOWN;\n"
+        # a list without items asks for the row after the last one shown first: the row's own label may be a buffer the
+        # next call writes
+        "        bool more = i + 1 == n && ui_main_games_get_row_info(app, row + 1, &next);\n        info.label = NULL;\n        info.attr = 0;\n        if (!ui_main_games_get_row_info(app, row, &info)) break;\n        if (i == 0 && row > 0) info.attr |= UI_ATTR_MORE_UP;\n        if (more) info.attr |= UI_ATTR_MORE_DOWN;\n"
+        # ui.txt's texts as shown, through main.c's ui_tr
+        "ui_tr(ui_main_texts + ui_main_items[item].text)"
         "        unsigned attr = ui_other_more_attr_cb(app, row);\n"
         # a platform's own metric: a macro each platform defines, the plain value or the default where it sets none
         "#ifdef SDL_PLATFORM_ANDROID\n#define UI_OTHER_MORE__ROW_HEIGHT 40\n#elif !defined(SDL_PLATFORM_IOS)\n#define UI_OTHER_MORE__ROW_HEIGHT 17\n#else\n#define UI_OTHER_MORE__ROW_HEIGHT 17\n#endif\n"
         "#ifdef SDL_PLATFORM_ANDROID\n#define UI_OTHER_MORE__MAX_ROWS 8\n#elif !defined(SDL_PLATFORM_IOS)\n#define UI_OTHER_MORE__MAX_ROWS 4\n#else\n#define UI_OTHER_MORE__MAX_ROWS 8\n#endif\n"
         "case UI_OTHER_MORE: return ui_shown(r[UI_OTHER_MORE].h, UI_OTHER_MORE__ROW_HEIGHT, 2, UI_OTHER_MORE__MAX_ROWS, scale);\n"
+        # a platform's own height: the scene laid out for each platform, Android's More 40px, the others' growing
+        "void ui_other_layout(GuiRect at, int scale, GuiRect* r) {\n    int s = scale;\n#ifdef SDL_PLATFORM_ANDROID\n"
+        "    r[UI_OTHER_MORE] = gui_rect(at.x + UI_AT(0L, at.w, 0L, s), at.y + UI_AT(0L, at.h, 1114112L, s), UI_AT(65536L, at.w, 0L, s), UI_AT(0L, at.h, 2621440L, s));\n"
+        "    r[UI_OTHER_MORE] = gui_rect(at.x + UI_AT(0L, at.w, 0L, s), at.y + UI_AT(0L, at.h, 1114112L, s), UI_AT(65536L, at.w, 0L, s), UI_AT(65536L, at.h, -1114112L, s));\n"
         "bool ui_main_spare_get_row_info(App* app, size_t row, UiRowInfo* info) {\n    (void)app;\n    (void)row;\n    (void)info;\n    return false;\n}\n")
     string(FIND "${c}" "${line}" at)
     if(at LESS 0)
@@ -203,8 +212,8 @@ refused(row_bounds "${S}${T}[list]L {\n${T}${T}min_row_width = 300px\n${T}${T}ma
 refused(label_attr "${S}${T}[label]\"A\" {\n${T}${T}attr = callback\n${T}}\n}\n" "3: attr is not a property of a label: it takes width, height, grow, color, for-platform")
 refused(attr "${S}${T}[button]\"A\" {\n${T}${T}attr = always\n${T}}\n}\n" "3: attr = always: it is callback")
 refused(rows_attr "${S}${T}[list]L {\n${T}${T}attr = callback\n${T}}\n}\n" "2: attr = callback on a list without items: its get_row_info gives each row's attr")
-refused(platform_width "${S}${T}[list]L {\n${T}${T}android.width = 10px\n${T}}\n}\n" "3: android.width: a platform's own value is a list's row_height, row_gap or max_rows")
-refused(platform_button "${S}${T}[button]\"A\" {\n${T}${T}desktop.row_gap = 4px\n${T}}\n}\n" "3: desktop.row_gap: a platform's own value is a list's row_height, row_gap or max_rows")
+refused(platform_gap "[scene]S {\n${T}android.gap = 10px\n}\n" "2: android.gap: a platform's own value is a width, a height, or a list's row_height, row_gap or max_rows")
+refused(platform_button "${S}${T}[button]\"A\" {\n${T}${T}desktop.row_gap = 4px\n${T}}\n}\n" "3: desktop.row_gap: a platform's own value is a width, a height, or a list's row_height, row_gap or max_rows")
 refused(platform_value "${S}${T}[list]L {\n${T}${T}android.row_height = 5%\n${T}}\n}\n" "3: row_height = 5%: pixels end in px")
 refused(platform_twice "${S}${T}[list]L {\n${T}${T}android.row_gap = 4px\n${T}${T}android.row_gap = 6px\n${T}}\n}\n" "4: android.row_gap is set twice for one list")
 refused(table_name "${S}${T}[list]Layout {}\n}\n" "2: ui_s_layout is the scene's own table or function: name it otherwise")
