@@ -150,7 +150,7 @@ static void trace_packet(const SnxCtrProcess* p, const char* direction, const ui
     for (unsigned i = 0; i < size && i < 96; ++i) fprintf(stderr, "%02x", bytes[i]);
     fputc('\n', stderr);
 }
-static void signal(SnxCtrProcess* p, uint32_t id) {
+static void signal_event(SnxCtrProcess* p, uint32_t id) {
     if (id && p->objects[id].type == CTR_OBJ_EVENT) {
         p->objects[id].data.event.signaled = 1;
         snx_ctr_wake_waiters(p, id);
@@ -240,7 +240,7 @@ static void clear_bindings(SnxCtrProcess* p) {
     struct SnxCtrUds* u = p->uds;
     for (unsigned i = 0; i < 16; i++)
         if (u->binds[i].event) {
-            signal(p, u->binds[i].event);
+            signal_event(p, u->binds[i].event);
             snx_ctr_object_release(p, u->binds[i].event);
         }
     memset(u->binds, 0, sizeof u->binds);
@@ -257,7 +257,7 @@ void snx_ctr_uds_close(SnxCtrProcess* p) {
     free(u);
     p->uds = NULL;
 }
-static void status_changed(SnxCtrProcess* p) { signal(p, p->uds->event); }
+static void status_changed(SnxCtrProcess* p) { signal_event(p, p->uds->event); }
 uint64_t snx_ctr_uds_rtt_ns(const SnxCtrProcess* p) { return p->uds ? p->uds->rtt_ns : 0; }
 void snx_ctr_uds_poll(SnxCtrProcess* p) {
     struct SnxCtrUds* u = p->uds;
@@ -367,7 +367,7 @@ void snx_ctr_uds_poll(SnxCtrProcess* p) {
                 memcpy(q->bytes, v + 6, payload);
                 ++k->count;
                 k->used += payload;
-                signal(p, k->event);
+                signal_event(p, k->event);
             }
         } else if ((type == MSG_LEAVE || type == MSG_CLOSE) && !size && session == u->session &&
                    !memcmp(from.addr, u->peer, 4)) {
@@ -922,7 +922,7 @@ void snx_ctr_uds_dispatch(SnxCtrIpc* c) {
                         --k->count;
                         k->head = (k->head + 1) % UDS_QUEUE;
                     }
-                    if (k->count) signal(c->process, k->event);
+                    if (k->count) signal_event(c->process, k->event);
                     return;
                 }
             reply(c, 1, 0, UDS_NOT_FOUND);

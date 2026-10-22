@@ -265,12 +265,17 @@ int main(int argc, char** argv) {
     assert(bad.state == SNX_CTR_IPC_UNSUPPORTED);
     uint32_t disconnect[] = {0xa0000};
     request(client, client_h, disconnect, 1);
-    for (unsigned i = 0; i < 100; i++) {
+    /* The delayed relay takes at least 120 ms to forward LEAVE. Wait for the
+       observed node count, not 100 nominal 1 ms sleeps (which passed only on
+       hosts whose sleep overshot enough). Keep failure bounded in wall time. */
+    int64_t disconnect_deadline = snx_net_now_us() + 3000000;
+    do {
         snx_ctr_uds_poll(host);
+        request(host, host_h, status, 1);
+        assert(get(host, COMMAND + 8) == 6);
+        if ((get(host, COMMAND + 52) & 255) == 1) break;
         snx_net_sleep_us(1000);
-    }
-    request(host, host_h, status, 1);
-    assert(get(host, COMMAND + 8) == 6);
+    } while (snx_net_now_us() < disconnect_deadline);
     assert((get(host, COMMAND + 52) & 255) == 1);
     /* The scanning caller sleeps while another guest thread remains runnable. */
     uint32_t worker = 0;
