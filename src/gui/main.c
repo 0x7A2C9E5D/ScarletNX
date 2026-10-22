@@ -100,7 +100,21 @@ enum { GUI_GROUP_APP, GUI_GROUP_RECOMPILED, GUI_GROUP_DUMPS, GUI_FOLDER_GROUPS }
 #define GUI_VIEW_ROWS    24    /* a group's rows shown as a view of them */
 #define SNX_GUI_PLAYERS  8     /* Controllers' players, as the runtime's gamepad_p<N>_ keys */
 /* Settings > App > Folders' rows, its last aside: the app's two, then each library's Main, its Extras and Add a folder */
-#define GUI_FOLDER_ROWS  (GUI_PLACES + 1 + GUI_FOLDERS_MAX + 2)
+#define GUI_FOLDER_ROWS (GUI_PLACES + 1 + GUI_FOLDERS_MAX + 2)
+/* the game folders watched on a thread of their own: listing them, a library's with its subfolders, can keep a busy
+   disk a while, the window frozen if the menu's thread waited for it. Once a second the thread hashes what they hold
+   (stamp_dirs); the menu hands it the folders (watch_set) and takes the last hash of those (watch_get) */
+#define GUI_WATCH_DIRS  (GUI_FOLDERS_MAX + 3) /* recompiled/, the player's folders, dumps/, an older version's games/ */
+typedef struct {
+    SDL_Mutex* lock;
+    SDL_Thread* thread;
+    char* dirs[GUI_WATCH_DIRS]; /* as the menu last handed them, NULL none; each one's depth beside it */
+    int depths[GUI_WATCH_DIRS];
+    int count, stop;
+    unsigned set;     /* how many times the folders were handed: a hash of older ones is not taken */
+    unsigned stamped; /* the set the hash is of, 0 none */
+    uint64_t stamp;
+} GuiWatch;
 /* the focused game's runtime JIT cache: none to show, no cache yet, one read, one unreadable */
 enum { GUI_AOT_NONE, GUI_AOT_NO_CACHE, GUI_AOT_CACHE, GUI_AOT_BAD };
 #define GUI_ICONS     96  /* the games' icons kept drawn: a page's rows and the recent ones, with room */
@@ -109,7 +123,25 @@ enum { GUI_AOT_NONE, GUI_AOT_NO_CACHE, GUI_AOT_CACHE, GUI_AOT_BAD };
 typedef struct {
     char* path;
     SDL_Texture* texture;
+    bool loading; /* a dump's, which the driver has not answered for yet: the row shows the loading one */
 } GuiIcon;
+/* the dumps whose icons the driver is asked for (-x --icon), on a thread of its own: reading a dump's Control NCA takes
+   the keys and the disk, which the window's thread waits for neither. Games puts a dump in (dump_icon_ask); the thread
+   asks the driver for each, a dump at a time, into its folder of the cache (dump_icon_dir), and counts the answers,
+   which the menu takes to look at those rows again */
+#define GUI_DUMP_ASKS 128 /* the dumps waiting at most: a page's and more */
+typedef struct {
+    SDL_Mutex* lock;
+    SDL_Condition* wake;
+    SDL_Thread* thread;
+    char* driver; /* the program asked, and the data folder its keys are found by */
+    char* repo;
+    char* dumps[GUI_DUMP_ASKS]; /* each owned, with its folder in the cache beside it */
+    char* dirs[GUI_DUMP_ASKS];
+    int count, stop;
+    unsigned answered; /* how many the driver answered, said or not */
+    bool live;         /* the program's: a thread answers (the tests answer with dump_icons_pass) */
+} GuiDumpIcons;
 /* the App screen's values, as its rows show them, and Folders' (what each row's folder is, past its path) */
 typedef struct {
     char theme[64], text[16], language[64], animations[16], side[16], places[48], moves[32];
@@ -205,6 +237,9 @@ typedef struct App {
     size_t user_jpeg_size;
     SDL_Texture* user_picture; /* drawn user_side pixels square, in the shape it was drawn for */
     GuiIcon icons[GUI_ICONS];  /* the games' icons drawn so far (game_icon), the oldest replaced first */
+    SDL_Texture* icon_loading; /* what a dump's row shows while the driver is asked for its icon */
+    GuiDumpIcons dump_icons;   /* the dumps' icons asked of the driver */
+    unsigned dump_icons_seen;  /* the answers the rows were drawn after */
     size_t icons_next;
     int user_side, user_shape;
     /* the box a click on the user opens (users_open): each user of users.ini, the focused one picked as Settings' user */
@@ -289,10 +324,11 @@ typedef struct App {
     char* folder_asked; /* a folder picked with folders in it, asked whether their games are listed too */
     char* folders_file; /* where they are kept; NULL keeps none */
     GuiThemeKey folder_keys[GUI_FOLDER_ROWS];
-    char* library_dumps;    /* dumps/ of the data folder, as Folders' row names it while it is open */
-    int folder_off;         /* the game folder GUI_ASK_FOLDER asks about, its index in folders */
-    uint64_t games_stamp;   /* what the game folders held when last counted (games_stamp) */
-    Uint64 games_checked;   /* when they were last looked at */
+    char* library_dumps;  /* dumps/ of the data folder, as Folders' row names it while it is open */
+    int folder_off;       /* the game folder GUI_ASK_FOLDER asks about, its index in folders */
+    uint64_t games_stamp; /* what the game folders held when last listed, as the watcher hashes them */
+    bool games_fresh;     /* listed just now: the watcher's next hash is what the list holds */
+    GuiWatch watch;
     bool recent_all;        /* every recent game shows, not GUI_RECENT_SHOWN and a row for the rest */
     Uint32 picked_folder;   /* the event a folder from the system's picker comes back as */
     SDL_Texture* preview;   /* the editor's: the menu or a run drawn in its theme, at 1x */
@@ -2164,20 +2200,209 @@ static SDL_Texture* picture_texture(App* app, const unsigned char* jpeg, size_t 
 }
 /* the icon of the game whose program is at path, as its row shows it: its icon.jpg drawn once, then kept; NULL for
    a game without one. One that does not draw is said, with its file, and shows none */
+/* the folder in the cache a dump's icon goes in: icons/ of the menu's cache, named by a hash of the dump's path, size
+   and time and of the keys' (prod.keys), so a dump replaced, or keys put in after a dump could not be read, asks again.
+   Owned; NULL when the dump is not there */
+static char* dump_icon_dir(const App* app, const char* dump) {
+    SDL_PathInfo info, keys = {0};
+    uint64_t h = 1469598103934665603ull; /* FNV-1a */
+    const char* c;
+    char *cache, *icons, name[17], *dir;
+    if (!SDL_GetPathInfo(dump, &info) || info.type != SDL_PATHTYPE_FILE) return NULL;
+    for (c = dump; *c; ++c) h = (h ^ (unsigned char)*c) * 1099511628211ull;
+    h = (h ^ info.size) * 1099511628211ull;
+    h = (h ^ (uint64_t)info.modify_time) * 1099511628211ull;
+    if (app->keys_path) SDL_GetPathInfo(app->keys_path, &keys); /* none: zeros */
+    h = (h ^ keys.size) * 1099511628211ull;
+    h = (h ^ (uint64_t)keys.modify_time) * 1099511628211ull;
+    snprintf(name, sizeof name, "%016llx", (unsigned long long)h);
+    cache = menu_folder(app, SNX_USER_CACHE, false);
+    icons = cache ? snx_path_join(cache, "icons") : NULL;
+    dir = icons ? snx_path_join(icons, name) : NULL;
+    free(icons);
+    free(cache);
+    return dir;
+}
+/* one dump asked of the driver: its icon.jpg in dir, else why.txt there with what the driver said */
+static void dump_icon_answer(const GuiDumpIcons* d, const char* dump, const char* dir) {
+    const char* args[] = {d->driver, "--repo", d->repo, "-x", "--icon", "--out", dir, "--", dump, NULL};
+    SDL_PropertiesID how;
+    SDL_Process* run = NULL;
+    char *said = NULL, *why, *icon;
+    size_t size = 0;
+    int status = -1;
+    if (snx_mkdirs(dir)) return;               /* asked again next time: nowhere to answer */
+    if ((how = SDL_CreateProperties()) != 0) { /* its stderr with its stdout: why it has none is an error line */
+        SDL_SetPointerProperty(how, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void*)args);
+        SDL_SetNumberProperty(how, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
+        SDL_SetNumberProperty(how, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_APP);
+        SDL_SetBooleanProperty(how, SDL_PROP_PROCESS_CREATE_STDERR_TO_STDOUT_BOOLEAN, true);
+        run = SDL_CreateProcessWithProperties(how);
+        SDL_DestroyProperties(how);
+    }
+    if (run) said = (char*)SDL_ReadProcess(run, &size, &status);
+    icon = snx_path_join(dir, "icon.jpg");
+    if (!run || status || !snx_is_file(icon)) {
+        why = snx_path_join(dir, "why.txt");
+        if (!run)
+            snx_write_file(why, SDL_GetError(), strlen(SDL_GetError()));
+        else
+            snx_write_file(why, said ? said : "", said ? strlen(said) : 0);
+        free(why);
+    }
+    free(icon);
+    SDL_free(said);
+    if (run) SDL_DestroyProcess(run);
+}
+/* the dumps asked so far, here: what the thread does, and the tests' look of their own */
+static void dump_icons_pass(GuiDumpIcons* d) {
+    char *dump, *dir;
+    if (!d->lock) return;
+    for (;;) {
+        SDL_LockMutex(d->lock);
+        if (!d->count || __atomic_load_n(&d->stop, __ATOMIC_RELAXED)) {
+            SDL_UnlockMutex(d->lock);
+            return;
+        }
+        dump = d->dumps[0];
+        dir = d->dirs[0];
+        memmove(d->dumps, d->dumps + 1, (size_t)--d->count * sizeof *d->dumps);
+        memmove(d->dirs, d->dirs + 1, (size_t)d->count * sizeof *d->dirs);
+        SDL_UnlockMutex(d->lock);
+        dump_icon_answer(d, dump, dir);
+        free(dump);
+        free(dir);
+        SDL_LockMutex(d->lock);
+        ++d->answered;
+        SDL_UnlockMutex(d->lock);
+    }
+}
+static int SDLCALL dump_icons_run(void* data) {
+    GuiDumpIcons* d = (GuiDumpIcons*)data;
+    while (!__atomic_load_n(&d->stop, __ATOMIC_RELAXED)) {
+        dump_icons_pass(d);
+        SDL_LockMutex(d->lock);
+        if (!d->count && !__atomic_load_n(&d->stop, __ATOMIC_RELAXED)) SDL_WaitCondition(d->wake, d->lock);
+        SDL_UnlockMutex(d->lock);
+    }
+    return 0;
+}
+static char* find_driver(const App* app, int item);
+/* a dump's icon to ask the driver for, once: false when it cannot be asked (no driver, the queue full) */
+static bool dump_icon_ask(App* app, const char* dump, const char* dir) {
+    GuiDumpIcons* d = &app->dump_icons;
+    bool asked = false;
+    int i;
+    if (!d->lock) {
+        char* driver = find_driver(app, GUI_SWITCH);
+        if (!driver || !app->data_dir || !(d->lock = SDL_CreateMutex()) || !(d->wake = SDL_CreateCondition())) {
+            free(driver);
+            return false;
+        }
+        d->driver = driver;
+        d->repo = snx_strdup(app->data_dir);
+    }
+    SDL_LockMutex(d->lock);
+    for (i = 0; i < d->count && strcmp(d->dirs[i], dir); ++i) {}
+    if (i == d->count && d->count < GUI_DUMP_ASKS) {
+        d->dumps[d->count] = snx_strdup(dump);
+        d->dirs[d->count++] = snx_strdup(dir);
+        asked = true;
+        SDL_SignalCondition(d->wake);
+    }
+    SDL_UnlockMutex(d->lock);
+    return asked || i < d->count;
+}
+/* the asker's thread, answering from now on: the program's alone (tests answer with dump_icons_pass) */
+static void dump_icons_start(App* app) {
+    GuiDumpIcons* d = &app->dump_icons;
+    if (d->lock && !d->thread && !(d->thread = SDL_CreateThread(dump_icons_run, "dump icons", d)))
+        snprintf(app->message, sizeof app->message, snx_tr("The dumps' icons are not asked for (%s)"), SDL_GetError());
+}
+static void dump_icons_stop(App* app) {
+    GuiDumpIcons* d = &app->dump_icons;
+    int i;
+    __atomic_store_n(&d->stop, 1, __ATOMIC_RELAXED);
+    if (d->lock) {
+        SDL_LockMutex(d->lock);
+        SDL_SignalCondition(d->wake);
+        SDL_UnlockMutex(d->lock);
+    }
+    if (d->thread) SDL_WaitThread(d->thread, NULL);
+    for (i = 0; i < d->count; ++i) {
+        free(d->dumps[i]);
+        free(d->dirs[i]);
+    }
+    free(d->driver);
+    free(d->repo);
+    if (d->wake) SDL_DestroyCondition(d->wake);
+    if (d->lock) SDL_DestroyMutex(d->lock);
+    *d = (GuiDumpIcons){0};
+}
+/* the icon file of the game or dump at path, owned: a game's own icon.jpg (gui_game_icon); a dump's in its folder of
+   the cache, asked of the driver when it has neither it nor the driver's why, *loading then saying so. NULL while
+   there is none */
+static char* icon_file(App* app, const char* path, bool* loading) {
+    char *dir, *file, *why;
+    const char* leaf = path + strlen(path);
+    *loading = false;
+    while (leaf > path && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
+    if (!gui_is_dump(leaf)) return gui_game_icon(path);
+    if (!(dir = dump_icon_dir(app, path))) return NULL;
+    file = snx_path_join(dir, "icon.jpg");
+    why = snx_path_join(dir, "why.txt");
+    if (!snx_is_file(file)) {
+        if (!snx_is_file(why) && (*loading = dump_icon_ask(app, path, dir)) && app->dump_icons.live)
+            dump_icons_start(app);
+        free(file);
+        file = NULL;
+    }
+    free(why);
+    free(dir);
+    return file;
+}
+/* what a dump's row shows while its icon is asked for: three dots, grey on either theme's page */
+static SDL_Texture* icon_loading(App* app) {
+    static const int dots[3] = {34, 64, 94};
+    Uint32* pixels;
+    int x, y, i;
+    if (app->icon_loading) return app->icon_loading;
+    if (!(pixels = (Uint32*)calloc((size_t)GUI_ICON_SIDE * GUI_ICON_SIDE, sizeof *pixels))) return NULL;
+    for (i = 0; i < 3; ++i)
+        for (y = 54; y < 74; ++y)
+            for (x = dots[i] - 10; x < dots[i] + 10; ++x)
+                if ((x - dots[i]) * (x - dots[i]) + (y - 64) * (y - 64) <= 100)
+                    pixels[y * GUI_ICON_SIDE + x] = 0xff8a8a8au;
+    app->icon_loading = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
+                                          GUI_ICON_SIDE, GUI_ICON_SIDE);
+    if (app->icon_loading && (!SDL_UpdateTexture(app->icon_loading, NULL, pixels, GUI_ICON_SIDE * 4) ||
+                              !SDL_SetTextureBlendMode(app->icon_loading, SDL_BLENDMODE_BLEND_PREMULTIPLIED))) {
+        SDL_DestroyTexture(app->icon_loading);
+        app->icon_loading = NULL;
+    }
+    free(pixels);
+    return app->icon_loading;
+}
 static SDL_Texture* game_icon(App* app, const char* path) {
     GuiIcon* icon;
     char* file;
     unsigned char* jpeg;
     void* pixels;
     size_t size = 0, i;
+    bool loading;
     for (i = 0; i < GUI_ICONS; ++i)
-        if (app->icons[i].path && !strcmp(app->icons[i].path, path)) return app->icons[i].texture;
+        if (app->icons[i].path && !strcmp(app->icons[i].path, path))
+            return app->icons[i].loading ? icon_loading(app) : app->icons[i].texture;
     icon = &app->icons[app->icons_next];
     app->icons_next = (app->icons_next + 1) % GUI_ICONS;
     free(icon->path);
     SDL_DestroyTexture(icon->texture);
-    *icon = (GuiIcon){snx_strdup(path), NULL};
-    file = gui_game_icon(path);
+    *icon = (GuiIcon){snx_strdup(path), NULL, false};
+    file = icon_file(app, path, &loading);
+    if (loading) {
+        icon->loading = true;
+        return icon_loading(app);
+    }
     jpeg = file ? snx_read_file(file, &size) : NULL;
     pixels = jpeg ? malloc((size_t)GUI_ICON_SIDE * GUI_ICON_SIDE * 4) : NULL;
     if (pixels && snx_splash_picture(jpeg, size, GUI_ICON_SIDE, 0, pixels, GUI_ICON_SIDE * 4))
@@ -2196,13 +2421,23 @@ static SDL_Texture* game_icon(App* app, const char* path) {
     free(file);
     return icon->texture;
 }
+/* the rows without an icon looked at again: the driver answered for a dump */
+static void icons_forget_none(App* app) {
+    size_t i;
+    for (i = 0; i < GUI_ICONS; ++i)
+        if (app->icons[i].path && !app->icons[i].texture) {
+            free(app->icons[i].path);
+            app->icons[i].path = NULL;
+            app->icons[i].loading = false;
+        }
+}
 /* every icon game_icon kept: drawn again from their files when shown, as a game's may have changed */
 static void icons_free(App* app) {
     size_t i;
     for (i = 0; i < GUI_ICONS; ++i) {
         free(app->icons[i].path);
         SDL_DestroyTexture(app->icons[i].texture);
-        app->icons[i] = (GuiIcon){NULL, NULL};
+        app->icons[i] = (GuiIcon){NULL, NULL, false};
     }
     app->icons_next = 0;
 }
@@ -6851,7 +7086,6 @@ static void recent_name(App* app, const char* label) {
     if (gui_recent_rename(&app->recent, app->file, named->detail)) recent_changed(app);
 }
 static void list_games(App* app);
-static uint64_t games_stamp(const App* app);
 /* back to the menu from a finished run, which fades in */
 static void leave_run(App* app) {
     app->finished = false;
@@ -7336,6 +7570,7 @@ static int aot_built(const App* app) {
         if (sscanf(app->steps.note[i].text, "AOT pack: %d", &n) == 1) return n;
     return -1;
 }
+static bool watch_get(App* app, uint64_t* stamp);
 static void pump(App* app) {
     keys_left(app);
     text_left(app);
@@ -7433,16 +7668,31 @@ static void pump(App* app) {
     }
     if (app->leaving_ms && now_ms(app) - app->leaving_ms >= app->theme.fade_out_ms) leave_run(app);
     if (app->closing_ms && now_ms(app) - app->closing_ms >= GUI_CLOSING_MS) app->menu.quit = true;
-    /* games put in or taken out of the folders while the menu is open, looked for once a second: Games and its list
-       follow, the list on the file it had */
-    if (!app->menu.running && !app->finished && now_ms(app) - app->games_checked >= 1000) {
-        app->games_checked = now_ms(app);
-        if (games_stamp(app) != app->games_stamp) {
-            app->games_stamp = games_stamp(app);
+    if (app->dump_icons.lock) { /* a dump's icon the driver answered: its row looks again */
+        unsigned answered;
+        SDL_LockMutex(app->dump_icons.lock);
+        answered = app->dump_icons.answered;
+        SDL_UnlockMutex(app->dump_icons.lock);
+        if (answered != app->dump_icons_seen) {
+            app->dump_icons_seen = answered;
+            icons_forget_none(app);
+        }
+    }
+    /* games put in or taken out of the folders while the menu is open, as the watcher's hash of them says: Games and
+       its list follow, the list on the file it had. The first hash after a listing is what the list holds, the same
+       as the one before it or not */
+    uint64_t stamp;
+    if (!app->menu.running && !app->finished && watch_get(app, &stamp) &&
+        (stamp != app->games_stamp || app->games_fresh)) {
+        bool fresh = app->games_fresh;
+        app->games_stamp = stamp;
+        app->games_fresh = false;
+        if (!fresh) {
             recent_as_games(app);
             if (app->menu.view == GUI_LOAD_GAMES) {
                 GuiBrowser was = app->browser;
                 list_games(app);
+                app->games_fresh = false; /* the hash it was listed by is this one, the folders the same */
                 app->browser.page = was.page;
                 app->browser.selected = was.selected;
                 gui_browser_resize(&app->browser, app->browser.page_size);
@@ -8226,20 +8476,21 @@ static size_t games_listed(const App* app) {
     for (i = 0; i < app->games.count; ++i) n += !gui_games_heading(&app->games, i);
     return n;
 }
-/* the names dir holds into h, and with depth those of its folders, down that many levels, hidden ones left alone */
-static uint64_t stamp_dir(uint64_t h, const char* dir, int depth) {
+/* the names dir holds into h, and with depth those of its folders, down that many levels, hidden ones left alone; it
+   ends where it is once *stop is set */
+static uint64_t stamp_dir(uint64_t h, const char* dir, int depth, const int* stop) {
     char** names = NULL;
     size_t count = 0, k;
     const char* c;
     if (!dir || snx_list_dir(dir, &names, &count)) count = (size_t)-1; /* none: not the same as an empty one */
-    for (k = 0; k < count && names; ++k) {
+    for (k = 0; k < count && names && !(stop && __atomic_load_n(stop, __ATOMIC_RELAXED)); ++k) {
         for (c = names[k];; ++c) {
             h = (h ^ (unsigned char)*c) * 1099511628211ull;
             if (!*c) break;
         }
         if (depth > 0 && names[k][0] != '.') {
             char* sub = snx_path_join(dir, names[k]);
-            if (sub && snx_is_dir(sub)) h = stamp_dir(h, sub, depth - 1);
+            if (sub && snx_is_dir(sub)) h = stamp_dir(h, sub, depth - 1, stop);
             free(sub);
         }
     }
@@ -8247,26 +8498,113 @@ static uint64_t stamp_dir(uint64_t h, const char* dir, int depth) {
     if (names) snx_free_strings(names, count);
     return h;
 }
-/* the names recompiled/ and the player's folders hold (a folder kept with its subfolders, theirs too), hashed: a game
-   put in, taken out or renamed changes it, and so does a folder that comes or goes */
-static uint64_t games_stamp(const App* app) {
+/* the names the folders hold (each down its depth), hashed: a game put in, taken out or renamed changes it, and so
+   does a folder that comes or goes */
+static uint64_t stamp_dirs(char* const* dirs, const int* depths, int count, const int* stop) {
     uint64_t h = 1469598103934665603ull; /* FNV-1a */
     int i;
-    char* dumps = app->data_dir ? snx_path_join(app->data_dir, "dumps") : NULL;
-    for (i = -1; i < app->folder_count; ++i)
-        h = stamp_dir(h, i < 0 ? app->games_dir : app->folders[i],
-                      i >= 0 && app->folders_deep[i] ? GUI_FOLDER_DEPTH : 0);
-    h = stamp_dir(h, dumps, GUI_FOLDER_DEPTH);
-    free(dumps);
-    dumps = games_old(app);
-    if (dumps) h = stamp_dir(h, dumps, 0);
-    free(dumps);
+    for (i = 0; i < count; ++i) h = stamp_dir(h, dirs[i], depths[i], stop);
     return h;
+}
+/* the folders Games lists, each owned (NULL none) with its depth: recompiled/, the player's (a folder kept with its
+   subfolders, theirs too), dumps/ and an older version's games/; how many */
+static int watch_dirs(const App* app, char** dirs, int* depths) {
+    int i, n = 0;
+    dirs[n] = app->games_dir ? snx_strdup(app->games_dir) : NULL;
+    depths[n++] = 0;
+    for (i = 0; i < app->folder_count; ++i) {
+        dirs[n] = snx_strdup(app->folders[i]);
+        depths[n++] = app->folders_deep[i] ? GUI_FOLDER_DEPTH : 0;
+    }
+    dirs[n] = app->data_dir ? snx_path_join(app->data_dir, "dumps") : NULL;
+    depths[n++] = GUI_FOLDER_DEPTH;
+    dirs[n] = games_old(app);
+    depths[n++] = 0;
+    return n;
+}
+/* the folders Games lists, handed to the watcher: their hash taken from its next look */
+static void watch_set(App* app) {
+    GuiWatch* w = &app->watch;
+    char* dirs[GUI_WATCH_DIRS];
+    int depths[GUI_WATCH_DIRS], n = watch_dirs(app, dirs, depths), i;
+    if (!w->lock && !(w->lock = SDL_CreateMutex())) {
+        snprintf(app->message, sizeof app->message, snx_tr("Games is not watched for new games (%s): F5 lists them"),
+                 SDL_GetError());
+        for (i = 0; i < n; ++i) free(dirs[i]);
+        return;
+    }
+    SDL_LockMutex(w->lock);
+    for (i = 0; i < w->count; ++i) free(w->dirs[i]);
+    memcpy(w->dirs, dirs, sizeof dirs);
+    memcpy(w->depths, depths, sizeof depths);
+    w->count = n;
+    ++w->set;
+    SDL_UnlockMutex(w->lock);
+}
+/* a look at the folders: their hash, kept unless they were handed again while it was taken */
+static void watch_pass(GuiWatch* w) {
+    char* dirs[GUI_WATCH_DIRS];
+    int depths[GUI_WATCH_DIRS], n, i;
+    unsigned set;
+    uint64_t h;
+    if (!w->lock) return;
+    SDL_LockMutex(w->lock);
+    for (i = n = 0; i < w->count; ++i, ++n) {
+        dirs[n] = w->dirs[i] ? snx_strdup(w->dirs[i]) : NULL;
+        depths[n] = w->depths[i];
+    }
+    set = w->set;
+    SDL_UnlockMutex(w->lock);
+    h = stamp_dirs(dirs, depths, n, &w->stop);
+    for (i = 0; i < n; ++i) free(dirs[i]);
+    SDL_LockMutex(w->lock);
+    if (w->set == set && !__atomic_load_n(&w->stop, __ATOMIC_RELAXED)) {
+        w->stamp = h;
+        w->stamped = set;
+    }
+    SDL_UnlockMutex(w->lock);
+}
+static int SDLCALL watch_run(void* data) {
+    GuiWatch* w = (GuiWatch*)data;
+    int i;
+    while (!__atomic_load_n(&w->stop, __ATOMIC_RELAXED)) {
+        watch_pass(w);
+        for (i = 0; i < 20 && !__atomic_load_n(&w->stop, __ATOMIC_RELAXED); ++i) SDL_Delay(50); /* a second */
+    }
+    return 0;
+}
+/* the last hash of the folders as last handed, when the watcher has one */
+static bool watch_get(App* app, uint64_t* stamp) {
+    GuiWatch* w = &app->watch;
+    bool got;
+    if (!w->lock) return false;
+    SDL_LockMutex(w->lock);
+    got = w->stamped && w->stamped == w->set;
+    *stamp = w->stamp;
+    SDL_UnlockMutex(w->lock);
+    return got;
+}
+/* the watcher's thread, looking from now on; without one Games follows its folders only by F5, said */
+static void watch_start(App* app) {
+    watch_set(app);
+    if (app->watch.lock && !(app->watch.thread = SDL_CreateThread(watch_run, "games", &app->watch)))
+        snprintf(app->message, sizeof app->message, snx_tr("Games is not watched for new games (%s): F5 lists them"),
+                 SDL_GetError());
+}
+static void watch_stop(App* app) {
+    GuiWatch* w = &app->watch;
+    int i;
+    __atomic_store_n(&w->stop, 1, __ATOMIC_RELAXED);
+    if (w->thread) SDL_WaitThread(w->thread, NULL);
+    for (i = 0; i < w->count; ++i) free(w->dirs[i]);
+    if (w->lock) SDL_DestroyMutex(w->lock);
+    *w = (GuiWatch){0};
 }
 static void list_games(App* app) {
     icons_free(app); /* a game made since has one now */
     games_scan(app, &app->games, app->message, sizeof app->message);
-    app->games_stamp = games_stamp(app);
+    app->games_fresh = true;
+    watch_set(app);
     memset(&app->browser, 0, sizeof(app->browser));
     app->browser.count = app->games.count;
     app->browser.head = games_head(app);
@@ -9320,6 +9658,9 @@ static void forget(App* app) {
     gui_android_ran(NULL); /* the run goes with the menu */
 #endif
     gui_process_destroy(app->process);
+    watch_stop(app);
+    dump_icons_stop(app);
+    SDL_DestroyTexture(app->icon_loading);
     space_stop(app);
     space_end(&app->left_space, &app->left_counter);
     settings_forget(app);
@@ -9460,8 +9801,10 @@ int snx_gui_main(const char* self) {
     }
     open_files(&app); /* here, not in initialize(), so the tests keep their own */
     setup_start(&app);
-    app.games_stamp = games_stamp(&app);
-    space_start(&app); /* the footer's disk */
+    app.games_fresh = true;
+    watch_start(&app);
+    app.dump_icons.live = true; /* the dumps' icons asked on a thread of their own */
+    space_start(&app);          /* the footer's disk */
     left_behind(&app);
     app.left_shown = app.lefts > 0;
     splash_start(&app);

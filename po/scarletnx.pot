@@ -608,6 +608,11 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "The dumps' icons are not asked for (%s)"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "%s could not be drawn: the game shows no icon"
 msgstr ""
 
@@ -2103,6 +2108,11 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Not enough memory to list the games in their groups."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Games is not watched for new games (%s): F5 lists them"
 msgstr ""
 
 #: src/gui/main.c

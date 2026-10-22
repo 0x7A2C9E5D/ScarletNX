@@ -850,6 +850,14 @@ static void pick_size(App* app, int size, bool keep) {
     key(app, SDLK_RETURN);
     assert(!app->confirm.shown && !app->size_until && app->menu.text_size == (keep ? size : app->size_was));
 }
+/* what the folders Games lists hold, as the watcher hashes them: a look of its own, here */
+static uint64_t stamp_now(App* app) {
+    uint64_t h = 0;
+    watch_set(app);
+    watch_pass(&app->watch);
+    assert(watch_get(app, &h));
+    return h;
+}
 /* a JPEG's bytes as snx_splash_jpeg hands them out: a game's icon */
 typedef struct {
     unsigned char data[16384];
@@ -865,6 +873,19 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     snx_test_crash_said();
 #endif
+    if (argc == 9 && !strcmp(argv[3], "-x") && !strcmp(argv[4], "--icon")) { /* a dump's icon, as -x --icon writes it */
+        IconJpeg jpeg = {{0}, 0};
+        char* to = snx_path_join(argv[6], "icon.jpg");
+        int rc = 1;
+        if (strstr(argv[8], "no icon"))
+            fprintf(stderr, "scarletnx: Games shows no icon for %s: it has no Control NCA\n",
+                    argv[8]); /* as snx_error */
+        else
+            rc = snx_splash_jpeg("wimsy-fuddles", 32, 90, icon_jpeg_write, &jpeg) ||
+                 snx_write_file(to, jpeg.data, (size_t)jpeg.size);
+        free(to);
+        return rc;
+    }
     if (argc == 2 && !strcmp(argv[1], "--settings")) { /* as the runtime lists its settings */
         fputs("Display\tfullscreen\t0\tint\t0\t1\t1 = start in fullscreen\t\t0=0|1=1\n"
               "Graphics\tresolution\t1\tfloat\t0.25\t4\tInternal 3D resolution\t\t\n"
@@ -2629,11 +2650,28 @@ int main(int argc, char** argv) {
             gui_games_free(&listed);
             /* read back as it was kept; a change below it changes the stamp */
             {
-                uint64_t stamp = games_stamp(&app);
+                uint64_t stamp = stamp_now(&app);
                 char* more_deep = snx_path_join(deep, "a/b/Two");
                 assert(!snx_write_file(more_deep, "fixture", 7));
-                assert(games_stamp(&app) != stamp);
+                assert(stamp_now(&app) != stamp);
                 free(more_deep);
+            }
+            /* the watcher's own thread: a hash soon, another once a game comes, and an end when told */
+            {
+                uint64_t first = 0, now = 0;
+                Uint64 until;
+                char* more = snx_path_join(deep, "a/Three");
+                watch_start(&app);
+                for (until = SDL_GetTicks() + 20000; !watch_get(&app, &first) && SDL_GetTicks() < until;) SDL_Delay(20);
+                assert(watch_get(&app, &first) && app.watch.thread);
+                assert(!snx_write_file(more, "fixture", 7));
+                for (until = SDL_GetTicks() + 20000;
+                     (!watch_get(&app, &now) || now == first) && SDL_GetTicks() < until;)
+                    SDL_Delay(20);
+                assert(now != first);
+                watch_stop(&app);
+                assert(!app.watch.thread && !watch_get(&app, &now));
+                free(more);
             }
             free(app.folders[0]);
             app.folder_count = 0;
@@ -3424,7 +3462,7 @@ int main(int argc, char** argv) {
                 assert(!game_icon(&app, program)); /* as it was drawn, until the list is read again */
                 icons_free(&app);
                 drawn = game_icon(&app, program);
-                assert(drawn && game_icon(&app, program) == drawn && !game_icon(&app, dump));
+                assert(drawn && game_icon(&app, program) == drawn && game_icon(&app, dump) == app.icon_loading);
                 list_games(&app); /* Games' row of it: its icon before its name */
                 {
                     UiRowInfo info = {0};
@@ -3444,6 +3482,64 @@ int main(int argc, char** argv) {
                 icons_free(&app);
                 assert(!remove(icon));
                 free(icon);
+            }
+            { /* a dump's icon, asked of the driver (-x --icon) into the menu's cache: none until it answers, once, then
+                 its row's; one it has none for keeps what the driver said and is not asked again */
+                char* cache_was = getenv("XDG_CACHE_HOME") ? snx_strdup(getenv("XDG_CACHE_HOME")) : NULL;
+                char *cache = snx_path_join(temporary, "icon cache"), *with = snx_path_join(temporary, "with icon.nsp");
+                char *without = snx_path_join(temporary, "no icon.nsp"), *dir, *why;
+                char* said;
+                size_t said_size = 0;
+                unsigned answered;
+                set_env("XDG_CACHE_HOME", cache);
+                assert(!snx_write_file(with, "x", 1) && !snx_write_file(without, "x", 1));
+                icons_free(&app);
+                dump_icons_pass(&app.dump_icons); /* the dumps Games' rows asked for before this */
+                pump(&app);
+                icons_free(&app);
+                answered = app.dump_icons.answered;
+                /* the loading mark while it is asked, in the place of the icon to come */
+                assert(game_icon(&app, with) == icon_loading(&app) && app.icon_loading && app.dump_icons.count == 1 &&
+                       !app.dump_icons.thread);
+                icons_free(&app);
+                assert(game_icon(&app, with) == app.icon_loading && app.dump_icons.count == 1); /* asked once */
+                dump_icons_pass(&app.dump_icons);
+                assert(!app.dump_icons.count && app.dump_icons.answered == answered + 1 &&
+                       game_icon(&app, with) == app.icon_loading);
+                pump(&app); /* an answer: the rows without one look again */
+                assert(app.dump_icons_seen == answered + 1 && game_icon(&app, with) &&
+                       game_icon(&app, with) != app.icon_loading);
+                assert(game_icon(&app, without) == app.icon_loading);
+                dump_icons_pass(&app.dump_icons);
+                pump(&app);
+                assert(!game_icon(&app, without)); /* none, and no loading mark */
+                dir = dump_icon_dir(&app, without);
+                why = snx_path_join(dir, "why.txt");
+                said = (char*)snx_read_file(why, &said_size);
+                assert(said && strstr(said, "no icon.nsp: it has no Control NCA"));
+                icons_free(&app);
+                assert(!game_icon(&app, without) && !app.dump_icons.count); /* said once: not asked again */
+                { /* keys put in: a dump the driver could not read is asked again */
+                    char* keys_was = app.keys_path;
+                    app.keys_path = snx_path_join(temporary, "icon cache keys");
+                    assert(!snx_write_file(app.keys_path, "keys", 4));
+                    icons_free(&app);
+                    assert(game_icon(&app, without) == app.icon_loading && app.dump_icons.count == 1);
+                    dump_icons_pass(&app.dump_icons);
+                    assert(!remove(app.keys_path));
+                    free(app.keys_path);
+                    app.keys_path = keys_was;
+                }
+                dump_icons_stop(&app);
+                set_env("XDG_CACHE_HOME", cache_was);
+                icons_free(&app);
+                free(said);
+                free(why);
+                free(dir);
+                free(without);
+                free(with);
+                free(cache);
+                free(cache_was);
             }
             app.recent = was;
             recent_changed(&app);
@@ -3511,11 +3607,11 @@ int main(int argc, char** argv) {
         render(&app);
         shows(&app, "- Add a folder", yellow);
         shows(&app, "Recent games", soft);
-        shows(&app, "- option flags", normal);
+        shows(&app, "option flags", normal); /* a dump's: the loading mark between the marker and its name */
         key(&app, SDLK_DOWN);
         render(&app);
         assert(app.browser.selected == 1);
-        shows(&app, "- option flags", yellow);
+        shows(&app, "option flags", yellow);
         hides(&app, "- Add a folder", yellow);
         {
             char start[21]; /* the tips: where it is */
@@ -3540,7 +3636,7 @@ int main(int argc, char** argv) {
         app.theme = *gui_theme_builtin("yorha");
         render(&app);
         shows(&app, "Recent games", rgb(app.theme.soft));
-        shows(&app, "\xfe option flags", rgb(app.theme.page));
+        shows(&app, "option flags", rgb(app.theme.page));
         app.theme = *gui_theme_builtin("default");
         /* a game whose file went away leaves the list when chosen, and the file says so */
         assert(!remove(again));
@@ -3672,7 +3768,7 @@ int main(int argc, char** argv) {
         app.menu.selected = GUI_LINUX;
         free(app.games_dir);
         app.games_dir = original_games;
-        app.games_stamp = games_stamp(&app);
+        app.games_stamp = stamp_now(&app);
         free(cia);
         free(recent_file);
     }
@@ -3955,9 +4051,7 @@ int main(int argc, char** argv) {
     char* directory = snx_path_join(app.games_dir, "directory.exe");
     assert(!snx_mkdirs(directory));
     free(directory);
-    /* Games finds them itself, looking once a second while it is open; F5, or the foot's, looks at once */
-    app.clock = 50000;
-    app.games_checked = app.clock;
+    /* Games finds them itself as the watcher's thread looks (a look here: watch_pass); F5, or the foot's, at once */
     pump(&app);
     assert(!app.games.count);
     key(&app, SDLK_F5);
@@ -3966,11 +4060,11 @@ int main(int argc, char** argv) {
     press_key(&app, "F5", 0, false, yellow);
     assert(app.games.count == 35 && !strcmp(app.message, "Refreshed: 35 games"));
     app.message[0] = 0;
-    app.clock += 1000;
+    app.browser.activated = true; /* which a new listing would reset */
+    watch_pass(&app.watch);       /* its first look after a listing: what the list holds, not listed again */
     pump(&app);
-    assert(app.games.count == 35 && app.browser.count == 35);
-    app.clock = 0;
-    app.games_checked = 0;
+    assert(app.games.count == 35 && app.browser.count == 35 && !app.games_fresh && app.browser.activated);
+    app.browser.activated = false;
     /* the menu: the loads, the keys, Settings, Share log and Exit, a box each with none between; no games in it. F5
        samples the status again */
     go_tab(&app, GUI_TAB_MENU);
@@ -4200,6 +4294,13 @@ int main(int argc, char** argv) {
         assert(app.games.count == 35 && !app.message[0]);
         free(zed);
     }
+    /* listed again, the folders as they were: the first hash after it is the list's all the same */
+    watch_pass(&app.watch);
+    pump(&app);
+    list_games(&app);
+    watch_pass(&app.watch);
+    pump(&app);
+    assert(!app.games_fresh);
     assert(gui_browser_pages(&app.browser) > 1);
     key(&app, SDLK_RIGHT);
     key(&app, SDLK_DOWN);
@@ -4211,17 +4312,18 @@ int main(int argc, char** argv) {
 #else
         char* late = snx_path_join(app.games_dir, "Game35");
 #endif
+        watch_pass(&app.watch); /* the list as the watcher first sees it */
+        pump(&app);
         assert(!snx_write_file(late, "fixture", 7) && !snx_make_executable(late));
-        app.clock = 60000;
-        app.games_checked = 59000;
+        pump(&app); /* nothing yet: the watcher has not looked */
+        assert(app.games.count == 35);
+        watch_pass(&app.watch);
         pump(&app);
         assert(app.games.count == 36 && app.browser.page == 1 && app.browser.selected == 1);
         assert(!snx_remove_tree(late));
-        app.clock += 1000;
+        watch_pass(&app.watch);
         pump(&app);
         assert(app.games.count == 35 && app.browser.page == 1 && app.browser.selected == 1);
-        app.clock = 0;
-        app.games_checked = 0;
         free(late);
     }
     render(&app);
