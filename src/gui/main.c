@@ -7605,9 +7605,11 @@ static void pump(App* app) {
         }
     }
     /* games put in or taken out of the folders while the menu is open, as the watcher's hash of them says: Games and
-       its list follow, the list on the file it had. The first hash after a listing is what the list holds */
+       its list follow, the list on the file it had. The first hash after a listing is what the list holds, the same
+       as the one before it or not */
     uint64_t stamp;
-    if (!app->menu.running && !app->finished && watch_get(app, &stamp) && stamp != app->games_stamp) {
+    if (!app->menu.running && !app->finished && watch_get(app, &stamp) &&
+        (stamp != app->games_stamp || app->games_fresh)) {
         bool fresh = app->games_fresh;
         app->games_stamp = stamp;
         app->games_fresh = false;

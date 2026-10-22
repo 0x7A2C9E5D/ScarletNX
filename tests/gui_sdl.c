@@ -4213,6 +4213,13 @@ int main(int argc, char** argv) {
         assert(app.games.count == 35 && !app.message[0]);
         free(zed);
     }
+    /* listed again, the folders as they were: the first hash after it is the list's all the same */
+    watch_pass(&app.watch);
+    pump(&app);
+    list_games(&app);
+    watch_pass(&app.watch);
+    pump(&app);
+    assert(!app.games_fresh);
     assert(gui_browser_pages(&app.browser) > 1);
     key(&app, SDLK_RIGHT);
     key(&app, SDLK_DOWN);
@@ -4231,24 +4238,6 @@ int main(int argc, char** argv) {
         assert(app.games.count == 35);
         watch_pass(&app.watch);
         pump(&app);
-        if (app.games.count != 36 || app.browser.page != 1 || app.browser.selected != 1) /* what CI alone shows */
-            fprintf(stderr,
-                    "games %zu, page %zu, focus %zu; watcher: set %u, stamped %u, hash %llx, the list's %llx%s\n",
-                    app.games.count, app.browser.page, app.browser.selected, app.watch.set, app.watch.stamped,
-                    (unsigned long long)app.watch.stamp, (unsigned long long)app.games_stamp,
-                    app.games_fresh ? ", fresh" : "");
-        if (app.games.count != 36) { /* each folder watched, as many names as it holds now, and the list's */
-            for (int d = 0; d < app.watch.count; ++d) {
-                char** names = NULL;
-                size_t n = 0;
-                int failed = !app.watch.dirs[d] || snx_list_dir(app.watch.dirs[d], &names, &n);
-                fprintf(stderr, "watched %s (depth %d): %s %zu names\n",
-                        app.watch.dirs[d] ? app.watch.dirs[d] : "(none)", app.watch.depths[d],
-                        failed ? "unreadable," : "", n);
-                if (names) snx_free_strings(names, n);
-            }
-            fprintf(stderr, "games_dir %s, the game put in %s\n", app.games_dir, late);
-        }
         assert(app.games.count == 36 && app.browser.page == 1 && app.browser.selected == 1);
         assert(!snx_remove_tree(late));
         watch_pass(&app.watch);
