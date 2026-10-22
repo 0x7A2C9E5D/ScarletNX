@@ -3,6 +3,7 @@
 """Validate direct SASS shader translation across stages and regression fixtures."""
 
 import argparse
+import re
 import shutil
 import subprocess
 import tempfile
@@ -91,7 +92,10 @@ def main():
             if f'OpTypeImage %float 2D 0 {array} 1 1 Unknown' not in ms_code or ' Sample %' not in ms_code:
                 raise AssertionError('multisample texture load must fetch a specified sample')
         exchange_code = disassemble(args.disassembler, nro_exchange)
-        if exchange_code.count('OpAccessChain %_ptr_Workgroup_uint') < 4 or exchange_code.count('OpLoad %uint') < 4:
+        # both words of shared memory: read through workgroup pointers (register reads may reuse a stored value)
+        shared = set(re.findall(r'(%\w+) = OpAccessChain %_ptr_Workgroup_uint', exchange_code))
+        shared_loads = [m for m in re.findall(r'= OpLoad %uint (%\w+)', exchange_code) if m in shared]
+        if len(shared) < 4 or len(shared_loads) < 2:
             raise AssertionError('64-bit shared exchange must access both words')
         dc_code = subprocess.run([args.disassembler, str(dc_color)], check=True, capture_output=True, text=True).stdout
         if 'Dref' in dc_code or 'OpFOrdGreaterThan' not in dc_code or 'OpSelect %float' not in dc_code:
