@@ -14,7 +14,7 @@ target_compile_options(snx_arm_rt PRIVATE -Wall -Wextra -Werror=missing-prototyp
 if(SNX_TEST_SANITIZERS)
     target_compile_options(snx_arm_rt PRIVATE -fno-sanitize=address,undefined)
 endif()
-add_library(snx_arm_llvm STATIC a32.c thumb_decode.c vector_decode.c profile.c llvm.c)
+add_library(snx_arm_llvm STATIC a32.c thumb_decode.c vector_decode.c profile.c llvm.c successors.c)
 set_target_properties(snx_arm_llvm PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_include_directories(snx_arm_llvm SYSTEM PUBLIC "${SNX_LLVM_INCLUDE_DIR}")
 target_compile_options(snx_arm_llvm PRIVATE -Wall -Wextra -Werror=missing-prototypes)

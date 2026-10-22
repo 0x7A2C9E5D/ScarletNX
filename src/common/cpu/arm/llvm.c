@@ -23,6 +23,7 @@ typedef struct {
     uint32_t pc, word;
     uint32_t next; /* the next instruction's address */
     int thumb;     /* a Thumb block: an A32 emitter running a Thumb32 instruction's A32 twin reads Thumb's PC */
+    int in_it;     /* the Thumb instruction being emitted is in an IT block: its 16-bit data processing sets no flags */
     unsigned pair; /* a Thumb32 doubleword exclusive's second register + 1 (TH_A32's .ra); 0: A32's first + 1 */
     SnxArmProfile profile;
     SnxArmMemoryMode memory;

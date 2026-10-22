@@ -285,11 +285,16 @@ elseif(SNX_DEPLOY)
     # where scarletnx is also the 3DS driver (src/multicall), the 3DS games' copies are of it too; else scarletnx-3ds
     # deploys them (src/3ds/CMakeLists.txt)
     set(snx_ctr_deployed "")
+    set(snx_vita_deployed "")
     if(SNX_MULTICALL AND SNX_BUILD_3DS)
         set(snx_ctr_deployed "$<TARGET_FILE:scarletnx>")
     endif()
+    if(SNX_MULTICALL AND TARGET snx_vita_program)
+        set(snx_vita_deployed "$<TARGET_FILE:scarletnx>")
+    endif()
     add_custom_command(TARGET scarletnx POST_BUILD
         COMMAND "${CMAKE_COMMAND}" "-DRUNTIME=$<TARGET_FILE:scarletnx>" "-DCTR_RUNTIME=${snx_ctr_deployed}"
+                "-DVITA_RUNTIME=${snx_vita_deployed}"
                 "-DGAMES=${SNX_RECOMPILED_DIR}" "-DWINDOWS=${WIN32}" "-DMACOS=${APPLE}"
                 -P "${CMAKE_SOURCE_DIR}/cmake/deploy.cmake"
         VERBATIM)
@@ -310,6 +315,9 @@ elseif(NOT ANDROID AND NOT IOS)
     endif()
     if(SNX_MULTICALL AND TARGET snx_gnuabi_program)
         list(APPEND snx_names scarletnx-gnuabi)
+    endif()
+    if(SNX_MULTICALL AND TARGET snx_vita_program)
+        list(APPEND snx_names scarletnx-vita)
     endif()
     foreach(name IN LISTS snx_names)
         # in place of the program of that name an older build made in this folder

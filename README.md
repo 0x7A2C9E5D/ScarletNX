@@ -103,6 +103,11 @@ Azahar's PICA pipeline and plays its music through a port of Azahar's HLE DSP.
 It is not playable yet: there is no input, the bottom screen is not shown, and parts of the OS are missing.
 See the [3DS port](docs/3DS.md) for limits, build instructions and the parity roadmap.
 
+The experimental `scarletnx-vita` driver runs PS Vita homebrew VPKs through the same
+**extract -> offline AOT -> native run** pipeline, compiling code it missed at run time. It draws sceGxm's scenes
+on Vulkan with a port of Vita3K's shader translator. The Lua Vita Tester draws its screen, reads input and plays sound.
+See the [Vita driver](docs/VITA.md) for what it covers.
+
 For more detailed information please see: [Build + run](./docs/BUILD.md). For the Android app (arm64 and x86_64),
 see [Android](./docs/ANDROID.md). macOS and iOS build in CI. An iPhone prepares and runs a game by itself, and no game
 runs on macOS yet: see [macOS and iOS](./docs/APPLE.md). Every document: [docs](./docs/README.md).
@@ -116,5 +121,6 @@ runs on macOS yet: see [macOS and iOS](./docs/APPLE.md). Every document: [docs](
 - [NeXium](https://nexium-emu.org/) for research and development.
 - [Switchbrew](https://switchbrew.org) for research.
 - [Azahar](https://github.com/azahar-emu/azahar) and Citra, for all of the 3DS emulation.
+- [Vita3K](https://github.com/Vita3K/Vita3K), for the PS Vita's GXM and shader translation, and [vita-headers](https://github.com/vitasdk/vita-headers) for its NIDs.
 
 Wimsy, the mascot and the runtime's icon (`dist/wimsy.svg`) was drawn by Liz.

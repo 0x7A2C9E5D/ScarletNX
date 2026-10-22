@@ -50,6 +50,7 @@ set(CMAKE_CXX_EXTENSIONS ON)
 option(SNX_BUILD_NX "Build the Switch Horizon/Maxwell runtime" ON)
 option(SNX_BUILD_GNUABI "Build the CPU-only Linux AArch64 runtime" ON)
 option(SNX_BUILD_3DS "Build the 3DS driver: extraction, the ARM11 AOT compiler and the runtime" ON)
+option(SNX_BUILD_VITA "Build the PS Vita driver: VPK extraction, the AArch32 AOT compiler and the runtime" ON)
 # Reject stale backend selections instead of silently changing an existing build's behavior.
 if(SNX_BUILD_NX AND DEFINED SNX_BACKEND AND NOT SNX_BACKEND STREQUAL "sdl3")
     message(FATAL_ERROR "SNX_BACKEND=${SNX_BACKEND}: SDL3 is now mandatory for the NX runtime. "
@@ -99,11 +100,12 @@ option(SNX_BUILD_GUI "Build the keyboard-driven SDL3 launcher" ${snx_gui_default
 # program carries LLVM, SDL and the code the drivers share once. A zip keeps no links, so Windows has three programs,
 # and Android's and iOS's apps start their drivers their own way
 set(snx_multicall_default OFF)
-if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY AND (SNX_BUILD_3DS OR SNX_BUILD_GNUABI) AND NOT WIN32 AND NOT ANDROID AND
+if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY AND (SNX_BUILD_3DS OR SNX_BUILD_GNUABI OR SNX_BUILD_VITA) AND NOT WIN32 AND
+   NOT ANDROID AND
    NOT IOS)
     set(snx_multicall_default ON)
 endif()
-option(SNX_MULTICALL "Make scarletnx-3ds and scarletnx-gnuabi names of scarletnx" ${snx_multicall_default})
+option(SNX_MULTICALL "Make scarletnx-3ds, scarletnx-vita and scarletnx-gnuabi names of scarletnx" ${snx_multicall_default})
 if(SNX_MULTICALL AND (NOT SNX_BUILD_NX OR SNX_TOOLS_ONLY OR WIN32 OR ANDROID OR IOS))
     message(FATAL_ERROR "SNX_MULTICALL makes names of the runtime's program, scarletnx, which a build without the "
                         "Switch runtime (SNX_BUILD_NX, SNX_TOOLS_ONLY) doesn't have, Windows has no links for, and "
@@ -165,6 +167,9 @@ if(SNX_BUILD_3DS)
     # and a target of src/3ds compiles only src/3ds (tests/architecture.py)
     include(cmake/window_icon.cmake)
     add_subdirectory(src/3ds)
+endif()
+if(SNX_BUILD_VITA AND NOT SNX_TOOLS_ONLY)
+    add_subdirectory(src/vita)
 endif()
 if(BUILD_TESTING)
     add_subdirectory(tests)

@@ -7,7 +7,9 @@
 # beside the runtime works in when no --repo names one (snx_data_dir): a .scarletnx/ beside it, else the user's data
 # folder.
 # A 3DS game's folder is named after its title ID (0004 and 12 more hex digits) and gets CTR_RUNTIME, scarletnx-3ds,
-# which is RUNTIME too where scarletnx is also the 3DS driver (SNX_MULTICALL). Either one empty: its games keep theirs.
+# which is RUNTIME too where scarletnx is also the 3DS driver (SNX_MULTICALL). A Vita game's folder is named after its
+# title ID (four capital letters and five digits) and gets VITA_RUNTIME, scarletnx-vita or RUNTIME the same way. One
+# of them empty: its games keep theirs.
 if(WINDOWS)
     set(module_ext dll)
     set(exe_ext .exe)
@@ -18,8 +20,10 @@ endif()
 if(NOT GAMES)
     if(RUNTIME)
         get_filename_component(program_dir "${RUNTIME}" DIRECTORY)
-    else()
+    elseif(CTR_RUNTIME)
         get_filename_component(program_dir "${CTR_RUNTIME}" DIRECTORY)
+    else()
+        get_filename_component(program_dir "${VITA_RUNTIME}" DIRECTORY)
     endif()
     if(IS_DIRECTORY "${program_dir}/.scarletnx")
         set(data "${program_dir}/.scarletnx")
@@ -41,6 +45,8 @@ endif()
 function(deploy folder game)
     if(game MATCHES "^0004[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$")
         set(runtime "${CTR_RUNTIME}")
+    elseif(game MATCHES "^[A-Z][A-Z][A-Z][A-Z][0-9][0-9][0-9][0-9][0-9]$")
+        set(runtime "${VITA_RUNTIME}")
     else()
         set(runtime "${RUNTIME}")
     endif()

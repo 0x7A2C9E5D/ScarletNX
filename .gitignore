@@ -22,6 +22,8 @@
 *.gba
 *.gb
 *.nds
+*.vpk
+*.apk
 exefs/
 romfs/
 /work/
