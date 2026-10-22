@@ -10,7 +10,7 @@
     </developer>
     <description>
       <p>
-      ScarletNX is a recompiler for ARM64 to x86 systems with a Nintendo Switch layer for emulation
+      ScarletNX is a recompiler for ARM64 to x86 systems with a Switch layer for emulation
       </p>
     </description>
     <launchable type="desktop-id">scarletnx.desktop</launchable>
