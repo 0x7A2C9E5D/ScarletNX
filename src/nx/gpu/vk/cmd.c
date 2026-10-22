@@ -70,6 +70,7 @@ static u64 g_frame_id;
 static VkSemaphore g_gsem; /* graphics timeline: submission n signals n */
 static u64 g_gval;         /* the last submission */
 static u64 g_landed;       /* submissions whose storage results vk_buf_frame_done has landed */
+static u64 g_sub_ns;       /* when the last submission was made */
 static VkSemaphoreSubmitInfo g_after[2]; /* vk_submit_after's wait and signal, for the next submission (semaphore 0: none) */
 u32 g_vk_epoch, g_vk_present;
 
@@ -493,6 +494,7 @@ static void submit(const VkSemaphoreSubmitInfo* xw, const VkSemaphoreSubmitInfo*
     vk_rec_submit(cb, w, nw, s, xs ? 2u : 1u);
     memset(g_after, 0, sizeof g_after);
     __atomic_store_n(&g_gval, g_gval + 1, __ATOMIC_RELAXED); /* read by the stall report too */
+    g_sub_ns = plat_ns();
     f->recording = 0;
     f->icb++;
     f->last = g_gval;
@@ -532,11 +534,23 @@ void vk_frame_next(void) {
     g_fr[g_cur].fresh = 1;
     g_frame_id++;
 }
+/* the GPU thread's recording time a submission holds at most */
+#define SUBMIT_EVERY_NS 1000000
 /* A frame that goes long without a present (a loading screen) still has to hand its pools and rings back: one with
-   many submissions or descriptor pools ends here, at the start of a draw or dispatch, before anything is set up */
+   many submissions or descriptor pools ends here, at the start of a draw or dispatch, before anything is set up.
+   Otherwise what was recorded goes to the GPU once it holds a millisecond of the GPU thread's work. Submissions came
+   only when something needed results, so in one game the GPU sat idle through the first 12 ms of the frame's 21 ms
+   on the GPU thread, got all of it in a burst at the end and finished 6 ms after the GPU thread, while the game
+   waited for that frame's fence before submitting the next (34.7 fps, 40.3 with these). Earlier submissions also land
+   their storage results sooner, so the pending results a draw's buffers are looked up in stay fewer. 2 ms and 0.5 ms
+   were both slower. The limit on submissions leaves room for these in a slow frame: one that reaches it records
+   the rest in the other slot, and its present then waits for this one's work */
 void vk_frame_check(void) {
     const Frame* f = &g_fr[g_cur];
-    if (f->icb >= 64 || f->ipool >= 32 || vk_rec_frame_sets(g_cur) >= 32 * 1024) vk_frame_next();
+    if (f->icb >= 128 || f->ipool >= 32 || vk_rec_frame_sets(g_cur) >= 32 * 1024)
+        vk_frame_next();
+    else if (f->recording && plat_ns() - g_sub_ns >= SUBMIT_EVERY_NS)
+        submit(NULL, NULL);
 }
 
 u64 vk_submit_number(void) { return g_gval + 1; }
