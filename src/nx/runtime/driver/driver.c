@@ -543,6 +543,19 @@ static char* game_folder(const char* outdir, const char* repo, const char* name)
    folder, recompiled/<title ID>/<title ID>_data (its title ID read from its NCAs' headers first), or with --tmpfs into
    tmpfs, and its game made from it there: no copy is kept. --out names a folder the extraction is kept in instead, the
    game made from a copy. A game made already stays where it is */
+/* whether the recompile of the game from source is given name, its folder's: only when it would name it otherwise by
+   itself (snx_game_name), or cannot read its NPDM to, as a game named by its title ID is then shown by the name in
+   its control.nacp, not by the ID */
+static int named_otherwise(const char* source, const char* name) {
+    SnxNpdm npdm;
+    char error[256], *own;
+    int otherwise;
+    if (snx_load_npdm(source, &npdm, error, sizeof error)) return 1;
+    own = snx_game_name(NULL, &npdm, source);
+    otherwise = !own || strcmp(own, name) != 0;
+    free(own);
+    return otherwise;
+}
 static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* outdir, const char* out,
                      const char* opt, int recompiling, char** recompile, int settings, char** setting, int game_argc,
                      char** game_argv, const char* const* updates, int nupdates) {
@@ -661,7 +674,7 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
                            input);
             goto done;
         }
-        named = 1;
+        named = named_otherwise(source, name); /* a dump without a title ID of its own, named by its file */
         goto made;
     }
     if (prepared) {
@@ -686,15 +699,7 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
             if (!source) source = snx_format("%s_data", base);
             free(exefs);
         }
-        /* its folder's name given only when the recompile would name it otherwise (an NRO's, one named when it was
-           made): a game named by its title ID stays shown by its control.nacp's */
-        if (snx_load_npdm(source, &npdm, error, sizeof error))
-            named = 1;
-        else {
-            char* own = snx_game_name(NULL, &npdm, source);
-            named = strcmp(own, name) != 0;
-            free(own);
-        }
+        named = named_otherwise(source, name); /* an NRO's, one named when it was made */
         goto made;
     }
     dumped = snx_dump_name(input);
