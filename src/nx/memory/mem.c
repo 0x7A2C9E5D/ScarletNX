@@ -479,22 +479,41 @@ static int alias_map_nl(u64 dst, u64 src, u64 size, u32 state, u32 perm) {
    same order and below the stack, with the kernel's pages in the last GiB. The game finds the sizes it asks of
    GetInfo (the alias region 4 GiB to 32 GiB, the heap region 4 GiB to 8 GiB) */
 static void layout_for(u64 size) {
-    u64 alias = size >= 64 * GIB ? 32 * GIB : size >= 32 * GIB ? 8 * GIB : 4 * GIB;
-    u64 heap = size >= 24 * GIB ? 8 * GIB : 4 * GIB;
     g_layout.end = size;
-    g_layout.alias = 4 * GIB;
-    g_layout.alias_size = alias;
-    g_layout.heap = g_layout.alias + alias;
-    g_layout.heap_size = heap;
-    g_layout.stack = g_layout.heap + heap;
-    g_layout.stack_size = 2 * GIB;
-    g_layout.kern = size - GIB;
+    if (size >= 16 * GIB) {
+        u64 alias = size >= 64 * GIB ? 32 * GIB : size >= 32 * GIB ? 8 * GIB : 4 * GIB;
+        u64 heap = size >= 24 * GIB ? 8 * GIB : 4 * GIB;
+        g_layout.alias = 4 * GIB;
+        g_layout.alias_size = alias;
+        g_layout.heap = g_layout.alias + alias;
+        g_layout.heap_size = heap;
+        g_layout.stack = g_layout.heap + heap;
+        g_layout.stack_size = 2 * GIB;
+        g_layout.kern = size - GIB;
+    } else if (size >= 12 * GIB) {
+        g_layout.alias = 4 * GIB;
+        g_layout.alias_size = 2 * GIB;
+        g_layout.heap = 6 * GIB;
+        g_layout.heap_size = 4 * GIB;
+        g_layout.stack = 10 * GIB;
+        g_layout.stack_size = GIB;
+        g_layout.kern = 11 * GIB;
+    } else {
+        /* 8 GiB: no alias region (as a 32-bit layout without one), a heap of 3.5 GiB above the code's first 4 GiB */
+        g_layout.alias = 4 * GIB;
+        g_layout.alias_size = 0;
+        g_layout.heap = 4 * GIB;
+        g_layout.heap_size = 3 * GIB + GIB / 2;
+        g_layout.stack = 7 * GIB + GIB / 2;
+        g_layout.stack_size = GIB / 4;
+        g_layout.kern = size - GIB / 4;
+    }
     g_layout.kern_end = size;
 }
 /* An app without the paid extended-virtual-addressing entitlement may reserve less than the console's layout wants:
    the largest of these that the system gives is the guest's address space */
 static u8* reserve_ios(void) {
-    static const u64 tiers[] = {128 * GIB, 64 * GIB, 48 * GIB, 32 * GIB, 24 * GIB, 16 * GIB};
+    static const u64 tiers[] = {128 * GIB, 64 * GIB, 48 * GIB, 32 * GIB, 24 * GIB, 16 * GIB, 12 * GIB, 8 * GIB};
     const char* cap = getenv("SNX_ADDRESS_SPACE_GIB"); /* a smaller layout on purpose, to try one on a host with room */
     u64 most = cap ? (u64)strtoull(cap, NULL, 10) * GIB : AS_MAX;
     size_t i;
@@ -516,7 +535,7 @@ void mem_init(void) {
     g_host_page = plat_vm_page();
 #ifdef SNX_IOS
     g_mem = reserve_ios();
-    if (!g_mem) fatal("Could not reserve even 16 GiB of address space for the game's memory");
+    if (!g_mem) fatal("Could not reserve even 8 GiB of address space for the game's memory");
     LOG("memory: %llu GiB of address space reserved%s\n", (unsigned long long)(g_as_size >> 30),
         g_as_size < AS_MAX ? " (a smaller layout: this app has no extended virtual addressing)" : "");
 #else

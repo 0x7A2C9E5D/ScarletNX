@@ -404,7 +404,14 @@ static SnxCodeLoader* new_loader(size_t reserve, unsigned machine, uint64_t toc,
     SnxCodeLoader* loader;
     size_t page = snx_vm_page_size();
     int i;
-    if (!reserve) reserve = SNX_CODE_ARENA_DEFAULT;
+    if (!reserve) {
+        reserve = SNX_CODE_ARENA_DEFAULT;
+#ifdef IOS_JIT
+        /* address space and the debugger's preparing time (4 s a GiB) are scarce on a device, and the code the JIT
+           adds to a game's is small (17 KiB in a minute of one game) */
+        reserve = (size_t)1 << 27;
+#endif
+    }
     if (reserve <= (size_t)1 << 31) reserve = (reserve + 8 * page - 1) / (8 * page) * (8 * page); /* whole pages */
     if (reserve > (size_t)1 << 31) {
         snprintf(error, error_size, "a code arena holds at most 2 GiB, so 32-bit displacements reach across it");

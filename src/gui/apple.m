@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <sys/resource.h>
 #include <sys/sysctl.h>
+#include <mach/mach.h>
 #include <time.h>
 #import <Foundation/Foundation.h>
 
@@ -78,6 +79,17 @@ void gui_apple_log_start(void) {
         limit_line("DATA", RLIMIT_DATA);
         limit_line("RSS", RLIMIT_RSS);
         limit_line("NOFILE", RLIMIT_NOFILE);
+        {
+            task_vm_info_data_t info;
+            mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+            if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS)
+                fprintf(stderr, "  task address space: %#llx to %#llx (%llu GiB), virtual size %llu MiB, footprint %llu MiB\n",
+                        (unsigned long long)info.min_address, (unsigned long long)info.max_address,
+                        (unsigned long long)((info.max_address - info.min_address) >> 30),
+                        (unsigned long long)(info.virtual_size >> 20), (unsigned long long)(info.phys_footprint >> 20));
+            else
+                fprintf(stderr, "  task address space: (unavailable)\n");
+        }
         fprintf(stderr, "  available memory before the first allocation: %llu MiB\n",
                 (unsigned long long)(os_proc_available_memory() >> 20));
         fprintf(stderr, "app: %s\n", NSBundle.mainBundle.bundleIdentifier.UTF8String);
