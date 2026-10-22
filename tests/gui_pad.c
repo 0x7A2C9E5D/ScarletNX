@@ -84,6 +84,8 @@ int main(void) {
         assert(!strcmp(out, "D-pad: move. Cross: select. ~Square/Triangle: A or B. LT/RT: page. Circle: back."));
         gui_pad_keys_named(said, PS, out, 20); /* cut short, ended */
         assert(strlen(out) == 19 && !strncmp(out, "D-pad: move. Cross:", 19));
+        gui_pad_keys_named("LT/RT: page.", XBOX, out, 3); /* full right before a slash: it ends all the same */
+        assert(!strcmp(out, "LT"));
         gui_pad_keys_named("no keys here", PS, out, sizeof out);
         assert(!strcmp(out, "no keys here"));
     }

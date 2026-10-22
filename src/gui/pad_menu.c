@@ -188,7 +188,10 @@ void gui_pad_keys_named(const char* keys, const int labels[4], char* out, size_t
             o += (size_t)snprintf(out + o, size - o, "%.*s", (int)(name ? strlen(name) : n), name ? name : word);
             if (o >= size) o = size - 1;
             word += n;
-            if (word < colon && o + 1 < size) out[o++] = *word++;
+            if (word < colon) { /* the slash, left out when out is full: past it either way */
+                if (o + 1 < size) out[o++] = *word;
+                ++word;
+            }
         }
         o += (size_t)snprintf(out + o, size - o, "%.*s", (int)(end - colon), colon);
         if (o >= size) o = size - 1;
