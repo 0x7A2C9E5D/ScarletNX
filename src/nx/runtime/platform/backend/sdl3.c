@@ -240,7 +240,11 @@ static bool SDLCALL lifecycle(void* unused, SDL_Event* e) {
     (void)unused;
     if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND) __atomic_store_n(&g_hidden, 1, __ATOMIC_RELEASE);
     if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND) {
+#ifndef SDL_PLATFORM_IOS
+        /* Android makes the window's surface anew when the app comes back. iOS keeps it: making another from the
+           renderer's thread is UIKit work off the main thread, which aborts the app */
         __atomic_add_fetch(&g_generation, 1, __ATOMIC_RELEASE);
+#endif
         __atomic_store_n(&g_hidden, 0, __ATOMIC_RELEASE);
     }
     return true;
