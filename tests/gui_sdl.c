@@ -172,11 +172,26 @@ static GuiRect game_box(App* app, int i, bool recent) {
     assert(app->menu.view == GUI_LOAD_GAMES && (!recent || i < g.lead - 1));
     return recent ? games_row_box(app, &g, i + 1) : i ? games_row_box(app, &g, g.lead + i - 1) : games_add_box(app, &g);
 }
+/* a form's list, the left (ui.txt's FormList) or the right (FormSide): the rows it has room for, the row it shows
+   first, and row's box as drawn (its row past the cursor), none while it is scrolled out */
+static size_t form_shown(const App* app, const GuiFormBoxes* f, bool right) {
+    return right ? ui_form_side_shown(f->right, app->scale, UI_FORM_SIDE_ROWS)
+                 : ui_form_list_shown(f->left, app->scale, UI_FORM_LIST_ROWS);
+}
+static size_t form_first(const GuiFormBoxes* f, bool right) {
+    return right ? f->right_lists[UI_FORM_SIDE_ROWS].first : f->left_lists[UI_FORM_LIST_ROWS].first;
+}
+static GuiRect form_row_box(const App* app, const GuiFormBoxes* f, bool right, int row) {
+    size_t first = form_first(f, right);
+    if (row < 0 || (size_t)row < first || (size_t)row >= first + form_shown(app, f, right)) return gui_rect(0, 0, 0, 0);
+    return ui_row_box(app, right ? ui_form_side_row(f->right, app->scale, UI_FORM_SIDE_ROWS, (size_t)row - first)
+                                 : ui_form_list_row(f->left, app->scale, UI_FORM_LIST_ROWS, (size_t)row - first));
+}
 static GuiRect row_box(App* app, int row, bool right) {
     GuiFormBoxes f;
     layout(app);
     form_boxes(app, &f);
-    return list_box(right ? &f.right : &f.left, row);
+    return form_row_box(app, &f, right, row);
 }
 /* text drawn from pixel x, y in the font's own bytes: its glyphs in color, around them back but on the font's last row,
    empty, which a box's frame may cover; a pixel that differs is named with the check's line */
@@ -2226,15 +2241,49 @@ int main(int argc, char** argv) {
         render(&app);
         hides(&app, "Back [ESC]", normal);
         form_boxes(&app, &f);
-        /* the whole screen, the app's title first: none beside it */
-        assert(list_box(&f.right, 0).y == f.place.side.y + 2 * app.scale && !f.left.shown && !f.place.status.h &&
-               f.place.side.w == f.place.head.w && f.right.count == 7 + GUI_FOLDER_GROUPS);
+        /* the whole screen, the app's title first: none beside it; a row each folder row and group title, and the
+           last */
+        assert(form_row_box(&app, &f, true, 0).y == f.place.side.y + 2 * app.scale && !form_shown(&app, &f, false) &&
+               !f.place.status.h && f.place.side.w == f.place.head.w);
+        {
+            UiRowInfo info = {0};
+            assert(ui_form_side_rows_get_row_info(&app, 7 + GUI_FOLDER_GROUPS - 1, 100, &info) && !info.attr &&
+                   !strcmp(info.label, "All back to the defaults"));
+            assert(!ui_form_side_rows_get_row_info(&app, 7 + GUI_FOLDER_GROUPS, 100, &info));
+            assert(ui_form_side_rows_get_row_info(&app, 0, 100, &info) && info.attr == UI_ATTR_TITLE &&
+                   !strcmp(info.label, "The app's folders"));
+        }
         render(&app);
         { /* each group's title: in the page's colour on a band of ink in a theme of filled boxes, else in ink */
             SDL_Color title = rgb(app.theme.panels == GUI_PANELS_FILL ? app.theme.page : app.theme.ink);
             shows(&app, "The app's folders", title);
             shows(&app, "Recompiled library", title);
             shows(&app, "Dumps library", title);
+        }
+        { /* each group in a box as far as it shows, half a cell wider than its rows, in the dim colour; none round
+             the last row, which no group holds */
+            GuiRect r = ui_form_side_row(f.right, app.scale, UI_FORM_SIDE_ROWS, 1); /* Data, under the app's title */
+            SDL_Color dim = rgb(app.theme.dim);
+            assert(!app.theme.grid && !same_colour(dim, rgb(app.theme.page)));
+            assert(same_colour(pixel(&app, (float)(r.x - 4 * app.scale), (float)(r.y + r.h / 2)), dim));
+            r = ui_form_side_row(f.right, app.scale, UI_FORM_SIDE_ROWS, 7 + GUI_FOLDER_GROUPS - 1);
+            assert(same_colour(pixel(&app, (float)(r.x - 4 * app.scale), (float)(r.y + r.h / 2)), rgb(app.theme.page)));
+        }
+        { /* a title on a band of ink in a theme of filled boxes, its text in the page's colour; over a rule in dim in
+             one of outlined boxes, in ink */
+            GuiRect t = ui_form_side_row(f.right, app.scale, UI_FORM_SIDE_ROWS, 0);
+            GuiPanels kept = app.theme.panels;
+            for (int filled = 0; filled < 2; ++filled) {
+                app.theme.panels = filled ? GUI_PANELS_FILL : GUI_PANELS_OUTLINE;
+                render(&app);
+                shows(&app, "Dumps library", rgb(filled ? app.theme.page : app.theme.ink));
+                assert(same_colour(pixel(&app, (float)(t.x + 1), (float)(t.y + t.h / 2)),
+                                   rgb(filled ? app.theme.ink : app.theme.page)));
+                assert(same_colour(pixel(&app, (float)(t.x + 1), (float)(t.y + t.h - 1)),
+                                   rgb(filled ? app.theme.ink : app.theme.dim)));
+            }
+            app.theme.panels = kept;
+            render(&app);
         }
         { /* the names' column as wide as the longest of the rows with a folder (Extractions), not Add a folder's or the
              last's; the folder after it */
@@ -2244,10 +2293,11 @@ int main(int argc, char** argv) {
         }
         { /* a click on a row takes it; one on a group's title, nothing */
             GuiRect b;
-            b = list_box(&f.right, folder_entry(&app, FOLDER_ROW(GUI_ROW_DUMPS, -1)) - 1); /* the dumps' title */
+            b = form_row_box(&app, &f, true,
+                             folder_entry(&app, FOLDER_ROW(GUI_ROW_DUMPS, -1)) - 1); /* the dumps' title */
             mouse_px(&app, b.x + b.w / 2, b.y + b.h / 2, true);
             assert(app.editor.row == 0 && !app.editor.note[0]);
-            b = list_box(&f.right, folder_entry(&app, FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED)));
+            b = form_row_box(&app, &f, true, folder_entry(&app, FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED)));
             mouse_px(&app, b.x + b.w / 2, b.y + b.h / 2, true);
             assert(app.editor.row == FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED));
             app.editor.row = 0;
@@ -2255,7 +2305,7 @@ int main(int argc, char** argv) {
                (the groups' titles are in the list): over a title, nowhere */
             mouse_px(&app, b.x + b.w / 2, b.y + b.h / 2, false);
             assert(app.editor.row == FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED));
-            b = list_box(&f.right, folder_entry(&app, FOLDER_ROW(GUI_ROW_DUMPS, -1)) - 1);
+            b = form_row_box(&app, &f, true, folder_entry(&app, FOLDER_ROW(GUI_ROW_DUMPS, -1)) - 1);
             mouse_px(&app, b.x + b.w / 2, b.y + b.h / 2, false);
             assert(app.editor.row == FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED));
             app.editor.row = 0;
@@ -3821,19 +3871,23 @@ int main(int argc, char** argv) {
         hides(&app, "Status", normal);
         open_settings(&app);
         form_boxes(&app, &f);
-        assert(app.form == GUI_FORM_SETTINGS && f.left.shown == f.left.count && !f.right.shown);
+        assert(app.form == GUI_FORM_SETTINGS && form_shown(&app, &f, false) >= (size_t)app.groups &&
+               !form_first(&f, false) && !form_shown(&app, &f, true));
         render(&app);
         hides(&app, "\x1f", rgb(app.theme.soft)); /* the rows' list, gone with the side box, marks nothing */
         open_group(&app, 2);
         form_boxes(&app, &f);
-        assert(app.form == GUI_FORM_GROUP && !f.left.shown && f.place.side.w == f.place.head.w && f.right.shown);
+        assert(app.form == GUI_FORM_GROUP && !form_shown(&app, &f, false) && f.place.side.w == f.place.head.w &&
+               form_shown(&app, &f, true));
         render(&app);
         shows(&app, "Display", normal);
-        assert(f.right.shown == f.right.count);   /* Display's rows all fit: an arrow would be the groups' */
+        /* Display's rows all fit: an arrow would be the groups' */
+        assert(form_shown(&app, &f, true) >= (size_t)gui_editor_rows(&app.editor) && !form_first(&f, true));
         hides(&app, "\x1f", rgb(app.theme.soft)); /* nor the groups', gone */
         press_key(&app, "F2", 0, false, yellow);
         form_boxes(&app, &f);
-        assert(app.side_box == GUI_SIDE_ON && f.left.shown && f.place.side.x > f.place.list.x + f.place.list.w);
+        assert(app.side_box == GUI_SIDE_ON && form_shown(&app, &f, false) &&
+               f.place.side.x > f.place.list.x + f.place.list.w);
         key(&app, SDLK_ESCAPE);
         key(&app, SDLK_ESCAPE);
         assert(!app.editing);
@@ -4322,6 +4376,57 @@ int main(int argc, char** argv) {
             e.type = SDL_EVENT_FINGER_UP;
             event(&app, &e);
             assert(app.menu.selected == GUI_3DS && !app.finger);
+            /* on the Settings a row of the list the keys move in: the groups', then an open group's */
+            open_settings(&app);
+            for (int open = 0; open < 2; ++open) {
+                GuiFormBoxes f;
+                GuiRect first, second;
+                int width, height;
+                render(&app);
+                form_boxes(&app, &f);
+                area(&app, &width, &height);
+                first = form_row_box(&app, &f, open, 0);
+                second = form_row_box(&app, &f, open, 1);
+                row = drag_row(&app);
+                assert(row == (float)(second.y - first.y) / (float)height && row > 1.0f / (float)app.rows);
+                assert(app.editor.row == 0 && gui_editor_rows(&app.editor) > 3);
+                e.type = SDL_EVENT_FINGER_DOWN;
+                e.tfinger.y = 0.2f;
+                event(&app, &e);
+                e.type = SDL_EVENT_FINGER_MOTION;
+                e.tfinger.y = 0.2f + 2.9f * row; /* 2 of its rows, which 3 of text would make 3 */
+                event(&app, &e);
+                assert(app.editor.row == 2);
+                e.type = SDL_EVENT_FINGER_UP;
+                event(&app, &e);
+                assert(app.editor.row == 2 && !app.finger);
+                if (!open) {
+                    for (app.editor.row = 1; app.editor.row < app.groups && app.group_rows[app.editor.row] < 4;
+                         ++app.editor.row) {}
+                    assert(app.editor.row < app.groups);
+                    key(&app, SDLK_RETURN); /* a group of 4 rows or more */
+                    assert(app.form == GUI_FORM_GROUP);
+                }
+            }
+            /* the groups too many for their column: the open one kept in view, in the focus's look */
+            app.menu.text_size = GUI_TEXT_MAX;
+            key(&app, SDLK_ESCAPE);
+            app.editor.row = app.groups - 1;
+            key(&app, SDLK_RETURN);
+            assert(app.editing && app.form != GUI_FORM_SETTINGS && app.group == app.groups - 1);
+            render(&app);
+            {
+                GuiFormBoxes f;
+                GuiRect b;
+                form_boxes(&app, &f);
+                assert(form_shown(&app, &f, false) > 0 && form_shown(&app, &f, false) < (size_t)app.groups &&
+                       form_first(&f, false) > 0);
+                b = form_row_box(&app, &f, false, app.groups - 1);
+                assert(b.h && same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), rgb(app.theme.focus)));
+            }
+            key(&app, SDLK_ESCAPE);
+            key(&app, SDLK_ESCAPE);
+            assert(!app.editing);
             app.menu.text_size = text_size;
             app.menu.selected = GUI_SWITCH;
             render(&app);
@@ -4460,13 +4565,13 @@ int main(int argc, char** argv) {
             shows(&app, "- Save", yellow); /* its first row */
             /* more rows than the box holds: an arrow down at first, both in the middle, up at the end */
             form_boxes(&app, &f);
-            assert(app.editor.row == 0 && f.left.shown < f.left.count);
+            assert(app.editor.row == 0 && form_shown(&app, &f, false) < (size_t)gui_editor_rows(&app.editor));
             hides(&app, "\x1e", soft);
             shows(&app, "\x1f", soft);
             app.editor.row = gui_editor_rows(&app.editor) / 2;
             render(&app);
             form_boxes(&app, &f);
-            assert(f.left.first > 0);
+            assert(form_first(&f, false) > 0);
             shows(&app, "\x1e", soft);
             shows(&app, "\x1f", soft);
             app.editor.row = gui_editor_rows(&app.editor) - 1;
@@ -4556,6 +4661,15 @@ int main(int argc, char** argv) {
                 /* a click off the box keeps it, and does nothing else: the preview stays the menu */
                 mouse_px(&app, preview.x + preview.w / 2, preview.y + 8 * s, true);
                 assert(!app.editor.picking && app.editor.preview == GUI_SCREEN_MENU && app.editor.theme.page.g == 0x20);
+                { /* its row: the value, then a cell on, the colour framed in soft */
+                    int x, y;
+                    render(&app);
+                    assert(find_text(&app, "#102030", yellow, 1, &x, &y));
+                    x += 8 * 8 * s;
+                    assert(same_colour(pixel(&app, (float)x, (float)(y + 8 * s)), soft));
+                    assert(same_colour(pixel(&app, (float)(x + 8 * s), (float)(y + 8 * s)), night));
+                    assert(!same_colour(pixel(&app, (float)(x + 16 * s), (float)(y + 8 * s)), night));
+                }
                 {
                     SDL_Event up = {0};
                     up.type = SDL_EVENT_MOUSE_BUTTON_UP;
@@ -4598,9 +4712,13 @@ int main(int argc, char** argv) {
             assert(app.editor.row == 2 && app.editor.typing);
             key(&app, SDLK_ESCAPE);
             assert(!app.editor.typing && strcmp(app.editor.theme.name, "Defaultx"));
-            /* a click focuses a row, a click on the focused one changes it */
+            /* a click focuses a row, a click on the focused one changes it: [theme] author, typed */
             point(&app, row_box(&app, 3, false), true);
             assert(app.editor.row == 3 && !app.editor.typing);
+            point(&app, row_box(&app, 3, false), true);
+            assert(app.editor.row == 3 && app.editor.typing);
+            key(&app, SDLK_ESCAPE);
+            assert(!app.editor.typing);
             /* ESC over changes asks first; Ctrl+S saves in themes/mytheme, and the menu's theme is it */
             key(&app, SDLK_ESCAPE);
             assert(app.editing && app.editor.leaving);
@@ -5135,28 +5253,34 @@ int main(int argc, char** argv) {
             assert(app.editing && app.form == GUI_FORM_SETTINGS && !app.editor.row && app.groups > 3);
             render(&app);
             form_boxes(&app, &f);
-            assert(f.place.side.x > f.place.list.x + f.place.list.w && f.left.count == app.groups);
-            /* the groups the theme's gap apart in a column that would spread them further: 6, then 14 and 0 */
-            assert(f.left.shown == f.left.count && f.left.count * (f.left.item + 14 * s) <= f.left.at.h &&
-                   app.theme.gap == 6 && f.left.pitch == f.left.item + 6 * s);
-            app.theme.gap = 14;
-            form_boxes(&app, &f);
-            assert(f.left.pitch == f.left.item + 14 * s);
-            app.theme.gap = 0;
-            form_boxes(&app, &f);
-            assert(f.left.pitch == f.left.item);
-            { /* a column too short for them all: 2 pixels apart, the least, unless the gap is under it */
+            assert(f.place.side.x > f.place.list.x + f.place.list.w);
+            /* every group shown, ui.txt's 2 pixels apart in a column that would spread them further, whatever gap the
+               theme gives the lists it lays out: 6, 14 and 0; nothing past the last group */
+            assert(form_shown(&app, &f, false) >= (size_t)app.groups && !form_first(&f, false) && app.theme.gap == 6 &&
+                   app.groups * (item_h(&app) + 14 * s) <= f.left[UI_FORM_LIST_ROWS].h);
+            {
+                UiRowInfo info = {0};
+                assert(!ui_form_list_rows_get_row_info(&app, (size_t)app.groups, 100, &info));
+            }
+            for (int gap = 6; gap >= 0; gap = gap == 6 ? 14 : gap == 14 ? 0 : -1) {
+                app.theme.gap = (uint32_t)gap;
+                form_boxes(&app, &f);
+                b = form_row_box(&app, &f, false, 1);
+                assert(b.y - form_row_box(&app, &f, false, 0).y == item_h(&app) + 2 * s && b.h == item_h(&app));
+            }
+            { /* a list the theme lays out, in a column too short for them all: 2 pixels apart, the least, unless the
+                 gap is under it */
                 GuiList l;
-                list_place(&app, &l, gui_rect(0, 0, 100 * s, 3 * f.left.item), 10, 0);
+                list_place(&app, &l, gui_rect(0, 0, 100 * s, 3 * item_h(&app)), 10, 0);
                 assert(l.pitch == l.item && l.shown == 3);
                 app.theme.gap = 6;
-                list_place(&app, &l, gui_rect(0, 0, 100 * s, 3 * f.left.item), 10, 0);
+                list_place(&app, &l, gui_rect(0, 0, 100 * s, 3 * item_h(&app)), 10, 0);
                 assert(l.pitch == l.item + 2 * s && l.shown == 2);
             }
             form_boxes(&app, &f);
-            b = list_box(&f.left, 0);
+            b = form_row_box(&app, &f, false, 0);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- App", yellow, black);
-            b = list_box(&f.left, app.groups - 1); /* the last group, whole */
+            b = form_row_box(&app, &f, false, app.groups - 1); /* the last group, whole */
             snprintf(last, sizeof last, "- %s", app.group_keys[app.groups - 1].key);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), last, normal, black);
             text_px_is(&app, f.place.side.x + cw, f.place.side.y + 2 * s, "App", normal, black);
@@ -5177,36 +5301,51 @@ int main(int argc, char** argv) {
                     text_px_is(&app, f.info.x + 8 * app.scale, y, row, rgb(app.theme.soft), black);
                     for (note += n; *note == ' ';) ++note;
                 }
-                assert(y <= f.info.y + f.info.h && f.info.y >= list_box(&f.right, f.right.first + f.right.shown - 1).y);
+                { /* under the last row drawn */
+                    GuiEditor peek;
+                    size_t drawn = SDL_min(form_shown(&app, &f, true), (size_t)gui_editor_rows(form_rows(&app, &peek)));
+                    GuiRect last = form_row_box(&app, &f, true, (int)drawn - 1);
+                    assert(drawn && y <= f.info.y + f.info.h && f.info.y >= last.y + last.h);
+                }
             }
             app.menu.text_size = 0;
             render(&app);
             form_boxes(&app, &f);
-            b = list_box(&f.right, GUI_APP_THEME);
+            b = form_row_box(&app, &f, true, GUI_APP_THEME);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Theme", normal,
                        black); /* no focus on the right yet */
             for (launch = 0; launch < app.groups && strcmp(app.group_keys[launch].key, "Launch"); ++launch) {}
             assert(launch < app.groups);
             /* the pointer over a group focuses it, its rows beside it; over those rows it waits for a click */
-            b = list_box(&f.left, 2);
+            b = form_row_box(&app, &f, false, 2);
             mouse_px(&app, b.x + 4, b.y + 4, false);
             assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 2);
-            b = list_box(&f.right, 0);
+            mouse_px(&app, b.x + 4, b.y + 4, true); /* and a click on the focused group opens it */
+            assert(app.form != GUI_FORM_SETTINGS && app.group == 2);
+            key(&app, SDLK_ESCAPE);
+            assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 2);
+            b = form_row_box(&app, &f, true, 0);
             mouse_px(&app, b.x + 4, b.y + 4, false);
             assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 2);
             app.editor.row = launch;
             render(&app);
             form_boxes(&app, &f);
             text_px_is(&app, f.place.side.x + cw, f.place.side.y + 2 * s, "Launch", normal, black);
-            text_px_is(&app, list_box(&f.right, 0).x + cw / 2, item_text_y(&app, list_box(&f.right, 0)), "- gdbstub",
-                       normal, black);
+            b = form_row_box(&app, &f, true, 0);
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- gdbstub", normal, black);
+            /* a click on one of those rows opens the group on it */
+            b = form_row_box(&app, &f, true, 1);
+            mouse_px(&app, b.x + 4, b.y + 4, true);
+            assert(app.form == GUI_FORM_GROUP && app.group == launch && app.editor.row == 1);
+            key(&app, SDLK_ESCAPE);
+            assert(app.form == GUI_FORM_SETTINGS && app.editor.row == launch);
             key(&app, SDLK_RETURN);
             assert(app.form == GUI_FORM_GROUP && app.group == launch && !app.editor.row);
             render(&app);
             form_boxes(&app, &f);
-            b = list_box(&f.left, launch);
+            b = form_row_box(&app, &f, false, launch);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Launch", yellow, black); /* the group open */
-            b = list_box(&f.right, 0);
+            b = form_row_box(&app, &f, true, 0);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- gdbstub", yellow, black);
             {
                 char start[16]; /* in the tips, its first row: in the foot here, in its letters */
@@ -5215,7 +5354,7 @@ int main(int argc, char** argv) {
             }
             /* a click on the second row focuses it, a second click changes it */
             launcher(&app, false);
-            b = list_box(&f.right, 1);
+            b = form_row_box(&app, &f, true, 1);
             mouse_px(&app, b.x + 4, b.y + 4, true);
             assert(app.form == GUI_FORM_GROUP && app.editor.row == 1 && setting_is(&app, "tmpfs", NULL));
             mouse_px(&app, b.x + 4, b.y + 4, true);
@@ -5224,22 +5363,28 @@ int main(int argc, char** argv) {
             assert(setting_is(&app, "tmpfs", NULL));
             /* the pointer over a row, not pressed, focuses it, as on the menu's screens (#415), and a click then
                changes it; over the groups' list it waits for a click */
-            b = list_box(&f.right, 0);
+            b = form_row_box(&app, &f, true, 0);
             mouse_px(&app, b.x + 4, b.y + 4, false);
             assert(app.form == GUI_FORM_GROUP && app.editor.row == 0);
-            b = list_box(&f.right, 1);
+            b = form_row_box(&app, &f, true, 1);
             mouse_px(&app, b.x + 4, b.y + 4, false);
             assert(app.editor.row == 1 && setting_is(&app, "tmpfs", NULL));
             mouse_px(&app, b.x + 4, b.y + 4, true);
             assert(setting_is(&app, "tmpfs", "on"));
             key(&app, SDLK_LEFT);
-            b = list_box(&f.left, 0);
+            b = form_row_box(&app, &f, false, 0);
             mouse_px(&app, b.x + 4, b.y + 4, false);
             assert(app.form == GUI_FORM_GROUP && app.editor.row == 1);
-            /* a click on App in the list opens it, from a group's rows */
-            b = list_box(&f.left, 0);
+            /* a click on App in the list opens it, from a group's rows; one on another group, that one */
+            b = form_row_box(&app, &f, false, 0);
             mouse_px(&app, b.x + 4, b.y + 4, true);
             assert(app.editing && app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME);
+            b = form_row_box(&app, &f, false, launch);
+            mouse_px(&app, b.x + 4, b.y + 4, true);
+            assert(app.form == GUI_FORM_GROUP && app.group == launch && !app.editor.row);
+            b = form_row_box(&app, &f, false, 0);
+            mouse_px(&app, b.x + 4, b.y + 4, true);
+            assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME);
             /* the theme editor: its keys on the left, the theme's menu in the preview on the right, which a click, or
                Ctrl+P, turns to a run; a long value being typed shows its end */
             app.editor.row = GUI_APP_EDITOR;
@@ -5247,8 +5392,14 @@ int main(int argc, char** argv) {
             assert(app.form == GUI_FORM_THEME);
             render(&app);
             form_boxes(&app, &f);
-            assert(f.left.count == gui_editor_rows(&app.editor) && f.left.shown < f.left.count);
+            assert(form_shown(&app, &f, false) < (size_t)gui_editor_rows(&app.editor));
             text_px_is(&app, f.place.side.x + cw, f.place.side.y + 2 * s, "Preview", normal, black);
+            /* the pointer over the preview, where a group's rows would be, focuses no key */
+            app.editor.row = 3;
+            mouse_px(&app, f.place.side.x + 2 * cw, f.place.side.y + f.place.side.h / 4, false);
+            mouse_px(&app, f.place.side.x + 2 * cw, f.place.side.y + 24 * s + 4, false);
+            assert(app.editor.row == 3 && app.editor.preview == GUI_SCREEN_MENU);
+            app.editor.row = 0;
             mouse_px(&app, f.place.side.x + f.place.side.w / 2, f.place.side.y + f.place.side.h / 2, true);
             assert(app.editor.preview == GUI_SCREEN_COMPILING);
             key_with(&app, SDLK_P, SDL_KMOD_LCTRL);
@@ -5294,7 +5445,7 @@ int main(int argc, char** argv) {
             typed(&app, "a theme name long enough to run past its box's right edge");
             render(&app);
             form_boxes(&app, &f);
-            b = list_box(&f.left, row);
+            b = form_row_box(&app, &f, false, row);
             {
                 int room = (b.w - cw * 3 / 2) / cw, end = b.x + cw / 2 + (room - 2) * cw, x, y;
                 text_px_is(&app, end, item_text_y(&app, b), "e_", yellow, black); /* its end, and the cursor */
@@ -5736,6 +5887,8 @@ int main(int argc, char** argv) {
                 assert(app.editor.typing);
                 for (int i = 0; i < 8; ++i) key(&app, SDLK_BACKSPACE);
                 typed(&app, "Aogo 55");
+                point(&app, row_box(&app, 2, true), false); /* the pointer moves no focus off a nickname typed */
+                assert(app.editor.row == 1 && app.editor.typing);
                 key(&app, SDLK_RETURN);
                 assert(!app.editor.typing && !strcmp(app.editor.note, "User 1 is Aogo 55 now") &&
                        !strcmp(app.user_name, "Aogo 55"));
@@ -6744,7 +6897,7 @@ int main(int argc, char** argv) {
         app.editor.row = app.groups - 1; /* the last group */
         render(&app);
         form_boxes(&app, &f);
-        b = list_box(&f.left, app.groups - 1);
+        b = form_row_box(&app, &f, false, app.groups - 1);
         {
             char last[80];
             snprintf(last, sizeof last, "\xfe %s", app.group_keys[app.groups - 1].key);
@@ -6761,9 +6914,17 @@ int main(int argc, char** argv) {
             form_boxes(&app, &f);
             gui_settings_shown(&app.settings, app.first, shown, sizeof shown);
             assert(!strcmp(shown, "Off [default]"));
-            snprintf(line, sizeof line, "\xfe %-*s %s", form_labels(f.rows), "Fullscreen", shown);
-            b = list_box(&f.right, 0);
+            snprintf(line, sizeof line, "\xfe %-*s %s", form_labels(&app.editor), "Fullscreen", shown);
+            b = form_row_box(&app, &f, true, 0);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), line, rgb(app.theme.page), rgb(app.theme.focus));
+            /* the cursor (YoRHa's "► ", CP437's 0x10) beside it; the group open on the focus's band, without the
+               cursor: the keys are not there */
+            assert(!strcmp(app.theme.cursor, "\xe2\x96\xba ") && app.theme.focus_bar);
+            text_px_is(&app, b.x - 2 * cw, item_text_y(&app, b), "\x10 ", rgb(app.theme.focus), rgb(app.theme.page));
+            b = form_row_box(&app, &f, false, row);
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe Display", rgb(app.theme.page),
+                       rgb(app.theme.focus));
+            text_px_is(&app, b.x - 2 * cw, item_text_y(&app, b), "  ", rgb(app.theme.focus), rgb(app.theme.page));
         }
         key(&app, SDLK_DOWN);
         key(&app, SDLK_RETURN);

@@ -34,3 +34,17 @@
 		android.row_height = 40px
 	}
 }
+# the Settings and the theme editor: the groups, or the theme's keys, in the list's column; beside them, under the
+# side box's head, the open group's rows or the focused one's (Folders: on the whole screen, each group under its title)
+[scene]FormList {
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}
+[scene]FormSide {
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}
