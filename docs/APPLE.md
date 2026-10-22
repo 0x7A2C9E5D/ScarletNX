@@ -63,20 +63,25 @@ executable. The app is signed without the hardened runtime, so `MAP_JIT` needs n
 The iPhone prepares the game itself: it extracts the dump and recompiles it with its own LLVM. Super Meat Boy takes
 about two minutes on an iPhone 14 Pro, with the app in the foreground and the screen on.
 
-1. **The app.** Take `ScarletNX-ios-arm64-<commit>.ipa` from a CI run, or build it (`cmake --preset ios`,
+You do not need to put files in the right folders. The app copies the `prod.keys` you pick into `keys/` and a dump you
+pick into `dumps/`, then makes the game in `recompiled/`. Pick them from wherever they are (Files, Downloads, iCloud).
+
+1. **Install the app.** Take `ScarletNX-ios-arm64-<commit>.ipa` from a CI run, or build it (`cmake --preset ios`,
    [Building](#building)), and install it with a sideloading tool that signs it with an Apple ID: iloader or
    SideStore. A free account signs an app for 7 days, up to three apps at a time (the app, SideStore and StikDebug).
-   Installing again removes the app's Documents with some tools, so the games are copied again after it.
-2. **JIT.** iOS makes memory executable only for an app with a debugger attached. Install StikDebug and LocalDevVPN,
-   give StikDebug the pairing file (SideStore keeps one: *Storage Explorer*, `ALTPairingFile.mobiledevicepairing`),
-   hold ScarletNX in StikDebug's list, *Assign Script* `universal.js`, and *Enable JIT* before each run. The runtime
-   checks for the debugger first and says what to enable when there is none.
-3. **Keys.** In the app, *Setup device keys* and pick the `prod.keys` of your Switch. The app keeps a copy in `keys/`.
-4. **The game.** In *Games*, pick the `.nsp` or `.xci`, or put it in *ScarletNX > dumps* first, and prepare it. A dump
-   from another folder is copied into `dumps/`. The app extracts it and writes `recompiled/<id>/` with
-   `<id>_code.snxobj` and `<id>_data/`. 64-bit games only. The pack holds the module's code without the runtime
-   library, which the app brings. Keep the app in the foreground: iOS stops its GPU and its threads in the background.
-5. **Run.** *Enable JIT* in StikDebug, open ScarletNX, *Games*, the game.
+2. **Set up JIT once.** iOS makes memory executable only for an app with a debugger attached. Install StikDebug and
+   LocalDevVPN, give StikDebug the pairing file (SideStore keeps one: *Storage Explorer*,
+   `ALTPairingFile.mobiledevicepairing`), hold ScarletNX in StikDebug's list and *Assign Script* `universal.js`. The
+   runtime checks for the debugger first and says what to enable when there is none.
+3. **Add your keys.** Open ScarletNX, *Setup device keys*, and pick the `prod.keys` of your Switch.
+4. **Prepare the game.** In *Games*, pick the `.nsp` or `.xci` and prepare it. The app extracts it and writes
+   `recompiled/<id>/` with `<id>_code.snxobj` and `<id>_data/`. 64-bit games only. Keep the app in the foreground
+   until it ends: iOS stops its GPU and its threads in the background.
+5. **Play.** *Enable JIT* for ScarletNX in StikDebug, open ScarletNX, *Games*, and pick the game. Do this before each
+   run, and do not leave the app while the game runs.
+
+The folders the app makes in *On My iPhone > ScarletNX* are `dumps/` (your games' dumps), `keys/`, `recompiled/` (the
+games it made) and `logs/` (what to send when a run fails). Reinstalling the app can remove them with some tools.
 
 A Mac still prepares a game the same way (`scarletnx -x "Game.nsp" --name Game`, then
 `scarletnx -r work/Game --target ios --outdir recompiled`), and its `recompiled/<id>/` can be copied into the app.
