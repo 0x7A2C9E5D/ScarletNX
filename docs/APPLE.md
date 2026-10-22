@@ -4,8 +4,8 @@
 
 Both build on a Mac with Xcode, for Apple silicon (arm64), with Xcode's Clang, and the CI builds both on every push
 (`.github/workflows/build.yml`). They are new. On a Mac, one game's module loads and runs as far as its title
-background, without the logo or the menu. No game runs on iOS from this tree yet, for the reasons under
-[What is missing](#what-is-missing).
+background, without the logo or the menu. On an iPhone, one game has been prepared on the device and run with JIT on.
+The rest is under [What is missing](#what-is-missing).
 
 ## The frontend
 
@@ -101,7 +101,7 @@ games from running:
   (`src/common/cpu/recompiler/llvm/link_macho.c`) with the ad hoc signature ld64 gives one, which Apple silicon
   needs to run it. A Mac loads one and the game runs, but the frame stops at the title background. Which part of the
   renderer on MoltenVK drops the rest is not known yet.
-- **Game modules on iOS, untested on a device.** iOS loads no code it did not ship with, so a game's code is a pack of
+- **Game modules on iOS, one game checked.** iOS loads no code it did not ship with, so a game's code is a pack of
   objects (`scarletnx -r Game --target ios` writes `<id>_code.snxobj`, 64-bit games only) that the app loads into
   memory a debugger made executable (`load_pack` in `src/nx/runtime/main.c`, the JIT loader's iOS arena in
   `code_loader.c`). The app makes it itself, or a Mac does.
