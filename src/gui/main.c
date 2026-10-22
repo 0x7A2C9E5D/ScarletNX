@@ -7647,7 +7647,7 @@ static int aot_focus_game(App* app, AotFocus* f) {
         if (app->recent.game[row - 1].driver != GUI_SWITCH) return 0;
         path = app->recent.game[row - 1].path;
     } else if (game) {
-        if (gui_is_cia(app->games.names[index])) return 0;
+        if (gui_games_heading(&app->games, index) || gui_is_cia(app->games.names[index])) return 0; /* no path */
         path = app->games.paths[index];
     } else {
         return 0;

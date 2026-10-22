@@ -4010,6 +4010,27 @@ int main(int argc, char** argv) {
         app.browser.page = 1;
         app.browser.selected = 0;
     }
+    /* a group's heading has no path: the focus on it, as the pointer over it puts it, offers no AOT pack */
+    {
+        GuiGames was = app.games, two = {0};
+        GuiBrowser browser_was = app.browser;
+        char *names[2] = {"Dumps", "a dump.nsp"}, *paths[2] = {NULL, "/nonexistent/a dump.nsp"};
+        size_t addons[2] = {0, 0};
+        AotFocus f;
+        two.names = two.shown = names;
+        two.paths = paths;
+        two.addons = addons;
+        two.count = 2;
+        app.games = two;
+        app.browser.count = 2;
+        app.browser.page = 0;
+        app.browser.selected = app.browser.head; /* the heading */
+        assert(!aot_focus_game(&app, &f) && !f.path && !f.folder);
+        app.browser.selected = app.browser.head + 1; /* a dump: no game folder either */
+        assert(!aot_focus_game(&app, &f) && !f.path);
+        app.games = was;
+        app.browser = browser_was;
+    }
     /* Add a folder over every page, a wider gap under it than between the games, and no Back: ESC is the menu's */
     render(&app);
     shows(&app, "- Add a folder", yellow);
