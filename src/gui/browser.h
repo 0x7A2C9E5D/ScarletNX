@@ -11,6 +11,7 @@ typedef struct {
     char** paths; /* where each is */
     size_t* addons; /* how many updates and DLCs each has beside it (gui_game_addons), and mods (gui_game_mods) */
     size_t count;
+    size_t room; /* the entries the lists have room for, one past the last included */
 } GuiGames;
 /* what a folder's games are: ready to run (executables; on Android a game's code or a dump), CIA files, and dumps
    (NSP, XCI and NRO files), prepared when they run */
