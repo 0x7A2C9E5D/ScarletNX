@@ -3985,6 +3985,31 @@ int main(int argc, char** argv) {
     }
     key(&app, SDLK_PAGEDOWN);
     assert(app.browser.page == 1 && app.browser.selected == 0);
+    /* the wheel goes over the pages as Up and Down do, a page's last game on to the next one's first and back, and
+       stops at the list's ends, where the keys go round */
+    {
+        SDL_Event e = {0};
+        size_t pages = gui_browser_pages(&app.browser), last;
+        assert(pages >= 2);
+        e.type = SDL_EVENT_MOUSE_WHEEL;
+        app.browser.page = 0;
+        last = app.browser.head + gui_browser_items(&app.browser) - 1;
+        app.browser.selected = last;
+        e.wheel.integer_y = -1;
+        event(&app, &e);
+        assert(app.browser.page == 1 && app.browser.selected == app.browser.head);
+        e.wheel.integer_y = 1;
+        event(&app, &e);
+        assert(app.browser.page == 0 && app.browser.selected == last);
+        app.browser.page = pages - 1;
+        last = app.browser.head + gui_browser_items(&app.browser) - 1;
+        app.browser.selected = last;
+        e.wheel.integer_y = -1;
+        event(&app, &e);
+        assert(app.browser.page == pages - 1 && app.browser.selected == last);
+        app.browser.page = 1;
+        app.browser.selected = 0;
+    }
     /* Add a folder over every page, a wider gap under it than between the games, and no Back: ESC is the menu's */
     render(&app);
     shows(&app, "- Add a folder", yellow);

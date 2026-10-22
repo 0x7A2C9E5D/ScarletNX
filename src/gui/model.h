@@ -124,6 +124,9 @@ typedef enum { GUI_BROWSER_NONE, GUI_BROWSER_BACK, GUI_BROWSER_HEAD, GUI_BROWSER
 size_t gui_browser_pages(const GuiBrowser* browser);
 size_t gui_browser_items(const GuiBrowser* browser);
 void gui_browser_resize(GuiBrowser* browser, size_t page_size);
+/* a key on a paged list under its head rows: Up and Down go over it whole, from a page's last item to the next
+   one's first and back, round from the list's last to the head; Left/Right and PgUp/PgDn turn the page, its focus kept
+   on the same row */
 GuiBrowserAction gui_browser_key(GuiBrowser* browser, GuiKey key);
 /* gui_browser_key over a list with items no one picks (a group's heading; skip says which, by the item's index): Up
    and Down step over them, a page shown with its focus on one moves it to the next item that is not one (else the one

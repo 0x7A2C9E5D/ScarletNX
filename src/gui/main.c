@@ -8578,10 +8578,10 @@ static void scroll(App* app, GuiKey key) {
         editor_key(app, key); /* stops at its ends */
         return;
     }
-    if (app->menu.view == GUI_LOAD_GAMES) {
-        if (key == GUI_UP ? app->browser.selected > 0
-                          : app->browser.selected + 1 < app->browser.head + gui_browser_items(&app->browser))
-            menu_key(app, key);
+    if (app->menu.view == GUI_LOAD_GAMES) { /* over its pages as the keys go, from the head's first to the last game */
+        bool last = app->browser.page + 1 >= gui_browser_pages(&app->browser) &&
+                    app->browser.selected + 1 >= app->browser.head + gui_browser_items(&app->browser);
+        if (key == GUI_UP ? app->browser.selected > 0 : !last) menu_key(app, key);
         return;
     }
     row = app->menu.selected;
