@@ -886,12 +886,33 @@ and disconnect. It uses a private protocol inside the room's datagram transport.
 not connect to physical consoles, Citra/Azahar rooms or Switch LDN sessions. LAN mode is
 not implemented by this backend and does not silently join a public room.
 
-No game image or synchronization window is patched. NSMB2 internet co-op still has
-input-delay and synchronization limits. The development runs with title-specific
-buffering experiments do not establish stock-game WAN compatibility for this backend.
+The separate NSMB2 compatibility change below modifies the verified USA v0 image in
+memory for Room mode. Other games retain their original synchronization settings.
 
 Synthetic IPC tests cover discovery, a duplicate join, packet bounds, FIFO bursts and
 disconnect through a local relay and a relay with 120 ms delay in each forwarding leg.
 `ldn_room` covers a 512-packet socket burst and the 4 MiB low-latency queue bound.
 Optional `snx-test-3ds-uds --public` uses `SNX_TEST_UDS_ROOM=host:port` rather than a
 hardcoded public server. No game data is needed for these tests.
+
+#### NSMB2 USA v0 buffering exception for review
+
+The separate compatibility commit recognizes title `000400000007AE00` only after
+checking the full expanded-code SHA-256, layout size, settings bytes and five
+instruction signatures. It changes input-history capacity from 32 to 64 frames and
+the input window from 3 to 12 frames. Five encoder loads keep transmitted history
+at six frames so widening the input window does not overflow the fixed packet buffer.
+The patched image is hashed before translation so cached native modules cannot be
+mixed with the original image. The CIA on disk is not modified.
+
+This is an explicit exception request to the project's rule against title-specific
+timing patches. It is kept in a separate commit because the successful development
+co-op runs depended on it. It is not a general solution to internet synchronization.
+At 60 Hz the 12-frame buffer represents 200 ms, before other input/display delays.
+Development runs included USA-to-Poland and USA-to-India play, with noticeable input
+lag at those distances. Some earlier 12-frame runs still disconnected. The user's
+latest reported runs held their connection. No repeated final-branch WAN test has
+established that all intermittent failures are resolved.
+
+Room mode enables this patch for that exact image. `SNX_3DS_NSMB2_NETPLAY=0` disables
+it for comparison. LAN/off modes and other revisions do not receive this patch.
