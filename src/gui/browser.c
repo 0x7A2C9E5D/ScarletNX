@@ -137,6 +137,7 @@ static char* folder_game(const char* directory, const char* name, int kinds) {
     free(folder);
     return path;
 }
+char* gui_folder_game(const char* directory, const char* name) { return folder_game(directory, name, GUI_GAMES_RUN); }
 /* what the game at path, named name, is shown as: the name in its <name>_data/control.nacp, which the recompile
    copies there, else name */
 static char* shown_name(const char* path, const char* name) {

@@ -80,10 +80,26 @@ int main(void) {
     gui_recent_remove(&r, 9);
     assert(r.count == 4 && !strcmp(r.game[0].path, games[5]));
 
+    /* a dump made since into its game: the entry runs the program, its place and name kept; an entry the program had
+       already goes when it is the older, else the dump's does */
+    memset(&r, 0, sizeof r);
+    assert(!gui_recent_add(&r, games[2], GUI_SWITCH, 0) && !gui_recent_add(&r, games[3], GUI_SWITCH, 0));
+    assert(gui_recent_rename(&r, games[2], "Two"));
+    assert(gui_recent_made(&r, 1, games[5]) && r.count == 2 && !strcmp(r.game[0].path, games[3]));
+    assert(!strcmp(r.game[1].path, games[5]) && r.game[1].prepared && !strcmp(r.game[1].name, "Two"));
+    assert(r.game[1].driver == GUI_SWITCH && !r.game[0].prepared);
+    assert(gui_recent_made(&r, 0, games[5]) && r.count == 1 && !strcmp(r.game[0].path, games[5]));
+    assert(!strcmp(r.game[0].name, "game 3") && r.game[0].prepared); /* the newer, the dump's, kept */
+    assert(!gui_recent_add(&r, games[6], GUI_SWITCH, 0) && !gui_recent_add(&r, games[5], GUI_SWITCH, 1));
+    assert(r.count == 2 && !strcmp(r.game[1].path, games[6]) && gui_recent_made(&r, 1, games[5]));
+    assert(r.count == 1 && !strcmp(r.game[0].path, games[5]) && !strcmp(r.game[0].name, "game 3")); /* the newer */
+    assert(!gui_recent_made(&r, 1, games[6]) && !gui_recent_made(&r, -1, games[6]));
+    assert(!gui_recent_made(&r, 0, "/a\tb") && r.count == 1 && !strcmp(r.game[0].path, games[5]));
+
     assert(!snx_remove_tree(dir));
     for (i = 0; i < 7; ++i) free(games[i]);
     free(file);
     free(dir);
-    puts("GUI recent games: order, cap, a file once, names and the file passed");
+    puts("GUI recent games: order, cap, a file once, names, the file and a dump made into its game passed");
     return 0;
 }

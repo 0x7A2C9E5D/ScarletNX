@@ -3285,16 +3285,67 @@ int main(int argc, char** argv) {
         launch(&app, snx_strdup(nro), false);
         assert(!app.confirm.shown && app.menu.running);
         finish(&app, 0);
-        out = snx_path_join(app.games_dir, "0100ABCD12345000"); /* made already: its folder links to the dump */
+        /* made already: a game of its own whose .ini names the dump (source=), or whose folder links to it as an older
+           version made it. Its recent row runs the game, and Games lists the game alone */
+        out = snx_path_join(app.games_dir, "0100ABCD12345000");
         {
-            char* link = snx_path_join(out, "0100ABCD12345000.source");
-            assert(!snx_mkdirs(out));
+            char *data = snx_path_join(out, "0100ABCD12345000_data"),
+                 *link = snx_path_join(out, "0100ABCD12345000.source");
+            char *data_was = app.data_dir, *ini, *dumps, *listed;
+#ifdef _WIN32
+            char* program = snx_path_join(out, "0100ABCD12345000.exe");
+#else
+            char* program = snx_path_join(out, "0100ABCD12345000");
+#endif
+            GuiGames games = {0};
+            GuiRecent was = app.recent;
+            char message[sizeof app.message];
+            size_t i, shown = 0;
+            app.data_dir = snx_temp_dir(NULL); /* its dumps/, which Games lists; --repo, never in the dump's folder */
+            dumps = snx_path_join(app.data_dir, "dumps");
+            listed = snx_path_join(dumps, "made dump.nsp");
+            assert(!snx_mkdirs(data) && !snx_mkdirs(dumps) && !snx_write_file(listed, "x", 1));
+            assert(!snx_record_source(out, "0100ABCD12345000", listed));
+            games_scan(&app, &games, message, sizeof message); /* named, but no program: nothing made yet */
+            for (i = 0; i < games.count; ++i) shown += games.paths[i] && snx_same_file(games.paths[i], listed);
+            assert(shown == 1);
+            assert(!snx_record_source(out, "0100ABCD12345000", dump));
+            launch(&app, snx_strdup(dump), false);
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ROOM && !app.menu.running);
+            key(&app, SDLK_RETURN); /* Back */
+            assert(!app.confirm.shown && !snx_copy_file(self, program) && !snx_make_executable(program));
+            launch(&app, snx_strdup(dump), false);
+            assert(!app.confirm.shown && app.menu.running);
+            finish(&app, 0);
+            app.recent = (GuiRecent){0};
+            assert(!gui_recent_add(&app.recent, dump, GUI_SWITCH, 0));
+            recent_made(&app);
+            assert(app.recent.count == 1 && app.recent.game[0].prepared &&
+                   snx_same_file(app.recent.game[0].path, program));
+            app.recent = was;
+            recent_changed(&app);
+            assert(!snx_record_source(out, "0100ABCD12345000", listed));
+            games_scan(&app, &games, message, sizeof message);
+            for (i = 0, shown = 0; i < games.count; ++i)
+                shown += games.paths[i] && snx_same_file(games.paths[i], listed);
+            assert(!shown);
+            gui_games_free(&games);
+            ini = snx_game_ini(out, "0100ABCD12345000"); /* the link alone, no source= */
+            assert(!remove(ini));
             if (!snx_symlink(dump, link)) { /* Windows without the right to make one: none to test */
                 launch(&app, snx_strdup(dump), false);
                 assert(!app.confirm.shown && app.menu.running);
                 finish(&app, 0);
             }
+            assert(!snx_remove_tree(app.data_dir));
+            free(app.data_dir);
+            app.data_dir = data_was;
+            free(ini);
+            free(program);
+            free(listed);
+            free(dumps);
             free(link);
+            free(data);
         }
         assert(!snx_remove_tree(out));
         free(out);
