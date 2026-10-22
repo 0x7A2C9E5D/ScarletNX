@@ -1429,6 +1429,10 @@ msgid "This copy is portable: to install it, first move away %s"
 msgstr "Esta cópia é portátil: para instalá-la, primeiro tire do lugar %s"
 
 #: src/gui/main.c
+msgid "Skip stops on this page: it has no default to take"
+msgstr "Pular parou nesta página: ela não tem um padrão a seguir"
+
+#: src/gui/main.c
 #, c-format
 msgid "Could not make %s"
 msgstr "Não foi possível criar %s"
@@ -1456,6 +1460,10 @@ msgstr "Escolher pasta"
 #: src/gui/main.c
 msgid "Later"
 msgstr "Depois"
+
+#: src/gui/main.c
+msgid "Skip"
+msgstr "Pular"
 
 #: src/gui/main.c
 msgid "Overwrite"
@@ -2360,12 +2368,8 @@ msgid "a text too long for its box over its rows, or on one that slides"
 msgstr "um texto longo demais para a caixa em várias linhas, ou numa só que desliza"
 
 #: src/gui/theme.c
-msgid "the most pixels between two boxes of a list, times the text's size, 0 to 14"
-msgstr "o máximo de pixels entre duas caixas de uma lista, vezes o tamanho do texto, de 0 a 14"
-
-#: src/gui/theme.c
-msgid "a list longer than its column: center keeps the focus in its middle, edge moves at its ends"
-msgstr "uma lista maior que a coluna: center mantém o foco no meio, edge rola nas pontas"
+msgid "[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"
+msgstr "[body] %s = %s não faz nada: o ui.txt agora dispõe as listas (apague)"
 
 #: src/gui/theme.c
 msgid "a colour as #RRGGBB"
@@ -2894,6 +2898,15 @@ msgstr "cada pasta na biblioteca de recompilados ou na de dumps, conforme seus j
 #: src/common/utilities/setup.c
 msgid "The launcher's Text size"
 msgstr "O Tamanho do texto do launcher"
+
+msgid "A theme's lists"
+msgstr "As listas de um tema"
+
+msgid "[body] gap and scroll in its theme.ini"
+msgstr "[body] gap e scroll no theme.ini dele"
+
+msgid "nothing: ui.txt lays out every list"
+msgstr "nada: o ui.txt dispõe todas as listas"
 
 #: src/common/utilities/setup.c
 msgid "text_size = in app.ini"

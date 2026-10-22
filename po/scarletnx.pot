@@ -526,10 +526,6 @@ msgid "and %d more, which Share log lists"
 msgstr ""
 
 #: src/gui/main.c
-msgid "OK"
-msgstr ""
-
-#: src/gui/main.c
 msgid "tap again"
 msgstr ""
 
@@ -593,6 +589,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Move"
+msgstr ""
+
+#: src/gui/main.c src/gui/ui.txt
+msgid "OK"
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -1578,6 +1578,10 @@ msgid "This copy is portable: to install it, first move away %s"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Skip stops on this page: it has no default to take"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Portable"
 msgstr ""
 
@@ -1603,6 +1607,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Next"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Skip"
 msgstr ""
 
 #: src/gui/main.c
@@ -2524,14 +2532,6 @@ msgid "a text too long for its box over its rows, or on one that slides"
 msgstr ""
 
 #: src/gui/theme.c
-msgid "the most pixels between two boxes of a list, times the text's size, 0 to 14"
-msgstr ""
-
-#: src/gui/theme.c
-msgid "a list longer than its column: center keeps the focus in its middle, edge moves at its ends"
-msgstr ""
-
-#: src/gui/theme.c
 msgid "in the margin, beside the focused box"
 msgstr ""
 
@@ -2749,6 +2749,11 @@ msgstr ""
 
 #: src/gui/theme.c
 #, c-format
+msgid "[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
 msgid "%s could not be read (out of memory): it shows %s"
 msgstr ""
 
@@ -2895,6 +2900,18 @@ msgstr ""
 
 #: src/common/utilities/setup.c
 msgid "ui_scale =, shown as UI scale"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "A theme's lists"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "[body] gap and scroll in its theme.ini"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "nothing: ui.txt lays out every list"
 msgstr ""
 
 #: src/nx/runtime/settings.txt

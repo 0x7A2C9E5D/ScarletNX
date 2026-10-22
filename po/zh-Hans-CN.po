@@ -1429,6 +1429,10 @@ msgid "This copy is portable: to install it, first move away %s"
 msgstr "此副本为便携版：要安装，请先移走 %s"
 
 #: src/gui/main.c
+msgid "Skip stops on this page: it has no default to take"
+msgstr "跳过在此页结束：此页没有默认选择"
+
+#: src/gui/main.c
 #, c-format
 msgid "Could not make %s"
 msgstr "无法创建 %s"
@@ -1456,6 +1460,10 @@ msgstr "选择文件夹"
 #: src/gui/main.c
 msgid "Later"
 msgstr "稍后"
+
+#: src/gui/main.c
+msgid "Skip"
+msgstr "跳过"
 
 #: src/gui/main.c
 msgid "Overwrite"
@@ -2360,12 +2368,8 @@ msgid "a text too long for its box over its rows, or on one that slides"
 msgstr "文字超出框时分多行显示，或单行滚动"
 
 #: src/gui/theme.c
-msgid "the most pixels between two boxes of a list, times the text's size, 0 to 14"
-msgstr "列表中两个框之间的最大距离，按文字大小放大，0 到 14"
-
-#: src/gui/theme.c
-msgid "a list longer than its column: center keeps the focus in its middle, edge moves at its ends"
-msgstr "超出一列的列表：center 使焦点在中间，edge 到两端时移动"
+msgid "[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"
+msgstr "[body] %s = %s 已无效：列表现在由 ui.txt 布局（请删除）"
 
 #: src/gui/theme.c
 msgid "a colour as #RRGGBB"
@@ -2894,6 +2898,15 @@ msgstr "每个文件夹按其游戏放入已重编译或转储游戏库"
 #: src/common/utilities/setup.c
 msgid "The launcher's Text size"
 msgstr "启动器的文字大小"
+
+msgid "A theme's lists"
+msgstr "主题的列表"
+
+msgid "[body] gap and scroll in its theme.ini"
+msgstr "theme.ini 中的 [body] gap 和 scroll"
+
+msgid "nothing: ui.txt lays out every list"
+msgstr "不再有作用：所有列表由 ui.txt 布局"
 
 #: src/common/utilities/setup.c
 msgid "text_size = in app.ini"
