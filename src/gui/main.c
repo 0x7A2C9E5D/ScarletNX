@@ -2996,6 +2996,11 @@ static void games_boxes(App* app, GuiGamesBoxes* g) {
     g->lists[UI_GAMES_ROWS].focus = !selected         ? SIZE_MAX
                                     : selected < head ? selected
                                                       : (size_t)g->lead + selected - head;
+    /* a page under the recent rows that does not fit (a short screen, a page of one) scrolls to the focus; with Add a
+       folder focused the rows stay at their top */
+    if (selected)
+        ui_games_follow(g->rects, app->scale, UI_GAMES_ROWS, (size_t)g->lead + gui_browser_items(&app->browser),
+                        &g->lists[UI_GAMES_ROWS]);
 }
 static void game_label(const App* app, const GuiGames* games, size_t i, char* out, size_t size);
 static void menu_key(App* app, GuiKey key);
