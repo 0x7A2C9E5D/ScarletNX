@@ -420,6 +420,34 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
     }
     return cleanup(&state, result);
 }
+int snx_extract_icon(const char* dump, const SnxPaths* paths, const char* out) {
+    ExtractState state;
+    SnxU64 title, game;
+    unsigned char* icon = NULL;
+    const char* why = NULL;
+    char* to = snx_path_join(out, "icon.jpg");
+    size_t size = 0;
+    int result;
+    memset(&state, 0, sizeof state);
+    state.base = snx_absolute(dump);
+    if (!state.base || !to)
+        result = snx_error("Cannot resolve %s", dump);
+    else if (!snx_is_file(state.base))
+        result = snx_error("%s is not a file", state.base);
+    else {
+        snx_hac_on_exit(hactool_exit, &state);
+        result = snx_dump_title(&state.dump, state.base, NULL, NULL, paths->repo, 0, &title, &game, NULL);
+        if (!result) icon = snx_dump_icon(&state.dump, &size, &why);
+        snx_hac_on_exit(NULL, NULL);
+        if (!result && !icon)
+            result = snx_error("Games shows no icon for %s: %s", state.base, why);
+        else if (!result && snx_write_file(to, icon, size))
+            result = snx_error("Games shows no icon for %s: %s cannot be written", state.base, to);
+    }
+    free(icon);
+    free(to);
+    return cleanup(&state, result);
+}
 int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title, SnxU64* game, SnxU64* version) {
     ExtractState state;
     int result;

@@ -228,6 +228,16 @@ static int in_place(const char* base, const SnxPaths* paths) {
     }
     snx_hac_fs_free(fs);
     snx_dump_close(&dump);
+    { /* the icon alone, for a game made before -x kept one */
+        blob_t picture = icon();
+        char *dir = snx_dirname(base), *out = dir ? snx_path_join(dir, "icon alone") : NULL;
+        CHECK(out && !snx_mkdirs(out) && !snx_extract_icon(base, paths, out));
+        CHECK(file_is(out, "icon.jpg", picture.data, picture.size));
+        CHECK(snx_extract_icon(base, paths, "/nonexistent/folder") != 0); /* said, nothing written */
+        free(picture.data);
+        free(out);
+        free(dir);
+    }
     free(map);
     free(meta.data);
     free(want.data);

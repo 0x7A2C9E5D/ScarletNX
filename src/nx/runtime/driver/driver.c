@@ -700,6 +700,15 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
             free(exefs);
         }
         named = named_otherwise(source, name); /* an NRO's, one named when it was made */
+        { /* made before its extraction kept its icon: the icon alone, from the dump its .ini names, while it has none */
+            char *icon = snx_format("%s_data/icon.jpg", base), *data = snx_format("%s_data", base),
+                 *from = snx_game_source(folder, name, NULL);
+            if (!snx_is_file(icon) && from && snx_is_file(from) && !is_nro_path(from))
+                snx_extract_icon(from, paths, data); /* the game plays without it, the line saying why */
+            free(icon);
+            free(data);
+            free(from);
+        }
         goto made;
     }
     dumped = snx_dump_name(input);
