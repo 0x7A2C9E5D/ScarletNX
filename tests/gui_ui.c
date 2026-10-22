@@ -29,19 +29,23 @@ typedef char ui_attr_bits[(UI_ATTR_FAILURE | UI_ATTR_BLINK | UI_ATTR_MORE_UP | U
 typedef struct {
     GuiRect r;
     char text[64];
+    const void* image;
     unsigned color, attr;
     int focused, label;
 } Drawn;
 static struct {
     Drawn drawn[32];
     int ndrawn;
+    char image; /* where the last game's image is: what the drawing passes on */
 } g_gui_ui;
 
-void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned attr, bool focused) {
+void ui_draw_row(App* app, GuiRect r, const char* text, const void* image, unsigned color, unsigned attr,
+                 bool focused) {
     Drawn* d = &g_gui_ui.drawn[g_gui_ui.ndrawn++];
     (void)app;
     d->r = r;
     snprintf(d->text, sizeof d->text, "%s", text);
+    d->image = image;
     d->color = color;
     d->attr = attr;
     d->focused = focused;
@@ -49,7 +53,7 @@ void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned
 }
 const char* ui_tr(const char* english) { return english; }
 void ui_draw_label(App* app, GuiRect r, const char* text, unsigned color) {
-    ui_draw_row(app, r, text, color, 0, false);
+    ui_draw_row(app, r, text, NULL, color, 0, false);
     g_gui_ui.drawn[g_gui_ui.ndrawn - 1].label = 1;
 }
 
@@ -69,12 +73,13 @@ void ui_main_load_list_open_data_folder_action_cb(App* app, uint32_t hit) { call
 #endif
 void ui_main_load_list_settings_action_cb(App* app, uint32_t hit) { called(app, SETTINGS, hit, 0); }
 /* four games: a title, the second in the failure colour, the third with no label and open (the focus's look, no
-   cursor) */
+   cursor), the last with an image */
 bool ui_main_games_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
     static const char* const names[] = {"Game 0", "Game 1", NULL, "Game 3"};
     app->width = width;
     if (row >= 4) return false;
     info->label = names[row];
+    if (row == 3) info->image = &g_gui_ui.image;
     info->attr = row == 0 ? UI_ATTR_TITLE : row == 1 ? UI_ATTR_FAILURE : row == 2 ? UI_ATTR_OPEN : 0;
     return true;
 }
@@ -166,6 +171,8 @@ static void test_draw(void) {
     assert(!strcmp(d[5].text, "Game 1") && d[5].attr == UI_ATTR_FAILURE);
     assert(!strcmp(d[6].text, "(null)") && d[6].attr == UI_ATTR_OPEN && !d[6].focused);
     assert(!strcmp(d[7].text, "Game 3") && d[7].focused);
+    assert(d[7].image == &g_gui_ui.image && !d[4].image && !d[5].image && !d[6].image); /* a row's own image */
+    assert(!d[0].image && !d[3].image); /* a static list's rows have none */
     is(d[7].r, 14, 154 + 3 * 19, 300, 17);
     assert(app.width == 300); /* each row asked with its own width, max_row_width */
     assert(d[8].label && !strcmp(d[8].text, "ready"));

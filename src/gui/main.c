@@ -1937,7 +1937,9 @@ static GuiRect ui_row_box(const App* app, GuiRect r) {
    title (UI_ATTR_TITLE) is on a band of ink in a theme of filled boxes, else over a rule */
 /* a row's text's top: as item_text_y has it in a row a cell and a pixel high, in the middle of a taller one */
 static int ui_text_y(const App* app, GuiRect b) { return b.y + (b.h - cell_h(app) + app->scale) / 2; }
-void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned attr, bool focused) {
+static int user_side(const App* app, int h);
+void ui_draw_row(App* app, GuiRect r, const char* text, const void* image, unsigned color, unsigned attr,
+                 bool focused) {
     const GuiTheme* t = &app->theme;
     int look = focused || (attr & UI_ATTR_OPEN), filled = t->panels == GUI_PANELS_FILL, inverted = look && t->focus_bar;
     int failing =
@@ -1962,11 +1964,22 @@ void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned
     else if (filled)
         fill_rect(app, b, t->dim);
     if (!failing && !inverted && (!filled || look)) outline(app, b, look ? t->focus : t->dim);
-    text_in(app, inner(app, b), b.x + cell_w(app) / 2, ui_text_y(app, b), label,
-            rgb(failing || inverted     ? t->page
-                : attr & UI_ATTR_ACTIVE ? t->active
-                : look                  ? t->focus
-                                        : ui_colour(app, color, t->ink)));
+    {
+        SDL_Color ink = rgb(failing || inverted     ? t->page
+                            : attr & UI_ATTR_ACTIVE ? t->active
+                            : look                  ? t->focus
+                                                    : ui_colour(app, color, t->ink));
+        int x = b.x + cell_w(app) / 2, side = user_side(app, b.h);
+        if (image && side > 0) { /* the marker, the image as big as the head's user picture, then the text */
+            SDL_FRect at;
+            text_in(app, inner(app, b), x, ui_text_y(app, b), t->marker, ink);
+            x += gui_text_cols(t->marker) * cell_w(app);
+            at = (SDL_FRect){(float)x, (float)(b.y + 2 * app->scale), (float)side, (float)side};
+            SDL_RenderTexture(app->renderer, (SDL_Texture*)image, NULL, &at);
+            text_in(app, inner(app, b), x + side + cell_w(app) / 2, ui_text_y(app, b), text, ink);
+        } else
+            text_in(app, inner(app, b), x, ui_text_y(app, b), label, ink);
+    }
     if (focused && t->cursor[0]) text_in(app, r, r.x, ui_text_y(app, b), t->cursor, rgb(t->focus));
     if (attr & UI_ATTR_MORE_UP) /* beside the down arrow when one row shows */
         text_in(app, b, b.x + b.w - ((attr & UI_ATTR_MORE_DOWN) ? 2 : 1) * cell_w(app), ui_text_y(app, b), "\x1e",

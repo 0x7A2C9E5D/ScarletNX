@@ -51,7 +51,8 @@
    a list's with size_t row after it.
    A hover calls the same action as a click: hit has UI_HIT_HOVER, and UI_HIT_CLICK or UI_HIT_RELEASE when one made
    it, and the callback tests for the event it acts on. The drawing, main.c's too: ui_draw_row, which draws a theme's
-   cursor and the arrows of hidden rows (UI_ATTR_MORE_UP, UI_ATTR_MORE_DOWN) inside the row, and ui_draw_label. */
+   cursor and the arrows of hidden rows (UI_ATTR_MORE_UP, UI_ATTR_MORE_DOWN) inside the row, and the image a list's
+   get_row_info gives the row (UiRowInfo.image, main.c's) before its text; and ui_draw_label. */
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -793,8 +794,9 @@ static void write_h(const char* path) {
     outs("/* a list's state, the caller's: the row it shows first and the row in focus */\ntypedef struct {\n"
          "    size_t first, focus;\n} UiList;\n");
     outs(
-        "/* a row a list without items asks get_row_info for: its text (NULL: \"(null)\", as printf's %s prints it) and\n"
-        "   how it is drawn */\ntypedef struct {\n    const char* label;\n    unsigned attr;\n} UiRowInfo;\n");
+        "/* a row a list without items asks get_row_info for: its text (NULL: \"(null)\", as printf's %s prints it), the\n"
+        "   image before it (NULL: none; main.c's, which draws it) and how it is drawn */\ntypedef struct {\n"
+        "    const char* label;\n    const void* image;\n    unsigned attr;\n} UiRowInfo;\n");
     outs(
         "/* how a row is drawn, a bit each: in the failure colour, every other blink, an arrow up (rows above it are\n"
         "   hidden) or down (rows below) at its right, in the active colour (the one activated last), a label between\n"
@@ -808,7 +810,8 @@ static void write_h(const char* path) {
     outs(
         "/* the drawing, main.c's: a row (a list's, or a button) and a label, in the theme's look, their text as given; a\n"
         "   text of ui.txt as shown (translated) */\n"
-        "void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned attr, bool focused);\n"
+        "void ui_draw_row(App* app, GuiRect r, const char* text, const void* image, unsigned color, unsigned attr,\n"
+        "                 bool focused);\n"
         "void ui_draw_label(App* app, GuiRect r, const char* text, unsigned color);\n"
         "const char* ui_tr(const char* english);\n");
     for (i = 0; i < g_uigen.nitems; i++) {
@@ -1122,7 +1125,7 @@ static void write_scene(int scene) {
                 it->symbol, it->symbol);
             out("        ui_draw_row(app, ");
             out_row(it, i, "i");
-            out(", ui_tr(%s_texts + %s_items[item].text), %s_items[item].color ? %s_items[item].color : "
+            out(", ui_tr(%s_texts + %s_items[item].text), NULL, %s_items[item].color ? %s_items[item].color : "
                 "%s_items[%s].color, attr,\n                    row == lists[%s].focus);\n    }\n",
                 s->symbol, s->symbol, s->symbol, s->symbol, s->symbol, it->upper, it->upper);
         } else if (it->type == T_LIST) {
@@ -1133,16 +1136,18 @@ static void write_scene(int scene) {
             outs(";\n        UiRowInfo next;\n");
             /* the row after it asked first: the row's own label may be a buffer of the code's the next call writes */
             out("        bool more = i + 1 == n && %s_get_row_info(app, row + 1, box.w, &next);\n", it->symbol);
-            out("        info.label = NULL;\n        info.attr = 0;\n        if (!%s_get_row_info(app, row, box.w, &info)) "
+            out("        info.label = NULL;\n        info.image = NULL;\n        info.attr = 0;\n"
+                "        if (!%s_get_row_info(app, row, box.w, &info)) "
                 "break;\n",
                 it->symbol);
             outs("        if (i == 0 && row > 0) info.attr |= UI_ATTR_MORE_UP;\n");
             outs("        if (more) info.attr |= UI_ATTR_MORE_DOWN;\n");
-            out("        ui_draw_row(app, box, info.label ? info.label : \"(null)\", %s_items[%s].color, info.attr,\n"
+            out("        ui_draw_row(app, box, info.label ? info.label : \"(null)\", info.image, %s_items[%s].color, "
+                "info.attr,\n"
                 "                    row == lists[%s].focus);\n    }\n",
                 s->symbol, it->upper, it->upper);
         } else if (it->type == T_BUTTON) {
-            out("    ui_draw_row(app, r[%s], ui_tr(%s_texts + %d), %s_items[%s].color, ", it->upper, s->symbol,
+            out("    ui_draw_row(app, r[%s], ui_tr(%s_texts + %d), NULL, %s_items[%s].color, ", it->upper, s->symbol,
                 it->offset, s->symbol, it->upper);
             if (has_attr(it))
                 out("%s_attr_cb(app), false);\n", it->symbol);
