@@ -56,6 +56,8 @@ if(SNX_TEST_SANITIZERS)
         snx_ctr_audio snx_ctr_gpu snx_ctr_gpu_reference
         # the Vita runtime, its loader and USSE translator
         scarletnx-vita snx_vita_program snx_vita_loader snx_vita_usse snx-vita-usse
+        # the GBA board and its runner
+        scarletnx-agb scarletnx-agb-run
         # scarletnx's main where it is the other drivers too
         snx_multicall
         # the menu, its splash, icon and pads

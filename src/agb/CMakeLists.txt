@@ -73,3 +73,7 @@ endif()
 
 include(GNUInstallDirs)
 install(TARGETS scarletnx-agb-run RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(COMMAND snx_sanitizer_path) # tests/CMakeLists.txt: this folder's tests
+    snx_test_sanitize(snx-test-agb-board snx-test-agb-bios snx-test-agb-ppu snx-test-agb-apu snx-test-agb-cpu)
+    snx_sanitizer_path()
+endif()
