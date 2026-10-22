@@ -44,8 +44,9 @@
    or alt- (alt-f4), a hotkey of its scene (Enter is the click's).
    The callbacks, main.c's: a button's ui_<symbol>_action_cb(App*, uint32_t hit); a named label's
    ui_<symbol>_update_cb(App*, char* text, size_t size); a list without items' ui_<symbol>_get_row_info(App*, size_t
-   row, UiRowInfo*) (false past its last row: the row and those after it are not shown; its label is used before
-   the next call, so a buffer of the code's does) and
+   row, int width, UiRowInfo*) (width: the row's in pixels, as drawn, for a label cut to fit it; false past its last
+   row: the row and those after it are not shown; its label is used before the next call, so a buffer of the code's
+   does) and
    ui_<symbol>_row_action_cb(App*, size_t row, uint32_t hit); with attr = callback, unsigned ui_<symbol>_attr_cb(App*),
    a list's with size_t row after it.
    A hover calls the same action as a click: hit has UI_HIT_HOVER, and UI_HIT_CLICK or UI_HIT_RELEASE when one made
@@ -761,8 +762,8 @@ static void out_prototypes(const Item* it, int stub) {
         out("unsigned %s_attr_cb(App* app%s)%s", it->symbol, it->type == T_LIST ? ", size_t row" : "", end);
     if (stub && has_attr(it)) outs("\n    (void)app;\n    return 0;\n}\n");
     if (has_rows(it)) {
-        out("bool %s_get_row_info(App* app, size_t row, UiRowInfo* info)%s", it->symbol, end);
-        if (stub) outs("\n    (void)app;\n    (void)row;\n    (void)info;\n    return false;\n}\n");
+        out("bool %s_get_row_info(App* app, size_t row, int width, UiRowInfo* info)%s", it->symbol, end);
+        if (stub) outs("\n    (void)app;\n    (void)row;\n    (void)width;\n    (void)info;\n    return false;\n}\n");
         out("void %s_row_action_cb(App* app, size_t row, uint32_t hit)%s", it->symbol, end);
         if (stub) outs("\n    (void)app;\n    (void)row;\n    (void)hit;\n}\n");
     }
@@ -797,8 +798,10 @@ static void write_h(const char* path) {
     outs(
         "/* how a row is drawn, a bit each: in the failure colour, every other blink, an arrow up (rows above it are\n"
         "   hidden) or down (rows below) at its right, in the active colour (the one activated last), a label between\n"
-        "   rows (no box) */\nenum { UI_ATTR_FAILURE = 1, UI_ATTR_BLINK = 2, UI_ATTR_MORE_UP = 4, UI_ATTR_MORE_DOWN = 8, "
-        "UI_ATTR_ACTIVE = 16, UI_ATTR_LABEL = 32 };\n");
+        "   rows (no box), in the focus's look without its cursor (open: the row whose own rows show beside its list), a\n"
+        "   title over the rows after it (on the theme's band) */\n"
+        "enum { UI_ATTR_FAILURE = 1, UI_ATTR_BLINK = 2, UI_ATTR_MORE_UP = 4, UI_ATTR_MORE_DOWN = 8, "
+        "UI_ATTR_ACTIVE = 16, UI_ATTR_LABEL = 32, UI_ATTR_OPEN = 64, UI_ATTR_TITLE = 128 };\n");
     outs("enum { UI_MOD_CTRL = 1, UI_MOD_ALT = 2 };\n");
     outs("/* what the hit test says of a point, a bit each: on an item, pressed on it, released on it */\nenum { "
          "UI_HIT_HOVER = 1, UI_HIT_CLICK = 2, UI_HIT_RELEASE = 4 };\n");
@@ -1124,19 +1127,19 @@ static void write_scene(int scene) {
                 s->symbol, s->symbol, s->symbol, s->symbol, s->symbol, it->upper, it->upper);
         } else if (it->type == T_LIST) {
             out("    n = %s_shown(r, scale, %s);\n", s->symbol, it->upper);
-            out("    for (i = 0; i < n; i++) {\n        size_t row = lists[%s].first + i;\n        UiRowInfo next;\n",
+            out("    for (i = 0; i < n; i++) {\n        size_t row = lists[%s].first + i;\n        GuiRect box = ",
                 it->upper);
+            out_row(it, i, "i");
+            outs(";\n        UiRowInfo next;\n");
             /* the row after it asked first: the row's own label may be a buffer of the code's the next call writes */
-            out("        bool more = i + 1 == n && %s_get_row_info(app, row + 1, &next);\n", it->symbol);
-            out("        info.label = NULL;\n        info.attr = 0;\n        if (!%s_get_row_info(app, row, &info)) "
+            out("        bool more = i + 1 == n && %s_get_row_info(app, row + 1, box.w, &next);\n", it->symbol);
+            out("        info.label = NULL;\n        info.attr = 0;\n        if (!%s_get_row_info(app, row, box.w, &info)) "
                 "break;\n",
                 it->symbol);
             outs("        if (i == 0 && row > 0) info.attr |= UI_ATTR_MORE_UP;\n");
             outs("        if (more) info.attr |= UI_ATTR_MORE_DOWN;\n");
-            outs("        ui_draw_row(app, ");
-            out_row(it, i, "i");
-            out(", info.label ? info.label : \"(null)\", %s_items[%s].color, info.attr,\n                    row == "
-                "lists[%s].focus);\n    }\n",
+            out("        ui_draw_row(app, box, info.label ? info.label : \"(null)\", %s_items[%s].color, info.attr,\n"
+                "                    row == lists[%s].focus);\n    }\n",
                 s->symbol, it->upper, it->upper);
         } else if (it->type == T_BUTTON) {
             out("    ui_draw_row(app, r[%s], ui_tr(%s_texts + %d), %s_items[%s].color, ", it->upper, s->symbol,
@@ -1164,18 +1167,18 @@ static void write_scene(int scene) {
         if (it->parent != scene) continue;
         out_from(it->line);
         if (it->type == T_LIST) {
-            out("    n = %s_shown(r, scale, %s);\n    for (i = 0; i < n; i++) {\n        *row = lists[%s].first + i;\n",
-                s->symbol, it->upper, it->upper);
+            out("    n = %s_shown(r, scale, %s);\n    for (i = 0; i < n; i++) {\n        GuiRect box = ", s->symbol,
+                it->upper);
+            out_row(it, i, "i");
+            out(";\n        *row = lists[%s].first + i;\n", it->upper);
             if (it->children)
                 out("        if (*row >= sizeof %s_rows / sizeof *%s_rows) break;\n", it->symbol, it->symbol);
             else
-                out("        if (!%s_get_row_info(app, *row, &info)) break;\n", it->symbol);
-            outs("        if (ui_in(");
-            out_row(it, i, "i");
+                out("        if (!%s_get_row_info(app, *row, box.w, &info)) break;\n", it->symbol);
             if (it->children) /* the row's own item, which a hit acts on */
-                out(", x, y)) {\n            *item = %s_rows[*row];\n", it->symbol);
+                out("        if (ui_in(box, x, y)) {\n            *item = %s_rows[*row];\n", it->symbol);
             else
-                out(", x, y)) {\n            *item = %s;\n", it->upper);
+                out("        if (ui_in(box, x, y)) {\n            *item = %s;\n", it->upper);
             outs("            return UI_HIT_HOVER | event;\n        }\n    }\n");
         } else
             out("    if (ui_in(r[%s], x, y)) {\n        *item = %s;\n        *row = 0;\n        return UI_HIT_HOVER | "

@@ -70,7 +70,7 @@ foreach(line
         # the callbacks main.c defines: a button's action, a named label's text, a list without items' rows
         "void ui_main_load_list_load_3ds_cia_action_cb(App* app, uint32_t hit);\n"
         "void ui_main_status_update_cb(App* app, char* text, size_t size);\n"
-        "bool ui_main_games_get_row_info(App* app, size_t row, UiRowInfo* info);\nvoid ui_main_games_row_action_cb(App* app, size_t row, uint32_t hit);\n"
+        "bool ui_main_games_get_row_info(App* app, size_t row, int width, UiRowInfo* info);\nvoid ui_main_games_row_action_cb(App* app, size_t row, uint32_t hit);\n"
         # and, with attr = callback, a button's attributes as it is drawn
         "void ui_main_load_list_drop_action_cb(App* app, uint32_t hit);\nunsigned ui_main_load_list_drop_attr_cb(App* app);\n"
         # a list's, any row's by its index
@@ -117,8 +117,10 @@ foreach(line
         "        case UI_MAIN_LOAD_LIST_DROP: return ui_main_load_list_drop_attr_cb(app);\n"
         "        unsigned attr = ui_main_attr(app, item);\n        if (i == 0 && row > 0) attr |= UI_ATTR_MORE_UP;\n        if (i + 1 == n && row + 1 < sizeof ui_main_load_list_rows / sizeof *ui_main_load_list_rows) attr |= UI_ATTR_MORE_DOWN;\n"
         # a list without items asks for the row after the last one shown first: the row's own label may be a buffer the
-        # next call writes
-        "        bool more = i + 1 == n && ui_main_games_get_row_info(app, row + 1, &next);\n        info.label = NULL;\n        info.attr = 0;\n        if (!ui_main_games_get_row_info(app, row, &info)) break;\n        if (i == 0 && row > 0) info.attr |= UI_ATTR_MORE_UP;\n        if (more) info.attr |= UI_ATTR_MORE_DOWN;\n"
+        # next call writes; each asked with the row's width, for a label cut to fit, and drawn in that box
+        "        GuiRect box = ui_row(r[UI_MAIN_GAMES], i, 17, 2, 0, 0, s);\n        UiRowInfo next;\n        bool more = i + 1 == n && ui_main_games_get_row_info(app, row + 1, box.w, &next);\n        info.label = NULL;\n        info.attr = 0;\n        if (!ui_main_games_get_row_info(app, row, box.w, &info)) break;\n        if (i == 0 && row > 0) info.attr |= UI_ATTR_MORE_UP;\n        if (more) info.attr |= UI_ATTR_MORE_DOWN;\n        ui_draw_row(app, box, "
+        # the hit test: a row of a list without items is there while get_row_info says so, hit where it is drawn
+        "        GuiRect box = ui_row(r[UI_MAIN_GAMES], i, 17, 2, 0, 0, s);\n        *row = lists[UI_MAIN_GAMES].first + i;\n        if (!ui_main_games_get_row_info(app, *row, box.w, &info)) break;\n        if (ui_in(box, x, y)) {\n            *item = UI_MAIN_GAMES;\n"
         # ui.txt's texts as shown, through main.c's ui_tr
         "ui_tr(ui_main_texts + ui_main_items[item].text)"
         "        unsigned attr = ui_other_more_attr_cb(app, row);\n"
@@ -130,7 +132,7 @@ foreach(line
         "void ui_other_layout(GuiRect at, int scale, GuiRect* r) {\n    int s = scale;\n#ifdef SDL_PLATFORM_ANDROID\n"
         "    r[UI_OTHER_MORE] = gui_rect(at.x + UI_AT(0L, at.w, 0L, s), at.y + UI_AT(0L, at.h, 1114112L, s), UI_AT(65536L, at.w, 0L, s), UI_AT(0L, at.h, 2621440L, s));\n"
         "    r[UI_OTHER_MORE] = gui_rect(at.x + UI_AT(0L, at.w, 0L, s), at.y + UI_AT(0L, at.h, 1114112L, s), UI_AT(65536L, at.w, 0L, s), UI_AT(65536L, at.h, -1114112L, s));\n"
-        "bool ui_main_spare_get_row_info(App* app, size_t row, UiRowInfo* info) {\n    (void)app;\n    (void)row;\n    (void)info;\n    return false;\n}\n")
+        "bool ui_main_spare_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {\n    (void)app;\n    (void)row;\n    (void)width;\n    (void)info;\n    return false;\n}\n")
     string(FIND "${c}" "${line}" at)
     if(at LESS 0)
         message(FATAL_ERROR "ui.c lacks \"${line}\":\n${c}")

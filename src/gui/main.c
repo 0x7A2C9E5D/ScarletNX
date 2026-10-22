@@ -2973,9 +2973,10 @@ static size_t games_selected(const App* app, size_t row) {
 }
 /* Rows' row: "Recent games", the recent rows and their show more, a page's headings and games; a game in the active
    colour once activated, the pages before and after marked on the first game and the last */
-bool ui_games_rows_get_row_info(App* app, size_t row, UiRowInfo* info) {
+bool ui_games_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
     static char label[400];
     size_t lead = (size_t)games_lead(app), items = gui_browser_items(&app->browser), i, start;
+    (void)width; /* a game's name slides when it is too long, as the menu's rows */
     start = app->browser.page * app->browser.page_size;
     if (row == 0 && lead) {
         info->label = snx_tr("Recent games");

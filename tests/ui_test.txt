@@ -25,6 +25,7 @@
 	}
 	[list]Games {
 		scroll = edge
+		max_row_width = 300px
 	}
 	[label]Status {
 		height = 20%

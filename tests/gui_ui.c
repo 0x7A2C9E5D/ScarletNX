@@ -16,8 +16,14 @@ struct App {
     size_t rows[8];
     bool keys_missing; /* Load Switch blinks in the failure colour */
     size_t active;     /* LoadList's row in the active colour, + 1; 0: none */
+    int width;         /* the width Games' get_row_info was given last */
 };
 enum { LOAD_SWITCH, LOAD_3DS, SETTINGS, GAMES, OK, BACK, DATA };
+/* the row attributes are a bit each, none shared */
+typedef char ui_attr_bits[(UI_ATTR_FAILURE | UI_ATTR_BLINK | UI_ATTR_MORE_UP | UI_ATTR_MORE_DOWN | UI_ATTR_ACTIVE |
+                           UI_ATTR_LABEL | UI_ATTR_OPEN | UI_ATTR_TITLE) == 255
+                              ? 1
+                              : -1];
 
 /* what was drawn, in order */
 typedef struct {
@@ -62,13 +68,14 @@ void ui_main_load_list_load_3ds_cia_action_cb(App* app, uint32_t hit) { called(a
 void ui_main_load_list_open_data_folder_action_cb(App* app, uint32_t hit) { called(app, DATA, hit, 0); }
 #endif
 void ui_main_load_list_settings_action_cb(App* app, uint32_t hit) { called(app, SETTINGS, hit, 0); }
-/* four games: the second in the failure colour, the third with no label */
-bool ui_main_games_get_row_info(App* app, size_t row, UiRowInfo* info) {
+/* four games: a title, the second in the failure colour, the third with no label and open (the focus's look, no
+   cursor) */
+bool ui_main_games_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
     static const char* const names[] = {"Game 0", "Game 1", NULL, "Game 3"};
-    (void)app;
+    app->width = width;
     if (row >= 4) return false;
     info->label = names[row];
-    info->attr = row == 1 ? UI_ATTR_FAILURE : 0;
+    info->attr = row == 0 ? UI_ATTR_TITLE : row == 1 ? UI_ATTR_FAILURE : row == 2 ? UI_ATTR_OPEN : 0;
     return true;
 }
 void ui_main_games_row_action_cb(App* app, size_t row, uint32_t hit) { called(app, GAMES, hit, row); }
@@ -146,18 +153,21 @@ static void test_draw(void) {
     is(d[1].r, 14, 51, 200, 17);                                              /* max_row_width */
     assert(!strcmp(d[2].text, "Load 3DS CIA") && d[2].focused);
     is(d[2].r, 14, 70, 200, 17);
-    is(ui_main_row(r, 1, UI_MAIN_LOAD_LIST, 1), 14, 70, 200, 17); /* as drawn */
-    is(ui_main_row(r, 1, UI_MAIN_GAMES, 3), 14, 154 + 3 * 19, 392, 17);
-    is(ui_main_row(r, 1, UI_MAIN_STATUS, 0), 0, 0, 0, 0); /* not a list */
+    is(ui_main_row(r, 1, UI_MAIN_LOAD_LIST, 1), 14, 70, 200, 17);       /* as drawn */
+    is(ui_main_row(r, 1, UI_MAIN_GAMES, 3), 14, 154 + 3 * 19, 300, 17); /* max_row_width */
+    is(ui_main_row(r, 1, UI_MAIN_STATUS, 0), 0, 0, 0, 0);               /* not a list */
 #ifdef SDL_PLATFORM_ANDROID
     assert(!strcmp(d[3].text, "Open data folder"));
 #else
     assert(!strcmp(d[3].text, "Settings") && d[3].color == UI_COLOR_FOCUS);
 #endif
     assert(d[2].attr == 0 && d[3].attr == UI_ATTR_MORE_DOWN); /* the last row shown, rows below it */
-    assert(!strcmp(d[4].text, "Game 0") && !strcmp(d[5].text, "Game 1") && d[5].attr == UI_ATTR_FAILURE);
-    assert(!strcmp(d[6].text, "(null)") && !strcmp(d[7].text, "Game 3") && d[7].focused);
-    is(d[7].r, 14, 154 + 3 * 19, 392, 17);
+    assert(!strcmp(d[4].text, "Game 0") && d[4].attr == UI_ATTR_TITLE);
+    assert(!strcmp(d[5].text, "Game 1") && d[5].attr == UI_ATTR_FAILURE);
+    assert(!strcmp(d[6].text, "(null)") && d[6].attr == UI_ATTR_OPEN && !d[6].focused);
+    assert(!strcmp(d[7].text, "Game 3") && d[7].focused);
+    is(d[7].r, 14, 154 + 3 * 19, 300, 17);
+    assert(app.width == 300); /* each row asked with its own width, max_row_width */
     assert(d[8].label && !strcmp(d[8].text, "ready"));
     is(d[8].r, 14, 257, 392, 58);
     /* scrolled: the rows from the first, an arrow up on it; the arrow down only while rows are left below */
@@ -200,7 +210,8 @@ static void test_draw(void) {
     assert(ui_main_shown(r, 2, UI_MAIN_GAMES) == 1);
     g_gui_ui.ndrawn = 0;
     ui_main_draw(&app, r, 2, lists);
-    assert(!strcmp(d[2].text, "Game 0") && d[2].attr == UI_ATTR_MORE_DOWN);
+    assert(!strcmp(d[2].text, "Game 0") && d[2].attr == (UI_ATTR_TITLE | UI_ATTR_MORE_DOWN) && app.width == 384 &&
+           d[2].r.w == 384);
     lists[UI_MAIN_GAMES].first = 3; /* its last row: none below */
     g_gui_ui.ndrawn = 0;
     ui_main_draw(&app, r, 2, lists);
@@ -220,8 +231,9 @@ static void test_hit(void) {
     assert(item == UI_MAIN_LOAD_LIST_LOAD_3DS_CIA && row == 1);
     ui_main_act(&app, item, row, UI_HIT_CLICK);
     assert(app.calls[LOAD_3DS] == 1 && app.hits[LOAD_3DS] == UI_HIT_CLICK);
-    /* past max_row_width: no row there */
+    /* past max_row_width: no row there, in a list with items or without */
     assert(!ui_main_hit(&app, r, 1, lists, 300, 60, 0, &item, &row) && item == -1);
+    assert(!ui_main_hit(&app, r, 1, lists, 350, 157, 0, &item, &row) && item == -1);
     /* a row of Games, scrolled one down: its row from the list's first */
     lists[UI_MAIN_GAMES].first = 1;
     assert(ui_main_hit(&app, r, 1, lists, 20, 154 + 19 + 3, UI_HIT_RELEASE, &item, &row) ==
@@ -229,8 +241,10 @@ static void test_hit(void) {
     assert(item == UI_MAIN_GAMES && row == 2);
     ui_main_act(&app, item, row, UI_HIT_RELEASE);
     assert(app.calls[GAMES] == 1 && app.rows[GAMES] == 2 && app.hits[GAMES] == UI_HIT_RELEASE);
-    /* a row past get_row_info's last is not there */
+    /* a row past get_row_info's last is not there; each asked with its width */
+    app.width = 0;
     assert(!ui_main_hit(&app, r, 1, lists, 20, 154 + 19 * 3 + 3, 0, &item, &row));
+    assert(app.width == 300);
     /* the label is hit, and acts on nothing */
     assert(ui_main_hit(&app, r, 1, lists, 20, 260, 0, &item, &row) == UI_HIT_HOVER && item == UI_MAIN_STATUS);
     ui_main_act(&app, item, row, UI_HIT_CLICK);
