@@ -489,8 +489,8 @@ static void write_threads(u64 second) {
 
 static void frontend_loop(void) {
     const u64 period = 1000000000u / VI_REFRESH_HZ;
-    u64 tick = 0, next = plat_ns(), now, changed = next;
-    int frames = 0, stalls = 0;
+    u64 tick = 0, next = plat_ns(), now, changed = next, rate_at = next;
+    int frames = 0, stalls = 0, rate_frames = 0;
     while (!g_quit) {
         int shown;
         video_poll();
@@ -506,6 +506,13 @@ static void frontend_loop(void) {
         if (tick % 900 == 0) write_threads(tick / VI_REFRESH_HZ);
         now = plat_ns();
         shown = __atomic_load_n(&g_frames, __ATOMIC_RELAXED);
+        /* the pace the game is shown at, in the log every five seconds: a phone has no overlay to read it from */
+        if (now - rate_at >= 5000000000u) {
+            LOG("perf: %.1f frames a second over %.1f s (%d shown in all)\n",
+                (double)(shown - rate_frames) * 1e9 / (double)(now - rate_at), (double)(now - rate_at) / 1e9, shown);
+            rate_at = now;
+            rate_frames = shown;
+        }
         if (shown != frames) {
             frames = shown;
             changed = now;
