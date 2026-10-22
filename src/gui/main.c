@@ -1439,7 +1439,6 @@ static void left_paths(const char* line, char* old, char* now, size_t size) {
     snprintf(now, size, "%.*s", (int)strcspn(by, "\n"), by);
 }
 static void list_item(App* app, const GuiList* l, int i, const char* label, int focused, int activated);
-static int list_hit(const GuiList* l, float x, float y, bool touch);
 static void fill_rect(App* app, GuiRect r, GuiRgb c) {
     if (r.w > 0 && r.h > 0) fill(app, (float)r.x, (float)r.y, (float)r.w, (float)r.h, c, 255);
 }
@@ -1899,17 +1898,6 @@ static GuiRect list_box(const GuiList* l, int i) {
     return gui_rect(l->at.x + l->margin, l->at.y + (i - l->first) * l->pitch, l->at.w - l->margin - l->arrows, l->item);
 }
 static void touch(App* app, float x, float y);
-/* the entry under pixel x, y, -1 for none; a finger takes the whole width */
-static int list_hit(const GuiList* l, float x, float y, bool touch) {
-    int i;
-    for (i = l->first; i < l->first + l->shown; ++i) {
-        GuiRect b = list_box(l, i);
-        if (y >= (float)b.y && y < (float)(b.y + b.h + (l->pitch - l->item)) &&
-            (touch ? x >= (float)l->at.x && x < (float)(l->at.x + l->at.w) : x >= (float)b.x && x < (float)(b.x + b.w)))
-            return i;
-    }
-    return -1;
-}
 /* an entry as a box of its own: on the dim colour (fill) or framed in it (line); the focused one inverted on the focus
    colour with a rule over and under it (fill), or framed and written in it; the cursor in the margin. focused 2: that
    look without the cursor, for the group whose rows have the focus */
@@ -2260,44 +2248,72 @@ static void users_open(App* app) {
     app->users_shown = true;
     app->users_focus = app->user - 1;
 }
-/* the box over the screen, as wide as its title or the longest nickname with its picture; a row each, the focused
-   one */
+/* the box over the screen, as wide as its title or the longest nickname with its picture; a row each, ui.txt's scene
+   Users, the focused one among those shown (the box kept on the screen) */
 #define SAY_USERS_TITLE SNX_TR_NOOP("Who plays the games")
-static void users_boxes(App* app, GuiRect* r, GuiList* rows) {
-    int i, s = app->scale, item = item_h(app), h = g_user_count * (item + 6 * s);
+typedef struct {
+    GuiRect box;
+    GuiRect rects[UI_USERS_ITEMS];
+    UiList lists[UI_USERS_ITEMS]; /* the rows' at UI_USERS_ROWS: row i is g_users[i] */
+} GuiUsersBoxes;
+/* a box over the screen of count rows of a scene's list: cols wide, its head over them, as high as the rows or as the
+   screen; the rows' area, which the scene is laid out in */
+static GuiRect over_rows(App* app, int cols, int rows_height, GuiRect* box) {
+    int width, height, s = app->scale, h;
+    area(app, &width, &height);
+    h = SDL_min(rows_height, SDL_max(0, height - head_h(app) - 12 * s));
+    *box = over_rect(app, cols, head_h(app) + h + 12 * s);
+    return gui_rect(box->x + cell_w(app), box->y + head_h(app) + 6 * s, box->w - 2 * cell_w(app), h);
+}
+static void users_boxes(App* app, GuiUsersBoxes* u) {
+    int i, s = app->scale;
     int longest = SDL_max(16, gui_text_cols(snx_tr(SAY_USERS_TITLE)) + 2);
     for (i = 0; i < g_user_count; ++i)
         longest = SDL_max(longest, gui_text_cols(g_users[i].nickname) + gui_text_cols(app->theme.marker) + 4);
-    *r = over_rect(app, longest, head_h(app) + h + 12 * s);
-    list_place(app, rows, gui_rect(r->x + cell_w(app), r->y + head_h(app) + 6 * s, r->w - 2 * cell_w(app), h),
-               g_user_count, app->users_focus);
+    ui_users_layout(over_rows(app, longest,
+                              rows_h(ui_users_layout, ui_users_row, u->rects, UI_USERS_ROWS, s, g_user_count), &u->box),
+                    s, u->rects);
+    memset(u->lists, 0, sizeof u->lists);
+    u->lists[UI_USERS_ROWS].focus = (size_t)app->users_focus;
+    ui_users_follow(u->rects, s, UI_USERS_ROWS, (size_t)g_user_count, &u->lists[UI_USERS_ROWS]);
 }
+/* Users' row: the nickname, in the active colour for the one the games play as */
+bool ui_users_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
+    (void)width; /* a nickname is 20 columns at most, the box as wide as the longest */
+    if (row >= (size_t)g_user_count) return false;
+    info->label = g_users[row].nickname;
+    if ((int)row == app->user - 1) info->attr |= UI_ATTR_ACTIVE;
+    return true;
+}
+/* each row drawn, then the user's picture against its box's right, two pixels in, as high as the row less four; left of
+   the arrows' cell while some are hidden */
 static void render_users(App* app) {
-    GuiRect r;
-    GuiList rows;
-    char label[SNX_USERS_NICKNAME + 24];
-    int i, s = app->scale;
-    users_boxes(app, &r, &rows);
-    over_box(app, r, snx_tr(SAY_USERS_TITLE));
-    for (i = rows.first; i < rows.first + rows.shown; ++i) {
-        GuiRect b = list_box(&rows, i);
-        int side = b.h - 4 * s;
-        snprintf(label, sizeof label, "%s%s", app->theme.marker, g_users[i].nickname);
-        list_item(app, &rows, i, label, app->users_focus == i, i == app->user - 1);
+    GuiUsersBoxes u;
+    size_t i, n;
+    int s = app->scale, side = 0, arrows;
+    users_boxes(app, &u);
+    over_box(app, u.box, snx_tr(SAY_USERS_TITLE));
+    ui_users_draw(app, u.rects, s, u.lists);
+    n = ui_users_shown(u.rects, s, UI_USERS_ROWS);
+    arrows = n < (size_t)g_user_count ? cell_w(app) : 0;
+    for (i = 0; i < n && u.lists[UI_USERS_ROWS].first + i < (size_t)g_user_count; ++i) {
+        int user = (int)(u.lists[UI_USERS_ROWS].first + i);
+        GuiRect b = ui_row_box(app, ui_users_row(u.rects, s, UI_USERS_ROWS, i));
+        side = b.h - 4 * s;
         if (side <= 0) continue;
-        if (!app->users_pictures[i] || app->users_side != side) {
+        if (!app->users_pictures[user] || app->users_side != side) {
             uint32_t size;
-            const unsigned char* jpeg = snx_users_picture(&g_users[i], &size);
+            const unsigned char* jpeg = snx_users_picture(&g_users[user], &size);
             bool failed;
-            SDL_DestroyTexture(app->users_pictures[i]);
-            app->users_pictures[i] = picture_texture(app, jpeg, size, side, &failed);
+            SDL_DestroyTexture(app->users_pictures[user]);
+            app->users_pictures[user] = picture_texture(app, jpeg, size, side, &failed);
         }
-        if (app->users_pictures[i]) {
-            SDL_FRect at = {(float)(b.x + b.w - 2 * s - side), (float)(b.y + 2 * s), (float)side, (float)side};
-            SDL_RenderTexture(app->renderer, app->users_pictures[i], NULL, &at);
+        if (app->users_pictures[user]) {
+            SDL_FRect at = {(float)(b.x + b.w - 2 * s - side - arrows), (float)(b.y + 2 * s), (float)side, (float)side};
+            SDL_RenderTexture(app->renderer, app->users_pictures[user], NULL, &at);
         }
     }
-    app->users_side = rows.shown ? list_box(&rows, rows.first).h - 4 * s : 0;
+    app->users_side = side;
 }
 /* user n (1-based) picked: Settings' user, kept in settings.ini at once, and the head shows them */
 static GuiSettings* settings_of(App* app);
@@ -2327,16 +2343,26 @@ static void users_key(App* app, GuiKey key) {
     else if (key == GUI_CANCEL)
         users_close(app);
 }
-/* the pointer on it: the row under it takes the focus, a click picks it; a click off the box closes it */
-static void users_pointer(App* app, float x, float y, bool click, bool touch) {
-    GuiRect r;
-    GuiList rows;
-    int i;
-    users_boxes(app, &r, &rows);
-    if ((i = list_hit(&rows, x, y, touch)) >= 0) {
-        app->users_focus = i;
-        if (click) users_pick(app, i + 1);
-    } else if (click && (x < (float)r.x || x >= (float)(r.x + r.w) || y < (float)r.y || y >= (float)(r.y + r.h)))
+/* a row under the pointer takes the focus, and a click picks its user */
+void ui_users_rows_row_action_cb(App* app, size_t row, uint32_t hit) {
+    app->users_focus = (int)row;
+    if (hit & UI_HIT_CLICK) users_pick(app, (int)row + 1);
+}
+/* whether x, y is in r */
+static bool in_rect(GuiRect r, float x, float y) {
+    return x >= (float)r.x && x < (float)(r.x + r.w) && y >= (float)r.y && y < (float)(r.y + r.h);
+}
+/* the pointer on it: a row's (ui_users_rows_row_action_cb); a click off the box closes it */
+static void users_pointer(App* app, float x, float y, bool click) {
+    GuiUsersBoxes u;
+    int item;
+    size_t row;
+    uint32_t hit;
+    users_boxes(app, &u);
+    hit = ui_users_hit(app, u.rects, app->scale, u.lists, (int)x, (int)y, click ? UI_HIT_CLICK : 0, &item, &row);
+    if (hit)
+        ui_users_act(app, item, row, hit);
+    else if (click && !in_rect(u.box, x, y))
         users_close(app);
 }
 /* ---- the box of a game's updates and DLCs (gui_game_addons) and mods (gui_game_mods), which opening the game shows,
@@ -2506,29 +2532,42 @@ static void addons_label(const App* app, int row, char* label, size_t size) {
     else
         snprintf(label, size, "%s%s", app->theme.marker, app->addons_recompile ? snx_tr("Recompile") : snx_tr("Play"));
 }
-static void addons_boxes(App* app, GuiRect* r, GuiList* rows) {
-    int i, s = app->scale, item = item_h(app), count = addons_rows(app), h = count * (item + 6 * s);
+/* the box over the screen, as wide as its title or the longest row; a row each, ui.txt's scene Addons, the focused
+   one among those shown (the box kept on the screen) */
+typedef struct {
+    GuiRect box;
+    GuiRect rects[UI_ADDONS_ITEMS];
+    UiList lists[UI_ADDONS_ITEMS]; /* the rows' at UI_ADDONS_ROWS: row i is addons_row's i */
+} GuiAddonsBoxes;
+static void addons_boxes(App* app, GuiAddonsBoxes* d) {
+    int i, s = app->scale, count = addons_rows(app);
     int longest = SDL_max(16, (int)SDL_utf8strlen(app->addons_title) + 2);
     char label[160];
     for (i = 0; i < count; ++i) {
         addons_label(app, i, label, sizeof label);
         longest = SDL_max(longest, (int)SDL_utf8strlen(label) + 4);
     }
-    *r = over_rect(app, longest, head_h(app) + h + 12 * s);
-    list_place(app, rows, gui_rect(r->x + cell_w(app), r->y + head_h(app) + 6 * s, r->w - 2 * cell_w(app), h), count,
-               app->addons_focus);
+    ui_addons_layout(
+        over_rows(app, longest, rows_h(ui_addons_layout, ui_addons_row, d->rects, UI_ADDONS_ROWS, s, count), &d->box),
+        s, d->rects);
+    memset(d->lists, 0, sizeof d->lists);
+    d->lists[UI_ADDONS_ROWS].focus = (size_t)app->addons_focus;
+    ui_addons_follow(d->rects, s, UI_ADDONS_ROWS, (size_t)count, &d->lists[UI_ADDONS_ROWS]);
+}
+/* Addons' row: an update's choice, a DLC's or a mod's box, Open mods folder, Save or Play (ui_draw_row puts the
+   marker) */
+bool ui_addons_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
+    (void)width; /* a long name slides, as the menu's rows do */
+    if (row >= (size_t)addons_rows(app)) return false;
+    addons_label(app, (int)row, app->row_text, sizeof app->row_text);
+    info->label = app->row_text + strlen(app->theme.marker);
+    return true;
 }
 static void render_addons(App* app) {
-    GuiRect r;
-    GuiList rows;
-    char label[160];
-    int i;
-    addons_boxes(app, &r, &rows);
-    over_box(app, r, app->addons_title);
-    for (i = rows.first; i < rows.first + rows.shown; ++i) {
-        addons_label(app, i, label, sizeof label);
-        list_item(app, &rows, i, label, app->addons_focus == i, false);
-    }
+    GuiAddonsBoxes d;
+    addons_boxes(app, &d);
+    over_box(app, d.box, app->addons_title);
+    ui_addons_draw(app, d.rects, app->scale, d.lists);
 }
 /* what is picked kept as the game's addons= and mods_off=: 1, else 0 with app->message saying why. The picked
    update's program, absolute and owned, in *program when it is not NULL (NULL with no update picked) */
@@ -2615,16 +2654,22 @@ static void addons_key(App* app, GuiKey key) {
     else if (key == GUI_CANCEL)
         addons_close(app);
 }
-/* the pointer on it: the row under it takes the focus, a click presses it; a click off the box closes it */
-static void addons_pointer(App* app, float x, float y, bool click, bool touch) {
-    GuiRect r;
-    GuiList rows;
-    int i;
-    addons_boxes(app, &r, &rows);
-    if ((i = list_hit(&rows, x, y, touch)) >= 0) {
-        app->addons_focus = i;
-        if (click) addons_press(app, i);
-    } else if (click && (x < (float)r.x || x >= (float)(r.x + r.w) || y < (float)r.y || y >= (float)(r.y + r.h)))
+/* a row under the pointer takes the focus, and a click presses it */
+void ui_addons_rows_row_action_cb(App* app, size_t row, uint32_t hit) {
+    app->addons_focus = (int)row;
+    if (hit & UI_HIT_CLICK) addons_press(app, (int)row);
+}
+/* the pointer on it: a row's (ui_addons_rows_row_action_cb); a click off the box closes it */
+static void addons_pointer(App* app, float x, float y, bool click) {
+    GuiAddonsBoxes d;
+    int item;
+    size_t row;
+    uint32_t hit;
+    addons_boxes(app, &d);
+    hit = ui_addons_hit(app, d.rects, app->scale, d.lists, (int)x, (int)y, click ? UI_HIT_CLICK : 0, &item, &row);
+    if (hit)
+        ui_addons_act(app, item, row, hit);
+    else if (click && !in_rect(d.box, x, y))
         addons_close(app);
 }
 /* ---- the head: the tabs, and the title after them or under them ---- */
@@ -8614,9 +8659,9 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
     else if (app->dests_shown)
         dests_pointer(app, x, y, click);
     else if (app->users_shown)
-        users_pointer(app, x, y, click, touch);
+        users_pointer(app, x, y, click);
     else if (app->addons_shown)
-        addons_pointer(app, x, y, click, touch);
+        addons_pointer(app, x, y, click);
     else if (app->editing && app->form == GUI_FORM_PAD) {
         if (click) pad_did(app, snx_pad_screen_tap(&app->pad, snx_pad_screen_hit(&app->pad_drawing, x, y)));
     } else if (app->editing && app->editor.picking)

@@ -63,3 +63,17 @@
 		android.row_height = 40px
 	}
 }
+# the box of users a click on the head's user opens, a row each (its picture at its right), and the box of a game's
+# updates, DLCs and mods, which opening it shows
+[scene]Users {
+	[list]Rows {
+		max_rows = 8
+		android.row_height = 40px
+	}
+}
+[scene]Addons {
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}

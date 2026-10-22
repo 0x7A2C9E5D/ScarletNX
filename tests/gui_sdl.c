@@ -4286,6 +4286,46 @@ int main(int argc, char** argv) {
                    find_text(&app, "( ) Update 1.2.0", yellow, 1, &nx, &ny));
             assert(find_text(&app, "(*) No update", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "[x] DLC 1", rgb(app.theme.ink), 1, &nx, &ny));
+            { /* the rows as the menu's (ui.txt's scene Addons), 2 pixels apart; the pointer over one its focus, a click
+                 presses it; a click off the box closes it, nothing kept */
+                GuiAddonsBoxes d;
+                GuiRect dlc, mod, first;
+                size_t top;
+                int s = app.scale;
+                addons_boxes(&app, &d);
+                top = d.lists[UI_ADDONS_ROWS].first;
+                first = ui_row_box(&app, ui_addons_row(d.rects, s, UI_ADDONS_ROWS, 0));
+                dlc = ui_row_box(&app, ui_addons_row(d.rects, s, UI_ADDONS_ROWS, 3 - top));
+                mod = ui_row_box(&app, ui_addons_row(d.rects, s, UI_ADDONS_ROWS, 4 - top));
+                assert(!top && mod.y - dlc.y == item_h(&app) + 2 * s && dlc.h == item_h(&app));
+                { /* its text past the marker, as the menu's rows */
+                    int x, y;
+                    assert(find_text(&app, "[x] DLC 1", rgb(app.theme.ink), 1, &x, &y));
+                    assert(x == dlc.x + cell_w(&app) / 2 + gui_text_cols(app.theme.marker) * cell_w(&app));
+                }
+                { /* rows past the screen's height: the box kept on it, the rows in it */
+                    GuiRect box, at = over_rows(&app, 20, 1 << 20, &box);
+                    int w, h;
+                    area(&app, &w, &h);
+                    assert(box.y >= 0 && box.y + box.h <= h && at.y + at.h <= box.y + box.h && at.h > 0);
+                }
+                point(&app, dlc, false);
+                assert(app.addons_focus == 3 && app.addons_checked[2]);
+                render(&app);
+                assert(find_text(&app, "[x] DLC 1", yellow, 1, &nx, &ny)); /* drawn in focus */
+                point(&app, dlc, true);
+                assert(app.addons_shown && !app.addons_checked[2]);
+                point(&app, dlc, true);
+                assert(app.addons_checked[2]);
+                point(&app, first, false);
+                assert(app.addons_focus == 0);
+                mouse_px(&app, d.box.x + d.box.w / 2, d.box.y + 2, true); /* its head: nothing */
+                assert(app.addons_shown && !app.addons_focus);
+                mouse_px(&app, d.box.x - 4, d.box.y + d.box.h / 2, true);
+                assert(!app.addons_shown && !app.menu.running);
+                key(&app, SDLK_RETURN);
+                assert(app.addons_shown && !app.addons_focus && app.addons_checked[2] && !app.addons_checked[0]);
+            }
             key(&app, SDLK_RETURN); /* Update 1.2.0 picked */
             assert(app.addons_checked[0] && !app.addons_checked[1]);
             key(&app, SDLK_DOWN);
@@ -6190,6 +6230,39 @@ int main(int argc, char** argv) {
             key(&app, SDLK_UP);
             key(&app, SDLK_RETURN);
             assert(!app.users_shown && app.user == 1 && !strcmp(app.user_name, "Aogo"));
+            { /* the rows as the menu's (ui.txt's scene Users), 2 pixels apart, each picture inside its row's box at its
+                 right; the pointer over a row its focus, a click picks its user */
+                GuiUsersBoxes u;
+                GuiRect aogo, xuji;
+                int side;
+                swipe_px(&app, b.x + b.w / 2, b.y + b.h / 2, b.x + b.w / 2, b.y + b.h / 2);
+                render(&app);
+                users_boxes(&app, &u);
+                aogo = ui_row_box(&app, ui_users_row(u.rects, s, UI_USERS_ROWS, 0));
+                xuji = ui_row_box(&app, ui_users_row(u.rects, s, UI_USERS_ROWS, 1));
+                side = xuji.h - 4 * s;
+                assert(xuji.y - aogo.y == item_h(&app) + 2 * s && xuji.h == item_h(&app) && app.users_side == side);
+                assert(same_colour(pixel(&app, (float)(xuji.x + xuji.w / 2), (float)(xuji.y + xuji.h / 2)),
+                                   rgb(app.theme.dim)) &&
+                       !same_colour(
+                           pixel(&app, (float)(xuji.x + xuji.w - 2 * s - side / 2), (float)(xuji.y + 2 * s + side / 2)),
+                           rgb(app.theme.dim)));
+                point(&app, xuji, false);
+                assert(app.users_shown && app.users_focus == 1 && app.user == 1);
+                render(&app);
+                {
+                    int x, y; /* the one the games play as, in the active colour */
+                    assert(find_text(&app, "Aogo", rgb(app.theme.active), 1, &x, &y) && y > aogo.y &&
+                           y < aogo.y + aogo.h);
+                }
+                mouse_px(&app, u.box.x + u.box.w / 2, u.box.y + 2, true); /* its head: nothing */
+                assert(app.users_shown && app.users_focus == 1 && app.user == 1);
+                point(&app, xuji, true);
+                assert(!app.users_shown && app.user == 2);
+                swipe_px(&app, b.x + b.w / 2, b.y + b.h / 2, b.x + b.w / 2, b.y + b.h / 2);
+                point(&app, aogo, true);
+                assert(!app.users_shown && app.user == 1);
+            }
             {
                 size_t size;
                 char* kept = (char*)snx_read_file(app.settings_file, &size);
