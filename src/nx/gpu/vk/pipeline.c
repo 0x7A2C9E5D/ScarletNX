@@ -339,6 +339,7 @@ static VkSh* g_shh[1024];
    by write tracking since then, or else by the hash of its code */
 typedef struct {
     u64 gva, gva_a, gw;
+	u64 shader_generation;
     u32 mask[20], epoch, wseen;
     int stage;
     VkSh* s;
@@ -490,9 +491,11 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
             ca = &set[w];
     if (ca) {
         VkSh* s = ca->s;
-        int same = ca->epoch == g_vk_epoch ||
-                   (code_same(ca, gva, s->clen, s->qh) && (!gva_a || code_same(ca, gva_a, s->clen_a, s->qh_a)));
-        if (same && ca->epoch != g_vk_epoch) {
+	int same = (ca->epoch == g_vk_epoch && ca->shader_generation == g_vk.shader_generation) ||
+		(code_same(ca, gva, s->clen, s->qh) &&
+		 (!gva_a || code_same(ca, gva_a, s->clen_a, s->qh_a)));
+        if (same && (ca->epoch != g_vk_epoch || ca->shader_generation != g_vk.shader_generation)) {
+            ca->shader_generation = g_vk.shader_generation;
             ca->epoch = g_vk_epoch;
             ca->wseen = vk_ww_now();
             ca->gw = gpu_mem_generation();
@@ -577,6 +580,7 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
     ca->epoch = g_vk_epoch;
     ca->wseen = wseen;
     ca->gw = gw;
+	ca->shader_generation = g_vk.shader_generation;
     ca->s = s;
     return s;
 }

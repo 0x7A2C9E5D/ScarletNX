@@ -835,6 +835,8 @@ static int check_rt_overlap(void) {
     return 0;
 }
 
+#include "vulkan_shader_invalidate.inc"
+
 int main(int argc, char** argv) {
     const u32 w = 32, h = 16;
     const u64 address = HEAP_BASE;
@@ -860,6 +862,7 @@ int main(int argc, char** argv) {
     CHECK(!check_multisample_shader_gate());
     CHECK(!check_direct_spirv());
     CHECK(!check_flush_subnormal());
+	CHECK(!check_shader_invalidation());
     CHECK(!check_vic());
     CHECK(!check_vic_chain(shot));
     CHECK(!check_nvdec_vic());

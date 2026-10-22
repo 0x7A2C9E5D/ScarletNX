@@ -293,6 +293,8 @@ static int keeps_draw(const u32* r, u32 m, u32 v) {
         case 0x1D1:
         case 0x6D:
         case 0xB2:
+        case 0x87:
+        case 0x369:
         case 0x378:
         case 0x3DD:
         case 0x3DF:
@@ -349,6 +351,7 @@ _Static_assert(R3D_XFB < G_ACTS, "the 3D register groups fit below G_ACTS");
 /* a vertex stream's stride and enable word and its divisor, around its address (0x701-0x702) */
 #define M3D_STREAM(i) [0x700 + 4 * (i)] = R3D_VFORMAT, [0x703 + 4 * (i)] = R3D_VFORMAT
 static const u8 g_m3d_group[0xE00] = {
+    [0x87] = G_ACTS, [0x369] = G_ACTS,
     [0x44] = G_ACTS, [0x45] = G_ACTS, [0x46] = G_ACTS, [0x47] = G_ACTS, [0x48] = G_ACTS, [0x49] = G_ACTS,
     [0x6C] = G_ACTS, [0x6D] = G_ACTS, [0xB2] = G_ACTS, [0xE4] = G_ACTS, [0xEC] = G_ACTS, [0xF4] = G_ACTS,
     [0xFC] = G_ACTS, [0x1D1] = G_ACTS | R3D_XFB, [0x35D] = G_ACTS, [0x35E] = G_ACTS, [0x378] = G_ACTS,
@@ -469,6 +472,11 @@ static void method_acts(GpuChannel* ch, u32 m, u32 v, int last) {
             else if (g_renderer->stream_incr)
                 g_renderer->stream_incr(v & 0xFFFF);
             break;
+	case 0x87: /* INVALIDATE_SHADER_CACHES */
+	case 0x369: /* INVALIDATE_SHADER_CACHES_NO_WFI */
+		if (v & 1)
+			barrier(5);
+		break;
         case 0x378: barrier(0); break; /* FRAGMENT_BARRIER */
         case 0x3DD: barrier(2); break; /* INVALIDATE_TEXTURE_DATA_CACHE */
         case 0x3DF: barrier(1); break; /* TILED_CACHE_BARRIER */

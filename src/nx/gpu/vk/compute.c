@@ -713,23 +713,30 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         g_cbn[i] = sz;
         gmem_read(cba[i], g_cb[i], sz);
     }
-    /* the program at an address is taken as the same until the next submit, as vk_shader_get does: the code isn't
-       read and hashed again for every dispatch of it */
-    static struct {
-        u64 addr;
-        u32 epoch, lx, ly, lz, shm;
-        CsPipe* p;
-    } fc[64];
+    /* Recheck code at a new submit or instruction invalidation, as vk_shader_get does. */
+	struct cs_fast {
+		u64 addr;
+		u64 shader_generation;
+		u32 epoch, lx, ly, lz, shm;
+		CsPipe *p;
+	};
+	static struct cs_fast fc[64];
     u64 pa = code + q[8];
-    typeof(fc[0])* fe = &fc[((pa >> 8) ^ (pa >> 16)) & 63];
+	struct cs_fast *fe = &fc[((pa >> 8) ^ (pa >> 16)) & 63];
     CsPipe* p = fe->p;
-    if (!p || fe->addr != pa || fe->epoch != g_vk_epoch || fe->lx != lx || fe->ly != ly || fe->lz != lz ||
+	if (!p || fe->addr != pa || fe->shader_generation != g_vk.shader_generation ||
+	    fe->epoch != g_vk_epoch || fe->lx != lx || fe->ly != ly || fe->lz != lz ||
         fe->shm != shm || !vk_cb_reads_hold(&p->cbr, cs_cb_read)) {
         static u8 code_buf[0x10000 + 80]; /* compute programs have no header: 80 zero bytes stand in for one */
         CsKey unkeyed = {0, 0, 0};
         cs_read_code(pa, code_buf);
         p = cs_pipe(code_buf, lx, ly, lz, shm, unkeyed);
-        *fe = (typeof(fc[0])){pa, g_vk_epoch, lx, ly, lz, shm, p};
+		*fe = (struct cs_fast){
+			.addr = pa,
+			.shader_generation = g_vk.shader_generation,
+			.epoch = g_vk_epoch,
+			.lx = lx, .ly = ly, .lz = lz, .shm = shm, .p = p,
+		};
     }
     /* A 2D store is translated unsigned for a bindless image and float for a bound one. An image of the other
        class (a bindless RGBA8 target), or an integer texture, needs the program translated again, keyed on it. */

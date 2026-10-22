@@ -47,6 +47,7 @@ typedef struct {
     VkSurfaceKHR surface;
     VkPhysicalDevice phys;
     VkPhysicalDeviceProperties props;
+	u64 shader_generation; /* shader instruction invalidations, separate from memory epochs */
     VkDevice dev;
     VmaAllocator vma;
     /* compute is a second queue of the graphics family, or of a compute-only family, when the device has one; else
