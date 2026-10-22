@@ -107,8 +107,8 @@ static AgbBlock* add(AgbRecomp* recomp, uint32_t pc, int thumb) {
 }
 
 static int32_t thumb_target(uint32_t pc, uint16_t hw1, uint16_t hw2, unsigned op) {
-    if (op == BR_B) return (int32_t)(pc + 4 + (uint32_t)((int32_t)((hw1 & 0x7FF) << 21) >> 20));
-    if (op == BR_BCOND) return (int32_t)(pc + 4 + (uint32_t)((int32_t)((hw1 & 0xFF) << 24) >> 23));
+    if (op == BR_B) return (int32_t)(pc + 4 + (uint32_t)((int32_t)((uint32_t)(hw1 & 0x7FF) << 21) >> 20));
+    if (op == BR_BCOND) return (int32_t)(pc + 4 + (uint32_t)((int32_t)((uint32_t)(hw1 & 0xFF) << 24) >> 23));
     if (op == BR_CBZ || op == BR_CBNZ)
         return (int32_t)(pc + 4 + ((((hw1 >> 9) & 1) << 5) | ((hw1 >> 3) & 31)) * 2);
     /* the Thumb32 forms spread the offset over both halfwords */
