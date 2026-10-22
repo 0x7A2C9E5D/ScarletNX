@@ -177,7 +177,19 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "Tap: select. Refresh: tap it."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "Tap: open. Swipe: turn the page. Recompile: tap it. Refresh: tap it. Back: go back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap: open. Swipe: turn the page. Recompile: tap it. Refresh: tap it."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -190,6 +202,12 @@ msgstr ""
 #: src/gui/main.c
 #, snx-keys
 msgid "Back: go back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Pick the prod.keys file."
 msgstr ""
 
 #: src/gui/main.c
@@ -225,7 +243,19 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "Tap a key to change, type or pick it."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "Drag a bar, or tap #RRGGBB to type it. Tap outside: keep. Back: put back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Drag a bar, or tap #RRGGBB to type it. Tap outside: keep."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -237,7 +267,19 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "Tap a group to open it."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "Tap a row to change or open it. Back: go back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap a row to change or open it."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -249,7 +291,19 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "Add a folder: tap it. Tap an Extra to take it off. Refresh: tap it."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "Tap a folder to pick another. Refresh: tap it. Back: go back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap a folder to pick another. Refresh: tap it."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -261,7 +315,19 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "Tap a control; tap it again for a press."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "Tap a user to rename it. Back: go back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap a user to rename it."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -1542,7 +1608,19 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "Tap: choose."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "Type the nickname. Back: go back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Type the nickname."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -2517,17 +2595,13 @@ msgstr ""
 msgid "Opens the data folder, games/ and the keys among them, in the system's Files app"
 msgstr ""
 
-#: src/gui/process_posix.c src/gui/process_win32.c
-msgid "A driver is already running"
-msgstr ""
-
-#: src/gui/process_posix.c
-msgid "iOS runs no other programs: prepare games on a computer, then copy them to games/"
-msgstr ""
-
 #: src/gui/process_posix.c
 #, c-format
 msgid "Cannot launch driver: %s"
+msgstr ""
+
+#: src/gui/process_posix.c src/gui/process_win32.c
+msgid "A driver is already running"
 msgstr ""
 
 #: src/gui/process_win32.c
