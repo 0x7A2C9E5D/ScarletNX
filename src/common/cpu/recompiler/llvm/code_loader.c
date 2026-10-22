@@ -201,12 +201,12 @@ static int debugger_attached(void) {
     return sysctl(mib, 4, &kp, &n, NULL, 0) == 0 && (kp.kp_proc.p_flag & P_TRACED);
 }
 
-/* The arena on iOS. Code and read-only data are one region the debugger prepares (read-execute), written through a
-   read-write alias of it (vm_remap, then vm_protect), which every load goes through. Data is ordinary memory placed
-   right after the region, where the debugger's regions leave room (the next page was free every time), so the three
-   regions stay within one arena's reach and the loader's offsets from base hold. The debugger can be let go after
-   this: the prepared pages stay executable, and what is written into them later runs. 0, or -1 with the reason in
-   error */
+/* The arena on iOS. The debugger prepares the whole arena as one region (read-execute), and code and read-only data
+   are written through a read-write alias of their part of it (vm_remap, then vm_protect), which every load goes
+   through. The data region is the region's tail, given back and mapped again as ordinary memory at the same place:
+   the pages after a debugger's region are not always free (an arena of a device's app found them taken), and this way
+   the three regions stay one arena's reach apart whatever is around it. The debugger can be let go after this: the
+   prepared pages stay executable, and what is written into them later runs. 0, or -1 with the reason in error */
 static int ios_arena(SnxCodeLoader* loader, char* error, size_t error_size) {
     size_t code = loader->region[DATA].start; /* CODE and RODATA */
     vm_address_t alias = 0, data;
@@ -220,9 +220,10 @@ static int ios_arena(SnxCodeLoader* loader, char* error, size_t error_size) {
                  "universal.js assigned to it) before opening a game");
         return -1;
     }
-    base = (unsigned char*)ios_jit_prepare(NULL, code);
+    base = (unsigned char*)ios_jit_prepare(NULL, loader->reserved);
     if (!base || base == (unsigned char*)(size_t)-1 || (size_t)base % loader->page) {
-        snprintf(error, error_size, "the debugger did not prepare %lu MiB of code memory", (unsigned long)(code >> 20));
+        snprintf(error, error_size, "the debugger did not prepare %lu MiB of code memory",
+                 (unsigned long)(loader->reserved >> 20));
         return -1;
     }
     loader->base = base;
@@ -235,11 +236,12 @@ static int ios_arena(SnxCodeLoader* loader, char* error, size_t error_size) {
     }
     for (i = CODE; i <= RODATA; ++i) loader->region[i].write = (unsigned char*)alias + loader->region[i].start;
     data = (vm_address_t)(base + loader->region[DATA].start);
-    kr = vm_allocate(mach_task_self(), &data, loader->region[DATA].size, VM_FLAGS_FIXED);
+    kr = vm_deallocate(mach_task_self(), data, loader->region[DATA].size);
+    if (kr == KERN_SUCCESS) kr = vm_allocate(mach_task_self(), &data, loader->region[DATA].size, VM_FLAGS_FIXED);
     if (kr == KERN_SUCCESS)
         kr = vm_protect(mach_task_self(), data, loader->region[DATA].size, FALSE, VM_PROT_NONE);
     if (kr != KERN_SUCCESS) {
-        snprintf(error, error_size, "cannot place the code arena's data after the debugger's region (%d)", (int)kr);
+        snprintf(error, error_size, "cannot make the code arena's data out of the debugger's region (%d)", (int)kr);
         return -1;
     }
     loader->region[DATA].write = base + loader->region[DATA].start;
