@@ -2527,14 +2527,6 @@ msgid "a text too long for its box over its rows, or on one that slides"
 msgstr ""
 
 #: src/gui/theme.c
-msgid "the most pixels between two boxes of a list, times the text's size, 0 to 14"
-msgstr ""
-
-#: src/gui/theme.c
-msgid "a list longer than its column: center keeps the focus in its middle, edge moves at its ends"
-msgstr ""
-
-#: src/gui/theme.c
 msgid "in the margin, beside the focused box"
 msgstr ""
 
@@ -2748,6 +2740,11 @@ msgstr ""
 #: src/gui/theme.c
 #, c-format
 msgid "[%s] %s = %s is not a key of a theme"
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
+msgid "[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"
 msgstr ""
 
 #: src/gui/theme.c

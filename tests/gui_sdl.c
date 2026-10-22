@@ -4487,15 +4487,13 @@ int main(int argc, char** argv) {
               rgb(ui_menu_entries_attr_cb(&app, GUI_KEYS) & UI_ATTR_FAILURE ? app.theme.page : app.theme.soft));
         app.clock = app.theme.blink_ms;
         /* ui.txt's scroll, center: each focus in the middle of the rows shown, the ends where the list has no more to
-           move; the theme's scroll is the other lists' */
-        app.theme.scroll = GUI_SCROLL_EDGE;
+           move */
         for (int at = 0; at < GUI_ITEM_COUNT; ++at) {
             int want = SDL_clamp(at - (shown - 1) / 2, 0, GUI_ITEM_COUNT - shown);
             app.menu.selected = at;
             menu_boxes(&app, &m);
             assert((int)m.lists[UI_MENU_ENTRIES].first == want);
         }
-        app.theme.scroll = GUI_SCROLL_CENTER;
         app.menu.selected = (shown - 1) / 2 + 1;
         render(&app);
         menu_boxes(&app, &m);
@@ -5437,22 +5435,17 @@ int main(int argc, char** argv) {
             render(&app);
             form_boxes(&app, &f);
             assert(f.place.side.x > f.place.list.x + f.place.list.w);
-            /* every group shown, ui.txt's 2 pixels apart in a column that would spread them further, whatever gap the
-               theme gives the lists it lays out: 6, 14 and 0; nothing past the last group */
-            assert(form_shown(&app, &f, false) >= (size_t)app.groups && !form_first(&f, false) && app.theme.gap == 6 &&
+            /* every group shown, ui.txt's 2 pixels apart in a column that would spread them further; nothing past the
+               last group */
+            assert(form_shown(&app, &f, false) >= (size_t)app.groups && !form_first(&f, false) &&
                    app.groups * (item_h(&app) + 14 * s) <= f.left[UI_FORM_LIST_ROWS].h);
             {
                 UiRowInfo info = {0};
                 assert(!ui_form_list_rows_get_row_info(&app, (size_t)app.groups, 100, &info));
             }
-            for (int gap = 6; gap >= 0; gap = gap == 6 ? 14 : gap == 14 ? 0 : -1) {
-                app.theme.gap = (uint32_t)gap;
-                form_boxes(&app, &f);
-                b = form_row_box(&app, &f, false, 1);
-                assert(b.y - form_row_box(&app, &f, false, 0).y == item_h(&app) + 2 * s && b.h == item_h(&app));
-            }
-            app.theme.gap = 6; /* the built-ins' */
             form_boxes(&app, &f);
+            b = form_row_box(&app, &f, false, 1);
+            assert(b.y - form_row_box(&app, &f, false, 0).y == item_h(&app) + 2 * s && b.h == item_h(&app));
             b = form_row_box(&app, &f, false, 0);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- App", yellow, black);
             b = form_row_box(&app, &f, false, app.groups - 1); /* the last group, whole */
@@ -5654,9 +5647,9 @@ int main(int argc, char** argv) {
             text_px_is(&app, r.x + cw, r.y + 4 * s, "Exit ScarletNX?", rgb(app.theme.warning), black);
             text_px_is(&app, choice_box(&app, &choices, 0).x + cw / 2, item_text_y(&app, choice_box(&app, &choices, 0)),
                        "- Stay", yellow, black);
-            { /* a row each, 2 pixels apart and as high as the menu's rows, whatever the theme's gap */
+            { /* a row each, 2 pixels apart and as high as the menu's rows */
                 GuiRect stay = choice_box(&app, &choices, 0), quit = choice_box(&app, &choices, 1);
-                assert(stay.h == item_h(&app) && quit.y - stay.y == item_h(&app) + 2 * s && app.theme.gap > 2);
+                assert(stay.h == item_h(&app) && quit.y - stay.y == item_h(&app) + 2 * s);
             }
             assert(b.x < r.x && /* its left edge, off the question's box, darkened */
                    same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), (SDL_Color){0x7F, 0x7F, 0, 255}));

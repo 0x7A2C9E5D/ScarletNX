@@ -398,8 +398,8 @@ note go on saying it after. F5, or the foot's (Refresh on a phone), looks at the
 Games lists its folders again, Folders says which of its folders are there, the menu counts the disk
 again, and the box of what an older version left looks again. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
 every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the
-column is as wide as its entries and the side box goes under the list. Every list is laid out by `src/gui/ui.txt`,
-whatever the theme says (`[body] gap` and `[body] scroll` are still read, and lay out no list): the menu's, Games',
+column is as wide as its entries and the side box goes under the list. Every list is laid out by `src/gui/ui.txt`
+(a theme's `[body] gap` and `[body] scroll` are deprecated, said as it loads: [DEPRECATIONS](DEPRECATIONS.md)): the menu's, Games',
 the Settings' two, the theme editor's, the choices of a question, of UI scale's box, of the Recompile box and of the
 setup's pages, the setup's Appearance rows, the box of users, that of a game's updates, DLCs and mods, and the OK of
 a box of files. Their rows are 2 pixels apart times the text's size (on Android 40 pixels high, about Android's 48 dp
@@ -454,7 +454,7 @@ in the build and installed in `share/scarletnx/themes`: copy one under a new nam
 to change the built-in. `[theme] base` picks the built-in a file starts from, and a key it
 leaves out, or that cannot be read, keeps the base's value. What a file has that the theme does not take as written
 is said, the file named, in the menu's message as it opens and in Settings > App's note when the theme is picked: a
-value it cannot read with the one it keeps (`[body] scroll = middle is not center or edge: it keeps center`), a number
+value it cannot read with the one it keeps (`[body] focus = middle is not color or bar: it keeps color`), a number
 past its most with the most it takes, a base that is no built-in with the one it starts from, and a key no theme has
 (an ErET file's own keys aside). A line with no `=` is no setting. The menu's **Theme editor**
 writes one with every key.
@@ -503,11 +503,6 @@ panels = fill
 sizing = fixed
 ; a text too long for its box: wrap (over its rows) | slide (on one row)
 text = wrap
-; the most pixels between two boxes of a list, times the text's size (0 to 14): they spread up to it
-gap = 6
-; a list longer than its column: center (the focused box in its middle, the list moving around it) | edge (the
-; list moving once the focus reaches its end)
-scroll = center
 ; in the list's margin, beside the focused box
 cursor = "> "
 ; a question and its choices: default (a box in the middle) | yorha (the question in a box at the foot, the

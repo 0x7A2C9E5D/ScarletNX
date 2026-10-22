@@ -20,8 +20,7 @@ typedef char snx_gui_word_int[sizeof(GuiStyle) == sizeof(int) && sizeof(GuiRunLa
                                       sizeof(GuiRing) == sizeof(int) && sizeof(GuiLineIn) == sizeof(int) &&
                                       sizeof(GuiAlign) == sizeof(int) && sizeof(GuiPanels) == sizeof(int) &&
                                       sizeof(GuiHeadPlace) == sizeof(int) && sizeof(GuiTipsPlace) == sizeof(int) &&
-                                      sizeof(GuiDialog) == sizeof(int) && sizeof(GuiPicture) == sizeof(int) &&
-                                      sizeof(GuiScroll) == sizeof(int)
+                                      sizeof(GuiDialog) == sizeof(int) && sizeof(GuiPicture) == sizeof(int)
                                   ? 1
                                   : -1];
 
@@ -37,7 +36,6 @@ static const char* const typings[] = {"async", "sync", NULL};
 static const char* const panel_words[] = {"outline", "fill", NULL};
 static const char* const sizings[] = {"fixed", "adaptive", NULL};
 static const char* const flows[] = {"wrap", "slide", NULL};
-static const char* const scrolls[] = {"center", "edge", NULL}; /* GuiScroll's order */
 static const char* const head_places[] = {"tabs", "below", NULL};
 static const char* const pictures[] = {"none", "square", "round", NULL}; /* GuiPicture's order */
 static const char* const tips_places[] = {"bottom", "top", NULL};
@@ -81,10 +79,6 @@ const GuiThemeKey gui_theme_keys[] = {
          SNX_TR_NOOP(
              "fixed: the list two fifths of every screen, alone on a narrow one; adaptive: as wide as its entries")),
     WORD("body", "text", text, flows, SNX_TR_NOOP("a text too long for its box over its rows, or on one that slides")),
-    NUMBER("body", "gap", gap, 14,
-           SNX_TR_NOOP("the most pixels between two boxes of a list, times the text's size, 0 to 14")),
-    WORD("body", "scroll", scroll, scrolls,
-         SNX_TR_NOOP("a list longer than its column: center keeps the focus in its middle, edge moves at its ends")),
     TEXT("body", "cursor", cursor, SNX_TR_NOOP("in the margin, beside the focused box")),
     WORD(
         "body", "options-dialog", dialog, dialogs,
@@ -331,6 +325,10 @@ static void apply(GuiTheme* t, const char* section, const char* key, const char*
     }
     if (!strcmp(section, "loading") && !strcmp(key, "title")) {
         set(t, gui_theme_key("head", "loading"), section, key, value, to);
+        return;
+    }
+    if (!strcmp(section, "body") && (!strcmp(key, "gap") || !strcmp(key, "scroll"))) { /* docs/DEPRECATIONS.md */
+        say(to, snx_tr("[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"), key, value);
         return;
     }
     k = gui_theme_key(section, key);

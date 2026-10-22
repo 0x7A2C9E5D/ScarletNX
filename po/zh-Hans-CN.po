@@ -2365,12 +2365,8 @@ msgid "a text too long for its box over its rows, or on one that slides"
 msgstr "文字超出框时分多行显示，或单行滚动"
 
 #: src/gui/theme.c
-msgid "the most pixels between two boxes of a list, times the text's size, 0 to 14"
-msgstr "列表中两个框之间的最大距离，按文字大小放大，0 到 14"
-
-#: src/gui/theme.c
-msgid "a list longer than its column: center keeps the focus in its middle, edge moves at its ends"
-msgstr "超出一列的列表：center 使焦点在中间，edge 到两端时移动"
+msgid "[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"
+msgstr "[body] %s = %s 已无效：列表现在由 ui.txt 布局（请删除）"
 
 #: src/gui/theme.c
 msgid "a colour as #RRGGBB"

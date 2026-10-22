@@ -2365,12 +2365,8 @@ msgid "a text too long for its box over its rows, or on one that slides"
 msgstr "um texto longo demais para a caixa em várias linhas, ou numa só que desliza"
 
 #: src/gui/theme.c
-msgid "the most pixels between two boxes of a list, times the text's size, 0 to 14"
-msgstr "o máximo de pixels entre duas caixas de uma lista, vezes o tamanho do texto, de 0 a 14"
-
-#: src/gui/theme.c
-msgid "a list longer than its column: center keeps the focus in its middle, edge moves at its ends"
-msgstr "uma lista maior que a coluna: center mantém o foco no meio, edge rola nas pontas"
+msgid "[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"
+msgstr "[body] %s = %s não faz nada: o ui.txt agora dispõe as listas (apague)"
 
 #: src/gui/theme.c
 msgid "a colour as #RRGGBB"
