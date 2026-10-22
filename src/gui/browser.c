@@ -48,7 +48,7 @@ void gui_games_free(GuiGames* games) {
     free(games->addons);
     games->names = games->shown = games->paths = NULL;
     games->addons = NULL;
-    games->count = 0;
+    games->count = games->room = 0;
 }
 uint64_t gui_tree_size(const char* path, const int* stop) {
     char** names = NULL;
@@ -267,6 +267,7 @@ bool gui_game_addons(const char* path, GuiGames* addons) {
         gui_games_free(addons);
         return false;
     }
+    addons->room = room;
     addons_of(path, addons);
     return addons->count > 0;
 }
@@ -297,9 +298,27 @@ static int before(const char* a, const char* b) {
 }
 /* directory's games into games, sorted from first on by what they are shown as; with depth, its folders' games too, down
    that many levels, a folder that is a game or hidden left alone */
+/* room in the lists for n entries, never fewer than they have: a folder deeper in adds its games while its
+   parent's are still to come, as many as it holds */
+static bool games_room(GuiGames* games, size_t n) {
+    char** more;
+    size_t* addons;
+    if (n <= games->room) return true;
+    if (n < 2 * games->room) n = 2 * games->room;
+    if (!(more = (char**)realloc(games->names, n * sizeof *more))) return false;
+    games->names = more;
+    if (!(more = (char**)realloc(games->shown, n * sizeof *more))) return false;
+    games->shown = more;
+    if (!(more = (char**)realloc(games->paths, n * sizeof *more))) return false;
+    games->paths = more;
+    if (!(addons = (size_t*)realloc(games->addons, n * sizeof *addons))) return false;
+    games->addons = addons;
+    games->room = n;
+    return true;
+}
 static bool add_games(GuiGames* games, const char* directory, int kinds, size_t first, int depth, char* error,
                       size_t size) {
-    char **names = NULL, **more;
+    char** names = NULL;
     size_t count = 0, i;
     if (snx_list_dir(directory, &names, &count)) {
         char why[256];
@@ -307,24 +326,6 @@ static bool add_games(GuiGames* games, const char* directory, int kinds, size_t 
         return false;
     }
     size_t j;
-    more = (char**)realloc(games->names, (games->count + count + 1) * sizeof *more);
-    if (more) games->names = more;
-    more = more ? (char**)realloc(games->shown, (games->count + count + 1) * sizeof *more) : NULL;
-    if (more) games->shown = more;
-    more = more ? (char**)realloc(games->paths, (games->count + count + 1) * sizeof *more) : NULL;
-    if (more) games->paths = more;
-    if (more) {
-        size_t* addons = (size_t*)realloc(games->addons, (games->count + count + 1) * sizeof *addons);
-        if (addons)
-            games->addons = addons;
-        else
-            more = NULL;
-    }
-    if (!more) {
-        snx_free_strings(names, count);
-        snprintf(error, size, snx_tr("Not enough memory to list %s."), directory);
-        return false;
-    }
     for (i = 0; i < count; ++i) {
         char* path = folder_game(directory, names[i], kinds);
         char* shown;
@@ -336,6 +337,12 @@ static bool add_games(GuiGames* games, const char* directory, int kinds, size_t 
             continue;
         }
         if (!path) continue;
+        if (!games_room(games, games->count + 2)) { /* it and the end */
+            free(path);
+            snx_free_strings(names, count);
+            snprintf(error, size, snx_tr("Not enough memory to list %s."), directory);
+            return false;
+        }
         shown = shown_name(path, names[i]);
         if (!shown) {
             free(path);
@@ -388,6 +395,7 @@ bool gui_games_group(GuiGames* games, const char* ready, const char* dumps,
     out.shown = (char**)calloc(room, sizeof *out.shown);
     out.paths = (char**)calloc(room, sizeof *out.paths);
     out.addons = (size_t*)calloc(room, sizeof *out.addons);
+    out.room = room;
     ok = out.names && out.shown && out.paths && out.addons;
     for (group = 0; group < 2 && ok; ++group)
         if (in[0] && in[1]) { /* one group alone has nothing to be told apart from */

@@ -272,5 +272,43 @@ int main(void) {
         snx_remove_tree(d);
         free(d);
     }
+    /* a deep library: folders of dumps, then its own dumps (snx_list_dir sorts: "folder" before "game"), every game
+       listed however many each folder holds. A folder's scan once sized the lists for its own games alone, smaller
+       than what its parent still had to add, and the parent wrote past their end */
+    {
+        GuiGames g = {0};
+        char* d = snx_temp_dir(NULL);
+        char name[32];
+        size_t k;
+        int f;
+        assert(d);
+        for (k = 0; k < 12; ++k) {
+            char* path;
+            snprintf(name, sizeof name, "game%02zu.nsp", k);
+            path = snx_path_join(d, name);
+            assert(path && !snx_write_file(path, "fixture", 7));
+            free(path);
+        }
+        for (f = 0; f < 3; ++f) { /* a dump, twenty, a dump */
+            char* folder;
+            snprintf(name, sizeof name, "folder%d", f);
+            folder = snx_path_join(d, name);
+            assert(folder && !snx_mkdirs(folder));
+            for (k = 0; k < (f == 1 ? 20u : 1u); ++k) {
+                char* path;
+                snprintf(name, sizeof name, "in%d-%02zu.xci", f, k);
+                path = snx_path_join(folder, name);
+                assert(path && !snx_write_file(path, "fixture", 7));
+                free(path);
+            }
+            free(folder);
+        }
+        assert(gui_games_add_deep(&g, d, GUI_GAMES_DUMP, 1, error, sizeof error) && !error[0]);
+        assert(g.count == 12 + 1 + 20 + 1);
+        for (k = 0; k < g.count; ++k) assert(g.names[k] && g.shown[k] && g.paths[k] && snx_is_file(g.paths[k]));
+        gui_games_free(&g);
+        snx_remove_tree(d);
+        free(d);
+    }
     return 0;
 }
