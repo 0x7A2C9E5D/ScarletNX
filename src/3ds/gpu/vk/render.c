@@ -989,10 +989,8 @@ static bool fs_shader(const SnxCtrFsConfig* c, uint32_t* index, const char** why
     s->config = *c;
     uint32_t* words;
     size_t count;
-    if (snx_ctr_fs_spirv(c, snx_ctr_vk()->preserve_infnan, &words, &count))
-        s->module = module(words, count, &s->why);
-    else
-        s->why = "the host is out of memory";
+    snx_ctr_fs_spirv(c, snx_ctr_vk()->preserve_infnan, &words, &count);
+    s->module = module(words, count, &s->why);
     *index = (uint32_t)g.fs_count++;
     *why = s->why;
     return s->module != VK_NULL_HANDLE;

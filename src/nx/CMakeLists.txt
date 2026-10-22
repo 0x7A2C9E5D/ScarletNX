@@ -83,7 +83,7 @@ endif()
 snx_component(platform ${platform})
 
 snx_component(shader gpu/shader/shader.c gpu/shader/decode.c gpu/shader/corpus.c gpu/shader/shipped.c
-                     gpu/shader/spirv_translate.c gpu/shader/spirv_compute.c gpu/shader/spirv_emit.c)
+                     gpu/shader/spirv_translate.c gpu/shader/spirv_compute.c)
 # the opcode enum and decoder, generated from gpu/shader/maxwell_opcodes.def
 include("${PROJECT_SOURCE_DIR}/cmake/shaderdec.cmake")
 snx_shaderdec(snx_shader)

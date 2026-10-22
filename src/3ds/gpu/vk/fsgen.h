@@ -94,9 +94,9 @@ void snx_ctr_fs_config(const SnxCtrPica* pica, SnxCtrFsConfig* config);
    needs the shadow_buffer storage image and a pass without colour attachments). The caller then stops the draw with
    that reason */
 const char* snx_ctr_fs_unsupported(const SnxCtrFsConfig* config);
-/* the fragment shader's SPIR-V module (the caller frees *words); false when the host ran out of memory.
-   preserve_infnan declares SPV_KHR_float_controls' SignedZeroInfNanPreserve for 32-bit floats */
-bool snx_ctr_fs_spirv(const SnxCtrFsConfig* config, bool preserve_infnan, uint32_t** words, size_t* count);
+/* the fragment shader's SPIR-V module (the caller frees *words). preserve_infnan declares SPV_KHR_float_controls'
+   SignedZeroInfNanPreserve for 32-bit floats */
+void snx_ctr_fs_spirv(const SnxCtrFsConfig* config, bool preserve_infnan, uint32_t** words, size_t* count);
 
 /* The uniform block the shader declares (Azahar FSUniformData, std140), filled from the registers. The scissor is
    the guest framebuffer's, in its pixels (x1, y1, x2 + 1, y2 + 1, y counted from the register's origin): the caller

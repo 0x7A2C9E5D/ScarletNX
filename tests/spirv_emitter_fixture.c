@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "nx/gpu/shader/spirv_emit.h"
+#include "common/utilities/spirv_emit.h"
 #include "spirv_emitter_fixture.h"
 
 uint32_t* snx_test_spirv_compute(size_t* words) {
@@ -88,7 +88,7 @@ uint32_t* snx_test_spirv_graphics(int fragment, size_t* words) {
         uint32_t sum = spv_emit_fadd(&e, f32_type, half, half);
         uint32_t product = spv_emit_fmul(&e, f32_type, half, half);
         uint32_t neg = spv_emit_fnegate(&e, f32_type, product);
-        uint32_t absval = spv_emit_glsl_unary(&e, f32_type, glsl, SPV_GLSL_FABS, neg);
+        uint32_t absval = spv_emit_glsl_unary(&e, f32_type, glsl, SPV_GLSL_F_ABS, neg);
         uint32_t fused = spv_emit_glsl_ternary(&e, f32_type, glsl, SPV_GLSL_FMA, half, half, absval);
         uint32_t varying = spv_emit_load(&e, vec4_type, input);
         uint32_t coord = spv_emit_load(&e, vec4_type, fragcoord);

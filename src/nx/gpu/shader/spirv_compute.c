@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Compute shaders are decoded directly to SPIR-V. Unsupported encodings reject the whole program. */
-#include "nx/gpu/shader/spirv_emit.h"
+#include "common/utilities/spirv_emit.h"
 #include "nx/gpu/shader/translator.h"
 
 typedef struct {

@@ -8,7 +8,7 @@
    notice is in shader.c). Multiplication is the host's (Azahar's sanitize_mul off), and RCP and RSQ skip a zero or
    negative operand as Azahar's do then. */
 #include "3ds/gpu/vk/vsgen.h"
-#include "3ds/gpu/vk/spirv.h"
+#include "common/utilities/spirv_emit.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -218,7 +218,7 @@ typedef struct {
     const SnxCtrShaderSetup* setup;
     const SnxCtrVsConfig* config;
     Flow* flow;
-    SnxCtrSpv* s;
+    SpvEmitter* s;
     uint32_t* sub_ids; /* the function of each of flow's subs */
     unsigned current;  /* the sub being written */
     /* the calls between subs (caller, callee), to refuse a recursion the analysis let through, as GLSL did */
@@ -235,12 +235,12 @@ typedef struct {
     const char* fail;
 } Gen;
 
-static uint32_t sconst(Gen* g, int32_t v) { return snx_ctr_spv_sint(g->s, v); }
-static uint32_t uconst(Gen* g, uint32_t v) { return snx_ctr_spv_uint(g->s, v); }
-static uint32_t fconst(Gen* g, float v) { return snx_ctr_spv_float_constant(g->s, v); }
+static uint32_t sconst(Gen* g, int32_t v) { return spv_emit_const_i32(g->s, v); }
+static uint32_t uconst(Gen* g, uint32_t v) { return spv_emit_const_u32(g->s, v); }
+static uint32_t fconst(Gen* g, float v) { return spv_emit_const_f32(g->s, v); }
 static uint32_t vec4_const(Gen* g, float x, float y, float z, float w) {
     uint32_t parts[4] = {fconst(g, x), fconst(g, y), fconst(g, z), fconst(g, w)};
-    return snx_ctr_spv_composite(g->s, g->t_vec4, parts, 4);
+    return spv_emit_const_composite(g->s, g->t_vec4, parts, 4);
 }
 static uint32_t load(Gen* g, uint32_t type, uint32_t pointer) { return SPV(g->s, SPV_OP_LOAD, type, pointer); }
 static void store(Gen* g, uint32_t pointer, uint32_t value) { SPV_VOID(g->s, SPV_OP_STORE, pointer, value); }
@@ -250,19 +250,19 @@ static uint32_t extract(Gen* g, uint32_t type, uint32_t composite, uint32_t inde
 static uint32_t splat4(Gen* g, uint32_t type, uint32_t v) {
     return SPV(g->s, SPV_OP_COMPOSITE_CONSTRUCT, type, v, v, v, v);
 }
-static uint32_t private_vec4(Gen* g) { return snx_ctr_spv_global(g->s, SPV_STORAGE_PRIVATE, g->t_vec4); }
+static uint32_t private_vec4(Gen* g) { return spv_emit_variable(g->s, SPV_STORAGE_PRIVATE, g->t_vec4); }
 /* uniforms.f[index], uniforms.i[index] and uniforms.b */
 static uint32_t uniform_f(Gen* g, uint32_t index) {
-    uint32_t pointer = snx_ctr_spv_pointer(g->s, SPV_STORAGE_UNIFORM, g->t_vec4);
+    uint32_t pointer = spv_emit_type_pointer(g->s, SPV_STORAGE_UNIFORM, g->t_vec4);
     return load(g, g->t_vec4, SPV(g->s, SPV_OP_ACCESS_CHAIN, pointer, g->pica, sconst(g, 2), index));
 }
 static uint32_t uniform_i(Gen* g, unsigned index) {
-    uint32_t pointer = snx_ctr_spv_pointer(g->s, SPV_STORAGE_UNIFORM, g->t_uvec4);
+    uint32_t pointer = spv_emit_type_pointer(g->s, SPV_STORAGE_UNIFORM, g->t_uvec4);
     uint32_t element = SPV(g->s, SPV_OP_ACCESS_CHAIN, pointer, g->pica, sconst(g, 1), sconst(g, (int32_t)index));
     return load(g, g->t_uvec4, element);
 }
 static uint32_t uniform_b(Gen* g) {
-    uint32_t pointer = snx_ctr_spv_pointer(g->s, SPV_STORAGE_UNIFORM, g->t_uint);
+    uint32_t pointer = spv_emit_type_pointer(g->s, SPV_STORAGE_UNIFORM, g->t_uint);
     return load(g, g->t_uint, SPV(g->s, SPV_OP_ACCESS_CHAIN, pointer, g->pica, sconst(g, 0)));
 }
 
@@ -274,16 +274,16 @@ static void jump(Gen* g, uint32_t target) {
 }
 static void place(Gen* g, uint32_t label) {
     jump(g, label);
-    snx_ctr_spv_label(g->s, label);
+    spv_emit_label(g->s, label);
     g->open = true;
 }
 static void ret(Gen* g, bool value) {
-    SPV_VOID(g->s, SPV_OP_RETURN_VALUE, snx_ctr_spv_bool_constant(g->s, value));
+    SPV_VOID(g->s, SPV_OP_RETURN_VALUE, spv_emit_const_bool(g->s, value));
     g->open = false;
 }
 /* if (cond) {: the then block is placed, and the merge block returned for place() to close it */
 static uint32_t if_begin(Gen* g, uint32_t cond) {
-    uint32_t then = snx_ctr_spv_id(g->s), merge = snx_ctr_spv_id(g->s);
+    uint32_t then = spv_emit_id(g->s), merge = spv_emit_id(g->s);
     SPV_VOID(g->s, SPV_OP_SELECTION_MERGE, merge, 0);
     SPV_VOID(g->s, SPV_OP_BRANCH_CONDITIONAL, cond, then, merge);
     g->open = false;
@@ -434,7 +434,7 @@ static void compile_arithmetic(Gen* g, uint32_t instr, unsigned raw) {
     uint32_t b = source(g, reg2, inverted ? address : 0, pattern, 2);
     uint32_t d = destination(g, bits(instr, 21, 5));
     uint32_t f = g->t_float, v4 = g->t_vec4;
-    SnxCtrSpv* s = g->s;
+    SpvEmitter* s = g->s;
     switch (op) {
         case OP_ADD: set_dest(g, pattern, d, SPV(s, SPV_OP_F_ADD, v4, a, b), false); break;
         case OP_MUL: set_dest(g, pattern, d, SPV(s, SPV_OP_F_MUL, v4, a, b), false); break;
@@ -555,8 +555,8 @@ static uint32_t compile_instr(Gen* g, uint32_t offset) {
         case OP_IFU: {
             uint32_t cond = raw == OP_IFC ? condition(g, instr) : uniform_bool(g, bits(instr, 22, 4), false);
             uint32_t else_offset = dest_offset(instr), endif_offset = else_offset + num_instructions(instr);
-            uint32_t then = snx_ctr_spv_id(g->s), merge = snx_ctr_spv_id(g->s);
-            uint32_t otherwise = num_instructions(instr) ? snx_ctr_spv_id(g->s) : merge;
+            uint32_t then = spv_emit_id(g->s), merge = spv_emit_id(g->s);
+            uint32_t otherwise = num_instructions(instr) ? spv_emit_id(g->s) : merge;
             SPV_VOID(g->s, SPV_OP_SELECTION_MERGE, merge, 0);
             SPV_VOID(g->s, SPV_OP_BRANCH_CONDITIONAL, cond, then, otherwise);
             g->open = false;
@@ -574,10 +574,10 @@ static uint32_t compile_instr(Gen* g, uint32_t offset) {
             /* aL = i.y; for (uint n = 0u; n <= i.x; aL += i.z, ++n) */
             uint32_t i = uniform_i(g, bits(instr, 22, 2));
             store(g, g->addr[2], SPV(g->s, SPV_OP_BITCAST, g->t_int, extract(g, g->t_uint, i, 1)));
-            uint32_t counter = snx_ctr_spv_local(g->s, g->t_uint);
+            uint32_t counter = spv_emit_local(g->s, g->t_uint);
             store(g, counter, uconst(g, 0));
-            uint32_t header = snx_ctr_spv_id(g->s), body = snx_ctr_spv_id(g->s), next = snx_ctr_spv_id(g->s);
-            uint32_t merge = snx_ctr_spv_id(g->s);
+            uint32_t header = spv_emit_id(g->s), body = spv_emit_id(g->s), next = spv_emit_id(g->s);
+            uint32_t merge = spv_emit_id(g->s);
             place(g, header);
             uint32_t more = SPV(g->s, SPV_OP_U_LESS_THAN_EQUAL, g->t_bool, load(g, g->t_uint, counter),
                                 extract(g, g->t_uint, i, 0));
@@ -632,12 +632,12 @@ static void compile_labelled(Gen* g, const Sub* s) {
         if (!g->fail) g->fail = "out of memory";
         return;
     }
-    SnxCtrSpv* sp = g->s;
-    g->jmp_to = snx_ctr_spv_local(sp, g->t_uint);
+    SpvEmitter* sp = g->s;
+    g->jmp_to = spv_emit_local(sp, g->t_uint);
     store(g, g->jmp_to, uconst(g, s->begin));
-    uint32_t header = snx_ctr_spv_id(sp), dispatch = snx_ctr_spv_id(sp), next = snx_ctr_spv_id(sp);
-    uint32_t loop_merge = snx_ctr_spv_id(sp), fallback = snx_ctr_spv_id(sp);
-    g->switch_merge = snx_ctr_spv_id(sp);
+    uint32_t header = spv_emit_id(sp), dispatch = spv_emit_id(sp), next = spv_emit_id(sp);
+    uint32_t loop_merge = spv_emit_id(sp), fallback = spv_emit_id(sp);
+    g->switch_merge = spv_emit_id(sp);
     place(g, header);
     SPV_VOID(sp, SPV_OP_LOOP_MERGE, loop_merge, next, 0);
     jump(g, dispatch);
@@ -646,10 +646,10 @@ static void compile_labelled(Gen* g, const Sub* s) {
     operands[1] = fallback;
     for (unsigned k = 0; k < labels.count; ++k) {
         operands[2 + 2 * k] = labels.items[k];
-        operands[3 + 2 * k] = snx_ctr_spv_id(sp);
+        operands[3 + 2 * k] = spv_emit_id(sp);
     }
     SPV_VOID(sp, SPV_OP_SELECTION_MERGE, g->switch_merge, 0);
-    snx_ctr_spv_void_op(sp, SPV_OP_SWITCH, operands, 2 + 2 * (size_t)labels.count);
+    spv_emit_void_op(sp, SPV_OP_SWITCH, operands, 2 + 2 * (size_t)labels.count);
     g->open = false;
     for (unsigned k = 0; k < labels.count && !g->fail; ++k) {
         uint32_t label = labels.items[k], next_label = k + 1 < labels.count ? labels.items[k + 1] : s->end;
@@ -704,7 +704,7 @@ static void generate(Gen* g) {
     for (unsigned i = 0; i < g->flow->sub_count && !g->fail; ++i) {
         const Sub* s = &g->flow->subs[i];
         g->current = i;
-        snx_ctr_spv_function(g->s, g->sub_ids[i], g->t_bool, NULL, 0, NULL);
+        spv_emit_function(g->s, g->sub_ids[i], g->t_bool, NULL, 0, NULL);
         g->open = true;
         if (s->label_count)
             compile_labelled(g, s);
@@ -712,7 +712,7 @@ static void generate(Gen* g) {
             walk(g, s->begin, s->end, true);
             if (g->open) ret(g, false); /* the range ran out (or, at an unreachable end, the value it never gives) */
         }
-        snx_ctr_spv_function_end(g->s);
+        spv_emit_function_end(g->s);
     }
     if (!g->fail && !acyclic(g)) g->fail = "a recursive function";
 }
@@ -756,21 +756,21 @@ static uint32_t semantic(Gen* g, const uint32_t* outputs, unsigned slot) {
     return fconst(g, 1.0f);
 }
 static uint32_t output_var(Gen* g, uint32_t type, uint32_t location) {
-    return snx_ctr_spv_location(g->s, SPV_STORAGE_OUTPUT, type, location);
+    return spv_emit_location(g->s, SPV_STORAGE_OUTPUT, type, location);
 }
 /* main: the input registers read from their attributes, the registers' first values, the program run, and EmitVtx */
-static void generate_main(Gen* g, uint32_t main_sub) {
-    SnxCtrSpv* s = g->s;
+static uint32_t generate_main(Gen* g, uint32_t main_sub) {
+    SpvEmitter* s = g->s;
     const SnxCtrVsConfig* c = g->config;
     uint32_t f = g->t_float, v4 = g->t_vec4;
-    uint32_t entry = snx_ctr_spv_function(s, 0, snx_ctr_spv_void(s), NULL, 0, NULL);
+    uint32_t entry = spv_emit_function(s, 0, spv_emit_type_void(s), NULL, 0, NULL);
     g->open = true;
     for (unsigned i = 0; i < 16; ++i) {
         if (!g->in_reg[i]) continue;
         unsigned type = c->input_type[i] ? c->input_type[i] : SNX_CTR_VS_FLOAT;
-        uint32_t integer = snx_ctr_spv_int(s, type == SNX_CTR_VS_SINT);
-        uint32_t typed = type == SNX_CTR_VS_FLOAT ? v4 : snx_ctr_spv_vector(s, integer, 4);
-        uint32_t v = load(g, typed, snx_ctr_spv_location(s, SPV_STORAGE_INPUT, typed, i));
+        uint32_t integer = spv_emit_type_int(s, 32, type == SNX_CTR_VS_SINT);
+        uint32_t typed = type == SNX_CTR_VS_FLOAT ? v4 : spv_emit_type_vector(s, integer, 4);
+        uint32_t v = load(g, typed, spv_emit_location(s, SPV_STORAGE_INPUT, typed, i));
         if (type != SNX_CTR_VS_FLOAT)
             v = SPV(s, type == SNX_CTR_VS_SINT ? SPV_OP_CONVERT_S_TO_F : SPV_OP_CONVERT_U_TO_F, v4, v);
         /* the components the attribute lacks read as 0, 0, 0, 1, whatever the bound format held there */
@@ -785,7 +785,7 @@ static void generate_main(Gen* g, uint32_t main_sub) {
         if (g->tmp[i]) store(g, g->tmp[i], initial);
     for (unsigned i = 0; i < c->num_outputs; ++i) store(g, g->out[i], initial);
     for (unsigned i = 0; i < 3; ++i) store(g, g->addr[i], sconst(g, 0));
-    for (unsigned i = 0; i < 2; ++i) store(g, g->cc[i], snx_ctr_spv_bool_constant(s, false));
+    for (unsigned i = 0; i < 2; ++i) store(g, g->cc[i], spv_emit_const_bool(s, false));
     SPV(s, SPV_OP_FUNCTION_CALL, g->t_bool, main_sub);
 
     uint32_t outputs[16], v[24];
@@ -804,20 +804,20 @@ static void generate_main(Gen* g, uint32_t main_sub) {
                          SPV(s, SPV_OP_F_ORD_GREATER_THAN, t_bool, ndc_z, fconst(g, -1.00001f)));
     z = SPV(s, SPV_OP_SELECT, f, near1, SPV(s, SPV_OP_F_NEGATE, f, w), z);
     /* if (flip_viewport) vtx_pos.y = -vtx_pos.y */
-    uint32_t data_uint = snx_ctr_spv_pointer(s, SPV_STORAGE_UNIFORM, g->t_uint);
+    uint32_t data_uint = spv_emit_type_pointer(s, SPV_STORAGE_UNIFORM, g->t_uint);
     uint32_t flip = load(g, g->t_uint, SPV(s, SPV_OP_ACCESS_CHAIN, data_uint, g->data, sconst(g, 1)));
     y = SPV(s, SPV_OP_SELECT, f, SPV(s, SPV_OP_I_NOT_EQUAL, t_bool, flip, uconst(g, 0)), SPV(s, SPV_OP_F_NEGATE, f, y),
             y);
-    uint32_t position = snx_ctr_spv_builtin(s, SPV_STORAGE_OUTPUT, v4, SPV_BUILT_IN_POSITION);
+    uint32_t position = spv_emit_builtin(s, SPV_STORAGE_OUTPUT, v4, SPV_BUILT_IN_POSITION);
     store(g, position, SPV(s, SPV_OP_COMPOSITE_CONSTRUCT, v4, x, y, SPV(s, SPV_OP_F_NEGATE, f, z), w));
     if (c->clip_planes) {
-        snx_ctr_spv_capability(s, SPV_CAPABILITY_CLIP_DISTANCE);
-        uint32_t clip_type = snx_ctr_spv_array(s, f, 2);
-        uint32_t clip = snx_ctr_spv_builtin(s, SPV_STORAGE_OUTPUT, clip_type, SPV_BUILT_IN_CLIP_DISTANCE);
-        uint32_t element = snx_ctr_spv_pointer(s, SPV_STORAGE_OUTPUT, f);
+        spv_emit_capability(s, SPV_CAPABILITY_CLIP_DISTANCE);
+        uint32_t clip_type = spv_emit_type_array(s, f, 2);
+        uint32_t clip = spv_emit_builtin(s, SPV_STORAGE_OUTPUT, clip_type, SPV_BUILT_IN_CLIP_DISTANCE);
+        uint32_t element = spv_emit_type_pointer(s, SPV_STORAGE_OUTPUT, f);
         /* the fixed PICA clipping plane z <= 0, and enable_clip1 ? dot(clip_coef, vtx_pos) : 0.0 */
         store(g, SPV(s, SPV_OP_ACCESS_CHAIN, element, clip, sconst(g, 0)), SPV(s, SPV_OP_F_NEGATE, f, z));
-        uint32_t data_vec4 = snx_ctr_spv_pointer(s, SPV_STORAGE_UNIFORM, v4);
+        uint32_t data_vec4 = spv_emit_type_pointer(s, SPV_STORAGE_UNIFORM, v4);
         uint32_t coef = load(g, v4, SPV(s, SPV_OP_ACCESS_CHAIN, data_vec4, g->data, sconst(g, 2)));
         uint32_t enable = load(g, g->t_uint, SPV(s, SPV_OP_ACCESS_CHAIN, data_uint, g->data, sconst(g, 0)));
         uint32_t distance = SPV(s, SPV_OP_DOT, f, coef, SPV(s, SPV_OP_COMPOSITE_CONSTRUCT, v4, x, y, z, w));
@@ -834,39 +834,40 @@ static void generate_main(Gen* g, uint32_t main_sub) {
     store(g, output_var(g, f, 4), v[16]);
     store(g, output_var(g, v4, 5), SPV(s, SPV_OP_COMPOSITE_CONSTRUCT, v4, v[4], v[5], v[6], v[7]));
     store(g, output_var(g, v3, 6), SPV(s, SPV_OP_COMPOSITE_CONSTRUCT, v3, v[18], v[19], v[20]));
-    snx_ctr_spv_void_op(s, SPV_OP_RETURN, NULL, 0);
-    snx_ctr_spv_function_end(s);
-    snx_ctr_spv_entry(s, SPV_MODEL_VERTEX, entry);
+    spv_emit_void_op(s, SPV_OP_RETURN, NULL, 0);
+    spv_emit_function_end(s);
+    spv_emit_entry_str(s, SPV_STAGE_VERTEX, entry, "main", s->interface, s->interface_count);
+    return entry;
 }
 /* the types, the uniform blocks and the registers every program has */
 static void declare(Gen* g) {
-    SnxCtrSpv* s = g->s;
-    g->t_bool = snx_ctr_spv_bool(s);
-    g->t_bool4 = snx_ctr_spv_vector(s, g->t_bool, 4);
-    g->t_int = snx_ctr_spv_int(s, true);
-    g->t_uint = snx_ctr_spv_int(s, false);
-    g->t_float = snx_ctr_spv_float(s);
-    g->t_vec2 = snx_ctr_spv_vector(s, g->t_float, 2);
-    g->t_vec3 = snx_ctr_spv_vector(s, g->t_float, 3);
-    g->t_vec4 = snx_ctr_spv_vector(s, g->t_float, 4);
-    g->t_uvec4 = snx_ctr_spv_vector(s, g->t_uint, 4);
+    SpvEmitter* s = g->s;
+    g->t_bool = spv_emit_type_bool(s);
+    g->t_bool4 = spv_emit_type_vector(s, g->t_bool, 4);
+    g->t_int = spv_emit_type_int(s, 32, true);
+    g->t_uint = spv_emit_type_int(s, 32, false);
+    g->t_float = spv_emit_type_float(s, 32);
+    g->t_vec2 = spv_emit_type_vector(s, g->t_float, 2);
+    g->t_vec3 = spv_emit_type_vector(s, g->t_float, 3);
+    g->t_vec4 = spv_emit_type_vector(s, g->t_float, 4);
+    g->t_uvec4 = spv_emit_type_vector(s, g->t_uint, 4);
     uint32_t stride = 16;
-    uint32_t i_array = snx_ctr_spv_array(s, g->t_uvec4, 4), f_array = snx_ctr_spv_array(s, g->t_vec4, 96);
-    snx_ctr_spv_decorate(s, i_array, SPV_DECORATION_ARRAY_STRIDE, &stride, 1);
-    snx_ctr_spv_decorate(s, f_array, SPV_DECORATION_ARRAY_STRIDE, &stride, 1);
+    uint32_t i_array = spv_emit_type_array(s, g->t_uvec4, 4), f_array = spv_emit_type_array(s, g->t_vec4, 96);
+    spv_emit_decorate(s, i_array, SPV_DECORATION_ARRAY_STRIDE, &stride, 1);
+    spv_emit_decorate(s, f_array, SPV_DECORATION_ARRAY_STRIDE, &stride, 1);
     /* vs_pica_data { uint b; uvec4 i[4]; vec4 f[96]; } and vs_data { bool enable_clip1; bool flip_viewport; vec4
        clip_coef; }, std140 (a bool is a 32-bit uint there) */
     uint32_t pica_members[3] = {g->t_uint, i_array, f_array}, pica_offsets[3] = {0, 16, 80};
-    uint32_t pica = snx_ctr_spv_struct(s, pica_members, pica_offsets, 3);
+    uint32_t pica = spv_emit_type_struct(s, pica_members, pica_offsets, 3);
     uint32_t data_members[3] = {g->t_uint, g->t_uint, g->t_vec4}, data_offsets[3] = {0, 4, 16};
-    uint32_t data = snx_ctr_spv_struct(s, data_members, data_offsets, 3);
-    snx_ctr_spv_decorate(s, pica, SPV_DECORATION_BLOCK, NULL, 0);
-    snx_ctr_spv_decorate(s, data, SPV_DECORATION_BLOCK, NULL, 0);
-    g->pica = snx_ctr_spv_resource(s, SPV_STORAGE_UNIFORM, pica, 0, 0);
-    g->data = snx_ctr_spv_resource(s, SPV_STORAGE_UNIFORM, data, 0, 1);
+    uint32_t data = spv_emit_type_struct(s, data_members, data_offsets, 3);
+    spv_emit_decorate(s, pica, SPV_DECORATION_BLOCK, NULL, 0);
+    spv_emit_decorate(s, data, SPV_DECORATION_BLOCK, NULL, 0);
+    g->pica = spv_emit_resource(s, SPV_STORAGE_UNIFORM, pica, 0, 0);
+    g->data = spv_emit_resource(s, SPV_STORAGE_UNIFORM, data, 0, 1);
     for (unsigned i = 0; i < g->config->num_outputs && i < 16; ++i) g->out[i] = private_vec4(g);
-    for (unsigned i = 0; i < 3; ++i) g->addr[i] = snx_ctr_spv_global(s, SPV_STORAGE_PRIVATE, g->t_int);
-    for (unsigned i = 0; i < 2; ++i) g->cc[i] = snx_ctr_spv_global(s, SPV_STORAGE_PRIVATE, g->t_bool);
+    for (unsigned i = 0; i < 3; ++i) g->addr[i] = spv_emit_variable(s, SPV_STORAGE_PRIVATE, g->t_int);
+    for (unsigned i = 0; i < 2; ++i) g->cc[i] = spv_emit_variable(s, SPV_STORAGE_PRIVATE, g->t_bool);
 }
 bool snx_ctr_vs_spirv(const SnxCtrShaderSetup* setup, const SnxCtrVsConfig* c, bool preserve_infnan, uint32_t** words,
                       size_t* count, const char** why) {
@@ -879,32 +880,35 @@ bool snx_ctr_vs_spirv(const SnxCtrShaderSetup* setup, const SnxCtrVsConfig* c, b
         flow_free(&flow);
         return false;
     }
-    SnxCtrSpv s;
-    snx_ctr_spv_init(&s);
+    SpvEmitter s;
+    spv_emit_init(&s, 0);
+    s.version = 0x00010300; /* SPIR-V 1.3 */
+    spv_emit_glsl450_import(&s);
+    spv_emit_shader_capability(&s);
     Gen g = {.setup = setup, .config = c, .flow = &flow, .s = &s};
     g.sub_ids = malloc(flow.sub_count * sizeof *g.sub_ids);
     if (!g.sub_ids) g.fail = "out of memory";
-    for (unsigned i = 0; i < flow.sub_count && g.sub_ids; ++i) g.sub_ids[i] = snx_ctr_spv_id(&s);
+    for (unsigned i = 0; i < flow.sub_count && g.sub_ids; ++i) g.sub_ids[i] = spv_emit_id(&s);
     if (!g.fail) {
         declare(&g);
         generate(&g);
     }
     if (!g.fail) {
-        generate_main(&g, g.sub_ids[find_sub(&flow, c->main_offset, PROGRAM_END) - flow.subs]);
+        uint32_t entry = generate_main(&g, g.sub_ids[find_sub(&flow, c->main_offset, PROGRAM_END) - flow.subs]);
         if (preserve_infnan) {
             /* PICA programs rely on infinities and NaNs, which SPIR-V otherwise lets the driver assume away */
-            snx_ctr_spv_extension(&s, "SPV_KHR_float_controls");
-            snx_ctr_spv_capability(&s, SPV_CAPABILITY_SIGNED_ZERO_INF_NAN_PRESERVE);
-            snx_ctr_spv_mode_operand(&s, s.main, SPV_MODE_SIGNED_ZERO_INF_NAN_PRESERVE, 32);
+            spv_emit_extension(&s, "SPV_KHR_float_controls");
+            spv_emit_capability(&s, SPV_CAPABILITY_SIGNED_ZERO_INF_NAN_PRESERVE);
+            spv_emit_execution_mode(&s, entry, SPV_MODE_SIGNED_ZERO_INF_NAN_PRESERVE, 1, 32);
         }
     }
     free(g.sub_ids);
     free(g.calls);
     flow_free(&flow);
-    uint32_t* module = g.fail ? NULL : snx_ctr_spv_finish(&s, count);
-    snx_ctr_spv_free(&s);
+    uint32_t* module = g.fail ? NULL : spv_emit_finish(&s, count);
+    spv_emit_destroy(&s);
     if (!module) {
-        *why = g.fail ? g.fail : "out of memory";
+        *why = g.fail;
         return false;
     }
     *words = module;
