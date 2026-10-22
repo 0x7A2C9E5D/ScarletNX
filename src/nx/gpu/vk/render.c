@@ -2175,6 +2175,85 @@ static int draw_key(const GpuChannel* ch, const DrawShaders* sh, const VkSh* fs,
     return 1;
 }
 
+/* The last vertex a draw reads, for its streams' ranges, or ~0 when that isn't known: indices outside contiguous guest
+   memory, or under results the GPU hasn't landed. A stream's limit is often the end of a ring the game streams
+   vertices through, so its range from the draw's start to the limit was megabytes for a few hundred vertices: one
+   game copied 100 to 360 MB a frame that way */
+static u64 draw_last_vertex(GpuChannel* ch, int indexed, u32 first, u32 count, u32 base_vertex) {
+    const u32* r = ch->r3d;
+    u64 top = 0;
+    if (!indexed) return (u64)first + count - 1;
+    if (indexed == 3) { /* inline indices, 32-bit */
+        for (u32 j = 0; j < count; j++)
+            if (ch->inline_indices[first + j] > top) top = ch->inline_indices[first + j];
+    } else {
+        u32 ifmt = r[0x5F6], isz = ifmt == 0 ? 1 : ifmt == 1 ? 2 : 4;
+        u64 ia = ((u64)r[0x5F2] << 32) | r[0x5F3], iend = ((u64)r[0x5F4] << 32) | r[0x5F5];
+        if (iend < ia || first >= (iend - ia + 1) / isz) return ~0ull;
+        u64 n = (iend - ia + 1) / isz - first, a = ia + (u64)first * isz;
+        VkBuffer tb;
+        u64 to;
+        if (n > count) n = count;
+        if (vk_buf_pending(a, n * isz) || vk_compute_gpu_src(a, n * isz, &tb, &to)) return ~0ull;
+        vk_compute_mem_need(a, n * isz);
+        /* the restart index, and all ones where Vulkan restarts instead, mark no vertex */
+        u32 ones = isz == 1 ? 0xFFu : isz == 2 ? 0xFFFFu : 0xFFFFFFFFu, ri = r[0x591] ? r[0x592] & ones : ones;
+        u32 skip = r[0x591] ? ones : 0;
+        /* A range's highest index is kept until its memory is written (by the GPU or, through the write tracking, the
+           CPU): scanning the indices of every draw was a tenth of one game's GPU thread, most of them meshes' that
+           never change. The baselines are taken before the bytes are read, as buf_get takes them */
+        static struct {
+            u64 a, n, gw;
+            u32 ws, isz, ri, skip, top;
+        } memo[256];
+        u32 slot = (u32)((a * 0x9E3779B97F4A7C15ull) >> 56), ws = vk_ww_now();
+        u64 gw = gpu_mem_generation();
+        const u8* p = gmem_ptr(a, n * isz);
+        if (!p) return ~0ull;
+        if (memo[slot].a == a && memo[slot].n == n && memo[slot].isz == isz && memo[slot].ri == ri &&
+            memo[slot].skip == skip && !gpu_mem_dirty_since(memo[slot].gw, a, n * isz) &&
+            vk_written_since(p, n * isz, memo[slot].ws) == 0)
+            top = memo[slot].top;
+        else {
+            /* a loop for each size, in signed arithmetic where the indices fit it, which SSE2 makes vector maxima of */
+            if (isz == 4) {
+                u32 m = 0;
+                for (u64 j = 0; j < n; j++) {
+                    u32 v = snx_ld_le32(p + j * 4);
+                    v = v == ri || v == skip ? 0 : v;
+                    m = v > m ? v : m;
+                }
+                top = m;
+            } else {
+                i32 m = 0, sri = (i32)ri, sskip = (i32)skip;
+                if (isz == 1)
+                    for (u64 j = 0; j < n; j++) {
+                        i32 v = p[j];
+                        v = v == sri || v == sskip ? 0 : v;
+                        m = v > m ? v : m;
+                    }
+                else
+                    for (u64 j = 0; j < n; j++) {
+                        i32 v = snx_ld_le16(p + j * 2);
+                        v = v == sri || v == sskip ? 0 : v;
+                        m = v > m ? v : m;
+                    }
+                top = (u32)m;
+            }
+            memo[slot].a = a;
+            memo[slot].n = n;
+            memo[slot].gw = gw;
+            memo[slot].ws = ws;
+            memo[slot].isz = isz;
+            memo[slot].ri = ri;
+            memo[slot].skip = skip;
+            memo[slot].top = (u32)top;
+        }
+    }
+    i64 last = (i64)top + (i32)base_vertex;
+    return last < 0 ? 0 : (u64)last;
+}
+
 void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 base_vertex, u32 base_instance,
                     u32 instances) {
     u32* r = ch->r3d;
@@ -2351,6 +2430,9 @@ retry:
         u32 b, base;
     } vq[33];
     u32 nvq = 0;
+    /* each stream up to the last vertex or instance the draw reads, rather than to its limit */
+    u64 last_vertex = k->nbind ? draw_last_vertex(ch, indexed, first, count, base_vertex) : ~0ull;
+    u64 last_instance = (u64)base_instance + instances - 1;
     for (u32 v = 0; v < k->nbind; v++) {
         if (pl->key[v] == ~0u) {
             /* the constants: staging that fails skips the draw (it once drew without the attributes) */
@@ -2362,7 +2444,14 @@ retry:
             continue;
         }
         u32 sbuf = pl->key[v] & 31;
-        u64 len = stream_len(r, sbuf);
+        /* up to a power of two of the bytes it reads: the cache keeps a range by its length, and draws of a mesh's parts
+           that end at different vertices then share a few ranges, not one each */
+        u64 len = stream_len(r, sbuf), last = k->bind[v].divisor ? last_instance : last_vertex;
+        if (pl->stride[v] && last < len / pl->stride[v]) {
+            u64 need = (last + 1) * pl->stride[v], up = 4096;
+            while (up < need) up <<= 1;
+            if (up < len) len = up;
+        }
         if (len > (64u << 20)) len = 64u << 20;
         vq[nvq].gva = stream_start(r, sbuf);
         vq[nvq].len = len + pl->pad[v];

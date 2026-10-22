@@ -25,6 +25,21 @@
         }                                                                                                              \
     } while (0)
 
+/* A buffer copied into staging as it is hashed gets the hash vk_hash gives it, which the cache compares with hashes
+   taken without a copy, and the bytes: every size around the hash's 32-byte steps, from every alignment */
+static int check_hash_copy(void) {
+    u8 src[300], dst[300];
+    for (u32 i = 0; i < sizeof src; i++) src[i] = (u8)(i * 151 + 7);
+    for (u32 at = 0; at < 8; at++)
+        for (u32 n = 0; at + n <= 290; n++) {
+            memset(dst, 0xA5, sizeof dst);
+            CHECK(vk_hash_copy(dst + (7 - at), src + at, n) == vk_hash(src + at, n));
+            CHECK(!memcmp(dst + (7 - at), src + at, n));
+            CHECK(dst[7 - at + n] == 0xA5 && (at == 7 || dst[6 - at] == 0xA5));
+        }
+    return 0;
+}
+
 /* Overflow blocks remain live through submission, then return with their slot. */
 static int check_staging_overflow(void)
 {
@@ -913,6 +928,7 @@ int main(int argc, char** argv) {
     g_settings.vulkan_video_decode = 1; /* a Vulkan Video decode queue where the device has one (lavapipe has none) */
     video_init("Headless Vulkan fixture", "");
     CHECK(g_opt_headless && g_renderer_up && g_vk.dev && !g_vk.surface && !g_vk.swapchain && !g_vk.sc_count);
+    CHECK(!check_hash_copy());
     CHECK(!check_staging_overflow());
     CHECK(!check_viewport_orientation());
     CHECK(!check_packed_depth());
