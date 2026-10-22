@@ -920,12 +920,15 @@ static void pipe_worker(void* arg) {
     }
 }
 int vk_pipeline_worker_count(int setting, int cpus) {
-    int n = cpus / 4;
+    int n = cpus - 2;
     if (setting > 0) return setting;
-    /* a quarter of the CPUs, two to six: the driver's compile is the CPU's work, which the game's threads need too,
-       and a first run's bursts of new pipelines go to them side by side (vk_pipeline_get_deferred) */
+    /* all the CPUs but two, two to twelve. A first run's burst of new pipelines goes to the workers side by side
+       (vk_pipeline_get_deferred), and the frame waits for them at its binds, so the game's threads have little to do
+       meanwhile, and an idle worker costs nothing. A quarter of 8 CPUs (two workers) froze one game's first scene for
+       4.6 s with its caches empty, where six took 1.7 s and eight 1.5 s: past six the CPUs the game's own threads use
+       take back what more would give */
     if (n < 2) n = 2;
-    if (n > 6) n = 6;
+    if (n > 12) n = 12;
     return n;
 }
 /* the workers, started the first time one is needed: how many there are (g_pj_lock) */
