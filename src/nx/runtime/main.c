@@ -629,6 +629,8 @@ int snx_main(int argc, char** argv) {
     snprintf(module, sizeof module, "%s%s%s", g_exedir, g_exename, MODULE_SUFFIX);
     if (argc == 1 && !snx_module_static && snx_menu && snx_launcher_name(g_exename) && !snx_is_file(module))
         return open_menu(argv[0]);
+    /* the game's errors in its log, where a fatal's "the line before" is: a game's process on Android has no stderr */
+    snx_error_sink(log_error_line);
     /* the code before anything is written: a mistyped --game leaves no .ini and no log behind */
     mod = load_module(module);
     if (mod->abi != SNX_ABI)

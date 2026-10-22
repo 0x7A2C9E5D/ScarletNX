@@ -21,7 +21,11 @@ void* snx_alloc(size_t size);
 void* snx_realloc(void* ptr, size_t size);
 char* snx_strdup(const char* s);
 char* snx_format(const char* fmt, ...);
+/* says a line of error, "scarletnx: " and the line on stderr, or to the sink given to snx_error_sink. Returns 1 */
 int snx_error(const char* fmt, ...);
+/* where snx_error's lines go from now on instead of stderr (the runtime's log, which a game's process on Android has
+   no other way to keep them in), NULL for stderr again. Set before the threads that say errors start */
+void snx_error_sink(void (*sink)(const char* line));
 /* the system's reason for the file or folder call that just failed, into out: strerror(errno), or on Windows the
    text of GetLastError, which its calls set instead of errno */
 char* snx_os_error(char* out, size_t size);

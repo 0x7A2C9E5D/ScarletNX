@@ -83,13 +83,27 @@ char* snx_format(const char* fmt, ...) {
     va_end(ap);
     return p;
 }
+/* snx_error's sink, snx_error_sink's: NULL for stderr */
+static struct {
+    void (*error_sink)(const char* line);
+} g_common;
+
+void snx_error_sink(void (*sink)(const char* line)) {
+    g_common.error_sink = sink;
+}
 int snx_error(const char* fmt, ...) {
+    char line[2048];
     va_list ap;
-    fputs("scarletnx: ", stderr);
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    if (g_common.error_sink) {
+        vsnprintf(line, sizeof line, fmt, ap);
+        g_common.error_sink(line);
+    } else {
+        fputs("scarletnx: ", stderr);
+        vfprintf(stderr, fmt, ap);
+        fputc('\n', stderr);
+    }
     va_end(ap);
-    fputc('\n', stderr);
     return 1;
 }
 char* snx_os_error(char* out, size_t size) {
