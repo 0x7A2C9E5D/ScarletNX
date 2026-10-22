@@ -21,7 +21,6 @@ target_sources(snx_ctr_process PRIVATE "${CMAKE_BINARY_DIR}/generated/ctr_system
 add_library(snx_ctr_gpu STATIC gpu/present.c input/input.c gpu/transfer.c gpu/y2r.c gpu/vk/y2r.c gpu/vk/device.c gpu/vk/transfer.c gpu/vk/spirv.c
             gpu/vk/vsgen.c gpu/vk/fsgen.c gpu/vk/render.c gpu/pica.c "${volk_SOURCE_DIR}/volk.c")
 target_include_directories(snx_ctr_gpu PUBLIC "${volk_SOURCE_DIR}")
-include("${PROJECT_SOURCE_DIR}/cmake/window_icon.cmake") # the window's icon, as the Switch runtime's
 target_link_libraries(snx_ctr_gpu PUBLIC snx_ctr_memory Vulkan::Headers SDL3::SDL3 snx_settings snx_build_info
                                          snx_window_icon ${CMAKE_DL_LIBS})
 set_source_files_properties("${volk_SOURCE_DIR}/volk.c" PROPERTIES COMPILE_OPTIONS "${snx_third_party_flags}")

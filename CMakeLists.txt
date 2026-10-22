@@ -127,6 +127,9 @@ if(SNX_BUILD_NX)
 endif()
 include(cmake/build_info.cmake) # the window titles' line; the driver stamps games with its commit
 if(SNX_BUILD_3DS)
+    # the window's icon, as the Switch runtime's: made here, as the folder including it first owns snx_window_icon,
+    # and a target of src/3ds compiles only src/3ds (tests/architecture.py)
+    include(cmake/window_icon.cmake)
     add_subdirectory(src/3ds)
 endif()
 if(BUILD_TESTING)
