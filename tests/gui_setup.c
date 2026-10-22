@@ -152,8 +152,8 @@ static void test_first(App* app) {
     assert(app->confirm.shown && app->confirm.ask == GUI_ASK_EXIT);
     key(app, SDLK_ESCAPE);
     assert(!app->confirm.shown && app->setup_on && !app->menu.quit);
-    /* Appearance: Settings > App's Language, Theme and Text size a row each, then Next. Left/Right change the language
-       and the theme at once, the screen with them, Auto again on the system's; Text size's box and its question, the
+    /* Appearance: Settings > App's Language, Theme and UI scale a row each, then Next. Left/Right change the language
+       and the theme at once, the screen with them, Auto again on the system's; UI scale's box and its question, the
        size kept for app.ini; a click on a row's left arrow goes back a step; nothing written until the setup is done */
     key(app, SDLK_RETURN);
     assert(page(app) == SNX_SETUP_LANGUAGE && app->setup_row == GUI_APPEARANCE_LANGUAGE && !app->language);
@@ -237,7 +237,7 @@ static void test_first(App* app) {
     path = join(home, ".config/scarletnx/app.ini");
     assert(!snx_is_file(path)); /* kept for the setup's end, in the folders Install picks */
     free(path);
-    key(app, SDLK_LEFT); /* Text size's box again, closed by ESC */
+    key(app, SDLK_LEFT); /* UI scale's box again, closed by ESC */
     assert(app->sizes_shown);
     key(app, SDLK_ESCAPE);
     assert(!app->sizes_shown && app->setup_on && page(app) == SNX_SETUP_LANGUAGE);
@@ -358,9 +358,13 @@ static void test_first(App* app) {
     assert(!app->setup_on && !app->message[0] && app->user == 1 && !strcmp(app->user_name, "Adam"));
     users = join(portable, "users");
     holds(users, "users.ini", "nickname=Adam\n");
-    holds(config, "setup.ini", "[setup]\nversion = 1\nnotices = 11\n");
+    {
+        char seen[64]; /* every notice there is, seen */
+        snprintf(seen, sizeof seen, "[setup]\nversion = 1\nnotices = %d\n", SNX_NOTICES);
+        holds(config, "setup.ini", seen);
+    }
     holds(config, "app.ini", "language = xx\n");
-    holds(config, "app.ini", "theme = yorha\ntext_size = 1\n");
+    holds(config, "app.ini", "theme = yorha\nui_scale = 1\n");
     path = join(home, ".config/scarletnx/setup.ini");
     assert(!snx_is_file(path)); /* nothing in the user's folders */
     free(path);
@@ -430,20 +434,23 @@ static void test_users(App* app) {
 
 /* after an update: the notice it brings, alone; --debug: nothing */
 static void test_notice(App* app) {
-    char *config = config_of(app), *file = join(config, "setup.ini");
-    put(file, "[setup]\nversion = 1\nnotices = 10\n");
+    char *config = config_of(app), *file = join(config, "setup.ini"), before[64], after[64];
+    /* the newest notice unseen, all the others seen */
+    snprintf(before, sizeof before, "[setup]\nversion = 1\nnotices = %d\n", SNX_NOTICES - 1);
+    snprintf(after, sizeof after, "notices = %d\n", SNX_NOTICES);
+    put(file, before);
     setup_start(app);
     assert(app->setup_on && app->setup_count == 1 && page(app) == SETUP_NOTICE);
     render(app);
     shows(app, "Changed since the last version", rgb(app->theme.page));
     shows(app, "Changed 1/1", rgb(head_ink(app)));
     assert(!strcmp(choice_label(app), "OK"));
-    shows(app, "The launcher's folders of games", rgb(app->theme.ink));
+    shows(app, snx_notices[SNX_NOTICES - 1].what, rgb(app->theme.ink)); /* in English: xx has no word of it */
     hides(app, "Game settings", rgb(app->theme.ink));
     hides(app, "1 Appearance", rgb(app->theme.ink));
     key(app, SDLK_RETURN);
     assert(!app->setup_on);
-    holds(config, "setup.ini", "notices = 11\n");
+    holds(config, "setup.ini", after);
     remove(file);
     snx_setup_skip = 1;
     setup_start(app);

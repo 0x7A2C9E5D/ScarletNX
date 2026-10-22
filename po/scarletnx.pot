@@ -455,6 +455,11 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "%s: text_size = %s is now ui_scale = %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "Recent games not kept: %s could not be written."
 msgstr ""
 
@@ -873,7 +878,7 @@ msgid "Built-in themes, then each themes/<name>/theme.ini"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Text size"
+msgid "UI scale"
 msgstr ""
 
 #: src/gui/main.c
@@ -1320,7 +1325,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Keep this text size? Back to %s in %d s"
+msgid "Keep this UI scale? Back to %s in %d s"
 msgstr ""
 
 #: src/gui/main.c
@@ -2788,6 +2793,18 @@ msgstr ""
 
 #: src/common/utilities/setup.c
 msgid "each folder in the recompiled or the dumps library, as its games say"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "The launcher's Text size"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "text_size = in app.ini"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "ui_scale =, shown as UI scale"
 msgstr ""
 
 #: src/nx/runtime/settings.txt
