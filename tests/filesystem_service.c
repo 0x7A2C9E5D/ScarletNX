@@ -25,6 +25,7 @@
 #include "nx/hle/hle.c"
 
 u8* g_mem;
+u64 g_as_size = AS_MAX; /* the reservation's size, mem.c's, which this test does not link */
 char g_datadir[1024], g_exename[256], g_exedir[1024], g_confdir[1024], g_addondir[1024], g_gamename[256];
 u64 g_addon;
 const u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull}; /* am.c's: the first user */

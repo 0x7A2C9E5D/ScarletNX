@@ -12,6 +12,7 @@
 #include <stdio.h>
 
 u8* g_mem;
+u64 g_as_size = AS_MAX; /* the reservation's size, mem.c's, which this test does not link */
 void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
 void logf_(int lvl, const char* fmt, ...) {
