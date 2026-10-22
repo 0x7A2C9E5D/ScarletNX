@@ -392,8 +392,9 @@ void fs_init(void) {
     if (n && g_datadir[n - 1] != '/' && g_datadir[n - 1] != '\\') g_datadir[n++] = '/';
     g_datadir[n] = 0;
     /* RomFS and ExeFS are what games read most and never change: open and map them once, for the whole run, instead
-       of opening them on demand like the save and SD card files */
-    static const char* const shared_paths[] = {"romfs", "exefs", "romfs.bin"};
+       of opening them on demand like the save and SD card files. ExeFS first: each mapped file holds a descriptor
+       (macOS allows 61440 a process), and a game with more files than that left its executables unmapped */
+    static const char* const shared_paths[] = {"exefs", "romfs", "romfs.bin"};
     unsigned shared = 0, failed = 0;
     pm_lock(&g_hle.fs.tree.lock);
     /* the console empties the application's temporary storage when the application is launched, and a game finds it

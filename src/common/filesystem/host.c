@@ -103,6 +103,16 @@ int pm_trylock(PMutex* m) { return pthread_mutex_trylock(&m->l) == 0; }
 
 int plat_mkdir(const char* path) { return mkdir(path, 0777) ? -1 : 0; }
 
+/* the descriptors the shared files may use: the soft limit, and on macOS no more than OPEN_MAX (10240). Its hard limit is
+   "unlimited" and kern.maxfilesperproc (61440) is what stops a process, but a game with 300000 files that mapped up to
+   that left SDL unable to open its Vulkan window, with the descriptors still free */
+static rlim_t descriptor_limit(const struct rlimit* rl) {
+    rlim_t limit = rl->rlim_cur;
+#if defined(__APPLE__)
+    if (limit > 10240) limit = 10240;
+#endif
+    return limit;
+}
 /* a game's RomFS can have more files than the default soft limit of descriptors: raise it to the hard limit, once.
    If that fails the old limit stays, and the reserve check below refuses what doesn't fit */
 static void raise_descriptor_limit(void) {
@@ -116,8 +126,11 @@ static void raise_descriptor_limit(void) {
 /* whether keeping descriptor fd leaves the reserve free (descriptors are handed out lowest first) */
 static int descriptor_fits(int fd) {
     struct rlimit rl;
-    if (getrlimit(RLIMIT_NOFILE, &rl) || rl.rlim_cur == RLIM_INFINITY) return 1;
-    return (rlim_t)fd + 1 + SHARE_RESERVE <= rl.rlim_cur;
+    rlim_t limit;
+    if (getrlimit(RLIMIT_NOFILE, &rl)) return 1;
+    limit = descriptor_limit(&rl);
+    if (limit == RLIM_INFINITY) return 1;
+    return (rlim_t)fd + 1 + SHARE_RESERVE <= limit;
 }
 int plat_file_share(const char* path, uint64_t size, int* fd, const uint8_t** data) {
     void* view = NULL;
