@@ -36,12 +36,16 @@ An iOS app runs one process and may not start another, so the iOS app works like
 menu's driver:
 
 - **The data folder** is the app's Documents, which the Files app (*On My iPhone > ScarletNX*) and the Finder show.
-  Games go in its `games/`, each as `games/<game>/<game>_code.so` with its `_data/`, prepared on a computer.
+  Games go in its `recompiled/`, each as `recompiled/<id>/<id>_code.snxobj` with its `.ini` and `_data/`, prepared on
+  a Mac ([Running a game on iOS](#running-a-game-on-ios)).
 - **The menu** lists those games. *Load* and the folder settings open the system's document picker. Preparing a
   dump says it needs a computer: extraction and recompilation run the driver as a program of its own.
 - **A game** runs in the app's process once the menu closes (`src/nx/runtime/entry.c`): the runtime starts once per
   process, so the app ends with the game.
 - **Share log** opens the share sheet with `scarletnx.log`.
+- **Logs.** Everything the app prints goes to `scarletnx-console.log` in its Documents, after a banner with the device,
+  the system and the limits the app has, and a fatal error is also written to `scarletnx-error.log`. A phone shows no
+  console, so these are what to read when a run fails.
 
 The IPA is unsigned: AltStore, SideStore or a developer account signs it for the device, with
 `dist/apple/ScarletNX.entitlements` (the larger address space and memory limit a game needs). It holds MoltenVK's
@@ -51,6 +55,36 @@ Code compiled while a game runs on macOS, 32-bit games' blocks and the runtime J
 runtime's own loader (`src/common/cpu/recompiler/llvm/code_loader.c`). LLVM writes it as ELF objects with Darwin's
 calling convention, and the loader places them in `MAP_JIT` memory, which each thread sees either writable or
 executable. The app is signed without the hardened runtime, so `MAP_JIT` needs no entitlement.
+
+### Running a game on iOS
+
+A game is prepared on a **Mac** today, then copied to the iPhone. Nothing else in the process needs one.
+
+1. **The app.** Take `ScarletNX-ios-arm64-<commit>.ipa` from a CI run, or build it (`cmake --preset ios`,
+   [Building](#building)), and install it with a sideloading tool that signs it with an Apple ID: iloader or
+   SideStore. A free account signs an app for 7 days, up to three apps at a time (the app, SideStore and StikDebug).
+   Installing again removes the app's Documents with some tools, so the games are copied again after it.
+2. **JIT.** iOS makes memory executable only for an app with a debugger attached. Install StikDebug and LocalDevVPN,
+   give StikDebug the pairing file (SideStore keeps one: *Storage Explorer*, `ALTPairingFile.mobiledevicepairing`),
+   hold ScarletNX in StikDebug's list, *Assign Script* `universal.js`, and *Enable JIT* before each run. The runtime
+   checks for the debugger first and says what to enable when there is none.
+3. **Prepare the game on a Mac**, where the recompiler has AArch64's code generator (a Windows or Linux x86 build
+   has x86's alone, and `--target ios` fails there with "No available targets are compatible"):
+
+   ```sh
+   scarletnx -x "Game.nsp" --name Game
+   scarletnx -r work/Game --target ios --outdir recompiled
+   ```
+
+   This writes `recompiled/<id>/` with `<id>_code.snxobj`, `<id>.ini` and `<id>_data/` (RomFS and ExeFS). 64-bit
+   games only. The pack holds the module's code without the runtime library, which the app brings.
+4. **Copy `recompiled/<id>/` to the iPhone**, into *ScarletNX > recompiled*: the Files app, the Finder, or a USB copy
+   into the app's Documents.
+5. **Run.** *Enable JIT* in StikDebug, open ScarletNX, *Games*, the game.
+
+Limits found on an iPhone 14 Pro (iOS 26.6.1): without the paid extended-virtual-addressing entitlement the app has
+about 13 GiB of address space and about 3 GB of memory, so the runtime takes the largest free run it can (128 GiB
+down to 5 GiB) and lays the guest out to fit, with no alias region below 12 GiB.
 
 ## What is missing
 
@@ -68,7 +102,9 @@ games from running:
   `code_loader.c`). The pack is made on a computer, since nothing runs the recompiler inside the app yet.
 - **32-bit games on iOS.** Their blocks are compiled at run time (`src/nx/runtime/arm.c`,
   `src/common/cpu/arm/exec.c`), which needs memory that becomes executable. iOS gives that only to an app that may JIT.
-- **Preparing on iOS**, for the reasons above, until the driver runs in the app's process.
+- **Preparing without a Mac.** Only a Mac makes the iOS pack today. Windows and Linux x86 builds carry x86's code
+  generator alone, to keep their size. A pack could come from them with AArch64's code generator added to their LLVM,
+  or from the iPhone once the driver runs in the app's process (its LLVM has AArch64's already).
 - **The 3DS and Linux drivers** are not built for iOS (`SNX_BUILD_3DS`, `SNX_BUILD_GNUABI`), nor the Linux one for
   macOS.
 
