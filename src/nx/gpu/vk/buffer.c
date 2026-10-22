@@ -2,9 +2,10 @@
    Copyright 2026 the ScarletNX contributors */
 /* Guest memory ranges as buffers the GPU reads: vertices, indices and storage buffers. A range is checked once per
    guest submit (and again after the GPU front end wrote it). Data that changed is copied into the frame's staging
-   ring, which draws read directly; data that stayed the same over a few checks gets a buffer of its own, written
-   once and never changed (a change makes a new one), so nothing waits for the GPU. Big ranges that have been stable
-   for long are checked less often. */
+   ring, which draws read directly; data that stayed the same over a few checks gets a buffer of its own, which a
+   change replaces, so nothing waits for the GPU. A big range's own buffer instead takes the pages written since it
+   last matched memory, copied on the GPU in order with the draws (patch_own). Big ranges that have been stable for
+   long are checked less often. */
 #include <stdlib.h>
 #include <string.h>
 #include "nx/gpu/gpu.h"
@@ -1124,6 +1125,25 @@ int vk_written_since(const u8* host, u64 len, u32 since) {
     return 0;
 }
 u32 vk_ww_now(void) { return g_wclock; }
+/* fn(user, at, n) for each run of [host, host + len) on pages written after since, at the range's byte offset at: for
+   a range vk_written_since(host, len, since) has just found written, so its pages are marked */
+static int page_written(u64 pg, u32 since) {
+    u64 l = pg >> (WW_LEAF_SHIFT - 12);
+    return g_wleaf_max[l] > since && (!g_wleaf[l] || g_wleaf[l][pg & ((1u << (WW_LEAF_SHIFT - 12)) - 1)] > since);
+}
+static void written_runs(const u8* host, u64 len, u32 since, void (*fn)(void*, u64, u64), void* user) {
+    u64 o = (u64)(host - g_mem), first = o >> 12, last = (o + len - 1) >> 12, run = 0, pg;
+    int in = 0;
+    for (pg = first; pg <= last + 1; pg++) {
+        int w = pg <= last && page_written(pg, since);
+        if (w && !in) run = pg;
+        if (!w && in) {
+            u64 a = run << 12 > o ? (run << 12) - o : 0, b = pg << 12 < o + len ? (pg << 12) - o : len;
+            fn(user, a, b - a);
+        }
+        in = w;
+    }
+}
 
 static u8* g_tmp;
 static u64 g_tmp_cap;
@@ -1505,6 +1525,57 @@ static void drop_own(u32 i) {
     e->own = 0;
     e->buf = VK_NULL_HANDLE;
 }
+/* A big own buffer takes the pages of its range written since it last matched memory (written_runs), through this
+   frame's staging ring, with a copy on the GPU between the draws before and after: a write anywhere in a 64 MiB window
+   (vk_buf_get_window) made it hash and copy all of it, again at each submit until it held still for two checks. In
+   one game's underground, where terrain streams in as the player moves, that was most of each hitch */
+#define PATCH_MIN (256u << 10)
+#define PATCH_RUNS 64
+typedef struct {
+    const u8* src;
+    VkBufferCopy r[PATCH_RUNS];
+    u32 n;
+    u64 bytes;
+} Patch;
+static void patch_note(void* user, u64 at, u64 n) {
+    Patch* p = user;
+    if (p->n < PATCH_RUNS) p->r[p->n] = (VkBufferCopy){0, at, n};
+    p->n++;
+    p->bytes += n;
+}
+static int patch_own(u32 i, const u8* host, u32 since) {
+    Vb* e = &g_vb[i];
+    Patch pt = {.src = host};
+    VkBuffer sb;
+    u64 so, at = 0;
+    u8* p;
+    written_runs(host, e->len, since, patch_note, &pt);
+    if (pt.n > PATCH_RUNS) { /* scattered: from the first written byte to the end of the last run, in one copy */
+        u64 o = (u64)(host - g_mem), a = pt.r[0].dstOffset, b = e->len;
+        for (u64 pg = (o + e->len - 1) >> 12; pg > o >> 12 && !page_written(pg, since); pg--) b = (pg << 12) - o;
+        pt.r[0] = (VkBufferCopy){0, a, b - a};
+        pt.n = 1;
+        pt.bytes = b - a;
+    }
+    if (!pt.n) return 1;
+    if (!(p = vk_stage_upload(pt.bytes, vk_stage_align(), &sb, &so))) return 0;
+    for (u32 k = 0; k < pt.n; k++) {
+        memcpy(p + at, host + pt.r[k].dstOffset, pt.r[k].size);
+        pt.r[k].srcOffset = so + at;
+        at += pt.r[k].size;
+    }
+    if (copy_stats_on()) g_copy_owned += pt.bytes;
+    vk_render_end(); /* copies happen outside rendering passes */
+    /* the draws recorded and submitted before read the old bytes, and an earlier patch wrote them: both are done
+       before the copy writes */
+    copy_barrier(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    rec_CmdCopyBuffer(vk_cmd(), sb, e->buf, pt.n, pt.r);
+    copy_barrier(VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                 VK_ACCESS_2_MEMORY_READ_BIT);
+    return 1;
+}
+
 /* An own buffer is device memory the GPU reads at full speed, filled by a copy from this frame's staging ring. Mapped
    memory for it is the BAR's window on most GPUs (256 MB, which VMA prefers for host writes), and thousands of own
    buffers there crowded out the staging rings: one game's rings, made again in the window as they grew after loading,
@@ -1590,7 +1661,15 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict, u64 al
             return 1;
         }
         /* with write tracking, an own buffer is checked only when its memory was written */
-        int w = e->own ? vk_written_since(entry_host(e, gva, len), len, e->wseen) : -1;
+        const u8* host = e->own ? entry_host(e, gva, len) : NULL;
+        int w = e->own ? vk_written_since(host, len, e->wseen) : -1;
+        if (w == 1 && len >= PATCH_MIN) { /* the written pages, not the whole range again */
+            u32 wnow = vk_ww_now();
+            if (patch_own(i, host, e->wseen)) {
+                e->wseen = wnow;
+                w = 0;
+            }
+        }
         if (w == 0) {
             e->epoch = g_vk_epoch;
             if (strict) e->strict_epoch = g_vk_epoch;
@@ -1670,7 +1749,8 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict, u64 al
             if (!(staged = vk_stage_upload(len, vk_stage_align(), &sb, &so))) return 0;
             memcpy(staged, src, len);
         }
-        if (!(e->stable >= 2 && make_own(i, sb, so))) {
+        /* a big range takes its own buffer at once when writes are tracked: changes then patch it (patch_own) */
+        if (!((e->stable >= 2 || (len >= PATCH_MIN && g_ww > 0)) && make_own(i, sb, so))) {
             /* changing (or new) data: read from this frame's staging ring */
             e->buf = sb;
             e->off = so;
