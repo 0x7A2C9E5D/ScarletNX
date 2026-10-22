@@ -72,7 +72,11 @@ The GPU's work runs on one Vulkan device (`src/3ds/gpu/vk/`), which needs Vulkan
 regions are imported as buffers, so the GPU reads and writes the guest's memory
 in place and nothing of it is copied by the CPU. Memory fills, display transfers
 and texture copies are compute shaders (`gpu/vk/shaders/`), held byte for byte to
-the CPU reference `gpu/transfer.c` by `tests/3ds_vk_transfer.c`. PICA draws run
+the CPU reference `gpu/transfer.c` by `tests/3ds_vk_transfer.c`. The Y2R engine (`y2r:u`, `services/y2r.c`), which
+turns a video's YUV frames to RGB, converts on the GPU too (`gpu/vk/y2r.c`). Its streams
+are the application's virtual memory, so each page goes through a table to its
+physical page. `tests/3ds_vk_y2r.c` holds it to the CPU reference `gpu/y2r.c`, ported
+from Azahar's. PICA draws run
 on the GPU too (`gpu/vk/render.c`). The vertex program is decompiled (`gpu/vk/vsgen.c`)
 and the fragment pipeline generated (`gpu/vk/fsgen.c`), both ported from Azahar's
 shader generators and both written as SPIR-V words directly (`gpu/vk/spirv.c`), with no

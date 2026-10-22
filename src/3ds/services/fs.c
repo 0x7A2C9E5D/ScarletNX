@@ -581,11 +581,17 @@ static void control_archive(SnxCtrIpc* c) {
     }
     c->out[0] = 0x080d0040;
 }
-/* An ExtSaveData's folder on the SD card, as the console lays it out (Azahar's GetExtDataPathFromId): the folder holds
-   user/ (the archive), boss/, metadata (its ArchiveFormatInfo) and icon */
-#define CTR_EXTDATA "Nintendo 3DS/00000000000000000000000000000000/00000000000000000000000000000000/extdata"
-static void extdata_folder(char out[128], uint32_t high, uint32_t low) {
-    snprintf(out, 128, CTR_EXTDATA "/%08x/%08x", high, low);
+/* An ExtSaveData's folder in the title's tree, as the console lays them out (Azahar's GetExtDataContainerPath and
+   GetExtSaveDataPath): a game's own (archive 6) on the SD card, a shared one (archive 7, the system's) on the NAND,
+   whose high word the FS module makes 0x48000 whatever the path says. The folder holds user/ (the archive), boss/,
+   metadata (its ArchiveFormatInfo) and icon */
+#define CTR_EXTDATA        "sdmc/Nintendo 3DS/00000000000000000000000000000000/00000000000000000000000000000000/extdata"
+#define CTR_SHARED_EXTDATA "nand/data/00000000000000000000000000000000/extdata"
+static void extdata_folder(char out[160], bool shared, uint32_t high, uint32_t low) {
+    if (shared)
+        snprintf(out, 160, CTR_SHARED_EXTDATA "/%08x/%08x", 0x48000u, low);
+    else
+        snprintf(out, 160, CTR_EXTDATA "/%08x/%08x", high, low);
 }
 /* An ExtSaveData archive's binary path: media type, save ID low, save ID high (Azahar ExtSaveDataArchivePath) */
 static bool extdata_path(SnxCtrIpc* c, uint32_t address, uint32_t words[3]) {
@@ -607,7 +613,7 @@ static void open_archive(SnxCtrIpc* c) {
         return;
     }
     uint32_t id = c->in[1], type = c->in[2], size = c->in[3];
-    bool extdata = id == 7 && type == 2 && size == 12;
+    bool extdata = (id == 6 || id == 7) && type == 2 && size == 12;
     if (!extdata && ((id != 9 && id != 3 && id != 4) || type != 1 || size != 1)) {
         c->state = SNX_CTR_IPC_UNSUPPORTED;
         return;
@@ -621,7 +627,7 @@ static void open_archive(SnxCtrIpc* c) {
         snx_ctr_ipc_error_reply(c, 0xc8804464u);
         return;
     }
-    if ((id == 9 || id == 7) && !p->sd) {
+    if ((id == 9 || id == 6) && !p->sd) {
         snx_ctr_ipc_error_reply(c, 0xc8804478u);
         return;
     }
@@ -629,22 +635,24 @@ static void open_archive(SnxCtrIpc* c) {
         snx_ctr_ipc_error_reply(c, CTR_NOT_FORMATTED);
         return;
     }
-    /* ExtSaveData (archive 7) is on the SD card whatever media its path names, as Azahar's archive is: a game
-       creates it when told it has none */
+    /* An ExtSaveData is where its archive keeps it whatever media its path names, as Azahar's archives are. A game
+       creates its own when told it has none (NotFound); a shared one that is missing is NotFormatted, as Azahar
+       answers, the system having made the ones the console has (services/ptm.c) */
     FsNode* root = NULL;
     if (extdata) {
         uint32_t path[3];
         if (!extdata_path(c, c->in[5], path)) return;
-        char folder[128 + 8];
-        extdata_folder(folder, path[2], path[1]);
+        char folder[160 + 8];
+        extdata_folder(folder, id == 7, path[2], path[1]);
         strcat(folder, "/user");
         pm_lock(&p->tree->lock);
-        FsTreeResult rc = fs_tree_lookup(p->tree, p->sd, folder, &root);
+        FsTreeResult rc = fs_tree_lookup(p->tree, NULL, folder, &root);
         if (!rc && !root->is_dir) rc = FS_TREE_NOTFOUND;
         if (!rc) fs_tree_retain(root);
         pm_unlock(&p->tree->lock);
         if (rc) {
-            snx_ctr_ipc_error_reply(c, rc == FS_TREE_NOTFOUND ? CTR_NO_EXTDATA : tree_result(rc));
+            snx_ctr_ipc_error_reply(c, rc != FS_TREE_NOTFOUND ? tree_result(rc) : id == 7 ? CTR_NOT_FORMATTED
+                                                                                            : CTR_NO_EXTDATA);
             return;
         }
     }
@@ -653,7 +661,7 @@ static void open_archive(SnxCtrIpc* c) {
             if (p->self_archives[i].token) continue;
             uint64_t token = ++p->archive_sequence;
             p->self_archives[i].token = token;
-            p->self_archives[i].kind = id == 9 ? 1u : id == 4 ? 2u : id == 7 ? 3u : 0u;
+            p->self_archives[i].kind = id == 9 ? 1u : id == 4 ? 2u : extdata ? 3u : 0u;
             p->self_archives[i].root = root;
             c->out[0] = 0x080c00c0;
             c->out[2] = (uint32_t)token;
@@ -685,9 +693,29 @@ static FsTreeResult write_whole(FsTree* tree, FsNode* scope, const char* path, c
 static void le32(unsigned char* out, uint32_t value) {
     for (unsigned i = 0; i < 4; ++i) out[i] = (unsigned char)(value >> (i * 8));
 }
-/* Create an ExtSaveData on the SD card: user/ and boss/, the format it was given in metadata and its SMDH icon, as
-   Azahar's ArchiveFactory_ExtSaveData::FormatAsExtData writes them. One that exists is made again over itself, its
-   files kept. The shared ExtSaveData of the NAND is not modelled */
+/* Create an ExtSaveData, a game's own on the SD card (media 1) or a shared one on the NAND (media 0), as Azahar's
+   ArchiveManager::CreateExtSaveData picks: user/ and boss/, the format it was given in metadata and its SMDH icon, as
+   ArchiveFactory_ExtSaveData::FormatAsExtData writes them. One that exists is made again over itself, its files
+   kept */
+FsTreeResult snx_ctr_fs_make_extdata(SnxCtrProcess* p, bool shared, uint32_t high, uint32_t low,
+                                     const unsigned char metadata[16], const void* icon, size_t icon_size) {
+    char folder[160], path[160 + 16];
+    extdata_folder(folder, shared, high, low);
+    FsTreeResult rc = FS_TREE_OK;
+    for (unsigned i = 0; i < 2 && !rc; ++i) {
+        snprintf(path, sizeof path, "%s/%s", folder, i ? "boss" : "user");
+        rc = fs_tree_mkdirs(p->tree, path, NULL);
+    }
+    if (!rc) {
+        snprintf(path, sizeof path, "%s/metadata", folder);
+        rc = write_whole(p->tree, NULL, path, metadata, 16);
+    }
+    if (!rc && icon_size) {
+        snprintf(path, sizeof path, "%s/icon", folder);
+        rc = write_whole(p->tree, NULL, path, icon, icon_size);
+    }
+    return rc;
+}
 static void create_extdata(SnxCtrIpc* c, uint32_t media, uint32_t low, uint32_t high, uint32_t directories,
                            uint32_t files, uint32_t total_size, uint32_t icon_size, uint32_t buffer_word) {
     SnxCtrProcess* p = c->process;
@@ -695,7 +723,7 @@ static void create_extdata(SnxCtrIpc* c, uint32_t media, uint32_t low, uint32_t 
         snx_ctr_ipc_error_reply(c, SNX_CTR_IPC_INVALID_STATE);
         return;
     }
-    if (media != 1 || icon_size > 0x10000 || c->in[buffer_word] != ((icon_size << 4) | 10)) {
+    if (media > 1 || icon_size > 0x10000 || c->in[buffer_word] != ((icon_size << 4) | 10)) {
         c->state = SNX_CTR_IPC_UNSUPPORTED;
         return;
     }
@@ -713,22 +741,8 @@ static void create_extdata(SnxCtrIpc* c, uint32_t media, uint32_t low, uint32_t 
     le32(metadata, total_size);
     le32(metadata + 4, directories);
     le32(metadata + 8, files);
-    char folder[128], path[128 + 16];
-    extdata_folder(folder, high, low);
     pm_lock(&p->tree->lock);
-    FsTreeResult rc = FS_TREE_OK;
-    for (unsigned i = 0; i < 2 && !rc; ++i) {
-        snprintf(path, sizeof path, "sdmc/%s/%s", folder, i ? "boss" : "user");
-        rc = fs_tree_mkdirs(p->tree, path, NULL);
-    }
-    if (!rc) {
-        snprintf(path, sizeof path, "%s/metadata", folder);
-        rc = write_whole(p->tree, p->sd, path, metadata, sizeof metadata);
-    }
-    if (!rc && icon_size) {
-        snprintf(path, sizeof path, "%s/icon", folder);
-        rc = write_whole(p->tree, p->sd, path, icon, icon_size);
-    }
+    FsTreeResult rc = snx_ctr_fs_make_extdata(p, media == 0, high, low, metadata, icon, icon_size);
     pm_unlock(&p->tree->lock);
     free(icon);
     if (rc) {
@@ -739,21 +753,22 @@ static void create_extdata(SnxCtrIpc* c, uint32_t media, uint32_t low, uint32_t 
     c->out[2] = c->in[buffer_word];
     c->out[3] = c->in[buffer_word + 1];
 }
-/* Delete an ExtSaveData and everything in it; an archive still open on it keeps its folder until it is closed */
+/* Delete an ExtSaveData (a game's own, media 1, or a shared one, media 0) and everything in it; an archive still open
+   on it keeps its folder until it is closed */
 static void delete_extdata(SnxCtrIpc* c, uint32_t media, uint32_t low, uint32_t high) {
     SnxCtrProcess* p = c->process;
     if (!initialized(c)) {
         snx_ctr_ipc_error_reply(c, SNX_CTR_IPC_INVALID_STATE);
         return;
     }
-    if (media != 1) {
+    if (media > 1) {
         c->state = SNX_CTR_IPC_UNSUPPORTED;
         return;
     }
-    char folder[128];
-    extdata_folder(folder, high, low);
+    char folder[160];
+    extdata_folder(folder, media == 0, high, low);
     pm_lock(&p->tree->lock);
-    FsTreeResult rc = fs_tree_remove(p->tree, p->sd, folder, 1, 1, 0);
+    FsTreeResult rc = fs_tree_remove(p->tree, NULL, folder, 1, 1, 0);
     pm_unlock(&p->tree->lock);
     snx_ctr_ipc_error_reply(c, tree_result(rc));
 }
@@ -803,7 +818,7 @@ static void format_save(SnxCtrIpc* c) {
 static void format_info(SnxCtrIpc* c) {
     if (!snx_ctr_ipc_expect(c, 3, 2)) return;
     SnxCtrProcess* p = c->process;
-    bool extdata = c->in[1] == 7 && c->in[2] == 2 && c->in[3] == 12;
+    bool extdata = (c->in[1] == 6 || c->in[1] == 7) && c->in[2] == 2 && c->in[3] == 12;
     if (!extdata && (c->in[1] != 4 || c->in[2] != 1)) {
         c->state = SNX_CTR_IPC_UNSUPPORTED;
         return;
@@ -812,19 +827,17 @@ static void format_info(SnxCtrIpc* c) {
         snx_ctr_ipc_bad(c);
         return;
     }
-    char path[128 + 16] = CTR_FORMAT_FILE;
-    FsNode* scope = NULL;
+    char path[160 + 16] = CTR_FORMAT_FILE;
     if (extdata) {
         uint32_t words[3];
         if (!extdata_path(c, c->in[5], words)) return;
-        extdata_folder(path, words[2], words[1]);
+        extdata_folder(path, c->in[1] == 7, words[2], words[1]);
         strcat(path, "/metadata");
-        scope = p->sd;
     }
     unsigned char bytes[16] = {0};
     FsNode* format = NULL;
     pm_lock(&p->tree->lock);
-    FILE* f = (extdata ? !!p->sd : !!p->save) && !fs_tree_lookup(p->tree, scope, path, &format) && !format->is_dir
+    FILE* f = (extdata || p->save) && !fs_tree_lookup(p->tree, NULL, path, &format) && !format->is_dir
                   ? fs_tree_open(p->tree, format, "rb")
                   : NULL;
     bool read = f && fread(bytes, 1, sizeof bytes, f) == sizeof bytes;

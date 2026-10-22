@@ -181,6 +181,12 @@ if(TARGET snx_ctr_board)
     target_link_libraries(snx-test-3ds-vk-transfer PRIVATE snx_ctr_gpu)
     add_test(NAME 3ds_vk_transfer COMMAND snx-test-3ds-vk-transfer)
     set_tests_properties(3ds_vk_transfer PROPERTIES SKIP_RETURN_CODE 77)
+    # the Y2R engine's conversion on the GPU against its CPU reference
+    add_executable(snx-test-3ds-vk-y2r 3ds_vk_y2r.c)
+    snx_test_target(snx-test-3ds-vk-y2r 11)
+    target_link_libraries(snx-test-3ds-vk-y2r PRIVATE snx_ctr_gpu)
+    add_test(NAME 3ds_vk_y2r COMMAND snx-test-3ds-vk-y2r)
+    set_tests_properties(3ds_vk_y2r PROPERTIES SKIP_RETURN_CODE 77)
     # the GPU's draws against the software renderer, the CPU reference they replaced, scene by scene
     add_executable(snx-test-3ds-vk-draw 3ds_vk_draw.c)
     snx_test_target(snx-test-3ds-vk-draw 11)

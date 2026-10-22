@@ -3,6 +3,7 @@
 #ifndef SNX_CTR_PROCESS_INTERNAL_H
 #define SNX_CTR_PROCESS_INTERNAL_H
 #include "3ds/runtime/ctr_process.h"
+#include "3ds/gpu/y2r.h"
 #include "3ds/kernel/ctr_kernel.h"
 #include "3ds/services/romfs.h"
 #define CTR_HANDLES        256u
@@ -145,6 +146,16 @@ typedef struct {
     uint16_t semaphore_mask;
     uint64_t next_frame_ns; /* host monotonic deadline of the next audio frame */
 } SnxCtrDspService;
+/* y2r:u: the Y2R engine's configuration as the application set it, and the conversion running (services/y2r.c) */
+typedef struct {
+    SnxCtrY2rConfig config;
+    SnxCtrY2rBuffer streams[SNX_CTR_Y2R_STREAMS]; /* Y, U, V and the output, as SetSending and SetReceiving gave them */
+    SnxCtrY2rBuffer yuyv;                         /* SetSendingYUYV's, which the interleaved input reads */
+    uint16_t dithering[16];
+    uint8_t spacial_dithering, temporal_dithering, transfer_end_interrupt;
+    uint32_t event;   /* the transfer end event (retained), made at the first GetTransferEndEvent or DriverInitialize */
+    uint64_t done_ns; /* host monotonic end of the conversion running, 0 when none is */
+} SnxCtrY2rService;
 /* hid:USER's sampling (services/hid.c): each update's next deadline, host monotonic ns (0: not running), the index
    each writes next, how many times the game enabled each sensor, and the circle pad's last two raw positions, which
    each sample averages with */
@@ -187,6 +198,7 @@ struct SnxCtrProcess {
     uint32_t fs_priority; /* fs:USER's SetPriority, UINT32_MAX until one */
     SnxCtrGsp gsp;
     SnxCtrDspService dsp;
+    SnxCtrY2rService y2r;
     uint64_t svc_count, svc_counts[256]; /* all, and each SVC's */
     uint64_t idle_ns, idle_waits;          /* the host time the scheduler slept with no thread to run, and how often */
     /* the codeset GetProcessInfo describes: segments as loaded, BSS, title and name (ExHeader) */

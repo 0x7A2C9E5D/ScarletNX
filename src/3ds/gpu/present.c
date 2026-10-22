@@ -14,6 +14,7 @@
 #include "3ds/gpu/vk/vk.h"
 #include "3ds/gpu/vk/shaders/present_spv.h"
 #include "3ds/gpu/vk/vk_transfer.h"
+#include "3ds/gpu/vk/vk_y2r.h"
 #include "3ds/gpu/vk/vk_render.h"
 #include "common/utilities/build_info.h"
 #include "common/utilities/common.h"
@@ -396,6 +397,7 @@ void snx_ctr_present_free(void) {
     if (g_present.readback_memory) vkFreeMemory(v->device, g_present.readback_memory, NULL);
     snx_ctr_vk_compute_free(&g_present.decode);
     snx_ctr_vk_transfer_free();
+    snx_ctr_vk_y2r_free();
     memset(&g_present, 0, sizeof g_present);
     snx_ctr_vk_free();
 }

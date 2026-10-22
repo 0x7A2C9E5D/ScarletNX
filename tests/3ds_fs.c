@@ -328,16 +328,17 @@ static void sd_area(SnxCtrProcess* p, uint32_t fs, const char* directory) {
     request(p, fs, commit, 10, SNX_CTR_SVC_RETURN, 0);
     assert(!get(p, 1));
 }
-/* ExtSaveData (archive 7): missing until CreateExtSaveData makes it in the SD card's extdata folder, its files fixed
-   in size, its folder read through a directory session, then all of it deleted */
+/* A game's ExtSaveData (archive 6): missing until CreateExtSaveData makes it in the SD card's extdata folder, its files
+   fixed in size, its folder read through a directory session, then all of it deleted. Then the shared ExtSaveData
+   (archive 7) PTM made at the mount, with its Play Coins */
 static void extdata(SnxCtrProcess* p, uint32_t fs, const char* directory) {
     word(p, 0x300020, 1); /* the path: media SDMC, save ID low, high */
     word(p, 0x300024, 0x1234);
     word(p, 0x300028, 0);
-    uint32_t a[] = {0x80c00c2, 7, 2, 12, (12u << 14) | 2, 0x300020};
+    uint32_t a[] = {0x80c00c2, 6, 2, 12, (12u << 14) | 2, 0x300020};
     request(p, fs, a, 6, SNX_CTR_SVC_RETURN, 0);
     assert(get(p, 1) == 0xc8a04478); /* not found: the game creates it */
-    uint32_t info[] = {0x84500c2, 7, 2, 12, (12u << 14) | 2, 0x300020};
+    uint32_t info[] = {0x84500c2, 6, 2, 12, (12u << 14) | 2, 0x300020};
     request(p, fs, info, 6, SNX_CTR_SVC_RETURN, 0);
     assert(get(p, 1) == 0xc8a04554);
     word(p, 0x300600, 0x48444d53); /* a four-byte icon */
@@ -433,6 +434,35 @@ static void extdata(SnxCtrProcess* p, uint32_t fs, const char* directory) {
     request(p, fs, a, 6, SNX_CTR_SVC_RETURN, 0);
     assert(get(p, 1) == 0xc8a04478);
     assert(!fopen(host, "rb"));
+    /* shared: 0xF000000B, its high word whatever the path says */
+    word(p, 0x300020, 0);
+    word(p, 0x300024, 0xf000000b);
+    word(p, 0x300028, 0xf0000000);
+    a[1] = 7;
+    request(p, fs, a, 6, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 0) == 0x80c00c0 && !get(p, 1));
+    lo = get(p, 2), hi = get(p, 3);
+    static const uint16_t coins16[] = {'/', 'g', 'a', 'm', 'e', 'c', 'o', 'i', 'n', '.', 'd', 'a', 't', 0};
+    utf16(p, 0x300400, coins16, 28);
+    uint32_t coins[] = {0x80201c2, 0, lo, hi, 4, 28, 1, 0, (28u << 14) | 2, 0x300400};
+    request(p, fs, coins, 10, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1));
+    file = get(p, 3);
+    request(p, file, size, 1, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1) && get(p, 2) == 20);
+    uint32_t read_coins[] = {0x80200c2, 0, 0, 20, (20u << 4) | 12, 0x300100};
+    request(p, file, read_coins, 6, SNX_CTR_SVC_RETURN, 0);
+    unsigned char coin[20];
+    assert(!get(p, 1) && snx_ctr_read_ram(p->space, 0x300100, coin, 20) == SNX_CTR_MEM_OK);
+    assert(coin[0] == 0 && coin[1] == 0x4f && coin[4] == 42 && coin[16] == 0xde && coin[17] == 7);
+    request(p, file, finish, 1, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1) && !snx_ctr_handle_close(p, file));
+    close[1] = lo, close[2] = hi;
+    request(p, fs, close, 3, SNX_CTR_SVC_RETURN, 0);
+    assert(!get(p, 1));
+    word(p, 0x300024, 0xf0000099); /* a shared one the system did not make */
+    request(p, fs, a, 6, SNX_CTR_SVC_RETURN, 0);
+    assert(get(p, 1) == 0xc8a04554);
 }
 /* The NCCH archive through OpenFileDirectly: a system title Azahar has an open stand-in for (the Mii data, the bad
    word list) is that RomFS, another one NotFound, and the title's own RomFS a file */

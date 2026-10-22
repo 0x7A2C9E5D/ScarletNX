@@ -3,6 +3,7 @@
 #include "3ds/runtime/internal.h"
 #include "3ds/gpu/pica.h"
 #include "3ds/services/dsp.h"
+#include "3ds/services/ptm.h"
 #include "3ds/services/file.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -351,6 +352,7 @@ static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia)
     if (fs_tree_lookup(tree, NULL, "savedata", &p->save) || !p->save->is_dir) p->save = NULL;
     pm_unlock(&tree->lock);
     snx_ctr_dsp_component_file(p);
+    snx_ctr_ptm_system_data(p);
     return true;
 }
 /* HLE shared pages come from board FCRAM past the application pool, outside
