@@ -6,6 +6,7 @@
    over the stand-in for its slot */
 #include "nx/hle/services/pl.c"
 #include "nx/hle/hle.c"
+#include "kobj_ids.h" /* the kernel objects the stubs make, as ids */
 
 static unsigned checks;
 #define CHECK(x)                                                                                                       \
