@@ -13,8 +13,9 @@ typedef struct {
     size_t count;
     size_t room; /* the entries the lists have room for, one past the last included */
 } GuiGames;
-/* what a folder's games are: ready to run (executables; on Android a game's code or a dump), CIA files, and dumps
-   (NSP, XCI and NRO files), prepared when they run */
+/* what a folder's games are: ready to run (executables; on Android a game's code or a dump), the other consoles'
+   packages (3DS CIA and Vita VPK files, each opened with its driver), and dumps (NSP, XCI and NRO files), prepared when
+   they run */
 enum { GUI_GAMES_RUN = 1, GUI_GAMES_CIA = 2, GUI_GAMES_DUMP = 4 };
 /* A folder's games of kinds added after those listed: its own files, and each folder of it that holds its game
    (<name>/<name>), named by the folder; nothing deeper. False, error saying why, when it cannot be read */
@@ -31,7 +32,7 @@ bool gui_games_group(GuiGames* games, const char* ready, const char* dumps,
 bool gui_games_heading(const GuiGames* games, size_t i);
 /* whether directory holds a folder that is no game and not hidden: one whose games a deep add would list */
 bool gui_has_folders(const char* directory, int kinds);
-/* games/'s alone: its executable files and game folders, or with cia CIA files (case-insensitive extension, no execute
+/* games/'s alone: its executable files and game folders, or with cia CIA and VPK files (case-insensitive extension, no execute
    bit needed). Never recurse into data/save directories. */
 bool gui_games_scan(GuiGames* games, const char* directory, bool cia, char* error, size_t size);
 void gui_games_free(GuiGames* games);
@@ -63,6 +64,7 @@ bool gui_game_addons(const char* path, GuiGames* addons);
    into *folder (owned, NULL for any other game), and its mods (snx_mods_list) into *names when names is not NULL:
    their count */
 size_t gui_game_mods(const char* path, char** folder, char*** names);
-/* A 3DS CIA by its name */
+/* A 3DS CIA, a Vita VPK, by its name */
 bool gui_is_cia(const char* name);
+bool gui_is_vpk(const char* name);
 #endif

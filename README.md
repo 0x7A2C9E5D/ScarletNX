@@ -103,7 +103,7 @@ Azahar's PICA pipeline and plays its music through a port of Azahar's HLE DSP.
 It is not playable yet: there is no input, the bottom screen is not shown, and parts of the OS are missing.
 See the [3DS port](docs/3DS.md) for limits, build instructions and the parity roadmap.
 
-The experimental `scarletnx-vita` driver runs PS Vita homebrew VPKs through the same
+The experimental `scarletnx-vita` driver and **Load Vita VPK** menu entry run PS Vita homebrew VPKs through the same
 **extract -> offline AOT -> native run** pipeline, compiling code it missed at run time. It draws sceGxm's scenes
 on Vulkan with a port of Vita3K's shader translator. The Lua Vita Tester draws its screen, reads input and plays sound.
 See the [Vita driver](docs/VITA.md) for what it covers.

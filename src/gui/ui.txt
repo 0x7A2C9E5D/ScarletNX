@@ -9,6 +9,7 @@
 		[button]"Load Switch NSP/XCI/NRO" {}
 		[button]"Load Linux ARM ELF" {}
 		[button]"Load 3DS CIA" {}
+		[button]"Load Vita VPK" {}
 		[button]"Setup device keys" {}
 		[button]"Settings" {}
 		[button]"Share log" {}

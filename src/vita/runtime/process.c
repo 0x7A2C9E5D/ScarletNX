@@ -16,6 +16,10 @@
 #include <sys/mman.h>
 #endif
 
+#ifndef MAP_NORESERVE
+#define MAP_NORESERVE 0
+#endif
+
 #define PAGE 0x1000u
 #define MAIN_STACK 0x40000u /* the kernel's default when the process parameters name none */
 #define MAIN_PRIORITY 0x10000100u /* SCE_KERNEL_DEFAULT_PRIORITY_USER */

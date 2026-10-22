@@ -914,6 +914,13 @@ int main(int argc, char** argv) {
         fputs("CIA execution is not implemented (stage 2)\n", stderr);
         return 3;
     }
+    if (argc > 1 && strstr(argv[0], "scarletnx-vita")) {
+        /* the VPK, in the menu's data folder as the 3DS driver */
+        assert(argc == 4 && snx_is_file(argv[1]) && strstr(argv[1], "vita input.VPK") && !strcmp(argv[2], "--repo") &&
+               argv[3][0]);
+        fputs("the VPK has no eboot.bin\n", stderr);
+        return 4;
+    }
     if (argc > 1 && strstr(argv[1], "elsewhere dump")) { /* its game in the recompiled library's folder picked */
         int i = 2;
         while (i < argc && strcmp(argv[i], "--outdir")) ++i;
@@ -1102,7 +1109,7 @@ int main(int argc, char** argv) {
     char* self = snx_executable(argv[0]);
     char* input = snx_path_join(temporary, "game with spaces;literal.nro");
     assert(!snx_write_file(input, "0", 1));
-    const char* names[] = {"runtime", "scarletnx-gnuabi", "scarletnx-3ds"};
+    const char* names[] = {"runtime", "scarletnx-gnuabi", "scarletnx-3ds", "scarletnx-vita"};
     for (size_t i = 0; i < sizeof names / sizeof *names; ++i) {
 #ifdef _WIN32
         char* filename = snx_format("%s.exe", names[i]);
@@ -1217,6 +1224,10 @@ int main(int argc, char** argv) {
     render(&app);
     shows(&app, "- Load 3DS CIA", yellow);
     shows(&app, "- Load Switch NSP/XCI/NRO", normal);
+    key(&app, SDLK_RIGHT);
+    assert(app.menu.selected == GUI_VITA);
+    render(&app);
+    shows(&app, "- Load Vita VPK", yellow);
     key(&app, SDLK_RIGHT);
     assert(app.menu.selected == GUI_KEYS);
     /* Never touch the real user's keys: exercise installation in a private home. */
@@ -3157,6 +3168,7 @@ int main(int argc, char** argv) {
     key(&app, SDLK_LEFT);
     key(&app, SDLK_LEFT);
     key(&app, SDLK_LEFT);
+    key(&app, SDLK_LEFT);
     /* a load opens the screen its file is picked on at once: games/ is Games' now, not an option under it */
     assert(app.menu.selected == GUI_SWITCH);
     pump(&app);
@@ -3809,6 +3821,44 @@ int main(int argc, char** argv) {
         app.games_dir = original_games;
         app.games_stamp = stamp_now(&app);
         free(cia);
+        free(recent_file);
+    }
+    /* Vita: the same, a VPK with scarletnx-vita */
+    {
+        char* original_games = app.games_dir;
+        char* recent_file = snx_path_join(temporary, "prefs/vita-recent.txt");
+        app.games_dir = snx_path_join(temporary, "vpk-games");
+        char* vpk = snx_path_join(app.games_dir, "vita input.VPK");
+        assert(!snx_mkdirs(app.games_dir) && !snx_write_file(vpk, "fixture", 7));
+        recent_open(&app, snx_strdup(recent_file));
+        launcher(&app, true);
+        point(&app, entry_box(&app, GUI_VITA), true);
+        assert(app.menu.view == GUI_LOAD_DROP && app.menu.active == GUI_VITA);
+        e.type = SDL_EVENT_DROP_FILE;
+        e.drop.data = vpk;
+        event(&app, &e);
+        assert(app.menu.running && app.menu.selected == GUI_VITA && !app.native);
+        finish(&app, 4);
+        assert(app.recent.count == 1 && app.recent.game[0].driver == GUI_VITA && !app.recent.game[0].prepared);
+        GuiRecent kept;
+        gui_recent_load(&kept, recent_file);
+        assert(kept.count == 1 && kept.game[0].driver == GUI_VITA && !kept.game[0].prepared);
+        go_tab(&app, GUI_TAB_GAMES);
+        assert(app.menu.view == GUI_LOAD_GAMES && app.games.count == 1);
+        app.browser.selected = app.browser.head;
+        key(&app, SDLK_RETURN);
+        assert(app.menu.running && !app.native && app.menu.selected == GUI_VITA);
+        finish(&app, 4);
+        app.recent = (GuiRecent){0};
+        recent_changed(&app);
+        free(app.recent_file);
+        app.recent_file = NULL;
+        launcher(&app, false);
+        app.menu.selected = GUI_LINUX;
+        free(app.games_dir);
+        app.games_dir = original_games;
+        app.games_stamp = stamp_now(&app);
+        free(vpk);
         free(recent_file);
     }
 
@@ -4719,11 +4769,11 @@ int main(int argc, char** argv) {
                !m.lists[UI_MENU_ENTRIES].first);
         hides(&app, "\x1e", soft);
         shows(&app, "\x1f", soft); /* items below the last row */
-        assert(shown - 1 == GUI_KEYS);
-        app.clock = 2 * app.theme.blink_ms; /* the red half where no keys are in use: the arrow as its text, page */
+        assert(shown - 1 == GUI_VITA);
+        app.clock = 2 * app.theme.blink_ms; /* the arrow as the last row's text: page on a failing one, else soft */
         render(&app);
         shows(&app, "\x1f",
-              rgb(ui_menu_entries_attr_cb(&app, GUI_KEYS) & UI_ATTR_FAILURE ? app.theme.page : app.theme.soft));
+              rgb(ui_menu_entries_attr_cb(&app, shown - 1) & UI_ATTR_FAILURE ? app.theme.page : app.theme.soft));
         app.clock = app.theme.blink_ms;
         /* ui.txt's scroll, center: each focus in the middle of the rows shown, the ends where the list has no more to
            move */
@@ -4765,10 +4815,10 @@ int main(int argc, char** argv) {
             assert(app.menu.selected == GUI_LINUX);
             e.tfinger.y = 0.2f + 3.2f * row;
             event(&app, &e);
-            assert(app.menu.selected == GUI_KEYS);
+            assert(app.menu.selected == GUI_VITA);
             e.type = SDL_EVENT_FINGER_UP;
             event(&app, &e);
-            assert(app.menu.selected == GUI_KEYS && !app.finger);
+            assert(app.menu.selected == GUI_VITA && !app.finger);
             app.menu.selected = GUI_SWITCH;
             render(&app);
         }
@@ -4857,7 +4907,7 @@ int main(int argc, char** argv) {
             e.type = SDL_EVENT_MOUSE_WHEEL;
             e.wheel.integer_y = -3;
             event(&app, &e);
-            assert(app.menu.selected == GUI_KEYS);
+            assert(app.menu.selected == GUI_VITA);
             e.wheel.integer_y = 3;
             event(&app, &e);
             assert(app.menu.selected == GUI_SWITCH);

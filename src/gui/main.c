@@ -414,6 +414,7 @@ typedef struct App {
 #define GUI_ENTRY(item) (UI_MENU_ENTRIES_LOAD_SWITCH_NSP_XCI_NRO + (item))
 typedef char gui_entries_in_order
     [GUI_ENTRY(GUI_LINUX) == UI_MENU_ENTRIES_LOAD_LINUX_ARM_ELF && GUI_ENTRY(GUI_3DS) == UI_MENU_ENTRIES_LOAD_3DS_CIA &&
+             GUI_ENTRY(GUI_VITA) == UI_MENU_ENTRIES_LOAD_VITA_VPK &&
              GUI_ENTRY(GUI_KEYS) == UI_MENU_ENTRIES_SETUP_DEVICE_KEYS &&
              GUI_ENTRY(GUI_SETTINGS) == UI_MENU_ENTRIES_SETTINGS && GUI_ENTRY(GUI_LOG) == UI_MENU_ENTRIES_SHARE_LOG &&
 #ifdef SDL_PLATFORM_ANDROID
@@ -3308,8 +3309,9 @@ typedef struct {
 static const char* item_about(const App* app, int item) {
     static const char* const loads[] = {SNX_TR_NOOP("Recompiles a game's .nsp, .xci or .nro, then runs it"),
                                         SNX_TR_NOOP("Runs an ARM64 Linux program on the CPU"),
-                                        SNX_TR_NOOP("Opens a 3DS .cia")};
-    if (item >= GUI_SWITCH && item <= GUI_3DS) return snx_tr(loads[item - GUI_SWITCH]);
+                                        SNX_TR_NOOP("Opens a 3DS .cia"),
+                                        SNX_TR_NOOP("Recompiles a PS Vita homebrew .vpk, then runs it")};
+    if (item >= GUI_SWITCH && item <= GUI_VITA) return snx_tr(loads[item - GUI_SWITCH]);
     if (item == GUI_KEYS) return snx_tr("Installs prod.keys, which games are extracted with");
     if (item == GUI_EXIT) return snx_tr("Closes ScarletNX");
     {
@@ -3478,6 +3480,7 @@ static void game_kind(const App* app, const GuiGames* games, size_t i, char* kin
     else
         snprintf(kind, size, "%s",
                  gui_is_cia(name)    ? snx_tr("3DS CIA, opened with scarletnx-3ds")
+                 : gui_is_vpk(name)  ? snx_tr("Vita VPK, opened with scarletnx-vita")
                  : gui_is_dump(name) ? snx_tr("A dump, prepared when it runs")
                                      : snx_tr("Ready to run"));
     n = strlen(kind);
@@ -3486,7 +3489,7 @@ static void game_kind(const App* app, const GuiGames* games, size_t i, char* kin
                  snx_tr(", in the games/ an older version made: new games go to recompiled/"));
 }
 static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** about, char* kind, size_t size) {
-    static const char* const kinds[] = {"Switch", "Linux ARM", "3DS"}; /* names, never translated */
+    static const char* const kinds[] = {"Switch", "Linux ARM", "3DS", "Vita"}; /* names, never translated */
     size_t selected = app->browser.selected, head = app->browser.head;
     kind[0] = 0;
     if (!selected) {
@@ -3495,7 +3498,7 @@ static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** ab
     }
     if (selected < head && (int)selected - 1 < recent_shown(app)) {
         const GuiRecentGame* r = &app->recent.game[selected - 1];
-        snprintf(kind, size, "%s, %s", kinds[r->driver >= GUI_SWITCH && r->driver <= GUI_3DS ? r->driver : 0],
+        snprintf(kind, size, "%s, %s", kinds[r->driver >= GUI_SWITCH && r->driver <= GUI_VITA ? r->driver : 0],
                  r->prepared ? snx_tr("ready to run") : snx_tr("prepared when it runs"));
         *about = r->path;
         return r->name;
@@ -3724,6 +3727,7 @@ static const char* driver_name(int item) {
         case GUI_SWITCH: return "scarletnx";
         case GUI_LINUX: return "scarletnx-gnuabi";
         case GUI_3DS: return "scarletnx-3ds";
+        case GUI_VITA: return "scarletnx-vita";
 #endif
         default: return NULL;
     }
@@ -4780,7 +4784,7 @@ static bool room_fits(App* app, const char* file) {
         free(temp);
         return true;
     }
-    out = dump_out(app, file, nx ? NULL : "3ds");
+    out = dump_out(app, file, nx ? NULL : app->menu.selected == GUI_VITA ? "vita" : "3ds");
     if (kept ? !snx_is_dir(out) : !made_from(app, file)) /* else extracted already, and its game made with it */
         fits = gui_room(snx_file_size(file), nx && kept, app->room_free ? app->room_free : free_space(work),
                         app->room_free ? app->room_free : free_space(games), snx_same_disk(work, games), &need, &left);
@@ -7937,8 +7941,8 @@ static void launch(App* app, char* absolute, bool prepared) {
         free(absolute);
         return;
     }
-    /* The 3DS browser lists CIA inputs, not prepared host executables. */
-    if (app->menu.selected == GUI_3DS) prepared = false;
+    /* The 3DS and Vita browsers list CIA and VPK inputs, not prepared host executables. */
+    if (app->menu.selected == GUI_3DS || app->menu.selected == GUI_VITA) prepared = false;
     bool native = prepared && app->menu.selected == GUI_SWITCH;
     /* a game in a folder of its own goes through the driver, which recompiles it first when another build made it; one
        an older version laid out beside the others runs as it is, as every game on iOS, which runs no other program */
@@ -7967,7 +7971,8 @@ static void launch(App* app, char* absolute, bool prepared) {
     }
 #endif
     /* the folders picked in Settings > App > Folders, which a Switch or 3DS run works in: refused when one cannot be */
-    bool folders = (app->menu.selected == GUI_SWITCH && !native) || app->menu.selected == GUI_3DS;
+    bool folders = (app->menu.selected == GUI_SWITCH && !native) || app->menu.selected == GUI_3DS ||
+                   app->menu.selected == GUI_VITA;
     if (folders && !places_fit(app, app->message, sizeof app->message)) {
         free(driver);
         free(absolute);
@@ -8117,7 +8122,7 @@ static void open_recent(App* app, int index) {
     launch(app, snx_strdup(game.path), game.prepared);
     app->menu.selected = item;
 }
-/* a game of Games' page, at index of the list: a CIA is the 3DS driver's, anything else a Switch game's, ready to run
+/* a game of Games' page, at index of the list: a CIA is the 3DS driver's, a VPK the Vita's, anything else a Switch game's, ready to run
    or a dump to prepare */
 static void open_game(App* app, size_t index) {
     int item = app->menu.selected;
@@ -8126,7 +8131,9 @@ static void open_game(App* app, size_t index) {
         addons_open(app, app->games.paths[index], app->games.shown[index]);
         if (app->addons_shown) return;
     }
-    app->menu.selected = gui_is_cia(app->games.names[index]) ? GUI_3DS : GUI_SWITCH;
+    app->menu.selected = gui_is_cia(app->games.names[index])   ? GUI_3DS
+                         : gui_is_vpk(app->games.names[index]) ? GUI_VITA
+                                                               : GUI_SWITCH;
     launch(app, snx_absolute(app->games.paths[index]), !gui_is_dump(app->games.names[index]));
     if (!app->menu.running) app->menu.selected = item;
 }
@@ -8139,7 +8146,8 @@ static void recompile_focus(App* app) {
          game = row >= head && index < app->games.count && !gui_games_heading(&app->games, index);
     if (!recent && !game)
         snprintf(app->message, sizeof app->message, "%s", snx_tr("No game in focus to recompile."));
-    else if (recent ? app->recent.game[row - 1].driver != GUI_SWITCH : gui_is_cia(app->games.names[index]))
+    else if (recent ? app->recent.game[row - 1].driver != GUI_SWITCH
+                    : gui_is_cia(app->games.names[index]) || gui_is_vpk(app->games.names[index]))
         snprintf(app->message, sizeof app->message, "%s", snx_tr("R recompiles Switch games only."));
     else {
         app->recompile = true;
@@ -8172,7 +8180,9 @@ static int aot_focus_game(App* app, AotFocus* f) {
         if (app->recent.game[row - 1].driver != GUI_SWITCH) return 0;
         path = app->recent.game[row - 1].path;
     } else if (game) {
-        if (gui_games_heading(&app->games, index) || gui_is_cia(app->games.names[index])) return 0; /* no path */
+        if (gui_games_heading(&app->games, index) || gui_is_cia(app->games.names[index]) ||
+            gui_is_vpk(app->games.names[index]))
+            return 0; /* no path */
         path = app->games.paths[index];
     } else {
         return 0;
@@ -8993,6 +9003,7 @@ static void menu_entry(App* app, int item, uint32_t hit) {
 void ui_menu_entries_load_switch_nsp_xci_nro_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_SWITCH, hit); }
 void ui_menu_entries_load_linux_arm_elf_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_LINUX, hit); }
 void ui_menu_entries_load_3ds_cia_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_3DS, hit); }
+void ui_menu_entries_load_vita_vpk_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_VITA, hit); }
 void ui_menu_entries_setup_device_keys_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_KEYS, hit); }
 void ui_menu_entries_settings_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_SETTINGS, hit); }
 void ui_menu_entries_share_log_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_LOG, hit); }
