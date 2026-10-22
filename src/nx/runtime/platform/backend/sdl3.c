@@ -653,6 +653,16 @@ static int fatal_screen(const char* msg) {
    thread doesn't come (held up elsewhere), Windows' own box (it takes any thread) and none on Linux: the error is in
    the log and on stderr. Nothing for an unattended run, where nobody would close it */
 void win_fatal_box(const char* msg) {
+#ifdef SDL_PLATFORM_IOS
+    /* a phone shows no stderr and no log of the app's: the Files app shows this file, in the app's Documents */
+    {
+        FILE* file = fopen("scarletnx-error.log", "a");
+        if (file) {
+            fprintf(file, "%s\n", msg);
+            fclose(file);
+        }
+    }
+#endif
     if (g_opt_headless || unattended_active()) return;
     if (SDL_IsMainThread()) {
         /* an error another thread left first: this one followed from it */

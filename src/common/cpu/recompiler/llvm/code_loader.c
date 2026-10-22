@@ -236,12 +236,27 @@ static int ios_arena(SnxCodeLoader* loader, char* error, size_t error_size) {
     }
     for (i = CODE; i <= RODATA; ++i) loader->region[i].write = (unsigned char*)alias + loader->region[i].start;
     data = (vm_address_t)(base + loader->region[DATA].start);
-    kr = vm_deallocate(mach_task_self(), data, loader->region[DATA].size);
-    if (kr == KERN_SUCCESS) kr = vm_allocate(mach_task_self(), &data, loader->region[DATA].size, VM_FLAGS_FIXED);
-    if (kr == KERN_SUCCESS)
+    /* the tail as read-write where it is first (it drops the execute right only), and when the system refuses, given
+       back and mapped again as ordinary memory. The pages are zeroed: the debugger touched each one */
+    kr = vm_protect(mach_task_self(), data, loader->region[DATA].size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+    if (kr == KERN_SUCCESS) {
+        memset((void*)data, 0, loader->region[DATA].size);
         kr = vm_protect(mach_task_self(), data, loader->region[DATA].size, FALSE, VM_PROT_NONE);
+    } else {
+        kern_return_t freed = vm_deallocate(mach_task_self(), data, loader->region[DATA].size), mapped = freed;
+        if (!freed) mapped = vm_allocate(mach_task_self(), &data, loader->region[DATA].size, VM_FLAGS_FIXED);
+        if (!freed && !mapped)
+            kr = vm_protect(mach_task_self(), data, loader->region[DATA].size, FALSE, VM_PROT_NONE);
+        else {
+            snprintf(error, error_size,
+                     "cannot make the code arena's data out of the debugger's region (in place %d, given back %d, "
+                     "mapped again %d)",
+                     (int)kr, (int)freed, (int)mapped);
+            return -1;
+        }
+    }
     if (kr != KERN_SUCCESS) {
-        snprintf(error, error_size, "cannot make the code arena's data out of the debugger's region (%d)", (int)kr);
+        snprintf(error, error_size, "cannot protect the code arena's data (%d)", (int)kr);
         return -1;
     }
     loader->region[DATA].write = base + loader->region[DATA].start;
