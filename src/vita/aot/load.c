@@ -66,6 +66,51 @@ void vita_native_close(VitaNative* native) {
     if (native->library) library_close(native->library);
     *native = (VitaNative){0};
 }
+static int by_key(const void* a, const void* b) {
+    uint32_t x = *(const uint32_t*)a, y = *(const uint32_t*)b;
+    return (x > y) - (x < y);
+}
+/* keys sorted, each once: the new count */
+static size_t unique(uint32_t* keys, size_t count) {
+    size_t n = 0;
+    if (count) qsort(keys, count, sizeof *keys, by_key);
+    for (size_t i = 0; i < count; ++i)
+        if (!n || keys[n - 1] != keys[i]) keys[n++] = keys[i];
+    return n;
+}
+uint32_t* vita_hints_read(const char* folder, size_t* count) {
+    char* path = vita_game_file(folder, VITA_HINTS_SUFFIX);
+    FILE* f = path ? fopen(path, "r") : NULL;
+    uint32_t* hints = NULL;
+    size_t capacity = 0;
+    unsigned value;
+    *count = 0;
+    while (f && fscanf(f, "%x", &value) == 1) {
+        if (*count == capacity) {
+            uint32_t* grown = realloc(hints, (capacity = capacity ? capacity * 2 : 1024) * sizeof *grown);
+            if (!grown) break;
+            hints = grown;
+        }
+        hints[(*count)++] = value;
+    }
+    if (f) fclose(f);
+    free(path);
+    *count = unique(hints, *count);
+    return hints;
+}
+size_t vita_hints_write(const char* folder, uint32_t* keys, size_t count) {
+    char *path = vita_game_file(folder, VITA_HINTS_SUFFIX), *staged = path ? snx_format("%s.tmp", path) : NULL;
+    FILE* f = staged ? fopen(staged, "w") : NULL;
+    bool ok = f != NULL;
+    count = unique(keys, count);
+    for (size_t i = 0; ok && i < count; ++i) ok = fprintf(f, "%08x\n", (unsigned)keys[i]) > 0;
+    if (f && fclose(f)) ok = false;
+    ok = ok && !snx_replace(staged, path);
+    if (!ok && staged) remove(staged);
+    free(staged);
+    free(path);
+    return ok ? count : SIZE_MAX;
+}
 char* vita_game_file(const char* directory, const char* suffix) {
     char* folder = snx_absolute(directory);
     if (!folder) folder = snx_strdup(directory);

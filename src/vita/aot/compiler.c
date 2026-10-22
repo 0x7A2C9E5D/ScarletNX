@@ -130,29 +130,10 @@ static LLVMValueRef emit(LLVMModuleRef module, const VitaImage* image, uint32_t 
     free(input);
     return fn;
 }
-static uint32_t* read_hints(const char* folder, size_t* count) {
-    char* path = vita_game_file(folder, VITA_HINTS_SUFFIX);
-    FILE* f = path ? fopen(path, "r") : NULL;
-    uint32_t* hints = NULL;
-    size_t capacity = 0;
-    unsigned value;
-    *count = 0;
-    while (f && fscanf(f, "%x", &value) == 1) {
-        if (*count == capacity) {
-            uint32_t* grown = realloc(hints, (capacity = capacity ? capacity * 2 : 1024) * sizeof *grown);
-            if (!grown) break;
-            hints = grown;
-        }
-        hints[(*count)++] = value;
-    }
-    if (f) fclose(f);
-    free(path);
-    return hints;
-}
 static bool discover(Discovery* d, const char* folder, char* error, size_t error_size) {
     const VitaImage* image = d->image;
     size_t hint_count = 0, refused = 0;
-    uint32_t* hints = read_hints(folder, &hint_count);
+    uint32_t* hints = vita_hints_read(folder, &hint_count);
     if (hint_count) printf("Seeding discovery with %zu blocks earlier runs compiled at run time\n", hint_count);
     queue_pointer(d, image->module_start);
     if (image->module_stop) queue_pointer(d, image->module_stop);

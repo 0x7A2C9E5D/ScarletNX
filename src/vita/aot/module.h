@@ -45,6 +45,11 @@ typedef struct {
 bool vita_native_open(const char* path, const VitaImage* image, VitaNative* native, char* error, size_t error_size);
 void vita_native_close(VitaNative* native);
 
+/* The hints (VITA_HINTS_SUFFIX): the blocks in folder's file, ascending and each once (count 0 and NULL for none, the
+   caller's to free); and the file written with keys (sorted in place): how many it holds, each once, SIZE_MAX when it
+   can't be written */
+uint32_t* vita_hints_read(const char* folder, size_t* count);
+size_t vita_hints_write(const char* folder, uint32_t* keys, size_t count);
 /* folder's file named after folder with suffix (recompiled/PCSE00001/PCSE00001_code.so), the caller's to free */
 char* vita_game_file(const char* folder, const char* suffix);
 /* Compiles image into folder's module, seeded with the hints there. 0, or 1 with error filled */

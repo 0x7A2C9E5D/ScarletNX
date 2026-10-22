@@ -35,12 +35,14 @@ enum {
     VITA_SVC_DISPLAY_NEXT,
     VITA_SVC_DISPLAY_DONE,
     VITA_SVC_FIBER_RETURN,
+    VITA_SVC_CALL_RETURN,
 };
 /* the trampolines' addresses, A32 code */
 #define VITA_THREAD_RETURN   (VITA_RUNTIME_PAGE + 0x00u)
 #define VITA_DISPLAY_LOOP    (VITA_RUNTIME_PAGE + 0x10u)
 #define VITA_RETURN          (VITA_RUNTIME_PAGE + 0x20u) /* bx lr: a function that does nothing */
 #define VITA_FIBER_RETURN    (VITA_RUNTIME_PAGE + 0x24u) /* a fiber's entry returning (its lr) */
+#define VITA_CALL_RETURN     (VITA_RUNTIME_PAGE + 0x2cu) /* a guest function an import called returning (its lr) */
 
 /* SceKernel's error codes (psp2/kernel/error.h), and errno's as the libraries return them (0x80010000 | errno) */
 #define SCE_OK                              0
@@ -85,7 +87,8 @@ typedef struct {
     uint32_t timeout;  /* the guest's SceUInt32* timeout in microseconds, written with what is left; 0 for none */
     uint64_t deadline; /* host monotonic ns, 0 for none */
 } VitaWait;
-typedef struct {
+struct VitaProcess;
+typedef struct VitaThread {
     SnxArmCPU cpu;
     uint32_t state, uid;
     char name[32];
@@ -96,6 +99,14 @@ typedef struct {
        with where sceFiberRun writes what the fiber returns to it */
     uint32_t fiber, fiber_out;
     SnxArmCPU own;
+    /* an import calling guest code (vita/hle/hle.h: vita_hle_guest_call): where the import returns to in the end,
+       the stack it was called with, what runs once the guest function returns */
+    struct {
+        bool active, redirected;
+        uint32_t lr, sp;
+        uint32_t (*next)(struct VitaProcess* p, struct VitaThread* t, void* context);
+        void* context;
+    } call;
     int32_t exit_status;
     VitaWait wait;
     uint64_t seq; /* when it last ran: the scheduler takes the ready thread that waited longest */
@@ -166,6 +177,9 @@ typedef struct {
 
 struct VitaGxm;
 struct VitaAudio;
+struct VitaMp4;
+struct VitaVideodec;
+struct VitaAudiodec;
 typedef struct VitaProcess {
     unsigned char* mem; /* the reservation */
     VitaImage image;
@@ -189,6 +203,10 @@ typedef struct VitaProcess {
     } display;
     struct VitaGxm* gxm;
     struct VitaAudio* audio;
+    /* the movie libraries (vita/hle/mp4.c, videodec.c, audiodec.c), made at their first use */
+    struct VitaMp4* mp4;
+    struct VitaVideodec* videodec;
+    struct VitaAudiodec* audiodec;
     bool exited;
     int32_t exit_code;
     /* the run-time compiler: blocks the module lacks (vita/runtime/jit.c), NULL without one */

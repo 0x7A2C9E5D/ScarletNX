@@ -22,6 +22,10 @@ typedef struct {
     VkPhysicalDeviceMemoryProperties memory_properties;
     VkDeviceSize host_alignment; /* minImportedHostPointerAlignment */
     bool preserve_infnan;
+    bool bc; /* the device samples BC1 to BC3 (textureCompressionBC) */
+    /* the color attachment read as an input attachment while rendered to (VK_KHR_dynamic_rendering_local_read), in
+       primitive order within a draw (VK_EXT_rasterization_order_attachment_access) */
+    bool local_read, raster_order;
     SDL_Window* window;
     VkSurfaceKHR surface;
     VkSwapchainKHR swapchain;

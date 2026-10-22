@@ -7,15 +7,31 @@ add_library(snx_vita_loader STATIC loader/inflate.c loader/vpk.c loader/image.c)
 target_link_libraries(snx_vita_loader PUBLIC scarletnx-common OpenSSL::Crypto)
 target_compile_definitions(snx_vita_loader PRIVATE _FILE_OFFSET_BITS=64 _CRT_SECURE_NO_WARNINGS)
 
+# the USSE translator, which the runtime and snx-vita-usse (the shader corpus' tool) share
+add_library(snx_vita_usse STATIC gpu/usse.c)
+target_link_libraries(snx_vita_usse PUBLIC scarletnx-common)
+add_executable(snx-vita-usse "${PROJECT_SOURCE_DIR}/tools/snx_vita_usse.c")
+target_link_libraries(snx-vita-usse PRIVATE snx_vita_usse)
+set_target_properties(snx-vita-usse PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 add_library(snx_vita_program STATIC
     aot/compiler.c aot/load.c
     runtime/process.c runtime/run.c runtime/jit.c runtime/lockstep.c
     hle/hle.c hle/kernel.c hle/io.c hle/ctrl.c hle/display.c hle/audio.c hle/misc.c hle/gxm.c hle/heap.c hle/libc.c hle/fiber.c hle/ngs.c
-    gpu/present.c gpu/render.c gpu/usse.c gpu/vk.c "${volk_SOURCE_DIR}/volk.c"
+    hle/mp4.c hle/videodec.c hle/audiodec.c
+    gpu/present.c gpu/render.c gpu/vk.c "${volk_SOURCE_DIR}/volk.c"
     platform/input.c)
-target_link_libraries(snx_vita_program PUBLIC snx_vita_loader snx_settings_runtime snx_build_info SDL3::SDL3
+# FFmpeg: the movies' demuxer and decoders (hle/mp4.c, videodec.c, audiodec.c)
+target_link_libraries(snx_vita_program PUBLIC snx_vita_loader snx_vita_usse FFmpeg::avformat FFmpeg::avcodec
+                      snx_settings_runtime snx_build_info SDL3::SDL3
                       Vulkan::Headers ${CMAKE_DL_LIBS})
 target_include_directories(snx_vita_program PUBLIC "${volk_SOURCE_DIR}")
+# the compute shaders (the texture deswizzle, the decoded pictures' layout, YUV textures), compiled at build time
+# (cmake/glsl.cmake)
+include("${PROJECT_SOURCE_DIR}/cmake/glsl.cmake")
+foreach(shader swizzle picture yuv)
+    snx_glsl_spirv(snx_vita_program SOURCE gpu/${shader}.comp NAME vita_${shader}_spv HEADER vita/gpu/${shader}_spv.h)
+endforeach()
 set_source_files_properties("${volk_SOURCE_DIR}/volk.c" PROPERTIES COMPILE_OPTIONS "${snx_third_party_flags}")
 include("${PROJECT_SOURCE_DIR}/cmake/llvm.cmake")
 if(NOT TARGET snx_arm_llvm)
@@ -45,7 +61,7 @@ if(SNX_VITA_LOCKSTEP)
     target_link_libraries(snx_vita_program PUBLIC "${SNX_UNICORN_LIBRARY}")
     target_compile_definitions(snx_vita_program PRIVATE SNX_VITA_LOCKSTEP)
 endif()
-foreach(target snx_vita_loader snx_vita_program)
+foreach(target snx_vita_loader snx_vita_usse snx-vita-usse snx_vita_program)
     set_target_properties(${target} PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 endforeach()

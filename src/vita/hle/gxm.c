@@ -9,6 +9,7 @@
 #include "vita/gpu/gxm.h"
 #include "vita/gpu/gxp.h"
 #include "vita/gpu/render.h"
+#include "vita/gpu/usse.h"
 #include "snx_settings.h"
 #include <inttypes.h>
 #include <math.h>
@@ -40,12 +41,12 @@ static GxmContext* context_of(VitaProcess* p, uint32_t address) {
     return g && g->context.used && g->context.address == address ? &g->context : NULL;
 }
 static GxmVertexProgram* vertex_of(VitaGxm* g, uint32_t handle) {
-    uint32_t i = (handle - GXM_HANDLE_VERTEX) / 16;
-    return handle >= GXM_HANDLE_VERTEX && i < GXM_PROGRAMS && g->vertex[i].used ? &g->vertex[i] : NULL;
+    uint32_t i = (handle - GXM_HANDLE_VERTEX) / GXM_PROGRAM_HANDLE;
+    return handle >= GXM_HANDLE_VERTEX && i < GXM_PROGRAMS && g->vertex[i].references ? &g->vertex[i] : NULL;
 }
 static GxmFragmentProgram* fragment_of(VitaGxm* g, uint32_t handle) {
-    uint32_t i = (handle - GXM_HANDLE_FRAGMENT) / 16;
-    return handle >= GXM_HANDLE_FRAGMENT && i < GXM_PROGRAMS && g->fragment[i].used ? &g->fragment[i] : NULL;
+    uint32_t i = (handle - GXM_HANDLE_FRAGMENT) / GXM_PROGRAM_HANDLE;
+    return handle >= GXM_HANDLE_FRAGMENT && i < GXM_PROGRAMS && g->fragment[i].references ? &g->fragment[i] : NULL;
 }
 
 /* ---- initialization: the display queue's thread ---- */
@@ -294,6 +295,11 @@ static uint32_t register_program(VitaProcess* p, VitaThread* t) {
     uint32_t program = arg(p, t, 1), id = arg(p, t, 2);
     if (!program || !id) return SCE_GXM_ERROR_INVALID_POINTER;
     if (vita_read32(p, program) != GXP_MAGIC) return SCE_GXM_ERROR_INVALID_VALUE;
+    /* the corpus has each registered program, with no hints until it is drawn */
+    if (g_settings.vita_shader_corpus[0]) {
+        UsseHints none = {.attribute_count = 0};
+        usse_corpus_write(g_settings.vita_shader_corpus, vita_ptr(p, program), vita_read32(p, program + 8), &none);
+    }
     vita_write32(p, id, program);
     return 0;
 }
@@ -304,26 +310,36 @@ static uint32_t create_vertex_program(VitaProcess* p, VitaThread* t) {
     VitaGxm* g = gxm(p);
     if (!g || !program || !out) return SCE_GXM_ERROR_INVALID_POINTER;
     if (attribute_count > GXM_ATTRIBUTES || stream_count > GXM_STREAMS) return SCE_GXM_ERROR_INVALID_VALUE;
+    GxmVertexProgram want = {.references = 1, .program = program};
+    want.attribute_count = attribute_count, want.stream_count = stream_count;
+    for (uint32_t a = 0; a < attribute_count; ++a) {
+        const unsigned char* q = vita_ptr(p, attributes + a * 8);
+        want.attributes[a] = (GxmAttribute){(uint16_t)gxp_u16(q), (uint16_t)gxp_u16(q + 2), q[4], q[5],
+                                            (uint16_t)gxp_u16(q + 6)};
+    }
+    for (uint32_t s = 0; s < stream_count; ++s) {
+        const unsigned char* q = vita_ptr(p, streams + s * 4);
+        want.streams[s] = (GxmStream){(uint16_t)gxp_u16(q), (uint16_t)gxp_u16(q + 2)};
+    }
+    uint32_t slot = GXM_PROGRAMS;
     for (uint32_t i = 0; i < GXM_PROGRAMS; ++i) {
         GxmVertexProgram* v = &g->vertex[i];
-        if (v->used) continue;
-        memset(v, 0, sizeof *v);
-        v->used = true;
-        v->program = program;
-        v->attribute_count = attribute_count, v->stream_count = stream_count;
-        for (uint32_t a = 0; a < attribute_count; ++a) {
-            const unsigned char* q = vita_ptr(p, attributes + a * 8);
-            v->attributes[a] = (GxmAttribute){(uint16_t)gxp_u16(q), (uint16_t)gxp_u16(q + 2), q[4], q[5],
-                                              (uint16_t)gxp_u16(q + 6)};
+        if (!v->references) {
+            if (slot == GXM_PROGRAMS) slot = i;
+            continue;
         }
-        for (uint32_t s = 0; s < stream_count; ++s) {
-            const unsigned char* q = vita_ptr(p, streams + s * 4);
-            v->streams[s] = (GxmStream){(uint16_t)gxp_u16(q), (uint16_t)gxp_u16(q + 2)};
+        if (v->program == program && v->attribute_count == attribute_count && v->stream_count == stream_count &&
+            !memcmp(v->attributes, want.attributes, sizeof want.attributes) &&
+            !memcmp(v->streams, want.streams, sizeof want.streams)) {
+            ++v->references;
+            vita_write32(p, out, GXM_HANDLE_VERTEX + i * GXM_PROGRAM_HANDLE);
+            return 0;
         }
-        vita_write32(p, out, GXM_HANDLE_VERTEX + i * 16);
-        return 0;
     }
-    return SCE_GXM_ERROR_OUT_OF_MEMORY;
+    if (slot == GXM_PROGRAMS) return SCE_GXM_ERROR_OUT_OF_MEMORY;
+    g->vertex[slot] = want;
+    vita_write32(p, out, GXM_HANDLE_VERTEX + slot * GXM_PROGRAM_HANDLE);
+    return 0;
 }
 /* sceGxmShaderPatcherCreateFragmentProgram(patcher, id, output format, multisample mode, blend info, vertex program,
    *program) */
@@ -331,36 +347,49 @@ static uint32_t create_fragment_program(VitaProcess* p, VitaThread* t) {
     uint32_t program = arg(p, t, 1), blend = arg(p, t, 4), out = arg(p, t, 6);
     VitaGxm* g = gxm(p);
     if (!g || !program || !out) return SCE_GXM_ERROR_INVALID_POINTER;
+    GxmFragmentProgram want = {.references = 1,
+                               .blend = blend != 0,
+                               .program = program,
+                               .vertex_program = arg(p, t, 5),
+                               .output_format = arg(p, t, 2),
+                               .multisample = arg(p, t, 3),
+                               .blend_info = blend ? vita_read32(p, blend) : 0xf}; /* all channels written */
+    uint32_t slot = GXM_PROGRAMS;
     for (uint32_t i = 0; i < GXM_PROGRAMS; ++i) {
         GxmFragmentProgram* f = &g->fragment[i];
-        if (f->used) continue;
-        memset(f, 0, sizeof *f);
-        f->used = true;
-        f->program = program;
-        f->output_format = arg(p, t, 2);
-        f->multisample = arg(p, t, 3);
-        f->vertex_program = arg(p, t, 5);
-        f->blend = blend != 0;
-        f->blend_info = blend ? vita_read32(p, blend) : 0xf; /* all channels written */
-        vita_write32(p, out, GXM_HANDLE_FRAGMENT + i * 16);
-        return 0;
+        if (!f->references) {
+            if (slot == GXM_PROGRAMS) slot = i;
+            continue;
+        }
+        if (f->program == program && f->vertex_program == want.vertex_program &&
+            f->output_format == want.output_format && f->multisample == want.multisample && f->blend == want.blend &&
+            f->blend_info == want.blend_info) {
+            ++f->references;
+            vita_write32(p, out, GXM_HANDLE_FRAGMENT + i * GXM_PROGRAM_HANDLE);
+            return 0;
+        }
     }
-    return SCE_GXM_ERROR_OUT_OF_MEMORY;
+    if (slot == GXM_PROGRAMS) return SCE_GXM_ERROR_OUT_OF_MEMORY;
+    g->fragment[slot] = want;
+    vita_write32(p, out, GXM_HANDLE_FRAGMENT + slot * GXM_PROGRAM_HANDLE);
+    return 0;
 }
 static uint32_t release_vertex_program(VitaProcess* p, VitaThread* t) {
     GxmVertexProgram* v = p->gxm ? vertex_of(p->gxm, arg(p, t, 1)) : NULL;
     if (!v) return SCE_GXM_ERROR_INVALID_POINTER;
+    if (--v->references) return 0;
     vita_render_idle(p, true);
     vita_render_shader_free(p, v->shader);
-    v->used = false;
+    v->shader = NULL;
     return 0;
 }
 static uint32_t release_fragment_program(VitaProcess* p, VitaThread* t) {
     GxmFragmentProgram* f = p->gxm ? fragment_of(p->gxm, arg(p, t, 1)) : NULL;
     if (!f) return SCE_GXM_ERROR_INVALID_POINTER;
+    if (--f->references) return 0;
     vita_render_idle(p, true);
     vita_render_shader_free(p, f->shader);
-    f->used = false;
+    f->shader = NULL;
     return 0;
 }
 static uint32_t program_check(VitaProcess* p, VitaThread* t) {

@@ -19,6 +19,7 @@
 #define USSE_BUFFERS    16u
 #define USSE_TEXTURES   16u
 #define USSE_TEXTURE_BINDING 2u
+#define USSE_COLOR_BINDING   (USSE_TEXTURE_BINDING + USSE_TEXTURES) /* the pixel's color, an input attachment */
 
 typedef struct {
     float viewport_flag; /* 1: positions are clip space (the viewport is enabled), 0: window coordinates */
@@ -52,10 +53,21 @@ typedef struct {
     unsigned buffer_count;
     uint32_t buffer_words; /* the storage buffer's size */
     uint32_t sampler_mask; /* the textures it samples */
+    bool reads_color;      /* a fragment program that starts with its pixel's color in O0 (FRAGCOLOR_USED) */
 } UsseShader;
 
 /* program's bytes (size of them) to a shader: false with the reason in error (an instruction not translated yet) */
 bool usse_translate(const unsigned char* program, size_t size, const UsseHints* hints, UsseShader* out, char* error,
                     size_t error_size);
 void usse_shader_free(UsseShader* shader);
+
+/* The shader corpus (the vita_shader_corpus setting): a program and the hints it was translated with, written to
+   folder as <hash>.gxp ("SNXGXP1", the hints, the program), once each. read gives a record's program (the caller's to
+   free) and hints. False when it can't */
+bool usse_corpus_write(const char* folder, const unsigned char* program, size_t size, const UsseHints* hints);
+bool usse_corpus_read(const char* path, unsigned char** program, size_t* size, UsseHints* hints);
+/* Each instruction of program, its pattern's name and whether the translator has it (name NULL for an encoding no
+   pattern matches), for the corpus tool's survey */
+void usse_survey(const unsigned char* program, size_t size, void (*each)(void* context, const char* name, bool known),
+                 void* context);
 #endif

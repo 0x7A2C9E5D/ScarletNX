@@ -209,6 +209,7 @@ static bool svc(VitaProcess* p, VitaThread* t, uint32_t imm) {
         case VITA_SVC_DISPLAY_NEXT: vita_gxm_display_next(p, t); return true;
         case VITA_SVC_DISPLAY_DONE: vita_gxm_display_done(p, t); return true;
         case VITA_SVC_FIBER_RETURN: vita_fiber_ended(p, t); return true;
+        case VITA_SVC_CALL_RETURN: vita_hle_call_returned(p, t); return true;
         default: report_fault(p, t, "unknown SVC", imm); return false;
     }
 }

@@ -48,9 +48,21 @@ static inline uint32_t vita_return64(VitaThread* t, uint64_t value) {
 
 /* Calls import index for the current thread */
 void vita_hle_call(VitaProcess* p, VitaThread* t, uint32_t index);
+
+/* An import calling a guest function (the game's callbacks): the thread runs func with args (r0 to r3, then its
+   stack; a 64-bit one takes two, at an even place), as guest code it is, waits included, and when func returns
+   next(p, t, context) runs with func's result in t->cpu.r[0] (and r[1]). next calls another, or returns the
+   import's result, which goes to the import's caller. The import (or next) returns right after calling this: what
+   it returns is dropped */
+typedef uint32_t (*VitaHleNext)(VitaProcess* p, VitaThread* t, void* context);
+void vita_hle_guest_call(VitaProcess* p, VitaThread* t, uint32_t func, const uint32_t* args, unsigned count,
+                         VitaHleNext next, void* context);
+/* VITA_SVC_CALL_RETURN: the guest function returned */
+void vita_hle_call_returned(VitaProcess* p, VitaThread* t);
 /* each module's functions (a NULL-named entry ends each table) */
 extern const VitaHle vita_hle_kernel[], vita_hle_io[], vita_hle_ctrl[], vita_hle_display[], vita_hle_audio[],
-    vita_hle_misc[], vita_hle_gxm[], vita_hle_libc[], vita_hle_fiber[], vita_hle_ngs[];
+    vita_hle_misc[], vita_hle_gxm[], vita_hle_libc[], vita_hle_fiber[], vita_hle_ngs[], vita_hle_mp4[],
+    vita_hle_videodec[], vita_hle_audiodec[];
 
 /* An imported variable (VitaImage.variables): what its slot (VITA_VARIABLE_SIZE bytes, zero) holds, written once as
    the process starts */
@@ -84,12 +96,20 @@ void vita_io_close_all(VitaProcess* p);
 uint32_t vita_io_open(VitaProcess* p, uint32_t path, uint32_t flags);
 uint32_t vita_io_close(VitaProcess* p, uint32_t fd);
 FILE* vita_io_file(VitaProcess* p, uint32_t fd);
+/* the host path of a guest path (app0: with the update's files over it, ux0:), the caller's to free; NULL for none */
+char* vita_io_host_path(VitaProcess* p, uint32_t address);
 /* audio.c: the ports' output device; their state is freed with the process */
 void vita_audio_free(VitaProcess* p);
 /* gxm.c: the display queue's thread asking for its next entry (VITA_SVC_DISPLAY_NEXT), and done with it */
 void vita_gxm_display_next(VitaProcess* p, VitaThread* t);
 void vita_gxm_display_done(VitaProcess* p, VitaThread* t);
 void vita_gxm_free(VitaProcess* p);
+/* mp4.c, videodec.c, audiodec.c: their state, freed with the process; the size of the unit SceMp4 last copied to
+   address (0 for none), which a raw AAC frame doesn't say itself */
+void vita_mp4_free(VitaProcess* p);
+void vita_videodec_free(VitaProcess* p);
+void vita_audiodec_free(VitaProcess* p);
+uint32_t vita_mp4_unit_size(VitaProcess* p, uint32_t address);
 /* fiber.c: the running fiber's entry returned: the thread goes on after its sceFiberRun */
 void vita_fiber_ended(VitaProcess* p, VitaThread* t);
 /* display.c: a vblank: the framebuffer shown, the window's events read. False once the player closed the window */

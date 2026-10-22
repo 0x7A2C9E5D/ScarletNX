@@ -715,6 +715,12 @@ setting Vita GXM trace
     default 0
     words Off|On
     help 1 = logs each scene, draw and display queue entry the Vita game makes through sceGxm
+setting Vita shader corpus
+    key vita_shader_corpus
+    text 1024
+    default ""
+    help A folder the Vita runtime writes each GXP program it translates to, with what it was translated for, as
+    help <hash>.gxp: tools/snx_vita_usse.c translates such a folder again (the game's own code: keep it local)
 setting Vita script
     key vita_script
     text 4096

@@ -223,6 +223,8 @@ static bool trampolines(VitaProcess* p) {
         0xe12fff1eu,                          /* 0x20: bx lr */
         0xef000000u | VITA_SVC_FIBER_RETURN,  /* 0x24: svc FIBER_RETURN */
         0xeafffffeu,                          /* b . */
+        0xef000000u | VITA_SVC_CALL_RETURN,   /* 0x2c: svc CALL_RETURN */
+        0xeafffffeu,                          /* b . */
     };
     if (!commit(p, VITA_RUNTIME_PAGE, VITA_TLS_BASE + VITA_THREADS * VITA_TLS_SIZE - VITA_RUNTIME_PAGE)) return false;
     for (size_t i = 0; i < sizeof code / sizeof *code; ++i) vita_write32(p, VITA_RUNTIME_PAGE + (uint32_t)i * 4, code[i]);
@@ -286,6 +288,9 @@ void vita_process_free(VitaProcess* p) {
     if (!p) return;
     vita_io_close_all(p);
     vita_audio_free(p);
+    vita_mp4_free(p);
+    vita_videodec_free(p);
+    vita_audiodec_free(p);
     vita_gxm_free(p);
     if (p->mem) snx_vm_release(p->mem, VITA_SPACE + 0x10000);
     free(p->unknown_logged);

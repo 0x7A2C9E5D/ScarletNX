@@ -11,17 +11,19 @@
 #define GXM_ATTRIBUTES       16u
 #define GXM_TEXTURES         16u
 #define GXM_UNIFORM_BUFFERS  15u /* the default one is GXP_DEFAULT_CONTAINER, 14 */
-#define GXM_PROGRAMS         256u
+#define GXM_PROGRAMS         4096u /* of each kind, as the patcher's memory allows: one game keeps 1200 fragment
+                                        programs */
 #define GXM_TARGETS          16u
 #define GXM_MAPPINGS         128u
 #define GXM_DISPLAY_QUEUE    16u
 /* the handles the API gives for what the runtime keeps (programs, render targets, sync objects, the patcher): addresses
-   in the runtime's page, never read by the game */
-#define GXM_HANDLE_VERTEX    0x80004000u
-#define GXM_HANDLE_FRAGMENT  0x80005000u
+   in and past the runtime's page that nothing maps, never read by the game */
 #define GXM_HANDLE_TARGET    0x80006000u
 #define GXM_HANDLE_SYNC      0x80007000u
 #define GXM_HANDLE_PATCHER   0x80008000u
+#define GXM_HANDLE_VERTEX    0x80010000u /* GXM_PROGRAMS handles, GXM_PROGRAM_HANDLE apart */
+#define GXM_HANDLE_FRAGMENT  0x80020000u
+#define GXM_PROGRAM_HANDLE   16u
 
 typedef struct {
     uint16_t stream, offset;
@@ -31,16 +33,19 @@ typedef struct {
 typedef struct {
     uint16_t stride, index_source;
 } GxmStream;
+/* the shader patcher's programs: creating one the patcher already has (the same GXP and state) gives that one again,
+   which is released when every creation of it has been */
 typedef struct {
-    bool used;
-    uint32_t program; /* the GXP, in guest memory */
+    uint32_t references; /* 0 for a free slot */
+    uint32_t program;    /* the GXP, in guest memory */
     GxmAttribute attributes[GXM_ATTRIBUTES];
     GxmStream streams[GXM_STREAMS];
     uint32_t attribute_count, stream_count;
     void* shader; /* the renderer's */
 } GxmVertexProgram;
 typedef struct {
-    bool used, blend;
+    uint32_t references;
+    bool blend;
     uint32_t program, vertex_program; /* GXPs */
     uint32_t output_format, multisample;
     /* SceGxmBlendInfo: the color mask (bits 0 to 7), color and alpha functions (8 and 12), color source and destination

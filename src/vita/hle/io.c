@@ -72,6 +72,10 @@ static char* host_path(VitaProcess* p, uint32_t address, bool* writable) {
     free(patched);
     return snx_path_join(root, rest);
 }
+char* vita_io_host_path(VitaProcess* p, uint32_t address) {
+    bool writable;
+    return host_path(p, address, &writable);
+}
 static int file_index(VitaProcess* p, uint32_t fd, bool directory) {
     if (fd < 1 || fd > VITA_FILES || !p->files[fd - 1].host || p->files[fd - 1].directory != directory) return -1;
     return (int)fd - 1;

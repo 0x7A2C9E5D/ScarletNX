@@ -36,7 +36,7 @@ static bool make_device(VitaVk* v, VkPhysicalDevice phys, uint32_t family) {
     VkExtensionProperties* list = calloc(count, sizeof *list);
     if (!list) return false;
     vkEnumerateDeviceExtensionProperties(phys, NULL, &count, list);
-    const char* extensions[2];
+    const char* extensions[4];
     uint32_t n = 0;
     bool ok = has_extension(list, count, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
     extensions[n++] = VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME;
@@ -44,14 +44,37 @@ static bool make_device(VitaVk* v, VkPhysicalDevice phys, uint32_t family) {
         ok = ok && has_extension(list, count, VK_KHR_SWAPCHAIN_EXTENSION_NAME);
         extensions[n++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
     }
+    /* fragment programs that read their pixel's color (the program flag FRAGCOLOR_USED): the color attachment read
+       as an input attachment while it is rendered to, in the order its primitives are drawn when the device keeps it */
+    bool local_read = has_extension(list, count, VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME);
+    bool raster_order = has_extension(list, count, VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME);
+    if (local_read) extensions[n++] = VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME;
+    if (raster_order) extensions[n++] = VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME;
     free(list);
     if (!ok) return false;
-    VkPhysicalDeviceVulkan13Features v13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+    VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR lr = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR};
+    VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT ro = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT, .pNext = &lr};
+    VkPhysicalDeviceVulkan13Features v13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+                                            .pNext = &ro};
     VkPhysicalDeviceVulkan12Features v12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &v13};
     VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &v12};
     vkGetPhysicalDeviceFeatures2(phys, &features);
     if (!v13.dynamicRendering || !v13.synchronization2) return false;
+    v->local_read = local_read && lr.dynamicRenderingLocalRead;
+    v->raster_order = raster_order && ro.rasterizationOrderColorAttachmentAccess;
+    VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR want_lr = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR,
+        .dynamicRenderingLocalRead = v->local_read};
+    VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT want_ro = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT,
+        .pNext = v->local_read ? &want_lr : NULL,
+        .rasterizationOrderColorAttachmentAccess = v->raster_order};
     VkPhysicalDeviceVulkan13Features want13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+                                               .pNext = v->raster_order ? (void*)&want_ro
+                                                        : v->local_read ? (void*)&want_lr
+                                                                        : NULL,
                                                .dynamicRendering = VK_TRUE,
                                                .synchronization2 = VK_TRUE};
     VkPhysicalDeviceVulkan12Features want12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
@@ -60,6 +83,7 @@ static bool make_device(VitaVk* v, VkPhysicalDevice phys, uint32_t family) {
     VkPhysicalDeviceFeatures2 want = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &want12};
     want.features.fragmentStoresAndAtomics = features.features.fragmentStoresAndAtomics;
     want.features.shaderClipDistance = features.features.shaderClipDistance;
+    want.features.textureCompressionBC = features.features.textureCompressionBC;
     float priority = 1.0f;
     VkDeviceQueueCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
                                   .queueFamilyIndex = family,
@@ -82,6 +106,7 @@ static bool make_device(VitaVk* v, VkPhysicalDevice phys, uint32_t family) {
     vkGetPhysicalDeviceProperties2(phys, &properties);
     v->host_alignment = host.minImportedHostPointerAlignment ? host.minImportedHostPointerAlignment : 4096;
     v->preserve_infnan = p12.shaderSignedZeroInfNanPreserveFloat32;
+    v->bc = features.features.textureCompressionBC;
     return true;
 }
 static void swapchain_free(VitaVk* v) {
@@ -216,7 +241,8 @@ bool vita_vk_init(const char* title, char* error, size_t error_size) {
     VkSemaphoreCreateInfo semaphore = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 8192},
                                     {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4096},
-                                    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 * 4096}};
+                                    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 * 4096},
+                                    {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 4096}};
     VkDescriptorPoolCreateInfo dp = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
                                      .maxSets = 4096,
                                      .poolSizeCount = sizeof sizes / sizeof *sizes,

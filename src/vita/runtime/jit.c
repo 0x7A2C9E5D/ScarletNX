@@ -8,6 +8,7 @@
 #include "snx_settings.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #ifndef SNX_VITA_JIT /* a build without the executor (snx_llvm comes with the Switch runtime) */
 VitaJit* vita_jit_new(VitaProcess* p, char* error, size_t error_size) {
     (void)p;
@@ -69,15 +70,20 @@ SnxArmBlock vita_jit_block(VitaJit* j, uint32_t pc, bool thumb) {
     }
     return block;
 }
+/* the blocks compiled here merged into the hints already there, each once: how many are new */
 size_t vita_jit_save_hints(VitaJit* j, const char* folder) {
-    char* path = j && j->count ? vita_game_file(folder, VITA_HINTS_SUFFIX) : NULL;
-    FILE* f = path ? fopen(path, "a") : NULL;
-    size_t added = 0;
-    for (size_t i = 0; f && i < j->count; ++i)
-        if (fprintf(f, "%08x\n", (unsigned)j->compiled[i]) > 0) ++added;
-    if (f && fclose(f)) added = 0;
-    free(path);
-    return added;
+    if (!j || !j->count) return 0;
+    size_t old = 0;
+    uint32_t* hints = vita_hints_read(folder, &old);
+    uint32_t* all = realloc(hints, (old + j->count) * sizeof *all);
+    if (!all) {
+        free(hints);
+        return 0;
+    }
+    memcpy(all + old, j->compiled, j->count * sizeof *all);
+    size_t now = vita_hints_write(folder, all, old + j->count);
+    free(all);
+    return now != SIZE_MAX && now > old ? now - old : 0;
 }
 void vita_jit_free(VitaJit* j) {
     if (!j) return;

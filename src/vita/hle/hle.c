@@ -13,7 +13,8 @@ uint32_t vita_arg(VitaProcess* p, VitaThread* t, unsigned n) {
 static const VitaHle* find(uint32_t nid) {
     static const VitaHle* const tables[] = {vita_hle_kernel, vita_hle_io,    vita_hle_ctrl, vita_hle_display,
                                             vita_hle_audio,  vita_hle_misc, vita_hle_gxm, vita_hle_libc,
-                                            vita_hle_fiber, vita_hle_ngs};
+                                            vita_hle_fiber, vita_hle_ngs, vita_hle_mp4, vita_hle_videodec,
+                                            vita_hle_audiodec};
     for (size_t i = 0; i < sizeof tables / sizeof *tables; ++i)
         for (const VitaHle* h = tables[i]; h->name; ++h)
             if (h->nid == nid) return h;
@@ -39,8 +40,9 @@ void vita_hle_call(VitaProcess* p, VitaThread* t, uint32_t index) {
         t->cpu.r[0] = 0;
         return;
     }
+    t->call.redirected = false;
     uint32_t result = h->function(p, t);
-    if (t->state == VITA_THREAD_READY && p->current == t) t->cpu.r[0] = result;
+    if (t->state == VITA_THREAD_READY && p->current == t && !t->call.redirected) t->cpu.r[0] = result;
     if (g_settings.vita_import_trace > 1)
         printf("vita: \"%s\" %s(0x%" PRIx32 ", 0x%" PRIx32 ", 0x%" PRIx32 ", 0x%" PRIx32 ")%s 0x%08" PRIx32
                " (sp 0x%08" PRIx32 ", lr 0x%08" PRIx32 ")\n",
@@ -57,4 +59,38 @@ void vita_hle_variables(VitaProcess* p) {
         else
             printf("vita: %s's variable 0x%08" PRIx32 " is not implemented (left zero)\n", v->library, v->nid);
     }
+}
+void vita_hle_guest_call(VitaProcess* p, VitaThread* t, uint32_t func, const uint32_t* args, unsigned count,
+                         VitaHleNext next, void* context) {
+    SnxArmCPU* c = &t->cpu;
+    if (!t->call.active) { /* the import's own return, kept for the end */
+        t->call.active = true;
+        t->call.lr = c->r[14], t->call.sp = c->r[13];
+    }
+    /* the arguments past the fourth on a stack of its own below the import's, 8-byte aligned */
+    unsigned extra = count > 4 ? count - 4 : 0;
+    uint32_t sp = (t->call.sp - extra * 4) & ~7u;
+    for (unsigned i = 0; i < extra; ++i) vita_write32(p, sp + i * 4, args[4 + i]);
+    for (unsigned i = 0; i < 4; ++i) c->r[i] = i < count ? args[i] : 0;
+    c->r[13] = sp;
+    c->r[14] = VITA_CALL_RETURN;
+    c->r[15] = func & ~1u;
+    c->cpsr = (c->cpsr & ~SNX_ARM_T) | (func & 1 ? SNX_ARM_T : 0);
+    t->call.next = next, t->call.context = context, t->call.redirected = true;
+}
+void vita_hle_call_returned(VitaProcess* p, VitaThread* t) {
+    SnxArmCPU* c = &t->cpu;
+    if (!t->call.active || !t->call.next) {
+        vita_thread_end(p, t, (int32_t)c->r[0]);
+        return;
+    }
+    t->call.redirected = false;
+    uint32_t result = t->call.next(p, t, t->call.context);
+    if (t->call.redirected || t->state == VITA_THREAD_DEAD) return; /* another call, or the game ended */
+    /* the import returns to its caller */
+    t->call.active = false, t->call.next = NULL;
+    c->r[0] = result;
+    c->r[13] = t->call.sp;
+    c->r[15] = t->call.lr & ~1u;
+    c->cpsr = (c->cpsr & ~SNX_ARM_T) | (t->call.lr & 1 ? SNX_ARM_T : 0);
 }

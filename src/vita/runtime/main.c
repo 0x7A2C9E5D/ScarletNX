@@ -192,13 +192,33 @@ static int play(const char* folder, bool recompile, double seconds, const char* 
     }
     printf("Module %s: %u imports, module_start 0x%08x\n", image.name, (unsigned)image.import_count,
            (unsigned)image.module_start);
-    if (recompile || !vita_native_open(module, &image, &native, error, sizeof error)) {
+    bool opened = !recompile && vita_native_open(module, &image, &native, error, sizeof error);
+    /* the blocks earlier runs compiled at run time (the hints) that the module lacks: compiled ahead of time now */
+    size_t hint_count = 0, missing = 0;
+    uint32_t* hints = opened ? vita_hints_read(folder, &hint_count) : NULL;
+    for (size_t i = 0; i < hint_count; ++i) missing += !vita_module_block(native.module, hints[i]);
+    free(hints);
+    if (missing) {
+        printf("%zu blocks earlier runs compiled at run time aren't in the game's module: compiling it again\n", missing);
+        vita_native_close(&native);
+        opened = false;
+    }
+    if (!opened) {
         printf("Compiling the game's code\n");
         if (vita_aot_compile(folder, &image, error, sizeof error) ||
             !vita_native_open(module, &image, &native, error, sizeof error)) {
             fprintf(stderr, "scarletnx-vita: %s\n", error);
             goto done;
         }
+        /* the hints the module has, each once: one discovery refused (not code after all) doesn't ask for a compile
+           again */
+        hints = vita_hints_read(folder, &hint_count);
+        size_t kept = 0;
+        for (size_t i = 0; i < hint_count; ++i)
+            if (vita_module_block(native.module, hints[i])) hints[kept++] = hints[i];
+        if (kept < hint_count) printf("%zu hints aren't code: dropped\n", hint_count - kept);
+        if (hint_count) vita_hints_write(folder, hints, kept);
+        free(hints);
     }
     deploy_runtime(folder, runtime);
     if (recompile) {
@@ -271,7 +291,8 @@ int snx_vita_main(int argc, char** argv) {
                 return 2;
             }
         } else if (!strncmp(a, "--", 2) && strchr(a, '=')) {
-            /* the Vita debug table's, --script= being vita_script, and a Switch game's press_len */
+            /* the Vita debug table's, --script= being vita_script, a Switch game's press_len, and vulkan_video (which
+               the Vita's AVC decoder doesn't take yet) */
             char key[64];
             size_t length = (size_t)(strchr(a, '=') - a - 2);
             const IniOpt* o = NULL;
@@ -280,6 +301,7 @@ int snx_vita_main(int argc, char** argv) {
                 key[length] = 0;
                 o = ini_find(g_vita_debug_ini, !strcmp(key, "script") ? "vita_script" : key);
                 if (!o) o = ini_find(g_debug_ini, key);
+                if (!o && !strcmp(key, "vulkan_video")) o = ini_find(g_graphics_ini, key);
             }
             if (!o) {
                 fprintf(stderr, "scarletnx-vita: unknown setting: %s\n", a);
