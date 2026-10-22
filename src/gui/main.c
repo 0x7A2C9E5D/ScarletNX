@@ -103,6 +103,13 @@ enum { GUI_GROUP_APP, GUI_GROUP_RECOMPILED, GUI_GROUP_DUMPS, GUI_FOLDER_GROUPS }
 #define GUI_FOLDER_ROWS  (GUI_PLACES + 1 + GUI_FOLDERS_MAX + 2)
 /* the focused game's runtime JIT cache: none to show, no cache yet, one read, one unreadable */
 enum { GUI_AOT_NONE, GUI_AOT_NO_CACHE, GUI_AOT_CACHE, GUI_AOT_BAD };
+#define GUI_ICONS     96  /* the games' icons kept drawn: a page's rows and the recent ones, with room */
+#define GUI_ICON_SIDE 128 /* the pixels square they are drawn at, scaled to their rows */
+/* a game's icon as its rows show it: its program's path, and its texture; NULL for a game without one */
+typedef struct {
+    char* path;
+    SDL_Texture* texture;
+} GuiIcon;
 /* the App screen's values, as its rows show them, and Folders' (what each row's folder is, past its path) */
 typedef struct {
     char theme[64], text[16], language[64], animations[16], side[16], places[48], moves[32];
@@ -196,6 +203,8 @@ typedef struct App {
     unsigned char* user_jpeg; /* users/<uid>.jpg, user_jpeg_size bytes; NULL for Wimsy */
     size_t user_jpeg_size;
     SDL_Texture* user_picture; /* drawn user_side pixels square, in the shape it was drawn for */
+    GuiIcon icons[GUI_ICONS];  /* the games' icons drawn so far (game_icon), the oldest replaced first */
+    size_t icons_next;
     int user_side, user_shape;
     /* the box a click on the user opens (users_open): each user of users.ini, the focused one picked as Settings' user */
     bool users_shown;
@@ -1937,7 +1946,9 @@ static GuiRect ui_row_box(const App* app, GuiRect r) {
    title (UI_ATTR_TITLE) is on a band of ink in a theme of filled boxes, else over a rule */
 /* a row's text's top: as item_text_y has it in a row a cell and a pixel high, in the middle of a taller one */
 static int ui_text_y(const App* app, GuiRect b) { return b.y + (b.h - cell_h(app) + app->scale) / 2; }
-void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned attr, bool focused) {
+static int user_side(const App* app, int h);
+void ui_draw_row(App* app, GuiRect r, const char* text, const void* image, unsigned color, unsigned attr,
+                 bool focused) {
     const GuiTheme* t = &app->theme;
     int look = focused || (attr & UI_ATTR_OPEN), filled = t->panels == GUI_PANELS_FILL, inverted = look && t->focus_bar;
     int failing =
@@ -1962,11 +1973,22 @@ void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned
     else if (filled)
         fill_rect(app, b, t->dim);
     if (!failing && !inverted && (!filled || look)) outline(app, b, look ? t->focus : t->dim);
-    text_in(app, inner(app, b), b.x + cell_w(app) / 2, ui_text_y(app, b), label,
-            rgb(failing || inverted     ? t->page
-                : attr & UI_ATTR_ACTIVE ? t->active
-                : look                  ? t->focus
-                                        : ui_colour(app, color, t->ink)));
+    {
+        SDL_Color ink = rgb(failing || inverted     ? t->page
+                            : attr & UI_ATTR_ACTIVE ? t->active
+                            : look                  ? t->focus
+                                                    : ui_colour(app, color, t->ink));
+        int x = b.x + cell_w(app) / 2, side = user_side(app, b.h);
+        if (image && side > 0) { /* the marker, the image as big as the head's user picture, then the text */
+            SDL_FRect at;
+            text_in(app, inner(app, b), x, ui_text_y(app, b), t->marker, ink);
+            x += gui_text_cols(t->marker) * cell_w(app);
+            at = (SDL_FRect){(float)x, (float)(b.y + 2 * app->scale), (float)side, (float)side};
+            SDL_RenderTexture(app->renderer, (SDL_Texture*)image, NULL, &at);
+            text_in(app, inner(app, b), x + side + cell_w(app) / 2, ui_text_y(app, b), text, ink);
+        } else
+            text_in(app, inner(app, b), x, ui_text_y(app, b), label, ink);
+    }
     if (focused && t->cursor[0]) text_in(app, r, r.x, ui_text_y(app, b), t->cursor, rgb(t->focus));
     if (attr & UI_ATTR_MORE_UP) /* beside the down arrow when one row shows */
         text_in(app, b, b.x + b.w - ((attr & UI_ATTR_MORE_DOWN) ? 2 : 1) * cell_w(app), ui_text_y(app, b), "\x1e",
@@ -2182,6 +2204,50 @@ static SDL_Texture* picture_texture(App* app, const unsigned char* jpeg, size_t 
     }
     free(pixels);
     return texture;
+}
+/* the icon of the game whose program is at path, as its row shows it: its icon.jpg drawn once, then kept; NULL for
+   a game without one. One that does not draw is said, with its file, and shows none */
+static SDL_Texture* game_icon(App* app, const char* path) {
+    GuiIcon* icon;
+    char* file;
+    unsigned char* jpeg;
+    void* pixels;
+    size_t size = 0, i;
+    for (i = 0; i < GUI_ICONS; ++i)
+        if (app->icons[i].path && !strcmp(app->icons[i].path, path)) return app->icons[i].texture;
+    icon = &app->icons[app->icons_next];
+    app->icons_next = (app->icons_next + 1) % GUI_ICONS;
+    free(icon->path);
+    SDL_DestroyTexture(icon->texture);
+    *icon = (GuiIcon){snx_strdup(path), NULL};
+    file = gui_game_icon(path);
+    jpeg = file ? snx_read_file(file, &size) : NULL;
+    pixels = jpeg ? malloc((size_t)GUI_ICON_SIDE * GUI_ICON_SIDE * 4) : NULL;
+    if (pixels && snx_splash_picture(jpeg, size, GUI_ICON_SIDE, 0, pixels, GUI_ICON_SIDE * 4))
+        snprintf(app->message, sizeof app->message, snx_tr("%s could not be drawn: the game shows no icon"), file);
+    else if (pixels) {
+        icon->texture = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
+                                          GUI_ICON_SIDE, GUI_ICON_SIDE);
+        if (icon->texture && (!SDL_UpdateTexture(icon->texture, NULL, pixels, GUI_ICON_SIDE * 4) ||
+                              !SDL_SetTextureBlendMode(icon->texture, SDL_BLENDMODE_BLEND_PREMULTIPLIED))) {
+            SDL_DestroyTexture(icon->texture);
+            icon->texture = NULL;
+        }
+    }
+    free(pixels);
+    free(jpeg);
+    free(file);
+    return icon->texture;
+}
+/* every icon game_icon kept: drawn again from their files when shown, as a game's may have changed */
+static void icons_free(App* app) {
+    size_t i;
+    for (i = 0; i < GUI_ICONS; ++i) {
+        free(app->icons[i].path);
+        SDL_DestroyTexture(app->icons[i].texture);
+        app->icons[i] = (GuiIcon){NULL, NULL};
+    }
+    app->icons_next = 0;
 }
 /* the head's user's picture, side pixels square, kept while its size and the theme's shape are the same. A JPEG that
    does not draw shows Wimsy, said. The preview's, at its own size and theme, is a texture of its own that the caller
@@ -3021,6 +3087,8 @@ bool ui_games_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info
         snprintf(label, sizeof app->row_text, "%s",
                  index < recent_shown(app) ? app->recent.game[index].name : snx_tr("...show more"));
         info->label = label;
+        if (index < recent_shown(app) && app->recent.game[index].driver == GUI_SWITCH)
+            info->image = game_icon(app, app->recent.game[index].path);
         return true;
     }
     i = row - lead;
@@ -3032,6 +3100,7 @@ bool ui_games_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info
     }
     game_label(app, &app->games, start + i, label, sizeof app->row_text);
     info->label = label + strlen(app->theme.marker); /* ui_draw_row puts the marker */
+    info->image = game_icon(app, app->games.paths[start + i]);
     if (app->browser.activated && app->browser.active == start + i) info->attr |= UI_ATTR_ACTIVE;
     if (i == 0 && app->browser.page > 0) info->attr |= UI_ATTR_MORE_UP;
     if (i + 1 == items && app->browser.page + 1 < gui_browser_pages(&app->browser)) info->attr |= UI_ATTR_MORE_DOWN;
@@ -7647,7 +7716,7 @@ static int aot_focus_game(App* app, AotFocus* f) {
         if (app->recent.game[row - 1].driver != GUI_SWITCH) return 0;
         path = app->recent.game[row - 1].path;
     } else if (game) {
-        if (gui_is_cia(app->games.names[index])) return 0;
+        if (gui_games_heading(&app->games, index) || gui_is_cia(app->games.names[index])) return 0; /* no path */
         path = app->games.paths[index];
     } else {
         return 0;
@@ -8130,6 +8199,7 @@ static uint64_t games_stamp(const App* app) {
     return h;
 }
 static void list_games(App* app) {
+    icons_free(app); /* a game made since has one now */
     games_scan(app, &app->games, app->message, sizeof app->message);
     app->games_stamp = games_stamp(app);
     memset(&app->browser, 0, sizeof(app->browser));
@@ -8578,10 +8648,10 @@ static void scroll(App* app, GuiKey key) {
         editor_key(app, key); /* stops at its ends */
         return;
     }
-    if (app->menu.view == GUI_LOAD_GAMES) {
-        if (key == GUI_UP ? app->browser.selected > 0
-                          : app->browser.selected + 1 < app->browser.head + gui_browser_items(&app->browser))
-            menu_key(app, key);
+    if (app->menu.view == GUI_LOAD_GAMES) { /* over its pages as the keys go, from the head's first to the last game */
+        bool last = app->browser.page + 1 >= gui_browser_pages(&app->browser) &&
+                    app->browser.selected + 1 >= app->browser.head + gui_browser_items(&app->browser);
+        if (key == GUI_UP ? app->browser.selected > 0 : !last) menu_key(app, key);
         return;
     }
     row = app->menu.selected;
@@ -9189,6 +9259,7 @@ static void forget(App* app) {
     SDL_DestroyTexture(app->splash);
     snx_splash_close(app->splash_drawing);
     SDL_DestroyTexture(app->user_picture);
+    icons_free(app);
     users_close(app);
     free(app->user_jpeg);
     free(app->users_dir);

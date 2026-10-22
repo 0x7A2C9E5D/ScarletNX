@@ -51,6 +51,9 @@ char* gui_folder_game(const char* directory, const char* name);
 /* What Games shows the game whose program is at path as, a game of a folder of its own: the name in its
    <name>_data/control.nacp, else its folder's name. Owned */
 char* gui_game_shown(const char* path);
+/* The icon the extraction kept for the game whose program is at path, a game of a folder of its own: its
+   <name>_data/icon.jpg, owned, else NULL (none there, or no such game) */
+char* gui_game_icon(const char* path);
 /* The updates and DLCs of the game at path, made beside it in its folder (<name>/<name>_<add-on's title ID>_data/, an
    update's program beside it), into addons (emptied first): names <name>_<its title ID>, shown what the player reads
    ("Update 1.2.0" from its control.nacp, "DLC 1"), paths an update's program or a DLC's data folder, an update

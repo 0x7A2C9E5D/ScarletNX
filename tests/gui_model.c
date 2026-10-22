@@ -132,7 +132,8 @@ int main(void) {
     assert(gui_wrap("\xe8\x8f\x9c\xe5\x8d\x95\xe8\x8f\x9c", 5) == 6 && gui_wrap("\xe8\x8f\x9c\xe5\x8d\x95", 4) == 6);
     assert(gui_wrap("a/\xe8\x8f\x9c", 3) == 2 && gui_wrap("\xe8\x8f\x9c\xe5\x8d\x95", 1) == 3);
 
-    /* the head (Add a folder and two recent games) over each page of the games, one ring with the page */
+    /* the head (Add a folder and two recent games) over each page of the games: Up and Down go over the whole list, a
+       page's last game to the next one's first and back, one ring from the list's last game round to the head */
     /* items no one picks (headings): the focus steps over them, Select on one asks nothing, a page that opens with
        its focus on one moves it off */
     {
@@ -142,10 +143,10 @@ int main(void) {
         gui_browser_key_skip(&b, GUI_DOWN, is_heading, heading); /* past item 0 */
         assert(b.selected == 2);
         gui_browser_key_skip(&b, GUI_DOWN, is_heading, heading);
-        gui_browser_key_skip(&b, GUI_DOWN, is_heading, heading); /* past item 3: round to the head */
-        assert(b.selected == 0);
-        gui_browser_key_skip(&b, GUI_UP, is_heading, heading); /* round to the page's last, item 3: the one before */
-        assert(b.selected == 3);
+        gui_browser_key_skip(&b, GUI_DOWN, is_heading, heading); /* past item 3 to the next page's first, item 4 */
+        assert(b.page == 1 && b.selected == 1);
+        gui_browser_key_skip(&b, GUI_UP, is_heading, heading); /* back to page 0's last, item 3: the one before */
+        assert(b.page == 0 && b.selected == 3);
         gui_browser_key_skip(&b, GUI_UP, is_heading, heading);
         gui_browser_key_skip(&b, GUI_UP, is_heading, heading); /* past item 0 to the head */
         assert(b.selected == 0);
@@ -153,6 +154,11 @@ int main(void) {
         assert(gui_browser_key_skip(&b, GUI_SELECT, is_heading, heading) == GUI_BROWSER_NONE && !b.activated);
         assert(gui_browser_key(&b, GUI_SELECT) == GUI_BROWSER_OPEN); /* without skip it is a game like any */
         b.activated = false;
+        b.selected = 0;
+        gui_browser_key_skip(&b, GUI_UP, is_heading, heading); /* the head's first, round to the list's last: item 5 */
+        assert(b.page == 1 && b.selected == 2);
+        gui_browser_key_skip(&b, GUI_DOWN, is_heading, heading); /* past item 6, a heading, round to the head */
+        assert(b.page == 0 && b.selected == 0);
         b.selected = 4; /* row 4, then the next page, whose row 4 is no more and row 3 is item 6, a heading */
         gui_browser_key_skip(&b, GUI_RIGHT, is_heading, heading);
         assert(b.page == 1 && b.selected == 2); /* item 5: no item after 6, so the one before */
@@ -174,8 +180,15 @@ int main(void) {
     gui_browser_key(&browser, GUI_UP);
     gui_browser_key(&browser, GUI_UP);
     gui_browser_key(&browser, GUI_UP);
-    gui_browser_key(&browser, GUI_UP); /* round to the page's last */
-    assert(browser.selected == 12 && !browser.activated);
+    gui_browser_key(&browser, GUI_UP); /* round to the list's last game, on the last page */
+    assert(browser.page == 2 && browser.selected == 5 && !browser.activated);
+    gui_browser_key(&browser, GUI_DOWN); /* and round again to the head's first */
+    assert(browser.page == 0 && browser.selected == 0);
+    browser.selected = 12; /* page 0's last game: Down goes on to page 1's first, Up back */
+    gui_browser_key(&browser, GUI_DOWN);
+    assert(browser.page == 1 && browser.selected == 3);
+    gui_browser_key(&browser, GUI_UP);
+    assert(browser.page == 0 && browser.selected == 12);
     gui_browser_key(&browser, GUI_RIGHT);
     assert(browser.page == 1 && browser.selected == 12);
     gui_browser_key(&browser, GUI_PAGE_DOWN);

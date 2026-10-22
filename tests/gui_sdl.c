@@ -854,6 +854,17 @@ static void pick_size(App* app, int size, bool keep) {
     key(app, SDLK_RETURN);
     assert(!app->confirm.shown && !app->size_until && app->menu.text_size == (keep ? size : app->size_was));
 }
+/* a JPEG's bytes as snx_splash_jpeg hands them out: a game's icon */
+typedef struct {
+    unsigned char data[16384];
+    int size;
+} IconJpeg;
+static void icon_jpeg_write(void* closure, void* data, int size) {
+    IconJpeg* j = closure;
+    assert(j->size + size <= (int)sizeof j->data);
+    memcpy(j->data + j->size, data, (size_t)size);
+    j->size += size;
+}
 int main(int argc, char** argv) {
 #ifdef _WIN32
     snx_test_crash_said();
@@ -3333,6 +3344,39 @@ int main(int argc, char** argv) {
             }
             recent_as_games(&app); /* by the name Games shows it by, not its ID */
             assert(app.recent.count == 1 && !strcmp(app.recent.game[0].name, "Made Quest"));
+            { /* its icon, icon.jpg beside its control.nacp: none, then drawn once and kept, and one that does not draw
+                 said with its file */
+                IconJpeg jpeg = {{0}, 0};
+                char* icon = snx_path_join(data, "icon.jpg");
+                SDL_Texture* drawn;
+                icons_free(&app);
+                assert(!game_icon(&app, program));
+                assert(!snx_splash_jpeg("wimsy-fuddles", 32, 90, icon_jpeg_write, &jpeg));
+                assert(!snx_write_file(icon, jpeg.data, (size_t)jpeg.size));
+                assert(!game_icon(&app, program)); /* as it was drawn, until the list is read again */
+                icons_free(&app);
+                drawn = game_icon(&app, program);
+                assert(drawn && game_icon(&app, program) == drawn && !game_icon(&app, dump));
+                list_games(&app); /* Games' row of it: its icon before its name */
+                {
+                    UiRowInfo info = {0};
+                    size_t k, lead = (size_t)games_lead(&app);
+                    for (k = 0;
+                         k < app.games.count && !(app.games.paths[k] && snx_same_file(app.games.paths[k], program));
+                         ++k) {}
+                    assert(k < app.games.count && k < app.browser.page_size);
+                    assert(ui_games_rows_get_row_info(&app, lead + k, 300, &info) && info.image &&
+                           info.image == game_icon(&app, program));
+                }
+                assert(!snx_write_file(icon, "not a JPEG", 10));
+                icons_free(&app);
+                app.message[0] = 0;
+                assert(!game_icon(&app, program) && strstr(app.message, icon) &&
+                       strstr(app.message, "could not be drawn"));
+                icons_free(&app);
+                assert(!remove(icon));
+                free(icon);
+            }
             app.recent = was;
             recent_changed(&app);
             assert(!snx_record_source(out, "0100ABCD12345000", listed));
@@ -3985,6 +4029,52 @@ int main(int argc, char** argv) {
     }
     key(&app, SDLK_PAGEDOWN);
     assert(app.browser.page == 1 && app.browser.selected == 0);
+    /* the wheel goes over the pages as Up and Down do, a page's last game on to the next one's first and back, and
+       stops at the list's ends, where the keys go round */
+    {
+        SDL_Event e = {0};
+        size_t pages = gui_browser_pages(&app.browser), last;
+        assert(pages >= 2);
+        e.type = SDL_EVENT_MOUSE_WHEEL;
+        app.browser.page = 0;
+        last = app.browser.head + gui_browser_items(&app.browser) - 1;
+        app.browser.selected = last;
+        e.wheel.integer_y = -1;
+        event(&app, &e);
+        assert(app.browser.page == 1 && app.browser.selected == app.browser.head);
+        e.wheel.integer_y = 1;
+        event(&app, &e);
+        assert(app.browser.page == 0 && app.browser.selected == last);
+        app.browser.page = pages - 1;
+        last = app.browser.head + gui_browser_items(&app.browser) - 1;
+        app.browser.selected = last;
+        e.wheel.integer_y = -1;
+        event(&app, &e);
+        assert(app.browser.page == pages - 1 && app.browser.selected == last);
+        app.browser.page = 1;
+        app.browser.selected = 0;
+    }
+    /* a group's heading has no path: the focus on it, as the pointer over it puts it, offers no AOT pack */
+    {
+        GuiGames was = app.games, two = {0};
+        GuiBrowser browser_was = app.browser;
+        char *names[2] = {"Dumps", "a dump.nsp"}, *paths[2] = {NULL, "/nonexistent/a dump.nsp"};
+        size_t addons[2] = {0, 0};
+        AotFocus f;
+        two.names = two.shown = names;
+        two.paths = paths;
+        two.addons = addons;
+        two.count = 2;
+        app.games = two;
+        app.browser.count = 2;
+        app.browser.page = 0;
+        app.browser.selected = app.browser.head; /* the heading */
+        assert(!aot_focus_game(&app, &f) && !f.path && !f.folder);
+        app.browser.selected = app.browser.head + 1; /* a dump: no game folder either */
+        assert(!aot_focus_game(&app, &f) && !f.path);
+        app.games = was;
+        app.browser = browser_was;
+    }
     /* Add a folder over every page, a wider gap under it than between the games, and no Back: ESC is the menu's */
     render(&app);
     shows(&app, "- Add a folder", yellow);
@@ -5124,8 +5214,23 @@ int main(int argc, char** argv) {
         /* a row taller than a cell and a pixel, as Android's 40px: its text in the middle, not at its top */
         b = gui_rect(b.x, b.y, b.w, 40 * s);
         fill_rect(&app, b, app.theme.page); /* the rows it covers, gone */
-        ui_draw_row(&app, b, "Exit", UI_COLOR_NONE, 0, false);
+        ui_draw_row(&app, b, "Exit", NULL, UI_COLOR_NONE, 0, false);
         text_px_is(&app, b.x + cw / 2, b.y + (40 * s - 16 * s + s) / 2, "- Exit", normal, black); /* not b.y + s */
+        { /* a row with an image: the marker, the image as big as the head's user picture, then the text */
+            SDL_Texture* red =
+                SDL_CreateTexture(app.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, 4, 4);
+            Uint32 pixels[16];
+            int side = user_side(&app, ui_row_box(&app, b).h), x = b.x + cw / 2 + gui_text_cols(app.theme.marker) * cw;
+            for (int k = 0; k < 16; ++k) pixels[k] = 0xffff0000u;
+            assert(red && SDL_UpdateTexture(red, NULL, pixels, 16));
+            fill_rect(&app, b, app.theme.page);
+            ui_draw_row(&app, b, "Exit", red, UI_COLOR_NONE, 0, false);
+            text_px_is(&app, b.x + cw / 2, b.y + (40 * s - 16 * s + s) / 2, "- ", normal, black);
+            assert(near_colour(pixel(&app, x + side / 2.0f, ui_row_box(&app, b).y + 2 * s + side / 2.0f),
+                               (SDL_Color){255, 0, 0, 255}, 8));
+            text_px_is(&app, x + side + cw / 2, b.y + (40 * s - 16 * s + s) / 2, "Exit", normal, black);
+            SDL_DestroyTexture(red);
+        }
         /* the side box: the focus's name over a rule and the keys in use, what it does left to the tips; the status
            box under it */
         r = m.place.side;

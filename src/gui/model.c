@@ -235,15 +235,33 @@ GuiBrowserAction gui_browser_key_skip(GuiBrowser* browser, GuiKey key, bool (*sk
             browser->active = browser->page * browser->page_size + browser->selected - browser->head;
             browser->activated = true;
             return GUI_BROWSER_OPEN;
-        case GUI_UP:
-            for (tries = 0; tries <= rows; ++tries) {
-                browser->selected = browser->selected ? browser->selected - 1 : rows ? rows - 1 : 0;
+        case GUI_UP: /* past a page's first item to the one before's last; from the head round to the list's last */
+            for (tries = 0; tries <= browser->head + browser->count; ++tries) {
+                if (browser->selected == browser->head && browser->page) {
+                    --browser->page;
+                    browser->selected = browser->head + gui_browser_items(browser) - 1;
+                } else if (browser->selected)
+                    --browser->selected;
+                else {
+                    browser->page = gui_browser_pages(browser) - 1;
+                    rows = browser->head + gui_browser_items(browser);
+                    browser->selected = rows ? rows - 1 : 0;
+                }
                 if (!skipped(browser, browser->selected, skip, user)) break;
             }
             break;
-        case GUI_DOWN:
-            for (tries = 0; tries <= rows; ++tries) {
-                browser->selected = browser->selected + 1 < rows ? browser->selected + 1 : 0;
+        case GUI_DOWN: /* past a page's last item to the next one's first; from the list's last round to the head */
+            for (tries = 0; tries <= browser->head + browser->count; ++tries) {
+                rows = browser->head + gui_browser_items(browser);
+                if (browser->selected + 1 < rows)
+                    ++browser->selected;
+                else if (browser->page + 1 < gui_browser_pages(browser)) {
+                    ++browser->page;
+                    browser->selected = browser->head;
+                } else {
+                    browser->page = 0;
+                    browser->selected = 0;
+                }
                 if (!skipped(browser, browser->selected, skip, user)) break;
             }
             break;

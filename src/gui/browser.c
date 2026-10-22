@@ -163,6 +163,21 @@ char* gui_game_shown(const char* path) {
     free(folder);
     return shown;
 }
+char* gui_game_icon(const char* path) {
+    char *folder, *icon;
+    const char* leaf;
+    if (!path || !gui_game_folder(path)) return NULL;
+    folder = snx_dirname(path);
+    leaf = folder + strlen(folder);
+    while (leaf > folder && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
+    icon = snx_format("%s/%s_data/icon.jpg", folder, leaf);
+    free(folder);
+    if (!snx_is_file(icon)) {
+        free(icon);
+        return NULL;
+    }
+    return icon;
+}
 /* whether the add-on named a (<game>_<entry>) is listed before b: updates first, the newest version first (one
    without a version last), then the DLCs by title ID */
 static bool addon_before(SnxU64 game, const char* a, const char* b) {

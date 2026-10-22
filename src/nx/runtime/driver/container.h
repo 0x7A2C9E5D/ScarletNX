@@ -68,5 +68,8 @@ void snx_size_text(SnxU64 bytes, char* text, size_t size);
 unsigned char* snx_romfs_file(SnxHacFs* fs, const char* name, size_t* size);
 /* the Control NCA's control.nacp, malloc'd, or NULL with why in *why */
 unsigned char* snx_dump_nacp(SnxDump* dump, size_t* size, const char** why);
+/* the Control NCA's icon, a JPEG (icon_<language>.dat, the first of control.nacp's languages it has), malloc'd, or
+   NULL with why in *why */
+unsigned char* snx_dump_icon(SnxDump* dump, size_t* size, const char** why);
 
 #endif

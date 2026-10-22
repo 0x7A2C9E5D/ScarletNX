@@ -608,6 +608,11 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "%s could not be drawn: the game shows no icon"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "%s's picture could not be drawn: Wimsy shows"
 msgstr ""
 
