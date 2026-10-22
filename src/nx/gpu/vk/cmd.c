@@ -218,7 +218,16 @@ void vk_cmd_init(void) {
    eighth of a small heap) gets memory of its own, so the rings didn't move out either. A ring is made there with room
    for it and a sixteenth of the heap to spare, for the desktop, and stays while the heap is within its budget. Where
    that memory is in the heap the caches use (resizable BAR, a GPU sharing system memory), the caches keep the heap
-   within its budget, counting the rings, and a ring goes there while the heap's use stays within it */
+   within its budget, counting the rings, and a ring goes there while the heap's use stays within it.
+
+   A window of its own is also no more than this process's share of it: a ring there is at most BAR_RING_MAX, and
+   this process's memory in the window at most a quarter of it. Within the budget, NVIDIA's driver (615.78, open
+   module) still failed to map a 64 MiB ring with 86 MiB budgeted ("NVRM: dmaAllocMapping_GM107: can't alloc VA space
+   for mapping" in the kernel's log) and reported success: CPU writes to it then ran at 18 MB/s, against 5 GB/s, and
+   every frame of that slot took half a second, in two games, in most runs, at a time that changed from run to run. No
+   16 or 32 MiB ring failed. The budget can't see what the desktop and the driver itself keep mapped there, so the
+   window is used as a small fast path, as other Vulkan translation layers do, and bigger rings go to host memory */
+#define BAR_RING_MAX (32ull << 20)
 static int g_bar_heap = -2; /* the heap of the device-local memory the CPU maps, -1 without one; -2 not looked for */
 static int bar_heap(void) {
     const VkPhysicalDeviceMemoryProperties* mp;
@@ -242,6 +251,7 @@ static int bar_room(const VmaBudget* b, u64 add, int back) {
     if (heap == vk_mem_heap()) return use + add <= (back ? budget / 4 * 3 : budget);
     vmaGetMemoryProperties(g_vk.vma, &mp);
     size = mp->memoryHeaps[heap].size;
+    if (add && (add > BAR_RING_MAX || b[heap].statistics.blockBytes + add > size / 4)) return 0;
     whole = use + budget + (1u << 20) >= size && use + budget <= size + (1u << 20); /* NVIDIA's use */
     if (whole) use = 0;                                                           /* the budget is what is left */
     return budget >= use + (add ? add + size / 16 : 0);
