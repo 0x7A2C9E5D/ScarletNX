@@ -5867,7 +5867,7 @@ static void form_pointer(App* app, float x, float y) {
 #define SAY_SETUP_ON         SNX_TR_KEYS("Up/Down: row. Enter: next. ESC: back.")
 #define SAY_SETUP_ON_FIRST   SNX_TR_KEYS("Up/Down: row. Enter: next. ESC: exit.")
 #endif
-#define GUI_SETUP_CHOICES  3 /* a page's, at most: Folders' and Keys' */
+#define GUI_SETUP_CHOICES 4 /* a page's, at most: Folders' and Keys' three, and Skip on the first page */
 static void open_files(App* app);
 static void left_behind(App* app);
 static void ask_key(App* app, GuiKey key);
@@ -5884,6 +5884,9 @@ static void closing_start(App* app) {
 }
 static int setup_page_of(const App* app) { return app->setup_pages[app->setup_page]; }
 static int setup_steps(const App* app) { return app->setup_count - (app->setup_pages[0] == SETUP_NOTICE); }
+/* the first page shows Skip after its own choices (setup_choice.count of them): every page left taken as its defaults
+   have it (setup_skip) */
+static int setup_skips(const App* app) { return app->setup_page == 0; }
 /* a portable copy's folder beside the program (snx_portable_dir), and whether it is there: owned */
 static char* setup_portable(const App* app, bool* there) {
     char* portable = snx_portable_dir(app->drivers);
@@ -6092,10 +6095,15 @@ static void setup_keys_from(App* app, const char* folder, const char* error) {
 }
 /* the focused choice of the page taken */
 static int setup_notices(const App* app, int* list);
+static void setup_skip(App* app);
 static void setup_take(App* app) {
     int page = setup_page_of(app), choice = app->setup_choice.focus;
     char note[1100], *portable, *prod, shown[1024];
     bool there;
+    if (setup_skips(app) && choice == app->setup_choice.count) {
+        setup_skip(app);
+        return;
+    }
     switch (page) {
         case SNX_SETUP_LANGUAGE: setup_next(app); return; /* its Next: the rows did what they do as they changed */
         case SNX_SETUP_INSTALL:
@@ -6156,6 +6164,22 @@ static void setup_take(App* app) {
         default: setup_next(app); return;
     }
 }
+/* Skip: the page from its start, then each page taken as its defaults have it, what Next, OK or Enter on each would
+   take (the focus setup_enter gives it, the nickname it types), until the setup is done and setup.ini says so. A page
+   whose default fails (a user not written, no uid) stays, saying why; so would one whose default takes nothing */
+static void setup_skip(App* app) {
+    setup_enter(app);
+    for (;;) {
+        int page = app->setup_page, top = app->setup_top;
+        bool typing = app->setup_typing;
+        setup_take(app);
+        if (!app->setup_on || app->setup_failed || app->confirm.shown) return; /* done, or its failure said */
+        if (page == app->setup_page && top == app->setup_top && typing == app->setup_typing) {
+            setup_fail(app, snx_tr("Skip stops on this page: it has no default to take"));
+            return;
+        }
+    }
+}
 /* back a page, out of the nickname to Keep and Overwrite, or on the first page what ESC does on the menu's */
 static void setup_back(App* app) {
     app->message[0] = 0;
@@ -6195,18 +6219,36 @@ static void appearance_change(App* app, int row, int step) {
     app->setup_save = true;
 }
 static void setup_key(App* app, GuiKey key) {
+    GuiChoice all = app->setup_choice; /* the page's choices, and Skip on the first */
+    GuiChoiceDo did;
     int step;
+    all.count += setup_skips(app);
     if (setup_page_of(app) == SNX_SETUP_LANGUAGE) {
+        /* on the choices under the rows: Left/Right go round them, Down to the next until the last, Up to the one
+           before until the first, then the rows' */
+        if (app->setup_row == GUI_APPEARANCE_NEXT && all.count > 1 &&
+            (key == GUI_LEFT || key == GUI_RIGHT || (key == GUI_DOWN && all.focus < all.count - 1) ||
+             (key == GUI_UP && all.focus > 0))) {
+            gui_choice_key(&all, key);
+            app->setup_choice.focus = all.focus;
+            return;
+        }
         switch (gui_appearance_key(&app->setup_row, key, &step)) {
             case GUI_APPEARANCE_CHANGE: appearance_change(app, app->setup_row, step); break;
             case GUI_APPEARANCE_SIZES: sizes_open(app); break;
-            case GUI_APPEARANCE_ON: setup_next(app); break;
+            case GUI_APPEARANCE_ON: setup_take(app); break;
             case GUI_APPEARANCE_BACK: setup_back(app); break;
             default: break;
         }
+        if (app->setup_on && setup_page_of(app) == SNX_SETUP_LANGUAGE && app->setup_row == GUI_APPEARANCE_NEXT &&
+            (key == GUI_UP ||
+             key == GUI_DOWN)) /* onto the choices: the first from above, the last from the rows' top */
+            app->setup_choice.focus = key == GUI_UP ? all.count - 1 : 0;
         return;
     }
-    switch (gui_choice_key(&app->setup_choice, key)) {
+    did = gui_choice_key(&all, key);
+    app->setup_choice.focus = all.focus;
+    switch (did) {
         case GUI_CHOICE_TAKE: setup_take(app); break;
         case GUI_CHOICE_BACK: setup_back(app); break;
         default: break;
@@ -6265,6 +6307,7 @@ static int setup_labels(const App* app, const char** labels) {
                     : page == SETUP_NOTICE && i < count - 1        ? snx_tr("Back")
                     : page == SETUP_NOTICE && app->setup_top < setup_notices(app, list) - 1 ? snx_tr("Next")
                                                                                             : snx_tr("OK");
+    if (setup_skips(app)) labels[count++] = snx_tr("Skip");
     return count;
 }
 static const char* setup_question(const App* app, char* out, size_t size) {
@@ -6308,9 +6351,11 @@ static const char* setup_keys_said(const App* app) {
            : app->setup_page                    ? SAY_SETUP
                                                 : SAY_SETUP_FIRST;
 }
-/* the page's choice drawn in focus: the Appearance's Next only while the focus is on it, not on a row; -1 for none */
+/* the page's choice drawn in focus: the Appearance's choices only while the focus is on them, not on a row; -1 for
+   none */
 static int setup_focus(const App* app) {
-    if (setup_page_of(app) == SNX_SETUP_LANGUAGE) return app->setup_row == GUI_APPEARANCE_NEXT ? 0 : -1;
+    if (setup_page_of(app) == SNX_SETUP_LANGUAGE)
+        return app->setup_row == GUI_APPEARANCE_NEXT ? app->setup_choice.focus : -1;
     return app->setup_choice.focus;
 }
 /* ---- the Appearance page's box: at the top of r, as high as its rows; its rows' list in it ---- */

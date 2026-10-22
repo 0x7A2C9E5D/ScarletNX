@@ -266,10 +266,13 @@ question and choices come as the theme's `[body] options-dialog` places a questi
 without darkening them; its tip, and what a choice did or why it did not, are in the foot. Up/Down (or the mouse)
 move between the choices, Enter takes one and ESC goes back a page, on the first page asking whether to exit. The
 notices come one a page, numbered (Changed 1/8), each read before the setup goes on: Next the next one, Back (from the
-second) the one before, and OK on the last.
+second) the one before, and OK on the last. The first page has **Skip** after its choices: it takes every page left as
+its defaults have it, what Next, OK or Enter on each would take (the notices read, the appearance and the install as
+they are, Keep, Later, the nickname `Player`), writes `setup.ini` and opens the menu; a page whose default fails (a
+`users.ini` that cannot be written) stays, saying why.
 
-- **Appearance**: a box of Settings > App's Language, Theme and UI scale, a row each, and Next under
-  them. Up/Down go over the rows and Next; Left/Right (or a click, on the left arrow back) change the language among
+- **Appearance**: a box of Settings > App's Language, Theme and UI scale, a row each, and Next (with Skip, on the first
+  page) under them. Up/Down go over the rows and Next; Left/Right (or a click, on the left arrow back) change the language among
   the menu's and the theme, at once, the screen with them; UI scale opens its box of sizes, the size picked asked
   about for 15 s as App's is; Enter does as App's (the language or the theme a step on, UI scale's box), and on
   Next goes on. What was changed is kept in `app.ini` once the setup is done, in the folders Install picks; Auto

@@ -1426,6 +1426,10 @@ msgid "This copy is portable: to install it, first move away %s"
 msgstr "此副本为便携版：要安装，请先移走 %s"
 
 #: src/gui/main.c
+msgid "Skip stops on this page: it has no default to take"
+msgstr "跳过在此页结束：此页没有默认选择"
+
+#: src/gui/main.c
 #, c-format
 msgid "Could not make %s"
 msgstr "无法创建 %s"
@@ -1453,6 +1457,10 @@ msgstr "选择文件夹"
 #: src/gui/main.c
 msgid "Later"
 msgstr "稍后"
+
+#: src/gui/main.c
+msgid "Skip"
+msgstr "跳过"
 
 #: src/gui/main.c
 msgid "Overwrite"

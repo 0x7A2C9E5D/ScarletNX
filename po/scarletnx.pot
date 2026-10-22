@@ -1573,6 +1573,10 @@ msgid "This copy is portable: to install it, first move away %s"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Skip stops on this page: it has no default to take"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Portable"
 msgstr ""
 
@@ -1598,6 +1602,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Next"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Skip"
 msgstr ""
 
 #: src/gui/main.c

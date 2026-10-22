@@ -3,7 +3,7 @@
 /* The launcher's setup (gui/main.c's setup_*) on the real renderer and its events, in a home of its own: the pages a
    first start goes through and what each writes (a portable copy, the language, the games and dumps folders, the keys,
    the first user), what it refuses, the user's page with users.ini there, the fixed uid kept for its saves, a notice
-   alone after an update, --debug, and the question's place as options-dialog says */
+   alone after an update, --debug, the question's place as options-dialog says, and Skip */
 #define SNX_GUI_NO_MAIN
 #include "gui/main.c"
 #define SNX_SCREEN_TEST "gui_setup.c"
@@ -536,6 +536,104 @@ static void test_places(App* app) {
     puts("PASS the question where options-dialog puts it");
 }
 
+/* Skip, on the first page alone, after its choices: every page left taken as its defaults have it (the notices read
+   to the last, Next, the install kept, Keep, Later, the nickname Player), setup.ini written as done; nothing else
+   written. From the Appearance as the first page too, by its keys and the pointer; a page whose default fails stays */
+static void test_skip(App* app) {
+    char *config = config_of(app), *file = join(config, "setup.ini"), *users = join(app->users_dir, "users.ini");
+    char *app_ini = text_of(config, "app.ini"), *games = snx_strdup(app->games_dir), seen[64], *now;
+    const char* labels[GUI_SETUP_CHOICES];
+    int n, i, list[SNX_NOTICES];
+    snprintf(seen, sizeof seen, "[setup]\nversion = 1\nnotices = %d\n", SNX_NOTICES);
+    remove(file);
+    remove(users);
+    setup_start(app);
+    assert(app->setup_on && !app->setup_page && page(app) == SETUP_NOTICE && app->setup_choice.count == 1);
+    n = setup_labels(app, labels);
+    assert(n == 2 && !strcmp(labels[0], "Next") && !strcmp(labels[1], "Skip"));
+    render(app);
+    shows(app, "\xfe Skip", rgb(app->theme.ink));
+    /* past the first page: none */
+    for (i = setup_notices(app, list); i > 0; --i) key(app, SDLK_RETURN);
+    assert(page(app) == SNX_SETUP_LANGUAGE && app->setup_page == 1 && setup_labels(app, labels) == 1);
+    render(app);
+    hides(app, "Skip", rgb(app->theme.ink));
+    key(app, SDLK_UP); /* the Appearance's choices from its rows' top: Next alone */
+    assert(app->setup_row == GUI_APPEARANCE_NEXT && !app->setup_choice.focus);
+    key(app, SDLK_RETURN);
+    assert(page(app) == SNX_SETUP_INSTALL && setup_labels(app, labels) == 2 && strcmp(labels[1], "Skip"));
+    key(app, SDLK_ESCAPE);
+    key(app, SDLK_ESCAPE);
+    assert(page(app) == SETUP_NOTICE && !app->setup_page && !app->setup_top);
+    key(app, SDLK_UP); /* round from Next to Skip */
+    assert(!strcmp(choice_label(app), "Skip"));
+    render(app);
+    shows(app, "\xfe Skip", rgb(app->theme.page)); /* in focus, on YoRHa's band */
+    key(app, SDLK_RETURN);
+    assert(!app->setup_on && !app->setup_failed && !app->confirm.shown && !app->message[0]);
+    holds(config, "setup.ini", seen);
+    holds(app->users_dir, "users.ini", "nickname=Player\n"); /* the nickname's page took its Player */
+    now = text_of(config, "app.ini");
+    assert(app_ini && now && !strcmp(app_ini, now) && same_path(app->games_dir, games)); /* nothing else */
+    free(now);
+    setup_start(app);
+    assert(!app->setup_on);
+    /* the Appearance first: Next, then Skip, under its rows; Up from the rows' top to Skip, Down round to Language;
+       the pointer on Skip takes it, users.ini kept */
+    put(file, "[setup]\nnotices = 99\n");
+    now = text_of(app->users_dir, "users.ini");
+    setup_start(app);
+    assert(app->setup_on && !app->setup_page && page(app) == SNX_SETUP_LANGUAGE && setup_labels(app, labels) == 2);
+    key(app, SDLK_UP);
+    assert(app->setup_row == GUI_APPEARANCE_NEXT && !strcmp(choice_label(app), "Skip") && setup_focus(app) == 1);
+    key(app, SDLK_UP);
+    assert(app->setup_row == GUI_APPEARANCE_NEXT && !strcmp(choice_label(app), "Next"));
+    key(app, SDLK_RIGHT);
+    assert(!strcmp(choice_label(app), "Skip"));
+    key(app, SDLK_DOWN);
+    assert(app->setup_row == GUI_APPEARANCE_LANGUAGE && setup_focus(app) < 0);
+    {
+        GuiSetupBoxes b;
+        render(app);
+        setup_boxes(app, &b);
+        point(app, choice_box(app, &b.choices, 1), true);
+    }
+    assert(!app->setup_on && !app->setup_failed);
+    holds(config, "setup.ini", "version = 1\nnotices = 99\n"); /* a newer file's count kept */
+    {
+        char* kept = text_of(app->users_dir, "users.ini");
+        assert(kept && now && !strcmp(kept, now));
+        free(kept);
+    }
+    free(now);
+    /* a default that fails: users.ini cannot be written, the user's page stays, saying why. Skip from the Appearance's
+       Enter */
+    {
+        char *was = app->users_dir, *blocker = join(root, "a file");
+        put(blocker, "x");
+        app->users_dir = join(blocker, "users");
+        put(file, "[setup]\nnotices = 99\n");
+        setup_start(app);
+        key(app, SDLK_UP);
+        assert(page(app) == SNX_SETUP_LANGUAGE && !strcmp(choice_label(app), "Skip"));
+        key(app, SDLK_RETURN);
+        assert(app->setup_on && page(app) == SNX_SETUP_USER && app->setup_failed && app->setup_typing);
+        assert(strstr(app->message, "No user written: ") && app->confirm.shown && app->confirm.ask == GUI_ASK_ERROR);
+        key(app, SDLK_RETURN);
+        free(app->users_dir);
+        app->users_dir = was;
+        setup_finish(app);
+        remove(blocker);
+        free(blocker);
+    }
+    free(games);
+    free(app_ini);
+    free(users);
+    free(file);
+    free(config);
+    puts("PASS Skip on the first page, every page's defaults taken, and where a default fails");
+}
+
 /* name set (NULL: unset) where getenv reads it as well as SDL: on Windows the C runtime keeps a copy of its own, which
    SDL_setenv_unsafe leaves naming the real user's folders */
 static void set_env(const char* name, const char* value) {
@@ -579,6 +677,7 @@ int main(void) {
     test_notice(&app);
     test_translated(&app);
     test_places(&app);
+    test_skip(&app);
     cleanup(&app);
     assert(!snx_remove_tree(root));
     free(home);

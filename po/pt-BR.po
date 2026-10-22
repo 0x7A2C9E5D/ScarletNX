@@ -1426,6 +1426,10 @@ msgid "This copy is portable: to install it, first move away %s"
 msgstr "Esta cópia é portátil: para instalá-la, primeiro tire do lugar %s"
 
 #: src/gui/main.c
+msgid "Skip stops on this page: it has no default to take"
+msgstr "Pular parou nesta página: ela não tem um padrão a seguir"
+
+#: src/gui/main.c
 #, c-format
 msgid "Could not make %s"
 msgstr "Não foi possível criar %s"
@@ -1453,6 +1457,10 @@ msgstr "Escolher pasta"
 #: src/gui/main.c
 msgid "Later"
 msgstr "Depois"
+
+#: src/gui/main.c
+msgid "Skip"
+msgstr "Pular"
 
 #: src/gui/main.c
 msgid "Overwrite"
