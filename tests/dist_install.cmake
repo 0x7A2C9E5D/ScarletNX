@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-# `cmake --install --component desktop` puts each program's desktop entry and the icon in every size where desktops
-# look, nothing else, each file the one in dist/. Run by ctest as dist_install (tests/CMakeLists.txt)
+# `cmake --install --component desktop` puts each program's desktop entry, the app's metainfo and the icon in every size
+# where desktops look, nothing else, each file the one in dist/. Run by ctest as dist_install (tests/CMakeLists.txt)
 file(REMOVE_RECURSE "${PREFIX}")
 execute_process(COMMAND "${CMAKE_COMMAND}" --install "${BUILD}" --component desktop --prefix "${PREFIX}"
     RESULT_VARIABLE result OUTPUT_QUIET)
@@ -14,9 +14,10 @@ foreach(size 16 22 24 32 48 64 128 256)
     list(APPEND want "${DATADIR}/icons/hicolor/${size}x${size}/apps/wimsy.png")
     list(APPEND from "icons/hicolor/${size}x${size}/apps/wimsy.png")
 endforeach()
-if(NX)
-    list(APPEND want "${DATADIR}/applications/scarletnx.desktop")
-    list(APPEND from "scarletnx.desktop")
+if(NX) # the app's desktop entry, and its AppStream metainfo, which software centres list it by
+    list(APPEND want "${DATADIR}/applications/scarletnx.desktop"
+         "${DATADIR}/metainfo/io.github.scarletnx.scarletnx.metainfo.xml")
+    list(APPEND from "scarletnx.desktop" "io.github.scarletnx.scarletnx.metainfo.xml")
 endif()
 if(GUI AND NOT NX) # with the Switch runtime the menu is part of it
     list(APPEND want "${DATADIR}/applications/scarletnx-gui.desktop")
