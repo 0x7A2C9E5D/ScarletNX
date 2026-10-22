@@ -3,11 +3,6 @@
 #include "nx/loader/unit_cache.h"
 #include <llvm-c/BitWriter.h>
 #include <llvm/Config/llvm-config.h>
-#if defined(__has_include)
-#if __has_include(<llvm/Support/VCSRevision.h>)
-#include <llvm/Support/VCSRevision.h>
-#endif
-#endif
 #include <openssl/evp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,9 +44,9 @@ static size_t put_field(unsigned char* p, const char* text) {
 void snx_unit_cache_llvm(char* out, size_t size) {
     unsigned major = 0, minor = 0, patch = 0;
     LLVMGetVersion(&major, &minor, &patch);
-#ifdef LLVM_REVISION
+#ifdef SNX_LLVM_REVISION /* VCSRevision.h's, which CMake reads: the header is C++ */
     snprintf(out, size, "headers %s, library %u.%u.%u, revision %s", LLVM_VERSION_STRING, major, minor, patch,
-             LLVM_REVISION);
+             SNX_LLVM_REVISION);
 #else
     snprintf(out, size, "headers %s, library %u.%u.%u", LLVM_VERSION_STRING, major, minor, patch);
 #endif

@@ -36,6 +36,12 @@ set_target_properties(snx_driver_llvm PROPERTIES C_STANDARD 11 C_STANDARD_REQUIR
 target_compile_options(snx_driver_llvm PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 # OpenSSL: the unit cache's SHA-256 (unit_cache.c)
 target_link_libraries(snx_driver_llvm PUBLIC snx_llvm snx_arm_llvm snx_nx_module snx_settings OpenSSL::Crypto)
+# LLVM's revision in the unit cache's key, where its headers name one
+include("${CMAKE_SOURCE_DIR}/cmake/llvm_revision.cmake")
+snx_llvm_revision(snx_llvm_revision "${SNX_LLVM_INCLUDE_DIR}")
+if(snx_llvm_revision)
+    target_compile_definitions(snx_driver_llvm PRIVATE "SNX_LLVM_REVISION=\"${snx_llvm_revision}\"")
+endif()
 # scarletnx --mcp's disassembler (disasm.c), where LLVM has its AArch64 target (cmake/llvm.cmake)
 if(SNX_LLVM_A64_DISASM)
     target_compile_definitions(snx_driver_llvm PRIVATE SNX_A64_DISASM)
