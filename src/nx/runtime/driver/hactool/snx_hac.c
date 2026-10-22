@@ -268,6 +268,22 @@ int snx_hac_newest_generation(SnxHac *hac) {
     return -1;
 }
 
+/* a Patch RomFS in the NCA whose header is decrypted, as nca_process tells one: BKTR encryption, or a decrypted dump's
+   kept indirect tables. An update's patches its base's RomFS, which it is read over */
+static int patches_romfs(const nca_ctx_t *nca) {
+    for (unsigned int i = 0; i < 4; i++) {
+        const nca_fs_header_t *fs = &nca->header.fs_headers[i];
+        if (!nca->header.section_entries[i].media_start_offset || fs->partition_type != PARTITION_ROMFS ||
+            fs->fs_type != FS_TYPE_ROMFS)
+            continue;
+        if (fs->crypt_type == CRYPT_BKTR ||
+            (nca->is_decrypted && fs->bktr_superblock.relocation_header.magic == MAGIC_BKTR &&
+             fs->bktr_superblock.subsection_header.magic == MAGIC_BKTR))
+            return 1;
+    }
+    return 0;
+}
+
 int snx_hac_nca(SnxHac *hac, int container, size_t entry, SnxHacNca *out) {
     nca_ctx_t nca;
     memset(out, 0, sizeof *out);
@@ -297,16 +313,7 @@ int snx_hac_nca(SnxHac *hac, int container, size_t entry, SnxHacNca *out) {
                                   memcmp(keys->key_area_keys[generation][nca.header.kaek_ind], zero, 0x10) != 0);
     }
     /* a Patch RomFS, as nca_process tells one: BKTR encryption, or a decrypted dump's kept indirect tables */
-    for (unsigned int i = 0; i < 4; i++) {
-        nca_fs_header_t *fs = &nca.header.fs_headers[i];
-        if (!nca.header.section_entries[i].media_start_offset || fs->partition_type != PARTITION_ROMFS ||
-            fs->fs_type != FS_TYPE_ROMFS)
-            continue;
-        if (fs->crypt_type == CRYPT_BKTR ||
-            (nca.is_decrypted && fs->bktr_superblock.relocation_header.magic == MAGIC_BKTR &&
-             fs->bktr_superblock.subsection_header.magic == MAGIC_BKTR))
-            out->patch = 1;
-    }
+    out->patch = patches_romfs(&nca);
     return 0;
 }
 
@@ -320,6 +327,7 @@ static int has_romfs(const nca_ctx_t *nca) {
    and base keep: 0, or -1. Either way the caller frees the section contexts of nca, then of base */
 static int program_process(SnxHac *hac, hactool_ctx_t *tool, nca_ctx_t *nca, hactool_ctx_t *base_tool, nca_ctx_t *base,
                            int container, size_t entry, int base_container, size_t base_entry) {
+    int alone = 0; /* a base with no RomFS: the update read without it */
     nca_init(nca);
     nca_init(base);
     if (base_container >= 0) { /* --basenca: the base's RomFS under the update's */
@@ -332,14 +340,20 @@ static int program_process(SnxHac *hac, hactool_ctx_t *tool, nca_ctx_t *nca, hac
         tool->base_file_type = BASEFILE_NCA;
         tool->base_nca_ctx = base;
         nca_process(base);
-        if (!has_romfs(base)) {
-            snx_hac_fprintf(stderr, "Unable to locate RomFS in base NCA!\n");
-            return -1;
+        if (!has_romfs(base)) { /* a game all in its ExeFS: an update's RomFS, unless a patch, needs none under it */
+            tool->base_file = NULL;
+            tool->base_file_type = BASEFILE_FAKE;
+            tool->base_nca_ctx = NULL;
+            alone = 1;
         }
     }
     nca_open(hac, tool, nca, container, entry);
     nca->is_cli_target = true;
     if (!nca_decrypt_header(nca)) return -1;
+    if (alone && patches_romfs(nca)) {
+        snx_hac_fprintf(stderr, "The update patches a RomFS its game's Program NCA does not have\n");
+        return -1;
+    }
     nca_process(nca);
     return 0;
 }
