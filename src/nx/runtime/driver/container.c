@@ -795,21 +795,44 @@ unsigned char* snx_romfs_file(SnxHacFs* fs, const char* name, size_t* size) {
     return NULL;
 }
 
-unsigned char* snx_dump_nacp(SnxDump* dump, size_t* size, const char** why) {
+/* the Control NCA's RomFS, or NULL with why in *why */
+static SnxHacFs* control_fs(SnxDump* dump, const char** why) {
     SnxHacFs* fs;
-    unsigned char* nacp;
     *why = NULL;
     if (!dump->control.found) {
         *why = "it has no Control NCA";
         return NULL;
     }
     fs = snx_hac_fs_open(dump->hac, dump->control.container, dump->control.entry, -1, 0);
-    if (!fs) {
-        *why = "its Control NCA cannot be read";
-        return NULL;
-    }
+    if (!fs) *why = "its Control NCA cannot be read";
+    return fs;
+}
+unsigned char* snx_dump_nacp(SnxDump* dump, size_t* size, const char** why) {
+    SnxHacFs* fs = control_fs(dump, why);
+    unsigned char* nacp;
+    if (!fs) return NULL;
     nacp = snx_romfs_file(fs, "control.nacp", size);
     snx_hac_fs_free(fs);
     if (!nacp) *why = "its Control NCA holds no control.nacp";
     return nacp;
+}
+unsigned char* snx_dump_icon(SnxDump* dump, size_t* size, const char** why) {
+    /* control.nacp's languages, in its order */
+    static const char* const languages[] = {
+        "AmericanEnglish", "BritishEnglish",       "Japanese",          "French",
+        "German",          "LatinAmericanSpanish", "Spanish",           "Italian",
+        "Dutch",           "CanadianFrench",       "Portuguese",        "Russian",
+        "Korean",          "TraditionalChinese",   "SimplifiedChinese", "BrazilianPortuguese"};
+    SnxHacFs* fs = control_fs(dump, why);
+    unsigned char* icon = NULL;
+    char name[48];
+    size_t i;
+    if (!fs) return NULL;
+    for (i = 0; !icon && i < sizeof languages / sizeof *languages; ++i) {
+        snprintf(name, sizeof name, "icon_%s.dat", languages[i]);
+        icon = snx_romfs_file(fs, name, size);
+    }
+    snx_hac_fs_free(fs);
+    if (!icon) *why = "its Control NCA holds no icon_<language>.dat";
+    return icon;
 }

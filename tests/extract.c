@@ -106,11 +106,15 @@ static blob_t program(uint64_t title, int with_main) {
     return nca;
 }
 
+/* the game's icon as a Control NCA holds it: a JPEG's first bytes and some more, under a language past the first */
+static blob_t icon(void) { return text_blob("\xff\xd8\xff synthetic icon"); }
+
 static blob_t control(uint64_t title) {
-    blob_t file = nacp();
-    romfs_file_t romfs[1] = {{"control.nacp", file}};
-    blob_t nca = dnca_build(NCACONTENTTYPE_CONTROL, title, NULL, 0, romfs, 1);
+    blob_t file = nacp(), picture = icon();
+    romfs_file_t romfs[2] = {{"control.nacp", file}, {"icon_Japanese.dat", picture}};
+    blob_t nca = dnca_build(NCACONTENTTYPE_CONTROL, title, NULL, 0, romfs, 2);
     free(file.data);
+    free(picture.data);
     return nca;
 }
 
@@ -215,6 +219,13 @@ static int in_place(const char* base, const SnxPaths* paths) {
     got = snx_dump_nacp(&dump, &size, &why);
     CHECK(got && size == want.size && !memcmp(got, want.data, want.size));
     free(got);
+    {
+        blob_t picture = icon();
+        got = snx_dump_icon(&dump, &size, &why);
+        CHECK(got && size == picture.size && !memcmp(got, picture.data, picture.size));
+        free(got);
+        free(picture.data);
+    }
     snx_hac_fs_free(fs);
     snx_dump_close(&dump);
     free(map);
@@ -340,10 +351,14 @@ static int scenario(const char* scratch, const char* mode) {
         CHECK(file_is(exefs, "main", "synthetic main", 14) && file_is(exefs, "main.npdm", meta.data, meta.size));
         free(meta.data);
         CHECK(file_is(romfs, "data.bin", "synthetic romfs data", 20));
+        blob_t picture = icon();
         if (strcmp(mode, "no-control"))
-            CHECK(file_is(out, "control.nacp", want.data, want.size));
+            CHECK(file_is(out, "control.nacp", want.data, want.size) &&
+                  file_is(out, "icon.jpg", picture.data, picture.size)); /* the icon Games shows beside it */
         else
-            CHECK(!file_is(out, "control.nacp", want.data, want.size));
+            CHECK(!file_is(out, "control.nacp", want.data, want.size) &&
+                  !file_is(out, "icon.jpg", picture.data, picture.size));
+        free(picture.data);
         CHECK(!snx_path_exists(control_romfs)); /* where control.nacp came out, gone */
         free(want.data);
         free(romfs);

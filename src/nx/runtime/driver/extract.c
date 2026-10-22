@@ -251,6 +251,22 @@ static void control_nacp(ExtractState* state) {
 
 /* A DLC's RomFS image as aoc:u and OpenDataStorageByDataId find it, <out>/system/archives/<its title ID>.romfs:
    written beside it, then moved over it */
+/* the game's icon beside control.nacp, icon.jpg, which Games shows on its row: the Control NCA's, a JPEG. A game
+   without one shows none there, a line saying why */
+static void control_icon(ExtractState* state) {
+    char* to = snx_path_join(state->out, "icon.jpg");
+    const char* why = NULL;
+    size_t size = 0;
+    unsigned char* icon = to ? snx_dump_icon(&state->dump, &size, &why) : NULL;
+    if (!to)
+        why = "out of memory";
+    else if (icon && snx_write_file(to, icon, size))
+        why = "its icon.jpg could not be written beside exefs/";
+    if (why) printf("Games shows no icon for the game: %s\n", why);
+    fflush(stdout);
+    free(icon);
+    free(to);
+}
 static int extract_aoc(ExtractState* state) {
     const SnxNcaRef* aoc = &state->dump.aoc;
     char text[17], *folder = snx_path_join(state->out, "system/archives"), *name, *path = NULL, *tmp = NULL;
@@ -362,6 +378,7 @@ static int extract_files(ExtractState* state, const ExtractOptions* options, con
     if (failed) return snx_hac_error("Extracted exefs has no main; verify that the update matches the base game");
     say_extracted(state);
     control_nacp(state);
+    control_icon(state);
     return 0;
 }
 
