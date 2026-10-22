@@ -882,7 +882,8 @@ int main(int argc, char** argv) {
         char* to = snx_path_join(argv[6], "icon.jpg");
         int rc = 1;
         if (strstr(argv[8], "no icon"))
-            printf("Games shows no icon for %s: it has no Control NCA\n", argv[8]);
+            fprintf(stderr, "scarletnx: Games shows no icon for %s: it has no Control NCA\n",
+                    argv[8]); /* as snx_error */
         else
             rc = snx_splash_jpeg("wimsy-fuddles", 32, 90, icon_jpeg_write, &jpeg) ||
                  snx_write_file(to, jpeg.data, (size_t)jpeg.size);
@@ -3393,7 +3394,7 @@ int main(int argc, char** argv) {
                 assert(!game_icon(&app, program)); /* as it was drawn, until the list is read again */
                 icons_free(&app);
                 drawn = game_icon(&app, program);
-                assert(drawn && game_icon(&app, program) == drawn && !game_icon(&app, dump));
+                assert(drawn && game_icon(&app, program) == drawn && game_icon(&app, dump) == app.icon_loading);
                 list_games(&app); /* Games' row of it: its icon before its name */
                 {
                     UiRowInfo info = {0};
@@ -3429,18 +3430,21 @@ int main(int argc, char** argv) {
                 pump(&app);
                 icons_free(&app);
                 answered = app.dump_icons.answered;
-                assert(!game_icon(&app, with) && app.dump_icons.count == 1 && !app.dump_icons.thread);
+                /* the loading mark while it is asked, in the place of the icon to come */
+                assert(game_icon(&app, with) == icon_loading(&app) && app.icon_loading && app.dump_icons.count == 1 &&
+                       !app.dump_icons.thread);
                 icons_free(&app);
-                assert(!game_icon(&app, with) && app.dump_icons.count == 1); /* asked once */
+                assert(game_icon(&app, with) == app.icon_loading && app.dump_icons.count == 1); /* asked once */
                 dump_icons_pass(&app.dump_icons);
                 assert(!app.dump_icons.count && app.dump_icons.answered == answered + 1 &&
-                       game_icon(&app, with) == NULL);
+                       game_icon(&app, with) == app.icon_loading);
                 pump(&app); /* an answer: the rows without one look again */
-                assert(app.dump_icons_seen == answered + 1 && game_icon(&app, with));
-                assert(!game_icon(&app, without));
+                assert(app.dump_icons_seen == answered + 1 && game_icon(&app, with) &&
+                       game_icon(&app, with) != app.icon_loading);
+                assert(game_icon(&app, without) == app.icon_loading);
                 dump_icons_pass(&app.dump_icons);
                 pump(&app);
-                assert(!game_icon(&app, without));
+                assert(!game_icon(&app, without)); /* none, and no loading mark */
                 dir = dump_icon_dir(&app, without);
                 why = snx_path_join(dir, "why.txt");
                 said = (char*)snx_read_file(why, &said_size);
@@ -3452,7 +3456,7 @@ int main(int argc, char** argv) {
                     app.keys_path = snx_path_join(temporary, "icon cache keys");
                     assert(!snx_write_file(app.keys_path, "keys", 4));
                     icons_free(&app);
-                    assert(!game_icon(&app, without) && app.dump_icons.count == 1);
+                    assert(game_icon(&app, without) == app.icon_loading && app.dump_icons.count == 1);
                     dump_icons_pass(&app.dump_icons);
                     assert(!remove(app.keys_path));
                     free(app.keys_path);
@@ -3535,11 +3539,11 @@ int main(int argc, char** argv) {
         render(&app);
         shows(&app, "- Add a folder", yellow);
         shows(&app, "Recent games", soft);
-        shows(&app, "- option flags", normal);
+        shows(&app, "option flags", normal); /* a dump's: the loading mark between the marker and its name */
         key(&app, SDLK_DOWN);
         render(&app);
         assert(app.browser.selected == 1);
-        shows(&app, "- option flags", yellow);
+        shows(&app, "option flags", yellow);
         hides(&app, "- Add a folder", yellow);
         {
             char start[21]; /* the tips: where it is */
@@ -3564,7 +3568,7 @@ int main(int argc, char** argv) {
         app.theme = *gui_theme_builtin("yorha");
         render(&app);
         shows(&app, "Recent games", rgb(app.theme.soft));
-        shows(&app, "\xfe option flags", rgb(app.theme.page));
+        shows(&app, "option flags", rgb(app.theme.page));
         app.theme = *gui_theme_builtin("default");
         /* a game whose file went away leaves the list when chosen, and the file says so */
         assert(!remove(again));

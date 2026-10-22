@@ -123,6 +123,7 @@ enum { GUI_AOT_NONE, GUI_AOT_NO_CACHE, GUI_AOT_CACHE, GUI_AOT_BAD };
 typedef struct {
     char* path;
     SDL_Texture* texture;
+    bool loading; /* a dump's, which the driver has not answered for yet: the row shows the loading one */
 } GuiIcon;
 /* the dumps whose icons the driver is asked for (-x --icon), on a thread of its own: reading a dump's Control NCA takes
    the keys and the disk, which the window's thread waits for neither. Games puts a dump in (dump_icon_ask); the thread
@@ -235,6 +236,7 @@ typedef struct App {
     size_t user_jpeg_size;
     SDL_Texture* user_picture; /* drawn user_side pixels square, in the shape it was drawn for */
     GuiIcon icons[GUI_ICONS];  /* the games' icons drawn so far (game_icon), the oldest replaced first */
+    SDL_Texture* icon_loading; /* what a dump's row shows while the driver is asked for its icon */
     GuiDumpIcons dump_icons;   /* the dumps' icons asked of the driver */
     unsigned dump_icons_seen;  /* the answers the rows were drawn after */
     size_t icons_next;
@@ -2267,12 +2269,20 @@ static char* dump_icon_dir(const App* app, const char* dump) {
 /* one dump asked of the driver: its icon.jpg in dir, else why.txt there with what the driver said */
 static void dump_icon_answer(const GuiDumpIcons* d, const char* dump, const char* dir) {
     const char* args[] = {d->driver, "--repo", d->repo, "-x", "--icon", "--out", dir, "--", dump, NULL};
-    SDL_Process* run;
+    SDL_PropertiesID how;
+    SDL_Process* run = NULL;
     char *said = NULL, *why, *icon;
     size_t size = 0;
     int status = -1;
-    if (snx_mkdirs(dir)) return; /* asked again next time: nowhere to answer */
-    run = SDL_CreateProcess(args, true);
+    if (snx_mkdirs(dir)) return;               /* asked again next time: nowhere to answer */
+    if ((how = SDL_CreateProperties()) != 0) { /* its stderr with its stdout: why it has none is an error line */
+        SDL_SetPointerProperty(how, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void*)args);
+        SDL_SetNumberProperty(how, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
+        SDL_SetNumberProperty(how, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_APP);
+        SDL_SetBooleanProperty(how, SDL_PROP_PROCESS_CREATE_STDERR_TO_STDOUT_BOOLEAN, true);
+        run = SDL_CreateProcessWithProperties(how);
+        SDL_DestroyProperties(how);
+    }
     if (run) said = (char*)SDL_ReadProcess(run, &size, &status);
     icon = snx_path_join(dir, "icon.jpg");
     if (!run || status || !snx_is_file(icon)) {
@@ -2373,19 +2383,20 @@ static void dump_icons_stop(App* app) {
     *d = (GuiDumpIcons){0};
 }
 /* the icon file of the game or dump at path, owned: a game's own icon.jpg (gui_game_icon); a dump's in its folder of
-   the cache, asked of the driver when it has neither it nor the driver's why. NULL while there is none */
-static char* icon_file(App* app, const char* path) {
+   the cache, asked of the driver when it has neither it nor the driver's why, *loading then saying so. NULL while
+   there is none */
+static char* icon_file(App* app, const char* path, bool* loading) {
     char *dir, *file, *why;
     const char* leaf = path + strlen(path);
+    *loading = false;
     while (leaf > path && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
     if (!gui_is_dump(leaf)) return gui_game_icon(path);
     if (!(dir = dump_icon_dir(app, path))) return NULL;
     file = snx_path_join(dir, "icon.jpg");
     why = snx_path_join(dir, "why.txt");
     if (!snx_is_file(file)) {
-        if (!snx_is_file(why)) {
-            if (dump_icon_ask(app, path, dir) && app->dump_icons.live) dump_icons_start(app);
-        }
+        if (!snx_is_file(why) && (*loading = dump_icon_ask(app, path, dir)) && app->dump_icons.live)
+            dump_icons_start(app);
         free(file);
         file = NULL;
     }
@@ -2393,20 +2404,48 @@ static char* icon_file(App* app, const char* path) {
     free(dir);
     return file;
 }
+/* what a dump's row shows while its icon is asked for: three dots, grey on either theme's page */
+static SDL_Texture* icon_loading(App* app) {
+    static const int dots[3] = {34, 64, 94};
+    Uint32* pixels;
+    int x, y, i;
+    if (app->icon_loading) return app->icon_loading;
+    if (!(pixels = (Uint32*)calloc((size_t)GUI_ICON_SIDE * GUI_ICON_SIDE, sizeof *pixels))) return NULL;
+    for (i = 0; i < 3; ++i)
+        for (y = 54; y < 74; ++y)
+            for (x = dots[i] - 10; x < dots[i] + 10; ++x)
+                if ((x - dots[i]) * (x - dots[i]) + (y - 64) * (y - 64) <= 100)
+                    pixels[y * GUI_ICON_SIDE + x] = 0xff8a8a8au;
+    app->icon_loading = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
+                                          GUI_ICON_SIDE, GUI_ICON_SIDE);
+    if (app->icon_loading && (!SDL_UpdateTexture(app->icon_loading, NULL, pixels, GUI_ICON_SIDE * 4) ||
+                              !SDL_SetTextureBlendMode(app->icon_loading, SDL_BLENDMODE_BLEND_PREMULTIPLIED))) {
+        SDL_DestroyTexture(app->icon_loading);
+        app->icon_loading = NULL;
+    }
+    free(pixels);
+    return app->icon_loading;
+}
 static SDL_Texture* game_icon(App* app, const char* path) {
     GuiIcon* icon;
     char* file;
     unsigned char* jpeg;
     void* pixels;
     size_t size = 0, i;
+    bool loading;
     for (i = 0; i < GUI_ICONS; ++i)
-        if (app->icons[i].path && !strcmp(app->icons[i].path, path)) return app->icons[i].texture;
+        if (app->icons[i].path && !strcmp(app->icons[i].path, path))
+            return app->icons[i].loading ? icon_loading(app) : app->icons[i].texture;
     icon = &app->icons[app->icons_next];
     app->icons_next = (app->icons_next + 1) % GUI_ICONS;
     free(icon->path);
     SDL_DestroyTexture(icon->texture);
-    *icon = (GuiIcon){snx_strdup(path), NULL};
-    file = icon_file(app, path);
+    *icon = (GuiIcon){snx_strdup(path), NULL, false};
+    file = icon_file(app, path, &loading);
+    if (loading) {
+        icon->loading = true;
+        return icon_loading(app);
+    }
     jpeg = file ? snx_read_file(file, &size) : NULL;
     pixels = jpeg ? malloc((size_t)GUI_ICON_SIDE * GUI_ICON_SIDE * 4) : NULL;
     if (pixels && snx_splash_picture(jpeg, size, GUI_ICON_SIDE, 0, pixels, GUI_ICON_SIDE * 4))
@@ -2432,6 +2471,7 @@ static void icons_forget_none(App* app) {
         if (app->icons[i].path && !app->icons[i].texture) {
             free(app->icons[i].path);
             app->icons[i].path = NULL;
+            app->icons[i].loading = false;
         }
 }
 /* every icon game_icon kept: drawn again from their files when shown, as a game's may have changed */
@@ -2440,7 +2480,7 @@ static void icons_free(App* app) {
     for (i = 0; i < GUI_ICONS; ++i) {
         free(app->icons[i].path);
         SDL_DestroyTexture(app->icons[i].texture);
-        app->icons[i] = (GuiIcon){NULL, NULL};
+        app->icons[i] = (GuiIcon){NULL, NULL, false};
     }
     app->icons_next = 0;
 }
@@ -9514,6 +9554,7 @@ static void forget(App* app) {
     gui_process_destroy(app->process);
     watch_stop(app);
     dump_icons_stop(app);
+    SDL_DestroyTexture(app->icon_loading);
     space_stop(app);
     space_end(&app->left_space, &app->left_counter);
     settings_forget(app);
