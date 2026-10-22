@@ -277,14 +277,13 @@ static int check_multisample_shader_gate(void) {
 }
 
 /* Execute the direct writer's module, not only spirv-val's structural check. */
-static int check_direct_spirv(void) {
-    size_t words = 0;
-    u32* code = snx_test_spirv_compute(&words);
+/* code, a compute module of one invocation over set 0 binding 0, run once on count words of data, read back
+   into data */
+static int run_storage_compute(const u32* code, size_t words, u32* data, u32 count) {
     VkShaderModuleCreateInfo smi = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = words * sizeof(u32), .pCode = code};
     VkShaderModule module;
     CHECK(vkCreateShaderModule(g_vk.dev, &smi, NULL, &module) == VK_SUCCESS);
-    free(code);
     VkDescriptorSetLayoutBinding binding = {.binding = 0,
                                             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                             .descriptorCount = 1,
@@ -307,7 +306,7 @@ static int check_direct_spirv(void) {
     CHECK(vkCreateComputePipelines(g_vk.dev, VK_NULL_HANDLE, 1, &pci, NULL, &pipeline) == VK_SUCCESS);
     vkDestroyShaderModule(g_vk.dev, module, NULL);
     VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                             .size = sizeof(u32),
+                             .size = (VkDeviceSize)count * sizeof(u32),
                              .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT};
     VmaAllocationCreateInfo ai = {.flags =
                                       VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
@@ -316,7 +315,7 @@ static int check_direct_spirv(void) {
     VmaAllocation memory;
     VmaAllocationInfo allocation;
     CHECK(vmaCreateBuffer(g_vk.vma, &bi, &ai, &buffer, &memory, &allocation) == VK_SUCCESS);
-    *(u32*)allocation.pMappedData = 0;
+    memcpy(allocation.pMappedData, data, (size_t)count * sizeof(u32));
     CHECK(vmaFlushAllocation(g_vk.vma, memory, 0, VK_WHOLE_SIZE) == VK_SUCCESS);
     VkDescriptorPoolSize pool_size = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1};
     VkDescriptorPoolCreateInfo dpi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -331,7 +330,7 @@ static int check_direct_spirv(void) {
                                        .pSetLayouts = &dlayout};
     VkDescriptorSet set;
     CHECK(vkAllocateDescriptorSets(g_vk.dev, &dsi, &set) == VK_SUCCESS);
-    VkDescriptorBufferInfo dbi = {buffer, 0, sizeof(u32)};
+    VkDescriptorBufferInfo dbi = {buffer, 0, (VkDeviceSize)count * sizeof(u32)};
     VkWriteDescriptorSet write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                   .dstSet = set,
                                   .dstBinding = 0,
@@ -367,13 +366,54 @@ static int check_direct_spirv(void) {
     CHECK(vkQueueSubmit(g_vk.gfx, 1, &submit, VK_NULL_HANDLE) == VK_SUCCESS);
     CHECK(vkQueueWaitIdle(g_vk.gfx) == VK_SUCCESS);
     CHECK(vmaInvalidateAllocation(g_vk.vma, memory, 0, VK_WHOLE_SIZE) == VK_SUCCESS);
-    CHECK(*(u32*)allocation.pMappedData == 42);
+    memcpy(data, allocation.pMappedData, (size_t)count * sizeof(u32));
     vkDestroyCommandPool(g_vk.dev, cpool, NULL);
     vkDestroyDescriptorPool(g_vk.dev, pool, NULL);
     vmaDestroyBuffer(g_vk.vma, buffer, memory);
     vkDestroyPipeline(g_vk.dev, pipeline, NULL);
     vkDestroyPipelineLayout(g_vk.dev, playout, NULL);
     vkDestroyDescriptorSetLayout(g_vk.dev, dlayout, NULL);
+    return 0;
+}
+
+static int check_direct_spirv(void) {
+    size_t words = 0;
+    u32* code = snx_test_spirv_compute(&words), value = 0;
+    int r = run_storage_compute(code, words, &value, 1);
+    free(code);
+    CHECK(!r && value == 42);
+    return 0;
+}
+
+/* The per-instruction FTZ flush (spv_emit_flush_subnormal) on this device, against the console's: a subnormal becomes
+   the zero of its sign, and zeros, normals, infinities and NaNs (their payloads too) keep their bits. The float test
+   only where the device keeps signed zeros, as the translator uses it */
+static int check_flush_subnormal(void) {
+    static const u32 in[] = {0x00000000u, 0x80000000u, 0x00000001u, 0x80000001u, 0x007fffffu, 0x807fffffu,
+                             0x00400000u, 0x80400000u, 0x00000123u, 0x80654321u, 0x00800000u, 0x80800000u,
+                             0x00800001u, 0x3f800000u, 0xbf800000u, 0x7f7fffffu, 0xff7fffffu, 0x7f800000u,
+                             0xff800000u, 0x7fc00000u, 0xffc00000u, 0x7fa00001u, 0x7fc12345u, 0x0d000000u,
+                             0x8c000000u, 0x34000000u, 0x00012345u, 0x80000100u, 0x01000000u, 0x81000000u,
+                             0x3e800000u, 0x42f60000u};
+    enum { N = sizeof in / sizeof *in };
+    for (int signed_zeros = 0; signed_zeros < 2; signed_zeros++) {
+        if (signed_zeros && !g_vk_preserve_infnan) continue;
+        size_t words = 0;
+        u32* code = snx_test_spirv_flush(N, signed_zeros, &words), data[2 * N] = {0};
+        memcpy(data, in, sizeof in);
+        int r = run_storage_compute(code, words, data, 2 * N);
+        free(code);
+        CHECK(!r);
+        for (u32 k = 0; k < N; k++) {
+            u32 want = (in[k] & 0x7f800000u) ? in[k] : in[k] & 0x80000000u;
+            if (data[N + k] != want) {
+                printf("flush %s: %08x gave %08x, not %08x\n", signed_zeros ? "float test" : "bits", in[k], data[N + k],
+                       want);
+                return 1;
+            }
+        }
+    }
+    puts("subnormal flush: every input's bits as the console's FTZ gives them");
     return 0;
 }
 
@@ -819,6 +859,7 @@ int main(int argc, char** argv) {
     CHECK(!check_srgb_write());
     CHECK(!check_multisample_shader_gate());
     CHECK(!check_direct_spirv());
+    CHECK(!check_flush_subnormal());
     CHECK(!check_vic());
     CHECK(!check_vic_chain(shot));
     CHECK(!check_nvdec_vic());

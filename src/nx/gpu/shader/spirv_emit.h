@@ -16,6 +16,11 @@ typedef struct {
     uint32_t storage, pointee, id;
 } SpvPointerType;
 
+/* a 32-bit OpConstant: one per type and value */
+typedef struct {
+    uint32_t type, value, id;
+} SpvConstant;
+
 typedef struct {
     SpvWords capabilities, extensions, imports, entry_points, execution_modes, debug, decorations, types, functions;
     uint32_t next_id;
@@ -26,6 +31,10 @@ typedef struct {
     uint32_t* nonuniform; /* ids decorated NonUniform: texture array elements and what is made from them */
     size_t nonuniform_count, nonuniform_capacity;
     int texture_arrays; /* their capabilities declared */
+    uint32_t block; /* the OpLabels emitted so far: values an emitter's user keeps are good within one block */
+    /* the 32-bit constants made, open addressing on a power of two: by type and value, and by id */
+    SpvConstant *constants, *constant_ids;
+    size_t constant_count, constant_capacity;
 } SpvEmitter;
 
 typedef enum {
@@ -115,6 +124,8 @@ uint32_t spv_emit_workgroup_variable(SpvEmitter* e, uint32_t pointer_type);
 uint32_t spv_emit_function_element_pointer(SpvEmitter* e, uint32_t pointer_type, uint32_t array, uint32_t index);
 uint32_t spv_emit_type_function_void(SpvEmitter* e, uint32_t void_type);
 uint32_t spv_emit_constant_u32(SpvEmitter* e, uint32_t type, uint32_t value);
+/* whether id is a 32-bit OpConstant this emitter made, and its type and bits */
+int spv_emit_constant_bits(const SpvEmitter* e, uint32_t id, uint32_t* type, uint32_t* value);
 uint32_t spv_emit_constant_bool(SpvEmitter* e, uint32_t type, int value);
 /* a constant of a 64-bit type (F64, or a 64-bit integer) from its bits */
 uint32_t spv_emit_constant64(SpvEmitter* e, uint32_t type, uint64_t value);
@@ -233,6 +244,10 @@ uint32_t spv_emit_glsl_ternary(SpvEmitter* e, uint32_t f32_type, uint32_t import
                                uint32_t b, uint32_t c);
 uint32_t spv_emit_isnan(SpvEmitter* e, uint32_t bool_type, uint32_t value);
 uint32_t spv_emit_select(SpvEmitter* e, uint32_t result_type, uint32_t condition, uint32_t yes, uint32_t no);
+/* a 32-bit float with a subnormal flushed to the zero of its sign, NaN and everything else as it is: with a float test
+   when the module preserves signed zeros (SignedZeroInfNanPreserve), else on its bits */
+uint32_t spv_emit_flush_subnormal(SpvEmitter* e, uint32_t f32_type, uint32_t u32_type, uint32_t bool_type, uint32_t glsl,
+                                  uint32_t value, int signed_zeros);
 uint32_t spv_emit_vec4_extract(SpvEmitter* e, uint32_t component_type, uint32_t vector, uint32_t component);
 uint32_t spv_emit_subgroup_ballot(SpvEmitter* e, uint32_t vec4_type, uint32_t u32_type, uint32_t predicate);
 uint32_t spv_emit_subgroup_umin_u32(SpvEmitter* e, uint32_t u32_type, uint32_t value);

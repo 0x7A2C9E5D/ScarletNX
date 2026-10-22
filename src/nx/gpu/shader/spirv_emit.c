@@ -171,6 +171,8 @@ void spv_emit_destroy(SpvEmitter* e) {
     for (size_t i = 0; i < sizeof sections / sizeof sections[0]; i++) free(sections[i]->words);
     free(e->pointer_types);
     free(e->nonuniform);
+    free(e->constants);
+    free(e->constant_ids);
     memset(e, 0, sizeof *e);
 }
 
@@ -578,13 +580,59 @@ uint32_t spv_emit_type_function_void(SpvEmitter* e, uint32_t void_type) {
     return id;
 }
 
+static size_t constant_slot(uint32_t a, uint32_t b, size_t capacity) {
+    uint64_t h = ((uint64_t)a << 32 | b) * 0x9E3779B97F4A7C15ull;
+    return (size_t)(h >> 40) & (capacity - 1);
+}
+static void constant_insert(SpvConstant* table, size_t capacity, const SpvConstant* c, int by_id) {
+    size_t i = by_id ? constant_slot(c->id, 0, capacity) : constant_slot(c->type, c->value, capacity);
+    while (table[i].id) i = (i + 1) & (capacity - 1);
+    table[i] = *c;
+}
+/* both tables at twice the capacity, the constants made so far in them again */
+static void constants_grow(SpvEmitter* e) {
+    size_t capacity = e->constant_capacity ? e->constant_capacity * 2 : 256;
+    SpvConstant* constants = (SpvConstant*)calloc(capacity, sizeof *constants);
+    SpvConstant* ids = (SpvConstant*)calloc(capacity, sizeof *ids);
+    if (!constants || !ids) abort();
+    for (size_t i = 0; i < e->constant_capacity; i++)
+        if (e->constants[i].id) {
+            constant_insert(constants, capacity, &e->constants[i], 0);
+            constant_insert(ids, capacity, &e->constants[i], 1);
+        }
+    free(e->constants);
+    free(e->constant_ids);
+    e->constants = constants;
+    e->constant_ids = ids;
+    e->constant_capacity = capacity;
+}
+
 uint32_t spv_emit_constant_u32(SpvEmitter* e, uint32_t type, uint32_t value) {
-    uint32_t id = spv_emit_id(e);
+    if ((e->constant_count + 1) * 2 > e->constant_capacity) constants_grow(e);
+    size_t i = constant_slot(type, value, e->constant_capacity);
+    for (; e->constants[i].id; i = (i + 1) & (e->constant_capacity - 1))
+        if (e->constants[i].type == type && e->constants[i].value == value) return e->constants[i].id;
+    SpvConstant c = {type, value, spv_emit_id(e)};
     instruction(&e->types, OP_CONSTANT, 4);
     put(&e->types, type);
-    put(&e->types, id);
+    put(&e->types, c.id);
     put(&e->types, value);
-    return id;
+    e->constants[i] = c;
+    constant_insert(e->constant_ids, e->constant_capacity, &c, 1);
+    e->constant_count++;
+    return c.id;
+}
+
+int spv_emit_constant_bits(const SpvEmitter* e, uint32_t id, uint32_t* type, uint32_t* value) {
+    if (!e->constant_capacity || !id) return 0;
+    for (size_t i = constant_slot(id, 0, e->constant_capacity); e->constant_ids[i].id;
+         i = (i + 1) & (e->constant_capacity - 1))
+        if (e->constant_ids[i].id == id) {
+            *type = e->constant_ids[i].type;
+            *value = e->constant_ids[i].value;
+            return 1;
+        }
+    return 0;
 }
 
 uint32_t spv_emit_constant64(SpvEmitter* e, uint32_t type, uint64_t value) {
@@ -1177,6 +1225,7 @@ void spv_emit_function_void(SpvEmitter* e, uint32_t void_type, uint32_t function
 }
 
 void spv_emit_label(SpvEmitter* e, uint32_t label) {
+    e->block++;
     instruction(&e->functions, OP_LABEL, 2);
     put(&e->functions, label);
 }
@@ -1450,6 +1499,23 @@ uint32_t spv_emit_fcompare(SpvEmitter* e, uint32_t bool_type, uint32_t condition
         return condition == 7 ? spv_emit_bool_not(e, bool_type, nan) : nan;
     }
     return binary(e, opcode[condition], bool_type, left, right);
+}
+
+uint32_t spv_emit_flush_subnormal(SpvEmitter* e, uint32_t f32_type, uint32_t u32_type, uint32_t bool_type, uint32_t glsl,
+                                  uint32_t value, int signed_zeros) {
+    if (signed_zeros) { /* below the smallest normal, times zero: the zero of its sign; NaN fails the test */
+        uint32_t magnitude = spv_emit_glsl_unary(e, f32_type, glsl, SPV_GLSL_FABS, value);
+        uint32_t tiny = spv_emit_fcompare(e, bool_type, 1, magnitude, spv_emit_constant_u32(e, f32_type, 0x00800000u));
+        uint32_t zero = spv_emit_fmul(e, f32_type, value, spv_emit_constant_u32(e, f32_type, 0));
+        return spv_emit_select(e, f32_type, tiny, zero, value);
+    }
+    uint32_t bits = spv_emit_bitcast(e, u32_type, value);
+    uint32_t exponent = spv_emit_bitwise_and_u32(e, u32_type, bits, spv_emit_constant_u32(e, u32_type, 0x7f800000u));
+    uint32_t sign = spv_emit_bitwise_and_u32(e, u32_type, bits, spv_emit_constant_u32(e, u32_type, 0x80000000u));
+    uint32_t flushed =
+        spv_emit_select(e, u32_type, spv_emit_i_equal(e, bool_type, exponent, spv_emit_constant_u32(e, u32_type, 0)),
+                        sign, bits);
+    return spv_emit_bitcast(e, f32_type, flushed);
 }
 
 uint32_t spv_emit_bool_not(SpvEmitter* e, uint32_t bool_type, uint32_t value) {

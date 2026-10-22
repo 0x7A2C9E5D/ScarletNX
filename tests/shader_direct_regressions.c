@@ -381,6 +381,20 @@ static int switch_selects_current_pc(const u32* code, size_t words) {
     return 0;
 }
 
+/* The values a register variable carries: what is loaded from it, and what is stored to it (the translator reuses a
+   value stored or loaded earlier in the same block in place of a load), up to max */
+static size_t register_values(const u32* code, size_t words, u32 pointer, u32* values, size_t max) {
+    size_t n = 0;
+    for (size_t i = 5; i < words && n < max;) {
+        u32 width = code[i] >> 16;
+        if (!width || i + width > words) return n;
+        if ((code[i] & 0xffff) == 61 && width == 4 && code[i + 3] == pointer) values[n++] = code[i + 2];
+        if ((code[i] & 0xffff) == 62 && width == 3 && code[i + 1] == pointer) values[n++] = code[i + 2];
+        i += width;
+    }
+    return n;
+}
+
 static int prmt_selector_uses_seeded_register(const u32* code, size_t words) {
     u32 register_pointer = 0;
     for (size_t i = 5; i < words;) {
@@ -391,22 +405,19 @@ static int prmt_selector_uses_seeded_register(const u32* code, size_t words) {
         i += width;
     }
     if (!register_pointer) return 0;
-    for (size_t i = 5; i < words;) {
-        u32 width = code[i] >> 16;
-        if (!width || i + width > words) return 0;
-        if ((code[i] & 0xffff) == 61 && width == 4 && code[i + 3] == register_pointer) {
-            u32 loaded = code[i + 2];
-            for (size_t j = 5; j < words;) {
-                u32 w = code[j] >> 16;
-                if (!w || j + w > words) return 0;
-                if ((code[j] & 0xffff) == 199 && w == 5 &&
-                    ((code[j + 3] == loaded && is_constant_value(code, words, code[j + 4], 3)) ||
-                     (code[j + 4] == loaded && is_constant_value(code, words, code[j + 3], 3))))
-                    return 1;
-                j += w;
-            }
+    u32 values[64];
+    size_t nvalues = register_values(code, words, register_pointer, values, 64);
+    for (size_t v = 0; v < nvalues; v++) {
+        u32 loaded = values[v];
+        for (size_t j = 5; j < words;) {
+            u32 w = code[j] >> 16;
+            if (!w || j + w > words) return 0;
+            if ((code[j] & 0xffff) == 199 && w == 5 &&
+                ((code[j + 3] == loaded && is_constant_value(code, words, code[j + 4], 3)) ||
+                 (code[j + 4] == loaded && is_constant_value(code, words, code[j + 3], 3))))
+                return 1;
+            j += w;
         }
-        i += width;
     }
     return 0;
 }
@@ -421,27 +432,24 @@ static int seeded_register_feeds(const u32* code, size_t words, u32 seed, u32 op
         i += width;
     }
     if (!pointer) return 0;
-    for (size_t i = 5; i < words;) {
-        u32 width = code[i] >> 16;
-        if (!width || i + width > words) return 0;
-        if ((code[i] & 0xffff) == 61 && width == 4 && code[i + 3] == pointer) {
-            u32 loaded = code[i + 2];
-            for (size_t j = 5; j < words;) {
-                u32 span = code[j] >> 16;
-                if (!span || j + span > words) return 0;
-                u32 value = loaded;
-                if ((code[j] & 0xffff) == 124 && span == 4 && code[j + 3] == loaded) value = code[j + 2];
-                for (size_t k = 5; k < words;) {
-                    u32 target_span = code[k] >> 16;
-                    if (!target_span || k + target_span > words) return 0;
-                    if ((code[k] & 0xffff) == opcode && target_span > operand_index && code[k + operand_index] == value)
-                        return 1;
-                    k += target_span;
-                }
-                j += span;
+    u32 values[64];
+    size_t nvalues = register_values(code, words, pointer, values, 64);
+    for (size_t v = 0; v < nvalues; v++) {
+        u32 loaded = values[v];
+        for (size_t j = 5; j < words;) {
+            u32 span = code[j] >> 16;
+            if (!span || j + span > words) return 0;
+            u32 value = loaded;
+            if ((code[j] & 0xffff) == 124 && span == 4 && code[j + 3] == loaded) value = code[j + 2];
+            for (size_t k = 5; k < words;) {
+                u32 target_span = code[k] >> 16;
+                if (!target_span || k + target_span > words) return 0;
+                if ((code[k] & 0xffff) == opcode && target_span > operand_index && code[k + operand_index] == value)
+                    return 1;
+                k += target_span;
             }
+            j += span;
         }
-        i += width;
     }
     return 0;
 }
@@ -455,38 +463,35 @@ static int seeded_gradient_component(const u32* code, size_t words, u32 seed, u3
             pointer = code[i + 1];
         i += width;
     }
-    for (size_t i = 5; pointer && i < words;) {
-        u32 width = code[i] >> 16;
-        if (!width || i + width > words) return 0;
-        if ((code[i] & 0xffff) == 61 && width == 4 && code[i + 3] == pointer) {
-            u32 loaded = code[i + 2];
-            for (size_t j = 5; j < words;) {
-                u32 span = code[j] >> 16;
-                if (!span || j + span > words) return 0;
-                if ((code[j] & 0xffff) == 124 && span == 4 && code[j + 3] == loaded) {
-                    u32 value = code[j + 2];
-                    for (size_t k = 5; k < words;) {
-                        u32 construct_span = code[k] >> 16;
-                        if (!construct_span || k + construct_span > words) return 0;
-                        if ((code[k] & 0xffff) == 80 && construct_span > 3 + component &&
-                            code[k + 3 + component] == value) {
-                            u32 vector = code[k + 2];
-                            for (size_t m = 5; m < words;) {
-                                u32 sample_span = code[m] >> 16;
-                                if (!sample_span || m + sample_span > words) return 0;
-                                if ((code[m] & 0xffff) == 88 && sample_span > 6 + gradient && code[m + 5] == 4 &&
-                                    code[m + 6 + gradient] == vector)
-                                    return 1;
-                                m += sample_span;
-                            }
+    u32 values[64];
+    size_t nvalues = pointer ? register_values(code, words, pointer, values, 64) : 0;
+    for (size_t v = 0; v < nvalues; v++) {
+        u32 loaded = values[v];
+        for (size_t j = 5; j < words;) {
+            u32 span = code[j] >> 16;
+            if (!span || j + span > words) return 0;
+            if ((code[j] & 0xffff) == 124 && span == 4 && code[j + 3] == loaded) {
+                u32 value = code[j + 2];
+                for (size_t k = 5; k < words;) {
+                    u32 construct_span = code[k] >> 16;
+                    if (!construct_span || k + construct_span > words) return 0;
+                    if ((code[k] & 0xffff) == 80 && construct_span > 3 + component &&
+                        code[k + 3 + component] == value) {
+                        u32 vector = code[k + 2];
+                        for (size_t m = 5; m < words;) {
+                            u32 sample_span = code[m] >> 16;
+                            if (!sample_span || m + sample_span > words) return 0;
+                            if ((code[m] & 0xffff) == 88 && sample_span > 6 + gradient && code[m + 5] == 4 &&
+                                code[m + 6 + gradient] == vector)
+                                return 1;
+                            m += sample_span;
                         }
-                        k += construct_span;
                     }
+                    k += construct_span;
                 }
-                j += span;
             }
+            j += span;
         }
-        i += width;
     }
     return 0;
 }
@@ -675,8 +680,10 @@ static void float_controls(void) {
                 check(info.fp32_flush == (i == 0 || i == 1) && info.fp32_preserve == (i != 0),
                       "FP32 modes recorded");
                 check((count_opcode(code, words, 17, 4465) > 0) == flush, "FP32 flush capability");
-                check((count_opcode(code, words, 199, 0xffffffffu) > 0) == soft_ftz,
-                      "FTZ instructions use integer-bit fallback when a module mode cannot apply");
+                /* the translation keeps signed zeros here: the flush is a float test (FOrdLessThan on the magnitude) */
+                check((count_opcode(code, words, 184, 0xffffffffu) > 0) == soft_ftz &&
+                          count_opcode(code, words, 199, 0xffffffffu) == 0,
+                      "FTZ instructions flush with a float test when a module mode cannot apply");
                 int mode = 0;
                 for (size_t k = 5; k < words;) {
                     u32 width = code[k] >> 16;
@@ -689,6 +696,18 @@ static void float_controls(void) {
             free(code);
         }
     }
+    /* without signed zeros kept, the flush is done on the bits */
+    size_t slots, words = 0;
+    u64* program = guest_program(cases[1], 2, NULL, &slots);
+    ShaderInfo info;
+    memset(&info, 0, sizeof info);
+    u32* code = program ? spirv_of(program, slots * sizeof *program, ST_FS, &info, &words, 1, 0, 1, 1) : NULL;
+    free(program);
+    check_translated(code, &info, "FP32 mixed modes translate without signed zeros kept");
+    if (code)
+        check(count_opcode(code, words, 199, 0xffffffffu) > 0 && count_opcode(code, words, 184, 0xffffffffu) == 0,
+              "FTZ instructions flush on the bits when signed zeros aren't kept");
+    free(code);
 }
 
 static void precise_math(void) {
