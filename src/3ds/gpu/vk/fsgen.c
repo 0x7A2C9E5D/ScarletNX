@@ -7,9 +7,9 @@
    2014-2026 Citra Emulator Project / Azahar Emulator Project) at azahar-emu/azahar 49a1e8c. The profile is Azahar's
    Vulkan one on a desktop GPU: logic ops and min/max blending in the pipeline, no framebuffer fetch, no fragment
    shader interlock or barycentrics, a [0, 1] depth range, and no custom border colours (emulated in the shader).
-   The GLSL Azahar generates is written here directly as SPIR-V (spirv.h). */
+   The GLSL Azahar generates is written here directly as SPIR-V (common/utilities/spirv_emit.h). */
 #include "3ds/gpu/vk/fsgen.h"
-#include "3ds/gpu/vk/spirv.h"
+#include "common/utilities/spirv_emit.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -242,7 +242,7 @@ enum { LUT_LF, LUT_RG, LUT_RGBA };
 
 typedef struct {
     const SnxCtrFsConfig* c;
-    SnxCtrSpv s;
+    SpvEmitter s;
     uint32_t t_bool, t_f, t_v2, t_v3, t_v4, t_i, t_iv2, t_iv4, t_u, t_uv4, t_bv2, t_bv4;
     uint32_t in[IN_COUNT], frag_coord, color, frag_depth;
     uint32_t fs_data, lut[3], lut_type, lut_image;
@@ -299,26 +299,26 @@ static unsigned width(const Gen* g, uint32_t type) {
 }
 /* a float constant of type, a vector one with it in every component */
 static uint32_t fc(Gen* g, uint32_t type, float value) {
-    uint32_t k = snx_ctr_spv_float_constant(&g->s, value), parts[4] = {k, k, k, k};
+    uint32_t k = spv_emit_const_f32(&g->s, value), parts[4] = {k, k, k, k};
     unsigned n = width(g, type);
-    return n == 1 ? k : snx_ctr_spv_composite(&g->s, type, parts, n);
+    return n == 1 ? k : spv_emit_const_composite(&g->s, type, parts, n);
 }
 static uint32_t vec_constant(Gen* g, uint32_t type, float x, float y, float z, float w) {
-    uint32_t parts[4] = {snx_ctr_spv_float_constant(&g->s, x), snx_ctr_spv_float_constant(&g->s, y),
-                         snx_ctr_spv_float_constant(&g->s, z), snx_ctr_spv_float_constant(&g->s, w)};
-    return snx_ctr_spv_composite(&g->s, type, parts, width(g, type));
+    uint32_t parts[4] = {spv_emit_const_f32(&g->s, x), spv_emit_const_f32(&g->s, y),
+                         spv_emit_const_f32(&g->s, z), spv_emit_const_f32(&g->s, w)};
+    return spv_emit_const_composite(&g->s, type, parts, width(g, type));
 }
-static uint32_t ic(Gen* g, int32_t value) { return snx_ctr_spv_sint(&g->s, value); }
-static uint32_t uc(Gen* g, uint32_t value) { return snx_ctr_spv_uint(&g->s, value); }
+static uint32_t ic(Gen* g, int32_t value) { return spv_emit_const_i32(&g->s, value); }
+static uint32_t uc(Gen* g, uint32_t value) { return spv_emit_const_u32(&g->s, value); }
 static uint32_t ivec2_constant(Gen* g, int32_t x, int32_t y) {
     uint32_t parts[2] = {ic(g, x), ic(g, y)};
-    return snx_ctr_spv_composite(&g->s, g->t_iv2, parts, 2);
+    return spv_emit_const_composite(&g->s, g->t_iv2, parts, 2);
 }
 /* a scalar in every component of type (GLSL's vector constructor from one scalar) */
 static uint32_t splat(Gen* g, uint32_t type, uint32_t scalar) {
     uint32_t parts[4] = {scalar, scalar, scalar, scalar};
     unsigned n = width(g, type);
-    return n == 1 ? scalar : snx_ctr_spv_op(&g->s, SPV_OP_COMPOSITE_CONSTRUCT, type, parts, n);
+    return n == 1 ? scalar : spv_emit_op(&g->s, SPV_OP_COMPOSITE_CONSTRUCT, type, parts, n);
 }
 
 static uint32_t op1(Gen* g, uint32_t op, uint32_t type, uint32_t a) { return SPV(&g->s, op, type, a); }
@@ -368,8 +368,8 @@ static uint32_t input(Gen* g, unsigned which) { return load(g, input_type(g, whi
 static uint32_t uniform(Gen* g, uint32_t type, const uint32_t* chain, size_t count) {
     uint32_t operands[4] = {g->fs_data};
     for (size_t i = 0; i < count; ++i) operands[i + 1] = ic(g, (int32_t)chain[i]);
-    uint32_t pointer = snx_ctr_spv_op(&g->s, SPV_OP_ACCESS_CHAIN,
-                                      snx_ctr_spv_pointer(&g->s, SPV_STORAGE_UNIFORM, type), operands, count + 1);
+    uint32_t pointer = spv_emit_op(&g->s, SPV_OP_ACCESS_CHAIN,
+                                      spv_emit_type_pointer(&g->s, SPV_STORAGE_UNIFORM, type), operands, count + 1);
     return load(g, type, pointer);
 }
 static uint32_t member(Gen* g, uint32_t type, unsigned m) {
@@ -386,31 +386,31 @@ static uint32_t light(Gen* g, uint32_t type, unsigned num, unsigned m) {
 }
 /* a constant int table indexed at run time: a Function array, as glslang makes a const array */
 static uint32_t table_at(Gen* g, const int32_t* values, unsigned count, uint32_t index) {
-    uint32_t parts[16], type = snx_ctr_spv_array(&g->s, g->t_i, count), var = snx_ctr_spv_local(&g->s, type);
+    uint32_t parts[16], type = spv_emit_type_array(&g->s, g->t_i, count), var = spv_emit_local(&g->s, type);
     for (unsigned i = 0; i < count; ++i) parts[i] = ic(g, values[i]);
-    store(g, var, snx_ctr_spv_composite(&g->s, type, parts, count));
+    store(g, var, spv_emit_const_composite(&g->s, type, parts, count));
     return load(g, g->t_i,
-                SPV(&g->s, SPV_OP_ACCESS_CHAIN, snx_ctr_spv_pointer(&g->s, SPV_STORAGE_FUNCTION, g->t_i), var, index));
+                SPV(&g->s, SPV_OP_ACCESS_CHAIN, spv_emit_type_pointer(&g->s, SPV_STORAGE_FUNCTION, g->t_i), var, index));
 }
 
 /* ---- control flow ---- */
 
 /* if (cond) { the block placed here }: if_end places the merge, branching to it unless the block ended itself */
 static uint32_t if_begin(Gen* g, uint32_t cond) {
-    uint32_t then = snx_ctr_spv_id(&g->s), merge = snx_ctr_spv_id(&g->s);
+    uint32_t then = spv_emit_id(&g->s), merge = spv_emit_id(&g->s);
     SPV_VOID(&g->s, SPV_OP_SELECTION_MERGE, merge, 0);
     SPV_VOID(&g->s, SPV_OP_BRANCH_CONDITIONAL, cond, then, merge);
-    snx_ctr_spv_label(&g->s, then);
+    spv_emit_label(&g->s, then);
     return merge;
 }
 static void if_end(Gen* g, uint32_t merge, bool falls_through) {
     if (falls_through) SPV_VOID(&g->s, SPV_OP_BRANCH, merge);
-    snx_ctr_spv_label(&g->s, merge);
+    spv_emit_label(&g->s, merge);
 }
 /* if (cond) discard; */
 static void kill_if(Gen* g, uint32_t cond) {
     uint32_t merge = if_begin(g, cond);
-    snx_ctr_spv_void_op(&g->s, SPV_OP_KILL, NULL, 0);
+    spv_emit_void_op(&g->s, SPV_OP_KILL, NULL, 0);
     if_end(g, merge, false);
 }
 
@@ -477,7 +477,7 @@ static uint32_t compare_shadow(Gen* g, uint32_t pixel, uint32_t z) {
     return choose(g, g->t_f, op2(g, SPV_OP_U_LESS_THAN_EQUAL, g->t_bool, depth, z), fc(g, g->t_f, 0.0f), value);
 }
 static uint32_t mix2(Gen* g, uint32_t s, uint32_t a) {
-    SnxCtrSpv* sp = &g->s;
+    SpvEmitter* sp = &g->s;
     uint32_t t = ext3(g, g->t_v2, SPV_GLSL_F_MIX, SPV(sp, SPV_OP_VECTOR_SHUFFLE, g->t_v2, s, s, 0, 1),
                       SPV(sp, SPV_OP_VECTOR_SHUFFLE, g->t_v2, s, s, 2, 3),
                       SPV(sp, SPV_OP_VECTOR_SHUFFLE, g->t_v2, a, a, 1, 1));
@@ -498,9 +498,9 @@ static uint32_t shadow_texel(Gen* g, uint32_t sampled, uint32_t coord) {
 
 /* the function SampleShadow2D(ivec2 uv, uint z) */
 static void shadow_2d_function(Gen* g) {
-    SnxCtrSpv* s = &g->s;
+    SpvEmitter* s = &g->s;
     uint32_t types[2] = {g->t_iv2, g->t_u}, p[2];
-    snx_ctr_spv_function(s, g->shadow_2d, g->t_f, types, 2, p);
+    spv_emit_function(s, g->shadow_2d, g->t_f, types, 2, p);
     uint32_t sampled = load(g, g->tex_type[0], g->tex[0]);
     uint32_t outside = SPV(s, SPV_OP_COMPOSITE_CONSTRUCT, g->t_bv4,
                            op2(g, SPV_OP_S_LESS_THAN, g->t_bv2, p[0], ivec2_constant(g, 0, 0)),
@@ -509,7 +509,7 @@ static void shadow_2d_function(Gen* g) {
     SPV_VOID(s, SPV_OP_RETURN_VALUE, fc(g, g->t_f, 1.0f));
     if_end(g, merge, false);
     SPV_VOID(s, SPV_OP_RETURN_VALUE, compare_shadow(g, shadow_texel(g, sampled, p[0]), p[1]));
-    snx_ctr_spv_function_end(s);
+    spv_emit_function_end(s);
 }
 
 /* shadowTexture(texcoord0, texcoord0_w) */
@@ -529,21 +529,21 @@ static uint32_t shadow_texture(Gen* g) {
         uint32_t at_k = k ? op2(g, SPV_OP_I_ADD, g->t_iv2, i, ivec2_constant(g, offsets[k][0], offsets[k][1])) : i;
         samples[k] = SPV(&g->s, SPV_OP_FUNCTION_CALL, g->t_f, g->shadow_2d, at_k, z);
     }
-    uint32_t s4 = snx_ctr_spv_op(&g->s, SPV_OP_COMPOSITE_CONSTRUCT, g->t_v4, samples, 4);
+    uint32_t s4 = spv_emit_op(&g->s, SPV_OP_COMPOSITE_CONSTRUCT, g->t_v4, samples, 4);
     return splat(g, g->t_v4, mix2(g, s4, f));
 }
 
 /* tex0[face] of the shadow cube */
 static uint32_t shadow_face(Gen* g, unsigned face) {
     uint32_t pointer = SPV(&g->s, SPV_OP_ACCESS_CHAIN,
-                           snx_ctr_spv_pointer(&g->s, SPV_STORAGE_UNIFORM_CONSTANT, g->tex_type[0]), g->tex[0],
+                           spv_emit_type_pointer(&g->s, SPV_STORAGE_UNIFORM_CONSTANT, g->tex_type[0]), g->tex[0],
                            ic(g, (int32_t)face));
     return load(g, g->tex_type[0], pointer);
 }
 /* shadowTextureCube(texcoord0, texcoord0_w): the face's choice of w and uv, pure, by selects; the fetches from the
    chosen face (SampleShadowCube) under a switch */
 static uint32_t shadow_texture_cube(Gen* g) {
-    SnxCtrSpv* s = &g->s;
+    SpvEmitter* s = &g->s;
     uint32_t size = texture_size(g, 0, shadow_face(g, 0));
     uint32_t c = SPV(s, SPV_OP_COMPOSITE_CONSTRUCT, g->t_v3, input(g, IN_TEXCOORD0), input(g, IN_TEXCOORD0_W));
     uint32_t a = ext1(g, g->t_v3, SPV_GLSL_F_ABS, c);
@@ -587,22 +587,22 @@ static uint32_t shadow_texture_cube(Gen* g) {
         corner[k] = ext3(g, g->t_iv2, SPV_GLSL_S_CLAMP, i, cmin, cmax);
     }
     /* pixels = SampleShadowCube(face, ...) */
-    uint32_t pixels = snx_ctr_spv_local(s, g->t_uv4), label[6], merge = snx_ctr_spv_id(s);
-    for (unsigned k = 0; k < 6; ++k) label[k] = snx_ctr_spv_id(s);
+    uint32_t pixels = spv_emit_local(s, g->t_uv4), label[6], merge = spv_emit_id(s);
+    for (unsigned k = 0; k < 6; ++k) label[k] = spv_emit_id(s);
     SPV_VOID(s, SPV_OP_SELECTION_MERGE, merge, 0);
     SPV_VOID(s, SPV_OP_SWITCH, face, label[5], 0, label[0], 1, label[1], 2, label[2], 3, label[3], 4, label[4]);
     for (unsigned k = 0; k < 6; ++k) {
         uint32_t texels[4], sampled;
-        snx_ctr_spv_label(s, label[k]);
+        spv_emit_label(s, label[k]);
         sampled = shadow_face(g, k);
         for (unsigned n = 0; n < 4; ++n) texels[n] = shadow_texel(g, sampled, corner[n]);
-        store(g, pixels, snx_ctr_spv_op(s, SPV_OP_COMPOSITE_CONSTRUCT, g->t_uv4, texels, 4));
+        store(g, pixels, spv_emit_op(s, SPV_OP_COMPOSITE_CONSTRUCT, g->t_uv4, texels, 4));
         SPV_VOID(s, SPV_OP_BRANCH, merge);
     }
-    snx_ctr_spv_label(s, merge);
+    spv_emit_label(s, merge);
     uint32_t p = load(g, g->t_uv4, pixels), compared[4];
     for (unsigned n = 0; n < 4; ++n) compared[n] = compare_shadow(g, SPV(s, SPV_OP_COMPOSITE_EXTRACT, g->t_u, p, n), z);
-    return splat(g, g->t_v4, mix2(g, snx_ctr_spv_op(s, SPV_OP_COMPOSITE_CONSTRUCT, g->t_v4, compared, 4), f));
+    return splat(g, g->t_v4, mix2(g, spv_emit_op(s, SPV_OP_COMPOSITE_CONSTRUCT, g->t_v4, compared, 4), f));
 }
 
 /* ---- procedural textures ---- */
@@ -799,13 +799,13 @@ static uint32_t sample_lod(Gen* g, unsigned unit, unsigned coord) {
 
 /* DefineTexUnitSampler: the function sampleTexUnit0..3 */
 static void unit_function(Gen* g, unsigned unit) {
-    SnxCtrSpv* s = &g->s;
+    SpvEmitter* s = &g->s;
     const SnxCtrFsConfig* c = g->c;
     uint32_t result;
-    snx_ctr_spv_function(s, g->unit[unit], g->t_v4, NULL, 0, NULL);
+    spv_emit_function(s, g->unit[unit], g->t_v4, NULL, 0, NULL);
     if (unit == 0 && c->texture0_type == SNX_CTR_FS_TEX_DISABLED) {
         SPV_VOID(s, SPV_OP_RETURN_VALUE, fc(g, g->t_v4, 0.0f));
-        snx_ctr_spv_function_end(s);
+        spv_emit_function_end(s);
         return;
     }
     if (unit < 3) {
@@ -847,7 +847,7 @@ static void unit_function(Gen* g, unsigned unit) {
         default: result = c->proctex.enable ? proctex(g) : fc(g, g->t_v4, 0.0f); break;
     }
     SPV_VOID(s, SPV_OP_RETURN_VALUE, result);
-    snx_ctr_spv_function_end(s);
+    spv_emit_function_end(s);
 }
 
 /* ---- the combiners ---- */
@@ -1138,20 +1138,20 @@ static void fog(Gen* g, uint32_t depth) {
 
 /* UpdateShadow(old, d, s), its ref in two Function variables */
 static uint32_t update_shadow(Gen* g, uint32_t pixel, uint32_t d, uint32_t s) {
-    SnxCtrSpv* sp = &g->s;
-    uint32_t u = g->t_u, ref_x = snx_ctr_spv_local(sp, u), ref_y = snx_ctr_spv_local(sp, u);
+    SpvEmitter* sp = &g->s;
+    uint32_t u = g->t_u, ref_x = spv_emit_local(sp, u), ref_y = spv_emit_local(sp, u);
     uint32_t x = op2(g, SPV_OP_SHIFT_RIGHT_LOGICAL, u, pixel, uc(g, 8));
     store(g, ref_x, x);
     store(g, ref_y, op2(g, SPV_OP_BITWISE_AND, u, pixel, uc(g, 0xff)));
     uint32_t outer = if_begin(g, op2(g, SPV_OP_U_LESS_THAN, g->t_bool, d, x));
-    uint32_t zero = snx_ctr_spv_id(sp), nonzero = snx_ctr_spv_id(sp), merge = snx_ctr_spv_id(sp);
+    uint32_t zero = spv_emit_id(sp), nonzero = spv_emit_id(sp), merge = spv_emit_id(sp);
     uint32_t is_zero = op2(g, SPV_OP_I_EQUAL, g->t_bool, s, uc(g, 0));
     SPV_VOID(sp, SPV_OP_SELECTION_MERGE, merge, 0);
     SPV_VOID(sp, SPV_OP_BRANCH_CONDITIONAL, is_zero, zero, nonzero);
-    snx_ctr_spv_label(sp, zero);
+    spv_emit_label(sp, zero);
     store(g, ref_x, d);
     SPV_VOID(sp, SPV_OP_BRANCH, merge);
-    snx_ctr_spv_label(sp, nonzero);
+    spv_emit_label(sp, nonzero);
     uint32_t bias = fadd(g, g->t_f, member(g, g->t_f, U_SHADOW_BIAS_CONSTANT),
                          op2(g, SPV_OP_F_DIV, g->t_f,
                              fmul(g, g->t_f, member(g, g->t_f, U_SHADOW_BIAS_LINEAR),
@@ -1161,7 +1161,7 @@ static uint32_t update_shadow(Gen* g, uint32_t pixel, uint32_t d, uint32_t s) {
                           op2(g, SPV_OP_F_DIV, g->t_f, op1(g, SPV_OP_CONVERT_U_TO_F, g->t_f, s), bias));
     store(g, ref_y, ext2(g, u, SPV_GLSL_U_MIN, biased, load(g, u, ref_y)));
     SPV_VOID(sp, SPV_OP_BRANCH, merge);
-    snx_ctr_spv_label(sp, merge);
+    spv_emit_label(sp, merge);
     if_end(g, outer, true);
     /* EncodeShadow */
     return op2(g, SPV_OP_BITWISE_OR, u, op2(g, SPV_OP_SHIFT_LEFT_LOGICAL, u, load(g, u, ref_x), uc(g, 8)),
@@ -1170,7 +1170,7 @@ static uint32_t update_shadow(Gen* g, uint32_t pixel, uint32_t d, uint32_t s) {
 
 /* the shadow map's compare-and-swap loop */
 static void shadow_write(Gen* g, uint32_t depth) {
-    SnxCtrSpv* s = &g->s;
+    SpvEmitter* s = &g->s;
     uint32_t u = g->t_u;
     uint32_t d = op1(g, SPV_OP_CONVERT_F_TO_U, u,
                      fmul(g, g->t_f, clamp01(g, g->t_f, depth), fc(g, g->t_f, 16777215.0f)));
@@ -1179,40 +1179,40 @@ static void shadow_write(Gen* g, uint32_t depth) {
     uint32_t frag_coord = load(g, g->t_v4, g->frag_coord);
     uint32_t image_coord = op1(g, SPV_OP_CONVERT_F_TO_S, g->t_iv2,
                                SPV(s, SPV_OP_VECTOR_SHUFFLE, g->t_v2, frag_coord, frag_coord, 0, 1));
-    uint32_t old = snx_ctr_spv_local(s, u), new1 = snx_ctr_spv_local(s, u), old2 = snx_ctr_spv_local(s, u);
+    uint32_t old = spv_emit_local(s, u), new1 = spv_emit_local(s, u), old2 = spv_emit_local(s, u);
     uint32_t texel = op2(g, SPV_OP_IMAGE_READ, g->t_uv4, load(g, g->shadow_image, g->shadow_buffer), image_coord);
     store(g, old, SPV(s, SPV_OP_COMPOSITE_EXTRACT, u, texel, 0));
-    uint32_t header = snx_ctr_spv_id(s), body = snx_ctr_spv_id(s), next = snx_ctr_spv_id(s), merge = snx_ctr_spv_id(s);
+    uint32_t header = spv_emit_id(s), body = spv_emit_id(s), next = spv_emit_id(s), merge = spv_emit_id(s);
     SPV_VOID(s, SPV_OP_BRANCH, header);
-    snx_ctr_spv_label(s, header);
+    spv_emit_label(s, header);
     SPV_VOID(s, SPV_OP_LOOP_MERGE, merge, next, 0);
     SPV_VOID(s, SPV_OP_BRANCH, body);
-    snx_ctr_spv_label(s, body);
+    spv_emit_label(s, body);
     uint32_t value = load(g, u, old);
     store(g, old2, value);
     store(g, new1, update_shadow(g, value, d, stencil));
     SPV_VOID(s, SPV_OP_BRANCH, next);
     /* while ((old = imageAtomicCompSwap(shadow_buffer, image_coord, old, new1)) != old2) */
-    snx_ctr_spv_label(s, next);
-    uint32_t pointer = SPV(s, OP_IMAGE_TEXEL_POINTER, snx_ctr_spv_pointer(s, SPV_STORAGE_IMAGE, u), g->shadow_buffer,
+    spv_emit_label(s, next);
+    uint32_t pointer = SPV(s, OP_IMAGE_TEXEL_POINTER, spv_emit_type_pointer(s, SPV_STORAGE_IMAGE, u), g->shadow_buffer,
                            image_coord, uc(g, 0));
     uint32_t swapped = SPV(s, SPV_OP_ATOMIC_COMPARE_EXCHANGE, u, pointer, uc(g, SCOPE_DEVICE), uc(g, 0), uc(g, 0),
                            load(g, u, new1), load(g, u, old));
     store(g, old, swapped);
     SPV_VOID(s, SPV_OP_BRANCH_CONDITIONAL, op2(g, SPV_OP_I_NOT_EQUAL, g->t_bool, swapped, load(g, u, old2)), header,
              merge);
-    snx_ctr_spv_label(s, merge);
+    spv_emit_label(s, merge);
 }
 
 /* FragmentModule::Generate's main */
 static void main_function(Gen* g, uint32_t id) {
-    SnxCtrSpv* s = &g->s;
+    SpvEmitter* s = &g->s;
     const SnxCtrFsConfig* c = g->c;
     uint32_t f = g->t_f, b = g->t_bool;
-    snx_ctr_spv_function(s, id, snx_ctr_spv_void(s), NULL, 0, NULL);
+    spv_emit_function(s, id, spv_emit_type_void(s), NULL, 0, NULL);
     if (c->alpha_test_func == 0) { /* never passes */
-        snx_ctr_spv_void_op(s, SPV_OP_KILL, NULL, 0);
-        snx_ctr_spv_function_end(s);
+        spv_emit_void_op(s, SPV_OP_KILL, NULL, 0);
+        spv_emit_function_end(s);
         return;
     }
     /* the interpolated primary colour rounded to the PICA's 8 bits */
@@ -1249,32 +1249,32 @@ static void main_function(Gen* g, uint32_t id) {
         store(g, g->frag_depth, depth);
         store(g, g->color, byteround(g, g->t_v4, g->combiner_output));
     }
-    snx_ctr_spv_void_op(s, SPV_OP_RETURN, NULL, 0);
-    snx_ctr_spv_function_end(s);
+    spv_emit_void_op(s, SPV_OP_RETURN, NULL, 0);
+    spv_emit_function_end(s);
 }
 
 /* ---- the module ---- */
 
 static void declare(Gen* g) {
-    SnxCtrSpv* s = &g->s;
+    SpvEmitter* s = &g->s;
     const SnxCtrFsConfig* c = g->c;
     unsigned type0 = c->texture0_type;
-    g->t_bool = snx_ctr_spv_bool(s);
-    g->t_f = snx_ctr_spv_float(s);
-    g->t_v2 = snx_ctr_spv_vector(s, g->t_f, 2);
-    g->t_v3 = snx_ctr_spv_vector(s, g->t_f, 3);
-    g->t_v4 = snx_ctr_spv_vector(s, g->t_f, 4);
-    g->t_i = snx_ctr_spv_int(s, true);
-    g->t_iv2 = snx_ctr_spv_vector(s, g->t_i, 2);
-    g->t_iv4 = snx_ctr_spv_vector(s, g->t_i, 4);
-    g->t_u = snx_ctr_spv_int(s, false);
-    g->t_uv4 = snx_ctr_spv_vector(s, g->t_u, 4);
-    g->t_bv2 = snx_ctr_spv_vector(s, g->t_bool, 2);
-    g->t_bv4 = snx_ctr_spv_vector(s, g->t_bool, 4);
-    for (unsigned i = 0; i < IN_COUNT; ++i) g->in[i] = snx_ctr_spv_location(s, SPV_STORAGE_INPUT, input_type(g, i), i);
-    g->color = snx_ctr_spv_location(s, SPV_STORAGE_OUTPUT, g->t_v4, 0);
-    g->frag_coord = snx_ctr_spv_builtin(s, SPV_STORAGE_INPUT, g->t_v4, SPV_BUILT_IN_FRAG_COORD);
-    if (writes_depth(c)) g->frag_depth = snx_ctr_spv_builtin(s, SPV_STORAGE_OUTPUT, g->t_f, SPV_BUILT_IN_FRAG_DEPTH);
+    g->t_bool = spv_emit_type_bool(s);
+    g->t_f = spv_emit_type_float(s, 32);
+    g->t_v2 = spv_emit_type_vector(s, g->t_f, 2);
+    g->t_v3 = spv_emit_type_vector(s, g->t_f, 3);
+    g->t_v4 = spv_emit_type_vector(s, g->t_f, 4);
+    g->t_i = spv_emit_type_int(s, 32, true);
+    g->t_iv2 = spv_emit_type_vector(s, g->t_i, 2);
+    g->t_iv4 = spv_emit_type_vector(s, g->t_i, 4);
+    g->t_u = spv_emit_type_int(s, 32, false);
+    g->t_uv4 = spv_emit_type_vector(s, g->t_u, 4);
+    g->t_bv2 = spv_emit_type_vector(s, g->t_bool, 2);
+    g->t_bv4 = spv_emit_type_vector(s, g->t_bool, 4);
+    for (unsigned i = 0; i < IN_COUNT; ++i) g->in[i] = spv_emit_location(s, SPV_STORAGE_INPUT, input_type(g, i), i);
+    g->color = spv_emit_location(s, SPV_STORAGE_OUTPUT, g->t_v4, 0);
+    g->frag_coord = spv_emit_builtin(s, SPV_STORAGE_INPUT, g->t_v4, SPV_BUILT_IN_FRAG_COORD);
+    if (writes_depth(c)) g->frag_depth = spv_emit_builtin(s, SPV_STORAGE_OUTPUT, g->t_f, SPV_BUILT_IN_FRAG_DEPTH);
 
     /* fs_data, std140, at SnxCtrFsUniforms' offsets */
     static const uint32_t light_offsets[LS_COUNT] = {
@@ -1315,72 +1315,73 @@ static void declare(Gen* g) {
         offsetof(SnxCtrFsUniforms, blend_color)};
     uint32_t f = g->t_f, i = g->t_i, v2 = g->t_v2, v3 = g->t_v3, v4 = g->t_v4;
     uint32_t light_members[LS_COUNT] = {v3, v3, v3, v3, v3, v3, f, f};
-    uint32_t light_src = snx_ctr_spv_struct(s, light_members, light_offsets, LS_COUNT);
-    uint32_t arrays[4] = {snx_ctr_spv_array(s, g->t_iv4, 6), snx_ctr_spv_array(s, light_src, 8),
-                          snx_ctr_spv_array(s, v4, 6), snx_ctr_spv_array(s, v4, 3)};
+    uint32_t light_src = spv_emit_type_struct(s, light_members, light_offsets, LS_COUNT);
+    uint32_t arrays[4] = {spv_emit_type_array(s, g->t_iv4, 6), spv_emit_type_array(s, light_src, 8),
+                          spv_emit_type_array(s, v4, 6), spv_emit_type_array(s, v4, 3)};
     const uint32_t strides[4] = {16, sizeof(SnxCtrFsLight), 16, 16};
-    for (unsigned k = 0; k < 4; ++k) snx_ctr_spv_decorate(s, arrays[k], SPV_DECORATION_ARRAY_STRIDE, &strides[k], 1);
+    for (unsigned k = 0; k < 4; ++k) spv_emit_decorate(s, arrays[k], SPV_DECORATION_ARRAY_STRIDE, &strides[k], 1);
     uint32_t members[U_COUNT] = {i, i, f, f, f, f, i, i, i, i, i, i, i, i, i, i, f, i,
                                  arrays[0], v3, v2, v2, v2, v3, arrays[1], arrays[2], v4, v3, arrays[3], v4};
-    uint32_t block = snx_ctr_spv_struct(s, members, offsets, U_COUNT);
-    snx_ctr_spv_decorate(s, block, SPV_DECORATION_BLOCK, NULL, 0);
-    g->fs_data = snx_ctr_spv_resource(s, SPV_STORAGE_UNIFORM, block, 0, 2);
+    uint32_t block = spv_emit_type_struct(s, members, offsets, U_COUNT);
+    spv_emit_decorate(s, block, SPV_DECORATION_BLOCK, NULL, 0);
+    g->fs_data = spv_emit_resource(s, SPV_STORAGE_UNIFORM, block, 0, 2);
 
     /* the LUTs: samplerBuffers */
-    g->lut_image = snx_ctr_spv_image(s, f, SPV_DIM_BUFFER, false, 1, 0);
-    g->lut_type = snx_ctr_spv_sampled_image(s, g->lut_image);
+    g->lut_image = spv_emit_type_image(s, f, SPV_DIM_BUFFER, 0, 0, 0, 1, 0);
+    g->lut_type = spv_emit_type_sampled_image(s, g->lut_image);
     for (unsigned k = 0; k < 3; ++k)
-        g->lut[k] = snx_ctr_spv_resource(s, SPV_STORAGE_UNIFORM_CONSTANT, g->lut_type, 0, 3 + k);
+        g->lut[k] = spv_emit_resource(s, SPV_STORAGE_UNIFORM_CONSTANT, g->lut_type, 0, 3 + k);
 
     /* the textures */
     if (type0 == SNX_CTR_FS_TEX_SHADOW_2D || type0 == SNX_CTR_FS_TEX_SHADOW_CUBE)
-        g->tex_image[0] = snx_ctr_spv_image(s, g->t_u, SPV_DIM_2D, false, 1, 0);
+        g->tex_image[0] = spv_emit_type_image(s, g->t_u, SPV_DIM_2D, 0, 0, 0, 1, 0);
     else
         g->tex_image[0] =
-            snx_ctr_spv_image(s, f, type0 == SNX_CTR_FS_TEX_CUBE ? SPV_DIM_CUBE : SPV_DIM_2D, false, 1, 0);
-    g->tex_image[1] = g->tex_image[2] = snx_ctr_spv_image(s, f, SPV_DIM_2D, false, 1, 0);
+            spv_emit_type_image(s, f, type0 == SNX_CTR_FS_TEX_CUBE ? SPV_DIM_CUBE : SPV_DIM_2D, 0, 0, 0, 1, 0);
+    g->tex_image[1] = g->tex_image[2] = spv_emit_type_image(s, f, SPV_DIM_2D, 0, 0, 0, 1, 0);
     for (unsigned k = 0; k < 3; ++k) {
-        g->tex_type[k] = snx_ctr_spv_sampled_image(s, g->tex_image[k]);
-        uint32_t type = k == 0 && type0 == SNX_CTR_FS_TEX_SHADOW_CUBE ? snx_ctr_spv_array(s, g->tex_type[0], 6)
+        g->tex_type[k] = spv_emit_type_sampled_image(s, g->tex_image[k]);
+        uint32_t type = k == 0 && type0 == SNX_CTR_FS_TEX_SHADOW_CUBE ? spv_emit_type_array(s, g->tex_type[0], 6)
                                                                       : g->tex_type[k];
-        g->tex[k] = snx_ctr_spv_resource(s, SPV_STORAGE_UNIFORM_CONSTANT, type, 1, k);
+        g->tex[k] = spv_emit_resource(s, SPV_STORAGE_UNIFORM_CONSTANT, type, 1, k);
     }
     if (c->shadow_rendering) {
-        g->shadow_image = snx_ctr_spv_image(s, g->t_u, SPV_DIM_2D, false, 2, FORMAT_R32UI);
-        g->shadow_buffer = snx_ctr_spv_resource(s, SPV_STORAGE_UNIFORM_CONSTANT, g->shadow_image, 2, 0);
+        g->shadow_image = spv_emit_type_image(s, g->t_u, SPV_DIM_2D, 0, 0, 0, 2, FORMAT_R32UI);
+        g->shadow_buffer = spv_emit_resource(s, SPV_STORAGE_UNIFORM_CONSTANT, g->shadow_image, 2, 0);
     }
 }
 
 /* FragmentModule::Generate */
-bool snx_ctr_fs_spirv(const SnxCtrFsConfig* c, bool preserve_infnan, uint32_t** words, size_t* count) {
+void snx_ctr_fs_spirv(const SnxCtrFsConfig* c, bool preserve_infnan, uint32_t** words, size_t* count) {
     Gen gen, *g = &gen;
-    SnxCtrSpv* s = &g->s;
+    SpvEmitter* s = &g->s;
     memset(g, 0, sizeof *g);
     g->c = c;
-    snx_ctr_spv_init(s);
-    snx_ctr_spv_capability(s, SPV_CAPABILITY_SAMPLED_BUFFER);
-    snx_ctr_spv_capability(s, SPV_CAPABILITY_IMAGE_QUERY);
+    spv_emit_init(s, 0);
+    s->version = 0x00010300; /* SPIR-V 1.3 */
+    spv_emit_glsl450_import(s);
+    spv_emit_shader_capability(s);
+    spv_emit_capability(s, SPV_CAPABILITY_SAMPLED_BUFFER);
+    spv_emit_capability(s, SPV_CAPABILITY_IMAGE_QUERY);
     if (preserve_infnan) {
-        snx_ctr_spv_extension(s, "SPV_KHR_float_controls");
-        snx_ctr_spv_capability(s, SPV_CAPABILITY_SIGNED_ZERO_INF_NAN_PRESERVE);
+        spv_emit_extension(s, "SPV_KHR_float_controls");
+        spv_emit_capability(s, SPV_CAPABILITY_SIGNED_ZERO_INF_NAN_PRESERVE);
     }
     declare(g);
-    for (unsigned i = 0; i < 4; ++i) g->unit[i] = snx_ctr_spv_id(s);
+    for (unsigned i = 0; i < 4; ++i) g->unit[i] = spv_emit_id(s);
     if (c->texture0_type == SNX_CTR_FS_TEX_SHADOW_2D) {
-        g->shadow_2d = snx_ctr_spv_id(s);
+        g->shadow_2d = spv_emit_id(s);
         shadow_2d_function(g);
     }
     for (unsigned i = 0; i < 4; ++i) unit_function(g, i);
-    uint32_t main_id = snx_ctr_spv_id(s);
+    uint32_t main_id = spv_emit_id(s);
     main_function(g, main_id);
-    snx_ctr_spv_entry(s, SPV_MODEL_FRAGMENT, main_id);
-    snx_ctr_spv_mode(s, main_id, SPV_MODE_ORIGIN_UPPER_LEFT);
-    if (g->frag_depth) snx_ctr_spv_mode(s, main_id, SPV_MODE_DEPTH_REPLACING);
-    if (preserve_infnan) snx_ctr_spv_mode_operand(s, main_id, SPV_MODE_SIGNED_ZERO_INF_NAN_PRESERVE, 32);
-    *count = 0;
-    *words = snx_ctr_spv_finish(s, count);
-    snx_ctr_spv_free(s);
-    return *words != NULL;
+    spv_emit_entry_str(s, SPV_STAGE_FRAGMENT, main_id, "main", s->interface, s->interface_count);
+    spv_emit_execution_mode(s, main_id, SPV_MODE_ORIGIN_UPPER_LEFT, 0, 0);
+    if (g->frag_depth) spv_emit_execution_mode(s, main_id, SPV_MODE_DEPTH_REPLACING, 0, 0);
+    if (preserve_infnan) spv_emit_execution_mode(s, main_id, SPV_MODE_SIGNED_ZERO_INF_NAN_PRESERVE, 1, 32);
+    *words = spv_emit_finish(s, count);
+    spv_emit_destroy(s);
 }
 
 /* ---- uniforms (rasterizer_accelerated.cpp SyncDrawUniforms) ---- */
