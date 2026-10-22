@@ -150,6 +150,8 @@ char* snx_dump_name(const char* input);
    folder", "cannot be written" or "is on a disk that runs no programs (noexec)"; NULL when it can */
 const char* snx_folder_unfit(const char* folder, int run);
 SnxU64 snx_free_space(const char* path);
+/* The disk path is on: its bytes free to this user and its size. 0, or -1 with the system's reason (snx_os_error) */
+int snx_disk_room(const char* path, SnxU64* free_bytes, SnxU64* total);
 /* 1 when a and b are on one disk (one file system), each a folder or one still to be made under the nearest folder
    there: what goes into one takes the other's free space */
 int snx_same_disk(const char* a, const char* b);

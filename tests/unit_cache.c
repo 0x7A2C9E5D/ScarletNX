@@ -14,6 +14,7 @@
 #include "nx/loader/module_abi.h"
 #include "nx/loader/module_llvm.h"
 #include "nx/loader/unit_cache.h"
+#include <errno.h>
 #include <llvm/Config/llvm-config.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,6 +38,10 @@ static struct {
     char said[16][1024];
     int said_count;
     size_t wrappers; /* the last build's snx_aot_ wrappers */
+    /* a disk of disk_total bytes with disk_free free, when disk is set; one whose room cannot be read with disk_fails */
+    SnxUnitDisk disk;
+    SnxU64 disk_free, disk_total;
+    int disk_fails;
 } g_unit_cache;
 
 #define CHECK(x)                                                                                                       \
@@ -53,6 +58,16 @@ static void sink(const char* line) {
         snprintf(g_unit_cache.said[g_unit_cache.said_count++], sizeof g_unit_cache.said[0], "%s", line);
 }
 static void forget(void) { g_unit_cache.said_count = 0; }
+static int fake_disk(const char* folder, SnxU64* free_bytes, SnxU64* total) {
+    (void)folder;
+    if (g_unit_cache.disk_fails) {
+        errno = EACCES;
+        return -1;
+    }
+    *free_bytes = g_unit_cache.disk_free;
+    *total = g_unit_cache.disk_total;
+    return 0;
+}
 static int said(const char* a, const char* b) {
     int i;
     for (i = 0; i < g_unit_cache.said_count; ++i)
@@ -100,6 +115,7 @@ static int build(const char* folder, const char* output, SnxU64 limit) {
     llvm.unit_cache = folder;
     llvm.unit_cache_limit = limit;
     llvm.wrappers = &g_unit_cache.wrappers;
+    llvm.unit_cache_disk = g_unit_cache.disk;
     return snx_build_module_llvm(&loaded, &options, &llvm);
 }
 
@@ -435,6 +451,32 @@ int main(void) {
     CHECK(!build(folder, out[1], total - 1) && objects(folder, NULL) == 2);
     CHECK(snx_is_file(path_a) && !snx_is_file(path_b));
     CHECK(!build(folder, out[4], 1) && objects(folder, NULL) == 0 && run(out[4]) == 42);
+
+    /* the disk keeps a tenth of itself free (a disk of 1000 GB here): short of it, a new object takes the place of the
+       cache's oldest; with no room even so it is not kept, said with the disk's numbers; a disk whose room cannot be
+       read keeps nothing, said with why. The module is built all the same */
+    program(1);
+    CHECK(!build(folder, out[4], 0) && objects(folder, NULL) == 2 && snx_is_file(path_a));
+    CHECK(!snx_set_file_time(path_a, 1000)); /* f1+1's, the oldest once f0's is reused */
+    g_unit_cache.disk = fake_disk;
+    g_unit_cache.disk_total = 1000000000000ull;
+    g_unit_cache.disk_free = 100000000000ull; /* the tenth: a new object needs its own size made */
+    program(5);
+    forget();
+    CHECK(!build(folder, out[5], 0) && run(out[5]) == 46 && !g_unit_cache.said_count);
+    CHECK(!snx_is_file(path_a) && snx_is_file(path_b));
+    g_unit_cache.disk_free = 0;
+    program(1);
+    forget();
+    CHECK(!build(folder, out[1], 0) && run(out[1]) == 42 && !snx_is_file(path_a));
+    CHECK(said("has 0.0 GB free and keeps a tenth of its 1000.0 GB (100.0 GB) free", "code_001 ("));
+    CHECK(said("cannot make room for", "is not kept"));
+    g_unit_cache.disk_fails = 1;
+    forget();
+    CHECK(!build(folder, out[1], 0) && run(out[1]) == 42 && !snx_is_file(path_a));
+    CHECK(said("cannot read the room on the disk of", "code_001 is not kept"));
+    g_unit_cache.disk = NULL;
+    g_unit_cache.disk_fails = 0;
 
     snx_unit_cache_close(cache);
     free(path_a);

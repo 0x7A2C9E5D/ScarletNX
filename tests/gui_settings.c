@@ -92,6 +92,7 @@ int main(int argc, char** argv) {
     assert(gui_settings_recompile(&s, options) == 2 && !strcmp(options[1], "--aot_threads=4"));
     assert(!strcmp(s.keys[5].section, "Launch") && !strcmp(s.keys[5].key, "Unit cache limit") &&
            !strcmp(s.values[5].key, "unit_cache_gb") && strstr(s.keys[5].about, "0 = no limit"));
+    assert(!strcmp(s.values[5].def, "0") && strstr(s.keys[5].about, "a tenth of its disk free")); /* no limit */
     assert(gui_settings_set(&s, "unit_cache_gb", "50") && gui_settings_recompile(&s, options) == 3 &&
            !strcmp(options[2], "--unit_cache_gb=50") && gui_settings_set(&s, "unit_cache_gb", ""));
     assert(!strcmp(s.keys[6].section, "Launch") && s.values[6].kind == GUI_SETTING_PAGE &&

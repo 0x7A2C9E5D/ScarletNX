@@ -17,6 +17,9 @@ typedef struct {
 } SnxUnitIdentity;
 
 typedef struct SnxUnitCache SnxUnitCache;
+/* The room on the disk a folder is on, as snx_disk_room reads it: its bytes free and its size. 0, or -1 with errno (or
+   Windows' last error) saying why */
+typedef int (*SnxUnitDisk)(const char* folder, SnxU64* free_bytes, SnxU64* total);
 
 /* A kept object's last bytes: "SNXUNIT1", then the SHA-256 of its key's 64 digits followed by the object. A file
    without them is not the whole object its name says */
@@ -34,6 +37,8 @@ void snx_unit_cache_llvm(char* out, size_t size);
 /* The cache in folder, made when it is not there; NULL with why in error */
 SnxUnitCache* snx_unit_cache_open(const char* folder, const SnxUnitIdentity* identity, char* error, size_t error_size);
 void snx_unit_cache_close(SnxUnitCache* cache);
+/* The disk's room read through disk from now on, snx_disk_room until then: a test's own */
+void snx_unit_cache_disk(SnxUnitCache* cache, SnxUnitDisk disk);
 const char* snx_unit_cache_folder(const SnxUnitCache* cache);
 /* A unit's key into key, 64 hex digits and a NUL: the SHA-256 of the identity, the triple, CPU and features of the target
    machine that compiles it, and its IR's bitcode. 0, or -1 when OpenSSL cannot hash */
@@ -45,10 +50,12 @@ int snx_unit_cache_keep(const SnxUnitCache* cache, const char* key, const unsign
                         char* error, size_t error_size);
 /* snx_ir_object through the cache: the object kept under the unit's key when it is there whole (*reused 1, the file's
    time renewed), else the one snx_ir_object makes, then kept. A kept object that is not whole, or cannot be read, is
-   said on stderr and made again; one that cannot be kept is said, and the unit has it all the same. 0, or -1 with why
-   in error (snx_ir_object's) */
-int snx_unit_cache_object(const SnxUnitCache* cache, SnxIr* ir, unsigned char** data, size_t* size, int* reused,
-                          char* error, size_t error_size);
+   said on stderr and made again; one that cannot be kept is said, and the unit has it all the same. The cache's disk
+   always keeps a tenth of itself free: the cache's oldest objects are removed to make room for a new one (said on
+   stdout), and one there is no room for is not kept (said). Units of one cache may run on several threads. 0, or -1
+   with why in error (snx_ir_object's) */
+int snx_unit_cache_object(SnxUnitCache* cache, SnxIr* ir, unsigned char** data, size_t* size, int* reused, char* error,
+                          size_t error_size);
 /* The cache's files in folder (its .o, and the .tmp a write left) held to limit bytes, the oldest by their time (the
    last write or reuse) removed first, then by name; 0 for no limit. Each file it cannot remove is said on stderr. 0, or
    -1 with why in error when the folder cannot be listed */

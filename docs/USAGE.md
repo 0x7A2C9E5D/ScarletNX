@@ -250,9 +250,11 @@ Remaining examples: POSIX.
   CPU and its features, the optimization level and the LLVM Internals: a unit found there is not compiled again (a
   recompile after an `SNX_ABI` change that leaves the unit's IR alone, or of a game whose code changed in a few units),
   and the last line says how many were (`unit cache: 241 of 259 units reused (310.2 MB) from ...`). The module
-  descriptor and the link are made each time. A kept object that is not whole is compiled again, and said.
-  `--unit_cache_gb=N` (20 by default, 0 for no limit) holds the folder to N GB after each recompile, the units reused
-  longest ago removed first.
+  descriptor and the link are made each time. A kept object that is not whole is compiled again, and said. The cache
+  always leaves a tenth of its disk free: when a new unit would take that, the units reused longest ago are removed
+  for it, and a unit there is still no room for is not kept (said, with the disk's free bytes). `--unit_cache_gb=N`
+  (0, no limit, by default) also holds the folder to N GB after each recompile, the units reused longest ago removed
+  first.
   `--keep-ir` saves the generated code (LLVM IR) in `<outdir>/<NAME>/<NAME>_build/`.
   `--hook-direct-calls` sends calls and branches between guest functions through the dispatch table too, so
   `nvn_trace=1` also counts calls made by direct branch. The game runs slower, so use it only for investigating.

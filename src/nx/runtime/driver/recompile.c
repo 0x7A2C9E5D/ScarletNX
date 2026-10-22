@@ -31,7 +31,8 @@ static void usage(void) {
          "  --jobs N               Parallel compiles (default: CPU count), the setting aot_threads");
     puts("  --jit-cache FILE       Link a profile run's .jitcache into the module as runtime code");
     puts("  --KEY=VALUE            A setting of the recompile: opt, aot_threads, unit_cache_gb (the most GB the\n"
-         "                         cache of compiled code units holds: 20, 0 for no limit), and LLVM's\n"
+         "                         cache of compiled code units holds: 0, the default, for no limit; it always\n"
+         "                         leaves a tenth of its disk free), and LLVM's\n"
          "                         (llvm_pass_<pass>=0 turns that pass off); scarletnx --settings=recompile\n"
          "                         lists them");
     printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",

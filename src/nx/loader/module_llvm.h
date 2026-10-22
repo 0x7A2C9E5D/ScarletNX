@@ -19,6 +19,8 @@ typedef struct {
        every unit is compiled, and none kept */
     const char* unit_cache;
     SnxU64 unit_cache_limit; /* the bytes the folder is held to after the build, its oldest objects removed; 0: none */
+    /* the room on the unit cache's disk, as unit_cache.h's SnxUnitDisk reads it: NULL for snx_disk_room, a test's own */
+    int (*unit_cache_disk)(const char* folder, SnxU64* free_bytes, SnxU64* total);
     /* when set, the snx_aot_ wrappers the descriptor got: one per entry when the profile cache's units link (they call
        them), else none */
     size_t* wrappers;

@@ -773,6 +773,23 @@ SnxU64 snx_free_space(const char* path) {
     return statvfs(path, &st) ? 0 : (SnxU64)st.f_bavail * st.f_frsize;
 #endif
 }
+int snx_disk_room(const char* path, SnxU64* free_bytes, SnxU64* total) {
+#ifdef _WIN32
+    wchar_t* p = wide(path);
+    ULARGE_INTEGER avail, all;
+    int ok = p && GetDiskFreeSpaceExW(p, &avail, &all, NULL);
+    free(p);
+    if (!ok) return -1;
+    *free_bytes = (SnxU64)avail.QuadPart;
+    *total = (SnxU64)all.QuadPart;
+#else
+    struct statvfs st;
+    if (statvfs(path, &st)) return -1;
+    *free_bytes = (SnxU64)st.f_bavail * st.f_frsize;
+    *total = (SnxU64)st.f_blocks * st.f_frsize;
+#endif
+    return 0;
+}
 /* path, or the nearest folder above it that is there */
 static char* existing_folder(const char* path) {
     char *at = snx_absolute(path), *up;
