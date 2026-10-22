@@ -572,6 +572,7 @@ int main(void) {
     }
     assert(!strcmp(app.theme.id, "yorha") && app.theme.dialog == GUI_DIALOG_YORHA);
     app.animations_off = true; /* each page read as it settles, not as it fades in */
+    app.clock = 1; /* a text too long for its row read from its start, whatever time the test takes to get there */
     open_files(&app);
     test_first(&app);
     test_users(&app);
