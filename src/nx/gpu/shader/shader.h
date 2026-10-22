@@ -30,6 +30,16 @@ static inline int shader_same_indexed_table(const ShTex* a, const ShTex* b) {
     return a->bl_cbuf == b->bl_cbuf && a->cbuf_off == b->cbuf_off && a->flags == b->flags && a->type == b->type &&
            a->array == b->array && a->shadow == b->shadow;
 }
+/* A global buffer (ShaderInfo.gbuf_cbuf_off) is named by where its 64-bit address is: the constant buffer in bits 16-20,
+   the byte offset in it in bits 0-15. NVN's storage buffer descriptors, in cbuf 0 from 0x110 to 0x410 (compute) or
+   0x830, follow the address with the buffer's size (shader_gbuf_sized). A graphics program may also keep a bare
+   address in a constant buffer of its own, with nothing after it: one game's terrain vertex programs read their patch
+   data through such an address in cbuf 6, as Eden tracks them when no NVN descriptor holds the base
+   (global_memory_to_storage_buffer_pass.cpp's Track without the NVN bias). The renderer sizes those by the memory
+   mapped from the address on. The vertex stage's cbuf 0 at 0xb0 is a bare pointer of 16 bytes. */
+#define SH_GBUF_BANK(d)   ((d) >> 16)
+#define SH_GBUF_OFFSET(d) ((d) & 0xFFFFu)
+static inline int shader_gbuf_sized(int stage, u32 d) { return d >= 0x110 && d < (stage == ST_CS ? 0x410u : 0x830u); }
 /* Transform feedback (key of the last program before rasterization): for each of the 4 buffers, the attribute word
    each 4-byte word of a vertex there holds (its ISA attribute address / 4: the position's x is 28, generic i's
    component k 32 + 4 * i + k), of count words, the vertices stride bytes apart. All counts 0: nothing is captured */
@@ -56,7 +66,7 @@ typedef struct {
     /* FP32 arithmetic asking to flush denormals (FTZ/FMZ), and FP32 arithmetic that doesn't. Only flush in every
        FADD, FMUL and FFMA lets the module declare flushing, as Eden declares DenormFlushToZero */
     int fp32_flush, fp32_preserve;
-    u32 gbuf_cbuf_off[16]; /* the global buffers found, by where cbuf 0 holds their address */
+    u32 gbuf_cbuf_off[16]; /* the global buffers found, by where a constant buffer holds their address (SH_GBUF_*) */
     int ngbuf;
     int unsupported; /* instructions or forms translation refused */
     char first_unsupported[96]; /* the longest: an untracked global memory base with its writer */

@@ -670,6 +670,9 @@ void vk_tex_frame(void);    /* a frame was presented: evicts what wasn't used fo
 int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off);
 /* the same for a vertex or index buffer, whose offset needs only to be a multiple of align (a power of two) */
 int vk_buf_get_input(u64 gva, u64 len, u64 align, VkBuffer* buf, u64* off);
+/* the same inside a window shared with the ranges it overlaps (a storage buffer with no size of its own): *off is the
+   range's offset in it, a multiple of minStorageBufferOffsetAlignment */
+int vk_buf_get_window(u64 gva, u64 len, VkBuffer* buf, u64* off);
 /* the cache lines vk_buf_get(gva, len) will read, fetched ahead: step 0 its index slot, step 1 (after step 0 for every
    range) its entry. For a caller with several ranges to look up, so their misses overlap */
 void vk_buf_prefetch(u64 gva, u64 len, int step);
@@ -682,6 +685,7 @@ typedef struct {
     u64 addr;
     u32 size;
     int writable, aliased;
+    int bare; /* its address has no size beside it (SH_GBUF_*): bound in a shared window */
     VkBuffer buf;
     u64 off, range;
 } VkDrawGbuf;
@@ -958,9 +962,10 @@ VkSampler vk_tex_bind_sampler(const u32* tsc, const ShTex* st, int num, const Su
    stores (which declare none). *bytes is set to the guest bytes t covers, every layer. A draw also refuses its own
    attachments, which a dispatch, outside any rendering pass, can write.
    vk_gbuf_desc: a storage buffer's address (*addr) and size from its descriptor's words {address low, address high,
-   size} in constant buffer 0 at off, where gbuf_tag (spirv_translate.c) found it for stage (ST_VS, ST_FS or ST_CS).
+   size} at off (SH_GBUF_*), where gbuf_tag (spirv_translate.c) found it for stage (ST_VS, ST_FS or ST_CS).
    No size takes 16 bytes, and sizes are capped at 16 MiB and rounded up to words. The vertex stage's 0xb0 holds a
-   bare 64-bit pointer with no size after it, 16 bytes (gbuf_tag tags it for the vertex stage alone). */
+   bare 64-bit pointer with no size after it, 16 bytes (gbuf_tag tags it for the vertex stage alone). A bare address
+   in a program's own constant buffer (gbuf_tag_any, v[2] unread) takes what is mapped from it on, to the cap. */
 int vk_tex_num(const u32* tic, const Surf* t);
 int vk_image_keyable(const ShaderInfo* si, int i);
 int vk_image_key(const ShaderInfo* si, int i, const u32* tic);

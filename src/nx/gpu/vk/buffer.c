@@ -1693,6 +1693,62 @@ int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off) { return buf_get(gva, 
 int vk_buf_get_input(u64 gva, u64 len, u64 align, VkBuffer* buf, u64* off) {
     return buf_get(gva, len, buf, off, 0, align);
 }
+
+/* Windows: guest ranges that storage buffers with no size of their own (a bare address in a program's constant buffer,
+   gbuf_tag_any) are bound inside, so draws whose ranges overlap read one copy of guest memory, each at its own offset
+   into it. Each such buffer takes the 16 MiB after its address (vk_gbuf_desc): one game's terrain tiles, each with its
+   own address about 1 MB after the last, made thirty overlapping copies of 16 MiB, 430 MB, and a write under them made
+   up to sixteen of them copy again. A range in no window gets one of WIN_SIZE from the MiB it starts in, as far as
+   guest memory runs on and short of a window above, which the ranges after it fall in until the next window. Sized up
+   front rather than grown into the union of the ranges that meet it: those come one draw after another, often within a
+   frame, and each growth would copy the whole window again. Windows go when the GPU mappings change (their run of guest
+   memory may have) and when unused for a while, before the cache's entries for them age out */
+#define WIN_N    32
+#define WIN_SIZE (64ull << 20)
+#define WIN_IDLE 1200 /* presents */
+typedef struct {
+    u64 start, end; /* end 0: none */
+    u32 used, gen;  /* the present it was last bound at, g_vb_map_gen when made */
+} Win;
+static Win g_win[WIN_N];
+static int win_live(const Win* w) {
+    return w->end && w->gen == g_vb_map_gen && (u32)(g_vk_present - w->used) < WIN_IDLE;
+}
+int vk_buf_get_window(u64 gva, u64 len, VkBuffer* buf, u64* off) {
+    u64 align = g_vk.props.limits.minStorageBufferOffsetAlignment, at, cpu = 0;
+    int slot = -1;
+    if (!len || gva + len < gva) return 0;
+    for (int i = 0; i < WIN_N && slot < 0; i++)
+        if (win_live(&g_win[i]) && g_win[i].start <= gva && gva + len <= g_win[i].end) slot = i;
+    if (slot < 0) {
+        u64 start = gva & ~((1ull << 20) - 1), run;
+        /* the MiB's start may lie before the run of guest memory the range is in: the range's own start then */
+        if (gmmu_run(start, gva + len - start, &cpu) < gva + len - start) start = gva;
+        run = gmmu_run(start, WIN_SIZE, &cpu) & ~3ull;
+        if (run < gva + len - start) /* not one run: the range alone */
+            return buf_get(gva, len, buf, off, 0, vk_stage_align());
+        /* a window above, which ranges from its start on fall in: this one needs to hold no more than the ranges
+           starting before it, so the two overlap by a range's length at most (ranges come in any order) */
+        for (int i = 0; i < WIN_N; i++)
+            if (win_live(&g_win[i]) && g_win[i].start > gva && g_win[i].start - start < run) {
+                u64 need = g_win[i].start + len - start;
+                if (need < run) run = need;
+            }
+        for (int i = 0; i < WIN_N && slot < 0; i++)
+            if (!win_live(&g_win[i])) slot = i;
+        if (slot < 0) /* all live: the one bound longest ago */
+            for (int i = slot = 0; i < WIN_N; i++)
+                if ((i32)(g_win[i].used - g_win[slot].used) < 0) slot = i;
+        g_win[slot] = (Win){start, start + run, 0, g_vb_map_gen};
+    }
+    g_win[slot].used = g_vk_present;
+    if (!buf_get(g_win[slot].start, g_win[slot].end - g_win[slot].start, buf, &at, 0, vk_stage_align())) return 0;
+    /* a binding's offset must be a multiple of the device's alignment: a range that would land off it is copied
+       alone */
+    if ((at + (gva - g_win[slot].start)) % (align ? align : 1)) return buf_get(gva, len, buf, off, 0, vk_stage_align());
+    *off = at + (gva - g_win[slot].start);
+    return 1;
+}
 /* A draw looks its buffers up one after another, and each lookup waited on two cache misses in a row, its index slot
    and then the entry the slot names: 88% of buf_get's own time in one game. A caller that knows its ranges first
    fetches every slot (step 0), then every entry they name (step 1), so the misses overlap */

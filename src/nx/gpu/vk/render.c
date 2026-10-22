@@ -840,6 +840,12 @@ VkImageView vk_storage_image_view(Surf* t, const ShaderInfo* si, int i, u64* byt
 u32 vk_gbuf_desc(int stage, u32 off, const u32* v, u64* addr) {
     u32 size = stage == ST_VS && off == 0xb0 ? 16 : v[2];
     *addr = ((u64)v[1] << 32) | v[0];
+    if (!shader_gbuf_sized(stage, off) && off != 0xb0) {
+        /* a bare address in the program's own constant buffer has no size beside it: the memory mapped from it on,
+           whole words, to the cap below (Eden binds such a buffer to the end of its mapping, at most 8 MiB) */
+        u64 cpu = 0;
+        size = *addr ? (u32)gmmu_run(*addr, 16u << 20, &cpu) & ~3u : 0;
+    }
     if (!size) size = 16;
     if (size > (16u << 20)) size = 16u << 20;
     return (size + 3) & ~3u;
@@ -1422,9 +1428,14 @@ static void draw_storage_read(const GpuChannel* ch, VkDrawStorage* draw, VkSh* v
         if (cb0 && draw->n[s]) vk_buf_mem_need(cb0, 0x610);
         for (int i = 0; i < draw->n[s]; i++) {
             VkDrawGbuf* b = &draw->b[s][i];
-            u32 v[3] = {0, 0, 0};
-            if (cb0) vk_gmem_words(cb0 + sh[s]->si.gbuf_cbuf_off[i], v, 3);
-            b->size = vk_gbuf_desc(stage, sh[s]->si.gbuf_cbuf_off[i], v, &b->addr);
+            u32 v[3] = {0, 0, 0}, desc = sh[s]->si.gbuf_cbuf_off[i];
+            /* the constant buffer holding the address (SH_GBUF_*): NVN's descriptors in cbuf 0, or one of the
+               program's own */
+            u64 cb = ch->cbind[stage][SH_GBUF_BANK(desc)];
+            if (cb && SH_GBUF_BANK(desc)) vk_buf_mem_need(cb + SH_GBUF_OFFSET(desc), 8);
+            if (cb) vk_gmem_words(cb + SH_GBUF_OFFSET(desc), v, SH_GBUF_BANK(desc) ? 2 : 3);
+            b->size = vk_gbuf_desc(stage, desc, v, &b->addr);
+            b->bare = SH_GBUF_BANK(desc) != 0;
             b->writable = (sh[s]->si.gbuf_wmask >> i) & 1;
         }
     }
@@ -1511,6 +1522,7 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         u64 o;
         int ok = gb->aliased            ? (b = gb->buf, o = gb->off, 1)
                  : addr && gb->writable ? vk_buf_copy_writable(addr, size, &b, &o)
+                 : addr && gb->bare     ? vk_buf_get_window(addr, size, &b, &o)
                  : addr                 ? vk_buf_get(addr, size, &b, &o)
                                         : vk_buf_copy(0, size, &b, &o);
         if (!ok) return VK_NULL_HANDLE;
