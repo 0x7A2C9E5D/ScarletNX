@@ -3,6 +3,7 @@
 #include "3ds/runtime/internal.h"
 #include "3ds/gpu/pica.h"
 #include "3ds/services/dsp.h"
+#include "3ds/services/ptm.h"
 #include "3ds/services/file.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -121,6 +122,8 @@ void snx_ctr_process_free(SnxCtrProcess* p) {
     /* files still open when the process ends close their host files and release their nodes before the tree goes */
     for (uint32_t i = 1; i < CTR_OBJECTS; ++i)
         if (p->objects[i].type == CTR_OBJ_FILE && !p->objects[i].data.file.closed) snx_ctr_file_release(p, i);
+    for (unsigned i = 0; i < CTR_SELF_ARCHIVES; ++i) /* and so do the ExtSaveData archives still open */
+        if (p->self_archives[i].root) fs_tree_release(p->self_archives[i].root);
     snx_ctr_romfs_free(p->romfs);
     if (p->tree) {
         fs_tree_destroy(p->tree);
@@ -143,6 +146,7 @@ SnxCtrProcess* snx_ctr_process_new(const SnxCtrImage* image, SnxCtrModel model) 
     p->title_id = image->title_id;
     memcpy(p->name, image->name, sizeof p->name);
     p->gsp.rights_thread = UINT32_MAX; /* no GPU right holder until an AcquireRight */
+    p->fs_priority = UINT32_MAX;       /* fs:USER's, until a SetPriority (Azahar's starts at -1) */
     p->physical_next = CTR_PHYS_BASE;
     p->physical_end = p->physical_next + p->app_limit;
     p->objects[1] = (CtrObject){.type = CTR_OBJ_PROCESS, .refs = 1};
@@ -239,6 +243,39 @@ bool snx_ctr_process_mount_fs(SnxCtrProcess* p, const char* directory) { return 
 bool snx_ctr_process_mount_cia(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia) {
     return cia && mount(p, directory, cia);
 }
+/* The SMDH's short title, for the window: one of the 16 languages' 0x200-byte entries (short title, 0x40 UTF-16LE
+   units, then the long one and the publisher), English (1) first, then the others in order, as UTF-8 */
+static void smdh_title(const unsigned char* smdh, char out[192]) {
+    out[0] = 0;
+    for (unsigned order = 0; order < 16 && !out[0]; ++order) {
+        const unsigned char* s = smdh + 8 + 0x200 * (order == 0 ? 1 : order == 1 ? 0 : order);
+        size_t n = 0;
+        for (unsigned i = 0; i < 0x40; ++i) {
+            uint32_t cp = (uint32_t)s[i * 2] | (uint32_t)s[i * 2 + 1] << 8;
+            if (!cp) break;
+            if (cp >= 0xd800 && cp < 0xdc00 && i + 1 < 0x40) { /* a surrogate pair */
+                uint32_t low = (uint32_t)s[i * 2 + 2] | (uint32_t)s[i * 2 + 3] << 8;
+                if (low >= 0xdc00 && low < 0xe000) {
+                    cp = 0x10000 + ((cp - 0xd800) << 10) + (low - 0xdc00);
+                    ++i;
+                }
+            }
+            if (cp == '\n') cp = ' '; /* a title broken over two lines is one in a window's */
+            unsigned char u[4];
+            unsigned len = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+            if (len == 1)
+                u[0] = (unsigned char)cp;
+            else {
+                for (unsigned k = len - 1; k > 0; --k, cp >>= 6) u[k] = (unsigned char)(0x80 | (cp & 0x3f));
+                u[0] = (unsigned char)((len == 2 ? 0xc0 : len == 3 ? 0xe0 : 0xf0) | cp);
+            }
+            if (n + len >= 192) break;
+            memcpy(out + n, u, len);
+            n += len;
+        }
+        out[n] = 0;
+    }
+}
 static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia) {
     if (!p || !directory || !*directory || p->tree) return false;
     FsTree* tree = calloc(1, sizeof *tree);
@@ -263,6 +300,17 @@ static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia)
         const unsigned char* image = snx_ctr_cia_romfs(cia, &size);
         /* a CIA without a RomFS reads as an empty one, as its extraction's empty romfs/ folder does */
         ok = ok && snx_ctr_romfs_open_image(image, size, snx_ctr_cia_mtime(cia), &p->romfs);
+        /* the ExeFS files SelfNCCH serves (services/fs.c), in the tree as an extraction's exefs/ has them: copies of
+           the CIA's sections, read-only and never on the host */
+        static const char* const sections[] = {"icon", "logo", "banner"};
+        pm_lock(&tree->lock);
+        for (unsigned i = 0; i < 3 && ok; ++i) {
+            const unsigned char* data = snx_ctr_cia_exefs(cia, sections[i], &size);
+            char path[16];
+            snprintf(path, sizeof path, "exefs/%s", sections[i]);
+            if (data) ok = !fs_tree_add_virtual(tree, path, data, size, NULL);
+        }
+        pm_unlock(&tree->lock);
     } else if (!ok || !snx_ctr_romfs_open(tree, &p->romfs))
         ok = false;
     FsNode* sd = NULL;
@@ -295,6 +343,7 @@ static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia)
         if (f) fclose(f);
         free(path);
     }
+    if (icon && smdh_size >= 0x201c && !memcmp(icon, "SMDH", 4)) smdh_title(icon, p->title);
     if (icon && smdh_size >= 0x201c && !memcmp(icon, "SMDH", 4))
         p->region_lockout = (uint32_t)icon[0x2018] | (uint32_t)icon[0x2019] << 8 | (uint32_t)icon[0x201a] << 16 |
                             (uint32_t)icon[0x201b] << 24;
@@ -303,6 +352,7 @@ static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia)
     if (fs_tree_lookup(tree, NULL, "savedata", &p->save) || !p->save->is_dir) p->save = NULL;
     pm_unlock(&tree->lock);
     snx_ctr_dsp_component_file(p);
+    snx_ctr_ptm_system_data(p);
     return true;
 }
 /* HLE shared pages come from board FCRAM past the application pool, outside

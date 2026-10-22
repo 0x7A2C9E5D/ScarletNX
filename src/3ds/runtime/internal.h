@@ -3,6 +3,7 @@
 #ifndef SNX_CTR_PROCESS_INTERNAL_H
 #define SNX_CTR_PROCESS_INTERNAL_H
 #include "3ds/runtime/ctr_process.h"
+#include "3ds/gpu/y2r.h"
 #include "3ds/kernel/ctr_kernel.h"
 #include "3ds/services/romfs.h"
 #define CTR_HANDLES        256u
@@ -47,7 +48,9 @@ enum { CTR_FILE_VIEW, CTR_FILE_HOST, CTR_FILE_DIR };
    monotonically issued and never reused; the process owns their RomFS backing. */
 typedef struct {
     uint64_t token;
-    uint32_t kind; /* 0: SelfNCCH RomFS view (read-only), 1: SDMC host area, 2: SaveData host area (read-write) */
+    uint32_t kind; /* 0: SelfNCCH RomFS view (read-only), 1: SDMC host area, 2: SaveData host area (read-write),
+                      3: an ExtSaveData's user folder (read-write, its files' sizes fixed) */
+    FsNode* root;  /* kind 3: the user folder, retained while the archive is open */
 } CtrSelfArchive;
 typedef struct {
     SnxArmCPU context; /* inactive architectural prefix only; never the checked adapter */
@@ -77,7 +80,10 @@ typedef struct {
         CtrThread thread;
         struct {
             uint32_t closed, kind, writable;
-            void* host; /* FILE* for CTR_FILE_HOST */
+            uint32_t fixed;    /* an ExtSaveData file: Write stops at its end and SetSize changes nothing */
+            uint32_t priority; /* SetPriority's, given back by GetPriority */
+            uint32_t position; /* CTR_FILE_DIR: the entries Read has given so far */
+            void* host;        /* FILE* for CTR_FILE_HOST */
             void* node; /* FsNode*, retained for the file's lifetime */
         } file;
         struct {
@@ -140,6 +146,17 @@ typedef struct {
     uint16_t semaphore_mask;
     uint64_t next_frame_ns; /* host monotonic deadline of the next audio frame */
 } SnxCtrDspService;
+/* y2r:u: the Y2R engine's configuration as the application set it, and the conversion running (services/y2r.c) */
+typedef struct {
+    SnxCtrY2rConfig config;
+    SnxCtrY2rBuffer streams[SNX_CTR_Y2R_STREAMS]; /* Y, U, V and the output, as SetSending and SetReceiving gave them */
+    SnxCtrY2rBuffer yuyv;                         /* SetSendingYUYV's, which the interleaved input reads */
+    uint16_t dithering[16];
+    uint8_t spacial_dithering, temporal_dithering, transfer_end_interrupt;
+    uint32_t event;   /* the transfer end event (retained), made at the first GetTransferEndEvent or DriverInitialize */
+    uint64_t done_ns; /* host monotonic end of the conversion running, 0 when none is */
+    uint64_t serial;  /* the GPU submission it runs in: it ends no sooner than that is done */
+} SnxCtrY2rService;
 /* hid:USER's sampling (services/hid.c): each update's next deadline, host monotonic ns (0: not running), the index
    each writes next, how many times the game enabled each sensor, and the circle pad's last two raw positions, which
    each sample averages with */
@@ -171,6 +188,7 @@ struct SnxCtrProcess {
     uint32_t next_core, core_thread[4];
     uint32_t last_ipc_service, last_ipc_header;
     uint32_t apt_lock; /* manager-owned object index; independent of client sessions */
+    uint32_t srv_notification; /* srv:'s notification semaphore (retained), made at the first EnableNotification */
     uint32_t apt_phase, apt_notification, apt_parameter;
     uint32_t hid_objects[6]; /* the shared memory, then the events: pad 1, pad 2, accelerometer, gyroscope, debug pad */
     SnxCtrHid hid;
@@ -178,8 +196,10 @@ struct SnxCtrProcess {
     double clock_origin;   /* host monotonic origin for the base ARM11 tick domain */
     CtrSelfArchive self_archives[CTR_SELF_ARCHIVES];
     uint64_t archive_sequence;
+    uint32_t fs_priority; /* fs:USER's SetPriority, UINT32_MAX until one */
     SnxCtrGsp gsp;
     SnxCtrDspService dsp;
+    SnxCtrY2rService y2r;
     uint64_t svc_count, svc_counts[256]; /* all, and each SVC's */
     uint64_t idle_ns, idle_waits;          /* the host time the scheduler slept with no thread to run, and how often */
     /* the codeset GetProcessInfo describes: segments as loaded, BSS, title and name (ExHeader) */
@@ -187,6 +207,7 @@ struct SnxCtrProcess {
     uint32_t bss_size, stack_size; /* the main thread's stack, page-rounded, below SNX_CTR_STACK_TOP */
     uint64_t title_id;
     char name[8];
+    char title[192]; /* the SMDH's short title (English, else the first language that has one), UTF-8; "" without */
     uint32_t region_lockout; /* the SMDH's regions the title runs in, bit per CFG region (0 JPN ... 6 TWN), 0 unknown */
     uint32_t resource_limit; /* CTR_OBJ_RESOURCE_LIMIT object, 0 until the first GetResourceLimit */
     uint32_t ipc_stubs;      /* services whose unknown commands answer success (bit per SNX_CTR_SERVICE_*), with

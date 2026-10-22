@@ -11,8 +11,11 @@
    The board's RAM regions (FCRAM, VRAM, DSP RAM, the New 3DS's extra RAM) are the host memory the guest runs in,
    imported into Vulkan as buffers (VK_EXT_external_memory_host): vertex and index data, textures, render targets'
    load and store, transfers and the shown framebuffers are read and written in place on the GPU, and nothing of them
-   is copied by the CPU. Work is recorded into one command buffer until snx_ctr_vk_finish submits it and waits: the
-   GX commands' ends do, as the guest's CPU may read what they wrote once their interrupt comes. */
+   is copied by the CPU. Work is recorded into a command buffer until it is submitted, a few submissions in flight
+   at once, each with a serial: nothing waits for the GPU but what needs its results. The guest's CPU finds them
+   through write tracking (memory/ctr_memory.h): the pages the GPU writes, or keeps newer in its render targets, trap
+   until they are in memory, and the GSP's interrupts come when the submission is done. */
+#define SNX_CTR_VK_SLOTS 4
 typedef struct {
     VkBuffer buffer;
     VkDeviceMemory memory;
@@ -33,12 +36,19 @@ typedef struct {
     unsigned ram_count;
     SDL_Window* window;
     VkSurfaceKHR surface;
-    /* the open recording, and what it allocated that lives until it is submitted and done */
+    SnxCtrMemory* memory; /* the board's, whose RAM the renderer tracks */
     VkCommandPool pool;
-    VkCommandBuffer cb;
-    VkFence fence;
-    VkDescriptorPool descriptors;
+    /* the submissions in flight, a ring: each recording's command buffer, fence and descriptor sets, free again once
+       its fence passed and its serial is completed */
+    struct {
+        VkCommandBuffer cb;
+        VkFence fence;
+        VkDescriptorPool descriptors;
+        uint64_t serial; /* 0: never submitted */
+    } slots[SNX_CTR_VK_SLOTS];
+    unsigned slot; /* the recording's, or the next one's */
     bool recording;
+    uint64_t submitted, completed;
 } SnxCtrVk;
 /* the device, once snx_ctr_vk_init made it; NULL before */
 SnxCtrVk* snx_ctr_vk(void);
@@ -47,14 +57,25 @@ SnxCtrVk* snx_ctr_vk(void);
    VK_EXT_external_memory_host */
 bool snx_ctr_vk_init(SnxCtrMemory* memory, char* error, size_t error_size);
 void snx_ctr_vk_free(void);
-/* the open command buffer, begun if none was */
+/* the open command buffer, begun if none was (in a slot free again, which may wait for its submission) */
 VkCommandBuffer snx_ctr_vk_commands(void);
-/* the recording submitted and done: its writes are in guest memory, its descriptor sets free again. Nothing when
-   nothing was recorded */
+/* The recording submitted, without waiting: its serial (the last one's when nothing was recorded and there is no
+   semaphore). wait and signal, when not null, are a swapchain's acquire and present semaphores */
+uint64_t snx_ctr_vk_submit(void);
+uint64_t snx_ctr_vk_submit_with(VkSemaphore wait, VkSemaphore signal);
+/* the serial the open recording (or the next) will have */
+uint64_t snx_ctr_vk_serial(void);
+/* the submissions done so far, without waiting: their slots free again. The last serial done */
+uint64_t snx_ctr_vk_poll(void);
+/* until serial is done (submitting the recording first when serial is its), or timeout_ns passed (UINT64_MAX: no
+   bound). True when it is done */
+bool snx_ctr_vk_wait(uint64_t serial, uint64_t timeout_ns);
+/* the recording submitted and waited for: everything the GPU wrote is in guest memory but what the render targets
+   keep newer (write tracking lands it when touched) */
 bool snx_ctr_vk_finish(void);
-/* the same, the submission waiting for wait first and signaling signal when done (a swapchain's acquire and present) */
-bool snx_ctr_vk_finish_with(VkSemaphore wait, VkSemaphore signal);
-/* a descriptor set of the layout, valid until the next snx_ctr_vk_finish */
+/* the slot of the open recording (or the next): per-submission resources are kept by it */
+unsigned snx_ctr_vk_slot(void);
+/* a descriptor set of the layout for the open recording, free again when its submission is done */
 VkDescriptorSet snx_ctr_vk_set(VkDescriptorSetLayout layout);
 /* the imported region that holds [pa, pa + size), and pa's offset into it; NULL when no RAM region holds it whole */
 const SnxCtrVkRam* snx_ctr_vk_ram(uint32_t pa, uint32_t size, VkDeviceSize* offset);

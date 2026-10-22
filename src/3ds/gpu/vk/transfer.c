@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors
    The transfer engine on the GPU: memory fills, display transfers and texture copies as compute shaders over the
-   guest's RAM in place (the shaders folder's .comp files). gpu/transfer.c is their CPU reference, which the tests hold them to; its
+   guest's RAM in place (the shaders folder's .comp files), with no wait: the memory they write is the GPU's until
+   their submission is done (snx_ctr_vk_sync). gpu/transfer.c is their CPU reference, which the tests hold them to; its
    span functions bound what each dispatch may reach, checked here before it is recorded. */
 #include "3ds/gpu/vk/vk_transfer.h"
 #include "3ds/gpu/vk/vk_render.h"
@@ -61,7 +62,7 @@ SnxCtrXferResult snx_ctr_vk_fill(uint32_t pa, uint32_t size, uint32_t value, uin
     if (!snx_ctr_vk_window(pa, size, &w, &inside)) return SNX_CTR_XFER_BOUNDS;
     uint32_t width = control & SNX_CTR_FILL_24BIT ? 3 : control & SNX_CTR_FILL_32BIT ? 4 : 2;
     uint32_t push[4] = {inside, size, value, width};
-    snx_ctr_vk_render_flush(); /* the draws before it in guest memory first */
+    snx_ctr_vk_sync(pa, size, true); /* what the GPU kept of it stored or let go of, then written */
     VkCommandBuffer cb = snx_ctr_vk_commands();
     snx_ctr_vk_barrier(cb);
     bind(cb, &g_transfer.fill, &w, 1, push, sizeof push);
@@ -95,7 +96,8 @@ SnxCtrXferResult snx_ctr_vk_display_transfer(const SnxCtrDisplayTransfer* t, uin
                          (flags & SNX_CTR_XFER_FLIP ? 1u : 0u) | (flags & SNX_CTR_XFER_LINEAR ? 2u : 0u) |
                              (flags & SNX_CTR_XFER_NO_SWIZZLE ? 4u : 0u),
                          skew};
-    snx_ctr_vk_render_flush(); /* the draws before it in guest memory first */
+    snx_ctr_vk_sync(input, (uint32_t)in_bytes, false); /* the draws over its input stored first */
+    snx_ctr_vk_sync(output, (uint32_t)out_bytes, true);
     VkCommandBuffer cb = snx_ctr_vk_commands();
     snx_ctr_vk_barrier(cb);
     bind(cb, &g_transfer.display, w, 2, push, sizeof push);
@@ -119,7 +121,8 @@ SnxCtrXferResult snx_ctr_vk_texture_copy(const SnxCtrTextureCopy* t, uint32_t in
                         in_gap,
                         out_gap ? (t->output_line & 0xffff) * 16 : size,
                         out_gap};
-    snx_ctr_vk_render_flush(); /* the draws before it in guest memory first */
+    snx_ctr_vk_sync(input, (uint32_t)in_bytes, false);
+    snx_ctr_vk_sync(output, (uint32_t)out_bytes, true);
     VkCommandBuffer cb = snx_ctr_vk_commands();
     snx_ctr_vk_barrier(cb);
     bind(cb, &g_transfer.copy, w, 2, push, sizeof push);

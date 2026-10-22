@@ -14,7 +14,7 @@ static const char* const names[] = {
     "ac:u",     "ac:i",     "act:u",   "boss:U",   "boss:P",   "cam:u",   "cecd:u", "cecd:s",
     "csnd:SND", "dlp:FKCL", "dlp:SRVR", "dlp:CLNT", "frd:u",  "frd:a",    "http:C",  "ir:USER", "ir:u",
     "ir:rst",   "ldr:ro",   "mic:u",   "mvd:STD", "ndm:u",    "news:u",   "news:s",  "nim:aoc", "nim:u",
-    "nwm::UDS", "pxi:dev",  "qtm:u",   "soc:U",   "ssl:C",    "y2r:u",    "nfc:u",   "nfc:m",  "cdc:CSN",
+    "nwm::UDS", "pxi:dev",  "qtm:u",   "soc:U",   "ssl:C",    "nfc:u",   "nfc:m",  "cdc:CSN",
 };
 _Static_assert(sizeof names / sizeof *names + 16 < 256, "a name index per session, stand-ins included");
 uint32_t snx_ctr_system_open(SnxCtrProcess* p, const uint8_t* name, uint32_t length, uint32_t* session) {

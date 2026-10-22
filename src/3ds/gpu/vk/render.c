@@ -19,9 +19,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define RING_SIZE (32u << 20) /* the uploads of one recording: uniforms, LUTs, default and immediate vertices */
-#define TEXTURES 96           /* textures decoded in one recording */
-#define SPARE_IMAGES 64       /* texture images kept for the next recordings */
+#define RING_SIZE (32u << 20) /* the uploads, a part for each submission slot: uniforms, LUTs, default and immediate
+                                 vertices */
+#define RING_PART (RING_SIZE / SNX_CTR_VK_SLOTS)
+#define TEXTURES  512 /* textures kept decoded */
+#define TARGETS   32  /* render targets kept */
+#define SPANS     4096 /* the memory spans a submission reads or writes, re-levelled when it is done */
 
 enum {
     CULL_MODE = 0x040,
@@ -71,19 +74,41 @@ typedef struct {
     uint32_t color_pa, depth_pa, width, height;
     uint8_t color_format, depth_format, flip, pad; /* color in transfer.h's order; depth 0 D16, 2 D24, 3 D24S8 */
 } TargetKey;
+/* A render target kept: its images hold memory's contents when valid, and newer ones when dirty (drawn into since they
+   were loaded or stored), whose memory is the GPU's until they are stored */
 typedef struct {
-    uint32_t width, height;
+    TargetKey key;
     Image color, depth;
     VkBuffer scratch; /* depth words, then stencil bytes from stencil_at, between the image and the guest's layout */
     VkDeviceMemory scratch_memory;
     VkDeviceSize stencil_at;
-} TargetImages;
+    bool color_valid, depth_valid, color_dirty, depth_dirty;
+    uint64_t used; /* the last submission's serial that drew into it or read it */
+} Target;
 
+/* A texture kept decoded while its memory is unchanged (valid); an invalid one's image is reused */
 typedef struct {
     uint32_t pa[6], format, width, height, levels, bytes;
     bool cube, valid;
     Image image;
+    uint64_t used;
 } Texture;
+/* What the GPU keeps of a RAM page and does with it: the submissions that last read and wrote it, the targets and
+   textures kept of it, the dirty targets over it. Its write-tracking level follows (levels()) */
+typedef struct {
+    uint64_t read, write;
+    uint16_t kept, dirty;
+} PageState;
+typedef struct {
+    uint32_t pa, size;
+} Span;
+/* an image (or a target's scratch buffer) no longer kept, destroyed once the submissions that may use it are done */
+typedef struct {
+    Image image;
+    VkBuffer buffer;
+    VkDeviceMemory memory;
+    uint64_t serial;
+} Dead;
 
 /* what picks a pipeline besides its shaders: plain data, zeroed before it is filled */
 typedef struct {
@@ -131,7 +156,8 @@ static struct {
     VkBuffer ring;
     VkDeviceMemory ring_memory;
     unsigned char* ring_map;
-    VkDeviceSize ring_at, align;
+    VkDeviceSize ring_at, align; /* ring_at: in the open slot's part */
+    unsigned slot;               /* the open recording's */
     Image dummy, dummy_cube;
     struct {
         uint32_t key;
@@ -144,18 +170,22 @@ static struct {
     size_t fs_count, fs_capacity;
     Pipe* pipes;
     size_t pipe_count, pipe_capacity;
-    TargetImages* targets;
-    size_t target_count, target_capacity;
-    /* the target the draws go to: its images, and whether they were drawn into since they were loaded */
-    TargetKey key;
-    size_t open;
-    bool opened, rendering, color_dirty, depth_dirty;
+    Target targets[TARGETS];
+    unsigned target_count;
+    /* the target the draws go to, and whether its rendering pass is open */
+    unsigned open;
+    bool opened, rendering;
     Texture textures[TEXTURES];
     unsigned texture_count;
-    Image spare[SPARE_IMAGES];
-    unsigned spare_count;
-    VkBufferView* views;
-    size_t view_count, view_capacity;
+    PageState* pages; /* every RAM page of the device's regions, in their order */
+    uint32_t page_count;
+    Span* spans[SNX_CTR_VK_SLOTS]; /* what each slot's submission reads or writes */
+    size_t span_count[SNX_CTR_VK_SLOTS], span_capacity[SNX_CTR_VK_SLOTS];
+    Dead* dead;
+    size_t dead_count, dead_capacity;
+    /* each slot's buffer views, destroyed when its submission is done */
+    VkBufferView* views[SNX_CTR_VK_SLOTS];
+    size_t view_count[SNX_CTR_VK_SLOTS], view_capacity[SNX_CTR_VK_SLOTS];
     /* the recording's last uploads, reused while they hold the same */
     bool vs_uploaded, fs_uploaded, lut_uploaded;
     SnxCtrVsPica vs_pica;
@@ -361,10 +391,12 @@ static bool made(void) {
     return true;
 }
 
+/* room in the open slot's part of the ring: its offset in the ring */
 static bool ring(VkDeviceSize size, VkDeviceSize* at) {
+    snx_ctr_vk_commands(); /* the open recording's slot */
     VkDeviceSize start = (g.ring_at + g.align - 1) / g.align * g.align;
-    if (start + size > RING_SIZE) return false;
-    *at = start;
+    if (start + size > RING_PART) return false;
+    *at = (VkDeviceSize)g.slot * RING_PART + start;
     g.ring_at = start + size;
     return true;
 }
@@ -374,12 +406,13 @@ static bool upload(const void* data, VkDeviceSize size, VkDeviceSize* at) {
     return true;
 }
 static bool texel_view(VkDeviceSize at, VkDeviceSize size, VkFormat format, VkBufferView* view) {
-    if (g.view_count == g.view_capacity) {
-        size_t n = g.view_capacity ? g.view_capacity * 2 : 64;
-        VkBufferView* views = (VkBufferView*)realloc(g.views, n * sizeof *views);
+    unsigned s = g.slot;
+    if (g.view_count[s] == g.view_capacity[s]) {
+        size_t n = g.view_capacity[s] ? g.view_capacity[s] * 2 : 64;
+        VkBufferView* views = (VkBufferView*)realloc(g.views[s], n * sizeof *views);
         if (!views) return false;
-        g.views = views;
-        g.view_capacity = n;
+        g.views[s] = views;
+        g.view_capacity[s] = n;
     }
     VkBufferViewCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO,
                                  .buffer = g.ring,
@@ -387,7 +420,7 @@ static bool texel_view(VkDeviceSize at, VkDeviceSize size, VkFormat format, VkBu
                                  .offset = at,
                                  .range = size};
     if (vkCreateBufferView(device(), &bi, NULL, view) != VK_SUCCESS) return false;
-    g.views[g.view_count++] = *view;
+    g.views[s][g.view_count[s]++] = *view;
     return true;
 }
 
@@ -425,66 +458,171 @@ static bool dispatch(const SnxCtrVkCompute* c, const SnxCtrVkWindow* windows, un
     return true;
 }
 
-/* ---- render targets ---- */
+/* ---- render targets and what the GPU keeps of memory ---- */
 
 static unsigned color_bytes(unsigned format) { return format == 0 ? 4 : format == 1 ? 3 : 2; }
 static unsigned depth_bytes(unsigned format) { return format == 0 ? 2 : format == 2 ? 3 : 4; }
+static bool overlaps(uint32_t a, uint64_t a_size, uint32_t b, uint64_t b_size) {
+    return a < (uint64_t)b + b_size && b < (uint64_t)a + a_size;
+}
+/* a target's colour and depth spans in memory (depth's 0 bytes without one) */
+static uint64_t color_span(const TargetKey* k) {
+    return (uint64_t)k->width * k->height * color_bytes(k->color_format);
+}
+static uint64_t depth_span(const TargetKey* k) {
+    return k->depth_format == NO_DEPTH ? 0 : (uint64_t)k->width * k->height * depth_bytes(k->depth_format);
+}
+/* the state of the RAM page holding pa, NULL outside RAM (the pages made at the first use) */
+static PageState* page_state(uint32_t pa) {
+    SnxCtrVk* v = snx_ctr_vk();
+    if (!v) return NULL;
+    if (!g.pages) {
+        uint32_t n = 0;
+        for (unsigned i = 0; i < v->ram_count; ++i) n += v->ram[i].size / 4096;
+        g.pages = (PageState*)calloc(n ? n : 1, sizeof *g.pages);
+        if (!g.pages) return NULL;
+        g.page_count = n;
+    }
+    uint32_t index = 0;
+    for (unsigned i = 0; i < v->ram_count; ++i) {
+        if (pa >= v->ram[i].base && pa - v->ram[i].base < v->ram[i].size)
+            return &g.pages[index + (pa - v->ram[i].base) / 4096];
+        index += v->ram[i].size / 4096;
+    }
+    return NULL;
+}
+/* The level write tracking gives each page of [pa, pa + size): the GPU's (OWN) under a dirty target or a write not
+   done, watched under something kept or a read not done (a write waits for that read), the CPU's otherwise */
+static void levels(uint32_t pa, uint64_t size) {
+    SnxCtrVk* v = snx_ctr_vk();
+    if (!v || !v->memory || !size) return;
+    for (uint64_t at = pa & ~4095u; at < (uint64_t)pa + size; at += 4096) {
+        PageState* page = page_state((uint32_t)at);
+        if (!page) continue;
+        SnxCtrTrackLevel l = page->dirty || page->write > v->completed ? SNX_CTR_TRACK_OWN
+                             : page->kept || page->read > v->completed ? SNX_CTR_TRACK_WATCH
+                                                                       : SNX_CTR_TRACK_NONE;
+        snx_ctr_track_set(v->memory, (uint32_t)at, 4096, l);
+    }
+}
+/* targets and textures kept of [pa, pa + size) (kept), and dirty targets over it (dirty), counted in or out */
+static void count(uint32_t pa, uint64_t size, int kept, int dirty) {
+    if (!size) return;
+    for (uint64_t at = pa & ~4095u; at < (uint64_t)pa + size; at += 4096) {
+        PageState* page = page_state((uint32_t)at);
+        if (!page) continue;
+        page->kept = (uint16_t)(page->kept + kept);
+        page->dirty = (uint16_t)(page->dirty + dirty);
+    }
+    levels(pa, size);
+}
+/* the open recording reads [pa, pa + size), or writes it: its pages wait for its submission (a CPU write for a read, any
+   access for a write), and are levelled again when it is done */
+static void gpu_uses(uint32_t pa, uint64_t size, bool write) {
+    if (!size || !snx_ctr_vk()) return;
+    snx_ctr_vk_commands(); /* the open recording's slot */
+    uint64_t serial = snx_ctr_vk_serial();
+    for (uint64_t at = pa & ~4095u; at < (uint64_t)pa + size; at += 4096) {
+        PageState* page = page_state((uint32_t)at);
+        if (!page) continue;
+        if (write)
+            page->write = serial;
+        else
+            page->read = serial;
+    }
+    unsigned slot = g.slot;
+    Span* last = g.span_count[slot] ? &g.spans[slot][g.span_count[slot] - 1] : NULL;
+    if (last && last->pa <= pa && (uint64_t)last->pa + last->size >= (uint64_t)pa + size) {
+        /* within the last one */
+    } else if (last && (uint64_t)last->pa + last->size == pa && last->size + size <= UINT32_MAX)
+        last->size += (uint32_t)size;
+    else {
+        if (g.span_count[slot] == g.span_capacity[slot] && g.span_capacity[slot] < SPANS) {
+            size_t n = g.span_capacity[slot] ? g.span_capacity[slot] * 2 : 256;
+            Span* grown = (Span*)realloc(g.spans[slot], n * sizeof *grown);
+            if (grown) {
+                g.spans[slot] = grown;
+                g.span_capacity[slot] = n;
+            }
+        }
+        if (g.span_count[slot] < g.span_capacity[slot])
+            g.spans[slot][g.span_count[slot]++] = (Span){pa, (uint32_t)(size > UINT32_MAX ? UINT32_MAX : size)};
+        else if (last) { /* no room: the last one grows over this one too, and more is levelled again than needed */
+            uint64_t start = pa < last->pa ? pa : last->pa;
+            uint64_t end = (uint64_t)pa + size > (uint64_t)last->pa + last->size ? (uint64_t)pa + size
+                                                                                   : (uint64_t)last->pa + last->size;
+            last->pa = (uint32_t)start;
+            last->size = (uint32_t)(end - start > UINT32_MAX ? UINT32_MAX : end - start);
+        }
+    }
+    levels(pa, size);
+}
+/* A target's colour (or depth) images as kept: holding what memory does (valid), or newer (dirty). Every change goes
+   through here, so the pages count them */
+static void set_color(Target* t, bool valid, bool dirty) {
+    if (valid != t->color_valid) count(t->key.color_pa, color_span(&t->key), valid ? 1 : -1, 0);
+    if (dirty != t->color_dirty) count(t->key.color_pa, color_span(&t->key), 0, dirty ? 1 : -1);
+    t->color_valid = valid;
+    t->color_dirty = dirty;
+}
+static void set_depth(Target* t, bool valid, bool dirty) {
+    if (valid != t->depth_valid) count(t->key.depth_pa, depth_span(&t->key), valid ? 1 : -1, 0);
+    if (dirty != t->depth_dirty) count(t->key.depth_pa, depth_span(&t->key), 0, dirty ? 1 : -1);
+    t->depth_valid = valid;
+    t->depth_dirty = dirty;
+}
+/* a texture kept decoded, or not: its faces' pages count it */
+static void set_texture(Texture* t, bool valid) {
+    if (valid == t->valid) return;
+    t->valid = valid;
+    for (unsigned f = 0; f < (t->cube ? 6u : 1u); ++f) count(t->pa[f], t->bytes, valid ? 1 : -1, 0);
+}
+static void dead_free(Dead* d) {
+    image_free(&d->image);
+    if (d->buffer) vkDestroyBuffer(device(), d->buffer, NULL);
+    if (d->memory) vkFreeMemory(device(), d->memory, NULL);
+}
+/* an image or buffer the recordings in flight, the open one included, may still use: destroyed when they are done */
+static void bury(Image* image, VkBuffer* buffer, VkDeviceMemory* memory) {
+    Dead d = {*image, buffer ? *buffer : VK_NULL_HANDLE, memory ? *memory : VK_NULL_HANDLE, snx_ctr_vk_serial()};
+    memset(image, 0, sizeof *image);
+    if (buffer) *buffer = VK_NULL_HANDLE;
+    if (memory) *memory = VK_NULL_HANDLE;
+    if (!d.image.image && !d.buffer) return;
+    if (g.dead_count == g.dead_capacity) {
+        size_t n = g.dead_capacity ? g.dead_capacity * 2 : 32;
+        Dead* grown = (Dead*)realloc(g.dead, n * sizeof *grown);
+        if (!grown) { /* no room to keep it: wait for the device instead */
+            vkDeviceWaitIdle(device());
+            dead_free(&d);
+            return;
+        }
+        g.dead = grown;
+        g.dead_capacity = n;
+    }
+    g.dead[g.dead_count++] = d;
+}
 static void end_rendering(void) {
     if (!g.rendering) return;
     vkCmdEndRendering(snx_ctr_vk_commands());
     g.rendering = false;
 }
-static TargetImages* target_images(uint32_t width, uint32_t height) {
-    for (size_t i = 0; i < g.target_count; ++i)
-        if (g.targets[i].width == width && g.targets[i].height == height) return &g.targets[i];
-    if (g.target_count == g.target_capacity) {
-        size_t n = g.target_capacity ? g.target_capacity * 2 : 4;
-        TargetImages* t = (TargetImages*)realloc(g.targets, n * sizeof *t);
-        if (!t) return NULL;
-        g.targets = t;
-        g.target_capacity = n;
-    }
-    TargetImages* t = &g.targets[g.target_count];
-    memset(t, 0, sizeof *t);
-    VkDeviceSize pixels = (VkDeviceSize)width * height;
-    VkDeviceSize alignment = snx_ctr_vk()->properties.limits.minStorageBufferOffsetAlignment;
-    if (alignment < 4) alignment = 4;
-    t->stencil_at = (pixels * 4 + alignment - 1) / alignment * alignment;
-    if (!image_new(VK_FORMAT_R8G8B8A8_UNORM, width, height, 1, 1,
-                   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT, &t->color))
-        return NULL;
-    if (!image_new(g.depth_format, width, height, 1, 1,
-                   VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                       VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                   &t->depth) ||
-        !buffer_new(t->stencil_at + (pixels + 3) / 4 * 4,
-                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &t->scratch, &t->scratch_memory)) {
-        image_free(&t->color);
-        image_free(&t->depth);
-        return NULL;
-    }
-    t->width = width;
-    t->height = height;
-    return &g.targets[g.target_count++];
-}
-/* the target's color, and its depth and stencil, moved between the guest's memory and its images (store: to memory) */
-static bool target_move(bool store, bool color, bool depth) {
-    TargetImages* t = &g.targets[g.open];
-    const TargetKey* k = &g.key;
+/* the target's colour, and its depth and stencil, moved between the guest's memory and its images (store: to memory,
+   which is then the GPU's until the recording is done) */
+static bool target_move(Target* t, bool store, bool color, bool depth) {
+    const TargetKey* k = &t->key;
     VkCommandBuffer cb = snx_ctr_vk_commands();
     VkDeviceSize pixels = (VkDeviceSize)k->width * k->height;
     SnxCtrVkWindow w[3];
     uint32_t inside;
+    if (store && &g.targets[g.open] == t) end_rendering();
     snx_ctr_vk_barrier(cb);
-    if (color) {
-        if (!snx_ctr_vk_window(k->color_pa, pixels * color_bytes(k->color_format), &w[0], &inside)) return true;
+    if (color && snx_ctr_vk_window(k->color_pa, color_span(k), &w[0], &inside)) {
         uint32_t push[6] = {inside, k->width, k->height, k->color_format, k->flip, store};
         if (!dispatch(&g.color, w, 1, t->color.view, push, sizeof push, k->width, k->height)) return false;
+        gpu_uses(k->color_pa, color_span(k), store);
     }
-    if (depth && k->depth_format != NO_DEPTH &&
-        snx_ctr_vk_window(k->depth_pa, pixels * depth_bytes(k->depth_format), &w[0], &inside)) {
+    if (depth && k->depth_format != NO_DEPTH && snx_ctr_vk_window(k->depth_pa, depth_span(k), &w[0], &inside)) {
         VkBufferImageCopy copies[2] = {
             {0, k->width, k->height, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1}, {0, 0, 0}, {k->width, k->height, 1}},
             {t->stencil_at, k->width, k->height, {VK_IMAGE_ASPECT_STENCIL_BIT, 0, 0, 1}, {0, 0, 0},
@@ -501,33 +639,157 @@ static bool target_move(bool store, bool color, bool depth) {
             snx_ctr_vk_barrier(cb);
             vkCmdCopyBufferToImage(cb, t->scratch, t->depth.image, VK_IMAGE_LAYOUT_GENERAL, 2, copies);
         }
+        gpu_uses(k->depth_pa, depth_span(k), store);
     }
     snx_ctr_vk_barrier(cb);
     return true;
 }
-/* the open target stored where it was drawn into */
-static bool target_store(void) {
-    if (!g.opened) return true;
-    end_rendering();
-    if ((g.color_dirty || g.depth_dirty) && !target_move(true, g.color_dirty, g.depth_dirty)) return false;
-    g.color_dirty = g.depth_dirty = false;
+/* a dirty target's newer contents written to memory, on the GPU: the target is clean, its memory the GPU's until the
+   recording is done */
+static bool target_store(Target* t) {
+    if (!t->color_dirty && !t->depth_dirty) return true;
+    if (!target_move(t, true, t->color_dirty, t->depth_dirty)) return false;
+    set_color(t, t->color_valid, false);
+    set_depth(t, t->depth_valid, false);
     return true;
 }
-static bool overlaps(uint32_t a, uint64_t a_size, uint32_t b, uint64_t b_size) {
-    return a < (uint64_t)b + b_size && b < (uint64_t)a + a_size;
+/* every dirty target over [pa, pa + size) stored */
+static bool store_over(uint32_t pa, uint64_t size) {
+    for (unsigned i = 0; i < g.target_count; ++i) {
+        Target* t = &g.targets[i];
+        if (((t->color_dirty && overlaps(pa, size, t->key.color_pa, color_span(&t->key))) ||
+             (t->depth_dirty && overlaps(pa, size, t->key.depth_pa, depth_span(&t->key)))) &&
+            !target_store(t))
+            return false;
+    }
+    return true;
 }
-/* the draw's target open: the one open, or this one loaded after the open one is stored */
+/* the textures decoded from [pa, pa + size) dropped: its memory changed, or is about to */
+static void drop_textures(uint32_t pa, uint64_t size) {
+    for (unsigned i = 0; i < g.texture_count; ++i) {
+        Texture* t = &g.textures[i];
+        bool over = false;
+        for (unsigned f = 0; t->valid && f < (t->cube ? 6u : 1u); ++f) over = over || overlaps(pa, size, t->pa[f], t->bytes);
+        if (over) set_texture(t, false);
+    }
+}
+/* what was kept of [pa, pa + size) is stale (memory changed under it): textures dropped, targets' images to be loaded
+   again. A dirty one was stored before */
+static void stale(uint32_t pa, uint64_t size) {
+    drop_textures(pa, size);
+    for (unsigned i = 0; i < g.target_count; ++i) {
+        Target* t = &g.targets[i];
+        bool color = overlaps(pa, size, t->key.color_pa, color_span(&t->key));
+        bool depth = overlaps(pa, size, t->key.depth_pa, depth_span(&t->key));
+        if (color) set_color(t, false, t->color_dirty);
+        if (depth) set_depth(t, false, t->depth_dirty);
+        if ((color || depth) && g.opened && g.open == i) { /* the draws load it again first */
+            end_rendering();
+            g.opened = false;
+        }
+    }
+}
+static bool target_images(Target* t, uint32_t width, uint32_t height) {
+    VkDeviceSize pixels = (VkDeviceSize)width * height;
+    VkDeviceSize alignment = snx_ctr_vk()->properties.limits.minStorageBufferOffsetAlignment;
+    if (alignment < 4) alignment = 4;
+    t->stencil_at = (pixels * 4 + alignment - 1) / alignment * alignment;
+    if (!image_new(VK_FORMAT_R8G8B8A8_UNORM, width, height, 1, 1,
+                   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT, &t->color))
+        return false;
+    if (!image_new(g.depth_format, width, height, 1, 1,
+                   VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                       VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                   &t->depth) ||
+        !buffer_new(t->stencil_at + (pixels + 3) / 4 * 4,
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &t->scratch, &t->scratch_memory)) {
+        image_free(&t->color);
+        image_free(&t->depth);
+        return false;
+    }
+    return true;
+}
+static void target_free(Target* t) {
+    image_free(&t->color);
+    image_free(&t->depth);
+    if (t->scratch) vkDestroyBuffer(device(), t->scratch, NULL);
+    if (t->scratch_memory) vkFreeMemory(device(), t->scratch_memory, NULL);
+    t->scratch = VK_NULL_HANDLE;
+    t->scratch_memory = VK_NULL_HANDLE;
+}
+/* a target for key: the one kept, or a new one (the least used one stored and let go of when they are all taken) */
+static Target* target_find(const TargetKey* k) {
+    for (unsigned i = 0; i < g.target_count; ++i)
+        if (!memcmp(&g.targets[i].key, k, sizeof *k)) return &g.targets[i];
+    Target* t = NULL;
+    if (g.target_count < TARGETS)
+        t = &g.targets[g.target_count];
+    else {
+        for (unsigned i = 0; i < TARGETS; ++i)
+            if ((!g.opened || g.open != i) && (!t || g.targets[i].used < t->used)) t = &g.targets[i];
+        if (!target_store(t)) return NULL;
+        set_color(t, false, false);
+        set_depth(t, false, false);
+        /* its images may be in the recordings in flight: they go when those are done */
+        bury(&t->color, NULL, NULL);
+        bury(&t->depth, &t->scratch, &t->scratch_memory);
+    }
+    memset(t, 0, sizeof *t);
+    if (!target_images(t, k->width, k->height)) return NULL;
+    t->key = *k;
+    if (t == &g.targets[g.target_count]) ++g.target_count;
+    return t;
+}
+/* the draw's target open: the one kept for key, loaded from memory unless its images hold what memory does. Other
+   targets over the same memory are stored first, and are stale from now on */
 static SnxCtrPicaResult target_open(const TargetKey* k) {
-    if (g.opened && !memcmp(k, &g.key, sizeof *k)) return SNX_CTR_PICA_OK;
-    if (!target_store()) return AGAIN;
+    if (g.opened && !memcmp(k, &g.targets[g.open].key, sizeof *k)) return SNX_CTR_PICA_OK;
+    end_rendering();
     g.opened = false;
-    TargetImages* t = target_images(k->width, k->height);
+    Target* t = target_find(k);
     if (!t) return SNX_CTR_PICA_UNSUPPORTED;
-    g.open = (size_t)(t - g.targets);
-    g.key = *k;
-    if (!target_move(false, true, true)) return AGAIN;
+    for (unsigned i = 0; i < g.target_count; ++i) {
+        Target* u = &g.targets[i];
+        if (u == t) continue;
+        bool color = overlaps(u->key.color_pa, color_span(&u->key), k->color_pa, color_span(k)) ||
+                     overlaps(u->key.color_pa, color_span(&u->key), k->depth_pa, depth_span(k));
+        bool depth = overlaps(u->key.depth_pa, depth_span(&u->key), k->color_pa, color_span(k)) ||
+                     overlaps(u->key.depth_pa, depth_span(&u->key), k->depth_pa, depth_span(k));
+        if (!color && !depth) continue;
+        if (!target_store(u)) return AGAIN;
+        if (color) set_color(u, false, u->color_dirty);
+        if (depth) set_depth(u, false, u->depth_dirty);
+    }
+    bool color = !t->color_valid, depth = !t->depth_valid && k->depth_format != NO_DEPTH;
+    if ((color || depth) && !target_move(t, false, color, depth)) return AGAIN;
+    set_color(t, true, t->color_dirty);
+    set_depth(t, true, t->depth_dirty);
+    t->used = snx_ctr_vk_serial();
+    g.open = (unsigned)(t - g.targets);
     g.opened = true;
     return SNX_CTR_PICA_OK;
+}
+void snx_ctr_vk_sync(uint32_t pa, uint32_t size, bool write) {
+    if (!size || !snx_ctr_vk()) return;
+    if (g.made && !store_over(pa, size)) fprintf(stderr, "3ds gpu: a render target could not be stored\n");
+    if (write) stale(pa, size);
+    gpu_uses(pa, size, write);
+}
+void snx_ctr_vk_track(void* context, uint32_t pa, SnxCtrTrackLevel level) {
+    (void)context;
+    if (level == SNX_CTR_TRACK_OWN) {
+        /* the page's newer contents: its targets stored, then every GPU write to it waited for */
+        if (g.made) (void)store_over(pa, 4096);
+        PageState* page = page_state(pa);
+        if (page && page->write) (void)snx_ctr_vk_wait(page->write, UINT64_MAX);
+    } else { /* the CPU writes it: after the GPU's reads of it, and what the GPU made of it is stale */
+        PageState* page = page_state(pa);
+        if (page && page->read) (void)snx_ctr_vk_wait(page->read, UINT64_MAX);
+        stale(pa, 4096);
+    }
+    levels(pa, 4096);
 }
 
 /* ---- textures ---- */
@@ -563,19 +825,39 @@ static VkSampler sampler(uint32_t key) {
     g.samplers[g.sampler_count++].sampler = s;
     return s;
 }
-/* an image for a texture of this shape: one kept from an earlier recording, or a new one */
-static bool texture_image(uint32_t width, uint32_t height, uint32_t levels, uint32_t layers, Image* m) {
-    for (unsigned i = 0; i < g.spare_count; ++i)
-        if (g.spare[i].width == width && g.spare[i].height == height && g.spare[i].level_count == levels &&
-            g.spare[i].layers == layers) {
-            *m = g.spare[i];
-            g.spare[i] = g.spare[--g.spare_count];
-            return true;
-        }
+/* texture slot t's image for this shape: its own when it has it, else a new one (the old one buried) */
+static bool texture_image(Texture* t, uint32_t width, uint32_t height, uint32_t levels, uint32_t layers) {
+    Image* m = &t->image;
+    if (m->image && m->width == width && m->height == height && m->level_count == levels && m->layers == layers)
+        return true;
+    bury(m, NULL, NULL);
     return image_new(VK_FORMAT_R8G8B8A8_UNORM, width, height, levels, layers,
                      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT, m);
 }
-/* the view and sampler of texture unit, decoded from guest memory unless this recording did already */
+/* a slot for a new texture: an invalid one of the same shape, an empty one, any invalid one, or the least used */
+static Texture* texture_slot(uint32_t width, uint32_t height, uint32_t levels, uint32_t layers) {
+    Texture* any = NULL;
+    for (unsigned i = 0; i < g.texture_count; ++i) {
+        Texture* t = &g.textures[i];
+        if (t->valid) continue;
+        if (t->image.width == width && t->image.height == height && t->image.level_count == levels &&
+            t->image.layers == layers)
+            return t;
+        if (!any) any = t;
+    }
+    if (g.texture_count < TEXTURES) {
+        Texture* t = &g.textures[g.texture_count++];
+        memset(t, 0, sizeof *t);
+        return t;
+    }
+    if (any) return any;
+    Texture* least = &g.textures[0];
+    for (unsigned i = 1; i < TEXTURES; ++i)
+        if (g.textures[i].used < least->used) least = &g.textures[i];
+    set_texture(least, false);
+    return least;
+}
+/* the view and sampler of texture unit: the texture kept, or decoded from guest memory on the GPU and kept */
 static SnxCtrPicaResult texture(const SnxCtrPica* p, unsigned unit, unsigned type, VkDescriptorImageInfo* out) {
     const uint32_t* r = p->regs;
     const uint32_t* cfg = &r[tex_config[unit]];
@@ -597,20 +879,16 @@ static SnxCtrPicaResult texture(const SnxCtrPica* p, unsigned unit, unsigned typ
     uint32_t pa[6] = {(cfg[4] & 0x0fffffff) * 8};
     for (unsigned f = 1; f < 6; ++f)
         pa[f] = cube ? (((cfg[4] & 0x0fffffff) & ~0x3fffffu) | (r[TEX_CUBE + f - 1] & 0x3fffff)) * 8 : 0;
-    /* a dirty target over the texture: its draws are what the texture holds (rendering to a texture) */
-    uint64_t pixels = (uint64_t)g.key.width * g.key.height;
+    /* a dirty target over the texture: stored first, so the texture is decoded from what its draws wrote (rendering to
+       a texture); the textures made from that memory before went stale when the target was drawn into */
     for (unsigned f = 0; f < (cube ? 6u : 1u); ++f)
-        if (g.opened &&
-            ((g.color_dirty && overlaps(pa[f], bytes, g.key.color_pa, pixels * color_bytes(g.key.color_format))) ||
-             (g.depth_dirty && g.key.depth_format != NO_DEPTH &&
-              overlaps(pa[f], bytes, g.key.depth_pa, pixels * depth_bytes(g.key.depth_format))))) {
-            if (!target_store()) return AGAIN;
-            for (unsigned i = 0; i < g.texture_count; ++i) g.textures[i].valid = false;
-        }
+        if (g.made && !store_over(pa[f], bytes)) return AGAIN;
+    uint64_t serial = snx_ctr_vk_serial();
     for (unsigned i = 0; i < g.texture_count; ++i) {
-        const Texture* t = &g.textures[i];
+        Texture* t = &g.textures[i];
         if (t->valid && t->cube == cube && t->format == format && t->width == width && t->height == height &&
             t->levels == levels && !memcmp(t->pa, pa, sizeof pa)) {
+            t->used = serial;
             out->imageView = t->image.view;
             return SNX_CTR_PICA_OK;
         }
@@ -619,11 +897,8 @@ static SnxCtrPicaResult texture(const SnxCtrPica* p, unsigned unit, unsigned typ
     uint32_t inside[6];
     for (unsigned f = 0; f < (cube ? 6u : 1u); ++f)
         if (!snx_ctr_vk_window(pa[f], bytes, &windows[f], &inside[f])) return SNX_CTR_PICA_OK; /* outside RAM */
-    if (g.texture_count == TEXTURES) return AGAIN;
-    Texture* t = &g.textures[g.texture_count];
-    memset(t, 0, sizeof *t);
-    if (!texture_image(width, height, levels, cube ? 6 : 1, &t->image)) return SNX_CTR_PICA_UNSUPPORTED;
-    ++g.texture_count;
+    Texture* t = texture_slot(width, height, levels, cube ? 6 : 1);
+    if (!texture_image(t, width, height, levels, cube ? 6 : 1)) return SNX_CTR_PICA_UNSUPPORTED;
     memcpy(t->pa, pa, sizeof pa);
     t->format = format;
     t->width = width;
@@ -631,6 +906,7 @@ static SnxCtrPicaResult texture(const SnxCtrPica* p, unsigned unit, unsigned typ
     t->levels = levels;
     t->bytes = bytes;
     t->cube = cube;
+    t->used = serial;
     end_rendering();
     VkCommandBuffer cb = snx_ctr_vk_commands();
     snx_ctr_vk_barrier(cb);
@@ -643,7 +919,8 @@ static SnxCtrPicaResult texture(const SnxCtrPica* p, unsigned unit, unsigned typ
         }
     }
     snx_ctr_vk_barrier(cb);
-    t->valid = true;
+    for (unsigned f = 0; f < (cube ? 6u : 1u); ++f) gpu_uses(pa[f], bytes, false);
+    set_texture(t, true); /* watched from now on */
     out->imageView = t->image.view;
     return SNX_CTR_PICA_OK;
 }
@@ -1066,6 +1343,34 @@ static SnxCtrPicaResult descriptors(const SnxCtrPica* p, const SnxCtrFsConfig* f
 }
 
 /* one draw: array (indexed or not) or the immediate vertices kept */
+/* What an array draw reads of memory, watched until its submission is done (a CPU write waits for it): the index
+   buffer, and each loader's binding up to the highest vertex drawn (read from the indices) */
+static void draw_reads(const PipeKey* k, const uint32_t binding_pa[12], uint32_t index_pa, bool indexed, bool wide,
+                       uint32_t count, uint32_t first) {
+    uint64_t last = (uint64_t)first + count - 1;
+    if (indexed) {
+        uint32_t bytes = count * (wide ? 2u : 1u), top = 0;
+        unsigned char chunk[4096];
+        for (uint32_t at = 0; at < bytes; at += sizeof chunk) {
+            uint32_t n = bytes - at < sizeof chunk ? bytes - at : (uint32_t)sizeof chunk;
+            if (snx_ctr_phys_read(snx_ctr_vk()->memory, index_pa + at, chunk, n) != SNX_CTR_MEM_OK) {
+                top = 0xffff; /* unreadable: every index there may be */
+                break;
+            }
+            for (uint32_t i = 0; i < n; i += wide ? 2u : 1u) {
+                uint32_t index = wide ? (uint32_t)chunk[i] | (uint32_t)chunk[i + 1] << 8 : chunk[i];
+                if (index > top) top = index;
+            }
+        }
+        last = top;
+        gpu_uses(index_pa, bytes, false);
+    }
+    for (unsigned n = 0; n < 12; ++n)
+        if (k->binding_mask >> n & 1) {
+            uint64_t size = (uint64_t)k->stride[n] * (last + 1);
+            gpu_uses(binding_pa[n], size < 64 ? 64 : size, false);
+        }
+}
 static SnxCtrPicaResult record(SnxCtrPica* p, bool immediate, bool indexed) {
     const uint32_t* r = p->regs;
     if (r[SNX_PICA_USE_GS] & 3) return stop(p, "geometry shaders are not ported yet");
@@ -1174,7 +1479,7 @@ static SnxCtrPicaResult record(SnxCtrPica* p, bool immediate, bool indexed) {
     offsets[DEFAULTS] = defaults;
     /* a texture decoded may have stored the target, which then needs loading no more: it is still open */
     VkCommandBuffer cb = snx_ctr_vk_commands();
-    TargetImages* t = &g.targets[g.open];
+    Target* t = &g.targets[g.open];
     if (!g.rendering) {
         VkRenderingAttachmentInfo color = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                                            .imageView = t->color.view,
@@ -1184,12 +1489,12 @@ static SnxCtrPicaResult record(SnxCtrPica* p, bool immediate, bool indexed) {
         VkRenderingAttachmentInfo ds = color;
         ds.imageView = t->depth.view;
         VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                              .renderArea = {{0, 0}, {g.key.width, g.key.height}},
+                              .renderArea = {{0, 0}, {t->key.width, t->key.height}},
                               .layerCount = 1,
                               .colorAttachmentCount = 1,
                               .pColorAttachments = &color,
-                              .pDepthAttachment = g.key.depth_format != NO_DEPTH ? &ds : NULL,
-                              .pStencilAttachment = g.key.depth_format != NO_DEPTH ? &ds : NULL};
+                              .pDepthAttachment = t->key.depth_format != NO_DEPTH ? &ds : NULL,
+                              .pStencilAttachment = t->key.depth_format != NO_DEPTH ? &ds : NULL};
         vkCmdBeginRendering(cb, &ri);
         g.rendering = true;
     }
@@ -1205,6 +1510,7 @@ static SnxCtrPicaResult record(SnxCtrPica* p, bool immediate, bool indexed) {
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g.layout, 0, 2, sets, 0, NULL);
     for (uint32_t b = 0; b < 13; ++b)
         if (k.binding_mask >> b & 1) vkCmdBindVertexBuffers(cb, b, 1, &buffers[b], &offsets[b]);
+    if (!immediate) draw_reads(&k, binding_pa, index_pa, indexed, wide, count, r[VERTEX_OFFSET]);
     if (indexed && !immediate) {
         VkDeviceSize at;
         const SnxCtrVkRam* ram = snx_ctr_vk_ram(index_pa, 1, &at);
@@ -1212,15 +1518,25 @@ static SnxCtrPicaResult record(SnxCtrPica* p, bool immediate, bool indexed) {
         vkCmdDrawIndexed(cb, count, 1, 0, 0, 0);
     } else
         vkCmdDraw(cb, count, 1, immediate ? 0 : r[VERTEX_OFFSET], 0);
-    if (k.color_mask) g.color_dirty = true;
-    if (depth && k.depth_write && ((om >> 12 & 1) || k.stencil_on)) g.depth_dirty = true;
+    /* drawn into: newer than memory, which is the GPU's until the target is stored, and the textures made from that
+       memory stale */
+    t->used = snx_ctr_vk_serial();
+    if (k.color_mask && !t->color_dirty) {
+        drop_textures(t->key.color_pa, color_span(&t->key));
+        set_color(t, t->color_valid, true);
+    }
+    if (depth && k.depth_write && ((om >> 12 & 1) || k.stencil_on) && !t->depth_dirty) {
+        drop_textures(t->key.depth_pa, depth_span(&t->key));
+        set_depth(t, t->depth_valid, true);
+    }
     return SNX_CTR_PICA_OK;
 }
 static SnxCtrPicaResult draw(SnxCtrPica* p, bool immediate, bool indexed) {
     SnxCtrPicaResult r = record(p, immediate, indexed);
     if (r != AGAIN) return r;
-    /* out of descriptors, uploads or texture slots: what is recorded runs, and the draw starts over */
-    if (!snx_ctr_vk_finish()) return stop(p, "the device lost a submission");
+    /* out of descriptors or uploads: what is recorded is submitted (no wait), and the draw starts over in the next
+       slot */
+    snx_ctr_vk_submit();
     r = record(p, immediate, indexed);
     return r == AGAIN ? stop(p, "a draw needs more than one recording holds") : r;
 }
@@ -1249,27 +1565,25 @@ SnxCtrPicaResult snx_ctr_vk_vertices_end(SnxCtrPica* p, SnxCtrMemory* memory) {
     return r;
 }
 
-void snx_ctr_vk_render_flush(void) {
-    if (!g.made) return;
-    end_rendering();
-    if (g.opened && !target_store()) fprintf(stderr, "3ds gpu: a render target could not be stored\n");
-    g.opened = false;
-    /* what is recorded after may write any texture's memory */
-    for (unsigned i = 0; i < g.texture_count; ++i) g.textures[i].valid = false;
-}
-void snx_ctr_vk_render_done(void) {
-    if (!g.made) return;
-    for (unsigned i = 0; i < g.texture_count; ++i) {
-        if (g.spare_count < SPARE_IMAGES)
-            g.spare[g.spare_count++] = g.textures[i].image;
-        else
-            image_free(&g.textures[i].image);
-    }
-    g.texture_count = 0;
-    for (size_t i = 0; i < g.view_count; ++i) vkDestroyBufferView(device(), g.views[i], NULL);
-    g.view_count = 0;
+void snx_ctr_vk_render_begin(unsigned slot) {
+    g.slot = slot;
     g.ring_at = 0;
-    g.vs_uploaded = g.fs_uploaded = g.lut_uploaded = false;
+    g.vs_uploaded = g.fs_uploaded = g.lut_uploaded = false; /* the last uploads were the other slot's */
+}
+void snx_ctr_vk_render_close(void) { end_rendering(); }
+void snx_ctr_vk_render_retire(unsigned slot, uint64_t serial) {
+    if (!snx_ctr_vk()) return;
+    for (size_t i = 0; i < g.view_count[slot]; ++i) vkDestroyBufferView(device(), g.views[slot][i], NULL);
+    g.view_count[slot] = 0;
+    for (size_t i = 0; i < g.dead_count;)
+        if (g.dead[i].serial <= serial) {
+            dead_free(&g.dead[i]);
+            g.dead[i] = g.dead[--g.dead_count];
+        } else
+            ++i;
+    /* what it read and wrote is done with: the CPU's again, or watched where something is kept of it */
+    for (size_t i = 0; i < g.span_count[slot]; ++i) levels(g.spans[slot][i].pa, g.spans[slot][i].size);
+    g.span_count[slot] = 0;
 }
 void snx_ctr_vk_render_free(void) {
     if (!snx_ctr_vk()) {
@@ -1278,14 +1592,16 @@ void snx_ctr_vk_render_free(void) {
     }
     VkDevice d = device();
     vkDeviceWaitIdle(d);
-    snx_ctr_vk_render_done();
-    for (unsigned i = 0; i < g.spare_count; ++i) image_free(&g.spare[i]);
-    for (size_t i = 0; i < g.target_count; ++i) {
-        image_free(&g.targets[i].color);
-        image_free(&g.targets[i].depth);
-        vkDestroyBuffer(d, g.targets[i].scratch, NULL);
-        vkFreeMemory(d, g.targets[i].scratch_memory, NULL);
+    for (unsigned s = 0; s < SNX_CTR_VK_SLOTS; ++s) {
+        for (size_t i = 0; i < g.view_count[s]; ++i) vkDestroyBufferView(d, g.views[s][i], NULL);
+        free(g.views[s]);
     }
+    for (size_t i = 0; i < g.dead_count; ++i) dead_free(&g.dead[i]);
+    free(g.dead);
+    for (unsigned s = 0; s < SNX_CTR_VK_SLOTS; ++s) free(g.spans[s]);
+    free(g.pages);
+    for (unsigned i = 0; i < g.texture_count; ++i) image_free(&g.textures[i].image);
+    for (unsigned i = 0; i < g.target_count; ++i) target_free(&g.targets[i]);
     for (size_t i = 0; i < g.pipe_count; ++i) vkDestroyPipeline(d, g.pipes[i].pipeline, NULL);
     for (size_t i = 0; i < g.vs_count; ++i)
         if (g.vs[i].module) vkDestroyShaderModule(d, g.vs[i].module, NULL);
@@ -1305,8 +1621,6 @@ void snx_ctr_vk_render_free(void) {
     free(g.vs);
     free(g.fs);
     free(g.pipes);
-    free(g.targets);
-    free(g.views);
     free(g.immediate);
     memset(&g, 0, sizeof g);
 }

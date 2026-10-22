@@ -72,20 +72,49 @@ The GPU's work runs on one Vulkan device (`src/3ds/gpu/vk/`), which needs Vulkan
 regions are imported as buffers, so the GPU reads and writes the guest's memory
 in place and nothing of it is copied by the CPU. Memory fills, display transfers
 and texture copies are compute shaders (`gpu/vk/shaders/`), held byte for byte to
-the CPU reference `gpu/transfer.c` by `tests/3ds_vk_transfer.c`. PICA draws run
+the CPU reference `gpu/transfer.c` by `tests/3ds_vk_transfer.c`. The Y2R engine (`y2r:u`, `services/y2r.c`), which
+turns a video's YUV frames to RGB, converts on the GPU too (`gpu/vk/y2r.c`). Its streams
+are the application's virtual memory, so each page goes through a table to its
+physical page. `tests/3ds_vk_y2r.c` holds it to the CPU reference `gpu/y2r.c`, ported
+from Azahar's. PICA draws run
 on the GPU too (`gpu/vk/render.c`). The vertex program is decompiled (`gpu/vk/vsgen.c`)
 and the fragment pipeline generated (`gpu/vk/fsgen.c`), both ported from Azahar's
 shader generators and both written as SPIR-V words directly (`gpu/vk/spirv.c`), with no
-shader compiler at run time. The output merger is the pipeline's fixed state. A render
-target is loaded from guest memory into an image by a compute shader when a draw first
-uses it, and stored back before anything else reads or writes memory. Textures are
-decoded from guest memory by a compute shader once in a recording. Vertex and index
-data are read in place. `tests/3ds_vk_draw.c` holds the draws to the software renderer
-they replaced, which stays only as that reference. The shown
+shader compiler at run time. The output merger is the pipeline's fixed state. Vertex and
+index data are read in place. `tests/3ds_vk_draw.c` holds the draws to the software
+renderer they replaced, which stays only as that reference. The shown
 framebuffers are decoded and turned to the landscape screen by a compute shader
 straight from guest memory into the window's swapchain; the frame dumps are the
-one readback. The work is submitted, and waited for, at the end of each GX queue
-run, before its interrupts reach the guest.
+one readback.
+
+What the GPU makes stays on it, and guest memory catches up only when something
+reads it. A render target's images are kept, and loaded from guest memory by a compute
+shader only when memory changed under them. The pages a draw makes newer stay the
+GPU's until the target is stored, on the GPU, for a GPU engine that reads that memory
+(a display transfer, a texture over it, the presenter), or for the CPU when it touches
+them. Textures are decoded once and kept while their memory is unchanged. Work goes to
+the GPU in submissions that nothing waits for, a few in flight at once
+(`gpu/vk/device.c`), and each GX queue run's interrupts are raised when its work is
+submitted. Not when it is done, as the console raises them: the DSP and the vblanks keep
+the host's time, so a GPU slower than the console's would leave a frame without its
+audio.
+
+Write tracking keeps the guest from seeing any of this unfinished
+(`snx_ctr_track_*` in `memory/ctr_memory.h`). Each physical page has a level:
+the CPU's; watched, when the GPU keeps something made from it or a submission not done
+reads it, so a write traps; or the GPU's, when a target there is newer or a submission
+not done writes it, so every access traps. Every guest view of the page is protected
+to its level, and so are the memory API's accesses and a bus master's by physical
+address. A trap is resolved by the renderer, on the faulting thread:
+- the GPU's page has its targets stored and its writes waited for, and is watched
+  after;
+- a watched page has the GPU's reads of it waited for and what was made of it dropped,
+  and is the CPU's after.
+
+A guest fault (`memory/host.h`) is taken by SIGSEGV or SIGBUS on Linux, FreeBSD and the
+other POSIX hosts, on an alternate stack large enough to wait for the GPU, and by a
+vectored exception handler on Windows. `tests/3ds_memory_track.c` checks the levels
+through the flat space and the API with a stand-in renderer.
 
 Compiled code addresses the guest flat: a 4 GiB host reservation where guest
 address `va` is `base + va`, each mapping a view of the board's RAM held in one
@@ -121,7 +150,6 @@ blocks presented frames until it was ended. It is **not playable** yet:
 
 - Input is the pad alone: the touch screen is not read, and the sensors are at
   rest (`hid:USER`, below).
-- Only the top screen is shown in the window.
 - The music has a gap after every rendered frame, because rendering and presenting
   run inside the guest's GSP call.
 - Geometry shaders, procedural textures, shadows and the DSP's AAC pipe still stop
@@ -272,7 +300,16 @@ are FS-private monotonic 64-bit identifiers, not kernel handles. 32 live binding
 are allowed and stale IDs never revive. NX and CTR share `common/filesystem/`
 indexing, immutable file mappings and fallback opens, not their IPC protocols or
 RomFS metadata. Only extracted `romfs/` is exposed, with no original container reads.
-Save data, extdata and other archives remain unsupported (F3). Reads preflight
+Save data (4) and ExtSaveData (6, in `sdmc/Nintendo 3DS/<id0>/<id1>/extdata/`, and the
+shared 7, in `nand/data/<id0>/extdata/`, as the console lays them out) are on the
+title's folder too. SelfNCCH also serves the
+ExeFS icon, logo and banner. The NCCH archive (0x2345678A) serves the title's own
+RomFS, and in place of the system titles no console here has, the open stand-ins
+Azahar carries (`cmake/ctr_system_archives.cmake`, generated by
+B3n30/citra_system_archives): the Mii data, the country list, the shared font
+(also for the Chinese, Korean and Taiwanese fonts) and the bad word list. Another
+system title is NotFound. Directory sessions read their entries, and FSFILE has
+Flush, priorities and OpenLinkFile. Reads preflight
 the complete guest destination and stage host IO before publication.
 Host-paced GetSystemTick and the shared page's date and time (the host's local
 time, rewritten every hour into the entry the counter does not select, as
@@ -357,8 +394,10 @@ created with. Each mapping holds a reference to the block. HLE shared pages are
 reserved from board FCRAM past the application pool.
 
 Presentation is **Vulkan only** (volk, with no linked Vulkan library):
-the device converts the guest framebuffer to RGBA8 and shows the landscape-
-rotated frame live in an SDL3 Vulkan window through a real swapchain. Bounded
+the device converts the guest framebuffers to RGBA8 and shows the landscape-
+rotated screens live in an SDL3 Vulkan window through a real swapchain, the top
+screen above the bottom one as on the console, the bottom one centred under it.
+The pair keeps its shape in a window of any size. Bounded
 PPM snapshots land in `<output>/frames` in every mode. Without a display the
 window path is unavailable and frames are only recorded; without a Vulkan
 device the presenter reports unavailability and no frame is fabricated.

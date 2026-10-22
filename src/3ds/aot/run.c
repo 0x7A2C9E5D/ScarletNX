@@ -8,6 +8,7 @@
 #include "common/utilities/common.h"
 #include "3ds/runtime/internal.h"
 #include "3ds/gpu/present.h"
+#include "common/utilities/build_info.h"
 #include "3ds/audio/output.h"
 #include "3ds/input/input.h"
 #include "common/filesystem/host.h"
@@ -56,6 +57,8 @@ static void report_stack(SnxCtrProcess* p, const SnxArmCPU* cpu) {
     }
     putchar('\n');
 }
+/* the flat space's fault resolver (memory/host.h): write tracking's */
+static bool track_fault(void* context, uint32_t va) { return snx_ctr_track_fault(context, va); }
 /* Every live thread, where it is and what it waits on, as the run ended */
 static void report_threads(SnxCtrProcess* p) {
     static const char* const types[] = {"free",  "process", "thread",    "arbiter", "session",       "mutex",
@@ -65,8 +68,9 @@ static void report_threads(SnxCtrProcess* p) {
         if (o->type != CTR_OBJ_THREAD || o->data.thread.dead) continue;
         const CtrThread* t = &o->data.thread;
         const SnxArmCPU* cpu = i == p->current_thread ? &p->cpu.state.cpu : &t->context;
-        printf("  thread %" PRIu32 "%s: core %" PRIu32 " priority 0x%02" PRIx32 " pc 0x%08" PRIx32 " lr 0x%08" PRIx32, i,
-               i == p->current_thread ? " (running)" : "", t->core, t->priority, cpu->r[15], cpu->r[14]);
+        printf("  thread %" PRIu32 "%s: core %" PRIu32 " priority 0x%02" PRIx32 " pc 0x%08" PRIx32 " lr 0x%08" PRIx32 " tls 0x%08" PRIx32,
+               i, i == p->current_thread ? " (running)" : "", t->core, t->priority, cpu->r[15], cpu->r[14],
+               cpu->tpidruro);
         if (t->waiting_object) {
             const CtrObject* w = &p->objects[t->waiting_object];
             printf(", waits on %s %" PRIu32, w->type < sizeof types / sizeof *types ? types[w->type] : "?",
@@ -78,7 +82,13 @@ static void report_threads(SnxCtrProcess* p) {
                        t->wait_more[j]);
                 if (m->type == CTR_OBJ_EVENT) printf(" (%s)", event_owner(p, t->wait_more[j]));
             }
-            if (w->type == CTR_OBJ_ARBITER) printf(" at 0x%08" PRIx32, t->waiting_address);
+            if (w->type == CTR_OBJ_ARBITER) {
+                /* the words there: an SDK critical section is its count, its owner's TLS and its depth */
+                uint32_t words[3];
+                printf(" at 0x%08" PRIx32, t->waiting_address);
+                if (snx_ctr_read_ram(p->space, t->waiting_address, words, sizeof words) == SNX_CTR_MEM_OK)
+                    printf(" [0x%08" PRIx32 " 0x%08" PRIx32 " 0x%08" PRIx32 "]", words[0], words[1], words[2]);
+            }
             if (t->waiting_service[0]) printf(" (the service %s)", t->waiting_service);
         } else if (t->wake_ns)
             printf(", sleeps%s", t->wake_ns == UINT64_MAX ? " forever" : "");
@@ -205,8 +215,15 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
         snprintf(error, error_size, "cannot create %s: %s", frames, snx_os_error(why, sizeof why));
         goto done;
     }
+    /* the game's name, else its title ID, in the window's title; nothing is added to a 3DS game yet (no update or DLC
+       is loaded) */
+    char id[17];
+    snprintf(id, sizeof id, "%016llX", (unsigned long long)process->title_id);
+    printf("Game: %s (%s) - %s\n", process->title[0] ? process->title : id, id, snx_build_info());
     if (!snx_ctr_present_init(process->memory, frames))
         printf("No Vulkan device: no frames will be drawn, shown or saved\n");
+    else
+        snx_ctr_present_title(process->title[0] ? process->title : id, "");
     /* the DSP's output plays on the default device, and its first two minutes go to <output>/audio.wav */
     wav = snx_path_join(directory, "audio.wav");
     if (!snx_ctr_audio_init(wav)) printf("No audio output: the DSP's frames will not be heard or saved\n");
@@ -219,7 +236,8 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
     SnxCtrRunResult state;
     printf("Running ARM11 static AOT%s\n", snx_ctr_space_base(process->space) ? " in a flat 4 GiB space" : "");
     /* a host fault in the flat space is the guest's data abort, reported with the block it happened in */
-    ctr_host_faults(snx_ctr_space_base(process->space), &snx_ctr_process_cpu(process)->r[15]);
+    ctr_host_faults(snx_ctr_space_base(process->space), &snx_ctr_process_cpu(process)->r[15], track_fault,
+                    process->space);
     for (;;) {
         uint64_t slice = SNX_CTR_RUN_SLICE, n = 0;
         if (limit && limit - executed < slice) slice = limit - executed;
@@ -261,7 +279,7 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
         putchar('\n');
     }
 done:
-    ctr_host_faults(NULL, NULL);
+    ctr_host_faults(NULL, NULL, NULL, NULL);
     snx_ctr_jit_free(jit);
     snx_ctr_present_free();
     snx_ctr_audio_free();

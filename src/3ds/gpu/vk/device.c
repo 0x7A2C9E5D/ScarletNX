@@ -182,7 +182,7 @@ bool snx_ctr_vk_init(SnxCtrMemory* memory, char* error, size_t error_size) {
     /* a window first: a display server and a Vulkan surface make it the output; without one frames go to the frame
        dumps only */
     if (SDL_InitSubSystem(SDL_INIT_VIDEO))
-        v->window = SDL_CreateWindow("ScarletNX 3DS", 800, 480, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+        v->window = SDL_CreateWindow("ScarletNX 3DS", 600, 720, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
     VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
                              .pApplicationName = "scarletnx-ctr",
                              .apiVersion = VK_API_VERSION_1_3};
@@ -264,10 +264,13 @@ bool snx_ctr_vk_init(SnxCtrMemory* memory, char* error, size_t error_size) {
     VkCommandBufferAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
                                       .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
                                       .commandBufferCount = 1};
-    if (vkCreateCommandPool(v->device, &pi, NULL, &v->pool) != VK_SUCCESS ||
-        vkCreateFence(v->device, &fi, NULL, &v->fence) != VK_SUCCESS ||
-        vkCreateDescriptorPool(v->device, &dp, NULL, &v->descriptors) != VK_SUCCESS ||
-        (ai.commandPool = v->pool, vkAllocateCommandBuffers(v->device, &ai, &v->cb) != VK_SUCCESS)) {
+    bool made = vkCreateCommandPool(v->device, &pi, NULL, &v->pool) == VK_SUCCESS;
+    ai.commandPool = v->pool;
+    for (unsigned i = 0; i < SNX_CTR_VK_SLOTS && made; ++i)
+        made = vkCreateFence(v->device, &fi, NULL, &v->slots[i].fence) == VK_SUCCESS &&
+               vkCreateDescriptorPool(v->device, &dp, NULL, &v->slots[i].descriptors) == VK_SUCCESS &&
+               vkAllocateCommandBuffers(v->device, &ai, &v->slots[i].cb) == VK_SUCCESS;
+    if (!made) {
         snprintf(error, error_size, "cannot make the Vulkan device's command pool");
         snx_ctr_vk_free();
         return false;
@@ -277,6 +280,9 @@ bool snx_ctr_vk_init(SnxCtrMemory* memory, char* error, size_t error_size) {
         snx_ctr_vk_free();
         return false;
     }
+    /* the renderer answers for the pages the GPU keeps (memory/ctr_memory.h) */
+    v->memory = memory;
+    snx_ctr_track_handler(memory, snx_ctr_vk_track, NULL);
     return true;
 }
 void snx_ctr_vk_free(void) {
@@ -284,12 +290,19 @@ void snx_ctr_vk_free(void) {
     if (v->device) {
         snx_ctr_vk_render_free();
         vkDeviceWaitIdle(v->device);
+        if (v->memory) { /* nothing is the GPU's any more: every page the CPU's, untrapped */
+            snx_ctr_track_handler(v->memory, NULL, NULL);
+            for (unsigned i = 0; i < v->ram_count; ++i)
+                snx_ctr_track_set(v->memory, v->ram[i].base, v->ram[i].size, SNX_CTR_TRACK_NONE);
+        }
         for (unsigned i = 0; i < v->ram_count; ++i) {
             vkDestroyBuffer(v->device, v->ram[i].buffer, NULL);
             vkFreeMemory(v->device, v->ram[i].memory, NULL);
         }
-        if (v->descriptors) vkDestroyDescriptorPool(v->device, v->descriptors, NULL);
-        if (v->fence) vkDestroyFence(v->device, v->fence, NULL);
+        for (unsigned i = 0; i < SNX_CTR_VK_SLOTS; ++i) {
+            if (v->slots[i].descriptors) vkDestroyDescriptorPool(v->device, v->slots[i].descriptors, NULL);
+            if (v->slots[i].fence) vkDestroyFence(v->device, v->slots[i].fence, NULL);
+        }
         if (v->pool) vkDestroyCommandPool(v->device, v->pool, NULL);
         vkDestroyDevice(v->device, NULL);
     }
@@ -299,51 +312,101 @@ void snx_ctr_vk_free(void) {
     memset(v, 0, sizeof *v);
     g_device.up = 0;
 }
+/* a submission done: its slot free again, and what the renderer kept for it */
+static void retire(SnxCtrVk* v, unsigned i) {
+    vkResetFences(v->device, 1, &v->slots[i].fence);
+    vkResetCommandBuffer(v->slots[i].cb, 0);
+    vkResetDescriptorPool(v->device, v->slots[i].descriptors, 0);
+    if (v->slots[i].serial > v->completed) v->completed = v->slots[i].serial;
+    snx_ctr_vk_render_retire(i, v->slots[i].serial);
+    v->slots[i].serial = 0;
+}
+/* the slots in submission order, the oldest first: the next slot to record is the one submitted longest ago (the
+   open recording's slot is not in flight, and is skipped) */
+static unsigned oldest(const SnxCtrVk* v, unsigned n) { return (v->slot + n) % SNX_CTR_VK_SLOTS; }
+uint64_t snx_ctr_vk_poll(void) {
+    SnxCtrVk* v = &g_device.vk;
+    if (!g_device.up) return 0;
+    for (unsigned n = 0; n < SNX_CTR_VK_SLOTS; ++n) {
+        unsigned i = oldest(v, n);
+        if (!v->slots[i].serial || (v->recording && i == v->slot)) continue;
+        if (vkGetFenceStatus(v->device, v->slots[i].fence) != VK_SUCCESS) break; /* in order: the later ones too */
+        retire(v, i);
+    }
+    return v->completed;
+}
+bool snx_ctr_vk_wait(uint64_t serial, uint64_t timeout_ns) {
+    SnxCtrVk* v = &g_device.vk;
+    if (!g_device.up || serial <= v->completed) return true;
+    if (serial > v->submitted) snx_ctr_vk_submit();
+    for (unsigned n = 0; n < SNX_CTR_VK_SLOTS && v->completed < serial; ++n) {
+        unsigned i = oldest(v, n);
+        if (!v->slots[i].serial || v->slots[i].serial <= v->completed || (v->recording && i == v->slot)) continue;
+        VkResult r = vkWaitForFences(v->device, 1, &v->slots[i].fence, VK_TRUE, timeout_ns);
+        if (r != VK_SUCCESS) return false; /* the timeout, or a lost device */
+        retire(v, i);
+    }
+    return v->completed >= serial;
+}
+/* the open slot free for a recording: its last submission waited for when it is still in flight */
+static void ready(SnxCtrVk* v) {
+    if (!v->recording && v->slots[v->slot].serial) (void)snx_ctr_vk_wait(v->slots[v->slot].serial, UINT64_MAX);
+}
 VkCommandBuffer snx_ctr_vk_commands(void) {
     SnxCtrVk* v = &g_device.vk;
     if (!v->recording) {
+        ready(v);
         VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
-        vkBeginCommandBuffer(v->cb, &bi);
+        vkBeginCommandBuffer(v->slots[v->slot].cb, &bi);
         v->recording = true;
+        snx_ctr_vk_render_begin(v->slot);
     }
-    return v->cb;
+    return v->slots[v->slot].cb;
 }
-bool snx_ctr_vk_finish(void) { return snx_ctr_vk_finish_with(VK_NULL_HANDLE, VK_NULL_HANDLE); }
-bool snx_ctr_vk_finish_with(VkSemaphore wait, VkSemaphore signal) {
+uint64_t snx_ctr_vk_serial(void) { return g_device.vk.submitted + 1; }
+unsigned snx_ctr_vk_slot(void) { return g_device.vk.slot; }
+uint64_t snx_ctr_vk_submit(void) { return snx_ctr_vk_submit_with(VK_NULL_HANDLE, VK_NULL_HANDLE); }
+uint64_t snx_ctr_vk_submit_with(VkSemaphore wait, VkSemaphore signal) {
     SnxCtrVk* v = &g_device.vk;
-    if (!g_device.up) return true;
-    snx_ctr_vk_render_flush(); /* the draws' targets stored to guest memory with the rest */
-    if (!v->recording && !wait && !signal) return true;
-    snx_ctr_vk_commands();
-    v->recording = false;
+    if (!g_device.up) return 0;
+    if (!v->recording && !wait && !signal) return v->submitted;
+    VkCommandBuffer cb = snx_ctr_vk_commands();
+    snx_ctr_vk_render_close(); /* a rendering pass ends with its command buffer */
     /* everything written is the host's to read once the fence is signaled */
     VkMemoryBarrier host = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
                             .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
                             .dstAccessMask = VK_ACCESS_HOST_READ_BIT | VK_ACCESS_HOST_WRITE_BIT};
-    vkCmdPipelineBarrier(v->cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &host, 0, NULL,
-                         0, NULL);
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &host, 0, NULL, 0,
+                         NULL);
     VkPipelineStageFlags stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
                        .waitSemaphoreCount = wait ? 1 : 0,
                        .pWaitSemaphores = &wait,
                        .pWaitDstStageMask = &stage,
                        .commandBufferCount = 1,
-                       .pCommandBuffers = &v->cb,
+                       .pCommandBuffers = &cb,
                        .signalSemaphoreCount = signal ? 1 : 0,
                        .pSignalSemaphores = &signal};
-    bool ok = vkEndCommandBuffer(v->cb) == VK_SUCCESS && vkQueueSubmit(v->queue, 1, &si, v->fence) == VK_SUCCESS &&
-              vkWaitForFences(v->device, 1, &v->fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS;
-    vkResetFences(v->device, 1, &v->fence);
-    vkResetCommandBuffer(v->cb, 0);
-    vkResetDescriptorPool(v->device, v->descriptors, 0);
-    snx_ctr_vk_render_done();
-    return ok;
+    v->recording = false;
+    if (vkEndCommandBuffer(cb) != VK_SUCCESS || vkQueueSubmit(v->queue, 1, &si, v->slots[v->slot].fence) != VK_SUCCESS) {
+        /* a lost device: nothing more runs, and the slot is free as if it had */
+        vkResetCommandBuffer(cb, 0);
+        return v->submitted;
+    }
+    v->slots[v->slot].serial = ++v->submitted;
+    v->slot = (v->slot + 1) % SNX_CTR_VK_SLOTS;
+    return v->submitted;
+}
+bool snx_ctr_vk_finish(void) {
+    if (!g_device.up) return true;
+    return snx_ctr_vk_wait(snx_ctr_vk_submit(), UINT64_MAX);
 }
 VkDescriptorSet snx_ctr_vk_set(VkDescriptorSetLayout layout) {
     SnxCtrVk* v = &g_device.vk;
+    snx_ctr_vk_commands(); /* the open recording's slot, free */
     VkDescriptorSetAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                                      .descriptorPool = v->descriptors,
+                                      .descriptorPool = v->slots[v->slot].descriptors,
                                       .descriptorSetCount = 1,
                                       .pSetLayouts = &layout};
     VkDescriptorSet set = VK_NULL_HANDLE;

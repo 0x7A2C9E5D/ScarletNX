@@ -2,7 +2,8 @@
    Copyright 2026 the ScarletNX contributors
    The shown framebuffers, on the 3DS's Vulkan device (vk/device.c): a compute shader (vk/shaders/present.comp)
    reads each one where the guest has it in RAM, decodes it and turns it to the console's landscape screen in an
-   image, which the window's swapchain shows (the top screen). Nothing of the frame passes through the CPU. The frame
+   image, and the window's swapchain shows both screens, the top one above the bottom one as on the console, each
+   keeping its shape (frame_layout). Nothing of the frame passes through the CPU. The frame
    dumps (the first eight, then each screen's latest about once a second, in frame_dir) and the tests' hashes are
    the one readback: the shader writes those frames' RGBA pixels to a host-visible buffer as well. The 3DS framebuffer
    is 240x400/320 portrait, one 240-pixel row per screen column from the left, each row from the bottom of the
@@ -13,8 +14,11 @@
 #include "3ds/gpu/vk/vk.h"
 #include "3ds/gpu/vk/shaders/present_spv.h"
 #include "3ds/gpu/vk/vk_transfer.h"
+#include "3ds/gpu/vk/vk_y2r.h"
 #include "3ds/gpu/vk/vk_render.h"
+#include "common/utilities/build_info.h"
 #include "common/utilities/common.h"
+#include "common/utilities/window_icon.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +29,7 @@ typedef struct {
     VkImage image;
     VkDeviceMemory memory;
     VkImageView view;
+    VkImageLayout layout;   /* where the last command recorded on it left it */
     unsigned width, height; /* landscape */
 } Frame;
 static struct {
@@ -37,10 +42,12 @@ static struct {
     VkImage swap_images[8];
     uint32_t swap_count;
     VkExtent2D swap_extent;
-    VkSemaphore acquire, presented;
+    /* each submission slot's: a slot is free again only once its submission is done, and so are they */
+    VkSemaphore acquire[SNX_CTR_VK_SLOTS], presented[SNX_CTR_VK_SLOTS];
     const char* frame_dir;
     unsigned dumps;
     uint64_t presents; /* past the first dumps, two presents (one a screen) of every 120 are kept as the latest */
+    unsigned bottom_alone; /* bottom screen frames since the window last showed, the top screen showing none */
     int up, windowed, closed;
 } g_present;
 
@@ -66,7 +73,7 @@ static bool swap_create(void) {
             break;
         }
     VkExtent2D extent = caps.currentExtent.width != UINT32_MAX ? caps.currentExtent : g_present.swap_extent;
-    if (extent.width < 2 || extent.height < 2) extent = (VkExtent2D){800, 480};
+    if (extent.width < 2 || extent.height < 2) extent = (VkExtent2D){600, 720};
     uint32_t images = caps.minImageCount + 1;
     if (caps.maxImageCount && images > caps.maxImageCount) images = caps.maxImageCount;
     VkSwapchainCreateInfoKHR ci = {.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -127,6 +134,7 @@ static bool frame_make(Frame* f, unsigned width, unsigned height) {
         return false;
     f->width = width;
     f->height = height;
+    f->layout = VK_IMAGE_LAYOUT_UNDEFINED;
     return true;
 }
 static void frame_free(Frame* f) {
@@ -137,6 +145,13 @@ static void frame_free(Frame* f) {
     memset(f, 0, sizeof *f);
 }
 
+static bool semaphores(const SnxCtrVk* v, const VkSemaphoreCreateInfo* si) {
+    for (unsigned i = 0; i < SNX_CTR_VK_SLOTS; ++i)
+        if (vkCreateSemaphore(v->device, si, NULL, &g_present.acquire[i]) != VK_SUCCESS ||
+            vkCreateSemaphore(v->device, si, NULL, &g_present.presented[i]) != VK_SUCCESS)
+            return false;
+    return true;
+}
 bool snx_ctr_present_init(SnxCtrMemory* memory, const char* frame_dir) {
     if (g_present.up) return true;
     char why[256];
@@ -169,16 +184,26 @@ bool snx_ctr_present_init(SnxCtrMemory* memory, const char* frame_dir) {
     if (type == UINT32_MAX || vkAllocateMemory(v->device, &ai, NULL, &g_present.readback_memory) != VK_SUCCESS ||
         vkBindBufferMemory(v->device, g_present.readback, g_present.readback_memory, 0) != VK_SUCCESS ||
         vkMapMemory(v->device, g_present.readback_memory, 0, VK_WHOLE_SIZE, 0, &mapped) != VK_SUCCESS ||
-        vkCreateSemaphore(v->device, &si, NULL, &g_present.acquire) != VK_SUCCESS ||
-        vkCreateSemaphore(v->device, &si, NULL, &g_present.presented) != VK_SUCCESS)
+        !semaphores(v, &si))
         return false;
     g_present.readback_view = mapped;
     if (v->surface) {
-        g_present.swap_extent = (VkExtent2D){800, 480};
+        g_present.swap_extent = (VkExtent2D){600, 720};
         g_present.windowed = swap_create();
     }
     g_present.up = 1;
     return true;
+}
+void snx_ctr_present_title(const char* name, const char* addons) {
+    const SnxCtrVk* v = snx_ctr_vk();
+    if (!g_present.up || !v->window) return;
+    char header[768];
+    if (addons && addons[0])
+        snprintf(header, sizeof header, "%s (%s) - %s", name, addons, snx_build_info());
+    else
+        snprintf(header, sizeof header, "%s - %s", name, snx_build_info());
+    SDL_SetWindowTitle(v->window, header);
+    snx_window_icon(v->window);
 }
 bool snx_ctr_present_ready(void) { return g_present.up; }
 bool snx_ctr_present_windowed(void) { return g_present.windowed; }
@@ -240,6 +265,41 @@ static void image_barrier(VkCommandBuffer cb, VkImage image, VkImageLayout old, 
     vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
                          NULL, 1, &b);
 }
+/* The window's picture: the top screen above the bottom one, which is centred under it (400 and 320 pixels wide, 240
+   high), the pair scaled as one to fit the swapchain's image and centred in it, the rest black */
+static void show_screens(VkCommandBuffer cb, VkImage target) {
+    const Frame* top = &g_present.frames[0];
+    const Frame* bottom = &g_present.frames[1];
+    unsigned layout_w = top->width > bottom->width ? top->width : bottom->width, layout_h = top->height + bottom->height;
+    VkExtent2D e = g_present.swap_extent;
+    double scale = (double)e.width / layout_w < (double)e.height / layout_h ? (double)e.width / layout_w
+                                                                             : (double)e.height / layout_h;
+    double x0 = (e.width - layout_w * scale) / 2, y0 = (e.height - layout_h * scale) / 2;
+    image_barrier(cb, target, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    VkClearColorValue black = {.float32 = {0, 0, 0, 1}};
+    VkImageSubresourceRange all = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(cb, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &all);
+    double y = y0;
+    for (unsigned i = 0; i < 2; ++i) {
+        Frame* f = &g_present.frames[i];
+        if (!f->image || f->layout == VK_IMAGE_LAYOUT_UNDEFINED) { /* a screen not drawn yet stays black */
+            y += f->height * scale;
+            continue;
+        }
+        image_barrier(cb, f->image, f->layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        f->layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        double x = x0 + (layout_w - f->width) * scale / 2;
+        VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                            .srcOffsets = {{0, 0, 0}, {(int32_t)f->width, (int32_t)f->height, 1}},
+                            .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                            .dstOffsets = {{(int32_t)x, (int32_t)y, 0},
+                                           {(int32_t)(x + f->width * scale), (int32_t)(y + f->height * scale), 1}}};
+        vkCmdBlitImage(cb, f->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &blit, VK_FILTER_NEAREST);
+        y += f->height * scale;
+    }
+    image_barrier(cb, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+}
 bool snx_ctr_present_frame(unsigned screen, uint32_t pa, unsigned width, unsigned height, unsigned format,
                            unsigned pitch, uint64_t* hash) {
     if (!g_present.up || screen > 1 || !width || !height || width > MAX_SIDE || height > MAX_SIDE || format > 4)
@@ -257,10 +317,12 @@ bool snx_ctr_present_frame(unsigned screen, uint32_t pa, unsigned width, unsigne
         if (!frame_make(f, height, width)) return false;
     }
     bool dump = dump_due(), readback = dump || hash;
-    snx_ctr_vk_render_flush(); /* the draws before it in guest memory first */
+    snx_ctr_vk_sync(pa, pitch * (height - 1) + width * bytes, false); /* the draws over it stored first, on the GPU */
     VkCommandBuffer cb = snx_ctr_vk_commands();
+    unsigned slot = snx_ctr_vk_slot(); /* the open recording's, whose semaphores it takes */
     snx_ctr_vk_barrier(cb); /* after what the GPU wrote to the framebuffer */
-    image_barrier(cb, f->image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+    image_barrier(cb, f->image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL); /* the shader writes all of it */
+    f->layout = VK_IMAGE_LAYOUT_GENERAL;
     VkDescriptorSet set = snx_ctr_vk_set(g_present.decode.set);
     VkDescriptorBufferInfo in = {w.buffer, w.offset, w.range}, out = {g_present.readback, 0, VK_WHOLE_SIZE};
     VkDescriptorImageInfo image = {VK_NULL_HANDLE, f->view, VK_IMAGE_LAYOUT_GENERAL};
@@ -288,11 +350,14 @@ bool snx_ctr_present_frame(unsigned screen, uint32_t pa, unsigned width, unsigne
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, g_present.decode.layout, 0, 1, &set, 0, NULL);
     vkCmdPushConstants(cb, g_present.decode.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof push, push);
     vkCmdDispatch(cb, (width + 7) / 8, (height + 7) / 8, 1);
-    /* the top screen in the window */
+    /* both screens in the window, at each top screen frame: a game draws both every frame, and showing at each
+       screen's would wait for two vblanks a frame. A bottom screen that changes while the top one stays still shows
+       at its second frame */
     uint32_t index = 0;
-    bool show = screen == 0 && g_present.windowed;
+    g_present.bottom_alone = screen ? g_present.bottom_alone + 1 : 0;
+    bool show = (screen == 0 || g_present.bottom_alone >= 2) && g_present.windowed;
     if (show) {
-        VkResult acquired = vkAcquireNextImageKHR(v->device, g_present.swapchain, UINT64_MAX, g_present.acquire,
+        VkResult acquired = vkAcquireNextImageKHR(v->device, g_present.swapchain, UINT64_MAX, g_present.acquire[slot],
                                                   VK_NULL_HANDLE, &index);
         if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
             g_present.windowed = swap_create();
@@ -301,24 +366,20 @@ bool snx_ctr_present_frame(unsigned screen, uint32_t pa, unsigned width, unsigne
             show = false;
     }
     if (show) {
-        VkImage target = g_present.swap_images[index];
-        image_barrier(cb, f->image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-        image_barrier(cb, target, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                            .srcOffsets = {{0, 0, 0}, {(int32_t)f->width, (int32_t)f->height, 1}},
-                            .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                            .dstOffsets = {{0, 0, 0},
-                                           {(int32_t)g_present.swap_extent.width,
-                                            (int32_t)g_present.swap_extent.height, 1}}};
-        vkCmdBlitImage(cb, f->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1, &blit, VK_FILTER_NEAREST);
-        image_barrier(cb, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        g_present.bottom_alone = 0;
+        show_screens(cb, g_present.swap_images[index]);
     }
-    bool ok = show ? snx_ctr_vk_finish_with(g_present.acquire, g_present.presented) : !readback || snx_ctr_vk_finish();
+    /* submitted, waited for only when the host reads the frame (a dump, a test's hash) */
+    bool ok = true;
+    if (show) {
+        uint64_t serial = snx_ctr_vk_submit_with(g_present.acquire[slot], g_present.presented[slot]);
+        ok = !readback || snx_ctr_vk_wait(serial, UINT64_MAX);
+    } else if (readback)
+        ok = snx_ctr_vk_finish();
     if (show && ok) {
         VkPresentInfoKHR present = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
                                     .waitSemaphoreCount = 1,
-                                    .pWaitSemaphores = &g_present.presented,
+                                    .pWaitSemaphores = &g_present.presented[slot],
                                     .swapchainCount = 1,
                                     .pSwapchains = &g_present.swapchain,
                                     .pImageIndices = &index};
@@ -344,12 +405,15 @@ void snx_ctr_present_free(void) {
     vkDeviceWaitIdle(v->device);
     swap_destroy();
     for (unsigned i = 0; i < 2; ++i) frame_free(&g_present.frames[i]);
-    if (g_present.acquire) vkDestroySemaphore(v->device, g_present.acquire, NULL);
-    if (g_present.presented) vkDestroySemaphore(v->device, g_present.presented, NULL);
+    for (unsigned i = 0; i < SNX_CTR_VK_SLOTS; ++i) {
+        if (g_present.acquire[i]) vkDestroySemaphore(v->device, g_present.acquire[i], NULL);
+        if (g_present.presented[i]) vkDestroySemaphore(v->device, g_present.presented[i], NULL);
+    }
     if (g_present.readback) vkDestroyBuffer(v->device, g_present.readback, NULL);
     if (g_present.readback_memory) vkFreeMemory(v->device, g_present.readback_memory, NULL);
     snx_ctr_vk_compute_free(&g_present.decode);
     snx_ctr_vk_transfer_free();
+    snx_ctr_vk_y2r_free();
     memset(&g_present, 0, sizeof g_present);
     snx_ctr_vk_free();
 }

@@ -617,8 +617,11 @@ static void trigger_queue(SnxCtrIpc* c) {
         }
         if (cmd[2]) queue[2] = GX_STATUS_STOPPED; /* the command's stop flag */
     }
-    /* the GPU's work done before the interrupts say so: the guest's CPU may read what it wrote then */
-    if (!snx_ctr_vk_finish()) stopped = true;
+    /* The GPU's work submitted, not waited for, and the interrupts raised now: the GPU runs beside the guest, which
+       write tracking keeps from seeing it unfinished (what it writes traps until it is done, what it reads traps
+       writes until then). Not at the work's end, as the hardware raises them: the DSP and the vblanks keep the host's
+       time, so a GPU slower than the console's would starve the guest's frame of its audio */
+    snx_ctr_vk_submit();
     queue[0] = (unsigned char)index;
     queue[1] = (unsigned char)pending;
     memcpy(queue + 4, &last_error, 4);
