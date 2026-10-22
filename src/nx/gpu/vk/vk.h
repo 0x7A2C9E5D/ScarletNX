@@ -217,6 +217,12 @@ void vk_rec_submit(VkCommandBuffer cb, const VkSemaphoreSubmitInfo* w, u32 nw, c
                    u32 ns);
 void vk_rec_sync(void);        /* until everything queued is recorded and submitted */
 void vk_rec_queue(VkQueue q);  /* before submitting to or presenting on q outside the ring (vk_lock) */
+/* presents image idx of sc once wait is signaled, in order after the submissions queued before it (vk_lock). The
+   result is this present's without the recording thread, otherwise that of an earlier one which wasn't VK_SUCCESS,
+   or VK_SUCCESS: a swapchain out of date shows a frame later */
+VkResult vk_rec_present(VkSwapchainKHR sc, u32 idx, VkSemaphore wait);
+/* takes the queued presents' result that wasn't VK_SUCCESS, if any (after a drain: a new swapchain drops the old's) */
+VkResult vk_rec_present_result(void);
 /* a new descriptor set of layout with those writes, for commands of the frame's command buffer only: allocated and
    written on the recording thread, a stand-in handle until then (vk_lock) */
 VkDescriptorSet vk_rec_new_set(VkDescriptorSetLayout layout, u32 n, const VkWriteDescriptorSet* w);
@@ -368,6 +374,7 @@ typedef struct Surf {
     VkPipelineStageFlags2 stage;
     VkAccessFlags2 access;
     u64 last_used;
+    u64 touched; /* when it last went to the recent end of its recency list: ties of last_used in the lists' order */
     u32 wgen;       /* render targets: bumped when drawn to */
     u64 wseq;       /* when its image last changed, counted across surfaces: of two over the same bytes, the higher
                        holds them (vk_surf_wrote) */
@@ -654,6 +661,10 @@ void vk_tex_frame(void);    /* a frame was presented: evicts what wasn't used fo
 
 /* gpu/vk/buffer.c: guest memory [gva, gva + len) as a buffer the GPU reads, valid until the next submit */
 int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off);
+/* the cache lines vk_buf_get(gva, len) will read, fetched ahead: step 0 its index slot, step 1 (after step 0 for every
+   range) its entry. For a caller with several ranges to look up, so their misses overlap */
+void vk_buf_prefetch(u64 gva, u64 len, int step);
+void vk_buf_mapping_changed(void); /* the GPU mappings or the guest memory under them changed: translations go */
 int vk_buf_get_strict(u64 gva, u64 len, VkBuffer* buf, u64* off); /* no delayed content checks */
 /* a copy of len bytes made now (data that changes within a frame), or of zeros when gva is 0 */
 int vk_buf_copy(u64 gva, u64 len, VkBuffer* buf, u64* off);
@@ -819,6 +830,9 @@ void vk_pipeline_init(void);
    rasterization's outputs (ShaderInfo.xfb), NULL for none */
 VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int_mask, u64 sint_mask, u32 rt_int,
                     u32 rt_sint, u32 clip, u64 dc_color, u32 dc_funcs, u32 unfed, const ShXfb* xfb);
+/* whether the constant buffer words s's translation read still hold in ch's bound buffers (vk_shader_get's check on
+   a hit, for a caller that kept s) */
+int vk_shader_cb_hold(const GpuChannel* ch, const VkSh* s);
 typedef struct {
     VkShaderModule vs, fs;
     VkShaderModule tcs, tes, gs; /* tessellation control and evaluation, geometry: VK_NULL_HANDLE when off */
@@ -856,13 +870,15 @@ int vk_pipeline_worker_count(int setting, int cpus);
    pipeline a stand-in names, or h itself) */
 VkPipeline vk_pipeline_get_deferred(const PipeKey* k);
 VkPipeline vk_pipeline_resolve(VkPipeline h);
+/* the pipeline h names when it is ready, else h itself, without waiting: a stand-in and its pipeline are one */
+VkPipeline vk_pipeline_ready(VkPipeline h);
 /* so far: pipelines made, how many of them the pipeline cache had, ms the workers took making them, ms the GPU thread
    waited for new ones, shaders translated, ms translating them */
 void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* shaders, u64* shader_ms);
 void vk_tex_stats(u64* uploads, u64* bytes); /* texture uploads from guest memory so far, and their bytes */
 u64 vk_rt_made(void);                         /* render targets made so far */
 VkPipelineCache vk_pipeline_cache(void); /* for pipelines made elsewhere (compute) */
-void vk_pipeline_save(void);
+void vk_pipeline_save(int at_exit);
 VkShaderModule vk_module_spv(const u32* words, size_t count);
 VkShaderModule vk_module_spv_location(const u32* words, size_t count, u32 location);
 /* pipelines of earlier runs made in the background: made so far, how many the pipeline cache had, and still to make */
@@ -943,6 +959,8 @@ u32 vk_gbuf_desc(int stage, u32 off, const u32* v, u64* addr);
    accesses a barrier names see the writes before it */
 #define VK_STORAGE_IMAGE_ACCESS (VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT)
 extern u64 g_vk_drawn, g_vk_skipped; /* draws recorded, and draws skipped (unsupported topology, failed shader) */
+/* draws that kept the last draw's shaders and pipeline key, and those of them SNX_DIRTY_CHECK made again to compare */
+extern u64 g_vk_draw_kept, g_vk_draw_checked;
 /* draws that sampled a color target they render to in place, the barriers ordering them within a pass, the passes
    begun again for them (a target's layout, or ordering without those barriers), and draws that sampled a target
    through a copy instead (gpu/vk/render.c) */

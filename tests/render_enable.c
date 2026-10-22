@@ -68,6 +68,8 @@ u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
     while (n < max && gmmu_translate(gva + n) == first + n) n += 0x1000;
     return n < max ? n : max;
 }
+/* nvdrv.c's index of mappings by guest address, for the translation above */
+void gmmu_aliases(u64 cpu, u64 size, void (*fn)(void* ctx, u64 gva, u64 n), void* ctx) { fn(ctx, cpu, size); }
 u32 gpu_color_bpp(u32 format) {
     (void)format;
     return 4;

@@ -29,6 +29,11 @@
 /* The caches live in shader_cache/ of the game's cache folder (g_cachedir), wherever the runtime was started from */
 static char g_cache_dir[1100], g_pcache_path[1200], g_pcache_tmp[1230];
 static int g_pcache_dirty; /* pipelines made since the cache was last written (atomic: it is saved outside vk_lock) */
+static u64 g_pcache_used;  /* plat_ns when a pipeline last went into the cache (atomic) */
+static void pcache_note(void) {
+    __atomic_store_n(&g_pcache_used, plat_ns(), __ATOMIC_RELAXED);
+    __atomic_store_n(&g_pcache_dirty, 1, __ATOMIC_RELAXED);
+}
 
 VkPipelineLayout g_vk_playout;
 VkDescriptorSetLayout g_vk_dslayout[2][5];
@@ -576,6 +581,14 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
     return s;
 }
 
+/* whether the constant buffer words s's translation read (BRX jump tables) still hold in ch's bound buffers, as
+   vk_shader_get checks them on each hit */
+int vk_shader_cb_hold(const GpuChannel* ch, const VkSh* s) {
+    g_sh_ch = ch;
+    g_sh_bind = s->stage <= ST_FS ? s->stage : 0;
+    return vk_cb_reads_hold(&s->cbr, sh_cb_read);
+}
+
 VkShaderModule vk_module_spv(const u32* spv, size_t nw) {
     VkShaderModuleCreateInfo mi = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = nw * 4, .pCode = spv};
@@ -859,7 +872,7 @@ static VkPipeline pipe_create(const Pipe* e) {
 static VkPipeline pipe_make(const Pipe* e, int record) {
     u64 t0 = plat_ns();
     VkPipeline p = pipe_create(e);
-    __atomic_store_n(&g_pcache_dirty, 1, __ATOMIC_RELAXED);
+    pcache_note();
     if (e->prewarm)
         __atomic_add_fetch(&g_pf.made, 1, __ATOMIC_RELAXED);
     else {
@@ -1077,6 +1090,14 @@ VkPipeline vk_pipeline_resolve(VkPipeline h) {
     __atomic_add_fetch(&g_pipe_wait_ns, plat_ns() - t0, __ATOMIC_RELAXED);
     return got;
 }
+/* the pipeline a handle from vk_pipeline_get_deferred names once it is ready, else the handle: without waiting */
+VkPipeline vk_pipeline_ready(VkPipeline h) {
+    u64 v = (u64)(uintptr_t)h;
+    if ((v & ~(u64)0xFFFFFFFFull) != PIPE_STANDIN) return h;
+    u32 i = (u32)v - 1;
+    Pipe* p = g_pstand[i / PSTAND_PAGE][i % PSTAND_PAGE];
+    return __atomic_load_n(&p->ready, __ATOMIC_ACQUIRE) ? p->p : h;
+}
 void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* shaders, u64* shader_ms) {
     *pipes = g_pipes_new;
     *hits = __atomic_load_n(&g_pipe_hits, __ATOMIC_RELAXED);
@@ -1087,14 +1108,19 @@ void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* s
 }
 
 VkPipelineCache vk_pipeline_cache(void) {
-    __atomic_store_n(&g_pcache_dirty, 1, __ATOMIC_RELAXED);
+    pcache_note();
     return g_pcache;
 }
-/* writes the pipeline cache when pipelines were made since the last write. Called every few seconds and at exit
-   (the renderer's save), outside vk_lock: the driver synchronizes the cache itself. Saves one at a time, so the one
-   at exit waits for a periodic one in progress to finish its file before the process ends */
+/* writes the pipeline cache when pipelines were made since the last write. Asked every few seconds and at exit (the
+   renderer's save), outside vk_lock: the driver synchronizes the cache itself. The driver holds the cache's lock while
+   it copies the cache out, so a pipeline made meanwhile waits for the whole copy, and the copies came every five seconds
+   while pipelines were being made: a pipeline once waited 3.2 s with recording stopped behind it. So the asking every
+   few seconds writes it only after PCACHE_QUIET_NS without a new pipeline, and at exit it is written regardless. Saves
+   one at a time, so the one at exit waits for one in progress to finish its file before the process ends */
+#define PCACHE_QUIET_NS 20000000000ull
 static PMutex g_psave = PMUTEX_INIT;
-void vk_pipeline_save(void) {
+void vk_pipeline_save(int at_exit) {
+    if (!at_exit && plat_ns() - __atomic_load_n(&g_pcache_used, __ATOMIC_RELAXED) < PCACHE_QUIET_NS) return;
     pm_lock(&g_psave);
     /* the shipped file's shaders the draws found, when that changed: nidx is settled once ship_ready */
     if (__atomic_load_n(&g_pf.ship_ready, __ATOMIC_ACQUIRE) && g_pf.nidx) {

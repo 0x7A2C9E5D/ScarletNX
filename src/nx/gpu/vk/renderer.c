@@ -54,8 +54,12 @@ static void vkr_gfx_mem_need(u64 gva, u64 size) {
     vk_buf_mem_need(gva, size);
     vk_gfx_image_mem_need(gva, size);
 }
+/* the GPU range a mapping change is changing, from its begin to its end (size 0 for a change of guest memory) */
+static u64 g_mapping_gva, g_mapping_size;
 static void vkr_mapping_begin(u64 gva, u64 size, int full) {
     vk_lock();
+    g_mapping_gva = gva;
+    g_mapping_size = full ? 0 : size;
     vk_release_drain();
     if (full) {
         vk_buf_land_map();
@@ -67,7 +71,14 @@ static void vkr_mapping_begin(u64 gva, u64 size, int full) {
         vk_compute_mem_need_map(gva, size);
     }
 }
-static void vkr_mapping_end(void) { vk_unlock(); }
+/* the pages changed count what is pending at the guest pages they show now. A change of guest memory (full) leaves
+   the GMMU as it was: pending pages are compared by address, and freed memory is landed first */
+static void vkr_mapping_end(void) {
+    vk_buf_mapping_changed();
+    pend_remap(g_mapping_gva, g_mapping_size);
+    g_mapping_size = 0;
+    vk_unlock();
+}
 
 /* 0 when Vulkan can't run here */
 static int vkr_start(void) {
@@ -444,14 +455,16 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
             char cs_why[256];
             u64 cs_skipped = vk_cs_skipped(cs_why, sizeof cs_why);
             LOG("vulkan: %llu draws, %llu skipped; %llu dispatches in %llu batches (%llu ms waiting), %llu skipped%s; "
-                "%llu finishes (%llu ms); %llu reads past queued releases; %llu descriptor sets written, %llu reused\n",
+                "%llu finishes (%llu ms); %llu reads past queued releases; %llu descriptor sets written, %llu reused; "
+                "%llu draws kept the last one's shaders and pipeline (%llu checked)\n",
                 (unsigned long long)g_vk_drawn, (unsigned long long)g_vk_skipped, (unsigned long long)g_vk_dispatches,
                 (unsigned long long)g_vk_cs_batches,
                 (unsigned long long)(__atomic_load_n(&g_vk_cs_wait_ns, __ATOMIC_RELAXED) / 1000000),
                 (unsigned long long)cs_skipped, cs_why, (unsigned long long)g_vk_finishes,
                 (unsigned long long)(g_vk_finish_ns / 1000000),
                 (unsigned long long)__atomic_load_n(&g_vk_release_forwards, __ATOMIC_RELAXED),
-                (unsigned long long)g_vk_dset_new, (unsigned long long)g_vk_dset_reused);
+                (unsigned long long)g_vk_dset_new, (unsigned long long)g_vk_dset_reused,
+                (unsigned long long)g_vk_draw_kept, (unsigned long long)g_vk_draw_checked);
             {
                 u64 pipes, hits, make_ms, pipe_ms, shaders, shader_ms, uploads, upload_bytes;
                 vk_pipeline_stats(&pipes, &hits, &make_ms, &pipe_ms, &shaders, &shader_ms);
@@ -521,14 +534,8 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
     if (game) vk_renderdoc_present(g_vk_present);
     vk_frame_next(); /* every show used this frame's slot and acquire semaphore, the menu's own too */
     if (signal) {
-        VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-                               .waitSemaphoreCount = 1,
-                               .pWaitSemaphores = &signal,
-                               .swapchainCount = 1,
-                               .pSwapchains = &g_vk.swapchain,
-                               .pImageIndices = &idx};
-        vk_rec_queue(g_vk.gfx); /* the present waits on the frame's submission's semaphore */
-        VkResult r = vkQueuePresentKHR(g_vk.gfx, &pi);
+        /* after the frame's submission, whose semaphore it waits on, without waiting for its recording */
+        VkResult r = vk_rec_present(g_vk.swapchain, idx, signal);
         if (r == VK_ERROR_OUT_OF_DATE_KHR || (r == VK_SUBOPTIMAL_KHR && !g_vk.sc_turned))
             recreate = 1;
         else if (r == VK_ERROR_SURFACE_LOST_KHR)

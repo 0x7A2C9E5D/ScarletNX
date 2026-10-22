@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The guest pages pending compute results cover (vk/pending_pages.c), over a stand-in GMMU: GPU ranges that alias the
-   same guest pages meet, unmapped GPU pages cover nothing, and a result removed leaves the pages others cover */
+   same guest pages meet, unmapped GPU pages cover nothing, a result removed leaves the pages others cover, and a
+   mapping changed while a result is pending counts it at its new pages */
 #include "nx/gpu/vk/pending_pages.h"
 #include "nx/hle/services/nvdrv.h"
 #include "nx/runtime/platform/log.h"
@@ -13,11 +14,14 @@
 #define GPU_PAGES (1u << 18)
 static u64 gmmu[GPU_PAGES];
 
+/* a mapping change ends with pend_remap, as the renderer's mapping bracket does */
 static void map(u64 gva, u64 cpu, u64 size) {
     for (u64 p = gva >> 12; p < (gva + size) >> 12; p++, cpu += 0x1000) gmmu[p] = cpu | 1;
+    pend_remap(gva, size);
 }
 static void unmap(u64 gva, u64 size) {
     for (u64 p = gva >> 12; p < (gva + size) >> 12; p++) gmmu[p] = 0;
+    pend_remap(gva, size);
 }
 /* as nvdrv.c's: the bytes from gva on that map contiguously, at most max, and where they start */
 u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
@@ -31,6 +35,26 @@ u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
         want += 0x1000;
     }
     return n < max ? n : max;
+}
+/* as nvdrv.c's index, by brute force: each GPU page showing guest bytes of [cpu, cpu + size), clipped to them */
+void gmmu_aliases(u64 cpu, u64 size, void (*fn)(void* ctx, u64 gva, u64 n), void* ctx) {
+    for (u64 p = 0; p < GPU_PAGES; p++) {
+        u64 c = gmmu[p] & ~0xFFFull, a = c > cpu ? c : cpu, b = c + 0x1000 < cpu + size ? c + 0x1000 : cpu + size;
+        if ((gmmu[p] & 1) && a < b) fn(ctx, (p << 12) + (a - c), b - a);
+    }
+}
+void gmmu_pieces(u64 gva, u64 size, void (*fn)(void* ctx, u64 gva, u64 cpu, u64 n), void* ctx) {
+    for (u64 p = gva >> 12; p <= (gva + size - 1) >> 12 && p < GPU_PAGES; p++)
+        if (gmmu[p] & 1) fn(ctx, p << 12, gmmu[p] & ~0xFFFull, 0x1000);
+}
+/* SNX_ALIAS_CHECK's warnings: pend_hit answered no where translating the range finds a result */
+static int warnings;
+void logf_(int level, const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    warnings += !level; /* WARN's level, not LOG's */
 }
 void fatal(const char* fmt, ...) {
     va_list ap;
@@ -52,6 +76,8 @@ int main(void) {
     /* tables that last, as the runtime's: none frees the leaves it makes */
     static PendPages tables[3];
     PendPages* t = &tables[0];
+    static char check_env[] = "SNX_ALIAS_CHECK=1"; /* every no is checked against the translated range */
+    putenv(check_env);
     map(0x100000, 0x80000000ull, 0x10000);   /* 16 pages */
     map(0x400000, 0x80004000ull, 0x2000);    /* aliases pages 4 and 5 of the range above */
     map(0x600000, 0x90000000ull, 0x4000000); /* 64 MiB: crosses table leaves (16 MiB of guest pages each) */
@@ -112,8 +138,22 @@ int main(void) {
         check(pend_empty(u), "the other empty once both are");
     }
 
+    /* a mapping made while a result is pending shows it too, and loses it when the result is removed; the result's
+       own pages stay until then, as the renderer lands a result before a change over its pages */
+    pend_add(t, 0x104000, 0x2000, 1);
+    map(0x800000, 0x80005000ull, 0x3000); /* its second page, and two beside it */
+    check(pend_hit(t, 0x800000, 1) && !pend_hit(t, 0x801000, 0x2000), "a new mapping of a pending page");
+    unmap(0x400000, 0x2000);
+    check(!pend_hit(t, 0x400000, 0x2000) && pend_hit(t, 0x105000, 1), "an alias unmapped");
+    map(0x400000, 0x80004000ull, 0x2000);
+    check(pend_hit(t, 0x400000, 1) && pend_hit(t, 0x401000, 1), "and mapped again");
+    pend_add(t, 0x104000, 0x2000, -1);
+    check(pend_empty(t) && !pend_hit(t, 0x800000, 0x3000) && !pend_hit(t, 0x400000, 0x2000), "every alias empty");
+    unmap(0x800000, 0x3000);
+
     /* a range to the top of the address space ends there */
     check(!pend_hit(t, ~0ull - 0xFFF, ~0ull), "a range that would wrap");
+    check(!warnings, "no answer of the GPU pages missed a result");
     if (failures) return 1;
     printf("pending pages: aliases, holes, large ranges and removals\n");
     return 0;

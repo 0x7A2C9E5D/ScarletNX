@@ -353,6 +353,7 @@ static void channel_reset(GpuChannel* ch) {
     memcpy(ch->sub_class, classes, sizeof classes);
     reset_3d(ch->r3d);
     memcpy(ch->r3d_shadow, ch->r3d, sizeof ch->r3d_shadow); /* the reset values count as tracked */
+    ch->r3d_dirty = ~0u; /* nothing the renderer derived from another channel's registers holds for these */
     ch->r2d[0x83] = ch->r2d[0x8F] = 1; /* the 2D surfaces' depth, as NVIDIA's driver assumes */
 }
 /* the channel of syncpoint id, made at its first submission. The queue's lock held */

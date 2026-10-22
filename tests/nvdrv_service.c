@@ -725,6 +725,137 @@ static void test_gmmu_runs(void) {
     check_runs(g - 0x3000, 0xA04000);
     gmmu_unmap(g + 0x200000, 0x1000, 0, 0);
 }
+/* gmmu_aliases against the page table, read page by page: random mappings over a GPU range, many of them showing the
+   same guest pages, own and plain unmaps, maps over maps, and REMAP's and FREE_SPACE's ioctls. After each change the
+   runs must be the table's pages and each query must report every GPU page showing the guest range once, clipped */
+#define ALIAS_G     (0x7200000000ull - 0x100000) /* across a second-level table's start */
+#define ALIAS_PAGES 1024u
+#define ALIAS_C     0x10000000ull
+#define ALIAS_CPAGES 256u
+static struct {
+    u32 count[ALIAS_PAGES];
+    u64 lo[ALIAS_PAGES], hi[ALIAS_PAGES];
+    u32 outside;
+} alias_seen;
+static u32 alias_rand_state = 12345;
+static u32 alias_rand(void) {
+    alias_rand_state = alias_rand_state * 1103515245u + 12345u;
+    return alias_rand_state >> 8;
+}
+static void alias_note(void* ctx, u64 gva, u64 n) {
+    (void)ctx;
+    CHECK(n != 0);
+    while (n) {
+        u64 off = gva & 0xFFF, k = 0x1000 - off < n ? 0x1000 - off : n, i = (gva - ALIAS_G) >> 12;
+        if (gva < ALIAS_G || i >= ALIAS_PAGES) {
+            alias_seen.outside++;
+        } else {
+            alias_seen.count[i]++;
+            alias_seen.lo[i] = off;
+            alias_seen.hi[i] = off + k;
+        }
+        gva += k;
+        n -= k;
+    }
+}
+static void alias_query(u64 cpu, u64 size) {
+    memset(&alias_seen, 0, sizeof alias_seen);
+    gmmu_aliases(cpu, size, alias_note, NULL);
+    CHECK(alias_seen.outside == 0); /* nothing else maps the test's guest pages */
+    for (u32 i = 0; i < ALIAS_PAGES; i++) {
+        u64 c = gmmu_translate(ALIAS_G + (u64)i * 0x1000), a, b;
+        if (!c || c + 0x1000 <= cpu || c >= cpu + size) {
+            CHECK(alias_seen.count[i] == 0);
+            continue;
+        }
+        a = c > cpu ? 0 : cpu - c;
+        b = c + 0x1000 < cpu + size ? 0x1000 : cpu + size - c;
+        CHECK(alias_seen.count[i] == 1 && alias_seen.lo[i] == a && alias_seen.hi[i] == b);
+    }
+}
+/* the runs are sorted, disjoint, and show what the table does over the test's range */
+static void alias_check_runs(void) {
+    const GRun* r = g_hle.nvdrv.gruns;
+    for (u32 k = 0; k + 1 < g_hle.nvdrv.ngruns; k++) CHECK(r[k].pages && r[k].gpage + r[k].pages <= r[k + 1].gpage);
+    for (u32 i = 0; i < ALIAS_PAGES; i++) {
+        u64 g = (ALIAS_G >> 12) + i, c = gmmu_translate(g << 12);
+        u32 k = grun_find(g);
+        int in = k < g_hle.nvdrv.ngruns && r[k].gpage <= g;
+        CHECK(in == (c != 0));
+        if (in) CHECK(c >> 12 == r[k].cpage + (g - r[k].gpage));
+    }
+}
+static void alias_check(void) {
+    alias_check_runs();
+    for (int q = 0; q < 8; q++) {
+        u64 cpu = ALIAS_C + alias_rand() % ((u64)ALIAS_CPAGES * 0x1000), size = 1 + alias_rand() % 0x9000;
+        alias_query(cpu, size);
+    }
+    alias_query(ALIAS_C, (u64)ALIAS_CPAGES * 0x1000);
+    alias_query(ALIAS_C - 0x100000, 0x400000);
+}
+static void test_gmmu_aliases(void) {
+    u64 mg[64], mc[64], mn[64];
+    u32 nm = 0;
+    for (int step = 0; step < 2000; step++) {
+        u32 op = alias_rand() % 8;
+        if (op < 4 || !nm) { /* a map, now and then a long one */
+            u64 n = alias_rand() % 16 ? 1 + alias_rand() % 48 : 1 + alias_rand() % 400;
+            u64 g = alias_rand() % (ALIAS_PAGES - n + 1), c = alias_rand() % (ALIAS_CPAGES - (n < ALIAS_CPAGES ? n : 0) + 1);
+            if (n > ALIAS_CPAGES) c = 0;
+            gmmu_map(ALIAS_G + g * 0x1000, ALIAS_C + c * 0x1000, n * 0x1000);
+            if (nm == 64) nm--;
+            mg[nm] = g, mc[nm] = c, mn[nm] = n, nm++;
+        } else if (op < 6) { /* an earlier mapping's own unmap: what was mapped over it since stays */
+            u32 k = alias_rand() % nm;
+            gmmu_unmap(ALIAS_G + mg[k] * 0x1000, mn[k] * 0x1000, 1, ALIAS_C + mc[k] * 0x1000);
+            mg[k] = mg[--nm], mc[k] = mc[nm], mn[k] = mn[nm];
+        } else { /* a plain unmap of a range */
+            u64 n = 1 + alias_rand() % 64, g = alias_rand() % (ALIAS_PAGES - n + 1);
+            gmmu_unmap(ALIAS_G + g * 0x1000, n * 0x1000, 0, 0);
+        }
+        alias_check();
+    }
+    gmmu_unmap(ALIAS_G, (u64)ALIAS_PAGES * 0x1000, 0, 0);
+    alias_check();
+    CHECK(!g_hle.nvdrv.alias.stale);
+    { /* REMAP of a handle's memory in big pages, then FREE_SPACE over it, through the ioctls */
+        u8 request[40] = {0}, remap[20] = {0};
+        u32 size = 0x20000, handle, pages = 1, big = 0x10000, gpu_offset = (u32)((ALIAS_G + 0x100000) >> 16), one = 1;
+        u64 addr = ALIAS_C, gva = ALIAS_G + 0x100000;
+        memcpy(request, &size, 4);
+        CHECK(ioctl_nvmap(0x01, request, sizeof request) == 0);
+        memcpy(&handle, request + 4, 4);
+        memcpy(request, &handle, 4);
+        memcpy(request + 24, &addr, 8);
+        CHECK(ioctl_nvmap(0x04, request, sizeof request) == 0);
+        memset(request, 0, sizeof request);
+        memcpy(request, &pages, 4);
+        memcpy(request + 4, &big, 4);
+        memcpy(request + 8, &one, 4);
+        memcpy(request + 16, &gva, 8);
+        CHECK(ioctl_as(0x02, request, sizeof request, NULL, 0) == 0); /* ALLOC_SPACE there */
+        memcpy(remap + 4, &handle, 4);
+        memcpy(remap + 8, &one, 4); /* the handle's second big page */
+        memcpy(remap + 12, &gpu_offset, 4);
+        memcpy(remap + 16, &pages, 4);
+        CHECK(ioctl_as(0x14, remap, sizeof remap, NULL, 0) == 0);
+        CHECK(gmmu_translate(gva) == ALIAS_C + 0x10000);
+        memset(&alias_seen, 0, sizeof alias_seen);
+        alias_query(ALIAS_C + 0xF000, 0x3000);
+        CHECK(alias_seen.count[0x100] == 1 && alias_seen.lo[0x100] == 0 && alias_seen.count[0x101] == 1);
+        alias_check();
+        memset(request, 0, sizeof request);
+        memcpy(request, &gva, 8);
+        memcpy(request + 8, &pages, 4);
+        memcpy(request + 12, &big, 4);
+        CHECK(ioctl_as(0x03, request, sizeof request, NULL, 0) == 0); /* FREE_SPACE */
+        CHECK(!gmmu_translate(gva));
+        alias_query(ALIAS_C, 0x20000);
+        CHECK(alias_seen.count[0x100] == 0);
+        alias_check();
+    }
+}
 int main(void) {
     hle_init();
     g_mem = calloc(1, 0x10000);
@@ -793,6 +924,7 @@ int main(void) {
     test_nvmap_as();
     test_gmmu_freed();
     test_gmmu_runs();
+    test_gmmu_aliases();
     nvdrv = new_nvdrv();
     u32 error;
 

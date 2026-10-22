@@ -44,6 +44,15 @@ u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
     for (want = *cpu + n; n < max && gmmu_translate(gva + n) == want; want += 0x1000) n += 0x1000;
     return n < max ? n : max;
 }
+/* nvdrv.c's index of mappings by guest address, by brute force over the translation above (from the middle of each
+   page, as page 0 translates to 0) */
+void gmmu_aliases(u64 cpu, u64 size, void (*fn)(void* ctx, u64 gva, u64 n), void* ctx) {
+    for (u64 p = 0; p < (sizeof guest + 0xFFF) >> 12; p++) {
+        u64 c = gmmu_translate((p << 12) + 0x800) & ~0xFFFull, a = c > cpu ? c : cpu;
+        u64 b = c + 0x1000 < cpu + size ? c + 0x1000 : cpu + size;
+        if (gmmu_translate((p << 12) + 0x800) && a < b) fn(ctx, (p << 12) + (a - c), b - a);
+    }
+}
 void mem_query(u64 addr, MemBlock* out) {
     memset(out, 0, sizeof *out);
     out->size = sizeof guest;
@@ -264,6 +273,26 @@ static void expect(int ok, const char* what) {
 int main(void) {
     struct timespec ms20 = {0, 20000000};
     gpu_init();
+
+    /* the record of GPU-side writes (maxwell3d.c): a write through one GPU address dirties every GPU page showing the
+       same guest memory, 0x3000 and 0xA000 here, and nothing else */
+    {
+        u64 g = gpu_mem_generation();
+        gpu_mem_written(0x3010, 4);
+        expect(gpu_mem_dirty_since(g, 0xA000, 0x1000) && gpu_mem_dirty_since(g, 0x3000, 0x20),
+               "a write dirties its page and another GPU address of it");
+        expect(!gpu_mem_dirty_since(g, 0xB000, 0x1000) && !gpu_mem_dirty_since(g, 0x4000, 0x1000),
+               "and not the pages beside them");
+        g = gpu_mem_generation();
+        gpu_mem_written(0xB800, 4);
+        expect(gpu_mem_dirty_since(g, 0x5000, 0x1000) && !gpu_mem_dirty_since(g, 0xA000, 0x1000),
+               "a write through the other address dirties the guest address's page");
+        g = gpu_mem_generation();
+        gpu_mem_written_cpu(0x3FFC, 8); /* guest memory across two pages */
+        expect(gpu_mem_dirty_since(g, 0xA000, 0x1000) && gpu_mem_dirty_since(g, 0x4000, 4) &&
+                   !gpu_mem_dirty_since(g, 0xB000, 0x1000),
+               "a write of guest memory dirties the GPU pages showing it");
+    }
 
     /* NVN temporarily forces rendering in passthrough mode, then replays the default override without ever
        tracking a write to it. Conditional clears must then initialize targets only when their metadata differs. */
