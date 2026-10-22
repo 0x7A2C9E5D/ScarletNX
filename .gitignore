@@ -28,10 +28,15 @@ romfs/
 /keys/
 /dumps/
 
-# Made from the game's files: shader corpora (shader_corpus), SPIR-V dumps, screenshots
+# Made from the game's files: shader corpora (shader_corpus), SPIR-V dumps, screenshots, and the shader and JIT
+# caches (in the user's cache folder, kept out wherever a copy lands)
 *.snxs
 *.spv
 *.ppm
+*.vkshaders
+*.vkshipped
+*.jitcache
+shader_cache/
 vkshader_*.glsl
 
 # Recompiled games: runtime, game module, generated C, data, saves, settings and logs

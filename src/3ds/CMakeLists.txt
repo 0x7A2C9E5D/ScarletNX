@@ -1,30 +1,48 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-# Extraction/memory do not need the NX runtime, LLVM, SDL or an Azahar build tree.
+# The board, loader and memory libraries need neither the NX runtime nor an Azahar build tree. The driver links LLVM
+# for its compiler, and its presenter and audio output use SDL3 and the Vulkan headers.
 add_library(snx_ctr_board STATIC board/board.c)
 set_target_properties(snx_ctr_board PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_compile_options(snx_ctr_board PRIVATE -Wall -Wextra -Werror=missing-prototypes)
-add_library(snx_ctr_memory STATIC memory/memory.c)
+add_library(snx_ctr_memory STATIC memory/memory.c memory/host.c)
 target_link_libraries(snx_ctr_memory PUBLIC snx_ctr_board)
 add_library(snx_ctr_cpu STATIC cpu/cpu.c)
 target_link_libraries(snx_ctr_cpu PUBLIC snx_ctr_memory)
 add_library(snx_ctr_loader STATIC loader/loader.c loader/cia.c loader/ncch.c loader/romfs.c loader/blz.c loader/image.c
-            loader/mapped.c)
+            loader/mapped.c loader/decrypt.c)
 # the CIA read where it lies is mapped as the indexed filesystem maps the files it shares (plat_file_share)
 target_link_libraries(snx_ctr_loader PUBLIC scarletnx-common scarletnx-filesystem OpenSSL::Crypto)
 target_compile_definitions(snx_ctr_loader PRIVATE _FILE_OFFSET_BITS=64 _CRT_SECURE_NO_WARNINGS)
-add_library(snx_ctr_process STATIC runtime/process.c kernel/kernel.c kernel/thread.c aot/dispatch.c ipc/ipc.c services/srv.c services/fs.c services/apt.c services/ptm.c services/hid.c services/romfs.c services/file.c services/gsp.c services/dsp.c services/cfg.c)
-add_library(snx_ctr_gpu STATIC gpu/present.c gpu/transfer.c gpu/pica.c gpu/shader.c gpu/draw.c gpu/raster.c gpu/lighting.c gpu/texture.c "${volk_SOURCE_DIR}/volk.c")
+add_library(snx_ctr_process STATIC runtime/process.c kernel/kernel.c kernel/thread.c aot/dispatch.c ipc/ipc.c services/srv.c services/fs.c services/apt.c services/ptm.c services/hid.c services/romfs.c services/file.c services/gsp.c services/dsp.c services/cfg.c services/system.c services/am.c services/y2r.c)
+# the system archives' stand-ins (cmake/ctr_system_archives.cmake), which services/fs.c serves through the NCCH archive
+target_sources(snx_ctr_process PRIVATE "${CMAKE_BINARY_DIR}/generated/ctr_system_archives.c")
+# the player's input lives beside the presenter, whose window's events it reads
+add_library(snx_ctr_gpu STATIC gpu/present.c input/input.c gpu/transfer.c gpu/y2r.c gpu/vk/y2r.c gpu/vk/device.c gpu/vk/transfer.c
+            gpu/vk/vsgen.c gpu/vk/fsgen.c gpu/vk/render.c gpu/pica.c "${volk_SOURCE_DIR}/volk.c")
 target_include_directories(snx_ctr_gpu PUBLIC "${volk_SOURCE_DIR}")
-target_link_libraries(snx_ctr_gpu PUBLIC snx_ctr_memory Vulkan::Headers SDL3::SDL3 ${CMAKE_DL_LIBS})
+target_link_libraries(snx_ctr_gpu PUBLIC snx_ctr_memory scarletnx-common Vulkan::Headers SDL3::SDL3 snx_settings snx_build_info
+                                         snx_window_icon ${CMAKE_DL_LIBS})
 set_source_files_properties("${volk_SOURCE_DIR}/volk.c" PROPERTIES COMPILE_OPTIONS "${snx_third_party_flags}")
+# the GPU's compute shaders, compiled at build time (cmake/glsl.cmake)
+include("${PROJECT_SOURCE_DIR}/cmake/glsl.cmake")
+foreach(shader fill display_transfer texture_copy present texture color depth y2r)
+    snx_glsl_spirv(snx_ctr_gpu SOURCE gpu/vk/shaders/${shader}.comp NAME snx_ctr_${shader}_spv
+                   HEADER 3ds/gpu/vk/shaders/${shader}_spv.h)
+endforeach()
+# the PICA's software renderer, ported from Azahar's: the CPU reference the GPU's draws are tested against, which the
+# runtime does not draw with
+add_library(snx_ctr_gpu_reference STATIC gpu/shader.c gpu/draw.c gpu/raster.c gpu/lighting.c gpu/texture.c)
+target_link_libraries(snx_ctr_gpu_reference PUBLIC snx_ctr_gpu m)
 # the HLE DSP and its SDL3 output
 add_library(snx_ctr_audio STATIC audio/dsp.c audio/source.c audio/mixers.c audio/output.c)
 target_link_libraries(snx_ctr_audio PUBLIC snx_ctr_memory SDL3::SDL3)
-target_link_libraries(snx_ctr_process PUBLIC snx_ctr_cpu snx_ctr_loader scarletnx-filesystem snx_ctr_gpu snx_ctr_audio)
+# snx_settings_runtime: g_settings and the 3DS debug table (g_ctr_debug_ini, src/nx/runtime/settings.txt)
+target_link_libraries(snx_ctr_process PUBLIC snx_ctr_cpu snx_ctr_loader scarletnx-filesystem snx_ctr_gpu snx_ctr_audio
+                      snx_settings_runtime)
 include("${PROJECT_SOURCE_DIR}/cmake/swipc.cmake")
 snx_swipc(snx_ctr_process CTR ROOT "${CMAKE_CURRENT_SOURCE_DIR}" FILES services/srv.swipc services/fs.swipc services/apt.swipc services/ptm.swipc services/hid.swipc services/file.swipc)
-foreach(target snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process snx_ctr_gpu snx_ctr_audio)
+foreach(target snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process snx_ctr_gpu snx_ctr_gpu_reference snx_ctr_audio)
     set_target_properties(${target} PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 endforeach()
@@ -53,6 +71,29 @@ else()
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
     target_compile_options(scarletnx-3ds PRIVATE -Wall -Wextra -Werror=missing-prototypes)
     set(SNX_CTR_PROGRAM "$<TARGET_FILE:scarletnx-3ds>" PARENT_SCOPE)
+    # after each build the program is copied beside every 3DS game (recompiled/<title ID>/<title ID>), as scarletnx
+    # is beside every Switch game (cmake/deploy.cmake), so a runtime fix reaches them without recompiling. A sanitized
+    # test build's stays here
+    if(SNX_DEPLOY AND NOT (SNX_TEST_SANITIZERS AND BUILD_TESTING))
+        add_custom_command(TARGET scarletnx-3ds POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" "-DCTR_RUNTIME=$<TARGET_FILE:scarletnx-3ds>" "-DGAMES=${SNX_RECOMPILED_DIR}"
+                    "-DWINDOWS=${WIN32}" "-DMACOS=${APPLE}" -P "${PROJECT_SOURCE_DIR}/cmake/deploy.cmake"
+            VERBATIM)
+    endif()
+    # Windows: the runtime's application manifest, as scarletnx has it (src/nx/runtime/driver/CMakeLists.txt). Its
+    # longPathAware lets the native linker start in a staging folder past MAX_PATH (aot/compiler.c), its UTF-8 code
+    # page lets a CIA's path hold any character
+    if(WIN32)
+        if(CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+            target_link_options(scarletnx-3ds PRIVATE
+                                "LINKER:/MANIFESTINPUT:${CMAKE_SOURCE_DIR}/src/common/platform/runtime.manifest")
+        else()
+            enable_language(RC)
+            target_sources(scarletnx-3ds PRIVATE "${CMAKE_SOURCE_DIR}/src/common/platform/runtime.rc")
+            target_include_directories(scarletnx-3ds PRIVATE
+                                       "$<$<COMPILE_LANGUAGE:RC>:${CMAKE_SOURCE_DIR}/src/common/platform>")
+        endif()
+    endif()
 endif()
 include(GNUInstallDirs)
 include("${PROJECT_SOURCE_DIR}/cmake/llvm.cmake")
@@ -104,7 +145,13 @@ add_library(snx_ctr_native STATIC aot/load.c)
 target_link_libraries(snx_ctr_native PUBLIC snx_ctr_process ${CMAKE_DL_LIBS})
 set_target_properties(snx_ctr_native PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_compile_options(snx_ctr_native PRIVATE -Wall -Wextra -Werror=missing-prototypes)
-target_sources(snx_ctr_program PRIVATE aot/run.c)
+target_sources(snx_ctr_program PRIVATE aot/run.c aot/jit.c)
+# the run-time compiler for the blocks the static module lacks: the LLVM backend's executor (exec.c, in snx_llvm, which
+# the Switch driver's build defines)
+if(TARGET snx_llvm)
+    target_link_libraries(snx_ctr_program PUBLIC snx_llvm)
+    target_compile_definitions(snx_ctr_program PRIVATE SNX_CTR_JIT)
+endif()
 target_link_libraries(snx_ctr_program PUBLIC snx_ctr_native)
 if(NOT SNX_MULTICALL)
     install(TARGETS scarletnx-3ds RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

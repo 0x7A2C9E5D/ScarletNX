@@ -59,10 +59,12 @@ static void lru_unlink(Surf* s) {
         g_lru[list].tail = s->lru_prev;
     s->lru = VK_LRU_NONE;
 }
+static u64 g_touched;
 void vk_surf_touch(Surf* s) {
     if (s->last_used == g_vk_present) return;
     s->last_used = g_vk_present;
     if (!s->lru) return;
+    s->touched = ++g_touched;
     int kind = lru_kind(s);
     lru_unlink(s);
     lru_link(s, kind);
@@ -78,6 +80,7 @@ void vk_surf_relist(Surf* s) {
     while (at && (i32)((u32)at->last_used - (u32)s->last_used) <= 0) at = at->lru_next;
     lru_unlink(s);
     s->lru = kind;
+    s->touched = ++g_touched; /* past the others of its last_used */
     s->lru_next = at;
     s->lru_prev = at ? at->lru_prev : g_lru[kind].tail;
     if (s->lru_prev)
@@ -91,6 +94,7 @@ void vk_surf_relist(Surf* s) {
 }
 static void lru_add(Surf* s, int kind) {
     s->last_used = g_vk_present;
+    s->touched = ++g_touched;
     lru_link(s, kind);
     g_held[kind].n++;
     g_held[kind].bytes += s->bytes;
@@ -256,9 +260,70 @@ void vk_surf_add(Surf* s) {
     lru_add(s, VK_LRU_TEX);
 }
 
+/* The live render targets (parked ones aren't) by address, open addressed. vk_rt_find is asked about 4,000 times a
+   frame in one game, mostly by texture lookups, and walking the hash chain read two or three Surfs scattered in
+   memory each time: a twentieth of its GPU thread. An address has at most one live target (rt_create parks the one
+   there before it makes or takes another), and a few hundred live at once, so the table stays in the cache. Without
+   it (an allocation failed) the chain is walked */
+typedef struct {
+    u64 gva;
+    Surf* s; /* NULL: a free slot */
+} RtSlot;
+static RtSlot* g_rtx;
+static u32 g_rtx_mask, g_rtx_n;
+static int g_rtx_failed;
+static u32 rtx_home(u64 gva) { return (u32)((gva * 0x9E3779B97F4A7C15ull) >> 40) & g_rtx_mask; }
+static void rtx_put(RtSlot* t, u32 mask, u64 gva, Surf* s) {
+    u32 i = (u32)((gva * 0x9E3779B97F4A7C15ull) >> 40) & mask;
+    while (t[i].s) i = (i + 1) & mask;
+    t[i].gva = gva;
+    t[i].s = s;
+}
+static void rtx_add(Surf* s) {
+    if (g_rtx_failed) return;
+    if ((g_rtx_n + 1) * 2 > (g_rtx ? g_rtx_mask + 1 : 0)) {
+        u32 cap = g_rtx ? (g_rtx_mask + 1) * 2 : 1024;
+        RtSlot* t = calloc(cap, sizeof *t);
+        if (!t) {
+            g_rtx_failed = 1;
+            free(g_rtx);
+            g_rtx = NULL;
+            return;
+        }
+        for (u32 i = 0; g_rtx && i <= g_rtx_mask; i++)
+            if (g_rtx[i].s) rtx_put(t, cap - 1, g_rtx[i].gva, g_rtx[i].s);
+        free(g_rtx);
+        g_rtx = t;
+        g_rtx_mask = cap - 1;
+    }
+    rtx_put(g_rtx, g_rtx_mask, s->gva, s);
+    g_rtx_n++;
+}
+/* the live target at gva out of the table, the slots after it shifted back so that every probe still finds its own */
+static void rtx_del(u64 gva) {
+    u32 i, j;
+    if (!g_rtx) return;
+    for (i = rtx_home(gva); g_rtx[i].s && g_rtx[i].gva != gva; i = (i + 1) & g_rtx_mask) {}
+    if (!g_rtx[i].s) return;
+    g_rtx_n--;
+    for (j = (i + 1) & g_rtx_mask; g_rtx[j].s; j = (j + 1) & g_rtx_mask) {
+        u32 h = rtx_home(g_rtx[j].gva);
+        /* j's entry stays when its home lies cyclically in (i, j] */
+        if (i <= j ? (i < h && h <= j) : (i < h || h <= j)) continue;
+        g_rtx[i] = g_rtx[j];
+        i = j;
+    }
+    g_rtx[i].s = NULL;
+}
 Surf* vk_rt_find(u64 gva) {
-    for (Surf* s = g_surfh[hkey(gva)]; s; s = s->next)
-        if (s->gva == gva && s->is_rt) return s;
+    if (g_rtx_failed) {
+        for (Surf* s = g_surfh[hkey(gva)]; s; s = s->next)
+            if (s->gva == gva && s->is_rt) return s;
+        return NULL;
+    }
+    if (!g_rtx) return NULL;
+    for (u32 i = rtx_home(gva); g_rtx[i].s; i = (i + 1) & g_rtx_mask)
+        if (g_rtx[i].gva == gva) return g_rtx[i].s;
     return NULL;
 }
 
@@ -308,12 +373,16 @@ static u64 rt_layer_bytes(const Surf* s) {
     u64 row = (u64)s->w * s->f.bpp;
     return s->bl ? bl_size((u32)row, s->h, s->bh) : (u64)s->pitch * (s->h - 1) + row;
 }
+/* whether s's slices are one 3D volume in guest memory (a 3D render target's layers, a 3D texture's depth, written
+   to as a storage image), not layers a layer_size apart */
+static int surf_volume(const Surf* s) { return s->volume || s->type == VK_IMAGE_VIEW_TYPE_3D; }
+static u32 surf_slices(const Surf* s) { return s->type == VK_IMAGE_VIEW_TYPE_3D ? s->depth3d : s->layers; }
 /* a target's guest bytes, all layers: kept in rt_size once rt_create has made it, as its shape doesn't change */
 static u64 rt_bytes(const Surf* s) {
     if (s->rt_size) return s->rt_size;
-    if (s->volume && s->bl) {
+    if (surf_volume(s) && s->bl) {
         u64 slice = rt_layer_bytes(s);
-        u32 depth = (s->layers + (1u << s->bd) - 1) & ~((1u << s->bd) - 1);
+        u32 depth = (surf_slices(s) + (1u << s->bd) - 1) & ~((1u << s->bd) - 1);
         return slice * depth;
     }
     return s->layer_size * (s->layers - 1) + rt_layer_bytes(s);
@@ -371,9 +440,9 @@ static void rt_loaded(Surf* s) {
    at layer_size from the last, where the layout starts again) */
 static VkBlMove rt_bl_move(const Surf* s, u32 pitch) {
     VkBlMove m = {s->w * s->f.bpp, s->h, bl_height(s->h, s->bh), 0, 0, s->h, 0, 1, pitch};
-    if (s->volume) {
+    if (surf_volume(s)) {
         m.bd = s->bd;
-        m.slices = s->layers;
+        m.slices = surf_slices(s);
     }
     return m;
 }
@@ -455,9 +524,11 @@ static u64 flush_bytes(const Surf* s) {
     if (s->mem_wgen == s->wgen || !moves_scaled(s)) return 0;
     return s->bl ? rt_bytes(s) : (u64)s->w * s->f.bpp * s->h * s->layers;
 }
-/* s's pixels copied into buf at at, in rows of pitch bytes, a layer after another, at the guest's size */
+/* s's pixels copied into buf at at, in rows of pitch bytes, a layer (or a 3D image's slice) after another, at the
+   guest's size */
 static void flush_copy(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 at, u32 pitch) {
     u64 slice = (u64)pitch * s->h;
+    u32 depth = s->type == VK_IMAGE_VIEW_TYPE_3D ? s->depth3d : 1; /* a 3D image's slices in one copy */
     vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
     for (u32 layer = 0; layer < s->layers; layer++) {
@@ -465,7 +536,7 @@ static void flush_copy(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 at, u32 pi
             .bufferOffset = at + (u64)layer * slice,
             .bufferRowLength = pitch / s->f.bpp,
             .imageSubresource = {s->f.depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1},
-            .imageExtent = {s->w, s->h, 1}};
+            .imageExtent = {s->w, s->h, depth}};
         VmaAllocation tm;
         VkImage t = s->sw == s->w && s->sh == s->h ? VK_NULL_HANDLE : vk_unscaled_image(s, 1, &tm);
         if (!t)
@@ -492,10 +563,10 @@ static int flush_record(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 at) {
         flush_copy(cb, s, buf, at, row);
         return 1;
     }
-    u32 pitch = (row + 15) & ~15u, moves = s->volume ? 1 : s->layers;
+    u32 pitch = (row + 15) & ~15u, moves = surf_volume(s) ? 1 : s->layers;
     u64 cap;
     VkBlMove m = rt_bl_move(s, pitch);
-    VkBuffer scratch = vk_bl_scratch((u64)pitch * s->h * s->layers, &cap);
+    VkBuffer scratch = vk_bl_scratch((u64)pitch * s->h * surf_slices(s), &cap);
     if (!scratch) return 0;
     flush_copy(cb, s, scratch, 0, pitch);
     vk_bl_barrier(cb, 1);
@@ -533,8 +604,8 @@ static void flush_land(Surf* s, const u8* p, const u8* original, u64 wgen) {
             gmem_read(gva, tmp, sz);
         dst = tmp;
     }
-    if (s->bl && s->volume)
-        bl_land(dst, p, (u32)row, s->h, s->layers, bl_height(s->h, s->bh), s->bd);
+    if (s->bl && surf_volume(s))
+        bl_land(dst, p, (u32)row, s->h, surf_slices(s), bl_height(s->h, s->bh), s->bd);
     else
         for (u32 layer = 0; layer < s->layers; layer++) {
             u8* layer_dst = dst + (u64)layer * s->layer_size;
@@ -653,6 +724,54 @@ void vk_surf_flush(Surf* s, const u8* original) {
     vk_result_end();
 }
 void vk_rt_flush(u64 gva) { vk_surf_flush(vk_rt_find(gva), NULL); }
+/* A storage image's results kept on the GPU (docs/GPU_OWNERSHIP.md), as the DMA engine's destination is: its span
+   staged as the GPU sees it into a buffer of its own (the bytes between its texels keep theirs), its texels laid out
+   over that in the guest's layout, and the buffer published over the span run by run of guest memory. Nothing waits:
+   the bytes land when the CPU touches them. A 3D volume a game writes twice a frame and only samples took a wait
+   each, a fifth of the run. 0 when it can't be (pitch linear, no room): the caller flushes at once */
+int vk_surf_publish(Surf* s) {
+    u64 size = flush_bytes(s), at, off = 0;
+    VkBuffer staged;
+    VkOwnRes* r;
+    VkCommandBuffer cb;
+    if (!size || !s->bl || (s->gva >> 63)) return 0;
+    vk_render_end();
+    r = vk_own_res_new(size);
+    if (!r) return 0;
+    u8* p = vk_stage(size, vk_stage_align(), &staged, &at);
+    if (!p) {
+        vk_own_res_unref(r);
+        return 0;
+    }
+    vk_guest_read(s->gva, size, p, staged, at);
+    vk_rt_overlay(s->gva, size, staged, at);
+    cb = vk_cmd();
+    VkBufferCopy c = {at, 0, size};
+    rec_CmdCopyBuffer(cb, staged, r->buf, 1, &c);
+    vk_all_barrier(cb);
+    if (!flush_record(cb, s, r->buf, 0)) {
+        vk_own_res_unref(r);
+        return 0;
+    }
+    vk_all_barrier(cb);
+    while (off < size) {
+        u64 cpu = 0, n = gmmu_run(s->gva + off, size - off, &cpu);
+        if (!n) { /* an unmapped page takes no write */
+            n = 0x1000 - ((s->gva + off) & 0xFFF);
+            if (n > size - off) n = size - off;
+        } else
+            vk_own_publish(cpu, n, r, off);
+        off += n;
+    }
+    gpu_mem_written(s->gva, size);
+    vk_own_res_unref(r);
+    /* guest memory (its owner) has the image's pixels now: the texture cache finds them current, by their owner */
+    s->mem_wgen = s->wgen;
+    s->gw = gpu_mem_generation();
+    vk_surf_relist(s);
+    if (!s->is_rt) vk_tex_note_writeback(s);
+    return 1;
+}
 
 u64 g_vk_rt_readbacks; /* render targets written back to guest memory because the GPU's copy couldn't take them */
 int vk_rt_overlay(u64 gva, u64 size, VkBuffer buf, u64 at) {
@@ -726,12 +845,14 @@ static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 
     for (Surf* s = g_surfh[hkey(gva)]; s; s = s->next)
         if (s->gva == gva && s->is_rt) {
             rt_pages(s, -1);
+            rtx_del(gva);
             s->gva = gva | 1ull << 63;
             g_parked++;
             g_vk_surf_epoch++;
         }
     if (parked) {
         parked->gva = gva;
+        rtx_add(parked);
         g_parked--;
         g_vk_surf_epoch++;
         rt_pages(parked, 1);
@@ -741,6 +862,7 @@ static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 
     VkFmt f = depth ? vk_zt_format(fmt) : vk_rt_format(fmt);
     Surf* s = surf_create(gva, w, h, f, fkey, bl, bh, pitch, 1, layers);
     if (!s) return NULL;
+    rtx_add(s);
     s->layer_size = layer_size;
     s->bd = bd;
     s->volume = volume;
@@ -780,10 +902,49 @@ void vk_rt_note_read(Surf* s) {
                   (unsigned long long)s->gva);
 }
 
+/* the GPU addresses showing a guest address (gmmu_aliases), up to RT_CPU_MAX: one more says there were more */
+#define RT_CPU_MAX 32
+typedef struct {
+    u64 gva[RT_CPU_MAX];
+    u32 n;
+} RtCpuAt;
+static void rt_cpu_at(void* ctx, u64 gva, u64 n) {
+    RtCpuAt* q = ctx;
+    (void)n;
+    if (q->n < RT_CPU_MAX)
+        q->gva[q->n++] = gva;
+    else
+        q->n = RT_CPU_MAX + 1;
+}
+/* whether s, a target showing the frame, is a better one than best: of the frame's size, else any; the most recently
+   used of those, and of two used in the same present the one first used later, as the recency lists order them */
+static int rt_cpu_better(const Surf* s, int exact, const Surf* best, int best_exact) {
+    if (!best || exact != best_exact) return !best || exact > best_exact;
+    i32 d = (i32)((u32)s->last_used - (u32)best->last_used);
+    return d > 0 || (d == 0 && s->touched > best->touched);
+}
 Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h) {
-    /* the one of the frame's size, else any; the most recently used of those */
     Surf* best = NULL;
     int best_exact = 0;
+    RtCpuAt q;
+    /* Each present asked this of every render target, translating its address: 3,600 of them in one game, 1.5% of
+       its GPU thread. The GPU addresses showing the frame, from the guest side, find the live targets there instead */
+    q.n = 0;
+    gmmu_aliases(cpu_addr, 1, rt_cpu_at, &q);
+    if (q.n <= RT_CPU_MAX) {
+        for (u32 i = 0; i < q.n; i++) {
+            Surf* s = vk_rt_find(q.gva[i]);
+            if (!s || s->f.depth || s->layout == VK_IMAGE_LAYOUT_UNDEFINED || gmmu_translate(s->gva) != cpu_addr)
+                continue;
+            int exact = s->w == w && s->h == h;
+            if (rt_cpu_better(s, exact, best, best_exact)) {
+                best = s;
+                best_exact = exact;
+            }
+        }
+        if (best) vk_rt_note_read(best);
+        return best && best->layout != VK_IMAGE_LAYOUT_UNDEFINED ? best : NULL;
+    }
     for (int list = VK_LRU_RT + LRU_AGED; list >= VK_LRU_RT; list -= LRU_AGED)
         for (Surf* s = g_lru[list].head; s; s = s->lru_next) {
             if (s->f.depth || (s->gva >> 63) || s->layout == VK_IMAGE_LAYOUT_UNDEFINED ||
@@ -947,6 +1108,7 @@ static int lossless(const Surf* s) {
 }
 /* s out of the table and freed, with its copies (gpu/vk/texture.c rt_crop): the device memory that releases */
 static u64 surf_evict(Surf* s) {
+    if (s->is_rt && !(s->gva >> 63)) rtx_del(s->gva);
     for (Surf** pp = &g_surfh[hkey(s->gva)]; *pp; pp = &(*pp)->next)
         if (*pp == s) {
             *pp = s->next;

@@ -28,6 +28,7 @@ typedef struct {
     u64 layer_id; /* 0: unused */
     int connected;
     u32 width, height, format; /* the default size and format, from the preallocated buffers */
+    u32 max_buffer_count;      /* what the game asked SetBufferCount for; 2 by default, as its window does */
     u32 interval;              /* the swap interval of the last frame queued */
     u32 gen;                   /* bumped when the layer closes (vi_key) */
     KEvent* event;             /* signaled when a buffer comes free (GetNativeHandle) */

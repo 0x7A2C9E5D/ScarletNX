@@ -16,7 +16,9 @@
    astc.c      compute decoding of ASTC texture blocks during upload
    buffer.c    vertex, index, constant and storage buffers from guest memory
    pipeline.c  translated shaders, the pipeline layout and pipelines by state
-   pipeline_file.c  the shaders and pipelines kept across runs, made again at startup (pipeline_file.h)
+   pipeline_file.c  the shaders and pipelines kept across runs, made again at startup (pipeline_file.h), and the
+                    shaders of the programs the game ships (<game>.vkshipped, translated by the pass over its files
+                    in gpu/shipped_pass.c), read as the draws ask for them
    render.c    the render target set (dynamic rendering), clears and draws
    compute.c   compute dispatches (on a queue of their own when there is one), landing their results in guest memory
    renderer.c  the renderer interface the GPU front end calls (gpu/renderer.h) and presenting
@@ -45,6 +47,7 @@ typedef struct {
     VkSurfaceKHR surface;
     VkPhysicalDevice phys;
     VkPhysicalDeviceProperties props;
+	u64 shader_generation; /* shader instruction invalidations, separate from memory epochs */
     VkDevice dev;
     VmaAllocator vma;
     /* compute is a second queue of the graphics family, or of a compute-only family, when the device has one; else
@@ -111,6 +114,9 @@ int vk_window_release(void); /* Renderer.release_window */
 /* logs a failed call with where it happened; evaluates to 1 on success */
 #define VK_OK(call) vk_ok_((call), #call, __FILE__, __LINE__)
 int vk_ok_(VkResult r, const char* what, const char* file, int line);
+/* The renderer's lock, reentrant on the thread that holds it. The outermost vk_unlock, once the lock is let go,
+   signals the event slots this thread's syncpoint releases under it reached (vk_release_events): that takes nvdrv's
+   nvev_lk and the kernel's lock, so a hold that performs releases is never let go under either */
 void vk_lock(void);
 void vk_unlock(void);
 int vk_trylock(void); /* vk_lock unless another thread holds it: 1 when taken */
@@ -140,10 +146,13 @@ u32 vk_present_before(u64 ago_ns, u32 presents);
 /* cmd.c */
 void vk_cmd_init(void);
 VkCommandBuffer vk_cmd(void); /* the current frame's command buffer, begun on first use */
-/* size bytes of the current frame's staging memory (host visible, flushed when the frame is submitted), valid until
+/* size bytes of the current frame's mapped staging memory (flushed when the frame is submitted), valid until
    that frame's work is done. NULL past g_vk.alloc_cap: a big upload stages in parts */
 u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off);
-/* As vk_stage, with the allocation for GPU-written data that must be invalidated after its frame fence. */
+/* Streamed buffer snapshots in host RAM, with the same frame lifetime as vk_stage. */
+u8* vk_stage_upload(u64 size, u64 align, VkBuffer* buf, u64* off);
+/* GPU-written storage, device-local when host-visible memory and its budget allow;
+   includes the allocation for invalidation after its frame fence. */
 u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation* mem);
 /* Host-cached memory for the current frame's GPU -> host copies, read after its fence once invalidated. */
 u8* vk_stage_back(u64 size, VkBuffer* buf, u64* off, VmaAllocation* mem);
@@ -212,6 +221,12 @@ void vk_rec_submit(VkCommandBuffer cb, const VkSemaphoreSubmitInfo* w, u32 nw, c
                    u32 ns);
 void vk_rec_sync(void);        /* until everything queued is recorded and submitted */
 void vk_rec_queue(VkQueue q);  /* before submitting to or presenting on q outside the ring (vk_lock) */
+/* presents image idx of sc once wait is signaled, in order after the submissions queued before it (vk_lock). The
+   result is this present's without the recording thread, otherwise that of an earlier one which wasn't VK_SUCCESS,
+   or VK_SUCCESS: a swapchain out of date shows a frame later */
+VkResult vk_rec_present(VkSwapchainKHR sc, u32 idx, VkSemaphore wait);
+/* takes the queued presents' result that wasn't VK_SUCCESS, if any (after a drain: a new swapchain drops the old's) */
+VkResult vk_rec_present_result(void);
 /* a new descriptor set of layout with those writes, for commands of the frame's command buffer only: allocated and
    written on the recording thread, a stand-in handle until then (vk_lock) */
 VkDescriptorSet vk_rec_new_set(VkDescriptorSetLayout layout, u32 n, const VkWriteDescriptorSet* w);
@@ -363,6 +378,7 @@ typedef struct Surf {
     VkPipelineStageFlags2 stage;
     VkAccessFlags2 access;
     u64 last_used;
+    u64 touched; /* when it last went to the recent end of its recency list: ties of last_used in the lists' order */
     u32 wgen;       /* render targets: bumped when drawn to */
     u64 wseq;       /* when its image last changed, counted across surfaces: of two over the same bytes, the higher
                        holds them (vk_surf_wrote) */
@@ -443,6 +459,8 @@ int vk_gfx_image_holds(const Surf* s); /* s has a storage result waiting to land
 u64 vk_surf_guest_size(const Surf* s);
 int vk_surf_can_writeback(const Surf* s);
 void vk_surf_flush(Surf* s, const u8* original); /* original preserves newer guest writes for storage images */
+/* s's pixels published over its guest bytes, GPU-owned and not waited for: 1, or 0 when only vk_surf_flush can */
+int vk_surf_publish(Surf* s);
 void vk_surf_wrote(Surf* s); /* its image changed: its copies are out of date (wgen), and it is the newest (wseq) */
 /* vk_surf_flush in two halves, the GPU not waited for: the bytes a write-back of s copies (0 for none), its copy
    recorded into buf at at (host-readable once the submit being recorded is done), and its landing from those bytes p,
@@ -649,6 +667,10 @@ void vk_tex_frame(void);    /* a frame was presented: evicts what wasn't used fo
 
 /* gpu/vk/buffer.c: guest memory [gva, gva + len) as a buffer the GPU reads, valid until the next submit */
 int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off);
+/* the cache lines vk_buf_get(gva, len) will read, fetched ahead: step 0 its index slot, step 1 (after step 0 for every
+   range) its entry. For a caller with several ranges to look up, so their misses overlap */
+void vk_buf_prefetch(u64 gva, u64 len, int step);
+void vk_buf_mapping_changed(void); /* the GPU mappings or the guest memory under them changed: translations go */
 int vk_buf_get_strict(u64 gva, u64 len, VkBuffer* buf, u64* off); /* no delayed content checks */
 /* a copy of len bytes made now (data that changes within a frame), or of zeros when gva is 0 */
 int vk_buf_copy(u64 gva, u64 len, VkBuffer* buf, u64* off);
@@ -697,6 +719,9 @@ int vk_release_read(u64 gva, void* dst, u64 len);
 extern u64 g_vk_release_forwards;           /* statistics: reads vk_release_read answered */
 extern u64 g_vk_dset_new, g_vk_dset_reused; /* statistics: descriptor sets written, reused for the same contents */
 u32 vk_release_value(u32 id);
+/* the event slots the syncpoint increments this thread performed under vk_lock reached, signaled (nvdrv.c's
+   syncpt_events): the outermost vk_unlock's, after the lock goes */
+void vk_release_events(void);
 /* renderer.h render_predicate and render_predicate_drop. A predicate is its slot + 1 (query.c), with VK_PRED_EQUAL for
    a draw when the count is zero */
 #define VK_PRED_EQUAL 0x80000000u
@@ -778,6 +803,7 @@ typedef struct VkSh {
     VkShaderModule mod;
     int indexed; /* it reads indexed textures: its set needs the texture array bindings (vk_playout) */
     int failed;
+    int shipped; /* a program the game ships, translated before a draw asked for it: 2 once one found it */
     u32 clen, clen_a;
     u64 qh, qh_a;
     struct VkSh* next;
@@ -810,6 +836,9 @@ void vk_pipeline_init(void);
    rasterization's outputs (ShaderInfo.xfb), NULL for none */
 VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int_mask, u64 sint_mask, u32 rt_int,
                     u32 rt_sint, u32 clip, u64 dc_color, u32 dc_funcs, u32 unfed, const ShXfb* xfb);
+/* whether the constant buffer words s's translation read still hold in ch's bound buffers (vk_shader_get's check on
+   a hit, for a caller that kept s) */
+int vk_shader_cb_hold(const GpuChannel* ch, const VkSh* s);
 typedef struct {
     VkShaderModule vs, fs;
     VkShaderModule tcs, tes, gs; /* tessellation control and evaluation, geometry: VK_NULL_HANDLE when off */
@@ -847,17 +876,24 @@ int vk_pipeline_worker_count(int setting, int cpus);
    pipeline a stand-in names, or h itself) */
 VkPipeline vk_pipeline_get_deferred(const PipeKey* k);
 VkPipeline vk_pipeline_resolve(VkPipeline h);
+/* the pipeline h names when it is ready, else h itself, without waiting: a stand-in and its pipeline are one */
+VkPipeline vk_pipeline_ready(VkPipeline h);
+/* h's pipeline if it is ready, else VK_NULL_HANDLE, *pending saying whether a worker still makes it */
+VkPipeline vk_pipeline_now(VkPipeline h, int* pending);
 /* so far: pipelines made, how many of them the pipeline cache had, ms the workers took making them, ms the GPU thread
    waited for new ones, shaders translated, ms translating them */
 void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* shaders, u64* shader_ms);
 void vk_tex_stats(u64* uploads, u64* bytes); /* texture uploads from guest memory so far, and their bytes */
 u64 vk_rt_made(void);                         /* render targets made so far */
 VkPipelineCache vk_pipeline_cache(void); /* for pipelines made elsewhere (compute) */
-void vk_pipeline_save(void);
+void vk_pipeline_save(int at_exit);
 VkShaderModule vk_module_spv(const u32* words, size_t count);
 VkShaderModule vk_module_spv_location(const u32* words, size_t count, u32 location);
 /* pipelines of earlier runs made in the background: made so far, how many the pipeline cache had, and still to make */
 void vk_pipeline_prewarm_stats(u64* made, u64* hits, u64* left);
+/* what is made before the game draws, so far (the renderer's prepare) */
+struct RendererPrepare;
+void vk_pipeline_prepare(struct RendererPrepare* p);
 
 /* compute.c */
 void vk_dispatch(GpuChannel* ch, const u32* q, u64 code);
@@ -931,6 +967,8 @@ u32 vk_gbuf_desc(int stage, u32 off, const u32* v, u64* addr);
    accesses a barrier names see the writes before it */
 #define VK_STORAGE_IMAGE_ACCESS (VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT)
 extern u64 g_vk_drawn, g_vk_skipped; /* draws recorded, and draws skipped (unsupported topology, failed shader) */
+/* draws that kept the last draw's shaders and pipeline key, and those of them SNX_DIRTY_CHECK made again to compare */
+extern u64 g_vk_draw_kept, g_vk_draw_checked;
 /* draws that sampled a color target they render to in place, the barriers ordering them within a pass, the passes
    begun again for them (a target's layout, or ordering without those barriers), and draws that sampled a target
    through a copy instead (gpu/vk/render.c) */

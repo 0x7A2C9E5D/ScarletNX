@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Direct Maxwell to SPIR-V translation. Unsupported instructions reject the entire module. */
-#include "nx/gpu/shader/spirv_emit.h"
+#include "common/utilities/spirv_emit.h"
 #include "nx/gpu/shader/translator.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -10,6 +10,24 @@ typedef struct {
     SpvEmitter emit;
     u32 u32_type, f32_type, f16_type, f64_type, bool_type, zero, true_value, false_value, glsl;
     u32 reg[255];
+    /* Each register's value in the block being written, so that reading it again takes no load: the value, a bitcast
+       of it to alt_type, and the emitter's block they were made in. Stores stay where they were, so the variables
+       hold every value at a block's end and the driver sees the same memory as before */
+    u32 reg_val[255], reg_alt[255], reg_alt_type[255], reg_block[255];
+    u8* ftz; /* a bit per id: values with no subnormal (float_ftz's, and reads of registers not tainted) */
+    size_t ftz_bytes;
+    /* each value's flush in the block it was made in (by id, ftz_of_cap of them): a value read once and used by
+       several FTZ instructions is flushed once a block */
+    u32 *ftz_of, *ftz_of_block;
+    size_t ftz_of_cap;
+    /* Registers that may hold a subnormal on the per-instruction FTZ path: written by anything but an FTZ float
+       instruction whose result is flushed. A float read of one that isn't is flushed already */
+    u8 tainted[256];
+    int taint_known;
+    int ftz_float; /* the module preserves signed zeros (SignedZeroInfNanPreserve): float_ftz flushes with a float test */
+    /* A pure instruction's guard while it is translated: it runs unguarded and each register, predicate and flag it
+       writes keeps its old value where the guard is false, in place of a branch around it. 0 otherwise */
+    u32 guard;
     u32 pred[7];
     u32 cc_c, cc_o, cc_z, cc_s;
     u32 cbuf[18], cbuf_pointer[18];
@@ -38,11 +56,43 @@ int g_shader_tessellation = 1;
 int g_shader_clock_scopes;
 
 static u32 reg_read(DirectCtx* c, u32 r) {
-    return r >= 255 ? c->zero : spv_emit_load(&c->emit, c->u32_type, c->reg[r]);
+    if (r >= 255) return c->zero;
+    if (c->reg_val[r] && c->reg_block[r] == c->emit.block) return c->reg_val[r];
+    c->reg_val[r] = spv_emit_load(&c->emit, c->u32_type, c->reg[r]);
+    c->reg_block[r] = c->emit.block;
+    c->reg_alt_type[r] = 0;
+    return c->reg_val[r];
 }
 
 static void reg_write(DirectCtx* c, u32 r, u32 value) {
-    if (r < 255) spv_emit_store(&c->emit, c->reg[r], value);
+    if (r >= 255) return;
+    if (c->guard) value = spv_emit_select(&c->emit, c->u32_type, c->guard, value, reg_read(c, r));
+    spv_emit_store(&c->emit, c->reg[r], value);
+    c->reg_val[r] = value;
+    c->reg_block[r] = c->emit.block;
+    c->reg_alt_type[r] = 0;
+}
+
+/* value, of another 32-bit type, stored as the register's bits: a read of that type in the block takes value back */
+static void reg_write_as(DirectCtx* c, u32 r, u32 value, u32 type) {
+    reg_write(c, r, spv_emit_bitcast(&c->emit, c->u32_type, value));
+    if (r < 255 && !c->guard) { /* a guarded write's bits are a select of value's, not value's */
+        c->reg_alt[r] = value;
+        c->reg_alt_type[r] = type;
+    }
+}
+
+/* the register's bits as another 32-bit type, bitcast once a block */
+static void ftz_mark(DirectCtx* c, u32 value);
+static u32 reg_read_as(DirectCtx* c, u32 r, u32 type) {
+    u32 bits = reg_read(c, r);
+    if (r >= 255) return spv_emit_bitcast(&c->emit, type, bits);
+    if (c->reg_alt_type[r] != type) {
+        c->reg_alt[r] = spv_emit_bitcast(&c->emit, type, bits);
+        c->reg_alt_type[r] = type;
+        if (type == c->f32_type && c->taint_known && !c->tainted[r]) ftz_mark(c, c->reg_alt[r]);
+    }
+    return c->reg_alt[r];
 }
 
 /* How a fragment shader's generic input interpolates (the SPH's imap: 1 constant, 2 perspective, 3 screen
@@ -247,7 +297,246 @@ static u32 pred_read(DirectCtx* c, u32 p, int negative) {
 }
 
 static void pred_write(DirectCtx* c, u32 p, u32 value) {
-    if (p < 7) spv_emit_store(&c->emit, c->pred[p], value);
+    if (p >= 7) return;
+    if (c->guard) value = spv_emit_select(&c->emit, c->bool_type, c->guard, value, pred_read(c, p, 0));
+    spv_emit_store(&c->emit, c->pred[p], value);
+}
+
+/* a condition code flag written, kept as it was where a pure instruction's guard is false */
+static void cc_store(DirectCtx* c, u32 flag, u32 value) {
+    if (c->guard)
+        value = spv_emit_select(&c->emit, c->bool_type, c->guard, value, spv_emit_load(&c->emit, c->bool_type, flag));
+    spv_emit_store(&c->emit, flag, value);
+}
+
+/* Instructions that only compute registers, predicates and flags from registers, constants and immediates: no memory,
+   no texture or attribute, no lanes other than their own, no flow. Run with their guard false they change nothing a
+   select of their writes keeps, so a guarded one needs no branch around it */
+static int pure_op(int op) {
+    switch (op) {
+        case O_BFE_C:
+        case O_BFE_I:
+        case O_BFE_R:
+        case O_BFI_CR:
+        case O_BFI_I:
+        case O_BFI_R:
+        case O_BFI_RC:
+        case O_CS2R:
+        case O_CSET:
+        case O_CSETP:
+        case O_DADD_C:
+        case O_DADD_I:
+        case O_DADD_R:
+        case O_DFMA_CR:
+        case O_DFMA_I:
+        case O_DFMA_R:
+        case O_DFMA_RC:
+        case O_DMNMX_C:
+        case O_DMNMX_I:
+        case O_DMNMX_R:
+        case O_DMUL_C:
+        case O_DMUL_I:
+        case O_DMUL_R:
+        case O_DSET_C:
+        case O_DSET_I:
+        case O_DSETP_C:
+        case O_DSETP_I:
+        case O_DSETP_R:
+        case O_DSET_R:
+        case O_F2F_C:
+        case O_F2F_I:
+        case O_F2F_R:
+        case O_F2I_C:
+        case O_F2I_I:
+        case O_F2I_R:
+        case O_FADD32I:
+        case O_FADD_C:
+        case O_FADD_I:
+        case O_FADD_R:
+        case O_FCHK_C:
+        case O_FCHK_I:
+        case O_FCHK_R:
+        case O_FCMP_CR:
+        case O_FCMP_I:
+        case O_FCMP_R:
+        case O_FCMP_RC:
+        case O_FFMA32I:
+        case O_FFMA_CR:
+        case O_FFMA_I:
+        case O_FFMA_R:
+        case O_FFMA_RC:
+        case O_FLO_C:
+        case O_FLO_I:
+        case O_FLO_R:
+        case O_FMNMX_C:
+        case O_FMNMX_I:
+        case O_FMNMX_R:
+        case O_FMUL32I:
+        case O_FMUL_C:
+        case O_FMUL_I:
+        case O_FMUL_R:
+        case O_FSET_C:
+        case O_FSET_I:
+        case O_FSETP_C:
+        case O_FSETP_I:
+        case O_FSETP_R:
+        case O_FSET_R:
+        case O_HADD2_32I:
+        case O_HADD2_C:
+        case O_HADD2_I:
+        case O_HADD2_R:
+        case O_HFMA2_32I:
+        case O_HFMA2_CR:
+        case O_HFMA2_I:
+        case O_HFMA2_R:
+        case O_HFMA2_RC:
+        case O_HMUL2_32I:
+        case O_HMUL2_C:
+        case O_HMUL2_I:
+        case O_HMUL2_R:
+        case O_HSET2_C:
+        case O_HSET2_I:
+        case O_HSET2_R:
+        case O_HSETP2_C:
+        case O_HSETP2_I:
+        case O_HSETP2_R:
+        case O_I2F_C:
+        case O_I2F_I:
+        case O_I2F_R:
+        case O_I2I_C:
+        case O_I2I_I:
+        case O_I2I_R:
+        case O_IADD32I:
+        case O_IADD3_C:
+        case O_IADD3_I:
+        case O_IADD3_R:
+        case O_IADD_C:
+        case O_IADD_I:
+        case O_IADD_R:
+        case O_ICMP_CR:
+        case O_ICMP_I:
+        case O_ICMP_R:
+        case O_ICMP_RC:
+        case O_IMAD32I:
+        case O_IMAD_CR:
+        case O_IMAD_I:
+        case O_IMAD_R:
+        case O_IMAD_RC:
+        case O_IMNMX_C:
+        case O_IMNMX_I:
+        case O_IMNMX_R:
+        case O_IMUL32I:
+        case O_IMUL_C:
+        case O_IMUL_I:
+        case O_IMUL_R:
+        case O_ISCADD32I:
+        case O_ISCADD_C:
+        case O_ISCADD_I:
+        case O_ISCADD_R:
+        case O_ISET_C:
+        case O_ISET_I:
+        case O_ISETP_C:
+        case O_ISETP_I:
+        case O_ISETP_R:
+        case O_ISET_R:
+        case O_LEA_HC:
+        case O_LEA_HR:
+        case O_LEA_LC:
+        case O_LEA_LI:
+        case O_LEA_LR:
+        case O_LOP32I:
+        case O_LOP3_C:
+        case O_LOP3_I:
+        case O_LOP3_R:
+        case O_LOP_C:
+        case O_LOP_I:
+        case O_LOP_R:
+        case O_MOV32I:
+        case O_MOV_C:
+        case O_MOV_I:
+        case O_MOV_R:
+        case O_MUFU:
+        case O_P2R_C:
+        case O_P2R_I:
+        case O_P2R_R:
+        case O_POPC_C:
+        case O_POPC_I:
+        case O_POPC_R:
+        case O_PRMT_CR:
+        case O_PRMT_I:
+        case O_PRMT_R:
+        case O_PRMT_RC:
+        case O_PSET:
+        case O_PSETP:
+        case O_RRO_C:
+        case O_RRO_I:
+        case O_RRO_R:
+        case O_SEL_C:
+        case O_SEL_I:
+        case O_SEL_R:
+        case O_SHF_LI:
+        case O_SHF_LR:
+        case O_SHF_RI:
+        case O_SHF_RR:
+        case O_SHL_C:
+        case O_SHL_I:
+        case O_SHL_R:
+        case O_SHR_C:
+        case O_SHR_I:
+        case O_SHR_R:
+        case O_VABSDIFF:
+        case O_VADD:
+        case O_VMAD:
+        case O_VMNMX:
+        case O_VSET:
+        case O_VSETP:
+        case O_VSHL:
+        case O_VSHR:
+        case O_XMAD_CR:
+        case O_XMAD_I:
+        case O_XMAD_R:
+        case O_XMAD_RC:
+            return 1;
+        default: return 0;
+    }
+}
+
+/* An FTZ float instruction whose result is flushed as it is written: no scale after the flush (FMUL), no FMZ
+   select of an operand. Its destination is d alone */
+static int ftz_writer(u64 w) {
+    int id = decode(w)->id;
+    if (id == O_FADD_R || id == O_FADD_C || id == O_FADD_I) return (int)B(w, 44, 1);
+    if (id == O_FADD32I) return (int)B(w, 55, 1);
+    if (id == O_FMUL_R || id == O_FMUL_C || id == O_FMUL_I) return (B(w, 44, 2) & 1) && !B(w, 41, 3);
+    if (id == O_FMUL32I) return (int)(B(w, 53, 2) & 1);
+    if (id == O_FFMA_R || id == O_FFMA_RC || id == O_FFMA_CR || id == O_FFMA_I || id == O_FFMA32I)
+        return (int)(B(w, 53, 2) & 1);
+    return 0;
+}
+/* whether w may write register r: its destinations taken wide, d to d+3 and the second field texture instructions
+   write (bits 28 to 35) to it plus 3 */
+static int may_write(u64 w, u32 r) {
+    u32 d = B(w, 0, 8), e = B(w, 28, 8);
+    return (d < 255 && r >= d && r - d < 4) || (e < 255 && r >= e && r - e < 4);
+}
+/* whether register r holds a flushed value when instruction i reads it: the last instruction that may write it in the
+   straight-line code before i (no way in between) is an unpredicated FTZ float instruction, or, past where control
+   may come in, nothing but FTZ float instructions writes it anywhere (tainted) */
+static int reg_flushed_at(const DirectCtx* c, const u64* insn, const u8* block_start, u32 i, u32 r) {
+    if (r >= 255) return 1; /* RZ: zero */
+    if (!c->taint_known) return 0;
+    if (!block_start || !block_start[i])
+        for (u32 j = i; j-- > 11;) {
+            if (!IDX_OK(j)) continue;
+            if (may_write(insn[j], r)) return ftz_writer(insn[j]) && B(insn[j], 16, 3) == 7 && !B(insn[j], 19, 1);
+            if (block_start && block_start[j]) break;
+        }
+    return !c->tainted[r];
+}
+/* value, a read of register r at instruction i, noted flushed when it is (reg_flushed_at) */
+static u32 ftz_read(DirectCtx* c, const u64* insn, const u8* block_start, u32 i, u32 r, u32 value) {
+    if (reg_flushed_at(c, insn, block_start, i, r)) ftz_mark(c, value);
+    return value;
 }
 
 static u32 subgroup_ballot_word(DirectCtx* c, u32 vec4_u32, u32 lane, u32 predicate) {
@@ -298,10 +587,10 @@ static u32 integer_add(DirectCtx* c, u32 left, u32 right, u32 avg, int extended,
                 spv_emit_bool_binary(&c->emit, c->bool_type, 0, zero, spv_emit_load(&c->emit, c->bool_type, c->cc_z));
         u32 sign = spv_emit_i_not_equal(&c->emit, c->bool_type,
                                         spv_emit_bitwise_and_u32(&c->emit, c->u32_type, sum, top), c->zero);
-        spv_emit_store(&c->emit, c->cc_c, carry);
-        spv_emit_store(&c->emit, c->cc_o, overflow);
-        spv_emit_store(&c->emit, c->cc_z, zero);
-        spv_emit_store(&c->emit, c->cc_s, sign);
+        cc_store(c, c->cc_c, carry);
+        cc_store(c, c->cc_o, overflow);
+        cc_store(c, c->cc_z, zero);
+        cc_store(c, c->cc_s, sign);
     }
     return sum;
 }
@@ -311,10 +600,10 @@ static void flags_logic(DirectCtx* c, u32 value) {
                                     spv_emit_bitwise_and_u32(&c->emit, c->u32_type, value,
                                                              spv_emit_constant_u32(&c->emit, c->u32_type, 0x80000000u)),
                                     c->zero);
-    spv_emit_store(&c->emit, c->cc_c, c->false_value);
-    spv_emit_store(&c->emit, c->cc_o, c->false_value);
-    spv_emit_store(&c->emit, c->cc_z, spv_emit_i_equal(&c->emit, c->bool_type, value, c->zero));
-    spv_emit_store(&c->emit, c->cc_s, sign);
+    cc_store(c, c->cc_c, c->false_value);
+    cc_store(c, c->cc_o, c->false_value);
+    cc_store(c, c->cc_z, spv_emit_i_equal(&c->emit, c->bool_type, value, c->zero));
+    cc_store(c, c->cc_s, sign);
 }
 
 /* LOP, LOP32I and LOP3 flags: X retains zero only when the previous word was also zero, as IADD.X chains across
@@ -327,8 +616,8 @@ static void flags_logic_extended(DirectCtx* c, u32 value, int extended) {
                                     spv_emit_bitwise_and_u32(&c->emit, c->u32_type, value,
                                                              spv_emit_constant_u32(&c->emit, c->u32_type, 0x80000000u)),
                                     c->zero);
-    spv_emit_store(&c->emit, c->cc_z, zero);
-    spv_emit_store(&c->emit, c->cc_s, sign);
+    cc_store(c, c->cc_z, zero);
+    cc_store(c, c->cc_s, sign);
 }
 
 static u32 bool_combine(DirectCtx* c, u32 op, u32 left, u32 right) {
@@ -441,23 +730,57 @@ static u32 integer_compare(DirectCtx* c, u32 i32_type, u64 w, u32 left, u32 righ
     return spv_emit_bool_not(&c->emit, c->bool_type, cmp == 3 ? greater : less);
 }
 
+/* whether value is one float_ftz made, or one known to have no subnormal */
+static int ftz_has(const DirectCtx* c, u32 value) {
+    return (size_t)value / 8 < c->ftz_bytes && (c->ftz[value / 8] >> (value % 8) & 1);
+}
+static void ftz_mark(DirectCtx* c, u32 value) {
+    if ((size_t)value / 8 >= c->ftz_bytes) {
+        size_t bytes = ((size_t)value / 8 + 1) * 2;
+        u8* grown = (u8*)realloc(c->ftz, bytes);
+        if (!grown) return; /* not noted: flushed again where it is used */
+        memset(grown + c->ftz_bytes, 0, bytes - c->ftz_bytes);
+        c->ftz = grown;
+        c->ftz_bytes = bytes;
+    }
+    c->ftz[value / 8] |= (u8)(1u << (value % 8));
+}
+
+/* the absolute value and negation of a value with no subnormal have none either */
 static u32 float_mod(DirectCtx* c, u32 value, int absolute, int negative) {
-    if (absolute) value = spv_emit_glsl_unary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FABS, value);
+    int flushed = ftz_has(c, value);
+    if (absolute) value = spv_emit_glsl_unary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_F_ABS, value);
     if (negative) value = spv_emit_fnegate(&c->emit, c->f32_type, value);
+    if (flushed && (absolute || negative)) ftz_mark(c, value);
     return value;
 }
 
-/* An FTZ arithmetic instruction consumes and produces signed zero instead of a subnormal. Do it with integer bits
-   when the Vulkan device can't request DenormFlushToZero, or when this shader mixes FTZ and non-FTZ instructions. */
+/* An FTZ arithmetic instruction consumes and produces signed zero instead of a subnormal. Done here per operand and
+   result when the Vulkan device can't request DenormFlushToZero, or when this shader mixes FTZ and non-FTZ
+   instructions: with a float test where the module keeps signed zeros, else on the bits (spv_emit_flush_subnormal) */
 static u32 float_ftz(DirectCtx* c, u32 value) {
-    u32 bits = spv_emit_bitcast(&c->emit, c->u32_type, value);
-    u32 exponent = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, bits,
-                                            spv_emit_constant_u32(&c->emit, c->u32_type, 0x7f800000u));
-    u32 sign = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, bits,
-                                        spv_emit_constant_u32(&c->emit, c->u32_type, 0x80000000u));
-    u32 flushed =
-        spv_emit_select(&c->emit, c->u32_type, spv_emit_i_equal(&c->emit, c->bool_type, exponent, c->zero), sign, bits);
-    return spv_emit_bitcast(&c->emit, c->f32_type, flushed);
+    u32 type, constant;
+    /* a value flushed once has no subnormal left, wherever it is used; a constant is flushed here */
+    if (ftz_has(c, value)) return value;
+    if (spv_emit_constant_bits(&c->emit, value, &type, &constant) && type == c->f32_type)
+        return spv_emit_constant_u32(&c->emit, c->f32_type,
+                                     constant & 0x7f800000u ? constant : constant & 0x80000000u);
+    if (value < c->ftz_of_cap && c->ftz_of[value] && c->ftz_of_block[value] == c->emit.block) return c->ftz_of[value];
+    u32 result = spv_emit_flush_subnormal(&c->emit, c->f32_type, c->u32_type, c->bool_type, c->glsl, value, c->ftz_float);
+    ftz_mark(c, result);
+    if (value >= c->ftz_of_cap) {
+        size_t cap = ((size_t)value + 1) * 2;
+        u32* of = (u32*)realloc(c->ftz_of, cap * sizeof *of);
+        u32* block = of ? (u32*)realloc(c->ftz_of_block, cap * sizeof *block) : NULL;
+        if (of) c->ftz_of = of;
+        if (!block) return result; /* not noted: flushed again where it is used */
+        memset(of + c->ftz_of_cap, 0, (cap - c->ftz_of_cap) * sizeof *of);
+        c->ftz_of_block = block;
+        c->ftz_of_cap = cap;
+    }
+    c->ftz_of[value] = result;
+    c->ftz_of_block[value] = c->emit.block;
+    return result;
 }
 
 static u32 double_read(DirectCtx* c, u32 vec2_u32, u32 index) {
@@ -468,7 +791,7 @@ static u32 double_read(DirectCtx* c, u32 vec2_u32, u32 index) {
 }
 
 static u32 double_mod(DirectCtx* c, u32 value, int absolute, int negative) {
-    if (absolute) value = spv_emit_glsl_unary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_FABS, value);
+    if (absolute) value = spv_emit_glsl_unary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_F_ABS, value);
     if (negative) value = spv_emit_fnegate(&c->emit, c->f64_type, value);
     return value;
 }
@@ -491,7 +814,7 @@ static u32 half_pair(DirectCtx* c, u32 vec2, u32 raw, u32 swizzle) {
 }
 
 static u32 half_pair_mod(DirectCtx* c, u32 vec2, u32 pair, int absolute, int negative) {
-    if (absolute) pair = spv_emit_glsl_unary(&c->emit, vec2, c->glsl, SPV_GLSL_FABS, pair);
+    if (absolute) pair = spv_emit_glsl_unary(&c->emit, vec2, c->glsl, SPV_GLSL_F_ABS, pair);
     if (negative) pair = spv_emit_fnegate(&c->emit, vec2, pair);
     return pair;
 }
@@ -526,7 +849,7 @@ static u32 half_pair_result(DirectCtx* c, u32 vec2, u32 pair, u32 old, u32 merge
     if (saturate) {
         u32 zero = spv_emit_constant_f32(&c->emit, c->f32_type, 0.0f);
         u32 one = spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f);
-        pair = spv_emit_glsl_ternary(&c->emit, vec2, c->glsl, SPV_GLSL_FCLAMP, pair,
+        pair = spv_emit_glsl_ternary(&c->emit, vec2, c->glsl, SPV_GLSL_F_CLAMP, pair,
                                      spv_emit_vec2_construct(&c->emit, vec2, zero, zero),
                                      spv_emit_vec2_construct(&c->emit, vec2, one, one));
     }
@@ -553,7 +876,7 @@ static u32 float_saturate(DirectCtx* c, u32 value, int saturate) {
     if (!saturate) return value;
     u32 zero = spv_emit_constant_f32(&c->emit, c->f32_type, 0.0f);
     u32 one = spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f);
-    return spv_emit_glsl_ternary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FCLAMP, value, zero, one);
+    return spv_emit_glsl_ternary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_F_CLAMP, value, zero, one);
 }
 
 static void alpha_test(DirectCtx* c, u32 push, u32 push_pointer, u32 alpha) {
@@ -1529,8 +1852,10 @@ static int supported(u64 w, int op) {
         case O_SULD:
             return (B(w, 33, 3) == 3 && (!B(w, 52, 1) || B(w, 20, 4) == 4)) ||
                    (B(w, 33, 3) == 1 && B(w, 52, 1) && B(w, 20, 4) == 4);
-        /* stores and atomics also reach 2D array surfaces (4), the layer in the coordinates' third register */
-        case O_SUST: return !B(w, 52, 1) && (B(w, 33, 3) == 3 || B(w, 33, 3) == 4 || B(w, 33, 3) == 1);
+        /* stores and atomics also reach 2D array surfaces (4), the layer in the coordinates' third register; stores
+           reach 3D surfaces (5) too, z in that register */
+        case O_SUST:
+            return !B(w, 52, 1) && (B(w, 33, 3) == 3 || B(w, 33, 3) == 4 || B(w, 33, 3) == 5 || B(w, 33, 3) == 1);
         /* 32-bit atomics other than INC and DEC, which wrap at the operand. Bindless is bit 54 here. */
         case O_SUATOM:
             return (B(w, 33, 3) == 3 || B(w, 33, 3) == 4 || B(w, 33, 3) == 1) &&
@@ -1598,7 +1923,7 @@ static int supported(u64 w, int op) {
 }
 
 /* The storage image slot for a surface operation: images of one handle share a slot when they have the same
-   dimension (3 a 2D image, 4 a 2D array, 1 a buffer) and are both R32ui (atomics, and loads from buffers) or both
+   dimension (3 a 2D image, 4 a 2D array, 5 a 3D image, 1 a buffer) and are both R32ui (atomics, and loads from buffers) or both
    not. */
 static int direct_image_slot(const ShaderInfo* info, u32 off, int bindless, u32 bank, int r32ui, int type) {
     int slot = 0;
@@ -2615,7 +2940,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 return direct_reject(si, "untracked surface handle");
             if (a < 255) used[a] = 1;
             if (!buffer && a + 1 < 255) used[a + 1] = 1;
-            if (dim == 4 && a + 2 < 255) used[a + 2] = 1;
+            if ((dim == 4 || dim == 5) && a + 2 < 255) used[a + 2] = 1;
             if (bindless && handle < 255) used[handle] = 1;
             int raw = op->id == O_SULD && B(insn[i], 52, 1);
             u32 mask = raw ? 1u : B(insn[i], 20, 4), target = d;
@@ -2634,7 +2959,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                16384 texels, and the dispatch's own stores and atomics wouldn't reach it */
             if (op->id != O_SULD || buffer) {
                 int r32ui = op->id != O_SUST;
-                int type = dim; /* 1, 3 or 4: the forms supported() takes here */
+                int type = dim; /* 1, 3, 4 or 5: the forms supported() takes here */
                 int slot = direct_image_slot(&image_info, off, bindless, bank, r32ui, type);
                 if (slot == image_info.nimg) {
                     if (slot >= 8) return direct_reject(si, "storage image descriptor count");
@@ -3171,6 +3496,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         free(pop_targets);
         return NULL;
     }
+    c->ftz_float = can_preserve;
     spv_emit_init(&c->emit, (size_t)n * 20 + 128);
     spv_emit_shader_capability(&c->emit);
     if (stage == ST_TCS || stage == ST_TES) spv_emit_capability(&c->emit, 3); /* Tessellation */
@@ -3187,6 +3513,10 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     if (converge) spv_emit_subgroup_arithmetic_capability(&c->emit);
     if (needs_gather_extended) spv_emit_image_gather_extended_capability(&c->emit);
     if (needs_image_query) spv_emit_image_query_capability(&c->emit);
+    /* the per-instruction flush to zero tests the absolute value, GLSL.std.450's FAbs, where the module keeps signed
+       zeros (float_ftz): without the import its OpExtInst named id 0, which NVIDIA's SPIR-V front end (615.78)
+       crashed on, a shader of FADD and FMUL with nothing else from the set */
+    if (fp32_flush && (!can_flush || fp32_preserve) && can_preserve) needs_glsl = 1;
     if (needs_glsl) c->glsl = spv_emit_glsl450_import(&c->emit);
     u32 fn = spv_emit_id(&c->emit), label = spv_emit_id(&c->emit);
     u32 void_type = spv_emit_type_void(&c->emit);
@@ -3521,7 +3851,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         int integer = image_info.img[i].kind != 0, buffer = image_info.img[i].type == 1;
         c->image[i] = spv_emit_storage_image(
             &c->emit, integer ? c->u32_type : c->f32_type, shader_vk_set(stage),
-            (buffer ? SNX_VKB_IMGBUF : SNX_VKB_IMG) + (u32)i, buffer ? 5 : 1, image_info.img[i].type == 4,
+            (buffer ? SNX_VKB_IMGBUF : SNX_VKB_IMG) + (u32)i, buffer ? 5 : image_info.img[i].type == 5 ? 2 : 1,
+            image_info.img[i].type == 4,
             integer && (!buffer || image_info.img[i].kind == 1) ? 33 : 0, &c->image_type[i]);
         interfaces[count++] = c->image[i];
     }
@@ -3613,6 +3944,18 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     }
     for (u32 r = 0; r < 255; r++)
         if (used[r]) c->reg[r] = spv_emit_function_variable_init(&c->emit, reg_ptr, c->zero);
+    /* On the per-instruction FTZ path, the registers only FTZ float instructions write hold flushed values (from zero,
+       their first value): their reads need no flush. Anything else that may write a register taints it, its
+       destinations taken wide (d to d+3, and the second field texture instructions write, bits 28 to 35) */
+    if (!can_flush || fp32_preserve) {
+        for (u32 i = 11; i < n; i++) {
+            if (!IDX_OK(i)) continue;
+            if (ftz_writer(insn[i])) continue;
+            for (u32 r = 0; r < 255; r++)
+                if (may_write(insn[i], r)) c->tainted[r] = 1;
+        }
+        c->taint_known = 1;
+    }
     for (k_indexed = 0; k_indexed < texture_count; k_indexed++)
         if (textures[k_indexed].flags & SNX_TEX_INDEXED)
             c->tex_index[k_indexed] = spv_emit_function_variable_init(&c->emit, reg_ptr, c->zero);
@@ -3754,17 +4097,22 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         int op = decode(w)->id;
         u32 d = B(w, 0, 8), a = B(w, 8, 8), b = B(w, 20, 8);
         u32 guard_merge = 0;
+        c->guard = 0; /* the instruction before may have ended its translation early */
         int skip_helper = stage == ST_FS && helper_side_effect(op);
         if (op != O_SSY && op != O_PBK && op != O_PCNT && op != O_PEXIT && op != O_CAL &&
             (B(w, 16, 3) != 7 || B(w, 19, 1) || (flow_has_cc(op) && B(w, 0, 5) != 15) || skip_helper)) {
-            u32 execute = spv_emit_id(&c->emit);
-            guard_merge = spv_emit_id(&c->emit);
             u32 condition = pred_read(c, B(w, 16, 3), B(w, 19, 1));
             if (flow_has_cc(op) && B(w, 0, 5) != 15) condition = cc_and(c, condition, cc_test(c, B(w, 0, 5)));
             if (skip_helper) condition = cc_and(c, condition, cc_not(c, lane_dead(c)));
-            spv_emit_selection_merge(&c->emit, guard_merge);
-            spv_emit_branch_conditional(&c->emit, condition, execute, guard_merge);
-            spv_emit_label(&c->emit, execute);
+            if (pure_op(op) && !skip_helper && !(flow_has_cc(op) && B(w, 0, 5) != 15))
+                c->guard = condition;
+            else {
+                u32 execute = spv_emit_id(&c->emit);
+                guard_merge = spv_emit_id(&c->emit);
+                spv_emit_selection_merge(&c->emit, guard_merge);
+                spv_emit_branch_conditional(&c->emit, condition, execute, guard_merge);
+                spv_emit_label(&c->emit, execute);
+            }
         }
         if (op == O_CAL || op == O_PRET) {
             /* CAL pushes the instruction after it and jumps. PRET only pushes its target, where a later RET returns */
@@ -3825,7 +4173,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         } else if (op == O_BRX) {
             u32 offset = spv_emit_constant_u32(&c->emit, i32_type, (u32)((i32)(B(w, 20, 24) << 8) >> 8));
             u32 signed_index =
-                spv_emit_iadd_u32(&c->emit, i32_type, spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a)), offset);
+                spv_emit_iadd_u32(&c->emit, i32_type, reg_read_as(c, a, i32_type), offset);
             u32 words =
                 spv_emit_sdiv_i32(&c->emit, i32_type, signed_index, spv_emit_constant_u32(&c->emit, i32_type, 8));
             u32 target = spv_emit_iadd_u32(&c->emit, c->u32_type, spv_emit_bitcast(&c->emit, c->u32_type, words),
@@ -3980,7 +4328,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                         &c->emit, 3, c->f32_type, location < 0x10 ? tess_outer : tess_inner, 0,
                         spv_emit_constant_u32(&c->emit, c->u32_type, (location & 0xf) / 4));
                 if (pointer)
-                    spv_emit_store(&c->emit, pointer, spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, d + k)));
+                    spv_emit_store(&c->emit, pointer, reg_read_as(c, d + k, c->f32_type));
             }
         } else if (op == O_AST) {
             u32 addr = B(w, 20, 10), width = B(w, 47, 2) + 1;
@@ -3989,13 +4337,13 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 if (location == 0x6c) {
                     if (point_size)
                         spv_emit_store(&c->emit, point_size,
-                                       spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, d + k)));
+                                       reg_read_as(c, d + k, c->f32_type));
                     continue;
                 }
                 if (location == 0x64) {
                     if (layer_output) /* none: the device can't take this stage's layer */
                         spv_emit_store(&c->emit, layer_output,
-                                       spv_emit_bitcast(&c->emit, i32_type, reg_read(c, d + k)));
+                                       reg_read_as(c, d + k, i32_type));
                     continue;
                 }
                 if (location >= 0x2c0) {
@@ -4003,13 +4351,13 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                     if (clip_used & (1u << index)) {
                         u32 ptr = spv_emit_output_element_pointer(&c->emit, c->f32_type, clip_output,
                                                                   spv_emit_constant_u32(&c->emit, c->u32_type, index));
-                        spv_emit_store(&c->emit, ptr, spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, d + k)));
+                        spv_emit_store(&c->emit, ptr, reg_read_as(c, d + k, c->f32_type));
                     }
                     continue;
                 }
                 u32 variable = location < 0x80 ? position : output_attrs[(location - 0x80) >> 4];
                 u32 vector = spv_emit_load(&c->emit, vec4, variable);
-                u32 value = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, d + k));
+                u32 value = reg_read_as(c, d + k, c->f32_type);
                 vector = spv_emit_vec4_insert(&c->emit, vec4, vector, value, (location >> 2) & 3);
                 spv_emit_store(&c->emit, variable, vector);
             }
@@ -4252,9 +4600,9 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                     spv_emit_bitwise_and_u32(&c->emit, c->u32_type, sum2,
                                              spv_emit_constant_u32(&c->emit, c->u32_type, 0x80000000)),
                     c->zero);
-                spv_emit_store(&c->emit, c->cc_c, carry);
-                spv_emit_store(&c->emit, c->cc_z, zero);
-                spv_emit_store(&c->emit, c->cc_s, sign);
+                cc_store(c, c->cc_c, carry);
+                cc_store(c, c->cc_z, zero);
+                cc_store(c, c->cc_s, sign);
             }
             reg_write(c, d, sum2);
         } else if (op == O_IADD_R || op == O_IADD_C || op == O_IADD_I) {
@@ -5105,7 +5453,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 u32 limit = wide ? spv_emit_constant64(&c->emit, ftype, limit_bits)
                                  : spv_emit_constant_u32(&c->emit, ftype, (u32)limit_bits);
                 u32 itype = is_signed ? i64_type : u64_type;
-                u32 bounded = spv_emit_glsl_ternary(&c->emit, ftype, c->glsl, SPV_GLSL_FCLAMP, src, low, high);
+                u32 bounded = spv_emit_glsl_ternary(&c->emit, ftype, c->glsl, SPV_GLSL_F_CLAMP, src, low, high);
                 u32 result = is_signed ? spv_emit_convert_f_to_s(&c->emit, itype, bounded)
                                        : spv_emit_convert_f_to_u(&c->emit, itype, bounded);
                 result = spv_emit_select(
@@ -5120,7 +5468,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 u32 low = wide ? spv_emit_constant64(&c->emit, ftype, 0) : spv_emit_constant_f32(&c->emit, ftype, 0.0f);
                 u32 high = wide ? spv_emit_constant64(&c->emit, ftype, 0x41efffffffe00000ull) /* 2^32 - 1 */
                                 : spv_emit_constant_f32(&c->emit, ftype, 4294967040.0f);
-                u32 bounded = spv_emit_glsl_ternary(&c->emit, ftype, c->glsl, SPV_GLSL_FCLAMP, src, low, high);
+                u32 bounded = spv_emit_glsl_ternary(&c->emit, ftype, c->glsl, SPV_GLSL_F_CLAMP, src, low, high);
                 u32 result = spv_emit_convert_f_to_u(&c->emit, c->u32_type, bounded);
                 u32 overflow = spv_emit_fcompare(&c->emit, c->bool_type, 6, src,
                                                  wide ? spv_emit_constant64(&c->emit, ftype, 0x41f0000000000000ull)
@@ -5144,7 +5492,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                                : spv_emit_constant_f32(&c->emit, ftype, -2147483648.0f);
                 u32 high = wide ? spv_emit_constant64(&c->emit, ftype, 0x41dfffffffc00000ull) /* 2^31 - 1 */
                                 : spv_emit_constant_f32(&c->emit, ftype, 2147483520.0f);
-                u32 bounded = spv_emit_glsl_ternary(&c->emit, ftype, c->glsl, SPV_GLSL_FCLAMP, src, low, high);
+                u32 bounded = spv_emit_glsl_ternary(&c->emit, ftype, c->glsl, SPV_GLSL_F_CLAMP, src, low, high);
                 u32 result = spv_emit_convert_f_to_s(&c->emit, i32_type, bounded);
                 u32 overflow = spv_emit_fcompare(&c->emit, c->bool_type, 6, src,
                                                  wide ? spv_emit_constant64(&c->emit, ftype, 0x41e0000000000000ull)
@@ -5161,7 +5509,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                     result = spv_emit_select(
                         &c->emit, i32_type, spv_emit_s_greater(&c->emit, c->bool_type, bottom, result), bottom, result);
                 }
-                reg_write(c, d, spv_emit_bitcast(&c->emit, c->u32_type, result));
+                reg_write_as(c, d, result, i32_type);
             }
         } else if (op == O_I2I_R || op == O_I2I_C || op == O_I2I_I) {
             u32 value = integer_right(c, w, op - O_I2I_R);
@@ -5298,7 +5646,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                     spv_emit_vec2_construct(&c->emit, vec2, result, spv_emit_constant_f32(&c->emit, c->f32_type, 0.0f));
                 reg_write(c, d, spv_emit_glsl_unary(&c->emit, c->u32_type, c->glsl, SPV_GLSL_PACK_HALF2X16, pair));
             } else
-                reg_write(c, d, spv_emit_bitcast(&c->emit, c->u32_type, result));
+                reg_write_as(c, d, result, c->f32_type);
         } else if (op == O_ISCADD_R || op == O_ISCADD_C || op == O_ISCADD_I || op == O_ISCADD32I) {
             /* ISCADD32I: a 32-bit immediate, the shift in bits 53-57 and CC in bit 52, and no negation */
             int immediate32 = op == O_ISCADD32I;
@@ -5486,11 +5834,12 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             reg_write(c, d, value);
         } else if (op == O_FADD_R || op == O_FADD_C || op == O_FADD_I || op == O_FADD32I || op == O_FMUL_R ||
                    op == O_FMUL_C || op == O_FMUL_I || op == O_FMUL32I) {
-            u32 left = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a));
+            u32 left = ftz_read(c, insn, block_start, i, a, reg_read_as(c, a, c->f32_type));
             u32 right = op == O_FADD_C || op == O_FMUL_C     ? cbuf_read(c, w)
                         : op == O_FADD_I || op == O_FMUL_I   ? float_imm20(c, w)
                         : op == O_FADD32I || op == O_FMUL32I ? float_imm32(c, w)
-                                                             : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b));
+                                                             : ftz_read(c, insn, block_start, i, b,
+                                                                        reg_read_as(c, b, c->f32_type));
             if (op == O_FADD_R || op == O_FADD_C || op == O_FADD_I) {
                 left = float_mod(c, left, B(w, 46, 1), B(w, 48, 1));
                 right = float_mod(c, right, B(w, 49, 1), B(w, 45, 1));
@@ -5535,23 +5884,24 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             }
             int sat = op == O_FADD32I ? 0 : op == O_FMUL32I ? B(w, 55, 1) : B(w, 50, 1);
             result = float_saturate(c, result, sat);
-            reg_write(c, d, spv_emit_bitcast(&c->emit, c->u32_type, result));
+            reg_write_as(c, d, result, c->f32_type);
         } else if (op == O_FFMA_R || op == O_FFMA_RC || op == O_FFMA_CR || op == O_FFMA_I || op == O_FFMA32I) {
-            u32 left = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a));
+            u32 left = ftz_read(c, insn, block_start, i, a, reg_read_as(c, a, c->f32_type));
             u32 right = op == O_FFMA32I   ? float_imm32(c, w)
                         : op == O_FFMA_CR ? cbuf_read(c, w)
                         : op == O_FFMA_I
                             ? float_imm20(c, w)
-                            : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, op == O_FFMA_RC ? B(w, 39, 8) : b));
-            u32 addend = op == O_FFMA_RC
-                             ? cbuf_read(c, w)
-                             : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, op == O_FFMA32I ? d : B(w, 39, 8)));
+                            : ftz_read(c, insn, block_start, i, op == O_FFMA_RC ? B(w, 39, 8) : b,
+                                       reg_read_as(c, op == O_FFMA_RC ? B(w, 39, 8) : b, c->f32_type));
+            u32 addend = op == O_FFMA_RC ? cbuf_read(c, w)
+                                         : ftz_read(c, insn, block_start, i, op == O_FFMA32I ? d : B(w, 39, 8),
+                                                    reg_read_as(c, op == O_FFMA32I ? d : B(w, 39, 8), c->f32_type));
             if (op == O_FFMA32I) {
-                if (B(w, 56, 1)) left = spv_emit_fnegate(&c->emit, c->f32_type, left);
-                if (B(w, 57, 1)) addend = spv_emit_fnegate(&c->emit, c->f32_type, addend);
+                left = float_mod(c, left, 0, B(w, 56, 1));
+                addend = float_mod(c, addend, 0, B(w, 57, 1));
             } else {
-                if (B(w, 48, 1)) right = spv_emit_fnegate(&c->emit, c->f32_type, right);
-                if (B(w, 49, 1)) addend = spv_emit_fnegate(&c->emit, c->f32_type, addend);
+                right = float_mod(c, right, 0, B(w, 48, 1));
+                addend = float_mod(c, addend, 0, B(w, 49, 1));
             }
             int soft_ftz = (B(w, 53, 2) & 1) && (!can_flush || fp32_preserve);
             if (soft_ftz) {
@@ -5568,25 +5918,25 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 result = spv_emit_select(&c->emit, c->f32_type, cc_or(c, left_zero, right_zero), addend, result);
             }
             result = float_saturate(c, result, op == O_FFMA32I ? B(w, 55, 1) : B(w, 50, 1));
-            reg_write(c, d, spv_emit_bitcast(&c->emit, c->u32_type, result));
+            reg_write_as(c, d, result, c->f32_type);
         } else if (op == O_FMNMX_R || op == O_FMNMX_C || op == O_FMNMX_I) {
-            u32 left = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a));
+            u32 left = reg_read_as(c, a, c->f32_type);
             u32 right = op == O_FMNMX_C   ? cbuf_read(c, w)
                         : op == O_FMNMX_I ? float_imm20(c, w)
-                                          : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b));
+                                          : reg_read_as(c, b, c->f32_type);
             left = float_mod(c, left, B(w, 46, 1), B(w, 48, 1));
             right = float_mod(c, right, B(w, 49, 1), B(w, 45, 1));
             u32 is_left_nan = spv_emit_isnan(&c->emit, c->bool_type, left);
             u32 is_right_nan = spv_emit_isnan(&c->emit, c->bool_type, right);
-            u32 minimum = spv_emit_glsl_binary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FMIN, left, right);
-            u32 maximum = spv_emit_glsl_binary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FMAX, left, right);
+            u32 minimum = spv_emit_glsl_binary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_F_MIN, left, right);
+            u32 maximum = spv_emit_glsl_binary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_F_MAX, left, right);
             u32 choose_min = pred_read(c, B(w, 39, 3), B(w, 42, 1));
             u32 value = spv_emit_select(&c->emit, c->f32_type, choose_min, minimum, maximum);
             value = spv_emit_select(&c->emit, c->f32_type, is_right_nan, left, value);
             value = spv_emit_select(&c->emit, c->f32_type, is_left_nan, right, value);
-            reg_write(c, d, spv_emit_bitcast(&c->emit, c->u32_type, value));
+            reg_write_as(c, d, value, c->f32_type);
         } else if (op == O_FSETP_R || op == O_FSETP_C || op == O_FSETP_I) {
-            u32 left = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a));
+            u32 left = reg_read_as(c, a, c->f32_type);
             left = float_mod(c, left, B(w, 7, 1), B(w, 43, 1));
             u32 right;
             if (op == O_FSETP_C)
@@ -5594,7 +5944,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             else if (op == O_FSETP_I)
                 right = spv_emit_constant_u32(&c->emit, c->f32_type, (B(w, 20, 19) << 12) | (B(w, 56, 1) << 31));
             else
-                right = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b));
+                right = reg_read_as(c, b, c->f32_type);
             right = float_mod(c, right, B(w, 44, 1), B(w, 6, 1));
             u32 test = spv_emit_fcompare(&c->emit, c->bool_type, B(w, 48, 4), left, right);
             u32 pc = pred_read(c, B(w, 39, 3), B(w, 42, 1));
@@ -5632,8 +5982,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             } else {
                 left = double_mod(c, left, B(w, 46, 1), B(w, 48, 1));
                 right = double_mod(c, right, B(w, 49, 1), B(w, 45, 1));
-                u32 min = spv_emit_glsl_binary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_FMIN, left, right);
-                u32 max = spv_emit_glsl_binary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_FMAX, left, right);
+                u32 min = spv_emit_glsl_binary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_F_MIN, left, right);
+                u32 max = spv_emit_glsl_binary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_F_MAX, left, right);
                 u32 left_nan = spv_emit_isnan(&c->emit, c->bool_type, left);
                 u32 right_nan = spv_emit_isnan(&c->emit, c->bool_type, right);
                 min = spv_emit_select(&c->emit, c->f64_type, left_nan, right, min);
@@ -5662,10 +6012,10 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 pred_write(c, B(w, 0, 3), bool_combine(c, B(w, 45, 2), inverse, predicate));
             }
         } else if (op == O_FSET_R || op == O_FSET_C || op == O_FSET_I) {
-            u32 left = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a));
+            u32 left = reg_read_as(c, a, c->f32_type);
             u32 right = op == O_FSET_C   ? cbuf_read(c, w)
                         : op == O_FSET_I ? float_imm20(c, w)
-                                         : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b));
+                                         : reg_read_as(c, b, c->f32_type);
             left = float_mod(c, left, B(w, 54, 1), B(w, 43, 1));
             right = float_mod(c, right, B(w, 44, 1), B(w, 53, 1));
             u32 test = spv_emit_fcompare(&c->emit, c->bool_type, B(w, 48, 4), left, right);
@@ -5737,12 +6087,12 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 spv_emit_no_contraction(&c->emit, value);
             }
             if (B(w, 54, 2) == 1) {
-                u32 rhs = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b));
+                u32 rhs = reg_read_as(c, b, c->f32_type);
                 value = spv_emit_fmul(&c->emit, c->f32_type, value, rhs);
                 spv_emit_no_contraction(&c->emit, value);
             }
             value = float_saturate(c, value, B(w, 51, 1));
-            reg_write(c, d, spv_emit_bitcast(&c->emit, c->u32_type, value));
+            reg_write_as(c, d, value, c->f32_type);
         } else if (op == O_MUFU && (B(w, 20, 4) == 6 || B(w, 20, 4) == 7)) {
             /* RCP64H and RSQ64H: Ra is a double's high word (the low one 0), the result the high word of its
                reciprocal or reciprocal square root, as Mesa's nouveau uses them */
@@ -5758,10 +6108,10 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             u32 source = op == O_MUFU ? a : b;
             u32 value = op == O_RRO_C   ? cbuf_read(c, w)
                         : op == O_RRO_I ? float_imm20(c, w)
-                                        : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, source));
+                                        : reg_read_as(c, source, c->f32_type);
             u32 absolute = op == O_MUFU ? B(w, 46, 1) : B(w, 49, 1);
             u32 negative = op == O_MUFU ? B(w, 48, 1) : B(w, 45, 1);
-            if (absolute) value = spv_emit_glsl_unary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FABS, value);
+            if (absolute) value = spv_emit_glsl_unary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_F_ABS, value);
             if (negative) value = spv_emit_fnegate(&c->emit, c->f32_type, value);
             if (op == O_MUFU) {
                 SpvGlsl450Op fn = 0;
@@ -5783,21 +6133,21 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 if (B(w, 50, 1)) {
                     u32 fzero = spv_emit_constant_f32(&c->emit, c->f32_type, 0.0f);
                     u32 fone = spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f);
-                    value = spv_emit_glsl_ternary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FCLAMP, value, fzero, fone);
+                    value = spv_emit_glsl_ternary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_F_CLAMP, value, fzero, fone);
                 }
             }
-            reg_write(c, d, spv_emit_bitcast(&c->emit, c->u32_type, value));
+            reg_write_as(c, d, value, c->f32_type);
         } else if (op == O_FSWZADD) {
             u32 quad = B(w, 28, 8);
-            u32 lhs = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a));
-            u32 rhs = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b));
+            u32 lhs = reg_read_as(c, a, c->f32_type);
+            u32 rhs = reg_read_as(c, b, c->f32_type);
             u32 result;
             if (quad == 0x99 || quad == 0x66 || quad == 0xa5 || quad == 0x5a) {
                 result = spv_emit_derivative(&c->emit, c->f32_type, rhs, quad == 0xa5 || quad == 0x5a);
                 if (quad == 0x66 || quad == 0x5a) result = spv_emit_fnegate(&c->emit, c->f32_type, result);
             } else
                 result = spv_emit_fadd(&c->emit, c->f32_type, lhs, rhs);
-            reg_write(c, d, spv_emit_bitcast(&c->emit, c->u32_type, result));
+            reg_write_as(c, d, result, c->f32_type);
         } else if (half_arithmetic(op)) {
             /* Each form's operands and fields, as Eden's half_floating_point_*.cpp decode them. A constant buffer
                operand is one F32 for both halves (swizzle 1). The 32I forms write both halves (no merge), take A's
@@ -5970,9 +6320,9 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                      !direct_bindless_matches(&textures[slot], bank, handle_count, bank2, off2, indexed, ldc))))
                 slot++;
             if (textures[slot].flags & SNX_TEX_INDEXED) direct_swap_element(c, slot);
-            u32 x = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + array));
+            u32 x = reg_read_as(c, a + array, i32_type);
             u32 y = type == 0 ? spv_emit_constant_u32(&c->emit, i32_type, 0)
-                              : spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + array + 1));
+                              : reg_read_as(c, a + array + 1, i32_type);
             /* Rb's operands, in order: TLD.B's handle, the level (bit 55), the offsets (bit 35) and the sample (bit 50) */
             u32 meta = b + (op == O_TLD_B), level = B(w, 55, 1) ? meta++ : 255, packed_reg = B(w, 35, 1) ? meta++ : 255;
             u32 z =
@@ -5981,9 +6331,9 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                     ? spv_emit_bitcast(&c->emit, i32_type,
                                        spv_emit_bitwise_and_u32(&c->emit, c->u32_type, reg_read(c, a),
                                                                 spv_emit_constant_u32(&c->emit, c->u32_type, 0xffff)))
-                    : spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + 2));
+                    : reg_read_as(c, a + 2, i32_type);
             if (packed_reg < 255) { /* 4-bit signed offsets: x, then y but for 1D, then z for 3D */
-                u32 packed = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, packed_reg));
+                u32 packed = reg_read_as(c, packed_reg, i32_type);
                 u32 four = spv_emit_constant_u32(&c->emit, c->u32_type, 4);
                 x = spv_emit_iadd_u32(&c->emit, i32_type, x,
                                       spv_emit_bitfield_sextract(&c->emit, i32_type, packed, c->zero, four));
@@ -6001,9 +6351,9 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             u32 sample =
                 multisample
                     ? spv_emit_image_fetch_sample(&c->emit, texture_vec4[slot], c->sampled_type[slot], c->sampler[slot],
-                                                  coord, spv_emit_bitcast(&c->emit, i32_type, reg_read(c, meta)))
+                                                  coord, reg_read_as(c, meta, i32_type))
                     : spv_emit_image_fetch(&c->emit, texture_vec4[slot], c->sampled_type[slot], c->sampler[slot], coord,
-                                           level < 255 ? spv_emit_bitcast(&c->emit, i32_type, reg_read(c, level))
+                                           level < 255 ? reg_read_as(c, level, i32_type)
                                                        : spv_emit_constant_u32(&c->emit, i32_type, 0));
             u32 mask = B(w, 31, 4), target = d;
             for (u32 k = 0; k < 4; k++)
@@ -6016,18 +6366,20 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             u32 bank = 0, off = B(w, 36, 13);
             int bindless = op == O_SUATOM ? (int)B(w, 54, 1) : !B(w, 51, 1);
             if (bindless) direct_track_image_handle(insn, n, i, B(w, 39, 8), &bank, &off, 0);
-            u32 x = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a)), coord = x;
+            u32 x = reg_read_as(c, a, i32_type), coord = x;
             if (!buffer) {
-                u32 y = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + 1));
-                /* a 2D array's layer is the low 16 bits of the third register, as TLD's is (Eden's MakeCoords in
-                   surface_load_store.cpp reads it the same way) */
+                u32 y = reg_read_as(c, a + 1, i32_type);
+                /* a 2D array's layer is the low 16 bits of the third register, as TLD's is, and a 3D surface's z the
+                   whole register (Eden's MakeCoords in surface_load_store.cpp reads them the same way) */
                 coord = dim == 4 ? spv_emit_vec3_construct(
                                        &c->emit, vec3_i32, x, y,
                                        spv_emit_bitcast(&c->emit, i32_type,
                                                         spv_emit_bitwise_and_u32(
                                                             &c->emit, c->u32_type, reg_read(c, a + 2),
                                                             spv_emit_constant_u32(&c->emit, c->u32_type, 0xffff))))
-                                 : spv_emit_vec2_construct(&c->emit, vec2_i32, x, y);
+                        : dim == 5 ? spv_emit_vec3_construct(&c->emit, vec3_i32, x, y,
+                                                             reg_read_as(c, a + 2, i32_type))
+                                   : spv_emit_vec2_construct(&c->emit, vec2_i32, x, y);
             }
             u32 mask = op == O_SULD && B(w, 52, 1) ? 1u : B(w, 20, 4), source = d;
             if (op != O_SULD || buffer) {
@@ -6061,7 +6413,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                                                   : spv_emit_constant_f32(&c->emit, c->f32_type, q == 3 ? 1.0f : 0.0f);
                         if (mask & (1u << q)) {
                             components[q] = kind == 2 ? reg_read(c, source)
-                                                      : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, source));
+                                                      : reg_read_as(c, source, c->f32_type);
                             if (source < 255) source++;
                         }
                     }
@@ -6095,7 +6447,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                     textures[slot].shadow || textures[slot].bindless || textures[slot].flags != (multisample ? 2 : 0)))
                 slot++;
             /* the 2D array form takes x and y from Rb and Rb + 1, the layer from Ra's low 16 bits */
-            x = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, array ? b : a));
+            x = reg_read_as(c, array ? b : a, i32_type);
             y = type == 0 ? spv_emit_constant_u32(&c->emit, i32_type, 0)
                           : spv_emit_bitcast(&c->emit, i32_type,
                                              reg_read(c, array ? b + 1
@@ -6112,7 +6464,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 y = spv_emit_iadd_u32(&c->emit, i32_type, y, oy);
             }
             u32 coord = type == 2 ? spv_emit_vec3_construct(&c->emit, vec3_i32, x, y,
-                                                            spv_emit_bitcast(&c->emit, i32_type, reg_read(c, b)))
+                                                            reg_read_as(c, b, i32_type))
                         : array   ? spv_emit_vec3_construct(
                                         &c->emit, vec3_i32, x, y,
                                         spv_emit_bitcast(&c->emit, i32_type,
@@ -6152,18 +6504,18 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                    (textures[slot].cbuf_off != off || textures[slot].shadow != shadow || textures[slot].type != type ||
                     textures[slot].array != array || textures[slot].bindless || textures[slot].flags))
                 slot++;
-            u32 x = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, array ? a + 1 : a));
+            u32 x = reg_read_as(c, array ? a + 1 : a, c->f32_type);
             u32 y = encoding == 0 ? spv_emit_constant_f32(&c->emit, c->f32_type, 0.5f)
                                   : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, texs_y(encoding, a, b)));
             u32 uv = array       ? spv_emit_vec3_construct(&c->emit, vec3, x, y, array_layer(c, a))
                      : type >= 2 ? spv_emit_vec3_construct(&c->emit, vec3, x, y,
-                                                           spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b)))
+                                                           reg_read_as(c, b, c->f32_type))
                                  : spv_emit_vec2_construct(&c->emit, vec2, x, y);
             u32 dref = shadow ? spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, texs_dref(encoding, b))) : 0;
             u32 sample;
             int explicit_lod = texs_explicit(encoding) || stage != ST_FS;
             u32 level = texs_explicit(encoding) ? texs_level(encoding, b) : 255;
-            u32 lod = level < 255 ? spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, level)) : zero_f;
+            u32 lod = level < 255 ? reg_read_as(c, level, c->f32_type) : zero_f;
             sample = sample_dref(c, si, slot, texture_vec4[slot], uv, dref, explicit_lod, lod);
             texs_store(c, w, sample, texture_scalar[slot], shadow, i32_type, vec2, zero_f);
         } else if (op == O_TEX || op == O_TEX_B) {
@@ -6187,23 +6539,23 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                                                                                   bank2, off2, indexed, ldc))))
                 slot++;
             if (textures[slot].flags & SNX_TEX_INDEXED) direct_swap_element(c, slot);
-            u32 x = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array));
+            u32 x = reg_read_as(c, a + array, c->f32_type);
             u32 y = type == 0 ? spv_emit_constant_f32(&c->emit, c->f32_type, 0.5f)
-                              : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array + 1));
+                              : reg_read_as(c, a + array + 1, c->f32_type);
             u32 coords =
                 type == 3 && array ? spv_emit_vec4_construct(
                                          &c->emit, vec4,
-                                         (u32[4]){x, y, spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + 3)),
+                                         (u32[4]){x, y, reg_read_as(c, a + 3, c->f32_type),
                                                   array_layer(c, a)})
                 : array            ? spv_emit_vec3_construct(&c->emit, vec3, x, y, array_layer(c, a))
                 : type >= 2 ? spv_emit_vec3_construct(&c->emit, vec3, x, y,
-                                                      spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + 2)))
+                                                      reg_read_as(c, a + 2, c->f32_type))
                             : spv_emit_vec2_construct(&c->emit, vec2, x, y);
             u32 level = mode == 1   ? zero_f
-                        : has_level ? spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, source))
+                        : has_level ? reg_read_as(c, source, c->f32_type)
                                     : 0;
             u32 dref =
-                shadow ? spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, offset_source + offset_enabled)) : 0;
+                shadow ? reg_read_as(c, offset_source + offset_enabled, c->f32_type) : 0;
             u32 offset = 0;
             int dynamic_offset = 0;
             if (offset_enabled) {
@@ -6298,9 +6650,9 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             /* a 1D texture is bound as a 2D one of height 1: y 0.5, and no change along it */
             u32 dims = type == 0 ? 2 : count;
             for (k = 0; k < count; k++) {
-                values[k] = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, coord + k));
-                dx[k] = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b + 2 * k));
-                dy[k] = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b + 2 * k + 1));
+                values[k] = reg_read_as(c, coord + k, c->f32_type);
+                dx[k] = reg_read_as(c, b + 2 * k, c->f32_type);
+                dy[k] = reg_read_as(c, b + 2 * k + 1, c->f32_type);
             }
             if (type == 0) {
                 values[1] = spv_emit_constant_f32(&c->emit, c->f32_type, 0.5f);
@@ -6322,7 +6674,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 } else {
                     /* Vulkan takes a non-constant offset on gathers only. TXD moves coordinates by the offset over
                        the base level's size as an approximation. */
-                    u32 bits = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, packed_reg)), o[3];
+                    u32 bits = reg_read_as(c, packed_reg, i32_type), o[3];
                     for (k = 0; k < dims; k++)
                         o[k] =
                             k < count
@@ -6383,13 +6735,13 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                                          bank2, off2, indexed, ldc);
             if (textures[slot].flags & SNX_TEX_INDEXED) direct_swap_element(c, slot);
             /* a 1D texture is bound as a 2D one of height 1 */
-            u32 x = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array));
+            u32 x = reg_read_as(c, a + array, c->f32_type);
             u32 y = type == 0 ? spv_emit_constant_f32(&c->emit, c->f32_type, 0.5f)
-                              : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array + 1));
+                              : reg_read_as(c, a + array + 1, c->f32_type);
             u32 coords =
                 type < 2 ? spv_emit_vec2_construct(&c->emit, vec2, x, y)
                          : spv_emit_vec3_construct(&c->emit, vec3, x, y,
-                                                   spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array + 2)));
+                                                   reg_read_as(c, a + array + 2, c->f32_type));
             u32 lod = spv_emit_image_query_lod(&c->emit, vec2, c->sampled_type[slot], c->sampler[slot], coords);
             u32 mask = B(w, 31, 4), dst = d;
             for (u32 component = 0; component < 4; component++) {
@@ -6421,7 +6773,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                      !direct_bindless_matches(&textures[slot], bank, handle_count, bank2, off2, indexed, ldc))))
                 slot++;
             if (textures[slot].flags & SNX_TEX_INDEXED) direct_swap_element(c, slot);
-            u32 x = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array));
+            u32 x = reg_read_as(c, a + array, c->f32_type);
             u32 y = type == 0
                         ? spv_emit_constant_f32(&c->emit, c->f32_type, 0.5f)
                         : spv_emit_bitcast(&c->emit, c->f32_type,
@@ -6431,7 +6783,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 coords = spv_emit_vec2_construct(&c->emit, vec2, x, y);
             else {
                 u32 z =
-                    type == 3 ? spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array + 2)) : array_layer(c, a);
+                    type == 3 ? reg_read_as(c, a + array + 2, c->f32_type) : array_layer(c, a);
                 if (type == 3 && array) {
                     u32 four[4];
                     four[0] = x;
@@ -6462,7 +6814,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                     ptp_source = source;
                     source += 2;
                 }
-                if (shadow) dref = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, source));
+                if (shadow) dref = reg_read_as(c, source, c->f32_type);
             } else {
                 if (B(w, 51, 1)) { offset = direct_gather_offset(c, reg_read(c, b), 0, 0, i32_type, vec2_i32); }
                 if (shadow) dref = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b + B(w, 51, 1)));
@@ -6618,7 +6970,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                         reg_read(c, reg));
                 if (depth_output)
                     spv_emit_store(&c->emit, depth_output,
-                                   spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, reg + 1)));
+                                   reg_read_as(c, reg + 1, c->f32_type));
                 if (push && (target & 15)) alpha_test(c, push, push_pointer, alpha);
             }
             if (c->discarded) { /* the lane leaves the flow loop, and a discarded one is discarded after it */
@@ -6630,6 +6982,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         }
         /* no texture is sparse, so every texel a fetch reads is resident */
         pred_write(c, sparse_predicate(w, op), c->false_value);
+        c->guard = 0;
         if (guard_merge) {
             if (op != O_EXIT || c->discarded) spv_emit_branch(&c->emit, guard_merge);
             spv_emit_label(&c->emit, guard_merge);
@@ -6677,6 +7030,9 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     spv_emit_function_end(&c->emit);
     u32* result = spv_emit_finish(&c->emit, word_count);
     spv_emit_destroy(&c->emit);
+    free(c->ftz);
+    free(c->ftz_of);
+    free(c->ftz_of_block);
     free(c);
     free(case_labels); /* the literals and block starts too */
     free(pop_targets);

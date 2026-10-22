@@ -52,14 +52,14 @@ if(SNX_TEST_SANITIZERS)
         scarletnx-gnuabi scarletnx-gnuabi-run snx_gnuabi_program
         # the 3DS runtime
         scarletnx-3ds snx_ctr_program snx_ctr_board snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process snx_ctr_native
-        snx_ctr_audio snx_ctr_gpu
+        snx_ctr_audio snx_ctr_gpu snx_ctr_gpu_reference
         # scarletnx's main where it is the other drivers too
         snx_multicall
         # the menu, its splash, icon and pads
-        scarletnx-gui snx_gui_support snx_i18n snx_gui_languages snx_gui_languages_test snx_splash snx-test-splash
-        snx_window_icon snx-test-window-icon snx_pad_sdl
+        scarletnx-gui snx_gui_support snx_gui_ui snx_i18n snx_gui_languages snx_gui_languages_test snx_splash snx-test-splash
+        snx_window_icon snx-test-window-icon snx_pad_sdl snx_gui_pad
         # the code generators, which tests run on files they refuse
-        snx-swipc snx-svcgen snx-shaderdec snx-settingsgen)
+        snx-swipc snx-svcgen snx-shaderdec snx-settingsgen snx-uigen)
 endif()
 # one Python for the scripted tests: without it they are left out
 find_package(Python3 QUIET COMPONENTS Interpreter)
@@ -131,6 +131,10 @@ if(TARGET snx_ctr_board)
     snx_test_target(snx-test-3ds-memory 11)
         target_link_libraries(snx-test-3ds-memory PRIVATE snx_ctr_memory)
     add_test(NAME 3ds_memory COMMAND snx-test-3ds-memory)
+    add_executable(snx-test-3ds-memory-track 3ds_memory_track.c)
+    snx_test_target(snx-test-3ds-memory-track 11)
+    target_link_libraries(snx-test-3ds-memory-track PRIVATE snx_ctr_memory)
+    add_test(NAME 3ds_memory_track COMMAND snx-test-3ds-memory-track)
     add_executable(snx-test-3ds-kernel 3ds_kernel.c)
     snx_test_target(snx-test-3ds-kernel 11)
     target_link_libraries(snx-test-3ds-kernel PRIVATE snx_ctr_process)
@@ -145,6 +149,10 @@ if(TARGET snx_ctr_board)
     snx_test_target(snx-test-3ds-ipc 11)
     target_link_libraries(snx-test-3ds-ipc PRIVATE snx_ctr_process)
     add_test(NAME 3ds_ipc COMMAND snx-test-3ds-ipc)
+    add_executable(snx-test-3ds-hid 3ds_hid.c)
+    snx_test_target(snx-test-3ds-hid 11)
+    target_link_libraries(snx-test-3ds-hid PRIVATE snx_ctr_process)
+    add_test(NAME 3ds_hid COMMAND snx-test-3ds-hid)
     add_executable(snx-test-ctr-swipc ctr_swipc.c)
     if(NOT WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
         snx_test_target(snx-test-ctr-swipc 99)
@@ -162,15 +170,54 @@ if(TARGET snx_ctr_board)
         "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/vector_decode.c" "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/profile.c")
     snx_test_target(snx-test-3ds-discover 11)
     add_test(NAME 3ds_static_discovery COMMAND snx-test-3ds-discover)
-    if(TARGET snx_ctr_native)
-        add_executable(snx-test-3ds-native 3ds_native.c)
-        snx_test_target(snx-test-3ds-native 11)
-        target_link_libraries(snx-test-3ds-native PRIVATE snx_ctr_native)
-    endif()
+    add_executable(snx-test-3ds-native 3ds_native.c)
+    snx_test_target(snx-test-3ds-native 11)
+    target_link_libraries(snx-test-3ds-native PRIVATE snx_ctr_native)
     add_executable(snx-test-3ds-blz 3ds_blz.c)
     snx_test_target(snx-test-3ds-blz 11)
-        target_link_libraries(snx-test-3ds-blz PRIVATE snx_ctr_loader)
+    target_link_libraries(snx-test-3ds-blz PRIVATE snx_ctr_loader)
     add_test(NAME 3ds_blz COMMAND snx-test-3ds-blz)
+
+    # The GPU, presentation and DSP tests need neither Python nor POSIX, and Windows is a 3DS target too
+    # the GPU's transfer engine against the CPU reference (gpu/transfer.c), on whatever Vulkan device there is
+    add_executable(snx-test-3ds-vk-transfer 3ds_vk_transfer.c)
+    snx_test_target(snx-test-3ds-vk-transfer 11)
+    target_link_libraries(snx-test-3ds-vk-transfer PRIVATE snx_ctr_gpu)
+    add_test(NAME 3ds_vk_transfer COMMAND snx-test-3ds-vk-transfer)
+    set_tests_properties(3ds_vk_transfer PROPERTIES SKIP_RETURN_CODE 77)
+    # the Y2R engine's conversion on the GPU against its CPU reference
+    add_executable(snx-test-3ds-vk-y2r 3ds_vk_y2r.c)
+    snx_test_target(snx-test-3ds-vk-y2r 11)
+    target_link_libraries(snx-test-3ds-vk-y2r PRIVATE snx_ctr_gpu)
+    add_test(NAME 3ds_vk_y2r COMMAND snx-test-3ds-vk-y2r)
+    set_tests_properties(3ds_vk_y2r PROPERTIES SKIP_RETURN_CODE 77)
+    # the GPU's draws against the software renderer, the CPU reference they replaced, scene by scene
+    add_executable(snx-test-3ds-vk-draw 3ds_vk_draw.c)
+    snx_test_target(snx-test-3ds-vk-draw 11)
+    target_link_libraries(snx-test-3ds-vk-draw PRIVATE snx_ctr_gpu_reference)
+    add_test(NAME 3ds_vk_draw COMMAND snx-test-3ds-vk-draw)
+    set_tests_properties(3ds_vk_draw PROPERTIES SKIP_RETURN_CODE 77)
+    add_executable(snx-test-3ds-gsp 3ds_gsp.c)
+    snx_test_target(snx-test-3ds-gsp 11)
+    target_link_libraries(snx-test-3ds-gsp PRIVATE snx_ctr_process)
+    add_test(NAME 3ds_gsp_gpu COMMAND snx-test-3ds-gsp "${CMAKE_CURRENT_BINARY_DIR}/gsp-frames")
+    # No Vulkan loader/ICD: presentation cannot run here; the probe skips, never fakes a frame.
+    set_tests_properties(3ds_gsp_gpu PROPERTIES SKIP_RETURN_CODE 77)
+    # the transfer engine alone: fills, display transfers, texture copies against hand-written goldens
+    add_executable(snx-test-3ds-transfer 3ds_transfer.c)
+    snx_test_target(snx-test-3ds-transfer 11)
+    target_link_libraries(snx-test-3ds-transfer PRIVATE snx_ctr_gpu)
+    add_test(NAME 3ds_transfer COMMAND snx-test-3ds-transfer)
+    # the PICA command processor: lists in FCRAM, uploads, interrupts, jumps, draw and immediate hooks
+    add_executable(snx-test-3ds-pica 3ds_pica.c)
+    snx_test_target(snx-test-3ds-pica 11)
+    target_link_libraries(snx-test-3ds-pica PRIVATE snx_ctr_gpu_reference m)
+    add_test(NAME 3ds_pica COMMAND snx-test-3ds-pica)
+    # the HLE DSP and dsp::DSP: pipes, regions, sources, mixing, decoding, the service as ndsp drives it
+    add_executable(snx-test-3ds-dsp 3ds_dsp.c)
+    snx_test_target(snx-test-3ds-dsp 11)
+    target_link_libraries(snx-test-3ds-dsp PRIVATE snx_ctr_process)
+    add_test(NAME 3ds_dsp COMMAND snx-test-3ds-dsp)
 
     if(NOT WIN32)
         if(Python3_Interpreter_FOUND)
@@ -178,27 +225,6 @@ if(TARGET snx_ctr_board)
             snx_test_target(snx-test-3ds-fs 11)
             target_link_libraries(snx-test-3ds-fs PRIVATE snx_ctr_process)
             add_test(NAME 3ds_filesystem COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_fs.py" $<TARGET_FILE:snx-test-3ds-fs>)
-            add_executable(snx-test-3ds-gsp 3ds_gsp.c)
-            snx_test_target(snx-test-3ds-gsp 11)
-            target_link_libraries(snx-test-3ds-gsp PRIVATE snx_ctr_process)
-            add_test(NAME 3ds_gsp_gpu COMMAND snx-test-3ds-gsp "${CMAKE_CURRENT_BINARY_DIR}/gsp-frames")
-            # the transfer engine alone: fills, display transfers, texture copies against hand-written goldens
-            add_executable(snx-test-3ds-transfer 3ds_transfer.c)
-            snx_test_target(snx-test-3ds-transfer 11)
-            target_link_libraries(snx-test-3ds-transfer PRIVATE snx_ctr_gpu)
-            add_test(NAME 3ds_transfer COMMAND snx-test-3ds-transfer)
-            # the PICA command processor: lists in FCRAM, uploads, interrupts, jumps, draw and immediate hooks
-            add_executable(snx-test-3ds-pica 3ds_pica.c)
-            snx_test_target(snx-test-3ds-pica 11)
-            target_link_libraries(snx-test-3ds-pica PRIVATE snx_ctr_gpu m)
-            add_test(NAME 3ds_pica COMMAND snx-test-3ds-pica)
-            # the HLE DSP and dsp::DSP: pipes, regions, sources, mixing, decoding, the service as ndsp drives it
-            add_executable(snx-test-3ds-dsp 3ds_dsp.c)
-            snx_test_target(snx-test-3ds-dsp 11)
-            target_link_libraries(snx-test-3ds-dsp PRIVATE snx_ctr_process)
-            add_test(NAME 3ds_dsp COMMAND snx-test-3ds-dsp)
-    # No Vulkan loader/ICD: presentation cannot run here; the probe skips, never fakes a frame.
-    set_tests_properties(3ds_gsp_gpu PROPERTIES SKIP_RETURN_CODE 77)
             add_test(NAME ctr_swipc_validation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/ctr_swipc.py"
                 $<TARGET_FILE:snx-swipc>)
             add_test(NAME 3ds_driver COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_driver.py"
@@ -218,21 +244,24 @@ if(TARGET snx_ctr_board)
                     "${SNX_CTR_PROGRAM}" $<TARGET_FILE:snx-test-3ds-native>)
                 set_tests_properties(3ds_static_pipeline PROPERTIES TIMEOUT 180)
             endif()
-            if(SNX_TEST_3DS_SUPERTUX)
-                get_filename_component(snx_supertux_cia "${SNX_TEST_3DS_SUPERTUX}" ABSOLUTE)
-                set(snx_supertux_oracle_args "")
-                if(SNX_TEST_ARM_DIFF)
-                    set(snx_supertux_oracle_args --oracle)
-                endif()
-                add_test(NAME 3ds_supertux_bootstrap COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_supertux.py"
-                    "${SNX_CTR_PROGRAM}" "${snx_supertux_cia}" $<TARGET_FILE:snx-test-3ds-native> ${snx_supertux_oracle_args})
-                set_tests_properties(3ds_supertux_bootstrap PROPERTIES TIMEOUT 1800 LABELS "external;bootstrap")
-            endif()
-            
+            add_test(NAME 3ds_decrypt COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_decrypt.py"
+                "${SNX_CTR_PROGRAM}")
+            set_tests_properties(3ds_decrypt PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
             add_test(NAME 3ds_extract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_extract.py"
                 "${SNX_CTR_PROGRAM}" ${snx_ctr_extract_test_args})
             set_tests_properties(3ds_extract PROPERTIES TIMEOUT 120)
         endif()
+    endif()
+    # The pinned SuperTux gate runs on Windows too, the other Python tests not yet
+    if(SNX_TEST_3DS_SUPERTUX AND Python3_Interpreter_FOUND)
+        get_filename_component(snx_supertux_cia "${SNX_TEST_3DS_SUPERTUX}" ABSOLUTE)
+        set(snx_supertux_oracle_args "")
+        if(SNX_TEST_ARM_DIFF)
+            set(snx_supertux_oracle_args --oracle)
+        endif()
+        add_test(NAME 3ds_supertux_bootstrap COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_supertux.py"
+            "${SNX_CTR_PROGRAM}" "${snx_supertux_cia}" $<TARGET_FILE:snx-test-3ds-native> ${snx_supertux_oracle_args})
+        set_tests_properties(3ds_supertux_bootstrap PROPERTIES TIMEOUT 1800 LABELS "external;bootstrap")
     endif()
 endif()
 # the 3DS tests that present through Vulkan, sanitized: the Vulkan driver stays loaded (vulkan_drivers_kept.c), as its
@@ -349,7 +378,7 @@ if(SNX_BUILD_NX)
     find_program(SNX_SPIRV_DIS spirv-dis)
     if(SNX_SPIRV_VAL AND SNX_SPIRV_DIS AND Python3_Interpreter_FOUND)
         add_executable(snx-test-spirv-emitter spirv_emitter.c spirv_emitter_fixture.c
-            "${PROJECT_SOURCE_DIR}/src/nx/gpu/shader/spirv_emit.c")
+            "${PROJECT_SOURCE_DIR}/src/common/utilities/spirv_emit.c")
         snx_test_target(snx-test-spirv-emitter 11)
                 add_test(NAME spirv_emitter COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/spirv_emitter_test.py"
             --generator $<TARGET_FILE:snx-test-spirv-emitter> --validator "${SNX_SPIRV_VAL}" --disassembler "${SNX_SPIRV_DIS}")
@@ -645,6 +674,7 @@ add_test(NAME llvm_dependency COMMAND "${CMAKE_COMMAND}"
 
 add_executable(snx-test-overlay overlay.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/overlay.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/fatal_screen.c"
+    "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/prepare_screen.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/vpad.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-overlay 11)
@@ -704,7 +734,7 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME ui_shaders_current
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-ui-shaders.py" --check)
     add_test(NAME generators_crlf COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/generators_crlf.py")
-    # every 3D method that acts is in the fast path's table (engines.c g_m3d_acts)
+    # every 3D method that acts is marked in the fast path's table (engines.c g_m3d_group)
     add_test(NAME m3d_acts COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/m3d_acts_test.py")
     # no keys, dumps, stray binaries, piracy sites or the console maker's name in prose among the tracked files: the
     # checks on planted ones (self test), then on the checkout. Skipped (77) without git or outside a checkout
@@ -754,6 +784,9 @@ add_test(NAME patched_copy COMMAND "${CMAKE_COMMAND}" "-DSRC=${PROJECT_SOURCE_DI
 # the dependency cache's keys and how a build is published to it (cmake/deps_cache.cmake)
 add_test(NAME deps_cache COMMAND "${CMAKE_COMMAND}" "-DCC=${CMAKE_C_COMPILER}" "-DSRC=${PROJECT_SOURCE_DIR}"
          "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/deps-cache-test" -P "${CMAKE_CURRENT_SOURCE_DIR}/deps_cache_test.cmake")
+# LLVM's revision for the unit cache's key, read by CMake from its C++ header (cmake/llvm_revision.cmake)
+add_test(NAME llvm_revision COMMAND "${CMAKE_COMMAND}" "-DSRC=${PROJECT_SOURCE_DIR}"
+         "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/llvm-revision-test" -P "${CMAKE_CURRENT_SOURCE_DIR}/llvm_revision_test.cmake")
 
 # hid's shared memory layout (src/nx/hle/services/hid_layout.h) is checked against Eden's declarations at a pinned
 # revision by check_hid_layout.py, run by hand: `python3 tests/check_hid_layout.py --eden <an Eden checkout>`. It
@@ -1018,7 +1051,8 @@ if(NOT SNX_TOOLS_ONLY)
     target_link_libraries(snx-test-tex-upload-rows PRIVATE snx_nx_flags)
     add_test(NAME tex_upload_rows COMMAND snx-test-tex-upload-rows)
     # the file of shaders and pipelines kept across runs (gpu/vk/pipeline_file.c): records back as written, pipelines
-    # by their shaders' records, a cut or changed record ending the reading, another key starting over, a full file
+    # by their shaders' records (a shipped shader's reference among them), a cut or changed record ending the reading,
+    # another key starting over, a full file; and the shipped shaders' file read through its mapping
     add_executable(snx-test-pipeline-file pipeline_file.c)
     snx_test_target(snx-test-pipeline-file 23)
     target_link_libraries(snx-test-pipeline-file PRIVATE snx_nx_flags scarletnx-common)
@@ -1065,22 +1099,73 @@ if(SNX_TEST_LLVM_SWEEP)
         set_tests_properties(llvm_differential_sweep_${shard} PROPERTIES TIMEOUT 1800 COST 100)
     endforeach()
 endif()
+# the variant table's hash, which must match jit_service.c's cache hash
+add_executable(snx-test-variants variants.c)
+snx_test_target(snx-test-variants 11)
+target_link_libraries(snx-test-variants PRIVATE scarletnx-common)
+add_test(NAME variants COMMAND snx-test-variants)
+# the AOT build linking a profile cache's unit and emitting snx_variants
+add_executable(snx-test-aot-variants aot_variants.c)
+snx_test_target(snx-test-aot-variants 11)
+target_link_libraries(snx-test-aot-variants PRIVATE snx_driver_llvm ${CMAKE_DL_LIBS})
+add_test(NAME aot_variants COMMAND snx-test-aot-variants)
+set_tests_properties(aot_variants PROPERTIES TIMEOUT 120)
+# the code units' cache (nx/loader/unit_cache.c) under the LLVM module build: reuse, keys, broken objects, the limit
+add_executable(snx-test-unit-cache unit_cache.c)
+snx_test_target(snx-test-unit-cache 11)
+target_link_libraries(snx-test-unit-cache PRIVATE snx_driver_llvm ${CMAKE_DL_LIBS})
+add_test(NAME unit_cache COMMAND snx-test-unit-cache)
+set_tests_properties(unit_cache PROPERTIES TIMEOUT 120)
+# the runtime looking a pc up in the AOT variant table instead of compiling it
+add_executable(snx-test-runtime-variants runtime_variants.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/guest_jit.c")
+snx_test_target(snx-test-runtime-variants 11)
+target_link_libraries(snx-test-runtime-variants PRIVATE scarletnx-common scarletnx-filesystem snx_settings)
+add_test(NAME runtime_variants COMMAND snx-test-runtime-variants)
+# the runtime taking a module of SNX_ABI and refusing any other, on modules that are a descriptor alone (the fixture,
+# also built as a 32-bit program's): plain C99, without sanitizers the runtime may lack
+foreach(snx_fixture module-abi module-abi-arm)
+    add_library(snx-test-${snx_fixture} MODULE module_abi_fixture.c)
+    set_target_properties(snx-test-${snx_fixture} PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    target_compile_options(snx-test-${snx_fixture} PRIVATE -Wall -Wextra -Werror -pedantic-errors)
+    target_include_directories(snx-test-${snx_fixture} PRIVATE "${PROJECT_SOURCE_DIR}/src")
+endforeach()
+target_compile_definitions(snx-test-module-abi-arm PRIVATE SNX_TEST_MODULE_ARM)
+add_executable(snx-test-runtime-module-abi module_abi.c)
+snx_test_target(snx-test-runtime-module-abi 99)
+target_link_libraries(snx-test-runtime-module-abi PRIVATE snx_test_common)
+add_test(NAME runtime_module_abi COMMAND snx-test-runtime-module-abi $<TARGET_FILE:scarletnx>
+    $<TARGET_FILE:snx-test-module-abi> $<TARGET_FILE:snx-test-module-abi-arm>)
+# the module contract's layout as recorded when SNX_ABI last rose (docs/ARCHITECTURE.md, Module ABI)
+add_executable(snx-test-module-contract module_contract.c)
+snx_test_target(snx-test-module-contract 99)
+add_test(NAME module_contract COMMAND snx-test-module-contract)
+# the build-side reader of the runtime JIT's cache
+add_executable(snx-test-jit-cache jit_cache.c)
+snx_test_target(snx-test-jit-cache 11)
+target_link_libraries(snx-test-jit-cache PRIVATE snx_llvm)
+add_test(NAME jit_cache COMMAND snx-test-jit-cache)
+# the launcher's AOT pack action: the cache's path and header, and the optimization the AOT build must share
+add_executable(snx-test-aot-pack aot_pack.c "${PROJECT_SOURCE_DIR}/src/gui/aot.c")
+snx_test_target(snx-test-aot-pack 11)
+target_link_libraries(snx-test-aot-pack PRIVATE scarletnx-common)
+add_test(NAME aot_pack COMMAND snx-test-aot-pack)
 # the runtime JIT (jit_service.c): misses compiled, published and shared between threads, on that loader
 add_executable(snx-test-jit-service jit_service.c)
 snx_test_target(snx-test-jit-service 11)
 target_link_libraries(snx-test-jit-service PRIVATE snx_llvm Threads::Threads)
 add_test(NAME jit_service COMMAND snx-test-jit-service)
 set_tests_properties(jit_service PROPERTIES TIMEOUT 120)
-# the runtime JIT's coverage of code outside every image (guest_jit.c's jit_resolve_or_add): a block the game mapped
-add_executable(snx-test-nx-jit-region nx_jit_region.c)
-snx_test_target(snx-test-nx-jit-region 11)
-target_link_libraries(snx-test-nx-jit-region PRIVATE snx_llvm Threads::Threads)
-add_test(NAME nx_jit_region COMMAND snx-test-nx-jit-region)
 # longjmp across the loader's code, which on Windows unwinds through its registered function table
 add_executable(snx-test-code-loader-unwind code_loader_unwind.c)
 snx_test_target(snx-test-code-loader-unwind 11)
 target_link_libraries(snx-test-code-loader-unwind PRIVATE snx_llvm)
 add_test(NAME code_loader_unwind COMMAND snx-test-code-loader-unwind)
+# the loader's objects as GDB's JIT interface lists them (gdb_jit.c); skipped on Windows, which registers none
+add_executable(snx-test-gdb-jit gdb_jit.c)
+snx_test_target(snx-test-gdb-jit 11)
+target_link_libraries(snx-test-gdb-jit PRIVATE snx_llvm)
+add_test(NAME gdb_jit COMMAND snx-test-gdb-jit)
+set_tests_properties(gdb_jit PROPERTIES SKIP_RETURN_CODE 77)
 if(NOT WIN32)
     # the relocations both ELF paths share (elf_object.c), AArch64's included, checked on any ELF host and on macOS,
     # whose JIT loads ELF objects
@@ -1181,9 +1266,10 @@ endif()
 if(APPLE)
     # these build a game module and load it, which no Mac has done yet: the Mach-O linker (link_macho.c) is checked
     # on Linux only (the link_macho test and docs/APPLE.md), and these wait for a run on a Mac. The in-process
-    # loader's tests run: it loads ELF objects on macOS too (code_loader.c)
-    set_tests_properties(native_recompiler llvm_module recompiler_library llvm_differential_0 llvm_differential_1
-                         llvm_differential_2 PROPERTIES DISABLED TRUE)
+    # loader's tests run: it loads ELF objects on macOS too (code_loader.c). aot_variants also links a JIT cache unit,
+    # and Darwin's JIT writes ELF objects for that loader where the AOT module is Mach-O.
+    set_tests_properties(native_recompiler llvm_module recompiler_library aot_variants unit_cache llvm_differential_0
+                         llvm_differential_1 llvm_differential_2 PROPERTIES DISABLED TRUE)
 endif()
 
 add_executable(snx_codegen_test codegen_test.c)
@@ -1330,6 +1416,16 @@ add_executable(snx-test-mme-jit mme_jit.c)
 snx_test_target(snx-test-mme-jit 23)
 target_link_libraries(snx-test-mme-jit PRIVATE snx_llvm)
 add_test(NAME mme_jit COMMAND snx-test-mme-jit)
+
+# the shader programs a game ships, found in containers built by the test (gpu/shader/shipped.c)
+add_executable(snx-test-shipped-shaders shipped_shaders.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/shader/shipped.c")
+snx_test_target(snx-test-shipped-shaders 99)
+add_test(NAME shipped_shaders COMMAND snx-test-shipped-shaders)
+# the walk over a game's files and segments for those programs (gpu/shipped_pass.c), on a RomFS made by the test
+add_executable(snx-test-shipped-pass shipped_pass.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/shipped_pass.c"
+               "${PROJECT_SOURCE_DIR}/src/nx/gpu/shader/shipped.c")
+snx_test_target(snx-test-shipped-pass 99)
+add_test(NAME shipped_pass COMMAND snx-test-shipped-pass)
 
 add_executable(snx-test-etc2 etc2_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
 snx_test_target(snx-test-etc2 23)
@@ -1484,4 +1580,11 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
     snx_test_target(snx-test-vulkan-backing 11)
     add_test(NAME vulkan_backing COMMAND snx-test-vulkan-backing)
 endif()
+# these recompile with --repo of the checkout, which keeps the code units (nx/loader/unit_cache.c) in the user's cache
+# folder: a folder of the build tree's instead, where XDG names it
+foreach(snx_test native_recompiler llvm_module nx_runtime_homebrew nx_runtime_homebrew_64k_pages)
+    if(TEST ${snx_test})
+        set_property(TEST ${snx_test} APPEND PROPERTY ENVIRONMENT "XDG_CACHE_HOME=${CMAKE_CURRENT_BINARY_DIR}/xdg-cache")
+    endif()
+endforeach()
 snx_sanitizer_path()

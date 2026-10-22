@@ -7,10 +7,10 @@
 
    Only the frame's command buffer (vk_cmd) goes through the ring. A command for any other one (compute's, VIC's)
    is made at once, as are commands while vk_record=0. Whoever adds to the ring holds vk_lock, so there is one
-   producer at a time. What has to happen after the queued commands are recorded and submitted waits for the ring to
-   drain (vk_rec_sync): a present waiting on a submission's semaphore, a new command buffer from the frame's pool,
-   a device wait. Waits on the graphics timeline need none, as a timeline value can be waited for before its
-   submission. */
+   producer at a time. A present goes through the ring too, after the submission whose semaphore it waits on. What
+   else has to happen after the queued commands are recorded and submitted waits for the ring to drain
+   (vk_rec_sync): a new command buffer from the frame's pool, a device wait. Waits on the graphics timeline need
+   none, as a timeline value can be waited for before its submission. */
 #include <stdlib.h>
 #include <string.h>
 #include "common/utilities/common.h"
@@ -213,6 +213,39 @@ void vk_rec_submit(VkCommandBuffer cb, const VkSemaphoreSubmitInfo* w, u32 nw, c
     publish(); /* the timeline value is waited for by whoever needs the work done */
 }
 
+/* A present, after the frame's submission. The GPU thread waited for the ring to drain before presenting, and so
+   for the recording of its whole frame: a sixth of its time in one game, where it could have gone on with the next
+   frame. Its result comes back at a later present (vk_rec_present) */
+typedef struct {
+    VkSwapchainKHR sc;
+    VkSemaphore wait;
+    u32 idx;
+} Present;
+static VkResult g_present_result; /* atomic: the last present's result that wasn't VK_SUCCESS, until it is taken */
+static VkResult present_run(const Present* x) {
+    VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+                           .waitSemaphoreCount = 1,
+                           .pWaitSemaphores = &x->wait,
+                           .swapchainCount = 1,
+                           .pSwapchains = &x->sc,
+                           .pImageIndices = &x->idx};
+    return vkQueuePresentKHR(g_vk.gfx, &pi);
+}
+static void present_queued(const void* p) {
+    VkResult r = present_run(p);
+    if (r != VK_SUCCESS) __atomic_store_n(&g_present_result, r, __ATOMIC_RELEASE);
+}
+VkResult vk_rec_present(VkSwapchainKHR sc, u32 idx, VkSemaphore wait) {
+    Present x = {sc, wait, idx};
+    if (g_rec <= 0) return present_run(&x);
+    *(Present*)rec_push(present_queued, sizeof x) = x;
+    publish();
+    return vk_rec_present_result();
+}
+VkResult vk_rec_present_result(void) {
+    return g_rec > 0 ? __atomic_exchange_n(&g_present_result, VK_SUCCESS, __ATOMIC_ACQ_REL) : VK_SUCCESS;
+}
+
 /* ------------------------------------------------------------ commands of scalar arguments */
 #define REC_FN(Name, PARAMS, FIELDS, SET, ARGS, XARGS)                                                                 \
     typedef struct {                                                                                                   \
@@ -256,9 +289,11 @@ void vk_rec_submit(VkCommandBuffer cb, const VkSemaphoreSubmitInfo* w, u32 nw, c
 
 /* A graphics pipeline may be a stand-in for one a worker is still making (vk_pipeline_get_deferred): it is waited for
    here, at its bind. One that couldn't be made binds nothing, and the draws after it until the next graphics bind are
-   dropped, as the GPU thread drops a draw without its pipeline (the recording thread's own flag) */
+   dropped, as the GPU thread drops a draw without its pipeline (the recording thread's own flag: 1). With
+   async_pipelines one still being made isn't waited for: its draws are dropped the same way (2) until a later frame
+   binds it made. A new shader's compile, 60 to 400 ms on one driver, stalled the frame it first appeared in */
 static int g_rec_unbound;
-static u64 g_rec_dropped;
+static u64 g_rec_dropped, g_rec_skipped;
 typedef struct {
     VkCommandBuffer cb;
     VkPipelineBindPoint bp;
@@ -266,8 +301,10 @@ typedef struct {
 } BindPipelineArgs;
 static void bind_pipeline_run(const void* p) {
     const BindPipelineArgs* x = p;
-    VkPipeline pipe = vk_pipeline_resolve(x->p);
-    if (x->bp == VK_PIPELINE_BIND_POINT_GRAPHICS) g_rec_unbound = !pipe;
+    int graphics = x->bp == VK_PIPELINE_BIND_POINT_GRAPHICS, pending = 0;
+    VkPipeline pipe =
+        graphics && g_settings.async_pipelines ? vk_pipeline_now(x->p, &pending) : vk_pipeline_resolve(x->p);
+    if (graphics) g_rec_unbound = pipe ? 0 : pending ? 2 : 1;
     if (pipe) vkCmdBindPipeline(x->cb, x->bp, pipe);
 }
 void rec_CmdBindPipeline(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipeline p) {
@@ -282,7 +319,12 @@ void rec_CmdBindPipeline(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipeline 
 }
 static int rec_drop_draw(void) {
     if (!g_rec_unbound) return 0;
-    if (!g_rec_dropped++) WARN("vulkan: a pipeline couldn't be made: its draws are dropped\n");
+    if (g_rec_unbound == 2) {
+        if (g_rec_skipped++ % 1000 == 0)
+            LOG("vulkan: %llu draws skipped while their pipelines were made (async_pipelines)\n",
+                (unsigned long long)g_rec_skipped);
+    } else if (!g_rec_dropped++)
+        WARN("vulkan: a pipeline couldn't be made: its draws are dropped\n");
     return 1;
 }
 typedef struct {

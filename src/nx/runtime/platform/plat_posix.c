@@ -568,9 +568,45 @@ void plat_alias_host_free(u8* p, u64 size) { munmap(p, (size_t)size); }
 static u64 g_alias_size;
 u32 plat_tid(void) {
 #if defined(__linux__)
-    return (u32)syscall(SYS_gettid);
+    /* kept per thread: vk_lock asks it on every acquire, thousands of times a frame in one game, and each was a
+       system call */
+    static __thread u32 t_tid;
+    if (!t_tid) t_tid = (u32)syscall(SYS_gettid);
+    return t_tid;
 #else
     return (u32)(uintptr_t)pthread_self();
+#endif
+}
+/* /proc's view of the thread: running (R) is no wait, and a sleep's wait channel names the kernel function it sleeps
+   in, handle_userfault for a trap. "0" or nothing when the kernel won't name it (no kallsyms): unknown */
+int plat_thread_in_fault(u32 tid) {
+#if defined(__linux__)
+    char path[64], buf[256];
+    const char* state;
+    ssize_t n;
+    int fd;
+    snprintf(path, sizeof path, "/proc/self/task/%u/stat", (unsigned)tid);
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    n = read(fd, buf, sizeof buf - 1);
+    close(fd);
+    if (n <= 0) return -1;
+    buf[n] = 0;
+    state = strrchr(buf, ')'); /* after the name, which may hold anything */
+    if (!state || state[1] != ' ') return -1;
+    if (state[2] == 'R') return 0;
+    snprintf(path, sizeof path, "/proc/self/task/%u/wchan", (unsigned)tid);
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    n = read(fd, buf, sizeof buf - 1);
+    close(fd);
+    if (n <= 0) return -1;
+    buf[n] = 0;
+    if (!strcmp(buf, "0")) return -1;
+    return !strcmp(buf, "handle_userfault");
+#else
+    (void)tid;
+    return -1; /* traps are userfaultfd's, Linux's */
 #endif
 }
 u8* plat_alias_mirror(void) {
@@ -636,6 +672,12 @@ int plat_trap_init(void (*fault)(u8* p, int write, u32 tid)) {
 int plat_trap_arm(u8* p, u64 size) {
 #if SNX_UFFD_MINOR
     struct uffdio_register reg;
+    struct uffdio_range unreg;
+    /* the write watch registered this range first; the kernel won't add minor mode to a WP registration (EBUSY), so
+       let that go before the trap's own */
+    unreg.start = (u64)(uintptr_t)p;
+    unreg.len = size;
+    if (ioctl(g_uffd, UFFDIO_UNREGISTER, &unreg) && errno != ENOENT) return -1;
     memset(&reg, 0, sizeof reg);
     reg.range.start = (u64)(uintptr_t)p;
     reg.range.len = size;
@@ -708,11 +750,59 @@ void plat_trap_disarm(u8* p, u64 size) {
 static u8 *g_frz_lo, *g_frz_hi;
 static int g_frozen; /* a futex word: 1 while frozen */
 static __thread void* t_frz_retried; /* the address a thawed write was let go again at once */
-static int frozen_wait(void* a);
+static int frozen_wait(void* a, int access);
+
+/* A SIGSEGV or SIGBUS no access raised but sent (kill, tgkill, sigqueue), told by its code's name: si_code <= 0 is
+   Linux's alone, and on Darwin x86_64 a real fault may carry 0. A debugger has one sent when it detaches passing a
+   fault it held: the kernel then delivers it as SI_USER from the tracer, si_addr holding the sender's pid and uid
+   instead of the fault's address. The access behind it, if any, faults again as the thread goes on. Darwin can't
+   tell: its sendsig fills every SIGSEGV's and SIGBUS's code and address from the thread's last fault, sent or not
+   (SEGV_ACCERR and BUS_ADRALN on arm64), so there one sent is reported as a crash. Its debuggers take faults as Mach exceptions
+   and leave none behind */
+static int sent_signal(const siginfo_t* si) {
+    return si->si_code == SI_USER || si->si_code == SI_QUEUE
+#ifdef SI_TKILL
+           || si->si_code == SI_TKILL
+#endif
+        ;
+}
+/* the note of one ignored, on stderr: write(2) only, which a handler may call */
+static void note_sent(int sig, const siginfo_t* si) {
+    static const char head[] = "scarletnx: ignored a ", tail[] = " sent by process ";
+    const char* name = sig == SIGBUS ? "SIGBUS" : "SIGSEGV";
+    char msg[96], digits[24];
+    size_t n, k = 0;
+    unsigned long v = (unsigned long)(si->si_pid > 0 ? si->si_pid : 0);
+    memcpy(msg, head, sizeof head - 1);
+    n = sizeof head - 1;
+    memcpy(msg + n, name, strlen(name));
+    n += strlen(name);
+    memcpy(msg + n, tail, sizeof tail - 1);
+    n += sizeof tail - 1;
+    do {
+        digits[k++] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v);
+    while (k) msg[n++] = digits[--k];
+    msg[n++] = '\n';
+    if (write(STDERR_FILENO, msg, n) < 0) return;
+}
+/* SIGSEGV or SIGBUS of a write that may be the freeze's: a protection fault (Darwin reports one as SIGBUS) */
+static int access_fault(int sig, const siginfo_t* si) { return sig == SIGBUS || si->si_code == SEGV_ACCERR; }
+
 /* a process without the crash handler (a test): faults outside a frozen range end it as they would have */
 static void freeze_signal(int sig, siginfo_t* si, void* ctx) {
+    int saved = errno; /* the interrupted code's, which frozen_wait's futex changes */
     (void)ctx;
-    if (frozen_wait(si->si_addr)) return;
+    if (sent_signal(si)) {
+        note_sent(sig, si);
+        errno = saved;
+        return;
+    }
+    if (frozen_wait(si->si_addr, access_fault(sig, si))) {
+        errno = saved;
+        return;
+    }
     signal(sig, SIG_DFL);
 }
 static int g_fault_handler; /* plat_install_crash_handler's, or freeze_signal, catches SIGSEGV and SIGBUS */
@@ -741,10 +831,18 @@ void plat_thaw(void) {
 #endif
 }
 /* 1 when the fault at a is a write to the frozen range, which may go on now (after waiting for the thaw). The range
-   is kept after the thaw, so a write that faulted just before it is let go once more */
-static int frozen_wait(void* a) {
+   is kept after the thaw, so a write that faulted just before it is let go once more. So is a protection fault
+   (access) outside the range: mem.c freezes its runs one after another, and a run can be thawed and the next frozen
+   before the handler of a write that faulted on the first one reads the range (a debugger holding the fault widens
+   that). A write that faults again at the same address is not the freeze's */
+static int frozen_wait(void* a, int access) {
     u8* lo = __atomic_load_n(&g_frz_lo, __ATOMIC_ACQUIRE);
-    if (!lo || (u8*)a < lo || (u8*)a >= __atomic_load_n(&g_frz_hi, __ATOMIC_ACQUIRE)) return 0;
+    if (!lo) return 0;
+    if ((u8*)a < lo || (u8*)a >= __atomic_load_n(&g_frz_hi, __ATOMIC_ACQUIRE)) {
+        if (!access || t_frz_retried == a) return 0;
+        t_frz_retried = a;
+        return 1;
+    }
     if (!__atomic_load_n(&g_frozen, __ATOMIC_SEQ_CST)) {
         if (t_frz_retried == a) return 0; /* faulted again after the thaw: not the freeze's */
         t_frz_retried = a;
@@ -1066,10 +1164,20 @@ static void* context_pc(void* ctx) {
 }
 
 static void crash_signal(int sig, siginfo_t* si, void* ctx) {
-    int idle = 0;
+    int idle = 0, saved = errno; /* the interrupted code's, which frozen_wait's futex changes */
     void* fault;
+    /* sent, not raised (sent_signal): a debugger's leftover of plat_freeze's fault, the runtime's one SIGSEGV trap
+       (its guest-memory traps are userfaultfd's, which raise none) */
+    if ((sig == SIGSEGV || sig == SIGBUS) && sent_signal(si)) {
+        note_sent(sig, si);
+        errno = saved;
+        return;
+    }
     /* a write to memory frozen while it moves (plat_freeze): it goes on once the move is done */
-    if ((sig == SIGSEGV || sig == SIGBUS) && frozen_wait(si->si_addr)) return;
+    if ((sig == SIGSEGV || sig == SIGBUS) && frozen_wait(si->si_addr, access_fault(sig, si))) {
+        errno = saved;
+        return;
+    }
     /* a fault inside the report itself */
     if (t_crashed) _exit(1);
     t_crashed = 1;
@@ -1101,8 +1209,10 @@ void plat_install_crash_handler(void) {
     memset(&sa, 0, sizeof sa);
     sigemptyset(&sa.sa_mask);
     sa.sa_sigaction = crash_signal;
-    /* NODEFER: a fault during the report re-enters the handler, which ends the process, instead of hanging */
-    sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
+    /* NODEFER: a fault during the report re-enters the handler, which ends the process, instead of hanging. RESTART:
+       a sent signal it ignores (sent_signal) may land in a system call, which goes on instead of failing with EINTR;
+       a fault interrupts none */
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER | SA_RESTART;
     for (i = 0; i < sizeof sigs / sizeof *sigs; i++) sigaction(sigs[i], &sa, NULL);
     __atomic_store_n(&g_fault_handler, 1, __ATOMIC_RELEASE);
     memset(&sa, 0, sizeof sa);

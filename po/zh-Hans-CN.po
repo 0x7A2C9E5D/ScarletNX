@@ -549,6 +549,15 @@ msgstr "未显示用户：%s"
 msgid "%s's picture could not be drawn: Wimsy shows"
 msgstr "无法绘制 %s 的头像：改为显示 Wimsy"
 
+msgid "%s could not be drawn: the game shows no icon"
+msgstr "无法绘制 %s：该游戏不显示图标"
+
+msgid "Games is not watched for new games (%s): F5 lists them"
+msgstr "无法自动发现新游戏（%s）：按 F5 更新"
+
+msgid "The dumps' icons are not asked for (%s)"
+msgstr "未能读取转储的图标（%s）"
+
 #: src/gui/main.c
 msgid "Who plays the games"
 msgstr "谁在玩"
@@ -829,8 +838,8 @@ msgid "Built-in themes, then each themes/<name>/theme.ini"
 msgstr "内置主题，然后是每个 themes/<名称>/theme.ini"
 
 #: src/gui/main.c
-msgid "Text size"
-msgstr "文字大小"
+msgid "UI scale"
+msgstr "显示大小"
 
 #: src/gui/main.c
 msgid "Picked in a box, kept once said so. Auto fits the screen, its parts are smaller"
@@ -1139,8 +1148,8 @@ msgstr "「自动」的 0.75"
 
 #: src/gui/main.c
 #, c-format
-msgid "Keep this text size? Back to %s in %d s"
-msgstr "保留此文字大小？将恢复为 %s，剩余 %d 秒"
+msgid "Keep this UI scale? Back to %s in %d s"
+msgstr "保留此显示大小？将恢复为 %s，剩余 %d 秒"
 
 #: src/gui/main.c
 #, c-format
@@ -1426,6 +1435,10 @@ msgid "This copy is portable: to install it, first move away %s"
 msgstr "此副本为便携版：要安装，请先移走 %s"
 
 #: src/gui/main.c
+msgid "Skip stops on this page: it has no default to take"
+msgstr "跳过在此页结束：此页没有默认选择"
+
+#: src/gui/main.c
 #, c-format
 msgid "Could not make %s"
 msgstr "无法创建 %s"
@@ -1453,6 +1466,10 @@ msgstr "选择文件夹"
 #: src/gui/main.c
 msgid "Later"
 msgstr "稍后"
+
+#: src/gui/main.c
+msgid "Skip"
+msgstr "跳过"
 
 #: src/gui/main.c
 msgid "Overwrite"
@@ -2357,12 +2374,8 @@ msgid "a text too long for its box over its rows, or on one that slides"
 msgstr "文字超出框时分多行显示，或单行滚动"
 
 #: src/gui/theme.c
-msgid "the most pixels between two boxes of a list, times the text's size, 0 to 14"
-msgstr "列表中两个框之间的最大距离，按文字大小放大，0 到 14"
-
-#: src/gui/theme.c
-msgid "a list longer than its column: center keeps the focus in its middle, edge moves at its ends"
-msgstr "超出一列的列表：center 使焦点在中间，edge 到两端时移动"
+msgid "[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"
+msgstr "[body] %s = %s 已无效：列表现在由 ui.txt 布局（请删除）"
 
 #: src/gui/theme.c
 msgid "a colour as #RRGGBB"
@@ -2862,6 +2875,11 @@ msgstr ""
 msgid "%s: [folders] games = %s is now recompiled = %s"
 msgstr "%s：[folders] games = %s 现在是 recompiled = %s"
 
+#: src/gui/main.c
+#, c-format
+msgid "%s: text_size = %s is now ui_scale = %s"
+msgstr "%s：text_size = %s 现在是 ui_scale = %s"
+
 msgid "Recompiled games"
 msgstr "已重编译的游戏"
 
@@ -2882,3 +2900,24 @@ msgstr "folders.txt 中只有路径的一行"
 #: src/common/utilities/setup.c
 msgid "each folder in the recompiled or the dumps library, as its games say"
 msgstr "每个文件夹按其游戏放入已重编译或转储游戏库"
+
+#: src/common/utilities/setup.c
+msgid "The launcher's Text size"
+msgstr "启动器的文字大小"
+
+msgid "A theme's lists"
+msgstr "主题的列表"
+
+msgid "[body] gap and scroll in its theme.ini"
+msgstr "theme.ini 中的 [body] gap 和 scroll"
+
+msgid "nothing: ui.txt lays out every list"
+msgstr "不再有作用：所有列表由 ui.txt 布局"
+
+#: src/common/utilities/setup.c
+msgid "text_size = in app.ini"
+msgstr "app.ini 中的 text_size ="
+
+#: src/common/utilities/setup.c
+msgid "ui_scale =, shown as UI scale"
+msgstr "ui_scale =，名为显示大小"

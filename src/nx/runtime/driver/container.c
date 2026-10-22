@@ -399,7 +399,7 @@ static int read_ncas(SnxDump* dump, int container, const SnxHacEntry** entries, 
    record after it is 0x38 bytes: a hash, then the content ID (the NCA's file name before .nca), its size, its type
    and, for a program, its index in the application */
 enum { META_APPLICATION = 0x80, META_PATCH = 0x81, META_ADDON = 0x82 };
-enum { CONTENT_PROGRAM = 1, CONTENT_DATA = 2, CONTENT_CONTROL = 3 };
+enum { CONTENT_PROGRAM = 1, CONTENT_DATA = 2, CONTENT_CONTROL = 3, CONTENT_HTML_DOCUMENT = 4 };
 typedef struct {
     unsigned char id[16];
     int type, index;
@@ -531,12 +531,16 @@ static int select_ncas(SnxDump* dump, int container, SnxNcaRef* selected, SnxNca
     nmetas = read_metas(dump, container, &metas);
     for (i = 0; i < nmetas && !selected->found; i++)
         if (metas[i].type == META_APPLICATION &&
-            take_content(selected, &metas[i], CONTENT_PROGRAM, container, entries, ncas, count))
+            take_content(selected, &metas[i], CONTENT_PROGRAM, container, entries, ncas, count)) {
             take_content(control, &metas[i], CONTENT_CONTROL, container, entries, ncas, count);
+            take_content(&dump->html, &metas[i], CONTENT_HTML_DOCUMENT, container, entries, ncas, count);
+        }
     for (i = 0; embedded_patch && selected->found && i < nmetas && !embedded_patch->found; i++)
         if (metas[i].type == META_PATCH && metas[i].application == selected->title_id &&
-            take_content(embedded_patch, &metas[i], CONTENT_PROGRAM, container, entries, ncas, count))
+            take_content(embedded_patch, &metas[i], CONTENT_PROGRAM, container, entries, ncas, count)) {
             take_content(control, &metas[i], CONTENT_CONTROL, container, entries, ncas, count); /* a name changed */
+            take_content(&dump->html, &metas[i], CONTENT_HTML_DOCUMENT, container, entries, ncas, count);
+        }
     if (!selected->found) { /* no content meta naming them */
         for (i = 0; i < count; i++)
             if (ncas[i].type == SNX_HAC_PROGRAM && !is_patch(&ncas[i]) &&
@@ -585,6 +589,7 @@ static int select_addon(SnxDump* dump, int container) {
         }
         if (take_content(&dump->patch, &metas[i], CONTENT_PROGRAM, container, entries, ncas, count)) {
             take_content(&dump->control, &metas[i], CONTENT_CONTROL, container, entries, ncas, count);
+            take_content(&dump->html, &metas[i], CONTENT_HTML_DOCUMENT, container, entries, ncas, count);
             dump->game = metas[i].application;
             dump->version = metas[i].version;
         }
@@ -748,6 +753,11 @@ SnxHacFs* snx_dump_fs(SnxDump* dump) {
     return fs;
 }
 
+SnxHacFs* snx_dump_html_fs(SnxDump* dump) {
+    if (!dump->html.found) return NULL;
+    return snx_hac_fs_open(dump->hac, dump->html.container, dump->html.entry, -1, 0);
+}
+
 SnxHacFs* snx_dump_aoc_fs(SnxDump* dump) {
     SnxHacFs* fs = snx_hac_fs_open(dump->hac, dump->aoc.container, dump->aoc.entry, -1, 0);
     if (!fs) snx_hac_error("The DLC's Data NCA cannot be read");
@@ -755,20 +765,45 @@ SnxHacFs* snx_dump_aoc_fs(SnxDump* dump) {
 }
 
 /* The RomFS's header and tables (Switchbrew's "RomFS"): ten little-endian 64-bit fields, the root's directory entry
-   first in its table, a file entry its parent, sibling, offset and size, then its name */
+   first in its table, a directory entry its parent, sibling, first child directory and first file, then its name
+   (0x18 on), a file entry its parent, sibling, offset and size, then its name (0x20 on). Each directory of name's
+   path (dir/dir/file) is found among its parent's children, and the file among the last one's files */
 unsigned char* snx_romfs_file(SnxHacFs* fs, const char* name, size_t* size) {
     unsigned char header[0x50], entry[0x20 + 0x300], *data;
-    SnxU64 total = snx_hac_fs_romfs_size(fs), table, table_size, files, start, length;
-    SnxU32 at, name_size;
-    size_t want = strlen(name);
+    SnxU64 total = snx_hac_fs_romfs_size(fs), table, table_size, files, start, length, dirs, dirs_size;
+    SnxU32 at, name_size, dir = 0;
+    size_t want;
+    const char* slash;
     unsigned visited;
     if (total < sizeof header || snx_hac_fs_read_romfs(fs, 0, header, sizeof header)) return NULL;
+    dirs = le_bytes(header + 0x18, 8);
+    dirs_size = le_bytes(header + 0x20, 8);
     table = le_bytes(header + 0x38, 8);
     table_size = le_bytes(header + 0x40, 8);
     files = le_bytes(header + 0x48, 8);
-    if (le_bytes(header + 0x18, 8) > total - 0x10 ||
-        snx_hac_fs_read_romfs(fs, le_bytes(header + 0x18, 8), entry, 0x10)) /* the root's first file */
-        return NULL;
+    if (dirs > total || dirs_size > total - dirs) return NULL;
+    while ((slash = strchr(name, '/')) != NULL) { /* the next directory of the path, among dir's children */
+        want = (size_t)(slash - name);
+        if (dir > dirs_size || 0x18 > dirs_size - dir || snx_hac_fs_read_romfs(fs, dirs + dir, entry, 0x18))
+            return NULL;
+        at = (SnxU32)le_bytes(entry + 8, 4);
+        for (visited = 0; at != 0xFFFFFFFFUL && visited < 0x100000; visited++) {
+            if (at > dirs_size || 0x18 > dirs_size - at || snx_hac_fs_read_romfs(fs, dirs + at, entry, 0x18))
+                return NULL;
+            name_size = (SnxU32)le_bytes(entry + 0x14, 4);
+            if (name_size == want && name_size <= 0x300 && 0x18 + (SnxU64)name_size <= dirs_size - at &&
+                !snx_hac_fs_read_romfs(fs, dirs + at + 0x18, entry + 0x18, name_size) &&
+                !memcmp(entry + 0x18, name, want))
+                break;
+            at = (SnxU32)le_bytes(entry + 4, 4);
+        }
+        if (at == 0xFFFFFFFFUL || visited == 0x100000) return NULL;
+        dir = at;
+        name = slash + 1;
+    }
+    want = strlen(name);
+    if (dir > dirs_size || 0x10 > dirs_size - dir || snx_hac_fs_read_romfs(fs, dirs + dir, entry, 0x10))
+        return NULL; /* the directory's first file */
     at = (SnxU32)le_bytes(entry + 0xc, 4);
     for (visited = 0; at != 0xFFFFFFFFUL && visited < 0x100000; visited++) {
         if (table > total || table_size > total - table || at > table_size || 0x20 > table_size - at ||
@@ -795,21 +830,44 @@ unsigned char* snx_romfs_file(SnxHacFs* fs, const char* name, size_t* size) {
     return NULL;
 }
 
-unsigned char* snx_dump_nacp(SnxDump* dump, size_t* size, const char** why) {
+/* the Control NCA's RomFS, or NULL with why in *why */
+static SnxHacFs* control_fs(SnxDump* dump, const char** why) {
     SnxHacFs* fs;
-    unsigned char* nacp;
     *why = NULL;
     if (!dump->control.found) {
         *why = "it has no Control NCA";
         return NULL;
     }
     fs = snx_hac_fs_open(dump->hac, dump->control.container, dump->control.entry, -1, 0);
-    if (!fs) {
-        *why = "its Control NCA cannot be read";
-        return NULL;
-    }
+    if (!fs) *why = "its Control NCA cannot be read";
+    return fs;
+}
+unsigned char* snx_dump_nacp(SnxDump* dump, size_t* size, const char** why) {
+    SnxHacFs* fs = control_fs(dump, why);
+    unsigned char* nacp;
+    if (!fs) return NULL;
     nacp = snx_romfs_file(fs, "control.nacp", size);
     snx_hac_fs_free(fs);
     if (!nacp) *why = "its Control NCA holds no control.nacp";
     return nacp;
+}
+unsigned char* snx_dump_icon(SnxDump* dump, size_t* size, const char** why) {
+    /* control.nacp's languages, in its order */
+    static const char* const languages[] = {
+        "AmericanEnglish", "BritishEnglish",       "Japanese",          "French",
+        "German",          "LatinAmericanSpanish", "Spanish",           "Italian",
+        "Dutch",           "CanadianFrench",       "Portuguese",        "Russian",
+        "Korean",          "TraditionalChinese",   "SimplifiedChinese", "BrazilianPortuguese"};
+    SnxHacFs* fs = control_fs(dump, why);
+    unsigned char* icon = NULL;
+    char name[48];
+    size_t i;
+    if (!fs) return NULL;
+    for (i = 0; !icon && i < sizeof languages / sizeof *languages; ++i) {
+        snprintf(name, sizeof name, "icon_%s.dat", languages[i]);
+        icon = snx_romfs_file(fs, name, size);
+    }
+    snx_hac_fs_free(fs);
+    if (!icon) *why = "its Control NCA holds no icon_<language>.dat";
+    return icon;
 }

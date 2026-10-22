@@ -9,4 +9,7 @@
 uint32_t* snx_test_spirv_compute(size_t* words);
 /* Minimal graphics stages for checking Vulkan's entry point and output rules. */
 uint32_t* snx_test_spirv_graphics(int fragment, size_t* words);
+/* Compute shader: words 0 to n - 1 of set 0, binding 0, as floats with their subnormals flushed
+   (spv_emit_flush_subnormal, the float test with signed_zeros), into words n to 2n - 1 */
+uint32_t* snx_test_spirv_flush(uint32_t n, int signed_zeros, size_t* words);
 #endif

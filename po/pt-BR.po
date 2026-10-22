@@ -549,6 +549,15 @@ msgstr "Nenhum usuário mostrado: %s"
 msgid "%s's picture could not be drawn: Wimsy shows"
 msgstr "Não foi possível desenhar a foto de %s: aparece a Wimsy"
 
+msgid "%s could not be drawn: the game shows no icon"
+msgstr "Não foi possível desenhar %s: o jogo fica sem ícone"
+
+msgid "Games is not watched for new games (%s): F5 lists them"
+msgstr "Jogos não acompanha jogos novos (%s): F5 os lista"
+
+msgid "The dumps' icons are not asked for (%s)"
+msgstr "Os ícones dos dumps não são pedidos (%s)"
+
 #: src/gui/main.c
 msgid "Who plays the games"
 msgstr "Quem joga"
@@ -829,8 +838,8 @@ msgid "Built-in themes, then each themes/<name>/theme.ini"
 msgstr "Os temas embutidos, depois cada themes/<nome>/theme.ini"
 
 #: src/gui/main.c
-msgid "Text size"
-msgstr "Tamanho do texto"
+msgid "UI scale"
+msgstr "Escala da interface"
 
 #: src/gui/main.c
 msgid "Picked in a box, kept once said so. Auto fits the screen, its parts are smaller"
@@ -1139,8 +1148,8 @@ msgstr "0.75 do Auto"
 
 #: src/gui/main.c
 #, c-format
-msgid "Keep this text size? Back to %s in %d s"
-msgstr "Manter este tamanho de texto? Volta para %s em %d s"
+msgid "Keep this UI scale? Back to %s in %d s"
+msgstr "Manter esta escala da interface? Volta para %s em %d s"
 
 #: src/gui/main.c
 #, c-format
@@ -1426,6 +1435,10 @@ msgid "This copy is portable: to install it, first move away %s"
 msgstr "Esta cópia é portátil: para instalá-la, primeiro tire do lugar %s"
 
 #: src/gui/main.c
+msgid "Skip stops on this page: it has no default to take"
+msgstr "Pular parou nesta página: ela não tem um padrão a seguir"
+
+#: src/gui/main.c
 #, c-format
 msgid "Could not make %s"
 msgstr "Não foi possível criar %s"
@@ -1453,6 +1466,10 @@ msgstr "Escolher pasta"
 #: src/gui/main.c
 msgid "Later"
 msgstr "Depois"
+
+#: src/gui/main.c
+msgid "Skip"
+msgstr "Pular"
 
 #: src/gui/main.c
 msgid "Overwrite"
@@ -2357,12 +2374,8 @@ msgid "a text too long for its box over its rows, or on one that slides"
 msgstr "um texto longo demais para a caixa em várias linhas, ou numa só que desliza"
 
 #: src/gui/theme.c
-msgid "the most pixels between two boxes of a list, times the text's size, 0 to 14"
-msgstr "o máximo de pixels entre duas caixas de uma lista, vezes o tamanho do texto, de 0 a 14"
-
-#: src/gui/theme.c
-msgid "a list longer than its column: center keeps the focus in its middle, edge moves at its ends"
-msgstr "uma lista maior que a coluna: center mantém o foco no meio, edge rola nas pontas"
+msgid "[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"
+msgstr "[body] %s = %s não faz nada: o ui.txt agora dispõe as listas (apague)"
 
 #: src/gui/theme.c
 msgid "a colour as #RRGGBB"
@@ -2711,6 +2724,14 @@ msgid "The threads compiling the game's code when it is recompiled: 0 = one for 
 msgstr "As threads que compilam o código do jogo ao recompilar: 0 = uma para cada núcleo do computador"
 
 #: src/nx/runtime/settings.txt
+msgid "Unit cache limit"
+msgstr "Limite do cache de unidades"
+
+#: src/nx/runtime/settings.txt
+msgid "The most the cache of compiled code units may hold, in GB: units/ of the cache folder, where every recompile finds the units it compiled before. Past it the units reused longest ago are removed. 0 = no limit. Either way the cache always leaves a tenth of its disk free, removing its oldest units for a new one"
+msgstr "O máximo que o cache de unidades de código compiladas pode ocupar, em GB: units/ da pasta de cache, onde cada recompilação acha as unidades que já compilou. Passando dele, saem as unidades reusadas há mais tempo. 0 = sem limite. De todo jeito o cache sempre deixa um décimo do disco livre, tirando as unidades mais antigas para caber uma nova"
+
+#: src/nx/runtime/settings.txt
 msgid "Instruction combining"
 msgstr "Combinação de instruções"
 
@@ -2862,6 +2883,11 @@ msgstr "Os dumps postos aqui são listados, os das subpastas também: arquivos .
 msgid "%s: [folders] games = %s is now recompiled = %s"
 msgstr "%s: [folders] games = %s agora é recompiled = %s"
 
+#: src/gui/main.c
+#, c-format
+msgid "%s: text_size = %s is now ui_scale = %s"
+msgstr "%s: text_size = %s agora é ui_scale = %s"
+
 msgid "Recompiled games"
 msgstr "Jogos recompilados"
 
@@ -2882,3 +2908,24 @@ msgstr "uma linha do folders.txt, só um caminho"
 #: src/common/utilities/setup.c
 msgid "each folder in the recompiled or the dumps library, as its games say"
 msgstr "cada pasta na biblioteca de recompilados ou na de dumps, conforme seus jogos"
+
+#: src/common/utilities/setup.c
+msgid "The launcher's Text size"
+msgstr "O Tamanho do texto do launcher"
+
+msgid "A theme's lists"
+msgstr "As listas de um tema"
+
+msgid "[body] gap and scroll in its theme.ini"
+msgstr "[body] gap e scroll no theme.ini dele"
+
+msgid "nothing: ui.txt lays out every list"
+msgstr "nada: o ui.txt dispõe todas as listas"
+
+#: src/common/utilities/setup.c
+msgid "text_size = in app.ini"
+msgstr "text_size = no app.ini"
+
+#: src/common/utilities/setup.c
+msgid "ui_scale =, shown as UI scale"
+msgstr "ui_scale =, mostrada como Escala da interface"

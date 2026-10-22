@@ -4,6 +4,7 @@
 #include "nx/runtime/platform/backend.h"
 #include "nx/runtime/platform/fatal_screen.h"
 #include "nx/runtime/platform/gamepad.h"
+#include "nx/runtime/platform/prepare_screen.h"
 #include "nx/runtime/platform/vpad.h"
 #include "gui_theme_colors.h"
 #include "common/utilities/pad_screen.h"
@@ -271,9 +272,10 @@ static int act(int i, int step) {
             g_settings.control_shown[c] = !all;
             vpad_store_shown(c);
         }
-    } else if (page == PAGE_CONTROLS && i == C_EDIT)
-        return OVERLAY_EDIT;
-    else if (page == PAGE_CONTROLS && i == C_BUTTONS)
+    } else if (page == PAGE_CONTROLS && i == C_EDIT) {
+        /* not over the loading screen, which hides the controls: they would be moved unseen */
+        if (!prepare_screen_shown()) return OVERLAY_EDIT;
+    } else if (page == PAGE_CONTROLS && i == C_BUTTONS)
         page_open(PAGE_BUTTONS);
     else if (page == PAGE_CONTROLS && i == C_RESET)
         vpad_reset_layout();
@@ -295,9 +297,10 @@ static int display_percent = 100; /* set on the event thread, read by the render
 void overlay_set_display_scale(float scale) {
     __atomic_store_n(&display_percent, scale > 0.0f ? (int)(scale * 100.0f) : 100, __ATOMIC_RELAXED);
 }
+int overlay_display_percent(void) { return __atomic_load_n(&display_percent, __ATOMIC_RELAXED); }
 void overlay_place(int sw, int sh, int* x, int* y, int* scale) {
     /* the tallest page sets the scale, so the letters keep their size from page to page: half the picture, or twice
-       the display's scale as the menu's Text size Auto (src/gui) if that is more, within three quarters of it. A
+       the display's scale as the menu's UI scale Auto (src/gui) if that is more, within three quarters of it. A
        phone's short picture held its letters at 2x by the half alone */
     int w = OVERLAY_COLS * 8, h = OVERLAY_ROWS * 16;
     int s = sw / 2 / w < sh / 2 / h ? sw / 2 / w : sh / 2 / h;
@@ -492,7 +495,7 @@ int overlay_controls(u64 buttons, const i32 sticks[4], u64 ms) {
         seen = now;
         return OVERLAY_NONE;
     }
-    if (pressed & dirs)
+    if ((pressed & dirs) || !shown) /* a direction held as the menu opens waits as a fresh press would */
         next = ms + SNX_OVERLAY_REPEAT_DELAY;
     else if (shown && (now & dirs) && ms >= next) { /* held: the lowest direction again */
         pressed |= now & dirs & (~(now & dirs) + 1);
@@ -556,14 +559,16 @@ int overlay_tap(float x, float y, int sw, int sh) {
     if (r == d.shown) return OVERLAY_NONE;
     focus = d.top + r;
     col = (int)((x - at.box.x) / (8.0f * (float)at.scale));
-    /* a value's arrows: the left half of its last ten columns steps it down */
+    /* a value's row: a tap on its last five columns (the right arrow's) steps it up, a tap anywhere left of them
+       down */
     if (arrows(setting(focus))) return act(focus, col < at.cols - 5 ? -1 : 1);
     return act(focus, 0);
 }
 static u64 tap_id;   /* what went down off the on-screen controls, */
 static int tap_down; /* whose lift taps the menu */
 void overlay_pointer_down(u64 id, float x, float y, const int safe[4]) {
-    if (vpad_down(id, x, y, safe)) return;
+    /* the on-screen controls take no finger under the loading screen, where they aren't drawn (vk/ui.c) */
+    if (!prepare_screen_shown() && vpad_down(id, x, y, safe)) return;
     tap_id = id;
     tap_down = 1;
 }

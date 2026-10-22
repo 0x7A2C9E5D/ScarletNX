@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_GUI_THEME_H
 #define SNX_GUI_THEME_H
+#include "common/utilities/run_theme.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -20,7 +21,6 @@ typedef enum { GUI_SIZING_FIXED, GUI_SIZING_ADAPTIVE } GuiSizing;
 /* a text too long for its box: over as many rows as it takes, or on one that slides */
 typedef enum { GUI_TEXT_WRAP, GUI_TEXT_SLIDE } GuiTextFlow;
 /* a list longer than its column: the focused box kept in its middle, or the list moving once the focus reaches an end */
-typedef enum { GUI_SCROLL_CENTER, GUI_SCROLL_EDGE } GuiScroll;
 /* the title in the row of tabs, after them, or on a row of its own under them */
 typedef enum { GUI_HEAD_TABS, GUI_HEAD_BELOW } GuiHeadPlace;
 /* the user's picture at the head's right, by their nickname: none (and no nickname), square or round */
@@ -73,8 +73,6 @@ typedef struct {
     GuiPanels panels;
     GuiSizing sizing;
     GuiTextFlow text;
-    uint32_t gap; /* the most pixels between two boxes of a list, times the scale: they spread up to it */
-    GuiScroll scroll;
     char cursor[16]; /* in the list's margin, beside the focused box */
     GuiDialog dialog;
     int grid;        /* a faint grid on the page behind the boxes, in the dim colour */
@@ -162,4 +160,10 @@ void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, cons
 /* the built-ins, then each other folder of dirs with a theme.ini, once */
 void gui_themes_scan(GuiThemes* themes, const char* const* dirs, size_t count);
 void gui_themes_free(GuiThemes* themes);
+/* The loading screen's look of the theme the launcher of a program in folder picked (its app.ini's [app] theme, from
+   the built-ins, the themes/ of its data folder (Folders' pick, else the default) and those shipped beside the
+   running program, which is the launcher's own when the launcher started the run; YoRHa, the launcher's own, until
+   one is picked or when the picked one is no longer there), for the runtime's screens
+   (main.h's snx_menu_run_theme). out is all zeros, ink and page alike, when out of memory */
+void gui_run_theme(const char* folder, SnxRunTheme* out);
 #endif

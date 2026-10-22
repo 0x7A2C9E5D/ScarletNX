@@ -63,7 +63,6 @@ int main(void) {
     CHECK(at(9010, 402) == 1, "changed script starts its new press");
     CHECK(at(9310, 403) == 0, "new press ends normally");
 
-
     /* the help's example of a present is one the parser takes as a present */
     {
         const IniOpt* o = ini_find(g_unattended_ini, "script");
@@ -116,6 +115,15 @@ int main(void) {
         CHECK(x == -32767 && y == 0, "axis clamp %d %d", x, y);
     }
 
+    /* last, as it starts the clock over: a press the backend looked at before the game started (during main.c's
+       loading screen) is pressed again once unattended_start starts the game's clock, not used up before it */
+    g_now = 1000000000ull + 20000ull * 1000000ull;
+    unattended_start();
+    unattended_ini("script", "703f:4");
+    CHECK(at(20000, 703) == 4 && at(20400, 703) == 0, "703f pressed and ended before the start");
+    g_now = 1000000000ull + 30000ull * 1000000ull;
+    unattended_start();
+    CHECK(at(30000, 703) == 4, "703f pressed again after unattended_start: %llx", (unsigned long long)at(30000, 703));
     printf("%u checks, %u failed\n", checks, failures);
     return failures != 0;
 }

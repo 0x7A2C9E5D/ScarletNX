@@ -36,21 +36,30 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - Tab and Shift+Tab go round the menu, Games and the Settings, the tabs at the top; a click on a tab
   opens it. A theme edited and not saved keeps its screen.
 - A list with rows out of sight (the menu with big letters, `recompiled/`'s pages, the Settings, the theme
-  editor) shows an arrow past the right edge of its boxes, up on its first row and down on its last, in
-  the soft colour.
+  editor) shows an arrow at the right end of its first row, up, and of its last, down, in the soft colour.
 - Moving the mouse over an item focuses it in yellow without activating it; in the Settings, a row of the list the
   keys move in (the groups, or the rows of the one open), the other list, a tab and Back waiting for a click.
+- A gamepad drives the menu as the keys do (`src/gui/pad_menu.c`): the D-pad and the left stick are the arrows, the
+  button labelled A (or Cross) is Enter, B (or Circle) ESC, X (or Square) Del and Y (or Triangle) R, wherever the pad
+  has them (a Switch pad's A is east, its X north), LB and RB are Shift+Tab and Tab, LT and RT are PgUp and PgDn, L3
+  and R3 are M and B (Games' mods folder and AOT pack), Start is F5 and Back (View, Minus, Select) F2. A held arrow or
+  page repeats. A press on the pad hides the mouse's cursor and the foot names the pad's buttons, a PlayStation pad's
+  by their shapes; a key or the mouse moving past a few pixels shows the keyboard's again, and so do a click and a
+  finger once they have pressed what the foot showed under them: the press that switched does what it does. The Button
+  map page and a Controller row waiting for a press read the pads themselves. While a run goes the menu lets go of the
+  pads, for the game.
 - The keys at the foot are buttons: a click or a tap on one presses it, as the keyboard does (ESC or
   Back goes back, Tab to the next screen, Enter or Tap selects, Swipe turns the page). A key of
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
-  presses the key when its words all press one. `Arrows`, `mouse` and `pad` press nothing.
+  presses the key when its words all press one. `Arrows`, `mouse`, `pad` and `D-pad` press nothing.
 - The menu, top to bottom: the three loads, **Setup device keys**, **Settings**, **Share log**, on
   Android **Open data folder**, and **Exit**. The games, and the recent ones, are the Games tab's.
 - Space, Enter or a left click explicitly activates an item, marking it bright
   pink. Activation is tracked separately from hover/focus, so the activated item
   stays pink while another item is hovered in yellow. Mouse controls also work
   on Games' rows.
-- A finger taps an item anywhere on its row, as a click does on its label; a swipe turns Games'
+- A finger taps an item anywhere on its row, as a click does on its label, and a drag up or down on the menu or the
+  Settings moves the focus a row each time it passes one, whether or not the rows all fit; a swipe turns Games'
   pages, left or up to the next as a phone's lists scroll, right or down back; a tap on a finished run returns to the menu, and one on a
   running run's ESC line aborts it. Android's back button is ESC. On a screen packed with
   pixels (a phone) the text takes the display's own scale, as far as the menu still fits.
@@ -65,14 +74,11 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   take a game (its Main, and each Extra that can be written and runs programs), a box asks which the dump's game goes
   in, **Recompile** on its tab: each folder with what it is and its free room, the Main first and in focus; ESC runs
   nothing. The one taken is the run's `--outdir`, and the room asked about is that folder's.
-- **Load 3DS CIA** uses `scarletnx-3ds`. Its `recompiled/` browser lists CIA inputs,
-  not host executables. The driver reads supported decrypted application CIAs where they lie, or extracts them
-  with *Extract game container*.
-  A native Linux build with `SNX_3DS_AOT=ON` then performs static ARM11 integer
-  compilation/execution; the default build reports missing AOT support. Larger
-  images use bounded conservative discovery (16 MiB text cap). SuperTux now
-  connects/registers `srv:`, then waits for absent `APT:S`, before main,
-  graphics or audio. No service/session success is invented to bypass that wait.
+- **Load 3DS CIA** uses `scarletnx-3ds`. Its `games/` browser lists CIA inputs,
+  not host executables. The driver reads supported decrypted application CIAs where they lie, or extracts them with *Extract game container*.
+  The driver then compiles the ARM11 code ahead of time and runs it, on Linux and
+  Windows. Larger images use bounded conservative discovery (16 MiB text cap).
+  SuperTux shows its title screen and plays its music, but takes no input yet.
   Full HLE/devices remain incomplete. Like the Switch driver, it uses an
   extraction (or the CIA itself) and a compiled module already there, and recompiles only when needed.
   See [3DS port](3DS.md) for limits.
@@ -108,7 +114,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   dead zone, background input, Joy-Cons). A player's *Controller* is *Any*, the next to connect, until Enter on it
   and a press on a controller give it that one (ESC leaves it as it was, Del makes it *Any* again); its *Button
   map* is the page above on its own keys, its A and B as its *Swap A/B* says.
-  **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **Text size**, which opens
+  **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **UI scale**, which opens
   its box of sizes (below), **Animations** (On by default, `animations = 1` in `app.ini`: a screen comes in from the
   page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Side box** (below, F2 too),
 **Theme editor**, which comes
@@ -173,19 +179,21 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   is read the same way. On, a dump is extracted as before, into the game's folder or with *Extract to tmpfs* into
   tmpfs, which implies it. Turning it off again takes a game's extraction away on its next run.
   **Optimization level** (0, 1, 2, 3 or z, 2 by default) is LLVM's level for the game's code, **AOT threads** the
-  threads compiling it (0, the default, one for each core), and the **LLVM Internals** page turns each pass of LLVM's
-  pipelines off and sets the options LLVM's C API takes, its **All** stepping every row. They are passed as
-  `--key=value` when the game is recompiled: by **R**, or by a run that has to (a dump played the first time, an NRO
-  each time). A game made already keeps its code until then. The first two settings and these reach neither the Linux
-  nor the 3DS driver.
+  threads compiling it (0, the default, one for each core), **Unit cache limit** the GB the compiled code units kept
+  for the next recompile may hold (20 by default, 0 for no limit; [USAGE](USAGE.md)), and the **LLVM Internals** page
+  turns each pass of LLVM's pipelines off and sets the options LLVM's C API takes, its **All** stepping every row. They
+  are passed as `--key=value` when the game is recompiled: by **R**, or by a run that has to (a dump played the first
+  time, an NRO each time). A game made already keeps its code until then. The first two settings and these reach
+  neither the Linux nor the 3DS driver.
 - The Status box, after the RAM and the CPU, says what ScarletNX's folders take (recompiled/,
   work/ and themes/ of the data folder, and on Linux its config, state and cache folders, else
   the menu's own) and what is left on that disk, counted as the menu opens and after each run.
 - Settings > App's **Theme** switches to the next theme, or the one before: the built-in Default
   and YoRHa, then each folder of `themes/` (see [Themes](#themes)). The menu opens in YoRHa until one is picked.
   It is kept for the next start,
-  as are Text size and Language, in `app.ini` beside `settings.ini`: `[app]` with `theme` (a theme's folder
-  name), `text_size` (`auto`, `0.25`, `0.5`, `0.75` or 1 to 4) and `language` (`auto`, `en` or a language's BCP 47
+  as are UI scale and Language, in `app.ini` beside `settings.ini`: `[app]` with `theme` (a theme's folder
+  name), `ui_scale` (`auto`, `0.25`, `0.5`, `0.75` or 1 to 4; `text_size` before, still read and written again
+  as `ui_scale`, said once) and `language` (`auto`, `en` or a language's BCP 47
   tag, as `pt-BR` or `zh-Hans-CN`), and once one
   is picked `[folders]` with Folders' `data`, `games` and
   `work` (a full path, nothing for the default). A value the
@@ -194,7 +202,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   `zh_CN`, which builds before the tags wrote) is read as that language and written as its tag, the message saying
   the two once (`language = pt_BR is now pt-BR`).
 - Settings > App's **Theme editor** edits the current theme: **Save** first, the folder it is saved in, a row
-  per `theme.ini` key, and beside them a
+  per `theme.ini` key, a colour's with the colour after its value, and beside them a
   preview of the menu or a run (Ctrl+P, or a click on it, switches). Left/Right change a word, a switch or a
   number, Enter types a text or a number and opens a colour's picker. The picker sits over the keys, so the preview
   shows the colour as it changes: a bar per channel, R, G and B, which Left/Right step by 1 and PgUp/PgDn by 16, or
@@ -203,7 +211,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Save (or Ctrl+S) writes `themes/<folder>/theme.ini` in the data folder and switches to it;
   a built-in is saved as a new theme, `mytheme` until renamed. ESC leaves, asking first if
   there are unsaved changes.
-- Settings > App's **Text size** opens a box of sizes: a quarter, half or three quarters of Auto (Auto's scale times
+- Settings > App's **UI scale** opens a box of sizes: a quarter, half or three quarters of Auto (Auto's scale times
   it, rounded, 1x at the least), Auto (fit the screen), then 1x to 4x. The size picked is used at once, and a question
   asks to keep it: Keep keeps it in `app.ini`; Back, ESC or no answer in 15 s bring the one before it back. Bigger
   letters scroll the menu. The foot's letters (its keys, and the tips when they are
@@ -215,7 +223,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   which it took. A language written in two scripts goes by its script, written or implied by its country (`zh-CN`,
   `zh-SG` simplified, `zh-TW`, `zh-HK`, `zh-MO` traditional): a system in one never takes a catalog of the other. The
   words change at once; a phrase the language has not translated stays English.
-- **Share log** saves the last run's output and game log to `scarletnx.log`. On the
+- **Share log** saves the last run's output and game log to `scarletnx.log`. After a run that ended abnormally (not
+  by ESC) it blinks red, as Setup device keys does, until its log is saved or a run ends well. On the
   desktop it goes in the working folder with its path copied. On Android it goes to the
   data folder's `state/` and is shared.
 - **Open data folder**, on Android, opens the data folder, the app's own storage, in the
@@ -267,12 +276,15 @@ question and choices come as the theme's `[body] options-dialog` places a questi
 without darkening them; its tip, and what a choice did or why it did not, are in the foot. Up/Down (or the mouse)
 move between the choices, Enter takes one and ESC goes back a page, on the first page asking whether to exit. The
 notices come one a page, numbered (Changed 1/8), each read before the setup goes on: Next the next one, Back (from the
-second) the one before, and OK on the last.
+second) the one before, and OK on the last. The first page has **Skip** after its choices: it takes every page left as
+its defaults have it, what Next, OK or Enter on each would take (the notices read, the appearance and the install as
+they are, Keep, Later, the nickname `Player`), writes `setup.ini` and opens the menu; a page whose default fails (a
+`users.ini` that cannot be written) stays, saying why.
 
-- **Appearance**: a box of Settings > App's Language, Theme and Text size, a row each, and Next under
-  them. Up/Down go over the rows and Next; Left/Right (or a click, on the left arrow back) change the language among
-  the menu's and the theme, at once, the screen with them; Text size opens its box of sizes, the size picked asked
-  about for 15 s as App's is; Enter does as App's (the language or the theme a step on, Text size's box), and on
+- **Appearance**: a box of Settings > App's Language, Theme and UI scale, a row each, and Next (with Skip, on the first
+  page) under them. Up/Down go over the rows and Next; Left/Right (or a click, on the left arrow back) change the language among
+  the menu's and the theme, at once, the screen with them; UI scale opens its box of sizes, the size picked asked
+  about for 15 s as App's is; Enter does as App's (the language or the theme a step on, UI scale's box), and on
   Next goes on. What was changed is kept in `app.ini` once the setup is done, in the folders Install picks; Auto
   stays Auto while the language is the system's.
 - **Install**: Installed, or Portable, which makes `.scarletnx/` beside the program and moves the menu's own files
@@ -396,10 +408,14 @@ note go on saying it after. F5, or the foot's (Refresh on a phone), looks at the
 Games lists its folders again, Folders says which of its folders are there, the menu counts the disk
 again, and the box of what an older version left looks again. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
 every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the
-column is as wide as its entries and the side box goes under the list. A list's boxes spread over its column, at
-most `[body] gap` pixels apart, times the text's size (0 to 14; 6 in the built-ins), and one longer than its column
-keeps the focused box in its middle, the list moving around it (`[body] scroll = center`, the built-ins'), or moves
-once the focus reaches its end (`edge`). That is the **Side box**'s *Auto*, the
+column is as wide as its entries and the side box goes under the list. Every list is laid out by `src/gui/ui.txt`
+(a theme's `[body] gap` and `[body] scroll` are deprecated, said as it loads: [DEPRECATIONS](DEPRECATIONS.md)): the menu's, Games',
+the Settings' two, the theme editor's, the choices of a question, of UI scale's box, of the Recompile box and of the
+setup's pages, the setup's Appearance rows, the box of users, that of a game's updates, DLCs and mods, and the OK of
+a box of files. Their rows are 2 pixels apart times the text's size (on Android 40 pixels high, about Android's 48 dp
+touch target at the 3x a phone held wide gets, where the desktop's are 17), the focused one kept in the middle (on a
+group's screen, the group open in the groups' list), the cursor and the arrows of hidden rows inside each row, which a
+click takes whole as a tap does. That is the **Side box**'s *Auto*, the
 default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
 not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2, or the
 foot's, shows it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over
@@ -425,17 +441,30 @@ what hactool has written, the recompile by its blocks, shows how far it is on it
 driver's own row says it, `extracted 1229 of 4096 MB (30%)`, written over itself each second. The menu fades out to black as a run starts and the run fades in from it; ESC
 fades the run out and the menu back in.
 
+The runtime draws a loading screen of its own in the same look while it prepares the shaders before a game starts
+(`prepare_shaders = 2`, the default). It shows steps with their progress, the lines of the work scrolling under
+them, and a progress bar in every theme. A key that types, an arrow or the keypad, a gamepad button other than Home,
+or a tap starts the game at once, and the rest is prepared while it runs. Esc quits, or on Android back opens the
+menu, whose Exit quits. The screen appears only when the work takes longer than a quarter second, and its words are
+in English whatever language the launcher uses. It reads the theme the launcher picked from the launcher's
+`app.ini`, from the built-ins, the `themes/` of the data folder (the one Folders picked, when it did) and
+the themes shipped beside the launcher, which it finds when the launcher started the game. It uses the theme's
+`[run]` colours, `layout`, `texture` and `progress`, and its loading title. A theme that is no longer there draws as
+YoRHa. So does a runtime built without the launcher, which on Android is every runtime: the launcher is the app's
+own library there, and the game's runtime can't ask it.
+
 A theme is also a folder holding a `theme.ini`, the folder's name its id, in
 `themes/` in that same folder or in `themes/` beside the GUI; the first one found
 wins, and a folder named like a built-in replaces it. The built-ins are such files, and
 nothing else: each folder of `src/gui/themes/` is one, its `theme.ini` compiled into the GUI
 (`cmake/gui_themes.cmake`) and read as any other, setting every key. The runtime's game menu
-takes YoRHa's colours from the same file at build time. The files are copied beside the GUI
+takes YoRHa's colours from the same file at build time, and so does its loading screen when it can't read the
+launcher's theme. The files are copied beside the GUI
 in the build and installed in `share/scarletnx/themes`: copy one under a new name to make a theme, or edit one
 to change the built-in. `[theme] base` picks the built-in a file starts from, and a key it
 leaves out, or that cannot be read, keeps the base's value. What a file has that the theme does not take as written
 is said, the file named, in the menu's message as it opens and in Settings > App's note when the theme is picked: a
-value it cannot read with the one it keeps (`[body] scroll = middle is not center or edge: it keeps center`), a number
+value it cannot read with the one it keeps (`[body] focus = middle is not color or bar: it keeps color`), a number
 past its most with the most it takes, a base that is no built-in with the one it starts from, and a key no theme has
 (an ErET file's own keys aside). A line with no `=` is no setting. The menu's **Theme editor**
 writes one with every key.
@@ -484,11 +513,6 @@ panels = fill
 sizing = fixed
 ; a text too long for its box: wrap (over its rows) | slide (on one row)
 text = wrap
-; the most pixels between two boxes of a list, times the text's size (0 to 14): they spread up to it
-gap = 6
-; a list longer than its column: center (the focused box in its middle, the list moving around it) | edge (the
-; list moving once the focus reaches its end)
-scroll = center
 ; in the list's margin, beside the focused box
 cursor = "> "
 ; a question and its choices: default (a box in the middle) | yorha (the question in a box at the foot, the
@@ -658,6 +682,12 @@ Supported host platforms are Linux, FreeBSD, Windows (llvm-mingw) and Android (`
 SDL3 handles window creation, keyboard/mouse input, rendering, clipboard and drag-and-drop
 on every host. The platform-specific code only handles child processes and resource
 accounting. See [BUILD](BUILD.md) for SDL3's desktop dependencies.
+
+The menu's list, Games', the Settings', the setup's Appearance, the choices of the questions and the setup, the
+boxes of users and of a game's add-ons, and the OK of a box of files are scenes of `src/gui/ui.txt`, which `tools/uigen` turns into `gui/ui.h` and
+`gui/ui.c` as the GUI builds (the format is in `tools/uigen/uigen.c`'s first comment): their layout computed at build
+time, the drawing and callbacks main.c's. `uigen` tests the generator's output and refusals, `gui_ui` runs what it
+makes of `tests/ui_test.txt`.
 
 The tests cover menu transitions, bounded console scrolling, split UTF-8/ANSI
 sequences, path parsing, argument quoting, inherited grandchild output, resource

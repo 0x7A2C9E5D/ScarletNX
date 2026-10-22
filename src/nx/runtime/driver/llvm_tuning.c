@@ -61,16 +61,44 @@ static int cut_list(Cut* c) {
     return kept;
 }
 
-static char g_pipeline[1 << 16];
+/* what snx_llvm_tuning gives, made again at each call */
+static struct {
+    SnxIrTuning tuning;
+    char pipeline[1 << 16];
+    char text[1 << 17]; /* tuning.text: the pipeline that runs, then each LLVM Internals key and its value */
+} g_llvm_tuning;
 static void builder(LLVMPassBuilderOptionsRef options) { settings_llvm_builder(&g_settings, options); }
 static void machine(LLVMTargetMachineRef target) { settings_llvm_machine(&g_settings, target); }
 
+/* tuning.text, a line each: "pipeline=" the one that runs (default: LLVM's own for the level), then every key of the
+   llvm table with its value. 0, or -1 with why */
+static int describe(char* error, size_t error_size) {
+    char* text = g_llvm_tuning.text;
+    size_t size = sizeof g_llvm_tuning.text, at;
+    const IniOpt* o;
+    int n = snprintf(text, size, "pipeline=%s\n",
+                     g_llvm_tuning.tuning.pipeline ? g_llvm_tuning.tuning.pipeline : "default");
+    for (at = (size_t)n, o = g_llvm_ini; n >= 0 && at < size && o->key; o++, at += (size_t)n) {
+        char value[64];
+        ini_format(o, value, sizeof value);
+        n = snprintf(text + at, size - at, "%s=%s\n", o->key, value);
+    }
+    if (n < 0 || at >= size) {
+        snprintf(error, error_size, "LLVM Internals' values take more than %zu bytes as text", size - 1);
+        return -1;
+    }
+    g_llvm_tuning.tuning.text = text;
+    return 0;
+}
+
 const struct SnxIrTuning* snx_llvm_tuning(char opt, char* error, size_t error_size) {
-    static SnxIrTuning tuning;
+    SnxIrTuning* tuning = &g_llvm_tuning.tuning;
+    char* pipeline = g_llvm_tuning.pipeline;
     const char* text = settings_llvm_pipeline(opt);
-    tuning.pipeline = NULL;
-    tuning.builder = builder;
-    tuning.machine = machine;
+    tuning->pipeline = NULL;
+    tuning->builder = builder;
+    tuning->machine = machine;
+    tuning->text = NULL;
     if (!text) { /* no pipeline to cut a pass from: a pass turned off would go on running under default<O?> */
         const IniOpt* o;
         for (o = g_llvm_ini; o->key; o++)
@@ -86,21 +114,21 @@ const struct SnxIrTuning* snx_llvm_tuning(char opt, char* error, size_t error_si
     if (text) {
         Cut c;
         size_t n = strlen(text);
-        if (n >= sizeof g_pipeline) {
+        if (n >= sizeof g_llvm_tuning.pipeline) {
             snprintf(error, error_size, "LLVM's pipeline for -O%c is longer than %u bytes", opt,
-                     (unsigned)sizeof g_pipeline - 1);
+                     (unsigned)sizeof g_llvm_tuning.pipeline - 1);
             return NULL;
         }
         c.p = text;
-        c.out = g_pipeline;
+        c.out = pipeline;
         c.at = 0;
         if (!cut_list(&c)) {
             snprintf(error, error_size, "LLVM Internals turn off every pass of -O%c's pipeline", opt);
             return NULL;
         }
-        g_pipeline[c.at] = 0;
+        pipeline[c.at] = 0;
         /* opt's own text when nothing was cut: default<O?> runs the same, and doesn't depend on the text */
-        if (strcmp(g_pipeline, text)) tuning.pipeline = g_pipeline;
+        if (strcmp(pipeline, text)) tuning->pipeline = pipeline;
     }
-    return &tuning;
+    return describe(error, error_size) ? NULL : tuning;
 }

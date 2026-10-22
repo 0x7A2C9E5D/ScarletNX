@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "nx/gpu/shader/spirv_emit.h"
+#include "common/utilities/spirv_emit.h"
 #include "spirv_emitter_fixture.h"
 
 uint32_t* snx_test_spirv_compute(size_t* words) {
@@ -35,6 +35,43 @@ uint32_t* snx_test_spirv_compute(size_t* words) {
     uint32_t target = spv_emit_storage_access_u32(&e, pointer_type, buffer, zero_index, zero_index);
     uint32_t result = spv_emit_iadd_u32(&e, u32_type, forty, two);
     spv_emit_store_u32(&e, target, result);
+    spv_emit_return(&e);
+    spv_emit_function_end(&e);
+    uint32_t* code = spv_emit_finish(&e, words);
+    spv_emit_destroy(&e);
+    return code;
+}
+
+uint32_t* snx_test_spirv_flush(uint32_t n, int signed_zeros, size_t* words) {
+    SpvEmitter e;
+    spv_emit_init(&e, 64);
+    spv_emit_shader_capability(&e);
+    uint32_t glsl = spv_emit_glsl450_import(&e);
+    uint32_t function = spv_emit_id(&e);
+    uint32_t label = spv_emit_id(&e);
+    uint32_t void_type = spv_emit_type_void(&e);
+    uint32_t u32_type = spv_emit_type_u32(&e);
+    uint32_t f32_type = spv_emit_type_f32(&e);
+    uint32_t bool_type = spv_emit_type_bool(&e);
+    uint32_t function_type = spv_emit_type_function_void(&e, void_type);
+    uint32_t array_type = spv_emit_type_runtime_array(&e, u32_type, 4);
+    uint32_t struct_type = spv_emit_type_struct_one(&e, array_type);
+    uint32_t buffer = spv_emit_storage_buffer(&e, struct_type, 0, 0);
+    uint32_t pointer_type = spv_emit_type_storage_pointer(&e, u32_type);
+    spv_emit_compute_entry_str(&e, function, "main", &buffer, 1);
+    spv_emit_local_size(&e, function, 1, 1, 1);
+    spv_emit_float_controls(&e, function, 0, signed_zeros, 0);
+    uint32_t member = spv_emit_constant_u32(&e, u32_type, 0);
+    spv_emit_function_void(&e, void_type, function, function_type);
+    spv_emit_label(&e, label);
+    for (uint32_t k = 0; k < n; k++) {
+        uint32_t in = spv_emit_storage_access_u32(&e, pointer_type, buffer, member, spv_emit_constant_u32(&e, u32_type, k));
+        uint32_t value = spv_emit_bitcast(&e, f32_type, spv_emit_load(&e, u32_type, in));
+        uint32_t flushed = spv_emit_flush_subnormal(&e, f32_type, u32_type, bool_type, glsl, value, signed_zeros);
+        uint32_t out =
+            spv_emit_storage_access_u32(&e, pointer_type, buffer, member, spv_emit_constant_u32(&e, u32_type, n + k));
+        spv_emit_store_u32(&e, out, spv_emit_bitcast(&e, u32_type, flushed));
+    }
     spv_emit_return(&e);
     spv_emit_function_end(&e);
     uint32_t* code = spv_emit_finish(&e, words);
@@ -88,7 +125,7 @@ uint32_t* snx_test_spirv_graphics(int fragment, size_t* words) {
         uint32_t sum = spv_emit_fadd(&e, f32_type, half, half);
         uint32_t product = spv_emit_fmul(&e, f32_type, half, half);
         uint32_t neg = spv_emit_fnegate(&e, f32_type, product);
-        uint32_t absval = spv_emit_glsl_unary(&e, f32_type, glsl, SPV_GLSL_FABS, neg);
+        uint32_t absval = spv_emit_glsl_unary(&e, f32_type, glsl, SPV_GLSL_F_ABS, neg);
         uint32_t fused = spv_emit_glsl_ternary(&e, f32_type, glsl, SPV_GLSL_FMA, half, half, absval);
         uint32_t varying = spv_emit_load(&e, vec4_type, input);
         uint32_t coord = spv_emit_load(&e, vec4_type, fragcoord);

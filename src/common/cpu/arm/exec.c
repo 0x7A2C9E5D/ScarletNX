@@ -17,7 +17,7 @@
 #include <string.h>
 
 /* a block's -O level, the A64 JIT's default */
-#define BLOCK_OPT '2'
+#define BLOCK_OPT '0'
 
 typedef struct {
     uint64_t key; /* (pc << 1 | thumb) + 1, 0 for an empty slot */
@@ -27,7 +27,7 @@ struct SnxArmExec {
     SnxIr* ir; /* the context and target machine every block's module is made with */
     SnxCodeLoader* loader;
     CachedBlock* blocks; /* open addressing, a power of two slots, at most half full */
-    size_t count, capacity;
+    size_t count, capacity, compiles;
 };
 
 static size_t code_span(const SnxArmExecRange* ranges, size_t n, uint32_t pc, unsigned unit) {
@@ -62,38 +62,20 @@ static int reserve(SnxArmExec* e) {
     return 0;
 }
 
-SnxArmBlock snx_arm_exec_block(SnxArmExec* e, const SnxArmExecRange* ranges, size_t nranges, uint32_t pc, int thumb,
-                               const unsigned char* base) {
-    uint64_t key = (((uint64_t)pc << 1) | (unsigned)thumb) + 1;
-    if (e->capacity && e->blocks[slot_of(e, key)].key == key) return e->blocks[slot_of(e, key)].fn;
-    size_t consumed = 0, span = code_span(ranges, nranges, pc, thumb ? 2 : 4), size = 0;
-    if (!span || reserve(e)) return NULL;
-    if (span > 65536) span = 65536; /* the block compiler's limit */
-    char name[40], error[512];
-    snprintf(name, sizeof name, "a32_%08x_%d", pc, thumb);
+SnxArmBlock snx_arm_exec_compile(SnxArmExec* e, const void* code, size_t count, uint32_t pc, int thumb,
+                                 SnxArmProfile profile, int checked, size_t* consumed) {
+    SnxArmCodegenOptions options = {SNX_ARM_CODEGEN_OPTIONS_ABI, profile,
+                                    checked ? SNX_ARM_MEMORY_CHECKED : SNX_ARM_MEMORY_FLAT};
+    size_t size = 0;
+    char name[48], error[512];
+    *consumed = 0;
+    /* a name of its own each time: the same pc compiles again when its code changes */
+    snprintf(name, sizeof name, "a32_%08x_%d_%zu", pc, thumb, e->compiles++);
     LLVMModuleRef module = LLVMModuleCreateWithNameInContext(name, e->ir->ctx);
     LLVMSetTarget(module, LLVMGetTarget(e->ir->mod));
     LLVMSetDataLayout(module, LLVMGetDataLayoutStr(e->ir->mod));
-    /* the block compiler reads host integers, and the guest's code is little-endian */
-    const void* code = base + pc;
-    void* swapped = NULL;
-    if (SNX_HOST_BE) {
-        size_t i;
-        swapped = malloc(span * (thumb ? 2 : 4));
-        if (!swapped) {
-            LLVMDisposeModule(module);
-            return NULL;
-        }
-        for (i = 0; i < span; ++i)
-            if (thumb)
-                ((uint16_t*)swapped)[i] = snx_ld_le16(base + pc + i * 2);
-            else
-                ((uint32_t*)swapped)[i] = snx_ld_le32(base + pc + i * 4);
-        code = swapped;
-    }
-    LLVMValueRef fn = thumb ? snx_thumb_llvm_block(module, name, (const uint16_t*)code, span, pc, &consumed)
-                            : snx_arm_llvm_block(module, name, (const uint32_t*)code, span, pc, &consumed);
-    free(swapped);
+    LLVMValueRef fn = thumb ? snx_thumb_llvm_block_ex(module, name, (const uint16_t*)code, count, pc, consumed, &options)
+                            : snx_arm_llvm_block_ex(module, name, (const uint32_t*)code, count, pc, consumed, &options);
     unsigned char* object = NULL;
     int rc = fn ? snx_ir_module_object(e->ir, module, BLOCK_OPT, &object, &size, error, sizeof error) : -1;
     LLVMDisposeModule(module);
@@ -106,8 +88,33 @@ SnxArmBlock snx_arm_exec_block(SnxArmExec* e, const SnxArmExecRange* ranges, siz
     input.name = name;
     rc = snx_code_load(e->loader, &input, 1, names, 1, &address, error, sizeof error);
     free(object);
-    if (rc || !address) return NULL;
-    SnxArmBlock block = (SnxArmBlock)(uintptr_t)address;
+    return rc || !address ? NULL : (SnxArmBlock)(uintptr_t)address;
+}
+
+SnxArmBlock snx_arm_exec_block(SnxArmExec* e, const SnxArmExecRange* ranges, size_t nranges, uint32_t pc, int thumb,
+                               const unsigned char* base) {
+    uint64_t key = (((uint64_t)pc << 1) | (unsigned)thumb) + 1;
+    if (e->capacity && e->blocks[slot_of(e, key)].key == key) return e->blocks[slot_of(e, key)].fn;
+    size_t consumed = 0, span = code_span(ranges, nranges, pc, thumb ? 2 : 4);
+    if (!span || reserve(e)) return NULL;
+    if (span > 65536) span = 65536; /* the block compiler's limit */
+    /* the block compiler reads host integers, and the guest's code is little-endian */
+    const void* code = base + pc;
+    void* swapped = NULL;
+    if (SNX_HOST_BE) {
+        size_t i;
+        swapped = malloc(span * (thumb ? 2 : 4));
+        if (!swapped) return NULL;
+        for (i = 0; i < span; ++i)
+            if (thumb)
+                ((uint16_t*)swapped)[i] = snx_ld_le16(base + pc + i * 2);
+            else
+                ((uint32_t*)swapped)[i] = snx_ld_le32(base + pc + i * 4);
+        code = swapped;
+    }
+    SnxArmBlock block = snx_arm_exec_compile(e, code, span, pc, thumb, SNX_ARM_PROFILE_A57, 0, &consumed);
+    free(swapped);
+    if (!block) return NULL;
     size_t slot = slot_of(e, key);
     e->blocks[slot].key = key;
     e->blocks[slot].fn = block;

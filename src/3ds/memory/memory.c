@@ -1,9 +1,16 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "3ds/memory/ctr_memory.h"
+#include "3ds/memory/host.h"
 #include <stdlib.h>
 #include <string.h>
 
+/* A guest address of a physical RAM page in a flat space: the reverse map write tracking protects through */
+typedef struct {
+    uint32_t va, next; /* next: the page's next alias + 1, 0 for none */
+    uint8_t space;     /* its index in spaces[] */
+} Alias;
+#define TRACK_SPACES 4
 /* Two-level ARM-sized page metadata, not an emulated hardware MMU table. */
 typedef struct {
     uint32_t pa;
@@ -11,15 +18,32 @@ typedef struct {
 } Page;
 struct SnxCtrMemory {
     const SnxCtrProfile* profile;
+    /* each RAM region's memory: its part of host's view, the regions one after another (NULL for MMIO) */
     unsigned char* backing[8];
+    CtrHostMemory host;
     void* mmio_context;
     SnxCtrMmioRead read;
     SnxCtrMmioWrite write;
     uint64_t epoch;
+    /* write tracking (snx_ctr_track_*), by RAM page of the host object (its offset / 4096) */
+    uint32_t pages;
+    uint8_t* level;
+    uint32_t* alias_head; /* the page's first alias + 1, 0 for none */
+    Alias* aliases;
+    uint32_t alias_count, alias_capacity, alias_free; /* alias_free: a freed entry + 1, 0 for none */
+    SnxCtrAddressSpace* spaces[TRACK_SPACES];         /* the flat spaces, whose views a level protects */
+    uint32_t tracked;                                 /* pages above SNX_CTR_TRACK_NONE */
+    SnxCtrTrackHandler handler;
+    void* handler_context;
+    bool resolving;
 };
 struct SnxCtrAddressSpace {
     SnxCtrMemory* memory;
     Page* tables[1024];
+    /* the flat space: every guest address an offset into it, the mappings views of the memory's host object; NULL
+       without one */
+    unsigned char* base;
+    uint8_t index; /* in the memory's spaces[], for a flat space */
 };
 
 SnxCtrMemory* snx_ctr_memory_new(SnxCtrModel model) {
@@ -29,20 +53,40 @@ SnxCtrMemory* snx_ctr_memory_new(SnxCtrModel model) {
     if (!m) return NULL;
     m->profile = p;
     m->epoch = 1;
+    uint64_t ram = 0;
+    for (size_t i = 0; i < p->region_count; ++i)
+        if (p->regions[i].kind != SNX_CTR_MMIO) ram += p->regions[i].size;
+    /* one host memory object, whatever the host: its view is page-aligned (the GPU imports each region's part, and a
+       flat space maps its pages) */
+    if (!ctr_host_memory_new(&m->host, ram)) {
+        free(m);
+        return NULL;
+    }
+    uint64_t offset = 0;
     for (size_t i = 0; i < p->region_count; ++i) {
         if (p->regions[i].kind == SNX_CTR_MMIO) continue;
-        m->backing[i] = calloc(1, p->regions[i].size);
-        if (!m->backing[i]) {
-            snx_ctr_memory_free(m);
-            return NULL;
-        }
+        m->backing[i] = m->host.view + offset;
+        offset += p->regions[i].size;
+    }
+    m->pages = (uint32_t)(ram / 4096);
+    m->level = calloc(m->pages, 1);
+    m->alias_head = calloc(m->pages, sizeof *m->alias_head);
+    if (!m->level || !m->alias_head) {
+        snx_ctr_memory_free(m);
+        return NULL;
     }
     return m;
+}
+unsigned char* snx_ctr_memory_region(const SnxCtrMemory* m, size_t index) {
+    return m && index < m->profile->region_count ? m->backing[index] : NULL;
 }
 const SnxCtrProfile* snx_ctr_memory_profile(const SnxCtrMemory* m) { return m ? m->profile : NULL; }
 void snx_ctr_memory_free(SnxCtrMemory* m) {
     if (!m) return;
-    for (size_t i = 0; i < 8; ++i) free(m->backing[i]);
+    ctr_host_memory_free(&m->host);
+    free(m->level);
+    free(m->alias_head);
+    free(m->aliases);
     free(m);
 }
 void snx_ctr_memory_mmio(SnxCtrMemory* m, void* context, SnxCtrMmioRead read, SnxCtrMmioWrite write) {
@@ -54,11 +98,38 @@ void snx_ctr_memory_mmio(SnxCtrMemory* m, void* context, SnxCtrMmioRead read, Sn
 SnxCtrAddressSpace* snx_ctr_space_new(SnxCtrMemory* m) {
     if (!m) return NULL;
     SnxCtrAddressSpace* s = calloc(1, sizeof *s);
-    if (s) s->memory = m;
+    if (!s) return NULL;
+    s->memory = m;
+    if (ctr_host_flat()) {
+        while (s->index < TRACK_SPACES && m->spaces[s->index]) ++s->index;
+        if (s->index == TRACK_SPACES || !(s->base = ctr_host_reserve())) {
+            free(s);
+            return NULL;
+        }
+        m->spaces[s->index] = s;
+    }
     return s;
 }
+unsigned char* snx_ctr_space_base(const SnxCtrAddressSpace* s) { return s ? s->base : NULL; }
+/* the host object's offset of a physical RAM address, the region's: its backing's place in the view */
+static uint64_t host_offset(const SnxCtrMemory* m, const SnxCtrRegion* region, uint32_t pa) {
+    size_t i = (size_t)(region - m->profile->regions);
+    return (uint64_t)(m->backing[i] - m->host.view) + (pa - region->base);
+}
+static void alias_remove(SnxCtrMemory* m, uint32_t index, const SnxCtrAddressSpace* s, uint32_t va);
+static uint32_t ram_index(const SnxCtrMemory* m, uint32_t pa);
 void snx_ctr_space_free(SnxCtrAddressSpace* s) {
     if (!s) return;
+    if (s->base) { /* its aliases go with it */
+        for (uint32_t t = 0; t < 1024; ++t)
+            for (uint32_t i = 0; s->tables[t] && i < 1024; ++i)
+                if (s->tables[t][i].present) {
+                    uint32_t index = ram_index(s->memory, s->tables[t][i].pa);
+                    if (index != UINT32_MAX) alias_remove(s->memory, index, s, t << 22 | i << 12);
+                }
+        s->memory->spaces[s->index] = NULL;
+        ctr_host_release(s->base);
+    }
     for (size_t i = 0; i < 1024; ++i) free(s->tables[i]);
     free(s);
 }
@@ -66,6 +137,117 @@ static Page* page(const SnxCtrAddressSpace* s, uint32_t address) {
     Page* table = s->tables[address >> 22];
     return table ? &table[(address >> 12) & 1023] : NULL;
 }
+/* ---- write tracking ---- */
+
+/* the RAM page index of a physical address (its host object offset / 4096), UINT32_MAX outside RAM */
+static uint32_t ram_index(const SnxCtrMemory* m, uint32_t pa) {
+    const SnxCtrRegion* r = snx_ctr_physical_region(m->profile, pa, 1);
+    if (!r || r->kind == SNX_CTR_MMIO) return UINT32_MAX;
+    return (uint32_t)(host_offset(m, r, pa) / 4096);
+}
+/* the host protection of a guest page at a level: owned pages trap every access, watched ones writes */
+static unsigned tracked_permissions(unsigned level, unsigned permissions) {
+    return level == SNX_CTR_TRACK_OWN ? 0u : level == SNX_CTR_TRACK_WATCH ? permissions & ~SNX_CTR_WRITE : permissions;
+}
+/* every flat view of the page given its level's protection */
+static void apply(SnxCtrMemory* m, uint32_t index) {
+    for (uint32_t a = m->alias_head[index]; a; a = m->aliases[a - 1].next) {
+        const Alias* alias = &m->aliases[a - 1];
+        SnxCtrAddressSpace* s = m->spaces[alias->space];
+        (void)ctr_host_protect(s->base, alias->va, 4096,
+                               tracked_permissions(m->level[index], page(s, alias->va)->permissions));
+    }
+}
+static bool alias_add(SnxCtrMemory* m, uint32_t index, const SnxCtrAddressSpace* s, uint32_t va) {
+    uint32_t a = m->alias_free;
+    if (a)
+        m->alias_free = m->aliases[a - 1].next;
+    else {
+        if (m->alias_count == m->alias_capacity) {
+            uint32_t n = m->alias_capacity ? m->alias_capacity * 2 : 4096;
+            Alias* grown = realloc(m->aliases, n * sizeof *grown);
+            if (!grown) return false;
+            m->aliases = grown;
+            m->alias_capacity = n;
+        }
+        a = ++m->alias_count;
+    }
+    m->aliases[a - 1] = (Alias){va, m->alias_head[index], s->index};
+    m->alias_head[index] = a;
+    return true;
+}
+static void alias_remove(SnxCtrMemory* m, uint32_t index, const SnxCtrAddressSpace* s, uint32_t va) {
+    for (uint32_t* link = &m->alias_head[index]; *link; link = &m->aliases[*link - 1].next) {
+        Alias* alias = &m->aliases[*link - 1];
+        if (alias->va != va || alias->space != s->index) continue;
+        uint32_t a = *link;
+        *link = alias->next;
+        alias->next = m->alias_free;
+        m->alias_free = a;
+        return;
+    }
+}
+void snx_ctr_track_handler(SnxCtrMemory* m, SnxCtrTrackHandler handler, void* context) {
+    m->handler = handler;
+    m->handler_context = context;
+}
+void snx_ctr_track_set(SnxCtrMemory* m, uint32_t pa, uint32_t size, SnxCtrTrackLevel level) {
+    if (!m || !size) return;
+    for (uint64_t at = pa & ~4095u; at < (uint64_t)pa + size; at += 4096) {
+        uint32_t index = ram_index(m, (uint32_t)at);
+        if (index == UINT32_MAX || m->level[index] == level) continue;
+        m->tracked += (level != SNX_CTR_TRACK_NONE) - (m->level[index] != SNX_CTR_TRACK_NONE);
+        m->level[index] = (uint8_t)level;
+        apply(m, index);
+    }
+}
+SnxCtrTrackLevel snx_ctr_track_level(const SnxCtrMemory* m, uint32_t pa) {
+    uint32_t index = m ? ram_index(m, pa) : UINT32_MAX;
+    return index == UINT32_MAX ? SNX_CTR_TRACK_NONE : (SnxCtrTrackLevel)m->level[index];
+}
+/* One step down for the page of pa: what the GPU owns lands (owned to watched), or its copies go (watched to none),
+   by the handler. A handler that leaves the page where it was is a bug in it: the step is taken anyway, so the
+   access goes on, and said */
+static void step(SnxCtrMemory* m, uint32_t index, uint32_t pa) {
+    unsigned before = m->level[index];
+    m->resolving = true;
+    if (m->handler) m->handler(m->handler_context, pa & ~4095u, (SnxCtrTrackLevel)before);
+    m->resolving = false;
+    if (m->level[index] >= before) {
+        static const char line[] = "3ds memory: a GPU page's handler did not resolve it\n";
+        ctr_host_say(line, sizeof line - 1);
+        snx_ctr_track_set(m, pa & ~4095u, 4096, before == SNX_CTR_TRACK_OWN ? SNX_CTR_TRACK_WATCH : SNX_CTR_TRACK_NONE);
+    }
+}
+/* the CPU (this API, a bus master's access by physical address, or the checked bus) is about to read or write
+   [pa, pa + size): its tracked pages resolved first */
+static void touch(SnxCtrMemory* m, uint32_t pa, size_t size, bool write) {
+    if (!m->tracked || m->resolving) return;
+    for (uint64_t at = pa & ~4095u; at < (uint64_t)pa + size; at += 4096) {
+        uint32_t index = ram_index(m, (uint32_t)at);
+        if (index == UINT32_MAX) continue;
+        while (m->level[index] == SNX_CTR_TRACK_OWN || (write && m->level[index] == SNX_CTR_TRACK_WATCH))
+            step(m, index, (uint32_t)at);
+    }
+}
+/* the same for a virtual range of a space, page by page */
+static void touch_virtual(SnxCtrAddressSpace* s, uint32_t va, size_t size, bool write) {
+    if (!s->memory->tracked || s->memory->resolving) return;
+    for (uint64_t at = va & ~4095u; at < (uint64_t)va + size; at += 4096) {
+        Page* p = page(s, (uint32_t)at);
+        if (p && p->present) touch(s->memory, p->pa, 4096, write);
+    }
+}
+bool snx_ctr_track_fault(SnxCtrAddressSpace* s, uint32_t va) {
+    SnxCtrMemory* m = s->memory;
+    Page* p = page(s, va);
+    if (!p || !p->present || m->resolving) return false;
+    uint32_t index = ram_index(m, p->pa);
+    if (index == UINT32_MAX || m->level[index] == SNX_CTR_TRACK_NONE) return false; /* the guest's own data abort */
+    step(m, index, p->pa);
+    return true;
+}
+
 /* A board-wide epoch conservatively invalidates every reservation on any
    successful store or mapping change, including aliases and other spaces.
    Saturation disables exclusive success rather than permitting an ABA wrap. */
@@ -92,10 +274,51 @@ SnxCtrMemResult snx_ctr_map(SnxCtrAddressSpace* s, uint32_t va, uint32_t pa, uin
         if (!s->tables[index]) s->tables[index] = calloc(1024, sizeof(Page));
         if (!s->tables[index]) return SNX_CTR_MEM_NOMEM;
     }
+    /* the flat space's view of the pages, before they are published: MMIO stays inaccessible there, and an access
+       from compiled code faults (ctr_host_faults) */
+    if (s->base && region->kind != SNX_CTR_MMIO &&
+        !ctr_host_map(&s->memory->host, s->base, va, host_offset(s->memory, region, pa), size, permissions))
+        return SNX_CTR_MEM_NOMEM;
     for (uint64_t offset = 0; offset < size; offset += 4096)
         *page(s, va + (uint32_t)offset) = (Page){pa + (uint32_t)offset, (unsigned char)permissions, 1};
+    /* a flat view of a RAM page is one of its aliases, at its level's protection */
+    if (s->base && region->kind != SNX_CTR_MMIO)
+        for (uint64_t offset = 0; offset < size; offset += 4096) {
+            uint32_t index = ram_index(s->memory, pa + (uint32_t)offset);
+            if (!alias_add(s->memory, index, s, va + (uint32_t)offset)) {
+                for (uint64_t undo = 0; undo < offset; undo += 4096)
+                    alias_remove(s->memory, ram_index(s->memory, pa + (uint32_t)undo), s, va + (uint32_t)undo);
+                (void)ctr_host_unmap(s->base, va, size);
+                for (uint64_t at = 0; at < size; at += 4096) *page(s, va + (uint32_t)at) = (Page){0};
+                return SNX_CTR_MEM_NOMEM;
+            }
+            if (s->memory->level[index])
+                (void)ctr_host_protect(s->base, va + (uint32_t)offset, 4096,
+                                       tracked_permissions(s->memory->level[index], permissions));
+        }
     changed(s->memory);
     return SNX_CTR_MEM_OK;
+}
+/* the flat space's side of a protect or an unmap, over the runs of RAM pages in the range: an MMIO page was never
+   mapped there and stays inaccessible */
+static bool host_change(SnxCtrAddressSpace* s, uint32_t va, uint32_t size, unsigned permissions, bool unmap) {
+    uint32_t run = 0, start = va;
+    for (uint64_t at = va; at <= (uint64_t)va + size; at += 4096) {
+        bool ram = false;
+        if (at < (uint64_t)va + size) {
+            const SnxCtrRegion* r = snx_ctr_physical_region(s->memory->profile, page(s, (uint32_t)at)->pa, 4096);
+            ram = r && r->kind != SNX_CTR_MMIO;
+        }
+        if (ram) {
+            if (!run) start = (uint32_t)at;
+            run += 4096;
+            continue;
+        }
+        if (run && !(unmap ? ctr_host_unmap(s->base, start, run) : ctr_host_protect(s->base, start, run, permissions)))
+            return false;
+        run = 0;
+    }
+    return true;
 }
 static SnxCtrMemResult change(SnxCtrAddressSpace* s, uint32_t va, uint32_t size, unsigned permissions, bool unmap) {
     if (!s || !valid_range(va, size) || !permissions_valid(permissions)) return SNX_CTR_MEM_INVALID;
@@ -105,12 +328,19 @@ static SnxCtrMemResult change(SnxCtrAddressSpace* s, uint32_t va, uint32_t size,
         const SnxCtrRegion* r = snx_ctr_physical_region(s->memory->profile, p->pa, 4096);
         if (!unmap && (permissions & SNX_CTR_EXEC) && r->kind == SNX_CTR_MMIO) return SNX_CTR_MEM_PERMISSION;
     }
+    if (s->base && !host_change(s, va, size, permissions, unmap)) return SNX_CTR_MEM_NOMEM;
     for (uint64_t at = va; at < (uint64_t)va + size; at += 4096) {
         Page* p = page(s, (uint32_t)at);
-        if (unmap)
+        uint32_t index = s->base ? ram_index(s->memory, p->pa) : UINT32_MAX;
+        if (unmap) {
+            if (index != UINT32_MAX) alias_remove(s->memory, index, s, (uint32_t)at);
             *p = (Page){0};
-        else
+        } else {
             p->permissions = (unsigned char)permissions;
+            if (index != UINT32_MAX && s->memory->level[index]) /* a tracked page keeps its level's protection */
+                (void)ctr_host_protect(s->base, (uint32_t)at, 4096,
+                                       tracked_permissions(s->memory->level[index], permissions));
+        }
     }
     changed(s->memory);
     return SNX_CTR_MEM_OK;
@@ -159,6 +389,23 @@ SnxCtrMemResult snx_ctr_check_ram(SnxCtrAddressSpace* s, uint32_t va, size_t siz
 static SnxCtrMemResult transfer(SnxCtrAddressSpace* s, uint32_t va, void* buffer, size_t size, unsigned access,
                                 bool ram_only) {
     if (!s || !buffer || !size || size > 0x100000000ull - va) return SNX_CTR_MEM_INVALID;
+    touch_virtual(s, va, size, access == SNX_CTR_WRITE);
+    /* within one page, as nearly every access is (each instruction's fetch among them): one lookup */
+    if ((va & 4095) + size <= 4096) {
+        Page* p = page(s, va);
+        if (!p || !p->present) return SNX_CTR_MEM_UNMAPPED;
+        if (!(p->permissions & access)) return SNX_CTR_MEM_PERMISSION;
+        bool mmio;
+        unsigned char* host = physical(s->memory, p->pa + (va & 4095), &mmio);
+        if (!mmio) {
+            if (access == SNX_CTR_WRITE) {
+                memcpy(host, buffer, size);
+                changed(s->memory);
+            } else
+                memcpy(buffer, host, size);
+            return SNX_CTR_MEM_OK;
+        }
+    }
     size_t offset = 0;
     while (offset < size) {
         uint32_t at = va + (uint32_t)offset;
@@ -218,6 +465,7 @@ static SnxCtrMemResult device(SnxCtrMemory* m, uint32_t pa, void* buffer, size_t
     const SnxCtrRegion* r = snx_ctr_physical_region(m->profile, pa, (uint32_t)size);
     if (!r) return SNX_CTR_MEM_INVALID;
     if (r->kind == SNX_CTR_MMIO) return SNX_CTR_MEM_DEVICE;
+    touch(m, pa, size, write);
     unsigned char* host = m->backing[r - m->profile->regions] + (pa - r->base);
     if (write) {
         memcpy(host, buffer, size);

@@ -43,7 +43,8 @@ void snx_ctr_cia_close(SnxCtrCia* c) {
     free(c);
 }
 SnxCtrExtractResult snx_ctr_cia_open(const char* input, SnxCtrCia** out, char* error, size_t error_size) {
-    CtrReader r = {.error = error, .error_size = error_size};
+    /* read where it lies every launch: no whole-data hashes (CtrReader.quick) */
+    CtrReader r = {.error = error, .error_size = error_size, .quick = true};
     SnxCtrCia* c = calloc(1, sizeof *c);
     *out = NULL;
     if (error_size) error[0] = 0;

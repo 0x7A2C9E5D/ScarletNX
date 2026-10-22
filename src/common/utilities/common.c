@@ -83,13 +83,27 @@ char* snx_format(const char* fmt, ...) {
     va_end(ap);
     return p;
 }
+/* snx_error's sink, snx_error_sink's: NULL for stderr */
+static struct {
+    void (*error_sink)(const char* line);
+} g_common;
+
+void snx_error_sink(void (*sink)(const char* line)) {
+    g_common.error_sink = sink;
+}
 int snx_error(const char* fmt, ...) {
+    char line[2048];
     va_list ap;
-    fputs("scarletnx: ", stderr);
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    if (g_common.error_sink) {
+        vsnprintf(line, sizeof line, fmt, ap);
+        g_common.error_sink(line);
+    } else {
+        fputs("scarletnx: ", stderr);
+        vfprintf(stderr, fmt, ap);
+        fputc('\n', stderr);
+    }
     va_end(ap);
-    fputc('\n', stderr);
     return 1;
 }
 char* snx_os_error(char* out, size_t size) {
@@ -169,6 +183,14 @@ FILE* snx_fopen(const char* path, const char* mode) {
     return f;
 #else
     return fopen(path, mode);
+#endif
+}
+int snx_path_is_full(const char* path) {
+#ifdef _WIN32
+    if (isalpha((unsigned char)path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) return 1;
+    return path[0] == '\\' && path[1] == '\\';
+#else
+    return path[0] == '/';
 #endif
 }
 char* snx_absolute(const char* path) {
@@ -696,6 +718,49 @@ SnxU64 snx_file_size(const char* path) {
     return stat(path, &st) || st.st_size < 0 ? 0 : (SnxU64)st.st_size;
 #endif
 }
+#ifdef _WIN32
+/* FILETIME counts 100 ns from 1601, 11644473600 s before 1970 */
+#define SNX_FILETIME_1970 116444736000000000ull
+#endif
+SnxU64 snx_file_time(const char* path) {
+#ifdef _WIN32
+    WIN32_FILE_ATTRIBUTE_DATA st;
+    wchar_t* p = wide(path);
+    int ok = p && GetFileAttributesExW(p, GetFileExInfoStandard, &st);
+    SnxU64 t = ok ? ((SnxU64)st.ftLastWriteTime.dwHighDateTime << 32) | st.ftLastWriteTime.dwLowDateTime : 0;
+    free(p);
+    return t > SNX_FILETIME_1970 ? (t - SNX_FILETIME_1970) / 10000000ull : 0;
+#else
+    struct stat st;
+    return stat(path, &st) || st.st_mtime < 0 ? 0 : (SnxU64)st.st_mtime;
+#endif
+}
+int snx_set_file_time(const char* path, SnxU64 seconds) {
+#ifdef _WIN32
+    wchar_t* p = wide(path);
+    HANDLE file = p ? CreateFileW(p, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                  NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL)
+                    : INVALID_HANDLE_VALUE;
+    SnxU64 t = seconds * 10000000ull + SNX_FILETIME_1970;
+    FILETIME ft;
+    int ok;
+    ft.dwLowDateTime = (DWORD)t;
+    ft.dwHighDateTime = (DWORD)(t >> 32);
+    ok = file != INVALID_HANDLE_VALUE && SetFileTime(file, NULL, &ft, &ft);
+    if (file != INVALID_HANDLE_VALUE) {
+        DWORD error = GetLastError();
+        CloseHandle(file);
+        SetLastError(error); /* the reason SetFileTime gave, for snx_os_error */
+    }
+    free(p);
+    return !ok;
+#else
+    struct timespec times[2];
+    times[0].tv_sec = times[1].tv_sec = (time_t)seconds;
+    times[0].tv_nsec = times[1].tv_nsec = 0;
+    return utimensat(AT_FDCWD, path, times, 0) != 0;
+#endif
+}
 SnxU64 snx_free_space(const char* path) {
 #ifdef _WIN32
     wchar_t* p = wide(path);
@@ -707,6 +772,23 @@ SnxU64 snx_free_space(const char* path) {
     struct statvfs st;
     return statvfs(path, &st) ? 0 : (SnxU64)st.f_bavail * st.f_frsize;
 #endif
+}
+int snx_disk_room(const char* path, SnxU64* free_bytes, SnxU64* total) {
+#ifdef _WIN32
+    wchar_t* p = wide(path);
+    ULARGE_INTEGER avail, all;
+    int ok = p && GetDiskFreeSpaceExW(p, &avail, &all, NULL);
+    free(p);
+    if (!ok) return -1;
+    *free_bytes = (SnxU64)avail.QuadPart;
+    *total = (SnxU64)all.QuadPart;
+#else
+    struct statvfs st;
+    if (statvfs(path, &st)) return -1;
+    *free_bytes = (SnxU64)st.f_bavail * st.f_frsize;
+    *total = (SnxU64)st.f_blocks * st.f_frsize;
+#endif
+    return 0;
 }
 /* path, or the nearest folder above it that is there */
 static char* existing_folder(const char* path) {

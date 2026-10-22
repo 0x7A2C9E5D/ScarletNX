@@ -41,8 +41,6 @@ static const char* const format_keys[] = {"theme/format",
                                           "body/panels",
                                           "body/sizing",
                                           "body/text",
-                                          "body/gap",
-                                          "body/scroll",
                                           "body/cursor",
                                           "body/options-dialog",
                                           "backdrop/grid",
@@ -141,6 +139,47 @@ static void write(const char* dir, const char* name, const char* text) {
     free(folder);
 }
 
+/* gui_run_theme: the [run] look of the theme a portable copy's app.ini picked, from its data folder's themes/ or the
+   one Folders picked; YoRHa for one not listed (gone, or a path) */
+static void app_ini(const char* config, const char* text) {
+    char* file = snx_path_join(config, "app.ini");
+    assert(!snx_mkdirs(config) && !snx_write_file(file, text, strlen(text)));
+    free(file);
+}
+static void run_theme(void) {
+    char *root = snx_absolute("gui_run_theme_test"), *app = snx_path_join(root, ".scarletnx");
+    char *config = snx_path_join(app, "config"), *themes = snx_path_join(app, "themes"),
+         *game = snx_path_join(app, "games");
+    char *picked = snx_path_join(root, "picked"), *picked_themes = snx_path_join(picked, "themes"), text[1200];
+    SnxRunTheme out;
+    write(themes, "mine",
+          "[theme]\nname = Mine\nbase = default\n[run]\nlayout = steps\npage = #102030\nink = #405060\n"
+          "progress = time\n");
+    write(picked_themes, "there", "[theme]\nname = There\nbase = default\n[run]\npage = #0A0B0C\nink = #FFFFFF\n");
+    app_ini(config, "[app]\ntheme = mine\n");
+    gui_run_theme(game, &out);
+    assert(!strcmp(out.name, "Mine") && out.page == 0x102030 && out.ink == 0x405060 && out.steps &&
+           out.progress == SNX_RUN_PROGRESS_TIME);
+    snprintf(text, sizeof text, "[app]\ntheme = there\n[folders]\ndata = %s\n", picked);
+    app_ini(config, text);
+    gui_run_theme(game, &out);
+    assert(!strcmp(out.name, "There") && out.page == 0x0A0B0C);
+    app_ini(config, "[app]\ntheme = ../.scarletnx/themes/mine\n");
+    gui_run_theme(game, &out);
+    assert(!strcmp(out.name, gui_theme_builtin("yorha")->name) && out.ink != out.page);
+    app_ini(config, "[app]\ntheme = gone\n");
+    gui_run_theme(game, &out);
+    assert(!strcmp(out.name, gui_theme_builtin("yorha")->name));
+    assert(!snx_remove_tree(root));
+    free(picked_themes);
+    free(picked);
+    free(game);
+    free(themes);
+    free(config);
+    free(app);
+    free(root);
+}
+
 int main(void) {
     static const char* const ids[] = {"default", "yorha"};
     const char* shipped[] = {SNX_GUI_THEMES_DIR};
@@ -210,16 +249,18 @@ int main(void) {
     assert(def->footer == GUI_STYLE_PLAIN && yorha->footer == GUI_STYLE_BAR && yorha->head_rule && !def->head_rule);
     assert(!gui_theme_key("body", "layout") && !gui_theme_key("head", "tabs") && !gui_theme_key("frame", "edges"));
 
-    /* a list's boxes at most 6 pixels apart in both, the focus in its middle; a theme's gap from 0 to 14, over 14 taken
-       as 14 as every number past its most; scroll center or edge */
-    assert(def->gap == 6 && yorha->gap == 6 && def->scroll == GUI_SCROLL_CENTER && yorha->scroll == GUI_SCROLL_CENTER);
-    parse(&theme, "[body]\ngap = 0\nscroll = edge\n");
-    assert(theme.gap == 0 && theme.scroll == GUI_SCROLL_EDGE && !said[0]);
-    parse(&theme, "[body]\ngap = 99\nscroll = middle\n"); /* each said, with the value it has instead */
-    assert(theme.gap == 14 && theme.scroll == GUI_SCROLL_CENTER &&
-           !gui_theme_set(&theme, gui_theme_key("body", "scroll"), "middle"));
-    assert(!strcmp(said, "[body] gap = 99 is more than 14: it takes 14; [body] scroll = middle is not center or edge: "
-                         "it keeps center"));
+    /* a number past its most taken as its most, a word it does not know keeping the base's, each said with the value
+       it has instead */
+    parse(&theme, "[head]\nsize = 9\n[body]\nfocus = middle\n");
+    assert(theme.title_size == 3 && theme.focus_bar == def->focus_bar &&
+           !gui_theme_set(&theme, gui_theme_key("body", "focus"), "middle"));
+    assert(!strcmp(said, "[head] size = 9 is more than 3: it takes 3; [body] focus = middle is not color or bar: it "
+                         "keeps color"));
+    /* [body] gap and scroll laid out the lists before ui.txt: deprecated, said, nothing taken (docs/DEPRECATIONS.md) */
+    parse(&theme, "[body]\ngap = 4\nscroll = edge\n");
+    assert(!gui_theme_key("body", "gap") && !gui_theme_key("body", "scroll"));
+    assert(!strcmp(said, "[body] gap = 4 does nothing: ui.txt lays out the lists now (delete it); [body] scroll = edge "
+                         "does nothing: ui.txt lays out the lists now (delete it)"));
 
     parse(&theme, ""); /* nothing: the default, named after its folder */
     assert(same(theme.ink, def->ink) && !strcmp(theme.id, "mine") && !strcmp(theme.name, "mine") && !said[0]);
@@ -354,13 +395,13 @@ int main(void) {
     assert(rgb_is(theme.page, 255, 255, 255) && same(theme.ink, yorha->ink) && !said[0]);
     gui_theme_load(&theme, dirs, 3, "beta", said, sizeof said);
     assert(!strcmp(theme.id, "default") && !strcmp(said, "No themes/beta/theme.ini could be read: it shows default"));
-    write(dir, "delta", "[body]\nscroll = middle\n"); /* its file named, then what it does not take */
+    write(dir, "delta", "[body]\nfocus = middle\n"); /* its file named, then what it does not take */
     gui_theme_load(&theme, dirs, 3, "delta", said, sizeof said);
     {
         char* folder = snx_path_join(dir, "delta");
         char* file = snx_path_join(folder, "theme.ini");
         char want[600];
-        snprintf(want, sizeof want, "%s: [body] scroll = middle is not center or edge: it keeps center", file);
+        snprintf(want, sizeof want, "%s: [body] focus = middle is not color or bar: it keeps color", file);
         assert(!strcmp(theme.id, "delta") && !strcmp(said, want));
         free(file);
         free(folder);
@@ -449,6 +490,12 @@ int main(void) {
     assert(rgb_hex(yorha->run_colors.ink, SNX_GUI_THEME_YORHA_RUN_INK));
     assert(rgb_hex(yorha->run_colors.soft, SNX_GUI_THEME_YORHA_RUN_SOFT));
     assert(rgb_hex(yorha->run_colors.dim, SNX_GUI_THEME_YORHA_RUN_DIM));
+    /* and the rest of its loading screen's look, which the runtime's draws when it can't read the launcher's theme */
+    assert(!strcmp(yorha->name, SNX_GUI_THEME_YORHA_NAME));
+    assert(!strcmp(yorha->title[GUI_SCREEN_LOADING], SNX_GUI_THEME_YORHA_LOADING));
+    assert((yorha->run == GUI_RUN_STEPS) == SNX_GUI_THEME_YORHA_RUN_STEPS);
+    assert(yorha->texture == SNX_GUI_THEME_YORHA_RUN_TEXTURE);
+    assert((int)yorha->progress == SNX_GUI_THEME_YORHA_RUN_PROGRESS);
     assert(rgb_hex(yorha->run_colors.failure, SNX_GUI_THEME_YORHA_RUN_FAILURE));
     assert(rgb_hex(yorha->run_colors.warning, SNX_GUI_THEME_YORHA_RUN_WARNING));
     assert(rgb_hex(yorha->splash_page, SNX_GUI_THEME_YORHA_SPLASH_PAGE));
@@ -489,6 +536,7 @@ int main(void) {
     assert(rgb_is(theme.splash_page, 0x10, 0x20, 0x30) && !theme.splash_ms && theme.splash_chance == 100);
     assert(rgb_is(yorha->splash_page, 0xDA, 0xD6, 0xBE) && yorha->splash_chance == 25 && yorha->splash_ms);
     assert(rgb_is(def->splash_page, 0, 0, 0) && def->splash_chance == 100 && def->splash_ms);
-    puts("GUI themes: built-ins, theme.ini over its base, themes/ folders passed");
+    run_theme();
+    puts("GUI themes: built-ins, theme.ini over its base, themes/ folders passed, the runtime's loading look");
     return 0;
 }

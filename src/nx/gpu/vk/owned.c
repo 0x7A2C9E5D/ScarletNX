@@ -4,7 +4,8 @@
    device-local buffer holding guest bytes in their own layout; an engine that wrote it publishes it over those bytes,
    and the trap lands it when the CPU touches them: copied by the GPU into host-cached memory, waited for (that
    submission only), and copied into the pool's mirror. On a host without traps a publish lands at once. Landing runs
-   on whatever thread faulted or acquired, under vk_lock, which it takes itself */
+   on whatever thread faulted or acquired, under vk_lock, which own.c takes before it marks what lands (OwnHooks'
+   lock) and own_land again for itself (it is reentrant, and a publish without traps lands with no landing of own.c's) */
 #include <stdlib.h>
 #include <string.h>
 #include "nx/gpu/gpu.h"
@@ -121,7 +122,14 @@ static void own_land(const OwnRange* r, u8* const* dst, u32 n) {
 static u32 lock_owner(void) { return vk_lock_owner(); }
 
 int vk_own_init(void) {
-    OwnHooks h = {own_land, res_retain, res_release, lock_owner};
+    /* vk_lock and vk_unlock themselves, not g_vklock: the outermost unlock also signals what the hold's releases
+       reached (vk_release_events) */
+    OwnHooks h = {.land = own_land,
+                  .retain = res_retain,
+                  .release = res_release,
+                  .busy_tid = lock_owner,
+                  .lock = vk_lock,
+                  .unlock = vk_unlock};
     g_own_traps = !own_init(&h);
     return g_own_traps ? 0 : -1;
 }
@@ -222,7 +230,15 @@ void vk_guest_peek(u64 gva, void* dst, u64 size) {
                 for (i = 0; i < k; i++) { /* the owner's identity in place of its stale bytes */
                     u64 tag = ((u64)(uintptr_t)r[i].res * 0x9E3779B97F4A7C15ull) ^ (r[i].res_off - (r[i].addr - cpu));
                     u8* t = d + o + (r[i].addr - cpu);
-                    for (u64 b = 0; b < r[i].size; b++) t[b] = (u8)(tag >> (8 * ((r[i].addr + b) & 7)));
+                    u8 word[8];
+                    u64 b = 0;
+                    /* the byte at an address is the tag's byte of the address modulo 8: whole words of guest memory
+                       take the tag's 8 bytes in order, written as such. Byte by byte took a third of the GPU
+                       thread hashing textures over GPU-owned memory (mem_hash) */
+                    for (u32 j = 0; j < 8; j++) word[j] = (u8)(tag >> (8 * j));
+                    for (; b < r[i].size && ((r[i].addr + b) & 7); b++) t[b] = word[(r[i].addr + b) & 7];
+                    for (; b + 8 <= r[i].size; b += 8) memcpy(t + b, word, 8);
+                    for (; b < r[i].size; b++) t[b] = word[(r[i].addr + b) & 7];
                 }
         }
         o += n;

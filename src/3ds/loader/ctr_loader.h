@@ -40,6 +40,13 @@ const unsigned char* snx_ctr_cia_code(const SnxCtrCia* cia, size_t* size);
 const unsigned char* snx_ctr_cia_exefs(const SnxCtrCia* cia, const char* name, uint64_t* size);
 /* the RomFS's level 3, the image the guest reads, in the mapping; NULL with *size 0 without a RomFS */
 const unsigned char* snx_ctr_cia_romfs(const SnxCtrCia* cia, uint64_t* size);
+/* An encrypted application CIA decrypted into output, published only complete, which then reads as a decrypted CIA:
+   its contents' title-key layer and their NCCHs' AES-CTR layer taken off, the NCCHs marked NoCrypto, the TMD's hashes
+   those of the decrypted contents. keys is an aes_keys.txt in Azahar's format (the generator constant, the KeyX of
+   slots 0x2C, 0x3D and the secondary key's, the common KeyYs). A CIA with nothing encrypted is left alone,
+   *encrypted false and nothing written. Seed crypto (seeddb) is refused */
+SnxCtrExtractResult snx_ctr_cia_decrypt(const char* input, const char* keys, const char* output, bool* encrypted,
+                                        char* error, size_t error_size);
 /* ExeFS backward LZSS/BLZ, exact bounded expansion; output_size is authoritative.
    The input and output buffers must not overlap. */
 bool snx_ctr_blz(const unsigned char* input, size_t input_size, unsigned char* output, size_t output_size);

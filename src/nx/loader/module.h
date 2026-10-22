@@ -14,6 +14,7 @@ typedef struct {
     int interp_only, quiet, hook_direct_calls;
     const SnxU64* hints; /* guest addresses a run found code at (the game's .hints file) */
     size_t hint_count;
+    const char* jit_cache; /* the profile run's .jitcache, linked into the module; NULL for none */
     unsigned abi;
 } SnxCodegenOptions;
 

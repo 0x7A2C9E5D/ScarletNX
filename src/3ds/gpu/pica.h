@@ -6,8 +6,8 @@
    shader_setup.cpp and packed_attribute.h, with register positions from regs_internal.h and the regs_*.h it
    includes (GPL-2.0-or-later), at azahar-emu/azahar a4b335e. Copyright 2015-2026 Citra Emulator Project / Azahar
    Emulator Project.
-   A draw trigger runs the software pipeline of draw.c (vertex loading, the vertex shader, primitive assembly) and
-   raster.c (the fixed-function back end). */
+   A draw trigger goes to the host's renderer: the GPU's (vk/render.c) in the runtime, the software pipeline of draw.c
+   and raster.c, the CPU reference, in the tests. */
 #ifndef SNX_CTR_PICA_H
 #define SNX_CTR_PICA_H
 #include "3ds/memory/ctr_memory.h"
@@ -84,10 +84,21 @@ typedef struct {
 } SnxCtrAssembler;
 
 typedef struct SnxCtrPica SnxCtrPica;
-/* the host side of the command processor: the P3D interrupt */
+typedef enum {
+    SNX_CTR_PICA_OK,          /* the list ran to its end or to an interrupt with autostop */
+    SNX_CTR_PICA_UNSUPPORTED, /* a draw using a part not ported yet (stop_reason), or a list past the staging bound */
+    SNX_CTR_PICA_FAULT        /* a jump to a list outside the board's memory */
+} SnxCtrPicaResult;
+/* the host side of the command processor: the P3D interrupt, and the renderer the draws go to (none: they draw
+   nothing). Immediate mode gives the renderer each vertex as it is formed (pica->immediate_vertex), then, before a
+   register write other than another vertex's attributes and at the end of the list, vertices_end (when set) to draw
+   the ones given */
 typedef struct {
     void* context;
     void (*interrupt)(void* context);
+    SnxCtrPicaResult (*draw)(SnxCtrPica* pica, SnxCtrMemory* memory, bool indexed);
+    SnxCtrPicaResult (*vertex)(SnxCtrPica* pica, SnxCtrMemory* memory);
+    SnxCtrPicaResult (*vertices_end)(SnxCtrPica* pica, SnxCtrMemory* memory);
 } SnxCtrPicaHost;
 
 struct SnxCtrPica {
@@ -102,6 +113,8 @@ struct SnxCtrPica {
     unsigned immediate_queued, immediate_attribute;
     float immediate_vertex[16][4];
     bool immediate_reset; /* reset_geometry_pipeline: the next immediate vertex starts a new batch */
+    bool immediate_given; /* vertices given to the renderer that vertices_end has not drawn yet */
+    uint32_t vs_version;  /* counts the vertex program's code and swizzle uploads: a renderer's cache key */
     /* the primitive assembler (PrimitiveAssembler), kept across draws; topology and restart writes reset it */
     SnxCtrAssembler assembler;
     /* the list being run, a staged copy of guest memory; a jump (a command buffer trigger) replaces it */
@@ -115,12 +128,8 @@ struct SnxCtrPica {
 void snx_ctr_pica_init(SnxCtrPica* pica);
 void snx_ctr_pica_free(SnxCtrPica* pica);
 
-typedef enum {
-    SNX_CTR_PICA_OK,          /* the list ran to its end or to an interrupt with autostop */
-    SNX_CTR_PICA_UNSUPPORTED, /* a draw using a part not ported yet (stop_reason), or a list past the staging bound */
-    SNX_CTR_PICA_FAULT        /* a jump to a list outside the board's memory */
-} SnxCtrPicaResult;
-/* the draw triggers (draw.c): DrawArrays, indexed or not, and DrawImmediate for the vertex immediate mode formed */
+/* the software renderer's draws (draw.c, the CPU reference): DrawArrays, indexed or not, and DrawImmediate for the
+   vertex immediate mode formed */
 SnxCtrPicaResult snx_ctr_pica_draw(SnxCtrPica* pica, SnxCtrMemory* memory, bool indexed);
 SnxCtrPicaResult snx_ctr_pica_draw_immediate(SnxCtrPica* pica, SnxCtrMemory* memory);
 /* Runs the command list of size bytes at physical address (GPU::SubmitCmdList's checks are the caller's). A list

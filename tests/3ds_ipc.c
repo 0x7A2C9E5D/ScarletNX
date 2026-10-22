@@ -3,6 +3,8 @@
 #include "3ds/aot/ctr_module.h"
 #include "3ds/runtime/internal.h"
 #include "3ds/ipc/ctr_ipc.h"
+#include "3ds/services/system.h"
+#include "snx_settings.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -53,9 +55,12 @@ static void lookup(SnxCtrProcess* p, uint32_t handle, uint32_t flags) {
     sync(p, handle, SNX_CTR_SVC_RETURN, 0);
 }
 int main(void) {
+    /* the console's answers: an unknown command or service stops, but where the tests below answer it */
+    g_settings.ctr_answer_unknown_commands = 0;
     unsigned char code[0x3000] = {0};
     SnxCtrImage image = {.segment = {{0x100000, 1, 16}, {0x200000, 1, 4}, {0x300000, 1, 4}},
                          .stack_size = 0x4000,
+                         .main_priority = 0x30,
                          .bss_size = 0x1000,
                          .code = code,
                          .code_size = sizeof code};
@@ -131,15 +136,60 @@ int main(void) {
         assert(word(p, 0) == 0x08610040 && !word(p, 1));
         assert(p->objects[fid].data.session.client_pid == CTR_PROCESS_ID &&
                p->objects[fid].data.session.sdk_version == 0x11223344);
+        /* a command the service lacks stops the run, unless the stub list names the service: then it answers
+           success with one normal word, as Azahar's ReportUnimplementedFunction does */
         uint32_t unknown[] = {0xbeef0000};
         request(p, unknown, 1);
         sync(p, fs, SNX_CTR_SVC_UNSUPPORTED, 0);
         assert(word(p, 0) == unknown[0] && objects(p) == 4);
-        /* Valid-but-unimplemented CTR mapped buffers stop, not HIPC parsing. */
+        uint32_t mask = 0;
+        assert(snx_ctr_ipc_stub_mask("apt,fs", &mask) && !snx_ctr_ipc_stub_mask("fs,nope", &mask));
+        /* a file session is fs's; a refused list leaves the mask as it was, and lists add up */
+        assert(mask == (1u << SNX_CTR_SERVICE_APT | 1u << SNX_CTR_SERVICE_FS | 1u << SNX_CTR_SERVICE_FILE));
+        assert(!snx_ctr_ipc_stub_mask("", &mask) && !snx_ctr_ipc_stub_mask("fs,", &mask) &&
+               !snx_ctr_ipc_stub_mask(",fs", &mask) && !snx_ctr_ipc_stub_mask("fs,,apt", &mask));
+        assert(snx_ctr_ipc_stub_mask("dsp", &mask) && (mask & 1u << SNX_CTR_SERVICE_DSP) &&
+               (mask & 1u << SNX_CTR_SERVICE_APT));
+        assert(snx_ctr_ipc_stub_mask("fs", &p->ipc_stubs));
+        request(p, unknown, 1);
+        sync(p, fs, SNX_CTR_SVC_RETURN, 0);
+        assert(word(p, 0) == 0xbeef0040 && !word(p, 1));
+        p->ipc_stubs = 0;
+        /* Any well-formed descriptor is translated: a mapped buffer the command does not take reaches the handler,
+           which refuses its form; one over memory the caller cannot read never does */
         uint32_t buffer[] = {0x08010002, 0x0000100a, 0x300000};
         request(p, buffer, 3);
+        sync(p, fs, SNX_CTR_SVC_RETURN, 0xd9001830u);
+        uint32_t unmapped[] = {0x08010002, 0x0000100a, 0x00500000};
+        request(p, unmapped, 3);
+        sync(p, fs, SNX_CTR_SVC_RETURN, 0xe0e01bf5u);
+        /* PXI buffers (libctru IPC_Desc_PXIBuffer): 6 the service only reads, so read-only code passes; 4 it also
+           writes, so the same memory does not */
+        uint32_t pxi[] = {0x08010002, 0x00001006, 0x100000};
+        request(p, pxi, 3);
+        sync(p, fs, SNX_CTR_SVC_RETURN, 0xd9001830u);
+        pxi[1] = 0x00001004;
+        request(p, pxi, 3);
+        sync(p, fs, SNX_CTR_SVC_RETURN, 0xe0e01bf5u);
+        /* more handles than the runtime translates stop the run instead of inventing an answer */
+        uint32_t many[11] = {0xbeef000a, 0x20000000};
+        request(p, many, 11);
         sync(p, fs, SNX_CTR_SVC_UNSUPPORTED, 0);
-        assert(word(p, 0) == buffer[0]);
+        /* a moved handle leaves the caller's table once the request is answered (here a stubbed command) */
+        uint32_t moved = 0;
+        assert(!snx_ctr_object_create(p, CTR_OBJ_EVENT, &moved));
+        uint32_t move[] = {0xbeef0002, 0x10, moved};
+        assert(snx_ctr_ipc_stub_mask("fs", &p->ipc_stubs));
+        request(p, move, 3);
+        sync(p, fs, SNX_CTR_SVC_RETURN, 0);
+        assert(!snx_ctr_handle_object(p, moved) && objects(p) == 4);
+        p->ipc_stubs = 0;
+        /* ... and also when the service refuses the request's form */
+        assert(!snx_ctr_object_create(p, CTR_OBJ_EVENT, &moved));
+        uint32_t refused[] = {0x08010004, 0x20, 0, 0x10, moved};
+        request(p, refused, 5);
+        sync(p, fs, SNX_CTR_SVC_RETURN, 0xd9001830u);
+        assert(!snx_ctr_handle_object(p, moved) && objects(p) == 4);
         close_handle(p, fs);
         request(p, init, 4);
         sync(p, fs, SNX_CTR_SVC_RETURN, 0xd8e007f7);
@@ -195,7 +245,26 @@ int main(void) {
         request(p, absent, 5);
         sync(p, srv, SNX_CTR_SVC_RETURN, 0);
         assert(word(p, 0) == 0x00050040 && word(p, 1) == 0xd0406401 && !snx_ctr_kernel_blocked(p));
+        /* answering unknown commands, the runtime's default (ctr_auto_stub_ipc): a service it does not know is a
+           stand-in, each command of which answers success and nothing else, and so is an unknown command of a known
+           service, with no stub list */
+        g_settings.ctr_answer_unknown_commands = 1;
         absent[4] = 0;
+        request(p, absent, 5);
+        sync(p, srv, SNX_CTR_SVC_RETURN, 0);
+        assert(word(p, 0) == 0x00050042 && !word(p, 1) && word(p, 2) == 0x10 && !snx_ctr_kernel_blocked(p));
+        uint32_t stand_in = word(p, 3), command[] = {0x12340080, 7, 8};
+        assert(!strcmp(snx_ctr_system_name(p, p->objects[snx_ctr_handle_object(p, stand_in)].data.session.name),
+                       "MISSING"));
+        request(p, command, 3);
+        sync(p, stand_in, SNX_CTR_SVC_RETURN, 0);
+        assert(word(p, 0) == 0x12340040 && !word(p, 1) && !word(p, 2));
+        close_handle(p, stand_in);
+        uint32_t unknown_srv[] = {0x7fff0000};
+        request(p, unknown_srv, 1);
+        sync(p, srv, SNX_CTR_SVC_RETURN, 0);
+        assert(word(p, 0) == 0x7fff0040 && !word(p, 1));
+        g_settings.ctr_answer_unknown_commands = 0;
         request(p, absent, 5);
         sync(p, srv, SNX_CTR_SVC_BLOCKED, 0);
         assert(word(p, 0) == absent[0] && !strcmp(snx_ctr_thread(p)->waiting_service, "MISSING") &&

@@ -61,6 +61,15 @@ reached byte-exact intermediate targets in all four titles, but the approach cou
 
 ## What remains in the tree
 
+### GPU compatibility coverage
+
+Shader instruction invalidation reaches the Vulkan shader address caches from the 3D engine's `0x87` and `0x369`
+methods and the compute engine's `0x87` and `0x5a6` methods. Bit 0 advances a shader generation independent of the
+memory epoch. The next lookup reloads code, while content-addressed modules remain reusable. This does not expire
+texture caches or force a host wait. Repeated invalidations flush any held draw before advancing the generation.
+The method encodings are documented in NVIDIA's public [3D class](https://github.com/NVIDIA/open-gpu-doc/blob/master/classes/3d/clb197.h)
+and [compute class](https://github.com/NVIDIA/open-gpu-doc/blob/master/classes/compute/clb1c0.h) headers.
+
 | File | What it is | Built into |
 | --- | --- | --- |
 | `src/nx/gpu/nvn_trace.c` | `nvn_trace=1` inventory of resolved and called NVN functions | the runtime |
@@ -203,6 +212,7 @@ passes float bits (Scarlet passes `0x3f800000`), which reach the Maxwell clear r
 | Kind | Layout |
 | --- | --- |
 | Graphics | a 0x30-byte wrapper with magic `0x12345678`, then the Maxwell shader program header (SPH) and instructions |
+| Bare shader file | magic `0x19866891` at the start of a file one game ships, with its SPH at `0xB50` and no wrapper |
 | Compute | magic `0x12345679` with the declared code size at `+4`, 0x100 bytes before the code. The QMD's program address is the code, so it is the NVN candidate + 0x100. Local workgroup size and shared memory come from the NVN control object |
 
 - **VertexA and VertexB:** NVN dual vertex programs put the position in VertexA (slot 0) and the varyings in VertexB.
@@ -294,7 +304,8 @@ RGBA8 storage (Odyssey) is a format reinterpretation of one image, not a second 
   register changes between the first and second submission, written by the queue tail. Its value matters at the
   command segment's position in the submission.
 - **User clip enables** are a register the vertex shader translation depends on. TotK enabled all eight (`0xff`) on
-  its cubemap draws.
+  its cubemap draws, and two other games on every draw. The vertex programs a game ships, translated before its
+  draws use them (`prepare_shaders`), take that value, so their keys match those draws.
 - **Render conditions:** `SetRenderEnableConditional` compares query values that puller releases inside the same list
   change between clears. Only an ordered decode of the list can say whether a clear runs. Reading guest memory after
   the list cannot.

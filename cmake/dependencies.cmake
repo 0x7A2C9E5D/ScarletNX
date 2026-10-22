@@ -113,6 +113,28 @@ if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY) OR SNX_BUILD_3DS)
                   URL https://github.com/zeux/volk/archive/refs/tags/vulkan-sdk-1.4.363.0.tar.gz
                   URL_HASH SHA256=1547d8d74395d4048fb3f4a6313da56db626e89b55db238d0d7e8944c8a645f3
                   DOWNLOAD_ONLY YES)
+    # the 3DS system archives' open stand-ins (cmake/ctr_system_archives.cmake): the RomFS images
+    # B3n30/citra_system_archives makes (GPL-2.0-or-later), as the C arrays Azahar's source holds them in, each at the
+    # commit that last changed it
+    if(SNX_BUILD_3DS)
+        CPMAddPackage(NAME AzaharMiiData VERSION 2019
+                      URL https://raw.githubusercontent.com/azahar-emu/azahar/36ae10f555f73fb4e8d05cb676583efc67ecacef/externals/open_source_archives/include/mii.app.romfs.h
+                      URL_HASH SHA256=4538bb4964ce4449732adc0bbf0faf69d7c054a0eee6d5f1dafce17bad409ad1
+                      DOWNLOAD_ONLY YES DOWNLOAD_NO_EXTRACT YES)
+        CPMAddPackage(NAME AzaharCountryList VERSION 2019
+                      URL https://raw.githubusercontent.com/azahar-emu/azahar/a1517612d37f17e673849e04673a0f3c146d6208/externals/open_source_archives/include/country_list.app.romfs.h
+                      URL_HASH SHA256=bd1c384c9788f99ed2cf9157727820c4c0000f6bbc01843ff8642a32e6f90651
+                      DOWNLOAD_ONLY YES DOWNLOAD_NO_EXTRACT YES)
+        CPMAddPackage(NAME AzaharSharedFont VERSION 2019
+                      URL https://raw.githubusercontent.com/azahar-emu/azahar/7f1303a8344724598015a3e48a4bc5aef77090fc/externals/open_source_archives/include/shared_font.app.romfs.h
+                      URL_HASH SHA256=316a05284c0746bcd1b5623c54ff770f2db736bdb90a592c2eda176e2c3ac6c1
+                      DOWNLOAD_ONLY YES DOWNLOAD_NO_EXTRACT YES)
+        CPMAddPackage(NAME AzaharBadWordList VERSION 2019
+                      URL https://raw.githubusercontent.com/azahar-emu/azahar/8a2c44be5688db1cea22ba7c485e8befc892e673/externals/open_source_archives/include/bad_word_list.app.romfs.h
+                      URL_HASH SHA256=fe040590fa035e2602c9ce25ba3cf6a208fcb72cb9d53945cbc5747610ad4e15
+                      DOWNLOAD_ONLY YES DOWNLOAD_NO_EXTRACT YES)
+        include("${CMAKE_SOURCE_DIR}/cmake/ctr_system_archives.cmake")
+    endif()
     # volk.c and VMA's implementation (src/nx/gpu/vk/vma.cpp) compiled into a target of ours: no warnings, and not
     # the sanitizers SNX_TEST_SANITIZERS gives our code (tests/CMakeLists.txt)
     set(snx_third_party_flags -w)

@@ -7,11 +7,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Resource limits apply to the offline graph, not to runtime compilation.
-   Reject excessive graphs rather than silently publishing a truncated plan. */
-#define INSTRUCTION_LIMIT 524288u
-#define ENTRY_LIMIT       131072u
-#define QUEUED            8u
+/* Each instruction slot is visited at most once in each instruction set, so the graph is bounded by the text itself
+   (SNX_CTR_AOT_TEXT_LIMIT): a commercial title's few megabytes of text discover a few hundred thousand blocks, which
+   the compiler and the module's tables take as they are. */
+#define QUEUED 8u
 
 typedef struct {
     const SnxCtrImage* image;
@@ -179,7 +178,8 @@ unsigned snx_ctr_plan_length(const SnxCtrPlan* p, uint32_t pc, bool thumb_mode) 
     }
     return n;
 }
-bool snx_ctr_discover(const SnxCtrImage* image, SnxCtrPlan* p, char* error, size_t size) {
+bool snx_ctr_discover(const SnxCtrImage* image, const uint32_t* seeds, size_t seed_count, SnxCtrPlan* p, char* error,
+                      size_t size) {
     if (!p) return false;
     memset(p, 0, sizeof *p);
     const char* reason = "invalid static discovery image";
@@ -203,6 +203,7 @@ bool snx_ctr_discover(const SnxCtrImage* image, SnxCtrPlan* p, char* error, size
     if (!p->arm || !p->thumb || !queue) goto fail;
     Discovery d = {image, p, queue, 0};
     enqueue(&d, p->address, false);
+    for (size_t i = 0; i < seed_count; ++i) pointer(&d, seeds[i]);
     /* Conservatively seed code pointers in initialized RO/data, e.g. vtables
        and constructors. This is static analysis, not relocation or runtime JIT. */
     size_t data = (size_t)image->segment[0].pages * 4096;
@@ -214,10 +215,7 @@ bool snx_ctr_discover(const SnxCtrImage* image, SnxCtrPlan* p, char* error, size
             unsigned char* f = flag(p, pc, t);
             if (*f & SNX_CTR_PLAN_VISITED) break;
             *f |= SNX_CTR_PLAN_VISITED;
-            if (++p->instructions > INSTRUCTION_LIMIT) {
-                reason = "static discovery instruction limit exceeded";
-                goto fail;
-            }
+            ++p->instructions;
             uint32_t word = little(image->code + pc - p->address, t ? 2 : 4);
             bool stop = t ? thumb(&d, pc, (uint16_t)word) : arm(&d, pc, word);
             if (stop) {
@@ -233,10 +231,6 @@ bool snx_ctr_discover(const SnxCtrImage* image, SnxCtrPlan* p, char* error, size
         unsigned count = p->bytes / (mode ? 2 : 4);
         for (unsigned i = 0; i < count; ++i)
             if (f[i] & SNX_CTR_PLAN_ENTRY) ++p->entries;
-    }
-    if (p->entries > ENTRY_LIMIT) {
-        reason = "static discovery entry limit exceeded";
-        goto fail;
     }
     free(queue);
     return true;

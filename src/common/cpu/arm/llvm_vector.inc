@@ -168,7 +168,7 @@ static void vector_instruction(ArmIR* a) {
         /* Odd double-register multiple counts are legacy FSTMX/FLDMX forms
            with an extra format word, not ordinary VLDM/VSTM transactions. */
         int multiple = !(v.flags & AV_PRE) || (v.flags & AV_WB);
-        if (v.op == AV_MEM && (v.bytes > 64 || (multiple && v.width == 64 && (v.imm & 4)))) {
+        if (v.op == AV_MEM && (v.bytes > 128 || (multiple && v.width == 64 && (v.imm & 4)))) {
             trap(a, SNX_ARM_BACKEND_UNSUPPORTED, c32(a, a->word));
             return;
         }

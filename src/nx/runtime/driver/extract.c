@@ -11,6 +11,7 @@
 
 typedef struct {
     const char *base, *update, *name, *out, *keys, *title_keys;
+    int icon; /* --icon: the game's icon alone */
 } ExtractOptions;
 
 typedef struct {
@@ -31,6 +32,7 @@ static void extract_help(void) {
          "  --out DIR           Output directory (default: REPO/work/NAME)\n"
          "  --keys FILE         prod.keys (default: REPO, then ~/.switch)\n"
          "  --title-keys FILE   title.keys (same discovery order; optional)\n"
+         "  --icon              The game's icon alone, icon.jpg into --out DIR (what Games shows), nothing extracted\n"
          "  --help              Show this help");
     puts("REPO is the data folder: --repo, else a portable copy's or the user's (scarletnx --help).");
 #ifdef SNX_XDG
@@ -69,6 +71,10 @@ static int parse_options(int argc, char** argv, ExtractOptions* options) {
         }
         if (!positional && !strcmp(argv[i], "--")) {
             positional = 1;
+            continue;
+        }
+        if (!positional && !strcmp(argv[i], "--icon")) {
+            options->icon = 1;
             continue;
         }
         if (positional || argv[i][0] != '-' || !argv[i][1]) {
@@ -251,6 +257,22 @@ static void control_nacp(ExtractState* state) {
 
 /* A DLC's RomFS image as aoc:u and OpenDataStorageByDataId find it, <out>/system/archives/<its title ID>.romfs:
    written beside it, then moved over it */
+/* the game's icon beside control.nacp, icon.jpg, which Games shows on its row: the Control NCA's, a JPEG. A game
+   without one shows none there, a line saying why */
+static void control_icon(ExtractState* state) {
+    char* to = snx_path_join(state->out, "icon.jpg");
+    const char* why = NULL;
+    size_t size = 0;
+    unsigned char* icon = to ? snx_dump_icon(&state->dump, &size, &why) : NULL;
+    if (!to)
+        why = "out of memory";
+    else if (icon && snx_write_file(to, icon, size))
+        why = "its icon.jpg could not be written beside exefs/";
+    if (why) printf("Games shows no icon for the game: %s\n", why);
+    fflush(stdout);
+    free(icon);
+    free(to);
+}
 static int extract_aoc(ExtractState* state) {
     const SnxNcaRef* aoc = &state->dump.aoc;
     char text[17], *folder = snx_path_join(state->out, "system/archives"), *name, *path = NULL, *tmp = NULL;
@@ -362,6 +384,7 @@ static int extract_files(ExtractState* state, const ExtractOptions* options, con
     if (failed) return snx_hac_error("Extracted exefs has no main; verify that the update matches the base game");
     say_extracted(state);
     control_nacp(state);
+    control_icon(state);
     return 0;
 }
 
@@ -394,6 +417,11 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
     result = parse_options(argc, argv, &options);
     if (result) return result == 2 ? 0 : 1;
     if (!paths || !paths->repo) return snx_error("Extraction requires the repository path");
+    if (options.icon) { /* nothing else read or written */
+        if (!options.out) return snx_error("--icon writes icon.jpg into --out DIR, and none is given");
+        if (snx_mkdirs(options.out)) return snx_error("cannot create %s for the icon", options.out);
+        return snx_extract_icon(options.base, paths, options.out) ? 1 : 0;
+    }
     memset(&state, 0, sizeof state);
     result = prepare_paths(&state, &options, paths);
     if (!result) {
@@ -401,6 +429,34 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
         result = extract_files(&state, &options, paths);
         snx_hac_on_exit(NULL, NULL);
     }
+    return cleanup(&state, result);
+}
+int snx_extract_icon(const char* dump, const SnxPaths* paths, const char* out) {
+    ExtractState state;
+    SnxU64 title, game;
+    unsigned char* icon = NULL;
+    const char* why = NULL;
+    char* to = snx_path_join(out, "icon.jpg");
+    size_t size = 0;
+    int result;
+    memset(&state, 0, sizeof state);
+    state.base = snx_absolute(dump);
+    if (!state.base || !to)
+        result = snx_error("Cannot resolve %s", dump);
+    else if (!snx_is_file(state.base))
+        result = snx_error("%s is not a file", state.base);
+    else {
+        snx_hac_on_exit(hactool_exit, &state);
+        result = snx_dump_title(&state.dump, state.base, NULL, NULL, paths->repo, 0, &title, &game, NULL);
+        if (!result) icon = snx_dump_icon(&state.dump, &size, &why);
+        snx_hac_on_exit(NULL, NULL);
+        if (!result && !icon)
+            result = snx_error("Games shows no icon for %s: %s", state.base, why);
+        else if (!result && snx_write_file(to, icon, size))
+            result = snx_error("Games shows no icon for %s: %s cannot be written", state.base, to);
+    }
+    free(icon);
+    free(to);
     return cleanup(&state, result);
 }
 int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title, SnxU64* game, SnxU64* version) {

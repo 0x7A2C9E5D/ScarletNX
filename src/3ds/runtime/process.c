@@ -3,6 +3,9 @@
 #include "3ds/runtime/internal.h"
 #include "3ds/gpu/pica.h"
 #include "3ds/services/dsp.h"
+#include "3ds/services/ptm.h"
+#include "3ds/services/file.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -58,12 +61,69 @@ static bool special_mappings(SnxCtrProcess* p, const uint32_t* caps) {
     }
     return true;
 }
+/* The host's local wall-clock time in milliseconds since 1900, the shared page's date_time: the console keeps local
+   time, and Azahar gives it the host's (Handler::GetSystemTimeSince1900, daylight saving included). The console
+   allows no time before 2000, so an earlier host clock reads as 2000-01-01 as Azahar has it. */
+static bool local_1900_ms(uint64_t* out) {
+    struct timespec now;
+    struct tm local;
+    if (
+#if defined(__ANDROID__) && __ANDROID_API__ < 29
+        clock_gettime(CLOCK_REALTIME, &now)
+#else
+        !timespec_get(&now, TIME_UTC)
+#endif
+    )
+        return false;
+    time_t seconds = now.tv_sec;
+#ifdef _WIN32
+    if (localtime_s(&local, &seconds)) return false;
+#else
+    if (!localtime_r(&seconds, &local)) return false;
+#endif
+    /* days from 1900-01-01 to the local date (the proleptic Gregorian count of H. Hinnant's days_from_civil) */
+    int64_t year = (int64_t)local.tm_year + 1900 - (local.tm_mon < 2);
+    int64_t era = (year >= 0 ? year : year - 399) / 400, of_era = year - era * 400;
+    int64_t month = local.tm_mon < 2 ? local.tm_mon + 10 : local.tm_mon - 2; /* from March */
+    int64_t of_year = (153 * month + 2) / 5 + local.tm_mday - 1;
+    int64_t days = era * 146097 + of_era * 365 + of_era / 4 - of_era / 100 + of_year - 719468 + 25567;
+    int64_t ms = ((days * 24 + local.tm_hour) * 60 + local.tm_min) * 60 + local.tm_sec;
+    ms = ms * 1000 + now.tv_nsec / 1000000;
+    *out = ms > INT64_C(3155673600000) ? (uint64_t)ms : UINT64_C(3155673600000);
+    return true;
+}
+void snx_ctr_shared_page_time(SnxCtrProcess* p) {
+    /* Azahar's UpdateTimeCallback: the entry the counter's parity does not select gets the time, the tick it was
+       taken at and the tick rate; then the counter moves on, so readers (index counter & 1) switch to it whole */
+    uint64_t rtc, ticks = (uint64_t)((snx_seconds() - p->clock_origin) * 268111856.0), values[4];
+    p->time_update_ns = snx_ctr_now_ns() + UINT64_C(3600000000000);
+    unsigned char counter[4];
+    if (!local_1900_ms(&rtc) || snx_ctr_phys_read(p->memory, 0x1ff81000, counter, 4) != SNX_CTR_MEM_OK) return;
+    uint32_t count =
+        (uint32_t)counter[0] | (uint32_t)counter[1] << 8 | (uint32_t)counter[2] << 16 | (uint32_t)counter[3] << 24;
+    values[0] = rtc;
+    values[1] = ticks;
+    values[2] = UINT64_C(268111856);
+    values[3] = 0;
+    unsigned char entry[32];
+    for (unsigned v = 0; v < 4; ++v)
+        for (unsigned i = 0; i < 8; ++i) entry[v * 8 + i] = (unsigned char)(values[v] >> (i * 8));
+    if (snx_ctr_phys_write(p->memory, 0x1ff81020 + (count % 2 ? 0 : 0x20), entry, sizeof entry) != SNX_CTR_MEM_OK)
+        return;
+    ++count;
+    for (unsigned i = 0; i < 4; ++i) counter[i] = (unsigned char)(count >> (i * 8));
+    (void)snx_ctr_phys_write(p->memory, 0x1ff81000, counter, 4);
+}
 void snx_ctr_process_free(SnxCtrProcess* p) {
     if (!p) return;
-    free(p->gsp.regs);
     if (p->gsp.pica) snx_ctr_pica_free(p->gsp.pica);
     free(p->gsp.pica);
     snx_ctr_dsp_close(p);
+    /* files still open when the process ends close their host files and release their nodes before the tree goes */
+    for (uint32_t i = 1; i < CTR_OBJECTS; ++i)
+        if (p->objects[i].type == CTR_OBJ_FILE && !p->objects[i].data.file.closed) snx_ctr_file_release(p, i);
+    for (unsigned i = 0; i < CTR_SELF_ARCHIVES; ++i) /* and so do the ExtSaveData archives still open */
+        if (p->self_archives[i].root) fs_tree_release(p->self_archives[i].root);
     snx_ctr_romfs_free(p->romfs);
     if (p->tree) {
         fs_tree_destroy(p->tree);
@@ -81,13 +141,19 @@ SnxCtrProcess* snx_ctr_process_new(const SnxCtrImage* image, SnxCtrModel model) 
     SnxCtrProcess* p = calloc(1, sizeof *p + app_limit / 4096);
     if (!p) return NULL;
     p->app_limit = app_limit;
+    memcpy(p->segment, image->segment, sizeof p->segment);
+    p->bss_size = image->bss_size;
+    p->title_id = image->title_id;
+    memcpy(p->name, image->name, sizeof p->name);
     p->gsp.rights_thread = UINT32_MAX; /* no GPU right holder until an AcquireRight */
+    p->fs_priority = UINT32_MAX;       /* fs:USER's, until a SetPriority (Azahar's starts at -1) */
     p->physical_next = CTR_PHYS_BASE;
     p->physical_end = p->physical_next + p->app_limit;
     p->objects[1] = (CtrObject){.type = CTR_OBJ_PROCESS, .refs = 1};
     p->objects[2] = (CtrObject){.type = CTR_OBJ_THREAD, .refs = 1};
     p->current_thread = 2;
-    p->objects[2].data.thread.priority = 0x30;
+    /* the ExHeader's ARM11 local capabilities give the main thread's priority (Azahar Process::Run) */
+    p->objects[2].data.thread.priority = image->main_priority;
     p->memory = snx_ctr_memory_new(model);
     if (!p->memory || !(p->space = snx_ctr_space_new(p->memory))) goto fail;
     size_t offset = 0;
@@ -107,11 +173,19 @@ SnxCtrProcess* snx_ctr_process_new(const SnxCtrImage* image, SnxCtrModel model) 
         offset += (size_t)bytes;
     }
     uint32_t stack = (image->stack_size + 4095) & ~4095u;
+    p->stack_size = stack;
+    /* the main thread's TLS page is the BASE region's, outside the application's pool, as every TLS page is
+       (kernel/thread.c) */
+    uint32_t tls_page = 0;
     if (offset != image->code_size || !map(p, SNX_CTR_STACK_TOP - stack, stack, SNX_CTR_READ | SNX_CTR_WRITE) ||
-        !map(p, SNX_CTR_INITIAL_TLS, 4096, SNX_CTR_READ | SNX_CTR_WRITE) ||
+        !(tls_page = snx_ctr_shared_pages(p, 4096)) ||
+        snx_ctr_map(p->space, SNX_CTR_INITIAL_TLS, tls_page, 4096, SNX_CTR_READ | SNX_CTR_WRITE) != SNX_CTR_MEM_OK ||
         !snx_ctr_cpu_init(&p->cpu, p->space, image->segment[0].address, SNX_CTR_STACK_TOP, false))
         goto fail;
     p->cpu.state.cpu.tpidruro = SNX_CTR_INITIAL_TLS;
+    /* default NaN, flush-to-zero, round toward zero and the inexact enable, as Azahar's SetupMainThread starts the main
+       thread (kernel/thread.cpp); created threads start without the inexact bit (snx_ctr_thread_create) */
+    p->cpu.state.cpu.fpscr = 0x03c00010u;
     p->objects[2].data.thread.context = p->cpu.state.cpu;
     /* Configuration-page layout and kernel personality facts from Citra/Azahar
        config_mem.{h,cpp}, memory.cpp (GPL-2.0-or-later, revision in docs/3DS.md).
@@ -135,31 +209,24 @@ SnxCtrProcess* snx_ctr_process_new(const SnxCtrImage* image, SnxCtrModel model) 
     if (snx_ctr_write_ram(p->space, CTR_CONFIG, config, sizeof config) != SNX_CTR_MEM_OK ||
         snx_ctr_protect(p->space, CTR_CONFIG, 4096, SNX_CTR_READ) != SNX_CTR_MEM_OK)
         goto fail;
-    /* Shared-page time snapshot (Azahar shared_page.h): UTC milliseconds since
-       1900 plus an ARM11 base-clock reference. Clients interpolate via SVC 28.
+    /* The shared page (Azahar kernel/shared_page.{h,cpp}, GPL-2.0-or-later): a retail console (running_hw 1),
+       unknown_value 1 as Azahar sets it, a full battery on its charger, Wi-Fi at its best link with Internet, the 3D
+       slider down. The time entry is written now and then every hour; clients interpolate between with SVC 0x28.
        Host-paced monotonic ticks, not an instruction/cycle-accuracy claim. */
-    struct timespec now;
-    if (
-#if defined(__ANDROID__) && __ANDROID_API__ < 29
-        clock_gettime(CLOCK_REALTIME, &now)
-#else
-        !timespec_get(&now, TIME_UTC)
-#endif
-        || now.tv_sec < 0 || (uint64_t)now.tv_sec > (UINT64_MAX - 999) / 1000 - 2208988800ull)
-        goto fail;
+    uint64_t rtc;
+    if (!local_1900_ms(&rtc)) goto fail;
     p->clock_origin = snx_seconds();
-    uint64_t rtc = ((uint64_t)now.tv_sec + 2208988800ull) * 1000 + (uint64_t)now.tv_nsec / 1000000;
     unsigned char shared[4096] = {0};
-    for (unsigned bank = 0; bank < 2; ++bank) {
-        for (unsigned i = 0; i < 8; ++i) {
-            shared[0x20 + bank * 0x20 + i] = (unsigned char)(rtc >> (i * 8));
-            shared[0x30 + bank * 0x20 + i] = (unsigned char)(268111856ull >> (i * 8));
-        }
-    }
+    shared[0x04] = 1;    /* running_hw: product */
+    shared[0x66] = 3;    /* wifi_link_level: best */
+    shared[0x67] = 2;    /* wifi_state: Internet */
+    shared[0x85] = 0x17; /* battery_state: adapter connected, charging, completely full (5) */
+    shared[0x86] = 1;    /* unknown_value */
     if (snx_ctr_map(p->space, 0x1ff81000, 0x1ff81000, 4096, 3) != SNX_CTR_MEM_OK ||
         snx_ctr_write_ram(p->space, 0x1ff81000, shared, sizeof shared) != SNX_CTR_MEM_OK ||
         snx_ctr_protect(p->space, 0x1ff81000, 4096, SNX_CTR_READ) != SNX_CTR_MEM_OK)
         goto fail;
+    snx_ctr_shared_page_time(p);
     if (!special_mappings(p, image->kernel_caps)) goto fail;
     return p;
 fail:
@@ -175,6 +242,39 @@ bool snx_ctr_process_mount_fs(SnxCtrProcess* p, const char* directory) { return 
    is the CIA's level 3 read where it lies */
 bool snx_ctr_process_mount_cia(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia) {
     return cia && mount(p, directory, cia);
+}
+/* The SMDH's short title, for the window: one of the 16 languages' 0x200-byte entries (short title, 0x40 UTF-16LE
+   units, then the long one and the publisher), English (1) first, then the others in order, as UTF-8 */
+static void smdh_title(const unsigned char* smdh, char out[192]) {
+    out[0] = 0;
+    for (unsigned order = 0; order < 16 && !out[0]; ++order) {
+        const unsigned char* s = smdh + 8 + 0x200 * (order == 0 ? 1 : order == 1 ? 0 : order);
+        size_t n = 0;
+        for (unsigned i = 0; i < 0x40; ++i) {
+            uint32_t cp = (uint32_t)s[i * 2] | (uint32_t)s[i * 2 + 1] << 8;
+            if (!cp) break;
+            if (cp >= 0xd800 && cp < 0xdc00 && i + 1 < 0x40) { /* a surrogate pair */
+                uint32_t low = (uint32_t)s[i * 2 + 2] | (uint32_t)s[i * 2 + 3] << 8;
+                if (low >= 0xdc00 && low < 0xe000) {
+                    cp = 0x10000 + ((cp - 0xd800) << 10) + (low - 0xdc00);
+                    ++i;
+                }
+            }
+            if (cp == '\n') cp = ' '; /* a title broken over two lines is one in a window's */
+            unsigned char u[4];
+            unsigned len = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+            if (len == 1)
+                u[0] = (unsigned char)cp;
+            else {
+                for (unsigned k = len - 1; k > 0; --k, cp >>= 6) u[k] = (unsigned char)(0x80 | (cp & 0x3f));
+                u[0] = (unsigned char)((len == 2 ? 0xc0 : len == 3 ? 0xe0 : 0xf0) | cp);
+            }
+            if (n + len >= 192) break;
+            memcpy(out + n, u, len);
+            n += len;
+        }
+        out[n] = 0;
+    }
 }
 static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia) {
     if (!p || !directory || !*directory || p->tree) return false;
@@ -200,6 +300,17 @@ static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia)
         const unsigned char* image = snx_ctr_cia_romfs(cia, &size);
         /* a CIA without a RomFS reads as an empty one, as its extraction's empty romfs/ folder does */
         ok = ok && snx_ctr_romfs_open_image(image, size, snx_ctr_cia_mtime(cia), &p->romfs);
+        /* the ExeFS files SelfNCCH serves (services/fs.c), in the tree as an extraction's exefs/ has them: copies of
+           the CIA's sections, read-only and never on the host */
+        static const char* const sections[] = {"icon", "logo", "banner"};
+        pm_lock(&tree->lock);
+        for (unsigned i = 0; i < 3 && ok; ++i) {
+            const unsigned char* data = snx_ctr_cia_exefs(cia, sections[i], &size);
+            char path[16];
+            snprintf(path, sizeof path, "exefs/%s", sections[i]);
+            if (data) ok = !fs_tree_add_virtual(tree, path, data, size, NULL);
+        }
+        pm_unlock(&tree->lock);
     } else if (!ok || !snx_ctr_romfs_open(tree, &p->romfs))
         ok = false;
     FsNode* sd = NULL;
@@ -221,7 +332,27 @@ static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia)
         return false;
     }
     p->sd = sd;
+    /* the regions the title's SMDH (ExeFS icon) says it runs in, which pick the console's (services/cfg.c) */
+    unsigned char smdh[0x2020];
+    uint64_t smdh_size = 0;
+    const unsigned char* icon = cia ? snx_ctr_cia_exefs(cia, "icon", &smdh_size) : NULL;
+    if (!cia) {
+        char* path = snx_path_join(directory, "exefs/icon");
+        FILE* f = path ? fopen(path, "rb") : NULL;
+        if (f && fread(smdh, 1, sizeof smdh, f) == sizeof smdh) icon = smdh, smdh_size = sizeof smdh;
+        if (f) fclose(f);
+        free(path);
+    }
+    if (icon && smdh_size >= 0x201c && !memcmp(icon, "SMDH", 4)) smdh_title(icon, p->title);
+    if (icon && smdh_size >= 0x201c && !memcmp(icon, "SMDH", 4))
+        p->region_lockout = (uint32_t)icon[0x2018] | (uint32_t)icon[0x2019] << 8 | (uint32_t)icon[0x201a] << 16 |
+                            (uint32_t)icon[0x201b] << 24;
+    /* the save data a run formatted before */
+    pm_lock(&tree->lock);
+    if (fs_tree_lookup(tree, NULL, "savedata", &p->save) || !p->save->is_dir) p->save = NULL;
+    pm_unlock(&tree->lock);
     snx_ctr_dsp_component_file(p);
+    snx_ctr_ptm_system_data(p);
     return true;
 }
 /* HLE shared pages come from board FCRAM past the application pool, outside

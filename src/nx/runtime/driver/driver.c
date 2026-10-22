@@ -543,6 +543,19 @@ static char* game_folder(const char* outdir, const char* repo, const char* name)
    folder, recompiled/<title ID>/<title ID>_data (its title ID read from its NCAs' headers first), or with --tmpfs into
    tmpfs, and its game made from it there: no copy is kept. --out names a folder the extraction is kept in instead, the
    game made from a copy. A game made already stays where it is */
+/* whether the recompile of the game from source is given name, its folder's: only when it would name it otherwise by
+   itself (snx_game_name), or cannot read its NPDM to, as a game named by its title ID is then shown by the name in
+   its control.nacp, not by the ID */
+static int named_otherwise(const char* source, const char* name) {
+    SnxNpdm npdm;
+    char error[256], *own;
+    int otherwise;
+    if (snx_load_npdm(source, &npdm, error, sizeof error)) return 1;
+    own = snx_game_name(NULL, &npdm, source);
+    otherwise = !own || strcmp(own, name) != 0;
+    free(own);
+    return otherwise;
+}
 static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* outdir, const char* out,
                      const char* opt, int recompiling, char** recompile, int settings, char** setting, int game_argc,
                      char** game_argv, const char* const* updates, int nupdates) {
@@ -661,7 +674,7 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
                            input);
             goto done;
         }
-        named = 1;
+        named = named_otherwise(source, name); /* a dump without a title ID of its own, named by its file */
         goto made;
     }
     if (prepared) {
@@ -686,14 +699,15 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
             if (!source) source = snx_format("%s_data", base);
             free(exefs);
         }
-        /* its folder's name given only when the recompile would name it otherwise (an NRO's, one named when it was
-           made): a game named by its title ID stays shown by its control.nacp's */
-        if (snx_load_npdm(source, &npdm, error, sizeof error))
-            named = 1;
-        else {
-            char* own = snx_game_name(NULL, &npdm, source);
-            named = strcmp(own, name) != 0;
-            free(own);
+        named = named_otherwise(source, name); /* an NRO's, one named when it was made */
+        { /* made before its extraction kept its icon: the icon alone, from the dump its .ini names, while it has none */
+            char *icon = snx_format("%s_data/icon.jpg", base), *data = snx_format("%s_data", base),
+                 *from = snx_game_source(folder, name, NULL);
+            if (!snx_is_file(icon) && from && snx_is_file(from) && !is_nro_path(from))
+                snx_extract_icon(from, paths, data); /* the game plays without it, the line saying why */
+            free(icon);
+            free(data);
+            free(from);
         }
         goto made;
     }
@@ -1095,6 +1109,26 @@ int snx_driver(int argc, char** argv) {
             n -= 1 + own;
             --i;
         }
+    /* -r's AOT build names the profile cache and hooks direct calls; both are the recompiler's, not the game's.
+       Left in rest they count as extra dump inputs */
+    for (i = 0; automatic && (flags & SNX_RECOMP) && i < n; ++i) {
+        if (!strcmp(rest[i], "--jit-cache")) {
+            if (i + 1 == n) {
+                result = snx_error("--jit-cache requires a file");
+                goto done;
+            }
+            recompile[recompiling++] = rest[i];
+            recompile[recompiling++] = rest[i + 1];
+            memmove(rest + i, rest + i + 2, (size_t)(n - i - 2) * sizeof(*rest));
+            n -= 2;
+            --i;
+        } else if (!strcmp(rest[i], "--hook-direct-calls")) {
+            recompile[recompiling++] = rest[i];
+            memmove(rest + i, rest + i + 1, (size_t)(n - i - 1) * sizeof(*rest));
+            --n;
+            --i;
+        }
+    }
     if (automatic && (n != 1 + tmpfs_args || help)) {
         result = snx_error("automatic preparation accepts one dump file. Pass game arguments after --");
         goto done;

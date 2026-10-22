@@ -17,7 +17,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
 #include <unistd.h>
 
 static unsigned checks;
@@ -74,8 +78,25 @@ static void land(const OwnRange* r, u8* const* dst, u32 n) {
     __atomic_add_fetch(&g_lands, 1, __ATOMIC_RELAXED);
 }
 static void retain(void* res) { __atomic_add_fetch(&((Res*)res)->refs, 1, __ATOMIC_RELAXED); }
-static void release(void* res) { __atomic_sub_fetch(&((Res*)res)->refs, 1, __ATOMIC_RELAXED); }
+static u64 g_release_touch; /* a guest address the release reads, 0 for none: test_release_order's */
+static int g_release_read;
+static void release(void* res) {
+    __atomic_sub_fetch(&((Res*)res)->refs, 1, __ATOMIC_RELAXED);
+    if (g_release_touch) g_release_read = *(volatile u8*)GP(g_release_touch);
+}
 static u32 busy_tid(void) { return g_busy_tid; }
+/* the producer's lock: recursive, as the renderer's */
+static pthread_mutex_t g_producer;
+static void producer_lock(void) { pthread_mutex_lock(&g_producer); }
+static void producer_unlock(void) { pthread_mutex_unlock(&g_producer); }
+/* r's references once no landing is under way: a landing holds the producer's lock from before it cuts its entries
+   until it has released them, so a thread it let go, or an own_acquire that found the entries cut already, can come
+   back before the release */
+static int refs(Res* r) {
+    producer_lock();
+    producer_unlock();
+    return __atomic_load_n(&r->refs, __ATOMIC_RELAXED);
+}
 static Res* res_new(u64 size, u8 fill) {
     Res* r = (Res*)calloc(1, sizeof *r);
     u64 i;
@@ -102,14 +123,14 @@ static void test_read_write(void) {
     u64 a = region(R0, 0x10000);
     Res* r = res_new(0x3000, 0xA0);
     int lands = g_lands;
-    CHECK(own_begin(a + 0x1100, 0x2000, r, 0) == 0 && r->refs == 1);
+    CHECK(own_begin(a + 0x1100, 0x2000, r, 0) == 0 && refs(r) == 1);
     {
         OwnRange o[2];
         CHECK(own_lookup(a, 0x10000, o, 2) == 1 && o[0].addr == a + 0x1100 && o[0].size == 0x2000);
         CHECK(own_lookup(a + 0x2000, 0x10, o, 2) == 1 && o[0].addr == a + 0x2000 && o[0].res_off == 0xF00);
     }
     CHECK(GP(a)[0x1200] == (u8)(0xA0 + 0x100)); /* the read faults: the owner lands */
-    CHECK(g_lands == lands + 1 && r->refs == 0);
+    CHECK(g_lands == lands + 1 && refs(r) == 0);
     CHECK(GP(a)[0x10FF] == (u8)(0x11 + 0x10FF) && GP(a)[0x3100] == (u8)(0x11 + 0x3100)); /* the CPU's bytes */
     CHECK(GP(a)[0x30FF] == (u8)(0xA0 + 0x1FFF));
     {
@@ -130,10 +151,10 @@ static void test_read_write(void) {
         OwnRange o[4];
         CHECK(own_lookup(a + 0x8000, 0x3000, o, 4) == 3);
         CHECK(o[0].size == 0x1000 && o[1].addr == a + 0x9000 && o[1].res_off == 0x1000 && o[2].addr == a + 0x9800);
-        CHECK(o[2].res_off == 0x1800 && r->refs == 3);
+        CHECK(o[2].res_off == 0x1800 && refs(r) == 3);
     }
     own_acquire(a + 0x8000, 0x3000);
-    CHECK(r->refs == 0);
+    CHECK(refs(r) == 0);
     CHECK(GP(a)[0x8000] == 0xA0);
     CHECK(GP(a)[0x9000] == (u8)(0xA0 + 0x1000));
     CHECK(GP(a)[0xA7FF] == (u8)(0xA0 + 0x27FF));
@@ -181,7 +202,7 @@ static void test_freeze(void) {
         }
         CHECK(GP(pages + 0x1F00)[0] == 0x40); /* and the owner's bytes */
     }
-    CHECK(mem_unmap(a, 0x80000) == 0 && r->refs == 0);
+    CHECK(mem_unmap(a, 0x80000) == 0 && refs(r) == 0);
     res_free(r);
 }
 
@@ -210,8 +231,8 @@ static void test_drop(void) {
     int lands = g_lands;
     CHECK(own_begin(a, 0x2000, r, 0) == 0);
     own_drop(a, 0x1000);
-    CHECK(r->refs == 1 && GP(a)[5] == (u8)(0x11 + 5) && g_lands == lands); /* the CPU's old bytes, no landing */
-    CHECK(mem_unmap(a, 0x4000) == 0 && r->refs == 0 && g_lands == lands);
+    CHECK(refs(r) == 1 && GP(a)[5] == (u8)(0x11 + 5) && g_lands == lands); /* the CPU's old bytes, no landing */
+    CHECK(mem_unmap(a, 0x4000) == 0 && refs(r) == 0 && g_lands == lands);
     CHECK(region(a, 0x4000) == a && GP(a)[0x1005] == (u8)(0x11 + 0x1005)); /* mapped again: nothing trapped */
     CHECK(mem_unmap(a, 0x4000) == 0);
     res_free(r);
@@ -235,7 +256,7 @@ static void test_stage(void) {
     CHECK(dst[0x1800] == (u8)(0x11 + 0x2800) && dst[0x2800] == 0x99);
     CHECK(own_stage(a + 0x1000, 0x3000, dst, o, 0) == 1); /* no room: how many, nothing copied */
     CHECK(own_lookup(a, 0x4000, o, 4) == 1 && g_lands == lands);
-    CHECK(mem_unmap(a, 0x4000) == 0 && r->refs == 0);
+    CHECK(mem_unmap(a, 0x4000) == 0 && refs(r) == 0);
     res_free(r);
 }
 
@@ -247,7 +268,7 @@ static void test_view(void) {
     CHECK(own_begin(a + 0x1000, 0x1000, r, 0) == 0);
     CHECK(mem_alias_begin(a, 0x4000) == 0);
     CHECK(mem_alias_map(v, a, 0x4000, MS_STACK, PERM_RW) == 0);
-    CHECK(g_lands == lands + 1 && r->refs == 0 && GP(v)[0x1001] == 0x91 && GP(a)[0x1001] == 0x91);
+    CHECK(g_lands == lands + 1 && refs(r) == 0 && GP(v)[0x1001] == 0x91 && GP(a)[0x1001] == 0x91);
     /* nor is a view's memory owned: own_begin refuses it, and the producer lands it itself */
     CHECK(own_begin(a + 0x1000, 0x1000, r, 0) == -1 && own_begin(v, 0x1000, r, 0) == -1);
     CHECK(mem_alias_unmap(v, 0x4000, 0) == 0);
@@ -261,6 +282,14 @@ static void test_view(void) {
 static int busy_child(void) {
     u64 a = region(R0 + 0x500000, 0x2000);
     Res* r = res_new(0x1000, 0x10);
+    /* no core of the abort it expects: its address space is the guest's whole reservation, which a core_pattern pipe
+       (systemd-coredump) takes minutes to read, and the test waits for the abort. A zero limit for a core written to
+       a file, and on Linux not dumpable at all, as a pipe takes the core whatever the limit */
+    struct rlimit none = {0, 0};
+    CHECK(setrlimit(RLIMIT_CORE, &none) == 0);
+#if defined(__linux__)
+    CHECK(prctl(PR_SET_DUMPABLE, 0) == 0);
+#endif
     alarm(10);
     if (own_begin(a, 0x1000, r, 0)) return 2;
     g_busy_tid = plat_tid();
@@ -276,6 +305,36 @@ static void test_busy(const char* self) {
         _exit(5);
     }
     CHECK(waitpid(pid, &status, 0) == pid && WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
+}
+
+/* a landing lets its pages go before it releases the resources: the trap thread lands this one (the main thread's
+   read faults), and its release reads the landed page, which would fault on the trap thread itself, with nothing to
+   answer it, if the page were still armed */
+static void test_release_order(void) {
+    u64 a = region(R0 + 0x700000, 0x2000);
+    Res* r = res_new(0x1000, 0x50);
+    CHECK(own_begin(a, 0x1000, r, 0) == 0);
+    g_release_touch = a + 7;
+    CHECK(GP(a)[7] == 0x57 && refs(r) == 0 && g_release_read == 0x57);
+    g_release_touch = 0;
+    CHECK(mem_unmap(a, 0x2000) == 0);
+    res_free(r);
+}
+
+/* the producer's lock holder faulting on a page that is armed with no entry on it (a landing's, cut and not let go
+   yet) goes on: nothing has to land there */
+static void test_busy_unowned(void) {
+    u64 a = region(R0 + 0x800000, 0x2000);
+    Res* r = res_new(0x1000, 0x60);
+    CHECK(own_begin(a, 0x1000, r, 0) == 0);
+    own_drop(a, 0x1000); /* the pool keeps the CPU's bytes, and the page is let go */
+    CHECK(refs(r) == 0 && plat_trap_arm(GP(a), 0x1000) == 0);
+    g_busy_tid = plat_tid();
+    CHECK(GP(a)[9] == 0x1A); /* the CPU's byte, 0x11 + 9 */
+    g_busy_tid = 0;
+    plat_trap_disarm(GP(a), 0x1000);
+    CHECK(mem_unmap(a, 0x2000) == 0);
+    res_free(r);
 }
 
 /* many threads fault on many owned pages at once while the owners change between rounds */
@@ -307,14 +366,24 @@ static void test_stress(void) {
         for (i = 0; i < THREADS; i++) pthread_create(&t[i], NULL, reader, (void*)(uintptr_t)(i + 1));
         for (i = 0; i < THREADS; i++) pthread_join(t[i], NULL);
         own_acquire(g_sa, 0x20000); /* what no reader touched */
-        CHECK(r->refs == 0);
+        CHECK(refs(r) == 0);
         res_free(r);
     }
     CHECK(mem_unmap(g_sa, 0x20000) == 0);
 }
 
 int main(int argc, char** argv) {
-    OwnHooks h = {land, retain, release, busy_tid};
+    OwnHooks h = {.land = land,
+                  .retain = retain,
+                  .release = release,
+                  .busy_tid = busy_tid,
+                  .lock = producer_lock,
+                  .unlock = producer_unlock};
+    pthread_mutexattr_t recursive;
+    pthread_mutexattr_init(&recursive);
+    pthread_mutexattr_settype(&recursive, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&g_producer, &recursive);
+    pthread_mutexattr_destroy(&recursive);
     if (sysconf(_SC_PAGESIZE) != 4096) {
         printf("skipped: this host's pages are %ld bytes, and the pool needs 4 KiB ones\n", sysconf(_SC_PAGESIZE));
         return 77;
@@ -332,6 +401,8 @@ int main(int argc, char** argv) {
     test_stage();
     test_view();
     test_busy("/proc/self/exe");
+    test_release_order();
+    test_busy_unowned();
     test_stress();
     CHECK(!g_own_any);
     printf("memory_own: %u checks passed (%d landings, %d bytes)\n", checks, g_lands, g_landed_bytes);

@@ -94,6 +94,19 @@ done:
     free(out);
     return rc;
 }
+char* snx_game_source(const char* folder, const char* name, int* recorded) {
+    char *ini = snx_game_ini(folder, name), *source = snx_ini_value(ini, "source");
+    char* path = source ? source : snx_format("%s/%s.source", folder, name);
+    if (recorded) *recorded = source || snx_is_link(path) || snx_path_exists(path);
+    free(ini);
+    return path;
+}
+int snx_record_source(const char* folder, const char* name, const char* dump) {
+    char* ini = snx_game_ini(folder, name);
+    int rc = snx_ini_record(ini, "source", dump);
+    free(ini);
+    return rc;
+}
 size_t snx_addons_parse(const char* text, const char* game, SnxAddon* list, size_t max) {
     char word[32];
     size_t count = 0, n, i, update = (size_t)-1;

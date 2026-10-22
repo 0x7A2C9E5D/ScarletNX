@@ -15,6 +15,7 @@ void vk_result_end(void);
 int vk_result_landing(void);
 void vk_lock(void);
 void vk_unlock(void);
+void vk_release_events(void);
 void vk_compute_land_through(u64);
 void vk_land_through(u64);
 void vk_wait_submit(u64);
@@ -47,7 +48,8 @@ void vk_render_predicate_drop(u32 pred);
 #include "nx/gpu/vk/writeback.c"
 
 int g_gpu_releases;
-static unsigned lock_depth, landing_calls, payload_writes, submits, query_reads;
+static unsigned lock_depth, landing_calls, payload_writes, submits, query_reads, events_signaled;
+static int events_due;
 static u64 next_compute, next_graphics = 1, waited_compute, waited_graphics;
 static int pending, unsubmitted, landing_probe, other_pending;
 static u32 completed[128];
@@ -73,10 +75,15 @@ void fatal(const char* fmt, ...) {
     (void)fmt;
     abort();
 }
+void logf_(int level, const char* fmt, ...) {
+    (void)level;
+    (void)fmt;
+}
 void vk_lock(void) { lock_depth++; }
+/* as device.c's: the outermost unlock signals the event slots the releases under it reached */
 void vk_unlock(void) {
     assert(lock_depth);
-    lock_depth--;
+    if (!--lock_depth) vk_release_events();
 }
 u64 gmmu_translate(u64 address) {
     if (address >= 0x10000 && address < 0x11000) return mapping + (address & 4095);
@@ -93,10 +100,32 @@ u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
     while (n < max && gmmu_translate(gva + n) == first + n) n += 0x1000;
     return n < max ? n : max;
 }
+/* nvdrv.c's index of mappings by guest address, by brute force over the pages above (the middle of each, as the last
+   range starts a few bytes in): each GPU page showing guest bytes of [cpu, cpu + size), clipped to them */
+void gmmu_aliases(u64 cpu, u64 size, void (*fn)(void* ctx, u64 gva, u64 n), void* ctx) {
+    for (u64 p = 0; p < 0x40; p++) {
+        u64 c = gmmu_translate((p << 12) + 0x800) & ~0xFFFull, a = c > cpu ? c : cpu;
+        u64 b = c + 0x1000 < cpu + size ? c + 0x1000 : cpu + size;
+        if (gmmu_translate((p << 12) + 0x800) && a < b) fn(ctx, (p << 12) + (a - c), b - a);
+    }
+}
+void gmmu_pieces(u64 gva, u64 size, void (*fn)(void* ctx, u64 gva, u64 cpu, u64 n), void* ctx) {
+    for (u64 p = gva >> 12; p <= (gva + size - 1) >> 12 && p < 0x40; p++)
+        if (gmmu_translate((p << 12) + 0x800)) fn(ctx, p << 12, gmmu_translate((p << 12) + 0x800) & ~0xFFFull, 0x1000);
+}
 u32 syncpt_read(u32 id) { return id < 128 ? completed[id] : 0; }
-void syncpt_incr(u32 id) {
+/* under vk_lock, so the events it reaches wait for vk_unlock (memory/own.c's traps are answered under vk_lock) */
+void syncpt_add_quiet(u32 id, u32 n) {
     assert(lock_depth && vk_result_landing());
-    completed[id]++;
+    completed[id] += n;
+    events_due = 1;
+}
+/* nvdrv.c's: signals with no vk_lock held, what was due since the last call */
+void syncpt_events(void) {
+    assert(!lock_depth);
+    if (!events_due) return;
+    events_due = 0;
+    events_signaled++;
 }
 int gmem_write(u64 address, const void* data, u64 size) {
     assert(lock_depth && vk_result_landing());
@@ -226,6 +255,7 @@ int main(void) {
     landing_probe = 1;
     vk_release_need(0x20000, 1); /* another GVA names the same backing */
     assert(landing_calls == 1 && completed[3] == 1 && memory[4096] == 11);
+    assert(events_signaled == 1 && !events_due); /* the increment's events, at the outermost unlock */
     assert(g_rhead == g_rtail && !g_gpu_releases && !vk_result_landing());
     assert(vk_release_value(3) == 1);
     value = 13;
@@ -240,7 +270,7 @@ int main(void) {
     pending = 1;
     vk_release_incr(5);
     vk_release_retire(5);
-    assert(completed[5] == 1 && g_rhead == g_rtail);
+    assert(completed[5] == 1 && g_rhead == g_rtail && events_signaled == 2 && !events_due);
     /* a samples-passed report waits for the submit being recorded even with nothing pending, without submitting it:
        whoever needs it submits, and its count is read when it is performed (the count, then the ticks) */
     pending = 0;
@@ -272,7 +302,7 @@ int main(void) {
     assert(submits == before + 1 && vk_last_submit() == recording);
     unsubmitted = 0;
     vk_release_retire(6);
-    assert(completed[6] == 1 && g_rhead == g_rtail);
+    assert(completed[6] == 1 && g_rhead == g_rtail && events_signaled == 3 && !events_due);
     pending = 0;
     /* a read over queued releases takes their payloads, in their order, without waiting for the work before them or
        writing memory; the same memory through another address, another pending result there or a samples-passed count
@@ -346,6 +376,6 @@ int main(void) {
     assert(g_rix[(home + 1) & (RIX_N - 1)].word == 0x5254 && g_rix[(home + 1) & (RIX_N - 1)].n == 1);
     vk_release_drain();
     assert(!g_rix[home].word && !g_rix[(home + 1) & (RIX_N - 1)].word && count_queued(0x37ab4) == -1);
-    assert(lock_depth == 0);
+    assert(lock_depth == 0 && events_signaled == 3 && !events_due); /* payload writes signal nothing */
     return 0;
 }

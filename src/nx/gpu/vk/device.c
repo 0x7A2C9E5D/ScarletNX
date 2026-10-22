@@ -31,11 +31,14 @@ void vk_lock(void) {
         __atomic_store_n(&g_vk_owner, plat_tid(), __ATOMIC_RELAXED);
     }
 }
+/* lets go of this thread's last hold, then signals the event slots its releases under it reached */
+static void vk_let_go(void) {
+    __atomic_store_n(&g_vk_owner, 0, __ATOMIC_RELAXED);
+    pm_unlock(&g_vklock);
+    vk_release_events();
+}
 void vk_unlock(void) {
-    if (!--t_vkdepth) {
-        __atomic_store_n(&g_vk_owner, 0, __ATOMIC_RELAXED);
-        pm_unlock(&g_vklock);
-    }
+    if (!--t_vkdepth) vk_let_go();
 }
 int vk_trylock(void) {
     if (!t_vkdepth && !pm_trylock(&g_vklock)) return 0;
@@ -273,9 +276,14 @@ static int create_device(void) {
     /* MoltenVK fails every pipeline that lists VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE (Metal's dynamic stride) */
     g_vk.has_dynamic_stride = p12.driverID != VK_DRIVER_ID_MOLTENVK;
     g_vk_preserve_infnan64 = p12.shaderSignedZeroInfNanPreserveFloat64 != 0;
-    /* 32 bit alone: a device whose denorm modes can't differ per width would need 16 and 64 bit declared too */
+    /* 32 bit alone: a device whose denorm modes can't differ per width would need 16 and 64 bit declared too.
+       Qualcomm's driver claims the mode but miscompiles with it: a fragment shader of one game's waterfalls, all of
+       its FMUL, FADD and FFMA FTZ as NVIDIA's compiler made them, drew the background's colour on an Adreno 740
+       (driver 512.676), and right with the execution mode taken out of the same SPIR-V. Its FTZ is done per
+       instruction there, as on a device without the mode */
     g_vk_flush_denorm = p12.shaderDenormFlushToZeroFloat32 &&
-                        p12.denormBehaviorIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
+                        p12.denormBehaviorIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE &&
+                        p12.driverID != VK_DRIVER_ID_QUALCOMM_PROPRIETARY;
     if (!g_vk_flush_denorm)
         WARN("vulkan: FP32 denormal flush mode unavailable; graphics shaders use per-instruction FTZ fallback\n");
     if (!g_vk_preserve_infnan) WARN("vulkan: FP32 signed-zero/Inf/NaN preservation unavailable on this GPU\n");
@@ -685,7 +693,7 @@ int vk_window_release(void) {
     g_vk.surface = VK_NULL_HANDLE;
     /* every hold of this thread's at once: it won't return to the callers that took them */
     t_vkdepth = 0;
-    pm_unlock(&g_vklock);
+    vk_let_go();
     return 1;
 }
 
@@ -752,7 +760,9 @@ int vk_swapchain_create(int srgb) {
             if (ms[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) mode = ms[i];
     free(ms);
 
-    u32 count = caps.minImageCount + 1;
+    /* an image for each frame in flight beyond what the driver keeps: a frame's present waits in the recording ring
+       (vk_rec_present) while the next frame acquires, which takes no wait, so with one image fewer it found none */
+    u32 count = caps.minImageCount + VK_FRAMES;
     if (caps.maxImageCount && count > caps.maxImageCount) count = caps.maxImageCount;
     if (count > VK_SC_MAX) count = VK_SC_MAX > caps.minImageCount ? VK_SC_MAX : caps.minImageCount;
     VkCompositeAlphaFlagBitsKHR alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -768,6 +778,7 @@ int vk_swapchain_create(int srgb) {
         vk_rec_sync();
         vkDeviceWaitIdle(g_vk.dev);
     }
+    vk_rec_present_result(); /* the old swapchain's presents, all made (a retire drained the ring), say nothing of it */
     VkSwapchainCreateInfoKHR ci = {.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
                                    .surface = g_vk.surface,
                                    .minImageCount = count,

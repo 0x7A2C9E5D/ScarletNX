@@ -7,7 +7,8 @@
 * [Extract → AOT → run](#extract--aot--run)
   * [Updates and DLC](#updates-and-dlc)
   * [NRO applications](#nro-applications)
-* [GDB (UNIX only)](#gdb-unix-only)
+* [GDB (Linux)](#gdb-linux)
+  * [GDB through the MCP server](#gdb-through-the-mcp-server)
 * [Headless Vulkan / lavapipe](#headless-vulkan--lavapipe)
 * [AppImage / display](#appimage--display)
 * [Folders](#folders)
@@ -165,7 +166,8 @@ Run the same command again to retry after a failure or interruption:
   using `work/Game.extracting/` while running. An incomplete staging directory is discarded on retry.
 - A complete `recompiled/<id>/<id>` (`<id>.exe` on Windows), code module and `<id>.abi` stamp naming this build's
   ABI skip recompilation. The stamp holds `SNX_ABI`: a game a build of another ABI made is recompiled
-  automatically, as is one with a missing or invalid stamp. One another build of the same ABI made keeps its code,
+  automatically, as is one with a missing or invalid stamp, and that recompile takes from the unit cache (below) every
+  code unit whose code is the same. One another build of the same ABI made keeps its code,
   and its `recompiled/<id>/<id>` is replaced by this build's runtime when the two differ, so a newer build's fixes reach
   it. Failed builds never publish a valid ABI checkpoint. A change to the recompiler that keeps `SNX_ABI` isn't
   seen: there `-r` recompiles.
@@ -244,7 +246,16 @@ Remaining examples: POSIX.
   its checkout's `build/native-recomp` (`build/win64-recomp` on Windows). `-q` (`--quiet`) prints no progress.
   `--keep-c` is the deprecated spelling of `--keep-ir`.
 - **Codegen:** `--no-build` stages data/INI only; `--interp-only` omits AOT functions.
-  `--chunk N` sets instructions per code unit. Nothing is cached between runs.
+  `--chunk N` sets instructions per code unit. Each unit's object is kept in `units/` of the cache folder
+  ([Folders](#folders)), which every game's recompile shares, under the SHA-256 of the unit's LLVM IR, the LLVM, the
+  CPU and its features, the optimization level and the LLVM Internals: a unit found there is not compiled again (a
+  recompile after an `SNX_ABI` change that leaves the unit's IR alone, or of a game whose code changed in a few units),
+  and the last line says how many were (`unit cache: 241 of 259 units reused (310.2 MB) from ...`). The module
+  descriptor and the link are made each time. A kept object that is not whole is compiled again, and said. The cache
+  always leaves a tenth of its disk free: when a new unit would take that, the units reused longest ago are removed
+  for it, and a unit there is still no room for is not kept (said, with the disk's free bytes). `--unit_cache_gb=N`
+  (0, no limit, by default) also holds the folder to N GB after each recompile, the units reused longest ago removed
+  first. A cache folder that cannot be made stops the recompile, saying why.
   `--keep-ir` saves the generated code (LLVM IR) in `<outdir>/<NAME>/<NAME>_build/`.
   `--hook-direct-calls` sends calls and branches between guest functions through the dispatch table too, so
   `nvn_trace=1` also counts calls made by direct branch. The game runs slower, so use it only for investigating.
@@ -261,10 +272,11 @@ With `--out work/Game` and `--outdir games` as above (without them, see [Folders
 | `recompiled/<id>/<id>_build/` | Generated code, only with `--keep-ir` |
 | `recompiled/<id>/shader_cache/vk_pipelines.bin` | Vulkan pipeline cache |
 | `recompiled/<id>/shader_cache/<id>.vkshaders` | Translated shaders and the pipelines made, made again at the next start |
+| `recompiled/<id>/shader_cache/<id>.vkshipped` | The shaders found in the game's own files and executables, prepared ahead of time (`prepare_shaders`), each read when the game first draws with it. It can be large: one game's 2,700 shaders took 245 MB, another's 18,500 took 2 GB |
 
-## GDB (UNIX only)
+## GDB (Linux)
 
-Install `gdbserver` on PATH. `-S` enables the native-code stub on loopback port **1234**
+Install `gdbserver` on PATH (and `gdb` for the MCP tools below). `-S` enables the native-code stub on loopback port **1234**
 (the QEMU default port). The game runs until a debugger connects.
 `-s` enables the stub and waits before runtime initialization. It implies `-S`.
 
@@ -288,6 +300,48 @@ connection per run. Local ptrace permissions must allow attachment. Binding fail
 missing `gdbserver` are reported instead of silently running without a debugger.
 No debugger flags or combined short flags are supported on Windows.
 
+The recompiled game module is a shared library with a symbol for each function, so GDB names game
+frames as it loads. A 64-bit game's functions are `F_<address>`, and a 32-bit game's blocks are
+`A_<address>` (A32) and `T_<address>` (Thumb). Code the JIT compiles at run time lives in an
+anonymous code arena. With `--gdb_jit=1` (the `[Debug]` setting `gdb_jit`) and the stub (`-S` or
+`-s`), the runtime hands each compile to GDB through its JIT interface, with its symbols. A 32-bit
+game's are `a32_<address>_<thumb>`. GDB stops the whole game to read each compile while it is
+attached, and again for each at the game's end. That slows a 32-bit game (its blocks compile one
+at a time) to a crawl, so it is off by default. Without the stub the setting does nothing.
+
+The runtime handles SIGSEGV and SIGBUS itself: memory it moves while a thread writes to it stops
+that thread on a fault, and a crash's fault writes the crash report. Tell GDB
+`handle SIGSEGV SIGBUS nostop noprint pass` and break on `crash_report` to stop only at a crash.
+A SIGSEGV or SIGBUS another process sends (`kill -SEGV`, or GDB's `signal SIGSEGV`) is not a
+crash. The runtime prints a line saying so and runs on.
+
+### GDB through the MCP server
+
+An agent can drive GDB through the MCP server (`scarletnx --mcp`). It needs `gdb` (9 or later)
+on PATH as well as `gdbserver`, and a runtime with its debug information (the default
+RelWithDebInfo build, not one built with `-g0`).
+
+- `gdb_attach` connects to a game started with `-S` or `-s` and stops it. It sets the `handle`
+  line above and a breakpoint on `crash_report`. Given the game (a folder, a game of `work/` or a
+  title ID, of the same version), the other tools name guest addresses and the symbols above by
+  the game's own symbols. The stub takes one connection per run, so a second attach is refused.
+- `gdb_command` runs one GDB command from a list of reading, breakpoint and execution commands
+  (`backtrace`, `info`, `print`, `x`, `frame`, `thread`, `break`, `watch`, `set var` and the
+  like), by GDB's names, aliases and unambiguous prefixes. Shells, scripts, file writes, command
+  bodies (`commands`, `define`, `if`, `while`) and session changes are refused. `print` and
+  `call` still run the game's own functions. A resume (`continue`, `next`, `step`, `finish` and
+  the rest) runs in the background and waits up to `wait` seconds for the game to stop at a
+  breakpoint or a crash, then interrupts it. With `wait` 0 the game runs on, and only
+  `interrupt` is taken until it stops.
+- `gdb_threads` lists each host thread, and each guest thread's id, its SDK name, whether it is
+  in an SVC and its guest pc and lr. It finds a guest thread through its host thread's TLS, which
+  GDB reads with the C library's `libthread_db`. Without it (a musl build) every thread is listed
+  as the runtime's.
+- `gdb_guest` shows a guest thread's registers and its guest backtrace from its frame records.
+- `gdb_memory` reads guest memory. A page the GPU holds can't be read until the game's CPU
+  touches it.
+- `gdb_detach` lets the game run on without the debugger.
+
 ## Headless Vulkan / lavapipe
 
 The normal SDL3 build can run without initializing SDL video or opening a window:
@@ -306,6 +360,8 @@ build, but headless runs do not initialize its video subsystem or require a disp
 Rendering still uses Vulkan 1.3, including uploads, draws, compute and screenshot readback. Headless runs
 create no window, `VkSurfaceKHR` or swapchain and request no WSI extensions, including `VK_EXT_headless_surface`.
 Frames still submit and recycle their resources. `--seconds`, `--frames`, `--script` and `--shot` work as before.
+The time and frame limits and the script count from the game's start, after the shaders made before it
+(`prepare_shaders`).
 FFmpeg decoding is always included in the NX runtime, including headless builds, for video and hwopus audio.
 
 To use software rendering, select Mesa's **lavapipe Vulkan ICD**, rather than the hardware driver. Mesa may
@@ -367,6 +423,7 @@ list). The user's data folder and a portable copy's keep each kind of file apart
 | its `<id>.log` and `threads.txt` | `recompiled/<id>/` | `~/.local/state/scarletnx/recompiled/<id>/` | `state/recompiled/<id>/` |
 | its pipeline cache | `recompiled/<id>/shader_cache/` | `~/.cache/scarletnx/recompiled/<id>/shader_cache/` | `cache/recompiled/<id>/shader_cache/` |
 | extractions (`3ds/` for the 3DS driver) | `work/` | `~/.cache/scarletnx/work/` | `cache/work/` |
+| the recompile's code units, `<key>.o`, every game's | `units/` of the user's cache folder | `~/.cache/scarletnx/units/` | `cache/units/` |
 | the menu's themes, `<name>/theme.ini` | - | `~/.local/share/scarletnx/themes/` | `themes/` |
 | the menu's `settings.ini`, `app.ini`, `folders.txt`, `gamecontrollerdb.txt` | - | `~/.config/scarletnx/` | `config/` |
 | the setup's `setup.ini` ([Setup](#setup)) | - | `~/.config/scarletnx/` | `config/` |
@@ -436,7 +493,7 @@ first run from. It says first what older versions did that this one does otherwi
 only said, nothing is moved), then asks:
 
 1. **Appearance**: the launcher's language (app.ini's `language`), starting on the one it has (the system's, until
-   one is picked), and in the launcher's setup its theme and text size beside it; the terminal's asks the language
+   one is picked), and in the launcher's setup its theme and UI scale beside it; the terminal's asks the language
    alone.
 2. **Install type**: installed, in the user's folders ([Folders](#folders)), or portable, everything in
    `.scarletnx/` beside the program (or the AppImage), which it makes. An app (Android, iOS) has no other.
@@ -446,6 +503,9 @@ only said, nothing is moved), then asks:
 5. **First user**: a `users/users.ini` there is kept, or overwritten, the one before kept as `users.ini.old`. A new one
    has one user, the nickname given (`Player` by default), its uid random, of a v4 UUID's form as Ryujinx's are; or
    `0123456789abcdeffedcba9876543210`, the uid user 1 has had, while a game in `recompiled/` has saves of it.
+
+In the launcher the first page also has Skip, which takes each step as its default, what Enter on each would take
+(the nickname `Player`), and writes `setup.ini`.
 
 `setup.ini`, in the config folder, keeps how far it went:
 
@@ -471,7 +531,7 @@ written, so a data folder with no users.ini plays as `Player`, uid `0123456789ab
 
 `Game.ini`: help rewritten at startup, most settings hot-reload. `--key=value` overrides one run.
 Restart for `docked`, `fullscreen`, `language`, `resolution`, `anisotropy`, `memory_gb`, `heap_max_mb`, `airplane_mode`,
-`ldn`, `room`, `pipeline_threads`, `jit_threads`, and the `[Debug]` settings other than `log`, `auto_stub_ipc` and `diag`.
+`ldn`, `room`, `pipeline_threads`, `prepare_shaders`, `jit_threads`, and the `[Debug]` settings other than `log`, `auto_stub_ipc` and `diag`.
 `scarletnx --settings` prints each setting the launcher's Settings offer, one a line: its section, key, default,
 type, range and help, tab-separated. Every setting, the recompiler's too, is described once in
 `src/nx/runtime/settings.txt`, which the build generates the tables and `g_settings` from.
@@ -489,9 +549,11 @@ type, range and help, tab-separated. Every setting, the recompiler's too, is des
 | `vsync` | `1` | Images are shown only on the display's refresh, so nothing tears. `0` doesn't wait for it: the newest image is shown on the next refresh where the display can do that, else at once (which may tear). A display that can do neither waits for the refresh as `1` does |
 | `anisotropy` | `0` | Texture filtering as the game asks. `2` to `16` sharpens surfaces seen at an angle |
 | `fps_limit` | `game` | The pace the game asks for, as on the console: 60 FPS, or 30 for a game made for 30. `0` is unlimited, and `10` to `1000` is that many FPS |
-| `memory_gb` | `0` | Memory the game sees. Below `6` it is the console's 3.2 GB, `6` gives 4.8 GB and `8` gives 6.8 GB. Games that run out of memory on 3.2 GB, like Tears of the Kingdom, need `6` |
+| `memory_gb` | `0` | Memory the game sees. Below `6` it is the console's 3.2 GB, `6` gives 4.8 GB and `8` gives 6.8 GB. Games that run out of memory on 3.2 GB need `6` |
 | `heap_max_mb` | `0` | The most heap the game can allocate, in MB. `0` is as much as the memory allows |
-| `pipeline_threads` | `0` | Threads that make the GPU's new pipelines while the game goes on. `0` uses a quarter of the computer's threads, two to six; `1` to `32` is that many. More make a first run's new pipelines sooner, with less CPU left for the game |
+| `pipeline_threads` | `0` | Threads that make the GPU's new pipelines while the game goes on, and those of earlier runs before it starts with `prepare_shaders=2`. `0` uses all the computer's threads but two, two to twelve. `1` to `32` is that many. More make a first run's new pipelines sooner, with less CPU left for the game |
+| `async_pipelines` | `0` | `1` skips what a new shader draws while its pipeline is made, where the game would otherwise pause until it is ready. The game no longer stops where a new shader first appears, and the things that shader draws show up a few frames later. `0` waits for every pipeline |
+| `prepare_shaders` | `2` | Prepares the shaders the game ships in its files and executables ahead of time, so the game's draws needn't make them and it stutters less. They are prepared again after ScarletNX, the GPU or its driver is updated. `0` (Off) makes each shader only when the game first draws with it. `1` (While playing) prepares them in the background, and the game uses them once all are ready. `2` (Before starting) prepares them behind a loading screen in the launcher theme's look, which also waits for the shader cache of earlier sessions, so an opening movie doesn't stutter. A key that types, an arrow or the keypad, a gamepad button other than Home, or a tap starts the game at once, and the rest is prepared while it runs. Esc quits (on Android, back opens the menu, whose Exit quits). F2 or a gamepad's Home opens the menu, and F11 or Alt+Enter switches fullscreen, without starting the game. The screen shows only when the wait passes a quarter second, its words are in English, and a timed run (`--seconds`) starts its clock after it |
 | `jit_threads` | `0` | Threads compiling the game code the recompiler missed, which a thread waits for when it reaches it. `0` uses every CPU the game may run on but two, at most 8. They run below the game's threads |
 | `network` | `0` | `0` reports offline and lets the game reach only loopback, which is not a network sandbox. `1` uses the computer's connection, and the resolver blocks known console service domains. Local wireless works either way (`ldn`) |
 | `airplane_mode` | `0` | `1` is the console in airplane mode: offline whatever `network` says, no local wireless, as the game hears it, and in no Eden room |
@@ -515,6 +577,7 @@ type, range and help, tab-separated. Every setting, the recompiler's too, is des
 | `auto_stub_ipc` | `1` | A service command the runtime doesn't know answers success, logged as `[undeclared]`, and a service it doesn't have answers every command that way. `0` answers them with the console's UnknownCommandId instead, which shows the gap where the game makes the call |
 | `diag` | `0` | `1` saves the data of each new compute shader to `captures/compute`, and each new shader's snx-shaderc corpus entry to `captures/shaders`, for debugging |
 | `vk_validation` | `0` | `1` turns on the Vulkan validation layer (`VK_LAYER_KHRONOS_validation`, from the Vulkan SDK or the distribution's validation layers package), which logs each misuse of Vulkan it finds. It slows the game down a lot. Without the layer installed the run only warns |
+| `gdb_jit` | `0` | `1`, with the GDB stub (`-S` or `-s`), hands the code the JIT compiles to GDB ([GDB](#gdb-linux)). GDB stops the game for each compile while it is attached, and each compile's object stays in memory for the run |
 | `profile` | `0` | `1` writes `profile.txt` every 10 seconds. The CPU profiler is Windows only |
 | `nvn_trace` | `0` | `1` logs each NVN function the game resolves and, at exit, how often each was called ([DEVELOPMENT.md](DEVELOPMENT.md)). The game runs slower |
 | `shader_corpus` | empty | A folder that keeps each translated shader for `snx-shaderc`. With it every shader is translated, and none is kept for the next run |

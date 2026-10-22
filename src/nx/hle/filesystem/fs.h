@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The game's files as the runtime itself reads them (the loader, shared fonts, the control data), beside the fsp-srv
-   service in fs.c */
+/* The game's files as the runtime itself reads them (the loader, shared fonts, the control data, the shader programs
+   the game ships for gpu/shipped_pass.c), beside the fsp-srv service in fs.c */
 #ifndef SNX_FS_H
 #define SNX_FS_H
 #include "common/cpu/aarch64/cpu.h"
@@ -21,10 +21,25 @@ int fs_aoc_has(u64 id);
    their count */
 size_t fs_dlcs(const u64** ids);
 u8* fs_read_file(const char* path, u64* size);    /* malloc'd, or NULL */
+/* a file of the game's HtmlDocument content (the pages its web applet shows), by its path under html-document/,
+   malloc'd: NULL when the game has no dump open, or the dump no such content or file */
+u8* fs_html_document(const char* path, u64* size);
 /* a file that exists only in memory, which the lookups find like any other. 0, or -1 */
 int fs_add_virtual_file(const char* path, const void* data, u64 size);
 /* the RomFS the game opens: romfs.bin as it is, or an image built from the romfs folder */
 void romfs_init(void);
+/* What the runtime reads of the RomFS for itself (the shader programs the game ships, gpu/shipped_pass.c), from any
+   thread once romfs_init ran (main.c calls it before video_init, which starts the renderer's thread that reads).
+   romfs_files hands each entry of the image's file table to each, its name in its folder (the table has no paths),
+   its data's offset in the image and its size, while each returns 0: 0 for all of them (none without an image), 1
+   when each stopped, -1 when the table couldn't be read (a later call may), -2 when it is malformed, as it will be
+   on every call: a header or table past the image or past any game's size (nothing listed), an entry whose data
+   lies past the image (left out), or one whose name runs past the table (it and all after it left out). romfs_peek
+   reads the image as the game would, a piece at a time so the game's own reads wait for one piece at most, and
+   without logging or warning of the files it comes from: 0, or -1 past its end or when part of it couldn't be read */
+typedef int (*RomfsEach)(void* ctx, const char* name, u64 off, u64 size);
+int romfs_files(RomfsEach each, void* ctx);
+int romfs_peek(u64 off, void* dst, u64 size);
 /* ---- HLE state in g_hle (hle.h) */
 /* RomFS. With no romfs.bin, the image is made up from the romfs/ folder: its header and tables in memory (rmeta), the
    files' data read from the files themselves when the game reads that part of the image. With mods' romfs/ folders
@@ -35,7 +50,8 @@ typedef struct {
     u64 base;     /* where that one's data is in that image */
     u64 size;
     u64 off;    /* where its data starts in the image */
-    int logged; /* its first read was logged, and its first failure warned (atomics: game threads read at once) */
+    int logged; /* the game's first read of it was logged, and its first failure warned (atomics: game threads read
+                   at once). romfs_peek's reads don't count */
     int warned;
 } RFile;
 /* unmapped RomFS files open on the host, least recently used closed first */
@@ -101,6 +117,8 @@ typedef struct {
     SnxHacFs* dfs;
     PFileMap dmap;
     PMutex dlock;
+    SnxHacFs* hfs;  /* its HtmlDocument content, read under dlock too (fs_html_document) */
+    int html_tried; /* hfs looked for */
     /* the update's dump read in place (dump_open), read with the game's in dump; and the checked DLCs read from their
        dumps (dlcs_open), naocs of them, each in a hactool of its own (dlock keeps one read at a time) */
     PFileMap amap;

@@ -121,11 +121,15 @@ static void receive_parameter(SnxCtrIpc* c) {
     c->out[8] = address;
     p->apt_phase = 3; /* wakeup received, startup transition not yet released */
 }
+/* AppletUtility: a utility command, its input in static buffer 1, its output (output_size bytes) in the caller's
+   receive buffer 0. As Azahar answers them: success, and an output of zeros, but for TryLockTransition (6), which
+   says the transitions are locked, there being none that waits. The first UnlockTransition (7) of the startup's
+   (0x10) ends the startup transition. SleepIfShellClosed (4) does not sleep: the shell stays open */
 static void applet_utility(SnxCtrIpc* c) {
     if (!snx_ctr_ipc_expect(c, 3, 2)) return;
     SnxCtrProcess* p = c->process;
-    uint32_t command = c->in[1], input_size = c->in[2];
-    if (c->in[3] != 1 || !((command == 7 && input_size == 4) || (command == 4 && input_size == 1))) {
+    uint32_t command = c->in[1], input_size = c->in[2], output_size = c->in[3];
+    if (input_size > 0x1000 || output_size > 0x1000) {
         c->state = SNX_CTR_IPC_UNSUPPORTED;
         return;
     }
@@ -134,34 +138,30 @@ static void applet_utility(SnxCtrIpc* c) {
         return;
     }
     unsigned char input[4] = {0}, descriptor[8];
-    if (snx_ctr_read_ram(p->space, c->in[5], input, input_size) != SNX_CTR_MEM_OK ||
+    if (snx_ctr_read_ram(p->space, c->in[5], input, input_size < 4 ? input_size : 4) != SNX_CTR_MEM_OK ||
         snx_ctr_read_ram(p->space, p->cpu.state.cpu.tpidruro + 0x180, descriptor, 8) != SNX_CTR_MEM_OK) {
         c->transport_result = 0xe0e01bf5u;
         return;
     }
     uint32_t d = le32(descriptor), address = le32(descriptor + 4);
-    if ((d & 0x3fff) != 2 || !(d >> 14)) {
+    if ((d & 0x3fff) != 2 || (d >> 14) < output_size) {
         snx_ctr_ipc_bad(c);
         return;
     }
-    if (command == 7 && (le32(input) != 0x10 || p->apt_phase < 3)) {
+    if (command == 4 && (input[0] || p->shell_closed)) { /* sleep is not modelled */
         c->state = SNX_CTR_IPC_UNSUPPORTED;
         return;
     }
-    /* Only the initial wakeup transition and the configured open-shell case.
-       No generic transition locks, sleep completion or applet success stubs. */
-    if (command == 4 && (input[0] || p->shell_closed || p->apt_phase < 4)) {
-        c->state = SNX_CTR_IPC_UNSUPPORTED;
-        return;
-    }
-    unsigned char out = 0; /* unlocked / did not enter shell-closed sleep */
-    if (snx_ctr_write_ram(p->space, address, &out, 1) != SNX_CTR_MEM_OK) {
+    unsigned char out[0x1000] = {0};
+    if (command == 6 && output_size) out[0] = 1;
+    if (output_size && snx_ctr_write_ram(p->space, address, out, output_size) != SNX_CTR_MEM_OK) {
         c->transport_result = 0xe0e01bf5u;
         return;
     }
-    if (command == 7) p->apt_phase = 4;
+    if (command == 7 && input_size == 4 && le32(input) == 0x10 && p->apt_phase == 3) p->apt_phase = 4;
     c->out[0] = 0x004b0082;
-    c->out[3] = 0x4002;
+    c->out[2] = 0; /* the utility's own result */
+    c->out[3] = (output_size << 14) | 2;
     c->out[4] = address;
 }
 void snx_ctr_apt_dispatch(SnxCtrIpc* c) {

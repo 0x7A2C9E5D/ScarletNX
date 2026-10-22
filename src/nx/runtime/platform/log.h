@@ -28,6 +28,9 @@ void logf_(int lvl, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 #define LOG_LIMIT(n, ...) SNX_LOG_AT_MOST_(log_limit_said_, n, 1, __VA_ARGS__)
 #define WARN_LIMIT(n, ...) SNX_LOG_AT_MOST_(warn_limit_said_, n, 0, __VA_ARGS__)
 
+/* snx_error's sink (common.h) for the runtime: the line as a warning, in the log and on stderr */
+void log_error_line(const char* line);
+
 /* Logs "FATAL: ..." and ends the process, after the error box where there is one */
 void fatal(const char* fmt, ...) __attribute__((format(printf, 1, 2), noreturn));
 

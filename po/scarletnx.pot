@@ -168,38 +168,6 @@ msgstr ""
 msgid "Saved in %s"
 msgstr ""
 
-#: src/gui/main.c
-msgid "Load Switch NSP/XCI/NRO"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Load Linux ARM ELF"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Load 3DS CIA"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Setup device keys"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Settings"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Share log"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Open data folder"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Exit"
-msgstr ""
-
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -210,6 +178,12 @@ msgstr ""
 #: src/gui/main.c
 #, snx-keys
 msgid "Tap: open. Swipe: turn the page. Recompile: tap it. Refresh: tap it. Back: go back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "AOT pack: tap it."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -302,6 +276,12 @@ msgstr ""
 msgid "Up/Down: select. Enter/Space: open. R: recompile. M: mods folder. Left/Right/PgUp/PgDown: page. F5: refresh."
 msgstr ""
 
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "B: build AOT pack."
+msgstr ""
+
 #: src/gui/main.c
 msgid "click the box (or Enter) to open the file picker"
 msgstr ""
@@ -386,6 +366,84 @@ msgstr ""
 msgid "Up/Down: user. Left/Right: plays as. Enter: type a nickname. ESC: back."
 msgstr ""
 
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "D-pad: move. A: select. Start: refresh. B: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "D-pad: select. A: open. Y: recompile. L3: mods folder. LT/RT: page. Start: refresh. B: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "R3: build AOT pack."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "A: pick a file. B: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "D-pad: key, change. A: edit. B: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "D-pad: row, 1. LT/RT: 16. A: keep. B: put back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "D-pad: setting, change. A: type. X: default. B: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "D-pad: group. A: open. B: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "D-pad: row, change. A: change or open. B: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "D-pad: row. X: take an Extra off. Start: refresh. B: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "D-pad: folder. A: pick another. X: the default. Start: refresh. B: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "D-pad: user, plays as. A: type a nickname. B: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "LB/RB: screen."
+msgstr ""
+
 #: src/gui/main.c
 #, c-format
 msgid "Disk: %s, %s free"
@@ -455,11 +513,12 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Recent games not kept: %s could not be written."
+msgid "%s: text_size = %s is now ui_scale = %s"
 msgstr ""
 
 #: src/gui/main.c
-msgid "...show more"
+#, c-format
+msgid "Recent games not kept: %s could not be written."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -545,10 +604,6 @@ msgid "and %d more, which Share log lists"
 msgstr ""
 
 #: src/gui/main.c
-msgid "OK"
-msgstr ""
-
-#: src/gui/main.c
 msgid "tap again"
 msgstr ""
 
@@ -566,6 +621,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Stay"
+msgstr ""
+
+#: src/gui/main.c src/gui/ui.txt
+msgid "Exit"
 msgstr ""
 
 #: src/gui/main.c
@@ -610,6 +669,10 @@ msgstr ""
 msgid "Move"
 msgstr ""
 
+#: src/gui/main.c src/gui/ui.txt
+msgid "OK"
+msgstr ""
+
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -619,6 +682,16 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "No user shown: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "The dumps' icons are not asked for (%s)"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s could not be drawn: the game shows no icon"
 msgstr ""
 
 #: src/gui/main.c
@@ -711,6 +784,10 @@ msgstr ""
 msgid "Games"
 msgstr ""
 
+#: src/gui/main.c src/gui/ui.txt
+msgid "Settings"
+msgstr ""
+
 #: src/gui/main.c
 msgid "Appearance"
 msgstr ""
@@ -773,6 +850,10 @@ msgid "none"
 msgstr ""
 
 #: src/gui/main.c
+msgid "...show more"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "Ready to run, with %zu update(s), DLC(s) or mod(s) to pick from"
 msgstr ""
@@ -798,7 +879,7 @@ msgid "Pick a folder of games or dumps, listed after recompiled/ and dumps/"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
+#: src/gui/main.c src/gui/ui.txt
 #, snx-key
 msgid "Add a folder"
 msgstr ""
@@ -817,6 +898,28 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "  (games/)"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "JIT cache: %s, O%c"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "AOT build: O%c%s"
+msgstr ""
+
+#: src/gui/main.c
+msgid " (levels differ)"
+msgstr ""
+
+#: src/gui/main.c
+msgid "JIT cache: none yet. Play once to collect one."
+msgstr ""
+
+#: src/gui/main.c
+msgid "JIT cache: unreadable. Play once to rebuild it."
 msgstr ""
 
 #: src/gui/main.c
@@ -873,7 +976,7 @@ msgid "Built-in themes, then each themes/<name>/theme.ini"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Text size"
+msgid "UI scale"
 msgstr ""
 
 #: src/gui/main.c
@@ -1320,7 +1423,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Keep this text size? Back to %s in %d s"
+msgid "Keep this UI scale? Back to %s in %d s"
 msgstr ""
 
 #: src/gui/main.c
@@ -1558,6 +1661,10 @@ msgid "This copy is portable: to install it, first move away %s"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Skip stops on this page: it has no default to take"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Portable"
 msgstr ""
 
@@ -1583,6 +1690,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Next"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Skip"
 msgstr ""
 
 #: src/gui/main.c
@@ -1892,6 +2003,28 @@ msgid "%d moved, %d not"
 msgstr ""
 
 #: src/gui/main.c
+msgid "AOT pack build aborted."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "AOT pack build failed (status %d)."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "AOT pack built from %d cached function%s."
+msgstr ""
+
+#: src/gui/main.c
+msgid "AOT pack built, but no cached function matched the game."
+msgstr ""
+
+#: src/gui/main.c
+msgid "AOT pack built."
+msgstr ""
+
+#: src/gui/main.c
 msgid "Program ended abnormally (force-terminated by ESC)."
 msgstr ""
 
@@ -1957,6 +2090,23 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "R recompiles Switch games only."
+msgstr ""
+
+#: src/gui/main.c
+msgid "B builds an AOT pack for a prepared Switch game in focus."
+msgstr ""
+
+#: src/gui/main.c
+msgid "No JIT cache for this game yet. Play it once to collect one."
+msgstr ""
+
+#: src/gui/main.c
+msgid "The JIT cache is unreadable. Play it once to rebuild it."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "The JIT cache is O%c, but the game's AOT optimization is O%c. They must match: set Optimization level to O%c before building, or set JIT optimization to O%c and play once to make a matching cache."
 msgstr ""
 
 #: src/gui/main.c
@@ -2039,7 +2189,102 @@ msgid "Not enough memory to list the games in their groups."
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "Games is not watched for new games (%s): F5 lists them"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Not saved: Ctrl+S saves it, ESC twice leaves without it"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "A"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "B"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "X"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Y"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Cross"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Circle"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Square"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Triangle"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "LB"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "RB"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "LT"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "RT"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Start"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "L3"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "R3"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
@@ -2076,12 +2321,6 @@ msgstr ""
 #: src/gui/main.c
 #, snx-key
 msgid "Tap"
-msgstr ""
-
-#. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
-#, snx-key
-msgid "A"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
@@ -2142,6 +2381,12 @@ msgstr ""
 #: src/gui/main.c
 #, snx-key
 msgid "R"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "AOT pack"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
@@ -2453,14 +2698,6 @@ msgid "a text too long for its box over its rows, or on one that slides"
 msgstr ""
 
 #: src/gui/theme.c
-msgid "the most pixels between two boxes of a list, times the text's size, 0 to 14"
-msgstr ""
-
-#: src/gui/theme.c
-msgid "a list longer than its column: center keeps the focus in its middle, edge moves at its ends"
-msgstr ""
-
-#: src/gui/theme.c
 msgid "in the margin, beside the focused box"
 msgstr ""
 
@@ -2678,12 +2915,41 @@ msgstr ""
 
 #: src/gui/theme.c
 #, c-format
+msgid "[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
 msgid "%s could not be read (out of memory): it shows %s"
 msgstr ""
 
 #: src/gui/theme.c
 #, c-format
 msgid "No themes/%s/theme.ini could be read: it shows %s"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Load Switch NSP/XCI/NRO"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Load Linux ARM ELF"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Load 3DS CIA"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Setup device keys"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Share log"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Open data folder"
 msgstr ""
 
 #: src/common/utilities/setup.c
@@ -2790,6 +3056,30 @@ msgstr ""
 msgid "each folder in the recompiled or the dumps library, as its games say"
 msgstr ""
 
+#: src/common/utilities/setup.c
+msgid "The launcher's Text size"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "text_size = in app.ini"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "ui_scale =, shown as UI scale"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "A theme's lists"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "[body] gap and scroll in its theme.ini"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "nothing: ui.txt lays out every list"
+msgstr ""
+
 #: src/nx/runtime/settings.txt
 msgid "gdbstub"
 msgstr ""
@@ -2828,6 +3118,14 @@ msgstr ""
 
 #: src/nx/runtime/settings.txt
 msgid "The threads compiling the game's code when it is recompiled: 0 = one for each of the computer's cores"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Unit cache limit"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "The most the cache of compiled code units may hold, in GB: units/ of the cache folder, where every recompile finds the units it compiled before. Past it the units reused longest ago are removed. 0 = no limit. Either way the cache always leaves a tenth of its disk free, removing its oldest units for a new one"
 msgstr ""
 
 #: src/nx/runtime/settings.txt

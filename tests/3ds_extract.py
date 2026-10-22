@@ -32,6 +32,8 @@ def main():
             if explicit:
                 args += ['-x', '--output', str(output)]
             args += [str(source)]
+            # no 3DS keys but the case's own: the home folder is the test's (the user's ~/.3ds is not read)
+            env = {**(env or os.environ), 'HOME': str(root), 'USERPROFILE': str(root)}
             p = subprocess.run(args, capture_output=True, text=True, cwd=root, timeout=20, env=env)
             text = p.stdout + p.stderr
             assert p.returncode == status, (cases, args, p.returncode, text)
@@ -51,7 +53,7 @@ def main():
         assert len(code) == 0x3000 and code[:8] == struct.pack('<II', 0xE3A0002A, 0xEF000003)
         manifest = dict(line.split('=', 1) for line in (output / 'manifest.ini').read_text().splitlines())
         assert manifest['state'] == 'extracted' and manifest['title_id'] == f'{TITLE:016x}'
-        assert manifest['input_sha256'] == hashlib.sha256(plain).hexdigest()
+        assert 'input_sha256' not in manifest  # an extraction to a folder given does not hash its input
         assert manifest['code_sha256'] == hashlib.sha256(code).hexdigest()
         assert sorted(p.name for p in (output / 'contents').iterdir()) == ['00001111.app', '00002222.app']
         assert (output / 'contents/00002222.app').read_bytes() == ncch()
@@ -104,8 +106,9 @@ def main():
 
         empty, _ = run(cia(application=ncch(patch_exefs=empty_icon)))
         assert (empty / 'exefs/icon').read_bytes() == b''
-        # The default path is named after the CIA in the data folder's work/3ds, in the Switch driver's alphabet
-        name = 'input with spacesliteral'
+        # The default folder is the data folder's recompiled/<title ID>, a Switch game's layout: the module, the copy of
+        # the runtime that plays it, and the .ini naming the CIA
+        name = f'{TITLE:016X}'
         data = root / 'data'
         # AOT is always on: the same launch also compiles and runs the tiny witness.
         run_status = 0
@@ -117,8 +120,19 @@ def main():
             extra=('--repo', str(data)),
             explicit=False,
         )
-        expected = data.resolve() / 'work/3ds' / name
+        expected = data.resolve() / 'recompiled' / name
         assert expected.is_dir() and str(expected) in text
+        assert (expected / f'{name}_code.so').is_file() and os.access(expected / name, os.X_OK)
+        ini = dict(line.split('=', 1) for line in (expected / f'{name}.ini').read_text().splitlines())
+        assert ini == {'source': str(source.resolve()), 'model': 'old'}, ini
+        assert not (data / 'work/3ds/input with spacesliteral').exists()
+        # the copy plays its game alone, from the CIA its .ini names, with what --script= and --seconds= set
+        env = {**os.environ, 'HOME': str(root), 'USERPROFILE': str(root)}
+        p = subprocess.run([str(expected / name), '--script=100:1', '--seconds=20'], capture_output=True, text=True,
+                           cwd=root, timeout=30, env=env)
+        assert p.returncode == 0 and run_message in p.stdout + p.stderr, (p.returncode, p.stdout + p.stderr)
+        p = subprocess.run([driver, f'--game={expected}'], capture_output=True, text=True, cwd=root, timeout=30, env=env)
+        assert p.returncode == 0 and run_message in p.stdout + p.stderr, (p.returncode, p.stdout + p.stderr)
         if sys.platform != 'win32' and sys.platform != 'darwin':
             # An installed build's (its folder is the user's data folder) is in the XDG cache folder
             env = {**os.environ, 'XDG_DATA_HOME': str(root / 'xdg-data'), 'XDG_CACHE_HOME': str(root / 'xdg-cache')}
@@ -130,12 +144,12 @@ def main():
                 explicit=False,
                 env=env,
             )
-            expected = (root / 'xdg-cache').resolve() / 'scarletnx/work/3ds' / name
+            expected = (root / 'xdg-data').resolve() / 'scarletnx/recompiled' / name
             assert expected.is_dir() and str(expected) in text
             assert not (root / 'xdg-data/scarletnx/work').exists()
         # Requested extraction alone may succeed without a runtime; normal launches stop before AOT.
-        run(cia(encrypted=True), 3, 'encrypted CIA')
-        run(cia(application=ncch(encrypted=True)), 3, 'encrypted NCCH')
+        run(cia(encrypted=True), 3, 'no 3DS keys')
+        run(cia(application=ncch(encrypted=True)), 3, 'no 3DS keys')
         run(cia(title=0x0004000E01234500), 3, 'updates/DLC/system')
         run(cia(ticket_title=TITLE + 1), 1, 'title ID mismatch')
         run(cia(boot=7), 1, 'boot content')

@@ -28,8 +28,15 @@ const SnxCtrProfile* snx_ctr_memory_profile(const SnxCtrMemory* memory);
 /* Address spaces must be destroyed first. No internal locking: caller serializes
    mappings/accesses/devices. Physical RAM is shared by all spaces on this board. */
 void snx_ctr_memory_free(SnxCtrMemory* memory);
+/* The board's region index's RAM, as the host holds it (page-aligned, the region's size), which the GPU imports and
+   reads and writes in place; NULL for an MMIO region */
+unsigned char* snx_ctr_memory_region(const SnxCtrMemory* memory, size_t index);
 void snx_ctr_memory_mmio(SnxCtrMemory* memory, void* context, SnxCtrMmioRead read, SnxCtrMmioWrite write);
 SnxCtrAddressSpace* snx_ctr_space_new(SnxCtrMemory* memory);
+/* The flat space, on a host that has one (memory/host.h): guest address va is base + va for compiled code, which
+   reads and writes it directly (SNX_ARM_MEMORY_FLAT), its mappings views of the board's RAM, so this API and the
+   generated code see the same bytes. NULL without one: compiled code then goes through the checked bus */
+unsigned char* snx_ctr_space_base(const SnxCtrAddressSpace* space);
 void snx_ctr_space_free(SnxCtrAddressSpace* space);
 /* Page-aligned nonempty ranges; mapping requires one physical board region.
    Failed map/protect/unmap leave all mappings unchanged. No automatic user VA
@@ -60,4 +67,25 @@ SnxCtrMemResult snx_ctr_write_ram(SnxCtrAddressSpace* space, uint32_t va, const 
    epoch like CPU stores. MMIO is refused (SNX_CTR_MEM_DEVICE). */
 SnxCtrMemResult snx_ctr_phys_read(SnxCtrMemory* memory, uint32_t pa, void* output, size_t size);
 SnxCtrMemResult snx_ctr_phys_write(SnxCtrMemory* memory, uint32_t pa, const void* input, size_t size);
+
+/* Write tracking: what the GPU keeps of guest RAM, by physical page, so the CPU's accesses come to it first (the
+   renderer's surfaces and textures, docs/3DS.md). A page's level, in order:
+   - NONE: the CPU's.
+   - WATCH: the GPU keeps a copy made from it (a decoded texture, a render target as memory has it): writes trap.
+   - OWN: the GPU's copy is newer than memory, or GPU writes to it are not done: every access traps.
+   Every guest view of the page traps (its aliases in each flat space, at their guest permissions less the level's),
+   and so do this API's accesses and a bus master's by physical address, before they copy. A trap is resolved a step
+   at a time by the handler, which must lower the page: an owned page's data lands in memory (to WATCH, or NONE), a
+   watched page's copies are dropped (to NONE). A write to an owned page takes both steps. The handler runs on the
+   thread that touched the page, from a fault handler for compiled code: it may wait for the GPU and call
+   snx_ctr_track_set, and it must not touch a tracked page through this API */
+typedef enum { SNX_CTR_TRACK_NONE, SNX_CTR_TRACK_WATCH, SNX_CTR_TRACK_OWN } SnxCtrTrackLevel;
+typedef void (*SnxCtrTrackHandler)(void* context, uint32_t pa, SnxCtrTrackLevel level);
+void snx_ctr_track_handler(SnxCtrMemory* memory, SnxCtrTrackHandler handler, void* context);
+/* every RAM page of [pa, pa + size) at level */
+void snx_ctr_track_set(SnxCtrMemory* memory, uint32_t pa, uint32_t size, SnxCtrTrackLevel level);
+SnxCtrTrackLevel snx_ctr_track_level(const SnxCtrMemory* memory, uint32_t pa);
+/* A flat space's fault at va (memory/host.h's resolver): true when it was a tracked page, whose step was taken, so
+   the access is made again; false for the guest's own data abort */
+bool snx_ctr_track_fault(SnxCtrAddressSpace* space, uint32_t va);
 #endif

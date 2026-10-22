@@ -7,6 +7,26 @@
 #include "common/cpu/aarch64/cpu.h"
 #include "nx/gpu/gpu.h"
 
+/* What the renderer makes before the game draws, for the screen main.c shows while it does: the shader programs the
+   game ships in its RomFS and executables, found and translated, and the pipelines of earlier runs. done once the
+   pass over them ended (finished, stopped, or not run) and those pipelines are made */
+typedef struct RendererPrepare {
+    u32 files, files_seen;       /* the RomFS's files and the executables' segments, and those the pass looked at */
+    u32 programs, programs_done; /* the programs found in them (once all were looked at, when they are counted first:
+                                    prepare_shaders 2), and those handed on to be translated (the ones translated
+                                    before and those left out included) */
+    u32 shipped;                 /* the programs it translated, this run */
+    u32 shaders;                 /* shaders of earlier runs, theirs included */
+    u32 pipes, pipes_made;       /* pipelines of earlier runs, and those made */
+    int scanning;                /* the pass runs */
+    int loaded;                  /* the shader files of earlier runs are read */
+    int done;
+#define RENDERER_NOTES     48
+#define RENDERER_NOTE_SIZE 256                     /* a line's bytes: as wide as a wide window's row, which cuts it */
+    char note[RENDERER_NOTES][RENDERER_NOTE_SIZE]; /* the pass's latest lines, oldest first (the log has every one) */
+    int notes;
+} RendererPrepare;
+
 typedef struct Renderer {
     const char* name;
     int (*start)(void); /* 0 when it can't run here */
@@ -19,7 +39,7 @@ typedef struct Renderer {
     void (*draw)(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 base_vertex, u32 base_instance,
                  u32 instances);
     /* Maxwell ordering methods: 0 texture barrier, 1 tiled barrier, 2 data-cache invalidate,
-       3 descriptor-cache invalidate, 4 wait for idle. */
+       3 descriptor-cache invalidate, 4 wait for idle, 5 shader instruction invalidate. */
     void (*method_barrier)(int kind);
     /* DRAW_TEXTURE: a texture's rectangle onto color target 0. NULL: not drawn */
     void (*draw_texture)(GpuChannel* ch);
@@ -90,13 +110,17 @@ typedef struct Renderer {
     /* the window again, its last frame (or black) under the on-screen controls and the game's menu, for when the game
        has shown nothing for a while: the frontend's loop calls it while either shows. NULL when there is no window */
     void (*refresh)(void);
-    /* writes what should outlive the process (the pipeline cache): every 5 s from the frontend loop, and before an exit
-       that skips the normal shutdown. Any thread, while the others still run. NULL when the renderer keeps nothing */
-    void (*save)(void);
+    /* writes what should outlive the process (the pipeline cache): asked every 5 s from the frontend loop, where it may
+       wait for a quiet moment, and before an exit (at_exit), which writes it now. Any thread, while the others still
+       run. NULL when the renderer keeps nothing */
+    void (*save)(int at_exit);
     /* the window given up for a fatal error's screen (plat.c's fatal, backend/sdl3.c): the swapchain and the surface go,
        as nothing else can draw in a window something presents to. Called on the failing thread, which never returns to
        its callers, so it keeps no lock. 0 when another thread held the renderer too long. NULL without a window */
     int (*release_window)(void);
+    /* RendererPrepare's progress, any thread. What isn't done when the game starts goes on in the background. NULL when
+       the renderer makes nothing before */
+    void (*prepare)(RendererPrepare* p);
 } Renderer;
 
 extern const Renderer vk_renderer;

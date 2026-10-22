@@ -3,7 +3,7 @@
 /* The launcher's setup (gui/main.c's setup_*) on the real renderer and its events, in a home of its own: the pages a
    first start goes through and what each writes (a portable copy, the language, the games and dumps folders, the keys,
    the first user), what it refuses, the user's page with users.ini there, the fixed uid kept for its saves, a notice
-   alone after an update, --debug, and the question's place as options-dialog says */
+   alone after an update, --debug, the question's place as options-dialog says, and Skip */
 #define SNX_GUI_NO_MAIN
 #include "gui/main.c"
 #define SNX_SCREEN_TEST "gui_setup.c"
@@ -79,6 +79,14 @@ static const char* choice_before(const App* app) {
     assert(setup_labels(app, labels) > app->setup_choice.focus);
     return app->setup_choice.focus ? labels[app->setup_choice.focus - 1] : NULL;
 }
+/* the Appearance's row i as drawn (ui.txt's scene Appearance): its box, past the cursor's margin, and its whole row */
+static GuiRect appearance_row_box(const App* app, const GuiAppearanceBoxes* a, int i) {
+    size_t first = a->lists[UI_APPEARANCE_ROWS].first;
+    return ui_row_box(app, ui_appearance_row(a->rects, app->scale, UI_APPEARANCE_ROWS, (size_t)i - first));
+}
+static GuiRect appearance_whole_row(const App* app, const GuiAppearanceBoxes* a, int i) {
+    return ui_appearance_row(a->rects, app->scale, UI_APPEARANCE_ROWS, (size_t)i - a->lists[UI_APPEARANCE_ROWS].first);
+}
 /* a and b one folder however each is written: the menu keeps a folder it takes resolved (snx_absolute), with
    Windows' separators where snx_path_join wrote '/' */
 static bool same_path(const char* a, const char* b) {
@@ -136,7 +144,7 @@ static void test_first(App* app) {
         key(app, SDLK_RETURN); /* Back with the mouse, from the second */
         render(app);
         setup_boxes(app, &c);
-        point(app, list_box(&c.choices.list, 0), true);
+        point(app, choice_box(app, &c.choices, 0), true);
         assert(app->setup_top == 0);
     }
     for (int i = 0; i < notices - 1; ++i) key(app, SDLK_RETURN);
@@ -150,10 +158,17 @@ static void test_first(App* app) {
     assert(!strcmp(choice_label(app), "OK") && !strcmp(choice_before(app), "Back"));
     key(app, SDLK_ESCAPE);
     assert(app->confirm.shown && app->confirm.ask == GUI_ASK_EXIT);
+    { /* the pointer over Exit, the page's choices drawn last: the question's focus moves, not the page's */
+        GuiChoices c;
+        int focus = app->setup_choice.focus;
+        ask_place(app, &c);
+        point(app, choice_box(app, &c, 1), false);
+        assert(app->confirm.selected == GUI_CONFIRM_ABORT && app->setup_choice.focus == focus);
+    }
     key(app, SDLK_ESCAPE);
     assert(!app->confirm.shown && app->setup_on && !app->menu.quit);
-    /* Appearance: Settings > App's Language, Theme and Text size a row each, then Next. Left/Right change the language
-       and the theme at once, the screen with them, Auto again on the system's; Text size's box and its question, the
+    /* Appearance: Settings > App's Language, Theme and UI scale a row each, then Next. Left/Right change the language
+       and the theme at once, the screen with them, Auto again on the system's; UI scale's box and its question, the
        size kept for app.ini; a click on a row's left arrow goes back a step; nothing written until the setup is done */
     key(app, SDLK_RETURN);
     assert(page(app) == SNX_SETUP_LANGUAGE && app->setup_row == GUI_APPEARANCE_LANGUAGE && !app->language);
@@ -161,6 +176,17 @@ static void test_first(App* app) {
     render(app);
     shows(app, "Appearance", rgb(head_ink(app)));
     shows(app, "< English >", rgb(app->theme.page)); /* the row in focus, inverted on YoRHa's focus bar */
+    { /* its value at appearance_column of the row's text, past the marker ui_draw_row draws */
+        GuiSetupBoxes c;
+        GuiAppearanceBoxes a;
+        GuiRect row;
+        int x, y;
+        setup_boxes(app, &c);
+        appearance_boxes(app, c.content, &a);
+        row = appearance_row_box(app, &a, GUI_APPEARANCE_LANGUAGE);
+        assert(find_text(app, "< English >", rgb(app->theme.page), 1, &x, &y));
+        assert(x == row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app) && y > row.y);
+    }
     shows(app, "< YoRHa >", rgb(app->theme.ink));
     {
         char line[64];
@@ -187,19 +213,46 @@ static void test_first(App* app) {
     assert(!app->language && snx_tr_language() == 0);
     key(app, SDLK_LEFT);
     assert(app->language == 3);
-    {
+    { /* the rows as Settings' (ui.txt's scene Appearance): 2 pixels apart and as high as the menu's, the cursor in
+         the row, which a click takes whole */
         GuiSetupBoxes c;
-        GuiList rows;
-        GuiRect row;
+        GuiAppearanceBoxes a;
+        GuiRect row, whole;
+        int s = app->scale;
         render(app);
         setup_boxes(app, &c);
-        appearance_box(app, c.content, &rows);
-        row = list_box(&rows, GUI_APPEARANCE_LANGUAGE);
+        appearance_boxes(app, c.content, &a);
+        row = appearance_row_box(app, &a, GUI_APPEARANCE_LANGUAGE);
+        whole = appearance_whole_row(app, &a, GUI_APPEARANCE_LANGUAGE);
+        assert(row.h == item_h(app) && whole.x < row.x && row.y >= a.box.y + head_h(app));
+        assert(appearance_row_box(app, &a, GUI_APPEARANCE_THEME).y - row.y == item_h(app) + 2 * s);
+        assert(appearance_row_box(app, &a, GUI_APPEARANCE_TEXT).y + item_h(app) <= a.box.y + a.box.h);
         mouse_px(app, row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app) + cell_w(app) / 2,
                  row.y + row.h / 2, true); /* its left arrow: back a step */
         assert(app->language == 2 && snx_tr_language() == 1 && app->setup_row == GUI_APPEARANCE_LANGUAGE);
-        point(app, list_box(&rows, GUI_APPEARANCE_THEME), false); /* the pointer over a row: its focus */
+        mouse_px(app, whole.x + 1, whole.y + whole.h / 2, true); /* in the cursor's margin: a step on */
+        assert(app->language == 3 && app->setup_row == GUI_APPEARANCE_LANGUAGE);
+        mouse_px(app, row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app) + cell_w(app) / 2,
+                 row.y + row.h / 2, true);
+        assert(app->language == 2 && snx_tr_language() == 1);
+        point(app, appearance_row_box(app, &a, GUI_APPEARANCE_THEME), false); /* the pointer over a row: its focus */
         assert(app->setup_row == GUI_APPEARANCE_THEME && app->language == 2);
+        point(app, choice_box(app, &c.choices, 0), false); /* over Next: the focus on it, off the rows */
+        assert(app->setup_row == GUI_APPEARANCE_NEXT && page(app) == SNX_SETUP_LANGUAGE);
+        point(app, appearance_row_box(app, &a, GUI_APPEARANCE_THEME), false);
+        assert(app->setup_row == GUI_APPEARANCE_THEME);
+        point(app, appearance_row_box(app, &a, GUI_APPEARANCE_TEXT), true); /* UI scale clicked: its box */
+        assert(app->sizes_shown && app->setup_row == GUI_APPEARANCE_TEXT && app->language == 2);
+        key(app, SDLK_ESCAPE);
+        assert(!app->sizes_shown);
+        point(app, appearance_row_box(app, &a, GUI_APPEARANCE_THEME), false);
+        /* a box too short for the three: the rows that fit, from the focused one's, inside it */
+        app->setup_row = GUI_APPEARANCE_TEXT;
+        appearance_boxes(app, gui_rect(c.content.x, c.content.y, c.content.w, head_h(app) + 4 * s + 2 * item_h(app)),
+                         &a);
+        assert(ui_appearance_shown(a.rects, s, UI_APPEARANCE_ROWS) == 1 && a.lists[UI_APPEARANCE_ROWS].first == 2);
+        assert(appearance_whole_row(app, &a, GUI_APPEARANCE_TEXT).y + item_h(app) <= a.box.y + a.box.h);
+        app->setup_row = GUI_APPEARANCE_THEME;
     }
     key(app, SDLK_RIGHT); /* the next theme, the dialog's place with it */
     assert(!strcmp(app->theme.id, "default") && app->theme.dialog == GUI_DIALOG_DEFAULT);
@@ -207,10 +260,11 @@ static void test_first(App* app) {
     shows(app, "< Default >", rgb(app->theme.focus));
     {
         GuiSetupBoxes c;
-        GuiList rows;
+        GuiAppearanceBoxes a;
         GuiRect box;
         setup_boxes(app, &c);
-        box = appearance_box(app, c.content, &rows);
+        appearance_boxes(app, c.content, &a);
+        box = a.box;
         { /* the question in the middle of what is under the rows */
             int under = box.y + box.h + cell_h(app), bottom = c.place.list.y + c.place.list.h;
             assert(c.choices.box.y >= under);
@@ -237,14 +291,15 @@ static void test_first(App* app) {
     path = join(home, ".config/scarletnx/app.ini");
     assert(!snx_is_file(path)); /* kept for the setup's end, in the folders Install picks */
     free(path);
-    key(app, SDLK_LEFT); /* Text size's box again, closed by ESC */
+    key(app, SDLK_LEFT); /* UI scale's box again, closed by ESC */
     assert(app->sizes_shown);
     key(app, SDLK_ESCAPE);
     assert(!app->sizes_shown && app->setup_on && page(app) == SNX_SETUP_LANGUAGE);
     key(app, SDLK_DOWN);
     assert(app->setup_row == GUI_APPEARANCE_NEXT);
     render(app);
-    shows(app, "Next", rgb(app->theme.page)); /* in focus now */
+    shows(app, "Next", rgb(app->theme.page));     /* in focus now */
+    hides(app, "UI scale", rgb(app->theme.page)); /* and no row */
     key(app, SDLK_RETURN);
     assert(page(app) == SNX_SETUP_INSTALL && app->language == 2 && app->setup_save && snx_tr_language() == 1);
     app->language = 0; /* English again, for the words below, kept as the language picked */
@@ -358,9 +413,13 @@ static void test_first(App* app) {
     assert(!app->setup_on && !app->message[0] && app->user == 1 && !strcmp(app->user_name, "Adam"));
     users = join(portable, "users");
     holds(users, "users.ini", "nickname=Adam\n");
-    holds(config, "setup.ini", "[setup]\nversion = 1\nnotices = 11\n");
+    {
+        char seen[64]; /* every notice there is, seen */
+        snprintf(seen, sizeof seen, "[setup]\nversion = 1\nnotices = %d\n", SNX_NOTICES);
+        holds(config, "setup.ini", seen);
+    }
     holds(config, "app.ini", "language = xx\n");
-    holds(config, "app.ini", "theme = yorha\ntext_size = 1\n");
+    holds(config, "app.ini", "theme = yorha\nui_scale = 1\n");
     path = join(home, ".config/scarletnx/setup.ini");
     assert(!snx_is_file(path)); /* nothing in the user's folders */
     free(path);
@@ -430,20 +489,23 @@ static void test_users(App* app) {
 
 /* after an update: the notice it brings, alone; --debug: nothing */
 static void test_notice(App* app) {
-    char *config = config_of(app), *file = join(config, "setup.ini");
-    put(file, "[setup]\nversion = 1\nnotices = 10\n");
+    char *config = config_of(app), *file = join(config, "setup.ini"), before[64], after[64];
+    /* the newest notice unseen, all the others seen */
+    snprintf(before, sizeof before, "[setup]\nversion = 1\nnotices = %d\n", SNX_NOTICES - 1);
+    snprintf(after, sizeof after, "notices = %d\n", SNX_NOTICES);
+    put(file, before);
     setup_start(app);
     assert(app->setup_on && app->setup_count == 1 && page(app) == SETUP_NOTICE);
     render(app);
     shows(app, "Changed since the last version", rgb(app->theme.page));
     shows(app, "Changed 1/1", rgb(head_ink(app)));
     assert(!strcmp(choice_label(app), "OK"));
-    shows(app, "The launcher's folders of games", rgb(app->theme.ink));
+    shows(app, snx_notices[SNX_NOTICES - 1].what, rgb(app->theme.ink)); /* in English: xx has no word of it */
     hides(app, "Game settings", rgb(app->theme.ink));
     hides(app, "1 Appearance", rgb(app->theme.ink));
     key(app, SDLK_RETURN);
     assert(!app->setup_on);
-    holds(config, "setup.ini", "notices = 11\n");
+    holds(config, "setup.ini", after);
     remove(file);
     snx_setup_skip = 1;
     setup_start(app);
@@ -500,8 +562,8 @@ static void test_places(App* app) {
     setup_boxes(app, &b);
     area(app, &width, &height);
     assert(b.choices.box.y + b.choices.box.h == b.place.list.y + b.place.list.h && b.choices.box.w == b.place.list.w);
-    assert(b.choices.list.at.y + b.choices.list.at.h <= b.choices.tab.y && b.choices.list.at.x > width / 2);
-    assert(b.content.y + b.content.h <= b.choices.list.at.y && b.content.h > 0);
+    assert(b.choices.at.y + b.choices.at.h <= b.choices.tab.y && b.choices.at.x > width / 2);
+    assert(b.content.y + b.content.h <= b.choices.at.y && b.content.h > 0);
     assert(!strcmp(b.tab, "ScarletNX  2/5"));
     shows(app, "ScarletNX  2/5", rgb(app->theme.ink));
     app->theme = *gui_theme_builtin("default");
@@ -516,6 +578,104 @@ static void test_places(App* app) {
     setup_finish(app);
     free(file);
     puts("PASS the question where options-dialog puts it");
+}
+
+/* Skip, on the first page alone, after its choices: every page left taken as its defaults have it (the notices read
+   to the last, Next, the install kept, Keep, Later, the nickname Player), setup.ini written as done; nothing else
+   written. From the Appearance as the first page too, by its keys and the pointer; a page whose default fails stays */
+static void test_skip(App* app) {
+    char *config = config_of(app), *file = join(config, "setup.ini"), *users = join(app->users_dir, "users.ini");
+    char *app_ini = text_of(config, "app.ini"), *games = snx_strdup(app->games_dir), seen[64], *now;
+    const char* labels[GUI_SETUP_CHOICES];
+    int n, i, list[SNX_NOTICES];
+    snprintf(seen, sizeof seen, "[setup]\nversion = 1\nnotices = %d\n", SNX_NOTICES);
+    remove(file);
+    remove(users);
+    setup_start(app);
+    assert(app->setup_on && !app->setup_page && page(app) == SETUP_NOTICE && app->setup_choice.count == 1);
+    n = setup_labels(app, labels);
+    assert(n == 2 && !strcmp(labels[0], "Next") && !strcmp(labels[1], "Skip"));
+    render(app);
+    shows(app, "\xfe Skip", rgb(app->theme.ink));
+    /* past the first page: none */
+    for (i = setup_notices(app, list); i > 0; --i) key(app, SDLK_RETURN);
+    assert(page(app) == SNX_SETUP_LANGUAGE && app->setup_page == 1 && setup_labels(app, labels) == 1);
+    render(app);
+    hides(app, "Skip", rgb(app->theme.ink));
+    key(app, SDLK_UP); /* the Appearance's choices from its rows' top: Next alone */
+    assert(app->setup_row == GUI_APPEARANCE_NEXT && !app->setup_choice.focus);
+    key(app, SDLK_RETURN);
+    assert(page(app) == SNX_SETUP_INSTALL && setup_labels(app, labels) == 2 && strcmp(labels[1], "Skip"));
+    key(app, SDLK_ESCAPE);
+    key(app, SDLK_ESCAPE);
+    assert(page(app) == SETUP_NOTICE && !app->setup_page && !app->setup_top);
+    key(app, SDLK_UP); /* round from Next to Skip */
+    assert(!strcmp(choice_label(app), "Skip"));
+    render(app);
+    shows(app, "\xfe Skip", rgb(app->theme.page)); /* in focus, on YoRHa's band */
+    key(app, SDLK_RETURN);
+    assert(!app->setup_on && !app->setup_failed && !app->confirm.shown && !app->message[0]);
+    holds(config, "setup.ini", seen);
+    holds(app->users_dir, "users.ini", "nickname=Player\n"); /* the nickname's page took its Player */
+    now = text_of(config, "app.ini");
+    assert(app_ini && now && !strcmp(app_ini, now) && same_path(app->games_dir, games)); /* nothing else */
+    free(now);
+    setup_start(app);
+    assert(!app->setup_on);
+    /* the Appearance first: Next, then Skip, under its rows; Up from the rows' top to Skip, Down round to Language;
+       the pointer on Skip takes it, users.ini kept */
+    put(file, "[setup]\nnotices = 99\n");
+    now = text_of(app->users_dir, "users.ini");
+    setup_start(app);
+    assert(app->setup_on && !app->setup_page && page(app) == SNX_SETUP_LANGUAGE && setup_labels(app, labels) == 2);
+    key(app, SDLK_UP);
+    assert(app->setup_row == GUI_APPEARANCE_NEXT && !strcmp(choice_label(app), "Skip") && setup_focus(app) == 1);
+    key(app, SDLK_UP);
+    assert(app->setup_row == GUI_APPEARANCE_NEXT && !strcmp(choice_label(app), "Next"));
+    key(app, SDLK_RIGHT);
+    assert(!strcmp(choice_label(app), "Skip"));
+    key(app, SDLK_DOWN);
+    assert(app->setup_row == GUI_APPEARANCE_LANGUAGE && setup_focus(app) < 0);
+    {
+        GuiSetupBoxes b;
+        render(app);
+        setup_boxes(app, &b);
+        point(app, choice_box(app, &b.choices, 1), true);
+    }
+    assert(!app->setup_on && !app->setup_failed);
+    holds(config, "setup.ini", "version = 1\nnotices = 99\n"); /* a newer file's count kept */
+    {
+        char* kept = text_of(app->users_dir, "users.ini");
+        assert(kept && now && !strcmp(kept, now));
+        free(kept);
+    }
+    free(now);
+    /* a default that fails: users.ini cannot be written, the user's page stays, saying why. Skip from the Appearance's
+       Enter */
+    {
+        char *was = app->users_dir, *blocker = join(root, "a file");
+        put(blocker, "x");
+        app->users_dir = join(blocker, "users");
+        put(file, "[setup]\nnotices = 99\n");
+        setup_start(app);
+        key(app, SDLK_UP);
+        assert(page(app) == SNX_SETUP_LANGUAGE && !strcmp(choice_label(app), "Skip"));
+        key(app, SDLK_RETURN);
+        assert(app->setup_on && page(app) == SNX_SETUP_USER && app->setup_failed && app->setup_typing);
+        assert(strstr(app->message, "No user written: ") && app->confirm.shown && app->confirm.ask == GUI_ASK_ERROR);
+        key(app, SDLK_RETURN);
+        free(app->users_dir);
+        app->users_dir = was;
+        setup_finish(app);
+        remove(blocker);
+        free(blocker);
+    }
+    free(games);
+    free(app_ini);
+    free(users);
+    free(file);
+    free(config);
+    puts("PASS Skip on the first page, every page's defaults taken, and where a default fails");
 }
 
 /* name set (NULL: unset) where getenv reads it as well as SDL: on Windows the C runtime keeps a copy of its own, which
@@ -554,12 +714,14 @@ int main(void) {
     }
     assert(!strcmp(app.theme.id, "yorha") && app.theme.dialog == GUI_DIALOG_YORHA);
     app.animations_off = true; /* each page read as it settles, not as it fades in */
+    app.clock = 1; /* a text too long for its row read from its start, whatever time the test takes to get there */
     open_files(&app);
     test_first(&app);
     test_users(&app);
     test_notice(&app);
     test_translated(&app);
     test_places(&app);
+    test_skip(&app);
     cleanup(&app);
     assert(!snx_remove_tree(root));
     free(home);

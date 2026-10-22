@@ -5,7 +5,10 @@
    a pipeline record waits for its shaders' records and is dropped when one of them couldn't be made again; records
    appended after a reading refer to the shaders read; a record cut short by a crash or changed on disk ends the
    reading, and the file goes on from the last good record; a file of another key starts over; a full file takes no
-   more */
+   more; a PF_SHIPREF counts as a shader record that pipelines name. A file read as its records are used
+   (pf_open_mapped) hands each over with where it starts, checks one when it is read (a payload changed on disk doesn't
+   check out), drops a record cut short and maps the file as rewritten, leaves one it can't map as it is and never
+   appends to it, and shows what was appended once sealed */
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -13,12 +16,21 @@
 #include <string.h>
 #include "nx/gpu/vk/pipeline_file.c"
 
+#define PATH "pipeline_file_test.vkshaders"
+/* the test's file and the temporary one a rewrite makes, for a failing check to leave neither */
+static void cleanup(void) {
+    char tmp[64];
+    snprintf(tmp, sizeof tmp, "%s.%u.tmp", PATH, pf_pid());
+    remove(PATH);
+    remove(tmp);
+}
 static unsigned checks;
 #define CHECK(x)                                                                                                       \
     do {                                                                                                               \
         ++checks;                                                                                                      \
         if (!(x)) {                                                                                                    \
             fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #x);                                                    \
+            cleanup();                                                                                                 \
             exit(1);                                                                                                   \
         }                                                                                                              \
     } while (0)
@@ -33,7 +45,36 @@ void logf_(int lvl, const char* fmt, ...) {
     va_end(ap);
 }
 
-#define PATH "pipeline_file_test.vkshaders"
+/* the platform's file functions the file uses, over a copy in memory */
+static int fail_map; /* the next maps fail, as one of a file the system won't map */
+int plat_file_map(PFileMap* m, const char* path) {
+    FILE* f = fail_map ? NULL : fopen(path, "rb");
+    long n = -1;
+    u8* d;
+    memset(m, 0, sizeof *m);
+    if (!f) return -1;
+    if (!fseek(f, 0, SEEK_END)) n = ftell(f);
+    d = n > 0 && !fseek(f, 0, SEEK_SET) ? malloc((size_t)n) : NULL;
+    if (d && fread(d, 1, (size_t)n, f) == (size_t)n) {
+        m->data = d;
+        m->size = (u64)n;
+        m->heap = 1;
+    } else
+        free(d);
+    fclose(f);
+    return n < 0 ? -1 : 0;
+}
+void plat_file_unmap(PFileMap* m) {
+    free((void*)m->data);
+    memset(m, 0, sizeof *m);
+}
+/* rename doesn't replace a file on Windows. fail_replace: the next replaces fail, as on a full disk */
+static int fail_replace;
+int plat_replace_file(const char* tmp, const char* dst) {
+    if (fail_replace) return -1;
+    remove(dst);
+    return rename(tmp, dst) ? -1 : 0;
+}
 #define KEYB 96 /* a pipeline key's bytes */
 
 /* what a reading handed back */
@@ -65,10 +106,162 @@ static void load_pipe(void* ctx, const u64 modules[5], const void* key, u32 keyl
     got.npipe++;
 }
 
+static struct {
+    int n;
+    u64 at, check;
+} shipref_got;
+static u64 load_shipref(void* ctx, u64 at, u64 check) {
+    (void)ctx;
+    shipref_got.n++;
+    shipref_got.at = at;
+    shipref_got.check = check;
+    return got.next_module++;
+}
+static void make_shader(int n, PfShader* s, u32* cbr, u32* spv);
+static long file_size(void);
+static void open_file(PFile* pf, const char* key, u64 first_module, int fail_first, u32 loaded[2]);
+static void close_file(PFile* pf);
+static void add_shader(PFile* pf, int n, u64 module);
+static void add_pipe(PFile* pf, int n, u64 vs, u64 tcs, u64 tes, u64 gs, u64 fs);
+static void check_pipe(int i, int n, u64 vs, u64 tcs, u64 tes, u64 gs, u64 fs);
+/* the file's byte at at changed, or its last cut bytes cut off, by writing it again */
+static void rewrite(long at, long cut) {
+    long n = file_size();
+    u8* d = n > 0 ? malloc((size_t)n) : NULL;
+    FILE* f = d ? fopen(PATH, "rb") : NULL;
+    CHECK(f && fread(d, 1, (size_t)n, f) == (size_t)n && at < n && cut < n);
+    fclose(f);
+    if (at >= 0) d[at] ^= 0x5A;
+    f = fopen(PATH, "wb");
+    CHECK(f && fwrite(d, 1, (size_t)(n - cut), f) == (size_t)(n - cut));
+    fclose(f);
+    free(d);
+}
+/* what pf_open_mapped handed over */
+static struct {
+    int n;
+    u32 type[8];
+    u64 at[8];
+} each_got;
+static void each_rec(void* ctx, u32 type, const u8* payload, u32 len, u64 at) {
+    (void)ctx;
+    (void)payload;
+    (void)len;
+    if (each_got.n < 8) {
+        each_got.type[each_got.n] = type;
+        each_got.at[each_got.n] = at;
+    }
+    each_got.n++;
+}
+static void mapped(void) {
+    PFile pf = {0};
+    PfShader s;
+    u32 cbr[8], spv[16], len = 0;
+    u64 at[2], check = 0;
+    const u8* p;
+    remove(PATH);
+    pm_init(&pf.lock);
+    memset(&each_got, 0, sizeof each_got);
+    pf_open_mapped(&pf, PATH, "mapped key", each_rec, NULL);
+    CHECK(!pf.f && !pf.kept && each_got.n == 0 && pf.view.data && pf.size == pf.view.size); /* its header, mapped */
+    pf_unseal(&pf);
+    CHECK(pf.f && !pf.view.data);
+    make_shader(1, &s, cbr, spv);
+    at[0] = pf_shader(&pf, 0, &s, cbr, spv);
+    pf_scan(&pf, 1, 77);
+    make_shader(2, &s, cbr, spv);
+    at[1] = pf_shader(&pf, 0, &s, cbr, spv);
+    CHECK(at[0] && at[1] > at[0] && pf.nmap == 0); /* no module: nothing for pipelines to name */
+    CHECK(!pf_payload(&pf, at[1], &len, &check));  /* unmapped while appended to */
+    pf_seal(&pf);
+    CHECK(!pf.f);
+    p = pf_payload(&pf, at[1], &len, &check);
+    CHECK(p && len >= sizeof s && !memcmp(p, &s, sizeof s) && check == pf_get64(p - 8));
+    CHECK(!pf_payload(&pf, at[1] + 8, &len, &check)); /* not a record's start */
+    plat_file_unmap(&pf.view);
+    /* read again: each record with where it starts, in order */
+    memset(&each_got, 0, sizeof each_got);
+    pf_open_mapped(&pf, PATH, "mapped key", each_rec, NULL);
+    CHECK(!pf.f && each_got.n == 3 && each_got.type[0] == PF_SHADER && each_got.at[0] == at[0] &&
+          each_got.type[1] == PF_SCAN && each_got.type[2] == PF_SHADER && each_got.at[2] == at[1]);
+    CHECK(pf_payload(&pf, at[0], &len, &check) != NULL);
+    plat_file_unmap(&pf.view);
+    /* a payload changed on disk: handed over unchecked, but it doesn't check out when read */
+    rewrite((long)at[0] + PF_REC + 4, 0);
+    memset(&each_got, 0, sizeof each_got);
+    pf_open_mapped(&pf, PATH, "mapped key", each_rec, NULL);
+    CHECK(each_got.n == 3 && !pf_payload(&pf, at[0], &len, &check) && pf_payload(&pf, at[1], &len, &check));
+    plat_file_unmap(&pf.view);
+    rewrite((long)at[0] + PF_REC + 4, 0);
+    /* the last record cut short: the file goes on without it, mapped as rewritten */
+    rewrite(-1, 8);
+    memset(&each_got, 0, sizeof each_got);
+    pf_open_mapped(&pf, PATH, "mapped key", each_rec, NULL);
+    CHECK(!pf.f && each_got.n == 2 && pf.size == at[1] && file_size() == (long)at[1] && pf.view.size == at[1]);
+    plat_file_unmap(&pf.view);
+    /* cut short again, and the rewrite fails: left as it is, said, and never appended to */
+    rewrite(-1, 8);
+    fail_replace = 1;
+    warned[0] = 0;
+    memset(&each_got, 0, sizeof each_got);
+    pf_open_mapped(&pf, PATH, "mapped key", each_rec, NULL);
+    CHECK(pf.kept && strstr(warned, "cannot write") && file_size() == (long)at[1] - 8);
+    {
+        char name[64];
+        FILE* tmp;
+        snprintf(name, sizeof name, "%s.%u.tmp", PATH, pf_pid());
+        tmp = fopen(name, "rb");
+        CHECK(!tmp); /* removed */
+    }
+    pf_unseal(&pf);
+    CHECK(!pf.f);
+    pf_seal(&pf);
+    plat_file_unmap(&pf.view);
+    fail_replace = 0;
+    pf.kept = 0;
+    /* there, but it can't be mapped: left as it is, and never appended to */
+    fail_map = 1;
+    memset(&each_got, 0, sizeof each_got);
+    pf_open_mapped(&pf, PATH, "mapped key", each_rec, NULL);
+    CHECK(pf.kept && each_got.n == 0 && !pf.view.data && file_size() == (long)at[1] - 8);
+    pf_unseal(&pf);
+    CHECK(!pf.f);
+    pf_seal(&pf);
+    fail_map = 0;
+    pf.kept = 0;
+    /* another key's: started over */
+    memset(&each_got, 0, sizeof each_got);
+    pf_open_mapped(&pf, PATH, "another key", each_rec, NULL);
+    CHECK(!pf.f && each_got.n == 0 && file_size() == (long)pf.size);
+    plat_file_unmap(&pf.view);
+    pm_destroy(&pf.lock);
+    remove(PATH);
+}
+/* a PF_SHIPREF: read back with its place and check, and a shader record that a pipeline after it names */
+static void shiprefs(void) {
+    PFile pf;
+    u32 loaded[2] = {0, 0};
+    remove(PATH);
+    open_file(&pf, "key one", 0x10, 0, loaded);
+    add_shader(&pf, 1, 0x7001);
+    pf_shipref(&pf, 0x7002, 0x1230, 0xABCDEF);
+    CHECK(pf.nsh == 2 && pf.nmap == 2);
+    add_pipe(&pf, 1, 0x7002, 0, 0, 0, 0x7001);
+    close_file(&pf);
+    memset(&shipref_got, 0, sizeof shipref_got);
+    open_file(&pf, "key one", 0x20, 0, loaded);
+    CHECK(loaded[0] == 2 && loaded[1] == 1 && got.nsh == 1 && pf.nsh == 2);
+    CHECK(shipref_got.n == 1 && shipref_got.at == 0x1230 && shipref_got.check == 0xABCDEF);
+    check_pipe(0, 1, 0x21, 0, 0, 0, 0x20);
+    close_file(&pf);
+    remove(PATH);
+}
+
 static void open_file(PFile* pf, const char* key, u64 first_module, int fail_first, u32 loaded[2]) {
     PfLoad load;
     load.shader = load_shader;
     load.pipe = load_pipe;
+    load.shipref = load_shipref;
     load.ctx = NULL;
     memset(&got, 0, sizeof got);
     got.next_module = first_module;
@@ -258,6 +451,7 @@ int main(void) {
         PfLoad load;
         load.shader = load_shader;
         load.pipe = load_pipe;
+        load.shipref = load_shipref;
         load.ctx = NULL;
         memset(&pf, 0, sizeof pf);
         pm_init(&pf.lock);
@@ -267,6 +461,8 @@ int main(void) {
         close_file(&pf);
     }
 #endif
+    mapped();
+    shiprefs();
     printf("pipeline_file: %u checks passed\n", checks);
     return 0;
 }

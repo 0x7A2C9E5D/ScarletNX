@@ -33,8 +33,12 @@ static void usage(void) {
          "  --outdir DIR           Where the game's folder goes (default: games/ in the data folder)\n"
          "  -O LEVEL               Optimization: 0,1,2,3,s,z (default: 2), the setting opt\n"
          "  --jobs N               Parallel compiles (default: CPU count), the setting aot_threads");
-    puts("  --KEY=VALUE            A setting of the recompile: opt, aot_threads, and LLVM's (llvm_pass_<pass>=0\n"
-         "                         turns that pass off; scarletnx --settings=recompile lists them)");
+    puts("  --jit-cache FILE       Link a profile run's .jitcache into the module as runtime code");
+    puts("  --KEY=VALUE            A setting of the recompile: opt, aot_threads, unit_cache_gb (the most GB the\n"
+         "                         cache of compiled code units holds: 0, the default, for no limit; it always\n"
+         "                         leaves a tenth of its disk free), and LLVM's\n"
+         "                         (llvm_pass_<pass>=0 turns that pass off); scarletnx --settings=recompile\n"
+         "                         lists them");
     printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",
            SNX_CHUNK_INSTRUCTIONS);
     puts("  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
@@ -322,7 +326,8 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs)
     return rc;
 }
 int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
-    const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *arg, *value;
+    const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *jit_cache = NULL,
+               *arg, *value;
     SnxU64 addon = 0, owner = 0, version = SNX_NO_VERSION; /* an update, its game and version, as its content meta
                                                                 names them */
     SnxLlvmBuild llvm;
@@ -400,7 +405,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             }
             if (strcmp(arg, "-o") && strcmp(arg, "--name") && strcmp(arg, "--out") && strcmp(arg, "--outname") &&
                 strcmp(arg, "--outdir") && strcmp(arg, "--runtime") && strcmp(arg, "--target") && strcmp(arg, "-O") &&
-                strcmp(arg, "--jobs") && strcmp(arg, "--chunk"))
+                strcmp(arg, "--jobs") && strcmp(arg, "--chunk") && strcmp(arg, "--jit-cache"))
                 return snx_error("unknown recompiler option: %s", arg);
             if (!value) {
                 if (++i == argc) return snx_error("%s requires a value", arg);
@@ -421,6 +426,8 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             } else if (!strcmp(arg, "--jobs")) {
                 g_settings.aot_threads = (int)number(value, 1024);
                 if (!g_settings.aot_threads) return snx_error("--jobs expects 1..1024");
+            } else if (!strcmp(arg, "--jit-cache")) {
+                jit_cache = value;
             } else {
                 gen.chunk_instrs = number(value, INT_MAX);
                 if (!gen.chunk_instrs) return snx_error("--chunk expects a positive instruction count");
@@ -549,6 +556,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         goto done;
     }
     gen.title = title;
+    gen.jit_cache = jit_cache;
     gen.hints = read_hints(base, program.npdm.is64, &gen.hint_count);
     if (!compile.quiet) printf("Recompiling %s (%zu modules)\n", title, program.module_count);
     /* an add-on's files: its dump, read in place, or what the driver extracts into its data folder */
@@ -596,7 +604,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     }
     code = ios ? snx_format("%s_code.snxobj", base) : snx_format("%s_code.%s", base, compile.target_win ? "dll" : "so");
     {
-        char* kept = keep_c ? snx_format("%s_build", base) : NULL;
+        char *kept = keep_c ? snx_format("%s_build", base) : NULL, *units = NULL;
         llvm.output = code;
         llvm.triple = ios ? SNX_IOS_TRIPLE : NULL;
         llvm.opt = compile.opt[0];
@@ -608,6 +616,20 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         llvm.jobs = compile.jobs;
         llvm.quiet = compile.quiet;
         llvm.keep_ir = kept;
+        {
+            /* the user's cache folder, or a portable copy's: every game's recompile shares it */
+            char* folder = snx_menu_dir(paths->repo, SNX_USER_CACHE);
+            units = folder ? snx_path_join(folder, "units") : NULL;
+            free(folder);
+            if (!units) {
+                snx_error("unit cache: no cache folder, as the environment names no home (HOME, or APPDATA on "
+                          "Windows): the game is not recompiled");
+                free(kept);
+                goto done;
+            }
+            llvm.unit_cache = units;
+            llvm.unit_cache_limit = (SnxU64)g_settings.unit_cache_limit * 1000000000ull;
+        }
         i = kept && (snx_is_link(kept) || snx_mkdirs(kept));
         if (i) snx_error("cannot save the generated code in %s", kept);
         if (!i && !program.npdm.is64)
@@ -615,6 +637,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         else if (!i)
             i = snx_build_module_llvm(&program, &gen, &llvm);
         free(kept);
+        free(units);
         if (i) goto done;
     }
     if (ios) { /* the iOS app is the runtime: only the code is made here */

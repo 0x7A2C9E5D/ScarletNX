@@ -49,7 +49,7 @@ set(CMAKE_CXX_EXTENSIONS ON)
 
 option(SNX_BUILD_NX "Build the Switch Horizon/Maxwell runtime" ON)
 option(SNX_BUILD_GNUABI "Build the CPU-only Linux AArch64 runtime" ON)
-option(SNX_BUILD_3DS "Build 3DS extraction/memory support" ON)
+option(SNX_BUILD_3DS "Build the 3DS driver: extraction, the ARM11 AOT compiler and the runtime" ON)
 # Reject stale backend selections instead of silently changing an existing build's behavior.
 if(SNX_BUILD_NX AND DEFINED SNX_BACKEND AND NOT SNX_BACKEND STREQUAL "sdl3")
     message(FATAL_ERROR "SNX_BACKEND=${SNX_BACKEND}: SDL3 is now mandatory for the NX runtime. "
@@ -127,6 +127,9 @@ if(SNX_BUILD_NX)
 endif()
 include(cmake/build_info.cmake) # the window titles' line; the driver stamps games with its commit
 if(SNX_BUILD_3DS)
+    # the window's icon, as the Switch runtime's: made here, as the folder including it first owns snx_window_icon,
+    # and a target of src/3ds compiles only src/3ds (tests/architecture.py)
+    include(cmake/window_icon.cmake)
     add_subdirectory(src/3ds)
 endif()
 if(BUILD_TESTING)
@@ -205,6 +208,7 @@ install(FILES LICENSE DESTINATION ${licenses})
 install(FILES "${FFmpeg_SOURCE_DIR}/COPYING.LGPLv2.1" "${FFmpeg_SOURCE_DIR}/LICENSE.md" cmake/ffmpeg-vp9-nvdec.patch
         DESTINATION ${licenses}/FFmpeg)
 install(FILES dist/licenses/DejaVu/LICENSE DESTINATION ${licenses}/DejaVu) # the shared fonts' stand-in (pl.c)
+install(FILES dist/licenses/Montserrat/OFL.txt DESTINATION ${licenses}/Montserrat) # the 3DS shared font's stand-in
 install(FILES dist/licenses/Ryujinx/LICENSE.txt DESTINATION ${licenses}/Ryujinx) # the default Miis (misc.c)
 install(FILES "${Vulkan-Headers_SOURCE_DIR}/LICENSE.md" DESTINATION ${licenses}/Vulkan-Headers)
 install(DIRECTORY "${Vulkan-Headers_SOURCE_DIR}/LICENSES" DESTINATION ${licenses}/Vulkan-Headers)

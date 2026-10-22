@@ -25,6 +25,16 @@ u64 gmmu_run(u64 gva, u64 max, u64* cpu);
 /* Points the pages of [gva, gva + size) at guest memory from cpu on, the renderer told (its mapping bracket): what
    nvhost-as-gpu's MapBufferEx does, and a test without the ioctls */
 void gmmu_map(u64 gva, u64 cpu, u64 size);
+/* Each GPU range that shows guest bytes of [cpu, cpu + size), clipped to them: fn(ctx, gva, n) for the n bytes at
+   gva, each mapped page once. The same guest memory is mapped at several GPU addresses, so what is known of it by one
+   address holds at the others, and this finds them all from the guest side. From any thread. fn runs under the
+   index's lock: it takes no lock and doesn't call back into nvdrv. The index compares addresses only, as the page
+   table holds them: guest memory freed under a mapping still counts here, where gmmu_translate reads it as unmapped */
+void gmmu_aliases(u64 cpu, u64 size, void (*fn)(void* ctx, u64 gva, u64 n), void* ctx);
+/* The other way: each run of the page table over [gva, gva + size), a range below 2^40, in GPU order and clipped to it:
+   fn(ctx, gva, cpu, n) for n bytes at gva showing guest memory from cpu on, whole pages. Addresses only, and under the
+   same lock, as gmmu_aliases */
+void gmmu_pieces(u64 gva, u64 size, void (*fn)(void* ctx, u64 gva, u64 cpu, u64 n), void* ctx);
 
 /* Every syncpoint user allocates its ids here, so they stay below the 128 the stream library sizes its tables at.
    Running out is fatal. A freed id can be handed out again */
@@ -33,6 +43,14 @@ void syncpt_free(u32 id);
 u32 syncpt_read(u32 id);
 void syncpt_incr(u32 id);
 void syncpt_add(u32 id, u32 n); /* n increments, one wakeup */
+/* syncpt_add for a thread holding the renderer's lock (vk_lock), and only inside such a hold: the event slots waiting
+   for the value are signaled by the same thread's syncpt_events, which its outermost vk_unlock calls as it lets the
+   lock go (vk_release_events). Signaling takes the kernel's lock, and a thread holding that may wait in a trap on
+   GPU-owned memory, which is answered under the renderer's lock (memory/own.c) */
+void syncpt_add_quiet(u32 id, u32 n);
+/* the event slots this thread's syncpt_add_quiet increments reached, signaled: with no renderer's lock held. Nothing
+   when there were none since the last call */
+void syncpt_events(void);
 /* A channel promises the next n increments it will make, in order. Returns the value they reach: the fence the ioctl
    hands back, and what nvhost-ctrl reads as the maximum */
 u32 syncpt_promise(u32 id, u32 n);
@@ -70,6 +88,24 @@ typedef struct {
 typedef struct {
     u64 a, e;
 } VaRange;
+/* a run of the GPU page table: its pages [gpage, gpage + pages) show guest pages from cpage on */
+typedef struct {
+    u64 gpage, pages, cpage;
+} GRun;
+/* gmmu_aliases' index of the runs by guest page, built from them on its first query after a change. The guest pages
+   where a run starts or ends cut guest memory into nbound - 1 intervals, interval i [bound[i], bound[i + 1]), and
+   cover[first[i]] to cover[first[i + 1]] are the runs over all of it, so a query walks the intervals its range
+   meets. seen[r] is the query that last reported run r, so a run over several intervals is reported once. One block
+   from bound, cap bytes */
+typedef struct {
+    u64* bound;
+    u32* first; /* nbound + 1 entries */
+    u32* cover;
+    u32* seen;  /* one per run */
+    size_t cap;
+    u32 nbound, query;
+    int stale; /* the runs changed since the index was built */
+} GAlias;
 /* an nvhost-ctrl event slot. ev is made on first use and nvdrv keeps a reference. An armed slot is signaled once
    syncpoint id reaches thresh; armed changes under nvev_lk */
 typedef struct {
@@ -114,6 +150,13 @@ typedef struct {
     PMutex aslock;         /* held across ioctl_as: the mappings below and the VA allocator */
     GMap* gmaps;
     u32 ngmaps, capgmaps;
+    /* the GPU page table again as runs, sorted by GPU page and disjoint, changed with it (gmmu_map, gmmu_unmap: every
+       mapping, MAP_BUFFER_EX's, REMAP's and FREE_SPACE's, goes through them), and their index by guest page. Both
+       under alias_lock, which is taken last: inside aslock and the renderer's mapping bracket */
+    GRun* gruns;
+    u32 ngruns, capgruns;
+    GAlias alias;
+    PMutex alias_lock;
     u32 big_page_bits; /* 64K unless asked otherwise */
     VaRange* vafree;
     u32 nvafree, capvafree;
@@ -134,10 +177,10 @@ typedef struct {
     u32 ctrl_ev[NV_FDS];
     NvEventTable ctrl_evt[NV_CTRL_TABLES];
     u32 ctrl_evt_next;
-    /* a game thread arms a slot while GPU and video threads run nv_events_check after their increments. Arming
-       clears the event first and does both in one hold: an increment between a separate arm and clear would signal
-       and then lose its wakeup, leaving the game waiting for good. A mutex, not a spin: kevent_signal runs under
-       it */
+    /* a game thread arms a slot while GPU and video threads run nv_events_check after their increments: syncpt_add's
+       at once, syncpt_add_quiet's at the outermost vk_unlock, after vk_lock goes (syncpt_events). Arming clears the
+       event first and does both in one hold: an increment between a separate arm and clear would signal and then
+       lose its wakeup, leaving the game waiting for good. A mutex, not a spin: kevent_signal runs under it */
     PMutex nvev_lk;
     NvFile nvf[NV_FDS];
     /* nv_first_use's (device, ioctl) pairs, under seen_lock */

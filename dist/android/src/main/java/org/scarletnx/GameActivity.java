@@ -3,11 +3,25 @@
 package org.scarletnx;
 
 import android.content.Context;
+import android.os.Bundle;
+import android.system.ErrnoException;
+import android.system.Os;
 import org.libsdl.app.SDLActivity;
 import org.libsdl.app.SDLSurface;
 
 /** A game: the runtime's main in libscarletnx.so, with the menu's arguments */
 public class GameActivity extends SDLActivity {
+    /** HOME as the menu sets it (src/gui/android.c): a new process has none, and the keys are in its .switch/ */
+    @Override
+    protected void onCreate(Bundle state) {
+        try {
+            Os.setenv("HOME", getFilesDir().getPath(), true);
+        } catch (ErrnoException e) {
+            // the runtime then reads the keys from the data folder only
+        }
+        super.onCreate(state);
+    }
+
     @Override
     protected String[] getLibraries() {
         return new String[] {"scarletnx"};

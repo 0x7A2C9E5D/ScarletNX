@@ -31,7 +31,9 @@ typedef double f64;
 
 /* The version of the contract between a game module and the runtime: this header (the CPU layout, the SNX_FP_*
    numbers), the helpers in cpu_helpers.c, RtAPI and the module descriptor. The recompiler writes it into each
-   module and the runtime refuses any other. Bump it for any change of layout or of a helper's results.
+   module and the runtime refuses any other. Bump it for any change of layout or of a helper's results:
+   docs/ARCHITECTURE.md's Module ABI says what changes it, and tests/module_contract.c fails when the layout moves
+   while it stays.
    7: CPU.poll and RtAPI.poll, read on the backward branches of generated code.
    8: the FP/SIMD emitters and discovery changes.
    9: RtAPI.svcs, which the NX modules call each SVC through by its number.
@@ -40,8 +42,10 @@ typedef double f64;
   11: the reworked LLVM backend's modules. Old 10 was taken twice, by our engine and upstream's, and a module built
       for the wrong one must not load.
   12: snx_cas128 takes the CPU, and RtAPI.cas128 is the 16-byte compare-and-swap of the RISC-V and LoongArch
-      modules. */
-#define SNX_ABI 12
+      modules.
+  13: the AOT module's snx_variants() table, which the runtime reads for code the recompiler missed instead of
+      compiling it at run time. */
+#define SNX_ABI 13
 
 #if defined(_WIN32)
 #define SNX_EXPORT __declspec(dllexport)
@@ -285,8 +289,13 @@ SNX_INLINE u64 ext64(u64 x, u32 opt, u32 sh) {
 SNX_INLINE u32 clz64(u64 x) { return x ? (u32)__builtin_clzll(x) : 64; }
 SNX_INLINE u32 clz32(u32 x) { return x ? (u32)__builtin_clz(x) : 32; }
 SNX_INLINE u32 popc8(u8 x) { return (u32)__builtin_popcount(x); }
+/* FreeBSD defines these */
+#ifndef bswap32
 SNX_INLINE u32 bswap32(u32 x) { return __builtin_bswap32(x); }
+#endif
+#ifndef bswap64
 SNX_INLINE u64 bswap64(u64 x) { return __builtin_bswap64(x); }
+#endif
 /* CLS: the leading bits equal to the sign bit, the sign bit itself not counted */
 SNX_INLINE u32 cls64(u64 x) { return clz64(x ^ (u64)((i64)x >> 1)) - 1; }
 SNX_INLINE u32 cls32(u32 x) { return clz32(x ^ (u32)((i32)x >> 1)) - 1; }

@@ -713,23 +713,30 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         g_cbn[i] = sz;
         gmem_read(cba[i], g_cb[i], sz);
     }
-    /* the program at an address is taken as the same until the next submit, as vk_shader_get does: the code isn't
-       read and hashed again for every dispatch of it */
-    static struct {
-        u64 addr;
-        u32 epoch, lx, ly, lz, shm;
-        CsPipe* p;
-    } fc[64];
+    /* Recheck code at a new submit or instruction invalidation, as vk_shader_get does. */
+	struct cs_fast {
+		u64 addr;
+		u64 shader_generation;
+		u32 epoch, lx, ly, lz, shm;
+		CsPipe *p;
+	};
+	static struct cs_fast fc[64];
     u64 pa = code + q[8];
-    typeof(fc[0])* fe = &fc[((pa >> 8) ^ (pa >> 16)) & 63];
+	struct cs_fast *fe = &fc[((pa >> 8) ^ (pa >> 16)) & 63];
     CsPipe* p = fe->p;
-    if (!p || fe->addr != pa || fe->epoch != g_vk_epoch || fe->lx != lx || fe->ly != ly || fe->lz != lz ||
+	if (!p || fe->addr != pa || fe->shader_generation != g_vk.shader_generation ||
+	    fe->epoch != g_vk_epoch || fe->lx != lx || fe->ly != ly || fe->lz != lz ||
         fe->shm != shm || !vk_cb_reads_hold(&p->cbr, cs_cb_read)) {
         static u8 code_buf[0x10000 + 80]; /* compute programs have no header: 80 zero bytes stand in for one */
         CsKey unkeyed = {0, 0, 0};
         cs_read_code(pa, code_buf);
         p = cs_pipe(code_buf, lx, ly, lz, shm, unkeyed);
-        *fe = (typeof(fc[0])){pa, g_vk_epoch, lx, ly, lz, shm, p};
+		*fe = (struct cs_fast){
+			.addr = pa,
+			.shader_generation = g_vk.shader_generation,
+			.epoch = g_vk_epoch,
+			.lx = lx, .ly = ly, .lz = lz, .shm = shm, .p = p,
+		};
     }
     /* A 2D store is translated unsigned for a bindless image and float for a bound one. An image of the other
        class (a bindless RGBA8 target), or an integer texture, needs the program translated again, keyed on it. */
@@ -819,15 +826,15 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     need += sizeof(i32) * 320 + vk_stage_align(); /* optional format data */
     /* dispatches that read textures run on the graphics queue, after what was recorded before them. Inputs that
        pending compute results overlap land those first, before anything is put in the arena */
-    int gfx = p->si.ntex > 0 || p->si.nimg > 0, overlap = 0, storage_images = 0, retries = 0;
+    int gfx = p->si.ntex > 0 || p->si.nimg > 0, overlap = 0, retries = 0;
     /* so does one whose storage buffers a draw's pending result covers: on the graphics queue, after that draw, it
        reads the result on the GPU instead of the compute queue waiting for it to land (one game: three a frame) */
     for (i = 0; i < ng && !gfx; i++) gfx = sa[i] && vk_buf_pending(sa[i], ss[i]);
-    for (i = 0; i < p->si.nimg; i++) storage_images |= p->si.img[i].type != 1;
-    /* A graphics-queue dispatch without storage images binds like a draw: staged inputs, results pending in staging
-       (buffer.c's GfxOut), landed when the guest needs them or once their submit is done. Landing each one at once
-       took a vk_finish per dispatch, about 9 a frame in one game. Storage images still land at once (vk_surf_flush) */
-    int deferred = gfx && !storage_images;
+    /* A graphics-queue dispatch binds like a draw: staged inputs, results pending in staging (buffer.c's GfxOut),
+       landed when the guest needs them or once their submit is done. Landing each one at once took a vk_finish per
+       dispatch, about 9 a frame in one game. Its storage images are published over their guest bytes, GPU-owned
+       (vk_surf_publish), and land at once only where they can't be */
+    int deferred = gfx;
     /* a read-only input inside a pending result of this batch is read from the arena on the GPU, after a barrier
        (multi-pass skinning reads what the pass before wrote); any other overlap lands the results first */
     i64 chain[16];
@@ -1061,7 +1068,7 @@ rebind:
                     seen = 1;
                     break;
                 }
-            if (!seen) {
+            if (!seen && !deferred) { /* a published image keeps no merge: its owner takes the span whole */
                 originals[i] = malloc(image_bytes);
                 if (!originals[i]) {
                     g_cs_skips[CS_SKIP_RESOURCES]++;
@@ -1226,6 +1233,14 @@ rebind:
         vk_buf_writable_commit();
         for (i = 0; i < p->si.nimg && i < 8; i++)
             if (bufimg_view[i]) vk_defer_buffer_view(bufimg_view[i]);
+        /* the storage images' texels over their guest bytes, after the dispatch on the GPU */
+        for (i = 0; i < p->si.nimg && i < 8; i++) {
+            int seen = 0;
+            for (int k = 0; k < i && !seen; k++) seen = images[k] == images[i];
+            if (!images[i] || seen) continue;
+            vk_surf_wrote(images[i]);
+            if (!vk_surf_publish(images[i])) vk_surf_flush(images[i], NULL);
+        }
         g_vk_dispatches++;
         vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
         return;

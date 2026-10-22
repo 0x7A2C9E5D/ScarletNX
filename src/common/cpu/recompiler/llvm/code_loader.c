@@ -8,6 +8,8 @@
 #define _DARWIN_C_SOURCE /* MAP_ANON, MAP_JIT and pthread_jit_write_protect_np besides POSIX */
 #endif
 #include "common/cpu/recompiler/llvm/code_loader_int.h"
+#include "common/cpu/recompiler/llvm/gdb_jit.h"
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -483,6 +485,7 @@ static SnxCodeLoader* new_loader(size_t reserve, unsigned machine, uint64_t toc,
 
 void snx_code_loader_free(SnxCodeLoader* loader) {
     if (!loader) return;
+    snx_gdb_jit_remove(loader);
 #ifdef _WIN32
     /* each part of the arena goes as it was made: the views, the data reservation, a placeholder left over */
     {
@@ -940,6 +943,19 @@ static int relocate(const SnxCodeLoader* loader, const Load* ld, char* error, si
     return 0;
 }
 
+/* Hands an attached GDB a copy of o, a load's object, with its loaded sections' sh_addr where the load put them
+   (gdb_jit.c), for loader's free to take back */
+static void gdb_register(const SnxCodeLoader* loader, const SnxElfObject* o) {
+    unsigned char* copy = snx_gdb_jit_copy(loader, o->input->data, o->input->size);
+    size_t i;
+    if (!copy) return;
+    for (i = 0; i < o->eh->e_shnum; ++i)
+        if (o->kind[i] >= 0)
+            memcpy(copy + o->eh->e_shoff + i * sizeof(Elf64_Shdr) + offsetof(Elf64_Shdr, sh_addr), &o->address[i],
+                   sizeof(Elf64_Addr));
+    snx_gdb_jit_add(copy);
+}
+
 /* snx_code_load, and snx_code_load_private when publish is 0 */
 static int load(SnxCodeLoader* loader, const SnxLinkInput* inputs, size_t count, const char* const* names,
                 size_t name_count, SnxU64* addresses, int publish, char* error, size_t error_size) {
@@ -1051,6 +1067,9 @@ static int load(SnxCodeLoader* loader, const SnxLinkInput* inputs, size_t count,
     /* a region the unit put nothing into keeps its next free byte, so an empty load uses nothing */
     for (i = 0; i < REGIONS; ++i)
         if (end[i] > start[i]) loader->region[i].used = (size_t)(end[i] - ld.arena_start - loader->region[i].start);
+    /* another machine's objects (a test's) run nowhere here, nor does GDB debug them */
+    if (loader->machine == HOST_MACHINE)
+        for (i = 0; i < count; ++i) gdb_register(loader, &ld.objs[i]);
     rc = 0;
 done:
     for (i = 0; i < count; ++i) snx_elf_free(&ld.objs[i]);

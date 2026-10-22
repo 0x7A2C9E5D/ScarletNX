@@ -91,6 +91,16 @@ int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title, Sn
     if (version) *version = strstr(dump, "Update old") ? 0 : strstr(dump, "Update") ? 65536 : SNX_NO_VERSION;
     return 0;
 }
+/* the icon alone, as -x keeps it: what a game made before it kept one gets from its dump */
+int snx_extract_icon(const char* dump, const SnxPaths* paths, const char* out) {
+    char* to = snx_path_join(out, "icon.jpg");
+    int rc;
+    (void)paths;
+    CHECK(snx_is_file(dump));
+    rc = snx_write_file(to, "icon", 4);
+    free(to);
+    return rc;
+}
 int snx_extract(int argc, char** argv, const SnxPaths* paths) {
     char* partial;
     int rc;
@@ -784,7 +794,8 @@ int main(int argc, char** argv) {
             free(directory);
         }
     }
-    /* a game with a title ID of its own is named by it, whatever its dump is called; a broken NPDM stops the run */
+    /* a game with a title ID of its own is named by it, whatever its dump is called, its recompile given no name; a
+       broken NPDM stops the run */
     {
 #ifdef _WIN32
         char* named = snx_path_join(repo, "recompiled/0100ABCD12345000/0100ABCD12345000.exe");
@@ -792,20 +803,28 @@ int main(int argc, char** argv) {
         char* named = snx_path_join(repo, "recompiled/0100ABCD12345000/0100ABCD12345000");
 #endif
         char* folder = snx_path_join(repo, "recompiled/0100ABCD12345000");
+        char* extracted = snx_path_join(folder, "0100ABCD12345000_data");
         reset(repo, dump);
         set_env("SNX_WORKFLOW_MODE", "exit");
         set_env("SNX_WORKFLOW_NPDM", "id");
         set_env("SNX_WORKFLOW_GAMES", folder);
+        set_env("SNX_WORKFLOW_SOURCE", extracted); /* given no name: shown by its control.nacp's, not its ID */
         run(exe, repo, dump, log, 0, "ERG", NULL);
+        set_env("SNX_WORKFLOW_SOURCE", "");
+        free(extracted);
         CHECK(snx_is_file(named) && !snx_is_file(game));
         run(exe, repo, dump, log, 0, "G", NULL);
         { /* made already, recompiled where it is with no name given: shown again by its control.nacp, not its ID */
             char *stamp = snx_format("%s/0100ABCD12345000.abi", folder),
                  *data = snx_format("%s/0100ABCD12345000_data", folder);
+            char* icon = snx_format("%s/icon.jpg", data);
             CHECK(!snx_write_file(stamp, "4\n", 2));
+            CHECK(!snx_is_file(icon)); /* its extraction kept none: its dump's taken as it plays */
             set_env("SNX_WORKFLOW_SOURCE", data);
             run(exe, repo, named, log, 0, "RG", NULL);
             set_env("SNX_WORKFLOW_SOURCE", "");
+            CHECK(snx_is_file(icon));
+            free(icon);
             free(data);
             free(stamp);
         }
@@ -1175,7 +1194,7 @@ int main(int argc, char** argv) {
         rc = snx_run(probe, NULL, NULL, &output);
         CHECK(rc != 0 && strstr(output, "Probe"));
 #ifndef _WIN32
-        CHECK(strstr(output, "chdir to game directory"));
+        CHECK(strstr(output, "chdir to the child's working directory"));
 #endif
         free(output);
         probe[2] = "exec";

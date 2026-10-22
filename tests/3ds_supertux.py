@@ -7,6 +7,7 @@ No download, title assets or native cache are shipped/reused. Takes DRIVER CIA P
 
 import hashlib
 from pathlib import Path
+import re
 import subprocess
 import struct
 import sys
@@ -42,6 +43,9 @@ def oracle(output, native):
         emu.reg_write(reg, 0)
     emu.reg_write(R.UC_ARM_REG_SP, 0x10000000)
     emu.reg_write(R.UC_ARM_REG_C13_C0_3, 0x1FF82000)
+    # the main thread's FPSCR as the kernel sets it, as the runtime does (Azahar SetupMainThread): default NaN, flush
+    # to zero, round toward zero
+    emu.reg_write(R.UC_ARM_REG_FPSCR, 0x03C00010)
     seen = []
 
     def interrupt(cpu, number, context):
@@ -176,10 +180,10 @@ def main():
         )
         text = result.stdout + result.stderr
         print(text)
-        assert result.returncode == 3 and 'syndrome=0x00000032' in result.stderr
-        assert 'pc=0x001def50' in result.stderr and 'blocks=50629' in result.stderr
-        assert 'unsupported guest operation' in result.stderr
-        assert 'svcs=61' in result.stderr and 'ipc_header=0x080d0144' in result.stderr
+        # Past the archive timestamp the title goes on loading: the block budget ends the run, nothing unsupported
+        # does. Where it ends depends on host-paced vblank and DSP time, so the pc and SVC count are not checked.
+        assert result.returncode == 3 and 'static block budget exhausted' in result.stderr
+        assert re.search(r'\bblocks=100000\b', result.stderr) and 'unsupported guest operation' not in text
         assert 'Running ARM11 static AOT' in result.stdout and 'Guest ExitProcess' not in text
         assert 'AddressSanitizer' not in text and 'runtime error:' not in text
         assert (
@@ -191,12 +195,10 @@ def main():
         state = subprocess.run([probe, str(output), 'supertux_boot'], text=True, capture_output=True, timeout=30)
         print(state.stdout, state.stderr)
         assert state.returncode == 0 and 'CPU gate before APT:S lookup handling' in state.stdout
-        assert 'SuperTux main entry reached: pc=0x00167d88 blocks=50489' in state.stdout
+        assert 'SuperTux main entry reached: pc=0x00167d88 blocks=50569' in state.stdout
         if '--oracle' in sys.argv[4:]:
             oracle(output, state.stdout)
-    print(
-        'Pinned SuperTux executes scalar VFP, opens RomFS, then stops at archive timestamp control; no graphics/audio/gameplay.'
-    )
+    print('Pinned SuperTux reaches main, opens RomFS, answers its archive timestamp and runs on to the block budget.')
 
 
 if __name__ == '__main__':

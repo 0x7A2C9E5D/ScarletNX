@@ -133,7 +133,7 @@ static void uploads(SnxCtrMemory* m) {
 static void control(SnxCtrMemory* m) {
     SnxCtrPica* p = calloc(1, sizeof *p);
     unsigned interrupts = 0;
-    SnxCtrPicaHost host = {&interrupts, on_interrupt};
+    SnxCtrPicaHost host = {&interrupts, on_interrupt, snx_ctr_pica_draw, snx_ctr_pica_draw_immediate, NULL};
     List l = {{0}, 0}, sub = {{0}, 0};
     const uint32_t attr[3] = {0x3e0000c0u, 0x00004000u, 0x003f0000u};
     snx_ctr_pica_init(p);
@@ -281,7 +281,7 @@ static void render(SnxCtrMemory* m) {
     enum { FB = FCRAM + 0x20000, VERTICES = FCRAM + 0x10000, TEXTURE = FCRAM + 0x30000, W = 16, H = 16 };
     SnxCtrPica* p = calloc(1, sizeof *p);
     unsigned interrupts = 0;
-    SnxCtrPicaHost host = {&interrupts, on_interrupt};
+    SnxCtrPicaHost host = {&interrupts, on_interrupt, snx_ctr_pica_draw, snx_ctr_pica_draw_immediate, NULL};
     List l = {{0}, 0};
     /* position, colour, texture coordinate */
     float vertices[3][10] = {{-1, -1, -0.5f, 1, 1, 0.6f, 0.25f, 1, 0, 0},

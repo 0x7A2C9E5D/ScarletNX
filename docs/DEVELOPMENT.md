@@ -68,7 +68,10 @@ build/scarletnx --scan-log "$games/<id>/<id>.log" [--format markdown]
   the data folder and its state, cache and settings folders), `find_game` (the extracted games in `work/` with their
   title IDs and versions), `symbolize` and `disassemble` (as `tools/symbols.py` and `tools/disasm.py`, A64 through
   LLVM's disassembler where LLVM has the AArch64 target). The last game loaded stays loaded for the next call. Its
-  edenprobe tools turn a confirmed report into an edenprobe case ([EDENPROBE.md](EDENPROBE.md)). The game reports
+  edenprobe tools turn a confirmed report into an edenprobe case ([EDENPROBE.md](EDENPROBE.md)). Its GDB tools
+  (`mcp_gdb.c`, [USAGE.md](USAGE.md#gdb-through-the-mcp-server)) run one GDB over its machine interface (MI 3,
+  resumes as `-exec-*` commands in the background). They find a guest thread's `KThread` through its host thread's
+  `tls_thread`, by the runtime's debug information, and guest memory at `g_mem`. The game reports
   on GitHub come from GitHub's own MCP server or `scripts/game-reports.py index`.
 - Game reports: `.github/workflows/game-reports.yml` builds `snx-logscan` and runs `scripts/game-reports.py triage` on
   each issue and comment. An issue with a log attached (`.log`, `.txt`, `.gz`, `.zip`) or pasted in a fenced block gets
@@ -78,7 +81,9 @@ build/scarletnx --scan-log "$games/<id>/<id>.log" [--format markdown]
   logs as JSON lines. A maintainer's `status: confirmed` label on a report gets one comment: ready for an edenprobe
   case, with the steps.
 
-- Runtime: `--seconds=N` / `--frames=N`; `--shot=out` → CWD `out.ppm`; `--shot_every=N` → every N frames.
+- Runtime: `--seconds=N` / `--frames=N`, counted from the game's start, after the shader loading screen
+  (`prepare_shaders=2`, which the first run after a rebuild spends translating the game's shaders again);
+  `--shot=out` → CWD `out.ppm`; `--shot_every=N` → every N frames.
   `--script=ms:hexbuttons,...` (or `Nf:hexbuttons` to press at present N), `--press_len=ms` (default 300).
   `--swkbd_text=TEXT`: the software keyboard answers TEXT instead of opening the host's dialog.
   Masks: A/B/X/Y `1/2/4/8`, L/R `40/80`, ZL/ZR `100/200`, Plus/Minus `400/800`,
