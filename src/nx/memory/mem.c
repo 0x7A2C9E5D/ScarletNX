@@ -584,7 +584,8 @@ void mem_init(void) {
         g_as_size < AS_MAX ? " (a smaller layout: this app has no extended virtual addressing)" : "");
 #else
     g_mem = plat_vm_reserve(AS_SIZE);
-    if (!g_mem) fatal("Could not reserve %llu GiB of address space for the game's memory", AS_SIZE >> 30);
+    if (!g_mem) fatal("Could not reserve %llu GiB of address space for the game's memory",
+                      (unsigned long long)(AS_SIZE >> 30));
 #endif
     mem_lock();
     blk_reserve_nl(1);

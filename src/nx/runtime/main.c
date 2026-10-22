@@ -46,6 +46,8 @@
 #define MODULE_PACK 1
 #include "common/cpu/recompiler/llvm/code_loader.h"
 #include "common/cpu/recompiler/llvm/objects_pack.h"
+/* src/gui/apple.m's (gui/apple.h pulls in SDL's headers, which this part of the runtime is not built with) */
+void gui_apple_stats(char* out, size_t size);
 #include "common/cpu/recompiler/llvm/rtlib_object.h"
 #endif
 
@@ -489,8 +491,8 @@ static void write_threads(u64 second) {
 
 static void frontend_loop(void) {
     const u64 period = 1000000000u / VI_REFRESH_HZ;
-    u64 tick = 0, next = plat_ns(), now, changed = next;
-    int frames = 0, stalls = 0;
+    u64 tick = 0, next = plat_ns(), now, changed = next, rate_at = next;
+    int frames = 0, stalls = 0, rate_frames = 0;
     while (!g_quit) {
         int shown;
         video_poll();
@@ -506,6 +508,20 @@ static void frontend_loop(void) {
         if (tick % 900 == 0) write_threads(tick / VI_REFRESH_HZ);
         now = plat_ns();
         shown = __atomic_load_n(&g_frames, __ATOMIC_RELAXED);
+        /* the pace the game is shown at, in the log every five seconds: a phone has no overlay to read it from */
+        if (now - rate_at >= 5000000000u) {
+            LOG("perf: %.1f frames a second over %.1f s (%d shown in all)\n",
+                (double)(shown - rate_frames) * 1e9 / (double)(now - rate_at), (double)(now - rate_at) / 1e9, shown);
+            rate_at = now;
+            rate_frames = shown;
+#ifdef MODULE_PACK
+            {
+                char line[320];
+                gui_apple_stats(line, sizeof line);
+                LOG("%s\n", line);
+            }
+#endif
+        }
         if (shown != frames) {
             frames = shown;
             changed = now;

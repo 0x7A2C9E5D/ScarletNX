@@ -182,6 +182,10 @@ void vk_defer_call(void (*fn)(void*), void* arg); /* fn(arg) then */
 /* the submission being recorded (a number that grows at every submit: what a submit may have changed, results landed,
    is checked against it), and the frame (grows at vk_frame_next: frame f's work is done once f + VK_FRAMES started) */
 u64 vk_submit_number(void);
+/* iOS takes the GPU from an app in the background: a submit then loses the device ("Insufficient Permission (to submit
+   GPU work from background)"). Holds the caller until the app is shown again, or the game is leaving. Returns at once
+   everywhere else */
+void vk_wait_foreground(void);
 u32 vk_cb_begun(void); /* command buffers begun so far: changes when a new one starts recording */
 u64 vk_frame_id(void);
 /* the submission being recorded reads buffers in frame frame_id's rings: that frame's slot isn't reused until it is
