@@ -412,7 +412,7 @@ SNX_INLINE u64 sat_u(i64 v, int bits) {
     return (u64)v > hi ? hi : (u64)v;
 }
 
-/* ---- AdvSIMD helpers out of line (helpers/simd.c, helpers/crypto.c) ---- */
+/* ---- AdvSIMD helpers out of line (tests/a64_reference/simd.c, helpers/crypto.c) ---- */
 void v_tbl(CPU* c, u32 d, u32 n, u32 len, u32 m, int q, int tbx);
 void v_aes(V128* d, const V128* k, int dec);         /* AESE (dec 0), AESD (1): d = round(d ^ k) */
 void v_aesmc(V128* d, const V128* s, int inv);       /* AESMC (inv 0), AESIMC (1) */

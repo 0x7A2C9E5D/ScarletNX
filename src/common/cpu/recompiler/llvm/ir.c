@@ -62,6 +62,7 @@ int snx_ir_init(char* error, size_t error_size) {
         snx_ir_host.crc32 = snx_ir_host.sse42 && has_feature(f, "crc32");
         snx_ir_host.pclmul = has_feature(f, "pclmul");
         snx_ir_host.aes = has_feature(f, "aes");
+        snx_ir_host.sha_ni = has_feature(f, "sha");
         snx_ir_host.gfni = has_feature(f, "gfni");
         snx_ir_host.fma = has_feature(f, "fma");
         snx_ir_host.avx2 = has_feature(f, "avx2");
@@ -70,6 +71,14 @@ int snx_ir_init(char* error, size_t error_size) {
         snx_ir_host.avx512bitalg = has_feature(f, "avx512bitalg");
         LLVMDisposeMessage(f);
         snx_ir_host.x86 = 1; /* last: snx_ir_init may run again, the features stay as read */
+    }
+    if (arm && !snx_ir_host.aarch64) {
+        char* f = LLVMGetHostCPUFeatures();
+        snx_ir_host.arm_aes = has_feature(f, "aes") || has_feature(f, "crypto");
+        snx_ir_host.arm_sha2 = has_feature(f, "sha2") || has_feature(f, "crypto");
+        snx_ir_host.arm_crc = has_feature(f, "crc");
+        LLVMDisposeMessage(f);
+        snx_ir_host.aarch64 = 1; /* last, as x86 above */
     }
     return x86 || arm || ppc || other ? 0 : -1;
 }

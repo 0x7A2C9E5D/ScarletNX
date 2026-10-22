@@ -63,11 +63,15 @@ enum {
 
 /* Instruction set extensions the generated code may use. The host's are read once per process (snx_ir_init, from
    LLVM's CPUID-based host detection) into snx_ir_host; an SnxIr for another triple (tests) gets none of them. The
-   x86 fields are only ever set when the target is x86-64, so an emitter gated on them is gated on the architecture */
+   x86 fields are only ever set when the target is x86-64 and the arm ones when it is AArch64, so an emitter gated
+   on them is gated on the architecture */
 typedef struct {
-    int x86;                                  /* x86-64 target: x86 intrinsics are available at all */
-    int sse42, crc32, pclmul, aes, gfni, fma; /* x86 extensions */
+    int x86;                                          /* x86-64 target: x86 intrinsics are available at all */
+    int sse42, crc32, pclmul, aes, sha_ni, gfni, fma; /* x86 extensions */
     int avx2, avx512bw, avx512vl, avx512bitalg;
+    int aarch64;           /* AArch64 target: AArch64 intrinsics are available at all */
+    int arm_aes, arm_sha2; /* AArch64 crypto extensions (PMULL comes with AES) */
+    int arm_crc;           /* AArch64 CRC32 extension */
 } SnxIrFeatures;
 extern SnxIrFeatures snx_ir_host;
 

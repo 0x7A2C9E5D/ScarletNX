@@ -94,7 +94,7 @@ static void* reference_library;
 /* the interpreter of a64_templates.inc's C, compiled into a library of its own with compiler and loaded: 0, or -1 */
 static int build_reference(const char* root, const char* repo, const char* compiler) {
     char *source = snx_path_join(root, "reference.c"), *include = snx_path_join(repo, "src"),
-         *output = NULL;
+         *tests = snx_path_join(repo, "tests"), *output = NULL;
 #ifdef _WIN32
     char* library = snx_path_join(root, "reference.dll");
 #else
@@ -122,6 +122,8 @@ static int build_reference(const char* root, const char* repo, const char* compi
     args[n++] = "-w";
     args[n++] = "-I";
     args[n++] = include;
+    args[n++] = "-I";
+    args[n++] = tests;
     args[n++] = source;
     args[n++] = "-o";
     args[n++] = library;
@@ -139,6 +141,7 @@ static int build_reference(const char* root, const char* repo, const char* compi
 #endif
     free(source);
     free(include);
+    free(tests);
     free(library);
     return reference ? 0 : -1;
 }

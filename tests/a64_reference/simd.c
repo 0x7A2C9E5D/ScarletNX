@@ -3,6 +3,13 @@
    Ported from QEMU (target/arm/tcg/translate-a64.c, vec_helper.c, helper-a64.c), LGPL-2.1-or-later:
    Copyright (c) 2013 Alexander Graf <agraf@suse.de>
    Copyright (c) 2018 Linaro */
+/* ================================================================================================
+   TEST ONLY. NOT IN PRODUCTION.
+   tests/a64_reference/reference.inc includes this file; cpu_helpers.c includes that only under
+   SNX_A64_REFERENCE. It is the C reference interpreter the differential tests compare the LLVM
+   backend against. No game module compiles it, no runtime path calls it. Its job is to be the slow,
+   obvious oracle, so do not optimize it for speed.
+   ================================================================================================ */
 /* AdvSIMD data processing for the C reference interpreter (SNX_A64_REFERENCE): every ARMv8.0 encoding of the vector
    and scalar groups, lane by lane in plain C. The LLVM backend lowers the same words directly (ir_neon_*.inc), so
    this is test-only. Allocation matters as much as results: an unallocated word returns 0 (UNDEFINED), as the

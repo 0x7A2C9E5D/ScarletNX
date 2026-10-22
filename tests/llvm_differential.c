@@ -594,7 +594,7 @@ int main(int argc, char** argv) {
     size_t pattern_failures[64] = {0};
     Word* words = NULL;
     const SnxA64Pattern* patterns = snx_a64_patterns(&npatterns);
-    char error[1024], *dir, *c_path, *c_lib, *l_lib, *text = NULL, *abi, *root;
+    char error[1024], *dir, *c_path, *c_lib, *l_lib, *text = NULL, *abi, *root, *tests;
     const char* args[24];
     FILE* f;
     SnxIr* ir;
@@ -687,7 +687,8 @@ int main(int argc, char** argv) {
     fputs("};\nSNX_EXPORT StepFnPtr* snx_test_steps(void){ return TABLE; }\n", f);
     fclose(f);
     abi = snx_path_join(repo, "src/common/cpu/aarch64");
-    root = snx_path_join(repo, "src"); /* what cpu.h includes */
+    root = snx_path_join(repo, "src");    /* what cpu.h includes */
+    tests = snx_path_join(repo, "tests"); /* what cpu_helpers.c's reference include needs */
     k = 0;
     args[k++] = clang;
     args[k++] = "-O2";
@@ -710,6 +711,8 @@ int main(int argc, char** argv) {
     args[k++] = abi;
     args[k++] = "-I";
     args[k++] = root;
+    args[k++] = "-I";
+    args[k++] = tests;
     args[k++] = c_path;
     args[k++] = "-o";
     args[k++] = c_lib;
@@ -843,5 +846,6 @@ int main(int argc, char** argv) {
     free(l_lib);
     free(abi);
     free(root);
+    free(tests);
     return failures || fallbacks;
 }

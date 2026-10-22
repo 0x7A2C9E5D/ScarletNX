@@ -384,8 +384,8 @@ static void emit_semantic_fixture(FILE* out) {
 }
 
 static void semantics_test(const char* compiler, const char* repo, const char* directory) {
-    const char* args[16];
-    char *source, *binary, *include, *root, *output;
+    const char* args[18];
+    char *source, *binary, *include, *root, *tests, *output;
     FILE* file;
     int n, status;
     source = snx_path_join(directory, "semantics.c");
@@ -395,7 +395,8 @@ static void semantics_test(const char* compiler, const char* repo, const char* d
     binary = snx_path_join(directory, "semantics");
 #endif
     include = snx_path_join(repo, "src/common/cpu/aarch64");
-    root = snx_path_join(repo, "src"); /* what cpu.h includes */
+    root = snx_path_join(repo, "src");    /* what cpu.h includes */
+    tests = snx_path_join(repo, "tests"); /* what cpu_helpers.c's reference include needs */
     output = NULL;
     file = snx_fopen(source, "wb");
     check(file != NULL, "open ISA semantics fixture");
@@ -415,6 +416,8 @@ static void semantics_test(const char* compiler, const char* repo, const char* d
     args[n++] = include;
     args[n++] = "-I";
     args[n++] = root;
+    args[n++] = "-I";
+    args[n++] = tests;
     args[n++] = source;
 #ifndef _WIN32
     args[n++] = "-lm";
@@ -439,6 +442,7 @@ done:
     free(binary);
     free(include);
     free(root);
+    free(tests);
     free(output);
 }
 
@@ -508,8 +512,8 @@ static void poll_test(const char* compiler, const char* repo, const char* direct
     SnxCodegen codegen;
     SnxFde range;
     const SnxFunction* function;
-    const char* args[16];
-    char *source, *binary, *include, *root, *output = NULL;
+    const char* args[18];
+    char *source, *binary, *include, *root, *tests, *output = NULL;
     FILE* file;
     size_t i;
     int n, status;
@@ -529,7 +533,8 @@ static void poll_test(const char* compiler, const char* repo, const char* direct
     binary = snx_path_join(directory, "poll");
 #endif
     include = snx_path_join(repo, "src/common/cpu/aarch64");
-    root = snx_path_join(repo, "src"); /* what cpu.h includes */
+    root = snx_path_join(repo, "src");    /* what cpu.h includes */
+    tests = snx_path_join(repo, "tests"); /* what cpu_helpers.c's reference include needs */
     file = function ? snx_fopen(source, "wb") : NULL;
     check(file != NULL, "open the poll fixture");
     if (!file) goto done;
@@ -574,6 +579,8 @@ static void poll_test(const char* compiler, const char* repo, const char* direct
     args[n++] = include;
     args[n++] = "-I";
     args[n++] = root;
+    args[n++] = "-I";
+    args[n++] = tests;
     args[n++] = source;
 #ifndef _WIN32
     args[n++] = "-lm";
@@ -599,6 +606,7 @@ done:
     free(binary);
     free(include);
     free(root);
+    free(tests);
     free(output);
 }
 
