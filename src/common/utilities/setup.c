@@ -248,6 +248,15 @@ static char* keys_home(void) {
 }
 char* snx_keys_found(const char* data, const char* name) {
     char *path = data ? snx_path_join(data, name) : NULL, *home;
+#ifdef SNX_IOS
+    free(path); /* the data folder keeps them in keys/ */
+    path = data ? snx_path_join(data, "keys") : NULL;
+    if (path) {
+        char* file = snx_path_join(path, name);
+        free(path);
+        path = file;
+    }
+#endif
     if (path && snx_is_file(path)) return path;
     free(path);
     home = keys_home();
@@ -263,6 +272,9 @@ char* snx_keys_dir(const char* data) {
     int own = user && data && !strcmp(user, data);
     free(user);
     if (own) return snx_strdup(data);
+#elif defined(SNX_IOS)
+    /* HOME is the app's container root, which it cannot write to: the keys go in the data folder's keys/ */
+    if (data) return snx_path_join(data, "keys");
 #else
     (void)data;
 #endif

@@ -6,6 +6,7 @@
 #include "nx/loader/codegen_view.h"
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/llvm/link.h"
+#include "common/cpu/recompiler/llvm/objects_pack.h"
 #include "nx/loader/module_abi.h"
 #include "nx/loader/unit_cache.h"
 #include "common/cpu/recompiler/llvm/rtlib_object.h"
@@ -65,6 +66,11 @@ static int save_ir(SnxIr* ir, const char* dir, const char* name) {
     return rc;
 }
 
+static SnxIr* new_ir(const SnxLlvmBuild* build, const char* name, char* error, size_t error_size) {
+    return build->triple ? snx_ir_new_target(name, build->opt, build->triple, error, error_size)
+                         : snx_ir_new(name, build->opt, error, error_size);
+}
+
 /* one chunk of functions, as module.c's code_NNN.c */
 static int compile_unit(Queue* q, size_t index, char* error, size_t error_size) {
     Unit* u = &q->units[index];
@@ -73,7 +79,7 @@ static int compile_unit(Queue* q, size_t index, char* error, size_t error_size) 
     SnxIr* ir;
     int rc;
     sprintf(name, "code_%03lu", (unsigned long)index);
-    ir = snx_ir_new(name, q->build->opt, error, error_size);
+    ir = new_ir(q->build, name, error, error_size);
     if (!ir) return -1;
     snx_ir_tune(ir, q->build->tuning);
     for (i = u->first; i < u->last; ++i) snx_ir_emit(ir, q->codegen, &q->codegen->functions[i]);
@@ -435,6 +441,10 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     memset(&linked, 0, sizeof(linked));
     if (!loaded->module_count) return snx_error("No modules to generate");
     if (snx_ir_init(error, sizeof(error))) return snx_error("%s", error);
+    if (options->jit_cache && build->triple) {
+        snx_error("JIT cache: a module for another machine (--target) takes none: its units are this host's");
+        goto done;
+    }
     if (options->jit_cache) {
         char* key = snx_jit_cache_key(build->opt, options->hook_direct_calls, 1);
         if (!key) {
@@ -491,7 +501,7 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     }
     /* the module descriptor */
     start = snx_seconds();
-    ir = snx_ir_new("module", build->opt, error, sizeof(error));
+    ir = new_ir(build, "module", error, sizeof(error));
     if (!ir) {
         snx_error("LLVM backend: %s", error);
         goto done;
@@ -520,15 +530,20 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
         snx_report_unit(q.count + 1, q.count + 1, "module", label, 0, snx_seconds() - start);
         free(label);
     }
-    if (snx_ir_rtlib_object(build->opt, &rtlib_object, &rtlib_size, error, sizeof(error))) {
+    /* link: runtime library, descriptor, chunks. A module for another machine has no runtime library of its own
+       (this host has none for that machine): the app that loads it brings its own */
+    if (!build->triple && snx_ir_rtlib_object(build->opt, &rtlib_object, &rtlib_size, error, sizeof(error))) {
         snx_error("LLVM backend: %s", error);
         goto done;
     }
-    /* link: runtime library, descriptor, chunks, the profile cache's units */
+    /* link: runtime library, descriptor, chunks, the profile cache's units. A module for another machine has no
+       runtime library of its own (this host has none for that machine): the app that loads it brings its own */
     inputs = (SnxLinkInput*)snx_alloc((q.count + 2 + cache_count) * sizeof(*inputs));
-    inputs[n].data = rtlib_object;
-    inputs[n].size = rtlib_size;
-    inputs[n++].name = "rtlib";
+    if (rtlib_object) {
+        inputs[n].data = rtlib_object;
+        inputs[n].size = rtlib_size;
+        inputs[n++].name = "rtlib";
+    }
     inputs[n].data = module_object;
     inputs[n].size = module_size;
     inputs[n++].name = "module";
@@ -545,7 +560,13 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     }
     exports[0] = "snx_module";
     if (variant_count) exports[export_count++] = "snx_variants";
-    if (snx_link(inputs, n, exports, export_count, base_name(build->output), &linked, error, sizeof(error))) {
+    if (build->triple) {
+        linked.data = snx_objects_pack(inputs, n, &linked.size);
+        if (!linked.data) {
+            snx_error("Packing failed: out of memory");
+            goto done;
+        }
+    } else if (snx_link(inputs, n, exports, export_count, base_name(build->output), &linked, error, sizeof(error))) {
         snx_error("Linking failed: %s", error);
         goto done;
     }

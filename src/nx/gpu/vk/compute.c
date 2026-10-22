@@ -252,6 +252,7 @@ static void cs_submit(void) {
                         .signalSemaphoreInfoCount = 1,
                         .pSignalSemaphoreInfos = &sig};
     vk_rec_queue(g_vk.compute); /* after the graphics submissions before it, when the queue is theirs too */
+    vk_wait_foreground();
     VkResult r = vkQueueSubmit2(g_vk.compute, 1, &si, VK_NULL_HANDLE);
     if (r == VK_ERROR_DEVICE_LOST) fatal("vulkan: the GPU device was lost (driver reset or crash)");
     g_recording = 0;

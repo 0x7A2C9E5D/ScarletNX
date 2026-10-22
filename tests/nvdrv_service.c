@@ -18,6 +18,7 @@
 #define CTRL_EV(fd) (g_hle.nvdrv.ctrl_evt[g_hle.nvdrv.ctrl_ev[fd] - 1].slot)
 
 u8* g_mem;
+u64 g_as_size = AS_MAX; /* the reservation's size, mem.c's, which this test does not link */
 void (*g_gpu_mapping_begin)(u64, u64, int);
 void (*g_gpu_mapping_end)(void);
 static unsigned test_checks, test_kobjs;

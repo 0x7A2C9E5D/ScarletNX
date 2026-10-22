@@ -20,6 +20,7 @@
 
 /* ============================================================ the kernel ipc.c calls */
 u8* g_mem;
+u64 g_as_size = AS_MAX; /* the reservation's size, mem.c's, which this test does not link */
 static int test_log; /* SNX_TEST_LOG=1 prints what ipc.c logs */
 /* single-threaded: the locks only have to be balanced, which the count checks at the end */
 static int test_locks;

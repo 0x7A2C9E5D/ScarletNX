@@ -5,7 +5,7 @@
 # their headers and CMake package, and one code generator: AArch64's, the Mac's or the phone's own. Run on a Mac with
 # Xcode.
 #
-#   scripts/apple-llvm.sh macos|ios PREFIX [SOURCE] [-- cmake args]
+#   scripts/apple-llvm.sh macos|ios|iossim PREFIX [SOURCE] [-- cmake args]
 #
 # SOURCE is an llvm-project folder or .tar.xz (default: the release named by LLVM_VERSION, downloaded). MACOS_VERSION
 # (default 13.0) and IOS_VERSION (default 16.0), the apps' oldest, are the oldest systems it runs on. Configure
@@ -30,7 +30,13 @@ case $system in
         set -- -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_DEPLOYMENT_TARGET="$os" \
             -DLLVM_HOST_TRIPLE=arm64-apple-ios"$os" "$@"
         ;;
-    *) echo "macos or ios, not $system" >&2; exit 2 ;;
+    # the iOS simulator on Apple silicon: the phone's system running as a Mac process (CMake's iOS, the simulator's SDK)
+    iossim)
+        os=${IOS_VERSION:-16.0}
+        set -- -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET="$os" \
+            -DLLVM_HOST_TRIPLE=arm64-apple-ios"$os"-simulator "$@"
+        ;;
+    *) echo "macos, ios or iossim, not $system" >&2; exit 2 ;;
 esac
 version=${LLVM_VERSION:-23.1.3}
 work=$prefix.build/$version

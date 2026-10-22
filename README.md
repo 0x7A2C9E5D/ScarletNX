@@ -104,8 +104,8 @@ It is not playable yet: there is no input, the bottom screen is not shown, and p
 See the [3DS port](docs/3DS.md) for limits, build instructions and the parity roadmap.
 
 For more detailed information please see: [Build + run](./docs/BUILD.md). For the Android app (arm64 and x86_64),
-see [Android](./docs/ANDROID.md). macOS and iOS build in CI, but no game runs on them yet: see
-[macOS and iOS](./docs/APPLE.md). Every document: [docs](./docs/README.md).
+see [Android](./docs/ANDROID.md). macOS and iOS build in CI. An iPhone prepares and runs a game by itself, and no game
+runs on macOS yet: see [macOS and iOS](./docs/APPLE.md). Every document: [docs](./docs/README.md).
 
 # Special thanks
 
