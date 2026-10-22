@@ -8,8 +8,13 @@
 #include "common/utilities/endian.h"
 #include <string.h>
 
-/* The host reservation (128 GiB). A guest address of either width is an offset below it */
-#define AS_SIZE 0x2000000000ull
+/* The most host address space the guest gets (128 GiB), which tables indexed by guest address are sized for */
+#define AS_MAX 0x2000000000ull
+/* The host reservation, which a guest address of either width is an offset below: AS_MAX, or less where the system
+   allows an app less address space (iOS without the paid extended-virtual-addressing entitlement), when mem_init picks
+   a smaller layout to fit it */
+extern u64 g_as_size;
+#define AS_SIZE (g_as_size)
 
 /* The regions of the address space. The 64-bit layout is g_layout's static value, so it holds before mem_layout32 */
 typedef struct {

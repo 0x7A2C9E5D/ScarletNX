@@ -817,13 +817,13 @@ static int gfx_composed(u64 gva, u64 len, VkBuffer* buf, u64* off) {
    from another entry over the same memory. The table has a leaf of 1024 pages per 4 MB that has been written, with
    the newest generation in the leaf beside it so whole leaves are skipped */
 #define WW_LEAF_SHIFT 22
-static u32* g_wleaf[AS_SIZE >> WW_LEAF_SHIFT];
-static u32 g_wleaf_max[AS_SIZE >> WW_LEAF_SHIFT];
+static u32* g_wleaf[AS_MAX >> WW_LEAF_SHIFT];
+static u32 g_wleaf_max[AS_MAX >> WW_LEAF_SHIFT];
 /* The CPU writes a GPU stream may see come before its submission or the end of one of its waits: each of those starts
    a write epoch (vk_ww_new_epoch). A leaf scanned whole in the current epoch isn't scanned again in it, and a scan
    covers whole leaves, so the textures and buffers checked in one epoch share a few scans: one game made 5,600 of them
    a frame. g_wleaf_seen holds the epoch + 1 a leaf was last scanned in */
-static u32 g_wleaf_seen[AS_SIZE >> WW_LEAF_SHIFT];
+static u32 g_wleaf_seen[AS_MAX >> WW_LEAF_SHIFT];
 static u32 g_ww_epoch;
 void vk_ww_new_epoch(void) { __atomic_add_fetch(&g_ww_epoch, 1, __ATOMIC_RELAXED); }
 u32 vk_ww_epoch(void) { return __atomic_load_n(&g_ww_epoch, __ATOMIC_RELAXED); }
