@@ -8206,24 +8206,33 @@ static void scroll(App* app, GuiKey key) {
     if (key == GUI_UP ? app->menu.selected > row : app->menu.selected < row)
         menu_key(app, key == GUI_UP ? GUI_DOWN : GUI_UP); /* it went round: back */
 }
-/* the menu's rows go past the screen: its letters are too big for it */
-static bool menu_scrolls(App* app) {
-    GuiMenuBoxes m;
-    layout(app);
-    menu_boxes(app, &m);
-    return ui_menu_shown(m.rects, app->scale, UI_MENU_ENTRIES) < GUI_ITEM_COUNT;
-}
-/* a drag up or down from where the finger went down, on a menu whose letters make it scroll */
+/* a drag up or down from where the finger went down: on the menu, whether or not its rows all fit (the focus follows
+   it), and on a form */
 static bool drags(App* app, float x, float y) {
     float dx = x - app->finger_x, dy = y - app->finger_y;
     return SDL_fabsf(dy) > 0.05f && SDL_fabsf(dy) > 2 * SDL_fabsf(dx) && app->menu.view != GUI_LOAD_GAMES &&
            !app->menu.running && !app->finished && !app->setup_on &&
-           (app->editing ? app->form != GUI_FORM_PAD : menu_scrolls(app));
+           (app->editing ? app->form != GUI_FORM_PAD : !pick_screen(app));
+}
+/* the share of the window's height the finger goes for a row: the menu's rows, a form's row of text */
+static float drag_row(App* app) {
+    if (!app->editing) {
+        GuiMenuBoxes m;
+        GuiRect first, second;
+        int width, height;
+        layout(app);
+        menu_boxes(app, &m);
+        area(app, &width, &height);
+        first = ui_menu_row(m.rects, app->scale, UI_MENU_ENTRIES, 0);
+        second = ui_menu_row(m.rects, app->scale, UI_MENU_ENTRIES, 1);
+        if (height > 0 && second.y > first.y) return (float)(second.y - first.y) / (float)height;
+    }
+    return 1.0f / (float)SDL_max(1, app->rows);
 }
 /* the focus follows the finger, up as it goes up, a row each time it passes a row's height, so the highlight is seen
    going */
 static void drag(App* app, float y) {
-    float row = 1.0f / (float)SDL_max(1, app->rows);
+    float row = drag_row(app);
     while (y <= app->finger_mark - row) {
         scroll(app, GUI_UP);
         app->finger_mark -= row;

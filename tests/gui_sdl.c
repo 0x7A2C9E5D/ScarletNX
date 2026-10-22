@@ -4263,7 +4263,7 @@ int main(int argc, char** argv) {
         /* a drag down moves the focus down row by row while the finger goes, not all at once when it lifts */
         {
             SDL_Event e = {0};
-            float row = 1.0f / (float)app.rows;
+            float row = drag_row(&app); /* a row of the menu's */
             e.tfinger.fingerID = 7;
             e.tfinger.x = 0.5f;
             e.tfinger.y = 0.2f;
@@ -4279,6 +4279,34 @@ int main(int argc, char** argv) {
             e.type = SDL_EVENT_FINGER_UP;
             event(&app, &e);
             assert(app.menu.selected == GUI_KEYS && !app.finger);
+            app.menu.selected = GUI_SWITCH;
+            render(&app);
+        }
+        /* its rows all fitting, the focus follows a drag too, a row of the menu's, not of text, each time */
+        {
+            SDL_Event e = {0};
+            GuiMenuBoxes all;
+            int text_size = app.menu.text_size;
+            float row;
+            app.menu.text_size = 2; /* a row past the 5% of the window a drag starts at */
+            render(&app);
+            menu_boxes(&app, &all);
+            assert(ui_menu_shown(all.rects, app.scale, UI_MENU_ENTRIES) >= GUI_ITEM_COUNT);
+            row = drag_row(&app);
+            assert(row > 1.0f / (float)app.rows);
+            e.tfinger.fingerID = 7;
+            e.tfinger.x = 0.5f;
+            e.tfinger.y = 0.2f;
+            e.type = SDL_EVENT_FINGER_DOWN;
+            event(&app, &e);
+            e.type = SDL_EVENT_FINGER_MOTION;
+            e.tfinger.y = 0.2f + 2.9f * row; /* 2 of the menu's rows, which 3 of text would make 3 */
+            event(&app, &e);
+            assert(app.menu.selected == GUI_3DS);
+            e.type = SDL_EVENT_FINGER_UP;
+            event(&app, &e);
+            assert(app.menu.selected == GUI_3DS && !app.finger);
+            app.menu.text_size = text_size;
             app.menu.selected = GUI_SWITCH;
             render(&app);
         }
@@ -6016,7 +6044,6 @@ int main(int argc, char** argv) {
             assert(shown < GUI_ITEM_COUNT && l->first > 0 && l->focus < l->first + shown);
             b = menu_entry_box(&app, &m, (int)l->first);
         }
-        assert(menu_scrolls(&app));
         text_px_is(&app, b.x + b.w - 8 * app.scale, item_text_y(&app, b), "\x1e", rgb(app.theme.soft),
                    rgb(app.theme.panels == GUI_PANELS_FILL ? app.theme.dim : app.theme.page)); /* in its box */
         assert(!m.place.stacked);

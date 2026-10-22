@@ -50,7 +50,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   pink. Activation is tracked separately from hover/focus, so the activated item
   stays pink while another item is hovered in yellow. Mouse controls also work
   on Games' rows.
-- A finger taps an item anywhere on its row, as a click does on its label; a swipe turns Games'
+- A finger taps an item anywhere on its row, as a click does on its label, and a drag up or down on the menu moves
+  the focus a row each time it passes one, whether or not the rows all fit; a swipe turns Games'
   pages, left or up to the next as a phone's lists scroll, right or down back; a tap on a finished run returns to the menu, and one on a
   running run's ESC line aborts it. Android's back button is ESC. On a screen packed with
   pixels (a phone) the text takes the display's own scale, as far as the menu still fits.
