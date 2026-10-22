@@ -446,6 +446,20 @@ static void test_swkbd(void) {
 }
 /* the other applets' outputs: the controller applet's players against the game's minimum, a web applet's return
    value, and zeros from the rest */
+/* the offline web applet on page (a WebArgHeader: two entries, the document kind (7) 1, an offline page, and its
+   path (6)), run to its end: its WebCommonReturnValue */
+static SvcObj* offline_page(const char* page) {
+    u8 arg[0x100] = {2, 0, 0, 0, 3, 0, 0, 0, 7, 0, 4, 0, 0, 0, 0, 0, 1, 0, 0, 0, 6, 0};
+    SvcObj *in, *out;
+    size_t n = strlen(page) + 1;
+    arg[22] = (u8)n;
+    memcpy(arg + 28, page, n);
+    in = am_storage_new(sizeof arg, arg);
+    out = run_applet(0x17, &in, 1);
+    svcobj_unref(in);
+    CHECK(((StorageData*)out->data)->size == 0x1010);
+    return out;
+}
 static void test_applets(void) {
     u8 arg[0x40] = {2};
     SvcObj *in[2], *out;
@@ -463,6 +477,17 @@ static void test_applets(void) {
     test_players = 1;
     out = run_applet(0x14, in, 0); /* Shop */
     CHECK(((StorageData*)out->data)->size == 0x1010);
+    svcobj_unref(out);
+    out = offline_page("pages.htdocs/index.html"); /* answered as its A button: CallbackUrl and the URL */
+    CHECK(get32(((StorageData*)out->data)->d) == 3 &&
+          !strcmp((const char*)((StorageData*)out->data)->d + 8, "http://localhost/?ret=Yes") &&
+          get32(((StorageData*)out->data)->d + 0x1008) == 26);
+    svcobj_unref(out);
+    out = offline_page("plain.htdocs/index.html"); /* no A button: closed, no URL */
+    CHECK(get32(((StorageData*)out->data)->d) == 0 && ((StorageData*)out->data)->d[8] == 0);
+    svcobj_unref(out);
+    out = offline_page("missing.htdocs/index.html");
+    CHECK(get32(((StorageData*)out->data)->d) == 0);
     svcobj_unref(out);
     out = run_applet(0x0e, in, 0); /* the error applet */
     CHECK(((StorageData*)out->data)->size == 0x10 && get32(((StorageData*)out->data)->d) == 0);

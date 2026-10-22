@@ -21,6 +21,9 @@ int fs_aoc_has(u64 id);
    their count */
 size_t fs_dlcs(const u64** ids);
 u8* fs_read_file(const char* path, u64* size);    /* malloc'd, or NULL */
+/* a file of the game's HtmlDocument content (the pages its web applet shows), by its path under html-document/,
+   malloc'd: NULL when the game has no dump open, or the dump no such content or file */
+u8* fs_html_document(const char* path, u64* size);
 /* a file that exists only in memory, which the lookups find like any other. 0, or -1 */
 int fs_add_virtual_file(const char* path, const void* data, u64 size);
 /* the RomFS the game opens: romfs.bin as it is, or an image built from the romfs folder */
@@ -114,6 +117,8 @@ typedef struct {
     SnxHacFs* dfs;
     PFileMap dmap;
     PMutex dlock;
+    SnxHacFs* hfs;  /* its HtmlDocument content, read under dlock too (fs_html_document) */
+    int html_tried; /* hfs looked for */
     /* the update's dump read in place (dump_open), read with the game's in dump; and the checked DLCs read from their
        dumps (dlcs_open), naocs of them, each in a hactool of its own (dlock keeps one read at a time) */
     PFileMap amap;
