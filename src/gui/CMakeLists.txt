@@ -35,6 +35,19 @@ add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/generated/gui_glyphs.c"
     DEPENDS "${PROJECT_SOURCE_DIR}/scripts/build-glyphs.py" "${CMAKE_CURRENT_SOURCE_DIR}/unifont-latin.hex"
             "${CMAKE_CURRENT_SOURCE_DIR}/unifont-wide.hex"
     COMMENT "The menu's Latin and wide glyphs" VERBATIM)
+# the launcher's scenes, generated from ui.txt by tools/uigen: gui/ui.h and gui/ui.c, whose drawing and callbacks
+# main.c defines, so they go into what compiles main.c
+include("${PROJECT_SOURCE_DIR}/cmake/ui.cmake")
+add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/generated/gui/ui.h" "${CMAKE_BINARY_DIR}/generated/gui/ui.c"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/generated/gui"
+    COMMAND snx-uigen --out "${CMAKE_BINARY_DIR}/generated" "${CMAKE_CURRENT_SOURCE_DIR}/ui.txt"
+    DEPENDS snx-uigen "${CMAKE_CURRENT_SOURCE_DIR}/ui.txt"
+    COMMENT "Generating the launcher's scenes from src/gui/ui.txt" VERBATIM)
+add_library(snx_gui_ui OBJECT "${CMAKE_BINARY_DIR}/generated/gui/ui.c")
+target_include_directories(snx_gui_ui PUBLIC "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(snx_gui_ui PRIVATE SDL3::SDL3) # its platform macros and keycodes
+set_target_properties(snx_gui_ui PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+target_compile_options(snx_gui_ui PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 add_library(snx_gui_support STATIC model.c browser.c steps.c theme.c recent.c editor.c settings.c place.c clean.c
             latin.c wide.c ${gui_process}
             "${CMAKE_BINARY_DIR}/generated/gui_themes.c" "${CMAKE_BINARY_DIR}/generated/gui_glyphs.c")
@@ -99,8 +112,8 @@ set_target_properties(scarletnx-gui PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_compile_options(scarletnx-gui PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 target_compile_definitions(scarletnx-gui PRIVATE SNX_SOURCE_DIR="${CMAKE_SOURCE_DIR}" SNX_BUILD_DIR="${CMAKE_BINARY_DIR}")
-target_link_libraries(scarletnx-gui PUBLIC snx_gui_support PRIVATE scarletnx-common SDL3::SDL3 snx_window_icon
-                      snx_build_info snx_pad_sdl snx_splash snx_gui_languages snx_demangle)
+target_link_libraries(scarletnx-gui PUBLIC snx_gui_support PRIVATE snx_gui_ui scarletnx-common SDL3::SDL3
+                      snx_window_icon snx_build_info snx_pad_sdl snx_splash snx_gui_languages snx_demangle)
 if(WIN32 AND NOT SNX_BUILD_NX)
     enable_language(RC)
     target_sources(scarletnx-gui PRIVATE ../common/platform/runtime.rc)
@@ -127,6 +140,17 @@ if(BUILD_TESTING)
     add_executable(snx-test-gui-place "${PROJECT_SOURCE_DIR}/tests/gui_place.c")
     target_link_libraries(snx-test-gui-place PRIVATE snx_gui_support)
     add_test(NAME gui_place COMMAND snx-test-gui-place)
+    # what tools/uigen makes of tests/ui_test.txt, built and run: layouts, drawing, hit tests, actions, hotkeys
+    set(gui_ui_test "${CMAKE_CURRENT_BINARY_DIR}/uitest")
+    add_custom_command(OUTPUT "${gui_ui_test}/gui/ui.h" "${gui_ui_test}/gui/ui.c"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${gui_ui_test}/gui"
+        COMMAND snx-uigen --out "${gui_ui_test}" "${PROJECT_SOURCE_DIR}/tests/ui_test.txt"
+        DEPENDS snx-uigen "${PROJECT_SOURCE_DIR}/tests/ui_test.txt"
+        COMMENT "Generating tests/ui_test.txt's scenes" VERBATIM)
+    add_executable(snx-test-gui-ui "${PROJECT_SOURCE_DIR}/tests/gui_ui.c" "${gui_ui_test}/gui/ui.c")
+    target_include_directories(snx-test-gui-ui PRIVATE "${gui_ui_test}")
+    target_link_libraries(snx-test-gui-ui PRIVATE snx_gui_support SDL3::SDL3) # SDL3: its keycodes' header
+    add_test(NAME gui_ui COMMAND snx-test-gui-ui)
     add_executable(snx-test-gui-cia-browser "${PROJECT_SOURCE_DIR}/tests/gui_cia_browser.c")
     target_link_libraries(snx-test-gui-cia-browser PRIVATE snx_gui_support scarletnx-common)
     add_test(NAME gui_cia_browser COMMAND snx-test-gui-cia-browser)
@@ -165,6 +189,11 @@ if(BUILD_TESTING)
     add_test(NAME gui_languages_pot COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-languages.py"
              --check)
     add_test(NAME gui_languages_script COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/languages_test.py")
+    if(NOT CMAKE_CROSSCOMPILING)
+        # tools/uigen on a ui.txt of its own: what it generates, and each file it refuses, at its line
+        add_test(NAME uigen COMMAND "${CMAKE_COMMAND}" "-DUIGEN=$<TARGET_FILE:snx-uigen>"
+                 "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/uigen-test" -P "${PROJECT_SOURCE_DIR}/tests/uigen.cmake")
+    endif()
     # unifont-latin.hex holds the Latin letters CP437 lacks, unifont-wide.hex the wide ones the languages show, each
     # once, in order
     add_test(NAME gui_glyphs_kept COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-glyphs.py" --check)
@@ -184,8 +213,8 @@ if(BUILD_TESTING)
     # a language of its own (tests/po), not the menu's: the screens' checks hold whatever po/ has
     snx_gui_languages(snx_gui_languages_test "${PROJECT_SOURCE_DIR}/tests/po"
                       "${CMAKE_BINARY_DIR}/generated/gui_languages_test.c")
-    target_link_libraries(snx-test-gui-sdl PRIVATE snx_gui_support scarletnx-common SDL3::SDL3 snx_window_icon
-                          snx_build_info snx_pad_sdl snx_splash snx_gui_languages_test snx_demangle)
+    target_link_libraries(snx-test-gui-sdl PRIVATE snx_gui_support snx_gui_ui scarletnx-common SDL3::SDL3
+                          snx_window_icon snx_build_info snx_pad_sdl snx_splash snx_gui_languages_test snx_demangle)
     if(APPLE) # it compiles main.c itself, which calls the frontend (apple.m and its Swift), as scarletnx-gui links it
         target_sources(snx-test-gui-sdl PRIVATE apple.m)
         target_link_libraries(snx-test-gui-sdl PRIVATE snx_apple_frontend "-framework Foundation")
@@ -200,8 +229,8 @@ if(BUILD_TESTING)
     endif()
     # the setup's pages (gui_setup.c), as gui_sdl's: the real renderer, a language of the tests' own, no picker
     add_executable(snx-test-gui-setup "${PROJECT_SOURCE_DIR}/tests/gui_setup.c")
-    target_link_libraries(snx-test-gui-setup PRIVATE snx_gui_support scarletnx-common SDL3::SDL3 snx_window_icon
-                          snx_build_info snx_pad_sdl snx_splash snx_gui_languages_test snx_demangle)
+    target_link_libraries(snx-test-gui-setup PRIVATE snx_gui_support snx_gui_ui scarletnx-common SDL3::SDL3
+                          snx_window_icon snx_build_info snx_pad_sdl snx_splash snx_gui_languages_test snx_demangle)
     if(APPLE)
         target_sources(snx-test-gui-setup PRIVATE apple.m)
         target_link_libraries(snx-test-gui-setup PRIVATE snx_apple_frontend "-framework Foundation")

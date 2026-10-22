@@ -1,0 +1,56 @@
+# tests/gui_ui.c's scenes: what tools/uigen generates from them is built and run there
+[scene]Main {
+	padding = 4px
+	gap = 10px
+	[label]"Pick one" {
+		color = soft
+	}
+	[list]LoadList {
+		max_rows = 3
+		attr = callback
+		max_row_width = 200px
+		[button]"Load Switch" {
+			attr = callback
+		}
+		[button]"Load 3DS CIA" {
+			key = alt-f4
+		}
+		[button]"Open data folder" {
+			for-platform = android
+		}
+		[button]"Settings" {
+			color = focus
+		}
+		@[button]"Decor" {}
+	}
+	[list]Games {
+		scroll = edge
+		max_row_width = 300px
+	}
+	[label]Status {
+		height = 20%
+	}
+}
+[scene]Row {
+	direction = row
+	justify = center
+	align = center
+	[button]"OK" {
+		width = 60px
+		height = 20px
+		key = o
+	}
+	[button]"Back" {
+		width = 25%
+		attr = callback
+	}
+}
+[scene]Touch {
+	[list]Big {
+		android.row_height = 30px
+		desktop.max_rows = 2
+		[button]"A" {}
+		[button]"B" {}
+		[button]"C" {}
+	}
+}

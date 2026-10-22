@@ -36,8 +36,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - Tab and Shift+Tab go round the menu, Games and the Settings, the tabs at the top; a click on a tab
   opens it. A theme edited and not saved keeps its screen.
 - A list with rows out of sight (the menu with big letters, `recompiled/`'s pages, the Settings, the theme
-  editor) shows an arrow past the right edge of its boxes, up on its first row and down on its last, in
-  the soft colour.
+  editor) shows an arrow at the right end of its first row, up, and of its last, down, in the soft colour.
 - Moving the mouse over an item focuses it in yellow without activating it; in the Settings, a row of the list the
   keys move in (the groups, or the rows of the one open), the other list, a tab and Back waiting for a click.
 - The keys at the foot are buttons: a click or a tap on one presses it, as the keyboard does (ESC or
@@ -50,7 +49,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   pink. Activation is tracked separately from hover/focus, so the activated item
   stays pink while another item is hovered in yellow. Mouse controls also work
   on Games' rows.
-- A finger taps an item anywhere on its row, as a click does on its label; a swipe turns Games'
+- A finger taps an item anywhere on its row, as a click does on its label, and a drag up or down on the menu or the
+  Settings moves the focus a row each time it passes one, whether or not the rows all fit; a swipe turns Games'
   pages, left or up to the next as a phone's lists scroll, right or down back; a tap on a finished run returns to the menu, and one on a
   running run's ESC line aborts it. Android's back button is ESC. On a screen packed with
   pixels (a phone) the text takes the display's own scale, as far as the menu still fits.
@@ -192,7 +192,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   `zh_CN`, which builds before the tags wrote) is read as that language and written as its tag, the message saying
   the two once (`language = pt_BR is now pt-BR`).
 - Settings > App's **Theme editor** edits the current theme: **Save** first, the folder it is saved in, a row
-  per `theme.ini` key, and beside them a
+  per `theme.ini` key, a colour's with the colour after its value, and beside them a
   preview of the menu or a run (Ctrl+P, or a click on it, switches). Left/Right change a word, a switch or a
   number, Enter types a text or a number and opens a colour's picker. The picker sits over the keys, so the preview
   shows the colour as it changes: a bar per channel, R, G and B, which Left/Right step by 1 and PgUp/PgDn by 16, or
@@ -213,7 +213,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   which it took. A language written in two scripts goes by its script, written or implied by its country (`zh-CN`,
   `zh-SG` simplified, `zh-TW`, `zh-HK`, `zh-MO` traditional): a system in one never takes a catalog of the other. The
   words change at once; a phrase the language has not translated stays English.
-- **Share log** saves the last run's output and game log to `scarletnx.log`. On the
+- **Share log** saves the last run's output and game log to `scarletnx.log`. After a run that ended abnormally (not
+  by ESC) it blinks red, as Setup device keys does, until its log is saved or a run ends well. On the
   desktop it goes in the working folder with its path copied. On Android it goes to the
   data folder's `state/` and is shared.
 - **Open data folder**, on Android, opens the data folder, the app's own storage, in the
@@ -397,7 +398,11 @@ every screen (`[body] sizing = fixed`), and a window too narrow for both shows t
 column is as wide as its entries and the side box goes under the list. A list's boxes spread over its column, at
 most `[body] gap` pixels apart, times the text's size (0 to 14; 6 in the built-ins), and one longer than its column
 keeps the focused box in its middle, the list moving around it (`[body] scroll = center`, the built-ins'), or moves
-once the focus reaches its end (`edge`). That is the **Side box**'s *Auto*, the
+once the focus reaches its end (`edge`). The menu's list, Games', the Settings' two and the theme editor's are laid
+out by `src/gui/ui.txt` instead, whatever the theme says: their rows 2 pixels apart times the text's size (on Android
+40 pixels high, about Android's 48 dp touch target at the 3x a phone held wide gets, where the desktop's are 17), the
+focused one kept in the middle (on a group's screen, the group open in the groups' list), the cursor and the arrows
+of hidden rows inside each row, which a click takes whole as a tap does. That is the **Side box**'s *Auto*, the
 default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
 not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2, or the
 foot's, shows it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over
@@ -669,6 +674,11 @@ Supported host platforms are Linux, FreeBSD, Windows (llvm-mingw) and Android (`
 SDL3 handles window creation, keyboard/mouse input, rendering, clipboard and drag-and-drop
 on every host. The platform-specific code only handles child processes and resource
 accounting. See [BUILD](BUILD.md) for SDL3's desktop dependencies.
+
+The menu's list, Games' and the Settings' are scenes of `src/gui/ui.txt`, which `tools/uigen` turns into `gui/ui.h`
+and `gui/ui.c` as the GUI builds (the format is in `tools/uigen/uigen.c`'s first comment): their layout computed at
+build time, the drawing and callbacks main.c's. `uigen` tests the generator's output and refusals, `gui_ui` runs what
+it makes of `tests/ui_test.txt`.
 
 The tests cover menu transitions, bounded console scrolling, split UTF-8/ANSI
 sequences, path parsing, argument quoting, inherited grandchild output, resource

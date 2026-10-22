@@ -56,10 +56,10 @@ if(SNX_TEST_SANITIZERS)
         # scarletnx's main where it is the other drivers too
         snx_multicall
         # the menu, its splash, icon and pads
-        scarletnx-gui snx_gui_support snx_i18n snx_gui_languages snx_gui_languages_test snx_splash snx-test-splash
+        scarletnx-gui snx_gui_support snx_gui_ui snx_i18n snx_gui_languages snx_gui_languages_test snx_splash snx-test-splash
         snx_window_icon snx-test-window-icon snx_pad_sdl
         # the code generators, which tests run on files they refuse
-        snx-swipc snx-svcgen snx-shaderdec snx-settingsgen)
+        snx-swipc snx-svcgen snx-shaderdec snx-settingsgen snx-uigen)
 endif()
 # one Python for the scripted tests: without it they are left out
 find_package(Python3 QUIET COMPONENTS Interpreter)

@@ -168,38 +168,6 @@ msgstr ""
 msgid "Saved in %s"
 msgstr ""
 
-#: src/gui/main.c
-msgid "Load Switch NSP/XCI/NRO"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Load Linux ARM ELF"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Load 3DS CIA"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Setup device keys"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Settings"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Share log"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Open data folder"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Exit"
-msgstr ""
-
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -463,10 +431,6 @@ msgstr ""
 msgid "Recent games not kept: %s could not be written."
 msgstr ""
 
-#: src/gui/main.c
-msgid "...show more"
-msgstr ""
-
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -571,6 +535,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Stay"
+msgstr ""
+
+#: src/gui/main.c src/gui/ui.txt
+msgid "Exit"
 msgstr ""
 
 #: src/gui/main.c
@@ -716,6 +684,10 @@ msgstr ""
 msgid "Games"
 msgstr ""
 
+#: src/gui/main.c src/gui/ui.txt
+msgid "Settings"
+msgstr ""
+
 #: src/gui/main.c
 msgid "Appearance"
 msgstr ""
@@ -778,6 +750,10 @@ msgid "none"
 msgstr ""
 
 #: src/gui/main.c
+msgid "...show more"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "Ready to run, with %zu update(s), DLC(s) or mod(s) to pick from"
 msgstr ""
@@ -803,7 +779,7 @@ msgid "Pick a folder of games or dumps, listed after recompiled/ and dumps/"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
+#: src/gui/main.c src/gui/ui.txt
 #, snx-key
 msgid "Add a folder"
 msgstr ""
@@ -2689,6 +2665,30 @@ msgstr ""
 #: src/gui/theme.c
 #, c-format
 msgid "No themes/%s/theme.ini could be read: it shows %s"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Load Switch NSP/XCI/NRO"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Load Linux ARM ELF"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Load 3DS CIA"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Setup device keys"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Share log"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Open data folder"
 msgstr ""
 
 #: src/common/utilities/setup.c

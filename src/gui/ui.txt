@@ -1,0 +1,50 @@
+# The launcher's scenes: tools/uigen makes gui/ui.h and gui/ui.c of them as it builds (its first comment has the
+# format), and main.c draws each in the area its screen gives it
+[scene]Menu {
+	# in the order of model.h's items, which main.c checks; the code gives the active one and the keys' state
+	[list]Entries {
+		attr = callback
+		# a finger's: 40px at the 3x a phone held wide gets is about 48dp, Android's touch target
+		android.row_height = 40px
+		[button]"Load Switch NSP/XCI/NRO" {}
+		[button]"Load Linux ARM ELF" {}
+		[button]"Load 3DS CIA" {}
+		[button]"Setup device keys" {}
+		[button]"Settings" {}
+		[button]"Share log" {}
+		[button]"Open data folder" {
+			for-platform = android
+		}
+		[button]"Exit" {}
+	}
+}
+[scene]Games {
+	# Add a folder over the page, a wider gap under it than between the games
+	gap = 24px
+	[list]Add {
+		height = 17px
+		android.height = 40px
+		android.row_height = 40px
+		max_rows = 1
+		[button]"Add a folder" {}
+	}
+	# Recent games over the recent rows, then a page of the games, as many as fit, each group under its heading
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}
+# the Settings and the theme editor: the groups, or the theme's keys, in the list's column; beside them, under the
+# side box's head, the open group's rows or the focused one's (Folders: on the whole screen, each group under its title)
+[scene]FormList {
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}
+[scene]FormSide {
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}
