@@ -398,7 +398,8 @@ column is as wide as its entries and the side box goes under the list. A list's 
 most `[body] gap` pixels apart, times the text's size (0 to 14; 6 in the built-ins), and one longer than its column
 keeps the focused box in its middle, the list moving around it (`[body] scroll = center`, the built-ins'), or moves
 once the focus reaches its end (`edge`). The menu's list is laid out by `src/gui/ui.txt` instead, whatever the theme
-says: its rows 2 pixels apart times the text's size, the focused one kept in the middle, the cursor and the arrows of
+says: its rows 2 pixels apart times the text's size (on Android 40 pixels high, about Android's 48 dp touch target
+at the 3x a phone held wide gets, where the desktop's are 17), the focused one kept in the middle, the cursor and the arrows of
 hidden rows inside each row, which a click takes whole as a tap does. That is the **Side box**'s *Auto*, the
 default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
 not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2, or the

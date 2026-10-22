@@ -1924,6 +1924,8 @@ static GuiRect ui_row_box(const App* app, GuiRect r) {
 /* a row of a scene of ui.txt, in list_item's look: the theme's cursor and the arrows of hidden rows inside it, the box
    between them; the failure colour fills it (every other blink_ms with UI_ATTR_BLINK, steady with 0), the active
    colour writes the one activated last */
+/* a row's text's top: as item_text_y has it in a row a cell and a pixel high, in the middle of a taller one */
+static int ui_text_y(const App* app, GuiRect b) { return b.y + (b.h - cell_h(app) + app->scale) / 2; }
 void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned attr, bool focused) {
     const GuiTheme* t = &app->theme;
     int filled = t->panels == GUI_PANELS_FILL, inverted = focused && t->focus_bar;
@@ -1937,17 +1939,17 @@ void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned
     else if (filled)
         fill_rect(app, b, t->dim);
     if (!failing && !inverted && (!filled || focused)) outline(app, b, focused ? t->focus : t->dim);
-    text_in(app, inner(app, b), b.x + cell_w(app) / 2, item_text_y(app, b), label,
+    text_in(app, inner(app, b), b.x + cell_w(app) / 2, ui_text_y(app, b), label,
             rgb(failing || inverted     ? t->page
                 : attr & UI_ATTR_ACTIVE ? t->active
                 : focused               ? t->focus
                                         : ui_colour(app, color, t->ink)));
-    if (focused && t->cursor[0]) text_in(app, r, r.x, item_text_y(app, b), t->cursor, rgb(t->focus));
+    if (focused && t->cursor[0]) text_in(app, r, r.x, ui_text_y(app, b), t->cursor, rgb(t->focus));
     if (attr & UI_ATTR_MORE_UP) /* beside the down arrow when one row shows */
-        text_in(app, b, b.x + b.w - ((attr & UI_ATTR_MORE_DOWN) ? 2 : 1) * cell_w(app), item_text_y(app, b), "\x1e",
+        text_in(app, b, b.x + b.w - ((attr & UI_ATTR_MORE_DOWN) ? 2 : 1) * cell_w(app), ui_text_y(app, b), "\x1e",
                 rgb(failing || inverted ? t->page : t->soft));
     if (attr & UI_ATTR_MORE_DOWN)
-        text_in(app, b, b.x + b.w - cell_w(app), item_text_y(app, b), "\x1f",
+        text_in(app, b, b.x + b.w - cell_w(app), ui_text_y(app, b), "\x1f",
                 rgb(failing || inverted ? t->page : t->soft));
 }
 /* a label of a scene of ui.txt, in the soft colour unless it names one */

@@ -4,6 +4,8 @@
 	# in the order of model.h's items, which main.c checks; the code gives the active one and the keys' state
 	[list]Entries {
 		attr = callback
+		# a finger's: 40px at the 3x a phone held wide gets is about 48dp, Android's touch target
+		android.row_height = 40px
 		[button]"Load Switch NSP/XCI/NRO" {}
 		[button]"Load Linux ARM ELF" {}
 		[button]"Load 3DS CIA" {}

@@ -4896,6 +4896,11 @@ int main(int argc, char** argv) {
         app.menu.activated = false;
         render(&app);
         text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Load 3DS CIA", normal, black);
+        /* a row taller than a cell and a pixel, as Android's 40px: its text in the middle, not at its top */
+        b = gui_rect(b.x, b.y, b.w, 40 * s);
+        fill_rect(&app, b, app.theme.page); /* the rows it covers, gone */
+        ui_draw_row(&app, b, "Exit", UI_COLOR_NONE, 0, false);
+        text_px_is(&app, b.x + cw / 2, b.y + (40 * s - 16 * s + s) / 2, "- Exit", normal, black); /* not b.y + s */
         /* the side box: the focus's name over a rule and the keys in use, what it does left to the tips; the status
            box under it */
         r = m.place.side;
