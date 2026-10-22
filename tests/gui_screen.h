@@ -141,4 +141,12 @@ static inline void tap_px(App* app, int x, int y) {
     event(app, &e);
 }
 static inline void point(App* app, GuiRect b, bool click) { mouse_px(app, b.x + b.w / 2, b.y + b.h / 2, click); }
+/* choice i's box in the dialog placed (ui.txt's scene Choices), as drawn: its row past the cursor's margin; none while it
+   is scrolled out */
+static inline GuiRect choice_box(const App* app, const GuiChoices* c, int i) {
+    size_t first = c->lists[UI_CHOICES_ROWS].first;
+    if (i < 0 || (size_t)i < first || (size_t)i >= first + ui_choices_shown(c->rects, app->scale, UI_CHOICES_ROWS))
+        return gui_rect(0, 0, 0, 0);
+    return ui_row_box(app, ui_choices_row(c->rects, app->scale, UI_CHOICES_ROWS, (size_t)i - first));
+}
 #endif

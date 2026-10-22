@@ -136,7 +136,7 @@ static void test_first(App* app) {
         key(app, SDLK_RETURN); /* Back with the mouse, from the second */
         render(app);
         setup_boxes(app, &c);
-        point(app, list_box(&c.choices.list, 0), true);
+        point(app, choice_box(app, &c.choices, 0), true);
         assert(app->setup_top == 0);
     }
     for (int i = 0; i < notices - 1; ++i) key(app, SDLK_RETURN);
@@ -150,6 +150,13 @@ static void test_first(App* app) {
     assert(!strcmp(choice_label(app), "OK") && !strcmp(choice_before(app), "Back"));
     key(app, SDLK_ESCAPE);
     assert(app->confirm.shown && app->confirm.ask == GUI_ASK_EXIT);
+    { /* the pointer over Exit, the page's choices drawn last: the question's focus moves, not the page's */
+        GuiChoices c;
+        int focus = app->setup_choice.focus;
+        ask_place(app, &c);
+        point(app, choice_box(app, &c, 1), false);
+        assert(app->confirm.selected == GUI_CONFIRM_ABORT && app->setup_choice.focus == focus);
+    }
     key(app, SDLK_ESCAPE);
     assert(!app->confirm.shown && app->setup_on && !app->menu.quit);
     /* Appearance: Settings > App's Language, Theme and UI scale a row each, then Next. Left/Right change the language
@@ -200,6 +207,10 @@ static void test_first(App* app) {
         assert(app->language == 2 && snx_tr_language() == 1 && app->setup_row == GUI_APPEARANCE_LANGUAGE);
         point(app, list_box(&rows, GUI_APPEARANCE_THEME), false); /* the pointer over a row: its focus */
         assert(app->setup_row == GUI_APPEARANCE_THEME && app->language == 2);
+        point(app, choice_box(app, &c.choices, 0), false); /* over Next: the focus on it, off the rows */
+        assert(app->setup_row == GUI_APPEARANCE_NEXT && page(app) == SNX_SETUP_LANGUAGE);
+        point(app, list_box(&rows, GUI_APPEARANCE_THEME), false);
+        assert(app->setup_row == GUI_APPEARANCE_THEME);
     }
     key(app, SDLK_RIGHT); /* the next theme, the dialog's place with it */
     assert(!strcmp(app->theme.id, "default") && app->theme.dialog == GUI_DIALOG_DEFAULT);
@@ -507,8 +518,8 @@ static void test_places(App* app) {
     setup_boxes(app, &b);
     area(app, &width, &height);
     assert(b.choices.box.y + b.choices.box.h == b.place.list.y + b.place.list.h && b.choices.box.w == b.place.list.w);
-    assert(b.choices.list.at.y + b.choices.list.at.h <= b.choices.tab.y && b.choices.list.at.x > width / 2);
-    assert(b.content.y + b.content.h <= b.choices.list.at.y && b.content.h > 0);
+    assert(b.choices.at.y + b.choices.at.h <= b.choices.tab.y && b.choices.at.x > width / 2);
+    assert(b.content.y + b.content.h <= b.choices.at.y && b.content.h > 0);
     assert(!strcmp(b.tab, "ScarletNX  2/5"));
     shows(app, "ScarletNX  2/5", rgb(app->theme.ink));
     app->theme = *gui_theme_builtin("default");

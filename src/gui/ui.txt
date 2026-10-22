@@ -48,3 +48,11 @@
 		android.row_height = 40px
 	}
 }
+# a question's choices, a row each: the setup page's, and those of a box over a screen (a question, UI scale's, the
+# folders a recompile's game may go in); main.c places the dialog as the theme's options-dialog says, and the rows in it
+[scene]Choices {
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}

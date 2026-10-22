@@ -16,13 +16,9 @@ static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255
                        pink = {255, 85, 255, 255}, black = {0, 0, 0, 255};
 
 /* the question's box and its choices, as the theme places them (ask_place) */
-static void ask_boxes(App* app, GuiRect* r, GuiList* choices) {
-    GuiChoices c;
-    const char* labels[2];
-    char second[96];
-    ask_place(app, &c, labels, second, sizeof second);
-    *r = c.box;
-    *choices = c.list;
+static void ask_boxes(App* app, GuiRect* r, GuiChoices* choices) {
+    ask_place(app, choices);
+    *r = choices->box;
 }
 static void key(App* app, SDL_Keycode code) {
     SDL_Event e = {0};
@@ -1131,9 +1127,7 @@ int main(int argc, char** argv) {
     shows(&app, "- OK", yellow);
     {
         GuiChoices c;
-        const char* labels[2];
-        char second[96];
-        assert(ask_place(&app, &c, labels, second, sizeof second) == 1 && c.list.count == 1); /* OK alone */
+        assert(ask_place(&app, &c) == 1 && c.count == 1); /* OK alone */
     }
     key(&app, SDLK_DOWN); /* its one choice: nothing to move to, nothing closes */
     assert(app.confirm.shown && !app.confirm.selected);
@@ -1621,6 +1615,47 @@ int main(int argc, char** argv) {
     key(&app, SDLK_RIGHT);
     assert(app.sizes_shown && app.sizes.count == GUI_TEXT_MAX + 4 && app.sizes.focus == 3 && !app.menu.text_size);
     render(&app);
+    { /* the pointer over a size: its focus; a click off the box closes it, nothing taken */
+        GuiChoices c;
+        sizes_place(&app, &c);
+        point(&app, choice_box(&app, &c, 5), false);
+        assert(app.sizes_shown && app.sizes.focus == 5);
+        mouse_px(&app, c.box.x + c.box.w / 2, c.box.y + 2, true); /* on the box, off its rows: nothing */
+        assert(app.sizes_shown && app.sizes.focus == 5 && !app.menu.text_size);
+        mouse_px(&app, c.box.x - 4, c.box.y + c.box.h / 2, true);
+        assert(!app.sizes_shown && !app.menu.text_size && !app.confirm.shown);
+        key(&app, SDLK_RIGHT);
+        assert(app.sizes_shown && app.sizes.focus == 3);
+    }
+    { /* in an area too short for them: the rows that fit, from the focus's; the arrow of those hidden above in the first
+         row's box, at its right; YoRHa's rows from the area's top down to the question */
+        GuiChoices c;
+        GuiTheme was = app.theme;
+        GuiRect first, short_area = gui_rect(0, 0, 60 * cell_w(&app), 6 * item_h(&app));
+        size_t rows;
+        int cw = cell_w(&app);
+        choices_place(&app, GUI_CHOICES_SIZES, short_area, "UI scale", NULL, GUI_TEXT_MAX + 3, &c); /* 4x, the last */
+        rows = ui_choices_shown(c.rects, app.scale, UI_CHOICES_ROWS);
+        assert(c.count == GUI_TEXT_MAX + 4 && rows > 0 && rows < (size_t)c.count);
+        assert(c.lists[UI_CHOICES_ROWS].first == (size_t)c.count - rows && c.box.y + c.box.h <= short_area.h);
+        SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
+        SDL_RenderClear(app.renderer); /* the dialog alone */
+        choices_draw(&app, &c, "UI scale", NULL);
+        first = choice_box(&app, &c, c.count - (int)rows);
+        {
+            int x, y;
+            assert(find_text(&app, "\x1e", rgb(app.theme.soft), 1, &x, &y));
+            assert(x == first.x + first.w - cw && y == item_text_y(&app, first));
+            hides(&app, "\x1f", rgb(app.theme.soft)); /* the last in focus: none hidden below */
+        }
+        app.theme = *gui_theme_builtin("yorha");
+        choices_place(&app, GUI_CHOICES_SIZES, short_area, "UI scale", NULL, 0, &c);
+        rows = ui_choices_shown(c.rects, app.scale, UI_CHOICES_ROWS);
+        assert(c.at.y == short_area.y && c.at.y + c.at.h <= c.box.y && rows > 0 && rows < (size_t)c.count);
+        assert(!c.lists[UI_CHOICES_ROWS].first);
+        app.theme = was;
+        render(&app);
+    }
     key(&app, SDLK_DOWN);
     key(&app, SDLK_RETURN);
     assert(!app.sizes_shown && app.menu.text_size == 1 && app.scale == 1 && !strcmp(app.app_form.text, "1x"));
@@ -1630,8 +1665,12 @@ int main(int argc, char** argv) {
     assert(!app.confirm.shown && !app.menu.text_size && !strcmp(app.app_form.text, "Auto"));
     app.clock = 1000;
     key(&app, SDLK_RETURN);
-    app.sizes.focus = 1; /* 0.5 of Auto */
-    key(&app, SDLK_RETURN);
+    {
+        GuiChoices c;
+        render(&app);
+        sizes_place(&app, &c);
+        point(&app, choice_box(&app, &c, 1), true); /* 0.5 of Auto clicked */
+    }
     assert(app.menu.text_size == -2 && app.scale == SDL_max(1, (app.auto_scale * 2 + 2) / 4) &&
            strstr(app.app_form.text, "0.5 of Auto: "));
     app.clock = 1000 + GUI_TEXT_KEEP_MS - 1;
@@ -1930,7 +1969,8 @@ int main(int argc, char** argv) {
             int user = app.user, side = 3 * h;
             GuiAsk ask = app.confirm.ask;
             GuiPicture picture = app.theme.picture;
-            GuiList l, choices;
+            GuiList l;
+            GuiChoices choices;
             GuiRect asked, ascii;
             memcpy(cursor, app.theme.cursor, sizeof cursor);
             memcpy(name, app.user_name, sizeof name);
@@ -2898,7 +2938,7 @@ int main(int argc, char** argv) {
             char *own = snx_path_join(temporary, "own"), *inside = snx_path_join(own, "games");
             int w, h;
             GuiRect r;
-            GuiList l;
+            GuiChoices l;
             assert(!snx_mkdirs(inside));
             app.own_dir = own;
             app.editor.row = FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_WORK);
@@ -2911,7 +2951,7 @@ int main(int argc, char** argv) {
             shows(&app, "Outside the app,", rgb(app.theme.warning));
             shows(&app, "games may run slower.", rgb(app.theme.warning));
             ask_boxes(&app, &r, &l);
-            assert(list_box(&l, 0).y >= r.y + 2 * cell_h(&app));
+            assert(choice_box(&app, &l, 0).y >= r.y + 2 * cell_h(&app));
             assert(SDL_SetWindowSize(app.window, w, h));
             render(&app);
             shows(&app, "- Back", yellow);
@@ -2934,9 +2974,9 @@ int main(int argc, char** argv) {
             assert(!app.place[GUI_PLACE_WORK]);
             place_set(&app, GUI_PLACE_WORK, temporary);
             ask_boxes(&app, &r, &l);
-            touch_box(&app, list_box(&l, 1));
+            touch_box(&app, choice_box(&app, &l, 1));
             assert(app.confirm.shown && app.confirm.armed && !app.place[GUI_PLACE_WORK]);
-            touch_box(&app, list_box(&l, 1));
+            touch_box(&app, choice_box(&app, &l, 1));
             assert(!app.confirm.shown && app.place[GUI_PLACE_WORK]);
             key(&app, SDLK_DELETE);
             key(&app, SDLK_DOWN);
@@ -3198,14 +3238,44 @@ int main(int argc, char** argv) {
         snprintf(question, sizeof question, "%s", "elsewhere dump.nsp: into which folder of the recompiled library?");
         shows(&app, question, rgb(app.theme.warning));
         shows(&app, "default, ", yellow); /* the Main first, in focus */
+        { /* YoRHa's choices as wide as the longest of them with the marker and two columns, past the cursor's margin */
+            GuiChoices c;
+            GuiTheme was = app.theme;
+            char text[700];
+            int cols;
+            app.theme = *gui_theme_builtin("yorha");
+            dests_place(&app, &c, question, sizeof question);
+            cols = gui_text_cols(choice_text(&app, GUI_CHOICES_DESTS, 0, text, sizeof text)) +
+                   gui_text_cols(app.theme.marker) + 2;
+            assert(cols > 24 && choice_box(&app, &c, 0).w >= cols * cell_w(&app));
+            app.theme = was;
+        }
         key(&app, SDLK_ESCAPE);
         assert(!app.dests_shown && !app.menu.running && !app.dest_file && !app.dest_out);
-        launch(&app, snx_strdup(dump), false);
-        key(&app, SDLK_DOWN);
-        key(&app, SDLK_RETURN);
-        assert(!app.dests_shown && app.menu.running && !app.dest_out && app.menu.selected == GUI_SWITCH);
-        finish(&app, 0); /* status 0: the fake driver found its --outdir the folder taken */
-        {
+        { /* the pointer over a folder: its focus; a click off the box is Back */
+            GuiChoices c;
+            launch(&app, snx_strdup(dump), false);
+            render(&app);
+            dests_place(&app, &c, question, sizeof question);
+            point(&app, choice_box(&app, &c, 1), false);
+            assert(app.dests_shown && app.dests.focus == 1);
+            mouse_px(&app, c.box.x - 4, c.box.y + c.box.h / 2, true);
+            assert(!app.dests_shown && !app.menu.running && !app.dest_file && !app.dest_out);
+        }
+        /* the second taken, by its keys, then by a click: each run's --outdir that folder */
+        for (int pass = 0; pass < 2; ++pass) {
+            launch(&app, snx_strdup(dump), false);
+            if (!pass) {
+                key(&app, SDLK_DOWN);
+                key(&app, SDLK_RETURN);
+            } else {
+                GuiChoices c;
+                render(&app);
+                dests_place(&app, &c, question, sizeof question);
+                point(&app, choice_box(&app, &c, 1), true);
+            }
+            assert(!app.dests_shown && app.menu.running && !app.dest_out && app.menu.selected == GUI_SWITCH);
+            finish(&app, 0); /* status 0: the fake driver found its --outdir the folder taken */
             size_t size;
             char* kept = (char*)snx_read_file(app.run_log, &size);
             char* said = snx_format(" --outdir %s", extra); /* the run's line, written after the run started */
@@ -3228,7 +3298,7 @@ int main(int argc, char** argv) {
         char *dump = snx_path_join(temporary, "room dump.nsp"), *nro = snx_path_join(temporary, "room dump.nro");
         char *work_was = app.work_dir, *games_was = app.games_dir, *out;
         GuiRect r;
-        GuiList l;
+        GuiChoices l;
         void* zeros = calloc(1, 3u << 20);
         assert(zeros && !snx_write_file(dump, zeros, 3u << 20) && !snx_write_file(nro, zeros, 3u << 20));
         free(zeros);
@@ -3272,9 +3342,9 @@ int main(int argc, char** argv) {
         /* a finger: the first tap arms Run anyway, the second runs it */
         launch(&app, snx_strdup(dump), false);
         ask_boxes(&app, &r, &l);
-        touch_box(&app, list_box(&l, 1));
+        touch_box(&app, choice_box(&app, &l, 1));
         assert(app.confirm.shown && app.confirm.armed && !app.menu.running);
-        touch_box(&app, list_box(&l, 1));
+        touch_box(&app, choice_box(&app, &l, 1));
         assert(!app.confirm.shown && app.menu.running);
         finish(&app, 0);
         app.room_free = 3u << 20;
@@ -3689,7 +3759,7 @@ int main(int argc, char** argv) {
     {
         int pass;
         GuiRect r;
-        GuiList l;
+        GuiChoices l;
         GuiPlace p;
         SDL_Event held;
         app.ask_abort = true;
@@ -3726,12 +3796,12 @@ int main(int argc, char** argv) {
             assert(app.confirm.shown && !app.aborting);
             tap_px(&app, r.x + 16 * app.scale, r.y + 8 * app.scale); /* the question itself: nothing */
             assert(app.confirm.shown);
-            tap_px(&app, r.x - 8, list_box(&l, 1).y + 4); /* beside Abort, off the box */
+            tap_px(&app, r.x - 8, choice_box(&app, &l, 1).y + 4); /* beside Abort, off the box */
             assert(!app.confirm.shown && !app.aborting && app.menu.running);
             key(&app, SDLK_ESCAPE);
-            point(&app, list_box(&l, 1), false); /* the pointer moves the focus */
+            point(&app, choice_box(&app, &l, 1), false); /* the pointer moves the focus */
             assert(app.confirm.shown && app.confirm.selected == GUI_CONFIRM_ABORT);
-            point(&app, list_box(&l, 0), true);
+            point(&app, choice_box(&app, &l, 0), true);
             assert(!app.confirm.shown && !app.aborting && app.menu.running);
             key(&app, SDLK_ESCAPE);
             key(&app, SDLK_RETURN);
@@ -3759,13 +3829,26 @@ int main(int argc, char** argv) {
                 assert(l.at.y + l.at.h <= r.y && l.at.x > w / 2);         /* above it, at its right */
                 assert(same_colour(pixel(&app, (float)(r.x + r.w / 2), (float)(r.y + r.h - 2)), rgb(app.theme.ink)));
             }
+            { /* a row hit whole, the cursor's margin before its box too; a click between two rows is on the dialog,
+                 above its box: it keeps on */
+                GuiRect keep = ui_choices_row(l.rects, app.scale, UI_CHOICES_ROWS, 0), box = choice_box(&app, &l, 0);
+                GuiRect abort_row = ui_choices_row(l.rects, app.scale, UI_CHOICES_ROWS, 1);
+                assert(box.x > keep.x); /* YoRHa's cursor, in the row */
+                mouse_px(&app, abort_row.x + 1, abort_row.y + abort_row.h / 2, false);
+                assert(app.confirm.shown && app.confirm.selected == GUI_CONFIRM_ABORT);
+                mouse_px(&app, keep.x + 1, keep.y + keep.h / 2, false);
+                assert(app.confirm.selected == GUI_CONFIRM_KEEP);
+                assert(abort_row.y > keep.y + keep.h && keep.y + keep.h + 1 < r.y);
+                mouse_px(&app, keep.x + keep.w / 2, keep.y + keep.h, true);
+                assert(app.confirm.shown && app.confirm.selected == GUI_CONFIRM_KEEP && !app.aborting);
+            }
             /* its options-dialog = default: in the middle, the question in the warning colour */
             app.theme.dialog = GUI_DIALOG_DEFAULT;
             render(&app);
             shows(&app, "Abort the recompile?", rgb(app.theme.warning));
             app.theme = *gui_theme_builtin("default");
             ask_boxes(&app, &r, &l);
-            touch_box(&app, list_box(&l, 1));
+            touch_box(&app, choice_box(&app, &l, 1));
             assert(app.aborting && !app.confirm.shown);
             while (app.menu.running && SDL_GetTicks() < until) {
                 pump(&app);
@@ -5529,7 +5612,7 @@ int main(int argc, char** argv) {
         /* a box over the screen is a box on the screen darkened: the exit question, its choices as boxes, a click on
            one taking it, a click off the box keeping on; the files an older version left, OK focused, a key closing it */
         {
-            GuiList choices;
+            GuiChoices choices;
             app.menu.selected = GUI_EXIT;
             render(&app);
             menu_boxes(&app, &m);
@@ -5539,17 +5622,21 @@ int main(int argc, char** argv) {
             render(&app);
             ask_boxes(&app, &r, &choices);
             text_px_is(&app, r.x + cw, r.y + 4 * s, "Exit ScarletNX?", rgb(app.theme.warning), black);
-            text_px_is(&app, list_box(&choices, 0).x + cw / 2, item_text_y(&app, list_box(&choices, 0)), "- Stay",
-                       yellow, black);
+            text_px_is(&app, choice_box(&app, &choices, 0).x + cw / 2, item_text_y(&app, choice_box(&app, &choices, 0)),
+                       "- Stay", yellow, black);
+            { /* a row each, 2 pixels apart and as high as the menu's rows, whatever the theme's gap */
+                GuiRect stay = choice_box(&app, &choices, 0), quit = choice_box(&app, &choices, 1);
+                assert(stay.h == item_h(&app) && quit.y - stay.y == item_h(&app) + 2 * s && app.theme.gap > 2);
+            }
             assert(b.x < r.x && /* its left edge, off the question's box, darkened */
                    same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), (SDL_Color){0x7F, 0x7F, 0, 255}));
-            mouse_px(&app, list_box(&choices, 1).x + 4, list_box(&choices, 1).y + 4, false);
+            mouse_px(&app, choice_box(&app, &choices, 1).x + 4, choice_box(&app, &choices, 1).y + 4, false);
             assert(app.confirm.shown && app.confirm.selected == GUI_CONFIRM_ABORT);
             mouse_px(&app, r.x + r.w + 8, r.y + r.h + 8, true);
             assert(!app.confirm.shown && !app.menu.quit);
             key(&app, SDLK_ESCAPE);
             render(&app);
-            mouse_px(&app, list_box(&choices, 1).x + 4, list_box(&choices, 1).y + 4, true);
+            mouse_px(&app, choice_box(&app, &choices, 1).x + 4, choice_box(&app, &choices, 1).y + 4, true);
             assert(!app.confirm.shown && app.closing_ms && !app.menu.quit); /* the screen of what is kept, first */
             app.closing_ms = 0;
             {
