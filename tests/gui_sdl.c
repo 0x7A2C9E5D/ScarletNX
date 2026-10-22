@@ -3319,9 +3319,20 @@ int main(int argc, char** argv) {
             finish(&app, 0);
             app.recent = (GuiRecent){0};
             assert(!gui_recent_add(&app.recent, dump, GUI_SWITCH, 0));
-            recent_made(&app);
+            assert(gui_recent_rename(&app.recent, dump, "0100ABCD12345000")); /* as its run's line named it */
+            recent_as_games(&app);
             assert(app.recent.count == 1 && app.recent.game[0].prepared &&
                    snx_same_file(app.recent.game[0].path, program));
+            assert(!strcmp(app.recent.game[0].name, "0100ABCD12345000")); /* no control.nacp: its folder's name */
+            {
+                static unsigned char nacp[0x300];
+                char* file = snx_path_join(data, "control.nacp");
+                memcpy(nacp, "Made Quest", 10);
+                assert(!snx_write_file(file, nacp, sizeof nacp));
+                free(file);
+            }
+            recent_as_games(&app); /* by the name Games shows it by, not its ID */
+            assert(app.recent.count == 1 && !strcmp(app.recent.game[0].name, "Made Quest"));
             app.recent = was;
             recent_changed(&app);
             assert(!snx_record_source(out, "0100ABCD12345000", listed));

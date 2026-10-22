@@ -154,6 +154,15 @@ static char* shown_name(const char* path, const char* name) {
     free(folder);
     return shown ? shown : snx_strdup(name);
 }
+char* gui_game_shown(const char* path) {
+    char *folder = snx_dirname(path), *shown;
+    const char* leaf = folder ? folder + strlen(folder) : NULL;
+    if (!leaf) return NULL;
+    while (leaf > folder && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
+    shown = shown_name(path, leaf);
+    free(folder);
+    return shown;
+}
 /* whether the add-on named a (<game>_<entry>) is listed before b: updates first, the newest version first (one
    without a version last), then the DLCs by title ID */
 static bool addon_before(SnxU64 game, const char* a, const char* b) {

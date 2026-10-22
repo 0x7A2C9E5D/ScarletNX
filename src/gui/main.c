@@ -4274,8 +4274,9 @@ static bool made_from(const App* app, const char* file) {
     made_free(&made);
     return found;
 }
-/* the recent dumps made into games of recompiled/ since: each one's row runs its game's program from then on */
-static void recent_made(App* app) {
+/* the recent rows as Games has their games: a dump made into a game of recompiled/ since runs that game's program
+   from then on, and a game of a folder of its own goes by the name Games shows it by, its control.nacp's */
+static void recent_as_games(App* app) {
     MadeGames made;
     bool changed = false;
     int i;
@@ -4286,6 +4287,13 @@ static void recent_made(App* app) {
         if (program && gui_recent_made(&app->recent, i, program)) changed = true;
     }
     made_free(&made);
+    for (i = 0; i < app->recent.count; ++i) {
+        char* shown = app->recent.game[i].driver == GUI_SWITCH && gui_game_folder(app->recent.game[i].path)
+                          ? gui_game_shown(app->recent.game[i].path)
+                          : NULL;
+        if (shown && gui_recent_rename(&app->recent, app->recent.game[i].path, shown)) changed = true;
+        free(shown);
+    }
     if (changed) recent_changed(app);
 }
 /* room on the disks for file's run (gui_room), not extracted yet; else room_line says what it takes. With Extract game
@@ -7172,7 +7180,7 @@ static void pump(App* app) {
             }
             recent_name(app, "LAUNCH");
             recent_name(app, "RECOMPILE"); /* a run that ended before its game loaded */
-            recent_made(app);              /* a dump's run made its game */
+            recent_as_games(app);          /* a dump's run made its game */
             app->menu.view = GUI_LOAD_NONE;
             if (app->aborting)
                 snprintf(app->message, sizeof(app->message), "%s",
@@ -7220,7 +7228,7 @@ static void pump(App* app) {
         app->games_checked = now_ms(app);
         if (games_stamp(app) != app->games_stamp) {
             app->games_stamp = games_stamp(app);
-            recent_made(app);
+            recent_as_games(app);
             if (app->menu.view == GUI_LOAD_GAMES) {
                 GuiBrowser was = app->browser;
                 list_games(app);
@@ -8962,7 +8970,7 @@ static void open_files(App* app) {
         folders_load(app);
         app_load(app);
     }
-    if (prefs) recent_made(app); /* by the recompiled/ app.ini picked */
+    if (prefs) recent_as_games(app); /* by the recompiled/ app.ini picked */
     app->users_dir = snx_users_dir(app->home_dir ? app->home_dir : app->data_dir);
     if (!app->users_dir) {
         snprintf(app->message, sizeof app->message, "%s", snx_tr("No user shown: out of memory"));
