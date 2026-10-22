@@ -145,11 +145,6 @@ static void covered(u32 off, u32 size, int own_glyphs) {
     else CHECK(cmap_lookup(shm + off, size, 'A') != 0);
 }
 
-int kobj_never_signaled(KObj* o) {
-    (void)o;
-    return 0;
-}
-
 int main(void) {
     hle_init();
     fonts_fill(shm, sizeof shm);
