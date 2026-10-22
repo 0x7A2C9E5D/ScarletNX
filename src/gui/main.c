@@ -19,6 +19,7 @@
 #include "gui/wide.h"
 #include "gui/model.h"
 #include "gui/place.h"
+#include "gui/ui.h" /* generated from ui.txt by tools/uigen */
 #include "gui/gui_process.h"
 #include "gui/steps.h"
 #include "gui/theme.h"
@@ -104,7 +105,7 @@ typedef struct {
     char theme[64], text[16], language[64], animations[16], side[16], places[48], moves[32];
     char folder[GUI_FOLDER_ROWS][64];
 } GuiAppForm;
-typedef struct {
+typedef struct App {
     SDL_Window* window;
     SDL_Renderer* renderer;
     SDL_Texture* font;
@@ -332,17 +333,20 @@ typedef struct {
 #endif
 } App;
 
-/* shown translated */
-static const char* const items[] = {SNX_TR_NOOP("Load Switch NSP/XCI/NRO"),
-                                    SNX_TR_NOOP("Load Linux ARM ELF"),
-                                    SNX_TR_NOOP("Load 3DS CIA"),
-                                    SNX_TR_NOOP("Setup device keys"),
-                                    SNX_TR_NOOP("Settings"),
-                                    SNX_TR_NOOP("Share log"),
+/* the menu's item i: a row of ui.txt's Entries, in model.h's order (a negative size if not); its text shown
+   translated */
+#define GUI_ENTRY(item) (UI_MENU_ENTRIES_LOAD_SWITCH_NSP_XCI_NRO + (item))
+typedef char gui_entries_in_order
+    [GUI_ENTRY(GUI_LINUX) == UI_MENU_ENTRIES_LOAD_LINUX_ARM_ELF && GUI_ENTRY(GUI_3DS) == UI_MENU_ENTRIES_LOAD_3DS_CIA &&
+             GUI_ENTRY(GUI_KEYS) == UI_MENU_ENTRIES_SETUP_DEVICE_KEYS &&
+             GUI_ENTRY(GUI_SETTINGS) == UI_MENU_ENTRIES_SETTINGS && GUI_ENTRY(GUI_LOG) == UI_MENU_ENTRIES_SHARE_LOG &&
 #ifdef SDL_PLATFORM_ANDROID
-                                    SNX_TR_NOOP("Open data folder"),
+             GUI_ENTRY(GUI_DATA) == UI_MENU_ENTRIES_OPEN_DATA_FOLDER &&
 #endif
-                                    SNX_TR_NOOP("Exit")};
+             GUI_ENTRY(GUI_EXIT) == UI_MENU_ENTRIES_EXIT && GUI_ENTRY(GUI_ITEM_COUNT) == UI_MENU_ITEMS
+         ? 1
+         : -1];
+static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[GUI_ENTRY(item)].text; }
 #define GUI_RECENT_SHOWN 3 /* the recent games Games shows before a row that shows the rest */
 /* what the screens say to press: a phone has a finger, the back button and the system's file picker, nothing to drop;
    a computer has the picker too (on Linux the desktop's portal, else zenity), on a screen of its own as the keys' */
@@ -942,7 +946,7 @@ static void recent_open(App* app, char* file) {
     app->browser.head = games_head(app);
 }
 static void menu_label(const App* app, int item, char* label, size_t size) {
-    snprintf(label, size, "%s%s", app->theme.marker, snx_tr(items[item]));
+    snprintf(label, size, "%s%s", app->theme.marker, snx_tr(entry_text(item)));
 }
 /* still the menu, fading out, while a run starts */
 static int entering(const App* app) {
@@ -1906,6 +1910,50 @@ static void list_marks(App* app, const GuiList* l) {
     if (!l->shown) return;
     list_arrows(app, l, l->first, l->first + l->shown - 1, l->first > 0, l->first + l->shown < l->count);
 }
+/* a theme colour by ui.txt's name (UiColor), else dflt */
+static GuiRgb ui_colour(const App* app, unsigned color, GuiRgb dflt) {
+    const GuiTheme* t = &app->theme;
+    const GuiRgb named[] = {t->page, t->ink, t->soft, t->focus, t->active, t->failure, t->dim, t->warning, t->added};
+    return color > UI_COLOR_NONE && color <= sizeof named / sizeof *named ? named[color - 1] : dflt;
+}
+/* a row's box: the row less the theme's cursor, which is drawn before it */
+static GuiRect ui_row_box(const App* app, GuiRect r) {
+    int margin = app->theme.cursor[0] ? gui_text_cols(app->theme.cursor) * cell_w(app) : 0;
+    return gui_rect(r.x + margin, r.y, r.w - margin, r.h);
+}
+/* a row of a scene of ui.txt, in list_item's look: the theme's cursor and the arrows of hidden rows inside it, the box
+   between them; the failure colour fills it (every other blink_ms with UI_ATTR_BLINK, steady with 0), the active
+   colour writes the one activated last */
+void ui_draw_row(App* app, GuiRect r, const char* text, unsigned color, unsigned attr, bool focused) {
+    const GuiTheme* t = &app->theme;
+    int filled = t->panels == GUI_PANELS_FILL, inverted = focused && t->focus_bar;
+    int failing =
+        (attr & UI_ATTR_FAILURE) && !((attr & UI_ATTR_BLINK) && t->blink_ms && (now_ms(app) / t->blink_ms) % 2);
+    GuiRect b = ui_row_box(app, r);
+    char label[160];
+    snprintf(label, sizeof label, "%s%s", t->marker, snx_tr(text));
+    if (failing || inverted)
+        fill_rect(app, b, failing ? t->failure : t->focus);
+    else if (filled)
+        fill_rect(app, b, t->dim);
+    if (!failing && !inverted && (!filled || focused)) outline(app, b, focused ? t->focus : t->dim);
+    text_in(app, inner(app, b), b.x + cell_w(app) / 2, item_text_y(app, b), label,
+            rgb(failing || inverted     ? t->page
+                : attr & UI_ATTR_ACTIVE ? t->active
+                : focused               ? t->focus
+                                        : ui_colour(app, color, t->ink)));
+    if (focused && t->cursor[0]) text_in(app, r, r.x, item_text_y(app, b), t->cursor, rgb(t->focus));
+    if (attr & UI_ATTR_MORE_UP) /* beside the down arrow when one row shows */
+        text_in(app, b, b.x + b.w - ((attr & UI_ATTR_MORE_DOWN) ? 2 : 1) * cell_w(app), item_text_y(app, b), "\x1e",
+                rgb(failing || inverted ? t->page : t->soft));
+    if (attr & UI_ATTR_MORE_DOWN)
+        text_in(app, b, b.x + b.w - cell_w(app), item_text_y(app, b), "\x1f",
+                rgb(failing || inverted ? t->page : t->soft));
+}
+/* a label of a scene of ui.txt, in the soft colour unless it names one */
+void ui_draw_label(App* app, GuiRect r, const char* text, unsigned color) {
+    text_in(app, r, r.x, item_text_y(app, r), snx_tr(text), rgb(ui_colour(app, color, app->theme.soft)));
+}
 /* The keys of a screen: "Keys: what they do." sentences, each drawn as the keys, inverted (the theme's focus bar) or in
    the focus colour, and what they do; a row holds as many as fit, against its right edge */
 static int hint_next(const char** s, char* key, char* what, size_t size) {
@@ -2813,10 +2861,11 @@ static void status_box(App* app, GuiRect r) {
     y = pane(app, r, snx_tr("Status"));
     status_rows(app, text.w / cell_w(app), gui_rect(text.x, y, text.w, r.y + r.h - y), y, 1);
 }
-/* ---- the menu: the items, a box each; beside them the focused one ---- */
+/* ---- the menu: the items, ui.txt's scene Menu; beside them the focused one ---- */
 typedef struct {
     GuiPlace place;
-    GuiList list; /* entry i is item i */
+    GuiRect rects[UI_MENU_ITEMS];
+    UiList lists[UI_MENU_ITEMS]; /* the entries' at UI_MENU_ENTRIES: row i is item i */
 } GuiMenuBoxes;
 /* what an item is about, for the tips and the side box */
 static const char* item_about(const App* app, int item) {
@@ -2841,7 +2890,10 @@ static void menu_boxes(App* app, GuiMenuBoxes* m) {
     }
     place_screen(app, &m->place, shown_keys(app, keys, sizeof keys), longest + 2 + gui_text_cols(app->theme.cursor),
                  GUI_SHOWS_STATUS | GUI_SHOWS_TABS);
-    list_place(app, &m->list, m->place.list, GUI_ITEM_COUNT, app->menu.selected);
+    ui_menu_layout(m->place.list, app->scale, m->rects);
+    memset(m->lists, 0, sizeof m->lists);
+    m->lists[UI_MENU_ENTRIES].focus = (size_t)app->menu.selected;
+    ui_menu_follow(m->rects, app->scale, UI_MENU_ENTRIES, GUI_ITEM_COUNT, &m->lists[UI_MENU_ENTRIES]);
 }
 /* the last run's output, under what the side box says */
 static void last_output(App* app, GuiRect r, int y) {
@@ -2859,11 +2911,11 @@ static void last_output(App* app, GuiRect r, int y) {
 /* the side box: the focused item, and for the keys the ones in use; the last run's output under it. What the item
    does is the tips', not said twice */
 static void menu_side(App* app, const GuiMenuBoxes* m) {
-    int item = m->list.focus, y;
+    int item = (int)m->lists[UI_MENU_ENTRIES].focus, y;
     GuiRect r = inner(app, m->place.side);
     char line[1100];
     if (!m->place.side.h) return;
-    y = pane(app, m->place.side, snx_tr(items[item]));
+    y = pane(app, m->place.side, snx_tr(entry_text(item)));
     r = gui_rect(r.x, y, r.w, m->place.side.y + m->place.side.h - y);
     if (item == GUI_KEYS) {
         char* in_use = keys_in_use(app);
@@ -2873,36 +2925,27 @@ static void menu_side(App* app, const GuiMenuBoxes* m) {
     }
     last_output(app, r, y);
 }
-/* Setup device keys while no prod.keys is in use: its box in the failure colour every other blink_ms (steady with 0),
-   over its usual look, so a first start shows what to do first */
-static void keys_wanted(App* app, const GuiList* l, const char* label) {
-    const GuiTheme* t = &app->theme;
-    GuiRect b = list_box(l, GUI_KEYS);
-    char* in_use;
-    if (t->blink_ms && (now_ms(app) / t->blink_ms) % 2) return;
-    in_use = keys_in_use(app);
-    if (in_use) {
+/* the entries' attributes: the one activated last in the active colour; Setup device keys while no prod.keys is in
+   use blinking in the failure colour, so a first start shows what to do first */
+unsigned ui_menu_entries_attr_cb(App* app, size_t row) {
+    unsigned attr = app->menu.activated && (size_t)app->menu.active == row ? UI_ATTR_ACTIVE : 0;
+    if (row == GUI_KEYS) {
+        char* in_use = keys_in_use(app);
+        if (!in_use) attr |= UI_ATTR_FAILURE | UI_ATTR_BLINK;
         free(in_use);
-        return;
     }
-    fill_rect(app, b, t->failure);
-    text_in(app, inner(app, b), b.x + cell_w(app) / 2, item_text_y(app, b), label, rgb(t->page));
+    return attr;
 }
 static void draw_menu(App* app) {
     GuiMenuBoxes m;
-    char label[160], keys[256];
-    int i;
+    char keys[256];
     menu_boxes(app, &m);
     chrome(app, &m.place);
-    for (i = m.list.first; i < m.list.first + m.list.shown; ++i) {
-        menu_label(app, i, label, sizeof label);
-        list_item(app, &m.list, i, label, i == m.list.focus, app->menu.activated && app->menu.active == i);
-        if (i == GUI_KEYS) keys_wanted(app, &m.list, label);
-    }
-    list_marks(app, &m.list);
+    ui_menu_draw(app, m.rects, app->scale, m.lists);
     menu_side(app, &m);
     status_box(app, m.place.status);
-    screen_foot(app, &m.place, item_about(app, m.list.focus), shown_keys(app, keys, sizeof keys));
+    screen_foot(app, &m.place, item_about(app, (int)m.lists[UI_MENU_ENTRIES].focus),
+                shown_keys(app, keys, sizeof keys));
 }
 /* ---- Games: Add a folder, then "Recent games" over the recent rows and a page of the games, as many as the list's
    box holds ---- */
@@ -3078,7 +3121,7 @@ static void draw_pick(App* app) {
     int y;
     pick_boxes(app, &k);
     chrome(app, &k.place);
-    y = pane(app, k.place.list, snx_tr(items[keys ? GUI_KEYS : app->menu.active]));
+    y = pane(app, k.place.list, snx_tr(entry_text(keys ? GUI_KEYS : app->menu.active)));
     r = inner(app, k.place.list);
     r = gui_rect(r.x, y, r.w, r.y + r.h - y);
     if (keys) {
@@ -3114,7 +3157,7 @@ static void draw_pick(App* app) {
     if (!keys || !app->keys_done || !app->keys_ok)
         prompt_in(app, r, SDL_max(y, k.prompt), GUI_PROMPT_KEYS, snx_tr(keys ? SAY_KEYS_WAIT : SAY_FILE_WAIT),
                   rgb(app->theme.focus));
-    snprintf(line, sizeof line, "%s: %s", snx_tr(items[keys ? GUI_KEYS : app->menu.active]), snx_tr(SAY_PICK_BOX));
+    snprintf(line, sizeof line, "%s: %s", snx_tr(entry_text(keys ? GUI_KEYS : app->menu.active)), snx_tr(SAY_PICK_BOX));
     screen_foot(app, &k.place, line, shown_keys(app, hints_line, sizeof hints_line));
 }
 static void draw_run(App* app) {
@@ -3134,7 +3177,7 @@ static void draw_run(App* app) {
         for (x = 0; x < SDL_min(cols, app->console.cols); ++x)
             if (app->console.cells[i][x] != ' ')
                 glyph(app, (float)(r.x + x * cell_w(app)), (float)(y + i * cell_h(app)), app->console.cells[i][x]);
-    y = pane(app, p.side, snx_tr(items[app->menu.selected]));
+    y = pane(app, p.side, snx_tr(entry_text(app->menu.selected)));
     text = inner(app, p.side);
     text = gui_rect(text.x, y, text.w, p.side.y + p.side.h - y);
     y += wrap_in(app, text, text.x, y, app->file ? app->file : "", 1, rgb(t->ink)) * cell_h(app);
@@ -7892,10 +7935,28 @@ static void screen_pointer(App* app, float x, float y, bool click, bool touch) {
         return;
     }
     menu_boxes(app, &m);
-    if ((i = list_hit(&m.list, x, y, touch)) < 0) return;
-    app->menu.selected = i;
-    if (click) menu_key(app, GUI_SELECT);
+    {
+        size_t row;
+        uint32_t hit =
+            ui_menu_hit(app, m.rects, app->scale, m.lists, (int)x, (int)y, click ? UI_HIT_CLICK : 0, &i, &row);
+        if (hit) ui_menu_act(app, i, row, hit);
+    }
 }
+/* an entry of the menu hit: the focus on it, and a click activates it */
+static void menu_entry(App* app, int item, uint32_t hit) {
+    app->menu.selected = item;
+    if (hit & UI_HIT_CLICK) menu_key(app, GUI_SELECT);
+}
+void ui_menu_entries_load_switch_nsp_xci_nro_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_SWITCH, hit); }
+void ui_menu_entries_load_linux_arm_elf_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_LINUX, hit); }
+void ui_menu_entries_load_3ds_cia_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_3DS, hit); }
+void ui_menu_entries_setup_device_keys_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_KEYS, hit); }
+void ui_menu_entries_settings_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_SETTINGS, hit); }
+void ui_menu_entries_share_log_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_LOG, hit); }
+#ifdef SDL_PLATFORM_ANDROID
+void ui_menu_entries_open_data_folder_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_DATA, hit); }
+#endif
+void ui_menu_entries_exit_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_EXIT, hit); }
 /* the keys the foot names, a word each ("Up/Down" is two): what a click or a tap on the word presses. Space selects
    where the foot names it, as Enter; Add a folder's opens the folder picker, as Enter on its row. A word is found by
    its English or its translation, which the foot's sentences keep (scripts/build-languages.py checks them) */
@@ -8141,7 +8202,7 @@ static bool menu_scrolls(App* app) {
     GuiMenuBoxes m;
     layout(app);
     menu_boxes(app, &m);
-    return m.list.shown < m.list.count;
+    return ui_menu_shown(m.rects, app->scale, UI_MENU_ENTRIES) < GUI_ITEM_COUNT;
 }
 /* a drag up or down from where the finger went down, on a menu whose letters make it scroll */
 static bool drags(App* app, float x, float y) {

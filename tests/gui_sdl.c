@@ -101,6 +101,13 @@ static SDL_Color pixel(App* app, float x, float y) {
     return out;
 }
 static int same_colour(SDL_Color a, SDL_Color b) { return a.r == b.r && a.g == b.g && a.b == b.b; }
+/* the menu's item i's box, as drawn (its row past the cursor); none while it is scrolled out */
+static GuiRect menu_entry_box(const App* app, const GuiMenuBoxes* m, int item) {
+    size_t first = m->lists[UI_MENU_ENTRIES].first;
+    if ((size_t)item < first || (size_t)item >= first + ui_menu_shown(m->rects, app->scale, UI_MENU_ENTRIES))
+        return gui_rect(0, 0, 0, 0);
+    return ui_row_box(app, ui_menu_row(m->rects, app->scale, UI_MENU_ENTRIES, (size_t)item - first));
+}
 /* Setup device keys' box in the failure colour, at the clock given (a blink's half): inside it, past its label */
 static int keys_red(App* app, Uint64 clock) {
     GuiMenuBoxes m;
@@ -108,7 +115,7 @@ static int keys_red(App* app, Uint64 clock) {
     app->clock = clock;
     render(app);
     menu_boxes(app, &m);
-    b = list_box(&m.list, GUI_KEYS);
+    b = menu_entry_box(app, &m, GUI_KEYS);
     return same_colour(pixel(app, (float)(b.x + b.w - 3 * app->scale - 1), (float)(b.y + b.h / 2)),
                        rgb(app->theme.failure));
 }
@@ -149,7 +156,7 @@ static GuiRect entry_box(App* app, int item) {
     GuiMenuBoxes m;
     layout(app);
     menu_boxes(app, &m);
-    return list_box(&m.list, item);
+    return menu_entry_box(app, &m, item);
 }
 static GuiRect game_box(App* app, int i, bool recent) {
     GuiGamesBoxes g;
@@ -3824,7 +3831,7 @@ int main(int argc, char** argv) {
     {
         GuiMenuBoxes m;
         menu_boxes(&app, &m);
-        assert(m.list.count == GUI_ITEM_COUNT && GUI_SWITCH == 0);
+        assert(ui_menu_shown(m.rects, app.scale, UI_MENU_ENTRIES) >= GUI_ITEM_COUNT && GUI_SWITCH == 0);
     }
     go_tab(&app, GUI_TAB_GAMES);
     assert(app.menu.view == GUI_LOAD_GAMES && app.games.count == 35 && !app.message[0]);
@@ -4007,7 +4014,7 @@ int main(int argc, char** argv) {
         {
             static unsigned char nacp[0x4000];
             char *own = snx_path_join(app.games_dir, "0100ABCD12340000"), *base, *newer, *older, *file, *ini, *checked;
-            char *dirs[4];
+            char* dirs[4];
             int nx, ny, i;
 #ifdef _WIN32
             base = snx_path_join(own, "0100ABCD12340000.exe");
@@ -4047,8 +4054,9 @@ int main(int argc, char** argv) {
             app.menu.selected = GUI_SWITCH;
             go_tab(&app, GUI_TAB_GAMES);
             focus_game(&app, "0100ABCD12340000");
-            assert(app.games.addons[app.browser.page * app.browser.page_size + app.browser.selected - app.browser.head] ==
-                   5);
+            assert(
+                app.games.addons[app.browser.page * app.browser.page_size + app.browser.selected - app.browser.head] ==
+                5);
             key(&app, SDLK_RETURN);
             /* rows: Update 1.2.0, Update 1.0.0, No update, DLC 1, A mod, B mod, Open mods folder, Save, Play */
             assert(app.addons_shown && !app.menu.running && app.addons.count == 3 && app.mods_count == 2 &&
@@ -4187,7 +4195,8 @@ int main(int argc, char** argv) {
         {
             GuiMenuBoxes m;
             menu_boxes(&app, &m);
-            assert(m.list.focus >= m.list.first && m.list.focus < m.list.first + m.list.shown);
+            const UiList* l = &m.lists[UI_MENU_ENTRIES];
+            assert(l->focus >= l->first && l->focus < l->first + ui_menu_shown(m.rects, app.scale, UI_MENU_ENTRIES));
         }
     }
     /* a text size too big for the window: the list scrolls as the focus goes down, then back, an arrow where boxes
@@ -4195,6 +4204,7 @@ int main(int argc, char** argv) {
     {
         GuiMenuBoxes m;
         SDL_Color soft = rgb(app.theme.soft);
+        int shown;
         assert(SDL_SetWindowSize(app.window, 1280, 1024));
         SDL_SyncWindow(app.window);
         app.menu.text_size = GUI_TEXT_MAX;
@@ -4208,43 +4218,37 @@ int main(int argc, char** argv) {
         render(&app);
         menu_boxes(&app, &m);
         assert(m.place.stacked && m.place.side.h);
-        assert(app.scale == GUI_TEXT_MAX && app.rows == 16 && m.list.shown < m.list.count && !m.list.first);
+        shown = (int)ui_menu_shown(m.rects, app.scale, UI_MENU_ENTRIES);
+        assert(app.scale == GUI_TEXT_MAX && app.rows == 16 && shown < GUI_ITEM_COUNT &&
+               !m.lists[UI_MENU_ENTRIES].first);
         hides(&app, "\x1e", soft);
-        shows(&app, "\x1f", soft); /* items below the last box */
-        /* scroll = center, the built-ins': each focus in the middle of the boxes shown, the ends where the list has no
-           more to move */
-        assert(app.theme.scroll == GUI_SCROLL_CENTER);
-        for (int at = 0; at < m.list.count; ++at) {
-            int want = SDL_clamp(at - (m.list.shown - 1) / 2, 0, m.list.count - m.list.shown);
+        shows(&app, "\x1f", soft); /* items below the last row */
+        /* ui.txt's scroll, center: each focus in the middle of the rows shown, the ends where the list has no more to
+           move; the theme's scroll is the other lists' */
+        app.theme.scroll = GUI_SCROLL_EDGE;
+        for (int at = 0; at < GUI_ITEM_COUNT; ++at) {
+            int want = SDL_clamp(at - (shown - 1) / 2, 0, GUI_ITEM_COUNT - shown);
             app.menu.selected = at;
             menu_boxes(&app, &m);
-            assert(m.list.first == want);
+            assert((int)m.lists[UI_MENU_ENTRIES].first == want);
         }
-        app.menu.selected = (m.list.shown - 1) / 2 + 1;
+        app.theme.scroll = GUI_SCROLL_CENTER;
+        app.menu.selected = (shown - 1) / 2 + 1;
         render(&app);
         menu_boxes(&app, &m);
-        assert(m.list.first == 1 && m.list.first + m.list.shown < m.list.count); /* hidden above and below */
-        shows(&app, "\x1e", soft);
-        shows(&app, "\x1f", soft);
-        app.theme.scroll = GUI_SCROLL_EDGE; /* the list moving once the focus reaches its end */
-        app.menu.selected = GUI_LOG;
-        render(&app);
-        menu_boxes(&app, &m);
-        assert(m.list.first == GUI_LOG - m.list.shown + 1 && m.list.first > 0 &&
-               m.list.first + m.list.shown < m.list.count);
+        assert(m.lists[UI_MENU_ENTRIES].first == 1 && 1 + shown < GUI_ITEM_COUNT); /* hidden above and below */
         shows(&app, "\x1e", soft);
         shows(&app, "\x1f", soft);
         app.menu.selected = GUI_EXIT;
         render(&app);
         menu_boxes(&app, &m);
-        assert(m.list.first + m.list.shown == m.list.count && m.list.first > 0);
+        assert((int)m.lists[UI_MENU_ENTRIES].first + shown == GUI_ITEM_COUNT && m.lists[UI_MENU_ENTRIES].first > 0);
         shows(&app, "\x1e", soft);
         hides(&app, "\x1f", soft);
         app.menu.selected = GUI_SWITCH;
         render(&app);
         menu_boxes(&app, &m);
-        assert(!m.list.first);
-        app.theme.scroll = GUI_SCROLL_CENTER;
+        assert(!m.lists[UI_MENU_ENTRIES].first);
         /* a drag down moves the focus down row by row while the finger goes, not all at once when it lifts */
         {
             SDL_Event e = {0};
@@ -4866,13 +4870,22 @@ int main(int argc, char** argv) {
         dim = rgb(app.theme.dim);
         focus = GUI_KEYS;
         exit_entry = GUI_EXIT;
-        assert(focus >= 0 && m.list.focus == focus && exit_entry > focus && !m.place.stacked);
-        b = list_box(&m.list, focus);
+        assert(focus >= 0 && (int)m.lists[UI_MENU_ENTRIES].focus == focus && exit_entry > focus && !m.place.stacked);
+        b = menu_entry_box(&app, &m, focus);
         assert(same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), yellow)); /* framed in the focus colour */
         text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Setup device keys", yellow, black);
-        b = list_box(&m.list, exit_entry);
+        b = menu_entry_box(&app, &m, exit_entry);
         assert(same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), dim)); /* the others in the dim one */
         text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Exit", normal, black);
+        /* the load activated last in the active colour, the focus kept where it is */
+        app.menu.activated = true;
+        app.menu.active = GUI_3DS;
+        render(&app);
+        b = menu_entry_box(&app, &m, GUI_3DS);
+        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Load 3DS CIA", rgb(app.theme.active), black);
+        app.menu.activated = false;
+        render(&app);
+        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Load 3DS CIA", normal, black);
         /* the side box: the focus's name over a rule and the keys in use, what it does left to the tips; the status
            box under it */
         r = m.place.side;
@@ -4971,10 +4984,10 @@ int main(int argc, char** argv) {
         app.message[0] = 0;
         app.abnormal_exit = false;
         /* the pointer: over Exit's box it takes the focus, a click on Setup device keys opens its screen */
-        b = list_box(&m.list, exit_entry);
+        b = menu_entry_box(&app, &m, exit_entry);
         mouse_px(&app, b.x + 4, b.y + 4, false);
         assert(app.menu.selected == GUI_EXIT);
-        b = list_box(&m.list, focus);
+        b = menu_entry_box(&app, &m, focus);
         mouse_px(&app, b.x + 4, b.y + 4, true);
         assert(app.menu.view == GUI_LOAD_KEYS);
         key(&app, SDLK_ESCAPE);
@@ -5246,7 +5259,7 @@ int main(int argc, char** argv) {
             app.menu.selected = GUI_EXIT;
             render(&app);
             menu_boxes(&app, &m);
-            b = list_box(&m.list, m.list.focus);
+            b = menu_entry_box(&app, &m, (int)m.lists[UI_MENU_ENTRIES].focus);
             key(&app, SDLK_ESCAPE);
             assert(app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT);
             render(&app);
@@ -5556,10 +5569,10 @@ int main(int argc, char** argv) {
         app.clock = 1; /* the tips at their start, before they slide */
         render(&app);
         menu_boxes(&app, &m);
-        b = list_box(&m.list, m.list.focus);
+        b = menu_entry_box(&app, &m, (int)m.lists[UI_MENU_ENTRIES].focus);
         text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe Setup device keys", page, rgb(app.theme.focus));
-        text_px_is(&app, m.list.at.x, item_text_y(&app, b), "\x10", rgb(app.theme.focus), page);
-        b = list_box(&m.list, GUI_EXIT);
+        text_px_is(&app, m.rects[UI_MENU_ENTRIES].x, item_text_y(&app, b), "\x10", rgb(app.theme.focus), page);
+        b = menu_entry_box(&app, &m, GUI_EXIT);
         text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe Exit", ink, dim = rgb(app.theme.dim));
         r = m.place.side;
         text_px_is(&app, r.x + cw, r.y + 2 * s, "Setup device keys", page, ink);
@@ -5956,7 +5969,7 @@ int main(int argc, char** argv) {
             recent_changed(&app);
             render(&app);
             menu_boxes(&app, &m);
-            assert(m.list.count == GUI_ITEM_COUNT && m.list.shown == m.list.count);
+            assert(ui_menu_shown(m.rects, app.scale, UI_MENU_ENTRIES) >= GUI_ITEM_COUNT);
             go_tab(&app, GUI_TAB_GAMES);
             {
                 GuiGamesBoxes g;
@@ -5981,11 +5994,15 @@ int main(int argc, char** argv) {
         render(&app);
         menu_boxes(&app, &m);
         assert(app.scale == 3 && foot_scale(&app) == 2);
-        assert(m.list.shown < m.list.count && m.list.first > 0 && m.list.focus < m.list.first + m.list.shown);
+        {
+            const UiList* l = &m.lists[UI_MENU_ENTRIES];
+            size_t shown = ui_menu_shown(m.rects, app.scale, UI_MENU_ENTRIES);
+            assert(shown < GUI_ITEM_COUNT && l->first > 0 && l->focus < l->first + shown);
+            b = menu_entry_box(&app, &m, (int)l->first);
+        }
         assert(menu_scrolls(&app));
-        b = list_box(&m.list, m.list.first);
-        text_px_is(&app, m.list.at.x + m.list.at.w - 8 * app.scale, item_text_y(&app, b), "\x1e", rgb(app.theme.soft),
-                   page);
+        text_px_is(&app, b.x + b.w - 8 * app.scale, item_text_y(&app, b), "\x1e", rgb(app.theme.soft),
+                   rgb(app.theme.panels == GUI_PANELS_FILL ? app.theme.dim : app.theme.page)); /* in its box */
         assert(!m.place.stacked);
         /* and on a window too narrow for both, the list alone (fixed), or the side box under it (adaptive) */
         assert(SDL_SetWindowSize(app.window, 800, 800));
@@ -6026,8 +6043,9 @@ int main(int argc, char** argv) {
     assert(app.menu.quit);
     app.menu.quit = false;
     app.closing_ms = 0;
-    /* fingers: a tap takes an entry anywhere across the list, the cursor's margin too, which a mouse does on the box
-       only; a drag is no tap, nor a second finger; a swipe across turns the games' pages; back is ESC */
+    /* fingers: a tap takes an entry anywhere across its row, the cursor's margin too, as a click does (the cursor is
+       drawn inside the row); a drag is no tap, nor a second finger; a swipe across turns the games' pages; back is
+       ESC */
     {
         GuiMenuBoxes m;
         GuiRect b;
@@ -6040,11 +6058,13 @@ int main(int argc, char** argv) {
         render(&app);
         menu_boxes(&app, &m);
         b = entry_box(&app, GUI_SETTINGS);
-        margin = m.list.at.x + 2;
+        margin = m.rects[UI_MENU_ENTRIES].x + 2;
         y = b.y + b.h / 2;
         assert(margin < b.x);
         mouse_px(&app, margin, y, true);
-        assert(!app.editing);
+        assert(app.editing && app.menu.selected == GUI_SETTINGS);
+        key(&app, SDLK_ESCAPE);
+        app.menu.selected = GUI_KEYS;
         tap_px(&app, margin, y);
         assert(app.editing && app.menu.selected == GUI_SETTINGS);
         key(&app, SDLK_ESCAPE);

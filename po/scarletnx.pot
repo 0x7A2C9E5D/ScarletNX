@@ -168,38 +168,6 @@ msgstr ""
 msgid "Saved in %s"
 msgstr ""
 
-#: src/gui/main.c
-msgid "Load Switch NSP/XCI/NRO"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Load Linux ARM ELF"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Load 3DS CIA"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Setup device keys"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Settings"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Share log"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Open data folder"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Exit"
-msgstr ""
-
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -573,6 +541,10 @@ msgstr ""
 msgid "Stay"
 msgstr ""
 
+#: src/gui/main.c src/gui/ui.txt
+msgid "Exit"
+msgstr ""
+
 #: src/gui/main.c
 msgid "Only this folder"
 msgstr ""
@@ -714,6 +686,10 @@ msgstr ""
 
 #: src/gui/main.c src/common/utilities/setup.c
 msgid "Games"
+msgstr ""
+
+#: src/gui/main.c src/gui/ui.txt
+msgid "Settings"
 msgstr ""
 
 #: src/gui/main.c
@@ -2689,6 +2665,30 @@ msgstr ""
 #: src/gui/theme.c
 #, c-format
 msgid "No themes/%s/theme.ini could be read: it shows %s"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Load Switch NSP/XCI/NRO"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Load Linux ARM ELF"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Load 3DS CIA"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Setup device keys"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Share log"
+msgstr ""
+
+#: src/gui/ui.txt
+msgid "Open data folder"
 msgstr ""
 
 #: src/common/utilities/setup.c

@@ -1,0 +1,18 @@
+# The launcher's scenes: tools/uigen makes gui/ui.h and gui/ui.c of them as it builds (its first comment has the
+# format), and main.c draws each in the area its screen gives it
+[scene]Menu {
+	# in the order of model.h's items, which main.c checks; the code gives the active one and the keys' state
+	[list]Entries {
+		attr = callback
+		[button]"Load Switch NSP/XCI/NRO" {}
+		[button]"Load Linux ARM ELF" {}
+		[button]"Load 3DS CIA" {}
+		[button]"Setup device keys" {}
+		[button]"Settings" {}
+		[button]"Share log" {}
+		[button]"Open data folder" {
+			for-platform = android
+		}
+		[button]"Exit" {}
+	}
+}

@@ -3,7 +3,8 @@
 # Copyright 2026 the ScarletNX contributors
 """The menu's languages (src/gui/i18n.h): its phrases listed from the code, and each translation compiled into it.
 
---pot writes po/scarletnx.pot from the phrases of src/gui (snx_tr, SNX_TR_NOOP, SNX_TR_KEYS, SNX_TR_KEY), the setup's
+--pot writes po/scarletnx.pot from the phrases of src/gui (snx_tr, SNX_TR_NOOP, SNX_TR_KEYS, SNX_TR_KEY, and the texts
+of the items of its scenes, ui.txt, which main.c draws through snx_tr), the setup's
 notices it shows (src/common/utilities/setup.c) and the launcher's own rows in src/nx/runtime/settings.txt (their
 names, labels, help and sections, which its Settings show through snx_tr); --check fails when it is not what the code
 makes, or a po/*.po would not compile. --out FILE PO... makes FILE, the C source of every language's catalog (the .mo
@@ -23,6 +24,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCES = 'src/gui'
 SHOWN = ('src/common/utilities/setup.c',)  # files elsewhere with phrases the menu shows: the setup's notices
 SETTINGS = 'src/nx/runtime/settings.txt'
+UI = 'src/gui/ui.txt'
+UI_TEXT = re.compile(r'\t*@?\[[a-z]+\]"((?:[^"\\]|\\["\\])*)"')  # tools/uigen's [type]"Text", \" and \\ in it
 POT = 'po/scarletnx.pot'
 MARKS = {'snx_tr': None, 'SNX_TR_NOOP': None, 'SNX_TR_KEYS': 'snx-keys', 'SNX_TR_KEY': 'snx-key'}
 CODE = re.compile(r'[a-z]{2,3}(-[A-Z][a-z]{3})?(-([A-Z]{2}|[0-9]{3}))?$')  # BCP 47: language[-Script][-REGION]
@@ -171,14 +174,23 @@ def settings_phrases(root, phrases):
     done()
 
 
+def ui_phrases(text):
+    """the texts of ui.txt's items, in their order"""
+    return [re.sub(r'\\(["\\])', r'\1', found.group(1)) for found in map(UI_TEXT.match, text.splitlines()) if found]
+
+
 def code_phrases(root):
     """every phrase of the code, in the order first met: {phrase: (flags, files)}"""
     phrases = {}
     for path in sorted((root / SOURCES).iterdir()) + [root / shown for shown in SHOWN]:
-        if path.suffix not in ('.c', '.h', '.m', '.cpp') or path.name == 'i18n.h':
-            continue
         name = path.relative_to(root).as_posix()
-        for phrase, flag, _ in phrases_of(path.read_text(encoding='utf-8'), name):
+        if name == UI:
+            found = [(phrase, None, None) for phrase in ui_phrases(path.read_text(encoding='utf-8'))]
+        elif path.suffix not in ('.c', '.h', '.m', '.cpp') or path.name == 'i18n.h':
+            continue
+        else:
+            found = phrases_of(path.read_text(encoding='utf-8'), name)
+        for phrase, flag, _ in found:
             if not phrase:
                 raise Refused(f'{name}: an empty phrase')
             flags, files = phrases.setdefault(phrase, (set(), []))
