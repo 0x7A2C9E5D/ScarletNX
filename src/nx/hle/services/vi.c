@@ -370,7 +370,7 @@ static void vi_transact(ViLayer* l, u32 code, IpcBuf parcel, IpcBuf reply) {
                 case 1:
                 case 7: v = l->height; break;
                 case 2: v = l->format; break;
-                case 3: v = 1; break;  /* MinUndequeuedBuffers: the one the display holds */
+                case 3: v = 0; break;  /* MinUndequeuedBuffers: HOS never uses the async buffer path */
                 case 9:                /* ConsumerRunningBehind */
                 case 10:               /* ConsumerUsageBits */
                 case 11: v = 0; break; /* StickyTransform */
