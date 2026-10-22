@@ -8,6 +8,7 @@
 #include "nx/hle/hle.c"
 
 u8* g_mem;
+u64 g_as_size = AS_MAX; /* the reservation's size, mem.c's, which this test does not link */
 static u64 test_now;
 static unsigned test_checks, test_objects, test_events;
 static int test_no_device;
