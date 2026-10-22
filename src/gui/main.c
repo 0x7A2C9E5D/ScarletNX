@@ -27,6 +27,7 @@
 #include "common/utilities/window_icon.h"
 #include "common/utilities/build_info.h"
 #include "gui/recent.h"
+#include "gui/pad_menu.h"
 #include "gui/clean.h"
 #include "gui/settings.h"
 #include "gui/splash.h"
@@ -254,6 +255,12 @@ typedef struct App {
     SDL_Gamepad* gamepad;      /* the pad it shows, the first one plugged in, while it is open */
     bool pads_read;            /* SDL's gamepads started for it */
     unsigned pad_pushed;       /* the triggers and the left stick's directions past half way, a bit each */
+    /* the menu's own pads, whose presses are its keys (pad_menu.h), open while no run goes; pads_failed: SDL could not
+       start them, not asked again. pad_driven: a pad pressed last, not the keyboard, the mouse or a finger, so the
+       cursor is hidden and a mouse moving less than pointer_travel's GUI_PAD_TRAVEL moves nothing */
+    GuiPads pads;
+    bool pads_failed, pad_driven;
+    float pointer_travel;
     /* the Settings' groups: App, then a group per section of the settings, its first row and rows; a row each */
     int groups, group_first[GUI_GROUPS_MAX], group_rows[GUI_GROUPS_MAX];
     GuiThemeKey group_keys[GUI_GROUPS_MAX];
@@ -419,6 +426,22 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_PAD    SNX_TR_KEYS("Arrows/pad: move, change. Enter/A: select. Del: the .ini's. ESC: back.")
 #define SAY_USERS  SNX_TR_KEYS("Up/Down: user. Left/Right: plays as. Enter: type a nickname. ESC: back.")
 #endif
+/* and what they say while a pad drives the menu (pad_menu.h's keys), on every system: its face's letters as an Xbox
+   pad's and a Nintendo one's name them, a PlayStation pad's shapes in their place (gui_pad_keys_named) */
+#define SAY_PAD_MENU SNX_TR_KEYS("D-pad: move. A: select. Start: refresh. B: back.")
+#define SAY_PAD_GAMES                                                                                                  \
+    SNX_TR_KEYS("D-pad: select. A: open. Y: recompile. L3: mods folder. LT/RT: page. Start: refresh. B: back.")
+#define SAY_PAD_GAMES_AOT SNX_TR_KEYS("R3: build AOT pack.")
+#define SAY_PAD_KEYS_HOW  SNX_TR_KEYS("A: pick a file. B: back.")
+#define SAY_PAD_EDITOR    SNX_TR_KEYS("D-pad: key, change. A: edit. B: back.")
+#define SAY_PAD_PICKER    SNX_TR_KEYS("D-pad: row, 1. LT/RT: 16. A: keep. B: put back.")
+#define SAY_PAD_SETTINGS  SNX_TR_KEYS("D-pad: setting, change. A: type. X: default. B: back.")
+#define SAY_PAD_GROUPS    SNX_TR_KEYS("D-pad: group. A: open. B: back.")
+#define SAY_PAD_APP       SNX_TR_KEYS("D-pad: row, change. A: change or open. B: back.")
+#define SAY_PAD_FOLDERS   SNX_TR_KEYS("D-pad: row. X: take an Extra off. Start: refresh. B: back.")
+#define SAY_PAD_PLACES    SNX_TR_KEYS("D-pad: folder. A: pick another. X: the default. Start: refresh. B: back.")
+#define SAY_PAD_USERS     SNX_TR_KEYS("D-pad: user, plays as. A: type a nickname. B: back.")
+#define SAY_PAD_TAB       SNX_TR_KEYS("LB/RB: screen.")
 /* a failure of the system's (a file not written, a picker that did not open): in a box over the screen, whole, until
    OK, once in the session; the tips or the note keep it after. Over a run or another question, those alone */
 static void say_failure(App* app, const char* text) {
@@ -999,9 +1022,12 @@ static const char* shown_keys(const App* app, char* out, size_t size);
 static void aot_status_update(App* app);
 /* a screen's keys, Tab's after them */
 #define SAY_TAB SNX_TR_KEYS("Tab: screen. F2: side box.")
+/* Games' foot says the AOT pack's key: there is a cache to build it from, or the pack built is bad */
+static bool aot_said(const App* app) {
+    return app->menu.view == GUI_LOAD_GAMES && (app->aot_state == GUI_AOT_CACHE || app->aot_state == GUI_AOT_BAD);
+}
 static const char* screen_keys(const App* app, const char* keys, char* out, size_t size) {
-    int aot = app->menu.view == GUI_LOAD_GAMES &&
-              (app->aot_state == GUI_AOT_CACHE || app->aot_state == GUI_AOT_BAD);
+    bool aot = aot_said(app);
 #ifdef SDL_PLATFORM_ANDROID
     if (aot) {
         snprintf(out, size, "%s %s", snx_tr(keys), snx_tr(SAY_GAMES_AOT));
@@ -1204,7 +1230,7 @@ static int type_rows(const GuiTheme* theme, int rows, int first, const size_t* t
     return typing;
 }
 static void foot(App* app, const GuiPlace* p, const char* tips, SDL_Color color, const char* keys);
-static int hint_pick(const char* key, int col);
+static int hint_pick(const char* key, int col, bool pad);
 /* a run as a loading screen: the title, the name and the ring; the steps typed down the page, their status last;
    the progress bar and its percentage */
 static void render_steps(App* app) {
@@ -1860,6 +1886,25 @@ static int splash_shown(App* app) {
 static bool folders_row_place(const App* app);
 static const char* shown_keys(const App* app, char* out, size_t size) {
     const char* keys = SAY_MENU_KEYS;
+    if (app->pad_driven && !(app->editing && app->form == GUI_FORM_PAD)) { /* the button map's speaks of pads already */
+        char said[512];
+        if (app->editing)
+            keys = app->editor.picking              ? SAY_PAD_PICKER
+                   : app->form == GUI_FORM_THEME    ? SAY_PAD_EDITOR
+                   : app->form == GUI_FORM_SETTINGS ? SAY_PAD_GROUPS
+                   : app->form == GUI_FORM_APP      ? SAY_PAD_APP
+                   : app->form == GUI_FORM_FOLDERS  ? (folders_row_place(app) ? SAY_PAD_PLACES : SAY_PAD_FOLDERS)
+                   : app->form == GUI_FORM_USERS    ? SAY_PAD_USERS
+                                                    : SAY_PAD_SETTINGS;
+        else
+            keys = app->menu.view == GUI_LOAD_GAMES ? SAY_PAD_GAMES
+                   : pick_screen(app)               ? SAY_PAD_KEYS_HOW
+                                                    : SAY_PAD_MENU;
+        snprintf(said, sizeof said, "%s%s%s %s", snx_tr(keys), aot_said(app) ? " " : "",
+                 aot_said(app) ? snx_tr(SAY_PAD_GAMES_AOT) : "", snx_tr(SAY_PAD_TAB));
+        gui_pad_keys_named(said, app->pads.labels, out, size);
+        return out;
+    }
     if (app->editing)
         keys = app->form == GUI_FORM_PAD        ? SAY_PAD
                : app->editor.picking            ? SAY_PICKER
@@ -2063,7 +2108,7 @@ static int hints(App* app, const char* keys, int width, GuiRect r, int y, int dr
             lit = draw && k && !off && app->hovering && app->hover_y >= (float)cy &&
                   app->hover_y < (float)(cy + cell_h(app)) && app->hover_x >= (float)(x - cell_w(app)) &&
                   app->hover_x < (float)(x + w + cell_w(app)) &&
-                  hint_pick(key, (int)SDL_floorf((app->hover_x - (float)x) / (float)cell_w(app))) >= 0;
+                  hint_pick(key, (int)SDL_floorf((app->hover_x - (float)x) / (float)cell_w(app)), app->pad_driven) >= 0;
             if (lit) /* the whole sentence, as a button under the pointer: inverted */
                 fill_rect(app, gui_rect(x - s, cy, w + 2 * s, cell_h(app)), band ? t->page : t->focus);
             else if (draw && k && !off && t->focus_bar)
@@ -4993,6 +5038,12 @@ static void pad_load_mappings(App* app) {
     free(path);
 }
 static void render(App* app);
+/* two Joy-Cons one pad, or two, as the games take them (gamepad_joycon_pair, 1 when not picked): before SDL's gamepads
+   start, which read it then */
+static void joycon_pairs(App* app) {
+    const char* pair = gui_settings_value(&app->settings, "gamepad_joycon_pair");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS, pair && !atoi(pair) ? "0" : "1");
+}
 /* the button map of map's row (row: what to come back to), A and B as swap's row says, for player (0: every one) */
 static void open_pad_on(App* app, int row, int map, int swap, int player) {
     leave_editor(app);
@@ -5006,11 +5057,7 @@ static void open_pad_on(App* app, int row, int map, int swap, int player) {
     app->pad.note[0] = 0;
     pad_start(app);
     render(app); /* SDL looks for pads for most of a second: the page shows first, saying so */
-    /* two Joy-Cons one pad, or two, as the games take them (gamepad_joycon_pair, 1 when not picked) */
-    {
-        const char* pair = gui_settings_value(&app->settings, "gamepad_joycon_pair");
-        SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS, pair && !atoi(pair) ? "0" : "1");
-    }
+    joycon_pairs(app);
     app->pads_read = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
     if (!app->pads_read)
         snprintf(app->pad.note, sizeof app->pad.note, "Controllers cannot be read: %s", SDL_GetError());
@@ -8424,39 +8471,56 @@ static const struct {
     const char* word;
     SDL_Keycode key;
     SDL_Keymod mod;
-} hint_keys[] = {{SNX_TR_KEY("ESC"), SDLK_ESCAPE, 0},
-                 {SNX_TR_KEY("Back"), SDLK_AC_BACK, 0},
-                 {SNX_TR_KEY("Tab"), SDLK_TAB, 0},
-                 {SNX_TR_KEY("Enter"), SDLK_RETURN, 0},
-                 {SNX_TR_KEY("Space"), SDLK_RETURN, 0},
-                 {SNX_TR_KEY("click"), SDLK_RETURN, 0},
-                 {SNX_TR_KEY("Tap"), SDLK_RETURN, 0},
-                 {SNX_TR_KEY("A"), SDLK_RETURN, 0},
-                 {SNX_TR_KEY("Up"), SDLK_UP, 0},
-                 {SNX_TR_KEY("Down"), SDLK_DOWN, 0},
-                 {SNX_TR_KEY("Left"), SDLK_LEFT, 0},
-                 {SNX_TR_KEY("Right"), SDLK_RIGHT, 0},
-                 {SNX_TR_KEY("PgUp"), SDLK_PAGEUP, 0},
-                 {SNX_TR_KEY("PgDn"), SDLK_PAGEDOWN, 0},
-                 {SNX_TR_KEY("PgDown"), SDLK_PAGEDOWN, 0},
-                 {SNX_TR_KEY("Swipe"), SDLK_PAGEDOWN, 0},
-                 {SNX_TR_KEY("Del"), SDLK_DELETE, 0},
-                 {SNX_TR_KEY("R"), SDLK_R, 0},
-                 {SNX_TR_KEY("Recompile"), SDLK_R, 0},
-                 {SNX_TR_KEY("B"), SDLK_B, 0},
-                 {SNX_TR_KEY("AOT pack"), SDLK_B, 0},
-                 {SNX_TR_KEY("M"), SDLK_M, 0},
-                 {SNX_TR_KEY("Ctrl+S"), SDLK_S, SDL_KMOD_CTRL},
-                 {SNX_TR_KEY("Ctrl+V"), SDLK_V, SDL_KMOD_CTRL},
-                 {SNX_TR_KEY("F5"), SDLK_F5, 0},
-                 {SNX_TR_KEY("F2"), SDLK_F2, 0},
-                 {SNX_TR_KEY("Refresh"), SDLK_F5, 0},
-                 {SNX_TR_KEY("Add a folder"), SDLK_UNKNOWN, 0}};
-/* the hint_keys entry of the n bytes at word, -1 for none */
-static int hint_word(const char* word, size_t n) {
+    bool pad; /* a pad's button (pad_menu.h's key), found first while a pad drives the menu and only then: B is ESC */
+} hint_keys[] = {{SNX_TR_KEY("A"), SDLK_RETURN, 0, true},
+                 {SNX_TR_KEY("B"), SDLK_ESCAPE, 0, true},
+                 {SNX_TR_KEY("X"), SDLK_DELETE, 0, true},
+                 {SNX_TR_KEY("Y"), SDLK_R, 0, true},
+                 {SNX_TR_KEY("Cross"), SDLK_RETURN, 0, true},
+                 {SNX_TR_KEY("Circle"), SDLK_ESCAPE, 0, true},
+                 {SNX_TR_KEY("Square"), SDLK_DELETE, 0, true},
+                 {SNX_TR_KEY("Triangle"), SDLK_R, 0, true},
+                 {SNX_TR_KEY("LB"), SDLK_TAB, SDL_KMOD_LSHIFT, true},
+                 {SNX_TR_KEY("RB"), SDLK_TAB, 0, true},
+                 {SNX_TR_KEY("LT"), SDLK_PAGEUP, 0, true},
+                 {SNX_TR_KEY("RT"), SDLK_PAGEDOWN, 0, true},
+                 {SNX_TR_KEY("Start"), SDLK_F5, 0, true},
+                 {SNX_TR_KEY("L3"), SDLK_M, 0, true},
+                 {SNX_TR_KEY("R3"), SDLK_B, 0, true},
+                 {SNX_TR_KEY("ESC"), SDLK_ESCAPE, 0, false},
+                 {SNX_TR_KEY("Back"), SDLK_AC_BACK, 0, false},
+                 {SNX_TR_KEY("Tab"), SDLK_TAB, 0, false},
+                 {SNX_TR_KEY("Enter"), SDLK_RETURN, 0, false},
+                 {SNX_TR_KEY("Space"), SDLK_RETURN, 0, false},
+                 {SNX_TR_KEY("click"), SDLK_RETURN, 0, false},
+                 {SNX_TR_KEY("Tap"), SDLK_RETURN, 0, false},
+                 {SNX_TR_KEY("A"), SDLK_RETURN, 0, false},
+                 {SNX_TR_KEY("Up"), SDLK_UP, 0, false},
+                 {SNX_TR_KEY("Down"), SDLK_DOWN, 0, false},
+                 {SNX_TR_KEY("Left"), SDLK_LEFT, 0, false},
+                 {SNX_TR_KEY("Right"), SDLK_RIGHT, 0, false},
+                 {SNX_TR_KEY("PgUp"), SDLK_PAGEUP, 0, false},
+                 {SNX_TR_KEY("PgDn"), SDLK_PAGEDOWN, 0, false},
+                 {SNX_TR_KEY("PgDown"), SDLK_PAGEDOWN, 0, false},
+                 {SNX_TR_KEY("Swipe"), SDLK_PAGEDOWN, 0, false},
+                 {SNX_TR_KEY("Del"), SDLK_DELETE, 0, false},
+                 {SNX_TR_KEY("R"), SDLK_R, 0, false},
+                 {SNX_TR_KEY("Recompile"), SDLK_R, 0, false},
+                 {SNX_TR_KEY("B"), SDLK_B, 0, false},
+                 {SNX_TR_KEY("AOT pack"), SDLK_B, 0, false},
+                 {SNX_TR_KEY("M"), SDLK_M, 0, false},
+                 {SNX_TR_KEY("Ctrl+S"), SDLK_S, SDL_KMOD_CTRL, false},
+                 {SNX_TR_KEY("Ctrl+V"), SDLK_V, SDL_KMOD_CTRL, false},
+                 {SNX_TR_KEY("F5"), SDLK_F5, 0, false},
+                 {SNX_TR_KEY("F2"), SDLK_F2, 0, false},
+                 {SNX_TR_KEY("Refresh"), SDLK_F5, 0, false},
+                 {SNX_TR_KEY("Add a folder"), SDLK_UNKNOWN, 0, false}};
+/* the hint_keys entry of the n bytes at word, a pad's buttons' only when pad (a pad drives the menu), -1 for none */
+static int hint_word(const char* word, size_t n, bool pad) {
     int i;
     for (i = 0; i < (int)SDL_arraysize(hint_keys); ++i) {
         const char* shown = snx_tr(hint_keys[i].word);
+        if (hint_keys[i].pad && !pad) continue;
         if ((strlen(hint_keys[i].word) == n && !strncmp(hint_keys[i].word, word, n)) ||
             (strlen(shown) == n && !strncmp(shown, word, n)))
             return i;
@@ -8473,13 +8537,13 @@ static int text_cols(const char* s, size_t n) {
 /* the hint_keys entry a click or a tap col columns into the foot's sentence of key (hints()) presses, -1 for none: the
    word of key it is on, the slash after a word its own and the margin before the first's; the sentence's text, and the
    margin after it, what every word does when they all do one thing */
-static int hint_pick(const char* key, int col) {
+static int hint_pick(const char* key, int col, bool pad) {
     const char *word = key, *end;
     int k = gui_text_cols(key), pick = -1, first = 1, w;
     for (;; word = end + 1) {
         end = strchr(word, '/');
         if (!end) end = word + strlen(word);
-        w = hint_word(word, (size_t)(end - word));
+        w = hint_word(word, (size_t)(end - word), pad);
         if (col < k && col <= text_cols(key, (size_t)(end - key))) {
             pick = w;
             break;
@@ -8496,7 +8560,7 @@ static int hint_pick(const char* key, int col) {
 }
 /* the key it picks pressed, as on the keyboard; whether there was one */
 static bool hint_press(App* app, const char* key, int col) {
-    int pick = hint_pick(key, col);
+    int pick = hint_pick(key, col, app->pad_driven);
     SDL_Event e;
     if (pick < 0) return false;
     if (hint_keys[pick].key == SDLK_UNKNOWN) { /* Add a folder: on Folders to the focused row's library */
@@ -8844,7 +8908,77 @@ static bool files_key(App* app, SDL_Keycode code) {
         default: return false;
     }
 }
+#define GUI_PAD_TRAVEL 8.0f /* the pixels a mouse moves before it takes the menu back from a pad */
+/* the pages that read the pads themselves: the button map, and a Controller row waiting for a press */
+static bool pads_own(const App* app) { return app->device_listen || (app->editing && app->form == GUI_FORM_PAD); }
+/* a pad pressed last, or the keyboard, the mouse or a finger: the cursor shows for the mouse alone */
+static void pad_drive(App* app, bool pad) {
+    if (pad == app->pad_driven) return;
+    app->pad_driven = pad;
+    app->pointer_travel = 0;
+    if (pad) {
+        app->hovering = false;
+        SDL_HideCursor();
+    } else
+        SDL_ShowCursor();
+}
+/* which of them e is, a key or the mouse moving before it is taken: false, or true for a mouse moving too little to
+   take the menu back from a pad, which then moves nothing. A click, a wheel or a finger lifted takes it back after
+   (pointer_leaves), so it presses what the foot showed under it */
+static bool input_seen(App* app, const SDL_Event* e) {
+    switch (e->type) {
+        case SDL_EVENT_GAMEPAD_BUTTON_DOWN: pad_drive(app, true); break;
+        case SDL_EVENT_KEY_DOWN:
+            if (e->key.which != GUI_PAD_KEYBOARD) pad_drive(app, false);
+            break;
+        case SDL_EVENT_MOUSE_MOTION:
+            if (!app->pad_driven) break;
+            app->pointer_travel += SDL_fabsf(e->motion.xrel) + SDL_fabsf(e->motion.yrel);
+            if (app->pointer_travel < GUI_PAD_TRAVEL) return true;
+            pad_drive(app, false);
+            break;
+        default: break;
+    }
+    return false;
+}
+/* a pad's event: the key it presses taken as the keyboard's, but by the pages that read the pads themselves, which
+   take the event as it is; whether it was taken here */
+static bool pads_event(App* app, const SDL_Event* e) {
+    SDL_Event key;
+    bool pressed = gui_pads_event(&app->pads, e, now_ms(app), &key);
+    if (pressed) pad_drive(app, true); /* a stick or a trigger too */
+    if (!pressed || pads_own(app)) return false;
+    event(app, &key);
+    return true;
+}
+/* the menu's pads open while no run goes, which may play a game wanting them; the first time once the menu shows, as
+   SDL may take most of a second looking for them */
+static void pads_follow(App* app) {
+    if (app->menu.running) {
+        gui_pads_stop(&app->pads);
+        return;
+    }
+    if (app->pads.started || app->pads_failed) return;
+    joycon_pairs(app);
+    app->pads_failed = !gui_pads_start(&app->pads);
+    if (!app->pads_failed) pad_load_mappings(app);
+}
+/* the arrow or the page a pad holds pressed again */
+static void pads_repeat(App* app) {
+    SDL_Event key;
+    if (!pads_own(app) && gui_pads_repeat(&app->pads, now_ms(app), &key)) event(app, &key);
+}
+static bool pointer_leaves(const SDL_Event* e) {
+    return e->type == SDL_EVENT_MOUSE_BUTTON_DOWN || e->type == SDL_EVENT_MOUSE_WHEEL ||
+           e->type == SDL_EVENT_FINGER_UP || e->type == SDL_EVENT_PEN_UP;
+}
+static void event_take(App* app, const SDL_Event* e);
 static void event(App* app, const SDL_Event* e) {
+    if (input_seen(app, e) || pads_event(app, e)) return;
+    event_take(app, e);
+    if (pointer_leaves(e)) pad_drive(app, false);
+}
+static void event_take(App* app, const SDL_Event* e) {
     GuiKey key;
     /* the window closed: asked first while a run goes, unless it asks already; else the screen of what is kept */
     if (e->type == SDL_EVENT_QUIT || e->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
@@ -9269,6 +9403,7 @@ static void forget(App* app) {
 }
 static void cleanup(App* app) {
     forget(app);
+    gui_pads_stop(&app->pads);
     SDL_Quit();
 }
 /* the settings, its picks and its game folders in a file each */
@@ -9368,11 +9503,13 @@ int snx_gui_main(const char* self) {
         if (app.hidden && !app.menu.running && SDL_WaitEvent(&e)) event(&app, &e);
 #endif
         while (SDL_PollEvent(&e)) event(&app, &e);
+        pads_repeat(&app);
         pump(&app);
 #ifdef SDL_PLATFORM_ANDROID
         if (!app.hidden)
 #endif
             render(&app);
+        pads_follow(&app);
         SDL_Delay(16);
     }
     cleanup(&app);
