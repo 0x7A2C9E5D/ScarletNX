@@ -7,7 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 /* The vertex shader of a draw: the PICA vertex program decompiled to a SPIR-V 1.3 module for Vulkan (vsgen.c, on
-   vk/spirv.h's builder), with the outputs mapped to the rasterizer's semantics as Azahar's shader does without a
+   common/utilities/spirv_emit.h's writer), with the outputs mapped to the rasterizer's semantics as Azahar's shader does without a
    geometry shader. Interface, written in GLSL's terms:
    - set 0 binding 0, std140: uniform vs_pica_data { uint b; uvec4 i[4]; vec4 f[96]; } (SnxCtrVsPica)
    - set 0 binding 1, std140: uniform vs_data { bool enable_clip1; bool flip_viewport; vec4 clip_coef; }

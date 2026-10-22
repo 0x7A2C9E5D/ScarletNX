@@ -42,7 +42,9 @@ const SnxNotice snx_notices[SNX_NOTICES] = {
      SNX_TR_NOOP("each folder in the recompiled or the dumps library, as its games say"), "A line of `folders.txt`",
      SNX_NOTICE_ALL},
     {SNX_TR_NOOP("The launcher's Text size"), SNX_TR_NOOP("text_size = in app.ini"),
-     SNX_TR_NOOP("ui_scale =, shown as UI scale"), "`text_size =` in `app.ini`", SNX_NOTICE_ALL}};
+     SNX_TR_NOOP("ui_scale =, shown as UI scale"), "`text_size =` in `app.ini`", SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("A theme's lists"), SNX_TR_NOOP("[body] gap and scroll in its theme.ini"),
+     SNX_TR_NOOP("nothing: ui.txt lays out every list"), "A theme's `[body] gap` and `[body] scroll`", SNX_NOTICE_ALL}};
 int snx_notice_here(int notice) {
     int systems = snx_notices[notice].systems;
 #if defined(__ANDROID__)

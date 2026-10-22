@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Direct Maxwell to SPIR-V translation. Unsupported instructions reject the entire module. */
-#include "nx/gpu/shader/spirv_emit.h"
+#include "common/utilities/spirv_emit.h"
 #include "nx/gpu/shader/translator.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -749,7 +749,7 @@ static void ftz_mark(DirectCtx* c, u32 value) {
 /* the absolute value and negation of a value with no subnormal have none either */
 static u32 float_mod(DirectCtx* c, u32 value, int absolute, int negative) {
     int flushed = ftz_has(c, value);
-    if (absolute) value = spv_emit_glsl_unary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FABS, value);
+    if (absolute) value = spv_emit_glsl_unary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_F_ABS, value);
     if (negative) value = spv_emit_fnegate(&c->emit, c->f32_type, value);
     if (flushed && (absolute || negative)) ftz_mark(c, value);
     return value;
@@ -791,7 +791,7 @@ static u32 double_read(DirectCtx* c, u32 vec2_u32, u32 index) {
 }
 
 static u32 double_mod(DirectCtx* c, u32 value, int absolute, int negative) {
-    if (absolute) value = spv_emit_glsl_unary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_FABS, value);
+    if (absolute) value = spv_emit_glsl_unary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_F_ABS, value);
     if (negative) value = spv_emit_fnegate(&c->emit, c->f64_type, value);
     return value;
 }
@@ -814,7 +814,7 @@ static u32 half_pair(DirectCtx* c, u32 vec2, u32 raw, u32 swizzle) {
 }
 
 static u32 half_pair_mod(DirectCtx* c, u32 vec2, u32 pair, int absolute, int negative) {
-    if (absolute) pair = spv_emit_glsl_unary(&c->emit, vec2, c->glsl, SPV_GLSL_FABS, pair);
+    if (absolute) pair = spv_emit_glsl_unary(&c->emit, vec2, c->glsl, SPV_GLSL_F_ABS, pair);
     if (negative) pair = spv_emit_fnegate(&c->emit, vec2, pair);
     return pair;
 }
@@ -849,7 +849,7 @@ static u32 half_pair_result(DirectCtx* c, u32 vec2, u32 pair, u32 old, u32 merge
     if (saturate) {
         u32 zero = spv_emit_constant_f32(&c->emit, c->f32_type, 0.0f);
         u32 one = spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f);
-        pair = spv_emit_glsl_ternary(&c->emit, vec2, c->glsl, SPV_GLSL_FCLAMP, pair,
+        pair = spv_emit_glsl_ternary(&c->emit, vec2, c->glsl, SPV_GLSL_F_CLAMP, pair,
                                      spv_emit_vec2_construct(&c->emit, vec2, zero, zero),
                                      spv_emit_vec2_construct(&c->emit, vec2, one, one));
     }
@@ -876,7 +876,7 @@ static u32 float_saturate(DirectCtx* c, u32 value, int saturate) {
     if (!saturate) return value;
     u32 zero = spv_emit_constant_f32(&c->emit, c->f32_type, 0.0f);
     u32 one = spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f);
-    return spv_emit_glsl_ternary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FCLAMP, value, zero, one);
+    return spv_emit_glsl_ternary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_F_CLAMP, value, zero, one);
 }
 
 static void alpha_test(DirectCtx* c, u32 push, u32 push_pointer, u32 alpha) {
@@ -5453,7 +5453,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 u32 limit = wide ? spv_emit_constant64(&c->emit, ftype, limit_bits)
                                  : spv_emit_constant_u32(&c->emit, ftype, (u32)limit_bits);
                 u32 itype = is_signed ? i64_type : u64_type;
-                u32 bounded = spv_emit_glsl_ternary(&c->emit, ftype, c->glsl, SPV_GLSL_FCLAMP, src, low, high);
+                u32 bounded = spv_emit_glsl_ternary(&c->emit, ftype, c->glsl, SPV_GLSL_F_CLAMP, src, low, high);
                 u32 result = is_signed ? spv_emit_convert_f_to_s(&c->emit, itype, bounded)
                                        : spv_emit_convert_f_to_u(&c->emit, itype, bounded);
                 result = spv_emit_select(
@@ -5468,7 +5468,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 u32 low = wide ? spv_emit_constant64(&c->emit, ftype, 0) : spv_emit_constant_f32(&c->emit, ftype, 0.0f);
                 u32 high = wide ? spv_emit_constant64(&c->emit, ftype, 0x41efffffffe00000ull) /* 2^32 - 1 */
                                 : spv_emit_constant_f32(&c->emit, ftype, 4294967040.0f);
-                u32 bounded = spv_emit_glsl_ternary(&c->emit, ftype, c->glsl, SPV_GLSL_FCLAMP, src, low, high);
+                u32 bounded = spv_emit_glsl_ternary(&c->emit, ftype, c->glsl, SPV_GLSL_F_CLAMP, src, low, high);
                 u32 result = spv_emit_convert_f_to_u(&c->emit, c->u32_type, bounded);
                 u32 overflow = spv_emit_fcompare(&c->emit, c->bool_type, 6, src,
                                                  wide ? spv_emit_constant64(&c->emit, ftype, 0x41f0000000000000ull)
@@ -5492,7 +5492,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                                : spv_emit_constant_f32(&c->emit, ftype, -2147483648.0f);
                 u32 high = wide ? spv_emit_constant64(&c->emit, ftype, 0x41dfffffffc00000ull) /* 2^31 - 1 */
                                 : spv_emit_constant_f32(&c->emit, ftype, 2147483520.0f);
-                u32 bounded = spv_emit_glsl_ternary(&c->emit, ftype, c->glsl, SPV_GLSL_FCLAMP, src, low, high);
+                u32 bounded = spv_emit_glsl_ternary(&c->emit, ftype, c->glsl, SPV_GLSL_F_CLAMP, src, low, high);
                 u32 result = spv_emit_convert_f_to_s(&c->emit, i32_type, bounded);
                 u32 overflow = spv_emit_fcompare(&c->emit, c->bool_type, 6, src,
                                                  wide ? spv_emit_constant64(&c->emit, ftype, 0x41e0000000000000ull)
@@ -5928,8 +5928,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             right = float_mod(c, right, B(w, 49, 1), B(w, 45, 1));
             u32 is_left_nan = spv_emit_isnan(&c->emit, c->bool_type, left);
             u32 is_right_nan = spv_emit_isnan(&c->emit, c->bool_type, right);
-            u32 minimum = spv_emit_glsl_binary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FMIN, left, right);
-            u32 maximum = spv_emit_glsl_binary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FMAX, left, right);
+            u32 minimum = spv_emit_glsl_binary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_F_MIN, left, right);
+            u32 maximum = spv_emit_glsl_binary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_F_MAX, left, right);
             u32 choose_min = pred_read(c, B(w, 39, 3), B(w, 42, 1));
             u32 value = spv_emit_select(&c->emit, c->f32_type, choose_min, minimum, maximum);
             value = spv_emit_select(&c->emit, c->f32_type, is_right_nan, left, value);
@@ -5982,8 +5982,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             } else {
                 left = double_mod(c, left, B(w, 46, 1), B(w, 48, 1));
                 right = double_mod(c, right, B(w, 49, 1), B(w, 45, 1));
-                u32 min = spv_emit_glsl_binary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_FMIN, left, right);
-                u32 max = spv_emit_glsl_binary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_FMAX, left, right);
+                u32 min = spv_emit_glsl_binary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_F_MIN, left, right);
+                u32 max = spv_emit_glsl_binary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_F_MAX, left, right);
                 u32 left_nan = spv_emit_isnan(&c->emit, c->bool_type, left);
                 u32 right_nan = spv_emit_isnan(&c->emit, c->bool_type, right);
                 min = spv_emit_select(&c->emit, c->f64_type, left_nan, right, min);
@@ -6111,7 +6111,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                                         : reg_read_as(c, source, c->f32_type);
             u32 absolute = op == O_MUFU ? B(w, 46, 1) : B(w, 49, 1);
             u32 negative = op == O_MUFU ? B(w, 48, 1) : B(w, 45, 1);
-            if (absolute) value = spv_emit_glsl_unary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FABS, value);
+            if (absolute) value = spv_emit_glsl_unary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_F_ABS, value);
             if (negative) value = spv_emit_fnegate(&c->emit, c->f32_type, value);
             if (op == O_MUFU) {
                 SpvGlsl450Op fn = 0;
@@ -6133,7 +6133,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 if (B(w, 50, 1)) {
                     u32 fzero = spv_emit_constant_f32(&c->emit, c->f32_type, 0.0f);
                     u32 fone = spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f);
-                    value = spv_emit_glsl_ternary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FCLAMP, value, fzero, fone);
+                    value = spv_emit_glsl_ternary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_F_CLAMP, value, fzero, fone);
                 }
             }
             reg_write_as(c, d, value, c->f32_type);

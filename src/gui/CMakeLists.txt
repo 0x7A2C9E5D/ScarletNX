@@ -63,6 +63,11 @@ include("${PROJECT_SOURCE_DIR}/cmake/window_icon.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/build_info.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/pad_sdl.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/splash.cmake")
+# the menu's pads, their presses its keys (pad_menu.h)
+add_library(snx_gui_pad STATIC pad_menu.c)
+target_link_libraries(snx_gui_pad PUBLIC scarletnx-common snx_pad_sdl SDL3::SDL3)
+set_target_properties(snx_gui_pad PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+target_compile_options(snx_gui_pad PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 include(GNUInstallDirs)
 # The menu: Android's activity loads it as libmain.so and runs its SDL_main (dist/android); scarletnx, the Switch
 # runtime, links it and opens it when started with nothing to run (#243); a build without that runtime makes it a
@@ -113,7 +118,7 @@ set_target_properties(scarletnx-gui PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED
 target_compile_options(scarletnx-gui PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 target_compile_definitions(scarletnx-gui PRIVATE SNX_SOURCE_DIR="${CMAKE_SOURCE_DIR}" SNX_BUILD_DIR="${CMAKE_BINARY_DIR}")
 target_link_libraries(scarletnx-gui PUBLIC snx_gui_support PRIVATE snx_gui_ui scarletnx-common SDL3::SDL3
-                      snx_window_icon snx_build_info snx_pad_sdl snx_splash snx_gui_languages snx_demangle)
+                      snx_window_icon snx_build_info snx_pad_sdl snx_gui_pad snx_splash snx_gui_languages snx_demangle)
 if(WIN32 AND NOT SNX_BUILD_NX)
     enable_language(RC)
     target_sources(scarletnx-gui PRIVATE ../common/platform/runtime.rc)
@@ -157,6 +162,9 @@ if(BUILD_TESTING)
     add_executable(snx-test-gui-recent "${PROJECT_SOURCE_DIR}/tests/gui_recent.c")
     target_link_libraries(snx-test-gui-recent PRIVATE snx_gui_support scarletnx-common)
     add_test(NAME gui_recent COMMAND snx-test-gui-recent)
+    add_executable(snx-test-gui-pad "${PROJECT_SOURCE_DIR}/tests/gui_pad.c")
+    target_link_libraries(snx-test-gui-pad PRIVATE snx_gui_pad)
+    add_test(NAME gui_pad COMMAND snx-test-gui-pad)
     add_executable(snx-test-gui-steps "${PROJECT_SOURCE_DIR}/tests/gui_steps.c")
     target_link_libraries(snx-test-gui-steps PRIVATE snx_gui_support)
     add_test(NAME gui_steps COMMAND snx-test-gui-steps)
@@ -214,7 +222,7 @@ if(BUILD_TESTING)
     snx_gui_languages(snx_gui_languages_test "${PROJECT_SOURCE_DIR}/tests/po"
                       "${CMAKE_BINARY_DIR}/generated/gui_languages_test.c")
     target_link_libraries(snx-test-gui-sdl PRIVATE snx_gui_support snx_gui_ui scarletnx-common SDL3::SDL3
-                          snx_window_icon snx_build_info snx_pad_sdl snx_splash snx_gui_languages_test snx_demangle)
+                          snx_window_icon snx_build_info snx_pad_sdl snx_gui_pad snx_splash snx_gui_languages_test snx_demangle)
     if(APPLE) # it compiles main.c itself, which calls the frontend (apple.m and its Swift), as scarletnx-gui links it
         target_sources(snx-test-gui-sdl PRIVATE apple.m)
         target_link_libraries(snx-test-gui-sdl PRIVATE snx_apple_frontend "-framework Foundation")
@@ -230,7 +238,7 @@ if(BUILD_TESTING)
     # the setup's pages (gui_setup.c), as gui_sdl's: the real renderer, a language of the tests' own, no picker
     add_executable(snx-test-gui-setup "${PROJECT_SOURCE_DIR}/tests/gui_setup.c")
     target_link_libraries(snx-test-gui-setup PRIVATE snx_gui_support snx_gui_ui scarletnx-common SDL3::SDL3
-                          snx_window_icon snx_build_info snx_pad_sdl snx_splash snx_gui_languages_test snx_demangle)
+                          snx_window_icon snx_build_info snx_pad_sdl snx_gui_pad snx_splash snx_gui_languages_test snx_demangle)
     if(APPLE)
         target_sources(snx-test-gui-setup PRIVATE apple.m)
         target_link_libraries(snx-test-gui-setup PRIVATE snx_apple_frontend "-framework Foundation")

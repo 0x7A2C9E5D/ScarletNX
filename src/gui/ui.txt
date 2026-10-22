@@ -48,3 +48,41 @@
 		android.row_height = 40px
 	}
 }
+# a question's choices, a row each: the setup page's, and those of a box over a screen (a question, UI scale's, the
+# folders a recompile's game may go in); main.c places the dialog as the theme's options-dialog says, and the rows in it
+[scene]Choices {
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}
+# the setup's Appearance page: Settings > App's Language, Theme and UI scale, a row each, under the page box's head
+[scene]Appearance {
+	[list]Rows {
+		max_rows = 3
+		android.row_height = 40px
+	}
+}
+# the box of users a click on the head's user opens, a row each (its picture at its right), and the box of a game's
+# updates, DLCs and mods, which opening it shows
+[scene]Users {
+	[list]Rows {
+		max_rows = 8
+		android.row_height = 40px
+	}
+}
+[scene]Addons {
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}
+# the OK under the files of a box over the screen (what an older version left, what Clean old settings did): any key,
+# button or finger closes the box before a row is hit, so the row's own action is none (@)
+[scene]Files {
+	[list]Ok {
+		max_rows = 1
+		android.row_height = 40px
+		@[button]"OK" {}
+	}
+}

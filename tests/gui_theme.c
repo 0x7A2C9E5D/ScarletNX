@@ -41,8 +41,6 @@ static const char* const format_keys[] = {"theme/format",
                                           "body/panels",
                                           "body/sizing",
                                           "body/text",
-                                          "body/gap",
-                                          "body/scroll",
                                           "body/cursor",
                                           "body/options-dialog",
                                           "backdrop/grid",
@@ -251,16 +249,18 @@ int main(void) {
     assert(def->footer == GUI_STYLE_PLAIN && yorha->footer == GUI_STYLE_BAR && yorha->head_rule && !def->head_rule);
     assert(!gui_theme_key("body", "layout") && !gui_theme_key("head", "tabs") && !gui_theme_key("frame", "edges"));
 
-    /* a list's boxes at most 6 pixels apart in both, the focus in its middle; a theme's gap from 0 to 14, over 14 taken
-       as 14 as every number past its most; scroll center or edge */
-    assert(def->gap == 6 && yorha->gap == 6 && def->scroll == GUI_SCROLL_CENTER && yorha->scroll == GUI_SCROLL_CENTER);
-    parse(&theme, "[body]\ngap = 0\nscroll = edge\n");
-    assert(theme.gap == 0 && theme.scroll == GUI_SCROLL_EDGE && !said[0]);
-    parse(&theme, "[body]\ngap = 99\nscroll = middle\n"); /* each said, with the value it has instead */
-    assert(theme.gap == 14 && theme.scroll == GUI_SCROLL_CENTER &&
-           !gui_theme_set(&theme, gui_theme_key("body", "scroll"), "middle"));
-    assert(!strcmp(said, "[body] gap = 99 is more than 14: it takes 14; [body] scroll = middle is not center or edge: "
-                         "it keeps center"));
+    /* a number past its most taken as its most, a word it does not know keeping the base's, each said with the value
+       it has instead */
+    parse(&theme, "[head]\nsize = 9\n[body]\nfocus = middle\n");
+    assert(theme.title_size == 3 && theme.focus_bar == def->focus_bar &&
+           !gui_theme_set(&theme, gui_theme_key("body", "focus"), "middle"));
+    assert(!strcmp(said, "[head] size = 9 is more than 3: it takes 3; [body] focus = middle is not color or bar: it "
+                         "keeps color"));
+    /* [body] gap and scroll laid out the lists before ui.txt: deprecated, said, nothing taken (docs/DEPRECATIONS.md) */
+    parse(&theme, "[body]\ngap = 4\nscroll = edge\n");
+    assert(!gui_theme_key("body", "gap") && !gui_theme_key("body", "scroll"));
+    assert(!strcmp(said, "[body] gap = 4 does nothing: ui.txt lays out the lists now (delete it); [body] scroll = edge "
+                         "does nothing: ui.txt lays out the lists now (delete it)"));
 
     parse(&theme, ""); /* nothing: the default, named after its folder */
     assert(same(theme.ink, def->ink) && !strcmp(theme.id, "mine") && !strcmp(theme.name, "mine") && !said[0]);
@@ -395,13 +395,13 @@ int main(void) {
     assert(rgb_is(theme.page, 255, 255, 255) && same(theme.ink, yorha->ink) && !said[0]);
     gui_theme_load(&theme, dirs, 3, "beta", said, sizeof said);
     assert(!strcmp(theme.id, "default") && !strcmp(said, "No themes/beta/theme.ini could be read: it shows default"));
-    write(dir, "delta", "[body]\nscroll = middle\n"); /* its file named, then what it does not take */
+    write(dir, "delta", "[body]\nfocus = middle\n"); /* its file named, then what it does not take */
     gui_theme_load(&theme, dirs, 3, "delta", said, sizeof said);
     {
         char* folder = snx_path_join(dir, "delta");
         char* file = snx_path_join(folder, "theme.ini");
         char want[600];
-        snprintf(want, sizeof want, "%s: [body] scroll = middle is not center or edge: it keeps center", file);
+        snprintf(want, sizeof want, "%s: [body] focus = middle is not color or bar: it keeps color", file);
         assert(!strcmp(theme.id, "delta") && !strcmp(said, want));
         free(file);
         free(folder);

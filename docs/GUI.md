@@ -39,10 +39,19 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   editor) shows an arrow at the right end of its first row, up, and of its last, down, in the soft colour.
 - Moving the mouse over an item focuses it in yellow without activating it; in the Settings, a row of the list the
   keys move in (the groups, or the rows of the one open), the other list, a tab and Back waiting for a click.
+- A gamepad drives the menu as the keys do (`src/gui/pad_menu.c`): the D-pad and the left stick are the arrows, the
+  button labelled A (or Cross) is Enter, B (or Circle) ESC, X (or Square) Del and Y (or Triangle) R, wherever the pad
+  has them (a Switch pad's A is east, its X north), LB and RB are Shift+Tab and Tab, LT and RT are PgUp and PgDn, L3
+  and R3 are M and B (Games' mods folder and AOT pack), Start is F5 and Back (View, Minus, Select) F2. A held arrow or
+  page repeats. A press on the pad hides the mouse's cursor and the foot names the pad's buttons, a PlayStation pad's
+  by their shapes; a key or the mouse moving past a few pixels shows the keyboard's again, and so do a click and a
+  finger once they have pressed what the foot showed under them: the press that switched does what it does. The Button
+  map page and a Controller row waiting for a press read the pads themselves. While a run goes the menu lets go of the
+  pads, for the game.
 - The keys at the foot are buttons: a click or a tap on one presses it, as the keyboard does (ESC or
   Back goes back, Tab to the next screen, Enter or Tap selects, Swipe turns the page). A key of
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
-  presses the key when its words all press one. `Arrows`, `mouse` and `pad` press nothing.
+  presses the key when its words all press one. `Arrows`, `mouse`, `pad` and `D-pad` press nothing.
 - The menu, top to bottom: the three loads, **Setup device keys**, **Settings**, **Share log**, on
   Android **Open data folder**, and **Exit**. The games, and the recent ones, are the Games tab's.
 - Space, Enter or a left click explicitly activates an item, marking it bright
@@ -266,10 +275,13 @@ question and choices come as the theme's `[body] options-dialog` places a questi
 without darkening them; its tip, and what a choice did or why it did not, are in the foot. Up/Down (or the mouse)
 move between the choices, Enter takes one and ESC goes back a page, on the first page asking whether to exit. The
 notices come one a page, numbered (Changed 1/8), each read before the setup goes on: Next the next one, Back (from the
-second) the one before, and OK on the last.
+second) the one before, and OK on the last. The first page has **Skip** after its choices: it takes every page left as
+its defaults have it, what Next, OK or Enter on each would take (the notices read, the appearance and the install as
+they are, Keep, Later, the nickname `Player`), writes `setup.ini` and opens the menu; a page whose default fails (a
+`users.ini` that cannot be written) stays, saying why.
 
-- **Appearance**: a box of Settings > App's Language, Theme and UI scale, a row each, and Next under
-  them. Up/Down go over the rows and Next; Left/Right (or a click, on the left arrow back) change the language among
+- **Appearance**: a box of Settings > App's Language, Theme and UI scale, a row each, and Next (with Skip, on the first
+  page) under them. Up/Down go over the rows and Next; Left/Right (or a click, on the left arrow back) change the language among
   the menu's and the theme, at once, the screen with them; UI scale opens its box of sizes, the size picked asked
   about for 15 s as App's is; Enter does as App's (the language or the theme a step on, UI scale's box), and on
   Next goes on. What was changed is kept in `app.ini` once the setup is done, in the folders Install picks; Auto
@@ -395,14 +407,14 @@ note go on saying it after. F5, or the foot's (Refresh on a phone), looks at the
 Games lists its folders again, Folders says which of its folders are there, the menu counts the disk
 again, and the box of what an older version left looks again. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
 every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the
-column is as wide as its entries and the side box goes under the list. A list's boxes spread over its column, at
-most `[body] gap` pixels apart, times the text's size (0 to 14; 6 in the built-ins), and one longer than its column
-keeps the focused box in its middle, the list moving around it (`[body] scroll = center`, the built-ins'), or moves
-once the focus reaches its end (`edge`). The menu's list, Games', the Settings' two and the theme editor's are laid
-out by `src/gui/ui.txt` instead, whatever the theme says: their rows 2 pixels apart times the text's size (on Android
-40 pixels high, about Android's 48 dp touch target at the 3x a phone held wide gets, where the desktop's are 17), the
-focused one kept in the middle (on a group's screen, the group open in the groups' list), the cursor and the arrows
-of hidden rows inside each row, which a click takes whole as a tap does. That is the **Side box**'s *Auto*, the
+column is as wide as its entries and the side box goes under the list. Every list is laid out by `src/gui/ui.txt`
+(a theme's `[body] gap` and `[body] scroll` are deprecated, said as it loads: [DEPRECATIONS](DEPRECATIONS.md)): the menu's, Games',
+the Settings' two, the theme editor's, the choices of a question, of UI scale's box, of the Recompile box and of the
+setup's pages, the setup's Appearance rows, the box of users, that of a game's updates, DLCs and mods, and the OK of
+a box of files. Their rows are 2 pixels apart times the text's size (on Android 40 pixels high, about Android's 48 dp
+touch target at the 3x a phone held wide gets, where the desktop's are 17), the focused one kept in the middle (on a
+group's screen, the group open in the groups' list), the cursor and the arrows of hidden rows inside each row, which a
+click takes whole as a tap does. That is the **Side box**'s *Auto*, the
 default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
 not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2, or the
 foot's, shows it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over
@@ -451,7 +463,7 @@ in the build and installed in `share/scarletnx/themes`: copy one under a new nam
 to change the built-in. `[theme] base` picks the built-in a file starts from, and a key it
 leaves out, or that cannot be read, keeps the base's value. What a file has that the theme does not take as written
 is said, the file named, in the menu's message as it opens and in Settings > App's note when the theme is picked: a
-value it cannot read with the one it keeps (`[body] scroll = middle is not center or edge: it keeps center`), a number
+value it cannot read with the one it keeps (`[body] focus = middle is not color or bar: it keeps color`), a number
 past its most with the most it takes, a base that is no built-in with the one it starts from, and a key no theme has
 (an ErET file's own keys aside). A line with no `=` is no setting. The menu's **Theme editor**
 writes one with every key.
@@ -500,11 +512,6 @@ panels = fill
 sizing = fixed
 ; a text too long for its box: wrap (over its rows) | slide (on one row)
 text = wrap
-; the most pixels between two boxes of a list, times the text's size (0 to 14): they spread up to it
-gap = 6
-; a list longer than its column: center (the focused box in its middle, the list moving around it) | edge (the
-; list moving once the focus reaches its end)
-scroll = center
 ; in the list's margin, beside the focused box
 cursor = "> "
 ; a question and its choices: default (a box in the middle) | yorha (the question in a box at the foot, the
@@ -675,10 +682,11 @@ SDL3 handles window creation, keyboard/mouse input, rendering, clipboard and dra
 on every host. The platform-specific code only handles child processes and resource
 accounting. See [BUILD](BUILD.md) for SDL3's desktop dependencies.
 
-The menu's list, Games' and the Settings' are scenes of `src/gui/ui.txt`, which `tools/uigen` turns into `gui/ui.h`
-and `gui/ui.c` as the GUI builds (the format is in `tools/uigen/uigen.c`'s first comment): their layout computed at
-build time, the drawing and callbacks main.c's. `uigen` tests the generator's output and refusals, `gui_ui` runs what
-it makes of `tests/ui_test.txt`.
+The menu's list, Games', the Settings', the setup's Appearance, the choices of the questions and the setup, the
+boxes of users and of a game's add-ons, and the OK of a box of files are scenes of `src/gui/ui.txt`, which `tools/uigen` turns into `gui/ui.h` and
+`gui/ui.c` as the GUI builds (the format is in `tools/uigen/uigen.c`'s first comment): their layout computed at build
+time, the drawing and callbacks main.c's. `uigen` tests the generator's output and refusals, `gui_ui` runs what it
+makes of `tests/ui_test.txt`.
 
 The tests cover menu transitions, bounded console scrolling, split UTF-8/ANSI
 sequences, path parsing, argument quoting, inherited grandchild output, resource

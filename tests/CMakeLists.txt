@@ -57,7 +57,7 @@ if(SNX_TEST_SANITIZERS)
         snx_multicall
         # the menu, its splash, icon and pads
         scarletnx-gui snx_gui_support snx_gui_ui snx_i18n snx_gui_languages snx_gui_languages_test snx_splash snx-test-splash
-        snx_window_icon snx-test-window-icon snx_pad_sdl
+        snx_window_icon snx-test-window-icon snx_pad_sdl snx_gui_pad
         # the code generators, which tests run on files they refuse
         snx-swipc snx-svcgen snx-shaderdec snx-settingsgen snx-uigen)
 endif()
@@ -378,7 +378,7 @@ if(SNX_BUILD_NX)
     find_program(SNX_SPIRV_DIS spirv-dis)
     if(SNX_SPIRV_VAL AND SNX_SPIRV_DIS AND Python3_Interpreter_FOUND)
         add_executable(snx-test-spirv-emitter spirv_emitter.c spirv_emitter_fixture.c
-            "${PROJECT_SOURCE_DIR}/src/nx/gpu/shader/spirv_emit.c")
+            "${PROJECT_SOURCE_DIR}/src/common/utilities/spirv_emit.c")
         snx_test_target(snx-test-spirv-emitter 11)
                 add_test(NAME spirv_emitter COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/spirv_emitter_test.py"
             --generator $<TARGET_FILE:snx-test-spirv-emitter> --validator "${SNX_SPIRV_VAL}" --disassembler "${SNX_SPIRV_DIS}")
