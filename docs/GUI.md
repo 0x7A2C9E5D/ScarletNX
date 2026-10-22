@@ -401,9 +401,9 @@ every screen (`[body] sizing = fixed`), and a window too narrow for both shows t
 column is as wide as its entries and the side box goes under the list. A list's boxes spread over its column, at
 most `[body] gap` pixels apart, times the text's size (0 to 14; 6 in the built-ins), and one longer than its column
 keeps the focused box in its middle, the list moving around it (`[body] scroll = center`, the built-ins'), or moves
-once the focus reaches its end (`edge`). The menu's list, Games', the Settings' two, the theme editor's and the
-choices of a question, of UI scale's box, of the Recompile box and of the setup's pages are laid out by
-`src/gui/ui.txt` instead, whatever the theme says: their rows 2 pixels apart times the text's size (on Android
+once the focus reaches its end (`edge`). The menu's list, Games', the Settings' two, the theme editor's, the
+choices of a question, of UI scale's box, of the Recompile box and of the setup's pages, and the setup's Appearance
+rows are laid out by `src/gui/ui.txt` instead, whatever the theme says: their rows 2 pixels apart times the text's size (on Android
 40 pixels high, about Android's 48 dp touch target at the 3x a phone held wide gets, where the desktop's are 17), the
 focused one kept in the middle (on a group's screen, the group open in the groups' list), the cursor and the arrows
 of hidden rows inside each row, which a click takes whole as a tap does. That is the **Side box**'s *Auto*, the
@@ -679,10 +679,10 @@ SDL3 handles window creation, keyboard/mouse input, rendering, clipboard and dra
 on every host. The platform-specific code only handles child processes and resource
 accounting. See [BUILD](BUILD.md) for SDL3's desktop dependencies.
 
-The menu's list, Games', the Settings' and the choices of the questions and the setup are scenes of `src/gui/ui.txt`,
-which `tools/uigen` turns into `gui/ui.h` and `gui/ui.c` as the GUI builds (the format is in `tools/uigen/uigen.c`'s
-first comment): their layout computed at build time, the drawing and callbacks main.c's. `uigen` tests the
-generator's output and refusals, `gui_ui` runs what it makes of `tests/ui_test.txt`.
+The menu's list, Games', the Settings', the setup's Appearance and the choices of the questions and the setup are
+scenes of `src/gui/ui.txt`, which `tools/uigen` turns into `gui/ui.h` and `gui/ui.c` as the GUI builds (the format is
+in `tools/uigen/uigen.c`'s first comment): their layout computed at build time, the drawing and callbacks main.c's.
+`uigen` tests the generator's output and refusals, `gui_ui` runs what it makes of `tests/ui_test.txt`.
 
 The tests cover menu transitions, bounded console scrolling, split UTF-8/ANSI
 sequences, path parsing, argument quoting, inherited grandchild output, resource

@@ -1641,13 +1641,15 @@ typedef struct {
 } GuiChoices;
 /* choice i of whose choices (GuiChoicesOf) as its row reads, in out when it is made there; NULL past the last */
 static const char* choice_text(App* app, int of, int i, char* out, size_t size);
-/* the height count rows of the scene take: from the first one's top to the last one's foot, as it lays them out */
-static int choices_rows_h(const App* app, int count) {
-    GuiRect rects[UI_CHOICES_ITEMS], first, last;
+/* the height count rows of a scene's list take, from the first one's top to the last one's foot, as the scene lays
+   them out: its layout and its row functions, rects room for its items, item the list's */
+static int rows_h(void (*layout)(GuiRect, int, GuiRect*), GuiRect (*row)(const GuiRect*, int, int, size_t),
+                  GuiRect* rects, int item, int scale, int count) {
+    GuiRect first, last;
     if (count <= 0) return 0;
-    ui_choices_layout(gui_rect(0, 0, 1 << 14, 1 << 20), app->scale, rects);
-    first = ui_choices_row(rects, app->scale, UI_CHOICES_ROWS, 0);
-    last = ui_choices_row(rects, app->scale, UI_CHOICES_ROWS, (size_t)count - 1);
+    layout(gui_rect(0, 0, 1 << 14, 1 << 20), scale, rects);
+    first = row(rects, scale, item, 0);
+    last = row(rects, scale, item, (size_t)count - 1);
     return last.y + last.h - first.y;
 }
 /* the dialog of whose choices in area, the one in focus (-1 for none) among the rows shown. Rows that do not fit
@@ -1661,7 +1663,7 @@ static void choices_place(App* app, int of, GuiRect area, const char* question, 
     c->of = of;
     for (; (label = choice_text(app, of, c->count, app->row_text, sizeof app->row_text)); ++c->count)
         longest = SDL_max(longest, gui_text_cols(label) + marker + 2);
-    list_h = choices_rows_h(app, c->count);
+    list_h = rows_h(ui_choices_layout, ui_choices_row, c->rects, UI_CHOICES_ROWS, s, c->count);
     if (app->theme.dialog == GUI_DIALOG_YORHA) {
         int margin = app->theme.cursor[0] ? gui_text_cols(app->theme.cursor) * cw : 0;
         int w = SDL_min(SDL_max(longest, 24) * cw + margin, area.w), top;
@@ -6358,15 +6360,26 @@ static int setup_focus(const App* app) {
         return app->setup_row == GUI_APPEARANCE_NEXT ? app->setup_choice.focus : -1;
     return app->setup_choice.focus;
 }
-/* ---- the Appearance page's box: at the top of r, as high as its rows; its rows' list in it ---- */
+/* ---- the Appearance page's box: at the top of r, as high as its rows; under its head the rows, ui.txt's scene
+   Appearance ---- */
 static const char* const appearance_names[GUI_APPEARANCE_NEXT] = {SNX_TR_NOOP("Language"), SNX_TR_NOOP("Theme"),
                                                                   SNX_TR_NOOP("UI scale")};
-static GuiRect appearance_box(const App* app, GuiRect r, GuiList* rows) {
-    int s = app->scale, top = head_h(app) + 4 * s, h = GUI_APPEARANCE_NEXT * (item_h(app) + 6 * s);
-    GuiRect box = gui_rect(r.x, r.y, r.w, SDL_min(top + h + 2 * s, r.h));
-    list_place(app, rows, gui_rect(box.x + cell_w(app), box.y + top, box.w - 2 * cell_w(app), h), GUI_APPEARANCE_NEXT,
-               SDL_min(app->setup_row, GUI_APPEARANCE_NEXT - 1));
-    return box;
+typedef struct {
+    GuiRect box; /* the page's box, its head over the rows */
+    GuiRect rects[UI_APPEARANCE_ITEMS];
+    UiList lists[UI_APPEARANCE_ITEMS]; /* the rows' at UI_APPEARANCE_ROWS: row i is GUI_APPEARANCE_* i */
+} GuiAppearanceBoxes;
+static void appearance_boxes(const App* app, GuiRect r, GuiAppearanceBoxes* a) {
+    int s = app->scale, top = head_h(app) + 4 * s, h;
+    h = rows_h(ui_appearance_layout, ui_appearance_row, a->rects, UI_APPEARANCE_ROWS, s, GUI_APPEARANCE_NEXT);
+    a->box = gui_rect(r.x, r.y, r.w, SDL_min(top + h + 2 * s, r.h));
+    ui_appearance_layout(gui_rect(a->box.x + cell_w(app), a->box.y + top, a->box.w - 2 * cell_w(app),
+                                  SDL_min(h, a->box.h - top - 2 * s)),
+                         s, a->rects);
+    memset(a->lists, 0, sizeof a->lists);
+    a->lists[UI_APPEARANCE_ROWS].focus = (size_t)SDL_min(app->setup_row, GUI_APPEARANCE_NEXT - 1);
+    ui_appearance_follow(a->rects, s, UI_APPEARANCE_ROWS, GUI_APPEARANCE_NEXT, &a->lists[UI_APPEARANCE_ROWS]);
+    if (app->setup_row == GUI_APPEARANCE_NEXT) a->lists[UI_APPEARANCE_ROWS].focus = SIZE_MAX; /* on its choices */
 }
 /* the column a row's value starts at, in the row's text: past the marker and the longest name */
 static int appearance_column(const App* app) {
@@ -6416,9 +6429,10 @@ static void setup_boxes(App* app, GuiSetupBoxes* b) {
     area = b->place.list;
     /* the Appearance's question in the middle of what is under its rows, YoRHa's at the foot as any */
     if (setup_page_of(app) == SNX_SETUP_LANGUAGE && app->theme.dialog != GUI_DIALOG_YORHA) {
-        GuiList rows;
-        GuiRect box = appearance_box(app, area, &rows);
-        int under = box.y + box.h + cell_h(app) - area.y;
+        GuiAppearanceBoxes a;
+        int under;
+        appearance_boxes(app, area, &a);
+        under = a.box.y + a.box.h + cell_h(app) - area.y;
         area = gui_rect(area.x, area.y + under, area.w, SDL_max(0, area.h - under));
     }
     choices_place(app, GUI_CHOICES_SETUP, area, b->question, b->tab, setup_focus(app), &b->choices);
@@ -6566,13 +6580,10 @@ static void setup_panes(App* app, GuiRect r) {
     switch (setup_page_of(app)) {
         case SETUP_NOTICE: setup_notices_box(app, r); break;
         case SNX_SETUP_LANGUAGE: {
-            GuiList rows;
-            GuiRect box = appearance_box(app, r, &rows);
-            pane(app, box, snx_tr("Appearance"));
-            for (i = 0; i < GUI_APPEARANCE_NEXT; ++i) {
-                appearance_row(app, i, text[0], sizeof text[0]);
-                list_item(app, &rows, i, text[0], app->setup_row == i, false);
-            }
+            GuiAppearanceBoxes a;
+            appearance_boxes(app, r, &a);
+            pane(app, a.box, snx_tr("Appearance"));
+            ui_appearance_draw(app, a.rects, app->scale, a.lists);
             break;
         }
         case SNX_SETUP_INSTALL:
@@ -6657,25 +6668,47 @@ static void draw_setup(App* app) {
     if (app->sizes_shown) render_sizes(app); /* UI scale's box, over the Appearance page */
     if (app->confirm.shown) render_ask(app);
 }
-/* the pointer on the page: a choice under it takes the focus, a click takes it (ui_choices_rows_row_action_cb). On the
-   Appearance's rows, a click changes the value a step on, or back on its left arrow, and on UI scale opens its box */
+/* the pointer on the page: a choice under it takes the focus, a click takes it (ui_choices_rows_row_action_cb), as
+   one of the Appearance's rows (ui_appearance_rows_row_action_cb) */
 static void setup_pointer(App* app, float x, float y, bool click) {
     GuiSetupBoxes b;
-    GuiList rows;
+    GuiAppearanceBoxes a;
     bool on;
-    int i;
+    int item;
+    size_t row;
+    uint32_t hit;
     setup_boxes(app, &b);
     if (choices_pointer(app, &b.choices, x, y, click, &on)) return;
     if (setup_page_of(app) != SNX_SETUP_LANGUAGE) return;
-    appearance_box(app, b.content, &rows);
-    if ((i = list_hit(&rows, x, y, false)) < 0) return;
-    app->setup_row = i;
-    if (click && i == GUI_APPEARANCE_TEXT)
+    appearance_boxes(app, b.content, &a);
+    hit = ui_appearance_hit(app, a.rects, app->scale, a.lists, (int)x, (int)y, click ? UI_HIT_CLICK : 0, &item, &row);
+    if (hit) ui_appearance_act(app, item, row, hit);
+}
+/* Appearance's row: its name, then its value at appearance_column (ui_draw_row puts the marker) */
+bool ui_appearance_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
+    (void)width; /* a value too long for its row slides, as the menu's rows do */
+    if (row >= GUI_APPEARANCE_NEXT) return false;
+    appearance_row(app, (int)row, app->row_text, sizeof app->row_text);
+    info->label = app->row_text + strlen(app->theme.marker);
+    return true;
+}
+/* a row under the pointer takes the focus; a click changes its value a step on, or back on its left arrow, which the
+   pointer (app->hover_x) is on, and on UI scale opens its box */
+void ui_appearance_rows_row_action_cb(App* app, size_t row, uint32_t hit) {
+    GuiSetupBoxes b;
+    GuiAppearanceBoxes a;
+    int arrow;
+    app->setup_row = (int)row;
+    if (!(hit & UI_HIT_CLICK)) return;
+    if (row == GUI_APPEARANCE_TEXT) {
         sizes_open(app);
-    else if (click) {
-        int arrow = list_box(&rows, i).x + cell_w(app) / 2 + appearance_column(app) * cell_w(app);
-        appearance_change(app, i, x >= (float)arrow && x < (float)(arrow + cell_w(app)) ? -1 : 1);
+        return;
     }
+    setup_boxes(app, &b);
+    appearance_boxes(app, b.content, &a);
+    arrow = ui_row_box(app, a.rects[UI_APPEARANCE_ROWS]).x + cell_w(app) / 2 + appearance_column(app) * cell_w(app);
+    appearance_change(app, (int)row,
+                      app->hover_x >= (float)arrow && app->hover_x < (float)(arrow + cell_w(app)) ? -1 : 1);
 }
 /* what the menu keeps for the next start, as it closes: each of its files there and its folder, in a box */
 static void draw_closing(App* app) {

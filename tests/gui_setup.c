@@ -79,6 +79,14 @@ static const char* choice_before(const App* app) {
     assert(setup_labels(app, labels) > app->setup_choice.focus);
     return app->setup_choice.focus ? labels[app->setup_choice.focus - 1] : NULL;
 }
+/* the Appearance's row i as drawn (ui.txt's scene Appearance): its box, past the cursor's margin, and its whole row */
+static GuiRect appearance_row_box(const App* app, const GuiAppearanceBoxes* a, int i) {
+    size_t first = a->lists[UI_APPEARANCE_ROWS].first;
+    return ui_row_box(app, ui_appearance_row(a->rects, app->scale, UI_APPEARANCE_ROWS, (size_t)i - first));
+}
+static GuiRect appearance_whole_row(const App* app, const GuiAppearanceBoxes* a, int i) {
+    return ui_appearance_row(a->rects, app->scale, UI_APPEARANCE_ROWS, (size_t)i - a->lists[UI_APPEARANCE_ROWS].first);
+}
 /* a and b one folder however each is written: the menu keeps a folder it takes resolved (snx_absolute), with
    Windows' separators where snx_path_join wrote '/' */
 static bool same_path(const char* a, const char* b) {
@@ -168,6 +176,17 @@ static void test_first(App* app) {
     render(app);
     shows(app, "Appearance", rgb(head_ink(app)));
     shows(app, "< English >", rgb(app->theme.page)); /* the row in focus, inverted on YoRHa's focus bar */
+    { /* its value at appearance_column of the row's text, past the marker ui_draw_row draws */
+        GuiSetupBoxes c;
+        GuiAppearanceBoxes a;
+        GuiRect row;
+        int x, y;
+        setup_boxes(app, &c);
+        appearance_boxes(app, c.content, &a);
+        row = appearance_row_box(app, &a, GUI_APPEARANCE_LANGUAGE);
+        assert(find_text(app, "< English >", rgb(app->theme.page), 1, &x, &y));
+        assert(x == row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app) && y > row.y);
+    }
     shows(app, "< YoRHa >", rgb(app->theme.ink));
     {
         char line[64];
@@ -194,23 +213,46 @@ static void test_first(App* app) {
     assert(!app->language && snx_tr_language() == 0);
     key(app, SDLK_LEFT);
     assert(app->language == 3);
-    {
+    { /* the rows as Settings' (ui.txt's scene Appearance): 2 pixels apart and as high as the menu's, the cursor in
+         the row, which a click takes whole */
         GuiSetupBoxes c;
-        GuiList rows;
-        GuiRect row;
+        GuiAppearanceBoxes a;
+        GuiRect row, whole;
+        int s = app->scale;
         render(app);
         setup_boxes(app, &c);
-        appearance_box(app, c.content, &rows);
-        row = list_box(&rows, GUI_APPEARANCE_LANGUAGE);
+        appearance_boxes(app, c.content, &a);
+        row = appearance_row_box(app, &a, GUI_APPEARANCE_LANGUAGE);
+        whole = appearance_whole_row(app, &a, GUI_APPEARANCE_LANGUAGE);
+        assert(row.h == item_h(app) && whole.x < row.x && row.y >= a.box.y + head_h(app));
+        assert(appearance_row_box(app, &a, GUI_APPEARANCE_THEME).y - row.y == item_h(app) + 2 * s);
+        assert(appearance_row_box(app, &a, GUI_APPEARANCE_TEXT).y + item_h(app) <= a.box.y + a.box.h);
         mouse_px(app, row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app) + cell_w(app) / 2,
                  row.y + row.h / 2, true); /* its left arrow: back a step */
         assert(app->language == 2 && snx_tr_language() == 1 && app->setup_row == GUI_APPEARANCE_LANGUAGE);
-        point(app, list_box(&rows, GUI_APPEARANCE_THEME), false); /* the pointer over a row: its focus */
+        mouse_px(app, whole.x + 1, whole.y + whole.h / 2, true); /* in the cursor's margin: a step on */
+        assert(app->language == 3 && app->setup_row == GUI_APPEARANCE_LANGUAGE);
+        mouse_px(app, row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app) + cell_w(app) / 2,
+                 row.y + row.h / 2, true);
+        assert(app->language == 2 && snx_tr_language() == 1);
+        point(app, appearance_row_box(app, &a, GUI_APPEARANCE_THEME), false); /* the pointer over a row: its focus */
         assert(app->setup_row == GUI_APPEARANCE_THEME && app->language == 2);
         point(app, choice_box(app, &c.choices, 0), false); /* over Next: the focus on it, off the rows */
         assert(app->setup_row == GUI_APPEARANCE_NEXT && page(app) == SNX_SETUP_LANGUAGE);
-        point(app, list_box(&rows, GUI_APPEARANCE_THEME), false);
+        point(app, appearance_row_box(app, &a, GUI_APPEARANCE_THEME), false);
         assert(app->setup_row == GUI_APPEARANCE_THEME);
+        point(app, appearance_row_box(app, &a, GUI_APPEARANCE_TEXT), true); /* UI scale clicked: its box */
+        assert(app->sizes_shown && app->setup_row == GUI_APPEARANCE_TEXT && app->language == 2);
+        key(app, SDLK_ESCAPE);
+        assert(!app->sizes_shown);
+        point(app, appearance_row_box(app, &a, GUI_APPEARANCE_THEME), false);
+        /* a box too short for the three: the rows that fit, from the focused one's, inside it */
+        app->setup_row = GUI_APPEARANCE_TEXT;
+        appearance_boxes(app, gui_rect(c.content.x, c.content.y, c.content.w, head_h(app) + 4 * s + 2 * item_h(app)),
+                         &a);
+        assert(ui_appearance_shown(a.rects, s, UI_APPEARANCE_ROWS) == 1 && a.lists[UI_APPEARANCE_ROWS].first == 2);
+        assert(appearance_whole_row(app, &a, GUI_APPEARANCE_TEXT).y + item_h(app) <= a.box.y + a.box.h);
+        app->setup_row = GUI_APPEARANCE_THEME;
     }
     key(app, SDLK_RIGHT); /* the next theme, the dialog's place with it */
     assert(!strcmp(app->theme.id, "default") && app->theme.dialog == GUI_DIALOG_DEFAULT);
@@ -218,10 +260,11 @@ static void test_first(App* app) {
     shows(app, "< Default >", rgb(app->theme.focus));
     {
         GuiSetupBoxes c;
-        GuiList rows;
+        GuiAppearanceBoxes a;
         GuiRect box;
         setup_boxes(app, &c);
-        box = appearance_box(app, c.content, &rows);
+        appearance_boxes(app, c.content, &a);
+        box = a.box;
         { /* the question in the middle of what is under the rows */
             int under = box.y + box.h + cell_h(app), bottom = c.place.list.y + c.place.list.h;
             assert(c.choices.box.y >= under);
@@ -255,7 +298,8 @@ static void test_first(App* app) {
     key(app, SDLK_DOWN);
     assert(app->setup_row == GUI_APPEARANCE_NEXT);
     render(app);
-    shows(app, "Next", rgb(app->theme.page)); /* in focus now */
+    shows(app, "Next", rgb(app->theme.page));     /* in focus now */
+    hides(app, "UI scale", rgb(app->theme.page)); /* and no row */
     key(app, SDLK_RETURN);
     assert(page(app) == SNX_SETUP_INSTALL && app->language == 2 && app->setup_save && snx_tr_language() == 1);
     app->language = 0; /* English again, for the words below, kept as the language picked */
