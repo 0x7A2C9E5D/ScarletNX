@@ -724,6 +724,54 @@ void vk_surf_flush(Surf* s, const u8* original) {
     vk_result_end();
 }
 void vk_rt_flush(u64 gva) { vk_surf_flush(vk_rt_find(gva), NULL); }
+/* A storage image's results kept on the GPU (docs/GPU_OWNERSHIP.md), as the DMA engine's destination is: its span
+   staged as the GPU sees it into a buffer of its own (the bytes between its texels keep theirs), its texels laid out
+   over that in the guest's layout, and the buffer published over the span run by run of guest memory. Nothing waits:
+   the bytes land when the CPU touches them. A 3D volume a game writes twice a frame and only samples took a wait
+   each, a fifth of the run. 0 when it can't be (pitch linear, no room): the caller flushes at once */
+int vk_surf_publish(Surf* s) {
+    u64 size = flush_bytes(s), at, off = 0;
+    VkBuffer staged;
+    VkOwnRes* r;
+    VkCommandBuffer cb;
+    if (!size || !s->bl || (s->gva >> 63)) return 0;
+    vk_render_end();
+    r = vk_own_res_new(size);
+    if (!r) return 0;
+    u8* p = vk_stage(size, vk_stage_align(), &staged, &at);
+    if (!p) {
+        vk_own_res_unref(r);
+        return 0;
+    }
+    vk_guest_read(s->gva, size, p, staged, at);
+    vk_rt_overlay(s->gva, size, staged, at);
+    cb = vk_cmd();
+    VkBufferCopy c = {at, 0, size};
+    rec_CmdCopyBuffer(cb, staged, r->buf, 1, &c);
+    vk_all_barrier(cb);
+    if (!flush_record(cb, s, r->buf, 0)) {
+        vk_own_res_unref(r);
+        return 0;
+    }
+    vk_all_barrier(cb);
+    while (off < size) {
+        u64 cpu = 0, n = gmmu_run(s->gva + off, size - off, &cpu);
+        if (!n) { /* an unmapped page takes no write */
+            n = 0x1000 - ((s->gva + off) & 0xFFF);
+            if (n > size - off) n = size - off;
+        } else
+            vk_own_publish(cpu, n, r, off);
+        off += n;
+    }
+    gpu_mem_written(s->gva, size);
+    vk_own_res_unref(r);
+    /* guest memory (its owner) has the image's pixels now: the texture cache finds them current, by their owner */
+    s->mem_wgen = s->wgen;
+    s->gw = gpu_mem_generation();
+    vk_surf_relist(s);
+    if (!s->is_rt) vk_tex_note_writeback(s);
+    return 1;
+}
 
 u64 g_vk_rt_readbacks; /* render targets written back to guest memory because the GPU's copy couldn't take them */
 int vk_rt_overlay(u64 gva, u64 size, VkBuffer buf, u64 at) {

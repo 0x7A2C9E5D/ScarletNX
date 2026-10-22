@@ -819,15 +819,15 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     need += sizeof(i32) * 320 + vk_stage_align(); /* optional format data */
     /* dispatches that read textures run on the graphics queue, after what was recorded before them. Inputs that
        pending compute results overlap land those first, before anything is put in the arena */
-    int gfx = p->si.ntex > 0 || p->si.nimg > 0, overlap = 0, storage_images = 0, retries = 0;
+    int gfx = p->si.ntex > 0 || p->si.nimg > 0, overlap = 0, retries = 0;
     /* so does one whose storage buffers a draw's pending result covers: on the graphics queue, after that draw, it
        reads the result on the GPU instead of the compute queue waiting for it to land (one game: three a frame) */
     for (i = 0; i < ng && !gfx; i++) gfx = sa[i] && vk_buf_pending(sa[i], ss[i]);
-    for (i = 0; i < p->si.nimg; i++) storage_images |= p->si.img[i].type != 1;
-    /* A graphics-queue dispatch without storage images binds like a draw: staged inputs, results pending in staging
-       (buffer.c's GfxOut), landed when the guest needs them or once their submit is done. Landing each one at once
-       took a vk_finish per dispatch, about 9 a frame in one game. Storage images still land at once (vk_surf_flush) */
-    int deferred = gfx && !storage_images;
+    /* A graphics-queue dispatch binds like a draw: staged inputs, results pending in staging (buffer.c's GfxOut),
+       landed when the guest needs them or once their submit is done. Landing each one at once took a vk_finish per
+       dispatch, about 9 a frame in one game. Its storage images are published over their guest bytes, GPU-owned
+       (vk_surf_publish), and land at once only where they can't be */
+    int deferred = gfx;
     /* a read-only input inside a pending result of this batch is read from the arena on the GPU, after a barrier
        (multi-pass skinning reads what the pass before wrote); any other overlap lands the results first */
     i64 chain[16];
@@ -1061,7 +1061,7 @@ rebind:
                     seen = 1;
                     break;
                 }
-            if (!seen) {
+            if (!seen && !deferred) { /* a published image keeps no merge: its owner takes the span whole */
                 originals[i] = malloc(image_bytes);
                 if (!originals[i]) {
                     g_cs_skips[CS_SKIP_RESOURCES]++;
@@ -1226,6 +1226,14 @@ rebind:
         vk_buf_writable_commit();
         for (i = 0; i < p->si.nimg && i < 8; i++)
             if (bufimg_view[i]) vk_defer_buffer_view(bufimg_view[i]);
+        /* the storage images' texels over their guest bytes, after the dispatch on the GPU */
+        for (i = 0; i < p->si.nimg && i < 8; i++) {
+            int seen = 0;
+            for (int k = 0; k < i && !seen; k++) seen = images[k] == images[i];
+            if (!images[i] || seen) continue;
+            vk_surf_wrote(images[i]);
+            if (!vk_surf_publish(images[i])) vk_surf_flush(images[i], NULL);
+        }
         g_vk_dispatches++;
         vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
         return;

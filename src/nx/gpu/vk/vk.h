@@ -455,6 +455,8 @@ int vk_gfx_image_holds(const Surf* s); /* s has a storage result waiting to land
 u64 vk_surf_guest_size(const Surf* s);
 int vk_surf_can_writeback(const Surf* s);
 void vk_surf_flush(Surf* s, const u8* original); /* original preserves newer guest writes for storage images */
+/* s's pixels published over its guest bytes, GPU-owned and not waited for: 1, or 0 when only vk_surf_flush can */
+int vk_surf_publish(Surf* s);
 void vk_surf_wrote(Surf* s); /* its image changed: its copies are out of date (wgen), and it is the newest (wseq) */
 /* vk_surf_flush in two halves, the GPU not waited for: the bytes a write-back of s copies (0 for none), its copy
    recorded into buf at at (host-readable once the submit being recorded is done), and its landing from those bytes p,
