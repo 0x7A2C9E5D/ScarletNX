@@ -59,6 +59,9 @@ void snx_room_unref(SnxRoom* r);
 void snx_room_fake_ip(const SnxRoom* r, uint8_t ip[4]);
 /* SNX_ROOM_IN while in the room, else why it went away */
 int snx_room_state(SnxRoom* r);
+/* Local-wireless games need prompt delivery. Opt into a 1 ms service interval
+   and periodic relay transport diagnostics; other room users retain 5 ms. */
+void snx_room_low_latency(SnxRoom* r);
 /* 1 while a member of the room has address ip (this console included) */
 int snx_room_has_member(SnxRoom* r, const uint8_t ip[4]);
 

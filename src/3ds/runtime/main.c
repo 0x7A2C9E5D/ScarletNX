@@ -5,6 +5,7 @@
 #include "3ds/aot/ctr_module.h"
 #include "3ds/runtime/main.h"
 #include "3ds/ipc/ctr_ipc.h"
+#include "3ds/services/uds.h"
 #include "common/utilities/common.h"
 #include "common/utilities/ini_lines.h"
 #include "snx_settings.h"
@@ -23,44 +24,45 @@
 #endif
 
 static void usage(FILE* out) {
-    fputs("Usage: scarletnx-3ds [OPTIONS] game.cia\n"
-          "       scarletnx-3ds [OPTIONS] --game=recompiled/<title ID>\n"
-          "       <title ID> [OPTIONS]   (the game's copy of the runtime, in its folder)\n"
-          "       scarletnx-3ds [--model old|new] --board-info\n"
-          "  game.cia        Read a decrypted application CIA where it lies, recompile if needed, then play. The\n"
-          "                  game's folder is recompiled/<its title ID>, as a Switch game's: its module <title ID>_code.so,\n"
-          "                  its copy of the runtime <title ID>, which plays it from then on, and <title ID>.ini,\n"
-          "                  which names the CIA (source=) and the console (model=)\n"
-          "  --game=DIR      Play the game in its folder DIR, as its copy of the runtime does\n"
-          "  --extract-container\n"
-          "                  Extract the CIA into its folder first and play from the extraction\n"
-          "  -x, --extract   Extract only\n"
-          "  -r, --recomp    Recompile without playing\n"
-          "  --model old|new The console to model (default old)\n"
-          "  --keys FILE     The 3DS AES keys, in Azahar's aes_keys.txt format, to decrypt an encrypted CIA\n"
-          "                  with (default ~/.3ds/aes_keys.txt)\n"
-          "  --repo DIR      The data folder (default: a portable copy's folder, else the user's data\n"
-          "                  folder, as scarletnx picks it; the user's keeps work/ in its cache folder)\n"
-          "  --outdir DIR    The folder of the games, in which the game's folder is made (default recompiled/ of\n"
-          "                  the data folder)\n"
-          "  --output DIR    The game's folder itself: its compiled module, SD card and any extraction (default\n"
-          "                  <outdir>/<the title ID>)\n"
-          "  --max-blocks N  Stop after N native blocks (default: run until the game exits or its window\n"
-          "                  closes)\n"
-          "  --seconds N     Stop after N seconds, reporting where each thread is (--seconds=N too)\n"
-          "  --KEY=VALUE     A setting of the 3DS debug table (g_ctr_debug_ini in src/nx/runtime/settings.txt):\n"
-          "                  --ctr_ipc_trace=1 logs each service request, --ctr_jit_trace=1 each block\n"
-          "                  compiled while the game runs, --script=ms:buttons,... (ctr_script) presses\n"
-          "                  buttons, --ctr_auto_stub_ipc=0 stops at a service command the runtime lacks\n"
-          "  --ipc-stubs L   With --ctr_auto_stub_ipc=0, still answer a service command the runtime lacks with\n"
-          "                  success for the services in L: all, or a comma list of srv, fs, apt, ptm, hid, gsp,\n"
-          "                  cfg, dsp, system. Given more than once, the lists add up\n"
-          "Without --extract-container nothing of the CIA is extracted: its ExeFS and RomFS are read from the\n"
-          "CIA itself, mapped read-only. An extraction and a compiled module already there are used as they\n"
-          "are: the ARM11 code is compiled again only when its module is missing or no longer matches the\n"
-          "build or the code. An encrypted CIA is decrypted once, with the keys, into <folder>.decrypted.cia\n"
-          "beside the title's folder, and read from there.\n",
-          out);
+    fputs(
+        "Usage: scarletnx-3ds [OPTIONS] game.cia\n"
+        "       scarletnx-3ds [OPTIONS] --game=recompiled/<title ID>\n"
+        "       <title ID> [OPTIONS]   (the game's copy of the runtime, in its folder)\n"
+        "       scarletnx-3ds [--model old|new] --board-info\n"
+        "  game.cia        Read a decrypted application CIA where it lies, recompile if needed, then play. The\n"
+        "                  game's folder is recompiled/<its title ID>, as a Switch game's: its module <title ID>_code.so,\n"
+        "                  its copy of the runtime <title ID>, which plays it from then on, and <title ID>.ini,\n"
+        "                  which names the CIA (source=) and the console (model=)\n"
+        "  --game=DIR      Play the game in its folder DIR, as its copy of the runtime does\n"
+        "  --extract-container\n"
+        "                  Extract the CIA into its folder first and play from the extraction\n"
+        "  -x, --extract   Extract only\n"
+        "  -r, --recomp    Recompile without playing\n"
+        "  --model old|new The console to model (default old)\n"
+        "  --keys FILE     The 3DS AES keys, in Azahar's aes_keys.txt format, to decrypt an encrypted CIA\n"
+        "                  with (default ~/.3ds/aes_keys.txt)\n"
+        "  --repo DIR      The data folder (default: a portable copy's folder, else the user's data\n"
+        "                  folder, as scarletnx picks it; the user's keeps work/ in its cache folder)\n"
+        "  --outdir DIR    The folder of the games, in which the game's folder is made (default recompiled/ of\n"
+        "                  the data folder)\n"
+        "  --output DIR    The game's folder itself: its compiled module, SD card and any extraction (default\n"
+        "                  <outdir>/<the title ID>)\n"
+        "  --max-blocks N  Stop after N native blocks (default: run until the game exits or its window\n"
+        "                  closes)\n"
+        "  --seconds N     Stop after N seconds, reporting where each thread is (--seconds=N too)\n"
+        "  --KEY=VALUE     A setting of the 3DS debug table (g_ctr_debug_ini in src/nx/runtime/settings.txt):\n"
+        "                  --ctr_ipc_trace=1 logs each service request, --ctr_jit_trace=1 each block\n"
+        "                  compiled while the game runs, --script=ms:buttons,... (ctr_script) presses\n"
+        "                  buttons, --ctr_auto_stub_ipc=0 stops at a service command the runtime lacks\n"
+        "  --ipc-stubs L   With --ctr_auto_stub_ipc=0, still answer a service command the runtime lacks with\n"
+        "                  success for the services in L: all, or a comma list of srv, fs, apt, ptm, hid, gsp,\n"
+        "                  cfg, dsp, system. Given more than once, the lists add up\n"
+        "Without --extract-container nothing of the CIA is extracted: its ExeFS and RomFS are read from the\n"
+        "CIA itself, mapped read-only. An extraction and a compiled module already there are used as they\n"
+        "are: the ARM11 code is compiled again only when its module is missing or no longer matches the\n"
+        "build or the code. An encrypted CIA is decrypted once, with the keys, into <folder>.decrypted.cia\n"
+        "beside the title's folder, and read from there.\n",
+        out);
 }
 static bool cia_path(const char* path) {
     size_t n = strlen(path);
@@ -146,9 +148,9 @@ done:
 }
 /* what an extraction writes into its folder, beside which the title's state (native/, sdmc/, frames/, audio.wav) is
    kept */
-static const char* const extraction_parts[] = {"exefs",          "romfs",     "contents", "cia-header.bin",
-                                               "certificates.bin", "ticket.bin", "tmd.bin", "metadata.bin",
-                                               "ncch.bin",       "exheader.bin", "manifest.ini"};
+static const char* const extraction_parts[] = {
+    "exefs",   "romfs",        "contents", "cia-header.bin", "certificates.bin", "ticket.bin",
+    "tmd.bin", "metadata.bin", "ncch.bin", "exheader.bin",   "manifest.ini"};
 static bool holds_extraction(const char* folder) {
     char* exheader = snx_path_join(folder, "exheader.bin");
     bool found = snx_is_file(exheader);
@@ -504,6 +506,11 @@ int snx_ctr_main(int argc, char** argv) {
     }
     snx_ctr_board_shutdown(&board);
     char *runtime = snx_executable(argv[0]), error[512];
+    char* runtime_dir = runtime ? snx_dirname(runtime) : NULL;
+    char* network_data = repo ? snx_strdup(repo) : snx_data_dir(runtime_dir);
+    if (network_data) snx_ctr_uds_settings(network_data);
+    free(network_data);
+    free(runtime_dir);
     SnxCtrCia* cia = NULL;
     int status;
     if (folder) {
@@ -617,7 +624,5 @@ int snx_ctr_main(int argc, char** argv) {
     return status;
 }
 #ifndef SNX_MULTICALL
-int main(int argc, char** argv) {
-    return snx_ctr_main(argc, argv);
-}
+int main(int argc, char** argv) { return snx_ctr_main(argc, argv); }
 #endif

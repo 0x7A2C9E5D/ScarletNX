@@ -874,3 +874,24 @@ policies require explicit support or documented unsupported results; never claim
 that every peripheral is wired when only button input works.
 Gate: injected input/touch tests, ring wrap/events, disconnect/reconnect, New/Old
 model differences, camera/mic bounds and end-to-end homebrew interaction.
+
+### Experimental local wireless over rooms
+
+`nwm::UDS` supports two ScarletNX instances using an explicitly selected Eden-compatible
+room in Network settings. Enable Room wireless on both players and choose the same room.
+The selected profile supplies the console username, limited to the 3DS's ten characters.
+
+The backend implements discovery, host/join, node status, channel bindings, packet send/pull
+and disconnect. It uses a private protocol inside the room's datagram transport. It does
+not connect to physical consoles, Citra/Azahar rooms or Switch LDN sessions. LAN mode is
+not implemented by this backend and does not silently join a public room.
+
+No game image or synchronization window is patched. NSMB2 internet co-op still has
+input-delay and synchronization limits. The development runs with title-specific
+buffering experiments do not establish stock-game WAN compatibility for this backend.
+
+Synthetic IPC tests cover discovery, a duplicate join, packet bounds, FIFO bursts and
+disconnect through a local relay and a relay with 120 ms delay in each forwarding leg.
+`ldn_room` covers a 512-packet socket burst and the 4 MiB low-latency queue bound.
+Optional `snx-test-3ds-uds --public` uses `SNX_TEST_UDS_ROOM=host:port` rather than a
+hardcoded public server. No game data is needed for these tests.

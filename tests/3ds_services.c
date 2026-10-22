@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #include "3ds/runtime/internal.h"
 #include "3ds/ipc/ctr_ipc.h"
+#include "common/utilities/users.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -180,6 +181,21 @@ int main(void) {
         unsigned char mode = 0;
         assert(snx_ctr_read_ram(p->space, 0x300000, &mode, 1) == SNX_CTR_MEM_OK && mode == 1);
         sound[1] = 4;
+        /* Console names follow the selected ScarletNX profile and obey the
+           3DS ten-character field without touching its trailing reserved words. */
+        char old_nickname[sizeof g_users[0].nickname];
+        memcpy(old_nickname, g_users[0].nickname, sizeof old_nickname);
+        strcpy(g_users[0].nickname, "Mario_Test_Long");
+        uint32_t username[] = {0x10082, 0x1c, 0xa0000, 0x1c << 4 | 0xc, 0x300000};
+        request(p, username, 5);
+        send(p, cfg, SNX_CTR_SVC_RETURN, 0);
+        assert(!get(p, 1));
+        unsigned char name_bytes[0x1c];
+        assert(snx_ctr_read_ram(p->space, 0x300000, name_bytes, sizeof name_bytes) == SNX_CTR_MEM_OK);
+        for (unsigned i = 0; i < 10; ++i)
+            assert(name_bytes[i * 2] == (unsigned char)"Mario_Test"[i] && !name_bytes[i * 2 + 1]);
+        for (unsigned i = 20; i < sizeof name_bytes; ++i) assert(!name_bytes[i]);
+        memcpy(g_users[0].nickname, old_nickname, sizeof old_nickname);
         sound[3] = 4 << 4 | 0xc;
         request(p, sound, 5);
         send(p, cfg, SNX_CTR_SVC_RETURN, 0);

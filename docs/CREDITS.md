@@ -76,3 +76,8 @@ Community credits: [README](../README.md#special-thanks).
 Wimsy ([SVG metadata](../dist/wimsy.svg)): drawn by Liz, GPL-3.0-or-later.
 The splash's Fuddles ([SVG metadata](../dist/splash/wimsy-fuddles.svg)): Wimsy with Fuddles' tails, circuits and
 colours, by AO55 after Liz's Wimsy, GPL-3.0-or-later.
+
+The 3DS UDS command layouts and encrypted beacon framing in `src/3ds/services/uds.c`
+are adapted from Azahar's `nwm_uds.cpp` and `uds_beacon.cpp` at
+`18c7ff10604659edc8e82d86b7c772f6f709c466` (Citra/Azahar contributors, GPL-2.0-or-later).
+The ScarletNX-to-ScarletNX room transport is separate from Azahar's room protocol.

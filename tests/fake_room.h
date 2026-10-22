@@ -12,6 +12,7 @@ typedef struct FakeRoom FakeRoom;
 FakeRoom* fake_room_start(void);
 void fake_room_stop(FakeRoom* f);
 uint16_t fake_room_port(const FakeRoom* f);
+void fake_room_datagram_delay(FakeRoom* f, unsigned milliseconds);
 void fake_room_close(FakeRoom* f);                      /* IdCloseRoom to every member */
 void fake_room_kick(FakeRoom* f, const char* nickname); /* IdHostKicked to it, then its connection closed */
 /* how many ldn messages of type the room relayed, and the size of the last one's data */

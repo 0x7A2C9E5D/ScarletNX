@@ -8,6 +8,7 @@
 #include "3ds/services/y2r.h"
 #include "3ds/services/file.h"
 #include "3ds/services/hid.h"
+#include "3ds/services/uds.h"
 #include "common/utilities/common.h"
 #include <string.h>
 #if defined(_WIN32)
@@ -388,6 +389,7 @@ SnxCtrSchedule snx_ctr_schedule(SnxCtrProcess* p) {
     uint32_t priority[CTR_OBJECTS];
     for (;;) {
         uint64_t now = now_ns(), earliest = UINT64_MAX;
+        snx_ctr_uds_poll(p);
         if (p->gsp.shared_object && now >= p->gsp.next_vblank_ns) snx_ctr_gsp_vblank(p);
         if (p->dsp.core && now >= p->dsp.next_frame_ns) snx_ctr_dsp_frame(p, now);
         if (p->y2r.done_ns && now >= p->y2r.done_ns) snx_ctr_y2r_done(p);
@@ -456,6 +458,7 @@ SnxCtrSchedule snx_ctr_schedule(SnxCtrProcess* p) {
         }
         if (slept_for_device) return SNX_CTR_SCHED_IDLE;
         uint64_t deadline = earliest;
+        if (p->uds && now + 1000000ull < deadline) deadline = now + 1000000ull;
         if (p->gsp.shared_object && p->gsp.next_vblank_ns < deadline) deadline = p->gsp.next_vblank_ns;
         if (p->dsp.core && p->dsp.next_frame_ns < deadline) deadline = p->dsp.next_frame_ns;
         if (p->y2r.done_ns && p->y2r.done_ns < deadline) deadline = p->y2r.done_ns;
