@@ -21,6 +21,15 @@
       }
     },
     {
+      "name": "tracy",
+      "displayName": "Clang with the Tracy profiler client, for this machine",
+      "inherits": "default",
+      "cacheVariables": {
+        "SNX_TRACY": "ON",
+        "SNX_DEPLOY": "OFF"
+      }
+    },
+    {
       "name": "windows-cross",
       "displayName": "Windows, cross-built with llvm-mingw",
       "inherits": "base",
@@ -205,6 +214,10 @@
     {
       "name": "default",
       "configurePreset": "default"
+    },
+    {
+      "name": "tracy",
+      "configurePreset": "tracy"
     },
     {
       "name": "windows-cross",

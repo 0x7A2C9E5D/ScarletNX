@@ -1493,15 +1493,19 @@ int main(int argc, char** argv) {
     assert(app.form == GUI_FORM_SETTINGS);
     key(&app, SDLK_RETURN);
     /* a group's settings on the right, a row each with its help in the tips; the group named over them */
-    /* gdbstub, Extract to tmpfs, Extract game container, Optimization level, AOT threads, Unit cache limit and the
-       LLVM Internals page */
-    assert(app.form == GUI_FORM_GROUP && app.group == 1 && app.editor.count == 7);
+    /* gdbstub, Extract to tmpfs, Extract game container, Optimization level, AOT threads, Unit cache limit, the
+       LLVM Internals page and Tracy capture, whose row a launcher without SNX_TRACY does not list */
+    int tracy = 0;
+    for (int i = 0; i < app.settings.own; i++)
+        if (!strcmp(app.settings.values[i].key, "tracy_capture")) tracy = 1;
+    assert(app.form == GUI_FORM_GROUP && app.group == 1 && app.editor.count == 7 + tracy);
     render(&app);
     shows(&app, "Launch", normal);
     shows(&app, "Enables gdbstub", normal); /* in the tips */
     shows(&app, "- gdbstub ", yellow); /* its value in the column after the longest name, Extract game container's */
     shows(&app, "- Extract to tmpfs ", normal);
     shows(&app, "- Extract game container off", normal);
+    if (tracy) shows(&app, "- Tracy capture", normal);
     key(&app, SDLK_RIGHT);
     assert(setting_is(&app, "gdbstub", "on"));
     key(&app, SDLK_LEFT);

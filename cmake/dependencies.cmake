@@ -176,6 +176,27 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
                   URL https://raw.githubusercontent.com/baldurk/renderdoc/v1.46/renderdoc/api/app/renderdoc_app.h
                   URL_HASH SHA256=b7005e7dc34c3635046868bbd76d81b9b055aede0f56daa0bd39fedee0639ffb
                   DOWNLOAD_ONLY YES DOWNLOAD_NO_EXTRACT YES)
+
+    # Tracy client, for SNX_TRACY development builds.
+    if(SNX_TRACY)
+        # The sampler and the callstacks it needs are on; the zones take no callstacks of their own, so it costs
+        # nothing per zone. The wait stacks are off: they walk the stack at every context switch.
+        set(snx_tracy_options "TRACY_ENABLE ON" "TRACY_ON_DEMAND ON" "TRACY_NO_CRASH_HANDLER ON" "TRACY_STATIC ON"
+                              "TRACY_MANUAL_LIFETIME ON" "TRACY_NO_CODE_TRANSFER ON" "TRACY_NO_FRAME_IMAGE ON"
+                              "TRACY_NO_WAIT_STACKS ON")
+        if(NOT ANDROID)
+            list(APPEND snx_tracy_options "TRACY_ONLY_LOCALHOST ON" "TRACY_NO_BROADCAST ON")
+        endif()
+        CPMAddPackage(NAME tracy VERSION 0.14.1
+                      URL https://github.com/wolfpld/tracy/archive/refs/tags/v0.14.1.tar.gz
+                      URL_HASH SHA256=bf4af567e9c7524d07f3caa745fad02fb33bd5694f11910750382d1efbb251c1
+                      EXCLUDE_FROM_ALL YES
+                      OPTIONS ${snx_tracy_options})
+        # The sampler waits for the runtime to ask for it, and samples at 1 kHz unless TRACY_SAMPLING_HZ says
+        # otherwise.
+        target_compile_definitions(TracyClient PRIVATE TRACY_SAMPLING_PROFILER_MANUAL_START TRACY_SAMPLING_HZ=1000)
+        snx_quiet(TracyClient)
+    endif()
 endif()
 
 set(SNX_SDL3_FROM_SOURCE OFF)

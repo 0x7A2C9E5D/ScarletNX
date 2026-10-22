@@ -8,6 +8,7 @@
 #include "nx/runtime/options.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/tracy.h"
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -167,6 +168,8 @@ void unattended_exit(u64 hash, int w, int h) {
         fprintf(stderr, "\nframes=%d hash=%016llx\n", frames_now(), (unsigned long long)hash);
     ini_poll(1); /* the settings changed during the run, as a quit saves them */
     snx_save_before_exit();
+    /* The same close as process_exit: it ends the frontend's open zone and lets the capture write. */
+    snx_tracy_shutdown();
     plat_exit_now(0);
 }
 

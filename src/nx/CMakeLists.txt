@@ -9,9 +9,15 @@
 #   shader    Maxwell shaders to SPIR-V
 #   vk        the renderer                                            platform  the OS layer and a window backend
 
+add_library(snx_tracy INTERFACE)
+if(SNX_TRACY)
+    target_compile_definitions(snx_tracy INTERFACE SNX_TRACY=1)
+    target_link_libraries(snx_tracy INTERFACE Tracy::TracyClient)
+endif()
+
 add_library(snx_nx_flags INTERFACE)
 target_link_libraries(snx_nx_flags INTERFACE scarletnx-common scarletnx-net scarletnx-ldn scarletnx-filesystem
-                                           snx_settings)
+                                           snx_settings snx_tracy)
 # Every function and global used across files is declared once, in the header of the file that defines it, and
 # everything else is static: a declaration that disagrees with the definition is then a compile error instead of a
 # miscompile. Third-party sources keep their own warnings off.
@@ -71,7 +77,7 @@ target_link_libraries(snx_gpu PRIVATE snx_llvm)
 include("${PROJECT_SOURCE_DIR}/cmake/controls_atlas.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
 set(platform runtime/platform/plat.c runtime/platform/unattended.c runtime/platform/backend/sdl3.c
-             runtime/platform/backend/gamepad.c
+             runtime/platform/backend/gamepad.c runtime/platform/tracy.c
              runtime/platform/overlay.c runtime/platform/touch.c runtime/platform/ui.c runtime/platform/vpad.c
              runtime/platform/fatal_screen.c runtime/platform/prepare_screen.c
              "${CMAKE_BINARY_DIR}/generated/controls_png.c")
@@ -255,7 +261,8 @@ if(BUILD_TESTING AND SNX_TEST_VULKAN)
     else()
         set(snx_astc_plat runtime/platform/plat_posix.c)
     endif()
-    add_executable(snx-test-astc-vulkan "${PROJECT_SOURCE_DIR}/tests/astc_vulkan.c" gpu/texture/astc.c gpu/vk/astc.c
+    add_executable(snx-test-astc-vulkan "${PROJECT_SOURCE_DIR}/tests/astc_vulkan.c" "${PROJECT_SOURCE_DIR}/tests/tracy_stubs.c"
+        gpu/texture/astc.c gpu/vk/astc.c
         gpu/vk/blocklinear.c gpu/texture/blocklinear.c gpu/vk/texconv.c gpu/texture/etc2.c
         gpu/vk/cmd.c gpu/vk/memory.c gpu/vk/record.c gpu/vk/vma.cpp ${snx_astc_plat} "${volk_SOURCE_DIR}/volk.c"
         "${CMAKE_BINARY_DIR}/generated/spirv/astc_spv.c" "${CMAKE_BINARY_DIR}/generated/spirv/blocklinear_spv.c"

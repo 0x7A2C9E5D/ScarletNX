@@ -588,6 +588,17 @@ setting RenderDoc frames
     startup
     help The presents RenderDoc captures takes, a comma between: N is the Nth present, Ns the first after N seconds of
     help the scripted input's clock. Empty: none
+# SNX_TRACY_DEBUG_BEGIN
+setting Tracy profiler
+    key tracy_profiler
+    int 0 1
+    default 0
+    startup
+    words Off|On
+    help 1 = starts the run with the Tracy client up; connect the GUI to 127.0.0.1:8086 (discovery is off, so its
+    help "connect to the next instrumented process" does not find it). A capture and the GUI cannot both
+    help have the run: the capture takes its one connection
+# SNX_TRACY_DEBUG_END
 
 # the unattended runs' (platform/unattended.c): read as the .ini's settings are, from the command line, but in no section,
 # so never written back
@@ -714,6 +725,16 @@ setting Extract game container
     default off
     words on=On
     help Extract a dump's ExeFS and RomFS into its game's folder. Off, the game reads them from the dump
+# SNX_TRACY_BEGIN
+setting Tracy capture
+    key tracy_capture
+    text 4
+    default off
+    words on=On
+    help Records Switch runs to captures/ beside the game, and opens the trace in the profiler when the run ends. Off,
+    help the client does not start; F7 starts a 60-second capture. tracy-capture must be on PATH, and the runtime
+    help must be built with SNX_TRACY
+# SNX_TRACY_END
 
 table g_recompile_ini recompile
 setting Optimization level

@@ -31,6 +31,7 @@
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/prepare_screen.h"
 #include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/tracy.h"
 #include "nx/runtime/platform/ui.h"
 #include "nx/runtime/platform/unattended.h"
 #include <stdio.h>
@@ -428,11 +429,31 @@ static void frontend_loop(void) {
     int frames = 0, stalls = 0;
     while (!g_quit) {
         int shown;
+        SNX_ZONE(z_frontend, "frontend tick");
         video_poll();
         hid_update();
         vi_vsync_tick();
         if (++tick % 60 == 0) ini_poll(0);
         frontend_frame();
+        SNX_ZONE_END(z_frontend);
+#if defined(SNX_TRACY)
+        SNX_PLOT("guest memory MB", (double)used_memory() / (1024.0 * 1024.0));
+        {
+            /* the io plots' bases */
+            static u64 was_read, was_written, last_ns;
+            u64 read = __atomic_load_n(&g_fs_bytes_read, __ATOMIC_RELAXED);
+            u64 written = __atomic_load_n(&g_fs_bytes_written, __ATOMIC_RELAXED);
+            u64 now_ns = plat_ns();
+            double secs = last_ns ? (double)(now_ns - last_ns) / 1e9 : 0.0;
+            if (secs > 0) {
+                SNX_PLOT("io read MB/s", (double)(read - was_read) / 1048576.0 / secs);
+                SNX_PLOT("io write MB/s", (double)(written - was_written) / 1048576.0 / secs);
+            }
+            was_read = read;
+            was_written = written;
+            last_ns = now_ns;
+        }
+#endif
         /* here and not on the GPU thread, where writing the pipeline cache would hold up every channel */
         if (tick % 300 == 0) {
             save_hints();
@@ -462,6 +483,7 @@ static void frontend_loop(void) {
     ini_poll(1); /* the settings the game's menu changed, even over an edit of the file */
     snx_save_before_exit();
     LOG("Exit.\n");
+    snx_tracy_shutdown();
     plat_exit_now(0);
 }
 
@@ -682,6 +704,9 @@ int snx_main(int argc, char** argv) {
     clock_start();
     g_mod = mod; /* from here the log is a file, in the state folder */
     title = mod->title && mod->title[0] ? mod->title : g_exename;
+#if defined(SNX_TRACY)
+    if (g_settings.tracy_profiler) g_opt_tracy_client = 1; /* the .ini's Debug section asks for the client */
+#endif
     /* the header the log summary reads (common/utilities/logscan.c): no folder in it, since players attach the log to
        public reports and the folder names their account */
     LOG("ScarletNX - %s\n", title);
@@ -691,6 +716,9 @@ int snx_main(int argc, char** argv) {
         plat_system_info(sys, sizeof sys);
         LOG("system: %s\n", sys);
     }
+    /* after the header, so the client's own lines do not come before it and a capture that cannot start still leaves
+       a log: it is asked for by a setting, and a run without it is better than no run */
+    if (snx_tracy_init(title)) WARN("tracy: no capture this run; it goes on without one\n");
     say_old_layout();
     /* before the JIT's first load (jit_init, arm.c's blocks, the GPU's macros), and only when asked: GDB stops the
        game to read each one */
