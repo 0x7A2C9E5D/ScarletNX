@@ -854,6 +854,14 @@ static void pick_size(App* app, int size, bool keep) {
     key(app, SDLK_RETURN);
     assert(!app->confirm.shown && !app->size_until && app->menu.text_size == (keep ? size : app->size_was));
 }
+/* what the folders Games lists hold, as the watcher hashes them: a look of its own, here */
+static uint64_t stamp_now(App* app) {
+    uint64_t h = 0;
+    watch_set(app);
+    watch_pass(&app->watch);
+    assert(watch_get(app, &h));
+    return h;
+}
 /* a JPEG's bytes as snx_splash_jpeg hands them out: a game's icon */
 typedef struct {
     unsigned char data[16384];
@@ -2591,11 +2599,28 @@ int main(int argc, char** argv) {
             gui_games_free(&listed);
             /* read back as it was kept; a change below it changes the stamp */
             {
-                uint64_t stamp = games_stamp(&app);
+                uint64_t stamp = stamp_now(&app);
                 char* more_deep = snx_path_join(deep, "a/b/Two");
                 assert(!snx_write_file(more_deep, "fixture", 7));
-                assert(games_stamp(&app) != stamp);
+                assert(stamp_now(&app) != stamp);
                 free(more_deep);
+            }
+            /* the watcher's own thread: a hash soon, another once a game comes, and an end when told */
+            {
+                uint64_t first = 0, now = 0;
+                Uint64 until;
+                char* more = snx_path_join(deep, "a/Three");
+                watch_start(&app);
+                for (until = SDL_GetTicks() + 20000; !watch_get(&app, &first) && SDL_GetTicks() < until;) SDL_Delay(20);
+                assert(watch_get(&app, &first) && app.watch.thread);
+                assert(!snx_write_file(more, "fixture", 7));
+                for (until = SDL_GetTicks() + 20000;
+                     (!watch_get(&app, &now) || now == first) && SDL_GetTicks() < until;)
+                    SDL_Delay(20);
+                assert(now != first);
+                watch_stop(&app);
+                assert(!app.watch.thread && !watch_get(&app, &now));
+                free(more);
             }
             free(app.folders[0]);
             app.folder_count = 0;
@@ -3604,7 +3629,7 @@ int main(int argc, char** argv) {
         app.menu.selected = GUI_LINUX;
         free(app.games_dir);
         app.games_dir = original_games;
-        app.games_stamp = games_stamp(&app);
+        app.games_stamp = stamp_now(&app);
         free(cia);
         free(recent_file);
     }
@@ -3874,9 +3899,7 @@ int main(int argc, char** argv) {
     char* directory = snx_path_join(app.games_dir, "directory.exe");
     assert(!snx_mkdirs(directory));
     free(directory);
-    /* Games finds them itself, looking once a second while it is open; F5, or the foot's, looks at once */
-    app.clock = 50000;
-    app.games_checked = app.clock;
+    /* Games finds them itself as the watcher's thread looks (a look here: watch_pass); F5, or the foot's, at once */
     pump(&app);
     assert(!app.games.count);
     key(&app, SDLK_F5);
@@ -3885,11 +3908,11 @@ int main(int argc, char** argv) {
     press_key(&app, "F5", 0, false, yellow);
     assert(app.games.count == 35 && !strcmp(app.message, "Refreshed: 35 games"));
     app.message[0] = 0;
-    app.clock += 1000;
+    app.browser.activated = true; /* which a new listing would reset */
+    watch_pass(&app.watch);       /* its first look after a listing: what the list holds, not listed again */
     pump(&app);
-    assert(app.games.count == 35 && app.browser.count == 35);
-    app.clock = 0;
-    app.games_checked = 0;
+    assert(app.games.count == 35 && app.browser.count == 35 && !app.games_fresh && app.browser.activated);
+    app.browser.activated = false;
     /* the menu: the loads, the keys, Settings, Share log and Exit, a box each with none between; no games in it. F5
        samples the status again */
     go_tab(&app, GUI_TAB_MENU);
@@ -4130,17 +4153,18 @@ int main(int argc, char** argv) {
 #else
         char* late = snx_path_join(app.games_dir, "Game35");
 #endif
+        watch_pass(&app.watch); /* the list as the watcher first sees it */
+        pump(&app);
         assert(!snx_write_file(late, "fixture", 7) && !snx_make_executable(late));
-        app.clock = 60000;
-        app.games_checked = 59000;
+        pump(&app); /* nothing yet: the watcher has not looked */
+        assert(app.games.count == 35);
+        watch_pass(&app.watch);
         pump(&app);
         assert(app.games.count == 36 && app.browser.page == 1 && app.browser.selected == 1);
         assert(!snx_remove_tree(late));
-        app.clock += 1000;
+        watch_pass(&app.watch);
         pump(&app);
         assert(app.games.count == 35 && app.browser.page == 1 && app.browser.selected == 1);
-        app.clock = 0;
-        app.games_checked = 0;
         free(late);
     }
     render(&app);

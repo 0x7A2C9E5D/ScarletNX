@@ -2098,6 +2098,11 @@ msgid "Not enough memory to list the games in their groups."
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "Games is not watched for new games (%s): F5 lists them"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Not saved: Ctrl+S saves it, ESC twice leaves without it"
 msgstr ""
 

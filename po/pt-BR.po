@@ -552,6 +552,9 @@ msgstr "Não foi possível desenhar a foto de %s: aparece a Wimsy"
 msgid "%s could not be drawn: the game shows no icon"
 msgstr "Não foi possível desenhar %s: o jogo fica sem ícone"
 
+msgid "Games is not watched for new games (%s): F5 lists them"
+msgstr "Jogos não acompanha jogos novos (%s): F5 os lista"
+
 #: src/gui/main.c
 msgid "Who plays the games"
 msgstr "Quem joga"

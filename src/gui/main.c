@@ -100,7 +100,21 @@ enum { GUI_GROUP_APP, GUI_GROUP_RECOMPILED, GUI_GROUP_DUMPS, GUI_FOLDER_GROUPS }
 #define GUI_VIEW_ROWS    24    /* a group's rows shown as a view of them */
 #define SNX_GUI_PLAYERS  8     /* Controllers' players, as the runtime's gamepad_p<N>_ keys */
 /* Settings > App > Folders' rows, its last aside: the app's two, then each library's Main, its Extras and Add a folder */
-#define GUI_FOLDER_ROWS  (GUI_PLACES + 1 + GUI_FOLDERS_MAX + 2)
+#define GUI_FOLDER_ROWS (GUI_PLACES + 1 + GUI_FOLDERS_MAX + 2)
+/* the game folders watched on a thread of their own: listing them, a library's with its subfolders, can keep a busy
+   disk a while, the window frozen if the menu's thread waited for it. Once a second the thread hashes what they hold
+   (stamp_dirs); the menu hands it the folders (watch_set) and takes the last hash of those (watch_get) */
+#define GUI_WATCH_DIRS  (GUI_FOLDERS_MAX + 3) /* recompiled/, the player's folders, dumps/, an older version's games/ */
+typedef struct {
+    SDL_Mutex* lock;
+    SDL_Thread* thread;
+    char* dirs[GUI_WATCH_DIRS]; /* as the menu last handed them, NULL none; each one's depth beside it */
+    int depths[GUI_WATCH_DIRS];
+    int count, stop;
+    unsigned set;     /* how many times the folders were handed: a hash of older ones is not taken */
+    unsigned stamped; /* the set the hash is of, 0 none */
+    uint64_t stamp;
+} GuiWatch;
 /* the focused game's runtime JIT cache: none to show, no cache yet, one read, one unreadable */
 enum { GUI_AOT_NONE, GUI_AOT_NO_CACHE, GUI_AOT_CACHE, GUI_AOT_BAD };
 #define GUI_ICONS     96  /* the games' icons kept drawn: a page's rows and the recent ones, with room */
@@ -288,10 +302,11 @@ typedef struct App {
     char* folder_asked; /* a folder picked with folders in it, asked whether their games are listed too */
     char* folders_file; /* where they are kept; NULL keeps none */
     GuiThemeKey folder_keys[GUI_FOLDER_ROWS];
-    char* library_dumps;    /* dumps/ of the data folder, as Folders' row names it while it is open */
-    int folder_off;         /* the game folder GUI_ASK_FOLDER asks about, its index in folders */
-    uint64_t games_stamp;   /* what the game folders held when last counted (games_stamp) */
-    Uint64 games_checked;   /* when they were last looked at */
+    char* library_dumps;  /* dumps/ of the data folder, as Folders' row names it while it is open */
+    int folder_off;       /* the game folder GUI_ASK_FOLDER asks about, its index in folders */
+    uint64_t games_stamp; /* what the game folders held when last listed, as the watcher hashes them */
+    bool games_fresh;     /* listed just now: the watcher's next hash is what the list holds */
+    GuiWatch watch;
     bool recent_all;        /* every recent game shows, not GUI_RECENT_SHOWN and a row for the rest */
     Uint32 picked_folder;   /* the event a folder from the system's picker comes back as */
     SDL_Texture* preview;   /* the editor's: the menu or a run drawn in its theme, at 1x */
@@ -6777,7 +6792,6 @@ static void recent_name(App* app, const char* label) {
     if (gui_recent_rename(&app->recent, app->file, named->detail)) recent_changed(app);
 }
 static void list_games(App* app);
-static uint64_t games_stamp(const App* app);
 /* back to the menu from a finished run, which fades in */
 static void leave_run(App* app) {
     app->finished = false;
@@ -7262,6 +7276,7 @@ static int aot_built(const App* app) {
         if (sscanf(app->steps.note[i].text, "AOT pack: %d", &n) == 1) return n;
     return -1;
 }
+static bool watch_get(App* app, uint64_t* stamp);
 static void pump(App* app) {
     keys_left(app);
     text_left(app);
@@ -7359,16 +7374,19 @@ static void pump(App* app) {
     }
     if (app->leaving_ms && now_ms(app) - app->leaving_ms >= app->theme.fade_out_ms) leave_run(app);
     if (app->closing_ms && now_ms(app) - app->closing_ms >= GUI_CLOSING_MS) app->menu.quit = true;
-    /* games put in or taken out of the folders while the menu is open, looked for once a second: Games and its list
-       follow, the list on the file it had */
-    if (!app->menu.running && !app->finished && now_ms(app) - app->games_checked >= 1000) {
-        app->games_checked = now_ms(app);
-        if (games_stamp(app) != app->games_stamp) {
-            app->games_stamp = games_stamp(app);
+    /* games put in or taken out of the folders while the menu is open, as the watcher's hash of them says: Games and
+       its list follow, the list on the file it had. The first hash after a listing is what the list holds */
+    uint64_t stamp;
+    if (!app->menu.running && !app->finished && watch_get(app, &stamp) && stamp != app->games_stamp) {
+        bool fresh = app->games_fresh;
+        app->games_stamp = stamp;
+        app->games_fresh = false;
+        if (!fresh) {
             recent_as_games(app);
             if (app->menu.view == GUI_LOAD_GAMES) {
                 GuiBrowser was = app->browser;
                 list_games(app);
+                app->games_fresh = false; /* the hash it was listed by is this one, the folders the same */
                 app->browser.page = was.page;
                 app->browser.selected = was.selected;
                 gui_browser_resize(&app->browser, app->browser.page_size);
@@ -8161,20 +8179,21 @@ static size_t games_listed(const App* app) {
     for (i = 0; i < app->games.count; ++i) n += !gui_games_heading(&app->games, i);
     return n;
 }
-/* the names dir holds into h, and with depth those of its folders, down that many levels, hidden ones left alone */
-static uint64_t stamp_dir(uint64_t h, const char* dir, int depth) {
+/* the names dir holds into h, and with depth those of its folders, down that many levels, hidden ones left alone; it
+   ends where it is once *stop is set */
+static uint64_t stamp_dir(uint64_t h, const char* dir, int depth, const int* stop) {
     char** names = NULL;
     size_t count = 0, k;
     const char* c;
     if (!dir || snx_list_dir(dir, &names, &count)) count = (size_t)-1; /* none: not the same as an empty one */
-    for (k = 0; k < count && names; ++k) {
+    for (k = 0; k < count && names && !(stop && __atomic_load_n(stop, __ATOMIC_RELAXED)); ++k) {
         for (c = names[k];; ++c) {
             h = (h ^ (unsigned char)*c) * 1099511628211ull;
             if (!*c) break;
         }
         if (depth > 0 && names[k][0] != '.') {
             char* sub = snx_path_join(dir, names[k]);
-            if (sub && snx_is_dir(sub)) h = stamp_dir(h, sub, depth - 1);
+            if (sub && snx_is_dir(sub)) h = stamp_dir(h, sub, depth - 1, stop);
             free(sub);
         }
     }
@@ -8182,26 +8201,113 @@ static uint64_t stamp_dir(uint64_t h, const char* dir, int depth) {
     if (names) snx_free_strings(names, count);
     return h;
 }
-/* the names recompiled/ and the player's folders hold (a folder kept with its subfolders, theirs too), hashed: a game
-   put in, taken out or renamed changes it, and so does a folder that comes or goes */
-static uint64_t games_stamp(const App* app) {
+/* the names the folders hold (each down its depth), hashed: a game put in, taken out or renamed changes it, and so
+   does a folder that comes or goes */
+static uint64_t stamp_dirs(char* const* dirs, const int* depths, int count, const int* stop) {
     uint64_t h = 1469598103934665603ull; /* FNV-1a */
     int i;
-    char* dumps = app->data_dir ? snx_path_join(app->data_dir, "dumps") : NULL;
-    for (i = -1; i < app->folder_count; ++i)
-        h = stamp_dir(h, i < 0 ? app->games_dir : app->folders[i],
-                      i >= 0 && app->folders_deep[i] ? GUI_FOLDER_DEPTH : 0);
-    h = stamp_dir(h, dumps, GUI_FOLDER_DEPTH);
-    free(dumps);
-    dumps = games_old(app);
-    if (dumps) h = stamp_dir(h, dumps, 0);
-    free(dumps);
+    for (i = 0; i < count; ++i) h = stamp_dir(h, dirs[i], depths[i], stop);
     return h;
+}
+/* the folders Games lists, each owned (NULL none) with its depth: recompiled/, the player's (a folder kept with its
+   subfolders, theirs too), dumps/ and an older version's games/; how many */
+static int watch_dirs(const App* app, char** dirs, int* depths) {
+    int i, n = 0;
+    dirs[n] = app->games_dir ? snx_strdup(app->games_dir) : NULL;
+    depths[n++] = 0;
+    for (i = 0; i < app->folder_count; ++i) {
+        dirs[n] = snx_strdup(app->folders[i]);
+        depths[n++] = app->folders_deep[i] ? GUI_FOLDER_DEPTH : 0;
+    }
+    dirs[n] = app->data_dir ? snx_path_join(app->data_dir, "dumps") : NULL;
+    depths[n++] = GUI_FOLDER_DEPTH;
+    dirs[n] = games_old(app);
+    depths[n++] = 0;
+    return n;
+}
+/* the folders Games lists, handed to the watcher: their hash taken from its next look */
+static void watch_set(App* app) {
+    GuiWatch* w = &app->watch;
+    char* dirs[GUI_WATCH_DIRS];
+    int depths[GUI_WATCH_DIRS], n = watch_dirs(app, dirs, depths), i;
+    if (!w->lock && !(w->lock = SDL_CreateMutex())) {
+        snprintf(app->message, sizeof app->message, snx_tr("Games is not watched for new games (%s): F5 lists them"),
+                 SDL_GetError());
+        for (i = 0; i < n; ++i) free(dirs[i]);
+        return;
+    }
+    SDL_LockMutex(w->lock);
+    for (i = 0; i < w->count; ++i) free(w->dirs[i]);
+    memcpy(w->dirs, dirs, sizeof dirs);
+    memcpy(w->depths, depths, sizeof depths);
+    w->count = n;
+    ++w->set;
+    SDL_UnlockMutex(w->lock);
+}
+/* a look at the folders: their hash, kept unless they were handed again while it was taken */
+static void watch_pass(GuiWatch* w) {
+    char* dirs[GUI_WATCH_DIRS];
+    int depths[GUI_WATCH_DIRS], n, i;
+    unsigned set;
+    uint64_t h;
+    if (!w->lock) return;
+    SDL_LockMutex(w->lock);
+    for (i = n = 0; i < w->count; ++i, ++n) {
+        dirs[n] = w->dirs[i] ? snx_strdup(w->dirs[i]) : NULL;
+        depths[n] = w->depths[i];
+    }
+    set = w->set;
+    SDL_UnlockMutex(w->lock);
+    h = stamp_dirs(dirs, depths, n, &w->stop);
+    for (i = 0; i < n; ++i) free(dirs[i]);
+    SDL_LockMutex(w->lock);
+    if (w->set == set && !__atomic_load_n(&w->stop, __ATOMIC_RELAXED)) {
+        w->stamp = h;
+        w->stamped = set;
+    }
+    SDL_UnlockMutex(w->lock);
+}
+static int SDLCALL watch_run(void* data) {
+    GuiWatch* w = (GuiWatch*)data;
+    int i;
+    while (!__atomic_load_n(&w->stop, __ATOMIC_RELAXED)) {
+        watch_pass(w);
+        for (i = 0; i < 20 && !__atomic_load_n(&w->stop, __ATOMIC_RELAXED); ++i) SDL_Delay(50); /* a second */
+    }
+    return 0;
+}
+/* the last hash of the folders as last handed, when the watcher has one */
+static bool watch_get(App* app, uint64_t* stamp) {
+    GuiWatch* w = &app->watch;
+    bool got;
+    if (!w->lock) return false;
+    SDL_LockMutex(w->lock);
+    got = w->stamped && w->stamped == w->set;
+    *stamp = w->stamp;
+    SDL_UnlockMutex(w->lock);
+    return got;
+}
+/* the watcher's thread, looking from now on; without one Games follows its folders only by F5, said */
+static void watch_start(App* app) {
+    watch_set(app);
+    if (app->watch.lock && !(app->watch.thread = SDL_CreateThread(watch_run, "games", &app->watch)))
+        snprintf(app->message, sizeof app->message, snx_tr("Games is not watched for new games (%s): F5 lists them"),
+                 SDL_GetError());
+}
+static void watch_stop(App* app) {
+    GuiWatch* w = &app->watch;
+    int i;
+    __atomic_store_n(&w->stop, 1, __ATOMIC_RELAXED);
+    if (w->thread) SDL_WaitThread(w->thread, NULL);
+    for (i = 0; i < w->count; ++i) free(w->dirs[i]);
+    if (w->lock) SDL_DestroyMutex(w->lock);
+    *w = (GuiWatch){0};
 }
 static void list_games(App* app) {
     icons_free(app); /* a game made since has one now */
     games_scan(app, &app->games, app->message, sizeof app->message);
-    app->games_stamp = games_stamp(app);
+    app->games_fresh = true;
+    watch_set(app);
     memset(&app->browser, 0, sizeof(app->browser));
     app->browser.count = app->games.count;
     app->browser.head = games_head(app);
@@ -9216,6 +9322,7 @@ static void forget(App* app) {
     gui_android_ran(NULL); /* the run goes with the menu */
 #endif
     gui_process_destroy(app->process);
+    watch_stop(app);
     space_stop(app);
     space_end(&app->left_space, &app->left_counter);
     settings_forget(app);
@@ -9356,7 +9463,8 @@ int snx_gui_main(const char* self) {
     }
     open_files(&app); /* here, not in initialize(), so the tests keep their own */
     setup_start(&app);
-    app.games_stamp = games_stamp(&app);
+    app.games_fresh = true;
+    watch_start(&app);
     space_start(&app); /* the footer's disk */
     left_behind(&app);
     app.left_shown = app.lefts > 0;
