@@ -183,6 +183,12 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "AOT pack: tap it."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "Back: go back."
 msgstr ""
 
@@ -268,6 +274,12 @@ msgstr ""
 #: src/gui/main.c
 #, snx-keys
 msgid "Up/Down: select. Enter/Space: open. R: recompile. M: mods folder. Left/Right/PgUp/PgDown: page. F5: refresh."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "B: build AOT pack."
 msgstr ""
 
 #: src/gui/main.c
@@ -798,6 +810,28 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "  (games/)"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "JIT cache: %s, O%c"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "AOT build: O%c%s"
+msgstr ""
+
+#: src/gui/main.c
+msgid " (levels differ)"
+msgstr ""
+
+#: src/gui/main.c
+msgid "JIT cache: none yet. Play once to collect one."
+msgstr ""
+
+#: src/gui/main.c
+msgid "JIT cache: unreadable. Play once to rebuild it."
 msgstr ""
 
 #: src/gui/main.c
@@ -1873,6 +1907,28 @@ msgid "%d moved, %d not"
 msgstr ""
 
 #: src/gui/main.c
+msgid "AOT pack build aborted."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "AOT pack build failed (status %d)."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "AOT pack built from %d cached function%s."
+msgstr ""
+
+#: src/gui/main.c
+msgid "AOT pack built, but no cached function matched the game."
+msgstr ""
+
+#: src/gui/main.c
+msgid "AOT pack built."
+msgstr ""
+
+#: src/gui/main.c
 msgid "Program ended abnormally (force-terminated by ESC)."
 msgstr ""
 
@@ -1938,6 +1994,23 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "R recompiles Switch games only."
+msgstr ""
+
+#: src/gui/main.c
+msgid "B builds an AOT pack for a prepared Switch game in focus."
+msgstr ""
+
+#: src/gui/main.c
+msgid "No JIT cache for this game yet. Play it once to collect one."
+msgstr ""
+
+#: src/gui/main.c
+msgid "The JIT cache is unreadable. Play it once to rebuild it."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "The JIT cache is O%c, but the game's AOT optimization is O%c. They must match: set Optimization level to O%c before building, or set JIT optimization to O%c and play once to make a matching cache."
 msgstr ""
 
 #: src/gui/main.c
@@ -2123,6 +2196,18 @@ msgstr ""
 #: src/gui/main.c
 #, snx-key
 msgid "R"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "B"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "AOT pack"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word

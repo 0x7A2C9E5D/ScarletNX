@@ -5,9 +5,13 @@
 #ifndef SNX_MAIN_H
 #define SNX_MAIN_H
 #include "common/cpu/aarch64/cpu.h"
+#include "common/cpu/recompiler/variants.h"
 #include "common/utilities/run_theme.h"
 
 int snx_main(int argc, char** argv); /* runs the game the arguments or the program's name say; its exit status */
+/* The AOT module's runtime code variants, from its snx_variants() (main.c's load_module); NULL for a module built
+   without a profile cache */
+extern const SnxVariants* g_variants;
 /* the launcher's menu (src/gui), for an executable built with it: a bare start of the runtime opens it, with the
    program's own path */
 extern int (*snx_menu)(const char* self);

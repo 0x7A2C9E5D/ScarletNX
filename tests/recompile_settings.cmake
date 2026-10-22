@@ -27,4 +27,25 @@ foreach(case "--aot_threads=abc|aot_threads=abc is not a whole number from 0 to 
         message(FATAL_ERROR "scarletnx -r missing.nro ${option} ended with ${result}, not \"${expected}\":\n${out}")
     endif()
 endforeach()
+# AOT pack build: a prepared game, recompiled with the cache the launcher names. --jit-cache and
+# --hook-direct-calls are the recompiler's, not extra dump inputs; before this case the automatic
+# preparation check took them for game arguments and stopped with "accepts one dump file".
+set(aot "${dir}/aot")
+set(aot_game "${aot}/0100000000000000")
+file(MAKE_DIRECTORY "${aot_game}" "${aot_game}/0100000000000000_data")
+file(WRITE "${aot_game}/0100000000000000" "")
+file(WRITE "${aot}/profile.jitcache" "")
+execute_process(COMMAND "${CMAKE_COMMAND}" -E env --unset=DISPLAY --unset=WAYLAND_DISPLAY SDL_VIDEO_DRIVER=dummy
+                        "${RUNTIME}" --repo "${aot}" --build-dir "${aot}" -r "${aot_game}"
+                        --jit-cache "${aot}/profile.jitcache" --hook-direct-calls -O 2
+                WORKING_DIRECTORY "${aot}" TIMEOUT 20 RESULT_VARIABLE result OUTPUT_VARIABLE out
+                ERROR_VARIABLE out)
+string(FIND "${out}" "automatic preparation accepts one dump file" bad)
+if(bad GREATER -1)
+    message(FATAL_ERROR "AOT build's --jit-cache/--hook-direct-calls were taken for extra dumps:\n${out}")
+endif()
+string(FIND "${out}" "holds no exefs/main" reached)
+if(reached LESS 0)
+    message(FATAL_ERROR "AOT build did not reach the recompiler:\n${out}")
+endif()
 file(REMOVE_RECURSE "${dir}")

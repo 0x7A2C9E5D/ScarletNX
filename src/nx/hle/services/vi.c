@@ -75,6 +75,7 @@ static int vi_layer_open(u64 layer_id) {
     g_hle.vi.layer[free_i].width = VI_WIDTH;
     g_hle.vi.layer[free_i].height = VI_HEIGHT;
     g_hle.vi.layer[free_i].format = 1; /* RGBA8888 */
+    g_hle.vi.layer[free_i].max_buffer_count = 2; /* and SetBufferCount's answer for a window that never asks */
     return free_i + 1;
 }
 /* CloseLayer and DestroyStrayLayer: the layer's buffer queue goes, and its place is free for the next layer opened.
@@ -88,6 +89,7 @@ static void vi_layer_close(u64 layer_id) {
         l->layer_id = 0;
         l->connected = 0;
         l->interval = 0;
+        l->max_buffer_count = 2;
         l->gen++;
         memset(l->slot, 0, sizeof l->slot);
         kevent_signal(l->event); /* as when a buffer comes free: the waiter finds the queue gone */
@@ -368,11 +370,11 @@ static void vi_transact(ViLayer* l, u32 code, IpcBuf parcel, IpcBuf reply) {
                 case 1:
                 case 7: v = l->height; break;
                 case 2: v = l->format; break;
-                case 3: v = 1; break;  /* MinUndequeuedBuffers: the one the display holds */
+                case 3: v = 0; break;  /* MinUndequeuedBuffers: HOS never uses the async buffer path */
                 case 9:                /* ConsumerRunningBehind */
                 case 10:               /* ConsumerUsageBits */
                 case 11: v = 0; break; /* StickyTransform */
-                case 12: v = VI_SLOTS; break;
+                case 12: v = l->max_buffer_count; break;
                 default:
                     v = 0;
                     status = BQ_BAD_VALUE;
@@ -419,11 +421,15 @@ static void vi_transact(ViLayer* l, u32 code, IpcBuf parcel, IpcBuf reply) {
             pc_broadcast(&g_hle.vi.freed);
             break;
         case BQ_GET_BUFFER_HISTORY: /* no history is kept */
-        case BQ_SET_BUFFER_COUNT:
         case BQ_DETACH_BUFFER:
         case BQ_DETACH_NEXT_BUFFER:
         case BQ_ATTACH_BUFFER:
         case BQ_ALLOCATE_BUFFERS: break;
+        case BQ_SET_BUFFER_COUNT: /* the game's window asks for 2; answering the 64 slots made NVN abort */
+            v = parcel_u32(&in);
+            if (v > VI_SLOTS) status = BQ_BAD_VALUE;
+            else l->max_buffer_count = v ? v : 2; /* 0 is the default, as Eden's override */
+            break;
         default: WARN_LIMIT(4, "vi: binder transaction %u isn't known, it answers success\n", code); break;
     }
     pm_unlock(&g_hle.vi.lock);

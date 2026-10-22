@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "nx/loader/module_ir.h"
+#include "nx/loader/module_variants.h"
 #include "common/cpu/recompiler/codegen.h"
 #include "nx/loader/codegen_view.h"
 #include "common/cpu/recompiler/llvm/ir.h"
@@ -295,6 +296,22 @@ static int emit_module(SnxIr* ir, const SnxCodegen* codegen, const SnxCodegenOpt
     ent_addr = global(ir, t_addrs, "ENT_ADDR", NULL, 0);
     ent_ptr = global(ir, t_ptrs, "ENT_PTR", NULL, 0);
     free(values);
+    /* snx_aot_<addr>: what the cache objects' direct calls name (ir_codegen.c). The
+       entry's function is in a code chunk, so this is a tail-calling wrapper, not an
+       alias: an alias may only name a definition in its own module */
+    for (i = 0; i < count; ++i) {
+        char name[40];
+        LLVMValueRef target = snx_ir_guest_function(ir, codegen->functions[entries[i].function].start);
+        LLVMValueRef wrapper, call, args[2];
+        sprintf(name, "snx_aot_%llx", (unsigned long long)entries[i].address);
+        wrapper = LLVMAddFunction(ir->mod, name, ir->t_guest);
+        LLVMPositionBuilderAtEnd(ir->b, LLVMAppendBasicBlockInContext(ir->ctx, wrapper, "entry"));
+        args[0] = LLVMGetParam(wrapper, 0);
+        args[1] = LLVMGetParam(wrapper, 1);
+        call = LLVMBuildCall2(ir->b, ir->t_guest, target, args, 2, "");
+        LLVMSetTailCallKind(call, LLVMTailCallKindTail);
+        LLVMBuildRetVoid(ir->b);
+    }
     /* static const SnxModInfo MODS[] */
     mods = snx_module_mods(ir, info, loaded);
     for (i = 0; i < loaded->module_count; ++i) {
@@ -370,11 +387,13 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     SnxCodegen codegen;
     Queue q;
     SnxIr* ir = NULL;
+    SnxJitCache* cache = NULL;
     SnxLinkInput* inputs = NULL;
     SnxLinkOutput linked;
     unsigned char *module_object = NULL, *rtlib_object = NULL;
     size_t module_size = 0, rtlib_size = 0, first, last, count, limit, i, entry_count = 0, n = 0;
-    const char* exports[1];
+    size_t cache_count = 0, variant_count = 0, export_count = 1;
+    const char* exports[2];
     char error[1024], *tmp = NULL;
     double start;
     int rc = -1;
@@ -383,9 +402,23 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     memset(&linked, 0, sizeof(linked));
     if (!loaded->module_count) return snx_error("No modules to generate");
     if (snx_ir_init(error, sizeof(error))) return snx_error("%s", error);
+    if (options->jit_cache) {
+        char* key = snx_jit_cache_key(build->opt, options->hook_direct_calls, 1);
+        if (!key) {
+            snx_error("LLVM backend: cannot make the JIT cache key");
+            goto done;
+        }
+        cache = snx_jit_cache_open(options->jit_cache, key, error, sizeof(error));
+        free(key);
+        if (!cache) {
+            snx_error("JIT cache: %s", error);
+            goto done;
+        }
+        cache_count = snx_jit_cache_count(cache);
+    }
     if (!options->interp_only &&
         snx_nx_codegen_analyze(&codegen, loaded, options->hints, options->hint_count, options->quiet))
-        return -1;
+        goto done;
     codegen.direct_svc = 1; /* the runtime's RtAPI.svcs (svc.c's g_svc64) */
     codegen.hook_direct_calls = options->hook_direct_calls;
     /* chunks of whole functions, as module.c splits the C */
@@ -411,8 +444,23 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     /* the module descriptor */
     start = snx_seconds();
     ir = snx_ir_new("module", build->opt, error, sizeof(error));
-    if (!ir || emit_module(ir, &codegen, options, loaded, &entry_count, error, sizeof(error)) ||
-        (build->keep_ir && save_ir(ir, build->keep_ir, "module")) ||
+    if (!ir) {
+        snx_error("LLVM backend: %s", error);
+        goto done;
+    }
+    if (emit_module(ir, &codegen, options, loaded, &entry_count, error, sizeof(error))) {
+        snx_error("LLVM backend: %s", error);
+        goto done;
+    }
+    if (cache_count &&
+        snx_module_variants_emit(ir, cache, &variant_count, error, sizeof(error))) {
+        snx_error("LLVM backend: %s", error);
+        goto done;
+    }
+    if (options->jit_cache && !options->quiet)
+        printf("AOT pack: %lu cached function%s%s\n", (unsigned long)variant_count, variant_count == 1 ? "" : "s",
+               variant_count ? "" : " (the cache did not match the game)");
+    if ((build->keep_ir && save_ir(ir, build->keep_ir, "module")) ||
         snx_ir_object(ir, build->opt, &module_object, &module_size, error, sizeof(error))) {
         snx_error("LLVM backend: %s", error);
         goto done;
@@ -426,8 +474,8 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
         snx_error("LLVM backend: %s", error);
         goto done;
     }
-    /* link: runtime library, descriptor, chunks */
-    inputs = (SnxLinkInput*)snx_alloc((q.count + 2) * sizeof(*inputs));
+    /* link: runtime library, descriptor, chunks, the profile cache's units */
+    inputs = (SnxLinkInput*)snx_alloc((q.count + 2 + cache_count) * sizeof(*inputs));
     inputs[n].data = rtlib_object;
     inputs[n].size = rtlib_size;
     inputs[n++].name = "rtlib";
@@ -439,8 +487,15 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
         inputs[n].size = q.units[i].size;
         inputs[n++].name = "code chunk";
     }
+    for (i = 0; i < cache_count; ++i) {
+        const SnxJitCacheRecord* record = snx_jit_cache_record(cache, i);
+        inputs[n].data = record->object;
+        inputs[n].size = record->object_size;
+        inputs[n++].name = record->name;
+    }
     exports[0] = "snx_module";
-    if (snx_link(inputs, n, exports, 1, base_name(build->output), &linked, error, sizeof(error))) {
+    if (variant_count) exports[export_count++] = "snx_variants";
+    if (snx_link(inputs, n, exports, export_count, base_name(build->output), &linked, error, sizeof(error))) {
         snx_error("Linking failed: %s", error);
         goto done;
     }
@@ -463,6 +518,7 @@ done:
     free(linked.data);
     free(tmp);
     snx_ir_free(ir);
+    snx_jit_cache_close(cache);
     snx_codegen_free(&codegen);
     return rc;
 }

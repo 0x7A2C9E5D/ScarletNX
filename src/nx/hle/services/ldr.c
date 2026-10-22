@@ -136,7 +136,8 @@ static int ro_load_nro(RoState* s, u64 source, u64 size, u64 bss, u64 bss_size, 
     memcpy(slot->id, GP(m.base + 0x40), 32);
     *address = m.base;
     LOG("ldr:ro: mapped NRO at %llx (%llu bytes, %s)\n", (unsigned long long)m.base,
-        (unsigned long long)(m.size + m.bss_size), jit_code_added(m.base, text, m.size) ? "interpreter" : "JIT");
+        (unsigned long long)(m.size + m.bss_size),
+        jit_code_added(m.base, text, m.size) ? "no AOT variants" : "AOT variants");
     R_SUCCEED();
 }
 static int ro_unload_nro(RoState* s, u64 base) {
@@ -144,7 +145,7 @@ static int ro_unload_nro(RoState* s, u64 base) {
     for (int i = 0; i < RO_LIMIT; i++) {
         RoNro* n = &s->nro[i];
         if (!n->map.base || n->map.base != base) continue;
-        jit_code_removed(base); /* before its memory goes: a compile may be reading it */
+        jit_code_removed(base); /* before its memory goes: a hash may be reading it */
         R_UNLESS(!mem_unmap_code(&n->map), RO_ERROR(1027));
         memset(n, 0, sizeof *n);
         R_SUCCEED();

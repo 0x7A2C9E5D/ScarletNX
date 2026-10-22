@@ -1086,17 +1086,38 @@ if(SNX_TEST_LLVM_SWEEP)
         set_tests_properties(llvm_differential_sweep_${shard} PROPERTIES TIMEOUT 1800 COST 100)
     endforeach()
 endif()
+# the variant table's hash, which must match jit_service.c's cache hash
+add_executable(snx-test-variants variants.c)
+snx_test_target(snx-test-variants 11)
+target_link_libraries(snx-test-variants PRIVATE scarletnx-common)
+add_test(NAME variants COMMAND snx-test-variants)
+# the AOT build linking a profile cache's unit and emitting snx_variants
+add_executable(snx-test-aot-variants aot_variants.c)
+snx_test_target(snx-test-aot-variants 11)
+target_link_libraries(snx-test-aot-variants PRIVATE snx_driver_llvm ${CMAKE_DL_LIBS})
+add_test(NAME aot_variants COMMAND snx-test-aot-variants)
+set_tests_properties(aot_variants PROPERTIES TIMEOUT 120)
+# the runtime looking a pc up in the AOT variant table instead of compiling it
+add_executable(snx-test-runtime-variants runtime_variants.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/guest_jit.c")
+snx_test_target(snx-test-runtime-variants 11)
+target_link_libraries(snx-test-runtime-variants PRIVATE scarletnx-common scarletnx-filesystem snx_settings)
+add_test(NAME runtime_variants COMMAND snx-test-runtime-variants)
+# the build-side reader of the runtime JIT's cache
+add_executable(snx-test-jit-cache jit_cache.c)
+snx_test_target(snx-test-jit-cache 11)
+target_link_libraries(snx-test-jit-cache PRIVATE snx_llvm)
+add_test(NAME jit_cache COMMAND snx-test-jit-cache)
+# the launcher's AOT pack action: the cache's path and header, and the optimization the AOT build must share
+add_executable(snx-test-aot-pack aot_pack.c "${PROJECT_SOURCE_DIR}/src/gui/aot.c")
+snx_test_target(snx-test-aot-pack 11)
+target_link_libraries(snx-test-aot-pack PRIVATE scarletnx-common)
+add_test(NAME aot_pack COMMAND snx-test-aot-pack)
 # the runtime JIT (jit_service.c): misses compiled, published and shared between threads, on that loader
 add_executable(snx-test-jit-service jit_service.c)
 snx_test_target(snx-test-jit-service 11)
 target_link_libraries(snx-test-jit-service PRIVATE snx_llvm Threads::Threads)
 add_test(NAME jit_service COMMAND snx-test-jit-service)
 set_tests_properties(jit_service PROPERTIES TIMEOUT 120)
-# the runtime JIT's coverage of code outside every image (guest_jit.c's jit_resolve_or_add): a block the game mapped
-add_executable(snx-test-nx-jit-region nx_jit_region.c)
-snx_test_target(snx-test-nx-jit-region 11)
-target_link_libraries(snx-test-nx-jit-region PRIVATE snx_llvm Threads::Threads)
-add_test(NAME nx_jit_region COMMAND snx-test-nx-jit-region)
 # longjmp across the loader's code, which on Windows unwinds through its registered function table
 add_executable(snx-test-code-loader-unwind code_loader_unwind.c)
 snx_test_target(snx-test-code-loader-unwind 11)
@@ -1208,9 +1229,10 @@ endif()
 if(APPLE)
     # these build a game module and load it, which no Mac has done yet: the Mach-O linker (link_macho.c) is checked
     # on Linux only (the link_macho test and docs/APPLE.md), and these wait for a run on a Mac. The in-process
-    # loader's tests run: it loads ELF objects on macOS too (code_loader.c)
-    set_tests_properties(native_recompiler llvm_module recompiler_library llvm_differential_0 llvm_differential_1
-                         llvm_differential_2 PROPERTIES DISABLED TRUE)
+    # loader's tests run: it loads ELF objects on macOS too (code_loader.c). aot_variants also links a JIT cache unit,
+    # and Darwin's JIT writes ELF objects for that loader where the AOT module is Mach-O.
+    set_tests_properties(native_recompiler llvm_module recompiler_library aot_variants llvm_differential_0
+                         llvm_differential_1 llvm_differential_2 PROPERTIES DISABLED TRUE)
 endif()
 
 add_executable(snx_codegen_test codegen_test.c)
