@@ -36,6 +36,7 @@ static struct {
     unsigned char memory[TEXT_OFF + TEXT_SIZE];
     char said[16][1024];
     int said_count;
+    size_t wrappers; /* the last build's snx_aot_ wrappers */
 } g_unit_cache;
 
 #define CHECK(x)                                                                                                       \
@@ -98,6 +99,7 @@ static int build(const char* folder, const char* output, SnxU64 limit) {
     llvm.quiet = 1;
     llvm.unit_cache = folder;
     llvm.unit_cache_limit = limit;
+    llvm.wrappers = &g_unit_cache.wrappers;
     return snx_build_module_llvm(&loaded, &options, &llvm);
 }
 
@@ -364,6 +366,7 @@ int main(void) {
     /* cold: both units compiled and kept */
     program(1);
     CHECK(!build(folder, out[0], 0) && run(out[0]) == 42);
+    CHECK(g_unit_cache.wrappers == 0); /* no profile cache, whose units alone call them */
     CHECK(objects(folder, f1) == 2 && f1[0][0] && !f1[1][0]);
     strcpy(f1a, f1[0]);
     /* warm: the same module, byte for byte, from the same two objects */

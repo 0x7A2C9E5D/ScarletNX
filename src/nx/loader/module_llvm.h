@@ -19,6 +19,9 @@ typedef struct {
        every unit is compiled, and none kept */
     const char* unit_cache;
     SnxU64 unit_cache_limit; /* the bytes the folder is held to after the build, its oldest objects removed; 0: none */
+    /* when set, the snx_aot_ wrappers the descriptor got: one per entry when the profile cache's units link (they call
+       them), else none */
+    size_t* wrappers;
 } SnxLlvmBuild;
 /* g_settings' LLVM Internals (settings.txt's llvm table) for -O<opt>: the pipeline with the passes turned off cut
    out, the options set. Static, made again at each call. NULL with the reason in error when nothing at all is left

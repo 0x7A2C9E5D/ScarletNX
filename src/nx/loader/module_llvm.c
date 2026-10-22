@@ -262,7 +262,7 @@ LLVMValueRef snx_module_mods(SnxIr* ir, LLVMTypeRef info, const SnxProgram* load
 }
 
 static int emit_module(SnxIr* ir, const SnxCodegen* codegen, const SnxCodegenOptions* options, const SnxProgram* loaded,
-                       size_t* entry_count, char* error, size_t error_size) {
+                       int wrappers, size_t* wrapped, size_t* entry_count, char* error, size_t error_size) {
     SnxModuleEntry* entries;
     size_t count, arraysize, i, nfns = codegen->function_count ? codegen->function_count : 1;
     LLVMValueRef *values, fns, ent_off, ent_fn, ent_addr, ent_ptr, mods, mod, fn, loop_i, phi_values[2];
@@ -305,7 +305,7 @@ static int emit_module(SnxIr* ir, const SnxCodegen* codegen, const SnxCodegenOpt
     /* snx_aot_<addr>: what the cache objects' direct calls name (ir_codegen.c). The
        entry's function is in a code chunk, so this is a tail-calling wrapper, not an
        alias: an alias may only name a definition in its own module */
-    for (i = 0; i < count; ++i) {
+    for (i = 0; wrappers && i < count; ++i) {
         char name[40];
         LLVMValueRef target = snx_ir_guest_function(ir, codegen->functions[entries[i].function].start);
         LLVMValueRef wrapper, call, args[2];
@@ -317,6 +317,7 @@ static int emit_module(SnxIr* ir, const SnxCodegen* codegen, const SnxCodegenOpt
         call = LLVMBuildCall2(ir->b, ir->t_guest, target, args, 2, "");
         LLVMSetTailCallKind(call, LLVMTailCallKindTail);
         LLVMBuildRetVoid(ir->b);
+        ++*wrapped;
     }
     /* static const SnxModInfo MODS[] */
     mods = snx_module_mods(ir, info, loaded);
@@ -424,7 +425,7 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     SnxLinkInput* inputs = NULL;
     SnxLinkOutput linked;
     unsigned char *module_object = NULL, *rtlib_object = NULL;
-    size_t module_size = 0, rtlib_size = 0, first, last, count, limit, i, entry_count = 0, n = 0;
+    size_t module_size = 0, rtlib_size = 0, first, last, count, limit, i, entry_count = 0, wrapped = 0, n = 0;
     size_t cache_count = 0, variant_count = 0, export_count = 1;
     const char* exports[2];
     char error[1024], *tmp = NULL;
@@ -493,10 +494,12 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
         snx_error("LLVM backend: %s", error);
         goto done;
     }
-    if (emit_module(ir, &codegen, options, loaded, &entry_count, error, sizeof(error))) {
+    /* only the profile cache's units name them: a module without any needs none */
+    if (emit_module(ir, &codegen, options, loaded, cache_count != 0, &wrapped, &entry_count, error, sizeof(error))) {
         snx_error("LLVM backend: %s", error);
         goto done;
     }
+    if (build->wrappers) *build->wrappers = wrapped;
     if (cache_count &&
         snx_module_variants_emit(ir, cache, &variant_count, error, sizeof(error))) {
         snx_error("LLVM backend: %s", error);
