@@ -12,6 +12,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/resource.h>
+#include <sys/mman.h>
 #include <sys/sysctl.h>
 #include <mach/mach.h>
 #include <time.h>
@@ -46,6 +47,45 @@ static void limit_line(const char* name, int resource) {
                 (unsigned long long)r.rlim_max);
 }
 #endif
+/* the entitlements the signed app carries, from the provisioning profile in the bundle: which of the ones that matter
+   to a game the sideloading tool gave this app (a profile is a signed plist, its keys readable in the file) */
+static void entitlement_lines(void) {
+    static const char* const keys[] = {"get-task-allow", "com.apple.developer.kernel.extended-virtual-addressing",
+                                       "com.apple.developer.kernel.increased-memory-limit",
+                                       "com.apple.developer.kernel.increased-debugging-memory-limit",
+                                       "com.apple.security.application-groups", "dynamic-codesigning"};
+    NSData* data = [NSData dataWithContentsOfFile:[NSBundle.mainBundle.bundlePath
+                                                      stringByAppendingPathComponent:@"embedded.mobileprovision"]];
+    size_t i;
+    if (!data) {
+        fprintf(stderr, "entitlements: no embedded.mobileprovision in the bundle\n");
+        return;
+    }
+    fprintf(stderr, "entitlements in the provisioning profile (%lu bytes):\n", (unsigned long)data.length);
+    for (i = 0; i < sizeof keys / sizeof *keys; ++i)
+        fprintf(stderr, "  %s: %s\n", keys[i], memmem(data.bytes, data.length, keys[i], strlen(keys[i])) ? "yes" : "no");
+}
+
+void gui_apple_stats(char* out, size_t size) {
+#if TARGET_OS_IPHONE
+    task_vm_info_data_t info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    struct rusage usage;
+    unsigned long long footprint = 0;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS)
+        footprint = info.phys_footprint >> 20;
+    if (getrusage(RUSAGE_SELF, &usage)) memset(&usage, 0, sizeof usage);
+    snprintf(out, size,
+             "resources: footprint %llu MiB, may still take %llu MiB, cpu %.1f s user %.1f s system, thermal %ld, "
+             "low power %d",
+             footprint, (unsigned long long)(os_proc_available_memory() >> 20),
+             usage.ru_utime.tv_sec + usage.ru_utime.tv_usec / 1e6, usage.ru_stime.tv_sec + usage.ru_stime.tv_usec / 1e6,
+             (long)NSProcessInfo.processInfo.thermalState, (int)NSProcessInfo.processInfo.lowPowerModeEnabled);
+#else
+    snprintf(out, size, "resources: (not iOS)");
+#endif
+}
+
 void gui_apple_log_start(void) {
 #if TARGET_OS_IPHONE
     @autoreleasepool {
@@ -92,6 +132,7 @@ void gui_apple_log_start(void) {
         }
         fprintf(stderr, "  available memory before the first allocation: %llu MiB\n",
                 (unsigned long long)(os_proc_available_memory() >> 20));
+        entitlement_lines();
         fprintf(stderr, "app: %s\n", NSBundle.mainBundle.bundleIdentifier.UTF8String);
         fprintf(stderr, "documents: %s\n", documents.fileSystemRepresentation);
     }

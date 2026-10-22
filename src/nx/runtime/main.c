@@ -46,6 +46,7 @@
 #define MODULE_PACK 1
 #include "common/cpu/recompiler/llvm/code_loader.h"
 #include "common/cpu/recompiler/llvm/objects_pack.h"
+#include "gui/apple.h"
 #include "common/cpu/recompiler/llvm/rtlib_object.h"
 #endif
 
@@ -512,6 +513,13 @@ static void frontend_loop(void) {
                 (double)(shown - rate_frames) * 1e9 / (double)(now - rate_at), (double)(now - rate_at) / 1e9, shown);
             rate_at = now;
             rate_frames = shown;
+#ifdef MODULE_PACK
+            {
+                char line[320];
+                gui_apple_stats(line, sizeof line);
+                LOG("%s\n", line);
+            }
+#endif
         }
         if (shown != frames) {
             frames = shown;

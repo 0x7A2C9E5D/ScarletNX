@@ -10,6 +10,9 @@
 /* iOS: from here on stdout and stderr go to scarletnx-console.log in the app's Documents, which the Files app shows,
    after a banner naming the device, the system and the limits it puts on the app (a phone shows no console) */
 void gui_apple_log_start(void);
+/* iOS: one line of what the app uses now (memory it is charged for and may still take, CPU time, thermal state, power
+   mode), for the log every few seconds of a run */
+void gui_apple_stats(char* out, size_t size);
 /* iOS: the working folder is the app's Documents (the data folder, which the Files app shows), with its games/ */
 void gui_apple_start(void);
 /* iOS: the system's document picker, as SDL has none there: a file, or a folder when folder is set. done gets its path
