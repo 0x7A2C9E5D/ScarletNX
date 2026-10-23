@@ -24,7 +24,7 @@ typedef struct {
 #define VALUE(name)     {#name, (unsigned long long)(name), 0}
 
 /* the SNX_ABI the table below was recorded at, and the table */
-#define RECORDED_ABI 13
+#define RECORDED_ABI 14
 static const Field g_recorded[] = {
     {"sizeof(V128)", 16, 0},
     {"sizeof(CPU)", 904, 0},
@@ -63,7 +63,7 @@ static const Field g_recorded[] = {
     {"SNX_FP_RECPE", 1, 0},
     {"SNX_FP_RSQRTE", 2, 0},
     {"SNX_FP_RECPX", 3, 0},
-    {"sizeof(RtAPI)", 96, 0},
+    {"sizeof(RtAPI)", 104, 0},
     {"RtAPI.svc", 0, 8},
     {"RtAPI.undef", 8, 8},
     {"RtAPI.note_hint", 16, 8},
@@ -76,6 +76,7 @@ static const Field g_recorded[] = {
     {"RtAPI.svcs", 72, 8},
     {"RtAPI.miss", 80, 8},
     {"RtAPI.cas128", 88, 8},
+    {"RtAPI.code_changed", 96, 8},
     {"SNX_SVC_COUNT", 256, 0},
     {"sizeof(SnxModInfo)", 88, 0},
     {"SnxModInfo.name", 0, 8},
@@ -90,7 +91,7 @@ static const Field g_recorded[] = {
     {"SnxModInfo.data_size", 76, 4},
     {"SnxModInfo.bss_size", 80, 4},
     {"SnxModInfo.is_nro", 84, 4},
-    {"sizeof(SnxModule)", 96, 0},
+    {"sizeof(SnxModule)", 128, 0},
     {"SnxModule.abi", 0, 4},
     {"SnxModule.nmods", 4, 4},
     {"SnxModule.mods", 8, 8},
@@ -105,6 +106,11 @@ static const Field g_recorded[] = {
     {"SnxModule.main_stack", 80, 4},
     {"SnxModule.main_prio", 84, 4},
     {"SnxModule.main_core", 88, 4},
+    {"SnxModule.nfns", 92, 4},
+    {"SnxModule.fn", 96, 8},
+    {"SnxModule.fn_lo", 104, 8},
+    {"SnxModule.fn_len", 112, 8},
+    {"SnxModule.stale", 120, 8},
 };
 
 int main(void) {
@@ -159,6 +165,7 @@ int main(void) {
         AT(RtAPI, svcs),
         AT(RtAPI, miss),
         AT(RtAPI, cas128),
+        AT(RtAPI, code_changed),
         VALUE(SNX_SVC_COUNT),
         SIZE(SnxModInfo),
         AT(SnxModInfo, name),
@@ -188,6 +195,11 @@ int main(void) {
         AT(SnxModule, main_stack),
         AT(SnxModule, main_prio),
         AT(SnxModule, main_core),
+        AT(SnxModule, nfns),
+        AT(SnxModule, fn),
+        AT(SnxModule, fn_lo),
+        AT(SnxModule, fn_len),
+        AT(SnxModule, stale),
     };
     const size_t count = sizeof now / sizeof *now, recorded = sizeof g_recorded / sizeof *g_recorded;
     size_t i;

@@ -82,6 +82,7 @@ static int compile_unit(Queue* q, size_t index, char* error, size_t error_size) 
     ir = new_ir(q->build, name, error, error_size);
     if (!ir) return -1;
     snx_ir_tune(ir, q->build->tuning);
+    snx_ir_stale_checks(ir);
     for (i = u->first; i < u->last; ++i) snx_ir_emit(ir, q->codegen, &q->codegen->functions[i]);
     rc = q->build->keep_ir && save_ir(ir, q->build->keep_ir, name);
     if (rc) snprintf(error, error_size, "cannot save the IR of %s", name);
@@ -271,7 +272,8 @@ static int emit_module(SnxIr* ir, const SnxCodegen* codegen, const SnxCodegenOpt
                        int wrappers, size_t* wrapped, size_t* entry_count, char* error, size_t error_size) {
     SnxModuleEntry* entries;
     size_t count, arraysize, i, nfns = codegen->function_count ? codegen->function_count : 1;
-    LLVMValueRef *values, fns, ent_off, ent_fn, ent_addr, ent_ptr, mods, mod, fn, loop_i, phi_values[2];
+    LLVMValueRef *values, fns, fn_lo, fn_len, stale, ent_off, ent_fn, ent_addr, ent_ptr, mods, mod, fn, loop_i,
+        phi_values[2];
     LLVMTypeRef info, t_fns, t_u32s, t_addrs, t_ptrs;
     LLVMBasicBlockRef start, head, body, done, phi_blocks[2];
     SnxU64 lo = ~(SnxU64)0, hi = 0;
@@ -295,6 +297,32 @@ static int emit_module(SnxIr* ir, const SnxCodegen* codegen, const SnxCodegenOpt
     if (!codegen->function_count) values[0] = LLVMConstNull(ir->t_ptr);
     t_fns = LLVMArrayType(ir->t_ptr, (unsigned)nfns);
     fns = global(ir, t_fns, "FNS", LLVMConstArray(ir->t_ptr, values, (unsigned)nfns), 1);
+    /* static const u64 FN_LO[]; static const u32 FN_LEN[]: the guest code each function was compiled from, from its
+       lowest instruction to the end of its highest (SNX_ABI 14: what a line the guest changes makes stale) */
+    for (i = 0; i < nfns; ++i) {
+        const SnxFunction* f = i < codegen->function_count ? &codegen->functions[i] : NULL;
+        values[i] = ir_i64(ir, f && f->count ? snx_function_address(f, 0) : 0);
+    }
+    fn_lo = global(ir, LLVMArrayType(ir->t_i64, (unsigned)nfns), "FN_LO",
+                   LLVMConstArray(ir->t_i64, values, (unsigned)nfns), 1);
+    for (i = 0; i < nfns; ++i) {
+        const SnxFunction* f = i < codegen->function_count ? &codegen->functions[i] : NULL;
+        SnxU64 first = f && f->count ? snx_function_address(f, 0) : 0;
+        SnxU64 end = f && f->count ? snx_function_address(f, f->count - 1) + 4 : 0;
+        if (end - first > 0xFFFFFFFFu) {
+            free(values);
+            free(entries);
+            snprintf(error, error_size, "a function's code spans more than the module ABI's 32-bit length");
+            return -1;
+        }
+        values[i] = ir_i32(ir, (SnxU32)(end - first));
+    }
+    fn_len = global(ir, LLVMArrayType(ir->t_i32, (unsigned)nfns), "FN_LEN",
+                    LLVMConstArray(ir->t_i32, values, (unsigned)nfns), 1);
+    /* u8 snx_stale[]: the byte each function reads first (ir_codegen.c's stale_check), the runtime's to set */
+    stale = LLVMAddGlobal(ir->mod, LLVMArrayType(ir->t_i8, (unsigned)nfns), SNX_IR_STALE);
+    LLVMSetInitializer(stale, LLVMConstNull(LLVMArrayType(ir->t_i8, (unsigned)nfns)));
+    LLVMSetVisibility(stale, LLVMHiddenVisibility);
     /* static const u32 ENT_OFF[], ENT_FN[] */
     t_u32s = LLVMArrayType(ir->t_i32, (unsigned)arraysize);
     for (i = 0; i < arraysize; ++i)
@@ -382,6 +410,11 @@ static int emit_module(SnxIr* ir, const SnxCodegen* codegen, const SnxCodegenOpt
     field(ir, mod, offsetof(SnxModule, main_stack), ir_i32(ir, (SnxU32)npdm->stack));
     field(ir, mod, offsetof(SnxModule, main_prio), ir_i32(ir, npdm->prio));
     field(ir, mod, offsetof(SnxModule, main_core), ir_i32(ir, npdm->core));
+    field(ir, mod, offsetof(SnxModule, nfns), ir_i32(ir, (SnxU32)codegen->function_count));
+    field(ir, mod, offsetof(SnxModule, fn), fns);
+    field(ir, mod, offsetof(SnxModule, fn_lo), fn_lo);
+    field(ir, mod, offsetof(SnxModule, fn_len), fn_len);
+    field(ir, mod, offsetof(SnxModule, stale), stale);
     LLVMBuildRet(ir->b, mod);
     free(entries);
     *entry_count = count;

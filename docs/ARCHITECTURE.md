@@ -194,6 +194,25 @@ function's arguments, or a field added into a struct's tail padding: for those t
 | 11 | the reworked LLVM backend's modules |
 | 12 | `RtAPI.cas128`, and `snx_cas128` takes the CPU |
 | 13 | the AOT module's `snx_variants()` table, read as optional |
+| 14 | `RtAPI.code_changed` for IC IVAU, and `SnxModule`'s function table with the byte each AOT function checks first |
+
+#### Code the game patches
+
+Mods for Atmosphère (Skyline, exlaunch) hook a game by writing branches into its code through a writable view of it
+(`svcMapProcessMemory`), then make the new instructions visible the way Arm requires, with `IC IVAU` on each line
+they wrote. The AOT code was compiled from the bytes before, so since SNX_ABI 14 `IC IVAU` reaches the runtime
+(`snx_ic_ivau`, `RtAPI.code_changed`), and `jit_code_changed` (`runtime/guest_jit.c`) finds the AOT functions compiled
+from the line by the descriptor's `fn_lo` and `fn_len`. Each one loses its dispatch slots and its entries in
+`entry_fn` (which the JIT calls AOT functions through), then its byte in `SnxModule.stale` is set. Every AOT function
+reads its byte first (`stale_check` in `ir_codegen.c`) and, once it is set, runs its entry through dispatch, where the
+lookup finds no code and the JIT compiles the instructions as they are now, the patch included. A direct call from
+other AOT code arrives at the same check, so a hook in the middle of a function takes effect for every caller. A call
+returning into an AOT function reads the byte too: a loader may patch a function from inside a call it makes, and once
+the byte is set the function leaves for the thread's dispatch loop at the return address, which runs the new code from
+there. The
+JIT's code goes as any other code change drops it (`jit_code_invalidate`): `snx_jit_invalidate` drops every unit
+whose span of guest code the change touches, all its leaders, since a unit's functions call each other directly. That
+covers hooks in code the game maps itself (NROs), which only the JIT runs.
 
 ## Runtime ownership
 
