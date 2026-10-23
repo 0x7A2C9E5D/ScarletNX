@@ -1283,7 +1283,7 @@ static void test_overlay(void) {
     strcpy(g_settings.game_addons, "0100000000AB1001");
     strcpy(g_addondir, "overlay-data/0100000000AB0000_0100000000AB0800_data/");
     strcpy(g_datadir, "overlay-data/0100000000AB0000_data/");
-    fs_init();
+    fs_init(NULL, NULL);
     data = fs_read_file("exefs/main", &size);
     CHECK(data && size == 17 && !memcmp(data, "the update's main", 17));
     free(data);
@@ -1737,7 +1737,7 @@ int main(int argc, char** argv) {
         dump_write(source);
         if (source) strcpy(g_settings.game_dump, "dump-data/Game.nsp");
         strcpy(g_datadir, "dump-data/Game_data/");
-        fs_init();
+        fs_init(NULL, NULL);
         test_scans_allowed = 0;
         svc_fs_init();
         romfs_init();
@@ -1757,7 +1757,7 @@ int main(int argc, char** argv) {
         addon_write(update, !strcmp(argv[3], "dump-update-extracted"));
         strcpy(g_settings.game_dump, "dump-data/Game.nsp"); /* the game's .ini's, which the add-on runs with */
         strcpy(g_datadir, "dump-data/Game_data/");
-        fs_init();
+        fs_init(NULL, NULL);
         test_scans_allowed = 0;
         svc_fs_init();
         romfs_init();
@@ -1786,7 +1786,7 @@ int main(int argc, char** argv) {
         CHECK(strcmp(ini, ini_file()) != 0);
         if (gone) strcpy(g_settings.game_dump, "dump-data/Gone.nsp");
         strcpy(g_datadir, "dump-data/Game_data/");
-        fs_init();
+        fs_init(NULL, NULL);
         if (strcmp(test_fs_text, said)) fprintf(stderr, "said:     %sexpected: %s", test_fs_text, said);
         CHECK(!strcmp(test_fs_text, said) && g_hle.fs.dfs == NULL);
         free(dir);
@@ -1801,7 +1801,7 @@ int main(int argc, char** argv) {
     if (argc == 4 && (!strcmp(argv[3], "mods") || !strcmp(argv[3], "mods-image") || !strcmp(argv[3], "mods-stale"))) {
         int image = !strcmp(argv[3], "mods-image"), stale = !strcmp(argv[3], "mods-stale");
         mods_write(image, stale);
-        fs_init();
+        fs_init(NULL, NULL);
         test_scans_allowed = 0;
         svc_fs_init();
         romfs_init();
@@ -1822,7 +1822,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     strcpy(g_datadir, raw ? "raw-data/" : "service-data/");
-    fs_init();
+    fs_init(NULL, NULL);
     CHECK(test_scans > 0);
     /* the temporary storage the fixture left is gone, from the index and the disk: each launch starts it empty */
     FILE* left = fopen("service-data/save/temp/last-launch.bin", "rb");

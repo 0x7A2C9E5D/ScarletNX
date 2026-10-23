@@ -175,6 +175,26 @@ static void test_keys(const char* root, const char* home) {
     assert(found && !strcmp(found, path));
     free(found);
     free(path);
+    { /* command-line files override the usual lookup, for this driver's run only */
+        char *prod_override = join(root, "provided-prod.keys"), *title_override = join(root, "provided-title.keys");
+        SnxSetupKeysOverride previous = snx_setup_keys_override_get();
+        put(prod_override, prod);
+        put(title_override, titles);
+        snx_setup_keys_override_set(prod_override, title_override);
+        found = snx_keys_found(data, "prod.keys");
+        assert(found && !strcmp(found, prod_override));
+        free(found);
+        found = snx_keys_found(data, "title.keys");
+        assert(found && !strcmp(found, title_override));
+        free(found);
+        found = snx_keys_found(data, "console.keys");
+        assert(!found || strcmp(found, title_override));
+        free(found);
+        assert(!snx_keys_found(data, "other.keys"));
+        snx_setup_keys_override_set(previous.prod, previous.title);
+        free(prod_override);
+        free(title_override);
+    }
     /* installed from a folder: prod.keys, title.keys with it when there, each its owner's alone */
     assert(snx_keys_install(picked, data, &titled, why, sizeof why) == -1 && strstr(why, "has no prod.keys"));
     path = join(picked, "prod.keys");

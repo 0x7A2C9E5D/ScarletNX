@@ -80,10 +80,42 @@ static SnxU64 addon_title(const char* dump) {
     return strstr(leaf, "Update") ? ADDON_GAME | 0x800 : strstr(leaf, "Dlc") ? ADDON_DLC : ADDON_GAME;
 }
 static int addon_mode(void) { return getenv("SNX_WORKFLOW_ADDON") && *getenv("SNX_WORKFLOW_ADDON"); }
+static void check_key_path(const char* path, const char* supplied) {
+    char* expected = supplied && *supplied ? snx_absolute(supplied) : NULL;
+    CHECK(expected ? path && !strcmp(path, expected) : !path);
+    free(expected);
+}
+static void check_key_paths(const SnxPaths* paths) {
+    const char *keys = getenv("SNX_WORKFLOW_KEYS"), *title_keys = getenv("SNX_WORKFLOW_TITLE_KEYS");
+    check_key_path(paths->keys, keys);
+    check_key_path(paths->title_keys, title_keys);
+}
+static void check_runtime_keys(int* argc, char** argv) {
+    const char *keys = getenv("SNX_WORKFLOW_KEYS"), *title_keys = getenv("SNX_WORKFLOW_TITLE_KEYS");
+    char *expected_keys = snx_absolute(keys), *expected_title_keys = snx_absolute(title_keys);
+    int read = 1, write = 1, found_keys = 0, found_title_keys = 0;
+    while (read < *argc && strcmp(argv[read], "--")) {
+        if (!strcmp(argv[read], "--keys") || !strcmp(argv[read], "--title-keys")) {
+            int title = !strcmp(argv[read], "--title-keys");
+            const char* expected = title ? expected_title_keys : expected_keys;
+            CHECK(read + 1 < *argc && expected && !strcmp(argv[read + 1], expected));
+            if (title) found_title_keys = 1;
+            else found_keys = 1;
+            read += 2;
+        } else
+            argv[write++] = argv[read++];
+    }
+    while (read < *argc) argv[write++] = argv[read++];
+    argv[write] = NULL;
+    *argc = write;
+    CHECK(found_keys && found_title_keys);
+    free(expected_keys);
+    free(expected_title_keys);
+}
 /* the title ID the extraction's NPDM gives (SNX_WORKFLOW_NPDM "id"), else none */
 int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title, SnxU64* game, SnxU64* version) {
     const char* kind = getenv("SNX_WORKFLOW_NPDM");
-    (void)paths;
+    check_key_paths(paths);
     CHECK(snx_is_file(dump));
     *title = addon_mode() ? addon_title(dump) : kind && !strcmp(kind, "id") ? 0x0100ABCD12345000ull : 0;
     *game = addon_mode() ? ADDON_GAME : *title;
@@ -95,7 +127,7 @@ int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title, Sn
 int snx_extract_icon(const char* dump, const SnxPaths* paths, const char* out) {
     char* to = snx_path_join(out, "icon.jpg");
     int rc;
-    (void)paths;
+    check_key_paths(paths);
     CHECK(snx_is_file(dump));
     rc = snx_write_file(to, "icon", 4);
     free(to);
@@ -104,7 +136,7 @@ int snx_extract_icon(const char* dump, const SnxPaths* paths, const char* out) {
 int snx_extract(int argc, char** argv, const SnxPaths* paths) {
     char* partial;
     int rc;
-    (void)paths;
+    check_key_paths(paths);
     if (addon_mode() && argc == 6 && !strcmp(argv[2], "--update")) { /* an update over its game: its ExeFS */
         CHECK(!strcmp(argv[0], "--out") && !strcmp(argv[4], "--") && snx_is_file(argv[3]) && snx_is_file(argv[5]));
         partial = snx_path_join(argv[1], "exefs");
@@ -233,6 +265,7 @@ static int addon_recompile(int argc, char** argv, const SnxPaths* paths) {
 int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     char *game, *partial, *name, *folder;
     int rc, tmpfs;
+    check_key_paths(paths);
     if (addon_mode()) return addon_recompile(argc, argv, paths);
     /* Extract to tmpfs: the RomFS left in the extraction */
     tmpfs = argc > 2 && !strcmp(argv[2], "--tmpfs");
@@ -358,8 +391,9 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
 }
 static void run(const char* exe, const char* repo, const char* dump, const char* log, int expected, const char* events,
                 const char* diagnostic) {
-    const char* args[24];
-    const char *headless = getenv("SNX_WORKFLOW_HEADLESS"), *flags = getenv("SNX_WORKFLOW_FLAGS");
+    const char* args[32];
+    const char *headless = getenv("SNX_WORKFLOW_HEADLESS"), *flags = getenv("SNX_WORKFLOW_FLAGS"),
+               *keys = getenv("SNX_WORKFLOW_KEYS"), *title_keys = getenv("SNX_WORKFLOW_TITLE_KEYS");
     const char *outdir = getenv("SNX_WORKFLOW_OUTDIR"), *out = getenv("SNX_WORKFLOW_OUT");
     int n = 5;
     char* output = NULL;
@@ -376,6 +410,14 @@ static void run(const char* exe, const char* repo, const char* dump, const char*
     if (flags && *flags && strncmp(flags, "--backend=", 10)) args[n++] = flags;
     if (headless && *headless && !strcmp(getenv("SNX_WORKFLOW_PREFIX"), "1")) args[n++] = headless;
     args[n++] = dump;
+    if (keys && *keys) {
+        args[n++] = "--keys";
+        args[n++] = keys;
+    }
+    if (title_keys && *title_keys) {
+        args[n++] = "--title-keys";
+        args[n++] = title_keys;
+    }
     if (flags && !strncmp(flags, "--backend=", 10)) args[n++] = flags;
     if (headless && *headless && strcmp(getenv("SNX_WORKFLOW_PREFIX"), "1")) args[n++] = headless;
     if (outdir && *outdir) { /* "none": the option without its folder */
@@ -573,7 +615,8 @@ static void reset(const char* repo, const char* dump) {
     set_env("SNX_WORKFLOW_FAIL", "");
 }
 int main(int argc, char** argv) {
-    char *exe, *root, *repo, *dump, *log, *extracted, *extracting, *kept, *game, *cwd, *expected_cwd;
+    char *exe, *root, *repo, *dump, *log, *extracted, *extracting, *kept, *game, *cwd, *expected_cwd, *keys,
+        *title_keys;
     const char* args[3];
     char* output;
     int rc;
@@ -599,6 +642,7 @@ int main(int argc, char** argv) {
         if (rc >= 0) return rc;
     }
     if (getenv("SNX_WORKFLOW_CHILD")) {
+        check_runtime_keys(&argc, argv);
         const char* flag = getenv("SNX_WORKFLOW_HEADLESS");
         const char* fullscreen = getenv("SNX_WORKFLOW_FLAGS");
         if (fullscreen &&
@@ -627,6 +671,13 @@ int main(int argc, char** argv) {
     exe = snx_executable(argv[0]);
     root = snx_temp_dir(NULL);
     CHECK(exe && root);
+    keys = snx_path_join(root, "provided prod.keys");
+    title_keys = snx_path_join(root, "provided title.keys");
+    CHECK(!snx_write_file(keys, "header_key = 00112233\n", strlen("header_key = 00112233\n")) &&
+          !snx_write_file(title_keys, "0100000000000000000000000000000a = 0011aabb\n",
+                          strlen("0100000000000000000000000000000a = 0011aabb\n")));
+    set_env("SNX_WORKFLOW_KEYS", keys);
+    set_env("SNX_WORKFLOW_TITLE_KEYS", title_keys);
     record_source(root);
     record_folders(root);
     repo = snx_path_join(root, "checkout with spaces");
@@ -1303,6 +1354,8 @@ int main(int argc, char** argv) {
         free(home);
     }
 #endif
+    set_env("SNX_WORKFLOW_KEYS", "");
+    set_env("SNX_WORKFLOW_TITLE_KEYS", "");
     CHECK(!snx_remove_tree(root));
     free(exe);
     free(root);
@@ -1313,6 +1366,8 @@ int main(int argc, char** argv) {
     free(extracting);
     free(kept);
     free(game);
+    free(keys);
+    free(title_keys);
     printf("Driver workflow: %u checks passed\n", checks);
     return 0;
 }

@@ -35,7 +35,9 @@ static void usage(void) {
          "  --outdir DIR           Where the game's folder goes (default: recompiled/)\n"
          "  -O LEVEL               Optimization: 0,1,2,3,s,z (default: 2), the setting opt\n"
          "  --jobs N               Parallel compiles (default: CPU count), the setting aot_threads");
-    puts("  --jit-cache FILE       Link a profile run's .jitcache into the module as runtime code");
+    puts("  --jit-cache FILE       Link a profile run's .jitcache into the module as runtime code\n"
+         "  --keys FILE            prod.keys for a dump (default: the data folder, then ~/.switch)\n"
+         "  --title-keys FILE      title.keys for a dump, found the same way (optional)");
     puts("  --KEY=VALUE            A recompile setting: opt, aot_threads, unit_cache_gb, llvm_pass_<pass>=0\n"
          "                         (scarletnx --settings=recompile lists them)");
     printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",
@@ -205,6 +207,7 @@ static int dump_read(void* source, const char* name, unsigned char** data, size_
    its control.nacp out of its Control NCA: nothing is extracted. 0, else nonzero, said why */
 static int load_dump(const char* dump, const char* update, const SnxPaths* paths, int quiet, char* const* names,
                      char* const* files, size_t count, SnxProgram* program, char* error, size_t error_size) {
+    /* paths->keys and paths->title_keys, when given, are the files the keys are read from */
     SnxDump opened;
     SnxHacFs* fs = NULL;
     SnxExefsReader reader;
@@ -213,7 +216,7 @@ static int load_dump(const char* dump, const char* update, const SnxPaths* paths
     const char* why;
     size_t nacp_size = 0;
     /* an update's ExeFS is whole: read without its game's, which only its RomFS is made of */
-    int rc = snx_dump_open(&opened, update ? NULL : dump, update, NULL, NULL, paths->repo, !quiet);
+    int rc = snx_dump_open(&opened, update ? NULL : dump, update, paths->keys, paths->title_keys, paths->repo, !quiet);
     if (!rc && opened.program.found) rc = snx_nca_keys(&opened.program, "The game's Program NCA");
     if (!rc && opened.patch.found) rc = snx_nca_keys(&opened.patch, "The update's Program NCA");
     if (!rc && !(fs = snx_dump_fs(&opened))) rc = 1;
@@ -328,7 +331,8 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs)
 }
 int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *jit_cache = NULL,
-               *arg, *value;
+               *keys = NULL, *title_keys = NULL, *arg, *value;
+    SnxPaths key_paths;
     SnxU64 addon = 0, owner = 0, version = SNX_NO_VERSION; /* an update, its game and version, as its content meta
                                                                 names them */
     SnxLlvmBuild llvm;
@@ -407,8 +411,9 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
                 }
             }
             if (strcmp(arg, "-o") && strcmp(arg, "--name") && strcmp(arg, "--out") && strcmp(arg, "--outname") &&
-                strcmp(arg, "--outdir") && strcmp(arg, "--runtime") && strcmp(arg, "--target") && strcmp(arg, "-O") &&
-                strcmp(arg, "--jobs") && strcmp(arg, "--chunk") && strcmp(arg, "--jit-cache"))
+                strcmp(arg, "--keys") && strcmp(arg, "--title-keys") && strcmp(arg, "--outdir") &&
+                strcmp(arg, "--runtime") && strcmp(arg, "--target") && strcmp(arg, "-O") && strcmp(arg, "--jobs") &&
+                strcmp(arg, "--chunk") && strcmp(arg, "--jit-cache"))
                 return snx_error("unknown option: %s (scarletnx -r -h lists them)", arg);
             if (!value) {
                 if (++i == argc) return snx_error("%s requires a value", arg);
@@ -419,6 +424,10 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
                 snx_option_renamed(!strcmp(arg, "-o") ? "-o" : !strcmp(arg, "--out") ? "--out" : "--outname", "--name");
             if (!strcmp(arg, "-o") || !strcmp(arg, "--name") || !strcmp(arg, "--out") || !strcmp(arg, "--outname"))
                 name = value;
+            else if (!strcmp(arg, "--keys"))
+                keys = value;
+            else if (!strcmp(arg, "--title-keys"))
+                title_keys = value;
             else if (!strcmp(arg, "--outdir"))
                 outdir = value;
             else if (!strcmp(arg, "--runtime"))
@@ -469,7 +478,10 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     gen.abi = snx_game_abi();
     /* a dump, read in place, else an ExeFS folder or an NRO. An update's dump is its own program; a DLC has none */
     dump = snx_is_file(input) && snx_is_dump(input);
-    if (dump && snx_extract_title(input, paths, &addon, &owner, &version)) return 1;
+    key_paths = *paths;
+    if (keys) key_paths.keys = keys;
+    if (title_keys) key_paths.title_keys = title_keys;
+    if (dump && snx_extract_title(input, &key_paths, &addon, &owner, &version)) return 1;
     if (snx_addon_kind(owner, addon) == SNX_ADDON_NONE)
         addon = 0;
     else if (name)
@@ -477,7 +489,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     if (addon && snx_addon_kind(owner, addon) == SNX_ADDON_DLC)
         return snx_error("a DLC runs its game's code and has no program of its own: play its dump, which checks it "
                          "in the game's list of updates and DLCs");
-    if (dump ? load_dump(input, addon ? input : NULL, paths, compile.quiet, NULL, NULL, 0, &program, error,
+    if (dump ? load_dump(input, addon ? input : NULL, &key_paths, compile.quiet, NULL, NULL, 0, &program, error,
                          sizeof(error))
              : snx_load_program(input, &program, error, sizeof(error)))
         return dump ? 1 : snx_error("%s", error);
@@ -540,7 +552,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     }
     if (mod_count) {
         snx_free_program(&program);
-        if (dump ? load_dump(input, addon ? input : NULL, paths, compile.quiet, mod_names, mod_files, mod_count,
+        if (dump ? load_dump(input, addon ? input : NULL, &key_paths, compile.quiet, mod_names, mod_files, mod_count,
                              &program, error, sizeof error)
                  : snx_load_program_mods(input, mod_names, mod_files, mod_count, &program, error, sizeof error)) {
             if (!dump) snx_error("%s", error);
@@ -566,10 +578,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     gen.title = title;
     gen.jit_cache = jit_cache;
     gen.hints = read_hints(base, program.npdm.is64, &gen.hint_count);
-    if (!compile.quiet) {
-        printf("Recompiling %s (%zu modules)\n", title, program.module_count);
-        snx_progress("recompile", -1, -1, title);
-    }
+    if (!compile.quiet) printf("Recompiling %s (%zu modules)\n", title, program.module_count);
     /* an add-on's files: its dump, read in place, or what the driver extracts into its data folder */
     if (addon ? snx_mkdirs(data)
               : dump ? drop_extraction(data, compile.quiet) : copy_data(&program, data, compile.quiet, tmpfs)) {
@@ -682,10 +691,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             goto done;
         }
     }
-    if (!compile.quiet) {
-        printf("Built %s\n", exe);
-        snx_progress("built", -1, -1, title);
-    }
+    if (!compile.quiet) printf("Built %s\n", exe);
     rc = 0;
 done:
     snx_free_program(&program);

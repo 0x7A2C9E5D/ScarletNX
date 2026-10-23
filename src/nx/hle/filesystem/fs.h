@@ -10,7 +10,7 @@
 #include "nx/runtime/driver/container.h"
 
 /* Indexes the game's data folder and maps RomFS and ExeFS for the run. Called once, before any guest file is loaded */
-void fs_init(void);
+void fs_init(const char* keys, const char* title_keys);
 extern u64 g_fs_bytes_read, g_fs_bytes_written; /* the game's file I/O, for the rate plot */
 /* Lookups by a path in the index. *size is 0 when the file isn't there */
 FILE* fs_open_read(const char* path, u64* size);

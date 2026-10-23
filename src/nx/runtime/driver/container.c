@@ -85,12 +85,9 @@ int snx_is_dump(const char* path) {
 }
 
 char* snx_find_keys(const char* given, const char* name, const char* repo) {
-    const char *home, *env;
+    const char* home;
     char *in_repo, *directory, *in_home, *absolute;
     if (given) return snx_absolute(given);
-    /* SNX_KEYS/SNX_TITLE_KEYS: set by a frontend, inherited by the recompile and the game */
-    env = getenv(!strcmp(name, "prod.keys") ? "SNX_KEYS" : "SNX_TITLE_KEYS");
-    if (env && env[0]) return snx_absolute(env);
 #ifdef SNX_IOS
     { /* the data folder keeps the keys in keys/ (snx_keys_dir) */
         char* keys = repo ? snx_path_join(repo, "keys") : NULL;

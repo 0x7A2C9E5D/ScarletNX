@@ -164,7 +164,6 @@ static int prepare_paths(ExtractState* state, const ExtractOptions* options, con
     return 0;
 }
 
-
 /* "  extracted 1229 of 4096 MB (30%)", ending in a carriage return while hactool writes: a terminal and the launcher's
    console write the next over it, the last one ends the row */
 static void progress_say(ExtractState* state, int last) {
@@ -358,7 +357,6 @@ static int extract_files(ExtractState* state, const ExtractOptions* options, con
     snx_hac_progress(progress_tick, state);
     puts(patch->found ? "Extracting the base with the update applied" : "Extracting the base game");
     fflush(stdout);
-    snx_progress("extract", -1, -1, NULL);
     { /* what is used, under the step's line */
         char size[32], other[32], title[17];
         snx_size_text(program->size, size, sizeof size);
@@ -415,14 +413,20 @@ static void hactool_exit(void* data) {
 int snx_extract(int argc, char** argv, const SnxPaths* paths) {
     ExtractOptions options;
     ExtractState state;
+    SnxPaths effective_paths;
     int result;
     result = parse_options(argc, argv, &options);
     if (result) return result == 2 ? 0 : 1;
     if (!paths || !paths->repo) return snx_error("-x needs the data folder (--repo)");
+    if (!options.keys) options.keys = paths->keys;
+    if (!options.title_keys) options.title_keys = paths->title_keys;
     if (options.icon) { /* nothing else read or written */
         if (!options.out) return snx_error("--icon writes icon.jpg into --out DIR, and none is given");
         if (snx_mkdirs(options.out)) return snx_error("cannot create %s for the icon", options.out);
-        return snx_extract_icon(options.base, paths, options.out) ? 1 : 0;
+        effective_paths = *paths;
+        effective_paths.keys = options.keys;
+        effective_paths.title_keys = options.title_keys;
+        return snx_extract_icon(options.base, &effective_paths, options.out) ? 1 : 0;
     }
     memset(&state, 0, sizeof state);
     result = prepare_paths(&state, &options, paths);
@@ -449,7 +453,8 @@ int snx_extract_icon(const char* dump, const SnxPaths* paths, const char* out) {
         result = snx_error("%s is not a file", state.base);
     else {
         snx_hac_on_exit(hactool_exit, &state);
-        result = snx_dump_title(&state.dump, state.base, NULL, NULL, paths->repo, 0, &title, &game, NULL);
+        result = snx_dump_title(&state.dump, state.base, paths->keys, paths->title_keys, paths->repo, 0, &title,
+                                &game, NULL);
         if (!result) icon = snx_dump_icon(&state.dump, &size, &why);
         snx_hac_on_exit(NULL, NULL);
         if (!result && !icon)
@@ -472,7 +477,8 @@ int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title, Sn
         result = snx_error("%s is not a file", state.base);
     else {
         snx_hac_on_exit(hactool_exit, &state);
-        result = snx_dump_title(&state.dump, state.base, NULL, NULL, paths->repo, 0, title, game, version);
+        result = snx_dump_title(&state.dump, state.base, paths->keys, paths->title_keys, paths->repo, 0, title,
+                                game, version);
         snx_hac_on_exit(NULL, NULL);
     }
     return cleanup(&state, result);

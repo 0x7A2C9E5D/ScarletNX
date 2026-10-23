@@ -2,7 +2,6 @@
    Copyright 2026 the ScarletNX contributors */
 /* What the game module's backends share: the dispatch entries, unit labels and progress lines */
 #include "nx/loader/module.h"
-#include "common/utilities/common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,5 +63,4 @@ void snx_report_unit(size_t done, size_t count, const char* name, const char* la
     else
         printf("  compiled block %zu/%zu: %s, %s (%.1f s)\n", done, count, name, label, seconds);
     fflush(stdout);
-    snx_progress("block", (int)done, (int)count, NULL);
 }

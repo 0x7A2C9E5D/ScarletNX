@@ -15,6 +15,8 @@ typedef struct {
     const char* build;
     const char* executable;
     const char* source; /* the checkout the build came from (snx_checkout), to build tools in; NULL without one */
+    const char* keys; /* optional prod.keys path supplied with --keys */
+    const char* title_keys; /* optional title.keys path supplied with --title-keys */
 } SnxPaths;
 
 void* snx_alloc(size_t size);
@@ -218,9 +220,6 @@ void snx_set_stage_runner(int (*run)(int argc, char** argv));
 /* As above, but intentional debugger stops do not abort the game. */
 int snx_run_debug_stage(const char* const* argv, const char* cwd, const char* stage);
 FILE* snx_fopen(const char* path, const char* mode);
-/* Appends a JSON line {"v":1,"event":E[,"done":N][,"total":M][,"title":T]} to SNX_PROGRESS_FILE, for a frontend to
-   read. done or total below 0 and a NULL title are left out. Does nothing without the variable or if the file fails */
-void snx_progress(const char* event, int done, int total, const char* title);
 /* f to offset from its start, past 2 GiB too (fseek takes a long, 32 bits on Windows); 0, or nonzero */
 int snx_seek(FILE* f, SnxU64 offset);
 
