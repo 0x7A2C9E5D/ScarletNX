@@ -542,12 +542,18 @@ static u64 largest_hole(void) {
             break;
         {
             u64 stop = (u64)at < hi ? (u64)at : hi; /* a run ends where the task's range does, not at a region past it */
+            if (stop > end && stop - end >= (u64)256 << 20)
+                fprintf(stderr, "memory: a free run of %llu MiB at %#llx\n", (unsigned long long)((stop - end) >> 20),
+                        (unsigned long long)end);
             if (stop > end && stop - end > best) best = stop - end, best_at = end;
         }
         end = (u64)at + size;
         at += size;
         if (end >= hi) break;
     }
+    if (hi > end && hi - end >= (u64)256 << 20)
+        fprintf(stderr, "memory: a free run of %llu MiB at %#llx\n", (unsigned long long)((hi - end) >> 20),
+                (unsigned long long)end);
     if (hi > end && hi - end > best) best = hi - end, best_at = end;
     fprintf(stderr, "memory: the task's address space is %#llx to %#llx, its largest free run %llu MiB at %#llx\n",
             (unsigned long long)lo, (unsigned long long)hi, (unsigned long long)(best >> 20),
