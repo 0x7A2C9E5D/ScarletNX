@@ -1032,6 +1032,10 @@ msgid "Open Mods Folder"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Add Cheats"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Open Cheats Folder"
 msgstr ""
 
@@ -1102,7 +1106,76 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "Not added: %s is not a file of this device's storage"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s is not a file"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s is not a .txt file, which cheats are"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s is %s, and a cheats file is text of 1 MiB at most"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: cannot read %s: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s has no cheat, no line that starts with [name]"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s is not named <build ID>.txt, and the build ID of the main module the game plays with cannot be read from %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: the cheats folder has %s already: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: cannot write %s: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Added %s: %zu cheats from %s, named by the build ID of the main module the game plays with"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Added %s: %zu cheats, which run with build ID %s; the game plays with %s now"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Added %s: %zu cheats"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "Add Mod: the folder picker could not open: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Add Cheats: the file picker could not open: %s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Cheats"
 msgstr ""
 
 #: src/gui/main.c
@@ -1111,6 +1184,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Add Mod: no folder was picked."
+msgstr ""
+
+#: src/gui/main.c
+msgid "Add Cheats: no file was picked."
 msgstr ""
 
 #: src/gui/main.c

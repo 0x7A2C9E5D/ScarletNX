@@ -184,6 +184,16 @@ under its mods, each with a box to check, and Open Cheats Folder opens the folde
 The cheats turned off are kept in `cheats_off=` in the game's `.ini`, their names with a `|` between two; a cheat with
 a `|` in its name always runs, and the launcher says so.
 
+Add Cheats, in the same box, opens the system's file picker for a `.txt` and copies it into the cheats folder as
+`<build id>.txt`, the only name the runtime reads; the original stays where it is, and its cheats show checked at once.
+A file already named by a build ID (16 hex digits) keeps that name, in capitals, and the message says so when it is
+not the build ID the game plays with. Another takes the build ID of the main module the game plays with as the box has
+it: a played mod's `exefs/main`, else the checked update's own (from its extraction: one read from its dump has none
+the launcher can read), else the game's `exefs/main` or `main.nro`; with none to read, the file is refused, the message
+naming the module it looked for. It refuses too a name the cheats folder has already (files are never merged), a file
+that is not a `.txt`, one over 1 MiB, one with no `[name]` line, and on a phone a document of an app or a cloud that no
+path reaches.
+
 Run the same command again to retry after a failure or interruption:
 
 - `work/Game/` skips extraction. Automatic extraction publishes this directory only after success,
