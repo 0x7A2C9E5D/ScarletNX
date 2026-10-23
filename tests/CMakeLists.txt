@@ -480,6 +480,25 @@ snx_test_target(snx-test-a64-decode 99)
 snx_a64dec(snx-test-a64-decode)
 add_test(NAME a64_decode COMMAND snx-test-a64-decode)
 
+# The QEMU reference (tests/qemu_ref/): hand-checked cases, the ported cases and the decoder's UNDEF sets under
+# qemu-aarch64 -cpu max and -cpu cortex-a57. Skipped (ctest's skip, code 77) without qemu-aarch64, ld.lld or a Clang
+# for AArch64
+include("${PROJECT_SOURCE_DIR}/cmake/qemu_ref.cmake")
+add_executable(snx-test-qemu-ref qemu_ref/selftest.c qemu_ref/qemu_ref.c)
+snx_test_target(snx-test-qemu-ref 99)
+target_include_directories(snx-test-qemu-ref PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(snx-test-qemu-ref PRIVATE snx_test_common)
+snx_a64dec(snx-test-qemu-ref)
+if(SNX_QEMU_REF)
+    snx_qemu_ref_runner()
+    add_dependencies(snx-test-qemu-ref snx_qemu_ref_runner)
+    add_test(NAME qemu_ref_selftest COMMAND snx-test-qemu-ref "${SNX_QEMU_AARCH64}" "${SNX_QEMU_REF_RUNNER}"
+             "${CMAKE_CURRENT_BINARY_DIR}/qemu_ref")
+else()
+    add_test(NAME qemu_ref_selftest COMMAND snx-test-qemu-ref --skip "${SNX_QEMU_REF_MISSING}")
+endif()
+set_tests_properties(qemu_ref_selftest PROPERTIES SKIP_RETURN_CODE 77)
+
 option(SNX_TEST_A64_FP_DIFF "Run the Linux AArch64 FP differential harness (requires Python unicorn 2.1.4)" OFF)
 if(SNX_TEST_A64_FP_DIFF)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_CROSSCOMPILING)
