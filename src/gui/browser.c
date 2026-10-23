@@ -364,6 +364,68 @@ size_t gui_game_cheats(const char* path, char** folder, char*** names) {
     free(dir);
     return count;
 }
+/* from's files and folders into to, depth folders under the mod's own one, whose link is followed: 0, else 1 */
+static int copy_into(const char* from, const char* to, unsigned depth, char* why, size_t size) {
+    char reason[256], **names = NULL;
+    size_t n = 0, i;
+    int rc = 0;
+    if (depth && snx_is_link(from)) {
+        snprintf(why, size, snx_tr("%s is a link, which a mod cannot hold"), from);
+        return 1;
+    }
+    if (!snx_is_dir(from)) {
+        if (!snx_copy_file(from, to)) return 0;
+        snprintf(why, size, snx_tr("cannot copy %s to %s: %s"), from, to, snx_os_error(reason, sizeof reason));
+        return 1;
+    }
+    if (depth > 128) { /* as snx_copy_tree stops */
+        snprintf(why, size, snx_tr("%s is more than 128 folders deep"), from);
+        return 1;
+    }
+    if (snx_mkdirs(to)) {
+        snprintf(why, size, snx_tr("cannot make %s: %s"), to, snx_os_error(reason, sizeof reason));
+        return 1;
+    }
+    if (snx_list_dir(from, &names, &n)) {
+        snprintf(why, size, snx_tr("cannot open %s: %s"), from, snx_os_error(reason, sizeof reason));
+        return 1;
+    }
+    for (i = 0; i < n && !rc; ++i) {
+        char *a = snx_path_join(from, names[i]), *b = snx_path_join(to, names[i]);
+        rc = copy_into(a, b, depth + 1, why, size);
+        free(a);
+        free(b);
+    }
+    snx_free_strings(names, n);
+    return rc;
+}
+bool gui_copy_mod(const char* from, const char* to, char* why, size_t size) {
+    char *folder = snx_dirname(to), *hidden, *staged, reason[256];
+    const char* leaf = to + strlen(to);
+    bool ok;
+    while (leaf > to && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
+    hidden = snx_format(".%s.adding", leaf);
+    staged = snx_path_join(folder, hidden);
+    if (snx_path_exists(staged) && snx_remove_tree(staged)) {
+        snprintf(why, size, snx_tr("cannot take away %s, which a copy that stopped left: %s"), staged,
+                 snx_os_error(reason, sizeof reason));
+        ok = false;
+    } else {
+        ok = !copy_into(from, staged, 0, why, size);
+        if (ok && snx_replace(staged, to)) {
+            snprintf(why, size, snx_tr("cannot rename %s to %s: %s"), staged, to, snx_os_error(reason, sizeof reason));
+            ok = false;
+        }
+        if (!ok && snx_path_exists(staged) && snx_remove_tree(staged)) { /* the next copy makes it again */
+            size_t n = strlen(why);
+            snprintf(why + n, size - n, snx_tr(" (%s stays, part of the copy)"), staged);
+        }
+    }
+    free(staged);
+    free(hidden);
+    free(folder);
+    return ok;
+}
 static int before(const char* a, const char* b) {
     for (; *a && tolower((unsigned char)*a) == tolower((unsigned char)*b); ++a, ++b) {}
     return tolower((unsigned char)*a) < tolower((unsigned char)*b);

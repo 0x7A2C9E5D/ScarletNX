@@ -52,10 +52,50 @@ msgstr ""
 
 #: src/gui/browser.c
 #, c-format
-msgid "Cannot open %s: %s"
+msgid "%s is a link, which a mod cannot hold"
 msgstr ""
 
 #: src/gui/browser.c
+#, c-format
+msgid "cannot copy %s to %s: %s"
+msgstr ""
+
+#: src/gui/browser.c
+#, c-format
+msgid "%s is more than 128 folders deep"
+msgstr ""
+
+#: src/gui/browser.c
+#, c-format
+msgid "cannot make %s: %s"
+msgstr ""
+
+#: src/gui/browser.c
+#, c-format
+msgid "cannot open %s: %s"
+msgstr ""
+
+#: src/gui/browser.c
+#, c-format
+msgid "cannot take away %s, which a copy that stopped left: %s"
+msgstr ""
+
+#: src/gui/browser.c
+#, c-format
+msgid "cannot rename %s to %s: %s"
+msgstr ""
+
+#: src/gui/browser.c
+#, c-format
+msgid " (%s stays, part of the copy)"
+msgstr ""
+
+#: src/gui/browser.c
+#, c-format
+msgid "Cannot open %s: %s"
+msgstr ""
+
+#: src/gui/browser.c src/gui/main.c
 #, c-format
 msgid "Not enough memory to list %s."
 msgstr ""
@@ -196,6 +236,12 @@ msgstr ""
 #: src/gui/main.c
 #, snx-keys
 msgid "Recompile."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Mods."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -984,7 +1030,15 @@ msgid "No update"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Add Mod"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Open Mods Folder"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Add Cheats"
 msgstr ""
 
 #: src/gui/main.c
@@ -999,6 +1053,152 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Play"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s is not a folder of this device's storage"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s is not a folder"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s has no name to give the mod"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: the mod would be named %s, and the mods list hides a name that starts with a dot"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s is in the mods folder already, %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s holds the mods folder %s, which it would copy into itself"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s has no exefs/ or romfs/ folder, which a mod is made of"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: the mods folder has %s already: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: cannot make %s: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Mod %s added: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s is not a file of this device's storage"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s is not a file"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s is not a .txt file, which cheats are"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s is %llu bytes, and a cheats file is text of %d bytes (1 MiB) at most"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: cannot read %s: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s has no cheat, no line that starts with [name]"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s is not named <build ID>.txt, and the build ID of the main module the game plays with cannot be read from %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s is for build ID %s, and the game plays with build ID %s: its cheats would never run"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: the cheats folder has %s already: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: cannot write %s: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Added %s: %zu cheats from %s, named by the build ID of the main module the game plays with"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Added %s: %zu cheats"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Add Mod: the folder picker could not open: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Add Cheats: the file picker could not open: %s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Cheats"
+msgstr ""
+
+#: src/gui/main.c
+msgid "no reason given"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Add Mod: no folder was picked."
+msgstr ""
+
+#: src/gui/main.c
+msgid "Add Cheats: no file was picked."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Not added: %s came back after the box it was picked for closed"
 msgstr ""
 
 #: src/gui/main.c
@@ -2420,7 +2620,7 @@ msgid "The JIT cache is O%c, but the game's AOT optimization is O%c. They must m
 msgstr ""
 
 #: src/gui/main.c
-msgid "M opens the mods folder of a recompiled Switch game in focus."
+msgid "M opens the mods and cheats of a recompiled Switch game in focus."
 msgstr ""
 
 #: src/gui/main.c
@@ -2712,6 +2912,12 @@ msgstr ""
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
 #, snx-key
+msgid "Mods"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
 msgid "P"
 msgstr ""
 
@@ -2793,10 +2999,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Drop one local folder"
-msgstr ""
-
-#: src/gui/main.c
-msgid "no reason given"
 msgstr ""
 
 #: src/gui/main.c

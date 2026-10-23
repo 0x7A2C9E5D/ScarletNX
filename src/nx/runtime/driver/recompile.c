@@ -17,6 +17,7 @@
 #include "snx_settings.h"
 #include "common/utilities/build_info.h"
 #include "common/utilities/mods.h"
+#include "common/utilities/patches.h"
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -329,6 +330,25 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs)
     free(ex);
     return rc;
 }
+/* the played mods' patches (common/utilities/patches.h) written over each NSO module of program they are made for,
+   every one said: 0, else nonzero with the patch that could not be applied said */
+static int patch_modules(SnxProgram* program, const char* mods, const char* off, int quiet) {
+    char error[1024], **patches;
+    size_t count = snx_mods_patches(mods, off, &patches), i, j;
+    unsigned char* applied = (unsigned char*)snx_alloc(count + 1);
+    int rc = 0;
+    for (i = 0; !rc && i < program->module_count; ++i) {
+        SnxModuleImage* m = &program->modules[i];
+        if (m->is_nro) continue;
+        if (snx_patch_module(m->image, m->image_size, m->build_id, patches, count, applied, error, sizeof error))
+            rc = snx_error("%s: the mod's patch can't be applied to %s, so it is not recompiled", error, m->name);
+        for (j = 0; !rc && !quiet && j < count; ++j)
+            if (applied[j]) printf("%s patched by the mod's %s\n", m->name, patches[j]);
+    }
+    free(applied);
+    snx_free_strings(patches, count);
+    return rc;
+}
 int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *jit_cache = NULL,
                *keys = NULL, *title_keys = NULL, *arg, *value;
@@ -561,6 +581,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         if (!compile.quiet)
             for (i = 0; i < (int)mod_count; ++i) printf("ExeFS %s from the mod's %s\n", mod_names[i], mod_files[i]);
     }
+    if (patch_modules(&program, mods, mods_off, compile.quiet)) goto done; /* before any code is made from them */
     base = snx_path_join(folder, game);
     /* Invalidate the completion stamp before touching an existing game's data
        or module. Failed recompilation must never leave a trusted checkpoint. */

@@ -6,12 +6,15 @@
 #include "nx/hle/filesystem/fs.h"
 #include "nx/memory/mem.h"
 #include "nx/runtime/platform/log.h"
+#include "common/utilities/patches.h"
 #include <stdlib.h>
 #include <string.h>
 
 static u8 file[0x4000], guest[0x5000];
 static size_t file_size;
 static int root_file, nso, maps, unmaps, permissions;
+static char* patch_paths[1]; /* the patches fs_patches gives, patch_count of them */
+static size_t patch_count;
 static unsigned checks;
 static SnxModInfo info;
 static SnxModule module;
@@ -32,6 +35,10 @@ char g_datadir[1024];
 void logf_(int level, const char* fmt, ...) {
     (void)level;
     (void)fmt;
+}
+size_t fs_patches(char* const** paths) {
+    *paths = patch_paths;
+    return patch_count;
 }
 int fs_map_file(const char* path, PFileMap* map) {
     if (nso) {
@@ -191,6 +198,34 @@ int main(void) {
     nso_fixture();
     put32(0x60, 0x100); /* a block cut short */
     CHECK(loader_load() == -1 && unmaps == 1 && !permissions && !g_code_memory);
+    { /* the mods' patches the program was recompiled with, over the segments as copied: one for this build, a second
+         named after another build left out; one that writes past the segments stops the load */
+        static const u8 fits[] = {'P',  'A',  'T',  'C',  'H',  0x00, 0x01, 0x05, 0x00, 0x02, 0xab,
+                                  0xcd, 0x00, 0x11, 0x00, 0x00, 0x01, 0xee, 'E',  'O',  'F'};
+        static const u8 past[] = {'P', 'A', 'T', 'C', 'H', 0x00, 0x31, 0x00, 0x00, 0x02, 0xab, 0xcd, 'E', 'O', 'F'};
+        char *dir = snx_temp_dir(NULL), name[80];
+        CHECK(dir != NULL);
+        for (int i = 0; i < 32; ++i) memcpy(name + 2 * i, "42", 2);
+        memcpy(name + 64, ".ips", 5);
+        patch_paths[0] = snx_path_join(dir, name);
+        patch_count = 1;
+        CHECK(!snx_write_file(patch_paths[0], fits, sizeof fits));
+        nso_fixture();
+        CHECK(!loader_load() && permissions == 3);
+        CHECK(guest[info.base + 5] == 0xab && guest[info.base + 6] == 0xcd && guest[info.base + 7] == (u8)(7 * 7));
+        CHECK(guest[info.base + 0x1000] == 0xee && guest[info.base + 0x1001] == 0x71);
+        nso_fixture();
+        file[0x40] = 0x43; /* another build, which the recompiled descriptor names too */
+        info.build_id[0] = 0x43;
+        CHECK(!loader_load() && guest[info.base + 5] == (u8)(5 * 7) && guest[info.base + 0x1000] == 0x71);
+        CHECK(!snx_write_file(patch_paths[0], past, sizeof past));
+        nso_fixture();
+        CHECK(loader_load() == -1 && !permissions && !g_code_memory);
+        patch_count = 0;
+        snx_remove_tree(dir);
+        free(patch_paths[0]);
+        free(dir);
+    }
     printf("Runtime NRO and NSO: %u checks passed\n", checks);
     return 0;
 }

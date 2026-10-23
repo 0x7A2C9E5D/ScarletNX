@@ -303,6 +303,11 @@ add_executable(snx-test-cheat-list cheat_list.c)
 snx_test_target(snx-test-cheat-list 99)
 target_link_libraries(snx-test-cheat-list PRIVATE scarletnx-common)
 add_test(NAME cheat_list COMMAND snx-test-cheat-list)
+# a mod's IPS, IPS32 and IPSwitch patches: their formats, which module takes one, the played mods' in their order
+add_executable(snx-test-patches patches.c)
+snx_test_target(snx-test-patches 99)
+target_link_libraries(snx-test-patches PRIVATE scarletnx-common)
+add_test(NAME patches COMMAND snx-test-patches)
 # the C compiler a 3DS game's native link runs: the build's own, else a clang beside the program, else one on PATH
 add_executable(snx-test-find-compiler find_compiler.c)
 snx_test_target(snx-test-find-compiler 99)
@@ -936,7 +941,7 @@ add_test(NAME loader_native COMMAND snx-test-loader)
 
 add_executable(snx-test-runtime-nro runtime_nro.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/loader.c")
 snx_test_target(snx-test-runtime-nro 11)
-target_link_libraries(snx-test-runtime-nro PRIVATE snx_lz4)
+target_link_libraries(snx-test-runtime-nro PRIVATE snx_lz4 scarletnx-common)
 add_test(NAME runtime_nro COMMAND snx-test-runtime-nro)
 
 if(NOT WIN32)

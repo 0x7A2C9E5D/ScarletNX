@@ -29,6 +29,7 @@ size_t snx_mods_played(const char* folder, const char* off, const char* part, ch
    that has it: their names into *names, sorted, and their paths into *paths (each snx_free_strings). Their count */
 size_t snx_mods_exefs(const char* folder, const char* off, char*** names, char*** paths);
 /* what the program of a game with mods in folder is built from beyond its own ExeFS, the files snx_mods_exefs gives
-   by their names and bytes, as 16 hex digits, owned. "" when no mod played has any */
+   and then the patches snx_mods_patches gives (common/utilities/patches.h), by their names and bytes, as 16 hex digits,
+   owned. "" when no mod played has any */
 char* snx_mods_stamp(const char* folder, const char* off);
 #endif

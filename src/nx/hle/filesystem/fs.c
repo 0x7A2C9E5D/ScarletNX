@@ -23,6 +23,7 @@
 #include "nx/runtime/driver/container.h"
 #include "common/utilities/game_ini.h"
 #include "common/utilities/mods.h"
+#include "common/utilities/patches.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -289,6 +290,7 @@ static void mods_open(void) {
             snx_mods_exefs(folder, g_settings.game_mods_off, &g_hle.fs.mexefs_names, &g_hle.fs.mexefs_paths);
         for (i = 0; i < g_hle.fs.nmexefs; i++)
             LOG("fs: exefs/%s from the mod's %s\n", g_hle.fs.mexefs_names[i], g_hle.fs.mexefs_paths[i]);
+        g_hle.fs.npatches = snx_mods_patches(folder, g_settings.game_mods_off, &g_hle.fs.patches);
     } else if (stamp[0])
         WARN("fs: the mods played replace ExeFS files, and the program was recompiled with %s: it runs the ExeFS it "
              "was made from until it is recompiled, which playing it from the launcher does\n",
@@ -459,6 +461,10 @@ FILE* fs_open_read(const char* path, u64* size) {
     return f;
 }
 
+size_t fs_patches(char* const** paths) {
+    *paths = g_hle.fs.patches;
+    return g_hle.fs.npatches;
+}
 int fs_map_file(const char* path, PFileMap* map) {
     FsNode* node;
     char host[FS_TREE_PATH_MAX];

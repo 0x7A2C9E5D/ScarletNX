@@ -42,7 +42,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - A gamepad drives the menu as the keys do (`src/gui/pad_menu.c`): the D-pad and the left stick are the arrows, the
   button labelled A (or Cross) is Enter, B (or Circle) ESC, X (or Square) Del and Y (or Triangle) R, wherever the pad
   has them (a Switch pad's A is east, its X north), LB and RB are Shift+Tab and Tab, LT and RT are PgUp and PgDn, L3
-  and R3 are M and B (Games' mods folder and AOT pack), Start is F5 and Back (View, Minus, Select) F1. A held arrow or
+  and R3 are M and B (Games' mods and AOT pack), Start is F5 and Back (View, Minus, Select) F1. A held arrow or
   page repeats. A press on the pad hides the mouse's cursor and the foot names the pad's buttons, a PlayStation pad's
   by their shapes; a key or the mouse moving past a few pixels shows the keyboard's again, and so do a click and a
   finger once they have pressed what the foot showed under them: the press that switched does what it does. The Button
@@ -353,6 +353,10 @@ cannot be read is named and the others still listed.
 - **R** (on Android a tap on *Recompile* at the foot) recompiles the Switch game in focus, recent or on the page,
   where it is, or prepares its dump again: `scarletnx -r`. It plays nothing;
   Enter then does. On another row, or a 3DS or Vita game, it says why it does nothing.
+- **M** (on Android a tap on *Mods* at the foot) opens the box of the recompiled Switch game in focus, recent or on
+  the page, that Enter opens for a game with updates, DLCs, mods or cheats beside it, and for a game with none of them
+  too, whose **Add Mod** and **Add Cheats** copy a folder or a `.txt` the system's picker gives into the game's mods
+  and cheats ([USAGE](USAGE.md#mods)). On another row, a dump, or a 3DS or Vita game, it says what it opens.
 - In the list, Left/Right and PgUp/PgDown go to the previous/next page. The page number and
   total file count are shown. Paging stops at the first and last pages.
 - Resizing adjusts the page size while keeping the selected file visible.

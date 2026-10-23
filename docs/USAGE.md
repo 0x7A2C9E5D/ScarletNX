@@ -152,13 +152,30 @@ wins over an earlier one where both have the same file.
 
 Every mod in the folder is played until it is turned off. Opening a game in the launcher lists its mods under its
 updates and DLCs, each with a box to check, and Open Mods Folder opens the folder in the file manager (it is made
-first when it isn't there). M opens it too, for the game in focus on Games. The mods turned off are kept in
-`mods_off=` in the game's `.ini`, their folder names with a `/` between two.
+first when it isn't there). M on Games opens that box for the game in focus, one with nothing beside it too. The mods
+turned off are kept in `mods_off=` in the game's `.ini`, their folder names with a `/` between two.
+
+Add Mod, in the same box, opens the system's folder picker and copies the folder picked, whole, into the mods folder
+under its own name, the original left where it is; the mod shows checked at once, and the message says where it went.
+The copy goes into a hidden `.<name>.adding` first and takes the mod's name once every file is in, so a copy that
+stops never shows as a mod. It refuses, naming the folder: a name the mods folder has already, a folder inside the
+mods folder or one that holds it, one with neither `exefs/` nor `romfs/`, a name that starts with a dot (the mods list
+hides those), a link inside the folder, and on a phone a folder of an app or a cloud that no path reaches; a file that
+cannot be copied is named with the system's reason. On Android and iOS the box has Add Mod and no Open Mods Folder or
+Open Cheats Folder, as a phone has no file manager to show a folder in.
 
 A mod's `exefs/` changes the game's code, which ScarletNX compiles ahead of time. The game's stamp (`<id>.abi`) records
 the mods' ExeFS files it was recompiled with, and playing it through the driver or the launcher recompiles it when the
 mods played have other ones. Run directly, a game made with other mods' files runs the ExeFS it was made from, and the
-log says so. IPS patches and cheats in `exefs/` are not applied.
+log says so.
+
+A mod's `exefs/` can also hold patches, each made for one build of a module: an IPS or IPS32 file named after the
+module's build ID (`exefs/<build id>.ips`), and IPSwitch text (`exefs/<name>.pchtxt`, the build ID after its
+`@nsobid-`), read as Eden reads them. Each is written over the module it is for when the game is recompiled, and over
+that module's segments as the game loads them. A patch that does not fit its module (a record past its end, a line
+the format has no meaning for) stops the recompile, which names the file, the line and the value. Patches count in
+the stamp as the mods' ExeFS files do: turning a mod with one on or off, or changing one, recompiles the game. Cheats
+in `exefs/` are not applied.
 
 A game's cheats go in the `cheats` folder of its data folder, in the Atmosphere format, a file named after the main
 module's build ID: `recompiled/<id>/<id>_data/cheats/<build id>.txt`, each cheat a `[name]` line and its codes under it.
@@ -166,6 +183,16 @@ Every cheat in it runs once per frame shown until it is turned off. Opening a ga
 under its mods, each with a box to check, and Open Cheats Folder opens the folder (made first when it isn't there).
 The cheats turned off are kept in `cheats_off=` in the game's `.ini`, their names with a `|` between two; a cheat with
 a `|` in its name always runs, and the launcher says so.
+
+Add Cheats, in the same box, opens the system's file picker for a `.txt` and copies it into the cheats folder as
+`<build id>.txt`, the only name the runtime reads; the original stays where it is, and its cheats show checked at once.
+A file already named by a build ID (16 hex digits) keeps that name, in capitals, and is refused when the game plays
+with another, the message naming both. Another takes the build ID of the main module the game plays with as the box has
+it: a played mod's `exefs/main`, else the checked update's own (from its extraction: one read from its dump has none
+the launcher can read), else the game's `exefs/main` or `main.nro`; with none to read, the file is refused, the message
+naming the module it looked for. It refuses too a name the cheats folder has already (files are never merged), a file
+that is not a `.txt`, one over 1 MiB, one with no `[name]` line, and on a phone a document of an app or a cloud that no
+path reaches.
 
 Run the same command again to retry after a failure or interruption:
 

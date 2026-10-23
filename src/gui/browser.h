@@ -77,6 +77,11 @@ size_t gui_game_mods(const char* path, char** folder, char*** names);
    snx_cheats_folder), into *folder (owned, NULL for any other game), and its cheats' names (snx_cheats_list) into
    *names when names is not NULL: their count */
 size_t gui_game_cheats(const char* path, char** folder, char*** names);
+/* The folder from copied whole to the folder to, which is not there yet: first into a hidden .<its name>.adding beside
+   it (one a stopped copy left is made again), renamed to to once every file is in, so the mods list never shows a mod
+   copied in part, and taken away when a file fails. from is left as it is. True; false with why naming the file that
+   failed, or the link a mod cannot hold, and the system's reason */
+bool gui_copy_mod(const char* from, const char* to, char* why, size_t size);
 /* A 3DS CIA, a Vita VPK, by its name */
 bool gui_is_cia(const char* name);
 bool gui_is_vpk(const char* name);

@@ -1331,8 +1331,11 @@ static const char* const mod_made[][2] = {
     {"mods-data/0100000000AB0000_data/mods/2 second/romfs/dir/b.bin", "second's b"},
     {"mods-data/0100000000AB0000_data/mods/2 second/exefs/main", "second's main"},
     {"mods-data/0100000000AB0000_data/mods/2 second/exefs/notes.txt", "no part of the program"},
+    {"mods-data/0100000000AB0000_data/mods/2 second/exefs/frames.pchtxt", "@nsobid-0123\n@enabled\n"},
+    {"mods-data/0100000000AB0000_data/mods/1 first/exefs/0123.ips", "PATCHEOF"},
     {"mods-data/0100000000AB0000_data/mods/3 off/romfs/a.bin", "off's a"},
     {"mods-data/0100000000AB0000_data/mods/3 off/exefs/subsdk0", "off's subsdk0"},
+    {"mods-data/0100000000AB0000_data/mods/3 off/exefs/0123.ips", "PATCHEOF"},
     {"mods-data/0100000000AB0000_data/mods/.hidden/romfs/a.bin", "hidden's a"},
     {"mods-data/0100000000AB0000_data/mods/readme.txt", "no mod"},
 };
@@ -1365,11 +1368,15 @@ static void test_mods(SvcObj* proxy, int image, int stale) {
     u8* data = fs_read_file("exefs/main", &size);
     const u8* bytes;
     FsNode* node;
-    if (stale) { /* the program's own ExeFS, said */
+    if (stale) { /* the program's own ExeFS, said, and no patch: its code was made without them */
         CHECK(data && size == 15 && !memcmp(data, "the game's main", 15));
         CHECK(strstr(test_fs_text, "the program was recompiled with none of them") != NULL && g_hle.fs.nmexefs == 0);
-    } else {
+        CHECK(g_hle.fs.npatches == 0);
+    } else { /* and the patches it was made with, for the loader: the played mods' in their order */
         CHECK(data && size == 13 && !memcmp(data, "second's main", 13) && g_hle.fs.nmexefs == 1);
+        CHECK(g_hle.fs.npatches == 2 && strstr(g_hle.fs.patches[0], "1 first") &&
+              strstr(g_hle.fs.patches[0], "0123.ips") && strstr(g_hle.fs.patches[1], "2 second") &&
+              strstr(g_hle.fs.patches[1], "frames.pchtxt"));
     }
     free(data);
     data = fs_read_file("exefs/main.npdm", &size);

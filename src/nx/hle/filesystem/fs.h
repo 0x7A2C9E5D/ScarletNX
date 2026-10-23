@@ -15,6 +15,9 @@ extern u64 g_fs_bytes_read, g_fs_bytes_written; /* the game's file I/O, for the 
 /* Lookups by a path in the index. *size is 0 when the file isn't there */
 FILE* fs_open_read(const char* path, u64* size);
 int fs_map_file(const char* path, PFileMap* map); /* 0, or -1 */
+/* the mods' patches the program was recompiled with (HleFs' patches), which the loader writes over the modules they
+   are for: their count, and their paths in *paths */
+size_t fs_patches(char* const** paths);
 /* 1 when id is a DLC read in place from its dump (one the game's addons= checks), which OpenDataStorageByDataId serves
    as installed */
 int fs_aoc_has(u64 id);
@@ -131,6 +134,10 @@ typedef struct {
        the game's (mexefs_names, mexefs_paths, nmexefs of them), and how many romfs/ folders are grafted as mods.<i> */
     char **mexefs_names, **mexefs_paths;
     size_t nmexefs, nmromfs;
+    /* and their patches (common/utilities/patches.h) the program was recompiled with, which the loader writes over the
+       modules they are made for, npatches of them */
+    char** patches;
+    size_t npatches;
     int rlayered; /* the RomFS image is made up with the mods' over the game's (romfs_init) */
 } HleFs;
 /* all zero: fs_init sets the tree up */
