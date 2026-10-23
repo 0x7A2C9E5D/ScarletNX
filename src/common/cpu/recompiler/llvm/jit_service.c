@@ -48,6 +48,20 @@ typedef struct {
     SnxU64 taken; /* IN_FLIGHT: the take that made it so (s->takes), so a batch ends its own pcs only */
 } Entry;
 
+/* A unit published, from a batch or the cache: the span of guest code its functions were compiled from and the leaders
+   it published, each with its code. Its functions call each other directly, so a change anywhere in the span drops
+   the whole unit (snx_jit_invalidate), not only the leaders in the range: a mod's hook in the middle of a function
+   reaches every caller. One allocation per unit, under lock */
+typedef struct {
+    SnxU64 pc;
+    GuestFn code;
+} Published;
+typedef struct {
+    SnxU64 lo, hi;
+    size_t count;
+    Published* leaders;
+} UnitSpan;
+
 /* pcs to compile, first in first out: a ring that grows on its own */
 typedef struct {
     SnxU64* pcs;
@@ -128,6 +142,8 @@ struct SnxJitService {
     SnxU64 epoch;                       /* under lock: incremented by snx_jit_invalidate */
     SnxU64 takes;                       /* under lock: incremented by each take, which stamps its pcs with it */
     SnxJitStats stats;                  /* under lock */
+    UnitSpan* spans;                    /* under lock: the units published, which snx_jit_invalidate drops */
+    size_t span_count, span_capacity;
     JitLock lock;                       /* everything above marked so */
     JitCond work;                       /* signalled when a pc is queued, broadcast at stop */
     JitCond idle;                       /* broadcast when nothing is queued or compiling */
@@ -390,8 +406,9 @@ static SnxU64 direct(void* user, SnxU64 target) {
         else
             hi = middle;
     }
-    if (lo == s->config.aot_count || s->config.aot_addresses[lo] != target || !s->config.aot_functions[lo]) return 0;
-    return (SnxU64)(size_t)s->config.aot_functions[lo];
+    if (lo == s->config.aot_count || s->config.aot_addresses[lo] != target) return 0;
+    /* a function the runtime found stale (its code changed: SNX_ABI 14) leaves the table while the JIT runs */
+    return (SnxU64)(size_t)__atomic_load_n(&s->config.aot_functions[lo], __ATOMIC_ACQUIRE);
 }
 
 /* the loader's resolver: snx_aot_<target>, the AOT module's function for target (ir_codegen.c's call) */
@@ -483,6 +500,51 @@ static GuestFn unit_function(SnxU64 table, size_t i) {
     GuestFn code;
     memcpy(&code, (const unsigned char*)(size_t)table + i * sizeof(code), sizeof(code));
     return code;
+}
+
+/* Under lock: a unit's span and leaders, taken over (freed when it can't be kept: a change then drops only the
+   leaders in its range, as before) */
+static void span_keep(SnxJitService* s, SnxU64 lo, SnxU64 hi, Published* leaders, size_t count) {
+    if (!count || lo >= hi) {
+        free(leaders);
+        return;
+    }
+    if (s->span_count == s->span_capacity) {
+        size_t capacity = s->span_capacity ? 2 * s->span_capacity : 256;
+        UnitSpan* grown = (UnitSpan*)realloc(s->spans, capacity * sizeof(*grown));
+        if (!grown) {
+            free(leaders);
+            return;
+        }
+        s->spans = grown;
+        s->span_capacity = capacity;
+    }
+    s->spans[s->span_count].lo = lo;
+    s->spans[s->span_count].hi = hi;
+    s->spans[s->span_count].count = count;
+    s->spans[s->span_count++].leaders = leaders;
+}
+/* the leaders of a batch's functions, with their code in table, as a span (span_keep) */
+static void span_of_batch(SnxJitService* s, const SnxCodegen* codegen, SnxU64 table) {
+    size_t i, j, count = 0, n = 0;
+    SnxU64 lo = ~(SnxU64)0, hi = 0, a;
+    Published* leaders;
+    for (i = 0; i < codegen->function_count; ++i) count += codegen->functions[i].leader_count;
+    leaders = count ? (Published*)malloc(count * sizeof(*leaders)) : NULL;
+    if (!leaders) return;
+    for (i = 0; i < codegen->function_count; ++i) {
+        const SnxFunction* f = &codegen->functions[i];
+        GuestFn code = unit_function(table, i);
+        if (!f->count) continue;
+        if ((a = snx_function_address(f, 0)) < lo) lo = a;
+        if ((a = snx_function_address(f, f->count - 1) + 4) > hi) hi = a;
+        for (j = 0; j < f->count && n < count; ++j)
+            if (f->leaders[j]) {
+                leaders[n].pc = snx_function_address(f, j);
+                leaders[n++].code = code;
+            }
+    }
+    span_keep(s, lo, hi, leaders, n);
 }
 
 /* ---- the cache (Cache) ---- */
@@ -818,8 +880,9 @@ static int cache_load(SnxJitService* s, CacheRecord* r, const SnxCodeImage* imag
     unsigned char* object;
     SnxLinkInput input;
     const char* names[1];
-    SnxU64 table = 0, h1, h2, epoch;
-    size_t f, k, leaders, runs;
+    SnxU64 table = 0, h1, h2, epoch, span_lo = ~(SnxU64)0, span_hi = 0;
+    size_t f, k, leaders, runs, span_count = 0;
+    Published* span = NULL;
     char error[256];
     int refused;
     lock(&s->lock);
@@ -860,6 +923,33 @@ static int cache_load(SnxJitService* s, CacheRecord* r, const SnxCodeImage* imag
         unlock(&s->lock);
         return 0;
     }
+    /* the unit's span: its functions' runs, and its leaders (span_keep) */
+    {
+        const unsigned char* q = r->functions;
+        size_t total = 0, n;
+        for (f = 0; f < r->function_count; ++f) {
+            total += get32(q + 8);
+            q += 12 + 8 * (size_t)get32(q + 8);
+            q += 4 + 12 * (size_t)get32(q) + 16;
+        }
+        span = total ? (Published*)malloc(total * sizeof(*span)) : NULL;
+        for (f = 0, q = r->functions, n = 0; span && f < r->function_count; ++f) {
+            SnxU64 run;
+            for (k = 0; k < get32(q + 8); ++k) {
+                span[n].pc = get64(q + 12 + 8 * k);
+                span[n++].code = unit_function(table, f);
+            }
+            q += 12 + 8 * (size_t)get32(q + 8);
+            for (k = 0; k < get32(q); ++k) {
+                run = get64(q + 4 + 12 * k);
+                if (run < span_lo) span_lo = run;
+                if (run + 4 * (SnxU64)get32(q + 4 + 12 * k + 8) > span_hi)
+                    span_hi = run + 4 * (SnxU64)get32(q + 4 + 12 * k + 8);
+            }
+            q += 4 + 12 * (size_t)get32(q) + 16;
+        }
+        span_count = n;
+    }
     for (f = 0; f < r->function_count; ++f) {
         GuestFn code = unit_function(table, f);
         leaders = get32(p + 8);
@@ -880,6 +970,7 @@ static int cache_load(SnxJitService* s, CacheRecord* r, const SnxCodeImage* imag
         p += 12 + 8 * leaders;
         p += 4 + 12 * (size_t)get32(p) + 16;
     }
+    span_keep(s, span_lo, span_hi, span, span_count);
     ++s->stats.cached;
     cond_broadcast(&s->done);
     unlock(&s->lock);
@@ -1047,6 +1138,7 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count, SnxU64 st
                 e->code = code;
             }
         }
+        if (!rc) span_of_batch(s, &codegen, table);
     }
     dropped = epoch != s->epoch;
     for (i = 0; i < count; ++i) {
@@ -1440,14 +1532,21 @@ void snx_jit_invalidate(SnxJitService* s, SnxU64 addr, SnxU64 size) {
     lock(&s->lock);
     /* a batch compiling now reads s->epoch before its code, and skips the publish when it has changed */
     ++s->epoch;
-    for (i = 0; i < s->entry_capacity; ++i) {
-        e = &s->entries[i];
-        pc = e->key & ~(SnxU64)1;
-        if (e->key && pc >= addr && pc < end) {
-            e->state = GONE;
-            e->code = NULL;
+    if ((end - addr) / 4 < s->entry_capacity / 8) { /* a few lines (IC IVAU's 64 bytes): each pc looked up */
+        for (pc = addr & ~(SnxU64)3; pc < end; pc += 4)
+            if ((e = find(s, pc)) != NULL) {
+                e->state = GONE;
+                e->code = NULL;
+            }
+    } else
+        for (i = 0; i < s->entry_capacity; ++i) {
+            e = &s->entries[i];
+            pc = e->key & ~(SnxU64)1;
+            if (e->key && pc >= addr && pc < end) {
+                e->state = GONE;
+                e->code = NULL;
+            }
         }
-    }
     for (j = 0; j <= SNX_JIT_IMAGES; ++j) {
         r = &s->regions[j];
         if (!r->hi || r->hi <= addr || r->lo >= end) continue; /* free, or outside the range */
@@ -1457,6 +1556,29 @@ void snx_jit_invalidate(SnxJitService* s, SnxU64 addr, SnxU64 size) {
             __atomic_store_n(slot(r, pc), NULL, __ATOMIC_RELEASE);
             clear_pending(r, pc); /* its pc is new to the service again: discovery isn't told a batch has it */
         }
+    }
+    /* a unit whose code the change touches goes whole: its leaders outside the range too, as its functions call the
+       ones inside directly. Its code stays in the arena, where a thread may still be running it */
+    for (i = 0; i < s->span_count;) {
+        UnitSpan* u = &s->spans[i];
+        if (u->hi <= addr || u->lo >= end) {
+            ++i;
+            continue;
+        }
+        for (j = 0; j < u->count; ++j) {
+            GuestFn expected = u->leaders[j].code;
+            e = find(s, u->leaders[j].pc);
+            if (e && e->code == u->leaders[j].code) {
+                e->state = GONE;
+                e->code = NULL;
+            }
+            r = region_of(s, u->leaders[j].pc);
+            if (r && __atomic_compare_exchange_n(slot(r, u->leaders[j].pc), &expected, NULL, 0, __ATOMIC_RELEASE,
+                                                 __ATOMIC_RELAXED))
+                clear_pending(r, u->leaders[j].pc);
+        }
+        free(u->leaders);
+        s->spans[i] = s->spans[--s->span_count];
     }
     cond_broadcast(&s->done); /* a thread waiting for one of them resolves it again */
     unlock(&s->lock);
@@ -1565,6 +1687,8 @@ void snx_jit_service_free(SnxJitService* s) {
     for (i = 0; i < s->stats.threads; ++i) thread_join(s->threads[i]);
     cache_close(&s->cache);
     snx_code_loader_free(s->loader);
+    for (i = 0; i < s->span_count; ++i) free(s->spans[i].leaders);
+    free(s->spans);
     free(s->entries);
     for (q = 0; q < QUEUES; ++q) free(s->queues[q].pcs);
     for (i = 0; i <= SNX_JIT_IMAGES; ++i) {
