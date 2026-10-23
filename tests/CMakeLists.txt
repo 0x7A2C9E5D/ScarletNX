@@ -1168,6 +1168,11 @@ add_executable(snx-test-jit-cache jit_cache.c)
 snx_test_target(snx-test-jit-cache 11)
 target_link_libraries(snx-test-jit-cache PRIVATE snx_llvm)
 add_test(NAME jit_cache COMMAND snx-test-jit-cache)
+# LLVM's SLP vectorizer turned off for a process (the setting slp_vectorizer), and the JIT cache's key saying so
+add_executable(snx-test-slp-vectorizer slp_vectorizer.c)
+snx_test_target(snx-test-slp-vectorizer 11)
+target_link_libraries(snx-test-slp-vectorizer PRIVATE snx_llvm)
+add_test(NAME slp_vectorizer COMMAND snx-test-slp-vectorizer)
 # the launcher's AOT pack action: the cache's path and header, and the optimization the AOT build must share
 add_executable(snx-test-aot-pack aot_pack.c "${PROJECT_SOURCE_DIR}/src/gui/aot.c")
 snx_test_target(snx-test-aot-pack 11)

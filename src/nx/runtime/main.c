@@ -5,6 +5,7 @@
    then the frontend's loop at the display's rate until the run ends, saving what outlives it */
 #include "nx/runtime/main.h"
 #include "common/cpu/recompiler/llvm/gdb_jit.h"
+#include "common/cpu/recompiler/llvm/ir.h"
 #include "common/utilities/build_info.h"
 #include "common/utilities/common.h"
 #include "common/utilities/ini_lines.h"
@@ -828,6 +829,7 @@ int snx_main(int argc, char** argv) {
             "attached\n");
     }
     if (g_addon) LOG("game: the update of the game in %s, with its settings and saves\n", base);
+    snx_ir_slp_vectorizer(g_settings.slp_vectorizer); /* before the JIT's first compile too */
 
     fs_init(); /* the npdm is read through it, and mem_init's layout comes before */
 #ifdef MODULE_PACK

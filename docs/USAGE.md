@@ -246,7 +246,8 @@ Remaining examples: POSIX.
   them, as the launcher's LLVM Internals page shows them: the passes are those of the pipelines the build's LLVM prints
   for each level, and a build without an `opt` of that LLVM has none. A dump played with these is recompiled with them
   when it has to be, and a game made already keeps its code until `-r` recompiles it. A value a setting does not take
-  (`--aot_threads=abc`) stops the recompile. The code the runtime compiles while the game runs keeps LLVM's own.
+  (`--aot_threads=abc`) stops the recompile. The code the runtime compiles while the game runs keeps LLVM's own, but
+  for the SLP vectorizer, which `slp_vectorizer` turns on or off for both.
   `--target auto|linux|win64` takes only this host's own system: modules are built for the machine that builds
   them. `--target ios` writes `<id>_code.snxobj` instead, a pack of the code's objects for the iOS app to load into JIT
   memory (64-bit games only, [APPLE](APPLE.md)); it makes no runtime copy. `--runtime FILE` deploys that runtime instead of the running one, or of the one a tools-only build builds in
@@ -589,6 +590,7 @@ type, range and help, tab-separated. Every setting, the recompiler's too, is des
 | `auto_stub_ipc` | `1` | A service command the runtime doesn't know answers success, logged as `[undeclared]`, and a service it doesn't have answers every command that way. `0` answers them with the console's UnknownCommandId instead, which shows the gap where the game makes the call |
 | `diag` | `0` | `1` saves the data of each new compute shader to `captures/compute`, and each new shader's snx-shaderc corpus entry to `captures/shaders`, for debugging |
 | `vk_validation` | `0` | `1` turns on the Vulkan validation layer (`VK_LAYER_KHRONOS_validation`, from the Vulkan SDK or the distribution's validation layers package), which logs each misuse of Vulkan it finds. It slows the game down a lot. Without the layer installed the run only warns |
+| `slp_vectorizer` | `0` | `1` runs LLVM's SLP vectorizer, which packs scalar instructions into SIMD ones, in the recompile and the JIT; the next recompile and the JIT's next run take it. Off while LLVM 23 can break a module with it and stop the recompile (llvm-project issue 231525). LLVM Internals' `llvm_slp_vectorization` leaves it running |
 | `gdb_jit` | `0` | `1`, with the GDB stub (`-S` or `-s`), hands the code the JIT compiles to GDB ([GDB](#gdb-linux)). GDB stops the game for each compile while it is attached, and each compile's object stays in memory for the run |
 | `profile` | `0` | `1` writes `profile.txt` every 10 seconds. The CPU profiler is Windows only |
 | `nvn_trace` | `0` | `1` logs each NVN function the game resolves and, at exit, how often each was called ([DEVELOPMENT.md](DEVELOPMENT.md)). The game runs slower |

@@ -339,6 +339,13 @@ size_t gui_settings_recompile(GuiSettings* s, const char** argv) {
     }
     return n;
 }
+size_t gui_settings_one(GuiSettings* s, const char* key, const char** argv) {
+    int i = find(s, key);
+    if (i < s->own || i >= s->count || !picked(s, i)) return 0;
+    snprintf(s->values[i].option, sizeof s->values[i].option, "--%s=%s", key, picked(s, i));
+    argv[0] = s->values[i].option;
+    return 1;
+}
 size_t gui_settings_options(GuiSettings* s, int launch, const char** argv) {
     size_t n = 0;
     int i;

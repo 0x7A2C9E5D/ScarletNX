@@ -8,6 +8,7 @@
 #include "nx/loader/loader.h"
 #include "nx/loader/module.h"
 #include "nx/loader/module_llvm.h"
+#include "common/cpu/recompiler/llvm/ir.h"
 
 /* the triple of the iOS app's code: Darwin's calling convention and the generic AArch64 CPU, in the object format the
    JIT loader reads (recompiler/llvm/ir.c's host_triple). The version only names the ABI */
@@ -24,7 +25,8 @@
 
 const IniOpt* snx_recompile_setting(const char* key) {
     const IniOpt* o = ini_find(g_recompile_ini, key);
-    return o ? o : ini_find(g_llvm_ini, key);
+    if (!o) o = ini_find(g_llvm_ini, key);
+    return o ? o : ini_find(g_recompile_game_ini, key);
 }
 static void usage(void) {
     puts("Usage: scarletnx -r INPUT [NAME] [OPTIONS]\n"
@@ -614,6 +616,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         llvm.output = code;
         llvm.triple = ios ? SNX_IOS_TRIPLE : NULL;
         llvm.opt = compile.opt[0];
+        snx_ir_slp_vectorizer(g_settings.slp_vectorizer);
         llvm.tuning = snx_llvm_tuning(llvm.opt, error, sizeof error);
         if (!llvm.tuning) {
             snx_error("%s", error);

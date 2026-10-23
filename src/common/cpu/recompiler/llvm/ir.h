@@ -161,6 +161,11 @@ LLVMValueRef ir_flags_cond(SnxIr* ir, unsigned cond);
 void ir_fp_guards_invalidate(SnxIr* ir);
 /* Once per process, before any other call; threads may then each own SnxIrs. 0, or -1 with the reason */
 int snx_ir_init(char* error, size_t error_size);
+/* LLVM's SLP vectorizer on or off for every module this process makes (the setting slp_vectorizer): an option of
+   LLVM's command line, so once per process, from one thread, before any module is made */
+void snx_ir_slp_vectorizer(int on);
+/* whether it runs: LLVM's own, on, until snx_ir_slp_vectorizer. The caches' keys carry it */
+int snx_ir_slp(void);
 /* opt is the -O letter: 0,1,2,3,s,z */
 SnxIr* snx_ir_new(const char* name, char opt, char* error, size_t error_size);
 /* the same for code the JIT loader loads into this process (code_loader.h): the host's target, CPU and calling

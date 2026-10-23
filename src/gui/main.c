@@ -8514,6 +8514,8 @@ static void launch(App* app, char* absolute, bool prepared) {
         if (app->aot_hook) argv[n++] = "--hook-direct-calls";
     }
     if (app->menu.selected == GUI_SWITCH && !app->recompile) n += gui_settings_options(s, 1, argv + n);
+    /* Debug's SLP vectorizer, which R's recompile takes too: a run passes it with the game's settings */
+    if (app->menu.selected == GUI_SWITCH && app->recompile) n += gui_settings_one(s, "slp_vectorizer", argv + n);
     /* Extract dump, which both drivers take, for a run and for R's recompile: off, nothing is extracted */
     if ((app->menu.selected == GUI_3DS || (app->menu.selected == GUI_SWITCH && app->recompile)) &&
         gui_settings_extract(s))

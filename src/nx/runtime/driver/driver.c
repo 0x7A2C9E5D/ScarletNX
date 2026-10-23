@@ -1048,7 +1048,7 @@ int snx_driver(int argc, char** argv) {
     char *r = NULL, *b = NULL, *exe = NULL, **rest, **setting, **recompile, *self, *data = NULL, *source = NULL;
     unsigned flags = 0;
     int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, tmpfs_args = 0;
-    int repo_given = 0, settings = 0, recompiling = 0;
+    int repo_given = 0, settings = 0, recompiling = 0, taken = 0;
 #ifdef SNX_IOS
     snx_set_stage_runner(snx_driver); /* no child process there: the stages are this driver again, on this thread */
 #endif
@@ -1143,17 +1143,17 @@ int snx_driver(int argc, char** argv) {
                 memcpy(key, rest[i] + 2, length);
                 key[length] = 0;
             }
-            if (length < sizeof key && snx_recompile_setting(key))
-                recompile[recompiling++] = rest[i];
-            else if (setting_known(rest[i] + 2))
-                setting[settings++] = rest[i];
-            else {
+            int recompiles = length < sizeof key && snx_recompile_setting(key), plays = setting_known(rest[i] + 2);
+            if (!recompiles && !plays) {
                 result = snx_error("unknown option: %s", rest[i]);
                 goto done;
             }
+            if (recompiles) recompile[recompiling++] = rest[i];
+            if (plays) setting[settings++] = rest[i]; /* both for one both take (slp_vectorizer) */
+            ++taken;
         } else
-            rest[i - settings - recompiling] = rest[i];
-    n -= settings + recompiling;
+            rest[i - taken] = rest[i];
+    n -= taken;
     /* played, --outdir names the games' folder and --out the dump's extraction, as -r and -x take them, and --update
        an update or a DLC played over the game */
     for (i = 0; automatic && i < n; ++i)

@@ -50,6 +50,11 @@ setting Plain
     key plain
     int 0 1
     default 0
+setting Both
+    key both
+    int 0 1
+    default 1
+    recompile
 setting ${long_name}
     key long
     text 4
@@ -132,6 +137,17 @@ foreach(row "{\"llvm_inliner_threshold\", NULL, \"How large a function the inlin
         message(FATAL_ERROR "settings_launch.c lacks the row ${row}:\n${launch}")
     endif()
 endforeach()
+# a game's setting the recompile takes too: its row in the game's table and in the recompiler's file's own
+foreach(file launch runtime)
+    string(FIND "${${file}}" "{\"both\", \"1\", NULL, INI_INT, 0, &g_settings.both, 0, 1, NULL, \"Both\"" at)
+    if(at LESS 0)
+        message(FATAL_ERROR "the ${file} file lacks the row of both:\n${${file}}")
+    endif()
+endforeach()
+string(FIND "${launch}" "const IniOpt g_recompile_game_ini[] = {\n    {\"both\"" at)
+if(at LESS 0)
+    message(FATAL_ERROR "settings_launch.c has no g_recompile_game_ini with both:\n${launch}")
+endif()
 # the long ones, whole: the member of the 1100-letter name (its words joined by _), the long setter's key and name
 string(REPEAT "abcdefghij_" 110 long_member)
 string(REGEX REPLACE "_$" "" long_member "${long_member}")

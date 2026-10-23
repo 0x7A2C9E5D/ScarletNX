@@ -48,7 +48,10 @@ const SnxNotice snx_notices[SNX_NOTICES] = {
     {SNX_TR_NOOP("A theme's screens"), SNX_TR_NOOP("[head] place, [tips] place and [body] sizing in its theme.ini"),
      SNX_TR_NOOP("nothing: ui.txt lays out every screen"), "A theme's `[head] place`", SNX_NOTICE_ALL},
     {SNX_TR_NOOP("Options"), "--recomp, --repo, --debug, -r --out, --interp-only",
-     "--recompile, --data, --no-setup, -r --name, --jit-only", "[cli] the options' names", SNX_NOTICE_ALL}};
+     "--recompile, --data, --no-setup, -r --name, --jit-only", "[cli] the options' names", SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("SLP vectorizer"), SNX_TR_NOOP("LLVM's, on in the recompile and the JIT"),
+     SNX_TR_NOOP("off, as LLVM 23 can break a module with it: Settings > Debug turns it on"), "LLVM's SLP vectorizer",
+     SNX_NOTICE_ALL}};
 int snx_notice_here(int notice) {
     int systems = snx_notices[notice].systems;
 #if defined(__ANDROID__)
