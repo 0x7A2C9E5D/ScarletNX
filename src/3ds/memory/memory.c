@@ -2,8 +2,13 @@
    Copyright 2026 the ScarletNX contributors */
 #include "3ds/memory/ctr_memory.h"
 #include "3ds/memory/host.h"
+#include "common/memory/host.h"
 #include <stdlib.h>
 #include <string.h>
+
+/* the guest's permissions go to the host layer as they are */
+_Static_assert(SNX_CTR_READ == SNX_HOST_READ && SNX_CTR_WRITE == SNX_HOST_WRITE && SNX_CTR_EXEC == SNX_HOST_EXEC,
+               "permission bits");
 
 /* A guest address of a physical RAM page in a flat space: the reverse map write tracking protects through */
 typedef struct {
@@ -20,7 +25,7 @@ struct SnxCtrMemory {
     const SnxCtrProfile* profile;
     /* each RAM region's memory: its part of host's view, the regions one after another (NULL for MMIO) */
     unsigned char* backing[8];
-    CtrHostMemory host;
+    SnxHostMemory host;
     void* mmio_context;
     SnxCtrMmioRead read;
     SnxCtrMmioWrite write;
@@ -58,7 +63,7 @@ SnxCtrMemory* snx_ctr_memory_new(SnxCtrModel model) {
         if (p->regions[i].kind != SNX_CTR_MMIO) ram += p->regions[i].size;
     /* one host memory object, whatever the host: its view is page-aligned (the GPU imports each region's part, and a
        flat space maps its pages) */
-    if (!ctr_host_memory_new(&m->host, ram)) {
+    if (!snx_host_memory_new(&m->host, ram)) {
         free(m);
         return NULL;
     }
@@ -83,7 +88,7 @@ unsigned char* snx_ctr_memory_region(const SnxCtrMemory* m, size_t index) {
 const SnxCtrProfile* snx_ctr_memory_profile(const SnxCtrMemory* m) { return m ? m->profile : NULL; }
 void snx_ctr_memory_free(SnxCtrMemory* m) {
     if (!m) return;
-    ctr_host_memory_free(&m->host);
+    snx_host_memory_free(&m->host);
     free(m->level);
     free(m->alias_head);
     free(m->aliases);
@@ -102,7 +107,7 @@ SnxCtrAddressSpace* snx_ctr_space_new(SnxCtrMemory* m) {
     s->memory = m;
     if (ctr_host_flat()) {
         while (s->index < TRACK_SPACES && m->spaces[s->index]) ++s->index;
-        if (s->index == TRACK_SPACES || !(s->base = ctr_host_reserve())) {
+        if (s->index == TRACK_SPACES || !(s->base = snx_host_reserve(CTR_HOST_SPACE + CTR_HOST_GUARD))) {
             free(s);
             return NULL;
         }
@@ -128,7 +133,7 @@ void snx_ctr_space_free(SnxCtrAddressSpace* s) {
                     if (index != UINT32_MAX) alias_remove(s->memory, index, s, t << 22 | i << 12);
                 }
         s->memory->spaces[s->index] = NULL;
-        ctr_host_release(s->base);
+        snx_host_release(s->base, CTR_HOST_SPACE + CTR_HOST_GUARD);
     }
     for (size_t i = 0; i < 1024; ++i) free(s->tables[i]);
     free(s);
@@ -154,7 +159,7 @@ static void apply(SnxCtrMemory* m, uint32_t index) {
     for (uint32_t a = m->alias_head[index]; a; a = m->aliases[a - 1].next) {
         const Alias* alias = &m->aliases[a - 1];
         SnxCtrAddressSpace* s = m->spaces[alias->space];
-        (void)ctr_host_protect(s->base, alias->va, 4096,
+        (void)snx_host_protect(s->base, alias->va, 4096,
                                tracked_permissions(m->level[index], page(s, alias->va)->permissions));
     }
 }
@@ -277,7 +282,7 @@ SnxCtrMemResult snx_ctr_map(SnxCtrAddressSpace* s, uint32_t va, uint32_t pa, uin
     /* the flat space's view of the pages, before they are published: MMIO stays inaccessible there, and an access
        from compiled code faults (ctr_host_faults) */
     if (s->base && region->kind != SNX_CTR_MMIO &&
-        !ctr_host_map(&s->memory->host, s->base, va, host_offset(s->memory, region, pa), size, permissions))
+        !snx_host_map(&s->memory->host, s->base, va, host_offset(s->memory, region, pa), size, permissions))
         return SNX_CTR_MEM_NOMEM;
     for (uint64_t offset = 0; offset < size; offset += 4096)
         *page(s, va + (uint32_t)offset) = (Page){pa + (uint32_t)offset, (unsigned char)permissions, 1};
@@ -288,12 +293,12 @@ SnxCtrMemResult snx_ctr_map(SnxCtrAddressSpace* s, uint32_t va, uint32_t pa, uin
             if (!alias_add(s->memory, index, s, va + (uint32_t)offset)) {
                 for (uint64_t undo = 0; undo < offset; undo += 4096)
                     alias_remove(s->memory, ram_index(s->memory, pa + (uint32_t)undo), s, va + (uint32_t)undo);
-                (void)ctr_host_unmap(s->base, va, size);
+                (void)snx_host_unmap(s->base, va, size);
                 for (uint64_t at = 0; at < size; at += 4096) *page(s, va + (uint32_t)at) = (Page){0};
                 return SNX_CTR_MEM_NOMEM;
             }
             if (s->memory->level[index])
-                (void)ctr_host_protect(s->base, va + (uint32_t)offset, 4096,
+                (void)snx_host_protect(s->base, va + (uint32_t)offset, 4096,
                                        tracked_permissions(s->memory->level[index], permissions));
         }
     changed(s->memory);
@@ -314,7 +319,7 @@ static bool host_change(SnxCtrAddressSpace* s, uint32_t va, uint32_t size, unsig
             run += 4096;
             continue;
         }
-        if (run && !(unmap ? ctr_host_unmap(s->base, start, run) : ctr_host_protect(s->base, start, run, permissions)))
+        if (run && !(unmap ? snx_host_unmap(s->base, start, run) : snx_host_protect(s->base, start, run, permissions)))
             return false;
         run = 0;
     }
@@ -338,7 +343,7 @@ static SnxCtrMemResult change(SnxCtrAddressSpace* s, uint32_t va, uint32_t size,
         } else {
             p->permissions = (unsigned char)permissions;
             if (index != UINT32_MAX && s->memory->level[index]) /* a tracked page keeps its level's protection */
-                (void)ctr_host_protect(s->base, (uint32_t)at, 4096,
+                (void)snx_host_protect(s->base, (uint32_t)at, 4096,
                                        tracked_permissions(s->memory->level[index], permissions));
         }
     }

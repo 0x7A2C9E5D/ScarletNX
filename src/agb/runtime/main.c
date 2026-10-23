@@ -114,6 +114,11 @@ int main(int argc, char** argv) {
             agb_board_destroy(&board);
             return 1;
         }
+        if (!map.mirrored)
+            fprintf(stderr,
+                    "scarletnx-agb: the host's pages are %zu bytes, past the %u a memory mirror can be a view at: each "
+                    "mirror is RAM of its own\n",
+                    map.page, AGB_MAP_VIEW_MAX);
         agb_cpu_init(&cpu, &board, map.base);
         base = (char*)malloc(strlen(path) + 16);
         if (base) sprintf(base, "%s.code", path);

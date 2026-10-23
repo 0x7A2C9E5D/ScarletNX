@@ -6,7 +6,7 @@ add_library(snx_ctr_board STATIC board/board.c)
 set_target_properties(snx_ctr_board PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_compile_options(snx_ctr_board PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 add_library(snx_ctr_memory STATIC memory/memory.c memory/host.c)
-target_link_libraries(snx_ctr_memory PUBLIC snx_ctr_board)
+target_link_libraries(snx_ctr_memory PUBLIC snx_ctr_board scarletnx-common)
 add_library(snx_ctr_cpu STATIC cpu/cpu.c)
 target_link_libraries(snx_ctr_cpu PUBLIC snx_ctr_memory)
 add_library(snx_ctr_loader STATIC loader/loader.c loader/cia.c loader/ncch.c loader/romfs.c loader/blz.c loader/image.c

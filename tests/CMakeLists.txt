@@ -379,6 +379,11 @@ add_executable(snx-test-os-error os_error.c)
 snx_test_target(snx-test-os-error 99)
 target_link_libraries(snx-test-os-error PRIVATE scarletnx-common)
 add_test(NAME os_error COMMAND snx-test-os-error)
+# the host's side of a flat guest space (common/memory/host.c): views of one object are the same memory, a commit zeros
+add_executable(snx-test-host-memory host_memory.c)
+snx_test_target(snx-test-host-memory 99)
+target_link_libraries(snx-test-host-memory PRIVATE scarletnx-common)
+add_test(NAME host_memory COMMAND snx-test-host-memory)
 # RtAPI.cas128: the host's 16-byte compare-and-swap and the locked one, a pair stored whole or not at all
 add_executable(snx-test-cas128 cas128.c)
 snx_test_target(snx-test-cas128 11)

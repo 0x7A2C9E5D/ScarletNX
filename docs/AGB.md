@@ -104,7 +104,9 @@ next run starts with every block the last one reached.
 The CPU state is the recompiler's `SnxArmCPU` on a flat window (`cpu/memmap.c`)
 where the board's regions live at their canonical addresses with the console's
 mirrors mapped to the same pages, so generated code reaches everything with
-one pointer add. The blocks are compiled with the backend's ARM7TDMI profile
+one pointer add. Each region is a host memory object (`src/common/memory/host.c`,
+as the 3DS's RAM) mapped at every mirror at the host's page size; a host whose
+pages are past 32 KiB keeps each mirror as RAM of its own, and the runner says so. The blocks are compiled with the backend's ARM7TDMI profile
 (`src/common/cpu/arm/README.md`), which follows the console's CPU where ARMv8-A
 differs (rotated misaligned loads, PC + 12 stores, POP {pc} without
 interworking) and sends the BIOS, I/O window, palette, VRAM, OAM and save memory
