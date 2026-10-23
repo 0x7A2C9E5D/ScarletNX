@@ -105,6 +105,7 @@ static int tracy_capture_start(int seconds, int launch) {
 #endif
     snprintf(g_tracy_capture_path, sizeof g_tracy_capture_path, "%s/tracy_%s_%04d%02d%02d_%02d%02d%02d.tracy", dir,
              g_exename, t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
+    snx_path_native(g_tracy_capture_path);
     argv[n++] = tool;
     argv[n++] = "-o";
     argv[n++] = g_tracy_capture_path;

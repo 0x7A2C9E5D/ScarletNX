@@ -70,18 +70,44 @@ char* snx_strdup(const char* s) {
     memcpy(p, s, n);
     return p;
 }
-char* snx_format(const char* fmt, ...) {
-    va_list ap;
+static char* format_list(const char* fmt, va_list ap) {
+    va_list again;
     int n;
     char* p;
-    va_start(ap, fmt);
+    va_copy(again, ap);
     n = vsnprintf(NULL, 0, fmt, ap);
-    va_end(ap);
-    if (n < 0) return snx_strdup("");
+    if (n < 0) {
+        va_end(again);
+        return snx_strdup("");
+    }
     p = (char*)snx_alloc((size_t)n + 1);
+    vsnprintf(p, (size_t)n + 1, fmt, again);
+    va_end(again);
+    return p;
+}
+char* snx_format(const char* fmt, ...) {
+    va_list ap;
+    char* p;
     va_start(ap, fmt);
-    vsnprintf(p, (size_t)n + 1, fmt, ap);
+    p = format_list(fmt, ap);
     va_end(ap);
+    return p;
+}
+void snx_path_native(char* path) {
+#ifdef _WIN32
+    for (; path && *path; ++path)
+        if (*path == '/') *path = '\\';
+#else
+    (void)path;
+#endif
+}
+char* snx_path_format(const char* fmt, ...) {
+    va_list ap;
+    char* p;
+    va_start(ap, fmt);
+    p = format_list(fmt, ap);
+    va_end(ap);
+    snx_path_native(p);
     return p;
 }
 /* snx_error's sink, snx_error_sink's: NULL for stderr; and the kinds whose folder app.ini names wrongly, said once */
@@ -134,6 +160,7 @@ char* snx_path_join(const char* a, const char* b) {
     memcpy(p, a, n);
     if (n && !separator(a[n - 1])) p[n++] = '/';
     memcpy(p + n, b, m + 1);
+    snx_path_native(p);
     return p;
 }
 char* snx_dirname(const char* path) {

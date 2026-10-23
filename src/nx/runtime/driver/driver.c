@@ -159,11 +159,11 @@ static int prepared_game(const char* input, char** folder, char** name) {
     if (dir) {
         for (leaf = dir + strlen(dir); leaf > dir && leaf[-1] != '/' && leaf[-1] != '\\'; --leaf) continue;
 #ifdef _WIN32
-        program = snx_format("%s/%s.exe", dir, own);
+        program = snx_path_format("%s/%s.exe", dir, own);
 #else
-        program = snx_format("%s/%s", dir, own);
+        program = snx_path_format("%s/%s", dir, own);
 #endif
-        data = snx_format("%s/%s_data", dir, own);
+        data = snx_path_format("%s/%s_data", dir, own);
         found = *own && !strcmp(leaf, own) && snx_is_file(program) && snx_is_dir(data);
     }
     if (found && folder) {
@@ -483,9 +483,9 @@ static char* game_program(const char* folder, const char* name) {
     for (i = 0; i < count && !program; i++)
         if (snx_addon_kind(game_id(name), list[i].id) == SNX_ADDON_UPDATE) {
 #ifdef _WIN32
-            program = snx_format("%s/%s_%s.exe", folder, name, list[i].entry);
+            program = snx_path_format("%s/%s_%s.exe", folder, name, list[i].entry);
 #else
-            program = snx_format("%s/%s_%s", folder, name, list[i].entry);
+            program = snx_path_format("%s/%s_%s", folder, name, list[i].entry);
 #endif
             if (!snx_is_file(program)) {
                 free(program);
@@ -494,9 +494,9 @@ static char* game_program(const char* folder, const char* name) {
         }
     free(list);
 #ifdef _WIN32
-    return program ? program : snx_format("%s/%s.exe", folder, name);
+    return program ? program : snx_path_format("%s/%s.exe", folder, name);
 #else
-    return program ? program : snx_format("%s/%s", folder, name);
+    return program ? program : snx_path_format("%s/%s", folder, name);
 #endif
 }
 /* The game's checked DLCs readied as ensure_addon readies one, each from the dump its own .ini names; one whose dump
@@ -524,7 +524,7 @@ static int drop_dlc_program(const char* folder, const char* name) {
     size_t i;
     int rc = 0;
     for (i = 0; !rc && i < sizeof parts / sizeof *parts; ++i) {
-        char* part = snx_format("%s/%s%s", folder, name, parts[i]);
+        char* part = snx_path_format("%s/%s%s", folder, name, parts[i]);
         if (snx_is_file(part)) {
             printf("Removing %s: a DLC plays with its game now, checked in its list of updates and DLCs\n", part);
             rc = snx_remove_tree(part);

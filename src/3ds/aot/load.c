@@ -68,7 +68,7 @@ char* snx_ctr_game_file(const char* directory, const char* suffix) {
     size_t n = strlen(folder), cut;
     while (n > 1 && (folder[n - 1] == '/' || folder[n - 1] == '\\')) folder[--n] = 0;
     for (cut = n; cut && folder[cut - 1] != '/' && folder[cut - 1] != '\\'; --cut) continue;
-    char* file = snx_format("%s/%s%s", folder, folder + cut, suffix);
+    char* file = snx_path_format("%s/%s%s", folder, folder + cut, suffix);
     free(folder);
     return file;
 }

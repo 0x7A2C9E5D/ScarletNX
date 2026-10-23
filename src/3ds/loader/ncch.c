@@ -158,7 +158,7 @@ bool ctr_ncch_write(CtrReader* r, const CtrCia* cia, const CtrNcch* n, const cha
     free(path);
     for (size_t i = 0; i < 10 && ok; ++i) {
         if (!*n->names[i]) continue;
-        path = snx_format("%s/exefs/%s", stage, n->names[i]);
+        path = snx_path_format("%s/exefs/%s", stage, n->names[i]);
         const unsigned char* file_hash = n->exefs + 0x1e0 - i * 32;
         if ((int)i == n->code_index)
             ok = ctr_hash_matches(r, n->files[i], file_hash) && ctr_write(r, path, n->code, n->code_size);

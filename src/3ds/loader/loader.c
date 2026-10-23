@@ -196,7 +196,7 @@ SnxCtrExtractResult snx_ctr_extract(const char* input, const char* destination, 
     if (!destination) {
         char hex[65];
         for (size_t i = 0; i < 32; ++i) snprintf(hex + i * 2, 3, "%02x", cia.input_hash[i]);
-        generated = snx_format("%s/%016" PRIx64 "-%s", work ? work : "work/3ds", cia.title_id, hex);
+        generated = snx_path_format("%s/%016" PRIx64 "-%s", work ? work : "work/3ds", cia.title_id, hex);
         destination = generated;
     }
     if (!*destination || !no_links(destination) || !(target = snx_absolute(destination))) {

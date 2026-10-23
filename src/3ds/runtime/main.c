@@ -374,7 +374,7 @@ static bool parse_seconds(const char* text, double* seconds) {
 static char* own_game(const char* argv0) {
     char *name = last_part(argv0), *exe = name && strncmp(name, "scarletnx", 9) ? snx_executable(argv0) : NULL;
     char* dir = exe ? snx_dirname(exe) : NULL;
-    char* module = dir ? snx_format("%s/%s%s", dir, name, SNX_CTR_MODULE_SUFFIX) : NULL;
+    char* module = dir ? snx_path_format("%s/%s%s", dir, name, SNX_CTR_MODULE_SUFFIX) : NULL;
     if (dir && !snx_ctr_title_name(name) && !(module && snx_is_file(module))) {
         free(dir);
         dir = NULL;

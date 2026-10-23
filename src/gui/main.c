@@ -7767,7 +7767,8 @@ static void left_games(App* app, const char* folder) {
         npdm = data ? snx_path_join(data, "exefs/main.npdm") : NULL;
         bytes = npdm && snx_is_file(npdm) ? (unsigned char*)snx_read_file(npdm, &size) : NULL;
         old = name ? snx_path_join(folder, name) : NULL;
-        now = name ? snx_format("%s/%s/", folder, snx_title_text(snx_npdm_title(bytes, size), id) ? id : name) : NULL;
+        now = name ? snx_path_format("%s/%s/", folder, snx_title_text(snx_npdm_title(bytes, size), id) ? id : name)
+                   : NULL;
         if (old && now && data && snx_is_dir(data)) left_line(app, old, now, true);
         free(bytes);
         free(npdm);
@@ -7900,7 +7901,7 @@ static void left_behind(App* app) {
     /* a portable copy's games/ beside the program, which a .scarletnx/ there holds now */
     if (app->drivers && app->data_dir) {
         old = snx_path_join(app->drivers, "games");
-        now = snx_format("%s/" SNX_PORTABLE_DIR "/recompiled", app->drivers);
+        now = snx_path_format("%s/" SNX_PORTABLE_DIR "/recompiled", app->drivers);
         if (old && now && app->games_dir && strcmp(old, app->games_dir)) left_line(app, old, now, snx_is_dir(old));
     }
     free(old);
@@ -8303,7 +8304,7 @@ static void dests_open(App* app, char* file, bool prepared) {
 }
 /* the box's question */
 static void dests_question(const App* app, char* question, size_t size) {
-    const char* slash = app->dest_file ? strrchr(app->dest_file, '/') : NULL;
+    const char* slash = app->dest_file ? SDL_max(strrchr(app->dest_file, '/'), strrchr(app->dest_file, '\\')) : NULL;
     snprintf(question, size, snx_tr("%s: into which folder of the recompiled library?"),
              slash            ? slash + 1
              : app->dest_file ? app->dest_file

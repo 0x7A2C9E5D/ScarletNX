@@ -111,6 +111,18 @@ int main(void) {
         assert(dir[kind]);
         free(base);
     }
+    /* one separator in a path made here, the system's: on Windows a / given becomes \, as every folder shown is */
+    {
+        char *joined = snx_path_join("top/a", "b/c"), *formatted = snx_path_format("%s/%s.ini", "top/a", "G");
+#ifdef _WIN32
+        assert(!strcmp(joined, "top\\a\\b\\c") && !strcmp(formatted, "top\\a\\G.ini"));
+        for (kind = SNX_USER_DATA; kind <= SNX_USER_CACHE; ++kind) assert(!strchr(dir[kind], '/'));
+#else
+        assert(!strcmp(joined, "top/a/b/c") && !strcmp(formatted, "top/a/G.ini"));
+#endif
+        free(joined);
+        free(formatted);
+    }
     games = join(dir[SNX_USER_DATA], "games");
     assert(!snx_mkdirs(games));
 #ifdef SNX_XDG

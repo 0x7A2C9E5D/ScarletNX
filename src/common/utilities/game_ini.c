@@ -96,7 +96,7 @@ done:
 }
 char* snx_game_source(const char* folder, const char* name, int* recorded) {
     char *ini = snx_game_ini(folder, name), *source = snx_ini_value(ini, "source");
-    char* path = source ? source : snx_format("%s/%s.source", folder, name);
+    char* path = source ? source : snx_path_format("%s/%s.source", folder, name);
     if (recorded) *recorded = source || snx_is_link(path) || snx_path_exists(path);
     free(ini);
     return path;

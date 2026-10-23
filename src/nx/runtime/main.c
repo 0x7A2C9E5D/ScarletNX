@@ -282,6 +282,7 @@ static void kind_dir(char* out, size_t cap, int kind, const char* what, const ch
     char *moved, *full;
     if (recorded && snx_is_dir(recorded)) {
         snprintf(out, cap, "%s/", recorded);
+        snx_path_native(out);
         return;
     }
     snprintf(out, cap, "%s", g_exedir);
@@ -291,8 +292,10 @@ static void kind_dir(char* out, size_t cap, int kind, const char* what, const ch
         if (moved && strcmp(moved, here)) {
             if (snx_mkdirs(moved))
                 WARN("%s cannot be created, so the game's %s stay beside it\n", moved, what);
-            else
+            else {
                 snprintf(out, cap, "%s/", moved);
+                snx_path_native(out);
+            }
         }
         free(moved);
     }

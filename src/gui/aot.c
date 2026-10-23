@@ -22,7 +22,7 @@ char* gui_aot_cache_path(const char* folder, const char* name) {
     char* path;
     if (!folder || !name) return NULL;
     /* the runtime's .folders cache=, when it names a folder that is there; else its user path, as kind_dir */
-    record = snx_format("%s/%s.folders", folder, name);
+    record = snx_path_format("%s/%s.folders", folder, name);
     recorded = record ? snx_ini_value(record, "cache") : NULL;
     if (recorded && snx_is_dir(recorded)) {
         dir = snx_strdup(recorded);
@@ -40,7 +40,7 @@ char* gui_aot_cache_path(const char* folder, const char* name) {
         free(dir);
         dir = moved;
     }
-    path = snx_format("%s/%s.jitcache", dir, name);
+    path = snx_path_format("%s/%s.jitcache", dir, name);
     free(dir);
     return path;
 }

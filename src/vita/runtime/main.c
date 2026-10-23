@@ -128,7 +128,7 @@ static bool link_dump(const char* folder, const char* name, const char* target) 
 /* a dumped game's update: patch/<title ID> beside its app/<title ID> */
 static char* dump_patch(const char* app, const char* title) {
     char *full = snx_absolute(app), *parent = full ? snx_dirname(full) : NULL, *root = parent ? snx_dirname(parent) : NULL;
-    char* patch = root ? snx_format("%s/patch/%s", root, title) : NULL;
+    char* patch = root ? snx_path_format("%s/patch/%s", root, title) : NULL;
     free(full);
     free(parent);
     free(root);
@@ -178,11 +178,12 @@ static int play(const char* folder, bool recompile, double seconds, const char* 
     VitaNative native = {0};
     VitaProcess* process = NULL;
     /* the update's eboot.bin when there is one */
-    char error[512], *eboot = snx_format("%s/patch/eboot.bin", folder), *module = vita_game_file(folder, VITA_MODULE_SUFFIX);
+    char error[512], *eboot = snx_path_format("%s/patch/eboot.bin", folder),
+                     *module = vita_game_file(folder, VITA_MODULE_SUFFIX);
     int status = 1;
     if (eboot && !snx_is_file(eboot)) {
         free(eboot);
-        eboot = snx_format("%s/app/eboot.bin", folder);
+        eboot = snx_path_format("%s/app/eboot.bin", folder);
     }
     if (!eboot || !module || !vita_image_load(eboot, &image, error, sizeof error)) {
         fprintf(stderr, "scarletnx-vita: %s\n", eboot && module ? error : "out of memory");
@@ -231,7 +232,7 @@ static int play(const char* folder, bool recompile, double seconds, const char* 
         goto done;
     }
     process->module = native.module;
-    char *sfo_path = snx_format("%s/%s/sce_sys/param.sfo", folder, snx_is_dir(process->patch) ? "patch" : "app"),
+    char *sfo_path = snx_path_format("%s/%s/sce_sys/param.sfo", folder, snx_is_dir(process->patch) ? "patch" : "app"),
          *title = NULL;
     size_t sfo_size = 0;
     unsigned char* sfo = sfo_path ? snx_read_file(sfo_path, &sfo_size) : NULL;
@@ -331,7 +332,7 @@ int snx_vita_main(int argc, char** argv) {
         }
         char error[512] = "no sce_sys/param.sfo";
         size_t size = 0;
-        char* sfo_path = dump ? snx_format("%s/sce_sys/param.sfo", input) : NULL;
+        char* sfo_path = dump ? snx_path_format("%s/sce_sys/param.sfo", input) : NULL;
         unsigned char* sfo = dump ? (sfo_path ? snx_read_file(sfo_path, &size) : NULL)
                                   : vita_vpk_member(input, "sce_sys/param.sfo", &size, error, sizeof error);
         free(sfo_path);

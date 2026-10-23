@@ -20,6 +20,7 @@
 #include "vita/gpu/usse.h"
 #include "vita/gpu/gxp.h"
 #include "common/utilities/spirv_emit.h"
+#include "common/utilities/common.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -2110,6 +2111,7 @@ bool usse_corpus_write(const char* folder, const unsigned char* program, size_t 
         for (size_t i = 0; i < sizes[k]; ++i) h = (h ^ parts[k][i]) * 0x100000001b3ull;
     char path[1200];
     snprintf(path, sizeof path, "%s/%016llx.gxp", folder, (unsigned long long)h);
+    snx_path_native(path);
     FILE* f = fopen(path, "rb");
     if (f) { /* there already */
         fclose(f);

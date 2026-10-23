@@ -494,7 +494,7 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
         goto done;
     }
     objects[0] = snx_path_join(stage, "code.o");
-    for (unsigned i = 1; i < files; ++i) objects[i] = snx_format("%s/block-%05u.o", stage, i);
+    for (unsigned i = 1; i < files; ++i) objects[i] = snx_path_format("%s/block-%05u.o", stage, i);
     work = (Work){.image = &image, .entries = entries, .objects = objects + 1, .count = count, .chunks = files - 1,
                   .exhaustive = exhaustive};
     if (!compile_chunks(&work)) {
