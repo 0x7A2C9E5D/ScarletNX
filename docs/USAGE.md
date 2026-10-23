@@ -186,8 +186,8 @@ a `|` in its name always runs, and the launcher says so.
 
 Add Cheats, in the same box, opens the system's file picker for a `.txt` and copies it into the cheats folder as
 `<build id>.txt`, the only name the runtime reads; the original stays where it is, and its cheats show checked at once.
-A file already named by a build ID (16 hex digits) keeps that name, in capitals, and the message says so when it is
-not the build ID the game plays with. Another takes the build ID of the main module the game plays with as the box has
+A file already named by a build ID (16 hex digits) keeps that name, in capitals, and is refused when the game plays
+with another, the message naming both. Another takes the build ID of the main module the game plays with as the box has
 it: a played mod's `exefs/main`, else the checked update's own (from its extraction: one read from its dump has none
 the launcher can read), else the game's `exefs/main` or `main.nro`; with none to read, the file is refused, the message
 naming the module it looked for. It refuses too a name the cheats folder has already (files are never merged), a file

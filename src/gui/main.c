@@ -3549,9 +3549,9 @@ static size_t cheats_in(const char* text) {
 }
 /* Add Cheats' file, as the picker gave it (a path, or a phone's URI): a .txt with a cheat at least, copied into the
    game's cheats folder by the name the runtime reads, <build ID>.txt. That is its own name when it is one (16 hex
-   digits, in capitals), else the build ID of the main module the game plays with (addons_build_id); a file of that
-   name there is never added to. Its cheats checked in the box; else app->message says why not, with the file or the
-   name it is about */
+   digits, in capitals), else the build ID of the main module the game plays with (addons_build_id); a file named by
+   another build ID than that one is refused, and a file of that name there is never added to. Its cheats checked in
+   the box; else app->message says why not, with the file, the name or the build IDs it is about */
 static void cheats_add(App* app, const char* picked) {
     char *path = gui_document_path(picked), *leaf, *text = NULL, *module = NULL, *to = NULL, *staged = NULL;
     char name[24], given[17], known[17], why[256], size_text[32];
@@ -3590,6 +3590,11 @@ static void cheats_add(App* app, const char* picked) {
                  snx_tr("Not added: %s is not named <build ID>.txt, and the build ID of the main module the game plays "
                         "with cannot be read from %s"),
                  leaf, module);
+    else if (hex && has_id && strcmp(given, known)) /* the runtime reads only the one of the main it runs */
+        snprintf(app->message, sizeof app->message,
+                 snx_tr("Not added: %s is for build ID %s, and the game plays with build ID %s: its cheats would "
+                        "never run"),
+                 leaf, given, known);
     else {
         snprintf(name, sizeof name, "%s.txt", hex ? given : known);
         to = snx_path_join(app->cheats_folder, name);
@@ -3617,10 +3622,6 @@ static void cheats_add(App* app, const char* picked) {
                          snx_tr("Added %s: %zu cheats from %s, named by the build ID of the main module the game "
                                 "plays with"),
                          to, count, leaf);
-            else if (has_id && strcmp(given, known))
-                snprintf(app->message, sizeof app->message,
-                         snx_tr("Added %s: %zu cheats, which run with build ID %s; the game plays with %s now"), to,
-                         count, given, known);
             else
                 snprintf(app->message, sizeof app->message, snx_tr("Added %s: %zu cheats"), to, count);
         }

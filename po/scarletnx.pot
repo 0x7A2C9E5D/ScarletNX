@@ -1147,6 +1147,11 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "Not added: %s is for build ID %s, and the game plays with build ID %s: its cheats would never run"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "Not added: the cheats folder has %s already: %s"
 msgstr ""
 
@@ -1158,11 +1163,6 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "Added %s: %zu cheats from %s, named by the build ID of the main module the game plays with"
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
-msgid "Added %s: %zu cheats, which run with build ID %s; the game plays with %s now"
 msgstr ""
 
 #: src/gui/main.c

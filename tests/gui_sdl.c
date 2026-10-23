@@ -1886,13 +1886,32 @@ static void add_cheats(App* app, const char* temporary) {
     assert(!strcmp(app->message, want) && file_is(cheats, "FEDCBA9876543210.txt", mine_text));
     assert(app->cheats_count == 3 && !strcmp(app->cheats[2], "Infinite HP") && !app->cheats_on[0] &&
            app->cheats_on[1] && app->cheats_on[2] && app->addons_focus == 5 && app->games.addons[index] == 3);
-    /* named by another build ID than the one the game plays with: added, and the message says both */
+    /* named by another build ID than the one the game plays with: refused, the message naming both, nothing written */
     key(app, SDLK_RETURN);
     addon_answer_is(app, other);
-    snprintf(want, sizeof want,
-             "Added %s: 1 cheats, which run with build ID 1111111111111111; the game plays with FEDCBA9876543210 now",
-             to_other);
-    assert(!strcmp(app->message, want) && app->cheats_count == 4);
+    assert(!strcmp(app->message, "Not added: 1111111111111111.TXT is for build ID 1111111111111111, and the game "
+                                 "plays with build ID FEDCBA9876543210: its cheats would never run"));
+    assert(!snx_path_exists(to_other) && app->cheats_count == 3 && !app->confirm.shown);
+    /* the same file once the game plays with that build ID: added by its name */
+    fixture_module(main_file, "1111111111111111", false);
+    key(app, SDLK_RETURN);
+    addon_answer_is(app, other);
+    snprintf(want, sizeof want, "Added %s: 1 cheats", to_other);
+    assert(!strcmp(app->message, want) && app->cheats_count == 4 &&
+           file_is(cheats, "1111111111111111.txt", "[Speed]\n04000000 c 4\n"));
+    { /* a name in small letters is the same build ID as the main's, which its head gives in capitals */
+        char *small = snx_path_join(root, "abcdef0123456789.txt"),
+             *to_small = snx_path_join(cheats, "ABCDEF0123456789.txt");
+        assert(!snx_write_file(small, "[Speed]\n04000000 c 4\n", 21)); /* a cheat listed already: the count stays */
+        fixture_module(main_file, "ABCDEF0123456789", false);
+        key(app, SDLK_RETURN);
+        addon_answer_is(app, small);
+        snprintf(want, sizeof want, "Added %s: 1 cheats", to_small);
+        assert(!strcmp(app->message, want) && app->cheats_count == 4 && snx_is_file(to_small));
+        free(to_small);
+        free(small);
+    }
+    fixture_module(main_file, "FEDCBA9876543210", false);
     /* 16 letters that are not hex digits are no build ID, nor 16 hex digits and more before .txt: each takes the
        game's, which the folder has already */
     for (int i = 0; i < 2; ++i) {
@@ -1908,6 +1927,7 @@ static void add_cheats(App* app, const char* temporary) {
     if (snx_path_exists("/dev/full")) { /* a disk that fills up as the file is written: what it wrote taken away */
         char *full = snx_path_join(root, "3333333333333333.txt"), *gone = snx_path_join(cheats, "3333333333333333.txt");
         char* staged = snx_path_join(cheats, ".3333333333333333.txt.adding");
+        fixture_module(main_file, "3333333333333333", false); /* the file's own: nothing refuses it before */
         assert(!snx_write_file(full, "[Full]\n", 7) && !snx_symlink("/dev/full", staged));
         snprintf(want, sizeof want, "Not added: cannot write %s: %s", gone, strerror(ENOSPC));
         key(app, SDLK_RETURN);
@@ -1925,6 +1945,7 @@ static void add_cheats(App* app, const char* temporary) {
         char *locked = snx_path_join(root, "2222222222222222.txt"),
              *gone = snx_path_join(cheats, "2222222222222222.txt");
         char* staged = snx_path_join(cheats, ".2222222222222222.txt.adding");
+        fixture_module(main_file, "2222222222222222", false);
         assert(!snx_write_file(locked, "[Lock]\n", 7) && !chmod(cheats, 0500));
         if (access(cheats, W_OK)) { /* root writes there all the same: a container's */
             snprintf(want, sizeof want, "Not added: cannot write %s: %s", gone, strerror(EACCES));
