@@ -174,14 +174,23 @@ static const SnxModule* load_pack(const char* path) {
     const char* names[1];
     SnxU64 address = 0;
     ModuleFn get;
-    size_t size = 0, count = 0, reserve;
-    unsigned char* data = (unsigned char*)snx_read_file(path, &size);
+    size_t count = 0, reserve;
+    PFileMap map;
+    const unsigned char* data;
     char error[1024];
-    if (!data) fatal("%s could not be read", path);
-    inputs = snx_objects_unpack(data, size, "game code", &count);
+    /* mapped, not read: the pages are the file's, which the system can take back, and the pack is gone from the
+       address space once the loader has copied it */
+    if (plat_file_map(&map, path) || !map.data) fatal("%s could not be read", path);
+    data = map.data;
+    inputs = snx_objects_unpack(data, (size_t)map.size, "game code", &count);
     if (!inputs) fatal("%s is not a pack of recompiled code: recompile the game with --target ios", path);
+    /* the guest's address space before the code's arena: the arena lands in the middle of the 13 GiB or so an app has
+       and, with its write alias, leaves no run of the 5 GiB the guest needs at least */
+    mem_reserve();
     /* at least 64 MiB, and twice the objects' size up to the 2 GiB an arena holds */
-    reserve = size < ((size_t)1 << 25) ? ((size_t)1 << 26) : size < ((size_t)1 << 30) ? size * 2 : ((size_t)1 << 31);
+    reserve = map.size < ((u64)1 << 25) ? ((size_t)1 << 26)
+              : map.size < ((u64)1 << 30)  ? (size_t)map.size * 2
+                                           : ((size_t)1 << 31);
     loader = snx_code_loader_new(reserve, error, sizeof(error));
     if (!loader) fatal("The game's code cannot be loaded: %s", error);
     memset(&rtlib, 0, sizeof(rtlib));
@@ -193,7 +202,7 @@ static const SnxModule* load_pack(const char* path) {
         snx_code_load(loader, inputs, count, names, 1, &address, error, sizeof(error)))
         fatal("The game's code cannot be loaded: %s", error);
     free(inputs);
-    free(data); /* the loaded code is a copy */
+    plat_file_unmap(&map); /* the loaded code is a copy */
     {
         SnxU64 variants = 0;
         if (snx_code_lookup(loader, "snx_variants", &variants)) { /* a global of the pack, in the loader's table */

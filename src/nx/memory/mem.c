@@ -540,7 +540,10 @@ static u64 largest_hole(void) {
         if (vm_region_64(mach_task_self(), &at, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&region, &n,
                          &object) != KERN_SUCCESS)
             break;
-        if (at > end && at - end > best) best = at - end, best_at = end;
+        {
+            u64 stop = (u64)at < hi ? (u64)at : hi; /* a run ends where the task's range does, not at a region past it */
+            if (stop > end && stop - end > best) best = stop - end, best_at = end;
+        }
         end = (u64)at + size;
         at += size;
         if (end >= hi) break;
@@ -575,11 +578,18 @@ static u8* reserve_ios(void) {
 }
 #endif
 
+void mem_reserve(void) {
+#ifdef SNX_IOS
+    if (g_mem) return;
+    g_mem = reserve_ios();
+    if (!g_mem) fatal("Could not reserve even 5 GiB of address space for the game's memory");
+#endif
+}
+
 void mem_init(void) {
     g_host_page = plat_vm_page();
 #ifdef SNX_IOS
-    g_mem = reserve_ios();
-    if (!g_mem) fatal("Could not reserve even 5 GiB of address space for the game's memory");
+    mem_reserve();
     LOG("memory: %llu GiB of address space reserved%s\n", (unsigned long long)(g_as_size >> 30),
         g_as_size < AS_MAX ? " (a smaller layout: this app has no extended virtual addressing)" : "");
 #else
