@@ -38,6 +38,11 @@ typedef struct {
     u32 pred[7];
     u32 cc_c, cc_o, cc_z, cc_s;
     u32 cbuf[18], cbuf_pointer[18];
+    /* constant buffer words read in the block being written, by bank and offset (a cache: a word that collides is
+       read again), and their bitcast to a float, 0 until made. A draw's constant buffers don't change under it */
+    struct {
+        u32 key, block, word, as_float;
+    } cbuf_seen[512];
     u32 scale_buffer, scale_pointer;
     u32 sampler[SH_MAXTEX], sampled_type[SH_MAXTEX];
     u32 texture_array, tex_index[SH_MAXTEX], tex_map_buffer, tex_map_pointer, active_index;
@@ -1053,15 +1058,28 @@ static void geometry_passthrough(DirectCtx* c, const ShaderInfo* si, u32 vertice
 
 /* A constant buffer word is loaded as an integer: a float load may flush the bits of an integer that look like a
    denormal (Adreno does, in a shader that declares DenormFlushToZero), and a jump table of small offsets reads 0. */
-static u32 cbuf_word(DirectCtx* c, u64 w) {
-    u32 idx = B(w, 34, 5), off = B(w, 20, 14) * 4;
+/* the cache entry of instruction w's constant buffer operand, read in this block if it wasn't */
+static u32 cbuf_entry(DirectCtx* c, u64 w) {
+    u32 idx = B(w, 34, 5), off = B(w, 20, 14) * 4, key = (idx << 16 | off >> 2) + 1;
+    u32 at = (key * 2654435761u) >> 23; /* 9 bits */
+    if (c->cbuf_seen[at].key == key && c->cbuf_seen[at].block == c->emit.block) return at;
     u32 member = spv_emit_constant_u32(&c->emit, c->u32_type, 0);
     u32 element = spv_emit_constant_u32(&c->emit, c->u32_type, off >> 4);
     u32 component = spv_emit_constant_u32(&c->emit, c->u32_type, (off >> 2) & 3);
-    return spv_emit_uniform_component(&c->emit, c->cbuf_pointer[idx], c->cbuf[idx], member, element, component,
-                                      c->u32_type);
+    c->cbuf_seen[at].key = key;
+    c->cbuf_seen[at].block = c->emit.block;
+    c->cbuf_seen[at].word = spv_emit_uniform_component(&c->emit, c->cbuf_pointer[idx], c->cbuf[idx], member, element,
+                                                       component, c->u32_type);
+    c->cbuf_seen[at].as_float = 0;
+    return at;
 }
-static u32 cbuf_read(DirectCtx* c, u64 w) { return spv_emit_bitcast(&c->emit, c->f32_type, cbuf_word(c, w)); }
+static u32 cbuf_word(DirectCtx* c, u64 w) { return c->cbuf_seen[cbuf_entry(c, w)].word; }
+static u32 cbuf_read(DirectCtx* c, u64 w) {
+    u32 at = cbuf_entry(c, w);
+    if (!c->cbuf_seen[at].as_float)
+        c->cbuf_seen[at].as_float = spv_emit_bitcast(&c->emit, c->f32_type, c->cbuf_seen[at].word);
+    return c->cbuf_seen[at].as_float;
+}
 static u32 integer_right(DirectCtx* c, u64 w, int kind) {
     if (kind == 0) return reg_read(c, B(w, 20, 8));
     if (kind == 1) return cbuf_word(c, w);
