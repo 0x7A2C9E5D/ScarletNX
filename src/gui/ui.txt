@@ -1,5 +1,5 @@
 # The launcher's scenes: tools/uigen makes gui/ui.h and gui/ui.c of them as it builds (its first comment has the
-# format), and main.c draws each in the area its screen gives it
+# format), and main.c draws each in the area its screen gives it. android. values are a phone's, iOS's too
 [scene]Menu {
 	# in the order of model.h's items, which main.c checks; the code gives the active one and the keys' state
 	[list]Entries {

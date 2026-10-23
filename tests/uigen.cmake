@@ -124,12 +124,13 @@ foreach(line
         # ui.txt's texts as shown, through main.c's ui_tr
         "ui_tr(ui_main_texts + ui_main_items[item].text)"
         "        unsigned attr = ui_other_more_attr_cb(app, row);\n"
-        # a platform's own metric: a macro each platform defines, the plain value or the default where it sets none
-        "#ifdef SDL_PLATFORM_ANDROID\n#define UI_OTHER_MORE__ROW_HEIGHT 40\n#elif !defined(SDL_PLATFORM_IOS)\n#define UI_OTHER_MORE__ROW_HEIGHT 17\n#else\n#define UI_OTHER_MORE__ROW_HEIGHT 17\n#endif\n"
-        "#ifdef SDL_PLATFORM_ANDROID\n#define UI_OTHER_MORE__MAX_ROWS 8\n#elif !defined(SDL_PLATFORM_IOS)\n#define UI_OTHER_MORE__MAX_ROWS 4\n#else\n#define UI_OTHER_MORE__MAX_ROWS 8\n#endif\n"
+        # a platform's own metric: a macro each platform defines, the plain value or the default where it sets none;
+        # android's on iOS too, the phones'
+        "#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)\n#define UI_OTHER_MORE__ROW_HEIGHT 40\n#else\n#define UI_OTHER_MORE__ROW_HEIGHT 17\n#endif\n"
+        "#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)\n#define UI_OTHER_MORE__MAX_ROWS 8\n#else\n#define UI_OTHER_MORE__MAX_ROWS 4\n#endif\n"
         "case UI_OTHER_MORE: return ui_shown(r[UI_OTHER_MORE].h, UI_OTHER_MORE__ROW_HEIGHT, 2, UI_OTHER_MORE__MAX_ROWS, scale);\n"
-        # a platform's own height: the scene laid out for each platform, Android's More 40px, the others' growing
-        "void ui_other_layout(GuiRect at, int scale, GuiRect* r) {\n    int s = scale;\n#ifdef SDL_PLATFORM_ANDROID\n"
+        # a platform's own height: the scene laid out for each platform, the phones' More 40px, the others' growing
+        "void ui_other_layout(GuiRect at, int scale, GuiRect* r) {\n    int s = scale;\n#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)\n"
         "    r[UI_OTHER_MORE] = gui_rect(at.x + UI_AT(0L, at.w, 0L, s), at.y + UI_AT(0L, at.h, 1114112L, s), UI_AT(65536L, at.w, 0L, s), UI_AT(0L, at.h, 2621440L, s));\n"
         "    r[UI_OTHER_MORE] = gui_rect(at.x + UI_AT(0L, at.w, 0L, s), at.y + UI_AT(0L, at.h, 1114112L, s), UI_AT(65536L, at.w, 0L, s), UI_AT(65536L, at.h, -1114112L, s));\n"
         "bool ui_main_spare_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {\n    (void)app;\n    (void)row;\n    (void)width;\n    (void)info;\n    return false;\n}\n")

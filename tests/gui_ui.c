@@ -148,11 +148,11 @@ static void test_layout(void) {
     ui_row_layout(gui_rect(0, 0, 400, 100), 1, o);
     is(o[UI_ROW_OK], 120, 40, 60, 20);
     is(o[UI_ROW_BACK], 180, 0, 100, 100);
-    /* a platform's own row metrics: Android's rows 30px high, the desktop's at most 2, the plain ones elsewhere */
+    /* a platform's own row metrics: a phone's rows 30px high (Android's and iOS's), the desktop's at most 2 */
     {
         GuiRect t[UI_TOUCH_ITEMS];
         ui_touch_layout(gui_rect(0, 0, 100, 100), 1, t);
-#ifdef SDL_PLATFORM_ANDROID
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS) /* a phone's: Android's own metrics on iOS too */
         is(ui_touch_row(t, 1, UI_TOUCH_BIG, 1), 0, 32, 100, 30);
         assert(ui_touch_shown(t, 1, UI_TOUCH_BIG) == 3); /* 100 / 32: 3 */
 #else

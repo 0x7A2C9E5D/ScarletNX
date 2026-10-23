@@ -44,8 +44,9 @@
    the code gives the button or row its UI_ATTR_* bits as it is drawn (failure, blink, active); on a list with items,
    any row's by its index. for-platform (android or desktop) is a row's alone: a scene's items keep their places on
    every platform, though an item's width and height, and a list's row_height, row_gap and max_rows, may take a
-   platform's own value (android.row_height = 40px; desktop. too), the scene laid out for each platform. color is a theme colour by its theme.ini name. key is an ASCII character or f1 to f12 after ctrl-
-   or alt- (alt-f4), a hotkey of its scene (Enter is the click's).
+   platform's own value (android.row_height = 40px, a phone's: Android's and iOS's, as main.c's touch UI; desktop.
+   the others'), the scene laid out for each. color is a theme colour by its theme.ini name. key is an ASCII
+   character or f1 to f12 after ctrl- or alt- (alt-f4), a hotkey of its scene (Enter is the click's).
    The callbacks, main.c's: a button's ui_<symbol>_action_cb(App*, uint32_t hit); a named label's
    ui_<symbol>_update_cb(App*, char* text, size_t size); a list without items' ui_<symbol>_get_row_info(App*, size_t
    row, int width, UiRowInfo*) (width: the row's in pixels, as drawn, for a label cut to fit it; false past its last
@@ -1342,7 +1343,8 @@ static void out_metric(const Item* list, int p) {
     else
         out("%d", metric(list, PLATFORM_ANY, p));
 }
-/* the macros of a scene's lists' metrics that a platform sets: android's, desktop's (out_platform's), else iOS's */
+/* the macros of a scene's lists' metrics that a platform sets: android's on Android and iOS (the phones'), else
+   desktop's */
 static void out_metrics(int scene) {
     static const int metrics[] = {P_ROW_HEIGHT, P_ROW_GAP, P_MAX_ROWS};
     int i, k;
@@ -1351,11 +1353,9 @@ static void out_metrics(int scene) {
         for (k = 0; k < 3; k++) {
             int p = metrics[k];
             if (!metric_varies(l, p)) continue;
-            out("#ifdef SDL_PLATFORM_ANDROID\n#define %s__%s %d\n", l->upper, metric_name(p),
-                metric(l, PLATFORM_ANDROID, p));
-            out("#elif !defined(SDL_PLATFORM_IOS)\n#define %s__%s %d\n", l->upper, metric_name(p),
-                metric(l, PLATFORM_DESKTOP, p));
-            out("#else\n#define %s__%s %d\n#endif\n", l->upper, metric_name(p), metric(l, PLATFORM_ANY, p));
+            out("#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)\n#define %s__%s %d\n", l->upper,
+                metric_name(p), metric(l, PLATFORM_ANDROID, p));
+            out("#else\n#define %s__%s %d\n#endif\n", l->upper, metric_name(p), metric(l, PLATFORM_DESKTOP, p));
         }
     }
 }
@@ -1464,12 +1464,10 @@ static void write_scene(int scene) {
     if (!layout_varies(scene))
         out_layout(scene, PLATFORM_ANY);
     else {
-        outs("#ifdef SDL_PLATFORM_ANDROID\n");
+        outs("#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)\n");
         out_layout(scene, PLATFORM_ANDROID);
-        outs("#elif !defined(SDL_PLATFORM_IOS)\n");
-        out_layout(scene, PLATFORM_DESKTOP);
         outs("#else\n");
-        out_layout(scene, PLATFORM_ANY);
+        out_layout(scene, PLATFORM_DESKTOP);
         outs("#endif\n");
     }
     out_here();
