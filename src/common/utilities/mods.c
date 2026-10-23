@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #include "common/utilities/mods.h"
 #include "common/utilities/game_ini.h"
+#include "common/utilities/patches.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -119,23 +120,32 @@ static SnxU64 hash(SnxU64 h, const void* data, size_t size) {
     for (i = 0; i < size; ++i) h = (h ^ p[i]) * 0x100000001b3ull;
     return h;
 }
+/* a file of the stamp, by its name and its bytes */
+static SnxU64 hash_file(SnxU64 h, const char* name, const char* path) {
+    size_t size = 0, k;
+    unsigned char* data = snx_read_file(path, &size);
+    unsigned char size_bytes[8];
+    for (k = 0; k < 8; ++k) size_bytes[k] = (unsigned char)((SnxU64)size >> (8 * k));
+    h = hash(h, name, strlen(name) + 1);
+    h = hash(h, size_bytes, sizeof size_bytes);
+    if (data) h = hash(h, data, size);
+    free(data);
+    return h;
+}
 char* snx_mods_stamp(const char* folder, const char* off) {
-    char **names, **paths;
-    size_t count = snx_mods_exefs(folder, off, &names, &paths), i, k;
+    char **names, **paths, **patches;
+    size_t count = snx_mods_exefs(folder, off, &names, &paths), npatches = snx_mods_patches(folder, off, &patches), i;
     SnxU64 h = 0xcbf29ce484222325ull;
     char* stamp;
-    for (i = 0; i < count; ++i) {
-        size_t size = 0;
-        unsigned char* data = snx_read_file(paths[i], &size);
-        unsigned char size_bytes[8];
-        for (k = 0; k < 8; ++k) size_bytes[k] = (unsigned char)((SnxU64)size >> (8 * k));
-        h = hash(h, names[i], strlen(names[i]) + 1);
-        h = hash(h, size_bytes, sizeof size_bytes);
-        if (data) h = hash(h, data, size);
-        free(data);
+    for (i = 0; i < count; ++i) h = hash_file(h, names[i], paths[i]);
+    for (i = 0; i < npatches; ++i) { /* after the files, so a stamp with none of them is the one of before */
+        const char* name = patches[i] + strlen(patches[i]);
+        while (name > patches[i] && name[-1] != '/' && name[-1] != '\\') --name;
+        h = hash_file(h, name, patches[i]);
     }
-    stamp = count ? snx_format("%016llx", (unsigned long long)h) : snx_strdup("");
+    stamp = count || npatches ? snx_format("%016llx", (unsigned long long)h) : snx_strdup("");
     snx_free_strings(names, count);
     snx_free_strings(paths, count);
+    snx_free_strings(patches, npatches);
     return stamp;
 }

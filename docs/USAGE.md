@@ -158,7 +158,15 @@ first when it isn't there). M opens it too, for the game in focus on Games. The 
 A mod's `exefs/` changes the game's code, which ScarletNX compiles ahead of time. The game's stamp (`<id>.abi`) records
 the mods' ExeFS files it was recompiled with, and playing it through the driver or the launcher recompiles it when the
 mods played have other ones. Run directly, a game made with other mods' files runs the ExeFS it was made from, and the
-log says so. IPS patches and cheats in `exefs/` are not applied.
+log says so.
+
+A mod's `exefs/` can also hold patches, each made for one build of a module: an IPS or IPS32 file named after the
+module's build ID (`exefs/<build id>.ips`), and IPSwitch text (`exefs/<name>.pchtxt`, the build ID after its
+`@nsobid-`), read as Eden reads them. Each is written over the module it is for when the game is recompiled, and over
+that module's segments as the game loads them. A patch that does not fit its module (a record past its end, a line
+the format has no meaning for) stops the recompile, which names the file, the line and the value. Patches count in
+the stamp as the mods' ExeFS files do: turning a mod with one on or off, or changing one, recompiles the game. Cheats
+in `exefs/` are not applied.
 
 A game's cheats go in the `cheats` folder of its data folder, in the Atmosphere format, a file named after the main
 module's build ID: `recompiled/<id>/<id>_data/cheats/<build id>.txt`, each cheat a `[name]` line and its codes under it.
