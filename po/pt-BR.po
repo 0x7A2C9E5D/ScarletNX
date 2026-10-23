@@ -739,8 +739,8 @@ msgstr "SCARLETNX  /  CONFIGURAÇÕES  /  PASTAS"
 
 #: src/gui/main.c
 #, c-format
-msgid "%d picked, %d Extra(s)"
-msgstr "%d escolhidas, %d Extra(s)"
+msgid "%d custom, %d Extra(s)"
+msgstr "%d personalizadas, %d Extra(s)"
 
 #: src/gui/main.c
 #, c-format
@@ -972,8 +972,8 @@ msgstr "Padrões, %d Extra(s)"
 
 #: src/gui/main.c
 #, c-format
-msgid "%d picked"
-msgstr "%d escolhidas"
+msgid "%d custom"
+msgstr "%d personalizadas"
 
 #: src/gui/main.c
 msgid "Defaults"
@@ -1128,8 +1128,8 @@ msgid "outside the app"
 msgstr "fora do app"
 
 #: src/gui/main.c
-msgid "picked"
-msgstr "escolhida"
+msgid "custom"
+msgstr "personalizada"
 
 #: src/gui/main.c
 msgid "shown only"

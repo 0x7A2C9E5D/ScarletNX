@@ -739,8 +739,8 @@ msgstr "SCARLETNX  /  设置  /  文件夹"
 
 #: src/gui/main.c
 #, c-format
-msgid "%d picked, %d Extra(s)"
-msgstr "已选 %d 个，%d 个另外的文件夹"
+msgid "%d custom, %d Extra(s)"
+msgstr "自定义 %d 个，%d 个另外的文件夹"
 
 #: src/gui/main.c
 #, c-format
@@ -968,8 +968,8 @@ msgstr "默认，%d 个另外的文件夹"
 
 #: src/gui/main.c
 #, c-format
-msgid "%d picked"
-msgstr "已选 %d 个"
+msgid "%d custom"
+msgstr "自定义 %d 个"
 
 #: src/gui/main.c
 msgid "Defaults"
@@ -1124,8 +1124,8 @@ msgid "outside the app"
 msgstr "在应用之外"
 
 #: src/gui/main.c
-msgid "picked"
-msgstr "已选"
+msgid "custom"
+msgstr "自定义"
 
 #: src/gui/main.c
 msgid "shown only"

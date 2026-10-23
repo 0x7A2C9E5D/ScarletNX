@@ -4306,9 +4306,9 @@ static void app_values(App* app) {
     moved = 0;
     for (int i = 0; i < GUI_PLACES; ++i) moved += app->place[i] != NULL;
     if (moved && app->folder_count)
-        snprintf(f->places, sizeof f->places, snx_tr("%d picked, %d Extra(s)"), moved, app->folder_count);
+        snprintf(f->places, sizeof f->places, snx_tr("%d custom, %d Extra(s)"), moved, app->folder_count);
     else if (moved)
-        snprintf(f->places, sizeof f->places, snx_tr("%d picked"), moved);
+        snprintf(f->places, sizeof f->places, snx_tr("%d custom"), moved);
     else if (app->folder_count)
         snprintf(f->places, sizeof f->places, snx_tr("Defaults, %d Extra(s)"), app->folder_count);
     else
@@ -4814,7 +4814,7 @@ static void open_folders(App* app, int row) {
             snprintf(value, size, "%s",
                      why                                        ? unfit_text(why)
                      : app->place[at] && outside_app(app, path) ? snx_tr("outside the app")
-                     : app->place[at]                           ? snx_tr("picked")
+                     : app->place[at]                           ? snx_tr("custom")
                                                                 : snx_tr("default"));
             snprintf(app->place_about[at], sizeof app->place_about[at], snx_tr("%s, %s free"), snx_tr(place_holds[at]),
                      left);

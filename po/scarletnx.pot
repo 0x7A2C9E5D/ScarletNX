@@ -1223,12 +1223,12 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%d picked, %d Extra(s)"
+msgid "%d custom, %d Extra(s)"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%d picked"
+msgid "%d custom"
 msgstr ""
 
 #: src/gui/main.c
@@ -1433,7 +1433,7 @@ msgid "outside the app"
 msgstr ""
 
 #: src/gui/main.c
-msgid "picked"
+msgid "custom"
 msgstr ""
 
 #: src/gui/main.c

@@ -138,7 +138,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   the recompiled Main are each their default or a folder picked: Enter opens the folder picker, a folder dropped or
   pasted with Ctrl+V takes the row, Del puts the default back (asking first with the folders it changes) and the last
   row all five. Logs and Caches reach the drivers and the games through `app.ini`, so when it cannot be written they
-  stay as they were, said in a box; the row says *default*, *picked* or why its folder cannot be, the tips what it holds and its disk's free
+  stay as they were, said in a box; the row says *default*, *custom* or why its folder cannot be, at its end, the tips what it holds and its disk's free
   space. A folder not there, not a folder, that cannot be written or, for the games, on a disk that runs no programs
   (`noexec`) is refused, and a run whose picked folder no longer can be stops, naming it: the default never takes its
   place. On Android a folder outside the app's own storage is asked about first, since Android checks every file

@@ -2550,7 +2550,7 @@ int main(int argc, char** argv) {
                    !strncmp(app.editor.note, "Recompiled: ", 12));
             assert(app.form == GUI_FORM_FOLDERS && app.editor.row == FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES) &&
                    same_path(folder_row_path(&app, app.editor.row), elsewhere) &&
-                   !strcmp(app.app_form.folder[app.editor.row], "picked"));
+                   !strcmp(app.app_form.folder[app.editor.row], "custom"));
             {
                 char note[sizeof app.editor.note];
                 snprintf(note, sizeof note, "%s", app.editor.note);
@@ -3018,7 +3018,7 @@ int main(int argc, char** argv) {
             assert(!strcmp(app.editor.note, line) && snx_path_within(app.run_log, logs));
             render(&app);
             shows(&app, "- Logs", yellow);
-            shows(&app, "picked", yellow);
+            shows(&app, "custom", yellow);
             kept = (char*)snx_read_file(app.app_file, &size);
             snprintf(line, sizeof line, "\nstate = %s\ncache = \n", app.state_dir);
             assert(kept && strstr(kept, line));
@@ -3076,10 +3076,10 @@ int main(int argc, char** argv) {
         }
         render(&app);
         shows(&app, "- Main", yellow);
-        shows(&app, "picked", yellow);
+        shows(&app, "custom", yellow);
         assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir));
         app_values(&app); /* App's note, the folder now */
-        assert(!strcmp(app.app_form.places, "1 picked, 1 Extra(s)") && strstr(app.places_note, app.games_dir));
+        assert(!strcmp(app.app_form.places, "1 custom, 1 Extra(s)") && strstr(app.places_note, app.games_dir));
         { /* a folder dropped on a place's row takes its place there, as one picked; Del puts back the default */
             char* dropped = snx_path_join(temporary, "dropped work");
             SDL_Event drop_event = {0};
@@ -3233,7 +3233,7 @@ int main(int argc, char** argv) {
             assert(!app.confirm.shown && !app.place[GUI_PLACE_WORK]);
             place_set(&app, GUI_PLACE_GAMES, inside);
             assert(!app.confirm.shown && app.place[GUI_PLACE_GAMES] &&
-                   !strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES)], "picked"));
+                   !strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES)], "custom"));
             app.own_dir = NULL;
             free(inside);
             free(own);
