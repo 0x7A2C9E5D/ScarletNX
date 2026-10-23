@@ -39,17 +39,18 @@ void pm_unlock(PMutex* m);
 int pm_trylock(PMutex* m); /* 1 when it took the lock, 0 when another thread holds it */
 /* The profiler's view of the locks, registered while a run has one attached: pm_lock, pm_unlock and pm_trylock
    report the named locks through it, and its pane shows who held which and who waited how long. Nothing registers
-   it on a run without the profiler, so a lock unnamed costs a null check. */
+   it on a run without the profiler, so a lock unnamed costs a null check. The reporter's context is the raw
+   profiler lock; the admission (who reports on a lock at all) is host.c's, which owns the mutex. */
 typedef struct {
-    void* (*make)(const void* m, const char* name);
-    void (*free)(void* ctx);
-    void (*wait)(void* ctx);
-    void (*lock)(void* ctx);
-    void (*unlock)(void* ctx);
-    void (*try_lock)(void* ctx, int acquired);
+    void* (*make)(const char* name);
+    void (*free)(void* l);
+    void (*wait)(void* l);
+    void (*lock)(void* l);
+    void (*unlock)(void* l);
+    void (*try_lock)(void* l, int acquired);
 } PmTracy;
 void pm_tracy_register(const PmTracy* t);
-void pm_lock_announce(PMutex* m, const char* name); /* names a lock, before the first lock is ever taken */
+void pm_lock_announce(PMutex* m, const char* name); /* names a lock; from then on its locks report */
 /* A thread blocked in pm_lock on a mutex another thread holds, or waiting on a condition variable with it (cond 1), for
    a hang report: the host thread, the mutex and the caller's address. A lock taken at once notes nothing */
 typedef struct {

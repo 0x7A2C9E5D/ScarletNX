@@ -86,6 +86,10 @@ if(WIN32)
 else()
     list(APPEND platform runtime/platform/plat_posix.c)
 endif()
+if(SNX_TRACY)
+    # the C++ client's connection id, which the C layer's GPU track keys its epochs on
+    list(APPEND platform runtime/platform/tracy_conn.cpp)
+endif()
 snx_component(platform ${platform})
 
 snx_component(shader gpu/shader/shader.c gpu/shader/decode.c gpu/shader/corpus.c gpu/shader/shipped.c

@@ -454,7 +454,7 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
         static u64 was_drawn __attribute__((unused)); /* the draws plot's base; only the profiler reads it */
         /* the counters as of the last present: a slow frame says what it did, which names what a hitch waited for */
         static u64 was[12];
-        u64 now_ns = plat_ns(), is[12];
+        u64 now_ns = plat_ns(), is[11];
         vk_pipeline_stats(&is[0], &is[1], &is[2], &is[3], &is[4], &is[5]);
         vk_tex_stats(&is[6], &is[7]);
         is[8] = vk_rt_made();
@@ -474,6 +474,8 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
                 SNX_PLOT("compute pending", (double)(csub - cdone));
                 SNX_PLOT("dispatches", (double)(g_vk_dispatches - was[10]));
                 was[10] = g_vk_dispatches;
+                SNX_PLOT("compute cpu reads", (double)(g_vk_cs_cpu_reads - was[11]));
+                was[11] = g_vk_cs_cpu_reads;
             }
 #endif
             SNX_PLOT("draws", (double)(g_vk_drawn - was_drawn));
@@ -482,7 +484,7 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
             SNX_PLOT("pipeline cache hits", (double)(is[1] - was[1]));
             SNX_PLOT("pipeline make ms", (double)(is[2] - was[2]));
             SNX_PLOT("pipeline wait ms", (double)(is[3] - was[3]));
-            SNX_PLOT("texture memory", is[7] - was[7]);
+            SNX_PLOT("texture uploads", is[7] - was[7]);
             was_drawn = g_vk_drawn;
             if (d > 50000000) {
                 slow_frames++;

@@ -402,11 +402,13 @@ static int create_device(void) {
     if (has_calibrated) {
         u32 nd = 0;
         if (VK_OK(vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(g_vk.phys, &nd, NULL)) && nd) {
-            VkTimeDomainEXT dom[8];
-            if (nd > 8) nd = 8;
-            if (VK_OK(vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(g_vk.phys, &nd, dom)))
-                for (u32 i = 0; i < nd; i++)
-                    if (dom[i] == VK_TIME_DOMAIN_CLOCK_MONOTONIC_RAW_EXT) g_vk.has_calibrated_host = 1;
+            VkTimeDomainEXT* dom = malloc(sizeof *dom * nd);
+            if (dom) {
+                if (VK_OK(vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(g_vk.phys, &nd, dom)))
+                    for (u32 i = 0; i < nd; i++)
+                        if (dom[i] == VK_TIME_DOMAIN_CLOCK_MONOTONIC_RAW_EXT) g_vk.has_calibrated_host = 1;
+                free(dom);
+            }
         }
         if (g_vk.has_calibrated_host) ext[next++] = VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME;
     }

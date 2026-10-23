@@ -63,13 +63,22 @@ typedef struct {
 /* The GPU track: a context per queue, the zones' query ids paired with their timestamps at the read-back, the two
    clocks' calibration. A query id of 0 means the emission did not go out: the caller keeps the pair and sends only
    what it got. The context is announced at the caller's first read-back (snx_tracy_gpu_context, which returns 1
-   then, so the caller can reset its own calibration anchor); a zone goes out only after its context did. */
+   then, so the caller can reset its own calibration anchor); a zone goes out only after its context did. Each
+   emission carries the connection it belongs to (*ep at the begin): the client's deferred queue replays the
+   contexts at a new connection, and an end or a time from another one than the begin's is dropped, where the
+   server would fault on a query it never saw. */
 int snx_tracy_gpu_context(int ctx, int64_t gpu_time, float period, int calibrated, const char* name);
-uint16_t snx_tracy_gpu_zone_begin(const char* name, uint32_t color, int ctx);
-uint16_t snx_tracy_gpu_zone_end(uint16_t query, int ctx);
-void snx_tracy_gpu_time(int64_t gpu_time, uint16_t query, int ctx);
+uint16_t snx_tracy_gpu_zone_begin(const char* name, uint32_t color, int ctx, uint64_t* ep);
+uint16_t snx_tracy_gpu_zone_end(uint16_t query, int ctx, uint64_t ep);
+void snx_tracy_gpu_time(int64_t gpu_time, uint16_t query, int ctx, uint64_t ep);
 void snx_tracy_gpu_sync(int64_t gpu_time, int ctx);
 void snx_tracy_gpu_calibrate(int64_t gpu_time, int64_t cpu_delta, int ctx);
+/* The connection's id, 0 when nothing is attached: a calibration baseline and an in-flight pair's epoch are keyed
+   on it (a new connection re-anchors both). */
+uint64_t snx_tracy_connection_id(void);
+/* 1 when the client is up and a server is attached. TracyCIsConnected reads the client's own data, which a run
+   that never started one (or one that has shut down) has none of, so the code that asks per frame asks this. */
+int snx_tracy_attached(void);
 /* SNX_FRAME_SCOPED's pair: 1 when the start went out, so the block's end sends none otherwise */
 int snx_tracy_frame_start(const char* name);
 void snx_tracy_frame_at_scope(SnxTracyFrame* f);
@@ -102,21 +111,25 @@ static inline int snx_tracy_gpu_context(int ctx, int64_t gpu_time, float period,
     (void)ctx, (void)gpu_time, (void)period, (void)calibrated, (void)name;
     return 0;
 }
-static inline uint16_t snx_tracy_gpu_zone_begin(const char* name, uint32_t color, int ctx) {
+static inline uint16_t snx_tracy_gpu_zone_begin(const char* name, uint32_t color, int ctx, uint64_t* ep) {
     (void)name, (void)color, (void)ctx;
+    if (ep) *ep = 0;
     return 0;
 }
-static inline uint16_t snx_tracy_gpu_zone_end(uint16_t query, int ctx) {
-    (void)query, (void)ctx;
+static inline uint16_t snx_tracy_gpu_zone_end(uint16_t query, int ctx, uint64_t ep) {
+    (void)query, (void)ctx, (void)ep;
     return 0;
 }
-static inline void snx_tracy_gpu_time(int64_t gpu_time, uint16_t query, int ctx) {
-    (void)gpu_time, (void)query, (void)ctx;
+static inline void snx_tracy_gpu_time(int64_t gpu_time, uint16_t query, int ctx, uint64_t ep) {
+    (void)gpu_time, (void)query, (void)ctx, (void)ep;
 }
 static inline void snx_tracy_gpu_sync(int64_t gpu_time, int ctx) { (void)gpu_time, (void)ctx; }
 static inline void snx_tracy_gpu_calibrate(int64_t gpu_time, int64_t cpu_delta, int ctx) {
     (void)gpu_time, (void)cpu_delta, (void)ctx;
 }
+static inline uint64_t snx_tracy_connection_id(void) { return 1; }
+static inline int snx_tracy_attached(void) { return 0; }
+static inline int snx_tracy_gate_open(void) { return 0; }
 typedef struct SnxTracyLock SnxTracyLock;
 static inline SnxTracyLock* snx_tracy_lock_make(const char* name) {
     (void)name;
@@ -132,6 +145,9 @@ static inline void snx_tracy_lock_try(SnxTracyLock* l, int acquired) { (void)l, 
 /* Starts the client when --tracy or --tracy-capture asks for it. Returns 1 when the capture it was asked for is not
    running; the run goes on without one. */
 #if defined(SNX_TRACY)
+/* 1 while emissions are allowed: closed before the client starts and, again, before it shuts down. tracy_conn reads
+   it so TracyCIsConnected is never reached while the client has no data to read (an assert). */
+int snx_tracy_gate_open(void);
 int snx_tracy_init(const char* title);
 void snx_tracy_thread_name(const char* name);
 /* F7: starts the client if needed, then a 60-second capture. */
