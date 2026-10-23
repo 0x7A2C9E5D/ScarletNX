@@ -134,16 +134,21 @@ static void branches(void) {
     /* BRAA x1, x2: opc=1000 (C6.2.38) */
     DEC(0xd71f0822u, MAX, BRA);
     A(m, 0), A(rn, 1), A(rm, 2), FLOW(BR);
-    /* ERET (C6.2.117) */
-    DEC(0xd69f03e0u, SW, ERET);
+    /* ERET (C6.2.117): UNDEF at EL0, so on every user-space target */
+    UNDEF(0xd69f03e0u, MAX);
+    DEC(0xd69f03e0u, MAX | SNX_A64_FEAT_EL1, ERET);
     FLOW(ERET);
     /* SVC #0x45, BRK #1, HVC #0: 11010100 opc imm16 op2=000 LL (C4.1.3, exception generation) */
     DEC(0xd40008a1u, SW, SVC);
     A(imm, 0x45), FLOW(SVC);
     DEC(0xd4200020u, SW, BRK);
     A(imm, 1), FLOW(BRK);
-    DEC(0xd4000002u, SW, HVC);
+    UNDEF(0xd4000002u, MAX);
+    DEC(0xd4000002u, SW | SNX_A64_FEAT_EL1, HVC);
     FLOW(EXC);
+    /* SMC #0 and HLT #0 are UNDEF at EL0 too */
+    UNDEF(0xd4000003u, MAX);
+    UNDEF(0xd4400000u, MAX);
 }
 
 /* C4.1.3 Hints: the overlapping group, first match wins and the rest of the space is NOP */
@@ -171,9 +176,15 @@ static void hints(void) {
     /* SB: FEAT_SB */
     UNDEF(0xd50330ffu, SW);
     DEC(0xd50330ffu, MAX, SB);
-    /* MSR DAIFSet, #2: op1=011 CRn=0100 CRm=imm op2=110 (C6.2.250) */
-    DEC(0xd50342dfu, SW, MSR_i_DAIFSET);
-    A(imm, 2), NOP(1);
+    /* MSR DAIFSet, #2: op1=011 CRn=0100 CRm=imm op2=110 (C6.2.250), trapped at EL0 (SCTLR_EL1.UMA is 0); MSR
+       SPSel, #1 (op1=000 op2=101) is UNDEFINED at EL0 */
+    UNDEF(0xd50342dfu, MAX);
+    DEC(0xd50342dfu, SW | SNX_A64_FEAT_EL1, MSR_i_DAIFSET);
+    A(imm, 2), NOP(0);
+    UNDEF(0xd50041bfu, MAX);
+    DEC(0xd50041bfu, SW | SNX_A64_FEAT_EL1, MSR_i_SPSEL);
+    /* MSR DIT, #1 (op1=011 op2=010, FEAT_DIT) is EL0's */
+    DEC(0xd503415fu, MAX, MSR_i_DIT);
     /* SMSTART: MSR SVCR with mask=11 imm=1, FEAT_SME; mask=00 is reserved */
     DEC(0xd503477fu, MAX, MSR_i_SVCR);
     A(mask, 3), A(imm, 1);

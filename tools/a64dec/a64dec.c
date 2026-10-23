@@ -13,7 +13,7 @@
 
    The profile gives each name a line: its flow kind, `nop` when it has no architectural effect at EL0, predicates on
    its arguments (a row whose predicate fails does not match), and the FEAT_* features it needs, some only when a
-   condition on its arguments holds. A row needing a feature the target lacks does not match either, so the word is
+   condition on its arguments holds, or EL1 for an encoding that is UNDEF at EL0. A row needing a feature the target lacks does not match either, so the word is
    UNDEF unless another row (in a group, a later one) matches it. A profile name the .decode files lack, and a name
    they have that the profile lacks, are errors. The profile also declares the features (their bit numbers, in that
    order) and the target sets.
@@ -693,8 +693,10 @@ static void parse_pred(Pred* pr, const char* text) {
     }
 }
 
+/* EL1 is not an architecture feature but the exception level an instruction needs: the encodings that are UNDEF at
+   EL0 need it, and no target of user-space code has it (the profile's `*` leaves it out) */
 static int is_feature_token(const char* t) {
-    return !strncmp(t, "FEAT_", 5) || !strncmp(t, "v8.0", 4);
+    return !strncmp(t, "FEAT_", 5) || !strncmp(t, "v8.0", 4) || !strncmp(t, "EL1", 3);
 }
 
 static void parse_profile(const char* path) {
@@ -716,7 +718,7 @@ static void parse_profile(const char* path) {
         if (!strcmp(tok[0], "feature")) {
             for (i = 1; i < ntok; i++) {
                 int k;
-                if (!is_feature_token(tok[i])) fail("a feature is v8.0 or FEAT_*: %s", tok[i]);
+                if (!is_feature_token(tok[i])) fail("a feature is v8.0, FEAT_* or EL1: %s", tok[i]);
                 for (k = 0; k < g.nfeats; k++)
                     if (!strcmp(g.feats[k], tok[i])) fail("%s declared twice", tok[i]);
                 if (g.nfeats == MAX_FEATS) fail("more than %d features", MAX_FEATS);
@@ -733,9 +735,11 @@ static void parse_profile(const char* path) {
             if (!is_ident(tok[1])) fail("bad target name %s", tok[1]);
             copy_name(t->name, tok[1]);
             for (i = 2; i < ntok; i++) {
-                if (!strcmp(tok[i], "*"))
-                    t->feats = g.nfeats == 64 ? ~0ull : (1ull << g.nfeats) - 1;
-                else
+                if (!strcmp(tok[i], "*")) {
+                    int k;
+                    for (k = 0; k < g.nfeats; k++)
+                        if (strcmp(g.feats[k], "EL1")) t->feats |= 1ull << k;
+                } else
                     t->feats |= 1ull << feat_index(tok[i]);
             }
             continue;
@@ -1138,7 +1142,8 @@ static void write_header(const char* path) {
     char macro[64];
     notice("the A64 decoder's types");
     out("#ifndef SNX_A64_DECODE_H\n#define SNX_A64_DECODE_H\n\n#include <stdint.h>\n\n");
-    out("/* the features a row may need, FEAT_* as the Arm ARM names them; v8.0 is the base architecture */\n");
+    out("/* the features a row may need, FEAT_* as the Arm ARM names them; v8.0 is the base architecture. EL1 is the\n"
+        "   exception level the encodings UNDEF at EL0 need, which no target of user-space code has */\n");
     for (i = 0; i < g.nfeats; i++) {
         feat_macro(i, macro);
         out("#define %s (1ull << %d)\n", macro, i);
@@ -1169,6 +1174,36 @@ static void write_header(const char* path) {
     flush(path);
 }
 
+/* each row's argument fields as masks of the word's bits (a field of several parts is one mask), for tests that
+   enumerate a field's values; compiled only where SNX_A64_DECODE_FIELDS is defined */
+static void write_fields(void) {
+    int first[MAX_ROWS], count[MAX_ROWS];
+    int i, total = 0;
+    out("#ifdef SNX_A64_DECODE_FIELDS\n/* each row's argument fields: the masks of snx_a64_field_masks[first...] */\n"
+        "typedef struct {\n    uint16_t first, count;\n} SnxA64RowFields;\n\n"
+        "static const uint32_t snx_a64_field_masks[] = {");
+    for (i = 0; i < g.nrows; i++) {
+        const Row* r = &g.rows[i];
+        unsigned masks[MAX_ASSIGN];
+        int n = 0, k, j;
+        for (k = 0; k < r->p.nas; k++) {
+            unsigned m;
+            if (!r->p.as[k].field) continue;
+            m = field_bits(&g.fields[r->p.as[k].field - 1]) & ~r->p.fixmask;
+            for (j = 0; j < n && masks[j] != m; j++) {}
+            if (m && j == n) masks[n++] = m;
+        }
+        first[i] = total;
+        count[i] = n;
+        for (j = 0; j < n; j++, total++) out("%s0x%08xu,", total % 8 == 0 ? "\n    " : " ", masks[j]);
+    }
+    if (!total) out("0");
+    out("\n};\n\nstatic const SnxA64RowFields snx_a64_row_fields[%d] = {", g.nrows);
+    for (i = 0; i < g.nrows; i++)
+        out("%s{%d, %d},", i % 8 == 0 ? "\n    " : " ", first[i], count[i]);
+    out("\n};\n#endif\n\n");
+}
+
 static void write_decoder(const char* path) {
     unsigned long long hash;
     int i;
@@ -1191,7 +1226,9 @@ static void write_decoder(const char* path) {
         out("    {0x%08xu, 0x%08xu, 0x%llxull, SNX_A64_%s, %d}, /* %s:%d */\n", r->p.fixmask, r->p.fixval, r->feat,
             g.names[r->name].name, r->body, base_name(g.files[r->p.file]), r->p.line);
     }
-    out("};\n\n/* the rows each bucket can match, in order */\nstatic const uint16_t snx_a64_list[%d] = {", g.nlist);
+    out("};\n\n");
+    write_fields();
+    out("/* the rows each bucket can match, in order */\nstatic const uint16_t snx_a64_list[%d] = {", g.nlist);
     for (i = 0; i < g.nlist; i++) out("%s%d,", i % 16 == 0 ? "\n    " : " ", g.list[i]);
     out("\n};\n\n/* by bits [31:21]: a run of the list, or (bits != 0) the parts of snx_a64_split picked by the word's\n"
         "   bits [lo + bits - 1:lo] */\nstatic const SnxA64Bucket snx_a64_buckets[%d] = {", BUCKETS);

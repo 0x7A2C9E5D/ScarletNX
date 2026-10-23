@@ -1179,6 +1179,31 @@ if(SNX_TEST_LLVM_SWEEP)
         set_tests_properties(llvm_differential_sweep_${shard} PROPERTIES TIMEOUT 1800 COST 100)
     endforeach()
 endif()
+# The LLVM backend against QEMU (tests/qemu_ref) instead of the template C: llvm_qemu_differential.c, with the words
+# of the generated decoder's rows (llvm_qemu_words.c, apart for the decoders' clashing names). The groups known to
+# differ until the emitters are rewritten are in llvm_qemu_expected.txt. Skipped as qemu_ref_selftest is
+if(NOT WIN32)
+    add_executable(snx-test-llvm-qemu-differential llvm_qemu_differential.c llvm_qemu_words.c qemu_ref/qemu_ref.c)
+    snx_test_target(snx-test-llvm-qemu-differential 11)
+    target_include_directories(snx-test-llvm-qemu-differential PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(snx-test-llvm-qemu-differential PRIVATE snx_llvm snx_driver ${CMAKE_DL_LIBS})
+    snx_a64dec(snx-test-llvm-qemu-differential)
+    set(snx_lqd_expected "${CMAKE_CURRENT_SOURCE_DIR}/llvm_qemu_expected.txt")
+    if(SNX_QEMU_REF)
+        add_dependencies(snx-test-llvm-qemu-differential snx_qemu_ref_runner)
+        add_test(NAME llvm_qemu_differential COMMAND snx-test-llvm-qemu-differential "${SNX_QEMU_AARCH64}"
+                 "${SNX_QEMU_REF_RUNNER}" "${CMAKE_CURRENT_BINARY_DIR}/llvm_qemu" "${snx_lqd_expected}" --quiet)
+        if(SNX_TEST_LLVM_SWEEP)
+            add_test(NAME llvm_qemu_differential_sweep COMMAND snx-test-llvm-qemu-differential "${SNX_QEMU_AARCH64}"
+                     "${SNX_QEMU_REF_RUNNER}" "${CMAKE_CURRENT_BINARY_DIR}/llvm_qemu_sweep" "${snx_lqd_expected}"
+                     --quiet --sweep)
+            set_tests_properties(llvm_qemu_differential_sweep PROPERTIES TIMEOUT 3600 COST 100)
+        endif()
+    else()
+        add_test(NAME llvm_qemu_differential COMMAND snx-test-llvm-qemu-differential --skip "${SNX_QEMU_REF_MISSING}")
+    endif()
+    set_tests_properties(llvm_qemu_differential PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+endif()
 # the variant table's hash, which must match jit_service.c's cache hash
 add_executable(snx-test-variants variants.c)
 snx_test_target(snx-test-variants 11)

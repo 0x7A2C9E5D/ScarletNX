@@ -1,0 +1,11 @@
+# llvm_qemu_differential's expected mismatches until the emitters are rewritten from QEMU's translate-a64.c:
+# the max target's name for the word, the cause (the state parts that differ, or llvm-X/qemu-Y for
+# different outcomes), and the words differing in the default run and in --sweep. A group missing here
+# fails the test, and so does a listed one that no longer differs in a run whose count isn't 0.
+# --update rewrites the counts of the run it is given with. qemu-diff-triage.md has the judgement on each.
+(unallocated)        llvm-runs/qemu-UNDEF             29    216
+AXFLAG               nzcv                              2      4
+CFINV                nzcv                              2      4
+SYS                  llvm-runs/qemu-UNDEF             57     61
+SYS                  x                                 1      1
+XAFLAG               nzcv                              2      4

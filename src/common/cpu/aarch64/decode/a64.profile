@@ -13,6 +13,17 @@
 # FEATURE: the FEAT_* the Arm ARM's encoding index names (v8.0 for the base), as QEMU's translate-a64.c gates it
 # with dc_isar_feature(). FEAT_X(cond) is needed only when cond holds, as half precision is for esz == 1.
 # A row needing a feature the target lacks does not match.
+#
+# EL1 marks an encoding that is UNDEF at EL0, where games and every target here run: it needs EL1, which `*` leaves
+# out, so the word is UNDEF for every target and the runtime raises an undefined instruction, as the console does.
+# ERET, ERETA, HVC, SMC and HLT (halting debug is off) are UNDEFINED at EL0. MSR SPSel, PAN, UAO and ALLINT
+# (immediate) are UNDEFINED at EL0. MSR DAIFSet and DAIFClr trap to EL1 because Horizon keeps SCTLR_EL1.UMA 0, and
+# the kernel delivers the trap to the process as an exception, which ends it as an UNDEF does. The old decoder ran the MSR immediates as NOPs
+# and these as UNDEF: no game that runs on the console executes one, so only the code after one changes, which
+# discovery no longer follows, as the console never falls through to it.
+# SYS (MRS, MSR register, SYS, SYSL) stays EL0 here: which system registers and operations EL0 can reach depends on
+# op0:op1:CRn:CRm:op2 and on the EL1 controls (SCTLR_EL1.UCT, UCI, DZE, CNTKCTL_EL1), more than a decode table
+# should hold, so the emitter decides each one and raises UNDEF for the rest.
 
 feature v8.0 FEAT_CRC32 FEAT_AES FEAT_PMULL FEAT_SHA1 FEAT_SHA256
 feature FEAT_LSE FEAT_RDM FEAT_LOR FEAT_PAN
@@ -23,6 +34,7 @@ feature FEAT_MTE FEAT_MTE2 FEAT_BF16 FEAT_I8MM FEAT_RAS FEAT_XS FEAT_WFxT FEAT_H
 feature FEAT_CSSC FEAT_SME FEAT_GCS FEAT_CHK FEAT_LSE128
 feature FEAT_FAMINMAX FEAT_LUT FEAT_FP8 FEAT_FP8FMA FEAT_FP8DOT4 FEAT_FP8DOT2 FEAT_F8F32MM FEAT_F8F16MM
 feature FEAT_CMPBR FEAT_FPRCVT
+feature EL1
 
 # The Switch's Cortex-A57: Armv8.0 with the CRC32 and Cryptographic Extensions
 target switch v8.0 FEAT_CRC32 FEAT_AES FEAT_PMULL FEAT_SHA1 FEAT_SHA256
@@ -67,8 +79,8 @@ BLRAZ           BLR   FEAT_PAuth
 RETA            RET   FEAT_PAuth
 BRA             BR    FEAT_PAuth
 BLRA            BLR   FEAT_PAuth
-ERET            ERET  v8.0
-ERETA           ERET  FEAT_PAuth
+ERET            ERET  v8.0 EL1
+ERETA           ERET  FEAT_PAuth EL1
 YIELD           PLAIN nop v8.0
 WFE             PLAIN nop v8.0
 WFI             PLAIN nop v8.0
@@ -101,22 +113,22 @@ SB              PLAIN FEAT_SB
 CFINV           PLAIN FEAT_FlagM
 XAFLAG          PLAIN FEAT_FlagM2
 AXFLAG          PLAIN FEAT_FlagM2
-MSR_i_UAO       PLAIN FEAT_UAO
-MSR_i_PAN       PLAIN FEAT_PAN
-MSR_i_SPSEL     PLAIN v8.0
+MSR_i_UAO       PLAIN FEAT_UAO EL1
+MSR_i_PAN       PLAIN FEAT_PAN EL1
+MSR_i_SPSEL     PLAIN v8.0 EL1
 MSR_i_SBSS      PLAIN FEAT_SSBS
 MSR_i_DIT       PLAIN FEAT_DIT
 MSR_i_TCO       PLAIN FEAT_MTE
-MSR_i_DAIFSET   PLAIN nop v8.0
-MSR_i_DAIFCLEAR PLAIN nop v8.0
-MSR_i_ALLINT    PLAIN FEAT_NMI
+MSR_i_DAIFSET   PLAIN v8.0 EL1
+MSR_i_DAIFCLEAR PLAIN v8.0 EL1
+MSR_i_ALLINT    PLAIN FEAT_NMI EL1
 MSR_i_SVCR      PLAIN mask!=0 FEAT_SME
 SYS             PLAIN v8.0
 SVC             SVC   v8.0
-HVC             EXC   v8.0
-SMC             EXC   v8.0
+HVC             EXC   v8.0 EL1
+SMC             EXC   v8.0 EL1
 BRK             BRK   v8.0
-HLT             EXC   v8.0
+HLT             EXC   v8.0 EL1
 STXR            PLAIN v8.0
 LDXR            PLAIN v8.0
 STLR            PLAIN v8.0 FEAT_LOR(lasr==0)

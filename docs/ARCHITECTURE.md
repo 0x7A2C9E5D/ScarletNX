@@ -113,7 +113,9 @@ the game's image read from that image.
   `link_coff.c`, `link_macho.c`) with `rtlib.c`, the helpers compiled when the recompiler is built, into a module
   with no imports, for the host it runs on: x86-64 (ELF or COFF), AArch64 (ELF, or on macOS and iOS a Mach-O dylib
   with an ad hoc signature, either with a veneer for a branch past 128 MiB) or PowerPC64 (ELF, ELFv1 or ELFv2, with a stub for a branch past 32 MiB: [PowerPC64](./PPC64.md)). `tests/llvm_differential.c` runs its step functions against the templates' C on random
-  states (every pattern, failing if any instruction has no emitter: the backend refuses such a module), `tests/llvm_module.c`
+  states (every pattern, failing if any instruction has no emitter: the backend refuses such a module),
+  `tests/llvm_qemu_differential.c` runs them against `qemu-aarch64 -cpu max` (`tests/qemu_ref/`) on the generated decoder's
+  rows, with the groups known to differ in `tests/llvm_qemu_expected.txt`, `tests/llvm_module.c`
   a whole program, `tests/llvm_bench.c` times it on assembly kernels.
 - The generated code polls `CPU.poll` on backward branches inside a function and at the `D_` dispatch, as `codegen.c`'s C
   does, so a loop without SVCs gives its core to a waiting thread of higher priority.

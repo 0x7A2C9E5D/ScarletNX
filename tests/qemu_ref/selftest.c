@@ -3,8 +3,9 @@
 /* The QEMU reference's self-test, under -cpu max and -cpu cortex-a57: hand-checked cases, the ported cases of
    a64_ported_cases.h with their expected values, and the decoder's UNDEF sets (a64dec's Switch and max targets)
    against where each CPU raises SIGILL, a few words of every row of the decoder's table and random words. The
-   mismatches of that last part are listed (in qemu_ref_undef.txt too) without failing the test: they are what the
-   profile is fixed from.
+   mismatches of that last part are listed (in qemu_ref_undef.txt too). Under max they don't fail the test: they are
+   what the profile is fixed from. The Switch target must match the Cortex-A57 but for SYS, whose system registers
+   the emitter decides (a64.profile).
    Usage: snx-test-qemu-ref QEMU RUNNER DIR, or snx-test-qemu-ref --skip REASON (exits 77: ctest's skip) */
 #include "qemu_ref.h"
 
@@ -571,7 +572,7 @@ static void feature_names(uint64_t feature, char* text, size_t size) {
         SNX_FEAT(WFXT),     SNX_FEAT(HBC),     SNX_FEAT(MOPS),    SNX_FEAT(NMI),      SNX_FEAT(CSSC),
         SNX_FEAT(SME),      SNX_FEAT(GCS),     SNX_FEAT(CHK),     SNX_FEAT(LSE128),   SNX_FEAT(FAMINMAX),
         SNX_FEAT(LUT),      SNX_FEAT(FP8),     SNX_FEAT(FP8FMA),  SNX_FEAT(FP8DOT4),  SNX_FEAT(FP8DOT2),
-        SNX_FEAT(F8F32MM),  SNX_FEAT(F8F16MM), SNX_FEAT(CMPBR),   SNX_FEAT(FPRCVT),
+        SNX_FEAT(F8F32MM),  SNX_FEAT(F8F16MM), SNX_FEAT(CMPBR),   SNX_FEAT(FPRCVT),   SNX_FEAT(EL1),
     };
 #undef SNX_FEAT
     size_t i, used = 0;
@@ -669,6 +670,9 @@ static void cross(const char* cpu, const uint32_t* words) {
             fprintf(g_test.report, "%s\t%s\t%s\t%s\t%u\t%08x\n", cpu,
                     groups[i].decoded ? "decodes-sigill" : "undef-runs", name, features, groups[i].count,
                     groups[i].example);
+        if (!max)
+            check(groups[i].decoded && groups[i].op == SNX_A64_SYS, cpu,
+                  "the Switch target's UNDEF set matches the Cortex-A57's outside SYS");
     }
 done:
     snx_qref_free(&b);
