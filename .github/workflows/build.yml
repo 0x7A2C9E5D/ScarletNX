@@ -82,7 +82,7 @@ jobs:
       - name: Install tools
         run: |
           for try in 1 2 3; do
-            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python git clang llvm pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast ccache gdb jq glslang && break
+            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python git clang lld llvm qemu-user pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast ccache gdb jq glslang && break
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
@@ -233,7 +233,7 @@ jobs:
       - name: Install tools
         run: |
           for try in 1 2 3; do
-            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python git clang llvm pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast ccache gdb jq glslang && break
+            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python git clang lld llvm qemu-user pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast ccache gdb jq glslang && break
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
