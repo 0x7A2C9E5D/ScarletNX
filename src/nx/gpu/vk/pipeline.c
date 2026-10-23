@@ -20,6 +20,7 @@
 #include "nx/gpu/renderer.h"
 #include "nx/gpu/shader/shipped.h"
 #include "nx/gpu/shipped_pass.h"
+#include "nx/runtime/platform/tracy.h"
 #include "common/utilities/build_info.h"
 #include "common/utilities/common.h"
 #include <sys/stat.h>
@@ -454,7 +455,9 @@ static VkSh* sh_make(const u8* code, u32 mlen, u64 h, int stage, const u32 mask[
     size_t nw;
     VkSh* s = calloc(1, sizeof *s);
     if (!s) return NULL;
+    SNX_ZONE(z, "shader translate");
     u32* spv = sh_spirv(s, code, h, stage, mask, len, qh, len_a, qh_a, xfb, read, 0, &nw);
+    SNX_ZONE_END(z);
     if (spv) {
         VkShaderModuleCreateInfo mi = {
             .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = nw * 4, .pCode = spv};
@@ -889,7 +892,9 @@ static VkPipeline pipe_create(const Pipe* e) {
    makes it (record), and when it queues it for a worker otherwise, as the file's tables are the GPU thread's */
 static VkPipeline pipe_make(const Pipe* e, int record) {
     u64 t0 = plat_ns();
+    SNX_ZONE(z, "pipeline make");
     VkPipeline p = pipe_create(e);
+    SNX_ZONE_END(z);
     pcache_note();
     if (e->prewarm)
         __atomic_add_fetch(&g_pf.made, 1, __ATOMIC_RELAXED);
@@ -909,6 +914,7 @@ static Pipe *g_pw_head, *g_pw_tail; /* the file's */
 static int g_pj_started, g_pj_threads;
 static void pipe_worker(void* arg) {
     (void)arg;
+    SNX_THREAD_NAME("Vulkan pipelines");
     for (;;) {
         Pipe* e;
         VkPipeline p;
@@ -990,6 +996,7 @@ static int pipe_promote(Pipe* e) {
 /* e's pipeline once ready, waiting at most ns for it (a negative ns: until it is) */
 static VkPipeline pipe_wait(Pipe* e, i64 ns) {
     u64 until = ns < 0 ? 0 : plat_ns() + (u64)ns;
+    SNX_ZONE(z, "pipeline wait");
     pm_lock(&g_pj_lock);
     while (!e->ready) {
         u64 now = plat_ns();
@@ -997,6 +1004,7 @@ static VkPipeline pipe_wait(Pipe* e, i64 ns) {
         pc_wait(&g_pj_done, &g_pj_lock, ns < 0 ? -1 : (i64)(until - now));
     }
     pm_unlock(&g_pj_lock);
+    SNX_ZONE_END(z);
     return __atomic_load_n(&e->ready, __ATOMIC_ACQUIRE) ? e->p : VK_NULL_HANDLE;
 }
 /* Stand-ins for pipelines still being made, which the GPU thread hands the recording thread in their place

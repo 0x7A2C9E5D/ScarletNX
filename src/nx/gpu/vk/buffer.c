@@ -17,6 +17,7 @@
 #include "nx/runtime/platform/plat.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/vk/pending_pages.h"
+#include "nx/runtime/platform/tracy.h"
 
 typedef struct {
     u64 start, len, hash, shash;
@@ -1581,7 +1582,15 @@ static int patch_own(u32 i, const u8* host, u32 since) {
    buffers there crowded out the staging rings: one game's rings, made again in the window as they grew after loading,
    took writes at a twentieth of their speed for minutes (18 to 25 fps against 43). sb at so is the entry's bytes, in
    the staging ring already */
+static int make_own_(u32 i, VkBuffer sb, u64 so);
+/* a buffer of its own being made, as a profiler zone (SNX_TRACY builds) */
 static int make_own(u32 i, VkBuffer sb, u64 so) {
+    SNX_ZONE_V(z, "own buffer", g_vb[i].len);
+    int r = make_own_(i, sb, so);
+    SNX_ZONE_END(z);
+    return r;
+}
+static int make_own_(u32 i, VkBuffer sb, u64 so) {
     Vb* e = &g_vb[i];
     u64 len = e->len;
     VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
