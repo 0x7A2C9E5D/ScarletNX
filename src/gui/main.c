@@ -10225,10 +10225,10 @@ int snx_gui_migrate(const char* self, const char* option) {
    made-up recompile slowly, so the run's screen, its questions and its end are the real ones */
 static struct {
     const char* dir;
-    Uint64 at, deadline;
+    Uint64 at, deadline, hold;
     int step, page;
     bool advance;
-    char want[64];
+    char want[64], pending[64];
 } tour;
 static void tour_shot(App* app) {
     SDL_Surface* surface;
@@ -10251,6 +10251,12 @@ static void tour_tick(App* app) {
         tour.at = now + 3000;
     }
     if (!tour.dir[0] || now < tour.at || tour.want[0]) return;
+    if (tour.pending[0]) { /* the screen has faded in: now its picture */
+        snprintf(tour.want, sizeof tour.want, "%s", tour.pending);
+        tour.pending[0] = 0;
+        tour.at = now + tour.hold;
+        return;
+    }
     if (app->setup_on) { /* the setup first, a page at a time: its picture, then Next */
         char name[32];
         if (tour.advance) {
@@ -10265,7 +10271,7 @@ static void tour_tick(App* app) {
         tour.advance = true;
         return;
     }
-#define TOUR(name, wait) do { snprintf(tour.want, sizeof tour.want, "%s", name); tour.at = now + (wait); } while (0)
+#define TOUR(name, wait) do { snprintf(tour.pending, sizeof tour.pending, "%s", name); tour.hold = (wait); tour.at = now + 700; } while (0)
     switch (tour.step++) {
         case 0: TOUR("01-menu", 1500); break;
         case 1: app->menu.selected = GUI_KEYS; TOUR("02-menu-keys-focused", 1200); break;
