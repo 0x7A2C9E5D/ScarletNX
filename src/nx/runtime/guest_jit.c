@@ -400,6 +400,78 @@ void jit_code_invalidate(u64 addr, u64 size) {
     pm_unlock(&g_jit_synthetic_lock);
 }
 
+/* The AOT functions in the order of the lowest guest address each was compiled from (SnxModule.fn_lo), and the
+   longest one's span: jit_code_changed's search, made at its first call, which most games never make. Under
+   g_fn_lock */
+static u32* g_fn_order;
+static u64 g_fn_span;
+static PMutex g_fn_lock = PMUTEX_INIT;
+static int fn_lo_cmp(const void* a, const void* b) {
+    u64 x = g_mod->fn_lo[*(const u32*)a], y = g_mod->fn_lo[*(const u32*)b];
+    return x < y ? -1 : x > y;
+}
+static int fn_order(void) {
+    u32 i, n = g_mod->nfns;
+    if (g_fn_order) return 0;
+    if (!n || !(g_fn_order = (u32*)malloc((size_t)n * sizeof *g_fn_order))) return -1;
+    for (i = 0; i < n; i++) {
+        g_fn_order[i] = i;
+        if (g_mod->fn_len[i] > g_fn_span) g_fn_span = g_mod->fn_len[i];
+    }
+    qsort(g_fn_order, n, sizeof *g_fn_order, fn_lo_cmp);
+    return 0;
+}
+/* AOT function i goes stale. Its dispatch slots and its entries the JIT calls it through (SnxModule.entry_fn, the
+   module's own table, which it filled at load) go first, so a thread that reads its byte set finds no code for the
+   entry it was called at, and the lookup compiles the code there now. An inlined copy reads the same byte */
+static void fn_stale(u32 i) {
+    GuestFn f = g_mod->fn[i], *entry_fn = (GuestFn*)(uintptr_t)g_mod->entry_fn;
+    u64 lo = g_mod->fn_lo[i], hi = lo + g_mod->fn_len[i], pc;
+    size_t a = 0, b = g_mod->nentries, m;
+    for (pc = lo; pc < hi; pc += 4)
+        if (pc >= g_code_lo && pc < g_code_hi) {
+            GuestFn expected = f;
+            __atomic_compare_exchange_n(&g_disp[(pc - g_code_lo) >> 2], &expected, NULL, 0, __ATOMIC_RELEASE,
+                                        __ATOMIC_RELAXED);
+        }
+    while (a < b) {
+        m = a + (b - a) / 2;
+        if (g_mod->entry_addr[m] < lo)
+            a = m + 1;
+        else
+            b = m;
+    }
+    for (; a < g_mod->nentries && g_mod->entry_addr[a] < hi; a++)
+        if (__atomic_load_n(&entry_fn[a], __ATOMIC_RELAXED) == f) __atomic_store_n(&entry_fn[a], NULL, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_mod->stale[i], 1, __ATOMIC_RELEASE);
+}
+void jit_code_changed(u64 addr, u64 size) {
+    u64 end = addr + size, from;
+    size_t a = 0, b, m;
+    pm_lock(&g_fn_lock);
+    if (g_mod->nfns && !fn_order()) {
+        from = addr > g_fn_span ? addr - g_fn_span : 0;
+        b = g_mod->nfns;
+        while (a < b) {
+            m = a + (b - a) / 2;
+            if (g_mod->fn_lo[g_fn_order[m]] < from)
+                a = m + 1;
+            else
+                b = m;
+        }
+        for (; a < g_mod->nfns && g_mod->fn_lo[g_fn_order[a]] < end; a++) {
+            u32 i = g_fn_order[a];
+            if (g_mod->fn_lo[i] + g_mod->fn_len[i] <= addr || __atomic_load_n(&g_mod->stale[i], __ATOMIC_RELAXED))
+                continue;
+            fn_stale(i);
+            LOG_LIMIT(64, "jit: the game changed its code at %llx, compiled into its function from %llx: compiled again\n",
+                      (unsigned long long)addr, (unsigned long long)g_mod->fn_lo[i]);
+        }
+    }
+    pm_unlock(&g_fn_lock);
+    jit_code_invalidate(addr, size); /* the slots in the line, and the JIT's code there */
+}
+
 void jit_report(void) {
     unsigned long images = g_mod ? g_mod->nmods : 0;
     size_t i;

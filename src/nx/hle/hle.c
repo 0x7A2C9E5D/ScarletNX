@@ -12,6 +12,7 @@ void hle_init(void) {
     /* every lock: PMUTEX_INIT's value isn't all zero on every platform */
     pm_init(&g_hle.kernel.klock);
     pm_init(&g_hle.kernel.pool_lk);
+    pm_init(&g_hle.svcmem.views_lk);
     pm_init(&g_hle.thread.core_lk);
     pm_init(&g_hle.ipc.lk);
     pm_init(&g_hle.acc.pic.lk);

@@ -460,7 +460,18 @@ static u32 resource_limit(u32 h, u32 which, int kind, u64* out) {
         *out = which == 1 ? (u64)kthread_live_count() : 0;
     R_SUCCEED();
 }
+/* Mesosphère's InfoType_MesosphereCurrentProcess (Atmosphère's kernel, read for its behavior): a new handle to the
+   calling process, which mods for Atmosphère take before patching their own code (exlaunch's cur_proc_handle) */
+#define INFO_CURRENT_PROCESS 65001u
 static u32 get_info(u32 id0, u32 h, u64 id1, u64* out) {
+    if (id0 == INFO_CURRENT_PROCESS) {
+        R_UNLESS(!h, R_BADHANDLE);
+        R_UNLESS(!id1, R_BADCOMBO);
+        u32 ph = h_new(&g_hle.kernel.process); /* the handle's own reference */
+        R_UNLESS(ph, R_OUTOFHANDLES);
+        *out = ph;
+        R_SUCCEED();
+    }
     if (id0 != 9) return svc_get_info(id0, h, id1, out);
     R_UNLESS(!h, R_BADHANDLE); /* ResourceLimit: always succeeds after its checks */
     R_UNLESS(!id1, R_BADCOMBO);
@@ -555,6 +566,12 @@ static u32 svc_MapMemory(u64 dst_address, u64 src_address, u64 size) {
 }
 static u32 svc_UnmapMemory(u64 dst_address, u64 src_address, u64 size) {
     return svc_unmap_memory(dst_address, src_address, size);
+}
+static u32 svc_MapProcessMemory(u64 dst_address, u32 process_handle, u64 src_address, u64 size) {
+    return svc_map_process_memory(dst_address, process_handle, src_address, size);
+}
+static u32 svc_UnmapProcessMemory(u64 dst_address, u32 process_handle, u64 src_address, u64 size) {
+    return svc_unmap_process_memory(dst_address, process_handle, src_address, size);
 }
 static u32 svc_QueryMemory(u64 out_memory_info, u32* out_page_info, u64 address) {
     *out_page_info = 0; /* no flags */

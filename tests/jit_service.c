@@ -12,7 +12,8 @@
    its code is found by snx_jit_resolve alone, it calls the AOT module directly, and removing it, even with its
    compiles in flight, forgets its code, so the different code mapped at the same place later is what runs. Then the
    cache: a second service on the same file loads the first one's units instead of compiling them, refuses a unit whose
-   code changed (and compiles the new code), and reads the records before one a run left unfinished */
+   code changed (and compiles the new code), and reads the records before one a run left unfinished. A change in the
+   middle of a function drops its whole unit */
 #include "common/cpu/recompiler/llvm/jit_service.h"
 #include <pthread.h>
 #include <stdio.h>
@@ -489,6 +490,38 @@ static void test_invalidate(void) {
     snx_jit_service_free(service);
 }
 
+/* a change in the middle of a compiled function, its entry outside the range, as a mod's hook patches an instruction
+   and invalidates its line (IC IVAU): the whole unit goes, so the next call runs the new instruction */
+static void test_invalidate_middle(void) {
+    static const u32 words[] = {0x91000400, 0x91000400, 0xD65F03C0}; /* add x0,x0,#1; add x0,x0,#1; ret */
+    static const u32 patch = 0x91002800;                               /* add x0,x0,#10 */
+    GuestFn before, after;
+    CPU c;
+    service = start(0, 2);
+    if (!service) {
+        ++failures;
+        return;
+    }
+    put(0x3A00, words, 3);
+    cpu_init(&c, 0xF000);
+    run(&c, 0x3A00);
+    CHECK(c.x[0] == 2 && c.pc == RETURN);
+    snx_jit_drain(service);
+    before = snx_jit_resolve(service, 0x3A00);
+    CHECK(before != NULL && get(0x3A00) == before);
+    put(0x3A04, &patch, 1);
+    snx_jit_invalidate(service, 0x3A04, 4);
+    CHECK(get(0x3A00) == NULL); /* the entry, outside the range, went with its unit */
+    CHECK(snx_jit_resolve(service, 0x3A00) == NULL);
+    snx_jit_drain(service);
+    after = snx_jit_resolve(service, 0x3A00);
+    CHECK(after != NULL && after != before);
+    cpu_init(&c, 0xF000);
+    run(&c, 0x3A00);
+    CHECK(c.x[0] == 11 && c.pc == RETURN);
+    snx_jit_service_free(service);
+}
+
 /* an invalidation of another range while a pc compiles: the batch read code that may be stale, so it publishes nothing
    and its pcs go back to their queue. Before, they were left GONE with their pending bit set, which snx_jit_resolve's
    fast path reads as "queued, wait for it": nothing queued them again, and the pc was never compiled (rt_miss's fatal,
@@ -769,6 +802,7 @@ int main(void) {
     test_added_image();
     test_cache();
     test_invalidate();
+    test_invalidate_middle();
     test_invalidate_in_flight();
     test_image_map();
     free(memory);

@@ -55,7 +55,7 @@ static void poll(CPU* c) {
             (unsigned long long)c->x[0], (unsigned long long)c->x[1]);
 }
 const RtAPI gnu_rtapi = {syscall_entry, undefined,  hint, ticks, breakpoint,   fpcr,
-                         event,         wait_event, poll, NULL,  gnu_jit_miss, snx_runtime_cas128};
+                         event,         wait_event, poll, NULL,  gnu_jit_miss, snx_runtime_cas128, NULL};
 
 /* SNX_GNU_SAMPLE=1: once a second, the guest's pc on stderr (poll above), for a loop that makes no syscall. A forked
    child has no watchdog thread, so it starts its own at its next exec */
