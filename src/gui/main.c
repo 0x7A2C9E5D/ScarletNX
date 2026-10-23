@@ -493,15 +493,16 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_APP        SNX_TR_KEYS("Tap a row to change or open it.")
 #endif
 #ifdef SDL_PLATFORM_ANDROID
-#define SAY_FOLDERS    SNX_TR_KEYS("Add a folder: tap it. Tap an Extra to take it off. Refresh: tap it. Back: go back.")
+#define SAY_FOLDERS SNX_TR_KEYS("Refresh: tap it. Back: go back.")
 #else
-#define SAY_FOLDERS    SNX_TR_KEYS("Add a folder: tap it. Tap an Extra to take it off. Refresh: tap it.")
+#define SAY_FOLDERS SNX_TR_KEYS("Refresh: tap it.")
 #endif
-#ifdef SDL_PLATFORM_ANDROID
-#define SAY_PLACES     SNX_TR_KEYS("Tap a folder to pick another. Refresh: tap it. Back: go back.")
-#else
-#define SAY_PLACES     SNX_TR_KEYS("Tap a folder to pick another. Refresh: tap it.")
-#endif
+/* Folders' focused row, each when it can be done there: a finger has no Del, the default is Reset to Defaults' */
+#define SAY_CHANGE  SNX_TR_KEYS("Tap: change.")
+#define SAY_DEFAULT NULL
+#define SAY_DELETE  SNX_TR_KEYS("Tap: delete.")
+#define SAY_ADD     SNX_TR_KEYS("Tap: add.")
+#define SAY_RESET   SNX_TR_KEYS("Tap: reset.")
 #ifdef SDL_PLATFORM_ANDROID
 #define SAY_PAD            SNX_TR_KEYS("Tap a control; tap it again for a press. Back: go back.")
 #else
@@ -530,9 +531,13 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_SETTINGS   SNX_TR_KEYS("Up/Down: setting. Left/Right: change. Enter: type. Del: default. ESC: back.")
 #define SAY_GROUPS     SNX_TR_KEYS("Up/Down: group. Enter: open. ESC: back.")
 #define SAY_APP        SNX_TR_KEYS("Up/Down: row. Left/Right: change. Enter: change or open. ESC: back.")
-#define SAY_FOLDERS                                                                                                    \
-    SNX_TR_KEYS("Add a folder: pick, drop or paste one. Del: take an Extra off. F5: refresh. ESC: back.")
-#define SAY_PLACES SNX_TR_KEYS("Up/Down: folder. Enter: pick another. Del: the default. F5: refresh. ESC: back.")
+#define SAY_FOLDERS    SNX_TR_KEYS("Up/Down: folder. F5: refresh. ESC: back.")
+/* Folders' focused row, each when it can be done there */
+#define SAY_CHANGE     SNX_TR_KEYS("Enter: change.")
+#define SAY_DEFAULT    SNX_TR_KEYS("Del: default.")
+#define SAY_DELETE     SNX_TR_KEYS("Del: delete.")
+#define SAY_ADD        SNX_TR_KEYS("Enter: add.")
+#define SAY_RESET      SNX_TR_KEYS("Enter: reset.")
 #define SAY_PAD    SNX_TR_KEYS("Arrows/pad: move, change. Enter/A: select. Del: the .ini's. ESC: back.")
 #define SAY_USERS  SNX_TR_KEYS("Up/Down: user. Left/Right: plays as. Enter: type a nickname. ESC: back.")
 #endif
@@ -548,8 +553,12 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_PAD_SETTINGS  SNX_TR_KEYS("D-pad: setting, change. A: type. X: default. B: back.")
 #define SAY_PAD_GROUPS    SNX_TR_KEYS("D-pad: group. A: open. B: back.")
 #define SAY_PAD_APP       SNX_TR_KEYS("D-pad: row, change. A: change or open. B: back.")
-#define SAY_PAD_FOLDERS   SNX_TR_KEYS("D-pad: row. X: take an Extra off. Start: refresh. B: back.")
-#define SAY_PAD_PLACES    SNX_TR_KEYS("D-pad: folder. A: pick another. X: the default. Start: refresh. B: back.")
+#define SAY_PAD_FOLDERS   SNX_TR_KEYS("D-pad: folder. Start: refresh. B: back.")
+#define SAY_PAD_CHANGE    SNX_TR_KEYS("A: change.")
+#define SAY_PAD_DEFAULT   SNX_TR_KEYS("X: default.")
+#define SAY_PAD_DELETE    SNX_TR_KEYS("X: delete.")
+#define SAY_PAD_ADD       SNX_TR_KEYS("A: add.")
+#define SAY_PAD_RESET     SNX_TR_KEYS("A: reset.")
 #define SAY_PAD_USERS     SNX_TR_KEYS("D-pad: user, plays as. A: type a nickname. B: back.")
 #define SAY_PAD_TAB       SNX_TR_KEYS("LB/RB: screen.")
 /* a failure of the system's (a file not written, a picker that did not open): in a box over the screen, whole, until
@@ -1988,7 +1997,7 @@ static int splash_shown(App* app) {
 #define SAY_MENU_KEYS SNX_TR_KEYS("Arrows/mouse: move. Space/Enter/click: select. F5: refresh. ESC: exit.")
 #endif
 /* the keys the foot of the screen shown says, Tab's after them: what it draws, and what a click on one presses */
-static bool folders_row_place(const App* app);
+static int folders_said(const App* app, bool pad, const char** parts);
 static int hint_next(const char** s, char* key, char* what, size_t size);
 /* a key every screen has, which F1's box says and a foot leaves out: moving and picking, paging, the tabs, the side
    box, a pad's D-pad, A, LT/RT and LB/RB. key: an English sentence's, its words between slashes */
@@ -2051,13 +2060,14 @@ static const char* screen_said(const App* app, bool help, char* out, size_t size
                    : app->form == GUI_FORM_THEME    ? SAY_PAD_EDITOR
                    : app->form == GUI_FORM_SETTINGS ? SAY_PAD_GROUPS
                    : app->form == GUI_FORM_APP      ? SAY_PAD_APP
-                   : app->form == GUI_FORM_FOLDERS  ? (folders_row_place(app) ? SAY_PAD_PLACES : SAY_PAD_FOLDERS)
+                   : app->form == GUI_FORM_FOLDERS  ? SAY_PAD_FOLDERS
                    : app->form == GUI_FORM_USERS    ? SAY_PAD_USERS
                                                     : SAY_PAD_SETTINGS;
         else
             keys = app->menu.view == GUI_LOAD_GAMES ? SAY_PAD_GAMES
                    : pick_screen(app)               ? SAY_PAD_KEYS_HOW
                                                     : SAY_PAD_MENU;
+        if (app->editing && app->form == GUI_FORM_FOLDERS) n += folders_said(app, true, parts + n);
         parts[n++] = keys;
         if (aot_said(app)) parts[n++] = SAY_PAD_GAMES_AOT;
         parts[n++] = SAY_PAD_TAB;
@@ -2068,13 +2078,14 @@ static const char* screen_said(const App* app, bool help, char* out, size_t size
                    : app->form == GUI_FORM_THEME    ? SAY_EDITOR
                    : app->form == GUI_FORM_SETTINGS ? SAY_GROUPS
                    : app->form == GUI_FORM_APP      ? SAY_APP
-                   : app->form == GUI_FORM_FOLDERS  ? (folders_row_place(app) ? SAY_PLACES : SAY_FOLDERS)
+                   : app->form == GUI_FORM_FOLDERS  ? SAY_FOLDERS
                    : app->form == GUI_FORM_USERS    ? SAY_USERS
                                                     : SAY_SETTINGS;
         else if (app->menu.view == GUI_LOAD_GAMES)
             keys = SAY_GAMES;
         else if (pick_screen(app))
             keys = SAY_KEYS_HOW;
+        if (app->editing && app->form == GUI_FORM_FOLDERS) n += folders_said(app, false, parts + n);
         parts[n++] = keys;
         if (!app->editing && app->menu.view == GUI_LOAD_GAMES) parts[n++] = SAY_GAMES_FOLDERS; /* to add a folder */
         if (aot_said(app)) parts[n++] = SAY_GAMES_AOT;
@@ -4607,8 +4618,8 @@ static const char* unfit_text(const char* why) {
 }
 static const char* const place_holds[GUI_PLACES] = {
     SNX_TR_NOOP("recompiled/, dumps/, themes/ and prod.keys"), SNX_TR_NOOP("The recompiled games"),
-    SNX_TR_NOOP("Each dump's extraction"), SNX_TR_NOOP("The games' logs and threads.txt, and the recent games"),
-    SNX_TR_NOOP("The recompile's unit cache, the shader caches and the dumps' icons; Extractions' default")};
+    SNX_TR_NOOP("Each dump's extraction"), SNX_TR_NOOP("The games' logs, threads.txt and recent.txt"),
+    SNX_TR_NOOP("units/, the shader caches and the dumps' icons")};
 /* Settings' row: its folder holds app.ini, which names the others, so the folder is moved outside the launcher */
 #ifdef SNX_XDG
 static const char config_row[] =
@@ -4617,11 +4628,6 @@ static const char config_row[] =
 static const char config_row[] = SNX_TR_NOOP(
     "app.ini, which names the other folders, and each game's .ini: a portable copy (.scarletnx beside the program) "
     "keeps its own");
-#endif
-#ifdef SNX_TOUCH_UI
-#define PLACE_HOW SNX_TR_NOOP("Tap: pick another. The last row: all back to the defaults")
-#else
-#define PLACE_HOW SNX_TR_NOOP("Enter: pick another. Del: the default")
 #endif
 /* the folders as Folders has them: each one picked, else its default from the data folder, the menu's own one first */
 /* the folder place takes while none is picked, with the data folder in use (its own default: home_dir): owned */
@@ -4683,7 +4689,7 @@ static bool outside_app(const App* app, const char* path) {
 static const char* const group_titles[GUI_FOLDER_GROUPS] = {
     SNX_TR_NOOP("The app's folders"), SNX_TR_NOOP("Recompiled library"), SNX_TR_NOOP("Dumps library")};
 /* row r's kind (GuiFolderRow), its place, folder or library in *at and its group in *group; -1 past the rows (the
-   last, All back to the defaults, is the form's own) */
+   last, Reset to Defaults, is the form's own) */
 static int folder_row(const App* app, int r, int* at, int* group) {
     /* -1: Settings, between Data and the two whose folders app.ini in it names */
     static const int app_places[] = {GUI_PLACE_DATA, -1, GUI_PLACE_STATE, GUI_PLACE_CACHE, GUI_PLACE_WORK};
@@ -4754,10 +4760,19 @@ static int folder_entry_row(const App* app, int e, int* group) {
     *group = GUI_FOLDER_GROUPS;
     return rows;
 }
-/* the focused row of Folders a place's: Enter picks another, Del its default */
-static bool folders_row_place(const App* app) {
-    int at, group;
-    return folder_row(app, app->editor.row, &at, &group) == GUI_ROW_PLACE;
+/* the key Folders' focused row takes, in parts, when it does something there: a place picks another, and one picked
+   goes back to its default; an Extra is taken off; Add a folder adds one; Reset to Defaults resets a place picked.
+   How many (0 or 1, 2 for a place picked) */
+static int folders_said(const App* app, bool pad, const char** parts) {
+    int at, group, n = 0, picked = 0, kind = folder_row(app, app->editor.row, &at, &group);
+    for (int i = 0; i < GUI_PLACES; ++i) picked += app->place[i] != NULL;
+    if (kind == GUI_ROW_PLACE) parts[n++] = pad ? SAY_PAD_CHANGE : SAY_CHANGE;
+    if (kind == GUI_ROW_PLACE && app->place[at] && (pad ? SAY_PAD_DEFAULT : SAY_DEFAULT))
+        parts[n++] = pad ? SAY_PAD_DEFAULT : SAY_DEFAULT;
+    if (kind == GUI_ROW_FOLDER) parts[n++] = pad ? SAY_PAD_DELETE : SAY_DELETE;
+    if (kind == GUI_ROW_ADD) parts[n++] = pad ? SAY_PAD_ADD : SAY_ADD;
+    if (kind < 0 && picked) parts[n++] = pad ? SAY_PAD_RESET : SAY_RESET;
+    return n;
 }
 /* the library row r's group lists, -1 for the app's folders and the last */
 static int folder_row_library(const App* app, int r) {
@@ -4801,8 +4816,8 @@ static void open_folders(App* app, int row) {
                      : app->place[at] && outside_app(app, path) ? snx_tr("outside the app")
                      : app->place[at]                           ? snx_tr("picked")
                                                                 : snx_tr("default"));
-            snprintf(app->place_about[at], sizeof app->place_about[at], snx_tr("%s, %s free. %s"),
-                     snx_tr(place_holds[at]), left, snx_tr(PLACE_HOW));
+            snprintf(app->place_about[at], sizeof app->place_about[at], snx_tr("%s, %s free"), snx_tr(place_holds[at]),
+                     left);
             snprintf(app->place_line[at], sizeof app->place_line[at], "%s%s%s", path ? path : snx_tr("(none)"),
                      why ? " " : "", why ? unfit_text(why) : "");
         } else if (kind == GUI_ROW_CONFIG) {
@@ -4821,7 +4836,7 @@ static void open_folders(App* app, int row) {
                                                                       : "");
         }
     }
-    gui_editor_form(&app->editor, app->folder_keys, rows, &app->app_form, SNX_TR_NOOP("All back to the defaults"));
+    gui_editor_form(&app->editor, app->folder_keys, rows, &app->app_form, SNX_TR_NOOP("Reset to Defaults"));
     app->editor.flat = true;
     app->editor.row = SDL_min(row, gui_editor_rows(&app->editor) - 1);
     app->form = GUI_FORM_FOLDERS;
@@ -4949,8 +4964,7 @@ static void places_reset_ask(App* app) {
         place_note(app, note);
         return;
     }
-    snprintf(app->ask_line, sizeof app->ask_line,
-             snx_tr("Back to the defaults: %s? The folders before keep what they have."), list);
+    snprintf(app->ask_line, sizeof app->ask_line, snx_tr("Reset to Defaults? %s. Nothing is moved."), list);
     gui_confirm_open(&app->confirm, GUI_ASK_PLACES, false);
 }
 /* its answer: every place back to its default */
@@ -4969,7 +4983,7 @@ static void places_reset(App* app) {
     if (logs) run_log_follow(app);
     if (app->editing && app->form == GUI_FORM_FOLDERS) open_folders(app, folder_rows(app)); /* the last row */
     if (failed) say_failure(app, note);
-    place_note(app, failed ? note : snx_tr("All back to the defaults. The folders before keep what they have"));
+    place_note(app, failed ? note : snx_tr("Reset to Defaults: nothing was moved"));
 }
 /* a run's folders picked in Folders, each still able to take what goes there: else out says which, and why */
 static bool places_fit(const App* app, char* out, size_t size) {
@@ -6006,7 +6020,7 @@ static void editor_key(App* app, GuiKey key) {
     if (app->form == GUI_FORM_FOLDERS) {
         if (what == GUI_EDITOR_ACTION && !app->editor.step)
             folder_select(app, app->editor.row, false);
-        else if (what == GUI_EDITOR_SAVE) /* All back to the defaults */
+        else if (what == GUI_EDITOR_SAVE) /* Reset to Defaults */
             places_reset_ask(app);
         if (what != GUI_EDITOR_LEAVE) return;
     }
@@ -6309,7 +6323,7 @@ static const char* form_about(const App* app, SDL_Color* color) {
     *color = rgb(e->note[0] ? (e->leaving ? app->theme.failure : app->theme.focus) : app->theme.ink);
     if (e->note[0]) return e->note;
     if (k) return snx_tr(k->about);
-    if (app->form == GUI_FORM_FOLDERS) return snx_tr("Each folder back to its default. What is in them stays");
+    if (app->form == GUI_FORM_FOLDERS) return snx_tr("Nothing is moved"); /* Reset to Defaults: what, under the boxes */
     return e->object                     ? ""
            : e->row == GUI_EDITOR_FOLDER ? snx_tr("The folder of themes/ it is saved in")
                                          : snx_tr("Ctrl+S saves too");
@@ -9428,8 +9442,7 @@ static const struct {
                  {SNX_TR_KEY("F2"), SDLK_F2, 0, false},
                  {SNX_TR_KEY("F1"), SDLK_F1, 0, false},
                  {SNX_TR_KEY("Select"), SDLK_F1, 0, true},
-                 {SNX_TR_KEY("Refresh"), SDLK_F5, 0, false},
-                 {SNX_TR_KEY("Add a folder"), SDLK_UNKNOWN, 0, false}};
+                 {SNX_TR_KEY("Refresh"), SDLK_F5, 0, false}};
 /* the hint_keys entry of the n bytes at word, a pad's buttons' only when pad (a pad drives the menu), -1 for none */
 static int hint_word(const char* word, size_t n, bool pad) {
     int i;
@@ -9478,11 +9491,6 @@ static bool hint_press(App* app, const char* key, int col) {
     int pick = hint_pick(key, col, app->pad_driven);
     SDL_Event e;
     if (pick < 0) return false;
-    if (hint_keys[pick].key == SDLK_UNKNOWN) { /* Add a folder: on Folders to the focused row's library */
-        if (app->editing && app->form == GUI_FORM_FOLDERS) app->adding = folder_row_library(app, app->editor.row);
-        open_folder_picker(app);
-        return true;
-    }
     SDL_zero(e);
     e.type = SDL_EVENT_KEY_DOWN;
     e.key.key = hint_keys[pick].key;

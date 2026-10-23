@@ -131,7 +131,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
     ready to run Games lists too, and **Add a folder**;
   - **Dumps library**: its **Main**, the data folder's `dumps/` (with its subfolders, going with the data folder), then its
     **Extra** folders, whose dumps Games lists, and **Add a folder**;
-  - **All back to the defaults**, last.
+  - **Reset to Defaults**, last, which asks first.
 
   A row is its name, its folder (one too long for the row cut in its middle: its root and first folder, `...`, as
   many of its last folders as fit; the whole path under the boxes) and what it is. Data, Logs, Caches, Extractions and

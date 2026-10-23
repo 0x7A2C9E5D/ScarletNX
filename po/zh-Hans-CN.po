@@ -214,14 +214,36 @@ msgstr "轻触一行以更改或打开. 返回: 后退."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: tap it. Tap an Extra to take it off. Refresh: tap it. Back: go back."
-msgstr "添加文件夹: 轻触它. 轻触另外的文件夹将其移除. 更新: 轻触它. 返回: 后退."
+msgid "Tap: add."
+msgstr "轻触: 添加."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap a folder to pick another. Refresh: tap it. Back: go back."
-msgstr "轻触文件夹以另选一个. 更新: 轻触它. 返回: 后退."
+msgid "Tap: change."
+msgstr "轻触: 更改."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap: delete."
+msgstr "轻触: 删除."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap: reset."
+msgstr "轻触: 恢复."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Refresh: tap it. Back: go back."
+msgstr "更新: 轻触它. 返回: 后退."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Refresh: tap it."
+msgstr "更新: 轻触它."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -304,14 +326,37 @@ msgstr "上/下: 行. 左/右: 更改. Enter: 更改或打开. ESC: 返回."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: pick, drop or paste one. Del: take an Extra off. F5: refresh. ESC: back."
-msgstr "添加文件夹: 选取、拖入或粘贴一个. Del: 移除另外的文件夹. F5: 更新. ESC: 返回."
+msgid "Enter: add."
+msgstr "Enter: 添加."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: folder. Enter: pick another. Del: the default. F5: refresh. ESC: back."
-msgstr "上/下: 文件夹. Enter: 另选一个. Del: 默认. F5: 更新. ESC: 返回."
+msgid "Enter: change."
+msgstr "Enter: 更改."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Del: default."
+msgstr "Del: 默认."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Del: delete."
+msgstr "Del: 删除."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Enter: reset."
+msgstr "Enter: 恢复."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: folder. F5: refresh. ESC: back."
+msgstr "上/下: 文件夹. F5: 更新. ESC: 返回."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -1059,12 +1104,12 @@ msgid "Each dump's extraction"
 msgstr "每个转储的提取文件"
 
 #: src/gui/main.c
-msgid "The games' logs and threads.txt, and the recent games"
-msgstr "游戏的日志和 threads.txt，以及最近的游戏"
+msgid "The games' logs, threads.txt and recent.txt"
+msgstr "游戏的日志、threads.txt 和 recent.txt"
 
 #: src/gui/main.c
-msgid "The recompile's unit cache, the shader caches and the dumps' icons; Extractions' default"
-msgstr "重编译的单元缓存、着色器缓存和转储的图标；提取的默认位置"
+msgid "units/, the shader caches and the dumps' icons"
+msgstr "units/、着色器缓存和转储的图标"
 
 #: src/gui/main.c
 msgid "app.ini, which names the other folders, and each game's .ini: XDG_CONFIG_HOME moves it"
@@ -1073,14 +1118,6 @@ msgstr "app.ini（指定其他文件夹）和每个游戏的 .ini：用 XDG_CONF
 #: src/gui/main.c
 msgid "app.ini, which names the other folders, and each game's .ini: a portable copy (.scarletnx beside the program) keeps its own"
 msgstr "app.ini（指定其他文件夹）和每个游戏的 .ini：便携版（程序旁的 .scarletnx）有自己的"
-
-#: src/gui/main.c
-msgid "Tap: pick another. The last row: all back to the defaults"
-msgstr "轻触：另选一个。最后一行：全部恢复默认"
-
-#: src/gui/main.c
-msgid "Enter: pick another. Del: the default"
-msgstr "Enter：另选一个。Del：默认"
 
 #: src/gui/main.c
 msgid "outside the app"
@@ -1100,12 +1137,12 @@ msgstr "默认"
 
 #: src/gui/main.c
 #, c-format
-msgid "%s, %s free. %s"
-msgstr "%s，可用 %s。%s"
+msgid "%s, %s free"
+msgstr "%s，可用 %s"
 
 #: src/gui/main.c
-msgid "All back to the defaults"
-msgstr "全部恢复默认"
+msgid "Reset to Defaults"
+msgstr "恢复默认"
 
 #: src/gui/main.c
 #, c-format
@@ -1148,12 +1185,12 @@ msgstr "已是默认：%s"
 
 #: src/gui/main.c
 #, c-format
-msgid "Back to the defaults: %s? The folders before keep what they have."
-msgstr "全部恢复默认：%s？原来的文件夹保留其内容。"
+msgid "Reset to Defaults? %s. Nothing is moved."
+msgstr "恢复默认？%s。不移动任何文件。"
 
 #: src/gui/main.c
-msgid "All back to the defaults. The folders before keep what they have"
-msgstr "全部恢复默认。之前的文件夹保留其内容"
+msgid "Reset to Defaults: nothing was moved"
+msgstr "已恢复默认：未移动任何文件"
 
 #: src/gui/main.c
 #, c-format
@@ -1276,8 +1313,8 @@ msgid "Pick, drop or paste a folder of dumps: Games lists them too"
 msgstr "选取、拖入或粘贴一个转储文件夹：游戏也会列出它们"
 
 #: src/gui/main.c
-msgid "Each folder back to its default. What is in them stays"
-msgstr "每个文件夹恢复默认。其中的内容保留"
+msgid "Nothing is moved"
+msgstr "不移动任何文件"
 
 #: src/gui/main.c
 msgid "The folder of themes/ it is saved in"
