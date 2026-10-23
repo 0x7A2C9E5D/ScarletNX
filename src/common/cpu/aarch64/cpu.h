@@ -39,8 +39,8 @@ typedef double f64;
    9: RtAPI.svcs, which the NX modules call each SVC through by its number.
   10: RtAPI.miss replaces the module's own snx_interp_entry as snx_lookup's fallback, and CPU.disp's slots are read
       with relaxed atomic loads, since the runtime JIT fills them while guest threads run.
-  11: the reworked LLVM backend's modules. Old 10 was taken twice, by our engine and upstream's, and a module built
-      for the wrong one must not load.
+  11: the reworked LLVM backend's modules. Old 10 had been given to two incompatible module formats, and a module
+      built for the wrong one must not load.
   12: snx_cas128 takes the CPU, and RtAPI.cas128 is the 16-byte compare-and-swap of the RISC-V and LoongArch
       modules.
   13: the AOT module's snx_variants() table, which the runtime reads for code the recompiler missed instead of

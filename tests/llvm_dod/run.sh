@@ -24,7 +24,7 @@ print('PASS module dependency map: 9 LLVM IR .c units and 4 NEON source partitio
 PY
 
 # The new runtime calls SVCs through the ABI's indexed table. Check the actual
-# emitter with the upstream CPU layout, LLVM verifier, and native execution.
+# emitter with cpu.h's CPU layout, LLVM verifier, and native execution.
 : "${LLVM_LIBRARY:=$(llvm-config --libdir 2>/dev/null)/libLLVM.so}"
 if [[ -f "$LLVM_LIBRARY" ]]; then
     python3 "$root/tests/llvm_dod/test_svc_table.py" "$work/svc_table.c"

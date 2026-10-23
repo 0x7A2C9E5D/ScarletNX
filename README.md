@@ -118,7 +118,6 @@ runs on macOS yet: see [macOS and iOS](./docs/APPLE.md). Every document: [docs](
 - yuzu, Suyu, Torzu, Ryujinx, [Ryubing](https://git.ryujinx.app/ryubing/ryujinx) (Ryujinx's continuation), [Citron](https://git.citron-emu.org/citron/emulator) and [Eden](https://git.eden-emu.dev/eden-emu/eden).
 - [Atmosphère](https://github.com/Atmosphere-NX/Atmosphere)
 - LibHac.
-- MZ Labs for SwitchRecomp, which we started from. Its code has since been replaced by our own.
 - [NeXium](https://nexium-emu.org/) for research and development.
 - [Switchbrew](https://switchbrew.org) for research.
 - [Azahar](https://github.com/azahar-emu/azahar) and Citra, for all of the 3DS emulation.

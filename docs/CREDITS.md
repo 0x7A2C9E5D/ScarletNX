@@ -68,8 +68,7 @@ a source keep that source's copyright lines and license, most with the revision 
 Dynarmic (0BSD) and its GPL-3.0-or-later fork were consulted for the recompiler's instruction semantics. No code was
 ported from them.
 
-[Nexium](https://nexium-emu.org/) (MIT) is credited for its research and development, which SwitchRecomp, the
-project ScarletNX started from, took as its basis.
+[Nexium](https://nexium-emu.org/) (MIT) is credited for its research and development.
 
 [Anylinux-AppImages](https://github.com/pkgforge-dev/Anylinux-AppImages) (Package Forge, MIT) makes the Linux
 AppImages with its quick-sharun, its Arch images and its debloated packages, and is the reference for how they are
