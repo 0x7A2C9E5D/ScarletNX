@@ -261,11 +261,12 @@ static void bios_rl_uncomp(AgbBoard* board, uint32_t regs[16], int halfwords) {
 /* The difference filters undo a delta encoding: every unit is the difference to the one before it. The
    VRAM variant widens filtered bytes to halfwords. */
 static void bios_diff_unfilter(AgbBoard* board, uint32_t regs[16], int in_width, int out_width) {
-    uint32_t source = regs[0] & ~(uint32_t)3, destination = regs[1];
-    uint32_t remaining = agb_read32(board, source) >> 8, previous = 0, pair = 0;
+    uint32_t source = regs[0] & ~(uint32_t)3, destination = regs[1], previous = 0, pair = 0;
+    /* signed, as the BIOS's subs/bgt count: an odd size from the ROM ends past 0 instead of wrapping */
+    int32_t remaining = (int32_t)(agb_read32(board, source) >> 8);
     uint16_t held = 0;
     source += 4;
-    while (remaining) {
+    while (remaining > 0) {
         uint32_t value = in_width == 2 ? agb_read16(board, source) : agb_read8(board, source);
         value = in_width == 2 ? (uint16_t)(value + previous) : (uint8_t)(value + previous);
         previous = value;

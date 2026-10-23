@@ -174,6 +174,17 @@ int main(void) {
     regs[1] = 0x06010000;
     CHECK(call(regs, AGB_SWI_DIFF_8BIT_UNFILTER_VRAM) == 0);
     CHECK(agb_read16(&board, 0x06010000) == 0x0F0A && agb_read16(&board, 0x06010002) == 0x1211);
+    /* an odd size ends with the halfword that passes it, the one after it untouched */
+    agb_write32(&board, 0x02000310, (3u << 8) | 0x82);
+    agb_write16(&board, 0x02000314, 1);
+    agb_write16(&board, 0x02000316, 1);
+    agb_write16(&board, 0x02030104, 0xBEEF);
+    memset(regs, 0, sizeof(regs));
+    regs[0] = 0x02000310;
+    regs[1] = 0x02030100;
+    CHECK(call(regs, AGB_SWI_DIFF_16BIT_UNFILTER) == 0);
+    CHECK(agb_read16(&board, 0x02030100) == 1 && agb_read16(&board, 0x02030102) == 2);
+    CHECK(agb_read16(&board, 0x02030104) == 0xBEEF && regs[1] == 0x02030104);
 
     /* BgAffineSet: a 90 degree turn, no scale, the origin at the screen center */
     agb_write32(&board, 0x02000400, 128 << 8); /* origin x (24.8) */
