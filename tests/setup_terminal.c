@@ -195,16 +195,22 @@ static void test_ended(void) {
     puts("PASS answers that end too soon");
 }
 
-/* games with saves of the fixed uid: user 1 keeps it */
+/* games with saves of the fixed uid, in recompiled/ where the launcher puts them or in the games/ an older version
+   left: user 1 keeps it */
 static void test_first_saves(void) {
-    char *games = join(data, "games/0100A/0100A_data/save/user." FIRST), *users = join(data, "users");
-    fresh();
-    assert(!snx_mkdirs(games));
-    assert(!run("\n\n\n\n\n\n", 0));
-    said("uid " FIRST ", the uid of the saves of 1 game\n");
-    expect(users, "users.ini", "uid=" FIRST "\nnickname=Player\n");
-    free(users);
-    free(games);
+    static const char* const saves[] = {"recompiled/0100A/0100A_data/save/user." FIRST,
+                                        "games/0100A/0100A_data/save/user." FIRST};
+    size_t i;
+    for (i = 0; i < sizeof saves / sizeof *saves; ++i) {
+        char *games = join(data, saves[i]), *users = join(data, "users");
+        fresh();
+        assert(!snx_mkdirs(games));
+        assert(!run("\n\n\n\n\n\n", 0));
+        said("uid " FIRST ", the uid of the saves of 1 game\n");
+        expect(users, "users.ini", "uid=" FIRST "\nnickname=Player\n");
+        free(users);
+        free(games);
+    }
     puts("PASS the fixed uid kept for its saves");
 }
 

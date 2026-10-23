@@ -192,6 +192,20 @@ static int install(Ask* a) {
     free(portable);
     return rc;
 }
+/* where the launcher puts the games: app.ini's recompiled =, else games = as an older version wrote it, else the data
+   folder's recompiled/ */
+static char* recompiled_folder(Ask* a) {
+    char* games = app_value(a, "folders", "recompiled");
+    if (!games || !games[0]) {
+        free(games);
+        games = app_value(a, "folders", "games");
+    }
+    if (!games || !games[0]) {
+        free(games);
+        games = snx_recompiled_dir(a->data);
+    }
+    return games;
+}
 /* where the launcher puts the games, and the folders it lists them from: kept, or one changed or added at a time */
 static int folders(Ask* a) {
     char *app = menu_file(a, "app.ini"), *list = menu_file(a, "folders.txt"), *picked = NULL, *games, *text;
@@ -200,16 +214,7 @@ static int folders(Ask* a) {
     int choice, rc = 0;
     heading(a, "Folders");
     for (;;) {
-        /* recompiled = as the launcher reads it; games = as an older version wrote it */
-        games = app_value(a, "folders", "recompiled");
-        if (!games || !games[0]) {
-            free(games);
-            games = app_value(a, "folders", "games");
-        }
-        if (!games || !games[0]) {
-            free(games);
-            games = snx_recompiled_dir(a->data);
-        }
+        games = recompiled_folder(a);
         shown(games, line, sizeof line);
         fprintf(a->out, "  Recompiled: %s\n  Dumps:", line);
         text = list && snx_is_file(list) ? (char*)snx_read_file(list, &size) : NULL;
@@ -278,7 +283,7 @@ static int keys(Ask* a) {
 /* the first user: users.ini kept as it is, or started over with one user, its uid the fixed one while games have
    saves of it, else a random one */
 static int user(Ask* a) {
-    char *users = snx_users_dir(a->data), *path = users ? snx_path_join(users, "users.ini") : NULL, *games;
+    char *users = snx_users_dir(a->data), *path = users ? snx_path_join(users, "users.ini") : NULL, *games, *old;
     char why[512], line[SETUP_LINE], hex[33];
     uint64_t uid[2];
     int i, yes = 1, saves, rc = 0;
@@ -301,9 +306,17 @@ static int user(Ask* a) {
         if (yes_no(a, "Overwrite? (users.ini.old keeps it)", &yes)) rc = 1;
     } else
         heading(a, "First User");
-    games = snx_path_join(a->data, "games");
+    /* the saves where the launcher puts the games, else in the games/ an older version left, whose games still run */
+    games = recompiled_folder(a);
+    old = snx_path_join(a->data, "games");
+    if (!snx_setup_first_saves(games) && snx_is_dir(old)) {
+        free(games);
+        games = old;
+        old = NULL;
+    }
     saves = !rc && yes ? snx_setup_first_uid(games, uid) : 0;
     free(games);
+    free(old);
     if (saves < 0) {
         fputs("  The system's random number generator failed: no uid for a new user\n", a->out);
         rc = 1;
