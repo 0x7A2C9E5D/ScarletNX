@@ -749,6 +749,15 @@ static void disk_text(const App* app, char* out, size_t size) {
     } else
         snprintf(out, size, snx_tr("Disk: counting, %s free"), left);
 }
+/* a path as the person sees it: on an iPhone from the app's Documents folder, which the Files app shows as the app's own
+   (On My iPhone > ScarletNX), the container's long path before it being nothing they can open */
+static const char* visible_path(const char* path) {
+#ifdef SDL_PLATFORM_IOS
+    const char* documents = path ? strstr(path, "/Documents") : NULL;
+    if (documents && (documents[10] == '/' || !documents[10])) return documents + 1;
+#endif
+    return path;
+}
 static void footer(App* app, int row, int rows, GuiRgb page, GuiRgb ink, GuiRgb soft) {
     char usage[256], disk[96];
     int bar = app->theme.footer == GUI_STYLE_BAR;
@@ -757,12 +766,15 @@ static void footer(App* app, int row, int rows, GuiRgb page, GuiRgb ink, GuiRgb 
     if (app->theme.footer_rule) rule(app, row, soft);
     gui_usage_text(usage, sizeof(usage), app->usage.available, app->usage.memory_bytes, app->usage.cpu_percent,
                    SDL_GetNumLogicalCPUCores());
+#ifdef SDL_PLATFORM_IOS
+    usage[0] = 0; /* an app runs no children, so there is nothing of them to say */
+#endif
     disk_text(app, disk, sizeof disk);
     n = strlen(usage);
-    if (disk[0]) snprintf(usage + n, sizeof usage - n, "  %s", disk);
+    if (disk[0]) snprintf(usage + n, sizeof usage - n, "%s%s", n ? "  " : "", disk);
     text(app, 1, row, usage, rgb(bar ? page : soft));
     text(app, 1, row + 1, snx_tr("CWD:"), rgb(bar ? page : soft));
-    text(app, 2 + gui_text_cols(snx_tr("CWD:")), row + 1, app->cwd ? app->cwd : snx_tr("(unavailable)"),
+    text(app, 2 + gui_text_cols(snx_tr("CWD:")), row + 1, app->cwd ? visible_path(app->cwd) : snx_tr("(unavailable)"),
          rgb(bar ? page : ink));
 }
 /* the screen a file is picked or dropped on: the keys', and a load option's */
@@ -3075,8 +3087,11 @@ static int status_rows(App* app, int width, GuiRect r, int y, int draw) {
     SDL_Color soft = rgb(app->theme.soft), ink = rgb(app->theme.ink);
     gui_usage_text(usage, sizeof usage, app->usage.available, app->usage.memory_bytes, app->usage.cpu_percent,
                    SDL_GetNumLogicalCPUCores());
+#ifdef SDL_PLATFORM_IOS
+    usage[0] = 0; /* an app runs no children: the row is left out */
+#endif
     disk_text(app, disk, sizeof disk);
-    snprintf(cwd, sizeof cwd, "%s %s", snx_tr("CWD:"), app->cwd ? app->cwd : snx_tr("(unavailable)"));
+    snprintf(cwd, sizeof cwd, "%s %s", snx_tr("CWD:"), app->cwd ? visible_path(app->cwd) : snx_tr("(unavailable)"));
     lines[0] = usage;
     lines[1] = "";
     lines[2] = disk;
@@ -3341,15 +3356,28 @@ static void menu_boxes(App* app, GuiMenuBoxes* m) {
 /* the last run's output, under what the side box says */
 static void last_output(App* app, GuiRect r, int y) {
     SDL_Color soft = rgb(app->theme.soft);
-    int i, x;
+    int i, x, fit = r.w / cell_w(app);
+    bool clipped = false; /* the row before was cut at the box's edge: the one that follows may be its rest */
     if (!app->has_output || entering(app)) return;
     y += cell_h(app);
     y += wrap_in(app, r, r.x, y, snx_tr("Last output (no scrollback):"), 0, soft) * cell_h(app);
     SDL_SetTextureColorMod(app->font, app->theme.ink.r, app->theme.ink.g, app->theme.ink.b);
-    for (i = 0; i < app->console.rows && y + cell_h(app) <= r.y + r.h; ++i, y += cell_h(app))
-        for (x = 0; x < app->console.cols && (x + 1) * cell_w(app) <= r.w; ++x)
+    for (i = 0; i < app->console.rows && y + cell_h(app) <= r.y + r.h; ++i) {
+        int end = app->console.cols - 1, shown;
+        bool wrapped = i && clipped && app->console.cells[i - 1][app->console.cols - 1] != ' ';
+        if (wrapped) { /* the console wrapped a long line: its start, cut with "...", says what it was */
+            clipped = true;
+            continue;
+        }
+        while (end >= 0 && app->console.cells[i][end] == ' ') --end;
+        clipped = end + 1 > fit && fit > 3;
+        shown = clipped ? fit - 3 : end + 1 < fit ? end + 1 : fit;
+        for (x = 0; x < shown; ++x)
             if (app->console.cells[i][x] != ' ')
                 glyph(app, (float)(r.x + x * cell_w(app)), (float)y, app->console.cells[i][x]);
+        for (x = 0; clipped && x < 3; ++x) glyph(app, (float)(r.x + (shown + x) * cell_w(app)), (float)y, '.');
+        y += cell_h(app);
+    }
 }
 /* the side box: the focused item, and for the keys the ones in use; the last run's output under it. What the item
    does is the tips', not said twice */
@@ -3572,14 +3600,15 @@ static void draw_games(App* app) {
                      gui_browser_pages(&app->browser), games_listed(app));
             y += wrap_in(app, r, r.x, y, line, 0, soft) * cell_h(app);
         }
-        y += wrap_in(app, r, r.x, y, app->games_dir ? app->games_dir : "recompiled/", 1, soft) * cell_h(app);
+        y += wrap_in(app, r, r.x, y, app->games_dir ? visible_path(app->games_dir) : "recompiled/", 1, soft) *
+             cell_h(app);
         {
             char* dumps = app->data_dir ? snx_path_join(app->data_dir, "dumps") : NULL;
-            y += wrap_in(app, r, r.x, y, dumps ? dumps : "dumps/", 1, soft) * cell_h(app);
+            y += wrap_in(app, r, r.x, y, dumps ? visible_path(dumps) : "dumps/", 1, soft) * cell_h(app);
             free(dumps);
         }
         for (i = 0; i < (size_t)app->folder_count; ++i)
-            y += wrap_in(app, r, r.x, y, app->folders[i], 1, soft) * cell_h(app);
+            y += wrap_in(app, r, r.x, y, visible_path(app->folders[i]), 1, soft) * cell_h(app);
         last_output(app, r, y);
     }
     status_box(app, g.place.status);
@@ -3625,7 +3654,7 @@ static void draw_pick(App* app) {
     r = gui_rect(r.x, y, r.w, r.y + r.h - y);
     if (keys) {
         snprintf(line, sizeof line, snx_tr("Installs to: %s"),
-                 app->keys_path ? app->keys_path : snx_tr("Home directory unavailable."));
+                 app->keys_path ? visible_path(app->keys_path) : snx_tr("Home directory unavailable."));
         y += wrap_in(app, r, r.x, y, line, 1, rgb(app->theme.ink)) * cell_h(app);
     }
     if (keys && keys_left(app)) { /* what the last try did, and when the menu comes back */
@@ -10344,24 +10373,42 @@ static void tour_tick(App* app) {
                 TOUR("13-after-run", 1500);
             break;
         case 14:
+        case 15:
+        case 16: { /* what the other loads do on an iPhone: a file of theirs, as if the picker had given it */
+            static const struct { int item; const char* file; const char* shot; } other[3] = {
+                {GUI_3DS, "Stand-in.cia", "14-load-3ds"},
+                {GUI_LINUX, "Stand-in.elf", "15-load-linux"},
+                {GUI_VITA, "Stand-in.vpk", "16-load-vita"}};
+            int k = tour.step - 15; /* tour.step was already moved on */
+            FILE* f;
+            app->confirm.shown = false;
+            snprintf(file, sizeof file, "%s/%s", tour.dir, other[k].file);
+            f = fopen(file, "wb");
+            if (f) fclose(f);
+            app->menu.selected = other[k].item;
+            launch(app, snx_strdup(file), false);
+            TOUR(other[k].shot, 1500);
+            break;
+        }
+        case 17:
             snprintf(app->replace_line, sizeof app->replace_line, "0100F43008C44000 is already made. Recompile it over the old one?");
             gui_confirm_open(&app->confirm, GUI_ASK_REPLACE, true);
-            TOUR("14-replace-question", 1500);
+            TOUR("17-replace-question", 1500);
             break;
-        case 15:
+        case 18:
             app->confirm.shown = false;
             snprintf(app->room_line, sizeof app->room_line, "Needs about 4.3 GB, 1.2 GB free.");
             gui_confirm_open(&app->confirm, GUI_ASK_ROOM, true);
-            TOUR("15-room-question", 1500);
+            TOUR("18-room-question", 1500);
             break;
-        case 16:
+        case 19:
             app->confirm.shown = false;
             say_failure(app, "The game's code cannot be loaded: iOS makes memory executable only for an attached "
                              "debugger: enable JIT for this app (StikDebug, with universal.js assigned to it) before "
                              "opening a game");
-            TOUR("16-error-box", 1500);
+            TOUR("19-error-box", 1500);
             break;
-        case 17: app->confirm.shown = false; TOUR("17-menu-end", 1000); break;
+        case 20: app->confirm.shown = false; TOUR("20-menu-end", 1000); break;
         default: app->menu.quit = true; break;
     }
 #undef TOUR
