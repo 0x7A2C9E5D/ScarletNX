@@ -8,7 +8,7 @@ on:
     tags: ['v*'] # a version's release (publish.yml)
   pull_request:
     # skipped when the change is only in files that no build or test reads. tracked_material.py reads them all and runs
-    # on its own (tracked-material.yml). docs/ARCHITECTURE.md, DEPRECATIONS.md and GUI.md are test inputs: they build
+    # on its own (pr-checks.yml). docs/ARCHITECTURE.md, DEPRECATIONS.md and GUI.md are test inputs: they build
     paths:
       - '**'
       - '!**/*.md'
