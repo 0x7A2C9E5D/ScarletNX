@@ -5875,6 +5875,7 @@ int main(int argc, char** argv) {
             assert(hint_keys[hint_pick("R", 0, false)].key == SDLK_R &&
                    hint_keys[hint_pick("R", 5, false)].key == SDLK_R);
             assert(hint_keys[hint_pick("Recompile", 3, false)].key == SDLK_R); /* Android's: no R to name */
+            assert(hint_keys[hint_pick("Mods", 2, false)].key == SDLK_M);      /* and no M: a tap on it opens the box */
             { /* a key's word alone is that key (a finger's "Refresh."); a sentence of other words, text */
                 const char* at = "Refresh. Back.";
                 char k[64], w[64];

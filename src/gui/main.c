@@ -494,7 +494,7 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_GAMES_GRID SAY_GAMES /* a finger's are the list's */
 /* Games' focused row, each when it can be done there (games_said) */
 #define SAY_GAMES_R   SNX_TR_KEYS("Recompile.")
-#define SAY_GAMES_M   NULL
+#define SAY_GAMES_M    SNX_TR_KEYS("Mods.")
 #define SAY_GAMES_AOT SNX_TR_KEYS("AOT pack.")
 #ifdef SDL_PLATFORM_ANDROID
 #define SAY_KEYS_HOW SNX_TR_KEYS("Back.")
@@ -10372,6 +10372,7 @@ static const struct {
                  {SNX_TR_KEY("B"), SDLK_B, 0, false},
                  {SNX_TR_KEY("AOT pack"), SDLK_B, 0, false},
                  {SNX_TR_KEY("M"), SDLK_M, 0, false},
+                 {SNX_TR_KEY("Mods"), SDLK_M, 0, false},
                  {SNX_TR_KEY("P"), SDLK_P, 0, false},
                  {SNX_TR_KEY("Folders"), SDLK_P, 0, false},
                  {SNX_TR_KEY("V"), SDLK_V, 0, false},

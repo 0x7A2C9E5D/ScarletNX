@@ -353,10 +353,10 @@ cannot be read is named and the others still listed.
 - **R** (on Android a tap on *Recompile* at the foot) recompiles the Switch game in focus, recent or on the page,
   where it is, or prepares its dump again: `scarletnx -r`. It plays nothing;
   Enter then does. On another row, or a 3DS or Vita game, it says why it does nothing.
-- **M** opens the box of the recompiled Switch game in focus, recent or on the page, that Enter opens for a game with
-  updates, DLCs, mods or cheats beside it, and for a game with none of them too, whose **Add Mod** and **Add Cheats**
-  copy a folder or a `.txt` the system's picker gives into the game's mods and cheats ([USAGE](USAGE.md#mods)). On
-  another row, a dump, or a 3DS or Vita game, it says what it opens.
+- **M** (on Android a tap on *Mods* at the foot) opens the box of the recompiled Switch game in focus, recent or on
+  the page, that Enter opens for a game with updates, DLCs, mods or cheats beside it, and for a game with none of them
+  too, whose **Add Mod** and **Add Cheats** copy a folder or a `.txt` the system's picker gives into the game's mods
+  and cheats ([USAGE](USAGE.md#mods)). On another row, a dump, or a 3DS or Vita game, it says what it opens.
 - In the list, Left/Right and PgUp/PgDown go to the previous/next page. The page number and
   total file count are shown. Paging stops at the first and last pages.
 - Resizing adjusts the page size while keeping the selected file visible.
