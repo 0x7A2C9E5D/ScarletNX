@@ -2400,9 +2400,16 @@ int main(int argc, char** argv) {
                !f.place.status.h && f.place.side.w == f.place.head.w);
         {
             UiRowInfo info = {0};
-            assert(ui_form_side_rows_get_row_info(&app, 10 + GUI_FOLDER_GROUPS - 1, 100, &info) && !info.attr &&
+            /* Reset to Defaults in a group of its own, Defaults, after a blank entry */
+            assert(ui_form_side_rows_get_row_info(&app, 9 + GUI_FOLDER_GROUPS, 100, &info) &&
+                   info.attr == UI_ATTR_LABEL && !info.label[0]);
+            info = (UiRowInfo){0};
+            assert(ui_form_side_rows_get_row_info(&app, 9 + GUI_FOLDER_GROUPS + 1, 100, &info) &&
+                   info.attr == UI_ATTR_TITLE && !strcmp(info.label, "Defaults"));
+            info = (UiRowInfo){0};
+            assert(ui_form_side_rows_get_row_info(&app, 9 + GUI_FOLDER_GROUPS + 2, 100, &info) && !info.attr &&
                    !strcmp(info.label, "Reset to Defaults"));
-            assert(!ui_form_side_rows_get_row_info(&app, 10 + GUI_FOLDER_GROUPS, 100, &info));
+            assert(!ui_form_side_rows_get_row_info(&app, 9 + GUI_FOLDER_GROUPS + 3, 100, &info));
             assert(ui_form_side_rows_get_row_info(&app, 0, 100, &info) && info.attr == UI_ATTR_TITLE &&
                    !strcmp(info.label, "The app's folders"));
         }
@@ -2419,7 +2426,7 @@ int main(int argc, char** argv) {
             SDL_Color dim = rgb(app.theme.dim);
             assert(!app.theme.grid && !same_colour(dim, rgb(app.theme.page)));
             assert(same_colour(pixel(&app, (float)(r.x - 4 * app.scale), (float)(r.y + r.h / 2)), dim));
-            r = ui_form_side_row(f.right, app.scale, UI_FORM_SIDE_ROWS, 10 + GUI_FOLDER_GROUPS - 1);
+            r = ui_form_side_row(f.right, app.scale, UI_FORM_SIDE_ROWS, 9 + GUI_FOLDER_GROUPS + 2);
             assert(same_colour(pixel(&app, (float)(r.x - 4 * app.scale), (float)(r.y + r.h / 2)), dim));
         }
         { /* a title on a band of ink in a theme of filled boxes, its text in the page's colour; over a rule in dim in

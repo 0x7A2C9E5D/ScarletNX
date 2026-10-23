@@ -4686,8 +4686,9 @@ static const char* place_path(const App* app, int place) {
 static bool outside_app(const App* app, const char* path) {
     return app->own_dir && !snx_path_within(path, app->own_dir);
 }
-static const char* const group_titles[GUI_FOLDER_GROUPS] = {
-    SNX_TR_NOOP("The app's folders"), SNX_TR_NOOP("Recompiled library"), SNX_TR_NOOP("Dumps library")};
+static const char* const group_titles[GUI_FOLDER_GROUPS + 1] = {
+    SNX_TR_NOOP("The app's folders"), SNX_TR_NOOP("Recompiled library"), SNX_TR_NOOP("Dumps library"),
+    SNX_TR_NOOP("Defaults")}; /* the last's, Reset to Defaults' */
 /* row r's kind (GuiFolderRow), its place, folder or library in *at and its group in *group; -1 past the rows (the
    last, Reset to Defaults, is the form's own) */
 static int folder_row(const App* app, int r, int* at, int* group) {
@@ -4740,13 +4741,13 @@ static const char* folder_row_path(const App* app, int r) {
            : kind == GUI_ROW_FOLDER ? app->folders[at]
                                     : NULL;
 }
-/* Folders' screen lists each group's title before its rows (every group has some) and the last row after the
-   groups: the list's entries, row r's, and entry e's row (-1 a title, its group in *group; the last's group
-   GUI_FOLDER_GROUPS) */
-static int folder_entries(const App* app) { return folder_rows(app) + GUI_FOLDER_GROUPS + 1; }
+/* Folders' screen lists each group's title before its rows (every group has some), then a blank entry and the last
+   row in a group of its own, Defaults: the list's entries, row r's, and entry e's row (-1 a title, its group in
+   *group; the last's group GUI_FOLDER_GROUPS, the blank one's GUI_FOLDER_GROUPS + 1) */
+static int folder_entries(const App* app) { return folder_rows(app) + GUI_FOLDER_GROUPS + 3; }
 static int folder_entry(const App* app, int r) {
     int at, group, rows = folder_rows(app);
-    if (r >= rows) return rows + GUI_FOLDER_GROUPS;
+    if (r >= rows) return rows + GUI_FOLDER_GROUPS + 2;
     folder_row(app, r, &at, &group);
     return r + group + 1;
 }
@@ -4757,8 +4758,8 @@ static int folder_entry_row(const App* app, int e, int* group) {
         if (folder_entry(app, r) == e) return r;
         if (folder_entry(app, r) - 1 == e && (!r || folder_entry(app, r - 1) + 1 < folder_entry(app, r))) return -1;
     }
-    *group = GUI_FOLDER_GROUPS;
-    return rows;
+    *group = e == rows + GUI_FOLDER_GROUPS ? GUI_FOLDER_GROUPS + 1 : GUI_FOLDER_GROUPS;
+    return e < rows + GUI_FOLDER_GROUPS + 2 ? -1 : rows;
 }
 /* the key Folders' focused row takes, in parts, when it does something there: a place picks another, and one picked
    goes back to its default; an Extra is taken off; Add a folder adds one; Reset to Defaults resets a place picked.
@@ -6309,7 +6310,13 @@ bool ui_form_side_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* 
         return form_row_info(app, e, row, form_labels(e), width, info);
     }
     if (row >= (size_t)folder_entries(app)) return false;
-    if ((r = folder_entry_row(app, (int)row, &group)) < 0) { /* a group's title, over its rows */
+    if ((r = folder_entry_row(app, (int)row, &group)) < 0 &&
+        group > GUI_FOLDER_GROUPS) { /* the blank before Defaults */
+        info->label = "";
+        info->attr = UI_ATTR_LABEL;
+        return true;
+    }
+    if (r < 0) { /* a group's title, over its rows */
         info->label = snx_tr(group_titles[group]);
         info->attr = UI_ATTR_TITLE;
         return true;
@@ -6353,7 +6360,7 @@ static void form_swatches(App* app, const GuiFormBoxes* f) {
     }
 }
 /* Folders' groups, a box each as far as it shows: from its title down to its last row shown, half a cell wider
-   either side, and Reset to Defaults in one of its own; drawn under them */
+   either side, Defaults' too; drawn under them */
 static void folder_frames(App* app, const GuiFormBoxes* f) {
     const UiList* l = &f->right_lists[UI_FORM_SIDE_ROWS];
     size_t i, n = ui_form_side_shown(f->right, app->scale, UI_FORM_SIDE_ROWS);
