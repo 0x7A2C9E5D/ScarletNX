@@ -83,6 +83,20 @@ void agb_dma_write(AgbBoard* board, uint32_t offset, uint16_t value) {
     }
 }
 
+uint16_t agb_dma_written(AgbBoard* board, uint32_t offset) {
+    int index = (int)((offset - 0xB0) >> 4), part = (int)(offset & 0xF);
+    const AgbDmaChannel* channel;
+    if (index < 0 || index > 3) return 0;
+    channel = &board->dma[index];
+    switch (part) {
+        case 0x0: return (uint16_t)channel->source;
+        case 0x2: return (uint16_t)(channel->source >> 16);
+        case 0x4: return (uint16_t)channel->destination;
+        case 0x6: return (uint16_t)(channel->destination >> 16);
+        default: return agb_dma_read(board, offset);
+    }
+}
+
 uint16_t agb_dma_read(AgbBoard* board, uint32_t offset) {
     int index = (int)((offset - 0xB0) >> 4), part = (int)(offset & 0xF);
     AgbDmaChannel* channel;

@@ -66,6 +66,32 @@ uint16_t agb_apu_read(AgbBoard* board, uint32_t offset) {
     return 0;
 }
 
+uint16_t agb_apu_written(AgbBoard* board, uint32_t offset) {
+    const AgbApu* apu = &board->apu;
+    switch (offset) {
+        case 0x060: return apu->cnt_l[0];
+        case 0x062: return apu->cnt_h[0];
+        case 0x068: return apu->cnt_h[1];
+        case 0x064: return apu->cnt_x[0];
+        case 0x06C: return apu->cnt_x[1];
+        case 0x074: return apu->cnt_x[2];
+        case 0x07C: return apu->cnt_x[3] & 0x7FFF; /* the noise keeps its trigger bit */
+        case 0x070: return apu->cnt_l[2];
+        case 0x072: return apu->cnt_h[2];
+        case 0x078: return apu->cnt_h[3];
+        case 0x080: return apu->soundcnt_l;
+        case 0x082: return apu->soundcnt_h;
+        case 0x084: return apu->soundcnt_x;
+        case 0x088: return apu->soundbias;
+        default: break;
+    }
+    if (offset >= 0x090 && offset <= 0x09E) {
+        uint32_t bank = apu->cnt_l[2] & 0x20 ? 1 : 0, index = offset & 7; /* where agb_apu_write puts it */
+        return (uint16_t)(apu->wave_ram[bank][index] | apu->wave_ram[bank][index + 1] << 8);
+    }
+    return 0;
+}
+
 void agb_apu_write(AgbBoard* board, uint32_t offset, uint16_t value) {
     AgbApu* apu = &board->apu;
     int channel;

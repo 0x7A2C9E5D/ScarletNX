@@ -41,8 +41,24 @@ uint16_t agb_io_read16(AgbBoard* board, uint32_t address) {
     return board->io[offset];
 }
 
-void agb_io_write16(AgbBoard* board, uint32_t address, uint16_t value) {
+/* the register as written, for the lane a byte store leaves: a device's copy where a read gives another value */
+static uint16_t io_written(AgbBoard* board, uint32_t byte, uint32_t offset) {
+    if (byte <= 0x5F) return agb_ppu_read(board, byte);
+    if (byte >= 0x60 && byte <= 0xA7) return agb_apu_written(board, byte);
+    if (byte >= 0xB0 && byte <= 0xDF) return agb_dma_written(board, byte);
+    if (byte >= 0x100 && byte <= 0x10F) return agb_timer_written(board, byte);
+    if (byte == 0x200) return board->irq_ie;
+    if (byte == 0x208) return board->irq_ime;
+    return board->io[offset];
+}
+
+void agb_io_write16(AgbBoard* board, uint32_t address, uint16_t value, uint16_t mask) {
     uint32_t offset = (address >> 1) & (AGB_IO_COUNT - 1), byte = offset * 2;
+    if (byte == 0x202) {
+        board->irq_if &= (uint16_t)~(value & mask); /* one bits acknowledge the interrupt flags of the lanes written */
+        return;
+    }
+    if (mask != 0xFFFF) value = (uint16_t)((value & mask) | (io_written(board, byte, offset) & ~mask));
     if (byte <= 0x5F) {
         agb_ppu_write(board, byte, value);
         return;
@@ -61,10 +77,6 @@ void agb_io_write16(AgbBoard* board, uint32_t address, uint16_t value) {
     }
     if (byte == 0x200) {
         board->irq_ie = value;
-        return;
-    }
-    if (byte == 0x202) {
-        board->irq_if &= (uint16_t)~value; /* one bits acknowledge the interrupt flags */
         return;
     }
     if (byte == 0x208) {

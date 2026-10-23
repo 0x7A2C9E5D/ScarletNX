@@ -39,7 +39,7 @@ int main(void) {
     CHECK(agb_ppu_read(&board, 0x006) == 160); /* a frame of lines from here wraps back */
     agb_ppu_step(&board, AGB_SCANLINE_CYCLES * 68);
     CHECK(agb_ppu_read(&board, 0x006) == 0);
-    agb_io_write16(&board, 0x04000202, 0xFFFF);
+    agb_io_write16(&board, 0x04000202, 0xFFFF, 0xFFFF);
 
     /* mode 3: the bitmap is the screen */
     agb_ppu_write(&board, 0x000, 0x0403); /* mode 3, BG2 on */

@@ -105,6 +105,28 @@ int main(void) {
     CHECK(agb_read8(&board, 0x0E008010) == 0x5A && agb_read8(&board, 0x0F018010) == 0x5A);
     agb_write8(&board, 0x0E008020, 0xA5);
     CHECK(agb_read8(&board, 0x0E000020) == 0xA5);
+
+    /* a byte store to the I/O window writes its lane alone, the other as the register holds it written */
+    board.irq_if = 0x0101;
+    agb_write8(&board, 0x04000203, 0x01); /* IF+1 acknowledges bit 8 alone */
+    CHECK(board.irq_if == 0x0001);
+    agb_write16(&board, 0x04000100, 0x1234); /* TM0CNT_L sets the reload, and reads as the counter */
+    board.timer[0].counter = 0xABCD;
+    agb_write8(&board, 0x04000100, 0x56);
+    CHECK(board.timer[0].reload == 0x1256);
+    agb_write16(&board, 0x040000B0, 0x1234); /* DMA0SAD, write-only */
+    agb_write8(&board, 0x040000B1, 0x56);
+    CHECK((board.dma[0].source & 0xFFFF) == 0x5634);
+    agb_write16(&board, 0x0400006C, 0x0123); /* SOUND2CNT_H: its frequency reads as 0 */
+    agb_write8(&board, 0x0400006D, 0x04);
+    CHECK((board.apu.cnt_x[1] & 0x7FF) == 0x423);
+    agb_write16(&board, 0x0400007C, 0x8001); /* SOUND4CNT_H: a trigger acts once, the next byte store's lane has none */
+    board.apu.enabled[3] = 0;
+    agb_write8(&board, 0x0400007C, 0x02);
+    CHECK(!board.apu.enabled[3] && (board.apu.cnt_x[3] & 0xFF) == 0x02);
+    agb_write16(&board, 0x04000000, 0x0403); /* DISPCNT */
+    agb_write8(&board, 0x04000001, 0x01);
+    CHECK(board.ppu.dispcnt == 0x0103);
     agb_board_destroy(&board);
     CHECK(!board.has_cartridge && !board.cartridge.data);
 

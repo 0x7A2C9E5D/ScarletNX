@@ -32,6 +32,8 @@ typedef struct {
 
 /* The register window at 0x04000060 to 0x040000A7, halfword addressed. */
 uint16_t agb_apu_read(AgbBoard* board, uint32_t offset);
+/* as written: the frequencies and lengths a read hides, without a trigger */
+uint16_t agb_apu_written(AgbBoard* board, uint32_t offset);
 void agb_apu_write(AgbBoard* board, uint32_t offset, uint16_t value);
 /* Runs the sound hardware for the given CPU cycles, appending interleaved stereo samples at
    AGB_APU_RATE to the buffer. Returns the number of stereo samples appended. */

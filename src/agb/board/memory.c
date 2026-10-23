@@ -123,9 +123,7 @@ uint32_t agb_read32(AgbBoard* board, uint32_t address) {
 void agb_write8(AgbBoard* board, uint32_t address, uint8_t value) {
     uint8_t* p;
     if ((address >> 24) == 0x04) {
-        uint32_t halfword = address & 0x0FFFFFFE;
-        uint16_t old = agb_io_read16(board, halfword);
-        agb_io_write16(board, halfword, (uint16_t)(address & 1 ? (old & 0x00FF) | value << 8 : (old & 0xFF00) | value));
+        agb_io_write16(board, address & 0x0FFFFFFE, (uint16_t)(value * 0x0101u), address & 1 ? 0xFF00 : 0x00FF);
         return;
     }
     if ((address >> 24) >= 0x0E) {
@@ -158,7 +156,7 @@ void agb_write16(AgbBoard* board, uint32_t address, uint16_t value) {
     }
     address &= 0x0FFFFFFE;
     if ((address >> 24) == 0x04) {
-        agb_io_write16(board, address, value);
+        agb_io_write16(board, address, value, 0xFFFF);
         return;
     }
     p = region8(board, address);
@@ -173,8 +171,8 @@ void agb_write32(AgbBoard* board, uint32_t address, uint32_t value) {
     }
     address &= 0x0FFFFFFC;
     if ((address >> 24) == 0x04) {
-        agb_io_write16(board, address, (uint16_t)value);
-        agb_io_write16(board, address + 2, (uint16_t)(value >> 16));
+        agb_io_write16(board, address, (uint16_t)value, 0xFFFF);
+        agb_io_write16(board, address + 2, (uint16_t)(value >> 16), 0xFFFF);
         return;
     }
     p = region8(board, address);

@@ -36,6 +36,12 @@ void agb_timer_write(AgbBoard* board, uint32_t offset, uint16_t value) {
     timer->control = value & 0x00C7;
 }
 
+uint16_t agb_timer_written(AgbBoard* board, uint32_t offset) {
+    int index = (int)((offset - 0x100) >> 2);
+    if (index < 0 || index > 3) return 0;
+    return offset & 3 ? board->timer[index].control : board->timer[index].reload;
+}
+
 uint16_t agb_timer_read(AgbBoard* board, uint32_t offset) {
     int index = (int)((offset - 0x100) >> 2), part = (int)(offset & 3);
     if (index < 0 || index > 3) return 0;

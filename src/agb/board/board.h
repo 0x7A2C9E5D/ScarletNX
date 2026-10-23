@@ -67,17 +67,20 @@ int agb_board_insert(AgbBoard* board, const void* image, size_t size, char* erro
 void agb_board_destroy(AgbBoard* board);
 
 /* The I/O window at 0x04000000: the devices own their registers here. Recompiled code reaches them
-   through the bus hook of AgbCpu, which routes every access to these. */
+   through the bus hook of AgbCpu, which routes every access to these. A store's mask is the lanes it writes,
+   0xFFFF a halfword, 0x00FF or 0xFF00 a byte: the other lane keeps the register as written. */
 uint16_t agb_io_read16(AgbBoard* board, uint32_t address);
-void agb_io_write16(AgbBoard* board, uint32_t address, uint16_t value);
+void agb_io_write16(AgbBoard* board, uint32_t address, uint16_t value, uint16_t mask);
 /* Devices request interrupts here. */
 void agb_irq_request(AgbBoard* board, uint32_t mask);
 
 /* The DMA controller and the timers (dma.c, timers.c). */
 void agb_dma_write(AgbBoard* board, uint32_t offset, uint16_t value);
 uint16_t agb_dma_read(AgbBoard* board, uint32_t offset);
+uint16_t agb_dma_written(AgbBoard* board, uint32_t offset); /* as written: the addresses a read gives as 0 */
 void agb_dma_event(AgbBoard* board, int event);
 void agb_timer_write(AgbBoard* board, uint32_t offset, uint16_t value);
 uint16_t agb_timer_read(AgbBoard* board, uint32_t offset);
+uint16_t agb_timer_written(AgbBoard* board, uint32_t offset); /* as written: TMxCNT_L's reload, not its counter */
 void agb_timer_step(AgbBoard* board, uint32_t cycles);
 #endif
