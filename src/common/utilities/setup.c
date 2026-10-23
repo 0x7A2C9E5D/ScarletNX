@@ -150,6 +150,17 @@ int snx_setup_due(const SnxSetup* setup) {
 }
 
 int snx_setup_skip, snx_setup_again;
+static struct {
+    const char *prod_keys_override, *title_keys_override;
+} g_setup;
+SnxSetupKeysOverride snx_setup_keys_override_get(void) {
+    SnxSetupKeysOverride current = {g_setup.prod_keys_override, g_setup.title_keys_override};
+    return current;
+}
+void snx_setup_keys_override_set(const char* prod, const char* title) {
+    g_setup.prod_keys_override = prod;
+    g_setup.title_keys_override = title;
+}
 int snx_setup_options(int argc, char** argv, char* why, size_t why_size) {
     int i, n = 1, skips = 0, debug = 0;
     snx_setup_skip = snx_setup_again = 0;
@@ -258,7 +269,16 @@ static char* keys_home(void) {
     return home && home[0] ? snx_path_join(home, ".switch") : NULL;
 }
 char* snx_keys_found(const char* data, const char* name) {
-    char *path = data ? snx_path_join(data, name) : NULL, *home;
+    const char* override;
+    char *path, *home;
+    if (!strcmp(name, "prod.keys"))
+        override = g_setup.prod_keys_override;
+    else if (!strcmp(name, "title.keys"))
+        override = g_setup.title_keys_override;
+    else
+        override = NULL;
+    if (override) return snx_is_file(override) ? snx_strdup(override) : NULL;
+    path = data ? snx_path_join(data, name) : NULL;
 #ifdef SNX_IOS
     free(path); /* the data folder keeps them in keys/ */
     path = data ? snx_path_join(data, "keys") : NULL;

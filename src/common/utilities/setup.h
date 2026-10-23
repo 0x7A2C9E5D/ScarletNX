@@ -64,6 +64,13 @@ int snx_keys_text(const char* data, size_t size);
 /* name (prod.keys, title.keys) where the driver reads it: in the data folder data, else in ~/.switch (%USERPROFILE% on
    Windows); NULL for neither */
 char* snx_keys_found(const char* data, const char* name);
+/* key paths explicitly supplied to the current driver's run, visible to the setup's key check */
+typedef struct {
+    const char* prod;
+    const char* title;
+} SnxSetupKeysOverride;
+SnxSetupKeysOverride snx_setup_keys_override_get(void);
+void snx_setup_keys_override_set(const char* prod, const char* title);
 /* the folder the keys are installed in: data when it is the user's data folder on an XDG system, which the driver
    reads first, so nothing is written in the home folder itself; else ~/.switch. NULL with no home */
 char* snx_keys_dir(const char* data);

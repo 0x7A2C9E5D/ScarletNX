@@ -15,6 +15,8 @@ typedef struct {
     const char* build;
     const char* executable;
     const char* source; /* the checkout the build came from (snx_checkout), to build tools in; NULL without one */
+    const char* keys; /* optional prod.keys path supplied with --keys */
+    const char* title_keys; /* optional title.keys path supplied with --title-keys */
 } SnxPaths;
 
 void* snx_alloc(size_t size);

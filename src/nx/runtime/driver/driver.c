@@ -64,6 +64,8 @@ static void usage(void) {
 #else
          "                         ~/.local/share/scarletnx)");
 #endif
+    puts("  --keys FILE            prod.keys for this run (default: the data folder, then ~/.switch)\n"
+         "  --title-keys FILE      title.keys for this run, found the same way (optional)");
     puts("  --setup                Go through the setup in the terminal: the language, the install, the\n"
          "                         folders, the keys and the first user (asked by itself the first time\n"
          "                         a terminal runs a dump, or after an update says what changed)\n"
@@ -85,6 +87,62 @@ static int is_nro_path(const char* path) {
     const char* ext = strrchr(path, '.');
     return ext && strlen(ext) == 4 && tolower((unsigned char)ext[1]) == 'n' && tolower((unsigned char)ext[2]) == 'r' &&
            tolower((unsigned char)ext[3]) == 'o';
+}
+/* the keys' options of a stage, --keys and --title-keys as the driver has them, put in command at n: the next n */
+static int add_keys(const char** command, int n, const SnxPaths* paths) {
+    if (paths->keys) {
+        command[n++] = "--keys";
+        command[n++] = paths->keys;
+    }
+    if (paths->title_keys) {
+        command[n++] = "--title-keys";
+        command[n++] = paths->title_keys;
+    }
+    return n;
+}
+/* --keys or --title-keys, as a flag in this driver's arguments. Sets consumed to 1 when its value is next;
+   returns 0 for another option, -1 on malformed input. */
+static int keys_option(const char* arg, const char* next, const char** prod_flag, const char** title_flag,
+                       int* consumed) {
+    const char *equal = strchr(arg, '='), *value = NULL;
+    *consumed = 0;
+    if (strncmp(arg, "--", 2)) return 0;
+    if (!strcmp(arg, "--keys") || !strcmp(arg, "--title-keys")) {
+        value = next;
+        if (!value || !value[0] || value[0] == '-') {
+            snx_error("%s requires a file", arg);
+            return -1;
+        }
+        *consumed = 1;
+        if (!strcmp(arg, "--keys")) *prod_flag = value;
+        else *title_flag = value;
+        return 1;
+    }
+    if (equal && (!strncmp(arg, "--keys=", 7) || !strncmp(arg, "--title-keys=", 13))) {
+        value = equal + 1;
+        if (!value[0]) {
+            snx_error("%.*s requires a file", (int)(equal - arg), arg);
+            return -1;
+        }
+        if (!strncmp(arg, "--keys=", 7)) *prod_flag = value;
+        else *title_flag = value;
+        return 1;
+    }
+    return 0;
+}
+/* A key flag's file, made absolute because the stages run from other folders. NULL, said why, when it is not a file. */
+static char* keys_flag_file(const char* key, const char* value) {
+    char* path = snx_absolute(value);
+    if (!path) {
+        snx_error("cannot resolve %s: %s", key, value);
+        return NULL;
+    }
+    if (!snx_is_file(path)) {
+        snx_error("%s is not a file: %s", key, path);
+        free(path);
+        return NULL;
+    }
+    return path;
 }
 /* 1 when the files at a and b hold the same bytes */
 static int same_bytes(const char* a, const char* b) {
@@ -238,7 +296,7 @@ static int left_beside(const char* input) {
    rest kept. made, the part of target the extraction makes (exefs, a DLC's image), is there once it is done. marker,
    <name>.extracting in the game's folder, says it is incomplete until it is done */
 static int extract_game(const char** command, const char* dump, const char* update, const char* target,
-                        const char* made, const char* marker) {
+                        const char* made, const char* marker, const SnxPaths* paths) {
     static const char* const parts[] = {"exefs", "romfs", "control.nacp", "control.romfs"};
     char *folder = snx_dirname(marker), *part;
     size_t i;
@@ -257,6 +315,7 @@ static int extract_game(const char** command, const char* dump, const char* upda
         command[n++] = "--update";
         command[n++] = update;
     }
+    n = add_keys(command, n, paths);
     command[n++] = "--";
     command[n++] = dump;
     command[n] = NULL;
@@ -314,7 +373,8 @@ static int drop_extraction(const char* data, const char* source, int recorded, c
    it was made from (snx_game_source) when it is in neither (a reboot empties tmpfs) or its extraction stopped, or said why not. An
    NRO's romfs.bin and a program without a title ID stay as they are. 0, or nonzero when an extraction or a copy
    failed */
-static int ensure_romfs(const char** command, const char* folder, const char* name, int tmpfs, int extract) {
+static int ensure_romfs(const char** command, const char* folder, const char* name, int tmpfs, int extract,
+                        const SnxPaths* paths) {
     char *base = snx_path_join(folder, name), *data = snx_format("%s_data", base);
     int recorded;
     char* source = snx_game_source(folder, name, &recorded);
@@ -331,7 +391,7 @@ static int ensure_romfs(const char** command, const char* folder, const char* na
     }
     exefs = snx_path_join(data, "exefs");
     if (!snx_is_dir(exefs) && snx_is_file(source)) { /* made from its dump in place: extracted now */
-        rc = extract_game(command, source, NULL, data, "exefs", extracting);
+        rc = extract_game(command, source, NULL, data, "exefs", extracting, paths);
         if (rc) goto done;
     }
     text = snx_read_file(npdm, &size);
@@ -366,7 +426,7 @@ static int ensure_romfs(const char** command, const char* folder, const char* na
                 tmpfs ? "to tmpfs" : "again from tmpfs's emptied copy");
         goto done;
     }
-    rc = extract_game(command, source, NULL, tmpfs ? work : data, "exefs", extracting);
+    rc = extract_game(command, source, NULL, tmpfs ? work : data, "exefs", extracting, paths);
     if (!rc && tmpfs)
         rc = (snx_is_dir(disk) && snx_remove_tree(disk)) || snx_write_file(marker, "", 0);
     else if (!rc)
@@ -400,7 +460,7 @@ static SnxU64 game_id(const char* name) {
    RomFS image as system/archives/<its title ID>.romfs, from its dump. Off: what an extraction left there taken away,
    the add-on read from its dump in place. 0, or nonzero when an extraction failed or a part could not be taken away */
 static int ensure_addon(const char** command, const char* folder, const char* name, SnxU64 addon, const char* dump,
-                        const char* game, int extract) {
+                        const char* game, int extract, const SnxPaths* paths) {
     char *base = snx_path_join(folder, name), *data = snx_format("%s_data", base), text[17], *made, *path;
     char* extracting = snx_format("%s.extracting", base);
     int update = snx_addon_kind(game_id(name), addon) == SNX_ADDON_UPDATE, rc = 0, i;
@@ -431,8 +491,8 @@ static int ensure_addon(const char** command, const char* folder, const char* na
                             "the update goes over its game's dump, and the game's .ini names none: play the game's "
                             "dump to record it");
         else
-            rc = update ? extract_game(command, game, dump, data, made, extracting)
-                        : extract_game(command, dump, NULL, data, made, extracting);
+            rc = update ? extract_game(command, game, dump, data, made, extracting, paths)
+                        : extract_game(command, dump, NULL, data, made, extracting, paths);
     }
     free(base);
     free(data);
@@ -489,7 +549,8 @@ static char* game_program(const char* folder, const char* name) {
 }
 /* The game's checked DLCs readied as ensure_addon readies one, each from the dump its own .ini names; one whose dump
    is not there is left to the runtime, which plays without it and says so. 0, or nonzero when one failed */
-static int ensure_dlcs(const char** command, const char* folder, const char* name, int extract) {
+static int ensure_dlcs(const char** command, const char* folder, const char* name, int extract,
+                       const SnxPaths* paths) {
     size_t count, i;
     SnxAddon* list = checked_addons(folder, name, &count);
     char *own, *dump;
@@ -501,7 +562,7 @@ static int ensure_dlcs(const char** command, const char* folder, const char* nam
         if (!dump)
             rc = 1; /* its path did not fit, said */
         else if (snx_is_file(dump) || !extract)
-            rc = ensure_addon(command, folder, own, list[i].id, dump, NULL, extract);
+            rc = ensure_addon(command, folder, own, list[i].id, dump, NULL, extract, paths);
         free(own);
         free(dump);
     }
@@ -661,7 +722,8 @@ static int play_dump_at(const char* input, const SnxPaths* paths, unsigned flags
         /* extracted unless its game has its ExeFS, from a finished extraction; else its game made from the dump read
            in place */
         fresh = extract && (snx_is_file(extracting) || !snx_is_dir(exefs));
-        rc = fresh ? extract_game(command, dump, NULL, tmpfs ? work : data, "exefs", extracting) : snx_mkdirs(folder);
+        rc = fresh ? extract_game(command, dump, NULL, tmpfs ? work : data, "exefs", extracting, paths)
+                   : snx_mkdirs(folder);
         source = snx_strdup(!extract ? dump : fresh && tmpfs ? work : data);
         free(data);
         free(extracting);
@@ -738,9 +800,11 @@ static int play_dump_at(const char* input, const SnxPaths* paths, unsigned flags
         command[5] = "-x";
         command[6] = "--out";
         command[7] = pending;
-        command[8] = "--";
-        command[9] = dump;
-        command[10] = NULL;
+        n = 8;
+        n = add_keys(command, n, paths);
+        command[n++] = "--";
+        command[n++] = dump;
+        command[n] = NULL;
         rc = snx_run_stage(command, NULL, "Extraction");
         if (rc) goto done;
         if (!snx_is_dir(pending)) {
@@ -836,6 +900,7 @@ made:
             command[n++] = opt;
         }
         for (j = 0; j < recompiling; ++j) command[n++] = recompile[j];
+        n = add_keys(command, n, paths);
 #ifdef SNX_IOS
         command[n++] = "--target";
         command[n++] = "ios";
@@ -862,13 +927,13 @@ made:
         goto done;
     }
     rc = nro      ? 0
-         : addon ? ensure_addon(command, folder, name, addon, source, game_dump, extract)
-                 : ensure_romfs(command, folder, name, tmpfs, extract);
+         : addon ? ensure_addon(command, folder, name, addon, source, game_dump, extract, paths)
+                 : ensure_romfs(command, folder, name, tmpfs, extract, paths);
     if (!rc && !nro) { /* its checked DLCs; and the game played with its checked update, from the update's program */
         char of[17], *program;
         if (addon) snx_title_text(owner, of);
-        if (addon) rc = ensure_romfs(command, folder, of, tmpfs, extract); /* the game's own files under it */
-        if (!rc) rc = ensure_dlcs(command, folder, addon ? of : name, extract);
+        if (addon) rc = ensure_romfs(command, folder, of, tmpfs, extract, paths); /* the game's own files under it */
+        if (!rc) rc = ensure_dlcs(command, folder, addon ? of : name, extract, paths);
 #ifdef SNX_IOS
         program = NULL; /* the pack is the whole game: no program beside it to play instead */
 #else
@@ -895,6 +960,7 @@ made:
     if (rc) goto done;
     n = 0;
     command[n++] = game;
+    n = add_keys(command, n, paths);
     if (flags & SNX_HEADLESS) command[n++] = "-H";
     if (flags & SNX_FULLSCREEN) command[n++] = "-f";
     if (flags & SNX_WINDOWED) command[n++] = "--fullscreen=0";
@@ -1042,20 +1108,37 @@ static int setup_run(const char* argv0, int all) {
 }
 int snx_driver(int argc, char** argv) {
     SnxPaths paths;
+    SnxSetupKeysOverride previous_keys_override;
     const char *repo = NULL, *build = SNX_BUILD_DIR, *input = NULL, *outdir = NULL, *out = NULL, *opt = NULL;
     const char** updates = NULL;
     int nupdates = 0;
-    char *r = NULL, *b = NULL, *exe = NULL, **rest, **setting, **recompile, *self, *data = NULL, *source = NULL;
+    char *r = NULL, *b = NULL, *exe = NULL, **rest = NULL, **setting, **recompile, *self, *data = NULL, *source = NULL;
+    char *keys_path = NULL, *title_keys_path = NULL;
+    const char *prod_keys_flag = NULL, *title_keys_flag = NULL;
     unsigned flags = 0;
-    int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, tmpfs_args = 0;
+    int i, j, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, tmpfs_args = 0;
     int repo_given = 0, settings = 0, recompiling = 0, taken = 0;
+    previous_keys_override = snx_setup_keys_override_get();
+    snx_setup_keys_override_set(NULL, NULL);
 #ifdef SNX_IOS
     snx_set_stage_runner(snx_driver); /* no child process there: the stages are this driver again, on this thread */
 #endif
-    if (argc <= 1 && snx_setup_again) return setup_run(argv[0], 1); /* scarletnx --setup */
-    if (argc <= 1) return -1;
-    if (!strcmp(argv[1], "--dump-modules")) return dump_modules(argc, argv);
-    if (!strcmp(argv[1], "--scan-log")) return snx_logscan_main(argc - 1, argv + 1, snx_demangle);
+    if (argc <= 1 && snx_setup_again) {
+        result = setup_run(argv[0], 1); /* scarletnx --setup */
+        goto done;
+    }
+    if (argc <= 1) {
+        result = -1;
+        goto done;
+    }
+    if (!strcmp(argv[1], "--dump-modules")) {
+        result = dump_modules(argc, argv);
+        goto done;
+    }
+    if (!strcmp(argv[1], "--scan-log")) {
+        result = snx_logscan_main(argc - 1, argv + 1, snx_demangle);
+        goto done;
+    }
     rest = (char**)snx_alloc((size_t)(3 * argc + 1) * sizeof(*rest));
     setting = rest + argc + 1;
     recompile = setting + argc;
@@ -1121,6 +1204,20 @@ int snx_driver(int argc, char** argv) {
         result = 0;
         goto done;
     }
+    /* --keys and --title-keys, in every mode: taken out of rest, and carried on to the stages */
+    for (i = 0, j = 0; i < n; ++i) {
+        int consumed = 0;
+        parsed = keys_option(rest[i], i + 1 < n ? rest[i + 1] : NULL, &prod_keys_flag, &title_keys_flag, &consumed);
+        if (parsed < 0) {
+            result = 1;
+            goto done;
+        }
+        if (!parsed)
+            rest[j++] = rest[i];
+        else if (consumed)
+            ++i;
+    }
+    n = j;
     /* a game made already is played or, with -r, recompiled where it is */
     automatic = input && (!(flags & (SNX_EXTRACT | SNX_RECOMP)) ||
                           ((flags & SNX_RECOMP) &&
@@ -1285,6 +1382,22 @@ int snx_driver(int argc, char** argv) {
     snx_tool_console();
     if (data && source) snx_checkout_left(source, data);
     if (data) snx_recompiled_left(data);
+    /* Resolve and validate key paths before setup checks for keys. */
+    if (prod_keys_flag) {
+        keys_path = keys_flag_file("--keys", prod_keys_flag);
+        if (!keys_path) {
+            result = 1;
+            goto done;
+        }
+    }
+    if (title_keys_flag) {
+        title_keys_path = keys_flag_file("--title-keys", title_keys_flag);
+        if (!title_keys_path) {
+            result = 1;
+            goto done;
+        }
+    }
+    snx_setup_keys_override_set(keys_path, title_keys_path);
     /* what the setup has left, before the first run a terminal makes and the first after an update, or all of it */
     if (!snx_setup_skip && (snx_setup_again || snx_terminal()) && setup_run(argv[0], snx_setup_again)) {
         result = 1;
@@ -1301,6 +1414,8 @@ int snx_driver(int argc, char** argv) {
     paths.build = b;
     paths.executable = exe;
     paths.source = source;
+    paths.keys = keys_path;
+    paths.title_keys = title_keys_path;
     if (automatic)
         result =
             play_dump(input, &paths, flags, outdir, out, opt, recompiling, recompile, settings, setting,
@@ -1316,5 +1431,8 @@ done:
     free(exe);
     free(data);
     free(source);
+    snx_setup_keys_override_set(previous_keys_override.prod, previous_keys_override.title);
+    free(keys_path);
+    free(title_keys_path);
     return result;
 }

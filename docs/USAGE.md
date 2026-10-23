@@ -93,7 +93,7 @@ the game's `.ini` keeps `controls`. Any other `--key=value` of the game's
 The game's own executable also takes `-v`, the same as `--log=2`.
 LLVM is the only backend. `--backend=llvm`, which older scripts give, is accepted and changes nothing, and any
 other `--backend` stops with an error.
-Use the separate commands for updates, custom keys or other compiler options.
+Use the separate commands for other compiler options.
 
 DXCI and DNSP with decrypted content need no keys. Containers are identified by their headers,
 including renamed files. A matching bundled update is applied automatically. DLC-only and update-only dumps cannot
@@ -228,7 +228,7 @@ Remaining examples: POSIX.
 ./build/scarletnx -r -h
 ```
 
-- **Keys:** encrypted content uses flags → the data folder ([Folders](#folders)) → `~/.switch`
+- **Keys:** encrypted content uses `--keys`/`--title-keys` flags, then the data folder ([Folders](#folders)) → `~/.switch`
   (`%USERPROFILE%\.switch` on Windows).
   Common NSP tickets supplement title keys. Fully decrypted content needs neither key file.
 - **Extraction:** defaults to the data folder's `work/<dump stem>`; `--name`/`--out DIR` override. Refuses existing

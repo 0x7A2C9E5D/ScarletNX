@@ -104,9 +104,9 @@ static SnxU64 game_title(void) {
 /* dump opened as snx_dump_open takes it (base, addon, either NULL) and each container mapped read-only for the whole
    run: the base's into base_map, the add-on's into addon_map. Ends the run on a dump that cannot be read */
 static void dump_map(SnxDump* dump, PFileMap* base_map, PFileMap* addon_map, const char* base, const char* addon,
-                     const char* repo) {
+                     const char* keys, const char* title_keys, const char* repo) {
     snx_hac_on_exit(dump_exit, NULL);
-    if (snx_dump_open(dump, base, addon, NULL, NULL, repo, 0))
+    if (snx_dump_open(dump, base, addon, keys, title_keys, repo, 0))
         fatal("Could not read the game's dump %s, which it reads its files from: the line before says why",
               addon ? addon : base);
     if (base && (plat_file_map_sized(base_map, base, snx_file_size(base)) ||
@@ -121,11 +121,12 @@ static void dump_map(SnxDump* dump, PFileMap* base_map, PFileMap* addon_map, con
 /* Extract dump off: a data folder without an ExeFS of its own reads its ExeFS and RomFS from the dump the
    game was made from, mapped read-only for the whole run: source= in its .ini, else the dump <folder>/<name>.source
    beside <name>_data links to, as older versions recorded it; a line names both when neither is. Nothing of it is
-   written anywhere. The keys are where the driver finds them, in the data folder games/ is in or in ~/.switch.
+   written anywhere. The keys are those given for this run, else where the driver finds them, in the data folder games/
+   is in or in ~/.switch.
    An add-on (g_addon) not extracted into its own data folder reads its dump, source= in its own .ini: an update's
    ExeFS and RomFS over the game's dump, which it needs even when the game's files are extracted (its Patch RomFS
    is made of the game's), and a DLC's RomFS image beside the game's files (dump_aoc). At startup, under tree.lock */
-static void dump_open(void) {
+static void dump_open(const char* keys, const char* title_keys) {
     FsNode* node;
     char *data, *source, *folder, *games, *repo, *ini, *addon = NULL, *own, *at;
     size_t n = strlen(g_datadir);
@@ -179,7 +180,8 @@ static void dump_open(void) {
         goto done;
     }
     /* an update over the game: both in one hactool, its Patch RomFS reading the game's */
-    dump_map(&g_hle.fs.dump, &g_hle.fs.dmap, &g_hle.fs.amap, source, kind == SNX_ADDON_UPDATE ? addon : NULL, repo);
+    dump_map(&g_hle.fs.dump, &g_hle.fs.dmap, &g_hle.fs.amap, source,
+             kind == SNX_ADDON_UPDATE ? addon : NULL, keys, title_keys, repo);
     snx_hac_on_exit(dump_exit, NULL);
     g_hle.fs.dfs = snx_dump_fs(&g_hle.fs.dump);
     if (!g_hle.fs.dfs) fatal("Could not read the game's program in its dump %s: the line before says why", source);
@@ -204,9 +206,9 @@ done:
 /* The DLCs checked in the game's addons= (g_settings.game_addons), each made beside it with its own .ini naming its
    dump (<game>_<its title ID>.ini): one extracted in its data folder is there already, laid over the game's
    (fs_init); any other is read from its dump in place, its RomFS image served by OpenDataStorageByDataId as
-   installed. One whose dump is not there is left out, a line saying so. The keys where the game's dump finds them:
-   the data folder games/ is in, or ~/.switch. At startup */
-static void dlcs_open(void) {
+   installed. One whose dump is not there is left out, a line saying so. The keys are those given for this run, else
+   where the driver finds them, in the data folder games/ is in or in ~/.switch. At startup */
+static void dlcs_open(const char* keys, const char* title_keys) {
     SnxAddon* ids = malloc(SNX_ADDONS_MAX * sizeof *ids);
     size_t count, i;
     char *data = snx_strdup(g_datadir), *folder, *games, *repo;
@@ -243,7 +245,7 @@ static void dlcs_open(void) {
                  "again to record it\n",
                  text, ini, dump ? "a dump that is not there" : "no dump (source=)");
         else {
-            dump_map(&aoc->dump, NULL, &aoc->map, NULL, dump, repo);
+            dump_map(&aoc->dump, NULL, &aoc->map, NULL, dump, keys, title_keys, repo);
             snx_hac_on_exit(dump_exit, NULL);
             aoc->fs = snx_dump_aoc_fs(&aoc->dump);
             if (!aoc->fs) fatal("Could not read the DLC in its dump %s: the line before says why", dump);
@@ -401,7 +403,7 @@ static void overlays(void) {
    data folder keeps */
 static int dump_has_exefs(const char* path) { return g_hle.fs.dfs && !strncmp(path, "exefs/", 6); }
 
-void fs_init(void) {
+void fs_init(const char* keys, const char* title_keys) {
     static const char* const apart[] = {"mods", NULL}; /* mods_open's */
     FsTreeResult r = fs_tree_init_skipping(&g_hle.fs.tree, g_datadir, apart);
     if (r != FS_TREE_OK) fatal("Could not index game filesystem %s (error %d)", g_datadir, r);
@@ -421,8 +423,8 @@ void fs_init(void) {
     r = fs_tree_remove(&g_hle.fs.tree, NULL, "save/temp", 1, 1, 0);
     if (r != FS_TREE_OK && r != FS_TREE_NOTFOUND) WARN("fs: could not empty save/temp (error %d)\n", r);
     overlays();
-    dump_open();
-    dlcs_open();
+    dump_open(keys, title_keys);
+    dlcs_open(keys, title_keys);
     if (!g_hle.fs.dfs) romfs_from_tmpfs();
     mods_open();
     for (size_t i = 0; i < sizeof shared_paths / sizeof shared_paths[0]; i++) {
