@@ -2223,12 +2223,14 @@ static u64 draw_last_vertex(GpuChannel* ch, int indexed, u32 first, u32 count, u
         u32 skip = r[0x591] ? ones : 0;
         /* A range's highest index is kept until its memory is written (by the GPU or, through the write tracking, the
            CPU): scanning the indices of every draw was a tenth of one game's GPU thread, most of them meshes' that
-           never change. The baselines are taken before the bytes are read, as buf_get takes them */
+           never change. The baselines are taken before the bytes are read, as buf_get takes them. One game reads
+           about 1,900 index ranges a frame: 256 entries answered 55% of them, and scanning the rest again was a
+           twentieth of a draw's setup */
         static struct {
             u64 a, n, gw;
             u32 ws, isz, ri, skip, top;
-        } memo[256];
-        u32 slot = (u32)((a * 0x9E3779B97F4A7C15ull) >> 56), ws = vk_ww_now();
+        } memo[4096];
+        u32 slot = (u32)((a * 0x9E3779B97F4A7C15ull) >> 52), ws = vk_ww_now();
         u64 gw = gpu_mem_generation();
         const u8* p = gmem_ptr(a, n * isz);
         if (!p) return ~0ull;
