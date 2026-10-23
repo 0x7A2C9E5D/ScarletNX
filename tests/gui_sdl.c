@@ -10,9 +10,10 @@
 #include "win32_crash.h"
 #else
 #include <errno.h>
-#include <sys/stat.h>    /* a mod's file it may not read */
-#include <sys/statvfs.h> /* Folders on a disk mounted noexec */
-#include <unistd.h>      /* a cheats folder it may not write */
+#include <sys/resource.h> /* the queue's recompile's priority */
+#include <sys/stat.h>     /* a mod's file it may not read */
+#include <sys/statvfs.h>  /* Folders on a disk mounted noexec */
+#include <unistd.h>       /* a cheats folder it may not write */
 #endif
 /* app.ini as the menu writes it: its head, and the Games options' lines that end [app], at their defaults */
 #define APP_INI_HEAD   "; Settings > App and Games' View in the launcher, as they were left\n[app]\n"
@@ -378,6 +379,26 @@ static void finish(App* app, int status) {
     /* the item the run was started from has the focus again */
     assert(app->menu.selected == selected && setting_is(app, "fullscreen", "1"));
     render(app);
+}
+/* the queue's recompile running, through to its end as pump reads it: how it ended (OK for status 0, else FAILED) on its
+   row, its output kept; then ESC on the Recompile tab, back to Games, the line seen and gone with the tab, and the menu
+   again, as a run's end leaves it */
+static void job_done(App* app, int status) {
+    int i = gui_queue_running(&app->queue);
+    Uint64 until = SDL_GetTicks() + 10000;
+    assert(i >= 0 && !app->menu.running);
+    while (gui_queue_running(&app->queue) == i && SDL_GetTicks() < until) {
+        pump(app);
+        render(app);
+        SDL_Delay(5);
+    }
+    assert(gui_queue_running(&app->queue) < 0 && app->queue.job[i].state == (status ? GUI_JOB_FAILED : GUI_JOB_OK));
+    assert(app->queue.job[i].status == status && app->ended_serial == app->queue.job[i].serial);
+    go_tab(app, GUI_TAB_RECOMPILE);
+    app->queue_focus = i;
+    key(app, SDLK_ESCAPE);
+    assert(app->menu.view == GUI_LOAD_GAMES && !app->queue.count && tab_count(app) == GUI_TAB_RECOMPILE);
+    go_tab(app, GUI_TAB_MENU);
 }
 /* what the button map page last drew: a text holding s, or the shape of id of a kind and style (-1: any) */
 static bool drawn_text(const App* app, const char* s) {
@@ -2062,10 +2083,497 @@ static void pickers_asked(App* app, const char* temporary, const char* self) {
     free(root);
 }
 #endif
+/* this process's priority: its nice value, on Windows its class */
+static int own_priority(void) {
+#ifdef _WIN32
+    return (int)GetPriorityClass(GetCurrentProcess());
+#else
+    return getpriority(PRIO_PROCESS, 0);
+#endif
+}
+/* the queue's recompile running gone a block further: <file>.step made, pump until its percent is percent */
+static void job_step(App* app, int percent) {
+    int i = gui_queue_running(&app->queue);
+    char* step;
+    Uint64 until = SDL_GetTicks() + 10000;
+    assert(i >= 0);
+    step = snx_format("%s.step", gui_queue_file(&app->queue, i));
+    assert(!snx_write_file(step, "", 0));
+    while (gui_queue_running(&app->queue) == i && app->queue.job[i].percent != percent && SDL_GetTicks() < until) {
+        pump(app);
+        SDL_Delay(2);
+    }
+    assert(app->queue.job[i].percent == percent);
+    free(step);
+}
+/* pump until the queue's recompile running has said block 1, its percent 25 */
+static void job_started(App* app) {
+    int i = gui_queue_running(&app->queue);
+    Uint64 until = SDL_GetTicks() + 10000;
+    assert(i >= 0);
+    while (app->queue.job[i].percent != 25 && SDL_GetTicks() < until) {
+        pump(app);
+        SDL_Delay(2);
+    }
+    assert(app->queue.job[i].percent == 25);
+}
+/* the last of the queue's recompile running's blocks, then pump until it ended: the next one, if any, running */
+static void job_end(App* app) {
+    int i = gui_queue_running(&app->queue);
+    uint32_t serial = app->queue.job[i].serial;
+    char* step = snx_format("%s.step", gui_queue_file(&app->queue, i));
+    Uint64 until = SDL_GetTicks() + 10000;
+    assert(!snx_write_file(step, "", 0));
+    while (app->ended_serial != serial && SDL_GetTicks() < until) {
+        pump(app);
+        SDL_Delay(2);
+    }
+    assert(app->ended_serial == serial);
+    free(step);
+}
+/* a note of the steps: a line the run printed that is no step of its own */
+static bool noted(const GuiSteps* steps, const char* text) {
+    for (int i = 0; i < steps->notes; ++i)
+        if (strstr(steps->note[i].text, text)) return true;
+    return false;
+}
+/* Games' row of the game named name on the page shown, as its label reads (the whole of it, which a long one slides
+   to show) */
+static bool games_row_reads(App* app, const char* name, const char* want) {
+    GuiGamesBoxes g;
+    games_boxes(app, &g);
+    for (size_t row = 0; row < games_rows(app); ++row) {
+        UiRowInfo info = {0};
+        if (ui_games_rows_get_row_info(app, row, 0, &info) && info.label && !strncmp(info.label, name, strlen(name)))
+            return !strcmp(info.label, want);
+    }
+    return false;
+}
+/* the Recompile tab's label as it reads now */
+static bool tab_reads(App* app, const char* want) {
+    char label[64];
+    tab_label(app, GUI_TAB_RECOMPILE, label, sizeof label);
+    return !strcmp(label, want);
+}
+/* R's and B's recompiles: a queue behind the screens and its Recompile tab (queue.h; DraVee's picks, 2026-10-23) */
+static void recompile_queue(App* app) {
+    static const char* const names[] = {"queue game one", "queue game two", "queue game fails"};
+    char *folders[3], *programs[3], line[512];
+    int own = own_priority();
+    GuiSettings* settings = settings_of(app);
+    for (int i = 0; i < 3; ++i) { /* games of folders of their own, which R recompiles where they are */
+        folders[i] = snx_path_join(app->games_dir, names[i]);
+#ifdef _WIN32
+        char* file = snx_format("%s.exe", names[i]);
+#else
+        char* file = snx_strdup(names[i]);
+#endif
+        char* data = snx_format("%s_data", names[i]); /* a game's: its program and its data beside it */
+        char* where = snx_path_join(folders[i], data);
+        programs[i] = snx_path_join(folders[i], file);
+        assert(!snx_mkdirs(where) && !snx_write_file(programs[i], "x", 1) && !snx_make_executable(programs[i]));
+        free(where);
+        free(data);
+        free(file);
+    }
+    app->theme = *gui_theme_builtin("default");
+    app->side_box = GUI_SIDE_AUTO;
+    free(app->job_log); /* beside the games: Folders' Logs, which may have set it, are gone */
+    app->job_log = snx_format("%s-last-recompile.log", app->games_dir);
+    recent_open(app, snx_format("%s-recent.txt", app->games_dir)); /* R puts its game first in the recent games */
+    assert(gui_settings_set(settings, "aot_threads", "8")); /* passed on as the driver's threads */
+    assert(!app->queue.count && tab_count(app) == GUI_TAB_RECOMPILE);
+    /* R on a game: the Recompile tab, a fourth, shows it, its output at the letters a half step under the text's,
+       the queue and the Status box beside it; the menu runs nothing, the queue's process does */
+    go_tab(app, GUI_TAB_GAMES);
+    focus_game(app, names[0]);
+    key(app, SDLK_R);
+    assert(!app->menu.running && gui_queue_running(&app->queue) == 0 && app->queue.count == 1);
+    assert(app->menu.view == GUI_LOAD_RECOMPILE && tab_shown(app) == GUI_TAB_RECOMPILE && tab_count(app) == GUI_TABS);
+    job_started(app);
+    assert(noted(&app->job_steps, "threads 8, priority"));
+    snprintf(line, sizeof line, "threads 8, priority %d", own);
+    assert(noted(&app->job_steps, line));
+    assert(tab_reads(app, "Recompile 25%"));
+    render(app);
+    shows(app, "Recompile 25%", yellow); /* the tab, in focus */
+    shows(app, "RECOMPILE", normal);     /* the head's title, its first part left out beside four tabs */
+    shows_half(app, "Recompiling queue game one (1 modules)", normal); /* its output, in the Output box */
+    shows(app, "Output", normal);
+    shows(app, "Queue", normal);
+    shows(app, "- queue game one  25%", yellow);
+    shows_half(app, "Recompiling queue game one: 25%", rgb(app->theme.ink)); /* the tips under the head */
+    shows_foot(app, "abort", normal);
+    shows_foot(app, "games", normal);    /* Tab's, which every other foot leaves to F1 */
+    hides_foot(app, "take out", normal); /* the one running stays: ESC aborts it */
+    /* YoRHa's: its loading screen as the panel, in its own colours and the letters a half step under the text's, its
+       usage on the footer's band at its foot */
+    app->theme = *gui_theme_builtin("yorha");
+    app->clock = SDL_GetTicks() + 60000; /* every line typed */
+    render(app);
+    shows_half(app, "RECOMPILE: QUEUE GAME ONE 25%", rgb(app->theme.run_colors.ink));
+    shows_half(app, "threads 8, priority", rgb(app->theme.run_colors.soft)); /* its lines under its step */
+    shows_half(app, "RAM ", rgb(app->theme.run_colors.page));
+    hides(app, "RECOMPILE: QUEUE GAME ONE 25%", rgb(app->theme.run_colors.ink)); /* not the text's own letters */
+    app->clock = 0;
+    app->theme = *gui_theme_builtin("default");
+    /* Tab back to Games, the recompile going on: its row says how far it is, and the tab too */
+    key(app, SDLK_TAB);
+    assert(app->menu.view == GUI_LOAD_GAMES && gui_queue_running(&app->queue) == 0);
+    job_step(app, 50);
+    render(app);
+    shows(app, "Recompile 50%", normal);
+    shows(app, "- queue game one  50%", yellow);
+    shows(app, "Recompiling: RECOMPILE: QUEUE GAME ONE 2 / 4",
+          normal); /* the side box of its row: the theme's amount */
+    /* R on another game while one runs: it joins the queue, the tips saying where; one runs at a time */
+    focus_game(app, names[1]);
+    key(app, SDLK_R);
+    assert(app->menu.view == GUI_LOAD_GAMES && app->queue.count == 2 && gui_queue_running(&app->queue) == 0);
+    assert(!strcmp(app->message, "queue game two joins the queue: next. queue game one recompiles now (50%)"));
+    focus_game(app, names[2]);
+    key(app, SDLK_R);
+    assert(app->queue.count == 3 && app->queue.job[2].state == GUI_JOB_WAITING);
+    assert(!strcmp(app->message, "queue game fails joins the queue: 3rd. queue game one recompiles now (50%)"));
+    { /* the focus on the game R was pressed on, though the recent games over the list grew */
+        bool recent;
+        assert(!strcmp(games_focused_path(app, &recent), app->queue.job[2].text + app->queue.job[2].listed) && !recent);
+    }
+    assert(games_row_reads(app, names[1], "queue game two  next"));
+    assert(games_row_reads(app, names[2], "queue game fails  3rd in queue"));
+    assert(games_row_reads(app, names[0], "queue game one  50%"));
+    /* R on one in the queue again adds nothing: its line shows */
+    key(app, SDLK_R);
+    assert(app->queue.count == 3 && app->menu.view == GUI_LOAD_RECOMPILE && app->queue_focus == 2);
+    assert(!strcmp(app->message, "queue game fails is in the queue already"));
+    /* Enter on a game of the queue plays nothing yet: its recompile shows */
+    key(app, SDLK_TAB);
+    focus_game(app, names[0]);
+    key(app, SDLK_RETURN);
+    assert(!app->menu.running && app->menu.view == GUI_LOAD_RECOMPILE && app->queue_focus == 0);
+    { /* its recent row too, which R put first; and one with updates, DLCs or mods: its recompile, not their box */
+        int r = 0;
+        size_t g;
+        char* mod = snx_format("%s/%s_data/mods/A mod", folders[0], names[0]);
+        key(app, SDLK_TAB);
+        while (r < recent_shown(app) && !snx_same_file(app->recent.game[r].path, programs[0])) ++r;
+        assert(r < recent_shown(app));
+        app->browser.page = 0;
+        app->browser.selected = (size_t)r;
+        key(app, SDLK_RETURN);
+        assert(!app->menu.running && app->menu.view == GUI_LOAD_RECOMPILE && app->queue_focus == 0);
+        assert(!snx_mkdirs(mod)); /* a mod of its own, which Games counts */
+        key(app, SDLK_TAB);
+        focus_game(app, names[0]);
+        g = app->browser.page * app->browser.page_size + app->browser.selected - app->browser.head;
+        assert(app->games.addons[g] == 1);
+        key(app, SDLK_RETURN);
+        assert(!app->addons_shown && !app->menu.running && app->menu.view == GUI_LOAD_RECOMPILE);
+        assert(!snx_remove_tree(mod));
+        free(mod);
+    }
+    /* the queue's rows: one waiting says where it waits, Del takes it out; Del on the one running says why not */
+    key(app, SDLK_DOWN);
+    render(app);
+    shows(app, "Waits in the queue: next", normal);
+    shows_foot(app, "take out", normal);
+    key(app, SDLK_DOWN);
+    key(app, SDLK_DELETE);
+    assert(app->queue.count == 2 && !strcmp(app->message, "queue game fails taken out of the queue"));
+    assert(app->queue_focus == 1); /* the row it was on, the last */
+    key(app, SDLK_UP);
+    assert(app->queue_focus == 0);
+    key(app, SDLK_DELETE);
+    assert(app->queue.count == 2 &&
+           !strcmp(app->message, "queue game one recompiles now: ESC aborts it, Del takes out one waiting"));
+    /* F1 there: its keys, Up/Down and Tab among them */
+    key(app, SDLK_F1);
+    render(app);
+    shows(app, "Up/Down", yellow);
+    shows(app, "queue", normal);
+    key(app, SDLK_ESCAPE);
+    assert(!app->help_shown && app->menu.view == GUI_LOAD_RECOMPILE && gui_queue_running(&app->queue) == 0);
+    /* leaving asks, naming it: ESC on the menu, the Exit item, the window closed */
+    go_tab(app, GUI_TAB_MENU);
+    key(app, SDLK_ESCAPE);
+    assert(app->confirm.shown && app->confirm.ask == GUI_ASK_EXIT);
+    assert(!strcmp(ask_question(app),
+                   "queue game one is recompiling (50%), 1 more in the queue: exiting stops them. Exit?"));
+    key(app, SDLK_ESCAPE);
+    app->menu.selected = GUI_EXIT;
+    key(app, SDLK_RETURN);
+    assert(!app->menu.quit && app->confirm.shown && app->confirm.ask == GUI_ASK_EXIT);
+    key(app, SDLK_ESCAPE);
+    {
+        SDL_Event e = {0};
+        e.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+        event(app, &e);
+        assert(!app->closing_ms && app->confirm.shown && app->confirm.ask == GUI_ASK_CLOSE);
+        assert(!strcmp(ask_question(app),
+                       "queue game one is recompiling (50%), 1 more in the queue: exiting stops them. Exit?"));
+        key(app, SDLK_ESCAPE);
+    }
+    app->menu.selected = GUI_SWITCH;
+    /* Move Old Files and Clean Old Settings wait until the queue ends, the note naming the one running */
+    open_app(app, GUI_APP_MOVE);
+    app_action(app, GUI_APP_MOVE, 0);
+    assert(!app->confirm.shown && !app->cleaned_shown &&
+           !strcmp(app->editor.note, "queue game one is recompiling (50%): Move Old Files waits until the queue ends"));
+    app_action(app, GUI_APP_CLEAN, 0);
+    assert(!app->confirm.shown &&
+           !strcmp(app->editor.note,
+                   "queue game one is recompiling (50%): Clean Old Settings waits until the queue ends"));
+    leave_editor(app);
+    /* the Settings read on a process of their own, the recompile going on, and a run of the menu's too */
+    if (!snx_menu_settings) {
+        settings_forget(app);
+        settings = settings_of(app);
+        assert(settings->count > settings->own && gui_queue_running(&app->queue) == 0);
+        assert(gui_settings_set(settings, "aot_threads", "8"));
+    }
+    if (!snx_menu_settings) {
+        char* step = snx_format("%s.step", programs[2]);
+        go_tab(app, GUI_TAB_GAMES);
+        focus_game(app, names[2]); /* taken out of the queue: it plays */
+        key(app, SDLK_RETURN);
+        assert(app->menu.running && gui_queue_running(&app->queue) == 0);
+        settings_forget(app);
+        settings = settings_of(app);
+        assert(settings->count > settings->own && app->menu.running);
+        assert(gui_settings_set(settings, "aot_threads", "8"));
+        assert(!snx_write_file(step, "", 0));
+        for (Uint64 until = SDL_GetTicks() + 10000; app->menu.running && SDL_GetTicks() < until;) {
+            pump(app);
+            SDL_Delay(2);
+        }
+        assert(!app->menu.running && app->finished);
+        key(app, SDLK_ESCAPE);
+        free(step);
+    }
+    /* the end: its line OK, the tab OK a while, then the next one's percent; the next runs by itself */
+    go_tab(app, GUI_TAB_RECOMPILE);
+    job_step(app, 75);
+    job_step(app, 100);
+    job_end(app);
+    assert(app->queue.job[0].state == GUI_JOB_OK && gui_queue_running(&app->queue) == 1 && app->queue_focus == 0);
+    assert(!strncmp(app->message, "queue game one: Recompiled in ", 30) && !app->log_due);
+    assert(tab_reads(app, "Recompile OK"));
+    queue_tips(app, line, sizeof line); /* how it ended, then the one that runs now, a period between */
+    assert(!strncmp(line, "queue game one: Recompiled in ", 30) &&
+           strstr(line, " s. queue game two recompiles now (") && !strstr(line, ".."));
+    job_started(app);
+    app->clock = app->queue.job[0].ended_ms + GUI_JOB_SAID_MS;
+    assert(tab_reads(app, "Recompile 25%"));
+    render(app);
+    shows(app, "- queue game one  OK", yellow);
+    shows(app, "- queue game two  25%", normal);
+    shows_half(app, "Built queue game one", normal); /* its output kept, beside its row */
+    shows_foot(app, "play", normal);
+    app->clock = 0;
+    { /* a click on a row takes the focus, a click on the one that ended well and in focus plays it, as Enter does */
+        GuiQueueBoxes q;
+        queue_boxes(app, &q);
+        mouse_px(app, ui_queue_row(q.rects, app->scale, UI_QUEUE_ROWS, 1).x + 4,
+                 ui_queue_row(q.rects, app->scale, UI_QUEUE_ROWS, 1).y + 4, true);
+        assert(app->queue_focus == 1 && !app->menu.running);
+        render(app);
+        shows_foot(app, "abort", normal); /* the keys follow the focus */
+        mouse_px(app, ui_queue_row(q.rects, app->scale, UI_QUEUE_ROWS, 0).x + 4,
+                 ui_queue_row(q.rects, app->scale, UI_QUEUE_ROWS, 0).y + 4, true);
+        assert(app->queue_focus == 0 && !app->menu.running && app->queue.count == 2);
+    }
+    /* Enter on it plays its game, its line seen and gone, the one running going on */
+    {
+        char* step = snx_format("%s.step", programs[0]);
+        key(app, SDLK_RETURN);
+        assert(app->menu.running && app->queue.count == 1 && gui_queue_running(&app->queue) == 0);
+        pump(app);
+        assert(!snx_write_file(step, "", 0));
+        for (Uint64 until = SDL_GetTicks() + 10000; app->menu.running && SDL_GetTicks() < until;) {
+            pump(app);
+            SDL_Delay(2);
+        }
+        assert(!app->menu.running && app->finished);
+        key(app, SDLK_ESCAPE);
+        pump(app);
+        assert(gui_queue_running(&app->queue) == 0);
+        free(step);
+    }
+    /* a failure: FAILED on its row and its tab, blinking as Share Log does, which blinks too */
+    go_tab(app, GUI_TAB_GAMES);
+    focus_game(app, names[2]);
+    key(app, SDLK_R);
+    assert(app->queue.count == 2 && app->queue.job[1].state == GUI_JOB_WAITING);
+    job_step(app, 50);
+    job_step(app, 75);
+    job_step(app, 100);
+    job_end(app);
+    assert(app->queue.job[0].state == GUI_JOB_OK && gui_queue_running(&app->queue) == 1);
+    job_started(app);
+    job_step(app, 50);
+    job_step(app, 75);
+    job_step(app, 100);
+    job_end(app);
+    assert(app->queue.job[1].state == GUI_JOB_FAILED && app->queue.job[1].status == 3 && app->log_due);
+    assert(!strcmp(app->message, "queue game fails: Recompile failed (status 3).") &&
+           tab_reads(app, "Recompile FAILED"));
+    {
+        GuiPlace p;
+        GuiRect tab;
+        go_tab(app, GUI_TAB_GAMES);
+        games_place(app, &p);
+        tab = tab_rect(app, p.tabs, GUI_TAB_RECOMPILE);
+        app->clock = 2 * app->theme.blink_ms * 50;
+        render(app);
+        assert(
+            same_colour(pixel(app, (float)(tab.x + app->scale), (float)(tab.y + tab.h / 2)), rgb(app->theme.failure)));
+        app->clock += app->theme.blink_ms;
+        render(app);
+        assert(
+            !same_colour(pixel(app, (float)(tab.x + app->scale), (float)(tab.y + tab.h / 2)), rgb(app->theme.failure)));
+        app->clock = 0;
+    }
+    /* the log holds the queue's recompiles since one started with no line of an ended one left, the failure's among
+       them; Share Log holds the log */
+    {
+        size_t size;
+        char *log = (char*)snx_read_file(app->job_log, &size), *shared;
+        const char *at, *end;
+        assert(log && strstr(log, "queue game one") && strstr(log, "queue game two") &&
+               strstr(log, "queue game fails") && strstr(log, "[ended, status 3]"));
+        free(log);
+        share_log(app);
+        assert((at = strstr(app->message, "Log saved to ")) != NULL);
+        at += 13;
+        end = strstr(at, " (path copied)");
+        shared = snx_format("%.*s", (int)(end ? (size_t)(end - at) : strlen(at)), at);
+        log = (char*)snx_read_file(shared, &size);
+        snprintf(line, sizeof line, "== the last recompile of the queue: %s ==", app->job_log);
+        assert(log && strstr(log, line) && strstr(log, "[ended, status 3]") && !app->log_due);
+        app->log_due = true; /* for the checks below */
+        free(log);
+        free(shared);
+    }
+    /* ESC on an ended one: back to Games, its line gone */
+    go_tab(app, GUI_TAB_RECOMPILE);
+    app->queue_focus = 1;
+    key(app, SDLK_ESCAPE);
+    assert(app->menu.view == GUI_LOAD_GAMES && app->queue.count == 1 && tab_count(app) == GUI_TABS);
+    pump(app);
+    assert(tab_reads(app, "Recompile OK"));
+    go_tab(app, GUI_TAB_RECOMPILE);
+    key(app, SDLK_ESCAPE);
+    assert(app->menu.view == GUI_LOAD_GAMES && !app->queue.count && tab_count(app) == GUI_TAB_RECOMPILE);
+    app->log_due = false;
+    /* ESC on the one running aborts it, its line gone with it, the next one starting, the one after it waiting */
+    focus_game(app, names[0]);
+    key(app, SDLK_R);
+    go_tab(app, GUI_TAB_GAMES);
+    focus_game(app, names[1]);
+    key(app, SDLK_R);
+    go_tab(app, GUI_TAB_GAMES);
+    focus_game(app, names[2]);
+    key(app, SDLK_R);
+    assert(app->queue.count == 3);
+    go_tab(app, GUI_TAB_RECOMPILE);
+    app->queue_focus = 0;
+    job_started(app);
+    key(app, SDLK_ESCAPE);
+    for (Uint64 until = SDL_GetTicks() + 10000; app->queue.count == 3 && SDL_GetTicks() < until;) {
+        pump(app);
+        SDL_Delay(2);
+    }
+    assert(app->queue.count == 2 && gui_queue_running(&app->queue) == 0 && !app->log_due);
+    assert(app->queue.job[1].state == GUI_JOB_WAITING && app->queue_focus == 0);
+    assert(!strcmp(gui_queue_name(&app->queue, 0), names[1]) &&
+           !strcmp(app->message, "queue game one: aborted with ESC"));
+    for (int left = 1; left >= 0; --left) { /* the others aborted too, one after the other; the tab goes with them */
+        job_started(app);
+        key(app, SDLK_ESCAPE);
+        for (Uint64 until = SDL_GetTicks() + 10000; app->queue.count > left && SDL_GetTicks() < until;) {
+            pump(app);
+            SDL_Delay(2);
+        }
+        assert(app->queue.count == left);
+    }
+    assert(!app->queue.count && app->menu.view == GUI_LOAD_GAMES && tab_count(app) == GUI_TAB_RECOMPILE);
+    /* B's AOT pack joins the same queue: its row says so, its end what the cache gave */
+    {
+        UiRowInfo info = {0};
+        app->aot_pack = app->recompile = true;
+        app->aot_cache = snx_strdup("queue game two.jitcache");
+        app->aot_opt[0] = '2';
+        app->menu.selected = GUI_SWITCH;
+        launch(app, snx_strdup(programs[1]), true);
+        app->aot_pack = app->recompile = false;
+        free(app->aot_cache);
+        app->aot_cache = NULL;
+        assert(app->queue.count == 1 && app->queue.job[0].kind == GUI_JOB_AOT && app->menu.view == GUI_LOAD_RECOMPILE);
+        job_started(app);
+        assert(ui_queue_rows_get_row_info(app, 0, 0, &info) && !strcmp(info.label, "queue game two, AOT pack  25%"));
+        job_step(app, 50);
+        job_step(app, 75);
+        job_step(app, 100);
+        job_end(app);
+        assert(!strcmp(app->queue.job[0].said, "AOT pack built from 3 cached functions."));
+        key(app, SDLK_ESCAPE);
+        assert(!app->queue.count);
+    }
+    app->message[0] = 0;
+    for (int i = 0; i < 3; ++i) {
+        assert(!snx_remove_tree(folders[i]));
+        free(folders[i]);
+        free(programs[i]);
+    }
+    go_tab(app, GUI_TAB_MENU);
+}
+/* the fake driver's wait for the test: until path is there (taken), ten seconds at most */
+static void wait_taken(const char* path) {
+    for (int n = 0; n < 2000 && !snx_is_file(path); ++n) SDL_Delay(5);
+    remove(path);
+}
 int main(int argc, char** argv) {
 #ifdef _WIN32
     snx_test_crash_said();
 #endif
+    if (argc > 2 && !strcmp(argv[1], "-r") && strstr(argv[2], "queue game")) {
+        /* a recompile of the queue: its blocks one at a time, each once the test makes <input>.step (which it takes),
+           then how it ended; the threads and the priority it got on its second line, its pid in <input>.pid */
+        const char *threads = "default", *name = argv[2] + strlen(argv[2]);
+        char *step = snx_format("%s.step", argv[2]), *pid = snx_format("%s.pid", argv[2]), *at;
+        for (int i = 3; i < argc; ++i)
+            if (!strncmp(argv[i], "--aot_threads=", 14)) threads = argv[i] + 14; /* the last one given */
+        while (name > argv[2] && name[-1] != '/' && name[-1] != '\\') --name;
+#ifdef _WIN32
+        at = snx_format("%lu", (unsigned long)GetCurrentProcessId());
+#else
+        at = snx_format("%ld", (long)getpid());
+#endif
+        assert(!snx_write_file(pid, at, strlen(at)));
+        printf("Recompiling %.*s (1 modules)\nthreads %s, priority %d\n",
+               (int)(strstr(name, ".exe") ? (size_t)(strstr(name, ".exe") - name) : strlen(name)), name, threads,
+               own_priority());
+        for (int b = 1; b <= 4; ++b) {
+            printf("  compiled block %d/4: code_00%d, 10 functions (0.1 s)\n", b, b - 1);
+            fflush(stdout);
+            wait_taken(step);
+        }
+        for (int i = 3; i < argc; ++i) /* B's: what the cache gave, as the driver says it */
+            if (!strcmp(argv[i], "--jit-cache")) puts("AOT pack: 3 functions from the cache");
+        printf("Built %s\n", name);
+        free(at);
+        free(pid);
+        free(step);
+        return strstr(argv[2], "fails") ? 3 : 0;
+    }
+    if (argc > 1 && strstr(argv[1], "queue game")) { /* one of them played: until <input>.step, the queue going on */
+        char* step = snx_format("%s.step", argv[1]);
+        puts("ScarletNX - queue game");
+        fflush(stdout);
+        wait_taken(step);
+        free(step);
+        return 0;
+    }
     if (argc == 9 && !strcmp(argv[3], "-x") && !strcmp(argv[4], "--icon")) { /* a dump's icon, as -x --icon writes it */
         IconJpeg jpeg = {{0}, 0};
         char* to = snx_path_join(argv[6], "icon.jpg");
@@ -4817,7 +5325,8 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RETURN);
         assert(!app.confirm.shown && app.menu.running && !app.room_ok && app.menu.selected == GUI_SWITCH);
         finish(&app, 0);
-        /* R's recompile of a dump is asked about too, and Run Anyway prepares it again, playing nothing */
+        /* R's recompile of a dump is asked about too, and Run Anyway prepares it again, playing nothing: in the queue,
+           its Recompile tab shown */
         app.recompile = true;
         launch(&app, snx_strdup(dump), false);
         app.recompile = false;
@@ -4825,9 +5334,10 @@ int main(int argc, char** argv) {
         key(&app, SDLK_DOWN);
         key(&app, SDLK_RETURN);
         key(&app, SDLK_RETURN);
-        assert(!app.confirm.shown && app.menu.running && !app.recompile);
-        finish(&app, 0);
-        assert(gui_steps_last(&app.steps, "RECOMPILE") && !gui_steps_last(&app.steps, "LAUNCH"));
+        assert(!app.confirm.shown && !app.menu.running && !app.recompile && gui_queue_running(&app.queue) == 0);
+        assert(app.menu.view == GUI_LOAD_RECOMPILE && tab_shown(&app) == GUI_TAB_RECOMPILE);
+        job_done(&app, 0);
+        assert(gui_steps_last(&app.ended_steps, "RECOMPILE") && !gui_steps_last(&app.ended_steps, "LAUNCH"));
         /* a finger: the first tap arms Run Anyway, the second runs it */
         launch(&app, snx_strdup(dump), false);
         ask_boxes(&app, &r, &l);
@@ -5966,10 +6476,10 @@ int main(int argc, char** argv) {
         assert(app.menu.running && app.native && screen(&app) == GUI_SCREEN_LOADING);
         {
             char name[64];
-            run_name(&app, name, sizeof name);
+            run_name_of(&app.steps, app.native, app.file, name, sizeof name);
             assert(!strcmp(name, "FOLDER GAME")); /* its file's, until its recompile names it */
             gui_steps_feed(&app.steps, "Recompiling Folder Quest 2.0 (1 modules)\n", 41, 0);
-            run_name(&app, name, sizeof name);
+            run_name_of(&app.steps, app.native, app.file, name, sizeof name);
             assert(!strcmp(name, "FOLDER QUEST 2.0") && screen(&app) == GUI_SCREEN_COMPILING);
         }
         gui_steps_feed(&app.steps, "ScarletNX - folder game\n", 24, 0);
@@ -6099,9 +6609,10 @@ int main(int argc, char** argv) {
             }
             launcher(&app, true);
             key(&app, SDLK_R);
-            assert(app.menu.running && app.native && !app.recompile);
-            finish(&app, 0);
-            assert(gui_steps_last(&app.steps, "BUILD") && !gui_steps_last(&app.steps, "LAUNCH"));
+            assert(!app.menu.running && !app.recompile && gui_queue_running(&app.queue) == 0 &&
+                   app.queue.job[0].native);
+            job_done(&app, 0);
+            assert(gui_steps_last(&app.ended_steps, "BUILD") && !gui_steps_last(&app.ended_steps, "LAUNCH"));
             launcher(&app, false);
             app.menu.selected = item;
             assert(!snx_remove_tree(cia));
@@ -6301,16 +6812,16 @@ int main(int argc, char** argv) {
             for (i = 0; i < 12; i++) key(&app, SDLK_DOWN);
             assert(app.addons_focus == 14);
             key(&app, SDLK_RETURN);
-            assert(!app.addons_shown && app.menu.running && !app.recompile);
+            assert(!app.addons_shown && !app.menu.running && !app.recompile && gui_queue_running(&app.queue) == 0);
             {
                 char* ran = snx_absolute(base);
-                assert(ran && !strcmp(app.file, ran));
+                assert(ran && !strcmp(gui_queue_file(&app.queue, 0), ran));
                 free(ran);
             }
             checked = snx_ini_value(ini, "addons");
             assert(checked && !strcmp(checked, "0100ABCD12341001"));
             free(checked);
-            finish(&app, 0);
+            job_done(&app, 0);
             launcher(&app, false);
             assert(!snx_remove_tree(own));
             free(own);
@@ -9108,6 +9619,7 @@ int main(int argc, char** argv) {
         leave_editor(&app);
         app.theme = *gui_theme_builtin("default");
     }
+    recompile_queue(&app);
 #ifdef SNX_XDG /* the last of the test: SDL keeps the picker it found from then on */
     pickers_asked(&app, temporary, self);
 #endif

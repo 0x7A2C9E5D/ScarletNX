@@ -15,7 +15,8 @@
 /* the item before or after one, round the menu */
 static int step_item(int item, int step) { return (item + GUI_ITEM_COUNT + step) % GUI_ITEM_COUNT; }
 GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
-    if (menu->running || menu->view == GUI_LOAD_GAMES) return GUI_MENU_STAY; /* the browser owns its keys */
+    /* the browser owns its keys, and the queue its own */
+    if (menu->running || menu->view == GUI_LOAD_GAMES || menu->view == GUI_LOAD_RECOMPILE) return GUI_MENU_STAY;
     if (menu->view != GUI_LOAD_NONE && key == GUI_CANCEL) {
         menu->view = GUI_LOAD_NONE;
         menu->selected = menu->active;

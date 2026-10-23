@@ -26,8 +26,8 @@ enum {
 };
 typedef enum { GUI_UP, GUI_DOWN, GUI_LEFT, GUI_RIGHT, GUI_SELECT, GUI_CANCEL, GUI_PAGE_UP, GUI_PAGE_DOWN } GuiKey;
 #define GUI_TEXT_MAX 4
-/* the screen over the menu: none, a load's file to pick, the games' browser, the keys' */
-typedef enum { GUI_LOAD_NONE, GUI_LOAD_DROP, GUI_LOAD_GAMES, GUI_LOAD_KEYS } GuiLoadView;
+/* the screen over the menu: none, a load's file to pick, the games' browser, the keys', the recompiles' queue */
+typedef enum { GUI_LOAD_NONE, GUI_LOAD_DROP, GUI_LOAD_GAMES, GUI_LOAD_KEYS, GUI_LOAD_RECOMPILE } GuiLoadView;
 typedef struct {
     int selected; /* keyboard/mouse focus, not activation */
     int active;   /* the last explicitly activated item: the load a picked file goes to */

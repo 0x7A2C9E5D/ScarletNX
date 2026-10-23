@@ -91,6 +91,14 @@
 		android.row_height = 40px
 	}
 }
+# the Recompile tab's queue, under its box's head: a row a recompile in the order they were asked, those that ended
+# until seen, the one running and those waiting
+[scene]Queue {
+	[list]Rows {
+		max_rows = 16
+		android.row_height = 40px
+	}
+}
 # the OK under the files of a box over the screen (what an older version left, what Clean Old Settings did): any key,
 # button or finger closes the box before a row is hit, so the row's own action is none (@)
 [scene]Files {
