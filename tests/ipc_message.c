@@ -928,21 +928,22 @@ static void undeclared_commands(void) {
     CHECK(stub_ok(&o, &c) == (int)RC(10, 221));
     g_settings.answer_unknown_commands = 1;
 }
-/* ipc_warn_once: three warnings per service and command, a name told apart by its first 127 characters, and nothing
-   once its 512 entries are taken. Run last: it fills the table */
+/* ipc_warn_once: one warning per service and command, a name told apart by its first 127 characters, and nothing
+   new once WARN_PAIRS pairs are taken. Run last: it fills the table */
 static void warn_once(void) {
     char a[200], b[200];
     memset(a, 'a', 199), a[199] = 0;
     memcpy(b, a, sizeof b), b[150] = 'b'; /* differs past the 127th character */
-    for (int i = 0; i < 3; i++) CHECK(ipc_warn_once("warn:x", 5) == 1);
+    CHECK(ipc_warn_once("warn:x", 5) == 1);
     CHECK(ipc_warn_once("warn:x", 5) == 0 && ipc_warn_once("warn:x", 5) == 0);
     CHECK(ipc_warn_once("warn:x", 6) == 1); /* another command counts on its own */
-    CHECK(ipc_warn_once(a, 1) == 1 && ipc_warn_once(b, 1) == 1 && ipc_warn_once(a, 1) == 1);
-    CHECK(ipc_warn_once(b, 1) == 0); /* the fourth for the same 127 characters */
-    for (int i = 0; i < 100000; i++) ipc_warn_once("warn:x", 7); /* the count stops: no overflow, still quiet */
+    CHECK(ipc_warn_once("warn:y", 5) == 1); /* and another service */
+    CHECK(ipc_warn_once(a, 1) == 1 && ipc_warn_once(b, 1) == 0); /* the same 127 characters */
+    for (int i = 0; i < 100000; i++) ipc_warn_once("warn:x", 7); /* repeats stay quiet and take no room */
     CHECK(ipc_warn_once("warn:x", 7) == 0);
     for (u32 cmd = 1000; cmd < 1600; cmd++) ipc_warn_once("warn:fill", cmd);
     CHECK(ipc_warn_once("warn:new", 1) == 0); /* the table is full */
+    CHECK(ipc_warn_once("warn:x", 5) == 0 && ipc_warn_once("warn:fill", 1000) == 0); /* old pairs are still found */
 }
 
 /* the control requests on a domain session: CloneCurrentObject shares the domain, closing the clone and the original

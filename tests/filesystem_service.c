@@ -1725,8 +1725,18 @@ int kobj_never_signaled(KObj* o) {
     return 0;
 }
 
+/* rhash against the RomFS format's definition, worked by hand: the seed is the parent's offset xor 123456789
+   (0x075BCD15), each byte rotates right by 5 then xors in. "a": 0x075BCD15 ror 5 = 0xA83ADE68, xor 0x61 = 0xA83ADE09.
+   A byte past 0x7F counts unsigned */
+static void test_rhash(void) {
+    CHECK(rhash(0, "") == 0x075BCD15u);
+    CHECK(rhash(0, "a") == 0xA83ADE09u);
+    CHECK(rhash(0x18, "Data") == 0x0418D017u);
+    CHECK(rhash(0, "\xC3\xA9") == 0x5D41D65Cu);
+}
 int main(int argc, char** argv) {
     hle_init();
+    test_rhash();
     g_hle.kernel.title_id = 0x0100000000010000ull; /* the title the test was written for */
     CHECK((argc == 3 || argc == 4) && strstr(argv[1], "scarletnx-fs-tree-") != NULL);
     CHECK(!test_chdir(argv[1]));
