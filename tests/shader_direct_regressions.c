@@ -649,6 +649,30 @@ static void global_buffers(void) {
     check_refused(code, &info, "global memory base R2 not tracked at 58: no write before",
                   "an untracked global base without a writer says so");
     free(code);
+    /* an index plus a bare address in a constant buffer of the program's own, with no NVN descriptor behind it: one
+       game's terrain vertex programs read their patch data so, and weren't translated (their draws all skipped) */
+    const u64 bare[] = {
+        0x4C10801800070A0Aull, /* IADD.CC R10, R10, c[6][0x0] */
+        0x4C1008180017FF0Bull, /* IADD.X R11, RZ, c[6][0x4] */
+        0xEED4A00000070A0Bull, /* LDG.E R11, [R10] */
+    };
+    code = translate(bare, 3, ST_FS, &info, &words, 1);
+    check(code && !info.unsupported && info.ngbuf == 1 && info.gbuf_cbuf_off[0] == (6u << 16) &&
+              SH_GBUF_BANK(info.gbuf_cbuf_off[0]) == 6 && SH_GBUF_OFFSET(info.gbuf_cbuf_off[0]) == 0 &&
+              info.cbuf_max[6] >= 16,
+          "a bare address in a program's own constant buffer is a global buffer");
+    free(code);
+    /* an offset from one constant buffer, then the address from another: the address, added last, is the base */
+    const u64 offset_then_bare[] = {
+        0x4C1801C000470200ull, /* ISCADD R0, R2, c[16][0x10], 3 */
+        0x4C10801800070000ull, /* IADD.CC R0, R0, c[6][0x0] */
+        0x4C1008180017FF01ull, /* IADD.X R1, RZ, c[6][0x4] */
+        0xEED5A00000070000ull, /* LDG.E.64 R0, [R0] */
+    };
+    code = translate(offset_then_bare, 4, ST_FS, &info, &words, 1);
+    check(code && !info.unsupported && info.ngbuf == 1 && info.gbuf_cbuf_off[0] == (6u << 16),
+          "of an offset and a bare address, the one added last is the base");
+    free(code);
     /* LEA.LO R2, R0, c[0][0x510], 4: the base plus an index, as a 64-bit address's low word (Pokemon Legends Z-A) */
     const u64 lea[] = {0x4BD7020014470002ull, 0xEED4200000070200ull};
     code = translate(lea, 2, ST_FS, &info, &words, 1);

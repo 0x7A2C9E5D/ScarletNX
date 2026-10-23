@@ -1040,10 +1040,19 @@ static u32 integer_mul_high(DirectCtx* c, u32 lhs, u32 rhs, int signed_lhs, int 
     return high;
 }
 static int gbuf_tag(int stage, u32 index, u32 offset) {
-    u32 end = stage == ST_CS ? 0x410 : 0x830;
     /* The vertex system buffer also supplies a bare 64-bit output pointer at 0xb0. */
     if (stage == ST_VS && index == 0 && offset == 0xb0) return 0xb1;
-    return index == 0 && offset >= 0x110 && offset < end && !(offset & 15) ? (int)offset + 1 : 0;
+    return index == 0 && shader_gbuf_sized(stage, offset) && !(offset & 15) ? (int)offset + 1 : 0;
+}
+/* A bare 64-bit address in a constant buffer of the program's own (1 to 17: cbuf 0 is NVN's, its descriptors and
+   system values), 16-byte aligned as Eden requires of one (SH_GBUF_*). Taken only where neither an NVN descriptor
+   (gbuf_tag) nor a register already holding a base explains the access, and not for compute dispatches, which copy
+   each buffer whole and would have no size for one. Without it such a graphics program wasn't translated, and its
+   draws were skipped: one game's terrain, all of it */
+static int gbuf_tag_any(int stage, u32 index, u32 offset) {
+    return stage != ST_CS && index > 0 && index < 18 && offset < 0x10000 && !(offset & 15)
+               ? (int)((index << 16) | offset) + 1
+               : 0;
 }
 static int texs_outputs(u64 w, u32 regs[4], u32 comps[4]) {
     u32 da = B(w, 0, 8), db = B(w, 28, 8), sw = B(w, 50, 3);
@@ -1511,7 +1520,8 @@ static u32 gbuf_word_index(DirectCtx* c, int stage, u32 slot, u32 word) {
 }
 
 static u32 global_atomic_pointer(DirectCtx* c, int stage, u32 slot, u32 base_off, u32 a, u64 w) {
-    u32 base = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, base_off));
+    u32 base = cbuf_read_dynamic(c, SH_GBUF_BANK(base_off),
+                                 spv_emit_constant_u32(&c->emit, c->u32_type, SH_GBUF_OFFSET(base_off)));
     u32 immediate = (u32)((i32)(B(w, 28, 20) << 12) >> 12);
     u32 address = spv_emit_iadd_u32(&c->emit, c->u32_type, reg_read(c, a),
                                     spv_emit_constant_u32(&c->emit, c->u32_type, immediate));
@@ -2269,12 +2279,17 @@ static void global_dynamic(DirectCtx* c, int stage, u64 w, int op, const u32* gb
         for (k = 0; k < words; k++) reg_write(c, d + k, c->zero);
     for (int slot = 0; slot < ngbuf; slot++) {
         u32 then_label, merge_label, base_lo, base_hi, size, relative, borrow, inside;
+        u32 bank = SH_GBUF_BANK(gbuf_off[slot]), at = SH_GBUF_OFFSET(gbuf_off[slot]);
         if (gbuf_off[slot] == 0xb0) continue; /* the vertex stage's bare pointer, a buffer of its own */
-        base_lo = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot]));
-        base_hi = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot] + 4));
-        size = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot] + 8));
-        size = spv_emit_select(&c->emit, c->u32_type, spv_emit_i_equal(&c->emit, c->bool_type, size, c->zero),
-                               spv_emit_constant_u32(&c->emit, c->u32_type, 16), size);
+        base_lo = cbuf_read_dynamic(c, bank, spv_emit_constant_u32(&c->emit, c->u32_type, at));
+        base_hi = cbuf_read_dynamic(c, bank, spv_emit_constant_u32(&c->emit, c->u32_type, at + 4));
+        /* a bare address has no size beside it: the cap below, of which the renderer binds what is mapped */
+        if (shader_gbuf_sized(stage, gbuf_off[slot])) {
+            size = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, at + 8));
+            size = spv_emit_select(&c->emit, c->u32_type, spv_emit_i_equal(&c->emit, c->bool_type, size, c->zero),
+                                   spv_emit_constant_u32(&c->emit, c->u32_type, 16), size);
+        } else
+            size = spv_emit_constant_u32(&c->emit, c->u32_type, 16u << 20);
         size = spv_emit_select(
             &c->emit, c->u32_type,
             spv_emit_u_less(&c->emit, c->bool_type, spv_emit_constant_u32(&c->emit, c->u32_type, 16u << 20), size),
@@ -3344,11 +3359,13 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
            compiler's unused direct-export stores do not require a guest global-buffer descriptor. */
         if (op == O_S2R && B(w, 20, 8) == 0x15)
             tag = 0xcbe;
-        else if (op == O_MOV_C)
+        else if (op == O_MOV_C) {
             tag = gbuf_tag(stage, B(w, 34, 5), B(w, 20, 14) * 4);
-        else if (op == O_LDC && a == 255 && (B(w, 48, 3) == 4 || B(w, 48, 3) == 5))
+            if (!tag) tag = gbuf_tag_any(stage, B(w, 34, 5), B(w, 20, 14) * 4);
+        } else if (op == O_LDC && a == 255 && (B(w, 48, 3) == 4 || B(w, 48, 3) == 5)) {
             tag = gbuf_tag(stage, B(w, 36, 5), (u32)(i32)(i16)B(w, 20, 16));
-        else if (op == O_MOV_R)
+            if (!tag) tag = gbuf_tag_any(stage, B(w, 36, 5), (u32)(i32)(i16)B(w, 20, 16));
+        } else if (op == O_MOV_R)
             tag = b == 255 ? 0 : gtags[b];
         else if (op == O_IADD32I && a < 255)
             tag = gtags[a];
@@ -3357,6 +3374,14 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         else if (op == O_IADD_C) {
             tag = gbuf_tag(stage, B(w, 34, 5), B(w, 20, 14) * 4);
             if (!tag && B(w, 48, 2) != 2 && a < 255) tag = gtags[a];
+            /* an index plus a bare address of the program's own, neither negated. Of two such constants added
+               (an offset into the buffer, then its address), the one nearest the access is the base, as Eden's
+               breadth-first search back from the access finds it: one game adds c[16][0x10], an offset, and then
+               c[6][0x0], the address. An NVN descriptor's address already in Ra stays the base */
+            if (!B(w, 48, 2) && (!tag || tag > 0xFFFF)) {
+                int bare = gbuf_tag_any(stage, B(w, 34, 5), B(w, 20, 14) * 4);
+                if (bare) tag = bare;
+            }
             if (B(w, 48, 2) == 1) tag = 0;
         } else if (op == O_IADD_R) {
             tag = B(w, 48, 2) == 1      ? (a < 255 ? gtags[a] : 0)
@@ -3370,15 +3395,17 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                   : cr < 255 && gtags[cr]      ? gtags[cr]
                   : op == O_IADD3_R && b < 255 ? gtags[b]
                                                : 0;
-        } else if (op == O_ISCADD_C && B(w, 48, 2) != 1)
+        } else if (op == O_ISCADD_C && B(w, 48, 2) != 1) {
             tag = gbuf_tag(stage, B(w, 34, 5), B(w, 20, 14) * 4);
-        else if (op == O_ISCADD_R && B(w, 48, 2) != 1 && b < 255)
+            if (!tag) tag = gbuf_tag_any(stage, B(w, 34, 5), B(w, 20, 14) * 4);
+        } else if (op == O_ISCADD_R && B(w, 48, 2) != 1 && b < 255)
             tag = gtags[b];
         /* LEA's low word adds the base the same way, with its carry out for the high word's LEA.HI.X; negated
            (bit 45) or with a carry in (bit 46) it is no base plus an index */
-        else if (op == O_LEA_LC && !B(w, 45, 2))
+        else if (op == O_LEA_LC && !B(w, 45, 2)) {
             tag = gbuf_tag(stage, B(w, 34, 5), B(w, 20, 14) * 4);
-        else if (op == O_LEA_LR && !B(w, 45, 2) && b < 255)
+            if (!tag) tag = gbuf_tag_any(stage, B(w, 34, 5), B(w, 20, 14) * 4);
+        } else if (op == O_LEA_LR && !B(w, 45, 2) && b < 255)
             tag = gtags[b];
         if (tag == 0xb1 && op != O_MOV_C && op != O_LDC && op != O_MOV_R) tag = 0;
         if (op == O_LDG || op == O_STG || op == O_RED || op == O_ATOM || op == O_ATOM_CAS) {
@@ -3425,8 +3452,11 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 }
                 gb_at[i] = (u8)(slot + 1);
                 if (op != O_LDG) gbuf_wmask |= 1u << slot;
-                cbuf_used[0] = 1;
-                if ((descriptor | 15u) + 1 > cbuf_max[0]) cbuf_max[0] = (descriptor | 15u) + 1;
+                {
+                    u32 bank = SH_GBUF_BANK(descriptor), at = SH_GBUF_OFFSET(descriptor);
+                    cbuf_used[bank] = 1;
+                    if ((at | 15u) + 1 > cbuf_max[bank]) cbuf_max[bank] = (at | 15u) + 1;
+                }
             }
         }
         /* every register the instruction writes stops being a pointer, then its destination takes the new tag */
@@ -4901,8 +4931,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             global_dynamic(c, stage, w, op, gbuf_off, ngbuf);
         } else if (op == O_LDG || op == O_STG) {
             u32 slot = gb_at[i] - 1;
-            u32 offset = spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot]);
-            u32 base = cbuf_read_dynamic(c, 0, offset);
+            u32 offset = spv_emit_constant_u32(&c->emit, c->u32_type, SH_GBUF_OFFSET(gbuf_off[slot]));
+            u32 base = cbuf_read_dynamic(c, SH_GBUF_BANK(gbuf_off[slot]), offset);
             u32 immediate = spv_emit_constant_u32(&c->emit, c->u32_type, (u32)((i32)(B(w, 20, 24) << 8) >> 8));
             u32 address = spv_emit_iadd_u32(&c->emit, c->u32_type, reg_read(c, a), immediate);
             address = spv_emit_isub_u32(&c->emit, c->u32_type, address, base);

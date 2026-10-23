@@ -79,7 +79,7 @@ void pc_init(PCond* c) {
 }
 void pc_signal(PCond* c) { pthread_cond_signal(&c->c); }
 void pc_broadcast(PCond* c) { pthread_cond_broadcast(&c->c); }
-int pc_wait(PCond* c, PMutex* m, i64 timeout_ns) {
+static int cond_wait(PCond* c, PMutex* m, i64 timeout_ns) {
     struct timespec ts;
     int r;
     if (timeout_ns < 0) {
@@ -105,6 +105,14 @@ int pc_wait(PCond* c, PMutex* m, i64 timeout_ns) {
     r = pthread_cond_timedwait(&c->c, &m->l, &ts);
 #endif
     return r == ETIMEDOUT;
+}
+/* the wait noted while it lasts, for a hang report (pm_waits) */
+int pc_wait(PCond* c, PMutex* m, i64 timeout_ns) {
+    int r;
+    pm_wait_note(m, __builtin_return_address(0), 1);
+    r = cond_wait(c, m, timeout_ns);
+    pm_wait_note(NULL, NULL, 0);
+    return r;
 }
 
 /* ================================================================ threads */

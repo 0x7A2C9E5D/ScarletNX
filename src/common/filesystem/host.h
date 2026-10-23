@@ -35,6 +35,17 @@ void pm_destroy(PMutex* m);
 void pm_lock(PMutex* m);
 void pm_unlock(PMutex* m);
 int pm_trylock(PMutex* m); /* 1 when it took the lock, 0 when another thread holds it */
+/* A thread blocked in pm_lock on a mutex another thread holds, or waiting on a condition variable with it (cond 1), for
+   a hang report: the host thread, the mutex and the caller's address. A lock taken at once notes nothing */
+typedef struct {
+    uint64_t tid;
+    const void* m;
+    const void* at;
+    int cond;
+} PmWait;
+void pm_wait_note(const void* m, const void* at, int cond); /* m NULL: the wait is over */
+int pm_waits(PmWait* out, int max);                          /* the waits now, at most max */
+const void* pm_wait_base(void); /* an address in this module's data, to name a mutex by its offset from */
 
 int plat_mkdir(const char* path); /* 0, or -1 */
 

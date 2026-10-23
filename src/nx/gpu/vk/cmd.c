@@ -73,47 +73,67 @@ static u64 g_frame_id;
 static VkSemaphore g_gsem; /* graphics timeline: submission n signals n */
 static u64 g_gval;         /* the last submission */
 static u64 g_landed;       /* submissions whose storage results vk_buf_frame_done has landed */
+static u64 g_sub_ns;       /* when the last submission was made */
 static VkSemaphoreSubmitInfo g_after[2]; /* vk_submit_after's wait and signal, for the next submission (semaphore 0: none) */
 u32 g_vk_epoch, g_vk_present;
 
-u64 vk_hash(const void* p, u64 size) {
-    const u64* q = p;
-    u64 n = size / 8, i = 0;
-    u64 a = 0x9E3779B97F4A7C15ull, b = 0xC2B2AE3D27D4EB4Full, c = 0x165667B19E3779F9ull, d = 0x27D4EB2F165667C5ull;
-    for (; i + 3 < n; i += 4) {
-        a = (a ^ q[i]) * 0x100000001B3ull;
-        b = (b ^ q[i + 1]) * 0x100000001B3ull;
-        c = (c ^ q[i + 2]) * 0x100000001B3ull;
-        d = (d ^ q[i + 3]) * 0x100000001B3ull;
+/* XXH64 (Yann Collet's xxHash, BSD-2-Clause), the algorithm as its specification gives it. The hash it replaced
+   multiplied each lane by an odd constant, which carries a change only towards the high bits, and shifted lanes
+   before combining them: a change confined to a word's top bits (a float's sign, a Maxwell opcode's high bits) left
+   the hash the same, so a buffer kept a stale copy and two programs could share one translation. Each round here
+   rotates the high bits down before the next multiply, and the avalanche at the end mixes every bit into every other */
+#define XXH_P1 0x9E3779B185EBCA87ull
+#define XXH_P2 0xC2B2AE3D27D4EB4Full
+#define XXH_P3 0x165667B19E3779F9ull
+#define XXH_P4 0x85EBCA77C2B2AE63ull
+#define XXH_P5 0x27D4EB2F165667C5ull
+static u64 xxh_rotl(u64 x, int r) { return (x << r) | (x >> (64 - r)); }
+static u64 xxh_round(u64 acc, u64 in) { return xxh_rotl(acc + in * XXH_P2, 31) * XXH_P1; }
+static u64 xxh_merge(u64 h, u64 v) { return (h ^ xxh_round(0, v)) * XXH_P1 + XXH_P4; }
+/* XXH64 of size bytes at s, each byte copied to out on the way when it isn't NULL: the bytes are read once */
+static u64 xxh64(const u8* s, u64 size, u8* out) {
+    const u8* end = s + size;
+    u64 h, w;
+    u32 w4;
+    if (size >= 32) {
+        u64 a = XXH_P1 + XXH_P2, b = XXH_P2, c = 0, d = 0 - XXH_P1;
+        for (; end - s >= 32; s += 32) {
+            u64 q[4];
+            memcpy(q, s, 32);
+            if (out) {
+                memcpy(out, q, 32);
+                out += 32;
+            }
+            a = xxh_round(a, q[0]);
+            b = xxh_round(b, q[1]);
+            c = xxh_round(c, q[2]);
+            d = xxh_round(d, q[3]);
+        }
+        h = xxh_rotl(a, 1) + xxh_rotl(b, 7) + xxh_rotl(c, 12) + xxh_rotl(d, 18);
+        h = xxh_merge(xxh_merge(xxh_merge(xxh_merge(h, a), b), c), d);
+    } else
+        h = XXH_P5;
+    h += size;
+    if (out) memcpy(out, s, (size_t)(end - s)); /* the tail, under 32 bytes */
+    for (; end - s >= 8; s += 8) {
+        memcpy(&w, s, 8);
+        h = xxh_rotl(h ^ xxh_round(0, w), 27) * XXH_P1 + XXH_P4;
     }
-    for (; i < n; i++) a = (a ^ q[i]) * 0x100000001B3ull;
-    for (u64 k = n * 8; k < size; k++) b = (b ^ ((const u8*)p)[k]) * 0x100000001B3ull;
-    return a ^ (b << 1) ^ (c << 2) ^ (d << 3) ^ size;
+    if (end - s >= 4) {
+        memcpy(&w4, s, 4);
+        h = xxh_rotl(h ^ (u64)w4 * XXH_P1, 23) * XXH_P2 + XXH_P3;
+        s += 4;
+    }
+    for (; s < end; s++) h = xxh_rotl(h ^ *s * XXH_P5, 11) * XXH_P1;
+    h ^= h >> 33;
+    h *= XXH_P2;
+    h ^= h >> 29;
+    h *= XXH_P3;
+    return h ^ (h >> 32);
 }
-u64 vk_hash_copy(void* dst, const void* src, u64 size) {
-    const u8* s = src;
-    u8* o = dst;
-    u64 n = size / 8, i = 0, w[4];
-    u64 a = 0x9E3779B97F4A7C15ull, b = 0xC2B2AE3D27D4EB4Full, c = 0x165667B19E3779F9ull, d = 0x27D4EB2F165667C5ull;
-    for (; i + 3 < n; i += 4) {
-        memcpy(w, s + 8 * i, sizeof w);
-        memcpy(o + 8 * i, w, sizeof w);
-        a = (a ^ w[0]) * 0x100000001B3ull;
-        b = (b ^ w[1]) * 0x100000001B3ull;
-        c = (c ^ w[2]) * 0x100000001B3ull;
-        d = (d ^ w[3]) * 0x100000001B3ull;
-    }
-    for (; i < n; i++) {
-        memcpy(w, s + 8 * i, 8);
-        memcpy(o + 8 * i, w, 8);
-        a = (a ^ w[0]) * 0x100000001B3ull;
-    }
-    for (u64 k = n * 8; k < size; k++) {
-        o[k] = s[k];
-        b = (b ^ s[k]) * 0x100000001B3ull;
-    }
-    return a ^ (b << 1) ^ (c << 2) ^ (d << 3) ^ size;
-}
+u64 vk_hash(const void* p, u64 size) { return xxh64(p, size, NULL); }
+/* the same hash as vk_hash, which an entry's next check may compute instead */
+u64 vk_hash_copy(void* dst, const void* src, u64 size) { return xxh64(src, size, dst); }
 
 u64 vk_sample_hash(u64 gva, u64 len) {
     u8 tmp[2048 + 128];
@@ -201,7 +221,16 @@ void vk_cmd_init(void) {
    eighth of a small heap) gets memory of its own, so the rings didn't move out either. A ring is made there with room
    for it and a sixteenth of the heap to spare, for the desktop, and stays while the heap is within its budget. Where
    that memory is in the heap the caches use (resizable BAR, a GPU sharing system memory), the caches keep the heap
-   within its budget, counting the rings, and a ring goes there while the heap's use stays within it */
+   within its budget, counting the rings, and a ring goes there while the heap's use stays within it.
+
+   A window of its own is also no more than this process's share of it: a ring there is at most BAR_RING_MAX, and
+   this process's memory in the window at most a quarter of it. Within the budget, NVIDIA's driver (615.78, open
+   module) still failed to map a 64 MiB ring with 86 MiB budgeted ("NVRM: dmaAllocMapping_GM107: can't alloc VA space
+   for mapping" in the kernel's log) and reported success: CPU writes to it then ran at 18 MB/s, against 5 GB/s, and
+   every frame of that slot took half a second, in two games, in most runs, at a time that changed from run to run. No
+   16 or 32 MiB ring failed. The budget can't see what the desktop and the driver itself keep mapped there, so the
+   window is used as a small fast path, as other Vulkan translation layers do, and bigger rings go to host memory */
+#define BAR_RING_MAX (32ull << 20)
 static int g_bar_heap = -2; /* the heap of the device-local memory the CPU maps, -1 without one; -2 not looked for */
 static int bar_heap(void) {
     const VkPhysicalDeviceMemoryProperties* mp;
@@ -225,6 +254,7 @@ static int bar_room(const VmaBudget* b, u64 add, int back) {
     if (heap == vk_mem_heap()) return use + add <= (back ? budget / 4 * 3 : budget);
     vmaGetMemoryProperties(g_vk.vma, &mp);
     size = mp->memoryHeaps[heap].size;
+    if (add && (add > BAR_RING_MAX || b[heap].statistics.blockBytes + add > size / 4)) return 0;
     whole = use + budget + (1u << 20) >= size && use + budget <= size + (1u << 20); /* NVIDIA's use */
     if (whole) use = 0;                                                           /* the budget is what is left */
     return budget >= use + (add ? add + size / 16 : 0);
@@ -477,6 +507,7 @@ static void submit(const VkSemaphoreSubmitInfo* xw, const VkSemaphoreSubmitInfo*
     vk_rec_submit(cb, w, nw, s, xs ? 2u : 1u);
     memset(g_after, 0, sizeof g_after);
     __atomic_store_n(&g_gval, g_gval + 1, __ATOMIC_RELAXED); /* read by the stall report too */
+    g_sub_ns = plat_ns();
     f->recording = 0;
     f->icb++;
     f->last = g_gval;
@@ -516,11 +547,23 @@ void vk_frame_next(void) {
     g_fr[g_cur].fresh = 1;
     g_frame_id++;
 }
+/* the GPU thread's recording time a submission holds at most */
+#define SUBMIT_EVERY_NS 1000000
 /* A frame that goes long without a present (a loading screen) still has to hand its pools and rings back: one with
-   many submissions or descriptor pools ends here, at the start of a draw or dispatch, before anything is set up */
+   many submissions or descriptor pools ends here, at the start of a draw or dispatch, before anything is set up.
+   Otherwise what was recorded goes to the GPU once it holds a millisecond of the GPU thread's work. Submissions came
+   only when something needed results, so in one game the GPU sat idle through the first 12 ms of the frame's 21 ms
+   on the GPU thread, got all of it in a burst at the end and finished 6 ms after the GPU thread, while the game
+   waited for that frame's fence before submitting the next (34.7 fps, 40.3 with these). Earlier submissions also land
+   their storage results sooner, so the pending results a draw's buffers are looked up in stay fewer. 2 ms and 0.5 ms
+   were both slower. The limit on submissions leaves room for these in a slow frame: one that reaches it records
+   the rest in the other slot, and its present then waits for this one's work */
 void vk_frame_check(void) {
     const Frame* f = &g_fr[g_cur];
-    if (f->icb >= 64 || f->ipool >= 32 || vk_rec_frame_sets(g_cur) >= 32 * 1024) vk_frame_next();
+    if (f->icb >= 128 || f->ipool >= 32 || vk_rec_frame_sets(g_cur) >= 32 * 1024)
+        vk_frame_next();
+    else if (f->recording && plat_ns() - g_sub_ns >= SUBMIT_EVERY_NS)
+        submit(NULL, NULL);
 }
 
 u64 vk_submit_number(void) { return g_gval + 1; }

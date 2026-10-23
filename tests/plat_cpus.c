@@ -7,6 +7,11 @@
 #include <stdarg.h>
 
 void log_crash_mode(void) {}
+void pm_wait_note(const void* m, const void* at, int cond) {
+    (void)m;
+    (void)at;
+    (void)cond;
+}
 void crash_report(void* host_pc, void* fault, int sig) {
     (void)host_pc;
     (void)fault;

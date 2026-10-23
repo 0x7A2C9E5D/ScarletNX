@@ -41,7 +41,7 @@ static void timer_period_1ms(void) {
 void pc_init(PCond* c) { InitializeConditionVariable(&c->c); }
 void pc_signal(PCond* c) { WakeConditionVariable(&c->c); }
 void pc_broadcast(PCond* c) { WakeAllConditionVariable(&c->c); }
-int pc_wait(PCond* c, PMutex* m, i64 timeout_ns) {
+static int cond_wait(PCond* c, PMutex* m, i64 timeout_ns) {
     DWORD ms = INFINITE;
     if (timeout_ns >= 0) {
         /* whole milliseconds rounded up, in u64 so a timeout near INT64_MAX can't overflow, and kept below INFINITE
@@ -52,6 +52,14 @@ int pc_wait(PCond* c, PMutex* m, i64 timeout_ns) {
     }
     if (SleepConditionVariableSRW(&c->c, &m->l, ms, 0)) return 0;
     return GetLastError() == ERROR_TIMEOUT;
+}
+/* the wait noted while it lasts, for a hang report (pm_waits) */
+int pc_wait(PCond* c, PMutex* m, i64 timeout_ns) {
+    int r;
+    pm_wait_note(m, __builtin_return_address(0), 1);
+    r = cond_wait(c, m, timeout_ns);
+    pm_wait_note(NULL, NULL, 0);
+    return r;
 }
 
 /* ================================================================ threads */
