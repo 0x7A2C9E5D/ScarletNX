@@ -194,12 +194,13 @@ static GuiRect row_box(App* app, int row, bool right) {
 #define text_px_is(app, x0, y0, text, color, back) text_px_is_at(__LINE__, app, x0, y0, text, color, back)
 static void text_px_is_at(int line, App* app, int x0, int y0, const char* text, SDL_Color color, SDL_Color back) {
     SDL_Surface* image = SDL_RenderReadPixels(app->renderer, NULL);
+    int half = app->half ? app->half : 2 * app->scale; /* the letters' size, in halves of a cell */
     assert(image);
     for (int i = 0; text[i]; ++i)
         for (int y = 0; y < 16; ++y)
             for (int x = 0; x < 8; ++x) {
                 Uint8 r, g, b, a;
-                int px = x0 + (i * 8 + x) * app->scale, py = y0 + y * app->scale;
+                int px = x0 + font_px(i * 8 + x, half), py = y0 + font_px(y, half);
                 assert(SDL_ReadSurfacePixel(image, px, py, &r, &g, &b, &a));
                 bool ink = (gui_vga_font[(unsigned char)text[i] * 16 + y] & (0x80 >> x)) != 0;
                 SDL_Color want = ink ? color : back;
@@ -237,11 +238,14 @@ static GuiRect foot_room(App* app, GuiRect r, int box) {
     app->scale = scale;
     return out;
 }
-/* text drawn at the start of the tips on their row under the head, past their box's bar, in the foot's letters */
+/* text drawn at the start of the tips on their row under the head, past their box's bar, a half step under the text's
+   letters */
 #define tips_px_is(app, tips, text, color, back) tips_px_is_at(__LINE__, app, tips, text, color, back)
 static void tips_px_is_at(int line, App* app, GuiRect tips, const char* text, SDL_Color color, SDL_Color back) {
-    GuiRect r = foot_room(app, tips, app->theme.tips_box);
-    foot_px_is_at(line, app, r.x, r.y, text, color, back);
+    GuiRect r = foot_text(app, tips, app->theme.tips_box);
+    int half = text_half(app);
+    text_px_is_at(line, app, r.x, r.y, text, color, back);
+    app->half = half;
 }
 /* a click, or a tap, on column col of the key the foot draws in color, in its letters */
 #define press_key(app, key, col, tap, color) press_key_at(__LINE__, app, key, col, tap, color)
@@ -575,7 +579,7 @@ static void button_map(App* app) {
     app->editor.row = page - app->first;
     key(app, SDLK_RETURN);
     /* drawn before SDL looks for pads, which takes it most of a second, saying so */
-    shows_foot(app, "Looking for controllers...", rgb(app->theme.soft)); /* in the tips */
+    shows_half(app, "Looking for controllers...", rgb(app->theme.soft)); /* in the tips */
     /* no pad: no presets, the first control focused, A and B where the console's are */
     assert(app->form == GUI_FORM_PAD && app->pads_read && !app->gamepad && app->pad.focus == SNX_PAD_LT &&
            !app->pad.swap_ab);
@@ -768,7 +772,7 @@ static void button_map(App* app) {
     {
         char start[21]; /* in the tips, the foot's letters */
         snprintf(start, sizeof start, "%s", app->editor.note);
-        shows_foot(app, start, rgb(app->theme.failure));
+        shows_half(app, start, rgb(app->theme.failure));
     }
     key(app, SDLK_TAB); /* the next screen, as the foot says: the Menu, the pads closed */
     assert(!app->editing && app->menu.view == GUI_LOAD_NONE && !app->pads_read && !SDL_WasInit(SDL_INIT_GAMEPAD));
@@ -1452,7 +1456,8 @@ int main(int argc, char** argv) {
     key(&app, SDLK_RIGHT);
     assert(app.menu.selected == GUI_SETTINGS);
     render(&app);
-    shows_foot(&app, "The game's .ini settings,", normal); /* what it is about, in the tips, the foot's letters */
+    shows_half(&app, "The game's .ini settings,",
+               normal);                               /* what it is about, in the tips, a half step under the text's */
     mouse_px(&app, 2, 2, true);                       /* Blank space must not activate the current selection. */
     assert(!app.editing);
     /* Settings: the launcher's own, then each setting the runtime lists, a row each with its help above; what the
@@ -1485,8 +1490,8 @@ int main(int argc, char** argv) {
         snprintf(line, sizeof line, "Disk: %s, %s free", used, left);
         key(&app, SDLK_ESCAPE);
         render(&app);
-        shows(&app, line, rgb(app.theme.soft));
-        shows(&app, "GUI + children: ", rgb(app.theme.soft));
+        shows_half(&app, line, rgb(app.theme.soft));
+        shows_half(&app, "GUI + children: ", rgb(app.theme.soft));
         assert(total == 3 << 20 && !strncmp(line, "Disk: 3 MB, ", 12));
         key(&app, SDLK_SPACE);
         assert(!snx_remove_tree(app.games_dir)); /* the browser's checks below start with no games/ */
@@ -1502,7 +1507,7 @@ int main(int argc, char** argv) {
     render(&app);
     assert(app.form == GUI_FORM_SETTINGS && app.groups == 6 && gui_editor_rows(&app.editor) == 6);
     shows(&app, "SETTINGS", normal);
-    shows_foot(&app, "The theme, the menu's", normal); /* in the tips, the foot's letters */
+    shows_half(&app, "The theme, the menu's", normal); /* in the tips, a half step under the text's */
     shows(&app, "- App", yellow);
     shows(&app, "- Launch", normal);
     shows(&app, "- Display", normal);
@@ -1515,7 +1520,7 @@ int main(int argc, char** argv) {
     hides(&app, "\x1f", rgb(app.theme.soft));
     key(&app, SDLK_DOWN);
     render(&app);
-    shows_foot(&app, "gdbstub, Extract to tmpfs", normal); /* a group's help names its settings */
+    shows_half(&app, "gdbstub, Extract to tmpfs", normal); /* a group's help names its settings */
     key(&app, SDLK_RIGHT);                            /* a group opens with Enter only */
     assert(app.form == GUI_FORM_SETTINGS);
     key(&app, SDLK_RETURN);
@@ -1528,7 +1533,7 @@ int main(int argc, char** argv) {
     assert(app.form == GUI_FORM_GROUP && app.group == 1 && app.editor.count == 7 + tracy);
     render(&app);
     shows(&app, "Launch", normal);
-    shows_foot(&app, "Enables gdbstub", normal); /* in the tips */
+    shows_half(&app, "Enables gdbstub", normal); /* in the tips */
     shows(&app, "- gdbstub ", yellow); /* its value in the column after the longest name, Extract game container's */
     shows(&app, "- Extract to tmpfs ", normal);
     shows(&app, "- Extract game container off", normal);
@@ -1539,7 +1544,7 @@ int main(int argc, char** argv) {
     assert(!gui_settings_value(&app.settings, "gdbstub"));
     key(&app, SDLK_DOWN);
     render(&app);
-    shows_foot(&app, "Extract to t", normal);  /* the tips follow the focus, the row itself yellow */
+    shows_half(&app, "Extract to t", normal);  /* the tips follow the focus, the row itself yellow */
     point(&app, row_box(&app, 0, true), true); /* a click focuses a row, one on the focused row changes it */
     assert(app.editor.row == 0 && !gui_settings_value(&app.settings, "gdbstub"));
     point(&app, row_box(&app, 0, true), true);
@@ -1679,7 +1684,7 @@ int main(int argc, char** argv) {
         shows(&app, "- Theme editor", normal);
         /* under the rows, the three folders Folders moves, whole: the extractions too */
         shows(&app, "- Folders            Defaults", normal);
-        shows_foot(&app, "Extractions:", rgb(app.theme.soft)); /* in the foot's letters */
+        shows_half(&app, "Extractions:", rgb(app.theme.soft)); /* in a half step under the text's */
         { /* out of the data folder, as XDG's cache has them: without XDG (Windows) they are in it and read work/ */
             char *games = app.games_dir, *work = app.work_dir;
             app.work_dir = snx_path_join(temporary, "extractions");
@@ -2117,7 +2122,7 @@ int main(int argc, char** argv) {
         assert(!snx_write_file(app.app_file, gone, strlen(gone)));
         app.editor.row = GUI_APP_CLEAN;
         render(&app);
-        shows_foot(&app, "no longer read, taken out once asked", normal);
+        shows_half(&app, "no longer read, taken out once asked", normal);
         key(&app, SDLK_RETURN); /* a box says what it would take out, Back in focus */
         assert(app.confirm.shown && app.confirm.ask == GUI_ASK_CLEAN && !app.cleaned_shown && snx_is_file(old_ini));
         assert(!strcmp(app.ask_line, "Clean old settings? [Deprecated] in 1 .ini, 2 old keys"));
@@ -2477,7 +2482,7 @@ int main(int argc, char** argv) {
         /* the recompiled library's Main, where recompiled games go: its folder in its row, its tips what it holds */
         app.editor.row = FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES);
         render(&app);
-        shows_foot(&app, "The recompiled games, ", normal);
+        shows_half(&app, "The recompiled games, ", normal);
         shows(&app, "- Main", yellow);
         shows(&app, "- Add a folder", normal);
         assert(!strcmp(app.app_form.folder[app.editor.row], "default") && !strcmp(form_note(&app), app.games_dir));
@@ -2524,7 +2529,7 @@ int main(int argc, char** argv) {
                 snprintf(note, sizeof note, "%s", app.editor.note);
                 app.editor.note[0] = 0; /* the tips say the row while no note covers them */
                 render(&app);
-                shows_foot(&app, "Enter: pick another. Del: the default", normal);
+                shows_half(&app, "Enter: pick another. Del: the default", normal);
                 snprintf(app.editor.note, sizeof app.editor.note, "%s", note);
             }
             assert(strstr(shown_keys(&app, keys, sizeof keys), "Del: the default"));
@@ -2632,7 +2637,7 @@ int main(int argc, char** argv) {
         app.editor.row = FOLDER_ROW(GUI_ROW_FOLDER, 0);
         app.editor.note[0] = 0; /* the picker's answer above, over the tips */
         render(&app);
-        shows_foot(&app, "Del or Enter asks to take it off the library", normal);
+        shows_half(&app, "Del or Enter asks to take it off the library", normal);
         {
             char *asked = snx_format("Take %s off the dumps library? The folder keeps its games.", app.folders[0]),
                  *done = snx_format("%s taken off the list. The folder keeps its games", app.folders[0]);
@@ -2865,7 +2870,7 @@ int main(int argc, char** argv) {
         shows(&app, "default", yellow);
         /* under the rows, the folder in use: its start, as a long one wraps (Windows' %APPDATA% does) */
         snprintf(line, sizeof line, "%.24s", data);
-        shows_foot(&app, line, rgb(app.theme.soft));
+        shows_half(&app, line, rgb(app.theme.soft));
         shows(&app, "- Extractions", normal);
         shows(&app, "- All back to the defaults", normal);
         assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir) &&
@@ -3212,7 +3217,7 @@ int main(int argc, char** argv) {
         GuiPickBoxes k;
         app.clock = 1000 * app.theme.blink_ms * 2; /* the prompt shown, not blinked away */
         render(&app);
-        shows_foot(&app, "Load Switch NSP/XCI/NRO:", normal);
+        shows_half(&app, "Load Switch NSP/XCI/NRO:", normal);
         shows(&app, "[ Pick or drop a file ]", yellow);
         app.clock = 0;
         /* the arrows have nothing to move to there; a click on the prompt, or Enter, opens the system's picker, which
@@ -3775,10 +3780,9 @@ int main(int argc, char** argv) {
                 GuiGamesBoxes g;
                 int tx, ty;
                 games_boxes(&app, &g);
-                int scale = app.scale, found;
-                app.scale = foot_scale(&app); /* the tips' letters */
+                int half = text_half(&app), found; /* the tips' letters */
                 found = find_text(&app, "The recent games not shown", normal, 1, &tx, &ty);
-                app.scale = scale;
+                app.half = half;
                 assert(found && ty >= g.place.tips.y && ty < g.place.tips.y + g.place.tips.h);
             }
             key(&app, SDLK_RETURN);                            /* all five, the focus on the first that was hidden */
@@ -3968,7 +3972,7 @@ int main(int argc, char** argv) {
     assert(app.menu.view == GUI_LOAD_NONE && app.abnormal_exit);
     assert(!strcmp(app.message, "Program ended abnormally (force-terminated by ESC)."));
     render(&app);
-    shows_foot(&app, "Program ended abnormally", red); /* in the tips */
+    shows_half(&app, "Program ended abnormally", red); /* in the tips */
     /* a finger on a running run's ESC line aborts it, anywhere else it does nothing */
     assert(!snx_write_file(hung, "", 0));
     launch(&app, snx_strdup(hung), false);
@@ -4784,7 +4788,7 @@ int main(int argc, char** argv) {
         app.clock = 1; /* a description too long for its box rests before it slides */
         render(&app);
         shows(&app, "- Share log", yellow);
-        shows_foot(&app, "Saves the last run", normal);
+        shows_half(&app, "Saves the last run", normal);
         app.clock = 0;
         {
             GuiMenuBoxes m;
@@ -5031,7 +5035,7 @@ int main(int argc, char** argv) {
         shows_big(&app, "SCARLETNX  /  MENU", ink, 2); /* its head plain, as NieR's titles */
         shows(&app, "\xfe Settings", page);            /* the focused box on a band */
         shows(&app, "\xfe Exit", ink);
-        shows(&app, "CWD: ", ink);
+        shows_half(&app, "CWD: ", ink);
         {
             GuiMenuBoxes
                 m; /* the foot on a band of ink, the keys' box's bar in the page's colour, in the foot's size */
@@ -5630,7 +5634,7 @@ int main(int argc, char** argv) {
         assert(r.x == m.place.head.x && r.w == m.place.head.w);
         assert(r.y > m.place.tabs.y + m.place.tabs.h && r.y + r.h < m.place.list.y);
         assert(m.place.keys.x == m.place.head.x && m.place.keys.w == m.place.head.w && m.place.keys.y > r.y);
-        assert(r.h == 20 * foot_scale(&app)); /* a row of the foot's letters */
+        assert(r.h == 8 * (s + foot_scale(&app)) + 4 * s); /* a row of letters a half step under the text's */
         tips_px_is(&app, r, "Installs prod.keys", normal, black);
         snprintf(app.message, sizeof app.message, "Program ended abnormally (status 7).");
         app.abnormal_exit = true;
@@ -5799,25 +5803,29 @@ int main(int argc, char** argv) {
             snprintf(last, sizeof last, "- %s", app.group_keys[app.groups - 1].key);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), last, normal, black);
             text_px_is(&app, f.place.side.x + cw, f.place.side.y + 2 * s, "App", normal, black);
-            /* the note at the foot of the rows whole, wrapped to the box, in the foot's letters: at 2x and at 1x, 1x
-               both */
+            /* the note at the foot of the rows whole, wrapped to the box, a half step under the text's letters: at 2x
+               (1.5x) and at 1x (1x) */
             for (int size = 2; size >= 1; --size) {
                 const char* note = form_note(&app);
-                int y, room, fs;
+                int y, room, half, line, x;
                 app.menu.text_size = size == 1 ? 1 : 0; /* Auto is 2x here */
                 render(&app);
                 form_boxes(&app, &f);
-                fs = foot_scale(&app);
-                assert(app.scale == size && fs == 1 && note);
-                room = inner(&app, f.place.side).w / (8 * fs);
-                assert(f.info.h == wrap_rows(&app, note, room, 0) * 16 * fs + 2 * app.scale);
-                for (y = f.info.y; *note; y += 16 * fs) {
+                assert(app.scale == size && note);
+                x = f.info.x + 8 * app.scale;
+                half = text_half(&app);
+                assert(app.half == (size == 2 ? 3 : 2));
+                room = inner(&app, f.place.side).w / cell_w(&app);
+                line = cell_h(&app);
+                assert(f.info.h == wrap_rows(&app, note, room, 0) * line + 2 * app.scale);
+                for (y = f.info.y; *note; y += line) {
                     char row[96];
                     size_t n = wrap_at(note, room, 0);
                     snprintf(row, sizeof row, "%.*s", (int)n, note);
-                    foot_px_is(&app, f.info.x + 8 * app.scale, y, row, rgb(app.theme.soft), black);
+                    text_px_is(&app, x, y, row, rgb(app.theme.soft), black);
                     for (note += n; *note == ' ';) ++note;
                 }
+                app.half = half;
                 { /* under the last row drawn */
                     GuiEditor peek;
                     size_t drawn = SDL_min(form_shown(&app, &f, true), (size_t)gui_editor_rows(form_rows(&app, &peek)));
@@ -5867,7 +5875,7 @@ int main(int argc, char** argv) {
             {
                 char start[16]; /* in the tips, its first row, under the head */
                 snprintf(start, sizeof start, "%s", app.settings.keys[0].about);
-                shows_foot(&app, start, normal);
+                shows_half(&app, start, normal);
             }
             /* a click on the second row focuses it, a second click changes it */
             launcher(&app, false);
@@ -6707,9 +6715,8 @@ int main(int argc, char** argv) {
         assert(m.place.tips.w == m.place.head.w && m.place.keys.x == m.place.head.x &&
                m.place.keys.w == m.place.head.w);
         tips_px_is(&app, m.place.tips, "Installs prod.keys", ink, page);
-        assert(same_colour(
-            pixel(&app, (float)(m.place.tips.x + 3 * foot_scale(&app)), (float)(m.place.tips.y + m.place.tips.h / 2)),
-            ink));
+        assert(same_colour(pixel(&app, (float)(m.place.tips.x + 3 * s), (float)(m.place.tips.y + m.place.tips.h / 2)),
+                           ink));
         assert(same_colour(
             pixel(&app, (float)(m.place.keys.x + m.place.keys.w / 2), (float)(m.place.keys.y - 16 * s / 4 - s / 2)),
             rgb(app.theme.soft)));

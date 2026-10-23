@@ -304,6 +304,7 @@ typedef struct App {
     int listened_count;
     bool theme_from_app;       /* the theme editor goes back to the App's rows */
     bool folders_from_games;   /* Folders goes back to Games, whose Add a folder opened it */
+    int half;                  /* the letters in halves of a cell while text_half has them so, else 0: the scale's */
     SnxPadScreen pad;          /* the button map's, on the row gamepad_map, A and B as gamepad_swap_ab says */
     SnxPadDrawing pad_drawing; /* as last drawn: what a click or a tap lands on */
     SDL_Gamepad* gamepad;      /* the pad it shows, the first one plugged in, while it is open */
@@ -619,13 +620,14 @@ static void glyph_sized(App* app, float x, float y, int c, float w, float h) {
     }
 }
 static void glyph(App* app, float x, float y, int c) {
-    glyph_sized(app, x, y, c, 8.0f * (float)app->scale, 16.0f * (float)app->scale);
+    int half = app->half ? app->half : 2 * app->scale;
+    glyph_sized(app, x, y, c, 4.0f * (float)half, 8.0f * (float)half);
 }
 /* text from a pixel position, cols columns of it at most (a wide letter that would cross them left out), alpha its
    opacity, cut at the last column; where it ends */
 static float text_px(App* app, float x, float y, const char* value, size_t cols, SDL_Color color, float alpha) {
     size_t used = 0;
-    float w = 8.0f * (float)app->scale, limit = (float)(app->cols - 1) * w;
+    float w = 4.0f * (float)(app->half ? app->half : 2 * app->scale), limit = (float)(app->cols - 1) * w;
     SDL_SetTextureColorMod(app->font, color.r, color.g, color.b);
     SDL_SetTextureAlphaMod(app->font, (Uint8)(alpha * 255));
     while (*value) {
@@ -644,8 +646,8 @@ static void text(App* app, int x, int y, const char* value, SDL_Color color) {
     text_px(app, (float)(x * 8 * app->scale), (float)(y * 16 * app->scale), gui_cols_skip(value, skip), SIZE_MAX, color,
             1);
 }
-static int cell_h(const App* app) { return 16 * app->scale; }
-static int cell_w(const App* app) { return 8 * app->scale; }
+static int cell_h(const App* app) { return app->half ? 8 * app->half : 16 * app->scale; }
+static int cell_w(const App* app) { return app->half ? 4 * app->half : 8 * app->scale; }
 static void prompt_in(App* app, GuiRect r, int y, GuiPromptLine line, const char* value, SDL_Color color);
 /* a line of the loading screen that waits on the user, on row y as the theme's prompt places it */
 static void prompt(App* app, GuiPromptLine line, int x, int y, const char* value, SDL_Color color) {
@@ -2185,6 +2187,13 @@ static int hints(App* app, const char* keys, int width, GuiRect r, int y, int dr
 /* the foot's letters, a size under the rest's but 1 at the least: what draws or measures the keys, and the tips when
    they are in the foot, does it with app->scale set to them, then puts the menus' back */
 static int foot_scale(const App* app) { return SDL_max(1, app->scale - 1); }
+/* the tips under the head, a Settings box's note and the Status box: their letters a half step under the text's,
+   between its size and the foot's (1.5x by a 2x text); app->half as it was, to put back */
+static int text_half(App* app) {
+    int was = app->half;
+    app->half = app->scale + foot_scale(app);
+    return was;
+}
 /* the text's room in a box of them: past the bar at its left in a box, else the box's own width */
 static GuiRect foot_text(const App* app, GuiRect r, int box) {
     int s = app->scale;
@@ -2207,7 +2216,7 @@ static GuiRect foot_box(App* app, GuiRect r, int box, int band) {
 static void foot(App* app, const GuiPlace* p, const char* tips, SDL_Color color, const char* keys) {
     const GuiTheme* t = &app->theme;
     int band = t->footer == GUI_STYLE_BAR, below = p->tips.h && p->tips.y == p->keys.y, s = app->scale;
-    int small = foot_scale(app);
+    int small = foot_scale(app), half = app->half;
     GuiRect foot = below ? gui_rect(p->tips.x, p->keys.y, p->keys.x + p->keys.w - p->tips.x, p->keys.h) : p->keys;
     GuiRect text;
     if (!p->keys.h) return;
@@ -2215,12 +2224,14 @@ static void foot(App* app, const GuiPlace* p, const char* tips, SDL_Color color,
     if (t->footer_rule) fill_rect(app, gui_rect(foot.x, foot.y - cell_h(app) / 4 - s / 2, foot.w, s), t->soft);
     if (below && band && !(color.r == t->failure.r && color.g == t->failure.g && color.b == t->failure.b))
         color = rgb(t->page); /* on the band but a failure */
-    app->scale = small;       /* the tips in the foot's letters, under the head as beside the keys */
+    if (below) app->scale = small; /* beside the keys, in the foot's letters */
     text = foot_box(app, p->tips, t->tips_box, below && band);
+    if (!below) half = text_half(app); /* under the head, a half step under the text's */
     if (below && t->tips_wrap)
         wrap_in(app, text, text.x, text.y, tips, 0, color);
     else if (p->tips.h) /* one row: a long one slides */
         text_in(app, text, text.x, text.y, tips, color);
+    app->half = half;
     app->scale = small;
     text = foot_box(app, p->keys, t->footer_box, band);
     hints(app, keys, text.w / cell_w(app), text, text.y, 1, band, NULL);
@@ -3344,11 +3355,13 @@ static void place_screen(App* app, GuiPlace* p, const char* keys, int shows) {
 static bool frame_head_shown(const App* app) {
     return app->frame.head.tabs || app->frame.head.title || app->frame.head.badge;
 }
-/* the status box at width: its head and its rows */
+/* the status box at width: its head and its rows, a half step under the text's letters */
 static int frame_status(App* app, int width) {
     GuiRect none = {0, 0, 0, 0};
-    return head_h(app) + 4 * app->scale +
-           status_rows(app, (width - 2 * cell_w(app)) / cell_w(app), none, 0, 0) * cell_h(app);
+    int room = width - 2 * cell_w(app), h = head_h(app) + 4 * app->scale, half = text_half(app);
+    h += status_rows(app, room / cell_w(app), none, 0, 0) * cell_h(app);
+    app->half = half;
+    return h;
 }
 /* the keys' box at width, in the foot's letters: as many rows as its sentences wrap to (two at least with the tips
    beside it, wrapped) */
@@ -3383,11 +3396,10 @@ int ui_screen_head_measure_cb(App* app, int width, int scale) {
     return head_place(&app->frame.head, 0, 0, width, NULL);
 }
 bool ui_screen_tips_shown_cb(App* app) { return !app->frame.tips_foot; }
-/* the tips' row under the head: a row of the foot's letters */
+/* the tips' row under the head: a row of their letters, a half step under the text's, and foot_text's margins */
 int ui_screen_tips_measure_cb(App* app, int width, int scale) {
     (void)width;
-    (void)scale;
-    return 20 * foot_scale(app);
+    return 8 * (scale + foot_scale(app)) + 4 * scale;
 }
 bool ui_screen_body_side_shown_cb(App* app) { return app->frame.side; }
 bool ui_screen_body_side_status_shown_cb(App* app) { return app->frame.status; }
@@ -3425,10 +3437,12 @@ int ui_wide_foot_keys_min_width_cb(App* app, int scale) {
 }
 static void status_box(App* app, GuiRect r) {
     GuiRect text = inner(app, r);
-    int y;
+    int y, half;
     if (!r.h) return;
     y = pane(app, r, snx_tr("Status"));
+    half = text_half(app); /* its rows a half step under the text's letters */
     status_rows(app, text.w / cell_w(app), gui_rect(text.x, y, text.w, r.y + r.h - y), y, 1);
+    app->half = half;
 }
 /* ---- the menu: the items, ui.txt's scene Menu; beside them the focused one ---- */
 typedef struct {
@@ -6003,12 +6017,11 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
         f->place.side = f->place.list; /* no side box: the open group's rows the whole column, the groups out */
         f->place.list = gui_rect(f->place.list.x, f->place.list.y, 0, 0);
     }
-    { /* the note whole, in the foot's letters */
-        int s = app->scale, w = inner(app, f->place.side).w, line;
-        app->scale = foot_scale(app);
+    { /* the note whole, a half step under the text's letters */
+        int s = app->scale, w = inner(app, f->place.side).w, line, half = text_half(app);
         rows = note ? wrap_rows(app, note, w / cell_w(app), 0) : 1;
         line = cell_h(app);
-        app->scale = s;
+        app->half = half;
         f->info = gui_rect(f->place.side.x, f->place.side.y + f->place.side.h - rows * line - 4 * s, f->place.side.w,
                            rows * line + 2 * s);
     }
@@ -6210,12 +6223,11 @@ static void draw_form(App* app) {
                  app->form == GUI_FORM_GROUP && app->page >= 0 ? snx_tr(app->settings.keys[app->page].key)
                                                                : snx_tr(app->group_keys[g].key));
         ui_form_side_draw(app, f.right, app->scale, f.right_lists);
-        if (form_note(app)) { /* in the foot's letters, as form_boxes measured it */
+        if (form_note(app)) { /* a half step under the text's letters, as form_boxes measured it */
             GuiRect text = inner(app, f.info);
-            int s = app->scale;
-            app->scale = foot_scale(app);
+            int half = text_half(app);
             wrap_in(app, text, text.x, f.info.y, form_note(app), 0, rgb(app->theme.soft));
-            app->scale = s;
+            app->half = half;
         }
     }
     draw_picker(app);
