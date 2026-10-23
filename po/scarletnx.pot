@@ -3087,6 +3087,10 @@ msgstr ""
 msgid "Cannot launch driver: %s"
 msgstr ""
 
+#: src/gui/process_posix.c
+msgid "the driver runs on a thread of the app, at the app's priority"
+msgstr ""
+
 #: src/gui/process_win32.c
 msgid "A driver is already running"
 msgstr ""
@@ -3094,6 +3098,11 @@ msgstr ""
 #: src/gui/process_win32.c
 #, c-format
 msgid "Cannot start the run (Windows error %lu)"
+msgstr ""
+
+#: src/gui/process_win32.c
+#, c-format
+msgid "Windows error %lu"
 msgstr ""
 
 #: src/gui/settings.c

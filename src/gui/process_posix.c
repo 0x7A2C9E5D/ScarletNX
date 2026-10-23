@@ -55,7 +55,8 @@ struct GuiProcess {
     pid_t pid;
     int output, status;
     bool exited, eof;
-    GuiCpuBase cpu_base;
+    bool low; /* the tree's priority under this program's (gui_process_low), the next start's too */
+    GuiCpuBase cpu_base, tree_base;
 #ifdef GUI_DRIVER_THREAD
     pthread_t thread;
     int argc, saved[2], writer;
@@ -271,6 +272,17 @@ failed:
     }
 }
 #endif
+/* this program's priority, and a low one: ten steps of nice under it, the lowest at most */
+static int own_nice(void) {
+    int n;
+    errno = 0;
+    n = getpriority(PRIO_PROCESS, 0);
+    return errno ? 0 : n;
+}
+static int low_nice(void) {
+    int n = own_nice() + 10;
+    return n < PRIO_MAX - 1 ? n : PRIO_MAX - 1;
+}
 bool gui_process_start(GuiProcess* process, const char* const* argv, char* error, size_t size) {
     int output[2] = {-1, -1}, failure[2] = {-1, -1};
     int previous_status;
@@ -290,6 +302,7 @@ bool gui_process_start(GuiProcess* process, const char* const* argv, char* error
     if (fcntl(output[0], F_SETFL, O_NONBLOCK)) goto failed;
     long max_fd = sysconf(_SC_OPEN_MAX);
     if (max_fd < 0) max_fd = 1024;
+    int nice_to = process->low ? low_nice() : 0;
     fflush(NULL);
     pid_t pid = fork();
     if (pid < 0) goto failed;
@@ -300,6 +313,8 @@ bool gui_process_start(GuiProcess* process, const char* const* argv, char* error
         if (setsid() < 0 || null < 0 || dup2(null, STDIN_FILENO) < 0 || dup2(output[1], STDOUT_FILENO) < 0 ||
             dup2(output[1], STDERR_FILENO) < 0)
             goto child_failed;
+        /* low before it starts: every thread and process it makes takes the priority it has */
+        if (process->low && setpriority(PRIO_PROCESS, 0, nice_to) < 0) goto child_failed;
         if (null > STDERR_FILENO) close(null);
         if (output[1] > STDERR_FILENO) close(output[1]);
         /* Do not leak SDL/display descriptors into a game. Keep only the
@@ -419,6 +434,64 @@ GuiUsage gui_process_usage(GuiProcess* process) {
     usage.cpu_percent = gui_cpu_percent(&process->cpu_base, cpu, now);
     free(samples);
     return usage;
+}
+GuiUsage gui_process_usage_of(GuiProcess* process) {
+    GuiUsage usage = {0};
+    size_t count;
+    Sample* samples = snapshot(&count);
+    double cpu = 0;
+    if (!samples) return usage;
+    usage.available = true;
+    for (size_t i = 0; i < count; ++i)
+        if (process->pid && samples[i].session == process->pid) {
+            usage.memory_bytes += samples[i].resident;
+            cpu += samples[i].cpu;
+        }
+    usage.cpu_percent = gui_cpu_percent(&process->tree_base, cpu, seconds());
+    free(samples);
+    return usage;
+}
+#ifndef GUI_DRIVER_THREAD
+/* every thread of the tree at nice (Linux keeps it a thread's; the BSDs and macOS a process's): 0, else the first
+   errno the system gave, one gone meanwhile being none */
+static int tree_nice(const GuiProcess* process, int nice) {
+    size_t count;
+    Sample* samples = snapshot(&count);
+    int failed = 0;
+    if (!samples) return errno ? errno : ENOMEM;
+    for (size_t i = 0; i < count; ++i) {
+        if (samples[i].session != process->pid || !samples[i].live) continue;
+#ifdef __linux__
+        char path[64];
+        struct dirent* entry;
+        DIR* tasks;
+        snprintf(path, sizeof path, "/proc/%ld/task", (long)samples[i].pid);
+        if (!(tasks = opendir(path))) continue; /* gone */
+        while ((entry = readdir(tasks))) {
+            char* end;
+            long tid = strtol(entry->d_name, &end, 10);
+            if (*end || tid <= 0) continue;
+            if (setpriority(PRIO_PROCESS, (id_t)tid, nice) < 0 && errno != ESRCH && !failed) failed = errno;
+        }
+        closedir(tasks);
+#else
+        if (setpriority(PRIO_PROCESS, (id_t)samples[i].pid, nice) < 0 && errno != ESRCH && !failed) failed = errno;
+#endif
+    }
+    free(samples);
+    return failed;
+}
+#endif
+bool gui_process_low(GuiProcess* process, bool low, char* error, size_t size) {
+    process->low = low;
+#ifdef GUI_DRIVER_THREAD
+    if (low) snprintf(error, size, "%s", snx_tr("the driver runs on a thread of the app, at the app's priority"));
+    return !low;
+#else
+    int failed = process->pid ? tree_nice(process, low ? low_nice() : own_nice()) : 0;
+    if (failed) snprintf(error, size, "%s", strerror(failed));
+    return !failed;
+#endif
 }
 void gui_process_terminate(GuiProcess* process) {
     if (!process) return;
