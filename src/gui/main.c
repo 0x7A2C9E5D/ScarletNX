@@ -5346,6 +5346,9 @@ static void pad_load_mappings(App* app) {
     free(path);
 }
 static void render(App* app);
+#ifdef SNX_GUI_TOUR
+static void tour_shot(App* app);
+#endif
 /* two Joy-Cons one pad, or two, as the games take them (gamepad_joycon_pair, 1 when not picked): before SDL's gamepads
    start, which read it then */
 static void joycon_pairs(App* app) {
@@ -7198,6 +7201,9 @@ static void render(App* app) {
         draw_screen(app);
     if (app->cleaned_shown) render_files(app, 1); /* over the menu, or the App's rows it was started from */
     fades_draw(app);
+#ifdef SNX_GUI_TOUR
+    tour_shot(app);
+#endif
     SDL_RenderPresent(app->renderer);
 }
 /* the game's name as its run gave it, from the step that names it, for its recent game */
@@ -10169,6 +10175,134 @@ const char* snx_menu_language(int i, const char** name) {
     return snx_gui_languages[i].code;
 }
 #if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
+#ifdef SNX_GUI_TOUR
+/* A walk through the screens for the simulator, to see them as a phone draws them: SNX_TOUR_DIR names the folder it
+   writes a picture of each to, as the menu draws it, and the app ends after the last. Built only by a build that sets
+   SNX_GUI_TOUR (no release has it). The run is the driver's stand-in (process_posix.c's tour_driver), which prints a
+   made-up recompile slowly, so the run's screen, its questions and its end are the real ones */
+static struct {
+    const char* dir;
+    Uint64 at, deadline;
+    int step;
+    char want[64];
+} tour;
+static void tour_shot(App* app) {
+    SDL_Surface* surface;
+    char path[700];
+    if (!tour.want[0]) return;
+    surface = SDL_RenderReadPixels(app->renderer, NULL);
+    if (surface) {
+        snprintf(path, sizeof path, "%s/%s.bmp", tour.dir, tour.want);
+        SDL_SaveBMP(surface, path);
+        SDL_DestroySurface(surface);
+    }
+    tour.want[0] = 0;
+}
+static void tour_tick(App* app) {
+    Uint64 now = now_ms(app);
+    char file[700];
+    if (!tour.dir) {
+        tour.dir = getenv("SNX_TOUR_DIR");
+        if (!tour.dir) tour.dir = "";
+        tour.at = now + 3000;
+    }
+    if (!tour.dir[0] || now < tour.at || tour.want[0]) return;
+#define TOUR(name, wait) do { snprintf(tour.want, sizeof tour.want, "%s", name); tour.at = now + (wait); } while (0)
+    switch (tour.step++) {
+        case 0: TOUR("01-menu", 1500); break;
+        case 1: app->menu.selected = GUI_KEYS; TOUR("02-menu-keys-focused", 1200); break;
+        case 2:
+            app->menu.selected = GUI_SWITCH;
+            app->menu.view = GUI_LOAD_GAMES;
+            list_games(app);
+            layout(app);
+            TOUR("03-games", 1500);
+            break;
+        case 3:
+            app->menu.view = GUI_LOAD_KEYS;
+            layout(app);
+            TOUR("04-keys", 1500);
+            break;
+        case 4:
+            app->menu.view = GUI_LOAD_NONE;
+            open_settings(app);
+            layout(app);
+            TOUR("05-settings", 1500);
+            break;
+        case 5:
+            editor_key(app, GUI_SELECT);
+            layout(app);
+            TOUR("06-settings-group", 1500);
+            break;
+        case 6:
+            editor_key(app, GUI_CANCEL);
+            editor_key(app, GUI_DOWN);
+            editor_key(app, GUI_DOWN);
+            editor_key(app, GUI_SELECT);
+            layout(app);
+            TOUR("07-settings-group-2", 1500);
+            break;
+        case 7:
+            editor_key(app, GUI_CANCEL);
+            editor_key(app, GUI_CANCEL);
+            if (app->editing) leave_editor(app);
+            layout(app);
+            TOUR("08-menu-after-settings", 1200);
+            break;
+        case 8: { /* a run: the stand-in prints a recompile, a block every half second */
+            FILE* f;
+            snprintf(file, sizeof file, "%s/Stand-in Game.nsp", tour.dir);
+            f = fopen(file, "wb");
+            if (f) fclose(f);
+            setenv("SNX_TOUR_FAKE_RUN", "1", 1);
+            app->menu.selected = GUI_SWITCH;
+            launch(app, snx_strdup(file), false);
+            tour.at = now + 4000;
+            break;
+        }
+        case 9: TOUR("09-run-start", 5000); break;
+        case 10: TOUR("10-run-progress", 800); break;
+        case 11:
+            cancel(app); /* what a tap on the run does */
+            layout(app);
+            TOUR("11-run-abort-question", 1500);
+            break;
+        case 12: /* the first choice, Keep going */
+            ask_key(app, GUI_SELECT);
+            tour.deadline = now + 150000;
+            TOUR("12-run-keep-going", 1000);
+            break;
+        case 13: /* the stand-in ends after a minute and a half: wait for the menu to come back */
+            if ((app->menu.running || app->finished) && now < tour.deadline) {
+                --tour.step;
+                tour.at = now + 1000;
+            } else
+                TOUR("13-after-run", 1500);
+            break;
+        case 14:
+            snprintf(app->replace_line, sizeof app->replace_line, "0100F43008C44000 is already made. Recompile it over the old one?");
+            gui_confirm_open(&app->confirm, GUI_ASK_REPLACE, true);
+            TOUR("14-replace-question", 1500);
+            break;
+        case 15:
+            app->confirm.shown = false;
+            snprintf(app->room_line, sizeof app->room_line, "Needs about 4.3 GB, 1.2 GB free.");
+            gui_confirm_open(&app->confirm, GUI_ASK_ROOM, true);
+            TOUR("15-room-question", 1500);
+            break;
+        case 16:
+            app->confirm.shown = false;
+            say_failure(app, "The game's code cannot be loaded: iOS makes memory executable only for an attached "
+                             "debugger: enable JIT for this app (StikDebug, with universal.js assigned to it) before "
+                             "opening a game");
+            TOUR("16-error-box", 1500);
+            break;
+        case 17: app->confirm.shown = false; TOUR("17-menu-end", 1000); break;
+        default: app->menu.quit = true; break;
+    }
+#undef TOUR
+}
+#endif
 /* Move old files without the menu, to out: each entry and what it does or would, then how many; with apply, done.
    0, or 1 when one could not be moved; 2 when the folders cannot be found */
 static int migrate(const char* self, bool apply, FILE* out) {
@@ -10252,6 +10386,9 @@ int snx_gui_main(const char* self) {
         while (SDL_PollEvent(&e)) event(&app, &e);
         pads_repeat(&app);
         pump(&app);
+#ifdef SNX_GUI_TOUR
+        tour_tick(&app);
+#endif
 #ifdef SDL_PLATFORM_ANDROID
         if (!app.hidden)
 #endif

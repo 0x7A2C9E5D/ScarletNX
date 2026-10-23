@@ -207,9 +207,36 @@ GuiProcess* gui_process_create(void) {
 #ifdef GUI_DRIVER_THREAD
 /* LLVM's passes recurse deeply: a thread's default stack on iOS (512 KiB) is not enough */
 #define GUI_DRIVER_STACK ((size_t)64 << 20)
+#ifdef SNX_GUI_TOUR
+/* the driver's stand-in for the simulator's tour (main.c): a made-up recompile, a block every half second */
+static int tour_driver(void) {
+    int block;
+    printf("Extracting Stand-in Game.nsp\n");
+    fflush(stdout);
+    usleep(1200000);
+    printf("Extracted 3 NCAs, the program's 4 modules\nRecompiling Stand-in Game (4 modules)\n");
+    printf("Functions: 399891  instructions: 27210874\nLLVM: 302 code units and the module descriptor\n");
+    fflush(stdout);
+    for (block = 1; block <= 302; ++block) {
+        printf("  compiled block %d/303: code_%03d, 0x%X-0x%X, 1309 functions, 90006 instructions (1.6 s)\n", block,
+               block - 1, 0x8000000 + block * 0x5DC3C, 0x8000000 + (block + 1) * 0x5DC3C);
+        fflush(stdout);
+        usleep(250000);
+    }
+    printf("  compiled block 303/303: module, SnxModule descriptor, 2074958 entries (1.1 s)\n");
+    printf("LLVM module: 750.1 MB, 2074958 entries\nBuilt recompiled/0100F43008C44000/0100F43008C44000_code.snxobj\n");
+    printf("Ready 0100F43008C44000\n");
+    fflush(stdout);
+    return 0;
+}
+#endif
 static void* driver_thread(void* data) {
     GuiProcess* process = data;
+#ifdef SNX_GUI_TOUR
+    int status = getenv("SNX_TOUR_FAKE_RUN") ? tour_driver() : snx_driver(process->argc, process->argv);
+#else
     int status = snx_driver(process->argc, process->argv);
+#endif
     fflush(stdout);
     fflush(stderr);
     /* the process's own output back first, then the pipe's end: closing the writer is the menu's end of file */
