@@ -368,7 +368,7 @@ Extraction needs nothing beside the driver: hactool runs inside it. Recompilatio
 running full runtime; the tools-only build creates one in its checkout's `build/native-recomp`, or accepts
 `--runtime FILE`. A build tree's programs work in the same data folder as an installed copy's: the user's
 (`~/.local/share/scarletnx`, `%APPDATA%\scarletnx` on Windows), and on Linux the XDG config, state and cache folders
-hold its settings, logs and caches ([USAGE](USAGE.md#folders)). `--repo DIR` before the command names another data
+hold its settings, logs and caches ([USAGE](USAGE.md#folders)). `--data DIR` before the command names another data
 folder, `--build-dir DIR` another build tree.
 The menu (`SNX_BUILD_GUI`) needs Python 3 to build its languages (`scripts/build-languages.py`,
 [GUI](GUI.md#languages)). Python ≥3.12 is optional for `tools/*.py` diagnostics.

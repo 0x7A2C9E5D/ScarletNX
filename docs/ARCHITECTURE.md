@@ -97,7 +97,7 @@ the game's image read from that image.
 - `driver.c`: CLI dispatch only; `extract.c` and `recompile.c` own their workflows.
 - `container.c`: a dump opened with hactool, its keys loaded and its NCAs picked, shared by the extraction, the
   recompiler (a dump given to `-r`, its ExeFS read through `SnxExefsReader`) and the runtime's `fs.c`. Without
-  Extract game container, `fs.c` maps the dump `source=` names (else the one `<id>.source` links to) and serves `exefs/*` and the RomFS image from
+  Extract dump, `fs.c` maps the dump `source=` names (else the one `<id>.source` links to) and serves `exefs/*` and the RomFS image from
   it through hactool's storage chains (`snx_hac.h`'s `SnxHacFs`), the sections decrypted, an update's patch applied
   and compressed blocks expanded as they are read. Nothing is cached.
 - `src/nx/loader/loader.c`: NSO/NRO, LZ4, SHA-256, NPDM, MOD0, symbols/relocs/FDEs.

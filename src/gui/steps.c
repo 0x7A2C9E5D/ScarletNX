@@ -61,7 +61,7 @@ static void line(GuiSteps* steps, const char* s, uint64_t now) {
         const char* end = strstr(name, " (");
         begin(steps, SNX_TR_NOOP("RECOMPILE"), name, end ? (size_t)(end - name) : strlen(name), now);
     } else if (prefix(s, "Built ")) {
-        begin(steps, SNX_TR_NOOP("BUILT"), s + 6, strlen(s + 6), now);
+        begin(steps, SNX_TR_NOOP("BUILD"), s + 6, strlen(s + 6), now);
         current(steps)->state = GUI_STEP_DONE;
     } else if (prefix(s, "ScarletNX - "))
         begin(steps, SNX_TR_NOOP("LAUNCH"), s + 12, strlen(s + 12), now);

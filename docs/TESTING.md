@@ -45,7 +45,7 @@ Use the [Game report](https://github.com/scarletnx/ScarletNX/issues/new?template
 | Game | Its name, and its version or update if known |
 | What happens | The closest of: does not start, crashes, freezes, looks wrong, sounds wrong, controls, slow |
 | What you did and what you saw | Where in the game, what was pressed before, what you expected |
-| Log | The game's `.log` or the launcher's *Share log* file. Zip a log over 25 MB |
+| Log | The game's `.log` or the launcher's *Share Log* file. Zip a log over 25 MB |
 | Save | Optional. The zipped save folder |
 | Screenshots or video | Optional |
 

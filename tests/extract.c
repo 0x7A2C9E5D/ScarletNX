@@ -177,7 +177,7 @@ static int file_is(const char* dir, const char* name, const void* content, size_
     return same;
 }
 
-/* Extract game container off: the dump read in place, as the runtime and -r read it (container.h), mapped (here read
+/* Extract dump off: the dump read in place, as the runtime and -r read it (container.h), mapped (here read
    into memory) for the file systems to read from: the ExeFS's files, a file of the RomFS and the control.nacp. Nothing
    is written. 0, or 1 after saying what differed */
 static int in_place(const char* base, const SnxPaths* paths) {
@@ -407,26 +407,26 @@ int main(int argc, char** argv) {
         const char *mode, *says;
         int fails;
     } scenarios[] = {
-        {"nsp", "Left out 1 malformed key lines", 0},
+        {"nsp", "prod.keys: line 5 is not a key", 0},
         {"xci", "Done: ", 0},
         {"xci-keyarea", "Done: ", 0},
         {"renamed", "Done: ", 0}, /* an NSP named .XCI: the header decides */
-        {"homekeys", "Left out 1 malformed key lines", 0},
-        {"explicit", "Left out 1 malformed key lines", 0},
+        {"homekeys", "prod.keys: line 5 is not a key", 0},
+        {"explicit", "prod.keys: line 5 is not a key", 0},
         {"named", "Done: ", 0},
         {"no-control", "The game keeps the name of its file: it has no Control NCA", 0},
         {"unsupported", "(&).NSP is not an NSP/DNSP (PFS0) or an XCI/DXCI", 1},
-        {"encrypted-no-keys", "Encrypted content needs prod.keys", 1},
+        {"encrypted-no-keys", "encrypted content needs prod.keys", 1},
         {"explicit-missing-keys", "prod.keys is not a file", 1},
-        {"unmatched-update", "Update has no Program NCA matching the selected base game", 1},
+        {"unmatched-update", "has no Program NCA of the game 0100000000AB0000", 1},
         {"update-alone", "is an update, which goes over its game", 1},
         {"dlc-alone", "Extracting the DLC 0100000000AB1001", 0},
         {"dlc-base", "Extracting the DLC 0100000000AB1002", 0},
-        {"dlc-other", "The DLC is not the selected base game's", 1},
+        {"dlc-other", "is not a DLC of the game", 1},
         {"dlc-meta", "add-on content (a DLC) 0100000077770001, version 0, of the game 0100000000AB0000", 0},
         {"dlc-meta-other", "belongs to the game 0100000000AB2000, not to the selected base game 0100000000AB0000", 1},
-        {"no-main", "Extracted exefs has no main", 1},
-        {"existing", "Output already contains exefs", 1},
+        {"no-main", "the exefs has no main", 1},
+        {"existing", "output already contains exefs", 1},
         {"hactool-exit", "hactool stopped on the dump", 1},
         {"inplace-nsp", "Read in place", 0},
         {"inplace-xci", "Read in place", 0},

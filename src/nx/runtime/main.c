@@ -218,7 +218,7 @@ static const SnxModule* load_module(const char* path) {
     if (snx_module_static) return snx_module_static();
     if (!snx_is_file(path))
         fatal("Cannot find the recompiled code: %s. A copy of the runtime runs the game it is named after, with "
-              "that code beside it, or --game=PATH names the game (--game=games/Game)",
+              "that code beside it, or --game=PATH names the game (--game=recompiled/Game)",
               path);
 #ifdef MODULE_PACK
     m = load_pack(path);
@@ -755,6 +755,10 @@ int snx_main(int argc, char** argv) {
     if (argc == 2 && !strcmp(argv[1], "--settings=recompile")) {
         ini_list(g_launch_sections, g_launch_sections_count);
         return 0;
+    }
+    if (argc == 2 && !strncmp(argv[1], "--settings=", 11)) {
+        fprintf(stderr, "scarletnx: %s: not --settings (the game's) or --settings=recompile\n", argv[1]);
+        return 2;
     }
     if (g_opt_gdb && snx_gdb_start(g_opt_gdb_stop, SNX_GDB_PORT)) return 2; /* before any other thread */
     game = game_option(argc, argv);

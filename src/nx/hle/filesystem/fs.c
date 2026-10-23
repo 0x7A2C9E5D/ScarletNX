@@ -118,7 +118,7 @@ static void dump_map(SnxDump* dump, PFileMap* base_map, PFileMap* addon_map, con
     snx_hac_on_exit(NULL, NULL);
 }
 
-/* Extract game container off: a data folder without an ExeFS of its own reads its ExeFS and RomFS from the dump the
+/* Extract dump off: a data folder without an ExeFS of its own reads its ExeFS and RomFS from the dump the
    game was made from, mapped read-only for the whole run: source= in its .ini, else the dump <folder>/<name>.source
    beside <name>_data links to, as older versions recorded it; a line names both when neither is. Nothing of it is
    written anywhere. The keys are where the driver finds them, in the data folder games/ is in or in ~/.switch.

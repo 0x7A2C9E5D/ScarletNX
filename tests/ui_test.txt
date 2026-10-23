@@ -15,7 +15,7 @@
 		[button]"Load 3DS CIA" {
 			key = alt-f4
 		}
-		[button]"Open data folder" {
+		[button]"Open Data Folder" {
 			for-platform = android
 		}
 		[button]"Settings" {

@@ -12,7 +12,7 @@ What an older version used that this one replaced, how a run tells you, and how 
   never dropped in silence; a deprecated option still works.
 - **Each run says so** where you read it: stderr for the drivers, the game's `.log` and stderr for the runtime, the
   launcher's box for files an older version left. The line names what replaced it.
-- **You remove it**: a setting by hand or with the launcher's **Settings > App > Clean old settings**, which takes
+- **You remove it**: a setting by hand or with the launcher's **Settings > App > Clean Old Settings**, which takes
   the `[Deprecated]` section out of every game's `.ini` the launcher reaches (the games' config folder, `games/` and
   the libraries of Settings > App > Folders); a file an older version left, by moving it where the line says.
 - **It is listed below** until the code that reads it goes, which is a change of its own named in the table.
@@ -22,7 +22,7 @@ A game's `.ini` keeps its deprecated keys last, under what became of each:
 ```ini
 [Deprecated]
 ; keys an older version used, which do nothing now (docs/DEPRECATIONS.md): delete them, or use Settings > App >
-;   Clean old settings in the launcher
+;   Clean Old Settings in the launcher
 ; renderer: Vulkan is the only renderer
 renderer=opengl
 ```
@@ -39,6 +39,11 @@ renderer=opengl
 | `.ini` key `gamepad_buttons` (A B X Y by position, by label or the map) | Swap A/B in place of the A B X Y presets | `gamepad_swap_ab`; `gamepad_map` always applies | the same |
 | `.ini` key `cpu_fallback` (the interpreter or the JIT for code the recompiler missed) | [recompiler] Replace the interpreter with the runtime JIT | nothing: the runtime JIT compiles that code | under `[Deprecated]`, named once a run |
 | `--keep-c` | Replace Python pipeline with a C90 driver | `--keep-ir` | still taken, said on stderr each time |
+| `--recomp` | [cli] the options' names | `--recompile` | still taken, said on stderr once a run |
+| `--repo DIR` | [cli] the options' names | `--data DIR` | still taken, said on stderr once a run |
+| `--debug`, `--skip --skip` | [cli] the options' names | `--no-setup` | still taken, said on stderr once a run |
+| `-r`'s `-o`, `--out`, `--outname` NAME | [cli] the options' names | `--name NAME` | still taken, said on stderr once a run |
+| `--interp-only` | [cli] the options' names | `--jit-only` | still taken, said on stderr once a run |
 | An installed copy's files in `~/.local/share/scarletnx` on Linux: `gui/last-run.log`, `gui/recent.txt`, `games/<Game>.ini`, `games/<Game>.log`, `games/threads.txt`, `games/shader_cache/vk_pipelines.bin`, `work/` | #212 | the config, state and cache folders ([USAGE](USAGE.md#folders)) | the launcher lists their folders as it opens |
 | A game laid out beside the others: `games/<Game>`, `<Game>_code.so`, `<Game>.abi`, `<Game>_data/`, `<Game>.ini`, `<Game>.log` | [driver, runtime, gui] Keep each game in a folder of its own | `games/<id>/`, its settings, log and caches in their folders ([USAGE](USAGE.md#folders)) | it runs where it is, each run naming its folder now; the launcher lists it as it opens |
 | The menu's `gui/` in the data folder (`~/.local/share/scarletnx/gui/`, `%APPDATA%\scarletnx\gui\`) and in Linux's state folder | [runtime, driver, gui] Split config, state and cache off Linux too | `settings.ini`, `app.ini`, `folders.txt`, `gamecontrollerdb.txt` in the config folder; `recent.txt`, `last-run.log` in the state folder | the launcher lists the folder as it opens |
@@ -52,7 +57,7 @@ renderer=opengl
 | A line of `folders.txt` with a path alone (before the recompiled and the dumps libraries) | [gui] A folder of the player's is in the recompiled or the dumps library | `recompiled <path>` or `dumps <path>`: each such folder goes in the library of what it holds, in both for both, in the dumps one with neither | the launcher as it opens, naming each folder with its library; `folders.txt` is written again so, once |
 | The data folder's `games/` of recompiled games, `[folders] games =` in `app.ini`, the CMake option `SNX_GAMES_DIR` | [gui] Recompiled games go to recompiled/, games/ still read | `recompiled/`, the dumps in `dumps/` beside it; `[folders] recompiled =`; `SNX_RECOMPILED_DIR` | the launcher lists `games/` as it opens and still lists and runs its games, the driver says so on stderr; `app.ini` is written again once, said; CMake says so as it configures |
 
-Settings > App > Move old files in the launcher, or `scarletnx --migrate=yes`, moves the rest of these, an entry at a
+Settings > App > Move Old Files in the launcher, or `scarletnx --migrate=yes`, moves the rest of these, an entry at a
 time, each to the folder its line names; `scarletnx --migrate` says first what would move ([USAGE](USAGE.md#folders)).
 
 To move a game an older version laid out beside the others: run it from its dump once, which makes `games/<id>/`;

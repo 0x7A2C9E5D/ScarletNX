@@ -227,6 +227,17 @@ void gui_settings_reset(GuiSettings* s, int row) {
     for (i = first; i < end && i < s->count; ++i) set(s, i, s->values[i].start);
     gui_settings_sync(s);
 }
+int gui_settings_at_start(const GuiSettings* s, int row) {
+    int i, first = row, end = row + 1;
+    if (row < 0 || row >= s->count) return 1;
+    if (s->values[row].kind) { /* a page's or an All's: their rows */
+        first = s->values[row].first;
+        end = first + s->values[row].count;
+    }
+    for (i = first; i < end && i < s->count; ++i)
+        if (strcmp(kept(s, i), s->values[i].start)) return 0;
+    return 1;
+}
 int gui_settings_changed(const GuiSettings* s) {
     int i, n = 0;
     for (i = 0; i < s->count; ++i)

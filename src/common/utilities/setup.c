@@ -19,7 +19,7 @@
 const int snx_setup_since[SNX_SETUP_STEPS] = {1, 1, 1, 1, 1};
 const SnxNotice snx_notices[SNX_NOTICES] = {
     {SNX_TR_NOOP("Game settings"), SNX_TR_NOOP("removed or renamed keys in a game's .ini"),
-     SNX_TR_NOOP("under [Deprecated]: Clean old settings takes them"), "`.ini` key", SNX_NOTICE_ALL},
+     SNX_TR_NOOP("under [Deprecated]: Clean Old Settings takes them"), "`.ini` key", SNX_NOTICE_ALL},
     {SNX_TR_NOOP("An option"), "--keep-c", "--keep-ir", "`--keep-c`", SNX_NOTICE_ALL},
     {SNX_TR_NOOP("An installed copy's files"), "~/.local/share/scarletnx: gui/, games/<Game>.ini, work/",
      SNX_TR_NOOP("the scarletnx folders of ~/.config, ~/.local/state and ~/.cache"), "An installed copy's files",
@@ -46,7 +46,9 @@ const SnxNotice snx_notices[SNX_NOTICES] = {
     {SNX_TR_NOOP("A theme's lists"), SNX_TR_NOOP("[body] gap and scroll in its theme.ini"),
      SNX_TR_NOOP("nothing: ui.txt lays out every list"), "A theme's `[body] gap` and `[body] scroll`", SNX_NOTICE_ALL},
     {SNX_TR_NOOP("A theme's screens"), SNX_TR_NOOP("[head] place, [tips] place and [body] sizing in its theme.ini"),
-     SNX_TR_NOOP("nothing: ui.txt lays out every screen"), "A theme's `[head] place`", SNX_NOTICE_ALL}};
+     SNX_TR_NOOP("nothing: ui.txt lays out every screen"), "A theme's `[head] place`", SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("Options"), "--recomp, --repo, --debug, -r --out, --interp-only",
+     "--recompile, --data, --no-setup, -r --name, --jit-only", "[cli] the options' names", SNX_NOTICE_ALL}};
 int snx_notice_here(int notice) {
     int systems = snx_notices[notice].systems;
 #if defined(__ANDROID__)
@@ -153,9 +155,12 @@ int snx_setup_options(int argc, char** argv, char* why, size_t why_size) {
             while (i < argc) argv[n++] = argv[i++];
             break;
         }
-        if (!strcmp(argv[i], "--debug"))
+        if (!strcmp(argv[i], "--no-setup"))
             debug = 1;
-        else if (!strcmp(argv[i], "--skip"))
+        else if (!strcmp(argv[i], "--debug")) {
+            snx_option_renamed("--debug", "--no-setup");
+            debug = 1;
+        } else if (!strcmp(argv[i], "--skip"))
             ++skips;
         else if (!strcmp(argv[i], "--setup"))
             snx_setup_again = 1;
@@ -164,13 +169,14 @@ int snx_setup_options(int argc, char** argv, char* why, size_t why_size) {
     }
     argv[n] = NULL;
     if (skips == 1) {
-        snprintf(why, why_size, "--skip leaves the setup out given twice, --skip --skip, as --debug does");
+        snprintf(why, why_size, "--skip leaves the setup out given twice, --skip --skip, which is --no-setup now");
         return -1;
     }
+    if (skips) snx_option_renamed("--skip --skip", "--no-setup");
     snx_setup_skip = debug || skips;
     if (snx_setup_skip && snx_setup_again) {
         snprintf(why, why_size, "--setup goes through the setup, and %s leaves it out: one or the other",
-                 debug ? "--debug" : "--skip --skip");
+                 debug ? "--no-setup" : "--skip --skip");
         return -1;
     }
     return n;

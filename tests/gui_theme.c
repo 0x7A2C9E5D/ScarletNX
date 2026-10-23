@@ -270,10 +270,10 @@ int main(void) {
     { /* every line not taken said, with the base's value it keeps: not a colour, a word or a flag, no key; a line with no
          = is no setting */
         char want[160];
-        snprintf(want, sizeof want, "[colors] ink = #12345 is not a colour as #RRGGBB: it keeps #%02X%02X%02X",
+        snprintf(want, sizeof want, "[colors] ink = #12345 is not a color as #RRGGBB: it keeps #%02X%02X%02X",
                  yorha->ink.r, yorha->ink.g, yorha->ink.b);
-        assert(strstr(said, want) && strstr(said, "[colors] soft = # 12 34 is not a colour as #RRGGBB: it keeps #"));
-        assert(strstr(said, "[colors] focus = #GG0000 is not a colour as #RRGGBB: it keeps #"));
+        assert(strstr(said, want) && strstr(said, "[colors] soft = # 12 34 is not a color as #RRGGBB: it keeps #"));
+        assert(strstr(said, "[colors] focus = #GG0000 is not a color as #RRGGBB: it keeps #"));
         assert(strstr(said, "[head] style = none is not plain or bar: it keeps plain"));
         snprintf(want, sizeof want, "[head] rule = maybe is not true or false: it keeps %s",
                  yorha->head_rule ? "true" : "false");

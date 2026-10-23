@@ -438,10 +438,10 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     memset(&codegen, 0, sizeof(codegen));
     memset(&q, 0, sizeof(q));
     memset(&linked, 0, sizeof(linked));
-    if (!loaded->module_count) return snx_error("No modules to generate");
+    if (!loaded->module_count) return snx_error("no modules to generate");
     if (snx_ir_init(error, sizeof(error))) return snx_error("%s", error);
     if (options->jit_cache && build->triple) {
-        snx_error("JIT cache: a module for another machine (--target) takes none: its units are this host's");
+        snx_error("--jit-cache cannot go with --target %s: a JIT cache is this host's", build->triple);
         goto done;
     }
     if (options->jit_cache) {
@@ -562,16 +562,16 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     if (build->triple) {
         linked.data = snx_objects_pack(inputs, n, &linked.size);
         if (!linked.data) {
-            snx_error("Packing failed: out of memory");
+            snx_error("packing failed: out of memory");
             goto done;
         }
     } else if (snx_link(inputs, n, exports, export_count, base_name(build->output), &linked, error, sizeof(error))) {
-        snx_error("Linking failed: %s", error);
+        snx_error("linking failed: %s", error);
         goto done;
     }
     tmp = snx_format("%s.tmp", build->output);
     if (snx_write_file(tmp, linked.data, linked.size) || snx_replace(tmp, build->output)) {
-        snx_error("Linking failed: cannot write %s", build->output);
+        snx_error("linking failed: cannot write %s", build->output);
         if (snx_is_file(tmp)) snx_remove_tree(tmp);
         goto done;
     }

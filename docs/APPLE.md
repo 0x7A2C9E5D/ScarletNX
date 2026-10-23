@@ -22,7 +22,7 @@ same shape as Android's `MainActivity` and `src/gui/android.c`:
 `ScarletNX.app` is the desktop program in a bundle: `scarletnx` in `Contents/MacOS`, the themes and the
 licenses in `Contents/share`, where an installed copy looks for them. It works as on Linux. The menu extracts and
 recompiles through the driver as a child process, with SDL's own file and folder dialogs. Its data folder is
-`~/Library/Application Support/scarletnx`. *Share log* saves the log and selects it in a Finder window. The app is
+`~/Library/Application Support/scarletnx`. *Share Log* saves the log and selects it in a Finder window. The app is
 signed ad hoc, as Apple silicon runs no unsigned code. A copy from a download may need *Open* from the Finder's menu
 the first time.
 
@@ -45,7 +45,7 @@ menu's driver:
   copied into it first. The thread has a 64 MiB stack, which LLVM's passes need.
 - **A game** runs in the app's process once the menu closes (`src/nx/runtime/entry.c`): the runtime starts once per
   process, so the app ends with the game.
-- **Share log** opens the share sheet with `scarletnx.log`.
+- **Share Log** opens the share sheet with `scarletnx.log`.
 - **Logs.** Everything the app prints goes to `logs/scarletnx-console.log` in its Documents, after a banner with the
   device, the system and the limits the app has, and a fatal error is also written to `logs/scarletnx-error.log`. A
   phone shows no console, so these are what to read when a run fails.
@@ -74,7 +74,7 @@ pick into `dumps/`, then makes the game in `recompiled/`. Pick them from whereve
    LocalDevVPN, give StikDebug the pairing file (SideStore keeps one: *Storage Explorer*,
    `ALTPairingFile.mobiledevicepairing`), hold ScarletNX in StikDebug's list and *Assign Script* `universal.js`. The
    runtime checks for the debugger first and says what to enable when there is none.
-3. **Add your keys.** Open ScarletNX, *Setup device keys*, and pick the `prod.keys` of your Switch.
+3. **Add your keys.** Open ScarletNX, *Install Keys*, and pick the `prod.keys` of your Switch.
 4. **Prepare the game.** In *Games*, pick the `.nsp` or `.xci` and prepare it. The app extracts it and writes
    `recompiled/<id>/` with `<id>_code.snxobj` and `<id>_data/`. 64-bit games only. Keep the app in the foreground
    until it ends: iOS stops its GPU and its threads in the background.

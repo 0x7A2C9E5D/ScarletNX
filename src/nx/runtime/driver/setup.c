@@ -141,7 +141,7 @@ static int language(Ask* a, int* picked) {
     const char* name;
     int count = 0, now, rc;
     char* set = app_value(a, "app", "language");
-    heading(a, "Language (the launcher's)");
+    heading(a, "Language");
     fputs(" ", a->out);
     while (snx_menu_language(count, &name)) {
         fprintf(a->out, " %d) %s", count + 1, name);
@@ -162,7 +162,7 @@ static int install(Ask* a) {
     static const char* const names[] = {"settings", "data", "logs", "caches"};
     char *portable = snx_portable_dir(a->program_dir), path[SETUP_LINE];
     int i, choice, rc = 0;
-    heading(a, "Install type");
+    heading(a, "Install Type");
     fputs("  Installed:", a->out);
     for (i = 0; i < 4; ++i) {
         char* dir = snx_menu_dir(NULL, kinds[i]); /* Logs and Caches as Folders picked them */
@@ -198,31 +198,39 @@ static int folders(Ask* a) {
     char line[SETUP_LINE], why[SETUP_LINE + 64], *at;
     size_t size;
     int choice, rc = 0;
-    heading(a, "Folders (the launcher's)");
+    heading(a, "Folders");
     for (;;) {
-        games = app_value(a, "folders", "games");
-        if (!games) games = snx_path_join(a->data, "games");
+        /* recompiled = as the launcher reads it; games = as an older version wrote it */
+        games = app_value(a, "folders", "recompiled");
+        if (!games || !games[0]) {
+            free(games);
+            games = app_value(a, "folders", "games");
+        }
+        if (!games || !games[0]) {
+            free(games);
+            games = snx_recompiled_dir(a->data);
+        }
         shown(games, line, sizeof line);
-        fprintf(a->out, "  Games: %s\n  Dumps:", line);
+        fprintf(a->out, "  Recompiled: %s\n  Dumps:", line);
         text = list && snx_is_file(list) ? (char*)snx_read_file(list, &size) : NULL;
         fputs(text && text[0] ? "\n" : " none yet\n", a->out);
         for (at = text; at && *at; at += strcspn(at, "\n") + (at[strcspn(at, "\n")] != 0))
             fprintf(a->out, "    %.*s\n", (int)strcspn(at, "\n"), at);
         free(text);
         free(games);
-        fputs("  1) Keep  2) Change games folder  3) Add dumps folder\n", a->out);
+        fputs("  1) Keep  2) Change recompiled folder  3) Add dumps folder\n", a->out);
         if (choose(a, 3, 1, &choice)) {
             rc = 1;
             break;
         }
         if (choice == 1) break;
-        if (folder_answer(a, choice == 2 ? "Games folder" : "Dumps folder", &picked)) {
+        if (folder_answer(a, choice == 2 ? "Recompiled folder" : "Dumps folder", &picked)) {
             rc = 1;
             break;
         }
         if (choice == 2 && snx_folder_unfit(picked, 1))
             fprintf(a->out, "  Not changed: %s %s\n", picked, snx_folder_unfit(picked, 1));
-        else if (choice == 2 ? !app || snx_ini_put(app, "folders", "games", picked, why, sizeof why)
+        else if (choice == 2 ? !app || snx_ini_put(app, "folders", "recompiled", picked, why, sizeof why)
                              : !list || snx_lines_add(list, picked, why, sizeof why))
             fprintf(a->out, "  %s\n", app && list ? why : "No config folder: no home folder names one");
         free(picked);
@@ -275,7 +283,7 @@ static int user(Ask* a) {
     uint64_t uid[2];
     int i, yes = 1, saves, rc = 0;
     if (!path) {
-        heading(a, "First user");
+        heading(a, "First User");
         fputs("  No data folder: no home folder names one\n", a->out);
         free(users);
         return 1;
@@ -292,7 +300,7 @@ static int user(Ask* a) {
         }
         if (yes_no(a, "Overwrite? (users.ini.old keeps it)", &yes)) rc = 1;
     } else
-        heading(a, "First user");
+        heading(a, "First User");
     games = snx_path_join(a->data, "games");
     saves = !rc && yes ? snx_setup_first_uid(games, uid) : 0;
     free(games);

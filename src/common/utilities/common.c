@@ -110,11 +110,22 @@ int snx_path_format(char* out, size_t size, const char* fmt, ...) {
     snx_path_native(out);
     return 0;
 }
-/* snx_error's sink, snx_error_sink's: NULL for stderr; and the kinds whose folder app.ini names wrongly, said once */
+/* snx_error's sink, snx_error_sink's: NULL for stderr; the kinds whose folder app.ini names wrongly, and the options
+   given by an older name, said once */
 static struct {
     void (*error_sink)(const char* line);
     unsigned said_kinds;
+    const char* renamed[16];
+    size_t renamed_count;
 } g_common;
+void snx_option_renamed(const char* old, const char* now) {
+    size_t i;
+    for (i = 0; i < g_common.renamed_count; ++i)
+        if (!strcmp(g_common.renamed[i], old)) return;
+    if (g_common.renamed_count < sizeof g_common.renamed / sizeof *g_common.renamed)
+        g_common.renamed[g_common.renamed_count++] = old;
+    snx_error("%s is %s now: this run takes it as %s (docs/DEPRECATIONS.md)", old, now, now);
+}
 
 void snx_error_sink(void (*sink)(const char* line)) {
     g_common.error_sink = sink;
@@ -1068,7 +1079,8 @@ const SnxGameFile snx_game_files[SNX_GAME_FILES] = {{".log", SNX_USER_STATE},
 char* snx_work_dir(const char* data_dir) {
     char *old = snx_path_join(data_dir, "work"), *work = snx_user_path(old, SNX_USER_CACHE);
     if (snx_left_behind(old, work))
-        printf("%s was left by an older version: this one keeps extractions in %s\n", old, work);
+        printf("scarletnx: %s was left by an older version: this one keeps it in %s (docs/DEPRECATIONS.md)\n", old,
+               work);
     free(old);
     return work;
 }
@@ -1091,8 +1103,8 @@ void snx_recompiled_left(const char* data_dir) {
     char *old = snx_path_join(data_dir, "games"), *now = snx_recompiled_dir(data_dir);
     if (old && now && snx_left_behind(old, now))
         fprintf(stderr,
-                "scarletnx: %s was left by an older version: this one makes games in %s, and still runs the ones "
-                "in it until they are moved there (docs/DEPRECATIONS.md)\n",
+                "scarletnx: %s was left by an older version: new games go to %s, and the ones in it still run until "
+                "they are moved there (docs/DEPRECATIONS.md)\n",
                 old, now);
     free(old);
     free(now);

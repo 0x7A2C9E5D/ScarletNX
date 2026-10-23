@@ -547,7 +547,7 @@ int snx_codegen_analyze(SnxCodegen* codegen, const SnxCodeImage* modules, size_t
         qsort(codegen->functions, codegen->function_count, sizeof(*codegen->functions), compare_function);
     leaders(codegen, &extra, &hint_set);
     if (!quiet)
-        printf("Functions: %lu  instructions: %lu\n", (unsigned long)codegen->function_count,
+        printf("%lu functions, %lu instructions\n", (unsigned long)codegen->function_count,
                (unsigned long)codegen->instruction_count);
     free(work.values);
     free(ranges);

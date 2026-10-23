@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* Clean old settings (src/gui/clean.c): a game's .ini without its [Deprecated] section and nothing else changed, the
+/* Clean Old Settings (src/gui/clean.c): a game's .ini without its [Deprecated] section and nothing else changed, the
    .ini files of a folder, and an entry for each file, done or not */
 #include "gui/clean.h"
 #include "common/utilities/common.h"
@@ -54,7 +54,7 @@ int main(void) {
     const char* game =
         "[Display]\nfullscreen=1\n\n[Other]\nlanguage=en\n\n"
         "[Deprecated]\n; keys an older version used, which do nothing now (docs/DEPRECATIONS.md): delete "
-        "them, or use Settings > App >\n;   Clean old settings in the launcher\n"
+        "them, or use Settings > App >\n;   Clean Old Settings in the launcher\n"
         "; renderer: Vulkan is the only renderer\nrenderer=opengl\n; touch_controls: now controls\n"
         "touch_controls=1\n";
     assert(!strcmp(cleaned(game), "[Display]\nfullscreen=1\n\n[Other]\nlanguage=en\n"));
@@ -121,9 +121,9 @@ int main(void) {
     assert(gui_clean_inis(&done, games) == 3 && done.count == 3 && done.done == 3);
     {
         const char* list = entries(&done, games);
-        char *first = native(snx_strdup("+/First.ini|[Deprecated] taken out\n")),
-             *second = native(snx_strdup("+/Second.INI|[Deprecated] taken out\n")),
-             *own = native(snx_strdup("+/0100ABCD12345000/0100ABCD12345000.ini|[Deprecated] taken out\n"));
+        char *first = native(snx_strdup("+/First.ini|[Deprecated] removed\n")),
+             *second = native(snx_strdup("+/Second.INI|[Deprecated] removed\n")),
+             *own = native(snx_strdup("+/0100ABCD12345000/0100ABCD12345000.ini|[Deprecated] removed\n"));
         assert(strstr(list, first) && strstr(list, second) && strstr(list, own));
         free(first);
         free(second);
@@ -190,7 +190,7 @@ int main(void) {
         gui_cleaned_free(&done);
         assert(!gui_cleaned_entry(NULL, &ok, file, what, sizeof file));
     }
-    /* Move old files: each entry into the new folder, one already there left and said; nothing touched without
+    /* Move Old Files: each entry into the new folder, one already there left and said; nothing touched without
        apply, the new folder made with it, the old one gone once empty; only the entries named; a file by its name */
     {
         char *old = snx_path_join(root, "old"), *now = snx_path_join(root, "now"), *base = snx_path_join(root, "");
@@ -221,7 +221,7 @@ int main(void) {
         assert(!snx_remove_tree(moved));
         assert(gui_move_entries(&done, old, now, NULL, true) == 1 && !snx_path_exists(old) && snx_is_file(moved));
         {
-            char* said = native(snx_format("+old/a|Moved to %s/now/a\n+old|Taken away: empty now\n", root));
+            char* said = native(snx_format("+old/a|Moved to %s/now/a\n+old|Removed: it was empty\n", root));
             assert(!strcmp(entries(&done, base), said));
             free(said);
         }

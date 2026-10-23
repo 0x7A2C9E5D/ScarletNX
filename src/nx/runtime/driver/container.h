@@ -32,6 +32,7 @@ typedef struct {
        update's when it has one, a DLC's Data NCA (aoc), and the HtmlDocument NCA, the offline pages the web applet
        shows (the update's when it has one; found 0 without a content meta naming it) */
     SnxNcaRef program, patch, control, aoc, html;
+    const char* opened[4]; /* the files of the containers opened, by their index, which the messages name */
 } SnxDump;
 
 /* prod.keys or title.keys: given, else in repo (NULL for none), else in ~/.switch; the path in repo when it is in

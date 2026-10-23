@@ -209,8 +209,8 @@ int main(void) {
         assert(found && !strcmp(found, made));
         free(found);
         said = recompiled_said(dir, file);
-        line = snx_format("scarletnx: %s was left by an older version: this one makes games in %s, and still runs the "
-                          "ones in it until they are moved there (docs/DEPRECATIONS.md)\n",
+        line = snx_format("scarletnx: %s was left by an older version: new games go to %s, and the ones in it still "
+                          "run until they are moved there (docs/DEPRECATIONS.md)\n",
                           old_games, new_games);
         assert(!strcmp(said, line) && snx_is_dir(made));
         free(line);

@@ -824,6 +824,7 @@ add_test(NAME hid_motion COMMAND snx-test-hid-motion)
 
 add_executable(snx-test-startup startup_options.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/startup.c")
 snx_test_target(snx-test-startup 99)
+target_link_libraries(snx-test-startup PRIVATE scarletnx-common) # an option's older name said (snx_option_renamed)
 if(SNX_TRACY)
     # startup.c must see SNX_TRACY so its Tracy flag checks match the runtime.
     target_compile_definitions(snx-test-startup PRIVATE SNX_TRACY=1)
