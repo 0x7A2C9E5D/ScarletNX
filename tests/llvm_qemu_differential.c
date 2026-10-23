@@ -22,6 +22,7 @@
 #include "common/utilities/common.h"
 #include "common/cpu/aarch64/cpu.h"
 #include "common/cpu/recompiler/llvm/ir.h"
+#include "common/cpu/recompiler/llvm/ir_ldst.h"
 #include "common/cpu/recompiler/llvm/link.h"
 #include "llvm_qemu_words.h"
 #include "qemu_ref/qemu_ref.h"
@@ -737,9 +738,17 @@ int main(int argc, char** argv) {
             for (k = 0; k < it->nwords; ++k) {
                 char name[32];
                 unsigned long before = ir->fallbacks;
+                SnxA64Insn max;
+                SnxU64 features = 0;
                 sprintf(name, "S_%lu", (unsigned long)nsteps);
-                if (snx_a64_decode(it->words[k])->kind == SNX_FLOW_UNDEF) it->skip = 1;
-                fns[nsteps] = snx_ir_static_step(ir, it->words[k], item_pc(it) + 4 * k, 0, name);
+                /* the load/store emitters (ir_ldst.c) implement the LSE and RCpc atomics too: a word the Switch lacks
+                   that they emit runs with max's features, against QEMU's -cpu max */
+                if (snx_a64_decode_word(it->words[k], SNX_A64_TARGET_MAX, &max) != SNX_A64_OP_UNDEF &&
+                    snx_ir_ldst_handles(max.op) && (max.feature & ~(SnxU64)SNX_A64_TARGET_SWITCH))
+                    features = SNX_A64_TARGET_MAX;
+                else if (snx_a64_decode(it->words[k])->kind == SNX_FLOW_UNDEF)
+                    it->skip = 1;
+                fns[nsteps] = snx_ir_static_step(ir, it->words[k], item_pc(it) + 4 * k, features, name);
                 LLVMSetVisibility(fns[nsteps++], LLVMHiddenVisibility);
                 if (ir->fallbacks != before) {
                     it->skip = 1;
