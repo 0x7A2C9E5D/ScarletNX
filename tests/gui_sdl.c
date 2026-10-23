@@ -2444,6 +2444,21 @@ int main(int argc, char** argv) {
             snprintf(start, sizeof start, "- %-11s %c", "Data", app.data_dir[0]);
             shows(&app, start, yellow);
         }
+        { /* what a row is at its end; with no room for it beside the folder whole, it goes and the folder stays */
+            char line[1100];
+            int labels = folder_labels(&app), r = FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_DATA);
+            int whole = gui_text_cols(app.theme.marker) + labels + 1 + gui_text_cols(app.data_dir);
+            size_t n;
+            assert(!strcmp(app.app_form.folder[r], "default"));
+            for (int extra = 9; extra <= 40; extra += 31) {
+                form_line(&app, &app.editor, r, labels, whole + extra, line, sizeof line);
+                n = strlen(line);
+                assert(gui_text_cols(line) == whole + extra && n > 7 && !strcmp(line + n - 7, "default") &&
+                       strstr(line, app.data_dir));
+            }
+            form_line(&app, &app.editor, r, labels, whole + 8, line, sizeof line);
+            assert(strstr(line, app.data_dir) && !strstr(line, "default"));
+        }
         { /* a click on a row takes it; one on a group's title, nothing */
             GuiRect b;
             b = form_row_box(&app, &f, true,

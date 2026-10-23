@@ -6241,13 +6241,19 @@ static void form_line(App* app, const GuiEditor* e, int r, int labels, int room,
     } else
         gui_editor_value(e, r, value, sizeof value);
     if (k && e->keys == app->folder_keys && (path = folder_row_path(app, r)) != NULL) {
-        /* its folder, cut in its middle (whole under the boxes), then what it is */
+        /* its folder, then what it is at the row's end; with no room for both the folder stays whole and what it is
+           goes, and one too long alone is cut in its middle (whole under the boxes) */
         char state[64], cut[300];
-        int fit;
+        int left = room - gui_text_cols(app->theme.marker) - labels - 1, cols = gui_text_cols(path), gap;
         snprintf(state, sizeof state, "%s", value);
-        fit = room - gui_text_cols(app->theme.marker) - labels - 1 - (state[0] ? gui_text_cols(state) + 2 : 0);
-        gui_path_fit(path, SDL_max(fit, 4), cut, sizeof cut);
-        snprintf(value, sizeof value, "%s%s%s", cut, state[0] ? "  " : "", state);
+        gap = left - cols - gui_text_cols(state);
+        if (cols > left) {
+            gui_path_fit(path, SDL_max(left, 4), cut, sizeof cut);
+            snprintf(value, sizeof value, "%s", cut);
+        } else if (state[0] && gap >= 2)
+            snprintf(value, sizeof value, "%s%*s%s", path, gap, "", state);
+        else
+            snprintf(value, sizeof value, "%s", path);
     }
     pad = SDL_max(labels - gui_text_cols(label), 0); /* the labels' columns, not their bytes */
     if (value[0])
