@@ -123,18 +123,22 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Side box** (below, F2 too),
 **Theme editor**, which comes
   back to App, and **Folders**, every folder on one screen, the whole of it, a box a group:
-  - **The app's folders**: **Data** (`recompiled/`, `dumps/`, `themes/` and `prod.keys`) and **Extractions**;
+  - **The app's folders**: **Data** (`recompiled/`, `dumps/`, `themes/` and `prod.keys`), **Settings**, shown only
+    (`app.ini`, which names the others, and each game's `.ini`: `XDG_CONFIG_HOME` moves it, a portable copy keeps its
+    own), **Logs** (the games' logs and `threads.txt`, `recent.txt` and `last-run.log`), **Caches** (the recompile's
+    `units/`, the shader caches, the dumps' icons, and Extractions by default) and **Extractions**;
   - **Recompiled library**: its **Main**, `recompiled/`, where recompiled games go, then its **Extra** folders, whose games
     ready to run Games lists too, and **Add a folder**;
   - **Dumps library**: its **Main**, the data folder's `dumps/` (with its subfolders, going with the data folder), then its
     **Extra** folders, whose dumps Games lists, and **Add a folder**;
-  - **All back to the defaults**, last.
+  - **Reset to Defaults**, last, which asks first.
 
   A row is its name, its folder (one too long for the row cut in its middle: its root and first folder, `...`, as
-  many of its last folders as fit; the whole path under the boxes) and what it is. Data, Extractions and the
-  recompiled Main are each their default or a folder picked: Enter opens the folder picker, a folder dropped or pasted
-  with Ctrl+V takes the row, Del puts the default back (asking first with the folders it changes) and the last row all
-  three; the row says *default*, *picked* or why its folder cannot be, the tips what it holds and its disk's free
+  many of its last folders as fit; the whole path under the boxes) and what it is. Data, Logs, Caches, Extractions and
+  the recompiled Main are each their default or a folder picked: Enter opens the folder picker, a folder dropped or
+  pasted with Ctrl+V takes the row, Del puts the default back (asking first with the folders it changes) and the last
+  row all five. Logs and Caches reach the drivers and the games through `app.ini`, so when it cannot be written they
+  stay as they were, said in a box; the row says *default*, *custom* or why its folder cannot be, at its end, the tips what it holds and its disk's free
   space. A folder not there, not a folder, that cannot be written or, for the games, on a disk that runs no programs
   (`noexec`) is refused, and a run whose picked folder no longer can be stops, naming it: the default never takes its
   place. On Android a folder outside the app's own storage is asked about first, since Android checks every file
@@ -199,8 +203,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   name), `ui_scale` (`auto`, `0.25`, `0.5`, `0.75` or 1 to 4; `text_size` before, still read and written again
   as `ui_scale`, said once) and `language` (`auto`, `en` or a language's BCP 47
   tag, as `pt-BR` or `zh-Hans-CN`), and once one
-  is picked `[folders]` with Folders' `data`, `games` and
-  `work` (a full path, nothing for the default). A value the
+  is picked `[folders]` with Folders' `data`, `recompiled`, `work`, `state` (Logs) and `cache` (Caches) (a full path,
+  nothing for the default). A value the
   menu does not know, or a theme no longer there, is named in the menu's message as it opens and
   left out; a file that cannot be written is named in App's note. A language in another form of its tag (`pt_BR`,
   `zh_CN`, which builds before the tags wrote) is read as that language and written as its tag, the message saying

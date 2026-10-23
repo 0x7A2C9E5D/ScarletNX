@@ -285,25 +285,37 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: tap it. Tap an Extra to take it off. Refresh: tap it. Back: go back."
+msgid "Refresh: tap it. Back: go back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: tap it. Tap an Extra to take it off. Refresh: tap it."
+msgid "Refresh: tap it."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap a folder to pick another. Refresh: tap it. Back: go back."
+msgid "Tap: change."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap a folder to pick another. Refresh: tap it."
+msgid "Tap: delete."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap: add."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap: reset."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -411,13 +423,37 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: pick, drop or paste one. Del: take an Extra off. F5: refresh. ESC: back."
+msgid "Up/Down: folder. F5: refresh. ESC: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: folder. Enter: pick another. Del: the default. F5: refresh. ESC: back."
+msgid "Enter: change."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Del: default."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Del: delete."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Enter: add."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Enter: reset."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -489,13 +525,37 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "D-pad: row. X: take an Extra off. Start: refresh. B: back."
+msgid "D-pad: folder. Start: refresh. B: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "D-pad: folder. A: pick another. X: the default. Start: refresh. B: back."
+msgid "A: change."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "X: default."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "X: delete."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "A: add."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "A: reset."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -538,6 +598,14 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Extractions"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Logs"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Caches"
 msgstr ""
 
 #: src/gui/main.c
@@ -1174,12 +1242,12 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%d picked, %d Extra(s)"
+msgid "%d custom, %d Extra(s)"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%d picked"
+msgid "%d custom"
 msgstr ""
 
 #: src/gui/main.c
@@ -1331,11 +1399,19 @@ msgid "Each dump's extraction"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Tap: pick another. The last row: all back to the defaults"
+msgid "The games' logs, threads.txt and recent.txt"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Enter: pick another. Del: the default"
+msgid "units/, the shader caches and the dumps' icons"
+msgstr ""
+
+#: src/gui/main.c
+msgid "app.ini, which names the other folders, and each game's .ini: XDG_CONFIG_HOME moves it"
+msgstr ""
+
+#: src/gui/main.c
+msgid "app.ini, which names the other folders, and each game's .ini: a portable copy (.scarletnx beside the program) keeps its own"
 msgstr ""
 
 #: src/gui/main.c
@@ -1376,7 +1452,7 @@ msgid "outside the app"
 msgstr ""
 
 #: src/gui/main.c
-msgid "picked"
+msgid "custom"
 msgstr ""
 
 #: src/gui/main.c
@@ -1385,12 +1461,14 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s, %s free. %s"
+msgid "%s, %s free"
 msgstr ""
 
-#. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
-#, snx-key
+msgid "shown only"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Add a folder"
 msgstr ""
 
@@ -1407,7 +1485,12 @@ msgid "+ subfolders"
 msgstr ""
 
 #: src/gui/main.c
-msgid "All back to the defaults"
+msgid "Reset to Defaults"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Logs and Caches not changed: %s, which the runs read them from, could not be written"
 msgstr ""
 
 #: src/gui/main.c
@@ -1446,11 +1529,11 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Back to the defaults: %s? The folders before keep what they have."
+msgid "Reset to Defaults? %s. Nothing is moved."
 msgstr ""
 
 #: src/gui/main.c
-msgid "All back to the defaults. The folders before keep what they have"
+msgid "Reset to Defaults: nothing was moved"
 msgstr ""
 
 #: src/gui/main.c
@@ -1602,7 +1685,7 @@ msgid "Each library's Extras are listed after its Main"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Data, Extractions and the recompiled library's Main"
+msgid "Data, Logs, Caches, Extractions and the recompiled library's Main"
 msgstr ""
 
 #: src/gui/main.c
@@ -1622,7 +1705,7 @@ msgid "As All >"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Each folder back to its default. What is in them stays"
+msgid "Nothing is moved"
 msgstr ""
 
 #: src/gui/main.c
@@ -2595,7 +2678,7 @@ msgid "%s%s %s, made when needed"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Data, Recompiled and Extractions are there"
+msgid "Data, Recompiled, Extractions, Logs and Caches are there"
 msgstr ""
 
 #: src/gui/main.c

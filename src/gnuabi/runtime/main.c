@@ -199,7 +199,7 @@ int snx_gnuabi_main(int argc, char** argv) {
         if (cache_option)
             cache = snx_absolute(cache_option);
         else {
-            char* user = snx_user_dir(SNX_USER_CACHE);
+            char* user = snx_menu_dir(NULL, SNX_USER_CACHE);
             cache = user ? snx_path_join(user, "linux-jit") : NULL;
             free(user);
         }

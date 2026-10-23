@@ -165,7 +165,7 @@ static int install(Ask* a) {
     heading(a, "Install type");
     fputs("  Installed:", a->out);
     for (i = 0; i < 4; ++i) {
-        char* dir = snx_user_dir(kinds[i]);
+        char* dir = snx_menu_dir(NULL, kinds[i]); /* Logs and Caches as Folders picked them */
         shown(dir ? dir : "(no home folder)", path, sizeof path);
         fprintf(a->out, "%s %s %s", i ? "," : "", names[i], path);
         free(dir);

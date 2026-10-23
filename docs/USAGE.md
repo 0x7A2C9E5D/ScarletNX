@@ -442,7 +442,11 @@ list). The user's data folder and a portable copy's keep each kind of file apart
 The menu works in the user's data folder or a portable copy's, unless its Settings > App > Folders picks a data
 folder, a games folder or an extractions folder ([GUI](GUI.md)): it passes them to the driver as `--repo`, `--outdir`
 and `--out` (an extractions folder picked keeps a Switch dump's extraction there, the game made from a copy; to the
-3DS driver as `--repo` and `--output`), and its own files stay where they are. On Android they
+3DS driver as `--repo` and `--output`), and its own files stay where they are. Its Logs and Caches move the state and
+cache folders of the table: `[folders] state =` and `cache =` in `app.ini`, full paths, which the menu, the drivers
+and the games read (a game's `.folders` below names them), its files going to the same place under them
+(`recompiled/<id>/<id>.log` of the state folder); a value that is not a full path is said once and the default kept.
+The config folder holds `app.ini`, so it moves only with `$XDG_CONFIG_HOME` or a portable copy. On Android they
 are in its data folder's `config/` and `state/`, in the app's own storage, which needs no permission. `~/.local/share`, `~/.config`, `~/.local/state` and `~/.cache` are the
 defaults of `$XDG_DATA_HOME`, `$XDG_CONFIG_HOME`, `$XDG_STATE_HOME` and `$XDG_CACHE_HOME` (a relative one is ignored).
 Each time the driver makes or starts a game of the user's data folder, it names the folders of the game's settings, log

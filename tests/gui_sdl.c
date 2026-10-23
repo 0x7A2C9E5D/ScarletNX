@@ -2373,7 +2373,8 @@ int main(int argc, char** argv) {
     assert(app.form == GUI_FORM_THEME && app.editing);
     key(&app, SDLK_ESCAPE);
     assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_EDITOR);
-    /* Folders, every folder on one screen, a box a group: the app's (Data, Extractions), the recompiled library (its
+    /* Folders, every folder on one screen, a box a group: the app's (Data, Settings shown only, Logs, Caches,
+       Extractions), the recompiled library (its
        Main, recompiled/, its Extras, Add a folder), the dumps one (its Main, dumps/, its Extras, Add a folder); one
        dropped on a library's row is added to it and kept, once; the picker answers none here
        (SDL_FILE_DIALOG_DRIVER=none); Del or Enter asks before an Extra is taken off, the folder staying */
@@ -2381,10 +2382,12 @@ int main(int argc, char** argv) {
     render(&app);
     shows(&app, "- Folders            Defaults", yellow);
     key(&app, SDLK_RETURN);
-    assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 7 && app.editor.row == 0);
-    assert(FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_DATA) == 0 && FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_WORK) == 1 &&
-           FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES) == 2 && FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED) == 3 &&
-           FOLDER_ROW(GUI_ROW_DUMPS, -1) == 4 && FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_DUMPS) == 5);
+    assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 10 && app.editor.row == 0);
+    assert(FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_DATA) == 0 && FOLDER_ROW(GUI_ROW_CONFIG, -1) == 1 &&
+           FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_STATE) == 2 && FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_CACHE) == 3 &&
+           FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_WORK) == 4 && FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES) == 5 &&
+           FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED) == 6 && FOLDER_ROW(GUI_ROW_DUMPS, -1) == 7 &&
+           FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_DUMPS) == 8);
     /* no Back row over the rows: the foot's ESC, clicked, does what the key does, back on the App's row */
     {
         GuiFormBoxes f;
@@ -2397,9 +2400,16 @@ int main(int argc, char** argv) {
                !f.place.status.h && f.place.side.w == f.place.head.w);
         {
             UiRowInfo info = {0};
-            assert(ui_form_side_rows_get_row_info(&app, 7 + GUI_FOLDER_GROUPS - 1, 100, &info) && !info.attr &&
-                   !strcmp(info.label, "All back to the defaults"));
-            assert(!ui_form_side_rows_get_row_info(&app, 7 + GUI_FOLDER_GROUPS, 100, &info));
+            /* Reset to Defaults in a group of its own, Defaults, after a blank entry */
+            assert(ui_form_side_rows_get_row_info(&app, 9 + GUI_FOLDER_GROUPS, 100, &info) &&
+                   info.attr == UI_ATTR_LABEL && !info.label[0]);
+            info = (UiRowInfo){0};
+            assert(ui_form_side_rows_get_row_info(&app, 9 + GUI_FOLDER_GROUPS + 1, 100, &info) &&
+                   info.attr == UI_ATTR_TITLE && !strcmp(info.label, "Defaults"));
+            info = (UiRowInfo){0};
+            assert(ui_form_side_rows_get_row_info(&app, 9 + GUI_FOLDER_GROUPS + 2, 100, &info) && !info.attr &&
+                   !strcmp(info.label, "Reset to Defaults"));
+            assert(!ui_form_side_rows_get_row_info(&app, 9 + GUI_FOLDER_GROUPS + 3, 100, &info));
             assert(ui_form_side_rows_get_row_info(&app, 0, 100, &info) && info.attr == UI_ATTR_TITLE &&
                    !strcmp(info.label, "The app's folders"));
         }
@@ -2410,14 +2420,14 @@ int main(int argc, char** argv) {
             shows(&app, "Recompiled library", title);
             shows(&app, "Dumps library", title);
         }
-        { /* each group in a box as far as it shows, half a cell wider than its rows, in the dim colour; none round
-             the last row, which no group holds */
+        { /* each group in a box as far as it shows, half a cell wider than its rows, in the dim colour; Reset to
+             Defaults, the last row, in one of its own */
             GuiRect r = ui_form_side_row(f.right, app.scale, UI_FORM_SIDE_ROWS, 1); /* Data, under the app's title */
             SDL_Color dim = rgb(app.theme.dim);
             assert(!app.theme.grid && !same_colour(dim, rgb(app.theme.page)));
             assert(same_colour(pixel(&app, (float)(r.x - 4 * app.scale), (float)(r.y + r.h / 2)), dim));
-            r = ui_form_side_row(f.right, app.scale, UI_FORM_SIDE_ROWS, 7 + GUI_FOLDER_GROUPS - 1);
-            assert(same_colour(pixel(&app, (float)(r.x - 4 * app.scale), (float)(r.y + r.h / 2)), rgb(app.theme.page)));
+            r = ui_form_side_row(f.right, app.scale, UI_FORM_SIDE_ROWS, 9 + GUI_FOLDER_GROUPS + 2);
+            assert(same_colour(pixel(&app, (float)(r.x - 4 * app.scale), (float)(r.y + r.h / 2)), dim));
         }
         { /* a title on a band of ink in a theme of filled boxes, its text in the page's colour; over a rule in dim in
              one of outlined boxes, in ink */
@@ -2440,6 +2450,21 @@ int main(int argc, char** argv) {
             char start[64];
             snprintf(start, sizeof start, "- %-11s %c", "Data", app.data_dir[0]);
             shows(&app, start, yellow);
+        }
+        { /* what a row is at its end; with no room for it beside the folder whole, it goes and the folder stays */
+            char line[1100];
+            int labels = folder_labels(&app), r = FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_DATA);
+            int whole = gui_text_cols(app.theme.marker) + labels + 1 + gui_text_cols(app.data_dir);
+            size_t n;
+            assert(!strcmp(app.app_form.folder[r], "default"));
+            for (int extra = 9; extra <= 40; extra += 31) {
+                form_line(&app, &app.editor, r, labels, whole + extra, line, sizeof line);
+                n = strlen(line);
+                assert(gui_text_cols(line) == whole + extra && n > 7 && !strcmp(line + n - 7, "default") &&
+                       strstr(line, app.data_dir));
+            }
+            form_line(&app, &app.editor, r, labels, whole + 8, line, sizeof line);
+            assert(strstr(line, app.data_dir) && !strstr(line, "default"));
         }
         { /* a click on a row takes it; one on a group's title, nothing */
             GuiRect b;
@@ -2532,18 +2557,18 @@ int main(int argc, char** argv) {
                    !strncmp(app.editor.note, "Recompiled: ", 12));
             assert(app.form == GUI_FORM_FOLDERS && app.editor.row == FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES) &&
                    same_path(folder_row_path(&app, app.editor.row), elsewhere) &&
-                   !strcmp(app.app_form.folder[app.editor.row], "picked"));
+                   !strcmp(app.app_form.folder[app.editor.row], "custom"));
             {
                 char note[sizeof app.editor.note];
                 snprintf(note, sizeof note, "%s", app.editor.note);
                 app.editor.note[0] = 0; /* the tips say the row while no note covers them */
                 render(&app);
-                shows_half(&app, "Enter: pick another. Del: the default", normal);
+                shows_half(&app, "The recompiled games, ", normal); /* what it holds, its keys in the foot */
                 snprintf(app.editor.note, sizeof app.editor.note, "%s", note);
             }
-            assert(strstr(shown_keys(&app, keys, sizeof keys), "Del: the default"));
+            assert(strstr(shown_keys(&app, keys, sizeof keys), "Del: default."));
             render(&app);
-            hides_foot(&app, "take an Extra off", rgb(app.theme.soft));
+            hides_foot(&app, "delete", rgb(app.theme.soft)); /* an Extra's, not this row's */
             fallback = snx_recompiled_dir(app.data_dir);
             {
                 char* asked = snx_format("Recompiled back to its default, %s? %s keeps what it has.", fallback,
@@ -2583,7 +2608,7 @@ int main(int argc, char** argv) {
         assert(app.folder_count == 1 && same_path(app.folders[0], kept_as) &&
                app.folders_library[0] == GUI_LIBRARY_DUMPS && !strcmp(app.editor.note, "Added to the dumps library"));
         assert(app.form == GUI_FORM_FOLDERS && app.editor.row == FOLDER_ROW(GUI_ROW_FOLDER, 0) &&
-               app.editor.row == FOLDER_ROW(GUI_ROW_DUMPS, -1) + 1 && gui_editor_rows(&app.editor) == 8);
+               app.editor.row == FOLDER_ROW(GUI_ROW_DUMPS, -1) + 1 && gui_editor_rows(&app.editor) == 11);
         kept = (char*)snx_read_file(app.folders_file, &size);
         snprintf(line, sizeof line, "dumps %s\n", kept_as);
         assert(kept && !strcmp(kept, line));
@@ -2872,7 +2897,7 @@ int main(int argc, char** argv) {
         size_t size;
         assert(app.editor.row == GUI_APP_PLACES && !strcmp(app.app_form.places, "Defaults, 1 Extra(s)"));
         key(&app, SDLK_RETURN);
-        assert(app.form == GUI_FORM_FOLDERS && app.editor.row == 0 && gui_editor_rows(&app.editor) == 8);
+        assert(app.form == GUI_FORM_FOLDERS && app.editor.row == 0 && gui_editor_rows(&app.editor) == 11);
         render(&app);
         shows(&app, "FOLDERS", normal);
         shows(&app, "- Data", yellow);
@@ -2881,11 +2906,12 @@ int main(int argc, char** argv) {
         snprintf(line, sizeof line, "%.24s", data);
         shows_half(&app, line, rgb(app.theme.soft));
         shows(&app, "- Extractions", normal);
-        shows(&app, "- All back to the defaults", normal);
+        shows(&app, "- Reset to Defaults", normal);
         assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir) &&
                !strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES)], "default"));
         assert(strstr(app.place_about[GUI_PLACE_GAMES], "The recompiled games, ") &&
-               strstr(app.place_about[GUI_PLACE_GAMES], " free. Enter: pick another. Del: the default"));
+               strlen(app.place_about[GUI_PLACE_GAMES]) > 5 &&
+               !strcmp(app.place_about[GUI_PLACE_GAMES] + strlen(app.place_about[GUI_PLACE_GAMES]) - 5, " free"));
         /* refused: a folder not there, a file; nothing changes, nothing is kept */
         app.editor.row = FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES);
         place_set(&app, GUI_PLACE_GAMES, picked);
@@ -2917,15 +2943,20 @@ int main(int argc, char** argv) {
         snprintf(line, sizeof line, "[folders]\ndata = \nrecompiled = %s\nwork = \n", app.games_dir);
         assert(kept && strstr(kept, "[app]\ntheme = ") && strstr(kept, line));
         free(kept);
-        /* F5 looks at the three again: all there, said so; a default not there yet is made when a run needs it */
-        { /* the test's data folder is not there: a temporary one in its place, and the extractions' */
-            char *data_was = app.data_dir, *work_was = app.work_dir;
+        /* F5 looks at the five again: all there, said so; a default not there yet is made when a run needs it */
+        { /* the test's data folder is not there: a temporary one in its place, and the extractions', logs' and
+             caches' */
+            char *data_was = app.data_dir, *work_was = app.work_dir, *state_was = app.state_dir,
+                 *cache_was = app.cache_dir;
             app.data_dir = snx_strdup(temporary);
             app.work_dir = snx_strdup(temporary);
+            app.state_dir = snx_strdup(temporary);
+            app.cache_dir = snx_strdup(temporary);
             char *dumps = snx_path_join(app.data_dir, "dumps"), *libraries;
             libraries = snx_format("; dumps/ and 1 Extra(s), %d not found", !snx_is_dir(dumps));
             key(&app, SDLK_F5);
-            snprintf(line, sizeof line, "Refreshed: Data, Recompiled and Extractions are there%s", libraries);
+            snprintf(line, sizeof line, "Refreshed: Data, Recompiled, Extractions, Logs and Caches are there%s",
+                     libraries);
             assert(app.form == GUI_FORM_FOLDERS && app.editor.row == FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES) &&
                    !strcmp(app.editor.note, line));
             free(app.work_dir);
@@ -2944,20 +2975,119 @@ int main(int argc, char** argv) {
                 assert(!rename(moved, app.games_dir));
                 free(moved);
             }
+            { /* Logs and Caches too, each with its folder */
+                free(app.cache_dir);
+                app.cache_dir = snx_path_join(temporary, "no caches yet");
+                key(&app, SDLK_F5);
+                snprintf(line, sizeof line,
+                         "Refreshed: Extractions %s, made when needed, Caches %s, made when needed%s", app.work_dir,
+                         app.cache_dir, libraries);
+                assert(!strcmp(app.editor.note, line));
+            }
             free(libraries);
             free(dumps);
             free(app.work_dir);
             free(app.data_dir);
+            free(app.state_dir);
+            free(app.cache_dir);
             app.work_dir = work_was;
             app.data_dir = data_was;
+            app.state_dir = state_was;
+            app.cache_dir = cache_was;
             key(&app, SDLK_F5); /* the rows as the folders are again */
+        }
+        /* Logs and Caches, each a row: its default the menu's own folder; one picked kept in app.ini first, where the
+           drivers and the games find it (snx_menu_dir), the next run's log in Logs; app.ini that cannot be written
+           leaves them as they were. Settings above them, shown only: app.ini in it names them */
+        {
+            const char* home = app.home_dir ? app.home_dir : app.data_dir;
+            char *logs = snx_path_join(temporary, "picked logs"), *caches = snx_path_join(temporary, "picked caches");
+            char *fallback = snx_menu_kind_default(home, SNX_USER_STATE), *in_use, *ini_was = app.app_file;
+            assert(!snx_mkdirs(logs) && !snx_mkdirs(caches) && fallback && !strcmp(app.state_dir, fallback));
+            assert(!strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_STATE)], "default") &&
+                   !strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_CACHE)], "default"));
+            app.editor.row = FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_STATE);
+            { /* a key the focused row cannot do now is not said: Del on a default; F1's box the same */
+                char said[512];
+                assert(!strstr(screen_said(&app, true, said, sizeof said), "Del:") && strstr(said, "Enter: change.") &&
+                       strstr(said, "F5: refresh."));
+            }
+            place_set(&app, GUI_PLACE_STATE, logs);
+            {
+                char said[512];
+                assert(strstr(screen_said(&app, true, said, sizeof said), "Del: default."));
+                app.editor.row = folder_rows(&app); /* Reset to Defaults, with a folder picked */
+                assert(strstr(screen_said(&app, true, said, sizeof said), "Enter: reset."));
+                app.editor.row = FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_STATE);
+            }
+            assert(app.place[GUI_PLACE_STATE] && same_path(app.state_dir, logs));
+            snprintf(line, sizeof line, "Logs: %s. The folder before keeps what it has", app.state_dir);
+            assert(!strcmp(app.editor.note, line) && snx_path_within(app.run_log, logs));
+            render(&app);
+            shows(&app, "- Logs", yellow);
+            /* custom, at the row's end where the folder leaves room (a long one, as Windows' temporary folder, none) */
+            assert(!strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_STATE)], "custom"));
+            kept = (char*)snx_read_file(app.app_file, &size);
+            snprintf(line, sizeof line, "\nstate = %s\ncache = \n", app.state_dir);
+            assert(kept && strstr(kept, line));
+            free(kept);
+            /* the test's app.ini is <temporary>/config/app.ini: a data folder's config/, as a portable copy's is */
+            in_use = snx_app_kind_dir(temporary, SNX_USER_STATE);
+            assert(in_use && same_path(in_use, logs));
+            free(in_use);
+            /* app.ini not written: Caches as it was, said with the file */
+            app.app_file = snx_path_join(file, "app.ini"); /* under a file: no folder can be made there */
+            place_set(&app, GUI_PLACE_CACHE, caches);
+            snprintf(line, sizeof line,
+                     "Logs and Caches not changed: %s, which the runs read them from, could not be written",
+                     app.app_file);
+            assert(!app.place[GUI_PLACE_CACHE] && !strcmp(app.editor.note, line));
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR && !strcmp(app.error_line, line)); /* whole */
+            key(&app, SDLK_RETURN);
+            assert(!app.confirm.shown && !snx_is_file(app.app_file));
+            free(app.app_file);
+            app.app_file = ini_was;
+            place_set(&app, GUI_PLACE_CACHE, caches);
+            assert(app.place[GUI_PLACE_CACHE] && same_path(app.cache_dir, caches));
+            in_use = snx_app_kind_dir(temporary, SNX_USER_CACHE);
+            assert(in_use && same_path(in_use, caches));
+            free(in_use);
+            render(&app);
+            shows(&app, "- Caches", yellow);
+            /* back to the defaults, app.ini's keys empty */
+            place_use(&app, GUI_PLACE_STATE, NULL);
+            place_use(&app, GUI_PLACE_CACHE, NULL);
+            snprintf(line, sizeof line, "Caches: %s, the default", app.cache_dir);
+            assert(!app.place[GUI_PLACE_STATE] && !strcmp(app.state_dir, fallback) && !strcmp(app.editor.note, line));
+            in_use = snx_app_kind_dir(temporary, SNX_USER_STATE);
+            assert(in_use && snx_path_within(in_use, temporary)); /* its own state/ again */
+            free(in_use);
+            /* Settings: its folder, shown only; Enter says why */
+            if (!app.config_dir) app.config_dir = snx_dirname(app.app_file); /* as open_files keeps it */
+            app.editor.row = FOLDER_ROW(GUI_ROW_CONFIG, -1);
+            assert(app.config_dir && !strcmp(folder_row_path(&app, app.editor.row), app.config_dir) &&
+                   !strcmp(app.app_form.folder[app.editor.row], "shown only") &&
+                   !strcmp(form_note(&app), app.config_dir));
+            key(&app, SDLK_RETURN);
+            assert(!strcmp(app.editor.note, config_row) && app.place_row == -1);
+            { /* its foot: refresh and back, neither a pick nor Del */
+                char said[512];
+                screen_said(&app, false, said, sizeof said);
+                assert(strstr(said, "F5: refresh.") && !strstr(said, "Del:") && !strstr(said, "Add a folder"));
+            }
+            render(&app);
+            shows(&app, "- Settings", yellow);
+            app.editor.row = FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES); /* where the checks below look */
+            free(fallback);
+            free(logs);
+            free(caches);
         }
         render(&app);
         shows(&app, "- Main", yellow);
-        shows(&app, "picked", yellow);
+        assert(!strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES)], "custom"));
         assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir));
         app_values(&app); /* App's note, the folder now */
-        assert(!strcmp(app.app_form.places, "1 picked, 1 Extra(s)") && strstr(app.places_note, app.games_dir));
+        assert(!strcmp(app.app_form.places, "1 custom, 1 Extra(s)") && strstr(app.places_note, app.games_dir));
         { /* a folder dropped on a place's row takes its place there, as one picked; Del puts back the default */
             char* dropped = snx_path_join(temporary, "dropped work");
             SDL_Event drop_event = {0};
@@ -3111,7 +3241,7 @@ int main(int argc, char** argv) {
             assert(!app.confirm.shown && !app.place[GUI_PLACE_WORK]);
             place_set(&app, GUI_PLACE_GAMES, inside);
             assert(!app.confirm.shown && app.place[GUI_PLACE_GAMES] &&
-                   !strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES)], "picked"));
+                   !strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES)], "custom"));
             app.own_dir = NULL;
             free(inside);
             free(own);
@@ -3122,8 +3252,7 @@ int main(int argc, char** argv) {
                snx_path_within(app.games_dir, app.data_dir));
         app.editor.row = gui_editor_rows(&app.editor) - 1; /* asked first, the folders picked named: data, and
                                                               recompiled/ inside it above */
-        snprintf(line, sizeof line,
-                 "Back to the defaults: Data: %s, Recompiled: %s? The folders before keep what they have.",
+        snprintf(line, sizeof line, "Reset to Defaults? Data: %s, Recompiled: %s. Nothing is moved.",
                  app.place[GUI_PLACE_DATA], app.place[GUI_PLACE_GAMES]);
         key(&app, SDLK_RETURN);
         assert(app.confirm.shown && app.confirm.ask == GUI_ASK_PLACES && !strcmp(app.ask_line, line));
@@ -3134,15 +3263,20 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RETURN);
         key(&app, SDLK_DOWN);
         key(&app, SDLK_RETURN);
-        assert(!app.place[0] && !app.place[1] && !app.place[2] && !strcmp(app.data_dir, data));
-        assert(!strcmp(app.editor.note, "All back to the defaults. The folders before keep what they have"));
+        assert(!app.place[0] && !app.place[1] && !app.place[2] && !app.place[3] && !app.place[4] &&
+               !strcmp(app.data_dir, data));
+        assert(!strcmp(app.editor.note, "Reset to Defaults: nothing was moved"));
         key(&app, SDLK_RETURN); /* none picked: the defaults named, no box */
-        snprintf(line, sizeof line, "They are the defaults: Data: %s, Recompiled: %s, Extractions: %s", app.data_dir,
-                 app.games_dir, app.work_dir);
+        snprintf(line, sizeof line,
+                 "They are the defaults: Data: %s, Recompiled: %s, Extractions: %s, Logs: %s, Caches: %s", app.data_dir,
+                 app.games_dir, app.work_dir, app.state_dir, app.cache_dir);
         assert(!app.confirm.shown && !strcmp(app.editor.note, line));
+        {
+            char said[512];
+            assert(!strstr(screen_said(&app, true, said, sizeof said), "reset")); /* nothing to reset: no key for it */
+        }
         place_set(&app, GUI_PLACE_DATA, temporary); /* the data folder alone asked about too */
-        snprintf(line, sizeof line, "Back to the defaults: Data: %s? The folders before keep what they have.",
-                 app.place[GUI_PLACE_DATA]);
+        snprintf(line, sizeof line, "Reset to Defaults? Data: %s. Nothing is moved.", app.place[GUI_PLACE_DATA]);
         app.editor.row = gui_editor_rows(&app.editor) - 1;
         key(&app, SDLK_RETURN);
         assert(app.confirm.shown && app.confirm.ask == GUI_ASK_PLACES && !strcmp(app.ask_line, line));
@@ -3251,6 +3385,7 @@ int main(int argc, char** argv) {
     assert(app.menu.view == GUI_LOAD_DROP && !app.menu.running);
     e.type = SDL_EVENT_DROP_FILE;
     e.drop.data = input;
+    free(app.run_log);                                      /* Folders' Logs may have set one */
     app.run_log = snx_path_join(temporary, "last-run.log"); /* the run's output, kept as it comes */
     event(&app, &e);
     assert(app.menu.running && app.menu.selected == GUI_SWITCH);
@@ -3333,8 +3468,7 @@ int main(int argc, char** argv) {
         launcher(&app, false);
         app.menu.selected = GUI_LINUX;
         places_reset(&app);
-        snprintf(expected, sizeof expected,
-                 "Folders: All back to the defaults. The folders before keep what they have");
+        snprintf(expected, sizeof expected, "Folders: Reset to Defaults: nothing was moved");
         assert(!app.place[GUI_PLACE_GAMES] && !app.place[GUI_PLACE_WORK] && !strcmp(app.message, expected));
         app.message[0] = 0;
         free(app.games_dir);
@@ -6147,12 +6281,13 @@ int main(int argc, char** argv) {
         {
             static const char* const says[] = {
                 SAY_MENU_KEYS, SAY_GAMES, SAY_KEYS_HOW, SAY_EDITOR, SAY_PICKER, SAY_SETTINGS, SAY_GROUPS, SAY_APP,
-                SAY_FOLDERS, SAY_PLACES, SAY_PAD, SAY_TAB, SAY_BACK, SAY_HELP,
+                SAY_FOLDERS, SAY_CHANGE, SAY_DEFAULT, SAY_DELETE, SAY_ADD, SAY_RESET, SAY_PAD, SAY_TAB, SAY_BACK,
+                SAY_HELP,
                 /* and while a pad drives the menu, its words found first from here */
                 SAY_PAD_MENU, SAY_PAD_GAMES, SAY_PAD_KEYS_HOW, SAY_PAD_EDITOR, SAY_PAD_PICKER, SAY_PAD_SETTINGS,
-                SAY_PAD_GROUPS, SAY_PAD_APP, SAY_PAD_FOLDERS, SAY_PAD_PLACES, SAY_PAD_USERS, SAY_PAD_TAB,
-                SAY_PAD_GAMES_AOT, SAY_PAD_HELP};
-            const size_t pads = 14; /* the first of the pad's */
+                SAY_PAD_GROUPS, SAY_PAD_APP, SAY_PAD_FOLDERS, SAY_PAD_CHANGE, SAY_PAD_DEFAULT, SAY_PAD_DELETE,
+                SAY_PAD_ADD, SAY_PAD_RESET, SAY_PAD_USERS, SAY_PAD_TAB, SAY_PAD_GAMES_AOT, SAY_PAD_HELP};
+            const size_t pads = 18; /* the first of the pad's */
             static const char* const none[] = {"Arrows", "mouse", "pad", "D-pad"};
             char key_of[128], what[128];
             Uint8 was;
@@ -6321,12 +6456,15 @@ int main(int argc, char** argv) {
             key(&app, SDLK_ESCAPE);
             assert(app.editing && app.form == GUI_FORM_APP);
             leave_editor(&app);
-            /* Folders: on a library's row the foot's Add a folder opens the folder picker for that library, which answers
-               none here */
+            /* Folders: a library's Add a folder opens the folder picker for that library, which answers none here; the
+               foot has only what the focused row does: Del on an Extra, nothing on dumps/ */
             app_select(&app, GUI_APP_PLACES);
             assert(app.editing && app.form == GUI_FORM_FOLDERS && !app.editor.note[0]);
             app.editor.row = FOLDER_ROW(GUI_ROW_DUMPS, -1);
-            press_key(&app, "Add a folder", 0, false, yellow);
+            render(&app);
+            hides_foot(&app, "Del", yellow);
+            app.editor.row = FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_DUMPS);
+            key(&app, SDLK_RETURN);
             assert(app.adding == GUI_LIBRARY_DUMPS);
             {
                 SDL_Event answer;

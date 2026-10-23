@@ -52,7 +52,7 @@ typedef enum {
     /* a change to the player's settings or folders, what it changes in the question (main.c's ask_line) */
     GUI_ASK_CLEAN,  /* App's Clean old settings: the [Deprecated] sections and old keys taken out */
     GUI_ASK_RESET,  /* Settings' Reset all to the defaults: the settings not at their default */
-    GUI_ASK_PLACES, /* Folders' All back to the defaults: the folders picked */
+    GUI_ASK_PLACES, /* Folders' Reset to Defaults: the folders picked */
     GUI_ASK_PLACE,  /* a folder picked in Folders, or the Library's recompiled/, back to its default */
     GUI_ASK_FOLDER, /* a game folder taken off the Library */
     GUI_ASK_MOVE,   /* App's Move old files: how many entries move, how many stay */

@@ -457,8 +457,9 @@ static void record_source(const char* root) {
     free(folder);
 }
 /* snx_record_folders: a game of the user's data folder gets <name>.folders naming the config, state and cache folders
-   snx_user_path moves its files to, each made; a game elsewhere none, and an older one there is taken away. The
-   user's folders in root for the test, from the variables that name them */
+   snx_user_path moves its files to, each made, the logs and caches Settings > App > Folders picked in app.ini among
+   them; a game elsewhere none, and an older one there is taken away. The user's folders in root for the test, from the
+   variables that name them */
 static void record_folders(const char* root) {
 #ifdef _WIN32
     static const char* const vars[] = {"APPDATA"};
@@ -496,6 +497,36 @@ static void record_folders(const char* root) {
         fprintf(stderr, "%s has:\n%s\nnot:\n%s", record, text ? text : "(no such file)\n", expected);
     CHECK(text && !strcmp(text, expected));
     free(text);
+    { /* Logs and Caches picked, outside the user's folders: named too, so a game started elsewhere finds them */
+        char *config = snx_user_dir(SNX_USER_CONFIG), *ini = snx_path_join(config, "app.ini"), *picked[2], *game[2],
+             *at;
+        picked[0] = snx_path_join(root, "picked logs");
+        picked[1] = snx_path_join(root, "picked caches");
+        text = snx_format("[folders]\nstate = %s\ncache = %s\n", picked[0], picked[1]);
+        CHECK(!snx_mkdirs(config) && !snx_write_file(ini, text, strlen(text)));
+        free(text);
+        CHECK(!snx_record_folders(folder, "G"));
+        for (i = 0; i < 2; ++i) { /* games/G under each picked folder, made */
+            game[i] = snx_user_path(folder, i ? SNX_USER_CACHE : SNX_USER_STATE);
+            CHECK(strcmp(game[i], folder) && snx_path_within(game[i], picked[i]) && snx_is_dir(game[i]));
+        }
+        at = snx_user_path(folder, SNX_USER_CONFIG);
+        free(expected);
+        expected = snx_format("config=%s\nstate=%s\ncache=%s\n", at, game[0], game[1]);
+        free(at);
+        text = (char*)snx_read_file(record, &size);
+        if (!text || strcmp(text, expected))
+            fprintf(stderr, "%s has:\n%s\nnot:\n%s", record, text ? text : "(no such file)\n", expected);
+        CHECK(text && !strcmp(text, expected));
+        free(text);
+        for (i = 0; i < 2; ++i) {
+            free(picked[i]);
+            free(game[i]);
+        }
+        CHECK(!remove(ini));
+        free(ini);
+        free(config);
+    }
     free(record);
     other = snx_format("%s/elsewhere/G", root);
     record = snx_format("%s/G.folders", other);
