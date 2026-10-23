@@ -5,6 +5,7 @@
 #include "3ds/services/dsp.h"
 #include "3ds/services/ptm.h"
 #include "3ds/services/file.h"
+#include "3ds/services/uds.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -116,6 +117,7 @@ void snx_ctr_shared_page_time(SnxCtrProcess* p) {
 }
 void snx_ctr_process_free(SnxCtrProcess* p) {
     if (!p) return;
+    snx_ctr_uds_close(p);
     if (p->gsp.pica) snx_ctr_pica_free(p->gsp.pica);
     free(p->gsp.pica);
     snx_ctr_dsp_close(p);

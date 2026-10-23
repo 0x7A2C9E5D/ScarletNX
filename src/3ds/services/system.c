@@ -5,16 +5,17 @@
    in every output word), as Azahar's ReportUnimplementedFunction answers, reported the first time. A service whose
    answers a game depends on gets a model of its own, and leaves this list. */
 #include "3ds/services/system.h"
+#include "3ds/services/uds.h"
 #include "3ds/runtime/internal.h"
 #include <stdio.h>
 #include <string.h>
 
 /* the services of a retail console an application may name in its ExHeader (3dbrew's Services list) */
 static const char* const names[] = {
-    "ac:u",     "ac:i",     "act:u",   "boss:U",   "boss:P",   "cam:u",   "cecd:u", "cecd:s",
-    "csnd:SND", "dlp:FKCL", "dlp:SRVR", "dlp:CLNT", "frd:u",  "frd:a",    "http:C",  "ir:USER", "ir:u",
-    "ir:rst",   "ldr:ro",   "mic:u",   "mvd:STD", "ndm:u",    "news:u",   "news:s",  "nim:aoc", "nim:u",
-    "nwm::UDS", "pxi:dev",  "qtm:u",   "soc:U",   "ssl:C",    "nfc:u",   "nfc:m",  "cdc:CSN",
+    "ac:u",     "ac:i",     "act:u",    "boss:U", "boss:P", "cam:u",  "cecd:u",  "cecd:s", "csnd:SND",
+    "dlp:FKCL", "dlp:SRVR", "dlp:CLNT", "frd:u",  "frd:a",  "http:C", "ir:USER", "ir:u",   "ir:rst",
+    "ldr:ro",   "mic:u",    "mvd:STD",  "ndm:u",  "news:u", "news:s", "nim:aoc", "nim:u",  "nwm::UDS",
+    "pxi:dev",  "qtm:u",    "soc:U",    "ssl:C",  "nfc:u",  "nfc:m",  "cdc:CSN",
 };
 _Static_assert(sizeof names / sizeof *names + 16 < 256, "a name index per session, stand-ins included");
 uint32_t snx_ctr_system_open(SnxCtrProcess* p, const uint8_t* name, uint32_t length, uint32_t* session) {
@@ -22,7 +23,8 @@ uint32_t snx_ctr_system_open(SnxCtrProcess* p, const uint8_t* name, uint32_t len
         if (strlen(names[i]) == length && !memcmp(names[i], name, length)) {
             uint32_t result = snx_ctr_session_create(p, SNX_CTR_SERVICE_SYSTEM, session);
             if (!result) p->objects[snx_ctr_handle_object(p, *session)].data.session.name = i;
-            if (!result) fprintf(stderr, "3ds srv: %s has no model: its commands answer success\n", names[i]);
+            if (!result && strcmp(names[i], "nwm::UDS"))
+                fprintf(stderr, "3ds srv: %s has no model: its commands answer success\n", names[i]);
             return result;
         }
     return SNX_CTR_SYSTEM_UNKNOWN;
@@ -52,6 +54,10 @@ const char* snx_ctr_system_name(const SnxCtrProcess* p, uint32_t index) {
 }
 void snx_ctr_system_dispatch(SnxCtrIpc* c) {
     SnxCtrProcess* p = c->process;
+    if (!strcmp(snx_ctr_system_name(p, p->objects[c->object].data.session.name), "nwm::UDS")) {
+        snx_ctr_uds_dispatch(c);
+        return;
+    }
     uint32_t name = p->objects[c->object].data.session.name, command = c->in[0] >> 16;
     uint32_t key = (SNX_CTR_SERVICE_COUNT + name) << 16 | command, seen = 0;
     while (seen < p->stub_logged_count && p->stub_logged[seen] != key) ++seen;

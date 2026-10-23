@@ -36,10 +36,15 @@ enum {
 };
 /* Eden's Domain and Protocol, as a datagram carries them */
 enum { ROOM_INET = 1, ROOM_PROTOCOL_IP = 1, ROOM_PROTOCOL_UDP = 4 };
-#define ROOM_MEMBERS    254 /* MaxConcurrentConnections */
-#define ROOM_SERVICE_MS 5
-#define ROOM_LEAVE_MS   1000 /* for the room to take what was queued, then the disconnect */
-#define ROOM_QUEUE_MAX  256   /* datagrams a socket holds unread; the next ones are dropped, as UDP drops them */
+#define ROOM_MEMBERS                 254 /* MaxConcurrentConnections */
+#define ROOM_SERVICE_MS              5
+#define ROOM_LEAVE_MS                1000 /* for the room to take what was queued, then the disconnect */
+#define ROOM_QUEUE_MAX               256  /* ordinary guest UDP sockets */
+/* UDS transports reliable local-wireless inputs over this room socket. Retain
+   bursts while its caller is stalled; dropping here cannot be repaired by ENet,
+   which already acknowledged delivery. Bound both packet count and payload bytes. */
+#define ROOM_LOW_LATENCY_QUEUE_MAX   2048
+#define ROOM_LOW_LATENCY_QUEUE_BYTES (4u * 1024u * 1024u)
 #define ROOM_DATAGRAM_HEAD                                                                                             \
     21 /* a datagram message before its bytes: type, two endpoints, protocol, broadcast, length */
 #define ROOM_PORT_FIRST 49152 /* the ephemeral ports an unbound socket takes */
@@ -63,6 +68,7 @@ struct SnxRoom {
     int state; /* SNX_ROOM_IN, or why it went away */
     int refs;  /* snx_room_leave's, each socket's and each snx_room_ref's */
     int stop, done, running;
+    int low_latency;
     RoomOut *out, *out_tail; /* queued for the thread to send */
     RoomMember members[ROOM_MEMBERS];
     int nmembers;
@@ -393,6 +399,7 @@ struct RoomSock {
     int connected, broadcast, reuse, shut_rd, shut_wr, sndbuf, rcvbuf;
     RoomDatagramIn *head, *tail;
     int queued;
+    size_t queued_bytes;
     int warned_full, told_option;
 };
 
@@ -572,6 +579,7 @@ static int64_t sock_recv(SnxSocket* s, void* data, size_t size, int flags, SnxSo
                     if (!k->shut_rd) snx_notifier_drain(k->notify[0]);
                 }
                 k->queued--;
+                k->queued_bytes -= d->size;
                 free(d);
             }
             snx_unlock(&k->lk);
@@ -620,7 +628,7 @@ static int sock_setsockopt(SnxSocket* s, int level, int name, const void* v, siz
         if (size < sizeof value) return -SNX_EINVAL;
         memcpy(&value, v, sizeof value);
         if (SNX_HOST_BE) value = (int)snx_le32((uint32_t)value); /* the guest's little-endian int */
-        snx_lock(&k->room->lk); /* port_taken reads reuse under the member's lock */
+        snx_lock(&k->room->lk);                                  /* port_taken reads reuse under the member's lock */
         snx_lock(&k->lk);
         *o = name == SNX_SO_SNDBUF || name == SNX_SO_RCVBUF ? value : value != 0;
         snx_unlock(&k->lk);
@@ -762,7 +770,9 @@ static void datagram_in(SnxRoom* r, const uint8_t* msg, size_t size) {
             snx_unlock(&k->lk);
             continue;
         }
-        if (k->queued >= ROOM_QUEUE_MAX) {
+        int queue_limit = r->low_latency ? ROOM_LOW_LATENCY_QUEUE_MAX : ROOM_QUEUE_MAX;
+        if (k->queued >= queue_limit || (r->low_latency && (k->queued_bytes > ROOM_LOW_LATENCY_QUEUE_BYTES ||
+                                                            n > ROOM_LOW_LATENCY_QUEUE_BYTES - k->queued_bytes))) {
             if (!k->warned_full)
                 snx_net_log("room: the socket on port %u has %d datagrams unread, dropping the next ones", k->port,
                             k->queued);
@@ -785,6 +795,7 @@ static void datagram_in(SnxRoom* r, const uint8_t* msg, size_t size) {
             }
             k->tail = in;
             k->queued++;
+            k->queued_bytes += n;
             k->warned_full = 0;
         } else
             snx_net_log("room: a datagram for port %u dropped: out of memory", k->port);
@@ -925,13 +936,15 @@ static int room_message(SnxRoom* r, const uint8_t* msg, size_t size, int joining
 /* ============================================================ the thread */
 static void room_thread(void* arg) {
     SnxRoom* r = arg;
+    int64_t next_report = 0;
     for (;;) {
         RoomOut* o;
         ENetEvent ev;
-        int k, stop, in;
+        int k, stop, in, service_ms;
         snx_lock(&r->lk);
         stop = r->stop;
         in = r->state == SNX_ROOM_IN;
+        service_ms = r->low_latency ? 1 : ROOM_SERVICE_MS;
         o = r->out;
         r->out = r->out_tail = NULL;
         snx_unlock(&r->lk);
@@ -950,7 +963,7 @@ static void room_thread(void* arg) {
             snx_net_sleep_us(ROOM_SERVICE_MS * 1000);
             continue;
         }
-        for (k = enet_host_service(r->host, &ev, ROOM_SERVICE_MS); k > 0; k = enet_host_check_events(r->host, &ev)) {
+        for (k = enet_host_service(r->host, &ev, service_ms); k > 0; k = enet_host_check_events(r->host, &ev)) {
             if (ev.type == ENET_EVENT_TYPE_RECEIVE) {
                 room_message(r, ev.packet->data, ev.packet->dataLength, 0);
                 enet_packet_destroy(ev.packet);
@@ -958,9 +971,19 @@ static void room_thread(void* arg) {
                 went_away(r, SNX_ROOM_CLOSED);
         }
         if (k < 0) went_away(r, SNX_ROOM_CLOSED);
+        if (service_ms == 1 && snx_net_now_us() >= next_report) {
+            snx_net_log("room timing: relay RTT=%ums variance=%ums loss=%.2f%%", r->peer->roundTripTime,
+                        r->peer->roundTripTimeVariance, 100.0 * r->peer->packetLoss / ENET_PEER_PACKET_LOSS_SCALE);
+            next_report = snx_net_now_us() + 5000000;
+        }
     }
     snx_lock(&r->lk);
     r->done = 1;
+    snx_unlock(&r->lk);
+}
+void snx_room_low_latency(SnxRoom* r) {
+    snx_lock(&r->lk);
+    r->low_latency = 1;
     snx_unlock(&r->lk);
 }
 
