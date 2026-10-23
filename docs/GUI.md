@@ -82,7 +82,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Full HLE/devices remain incomplete. Like the Switch driver, it uses an
   extraction (or the CIA itself) and a compiled module already there, and recompiles only when needed.
   See [3DS port](3DS.md) for limits.
-- **Load Vita VPK** uses `scarletnx-vita`, with the menu's data folder as its `--repo`. The driver extracts the VPK
+- **Load Vita VPK** uses `scarletnx-vita`, with the menu's data folder as its `--data`. The driver extracts the VPK
   into its game's folder of `recompiled/` (named after its title ID), compiles its code ahead of time and plays it,
   compiling at run time what it missed. A VPK extracted and compiled before plays at once. See
   [Vita driver](VITA.md) for limits.
@@ -310,14 +310,14 @@ they are, Keep, Later, the nickname `Player`), writes `setup.ini` and opens the 
   the rooms' rule refuses is said, and the page stays.
 
 Once the last page is done the menu opens, `setup.ini` written. After an update that brings a notice, the setup
-shows that notice alone (1/1), with OK, before the menu. `scarletnx --debug` (or `--no-setup`) opens the menu with no
+shows that notice alone (1/1), with OK, before the menu. `scarletnx --no-setup` opens the menu with no
 setup, writing nothing.
 
 ## Games: the games of recompiled/ and the player's folders
 
 **Games**, the tab, lists the games: the ones ready to run (a recompiled game runs directly), the dumps to prepare
 on Android, CIA files, which go to the 3DS driver, and VPK files, which go to the Vita driver. It reads the `recompiled/` of the
-folder the driver works in, which the menu passes it as `--repo`: a portable copy's `.scarletnx/` beside the
+folder the driver works in, which the menu passes it as `--data`: a portable copy's `.scarletnx/` beside the
 AppImage (or the GUI), else the user's data folder, a build tree's menu's too ([USAGE](USAGE.md#folders)), then each
 Extra of Settings > App > Folders. Each game is shown by the name in its `control.nacp`, which the recompile copies into
 its data, else by its folder's or file's name, sorted by it in each folder. Only immediate files are listed:

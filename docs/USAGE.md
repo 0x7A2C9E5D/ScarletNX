@@ -59,7 +59,7 @@ from the dump the game records when the system emptied tmpfs, and moves it betwe
 no dump it was made from*. `-r --tmpfs` on an extraction leaves its RomFS where it is.
 `-H` (`--headless`) can precede or follow the dump and is passed to the game only.
 Omitting it starts the game with a window.
-`-x` means `--extract`, and `-r` means `--recompile` (the old `--recompile` spelling was removed).
+`-x` means `--extract`, and `-r` means `--recompile` (`--recomp`, its older name, still works and says so once).
 On UNIX, short flags can be combined. Windows accepts separate short flags only.
 
 To prepare a dump without playing, use `./build/scarletnx -r "Game.xci"`.
@@ -224,7 +224,7 @@ Remaining examples: POSIX.
   --keys /path/prod.keys --title-keys /path/title.keys
 
 ./build/scarletnx -r work/Game Game --outdir games --jobs 8
-./build/scarletnx -r app.nro -o App --outdir games
+./build/scarletnx -r app.nro --name App --outdir games
 ./build/scarletnx -r -h
 ```
 
@@ -422,9 +422,9 @@ Each game is a folder of `recompiled/` named by its title ID, `recompiled/0100DA
 `--name` names any. The game is shown by the name in its `control.nacp` (the window, the recompile, the menu's
 list). The user's data folder and a portable copy's keep each kind of file apart: on Linux the user's in the
 [XDG](https://specifications.freedesktop.org/basedir/latest/) folder of its kind, elsewhere in its own `config/`,
-`state/` and `cache/`. Any other folder `--repo` or `--outdir` names keeps everything in its games' folders.
+`state/` and `cache/`. Any other folder `--data` or `--outdir` names keeps everything in its games' folders.
 
-| What | Another `--repo`, an `--outdir` | Linux, the user's data folder | A portable copy's, the user's elsewhere |
+| What | Another `--data`, an `--outdir` | Linux, the user's data folder | A portable copy's, the user's elsewhere |
 | --- | --- | --- | --- |
 | a game: its program, `<id>_code.so`, `<id>_data/` (saves, `control.nacp`), `captures/` | `recompiled/<id>/` | `~/.local/share/scarletnx/recompiled/<id>/` | `recompiled/<id>/` |
 | its settings, `<id>.ini` | `recompiled/<id>/` | `~/.config/scarletnx/recompiled/<id>/` | `config/recompiled/<id>/` |
@@ -441,9 +441,9 @@ list). The user's data folder and a portable copy's keep each kind of file apart
 | the console's users, `users.ini` and `<uid>.jpg` ([Users](#users)), and `online.ini`, an Eden room's password (`room`) | `users/` of the user's data folder | `~/.local/share/scarletnx/users/` | `users/` |
 
 The menu works in the user's data folder or a portable copy's, unless its Settings > App > Folders picks a data
-folder, a games folder or an extractions folder ([GUI](GUI.md)): it passes them to the driver as `--repo`, `--outdir`
+folder, a games folder or an extractions folder ([GUI](GUI.md)): it passes them to the driver as `--data`, `--outdir`
 and `--out` (an extractions folder picked keeps a Switch dump's extraction there, the game made from a copy; to the
-3DS driver as `--repo` and `--output`), and its own files stay where they are. Its Logs and Caches move the state and
+3DS driver as `--data` and `--output`), and its own files stay where they are. Its Logs and Caches move the state and
 cache folders of the table: `[folders] state =` and `cache =` in `app.ini`, full paths, which the menu, the drivers
 and the games read (a game's `.folders` below names them), its files going to the same place under them
 (`recompiled/<id>/<id>.log` of the state folder); a value that is not a full path is said once and the default kept.
@@ -533,7 +533,7 @@ shown, and one a newer version adds shows alone, with OK, before anything else.
 ```sh
 ./build/scarletnx --setup                  # all of it again, in the terminal
 printf '\n\n\n\n\nAogo\n' | ./build/scarletnx --setup  # its answers a line each, Enter the one in brackets
-./build/scarletnx --debug "Game.xci"       # no setup this run (--skip --skip too), nothing written
+./build/scarletnx --no-setup "Game.xci"    # no setup this run, nothing written
 ```
 
 A run whose stdin or stdout is no terminal (a pipe, the launcher's runs) asks nothing. With `--no-setup` nothing is

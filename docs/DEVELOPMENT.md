@@ -63,7 +63,7 @@ build/scarletnx --scan-log "$games/<id>/<id>.log" [--format markdown]
   `scarletnx.log`. A log is read once, a line at a time, in fixed memory: a gigabyte takes about two seconds.
 - `scarletnx --mcp [--data DIR]` (`src/nx/runtime/driver/mcp.c`): an MCP server over stdio for an agent looking into a
   failure on this machine, built into the program so a player's agent has it too. `.mcp.json` starts it for agents
-  opened in the checkout (`build/scarletnx --mcp --repo .`). Its tools: `scan_log` (the summary above), `read_log`
+  opened in the checkout (`build/scarletnx --mcp --data .`). Its tools: `scan_log` (the summary above), `read_log`
   (a log's lines holding a text, `|` between alternatives, with context, or a range, or its last lines, only under
   the data folder and its state, cache and settings folders), `find_game` (the extracted games in `work/` with their
   title IDs and versions), `symbolize` and `disassemble` (as `tools/symbols.py` and `tools/disasm.py`, A64 through

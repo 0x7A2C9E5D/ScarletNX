@@ -64,7 +64,7 @@ minutes, against 4 natively on x86-64):
 
 ```bash
 export QEMU_LD_PREFIX=$SNX_SYSROOT VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
-qemu-ppc64le build/linux-ppc64le-cross/scarletnx -r app.nro -o App --outdir games/ppc64le
+qemu-ppc64le build/linux-ppc64le-cross/scarletnx -r app.nro --name App --outdir games/ppc64le
 cd games/ppc64le/App && qemu-ppc64le ./App -H --seconds=120 --shot=/path/to/shot
 ```
 
