@@ -99,7 +99,10 @@ the board interpreted, are compiled when they are first dispatched. The miss
 starts a discovery walk of its own, and the blocks it finds go into a module of
 their own (`<ROM>.code.<n>.so`), so a miss costs those blocks and not the
 whole ROM. When the run ends they are folded into the cached module, so the
-next run starts with every block the last one reached.
+next run starts with every block the last one reached. A block built from RAM
+runs while RAM holds the words it was built from, and is built again once the
+game writes over them; the map names the ROM's hash, and a map of another ROM is
+refused with both.
 
 The CPU state is the recompiler's `SnxArmCPU` on a flat window (`cpu/memmap.c`)
 where the board's regions live at their canonical addresses with the console's
