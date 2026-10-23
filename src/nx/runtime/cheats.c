@@ -6,6 +6,7 @@
    7 arithmetic on a register. Other opcodes stop that cheat and are logged once. Memory is checked before each access:
    an address outside the guest's mapped memory skips the access, it never faults. */
 #include "nx/runtime/cheats.h"
+#include "common/utilities/cheat_list.h"
 #include "nx/runtime/main.h"
 #include "nx/runtime/loader.h"
 #include "nx/hle/filesystem/fs.h"
@@ -91,14 +92,10 @@ static void cheats_load(void) {
         p = e + 1;
         char* s = line;
         while (isspace((unsigned char)*s)) s++;
-        if (*s == '[' || *s == '{') { /* a cheat's name starts it */
+        if (*s == '[' || *s == '{') { /* a cheat's name starts it, read as the launcher lists it */
             if (g_ncheats == CHEAT_MAX) break;
             cur = &g_cheats[g_ncheats++];
-            char* close = strpbrk(s + 1, "]}");
-            size_t ln = close ? (size_t)(close - s - 1) : strlen(s + 1);
-            if (ln >= sizeof cur->name) ln = sizeof cur->name - 1;
-            memcpy(cur->name, s + 1, ln);
-            cur->name[ln] = 0;
+            snx_cheat_name(s, cur->name, sizeof cur->name);
             cur->first = g_nwords;
             cur->count = 0;
             continue;
@@ -116,7 +113,8 @@ static void cheats_load(void) {
     }
     free(text);
     for (int i = 0; i < g_ncheats; i++)
-        LOG("cheats: \"%s\" from %s (%u words)\n", g_cheats[i].name, path, g_cheats[i].count);
+        LOG("cheats: \"%s\" from %s (%u words)%s\n", g_cheats[i].name, path, g_cheats[i].count,
+            snx_cheat_off(g_settings.game_cheats_off, g_cheats[i].name) ? ", off: cheats_off= names it" : "");
 }
 
 static void run_cheat(const Cheat* c) {
@@ -184,6 +182,7 @@ void cheats_frame(void) {
         cheats_load();
         cheats_loaded = 1;
     }
-    for (int i = 0; i < g_ncheats; i++) run_cheat(&g_cheats[i]);
+    for (int i = 0; i < g_ncheats; i++)
+        if (!snx_cheat_off(g_settings.game_cheats_off, g_cheats[i].name)) run_cheat(&g_cheats[i]);
     pm_unlock(&cheats_lock);
 }
