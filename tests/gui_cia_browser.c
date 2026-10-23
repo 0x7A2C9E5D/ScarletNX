@@ -269,6 +269,11 @@ int main(void) {
             assert(gui_games_group(&g, "Recompiled", "Dumps", made_b, NULL)); /* again: the same */
         }
         gui_games_free(&g);
+        /* no dumps' heading (Games' Dumps off): the ready games alone, no heading over them */
+        assert(gui_games_add(&g, d, GUI_GAMES_RUN | GUI_GAMES_CIA | GUI_GAMES_DUMP, error, sizeof error));
+        assert(g.count == 4 + ready && gui_games_group(&g, "Recompiled", NULL, made_b, NULL) && g.count == ready);
+        for (k = 0; k < g.count; ++k) assert(!gui_games_heading(&g, k) && !strcmp(g.names[k], "Ready"));
+        gui_games_free(&g);
         snx_remove_tree(d);
         free(d);
     }

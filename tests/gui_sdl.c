@@ -11,6 +11,9 @@
 #else
 #include <sys/statvfs.h> /* Folders on a disk mounted noexec */
 #endif
+/* app.ini as the menu writes it: its head, and the Games options' lines that end [app], at their defaults */
+#define APP_INI_HEAD   "; Settings > App and Games' View in the launcher, as they were left\n[app]\n"
+#define GAMES_DEFAULTS "recent_games = on\ngames_dumps = on\n"
 /* the default theme's colours, as the checks below name them */
 static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255}, red = {255, 0, 0, 255},
                        pink = {255, 85, 255, 255}, black = {0, 0, 0, 255};
@@ -885,6 +888,192 @@ static void icon_jpeg_write(void* closure, void* data, int size) {
     assert(j->size + size <= (int)sizeof j->data);
     memcpy(j->data + j->size, data, (size_t)size);
     j->size += size;
+}
+/* a game of folder made in a folder of its own beside its data, as the recompile lays it out (gui_game_folder): a file
+   that runs nothing, which Games lists by its folder's name; its program's path, owned */
+static char* folder_game_in(const char* folder, const char* name) {
+    char *own = snx_path_join(folder, name), *data = snx_format("%s/%s_data", own, name);
+#ifdef _WIN32
+    char* program = snx_format("%s/%s.exe", own, name);
+#else
+    char* program = snx_path_join(own, name);
+#endif
+    assert(!snx_mkdirs(data) && !snx_write_file(program, "game", 4) && !snx_make_executable(program));
+    free(data);
+    free(own);
+    return program;
+}
+/* whether Games lists the game shown so, and the heading text so */
+static bool games_lists(const App* app, const char* shown) {
+    for (size_t i = 0; i < app->games.count; ++i)
+        if (!strcmp(app->games.shown[i], shown)) return true;
+    return false;
+}
+/* Games' View box (V): Recent Games and Dumps, on by default, each changed by Enter, Left, Right or a click, kept in
+   app.ini at once and Games listed again by it; an app.ini without them (an older version's) has the defaults, iOS's
+   off; a word it does not know named with the one it keeps */
+static void view_box(App* app, const char* temporary) {
+    char *was_games = app->games_dir, *was_data = app->data_dir, *was_app = app->app_file;
+    char* was_recent_file = app->recent_file;
+    GuiRecent was_recent = app->recent;
+    int was_folders = app->folder_count;
+    char *root = snx_path_join(temporary, "view box"), *dumps = snx_path_join(root, "dumps"), *dump, *game, *kept, *cia;
+    char* was_folder = app->folders[0];
+    int was_library = app->folders_library[0];
+    bool was_deep = app->folders_deep[0];
+    char expected[1024], said[1024];
+    size_t size = 0;
+    app->data_dir = root;
+    app->games_dir = snx_path_join(root, "recompiled");
+    app->app_file = snx_path_join(root, "app.ini");
+    app->recent_file = NULL; /* the list in the menu alone */
+    app->folder_count = 0;
+    game = folder_game_in(app->games_dir, "alpha game");
+    dump = snx_path_join(dumps, "beta dump.nsp");
+    cia = snx_path_join(app->games_dir, "gamma.cia"); /* in the dumps' group, with them */
+    assert(!snx_mkdirs(dumps) && !snx_write_file(dump, "dump", 4) && !snx_write_file(cia, "cia", 3));
+    app->recent = (GuiRecent){0};
+    assert(!gui_recent_add(&app->recent, game, GUI_SWITCH, 0));
+    go_tab(app, GUI_TAB_GAMES);
+    assert(recent_on(app) && dumps_on(app) && app->browser.head == 1 && games_lists(app, "Dumps") &&
+           games_lists(app, "beta dump.nsp") && games_lists(app, "gamma.cia") && games_lists(app, "alpha game"));
+    render(app);
+    shows(app, "Recent Games", rgb(app->theme.soft));
+    shows(app, "dumps", rgb(app->theme.soft)); /* the side box's folders, dumps/ with them, wrapped at a slash */
+    shows_foot(app, "V", yellow);              /* its key, then what it does; its word presses V as the key does */
+    shows_foot(app, "view", normal);
+    assert(hint_keys[hint_pick("V", 0, false)].key == SDLK_V && !hint_keys[hint_pick("V", 0, false)].mod);
+    assert(hint_keys[hint_pick("View", 1, false)].key == SDLK_V); /* a phone's: the word alone */
+    assert(strstr(screen_said(app, true, said, sizeof said), "V: view."));
+    /* V opens the box, its rows the options, a value each between the arrows */
+    key(app, SDLK_V);
+    assert(app->options_shown && app->options_focus == 0 && app->menu.view == GUI_LOAD_GAMES);
+    render(app);
+    shows(app, "- Recent Games  < On >", yellow);
+    shows(app, "- Dumps         < On >", normal);
+    /* Enter: Recent Games off, kept at once, Games without its rows */
+    key(app, SDLK_RETURN);
+    assert(app->options_shown && !recent_on(app) && app->browser.head == 0 && games_lead(app) == 0);
+    kept = (char*)snx_read_file(app->app_file, &size);
+    assert(kept && strstr(kept, "\nrecent_games = off\ngames_dumps = on\n"));
+    free(kept);
+    render(app);
+    shows(app, "- Recent Games  < Off >", yellow);
+    hides(app, "Recent Games", rgb(app->theme.soft));
+    /* Down, then Right: Dumps off, the dumps out of the list and its side box, the groups' headings with them */
+    key(app, SDLK_DOWN);
+    assert(app->options_focus == 1);
+    key(app, SDLK_RIGHT);
+    assert(!dumps_on(app) && app->games.count == 1 && games_lists(app, "alpha game"));
+    kept = (char*)snx_read_file(app->app_file, &size);
+    assert(kept && strstr(kept, "\nrecent_games = off\ngames_dumps = off\n"));
+    free(kept);
+    key(app, SDLK_ESCAPE); /* the box closed, Games still there */
+    assert(!app->options_shown && app->menu.view == GUI_LOAD_GAMES);
+    render(app);
+    hides(app, "Dumps", rgb(app->theme.soft)); /* a group's heading */
+    hides(app, "dumps", rgb(app->theme.soft));
+    shows(app, "recompiled", rgb(app->theme.soft));
+    /* read back as the menu opens; an app.ini without them, an older version's, has the defaults: on, iOS's off */
+    memset(app->options, 0, sizeof app->options);
+    app->message[0] = 0;
+    app_load(app);
+    assert(!recent_on(app) && !dumps_on(app) && !app->message[0]);
+    snprintf(expected, sizeof expected, "[app]\ntheme = %s\n", app->theme.id);
+    assert(!snx_write_file(app->app_file, expected, strlen(expected)));
+    games_defaults(app, false);
+    app_load(app);
+    assert(recent_on(app) && dumps_on(app) && !app->message[0]);
+    games_defaults(app, true);
+    app_load(app);
+    assert(!recent_on(app) && !dumps_on(app) && !app->message[0]);
+    /* a word it does not know: named with the word it keeps, the file's last it knows or the default's */
+    games_defaults(app, false);
+    {
+        const char* broken = "[app]\nrecent_games = maybe\ngames_dumps = off\ngames_dumps = none\n";
+        assert(!snx_write_file(app->app_file, broken, strlen(broken)));
+        app_load(app);
+        snprintf(expected, sizeof expected,
+                 "Not used from %s: recent_games = maybe (it keeps on), games_dumps = none (it keeps off)",
+                 app->app_file);
+        assert(recent_on(app) && !dumps_on(app) && !strcmp(app->message, expected));
+        broken = "[app]\nrecent_games = maybe\nrecent_games = off\n"; /* the file's own after it, in use after it */
+        assert(!snx_write_file(app->app_file, broken, strlen(broken)));
+        games_defaults(app, false);
+        app->message[0] = 0;
+        app_load(app);
+        snprintf(expected, sizeof expected, "Not used from %s: recent_games = maybe (it keeps off)", app->app_file);
+        assert(!recent_on(app) && dumps_on(app) && !strcmp(app->message, expected));
+        app->message[0] = 0;
+    }
+    /* the pointer: over a row its focus, a click changes it; a click off the box closes it */
+    list_games(app);
+    key(app, SDLK_V);
+    {
+        GuiViewBoxes d;
+        GuiRect dumps_row;
+        view_boxes(app, &d);
+        dumps_row = ui_row_box(app, ui_view_row(d.rects, app->scale, UI_VIEW_ROWS, 1));
+        point(app, dumps_row, false);
+        assert(app->options_focus == 1 && dumps_on(app));
+        point(app, dumps_row, true);
+        assert(app->options_shown && !dumps_on(app) && !games_lists(app, "beta dump.nsp"));
+        mouse_px(app, d.box.x + d.box.w + 2, d.box.y + d.box.h + 2, true);
+        assert(!app->options_shown);
+    }
+    /* Dumps off reads no dumps' folder: one that cannot be read is named with them on alone */
+    {
+        char* gone = snx_path_join(root, "gone dumps");
+        app->folders[0] = gone;
+        app->folders_library[0] = GUI_LIBRARY_DUMPS;
+        app->folders_deep[0] = false;
+        app->folder_count = 1;
+        games_defaults(app, false);
+        list_games(app);
+        assert(strstr(app->message, "gone dumps"));
+        app->options[GUI_OPTION_DUMPS] = 1;
+        list_games(app);
+        assert(!strstr(app->message, "gone dumps") && !games_lists(app, "beta dump.nsp"));
+        app->folder_count = 0;
+        free(gone);
+#ifndef _WIN32
+        assert(!chmod(dumps, 0)); /* dumps/ itself, where it cannot be read (not as root) */
+        {
+            char** names = NULL;
+            size_t count = 0;
+            bool unreadable = snx_list_dir(dumps, &names, &count) != 0;
+            if (!unreadable) snx_free_strings(names, count);
+            list_games(app);
+            assert(!app->message[0]);
+            games_defaults(app, false);
+            list_games(app);
+            assert(!unreadable || strstr(app->message, dumps));
+        }
+        assert(!chmod(dumps, 0755));
+#endif
+        app->message[0] = 0;
+    }
+    games_defaults(app, false);
+    app->recent = was_recent;
+    app->recent_file = was_recent_file;
+    app->folder_count = was_folders;
+    app->folders[0] = was_folder;
+    app->folders_library[0] = was_library;
+    app->folders_deep[0] = was_deep;
+    free(app->games_dir);
+    free(app->app_file);
+    app->games_dir = was_games;
+    app->data_dir = was_data;
+    app->app_file = was_app;
+    go_tab(app, GUI_TAB_MENU);
+    app->games_stamp = stamp_now(app);
+    app->message[0] = 0;
+    assert(!snx_remove_tree(root));
+    free(game);
+    free(dump);
+    free(cia);
+    free(dumps);
+    free(root);
 }
 int main(int argc, char** argv) {
 #ifdef _WIN32
@@ -1830,11 +2019,10 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RIGHT); /* the next theme */
         snprintf(id, sizeof id, "%s", app.theme.id);
         assert(strcmp(id, first_id));
-        snprintf(
-            expected, sizeof expected,
-            "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\nui_scale = 1\nlanguage = auto\n"
-            "animations = 0\nside_box = auto\n",
-            id);
+        snprintf(expected, sizeof expected,
+                 APP_INI_HEAD "theme = %s\nui_scale = 1\nlanguage = auto\n"
+                              "animations = 0\nside_box = auto\n" GAMES_DEFAULTS,
+                 id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
         free(kept);
@@ -1859,8 +2047,8 @@ int main(int argc, char** argv) {
         assert(app.menu.text_size == -3);
         pick_size(&app, 0, true);
         snprintf(expected, sizeof expected,
-                 "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\nui_scale = auto\n"
-                 "language = auto\nanimations = 0\nside_box = auto\n",
+                 APP_INI_HEAD "theme = %s\nui_scale = auto\n"
+                              "language = auto\nanimations = 0\nside_box = auto\n" GAMES_DEFAULTS,
                  first_id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -1930,8 +2118,8 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RETURN); /* Enter goes round too */
         assert(app.language == 2 && snx_tr_language() == 1 && !strcmp(app.app_form.language, "Test\303\252s"));
         snprintf(expected, sizeof expected,
-                 "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\nui_scale = auto\n"
-                 "language = xx\nanimations = 0\nside_box = auto\n",
+                 APP_INI_HEAD "theme = %s\nui_scale = auto\n"
+                              "language = xx\nanimations = 0\nside_box = auto\n" GAMES_DEFAULTS,
                  app.theme.id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -4001,6 +4189,7 @@ int main(int argc, char** argv) {
         free(recent_file);
     }
 
+    view_box(&app, temporary);
     /* 3DS: its own driver for drops, CIA browser and recents, with no Switch
        flags or direct execution, even when another item is hovered. */
     {

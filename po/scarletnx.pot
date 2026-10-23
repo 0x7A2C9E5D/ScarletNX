@@ -633,8 +633,21 @@ msgid "Off"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Recent Games"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Dumps"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "Not kept for the next start: %s could not be written"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid " (it keeps %s)"
 msgstr ""
 
 #: src/gui/main.c
@@ -682,7 +695,19 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "View."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "P: folders."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "V: view."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -938,6 +963,12 @@ msgstr ""
 msgid "%s: its updates, DLCs, mods and cheats kept"
 msgstr ""
 
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "View"
+msgstr ""
+
 #: src/gui/main.c
 msgid "SCARLETNX  /  SETTINGS"
 msgstr ""
@@ -1042,10 +1073,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "none"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Recent Games"
 msgstr ""
 
 #: src/gui/main.c
@@ -2073,10 +2100,6 @@ msgid "caches"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Dumps"
-msgstr ""
-
-#: src/gui/main.c
 msgid "found"
 msgstr ""
 
@@ -2639,6 +2662,12 @@ msgstr ""
 #: src/gui/main.c
 #, snx-key
 msgid "P"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "V"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word

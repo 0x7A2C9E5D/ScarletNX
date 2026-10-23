@@ -70,6 +70,13 @@
 		android.row_height = 40px
 	}
 }
+# the box Games' V opens: an option of the list a row each, its value between the arrows Left and Right go by
+[scene]View {
+	[list]Rows {
+		max_rows = 8
+		android.row_height = 40px
+	}
+}
 # the OK under the files of a box over the screen (what an older version left, what Clean Old Settings did): any key,
 # button or finger closes the box before a row is hit, so the row's own action is none (@)
 [scene]Files {

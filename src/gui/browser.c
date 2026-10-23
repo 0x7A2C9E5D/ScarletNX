@@ -460,8 +460,8 @@ bool gui_games_group(GuiGames* games, const char* ready, const char* dumps,
     GuiGames out;
     int group;
     bool ok;
-    for (i = 0; i < games->count; ++i)
-        if (games->paths[i] && !(dump_entry(games, i) && made && made(games->paths[i], user)))
+    for (i = 0; i < games->count; ++i) /* no dumps' heading: none of the second group counted, so none moved */
+        if (games->paths[i] && !(dump_entry(games, i) && (!dumps || (made && made(games->paths[i], user)))))
             in[dump_entry(games, i)]++;
     memset(&out, 0, sizeof out);
     out.names = (char**)calloc(room, sizeof *out.names);
