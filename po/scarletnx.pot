@@ -345,6 +345,12 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "Arrows: select. Enter/Space: open. PgUp/PgDown: page. F5: refresh."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "R: recompile."
 msgstr ""
 
@@ -650,6 +656,20 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Last opened"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "View"
+msgstr ""
+
+#: src/gui/main.c
+msgid "List"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Grid"
 msgstr ""
 
 #: src/gui/main.c
@@ -975,12 +995,6 @@ msgstr ""
 msgid "%s: its updates, DLCs, mods and cheats kept"
 msgstr ""
 
-#. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
-#, snx-key
-msgid "View"
-msgstr ""
-
 #: src/gui/main.c
 msgid "SCARLETNX  /  SETTINGS"
 msgstr ""
@@ -1160,6 +1174,11 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "JIT cache: unreadable. Play once to rebuild it."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%zu game(s)"
 msgstr ""
 
 #: src/gui/main.c

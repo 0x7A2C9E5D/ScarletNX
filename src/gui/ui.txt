@@ -27,6 +27,17 @@
 		android.row_height = 40px
 	}
 }
+# Games as a grid (the View box's View: Grid): a tile a game, its icon over its name, as many a line as fit; Recent
+# Games and a group's heading each on a line of its own
+[scene]GamesGrid {
+	[list]Tiles {
+		max_rows = 64
+		row_gap = 8px
+		tile_width = 12cols
+		tile_height = 4rows + 8px
+		android.row_height = 40px
+	}
+}
 # the Settings and the theme editor: the groups, or the theme's keys, in the list's column; beside them, under the
 # side box's head, the open group's rows or the focused one's (Folders: on the whole screen, each group under its title)
 [scene]FormList {
