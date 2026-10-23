@@ -3579,7 +3579,7 @@ static void draw_games(App* app) {
     if (g.place.side.h) {
         y = pane(app, g.place.side, name);
         r = gui_rect(r.x, y, r.w, g.place.side.y + g.place.side.h - y);
-        y += wrap_in(app, r, r.x, y, about, app->browser.selected != 0, ink) * cell_h(app);
+        y += wrap_in(app, r, r.x, y, visible_path(about), app->browser.selected != 0, ink) * cell_h(app);
         if (kind[0]) y += wrap_in(app, r, r.x, y, kind, 0, soft) * cell_h(app);
         if (app->aot_state == GUI_AOT_CACHE) {
             char size[32];
@@ -3616,7 +3616,7 @@ static void draw_games(App* app) {
         last_output(app, r, y);
     }
     status_box(app, g.place.status);
-    screen_foot(app, &g.place, kind[0] ? kind : about, shown_keys(app, keys, sizeof keys));
+    screen_foot(app, &g.place, kind[0] ? kind : visible_path(about), shown_keys(app, keys, sizeof keys));
 }
 /* a line that waits on the user, at pixel row y of r: plain at its left, or framed, placed and blinking as the theme's
    prompt says */
