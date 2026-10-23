@@ -2211,6 +2211,14 @@ typedef struct {
 } GuiHintHit;
 /* the rows keys take in width columns; with draw, drawn from pixel y in r, on the foot's band of ink when band; with
    hit, the sentence its pixel is on, a column of the gap either side of one its own */
+/* a row of the foot's keys: a cell of its letters; on a phone a finger's, 40px times the scale as ui.txt's rows */
+static int hint_pitch(const App* app) {
+#ifdef SNX_TOUCH_UI
+    return SDL_max(cell_h(app), 40 * app->scale);
+#else
+    return cell_h(app);
+#endif
+}
 static int hints(App* app, const char* keys, int width, GuiRect r, int y, int draw, int band, GuiHintHit* hit) {
     const GuiTheme* t = &app->theme;
     char key[128], what[128];
@@ -2235,28 +2243,29 @@ static int hints(App* app, const char* keys, int width, GuiRect r, int y, int dr
         if (end == row) break;
         for (x = r.x + r.w - used * cell_w(app);
              (draw || hit) && u != end && (off = hint_off(u), hint_next(&u, key, what, sizeof key));) {
-            int cy = y + rows * cell_h(app), k = gui_text_cols(key), w = hint_width(key, what) * cell_w(app);
-            if (hit && k && !off && hit->y >= (float)cy && hit->y < (float)(cy + cell_h(app)) &&
+            int cy = y + rows * hint_pitch(app), k = gui_text_cols(key), w = hint_width(key, what) * cell_w(app);
+            int ty = cy + (hint_pitch(app) - cell_h(app)) / 2; /* the text in the middle of its row */
+            if (hit && k && !off && hit->y >= (float)cy && hit->y < (float)(cy + hint_pitch(app)) &&
                 hit->x >= (float)(x - cell_w(app)) && hit->x < (float)(x + w + cell_w(app))) {
                 snprintf(hit->key, sizeof hit->key, "%s", key);
                 hit->col = (int)SDL_floorf((hit->x - (float)x) / (float)cell_w(app));
             }
             lit = draw && k && !off && app->hovering && app->hover_y >= (float)cy &&
-                  app->hover_y < (float)(cy + cell_h(app)) && app->hover_x >= (float)(x - cell_w(app)) &&
+                  app->hover_y < (float)(cy + hint_pitch(app)) && app->hover_x >= (float)(x - cell_w(app)) &&
                   app->hover_x < (float)(x + w + cell_w(app)) &&
                   hint_pick(key, (int)SDL_floorf((app->hover_x - (float)x) / (float)cell_w(app)), app->pad_driven) >= 0;
             if (lit) /* the whole sentence, as a button under the pointer: inverted */
-                fill_rect(app, gui_rect(x - s, cy, w + 2 * s, cell_h(app)), band ? t->page : t->focus);
+                fill_rect(app, gui_rect(x - s, ty, w + 2 * s, cell_h(app)), band ? t->page : t->focus);
             else if (draw && k && !off && t->focus_bar)
-                fill_rect(app, gui_rect(x - s, cy, k * cell_w(app) + 2 * s, cell_h(app)), band ? t->soft : t->focus);
+                fill_rect(app, gui_rect(x - s, ty, k * cell_w(app) + 2 * s, cell_h(app)), band ? t->soft : t->focus);
             if (draw && k)
-                text_in(app, r, x, cy, key,
+                text_in(app, r, x, ty, key,
                         rgb(off                    ? t->soft
                             : lit                  ? (band ? t->ink : t->page)
                             : t->focus_bar || band ? t->page
                                                    : t->focus));
             if (draw)
-                text_in(app, r, x + (k + (k ? 1 : 0)) * cell_w(app), cy, what,
+                text_in(app, r, x + (k + (k ? 1 : 0)) * cell_w(app), ty, what,
                         rgb(off    ? t->soft
                             : lit  ? (band ? t->ink : t->page)
                             : band ? t->page
@@ -2271,7 +2280,11 @@ static int hints(App* app, const char* keys, int width, GuiRect r, int y, int dr
 /* ---- the foot and the tips: the keys' box, the tips' beside it or on a row under the head ---- */
 /* the foot's letters, a size under the rest's but 1 at the least: what draws or measures the keys, and the tips when
    they are in the foot, does it with app->scale set to them, then puts the menus' back */
+#ifdef SNX_TOUCH_UI
+static int foot_scale(const App* app) { return app->scale; } /* a finger's buttons: the text's letters */
+#else
 static int foot_scale(const App* app) { return SDL_max(1, app->scale - 1); }
+#endif
 /* the tips under the head, a Settings box's note and the Status box: their letters a half step under the text's,
    between its size and the foot's (1.5x by a 2x text); app->half as it was, to put back */
 static int text_half(App* app) {
@@ -3458,7 +3471,7 @@ static int frame_keys(App* app, int width) {
     h = SDL_max(!app->frame.tips_foot || !t->tips_wrap ? 1 : 2,
                 hints(app, app->frame.keys, foot_text(app, gui_rect(0, 0, width, 0), t->footer_box).w / cell_w(app),
                       none, 0, 0, 0, NULL)) *
-            cell_h(app) +
+            hint_pitch(app) +
         4 * app->scale;
     app->scale = s;
     return h;
@@ -9439,7 +9452,7 @@ static bool foot_press(App* app, float x, float y) {
     text = foot_text(app, p.keys, app->theme.footer_box);
     rows = hints(app, say, text.w / cell_w(app), text, text.y, 0, 0, NULL);
     hit.x = x;
-    hit.y = SDL_clamp(y, (float)text.y, (float)(text.y + rows * cell_h(app) - 1));
+    hit.y = SDL_clamp(y, (float)text.y, (float)(text.y + rows * hint_pitch(app) - 1));
     hit.key[0] = 0;
     hints(app, say, text.w / cell_w(app), text, text.y, 0, 0, &hit);
     app->scale = s;
