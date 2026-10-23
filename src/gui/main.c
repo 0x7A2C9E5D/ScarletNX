@@ -303,6 +303,7 @@ typedef struct App {
     SDL_Gamepad* listened[16]; /* the controllers open meanwhile: a press comes only from an open one */
     int listened_count;
     bool theme_from_app;       /* the theme editor goes back to the App's rows */
+    bool folders_from_games;   /* Folders goes back to Games, whose Add a folder opened it */
     SnxPadScreen pad;          /* the button map's, on the row gamepad_map, A and B as gamepad_swap_ab says */
     SnxPadDrawing pad_drawing; /* as last drawn: what a click or a tap lands on */
     SDL_Gamepad* gamepad;      /* the pad it shows, the first one plugged in, while it is open */
@@ -3632,7 +3633,7 @@ static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** ab
     size_t selected = app->browser.selected, head = app->browser.head;
     kind[0] = 0;
     if (!selected) {
-        *about = snx_tr("Pick a folder of games or dumps, listed after recompiled/ and dumps/");
+        *about = snx_tr("Settings > App > Folders: the libraries Games lists, and a folder added to one");
         return snx_tr("Add a folder");
     }
     if (selected < head && (int)selected - 1 < recent_shown(app)) {
@@ -4987,6 +4988,13 @@ static void folders_take(App* app, const char* path) {
         snprintf(app->editor.note, sizeof app->editor.note, "%s",
                  snx_tr("Drop it on the folder it takes the place of, or on a library's row"));
 }
+/* Games' Add a folder: Settings > App > Folders, at the recompiled library's Add a folder, ESC back to Games */
+static void folders_from_games(App* app) {
+    app->group = 0;
+    open_folders(app, folder_row_of(app, GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED));
+    app->folders_from_games = true;
+    space_start(app);
+}
 /* Select (with del, Del) on a row of Folders: a place picks another folder (Del: asks before its default); dumps/ says
    what it is; an Extra asks before it is taken off; Add a folder opens the picker for its library */
 static void folder_select(App* app, int row, bool del) {
@@ -5193,6 +5201,7 @@ static void leave_editor(App* app) {
 static void pad_close(App* app);
 /* ESC on a screen: a group's and the App's go back to the groups, the theme editor to where it was opened */
 static void device_stop(App* app);
+static void list_games(App* app);
 static void leave_form(App* app) {
     int form = app->form;
     device_stop(app);
@@ -5205,7 +5214,10 @@ static void leave_form(App* app) {
         app->editing = true;
     } else if (form == GUI_FORM_GROUP || form == GUI_FORM_APP || form == GUI_FORM_USERS)
         settings_top(app, app->group);
-    else if (form == GUI_FORM_FOLDERS)
+    else if (form == GUI_FORM_FOLDERS && app->folders_from_games) { /* Games again, its list with what was added */
+        app->folders_from_games = false;
+        list_games(app);
+    } else if (form == GUI_FORM_FOLDERS)
         open_app(app, GUI_APP_PLACES);
     else if (form == GUI_FORM_THEME && app->theme_from_app) {
         app->theme_from_app = false;
@@ -8919,7 +8931,7 @@ static void go_tab(App* app, int tab) {
         if (app->form == GUI_FORM_PAD) pad_close(app);
         device_stop(app);
         leave_editor(app);
-        app->theme_from_app = false;
+        app->theme_from_app = app->folders_from_games = false;
     }
     if (tab == tab_shown(app)) return;
     app->message[0] = 0;
@@ -8952,7 +8964,7 @@ static void menu_key(App* app, GuiKey key) {
             app->menu.view = GUI_LOAD_NONE;
             app->message[0] = 0;
         } else if (action == GUI_BROWSER_HEAD && !row)
-            open_folder_picker(app);
+            folders_from_games(app);
         else if (action == GUI_BROWSER_HEAD && (int)row - 1 < recent_shown(app))
             open_recent(app, (int)row - 1);
         else if (action ==

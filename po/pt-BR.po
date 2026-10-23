@@ -747,8 +747,8 @@ msgid "none"
 msgstr "nenhuma"
 
 #: src/gui/main.c
-msgid "Pick a folder of games or dumps, listed after recompiled/ and dumps/"
-msgstr "Escolha uma pasta de jogos ou dumps, listada depois de recompiled/ e dumps/"
+msgid "Settings > App > Folders: the libraries Games lists, and a folder added to one"
+msgstr "Configurações > App > Pastas: as bibliotecas que Jogos lista, e uma pasta posta numa delas"
 
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c

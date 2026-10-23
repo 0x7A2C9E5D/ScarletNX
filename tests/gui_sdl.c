@@ -4163,20 +4163,20 @@ int main(int argc, char** argv) {
     assert(app.menu.view == GUI_LOAD_GAMES && !app.games.count && app.browser.head == 1);
     render(&app);
     shows(&app, "- Add a folder", yellow);
-    shows(&app, "Pick a folder of games", normal); /* beside it, what it does */
-    /* it opens the folder picker of Settings > App > Folders, whose answer (none here) the message says */
+    shows(&app, "Settings > App > Folders", normal); /* beside it, what it does */
+    /* a shortcut: Settings > App > Folders at the recompiled library's Add a folder; ESC is Games again, its list
+       read again; a tab away goes where it goes from the Settings, Games forgotten */
     key(&app, SDLK_RETURN);
-    {
-        SDL_Event answer;
-        Uint64 until = SDL_GetTicks() + 2000;
-        while (!app.message[0] && SDL_GetTicks() < until) /* its answer comes on the picker's thread */
-            while (SDL_PollEvent(&answer)) event(&app, &answer);
-    }
-    picker_box_closed(&app);
-    assert(app.menu.view == GUI_LOAD_GAMES && !app.editing &&
-           (!strcmp(app.message, "Folders: No folder was picked.") ||
-            !strncmp(app.message, "Folders: The folder picker could not open: ", 43)));
-    app.message[0] = 0;
+    assert(app.editing && app.form == GUI_FORM_FOLDERS && app.folders_from_games &&
+           app.editor.row == folder_row_of(&app, GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED));
+    key(&app, SDLK_ESCAPE);
+    assert(!app.editing && !app.folders_from_games && app.menu.view == GUI_LOAD_GAMES && !app.browser.selected);
+    key(&app, SDLK_RETURN);
+    assert(app.form == GUI_FORM_FOLDERS && app.folders_from_games);
+    key(&app, SDLK_TAB);
+    assert(!app.editing && !app.folders_from_games && app.menu.view == GUI_LOAD_NONE);
+    go_tab(&app, GUI_TAB_GAMES);
+    assert(app.menu.view == GUI_LOAD_GAMES);
     for (int i = 0; i < 35; ++i) {
         char name[40];
 #ifdef _WIN32

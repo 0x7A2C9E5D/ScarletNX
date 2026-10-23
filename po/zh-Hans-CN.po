@@ -747,7 +747,7 @@ msgid "none"
 msgstr "无"
 
 #: src/gui/main.c
-msgid "Pick a folder of games or dumps, listed after recompiled/ and dumps/"
+msgid "Settings > App > Folders: the libraries Games lists, and a folder added to one"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word

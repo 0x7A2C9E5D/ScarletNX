@@ -323,8 +323,9 @@ directories are excluded. The folders are looked at once a second while the menu
 names only), so a game put in or taken out shows in the open list; a folder that
 cannot be read is named and the others still listed.
 
-- **Add a folder** is the first row on every page, a wider gap under it: it opens the folder picker, the folder going in
-  the library of what it holds (Settings > App > Folders). Under it the recent games, then the page's games. ESC returns to the menu.
+- **Add a folder** is the first row on every page, a wider gap under it: a shortcut to Settings > App > Folders, at
+  the recompiled library's Add a folder, where ESC comes back to Games and its list read again. Under it the recent
+  games, then the page's games. ESC returns to the menu.
 - Up/Down go round Add a folder, the recent games and the page's files. Enter/Space opens one.
 - **R** (on Android a tap on *Recompile* at the foot) recompiles the Switch game in focus, recent or on the page,
   where it is, or prepares its dump again: `scarletnx -r`. It plays nothing;
