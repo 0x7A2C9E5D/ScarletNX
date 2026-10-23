@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <sys/resource.h>
 #include <sys/mman.h>
 #include <sys/sysctl.h>
@@ -105,8 +106,32 @@ static void stamped(const char* what) {
 }
 /* Says in the console log when the debugger attaches or lets go, and when the app goes behind others, comes back or is
    warned of memory: what a game finds when it asks for code memory depends on them, and a log line has no time */
+static bool watched_debugger;
+/* once a second: whether a debugger is there, and the footprint each time it has moved 128 MiB from the last one said,
+   which is what a run of long work costs, up to the system taking the app */
+static void* watch_thread(void* unused) {
+    unsigned long long shown = 0;
+    (void)unused;
+    for (;;) {
+        task_vm_info_data_t info;
+        mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+        bool now = debugger_traced();
+        sleep(1);
+        if (now != watched_debugger) stamped(now ? "debugger: attached" : "debugger: let go");
+        watched_debugger = now;
+        if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) {
+            unsigned long long used = info.phys_footprint >> 20;
+            if (used + 128 <= shown || used >= shown + 128) {
+                char line[64];
+                snprintf(line, sizeof line, "app: footprint %llu MiB", used);
+                stamped(line);
+                shown = used;
+            }
+        }
+    }
+    return NULL;
+}
 static void watch_start(void) {
-    static bool was;
     NSNotificationCenter* center = NSNotificationCenter.defaultCenter;
     static NSString* const names[][2] = {{@"UIApplicationDidEnterBackgroundNotification", @"app: in the background"},
                                          {@"UIApplicationWillEnterForegroundNotification", @"app: back in the foreground"},
@@ -114,8 +139,8 @@ static void watch_start(void) {
                                          {@"UIApplicationWillResignActiveNotification", @"app: resigning active"},
                                          {@"UIApplicationDidBecomeActiveNotification", @"app: active"}};
     size_t i;
-    was = debugger_traced();
-    stamped(was ? "debugger: attached at start" : "debugger: not attached at start");
+    watched_debugger = debugger_traced();
+    stamped(watched_debugger ? "debugger: attached at start" : "debugger: not attached at start");
     for (i = 0; i < sizeof names / sizeof *names; ++i) {
         NSString* line = names[i][1];
         [center addObserverForName:names[i][0]
@@ -126,29 +151,10 @@ static void watch_start(void) {
                             stamped(line.UTF8String);
                         }];
     }
-    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
-                                                     dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
-    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_SEC / 10);
-    dispatch_source_set_event_handler(timer, ^{
-        static unsigned long long shown;
-        task_vm_info_data_t info;
-        mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
-        bool now = debugger_traced();
-        if (now != was) stamped(now ? "debugger: attached" : "debugger: let go");
-        was = now;
-        /* the footprint each time it has moved 128 MiB from the last one said: what a run of long work costs, up to the
-           system taking the app */
-        if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) {
-            unsigned long long used = info.phys_footprint >> 20;
-            if (used + 128 <= shown || used >= shown + 128) {
-                char line[64];
-                snprintf(line, sizeof line, "app: footprint %llu MiB", used);
-                stamped(line);
-                shown = used;
-            }
-        }
-    });
-    dispatch_resume(timer);
+    {
+        pthread_t thread;
+        if (!pthread_create(&thread, NULL, watch_thread, NULL)) pthread_detach(thread);
+    }
 }
 #endif
 
