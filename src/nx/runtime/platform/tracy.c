@@ -43,6 +43,9 @@ static PMutex g_tracy_capture_lock = PMUTEX_INIT;
 static void tracy_capture_lock(void) { pm_lock(&g_tracy_capture_lock); }
 static void tracy_capture_unlock(void) { pm_unlock(&g_tracy_capture_lock); }
 
+/* the plots' formats, once a GUI attaches */
+static void tracy_plots_send(void);
+
 /* The sampler starts when the run asks for it, tracy_sampling, at the connect. Its samples land on the timeline as
    gray sample zones, which with JIT'd guest code and the drivers' own threads (the NVIDIA helpers', MangoHud's) reads
    as a wall of [unknown]; the instrumented zones alone don't, so the sampler is off unless the trace wants the flame
@@ -311,6 +314,7 @@ TracyCZoneCtx snx_tracy_zone_begin(const struct ___tracy_source_location_data* s
         if (t_attached) {
             tracy_attach_thread();
             tracy_sampling_start();
+            tracy_plots_send();
         }
         snx_tracy_leave();
         if (!t_attached) return ctx;
@@ -352,6 +356,129 @@ void snx_tracy_thread_name(const char* name) {
     snprintf(t_name, sizeof t_name, "%s", name);
     if (!snx_tracy_enter()) return;
     if (TracyCIsConnected) TracyCSetThreadName(t_name);
+    snx_tracy_leave();
+}
+
+/* The plots' formats, sent when a GUI attaches: the byte counts as sizes, the idle mark as steps. A second
+   connection gets them again, its server knowing none of it. */
+static void tracy_plots_send(void) {
+    static const struct {
+        const char* name;
+        int type, step, fill;
+    } cfg[] = {
+        {"gpu memory", 1, 0, 1},   {"gpu memory budget", 1, 0, 1}, {"texture memory", 1, 0, 1},
+        {"guest memory", 1, 0, 1}, {"gpu idle", 0, 1, 0},
+    };
+    if (!snx_tracy_enter()) return;
+    if (TracyCIsConnected)
+        for (size_t i = 0; i < sizeof cfg / sizeof *cfg; i++)
+            ___tracy_emit_plot_config(cfg[i].name, cfg[i].type, cfg[i].step, cfg[i].fill, 0);
+    snx_tracy_leave();
+}
+
+int snx_tracy_frame_start(const char* name) {
+    int sent = 0;
+    if (!name || !*name || !snx_tracy_enter()) return 0;
+    if (TracyCIsConnected) {
+        ___tracy_emit_frame_mark_start(name);
+        sent = 1;
+    }
+    snx_tracy_leave();
+    return sent;
+}
+
+void snx_tracy_frame_at_scope(SnxTracyFrame* f) {
+    if (!f->started) return;
+    f->started = 0;
+    if (!snx_tracy_enter()) return;
+    if (TracyCIsConnected) ___tracy_emit_frame_mark_end(f->name);
+    snx_tracy_leave();
+}
+
+/* The GPU track's emissions, each gated on its own: the caller calls them as they come. A context is announced
+   once per connection, a zone only after its context, so the server knows where the timestamps belong; a
+   disconnection found on any of them re-arms the announcement. */
+#define SNX_TRACY_GPU_CTX 8
+static int g_gpu_sent[SNX_TRACY_GPU_CTX];
+static uint16_t g_gpu_query[SNX_TRACY_GPU_CTX];
+
+static int gpu_ctx_ok(int ctx) { return ctx >= 0 && ctx < SNX_TRACY_GPU_CTX; }
+
+int snx_tracy_gpu_context(int ctx, int64_t gpu_time, float period, int calibrated, const char* name) {
+    int announced = 0;
+    if (!gpu_ctx_ok(ctx) || !snx_tracy_enter()) return 0;
+    if (TracyCIsConnected) {
+        if (!g_gpu_sent[ctx]) {
+            struct ___tracy_gpu_new_context_data c = {gpu_time, period, (uint8_t)ctx, calibrated ? 1 : 0, 2};
+            ___tracy_emit_gpu_new_context_serial(c);
+            if (name && *name) {
+                struct ___tracy_gpu_context_name_data n = {(uint8_t)ctx, name, (uint16_t)strlen(name)};
+                ___tracy_emit_gpu_context_name_serial(n);
+            }
+            g_gpu_sent[ctx] = 1;
+            announced = 1;
+        }
+    } else
+        g_gpu_sent[ctx] = 0;
+    snx_tracy_leave();
+    return announced;
+}
+
+uint16_t snx_tracy_gpu_zone_begin(const char* name, uint32_t color, int ctx) {
+    uint16_t q = 0;
+    if (!gpu_ctx_ok(ctx) || !name || !*name || !snx_tracy_enter()) return 0;
+    if (TracyCIsConnected && g_gpu_sent[ctx]) {
+        /* one srcloc a zone: the name is the caller's, copied by the client at the allocation */
+        u64 srcloc = ___tracy_alloc_srcloc_name(0, __FILE__, sizeof __FILE__ - 1, __func__, sizeof __func__ - 1, name,
+                                                strlen(name), color);
+        if (srcloc) {
+            struct ___tracy_gpu_zone_begin_data d = {srcloc, ++g_gpu_query[ctx], (uint8_t)ctx};
+            q = g_gpu_query[ctx];
+            ___tracy_emit_gpu_zone_begin_alloc_serial(d);
+        }
+    }
+    snx_tracy_leave();
+    return q;
+}
+
+uint16_t snx_tracy_gpu_zone_end(uint16_t query, int ctx) {
+    uint16_t q = 0;
+    if (!query || !gpu_ctx_ok(ctx) || !snx_tracy_enter()) return 0;
+    if (TracyCIsConnected) {
+        struct ___tracy_gpu_zone_end_data d = {++g_gpu_query[ctx], (uint8_t)ctx};
+        q = g_gpu_query[ctx];
+        ___tracy_emit_gpu_zone_end_serial(d);
+    }
+    snx_tracy_leave();
+    return q;
+}
+
+void snx_tracy_gpu_time(int64_t gpu_time, uint16_t query, int ctx) {
+    if (!query || !gpu_ctx_ok(ctx) || !snx_tracy_enter()) return;
+    if (TracyCIsConnected) {
+        struct ___tracy_gpu_time_data t = {gpu_time, query, (uint8_t)ctx};
+        ___tracy_emit_gpu_time_serial(t);
+    }
+    snx_tracy_leave();
+}
+
+void snx_tracy_gpu_sync(int64_t gpu_time, int ctx) {
+    if (!gpu_ctx_ok(ctx) || !snx_tracy_enter()) return;
+    if (TracyCIsConnected) {
+        struct ___tracy_gpu_time_sync_data s = {gpu_time, (uint8_t)ctx};
+        ___tracy_emit_gpu_time_sync_serial(s);
+    } else
+        g_gpu_sent[ctx] = 0;
+    snx_tracy_leave();
+}
+
+void snx_tracy_gpu_calibrate(int64_t gpu_time, int64_t cpu_delta, int ctx) {
+    if (!gpu_ctx_ok(ctx) || !snx_tracy_enter()) return;
+    if (TracyCIsConnected) {
+        struct ___tracy_gpu_calibration_data c = {gpu_time, cpu_delta, (uint8_t)ctx};
+        ___tracy_emit_gpu_calibration_serial(c);
+    } else
+        g_gpu_sent[ctx] = 0;
     snx_tracy_leave();
 }
 

@@ -358,6 +358,7 @@ static int create_device(void) {
     u32 next = 0;
     int has_shader_clock = 0, has_feedback_dynamic = 0, has_cond = 0, has_provoking = 0, video_exts = 0;
     int has_portability = 0, has_reconvergence = 0;
+    int has_calibrated = 0;
     if (!g_opt_headless) ext[next++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
     {
         u32 n = 0;
@@ -381,6 +382,8 @@ static int create_device(void) {
             /* the driver's budget for each heap, the other processes' use taken out, for VMA: without it VMA took
                80% of a heap's size as its budget, blind to what the desktop and other programs hold */
             if (!strcmp(e[i].extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) has_budget = 1;
+            /* the GPU's clock next to the client's, for the profiler's GPU track (gpuprof.c's calibration) */
+            if (!strcmp(e[i].extensionName, VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME)) has_calibrated = 1;
             /* a portability driver's subset must be enabled when it has one (MoltenVK) */
             if (!strcmp(e[i].extensionName, "VK_KHR_portability_subset")) {
                 ext[next++] = "VK_KHR_portability_subset";
@@ -394,6 +397,19 @@ static int create_device(void) {
         free(e);
     }
     if (has_budget) ext[next++] = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;
+    /* the extension only with a host time domain among the calibrateable ones: CLOCK_MONOTONIC_RAW is the clock
+       the Tracy client keeps its own time in, so the two domains' pair maps the GPU's timestamps onto it */
+    if (has_calibrated) {
+        u32 nd = 0;
+        if (VK_OK(vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(g_vk.phys, &nd, NULL)) && nd) {
+            VkTimeDomainEXT dom[8];
+            if (nd > 8) nd = 8;
+            if (VK_OK(vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(g_vk.phys, &nd, dom)))
+                for (u32 i = 0; i < nd; i++)
+                    if (dom[i] == VK_TIME_DOMAIN_CLOCK_MONOTONIC_RAW_EXT) g_vk.has_calibrated_host = 1;
+        }
+        if (g_vk.has_calibrated_host) ext[next++] = VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME;
+    }
     g_vk.video_family = g_settings.vulkan_video_decode && video_exts == 3 ? video_decode_family() : ~0u;
     if (g_vk.video_family != ~0u) {
         ext[next++] = VK_KHR_VIDEO_QUEUE_EXTENSION_NAME;

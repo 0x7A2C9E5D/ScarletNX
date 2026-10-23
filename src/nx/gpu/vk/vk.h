@@ -82,6 +82,8 @@ typedef struct {
     VkPhysicalDeviceFeatures feat;
     int has_divisor;      /* VK_EXT_vertex_attribute_divisor: instance divisors above 1 */
     int has_dynamic_stride; /* a binding's stride is dynamic state, which MoltenVK refuses: a pipeline holds it then */
+    int has_calibrated_host; /* VK_EXT_calibrated_timestamps with CLOCK_MONOTONIC_RAW: the GPU's clock goes next to
+                                the client's, one driver call (gpuprof.c's calibration) */
     int has_xfb;          /* VK_EXT_transform_feedback: draws capture their outputs into guest memory */
     int has_border_color; /* VK_EXT_custom_border_color */
     u32 border_color_max; /* maxCustomBorderColorSamplers: past it, samplers take the nearest built-in color */
@@ -1007,9 +1009,14 @@ extern u64 g_vk_draw_kept, g_vk_draw_checked;
 extern u64 g_vk_fb_draws, g_vk_fb_barriers, g_vk_fb_restarts, g_vk_rt_copies;
 
 /* gpuprof.c, vk_gpu_profile=1: GPU time per rendering pass, summed per target and logged every 10 s */
+/* the Tracy GPU track's contexts, one per queue: the graphics queue's render passes, the compute queue's batches */
+#define VK_GPU_CTX_GRAPHICS 1
+#define VK_GPU_CTX_COMPUTE  2
 void vk_gpuprof_pass_begin(VkCommandBuffer cb, const Surf* rt, const Surf* zt);
 void vk_gpuprof_pass_end(VkCommandBuffer cb);
 void vk_gpuprof_frame_done(u32 slot);
+/* a fresh pair of the GPU's clock and the client's, for the track's calibration (0 without the extension) */
+int vk_gpuprof_clock(i64* cpu, i64* gpu);
 extern u64 g_rec_xfers, g_rec_barriers; /* record.c: copies and blits, and barriers, put in the frame's ring */
 extern u64 g_rec_xfer_kind[3], g_rec_buf_bytes; /* buffer, buffer-image, image copies; buffer copies' bytes */
 

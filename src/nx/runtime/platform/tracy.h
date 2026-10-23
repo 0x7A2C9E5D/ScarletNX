@@ -4,6 +4,9 @@
 #ifndef SNX_TRACY_H
 #define SNX_TRACY_H
 
+#include <stddef.h>
+#include <stdint.h>
+
 #if defined(SNX_TRACY)
 #include <tracy/TracyC.h>
 
@@ -35,15 +38,44 @@ static inline void snx_tracy_zone_end_at_scope(TracyCZoneCtx* ctx) { snx_tracy_z
 #define SNX_ZONE_V(ctx, name, value) SNX_ZONE(ctx, name); SNX_ZONE_VALUE(ctx, value)
 #define SNX_ZONE_TV(ctx, name, value, ...) SNX_ZONE_V(ctx, name, value); SNX_ZONE_TEXT(ctx, __VA_ARGS__)
 #define SNX_ZONE_END(ctx) snx_tracy_zone_end(ctx)
+/* a zone in a named color, for the timeline's kinds at a glance */
+#define SNX_ZONE_C(ctx, name, color)                                                                                   \
+    static const struct ___tracy_source_location_data TracyConcat(snx_tracy_source_, TracyLine) =                     \
+        {name, __func__, TracyFile, (uint32_t)TracyLine, (uint32_t)(color)};                                           \
+    TracyCZoneCtx ctx __attribute__((cleanup(snx_tracy_zone_end_at_scope))) =                                          \
+        snx_tracy_zone_begin(&TracyConcat(snx_tracy_source_, TracyLine))
 #define SNX_MEM_ALLOC(ptr, size, pool) SNX_TRACY_EMIT(TracyCAllocN((const void*)(ptr), (size_t)(size), (pool)))
 #define SNX_MEM_FREE(ptr, pool) SNX_TRACY_EMIT(TracyCFreeN((const void*)(ptr), (pool)))
 #define SNX_FRAME_MARK() SNX_TRACY_EMIT(TracyCFrameMark)
+/* a discontinuous frame: the work to the end of the block, one of a named frame set (the audio tick's, say). A
+   set's starts and ends pair and do not nest, and a set is either all continuous or all discontinuous. */
+typedef struct {
+    int started;
+    const char* name;
+} SnxTracyFrame;
+#define SNX_FRAME_SCOPED(ctx, name)                                                                                    \
+    SnxTracyFrame ctx __attribute__((cleanup(snx_tracy_frame_at_scope))) = {snx_tracy_frame_start(name), (name)}
 #define SNX_PLOT(name, value) SNX_TRACY_EMIT(TracyCPlot(name, value))
 /* the name goes into the client's table, which the server asks for when a GUI connects; kept per thread, so a
    thread that named itself before the client started is named again when it attaches */
 #define SNX_THREAD_NAME(name) snx_tracy_thread_name(name)
+
+/* The GPU track: a context per queue, the zones' query ids paired with their timestamps at the read-back, the two
+   clocks' calibration. A query id of 0 means the emission did not go out: the caller keeps the pair and sends only
+   what it got. The context is announced at the caller's first read-back (snx_tracy_gpu_context, which returns 1
+   then, so the caller can reset its own calibration anchor); a zone goes out only after its context did. */
+int snx_tracy_gpu_context(int ctx, int64_t gpu_time, float period, int calibrated, const char* name);
+uint16_t snx_tracy_gpu_zone_begin(const char* name, uint32_t color, int ctx);
+uint16_t snx_tracy_gpu_zone_end(uint16_t query, int ctx);
+void snx_tracy_gpu_time(int64_t gpu_time, uint16_t query, int ctx);
+void snx_tracy_gpu_sync(int64_t gpu_time, int ctx);
+void snx_tracy_gpu_calibrate(int64_t gpu_time, int64_t cpu_delta, int ctx);
+/* SNX_FRAME_SCOPED's pair: 1 when the start went out, so the block's end sends none otherwise */
+int snx_tracy_frame_start(const char* name);
+void snx_tracy_frame_at_scope(SnxTracyFrame* f);
 #else
 #define SNX_ZONE(ctx, name)      int ctx __attribute__((unused)) = 0
+#define SNX_ZONE_C(ctx, name, color) int ctx __attribute__((unused)) = 0
 #define SNX_ZONE_TEXT(ctx, ...)  ((void)0)
 #define SNX_ZONE_VALUE(ctx, value) ((void)0)
 #define SNX_ZONE_T(ctx, name, ...) int ctx __attribute__((unused)) = 0
@@ -53,8 +85,29 @@ static inline void snx_tracy_zone_end_at_scope(TracyCZoneCtx* ctx) { snx_tracy_z
 #define SNX_MEM_ALLOC(ptr, size, pool) ((void)0)
 #define SNX_MEM_FREE(ptr, pool) ((void)0)
 #define SNX_FRAME_MARK()        ((void)0)
+#define SNX_FRAME_SCOPED(ctx, name) int ctx __attribute__((unused)) = 0
 #define SNX_PLOT(name, value)   ((void)0)
 #define SNX_THREAD_NAME(name)   ((void)0)
+static inline int snx_tracy_gpu_context(int ctx, int64_t gpu_time, float period, int calibrated,
+                                        const char* name) {
+    (void)ctx, (void)gpu_time, (void)period, (void)calibrated, (void)name;
+    return 0;
+}
+static inline uint16_t snx_tracy_gpu_zone_begin(const char* name, uint32_t color, int ctx) {
+    (void)name, (void)color, (void)ctx;
+    return 0;
+}
+static inline uint16_t snx_tracy_gpu_zone_end(uint16_t query, int ctx) {
+    (void)query, (void)ctx;
+    return 0;
+}
+static inline void snx_tracy_gpu_time(int64_t gpu_time, uint16_t query, int ctx) {
+    (void)gpu_time, (void)query, (void)ctx;
+}
+static inline void snx_tracy_gpu_sync(int64_t gpu_time, int ctx) { (void)gpu_time, (void)ctx; }
+static inline void snx_tracy_gpu_calibrate(int64_t gpu_time, int64_t cpu_delta, int ctx) {
+    (void)gpu_time, (void)cpu_delta, (void)ctx;
+}
 #endif
 
 /* Starts the client when --tracy or --tracy-capture asks for it. Returns 1 when the capture it was asked for is not

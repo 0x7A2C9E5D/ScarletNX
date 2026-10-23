@@ -25,7 +25,6 @@ typedef struct {
     u32 kind[3];
     u64 bytes;
     u16 q0, q1; /* the Tracy query ids its begin and end went out with, 0 when it emitted none */
-    u8 emitted;
 } GpPass;
 typedef struct {
     VkQueryPool pool;
@@ -56,18 +55,21 @@ static int g_in_pass;
 static int g_dead; /* the query pool was refused once: stop asking */
 
 #if defined(SNX_TRACY)
-/* Tracy's GPU track: the passes as zones on the GPU's clock, their timestamps read back with the frame's
-   results, the context announced once per connection. A profiling run asks for them: the setting, or the client
-   being up. */
-#define GP_CTX 1 /* the one GPU context this runtime announces */
-static u16 g_query_id;
-static int g_ctx_sent;
+/* Tracy's GPU track: the passes as zones on the GPU's clock, their timestamps read back with the frame's results,
+   the emissions themselves in the platform layer (tracy.c). A profiling run asks for them: the setting, or the
+   client being up. The context is announced calibrated when the device can put its clock next to the client's
+   (has_calibrated_host); else the track is anchored at each frame's read-back instead. */
+static int g_calibrated;
+static i64 g_cal_cpu_prev; /* the client's clock at the context's last calibration pair */
 #endif
 
 static int gp_on(void) {
     if (g_on < 0) {
         g_on = g_settings.gpu_profile && g_vk.props.limits.timestampComputeAndGraphics;
         if (g_settings.gpu_profile && !g_on) WARN("vulkan: vk_gpu_profile: the device has no timestamps on its graphics queue\n");
+#if defined(SNX_TRACY)
+        g_calibrated = g_vk.has_calibrated_host && g_vk.props.limits.timestampComputeAndGraphics;
+#endif
     }
     if (g_dead) return 0;
 #if defined(SNX_TRACY)
@@ -119,25 +121,10 @@ void vk_gpuprof_pass_begin(VkCommandBuffer cb, const Surf* rt, const Surf* zt) {
     g_in_pass = 1;
 #if defined(SNX_TRACY)
     p->q0 = p->q1 = 0;
-    p->emitted = 0;
-    if (snx_tracy_enter()) {
-        if (TracyCIsConnected && g_ctx_sent) {
-            /* One allocation per pass, not a cached one: the client frees it when the begin is emitted (tracy_free in
-               ___tracy_emit_gpu_zone_begin_alloc), so a kept pointer would be used after free. */
-            char name[48];
-            int n = s ? snprintf(name, sizeof name, "gpu pass %ux%u fmt %u", s->w, s->h, (u32)s->f.vk)
-                      : snprintf(name, sizeof name, "gpu pass");
-            u64 srcloc = ___tracy_alloc_srcloc_name(0, "gpuprof", 7, "vk_gpuprof_pass_begin", 21, name,
-                                                    n > 0 ? (size_t)n : 0, 0);
-            if (srcloc) {
-                struct ___tracy_gpu_zone_begin_data d = {srcloc, 0, GP_CTX};
-                p->q0 = ++g_query_id;
-                d.queryId = p->q0;
-                ___tracy_emit_gpu_zone_begin_alloc_serial(d);
-                p->emitted = 1;
-            }
-        }
-        snx_tracy_leave();
+    if (TracyCIsStarted) {
+        char name[48] = "gpu pass";
+        if (s) snprintf(name, sizeof name, "gpu pass %ux%u fmt %u", s->w, s->h, (u32)s->f.vk);
+        p->q0 = snx_tracy_gpu_zone_begin(name, 0x3d8f4a, VK_GPU_CTX_GRAPHICS);
     }
 #endif
 }
@@ -158,14 +145,8 @@ void vk_gpuprof_pass_end(VkCommandBuffer cb) {
     for (int i = 0; i < 3; i++) g_k_at_end[i] = g_rec_xfer_kind[i];
     g_bytes_at_end = g_rec_buf_bytes;
 #if defined(SNX_TRACY)
-    /* The end goes out with the answer the begin had: the connection is not asked again. */
-    if (p->emitted && snx_tracy_enter()) {
-        struct ___tracy_gpu_zone_end_data d = {0, GP_CTX};
-        p->q1 = ++g_query_id;
-        d.queryId = p->q1;
-        ___tracy_emit_gpu_zone_end_serial(d);
-        snx_tracy_leave();
-    }
+    /* the end goes out whenever the begin did: a dropped pair never reaches the server apart */
+    if (p->q0) p->q1 = snx_tracy_gpu_zone_end(p->q0, VK_GPU_CTX_GRAPHICS);
 #endif
 }
 static void gp_report(void);
@@ -191,30 +172,30 @@ void vk_gpuprof_frame_done(u32 slot) {
     if (vkGetQueryPoolResults(g_vk.dev, g->pool, 0, g->used, sizeof ts, ts, 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
         return;
 #if defined(SNX_TRACY)
-    /* the frame's timestamps onto the GPU track, and the GPU clock onto the CPU's: the last timestamp was
-       written before timeline_wait returned, so this moment is its CPU time. */
-    if (snx_tracy_enter()) {
-        if (TracyCIsConnected) {
-            if (!g_ctx_sent) {
-                struct ___tracy_gpu_new_context_data c = {(int64_t)ts[g->used - 1],
-                                                          g_vk.props.limits.timestampPeriod, GP_CTX, 0, 2};
-                ___tracy_emit_gpu_new_context_serial(c);
-                g_ctx_sent = 1;
+    /* the frame's timestamps onto the GPU track. Announced calibrated when the device can put its clock next to
+       the client's (a fresh pair of the two every frame, vk_gpuprof_calibrate); else the GPU clock is anchored at
+       this moment: the last timestamp was written before timeline_wait returned, so this is its CPU time. */
+    if (TracyCIsConnected) {
+        if (snx_tracy_gpu_context(VK_GPU_CTX_GRAPHICS, (i64)ts[g->used - 1], g_vk.props.limits.timestampPeriod,
+                                  g_calibrated, "graphics"))
+            g_cal_cpu_prev = 0;
+        if (g_calibrated) {
+            i64 cpu, gpu;
+            if (vk_gpuprof_clock(&cpu, &gpu)) {
+                if (g_cal_cpu_prev) {
+                    i64 delta = cpu - g_cal_cpu_prev;
+                    if (delta > 0) snx_tracy_gpu_calibrate(gpu, delta, VK_GPU_CTX_GRAPHICS);
+                }
+                g_cal_cpu_prev = cpu;
             }
-            struct ___tracy_gpu_time_sync_data sc = {(int64_t)ts[g->used - 1], GP_CTX};
-            ___tracy_emit_gpu_time_sync(sc);
-            for (u32 i = 0; i + 1 < g->used; i += 2) {
-                const GpPass* p = &g->pass[i / 2];
-                if (!p->emitted) continue;
-                struct ___tracy_gpu_time_data t0 = {(int64_t)ts[i], p->q0, GP_CTX};
-                struct ___tracy_gpu_time_data t1 = {(int64_t)ts[i + 1], p->q1, GP_CTX};
-                ___tracy_emit_gpu_time_serial(t0);
-                ___tracy_emit_gpu_time_serial(t1);
-            }
-        } else {
-            g_ctx_sent = 0;
+        } else
+            snx_tracy_gpu_sync((i64)ts[g->used - 1], VK_GPU_CTX_GRAPHICS);
+        for (u32 i = 0; i + 1 < g->used; i += 2) {
+            const GpPass* p = &g->pass[i / 2];
+            if (!p->q0 || !p->q1) continue;
+            snx_tracy_gpu_time((i64)ts[i], p->q0, VK_GPU_CTX_GRAPHICS);
+            snx_tracy_gpu_time((i64)ts[i + 1], p->q1, VK_GPU_CTX_GRAPHICS);
         }
-        snx_tracy_leave();
     }
 #endif
     double period = g_vk.props.limits.timestampPeriod;
@@ -251,6 +232,22 @@ void vk_gpuprof_frame_done(u32 slot) {
         gp_report();
     }
 }
+#if defined(SNX_TRACY)
+/* a fresh pair of the GPU's clock and the client's, one driver call: CLOCK_MONOTONIC_RAW is the clock the Tracy
+   client keeps its own time in, so the deltas between the pairs map the device's timestamps onto it. 0 without
+   the extension or when the driver refused. */
+int vk_gpuprof_clock(i64* cpu, i64* gpu) {
+    static const VkCalibratedTimestampInfoEXT spec[2] = {
+        {VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT, NULL, VK_TIME_DOMAIN_DEVICE_EXT},
+        {VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT, NULL, VK_TIME_DOMAIN_CLOCK_MONOTONIC_RAW_EXT}};
+    u64 ts2[2], deviation;
+    if (!g_calibrated) return 0;
+    if (!VK_OK(vkGetCalibratedTimestampsEXT(g_vk.dev, 2, spec, ts2, &deviation))) return 0;
+    *cpu = (i64)ts2[1];
+    *gpu = (i64)ts2[0];
+    return 1;
+}
+#endif
 static int key_cmp(const void* a, const void* b) {
     u64 x = ((const GpKey*)a)->ns, y = ((const GpKey*)b)->ns;
     return x < y ? 1 : x > y ? -1 : 0;
