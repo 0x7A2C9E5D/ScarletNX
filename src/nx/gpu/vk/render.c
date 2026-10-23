@@ -19,6 +19,7 @@
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/vk/pending_pages.h"
 #include "nx/gpu/vk/internal_spv.h"
+#include "nx/runtime/platform/tracy.h"
 
 static struct {
     Surf* rt[8];
@@ -1495,8 +1496,17 @@ static VkDescriptorSet desc_set_cached(VkDescriptorSetLayout layout, DescWrites*
     *e = (typeof(cache[0])){h1, h2, frame, set};
     return set;
 }
+static VkDescriptorSet stage_set_(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro,
+                                  u32* fb, TexRes* res, const VkDrawStorage* draw, DrawImages* images);
 static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro, u32* fb,
                                  TexRes* res, const VkDrawStorage* draw, DrawImages* images) {
+    SNX_ZONE(z, "stage set");
+    VkDescriptorSet set = stage_set_(ch, stage, s, rt, zt, n, zt_ro, fb, res, draw, images);
+    SNX_ZONE_END(z);
+    return set;
+}
+static VkDescriptorSet stage_set_(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro,
+                                  u32* fb, TexRes* res, const VkDrawStorage* draw, DrawImages* images) {
     u32* r = ch->r3d;
     VkDescriptorSetLayout layout = g_vk_dslayout[s->indexed][shader_vk_set(stage)];
     VkDescriptorSet set = VK_NULL_HANDLE; /* the writes take it once their contents are known (desc_set_cached) */
@@ -2266,8 +2276,17 @@ static u64 draw_last_vertex(GpuChannel* ch, int indexed, u32 first, u32 count, u
     return last < 0 ? 0 : (u64)last;
 }
 
+static void render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 base_vertex,
+                        u32 base_instance, u32 instances);
+/* a draw as a profiler zone (SNX_TRACY builds), around its many ways out */
 void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 base_vertex, u32 base_instance,
                     u32 instances) {
+    SNX_ZONE(z, "draw");
+    render_draw(ch, indexed, topology, first, count, base_vertex, base_instance, instances);
+    SNX_ZONE_END(z);
+}
+static void render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 base_vertex,
+                        u32 base_instance, u32 instances) {
     u32* r = ch->r3d;
     /* the stages between the vertex and fragment programs and their sets */
     int bset_ok, b;

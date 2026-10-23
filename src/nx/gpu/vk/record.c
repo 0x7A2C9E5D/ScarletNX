@@ -18,6 +18,7 @@
 #include "nx/runtime/platform/log.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/tracy.h"
 
 typedef void (*RecFn)(const void* args);
 typedef struct {
@@ -43,6 +44,7 @@ static PCond g_cv;
 static void rec_thread(void* arg) {
     u64 tail = 0;
     (void)arg;
+    SNX_THREAD_NAME("Vulkan recorder");
     (void)g_pad0;
     (void)g_pad1;
     for (;;) {

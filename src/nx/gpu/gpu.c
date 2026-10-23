@@ -28,6 +28,7 @@
 #include "nx/memory/mem.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/tracy.h"
 
 GpuState g_gpu;
 volatile u64 g_gpu_submits;
@@ -755,7 +756,11 @@ static int run_pass(i64* wake) {
         pm_unlock(&g_qlk);
         __atomic_store_n(&g_run_since, plat_ns(), __ATOMIC_RELAXED);
         __atomic_store_n(&g_run_chan, it->chan + 1, __ATOMIC_RELEASE);
-        done = run_job(it);
+        {
+            SNX_ZONE_V(z, "gpu job", it->chan);
+            done = run_job(it);
+            SNX_ZONE_END(z);
+        }
         __atomic_store_n(&g_run_chan, 0, __ATOMIC_RELEASE);
         pm_lock(&g_qlk);
         if (!done)
@@ -825,13 +830,18 @@ void gpu_report_stall(void) {
 static void gpu_thread(void* arg) {
     (void)arg;
     t_gpu = 1;
+    SNX_THREAD_NAME("GPU");
     pm_lock(&g_qlk);
     for (;;) {
         u64 gen = g_qgen;
         i64 wake = -1;
         if (run_pass(&wake)) continue;
         /* a whole pass ran nothing: sleep until a new item, a kick, or the next look at a wait */
-        if (gen == g_qgen) pc_wait(&g_qcv, &g_qlk, wake);
+        if (gen == g_qgen) {
+            SNX_ZONE(z, "gpu idle");
+            pc_wait(&g_qcv, &g_qlk, wake);
+            SNX_ZONE_END(z);
+        }
     }
 }
 static void queue_init(void) {
