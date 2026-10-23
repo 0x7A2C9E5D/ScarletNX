@@ -31,6 +31,7 @@ static const char list[] =
     "On-screen controls/Buttons\tcontrols_a_shown\t\tint\t0\t1\tA control drawn\tA\t0=Hidden|1=Shown\n"
     "On-screen controls/Buttons\tcontrols_b_shown\t\tint\t0\t1\tA control drawn\tB\t0=Hidden|1=Shown\n"
     "Controllers\tgamepad_rumble\t100\tint\t0\t100\tHow strongly\tVibration\t0=Off|50=50%|100=100%\n"
+    "Debug\tslp_vectorizer\t0\tint\t0\t1\tLLVM's SLP vectorizer\tSLP vectorizer\t0=Off|1=On\n"
     "Debug\tlog\t1\tint\t0\t2\tLog detail\t\t0=0|1=1|2=2";
 
 /* a row by its .ini key, or by the name it shows */
@@ -76,7 +77,7 @@ int main(int argc, char** argv) {
        order, the other line left out; a page's row and its All before its settings */
     int tracy = at(&s, "tracy_capture") >= 0; /* the row a runtime without SNX_TRACY does not list */
     int opt = 3 + tracy;                      /* the optimization level's row, after it */
-    assert(s.own > 5 && s.count == s.own + 15 + tracy && !strcmp(s.keys[0].key, "GDB stub"));
+    assert(s.own > 5 && s.count == s.own + 16 + tracy && !strcmp(s.keys[0].key, "GDB stub"));
     assert(!tracy || at(&s, "tracy_capture") == 3); /* after Extract dump, before the optimization level */
     assert(!strcmp(s.keys[0].section, "Launch") && !strcmp(s.keys[0].about, "Enables gdbstub on port 1234") &&
            words(&s.keys[0]) == 2 && !strcmp(s.values[0].key, "gdbstub"));
@@ -107,6 +108,12 @@ int main(int argc, char** argv) {
            !strcmp(s.keys[opt + 3].key, "LLVM Internals"));
     assert(gui_settings_set(&s, "opt", ".ini") && gui_settings_set(&s, "aot_threads", "") &&
            !gui_settings_recompile(&s, options));
+    /* a game's setting alone, as R's recompile takes Debug's SLP vectorizer: once picked, and never a launcher's own */
+    assert(!gui_settings_one(&s, "slp_vectorizer", options) && gui_settings_set(&s, "slp_vectorizer", "1"));
+    assert(gui_settings_one(&s, "slp_vectorizer", options) == 1 && !strcmp(options[0], "--slp_vectorizer=1"));
+    assert(gui_settings_set(&s, "opt", "z") && !gui_settings_one(&s, "opt", options) &&
+           gui_settings_set(&s, "opt", ".ini"));
+    assert(gui_settings_set(&s, "slp_vectorizer", ".ini") && !gui_settings_one(&s, "slp_vectorizer", options));
     assert(!strcmp(s.keys[s.own].section, "Display") && !strcmp(s.keys[s.own].key, "docked"));
     assert(!strcmp(s.keys[s.own].about, "1 = TV mode") && !strcmp(key(&s, "fullscreen")->about, "1 = start in fullscreen"));
     assert(!strcmp(s.keys[s.count - 1].key, "log") && !strcmp(s.keys[s.count - 1].about, "Log detail"));

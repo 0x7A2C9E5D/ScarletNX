@@ -190,7 +190,8 @@ int snx_deploy_runtime(const char* run, const char* exe) {
 /* recompile.c's: a setting of the recompile, from the generated tables */
 const IniOpt* snx_recompile_setting(const char* key) {
     const IniOpt* o = ini_find(g_recompile_ini, key);
-    return o ? o : ini_find(g_llvm_ini, key);
+    if (!o) o = ini_find(g_llvm_ini, key);
+    return o ? o : ini_find(g_recompile_game_ini, key);
 }
 /* SNX_WORKFLOW_ADDON's recompile: --outdir GAMES -- DUMP [NAME]. A game's dump is named by its title ID, an update
    goes into its game's folder as <game>_<its own>; a DLC is never recompiled */
@@ -245,6 +246,21 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         CHECK(argc > 4 && !strcmp(argv[2], "-O") && !strcmp(argv[3], getenv("SNX_WORKFLOW_OPT")));
         memmove(argv + 2, argv + 4, (size_t)(argc - 4) * sizeof *argv);
         argc -= 2;
+    }
+    /* a recompile's setting the dump was played with (SNX_WORKFLOW_FLAGS), passed on as it was given */
+    {
+        const char* flags = getenv("SNX_WORKFLOW_FLAGS");
+        char key[64];
+        size_t length = flags && strchr(flags, '=') ? (size_t)(strchr(flags, '=') - flags) : 0;
+        if (length > 2 && length - 2 < sizeof key) {
+            memcpy(key, flags + 2, length - 2);
+            key[length - 2] = 0;
+            if (snx_recompile_setting(key)) {
+                CHECK(argc > 3 && !strcmp(argv[2], flags));
+                memmove(argv + 2, argv + 3, (size_t)(argc - 3) * sizeof *argv);
+                --argc;
+            }
+        }
     }
     /* a dump's: no name given, the recompile names the game; a game made already: its folder's name */
     CHECK((argc == 4 || argc == 5) && !strcmp(argv[0], "--outdir") && !strcmp(argv[2], "--"));
@@ -406,7 +422,7 @@ static void run(const char* exe, const char* repo, const char* dump, const char*
 }
 /* the runtime's settings (runtime/options.c): those this test gives */
 int snx_setting_known(const char* key) {
-    static const char* const known[] = {"touch", "controls", "resolution", "controls_a", "seconds"};
+    static const char* const known[] = {"touch", "controls", "resolution", "controls_a", "seconds", "slp_vectorizer"};
     size_t i;
     for (i = 0; i < sizeof known / sizeof *known; ++i)
         if (!strcmp(key, known[i])) return 1;
@@ -711,6 +727,16 @@ int main(int argc, char** argv) {
         run(exe, repo, dump, log, 0, "G", NULL);
         set_env("SNX_WORKFLOW_FLAGS", "--seconds=5");
         run(exe, repo, dump, log, 0, "G", NULL);
+        /* Debug's SLP vectorizer, which the recompile and the game both take: the game gets it as given, and a
+           recompile made for it takes it too */
+        set_env("SNX_WORKFLOW_FLAGS", "--slp_vectorizer=1");
+        run(exe, repo, dump, log, 0, "G", NULL);
+        {
+            char* stamp = snx_path_join(repo, "recompiled/Test game/Test game.abi");
+            CHECK(!snx_write_file(stamp, "broken", 6));
+            run(exe, repo, dump, log, 0, "RG", NULL);
+            free(stamp);
+        }
         set_env("SNX_WORKFLOW_FLAGS", "--resoltion=2");
         run(exe, repo, dump, log, 1, "", "unknown option: --resoltion=2");
         set_env("SNX_WORKFLOW_FLAGS", "--controls_a=0.5 0.5 100 1");

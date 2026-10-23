@@ -483,6 +483,16 @@ setting Vulkan validation layer
     words Off|On
     help 1 = the Vulkan validation layer (VK_LAYER_KHRONOS_validation, the Vulkan SDK's) checks every Vulkan call and
     help logs what it finds. It slows the game down a lot, and a missing layer is only a warning
+setting SLP vectorizer
+    key slp_vectorizer
+    int 0 1
+    default 0
+    startup
+    words Off|On
+    recompile
+    help LLVM's SLP vectorizer, which packs scalar instructions into SIMD ones, in the recompile and the JIT. Off
+    help while LLVM 23 can break a module with it and stop the recompile (llvm-project issue 231525). It applies to
+    help the next recompile, and to the JIT's next run
 setting GDB JIT symbols
     key gdb_jit
     int 0 1

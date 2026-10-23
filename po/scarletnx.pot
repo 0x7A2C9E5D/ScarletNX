@@ -3352,6 +3352,18 @@ msgstr ""
 msgid "Options"
 msgstr ""
 
+#: src/common/utilities/setup.c
+msgid "SLP vectorizer"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "LLVM's, on in the recompile and the JIT"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "off, as LLVM 23 can break a module with it: Settings > Debug turns it on"
+msgstr ""
+
 #: src/nx/runtime/settings.txt
 msgid "gdbstub"
 msgstr ""
