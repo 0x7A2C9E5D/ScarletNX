@@ -20,7 +20,7 @@
 #include <dlfcn.h>
 #endif
 
-#define AGB_RECOMP_ABI 3 /* 1-based block indices, the BIOS and 0x0F in the bus hook */
+#define AGB_RECOMP_ABI 4   /* the ROM's hash and each block's in the map */
 #define AGB_BLOCK_MAX  256 /* words compiled per block at most */
 
 /* the ARM7TDMI's rules (arm.h) on the flat window: the A57 default would run the ROM as ARMv8-A */
@@ -69,6 +69,37 @@ void agb_recomp_free(AgbRecomp* recomp) {
 
 static void block_name(char* out, size_t size, size_t index) { snprintf(out, size, "snx_agb_%zu", index); }
 
+/* FNV-1a over size bytes, from hash on: what tells one ROM, or one block's code, from another */
+static uint64_t fnv(uint64_t hash, const void* bytes, size_t size) {
+    const uint8_t* p = (const uint8_t*)bytes;
+    for (size_t i = 0; i < size; ++i) hash = (hash ^ p[i]) * 0x100000001B3u;
+    return hash;
+}
+#define AGB_FNV_BASIS 0xCBF29CE484222325u
+
+static uint64_t rom_hash(const AgbBoard* board) {
+    return board->has_cartridge ? fnv(AGB_FNV_BASIS, board->cartridge.data, board->cartridge.size) : AGB_FNV_BASIS;
+}
+
+/* The BIOS and the cartridge windows hold the same code for the whole run; the game writes over the rest */
+static int fixed(uint32_t pc) {
+    uint32_t region = pc >> 24 & 0x0F;
+    return region == 0x00 || (region >= 0x08 && region <= 0x0D);
+}
+
+/* the hash of the count words from pc on, as memory holds them now */
+static uint64_t code_hash(AgbBoard* board, uint32_t pc, int thumb, size_t count) {
+    if (thumb) {
+        uint16_t words[AGB_BLOCK_MAX];
+        for (size_t j = 0; j < count; ++j) words[j] = agb_read16(board, pc + (uint32_t)j * 2);
+        return fnv(AGB_FNV_BASIS, words, count * sizeof(*words));
+    } else {
+        uint32_t words[AGB_BLOCK_MAX];
+        for (size_t j = 0; j < count; ++j) words[j] = agb_read32(board, pc + (uint32_t)j * 4);
+        return fnv(AGB_FNV_BASIS, words, count * sizeof(*words));
+    }
+}
+
 static void* module_symbol(void* handle, size_t index) {
     char name[32];
     block_name(name, sizeof(name), index);
@@ -86,6 +117,15 @@ static AgbBlock* find(AgbRecomp* recomp, uint32_t pc, int thumb) {
     for (size_t i = 1; i <= recomp->count; ++i)
         if (recomp->blocks[i].pc == pc && recomp->blocks[i].thumb == (uint8_t)thumb) return &recomp->blocks[i];
     return NULL;
+}
+
+/* Takes a block out: an index names a block's function only from a module's emit to its open, which every block
+   past it already went through */
+static void drop(AgbRecomp* recomp, AgbBlock* block) {
+    size_t i = (size_t)(block - recomp->blocks);
+    memmove(block, block + 1, (recomp->count - i) * sizeof(*block));
+    --recomp->count;
+    recomp->dirty = 1;
 }
 
 static AgbBlock* add(AgbRecomp* recomp, uint32_t pc, int thumb) {
@@ -243,6 +283,7 @@ static int emit_module(AgbRecomp* recomp, AgbBoard* board, const char* path, siz
             goto done;
         }
         block->instructions = (uint16_t)(consumed > 0xFFFF ? 0xFFFF : consumed);
+        block->code = code_hash(board, block->pc, block->thumb, block->instructions);
     }
     if (LLVMVerifyModule(module, LLVMReturnStatusAction, &message)) goto done;
     LLVMDisposeMessage(message); /* an empty one on success, still allocated */
@@ -379,8 +420,8 @@ static int patch(AgbRecomp* recomp, AgbBoard* board, size_t first, char* error, 
     return 0;
 }
 
-/* The cache beside the ROM: the module plus a map of the blocks it holds. */
-static int write_cache(AgbRecomp* recomp) {
+/* The cache beside the ROM: the module plus a map of the blocks it holds, under the ROM's hash. */
+static int write_cache(AgbRecomp* recomp, const AgbBoard* board) {
     size_t length = strlen(recomp->base);
     char* map_path = (char*)malloc(length + 8);
     FILE* file;
@@ -389,10 +430,10 @@ static int write_cache(AgbRecomp* recomp) {
     file = fopen(map_path, "w");
     free(map_path);
     if (!file) return -1;
-    fprintf(file, "snx-agb-code %d %u %u\n", AGB_RECOMP_ABI, SNX_ARM_ABI, 0);
+    fprintf(file, "snx-agb-code %d %u %016llX\n", AGB_RECOMP_ABI, SNX_ARM_ABI, (unsigned long long)rom_hash(board));
     for (size_t i = 1; i <= recomp->count; ++i)
-        fprintf(file, "%08X %u %u snx_agb_%zu\n", recomp->blocks[i].pc, recomp->blocks[i].thumb,
-                recomp->blocks[i].instructions, i);
+        fprintf(file, "%08X %u %u %016llX snx_agb_%zu\n", recomp->blocks[i].pc, recomp->blocks[i].thumb,
+                recomp->blocks[i].instructions, (unsigned long long)recomp->blocks[i].code, i);
     fclose(file);
     return 0;
 }
@@ -403,27 +444,41 @@ int agb_recomp_load_cache(AgbRecomp* recomp, AgbBoard* board, char* error, size_
     char line[128];
     FILE* file;
     int abi = 0;
-    unsigned arm_abi = 0, size = 0;
-    (void)board;
+    unsigned arm_abi = 0;
+    unsigned long long rom = 0, here;
     if (!map_path) return -1;
     sprintf(map_path, "%s.map", recomp->base);
     file = fopen(map_path, "r");
-    free(map_path);
-    if (!file) return -1;
-    if (!fgets(line, sizeof(line), file) ||
-        sscanf(line, "snx-agb-code %d %u %u", &abi, &arm_abi, &size) != 3 || abi != AGB_RECOMP_ABI ||
-        arm_abi != SNX_ARM_ABI) {
+    if (!file) {
+        free(map_path);
+        return -1;
+    }
+    if (!fgets(line, sizeof(line), file) || sscanf(line, "snx-agb-code %d %u", &abi, &arm_abi) != 2 ||
+        abi != AGB_RECOMP_ABI || arm_abi != SNX_ARM_ABI) {
+        snprintf(error, error_size, "%s is another build's (ABI %d and %u, this one's %d and %u)", map_path, abi,
+                 arm_abi, AGB_RECOMP_ABI, SNX_ARM_ABI);
+        free(map_path);
         fclose(file);
         return -1;
     }
+    here = (unsigned long long)rom_hash(board);
+    if (sscanf(line, "snx-agb-code %*d %*u %llX", &rom) != 1 || rom != here) {
+        snprintf(error, error_size, "%s is another ROM's (%016llX, this one %016llX)", map_path, rom, here);
+        free(map_path);
+        fclose(file);
+        return -1;
+    }
+    free(map_path);
     while (fgets(line, sizeof(line), file)) {
         unsigned pc, thumb, instructions;
-        if (sscanf(line, "%X %u %u", &pc, &thumb, &instructions) != 3 || !instructions) continue;
+        unsigned long long code;
+        if (sscanf(line, "%X %u %u %llX", &pc, &thumb, &instructions, &code) != 4 || !instructions) continue;
         if (!add(recomp, pc, (int)thumb)) {
             fclose(file);
             return -1;
         }
         recomp->blocks[recomp->count].instructions = (uint16_t)instructions;
+        recomp->blocks[recomp->count].code = (uint64_t)code;
     }
     fclose(file);
     recomp->dirty = 0;
@@ -439,14 +494,20 @@ int agb_recomp_build(AgbRecomp* recomp, AgbBoard* board, char* error, size_t err
     }
     if (recomp->dirty || !recomp->handle)
         if (relink(recomp, board, error, error_size)) return -1;
-    write_cache(recomp);
+    write_cache(recomp, board);
     return 0;
 }
 
 const AgbBlock* agb_recomp_lookup(AgbRecomp* recomp, AgbBoard* board, uint32_t pc, int thumb, char* error,
                                   size_t error_size) {
     AgbBlock* block = find(recomp, pc, thumb);
-    size_t first = recomp->count + 1;
+    size_t first;
+    if (block && block->instructions && !fixed(pc) && code_hash(board, pc, thumb, block->instructions) != block->code) {
+        /* the game wrote over the code the block was built from, this run or the one that cached it */
+        drop(recomp, block);
+        block = NULL;
+    }
+    first = recomp->count + 1;
     if (block && block->fn && block->instructions) return block;
     if (block) {
         /* a block the cached module lacks: link everything again */
@@ -472,5 +533,5 @@ const AgbBlock* agb_recomp_lookup(AgbRecomp* recomp, AgbBoard* board, uint32_t p
 int agb_recomp_save(AgbRecomp* recomp, AgbBoard* board, char* error, size_t error_size) {
     if (!recomp->dirty) return 0;
     if (relink(recomp, board, error, error_size)) return -1;
-    return write_cache(recomp);
+    return write_cache(recomp, board);
 }

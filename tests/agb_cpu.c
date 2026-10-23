@@ -110,6 +110,15 @@ static uint8_t* make_rom(size_t* size) {
     return rom;
 }
 
+/* a Thumb block run as the machine runs it, from its own address: its r0 */
+static uint32_t run_block(AgbCpu* cpu, const AgbBlock* block) {
+    cpu->arm.r[15] = block->pc;
+    cpu->arm.cpsr |= SNX_ARM_T;
+    cpu->arm.exit = SNX_ARM_OK;
+    block->fn(&cpu->arm);
+    return cpu->arm.exit == SNX_ARM_OK ? cpu->arm.r[0] : 0xFFFFFFFFu;
+}
+
 int main(void) {
     AgbBoard board;
     AgbMap map;
@@ -178,6 +187,56 @@ int main(void) {
             if (!cached.blocks[i].fn || !cached.blocks[i].instructions) result = 1;
         agb_recomp_free(&cached);
         CHECK(!result);
+        result = 1;
+    }
+    {
+        /* code the game puts in RAM runs as RAM holds it: a block built from it goes once the game writes over it,
+           this run or the next one, which the cache hands it */
+        const AgbBlock* block;
+        AgbRecomp next;
+        agb_write16(&board, 0x03000000, 0x2001); /* movs r0, #1 */
+        agb_write16(&board, 0x03000002, 0x4770); /* bx lr */
+        block = agb_recomp_lookup(&recomp, &board, 0x03000000, 1, error, sizeof error);
+        CHECK(block);
+        CHECK(run_block(&cpu, block) == 1);
+        agb_write16(&board, 0x03000000, 0x2002); /* movs r0, #2 */
+        block = agb_recomp_lookup(&recomp, &board, 0x03000000, 1, error, sizeof error);
+        CHECK(block);
+        CHECK(run_block(&cpu, block) == 2);
+        {
+            size_t patches = recomp.patch_count; /* while RAM holds the same code, its block is the one already built */
+            CHECK(agb_recomp_lookup(&recomp, &board, 0x03000000, 1, error, sizeof error) == block &&
+                  recomp.patch_count == patches);
+        }
+        agb_write16(&board, 0x03000002, 0x4708); /* bx r1: the block's last word alone */
+        cpu.arm.r[1] = 0x08000201;
+        block = agb_recomp_lookup(&recomp, &board, 0x03000000, 1, error, sizeof error);
+        CHECK(block && run_block(&cpu, block) == 2 && cpu.arm.r[15] == 0x08000200);
+        CHECK(!agb_recomp_save(&recomp, &board, error, sizeof error));
+        agb_recomp_init(&next, "agb_cpu_test.code", SNX_AGB_TEST_CC);
+        CHECK(!agb_recomp_load_cache(&next, &board, error, sizeof error));
+        /* the same code in RAM: the cached block runs, nothing compiled */
+        block = agb_recomp_lookup(&next, &board, 0x03000000, 1, error, sizeof error);
+        result = block && !next.patch_count && run_block(&cpu, block) == 2 ? 0 : 1;
+        agb_write16(&board, 0x03000000, 0x2003); /* movs r0, #3 */
+        block = agb_recomp_lookup(&next, &board, 0x03000000, 1, error, sizeof error);
+        if (!block || run_block(&cpu, block) != 3) result = 1;
+        agb_recomp_free(&next);
+        CHECK(!result);
+        result = 1;
+    }
+    {
+        /* the cache is the ROM's it was built from: another one's, named the same, recompiles and says why */
+        AgbRecomp other;
+        uint8_t* changed = make_rom(&size);
+        CHECK(changed);
+        changed[0x1F0] = 1;
+        CHECK(!agb_board_insert(&board, changed, size, error, sizeof error));
+        free(changed);
+        agb_recomp_init(&other, "agb_cpu_test.code", SNX_AGB_TEST_CC);
+        result = agb_recomp_load_cache(&other, &board, error, sizeof error);
+        agb_recomp_free(&other);
+        CHECK(result && strstr(error, "agb_cpu_test.code.map is another ROM's ("));
         result = 1;
     }
     result = 0;

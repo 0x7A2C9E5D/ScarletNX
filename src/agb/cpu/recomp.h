@@ -13,6 +13,7 @@ typedef struct {
     uint32_t pc;
     uint16_t instructions;
     uint8_t thumb;
+    uint64_t code; /* a hash of the words it was built from: a block in RAM runs while memory still holds them */
     SnxArmBlock fn;
 } AgbBlock;
 
@@ -22,7 +23,7 @@ typedef struct {
     void* handle;   /* the loaded native module */
     void** patches; /* the modules of the blocks compiled at run time, <base>.<n>.so */
     size_t patch_count;
-    char* base;     /* the cache path: <base>.so and <base>.map */
+    char* base;     /* the cache path: <base>.so and <base>.map, which names the ROM's hash */
     const char* cc; /* the host compiler that links the emitted objects */
     int dirty;      /* blocks changed since the module was linked */
 } AgbRecomp;
@@ -31,7 +32,8 @@ void agb_recomp_init(AgbRecomp* recomp, const char* base, const char* cc);
 void agb_recomp_free(AgbRecomp* recomp);
 /* The AOT step: discovers the code the ROM entry reaches and builds the module. */
 int agb_recomp_build(AgbRecomp* recomp, AgbBoard* board, char* error, size_t error_size);
-/* Loads the module a previous build cached next to the ROM. Returns 0 on success. */
+/* Loads the module a previous build cached next to the ROM. Returns 0 on success, else -1, error saying why when a
+   cache is there but for another ROM or another build. */
 int agb_recomp_load_cache(AgbRecomp* recomp, AgbBoard* board, char* error, size_t error_size);
 /* The block at pc in the given ISA, compiling one if the cache does not hold it yet. */
 const AgbBlock* agb_recomp_lookup(AgbRecomp* recomp, AgbBoard* board, uint32_t pc, int thumb, char* error,

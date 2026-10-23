@@ -120,8 +120,11 @@ int main(int argc, char** argv) {
         agb_recomp_init(&recomp, base ? base : "agb-code", SNX_AGB_CC);
         free(base);
         if (recompile || agb_recomp_load_cache(&recomp, &board, error, sizeof error)) {
+            if (error[0])
+                printf("Recompiling %s: %s\n", path, error);
+            else
+                printf("Recompiling %s\n", path);
             error[0] = 0;
-            printf("Recompiling %s\n", path);
             if (agb_recomp_build(&recomp, &board, error, sizeof error)) {
                 fprintf(stderr, "scarletnx-agb: %s\n", error);
                 goto done;
