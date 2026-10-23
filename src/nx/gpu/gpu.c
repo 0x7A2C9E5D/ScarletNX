@@ -758,7 +758,9 @@ static int run_pass(i64* wake) {
         __atomic_store_n(&g_run_chan, it->chan + 1, __ATOMIC_RELEASE);
         {
             SNX_ZONE_V(z, "gpu job", it->chan);
+            if (g_renderer->stream_run) g_renderer->stream_run(1);
             done = run_job(it);
+            if (g_renderer->stream_run) g_renderer->stream_run(0);
             SNX_ZONE_END(z);
         }
         __atomic_store_n(&g_run_chan, 0, __ATOMIC_RELEASE);

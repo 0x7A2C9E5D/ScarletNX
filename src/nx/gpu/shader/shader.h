@@ -138,6 +138,9 @@ extern int g_shader_float16;
 extern int g_shader_tessellation;
 /* VK_KHR_shader_clock's scopes: bit 0 subgroup, bit 1 device */
 extern int g_shader_clock_scopes;
+/* VK_KHR_shader_maximal_reconvergence: a structured program's lanes reconverge where its constructs merge, so one
+   whose lanes must reconverge (subgroup operations, barriers, derivatives) takes structured control flow too */
+extern int g_shader_maximal_reconvergence;
 /* in clip_enable: a later stage before rasterization (tessellation or geometry) follows, and the last one applies
    the depth mode and the clip distances */
 #define SNX_SH_NOT_LAST (1u << 31)

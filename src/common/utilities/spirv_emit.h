@@ -53,6 +53,10 @@ typedef struct {
     /* the 32-bit constants made, open addressing on a power of two: by type and value, and by id */
     SpvConstant *constants, *constant_ids;
     size_t constant_count, constant_capacity;
+    /* called before each merge instruction and each branch or switch (not a return, kill or OpUnreachable) with
+       block_end_user, so that a user keeping values of its own Function variables in a block stores them there */
+    void (*block_end)(void* user);
+    void* block_end_user;
 } SpvEmitter;
 
 typedef enum {

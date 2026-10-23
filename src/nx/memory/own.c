@@ -43,6 +43,27 @@ static PMutex g_trap_lk = PMUTEX_INIT;
 static PCond g_own_cv;
 static Own* g_own;     /* sorted by lo, under g_own_lk */
 static u32 g_nown, g_capown;
+/* The entries on each 4 MB region of guest memory, changed with them under g_own_lk and read without it: the GPU
+   thread reads guest memory through copy_runs, which asked under the lock whether any entry was on each run it read,
+   and with storage buffers kept on the GPU there almost always is one somewhere. Those lock round trips were about 2%
+   of the GPU thread in one game's underground scene. A count of 0 answers for the region without the lock; a reader
+   racing an entry being made finds it or not, as one taking the lock first or second would. NULL: the lock always */
+#define OWN_REGION_SHIFT 22
+static u32* g_own_region;
+static u64 g_own_nregion;
+static void cover_nl(const Own* o, u32 d) {
+    if (!g_own_region || o->hi <= o->lo) return;
+    for (u64 r = o->lo >> OWN_REGION_SHIFT, e = (o->hi - 1) >> OWN_REGION_SHIFT; r <= e && r < g_own_nregion; r++)
+        __atomic_add_fetch(&g_own_region[r], d, __ATOMIC_RELEASE);
+}
+/* whether an entry may be on [lo, hi): 0 only when none is */
+static int region_owned(u64 lo, u64 hi) {
+    if (!g_own_region) return 1;
+    if (hi <= lo) return 0;
+    for (u64 r = lo >> OWN_REGION_SHIFT, e = (hi - 1) >> OWN_REGION_SHIFT; r <= e; r++)
+        if (r >= g_own_nregion || __atomic_load_n(&g_own_region[r], __ATOMIC_ACQUIRE)) return 1;
+    return 0;
+}
 
 /* ---------------------------------------------------------------- the entries, under g_own_lk */
 /* the first entry ending after a */
@@ -68,9 +89,11 @@ static void insert_nl(u32 i, const Own* o) {
     memmove(&g_own[i + 1], &g_own[i], sizeof *g_own * (size_t)(g_nown - i));
     g_own[i] = *o;
     g_nown++;
+    cover_nl(o, 1);
     __atomic_store_n(&g_own_any, 1, __ATOMIC_RELEASE);
 }
 static void remove_nl(u32 i) {
+    cover_nl(&g_own[i], (u32)-1);
     memmove(&g_own[i], &g_own[i + 1], sizeof *g_own * (size_t)(g_nown - i - 1));
     if (!--g_nown) __atomic_store_n(&g_own_any, 0, __ATOMIC_RELEASE);
 }
@@ -117,18 +140,24 @@ static void cut_nl(u64 lo, u64 hi, ResList* rel) {
             right.res_off += hi - o->lo;
             right.pool += hi - o->lo;
             right.lo = hi;
+            cover_nl(o, (u32)-1);
             o->hi = lo;
+            cover_nl(o, 1);
             g_hooks.retain(right.res);
             insert_nl(i + 1, &right);
             return;
         }
         if (o->lo < lo) { /* its end goes */
+            cover_nl(o, (u32)-1);
             o->hi = lo;
+            cover_nl(o, 1);
             i++;
         } else if (o->hi > hi) { /* its start goes */
             o->res_off += hi - o->lo;
             o->pool += hi - o->lo;
+            cover_nl(o, (u32)-1);
             o->lo = hi;
+            cover_nl(o, 1);
             return;
         } else { /* all of it */
             res_push(rel, o->res);
@@ -190,6 +219,7 @@ static void land_pages(u64 lo, u64 hi) {
         u32 i, first, n = 0;
         int any;
         ResList rel = {0};
+        if (!region_owned(lo, hi)) return;
         pm_lock(&g_own_lk);
         any = owned_nl(lo, hi);
         pm_unlock(&g_own_lk);
@@ -285,6 +315,8 @@ int own_init(const OwnHooks* h) {
         return -1;
     }
     g_traps = 1;
+    g_own_nregion = (AS_SIZE + (1ull << OWN_REGION_SHIFT) - 1) >> OWN_REGION_SHIFT;
+    g_own_region = (u32*)calloc((size_t)g_own_nregion, sizeof *g_own_region);
     LOG("memory: GPU engines keep their results, guest memory is trapped until the CPU needs it\n");
     return 0;
 }
@@ -326,7 +358,7 @@ int own_begin(u64 addr, u64 size, void* res, u64 res_off) {
 u32 own_lookup(u64 addr, u64 size, OwnRange* out, u32 max) {
     u64 end = addr + size;
     u32 i, n = 0;
-    if (!__atomic_load_n(&g_own_any, __ATOMIC_ACQUIRE)) return 0;
+    if (!__atomic_load_n(&g_own_any, __ATOMIC_ACQUIRE) || !region_owned(addr, end)) return 0;
     pm_lock(&g_own_lk);
     for (i = first_after_nl(addr); i < g_nown && g_own[i].lo < end; i++, n++)
         if (n < max) {
@@ -347,10 +379,13 @@ u32 own_stage(u64 addr, u64 size, u8* dst, OwnRange* out, u32 max) {
     u32 n = own_lookup(addr, size, out, max);
     int trapped;
     if (n > max) return n;
-    pm_lock(&g_own_lk);
-    trapped = __atomic_load_n(&g_own_any, __ATOMIC_ACQUIRE) && first_after_nl(lo) < g_nown &&
-              g_own[first_after_nl(lo)].lo < hi;
-    pm_unlock(&g_own_lk);
+    trapped = region_owned(lo, hi);
+    if (trapped) {
+        pm_lock(&g_own_lk);
+        trapped = __atomic_load_n(&g_own_any, __ATOMIC_ACQUIRE) && first_after_nl(lo) < g_nown &&
+                  g_own[first_after_nl(lo)].lo < hi;
+        pm_unlock(&g_own_lk);
+    }
     /* No owner on its pages: read as they are. One just landed may still be armed until its landing lets it go; the
        caller holds the producer's lock, which that landing holds until then, so none is armed here */
     if (!trapped) {
@@ -380,7 +415,7 @@ int own_hash(u64 addr, u64 size, u64* h) {
     u64 lo = addr & ~(g_page - 1), hi = (addr + size + g_page - 1) & ~(g_page - 1);
     u32 i;
     int any = 0;
-    if (!size || !__atomic_load_n(&g_own_any, __ATOMIC_ACQUIRE)) return 0;
+    if (!size || !__atomic_load_n(&g_own_any, __ATOMIC_ACQUIRE) || !region_owned(lo, hi)) return 0;
     pm_lock(&g_own_lk);
     for (i = first_after_nl(lo); i < g_nown && g_own[i].lo < hi; i++) {
         const Own* o = &g_own[i];

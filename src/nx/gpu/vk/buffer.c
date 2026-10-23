@@ -16,6 +16,7 @@
 #include "nx/runtime/options.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/tracy.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/vk/pending_pages.h"
 #include "nx/runtime/platform/tracy.h"
@@ -1007,13 +1008,16 @@ static int gfx_composed(u64 gva, u64 len, VkBuffer* buf, u64* off) {
 static u32* g_wleaf[AS_MAX >> WW_LEAF_SHIFT];
 static u32 g_wleaf_max[AS_MAX >> WW_LEAF_SHIFT];
 /* The CPU writes a GPU stream may see come before its submission or the end of one of its waits: each of those starts
-   a write epoch (vk_ww_new_epoch). A leaf scanned whole in the current epoch isn't scanned again in it, and a scan
-   covers whole leaves, so the textures and buffers checked in one epoch share a few scans: one game made 5,600 of them
-   a frame. g_wleaf_seen holds the epoch + 1 a leaf was last scanned in */
+   a write epoch (vk_ww_new_epoch). A leaf scanned whole in an epoch isn't scanned again in it, and a scan covers whole
+   leaves, so the textures and buffers checked in one epoch share a few scans: one game made 5,600 of them a frame.
+   g_wleaf_seen holds the epoch + 1 whose scans of the leaf its table has taken in (checks only, under vk_lock) */
 static u32 g_wleaf_seen[AS_MAX >> WW_LEAF_SHIFT];
-static u32 g_ww_epoch;
-void vk_ww_new_epoch(void) { __atomic_add_fetch(&g_ww_epoch, 1, __ATOMIC_RELAXED); }
-u32 vk_ww_epoch(void) { return __atomic_load_n(&g_ww_epoch, __ATOMIC_RELAXED); }
+static u32 g_ww_epoch; /* atomic */
+/* A job on the GPU thread checks against the newest epoch when it started (vk_ww_stream), not one a later submission
+   starts while it runs: what the CPU wrote for that submission is the later job's to see. That leaves the scanner
+   thread (ww_scanner) the time until the job starts to scan what it will check */
+static _Thread_local u32 t_ww_stream;
+static _Thread_local int t_ww_streaming;
 static u32 g_wclock = 1;
 static int g_ww = -1; /* -1 not tried yet, 0 not available, 1 on */
 static void ww_mark(u8* p, u64 n) {
@@ -1085,6 +1089,149 @@ static void ww_take_changed(void) {
     for (int i = 0; i < n; i++) ww_mark_range(c[i].a, c[i].e);
 }
 
+/* Scans, on the scanner thread as soon as an epoch starts and on the checks' thread for what it hasn't scanned yet.
+   A scan of a 4 MB leaf takes about 9 us in one game, 2.4 k cycles of each draw's setup on the GPU thread when the
+   checks did them all. A scan claims its leaves first (g_wleaf_busy), so one leaf is never scanned twice at once, and
+   the pages it finds written are in g_wres before the leaves' g_wleaf_done say they were scanned and their claims
+   end: a page a scan re-protects can't be missed by a check that scans the same leaf. The next check marks them
+   (ww_take_scanned). g_wleaf_done holds the epoch + 1 of the leaf's newest scan, read before it started, and
+   g_wleaf_used the epoch + 1 a check last needed the leaf in. The scanner only tries claims, and a check waits only
+   for a leaf the scanner is scanning right then: a lock over all scans had checks waiting out whole passes, 0.5 ms
+   each */
+#define WW_RES_N       4096
+#define WW_RUN_MAX     8 /* leaves the scanner scans in one call at most */
+#define WW_USED_EPOCHS 4 /* the scanner scans the leaves the checks of the last epochs needed */
+static u32 g_wleaf_done[AS_MAX >> WW_LEAF_SHIFT]; /* atomic, stored by the leaf's claimer */
+static u32 g_wleaf_used[AS_MAX >> WW_LEAF_SHIFT]; /* atomic: only a hint for the scanner */
+static u8 g_wleaf_busy[AS_MAX >> WW_LEAF_SHIFT];  /* atomic: 1 while a scan has claimed the leaf */
+static u32 g_ww_used[WW_USED_EPOCHS];             /* the last epochs + 1 checks needed leaves in, under vk_lock */
+static u32 g_ww_used_i;
+static u32 g_ww_used_from; /* atomic: the oldest of them */
+/* a scan's written pages before they go to g_wres: the scanner's, and the checks' (under vk_lock) */
+typedef struct {
+    WwRange r[WW_RES_N];
+    int n;
+} WwStage;
+static WwStage g_wstage_scanner, g_wstage_check;
+static _Thread_local WwStage* t_wstage; /* the running scan's, for ww_note */
+static WwRange g_wres[WW_RES_N]; /* what scans found written, for the next check to mark */
+static int g_wres_n;             /* atomic: read without the lock to skip it */
+static PMutex g_wres_lk = PMUTEX_INIT; /* after a leaf's claim */
+static int g_wscan_failed; /* atomic */
+static int g_wscan_on;     /* atomic: the scanner runs */
+static PMutex g_wscan_wlk = PMUTEX_INIT;
+static PCond g_wscan_cv;
+/* plat_ww_scan's callback: a run of written pages. When the stage is full its last range grows over the new one
+   (scans go up through memory), marking more than was written: a cache over the rest only checks its contents once */
+static void ww_note(u8* p, u64 n) {
+    WwStage* st = t_wstage;
+    u64 a = (u64)(p - g_mem);
+    if (a >= AS_SIZE || !n) return;
+    if (st->n && st->r[st->n - 1].e == a)
+        st->r[st->n - 1].e = a + n;
+    else if (st->n < WW_RES_N)
+        st->r[st->n++] = (WwRange){a, a + n};
+    else
+        st->r[WW_RES_N - 1].e = a + n;
+}
+static int ww_claim(u64 l) {
+    u8 free = 0;
+    return __atomic_compare_exchange_n(&g_wleaf_busy[l], &free, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
+}
+/* scans leaves [lo, hi], claimed by the caller, in the epoch seen - 1, and ends the claims: 0, or -1 when tracking
+   failed */
+static int ww_scan_leaves(u64 lo, u64 hi, u32 seen, WwStage* st) {
+    t_wstage = st;
+    int r = plat_ww_scan(g_mem + (lo << WW_LEAF_SHIFT), (hi - lo + 1) << WW_LEAF_SHIFT, ww_note);
+    pm_lock(&g_wres_lk);
+    int n = g_wres_n;
+    for (int i = 0; i < st->n; i++)
+        if (n < WW_RES_N)
+            g_wres[n++] = st->r[i];
+        else { /* full: the last range covers this one too */
+            WwRange* w = &g_wres[WW_RES_N - 1];
+            if (st->r[i].a < w->a) w->a = st->r[i].a;
+            if (st->r[i].e > w->e) w->e = st->r[i].e;
+        }
+    __atomic_store_n(&g_wres_n, n, __ATOMIC_RELEASE);
+    pm_unlock(&g_wres_lk);
+    st->n = 0;
+    if (r < 0) __atomic_store_n(&g_wscan_failed, 1, __ATOMIC_RELEASE);
+    for (u64 l = lo; l <= hi; l++) {
+        if (r == 0) __atomic_store_n(&g_wleaf_done[l], seen, __ATOMIC_RELEASE);
+        __atomic_store_n(&g_wleaf_busy[l], 0, __ATOMIC_RELEASE);
+    }
+    return r < 0 ? -1 : 0;
+}
+/* marks what scans found written, newer than every baseline taken before: those were taken before the scans
+   re-protected the pages, and their caches may have read memory before the writes */
+static void ww_take_scanned(void) {
+    if (!__atomic_load_n(&g_wres_n, __ATOMIC_ACQUIRE)) return;
+    pm_lock(&g_wres_lk);
+    if (g_wres_n) g_wclock++;
+    for (int i = 0; i < g_wres_n; i++) ww_mark_range(g_wres[i].a, g_wres[i].e);
+    __atomic_store_n(&g_wres_n, 0, __ATOMIC_RELAXED);
+    pm_unlock(&g_wres_lk);
+}
+/* whether the scanner scans leaf l for the epoch seen - 1: a check of the last epochs needed it, and it wasn't scanned
+   in this epoch or a later one */
+static int ww_wanted(u64 l, u32 seen, u32 from) {
+    u32 u = __atomic_load_n(&g_wleaf_used[l], __ATOMIC_RELAXED);
+    return u && (i32)(u - from) >= 0 && (i32)(__atomic_load_n(&g_wleaf_done[l], __ATOMIC_ACQUIRE) - seen) < 0;
+}
+/* Scans the leaves the checks of the last epochs needed each time an epoch starts, up through memory, and starts over
+   for a newer epoch. A check that comes before the scanner got to its leaf scans it itself */
+static void ww_scanner(void* arg) {
+    u32 last = 0;
+    (void)arg;
+    SNX_THREAD_NAME("Vulkan write scans");
+    for (;;) {
+        u32 e, seen, from;
+        pm_lock(&g_wscan_wlk);
+        while ((e = __atomic_load_n(&g_ww_epoch, __ATOMIC_ACQUIRE)) == last) pc_wait(&g_wscan_cv, &g_wscan_wlk, -1);
+        pm_unlock(&g_wscan_wlk);
+        last = e;
+        seen = e + 1;
+        from = __atomic_load_n(&g_ww_used_from, __ATOMIC_RELAXED);
+        for (u64 l = 0, n = AS_SIZE >> WW_LEAF_SHIFT; l < n;) {
+            if (!ww_wanted(l, seen, from)) {
+                l++;
+                continue;
+            }
+            u64 lo = l;
+            while (l < n && l - lo < WW_RUN_MAX && ww_wanted(l, seen, from) && ww_claim(l)) l++;
+            if (l == lo) { /* a check is scanning it */
+                l++;
+                continue;
+            }
+            if (ww_scan_leaves(lo, l - 1, seen, &g_wstage_scanner) < 0) return;
+            if (__atomic_load_n(&g_ww_epoch, __ATOMIC_RELAXED) != e) break; /* a newer one: start over for it */
+        }
+    }
+}
+void vk_ww_new_epoch(void) {
+    u32 e = __atomic_add_fetch(&g_ww_epoch, 1, __ATOMIC_RELEASE);
+    if (t_ww_streaming) t_ww_stream = e; /* a wait of the running job ended: what the CPU wrote before is its to see */
+    if (__atomic_load_n(&g_wscan_on, __ATOMIC_ACQUIRE)) {
+        pm_lock(&g_wscan_wlk);
+        pc_signal(&g_wscan_cv);
+        pm_unlock(&g_wscan_wlk);
+    }
+}
+u32 vk_ww_epoch(void) { return t_ww_streaming ? t_ww_stream : __atomic_load_n(&g_ww_epoch, __ATOMIC_ACQUIRE); }
+void vk_ww_stream(int on) {
+    t_ww_streaming = on;
+    t_ww_stream = __atomic_load_n(&g_ww_epoch, __ATOMIC_ACQUIRE);
+}
+/* a check in the epoch seen - 1 needs leaves: the scanner's next passes scan what the last epochs needed */
+static void ww_used_epoch(u32 seen) {
+    u32 cur = g_ww_used[g_ww_used_i % WW_USED_EPOCHS];
+    if (cur && (i32)(seen - cur) <= 0) return; /* this one, or an older one's check (another thread's) */
+    g_ww_used[++g_ww_used_i % WW_USED_EPOCHS] = seen;
+    u32 oldest = g_ww_used[(g_ww_used_i + 1) % WW_USED_EPOCHS];
+    __atomic_store_n(&g_ww_used_from, oldest ? oldest : seen, __ATOMIC_RELAXED);
+}
+
 int vk_written_since(const u8* host, u64 len, u32 since) {
     if (!g_ww || !host || !len) return -1;
     if (g_ww < 0) {
@@ -1092,6 +1239,13 @@ int vk_written_since(const u8* host, u64 len, u32 since) {
         LOG("vulkan: %s\n",
             g_ww ? "write tracking on (caches skip unchanged memory)" : "no write tracking (caches check contents)");
         if (!g_ww) return -1;
+        pc_init(&g_wscan_cv);
+        if (!plat_thread(ww_scanner, NULL, (size_t)1 << 20)) __atomic_store_n(&g_wscan_on, 1, __ATOMIC_RELEASE);
+    }
+    if (__atomic_load_n(&g_wscan_failed, __ATOMIC_ACQUIRE)) {
+        g_ww = 0;
+        LOG("vulkan: write tracking failed, caches check contents\n");
+        return -1;
     }
     /* Existing cache baselines cannot be ordered against a wrapped clock. Fall back
        to content checks permanently before consuming any dirty pages at wrap. */
@@ -1100,20 +1254,43 @@ int vk_written_since(const u8* host, u64 len, u32 since) {
         return -1;
     }
     u64 o = (u64)(host - g_mem), lo = o >> WW_LEAF_SHIFT, hi = (o + len - 1) >> WW_LEAF_SHIFT, l;
-    u32 seen = __atomic_load_n(&g_ww_epoch, __ATOMIC_RELAXED) + 1;
-    for (l = lo; l <= hi && g_wleaf_seen[l] == seen; l++) {}
-    /* the clock moves only when this call marks pages, before a scan here and in ww_take_changed when it takes ranges,
+    u32 seen = vk_ww_epoch() + 1;
+    for (l = lo; l <= hi && (i32)(g_wleaf_seen[l] - seen) >= 0; l++) {}
+    /* the clock moves only when this call marks pages, in ww_take_changed and ww_take_scanned when they take ranges,
        so what it marks is newer than every baseline taken before: a query that marks nothing, most of them, leaves
        it, and it doesn't reach its wrap within a session at thousands of queries a frame */
     ww_take_changed();
     if (l <= hi) {
-        g_wclock++;
-        if (plat_ww_scan(g_mem + (lo << WW_LEAF_SHIFT), (hi - lo + 1) << WW_LEAF_SHIFT, ww_mark) < 0) {
-            g_ww = 0;
-            LOG("vulkan: write tracking failed, caches check contents\n");
-            return -1;
+        /* the leaves not taken in for this epoch: scanned in it by the scanner already, or here */
+        u64 first = hi + 1, last = 0, a;
+        ww_used_epoch(seen);
+        for (a = l; a <= hi; a++) {
+            if ((i32)(g_wleaf_seen[a] - seen) >= 0) continue;
+            __atomic_store_n(&g_wleaf_used[a], seen, __ATOMIC_RELAXED);
+            if ((i32)(__atomic_load_n(&g_wleaf_done[a], __ATOMIC_ACQUIRE) - seen) < 0) {
+                if (first > hi) first = a;
+                last = a;
+            }
         }
-        for (l = lo; l <= hi; l++) g_wleaf_seen[l] = seen;
+        if (first <= hi) {
+            int r = 0;
+            /* the scanner may be scanning some of them: wait for those, which it may have scanned in this epoch */
+            for (a = first; a <= last; a++)
+                while (!ww_claim(a)) plat_yield();
+            for (; first <= last && (i32)(__atomic_load_n(&g_wleaf_done[first], __ATOMIC_RELAXED) - seen) >= 0; first++)
+                __atomic_store_n(&g_wleaf_busy[first], 0, __ATOMIC_RELEASE);
+            for (; last > first && (i32)(__atomic_load_n(&g_wleaf_done[last], __ATOMIC_RELAXED) - seen) >= 0; last--)
+                __atomic_store_n(&g_wleaf_busy[last], 0, __ATOMIC_RELEASE);
+            if (first <= last) r = ww_scan_leaves(first, last, seen, &g_wstage_check);
+            if (r < 0) {
+                g_ww = 0;
+                LOG("vulkan: write tracking failed, caches check contents\n");
+                return -1;
+            }
+        }
+        ww_take_scanned();
+        for (a = l; a <= hi; a++)
+            if ((i32)(g_wleaf_seen[a] - seen) < 0) g_wleaf_seen[a] = seen;
     }
     for (u64 pg = o >> 12, e = (o + len - 1) >> 12; pg <= e;) {
         u64 l = pg >> (WW_LEAF_SHIFT - 12), lend = (l + 1) << (WW_LEAF_SHIFT - 12);
@@ -1811,8 +1988,10 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict, u64 al
             }
         }
     }
-    else if (valid && e->own && !range_owned(gva, len)) {
-        /* a GPU-side write on its pages: those pages copied again, not the range hashed again */
+    else if (valid && e->own && len >= PATCH_MIN && !range_owned(gva, len)) {
+        /* a GPU-side write on its pages: those pages copied again, not the range hashed again. Not a small range: one
+           is hashed in microseconds, and GPU-side writes beside it stamp its pages (in one game 760 ranges a frame,
+           78% of them unchanged), each copy ending the rendering pass */
         const u8* host = entry_host(e, gva, len);
         u32 wnow = vk_ww_now();
         u64 gnow = gpu_mem_generation(); /* both before the bytes are read */

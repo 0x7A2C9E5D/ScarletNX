@@ -687,6 +687,8 @@ static void cs_read_code(u64 pa, u8* dst) {
    holds whole is bound where it is. Any other is copied, the CPU's bytes by the CPU and the GPU's by the GPU
    (vk_guest_read): into staging when it is only read, into a resource of its own when it is written, which then
    holds those bytes (res_publish). Nothing is waited for, compared or written back */
+/* how recently the CPU must have made a written range land for a dispatch writing it to run on the compute queue */
+#define CS_CPU_READ_PRESENTS 1200
 static int res_bind(u64 gva, u64 len, int written, VkBuffer* buf, u64* off, VkOwnRes** made) {
     OwnRange o[2];
     VkBuffer sb;
@@ -898,6 +900,15 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
        queue each landed at the next dispatch that read it: one game's passes update the same buffers dispatch after
        dispatch, and waited for the GPU at nearly every one, about 14 frames a second on any machine */
     int resident = !gfx && own_traps();
+    /* but not one that writes a range the CPU has made land lately: kept on the GPU, each read of it by the CPU trapped
+       and waited for the GPU, and one game reads its compute results every frame (34,000 landings in two minutes, its
+       frame rate down from 54 to 39). Such a dispatch runs on the compute queue as before, alongside the draws, its
+       results landing where they are read. One whose results only later dispatches and draws read stays resident */
+    for (int i = 0; i < ng && resident; i++) {
+        u64 cpu = 0, run;
+        if (!((p->si.gbuf_wmask >> i) & 1) || !sa[i]) continue;
+        if ((run = gmmu_run(sa[i], ss[i], &cpu)) && vk_own_cpu_read(cpu, run, CS_CPU_READ_PRESENTS)) resident = 0;
+    }
     VkOwnRes* made[16] = {0};
     deferred = deferred || resident;
     /* a read-only input inside a pending result of this batch is read from the arena on the GPU, after a barrier
