@@ -25,6 +25,7 @@ typedef struct {
     u8 tainted[256];
     int taint_known;
     int ftz_float; /* the module preserves signed zeros (SignedZeroInfNanPreserve): float_ftz flushes with a float test */
+    int soft_ftz_on; /* FTZ instructions flush their operands and results with float_ftz (SH_FTZ_EMULATE's way) */
     /* A pure instruction's guard while it is translated: it runs unguarded and each register, predicate and flag it
        writes keeps its old value where the guard is false, in place of a branch around it. 0 otherwise */
     u32 guard;
@@ -3329,6 +3330,10 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
        different iterations, and VOTE, SHFL and BAR would see part of the warp. Each iteration runs only the lanes
        at the subgroup's lowest pc, as the hardware reconverges: lanes ahead wait for the others to reach them. */
     converge = has_flow && can_subgroup && (needs_subgroup || has_barrier || needs_derivatives);
+    /* FTZ per instruction: without the execution mode, or with it where some FADD, FMUL or FFMA keeps subnormals (the
+       mode is the whole module's). Never on a device that flushes by itself, which also flushes those that keep them:
+       the flush would change no bit */
+    int soft_ftz_on = can_flush != SH_FTZ_NATIVE && (can_flush == SH_FTZ_EMULATE || fp32_preserve);
     if (needs_shared && (stage != ST_CS || si->shared_size <= 0)) return direct_reject(si, "shared memory size");
     for (int i = 0; i < texture_count; i++)
         if (textures[i].shadow && (si->tex_int_mask & (1ull << i))) return direct_reject(si, "integer shadow texture");
@@ -3527,6 +3532,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         return NULL;
     }
     c->ftz_float = can_preserve;
+    c->soft_ftz_on = soft_ftz_on;
     spv_emit_init(&c->emit, (size_t)n * 20 + 128);
     spv_emit_shader_capability(&c->emit);
     if (stage == ST_TCS || stage == ST_TES) spv_emit_capability(&c->emit, 3); /* Tessellation */
@@ -3546,7 +3552,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     /* the per-instruction flush to zero tests the absolute value, GLSL.std.450's FAbs, where the module keeps signed
        zeros (float_ftz): without the import its OpExtInst named id 0, which NVIDIA's SPIR-V front end (615.78)
        crashed on, a shader of FADD and FMUL with nothing else from the set */
-    if (fp32_flush && (!can_flush || fp32_preserve) && can_preserve) needs_glsl = 1;
+    if (fp32_flush && soft_ftz_on && can_preserve) needs_glsl = 1;
     if (needs_glsl) c->glsl = spv_emit_glsl450_import(&c->emit);
     u32 fn = spv_emit_id(&c->emit), label = spv_emit_id(&c->emit);
     u32 void_type = spv_emit_type_void(&c->emit);
@@ -3955,7 +3961,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     if (stage == ST_FS) spv_emit_fragment_origin_upper_left(&c->emit, fn);
     if (stage == ST_FS && si->early_fragment_tests) spv_emit_execution_mode(&c->emit, fn, 9, 0, 0); /* EarlyFragmentTests */
     if (depth_output) spv_emit_fragment_depth_replacing(&c->emit, fn);
-    spv_emit_float_controls(&c->emit, fn, fp32_flush && !fp32_preserve && can_flush, can_preserve,
+    spv_emit_float_controls(&c->emit, fn, fp32_flush && !fp32_preserve && can_flush == SH_FTZ_MODE, can_preserve,
                             needs_f64 && can_preserve_f64);
     spv_emit_function_void(&c->emit, void_type, fn, fn_type);
     spv_emit_label(&c->emit, label);
@@ -3977,7 +3983,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     /* On the per-instruction FTZ path, the registers only FTZ float instructions write hold flushed values (from zero,
        their first value): their reads need no flush. Anything else that may write a register taints it, its
        destinations taken wide (d to d+3, and the second field texture instructions write, bits 28 to 35) */
-    if (!can_flush || fp32_preserve) {
+    if (soft_ftz_on) {
         for (u32 i = 11; i < n; i++) {
             if (!IDX_OK(i)) continue;
             if (ftz_writer(insn[i])) continue;
@@ -5883,7 +5889,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                        : op == O_FMUL32I                                    ? B(w, 53, 2)
                        : op == O_FADD_R || op == O_FADD_C || op == O_FADD_I ? B(w, 44, 1)
                                                                             : B(w, 44, 2);
-            int soft_ftz = (mode & 1) && (!can_flush || fp32_preserve);
+            int soft_ftz = (mode & 1) && c->soft_ftz_on;
             if (soft_ftz) {
                 left = float_ftz(c, left);
                 right = float_ftz(c, right);
@@ -5933,7 +5939,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 right = float_mod(c, right, 0, B(w, 48, 1));
                 addend = float_mod(c, addend, 0, B(w, 49, 1));
             }
-            int soft_ftz = (B(w, 53, 2) & 1) && (!can_flush || fp32_preserve);
+            int soft_ftz = (B(w, 53, 2) & 1) && c->soft_ftz_on;
             if (soft_ftz) {
                 left = float_ftz(c, left);
                 right = float_ftz(c, right);

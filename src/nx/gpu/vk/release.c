@@ -18,6 +18,7 @@
 #include "nx/hle/services/nvdrv.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/tracy.h"
 
 typedef struct {
     u64 gate;  /* the graphics submit whose completion it waits for */
@@ -161,6 +162,7 @@ static void release_through(u64 gate, u64 cgate) {
 }
 static void release_thread(void* p) {
     (void)p;
+    SNX_THREAD_NAME("Vulkan release");
     for (;;) {
         u64 gate, cgate;
         pm_lock(&g_rlock);
@@ -170,7 +172,11 @@ static void release_thread(void* p) {
         pm_unlock(&g_rlock);
         vk_wait_submit(gate);
         vk_compute_wait(cgate);
-        release_through(gate, cgate);
+        {
+            SNX_ZONE(z, "land and release");
+            release_through(gate, cgate);
+            SNX_ZONE_END(z);
+        }
     }
 }
 

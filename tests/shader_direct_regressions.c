@@ -711,15 +711,17 @@ static void float_controls(void) {
                             {FMUL_KEEP, FMUL_KEEP},
                             {FFMA_FMZ, FFMA_FMZ},
                             {FFMA_FMZ, FFMA_KEEP}};
+    /* available: SH_FTZ_EMULATE, SH_FTZ_MODE, or SH_FTZ_NATIVE (a device that flushes by itself: neither the mode nor a
+       flush of its own) */
     for (int i = 0; i < 5; i++) {
-        for (int available = 0; available < 2; available++) {
+        for (int available = SH_FTZ_EMULATE; available <= SH_FTZ_NATIVE; available++) {
             ShaderInfo info;
             size_t words = 0;
             u32* code = translate(cases[i], 2, ST_FS, &info, &words, available);
             check_translated(code, &info, "FP32 mode translates");
             if (code) {
-                int flush = i == 0 && available;
-                int soft_ftz = (i == 0 && !available) || i == 1;
+                int flush = i == 0 && available == SH_FTZ_MODE;
+                int soft_ftz = available != SH_FTZ_NATIVE && ((i == 0 && available == SH_FTZ_EMULATE) || i == 1);
                 check(info.fp32_flush == (i == 0 || i == 1) && info.fp32_preserve == (i != 0),
                       "FP32 modes recorded");
                 check((count_opcode(code, words, 17, 4465) > 0) == flush, "FP32 flush capability");

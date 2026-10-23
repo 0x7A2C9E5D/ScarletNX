@@ -826,6 +826,11 @@ VkPipelineLayout vk_playout(u32 arrays); /* arrays: a bit per set (shader_vk_set
 extern int g_vk_preserve_infnan;
 extern int g_vk_preserve_infnan64;
 extern int g_vk_flush_denorm;
+/* SH_FTZ_*: how translations get the console's FP32 flush to zero, from g_vk_flush_denorm and vk_ftz_native */
+extern int g_vk_ftz;
+/* ftz_probe.c: 1 when the device flushes FP32 subnormals in FADD, FMUL and FFMA as the console's FTZ does, in a module
+   that declares no denormal mode (it runs a compute shader and waits for it: at the renderer's start only) */
+int vk_ftz_native(void);
 extern VkShaderStageFlags g_vk_subgroup_stages;
 /* by set, shader_vk_set(stage): [0] without the indexed texture arrays, [1] with them. A set holding 512 array
    descriptors cost the driver twice the time to bind (one game's 6,700 draws a frame), so only an indexed shader's has

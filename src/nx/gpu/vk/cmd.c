@@ -15,6 +15,7 @@
 #include "common/utilities/common.h"
 #include "nx/runtime/platform/backend.h"
 #include "nx/runtime/main.h"
+#include "nx/runtime/platform/tracy.h"
 
 typedef struct {
     VkImage img;
@@ -283,7 +284,9 @@ static void timeline_wait(u64 value) {
     VkSemaphoreWaitInfo wi = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &g_gsem, .pValues = &value};
     gpu_wait_note("a graphics submission", value);
+    SNX_ZONE_V(z, "timeline wait", value);
     VK_OK(vkWaitSemaphores(g_vk.dev, &wi, UINT64_MAX));
+    SNX_ZONE_END(z);
     gpu_wait_note(NULL, 0);
 }
 /* the storage results of every submission up to value, which has finished, land in guest memory, in order */
@@ -475,6 +478,7 @@ u8* vk_stage_back(u64 size, VkBuffer* buf, u64* off, VmaAllocation* mem) {
 
 /* the frame's commands submitted, waiting for xw and signaling xs besides the graphics timeline (one each at most) */
 static void submit(const VkSemaphoreSubmitInfo* xw, const VkSemaphoreSubmitInfo* xs) {
+    SNX_ZONE(z, "submit");
     vk_render_end();
     Frame* f = &g_fr[g_cur];
     VkCommandBuffer cb = vk_cmd(); /* a submit with nothing recorded still has to wait and signal */
@@ -514,6 +518,7 @@ static void submit(const VkSemaphoreSubmitInfo* xw, const VkSemaphoreSubmitInfo*
     /* results of submissions the GPU has finished land now, so a later release doesn't find them pending */
     u64 done = 0;
     if (VK_OK(vkGetSemaphoreCounterValue(g_vk.dev, g_gsem, &done))) land_through(done < g_gval ? done : g_gval);
+    SNX_ZONE_END(z);
 }
 
 void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal) {
