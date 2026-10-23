@@ -6353,12 +6353,12 @@ static void form_swatches(App* app, const GuiFormBoxes* f) {
     }
 }
 /* Folders' groups, a box each as far as it shows: from its title down to its last row shown, half a cell wider
-   either side; drawn under them */
+   either side, and Reset to Defaults in one of its own; drawn under them */
 static void folder_frames(App* app, const GuiFormBoxes* f) {
     const UiList* l = &f->right_lists[UI_FORM_SIDE_ROWS];
     size_t i, n = ui_form_side_shown(f->right, app->scale, UI_FORM_SIDE_ROWS);
     int g, group, cw = cell_w(app);
-    for (g = 0; g < GUI_FOLDER_GROUPS; ++g) {
+    for (g = 0; g <= GUI_FOLDER_GROUPS; ++g) {
         GuiRect a = {0}, z = {0}, box;
         for (i = 0; i < n && l->first + i < (size_t)folder_entries(app); ++i) {
             folder_entry_row(app, (int)(l->first + i), &group);

@@ -2413,14 +2413,14 @@ int main(int argc, char** argv) {
             shows(&app, "Recompiled library", title);
             shows(&app, "Dumps library", title);
         }
-        { /* each group in a box as far as it shows, half a cell wider than its rows, in the dim colour; none round
-             the last row, which no group holds */
+        { /* each group in a box as far as it shows, half a cell wider than its rows, in the dim colour; Reset to
+             Defaults, the last row, in one of its own */
             GuiRect r = ui_form_side_row(f.right, app.scale, UI_FORM_SIDE_ROWS, 1); /* Data, under the app's title */
             SDL_Color dim = rgb(app.theme.dim);
             assert(!app.theme.grid && !same_colour(dim, rgb(app.theme.page)));
             assert(same_colour(pixel(&app, (float)(r.x - 4 * app.scale), (float)(r.y + r.h / 2)), dim));
             r = ui_form_side_row(f.right, app.scale, UI_FORM_SIDE_ROWS, 10 + GUI_FOLDER_GROUPS - 1);
-            assert(same_colour(pixel(&app, (float)(r.x - 4 * app.scale), (float)(r.y + r.h / 2)), rgb(app.theme.page)));
+            assert(same_colour(pixel(&app, (float)(r.x - 4 * app.scale), (float)(r.y + r.h / 2)), dim));
         }
         { /* a title on a band of ink in a theme of filled boxes, its text in the page's colour; over a rule in dim in
              one of outlined boxes, in ink */
