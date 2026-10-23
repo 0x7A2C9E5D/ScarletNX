@@ -4,10 +4,10 @@
 # Who answers for each part of the code, whom GitHub asks for a review of a pull request out of draft that changes
 # their files. A line is a path pattern, then the logins that own the files it matches; a file takes the owners of the
 # last line that matches it, every login of that line. A pattern reads as in .gitignore, without ! and [ ]: /src/gui/
-# is that directory and all under it, /tests/gui_* the files of tests/ that start so.
+# is that directory and all under it, /scripts/pr-* the files of scripts/ that start so. A test takes no owner of its
+# own.
 
-# CI: the workflows, the scripts only they run and those scripts' tests, and the AppImage (area-labels.py files
-# appimage under area: ci)
+# CI: the workflows, the scripts only they run, and the AppImage (area-labels.py files appimage under area: ci)
 /.github/ @DraChimeraVee
 /scripts/pr-* @DraChimeraVee
 /scripts/area-labels.py @DraChimeraVee
@@ -20,12 +20,6 @@
 /scripts/make-appimage.sh @DraChimeraVee
 /scripts/appimage-sysroot.sh @DraChimeraVee
 /scripts/check-appimage.sh @DraChimeraVee
-/tests/pr_* @DraChimeraVee
-/tests/area_labels_test.py @DraChimeraVee
-/tests/trim_caches_test.py @DraChimeraVee
-/tests/publish_builds_test.py @DraChimeraVee
-/tests/nightly_notes_test.py @DraChimeraVee
-/tests/game_reports_test.py @DraChimeraVee
 
 # GUI: the launcher, its scenes' generator, themes, splash, letters and languages
 /src/gui/ @DraChimeraVee
@@ -38,15 +32,8 @@
 /po/ @DraChimeraVee
 /dist/splash/ @DraChimeraVee
 /docs/GUI.md @DraChimeraVee
-/tests/gui_* @DraChimeraVee
-/tests/glyphs_test.py @DraChimeraVee
-/tests/languages_test.py @DraChimeraVee
-/tests/uigen.cmake @DraChimeraVee
-/tests/ui_test.txt @DraChimeraVee
-/tests/splash.c @DraChimeraVee
 
-# GPU: the Switch's GPU, its shaders and their compilers, texture and video engines; the 3DS's and the Vita's GPU
-# have no owner yet
+# GPU: the Switch's GPU, its shaders and their compilers, texture and video engines
 /src/nx/gpu/ @fuddlesworth
 /tools/shaderdec/ @fuddlesworth
 /tools/snx_shaderc.c @fuddlesworth
@@ -62,25 +49,12 @@
 /docs/UMA_MEMORY.md @fuddlesworth
 /docs/VIC.md @fuddlesworth
 /docs/shader-audit/ @fuddlesworth
-/tests/shader* @fuddlesworth
-/tests/spirv_* @fuddlesworth
-/tests/vulkan_* @fuddlesworth
-/tests/astc_* @fuddlesworth
-/tests/mme_* @fuddlesworth
-/tests/nvdec_* @fuddlesworth
-/tests/nvn_* @fuddlesworth
-/tests/vic_* @fuddlesworth
-/tests/vp9_* @fuddlesworth
 
-# CPU: the A64 and ARM instruction libraries, the recompiler with its LLVM backend and JIT, the 3DS CPU
+# CPU: the A64 and ARM instruction libraries, the recompiler with its LLVM backend and JIT
 /src/common/cpu/ @xinitrcn1
-/src/3ds/cpu/ @xinitrcn1
 /docs/DIVERGENCES.md @xinitrcn1
 /docs/LIBRARY.md @xinitrcn1
-/tests/a64_* @xinitrcn1
-/tests/arm* @xinitrcn1
-/tests/thumb_* @xinitrcn1
-/tests/llvm_* @xinitrcn1
-/tests/recompiler_* @xinitrcn1
-/tests/codegen_test.c @xinitrcn1
-/tests/jit_* @xinitrcn1
+
+# The 3DS and the Vita: all of their code
+/src/3ds/ @xinitrcn1
+/src/vita/ @xinitrcn1

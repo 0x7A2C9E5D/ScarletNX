@@ -61,7 +61,7 @@ any job that did not build (`scripts/pr-builds.sh`). A pull request from a fork 
 not write.
 
 GitHub asks the owners of the files a pull request changes for their review once it is out of draft:
-`.github/CODEOWNERS` names those of the CI, GUI, GPU and CPU code.
+`.github/CODEOWNERS` names those of the CI, GUI, GPU and CPU code, and of the 3DS and the Vita.
 
 ## C code
 
