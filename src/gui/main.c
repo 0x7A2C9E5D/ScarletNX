@@ -305,6 +305,7 @@ typedef struct App {
     bool theme_from_app;       /* the theme editor goes back to the App's rows */
     bool folders_from_games;   /* Folders goes back to Games, whose Add a folder opened it */
     int half;                  /* the letters in halves of a cell while text_half has them so, else 0: the scale's */
+    bool help_shown;           /* F1's box over the screen: every key it has (screen_said) */
     SnxPadScreen pad;          /* the button map's, on the row gamepad_map, A and B as gamepad_swap_ab says */
     SnxPadDrawing pad_drawing; /* as last drawn: what a click or a tap lands on */
     SDL_Gamepad* gamepad;      /* the pad it shows, the first one plugged in, while it is open */
@@ -1117,28 +1118,14 @@ enum { GUI_SHOWS_STATUS = 1, GUI_SHOWS_TABS = 2, GUI_SHOWS_WIDE = 4, GUI_SHOWS_S
 static void place_screen(App* app, GuiPlace* p, const char* keys, int shows);
 static const char* shown_keys(const App* app, char* out, size_t size);
 static void aot_status_update(App* app);
-/* a screen's keys, Tab's after them */
-#define SAY_TAB SNX_TR_KEYS("Tab: screen. F2: side box.")
+/* a screen's keys, Tab's after them; the key back of a screen whose own keys do not say it; F1's, last in a foot */
+#define SAY_TAB      SNX_TR_KEYS("Tab: screen. F2: side box.")
+#define SAY_BACK     SNX_TR_KEYS("ESC: back.")
+#define SAY_HELP     SNX_TR_KEYS("F1: help.")
+#define SAY_PAD_HELP SNX_TR_KEYS("Select: help.")
 /* Games' foot says the AOT pack's key: there is a cache to build it from, or the pack built is bad */
 static bool aot_said(const App* app) {
     return app->menu.view == GUI_LOAD_GAMES && (app->aot_state == GUI_AOT_CACHE || app->aot_state == GUI_AOT_BAD);
-}
-static const char* screen_keys(const App* app, const char* keys, char* out, size_t size) {
-    bool aot = aot_said(app);
-#ifdef SNX_TOUCH_UI
-    if (aot) {
-        snprintf(out, size, "%s %s", snx_tr(keys), snx_tr(SAY_GAMES_AOT));
-        return out; /* a tap on a tab */
-    }
-    return snx_tr(keys);
-#else
-    if (aot) {
-        snprintf(out, size, "%s %s %s", snx_tr(keys), snx_tr(SAY_GAMES_AOT), snx_tr(SAY_TAB));
-        return out;
-    }
-    snprintf(out, size, "%s %s", snx_tr(keys), snx_tr(SAY_TAB));
-    return out;
-#endif
 }
 static void games_place(App* app, GuiPlace* p) {
     char keys[256];
@@ -1475,7 +1462,7 @@ static unsigned screen_mark(const App* app) {
 static void fades_mark(App* app) {
     unsigned mark = screen_mark(app);
     bool boxed = app->confirm.shown || app->sizes_shown || app->users_shown || app->addons_shown ||
-                 app->cleaned_shown || app->left_shown || app->dests_shown;
+                 app->cleaned_shown || app->left_shown || app->dests_shown || app->help_shown;
     if (mark != app->screen_was && app->screen_was) app->switch_ms = SDL_max(now_ms(app), 1);
     if (boxed != app->boxed_was) app->box_ms = SDL_max(now_ms(app), 1);
     app->screen_was = mark;
@@ -1982,10 +1969,63 @@ static int splash_shown(App* app) {
 #endif
 /* the keys the foot of the screen shown says, Tab's after them: what it draws, and what a click on one presses */
 static bool folders_row_place(const App* app);
-static const char* shown_keys(const App* app, char* out, size_t size) {
-    const char* keys = SAY_MENU_KEYS;
-    if (app->pad_driven && !(app->editing && app->form == GUI_FORM_PAD)) { /* the button map's speaks of pads already */
-        char said[512];
+static int hint_next(const char** s, char* key, char* what, size_t size);
+/* a key every screen has, which F1's box says and a foot leaves out: moving and picking, paging, the tabs, the side
+   box, a pad's D-pad, A, LT/RT and LB/RB. key: an English sentence's, its words between slashes */
+static bool key_generic(const char* key) {
+    static const char* const words[] = {"Up",    "Down",  "Left",  "Right", "Arrows", "mouse",  "pad",
+                                        "Space", "Enter", "click", "PgUp",  "PgDn",   "PgDown", "Tab",
+                                        "F2",    "D-pad", "A",     "LT",    "RT",     "LB",     "RB"};
+    const char* at = key;
+    if (!*key) return false;
+    while (*at) {
+        size_t n = strcspn(at, "/"), i;
+        bool known = false;
+        for (i = 0; i < SDL_arraysize(words) && !known; ++i) known = strlen(words[i]) == n && !strncmp(words[i], at, n);
+        if (!known) return false;
+        at += n + (at[n] == '/');
+    }
+    return true;
+}
+/* parts' sentences as a translation says them, for a foot (help false): the key back first and a \x1f after it,
+   which hints() puts alone at the left, then the sentences of the screen's own keys, F1's last; for F1's box (help)
+   every one. A translation has the sentences with keys of its English in their order (scripts/build-languages.py),
+   so each is known by its English's */
+static const char* keys_said(const char* const* parts, int n, bool pad, bool help, char* out, size_t size) {
+    char back[192] = "", kept[1024] = "";
+    size_t used = 0;
+    int i;
+    for (i = 0; i < n; ++i) {
+        const char *english = parts[i], *said = snx_tr(parts[i]);
+        char key[128], what[256], ekey[128], ewhat[256];
+        for (;;) {
+            const char* from = said;
+            bool found = false;
+            while (*from == ' ') ++from;
+            if (!hint_next(&said, key, what, sizeof key)) break;
+            while (key[0] && !found && hint_next(&english, ekey, ewhat, sizeof ekey)) found = ekey[0] != 0;
+            if (!help && found && !strcmp(ekey, pad ? "B" : "ESC")) {
+                snprintf(back, sizeof back, "%.*s", (int)(said - from), from);
+                continue;
+            }
+            if (!help && found && key_generic(ekey)) continue;
+            used += (size_t)snprintf(kept + used, sizeof kept - SDL_min(used, sizeof kept), "%.*s ", (int)(said - from),
+                                     from);
+            if (used >= sizeof kept) used = sizeof kept - 1;
+        }
+    }
+    if (help)
+        snprintf(out, size, "%s", kept);
+    else
+        snprintf(out, size, "%s\x1f%s%s", back, kept, snx_tr(pad ? SAY_PAD_HELP : SAY_HELP));
+    return out;
+}
+/* the keys of the screen shown: what its foot says (help false: keys_said), or F1's box every one (help) */
+static const char* screen_said(const App* app, bool help, char* out, size_t size) {
+    const char *keys = SAY_MENU_KEYS, *parts[4];
+    int n = 0;
+    bool pad = app->pad_driven && !(app->editing && app->form == GUI_FORM_PAD); /* the button map's speaks of pads */
+    if (pad) {
         if (app->editing)
             keys = app->editor.picking              ? SAY_PAD_PICKER
                    : app->form == GUI_FORM_THEME    ? SAY_PAD_EDITOR
@@ -1998,26 +2038,43 @@ static const char* shown_keys(const App* app, char* out, size_t size) {
             keys = app->menu.view == GUI_LOAD_GAMES ? SAY_PAD_GAMES
                    : pick_screen(app)               ? SAY_PAD_KEYS_HOW
                                                     : SAY_PAD_MENU;
-        snprintf(said, sizeof said, "%s%s%s %s", snx_tr(keys), aot_said(app) ? " " : "",
-                 aot_said(app) ? snx_tr(SAY_PAD_GAMES_AOT) : "", snx_tr(SAY_PAD_TAB));
+        parts[n++] = keys;
+        if (aot_said(app)) parts[n++] = SAY_PAD_GAMES_AOT;
+        parts[n++] = SAY_PAD_TAB;
+    } else {
+        if (app->editing)
+            keys = app->form == GUI_FORM_PAD        ? SAY_PAD
+                   : app->editor.picking            ? SAY_PICKER
+                   : app->form == GUI_FORM_THEME    ? SAY_EDITOR
+                   : app->form == GUI_FORM_SETTINGS ? SAY_GROUPS
+                   : app->form == GUI_FORM_APP      ? SAY_APP
+                   : app->form == GUI_FORM_FOLDERS  ? (folders_row_place(app) ? SAY_PLACES : SAY_FOLDERS)
+                   : app->form == GUI_FORM_USERS    ? SAY_USERS
+                                                    : SAY_SETTINGS;
+        else if (app->menu.view == GUI_LOAD_GAMES)
+            keys = SAY_GAMES;
+        else if (pick_screen(app))
+            keys = SAY_KEYS_HOW;
+        parts[n++] = keys;
+        if (aot_said(app)) parts[n++] = SAY_GAMES_AOT;
+#ifdef SNX_TOUCH_UI
+        /* a finger's: the words to tap are the foot, whole */
+        snprintf(out, size, "%s%s%s", snx_tr(keys), n > 1 ? " " : "", n > 1 ? snx_tr(parts[1]) : "");
+        return out;
+#else
+        if (!app->editing && app->menu.view == GUI_LOAD_GAMES) parts[n++] = SAY_BACK; /* to the menu */
+        parts[n++] = SAY_TAB;
+#endif
+    }
+    if (!pad) return keys_said(parts, n, false, help, out, size);
+    {
+        char said[1024];
+        keys_said(parts, n, true, help, said, sizeof said);
         gui_pad_keys_named(said, app->pads.labels, out, size);
         return out;
     }
-    if (app->editing)
-        keys = app->form == GUI_FORM_PAD        ? SAY_PAD
-               : app->editor.picking            ? SAY_PICKER
-               : app->form == GUI_FORM_THEME    ? SAY_EDITOR
-               : app->form == GUI_FORM_SETTINGS ? SAY_GROUPS
-               : app->form == GUI_FORM_APP      ? SAY_APP
-               : app->form == GUI_FORM_FOLDERS  ? (folders_row_place(app) ? SAY_PLACES : SAY_FOLDERS)
-               : app->form == GUI_FORM_USERS    ? SAY_USERS
-                                                : SAY_SETTINGS;
-    else if (app->menu.view == GUI_LOAD_GAMES)
-        keys = SAY_GAMES;
-    else if (pick_screen(app))
-        keys = SAY_KEYS_HOW;
-    return screen_keys(app, keys, out, size);
 }
+static const char* shown_keys(const App* app, char* out, size_t size) { return screen_said(app, false, out, size); }
 /* the colour picker's box, its rows and the bars of the first three, in pixels */
 typedef struct {
     GuiRect box, rows[GUI_PICK_ROWS], bars[3];
@@ -2124,6 +2181,17 @@ static int hint_off(const char* s) {
 static int hint_width(const char* key, const char* what) {
     return gui_text_cols(key) + (key[0] ? 1 : 0) + gui_text_cols(what);
 }
+/* the columns the key back takes alone at the left of a foot (keys_said: what is before its \x1f), 0 for none */
+static int hints_cols(const char* keys) {
+    const char* apart = strchr(keys, '\x1f');
+    char back[192], key[128], what[128];
+    const char* at = back;
+    int cols = 0;
+    if (!apart) return 0;
+    snprintf(back, sizeof back, "%.*s", (int)(apart - keys), keys);
+    while (hint_next(&at, key, what, sizeof key)) cols += hint_width(key, what) + (cols ? 2 : 0);
+    return cols;
+}
 /* a click or a tap, for hints() to say which sentence with keys it is on: their keys, and how many columns into the
    sentence (-1: the margin before it); key empty for none */
 typedef struct {
@@ -2136,8 +2204,15 @@ typedef struct {
 static int hints(App* app, const char* keys, int width, GuiRect r, int y, int draw, int band, GuiHintHit* hit) {
     const GuiTheme* t = &app->theme;
     char key[128], what[128];
-    const char* row = keys;
+    const char *row = keys, *apart = strchr(keys, '\x1f');
     int rows = 0, s = app->scale, lit, off;
+    if (apart) { /* the key back alone at the left of the first row (keys_said), three columns before the others */
+        char back[192];
+        int cols = hints_cols(keys);
+        snprintf(back, sizeof back, "%.*s", (int)(apart - keys), keys);
+        if (cols) hints(app, back, cols, gui_rect(r.x, r.y, cols * cell_w(app), r.h), y, draw, band, hit);
+        return hints(app, apart + 1, width - (cols ? cols + 3 : 0), r, y, draw, band, hit);
+    }
     for (;;) {
         const char *at = row, *end = row, *u = row;
         int used = 0, x;
@@ -3378,15 +3453,15 @@ static int frame_keys(App* app, int width) {
     app->scale = s;
     return h;
 }
-/* the keys' box at least as wide as its widest sentence, which a row cannot break */
+/* the keys' box at least as wide as its widest sentence, which a row cannot break, and the key back left of it */
 static int frame_keys_least(App* app) {
     const GuiTheme* t = &app->theme;
-    const char* at = app->frame.keys;
+    const char *apart = strchr(app->frame.keys, '\x1f'), *at = apart ? apart + 1 : app->frame.keys;
     char key[128], what[128];
-    int s = app->scale, least = 0;
+    int s = app->scale, cols = 0, back = hints_cols(app->frame.keys), least;
+    while (hint_next(&at, key, what, sizeof key)) cols = SDL_max(cols, hint_width(key, what));
     app->scale = foot_scale(app);
-    while (hint_next(&at, key, what, sizeof key))
-        least = SDL_max(least, (hint_width(key, what) + (t->footer_box ? 4 : 0)) * cell_w(app));
+    least = (cols + (back ? back + 3 : 0) + (t->footer_box ? 4 : 0)) * cell_w(app);
     app->scale = s;
     return least;
 }
@@ -7336,6 +7411,27 @@ static void draw_closing(App* app) {
             y += wrap_in(app, text, text.x, y, line, 1, rgb(app->theme.ink)) * cell_h(app);
         }
 }
+/* F1's box over the screen: every key it has (screen_said), a row a sentence, the keys in the focus colour */
+static void render_help(App* app) {
+    const GuiTheme* t = &app->theme;
+    char said[1024], key[128], what[256];
+    const char* at;
+    int rows = 0, keys = 0, whats = 0, y;
+    GuiRect r, text;
+    screen_said(app, true, said, sizeof said);
+    for (at = said; hint_next(&at, key, what, sizeof key); ++rows) {
+        keys = SDL_max(keys, gui_text_cols(key));
+        whats = SDL_max(whats, gui_text_cols(what));
+    }
+    r = over_rect(app, SDL_min(keys + 2 + whats, app->cols - 4), head_h(app) + rows * cell_h(app) + 8 * app->scale);
+    fill_rect(app, r, t->page); /* over the screen whatever its boxes are */
+    y = pane(app, r, snx_tr("Keys"));
+    text = inner(app, r);
+    for (at = said; hint_next(&at, key, what, sizeof key); y += cell_h(app)) {
+        text_in(app, text, text.x, y, key, rgb(t->focus));
+        text_in(app, text, text.x + (keys + 2) * cell_w(app), y, what, rgb(t->ink));
+    }
+}
 static void render(App* app) {
     layout(app);
     if (splash_shown(app)) return;
@@ -7361,6 +7457,7 @@ static void render(App* app) {
     } else
         draw_screen(app);
     if (app->cleaned_shown) render_files(app, 1); /* over the menu, or the App's rows it was started from */
+    if (app->help_shown) render_help(app);
     fades_draw(app);
     SDL_RenderPresent(app->renderer);
 }
@@ -9228,6 +9325,8 @@ static const struct {
                  {SNX_TR_KEY("Ctrl+V"), SDLK_V, SDL_KMOD_CTRL, false},
                  {SNX_TR_KEY("F5"), SDLK_F5, 0, false},
                  {SNX_TR_KEY("F2"), SDLK_F2, 0, false},
+                 {SNX_TR_KEY("F1"), SDLK_F1, 0, false},
+                 {SNX_TR_KEY("Select"), SDLK_F1, 0, true},
                  {SNX_TR_KEY("Refresh"), SDLK_F5, 0, false},
                  {SNX_TR_KEY("Add a folder"), SDLK_UNKNOWN, 0, false}};
 /* the hint_keys entry of the n bytes at word, a pad's buttons' only when pad (a pad drives the menu), -1 for none */
@@ -9353,6 +9452,10 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
     app->hovering = !click && !touch; /* a finger hovers nowhere, and a click has done what it lit */
     app->hover_x = x;
     app->hover_y = y;
+    if (app->help_shown) { /* F1's box: a click anywhere closes it */
+        if (click) app->help_shown = false;
+        return;
+    }
     /* under a question, the folder's too, a click is the question's */
     if (click && !app->confirm.shown && foot_press(app, x, y)) {
         if (touch && picking) app->pick_press = GUI_PICK_ROWS + 1; /* the picker's finger, pressed as it went down */
@@ -9771,6 +9874,17 @@ static void event_take(App* app, const SDL_Event* e) {
     if (app->confirm.shown && !app->menu.running &&
         (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
         if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && menu_key_of(&e->key, &key)) ask_key(app, key);
+        return;
+    }
+    /* F1's box takes every key while it shows, and any closes it */
+    if (app->help_shown && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
+        if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat) app->help_shown = false;
+        return;
+    }
+    /* F1, or the foot's (a pad's Select): every key of the screen in a box over it; the setup's foot says its own */
+    if (e->type == SDL_EVENT_KEY_DOWN && e->key.key == SDLK_F1 && !app->menu.running && !app->finished &&
+        !(app->setup_on && !app->editing) && !(app->editing && app->editor.typing)) {
+        if (!e->key.repeat) app->help_shown = true;
         return;
     }
     /* F2, or the foot's: the side box hidden where it shows, shown where it does not, kept in app.ini */

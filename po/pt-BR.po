@@ -385,6 +385,21 @@ msgid "Tab: screen. F2: side box."
 msgstr "Tab: tela. F2: caixa ao lado."
 
 #: src/gui/main.c
+#, snx-keys
+msgid "ESC: back."
+msgstr "ESC: voltar."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "F1: help."
+msgstr "F1: ajuda."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Select: help."
+msgstr "Select: ajuda."
+
+#: src/gui/main.c
 msgid "Recent games"
 msgstr "Jogos recentes"
 
@@ -2091,6 +2106,16 @@ msgstr "Ctrl+V"
 #, snx-key
 msgid "F5"
 msgstr "F5"
+
+#: src/gui/main.c
+#, snx-key
+msgid "F1"
+msgstr "F1"
+
+#: src/gui/main.c
+#, snx-key
+msgid "Select"
+msgstr "Select"
 
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c

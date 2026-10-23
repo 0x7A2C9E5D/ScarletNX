@@ -385,6 +385,21 @@ msgid "Tab: screen. F2: side box."
 msgstr "Tab: 切换画面. F2: 侧框."
 
 #: src/gui/main.c
+#, snx-keys
+msgid "ESC: back."
+msgstr "ESC: 返回."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "F1: help."
+msgstr ""
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Select: help."
+msgstr ""
+
+#: src/gui/main.c
 msgid "Recent games"
 msgstr "最近的游戏"
 
@@ -2087,6 +2102,16 @@ msgstr "Ctrl+V"
 #, snx-key
 msgid "F5"
 msgstr "F5"
+
+#: src/gui/main.c
+#, snx-key
+msgid "F1"
+msgstr "F1"
+
+#: src/gui/main.c
+#, snx-key
+msgid "Select"
+msgstr "Select"
 
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c

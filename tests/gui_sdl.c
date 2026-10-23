@@ -1929,9 +1929,21 @@ int main(int argc, char** argv) {
         shows(&app, line, yellow);
         shows(&app, "- UI scale", normal);  /* not translated in xx: English */
         shows(&app, "Ajustes", yellow);     /* the tab */
-        shows_foot(&app, "linha", normal);
-        shows_foot(&app, "tela", normal);
+        shows_foot(&app, "volta", normal);  /* the foot's own key, ESC alone at its left, translated */
+        hides_foot(&app, "linha", normal);  /* the keys every screen has: in F1's box alone */
+        hides_foot(&app, "tela", normal);
         hides_foot(&app, "change or open", normal);
+        {
+            int form = app.form;
+            key(&app, SDLK_F1);
+            render(&app);
+            assert(app.help_shown);
+            shows(&app, "linha", normal); /* F1's box: every key of the screen, translated */
+            shows(&app, "tela", normal);
+            key(&app, SDLK_ESCAPE); /* any key closes it, and does nothing else */
+            assert(!app.help_shown && app.editing && app.form == form);
+            render(&app);
+        }
         /* xx's wide letters, two columns each: the Menu tab (U+83DC U+5355) as wide as they are, the Theme row's value
            (U+4E3B U+9898) lined up with the others, a foot's keys (Up/Down as U+4E0A/U+4E0B) found by their columns */
         {
@@ -4317,7 +4329,7 @@ int main(int argc, char** argv) {
         /* Display's rows all fit: an arrow would be the groups' */
         assert(form_shown(&app, &f, true) >= (size_t)gui_editor_rows(&app.editor) && !form_first(&f, true));
         hides(&app, "\x1f", rgb(app.theme.soft)); /* nor the groups', gone */
-        press_key(&app, "F2", 0, false, yellow);
+        key(&app, SDLK_F2);                       /* F1's box says it, the foot no longer */
         form_boxes(&app, &f);
         assert(app.side_box == GUI_SIDE_ON && form_shown(&app, &f, false) &&
                f.place.side.x > f.place.list.x + f.place.list.w);
@@ -4816,6 +4828,11 @@ int main(int argc, char** argv) {
         render(&app);
         menu_boxes(&app, &m);
         assert(!m.place.side.h && !m.place.status.h && !m.place.stacked && m.place.list.w == m.place.head.w);
+        /* the side box under the list (side_box = on), the list too short for the menu: it scrolls */
+        app.side_box = GUI_SIDE_ON;
+        render(&app);
+        menu_boxes(&app, &m);
+        assert(m.place.stacked);
         shown = (int)ui_menu_shown(m.rects, app.scale, UI_MENU_ENTRIES);
         assert(app.scale == GUI_TEXT_MAX && app.rows == 16 && shown < GUI_ITEM_COUNT &&
                !m.lists[UI_MENU_ENTRIES].first);
@@ -4874,6 +4891,7 @@ int main(int argc, char** argv) {
             app.menu.selected = GUI_SWITCH;
             render(&app);
         }
+        app.side_box = GUI_SIDE_AUTO;
         assert(SDL_SetWindowSize(app.window, 1280, 1024)); /* back to the window the checks below were made for */
         SDL_SyncWindow(app.window);
         render(&app);
@@ -5646,16 +5664,16 @@ int main(int argc, char** argv) {
            focus colour; the default's on the page, no box */
         r = m.place.keys;
         assert(r.y > m.place.list.y + m.place.list.h && r.y + r.h == 800 - 8 * s);
-        { /* the keys in the foot's letters, a size under the rest's; F2's the last key, after Tab's, against the right
-             edge of the keys' last row */
+        { /* the keys in the foot's letters, a size under the rest's: ESC alone against the left edge of the first row,
+             F1's the last key, against the right edge of the keys' last row */
             int fs = foot_scale(&app), rows;
             assert(fs == s - 1);
             rows = (r.h - 4 * fs) / (16 * fs);
             assert(rows >= 1 && r.h == rows * 16 * fs + 4 * fs);
-            shows_foot(&app, "ESC", yellow);
+            foot_px_is(&app, r.x, r.y + 2 * fs, "ESC", yellow, black);
             shows_foot(&app, "exit", normal);
             hides(&app, "ESC", yellow);
-            foot_px_is(&app, r.x + r.w - 11 * 8 * fs, r.y + 2 * fs + (rows - 1) * 16 * fs, "F2", yellow, black);
+            foot_px_is(&app, r.x + r.w - 7 * 8 * fs, r.y + 2 * fs + (rows - 1) * 16 * fs, "F1", yellow, black);
             app.menu.text_size = 1; /* 1x: the foot's too, never under it */
             render(&app);
             assert(app.scale == 1 && foot_scale(&app) == 1);
@@ -6107,12 +6125,12 @@ int main(int argc, char** argv) {
         {
             static const char* const says[] = {
                 SAY_MENU_KEYS, SAY_GAMES, SAY_KEYS_HOW, SAY_EDITOR, SAY_PICKER, SAY_SETTINGS, SAY_GROUPS, SAY_APP,
-                SAY_FOLDERS, SAY_PLACES, SAY_PAD, " Tab: screen.",
+                SAY_FOLDERS, SAY_PLACES, SAY_PAD, SAY_TAB, SAY_BACK, SAY_HELP,
                 /* and while a pad drives the menu, its words found first from here */
                 SAY_PAD_MENU, SAY_PAD_GAMES, SAY_PAD_KEYS_HOW, SAY_PAD_EDITOR, SAY_PAD_PICKER, SAY_PAD_SETTINGS,
                 SAY_PAD_GROUPS, SAY_PAD_APP, SAY_PAD_FOLDERS, SAY_PAD_PLACES, SAY_PAD_USERS, SAY_PAD_TAB,
-                SAY_PAD_GAMES_AOT};
-            const size_t pads = 12; /* the first of the pad's */
+                SAY_PAD_GAMES_AOT, SAY_PAD_HELP};
+            const size_t pads = 14; /* the first of the pad's */
             static const char* const none[] = {"Arrows", "mouse", "pad", "D-pad"};
             char key_of[128], what[128];
             Uint8 was;
@@ -6134,8 +6152,26 @@ int main(int argc, char** argv) {
             app.menu.view = GUI_LOAD_NONE;
             app.menu.selected = GUI_SETTINGS;
             app.message[0] = 0;
-            /* the menu: ESC asks before closing, the pointer over it presses nothing; Arrows/mouse name no one key;
-               select, the text of three words that all select, opens the Settings, where ESC comes back */
+            /* the menu's foot: ESC alone at its left, F5 and F1 at its right, the keys every screen has (moving,
+               picking, the tabs, the side box) left to F1's box */
+            {
+                GuiMenuBoxes mb;
+                GuiRect room;
+                int x, y, scale = app.scale;
+                render(&app);
+                menu_boxes(&app, &mb);
+                room = foot_room(&app, mb.place.keys, app.theme.footer_box);
+                app.scale = foot_scale(&app);
+                assert(find_text(&app, "ESC", yellow, 1, &x, &y) && x == room.x);
+                assert(find_text(&app, "F1", yellow, 1, &x, &y) &&
+                       x + (int)(strlen("F1 help") * 8) * app.scale == room.x + room.w);
+                app.scale = scale;
+                hides_foot(&app, "Arrows/mouse", yellow);
+                hides_foot(&app, "Tab", yellow);
+                hides_foot(&app, "F2", yellow);
+                shows_foot(&app, "F5", yellow);
+            }
+            /* ESC asks before closing, the pointer over it presses nothing */
             press_key(&app, "ESC", 0, false, yellow);
             assert(app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT);
             key(&app, SDLK_ESCAPE);
@@ -6148,74 +6184,69 @@ int main(int argc, char** argv) {
                 app.scale = scale;
                 mouse_px(&app, x + 4, y + 4, false);
                 assert(!app.confirm.shown);
+                app.hovering = false; /* the pointer gone: no key lit */
             }
-            press_key(&app, "Arrows/mouse", 1, false, yellow);
-            assert(app.menu.selected == GUI_SETTINGS && !app.editing);
-            press_key(&app, "Space/Enter/click", 20, false, yellow);
-            assert(app.editing && app.form == GUI_FORM_SETTINGS);
+            /* a sentence's words press as the keyboard does, each its own: Arrows/mouse name no one key; select, the
+               text of three words that all select, opens the Settings, where ESC comes back */
+            assert(!hint_press(&app, "Arrows/mouse", 1) && app.menu.selected == GUI_SETTINGS && !app.editing);
+            assert(hint_press(&app, "Space/Enter/click", 20) && app.editing && app.form == GUI_FORM_SETTINGS);
             press_key(&app, "ESC", 0, false, yellow);
             assert(!app.editing && app.menu.view == GUI_LOAD_NONE);
-            { /* the keys' box's whole height is their rows': a click on its top edge, over Tab, opens Games */
+            { /* the keys' box's whole height is their rows': a click on its top edge, over F1, opens its box, which a
+                 click closes */
                 GuiMenuBoxes mb;
                 int x, y, scale = app.scale;
                 render(&app);
                 menu_boxes(&app, &mb);
                 app.scale = foot_scale(&app);
-                assert(find_text(&app, "Tab", yellow, 1, &x, &y));
+                assert(find_text(&app, "F1", yellow, 1, &x, &y));
                 app.scale = scale;
                 assert(y > mb.place.keys.y);
                 mouse_px(&app, x + 4, mb.place.keys.y, true);
-                assert(app.menu.view == GUI_LOAD_GAMES);
-                go_tab(&app, GUI_TAB_MENU);
+                assert(app.help_shown);
+                render(&app);
+                shows(&app, "Keys", normal);
+                shows(&app, "Arrows/mouse", yellow); /* every key, the foot's and the others */
+                shows(&app, "side box", normal);
+                mouse_px(&app, x + 4, y + 4, true);
+                assert(!app.help_shown && app.menu.view == GUI_LOAD_NONE);
             }
             { /* the mouse over a key of the foot lights its sentence, inverted, when a click there presses something;
-                 not over Arrows/mouse, which names no one key, and not once it leaves the window */
+                 not once it leaves the window */
                 SDL_Event left = {0};
                 int x, y, scale = app.scale;
                 SDL_Color page = rgb(app.theme.page);
                 render(&app);
                 app.scale = foot_scale(&app);
-                assert(find_text(&app, "Tab", yellow, 1, &x, &y));
+                assert(find_text(&app, "F5", yellow, 1, &x, &y));
                 app.scale = scale;
-                shows_foot(&app, "screen", normal);
-                mouse_px(&app, x + 4, y + 4, false);
-                assert(app.menu.view == GUI_LOAD_NONE); /* a hover presses nothing */
-                render(&app);
-                shows_foot(&app, "Tab", page);
-                shows_foot(&app, "screen", page);
-                hides_foot(&app, "Tab", yellow);
-                render(&app);
-                app.scale = foot_scale(&app);
-                assert(find_text(&app, "Arrows/mouse", yellow, 1, &x, &y));
-                app.scale = scale;
+                shows_foot(&app, "refresh", normal);
                 mouse_px(&app, x + 4, y + 4, false);
                 render(&app);
-                shows_foot(&app, "Arrows/mouse", yellow);
-                shows_foot(&app, "Tab", yellow);
+                shows_foot(&app, "F5", page);
+                shows_foot(&app, "refresh", page);
+                hides_foot(&app, "F5", yellow);
                 left.type = SDL_EVENT_WINDOW_MOUSE_LEAVE;
                 app.hovering = true;
                 event(&app, &left);
                 assert(!app.hovering);
             }
-            /* a tap on Tab opens Games, where each word of Left/Right/PgUp/PgDown turns the page its way, and its text,
-               of words two ways, none; Up/Down's each move the focus */
-            press_key(&app, "Tab", 0, true, yellow);
+            /* Games, where each word of Left/Right/PgUp/PgDown turns the page its way, and its text, of words two ways,
+               none; Up/Down's each move the focus */
+            key(&app, SDLK_TAB);
             assert(app.menu.view == GUI_LOAD_GAMES && app.browser.page == 0 && gui_browser_pages(&app.browser) > 1);
-            press_key(&app, "Left/Right/PgUp/PgDown", 18, false, yellow); /* PgDown */
-            assert(app.browser.page == 1);
-            press_key(&app, "Left/Right/PgUp/PgDown", 24, false, yellow); /* page */
-            assert(app.browser.page == 1);
-            press_key(&app, "Left/Right/PgUp/PgDown", 12, false, yellow); /* PgUp */
-            assert(app.browser.page == 0);
-            press_key(&app, "Left/Right/PgUp/PgDown", 10, false, yellow); /* Right's slash */
-            assert(app.browser.page == 1);
-            press_key(&app, "Left/Right/PgUp/PgDown", -1, false, yellow); /* the margin before Left */
-            assert(app.browser.page == 0);
+            assert(hint_press(&app, "Left/Right/PgUp/PgDown", 18) && app.browser.page == 1);  /* PgDown */
+            assert(!hint_press(&app, "Left/Right/PgUp/PgDown", 24) && app.browser.page == 1); /* page */
+            assert(hint_press(&app, "Left/Right/PgUp/PgDown", 12) && app.browser.page == 0);  /* PgUp */
+            assert(hint_press(&app, "Left/Right/PgUp/PgDown", 10) && app.browser.page == 1);  /* Right's slash */
+            assert(hint_press(&app, "Left/Right/PgUp/PgDown", -1) &&
+                   app.browser.page == 0); /* the margin before Left */
             app.browser.selected = 0;
-            press_key(&app, "Up/Down", 3, false, yellow);
-            assert(app.browser.selected == 1);
-            press_key(&app, "Up/Down", 0, false, yellow);
-            assert(app.browser.selected == 0);
+            assert(hint_press(&app, "Up/Down", 3) && app.browser.selected == 1);
+            assert(hint_press(&app, "Up/Down", 0) && app.browser.selected == 0);
+            press_key(&app, "ESC", 0, false, yellow); /* Games' own ESC, to the menu */
+            assert(app.menu.view == GUI_LOAD_NONE);
+            key(&app, SDLK_TAB);
             /* Android's words: a swipe turns the page, Back goes back as ESC, a tap selects; Tap outside, the
                picker's, presses nothing (a tap off the picker keeps the colour) */
             assert(hint_press(&app, "Swipe", 0) && app.browser.page == 1);
@@ -6234,12 +6265,12 @@ int main(int argc, char** argv) {
             for (launch = 0; launch < app.groups && strcmp(app.group_keys[launch].key, "Launch"); ++launch) {}
             assert(launch < app.groups);
             app.editor.row = launch;
-            press_key(&app, "Enter", 0, false, yellow);
+            assert(hint_press(&app, "Enter", 0));
             assert(app.form == GUI_FORM_GROUP && app.group == launch && !app.editor.row);
-            press_key(&app, "Up/Down", 5, false, yellow);
+            assert(hint_press(&app, "Up/Down", 5));
             assert(app.editor.row == 1 && !strcmp(app.settings.keys[app.first + 1].key, "Extract to tmpfs"));
             assert(gui_settings_set(&app.settings, "tmpfs", "off"));
-            press_key(&app, "Left/Right", 6, false, yellow);
+            assert(hint_press(&app, "Left/Right", 6));
             assert(setting_is(&app, "tmpfs", "on"));
             press_key(&app, "Del", 0, false, yellow);
             assert(setting_is(&app, "tmpfs", NULL));
@@ -6257,13 +6288,13 @@ int main(int argc, char** argv) {
             key(&app, SDLK_RETURN);
             assert(app.editor.picking && app.editor.channel == GUI_PICK_RED && app.editor.theme.page.r < 255);
             was = app.editor.theme.page.r;
-            press_key(&app, "Left/Right", 6, false, yellow);
+            assert(hint_press(&app, "Left/Right", 6));
             assert(app.editor.picking && app.editor.theme.page.r == was + 1);
             press_key(&app, "ESC", 0, false, yellow);
             assert(!app.editor.picking && app.editor.theme.page.r == was && app.form == GUI_FORM_THEME);
             key(&app, SDLK_RETURN);
             assert(app.editor.picking);
-            press_key(&app, "Enter", 0, true, yellow);
+            press_key(&app, "ESC", 0, true, yellow); /* a finger: put back as it goes down, its lift no tap */
             assert(!app.editor.picking && app.editing && app.form == GUI_FORM_THEME && !app.pick_press);
             key(&app, SDLK_ESCAPE);
             assert(app.editing && app.form == GUI_FORM_APP);
@@ -6286,9 +6317,10 @@ int main(int argc, char** argv) {
                    !strncmp(app.editor.note, "The folder picker could not open: ", 34));
             leave_editor(&app);
             /* and in YoRHa's box on the band, in its page colour */
-            press_key(&app, "Tab", 0, false, yellow);
-            assert(app.menu.view == GUI_LOAD_GAMES);
-            go_tab(&app, GUI_TAB_MENU);
+            press_key(&app, "F1", 0, false, yellow);
+            assert(app.help_shown);
+            key(&app, SDLK_F1);
+            assert(!app.help_shown);
             app.theme = *gui_theme_builtin("yorha");
             app.theme.grid = false;
             press_key(&app, "ESC", 0, false, rgb(app.theme.page));
@@ -7421,7 +7453,7 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RETURN);
         assert(app.form == GUI_FORM_PAD && app.editor.note[0]); /* the map it cannot read, still set */
         render(&app);
-        place_screen(&app, &p, screen_keys(&app, SAY_PAD, keys, sizeof keys), GUI_SHOWS_TABS);
+        place_screen(&app, &p, shown_keys(&app, keys, sizeof keys), GUI_SHOWS_TABS); /* the button map's */
         r = inner(&app, p.list);
         first = drawn(&app, 0, SNX_PAD_SHAPE_BOX, -1);
         assert(first && first->x >= (float)r.x && first->y >= (float)r.y && first->y < (float)(r.y + r.h));

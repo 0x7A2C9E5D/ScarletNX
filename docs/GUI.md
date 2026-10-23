@@ -42,7 +42,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - A gamepad drives the menu as the keys do (`src/gui/pad_menu.c`): the D-pad and the left stick are the arrows, the
   button labelled A (or Cross) is Enter, B (or Circle) ESC, X (or Square) Del and Y (or Triangle) R, wherever the pad
   has them (a Switch pad's A is east, its X north), LB and RB are Shift+Tab and Tab, LT and RT are PgUp and PgDn, L3
-  and R3 are M and B (Games' mods folder and AOT pack), Start is F5 and Back (View, Minus, Select) F2. A held arrow or
+  and R3 are M and B (Games' mods folder and AOT pack), Start is F5 and Back (View, Minus, Select) F1. A held arrow or
   page repeats. A press on the pad hides the mouse's cursor and the foot names the pad's buttons, a PlayStation pad's
   by their shapes; a key or the mouse moving past a few pixels shows the keyboard's again, and so do a click and a
   finger once they have pressed what the foot showed under them: the press that switched does what it does. The Button
@@ -400,7 +400,10 @@ run's output), never what the tips already say (what the row does, a game's kind
 box. The tips have a row of their own under the head, their letters a half step under the text's (1.5x by a 2x text),
 as the Status box's and the note at the foot of a Settings box are; the setup's go to the foot beside its keys, where they take one row,
 a long one sliding, or wrap over its rows with `[tips] wrap`, the last sliding what does not fit. At the foot the
-screen's keys, the whole width (the setup's beside its tips), in letters a size under the rest's; the tips and the keys each in a box with a bar down
+screen's keys, the whole width (the setup's beside its tips), in letters a size under the rest's: its own keys, ESC alone
+at the left of the row, **F1** last, which opens a box over the screen with every key it has, those every screen has too
+(the arrows and the mouse, Enter, Space and a click, the pages, Tab and F2), until any key or a click closes it; on a
+phone, the words to tap, whole. The tips and the keys each in a box with a bar down
 its left (`[tips] box`, `[footer] box`) or on the page. Games lists Add a folder, the recent games and a
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
@@ -425,8 +428,8 @@ touch target at the 3x a phone held wide gets, where the desktop's are 17), the 
 group's screen, the group open in the groups' list), the cursor and the arrows of hidden rows inside each row, which a
 click takes whole as a tap does. That is the **Side box**'s *Auto*, the
 default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
-not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2, or the
-foot's, shows it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over
+not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2 shows
+it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over
 its rows, its last sliding what is left, or takes one that slides with `[body] text = slide`. A run of the console layout shows the driver's output in a box sized to it,
 beside it what runs and how it ended over the status, the file in the tips and the ESC line where the keys
 go, which a tap aborts. The button map draws the pad in the box between the head and the foot. A question comes

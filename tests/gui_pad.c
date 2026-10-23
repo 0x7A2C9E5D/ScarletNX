@@ -74,7 +74,7 @@ int main(void) {
 #ifdef SDL_PLATFORM_ANDROID
     assert(key_of(SNX_PAD_START, XBOX) == SDLK_F5 && key_of(SNX_PAD_BACK, XBOX) == SDLK_ESCAPE);
 #else
-    assert(key_of(SNX_PAD_START, XBOX) == SDLK_F5 && key_of(SNX_PAD_BACK, XBOX) == SDLK_F2);
+    assert(key_of(SNX_PAD_START, XBOX) == SDLK_F5 && key_of(SNX_PAD_BACK, XBOX) == SDLK_F1);
 #endif
     /* the foot's keys as the pad names them: the letters of a PlayStation pad its shapes, in the keys alone */
     {
