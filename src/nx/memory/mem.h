@@ -21,6 +21,7 @@ typedef struct {
     u64 base, end; /* what the game may map in */
     u64 heap, heap_size;
     u64 alias, alias_size;
+    u64 alias_virtual; /* the alias region's size GetInfo reports when it is larger than the host backs: 0, alias_size */
     u64 stack, stack_size;
     u64 kern, kern_end; /* the kernel's own pages (TLS) */
 } MemLayout;
@@ -87,6 +88,8 @@ void mem_layout32(unsigned aspace);
 /* iOS: the guest's address space reserved now rather than in mem_init (which finds it kept), before the game's code
    takes a share of the app's 13 GiB or so and leaves no run of the 5 GiB the guest needs at least. Elsewhere nothing */
 void mem_reserve(void);
+/* the layout of a game with a system resource size (VAMM), once the program's metadata says so: before mem_init */
+void mem_layout_vamm(void);
 void mem_init(void);
 int mem_map(u64 addr, u64 size, u32 state, u32 perm); /* 0, MEM_BADSTATE when it isn't free, MEM_NOMEM */
 int mem_unmap(u64 addr, u64 size);
