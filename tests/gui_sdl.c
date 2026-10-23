@@ -5223,7 +5223,7 @@ int main(int argc, char** argv) {
                 assert(strstr(screen_said(&app, true, said, sizeof said), "B: AOT pack."));
                 /* Games' every key at once, the most parts a foot puts together: each in F1's box, none left out */
                 assert(strstr(said, "R: recompile.") && strstr(said, "M: mods.") && strstr(said, "P: folders.") &&
-                       strstr(said, "ESC: back.") && strstr(said, "Tab: screen."));
+                       strstr(said, "V: view.") && strstr(said, "ESC: back.") && strstr(said, "Tab: screen."));
                 assert(strstr(shown_keys(&app, said, sizeof said), "R: recompile.") && strstr(said, "B: AOT pack.") &&
                        strstr(said, "P: folders.") && strstr(said, "ESC: back."));
                 app.aot_state = state;
