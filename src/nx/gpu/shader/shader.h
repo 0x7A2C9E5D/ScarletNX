@@ -140,6 +140,12 @@ extern int g_shader_clock_scopes;
 #define SNX_SH_NOT_LAST (1u << 31)
 /* the descriptor set of a stage's bindings */
 int shader_vk_set(int stage);
+/* can_flush: how the module gets the console's FP32 flush to zero (FTZ on FADD, FMUL and FFMA). SH_FTZ_EMULATE: a
+   test and a select on each such operand and result; SH_FTZ_MODE: the DenormFlushToZero execution mode, in a module
+   whose every such instruction flushes; SH_FTZ_NATIVE: neither, on a device that flushes them by itself (vk/ftz_probe.c) */
+#define SH_FTZ_EMULATE 0
+#define SH_FTZ_MODE    1
+#define SH_FTZ_NATIVE  2
 /* Translates a program (code, readable up to max_bytes) to SPIR-V: malloc'd words, their count in word_count. NULL
    when the program uses something the translator can't express, with si->unsupported and the reason set. */
 u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count, int can_flush,

@@ -41,6 +41,7 @@ static VkPipelineLayout g_playouts[1u << 5]; /* by the sets with texture arrays,
 static PMutex g_playout_lock = PMUTEX_INIT;  /* making one: the file's reading thread asks for them too */
 u32 g_vk_stage_sets;
 static VkPipelineCache g_pcache;
+int g_vk_ftz; /* SH_FTZ_*: how translations flush FP32 subnormals (vk_pipeline_init) */
 static void pf_start_load(void);
 static void pf_merge(void);
 static void pf_shader_record(const VkSh* s, const u32* spv, size_t nw, const u8* code, u32 ncode, const ShXfb* xfb);
@@ -133,7 +134,7 @@ u32* vk_translate_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si
                                             VK_SHADER_STAGE_FRAGMENT_BIT,
                                             VK_SHADER_STAGE_COMPUTE_BIT};
     VkShaderStageFlagBits shader_stage = stages[stage];
-    u32* result = shader_to_spirv(code, max_bytes, stage, si, words, g_vk_flush_denorm, g_vk_preserve_infnan,
+    u32* result = shader_to_spirv(code, max_bytes, stage, si, words, g_vk_ftz, g_vk_preserve_infnan,
                                   g_vk_preserve_infnan64, (g_vk_subgroup_stages & shader_stage) != 0);
     g_shader_cb_read = old;
     g_rec = NULL;
@@ -330,6 +331,17 @@ void vk_pipeline_init(void) {
     }
     if (ci.initialDataSize) LOG("vulkan: pipeline cache loaded (%zu KB)\n", ci.initialDataSize >> 10);
     plat_file_unmap(&data); /* the cache copied it, and a mapped file can't be replaced on Windows */
+    /* how shaders get the console's FP32 flush to zero, settled before the reading thread translates any */
+    if (g_vk_flush_denorm)
+        g_vk_ftz = SH_FTZ_MODE;
+    else if (g_vk_preserve_infnan && vk_ftz_native()) {
+        g_vk_ftz = SH_FTZ_NATIVE;
+        LOG("vulkan: this GPU flushes FP32 subnormals as the console's FTZ instructions do, so shaders are translated "
+            "without a flush of their own\n");
+    } else {
+        g_vk_ftz = SH_FTZ_EMULATE;
+        WARN("vulkan: FP32 denormal flush mode unavailable; graphics shaders use per-instruction FTZ fallback\n");
+    }
     pf_start_load();
 }
 
@@ -1431,8 +1443,9 @@ static void pf_key(char* out, size_t n, size_t* guest) {
                      (unsigned)sizeof(PfSource), (unsigned)sizeof(PfPipe), (unsigned)sizeof(ShXfb));
     *guest = g > 0 && (size_t)g < n ? (size_t)g : 0;
     if (*guest)
-        snprintf(out + *guest, n - *guest, " %s%s driver=%u api=%u uuid=%s sizes=%u,%u", snx_build_info(), exe,
-                 d->driverVersion, d->apiVersion, uuid, (unsigned)sizeof(ShaderInfo), (unsigned)sizeof(PfShader));
+        snprintf(out + *guest, n - *guest, " %s%s driver=%u api=%u uuid=%s ftz=%d sizes=%u,%u", snx_build_info(), exe,
+                 d->driverVersion, d->apiVersion, uuid, g_vk_ftz, (unsigned)sizeof(ShaderInfo),
+                 (unsigned)sizeof(PfShader));
 }
 
 /* ---- the shaders of the programs the game ships (gpu/shipped_pass.c finds them), translated before a draw asks */
