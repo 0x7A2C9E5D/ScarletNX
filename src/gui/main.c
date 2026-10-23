@@ -2214,7 +2214,7 @@ static void foot(App* app, const GuiPlace* p, const char* tips, SDL_Color color,
     if (t->footer_rule) fill_rect(app, gui_rect(foot.x, foot.y - cell_h(app) / 4 - s / 2, foot.w, s), t->soft);
     if (below && band && !(color.r == t->failure.r && color.g == t->failure.g && color.b == t->failure.b))
         color = rgb(t->page); /* on the band but a failure */
-    if (below) app->scale = small;
+    app->scale = small;       /* the tips in the foot's letters, under the head as beside the keys */
     text = foot_box(app, p->tips, t->tips_box, below && band);
     if (below && t->tips_wrap)
         wrap_in(app, text, text.x, text.y, tips, 0, color);
@@ -3382,6 +3382,12 @@ int ui_screen_head_measure_cb(App* app, int width, int scale) {
     return head_place(&app->frame.head, 0, 0, width, NULL);
 }
 bool ui_screen_tips_shown_cb(App* app) { return !app->frame.tips_foot; }
+/* the tips' row under the head: a row of the foot's letters */
+int ui_screen_tips_measure_cb(App* app, int width, int scale) {
+    (void)width;
+    (void)scale;
+    return 20 * foot_scale(app);
+}
 bool ui_screen_body_side_shown_cb(App* app) { return app->frame.side; }
 bool ui_screen_body_side_status_shown_cb(App* app) { return app->frame.status; }
 int ui_screen_body_side_status_measure_cb(App* app, int width, int scale) {
@@ -3400,6 +3406,7 @@ int ui_screen_foot_keys_min_width_cb(App* app, int scale) {
 bool ui_wide_head_shown_cb(App* app) { return frame_head_shown(app); }
 int ui_wide_head_measure_cb(App* app, int width, int scale) { return ui_screen_head_measure_cb(app, width, scale); }
 bool ui_wide_tips_shown_cb(App* app) { return !app->frame.tips_foot; }
+int ui_wide_tips_measure_cb(App* app, int width, int scale) { return ui_screen_tips_measure_cb(app, width, scale); }
 bool ui_wide_body_side_shown_cb(App* app) { return app->frame.side; }
 bool ui_wide_body_side_status_shown_cb(App* app) { return app->frame.status; }
 int ui_wide_body_side_status_measure_cb(App* app, int width, int scale) {
@@ -5984,9 +5991,15 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
         f->place.side = f->place.list; /* no side box: the open group's rows the whole column, the groups out */
         f->place.list = gui_rect(f->place.list.x, f->place.list.y, 0, 0);
     }
-    rows = note ? wrap_rows(app, note, inner(app, f->place.side).w / cell_w(app), 0) : 1; /* the note whole */
-    f->info = gui_rect(f->place.side.x, f->place.side.y + f->place.side.h - rows * cell_h(app) - 4 * app->scale,
-                       f->place.side.w, rows * cell_h(app) + 2 * app->scale);
+    { /* the note whole, in the foot's letters */
+        int s = app->scale, w = inner(app, f->place.side).w, line;
+        app->scale = foot_scale(app);
+        rows = note ? wrap_rows(app, note, w / cell_w(app), 0) : 1;
+        line = cell_h(app);
+        app->scale = s;
+        f->info = gui_rect(f->place.side.x, f->place.side.y + f->place.side.h - rows * line - 4 * s, f->place.side.w,
+                           rows * line + 2 * s);
+    }
     top = f->place.side.y + (app->form == GUI_FORM_FOLDERS ? 2 * app->scale : head_h(app) + 4 * app->scale);
     ui_form_list_layout(f->place.list, app->scale, f->left);
     ui_form_side_layout(gui_rect(f->place.side.x + cell_w(app), top, f->place.side.w - 2 * cell_w(app),
@@ -6185,8 +6198,13 @@ static void draw_form(App* app) {
                  app->form == GUI_FORM_GROUP && app->page >= 0 ? snx_tr(app->settings.keys[app->page].key)
                                                                : snx_tr(app->group_keys[g].key));
         ui_form_side_draw(app, f.right, app->scale, f.right_lists);
-        if (form_note(app))
-            wrap_in(app, inner(app, f.info), f.info.x + cell_w(app), f.info.y, form_note(app), 0, rgb(app->theme.soft));
+        if (form_note(app)) { /* in the foot's letters, as form_boxes measured it */
+            GuiRect text = inner(app, f.info);
+            int s = app->scale;
+            app->scale = foot_scale(app);
+            wrap_in(app, text, text.x, f.info.y, form_note(app), 0, rgb(app->theme.soft));
+            app->scale = s;
+        }
     }
     draw_picker(app);
     about = form_about(app, &color);

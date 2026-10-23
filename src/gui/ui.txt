@@ -102,9 +102,9 @@
 		measure = callback
 		shown = callback
 	}
-	# off in the setup, whose tips are the foot's
+	# a row of the foot's letters; off in the setup, whose tips are the foot's
 	[slot]Tips {
-		height = 1rows + 4px
+		measure = callback
 		shown = callback
 	}
 	[box]Body {
@@ -163,7 +163,7 @@
 		shown = callback
 	}
 	[slot]Tips {
-		height = 1rows + 4px
+		measure = callback
 		shown = callback
 	}
 	[box]Body {
