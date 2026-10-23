@@ -19,6 +19,7 @@
 #include "common/utilities/common.h"
 #include "common/cpu/aarch64/cpu.h"
 #include "common/cpu/aarch64/a64_emit.h"
+#include "common/cpu/aarch64/a64_decoder.h"
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/llvm/link.h"
 #include "common/cpu/recompiler/llvm/code_loader.h"
@@ -664,6 +665,12 @@ int main(int argc, char** argv) {
         words = (Word*)snx_realloc(words, (count + DIRECTED * per_simd) * sizeof(*words));
         count += directed(match, per_simd, words + count);
     }
+    /* the backend decodes with the generated decoder (a64_decoder.h): a word it leaves UNDEF for the Switch, an
+       unallocated or post-Armv8.0 encoding the old decoder's patterns took in, runs no emitter there, while the
+       reference may still run it (llvm_qemu_differential holds it to QEMU) */
+    for (i = 0, k = 0; i < count; ++i)
+        if (snx_a64_flow(words[i].word, 0) != SNX_A64_FLOW_UNDEF) words[k++] = words[i];
+    count = k;
     for (i = shard, k = 0; i < count; i += shards) words[k++] = words[i];
     count = k;
     if (!count) return snx_error("no words to test");
@@ -736,7 +743,7 @@ int main(int argc, char** argv) {
         for (i = 0; i < count; ++i) {
             char name[32];
             sprintf(name, "S_%lu", (unsigned long)i);
-            fns[i] = snx_ir_static_step(ir, words[i].word, PC_BASE, name);
+            fns[i] = snx_ir_static_step(ir, words[i].word, PC_BASE, 0, name);
             LLVMSetVisibility(fns[i], LLVMHiddenVisibility);
         }
         table = LLVMAddGlobal(ir->mod, type, "TABLE");

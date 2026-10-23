@@ -615,7 +615,7 @@ static void cross(const char* cpu, const uint32_t* words) {
         SnxA64Insn insn;
         index[i] = -1;
         /* SME's SMSTART would leave the runner in streaming mode */
-        if (max && snx_a64_decode(words[i], SNX_A64_TARGET_MAX, &insn) != SNX_A64_UNDEF &&
+        if (max && snx_a64_decode(words[i], SNX_A64_TARGET_MAX, &insn) != SNX_A64_OP_UNDEF &&
             (insn.feature & SNX_A64_FEAT_SME)) {
             ++notrun;
             continue;
@@ -636,20 +636,20 @@ static void cross(const char* cpu, const uint32_t* words) {
             continue;
         }
         op = snx_a64_decode(words[i], target, &insn);
-        decoded = op != SNX_A64_UNDEF;
+        decoded = op != SNX_A64_OP_UNDEF;
         sigill = r->outcome == SNX_QREF_UNDEF;
         if (decoded != sigill) continue;
         ++total;
         /* the group: the op it decodes to here, or under max when not here, or its space when no row has it */
         if (!decoded) op = snx_a64_decode(words[i], SNX_A64_TARGET_MAX, &insn);
-        g = op == SNX_A64_UNDEF ? space(words[i]) : (uint32_t)op;
+        g = op == SNX_A64_OP_UNDEF ? space(words[i]) : (uint32_t)op;
         for (k = 0; k < ngroups && !(groups[k].op == g && groups[k].decoded == (uint32_t)decoded); ++k) {
         }
         if (k == ngroups) {
             groups[k].op = g;
             groups[k].decoded = (uint32_t)decoded;
             groups[k].example = words[i];
-            groups[k].feature = op == SNX_A64_UNDEF ? 0 : insn.feature;
+            groups[k].feature = op == SNX_A64_OP_UNDEF ? 0 : insn.feature;
             ++ngroups;
         }
         g = k;
@@ -671,7 +671,7 @@ static void cross(const char* cpu, const uint32_t* words) {
                     groups[i].decoded ? "decodes-sigill" : "undef-runs", name, features, groups[i].count,
                     groups[i].example);
         if (!max)
-            check(groups[i].decoded && groups[i].op == SNX_A64_SYS, cpu,
+            check(groups[i].decoded && groups[i].op == SNX_A64_OP_SYS, cpu,
                   "the Switch target's UNDEF set matches the Cortex-A57's outside SYS");
     }
 done:

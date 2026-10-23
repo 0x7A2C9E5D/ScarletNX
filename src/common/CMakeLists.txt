@@ -4,7 +4,7 @@ add_library(scarletnx-common STATIC
     utilities/common.c utilities/process.c utilities/font.c utilities/ini_lines.c utilities/game_ini.c utilities/pad_map.c
     utilities/pad_screen.c utilities/users.c utilities/logscan.c utilities/language_tag.c utilities/mods.c utilities/patches.c utilities/cheat_list.c
     utilities/spirv_emit.c memory/host.c
-    cpu/aarch64/a64.c cpu/recompiler/codegen.c cpu/recompiler/variants.c runtime/cas128.c)
+    cpu/aarch64/a64.c cpu/aarch64/a64_decoder.c cpu/recompiler/codegen.c cpu/recompiler/variants.c runtime/cas128.c)
 target_compile_definitions(scarletnx-common PRIVATE _CRT_SECURE_NO_WARNINGS
     SNX_HOST_COMPILER="${CMAKE_C_COMPILER}"
     SNX_CPU_INCLUDE="${CMAKE_CURRENT_SOURCE_DIR}/cpu/aarch64"
@@ -15,6 +15,9 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
     set_source_files_properties(runtime/cas128.c PROPERTIES COMPILE_OPTIONS -mcx16)
 endif()
 target_link_libraries(scarletnx-common PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+# the A64 decoder (cpu/aarch64/a64_decoder.c) tools/a64dec generates from cpu/aarch64/decode/
+include("${PROJECT_SOURCE_DIR}/cmake/a64dec.cmake")
+snx_a64dec(scarletnx-common)
 if(WIN32)
     target_link_libraries(scarletnx-common PUBLIC advapi32)
 else()

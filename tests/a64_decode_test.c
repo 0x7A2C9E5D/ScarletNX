@@ -37,8 +37,8 @@ static void dec(uint32_t word, uint64_t target, SnxA64Op op, int line) {
     }
 }
 
-#define DEC(word, target, op) dec(word, target, SNX_A64_##op, __LINE__)
-#define UNDEF(word, target)   dec(word, target, SNX_A64_UNDEF, __LINE__)
+#define DEC(word, target, op) dec(word, target, SNX_A64_OP_##op, __LINE__)
+#define UNDEF(word, target)   dec(word, target, SNX_A64_OP_UNDEF, __LINE__)
 #define A(field, want)        eq(g_test.d.args.field, want, #field, __LINE__)
 #define FLOW(want)            eq(g_test.d.flow, SNX_A64_FLOW_##want, "flow", __LINE__)
 #define NOP(want)             eq(g_test.d.nop, want, "nop", __LINE__)
@@ -539,11 +539,11 @@ static void index_matches_scan(void) {
         word = i < 2048 * 16 ? ((uint32_t)(i & 2047) << 21) | ((x >> 11) & 0x1fffffu) : x;
         for (t = 0; t < 2; t++) {
             SnxA64Insn a, b;
-            SnxA64Op want = SNX_A64_UNDEF;
+            SnxA64Op want = SNX_A64_OP_UNDEF;
             unsigned r;
             for (r = 0; r < sizeof snx_a64_rows / sizeof snx_a64_rows[0]; r++) {
                 const SnxA64Row* row = &snx_a64_rows[r];
-                SnxA64Insn zero = {SNX_A64_UNDEF, SNX_A64_FLOW_UNDEF, 0, 0, {0}};
+                SnxA64Insn zero = {SNX_A64_OP_UNDEF, SNX_A64_FLOW_UNDEF, 0, 0, {0}};
                 if ((word & row->mask) != row->value || (row->feature & ~targets[t])) continue;
                 b = zero;
                 b.feature = row->feature;

@@ -3,6 +3,7 @@
 /* Synthetic ISA/CFG/module tests. The generated ABI fixture is compiled by the
    supplied host Clang, then checks static and interpreted architectural results. */
 #include "common/cpu/aarch64/a64_emit.h"
+#include "common/cpu/aarch64/a64_decoder.h"
 #include "common/cpu/recompiler/codegen.h"
 #include "nx/loader/codegen_view.h"
 #include <stdlib.h>
@@ -38,20 +39,33 @@ static void decoder_test(void) {
                                      0x1EE70020UL,
                                      0x9EE60020UL,
                                      0x9EE70020UL};
+    /* ERET, HVC #0, SMC #0, HLT #0, MSR SPSel, DAIFSet, DAIFClr, PAN, UAO (immediate) */
+    static const SnxU32 el1[] = {0xD69F03E0UL, 0xD4000002UL, 0xD4000003UL, 0xD4400000UL, 0xD50040BFUL,
+                                 0xD50340DFUL, 0xD50340FFUL, 0xD500409FUL, 0xD500407FUL};
     static const SnxU32 backwards[] = {0x17FFFFFFUL, 0x97FFFFFFUL, 0x54FFFFE0UL, 0xB4FFFFE0UL, 0x3607FFE0UL};
+    SnxA64Insn insn;
     size_t i;
     for (i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
-        check(snx_a64_decode(invalid[i])->kind == SNX_FLOW_UNDEF, "reject reserved/invalid encoding");
-    check(snx_a64_decode(0x1EE24020UL)->kind == SNX_FLOW_PLAIN, "A57 FCVT S,H remains allocated");
-    check(snx_a64_decode(0x1EE2C020UL)->kind == SNX_FLOW_PLAIN, "A57 FCVT D,H remains allocated");
-    check(snx_a64_decode(0x1E23C020UL)->kind == SNX_FLOW_PLAIN, "A57 FCVT H,S remains allocated");
-    check(snx_a64_decode(0x1E63C020UL)->kind == SNX_FLOW_PLAIN, "A57 FCVT H,D remains allocated");
-    check(snx_a64_decode(0xD503201FUL)->kind == SNX_FLOW_PLAIN, "NOP decode");
-    check(snx_a64_decode(0xD65F03C0UL)->kind == SNX_FLOW_RET, "RET decode");
-    check(snx_a64_decode(0x94000002UL)->kind == SNX_FLOW_BL, "BL decode");
+        check(snx_a64_flow(invalid[i], 0) == SNX_A64_FLOW_UNDEF, "reject reserved/invalid encoding");
+    check(snx_a64_flow(0x1EE24020UL, 0) == SNX_A64_FLOW_PLAIN, "A57 FCVT S,H remains allocated");
+    check(snx_a64_flow(0x1EE2C020UL, 0) == SNX_A64_FLOW_PLAIN, "A57 FCVT D,H remains allocated");
+    check(snx_a64_flow(0x1E23C020UL, 0) == SNX_A64_FLOW_PLAIN, "A57 FCVT H,S remains allocated");
+    check(snx_a64_flow(0x1E63C020UL, 0) == SNX_A64_FLOW_PLAIN, "A57 FCVT H,D remains allocated");
+    check(snx_a64_flow(0xD503201FUL, 0) == SNX_A64_FLOW_PLAIN, "NOP decode");
+    check(snx_a64_flow(0xD65F03C0UL, 0) == SNX_A64_FLOW_RET, "RET decode");
+    check(snx_a64_flow(0x94000002UL, 0) == SNX_A64_FLOW_BL, "BL decode");
+    /* EL0: ERET, HVC, SMC, HLT and the EL1 MSR immediates are UNDEF whatever features are asked for; CFINV and the
+       unallocated MSR immediates are for the Switch */
+    for (i = 0; i < sizeof(el1) / sizeof(el1[0]); ++i)
+        check(snx_a64_flow(el1[i], 0) == SNX_A64_FLOW_UNDEF && snx_a64_flow(el1[i], ~(SnxU64)0) == SNX_A64_FLOW_UNDEF,
+              "EL1 encoding is UNDEF at EL0");
+    check(snx_a64_flow(0xD500401FUL, 0) == SNX_A64_FLOW_UNDEF, "CFINV (FEAT_FlagM) is UNDEF on the Switch");
+    check(snx_a64_flow(0xD500401FUL, SNX_A64_TARGET_MAX) == SNX_A64_FLOW_PLAIN, "CFINV decodes with every feature");
+    check(snx_a64_flow(0xD502401FUL, SNX_A64_TARGET_MAX) == SNX_A64_FLOW_UNDEF, "unallocated MSR immediate is UNDEF");
     for (i = 0; i < sizeof(backwards) / sizeof(backwards[0]); ++i) {
-        check(snx_a64_target(backwards[i], 0x1000) == 0xFFC, "sign-extend negative branch offset");
-        check(snx_a64_target(backwards[i], 0) == ~(SnxU64)3, "wrap negative branch target to 64 bits");
+        snx_a64_decode_word(backwards[i], 0, &insn);
+        check(snx_a64_branch_target(&insn, 0x1000) == 0xFFC, "sign-extend negative branch offset");
+        check(snx_a64_branch_target(&insn, 0) == ~(SnxU64)3, "wrap negative branch target to 64 bits");
     }
 }
 

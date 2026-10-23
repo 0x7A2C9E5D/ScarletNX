@@ -86,6 +86,15 @@ threads),
 progress lines (`snx_recompiler_set_verbose`) and a folder to save the generated
 code's text in (`snx_recompiler_set_keep_ir`).
 
+`snx_recompiler_set_a64_target` chooses the A64 features of the guest's CPU, which
+decide what the decoder (`tools/a64dec`, from QEMU's `a64.decode`) accepts: an
+encoding needing a feature the target lacks is an undefined instruction, as on that
+CPU. `SNX_RECOMPILER_A64_SWITCH`, the default, is the Switch's Cortex-A57 (Armv8.0
+with CRC32 and the Cryptographic Extension). `SNX_RECOMPILER_A64_MAX` takes every
+feature the decoder knows, so discovery follows their branches, but the backend has
+code only for the Cortex-A57's instructions so far: the others stay undefined
+instructions until it has.
+
 `snx_recompile` recompiles the bytes of one buffer as they will be found at a guest
 address (both multiples of 4), and loads the result: on Linux from an anonymous memory
 file, elsewhere through a temporary file, removed once loaded on Unix and when the module

@@ -75,6 +75,8 @@ typedef struct {
     int hook_direct_calls;
     /* SVC #imm through RtAPI.svcs, as the AOT module's (SnxCodegen.direct_svc): the runtime must give RtAPI.svcs */
     int direct_svc;
+    /* the guest's A64 features, what decodes (SnxCodegen.features): 0 is the Switch's */
+    SnxU64 features;
     size_t budget;    /* 0: SNX_JIT_BUDGET */
     size_t batch;     /* 0: SNX_JIT_BATCH */
     unsigned threads; /* compile threads, 0: by the host's CPUs (jit_service.c), at most SNX_JIT_THREADS */

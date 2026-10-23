@@ -10,8 +10,9 @@
    The words: samples of every row of the generated decoder's table with every value of each field of 3 bits or
    fewer, and llvm_differential.c's directed() words. The default run takes 2 samples of each row, 20 directed rounds
    and 3 states of each word; --sweep takes 4 samples, 300 rounds and 6 states.
-   A word the old decoder (a64.c, which the backend still decodes with) leaves UNDEF, or decodes without an emitter,
-   while QEMU runs it, has no emitter yet: it is listed in DIR/llvm_qemu_coverage.txt, not failed. So is a word that
+   A word the backend leaves UNDEF (the generated decoder for the Switch target, or the old decoder a64.c, which its
+   emitters still take), or decodes without an emitter, while QEMU runs it, has no emitter yet: it is listed in
+   DIR/llvm_qemu_coverage.txt, not failed. So is a word that
    differs where the Switch target decodes it as another name (a hint's NOP) or, as the backend does, as UNDEF: what
    max makes of it is beyond the Cortex-A57. The mismatches are
    grouped by the max target's name for the word and their cause, with examples in DIR/llvm_qemu_mismatches.txt.
@@ -738,7 +739,7 @@ int main(int argc, char** argv) {
                 unsigned long before = ir->fallbacks;
                 sprintf(name, "S_%lu", (unsigned long)nsteps);
                 if (snx_a64_decode(it->words[k])->kind == SNX_FLOW_UNDEF) it->skip = 1;
-                fns[nsteps] = snx_ir_static_step(ir, it->words[k], item_pc(it) + 4 * k, name);
+                fns[nsteps] = snx_ir_static_step(ir, it->words[k], item_pc(it) + 4 * k, 0, name);
                 LLVMSetVisibility(fns[nsteps++], LLVMHiddenVisibility);
                 if (ir->fallbacks != before) {
                     it->skip = 1;

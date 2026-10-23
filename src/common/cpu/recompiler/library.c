@@ -14,6 +14,7 @@
 #endif
 #include "common/cpu/recompiler/snx_recompiler.h"
 #include "common/cpu/recompiler/codegen.h"
+#include "common/cpu/aarch64/a64_decoder.h"
 #include "common/cpu/arm/exec.h"
 #include "common/cpu/arm/simd.h"
 #include "common/cpu/recompiler/llvm/ir.h"
@@ -69,6 +70,7 @@ typedef const Descriptor* (*DescriptorFn)(void);
 
 struct snx_recompiler {
     char opt;
+    SnxU64 features; /* the guest's A64 features (a64_decoder.h): SNX_A64_TARGET_SWITCH or SNX_A64_TARGET_MAX */
     unsigned jobs;
     int verbose;
     char* keep_ir;
@@ -100,6 +102,7 @@ struct snx_recompiled {
     size_t entry_count;
     struct snx_recompiler* arena_owner; /* PowerPC64: the recompiler whose arena holds the module's code */
     char opt;
+    SnxU64 features; /* the recompiler's when the module was made: its JIT decodes as its code was */
     /* made by the first miss (module_jit), JIT_NONE when it can't start */
     SnxJitService* jit;
 };
@@ -155,6 +158,7 @@ struct snx_recompiler* snx_recompiler_new(int flags) {
     r = (struct snx_recompiler*)calloc(1, sizeof(*r));
     if (!r) return NULL;
     r->opt = '2';
+    r->features = SNX_A64_TARGET_SWITCH;
     return r;
 }
 
@@ -181,6 +185,15 @@ int snx_recompiler_set_optimization(struct snx_recompiler* r, char opt) {
         return -1;
     }
     r->opt = opt;
+    return 0;
+}
+
+int snx_recompiler_set_a64_target(struct snx_recompiler* r, int target) {
+    if (target != SNX_RECOMPILER_A64_SWITCH && target != SNX_RECOMPILER_A64_MAX) {
+        fail(r, "unknown A64 target %d", target);
+        return -1;
+    }
+    r->features = target == SNX_RECOMPILER_A64_MAX ? SNX_A64_TARGET_MAX : SNX_A64_TARGET_SWITCH;
     return 0;
 }
 
@@ -253,6 +266,7 @@ static SnxJitService* module_jit(struct snx_recompiled* m) {
     config.aot_functions = m->entry_functions;
     config.aot_count = m->entry_count;
     config.opt = m->opt;
+    config.features = m->features;
     s = snx_jit_service_new(&config, error, sizeof(error));
     if (!__atomic_compare_exchange_n(&m->jit, &expected, s ? s : JIT_NONE, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
         snx_jit_service_free(s);
@@ -761,7 +775,8 @@ static int llvm_descriptor(SnxIr* ir, const SnxCodegen* codegen, char* error, si
 
 /* ---- the module cache ----
    A linked module is a function of the code it was made from, the addresses it sits at, where it may be entered (the
-   leaders), the optimization level, the contract with the runtime (SNX_ABI) and the CPU it was made for (the backend
+   leaders), the optimization level, the decoding (the decoder's tables and the guest's A64 features), the contract with
+   the runtime (SNX_ABI) and the CPU it was made for (the backend
    and rtlib.c use every extension the host has). Two 64-bit FNV-1a hashes of all that, with different offsets, name
    it in the cache folder */
 typedef struct {
@@ -791,6 +806,8 @@ static char* cache_path(struct snx_recompiler* r, SnxCodegen* codegen) {
     key_bytes(&k, "snx-module-cache-1", 18);
     key_u64(&k, SNX_ABI);
     key_u64(&k, (uint64_t)(unsigned char)r->opt);
+    key_u64(&k, snx_a64_decoder_hash()); /* what each word decodes to: the decoder and the guest's features */
+    key_u64(&k, r->features);
     cpu = LLVMGetHostCPUName();
     features = LLVMGetHostCPUFeatures();
     key_bytes(&k, cpu, strlen(cpu) + 1);
@@ -1210,13 +1227,14 @@ struct snx_recompiled* snx_recompile_ranges(struct snx_recompiler* r, const stru
     m->code_hi = hi;
     m->image_fd = -1;
     m->opt = r->opt;
+    m->features = r->features;
     if (keep_code(r, m, ranges, range_count)) {
         free(views);
         free(m);
         return NULL;
     }
     memset(&codegen, 0, sizeof(codegen));
-    if (snx_codegen_analyze(&codegen, views, range_count, hints, hint_count, !r->verbose)) {
+    if (snx_codegen_analyze(&codegen, views, range_count, hints, hint_count, !r->verbose, r->features)) {
         fail(r, "function discovery failed in 0x%llx-0x%llx", (unsigned long long)ranges[0].address,
              (unsigned long long)(ranges[range_count - 1].address + ranges[range_count - 1].size));
         free(views);
@@ -1239,7 +1257,7 @@ struct snx_recompiled* snx_recompile_from(struct snx_recompiler* r, const struct
     r->error[0] = 0;
     views = images(r, ranges, range_count, 1, &lo, &hi);
     if (!views) return NULL;
-    if (snx_codegen_analyze_from(&codegen, views, range_count, hints, hint_count, limit, skip, context)) {
+    if (snx_codegen_analyze_from(&codegen, views, range_count, hints, hint_count, limit, skip, context, r->features)) {
         fail(r, "no code at the starting addresses");
         snx_codegen_free(&codegen);
         free(views);
@@ -1256,6 +1274,7 @@ struct snx_recompiled* snx_recompile_from(struct snx_recompiler* r, const struct
     }
     m->image_fd = -1;
     m->opt = r->opt;
+    m->features = r->features;
     /* the table covers what was found, not the ranges: they may be a whole program's code */
     m->code_lo = ~(uint64_t)0;
     m->code_hi = 0;

@@ -76,7 +76,7 @@ const char* lqd_op_name(uint32_t word, int* unrunnable) {
     SnxA64Insn insn;
     const uint32_t op0 = (word >> 25) & 0xF;
     *unrunnable = 0;
-    if (snx_a64_decode(word, SNX_A64_TARGET_MAX, &insn) != SNX_A64_UNDEF) {
+    if (snx_a64_decode(word, SNX_A64_TARGET_MAX, &insn) != SNX_A64_OP_UNDEF) {
         *unrunnable = (insn.feature & (SNX_A64_FEAT_SME | SNX_A64_FEAT_MOPS)) != 0;
         return snx_a64_op_name(insn.op);
     }
@@ -86,7 +86,7 @@ const char* lqd_op_name(uint32_t word, int* unrunnable) {
 
 const char* lqd_switch_op_name(uint32_t word) {
     SnxA64Insn insn;
-    return snx_a64_decode(word, SNX_A64_TARGET_SWITCH, &insn) != SNX_A64_UNDEF ? snx_a64_op_name(insn.op) : NULL;
+    return snx_a64_decode(word, SNX_A64_TARGET_SWITCH, &insn) != SNX_A64_OP_UNDEF ? snx_a64_op_name(insn.op) : NULL;
 }
 
 size_t lqd_rows(void) { return ROWS; }

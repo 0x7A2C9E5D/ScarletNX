@@ -22,7 +22,7 @@ int snx_nx_codegen_analyze(SnxCodegen* codegen, const SnxProgram* program, const
         views[i].fde = m->fde;
         views[i].fde_count = m->fde_count;
     }
-    result = snx_codegen_analyze(codegen, views, program->module_count, hints, hint_count, quiet);
+    result = snx_codegen_analyze(codegen, views, program->module_count, hints, hint_count, quiet, 0); /* the Switch */
     free(views);
     return result;
 }

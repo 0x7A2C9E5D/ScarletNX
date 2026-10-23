@@ -208,8 +208,9 @@ char* snx_ir_text(SnxIr* ir);
 /* F_<address>, declared on first use, defined by snx_ir_emit */
 LLVMValueRef snx_ir_guest_function(SnxIr* ir, SnxU64 address);
 void snx_ir_emit(SnxIr* ir, SnxCodegen* codegen, const SnxFunction* function);
-/* u64 name(CPU* c): one instruction at pc, as snx_a64_static_step writes it (tests and audit tools) */
-LLVMValueRef snx_ir_static_step(SnxIr* ir, SnxU32 word, SnxU64 pc, const char* name);
+/* u64 name(CPU* c): one instruction at pc, as snx_a64_static_step writes it, for a guest with these A64 features (0:
+   the Switch's; tests and audit tools) */
+LLVMValueRef snx_ir_static_step(SnxIr* ir, SnxU32 word, SnxU64 pc, SnxU64 features, const char* name);
 /* Starts a function body: entry block, c and M */
 void snx_ir_begin(SnxIr* ir, LLVMValueRef function);
 

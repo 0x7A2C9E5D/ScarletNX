@@ -65,7 +65,7 @@ int main(void) {
     char error[256], *on, *off;
     assert(!snx_ir_init(error, sizeof error));
     /* LLVM's own: on, and the pass builder's switch leaves it on */
-    on = snx_jit_cache_key('2', 0, 0);
+    on = snx_jit_cache_key('2', 0, 0, 0);
     assert(snx_ir_slp() == 1 && on && strstr(on, " slp=1 "));
 #if defined(__x86_64__) || defined(_M_X64) || defined(__aarch64__) || defined(_M_ARM64)
     assert(packed("default<O2>")); /* SIMD for two doubles: the hosts the CI runs this on */
@@ -75,7 +75,7 @@ int main(void) {
     snx_ir_slp_vectorizer(0);
     assert(!snx_ir_slp() && !packed("default<O2>") && !packed("default<O3>"));
     snx_ir_slp_vectorizer(0); /* once only: LLVM refuses its option given twice */
-    off = snx_jit_cache_key('2', 0, 0);
+    off = snx_jit_cache_key('2', 0, 0, 0);
     assert(!snx_ir_slp() && off && strstr(off, " slp=0 ") && strcmp(on, off));
     free(on);
     free(off);

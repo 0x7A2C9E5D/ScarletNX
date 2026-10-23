@@ -1159,7 +1159,7 @@ static void write_header(const char* path) {
     }
     out("\n/* the names of the .decode files, in order: X(name) */\n#define SNX_A64_OPS(X)");
     for (i = 0; i < g.nnames; i++) out(" \\\n    X(%s)", g.names[i].name);
-    out("\n\ntypedef enum {\n    SNX_A64_UNDEF,\n#define SNX_A64_OP_ENUM(name) SNX_A64_##name,\n"
+    out("\n\ntypedef enum {\n    SNX_A64_OP_UNDEF,\n#define SNX_A64_OP_ENUM(name) SNX_A64_OP_##name,\n"
         "    SNX_A64_OPS(SNX_A64_OP_ENUM)\n#undef SNX_A64_OP_ENUM\n    SNX_A64_OP_COUNT\n} SnxA64Op;\n\n");
     out("/* what an instruction does to the flow: UNDEF when no row matches; BC is a conditional branch; EXC an\n"
         "   exception other than SVC and BRK (HVC, SMC, HLT) */\ntypedef enum {\n");
@@ -1223,7 +1223,7 @@ static void write_decoder(const char* path) {
         "static const SnxA64Row snx_a64_rows[%d] = {\n", g.nrows);
     for (i = 0; i < g.nrows; i++) {
         const Row* r = &g.rows[i];
-        out("    {0x%08xu, 0x%08xu, 0x%llxull, SNX_A64_%s, %d}, /* %s:%d */\n", r->p.fixmask, r->p.fixval, r->feat,
+        out("    {0x%08xu, 0x%08xu, 0x%llxull, SNX_A64_OP_%s, %d}, /* %s:%d */\n", r->p.fixmask, r->p.fixval, r->feat,
             g.names[r->name].name, r->body, base_name(g.files[r->p.file]), r->p.line);
     }
     out("};\n\n");
@@ -1254,9 +1254,9 @@ static void write_decoder(const char* path) {
     for (i = 0; i < g.nbodies; i++) out("    case %d:\n%s", i, g.bodies[i]);
     out("    default:\n        return 0;\n    }\n}\n\n");
     out("/* decodes word for a target with these features (SNX_A64_FEAT_*, or a SNX_A64_TARGET_*): the op, or\n"
-        "   SNX_A64_UNDEF when no row matches, with insn filled in either way */\n"
+        "   SNX_A64_OP_UNDEF when no row matches, with insn filled in either way */\n"
         "static SnxA64Op snx_a64_decode(uint32_t word, uint64_t features, SnxA64Insn* insn) {\n"
-        "    static const SnxA64Insn undef = {SNX_A64_UNDEF, SNX_A64_FLOW_UNDEF, 0, 0, {0}};\n"
+        "    static const SnxA64Insn undef = {SNX_A64_OP_UNDEF, SNX_A64_FLOW_UNDEF, 0, 0, {0}};\n"
         "    const SnxA64Bucket* b = &snx_a64_buckets[word >> 21];\n    unsigned start = b->start, count = b->count, i;\n"
         "    if (b->bits) {\n        b = &snx_a64_split[start + ((word >> b->lo) & ((1u << b->bits) - 1))];\n"
         "        start = b->start;\n        count = b->count;\n    }\n"
@@ -1266,7 +1266,7 @@ static void write_decoder(const char* path) {
         "        if (!snx_a64_body(r->body, word, features, insn)) continue;\n"
         "        insn->op = (SnxA64Op)r->op;\n        insn->flow = (SnxA64Flow)snx_a64_op_flow[r->op];\n"
         "        insn->nop = snx_a64_op_nop[r->op];\n        return insn->op;\n    }\n"
-        "    *insn = undef;\n    return SNX_A64_UNDEF;\n}\n\n");
+        "    *insn = undef;\n    return SNX_A64_OP_UNDEF;\n}\n\n");
     out("static inline const char* snx_a64_op_name(SnxA64Op op) {\n"
         "    return (unsigned)op < SNX_A64_OP_COUNT ? snx_a64_op_names[op] : \"?\";\n}\n\n");
     hash = fnv1a(g.obuf, g.olen);

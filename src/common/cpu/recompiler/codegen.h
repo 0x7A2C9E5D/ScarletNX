@@ -15,6 +15,9 @@ typedef struct {
 } SnxFunction;
 
 typedef struct {
+    /* the guest's A64 features (SNX_A64_FEAT_* or a SNX_A64_TARGET_* of a64_decoder.h), what decodes: 0 is the
+       Switch's. The analyses' features argument: emitting decodes with them too */
+    SnxU64 features;
     SnxCodeImage* modules;
     size_t module_count;
     /* SVC #imm below SNX_SVC_COUNT calls RtAPI.svcs[imm], the SVC's own entry, instead of RtAPI.svc (the NX modules) */
@@ -30,7 +33,7 @@ typedef struct {
 } SnxCodegen;
 
 int snx_codegen_analyze(SnxCodegen* codegen, const SnxCodeImage* modules, size_t module_count, const SnxU64* hints,
-                        size_t hint_count, int quiet);
+                        size_t hint_count, int quiet, SnxU64 features);
 /* The runtime JIT's discovery: the functions at roots[0..root_count), a batch of them, and those they call, found as
    snx_codegen_analyze finds functions. Every root is searched, and its callees until the functions hold budget
    instructions. known(user, address) says code exists already at an address, or will without this batch (the AOT
@@ -40,10 +43,10 @@ int snx_codegen_analyze(SnxCodegen* codegen, const SnxCodeImage* modules, size_t
    way */
 typedef int (*SnxCodegenKnown)(void* user, SnxU64 address);
 int snx_codegen_discover(SnxCodegen* codegen, const SnxCodeImage* modules, size_t module_count, const SnxU64* roots,
-                         size_t root_count, SnxCodegenKnown known, void* user, size_t budget);
+                         size_t root_count, SnxCodegenKnown known, void* user, size_t budget, SnxU64 features);
 int snx_codegen_analyze_from(SnxCodegen* codegen, const SnxCodeImage* modules, size_t module_count, const SnxU64* hints,
                              size_t hint_count, size_t limit, int (*skip)(void* context, SnxU64 address),
-                             void* context);
+                             void* context, SnxU64 features);
 void snx_codegen_free(SnxCodegen* codegen);
 SnxCodeImage* snx_codegen_module(SnxCodegen* codegen, SnxU64 address);
 int snx_codegen_word(SnxCodegen* codegen, SnxU64 address, SnxU32* word);
