@@ -174,7 +174,7 @@ static const SnxModule* load_pack(const char* path) {
     const char* names[1];
     SnxU64 address = 0;
     ModuleFn get;
-    size_t count = 0, reserve;
+    size_t count = 0, need[3], rtneed[3], room[3], k;
     PFileMap map;
     const unsigned char* data;
     char error[1024];
@@ -187,16 +187,21 @@ static const SnxModule* load_pack(const char* path) {
     /* the guest's address space before the code's arena: the arena lands in the middle of the 13 GiB or so an app has
        and, with its write alias, leaves no run of the 5 GiB the guest needs at least */
     mem_reserve();
-    /* at least 64 MiB, and twice the objects' size up to the 2 GiB an arena holds */
-    reserve = map.size < ((u64)1 << 25) ? ((size_t)1 << 26)
-              : map.size < ((u64)1 << 30)  ? (size_t)map.size * 2
-                                           : ((size_t)1 << 31);
-    loader = snx_code_loader_new(reserve, error, sizeof(error));
-    if (!loader) fatal("The game's code cannot be loaded: %s", error);
+    /* each region as large as the pack's sections need, not a share of twice the file: the debugger prepares the whole
+       arena (every page touched, so it is memory the app is charged for) and the arena, with its write alias, takes
+       address space of the 13 GiB or so an app has */
     memset(&rtlib, 0, sizeof(rtlib));
     rtlib.data = snx_rtlib_object;
     rtlib.size = snx_rtlib_object_size;
     rtlib.name = "rtlib";
+    if (snx_code_need(inputs, count, need, error, sizeof(error)) ||
+        snx_code_need(&rtlib, 1, rtneed, error, sizeof(error)))
+        fatal("The game's code cannot be loaded: %s", error);
+    for (k = 0; k < 3; ++k) room[k] = need[k] + rtneed[k];
+    fprintf(stderr, "jit arena: the pack's sections need code %lu, read-only data %lu, data %lu MiB\n",
+            (unsigned long)(room[0] >> 20), (unsigned long)(room[1] >> 20), (unsigned long)(room[2] >> 20));
+    loader = snx_code_loader_new_regions(room, error, sizeof(error));
+    if (!loader) fatal("The game's code cannot be loaded: %s", error);
     names[0] = "snx_module";
     if (snx_code_load(loader, &rtlib, 1, NULL, 0, NULL, error, sizeof(error)) ||
         snx_code_load(loader, inputs, count, names, 1, &address, error, sizeof(error)))

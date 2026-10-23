@@ -350,11 +350,58 @@ SnxCodeLoader* snx_code_loader_new(size_t reserve, char* error, size_t error_siz
     return snx_code_loader_new_machine(reserve, HOST_MACHINE, error, error_size);
 }
 
-static SnxCodeLoader* new_loader(size_t reserve, unsigned machine, uint64_t toc, int shared, char* error,
-                                 size_t error_size);
+static SnxCodeLoader* new_loader(size_t reserve, unsigned machine, uint64_t toc, int shared, const size_t* sizes,
+                                 char* error, size_t error_size);
 
 SnxCodeLoader* snx_code_loader_new_machine(size_t reserve, unsigned machine, char* error, size_t error_size) {
-    return new_loader(reserve, machine, 0, 0, error, error_size);
+    return new_loader(reserve, machine, 0, 0, NULL, error, error_size);
+}
+
+SnxCodeLoader* snx_code_loader_new_regions(const size_t size[3], char* error, size_t error_size) {
+    return new_loader(0, HOST_MACHINE, 0, 0, size, error, error_size);
+}
+
+static const Elf64_Shdr* relocations(const SnxElfObject* o, size_t section);
+
+/* Veneers are 12 bytes, a GOT slot 8: each call may need one of the first, each GOT reference one of the second */
+int snx_code_need(const SnxLinkInput* inputs, size_t count, size_t need[3], char* error, size_t error_size) {
+    uint64_t kind_size[SNX_ELF_KINDS], kind_align[SNX_ELF_KINDS], calls = 0, gots = 0;
+    unsigned machine = HOST_MACHINE, abi = 0;
+    SnxElfObject* objs = (SnxElfObject*)calloc(count ? count : 1, sizeof(*objs));
+    size_t i, j, k, parsed = 0;
+    int rc = -1;
+    if (!objs) {
+        snprintf(error, error_size, "out of memory");
+        return -1;
+    }
+    for (i = 0; i < count; ++i, ++parsed)
+        if (snx_elf_parse(&objs[i], &inputs[i], &machine, &abi, error, error_size)) goto done;
+    snx_elf_layout(objs, count, kind_size, kind_align);
+    for (i = 0; i < count; ++i) {
+        const SnxElfObject* o = &objs[i];
+        for (j = 0; j < o->eh->e_shnum; ++j) {
+            const Elf64_Shdr* s = relocations(o, j);
+            const Elf64_Rela* r;
+            if (!s) continue;
+            r = (const Elf64_Rela*)(o->input->data + s->sh_offset);
+            for (k = 0; k < s->sh_size / sizeof(Elf64_Rela); ++k) {
+                unsigned type = ELF64_R_TYPE(r[k].r_info);
+                if (snx_elf_call_relocation(machine, type)) ++calls;
+                if (snx_elf_got_relocation(machine, type)) ++gots;
+            }
+        }
+    }
+    /* what an object's sections take with the loads' alignments, 5% and a megabyte over, and the runtime library that
+       is loaded first */
+    need[CODE] = (size_t)(kind_size[SNX_ELF_TEXT] + 12 * calls);
+    need[RODATA] = (size_t)(kind_size[SNX_ELF_RODATA] + 8 * gots);
+    need[DATA] = (size_t)(kind_size[SNX_ELF_DATA] + kind_size[SNX_ELF_BSS]);
+    for (i = 0; i < REGIONS; ++i) need[i] += need[i] / 20 + ((size_t)3 << 20);
+    rc = 0;
+done:
+    for (i = 0; i < parsed; ++i) snx_elf_free(&objs[i]);
+    free(objs);
+    return rc;
 }
 
 #if defined(__powerpc64__)
@@ -393,7 +440,7 @@ SnxCodeLoader* snx_code_loader_new_toc(size_t reserve, SnxU64 toc, char* error, 
     if (!reserve) reserve = SNX_CODE_ARENA_DEFAULT;
     /* the module and what the system mapped near it may leave less room in reach: a smaller arena then */
     for (; !loader && reserve >= ((size_t)1 << 26); reserve /= 2)
-        loader = new_loader(reserve, HOST_MACHINE, toc, 1, error, error_size);
+        loader = new_loader(reserve, HOST_MACHINE, toc, 1, NULL, error, error_size);
     return loader;
 #else
     (void)toc;
@@ -401,8 +448,8 @@ SnxCodeLoader* snx_code_loader_new_toc(size_t reserve, SnxU64 toc, char* error, 
 #endif
 }
 
-static SnxCodeLoader* new_loader(size_t reserve, unsigned machine, uint64_t toc, int shared, char* error,
-                                 size_t error_size) {
+static SnxCodeLoader* new_loader(size_t reserve, unsigned machine, uint64_t toc, int shared, const size_t* sizes,
+                                 char* error, size_t error_size) {
     SnxCodeLoader* loader;
     size_t page = snx_vm_page_size();
     int i;
@@ -413,6 +460,11 @@ static SnxCodeLoader* new_loader(size_t reserve, unsigned machine, uint64_t toc,
            adds to a game's is small (17 KiB in a minute of one game) */
         reserve = (size_t)1 << 27;
 #endif
+    }
+    if (sizes) { /* the regions as asked, each in whole pages: the arena is their sum */
+        size_t whole = 8 * page;
+        reserve = 0;
+        for (i = 0; i < REGIONS; ++i) reserve += (sizes[i] + whole - 1) / whole * whole;
     }
     if (reserve <= (size_t)1 << 31) reserve = (reserve + 8 * page - 1) / (8 * page) * (8 * page); /* whole pages */
     if (reserve > (size_t)1 << 31) {
@@ -430,11 +482,20 @@ static SnxCodeLoader* new_loader(size_t reserve, unsigned machine, uint64_t toc,
     loader->machine = machine;
     /* code is most of what a unit holds. Read-only data is its jump tables, constants, function table and GOT, and
        generated code writes no data of its own (nor does the runtime library) */
-    loader->region[CODE].size = reserve / 8 * 5;
-    loader->region[RODATA].start = loader->region[CODE].size;
-    loader->region[RODATA].size = reserve / 8 * 2;
-    loader->region[DATA].start = loader->region[RODATA].start + loader->region[RODATA].size;
-    loader->region[DATA].size = reserve - loader->region[DATA].start;
+    if (sizes) {
+        size_t whole = 8 * page;
+        loader->region[CODE].size = (sizes[CODE] + whole - 1) / whole * whole;
+        loader->region[RODATA].start = loader->region[CODE].size;
+        loader->region[RODATA].size = (sizes[RODATA] + whole - 1) / whole * whole;
+        loader->region[DATA].start = loader->region[RODATA].start + loader->region[RODATA].size;
+        loader->region[DATA].size = reserve - loader->region[DATA].start;
+    } else {
+        loader->region[CODE].size = reserve / 8 * 5;
+        loader->region[RODATA].start = loader->region[CODE].size;
+        loader->region[RODATA].size = reserve / 8 * 2;
+        loader->region[DATA].start = loader->region[RODATA].start + loader->region[RODATA].size;
+        loader->region[DATA].size = reserve - loader->region[DATA].start;
+    }
 #ifdef _WIN32
     (void)i;
     if (windows_arena(loader, error, error_size)) {
