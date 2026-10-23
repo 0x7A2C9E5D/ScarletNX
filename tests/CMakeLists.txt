@@ -1279,12 +1279,9 @@ if(TARGET OpenSSL::Crypto)
     endif()
 endif()
 if(APPLE)
-    # these build a game module and load it, which no Mac has done yet: the Mach-O linker (link_macho.c) is checked
-    # on Linux only (the link_macho test and docs/APPLE.md), and these wait for a run on a Mac. The in-process
-    # loader's tests run: it loads ELF objects on macOS too (code_loader.c). aot_variants also links a JIT cache unit,
-    # and Darwin's JIT writes ELF objects for that loader where the AOT module is Mach-O.
-    set_tests_properties(native_recompiler llvm_module recompiler_library aot_variants unit_cache llvm_differential_0
-                         llvm_differential_1 llvm_differential_2 PROPERTIES DISABLED TRUE)
+    # llvm_differential_0 to _2 ask for ELF output, which the Mach-O host's linker refuses. aot_variants links a JIT cache
+    # unit as ELF into an AOT module that is Mach-O on this host. Each needs its own fix before it can run here.
+    set_tests_properties(aot_variants llvm_differential_0 llvm_differential_1 llvm_differential_2 PROPERTIES DISABLED TRUE)
 endif()
 
 add_executable(snx_codegen_test codegen_test.c)
