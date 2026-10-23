@@ -297,6 +297,11 @@ add_executable(snx-test-arm-profile arm_profile.c "${PROJECT_SOURCE_DIR}/src/com
     "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/profile.c")
 snx_test_target(snx-test-arm-profile 11)
 add_test(NAME arm_isa_profiles COMMAND snx-test-arm-profile)
+# a game's cheats by their names, as the launcher lists them and cheats_off= leaves them out
+add_executable(snx-test-cheat-list cheat_list.c)
+snx_test_target(snx-test-cheat-list 99)
+target_link_libraries(snx-test-cheat-list PRIVATE scarletnx-common)
+add_test(NAME cheat_list COMMAND snx-test-cheat-list)
 # the C compiler a 3DS game's native link runs: the build's own, else a clang beside the program, else one on PATH
 add_executable(snx-test-find-compiler find_compiler.c)
 snx_test_target(snx-test-find-compiler 99)
