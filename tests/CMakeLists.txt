@@ -1372,6 +1372,13 @@ snx_test_target(snx-test-vita-rgb24-glsl 23)
 target_compile_options(snx-test-vita-rgb24-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-vita-rgb24-glsl PRIVATE glsl)
 add_test(NAME vita_rgb24_glsl COMMAND snx-test-vita-rgb24-glsl)
+# the Vita's imports given memory that isn't the game's: their errors, and no access there
+if(TARGET snx_vita_program)
+    add_executable(snx-test-vita-hle-memory vita_hle_memory.c)
+    snx_test_target(snx-test-vita-hle-memory 11)
+    target_link_libraries(snx-test-vita-hle-memory PRIVATE snx_vita_program)
+    add_test(NAME vita_hle_memory COMMAND snx-test-vita-hle-memory)
+endif()
 # the texture conversion shader's GLSL run on the CPU against the CPU's conversions and ETC2 decoder: no GPU needed
 add_executable(snx-test-texconv-glsl glsl/texconv_glsl.cpp "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
 snx_test_target(snx-test-texconv-glsl 23)
