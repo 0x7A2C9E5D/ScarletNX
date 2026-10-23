@@ -451,7 +451,9 @@ static void record_source(const char* root) {
     CHECK(snx_record_source(folder, "G", "/a\nb"));
     CHECK(!snx_remove_tree(ini));
     source = snx_game_source(folder, "G", &recorded);
-    CHECK(!recorded && !strcmp(strrchr(source, '/'), "/G.source"));
+    text = snx_path_join(folder, "G.source");
+    CHECK(!recorded && source && !strcmp(source, text));
+    free(text);
     free(source);
     free(ini);
     free(folder);

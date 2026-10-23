@@ -1163,12 +1163,16 @@ int main(int argc, char** argv) {
     {
         char *blocker = snx_path_join(temporary, "a file"), *data = app.data_dir, *games = app.games_dir;
         char *themes = app.themes_dirs[0], *work = app.work_dir, *keys = app.keys_path, *home = app.home_dir, *said;
+        char* whole;
         assert(!snx_write_file(blocker, "", 0));
         app.home_dir = snx_path_join(blocker, "data"); /* the data folder places_apply takes, none picked */
         app.data_dir = NULL;
         app.games_dir = app.themes_dirs[0] = app.work_dir = app.keys_path = NULL;
         places_apply(&app);
-        said = snx_format("Could not make %s/dumps", app.data_dir);
+        said = snx_path_join(app.data_dir, "dumps"); /* in the system's separators, as the box says it */
+        whole = snx_format("Could not make %s", said);
+        free(said);
+        said = whole;
         assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR && !strcmp(app.error_line, said));
         render(&app);
         shows(&app, said, rgb(app.theme.warning));
