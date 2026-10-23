@@ -649,6 +649,7 @@ static int create_device(void) {
     g_vk.feat2 = (VkPhysicalDeviceFeatures2){
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &g_vk.feat11, .features = g_vk.feat};
     volkLoadDevice(g_vk.dev);
+    pm_lock_announce(&g_vklock, "vulkan"); /* the device's calls, every thread's */
     vkGetDeviceQueue(g_vk.dev, g_vk.gfx_family, 0, &g_vk.gfx);
     vkGetDeviceQueue(g_vk.dev, g_vk.compute_family, second ? 1 : 0, &g_vk.compute);
     VmaVulkanFunctions vf = {.vkGetInstanceProcAddr = vkGetInstanceProcAddr,

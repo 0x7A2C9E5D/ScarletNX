@@ -249,6 +249,8 @@ VkPipelineLayout vk_playout(u32 arrays) {
 }
 
 void vk_pipeline_init(void) {
+    pm_lock_announce(&g_playout_lock, "pipeline layout");
+    pm_lock_announce(&g_xlate_lock, "shader translate");
     /* a layout per set, the same bindings, each visible to the stage that uses the set (shader_vk_set): within the
        per-stage limits a device has, which all stages seeing every set would multiply by five */
     static const VkShaderStageFlags vis[5] = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT,

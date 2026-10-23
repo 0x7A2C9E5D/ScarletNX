@@ -73,6 +73,15 @@ void snx_tracy_gpu_calibrate(int64_t gpu_time, int64_t cpu_delta, int ctx);
 /* SNX_FRAME_SCOPED's pair: 1 when the start went out, so the block's end sends none otherwise */
 int snx_tracy_frame_start(const char* name);
 void snx_tracy_frame_at_scope(SnxTracyFrame* f);
+/* The named locks' events for the profiler's lock pane: the context a PMutex keeps once pm_lock_announce named it.
+   The events are single items, each gated on its own, so an unpaired one costs nothing but its absence. */
+typedef struct __tracy_lockable_context_data SnxTracyLock;
+SnxTracyLock* snx_tracy_lock_make(const char* name);
+void snx_tracy_lock_free(SnxTracyLock* l);
+void snx_tracy_lock_wait(SnxTracyLock* l);
+void snx_tracy_lock_lock(SnxTracyLock* l);
+void snx_tracy_lock_unlock(SnxTracyLock* l);
+void snx_tracy_lock_try(SnxTracyLock* l, int acquired);
 #else
 #define SNX_ZONE(ctx, name)      int ctx __attribute__((unused)) = 0
 #define SNX_ZONE_C(ctx, name, color) int ctx __attribute__((unused)) = 0
@@ -108,6 +117,16 @@ static inline void snx_tracy_gpu_sync(int64_t gpu_time, int ctx) { (void)gpu_tim
 static inline void snx_tracy_gpu_calibrate(int64_t gpu_time, int64_t cpu_delta, int ctx) {
     (void)gpu_time, (void)cpu_delta, (void)ctx;
 }
+typedef struct SnxTracyLock SnxTracyLock;
+static inline SnxTracyLock* snx_tracy_lock_make(const char* name) {
+    (void)name;
+    return NULL;
+}
+static inline void snx_tracy_lock_free(SnxTracyLock* l) { (void)l; }
+static inline void snx_tracy_lock_wait(SnxTracyLock* l) { (void)l; }
+static inline void snx_tracy_lock_lock(SnxTracyLock* l) { (void)l; }
+static inline void snx_tracy_lock_unlock(SnxTracyLock* l) { (void)l; }
+static inline void snx_tracy_lock_try(SnxTracyLock* l, int acquired) { (void)l, (void)acquired; }
 #endif
 
 /* Starts the client when --tracy or --tracy-capture asks for it. Returns 1 when the capture it was asked for is not

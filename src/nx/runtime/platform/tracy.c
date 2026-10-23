@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* Tracy client lifetime and emission gate; the client is manual-lifetime. */
 #include "nx/runtime/platform/tracy.h"
+#include "common/filesystem/host.h"
 #include "common/utilities/build_info.h"
 #include "common/utilities/common.h"
 #include "nx/runtime/main.h"
@@ -482,6 +483,63 @@ void snx_tracy_gpu_calibrate(int64_t gpu_time, int64_t cpu_delta, int ctx) {
     snx_tracy_leave();
 }
 
+/* The named locks' events: each PMutex that pm_lock_announce named reports its waits, takes and releases here, and
+   the pane shows who held it and who waited how long. The announce goes out even before a server attaches (the
+   client defers it); the events are single items and drop when nobody is connected. */
+SnxTracyLock* snx_tracy_lock_make(const char* name) {
+    static const struct ___tracy_source_location_data srcloc = {NULL, "pm_lock", __FILE__, __LINE__, 0};
+    SnxTracyLock* l;
+    if (!name || !*name || !snx_tracy_enter()) return NULL;
+    l = ___tracy_announce_lockable_ctx(&srcloc);
+    if (l) ___tracy_custom_name_lockable_ctx(l, name, strlen(name));
+    snx_tracy_leave();
+    return l;
+}
+
+void snx_tracy_lock_free(SnxTracyLock* l) {
+    if (!l || !snx_tracy_enter()) return;
+    ___tracy_terminate_lockable_ctx(l);
+    snx_tracy_leave();
+}
+
+void snx_tracy_lock_wait(SnxTracyLock* l) {
+    if (!l || !snx_tracy_enter()) return;
+    ___tracy_before_lock_lockable_ctx(l);
+    snx_tracy_leave();
+}
+
+void snx_tracy_lock_lock(SnxTracyLock* l) {
+    if (!l || !snx_tracy_enter()) return;
+    ___tracy_after_lock_lockable_ctx(l);
+    snx_tracy_leave();
+}
+
+void snx_tracy_lock_unlock(SnxTracyLock* l) {
+    if (!l || !snx_tracy_enter()) return;
+    ___tracy_after_unlock_lockable_ctx(l);
+    snx_tracy_leave();
+}
+
+void snx_tracy_lock_try(SnxTracyLock* l, int acquired) {
+    if (!l || !acquired || !snx_tracy_enter()) return;
+    ___tracy_after_try_lock_lockable_ctx(l, 1);
+    snx_tracy_leave();
+}
+
+/* host.c's reporters, in the client's terms; registered while the client is up, so a run without one and the tests
+   take no lock-reporting path at all */
+static void* pm_tracy_make(const void* m, const char* name) {
+    (void)m;
+    return snx_tracy_lock_make(name);
+}
+static void pm_tracy_free(void* ctx) { snx_tracy_lock_free(ctx); }
+static void pm_tracy_wait(void* ctx) { snx_tracy_lock_wait(ctx); }
+static void pm_tracy_lock(void* ctx) { snx_tracy_lock_lock(ctx); }
+static void pm_tracy_unlock(void* ctx) { snx_tracy_lock_unlock(ctx); }
+static void pm_tracy_try(void* ctx, int acquired) { snx_tracy_lock_try(ctx, acquired); }
+static const PmTracy g_pm_tracy_snx = {pm_tracy_make, pm_tracy_free,        pm_tracy_wait,
+                                       pm_tracy_lock, pm_tracy_unlock,     pm_tracy_try};
+
 int snx_tracy_init(const char* title) {
     snprintf(g_tracy_title, sizeof g_tracy_title, "%s", title && title[0] ? title : "ScarletNX");
     if (!g_opt_tracy_capture && !g_opt_tracy_client) return 0;
@@ -489,6 +547,7 @@ int snx_tracy_init(const char* title) {
        reads its port as it starts, so it is set before that. */
     tracy_port_setup(g_opt_tracy_capture);
     tracy_start_client();
+    pm_tracy_register(&g_pm_tracy_snx); /* the named locks report to the pane from here on */
     if (g_opt_tracy_capture && !tracy_capture_wait()) return 1;
     return 0;
 }

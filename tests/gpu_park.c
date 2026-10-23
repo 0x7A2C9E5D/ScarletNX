@@ -154,6 +154,7 @@ u64 plat_ns(void) {
 void pm_init(PMutex* m) { pthread_mutex_init(&m->l, NULL); }
 void pm_lock(PMutex* m) { pthread_mutex_lock(&m->l); }
 void pm_unlock(PMutex* m) { pthread_mutex_unlock(&m->l); }
+void pm_lock_announce(PMutex* m, const char* name) { (void)m, (void)name; }
 void pc_init(PCond* c) {
     pthread_condattr_t a;
     pthread_condattr_init(&a);

@@ -645,6 +645,7 @@ static u8* reserve_ios(void) {
 #endif
 
 void mem_init(void) {
+    pm_lock_announce(&g_mem_lk, "guest memory"); /* every thread's reads and writes of the game's memory */
     g_host_page = plat_vm_page();
 #ifdef SNX_IOS
     g_mem = reserve_ios();

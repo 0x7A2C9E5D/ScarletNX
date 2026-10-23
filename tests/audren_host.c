@@ -23,6 +23,7 @@ static void test_fail(const char* expression, int line) {
 
 void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
+void pm_lock_announce(PMutex* m, const char* name) { (void)m, (void)name; }
 /* audren_update's first-update line */
 void logf_(int level, const char* format, ...) {
     (void)level;

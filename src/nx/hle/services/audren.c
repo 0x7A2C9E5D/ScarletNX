@@ -8,6 +8,7 @@
    handed to the state under its lock, and the clock's frame of every started renderer (audio.c's audio_clock) queued
    to the host. The update's parsing, the output buffer's layout and the frame itself are audren_dsp.c's */
 #include "nx/hle/services/services_int.h"
+#include "nx/runtime/platform/tracy.h"
 #include "nx/hle/services/audren_dsp.h"
 #include "nx/hle/hle.h"
 
@@ -33,8 +34,11 @@ static void audren_destroy(SvcObj* o) {
 }
 
 int audren_open(SvcObj* o, const u8* params) {
+    static int announced;
     ARState* s = audren_state_new(params);
     ARRen* r;
+    if (!announced && __atomic_exchange_n(&announced, 1, __ATOMIC_ACQ_REL) == 0)
+        pm_lock_announce(&g_hle.audren.lk, "audren"); /* the renderers' table, the game's threads and the audio's */
     if (!s) return 0;
     pm_lock(&g_hle.audren.lk);
     r = POOL_TAKE(g_hle.audren.rens, g_hle.audren.ren_next, "audio renderers");
@@ -91,7 +95,11 @@ void audren_tick(void) {
         }
         if (!r->out) continue;
         bytes = r->s->frame * 4;
-        if (plat_audio_queued(r->out) > r->s->rate * 4 / 1000 * AUDREN_MAX_QUEUED_MS) continue;
+        u32 queued = plat_audio_queued(r->out);
+#if defined(SNX_TRACY)
+        SNX_PLOT("audio queued ms", (double)queued / ((double)r->s->rate * 4.0) * 1000.0); /* stereo s16 */
+#endif
+        if (queued > r->s->rate * 4 / 1000 * AUDREN_MAX_QUEUED_MS) continue;
         snx_le16_array(stereo, (size_t)r->s->frame * 2); /* the host plays little-endian samples, as audout's are */
         plat_audio_queue(r->out, stereo, bytes);
         if (!r->out_started) {

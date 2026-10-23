@@ -453,8 +453,8 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
         static u64 last_present_ns, slow_frames, slowest_ns;
         static u64 was_drawn __attribute__((unused)); /* the draws plot's base; only the profiler reads it */
         /* the counters as of the last present: a slow frame says what it did, which names what a hitch waited for */
-        static u64 was[10];
-        u64 now_ns = plat_ns(), is[10];
+        static u64 was[12];
+        u64 now_ns = plat_ns(), is[12];
         vk_pipeline_stats(&is[0], &is[1], &is[2], &is[3], &is[4], &is[5]);
         vk_tex_stats(&is[6], &is[7]);
         is[8] = vk_rt_made();
@@ -464,6 +464,17 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
             SNX_PLOT("frame ms", (double)d / 1e6);
 #if defined(SNX_TRACY)
             gpu_memory_plots();
+            /* what the CPU has put in the queues and the GPU hasn't got through: the CPU running ahead of the GPU
+               (a submit backlog), and the compute batches waiting to land */
+            {
+                u64 sub, done, csub, cdone;
+                vk_submit_progress(&sub, &done);
+                SNX_PLOT("submits pending", (double)(sub - done));
+                vk_compute_progress(&csub, &cdone);
+                SNX_PLOT("compute pending", (double)(csub - cdone));
+                SNX_PLOT("dispatches", (double)(g_vk_dispatches - was[10]));
+                was[10] = g_vk_dispatches;
+            }
 #endif
             SNX_PLOT("draws", (double)(g_vk_drawn - was_drawn));
             SNX_PLOT("shaders", (double)(is[4] - was[4]));

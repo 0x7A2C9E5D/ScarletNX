@@ -34,6 +34,7 @@ int kobj_never_signaled(KObj* o) {
 void pm_init(PMutex* m) { CHECK(!pthread_mutex_init(&m->l, NULL)); }
 void pm_lock(PMutex* m) { CHECK(!pthread_mutex_lock(&m->l)); }
 void pm_unlock(PMutex* m) { CHECK(!pthread_mutex_unlock(&m->l)); }
+void pm_lock_announce(PMutex* m, const char* name) { (void)m, (void)name; }
 /* this host's pages, or SNX_HOST_PAGE's larger ones (ldr_service_64k_pages), as plat_posix.c */
 u64 plat_vm_page(void) {
     u64 page = (u64)sysconf(_SC_PAGESIZE);

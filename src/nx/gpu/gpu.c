@@ -887,6 +887,7 @@ static void gpu_thread(void* arg) {
     }
 }
 static void queue_init(void) {
+    pm_lock_announce(&g_qlk, "gpu queue"); /* the jobs' handoff, game threads to the GPU thread */
     if (!g_qcv_ready) {
         pc_init(&g_qcv);
         g_qcv_ready = 1;

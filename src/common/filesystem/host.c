@@ -63,18 +63,44 @@ int pm_waits(PmWait* out, int max) {
 }
 const void* pm_wait_base(void) { return g_pm_wait; }
 
+/* The profiler's reporters, set once while a run has one attached; the named locks report through them. */
+static const PmTracy* g_pm_tracy;
+void pm_tracy_register(const PmTracy* t) { g_pm_tracy = t; }
+void pm_lock_announce(PMutex* m, const char* name) {
+    if (!g_pm_tracy || m->tracy) return;
+    m->tracy = g_pm_tracy->make(m, name); /* before the first lock: the readers of m->tracy take it unlocked */
+}
+
 #if defined(_WIN32)
 void pm_init(PMutex* m) { InitializeSRWLock(&m->l); }
-void pm_destroy(PMutex* m) { (void)m; /* an SRW lock holds nothing */ }
+void pm_destroy(PMutex* m) {
+    if (m->tracy) {
+        g_pm_tracy->free(m->tracy);
+        m->tracy = NULL;
+    }
+}
 static uint64_t pm_tid(void) { return GetCurrentThreadId(); }
 void pm_lock(PMutex* m) {
-    if (TryAcquireSRWLockExclusive(&m->l)) return;
+    void* tracy = m->tracy;
+    if (TryAcquireSRWLockExclusive(&m->l)) {
+        if (tracy) g_pm_tracy->lock(tracy);
+        return;
+    }
+    if (tracy) g_pm_tracy->wait(tracy);
     pm_wait_note(m, __builtin_return_address(0), 0);
     AcquireSRWLockExclusive(&m->l);
+    if (tracy) g_pm_tracy->lock(tracy);
     pm_wait_note(NULL, NULL, 0);
 }
-void pm_unlock(PMutex* m) { ReleaseSRWLockExclusive(&m->l); }
-int pm_trylock(PMutex* m) { return TryAcquireSRWLockExclusive(&m->l) != 0; }
+void pm_unlock(PMutex* m) {
+    if (m->tracy) g_pm_tracy->unlock(m->tracy);
+    ReleaseSRWLockExclusive(&m->l);
+}
+int pm_trylock(PMutex* m) {
+    int got = TryAcquireSRWLockExclusive(&m->l) != 0;
+    if (got && m->tracy) g_pm_tracy->try_lock(m->tracy, 1);
+    return got;
+}
 
 /* paths are UTF-8 everywhere else. A path that isn't valid UTF-8 names nothing: NULL, rather than a path with
    replacement characters that could name another file. Freed with free */
@@ -146,7 +172,13 @@ void plat_file_unshare(int fd, const uint8_t* data, uint64_t size) {
 }
 #else
 void pm_init(PMutex* m) { pthread_mutex_init(&m->l, NULL); }
-void pm_destroy(PMutex* m) { pthread_mutex_destroy(&m->l); }
+void pm_destroy(PMutex* m) {
+    if (m->tracy) {
+        g_pm_tracy->free(m->tracy);
+        m->tracy = NULL;
+    }
+    pthread_mutex_destroy(&m->l);
+}
 static uint64_t pm_tid(void) {
 #if defined(__APPLE__)
     uint64_t t = 0;
@@ -159,13 +191,26 @@ static uint64_t pm_tid(void) {
 #endif
 }
 void pm_lock(PMutex* m) {
-    if (pthread_mutex_trylock(&m->l) == 0) return;
+    void* tracy = m->tracy;
+    if (pthread_mutex_trylock(&m->l) == 0) {
+        if (tracy) g_pm_tracy->lock(tracy);
+        return;
+    }
+    if (tracy) g_pm_tracy->wait(tracy);
     pm_wait_note(m, __builtin_return_address(0), 0);
     pthread_mutex_lock(&m->l);
+    if (tracy) g_pm_tracy->lock(tracy);
     pm_wait_note(NULL, NULL, 0);
 }
-void pm_unlock(PMutex* m) { pthread_mutex_unlock(&m->l); }
-int pm_trylock(PMutex* m) { return pthread_mutex_trylock(&m->l) == 0; }
+void pm_unlock(PMutex* m) {
+    if (m->tracy) g_pm_tracy->unlock(m->tracy);
+    pthread_mutex_unlock(&m->l);
+}
+int pm_trylock(PMutex* m) {
+    int got = pthread_mutex_trylock(&m->l) == 0;
+    if (got && m->tracy) g_pm_tracy->try_lock(m->tracy, 1);
+    return got;
+}
 
 int plat_mkdir(const char* path) { return mkdir(path, 0777) ? -1 : 0; }
 

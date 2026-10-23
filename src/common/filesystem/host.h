@@ -18,16 +18,18 @@
 /* A mutex with a static initializer on both hosts; the member is l on both */
 typedef struct {
     SRWLOCK l;
+    void* tracy; /* the profiler's context for a named lock (pm_lock_announce), null otherwise */
 } PMutex;
-#define PMUTEX_INIT {SRWLOCK_INIT}
+#define PMUTEX_INIT {SRWLOCK_INIT, NULL}
 /* the UTF-8 path as a malloc'd wide string for the W calls; NULL when it isn't valid UTF-8 (or out of memory) */
 wchar_t* snx_host_wpath(const char* text);
 #else
 #include <pthread.h>
 typedef struct {
     pthread_mutex_t l;
+    void* tracy; /* the profiler's context for a named lock (pm_lock_announce), null otherwise */
 } PMutex;
-#define PMUTEX_INIT {PTHREAD_MUTEX_INITIALIZER}
+#define PMUTEX_INIT {PTHREAD_MUTEX_INITIALIZER, NULL}
 #endif
 
 void pm_init(PMutex* m);
@@ -35,6 +37,19 @@ void pm_destroy(PMutex* m);
 void pm_lock(PMutex* m);
 void pm_unlock(PMutex* m);
 int pm_trylock(PMutex* m); /* 1 when it took the lock, 0 when another thread holds it */
+/* The profiler's view of the locks, registered while a run has one attached: pm_lock, pm_unlock and pm_trylock
+   report the named locks through it, and its pane shows who held which and who waited how long. Nothing registers
+   it on a run without the profiler, so a lock unnamed costs a null check. */
+typedef struct {
+    void* (*make)(const void* m, const char* name);
+    void (*free)(void* ctx);
+    void (*wait)(void* ctx);
+    void (*lock)(void* ctx);
+    void (*unlock)(void* ctx);
+    void (*try_lock)(void* ctx, int acquired);
+} PmTracy;
+void pm_tracy_register(const PmTracy* t);
+void pm_lock_announce(PMutex* m, const char* name); /* names a lock, before the first lock is ever taken */
 /* A thread blocked in pm_lock on a mutex another thread holds, or waiting on a condition variable with it (cond 1), for
    a hang report: the host thread, the mutex and the caller's address. A lock taken at once notes nothing */
 typedef struct {
