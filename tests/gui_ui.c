@@ -17,6 +17,9 @@ struct App {
     bool keys_missing; /* Load Switch blinks in the failure colour */
     size_t active;     /* LoadList's row in the active colour, + 1; 0: none */
     int width;         /* the width Games' get_row_info was given last */
+    bool top_off, right_off;   /* Frame's Top and Right not shown */
+    int top_width, info_width; /* the widths Frame's Top and Info were measured at last */
+    int knob_least;            /* Frame's Knob at least this wide, at 1x; 0: no least */
 };
 enum { LOAD_SWITCH, LOAD_3DS, SETTINGS, GAMES, OK, BACK, DATA };
 /* the row attributes are a bit each, none shared */
@@ -97,6 +100,26 @@ unsigned ui_row_back_attr_cb(App* app) {
     (void)app;
     return UI_ATTR_FAILURE;
 }
+
+/* Frame's: Top a row of 1px for each 16 of its width, Info 150px, Keys 20px times the scale, Knob's least */
+bool ui_frame_top_shown_cb(App* app) { return !app->top_off; }
+int ui_frame_top_measure_cb(App* app, int width, int scale) {
+    (void)scale;
+    app->top_width = width;
+    return width / 16;
+}
+bool ui_frame_body_right_shown_cb(App* app) { return !app->right_off; }
+int ui_frame_body_right_info_measure_cb(App* app, int width, int scale) {
+    (void)scale;
+    app->info_width = width;
+    return 150;
+}
+int ui_frame_foot_keys_measure_cb(App* app, int width, int scale) {
+    (void)app;
+    (void)width;
+    return 20 * scale;
+}
+int ui_frame_pair_knob_min_width_cb(App* app, int scale) { return app->knob_least * scale; }
 
 static int same(GuiRect r, int x, int y, int w, int h) { return r.x == x && r.y == y && r.w == w && r.h == h; }
 static void is(GuiRect r, int x, int y, int w, int h) {
@@ -296,8 +319,76 @@ static void test_follow_and_keys(void) {
     puts("PASS how lists follow their focus, and the hotkeys");
 }
 
+/* a frame at 1x 400 by 300: padding 8, its column 4 apart; Top 384 / 16 high, Bar a row and 4px, Foot as tall as
+   Keys, Pair a row, Body the rest. Body's row 8 apart: Side 80, Left and Right sharing 288 by 2 and 3, Left held at
+   its 160 and Right given the 128 left. Right's column: Info's 150 held at half of 188, About the rest. Keys a
+   quarter of 384 against the right; Note and Knob halves of 376 */
+static void test_frame(void) {
+    App app = {0};
+    GuiRect r[UI_FRAME_ITEMS];
+    ui_frame_layout(&app, gui_rect(0, 0, 400, 300), 1, r);
+    is(r[UI_FRAME_TOP], 8, 8, 384, 24);
+    is(r[UI_FRAME_BAR], 8, 36, 384, 20);
+    is(r[UI_FRAME_BODY], 8, 60, 384, 188);
+    is(r[UI_FRAME_BODY_LEFT], 8, 60, 160, 188);
+    is(r[UI_FRAME_BODY_RIGHT], 176, 60, 128, 188);
+    is(r[UI_FRAME_BODY_RIGHT_ABOUT], 176, 60, 128, 90);
+    is(r[UI_FRAME_BODY_RIGHT_INFO], 176, 154, 128, 94);
+    is(r[UI_FRAME_BODY_SIDE], 312, 60, 80, 188);
+    is(r[UI_FRAME_FOOT], 8, 252, 384, 20);
+    is(r[UI_FRAME_FOOT_KEYS], 296, 252, 96, 20);
+    is(r[UI_FRAME_PAIR_NOTE], 8, 276, 188, 16);
+    is(r[UI_FRAME_PAIR_KNOB], 204, 276, 188, 16);
+    assert(app.top_width == 384 && app.info_width == 128);
+    /* Knob's least over its half: Note what is left; past what there is, Knob all of it and Note none, its gap kept */
+    app.knob_least = 300;
+    ui_frame_layout(&app, gui_rect(0, 0, 400, 300), 1, r);
+    is(r[UI_FRAME_PAIR_NOTE], 8, 276, 76, 16);
+    is(r[UI_FRAME_PAIR_KNOB], 92, 276, 300, 16);
+    app.knob_least = 500;
+    ui_frame_layout(&app, gui_rect(0, 0, 400, 300), 1, r);
+    is(r[UI_FRAME_PAIR_NOTE], 8, 276, 0, 16);
+    is(r[UI_FRAME_PAIR_KNOB], 16, 276, 376, 16);
+    app.knob_least = 0;
+    /* off: Top takes nothing, nor its gap, and Body grows by both; Right and its slots empty, Left the rest */
+    app.top_off = app.right_off = true;
+    ui_frame_layout(&app, gui_rect(0, 0, 400, 300), 1, r);
+    assert(!r[UI_FRAME_TOP].w && !r[UI_FRAME_TOP].h && !r[UI_FRAME_BODY_RIGHT].w && !r[UI_FRAME_BODY_RIGHT_INFO].h);
+    is(r[UI_FRAME_BAR], 8, 8, 384, 20);
+    is(r[UI_FRAME_BODY], 8, 32, 384, 216);
+    is(r[UI_FRAME_BODY_LEFT], 8, 32, 296, 216);
+    is(r[UI_FRAME_BODY_SIDE], 312, 32, 80, 216);
+    app.top_off = app.right_off = false;
+    /* at 2x the pixels double: Left over its least now, Info under its half */
+    ui_frame_layout(&app, gui_rect(0, 0, 800, 600), 2, r);
+    is(r[UI_FRAME_TOP], 16, 16, 768, 48);
+    is(r[UI_FRAME_BAR], 16, 72, 768, 40);
+    is(r[UI_FRAME_BODY_LEFT], 16, 120, 320, 376);
+    is(r[UI_FRAME_BODY_RIGHT], 352, 120, 256, 376);
+    is(r[UI_FRAME_BODY_RIGHT_ABOUT], 352, 120, 256, 218);
+    is(r[UI_FRAME_BODY_RIGHT_INFO], 352, 346, 256, 150);
+    is(r[UI_FRAME_BODY_SIDE], 624, 120, 160, 376);
+    is(r[UI_FRAME_FOOT_KEYS], 592, 504, 192, 40);
+    is(r[UI_FRAME_PAIR_KNOB], 408, 552, 376, 32);
+    /* under 40 columns inside, 320px at 1x: Body a column, Left two fifths of its 187 and Right the rest, Side off */
+    assert(!UI_FRAME_NARROW(336, 1) && UI_FRAME_NARROW(335, 1) && !UI_FRAME_NARROW(672, 2) && UI_FRAME_NARROW(671, 2));
+    ui_frame_layout(&app, gui_rect(0, 0, 300, 300), 1, r);
+    is(r[UI_FRAME_TOP], 8, 8, 284, 17);
+    is(r[UI_FRAME_BODY], 8, 53, 284, 195);
+    is(r[UI_FRAME_BODY_LEFT], 8, 53, 284, 74);
+    is(r[UI_FRAME_BODY_RIGHT], 8, 135, 284, 113);
+    is(r[UI_FRAME_BODY_RIGHT_ABOUT], 8, 135, 284, 53);
+    is(r[UI_FRAME_BODY_RIGHT_INFO], 8, 192, 284, 56);
+    assert(!r[UI_FRAME_BODY_SIDE].w && !r[UI_FRAME_BODY_SIDE].h);
+    is(r[UI_FRAME_FOOT_KEYS], 221, 252, 71, 20);
+    is(r[UI_FRAME_PAIR_KNOB], 154, 276, 138, 16);
+    assert(app.top_width == 284 && app.info_width == 284);
+    puts("PASS a frame: lengths, shares and their bounds, measures, slots off, 2x, narrow");
+}
+
 int main(void) {
     test_layout();
+    test_frame();
     test_draw();
     test_hit();
     test_follow_and_keys();
