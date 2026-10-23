@@ -20,6 +20,7 @@
 #define MSF_CAN_REPROTECT   (1u << 8)
 #define MSF_CAN_ALIAS       (1u << 15)
 #define MSF_CAN_TRANSFER    (1u << 17)
+#define MSF_CAN_MAP_PROCESS (1u << 23)
 #define MSF_CAN_CHANGE_ATTR (1u << 24)
 #define MSF_CAN_CODE_MEMORY (1u << 25)
 /* MemoryAttribute: Locked, IpcLocked, DeviceShared, Uncached, PermissionLocked */
@@ -214,6 +215,95 @@ u32 svc_unmap_memory(u64 dst, u64 src, u64 size) {
     mem_set_attr(src, size, MA_LOCKED, 0);
     set_perm(src, size, PERM_RW);
     R_SUCCEED();
+}
+
+/* svcMapProcessMemory: a view of a process's memory at dst, shared code read and written, src staying as it is. The
+   one process here is the caller's own, which mods for Atmosphère map their code through to patch it (exlaunch's
+   RwPages): the view and the code are the same pages with the alias pool, and a copy written back at the unmap
+   without. Either way the code compiled from src is stale once the view goes (mem_alias_unmap) */
+static u32 check_process_memory(u64 dst, u32 process, u64 src, u64 size) {
+    KObj* p;
+    R_UNLESS(!((dst | src) & 0xFFF), R_BADADDR);
+    R_UNLESS(size && !(size & 0xFFF), R_BADSIZE);
+    R_UNLESS(dst + size > dst && src + size > src, R_BADMEMSTATE);
+    p = h_get_ref(process, KO_PROCESS);
+    R_UNLESS(p, R_BADHANDLE);
+    kobj_unref(p);
+    R_UNLESS(can_contain(dst, size, MS_SHAREDCODE), R_BADREGION);
+    R_UNLESS(in_region(src, size, 0, AS_END), R_BADMEMSTATE);
+    R_SUCCEED();
+}
+u32 svc_map_process_memory(u64 dst, u32 process, u64 src, u64 size) {
+    u32 r;
+    int i;
+    R_TRY(check_process_memory(dst, process, src, size));
+    R_UNLESS(range_ok(src, size, 0, MSF_CAN_MAP_PROCESS, ANY, ~0u, 0), R_BADMEMSTATE);
+    R_UNLESS(range_ok(dst, size, MS_FREE, 0, ANY, ~0u, 0), R_BADMEMSTATE);
+    R_TRY(mem_result(mem_alias_begin(src, size)));
+    r = mem_result(mem_alias_map(dst, src, size, MS_SHAREDCODE, PERM_RW));
+    if (R_FAILED(r)) {
+        mem_alias_end(src, size);
+        return r;
+    }
+    /* the view of code keeps src as it is now, before anything is written through it (svc_code_line) */
+    pm_lock(&g_hle.svcmem.views_lk);
+    for (i = 0; i < KCODEVIEW_MAX && g_hle.svcmem.views[i].size; i++) {}
+    if (i < KCODEVIEW_MAX) {
+        KCodeView* v = &g_hle.svcmem.views[i];
+        v->dst = dst;
+        v->src = src;
+        v->size = size;
+        v->snap = (u8*)malloc((size_t)size);
+        if (v->snap) memcpy(v->snap, GP(src), (size_t)size);
+    } else
+        WARN_LIMIT(1, "kernel: more than %d views of code at once: their flushes recompile what they cover\n",
+                   KCODEVIEW_MAX);
+    pm_unlock(&g_hle.svcmem.views_lk);
+    R_SUCCEED();
+}
+u32 svc_unmap_process_memory(u64 dst, u32 process, u64 src, u64 size) {
+    int i;
+    R_TRY(check_process_memory(dst, process, src, size));
+    R_UNLESS(range_ok(dst, size, MS_SHAREDCODE, 0, PERM_RW, ~0u, 0), R_BADMEMSTATE);
+    R_UNLESS(range_ok(src, size, 0, MSF_CAN_MAP_PROCESS, ANY, ~0u, 0), R_BADMEMSTATE);
+    mem_alias_unmap(dst, size, src);
+    mem_alias_end(src, size);
+    pm_lock(&g_hle.svcmem.views_lk);
+    for (i = 0; i < KCODEVIEW_MAX; i++)
+        if (g_hle.svcmem.views[i].size && g_hle.svcmem.views[i].dst == dst) {
+            free(g_hle.svcmem.views[i].snap);
+            memset(&g_hle.svcmem.views[i], 0, sizeof g_hle.svcmem.views[i]);
+            break;
+        }
+    pm_unlock(&g_hle.svcmem.views_lk);
+    R_SUCCEED();
+}
+/* A line a flush names through a view or in the code it shows changed when its bytes differ from the view's
+   snapshot. A mod may flush its whole view after a few writes (exlaunch's RwPages), as a cache line that didn't
+   change costs the console nothing: here such a line keeps its compiled code */
+int svc_code_line(u64 addr, u64* code) {
+    int i, r = -1;
+    addr &= ~(u64)63;
+    *code = addr;
+    pm_lock(&g_hle.svcmem.views_lk);
+    for (i = 0; i < KCODEVIEW_MAX; i++) {
+        KCodeView* v = &g_hle.svcmem.views[i];
+        u64 at;
+        if (!v->size) continue;
+        if (addr - v->dst < v->size)
+            at = addr - v->dst;
+        else if (addr - v->src < v->size)
+            at = addr - v->src;
+        else
+            continue;
+        *code = v->src + at;
+        if (!v->snap || at + 64 > v->size) break; /* nothing kept to compare with: it may have changed */
+        r = memcmp(v->snap + at, GP(*code), 64) != 0;
+        if (r) memcpy(v->snap + at, GP(*code), 64);
+        break;
+    }
+    pm_unlock(&g_hle.svcmem.views_lk);
+    return r;
 }
 
 /* ============================================================ QueryMemory */
