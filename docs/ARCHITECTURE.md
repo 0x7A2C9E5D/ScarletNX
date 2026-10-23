@@ -74,13 +74,13 @@ syscalls, ELF execution, filesystem scope, and differential testing.
 ## Recompiler + module ABI
 
 NX tooling under `src/nx/runtime/driver/` and `src/nx/loader/`:
-a dump, read in place, or `work/<Game>/{exefs,romfs}` -> `games/<id>/`: `<id>[.exe]`, `<id>_code.{so,dll}`,
+a dump, read in place, or `work/<Game>/{exefs,romfs}` -> `recompiled/<id>/`: `<id>[.exe]`, `<id>_code.{so,dll}`,
 `<id>_data/`, and the dump's path as `source=` in the game's `<id>.ini` (`<id>.source`, a link to it, from older
 versions):
 
 An update or a DLC is recorded beside its game (`snx_addon_name`), its own `.ini` naming only its dump, and checked
 in the game's `addons=` (`common/utilities/game_ini.c`, which the driver and the launcher write). An update also gets a
-program, `games/<id>/<id>_<its title ID>`; a DLC runs its game's code. The runtime (`main.c`'s `addon_init`) runs an
+program, `recompiled/<id>/<id>_<its title ID>`; a DLC runs its game's code. The runtime (`main.c`'s `addon_init`) runs an
 update's program with the game's `.ini` and data folder, and `fs.c` lays the checked DLCs' data folders and then the
 update's over that folder (`fs_tree_overlay`, which takes only their ExeFS, RomFS, control data and `system/`). It
 reads an update's dump with the game's in one `SnxDump` (its Patch RomFS reads the game's NCA), and each checked DLC's

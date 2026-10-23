@@ -39,7 +39,7 @@ recompiles on the phone, then the game opens.
   returns to the menu. A run that ends there leaves a notification saying so, and its game opens once the menu shows.
   The first run asks to show it (Android 13) and to lift the battery limit; on a phone whose maker adds its own limit
   (Samsung, Xiaomi, OPPO, vivo, Huawei...) it names the setting, with a button to its screen.
-- **A game** runs in `GameActivity`, in a process of its own: the runtime's `main` with `--game=games/<game>`.
+- **A game** runs in `GameActivity`, in a process of its own: the runtime's `main` with `--game=recompiled/<game>`.
   Its process ends with the game, and the menu comes back on its first screen. `<game>_code.so` loads where it is;
   from a game folder on the shared storage, which maps nothing executable, the runtime loads a copy in the app's
   cache. The back button opens the

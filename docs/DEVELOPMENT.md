@@ -8,7 +8,7 @@ The build tree's drivers work in the user's data folder, as an installed copy do
 the examples name its folders on Linux, and `--data DIR` keeps a run's files in DIR instead:
 
 ```sh
-games=~/.local/share/scarletnx/games work=~/.cache/scarletnx/work
+games=~/.local/share/scarletnx/recompiled work=~/.cache/scarletnx/work
 ```
 
 ## Rebuild / checks
@@ -50,7 +50,7 @@ python3 tools/run_game.py <id> --runs 5 --seconds 60 --dump "$work/Game" --scrip
 python3 tools/symbols.py "$work/Game" cf34380
 python3 tools/disasm.py "$work/Game" NvRmStreamFlushSync
 python3 tools/disasm.py "$work/Game" cf34240 cf343c0
-build/scarletnx --scan-log "$games/<id>/<id>.log" [--format markdown]
+build/scarletnx --scan-log ~/.local/state/scarletnx/recompiled/<id>/<id>.log [--format markdown]
 ```
 
 - `--scan-log` (`src/common/utilities/logscan.c`, also built as `build/snx-logscan`): a log, or the launcher's Share

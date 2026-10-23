@@ -84,7 +84,7 @@ The GUI locates the cache the same way the runtime does:
 
 - `<game folder>/<title>.folders` names a `cache=` folder, if that folder exists; otherwise
 - the runtime's user cache path for the game folder, which for an installed or portable data folder is
-  `<data>/cache/games/<title>/`; otherwise
+  `<data>/cache/recompiled/<title>/`; otherwise
 - the game folder itself.
 
 The file is `<that folder>/<title>.jitcache`.

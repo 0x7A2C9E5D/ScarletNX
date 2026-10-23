@@ -144,7 +144,7 @@ DLC's dump given alone as its RomFS image.
 ### Mods
 
 A game's mods go in the `mods` folder of its data folder, one folder each, named as you like:
-`games/<id>/<id>_data/mods/<mod name>/exefs/` and `.../<mod name>/romfs/`. A mod lies over the game the way an update
+`recompiled/<id>/<id>_data/mods/<mod name>/exefs/` and `.../<mod name>/romfs/`. A mod lies over the game the way an update
 does, and over the update too when one is checked. A file in its `romfs/` replaces the RomFS file at the same path, or
 is added to the RomFS when the game has none there. A file in its `exefs/` (`main`, `subsdk0` and the other modules,
 or `main.npdm`) replaces the program's file of that name. Mods are laid in the order of their names, so a later one
@@ -161,7 +161,7 @@ mods played have other ones. Run directly, a game made with other mods' files ru
 log says so. IPS patches and cheats in `exefs/` are not applied.
 
 A game's cheats go in the `cheats` folder of its data folder, in the Atmosphere format, a file named after the main
-module's build ID: `games/<id>/<id>_data/cheats/<build id>.txt`, each cheat a `[name]` line and its codes under it.
+module's build ID: `recompiled/<id>/<id>_data/cheats/<build id>.txt`, each cheat a `[name]` line and its codes under it.
 Every cheat in it runs once per frame shown until it is turned off. Opening a game in the launcher lists its cheats
 under its mods, each with a box to check, and Open Cheats Folder opens the folder (made first when it isn't there).
 The cheats turned off are kept in `cheats_off=` in the game's `.ini`, their names with a `|` between two; a cheat with
