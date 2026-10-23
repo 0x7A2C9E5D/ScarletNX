@@ -506,11 +506,9 @@ static void record_folders(const char* root) {
         CHECK(!snx_mkdirs(config) && !snx_write_file(ini, text, strlen(text)));
         free(text);
         CHECK(!snx_record_folders(folder, "G"));
-        for (i = 0; i < 2; ++i) {
-            at = snx_path_join(picked[i], "games");
-            game[i] = snx_path_join(at, "G");
-            free(at);
-            CHECK(snx_is_dir(game[i]));
+        for (i = 0; i < 2; ++i) { /* games/G under each picked folder, made */
+            game[i] = snx_user_path(folder, i ? SNX_USER_CACHE : SNX_USER_STATE);
+            CHECK(strcmp(game[i], folder) && snx_path_within(game[i], picked[i]) && snx_is_dir(game[i]));
         }
         at = snx_user_path(folder, SNX_USER_CONFIG);
         free(expected);

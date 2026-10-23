@@ -3025,7 +3025,8 @@ int main(int argc, char** argv) {
             assert(!strcmp(app.editor.note, line) && snx_path_within(app.run_log, logs));
             render(&app);
             shows(&app, "- Logs", yellow);
-            shows(&app, "custom", yellow);
+            /* custom, at the row's end where the folder leaves room (a long one, as Windows' temporary folder, none) */
+            assert(!strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_STATE)], "custom"));
             kept = (char*)snx_read_file(app.app_file, &size);
             snprintf(line, sizeof line, "\nstate = %s\ncache = \n", app.state_dir);
             assert(kept && strstr(kept, line));
@@ -3083,7 +3084,7 @@ int main(int argc, char** argv) {
         }
         render(&app);
         shows(&app, "- Main", yellow);
-        shows(&app, "custom", yellow);
+        assert(!strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES)], "custom"));
         assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir));
         app_values(&app); /* App's note, the folder now */
         assert(!strcmp(app.app_form.places, "1 custom, 1 Extra(s)") && strstr(app.places_note, app.games_dir));
@@ -3384,6 +3385,7 @@ int main(int argc, char** argv) {
     assert(app.menu.view == GUI_LOAD_DROP && !app.menu.running);
     e.type = SDL_EVENT_DROP_FILE;
     e.drop.data = input;
+    free(app.run_log);                                      /* Folders' Logs may have set one */
     app.run_log = snx_path_join(temporary, "last-run.log"); /* the run's output, kept as it comes */
     event(&app, &e);
     assert(app.menu.running && app.menu.selected == GUI_SWITCH);
