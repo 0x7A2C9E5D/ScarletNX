@@ -16,6 +16,7 @@
 #include <string.h>
 
 #define SCE_NET_ERROR_EBADF              0x80410109u /* 0x80410100 | errno, sceNet's form of each */
+#define SCE_NET_ERROR_EFAULT             0x8041010eu
 #define SCE_NET_ERROR_EINVAL             0x80410116u
 #define SCE_NET_ERROR_EMFILE             0x80410118u
 #define SCE_NET_ERROR_EWOULDBLOCK        0x80410123u
@@ -29,6 +30,8 @@
 #define SCE_NET_CTL_ERROR_NOT_CONNECTED  0x80412108u
 #define SCE_HTTP_ERROR_NETWORK           0x80431063u
 #define SCE_SSL_ERROR_INTERNAL           0x80435026u
+#define SCE_NP_ERROR_INVALID_ARGUMENT    0x80550003u
+#define SCE_NP_MANAGER_ERROR_INVALID_ARGUMENT 0x80550503u
 #define SCE_NP_MANAGER_ERROR_INVALID_STATE 0x80550506u
 #define SCE_NP_UTIL_ERROR_INVALID_ARGUMENT 0x80550601u
 #define SCE_NP_UTIL_ERROR_INVALID_NP_ID  0x80550605u
@@ -159,10 +162,15 @@ static Socket* socket_of(VitaProcess* p, uint32_t id) {
     struct VitaNet* n = net(p);
     return n && id - 1 < SOCKETS && n->sockets[id - 1].used ? &n->sockets[id - 1] : NULL;
 }
+/* a SceNetSockaddrIn (16 bytes) at at, read or written only where the game's memory is: address_writable says
+   whether address_write can write at and length_at (each optional) */
 static Address address_read(VitaProcess* p, uint32_t at) {
     const unsigned char* a = vita_ptr(p, at);
     return (Address){(uint32_t)a[4] << 24 | (uint32_t)a[5] << 16 | (uint32_t)a[6] << 8 | a[7],
                      (uint16_t)(a[2] << 8 | a[3]), (uint16_t)(a[8] << 8 | a[9])};
+}
+static bool address_writable(VitaProcess* p, uint32_t at, uint32_t length_at) {
+    return (!at || vita_mapped(p, at, 16)) && (!length_at || vita_mapped(p, length_at, 4));
 }
 static void address_write(VitaProcess* p, uint32_t at, uint32_t length_at, Address a) {
     if (!at) return;
@@ -218,6 +226,7 @@ static uint32_t net_bind(VitaProcess* p, VitaThread* t) {
     uint32_t at = vita_arg(p, t, 1);
     if (!s) return fail(p, t, SCE_NET_ERROR_EBADF);
     if (!at || vita_arg(p, t, 2) < 16) return fail(p, t, SCE_NET_ERROR_EINVAL);
+    if (!vita_mapped(p, at, 16)) return fail(p, t, SCE_NET_ERROR_EFAULT);
     Address a = address_read(p, at);
     if (!local(a.address)) return fail(p, t, SCE_NET_ERROR_EINVAL); /* EADDRNOTAVAIL: no other interface is up */
     if (a.port && s->type != SCE_NET_SOCK_STREAM && bound_at(p, s, a)) return fail(p, t, SCE_NET_ERROR_EADDRINUSE);
@@ -228,6 +237,7 @@ static uint32_t net_bind(VitaProcess* p, VitaThread* t) {
 static uint32_t net_getsockname(VitaProcess* p, VitaThread* t) {
     Socket* s = socket_of(p, vita_arg(p, t, 0));
     if (!s) return fail(p, t, SCE_NET_ERROR_EBADF);
+    if (!address_writable(p, vita_arg(p, t, 1), vita_arg(p, t, 2))) return fail(p, t, SCE_NET_ERROR_EFAULT);
     address_write(p, vita_arg(p, t, 1), vita_arg(p, t, 2), s->local);
     return 0;
 }
@@ -236,6 +246,7 @@ static uint32_t net_setsockopt(VitaProcess* p, VitaThread* t) {
     Socket* s = socket_of(p, vita_arg(p, t, 0));
     uint32_t level = vita_arg(p, t, 1), option = vita_arg(p, t, 2), value = vita_arg(p, t, 3);
     if (!s) return fail(p, t, SCE_NET_ERROR_EBADF);
+    if (value && !vita_mapped(p, value, 4)) return fail(p, t, SCE_NET_ERROR_EFAULT);
     if (level == SCE_NET_SOL_SOCKET && option == SCE_NET_SO_NBIO && value) s->nbio = vita_read32(p, value) != 0;
     return 0;
 }
@@ -247,8 +258,11 @@ static uint32_t net_getsockopt(VitaProcess* p, VitaThread* t) {
                  : option == SCE_NET_SO_TYPE    ? s->type
                  : option == SCE_NET_SO_NBIO    ? s->nbio
                                                 : 0; /* SO_ERROR: none pending */
+    uint32_t length = vita_arg(p, t, 4);
+    if ((value && !vita_mapped(p, value, 4)) || (length && !vita_mapped(p, length, 4)))
+        return fail(p, t, SCE_NET_ERROR_EFAULT);
     if (value) vita_write32(p, value, v);
-    if (vita_arg(p, t, 4)) vita_write32(p, vita_arg(p, t, 4), 4);
+    if (length) vita_write32(p, length, 4);
     return 0;
 }
 /* a datagram of size bytes at data from s to a: queued for the socket bound there (dropped when none is, or its
@@ -257,6 +271,7 @@ static uint32_t send_to(VitaProcess* p, VitaThread* t, Socket* s, uint32_t data,
     if (s->type == SCE_NET_SOCK_STREAM) return fail(p, t, SCE_NET_ERROR_ENOTCONN);
     if (!local(a.address)) return fail(p, t, SCE_NET_ERROR_ENETUNREACH);
     if (size > 0x10000u) return fail(p, t, SCE_NET_ERROR_EMSGSIZE);
+    if (size && !vita_mapped(p, data, size)) return fail(p, t, SCE_NET_ERROR_EFAULT);
     bind_any(p, s);
     Socket* to = bound_at(p, s, a);
     if (to && to->count < QUEUE) {
@@ -279,6 +294,7 @@ static uint32_t net_sendto(VitaProcess* p, VitaThread* t) {
         if (!s->connected) return fail(p, t, SCE_NET_ERROR_ENOTCONN);
         return send_to(p, t, s, vita_arg(p, t, 1), vita_arg(p, t, 2), s->peer);
     }
+    if (!vita_mapped(p, at, 16)) return fail(p, t, SCE_NET_ERROR_EFAULT);
     return send_to(p, t, s, vita_arg(p, t, 1), vita_arg(p, t, 2), address_read(p, at));
 }
 /* sceNetSend(s, data, size, flags) */
@@ -299,6 +315,9 @@ static uint32_t receive(VitaProcess* p, VitaThread* t, Socket* s, uint32_t data,
     }
     Datagram* d = &s->queue[s->head];
     uint32_t n = d->size < size ? d->size : size;
+    /* a buffer or address outside the game's memory: the datagram stays queued */
+    if ((n && !vita_mapped(p, data, n)) || !address_writable(p, address, length))
+        return fail(p, t, SCE_NET_ERROR_EFAULT);
     memcpy(vita_ptr(p, data), d->bytes, n);
     address_write(p, address, length, d->from);
     free(d->bytes);
@@ -324,6 +343,7 @@ static uint32_t net_connect(VitaProcess* p, VitaThread* t) {
     uint32_t at = vita_arg(p, t, 1);
     if (!s) return fail(p, t, SCE_NET_ERROR_EBADF);
     if (!at) return fail(p, t, SCE_NET_ERROR_EINVAL);
+    if (!vita_mapped(p, at, 16)) return fail(p, t, SCE_NET_ERROR_EFAULT);
     Address a = address_read(p, at);
     if (!local(a.address)) return fail(p, t, SCE_NET_ERROR_ENETUNREACH);
     if (s->type == SCE_NET_SOCK_STREAM) return fail(p, t, SCE_NET_ERROR_ECONNREFUSED);
@@ -372,6 +392,7 @@ static uint32_t epoll_control(VitaProcess* p, VitaThread* t) {
     uint32_t op = vita_arg(p, t, 1), id = vita_arg(p, t, 2), event = vita_arg(p, t, 3);
     if (!e) return fail(p, t, SCE_NET_ERROR_EBADF);
     if (!socket_of(p, id)) return fail(p, t, SCE_NET_ERROR_ENOTSOCK);
+    if (event && !vita_mapped(p, event, 0x20)) return fail(p, t, SCE_NET_ERROR_EFAULT);
     unsigned i = 0, free_watch = WATCHES;
     for (; i < WATCHES && e->watch[i].socket != id; ++i)
         if (!e->watch[i].socket && free_watch == WATCHES) free_watch = i;
@@ -395,6 +416,8 @@ static uint32_t epoll_wait(VitaProcess* p, VitaThread* t) {
     uint32_t events = vita_arg(p, t, 1), count = vita_arg(p, t, 2);
     int32_t timeout = (int32_t)vita_arg(p, t, 3);
     if (!e) return fail(p, t, SCE_NET_ERROR_EBADF);
+    if (count > WATCHES) count = WATCHES; /* no more can be ready */
+    if (count && !vita_mapped(p, events, count * 0x20u)) return fail(p, t, SCE_NET_ERROR_EFAULT);
     uint32_t ready = 0;
     for (unsigned i = 0; i < WATCHES && ready < count; ++i) {
         Socket* s = e->watch[i].socket ? socket_of(p, e->watch[i].socket) : NULL;
@@ -417,13 +440,14 @@ static uint32_t epoll_wait(VitaProcess* p, VitaThread* t) {
 /* sceNetCtlInetGetState(int* state) */
 static uint32_t net_ctl_state(VitaProcess* p, VitaThread* t) {
     uint32_t state = vita_arg(p, t, 0);
+    if (state && !vita_mapped(p, state, 4)) return SCE_NET_CTL_ERROR_INVALID_ADDR;
     if (state) vita_write32(p, state, SCE_NETCTL_STATE_DISCONNECTED);
     return 0;
 }
 /* sceNetCtlInetGetResult(event, int* error): why the network went, for each event the callbacks are told */
 static uint32_t net_ctl_result(VitaProcess* p, VitaThread* t) {
     uint32_t error = vita_arg(p, t, 1);
-    if (!error) return SCE_NET_CTL_ERROR_INVALID_ADDR;
+    if (!error || !vita_mapped(p, error, 4)) return SCE_NET_CTL_ERROR_INVALID_ADDR;
     vita_write32(p, error, SCE_NET_CTL_ERROR_FLIGHT_MODE_ENABLED);
     return 0;
 }
@@ -431,7 +455,7 @@ static uint32_t net_ctl_result(VitaProcess* p, VitaThread* t) {
 static uint32_t net_ctl_register_callback(VitaProcess* p, VitaThread* t) {
     struct VitaNet* n = net(p);
     uint32_t callback = vita_arg(p, t, 0), argument = vita_arg(p, t, 1), id = vita_arg(p, t, 2);
-    if (!callback || !id) return SCE_NET_CTL_ERROR_INVALID_ADDR;
+    if (!callback || !id || !vita_mapped(p, id, 4)) return SCE_NET_CTL_ERROR_INVALID_ADDR;
     for (uint32_t i = 0; n && i < sizeof n->netctl / sizeof *n->netctl; ++i)
         if (!n->netctl[i].callback) {
             n->netctl[i].callback = callback, n->netctl[i].argument = argument;
@@ -468,6 +492,7 @@ static uint32_t net_ctl_check_callback(VitaProcess* p, VitaThread* t) {
 /* sceNpGetServiceState(SceNpServiceState* state) */
 static uint32_t np_service_state(VitaProcess* p, VitaThread* t) {
     uint32_t state = vita_arg(p, t, 0);
+    if (state && !vita_mapped(p, state, 4)) return SCE_NP_ERROR_INVALID_ARGUMENT;
     if (state) vita_write32(p, state, SCE_NP_SERVICE_STATE_SIGNED_OUT);
     return 0;
 }
@@ -504,6 +529,7 @@ static uint32_t np_check_callback(VitaProcess* p, VitaThread* t) {
 static uint32_t np_get_id(VitaProcess* p, VitaThread* t) {
     uint32_t id = vita_arg(p, t, 0);
     if (!id) return SCE_NP_MANAGER_ERROR_INVALID_STATE;
+    if (!vita_mapped(p, id, NP_ID_SIZE)) return SCE_NP_MANAGER_ERROR_INVALID_ARGUMENT;
     unsigned char* to = vita_ptr(p, id);
     memset(to, 0, NP_ID_SIZE);
     memcpy(to, "Player", 6);
@@ -515,7 +541,8 @@ static uint32_t np_get_id(VitaProcess* p, VitaThread* t) {
    platforms (unless neither names one) compared */
 static uint32_t np_compare_ids(VitaProcess* p, VitaThread* t) {
     uint32_t x = vita_arg(p, t, 0), y = vita_arg(p, t, 1);
-    if (!x || !y) return SCE_NP_UTIL_ERROR_INVALID_ARGUMENT;
+    if (!x || !y || !vita_mapped(p, x, NP_ID_SIZE) || !vita_mapped(p, y, NP_ID_SIZE))
+        return SCE_NP_UTIL_ERROR_INVALID_ARGUMENT;
     const unsigned char *a = vita_ptr(p, x), *b = vita_ptr(p, y);
     if (!a[NP_ID_VALID] || !b[NP_ID_VALID]) return SCE_NP_UTIL_ERROR_INVALID_NP_ID;
     if (strncmp((const char*)a, (const char*)b, 16) || memcmp(a + 0x14, b + 0x14, 4))

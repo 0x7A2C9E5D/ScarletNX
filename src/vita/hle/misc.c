@@ -256,7 +256,7 @@ static bool slot_read(VitaProcess* p, uint32_t id, unsigned char* param) {
 static uint32_t save_data_slot_create(VitaProcess* p, VitaThread* t) {
     uint32_t id = vita_arg(p, t, 0), param = vita_arg(p, t, 1);
     unsigned char old[SLOT_PARAM_SIZE];
-    if (id >= SAVEDATA_SLOTS || !param) return SCE_APPUTIL_ERROR_PARAMETER;
+    if (id >= SAVEDATA_SLOTS || !param || !vita_mapped(p, param, SLOT_PARAM_SIZE)) return SCE_APPUTIL_ERROR_PARAMETER;
     if (slot_read(p, id, old)) return SCE_APPUTIL_ERROR_SAVEDATA_SLOT_EXISTS;
     unsigned char copy[SLOT_PARAM_SIZE];
     memcpy(copy, vita_ptr(p, param), SLOT_PARAM_SIZE);
@@ -277,7 +277,7 @@ static uint32_t save_data_slot_delete(VitaProcess* p, VitaThread* t) {
 static uint32_t save_data_slot_get_param(VitaProcess* p, VitaThread* t) {
     uint32_t id = vita_arg(p, t, 0), param = vita_arg(p, t, 1);
     unsigned char copy[SLOT_PARAM_SIZE];
-    if (id >= SAVEDATA_SLOTS || !param) return SCE_APPUTIL_ERROR_PARAMETER;
+    if (id >= SAVEDATA_SLOTS || !param || !vita_mapped(p, param, SLOT_PARAM_SIZE)) return SCE_APPUTIL_ERROR_PARAMETER;
     if (!slot_read(p, id, copy)) return SCE_APPUTIL_ERROR_SAVEDATA_SLOT_NOT_FOUND;
     memset(copy, 0, 4); /* status: the slot is fine */
     memcpy(vita_ptr(p, param), copy, SLOT_PARAM_SIZE);
@@ -287,7 +287,7 @@ static uint32_t save_data_slot_get_param(VitaProcess* p, VitaThread* t) {
 static uint32_t save_data_slot_set_param(VitaProcess* p, VitaThread* t) {
     uint32_t id = vita_arg(p, t, 0), param = vita_arg(p, t, 1);
     unsigned char copy[SLOT_PARAM_SIZE];
-    if (id >= SAVEDATA_SLOTS || !param) return SCE_APPUTIL_ERROR_PARAMETER;
+    if (id >= SAVEDATA_SLOTS || !param || !vita_mapped(p, param, SLOT_PARAM_SIZE)) return SCE_APPUTIL_ERROR_PARAMETER;
     if (!slot_read(p, id, copy)) return SCE_APPUTIL_ERROR_SAVEDATA_SLOT_NOT_FOUND;
     memcpy(copy, vita_ptr(p, param), SLOT_PARAM_SIZE);
     return slot_write(p, id, copy) ? 0 : SCE_APPUTIL_ERROR_SAVEDATA_NO_SPACE_FS;
@@ -318,13 +318,20 @@ static bool save_file(const char* path, const unsigned char* data, uint32_t size
 static uint32_t save_data_data_save(VitaProcess* p, VitaThread* t) {
     uint32_t slot = vita_arg(p, t, 0), files = vita_arg(p, t, 1), count = vita_arg(p, t, 2);
     uint32_t required = vita_arg(p, t, 4);
-    uint32_t id = slot ? vita_read32(p, slot) : 0;
-    if ((slot && id >= SAVEDATA_SLOTS) || (count && !files)) return SCE_APPUTIL_ERROR_PARAMETER;
+    /* the slot (id, parameters), the files and the given parameters in the game's memory */
+    if ((slot && !vita_mapped(p, slot, 8)) ||
+        (count && (count > UINT32_MAX / 0x40 || !vita_mapped(p, files, count * 0x40))))
+        return SCE_APPUTIL_ERROR_PARAMETER;
+    uint32_t id = slot ? vita_read32(p, slot) : 0, given = slot ? vita_read32(p, slot + 4) : 0;
+    if (id >= SAVEDATA_SLOTS || (given && !vita_mapped(p, given, SLOT_PARAM_SIZE)) ||
+        (required && !vita_mapped(p, required, 4)))
+        return SCE_APPUTIL_ERROR_PARAMETER;
     if (required) vita_write32(p, required, 0); /* there is room */
     for (uint32_t i = 0; i < count; ++i) {
         uint32_t f = files + i * 0x40, buffer = vita_read32(p, f + 4), size = vita_read32(p, f + 8),
                  mode = vita_read32(p, f + 0x18);
         uint64_t offset = vita_read32(p, f + 0x10) | (uint64_t)vita_read32(p, f + 0x14) << 32;
+        if (buffer && mode != SAVE_MODE_DIRECTORY && !vita_mapped(p, buffer, size)) return SCE_APPUTIL_ERROR_PARAMETER;
         char* path = save_path(p, vita_read32(p, f));
         bool ok = path && (mode == SAVE_MODE_DIRECTORY
                                ? !snx_mkdirs(path)
@@ -335,7 +342,6 @@ static uint32_t save_data_data_save(VitaProcess* p, VitaThread* t) {
     }
     if (!slot) return 0;
     unsigned char param[SLOT_PARAM_SIZE];
-    uint32_t given = vita_read32(p, slot + 4);
     if (given)
         memcpy(param, vita_ptr(p, given), SLOT_PARAM_SIZE);
     else if (!slot_read(p, id, param))

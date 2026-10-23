@@ -223,6 +223,7 @@ int vita_run(VitaProcess* p, double seconds) {
     bool closed = false;
     p->display.next_ns = vita_now_ns() + VBLANK_NS;
     VitaThread* volatile running = NULL;
+    VitaThread* last = NULL; /* the thread that ran the last slice */
 #ifndef _WIN32
     faults_install(p->mem);
     if (sigsetjmp(fault_jump, 1)) {
@@ -249,7 +250,11 @@ int vita_run(VitaProcess* p, double seconds) {
             sleep_until(wake < p->display.next_ns ? wake : p->display.next_ns);
             continue;
         }
-        p->current = running = t;
+        /* a thread resumed after another ran: its exclusive monitor cleared, as the kernel's context switch clears it
+           (CLREX). Its STREX then fails and its loop reads again, where comparing the value LDREX read would let the
+           store pass over the other threads' writes in between (a lock-free list's head popped and pushed back) */
+        if (t != last) t->cpu.exclusive_valid = 0;
+        p->current = running = last = t;
         t->seq = ++p->seq;
 #ifndef _WIN32
         fault_armed = 1;
