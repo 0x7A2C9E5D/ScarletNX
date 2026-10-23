@@ -2788,6 +2788,10 @@ retry:
 
     VkViewport vp = vk_render_viewport(r);
     u32 viewports = last->si.writes_viewport ? GUEST_VIEWPORTS : 1;
+    if (viewports == 1 && !(vp.width > 0 && vp.height != 0)) {
+        draw_images_discard(&images);
+        return; /* its one viewport has no area: nothing is drawn, so nothing is recorded */
+    }
     VkViewport viewport[GUEST_VIEWPORTS] = {{0}};
     VkRect2D scissor[GUEST_VIEWPORTS] = {{{0}}};
     for (u32 i = 0; i < viewports; i++) {
