@@ -36,7 +36,8 @@ static const char* pexit_path;
 static const char* global_dynamic_path;
 static const char* xfb_path;
 static const char* passthrough_paths[6];
-static char* fixture_paths[68];
+static const char* structured_paths[2];
+static char* fixture_paths[70];
 static size_t fixture_count;
 
 static const char* fixture_path(const char* directory, const char* name) {
@@ -924,6 +925,77 @@ static int invalid_brx_table(u32 bank, u32 offset, u32* value) {
     if (bank || offset) return 0;
     *value = 1024;
     return 1;
+}
+
+static int three_way_table(u32 bank, u32 offset, u32* value) {
+    if (bank || offset > 8) return 0;
+    *value = offset == 0 ? 8 : offset == 4 ? 32 : 56; /* words 17, 20 and 23, after the BRX at 15 */
+    return 1;
+}
+
+/* the cases of each OpSwitch in a module, added up, and the switches */
+static int switch_cases(const u32* code, size_t words, int* switches) {
+    int cases = 0;
+    *switches = 0;
+    for (size_t i = 5; i < words && code[i] >> 16;) {
+        if ((code[i] & 0xffff) == 251) {
+            cases += (int)((code[i] >> 16) - 3) / 2;
+            ++*switches;
+        }
+        i += code[i] >> 16;
+    }
+    return cases;
+}
+
+/* Structured control flow: a jump table becomes an OpSwitch of its own targets and a loop its own loop construct, in
+   place of the dispatch loop's switch over every block */
+static void structured_flow(void) {
+    u64 code[32] = {0};
+    ShaderInfo info;
+    size_t words = 0;
+    int switches;
+    for (u32 i = 10; i < 32; i += 4) code[i] = SCHED;
+    code[11] = 0x3820000000270b0bull; /* IMNMX R11, R11, 2: three entries */
+    code[12] = 0x3848000000270b0dull; /* SHL R13, R11, 2 */
+    code[13] = 0xef94000000070d0dull; /* LDC.B32 R13, c[0][R13] */
+    code[15] = 0xe250000000070d0full; /* BRX R13 */
+    code[16] = EXIT;
+    code[17] = 0x010000000007F001ull; /* MOV32I R1 */
+    code[19] = EXIT;
+    code[20] = 0x010000000007F001ull;
+    code[21] = EXIT;
+    code[23] = 0x50B0000000070F00ull; /* NOP */
+    code[24] = EXIT;
+    int (*old)(u32, u32, u32*) = g_shader_cb_read;
+    g_shader_cb_read = three_way_table;
+    memset(&info, 0, sizeof info);
+    u32* spv = spirv_of(code, 25 * 8, ST_FS, &info, &words, 1, 1, 1, 1);
+    g_shader_cb_read = old;
+    check(spv != NULL, "a program with a jump table translates");
+    if (spv) {
+        check(switch_cases(spv, words, &switches) == 3 && switches == 1,
+              "a jump table is a switch of its three targets, with no dispatch loop");
+        save_fixture(structured_paths[0], spv, words);
+    }
+    free(spv);
+    /* a loop (@P0 BRA back to 12) and an if after it (@P1 BRA over a NOP) */
+    memset(code, 0, sizeof code);
+    for (u32 i = 10; i < 32; i += 4) code[i] = SCHED;
+    code[11] = 0x010000000007F001ull;
+    code[12] = 0x50B0000000070F00ull;
+    code[13] = (0xE24ull << 52 | (u64)(((12u - 14u) * 8) & 0xFFFFFF) << 20 | 0x7000Full) & ~0xF0000ull;
+    code[15] = (0xE24ull << 52 | (u64)(((17u - 16u) * 8) & 0xFFFFFF) << 20 | 0x7000Full) & ~0xE0000ull;
+    code[16] = 0x50B0000000070F00ull;
+    code[17] = EXIT;
+    memset(&info, 0, sizeof info);
+    spv = spirv_of(code, 18 * 8, ST_FS, &info, &words, 1, 1, 1, 1);
+    check(spv != NULL, "a program with a loop translates");
+    if (spv) {
+        check(switch_cases(spv, words, &switches) == 0 && count_opcode(spv, words, 246, 0xffffffffu) >= 2,
+              "a loop and an if are loop constructs, with no dispatch loop");
+        save_fixture(structured_paths[1], spv, words);
+    }
+    free(spv);
 }
 
 static void brx_length(void) {
@@ -2469,7 +2541,11 @@ int main(int argc, char** argv) {
             snprintf(name, sizeof name, "audit_%d", i);
             audit_paths[i] = fixture_path(argv[1], name);
         }
-        if (fixture_count != 68) {
+        for (int i = 0; i < 2; i++) {
+            snprintf(name, sizeof name, "structured_%d", i);
+            structured_paths[i] = fixture_path(argv[1], name);
+        }
+        if (fixture_count != 70) {
             fprintf(stderr, "failed to allocate fixture paths\n");
             return 2;
         }
@@ -2505,6 +2581,7 @@ int main(int argc, char** argv) {
     beyond_eden();
     system_values();
     attribute_pointer();
+    structured_flow();
     for (size_t i = 0; i < fixture_count; i++) free(fixture_paths[i]);
     return failures ? 1 : 0;
 }
