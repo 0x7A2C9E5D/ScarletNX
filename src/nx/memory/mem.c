@@ -26,7 +26,7 @@
    is the 1 GiB the kernel's own pages (TLS) need. The alias region starts at 4 GiB, which leaves the code below it
    up to 3.9 GiB, as the end of the code isn't known yet when the layout is made */
 MemLayout g_layout = {0x8000000ull,  AS_MAX,      0x1100000000ull, 8 * GIB, 0x100000000ull, 64 * GIB,
-                      0x1300000000ull, 2 * GIB, 0x1380000000ull, 0x13C0000000ull};
+                      0x1300000000ull, 2 * GIB, 0x1380000000ull, 0x13C0000000ull, 0};
 u64 g_as_size = AS_MAX;
 u8* g_mem;
 u64 g_heap_size, g_phys_mapped, g_heap_max, g_code_memory, g_main_stack_size;
