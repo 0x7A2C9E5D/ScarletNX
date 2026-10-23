@@ -525,17 +525,16 @@ static int jit_objects(const char* triple) {
     return 0;
 }
 
-/* an object of nothing but bytes in a code section, which makes the load's code as large as bytes say */
+/* an object of nothing but bytes in an executable section, which makes the load's code as large as bytes say (module
+   assembly: a global in a section named .text is data to LLVM, whose flags follow the global, not the name) */
 static int filler_object(const char* triple, size_t bytes, unsigned char** data, size_t* size) {
-    char error[1024];
-    SnxIr* ir = snx_ir_new_target("filler", '2', triple, error, sizeof(error));
-    LLVMTypeRef type;
-    LLVMValueRef filler;
+    char error[1024], text[128];
+    SnxIr* ir;
+    LLVMInitializeAllAsmParsers();
+    ir = snx_ir_new_target("filler", '2', triple, error, sizeof(error));
     if (!ir) return snx_error("%s", error);
-    type = LLVMArrayType(ir->t_i8, (unsigned)bytes);
-    filler = LLVMAddGlobal(ir->mod, type, "filler");
-    LLVMSetInitializer(filler, LLVMConstNull(type));
-    LLVMSetSection(filler, ".text.filler");
+    snprintf(text, sizeof text, ".section .text.filler,\"ax\",%%progbits\n.space %zu\n", bytes);
+    LLVMSetModuleInlineAsm2(ir->mod, text, strlen(text));
     if (snx_ir_object(ir, '2', data, size, error, sizeof(error))) return snx_error("%s", error);
     snx_ir_free(ir);
     return 0;
