@@ -466,6 +466,7 @@ int main(void) {
     CHECK(!build(folder, out[5], 0) && run(out[5]) == 46 && !g_unit_cache.said_count);
     CHECK(!snx_is_file(path_a) && snx_is_file(path_b));
     g_unit_cache.disk_free = 0;
+    CHECK(!snx_remove_tree(folder)); /* none reused: each unit needs room, whatever the times left kept */
     program(1);
     forget();
     CHECK(!build(folder, out[1], 0) && run(out[1]) == 42 && !snx_is_file(path_a));
