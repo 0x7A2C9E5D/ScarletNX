@@ -53,18 +53,18 @@ fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cd "$work"
-# An installed copy keeps games/ and prod.keys in the user's data folder, wherever it was started from, and a game's
+# An installed copy keeps recompiled/ and prod.keys in the user's data folder, wherever it was started from, and a game's
 # settings, log and caches (work/ too) in the XDG config, state and cache folders on Linux, in config/, state/ and
 # cache/ of the data folder elsewhere: point them into this run's
 export XDG_DATA_HOME="$work/data" XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" XDG_CACHE_HOME="$work/cache"
 data=$XDG_DATA_HOME/scarletnx
-config=$XDG_CONFIG_HOME/scarletnx/games
-state=$XDG_STATE_HOME/scarletnx/games
+config=$XDG_CONFIG_HOME/scarletnx/recompiled
+state=$XDG_STATE_HOME/scarletnx/recompiled
 if [ -n "$exe" ]; then
     APPDATA=$(cygpath -w "$work/data")
     export APPDATA
-    config=$data/config/games
-    state=$data/state/games
+    config=$data/config/recompiled
+    state=$data/state/recompiled
 fi
 
 failed=0
@@ -122,7 +122,7 @@ for mode in "" -x -r; do
 done
 
 # No --outdir: an installed copy has no checkout, so its games go in the data folder, each in a folder of its own
-game=$data/games/Smoke
+game=$data/recompiled/Smoke
 run "${launch[@]}" "$runtime" -r smoke.nro Smoke --jobs 2
 if [ "$status" -eq 0 ] && [ -f "$game/Smoke$exe" ] && [ -f "$game/Smoke.abi" ]; then
     pass "scarletnx -r smoke.nro made $game/Smoke$exe"
