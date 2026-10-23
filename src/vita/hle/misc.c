@@ -354,7 +354,11 @@ static uint32_t save_data_data_save(VitaProcess* p, VitaThread* t) {
    (SCE_APPUTIL_SAVEDATA_DATA_REMOVE_MODE_NO_SLOT, 1) */
 static uint32_t save_data_data_remove(VitaProcess* p, VitaThread* t) {
     uint32_t slot = vita_arg(p, t, 0), items = vita_arg(p, t, 1), count = vita_arg(p, t, 2);
-    if ((count && !items) || (slot && vita_read32(p, slot) >= SAVEDATA_SLOTS)) return SCE_APPUTIL_ERROR_PARAMETER;
+    /* the slot (its id) and the items in the game's memory, as DataSave's */
+    if ((slot && !vita_mapped(p, slot, 4)) ||
+        (count && (count > UINT32_MAX / 0x2c || !vita_mapped(p, items, count * 0x2c))) ||
+        (slot && vita_read32(p, slot) >= SAVEDATA_SLOTS))
+        return SCE_APPUTIL_ERROR_PARAMETER;
     for (uint32_t i = 0; i < count; ++i) {
         char* path = save_path(p, vita_read32(p, items + i * 0x2c));
         if (!path) return SCE_APPUTIL_ERROR_PARAMETER;

@@ -98,6 +98,19 @@ static void save_data(VitaProcess* p, VitaThread* t, uint32_t mem, uint32_t end)
     assert(bytes && size == 16 && !memcmp(bytes, "0123456789abcdef", 16));
     free(bytes);
     free(saved);
+
+    /* DataRemove's slot and items (0x2c bytes: the path, the mode) outside the game's memory, or as many items as wrap
+       their size around: refused, the file kept */
+    uint32_t items = mem + 0x800;
+    memset(vita_ptr(p, items), 0, 0x2c);
+    vita_write32(p, items, path);
+    assert(CALL(misc, "sceAppUtilSaveDataDataRemove", UNMAPPED, items, 1, 0) == SCE_APPUTIL_ERROR_PARAMETER);
+    assert(CALL(misc, "sceAppUtilSaveDataDataRemove", slot, UNMAPPED, 1, 0) == SCE_APPUTIL_ERROR_PARAMETER);
+    assert(CALL(misc, "sceAppUtilSaveDataDataRemove", slot, items, 0x05d1745eu, 0) == SCE_APPUTIL_ERROR_PARAMETER);
+    assert(save_file_exists(p, "file.bin"));
+    /* the game's: the file and the slot removed */
+    assert(CALL(misc, "sceAppUtilSaveDataDataRemove", slot, items, 1, 0) == 0);
+    assert(!save_file_exists(p, "file.bin") && !save_file_exists(p, "sce_sys/slot0.bin"));
 }
 
 /* sceNet (vita/hle/net.c): a socket's address read or written, a datagram sent from or received into the game's
