@@ -4,7 +4,7 @@
    has a player's own agent do. JSON-RPC 2.0 over stdin and stdout, a message a line (MCP's stdio transport), nothing
    else on stdout. Its tools read only this machine:
 
-   - scan_log: the log summary (common/utilities/logscan.h) of a game's log or the launcher's Share log file.
+   - scan_log: the log summary (common/utilities/logscan.h) of a game's log or the launcher's Share Log file.
    - read_log: parts of a log by text (with lines of context) or by line range, or its last lines, never the whole of a
      large one.
    - find_game: the extracted games in the data folder's work/, with their title IDs and versions.
@@ -135,7 +135,10 @@ static int mcp_open(Mcp* m, int argc, char** argv) {
     int i;
     memset(m, 0, sizeof *m);
     for (i = 2; i + 1 < argc; i++)
-        if (!strcmp(argv[i], "--repo")) m->data = snx_absolute(argv[++i]);
+        if (!strcmp(argv[i], "--data") || !strcmp(argv[i], "--repo")) {
+            if (!strcmp(argv[i], "--repo")) snx_option_renamed("--repo", "--data");
+            m->data = snx_absolute(argv[++i]);
+        }
     self = snx_executable(argv[0]);
     if (!m->data) {
         dir = self ? snx_dirname(self) : NULL;
@@ -707,7 +710,7 @@ static cJSON* tools(void) {
     static const char* const dis_types[] = {"string", "string", "string", "string"};
     static const char* const game[] = {"game"};
     static const char scan_says[] =
-        "The summary of a game's .log or the launcher's Share log file: build, title ID, game version, system, GPU, how the "
+        "The summary of a game's .log or the launcher's Share Log file: build, title ID, game version, system, GPU, how the "
         "run ended (crash, svcBreak, exception, BRK, an instruction the recompiler cannot run, fatal), the game "
         "function it is pinned on with its backtrace, "
         "the service commands the runtime doesn't implement, what else it missed (shaders not translated, GPU classes "

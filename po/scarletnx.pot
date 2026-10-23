@@ -71,7 +71,7 @@ msgid "Not written without [Deprecated]: %s"
 msgstr ""
 
 #: src/gui/clean.c
-msgid "[Deprecated] taken out"
+msgid "[Deprecated] removed"
 msgstr ""
 
 #: src/gui/clean.c
@@ -110,7 +110,7 @@ msgid "Not moved: it cannot be read: %s"
 msgstr ""
 
 #: src/gui/clean.c
-msgid "Taken away: empty now"
+msgid "Removed: it was empty"
 msgstr ""
 
 #: src/gui/editor.c
@@ -135,7 +135,7 @@ msgid "At most %u bytes"
 msgstr ""
 
 #: src/gui/editor.c
-msgid "A colour: #RRGGBB, as #1A2B3C"
+msgid "A color: #RRGGBB, as #1A2B3C"
 msgstr ""
 
 #: src/gui/editor.c
@@ -171,37 +171,43 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: select. Refresh: tap it. Back: go back."
+msgid "Tap: select. Refresh. Back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: select. Refresh: tap it."
+msgid "Tap: select. Refresh."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: open. Swipe: turn the page. Recompile: tap it. Refresh: tap it. Back: go back."
+msgid "Tap: open. Swipe: page. Refresh. Back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: open. Swipe: turn the page. Recompile: tap it. Refresh: tap it."
+msgid "Tap: open. Swipe: page. Refresh."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "AOT pack: tap it."
+msgid "Recompile."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Back: go back."
+msgid "AOT pack."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -237,67 +243,49 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap a key to change, type or pick it. Back: go back."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Tap a key to change, type or pick it."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Drag a bar, or tap #RRGGBB to type it. Tap outside: keep. Back: put back."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Drag a bar, or tap #RRGGBB to type it. Tap outside: keep."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Tap a group to open it. Back: go back."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Tap a group to open it."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Tap a row to change or open it. Back: go back."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Tap a row to change or open it."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Refresh: tap it. Back: go back."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
-msgid "Refresh: tap it."
+msgid "Tap: change. Back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
 msgid "Tap: change."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Drag: change. Tap #RRGGBB: type. Tap outside: OK. Back: cancel."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Drag: change. Tap #RRGGBB: type. Tap outside: OK."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap: open. Back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap: open."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Refresh. Back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Refresh."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -321,25 +309,25 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap a control; tap it again for a press. Back: go back."
+msgid "Tap: select. Tap again: press. Back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap a control; tap it again for a press."
+msgid "Tap: select. Tap again: press."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap a user to rename it. Back: go back."
+msgid "Tap: rename. Back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap a user to rename it."
+msgid "Tap: rename."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -351,13 +339,25 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: select. Enter/Space: open. R: recompile. M: mods folder. Left/Right/PgUp/PgDown: page. F5: refresh."
+msgid "Up/Down: select. Enter/Space: open. Left/Right/PgUp/PgDown: page. F5: refresh."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "B: build AOT pack."
+msgid "R: recompile."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "M: mods."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "B: AOT pack."
 msgstr ""
 
 #: src/gui/main.c
@@ -367,7 +367,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Ctrl+V: paste a path, or drop the file on the window. ESC: back."
+msgid "Ctrl+V: paste. ESC: back."
 msgstr ""
 
 #: src/gui/main.c
@@ -399,13 +399,19 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: row. Left/Right: 1. PgUp/PgDn: 16. Enter: keep. ESC: put back."
+msgid "Up/Down: row. Left/Right: step 1. PgUp/PgDn: step 16. Enter: OK. ESC: cancel."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: setting. Left/Right: change. Enter: type. Del: default. ESC: back."
+msgid "Up/Down: setting. Left/Right: change. Enter: type. ESC: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Del: default."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -435,12 +441,6 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Del: default."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
 msgid "Del: delete."
 msgstr ""
 
@@ -459,13 +459,13 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Arrows/pad: move, change. Enter/A: select. Del: the .ini's. ESC: back."
+msgid "Arrows/pad: move, change. Enter/A: select. Del: default. ESC: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: user. Left/Right: plays as. Enter: type a nickname. ESC: back."
+msgid "Up/Down: user. Left/Right: current user. Enter: rename. ESC: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -477,13 +477,25 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "D-pad: select. A: open. Y: recompile. L3: mods folder. LT/RT: page. Start: refresh. B: back."
+msgid "D-pad: select. A: open. LT/RT: page. Start: refresh. B: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "R3: build AOT pack."
+msgid "Y: recompile."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "L3: mods."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "R3: AOT pack."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -501,13 +513,19 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "D-pad: row, 1. LT/RT: 16. A: keep. B: put back."
+msgid "D-pad: row, step 1. LT/RT: step 16. A: OK. B: cancel."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "D-pad: setting, change. A: type. X: default. B: back."
+msgid "D-pad: setting, change. A: type. B: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "X: default."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -537,12 +555,6 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "X: default."
-msgstr ""
-
-#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
-#: src/gui/main.c
-#, snx-keys
 msgid "X: delete."
 msgstr ""
 
@@ -561,7 +573,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "D-pad: user, plays as. A: type a nickname. B: back."
+msgid "D-pad: user, current user. A: rename. B: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -581,7 +593,7 @@ msgid "Disk: counting, %s free"
 msgstr ""
 
 #: src/gui/main.c
-msgid "CWD:"
+msgid "Working folder:"
 msgstr ""
 
 #: src/gui/main.c
@@ -652,7 +664,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Recent games not kept: %s could not be written."
+msgid "Recent Games not kept: %s could not be written."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -664,7 +676,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Folders: tap it."
+msgid "Folders."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -700,7 +712,7 @@ msgid "...OK"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Aborting process tree..."
+msgid "Aborting..."
 msgstr ""
 
 #: src/gui/main.c
@@ -745,22 +757,22 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Move old files: %d done, %d not"
+msgid "Move Old Files: %d done, %d not"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Clean old settings: %d done, %d not"
+msgid "Clean Old Settings: %d done, %d not"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Clean old settings: %d done"
+msgid "Clean Old Settings: %d done"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "and %d more, which Share log lists"
+msgid "and %d more, which Share Log lists"
 msgstr ""
 
 #: src/gui/main.c
@@ -772,7 +784,7 @@ msgid "press again"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Keep going"
+msgid "Continue"
 msgstr ""
 
 #: src/gui/main.c
@@ -780,7 +792,7 @@ msgid "Abort"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Stay"
+msgid "Cancel"
 msgstr ""
 
 #: src/gui/main.c src/gui/ui.txt
@@ -788,25 +800,23 @@ msgid "Exit"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Only this folder"
+msgid "Only This Folder"
 msgstr ""
 
 #: src/gui/main.c
-msgid "With subfolders"
-msgstr ""
-
-#. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
-#, snx-key
-msgid "Back"
+msgid "With Subfolders"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Use it"
+msgid "Use Anyway"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Run anyway"
+msgid "Run Anyway"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Revert"
 msgstr ""
 
 #: src/gui/main.c
@@ -822,7 +832,7 @@ msgid "Reset"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Take it off"
+msgid "Remove"
 msgstr ""
 
 #: src/gui/main.c
@@ -901,11 +911,11 @@ msgid "No update"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Open mods folder"
+msgid "Open Mods Folder"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Open cheats folder"
+msgid "Open Cheats Folder"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
@@ -1002,11 +1012,11 @@ msgid "Recompiles a game's .nsp, .xci or .nro, then runs it"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Runs an ARM64 Linux program on the CPU"
+msgid "Runs a Linux ARM program, 64 or 32-bit"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Opens a 3DS .cia"
+msgid "Recompiles a 3DS .cia, then runs it"
 msgstr ""
 
 #: src/gui/main.c
@@ -1022,7 +1032,7 @@ msgid "Closes ScarletNX"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Last output (no scrollback):"
+msgid "Last output:"
 msgstr ""
 
 #: src/gui/main.c
@@ -1035,11 +1045,11 @@ msgid "none"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Recent games"
+msgid "Recent Games"
 msgstr ""
 
 #: src/gui/main.c
-msgid "...show more"
+msgid "Show More"
 msgstr ""
 
 #: src/gui/main.c
@@ -1072,7 +1082,7 @@ msgid "Linux ARM ELF, run with scarletnx-gnuabi"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Settings > App > Folders adds a folder of games or dumps: P, or the foot's, opens it"
+msgid "Add a folder of games or dumps in Settings > App > Folders (P)"
 msgstr ""
 
 #: src/gui/main.c
@@ -1081,6 +1091,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "The recent games not shown"
+msgstr ""
+
+#: src/gui/main.c
+msgid "...show more"
 msgstr ""
 
 #: src/gui/main.c
@@ -1120,7 +1134,7 @@ msgid "Installs to: %s"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Home directory unavailable."
+msgid "No home folder"
 msgstr ""
 
 #: src/gui/main.c
@@ -1142,7 +1156,7 @@ msgid "Back to the menu in %d s, or pick another file"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Keys already setup. This will overwrite the previous ones"
+msgid "Keys installed here: installing again replaces them"
 msgstr ""
 
 #: src/gui/main.c
@@ -1167,7 +1181,7 @@ msgid "UI scale"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Picked in a box, kept once said so. Auto fits the screen, its parts are smaller"
+msgid "Auto fits the screen. A new scale asks to be kept"
 msgstr ""
 
 #: src/gui/main.c
@@ -1175,7 +1189,7 @@ msgid "Language"
 msgstr ""
 
 #: src/gui/main.c
-msgid "The menu's words. Auto: the system's language, English when the menu has none of its"
+msgid "The launcher's language. Auto: the system's, else English"
 msgstr ""
 
 #: src/gui/main.c
@@ -1183,19 +1197,19 @@ msgid "Animations"
 msgstr ""
 
 #: src/gui/main.c
-msgid "A screen fading in, a box's shade coming and going, 0.15 s each. Off: at once"
+msgid "Screens and dialogs fade in and out, 0.15 s. Off: none"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Side box"
+msgid "Side panel"
 msgstr ""
 
 #: src/gui/main.c
-msgid "The box beside the list: Auto where both fit, On under the list where they do not, Off never. F2"
+msgid "The panel beside the list. Auto: where it fits. On: under the list where it does not. F2 turns it off and on"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Theme editor"
+msgid "Theme Editor"
 msgstr ""
 
 #: src/gui/main.c
@@ -1207,27 +1221,27 @@ msgid "The data and the extractions, and the libraries Games lists: recompiled g
 msgstr ""
 
 #: src/gui/main.c
-msgid "Clean old settings"
+msgid "Clean Old Settings"
 msgstr ""
 
 #: src/gui/main.c
-msgid "The settings the runtime and the launcher no longer read, taken out once asked"
+msgid "Removes the settings this version no longer reads. Asks first"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Move old files"
+msgid "Move Old Files"
 msgstr ""
 
 #: src/gui/main.c
-msgid "What an older version left where this one no longer looks, moved where it keeps it once asked"
+msgid "Moves what an older version left to where this one looks. Asks first"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Reset all"
+msgid "Reset to Defaults"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Every setting of the groups after App back to its default, once asked"
+msgid "Every setting of the groups after App to its default. Asks first"
 msgstr ""
 
 #: src/gui/main.c
@@ -1341,17 +1355,17 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s taken off the list. The folder keeps its games"
+msgid "%s removed from the library. Its games stay in the folder"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Take %s off the recompiled library? The folder keeps its games."
+msgid "Remove %s from the Recompiled Library? Its games stay in the folder."
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Take %s off the dumps library? The folder keeps its games."
+msgid "Remove %s from the Dumps Library? Its games stay in the folder."
 msgstr ""
 
 #: src/gui/main.c
@@ -1420,19 +1434,19 @@ msgid "Could not make %s"
 msgstr ""
 
 #: src/gui/main.c
-msgid "The app's folders"
+msgid "App Folders"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Recompiled library"
+msgid "Recompiled Library"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Dumps library"
+msgid "Dumps Library"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Del or Enter asks to take it off the library; the folder keeps its games"
+msgid "Removes it from the library; its games stay in the folder"
 msgstr ""
 
 #: src/gui/main.c
@@ -1465,11 +1479,11 @@ msgid "%s, %s free"
 msgstr ""
 
 #: src/gui/main.c
-msgid "shown only"
+msgid "read-only"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Add a folder"
+msgid "Add Folder"
 msgstr ""
 
 #: src/gui/main.c
@@ -1482,10 +1496,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "+ subfolders"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Reset to Defaults"
 msgstr ""
 
 #: src/gui/main.c
@@ -1565,7 +1575,7 @@ msgid "All"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Each player's own, as Eden's tabs: Left/Right go round All and players 1 to 8"
+msgid "The settings of All, or of player 1 to 8"
 msgstr ""
 
 #: src/gui/main.c
@@ -1582,11 +1592,11 @@ msgid "none in users.ini"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Plays as"
+msgid "Current user"
 msgstr ""
 
 #: src/gui/main.c
-msgid "The user the games play as: Left/Right, or Enter to pick by picture"
+msgid "The user the games play as"
 msgstr ""
 
 #: src/gui/main.c
@@ -1595,7 +1605,7 @@ msgid "User %d"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Its nickname, as the games and Eden's rooms show it: Enter types it, 4 to 20 of A-Z a-z 0-9 space . _ -"
+msgid "Its nickname, as the games and Eden rooms show it: 4 to 20 of A-Z a-z 0-9 space . _ -"
 msgstr ""
 
 #: src/gui/main.c
@@ -1697,7 +1707,7 @@ msgid "The runtime listed no settings"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Its own >"
+msgid "Custom >"
 msgstr ""
 
 #: src/gui/main.c
@@ -1744,7 +1754,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: choose. Back: go back."
+msgid "Tap: choose. Back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -1756,7 +1766,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Type the nickname. Back: go back."
+msgid "Type the nickname. Back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -1786,7 +1796,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Left/Right: choose. Enter: take it. ESC: exit."
+msgid "Left/Right: choose. Enter: OK. ESC: exit."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -1889,15 +1899,19 @@ msgid "Portable"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Change recompiled folder"
+msgid "Change Recompiled Folder"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Use these"
+msgid "Add a folder"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Choose folder"
+msgid "Use These"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Browse..."
 msgstr ""
 
 #: src/gui/main.c
@@ -1910,6 +1924,12 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Next"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Back"
 msgstr ""
 
 #: src/gui/main.c
@@ -1925,7 +1945,7 @@ msgid "Changed in older versions"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Install type"
+msgid "Install Type"
 msgstr ""
 
 #: src/gui/main.c
@@ -1934,7 +1954,7 @@ msgid "Nickname: %s_"
 msgstr ""
 
 #: src/gui/main.c
-msgid "users.ini is no list of users"
+msgid "users.ini is not a list of users"
 msgstr ""
 
 #: src/gui/main.c
@@ -1948,11 +1968,11 @@ msgid "users.ini has %d users"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Tip: --debug skips the setup"
+msgid "Tip: --no-setup skips the setup"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Tip: games keep their own language: Settings > System > language"
+msgid "Tip: games keep their own language: Settings > Display > Language"
 msgstr ""
 
 #: src/gui/main.c
@@ -1960,11 +1980,11 @@ msgid "Tip: a portable copy is a folder you can copy"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Tip: Settings > App > Library and Folders change them"
+msgid "Tip: Settings > App > Folders changes them"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Tip: the menu's Setup device keys changes them"
+msgid "Tip: Menu > Install Keys changes them"
 msgstr ""
 
 #: src/gui/main.c
@@ -2093,7 +2113,7 @@ msgid "nickname"
 msgstr ""
 
 #: src/gui/main.c
-msgid "First user"
+msgid "First User"
 msgstr ""
 
 #: src/gui/main.c
@@ -2101,11 +2121,11 @@ msgid "old file: users.ini.old"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Picks of Settings > App"
+msgid "Settings > App"
 msgstr ""
 
 #: src/gui/main.c
-msgid "The libraries' folders"
+msgid "Library folders"
 msgstr ""
 
 #: src/gui/main.c
@@ -2127,7 +2147,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Took out %s"
+msgid "Removed %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -2151,12 +2171,12 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Move old files? %d move, %d stay where they are"
+msgid "Move Old Files? %d move, %d stay where they are"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Move old files? %d move"
+msgid "Move Old Files? %d move"
 msgstr ""
 
 #: src/gui/main.c
@@ -2165,27 +2185,27 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Clean old settings? [Deprecated] in %d .ini, %d old keys"
+msgid "Clean Old Settings? [Deprecated] in %d .ini, %d old keys"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Clean old settings? [Deprecated] in %d .ini, %d old key"
+msgid "Clean Old Settings? [Deprecated] in %d .ini, %d old key"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Clean old settings? [Deprecated] in %d .ini"
+msgid "Clean Old Settings? [Deprecated] in %d .ini"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Clean old settings? %d old keys"
+msgid "Clean Old Settings? %d old keys"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Clean old settings? %d old key"
+msgid "Clean Old Settings? %d old key"
 msgstr ""
 
 #: src/gui/main.c
@@ -2194,12 +2214,12 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Reset all to the defaults? %d settings change"
+msgid "Reset to Defaults? %d settings change"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Reset all to the defaults? %d setting changes"
+msgid "Reset to Defaults? %d setting changes"
 msgstr ""
 
 #: src/gui/main.c
@@ -2245,7 +2265,7 @@ msgid "AOT pack built."
 msgstr ""
 
 #: src/gui/main.c
-msgid "Program ended abnormally (force-terminated by ESC)."
+msgid "Aborted with ESC."
 msgstr ""
 
 #: src/gui/main.c
@@ -2255,7 +2275,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Driver exited with status %d."
+msgid "The run ended with status %d."
 msgstr ""
 
 #: src/gui/main.c
@@ -2278,7 +2298,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "  picked, %s free"
+msgid "  custom, %s free"
 msgstr ""
 
 #: src/gui/main.c
@@ -2292,7 +2312,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Cannot find %s beside the GUI or on PATH."
+msgid "Cannot find %s beside ScarletNX or on PATH."
 msgstr ""
 
 #: src/gui/main.c
@@ -2414,7 +2434,7 @@ msgid "Games is not watched for new games (%s): F5 lists them"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Not saved: Ctrl+S saves it, ESC twice leaves without it"
+msgid "Not saved: Ctrl+S saves it, ESC again leaves without it"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
@@ -2727,12 +2747,12 @@ msgid "%d to move, %d staying: --migrate=yes moves them"
 msgstr ""
 
 #: src/gui/model.c
-msgid "GUI + children: resource usage unavailable"
+msgid "RAM and CPU: unavailable"
 msgstr ""
 
 #: src/gui/model.c
 #, c-format
-msgid "GUI + children: RAM %s  CPU %.0f%% (%.1f cores)"
+msgid "RAM %s  CPU %.0f%% (%.1f cores)"
 msgstr ""
 
 #: src/gui/model.c
@@ -2744,15 +2764,20 @@ msgid "Saves the last run's output and game log to scarletnx.log in the data fol
 msgstr ""
 
 #: src/gui/model.c
-msgid "Saves the last run's output and game log to scarletnx.log in the working folder (an installed copy's: its state folder), path copied"
+msgid "Saves the last run's output and game log to scarletnx.log and copies its path"
 msgstr ""
 
 #: src/gui/model.c
-msgid "Saves the last run's output and game log to scarletnx.log in the working folder, path copied"
+msgid "Opens the data folder, recompiled/ and the keys in it, in the system's Files app"
 msgstr ""
 
-#: src/gui/model.c
-msgid "Opens the data folder, games/ and the keys among them, in the system's Files app"
+#: src/gui/process_posix.c
+#, c-format
+msgid "Cannot start the run: %s"
+msgstr ""
+
+#: src/gui/process_posix.c
+msgid "A run is already going"
 msgstr ""
 
 #: src/gui/process_posix.c
@@ -2760,13 +2785,13 @@ msgstr ""
 msgid "Cannot launch driver: %s"
 msgstr ""
 
-#: src/gui/process_posix.c src/gui/process_win32.c
+#: src/gui/process_win32.c
 msgid "A driver is already running"
 msgstr ""
 
 #: src/gui/process_win32.c
 #, c-format
-msgid "Cannot launch driver (Windows error %lu)"
+msgid "Cannot start the run (Windows error %lu)"
 msgstr ""
 
 #: src/gui/settings.c
@@ -2794,7 +2819,7 @@ msgid "RECOMPILE"
 msgstr ""
 
 #: src/gui/steps.c
-msgid "BUILT"
+msgid "BUILD"
 msgstr ""
 
 #: src/gui/steps.c
@@ -2880,7 +2905,7 @@ msgid "the title's letters, times the text's, 1 to 3"
 msgstr ""
 
 #: src/gui/theme.c
-msgid "a shadow under the title's letters, in the dim colour"
+msgid "a shadow under the title's letters, in the dim color"
 msgstr ""
 
 #: src/gui/theme.c
@@ -2912,7 +2937,7 @@ msgid "before each item"
 msgstr ""
 
 #: src/gui/theme.c
-msgid "the focused box in the focus colour, or on a band of it"
+msgid "the focused box in the focus color, or on a band of it"
 msgstr ""
 
 #: src/gui/theme.c
@@ -2932,7 +2957,7 @@ msgid "a question: default, a box in the middle; yorha, at the foot, its choices
 msgstr ""
 
 #: src/gui/theme.c
-msgid "a faint grid on the page, in the dim colour"
+msgid "a faint grid on the page, in the dim color"
 msgstr ""
 
 #: src/gui/theme.c
@@ -2956,7 +2981,7 @@ msgid "the keys in a box with a bar at its left, or on the page"
 msgstr ""
 
 #: src/gui/theme.c
-msgid "steps: the loading screen; the keys below but colours are its"
+msgid "steps: the loading screen, in the colors of the keys below"
 msgstr ""
 
 #: src/gui/theme.c
@@ -3064,7 +3089,7 @@ msgid "sync: one line at a time"
 msgstr ""
 
 #: src/gui/theme.c
-msgid "the cursor's, the prompt's and Setup device keys' blink"
+msgid "the cursor's, the prompt's and Install Keys' blink"
 msgstr ""
 
 #: src/gui/theme.c
@@ -3080,11 +3105,11 @@ msgid "how long; 0: none"
 msgstr ""
 
 #: src/gui/theme.c
-msgid "the boots in 100 that show this theme's, the default's the others"
+msgid "how many boots in 100 show this theme's splash; the others show the default's"
 msgstr ""
 
 #: src/gui/theme.c
-msgid "a colour as #RRGGBB"
+msgid "a color as #RRGGBB"
 msgstr ""
 
 #: src/gui/theme.c
@@ -3172,15 +3197,15 @@ msgid "Load Vita VPK"
 msgstr ""
 
 #: src/gui/ui.txt
-msgid "Setup device keys"
+msgid "Install Keys"
 msgstr ""
 
 #: src/gui/ui.txt
-msgid "Share log"
+msgid "Share Log"
 msgstr ""
 
 #: src/gui/ui.txt
-msgid "Open data folder"
+msgid "Open Data Folder"
 msgstr ""
 
 #: src/common/utilities/setup.c
@@ -3192,7 +3217,7 @@ msgid "removed or renamed keys in a game's .ini"
 msgstr ""
 
 #: src/common/utilities/setup.c
-msgid "under [Deprecated]: Clean old settings takes them"
+msgid "under [Deprecated]: Clean Old Settings takes them"
 msgstr ""
 
 #: src/common/utilities/setup.c
@@ -3323,8 +3348,16 @@ msgstr ""
 msgid "nothing: ui.txt lays out every screen"
 msgstr ""
 
+#: src/common/utilities/setup.c
+msgid "Options"
+msgstr ""
+
 #: src/nx/runtime/settings.txt
 msgid "gdbstub"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "GDB stub"
 msgstr ""
 
 #: src/nx/runtime/settings.txt
@@ -3341,6 +3374,10 @@ msgstr ""
 
 #: src/nx/runtime/settings.txt
 msgid "Extract game container"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Extract dump"
 msgstr ""
 
 #: src/nx/runtime/settings.txt
@@ -3420,7 +3457,7 @@ msgid "Merges, removes and simplifies basic blocks (simplifycfg)"
 msgstr ""
 
 #: src/nx/runtime/settings.txt
-msgid "Loop unrolling"
+msgid "Loop unrolling pass"
 msgstr ""
 
 #: src/nx/runtime/settings.txt
@@ -3468,7 +3505,7 @@ msgid "Whether the pipeline packs scalar instructions into SIMD ones (LLVMPassBu
 msgstr ""
 
 #: src/nx/runtime/settings.txt
-msgid "Loop unrolling option"
+msgid "Loop unrolling"
 msgstr ""
 
 #: src/nx/runtime/settings.txt

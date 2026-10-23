@@ -49,7 +49,7 @@ public class GameActivity extends SDLActivity {
         return args != null ? args : new String[0];
     }
 
-    /** src/nx/runtime/platform/backend/sdl3.c: a stopped game's Share log, the saved file to the app the user picks */
+    /** src/nx/runtime/platform/backend/sdl3.c: a stopped game's Share Log, the saved file to the app the user picks */
     public void share(String path) {
         MainActivity.share(this, path);
     }

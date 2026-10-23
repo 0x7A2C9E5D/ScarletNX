@@ -57,7 +57,7 @@ setting Game dump
     once
     startup
     in-game
-    help The dump the game was made from, which the recompile writes here. Without Extract game container the game
+    help The dump the game was made from, which the recompile writes here. Without Extract dump the game
     help reads its ExeFS and RomFS from it, and Extract to tmpfs extracts it again when tmpfs was emptied. Empty or
     help left out: the link <name>.source in the game's folder, which older versions made
 setting Game addons
@@ -302,7 +302,7 @@ setting Touch screen
     int 0 2
     default 2
     set backend_touch_mode_set
-    words Off|Fingers|Mouse too
+    words Off|Fingers|Fingers and mouse
     help The game's touch screen: 1 = fingers, 2 = fingers and the mouse's left button, 0 = off
 
 table g_vpad_shown_ini
@@ -753,6 +753,7 @@ section Debug: g_debug_ini
 # off until picked, as the launcher keeps them: picking one turns it on
 table g_launch_ini launcher
 setting gdbstub
+    label GDB stub
     key gdbstub
     text 4
     default off
@@ -766,6 +767,7 @@ setting Extract to tmpfs
     help Extract to tmpfs, in memory (the temporary folder's scarletnx/work/<title ID>), which the game reads its RomFS
     help from
 setting Extract game container
+    label Extract dump
     key extract
     text 4
     default off
@@ -787,7 +789,7 @@ setting Optimization level
     key opt
     text 2
     default 2
-    words 0=0|1=1|2=2|3=3|z=z
+    words 0=O0|1=O1|2=O2|3=O3|s=Os|z=Oz
     help LLVM's optimization of the game's code when it is recompiled: 0 none, 3 the most, z the smallest. A game
     help made already keeps its code until it is recompiled
 setting AOT threads
@@ -824,7 +826,7 @@ setting @simplifycfg
     name Control flow simplification
     help Merges, removes and simplifies basic blocks (simplifycfg)
 setting @loop-unroll
-    name Loop unrolling
+    name Loop unrolling pass
     help Unrolls loops with known trip counts (loop-unroll)
 setting @loop-vectorize
     name Loop vectorization pass
@@ -842,7 +844,7 @@ setting @SLPVectorization
     name SLP vectorization
     help Whether the pipeline packs scalar instructions into SIMD ones (LLVMPassBuilderOptionsSetSLPVectorization)
 setting @LoopUnrolling
-    name Loop unrolling option
+    name Loop unrolling
     help Whether the pipeline unrolls loops (LLVMPassBuilderOptionsSetLoopUnrolling)
 setting @FastISel
     name Fast instruction selection

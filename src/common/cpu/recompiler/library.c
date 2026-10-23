@@ -1217,7 +1217,8 @@ struct snx_recompiled* snx_recompile_ranges(struct snx_recompiler* r, const stru
     }
     memset(&codegen, 0, sizeof(codegen));
     if (snx_codegen_analyze(&codegen, views, range_count, hints, hint_count, !r->verbose)) {
-        fail(r, "function discovery failed");
+        fail(r, "function discovery failed in 0x%llx-0x%llx", (unsigned long long)ranges[0].address,
+             (unsigned long long)(ranges[range_count - 1].address + ranges[range_count - 1].size));
         free(views);
         free(m->views);
         free(m);

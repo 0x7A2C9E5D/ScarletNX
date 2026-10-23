@@ -41,7 +41,7 @@ if [ ! -x "$runtime" ]; then
     echo "$0: no runtime at $runtime: build it with 'cmake --preset tracy && cmake --build --preset tracy'" >&2
     exit 2
 fi
-data=${XDG_DATA_HOME:-$HOME/.local/share}/scarletnx/games
+data=${XDG_DATA_HOME:-$HOME/.local/share}/scarletnx/recompiled
 if [ ! -d "$data/$id" ]; then
     echo "$0: no game $id in $data" >&2
     exit 2

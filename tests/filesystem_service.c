@@ -1053,7 +1053,7 @@ static void test_raw_romfs(SvcObj* proxy) {
 #undef romfs_build
 #endif
 #if !defined(_WIN32)
-/* Extract game container off: dump-data/Game_data has no ExeFS or RomFS of its own, and dump-data/Game.source links to
+/* Extract dump off: dump-data/Game_data has no ExeFS or RomFS of its own, and dump-data/Game.source links to
    an NSP of decrypted NCAs, which fs_init opens and maps. The game's ExeFS (exefs/...) and RomFS come out of it, read
    in place: nothing is written beside it. With source, the settings' source= names the NSP instead, and Game.source
    is a file that is no dump, which the setting is read over */

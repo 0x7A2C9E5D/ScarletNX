@@ -379,7 +379,7 @@ static int write_file(void) {
             if (!other++) fprintf(f, "\n[Other]\n; keys this version does not know, kept as they are\n");
             fprintf(f, "%s=%s\n", g_store[i].key, g_store[i].value);
         }
-    for (i = 0, other = 0; i < g_nstore; i++) /* last, so the launcher's Clean old settings cuts to the end */
+    for (i = 0, other = 0; i < g_nstore; i++) /* last, so the launcher's Clean Old Settings cuts to the end */
         if (ini_deprecated(g_store[i].key)) {
             if (!other++) ini_deprecated_head(f);
             ini_deprecated_key(f, g_store[i].key, g_store[i].value);

@@ -31,13 +31,13 @@ static void usage(FILE* out) {
           "  --game=DIR      Play the game in its folder DIR, as its copy of the runtime does\n"
           "  --patch DIR     The dumped game's update (default: patch/<title ID> beside its app/<title ID>)\n"
           "  -x, --extract   Extract only\n"
-          "  -r, --recomp    Compile again, without playing\n"
-          "  --repo DIR      The data folder (default: a portable copy's folder, else the user's data folder)\n"
+          "  -r, --recompile Compile again, without playing\n"
+          "  --data DIR      The data folder (default: a portable copy's folder, else the user's data folder)\n"
           "  --outdir DIR    The folder of the games, in which the game's folder is made (default recompiled/)\n"
           "  --output DIR    The game's folder itself\n"
           "  --seconds N     Stop after N seconds, reporting where each thread is\n"
           "  --shot=PATH     Save the last frame shown to PATH.ppm when the run ends\n"
-          "  --KEY=VALUE     A setting of the Vita debug table (g_vita_debug_ini in src/nx/runtime/settings.txt):\n"
+          "  --KEY=VALUE     A Vita debug setting:\n"
           "                  --vita_hle_trace=1 logs each import the runtime lacks (2 every call),\n"
           "                  --vita_gxm_trace=1 each scene, --script=ms:buttons,... (vita_script) presses buttons\n",
           out);
@@ -268,9 +268,12 @@ int snx_vita_main(int argc, char** argv) {
             return 0;
         } else if (!strcmp(a, "-x") || !strcmp(a, "--extract"))
             extract_only = true;
-        else if (!strcmp(a, "-r") || !strcmp(a, "--recomp"))
+        else if (!strcmp(a, "-r") || !strcmp(a, "--recompile") || !strcmp(a, "--recomp")) {
+            if (!strcmp(a, "--recomp")) snx_option_renamed("--recomp", "--recompile");
             recompile = true;
-        else if (!strcmp(a, "--output") || !strcmp(a, "--outdir") || !strcmp(a, "--repo") || !strcmp(a, "--patch")) {
+        } else if (!strcmp(a, "--output") || !strcmp(a, "--outdir") || !strcmp(a, "--repo") || !strcmp(a, "--data") ||
+                   !strcmp(a, "--patch")) {
+            if (!strcmp(a, "--repo")) snx_option_renamed("--repo", "--data");
             if (++i == argc || !*argv[i]) {
                 fprintf(stderr, "scarletnx-vita: %s requires a directory\n", a);
                 return 2;

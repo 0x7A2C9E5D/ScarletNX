@@ -780,6 +780,8 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME game_reports COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/game_reports_test.py"
                                            $<TARGET_FILE:snx-logscan>)
     endif()
+    # the game tools/run_game.py finds by its name (recompiled/, else an older version's games/)
+    add_test(NAME run_game COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/run_game_test.py")
     # the nightly release's title and notes (scripts/nightly-notes.py)
     add_test(NAME nightly_notes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/nightly_notes_test.py")
     # the builds published as releases and on Discord (scripts/publish-builds.py), against fakes. Where publish.yml
@@ -824,6 +826,7 @@ add_test(NAME hid_motion COMMAND snx-test-hid-motion)
 
 add_executable(snx-test-startup startup_options.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/startup.c")
 snx_test_target(snx-test-startup 99)
+target_link_libraries(snx-test-startup PRIVATE scarletnx-common) # an option's older name said (snx_option_renamed)
 if(SNX_TRACY)
     # startup.c must see SNX_TRACY so its Tracy flag checks match the runtime.
     target_compile_definitions(snx-test-startup PRIVATE SNX_TRACY=1)

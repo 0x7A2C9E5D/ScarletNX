@@ -22,7 +22,7 @@ ${T}${T}[button]\"Load 3DS CIA\" {
 ${T}${T}${T}color = focus
 ${T}${T}${T}key = alt-f4
 ${T}${T}}
-${T}${T}[button]\"Open data folder\" {
+${T}${T}[button]\"Open Data Folder\" {
 ${T}${T}${T}for-platform = android
 ${T}${T}${T}key = d
 ${T}${T}}
@@ -94,7 +94,7 @@ foreach(word "ui_main_load_list_fixed_words_" "ui_main_load_list_action_cb")
 endforeach()
 foreach(line
         # the texts, one array, each item at its offset; a # in a text is the text's
-        "const char ui_main_texts[] =\n    \"Load Switch NSP/XCI/NRO\" \"\\0\"\n    \"Load 3DS CIA\" \"\\0\"\n    \"Open data folder\" \"\\0\"\n    \"Paste #1 \\\"here\\\"\" \"\\0\"\n"
+        "const char ui_main_texts[] =\n    \"Load Switch NSP/XCI/NRO\" \"\\0\"\n    \"Load 3DS CIA\" \"\\0\"\n    \"Open Data Folder\" \"\\0\"\n    \"Paste #1 \\\"here\\\"\" \"\\0\"\n"
         # an item at the line it came from: its type, colour, parent, text's offset and lengths
         "#line 3 \"${WORK}/ui.txt\"\n    {UI_LIST, UI_COLOR_NONE, -1, UI_NO_TEXT},\n"
         "#line 8 \"${WORK}/ui.txt\"\n    {UI_BUTTON, UI_COLOR_FOCUS, UI_MAIN_LOAD_LIST, 24},\n"

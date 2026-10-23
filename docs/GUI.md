@@ -52,8 +52,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Back goes back, Tab to the next screen, Enter or Tap selects, Swipe turns the page). A key of
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
   presses the key when its words all press one. `Arrows`, `mouse`, `pad` and `D-pad` press nothing.
-- The menu, top to bottom: the three loads, **Setup device keys**, **Settings**, **Share log**, on
-  Android **Open data folder**, and **Exit**. The games, and the recent ones, are the Games tab's.
+- The menu, top to bottom: the three loads, **Install Keys**, **Settings**, **Share Log**, on
+  Android **Open Data Folder**, and **Exit**. The games, and the recent ones, are the Games tab's.
 - Space, Enter or a left click explicitly activates an item, marking it bright
   pink. Activation is tracked separately from hover/focus, so the activated item
   stays pink while another item is hovered in yellow. Mouse controls also work
@@ -67,26 +67,26 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   keys': a click on its blinking **[ Pick or drop a file ]**, or Enter, opens the system's file
   picker (on Linux the desktop's, else zenity's). Dropping a file on the window and Ctrl+V with
   a path work too. ESC returns to the menu. On Android the picker opens at once. A dump is read where it lies
-  and takes no room, unless *Extract game container* is on. Then one not extracted yet takes about its size, a Switch
+  and takes no room, unless *Extract dump* is on. Then one not extracted yet takes about its size, a Switch
   dump's extracted straight into its game's folder (as much again only with an **Extractions** folder picked, which
   keeps a copy, and in the temporary folder with *Extract to tmpfs*); when its disks have less free, the menu says how
-  much it needs and *Run anyway* takes a second press. With more than one folder of the recompiled library that can
+  much it needs and *Run Anyway* takes a second press. With more than one folder of the recompiled library that can
   take a game (its Main, and each Extra that can be written and runs programs), a box asks which the dump's game goes
   in, **Recompile** on its tab: each folder with what it is and its free room, the Main first and in focus; ESC runs
   nothing. The one taken is the run's `--outdir`, and the room asked about is that folder's.
 - **Load 3DS CIA** uses `scarletnx-3ds`. Its `games/` browser lists CIA inputs,
-  not host executables. The driver reads supported decrypted application CIAs where they lie, or extracts them with *Extract game container*.
+  not host executables. The driver reads supported decrypted application CIAs where they lie, or extracts them with *Extract dump*.
   The driver then compiles the ARM11 code ahead of time and runs it, on Linux and
   Windows. Larger images use bounded conservative discovery (16 MiB text cap).
   SuperTux shows its title screen and plays its music, but takes no input yet.
   Full HLE/devices remain incomplete. Like the Switch driver, it uses an
   extraction (or the CIA itself) and a compiled module already there, and recompiles only when needed.
   See [3DS port](3DS.md) for limits.
-- **Load Vita VPK** uses `scarletnx-vita`, with the menu's data folder as its `--repo`. The driver extracts the VPK
+- **Load Vita VPK** uses `scarletnx-vita`, with the menu's data folder as its `--data`. The driver extracts the VPK
   into its game's folder of `recompiled/` (named after its title ID), compiles its code ahead of time and plays it,
   compiling at run time what it missed. A VPK extracted and compiled before plays at once. See
   [Vita driver](VITA.md) for limits.
-- **Setup device keys**, immediately after the four load entries, blinks red (the theme's `failure` colour, at its
+- **Install Keys**, immediately after the four load entries, blinks red (the theme's `failure` colour, at its
   `blink_ms`) while no `prod.keys` is in use. It prompts you to
   pick `prod.keys` (a click on the blinking **[ Pick or drop prod.keys ]** in the middle of
   the screen, the theme's `[prompt]`, or Enter), drop it, or paste its path with Ctrl+V. It installs the file to `~/.switch/prod.keys`, or
@@ -120,16 +120,16 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   map* is the page above on its own keys, its A and B as its *Swap A/B* says.
   **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **UI scale**, which opens
   its box of sizes (below), **Animations** (On by default, `animations = 1` in `app.ini`: a screen comes in from the
-  page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Side box** (below, F2 too),
-**Theme editor**, which comes
+  page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Side panel** (below, F2 too),
+**Theme Editor**, which comes
   back to App, and **Folders**, every folder on one screen, the whole of it, a box a group:
-  - **The app's folders**: **Data** (`recompiled/`, `dumps/`, `themes/` and `prod.keys`), **Settings**, shown only
+  - **App Folders**: **Data** (`recompiled/`, `dumps/`, `themes/` and `prod.keys`), **Settings**, shown only
     (`app.ini`, which names the others, and each game's `.ini`: `XDG_CONFIG_HOME` moves it, a portable copy keeps its
     own), **Logs** (the games' logs and `threads.txt`, `recent.txt` and `last-run.log`), **Caches** (the recompile's
     `units/`, the shader caches, the dumps' icons, and Extractions by default) and **Extractions**;
-  - **Recompiled library**: its **Main**, `recompiled/`, where recompiled games go, then its **Extra** folders, whose games
+  - **Recompiled Library**: its **Main**, `recompiled/`, where recompiled games go, then its **Extra** folders, whose games
     ready to run Games lists too, and **Add a folder**;
-  - **Dumps library**: its **Main**, the data folder's `dumps/` (with its subfolders, going with the data folder), then its
+  - **Dumps Library**: its **Main**, the data folder's `dumps/` (with its subfolders, going with the data folder), then its
     **Extra** folders, whose dumps Games lists, and **Add a folder**;
   - **Reset to Defaults**, last, which asks first.
 
@@ -144,25 +144,25 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   place. On Android a folder outside the app's own storage is asked about first, since Android checks every file
   access there and games may run slower: *Use it* takes a second tap, and its row says *outside the app*. A library's
   **Add a folder** opens the folder picker, and a folder dropped on, or pasted on, a row of a library is added to it; one
-  with folders in it asks first: *Only this folder*, or *With subfolders*, whose games are listed too, four levels
+  with folders in it asks first: *Only This Folder*, or *With Subfolders*, whose games are listed too, four levels
   down, hidden folders left alone (its row says *+ subfolders*). Del or Enter asks before an Extra is taken off its
   library (the folder keeps its games). A folder added from Games goes in the library of what it holds, in both for
   both, the dumps one with no games of either. The Extras are kept in `folders.txt` beside `settings.ini`, a line each,
   the library's word, a space and the path (`recompiled /mnt/games`, `dumps /mnt/dumps/**`), `/**` after one kept with
   its subfolders; one that cannot be read is named when the games are listed. Under App's rows, the three folders in
   use: the data folder, the games' and the extractions'.
-  Nothing is moved, the folder before keeps what it has. The menu's own files stay where they are. **Clean old settings** asks first, with
+  Nothing is moved, the folder before keeps what it has. The menu's own files stay where they are. **Clean Old Settings** asks first, with
   how many it would take out, then takes out the settings nothing reads any more: the `[Deprecated]` section the runtime
   gives a game's `.ini` for the keys it no longer uses (in the config folder's `recompiled/`, in `recompiled/`
   and in the player's folders), the keys of `settings.ini` that no setting of the runtime's takes
   (only while the runtime lists its settings) and those of `app.ini` the menu does not know. A box
   over the screen then lists each file and what was done to it, or why not, Up/Down and the wheel going over those
   that do not fit, until another key closes it;
-  Share log lists them too. **Move old files** (its value how many folders an older version left) asks first, with
+  Share Log lists them too. **Move Old Files** (its value how many folders an older version left) asks first, with
   how many entries would move and how many stay, then moves what *Left by older versions* lists an entry at a time
   (`scarletnx --migrate=yes` without the menu, [USAGE](USAGE.md#folders)), the same box saying what moved and why the
   rest did not: one already there, one on another disk, a game laid out beside others, which moves from its dump.
-  **Reset all**, the last row, puts every setting of the groups after App back to its default, asking first with how
+  **Reset to Defaults**, the last row, puts every setting of the groups after App back to its default, asking first with how
   many change. A group of settings shows
   a row each, its help above, Left/Right going round its values, Enter typing one. A setting not picked shows the runtime's default and `[default]` (*Off [default]*):
   the run takes the game's `.ini`'s, which starts as that; one picked goes to every
@@ -170,7 +170,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   what was changed, by the `.ini`'s sections and keys, in `settings.ini` of the config folder on
   Linux (`~/.config/scarletnx/`), else the data folder's `config/`. A run takes a setting from what that
   run picks, then from the game's own picks (to come), then from these, and last from the game's
-  `.ini`. Del puts a setting back to its default, and App's **Reset all** every one. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
+  `.ini`. Del puts a setting back to its default, and App's **Reset to Defaults** every one. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
   and `fullscreen` puts the launcher itself on the whole screen too).
   **gdbstub** passes `-S` and `-s`, the
   runtime's stub on port 1234 waiting for the debugger at startup (UNIX only), and **Extract to tmpfs**
@@ -181,7 +181,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   extracted again from when tmpfs was emptied (a reboot), or moved by when the setting changes. A game that records
   none (made before, without the `<name>.source` link older versions made) says it can't be extracted to tmpfs and
   runs from what it has.
-  **Extract game container** passes `--extract-container`, to the Switch and the 3DS driver both. Off, the default,
+  **Extract dump** passes `--extract-container`, to the Switch and the 3DS driver both. Off, the default,
   nothing of a dump is extracted: the game's `.ini` records the dump, the recompile reads the ExeFS from it, and the
   game reads its ExeFS and RomFS out of the dump on the fly, decrypting them as it reads ([USAGE](USAGE.md)). A CIA
   is read the same way. On, a dump is extracted as before, into the game's folder or with *Extract to tmpfs* into
@@ -209,7 +209,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   left out; a file that cannot be written is named in App's note. A language in another form of its tag (`pt_BR`,
   `zh_CN`, which builds before the tags wrote) is read as that language and written as its tag, the message saying
   the two once (`language = pt_BR is now pt-BR`).
-- Settings > App's **Theme editor** edits the current theme: **Save** first, the folder it is saved in, a row
+- Settings > App's **Theme Editor** edits the current theme: **Save** first, the folder it is saved in, a row
   per `theme.ini` key, a colour's with the colour after its value, and beside them a
   preview of the menu or a run (Ctrl+P, or a click on it, switches). Left/Right change a word, a switch or a
   number, Enter types a text or a number and opens a colour's picker. The picker sits over the keys, so the preview
@@ -231,11 +231,11 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   which it took. A language written in two scripts goes by its script, written or implied by its country (`zh-CN`,
   `zh-SG` simplified, `zh-TW`, `zh-HK`, `zh-MO` traditional): a system in one never takes a catalog of the other. The
   words change at once; a phrase the language has not translated stays English.
-- **Share log** saves the last run's output and game log to `scarletnx.log`. After a run that ended abnormally (not
-  by ESC) it blinks red, as Setup device keys does, until its log is saved or a run ends well. On the
+- **Share Log** saves the last run's output and game log to `scarletnx.log`. After a run that ended abnormally (not
+  by ESC) it blinks red, as Install Keys does, until its log is saved or a run ends well. On the
   desktop it goes in the working folder with its path copied. On Android it goes to the
   data folder's `state/` and is shared.
-- **Open data folder**, on Android, opens the data folder, the app's own storage, in the
+- **Open Data Folder**, on Android, opens the data folder, the app's own storage, in the
   system's Files app ([ANDROID](ANDROID.md)).
 - **Exit** closes the launcher, once asked (ESC on the menu asks too), a screen saying for half a second which of its
   files it keeps for the next start (Settings, the picks of Settings > App, the libraries' folders, the recent games), a second
@@ -250,11 +250,11 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   ([USAGE](USAGE.md#folders)). Up/Down, PgUp/PgDn and the wheel go over those that do not fit (an arrow at the
   right of the first says some are above it, *and N more* the ones under), any other key, click or tap closes it;
   nothing is moved, and it shows again at the next start for as long as they are there.
-  **Share log** lists them all, each with where it goes now. On Android the menu's own files an older version kept
+  **Share Log** lists them all, each with where it goes now. On Android the menu's own files an older version kept
   in the app's own files, out of the Files app's reach, are listed a file at a time, and under them the box says how
   they go while the app is in testing: Android's Settings > Apps > ScarletNX > Storage > Clear storage, which takes
   every game, save and key in the app with them. The menu never reads them: it starts from its defaults.
-- **Recent games**, at the top of Games, lists the last games run, newest first, three and a row that
+- **Recent Games**, at the top of Games, lists the last games run, newest first, three and a row that
   shows the rest, by the name their run gave (the runner's `ScarletNX - <name>` line), else their file's.
   The focus moves between them and the page's games in one ring, and the tips show the focused
   game's path. Choosing one runs it again with the driver it was
@@ -304,20 +304,20 @@ they are, Keep, Later, the nickname `Player`), writes `setup.ini` and opens the 
   (an Extra of Settings > App > Folders), each through the folder picker, the page listing what is there now: Recompiled, Dumps
   (the data folder's `dumps/`, with its subfolders), then the player's folders.
 - **Keys**: `prod.keys` and `title.keys` where the driver reads them; Use these, Choose folder (a folder with
-  `prod.keys`, and `title.keys` if it has one, installed where Setup device keys installs them) or Later.
+  `prod.keys`, and `title.keys` if it has one, installed where Install Keys installs them) or Later.
 - **User**: with `users/users.ini` there, its users with their pictures and uids, then Keep or Overwrite; without one,
   or to overwrite it, the nickname typed (`Player` to start with; Backspace takes a letter out) and Enter. A nickname
   the rooms' rule refuses is said, and the page stays.
 
 Once the last page is done the menu opens, `setup.ini` written. After an update that brings a notice, the setup
-shows that notice alone (1/1), with OK, before the menu. `scarletnx --debug` (or `--skip --skip`) opens the menu with no
+shows that notice alone (1/1), with OK, before the menu. `scarletnx --no-setup` opens the menu with no
 setup, writing nothing.
 
 ## Games: the games of recompiled/ and the player's folders
 
 **Games**, the tab, lists the games: the ones ready to run (a recompiled game runs directly), the dumps to prepare
 on Android, CIA files, which go to the 3DS driver, and VPK files, which go to the Vita driver. It reads the `recompiled/` of the
-folder the driver works in, which the menu passes it as `--repo`: a portable copy's `.scarletnx/` beside the
+folder the driver works in, which the menu passes it as `--data`: a portable copy's `.scarletnx/` beside the
 AppImage (or the GUI), else the user's data folder, a build tree's menu's too ([USAGE](USAGE.md#folders)), then each
 Extra of Settings > App > Folders. Each game is shown by the name in its `control.nacp`, which the recompile copies into
 its data, else by its folder's or file's name, sorted by it in each folder. Only immediate files are listed:
@@ -386,7 +386,7 @@ and to the run, which is **compiling** until the runner prints its `ScarletNX - 
 The screens are boxes side by side, nothing over another, the default framing them in thin lines and YoRHa
 filling them. At the top the tabs, Menu, Games and Settings, and the screen's title after them against the
 right, and at its right the user games play as
-(Settings > User, which lists them under **Plays as**, Left/Right picking, and renames each: Enter types its
+(Settings > User, which lists them under **Current user**, Left/Right picking, and renames each: Enter types its
 nickname, the rule [USAGE](USAGE.md#users) gives checked, then written to `users.ini`): a box framed as the others are
 holding their nickname and their picture, `users/<uid>.jpg` or Wimsy
 without one ([USAGE](USAGE.md#users)), square or round (`[head] picture`; `none` for no box). A click on it opens
@@ -431,7 +431,7 @@ setup's pages, the setup's Appearance rows, the box of users, that of a game's u
 a box of files. Their rows are 2 pixels apart times the text's size (on Android and iOS 40 pixels high, about Android's 48 dp
 touch target at the 3x a phone held wide gets, where the desktop's are 17), the focused one kept in the middle (on a
 group's screen, the group open in the groups' list), the cursor and the arrows of hidden rows inside each row, which a
-click takes whole as a tap does. That is the **Side box**'s *Auto*, the
+click takes whole as a tap does. That is the **Side panel**'s *Auto*, the
 default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
 not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2 shows
 it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over
@@ -482,7 +482,7 @@ leaves out, or that cannot be read, keeps the base's value. What a file has that
 is said, the file named, in the menu's message as it opens and in Settings > App's note when the theme is picked: a
 value it cannot read with the one it keeps (`[body] focus = middle is not color or bar: it keeps color`), a number
 past its most with the most it takes, a base that is no built-in with the one it starts from, and a key no theme has
-(an ErET file's own keys aside). A line with no `=` is no setting. The menu's **Theme editor**
+(an ErET file's own keys aside). A line with no `=` is no setting. The menu's **Theme Editor**
 writes one with every key.
 
 ```ini
@@ -668,7 +668,7 @@ brings a translation up to the code; a phrase it leaves empty, or marks `fuzzy`,
 
 The runtime's settings stay as the runtime names them (their groups, names, help and words come from
 `scarletnx --settings`), as do the Controllers' button map page, drawn as the game's menu draws it, the theme
-editor's rows (the file's own keys) and the lines Share log adds for us.
+editor's rows (the file's own keys) and the lines Share Log adds for us.
 
 ## Building and testing
 
@@ -708,7 +708,7 @@ Key setup tests cover installation, replacement, invalid drops, failed writes,
 self-copy safety, cancellation, and the bright-red overwrite warning. Setup tests (`gui_setup`) go through every
 page of a first start in a home of their own and check what each writes (a portable copy, the language, the folders,
 the keys, the first user) and refuses, users.ini kept or overwritten, the fixed uid kept for its saves, a notice
-alone after an update, `--debug`, and the question where `options-dialog` puts it.
+alone after an update, `--no-setup`, and the question where `options-dialog` puts it.
 Language tests cover a catalog's search in either byte order, catalogs cut or pointing out of themselves, the language
 Auto picks from the system's locales, English where a language has none, the Language row and `app.ini`'s key, and
 the script's refusals; they use a language of their own, `tests/po/xx.po`. Glyph tests cover the Latin and the wide

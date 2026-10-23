@@ -112,7 +112,7 @@ typedef struct {
     FileData files[FS_FILE_MAX];
     DirData dirs[FS_DIR_MAX];
     u32 fs_next, file_next, dir_next;
-    /* Extract game container off: the dump the game's folder links to, mapped for the whole run, and its program's
+    /* Extract dump off: the dump the game's folder links to, mapped for the whole run, and its program's
        ExeFS and RomFS read out of it (dump_open). dlock keeps one read at a time: their decryption is shared */
     SnxDump dump;
     SnxHacFs* dfs;

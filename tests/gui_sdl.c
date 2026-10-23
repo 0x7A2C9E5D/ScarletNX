@@ -104,7 +104,7 @@ static GuiRect menu_entry_box(const App* app, const GuiMenuBoxes* m, int item) {
         return gui_rect(0, 0, 0, 0);
     return ui_row_box(app, ui_menu_row(m->rects, app->scale, UI_MENU_ENTRIES, (size_t)item - first));
 }
-/* Setup device keys' box in the failure colour, at the clock given (a blink's half): inside it, past its label */
+/* Install Keys' box in the failure colour, at the clock given (a blink's half): inside it, past its label */
 static int keys_red(App* app, Uint64 clock) {
     GuiMenuBoxes m;
     GuiRect b;
@@ -146,7 +146,7 @@ static void splash_drawn(App* app, const SDL_Rect* view, const SnxSplashSvg* svg
     free(drawing);
     SDL_DestroySurface(image);
 }
-/* the boxes a pointer or a finger goes to: a menu's item, Games' rows (0 Add a folder, then the page's games; with
+/* the boxes a pointer or a finger goes to: a menu's item, Games' rows (0 Add Folder, then the page's games; with
    recent a recent row), a form's row on the left or the right; a pointer at a box's middle */
 static GuiRect entry_box(App* app, int item) {
     GuiMenuBoxes m;
@@ -342,9 +342,9 @@ static void finish(App* app, int status) {
     assert(!app->menu.running && app->finished && app->menu.view == GUI_LOAD_NONE);
     char expected[80];
     snprintf(expected, sizeof(expected),
-             status ? "Program ended abnormally (status %d)." : "Driver exited with status %d.", status);
+             status ? "Program ended abnormally (status %d)." : "The run ended with status %d.", status);
     assert(!strcmp(app->message, expected) && app->abnormal_exit == (status != 0) && app->has_output);
-    assert(app->log_due == (status != 0)); /* Share log blinks after a crash, and stops after a run that ends well */
+    assert(app->log_due == (status != 0)); /* Share Log blinks after a crash, and stops after a run that ends well */
     shows_foot(app, "Press [ESC] to return to menu", red);   /* where the keys go, in their letters */
     if (status) shows(app, "Program ended abnormally", red); /* beside the output, how it ended */
     /* a theme can make that line a prompt: framed and placed, the done and the failed one apart */
@@ -526,7 +526,7 @@ static void players_view(App* app) {
     key(app, SDLK_ESCAPE);
     /* its map its own now; Del on a player's row: back to As All */
     render(app);
-    shows(app, "Its own >", yellow); /* focused, as ESC came back to it */
+    shows(app, "Custom >", yellow); /* focused, as ESC came back to it */
     app->editor.row = row_of(app, setting_row(app, "gamepad_p1_swap_ab"));
     key(app, SDLK_DELETE);
     assert(!gui_settings_value(&app->settings, "gamepad_p1_swap_ab"));
@@ -926,14 +926,14 @@ int main(int argc, char** argv) {
     }
     if (argc > 1 && strstr(argv[0], "scarletnx-3ds")) {
         /* in the menu's data folder, as the Switch driver */
-        assert(argc == 4 && snx_is_file(argv[1]) && strstr(argv[1], "3ds input.CIA") && !strcmp(argv[2], "--repo") &&
+        assert(argc == 4 && snx_is_file(argv[1]) && strstr(argv[1], "3ds input.CIA") && !strcmp(argv[2], "--data") &&
                argv[3][0]);
         fputs("CIA execution is not implemented (stage 2)\n", stderr);
         return 3;
     }
     if (argc > 1 && strstr(argv[0], "scarletnx-vita")) {
         /* the VPK, in the menu's data folder as the 3DS driver */
-        assert(argc == 4 && snx_is_file(argv[1]) && strstr(argv[1], "vita input.VPK") && !strcmp(argv[2], "--repo") &&
+        assert(argc == 4 && snx_is_file(argv[1]) && strstr(argv[1], "vita input.VPK") && !strcmp(argv[2], "--data") &&
                argv[3][0]);
         fputs("the VPK has no eboot.bin\n", stderr);
         return 4;
@@ -949,8 +949,8 @@ int main(int argc, char** argv) {
     if (argc > 1 && strstr(argv[1], "picked folders")) { /* Settings > App > Folders' games and extractions */
         int i = 2;
         bool nro = strstr(argv[1], ".nro") != NULL, extract = false; /* an NRO runs without an extraction */
-        while (i < argc && strcmp(argv[i], "--repo")) extract |= !strcmp(argv[i++], "--extract-container");
-        /* a dump read in place (Extract game container off) has no extraction either */
+        while (i < argc && strcmp(argv[i], "--data")) extract |= !strcmp(argv[i++], "--extract-container");
+        /* a dump read in place (Extract dump off) has no extraction either */
         assert(i + (nro || !extract ? 4 : 6) == argc && argv[i + 1][0] && !strcmp(argv[i + 2], "--outdir") &&
                strstr(argv[i + 3], "picked games"));
         /* the extraction's folder named after the dump, in the system's separators as every path made is */
@@ -965,14 +965,14 @@ int main(int argc, char** argv) {
     if (argc > 2 && !strcmp(argv[1], "-r") && strstr(argv[2], "room dump")) { /* R's, its room asked: not played */
         int i = 3;
         assert(!strcmp(argv[i++], "--extract-container")); /* asked about its room only when it is extracted */
-        assert(i + 2 == argc && !strcmp(argv[i], "--repo") && argv[i + 1][0]);
+        assert(i + 2 == argc && !strcmp(argv[i], "--data") && argv[i + 1][0]);
         puts("Recompiling room dump");
         return 0;
     }
     if (argc > 1 && strstr(argv[1], "room dump")) { /* asked about its room first */
         int i = 2;
         char* folder = snx_dirname(argv[1]);
-        while (i < argc && strcmp(argv[i], "--repo")) ++i;
+        while (i < argc && strcmp(argv[i], "--data")) ++i;
         /* a dump from a folder of its own, the folders their defaults: the data folder alone, no --out or --outdir, so
            the extraction goes to the data folder's work/ (on Android in the app's own storage), never beside it */
         assert(i + 2 == argc && !snx_path_within(argv[i + 1], folder) && !snx_path_within(folder, argv[i + 1]));
@@ -984,27 +984,27 @@ int main(int argc, char** argv) {
         int i = 2;
         assert(argc == 8 && !strcmp(argv[i++], "--fullscreen=1") && !strcmp(argv[i++], "--controls=0"));
         assert(!strcmp(argv[i++], "-S") && !strcmp(argv[i++], "-s"));
-        assert(!strcmp(argv[i++], "--repo") && argv[i++][0] && i == argc);
+        assert(!strcmp(argv[i++], "--data") && argv[i++][0] && i == argc);
         puts("Recompiling option flags\nScarletNX - option flags"); /* the runner's banner: now loading */
         return 0;
     }
     if (argc > 2 && strstr(argv[argv[1][0] == '-' ? 2 : 1], "0100ABCD12340000")) { /* a game or its update */
         int r = !strcmp(argv[1], "-r");
         assert(strstr(argv[0], "runtime") && snx_is_file(argv[1 + r]));
-        assert(!strcmp(argv[argc - 2], "--repo") && argv[argc - 1][0]);
+        assert(!strcmp(argv[argc - 2], "--data") && argv[argc - 1][0]);
         puts("ScarletNX - an update");
         return 0;
     }
     if (argc > 2 && !strcmp(argv[1], "-r") && strstr(argv[2], "folder game")) { /* R on it: recompiled, not played */
         int i = 3;
         assert(strstr(argv[0], "runtime") && snx_is_file(argv[2]));
-        assert(i + 2 == argc && !strcmp(argv[i], "--repo") && argv[i + 1][0]);
+        assert(i + 2 == argc && !strcmp(argv[i], "--data") && argv[i + 1][0]);
         puts("Recompiling folder game (1 modules)\nBuilt folder game");
         return 0;
     }
     if (argc > 1 && strstr(argv[1], "folder game")) { /* a game in a folder of its own, through the menu's driver */
         assert(strstr(argv[0], "runtime") && argc == 6 && snx_is_file(argv[1]) && !strcmp(argv[2], "--fullscreen=1") &&
-               !strcmp(argv[3], "--controls=0") && !strcmp(argv[4], "--repo") && argv[5][0]);
+               !strcmp(argv[3], "--controls=0") && !strcmp(argv[4], "--data") && argv[5][0]);
         puts("Recompiling folder game (1 modules)\nBuilt folder game\nScarletNX - folder game");
         return 0;
     }
@@ -1020,7 +1020,7 @@ int main(int argc, char** argv) {
         bool nx = strstr(argv[0], "runtime") != NULL; /* the program the menu is part of */
         if (nx)
             assert(argc == 6 && !strcmp(argv[2], "--fullscreen=1") && !strcmp(argv[3], "--controls=0") &&
-                   !strcmp(argv[4], "--repo") && argv[5][0]);
+                   !strcmp(argv[4], "--data") && argv[5][0]);
         else
             assert(argc == 2);
         size_t size;
@@ -1260,7 +1260,7 @@ int main(int argc, char** argv) {
     app.keys_path = snx_path_join(switch_dir, "prod.keys");
     char* source_keys = snx_path_join(temporary, "prod.keys");
     assert(!snx_write_file(source_keys, "first keys", 10));
-    /* no prod.keys in use: Setup device keys blinks red, focused or not, its label on the page colour; steady with
+    /* no prod.keys in use: Install Keys blinks red, focused or not, its label on the page colour; steady with
        blink_ms 0. A home without keys, as an installed build also takes ~/.switch's */
     {
         Uint64 on = 1000 * app.theme.blink_ms * 2, off = on + app.theme.blink_ms;
@@ -1269,7 +1269,7 @@ int main(int argc, char** argv) {
         assert(!snx_mkdirs(bare));
         set_env("HOME", bare);
         assert(!keys_red(&app, off) && keys_red(&app, on));
-        shows(&app, "- Setup device keys", rgb(app.theme.page));
+        shows(&app, "- Install Keys", rgb(app.theme.page));
         key(&app, SDLK_DOWN);
         assert(app.menu.selected != GUI_KEYS && keys_red(&app, on) && !keys_red(&app, off));
         key(&app, SDLK_UP);
@@ -1339,7 +1339,7 @@ int main(int argc, char** argv) {
 #endif
     key(&app, SDLK_RETURN);
     render(&app);
-    shows(&app, "Keys already setup. This will overwrite", red);
+    shows(&app, "Keys installed here: installing again", red);
     key(&app, SDLK_ESCAPE);
     assert(app.menu.view == GUI_LOAD_NONE);
     key(&app, SDLK_RETURN);
@@ -1495,7 +1495,7 @@ int main(int argc, char** argv) {
         key(&app, SDLK_ESCAPE);
         render(&app);
         shows_half(&app, line, rgb(app.theme.soft));
-        shows_half(&app, "GUI + children: ", rgb(app.theme.soft));
+        shows_half(&app, "RAM ", rgb(app.theme.soft));
         assert(total == 3 << 20 && !strncmp(line, "Disk: 3 MB, ", 12));
         key(&app, SDLK_SPACE);
         assert(!snx_remove_tree(app.games_dir)); /* the browser's checks below start with no games/ */
@@ -1519,17 +1519,17 @@ int main(int argc, char** argv) {
     shows(&app, "- Overlay", normal); /* the runtime's On-screen controls */
     hides(&app, "On-screen controls", normal);
     shows(&app, "- User", normal);
-    shows(&app, "Reset all", normal);         /* App's last row, beside: none among the groups */
+    shows(&app, "Reset to Defaults", normal); /* App's last row, beside: none among the groups */
     hides(&app, "\x1e", rgb(app.theme.soft)); /* every row shows: no arrows */
     hides(&app, "\x1f", rgb(app.theme.soft));
     key(&app, SDLK_DOWN);
     render(&app);
-    shows_half(&app, "gdbstub, Extract to tmpfs", normal); /* a group's help names its settings */
+    shows_half(&app, "GDB stub, Extract to tmpfs", normal); /* a group's help names its settings */
     key(&app, SDLK_RIGHT);                            /* a group opens with Enter only */
     assert(app.form == GUI_FORM_SETTINGS);
     key(&app, SDLK_RETURN);
     /* a group's settings on the right, a row each with its help in the tips; the group named over them */
-    /* gdbstub, Extract to tmpfs, Extract game container, Optimization level, AOT threads, Unit cache limit, the
+    /* gdbstub, Extract to tmpfs, Extract dump, Optimization level, AOT threads, Unit cache limit, the
        LLVM Internals page and Tracy capture, whose row a launcher without SNX_TRACY does not list */
     int tracy = 0;
     for (int i = 0; i < app.settings.own; i++)
@@ -1538,12 +1538,21 @@ int main(int argc, char** argv) {
     render(&app);
     shows(&app, "Launch", normal);
     shows_half(&app, "Enables gdbstub", normal); /* in the tips */
-    shows(&app, "- gdbstub ", yellow); /* its value in the column after the longest name, Extract game container's */
+    shows(&app, "- GDB stub ", yellow); /* its value in the column after the longest name, Optimization level's */
     shows(&app, "- Extract to tmpfs ", normal);
-    shows(&app, "- Extract game container off", normal);
+    {
+        char row[64];
+        snprintf(row, sizeof row, "- %-*s off", (int)strlen("Optimization level"), "Extract dump");
+        shows(&app, row, normal);
+    }
     if (tracy) shows(&app, "- Tracy capture", normal);
-    key(&app, SDLK_RIGHT);
-    assert(setting_is(&app, "gdbstub", "on"));
+    { /* Del is said where it does something: on a setting away from its default */
+        char said[512];
+        assert(!strstr(screen_said(&app, true, said, sizeof said), "Del: default."));
+        key(&app, SDLK_RIGHT);
+        assert(setting_is(&app, "gdbstub", "on") &&
+               strstr(screen_said(&app, true, said, sizeof said), "Del: default."));
+    }
     key(&app, SDLK_LEFT);
     assert(!gui_settings_value(&app.settings, "gdbstub"));
     key(&app, SDLK_DOWN);
@@ -1628,11 +1637,11 @@ int main(int argc, char** argv) {
         key(&app, SDLK_ESCAPE);
         assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 4);
     }
-    /* App's Reset all, its last row, asks first, with how many settings change; Back changes none, Reset puts every one
+    /* App's Reset to Defaults, its last row, asks first, with how many settings change; Back changes none, Reset puts every one
        back as it started, written to settings.ini, and says how many; none left to change, no box */
     {
         int changed = gui_settings_changed(&app.settings);
-        char* asked = snx_format("Reset all to the defaults? %d settings change", changed);
+        char* asked = snx_format("Reset to Defaults? %d settings change", changed);
         char* done = snx_format("%d settings back to their defaults", changed);
         size_t size;
         char* kept;
@@ -1642,12 +1651,12 @@ int main(int argc, char** argv) {
         app.editor.row = GUI_APP_RESET;
         assert(app.form == GUI_FORM_APP && GUI_APP_RESET == GUI_APP_ROWS - 1);
         render(&app);
-        shows(&app, "- Reset all", yellow);
+        shows(&app, "- Reset to Defaults", yellow);
         key(&app, SDLK_RETURN);
         assert(app.confirm.shown && app.confirm.ask == GUI_ASK_RESET && !strcmp(app.ask_line, asked));
         render(&app);
         shows(&app, asked, rgb(app.theme.warning));
-        shows(&app, "- Back", yellow);
+        shows(&app, "- Cancel", yellow);
         shows(&app, "- Reset", normal);
         key(&app, SDLK_RETURN); /* Back, in focus */
         assert(!app.confirm.shown && setting_is(&app, "gdbstub", "on") && app.form == GUI_FORM_APP);
@@ -1685,7 +1694,7 @@ int main(int argc, char** argv) {
         shows(&app, line, yellow);
         shows(&app, "- UI scale           Auto", normal);
         shows(&app, "- Language           Auto: English", normal); /* SDL_PREFERRED_LOCALES, the test's */
-        shows(&app, "- Theme editor", normal);
+        shows(&app, "- Theme Editor", normal);
         /* under the rows, the three folders Folders moves, whole: the extractions too */
         shows(&app, "- Folders            Defaults", normal);
         shows_half(&app, "Extractions:", rgb(app.theme.soft)); /* in a half step under the text's */
@@ -1708,7 +1717,7 @@ int main(int argc, char** argv) {
             app.work_dir = work;
             app_values(&app);
         }
-        shows(&app, "- Clean old settings", normal);
+        shows(&app, "- Clean Old Settings", normal);
         hides(&app, "- Layout", normal);
         key(&app, SDLK_RIGHT);
         assert(strcmp(app.theme.name, first) && !strcmp(app.app_form.theme, app.theme.name));
@@ -2116,7 +2125,7 @@ int main(int argc, char** argv) {
         assert(wrap_at("\xe8\x8f\x9c\xe5\x8d\x95 \xe8\x8f\x9c\xe5\x8d\x95\xe8\x8f\x9c\xe5\x8d\x95", 7, 0) == 10);
         assert(wrap_at("\xe8\x8f\x9c\xe5\x8d\x95\xe8\x8f\x9c", 5, 0) == 6 && wrap_at("ab cd", 4, 0) == 2);
     }
-    /* Clean old settings: a box says what it would do, Clean does it and shows what it did over the screen, until a
+    /* Clean Old Settings: a box says what it would do, Clean does it and shows what it did over the screen, until a
        key closes it; then there is nothing left. The tips say a box asks */
     {
         char *old_ini = snx_path_join(app.games_dir, "Old game.ini"), *kept, unread[64], expected[512];
@@ -2138,13 +2147,13 @@ int main(int argc, char** argv) {
         assert(!snx_write_file(app.app_file, gone, strlen(gone)));
         app.editor.row = GUI_APP_CLEAN;
         render(&app);
-        shows_half(&app, "no longer read, taken out once asked", normal);
+        shows_half(&app, "this version no longer reads. Asks first", normal);
         key(&app, SDLK_RETURN); /* a box says what it would take out, Back in focus */
         assert(app.confirm.shown && app.confirm.ask == GUI_ASK_CLEAN && !app.cleaned_shown && snx_is_file(old_ini));
-        assert(!strcmp(app.ask_line, "Clean old settings? [Deprecated] in 1 .ini, 2 old keys"));
+        assert(!strcmp(app.ask_line, "Clean Old Settings? [Deprecated] in 1 .ini, 2 old keys"));
         render(&app);
-        shows(&app, "Clean old settings? [Deprecated] in 1 .ini, 2 old keys", rgb(app.theme.warning));
-        shows(&app, "- Back", yellow);
+        shows(&app, "Clean Old Settings? [Deprecated] in 1 .ini, 2 old keys", rgb(app.theme.warning));
+        shows(&app, "- Cancel", yellow);
         shows(&app, "- Clean", normal);
         key(&app, SDLK_ESCAPE); /* Back: nothing taken out */
         assert(!app.confirm.shown && !app.cleaned_shown && app.editor.row == GUI_APP_CLEAN);
@@ -2161,23 +2170,23 @@ int main(int argc, char** argv) {
         free(kept);
         assert(!settings_unread(&app, unread, sizeof unread) && setting_is(&app, "fullscreen", "1"));
         snprintf(expected, sizeof expected,
-                 "+\t%s\t[Deprecated] taken out\n+\t%s\tTook out renderer=opengl\n+\t%s\tTook out theme = gone\n",
-                 old_ini, app.settings_file, app.app_file);
+                 "+\t%s\t[Deprecated] removed\n+\t%s\tRemoved renderer=opengl\n+\t%s\tRemoved theme = gone\n", old_ini,
+                 app.settings_file, app.app_file);
         assert(!strcmp(app.cleaned.text, expected));
         kept = (char*)snx_read_file(app.app_file, &size); /* the picks as the menu has them */
         snprintf(expected, sizeof expected, "\ntheme = %s\n", app.theme.id);
         assert(kept && strstr(kept, expected) && !strstr(kept, "gone"));
         free(kept);
         render(&app);
-        shows(&app, "Clean old settings: 3 done", title);
-        shows(&app, "[Deprecated] taken out", rgb(app.theme.soft));
+        shows(&app, "Clean Old Settings: 3 done", title);
+        shows(&app, "[Deprecated] removed", rgb(app.theme.soft));
         shows(&app, "- OK", yellow);
         key(&app, SDLK_DOWN); /* the three show: nothing to go to */
         assert(app.cleaned_shown && !app.files_top && app.editor.row == GUI_APP_CLEAN);
         key(&app, SDLK_LEFT); /* closes it, and does nothing else */
         assert(!app.cleaned_shown && app.editing && app.form == GUI_FORM_APP && app.editor.row == GUI_APP_CLEAN);
         render(&app);
-        hides(&app, "Clean old settings: 3 done", title);
+        hides(&app, "Clean Old Settings: 3 done", title);
         key(&app, SDLK_RETURN);
         assert(!app.confirm.shown && !strncmp(app.editor.note, "Nothing to clean", 16));
         /* a runtime that listed no settings: every key of settings.ini would look old, and none is taken out */
@@ -2196,7 +2205,7 @@ int main(int argc, char** argv) {
         app.editor.row = row;
         app.editor.note[0] = 0;
     }
-    /* Move old files: what an older version left, moved where this one keeps it once asked, entry by entry; a game laid
+    /* Move Old Files: what an older version left, moved where this one keeps it once asked, entry by entry; a game laid
        out beside others is not, the report says how it goes; then nothing that can move, said; nothing left, said */
     {
         char *data_was = app.data_dir, *older = snx_path_join(temporary, "move data"), *old_games, *old_game;
@@ -2214,7 +2223,7 @@ int main(int argc, char** argv) {
         app.editor.row = GUI_APP_MOVE;
         key(&app, SDLK_RETURN);
         assert(app.confirm.shown && app.confirm.ask == GUI_ASK_MOVE &&
-               !strcmp(app.ask_line, "Move old files? 1 move, 1 stay where they are"));
+               !strcmp(app.ask_line, "Move Old Files? 1 move, 1 stay where they are"));
         assert(!strcmp(app.app_form.moves, "2 left"));
         render(&app);
         shows(&app, "- Move", normal);
@@ -2228,7 +2237,7 @@ int main(int argc, char** argv) {
         assert(!strcmp(app.editor.note, "1 moved, 1 not") && app.cleaned.count == 3 && app.cleaned.done == 2);
         assert(strstr(app.cleaned.text, "Not moved: run it from its dump once, which makes "));
         render(&app);
-        shows(&app, "Move old files: 2 done, 1 not", title);
+        shows(&app, "Move Old Files: 2 done, 1 not", title);
         key(&app, SDLK_LEFT); /* the report closes */
         assert(!app.cleaned_shown && app.lefts == 1 && !strcmp(app.app_form.moves, "1 left"));
         key(&app, SDLK_RETURN); /* only Laid: none can move, the report says why at once */
@@ -2339,7 +2348,7 @@ int main(int argc, char** argv) {
     key(&app, SDLK_RETURN);
     assert(app.animations_off && !strcmp(app.app_form.animations, "Off")); /* the checks below read settled screens */
     key(&app, SDLK_DOWN);
-    /* Side box: Auto, On, Off either way round, kept in app.ini as side_box = auto, on or off */
+    /* Side panel: Auto, On, Off either way round, kept in app.ini as side_box = auto, on or off */
     assert(app.editor.row == GUI_APP_SIDE && !strcmp(app.app_form.side, "Auto"));
     key(&app, SDLK_RIGHT);
     assert(app.side_box == GUI_SIDE_ON && !strcmp(app.app_form.side, "On"));
@@ -2380,9 +2389,9 @@ int main(int argc, char** argv) {
     assert(app.form == GUI_FORM_THEME && app.editing);
     key(&app, SDLK_ESCAPE);
     assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_EDITOR);
-    /* Folders, every folder on one screen, a box a group: the app's (Data, Settings shown only, Logs, Caches,
+    /* Folders, every folder on one screen, a box a group: the app's (Data, Settings read-only, Logs, Caches,
        Extractions), the recompiled library (its
-       Main, recompiled/, its Extras, Add a folder), the dumps one (its Main, dumps/, its Extras, Add a folder); one
+       Main, recompiled/, its Extras, Add Folder), the dumps one (its Main, dumps/, its Extras, Add Folder); one
        dropped on a library's row is added to it and kept, once; the picker answers none here
        (SDL_FILE_DIALOG_DRIVER=none); Del or Enter asks before an Extra is taken off, the folder staying */
     key(&app, SDLK_DOWN);
@@ -2418,14 +2427,14 @@ int main(int argc, char** argv) {
                    !strcmp(info.label, "Reset to Defaults"));
             assert(!ui_form_side_rows_get_row_info(&app, 9 + GUI_FOLDER_GROUPS + 3, 100, &info));
             assert(ui_form_side_rows_get_row_info(&app, 0, 100, &info) && info.attr == UI_ATTR_TITLE &&
-                   !strcmp(info.label, "The app's folders"));
+                   !strcmp(info.label, "App Folders"));
         }
         render(&app);
         { /* each group's title: in the page's colour on a band of ink in a theme of filled boxes, else in ink */
             SDL_Color title = rgb(app.theme.panels == GUI_PANELS_FILL ? app.theme.page : app.theme.ink);
-            shows(&app, "The app's folders", title);
-            shows(&app, "Recompiled library", title);
-            shows(&app, "Dumps library", title);
+            shows(&app, "App Folders", title);
+            shows(&app, "Recompiled Library", title);
+            shows(&app, "Dumps Library", title);
         }
         { /* each group in a box as far as it shows, half a cell wider than its rows, in the dim colour; Reset to
              Defaults, the last row, in one of its own */
@@ -2443,7 +2452,7 @@ int main(int argc, char** argv) {
             for (int filled = 0; filled < 2; ++filled) {
                 app.theme.panels = filled ? GUI_PANELS_FILL : GUI_PANELS_OUTLINE;
                 render(&app);
-                shows(&app, "Dumps library", rgb(filled ? app.theme.page : app.theme.ink));
+                shows(&app, "Dumps Library", rgb(filled ? app.theme.page : app.theme.ink));
                 assert(same_colour(pixel(&app, (float)(t.x + 1), (float)(t.y + t.h / 2)),
                                    rgb(filled ? app.theme.ink : app.theme.page)));
                 assert(same_colour(pixel(&app, (float)(t.x + 1), (float)(t.y + t.h - 1)),
@@ -2452,7 +2461,7 @@ int main(int argc, char** argv) {
             app.theme.panels = kept;
             render(&app);
         }
-        { /* the names' column as wide as the longest of the rows with a folder (Extractions), not Add a folder's or the
+        { /* the names' column as wide as the longest of the rows with a folder (Extractions), not Add Folder's or the
              last's; the folder after it */
             char start[64];
             snprintf(start, sizeof start, "- %-11s %c", "Data", app.data_dir[0]);
@@ -2498,7 +2507,7 @@ int main(int argc, char** argv) {
             app.theme.scroll_ms = 100; /* the default theme slides nothing */
             for (app.clock = 1; gui_slide(1000, app.clock, app.theme.scroll_ms) != 3;) app.clock += 100;
             render(&app);
-            shows(&app, "- Add a folder", normal);
+            shows(&app, "- Add Folder", normal);
             app.theme.scroll_ms = kept;
             app.clock = 0;
         }
@@ -2525,7 +2534,7 @@ int main(int argc, char** argv) {
         render(&app);
         shows_half(&app, "The recompiled games, ", normal);
         shows(&app, "- Main", yellow);
-        shows(&app, "- Add a folder", normal);
+        shows(&app, "- Add Folder", normal);
         assert(!strcmp(app.app_form.folder[app.editor.row], "default") && !strcmp(form_note(&app), app.games_dir));
         /* at its default: Del says so, no box */
         key(&app, SDLK_DELETE);
@@ -2663,7 +2672,7 @@ int main(int argc, char** argv) {
             assert(app.folder_count == 1);
             free(deep);
         }
-        app.editor.row = FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_DUMPS); /* the dumps library's Add a folder */
+        app.editor.row = FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_DUMPS); /* the dumps library's Add Folder */
         key(&app, SDLK_RETURN);
         {
             SDL_Event answer;
@@ -2678,14 +2687,14 @@ int main(int argc, char** argv) {
         app.editor.row = FOLDER_ROW(GUI_ROW_FOLDER, 0);
         app.editor.note[0] = 0; /* the picker's answer above, over the tips */
         render(&app);
-        shows_half(&app, "Del or Enter asks to take it off the library", normal);
+        shows_half(&app, "Removes it from the library; its games stay in the folder", normal);
         {
-            char *asked = snx_format("Take %s off the dumps library? The folder keeps its games.", app.folders[0]),
-                 *done = snx_format("%s taken off the list. The folder keeps its games", app.folders[0]);
+            char *asked = snx_format("Remove %s from the Dumps Library? Its games stay in the folder.", app.folders[0]),
+                 *done = snx_format("%s removed from the library. Its games stay in the folder", app.folders[0]);
             key(&app, SDLK_RETURN);
             assert(app.confirm.shown && app.confirm.ask == GUI_ASK_FOLDER && !strcmp(app.ask_line, asked));
             render(&app);
-            shows(&app, "- Take it off", normal);
+            shows(&app, "- Remove", normal);
             key(&app, SDLK_ESCAPE);
             assert(!app.confirm.shown && app.folder_count == 1);
             key(&app, SDLK_DELETE);
@@ -2698,8 +2707,8 @@ int main(int argc, char** argv) {
         }
         assert(snx_is_dir(more) && (kept = (char*)snx_read_file(app.folders_file, &size)) && !size);
         free(kept);
-        /* a folder with folders in it asks whether their games are listed too: Cancel adds nothing, Only this folder
-           its own games, With subfolders theirs as well, down GUI_FOLDER_DEPTH levels, a hidden one left alone; kept
+        /* a folder with folders in it asks whether their games are listed too: Cancel adds nothing, Only This Folder
+           its own games, With Subfolders theirs as well, down GUI_FOLDER_DEPTH levels, a hidden one left alone; kept
            with GUI_FOLDER_DEEP after its path, and its row says so */
         {
 #ifdef _WIN32
@@ -2731,7 +2740,7 @@ int main(int argc, char** argv) {
             assert(!app.folder_asked && !app.confirm.shown && !app.folder_count &&
                    !strcmp(app.editor.note, "Not added"));
             event(&app, &e);
-            key(&app, SDLK_RETURN); /* Only this folder: games ready to run, so the recompiled library */
+            key(&app, SDLK_RETURN); /* Only This Folder: games ready to run, so the recompiled library */
             assert(app.folder_count == 1 && !app.folders_deep[0] && app.folders_library[0] == GUI_LIBRARY_RECOMPILED &&
                    !strcmp(app.editor.note, "Added to the recompiled library"));
             games_scan(&app, &listed, said, sizeof said);
@@ -2743,7 +2752,7 @@ int main(int argc, char** argv) {
             app.editor.row = FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED);
             event(&app, &e);
             key(&app, SDLK_DOWN);
-            key(&app, SDLK_RETURN); /* With subfolders */
+            key(&app, SDLK_RETURN); /* With Subfolders */
             assert(app.folder_count == 1 && app.folders_deep[0] &&
                    !strcmp(app.editor.note, "Added to the recompiled library, with its subfolders"));
             kept = (char*)snx_read_file(app.folders_file, &size);
@@ -3005,7 +3014,7 @@ int main(int argc, char** argv) {
         }
         /* Logs and Caches, each a row: its default the menu's own folder; one picked kept in app.ini first, where the
            drivers and the games find it (snx_menu_dir), the next run's log in Logs; app.ini that cannot be written
-           leaves them as they were. Settings above them, shown only: app.ini in it names them */
+           leaves them as they were. Settings above them, read-only: app.ini in it names them */
         {
             const char* home = app.home_dir ? app.home_dir : app.data_dir;
             char *logs = snx_path_join(temporary, "picked logs"), *caches = snx_path_join(temporary, "picked caches");
@@ -3069,18 +3078,18 @@ int main(int argc, char** argv) {
             in_use = snx_app_kind_dir(temporary, SNX_USER_STATE);
             assert(in_use && snx_path_within(in_use, temporary)); /* its own state/ again */
             free(in_use);
-            /* Settings: its folder, shown only; Enter says why */
+            /* Settings: its folder, read-only; Enter says why */
             if (!app.config_dir) app.config_dir = snx_dirname(app.app_file); /* as open_files keeps it */
             app.editor.row = FOLDER_ROW(GUI_ROW_CONFIG, -1);
             assert(app.config_dir && !strcmp(folder_row_path(&app, app.editor.row), app.config_dir) &&
-                   !strcmp(app.app_form.folder[app.editor.row], "shown only") &&
+                   !strcmp(app.app_form.folder[app.editor.row], "read-only") &&
                    !strcmp(form_note(&app), app.config_dir));
             key(&app, SDLK_RETURN);
             assert(!strcmp(app.editor.note, config_row) && app.place_row == -1);
             { /* its foot: refresh and back, neither a pick nor Del */
                 char said[512];
                 screen_said(&app, false, said, sizeof said);
-                assert(strstr(said, "F5: refresh.") && !strstr(said, "Del:") && !strstr(said, "Add a folder"));
+                assert(strstr(said, "F5: refresh.") && !strstr(said, "Del:") && !strstr(said, "Add Folder"));
             }
             render(&app);
             shows(&app, "- Settings", yellow);
@@ -3218,8 +3227,8 @@ int main(int argc, char** argv) {
             assert(choice_box(&app, &l, 0).y >= r.y + 2 * cell_h(&app));
             assert(SDL_SetWindowSize(app.window, w, h));
             render(&app);
-            shows(&app, "- Back", yellow);
-            shows(&app, "- Use it", normal);
+            shows(&app, "- Cancel", yellow);
+            shows(&app, "- Use Anyway", normal);
             key(&app, SDLK_ESCAPE);
             assert(!app.confirm.shown && !app.place[GUI_PLACE_WORK] && !strcmp(app.editor.note, "Not changed"));
             place_set(&app, GUI_PLACE_WORK, temporary);
@@ -3227,7 +3236,7 @@ int main(int argc, char** argv) {
             key(&app, SDLK_RETURN);
             assert(app.confirm.shown && app.confirm.armed && !app.place[GUI_PLACE_WORK]);
             render(&app);
-            shows(&app, "- Use it: press again", yellow);
+            shows(&app, "- Use Anyway: press again", yellow);
             key(&app, SDLK_RETURN);
             assert(!app.confirm.shown && app.place[GUI_PLACE_WORK] && same_path(app.work_dir, temporary));
             assert(!strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_WORK)], "outside the app"));
@@ -3405,7 +3414,7 @@ int main(int argc, char** argv) {
         app.self = NULL;
         set_env("PATH", "/nonexistent");
         launch(&app, snx_strdup(input), false);
-        assert(!app.menu.running && !strcmp(app.message, "Cannot find scarletnx beside the GUI or on PATH."));
+        assert(!app.menu.running && !strcmp(app.message, "Cannot find scarletnx beside ScarletNX or on PATH."));
         assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR && !strcmp(app.error_line, app.message));
         key(&app, SDLK_RETURN); /* in the box too, whole, until OK */
         assert(!app.confirm.shown);
@@ -3417,7 +3426,7 @@ int main(int argc, char** argv) {
     {
         size_t size;
         char* kept = (char*)snx_read_file(app.run_log, &size);
-        char* line = snx_format("game with spaces;literal.nro --fullscreen=1 --controls=0 --repo %s\n", app.data_dir);
+        char* line = snx_format("game with spaces;literal.nro --fullscreen=1 --controls=0 --data %s\n", app.data_dir);
         assert(kept && line && !app.run_out && !strncmp(kept, "$ ", 2) && strstr(kept, line));
         free(line);
         assert(strstr(kept, "driver stdout") && strstr(kept, "driver stderr") && strstr(kept, "\n[ended, status 0]\n"));
@@ -3462,7 +3471,7 @@ int main(int argc, char** argv) {
         launcher(&app, true);
         launch(&app, snx_strdup(dump), false); /* read in place: no extraction to put in the folder picked */
         finish(&app, 0);
-        assert(gui_settings_set(&app.settings, "extract", "on")); /* Extract game container: extracted there */
+        assert(gui_settings_set(&app.settings, "extract", "on")); /* Extract dump: extracted there */
         launch(&app, snx_strdup(dump), false);
         finish(&app, 0);
         assert(gui_settings_set(&app.settings, "extract", "off"));
@@ -3572,7 +3581,7 @@ int main(int argc, char** argv) {
         free(extra);
     }
     /* a dump not extracted yet, with less room than its extraction takes (straight into its game's folder: once):
-       asked first, Run anyway pressed twice; Back runs nothing. With room, made already or an NRO, it runs at once */
+       asked first, Run Anyway pressed twice; Back runs nothing. With room, made already or an NRO, it runs at once */
     {
         char *dump = snx_path_join(temporary, "room dump.nsp"), *nro = snx_path_join(temporary, "room dump.nro");
         char *work_was = app.work_dir, *games_was = app.games_dir, *out;
@@ -3586,7 +3595,7 @@ int main(int argc, char** argv) {
         app.menu.selected = GUI_SWITCH;
         launcher(&app, true);
         app.room_free = 2u << 20; /* 3 MB to take */
-        launch(&app, snx_strdup(dump), false); /* Extract game container off: read in place, it takes no room */
+        launch(&app, snx_strdup(dump), false); /* Extract dump off: read in place, it takes no room */
         assert(!app.confirm.shown && app.menu.running);
         finish(&app, 0);
         assert(gui_settings_set(&app.settings, "extract", "on"));
@@ -3594,8 +3603,8 @@ int main(int argc, char** argv) {
         assert(!app.menu.running && app.confirm.shown && app.confirm.ask == GUI_ASK_ROOM && app.room_file);
         render(&app);
         shows(&app, "Needs about 3 MB, 2 MB free.", rgb(app.theme.warning));
-        shows(&app, "- Back", yellow);
-        shows(&app, "- Run anyway", normal);
+        shows(&app, "- Cancel", yellow);
+        shows(&app, "- Run Anyway", normal);
         key(&app, SDLK_RETURN);
         assert(!app.confirm.shown && !app.menu.running && !app.room_file);
         launch(&app, snx_strdup(dump), false);
@@ -3603,11 +3612,11 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RETURN);
         assert(app.confirm.shown && app.confirm.armed && !app.menu.running);
         render(&app);
-        shows(&app, "- Run anyway: press again", yellow);
+        shows(&app, "- Run Anyway: press again", yellow);
         key(&app, SDLK_RETURN);
         assert(!app.confirm.shown && app.menu.running && !app.room_ok && app.menu.selected == GUI_SWITCH);
         finish(&app, 0);
-        /* R's recompile of a dump is asked about too, and Run anyway prepares it again, playing nothing */
+        /* R's recompile of a dump is asked about too, and Run Anyway prepares it again, playing nothing */
         app.recompile = true;
         launch(&app, snx_strdup(dump), false);
         app.recompile = false;
@@ -3618,7 +3627,7 @@ int main(int argc, char** argv) {
         assert(!app.confirm.shown && app.menu.running && !app.recompile);
         finish(&app, 0);
         assert(gui_steps_last(&app.steps, "RECOMPILE") && !gui_steps_last(&app.steps, "LAUNCH"));
-        /* a finger: the first tap arms Run anyway, the second runs it */
+        /* a finger: the first tap arms Run Anyway, the second runs it */
         launch(&app, snx_strdup(dump), false);
         ask_boxes(&app, &r, &l);
         touch_box(&app, choice_box(&app, &l, 1));
@@ -3870,11 +3879,11 @@ int main(int argc, char** argv) {
         assert(!strcmp(kept.game[0].path, app.recent.game[0].path));
         /* in Games, not the menu: a title and the game, then the games; the focus on it, first */
         render(&app);
-        hides(&app, "Recent games", soft); /* the game itself shows in the last output, beside the items */
+        hides(&app, "Recent Games", soft); /* the game itself shows in the last output, beside the items */
         go_tab(&app, GUI_TAB_GAMES);
         render(&app);
-        hides(&app, "- Add a folder", normal);
-        shows(&app, "Recent games", soft);
+        hides(&app, "- Add Folder", normal);
+        shows(&app, "Recent Games", soft);
         assert(app.browser.selected == 0);
         shows(&app, "option flags", yellow); /* a dump's: the loading mark between the marker and its name */
         {
@@ -3896,7 +3905,7 @@ int main(int argc, char** argv) {
         /* YoRHa: the focused game on the band, the title in its soft colour */
         app.theme = *gui_theme_builtin("yorha");
         render(&app);
-        shows(&app, "Recent games", rgb(app.theme.soft));
+        shows(&app, "Recent Games", rgb(app.theme.soft));
         shows(&app, "option flags", rgb(app.theme.page));
         app.theme = *gui_theme_builtin("default");
         /* a game whose file went away leaves the list when chosen, and the file says so */
@@ -3907,7 +3916,7 @@ int main(int argc, char** argv) {
         gui_recent_load(&kept, recent_file);
         assert(!kept.count);
         render(&app);
-        hides(&app, "Recent games", soft);
+        hides(&app, "Recent Games", soft);
         /* five: three of them, and a row that shows the rest */
         {
             const char* names[] = {"e", "d", "c", "b", "a"}; /* added oldest first: a is the newest */
@@ -3919,15 +3928,15 @@ int main(int argc, char** argv) {
             recent_changed(&app);
             assert(app.recent.count == 5 && app.browser.head == 4 && !app.recent_all);
             render(&app);
-            shows(&app, "Recent games", soft);
+            shows(&app, "Recent Games", soft);
             shows(&app, "- a", yellow); /* the focus, the first row */
             shows(&app, "- c", normal);
-            shows(&app, "- ...show more", normal);
+            shows(&app, "- Show More", normal);
             hides(&app, "- d", normal);
             app.browser.selected = 3; /* the row that shows the rest */
             app.message[0] = 0;       /* the gone game's, over the tips */
             render(&app);
-            shows(&app, "- ...show more", yellow);
+            shows(&app, "- Show More", yellow);
             { /* in the tips under the head, not again beside the list */
                 GuiGamesBoxes g;
                 int tx, ty;
@@ -3961,11 +3970,11 @@ int main(int argc, char** argv) {
             for (Uint64 until = SDL_GetTicks() + 10000; app.menu.running && SDL_GetTicks() < until; SDL_Delay(5))
                 pump(&app);
             assert(app.finished && !app.abnormal_exit);
-            snprintf(note, sizeof note, "Recent games not kept: %s could not be written.", unsaved);
-            snprintf(expected, sizeof expected, "Driver exited with status 0. %s", note);
+            snprintf(note, sizeof note, "Recent Games not kept: %s could not be written.", unsaved);
+            snprintf(expected, sizeof expected, "The run ended with status 0. %s", note);
             assert(app.recent_unsaved && app.recent.count == 1 && !strcmp(app.message, expected));
             render(&app);
-            shows(&app, "Driver exited with status 0.", yellow);
+            shows(&app, "The run ended with status 0.", yellow);
             leave_run(&app);
             assert(!strcmp(app.message, note));
             /* written at last: the note goes, what the message said before it stays */
@@ -4109,11 +4118,11 @@ int main(int argc, char** argv) {
     key(&app, SDLK_ESCAPE);
     assert(app.aborting && SDL_GetTicks() - started < 1000);
     render(&app);
-    shows(&app, "Aborting process tree...", red);
+    shows(&app, "Aborting...", red);
     app.theme.prompt.lines[GUI_PROMPT_ABORTING] = true;
     app.theme.prompt.blink = false;
     render(&app);
-    shows_foot(&app, "[ Aborting process tree... ]", red); /* where the keys go */
+    shows_foot(&app, "[ Aborting... ]", red); /* where the keys go */
     app.theme.prompt = gui_theme_builtin(app.theme.id)->prompt;
     key(&app, SDLK_ESCAPE); /* Repeated ESC while reaping is harmless. */
     while (app.menu.running && SDL_GetTicks() - started < 2000) {
@@ -4122,9 +4131,9 @@ int main(int argc, char** argv) {
     }
     assert(!app.menu.running && !app.finished && !app.aborting && !app.menu.quit);
     assert(app.menu.view == GUI_LOAD_NONE && app.abnormal_exit);
-    assert(!strcmp(app.message, "Program ended abnormally (force-terminated by ESC)."));
+    assert(!strcmp(app.message, "Aborted with ESC."));
     render(&app);
-    shows_half(&app, "Program ended abnormally", red); /* in the tips */
+    shows_half(&app, "Aborted with ESC.", red); /* in the tips */
     /* a finger on a running run's ESC line aborts it, anywhere else it does nothing */
     assert(!snx_write_file(hung, "", 0));
     launch(&app, snx_strdup(hung), false);
@@ -4197,7 +4206,7 @@ int main(int argc, char** argv) {
         app.message[0] = 0;
     }
     /* where ESC is a back gesture made by mistake (ask_abort, Android's) it asks first: ESC again, a click off the box
-       or Keep going leave the run going; Abort aborts it. The ESC line's tap asks too, and a held key answers nothing */
+       or Continue leave the run going; Abort aborts it. The ESC line's tap asks too, and a held key answers nothing */
     {
         int pass;
         GuiRect r;
@@ -4222,7 +4231,7 @@ int main(int argc, char** argv) {
             ask_boxes(&app, &r, &l);
             run_place(&app, &p);
             shows(&app, "Abort the recompile? Its work is lost.", rgb(app.theme.warning));
-            shows(&app, "- Keep going", yellow);
+            shows(&app, "- Continue", yellow);
             shows(&app, "- Abort", normal);
             key(&app, SDLK_ESCAPE);
             assert(!app.confirm.shown && app.menu.running && !app.aborting);
@@ -4230,7 +4239,7 @@ int main(int argc, char** argv) {
             key(&app, SDLK_DOWN);
             assert(app.confirm.shown && app.confirm.selected == GUI_CONFIRM_ABORT);
             render(&app);
-            shows(&app, "- Keep going", normal);
+            shows(&app, "- Continue", normal);
             shows(&app, "- Abort", yellow);
             key(&app, SDLK_ESCAPE); /* on Abort too */
             assert(!app.confirm.shown && !app.aborting);
@@ -4261,7 +4270,7 @@ int main(int argc, char** argv) {
             key(&app, SDLK_ESCAPE);
             render(&app);
             shows(&app, "Abort the recompile?", rgb(app.theme.page));
-            shows(&app, "\xfe Keep going", rgb(app.theme.page));
+            shows(&app, "\xfe Continue", rgb(app.theme.page));
             shows(&app, "\xfe Abort", rgb(app.theme.ink));
             ask_boxes(&app, &r, &l);
             {
@@ -4297,7 +4306,7 @@ int main(int argc, char** argv) {
                 SDL_Delay(5);
             }
             assert(!app.menu.running && app.abnormal_exit && !app.finished);
-            assert(!strcmp(app.message, "Program ended abnormally (force-terminated by ESC)."));
+            assert(!strcmp(app.message, "Aborted with ESC."));
         }
         /* a run that ends on its own while asking takes the question with it */
         gui_process_terminate(app.process);
@@ -4319,10 +4328,10 @@ int main(int argc, char** argv) {
     assert(app.menu.view == GUI_LOAD_GAMES && !app.games.count && !app.browser.head);
     render(&app);
     shows(&app, "No games", normal); /* the side box: no row, and how to add a folder */
-    shows(&app, "Settings > App > Folders", normal);
+    shows(&app, "Add a folder of games or dumps", normal);
     key(&app, SDLK_RETURN); /* no row: nothing */
     assert(!app.editing && app.menu.view == GUI_LOAD_GAMES);
-    /* P, or the foot's: Settings > App > Folders at the recompiled library's Add a folder; ESC is Games again, its
+    /* P, or the foot's: Settings > App > Folders at the recompiled library's Add Folder; ESC is Games again, its
        list read again; a tab away goes where it goes from the Settings, Games forgotten */
     press_key(&app, "P", 0, false, yellow);
     assert(app.editing && app.form == GUI_FORM_FOLDERS && app.folders_from_games &&
@@ -4371,7 +4380,7 @@ int main(int argc, char** argv) {
     pump(&app);
     assert(app.games.count == 35 && app.browser.count == 35 && !app.games_fresh && app.browser.activated);
     app.browser.activated = false;
-    /* the menu: the loads, the keys, Settings, Share log and Exit, a box each with none between; no games in it. F5
+    /* the menu: the loads, the keys, Settings, Share Log and Exit, a box each with none between; no games in it. F5
        samples the status again */
     go_tab(&app, GUI_TAB_MENU);
     app.sampled = 1;
@@ -4484,7 +4493,7 @@ int main(int argc, char** argv) {
         shows(&app, "Status", normal);
     }
     hides(&app, "- Games", normal);
-    hides(&app, "Recent games", rgb(app.theme.soft));
+    hides(&app, "Recent Games", rgb(app.theme.soft));
     {
         GuiMenuBoxes m;
         menu_boxes(&app, &m);
@@ -4556,7 +4565,7 @@ int main(int argc, char** argv) {
     }
     /* no row to add a folder, which P, the foot's, does; no Back: ESC is the menu's */
     render(&app);
-    hides(&app, "- Add a folder", yellow);
+    hides(&app, "- Add Folder", yellow);
     hides(&app, "Back [ESC]", normal);
     shows_foot(&app, "P", yellow);
     shows_foot(&app, "folders", normal);
@@ -4694,7 +4703,7 @@ int main(int argc, char** argv) {
         assert(gui_steps_last(&app.steps, "RECOMPILE") && gui_steps_last(&app.steps, "LAUNCH"));
         app.menu.selected = item;
         /* R on it recompiles it through the driver with the backend picked and no option of a run (-S -s, the
-           settings), playing nothing; R on Add a folder or a CIA says why it does nothing. The foot says so, and its
+           settings), playing nothing; R on Add Folder or a CIA says why it does nothing. The foot says so, and its
            word presses R as the key does */
         {
             char* cia = snx_path_join(app.games_dir, "r test.cia");
@@ -4706,6 +4715,15 @@ int main(int argc, char** argv) {
             assert(hint_keys[hint_pick("R", 0, false)].key == SDLK_R &&
                    hint_keys[hint_pick("R", 5, false)].key == SDLK_R);
             assert(hint_keys[hint_pick("Recompile", 3, false)].key == SDLK_R); /* Android's: no R to name */
+            { /* a key's word alone is that key (a finger's "Refresh."); a sentence of other words, text */
+                const char* at = "Refresh. Back.";
+                char k[64], w[64];
+                assert(hint_next(&at, k, w, sizeof k) && !strcmp(k, "Refresh") && !w[0]);
+                assert(hint_next(&at, k, w, sizeof k) && !strcmp(k, "Back") && !w[0] &&
+                       !hint_next(&at, k, w, sizeof k));
+                at = "Type the nickname.";
+                assert(hint_next(&at, k, w, sizeof k) && !k[0] && !strcmp(w, "Type the nickname"));
+            }
             /* B: AOT pack from the keyboard, back from a pad */
             assert(hint_keys[hint_pick("B", 0, false)].key == SDLK_B &&
                    hint_keys[hint_pick("B", 0, true)].key == SDLK_ESCAPE);
@@ -4717,14 +4735,34 @@ int main(int argc, char** argv) {
             key(&app, SDLK_R);
             assert(!app.menu.running && !strcmp(app.message, "No game in focus to recompile."));
             focus_game(&app, "r test.cia");
+            { /* R and M are said on a Switch game, M on a made one: not on a CIA */
+                char said[512];
+                assert(!strstr(screen_said(&app, true, said, sizeof said), "R: recompile.") &&
+                       !strstr(said, "M: mods."));
+            }
             key(&app, SDLK_R);
             assert(!app.menu.running && !strcmp(app.message, "R recompiles Switch games only."));
             focus_game(&app, "folder game");
+            {
+                char said[512];
+                int state = app.aot_state, match = app.aot_match;
+                assert(strstr(screen_said(&app, true, said, sizeof said), "R: recompile.") && strstr(said, "M: mods."));
+                /* B where it builds a pack: a cache read whole, at the build's level */
+                app.aot_state = GUI_AOT_BAD;
+                assert(!strstr(screen_said(&app, true, said, sizeof said), "B: AOT pack."));
+                app.aot_state = GUI_AOT_CACHE;
+                app.aot_match = 0;
+                assert(!strstr(screen_said(&app, true, said, sizeof said), "B: AOT pack."));
+                app.aot_match = 1;
+                assert(strstr(screen_said(&app, true, said, sizeof said), "B: AOT pack."));
+                app.aot_state = state;
+                app.aot_match = match;
+            }
             launcher(&app, true);
             key(&app, SDLK_R);
             assert(app.menu.running && app.native && !app.recompile);
             finish(&app, 0);
-            assert(gui_steps_last(&app.steps, "BUILT") && !gui_steps_last(&app.steps, "LAUNCH"));
+            assert(gui_steps_last(&app.steps, "BUILD") && !gui_steps_last(&app.steps, "LAUNCH"));
             launcher(&app, false);
             app.menu.selected = item;
             assert(!snx_remove_tree(cia));
@@ -4792,7 +4830,7 @@ int main(int argc, char** argv) {
                 8);
             key(&app, SDLK_RETURN);
             /* rows: Update 1.2.0, Update 1.0.0, No update, DLC 1, A mod, B mod, 60 FPS, Infinite HP, Speed x2|x4, Open
-               mods folder, Open cheats folder, Save, Play */
+               Mods Folder, Open Cheats Folder, Save, Play */
             assert(app.addons_shown && !app.menu.running && app.addons.count == 3 && app.mods_count == 2 &&
                    app.cheats_count == 3 && addons_rows(&app) == 13);
             assert(!app.addons_checked[0] && !app.addons_checked[1] && app.addons_checked[2]);
@@ -4801,10 +4839,10 @@ int main(int argc, char** argv) {
             render(&app);
             assert(find_text(&app, "[x] Mod A mod", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "[ ] Mod B mod", rgb(app.theme.ink), 1, &nx, &ny));
-            assert(find_text(&app, "Open mods folder", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "Open Mods Folder", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "[x] Cheat 60 FPS", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "[ ] Cheat Infinite HP", rgb(app.theme.ink), 1, &nx, &ny));
-            assert(find_text(&app, "Open cheats folder", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "Open Cheats Folder", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "( ) Update 1.2.0", rgb(app.theme.ink), 1, &nx, &ny) ||
                    find_text(&app, "( ) Update 1.2.0", yellow, 1, &nx, &ny));
             assert(find_text(&app, "(*) No update", rgb(app.theme.ink), 1, &nx, &ny));
@@ -4980,7 +5018,7 @@ int main(int argc, char** argv) {
         assert(app.menu.selected == GUI_LOG && !app.menu.text_size);
         app.clock = 1; /* a description too long for its box rests before it slides */
         render(&app);
-        shows(&app, "- Share log", yellow);
+        shows(&app, "- Share Log", yellow);
         shows_half(&app, "Saves the last run", normal);
         app.clock = 0;
         {
@@ -4996,7 +5034,7 @@ int main(int argc, char** argv) {
         GuiMenuBoxes m;
         SDL_Color soft = rgb(app.theme.soft);
         int shown;
-        /* Setup device keys blinks, no keys being in use: the clock on a half where it has its usual look, so an
+        /* Install Keys blinks, no keys being in use: the clock on a half where it has its usual look, so an
            arrow in its row is drawn soft wherever the row lands */
         assert(app.theme.blink_ms);
         app.clock = app.theme.blink_ms;
@@ -5234,7 +5272,7 @@ int main(int argc, char** argv) {
         shows_big(&app, "SCARLETNX  /  MENU", ink, 2); /* its head plain, as NieR's titles */
         shows(&app, "\xfe Settings", page);            /* the focused box on a band */
         shows(&app, "\xfe Exit", ink);
-        shows_half(&app, "CWD: ", ink);
+        shows_half(&app, "Working folder: ", ink);
         {
             GuiMenuBoxes
                 m; /* the foot on a band of ink, the keys' box's bar in the page's colour, in the foot's size */
@@ -5252,7 +5290,7 @@ int main(int argc, char** argv) {
             const GuiTheme* y = gui_theme_builtin("yorha");
             char want[600];
             snprintf(want, sizeof want,
-                     "%s: [colors] ink = not a colour is not a colour as #RRGGBB: it keeps #%02X%02X%02X", custom_ini,
+                     "%s: [colors] ink = not a colour is not a color as #RRGGBB: it keeps #%02X%02X%02X", custom_ini,
                      y->ink.r, y->ink.g, y->ink.b);
             assert(!strcmp(app.editor.note, want) && !app.editing);
             app.message[0] = 0; /* as the menu opens with app.ini's theme = custom: said in its message */
@@ -5322,7 +5360,7 @@ int main(int argc, char** argv) {
                 int s = app.scale, w;
                 SDL_Color c;
                 render(&app);
-                shows_foot(&app, "put back", normal); /* the picker's keys */
+                shows_foot(&app, "cancel", normal); /* the picker's keys */
                 picker_place(&app, &pk);
                 assert(pk.box.x + pk.box.w <= f.place.list.x + f.place.list.w); /* over the keys: the preview shows */
                 /* each bar the colours its channel goes through, the red one's ends black and red */
@@ -5459,7 +5497,7 @@ int main(int argc, char** argv) {
             assert(app.editing && app.form == GUI_FORM_APP && app.editor.row == GUI_APP_EDITOR);
             leave_editor(&app);
             render(&app);
-            shows(&app, "- Share log", normal); /* on its own page */
+            shows(&app, "- Share Log", normal); /* on its own page */
             assert(same_colour(pixel(&app, 2, 2), night));
             /* opened on a theme of themes/, it saves there under its own name */
             app_select(&app, GUI_APP_EDITOR);
@@ -5529,17 +5567,18 @@ int main(int argc, char** argv) {
         app.menu.running = app.aborting = true;
         app.theme.prompt.lines[GUI_PROMPT_ABORTING] = true;
         render(&app);
-        colored_text_on(&app, app.cols - 29, app.rows - 1, "[ Aborting process tree... ]", rgb(run->warning), lp);
+        colored_text_on(&app, app.cols - 1 - (int)strlen("[ Aborting... ]"), app.rows - 1, "[ Aborting... ]",
+                        rgb(run->warning), lp);
         app.menu.running = app.aborting = false;
         app.finished = true;
         app.theme.prompt = gui_theme_builtin("yorha")->prompt;
         cell = 16.0f * (float)app.scale;
         /* the menu's footer over the ESC line, in the run's colours: YoRHa's bar style, a band of its ink */
-        colored_text_on(&app, 1, app.rows - 3, "GUI + children: ", lp, li);
-        colored_text_on(&app, 1, app.rows - 2, "CWD: ", lp, li);
+        colored_text_on(&app, 1, app.rows - 3, "RAM ", lp, li);
+        colored_text_on(&app, 1, app.rows - 2, "Working folder: ", lp, li);
         app.theme.footer = GUI_STYLE_PLAIN;
         render(&app);
-        colored_text_on(&app, 1, app.rows - 2, "CWD:", ls, lp);
+        colored_text_on(&app, 1, app.rows - 2, "Working folder:", ls, lp);
         app.theme.footer = GUI_STYLE_NONE;
         render(&app);
         colored_text_on(&app, 1, app.rows - 2, "    ", ls, lp);
@@ -5552,7 +5591,7 @@ int main(int argc, char** argv) {
         colored_text_on(&app, app.cols - 6, app.rows - 5, "100%", li, lp); /* above the footer */
         colored_text_on(&app, 1, app.rows - 4, "OPTION FLAGS", li, lp);
         assert(same_colour(pixel(&app, 8.0f * (float)app.scale + 2, cell * (float)(app.rows - 5) + cell / 2), li));
-        colored_text_on(&app, 1, app.rows - 2, "CWD: ", lp, li);
+        colored_text_on(&app, 1, app.rows - 2, "Working folder: ", lp, li);
         /* typing: five characters in, the cursor after them; async, each line from when it came. The run is over, so
            a row types whole in typing_ms: 25 characters in 10 ms */
         app.theme.typing_sync = false;
@@ -5629,12 +5668,12 @@ int main(int argc, char** argv) {
         colored_text_on(&app, 16, 3, "...OK", li, lp);
         colored_text_on(&app, 3, 4, "compiled block 1/2: code_000 (1.0 s)", ls, lp);
         colored_text_on(&app, 3, 5, "compiled block 2/2: code_001 (1.0 s)", ls, lp);
-        colored_text_on(&app, 1, 6, "BUILT: GAMES/GAME", ls, lp);
+        colored_text_on(&app, 1, 6, "BUILD: GAMES/GAME", ls, lp);
         colored_text_on(&app, 1, 7, "LAUNCH: GAME...FAILED", lf, lp);
         colored_text_on(&app, 3, 8, "fs: 3 files mapped", ls, lp);
         app.theme.collapse = true;
         render(&app);
-        colored_text_on(&app, 1, 4, "BUILT: GAMES/GAME", ls, lp);
+        colored_text_on(&app, 1, 4, "BUILD: GAMES/GAME", ls, lp);
         colored_text_on(&app, 1, 5, "LAUNCH: GAME...FAILED", lf, lp);
         colored_text_on(&app, 3, 6, "fs: 3 files mapped", ls, lp);
         app.theme.detailed = false;
@@ -5753,7 +5792,7 @@ int main(int argc, char** argv) {
         char* keys_folder = snx_dirname(app.keys_path);
         app.theme = *gui_theme_builtin("default");
         assert(app.theme.panels == GUI_PANELS_OUTLINE && !app.theme.cursor[0] && !app.theme.tips_box);
-        /* keys in use, so Setup device keys has its usual look, not the red of a start without them */
+        /* keys in use, so Install Keys has its usual look, not the red of a start without them */
         assert(keys_folder && !snx_mkdirs(keys_folder) && !snx_write_file(app.keys_path, "header_key = 00\n", 16));
         free(keys_folder);
         app.menu.selected = GUI_KEYS;
@@ -5770,7 +5809,7 @@ int main(int argc, char** argv) {
         assert(focus >= 0 && (int)m.lists[UI_MENU_ENTRIES].focus == focus && exit_entry > focus && !m.place.stacked);
         b = menu_entry_box(&app, &m, focus);
         assert(same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), yellow)); /* framed in the focus colour */
-        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Setup device keys", yellow, black);
+        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Install Keys", yellow, black);
         b = menu_entry_box(&app, &m, exit_entry);
         assert(same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), dim)); /* the others in the dim one */
         text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Exit", normal, black);
@@ -5807,7 +5846,7 @@ int main(int argc, char** argv) {
            box under it */
         r = m.place.side;
         assert(r.x >= m.place.list.x + m.place.list.w && r.h > 0 && m.place.status.y >= r.y + r.h);
-        text_px_is(&app, r.x + cw, r.y + 2 * s, "Setup device keys", normal, black);
+        text_px_is(&app, r.x + cw, r.y + 2 * s, "Install Keys", normal, black);
         text_px_is(&app, r.x + cw, r.y + head_h(&app) + 2 * s, "In use: ", rgb(app.theme.soft), black);
         text_px_is(&app, m.place.status.x + cw, m.place.status.y + 2 * s, "Status", normal, black);
         { /* a status too narrow for the usage: the memory and the CPU a row each, the CPU's from its row's start */
@@ -5820,11 +5859,14 @@ int main(int argc, char** argv) {
             gui_usage_text(usage, sizeof usage, true, app.usage.memory_bytes, 50, SDL_GetNumLogicalCPUCores());
             first = (int)(strstr(usage, "  ") - usage);
             box = gui_rect(cw, cw, (first + 6) * cw, 10 * 16 * s); /* room for "  CPU" on the first row, not more */
+            char *cwd_was = app.cwd, short_cwd[] = "/"; /* the usage's rows alone: a working folder of one row */
+            app.cwd = short_cwd;
             SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
             SDL_RenderClear(app.renderer);
             assert(status_rows(&app, first + 6, box, box.y, 1) == status_rows(&app, first + 6, box, box.y, 0));
             assert(find_text(&app, "CPU ", rgb(app.theme.soft), 1, &cx, &cy) && cx == box.x && cy > box.y);
-            assert(find_text(&app, "GUI + children: RAM 90 MB", rgb(app.theme.soft), 1, &cx, &cy) && cx == box.x);
+            assert(find_text(&app, "RAM 90 MB", rgb(app.theme.soft), 1, &cx, &cy) && cx == box.x);
+            app.cwd = cwd_was;
             render(&app);
         }
         /* the tips on a row of their own under the head, what the focus is about or the screen's message, a failure's
@@ -5894,7 +5936,7 @@ int main(int argc, char** argv) {
         tips_px_is(&app, r, "Program ended abnormally", red, black);
         app.message[0] = 0;
         app.abnormal_exit = false;
-        /* the pointer: over Exit's box it takes the focus, a click on Setup device keys opens its screen */
+        /* the pointer: over Exit's box it takes the focus, a click on Install Keys opens its screen */
         b = menu_entry_box(&app, &m, exit_entry);
         mouse_px(&app, b.x + 4, b.y + 4, false);
         assert(app.menu.selected == GUI_EXIT);
@@ -5903,7 +5945,7 @@ int main(int argc, char** argv) {
         assert(app.menu.view == GUI_LOAD_KEYS);
         key(&app, SDLK_ESCAPE);
         assert(app.menu.view == GUI_LOAD_NONE && app.menu.selected == GUI_KEYS);
-        /* Games: Add a folder, then as many of a page's games as the list's box holds, the focused one's path beside
+        /* Games: Add Folder, then as many of a page's games as the list's box holds, the focused one's path beside
            them and in the bar; Right turns the page, ESC goes back */
         {
             GuiGamesBoxes g;
@@ -5951,9 +5993,9 @@ int main(int argc, char** argv) {
             render(&app);
             pick_boxes(&app, &k);
             r = inner(&app, k.place.list);
-            text_px_is(&app, r.x, k.place.list.y + 2 * s, "Setup device keys", normal, black);
+            text_px_is(&app, r.x, k.place.list.y + 2 * s, "Install Keys", normal, black);
             text_px_is(&app, r.x + (r.w - (int)strlen(waiting) * cw) / 2, k.prompt, waiting, yellow, black);
-            tips_px_is(&app, k.place.tips, "Setup device keys:", normal, black);
+            tips_px_is(&app, k.place.tips, "Install Keys:", normal, black);
             app.clock = 0;
             mouse_px(&app, r.x + 10, k.prompt + 4, true);
             for (until = SDL_GetTicks() + 2000; !app.message[0] && SDL_GetTicks() < until;)
@@ -6048,7 +6090,7 @@ int main(int argc, char** argv) {
             form_boxes(&app, &f);
             text_px_is(&app, f.place.side.x + cw, f.place.side.y + 2 * s, "Launch", normal, black);
             b = form_row_box(&app, &f, true, 0);
-            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- gdbstub", normal, black);
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- GDB stub", normal, black);
             /* a click on one of those rows opens the group on it */
             b = form_row_box(&app, &f, true, 1);
             mouse_px(&app, b.x + 4, b.y + 4, true);
@@ -6062,7 +6104,7 @@ int main(int argc, char** argv) {
             b = form_row_box(&app, &f, false, launch);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Launch", yellow, black); /* the group open */
             b = form_row_box(&app, &f, true, 0);
-            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- gdbstub", yellow, black);
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- GDB stub", yellow, black);
             {
                 char start[16]; /* in the tips, its first row, under the head */
                 snprintf(start, sizeof start, "%s", app.settings.keys[0].about);
@@ -6194,7 +6236,7 @@ int main(int argc, char** argv) {
             ask_boxes(&app, &r, &choices);
             text_px_is(&app, r.x + cw, r.y + 4 * s, "Exit ScarletNX?", rgb(app.theme.warning), black);
             text_px_is(&app, choice_box(&app, &choices, 0).x + cw / 2, item_text_y(&app, choice_box(&app, &choices, 0)),
-                       "- Stay", yellow, black);
+                       "- Cancel", yellow, black);
             { /* a row each, 2 pixels apart and as high as the menu's rows */
                 GuiRect stay = choice_box(&app, &choices, 0), quit = choice_box(&app, &choices, 1);
                 assert(stay.h == item_h(&app) && quit.y - stay.y == item_h(&app) + 2 * s);
@@ -6284,7 +6326,7 @@ int main(int argc, char** argv) {
             text_px_is(&app, p.side.x + cw,
                        p.side.y + head_h(&app) + 2 * s +
                            wrap_rows(&app, app.file, (p.side.w - 2 * cw) / cw, 1) * 16 * s + 8 * s,
-                       "Driver exited with status 0.", yellow, black);
+                       "The run ended with status 0.", yellow, black);
             r = foot_room(&app, p.keys, app.theme.footer_box);
             foot_px_is(&app, r.x, r.y, SAY_DONE, red, black);
             key(&app, SDLK_ESCAPE);
@@ -6473,7 +6515,7 @@ int main(int argc, char** argv) {
             key(&app, SDLK_ESCAPE);
             assert(app.editing && app.form == GUI_FORM_APP);
             leave_editor(&app);
-            /* Folders: a library's Add a folder opens the folder picker for that library, which answers none here; the
+            /* Folders: a library's Add Folder opens the folder picker for that library, which answers none here; the
                foot has only what the focused row does: Del on an Extra, nothing on dumps/ */
             app_select(&app, GUI_APP_PLACES);
             assert(app.editing && app.form == GUI_FORM_FOLDERS && !app.editor.note[0]);
@@ -6526,12 +6568,12 @@ int main(int argc, char** argv) {
         render(&app);
         menu_boxes(&app, &m);
         b = menu_entry_box(&app, &m, (int)m.lists[UI_MENU_ENTRIES].focus);
-        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe Setup device keys", page, rgb(app.theme.focus));
+        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe Install Keys", page, rgb(app.theme.focus));
         text_px_is(&app, m.rects[UI_MENU_ENTRIES].x, item_text_y(&app, b), "\x10", rgb(app.theme.focus), page);
         b = menu_entry_box(&app, &m, GUI_EXIT);
         text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe Exit", ink, dim = rgb(app.theme.dim));
         r = m.place.side;
-        text_px_is(&app, r.x + cw, r.y + 2 * s, "Setup device keys", page, ink);
+        text_px_is(&app, r.x + cw, r.y + 2 * s, "Install Keys", page, ink);
         assert(m.place.tips.y < m.place.list.y); /* the tips in their box under the head, off the band */
         tips_px_is(&app, m.place.tips, "Installs prod.keys", ink, page);
         render_foot_tips(&app, &m); /* in the foot, as the setup's: on its band, in the page's colour */
@@ -6617,7 +6659,7 @@ int main(int argc, char** argv) {
                 assert(app.form == GUI_FORM_USERS && gui_editor_rows(&app.editor) == 3 &&
                        !strcmp(app.users_form.plays, "User 1: Aogo"));
                 render(&app);
-                shows(&app, "Plays as User 1: Aogo", rgb(app.theme.page)); /* focused: on YoRHa's bar */
+                shows(&app, "Current user User 1: Aogo", rgb(app.theme.page)); /* focused: on YoRHa's bar */
                 shows(&app, "Xuji", rgb(app.theme.ink));
                 key(&app, SDLK_RIGHT);
                 assert(setting_is(&app, "user", "2") && !strcmp(app.users_form.plays, "User 2: Xuji") && app.user == 2);
@@ -6938,7 +6980,7 @@ int main(int argc, char** argv) {
         app.theme.grid = false;
         render(&app);
         menu_boxes(&app, &m);
-        /* with its tabs and big title, a 1280x800 window still holds the whole menu, and Games Add a folder, three
+        /* with its tabs and big title, a 1280x800 window still holds the whole menu, and Games Add Folder, three
            recent games, the row for the rest and a page of games */
         {
             GuiRecent kept = app.recent;
@@ -6960,8 +7002,8 @@ int main(int argc, char** argv) {
                 render(&app);
                 games_boxes(&app, &g);
                 assert(g.lead == 5 && ui_games_shown(g.rects, app.scale, UI_GAMES_ROWS) > (size_t)g.lead);
-                shows(&app, "Recent games", rgb(app.theme.soft));
-                shows(&app, "\xfe ...show more", rgb(app.theme.ink));
+                shows(&app, "Recent Games", rgb(app.theme.soft));
+                shows(&app, "\xfe Show More", rgb(app.theme.ink));
             }
             go_tab(&app, GUI_TAB_MENU);
             app.recent = kept;
@@ -7089,7 +7131,7 @@ int main(int argc, char** argv) {
         app.browser = (GuiBrowser){0};
         app.theme = *gui_theme_builtin("default");
     }
-    /* Share log off Android: scarletnx.log with the message and the last run's output, in the state folder of a data
+    /* Share Log off Android: scarletnx.log with the message and the last run's output, in the state folder of a data
        folder that keeps its kinds apart, else in the working folder */
     {
         char *saved = snx_path_join(temporary, "scarletnx.log"), *installed_dir = app.data_dir;
@@ -7179,7 +7221,7 @@ int main(int argc, char** argv) {
     /* Android's menu: its own files in its data folder's config/ and state/ (.scarletnx/ in the app's own files, which
        the Files app shows). An older version's, in the app's own files, are neither moved nor read: the menu starts
        from its defaults, and the box of what older versions left names each file with its size, then how they go while
-       the app is in testing; Share log too */
+       the app is in testing; Share Log too */
     {
         static const char* const olds[6][2] = {{"settings.ini", "[Display]\nfullscreen = 0\n"},
                                                {"app.ini", "[app]\ntheme = yorha\ntext_size = 2\n"},
@@ -7231,7 +7273,7 @@ int main(int argc, char** argv) {
         free(expected);
         assert(!strcmp(app.theme.id, "default") && app.menu.text_size == text_size && !app.recent.count &&
                app.folder_count == folder_count);
-        /* the box: each file with its size, where this one keeps it for Share log, then how they go */
+        /* the box: each file with its size, where this one keeps it for Share Log, then how they go */
         left_behind(&app);
         assert(app.left_clear);
         for (i = 0; i < 6; ++i) {
@@ -7254,7 +7296,7 @@ int main(int argc, char** argv) {
         shows(&app, SAY_LEFT_TITLE, rgb(app.theme.ink));
         shows(&app, "While the app is in testing,", rgb(app.theme.ink));
         app.left_shown = false;
-        app.log_due = true; /* a crash's log: Share log blinks in the failure colour until it is saved */
+        app.log_due = true; /* a crash's log: Share Log blinks in the failure colour until it is saved */
         assert((ui_menu_entries_attr_cb(&app, GUI_LOG) & (UI_ATTR_FAILURE | UI_ATTR_BLINK)) ==
                (UI_ATTR_FAILURE | UI_ATTR_BLINK));
         share_log(&app);
@@ -7449,14 +7491,14 @@ int main(int argc, char** argv) {
                         free(line);
                         rest += cut;
                     }
-                    hides(&app, paths[1], ink); /* where it goes is Share log's */
+                    hides(&app, paths[1], ink); /* where it goes is Share Log's */
                 }
                 assert(wraps >= 1); /* the long game's path wraps */
                 shows(&app, "1 KB", soft);
                 shows(&app, "3 MB", soft);
                 shows(&app, "0 MB", soft);
                 shows(&app, "- OK", yellow);
-                hides(&app, "which Share log lists", rgb(app.theme.soft));
+                hides(&app, "which Share Log lists", rgb(app.theme.soft));
                 /* a window too short for them all: as many as fit, then how many more */
                 assert(SDL_SetWindowSize(app.window, window_w, 14 * 16 * app.scale));
                 SDL_SyncWindow(app.window);
@@ -7464,7 +7506,7 @@ int main(int argc, char** argv) {
                 for (more = 0, n = 1; n < 5; ++n) {
                     char said[64];
                     int x, y;
-                    snprintf(said, sizeof said, "and %d more, which Share log lists", n);
+                    snprintf(said, sizeof said, "and %d more, which Share Log lists", n);
                     if (find_text(&app, said, rgb(app.theme.soft), 1, &x, &y)) more = n;
                 }
                 assert(more > 0);
@@ -7490,7 +7532,7 @@ int main(int argc, char** argv) {
                         render(&app);
                     }
                     assert(app.files_top + app.files_shown == app.lefts && app.files_top > 0);
-                    hides(&app, "which Share log lists", rgb(app.theme.soft));
+                    hides(&app, "which Share Log lists", rgb(app.theme.soft));
                     shows(&app, line, failure);
                     free(line);
                     top = app.files_top;
@@ -7533,7 +7575,7 @@ int main(int argc, char** argv) {
                 /* another key closes it and does nothing else; nothing was moved */
                 key(&app, SDLK_RIGHT);
                 assert(!app.left_shown && app.menu.selected == selected && snx_is_file(loose));
-                /* Clean old settings cleans settings only: what an older version left stays where it is */
+                /* Clean Old Settings cleans settings only: what an older version left stays where it is */
                 clean_old(&app);
                 assert(snx_is_file(loose) && snx_is_dir(loose_data) && snx_is_file(npdm) && snx_is_dir(work));
                 left_behind(&app);

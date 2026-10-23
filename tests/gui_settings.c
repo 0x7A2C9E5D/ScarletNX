@@ -27,7 +27,7 @@ static const char list[] =
     "Graphics\tbroken\t0\tint\t0\t1\tA value without its word\t\t0|1=On\n"
     "settings: not a setting\n"
     "On-screen controls\tcontrols\t0\tint\t0\t1\tThe on-screen controls\tShow controls\t0=Off|1=On\n"
-    "On-screen controls\ttouch\t2\tint\t0\t2\tThe game's touch screen\tTouch screen\t0=Off|1=Fingers|2=Mouse too\n"
+    "On-screen controls\ttouch\t2\tint\t0\t2\tThe game's touch screen\tTouch screen\t0=Off|1=Fingers|2=Fingers and mouse\n"
     "On-screen controls/Buttons\tcontrols_a_shown\t\tint\t0\t1\tA control drawn\tA\t0=Hidden|1=Shown\n"
     "On-screen controls/Buttons\tcontrols_b_shown\t\tint\t0\t1\tA control drawn\tB\t0=Hidden|1=Shown\n"
     "Controllers\tgamepad_rumble\t100\tint\t0\t100\tHow strongly\tVibration\t0=Off|50=50%|100=100%\n"
@@ -76,14 +76,14 @@ int main(int argc, char** argv) {
        order, the other line left out; a page's row and its All before its settings */
     int tracy = at(&s, "tracy_capture") >= 0; /* the row a runtime without SNX_TRACY does not list */
     int opt = 3 + tracy;                      /* the optimization level's row, after it */
-    assert(s.own > 5 && s.count == s.own + 15 + tracy && !strcmp(s.keys[0].key, "gdbstub"));
-    assert(!tracy || at(&s, "tracy_capture") == 3); /* after Extract game container, before the optimization level */
+    assert(s.own > 5 && s.count == s.own + 15 + tracy && !strcmp(s.keys[0].key, "GDB stub"));
+    assert(!tracy || at(&s, "tracy_capture") == 3); /* after Extract dump, before the optimization level */
     assert(!strcmp(s.keys[0].section, "Launch") && !strcmp(s.keys[0].about, "Enables gdbstub on port 1234") &&
            words(&s.keys[0]) == 2 && !strcmp(s.values[0].key, "gdbstub"));
     /* shown by its name, kept by its key */
     assert(!strcmp(s.keys[1].section, "Launch") && !strcmp(s.keys[1].key, "Extract to tmpfs") &&
            !strcmp(s.values[1].key, "tmpfs") && words(&s.keys[1]) == 2 && strstr(s.keys[1].about, "RomFS"));
-    assert(!strcmp(s.keys[2].section, "Launch") && !strcmp(s.keys[2].key, "Extract game container") &&
+    assert(!strcmp(s.keys[2].section, "Launch") && !strcmp(s.keys[2].key, "Extract dump") &&
            !strcmp(s.values[2].key, "extract") && words(&s.keys[2]) == 2 && strstr(s.keys[2].about, "dump"));
     assert(!tracy || (!strcmp(s.keys[3].section, "Launch") && !strcmp(s.values[3].key, "tracy_capture") &&
                       words(&s.keys[3]) == 2 && strstr(s.keys[3].about, "PATH")));
@@ -92,10 +92,12 @@ int main(int argc, char** argv) {
        AOT threads a number (0 the cores), the unit cache limit a number of GB (0 none), and LLVM Internals is a page of
        its own */
     assert(!strcmp(s.keys[opt].section, "Launch") && !strcmp(s.keys[opt].key, "Optimization level") &&
-           !strcmp(s.values[opt].key, "opt") && words(&s.keys[opt]) == 6 && !gui_settings_recompile(&s, options));
+           !strcmp(s.values[opt].key, "opt") && words(&s.keys[opt]) == 7 && !gui_settings_recompile(&s, options));
     assert(gui_settings_set(&s, "opt", "z") && gui_settings_recompile(&s, options) == 1 && !strcmp(options[0], "--opt=z"));
-    assert(!gui_settings_set(&s, "opt", "s") && gui_settings_set(&s, "aot_threads", "4"));
-    assert(gui_settings_recompile(&s, options) == 2 && !strcmp(options[1], "--aot_threads=4"));
+    assert(!gui_settings_set(&s, "opt", "q") && gui_settings_set(&s, "opt", "s") &&
+           gui_settings_set(&s, "aot_threads", "4"));
+    assert(gui_settings_recompile(&s, options) == 2 && !strcmp(options[0], "--opt=s") &&
+           !strcmp(options[1], "--aot_threads=4"));
     assert(!strcmp(s.keys[opt + 2].section, "Launch") && !strcmp(s.keys[opt + 2].key, "Unit cache limit") &&
            !strcmp(s.values[opt + 2].key, "unit_cache_gb") && strstr(s.keys[opt + 2].about, "0 = no limit"));
     assert(!strcmp(s.values[opt + 2].def, "0") && strstr(s.keys[opt + 2].about, "a tenth of its disk free")); /* no limit */
@@ -112,7 +114,7 @@ int main(int argc, char** argv) {
        typed, an older runtime's and one with a value missing its word among them */
     assert(!strcmp(key(&s, "controls")->key, "Show controls") && key(&s, "controls")->type == GUI_KEY_WORD);
     assert(words(key(&s, "touch")) == 4 && !strcmp(key(&s, "touch")->key, "Touch screen"));
-    assert(!strcmp(key(&s, "touch")->words[0], ".ini") && !strcmp(key(&s, "touch")->words[3], "Mouse too"));
+    assert(!strcmp(key(&s, "touch")->words[0], ".ini") && !strcmp(key(&s, "touch")->words[3], "Fingers and mouse"));
     assert(words(key(&s, "anisotropy")) == 18 && !strcmp(key(&s, "anisotropy")->words[17], "16"));
     assert(key(&s, "language")->type == GUI_KEY_TEXT && key(&s, "resolution")->type == GUI_KEY_TEXT);
     assert(key(&s, "old")->type == GUI_KEY_TEXT && key(&s, "broken")->type == GUI_KEY_TEXT);
@@ -132,7 +134,7 @@ int main(int argc, char** argv) {
     assert(!gui_settings_value(&s, "touch") && !gui_settings_value(&s, "language") && !gui_settings_value(&s, "x"));
     assert(gui_settings_set(&s, "touch", "1") && !strcmp(gui_settings_value(&s, "touch"), "1"));
     assert(!strcmp(shown(&s, "touch"), "Fingers"));
-    assert(!gui_settings_set(&s, "touch", "3") && !gui_settings_set(&s, "touch", "Mouse too"));
+    assert(!gui_settings_set(&s, "touch", "3") && !gui_settings_set(&s, "touch", "Fingers and mouse"));
     assert(!strcmp(gui_settings_value(&s, "touch"), "1") && !gui_settings_set(&s, "Touch screen", "2"));
     /* on the screen: a pick as it is; a row not picked the runtime's default in its words, a text as it is, an empty
        one bare, then [default]; an All while none of its rows is; the launcher's own and a page's as they are */
@@ -363,7 +365,8 @@ int main(int argc, char** argv) {
                !strcmp(key(&s, "gamepad_p3_device")->section, "Controllers/Player"));
         assert(!strcmp(s.keys[s.own].section, "Display") && !strcmp(s.keys[s.count - 1].section, "Debug"));
         assert(words(key(&s, "fullscreen")) == 3 && words(key(&s, "touch")) == 4 && words(key(&s, "controls")) == 3);
-        assert(!strcmp(key(&s, "controls")->key, "Show controls") && !strcmp(key(&s, "touch")->words[3], "Mouse too"));
+        assert(!strcmp(key(&s, "controls")->key, "Show controls") &&
+               !strcmp(key(&s, "touch")->words[3], "Fingers and mouse"));
         assert(!strcmp(key(&s, "gamepad_rumble")->words[1], "Off") && !key(&s, "controls_a"));
         assert(gui_settings_set(&s, "fullscreen", "0") && gui_settings_set(&s, "touch", "1"));
         assert(gui_settings_set(&s, "controls", "0") && key(&s, "resolution")->type == GUI_KEY_TEXT);

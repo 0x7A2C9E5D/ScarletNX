@@ -167,7 +167,7 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
         CHECK(!snx_remove_tree(argv[1]));
     return rc;
 }
-/* a dump given to -r, read in place (Extract game container off): a file, not an NRO */
+/* a dump given to -r, read in place (Extract dump off): a file, not an NRO */
 static int dump_input(const char* input) {
     size_t n = strlen(input);
     return snx_is_file(input) && !(n > 4 && input[n - 4] == '.' && (input[n - 3] | 32) == 'n' &&
@@ -266,7 +266,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         free(given);
         free(expected);
     } else if (getenv("SNX_WORKFLOW_DUMP") && *getenv("SNX_WORKFLOW_DUMP")) {
-        /* Extract game container off: the dump itself, read in place, named as its game is */
+        /* Extract dump off: the dump itself, read in place, named as its game is */
         char *given = snx_absolute(argv[3]), *expected = snx_absolute(getenv("SNX_WORKFLOW_DUMP"));
         CHECK(argc == 5 && given && expected && snx_same_file(given, expected));
         free(given);
@@ -394,6 +394,8 @@ static void run(const char* exe, const char* repo, const char* dump, const char*
     rc = snx_run(args, NULL, NULL, &output);
     if (rc != expected) fprintf(stderr, "expected %d, got %d: %s\n", expected, rc, output);
     CHECK(rc == expected);
+    if (diagnostic && !strstr(output, diagnostic))
+        fprintf(stderr, "expected it to say %s, got: %s\n", diagnostic, output);
     if (diagnostic) CHECK(strstr(output, diagnostic) != NULL);
     recorded = snx_read_file(log, &size);
     if (recorded && strcmp((const char*)recorded, events))
@@ -640,7 +642,7 @@ int main(int argc, char** argv) {
     set_env("SNX_WORKFLOW_DUMP", "");
     set_env("SNX_WORKFLOW_ADDON", "");
     set_env("SNX_WORKFLOW_UPDATE", "");
-    /* Extract game container on: the dump extracted into its game's data folder, which the game is made from */
+    /* Extract dump on: the dump extracted into its game's data folder, which the game is made from */
     set_env("SNX_WORKFLOW_EXTRACT", "1");
     reset(repo, dump);
     run(exe, repo, dump, log, 0, "ERG", NULL);
@@ -783,12 +785,12 @@ int main(int argc, char** argv) {
     reset(repo, dump);
     set_env("SNX_WORKFLOW_MODE", "missing");
     set_env("SNX_WORKFLOW_FAIL", "E");
-    run(exe, repo, dump, log, 1, "E", "Extraction finished without creating");
+    run(exe, repo, dump, log, 1, "E", "extraction finished without creating");
     set_env("SNX_WORKFLOW_FAIL", "R");
-    run(exe, repo, dump, log, 1, "ER", "Recompilation finished without creating");
+    run(exe, repo, dump, log, 1, "ER", "recompilation finished without creating");
     set_env("SNX_WORKFLOW_FAIL", "");
     run(exe, repo, dump, log, 0, "RG", NULL);
-    run(exe, repo, "/nonexistent/dump.xci", log, 1, "", "Input dump is missing");
+    run(exe, repo, "/nonexistent/dump.xci", log, 1, "", "/nonexistent/dump.xci is not a file");
     {
         const char* flags[] = {"--headless", "-H"};
         unsigned j;
@@ -907,15 +909,15 @@ int main(int argc, char** argv) {
         run(exe, repo, folder, log, 0, "EG", NULL);
         CHECK(snx_is_file(ram) && !snx_is_file(disk) && snx_is_file(marker));
         CHECK(!snx_remove_tree(work) && !snx_remove_tree(ini));
-        run(exe, repo, folder, log, 0, "G", "Can't be extracted to tmpfs: the game's settings name no dump");
+        run(exe, repo, folder, log, 0, "G", "The game cannot be extracted to tmpfs: its .ini names no dump (source=)");
         set_env("SNX_WORKFLOW_FLAGS", "");
-        run(exe, repo, folder, log, 0, "G", "name no dump");
+        run(exe, repo, folder, log, 0, "G", "names no dump");
         set_env("SNX_WORKFLOW_FLAGS", "--tmpfs");
         CHECK(!snx_symlink(dump, link)); /* an older version's */
         run(exe, repo, folder, log, 0, "EG", NULL);
         CHECK(snx_is_file(ram) && !snx_is_file(ini));
         set_env("SNX_WORKFLOW_OUT", temp);
-        run(exe, repo, dump, log, 1, "", "--tmpfs puts it in tmpfs");
+        run(exe, repo, dump, log, 1, "", "--tmpfs puts the extraction in tmpfs");
         set_env("SNX_WORKFLOW_OUT", "");
         set_env("SNX_WORKFLOW_FLAGS", "");
         set_env("SNX_WORKFLOW_TMPFS", "");
@@ -946,7 +948,7 @@ int main(int argc, char** argv) {
             run(exe, repo, nro, log, 0, "RG", NULL);
             CHECK(!snx_is_dir(kept) && snx_is_file(game));
             set_env("SNX_WORKFLOW_OUT", kept); /* an extraction an NRO does not have */
-            run(exe, repo, nro, log, 1, "", "--out names a dump's extraction, and an NRO has none");
+            run(exe, repo, nro, log, 1, "", "--out cannot go with an NRO: an NRO has no extraction");
             set_env("SNX_WORKFLOW_OUT", "");
             CHECK(!snx_mkdirs(kept));
             run(exe, repo, nro, log, 0, "RG", NULL);
@@ -955,7 +957,11 @@ int main(int argc, char** argv) {
             set_env("SNX_WORKFLOW_FAIL", "");
             run(exe, repo, nro, log, 0, "RG", NULL);
             CHECK(!snx_remove_tree(nro));
-            run(exe, repo, nro, log, 1, "", "Input dump is missing");
+            {
+                char* gone = snx_format("%s is not a file", nro);
+                run(exe, repo, nro, log, 1, "", gone);
+                free(gone);
+            }
             free(nro);
         }
         set_env("SNX_WORKFLOW_NRO", "");
@@ -993,7 +999,7 @@ int main(int argc, char** argv) {
         run(exe, repo, folder, log, 0, "R", NULL);
 #ifndef _WIN32
         set_env("SNX_WORKFLOW_FLAGS", "-rx");
-        run(exe, repo, game, log, 1, "", "-rx requires");
+        run(exe, repo, game, log, 1, "", "-rx takes an XCI, NSP, DXCI or DNSP dump");
 #endif
         set_env("SNX_WORKFLOW_FLAGS", "--backend=gcc");
         run(exe, repo, game, log, 1, "", "LLVM is the only backend");
@@ -1061,7 +1067,7 @@ int main(int argc, char** argv) {
         free(out);
         free(outdir);
     }
-    /* Extract game container off, the default: nothing extracted, the game made from its dump read in place and the
+    /* Extract dump off, the default: nothing extracted, the game made from its dump read in place and the
        dump recorded in its .ini. Switched on, the dump is extracted into the data folder without a recompile; off again,
        that extraction is taken away. A game made already is recompiled from the dump its .ini names, -r prepares a dump
        without extracting it, and a game whose dump is not there says so */
@@ -1104,7 +1110,7 @@ int main(int argc, char** argv) {
         run(exe, repo, dump, log, 0, "G", NULL);
         set_env("SNX_WORKFLOW_OPT", "");
         set_env("SNX_WORKFLOW_FLAGS", "-O9");
-        run(exe, repo, dump, log, 1, "", "-O expects 0,1,2,3,s,z");
+        run(exe, repo, dump, log, 1, "", "-O 9: not 0, 1, 2, 3, s or z");
         set_env("SNX_WORKFLOW_FLAGS", "");
         set_env("SNX_WORKFLOW_DUMP", "");
         free(own);
@@ -1115,7 +1121,7 @@ int main(int argc, char** argv) {
     /* Updates and DLCs: an update's dump made into its own program beside the game made already, a DLC's recorded with
        no program; each checked in the game's addons=, an update over the one checked, and the game played with them,
        from the checked update's program. Refused before the game is there; given with the game's dump as --update,
-       one or several. A DLC program an older version made is taken away. Extract game container extracts the update
+       one or several. A DLC program an older version made is taken away. Extract dump extracts the update
        and the DLCs checked into their data folders, and off again takes them away */
 #ifndef _WIN32
     {
@@ -1131,7 +1137,7 @@ int main(int argc, char** argv) {
         reset(repo, dump);
         CHECK(!snx_write_file(game_dump, "game", 4) && !snx_write_file(update, "update", 6) &&
               !snx_write_file(dlc, "dlc", 3));
-        run(exe, repo, update, log, 1, "", "recompile the base game first");
+        run(exe, repo, update, log, 1, "", "which is not recompiled yet: play the game's dump first");
         set_env("SNX_WORKFLOW_UPDATE", update);
         run(exe, repo, game_dump, log, 0, "RRA", NULL);
         set_env("SNX_WORKFLOW_UPDATE", "");
@@ -1146,10 +1152,10 @@ int main(int argc, char** argv) {
         run(exe, repo, game_dump, log, 0, "A", NULL); /* the game, played with its checked update */
         /* a DLC program an older version made, taken away as its dump is played: the game played with it */
         CHECK(!snx_copy_file(exe, old_dlc));
-        {   /* --out, which the menu passes with Extract game container: a DLC's goes into its own data folder */
+        { /* --out, which the menu passes with Extract dump: a DLC's goes into its own data folder */
             char* out = snx_path_join(root, "work elsewhere/Dlc");
             set_env("SNX_WORKFLOW_OUT", out);
-            run(exe, repo, dlc, log, 0, "A", "a DLC plays with its game now");
+            run(exe, repo, dlc, log, 0, "A", "a DLC has no program, it plays with its game");
             set_env("SNX_WORKFLOW_OUT", "");
             CHECK(!snx_path_exists(out));
             free(out);
@@ -1265,7 +1271,7 @@ int main(int argc, char** argv) {
         setup[1] = "--debug";
         setup[2] = "/nonexistent/dump.nsp";
         output = NULL;
-        CHECK(snx_run(setup, NULL, home, &output) == 1 && strstr(output, "Input dump is missing") &&
+        CHECK(snx_run(setup, NULL, home, &output) == 1 && strstr(output, "/nonexistent/dump.nsp is not a file") &&
               !strstr(output, "Changed"));
         free(output);
         free(home);

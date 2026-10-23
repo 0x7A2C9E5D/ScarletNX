@@ -41,7 +41,7 @@ def main():
             env[f'XDG_{kind}_HOME'] = str(path)
         env['HOME'] = str(root / 'home')
         data, config, state, cache = (homes[kind] / 'scarletnx' for kind in ('DATA', 'CONFIG', 'STATE', 'CACHE'))
-        games = data / 'games'
+        games = data / 'recompiled'
         folder = games / 'Smoke'  # the game's own
 
         def run(command, cwd=root, environment=None):
@@ -73,8 +73,8 @@ def main():
 
         # recompiled into the data folder (--repo names it, as the menu does): the settings in the config folder
         status, out = run([driver, '--repo', str(data), '-r', str(nro), 'Smoke', '--runtime', driver, '--jobs', '2'])
-        check(status == 0 and (folder / 'Smoke').is_file(), 'the recompile did not put Smoke in games/Smoke/', out)
-        ini = config / 'games/Smoke/Smoke.ini'
+        check(status == 0 and (folder / 'Smoke').is_file(), 'the recompile did not put Smoke in recompiled/Smoke/', out)
+        ini = config / 'recompiled/Smoke/Smoke.ini'
         older = 'kept from the older build'
         check(ini.is_file() and older not in ini.read_text(), f'the recompile did not write {ini}', out)
         check(older in (folder / 'Smoke.ini').read_text(), 'the older Smoke.ini was touched', out)
@@ -102,7 +102,7 @@ def main():
         # the build tree's own driver with no --repo works there too (#318), never in the checkout it was built from
         checkout = Path(__file__).resolve().parents[1]
         status, out = run([driver, '-r', str(nro), 'Tree', '--runtime', driver, '--jobs', '2'])
-        check(status == 0 and (games / 'Tree/Tree').is_file(), 'the driver without --repo did not use games/', out)
+        check(status == 0 and (games / 'Tree/Tree').is_file(), 'the driver without --repo did not use recompiled/', out)
         check(
             f'unit cache: {kept} of {kept} units reused' in out,
             f'another game of the same code did not reuse {units}',
@@ -113,9 +113,9 @@ def main():
         # the game, started in its folder as ./Smoke, logs in the state folder and stops before the GPU without its
         # ExeFS. Each start says where the older files are, as long as they are there
         shutil.rmtree(folder / 'Smoke_data/exefs')
-        log = state / 'games/Smoke/Smoke.log'
-        threads = state / 'games/Smoke/threads.txt'
-        pipelines = cache / 'games/Smoke/shader_cache/vk_pipelines.bin'
+        log = state / 'recompiled/Smoke/Smoke.log'
+        threads = state / 'recompiled/Smoke/threads.txt'
+        pipelines = cache / 'recompiled/Smoke/shader_cache/vk_pipelines.bin'
         for start in ('first', 'second'):
             status, out = run(['./Smoke', '-H'], cwd=folder)
             text = log.read_text(errors='replace') if log.is_file() else ''
@@ -130,7 +130,7 @@ def main():
         check((folder / 'Smoke.log').read_text() == 'older log\n', 'the game wrote in the older Smoke.log', out)
         # a .ini the game cannot read: said with its path and the reason, the defaults taken, the file not written over.
         # Root reads it all the same
-        if hasattr(os, 'geteuid') and os.geteuid() != 0:
+        if hasattr(os, 'geteuid') and os.geteuid() != 0 and ini.is_file():  # its absence is said above
             before = ini.read_bytes()
             ini.chmod(0)
             try:
@@ -170,7 +170,7 @@ def main():
         (root / 'empty.nsp').write_bytes(b'PFS0' + bytes(12))
         status, out = run([driver, '--repo', str(data), '-x', str(root / 'empty.nsp')])
         check((data / 'work/Old/exefs/main').read_bytes() == b'code', 'the older work/ was touched', out)
-        told = f'{data / "work"} was left by an older version: this one keeps extractions in {cache / "work"}'
+        told = f'{data / "work"} was left by an older version: this one keeps it in {cache / "work"}'
         check(told in out, 'the extraction did not say where the older work/ is', out)
 
         # a folder of its own (a checkout's or a portable copy's games/, --outdir): everything beside the game
@@ -244,14 +244,14 @@ def main():
             ),
         }
         for name, (environment, made_data, made_config, made_state, made_cache) in made.items():
-            game = made_data / 'games' / name
+            game = made_data / 'recompiled' / name
             status, out = run(
                 [driver, '--repo', str(made_data), '-r', str(nro), name, '--runtime', driver, '--jobs', '2'],
                 environment=environment,
             )
             record = game / f'{name}.folders'
             expected = ''.join(
-                f'{kind}={where / "games" / name}\n'
+                f'{kind}={where / "recompiled" / name}\n'
                 for kind, where in (('config', made_config), ('state', made_state), ('cache', made_cache))
             )
             check(
@@ -259,11 +259,11 @@ def main():
                 f'the recompile did not record its folders in {record}: {expected!r}',
                 out,
             )
-            ini = made_config / 'games' / name / f'{name}.ini'
+            ini = made_config / 'recompiled' / name / f'{name}.ini'
             ini.write_text(ini.read_text() + '[Game]\nsource=/nonexistent/Game.nsp\n')  # a dump read in place
             shutil.rmtree(game / f'{name}_data/exefs')
             status, out = run([f'./{name}', '-H'], cwd=game)
-            log = made_state / 'games' / name / f'{name}.log'
+            log = made_state / 'recompiled' / name / f'{name}.log'
             text = log.read_text(errors='replace') if log.is_file() else ''
             said = (
                 f"fs: the game's dump /nonexistent/Game.nsp, its source= setting, is not there; its settings are {ini}"
@@ -271,7 +271,7 @@ def main():
             check(said in text, f'the game started outside the AppImage did not read {ini} and log in {log}', out)
             outside = ((config, made_config), (state, made_state), (cache, made_cache))
             check(
-                not any((there / 'games' / name).exists() for there, own in outside if there != own),
+                not any((there / 'recompiled' / name).exists() for there, own in outside if there != own),
                 f'the game {name} started outside the AppImage wrote in the folders of that environment',
                 out,
             )
@@ -284,17 +284,17 @@ def main():
         # an older version's game has no record: its settings where the environment it starts in puts them, the one
         # that made it reading them as before, another saying which .ini names no dump
         name = 'PortableConfig'
-        game = data / 'games' / name
+        game = data / 'recompiled' / name
         (game / f'{name}.folders').unlink(missing_ok=True)
         status, out = run([f'./{name}', '-H'], cwd=game, environment=made[name][0])
-        log = state / 'games' / name / f'{name}.log'
-        ini = Path(f'{appimage}.config/scarletnx/games/{name}/{name}.ini')
+        log = state / 'recompiled' / name / f'{name}.log'
+        ini = Path(f'{appimage}.config/scarletnx/recompiled/{name}/{name}.ini')
         said = f"fs: the game's dump /nonexistent/Game.nsp, its source= setting, is not there; its settings are {ini}"
         check(said in log.read_text(errors='replace'), f'the game without a record did not read {ini}', out)
         status, out = run([f'./{name}', '-H'], cwd=game)
         said = (
             f'fs: the game has no ExeFS in {game}/{name}_data/exefs/ and no dump to read it from: '
-            f'{config}/games/{name}/{name}.ini sets no source=, and {game}/{name}.source is not there'
+            f'{config}/recompiled/{name}/{name}.ini sets no source=, and {game}/{name}.source is not there'
         )
         check(said in log.read_text(errors='replace'), 'the game without a dump did not say where it looked', out)
         # a record naming a folder that is not there: said, with the one the game takes instead
@@ -302,14 +302,14 @@ def main():
         status, out = run([f'./{name}', '-H'], cwd=game)
         said = (
             f"{game}/{name}.folders names {root / 'gone'} for the game's settings, and it is not there: they are in "
-            f'{config}/games/{name}/'
+            f'{config}/recompiled/{name}/'
         )
         check(said in out, 'the game did not say its recorded folder is not there', out)
         # the driver records where its own run keeps them before it starts the game, its environment the launcher's
         other = dict(env, XDG_CONFIG_HOME=str(root / 'other'))
         status, out = run([driver, '--repo', str(data), str(game), '-H'], environment=other)
         check(
-            (game / f'{name}.folders').read_text().startswith(f'config={root}/other/scarletnx/games/{name}\n'),
+            (game / f'{name}.folders').read_text().startswith(f'config={root}/other/scarletnx/recompiled/{name}\n'),
             'the driver that started the game did not record its own folders',
             out,
         )

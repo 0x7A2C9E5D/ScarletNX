@@ -2,7 +2,7 @@
   "mcpServers": {
     "scarletnx": {
       "command": "build/scarletnx",
-      "args": ["--mcp", "--repo", "."]
+      "args": ["--mcp", "--data", "."]
     }
   }
 }

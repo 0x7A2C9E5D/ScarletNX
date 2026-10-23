@@ -611,9 +611,9 @@ int overlay_error_hit(const SnxOverlayRect* r, float x, float y) {
 }
 void overlay_error_draw(SnxUiList* l, int sw, int sh, SnxOverlayError* e) {
     static DialogRows rows_of; /* the thread that shows the panel's */
-    static const char* const labels[SNX_OVERLAY_ERROR_ITEMS] = {"Share log", "Copy path", "Close"};
+    static const char* const labels[SNX_OVERLAY_ERROR_ITEMS] = {"Share Log", "Copy path", "Close"};
     /* on a short picture the log's label gives up rows first, then the hint, the log and the error; never the game's
-       name or what Share log or Copy path did. The log goes right under its label */
+       name or what Share Log or Copy path did. The log goes right under its label */
     const DialogPara para[] = {{e->name, SOFT, 0, 0, 0}, {e->msg, FAILURE, 0, 0, 4}, {fatal_hint(e->msg), INK, 0, 0, 2},
                                {e->how, SOFT, 0, 0, 1},  {e->log, INK, 1, 1, 3},     {e->said, SOFT, 0, 0, 0}};
     Dialog d;

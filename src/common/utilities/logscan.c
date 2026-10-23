@@ -443,7 +443,7 @@ static int marker(Span line, Marker* m) {
 }
 
 /* ============================================================ the scan */
-/* A game log is all of itself. The launcher's Share log file (src/gui/main.c's share_log) starts with snx_build_info's
+/* A game log is all of itself. The launcher's Share Log file (src/gui/main.c's share_log) starts with snx_build_info's
    line, "ScarletNX <branch> <commit> (<compiler>, <system>)", then its message and sections: the last run's output
    under "== the last run: <path> ==" and the newest game log under "== <path> ==". The game log's lines are scanned,
    else the run's output when it had none */

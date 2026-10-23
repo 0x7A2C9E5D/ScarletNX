@@ -30,6 +30,8 @@ void snx_path_native(char* path);
 int snx_path_format(char* out, size_t size, const char* fmt, ...);
 /* says a line of error, "scarletnx: " and the line on stderr, or to the sink given to snx_error_sink. Returns 1 */
 int snx_error(const char* fmt, ...);
+/* an option given by the name an older version had, old (a literal), said once a run with its name now */
+void snx_option_renamed(const char* old, const char* now);
 /* where snx_error's lines go from now on instead of stderr (the runtime's log, which a game's process on Android has
    no other way to keep them in), NULL for stderr again. Set before the threads that say errors start */
 void snx_error_sink(void (*sink)(const char* line));

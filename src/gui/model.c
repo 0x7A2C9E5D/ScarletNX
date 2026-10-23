@@ -138,12 +138,12 @@ void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_byte
     double n = cores > 0 ? cores : 1, used = cpu_percent / 100;
     char ram[32];
     if (!available) {
-        snprintf(out, size, "%s", snx_tr("GUI + children: resource usage unavailable"));
+        snprintf(out, size, "%s", snx_tr("RAM and CPU: unavailable"));
         return;
     }
     used = used < 0 ? 0 : used > n ? n : used; /* a sample taken over a little more than its interval */
     gui_size_text(ram, sizeof ram, memory_bytes);
-    snprintf(out, size, snx_tr("GUI + children: RAM %s  CPU %.0f%% (%.1f cores)"), ram, used / n * 100, used);
+    snprintf(out, size, snx_tr("RAM %s  CPU %.0f%% (%.1f cores)"), ram, used / n * 100, used);
 }
 const char* gui_setting_description(const GuiMenu* menu) {
     switch (menu->selected) {
@@ -153,16 +153,13 @@ const char* gui_setting_description(const GuiMenu* menu) {
             return snx_tr(
                 "Saves the last run's output and game log to scarletnx.log in the data folder, then shares it");
 #elif defined(SNX_XDG)
-            return snx_tr(
-                "Saves the last run's output and game log to scarletnx.log in the working folder (an installed "
-                "copy's: its state folder), path copied");
+            return snx_tr("Saves the last run's output and game log to scarletnx.log and copies its path");
 #else
-            return snx_tr(
-                "Saves the last run's output and game log to scarletnx.log in the working folder, path copied");
+            return snx_tr("Saves the last run's output and game log to scarletnx.log and copies its path");
 #endif
 #ifdef __ANDROID__
         case GUI_DATA:
-            return snx_tr("Opens the data folder, games/ and the keys among them, in the system's Files app");
+            return snx_tr("Opens the data folder, recompiled/ and the keys in it, in the system's Files app");
 #endif
         default: return "";
     }

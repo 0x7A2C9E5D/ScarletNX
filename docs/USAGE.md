@@ -42,12 +42,12 @@ NSP is applied over the base as it is read. Moving or deleting the dump breaks t
 instead, a link to the dump, which is still read when the `.ini` names no dump. Playing the dump again records it in
 the `.ini`.
 
-`--extract-container` (the launcher's **Extract game container**) extracts the dump instead, straight into the game's
+`--extract-container` (the launcher's **Extract dump**) extracts the dump instead, straight into the game's
 folder, `recompiled/<id>/<id>_data/` (`exefs/`, `romfs/`, `control.nacp`), and the game is made from it there: there is no
 second copy. `<id>.extracting` stays in the game's folder while an extraction is unfinished, and a stopped one is redone
 on the next run, the game's saves kept. A game made from its dump is extracted on the first run with the option, with
 no recompile, and a game run without it again has that extraction taken away, as long as the dump it records is there.
-`--repo DIR` and `--build-dir DIR` may precede the dump. Keys use the usual discovery paths below.
+`--data DIR` and `--build-dir DIR` may precede the dump. Keys use the usual discovery paths below.
 `--outdir DIR` puts the game's folder in DIR in place of the data folder's `recompiled/`, as `-r` takes it. With
 `--extract-container`, `--out DIR` keeps the dump's extraction at DIR instead, as `-x` takes it, the game made from a
 copy of it; an NRO has no extraction to name.
@@ -59,7 +59,7 @@ from the dump the game records when the system emptied tmpfs, and moves it betwe
 no dump it was made from*. `-r --tmpfs` on an extraction leaves its RomFS where it is.
 `-H` (`--headless`) can precede or follow the dump and is passed to the game only.
 Omitting it starts the game with a window.
-`-x` means `--extract`, and `-r` means `--recomp` (the old `--recompile` spelling was removed).
+`-x` means `--extract`, and `-r` means `--recompile` (`--recomp`, its older name, still works and says so once).
 On UNIX, short flags can be combined. Windows accepts separate short flags only.
 
 To prepare a dump without playing, use `./build/scarletnx -r "Game.xci"`.
@@ -130,10 +130,10 @@ playing, Play keeps it and plays the game, and Back leaves the list as it was.
   an older version made is taken away the next time its dump is played.
 - **Settings and saves:** an update runs with its game's `.ini` and its game's data folder, so its saves are the
   game's.
-- **Files:** the game's own program never reads an update's files. Without Extract game container, an update reads
+- **Files:** the game's own program never reads an update's files. Without Extract dump, an update reads
   its ExeFS and RomFS from its dump, its RomFS patch read over the game's dump (the game's `.ini` must name it, which
   playing the game's dump records). Each checked DLC's RomFS image is read from its dump and served as installed. A
-  checked DLC whose dump is not there is left out, and the log says so. With Extract game container, an update is
+  checked DLC whose dump is not there is left out, and the log says so. With Extract dump, an update is
   extracted into its own data folder with its RomFS applied, and a DLC's image goes to
   `system/archives/<its title ID>.romfs` in its own. Those folders lie over the game's: an update's ExeFS, RomFS and
   control data replace the game's, a DLC's `system/` is added to the game's, and nothing else of theirs is used.
@@ -144,14 +144,14 @@ DLC's dump given alone as its RomFS image.
 ### Mods
 
 A game's mods go in the `mods` folder of its data folder, one folder each, named as you like:
-`games/<id>/<id>_data/mods/<mod name>/exefs/` and `.../<mod name>/romfs/`. A mod lies over the game the way an update
+`recompiled/<id>/<id>_data/mods/<mod name>/exefs/` and `.../<mod name>/romfs/`. A mod lies over the game the way an update
 does, and over the update too when one is checked. A file in its `romfs/` replaces the RomFS file at the same path, or
 is added to the RomFS when the game has none there. A file in its `exefs/` (`main`, `subsdk0` and the other modules,
 or `main.npdm`) replaces the program's file of that name. Mods are laid in the order of their names, so a later one
 wins over an earlier one where both have the same file.
 
 Every mod in the folder is played until it is turned off. Opening a game in the launcher lists its mods under its
-updates and DLCs, each with a box to check, and Open mods folder opens the folder in the file manager (it is made
+updates and DLCs, each with a box to check, and Open Mods Folder opens the folder in the file manager (it is made
 first when it isn't there). M opens it too, for the game in focus on Games. The mods turned off are kept in
 `mods_off=` in the game's `.ini`, their folder names with a `/` between two.
 
@@ -161,9 +161,9 @@ mods played have other ones. Run directly, a game made with other mods' files ru
 log says so. IPS patches and cheats in `exefs/` are not applied.
 
 A game's cheats go in the `cheats` folder of its data folder, in the Atmosphere format, a file named after the main
-module's build ID: `games/<id>/<id>_data/cheats/<build id>.txt`, each cheat a `[name]` line and its codes under it.
+module's build ID: `recompiled/<id>/<id>_data/cheats/<build id>.txt`, each cheat a `[name]` line and its codes under it.
 Every cheat in it runs once per frame shown until it is turned off. Opening a game in the launcher lists its cheats
-under its mods, each with a box to check, and Open cheats folder opens the folder (made first when it isn't there).
+under its mods, each with a box to check, and Open Cheats Folder opens the folder (made first when it isn't there).
 The cheats turned off are kept in `cheats_off=` in the game's `.ini`, their names with a `|` between two; a cheat with
 a `|` in its name always runs, and the launcher says so.
 
@@ -224,7 +224,7 @@ Remaining examples: POSIX.
   --keys /path/prod.keys --title-keys /path/title.keys
 
 ./build/scarletnx -r work/Game Game --outdir games --jobs 8
-./build/scarletnx -r app.nro -o App --outdir games
+./build/scarletnx -r app.nro --name App --outdir games
 ./build/scarletnx -r -h
 ```
 
@@ -252,7 +252,7 @@ Remaining examples: POSIX.
   memory (64-bit games only, [APPLE](APPLE.md)); it makes no runtime copy. `--runtime FILE` deploys that runtime instead of the running one, or of the one a tools-only build builds in
   its checkout's `build/native-recomp` (`build/win64-recomp` on Windows). `-q` (`--quiet`) prints no progress.
   `--keep-c` is the deprecated spelling of `--keep-ir`.
-- **Codegen:** `--no-build` stages data/INI only; `--interp-only` omits AOT functions.
+- **Codegen:** `--no-build` stages data/INI only; `--jit-only` omits AOT functions.
   `--chunk N` sets instructions per code unit. Each unit's object is kept in `units/` of the cache folder
   ([Folders](#folders)), which every game's recompile shares, under the SHA-256 of the unit's LLVM IR, the LLVM, the
   CPU and its features, the optimization level and the LLVM Internals: a unit found there is not compiled again (a
@@ -408,23 +408,23 @@ X11 bypasses Wayland. [Licenses](CREDITS.md).
 
 The driver works in one folder, its data folder, the first of these that applies:
 
-1. the one `--repo DIR` names (the menu names its own);
+1. the one `--data DIR` names (the menu names its own);
 2. a portable copy's: `.scarletnx/` beside the AppImage, or beside the Windows zip's programs, when it is there;
 3. the user's data folder: `~/.local/share/scarletnx` on Linux, `%APPDATA%\scarletnx` on Windows,
    `~/Library/Application Support/scarletnx` on macOS. On Android the app names its own, `.scarletnx/` in its own
    storage ([ANDROID](ANDROID.md)).
 
 A driver run from its build tree works in the same folder as an installed one: the checkout it was built from is
-not a data folder. `--repo DIR`, or `--outdir DIR` for a recompile, keeps a run's files in one folder of your choice.
+not a data folder. `--data DIR`, or `--outdir DIR` for a recompile, keeps a run's files in one folder of your choice.
 
 Each game is a folder of `recompiled/` named by its title ID, `recompiled/0100DA801624E000/` and its files
 `0100DA801624E000*` in it; a program without an ID of its own (an NRO, an ExeFS without NPDM) by its name, and
 `--name` names any. The game is shown by the name in its `control.nacp` (the window, the recompile, the menu's
 list). The user's data folder and a portable copy's keep each kind of file apart: on Linux the user's in the
 [XDG](https://specifications.freedesktop.org/basedir/latest/) folder of its kind, elsewhere in its own `config/`,
-`state/` and `cache/`. Any other folder `--repo` or `--outdir` names keeps everything in its games' folders.
+`state/` and `cache/`. Any other folder `--data` or `--outdir` names keeps everything in its games' folders.
 
-| What | Another `--repo`, an `--outdir` | Linux, the user's data folder | A portable copy's, the user's elsewhere |
+| What | Another `--data`, an `--outdir` | Linux, the user's data folder | A portable copy's, the user's elsewhere |
 | --- | --- | --- | --- |
 | a game: its program, `<id>_code.so`, `<id>_data/` (saves, `control.nacp`), `captures/` | `recompiled/<id>/` | `~/.local/share/scarletnx/recompiled/<id>/` | `recompiled/<id>/` |
 | its settings, `<id>.ini` | `recompiled/<id>/` | `~/.config/scarletnx/recompiled/<id>/` | `config/recompiled/<id>/` |
@@ -436,14 +436,14 @@ list). The user's data folder and a portable copy's keep each kind of file apart
 | the menu's `settings.ini`, `app.ini`, `folders.txt`, `gamecontrollerdb.txt` | - | `~/.config/scarletnx/` | `config/` |
 | the setup's `setup.ini` ([Setup](#setup)) | - | `~/.config/scarletnx/` | `config/` |
 | the menu's `recent.txt`, `last-run.log` | - | `~/.local/state/scarletnx/` | `state/` |
-| the menu's Share log, `scarletnx.log` | - | `~/.local/state/scarletnx/` | `state/` |
+| the menu's Share Log, `scarletnx.log` | - | `~/.local/state/scarletnx/` | `state/` |
 | `prod.keys`, read before `~/.switch` | the folder | `~/.local/share/scarletnx/` | the folder |
 | the console's users, `users.ini` and `<uid>.jpg` ([Users](#users)), and `online.ini`, an Eden room's password (`room`) | `users/` of the user's data folder | `~/.local/share/scarletnx/users/` | `users/` |
 
 The menu works in the user's data folder or a portable copy's, unless its Settings > App > Folders picks a data
-folder, a games folder or an extractions folder ([GUI](GUI.md)): it passes them to the driver as `--repo`, `--outdir`
+folder, a games folder or an extractions folder ([GUI](GUI.md)): it passes them to the driver as `--data`, `--outdir`
 and `--out` (an extractions folder picked keeps a Switch dump's extraction there, the game made from a copy; to the
-3DS driver as `--repo` and `--output`), and its own files stay where they are. Its Logs and Caches move the state and
+3DS driver as `--data` and `--output`), and its own files stay where they are. Its Logs and Caches move the state and
 cache folders of the table: `[folders] state =` and `cache =` in `app.ini`, full paths, which the menu, the drivers
 and the games read (a game's `.folders` below names them), its files going to the same place under them
 (`recompiled/<id>/<id>.log` of the state folder); a value that is not a full path is said once and the default kept.
@@ -463,7 +463,7 @@ each run, and an older game runs where it is, its run saying where its folder go
 
 ```
 ./build/scarletnx --migrate       # each entry a line and where it would go; nothing is touched
-./build/scarletnx --migrate=yes   # moved, the same lines; Settings > App > Move old files in the menu
+./build/scarletnx --migrate=yes   # moved, the same lines; Settings > App > Move Old Files in the menu
 ```
 
 Each entry of an older folder goes into the folder this version keeps it in, the data folder's `games/` with its games'
@@ -533,10 +533,10 @@ shown, and one a newer version adds shows alone, with OK, before anything else.
 ```sh
 ./build/scarletnx --setup                  # all of it again, in the terminal
 printf '\n\n\n\n\nAogo\n' | ./build/scarletnx --setup  # its answers a line each, Enter the one in brackets
-./build/scarletnx --debug "Game.xci"       # no setup this run (--skip --skip too), nothing written
+./build/scarletnx --no-setup "Game.xci"    # no setup this run, nothing written
 ```
 
-A run whose stdin or stdout is no terminal (a pipe, the launcher's runs) asks nothing. With `--debug` nothing is
+A run whose stdin or stdout is no terminal (a pipe, the launcher's runs) asks nothing. With `--no-setup` nothing is
 written, so a data folder with no users.ini plays as `Player`, uid `0123456789abcdeffedcba9876543210`.
 
 ## Settings / input
@@ -653,7 +653,7 @@ image per refresh and drops the rest unless images tear, and the game keeps the 
 In the game's menu the arrows, Enter and Escape move, select and go back; a gamepad's D-pad or left stick, A and
 B do the same, the on-screen controls' too, and a direction held goes on after a moment.
 
-A game that stops on an error shows a panel with **Share log**, **Copy path** and **Close**. Share log saves
+A game that stops on an error shows a panel with **Share Log**, **Copy path** and **Close**. Share Log saves
 `scarletnx.log` (the build, the error and the game's log) beside the game's log, as the menu's does, and on Android
 sends it to the app you pick; Copy path copies that file's path once it is saved, else the game's log's. The panel says
 what each did. Up and Down move between the items, Enter or A does the one in focus, and any other key or button

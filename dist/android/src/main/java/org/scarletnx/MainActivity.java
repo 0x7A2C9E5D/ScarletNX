@@ -140,7 +140,7 @@ public class MainActivity extends SDLActivity {
         share(this, path);
     }
 
-    /** the menu's Share log and a stopped game's (GameActivity), from the activity that shows them: a file of the data
+    /** the menu's Share Log and a stopped game's (GameActivity), from the activity that shows them: a file of the data
         folder through DataProvider, another through the media store */
     static void share(Activity activity, String path) {
         Uri document = DataProvider.documentUri(activity, new java.io.File(path));

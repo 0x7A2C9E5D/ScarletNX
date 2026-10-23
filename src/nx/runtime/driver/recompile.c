@@ -28,24 +28,21 @@ const IniOpt* snx_recompile_setting(const char* key) {
 }
 static void usage(void) {
     puts("Usage: scarletnx -r INPUT [NAME] [OPTIONS]\n"
-         "  INPUT                  Game/ExeFS directory, .nro, or an XCI or NSP dump (read in place)\n"
-         "  -o, --name, --out NAME  Output name (default: the title ID, else the NPDM's or input name)\n"
-         "  --outdir DIR           Where the game's folder goes (default: games/ in the data folder)\n"
+         "  INPUT                  Game/ExeFS folder, .nro, or an XCI or NSP dump (read in place)\n"
+         "  --name NAME            Output name (default: the title ID, else the NPDM's or input name)\n"
+         "  --outdir DIR           Where the game's folder goes (default: recompiled/)\n"
          "  -O LEVEL               Optimization: 0,1,2,3,s,z (default: 2), the setting opt\n"
          "  --jobs N               Parallel compiles (default: CPU count), the setting aot_threads");
     puts("  --jit-cache FILE       Link a profile run's .jitcache into the module as runtime code");
-    puts("  --KEY=VALUE            A setting of the recompile: opt, aot_threads, unit_cache_gb (the most GB the\n"
-         "                         cache of compiled code units holds: 0, the default, for no limit; it always\n"
-         "                         leaves a tenth of its disk free), and LLVM's\n"
-         "                         (llvm_pass_<pass>=0 turns that pass off); scarletnx --settings=recompile\n"
-         "                         lists them");
+    puts("  --KEY=VALUE            A recompile setting: opt, aot_threads, unit_cache_gb, llvm_pass_<pass>=0\n"
+         "                         (scarletnx --settings=recompile lists them)");
     printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",
            SNX_CHUNK_INSTRUCTIONS);
     puts("  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
          "  --target ios           A pack of objects for the iOS app, which loads them into JIT memory (docs/APPLE.md)\n"
          "  --no-build             Stage data/INI only, generate no code\n"
          "  --tmpfs                Leave the RomFS in the extraction (in tmpfs), which the game reads it from");
-    puts("  --interp-only          Generate no code: the runtime JIT compiles all of it\n"
+    puts("  --jit-only             Generate no code: the runtime JIT compiles all of it\n"
          "  --runtime FILE         Deploy this runtime instead of building one\n"
          "  --hook-direct-calls    Route calls and branches between functions through dispatch (nvn_trace)\n"
          "  --keep-ir              Save the generated code (LLVM IR) in <NAME>/<NAME>_build\n"
@@ -144,7 +141,9 @@ static char* settings_path(const char* out, const char* title) {
         old = snx_format("%s.ini", base);
         free(base);
         if (snx_left_behind(old, path))
-            fprintf(stderr, "scarletnx: %s was left by an older version: this one keeps it in %s\n", old, path);
+            fprintf(stderr,
+                    "scarletnx: %s was left by an older version: this one keeps it in %s (docs/DEPRECATIONS.md)\n", old,
+                    path);
         free(old);
     }
     free(folder);
@@ -267,7 +266,7 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs)
     if (!p->modules[0].is_nro) {
         dst = snx_path_join(dir, "romfs.bin");
         if (snx_is_file(dst)) {
-            snx_error("cached romfs.bin conflicts with NSO input; remove that cache before recompiling");
+            snx_error("%s conflicts with the NSO input: remove it before recompiling", dst);
             free(dst);
             free(ex);
             return 1;
@@ -374,9 +373,10 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             no_build = 1;
         else if (!strcmp(arg, "--tmpfs"))
             tmpfs = 1;
-        else if (!strcmp(arg, "--interp-only"))
+        else if (!strcmp(arg, "--jit-only") || !strcmp(arg, "--interp-only")) {
+            if (!strcmp(arg, "--interp-only")) snx_option_renamed("--interp-only", "--jit-only");
             gen.interp_only = 1;
-        else if (!strcmp(arg, "--hook-direct-calls"))
+        } else if (!strcmp(arg, "--hook-direct-calls"))
             gen.hook_direct_calls = 1;
         else if (!strcmp(arg, "--keep-ir") || !strcmp(arg, "--keep-c")) {
             if (!strcmp(arg, "--keep-c"))
@@ -391,7 +391,8 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
                 arg = "-O";
             } else if ((equal = strchr(arg, '=')) != NULL) {
                 option_size = (size_t)(equal - arg);
-                if (option_size >= sizeof(option)) return snx_error("unknown recompiler option: %s", arg);
+                if (option_size >= sizeof(option))
+                    return snx_error("unknown option: %s (scarletnx -r -h lists them)", arg);
                 memcpy(option, arg, option_size);
                 option[option_size] = 0;
                 value = equal + 1;
@@ -406,12 +407,14 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             if (strcmp(arg, "-o") && strcmp(arg, "--name") && strcmp(arg, "--out") && strcmp(arg, "--outname") &&
                 strcmp(arg, "--outdir") && strcmp(arg, "--runtime") && strcmp(arg, "--target") && strcmp(arg, "-O") &&
                 strcmp(arg, "--jobs") && strcmp(arg, "--chunk") && strcmp(arg, "--jit-cache"))
-                return snx_error("unknown recompiler option: %s", arg);
+                return snx_error("unknown option: %s (scarletnx -r -h lists them)", arg);
             if (!value) {
                 if (++i == argc) return snx_error("%s requires a value", arg);
                 value = argv[i];
             }
             if (!*value) return snx_error("%s requires a nonempty value", arg);
+            if (!strcmp(arg, "-o") || !strcmp(arg, "--out") || !strcmp(arg, "--outname"))
+                snx_option_renamed(!strcmp(arg, "-o") ? "-o" : !strcmp(arg, "--out") ? "--out" : "--outname", "--name");
             if (!strcmp(arg, "-o") || !strcmp(arg, "--name") || !strcmp(arg, "--out") || !strcmp(arg, "--outname"))
                 name = value;
             else if (!strcmp(arg, "--outdir"))
@@ -421,16 +424,17 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             else if (!strcmp(arg, "--target"))
                 target = value;
             else if (!strcmp(arg, "-O")) {
-                if (strlen(value) != 1 || !strchr("0123sz", value[0])) return snx_error("-O expects 0,1,2,3,s,z");
+                if (strlen(value) != 1 || !strchr("0123sz", value[0]))
+                    return snx_error("-O %s: not 0, 1, 2, 3, s or z", value);
                 strcpy(g_settings.optimization_level, value);
             } else if (!strcmp(arg, "--jobs")) {
                 g_settings.aot_threads = (int)number(value, 1024);
-                if (!g_settings.aot_threads) return snx_error("--jobs expects 1..1024");
+                if (!g_settings.aot_threads) return snx_error("--jobs %s: not a whole number from 1 to 1024", value);
             } else if (!strcmp(arg, "--jit-cache")) {
                 jit_cache = value;
             } else {
                 gen.chunk_instrs = number(value, INT_MAX);
-                if (!gen.chunk_instrs) return snx_error("--chunk expects a positive instruction count");
+                if (!gen.chunk_instrs) return snx_error("--chunk %s: not a whole number of instructions from 1", value);
             }
         } else if (!input)
             input = arg;
@@ -445,7 +449,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     }
     /* the settings, whichever way they came: -O and --jobs, or --opt= and --aot_threads= as the launcher passes them */
     if (strlen(g_settings.optimization_level) != 1 || !strchr("0123sz", g_settings.optimization_level[0]))
-        return snx_error("opt expects 0,1,2,3,s,z");
+        return snx_error("opt = %s: not 0, 1, 2, 3, s or z", g_settings.optimization_level);
     compile.opt = g_settings.optimization_level;
     compile.jobs = g_settings.aot_threads > 0 ? (unsigned)g_settings.aot_threads : snx_cpu_count();
     if (!strcmp(target, "win64"))
@@ -455,9 +459,11 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     else if (!strcmp(target, "ios"))
         ios = 1;
     else if (strcmp(target, "auto"))
-        return snx_error("--target expects auto, linux, win64 or ios");
+        return snx_error("--target %s: not auto, linux, win64 or ios", target);
     /* The backends write the module for the machine they run on (build == host == target) */
-    if (compile.target_win != host_win) return snx_error("--target: modules are built for this host only");
+    if (compile.target_win != host_win)
+        return snx_error("--target %s: modules are built for this host only (%s)", target,
+                         host_win ? "win64" : "linux");
     gen.abi = snx_game_abi();
     /* a dump, read in place, else an ExeFS folder or an NRO. An update's dump is its own program; a DLC has none */
     dump = snx_is_file(input) && snx_is_dump(input);
@@ -490,7 +496,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         game = snx_format("%s_%s", of, own);
     } else
         game = snx_game_name(name, &program.npdm, program.entry_path);
-    out = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
+    out = outdir ? snx_absolute(outdir) : snx_recompiled_dir(paths->repo);
     if (!out) {
         snx_error("cannot resolve %s", outdir ? outdir : paths->repo);
         goto done;
@@ -622,8 +628,9 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             units = folder ? snx_path_join(folder, "units") : NULL;
             free(folder);
             if (!units) {
-                snx_error("unit cache: no cache folder, as the environment names no home (HOME, or APPDATA on "
-                          "Windows): the game is not recompiled");
+                snx_error(
+                    "unit cache: HOME is not set (APPDATA on Windows), so there is no cache folder: the game is not "
+                    "recompiled");
                 free(kept);
                 goto done;
             }

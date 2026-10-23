@@ -185,7 +185,7 @@ static void test_draw(void) {
     is(ui_main_row(r, 1, UI_MAIN_GAMES, 3), 14, 154 + 3 * 19, 300, 17); /* max_row_width */
     is(ui_main_row(r, 1, UI_MAIN_STATUS, 0), 0, 0, 0, 0);               /* not a list */
 #ifdef SDL_PLATFORM_ANDROID
-    assert(!strcmp(d[3].text, "Open data folder"));
+    assert(!strcmp(d[3].text, "Open Data Folder"));
 #else
     assert(!strcmp(d[3].text, "Settings") && d[3].color == UI_COLOR_FOCUS);
 #endif

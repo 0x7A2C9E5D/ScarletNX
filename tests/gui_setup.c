@@ -358,7 +358,7 @@ static void test_first(App* app) {
     shows(app, "Recompiled", rgb(app->theme.ink));
     key(app, SDLK_DOWN); /* round to Keep */
     key(app, SDLK_RETURN);
-    /* the keys: none, Later in focus; a folder of them installed where the menu keeps them, Use these then */
+    /* the keys: none, Later in focus; a folder of them installed where the menu keeps them, Use These then */
     assert(page(app) == SNX_SETUP_KEYS && app->setup_choice.count == 2 && app->setup_choice.focus == 1);
     key(app, SDLK_UP);
     key(app, SDLK_RETURN);
@@ -572,7 +572,7 @@ static void test_places(App* app) {
     assert(b.content.h == b.place.list.h && !b.choices.tab.h);
     assert(SDL_abs(b.choices.box.x + b.choices.box.w / 2 - (b.place.list.x + b.place.list.w / 2)) <= cell_w(app));
     assert(SDL_abs(b.choices.box.y + b.choices.box.h / 2 - (b.place.list.y + b.place.list.h / 2)) <= cell_h(app));
-    shows(app, "Install type", rgb(app->theme.warning));
+    shows(app, "Install Type", rgb(app->theme.warning));
     shows(app, "2/5", rgb(app->theme.soft));
     app->theme = *gui_theme_builtin("yorha");
     /* the foot: the tips beside the keys, halves; where half is under the keys' widest sentence, which a row cannot

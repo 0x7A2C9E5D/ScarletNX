@@ -10,17 +10,17 @@
 		[button]"Load Linux ARM ELF" {}
 		[button]"Load 3DS CIA" {}
 		[button]"Load Vita VPK" {}
-		[button]"Setup device keys" {}
+		[button]"Install Keys" {}
 		[button]"Settings" {}
-		[button]"Share log" {}
-		[button]"Open data folder" {
+		[button]"Share Log" {}
+		[button]"Open Data Folder" {
 			for-platform = android
 		}
 		[button]"Exit" {}
 	}
 }
 [scene]Games {
-	# Recent games over the recent rows, then a page of the games, as many as fit, each group under its heading (P, the
+	# Recent Games over the recent rows, then a page of the games, as many as fit, each group under its heading (P, the
 	# foot's, adds a folder)
 	[list]Rows {
 		max_rows = 64
@@ -70,7 +70,7 @@
 		android.row_height = 40px
 	}
 }
-# the OK under the files of a box over the screen (what an older version left, what Clean old settings did): any key,
+# the OK under the files of a box over the screen (what an older version left, what Clean Old Settings did): any key,
 # button or finger closes the box before a row is hit, so the row's own action is none (@)
 [scene]Files {
 	[list]Ok {

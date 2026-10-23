@@ -4,9 +4,8 @@
    older versions did that this one does otherwise (the notices), then the language, the install, the folders, the keys
    and the first user. setup.ini in the config folder says how far it went: the version of the steps it asked and the
    notices it showed. A step a newer version adds raises SNX_SETUP_VERSION and is asked alone where setup.ini is of an
-   older one; a notice goes last in snx_notices and is shown alone the next start. --debug, or --skip twice, leaves it
-   out of a run, writing nothing: a run without users.ini plays as Player, of the fixed uid. --setup goes through it
-   again */
+   older one; a notice goes last in snx_notices and is shown alone the next start. --no-setup leaves it out of a run,
+   writing nothing: a run without users.ini plays as Player, of the fixed uid. --setup goes through it again */
 #ifndef SNX_COMMON_SETUP_H
 #define SNX_COMMON_SETUP_H
 #include <stddef.h>
@@ -27,7 +26,7 @@ typedef struct {
     const char *what, *before, *now, *row;
     int systems;
 } SnxNotice;
-#define SNX_NOTICES 14
+#define SNX_NOTICES 15
 extern const SnxNotice snx_notices[SNX_NOTICES]; /* the oldest first */
 int snx_notice_here(int notice);                 /* 1 for one of this system's */
 
@@ -46,8 +45,8 @@ int snx_setup_here(int step); /* 1 for a step this system has: an app (Android, 
 int snx_setup_shows(const SnxSetup* setup, int notice); /* 1 for this system's notice not shown yet */
 int snx_setup_due(const SnxSetup* setup);               /* 1 while a step or a notice is left */
 
-/* --debug, --skip given twice and --setup taken out of argv, before a "--": snx_setup_skip and snx_setup_again say
-   which. The arguments left, else -1 with why */
+/* --no-setup (its old names --debug and --skip --skip too) and --setup taken out of argv, before a "--": snx_setup_skip
+   and snx_setup_again say which. The arguments left, else -1 with why */
 extern int snx_setup_skip, snx_setup_again;
 int snx_setup_options(int argc, char** argv, char* why, size_t why_size);
 

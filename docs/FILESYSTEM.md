@@ -55,7 +55,7 @@ IPC requests allow 0x300-byte paths excluding NUL. Host limits also apply.
 ## Shared fonts
 
 Place `fonts/FontStandard.ttf` inside the game's data directory before starting the game. For the default
-title-ID layout, the full path is `games/<id>/<id>_data/fonts/FontStandard.ttf` under the
+title-ID layout, the full path is `recompiled/<id>/<id>_data/fonts/FontStandard.ttf` under the
 [data folder](USAGE.md#folders). Named or older deployments use their existing `<Game>_data/` directory.
 `FontStandard.bfttf` is also accepted and takes priority over `.ttf`. Both take priority over the built-in
 stand-in fonts. Font substitution can change text weight and spacing.
