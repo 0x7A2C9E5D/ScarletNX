@@ -26,7 +26,11 @@ typedef struct {
     u64 size; /* of the packet, header included, a multiple of 16 */
 } RecHdr;
 
-#define REC_CAP     (16ull << 20)
+/* The ring holds about a frame of one game's commands (3.8 MB a frame in its underground scene). At 16 MB every packet
+   went to memory last written four frames before, long out of the caches, and the stream through the shared cache
+   likely pushed out what the GPU thread's draws look up: at 4 MB that thread's load misses dropped a tenth and its
+   frames took 5% fewer cycles. The producer waits for room only when the recording thread is a whole frame behind */
+#define REC_CAP     (4ull << 20)
 #define REC_PUBLISH (32ull << 10)
 
 static u8* g_ring;
