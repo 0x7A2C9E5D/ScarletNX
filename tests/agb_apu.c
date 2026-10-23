@@ -41,6 +41,16 @@ int main(void) {
     CHECK(out[2 * 127] == 960);
     CHECK(out[2 * 128] == -960 && out[2 * 200] == -960); /* the duty cycle's second half */
 
+    /* a volume's bits 15 and 14 neither trigger nor turn the length on: the frequency register's do */
+    reset();
+    agb_apu_write(&board, 0x068, 0xF080); /* square 2 at volume 15 */
+    agb_apu_write(&board, 0x072, 0x6000); /* the wave at 25 percent */
+    agb_apu_write(&board, 0x078, 0xF000); /* the noise at volume 15 */
+    CHECK(!board.apu.enabled[1] && !board.apu.length_enabled[1]);
+    CHECK(!board.apu.length_enabled[2] && !board.apu.length_enabled[3]);
+    agb_apu_write(&board, 0x06C, 0xC400);
+    CHECK(board.apu.enabled[1] && board.apu.length_enabled[1]);
+
     /* the envelope steps down at 64 Hz */
     reset();
     agb_apu_write(&board, 0x080, 0x2277);

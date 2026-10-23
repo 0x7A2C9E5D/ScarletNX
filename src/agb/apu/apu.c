@@ -71,23 +71,20 @@ void agb_apu_write(AgbBoard* board, uint32_t offset, uint16_t value) {
     int channel;
     switch (offset) {
         case 0x060: apu->cnt_l[0] = value & 0x7F; return;
+        /* length, duty and envelope (the wave's volume): the trigger and the length switch are the next register's */
         case 0x062:
         case 0x068:
             channel = offset == 0x062 ? 0 : 1;
             apu->cnt_h[channel] = value;
             apu->length[channel] = 64 - (value & 63);
-            apu->length_enabled[channel] = value & 0x4000 ? 1 : 0;
-            if (value & 0x8000) trigger(board, channel);
             return;
         case 0x072:
             apu->cnt_h[2] = value & 0xE0FF;
             apu->length[2] = 256 - (value & 0xFF);
-            apu->length_enabled[2] = value & 0x4000 ? 1 : 0;
             return;
         case 0x078:
             apu->cnt_h[3] = value;
             apu->length[3] = 64 - (value & 63);
-            apu->length_enabled[3] = value & 0x4000 ? 1 : 0;
             return;
         case 0x064:
         case 0x06C:
