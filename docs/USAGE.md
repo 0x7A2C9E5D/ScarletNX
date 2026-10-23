@@ -160,6 +160,13 @@ the mods' ExeFS files it was recompiled with, and playing it through the driver 
 mods played have other ones. Run directly, a game made with other mods' files runs the ExeFS it was made from, and the
 log says so. IPS patches and cheats in `exefs/` are not applied.
 
+A game's cheats go in the `cheats` folder of its data folder, in the Atmosphere format, a file named after the main
+module's build ID: `games/<id>/<id>_data/cheats/<build id>.txt`, each cheat a `[name]` line and its codes under it.
+Every cheat in it runs once per frame shown until it is turned off. Opening a game in the launcher lists its cheats
+under its mods, each with a box to check, and Open cheats folder opens the folder (made first when it isn't there).
+The cheats turned off are kept in `cheats_off=` in the game's `.ini`, their names with a `|` between two; a cheat with
+a `|` in its name always runs, and the launcher says so.
+
 Run the same command again to retry after a failure or interruption:
 
 - `work/Game/` skips extraction. Automatic extraction publishes this directory only after success,

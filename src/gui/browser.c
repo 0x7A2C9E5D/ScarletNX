@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #include "gui/browser.h"
 #include "common/utilities/common.h"
+#include "common/utilities/cheat_list.h"
 #include "common/utilities/mods.h"
 #include "gui/i18n.h"
 #include <ctype.h>
@@ -335,6 +336,27 @@ size_t gui_game_mods(const char* path, char** folder, char*** names) {
     free(dir);
     return count;
 }
+size_t gui_game_cheats(const char* path, char** folder, char*** names) {
+    char *dir, *data;
+    const char* leaf;
+    size_t count;
+    char** listed = NULL;
+    *folder = NULL;
+    if (names) *names = NULL;
+    if (!gui_game_folder(path)) return 0;
+    dir = snx_dirname(path);
+    for (leaf = dir + strlen(dir); leaf > dir && leaf[-1] != '/' && leaf[-1] != '\\'; --leaf) continue;
+    data = snx_format("%s/%s_data", dir, leaf);
+    *folder = snx_cheats_folder(data);
+    count = snx_cheats_list(*folder, &listed);
+    if (names)
+        *names = listed;
+    else
+        snx_free_strings(listed, count);
+    free(data);
+    free(dir);
+    return count;
+}
 static int before(const char* a, const char* b) {
     for (; *a && tolower((unsigned char)*a) == tolower((unsigned char)*b); ++a, ++b) {}
     return tolower((unsigned char)*a) < tolower((unsigned char)*b);
@@ -402,9 +424,11 @@ static bool add_games(GuiGames* games, const char* directory, int kinds, size_t 
         games->shown[j] = shown;
         games->paths[j] = path;
         {
-            char* mods;
-            games->addons[j] = addons_of(path, NULL) + gui_game_mods(path, &mods, NULL);
+            char *mods, *cheats;
+            games->addons[j] =
+                addons_of(path, NULL) + gui_game_mods(path, &mods, NULL) + gui_game_cheats(path, &cheats, NULL);
             free(mods);
+            free(cheats);
         }
         games->count++;
         names[i] = NULL;

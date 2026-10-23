@@ -64,6 +64,10 @@ bool gui_game_addons(const char* path, GuiGames* addons);
    into *folder (owned, NULL for any other game), and its mods (snx_mods_list) into *names when names is not NULL:
    their count */
 size_t gui_game_mods(const char* path, char** folder, char*** names);
+/* The cheats folder of the game at path, a program in a folder of its own (<name>/<name>_data/cheats/,
+   snx_cheats_folder), into *folder (owned, NULL for any other game), and its cheats' names (snx_cheats_list) into
+   *names when names is not NULL: their count */
+size_t gui_game_cheats(const char* path, char** folder, char*** names);
 /* A 3DS CIA, a Vita VPK, by its name */
 bool gui_is_cia(const char* name);
 bool gui_is_vpk(const char* name);

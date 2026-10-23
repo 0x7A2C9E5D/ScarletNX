@@ -7,6 +7,7 @@
 #endif
 #include "common/utilities/common.h"
 #include "common/utilities/game_ini.h"
+#include "common/utilities/cheat_list.h"
 #include "common/utilities/mods.h"
 #include "common/utilities/demangle.h"
 #include "common/utilities/logscan.h"
@@ -282,6 +283,9 @@ typedef struct App {
     char *mods_folder, **mods; /* the game's mods folder and its mods (gui_game_mods), mods_count of them */
     size_t mods_count;
     bool* mods_on; /* each of mods': played, not in mods_off= */
+    char *cheats_folder, **cheats; /* the game's cheats folder and its cheats' names (gui_game_cheats), cheats_count */
+    size_t cheats_count;
+    bool* cheats_on; /* each of cheats': run, not in cheats_off= */
     bool previewing; /* drawing the theme editor's preview, on a copy of the app put back after it */
     Uint64 splash_until;
     GuiRgb splash_page;
@@ -2845,8 +2849,13 @@ static void addons_close(App* app) {
     snx_free_strings(app->mods, app->mods_count);
     free(app->mods_folder);
     free(app->mods_on);
-    app->addons_game = app->addons_title = app->mods_folder = NULL;
-    app->addons_checked = app->mods_on = NULL;
+    snx_free_strings(app->cheats, app->cheats_count);
+    free(app->cheats_folder);
+    free(app->cheats_on);
+    app->addons_game = app->addons_title = app->mods_folder = app->cheats_folder = NULL;
+    app->addons_checked = app->mods_on = app->cheats_on = NULL;
+    app->cheats = NULL;
+    app->cheats_count = 0;
     app->mods = NULL;
     app->mods_count = 0;
     app->addons_shown = false;
@@ -2918,25 +2927,34 @@ static size_t addons_updates(const App* app) {
     return n;
 }
 /* the box's rows: the updates and No update (with any update), the DLCs, the mods, Open mods folder, Save, then Play */
-enum { ROW_NO_UPDATE = -1, ROW_SAVE = -2, ROW_PLAY = -3, ROW_MODS_FOLDER = -4 };
+enum { ROW_NO_UPDATE = -1, ROW_SAVE = -2, ROW_PLAY = -3, ROW_MODS_FOLDER = -4, ROW_CHEATS_FOLDER = -5 };
 static int addons_rows(const App* app) {
-    return (int)(app->addons.count + app->mods_count) + (addons_updates(app) ? 1 : 0) + 3;
+    return (int)(app->addons.count + app->mods_count + app->cheats_count) + (addons_updates(app) ? 1 : 0) + 4;
 }
-/* what row is: its add-on's index in addons, a mod's (mods' index past addons' count), or ROW_NO_UPDATE,
-   ROW_MODS_FOLDER, ROW_SAVE or ROW_PLAY */
+/* what row is: its add-on's index in addons, a mod's (mods' index past addons' count), a cheat's (cheats' past the
+   mods'), or ROW_NO_UPDATE, ROW_MODS_FOLDER, ROW_CHEATS_FOLDER, ROW_SAVE or ROW_PLAY */
 static int addons_row(const App* app, int row) {
     int updates = (int)addons_updates(app), rows = addons_rows(app);
     if (row == rows - 1) return ROW_PLAY;
     if (row == rows - 2) return ROW_SAVE;
-    if (row == rows - 3) return ROW_MODS_FOLDER;
+    if (row == rows - 3) return ROW_CHEATS_FOLDER;
+    if (row == rows - 4) return ROW_MODS_FOLDER;
     if (row < updates) return row;
     if (updates && row == updates) return ROW_NO_UPDATE;
     return row - (updates ? 1 : 0);
 }
 /* a mod's row's item (addons_row): its index in mods, else -1 */
 static int addons_mod(const App* app, int item) {
-    return item >= (int)app->addons.count ? item - (int)app->addons.count : -1;
+    int mod = item - (int)app->addons.count;
+    return mod >= 0 && mod < (int)app->mods_count ? mod : -1;
 }
+/* a cheat's row's item (addons_row): its index in cheats, else -1 */
+static int addons_cheat(const App* app, int item) {
+    int cheat = item - (int)(app->addons.count + app->mods_count);
+    return item >= 0 && cheat >= 0 ? cheat : -1;
+}
+/* a cheat cheats_off= cannot name (a | in it), which runs whatever its box says */
+static bool cheat_kept(const App* app, int cheat) { return strchr(app->cheats[cheat], SNX_CHEATS_SEPARATOR) != NULL; }
 static void addons_open(App* app, const char* game, const char* title) {
     char *folder, *name, *ini, *text;
     SnxAddon* list;
@@ -2944,7 +2962,8 @@ static void addons_open(App* app, const char* game, const char* title) {
     addons_close(app);
     gui_game_addons(game, &app->addons);
     app->mods_count = gui_game_mods(game, &app->mods_folder, &app->mods);
-    if (!app->addons.count && !app->mods_count) {
+    app->cheats_count = gui_game_cheats(game, &app->cheats_folder, &app->cheats);
+    if (!app->addons.count && !app->mods_count && !app->cheats_count) {
         addons_close(app);
         return;
     }
@@ -2952,8 +2971,9 @@ static void addons_open(App* app, const char* game, const char* title) {
     app->addons_title = snx_strdup(title);
     app->addons_checked = (bool*)calloc(app->addons.count + 1, sizeof *app->addons_checked);
     app->mods_on = (bool*)calloc(app->mods_count + 1, sizeof *app->mods_on);
+    app->cheats_on = (bool*)calloc(app->cheats_count + 1, sizeof *app->cheats_on);
     list = (SnxAddon*)malloc(SNX_ADDONS_MAX * sizeof *list);
-    if (!app->addons_checked || !app->mods_on || !list) {
+    if (!app->addons_checked || !app->mods_on || !app->cheats_on || !list) {
         free(list);
         addons_close(app);
         return;
@@ -2969,6 +2989,9 @@ static void addons_open(App* app, const char* game, const char* title) {
     text = snx_ini_value(ini, "mods_off");
     for (i = 0; i < app->mods_count; ++i) app->mods_on[i] = !snx_mod_off(text, app->mods[i]);
     free(text);
+    text = snx_ini_value(ini, "cheats_off");
+    for (i = 0; i < app->cheats_count; ++i) app->cheats_on[i] = !snx_cheat_off(text, app->cheats[i]);
+    free(text);
     free(ini);
     free(folder);
     free(name);
@@ -2981,11 +3004,17 @@ static void addons_label(const App* app, int row, char* label, size_t size) {
     int item = addons_row(app, row);
     size_t i;
     bool none = true;
+    char what[256]; /* a mod's or a cheat's name with its kind, as an update's and a DLC's are */
     for (i = 0; i < addons_updates(app); ++i) none = none && !app->addons_checked[i];
-    if (addons_mod(app, item) >= 0)
-        snprintf(label, size, "%s%s %s", app->theme.marker, app->mods_on[addons_mod(app, item)] ? "[x]" : "[ ]",
-                 app->mods[addons_mod(app, item)]);
-    else if (item >= 0)
+    if (addons_mod(app, item) >= 0) {
+        snprintf(what, sizeof what, snx_tr("Mod %s"), app->mods[addons_mod(app, item)]);
+        snprintf(label, size, "%s%s %s", app->theme.marker, app->mods_on[addons_mod(app, item)] ? "[x]" : "[ ]", what);
+    } else if (addons_cheat(app, item) >= 0) {
+        snprintf(what, sizeof what, snx_tr("Cheat %s"), app->cheats[addons_cheat(app, item)]);
+        snprintf(label, size, "%s%s %s", app->theme.marker,
+                 app->cheats_on[addons_cheat(app, item)] || cheat_kept(app, addons_cheat(app, item)) ? "[x]" : "[ ]",
+                 what);
+    } else if (item >= 0)
         snprintf(label, size, "%s%s %s", app->theme.marker,
                  addon_kind(app, (size_t)item) == SNX_ADDON_UPDATE ? (app->addons_checked[item] ? "(*)" : "( )")
                                                                    : (app->addons_checked[item] ? "[x]" : "[ ]"),
@@ -2994,6 +3023,8 @@ static void addons_label(const App* app, int row, char* label, size_t size) {
         snprintf(label, size, "%s%s %s", app->theme.marker, none ? "(*)" : "( )", snx_tr("No update"));
     else if (item == ROW_MODS_FOLDER)
         snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Open mods folder"));
+    else if (item == ROW_CHEATS_FOLDER)
+        snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Open cheats folder"));
     else if (item == ROW_SAVE)
         snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Save"));
     else
@@ -3036,10 +3067,11 @@ static void render_addons(App* app) {
     over_box(app, d.box, app->addons_title);
     ui_addons_draw(app, d.rects, app->scale, d.lists);
 }
-/* what is picked kept as the game's addons= and mods_off=: 1, else 0 with app->message saying why. The picked
+/* what is picked kept as the game's addons=, mods_off= and cheats_off=: 1, else 0 with app->message saying why. The
+   picked
    update's program, absolute and owned, in *program when it is not NULL (NULL with no update picked) */
 static int addons_save(App* app, char** program) {
-    char *folder, *name, *ini, *text, *off = snx_strdup("");
+    char *folder, *name, *ini, *text, *off = snx_strdup(""), *cheats_off = snx_strdup("");
     SnxAddon* list = (SnxAddon*)calloc(app->addons.count + 1, sizeof *list);
     size_t i, count = 0;
     int saved;
@@ -3056,14 +3088,22 @@ static int addons_save(App* app, char** program) {
             free(off);
             off = more;
         }
+    for (i = 0; i < app->cheats_count; ++i)
+        if (!app->cheats_on[i] && !cheat_kept(app, (int)i)) {
+            char* more = snx_format("%s%s%s", cheats_off, cheats_off[0] ? "|" : "", app->cheats[i]);
+            free(cheats_off);
+            cheats_off = more;
+        }
     ini = snx_game_ini(folder, name);
     text = list ? snx_addons_text(list, count) : NULL;
-    saved = text && !snx_ini_record(ini, "addons", text) && !snx_ini_record(ini, "mods_off", off);
+    saved = text && !snx_ini_record(ini, "addons", text) && !snx_ini_record(ini, "mods_off", off) &&
+            !snx_ini_record(ini, "cheats_off", cheats_off);
     if (!saved) {
         snprintf(app->message, sizeof app->message, snx_tr("Not saved: %s could not be written"), ini);
         say_failure(app, app->message);
     }
     free(off);
+    free(cheats_off);
     free(text);
     free(ini);
     free(list);
@@ -3072,8 +3112,8 @@ static int addons_save(App* app, char** program) {
     return saved;
 }
 static void launch(App* app, char* absolute, bool prepared);
-/* row pressed: an update picked (the others not: one runs at a time), No update, a DLC's or a mod's box checked or
-   not; Open mods folder, the folder opened; Save, the picks kept and the box closed; or Play, the picks kept and the
+/* row pressed: an update picked (the others not: one runs at a time), No update, a DLC's, a mod's or a cheat's box
+   checked or not; Open mods folder or Open cheats folder, the folder opened; Save, the picks kept and the box closed; or Play, the picks kept and the
    game played (or recompiled) through the driver, from the picked update's program. A mod's exefs/ changes the
    program, which the driver recompiles before it plays */
 static void addons_press(App* app, int row) {
@@ -3085,8 +3125,22 @@ static void addons_press(App* app, int row) {
         app->mods_on[addons_mod(app, item)] = !app->mods_on[addons_mod(app, item)];
         return;
     }
+    if (addons_cheat(app, item) >= 0) {
+        int cheat = addons_cheat(app, item);
+        if (cheat_kept(app, cheat)) /* cheats_off= has no way to name it */
+            snprintf(app->message, sizeof app->message,
+                     snx_tr("\"%s\" always runs: a | in its name, which cheats_off= puts between two"),
+                     app->cheats[cheat]);
+        else
+            app->cheats_on[cheat] = !app->cheats_on[cheat];
+        return;
+    }
     if (item == ROW_MODS_FOLDER) {
         if (app->mods_folder) show_folder(app, app->mods_folder);
+        return;
+    }
+    if (item == ROW_CHEATS_FOLDER) {
+        if (app->cheats_folder) show_folder(app, app->cheats_folder);
         return;
     }
     if (item >= 0 && addon_kind(app, (size_t)item) == SNX_ADDON_DLC) {
@@ -3099,7 +3153,8 @@ static void addons_press(App* app, int row) {
     }
     if (!addons_save(app, item == ROW_PLAY ? &path : NULL)) return;
     if (item == ROW_SAVE) {
-        snprintf(app->message, sizeof app->message, snx_tr("%s: its updates, DLCs and mods kept"), app->addons_title);
+        snprintf(app->message, sizeof app->message, snx_tr("%s: its updates, DLCs, mods and cheats kept"),
+                 app->addons_title);
         addons_close(app);
         return;
     }
@@ -3705,7 +3760,8 @@ static void game_kind(const App* app, const GuiGames* games, size_t i, char* kin
     const char* name = games->names[i];
     size_t n;
     if (games->addons[i])
-        snprintf(kind, size, snx_tr("Ready to run, with %zu update(s), DLC(s) or mod(s) to pick from"), games->addons[i]);
+        snprintf(kind, size, snx_tr("Ready to run, with %zu update(s), DLC(s), mod(s) or cheat(s) to pick from"),
+                 games->addons[i]);
     else
         snprintf(kind, size, "%s",
                  gui_is_cia(name)    ? snx_tr("3DS CIA, opened with scarletnx-3ds")

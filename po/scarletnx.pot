@@ -819,11 +819,25 @@ msgid "out of memory"
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "Mod %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Cheat %s"
+msgstr ""
+
+#: src/gui/main.c
 msgid "No update"
 msgstr ""
 
 #: src/gui/main.c
 msgid "Open mods folder"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Open cheats folder"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
@@ -838,7 +852,12 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s: its updates, DLCs and mods kept"
+msgid "\"%s\" always runs: a | in its name, which cheats_off= puts between two"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: its updates, DLCs, mods and cheats kept"
 msgstr ""
 
 #: src/gui/main.c
@@ -957,7 +976,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Ready to run, with %zu update(s), DLC(s) or mod(s) to pick from"
+msgid "Ready to run, with %zu update(s), DLC(s), mod(s) or cheat(s) to pick from"
 msgstr ""
 
 #: src/gui/main.c
