@@ -3497,6 +3497,16 @@ int main(int argc, char** argv) {
         launch(&app, snx_strdup(dump), false);
         assert(app.dests_shown && app.dests.count == 2 && !app.menu.running && app.dest_file);
         render(&app);
+#ifndef _WIN32
+        { /* off Windows a \ is a letter of the file's name, which the question keeps whole */
+            char* was = app.dest_file;
+            char odd[] = "/somewhere/odd\\name.nsp";
+            app.dest_file = odd;
+            dests_question(&app, question, sizeof question);
+            assert(!strcmp(question, "odd\\name.nsp: into which folder of the recompiled library?"));
+            app.dest_file = was;
+        }
+#endif
         snprintf(question, sizeof question, "%s", "elsewhere dump.nsp: into which folder of the recompiled library?");
         shows(&app, question, rgb(app.theme.warning));
         shows(&app, "default, ", yellow); /* the Main first, in focus */

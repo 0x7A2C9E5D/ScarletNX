@@ -8304,11 +8304,14 @@ static void dests_open(App* app, char* file, bool prepared) {
 }
 /* the box's question */
 static void dests_question(const App* app, char* question, size_t size) {
-    const char* slash = app->dest_file ? SDL_max(strrchr(app->dest_file, '/'), strrchr(app->dest_file, '\\')) : NULL;
-    snprintf(question, size, snx_tr("%s: into which folder of the recompiled library?"),
-             slash            ? slash + 1
-             : app->dest_file ? app->dest_file
-                              : "");
+    const char *file = app->dest_file ? app->dest_file : "", *leaf = file + strlen(file);
+    /* its name: a \ separates on Windows only, elsewhere it can be a name's letter */
+#ifdef _WIN32
+    while (leaf > file && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
+#else
+    while (leaf > file && leaf[-1] != '/') --leaf;
+#endif
+    snprintf(question, size, snx_tr("%s: into which folder of the recompiled library?"), leaf);
 }
 /* choice i: the folder from home, cut in its middle to fit, what it is and its free room; NULL past the last */
 static const char* dest_label(App* app, int i, char* out, size_t size) {
