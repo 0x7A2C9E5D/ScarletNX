@@ -191,16 +191,17 @@ static int play(const char* folder, bool recompile, double seconds, const char* 
     printf("Module %s: %u imports, module_start 0x%08x\n", image.name, (unsigned)image.import_count,
            (unsigned)image.module_start);
     bool opened = !recompile && vita_native_open(module, &image, &native, error, sizeof error);
-    /* the blocks earlier runs compiled at run time (the hints) that the module lacks: compiled ahead of time now */
+    /* the blocks earlier runs compiled at run time (the hints) that the module lacks: the run-time compiler compiles
+       them again, and a recompile (-r) starts from them, as the 3DS driver's. An existing module that matches is
+       played as it is */
     size_t hint_count = 0, missing = 0;
     uint32_t* hints = opened ? vita_hints_read(folder, &hint_count) : NULL;
     for (size_t i = 0; i < hint_count; ++i) missing += !vita_module_block(native.module, hints[i]);
     free(hints);
-    if (missing) {
-        printf("%zu blocks earlier runs compiled at run time aren't in the game's module: compiling it again\n", missing);
-        vita_native_close(&native);
-        opened = false;
-    }
+    if (missing)
+        printf("%zu blocks earlier runs compiled at run time aren't in the game's module, which a recompile (-r) "
+               "starts from\n",
+               missing);
     if (!opened) {
         printf("Compiling the game's code\n");
         if (vita_aot_compile(folder, &image, error, sizeof error) ||
@@ -236,8 +237,11 @@ static int play(const char* folder, bool recompile, double seconds, const char* 
                              ? NULL
                              : snx_read_file(sfo_path, &sfo_size);
     title = sfo ? vita_sfo_string(sfo, sfo_size, "TITLE") : NULL;
-    printf("Game: %s - %s\n", title ? title : image.name, snx_build_info());
-    vita_present_init(title ? title : image.name, shot);
+    /* the window's title as the 3DS driver's and a Switch game's: the game's name, then the build */
+    char* header = snx_format("%s - %s", title ? title : image.name, snx_build_info());
+    printf("Game: %s\n", header ? header : image.name);
+    vita_present_init(header ? header : image.name, shot);
+    free(header);
     free(sfo);
     free(title);
     status = vita_run(process, seconds);
@@ -303,6 +307,7 @@ int snx_vita_main(int argc, char** argv) {
                 o = ini_find(g_vita_debug_ini, !strcmp(key, "script") ? "vita_script" : key);
                 if (!o) o = ini_find(g_debug_ini, key);
                 if (!o && !strcmp(key, "vulkan_video")) o = ini_find(g_graphics_ini, key);
+                if (!o && !strcmp(key, "press_len")) o = ini_find(g_unattended_ini, key);
             }
             if (!o) {
                 fprintf(stderr, "scarletnx-vita: unknown setting: %s\n", a);

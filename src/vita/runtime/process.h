@@ -18,6 +18,7 @@
 #define VITA_TLS_BASE      0x80010000u
 #define VITA_TLS_SIZE      0x1000u /* each thread's: sceKernelGetTLSAddr's slots, then the TLS register's */
 #define VITA_TLS_ERRNO     0xffcu  /* in each thread's: its errno (SceLibc's _sceLibcErrnoLoc) */
+#define VITA_TLS_NET_ERRNO 0xff8u  /* in each thread's: SceNet's errno (sceNetErrnoLoc) */
 #define VITA_USER_BASE     0x82000000u
 #define VITA_USER_END      0xa0000000u
 #define VITA_CDRAM_BASE    0x60000000u
@@ -178,6 +179,7 @@ typedef struct {
 struct VitaGxm;
 struct VitaAudio;
 struct VitaMp4;
+struct VitaNet;
 struct VitaVideodec;
 struct VitaAudiodec;
 typedef struct VitaProcess {
@@ -188,6 +190,8 @@ typedef struct VitaProcess {
     char* app;     /* app0: in it */
     char* patch;   /* the update's files, which app0: shows over app's */
     char* ux0;     /* ux0: in it */
+    char* savedata; /* savedata0:, the game's save data: ux0/user/00/savedata/<its title ID>, as the console keeps it */
+    char title_id[16]; /* from its param.sfo (the update's when it has one), else the folder's name */
     VitaThread threads[VITA_THREADS];
     VitaObject objects[VITA_OBJECTS];
     VitaFile files[VITA_FILES];
@@ -218,6 +222,12 @@ typedef struct VitaProcess {
         uint32_t heap, data, rand;
     } libc;
     VitaFiber fibers[VITA_FIBERS];
+    /* the common dialog open (vita/hle/dialog.c): which one (0 for none), its status and the result it ends with */
+    struct {
+        uint32_t kind, status, result;
+    } dialog;
+    /* the network's state (vita/hle/net.c), made at its first use */
+    struct VitaNet* net;
     /* each import's function (vita/hle/hle.c), looked up at its first call; unknown_logged: reported as missing */
     const void** hle;
     uint32_t* unknown_logged;

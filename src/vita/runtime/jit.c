@@ -46,6 +46,7 @@ VitaJit* vita_jit_new(VitaProcess* p, char* error, size_t error_size) {
         free(j);
         return NULL;
     }
+    snx_arm_exec_set_profile(j->exec, SNX_ARM_PROFILE_A9);
     for (unsigned i = 0; i < p->image.segment_count; ++i)
         if (p->image.segment[i].flags & 1)
             j->ranges[j->range_count++] = (SnxArmExecRange){p->image.segment[i].address, NULL, p->image.segment[i].size};

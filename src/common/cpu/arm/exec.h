@@ -22,6 +22,8 @@ typedef struct SnxArmExec SnxArmExec;
 
 /* Returns NULL with a bounded error on failure. */
 SnxArmExec* snx_arm_exec_new(char* error, size_t error_size);
+/* The profile the blocks snx_arm_exec_block compiles from now on are for (A57 until set): the Vita's A9 */
+void snx_arm_exec_set_profile(SnxArmExec* exec, SnxArmProfile profile);
 void snx_arm_exec_free(SnxArmExec* exec);
 /* The block at pc (Thumb when thumb is set), compiled now unless it was before, from base + pc (the guest's
    memory; ranges bound how far it may read). NULL when pc is outside the ranges or the compiler fails. Not thread-safe:

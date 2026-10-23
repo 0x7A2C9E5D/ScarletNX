@@ -1629,7 +1629,9 @@ static void store_input(T* t, Bank bank, unsigned offset, Type type, Value v) {
         store(t, dest, part, (1u << part.n) - 1, (int)(at / per));
     }
 }
-/* SceGxmAttributeFormat: whether the host gives the shader integers (the non-normalized integer formats) */
+/* SceGxmAttributeFormat: whether the host gives the shader integers (the non-normalized integer formats). UNTYPED's
+   words reach the registers as they are (vertex_inputs) */
+#define GXM_ATTRIBUTE_UNTYPED 10u
 static int attribute_kind(unsigned format) {
     switch (format) {
         case 0: case 2: return K_UINT; /* U8, U16 */
@@ -1653,6 +1655,19 @@ static void vertex_inputs(T* t) {
         if (hint >= 0) {
             kind = attribute_kind(t->hints->attributes[hint].format);
             t->out->attribute_location[hint] = (int)slot;
+        }
+        if (hint >= 0 && t->hints->attributes[hint].format == GXM_ATTRIBUTE_UNTYPED) {
+            /* its 32-bit words as they are, one a register from the resource's, whatever the parameter's type */
+            unsigned words = t->hints->attributes[hint].components;
+            for (unsigned s = 0; s < (words + 3) / 4; ++s) {
+                uint32_t input = spv_emit_location(&t->e, SPV_STORAGE_INPUT, t->t_v4u, slot + s);
+                global(t, input);
+                uint32_t vec = SPV(&t->e, SPV_OP_LOAD, t->t_v4u, input);
+                for (unsigned i = 0; i < 4 && s * 4 + i < words; ++i)
+                    store_word(t, B_PA, resource + s * 4 + i, SPV(&t->e, SPV_OP_COMPOSITE_EXTRACT, t->t_u32, vec, i));
+            }
+            slot += (words + 3) / 4;
+            continue;
         }
         for (unsigned s = 0; s < slots; ++s) {
             uint32_t type4 = kind == K_FLOAT ? t->t_v4f : kind == K_UINT ? t->t_v4u : t->t_v4i;

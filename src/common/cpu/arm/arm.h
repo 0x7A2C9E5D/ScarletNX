@@ -119,8 +119,10 @@ typedef enum {
 SnxA32Kind snx_a32_decode(uint32_t word);
 
 /* Opt-in ISA profiles. Existing decode/emission APIs remain Cortex-A57.
-   ARM11 is an integer ARMv6K user-mode subset, not a full ARM11 implementation. */
-typedef enum { SNX_ARM_PROFILE_A57, SNX_ARM_PROFILE_ARM11 } SnxArmProfile;
+   ARM11 is an integer ARMv6K user-mode subset, not a full ARM11 implementation.
+   A9 (the Vita's Cortex-A9 MPCore, ARMv7-A) is A57's, with the UNPREDICTABLE forms its games rely on executed as the
+   A9 executes them (profile.c) */
+typedef enum { SNX_ARM_PROFILE_A57, SNX_ARM_PROFILE_ARM11, SNX_ARM_PROFILE_A9 } SnxArmProfile;
 SnxA32Kind snx_a32_decode_profile(SnxArmProfile profile, uint32_t word);
 
 /* ---- Thumb16/Thumb32 ----

@@ -86,6 +86,17 @@ Ordinary unaligned scalar RAM transfers model alignment checking disabled and
 ARMv6 unaligned support enabled; CP15 alignment/legacy rotated-load modes are
 not emulated. None of these changes affect A57's original flat-memory path.
 
+The A9 profile (`SNX_ARM_PROFILE_A9`, the Vita's Cortex-A9 MPCore) is A57's
+ARMv7-A subset with the UNPREDICTABLE forms Vita games rely on given the
+Cortex-A9's behavior. So far that is a store with writeback into the register
+it stores (`STR r0, [r0, #28]!`, A32 STR/STRB/STRH and Thumb's imm8 forms): the
+register is stored as it was, then the base is written back. `profile.c` decodes
+it as the same instruction with another base, which the emitters already run in
+that order. Loads with writeback into the loaded register and doubleword stores
+stay rejected. The executor compiles for A57 unless `snx_arm_exec_set_profile`
+selects another profile, and `snx_arm_successors` takes the profile its blocks
+were compiled for.
+
 Checked blocks require `&SnxArmCheckedCPU.cpu` (see `checked.h`), not a standalone
 `SnxArmCPU`. This **separate ABI** supplies a context and one callback; no flat
 pointer is read. Each instruction fetch checks execute permission and compares

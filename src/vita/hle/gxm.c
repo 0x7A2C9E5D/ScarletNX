@@ -23,6 +23,8 @@
 #define SCE_GXM_ERROR_INVALID_VALUE       0x805b0003u
 #define SCE_GXM_ERROR_INVALID_POINTER     0x805b0004u
 #define SCE_GXM_ERROR_INVALID_ALIGNMENT   0x805b0005u
+#define SCE_GXM_ERROR_UNSUPPORTED         0x805b0009u
+#define SCE_GXM_DEPTH_STENCIL_SURFACE_TILED 0x00011000u
 #define SCE_GXM_ERROR_NOT_WITHIN_SCENE    0x805b0006u
 #define SCE_GXM_ERROR_WITHIN_SCENE        0x805b0007u
 #define SCE_GXM_ERROR_NULL_PROGRAM        0x805b0008u
@@ -228,17 +230,35 @@ static uint32_t color_surface_init(VitaProcess* p, VitaThread* t) {
     for (unsigned i = 0; i < 12; ++i) vita_write32(p, surface + i * 4, words[i]);
     return 0;
 }
-/* sceGxmDepthStencilSurfaceInit(surface, format, type, stride, depth data, stencil data) */
+/* sceGxmDepthStencilSurfaceInit(surface, format, type, stride, depth data, stencil data): the control word as the
+   runtime keeps it (gxm.h, GXM_DEPTH_*) */
 static uint32_t depth_stencil_surface_init(VitaProcess* p, VitaThread* t) {
-    uint32_t surface = arg(p, t, 0);
+    uint32_t surface = arg(p, t, 0), stride = arg(p, t, 3);
     if (!surface) return SCE_GXM_ERROR_INVALID_POINTER;
-    uint32_t control = (arg(p, t, 1) >> 12) | (arg(p, t, 2) & 0xff000000u) | (arg(p, t, 3) & 0xffffu) << 8;
+    if (stride > 0x7fffu) return SCE_GXM_ERROR_INVALID_VALUE;
+    uint32_t control = (arg(p, t, 1) >> 12 & GXM_DEPTH_FORMAT_MASK) | stride << GXM_DEPTH_STRIDE_SHIFT |
+                       (arg(p, t, 2) == SCE_GXM_DEPTH_STENCIL_SURFACE_TILED ? GXM_DEPTH_TILED : 0);
     vita_write32(p, surface, control);
     vita_write32(p, surface + 4, arg(p, t, 4));
     vita_write32(p, surface + 8, arg(p, t, 5));
     vita_write32(p, surface + 12, 0x3f800000u); /* the background depth, 1.0 */
     vita_write32(p, surface + 16, 0);
     return 0;
+}
+/* sceGxmDepthStencilSurfaceSetForceLoadMode and SetForceStoreMode(surface, mode): whether each scene starts with the
+   depth in memory, and leaves its depth there */
+static uint32_t depth_set_force(VitaProcess* p, VitaThread* t, uint32_t bit) {
+    uint32_t surface = arg(p, t, 0);
+    if (!surface) return SCE_GXM_ERROR_INVALID_POINTER;
+    uint32_t control = vita_read32(p, surface) & ~bit;
+    vita_write32(p, surface, control | (arg(p, t, 1) ? bit : 0));
+    return 0;
+}
+static uint32_t depth_set_force_load(VitaProcess* p, VitaThread* t) {
+    return depth_set_force(p, t, GXM_DEPTH_FORCE_LOAD);
+}
+static uint32_t depth_set_force_store(VitaProcess* p, VitaThread* t) {
+    return depth_set_force(p, t, GXM_DEPTH_FORCE_STORE);
 }
 static uint32_t sync_object_create(VitaProcess* p, VitaThread* t) {
     uint32_t out = arg(p, t, 0);
@@ -530,20 +550,13 @@ static uint32_t set_region_clip(VitaProcess* p, VitaThread* t) {
     c->clip_x0 = arg(p, t, 2), c->clip_y0 = arg(p, t, 3), c->clip_x1 = arg(p, t, 4), c->clip_y1 = arg(p, t, 5);
     return 0;
 }
-static float float_arg(VitaProcess* p, VitaThread* t, unsigned n) {
-    uint32_t bits = arg(p, t, n);
-    float f;
-    memcpy(&f, &bits, 4);
-    return f;
-}
-/* sceGxmSetViewport(context, xOffset, xScale, yOffset, yScale, zOffset, zScale): floats in the core registers, as
-   the console's soft-float ABI passes them */
+/* sceGxmSetViewport(context, xOffset, xScale, yOffset, yScale, zOffset, zScale): the floats in S0 to S5, as the
+   console's hard-float ABI passes them (a game's call loads them there) */
 static uint32_t set_viewport(VitaProcess* p, VitaThread* t) {
     GxmContext* c = context_of(p, arg(p, t, 0));
     if (!c) return SCE_GXM_ERROR_INVALID_POINTER;
-    c->viewport_offset[0] = float_arg(p, t, 1), c->viewport_scale[0] = float_arg(p, t, 2);
-    c->viewport_offset[1] = float_arg(p, t, 3), c->viewport_scale[1] = float_arg(p, t, 4);
-    c->viewport_offset[2] = float_arg(p, t, 5), c->viewport_scale[2] = float_arg(p, t, 6);
+    for (unsigned i = 0; i < 3; ++i)
+        c->viewport_offset[i] = vita_float(t, i * 2), c->viewport_scale[i] = vita_float(t, i * 2 + 1);
     c->viewport_enabled = true;
     return 0;
 }
@@ -722,6 +735,54 @@ static uint32_t texture_init_tiled(VitaProcess* p, VitaThread* t) {
     return texture_init(p, arg(p, t, 0), arg(p, t, 1), arg(p, t, 2), arg(p, t, 3), arg(p, t, 4), arg(p, t, 5),
                         GXM_TEXTURE_TILED);
 }
+/* sceGxmTextureInitLinearStrided(texture, data, format, width, height, stride): one level of rows stride bytes apart,
+   the stride in 4-byte units less one where the mip filter, min filter, mip count and LOD bias are kept otherwise
+   (gxm_texture_stride), its min filter its mag filter */
+static uint32_t texture_init_linear_strided(VitaProcess* p, VitaThread* t) {
+    uint32_t address = arg(p, t, 0), stride = arg(p, t, 5);
+    if (stride & 3) return SCE_GXM_ERROR_INVALID_ALIGNMENT;
+    if (stride < 4 || stride > 0x20000u) return SCE_GXM_ERROR_INVALID_VALUE;
+    uint32_t status = texture_init(p, address, arg(p, t, 1), arg(p, t, 2), arg(p, t, 3), arg(p, t, 4), 1,
+                                   GXM_TEXTURE_LINEAR_STRIDED);
+    if (status) return status;
+    GxmTexture x = texture_read(p, address);
+    uint32_t units = stride / 4 - 1;
+    gxm_set_bits(&x.w[0], 9, 1, units & 1);
+    gxm_set_bits(&x.w[0], 10, 2, (units >> 1) & 3);
+    gxm_set_bits(&x.w[0], 17, 4, (units >> 3) & 15);
+    gxm_set_bits(&x.w[0], 21, 6, (units >> 7) & 63);
+    texture_write(p, address, &x);
+    return 0;
+}
+/* sceGxmTextureSetMipFilter(texture, SCE_GXM_TEXTURE_MIP_FILTER_DISABLED 0 or _ENABLED 0x200): a strided texture's
+   bit is its stride's */
+static uint32_t texture_set_mip_filter(VitaProcess* p, VitaThread* t) {
+    uint32_t address = arg(p, t, 0);
+    if (!address) return SCE_GXM_ERROR_INVALID_POINTER;
+    GxmTexture x = texture_read(p, address);
+    if (gxm_texture_type(&x) == GXM_TEXTURE_LINEAR_STRIDED) return SCE_GXM_ERROR_UNSUPPORTED;
+    gxm_set_bits(&x.w[0], 9, 1, arg(p, t, 1) != 0);
+    texture_write(p, address, &x);
+    return 0;
+}
+/* sceGxmTextureSetWidth and SetHeight(texture, size): a swizzled or cube texture's a power of two, in its log2 */
+static uint32_t texture_set_size(VitaProcess* p, VitaThread* t, unsigned linear_at, unsigned pow2_at) {
+    uint32_t address = arg(p, t, 0), size = arg(p, t, 1);
+    if (!address) return SCE_GXM_ERROR_INVALID_POINTER;
+    if (!size || size > 4096) return SCE_GXM_ERROR_INVALID_VALUE;
+    GxmTexture x = texture_read(p, address);
+    if (gxm_texture_pow2(&x)) {
+        if (size & (size - 1)) return SCE_GXM_ERROR_INVALID_VALUE;
+        unsigned log = 0;
+        while ((1u << log) < size) ++log;
+        gxm_set_bits(&x.w[1], pow2_at, 4, log);
+    } else
+        gxm_set_bits(&x.w[1], linear_at, 12, size - 1);
+    texture_write(p, address, &x);
+    return 0;
+}
+static uint32_t texture_set_width(VitaProcess* p, VitaThread* t) { return texture_set_size(p, t, 12, 16); }
+static uint32_t texture_set_height(VitaProcess* p, VitaThread* t) { return texture_set_size(p, t, 0, 0); }
 static uint32_t texture_get_data(VitaProcess* p, VitaThread* t) {
     GxmTexture x = texture_read(p, arg(p, t, 0));
     return gxm_texture_data(&x);
@@ -742,7 +803,7 @@ static uint32_t texture_set_filter(VitaProcess* p, VitaThread* t, unsigned at) {
     uint32_t address = arg(p, t, 0);
     if (!address) return SCE_GXM_ERROR_INVALID_POINTER;
     GxmTexture x = texture_read(p, address);
-    if (at == 10 && gxm_texture_type(&x) == GXM_TEXTURE_LINEAR_STRIDED) return 0x805b0009u; /* UNSUPPORTED */
+    if (at == 10 && gxm_texture_type(&x) == GXM_TEXTURE_LINEAR_STRIDED) return SCE_GXM_ERROR_UNSUPPORTED;
     gxm_set_bits(&x.w[0], at, 2, arg(p, t, 1));
     texture_write(p, address, &x);
     return 0;
@@ -975,6 +1036,10 @@ const VitaHle vita_hle_gxm[] = {
     {0x4811aecbu, "sceGxmTextureInitLinear", texture_init_linear},
     {0xd572d547u, "sceGxmTextureInitSwizzled", texture_init_swizzled},
     {0xe6f0db27u, "sceGxmTextureInitTiled", texture_init_tiled},
+    {0x6679bef0u, "sceGxmTextureInitLinearStrided", texture_init_linear_strided},
+    {0x1ca9fe0bu, "sceGxmTextureSetMipFilter", texture_set_mip_filter},
+    {0x2ea178beu, "sceGxmTextureSetWidth", texture_set_width},
+    {0xaee7fdd1u, "sceGxmTextureSetHeight", texture_set_height},
     {0x5341bd46u, "sceGxmTextureGetData", texture_get_data},
     {0x855814c4u, "sceGxmTextureSetData", texture_set_data},
     {0xe868d2b3u, "sceGxmTextureGetFormat", texture_get_format},
@@ -1016,8 +1081,8 @@ const VitaHle vita_hle_gxm[] = {
     {0xf33d9980u, "sceGxmColorSurfaceGetStrideInPixels", color_surface_get_stride},
     {0x86456f7bu, "sceGxmColorSurfaceSetClip", ok},
     {0xf5c89643u, "sceGxmColorSurfaceSetGammaMode", ok},
-    {0x0c44acd7u, "sceGxmDepthStencilSurfaceSetForceLoadMode", ok},
-    {0x12aaa7afu, "sceGxmDepthStencilSurfaceSetForceStoreMode", ok},
+    {0x0c44acd7u, "sceGxmDepthStencilSurfaceSetForceLoadMode", depth_set_force_load},
+    {0x12aaa7afu, "sceGxmDepthStencilSurfaceSetForceStoreMode", depth_set_force_store},
     {0xf65d4917u, "sceGxmTextureGetType", texture_get_type},
     {0xf7b7b1e4u, "sceGxmTextureGetMipmapCount", texture_get_mipmap_count},
     {0xb0bd52f3u, "sceGxmTextureGetStride", texture_get_stride},

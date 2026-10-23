@@ -4,7 +4,8 @@
    Cross (south), X Circle (east), V Square (west), C Triangle (north), Q L, E R, Enter Start, Backspace Select, the
    arrows the D-pad, WASD the left stick and IJKL the right. The window's mouse is the touch screen: the left button
    touches the front panel, the right the rear one. A gamepad's buttons go by where they are; gamepad_swap_ab swaps
-   Cross and Circle. The script (vita_script) is ms:hex presses, each held for press_len ms */
+   Cross and Circle. The script (vita_script) is ms:hex presses, each held for press_len ms, its bits 24 to 27 the left
+   stick pushed right, left, up or down */
 #include "vita/platform/input.h"
 #include "common/utilities/common.h"
 #include "snx_settings.h"
@@ -27,6 +28,11 @@ static struct {
     bool gamepads;
 } g_input;
 
+#define SCRIPT_BUTTONS     0x00ffffffu
+#define SCRIPT_STICK_RIGHT 0x01000000u
+#define SCRIPT_STICK_LEFT  0x02000000u
+#define SCRIPT_STICK_UP    0x04000000u
+#define SCRIPT_STICK_DOWN  0x08000000u
 static void script_parse(const char* text) {
     size_t most = 1;
     for (const char* c = text; *c; ++c) most += *c == ',';
@@ -143,14 +149,21 @@ void vita_input_read(VitaInput* input) {
             sticks[s * 2] = x * scale, sticks[s * 2 + 1] = y * scale;
         }
     }
-    input->lx = stick(sticks[0]), input->ly = stick(sticks[1]);
-    input->rx = stick(sticks[2]), input->ry = stick(sticks[3]);
+    /* the script's presses: buttons, and the left stick pushed all the way by bits 24 to 27 (right, left, up, down) */
     if (g_input.presses) {
         double ms = (snx_seconds() - g_input.start) * 1000.0;
         for (size_t i = 0; i < g_input.presses; ++i)
-            if (ms >= g_input.script[i].at && ms - g_input.script[i].at < g_settings.press_length)
-                input->buttons |= g_input.script[i].mask;
+            if (ms >= g_input.script[i].at && ms - g_input.script[i].at < g_settings.press_length) {
+                uint32_t mask = g_input.script[i].mask;
+                input->buttons |= mask & SCRIPT_BUTTONS;
+                if (mask & SCRIPT_STICK_RIGHT) sticks[0] = 1;
+                if (mask & SCRIPT_STICK_LEFT) sticks[0] = -1;
+                if (mask & SCRIPT_STICK_UP) sticks[1] = -1;
+                if (mask & SCRIPT_STICK_DOWN) sticks[1] = 1;
+            }
     }
+    input->lx = stick(sticks[0]), input->ly = stick(sticks[1]);
+    input->rx = stick(sticks[2]), input->ry = stick(sticks[3]);
 }
 void vita_input_free(void) {
     for (unsigned i = 0; i < INPUT_PADS; ++i)

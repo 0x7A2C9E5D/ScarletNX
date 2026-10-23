@@ -236,14 +236,37 @@ static uint32_t try_lock_call(VitaProcess* p, VitaThread* t, VitaObject* o, uint
     uint32_t r = try_lock(t, o, (int32_t)arg(p, t, 1));
     return r == 1 ? busy : r;
 }
-static uint32_t unlock(VitaProcess* p, VitaThread* t, VitaObject* o, uint32_t unknown, uint32_t unlocked,
-                   uint32_t not_owned) {
+/* A mutex its owner lets go of goes to the thread waiting for it longest (or, with SCE_KERNEL_ATTR_THREAD_PRIO, the
+   most urgent), as the console's kernel hands it over: left free, the thread that let go would take it again before
+   a waiter ran, and one that locks and unlocks it in a loop would keep the others waiting forever. The waiter's wait
+   is met (wait.b) with the mutex its own */
+#define ATTR_THREAD_PRIO 0x2000u
+static void hand_over(VitaProcess* p, uint32_t uid, VitaObject* o) {
+    VitaThread* next = NULL;
+    for (unsigned i = 0; i < VITA_THREADS; ++i) {
+        VitaThread* w = &p->threads[i];
+        if (w->state != VITA_THREAD_WAITING || w->wait.kind != VITA_WAIT_MUTEX || w->wait.object != uid || w->wait.b)
+            continue;
+        bool sooner = !next || ((o->u.mutex.attr & ATTR_THREAD_PRIO) && w->priority != next->priority
+                                    ? w->priority < next->priority
+                                    : w->seq < next->seq);
+        if (sooner) next = w;
+    }
+    if (!next) return;
+    o->u.mutex.owner = next->uid, o->u.mutex.count = (int32_t)next->wait.a;
+    next->wait.b = 1;
+}
+static uint32_t unlock(VitaProcess* p, VitaThread* t, uint32_t uid, VitaObject* o, uint32_t unknown,
+                       uint32_t unlocked, uint32_t not_owned) {
     if (!o) return unknown;
     int32_t count = (int32_t)arg(p, t, 1);
     if (!o->u.mutex.owner) return unlocked;
     if (o->u.mutex.owner != t->uid) return not_owned;
     if (count <= 0 || count > o->u.mutex.count) return SCE_KERNEL_ERROR_INVALID_ARGUMENT;
-    if (!(o->u.mutex.count -= count)) o->u.mutex.owner = 0;
+    if (!(o->u.mutex.count -= count)) {
+        o->u.mutex.owner = 0;
+        hand_over(p, uid, o);
+    }
     return 0;
 }
 static uint32_t lock_mutex(VitaProcess* p, VitaThread* t) {
@@ -255,7 +278,8 @@ static uint32_t try_lock_mutex(VitaProcess* p, VitaThread* t) {
                   0x80028145u /* SCE_KERNEL_ERROR_MUTEX_FAILED_TO_OWN */);
 }
 static uint32_t unlock_mutex(VitaProcess* p, VitaThread* t) {
-    return unlock(p, t, vita_object(p, arg(p, t, 0), VITA_OBJ_MUTEX), SCE_KERNEL_ERROR_UNKNOWN_MUTEX_ID,
+    uint32_t uid = arg(p, t, 0);
+    return unlock(p, t, uid, vita_object(p, uid, VITA_OBJ_MUTEX), SCE_KERNEL_ERROR_UNKNOWN_MUTEX_ID,
            SCE_KERNEL_ERROR_MUTEX_UNLOCKED, SCE_KERNEL_ERROR_MUTEX_NOT_OWNED);
 }
 static uint32_t delete_mutex(VitaProcess* p, VitaThread* t) {
@@ -273,7 +297,8 @@ static uint32_t try_lock_lw_mutex(VitaProcess* p, VitaThread* t) {
 }
 static uint32_t unlock_lw_mutex(VitaProcess* p, VitaThread* t) {
     uint32_t uid;
-    return unlock(p, t, lw_mutex(p, arg(p, t, 0), &uid), SCE_KERNEL_ERROR_UNKNOWN_MUTEX_ID,
+    VitaObject* o = lw_mutex(p, arg(p, t, 0), &uid);
+    return unlock(p, t, uid, o, SCE_KERNEL_ERROR_UNKNOWN_MUTEX_ID,
            SCE_KERNEL_ERROR_LW_MUTEX_UNLOCKED, SCE_KERNEL_ERROR_LW_MUTEX_NOT_OWNED);
 }
 static uint32_t delete_lw_mutex(VitaProcess* p, VitaThread* t) {
@@ -355,6 +380,7 @@ static uint32_t wait_cond(VitaProcess* p, VitaThread* t) {
     if (!m || m->u.mutex.owner != t->uid) return SCE_KERNEL_ERROR_MUTEX_NOT_OWNED;
     uint32_t count = (uint32_t)m->u.mutex.count;
     m->u.mutex.owner = 0, m->u.mutex.count = 0;
+    hand_over(p, c->u.cond.mutex, m);
     vita_wait(p, (VitaWait){.kind = VITA_WAIT_COND, .object = uid, .a = c->u.cond.mutex, .out = count,
                             .timeout = arg(p, t, 1), .deadline = vita_deadline(p, arg(p, t, 1))});
     return 0;
@@ -486,6 +512,7 @@ bool vita_kernel_wait_try(VitaProcess* p, VitaThread* t, uint64_t now) {
         case VITA_WAIT_MUTEX: {
             VitaObject* o = vita_object(p, w->object, VITA_OBJ_MUTEX);
             if (!o) return t->cpu.r[0] = SCE_KERNEL_ERROR_WAIT_DELETE, true;
+            if (w->b) return t->cpu.r[0] = 0, true; /* handed over by its owner (hand_over) */
             uint32_t r = try_lock(t, o, (int32_t)w->a);
             if (r == 1) return false;
             return t->cpu.r[0] = r, true;

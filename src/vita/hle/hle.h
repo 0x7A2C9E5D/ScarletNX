@@ -62,7 +62,7 @@ void vita_hle_call_returned(VitaProcess* p, VitaThread* t);
 /* each module's functions (a NULL-named entry ends each table) */
 extern const VitaHle vita_hle_kernel[], vita_hle_io[], vita_hle_ctrl[], vita_hle_display[], vita_hle_audio[],
     vita_hle_misc[], vita_hle_gxm[], vita_hle_libc[], vita_hle_fiber[], vita_hle_ngs[], vita_hle_mp4[],
-    vita_hle_videodec[], vita_hle_audiodec[];
+    vita_hle_videodec[], vita_hle_audiodec[], vita_hle_dialog[], vita_hle_net[];
 
 /* An imported variable (VitaImage.variables): what its slot (VITA_VARIABLE_SIZE bytes, zero) holds, written once as
    the process starts */
@@ -89,6 +89,11 @@ uint32_t vita_heap_in_use(VitaProcess* p, uint32_t heap);
 bool vita_kernel_wait_try(VitaProcess* p, VitaThread* t, uint64_t now);
 bool vita_gxm_wait_try(VitaProcess* p, VitaThread* t, uint64_t now);
 
+/* net.c: what an offline console's network library answers for a function the runtime doesn't know: its library's
+   error, 0 for a library that isn't the network's */
+uint32_t vita_net_offline_error(const char* library);
+/* net.c: its state (sockets and their datagrams), freed with the process */
+void vita_net_free(VitaProcess* p);
 /* io.c: the files the game left open */
 void vita_io_close_all(VitaProcess* p);
 /* sceIoOpen's and sceIoClose's work, for SceLibc's stdio: a descriptor or an error; a descriptor's host file, NULL

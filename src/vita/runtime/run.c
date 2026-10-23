@@ -309,7 +309,9 @@ done:
     if (result || (!p->exited && !closed)) report_threads(p);
     printf("Imports called: %" PRIu64 "\n", p->hle_calls);
     size_t hints = vita_jit_save_hints(p->jit, p->folder);
-    if (hints) printf("%zu blocks compiled at run time were added to the hints for the next compile\n", hints);
+    if (hints)
+        printf("%zu blocks compiled at run time were added to the hints, which a recompile (-r) starts from\n",
+               hints);
     vita_jit_free(p->jit);
     p->jit = NULL;
     vita_lockstep_free();
