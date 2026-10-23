@@ -227,7 +227,7 @@ msgid "Tap to return to menu"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Tap here to abort and return to menu"
+msgid "Tap the screen: abort or keep going"
 msgstr ""
 
 #: src/gui/main.c

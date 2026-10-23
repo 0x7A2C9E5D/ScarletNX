@@ -429,8 +429,8 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define GUI_RECENT_SHOWN 3 /* the recent games Games shows before a row that shows the rest */
 /* what the screens say to press: a phone has a finger, the back button and the system's file picker, nothing to drop;
    a computer has the picker too (on Linux the desktop's portal, else zenity), on a screen of its own as the keys' */
-#ifdef SDL_PLATFORM_ANDROID
 #ifdef SNX_TOUCH_UI
+#ifdef SDL_PLATFORM_ANDROID
 #define SAY_MENU      SNX_TR_KEYS("Tap: select. Refresh: tap it. Back: go back.")
 #else
 #define SAY_MENU      SNX_TR_KEYS("Tap: select. Refresh: tap it.")
@@ -450,7 +450,7 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_PICK_BOX   SNX_TR_NOOP("tap the box to open the file picker")
 #define SAY_FILE_WAIT  SNX_TR_NOOP("Pick a file")
 #define SAY_DONE       SNX_TR_NOOP("Tap to return to menu")
-#define SAY_ABORT      SNX_TR_NOOP("Tap here to abort and return to menu")
+#define SAY_ABORT      SNX_TR_NOOP("Tap the screen: abort or keep going")
 #define SAY_NO_GAMES   SNX_TR_NOOP("No games in recompiled/ or dumps/: put a game's .nro, .xci or .nsp in dumps/.")
 #ifdef SDL_PLATFORM_ANDROID
 #define SAY_EDITOR     SNX_TR_KEYS("Tap a key to change, type or pick it. Back: go back.")
@@ -9339,11 +9339,16 @@ static bool foot_press(App* app, float x, float y) {
     app->scale = s;
     return hit.key[0] && hint_press(app, hit.key, hit.col);
 }
+static void cancel(App* app);
 static void pointer(App* app, float window_x, float window_y, bool click, bool touch) {
     float x, y;
     bool picking = app->editing && app->editor.picking;
     if ((app->menu.running && !app->confirm.shown) || app->finished) {
         app->hovering = false; /* a run's foot presses nothing */
+#ifdef SNX_TOUCH_UI
+        /* a phone has no ESC: a tap on a run that goes asks whether to abort it or keep going */
+        if (click && app->menu.running && !app->finished && !app->aborting) cancel(app);
+#endif
         return;
     }
     layout(app);
@@ -10010,6 +10015,7 @@ static bool initialize(App* app, const char* self) {
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
     SDL_SetHint(SDL_HINT_PEN_MOUSE_EVENTS, "0");
 #ifdef SDL_PLATFORM_IOS
+    app->ask_abort = true; /* no ESC: a tap on a run asks what to do with it (pointer) */
     gui_apple_start();
 #endif
     if (!SDL_Init(SDL_INIT_VIDEO)) return false;
