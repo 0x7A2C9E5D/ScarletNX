@@ -953,9 +953,12 @@ int main(int argc, char** argv) {
         /* a dump read in place (Extract game container off) has no extraction either */
         assert(i + (nro || !extract ? 4 : 6) == argc && argv[i + 1][0] && !strcmp(argv[i + 2], "--outdir") &&
                strstr(argv[i + 3], "picked games"));
+        /* the extraction's folder named after the dump, in the system's separators as every path made is */
+        char* tail = snx_path_join("work", "picked folders");
         assert(nro || !extract ||
                (!strcmp(argv[i + 4], "--out") && strstr(argv[i + 5], "picked work") &&
-                !strcmp(argv[i + 5] + strlen(argv[i + 5]) - 15, "/picked folders")));
+                !strcmp(argv[i + 5] + strlen(argv[i + 5]) - 15, tail + 4)));
+        free(tail);
         puts("Recompiling picked folders\nScarletNX - picked folders");
         return 0;
     }
