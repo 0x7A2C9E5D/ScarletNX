@@ -124,12 +124,13 @@ foreach(line
         # ui.txt's texts as shown, through main.c's ui_tr
         "ui_tr(ui_main_texts + ui_main_items[item].text)"
         "        unsigned attr = ui_other_more_attr_cb(app, row);\n"
-        # a platform's own metric: a macro each platform defines, the plain value or the default where it sets none
-        "#ifdef SDL_PLATFORM_ANDROID\n#define UI_OTHER_MORE__ROW_HEIGHT 40\n#elif !defined(SDL_PLATFORM_IOS)\n#define UI_OTHER_MORE__ROW_HEIGHT 17\n#else\n#define UI_OTHER_MORE__ROW_HEIGHT 17\n#endif\n"
-        "#ifdef SDL_PLATFORM_ANDROID\n#define UI_OTHER_MORE__MAX_ROWS 8\n#elif !defined(SDL_PLATFORM_IOS)\n#define UI_OTHER_MORE__MAX_ROWS 4\n#else\n#define UI_OTHER_MORE__MAX_ROWS 8\n#endif\n"
+        # a platform's own metric: a macro each platform defines, the plain value or the default where it sets none;
+        # android's on iOS too, the phones'
+        "#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)\n#define UI_OTHER_MORE__ROW_HEIGHT 40\n#else\n#define UI_OTHER_MORE__ROW_HEIGHT 17\n#endif\n"
+        "#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)\n#define UI_OTHER_MORE__MAX_ROWS 8\n#else\n#define UI_OTHER_MORE__MAX_ROWS 4\n#endif\n"
         "case UI_OTHER_MORE: return ui_shown(r[UI_OTHER_MORE].h, UI_OTHER_MORE__ROW_HEIGHT, 2, UI_OTHER_MORE__MAX_ROWS, scale);\n"
-        # a platform's own height: the scene laid out for each platform, Android's More 40px, the others' growing
-        "void ui_other_layout(GuiRect at, int scale, GuiRect* r) {\n    int s = scale;\n#ifdef SDL_PLATFORM_ANDROID\n"
+        # a platform's own height: the scene laid out for each platform, the phones' More 40px, the others' growing
+        "void ui_other_layout(GuiRect at, int scale, GuiRect* r) {\n    int s = scale;\n#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)\n"
         "    r[UI_OTHER_MORE] = gui_rect(at.x + UI_AT(0L, at.w, 0L, s), at.y + UI_AT(0L, at.h, 1114112L, s), UI_AT(65536L, at.w, 0L, s), UI_AT(0L, at.h, 2621440L, s));\n"
         "    r[UI_OTHER_MORE] = gui_rect(at.x + UI_AT(0L, at.w, 0L, s), at.y + UI_AT(0L, at.h, 1114112L, s), UI_AT(65536L, at.w, 0L, s), UI_AT(65536L, at.h, -1114112L, s));\n"
         "bool ui_main_spare_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {\n    (void)app;\n    (void)row;\n    (void)width;\n    (void)info;\n    return false;\n}\n")
@@ -175,17 +176,17 @@ refused(item_tabs "${S}${T}${T}[button]\"A\" {}\n}\n" "2: an item at 2 tab\\(s\\
 refused(property_tabs "${S}${T}[list]L {\n${T}width = 1px\n${T}}\n}\n" "3: a property at 1 tab\\(s\\): its item's are at 2")
 refused(stray_close "}\n" "1: } with no block open")
 refused(close_tabs "${S}${T}}\n" "2: } at 1 tab\\(s\\): the block it closes opens at 0")
-refused(type "${S}${T}[slider]V {}\n}\n" "2: \\[slider\\] is not a type: scene, list, button, label")
+refused(type "${S}${T}[slider]V {}\n}\n" "2: \\[slider\\] is not a type: scene, list, button, label, box, slot")
 refused(outside "[button]\"A\" {}\n" "1: a button outside a scene: the file holds scenes")
 refused(holds "${S}${T}[button]\"A\" {\n${T}${T}[label]\"B\" {}\n${T}}\n}\n" "3: a button cannot hold a label")
 refused(scene_text "[scene]\"Main\" {}\n" "1: a scene has a Name, not a text")
 refused(button_name "${S}${T}[button]Load {}\n}\n" "2: a button has its \"Text\": its symbol is the text's, and a label is what shows a changing one")
 refused(property "${S}${T}[button]\"A\" {\n${T}${T}some_prop = 131313\n${T}}\n}\n" "3: some_prop is not a property of a button: it takes width, height, grow, attr, color, key, for-platform")
-refused(scene_property "${S}${T}color = ink\n}\n" "2: color is not a property of a scene: it takes gap, padding, direction, align, justify")
+refused(scene_property "${S}${T}color = ink\n}\n" "2: color is not a property of a scene: it takes gap, padding, narrow_below, direction, align, justify")
 refused(twice "${S}${T}[label]\"A\" {\n${T}${T}color = ink\n${T}${T}color = soft\n${T}}\n}\n" "4: color is set twice for one label")
 refused(percent "${S}${T}[list]L {\n${T}${T}width = 150%\n${T}}\n}\n" "3: width = 150%: a % of its parent is 0 to 100")
-refused(unit "${S}${T}[list]L {\n${T}${T}width = 12em\n${T}}\n}\n" "3: width = 12em: a length ends in px or %")
-refused(negative "${S}${T}[list]L {\n${T}${T}width = -3px\n${T}}\n}\n" "3: width = -3px: a length is a whole number of px, or a % of its parent")
+refused(unit "${S}${T}[list]L {\n${T}${T}width = 12em\n${T}}\n}\n" "3: width = 12em: a length ends in px, cols, rows or %")
+refused(negative "${S}${T}[list]L {\n${T}${T}width = -3px\n${T}}\n}\n" "3: width = -3px: a length is whole numbers of px, cols or rows, or a % of its parent, added with \\+")
 refused(color "${S}${T}[label]\"A\" {\n${T}${T}color = focsu\n${T}}\n}\n" "3: color = focsu: the theme's colours are page, ink, soft, focus, active, failure, dim, warning, added")
 refused(platform "${S}${T}[label]\"A\" {\n${T}${T}for-platform = ios\n${T}}\n}\n" "3: for-platform = ios: the platforms are android and desktop")
 refused(enter "${S}${T}[button]\"A\" {\n${T}${T}key = enter\n${T}}\n}\n" "3: key = enter: one ASCII character or f1 to f12, after ctrl- or alt- \\(Enter is the click's, not a hotkey\\)")
@@ -209,16 +210,40 @@ refused(grow_and_height "${S}${T}[list]L {\n${T}${T}height = 40px\n${T}${T}grow 
 refused(max_rows "${S}${T}[list]L {\n${T}${T}max_rows = 65\n${T}}\n}\n" "3: max_rows = 65: a whole number from 1 to 64")
 refused(scroll "${S}${T}[list]L {\n${T}${T}scroll = middle\n${T}}\n}\n" "3: scroll = middle: it is center or edge")
 refused(direction "[scene]S {\n${T}direction = diagonal\n}\n" "2: direction = diagonal: it is column or row")
-refused(pixels "[scene]S {\n${T}gap = 5%\n}\n" "2: gap = 5%: pixels end in px")
-refused(row_bounds "${S}${T}[list]L {\n${T}${T}min_row_width = 300px\n${T}${T}max_row_width = 200px\n${T}}\n}\n" "2: min_row_width 300 is over max_row_width 200")
+refused(pixels "[scene]S {\n${T}gap = 5%\n}\n" "2: gap = 5%: pixels end in px, cols or rows")
+refused(row_bounds "${S}${T}[list]L {\n${T}${T}min_row_width = 300px\n${T}${T}max_row_width = 200px\n${T}}\n}\n" "2: min_row_width 300px is over max_row_width 200px")
+refused(row_bounds_pct "${S}${T}[list]L {\n${T}${T}min_row_width = 60%\n${T}${T}max_row_width = 50%\n${T}}\n}\n" "2: min_row_width 60% is over max_row_width 50%")
 refused(label_attr "${S}${T}[label]\"A\" {\n${T}${T}attr = callback\n${T}}\n}\n" "3: attr is not a property of a label: it takes width, height, grow, color, for-platform")
 refused(attr "${S}${T}[button]\"A\" {\n${T}${T}attr = always\n${T}}\n}\n" "3: attr = always: it is callback")
 refused(rows_attr "${S}${T}[list]L {\n${T}${T}attr = callback\n${T}}\n}\n" "2: attr = callback on a list without items: its get_row_info gives each row's attr")
 refused(platform_gap "[scene]S {\n${T}android.gap = 10px\n}\n" "2: android.gap: a platform's own value is a width, a height, or a list's row_height, row_gap or max_rows")
 refused(platform_button "${S}${T}[button]\"A\" {\n${T}${T}desktop.row_gap = 4px\n${T}}\n}\n" "3: desktop.row_gap: a platform's own value is a width, a height, or a list's row_height, row_gap or max_rows")
-refused(platform_value "${S}${T}[list]L {\n${T}${T}android.row_height = 5%\n${T}}\n}\n" "3: row_height = 5%: pixels end in px")
+refused(platform_value "${S}${T}[list]L {\n${T}${T}android.row_height = 5%\n${T}}\n}\n" "3: row_height = 5%: pixels end in px, cols or rows")
 refused(platform_twice "${S}${T}[list]L {\n${T}${T}android.row_gap = 4px\n${T}${T}android.row_gap = 6px\n${T}}\n}\n" "4: android.row_gap is set twice for one list")
 refused(table_name "${S}${T}[list]Layout {}\n}\n" "2: ui_s_layout is the scene's own table or function: name it otherwise")
+
+# a frame: a scene of boxes and slots, laid out at run time
+set(F "[scene]F {\n${T}direction = column\n")
+refused(frame_list "${F}${T}[slot]A {\n${T}${T}grow = 1\n${T}}\n${T}[list]L {}\n}\n" "6: a list in scene F, whose boxes and slots are areas the code draws in: no list, button or label beside them")
+refused(frame_holds "${F}${T}[slot]A {\n${T}${T}grow = 1\n${T}${T}[slot]B {}\n${T}}\n}\n" "5: a slot cannot hold a slot")
+refused(slot_along "${F}${T}[slot]A {\n${T}${T}width = 10px\n${T}}\n}\n" "3: slot A has no height along its column: a height, a grow or measure = callback")
+refused(slot_along_row "[scene]F {\n${T}direction = row\n${T}[slot]A {\n${T}${T}measure = callback\n${T}}\n}\n" "3: slot A has no width along its row: a width, a grow or \\(in a column\\) measure = callback")
+refused(measure_height "${F}${T}[slot]A {\n${T}${T}measure = callback\n${T}${T}height = 2rows\n${T}}\n}\n" "3: measure and height: a measured slot's height is its measure_cb's")
+refused(frame_grow "${F}${T}[slot]A {\n${T}${T}height = 2rows\n${T}${T}grow = 1\n${T}}\n}\n" "3: height and grow: one of them, a length or a share of what is left")
+refused(box_measure "${F}${T}[box]B {\n${T}${T}measure = callback\n${T}}\n}\n" "4: measure is not a property of a box: it takes width, height, min_width, max_width, min_height, max_height, gap, padding, grow, direction, align, justify, shown, narrow")
+refused(slot_color "${F}${T}[slot]A {\n${T}${T}color = ink\n${T}}\n}\n" "4: color is not a property of a slot: it takes width, height, min_width, max_width, min_height, max_height, grow, measure, shown, narrow")
+refused(shown_word "${F}${T}[slot]A {\n${T}${T}grow = 1\n${T}${T}shown = always\n${T}}\n}\n" "5: shown = always: it is callback")
+refused(narrow_word "${F}${T}narrow_below = 45cols\n${T}[slot]A {\n${T}${T}grow = 1\n${T}${T}narrow = shrink\n${T}}\n}\n" "6: narrow = shrink: it is hide")
+refused(narrow_alone "${F}${T}[slot]A {\n${T}${T}grow = 1\n${T}${T}narrow = hide\n${T}}\n}\n" "3: narrow and narrow.\\* need the scene's narrow_below, the width they start below")
+refused(narrow_color "${F}${T}narrow_below = 45cols\n${T}[slot]A {\n${T}${T}grow = 1\n${T}${T}narrow.color = ink\n${T}}\n}\n" "6: narrow.color: below narrow_below a box or a slot may have its own width, height, grow, bounds or a box its direction")
+refused(narrow_twice "${F}${T}narrow_below = 45cols\n${T}[slot]A {\n${T}${T}grow = 1\n${T}${T}narrow.grow = 2\n${T}${T}narrow.grow = 3\n${T}}\n}\n" "7: narrow.grow is set twice for one slot")
+refused(narrow_along "${F}${T}narrow_below = 45cols\n${T}[box]B {\n${T}${T}direction = row\n${T}${T}grow = 1\n${T}${T}narrow.direction = column\n${T}${T}[slot]A {\n${T}${T}${T}width = 10cols\n${T}${T}}\n${T}}\n}\n" "8: slot A has no height along its column: a height, a grow or measure = callback")
+refused(narrow_below_list "${S}${T}narrow_below = 45cols\n${T}[list]L {}\n}\n" "1: narrow_below on scene S, which has no box or slot to lay out narrow")
+refused(content_pct "${F}${T}[box]B {\n${T}${T}direction = column\n${T}${T}[slot]A {\n${T}${T}${T}height = 50%\n${T}${T}}\n${T}}\n}\n" "5: height 50% in box B, which takes its height from its content: a % of it is of nothing")
+refused(frame_stub "${F}${T}@[slot]A {\n${T}${T}grow = 1\n${T}}\n}\n" "3: @ on a slot: a frame's callbacks are the code's that draws in it")
+refused(narrow_bound "${F}${T}narrow_below = 45cols\n${T}[slot]A {\n${T}${T}grow = 1\n${T}${T}narrow.min_width = callback\n${T}}\n}\n" "6: narrow.min_width = callback: a bound's callback is the plain one's, called below narrow_below too")
+refused(bound_word "${F}${T}[slot]A {\n${T}${T}grow = 1\n${T}${T}min_width = always\n${T}}\n}\n" "5: min_width = always: a length is whole numbers of px, cols or rows, or a % of its parent, added with \\+")
+refused(sum_unit "${F}${T}[slot]A {\n${T}${T}height = 1rows + 4em\n${T}}\n}\n" "4: height = 1rows \\+ 4em: a length ends in px, cols, rows or %")
 # the same key on two platforms is two keys
 file(WRITE "${WORK}/platforms.txt" "${S}${T}[list]L {\n${T}${T}[button]\"A\" {\n${T}${T}${T}key = r\n${T}${T}${T}for-platform = android\n${T}${T}}\n${T}${T}[button]\"B\" {\n${T}${T}${T}key = r\n${T}${T}${T}for-platform = desktop\n${T}${T}}\n${T}}\n}\n")
 execute_process(COMMAND "${UIGEN}" --out "${WORK}/out" "${WORK}/platforms.txt" RESULT_VARIABLE result ERROR_VARIABLE errors)

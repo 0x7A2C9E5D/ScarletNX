@@ -385,6 +385,31 @@ msgid "Tab: screen. F2: side box."
 msgstr "Tab: tela. F2: caixa ao lado."
 
 #: src/gui/main.c
+#, snx-keys
+msgid "P: folders."
+msgstr "P: pastas."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Folders: tap it."
+msgstr "Pastas: toque."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "ESC: back."
+msgstr "ESC: voltar."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "F1: help."
+msgstr "F1: ajuda."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Select: help."
+msgstr "Select: ajuda."
+
+#: src/gui/main.c
 msgid "Recent games"
 msgstr "Jogos recentes"
 
@@ -747,8 +772,12 @@ msgid "none"
 msgstr "nenhuma"
 
 #: src/gui/main.c
-msgid "Pick a folder of games or dumps, listed after recompiled/ and dumps/"
-msgstr "Escolha uma pasta de jogos ou dumps, listada depois de recompiled/ e dumps/"
+msgid "No games"
+msgstr "Nenhum jogo"
+
+#: src/gui/main.c
+msgid "Settings > App > Folders adds a folder of games or dumps: P, or the foot's, opens it"
+msgstr "Configurações > App > Pastas adiciona uma pasta de jogos ou dumps: o P, ou o do rodapé, abre ela"
 
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
@@ -757,12 +786,8 @@ msgid "Add a folder"
 msgstr "Adicionar pasta"
 
 #: src/gui/main.c
-msgid "ready to run"
-msgstr "pronto para rodar"
-
-#: src/gui/main.c
-msgid "prepared when it runs"
-msgstr "preparado ao rodar"
+msgid "Linux ARM ELF, run with scarletnx-gnuabi"
+msgstr "ELF Linux ARM, rodado com o scarletnx-gnuabi"
 
 #: src/gui/main.c
 msgid "The recent games not shown"
@@ -2096,6 +2121,21 @@ msgstr "Ctrl+V"
 msgid "F5"
 msgstr "F5"
 
+#: src/gui/main.c
+#, snx-key
+msgid "P"
+msgstr "P"
+
+#: src/gui/main.c
+#, snx-key
+msgid "F1"
+msgstr "F1"
+
+#: src/gui/main.c
+#, snx-key
+msgid "Select"
+msgstr "Select"
+
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
 #, snx-key
@@ -2318,10 +2358,6 @@ msgid "a line under the head"
 msgstr "uma linha sob o topo"
 
 #: src/gui/theme.c
-msgid "the title after the tabs, or on a row of its own under them"
-msgstr "o título depois das abas, ou numa linha própria sob elas"
-
-#: src/gui/theme.c
 msgid "the title's letters, times the text's, 1 to 3"
 msgstr "as letras do título, vezes as do texto, de 1 a 3"
 
@@ -2366,16 +2402,16 @@ msgid "the boxes outlined or filled"
 msgstr "as caixas com borda ou cheias"
 
 #: src/gui/theme.c
-msgid "fixed: the list two fifths of every screen, alone on a narrow one; adaptive: as wide as its entries"
-msgstr "fixed: a lista em dois quintos de cada tela, sozinha numa estreita; adaptive: da largura das entradas"
-
-#: src/gui/theme.c
 msgid "a text too long for its box over its rows, or on one that slides"
 msgstr "um texto longo demais para a caixa em várias linhas, ou numa só que desliza"
 
 #: src/gui/theme.c
 msgid "[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"
 msgstr "[body] %s = %s não faz nada: o ui.txt agora dispõe as listas (apague)"
+
+#: src/gui/theme.c
+msgid "[%s] %s = %s does nothing: ui.txt lays out the screens now (delete it)"
+msgstr "[%s] %s = %s não faz nada: o ui.txt agora dispõe as telas (apague)"
 
 #: src/gui/theme.c
 msgid "a colour as #RRGGBB"
@@ -2450,10 +2486,6 @@ msgstr "uma pergunta: default, uma caixa no meio; yorha, embaixo, as escolhas à
 #: src/gui/theme.c
 msgid "a faint grid on the page, in the dim colour"
 msgstr "uma grade fraca na página, na cor dim"
-
-#: src/gui/theme.c
-msgid "in a box at the foot beside the keys, or on a row under the head"
-msgstr "numa caixa no rodapé ao lado das teclas, ou numa linha sob o topo"
 
 #: src/gui/theme.c
 msgid "in a box with a bar at its left, or on the page"
@@ -2921,6 +2953,15 @@ msgstr "[body] gap e scroll no theme.ini dele"
 
 msgid "nothing: ui.txt lays out every list"
 msgstr "nada: o ui.txt dispõe todas as listas"
+
+msgid "A theme's screens"
+msgstr "As telas de um tema"
+
+msgid "[head] place, [tips] place and [body] sizing in its theme.ini"
+msgstr "[head] place, [tips] place e [body] sizing no theme.ini dele"
+
+msgid "nothing: ui.txt lays out every screen"
+msgstr "nada: o ui.txt dispõe todas as telas"
 
 #: src/common/utilities/setup.c
 msgid "text_size = in app.ini"

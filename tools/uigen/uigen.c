@@ -4,7 +4,8 @@
    name, its functions and the prototype of every callback the file names; gui/ui.c has each scene's items as a table
    in .rodata, its layout as one flat function of the area it is given and the UI scale, its drawing, its hit test, the
    actions a hit or a hotkey calls, and the stubs of the items marked @. A scene's rectangles are fixed by the file and
-   computed here, at build time: each edge is a fraction of the area plus pixels times the scale. An item's text is an
+   computed here, at build time: each edge is a fraction of the area plus pixels times the scale (a frame's, below, at
+   run time, by straight-line code from what its callbacks measure). An item's text is an
    offset into its scene's array of characters, never a pointer: a table of pointers goes to .data.rel.ro in a PIE or a
    shared library. The callbacks and the drawing are main.c's and are linked: one the file names and nothing defines
    fails the link. It is strict C99 and depends on nothing, so a cross build can build it for the machine it runs on.
@@ -26,9 +27,12 @@
        }
 
    Each type takes its own properties, word = value, and refuses any other. Lengths are Npx (pixels at a UI scale of
-   1x, multiplied by the scale) or N% (of the parent's inside, 0 to 100).
+   1x, multiplied by the scale), Ncols or Nrows (cells of the text, 8 and 16px at 1x) or N% (of the parent's inside, 0
+   to 100), or a sum of them with + (1rows + 4px); a length in pixels (gap, padding, a row's metrics, narrow_below)
+   takes no %.
      scene   direction (column or row: the main axis), gap (px between its items), padding (px around them), align
-             (stretch, start, center or end: across), justify (start, center or end: along, when nothing grows)
+             (stretch, start, center or end: across), justify (start, center or end: along, when nothing grows),
+             narrow_below (a frame's)
      list    width, height, grow (its share of the free length along its scene's axis; 1 when it has no length),
              max_rows (1 to 64, 8 by default: it shows the rows that fit, those at most), row_height (17px by
              default), row_gap (2px by default, under each row), scroll (center, the default, or edge: where the
@@ -40,8 +44,9 @@
    the code gives the button or row its UI_ATTR_* bits as it is drawn (failure, blink, active); on a list with items,
    any row's by its index. for-platform (android or desktop) is a row's alone: a scene's items keep their places on
    every platform, though an item's width and height, and a list's row_height, row_gap and max_rows, may take a
-   platform's own value (android.row_height = 40px; desktop. too), the scene laid out for each platform. color is a theme colour by its theme.ini name. key is an ASCII character or f1 to f12 after ctrl-
-   or alt- (alt-f4), a hotkey of its scene (Enter is the click's).
+   platform's own value (android.row_height = 40px, a phone's: Android's and iOS's, as main.c's touch UI; desktop.
+   the others'), the scene laid out for each. color is a theme colour by its theme.ini name. key is an ASCII
+   character or f1 to f12 after ctrl- or alt- (alt-f4), a hotkey of its scene (Enter is the click's).
    The callbacks, main.c's: a button's ui_<symbol>_action_cb(App*, uint32_t hit); a named label's
    ui_<symbol>_update_cb(App*, char* text, size_t size); a list without items' ui_<symbol>_get_row_info(App*, size_t
    row, int width, UiRowInfo*) (width: the row's in pixels, as drawn, for a label cut to fit it; false past its last
@@ -52,7 +57,23 @@
    A hover calls the same action as a click: hit has UI_HIT_HOVER, and UI_HIT_CLICK or UI_HIT_RELEASE when one made
    it, and the callback tests for the event it acts on. The drawing, main.c's too: ui_draw_row, which draws a theme's
    cursor and the arrows of hidden rows (UI_ATTR_MORE_UP, UI_ATTR_MORE_DOWN) inside the row, and the image a list's
-   get_row_info gives the row (UiRowInfo.image, main.c's) before its text; and ui_draw_label. */
+   get_row_info gives the row (UiRowInfo.image, main.c's) before its text; and ui_draw_label.
+
+   A scene of [box]es and [slot]s, and nothing else, is a frame: the areas a screen's code draws in, laid out at run
+   time, since their lengths come from what they hold. A slot is an area, a box lays its boxes and slots out as a scene
+   does; gui/ui.h gives the frame's void ui_<scene>_layout(App*, GuiRect at, int scale, GuiRect* rects), one rectangle
+   each, empty for one not shown, and no drawing or hit test.
+     box     width, height, grow, min_width, max_width, min_height, max_height (bounds a share is kept between, what it
+             leaves shared again among the others), gap, padding, direction, align, justify, shown, narrow
+     slot    as a box without gap, padding, direction, align and justify, and with measure
+   A bound may be callback: int ui_<symbol>_<bound>_cb(App*, int scale), its pixels as the frame is laid out (0: none),
+   a least taking at most what the others along its box leave.
+   Along its box a slot has a length, a grow, or in a column measure = callback: ui_<symbol>_measure_cb(App*, int
+   width, int scale), its height at that width in pixels. A box without either is as long as what it holds. shown =
+   callback: bool ui_<symbol>_shown_cb(App*), false taking it, what it holds and its gap out. A scene's narrow_below
+   (45cols) is the inside width below which its narrow layout applies, UI_<SCENE>_NARROW(width, scale) in gui/ui.h:
+   there narrow = hide takes a box or a slot out, and narrow.<property> (narrow.direction = column, narrow.min_width =
+   0px) is its own length, share, bound or direction. */
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -62,23 +83,32 @@
 #define MAX_ITEMS 1024
 #define MAX_DEPTH 16
 
-enum { T_SCENE, T_LIST, T_BUTTON, T_LABEL, T_TYPES };
-static const char* const type_words[T_TYPES] = {"scene", "list", "button", "label"};
-static const char* const type_enums[T_TYPES] = {"UI_SCENE", "UI_LIST", "UI_BUTTON", "UI_LABEL"};
-/* what each type holds, a bit per type */
-static const unsigned holds[T_TYPES] = {1u << T_LIST | 1u << T_BUTTON | 1u << T_LABEL, 1u << T_BUTTON | 1u << T_LABEL,
-                                        0, 0};
+enum { T_SCENE, T_LIST, T_BUTTON, T_LABEL, T_BOX, T_SLOT, T_TYPES };
+static const char* const type_words[T_TYPES] = {"scene", "list", "button", "label", "box", "slot"};
+static const char* const type_enums[T_TYPES] = {"UI_SCENE", "UI_LIST", "UI_BUTTON", "UI_LABEL", "UI_BOX", "UI_SLOT"};
+/* what each type holds, a bit per type: a scene of boxes and slots holds nothing else (check_items) */
+static const unsigned holds[T_TYPES] = {1u << T_LIST | 1u << T_BUTTON | 1u << T_LABEL | 1u << T_BOX | 1u << T_SLOT,
+                                        1u << T_BUTTON | 1u << T_LABEL,
+                                        0,
+                                        0,
+                                        1u << T_BOX | 1u << T_SLOT,
+                                        0};
 
 /* the properties, by the kind of value each takes */
 enum {
-    P_WIDTH, /* lengths: Npx or N% */
+    P_WIDTH, /* lengths: Npx, Ncols, Nrows or N%, or a sum of them */
     P_HEIGHT,
     P_MIN_ROW_WIDTH,
     P_MAX_ROW_WIDTH,
-    P_GAP, /* pixels: Npx */
+    P_MIN_WIDTH,
+    P_MAX_WIDTH,
+    P_MIN_HEIGHT,
+    P_MAX_HEIGHT,
+    P_GAP, /* pixels: Npx, Ncols or Nrows, or a sum of them */
     P_PADDING,
     P_ROW_HEIGHT,
     P_ROW_GAP,
+    P_NARROW_BELOW,
     P_GROW, /* whole numbers */
     P_MAX_ROWS,
     P_DIRECTION, /* words */
@@ -86,19 +116,23 @@ enum {
     P_JUSTIFY,
     P_SCROLL,
     P_ATTR,
+    P_MEASURE,
+    P_SHOWN,
+    P_NARROW,
     P_COLOR,
     P_KEY,
     P_PLATFORM,
     P_COUNT
 };
-#define LENGTHS_END (P_MAX_ROW_WIDTH + 1)
-#define PIXELS_END  (P_ROW_GAP + 1)
+#define LENGTHS_END (P_MAX_HEIGHT + 1)
+#define PIXELS_END  (P_NARROW_BELOW + 1)
 #define NUMBERS_END (P_MAX_ROWS + 1)
-#define WORDS_END   (P_ATTR + 1)
+#define WORDS_END   (P_NARROW + 1)
 static const char* const property_words[P_COUNT] = {
-    "width",      "height",  "min_row_width", "max_row_width", "gap",       "padding",
-    "row_height", "row_gap", "grow",          "max_rows",      "direction", "align",
-    "justify",    "scroll",  "attr",          "color",         "key",       "for-platform"};
+    "width",      "height",    "min_row_width", "max_row_width", "min_width",   "max_width",    "min_height",
+    "max_height", "gap",       "padding",       "row_height",    "row_gap",     "narrow_below", "grow",
+    "max_rows",   "direction", "align",         "justify",       "scroll",      "attr",         "measure",
+    "shown",      "narrow",    "color",         "key",           "for-platform"};
 /* the whole numbers' bounds */
 static const int number_lo[2] = {0, 1}, number_hi[2] = {100, 64};
 /* the words' values, a list each, their index the value */
@@ -107,19 +141,30 @@ static const char* const aligns[] = {"stretch", "start", "center", "end", NULL};
 static const char* const justifies[] = {"start", "center", "end", NULL};
 static const char* const scrolls[] = {"center", "edge", NULL};
 static const char* const attrs[] = {"callback", NULL};
-static const char* const* const word_values[5] = {directions, aligns, justifies, scrolls, attrs};
+static const char* const narrows[] = {"hide", NULL};
+static const char* const* const word_values[8] = {directions, aligns, justifies, scrolls, attrs, attrs, attrs, narrows};
 enum { COLUMN, ROW };
 enum { STRETCH, A_START, A_CENTER, A_END };
 enum { J_START, J_CENTER, J_END };
 enum { SCROLL_CENTER, SCROLL_EDGE };
 #define BIT(p) (1u << (p))
 #define BOX    (BIT(P_WIDTH) | BIT(P_HEIGHT) | BIT(P_GROW))
+#define FLEX   (BIT(P_DIRECTION) | BIT(P_ALIGN) | BIT(P_JUSTIFY) | BIT(P_GAP) | BIT(P_PADDING))
+/* a frame's item: its bounds, shown or not, and gone below the scene's narrow_below */
+#define AREA                                                                                                           \
+    (BOX | BIT(P_MIN_WIDTH) | BIT(P_MAX_WIDTH) | BIT(P_MIN_HEIGHT) | BIT(P_MAX_HEIGHT) | BIT(P_SHOWN) | BIT(P_NARROW))
 /* the properties each type takes; a row of a list takes ROW_TAKES of its type's alone */
-static const unsigned properties_of[T_TYPES] = {
-    BIT(P_DIRECTION) | BIT(P_ALIGN) | BIT(P_JUSTIFY) | BIT(P_GAP) | BIT(P_PADDING),
-    BOX | BIT(P_MAX_ROWS) | BIT(P_ROW_HEIGHT) | BIT(P_ROW_GAP) | BIT(P_SCROLL) | BIT(P_MIN_ROW_WIDTH) |
-        BIT(P_MAX_ROW_WIDTH) | BIT(P_ATTR) | BIT(P_COLOR),
-    BOX | BIT(P_ATTR) | BIT(P_COLOR) | BIT(P_KEY) | BIT(P_PLATFORM), BOX | BIT(P_COLOR) | BIT(P_PLATFORM)};
+static const unsigned properties_of[T_TYPES] = {FLEX | BIT(P_NARROW_BELOW),
+                                                BOX | BIT(P_MAX_ROWS) | BIT(P_ROW_HEIGHT) | BIT(P_ROW_GAP) |
+                                                    BIT(P_SCROLL) | BIT(P_MIN_ROW_WIDTH) | BIT(P_MAX_ROW_WIDTH) |
+                                                    BIT(P_ATTR) | BIT(P_COLOR),
+                                                BOX | BIT(P_ATTR) | BIT(P_COLOR) | BIT(P_KEY) | BIT(P_PLATFORM),
+                                                BOX | BIT(P_COLOR) | BIT(P_PLATFORM),
+                                                FLEX | AREA,
+                                                AREA | BIT(P_MEASURE)};
+/* what a frame's item may set its own below the scene's narrow_below (narrow.direction = column) */
+#define NARROW_TAKES                                                                                                   \
+    (BOX | BIT(P_MIN_WIDTH) | BIT(P_MAX_WIDTH) | BIT(P_MIN_HEIGHT) | BIT(P_MAX_HEIGHT) | BIT(P_DIRECTION))
 #define ROW_TAKES  (BIT(P_ATTR) | BIT(P_COLOR) | BIT(P_KEY) | BIT(P_PLATFORM))
 /* the defaults, in pixels at 1x and rows: a row as main.c's lists have it (a cell of text and a pixel), 2px under
    each (Liz's) */
@@ -132,7 +177,9 @@ static const char* const colors[] = {"page", "ink", "soft", "focus", "active", "
 #define COLORS (int)(sizeof colors / sizeof colors[0])
 enum { PLATFORM_ANY, PLATFORM_ANDROID, PLATFORM_DESKTOP };
 
-enum { UNIT_UNSET, UNIT_PX, UNIT_PERCENT };
+enum { UNIT_UNSET, UNIT_PX, UNIT_PERCENT, UNIT_SUM }; /* UNIT_SUM: pixels and a % of the parent, added */
+#define CELL_W 8                                      /* a cell of text at 1x: cols */
+#define CELL_H 16                                     /* and rows */
 enum { MOD_CTRL = 1, MOD_ALT = 2 };
 
 /* a length along one of the area's axes: a * the area's length + c pixels at 1x (times the scale) */
@@ -143,14 +190,18 @@ typedef struct {
 typedef struct {
     int type, parent, scene, line, stub, depth;
     char *name, *text, *symbol, *upper; /* upper: its enum's name */
-    int value[P_COUNT], unit[P_COUNT];  /* a length's unit, else UNIT_UNSET */
+    int value[P_COUNT], unit[P_COUNT];  /* a length's unit, else UNIT_UNSET; value its pixels at 1x */
+    int pct[P_COUNT];                   /* a length's % of the parent's inside */
     unsigned set;                       /* the properties given, a bit each */
+    unsigned bound_cb;                  /* the bounds main.c gives as it lays out (min_width = callback), a bit each */
     int color, platform;                /* color: an index in colors + 1, 0 for none */
     int key, fkey, mods;                /* key: an ASCII character; fkey: 1 to 12 for F1 to F12 */
     int key_line;
     int plat_value[3][P_COUNT]; /* a platform's own values (android.height), by PLATFORM_* */
-    int plat_unit[3][P_COUNT];
+    int plat_unit[3][P_COUNT], plat_pct[3][P_COUNT];
     unsigned plat_set[3];
+    int nar_value[P_COUNT], nar_unit[P_COUNT], nar_pct[P_COUNT]; /* its own below the scene's narrow_below */
+    unsigned nar_set;
     int children, offset;
     Lin x[3], y[3], w[3], h[3]; /* its rectangle in its scene's area, a scene's own item, by PLATFORM_* */
 } Item;
@@ -368,23 +419,51 @@ static char* words_of(unsigned taken) {
 }
 static int is_row(const Item* it) { return it->parent >= 0 && g_uigen.items[it->parent].type == T_LIST; }
 
-/* 200px or 50% (lengths), 6px (pixels) */
+/* 200px, 20cols, 2rows (a cell of text: 8 and 16 px at 1x) or 50% (of the parent's inside, a length's alone), or a
+   sum of them, 1rows + 4px: its pixels at 1x in value, its % in pct */
 static void parse_length(Item* it, int p, const char* value, int line) {
-    char* end;
-    long n = strtol(value, &end, 10);
-    if (end == value || !isdigit((unsigned char)*value))
-        fail(line, "%s = %s: a length is a whole number of px%s", property_words[p], value,
-             p < LENGTHS_END ? ", or a % of its parent" : "");
-    if (!strcmp(end, "px")) {
-        if (n > 10000) fail(line, "%s = %s: px from 0 to 10000", property_words[p], value);
-        it->unit[p] = UNIT_PX;
-    } else if (!strcmp(end, "%") && p < LENGTHS_END) {
-        if (n > 100) fail(line, "%s = %s: a %% of its parent is 0 to 100", property_words[p], value);
-        it->unit[p] = UNIT_PERCENT;
-    } else
-        fail(line, "%s = %s: %s", property_words[p], value,
-             p < LENGTHS_END ? "a length ends in px or %" : "pixels end in px");
-    it->value[p] = (int)n;
+    const char* at = value;
+    long px = 0, pct = 0;
+    int terms = 0, units = 0;
+    for (;;) {
+        char* end;
+        long n;
+        while (*at == ' ') at++;
+        if (!isdigit((unsigned char)*at))
+            fail(line, "%s = %s: a length is whole numbers of px, cols or rows%s, added with +", property_words[p],
+                 value, p < LENGTHS_END ? ", or a % of its parent" : "");
+        n = strtol(at, &end, 10);
+        if (!strncmp(end, "px", 2) && !isalpha((unsigned char)end[2])) {
+            px += n;
+            end += 2;
+            units |= UNIT_PX;
+        } else if (!strncmp(end, "cols", 4)) {
+            px += n * CELL_W;
+            end += 4;
+            units |= UNIT_PX;
+        } else if (!strncmp(end, "rows", 4)) {
+            px += n * CELL_H;
+            end += 4;
+            units |= UNIT_PX;
+        } else if (*end == '%' && p < LENGTHS_END) {
+            pct += n;
+            end++;
+            units |= UNIT_PERCENT;
+        } else
+            fail(line, "%s = %s: %s", property_words[p], value,
+                 p < LENGTHS_END ? "a length ends in px, cols, rows or %" : "pixels end in px, cols or rows");
+        terms++;
+        while (*end == ' ') end++;
+        if (!*end) break;
+        if (*end != '+') fail(line, "%s = %s: lengths are added with +", property_words[p], value);
+        at = end + 1;
+    }
+    if (px > 10000) fail(line, "%s = %s: px from 0 to 10000", property_words[p], value);
+    if (pct > 100) fail(line, "%s = %s: a %% of its parent is 0 to 100", property_words[p], value);
+    (void)terms;
+    it->value[p] = (int)px;
+    it->pct[p] = (int)pct;
+    it->unit[p] = units == (UNIT_PX | UNIT_PERCENT) ? UNIT_SUM : units;
 }
 /* ascii, f1 to f12, after ctrl- and alt- */
 static void parse_key(Item* it, const char* value, int line) {
@@ -418,7 +497,7 @@ static void set_platform_property(Item* it, int on, char* word, char* value, int
         BIT(P_WIDTH) | BIT(P_HEIGHT) | (it->type == T_LIST ? BIT(P_ROW_HEIGHT) | BIT(P_ROW_GAP) | BIT(P_MAX_ROWS) : 0);
     int p = property_of(word);
     Item checked = {0};
-    if (it->type == T_SCENE || p < 0 || !(own & BIT(p)))
+    if (it->type == T_SCENE || it->type == T_BOX || it->type == T_SLOT || p < 0 || !(own & BIT(p)))
         fail(line, "%s.%s: a platform's own value is a width, a height, or a list's row_height, row_gap or max_rows",
              platforms[on], word);
     if (it->plat_set[on] & BIT(p))
@@ -428,11 +507,37 @@ static void set_platform_property(Item* it, int on, char* word, char* value, int
     set_property(&checked, word, value, line);
     it->plat_value[on][p] = checked.value[p];
     it->plat_unit[on][p] = checked.unit[p];
+    it->plat_pct[on][p] = checked.pct[p];
     it->plat_set[on] |= BIT(p);
+}
+/* a frame's item's own value below its scene's narrow_below, narrow.direction = column: checked as the plain one is */
+static void set_narrow_property(Item* it, char* word, char* value, int line) {
+    int p = property_of(word);
+    Item checked = {0};
+    if ((it->type != T_BOX && it->type != T_SLOT) || p < 0 || !(NARROW_TAKES & BIT(p)) ||
+        !(properties_of[it->type] & BIT(p)))
+        fail(line,
+             "narrow.%s: below narrow_below a box or a slot may have its own width, height, grow, bounds or a box "
+             "its direction",
+             word);
+    if (it->nar_set & BIT(p)) fail(line, "narrow.%s is set twice for one %s", word, type_words[it->type]);
+    checked.type = it->type;
+    checked.parent = it->parent;
+    set_property(&checked, word, value, line);
+    if (checked.bound_cb)
+        fail(line, "narrow.%s = callback: a bound's callback is the plain one's, called below narrow_below too", word);
+    it->nar_value[p] = checked.value[p];
+    it->nar_unit[p] = checked.unit[p];
+    it->nar_pct[p] = checked.pct[p];
+    it->nar_set |= BIT(p);
 }
 static void set_property(Item* it, char* word, char* value, int line) {
     int p, i;
     unsigned taken;
+    if (!strncmp(word, "narrow.", 7)) {
+        set_narrow_property(it, word + 7, value, line);
+        return;
+    }
     if (!strncmp(word, "android.", 8) || !strncmp(word, "desktop.", 8)) {
         set_platform_property(it, word[0] == 'a' ? PLATFORM_ANDROID : PLATFORM_DESKTOP, word + 8, value, line);
         return;
@@ -447,7 +552,9 @@ static void set_property(Item* it, char* word, char* value, int line) {
     if (it->set & BIT(p)) fail(line, "%s is set twice for one %s", word, type_words[it->type]);
     if (!*value) fail(line, "%s = without its value", word);
     it->set |= BIT(p);
-    if (p < PIXELS_END)
+    if (p >= P_MIN_WIDTH && p <= P_MAX_HEIGHT && !strcmp(value, "callback"))
+        it->bound_cb |= BIT(p);
+    else if (p < PIXELS_END)
         parse_length(it, p, value, line);
     else if (p < NUMBERS_END) {
         char* end;
@@ -524,7 +631,7 @@ static int parse_opener(char* p, int parent, int depth, int line, int* closed) {
     if (*p != '[' || !(close = strchr(p, ']'))) fail(line, "an item opens [type]Name { or [type]\"Text\" {");
     *close = 0;
     for (type = 0; type < T_TYPES && strcmp(type_words[type], p + 1); type++) continue;
-    if (type == T_TYPES) fail(line, "[%s] is not a type: scene, list, button, label", p + 1);
+    if (type == T_TYPES) fail(line, "[%s] is not a type: scene, list, button, label, box, slot", p + 1);
     it->type = type;
     if (parent < 0 && type != T_SCENE) fail(line, "a %s outside a scene: the file holds scenes", type_words[type]);
     if (parent >= 0 && !(holds[g_uigen.items[parent].type] & (1u << type)))
@@ -546,12 +653,15 @@ static int parse_opener(char* p, int parent, int depth, int line, int* closed) {
         *closed = 0;
     else
         fail(line, "after the item, { or {}, not \"%s\"", rest);
-    if ((type == T_SCENE || type == T_LIST) && !it->name) fail(line, "a %s has a Name, not a text", type_words[type]);
+    if ((type == T_SCENE || type == T_LIST || type == T_BOX || type == T_SLOT) && !it->name)
+        fail(line, "a %s has a Name, not a text", type_words[type]);
     if (type == T_BUTTON && !it->text)
         fail(line, "a button has its \"Text\": its symbol is the text's, and a label is what shows a changing one");
     if (type == T_LABEL && it->name && is_row(it))
         fail(line, "a row of a list shows its \"Text\": a list whose rows change has no items, its rows come from "
                    "its get_row_info");
+    if (it->stub && (type == T_BOX || type == T_SLOT))
+        fail(line, "@ on a %s: a frame's callbacks are the code's that draws in it", type_words[type]);
     if (it->stub && (type == T_SCENE || (type == T_LABEL && it->text)))
         fail(line, "@ stubs an item's callbacks, and this %s has none", type_words[type]);
     {
@@ -636,10 +746,64 @@ static void read_ui(void) {
     g_uigen.spec = NULL;
 }
 
+/* whether the scene is a frame: its items boxes and slots, laid out at run time (write_frame) */
+static int is_frame(int scene) {
+    int i;
+    for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++)
+        if (g_uigen.items[i].type == T_BOX || g_uigen.items[i].type == T_SLOT) return 1;
+    return 0;
+}
+static int along_of(const Item* parent, int narrow); /* the axis a box lays its children along */
+/* whether item i, or a box it is in, is not shown below narrow_below (narrow = hide) */
+static int hidden_narrow(int i) {
+    for (; g_uigen.items[i].type != T_SCENE; i = g_uigen.items[i].parent)
+        if (g_uigen.items[i].set & BIT(P_NARROW)) return 1;
+    return 0;
+}
+/* a frame's items: each sized along its box (a length, a share, its content or, a slot's height, a measure), its
+   callbacks where it may have them, narrow where the scene says below what */
+static void check_frame(int scene) {
+    const Item* sc = &g_uigen.items[scene];
+    int i, narrow;
+    for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++) {
+        const Item* it = &g_uigen.items[i];
+        const Item* parent = &g_uigen.items[it->parent];
+        if (it->type != T_BOX && it->type != T_SLOT)
+            fail(it->line,
+                 "a %s in scene %s, whose boxes and slots are areas the code draws in: no list, button or "
+                 "label beside them",
+                 type_words[it->type], sc->name);
+        if (((it->set & BIT(P_NARROW)) || it->nar_set) && !(sc->set & BIT(P_NARROW_BELOW)))
+            fail(it->line, "narrow and narrow.* need the scene's narrow_below, the width they start below");
+        for (narrow = 0; narrow < 2 && !(narrow && hidden_narrow(i)); narrow++) {
+            int along = along_of(parent, narrow), len_p = along == ROW ? P_WIDTH : P_HEIGHT;
+            int has = (it->set & BIT(len_p)) || (narrow && (it->nar_set & BIT(len_p)));
+            int grows = (it->set & BIT(P_GROW)) || (narrow && (it->nar_set & BIT(P_GROW)));
+            int measured = (it->set & BIT(P_MEASURE)) != 0;
+            if (measured && ((it->set & BIT(P_HEIGHT)) || (narrow && (it->nar_set & BIT(P_HEIGHT)))))
+                fail(it->line, "measure and height: a measured slot's height is its measure_cb's");
+            if (has && grows && (it->set & BIT(len_p)) && (it->set & BIT(P_GROW)))
+                fail(it->line, "%s and grow: one of them, a length or a share of what is left", property_words[len_p]);
+            if (it->type == T_SLOT && !has && !grows && !(measured && along == COLUMN))
+                fail(it->line, "slot %s has no %s along its %s: a %s, a grow or%s", it->name, property_words[len_p],
+                     along == ROW ? "row" : "column", property_words[len_p],
+                     along == COLUMN ? " measure = callback" : " (in a column) measure = callback");
+            if (!(sc->set & BIT(P_NARROW_BELOW))) break;
+        }
+    }
+}
 /* what the items must have together: a hotkey once in its scene and platform; a list's rows its items or a callback's;
    a row's width kept between bounds that leave room */
 static void check_items(void) {
     int i, j;
+    for (i = 0; i < g_uigen.nitems; i++)
+        if (g_uigen.items[i].type == T_SCENE) {
+            if (is_frame(i))
+                check_frame(i);
+            else if (g_uigen.items[i].set & BIT(P_NARROW_BELOW))
+                fail(g_uigen.items[i].line, "narrow_below on scene %s, which has no box or slot to lay out narrow",
+                     g_uigen.items[i].name);
+        }
     for (i = 0; i < g_uigen.nitems; i++) {
         const Item* a = &g_uigen.items[i];
         if (a->stub && a->type == T_LIST && a->children)
@@ -649,10 +813,11 @@ static void check_items(void) {
         if (a->platform != PLATFORM_ANY && !is_row(a))
             fail(a->line, "for-platform is a row's: an item of a scene keeps its place on every platform");
         if ((a->set & BIT(P_MIN_ROW_WIDTH)) && (a->set & BIT(P_MAX_ROW_WIDTH)) &&
-            a->unit[P_MIN_ROW_WIDTH] == a->unit[P_MAX_ROW_WIDTH] &&
-            a->value[P_MIN_ROW_WIDTH] > a->value[P_MAX_ROW_WIDTH])
-            fail(a->line, "min_row_width %d is over max_row_width %d", a->value[P_MIN_ROW_WIDTH],
-                 a->value[P_MAX_ROW_WIDTH]);
+            a->unit[P_MIN_ROW_WIDTH] == a->unit[P_MAX_ROW_WIDTH] && a->unit[P_MIN_ROW_WIDTH] != UNIT_SUM &&
+            a->value[P_MIN_ROW_WIDTH] + a->pct[P_MIN_ROW_WIDTH] > a->value[P_MAX_ROW_WIDTH] + a->pct[P_MAX_ROW_WIDTH])
+            fail(a->line, "min_row_width %d%s is over max_row_width %d%s",
+                 a->value[P_MIN_ROW_WIDTH] + a->pct[P_MIN_ROW_WIDTH], a->unit[P_MIN_ROW_WIDTH] == UNIT_PX ? "px" : "%",
+                 a->value[P_MAX_ROW_WIDTH] + a->pct[P_MAX_ROW_WIDTH], a->unit[P_MAX_ROW_WIDTH] == UNIT_PX ? "px" : "%");
         if (a->key || a->fkey)
             for (j = 0; j < i; j++) {
                 const Item* b = &g_uigen.items[j];
@@ -678,16 +843,18 @@ static Lin lin_times(Lin x, double k) { return lin(x.a * k, x.c * k); }
 /* an item's length on an axis on platform on: its own there, else the property set (px, or a % of the parent's
    inside), else none (0 in *has) */
 static Lin length_of(const Item* it, int p, Lin inside, int* has, int on) {
-    int value = it->value[p], unit = it->unit[p];
+    int value = it->value[p], unit = it->unit[p], pct = it->pct[p];
     *has = (it->set & BIT(p)) != 0;
     if (on != PLATFORM_ANY && (it->plat_set[on] & BIT(p))) {
         *has = 1;
         value = it->plat_value[on][p];
         unit = it->plat_unit[on][p];
+        pct = it->plat_pct[on][p];
     }
     if (!*has) return lin(0, 0);
     if (unit == UNIT_PX) return lin(0, value);
-    return lin_times(inside, value / 100.0);
+    if (unit == UNIT_SUM) return lin_add(lin_times(inside, pct / 100.0), lin(0, value));
+    return lin_times(inside, pct / 100.0);
 }
 static void layout_scene(int scene, int on) {
     Item* s = &g_uigen.items[scene];
@@ -741,6 +908,252 @@ static void layout_scene(int scene, int on) {
     }
 }
 
+/* ============================================================ a frame: boxes and slots laid out at run time */
+
+static int along_of(const Item* parent, int narrow) {
+    return narrow && (parent->nar_set & BIT(P_DIRECTION)) ? parent->nar_value[P_DIRECTION] : parent->value[P_DIRECTION];
+}
+/* property p of it, its own below narrow_below when narrow: 1 and its pixels and %, else 0 */
+static int prop_of(const Item* it, int p, int narrow, int* px, int* pct) {
+    if (narrow && (it->nar_set & BIT(p))) {
+        *px = it->nar_value[p];
+        *pct = it->nar_pct[p];
+        return 1;
+    }
+    *px = (it->set & BIT(p)) ? it->value[p] : 0;
+    *pct = (it->set & BIT(p)) ? it->pct[p] : 0;
+    return (it->set & BIT(p)) != 0;
+}
+/* a length as C: pct of the inside and px times the scale */
+static void out_length(int px, int pct, const char* inside) {
+    if (pct && px)
+        out("%s * %d / 100 + %d * s", inside, pct, px);
+    else if (pct)
+        out("%s * %d / 100", inside, pct);
+    else
+        out("%d * s", px);
+}
+/* bound p of it as C: its callback's pixels, its length, or 0 for none */
+static void out_limit(const Item* it, int p, int narrow, const char* inside) {
+    int px, pct;
+    if (!(narrow && (it->nar_set & BIT(p))) && (it->bound_cb & BIT(p)))
+        out("%s_%s_cb(app, s)", it->symbol, property_words[p]);
+    else if (prop_of(it, p, narrow, &px, &pct))
+        out_length(px, pct, inside);
+    else
+        outs("0");
+}
+enum { AXIS_X, AXIS_Y };
+static const int len_props[2] = {P_WIDTH, P_HEIGHT}, lo_props[2] = {P_MIN_WIDTH, P_MIN_HEIGHT},
+                 hi_props[2] = {P_MAX_WIDTH, P_MAX_HEIGHT};
+static const char* const pos_vars[2] = {"x", "y"};
+static const char* const len_vars[2] = {"w", "h"};
+/* whether item k takes its length on axis from its content: a box with none of its own along its parent, and no grow */
+static int by_content(int k, int axis, int narrow) {
+    const Item* it = &g_uigen.items[k];
+    int px, pct, along = (along_of(&g_uigen.items[it->parent], narrow) == ROW) == (axis == AXIS_X);
+    return it->type == T_BOX && along && !prop_of(it, len_props[axis], narrow, &px, &pct) &&
+           !prop_of(it, P_GROW, narrow, &px, &pct);
+}
+/* item k's length on axis as its box adds it up for its content or gives it as a basis: its own, its measure (a
+   slot's height), its content, or 0 (a share of what is left); inside the C of its box's inside */
+static void out_basis(int k, int axis, int narrow, const char* inside) {
+    const Item* it = &g_uigen.items[k];
+    int px, pct;
+    if (prop_of(it, len_props[axis], narrow, &px, &pct))
+        out_length(px, pct, inside);
+    else if (axis == AXIS_Y && (it->set & BIT(P_MEASURE)))
+        out("m[%s]", it->upper);
+    else if (by_content(k, axis, narrow))
+        out("c[%s]", it->upper);
+    else
+        outs("0");
+}
+/* the content length of box b on axis: along its direction its children's and the gaps between those shown added,
+   across it the longest, with its padding. A % inside it has nothing to be a % of */
+static void out_content(int b, int axis, int narrow) {
+    const Item* box = &g_uigen.items[b];
+    int along = (along_of(box, narrow) == ROW) == (axis == AXIS_X), i, n = 0;
+    out("    c[%s] = 2 * %d * s", box->upper, box->value[P_PADDING]);
+    if (!along) outs(" + ");
+    for (i = b + 1; i < g_uigen.nitems && g_uigen.items[i].scene == box->scene; i++) {
+        const Item* it = &g_uigen.items[i];
+        int px, pct;
+        if (it->parent != b) continue;
+        if (prop_of(it, len_props[axis], narrow, &px, &pct) && pct)
+            fail(it->line, "%s %d%% in box %s, which takes its %s from its content: a %% of it is of nothing",
+                 property_words[len_props[axis]], pct, box->name, property_words[len_props[axis]]);
+        out(along ? " + (on[%s] ? " : "UI_MAX(on[%s] ? ", it->upper);
+        out_basis(i, axis, narrow, "0");
+        outs(along ? " : 0)" : " : 0, ");
+        n++;
+    }
+    if (!along) { /* the longest: UI_MAX(a, UI_MAX(b, 0)) */
+        outs("0");
+        for (i = 0; i < n; i++) outs(")");
+    }
+    if (along && n > 1) {
+        int first = 1;
+        out(" + UI_GAPS(%d * s, ", box->value[P_GAP]);
+        for (i = b + 1; i < g_uigen.nitems && g_uigen.items[i].scene == box->scene; i++)
+            if (g_uigen.items[i].parent == b) {
+                out("%son[%s]", first ? "" : " + ", g_uigen.items[i].upper);
+                first = 0;
+            }
+        outs(")");
+    }
+    outs(";\n");
+}
+/* box b's children placed on axis (b's own place on it known: a scene's is its area): along its direction by
+   ui_flex, across it by ui_cross; then theirs */
+static void out_place(int b, int axis, int narrow) {
+    const Item* box = &g_uigen.items[b];
+    int along = (along_of(box, narrow) == ROW) == (axis == AXIS_X), i, n = 0, k;
+    const char *P = pos_vars[axis], *L = len_vars[axis];
+    char start[128], inside[128];
+    int pad = box->value[P_PADDING];
+    if (box->type == T_SCENE) {
+        snprintf(start, sizeof start, "%d * s", pad);
+        snprintf(inside, sizeof inside, "(at.%s - 2 * %d * s)", L, pad);
+    } else {
+        snprintf(start, sizeof start, "%s[%s] + %d * s", P, box->upper, pad);
+        snprintf(inside, sizeof inside, "(%s[%s] - 2 * %d * s)", L, box->upper, pad);
+    }
+    for (i = b + 1; i < g_uigen.nitems && g_uigen.items[i].scene == box->scene; i++) n += g_uigen.items[i].parent == b;
+    if (!n) return;
+    out_from(box->line);
+    if (along) {
+        int idx = 0;
+        out("    { /* %s's %d along it */\n        int basis[%d] = {", box->name, n, n);
+        for (i = b + 1, k = 0; i < g_uigen.nitems && g_uigen.items[i].scene == box->scene; i++)
+            if (g_uigen.items[i].parent == b) {
+                outs(k++ ? ", " : "");
+                out_basis(i, axis, narrow, inside);
+            }
+        out("};\n        int grow[%d] = {", n);
+        for (i = b + 1, k = 0; i < g_uigen.nitems && g_uigen.items[i].scene == box->scene; i++)
+            if (g_uigen.items[i].parent == b) {
+                int px, pct;
+                outs(k++ ? ", " : "");
+                out("%d", prop_of(&g_uigen.items[i], P_GROW, narrow, &px, &pct) ? px : 0); /* a number's value */
+            }
+        out("};\n        int lo[%d] = {", n);
+        for (i = b + 1, k = 0; i < g_uigen.nitems && g_uigen.items[i].scene == box->scene; i++)
+            if (g_uigen.items[i].parent == b) {
+                outs(k++ ? ", " : "");
+                out_limit(&g_uigen.items[i], lo_props[axis], narrow, inside);
+            }
+        out("};\n        int hi[%d] = {", n);
+        for (i = b + 1, k = 0; i < g_uigen.nitems && g_uigen.items[i].scene == box->scene; i++)
+            if (g_uigen.items[i].parent == b) {
+                outs(k++ ? ", " : "");
+                out_limit(&g_uigen.items[i], hi_props[axis], narrow, inside);
+            }
+        out("};\n        int shown[%d] = {", n);
+        for (i = b + 1, k = 0; i < g_uigen.nitems && g_uigen.items[i].scene == box->scene; i++)
+            if (g_uigen.items[i].parent == b) out("%son[%s]", k++ ? ", " : "", g_uigen.items[i].upper);
+        out("}, at_[%d], len_[%d];\n        char held[%d] = {0};\n", n, n, n);
+        out("        ui_flex(%d, basis, grow, lo, hi, shown, %s, %d * s, %d, held, at_, len_);\n", n, inside,
+            box->value[P_GAP], box->value[P_JUSTIFY]);
+        for (i = b + 1; i < g_uigen.nitems && g_uigen.items[i].scene == box->scene; i++)
+            if (g_uigen.items[i].parent == b) {
+                out("        %s[%s] = %s + at_[%d];\n        %s[%s] = len_[%d];\n", P, g_uigen.items[i].upper, start,
+                    idx, L, g_uigen.items[i].upper, idx);
+                idx++;
+            }
+        outs("    }\n");
+    } else
+        for (i = b + 1; i < g_uigen.nitems && g_uigen.items[i].scene == box->scene; i++) {
+            const Item* it = &g_uigen.items[i];
+            int px, pct, own;
+            if (it->parent != b) continue;
+            own = prop_of(it, len_props[axis], narrow, &px, &pct) || (axis == AXIS_Y && (it->set & BIT(P_MEASURE)));
+            out_from(it->line);
+            out("    ui_cross(%d, ", own);
+            if (own)
+                out_basis(i, axis, narrow, inside);
+            else
+                outs("0");
+            outs(", ");
+            out_limit(it, lo_props[axis], narrow, inside);
+            outs(", ");
+            out_limit(it, hi_props[axis], narrow, inside);
+            out(", %s, %d, &%s[%s], &%s[%s]);\n    %s[%s] += %s;\n", inside, box->value[P_ALIGN], P, it->upper, L,
+                it->upper, P, it->upper, start);
+        }
+    for (i = b + 1; i < g_uigen.nitems && g_uigen.items[i].scene == box->scene; i++)
+        if (g_uigen.items[i].parent == b && g_uigen.items[i].type == T_BOX) out_place(i, axis, narrow);
+}
+/* the contents on axis that a box takes its length from, its own children's first */
+static void out_contents(int scene, int axis, int narrow) {
+    int i;
+    for (i = g_uigen.nitems - 1; i > scene; i--)
+        if (g_uigen.items[i].scene == scene && by_content(i, axis, narrow)) {
+            out_from(g_uigen.items[i].line);
+            out_content(i, axis, narrow);
+        }
+}
+/* a frame laid out, narrow or not: which items show, the widths, the measures (a slot's height from its width),
+   then the heights */
+static void out_frame(int scene, int narrow) {
+    int i;
+    for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++) {
+        const Item* it = &g_uigen.items[i];
+        out_from(it->line);
+        out("    on[%s] = ", it->upper);
+        if (narrow && (it->set & BIT(P_NARROW)))
+            outs("0");
+        else {
+            if (it->parent == scene)
+                outs("1");
+            else
+                out("on[%s]", g_uigen.items[it->parent].upper);
+            if (it->set & BIT(P_SHOWN)) out(" && %s_shown_cb(app)", it->symbol);
+        }
+        outs(";\n");
+    }
+    out_contents(scene, AXIS_X, narrow);
+    out_place(scene, AXIS_X, narrow);
+    for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++)
+        if (g_uigen.items[i].set & BIT(P_MEASURE)) {
+            out_from(g_uigen.items[i].line);
+            out("    m[%s] = on[%s] ? %s_measure_cb(app, w[%s], s) : 0;\n", g_uigen.items[i].upper,
+                g_uigen.items[i].upper, g_uigen.items[i].symbol, g_uigen.items[i].upper);
+        }
+    out_contents(scene, AXIS_Y, narrow);
+    out_place(scene, AXIS_Y, narrow);
+}
+static void write_frame(int scene) {
+    const Item* s = &g_uigen.items[scene];
+    int i;
+    out("const char %s_texts[] = \"\";\nconst UiItem %s_items[%s_ITEMS] = {\n", s->symbol, s->symbol, s->upper);
+    for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++) {
+        const Item* it = &g_uigen.items[i];
+        out_from(it->line);
+        out("    {%s, UI_COLOR_NONE, %s, UI_NO_TEXT},\n", type_enums[it->type],
+            it->parent == scene ? "-1" : g_uigen.items[it->parent].upper);
+    }
+    out_here();
+    outs("};\n");
+    out("void %s_layout(App* app, GuiRect at, int scale, GuiRect* r) {\n    int s = scale, i;\n", s->symbol);
+    out("    int x[%s_ITEMS] = {0}, y[%s_ITEMS] = {0}, w[%s_ITEMS] = {0}, h[%s_ITEMS] = {0}, on[%s_ITEMS] = {0},\n"
+        "        m[%s_ITEMS] = {0}, c[%s_ITEMS] = {0};\n    (void)app;\n    (void)m;\n    (void)c;\n",
+        s->upper, s->upper, s->upper, s->upper, s->upper, s->upper, s->upper);
+    if (s->set & BIT(P_NARROW_BELOW)) {
+        out("    if (%s_NARROW(at.w, s)) {\n", s->upper);
+        out_frame(scene, 1);
+        out_here();
+        outs("    } else {\n");
+        out_frame(scene, 0);
+        out_here();
+        outs("    }\n");
+    } else
+        out_frame(scene, 0);
+    out_here();
+    out("    for (i = 0; i < %s_ITEMS; i++) r[i] = gui_rect(at.x + x[i], at.y + y[i], on[i] ? w[i] : 0, on[i] ? h[i] : 0);\n}\n",
+        s->upper);
+}
+
 /* ============================================================ the generated files */
 
 static void head(void) {
@@ -752,9 +1165,12 @@ static int has_action(const Item* it) { return it->type == T_BUTTON; }
 static int has_update(const Item* it) { return it->type == T_LABEL && it->name; }
 static int has_rows(const Item* it) { return it->type == T_LIST && !it->children; }
 static int has_attr(const Item* it) { return (it->set & BIT(P_ATTR)) != 0; }
+static int has_measure(const Item* it) { return (it->set & BIT(P_MEASURE)) != 0; }
+static int has_shown(const Item* it) { return (it->set & BIT(P_SHOWN)) != 0; }
 
 static void out_prototypes(const Item* it, int stub) {
     const char* end = stub ? " {" : ";\n";
+    int p;
     if (has_action(it)) out("void %s_action_cb(App* app, uint32_t hit)%s", it->symbol, end);
     if (stub && has_action(it)) outs("\n    (void)app;\n    (void)hit;\n}\n");
     if (has_update(it)) out("void %s_update_cb(App* app, char* text, size_t size)%s", it->symbol, end);
@@ -762,6 +1178,11 @@ static void out_prototypes(const Item* it, int stub) {
     if (has_attr(it))
         out("unsigned %s_attr_cb(App* app%s)%s", it->symbol, it->type == T_LIST ? ", size_t row" : "", end);
     if (stub && has_attr(it)) outs("\n    (void)app;\n    return 0;\n}\n");
+    /* a frame's, which is never @: no stub */
+    if (has_measure(it)) out("int %s_measure_cb(App* app, int width, int scale)%s", it->symbol, end);
+    if (has_shown(it)) out("bool %s_shown_cb(App* app)%s", it->symbol, end);
+    for (p = P_MIN_WIDTH; p <= P_MAX_HEIGHT; p++)
+        if (it->bound_cb & BIT(p)) out("int %s_%s_cb(App* app, int scale)%s", it->symbol, property_words[p], end);
     if (has_rows(it)) {
         out("bool %s_get_row_info(App* app, size_t row, int width, UiRowInfo* info)%s", it->symbol, end);
         if (stub) outs("\n    (void)app;\n    (void)row;\n    (void)width;\n    (void)info;\n    return false;\n}\n");
@@ -778,7 +1199,7 @@ static void write_h(const char* path) {
         "#ifndef SNX_GUI_UI_H\n#define SNX_GUI_UI_H\n#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n");
     outs("#include <SDL3/SDL_platform_defines.h>\n#include \"gui/place.h\" /* GuiRect */\n");
     outs("typedef struct App App; /* main.c's */\n");
-    outs("typedef enum { UI_SCENE, UI_LIST, UI_BUTTON, UI_LABEL } UiType;\n");
+    outs("typedef enum { UI_SCENE, UI_LIST, UI_BUTTON, UI_LABEL, UI_BOX, UI_SLOT } UiType;\n");
     outs("/* a colour of the theme's, by its theme.ini name; none: the one its type draws in */\ntypedef enum {\n"
          "    UI_COLOR_NONE");
     for (i = 0; i < COLORS; i++) {
@@ -825,6 +1246,17 @@ static void write_h(const char* path) {
         }
         out("    %s_ITEMS\n};\n", s->upper);
         out("extern const char %s_texts[];\nextern const UiItem %s_items[%s_ITEMS];\n", s->symbol, s->symbol, s->upper);
+        if (is_frame(i) && (s->set & BIT(P_NARROW_BELOW)))
+            out("/* whether it lays out narrow in an area width pixels wide at a UI scale of scale: its inside under "
+                "narrow_below */\n#define %s_NARROW(width, scale) ((width) - 2 * %d * (scale) < %d * (scale))\n",
+                s->upper, s->value[P_PADDING], s->value[P_NARROW_BELOW]);
+        if (is_frame(i)) {
+            out("/* its boxes' and slots' rectangles in the area at, at a UI scale of scale, laid out as it is drawn: those "
+                "shown\n   (shown_cb, narrow_below), a slot measured (measure_cb) at its width; one not shown is empty */\n"
+                "void %s_layout(App* app, GuiRect at, int scale, GuiRect* rects);\n",
+                s->symbol);
+            continue;
+        }
         out("/* its items' rectangles in the area at, at a UI scale of scale (a row of a list gets none: its list's\n"
             "   rows are drawn and hit in the list's) */\nvoid %s_layout(GuiRect at, int scale, GuiRect* rects);\n",
             s->symbol);
@@ -854,7 +1286,9 @@ static void write_h(const char* path) {
     outs("/* the callbacks: main.c's, those of the items marked @ ui.c's */\n");
     for (i = 0; i < g_uigen.nitems; i++) {
         const Item* it = &g_uigen.items[i];
-        if (!has_action(it) && !has_update(it) && !has_rows(it) && !has_attr(it)) continue;
+        if (!has_action(it) && !has_update(it) && !has_rows(it) && !has_attr(it) && !has_measure(it) &&
+            !has_shown(it) && !it->bound_cb)
+            continue;
         out_platform(it);
         out_prototypes(it, 0);
         out_platform_end(it);
@@ -885,8 +1319,10 @@ static void out_bound(const Item* list, int p, const char* rect) {
         outs("0");
     else if (list->unit[p] == UNIT_PX)
         out("%d * s", list->value[p]);
+    else if (list->unit[p] == UNIT_PERCENT)
+        out("%s.w * %d / 100", rect, list->pct[p]);
     else
-        out("%s.w * %d / 100", rect, list->value[p]);
+        out("%s.w * %d / 100 + %d * s", rect, list->pct[p], list->value[p]);
 }
 /* a list's row metric (row_height, row_gap, max_rows) on a platform: its own there, else the list's, else the default */
 static int metric(const Item* list, int on, int p) {
@@ -907,7 +1343,8 @@ static void out_metric(const Item* list, int p) {
     else
         out("%d", metric(list, PLATFORM_ANY, p));
 }
-/* the macros of a scene's lists' metrics that a platform sets: android's, desktop's (out_platform's), else iOS's */
+/* the macros of a scene's lists' metrics that a platform sets: android's on Android and iOS (the phones'), else
+   desktop's */
 static void out_metrics(int scene) {
     static const int metrics[] = {P_ROW_HEIGHT, P_ROW_GAP, P_MAX_ROWS};
     int i, k;
@@ -916,11 +1353,9 @@ static void out_metrics(int scene) {
         for (k = 0; k < 3; k++) {
             int p = metrics[k];
             if (!metric_varies(l, p)) continue;
-            out("#ifdef SDL_PLATFORM_ANDROID\n#define %s__%s %d\n", l->upper, metric_name(p),
-                metric(l, PLATFORM_ANDROID, p));
-            out("#elif !defined(SDL_PLATFORM_IOS)\n#define %s__%s %d\n", l->upper, metric_name(p),
-                metric(l, PLATFORM_DESKTOP, p));
-            out("#else\n#define %s__%s %d\n#endif\n", l->upper, metric_name(p), metric(l, PLATFORM_ANY, p));
+            out("#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)\n#define %s__%s %d\n", l->upper,
+                metric_name(p), metric(l, PLATFORM_ANDROID, p));
+            out("#else\n#define %s__%s %d\n#endif\n", l->upper, metric_name(p), metric(l, PLATFORM_DESKTOP, p));
         }
     }
 }
@@ -1029,12 +1464,10 @@ static void write_scene(int scene) {
     if (!layout_varies(scene))
         out_layout(scene, PLATFORM_ANY);
     else {
-        outs("#ifdef SDL_PLATFORM_ANDROID\n");
+        outs("#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)\n");
         out_layout(scene, PLATFORM_ANDROID);
-        outs("#elif !defined(SDL_PLATFORM_IOS)\n");
-        out_layout(scene, PLATFORM_DESKTOP);
         outs("#else\n");
-        out_layout(scene, PLATFORM_ANY);
+        out_layout(scene, PLATFORM_DESKTOP);
         outs("#endif\n");
     }
     out_here();
@@ -1273,8 +1706,55 @@ static void write_c(const char* path) {
          "static size_t ui_shown(int height, int row, int gap, int max_rows, int s) {\n"
          "    int fit = height > 0 ? (height + gap * s) / ((row + gap) * s) : 0;\n"
          "    return (size_t)(fit < max_rows ? fit : max_rows);\n}\n");
+    for (i = 0; i < g_uigen.nitems && !(g_uigen.items[i].type == T_SCENE && is_frame(i)); i++) continue;
+    if (i < g_uigen.nitems) /* a frame's, laid out at run time */
+        outs(
+            "#define UI_MAX(a, b) ((a) > (b) ? (a) : (b))\n"
+            "/* v kept between lo and hi, 0 for none; lo first */\nstatic inline int ui_clamp(int v, int lo, int hi) {\n"
+            "    if (hi && v > hi) v = hi;\n    if (lo && v < lo) v = lo;\n    return v;\n}\n"
+            "/* the gaps between shown children, gap each */\n#define UI_GAPS(gap, shown) ((shown) > 1 ? ((shown) - 1) * (gap) : 0)\n"
+            "/* the lengths of n children along a box's inside, gap apart: each its basis or, growing, its share of "
+            "what the\n   others leave, kept between lo and hi (0: none), a share a bound holds kept and the rest shared "
+            "again among the\n   others (held, n zeros, marks those); a least past what the others leave takes it all, "
+            "theirs then none. One\n   not on takes nothing, nor a gap. Their offsets from the inside's start in at, by "
+            "justify (0 start, 1 center,\n   2 end) when none grows */\n"
+            "static inline void ui_flex(int n, const int* basis, const int* grow, const int* lo, const int* hi, const int* "
+            "on, int inside,\n                    int gap, int justify, char* held, int* at, int* len) {\n"
+            "    int i, shown = 0, used = 0, grows = 0, round, pos = 0, spare;\n"
+            "    for (i = 0; i < n; i++) {\n        len[i] = 0;\n        if (!on[i]) continue;\n        shown++;\n"
+            "        if (grow[i])\n            grows += grow[i];\n        else\n"
+            "            used += len[i] = ui_clamp(basis[i], lo[i], hi[i]);\n    }\n"
+            "    if (shown > 1) used += (shown - 1) * gap;\n    spare = inside - used > 0 ? inside - used : 0;\n"
+            "    for (round = 0; round < n && grows; round++) {\n"
+            "        int left = inside - used, share = 0, given = 0, last = -1, again = 0;\n"
+            "        for (i = 0; i < n; i++)\n            if (on[i] && grow[i] && held[i])\n"
+            "                left -= len[i];\n            else if (on[i] && grow[i])\n                share += grow[i];\n"
+            "        if (left < 0) left = 0;\n"
+            "        for (i = 0; i < n; i++)\n            if (on[i] && grow[i] && !held[i]) {\n"
+            "                len[i] = share ? left * grow[i] / share : 0;\n                given += len[i];\n"
+            "                last = i;\n            }\n"
+            "        if (last >= 0) len[last] += left - given; /* what the division left, to the last */\n"
+            "        for (i = 0; i < n; i++)\n"
+            "            if (on[i] && grow[i] && !held[i] && ui_clamp(len[i], lo[i], hi[i]) != len[i]) {\n"
+            "                len[i] = ui_clamp(len[i], lo[i], hi[i]);\n"
+            "                if (len[i] > spare) len[i] = spare; /* a least past what is spare takes it all */\n"
+            "                held[i] = 1;\n"
+            "                again = 1;\n            }\n        if (!again) break;\n    }\n"
+            "    if (!grows && justify) {\n        int room = inside - used;\n"
+            "        pos = room > 0 ? (justify == 1 ? room / 2 : room) : 0;\n    }\n"
+            "    for (i = 0; i < n; i++) {\n        at[i] = pos;\n        if (on[i]) pos += len[i] + gap;\n    }\n}\n"
+            "/* a child's length across a box's inside, its own or the inside's whole (stretched), kept between lo and "
+            "hi,\n   placed by align (0 stretch, 1 start, 2 center, 3 end) */\n"
+            "static inline void ui_cross(int own, int length, int lo, int hi, int inside, int align, int* at, int* len) {\n"
+            "    *len = ui_clamp(own ? length : inside, lo, hi);\n"
+            "    *at = align == 2 ? (inside - *len) / 2 : align == 3 ? inside - *len : 0;\n}\n");
     for (i = 0; i < g_uigen.nitems; i++)
-        if (g_uigen.items[i].type == T_SCENE) write_scene(i);
+        if (g_uigen.items[i].type == T_SCENE) {
+            if (is_frame(i))
+                write_frame(i);
+            else
+                write_scene(i);
+        }
     outs("/* the callbacks of the items marked @: decorative, they do nothing */\n");
     for (i = 0; i < g_uigen.nitems; i++) {
         const Item* it = &g_uigen.items[i];
@@ -1308,7 +1788,7 @@ int main(int argc, char** argv) {
     for (i = 0; i < g_uigen.nitems && g_uigen.items[i].type != T_SCENE; i++) continue;
     if (i == g_uigen.nitems) fail(0, "no scene in %s", g_uigen.spec_path);
     for (i = 0; i < g_uigen.nitems; i++)
-        if (g_uigen.items[i].type == T_SCENE) {
+        if (g_uigen.items[i].type == T_SCENE && !is_frame(i)) { /* a frame is laid out at run time */
             layout_scene(i, PLATFORM_ANY);
             layout_scene(i, PLATFORM_ANDROID);
             layout_scene(i, PLATFORM_DESKTOP);

@@ -42,7 +42,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - A gamepad drives the menu as the keys do (`src/gui/pad_menu.c`): the D-pad and the left stick are the arrows, the
   button labelled A (or Cross) is Enter, B (or Circle) ESC, X (or Square) Del and Y (or Triangle) R, wherever the pad
   has them (a Switch pad's A is east, its X north), LB and RB are Shift+Tab and Tab, LT and RT are PgUp and PgDn, L3
-  and R3 are M and B (Games' mods folder and AOT pack), Start is F5 and Back (View, Minus, Select) F2. A held arrow or
+  and R3 are M and B (Games' mods folder and AOT pack), Start is F5 and Back (View, Minus, Select) F1. A held arrow or
   page repeats. A press on the pad hides the mouse's cursor and the foot names the pad's buttons, a PlayStation pad's
   by their shapes; a key or the mouse moving past a few pixels shows the keyboard's again, and so do a click and a
   finger once they have pressed what the foot showed under them: the press that switched does what it does. The Button
@@ -250,9 +250,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   in the app's own files, out of the Files app's reach, are listed a file at a time, and under them the box says how
   they go while the app is in testing: Android's Settings > Apps > ScarletNX > Storage > Clear storage, which takes
   every game, save and key in the app with them. The menu never reads them: it starts from its defaults.
-- **Recent games**, in Games under Add a folder, lists the last games run, newest first, three and a row that
+- **Recent games**, at the top of Games, lists the last games run, newest first, three and a row that
   shows the rest, by the name their run gave (the runner's `ScarletNX - <name>` line), else their file's.
-  The focus moves between them, Add a folder and the page's games in one ring, and the tips show the focused
+  The focus moves between them and the page's games in one ring, and the tips show the focused
   game's path. Choosing one runs it again with the driver it was
   loaded with and the options the menu has now; a game whose file is gone leaves the
   list instead. The list is kept in `recent.txt`, beside `last-run.log`, at the root of the menu's state
@@ -323,16 +323,17 @@ directories are excluded. The folders are looked at once a second while the menu
 names only), so a game put in or taken out shows in the open list; a folder that
 cannot be read is named and the others still listed.
 
-- **Add a folder** is the first row on every page, a wider gap under it: it opens the folder picker, the folder going in
-  the library of what it holds (Settings > App > Folders). Under it the recent games, then the page's games. ESC returns to the menu.
-- Up/Down go round Add a folder, the recent games and the page's files. Enter/Space opens one.
+- **P** (on a phone a tap on *Folders* at the foot) opens Settings > App > Folders at the recompiled library's Add a
+  folder, where ESC comes back to Games and its list read again. The recent games are over every page, then the
+  page's games. ESC returns to the menu.
+- Up/Down go round the recent games and the page's files. Enter/Space opens one.
 - **R** (on Android a tap on *Recompile* at the foot) recompiles the Switch game in focus, recent or on the page,
   where it is, or prepares its dump again: `scarletnx -r`. It plays nothing;
   Enter then does. On another row, or a 3DS or Vita game, it says why it does nothing.
 - Left/Right and PgUp/PgDown go to the previous/next page. The page number and
   total file count are shown. Paging stops at the first and last pages.
 - Resizing adjusts the page size while keeping the selected file visible.
-- Empty or missing directories show a diagnostic and still provide Add a folder.
+- Empty or missing directories show a diagnostic, and the side box says P adds a folder.
 
 A recompiled game, in a folder of its own (`recompiled/<id>/<id>`), runs with the Settings through the menu's own
 `scarletnx` and is never extracted as a dump: it plays as it is when this build made it, and is recompiled first,
@@ -380,7 +381,7 @@ and to the run, which is **compiling** until the runner prints its `ScarletNX - 
 
 The screens are boxes side by side, nothing over another, the default framing them in thin lines and YoRHa
 filling them. At the top the tabs, Menu, Games and Settings, and the screen's title after them against the
-right (`[head] place = tabs`) or on a row of its own under them (`below`), and at its right the user games play as
+right, and at its right the user games play as
 (Settings > User, which lists them under **Plays as**, Left/Right picking, and renames each: Enter types its
 nickname, the rule [USAGE](USAGE.md#users) gives checked, then written to `users.ini`): a box framed as the others are
 holding their nickname and their picture, `users/<uid>.jpg` or Wimsy
@@ -396,11 +397,15 @@ the Settings leaves out what more it must. Under them the list, each entry a box
 of its own, the focused one framed in the focus colour or inverted, with the theme's cursor in the margin;
 beside it a box with what the focus is about (a game's path whole, Games' folders, the keys in use, the last
 run's output), never what the tips already say (what the row does, a game's kind), and under that one the Status
-box. The tips have a row of their own under the head (`[tips] place =
-top`, both built-ins'), or go to the foot under the list's column with `bottom`, where they take one row, a long one
-sliding, or wrap over its rows with `[tips] wrap`, the last sliding what does not fit. At the foot the screen's keys, the whole width, or under the side
-box's column beside the tips, in letters a size under the rest's; the tips and the keys each in a box with a bar down
-its left (`[tips] box`, `[footer] box`) or on the page. Games lists Add a folder, the recent games and a
+box. The tips have a row of their own under the head, their letters a half step under the text's (1.5x by a 2x text),
+as the Status box's and the note at the foot of a Settings box are; the setup's go to the foot beside its keys, where they take one row,
+a long one sliding, or wrap over its rows with `[tips] wrap`, the last sliding what does not fit. At the foot the
+screen's keys, the whole width (the setup's beside its tips), in letters a size under the rest's: its own keys, ESC alone
+at the left of the row, **F1** last, which opens a box over the screen with every key it has, those every screen has too
+(the arrows and the mouse, Enter, Space and a click, the pages, Tab and F2), until any key or a click closes it; on a
+phone, the words to tap, whole, in the text's letters, each row of them as tall as a list's row (40 pixels times
+the text's size) for a finger. The tips and the keys each in a box with a bar down
+its left (`[tips] box`, `[footer] box`) or on the page. Games lists the recent games and a
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
 opens the picker). The Settings list their groups, and beside them the focused group's
@@ -411,18 +416,21 @@ not found, the log not saved) shows whole in a box over the screen until OK, onc
 note go on saying it after. F5, or the foot's (Refresh on a phone), looks at the disk again at once rather than at the next look:
 Games lists its folders again, Folders says which of its folders are there, the menu counts the disk
 again, and the box of what an older version left looks again. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
-every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the
-column is as wide as its entries and the side box goes under the list. Every list is laid out by `src/gui/ui.txt`
-(a theme's `[body] gap` and `[body] scroll` are deprecated, said as it loads: [DEPRECATIONS](DEPRECATIONS.md)): the menu's, Games',
+every screen, 20 columns at the least, and a window under 45 columns shows the list alone, or with app.ini's
+`side_box = on` (F2) the side box under it; a run's output and the theme editor's keys take three fifths, the side box
+24 columns at the least, under them on a window under 45 columns. The screens are laid out by `src/gui/ui.txt`'s
+Screen and Wide (a theme's `[head] place`, `[tips] place` and `[body] sizing` are deprecated, said as it loads:
+[DEPRECATIONS](DEPRECATIONS.md)), and so is every list
+(a theme's `[body] gap` and `[body] scroll` are deprecated too): the menu's, Games',
 the Settings' two, the theme editor's, the choices of a question, of UI scale's box, of the Recompile box and of the
 setup's pages, the setup's Appearance rows, the box of users, that of a game's updates, DLCs and mods, and the OK of
-a box of files. Their rows are 2 pixels apart times the text's size (on Android 40 pixels high, about Android's 48 dp
+a box of files. Their rows are 2 pixels apart times the text's size (on Android and iOS 40 pixels high, about Android's 48 dp
 touch target at the 3x a phone held wide gets, where the desktop's are 17), the focused one kept in the middle (on a
 group's screen, the group open in the groups' list), the cursor and the arrows of hidden rows inside each row, which a
 click takes whole as a tap does. That is the **Side box**'s *Auto*, the
 default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
-not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2, or the
-foot's, shows it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over
+not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2 shows
+it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over
 its rows, its last sliding what is left, or takes one that slides with `[body] text = slide`. A run of the console layout shows the driver's output in a box sized to it,
 beside it what runs and how it ended over the status, the file in the tips and the ESC line where the keys
 go, which a tap aborts. The button map draws the pad in the box between the head and the foot. A question comes
@@ -497,8 +505,6 @@ added = #6A9A50
 ; plain | bar: the tabs and the title on a band of ink; rule: a line under the head
 style = bar
 rule = true
-; the title after the tabs (tabs) or on a row of its own under them (below)
-place = tabs
 ; the title's letters, times the text's (1 to 3), and a shadow under them in the dim colour
 size = 2
 shadow = true
@@ -513,8 +519,6 @@ marker = "> "
 focus = bar
 ; the boxes outline (framed) or fill (filled)
 panels = fill
-; fixed: the list two fifths of every screen, alone on a narrow one | adaptive: as wide as its entries
-sizing = fixed
 ; a text too long for its box: wrap (over its rows) | slide (on one row)
 text = wrap
 ; in the list's margin, beside the focused box
@@ -526,8 +530,6 @@ options-dialog = yorha
 ; a faint grid on the page behind the boxes, in the dim colour
 grid = true
 [tips]
-; what the focus is about: bottom (a box at the foot beside the keys) | top (a row under the head)
-place = top
 ; in a box with a bar at its left, or on the page
 box = false
 ; over the foot's rows, or on one row that slides
@@ -615,7 +617,7 @@ ErET needs `[theme] layout`, so the built-in files carry one: `debug` and `menu`
   keeps its meaning, and each value reads to the same theme.
 - A new key, or a new word for a key, keeps N: an older GUI leaves what it does not know, and
   a file that does not name it takes its base's value, so an older theme gets the new look of
-  the built-in it starts from (the title's place, the tips, the foot's boxes).
+  the built-in it starts from (the title's size, the tips' box, the foot's boxes).
 - A key a newer one replaces is deprecated, never given a new meaning: it still reads as the new keys say, and the
   GUI never writes it again. The format has none so far.
 - N goes up only when a key that exists has to mean something else. The GUI then reads the
@@ -690,7 +692,8 @@ accounting. See [BUILD](BUILD.md) for SDL3's desktop dependencies.
 The menu's list, Games', the Settings', the setup's Appearance, the choices of the questions and the setup, the
 boxes of users and of a game's add-ons, and the OK of a box of files are scenes of `src/gui/ui.txt`, which `tools/uigen` turns into `gui/ui.h` and
 `gui/ui.c` as the GUI builds (the format is in `tools/uigen/uigen.c`'s first comment): their layout computed at build
-time, the drawing and callbacks main.c's. `uigen` tests the generator's output and refusals, `gui_ui` runs what it
+time, the drawing and callbacks main.c's. The screens' boxes (the head, the tips, the list, the side box, the Status
+box and the foot) are its frames Screen and Wide, laid out as they are drawn, from what main.c measures. `uigen` tests the generator's output and refusals, `gui_ui` runs what it
 makes of `tests/ui_test.txt`.
 
 The tests cover menu transitions, bounded console scrolling, split UTF-8/ANSI
@@ -710,7 +713,7 @@ foot's keys and typed text), UTF-8 read with a `?` for each byte no character st
 them.
 Settings tests cover the runtime's list read into rows, picks, the options each combination
 passes, and the screens of its groups and App; menu tests cover mouse hover versus explicit
-activation, the menu without the games and Games with Add a folder and the recent games' show-more row,
+activation, the menu without the games and Games with its recent games' show-more row and P,
 yellow/pink highlighting and the tips. Theme tests cover the built-ins, a `theme.ini` over its base
 (unreadable values and unknown keys included), the `themes/` folders listed, the
 compiling and loading screens, and the YoRHa bars and band in the real renderer. Step

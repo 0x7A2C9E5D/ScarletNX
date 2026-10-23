@@ -16,11 +16,16 @@ static inline const uint8_t* font_rows(int c) {
            : c < 256 + gui_latin_count ? gui_latin_font + (c - 256) * 16
                                        : gui_wide_font + (c - 256 - gui_latin_count) * 16;
 }
+/* where a font's pixel k (from a glyph's corner) is read with letters half halves of a cell big: a whole scale s (2 * s
+   of them) its block's corner, k * s, so a glyph is found at its corner alone; a half step's pixels, a pixel and two by
+   turns, in their middle */
+static inline int font_px(int k, int half) { return half % 2 ? (2 * k + 1) * half / 4 : k * (half / 2); }
 /* n glyphs in color anywhere on the render: their ink pixels in color, the others not (a box's frame may cross the
-   font's last row, which is empty); 1 and where they start, else 0 */
+   font's last row, which is empty); 1 and where they start, else 0. Their letters size times the text's, or at the
+   half step app->half names while it is set */
 static inline int find_glyphs(App* app, const int* text, int n, SDL_Color color, int size, int* at_x, int* at_y) {
     SDL_Surface *read = SDL_RenderReadPixels(app->renderer, NULL), *image;
-    int s = app->scale * size, first = -1, fx = 0, fy = 0, found = 0, x, y;
+    int h = app->half && size == 1 ? app->half : 2 * app->scale * size, first = -1, fx = 0, fy = 0, found = 0, x, y;
     assert(read);
     image = SDL_ConvertSurface(read, SDL_PIXELFORMAT_RGBA32);
     SDL_DestroySurface(read);
@@ -32,19 +37,19 @@ static inline int find_glyphs(App* app, const int* text, int n, SDL_Color color,
             for (int gx = 0; gx < 8 && first < 0; ++gx)
                 if (font_rows(text[i])[gy] & (0x80 >> gx)) {
                     first = i;
-                    fx = (i * 8 + gx) * s;
-                    fy = gy * s;
+                    fx = font_px(i * 8 + gx, h);
+                    fy = font_px(gy, h);
                 }
     assert(first >= 0);
-    for (y = 0; !found && y + 15 * s <= image->h; ++y)
-        for (x = 0; !found && x + n * 8 * s <= image->w; ++x) {
+    for (y = 0; !found && y + font_px(14, h) < image->h; ++y)
+        for (x = 0; !found && x + font_px(n * 8 - 1, h) < image->w; ++x) {
             if (!SNX_IS(SNX_AT(x + fx, y + fy))) continue;
             found = 1;
             for (int i = 0; found && i < n; ++i)
                 for (int gy = 0; found && gy < 15; ++gy)
                     for (int gx = 0; found && gx < 8; ++gx) {
                         int ink = (font_rows(text[i])[gy] & (0x80 >> gx)) != 0;
-                        found = ink == SNX_IS(SNX_AT(x + (i * 8 + gx) * s, y + gy * s));
+                        found = ink == SNX_IS(SNX_AT(x + font_px(i * 8 + gx, h), y + font_px(gy, h)));
                     }
             if (found) {
                 *at_x = x;
@@ -97,6 +102,14 @@ static inline void shows_at(int line, App* app, const char* text, SDL_Color colo
         SDL_DestroySurface(image);
     }
     assert(!"the text drawn");
+}
+/* the same a half step under the text's letters (text_half: the tips under the head, a note, the Status box) */
+#define shows_half(app, text, color) half_shows_at(__LINE__, app, text, color, 1)
+#define hides_half(app, text, color) half_shows_at(__LINE__, app, text, color, 0)
+static inline void half_shows_at(int line, App* app, const char* text, SDL_Color color, int drawn) {
+    int half = text_half(app);
+    shows_at(line, app, text, color, 1, drawn);
+    app->half = half;
 }
 /* the same in the foot's letters, a size under the rest's (foot_scale) */
 #define shows_foot(app, text, color) foot_shows_at(__LINE__, app, text, color, 1)

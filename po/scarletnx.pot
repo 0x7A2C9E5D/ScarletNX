@@ -593,8 +593,34 @@ msgstr ""
 msgid "Tab: screen. F2: side box."
 msgstr ""
 
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
-msgid "Recent games"
+#, snx-keys
+msgid "Folders: tap it."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "P: folders."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "ESC: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "F1: help."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Select: help."
 msgstr ""
 
 #: src/gui/main.c
@@ -862,7 +888,9 @@ msgstr ""
 msgid "Install"
 msgstr ""
 
+#. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
+#, snx-key
 msgid "Folders"
 msgstr ""
 
@@ -920,6 +948,10 @@ msgid "none"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Recent games"
+msgstr ""
+
+#: src/gui/main.c
 msgid "...show more"
 msgstr ""
 
@@ -949,21 +981,15 @@ msgid ", in the games/ an older version made: new games go to recompiled/"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Pick a folder of games or dumps, listed after recompiled/ and dumps/"
-msgstr ""
-
-#. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c src/gui/ui.txt
-#, snx-key
-msgid "Add a folder"
+msgid "Linux ARM ELF, run with scarletnx-gnuabi"
 msgstr ""
 
 #: src/gui/main.c
-msgid "ready to run"
+msgid "Settings > App > Folders adds a folder of games or dumps: P, or the foot's, opens it"
 msgstr ""
 
 #: src/gui/main.c
-msgid "prepared when it runs"
+msgid "No games"
 msgstr ""
 
 #: src/gui/main.c
@@ -1341,6 +1367,12 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "%s, %s free. %s"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Add a folder"
 msgstr ""
 
 #: src/gui/main.c
@@ -2484,6 +2516,12 @@ msgstr ""
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
 #, snx-key
+msgid "P"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
 msgid "Ctrl+S"
 msgstr ""
 
@@ -2503,6 +2541,18 @@ msgstr ""
 #: src/gui/main.c
 #, snx-key
 msgid "F2"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "F1"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Select"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
@@ -2724,10 +2774,6 @@ msgid "a line under the head"
 msgstr ""
 
 #: src/gui/theme.c
-msgid "the title after the tabs, or on a row of its own under them"
-msgstr ""
-
-#: src/gui/theme.c
 msgid "the title's letters, times the text's, 1 to 3"
 msgstr ""
 
@@ -2772,10 +2818,6 @@ msgid "the boxes outlined or filled"
 msgstr ""
 
 #: src/gui/theme.c
-msgid "fixed: the list two fifths of every screen, alone on a narrow one; adaptive: as wide as its entries"
-msgstr ""
-
-#: src/gui/theme.c
 msgid "a text too long for its box over its rows, or on one that slides"
 msgstr ""
 
@@ -2789,10 +2831,6 @@ msgstr ""
 
 #: src/gui/theme.c
 msgid "a faint grid on the page, in the dim colour"
-msgstr ""
-
-#: src/gui/theme.c
-msgid "in a box at the foot beside the keys, or on a row under the head"
 msgstr ""
 
 #: src/gui/theme.c
@@ -3002,6 +3040,11 @@ msgstr ""
 
 #: src/gui/theme.c
 #, c-format
+msgid "[%s] %s = %s does nothing: ui.txt lays out the screens now (delete it)"
+msgstr ""
+
+#: src/gui/theme.c
+#, c-format
 msgid "%s could not be read (out of memory): it shows %s"
 msgstr ""
 
@@ -3164,6 +3207,18 @@ msgstr ""
 
 #: src/common/utilities/setup.c
 msgid "nothing: ui.txt lays out every list"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "A theme's screens"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "[head] place, [tips] place and [body] sizing in its theme.ini"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "nothing: ui.txt lays out every screen"
 msgstr ""
 
 #: src/nx/runtime/settings.txt
