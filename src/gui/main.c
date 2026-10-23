@@ -749,12 +749,16 @@ static void disk_text(const App* app, char* out, size_t size) {
     } else
         snprintf(out, size, snx_tr("Disk: counting, %s free"), left);
 }
-/* a path as the person sees it: on an iPhone from the app's Documents folder, which the Files app shows as the app's own
-   (On My iPhone > ScarletNX), the container's long path before it being nothing they can open */
+/* a path as the person sees it: on an iPhone what follows the app's Documents folder, which the Files app shows as the
+   app's own (On My iPhone > ScarletNX), the container's long path before it being nothing they can open */
 static const char* visible_path(const char* path) {
 #ifdef SDL_PLATFORM_IOS
     const char* documents = path ? strstr(path, "/Documents") : NULL;
-    if (documents && (documents[10] == '/' || !documents[10])) return documents + 1;
+    if (documents && (documents[10] == '/' || !documents[10])) {
+        documents += 10;
+        while (*documents == '/') ++documents;
+        return *documents ? documents : "/"; /* the app's own folder is the root there */
+    }
 #endif
     return path;
 }
@@ -6299,8 +6303,8 @@ static void form_pointer(App* app, float x, float y) {
    notices of what older versions did, then each step setup.ini has left. Its boxes say what the page is about, its
    question and choices come as the theme's options-dialog places them, its tip in the foot. What a step does is done
    as it is taken; setup.ini is written once the last one is ---- */
-#ifdef SDL_PLATFORM_ANDROID
 #ifdef SNX_TOUCH_UI
+#ifdef SDL_PLATFORM_ANDROID
 #define SAY_SETUP        SNX_TR_KEYS("Tap: choose. Back: go back.")
 #else
 #define SAY_SETUP        SNX_TR_KEYS("Tap: choose.")
@@ -6798,7 +6802,11 @@ static const char* setup_question(const App* app, char* out, size_t size) {
 }
 static const char* setup_tip(const App* app) {
     switch (setup_page_of(app)) {
+#ifdef SNX_TOUCH_UI
+        case SETUP_NOTICE: return snx_tr("Tip: Skip leaves the setup out");
+#else
         case SETUP_NOTICE: return snx_tr("Tip: --debug skips the setup");
+#endif
         case SNX_SETUP_LANGUAGE: return snx_tr("Tip: games keep their own language: Settings > System > language");
         case SNX_SETUP_INSTALL: return snx_tr("Tip: a portable copy is a folder you can copy");
         case SNX_SETUP_FOLDERS: return snx_tr("Tip: Settings > App > Library and Folders change them");

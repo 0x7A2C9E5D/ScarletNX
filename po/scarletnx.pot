@@ -1818,6 +1818,10 @@ msgid "users.ini has %d users"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Tip: Skip leaves the setup out"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Tip: --debug skips the setup"
 msgstr ""
 
