@@ -70,26 +70,17 @@ char* snx_strdup(const char* s) {
     memcpy(p, s, n);
     return p;
 }
-static char* format_list(const char* fmt, va_list ap) {
-    va_list again;
-    int n;
-    char* p;
-    va_copy(again, ap);
-    n = vsnprintf(NULL, 0, fmt, ap);
-    if (n < 0) {
-        va_end(again);
-        return snx_strdup("");
-    }
-    p = (char*)snx_alloc((size_t)n + 1);
-    vsnprintf(p, (size_t)n + 1, fmt, again);
-    va_end(again);
-    return p;
-}
 char* snx_format(const char* fmt, ...) {
     va_list ap;
+    int n;
     char* p;
     va_start(ap, fmt);
-    p = format_list(fmt, ap);
+    n = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+    if (n < 0) return snx_strdup("");
+    p = (char*)snx_alloc((size_t)n + 1);
+    va_start(ap, fmt);
+    vsnprintf(p, (size_t)n + 1, fmt, ap);
     va_end(ap);
     return p;
 }
@@ -101,14 +92,23 @@ void snx_path_native(char* path) {
     (void)path;
 #endif
 }
-char* snx_path_format(const char* fmt, ...) {
+int snx_path_format(char* out, size_t size, const char* fmt, ...) {
     va_list ap;
-    char* p;
+    int n;
     va_start(ap, fmt);
-    p = format_list(fmt, ap);
+    n = vsnprintf(out, size, fmt, ap);
     va_end(ap);
-    snx_path_native(p);
-    return p;
+    if (n < 0 || (size_t)n >= size) {
+        if (n < 0)
+            snx_error("cannot make a path of %s (%s)", fmt, strerror(errno));
+        else
+            snx_error("the path %.80s... is %d bytes, over the %zu it has room for", size ? out : fmt, n,
+                      size ? size - 1 : 0);
+        if (size) *out = 0;
+        return -1;
+    }
+    snx_path_native(out);
+    return 0;
 }
 /* snx_error's sink, snx_error_sink's: NULL for stderr; and the kinds whose folder app.ini names wrongly, said once */
 static struct {

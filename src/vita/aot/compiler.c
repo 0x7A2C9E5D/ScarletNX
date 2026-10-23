@@ -460,7 +460,11 @@ int vita_aot_compile(const char* folder, const VitaImage* image, char* error, si
         goto done;
     }
     objects[0] = snx_path_join(stage, "index.o");
-    for (unsigned i = 1; i < files; ++i) objects[i] = snx_path_format("%s/blocks-%05u.o", stage, i);
+    for (unsigned i = 1; i < files; ++i) {
+        char name[32];
+        snprintf(name, sizeof name, "blocks-%05u.o", i);
+        objects[i] = snx_path_join(stage, name);
+    }
     work = (Work){.image = image, .blocks = d.blocks, .objects = objects + 1, .count = d.count, .chunks = chunks};
     if (chunks && !compile_chunks(&work)) {
         snprintf(error, error_size, "%s", work.error);

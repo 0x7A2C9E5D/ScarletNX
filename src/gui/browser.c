@@ -27,7 +27,7 @@ bool gui_is_dump(const char* name) {
            suffix(name, ".dnsp");
 }
 bool gui_game_folder(const char* path) {
-    char *folder = snx_dirname(path), *name, *data;
+    char *folder = snx_dirname(path), *name, data[SNX_PATH_SIZE];
     const char *own = path + strlen(path), *leaf = folder + strlen(folder);
     bool found;
     while (own > path && own[-1] != '/' && own[-1] != '\\') --own;
@@ -39,9 +39,8 @@ bool gui_game_folder(const char* path) {
 #ifdef SNX_IOS
     if (suffix(name, "_code.snxobj")) name[strlen(name) - 12] = 0; /* the pack is the game's program there */
 #endif
-    data = snx_path_format("%s/%s_data", folder, name);
-    found = *name && (!strcmp(leaf, name) || snx_addon_name(leaf, name, NULL)) && snx_is_file(path) && snx_is_dir(data);
-    free(data);
+    found = *name && (!strcmp(leaf, name) || snx_addon_name(leaf, name, NULL)) && snx_is_file(path) &&
+            !snx_path_format(data, sizeof data, "%s/%s_data", folder, name) && snx_is_dir(data);
     free(name);
     free(folder);
     return found;
@@ -146,7 +145,8 @@ static char* folder_game(const char* directory, const char* name, int kinds) {
         if (own && playable(folder, own, GUI_GAMES_RUN)) {
 #ifdef SNX_IOS
             /* playable() cut the suffix: the runtime takes the pack itself, there is no program named <name> */
-            path = snx_path_format("%s/%s" GAME_CODE, folder, own);
+            char made[SNX_PATH_SIZE];
+            path = snx_path_format(made, sizeof made, "%s/%s" GAME_CODE, folder, own) ? NULL : snx_strdup(made);
 #else
             path = snx_path_join(folder, own);
 #endif
@@ -160,15 +160,16 @@ char* gui_folder_game(const char* directory, const char* name) { return folder_g
 /* what the game at path, named name, is shown as: the name in its <name>_data/control.nacp, which the recompile
    copies there, else name */
 static char* shown_name(const char* path, const char* name) {
-    char *folder = snx_dirname(path), *stem = snx_strdup(name), *nacp = NULL, *shown = NULL, text[0x200];
+    char *folder = snx_dirname(path), *stem = snx_strdup(name), *shown = NULL, nacp[SNX_PATH_SIZE], text[0x200];
     unsigned char* bytes;
     size_t size = 0;
     if (stem && suffix(stem, ".exe")) stem[strlen(stem) - 4] = 0;
-    if (folder && stem) nacp = snx_path_format("%s/%s_data/control.nacp", folder, stem);
-    bytes = nacp && snx_is_file(nacp) ? (unsigned char*)snx_read_file(nacp, &size) : NULL;
+    bytes = folder && stem && !snx_path_format(nacp, sizeof nacp, "%s/%s_data/control.nacp", folder, stem) &&
+                    snx_is_file(nacp)
+                ? (unsigned char*)snx_read_file(nacp, &size)
+                : NULL;
     if (bytes && snx_nacp_name(bytes, size, text, sizeof text)) shown = snx_strdup(text);
     free(bytes);
-    free(nacp);
     free(stem);
     free(folder);
     return shown ? shown : snx_strdup(name);
@@ -183,19 +184,16 @@ char* gui_game_shown(const char* path) {
     return shown;
 }
 char* gui_game_icon(const char* path) {
-    char *folder, *icon;
+    char *folder, icon[SNX_PATH_SIZE];
     const char* leaf;
+    int cut;
     if (!path || !gui_game_folder(path)) return NULL;
     folder = snx_dirname(path);
     leaf = folder + strlen(folder);
     while (leaf > folder && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
-    icon = snx_path_format("%s/%s_data/icon.jpg", folder, leaf);
+    cut = snx_path_format(icon, sizeof icon, "%s/%s_data/icon.jpg", folder, leaf);
     free(folder);
-    if (!snx_is_file(icon)) {
-        free(icon);
-        return NULL;
-    }
-    return icon;
+    return !cut && snx_is_file(icon) ? snx_strdup(icon) : NULL;
 }
 /* whether the add-on named a (<game>_<entry>) is listed before b: updates first, the newest version first (one
    without a version last), then the DLCs by title ID */
@@ -225,12 +223,13 @@ static size_t addons_of(const char* path, GuiGames* addons) {
     SnxU64 game = 0, aoc_base = 0;
     while (leaf > folder && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
     if (snx_title_parse(leaf, &game) && addons) { /* what its DLCs are numbered from: its control.nacp's base ID */
-        char* file = snx_path_format("%s/%s_data/control.nacp", folder, leaf);
+        char file[SNX_PATH_SIZE];
         size_t size = 0;
-        unsigned char* nacp = (unsigned char*)snx_read_file(file, &size);
+        unsigned char* nacp = snx_path_format(file, sizeof file, "%s/%s_data/control.nacp", folder, leaf)
+                                  ? NULL
+                                  : (unsigned char*)snx_read_file(file, &size);
         aoc_base = snx_nacp_aoc_base(nacp, size, game);
         free(nacp);
-        free(file);
     }
     while (own > path && own[-1] != '/' && own[-1] != '\\') --own;
     /* the game's own program, <name>/<name>: an add-on has none of its own */
@@ -239,8 +238,8 @@ static size_t addons_of(const char* path, GuiGames* addons) {
         count = 0;
     for (i = 0; i < count; ++i) {
         size_t n = strlen(names[i]);
-        char *stem = snx_strdup(names[i]), *data = snx_path_join(folder, names[i]), *program = NULL, *own;
-        char text[0x40], version[0x20];
+        char *stem = snx_strdup(names[i]), *data = snx_path_join(folder, names[i]), *program = NULL;
+        char text[0x40], version[0x20], nacp_file[SNX_PATH_SIZE];
         SnxU64 id;
         /* <game>_<its ID>_data: a DLC's record, or an update's beside its program */
         bool listed = n > 5 && !strcmp(names[i] + n - 5, "_data") && snx_is_dir(data);
@@ -257,7 +256,9 @@ static size_t addons_of(const char* path, GuiGames* addons) {
             listed = playable(folder, file, GUI_GAMES_RUN);
             free(file);
 #if defined(_WIN32)
-            program = snx_path_format("%s/%s.exe", folder, stem);
+            char made[SNX_PATH_SIZE];
+            program = snx_path_format(made, sizeof made, "%s/%s.exe", folder, stem) ? NULL : snx_strdup(made);
+            listed = listed && program;
 #else
             program = snx_path_join(folder, stem);
 #endif
@@ -265,8 +266,10 @@ static size_t addons_of(const char* path, GuiGames* addons) {
         if (listed && addons) {
             unsigned char* nacp;
             size_t size = 0;
-            own = snx_path_format("%s/control.nacp", data);
-            nacp = snx_addon_kind(game, id) == SNX_ADDON_UPDATE ? (unsigned char*)snx_read_file(own, &size) : NULL;
+            nacp = snx_addon_kind(game, id) == SNX_ADDON_UPDATE &&
+                           !snx_path_format(nacp_file, sizeof nacp_file, "%s/control.nacp", data)
+                       ? (unsigned char*)snx_read_file(nacp_file, &size)
+                       : NULL;
             if (snx_addon_kind(game, id) == SNX_ADDON_DLC && id > aoc_base && id - aoc_base < 0x800)
                 snprintf(text, sizeof text, snx_tr("DLC %u"), (unsigned)(id - aoc_base));
             else if (snx_addon_kind(game, id) == SNX_ADDON_DLC) { /* numbered from no base the game names */
@@ -278,7 +281,6 @@ static size_t addons_of(const char* path, GuiGames* addons) {
             else
                 snprintf(text, sizeof text, "%s", snx_tr("Update"));
             free(nacp);
-            free(own);
             for (j = addons->count; j > 0 && addon_before(game, stem, addons->names[j - 1]); --j) {
                 addons->names[j] = addons->names[j - 1];
                 addons->shown[j] = addons->shown[j - 1];
@@ -316,7 +318,7 @@ bool gui_game_addons(const char* path, GuiGames* addons) {
     return addons->count > 0;
 }
 size_t gui_game_mods(const char* path, char** folder, char*** names) {
-    char *dir, *data;
+    char *dir, data[SNX_PATH_SIZE];
     const char* leaf;
     size_t count;
     char** listed = NULL;
@@ -325,19 +327,21 @@ size_t gui_game_mods(const char* path, char** folder, char*** names) {
     if (!gui_game_folder(path)) return 0;
     dir = snx_dirname(path);
     for (leaf = dir + strlen(dir); leaf > dir && leaf[-1] != '/' && leaf[-1] != '\\'; --leaf) continue;
-    data = snx_path_format("%s/%s_data", dir, leaf);
+    if (snx_path_format(data, sizeof data, "%s/%s_data", dir, leaf)) {
+        free(dir);
+        return 0;
+    }
     *folder = snx_mods_folder(data);
     count = snx_mods_list(*folder, &listed);
     if (names)
         *names = listed;
     else
         snx_free_strings(listed, count);
-    free(data);
     free(dir);
     return count;
 }
 size_t gui_game_cheats(const char* path, char** folder, char*** names) {
-    char *dir, *data;
+    char *dir, data[SNX_PATH_SIZE];
     const char* leaf;
     size_t count;
     char** listed = NULL;
@@ -346,14 +350,16 @@ size_t gui_game_cheats(const char* path, char** folder, char*** names) {
     if (!gui_game_folder(path)) return 0;
     dir = snx_dirname(path);
     for (leaf = dir + strlen(dir); leaf > dir && leaf[-1] != '/' && leaf[-1] != '\\'; --leaf) continue;
-    data = snx_path_format("%s/%s_data", dir, leaf);
+    if (snx_path_format(data, sizeof data, "%s/%s_data", dir, leaf)) {
+        free(dir);
+        return 0;
+    }
     *folder = snx_cheats_folder(data);
     count = snx_cheats_list(*folder, &listed);
     if (names)
         *names = listed;
     else
         snx_free_strings(listed, count);
-    free(data);
     free(dir);
     return count;
 }

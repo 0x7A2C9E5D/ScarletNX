@@ -95,11 +95,13 @@ done:
     return rc;
 }
 char* snx_game_source(const char* folder, const char* name, int* recorded) {
-    char *ini = snx_game_ini(folder, name), *source = snx_ini_value(ini, "source");
-    char* path = source ? source : snx_path_format("%s/%s.source", folder, name);
-    if (recorded) *recorded = source || snx_is_link(path) || snx_path_exists(path);
+    char *ini = snx_game_ini(folder, name), *source = snx_ini_value(ini, "source"), path[SNX_PATH_SIZE];
     free(ini);
-    return path;
+    if (recorded) *recorded = source != NULL;
+    if (source) return source;
+    if (snx_path_format(path, sizeof path, "%s/%s.source", folder, name)) return NULL;
+    if (recorded) *recorded = snx_is_link(path) || snx_path_exists(path);
+    return snx_strdup(path);
 }
 int snx_record_source(const char* folder, const char* name, const char* dump) {
     char* ini = snx_game_ini(folder, name);

@@ -23,6 +23,12 @@
 #endif
 /* play_dump's: the game made and ready, not played (an update's or a DLC's game, before it) */
 #define PLAY_PREPARE 0x10000u
+/* a game's program file: <name>.exe on Windows, <name> elsewhere */
+#ifdef _WIN32
+#define PROGRAM_SUFFIX ".exe"
+#else
+#define PROGRAM_SUFFIX ""
+#endif
 
 static void usage(void) {
     puts("Usage: scarletnx [OPTIONS] INPUT [-- GAME_ARGUMENTS...]\n"
@@ -140,7 +146,7 @@ static int stamped(const char* base) {
    Windows): 1 with its folder and name, owned when asked for. A game an older version laid out beside the others is not
    one */
 static int prepared_game(const char* input, char** folder, char** name) {
-    char *path = snx_absolute(input), *dir = NULL, *own = NULL, *program = NULL, *data = NULL;
+    char *path = snx_absolute(input), *dir = NULL, *own = NULL, program[SNX_PATH_SIZE], data[SNX_PATH_SIZE];
     const char* leaf;
     size_t n;
     int found = 0;
@@ -158,13 +164,9 @@ static int prepared_game(const char* input, char** folder, char** name) {
 #endif
     if (dir) {
         for (leaf = dir + strlen(dir); leaf > dir && leaf[-1] != '/' && leaf[-1] != '\\'; --leaf) continue;
-#ifdef _WIN32
-        program = snx_path_format("%s/%s.exe", dir, own);
-#else
-        program = snx_path_format("%s/%s", dir, own);
-#endif
-        data = snx_path_format("%s/%s_data", dir, own);
-        found = *own && !strcmp(leaf, own) && snx_is_file(program) && snx_is_dir(data);
+        found = *own && !strcmp(leaf, own) &&
+                !snx_path_format(program, sizeof program, "%s/%s" PROGRAM_SUFFIX, dir, own) && snx_is_file(program) &&
+                !snx_path_format(data, sizeof data, "%s/%s_data", dir, own) && snx_is_dir(data);
     }
     if (found && folder) {
         *folder = dir;
@@ -177,8 +179,6 @@ static int prepared_game(const char* input, char** folder, char** name) {
     free(path);
     free(dir);
     free(own);
-    free(program);
-    free(data);
     return found;
 }
 /* an add-on the recompile made, named by its program in its game's folder (recompiled/<id>/<id>_<add-on's id>, .exe on
@@ -329,7 +329,8 @@ static int ensure_romfs(const char** command, const char* folder, const char* na
     char* extracting = snx_format("%s.extracting", base);
     unsigned char* text;
     size_t size;
-    int rc = 0;
+    int rc = !source; /* its path did not fit, said */
+    if (rc) goto done;
     if (!extract) { /* read in place: what an extraction left, here or in tmpfs, taken away */
         rc = drop_extraction(data, source, recorded, npdm, marker = snx_format("%s.tmpfs", base));
         goto done;
@@ -479,25 +480,15 @@ static int check_addon(const char* folder, const char* name, const char* entry) 
 static char* game_program(const char* folder, const char* name) {
     size_t count, i;
     SnxAddon* list = checked_addons(folder, name, &count);
-    char* program = NULL;
-    for (i = 0; i < count && !program; i++)
-        if (snx_addon_kind(game_id(name), list[i].id) == SNX_ADDON_UPDATE) {
-#ifdef _WIN32
-            program = snx_path_format("%s/%s_%s.exe", folder, name, list[i].entry);
-#else
-            program = snx_path_format("%s/%s_%s", folder, name, list[i].entry);
-#endif
-            if (!snx_is_file(program)) {
-                free(program);
-                program = NULL;
-            }
-        }
+    char program[SNX_PATH_SIZE];
+    int found = 0;
+    for (i = 0; i < count && !found; i++)
+        found = snx_addon_kind(game_id(name), list[i].id) == SNX_ADDON_UPDATE &&
+                !snx_path_format(program, sizeof program, "%s/%s_%s" PROGRAM_SUFFIX, folder, name, list[i].entry) &&
+                snx_is_file(program);
     free(list);
-#ifdef _WIN32
-    return program ? program : snx_path_format("%s/%s.exe", folder, name);
-#else
-    return program ? program : snx_path_format("%s/%s", folder, name);
-#endif
+    if (!found && snx_path_format(program, sizeof program, "%s/%s" PROGRAM_SUFFIX, folder, name)) return NULL;
+    return snx_strdup(program);
 }
 /* The game's checked DLCs readied as ensure_addon readies one, each from the dump its own .ini names; one whose dump
    is not there is left to the runtime, which plays without it and says so. 0, or nonzero when one failed */
@@ -510,7 +501,10 @@ static int ensure_dlcs(const char** command, const char* folder, const char* nam
         if (snx_addon_kind(game_id(name), list[i].id) != SNX_ADDON_DLC) continue;
         own = snx_format("%s_%s", name, list[i].entry);
         dump = snx_game_source(folder, own, NULL);
-        if (snx_is_file(dump) || !extract) rc = ensure_addon(command, folder, own, list[i].id, dump, NULL, extract);
+        if (!dump)
+            rc = 1; /* its path did not fit, said */
+        else if (snx_is_file(dump) || !extract)
+            rc = ensure_addon(command, folder, own, list[i].id, dump, NULL, extract);
         free(own);
         free(dump);
     }
@@ -524,13 +518,13 @@ static int drop_dlc_program(const char* folder, const char* name) {
     size_t i;
     int rc = 0;
     for (i = 0; !rc && i < sizeof parts / sizeof *parts; ++i) {
-        char* part = snx_path_format("%s/%s%s", folder, name, parts[i]);
+        char part[SNX_PATH_SIZE];
+        if (snx_path_format(part, sizeof part, "%s/%s%s", folder, name, parts[i])) return 1;
         if (snx_is_file(part)) {
             printf("Removing %s: a DLC plays with its game now, checked in its list of updates and DLCs\n", part);
             rc = snx_remove_tree(part);
             if (rc) snx_error("cannot remove %s", part);
         }
-        free(part);
     }
     return rc;
 }
@@ -613,8 +607,8 @@ static int play_dump_at(const char* input, const SnxPaths* paths, unsigned flags
         snx_title_text(title, of);
         folder = game_folder(outdir, paths->repo, of);
         program = game_program(folder, of);
-        rc = play_dump(program, paths, flags, NULL, NULL, opt, recompiling, recompile, settings, setting, game_argc,
-                       game_argv, NULL, 0);
+        rc = !program || play_dump(program, paths, flags, NULL, NULL, opt, recompiling, recompile, settings, setting,
+                                   game_argc, game_argv, NULL, 0);
         free(program);
         goto done;
     }
@@ -797,14 +791,14 @@ addon:
             free(data);
             if (!rc && !(flags & (SNX_RECOMP | PLAY_PREPARE))) {
                 program = game_program(folder, of);
-                rc = play_dump(program, paths, flags, NULL, NULL, opt, recompiling, recompile, settings, setting,
-                               game_argc, game_argv, NULL, 0);
+                rc = !program || play_dump(program, paths, flags, NULL, NULL, opt, recompiling, recompile, settings,
+                                           setting, game_argc, game_argv, NULL, 0);
                 free(program);
             }
             goto done;
         } else {
             game_dump = snx_game_source(folder, of, NULL);
-            if (!snx_is_file(game_dump)) {
+            if (game_dump && !snx_is_file(game_dump)) {
                 free(game_dump);
                 game_dump = NULL;
             }

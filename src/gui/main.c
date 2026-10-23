@@ -7757,7 +7757,7 @@ static void left_games(App* app, const char* folder) {
     size_t count = 0, i, n;
     if (!folder || snx_list_dir(folder, &names, &count)) return;
     for (i = 0; i < count; ++i) {
-        char *data, *npdm, *name, *old, *now, id[17];
+        char *data, *npdm, *name, *old, now[SNX_PATH_SIZE], id[17];
         unsigned char* bytes;
         size_t size = 0;
         n = strlen(names[i]);
@@ -7767,12 +7767,12 @@ static void left_games(App* app, const char* folder) {
         npdm = data ? snx_path_join(data, "exefs/main.npdm") : NULL;
         bytes = npdm && snx_is_file(npdm) ? (unsigned char*)snx_read_file(npdm, &size) : NULL;
         old = name ? snx_path_join(folder, name) : NULL;
-        now = name ? snx_path_format("%s/%s/", folder, snx_title_text(snx_npdm_title(bytes, size), id) ? id : name)
-                   : NULL;
-        if (old && now && data && snx_is_dir(data)) left_line(app, old, now, true);
+        if (old && data && snx_is_dir(data) &&
+            !snx_path_format(now, sizeof now, "%s/%s/", folder,
+                             snx_title_text(snx_npdm_title(bytes, size), id) ? id : name))
+            left_line(app, old, now, true);
         free(bytes);
         free(npdm);
-        free(now);
         free(old);
         free(name);
         free(data);
@@ -7900,12 +7900,13 @@ static void left_behind(App* app) {
     old = NULL;
     /* a portable copy's games/ beside the program, which a .scarletnx/ there holds now */
     if (app->drivers && app->data_dir) {
+        char portable[SNX_PATH_SIZE];
         old = snx_path_join(app->drivers, "games");
-        now = snx_path_format("%s/" SNX_PORTABLE_DIR "/recompiled", app->drivers);
-        if (old && now && app->games_dir && strcmp(old, app->games_dir)) left_line(app, old, now, snx_is_dir(old));
+        if (old && app->games_dir && strcmp(old, app->games_dir) &&
+            !snx_path_format(portable, sizeof portable, "%s/" SNX_PORTABLE_DIR "/recompiled", app->drivers))
+            left_line(app, old, portable, snx_is_dir(old));
     }
     free(old);
-    free(now);
     /* the checkout a build tree's menu used as its data folder */
     for (i = 0; app->checkout && app->data_dir && i < SNX_CHECKOUT_FILES; ++i) {
         old = snx_path_join(app->checkout, snx_checkout_files[i]);

@@ -199,9 +199,9 @@ int snx_setup_first_saves(const char* games) {
     if (!games || snx_list_dir(games, &names, &count)) return 0;
     snx_users_uid_text(first, text);
     for (i = 0; i < count; ++i) {
-        char* save = snx_path_format("%s/%s/%s_data/save/user.%s", games, names[i], names[i], text);
-        found += save && snx_is_dir(save);
-        free(save);
+        char save[SNX_PATH_SIZE];
+        found += !snx_path_format(save, sizeof save, "%s/%s/%s_data/save/user.%s", games, names[i], names[i], text) &&
+                 snx_is_dir(save);
     }
     snx_free_strings(names, count);
     return found;
