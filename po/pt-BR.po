@@ -350,6 +350,14 @@ msgid "Extractions"
 msgstr "Extrações"
 
 #: src/gui/main.c
+msgid "Logs"
+msgstr "Logs"
+
+#: src/gui/main.c
+msgid "Caches"
+msgstr "Caches"
+
+#: src/gui/main.c
 #, c-format
 msgid "Not kept for the next start: %s could not be written"
 msgstr "Não guardado para a próxima vez: não foi possível gravar %s"
@@ -1055,6 +1063,22 @@ msgid "Each dump's extraction"
 msgstr "A extração de cada dump"
 
 #: src/gui/main.c
+msgid "The games' logs and threads.txt, and the recent games"
+msgstr "Os logs e o threads.txt dos jogos, e os jogos recentes"
+
+#: src/gui/main.c
+msgid "The recompile's unit cache, the shader caches and the dumps' icons; Extractions' default"
+msgstr "O cache de unidades da recompilação, os caches de shader e os ícones dos dumps; o padrão de Extrações"
+
+#: src/gui/main.c
+msgid "app.ini, which names the other folders, and each game's .ini: XDG_CONFIG_HOME moves it"
+msgstr "app.ini, que indica as outras pastas, e o .ini de cada jogo: XDG_CONFIG_HOME a muda de lugar"
+
+#: src/gui/main.c
+msgid "app.ini, which names the other folders, and each game's .ini: a portable copy (.scarletnx beside the program) keeps its own"
+msgstr "app.ini, que indica as outras pastas, e o .ini de cada jogo: uma cópia portátil (.scarletnx ao lado do programa) tem a sua"
+
+#: src/gui/main.c
 msgid "Tap: pick another. The last row: all back to the defaults"
 msgstr "Toque: escolher outra. A última linha: tudo de volta ao padrão"
 
@@ -1069,6 +1093,10 @@ msgstr "fora do app"
 #: src/gui/main.c
 msgid "picked"
 msgstr "escolhida"
+
+#: src/gui/main.c
+msgid "shown only"
+msgstr "só mostrada"
 
 #: src/gui/main.c
 msgid "default"
@@ -1092,6 +1120,11 @@ msgstr "Pastas: %s"
 #, c-format
 msgid "Used, not kept for the next start: %s could not be written"
 msgstr "Em uso, não guardado para a próxima vez: não foi possível gravar %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Logs and Caches not changed: %s, which the runs read them from, could not be written"
+msgstr "Logs e Caches não mudaram: não foi possível gravar %s, de onde as execuções os leem"
 
 #: src/gui/main.c
 #, c-format
@@ -1223,8 +1256,8 @@ msgid "Paste one local folder's path"
 msgstr "Cole o caminho de uma pasta local"
 
 #: src/gui/main.c
-msgid "Data, Extractions and the recompiled library's Main"
-msgstr "Dados, Extrações e a Principal da biblioteca de recompilados"
+msgid "Data, Logs, Caches, Extractions and the recompiled library's Main"
+msgstr "Dados, Logs, Caches, Extrações e a Principal da biblioteca de recompilados"
 
 #: src/gui/main.c
 msgid "For the next runs. [default]: as the game's .ini says"
@@ -2158,8 +2191,8 @@ msgid "%s%s %s, made when needed"
 msgstr "%s%s %s, criada quando precisar"
 
 #: src/gui/main.c
-msgid "Data, Recompiled and Extractions are there"
-msgstr "Dados, Recompilados e Extrações estão lá"
+msgid "Data, Recompiled, Extractions, Logs and Caches are there"
+msgstr "Dados, Recompilados, Extrações, Logs e Caches estão lá"
 
 #: src/gui/main.c
 #, c-format

@@ -541,6 +541,14 @@ msgid "Extractions"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Logs"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Caches"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Auto"
 msgstr ""
 
@@ -1312,6 +1320,22 @@ msgid "Each dump's extraction"
 msgstr ""
 
 #: src/gui/main.c
+msgid "The games' logs and threads.txt, and the recent games"
+msgstr ""
+
+#: src/gui/main.c
+msgid "The recompile's unit cache, the shader caches and the dumps' icons; Extractions' default"
+msgstr ""
+
+#: src/gui/main.c
+msgid "app.ini, which names the other folders, and each game's .ini: XDG_CONFIG_HOME moves it"
+msgstr ""
+
+#: src/gui/main.c
+msgid "app.ini, which names the other folders, and each game's .ini: a portable copy (.scarletnx beside the program) keeps its own"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Tap: pick another. The last row: all back to the defaults"
 msgstr ""
 
@@ -1369,6 +1393,10 @@ msgstr ""
 msgid "%s, %s free. %s"
 msgstr ""
 
+#: src/gui/main.c
+msgid "shown only"
+msgstr ""
+
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
 #, snx-key
@@ -1389,6 +1417,11 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "All back to the defaults"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Logs and Caches not changed: %s, which the runs read them from, could not be written"
 msgstr ""
 
 #: src/gui/main.c
@@ -1583,7 +1616,7 @@ msgid "Each library's Extras are listed after its Main"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Data, Extractions and the recompiled library's Main"
+msgid "Data, Logs, Caches, Extractions and the recompiled library's Main"
 msgstr ""
 
 #: src/gui/main.c
@@ -2576,7 +2609,7 @@ msgid "%s%s %s, made when needed"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Data, Recompiled and Extractions are there"
+msgid "Data, Recompiled, Extractions, Logs and Caches are there"
 msgstr ""
 
 #: src/gui/main.c
