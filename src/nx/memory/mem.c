@@ -1079,19 +1079,14 @@ int mem_unmap_physical(u64 addr, u64 size) {
     mem_lock();
     for (i = blk_index_nl(addr); i < g_nblk && g_blk[i].addr < end; i++) {
         const MemBlock* b = &g_blk[i];
+        u64 lo = b->addr > addr ? b->addr : addr, hi = blk_end(b) < end ? blk_end(b) : end;
+        u64 off = b->pool - 1 + lo - b->addr; /* lo's offset in the pool, read only for a block in it */
         if (b->state == MS_FREE) continue;
-        if (b->state != MS_NORMAL || b->attr) {
+        /* GPU ownership promotes ordinary memory into the pool too. Only borrowed pages are aliases. */
+        if (b->state != MS_NORMAL || b->attr ||
+            (b->pool && (pool_mapped_elsewhere_nl(off, hi - lo, lo) || host_view_nl(off, hi - lo)))) {
             r = MEM_BADSTATE;
             break;
-        }
-        if (b->pool) {
-            u64 lo = b->addr > addr ? b->addr : addr, hi = blk_end(b) < end ? blk_end(b) : end;
-            u64 off = b->pool - 1 + lo - b->addr;
-            /* GPU ownership promotes ordinary memory into the pool too. Only borrowed pages are aliases. */
-            if (pool_mapped_elsewhere_nl(off, hi - lo, lo) || host_view_nl(off, hi - lo)) {
-                r = MEM_BADSTATE;
-                break;
-            }
         }
     }
     if (!r) {

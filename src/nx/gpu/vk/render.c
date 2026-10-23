@@ -1694,14 +1694,19 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
    (vk_cb_begun): a draw records only what differs, where every draw set about 30 states again (one game: 6,700 draws a
    frame). Every draw pipeline has these states dynamic, so binding another one keeps them. The clear path and the
    on-screen controls set or bind otherwise and forget them (vk_render_forget_state) */
+/* Maxwell's viewports, each with its own transform, clip and scissor (NVIDIA open-gpu-doc classes/3d/clb197.h):
+   SET_VIEWPORT_SCALE_X(j) at method 0x0A00 + 32 j (register 0x280 + 8 j) for j < 16, then
+   SET_VIEWPORT_CLIP_HORIZONTAL(j) at 0x0C00 + 16 j (0x300 + 4 j) and SET_SCISSOR_ENABLE(j) at 0x0E00 + 16 j
+   (0x380 + 4 j). A program that writes the viewport index selects among them */
+#define GUEST_VIEWPORTS 16
 static struct {
     u32 cb;
     VkPipeline pipe;
     VkPipelineLayout layout; /* the one sets were bound through: another may disturb them */
     VkDescriptorSet sets[5];
     u32 fb, cull, front, topo, restart, discard, bias_on, dt, dw, dcmp, dbounds, st;
-    VkViewport vp[16];
-    VkRect2D sc[16];
+    VkViewport vp[GUEST_VIEWPORTS];
+    VkRect2D sc[GUEST_VIEWPORTS];
     u32 viewports;
     float lw, bias[3], bc[4];
     u32 sfront[7], sback[7];
@@ -1727,6 +1732,7 @@ u64 g_vk_drawn, g_vk_skipped;
    height implements the same mapping without changing texture coordinates or guest render-target contents.
    Reference: NVIDIA open-gpu-doc/classes/3d/clb197.h. */
 VkViewport vk_render_viewport_at(const u32* r, u32 index) {
+    if (index >= GUEST_VIEWPORTS) fatal("vulkan: viewport %u of the %u the GPU has", index, GUEST_VIEWPORTS);
     float vt[6];
     memcpy(vt, &r[0x280 + index * 8], sizeof vt);
     float sx = vt[0], sy = vt[1], tx = vt[3], ty = vt[4], ax = sx < 0 ? -sx : sx, ay = sy < 0 ? -sy : sy;
@@ -2781,9 +2787,9 @@ retry:
         rec_CmdBindVertexBuffers2(cb, 0, k->nbind, vbuf, voff, NULL, g_vk.has_dynamic_stride ? pl->stride : NULL);
 
     VkViewport vp = vk_render_viewport(r);
-    u32 viewports = last->si.writes_viewport ? 16 : 1;
-    VkViewport viewport[16] = {{0}};
-    VkRect2D scissor[16] = {{{0}}};
+    u32 viewports = last->si.writes_viewport ? GUEST_VIEWPORTS : 1;
+    VkViewport viewport[GUEST_VIEWPORTS] = {{0}};
+    VkRect2D scissor[GUEST_VIEWPORTS] = {{{0}}};
     for (u32 i = 0; i < viewports; i++) {
         viewport[i] = vk_render_viewport_at(r, i);
         int area = viewport[i].width > 0 && viewport[i].height != 0;
