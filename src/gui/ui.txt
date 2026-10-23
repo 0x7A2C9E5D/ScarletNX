@@ -87,3 +87,122 @@
 		@[button]"OK" {}
 	}
 }
+# the frame of a screen: the head (tabs, title, user), the tips under it, the body and the foot (place_screen fills them
+# in); a slot is an area main.c draws in, a box lays slots out as a scene does. A column of margin at either side and
+# half a row of text between boxes, at 1x 8px both. Below 45 columns inside, the side box and the status go (they are
+# reached otherwise: Liz, 2026-10-22)
+[scene]Screen {
+	direction = column
+	padding = 1cols
+	gap = 8px
+	narrow_below = 45cols
+	# the tabs, the title after them (or under them where they do not fit) and the user, as tall as they lay out; off
+	# with none of them
+	[slot]Head {
+		measure = callback
+		shown = callback
+	}
+	# off in the setup, whose tips are the foot's
+	[slot]Tips {
+		height = 1rows + 4px
+		shown = callback
+	}
+	[box]Body {
+		direction = row
+		grow = 1
+		gap = 1cols
+		# the list two fifths, 20 columns at least
+		[slot]List {
+			grow = 2
+			min_width = 20cols
+		}
+		# off where a screen is one box, and with app.ini's side_box = off (F2); with side_box = on, below 45
+		# columns the screen is Wide's, the side box under the list
+		[box]Side {
+			direction = column
+			grow = 3
+			gap = 8px
+			shown = callback
+			narrow = hide
+			[slot]About {
+				grow = 1
+			}
+			# at most half the side box; off with the footer's style none
+			[slot]Status {
+				measure = callback
+				max_height = 50%
+				shown = callback
+			}
+		}
+	}
+	[box]Foot {
+		direction = row
+		gap = 1cols
+		# the setup's tips
+		[slot]Tips {
+			grow = 1
+			shown = callback
+		}
+		# as tall as the keys' sentences wrap to its width, as wide as the widest at least
+		[slot]Keys {
+			grow = 1
+			min_width = callback
+			measure = callback
+		}
+	}
+}
+# a wide list's, a run's output or the theme editor's keys: three fifths, the box beside it the rest, 24 columns at
+# least, under it where the screen is narrow
+[scene]Wide {
+	direction = column
+	padding = 1cols
+	gap = 8px
+	narrow_below = 45cols
+	[slot]Head {
+		measure = callback
+		shown = callback
+	}
+	[slot]Tips {
+		height = 1rows + 4px
+		shown = callback
+	}
+	[box]Body {
+		direction = row
+		grow = 1
+		gap = 1cols
+		narrow.direction = column
+		[slot]List {
+			grow = 3
+		}
+		# off with app.ini's side_box = off (F2)
+		[box]Side {
+			direction = column
+			grow = 2
+			min_width = 24cols
+			narrow.min_width = 0px
+			gap = 8px
+			shown = callback
+			[slot]About {
+				grow = 1
+			}
+			[slot]Status {
+				measure = callback
+				max_height = 50%
+				shown = callback
+			}
+		}
+	}
+	[box]Foot {
+		direction = row
+		gap = 1cols
+		[slot]Tips {
+			grow = 1
+			shown = callback
+		}
+		[slot]Keys {
+			grow = 1
+			min_width = callback
+			measure = callback
+		}
+	}
+}

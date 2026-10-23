@@ -2310,10 +2310,6 @@ msgid "a line under the head"
 msgstr "页头下方的一条线"
 
 #: src/gui/theme.c
-msgid "the title after the tabs, or on a row of its own under them"
-msgstr "标题位于标签页之后，或在其下方单独一行"
-
-#: src/gui/theme.c
 msgid "the title's letters, times the text's, 1 to 3"
 msgstr "标题文字的大小，为正文的倍数，1 到 3"
 
@@ -2358,16 +2354,16 @@ msgid "the boxes outlined or filled"
 msgstr "框为描边或填充"
 
 #: src/gui/theme.c
-msgid "fixed: the list two fifths of every screen, alone on a narrow one; adaptive: as wide as its entries"
-msgstr "fixed：列表占每个画面的五分之二，窄画面上单独显示；adaptive：与条目同宽"
-
-#: src/gui/theme.c
 msgid "a text too long for its box over its rows, or on one that slides"
 msgstr "文字超出框时分多行显示，或单行滚动"
 
 #: src/gui/theme.c
 msgid "[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"
 msgstr "[body] %s = %s 已无效：列表现在由 ui.txt 布局（请删除）"
+
+#: src/gui/theme.c
+msgid "[%s] %s = %s does nothing: ui.txt lays out the screens now (delete it)"
+msgstr "[%s] %s = %s 已无效：画面现在由 ui.txt 布局（请删除）"
 
 #: src/gui/theme.c
 msgid "a colour as #RRGGBB"
@@ -2442,10 +2438,6 @@ msgstr "提问框：default 为居中的框；yorha 在底部，选项在其右�
 #: src/gui/theme.c
 msgid "a faint grid on the page, in the dim colour"
 msgstr "页面上的淡网格，使用 dim 色"
-
-#: src/gui/theme.c
-msgid "in a box at the foot beside the keys, or on a row under the head"
-msgstr "在页脚按键旁的框中，或在页头下方一行"
 
 #: src/gui/theme.c
 msgid "in a box with a bar at its left, or on the page"
@@ -2905,6 +2897,15 @@ msgstr "theme.ini 中的 [body] gap 和 scroll"
 
 msgid "nothing: ui.txt lays out every list"
 msgstr "不再有作用：所有列表由 ui.txt 布局"
+
+msgid "A theme's screens"
+msgstr "主题的画面"
+
+msgid "[head] place, [tips] place and [body] sizing in its theme.ini"
+msgstr "theme.ini 中的 [head] place、[tips] place 和 [body] sizing"
+
+msgid "nothing: ui.txt lays out every screen"
+msgstr "不再有作用：所有画面由 ui.txt 布局"
 
 #: src/common/utilities/setup.c
 msgid "text_size = in app.ini"

@@ -575,9 +575,38 @@ static void test_places(App* app) {
     shows(app, "Install type", rgb(app->theme.warning));
     shows(app, "2/5", rgb(app->theme.soft));
     app->theme = *gui_theme_builtin("yorha");
+    /* the foot: the tips beside the keys, halves; where half is under the keys' widest sentence, which a row cannot
+       break (the narrowest window, 800 wide, at 4x: the foot's letters 3x), the keys that wide and the tips what is
+       left */
+    render(app);
+    setup_boxes(app, &b);
+    assert(b.place.tips.h && b.place.tips.y == b.place.keys.y && SDL_abs(b.place.tips.w - b.place.keys.w) <= 1);
+    { /* a row of the foot's letters for the keys, two with [tips] wrap: the tips' rows */
+        int fs = foot_scale(app);
+        assert(b.place.keys.h == 16 * fs + 4 * fs);
+        app->theme.tips_wrap = true;
+        render(app);
+        setup_boxes(app, &b);
+        assert(b.place.keys.h == 2 * 16 * fs + 4 * fs && b.place.tips.h == b.place.keys.h);
+        app->theme.tips_wrap = false;
+    }
+    assert(SDL_SetWindowSize(app->window, 800, 1024));
+    SDL_SyncWindow(app->window);
+    app->menu.text_size = GUI_TEXT_MAX;
+    render(app);
+    setup_boxes(app, &b);
+    assert(app->scale == 4);
+    {
+        int least = frame_keys_least(app);
+        assert(least > (b.place.tips.w + b.place.keys.w) / 2 && b.place.keys.w == least && b.place.tips.w > 0 &&
+               b.place.tips.w + cell_w(app) + least == b.place.keys.x + b.place.keys.w - b.place.tips.x);
+    }
+    app->menu.text_size = 0;
+    assert(SDL_SetWindowSize(app->window, width, height));
+    SDL_SyncWindow(app->window);
     setup_finish(app);
     free(file);
-    puts("PASS the question where options-dialog puts it");
+    puts("PASS the question where options-dialog puts it, the foot's keys their widest sentence wide");
 }
 
 /* Skip, on the first page alone, after its choices: every page left taken as its defaults have it (the notices read

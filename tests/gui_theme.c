@@ -27,7 +27,6 @@ static const char* const format_keys[] = {"theme/format",
                                           "colors/added",
                                           "head/style",
                                           "head/rule",
-                                          "head/place",
                                           "head/size",
                                           "head/shadow",
                                           "head/picture",
@@ -39,12 +38,10 @@ static const char* const format_keys[] = {"theme/format",
                                           "body/marker",
                                           "body/focus",
                                           "body/panels",
-                                          "body/sizing",
                                           "body/text",
                                           "body/cursor",
                                           "body/options-dialog",
                                           "backdrop/grid",
-                                          "tips/place",
                                           "tips/box",
                                           "tips/wrap",
                                           "footer/style",
@@ -236,15 +233,13 @@ int main(void) {
     assert(def->head == GUI_STYLE_PLAIN && !def->focus_bar && !strcmp(def->marker, "- ") &&
            !strcmp(def->title[GUI_SCREEN_MENU], yorha->title[GUI_SCREEN_MENU]));
     assert(yorha->head == GUI_STYLE_PLAIN && yorha->focus_bar && yorha->title[GUI_SCREEN_COMPILING][0]);
-    /* the boxes: the default's framed, YoRHa's filled with a cursor in the margin; the title in the row of tabs in
-       both, YoRHa's twice as big; the tips on a row of their own under the head in both; the grid, the tips' and the
-       keys' boxes and the foot on a band YoRHa's alone */
+    /* the boxes: the default's framed, YoRHa's filled with a cursor in the margin; YoRHa's title twice as big; the
+       grid, the tips' and the keys' boxes and the foot on a band YoRHa's alone */
     assert(def->panels == GUI_PANELS_OUTLINE && !def->cursor[0] && yorha->panels == GUI_PANELS_FILL &&
            !strcmp(yorha->cursor, "\xe2\x96\xba "));
-    assert(def->head_place == GUI_HEAD_TABS && yorha->head_place == GUI_HEAD_TABS);
     assert(def->title_size == 1 && !def->title_shadow && yorha->title_size == 2 && !yorha->title_shadow);
     assert(def->picture == GUI_PICTURE_ROUND && yorha->picture == GUI_PICTURE_SQUARE);
-    assert(!def->grid && yorha->grid && def->tips_place == GUI_TIPS_TOP && yorha->tips_place == GUI_TIPS_TOP);
+    assert(!def->grid && yorha->grid);
     assert(!def->tips_box && !def->footer_box && yorha->tips_box && yorha->footer_box);
     assert(def->footer == GUI_STYLE_PLAIN && yorha->footer == GUI_STYLE_BAR && yorha->head_rule && !def->head_rule);
     assert(!gui_theme_key("body", "layout") && !gui_theme_key("head", "tabs") && !gui_theme_key("frame", "edges"));
@@ -341,20 +336,22 @@ int main(void) {
     parse(&theme, "[prompt]\nalign = left\n");
     assert(theme.prompt.align == GUI_ALIGN_LEFT);
 
-    /* the boxes: a file that names none of their keys takes its base's; the title's place, the tips', the foot's
-       boxes and its style; an unknown word keeps the base's */
+    /* the boxes: a file that names none of their keys takes its base's; the tips' and the foot's boxes and its
+       style; an unknown word keeps the base's. The title's place, the tips' and the list's sizing do nothing:
+       ui.txt's Screen lays the screens out (docs/DEPRECATIONS.md), each said with its value */
     parse(&theme, "[theme]\nformat = 1\nbase = default\n[colors]\npage = #102030\n");
-    assert(theme.panels == GUI_PANELS_OUTLINE && theme.head_place == GUI_HEAD_TABS &&
-           rgb_is(theme.page, 0x10, 0x20, 0x30));
+    assert(theme.panels == GUI_PANELS_OUTLINE && rgb_is(theme.page, 0x10, 0x20, 0x30));
     parse(&theme, "[theme]\nbase = yorha\n[body]\ncursor = \"> \"\n");
     assert(theme.panels == GUI_PANELS_FILL && !strcmp(theme.cursor, "> "));
-    parse(&theme, "[theme]\nbase = yorha\n[body]\npanels = outline\n[head]\nplace = below\n[tips]\nplace = bottom\n"
-                  "box = false\n[footer]\nbox = false\nstyle = none\n");
-    assert(theme.panels == GUI_PANELS_OUTLINE && theme.head_place == GUI_HEAD_BELOW &&
-           theme.tips_place == GUI_TIPS_BOTTOM);
+    parse(&theme, "[theme]\nbase = yorha\n[body]\npanels = outline\nsizing = adaptive\n[head]\nplace = below\n[tips]\n"
+                  "place = bottom\nbox = false\n[footer]\nbox = false\nstyle = none\n");
+    assert(theme.panels == GUI_PANELS_OUTLINE);
+    assert(strstr(said, "[head] place = below does nothing: ui.txt lays out the screens now (delete it)"));
+    assert(strstr(said, "[tips] place = bottom does nothing: ui.txt lays out the screens now (delete it)"));
+    assert(strstr(said, "[body] sizing = adaptive does nothing: ui.txt lays out the screens now (delete it)"));
     assert(!theme.tips_box && !theme.footer_box && theme.footer == GUI_STYLE_NONE);
     parse(&theme, "[body]\npanels = round\n[head]\nplace = left\npicture = oval\n[tips]\nplace = side\n");
-    assert(theme.panels == def->panels && theme.head_place == def->head_place && theme.tips_place == def->tips_place);
+    assert(theme.panels == def->panels && strstr(said, "[head] place = left does nothing"));
     assert(theme.picture == def->picture);
     parse(&theme, "[theme]\nbase = yorha\n[head]\npicture = none\n");
     assert(theme.picture == GUI_PICTURE_NONE);

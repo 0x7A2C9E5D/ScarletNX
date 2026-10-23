@@ -380,7 +380,7 @@ and to the run, which is **compiling** until the runner prints its `ScarletNX - 
 
 The screens are boxes side by side, nothing over another, the default framing them in thin lines and YoRHa
 filling them. At the top the tabs, Menu, Games and Settings, and the screen's title after them against the
-right (`[head] place = tabs`) or on a row of its own under them (`below`), and at its right the user games play as
+right, and at its right the user games play as
 (Settings > User, which lists them under **Plays as**, Left/Right picking, and renames each: Enter types its
 nickname, the rule [USAGE](USAGE.md#users) gives checked, then written to `users.ini`): a box framed as the others are
 holding their nickname and their picture, `users/<uid>.jpg` or Wimsy
@@ -396,10 +396,9 @@ the Settings leaves out what more it must. Under them the list, each entry a box
 of its own, the focused one framed in the focus colour or inverted, with the theme's cursor in the margin;
 beside it a box with what the focus is about (a game's path whole, Games' folders, the keys in use, the last
 run's output), never what the tips already say (what the row does, a game's kind), and under that one the Status
-box. The tips have a row of their own under the head (`[tips] place =
-top`, both built-ins'), or go to the foot under the list's column with `bottom`, where they take one row, a long one
-sliding, or wrap over its rows with `[tips] wrap`, the last sliding what does not fit. At the foot the screen's keys, the whole width, or under the side
-box's column beside the tips, in letters a size under the rest's; the tips and the keys each in a box with a bar down
+box. The tips have a row of their own under the head; the setup's go to the foot beside its keys, where they take one row,
+a long one sliding, or wrap over its rows with `[tips] wrap`, the last sliding what does not fit. At the foot the
+screen's keys, the whole width (the setup's beside its tips), in letters a size under the rest's; the tips and the keys each in a box with a bar down
 its left (`[tips] box`, `[footer] box`) or on the page. Games lists Add a folder, the recent games and a
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
@@ -411,9 +410,12 @@ not found, the log not saved) shows whole in a box over the screen until OK, onc
 note go on saying it after. F5, or the foot's (Refresh on a phone), looks at the disk again at once rather than at the next look:
 Games lists its folders again, Folders says which of its folders are there, the menu counts the disk
 again, and the box of what an older version left looks again. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
-every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the
-column is as wide as its entries and the side box goes under the list. Every list is laid out by `src/gui/ui.txt`
-(a theme's `[body] gap` and `[body] scroll` are deprecated, said as it loads: [DEPRECATIONS](DEPRECATIONS.md)): the menu's, Games',
+every screen, 20 columns at the least, and a window under 45 columns shows the list alone, or with app.ini's
+`side_box = on` (F2) the side box under it; a run's output and the theme editor's keys take three fifths, the side box
+24 columns at the least, under them on a window under 45 columns. The screens are laid out by `src/gui/ui.txt`'s
+Screen and Wide (a theme's `[head] place`, `[tips] place` and `[body] sizing` are deprecated, said as it loads:
+[DEPRECATIONS](DEPRECATIONS.md)), and so is every list
+(a theme's `[body] gap` and `[body] scroll` are deprecated too): the menu's, Games',
 the Settings' two, the theme editor's, the choices of a question, of UI scale's box, of the Recompile box and of the
 setup's pages, the setup's Appearance rows, the box of users, that of a game's updates, DLCs and mods, and the OK of
 a box of files. Their rows are 2 pixels apart times the text's size (on Android 40 pixels high, about Android's 48 dp
@@ -497,8 +499,6 @@ added = #6A9A50
 ; plain | bar: the tabs and the title on a band of ink; rule: a line under the head
 style = bar
 rule = true
-; the title after the tabs (tabs) or on a row of its own under them (below)
-place = tabs
 ; the title's letters, times the text's (1 to 3), and a shadow under them in the dim colour
 size = 2
 shadow = true
@@ -513,8 +513,6 @@ marker = "> "
 focus = bar
 ; the boxes outline (framed) or fill (filled)
 panels = fill
-; fixed: the list two fifths of every screen, alone on a narrow one | adaptive: as wide as its entries
-sizing = fixed
 ; a text too long for its box: wrap (over its rows) | slide (on one row)
 text = wrap
 ; in the list's margin, beside the focused box
@@ -526,8 +524,6 @@ options-dialog = yorha
 ; a faint grid on the page behind the boxes, in the dim colour
 grid = true
 [tips]
-; what the focus is about: bottom (a box at the foot beside the keys) | top (a row under the head)
-place = top
 ; in a box with a bar at its left, or on the page
 box = false
 ; over the foot's rows, or on one row that slides
@@ -615,7 +611,7 @@ ErET needs `[theme] layout`, so the built-in files carry one: `debug` and `menu`
   keeps its meaning, and each value reads to the same theme.
 - A new key, or a new word for a key, keeps N: an older GUI leaves what it does not know, and
   a file that does not name it takes its base's value, so an older theme gets the new look of
-  the built-in it starts from (the title's place, the tips, the foot's boxes).
+  the built-in it starts from (the title's size, the tips' box, the foot's boxes).
 - A key a newer one replaces is deprecated, never given a new meaning: it still reads as the new keys say, and the
   GUI never writes it again. The format has none so far.
 - N goes up only when a key that exists has to mean something else. The GUI then reads the
@@ -690,7 +686,8 @@ accounting. See [BUILD](BUILD.md) for SDL3's desktop dependencies.
 The menu's list, Games', the Settings', the setup's Appearance, the choices of the questions and the setup, the
 boxes of users and of a game's add-ons, and the OK of a box of files are scenes of `src/gui/ui.txt`, which `tools/uigen` turns into `gui/ui.h` and
 `gui/ui.c` as the GUI builds (the format is in `tools/uigen/uigen.c`'s first comment): their layout computed at build
-time, the drawing and callbacks main.c's. `uigen` tests the generator's output and refusals, `gui_ui` runs what it
+time, the drawing and callbacks main.c's. The screens' boxes (the head, the tips, the list, the side box, the Status
+box and the foot) are its frames Screen and Wide, laid out as they are drawn, from what main.c measures. `uigen` tests the generator's output and refusals, `gui_ui` runs what it
 makes of `tests/ui_test.txt`.
 
 The tests cover menu transitions, bounded console scrolling, split UTF-8/ANSI

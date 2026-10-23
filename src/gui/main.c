@@ -153,6 +153,18 @@ typedef struct {
     char theme[64], text[16], language[64], animations[16], side[16], places[48], moves[32];
     char folder[GUI_FOLDER_ROWS][64];
 } GuiAppForm;
+/* the head's measures: the row of tabs (its height and the tabs' width), the title's height and width (0: none), the
+   user's box (0: none), a cell of the text */
+typedef struct {
+    int tabs, tabs_w, title, title_w, badge, badge_w, cw, ch;
+} GuiHead;
+/* the screen place_screen lays out, for the frame's callbacks (ui.txt's Screen and Wide): its head, its keys, whether
+   it has the side box and the status box, and its tips in the foot beside the keys rather than on a row of their own */
+typedef struct {
+    GuiHead head;
+    const char* keys;
+    bool side, status, tips_foot;
+} GuiFrame;
 typedef struct App {
     SDL_Window* window;
     SDL_Renderer* renderer;
@@ -310,6 +322,7 @@ typedef struct App {
     char group_name[GUI_GROUPS_MAX][64]; /* each one's key: a copy, the list it is from being freed apart */
     char group_about[GUI_GROUPS_MAX][128];
     GuiAppForm app_form;
+    GuiFrame frame; /* what place_screen measured of the screen it lays out */
     GuiUsersForm users_form;
     GuiThemeKey users_keys[SNX_USERS_MAX + 1]; /* Plays as, then a row a user */
     char users_label[SNX_USERS_MAX][32];
@@ -1077,9 +1090,6 @@ static void recent_open(App* app, char* file) {
     gui_recent_load(&app->recent, file);
     app->browser.head = games_head(app);
 }
-static void menu_label(const App* app, int item, char* label, size_t size) {
-    snprintf(label, size, "%s%s", app->theme.marker, snx_tr(entry_text(item)));
-}
 /* still the menu, fading out, while a run starts */
 static int entering(const App* app) {
     return app->entering_ms && now_ms(app) < app->entering_ms + app->theme.fade_out_ms;
@@ -1097,10 +1107,11 @@ static int pick_auto_scale(float display_scale, int height, int rows) {
     while (scale > 1 && height / (16 * scale) < rows) --scale;
     return scale;
 }
-/* what a screen has besides its title, list and foot: the status box (unless the footer's style is none), the tabs
-   (a run has none) */
-enum { GUI_SHOWS_STATUS = 1, GUI_SHOWS_TABS = 2 };
-static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols, int shows);
+/* what a screen has besides its title and foot: the status box (unless the footer's style is none), the tabs (a run
+   has none), a list with the side box beside it (one box without), a wide list (a run's output, the theme editor's
+   keys) laid out as ui.txt's Wide, not its Screen, and the tips in the foot beside the keys, as the setup's are */
+enum { GUI_SHOWS_STATUS = 1, GUI_SHOWS_TABS = 2, GUI_SHOWS_WIDE = 4, GUI_SHOWS_SIDE = 8, GUI_SHOWS_FOOT_TIPS = 16 };
+static void place_screen(App* app, GuiPlace* p, const char* keys, int shows);
 static const char* shown_keys(const App* app, char* out, size_t size);
 static void aot_status_update(App* app);
 /* a screen's keys, Tab's after them */
@@ -1127,14 +1138,8 @@ static const char* screen_keys(const App* app, const char* keys, char* out, size
 #endif
 }
 static void games_place(App* app, GuiPlace* p) {
-    size_t i;
-    int longest = gui_text_cols(snx_tr("Recent games"));
     char keys[256];
-    for (i = 0; i < app->games.count; ++i) longest = SDL_max(longest, gui_text_cols(app->games.shown[i]));
-    for (i = 0; i < (size_t)recent_shown(app); ++i) longest = SDL_max(longest, gui_text_cols(app->recent.game[i].name));
-    place_screen(app, p, shown_keys(app, keys, sizeof keys),
-                 longest + 2 + gui_text_cols(app->theme.marker) + gui_text_cols(app->theme.cursor),
-                 GUI_SHOWS_STATUS | GUI_SHOWS_TABS);
+    place_screen(app, p, shown_keys(app, keys, sizeof keys), GUI_SHOWS_STATUS | GUI_SHOWS_TABS | GUI_SHOWS_SIDE);
 }
 /* the list's entries before the page's games: "Recent games" and the recent rows, none without recent games */
 static int games_lead(const App* app) { return app->browser.head > 1 ? (int)app->browser.head : 0; }
@@ -1159,9 +1164,7 @@ static void run_console(App* app, const GuiPlace* p, int* cols, int* rows) {
 /* ---- a run of the console layout: the driver's output in the wide box, beside it what runs, its file and how it
    ended, the status under them; the file in the tips, the ESC line where the keys go, as the theme's prompt frames it */
 static void run_place(App* app, GuiPlace* p) {
-    int width, height;
-    area(app, &width, &height);
-    place_screen(app, p, snx_tr(SAY_ABORT), width / cell_w(app), GUI_SHOWS_STATUS); /* its longest ESC line */
+    place_screen(app, p, snx_tr(SAY_ABORT), GUI_SHOWS_STATUS | GUI_SHOWS_WIDE | GUI_SHOWS_SIDE);
 }
 static void layout(App* app) {
     int run;
@@ -3170,16 +3173,16 @@ static const char* title_tail(const char* title, int n) {
 static int title_px(const App* app, const char* title, int size) {
     return gui_text_cols(title) * size * cell_w(app) + (app->theme.title_shadow ? size * app->scale : 0);
 }
-/* the pixels a title of letters size times the text's has in the head, as gui_place gives them: beside the tabs and
-   the user, or with the user on a row under the tabs */
+/* the pixels a title of letters size times the text's has in the head, as head_place gives them: beside the tabs and
+   the user */
 static int head_room(const App* app, int size) {
     GuiRect none = {0, 0, 0, 0}, last = tab_rect(app, none, tab_count(app) - 1);
     int width, height, tabs = cell_h(app) + 4 * app->scale, title = size * cell_h(app), badge;
     if (app->theme.title_shadow) title += size * app->scale;
     area(app, &width, &height);
-    badge = user_width(app, app->theme.head_place == GUI_HEAD_TABS ? SDL_max(title, tabs) : title);
+    badge = user_width(app, SDL_max(title, tabs));
     width -= 2 * cell_w(app) + (badge ? badge + 2 * cell_w(app) : 0);
-    return app->theme.head_place == GUI_HEAD_TABS ? width - (last.x + last.w) - 2 * cell_w(app) : width;
+    return width - (last.x + last.w) - 2 * cell_w(app);
 }
 /* The head's title over the tabs' screens and its letters' size: a window too narrow for the main screens' titles
    (the menu's, Games', the keys' and the Settings') whole at the theme's size takes a size smaller, down to the
@@ -3241,56 +3244,176 @@ static void chrome(App* app, const GuiPlace* p) {
         big_text(app, p->title, p->title.x + size * s, p->title.y + size * s, title, size, rgb(t->dim));
     big_text(app, p->title, p->title.x, p->title.y, title, size, rgb(band ? t->page : t->ink));
 }
-static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols, int shows) {
+/* the head laid out from x, y in width: the tabs at its left, the title after them against its right when both fit,
+   else under them; the user against the right of the title's row, two columns past it as the title is past the tabs,
+   or of the tabs' when there is no title; on a row of its own when it does not fit there. Its rectangles in out (NULL:
+   measured only); its height, half a row of text between its rows */
+static int head_place(const GuiHead* in, int x, int y0, int width, GuiPlace* out) {
+    int gap = in->ch / 2, y = y0, badge = in->badge && in->badge_w ? in->badge_w + 2 * in->cw : 0;
+    GuiRect tabs = {0, 0, 0, 0}, title = tabs, user = tabs;
+    if (in->title && in->tabs && in->tabs_w + 2 * in->cw + in->title_w + badge <= width) {
+        int row = SDL_max(in->tabs, in->title);
+        if (badge) row = SDL_max(row, in->badge);
+        tabs = gui_rect(x, y + row - in->tabs, in->tabs_w, in->tabs);
+        title = gui_rect(x + width - badge - in->title_w, y + row - in->title, in->title_w, in->title);
+        if (badge) user = gui_rect(x + width - in->badge_w, y + row - in->badge, in->badge_w, in->badge);
+        y += row + gap;
+    } else {
+        int beside = in->tabs && !in->title && in->tabs_w + badge <= width;
+        if (in->tabs) {
+            int row = beside && in->badge > in->tabs ? in->badge : in->tabs;
+            tabs = gui_rect(x, y + row - in->tabs, in->tabs_w, in->tabs);
+            if (beside && badge) user = gui_rect(x + width - in->badge_w, y + row - in->badge, in->badge_w, in->badge);
+            y += row + gap;
+        }
+        if (in->title) {
+            int room = badge && in->title_w + badge <= width, row = in->title;
+            if (room && in->badge > row) row = in->badge;
+            title = gui_rect(x, y + row - in->title, room ? width - badge : width, in->title);
+            if (room) user = gui_rect(x + width - in->badge_w, y + row - in->badge, in->badge_w, in->badge);
+            y += row + gap;
+        }
+        if (badge && !user.h && in->badge_w <= width) { /* too narrow beside either: its own row, or none */
+            user = gui_rect(x + width - in->badge_w, y, in->badge_w, in->badge);
+            y += in->badge + gap;
+        }
+    }
+    if (out) {
+        out->tabs = tabs;
+        out->title = title;
+        out->badge = user;
+    }
+    return y > y0 ? y - y0 - gap : 0;
+}
+/* The screen's boxes, laid out by ui.txt's Screen (a list and the side box with GUI_SHOWS_SIDE, else one box) or Wide
+   (GUI_SHOWS_WIDE: a run's output, the theme editor's keys): the head's measures and the keys first, which its
+   callbacks read */
+static void place_screen(App* app, GuiPlace* p, const char* keys, int shows) {
     const GuiTheme* t = &app->theme;
-    GuiPlaceIn in;
-    GuiRect none = {0, 0, 0, 0};
+    GuiFrame* f = &app->frame;
+    GuiRect none = {0, 0, 0, 0}, r[UI_SCREEN_ITEMS > UI_WIDE_ITEMS ? UI_SCREEN_ITEMS : UI_WIDE_ITEMS];
     int width, height, s = app->scale, size;
     char out[160];
     const char* title = head_title(app, shows & GUI_SHOWS_TABS, out, sizeof out, &size);
     area(app, &width, &height);
-    memset(&in, 0, sizeof in);
-    in.width = width;
-    in.height = height;
-    in.cw = cell_w(app);
-    in.ch = cell_h(app);
+    memset(f, 0, sizeof *f);
+    memset(p, 0, sizeof *p);
+    f->head.cw = cell_w(app);
+    f->head.ch = cell_h(app);
     if (shows & GUI_SHOWS_TABS) {
         GuiRect last = tab_rect(app, none, tab_count(app) - 1);
-        in.tabs = cell_h(app) + 4 * s;
-        in.tabs_w = last.x + last.w;
+        f->head.tabs = cell_h(app) + 4 * s;
+        f->head.tabs_w = last.x + last.w;
     }
     if (title[0]) {
         int shadow = t->title_shadow ? size * s : 0;
-        in.title = size * cell_h(app) + shadow;
-        in.title_w = gui_text_cols(title) * size * cell_w(app) + shadow;
-        in.title_beside = t->head_place == GUI_HEAD_TABS;
+        f->head.title = size * cell_h(app) + shadow;
+        f->head.title_w = gui_text_cols(title) * size * cell_w(app) + shadow;
     }
-    /* the user as high as the head's row: the title's, or the tabs' with none */
-    in.badge = in.title ? SDL_max(in.title, in.title_beside ? in.tabs : 0) : in.tabs;
-    in.badge_w = user_width(app, in.badge);
-    if (!in.badge_w) in.badge = 0;
-    if (t->tips_place == GUI_TIPS_TOP && !app->setup_on) in.tips = cell_h(app) + 4 * s; /* the setup's: the foot's */
-    in.list_cols = list_cols ? SDL_min(SDL_max(list_cols, 20), SDL_max(20, (width / cell_w(app) - 2) * 3 / 5)) : 0;
-    in.fixed = t->sizing == GUI_SIZING_FIXED && list_cols && list_cols < width / cell_w(app); /* a list, not a run */
-    in.side = app->side_box;
+    /* the user as high as the head's row: the title's and the tabs', or the tabs' with no title */
+    f->head.badge = f->head.title ? SDL_max(f->head.title, f->head.tabs) : f->head.tabs;
+    f->head.badge_w = user_width(app, f->head.badge);
+    if (!f->head.badge_w) f->head.badge = 0;
+    f->keys = keys;
+    f->side = (shows & GUI_SHOWS_SIDE) && app->side_box != GUI_SIDE_OFF;
+    f->status = (shows & GUI_SHOWS_STATUS) && (shows & GUI_SHOWS_SIDE) && t->footer != GUI_STYLE_NONE;
+    f->tips_foot = app->setup_on || (shows & GUI_SHOWS_FOOT_TIPS);
+    /* side_box = on keeps the side box where Screen leaves it out, under the list as Wide lays it narrow */
+    if ((shows & GUI_SHOWS_WIDE) || (f->side && app->side_box == GUI_SIDE_ON && UI_SCREEN_NARROW(width, s))) {
+        ui_wide_layout(app, gui_rect(0, 0, width, height), s, r);
+        p->head = r[UI_WIDE_HEAD];
+        p->tips = f->tips_foot ? r[UI_WIDE_FOOT_TIPS] : r[UI_WIDE_TIPS];
+        p->list = r[UI_WIDE_BODY_LIST];
+        p->side = r[UI_WIDE_BODY_SIDE_ABOUT];
+        p->status = r[UI_WIDE_BODY_SIDE_STATUS];
+        p->keys = r[UI_WIDE_FOOT_KEYS];
+    } else {
+        ui_screen_layout(app, gui_rect(0, 0, width, height), s, r);
+        p->head = r[UI_SCREEN_HEAD];
+        p->tips = f->tips_foot ? r[UI_SCREEN_FOOT_TIPS] : r[UI_SCREEN_TIPS];
+        p->list = r[UI_SCREEN_BODY_LIST];
+        p->side = r[UI_SCREEN_BODY_SIDE_ABOUT];
+        p->status = r[UI_SCREEN_BODY_SIDE_STATUS];
+        p->keys = r[UI_SCREEN_FOOT_KEYS];
+    }
+    p->stacked = p->side.h && p->side.y > p->list.y;
+    head_place(&f->head, p->head.x, p->head.y, p->head.w, p);
+}
+/* ---- the frame's callbacks, ui.txt's Screen and Wide alike: what place_screen measured ---- */
+static bool frame_head_shown(const App* app) {
+    return app->frame.head.tabs || app->frame.head.title || app->frame.head.badge;
+}
+/* the status box at width: its head and its rows */
+static int frame_status(App* app, int width) {
+    GuiRect none = {0, 0, 0, 0};
+    return head_h(app) + 4 * app->scale +
+           status_rows(app, (width - 2 * cell_w(app)) / cell_w(app), none, 0, 0) * cell_h(app);
+}
+/* the keys' box at width, in the foot's letters: as many rows as its sentences wrap to (two at least with the tips
+   beside it, wrapped) */
+static int frame_keys(App* app, int width) {
+    const GuiTheme* t = &app->theme;
+    GuiRect none = {0, 0, 0, 0};
+    int s = app->scale, h;
     app->scale = foot_scale(app);
-    { /* the widest key, which a row cannot break */
-        const char* at = keys;
-        char key[128], what[128];
-        while (hint_next(&at, key, what, sizeof key))
-            in.keys_w = SDL_max(in.keys_w, (hint_width(key, what) + (t->footer_box ? 4 : 0)) * cell_w(app));
-    }
-    in.foot = cell_h(app);
-    gui_place(&in, p); /* the columns, which the foot's rows and the status box's follow */
-    in.foot = SDL_max(in.tips || !t->tips_wrap ? 1 : 2,
-                      hints(app, keys, foot_text(app, p->keys, t->footer_box).w / cell_w(app), none, 0, 0, 0, NULL)) *
-                  cell_h(app) +
-              4 * app->scale;
+    h = SDL_max(!app->frame.tips_foot || !t->tips_wrap ? 1 : 2,
+                hints(app, app->frame.keys, foot_text(app, gui_rect(0, 0, width, 0), t->footer_box).w / cell_w(app),
+                      none, 0, 0, 0, NULL)) *
+            cell_h(app) +
+        4 * app->scale;
     app->scale = s;
-    if (shows & GUI_SHOWS_STATUS && in.list_cols && t->footer != GUI_STYLE_NONE) /* at the side's width */
-        in.status =
-            head_h(app) + 4 * s + status_rows(app, inner(app, p->side).w / cell_w(app), none, 0, 0) * cell_h(app);
-    gui_place(&in, p);
+    return h;
+}
+/* the keys' box at least as wide as its widest sentence, which a row cannot break */
+static int frame_keys_least(App* app) {
+    const GuiTheme* t = &app->theme;
+    const char* at = app->frame.keys;
+    char key[128], what[128];
+    int s = app->scale, least = 0;
+    app->scale = foot_scale(app);
+    while (hint_next(&at, key, what, sizeof key))
+        least = SDL_max(least, (hint_width(key, what) + (t->footer_box ? 4 : 0)) * cell_w(app));
+    app->scale = s;
+    return least;
+}
+bool ui_screen_head_shown_cb(App* app) { return frame_head_shown(app); }
+int ui_screen_head_measure_cb(App* app, int width, int scale) {
+    (void)scale;
+    return head_place(&app->frame.head, 0, 0, width, NULL);
+}
+bool ui_screen_tips_shown_cb(App* app) { return !app->frame.tips_foot; }
+bool ui_screen_body_side_shown_cb(App* app) { return app->frame.side; }
+bool ui_screen_body_side_status_shown_cb(App* app) { return app->frame.status; }
+int ui_screen_body_side_status_measure_cb(App* app, int width, int scale) {
+    (void)scale;
+    return frame_status(app, width);
+}
+bool ui_screen_foot_tips_shown_cb(App* app) { return app->frame.tips_foot; }
+int ui_screen_foot_keys_measure_cb(App* app, int width, int scale) {
+    (void)scale;
+    return frame_keys(app, width);
+}
+int ui_screen_foot_keys_min_width_cb(App* app, int scale) {
+    (void)scale;
+    return frame_keys_least(app);
+}
+bool ui_wide_head_shown_cb(App* app) { return frame_head_shown(app); }
+int ui_wide_head_measure_cb(App* app, int width, int scale) { return ui_screen_head_measure_cb(app, width, scale); }
+bool ui_wide_tips_shown_cb(App* app) { return !app->frame.tips_foot; }
+bool ui_wide_body_side_shown_cb(App* app) { return app->frame.side; }
+bool ui_wide_body_side_status_shown_cb(App* app) { return app->frame.status; }
+int ui_wide_body_side_status_measure_cb(App* app, int width, int scale) {
+    (void)scale;
+    return frame_status(app, width);
+}
+bool ui_wide_foot_tips_shown_cb(App* app) { return app->frame.tips_foot; }
+int ui_wide_foot_keys_measure_cb(App* app, int width, int scale) {
+    (void)scale;
+    return frame_keys(app, width);
+}
+int ui_wide_foot_keys_min_width_cb(App* app, int scale) {
+    (void)scale;
+    return frame_keys_least(app);
 }
 static void status_box(App* app, GuiRect r) {
     GuiRect text = inner(app, r);
@@ -3321,14 +3444,9 @@ static const char* item_about(const App* app, int item) {
     }
 }
 static void menu_boxes(App* app, GuiMenuBoxes* m) {
-    int i, longest = 0;
-    char label[160], keys[256];
-    for (i = 0; i < GUI_ITEM_COUNT; ++i) {
-        menu_label(app, i, label, sizeof label);
-        longest = SDL_max(longest, gui_text_cols(label));
-    }
-    place_screen(app, &m->place, shown_keys(app, keys, sizeof keys), longest + 2 + gui_text_cols(app->theme.cursor),
-                 GUI_SHOWS_STATUS | GUI_SHOWS_TABS);
+    char keys[256];
+    place_screen(app, &m->place, shown_keys(app, keys, sizeof keys),
+                 GUI_SHOWS_STATUS | GUI_SHOWS_TABS | GUI_SHOWS_SIDE);
     ui_menu_layout(m->place.list, app->scale, m->rects);
     memset(m->lists, 0, sizeof m->lists);
     m->lists[UI_MENU_ENTRIES].focus = (size_t)app->menu.selected;
@@ -3618,7 +3736,7 @@ typedef struct {
 } GuiPickBoxes;
 static void pick_boxes(App* app, GuiPickBoxes* k) {
     char keys[256];
-    place_screen(app, &k->place, shown_keys(app, keys, sizeof keys), 0, GUI_SHOWS_TABS);
+    place_screen(app, &k->place, shown_keys(app, keys, sizeof keys), GUI_SHOWS_TABS);
     k->prompt = k->place.list.y + k->place.list.h / 2;
 }
 static void draw_pick(App* app) {
@@ -5620,7 +5738,7 @@ static void render_pad(App* app) {
     GuiRect r;
     int i;
     /* the pad drawn in the box between the head and the foot */
-    place_screen(app, &place, shown_keys(app, keys, sizeof keys), 0, GUI_SHOWS_TABS);
+    place_screen(app, &place, shown_keys(app, keys, sizeof keys), GUI_SHOWS_TABS);
     chrome(app, &place);
     r = inner(app, place.list);
     pad_sync(app);
@@ -5852,14 +5970,9 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
     const char* note = form_note(app);
     char keys[256];
     int rows, top, count;
-    int theme = app->form == GUI_FORM_THEME, width, height, g;
-    int longest = 0;
-    area(app, &width, &height);
-    for (g = 0; g < app->groups; ++g) longest = SDL_max(longest, gui_text_cols(snx_tr(app->group_keys[g].key)));
+    int theme = app->form == GUI_FORM_THEME, g;
     place_screen(app, &f->place, shown_keys(app, keys, sizeof keys),
-                 theme ? width / cell_w(app)
-                       : longest + 2 + gui_text_cols(app->theme.marker) + gui_text_cols(app->theme.cursor),
-                 GUI_SHOWS_TABS);
+                 GUI_SHOWS_TABS | GUI_SHOWS_SIDE | (theme ? GUI_SHOWS_WIDE : 0));
     if (app->form == GUI_FORM_FOLDERS) { /* the whole screen, as a load's: its boxes the groups, none beside them */
         int top = f->place.list.y,
             bottom = SDL_max(f->place.list.y + f->place.list.h,
@@ -6857,7 +6970,7 @@ static void setup_boxes(App* app, GuiSetupBoxes* b) {
     int n = setup_number(app, app->setup_page);
     char question[sizeof b->question];
     GuiRect area;
-    place_screen(app, &b->place, snx_tr(setup_keys_said(app)), 0, GUI_SHOWS_TABS);
+    place_screen(app, &b->place, snx_tr(setup_keys_said(app)), GUI_SHOWS_TABS | GUI_SHOWS_FOOT_TIPS);
     snprintf(b->question, sizeof b->question, "%s", setup_question(app, question, sizeof question));
     if (app->theme.dialog == GUI_DIALOG_YORHA && n)
         snprintf(b->tab, sizeof b->tab, "ScarletNX  %d/%d", n, setup_steps(app));
@@ -8954,7 +9067,7 @@ void ui_choices_rows_row_action_cb(App* app, size_t row, uint32_t hit) {
 /* whether pixel x, y is on the head's user */
 static bool user_hit(App* app, float x, float y) {
     GuiPlace p;
-    place_screen(app, &p, "", 0, GUI_SHOWS_TABS);
+    place_screen(app, &p, "", GUI_SHOWS_TABS);
     return p.badge.h && x >= (float)p.badge.x && x < (float)(p.badge.x + p.badge.w) && y >= (float)p.badge.y &&
            y < (float)(p.badge.y + p.badge.h);
 }
@@ -8962,7 +9075,7 @@ static bool user_hit(App* app, float x, float y) {
 static int tab_hit(App* app, float x, float y) {
     GuiPlace p;
     int i;
-    place_screen(app, &p, "", 0, GUI_SHOWS_TABS);
+    place_screen(app, &p, "", GUI_SHOWS_TABS);
     for (i = 0; i < GUI_TABS; ++i) {
         GuiRect r = tab_rect(app, p.tabs, i);
         if (x >= (float)r.x && x < (float)(r.x + r.w) && y >= (float)r.y && y < (float)(r.y + r.h)) return i;
@@ -9146,7 +9259,7 @@ static const char* shown_place(App* app, GuiPlace* p, char* keys, size_t size) {
         return keys;
     }
     if (app->editing && app->form == GUI_FORM_PAD)
-        place_screen(app, p, shown_keys(app, keys, size), 0, GUI_SHOWS_TABS); /* render_pad's */
+        place_screen(app, p, shown_keys(app, keys, size), GUI_SHOWS_TABS); /* render_pad's */
     else if (app->editing) {
         GuiFormBoxes f;
         form_boxes(app, &f);
