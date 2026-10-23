@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* What tools/uigen generates from tests/ui_test.txt, built and run: each scene's layout at two UI scales, the rows its
-   lists show, its drawing (the calls main.c's ui_draw_row and ui_draw_label would get, with the attributes the code
-   and the hidden rows give), its hit test, the actions a hit, a hover and a hotkey call, and how a list follows its
-   focus. */
+   lists show, its drawing (the calls main.c's ui_draw_row, ui_draw_tile and ui_draw_label would get, with the
+   attributes the code and the hidden rows give), its hit test, the actions a hit, a hover and a hotkey call, how a list
+   follows its focus, and a tile list's flow. */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -34,12 +34,13 @@ typedef struct {
     char text[64];
     const void* image;
     unsigned color, attr;
-    int focused, label;
+    int focused, label, tile;
 } Drawn;
 static struct {
     Drawn drawn[32];
     int ndrawn;
-    char image; /* where the last game's image is: what the drawing passes on */
+    char image;   /* where the last game's image is: what the drawing passes on */
+    char tile[8]; /* Grid's row's label, one buffer as main.c's: it lasts until the next call */
 } g_gui_ui;
 
 void ui_draw_row(App* app, GuiRect r, const char* text, const void* image, unsigned color, unsigned attr,
@@ -52,7 +53,12 @@ void ui_draw_row(App* app, GuiRect r, const char* text, const void* image, unsig
     d->color = color;
     d->attr = attr;
     d->focused = focused;
-    d->label = 0;
+    d->label = d->tile = 0;
+}
+void ui_draw_tile(App* app, GuiRect r, const char* text, const void* image, unsigned color, unsigned attr,
+                  bool focused) {
+    ui_draw_row(app, r, text, image, color, attr, focused);
+    g_gui_ui.drawn[g_gui_ui.ndrawn - 1].tile = 1;
 }
 const char* ui_tr(const char* english) { return english; }
 void ui_draw_label(App* app, GuiRect r, const char* text, unsigned color) {
@@ -87,6 +93,21 @@ bool ui_main_games_get_row_info(App* app, size_t row, int width, UiRowInfo* info
     return true;
 }
 void ui_main_games_row_action_cb(App* app, size_t row, uint32_t hit) { called(app, GAMES, hit, row); }
+/* Grid's thirteen rows: Head, a label, four tiles, Mid, a label, then seven tiles; T3 with an image */
+bool ui_grid_tiles_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
+    char* text = g_gui_ui.tile;
+    app->width = width;
+    if (row >= 13) return false;
+    if (row == 0 || row == 5)
+        snprintf(text, sizeof g_gui_ui.tile, "%s", row ? "Mid" : "Head");
+    else
+        snprintf(text, sizeof g_gui_ui.tile, "T%zu", row);
+    info->label = text;
+    if (row == 0 || row == 5) info->attr = UI_ATTR_LABEL;
+    if (row == 3) info->image = &g_gui_ui.image;
+    return true;
+}
+void ui_grid_tiles_row_action_cb(App* app, size_t row, uint32_t hit) { called(app, GAMES, hit, row); }
 void ui_main_status_update_cb(App* app, char* text, size_t size) {
     (void)app;
     snprintf(text, size, "ready");
@@ -288,7 +309,7 @@ static void test_hit(void) {
 
 static void test_follow_and_keys(void) {
     GuiRect r[UI_MAIN_ITEMS];
-    UiList list;
+    UiList list = {0};
     App app = {0};
     ui_main_layout(gui_rect(10, 20, 400, 300), 1, r);
     /* LoadList keeps its focus in the middle (center, the default), as far as its rows go */
@@ -299,6 +320,17 @@ static void test_follow_and_keys(void) {
     list.focus = 1;
     ui_main_follow(r, 1, UI_MAIN_LOAD_LIST, 4, &list);
     assert(list.first == 0);
+    /* a focus the pointer put there: on a row that shows, nothing moves (the middle would be first 0); on one that
+       does not, as little as it takes */
+    list.first = 1;
+    list.pointed = true;
+    ui_main_follow(r, 1, UI_MAIN_LOAD_LIST, 4, &list);
+    assert(list.first == 1);
+    list.first = 0;
+    list.focus = 3;
+    ui_main_follow(r, 1, UI_MAIN_LOAD_LIST, 4, &list);
+    assert(list.first == 1);
+    list.pointed = false;
     /* Games (edge) moves as little as it takes */
     list.first = 0;
     list.focus = 7;
@@ -386,8 +418,122 @@ static void test_frame(void) {
     puts("PASS a frame: lengths, shares and their bounds, measures, slots off, 2x, narrow");
 }
 
+/* Grid at 1x in 150 by 200, padding 4: three tiles a line (142px: 40 each, 4 apart), Head's line 10px high, every
+   line 4px under the one before; nine rows at most */
+static void test_tiles(void) {
+    GuiRect r[UI_GRID_ITEMS];
+    UiList lists[UI_GRID_ITEMS] = {{0}};
+    App app = {0};
+    const Drawn* d = g_gui_ui.drawn;
+    UiFlow f;
+    GuiRect at;
+    int item;
+    size_t row;
+    ui_grid_layout(gui_rect(0, 0, 150, 200), 1, r);
+    is(r[UI_GRID_TILES], 4, 4, 142, 192);
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS) /* a phone's 60px tiles: two a line */
+    ui_grid_flow(r, 1, UI_GRID_TILES, &f);
+    assert(f.cols == 2 && f.tile_w == 60);
+#else
+    /* the flow: a label's line, tiles, a new line when one is full and before a label */
+    ui_grid_flow(r, 1, UI_GRID_TILES, &f);
+    assert(f.cols == 3 && f.tile_w == 40 && f.tile_h == 30 && f.row_h == 10 && f.gap == 4 && f.max == 9);
+    assert(ui_flow_next(&f, true, &at) && f.line == 0);
+    is(at, 4, 4, 142, 10);
+    assert(ui_flow_next(&f, false, &at) && f.line == 1);
+    is(at, 4, 18, 40, 30);
+    assert(ui_flow_next(&f, false, &at));
+    is(at, 48, 18, 40, 30);
+    assert(ui_flow_next(&f, false, &at));
+    is(at, 92, 18, 40, 30);
+    assert(ui_flow_next(&f, false, &at) && f.line == 2); /* the line full: the next */
+    is(at, 4, 52, 40, 30);
+    assert(ui_flow_next(&f, true, &at) && f.line == 3); /* a label after one tile: a line of its own */
+    is(at, 4, 86, 142, 10);
+    assert(ui_flow_next(&f, false, &at) && f.line == 4);
+    is(at, 4, 100, 40, 30);
+    /* past the bottom: not placed, nothing changed */
+    f.area.h = 130;
+    assert(ui_flow_next(&f, false, &at) && !ui_flow_next(&f, true, &at) && f.line == 4 && f.placed == 8);
+    /* every row a tile: shown, row, follow */
+    assert(ui_grid_shown(r, 1, UI_GRID_TILES) == 9); /* 3 by 5 fit, max_rows 9 */
+    is(ui_grid_row(r, 1, UI_GRID_TILES, 4), 48, 38, 40, 30);
+    lists[UI_GRID_TILES].focus = 12;
+    ui_grid_follow(r, 1, UI_GRID_TILES, 13, &lists[UI_GRID_TILES]);
+    assert(lists[UI_GRID_TILES].first == 6); /* the last 3 lines of 5, at a line's first */
+    lists[UI_GRID_TILES].focus = 7;
+    lists[UI_GRID_TILES].pointed = true;
+    ui_grid_follow(r, 1, UI_GRID_TILES, 13, &lists[UI_GRID_TILES]);
+    assert(lists[UI_GRID_TILES].first == 6); /* the pointer's on a line that shows: nothing moves (the middle: 3) */
+    lists[UI_GRID_TILES].pointed = false;
+    lists[UI_GRID_TILES].focus = 4;
+    ui_grid_follow(r, 1, UI_GRID_TILES, 13, &lists[UI_GRID_TILES]);
+    assert(lists[UI_GRID_TILES].first == 0);
+    /* drawn as placed: the labels as rows, the others tiles, an image its row's; nine rows, the last's arrow down */
+    lists[UI_GRID_TILES].focus = 2;
+    g_gui_ui.ndrawn = 0;
+    ui_grid_draw(&app, r, 1, lists);
+    assert(g_gui_ui.ndrawn == 9 && app.width == 40);
+    assert(!strcmp(d[0].text, "Head") && d[0].attr == UI_ATTR_LABEL && !d[0].tile);
+    is(d[0].r, 4, 4, 142, 10);
+    assert(!strcmp(d[2].text, "T2") && d[2].tile && d[2].focused && !d[2].attr);
+    is(d[2].r, 48, 18, 40, 30);
+    assert(!strcmp(d[3].text, "T3") && d[3].image == &g_gui_ui.image && !d[2].image);
+    assert(!strcmp(d[5].text, "Mid") && !d[5].tile);
+    is(d[5].r, 4, 86, 142, 10);
+    assert(!strcmp(d[8].text, "T8") && d[8].attr == UI_ATTR_MORE_DOWN);
+    is(d[8].r, 92, 100, 40, 30);
+    /* from row 6: an arrow up on the first, none down on the last row */
+    lists[UI_GRID_TILES].first = 6;
+    g_gui_ui.ndrawn = 0;
+    ui_grid_draw(&app, r, 1, lists);
+    assert(g_gui_ui.ndrawn == 7 && !strcmp(d[0].text, "T6") && d[0].attr == UI_ATTR_MORE_UP);
+    is(d[0].r, 4, 4, 40, 30);
+    assert(!strcmp(d[6].text, "T12") && !d[6].attr);
+    is(d[6].r, 4, 72, 40, 30);
+    /* at 2x one tile a line: three rows fit, the third with the arrow down */
+    lists[UI_GRID_TILES].first = 0;
+    ui_grid_layout(gui_rect(0, 0, 150, 200), 2, r);
+    g_gui_ui.ndrawn = 0;
+    ui_grid_draw(&app, r, 2, lists);
+    assert(g_gui_ui.ndrawn == 3 && d[2].attr == UI_ATTR_MORE_DOWN);
+    is(d[2].r, 8, 104, 80, 60);
+    /* hit where drawn: a tile, a label; nothing between tiles or past a line's last */
+    ui_grid_layout(gui_rect(0, 0, 150, 200), 1, r);
+    assert(ui_grid_hit(&app, r, 1, lists, 50, 20, UI_HIT_CLICK, &item, &row) == (UI_HIT_HOVER | UI_HIT_CLICK));
+    assert(item == UI_GRID_TILES && row == 2);
+    ui_grid_act(&app, item, row, UI_HIT_CLICK);
+    assert(app.calls[GAMES] == 1 && app.rows[GAMES] == 2);
+    assert(ui_grid_hit(&app, r, 1, lists, 100, 8, 0, &item, &row) == UI_HIT_HOVER && item == UI_GRID_TILES && !row);
+    assert(!ui_grid_hit(&app, r, 1, lists, 45, 20, 0, &item, &row) && item == -1);
+    assert(!ui_grid_hit(&app, r, 1, lists, 140, 20, 0, &item, &row) && item == -1);
+    lists[UI_GRID_TILES].first = 6;
+    assert(ui_grid_hit(&app, r, 1, lists, 50, 40, 0, &item, &row) == UI_HIT_HOVER && row == 10);
+    /* the code's own tiles (UiList's tile_w and tile_h): placed, drawn, hit and followed at them, as many a line as
+       then fit; 0 ui.txt's again */
+    lists[UI_GRID_TILES].first = 0;
+    lists[UI_GRID_TILES].tile_w = 20;
+    lists[UI_GRID_TILES].tile_h = 10;
+    ui_grid_flow(r, 1, UI_GRID_TILES, &f);
+    ui_flow_sized(&f, &lists[UI_GRID_TILES], 1);
+    assert(f.tile_w == 20 && f.tile_h == 10 && f.cols == (f.area.w + f.gap) / (20 + f.gap) && f.cols > 3);
+    g_gui_ui.ndrawn = 0;
+    ui_grid_draw(&app, r, 1, lists);
+    assert(d[1].tile && !strcmp(d[1].text, "T1"));
+    is(d[1].r, 4, 18, 20, 10);
+    is(d[2].r, 28, 18, 20, 10);
+    assert(ui_grid_hit(&app, r, 1, lists, 30, 20, 0, &item, &row) == UI_HIT_HOVER && row == 2);
+    lists[UI_GRID_TILES].focus = 12;
+    ui_grid_follow(r, 1, UI_GRID_TILES, 13, &lists[UI_GRID_TILES]);
+    assert(lists[UI_GRID_TILES].first % (size_t)f.cols == 0 && lists[UI_GRID_TILES].first + (size_t)f.cols > 12);
+    lists[UI_GRID_TILES].tile_w = lists[UI_GRID_TILES].tile_h = 0;
+#endif
+    puts("PASS a tile list: its flow, tiles and labels drawn and hit where placed, shown, row and follow");
+}
+
 int main(void) {
     test_layout();
+    test_tiles();
     test_frame();
     test_draw();
     test_hit();

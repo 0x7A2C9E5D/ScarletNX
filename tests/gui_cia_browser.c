@@ -269,6 +269,11 @@ int main(void) {
             assert(gui_games_group(&g, "Recompiled", "Dumps", made_b, NULL)); /* again: the same */
         }
         gui_games_free(&g);
+        /* no dumps' heading (Games' Dumps off): the ready games alone, no heading over them */
+        assert(gui_games_add(&g, d, GUI_GAMES_RUN | GUI_GAMES_CIA | GUI_GAMES_DUMP, error, sizeof error));
+        assert(g.count == 4 + ready && gui_games_group(&g, "Recompiled", NULL, made_b, NULL) && g.count == ready);
+        for (k = 0; k < g.count; ++k) assert(!gui_games_heading(&g, k) && !strcmp(g.names[k], "Ready"));
+        gui_games_free(&g);
         snx_remove_tree(d);
         free(d);
     }
@@ -306,6 +311,101 @@ int main(void) {
         assert(gui_games_add_deep(&g, d, GUI_GAMES_DUMP, 1, error, sizeof error) && !error[0]);
         assert(g.count == 12 + 1 + 20 + 1);
         for (k = 0; k < g.count; ++k) assert(g.names[k] && g.shown[k] && g.paths[k] && snx_is_file(g.paths[k]));
+        gui_games_free(&g);
+        snx_remove_tree(d);
+        free(d);
+    }
+    /* the log a run writes for a game (gui_game_log), beside it in a folder no data folder holds; and the games by when
+       each last ran: the newest log first, two of a time in the order they had, one never run after them, each group
+       apart under its heading, a dump not ordered by a log of its name */
+    {
+        GuiGames g = {0};
+        char* d = snx_temp_dir(NULL);
+        const char* names[] = {"alpha", "beta", "delta", "gamma"};
+        const unsigned long long times[] = {1000, 3000, 1000, 0};
+        const char* order[] = {"beta", "flat", "alpha", "delta", "gamma", "a.nsp", "b.nsp"};
+        char *path, *log, *own;
+        size_t k, at;
+        assert(d);
+        for (k = 0; k < 4; ++k) {
+            char* folder = snx_path_join(d, names[k]);
+            char* data = snx_format("%s/%s_data", folder, names[k]);
+#ifdef _WIN32
+            path = snx_format("%s/%s.exe", folder, names[k]);
+#else
+            path = snx_path_join(folder, names[k]);
+#endif
+            assert(!snx_mkdirs(data) && !snx_write_file(path, "game", 4) && !snx_make_executable(path));
+            own = snx_format("%s/%s.log", folder, names[k]);
+            log = gui_game_log(path);
+            if (times[k]) { /* the log as the runtime writes it, where gui_game_log says it is */
+                assert(!snx_write_file(own, "log", 3) && !snx_set_file_time(own, times[k]));
+                assert(log && snx_same_file(log, own));
+            }
+            free(own);
+            free(log);
+            free(path);
+            free(data);
+            free(folder);
+        }
+#ifdef _WIN32
+        path = snx_path_join(d, "flat.exe"); /* an older version's, laid out beside the others: its name's log */
+#else
+        path = snx_path_join(d, "flat");
+#endif
+        own = snx_path_join(d, "flat.log");
+        assert(!snx_write_file(path, "game", 4) && !snx_make_executable(path));
+        assert(!snx_write_file(own, "log", 3) && !snx_set_file_time(own, 2000));
+        log = gui_game_log(path);
+        assert(log && snx_same_file(log, own));
+        free(log);
+        free(own);
+        free(path);
+        for (k = 0; k < 2; ++k) { /* the dumps; b.nsp with a newer log of its name, which is no run's */
+            path = snx_path_join(d, k ? "b.nsp" : "a.nsp");
+            assert(!snx_write_file(path, "dump", 4));
+            free(path);
+        }
+        own = snx_path_join(d, "b.nsp.log");
+        assert(!snx_write_file(own, "log", 3) && !snx_set_file_time(own, 9000));
+        free(own);
+        { /* where the game's <name>.folders records another state folder, the runtime's log is there while it is */
+            char *folder = snx_path_join(d, "gamma"), *record = snx_path_join(folder, "gamma.folders");
+            char *state = snx_temp_dir(NULL), *text = snx_format("state=%s\n", state), *there;
+#ifdef _WIN32
+            path = snx_path_join(folder, "gamma.exe");
+#else
+            path = snx_path_join(folder, "gamma");
+#endif
+            assert(state && !snx_write_file(record, text, strlen(text)));
+            log = gui_game_log(path);
+            there = snx_format("%s/gamma.log", state);
+            assert(!snx_write_file(there, "log", 3) && log && snx_same_file(log, there));
+            free(log);
+            snx_remove_tree(state); /* gone: beside the game again */
+            log = gui_game_log(path);
+            own = snx_format("%s/gamma.log", folder);
+            assert(!snx_write_file(own, "log", 3) && log && snx_same_file(log, own) && !remove(own));
+            assert(!remove(record));
+            free(own);
+            free(log);
+            free(there);
+            free(text);
+            free(state);
+            free(path);
+            free(record);
+            free(folder);
+        }
+        assert(gui_games_add(&g, d, GUI_GAMES_RUN | GUI_GAMES_DUMP, error, sizeof error));
+        assert(gui_games_group(&g, "Recompiled", "Dumps", NULL, NULL) && g.count == 9);
+        assert(!strcmp(g.names[1], "alpha") && !strcmp(g.names[5], "gamma")); /* by name first */
+        assert(gui_games_by_last_opened(&g) && g.count == 9);
+        assert(gui_games_heading(&g, 0) && !strcmp(g.shown[0], "Recompiled") && gui_games_heading(&g, 6) &&
+               !strcmp(g.shown[6], "Dumps"));
+        for (k = 0, at = 1; k < sizeof order / sizeof *order; ++k, ++at) {
+            if (at == 6) ++at; /* the heading */
+            assert(!strncmp(g.names[at], order[k], strlen(order[k])));
+        }
         gui_games_free(&g);
         snx_remove_tree(d);
         free(d);

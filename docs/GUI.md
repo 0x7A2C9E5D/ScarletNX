@@ -330,11 +330,30 @@ cannot be read is named and the others still listed.
 - **P** (on a phone a tap on *Folders* at the foot) opens Settings > App > Folders at the recompiled library's Add a
   folder, where ESC comes back to Games and its list read again. The recent games are over every page, then the
   page's games. ESC returns to the menu.
-- Up/Down go round the recent games and the page's files. Enter/Space opens one.
+- **V** (on a phone a tap on *View* at the foot) opens the View box over the list, an option a row, its value between
+  the arrows: **Recent Games** (*On*, `recent_games = on` in `app.ini`: the recent games over the list; *Off*: none),
+  **Dumps** (*On*, `games_dumps = on`: the dumps of `dumps/` and of the dumps library's folders under their
+  heading; *Off*: the games ready to run alone, a CIA or a VPK left out with the dumps) and **Sort** (*Title*,
+  `games_sort = title`: by the name shown, in each folder; *Last opened*, `games_sort = last_opened`: the game whose
+  log a run wrote last first, as every run writes its game's log again, then the games never run in their order,
+  each group on its own, its dumps, CIAs and VPKs in theirs) and **View** (*List*, `games_view = list`: a row a game,
+  in pages; *Grid*, `games_view = grid`: a tile a game, its icon over its name, as many a line as fit, on one page
+  that scrolls, the list three fifths of the screen as a run's output is, Recent Games and a group's heading each on
+  a line of its own; the arrows go to the tile beside, above or under the focus, its column or the line's last,
+  PgUp and PgDn by the lines that show, a click or a tap on a tile opens it, and the side box says the focused one as
+  the list's does); in the grid alone **Icon size** (*Medium*, `games_icons = medium`: a tile 12 cells by 4 rows;
+  *Small*, `small`: 8 by 3; *Large*, `large`: 16 by 6), then the **Side panel** of Settings > App (`side_box`, which
+  F2 turns too). Enter, Left, Right or
+  a click change the focused one,
+  kept in `app.ini` at once, and the list is read again by it; ESC or a click off the box closes it. On iOS Recent
+  Games and Dumps start *Off*, as a phone keeps the games made in the app's `recompiled/` and prepares a dump from the
+  Menu; the player turns them on there. An `app.ini` without them, an older version's, has these defaults, and a word
+  it does not know is named in the message with the one kept: `recent_games = maybe (it keeps on)`.
+- In the list, Up/Down go round the recent games and the page's files. Enter/Space opens one.
 - **R** (on Android a tap on *Recompile* at the foot) recompiles the Switch game in focus, recent or on the page,
   where it is, or prepares its dump again: `scarletnx -r`. It plays nothing;
   Enter then does. On another row, or a 3DS or Vita game, it says why it does nothing.
-- Left/Right and PgUp/PgDown go to the previous/next page. The page number and
+- In the list, Left/Right and PgUp/PgDown go to the previous/next page. The page number and
   total file count are shown. Paging stops at the first and last pages.
 - Resizing adjusts the page size while keeping the selected file visible.
 - Empty or missing directories show a diagnostic, and the side box says P adds a folder.
@@ -430,8 +449,9 @@ the Settings' two, the theme editor's, the choices of a question, of UI scale's 
 setup's pages, the setup's Appearance rows, the box of users, that of a game's updates, DLCs and mods, and the OK of
 a box of files. Their rows are 2 pixels apart times the text's size (on Android and iOS 40 pixels high, about Android's 48 dp
 touch target at the 3x a phone held wide gets, where the desktop's are 17), the focused one kept in the middle (on a
-group's screen, the group open in the groups' list), the cursor and the arrows of hidden rows inside each row, which a
-click takes whole as a tap does. That is the **Side panel**'s *Auto*, the
+group's screen, the group open in the groups' list; Games' grid by its lines) as the keys, a pad, the wheel or a drag
+move it, and a list still when the mouse, a pen or a tap moves it, the cursor and the arrows of hidden rows inside
+each row, which a click takes whole as a tap does. That is the **Side panel**'s *Auto*, the
 default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
 not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2 shows
 it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over
@@ -693,8 +713,9 @@ SDL3 handles window creation, keyboard/mouse input, rendering, clipboard and dra
 on every host. The platform-specific code only handles child processes and resource
 accounting. See [BUILD](BUILD.md) for SDL3's desktop dependencies.
 
-The menu's list, Games', the Settings', the setup's Appearance, the choices of the questions and the setup, the
-boxes of users and of a game's add-ons, and the OK of a box of files are scenes of `src/gui/ui.txt`, which `tools/uigen` turns into `gui/ui.h` and
+The menu's list, Games' and its grid, the Settings', the setup's Appearance, the choices of the questions and the
+setup, the boxes of users, of a game's add-ons and of Games' View, and the OK of a box of files are scenes of
+`src/gui/ui.txt`, which `tools/uigen` turns into `gui/ui.h` and
 `gui/ui.c` as the GUI builds (the format is in `tools/uigen/uigen.c`'s first comment): their layout computed at build
 time, the drawing and callbacks main.c's. The screens' boxes (the head, the tips, the list, the side box, the Status
 box and the foot) are its frames Screen and Wide, laid out as they are drawn, from what main.c measures. `uigen` tests the generator's output and refusals, `gui_ui` runs what it

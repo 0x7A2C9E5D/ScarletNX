@@ -36,17 +36,19 @@
      list    width, height, grow (its share of the free length along its scene's axis; 1 when it has no length),
              max_rows (1 to 64, 8 by default: it shows the rows that fit, those at most), row_height (17px by
              default), row_gap (2px by default, under each row), scroll (center, the default, or edge: where the
-             row in focus stays as the list moves), min_row_width and max_row_width (a row's width kept between
-             them), attr, color
+             row in focus stays as the list moves; a focus the pointer put on a row moves nothing), min_row_width
+             and max_row_width (a row's width kept between them), tile_width and tile_height (both or neither,
+             pixels: a tile list), attr, color
      button  width, height, grow (17px along, the whole inside across, by default), attr, color, key, for-platform
      label   as a button, without attr and key
    An item of a list is a row: it takes attr, color, key and for-platform alone, and shows its "Text". attr = callback:
    the code gives the button or row its UI_ATTR_* bits as it is drawn (failure, blink, active); on a list with items,
    any row's by its index. for-platform (android or desktop) is a row's alone: a scene's items keep their places on
-   every platform, though an item's width and height, and a list's row_height, row_gap and max_rows, may take a
-   platform's own value (android.row_height = 40px, a phone's: Android's and iOS's, as main.c's touch UI; desktop.
-   the others'), the scene laid out for each. color is a theme colour by its theme.ini name. key is an ASCII
-   character or f1 to f12 after ctrl- or alt- (alt-f4), a hotkey of its scene (Enter is the click's).
+   every platform, though an item's width and height, and a list's row_height, row_gap, max_rows, tile_width and
+   tile_height, may take a platform's own value (android.row_height = 40px, a phone's: Android's and iOS's, as
+   main.c's touch UI; desktop. the others'), the scene laid out for each. color is a theme colour by its theme.ini
+   name. key is an ASCII character or f1 to f12 after ctrl- or alt- (alt-f4), a hotkey of its scene (Enter is the
+   click's).
    The callbacks, main.c's: a button's ui_<symbol>_action_cb(App*, uint32_t hit); a named label's
    ui_<symbol>_update_cb(App*, char* text, size_t size); a list without items' ui_<symbol>_get_row_info(App*, size_t
    row, int width, UiRowInfo*) (width: the row's in pixels, as drawn, for a label cut to fit it; false past its last
@@ -54,6 +56,12 @@
    does) and
    ui_<symbol>_row_action_cb(App*, size_t row, uint32_t hit); with attr = callback, unsigned ui_<symbol>_attr_cb(App*),
    a list's with size_t row after it.
+   A tile list, a list without items with tile_width and tile_height, lays its rows out as tiles: as many a line as
+   fit its width, tile_width by tile_height, row_gap apart both ways, a row whose get_row_info gives UI_ATTR_LABEL on
+   a line of its own, row_height high and the list's width; max_rows the rows it shows at most, tiles and labels.
+   They are drawn and hit from its first row while they fit, a label by ui_draw_row and a tile by main.c's
+   ui_draw_tile, each asked with tile_width; its scene's ui_<scene>_flow starts the same placing for the code
+   (ui_flow_next, a row at a time: its keys move by it), whose shown, row and follow count every row a tile.
    A hover calls the same action as a click: hit has UI_HIT_HOVER, and UI_HIT_CLICK or UI_HIT_RELEASE when one made
    it, and the callback tests for the event it acts on. The drawing, main.c's too: ui_draw_row, which draws a theme's
    cursor and the arrows of hidden rows (UI_ATTR_MORE_UP, UI_ATTR_MORE_DOWN) inside the row, and the image a list's
@@ -108,6 +116,8 @@ enum {
     P_PADDING,
     P_ROW_HEIGHT,
     P_ROW_GAP,
+    P_TILE_WIDTH,
+    P_TILE_HEIGHT,
     P_NARROW_BELOW,
     P_GROW, /* whole numbers */
     P_MAX_ROWS,
@@ -129,10 +139,10 @@ enum {
 #define NUMBERS_END (P_MAX_ROWS + 1)
 #define WORDS_END   (P_NARROW + 1)
 static const char* const property_words[P_COUNT] = {
-    "width",      "height",    "min_row_width", "max_row_width", "min_width",   "max_width",    "min_height",
-    "max_height", "gap",       "padding",       "row_height",    "row_gap",     "narrow_below", "grow",
-    "max_rows",   "direction", "align",         "justify",       "scroll",      "attr",         "measure",
-    "shown",      "narrow",    "color",         "key",           "for-platform"};
+    "width",        "height",  "min_row_width", "max_row_width", "min_width", "max_width",  "min_height",
+    "max_height",   "gap",     "padding",       "row_height",    "row_gap",   "tile_width", "tile_height",
+    "narrow_below", "grow",    "max_rows",      "direction",     "align",     "justify",    "scroll",
+    "attr",         "measure", "shown",         "narrow",        "color",     "key",        "for-platform"};
 /* the whole numbers' bounds */
 static const int number_lo[2] = {0, 1}, number_hi[2] = {100, 64};
 /* the words' values, a list each, their index the value */
@@ -154,14 +164,14 @@ enum { SCROLL_CENTER, SCROLL_EDGE };
 #define AREA                                                                                                           \
     (BOX | BIT(P_MIN_WIDTH) | BIT(P_MAX_WIDTH) | BIT(P_MIN_HEIGHT) | BIT(P_MAX_HEIGHT) | BIT(P_SHOWN) | BIT(P_NARROW))
 /* the properties each type takes; a row of a list takes ROW_TAKES of its type's alone */
-static const unsigned properties_of[T_TYPES] = {FLEX | BIT(P_NARROW_BELOW),
-                                                BOX | BIT(P_MAX_ROWS) | BIT(P_ROW_HEIGHT) | BIT(P_ROW_GAP) |
-                                                    BIT(P_SCROLL) | BIT(P_MIN_ROW_WIDTH) | BIT(P_MAX_ROW_WIDTH) |
-                                                    BIT(P_ATTR) | BIT(P_COLOR),
-                                                BOX | BIT(P_ATTR) | BIT(P_COLOR) | BIT(P_KEY) | BIT(P_PLATFORM),
-                                                BOX | BIT(P_COLOR) | BIT(P_PLATFORM),
-                                                FLEX | AREA,
-                                                AREA | BIT(P_MEASURE)};
+static const unsigned properties_of[T_TYPES] = {
+    FLEX | BIT(P_NARROW_BELOW),
+    BOX | BIT(P_MAX_ROWS) | BIT(P_ROW_HEIGHT) | BIT(P_ROW_GAP) | BIT(P_TILE_WIDTH) | BIT(P_TILE_HEIGHT) |
+        BIT(P_SCROLL) | BIT(P_MIN_ROW_WIDTH) | BIT(P_MAX_ROW_WIDTH) | BIT(P_ATTR) | BIT(P_COLOR),
+    BOX | BIT(P_ATTR) | BIT(P_COLOR) | BIT(P_KEY) | BIT(P_PLATFORM),
+    BOX | BIT(P_COLOR) | BIT(P_PLATFORM),
+    FLEX | AREA,
+    AREA | BIT(P_MEASURE)};
 /* what a frame's item may set its own below the scene's narrow_below (narrow.direction = column) */
 #define NARROW_TAKES                                                                                                   \
     (BOX | BIT(P_MIN_WIDTH) | BIT(P_MAX_WIDTH) | BIT(P_MIN_HEIGHT) | BIT(P_MAX_HEIGHT) | BIT(P_DIRECTION))
@@ -418,6 +428,15 @@ static char* words_of(unsigned taken) {
     return list;
 }
 static int is_row(const Item* it) { return it->parent >= 0 && g_uigen.items[it->parent].type == T_LIST; }
+/* a tile list: its rows laid out as tiles, as many a line as fit (ui_flow_next) */
+static int is_tiles(const Item* it) { return it->type == T_LIST && (it->set & BIT(P_TILE_WIDTH)); }
+/* whether a scene has a tile list, and so its flow */
+static int has_tiles(int scene) {
+    int i;
+    for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++)
+        if (is_tiles(&g_uigen.items[i])) return 1;
+    return 0;
+}
 
 /* 200px, 20cols, 2rows (a cell of text: 8 and 16 px at 1x) or 50% (of the parent's inside, a length's alone), or a
    sum of them, 1rows + 4px: its pixels at 1x in value, its % in pct */
@@ -493,12 +512,16 @@ static void set_property(Item* it, char* word, char* value, int line);
    layout and rows take it there */
 static void set_platform_property(Item* it, int on, char* word, char* value, int line) {
     static const char* const platforms[] = {"", "android", "desktop"};
-    unsigned own =
-        BIT(P_WIDTH) | BIT(P_HEIGHT) | (it->type == T_LIST ? BIT(P_ROW_HEIGHT) | BIT(P_ROW_GAP) | BIT(P_MAX_ROWS) : 0);
+    unsigned own = BIT(P_WIDTH) | BIT(P_HEIGHT) |
+                   (it->type == T_LIST
+                        ? BIT(P_ROW_HEIGHT) | BIT(P_ROW_GAP) | BIT(P_MAX_ROWS) | BIT(P_TILE_WIDTH) | BIT(P_TILE_HEIGHT)
+                        : 0);
     int p = property_of(word);
     Item checked = {0};
     if (it->type == T_SCENE || it->type == T_BOX || it->type == T_SLOT || p < 0 || !(own & BIT(p)))
-        fail(line, "%s.%s: a platform's own value is a width, a height, or a list's row_height, row_gap or max_rows",
+        fail(line,
+             "%s.%s: a platform's own value is a width, a height, or a list's row_height, row_gap, max_rows, "
+             "tile_width or tile_height",
              platforms[on], word);
     if (it->plat_set[on] & BIT(p))
         fail(line, "%s.%s is set twice for one %s", platforms[on], word, type_words[it->type]);
@@ -810,6 +833,22 @@ static void check_items(void) {
             fail(a->line, "@ stubs a list's rows, and this one has items of its own");
         if (a->type == T_LIST && !a->children && (a->set & BIT(P_ATTR)))
             fail(a->line, "attr = callback on a list without items: its get_row_info gives each row's attr");
+        if (a->type == T_LIST && is_tiles(a) != ((a->set & BIT(P_TILE_HEIGHT)) != 0))
+            fail(a->line, "%s without %s: a tile list has both, its tiles' width and height",
+                 is_tiles(a) ? "tile_width" : "tile_height", is_tiles(a) ? "tile_height" : "tile_width");
+        if (a->type == T_LIST && !is_tiles(a) &&
+            ((a->plat_set[PLATFORM_ANDROID] | a->plat_set[PLATFORM_DESKTOP]) &
+             (BIT(P_TILE_WIDTH) | BIT(P_TILE_HEIGHT))))
+            fail(a->line, "a platform's tile_width or tile_height on a list that is no tile list: it has them on every "
+                          "platform, its own where a platform sets them");
+        if (is_tiles(a) && a->children)
+            fail(a->line, "tile_width on a list with items: a tile list's rows come from its get_row_info");
+        if (is_tiles(a) && (!a->value[P_TILE_WIDTH] || !a->value[P_TILE_HEIGHT]))
+            fail(a->line, "%s = 0px: a tile is a pixel at least",
+                 a->value[P_TILE_WIDTH] ? "tile_height" : "tile_width");
+        if (is_tiles(a) && (a->set & (BIT(P_MIN_ROW_WIDTH) | BIT(P_MAX_ROW_WIDTH))))
+            fail(a->line, "%s on a tile list: its tiles are tile_width wide, a label its whole width",
+                 (a->set & BIT(P_MIN_ROW_WIDTH)) ? "min_row_width" : "max_row_width");
         if (a->platform != PLATFORM_ANY && !is_row(a))
             fail(a->line, "for-platform is a row's: an item of a scene keeps its place on every platform");
         if ((a->set & BIT(P_MIN_ROW_WIDTH)) && (a->set & BIT(P_MAX_ROW_WIDTH)) &&
@@ -1212,8 +1251,11 @@ static void write_h(const char* path) {
     outs("/* an item of a scene: its parent's index (-1: the scene's own), its text's offset in the scene's texts */\n"
          "typedef struct {\n    uint8_t type, color; /* UiType, UiColor */\n    int16_t parent;\n    uint16_t text;\n"
          "} UiItem;\n");
-    outs("/* a list's state, the caller's: the row it shows first and the row in focus */\ntypedef struct {\n"
-         "    size_t first, focus;\n} UiList;\n");
+    outs("/* a list's state, the caller's: the row it shows first, the row in focus, and whether the pointer put the "
+         "focus\n   there, which keeps first where it is while the focus shows */\ntypedef struct {\n"
+         "    size_t first, focus;\n    bool pointed;\n"
+         "    int tile_w, tile_h; /* a tile list's tile in pixels at 1x where the code sizes it; 0: ui.txt's */\n"
+         "} UiList;\n");
     outs(
         "/* a row a list without items asks get_row_info for: its text (NULL: \"(null)\", as printf's %s prints it), the\n"
         "   image before it (NULL: none; main.c's, which draws it) and how it is drawn */\ntypedef struct {\n"
@@ -1235,6 +1277,23 @@ static void write_h(const char* path) {
         "                 bool focused);\n"
         "void ui_draw_label(App* app, GuiRect r, const char* text, unsigned color);\n"
         "const char* ui_tr(const char* english);\n");
+    outs("/* a tile of a tile list (tile_width, tile_height), main.c's: a row drawn as a tile, image over its text */\n"
+         "void ui_draw_tile(App* app, GuiRect r, const char* text, const void* image, unsigned color, unsigned attr,\n"
+         "                  bool focused);\n");
+    outs(
+        "/* a tile list's rows placed one after another, from the first it shows (its scene's flow starts it): a label\n"
+        "   (UI_ATTR_LABEL) on a line of its own, row_height high and the list's width, the others tiles, tile_width by\n"
+        "   tile_height, as many a line as fit across, row_gap apart both ways; in pixels at the UI scale */\n"
+        "typedef struct {\n    GuiRect area; /* the list's */\n    int tile_w, tile_h, row_h, gap;\n"
+        "    int cols;   /* the tiles a line holds, one at least */\n    size_t max; /* the rows it shows at most: max_rows */\n"
+        "    /* the line placed last: its top from area.y, its height (0: none yet), the tiles on it (cols: no more), its\n"
+        "       index from the first's */\n    int y, line_h, col, line;\n    size_t placed;\n} UiFlow;\n"
+        "/* the next row placed, a label's or a tile's rectangle in at: false where it does not fit under the list's bottom\n"
+        "   or past its max_rows, nothing placed then */\nbool ui_flow_next(UiFlow* flow, bool label, GuiRect* at);\n"
+        "/* a flow started by its scene's given its list's own tiles where the code sizes them (UiList's tile_w\n"
+        "   and tile_h), as many a line as then fit; the scene's drawing, hit and follow do it too, its shown and\n"
+        "   row keep ui.txt's */\n"
+        "void ui_flow_sized(UiFlow* flow, const UiList* list, int scale);\n");
     for (i = 0; i < g_uigen.nitems; i++) {
         const Item* s = &g_uigen.items[i];
         if (s->type != T_SCENE) continue;
@@ -1260,11 +1319,12 @@ static void write_h(const char* path) {
         out("/* its items' rectangles in the area at, at a UI scale of scale (a row of a list gets none: its list's\n"
             "   rows are drawn and hit in the list's) */\nvoid %s_layout(GuiRect at, int scale, GuiRect* rects);\n",
             s->symbol);
-        out("/* how many rows its list item shows: those that fit, max_rows at most */\nsize_t %s_shown(const GuiRect* "
-            "rects, int scale, int item);\n",
+        out("/* how many rows its list item shows: those that fit, max_rows at most (a tile list's when every row is a "
+            "tile) */\nsize_t %s_shown(const GuiRect* rects, int scale, int item);\n",
             s->symbol);
-        out("/* the rectangle of the row its list item shows i-th (from its first), as drawn and hit */\nGuiRect "
-            "%s_row(const GuiRect* rects, int scale, int item, size_t i);\n",
+        out("/* the rectangle of the row its list item shows i-th (from its first), as drawn and hit (a tile list's when "
+            "every row\n   is a tile: its flow places a label) */\nGuiRect %s_row(const GuiRect* rects, int scale, int "
+            "item, size_t i);\n",
             s->symbol);
         out("/* every item drawn, each list from its state (lists: one per item, a list's at its index) */\nvoid "
             "%s_draw(App* app, const GuiRect* rects, int scale, const UiList* lists);\n",
@@ -1273,9 +1333,14 @@ static void write_h(const char* path) {
             "makes\n   of it; 0 and *item -1 off every item */\nuint32_t %s_hit(App* app, const GuiRect* rects, int "
             "scale, const UiList* lists, int x, int y, uint32_t event,\n    int* item, size_t* row);\n",
             s->symbol);
-        out("/* list item's first row set so its focus shows, as its scroll says, of count rows */\nvoid "
-            "%s_follow(const GuiRect* rects, int scale, int item, size_t count, UiList* list);\n",
+        out("/* list item's first row set so its focus shows, as its scroll says, of count rows (a tile list's at a line's "
+            "first,\n   every row a tile) */\nvoid %s_follow(const GuiRect* rects, int scale, int item, size_t count, "
+            "UiList* list);\n",
             s->symbol);
+        if (has_tiles(i))
+            out("/* tile list item's flow started, nothing placed yet: ui_flow_next places its rows from the first it "
+                "shows */\nvoid %s_flow(const GuiRect* rects, int scale, int item, UiFlow* flow);\n",
+                s->symbol);
         out("/* what a hit on an item does: its button's action_cb, its list's row_action_cb */\nvoid %s_act(App* app, "
             "int item, size_t row, uint32_t hit);\n",
             s->symbol);
@@ -1324,7 +1389,8 @@ static void out_bound(const Item* list, int p, const char* rect) {
     else
         out("%s.w * %d / 100 + %d * s", rect, list->pct[p], list->value[p]);
 }
-/* a list's row metric (row_height, row_gap, max_rows) on a platform: its own there, else the list's, else the default */
+/* a list's row metric (row_height, row_gap, max_rows, a tile list's tile_width and tile_height) on a platform: its
+   own there, else the list's, else the default (a tile's has none: a tile list sets both) */
 static int metric(const Item* list, int on, int p) {
     if (on != PLATFORM_ANY && (list->plat_set[on] & BIT(p))) return list->plat_value[on][p];
     if (list->set & BIT(p)) return list->value[p];
@@ -1334,7 +1400,11 @@ static int metric_varies(const Item* list, int p) {
     return ((list->plat_set[PLATFORM_ANDROID] | list->plat_set[PLATFORM_DESKTOP]) & BIT(p)) != 0;
 }
 static const char* metric_name(int p) {
-    return p == P_ROW_HEIGHT ? "ROW_HEIGHT" : p == P_ROW_GAP ? "ROW_GAP" : "MAX_ROWS";
+    return p == P_ROW_HEIGHT    ? "ROW_HEIGHT"
+           : p == P_ROW_GAP     ? "ROW_GAP"
+           : p == P_TILE_WIDTH  ? "TILE_WIDTH"
+           : p == P_TILE_HEIGHT ? "TILE_HEIGHT"
+                                : "MAX_ROWS";
 }
 /* a metric as the code uses it: its number, or the macro out_metrics defines where a platform sets its own */
 static void out_metric(const Item* list, int p) {
@@ -1343,14 +1413,25 @@ static void out_metric(const Item* list, int p) {
     else
         out("%d", metric(list, PLATFORM_ANY, p));
 }
+/* metrics a, b, c and d of list l (d -1: three), as out_metric writes each, a comma between two */
+static void out_metrics_of(const Item* l, int a, int b, int c, int d) {
+    out_metric(l, a);
+    outs(", ");
+    out_metric(l, b);
+    outs(", ");
+    out_metric(l, c);
+    if (d < 0) return;
+    outs(", ");
+    out_metric(l, d);
+}
 /* the macros of a scene's lists' metrics that a platform sets: android's on Android and iOS (the phones'), else
    desktop's */
 static void out_metrics(int scene) {
-    static const int metrics[] = {P_ROW_HEIGHT, P_ROW_GAP, P_MAX_ROWS};
+    static const int metrics[] = {P_ROW_HEIGHT, P_ROW_GAP, P_MAX_ROWS, P_TILE_WIDTH, P_TILE_HEIGHT};
     int i, k;
     for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++) {
         const Item* l = &g_uigen.items[i];
-        for (k = 0; k < 3; k++) {
+        for (k = 0; k < 5; k++) {
             int p = metrics[k];
             if (!metric_varies(l, p)) continue;
             out("#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)\n#define %s__%s %d\n", l->upper,
@@ -1480,6 +1561,12 @@ static void write_scene(int scene) {
         const Item* l = &g_uigen.items[i];
         if (l->type != T_LIST) continue;
         out_from(l->line);
+        if (is_tiles(l)) {
+            out("        case %s: return ui_tiles_shown(r[%s], ", l->upper, l->upper);
+            out_metrics_of(l, P_TILE_WIDTH, P_TILE_HEIGHT, P_ROW_GAP, P_MAX_ROWS);
+            outs(", scale);\n");
+            continue;
+        }
         out("        case %s: return ui_shown(r[%s].h, ", l->upper, l->upper);
         out_metric(l, P_ROW_HEIGHT);
         outs(", ");
@@ -1499,6 +1586,12 @@ static void write_scene(int scene) {
         if (l->type != T_LIST) continue;
         out_from(l->line);
         out("        case %s: return ", l->upper);
+        if (is_tiles(l)) {
+            out("ui_tile(r[%s], i, ", l->upper);
+            out_metrics_of(l, P_TILE_WIDTH, P_TILE_HEIGHT, P_ROW_GAP, -1);
+            outs(", s);\n");
+            continue;
+        }
         out_row(l, i, "i");
         outs(";\n");
     }
@@ -1513,11 +1606,33 @@ static void write_scene(int scene) {
         const Item* l = &g_uigen.items[i];
         if (l->type != T_LIST) continue;
         out_from(l->line);
+        if (is_tiles(l)) {
+            out("        case %s: ui_follow_tiles(list, count, r[%s], ", l->upper, l->upper);
+            out_metrics_of(l, P_TILE_WIDTH, P_TILE_HEIGHT, P_ROW_GAP, P_MAX_ROWS);
+            out(", scale, %d); break;\n", (l->set & BIT(P_SCROLL)) ? l->value[P_SCROLL] == SCROLL_CENTER : 1);
+            continue;
+        }
         out("        case %s: ui_follow(list, count, %s_shown(r, scale, item), %d); break;\n", l->upper, s->symbol,
             (l->set & BIT(P_SCROLL)) ? l->value[P_SCROLL] == SCROLL_CENTER : 1);
     }
     out_here();
     outs("        default: break;\n    }\n}\n");
+    /* a tile list's flow, which places its rows */
+    if (has_tiles(scene)) {
+        out("void %s_flow(const GuiRect* r, int scale, int item, UiFlow* flow) {\n    switch (item) {\n", s->symbol);
+        for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++) {
+            const Item* l = &g_uigen.items[i];
+            if (!is_tiles(l)) continue;
+            out_from(l->line);
+            out("        case %s: ui_flow_start(flow, r[%s], ", l->upper, l->upper);
+            out_metrics_of(l, P_TILE_WIDTH, P_TILE_HEIGHT, P_ROW_GAP, P_MAX_ROWS);
+            outs(", ");
+            out_metric(l, P_ROW_HEIGHT);
+            outs(", scale); return;\n");
+        }
+        out_here();
+        outs("        default: ui_flow_start(flow, gui_rect(0, 0, 0, 0), 1, 1, 0, 0, 1, scale); return;\n    }\n}\n");
+    }
     /* the attributes the code gives the rows of its static lists, by item */
     for (i = scene + 1; i < g_uigen.nitems && g_uigen.items[i].scene == scene; i++)
         attrs += has_attr(&g_uigen.items[i]) && g_uigen.items[i].parent != scene;
@@ -1561,6 +1676,30 @@ static void write_scene(int scene) {
             out(", ui_tr(%s_texts + %s_items[item].text), NULL, %s_items[item].color ? %s_items[item].color : "
                 "%s_items[%s].color, attr,\n                    row == lists[%s].focus);\n    }\n",
                 s->symbol, s->symbol, s->symbol, s->symbol, s->symbol, it->upper, it->upper);
+        } else if (is_tiles(it)) {
+            /* from its first row, while the rows fit: a label on a line of its own, drawn as a row, the others tiles;
+               the row after each asked first, its label maybe a buffer the row's call writes, and whether it fits */
+            out("    {\n        UiFlow flow;\n        %s_flow(r, scale, %s, &flow);\n", s->symbol, it->upper);
+            out("        ui_flow_sized(&flow, &lists[%s], scale);\n", it->upper);
+            out("        for (i = 0;; i++) {\n            size_t row = lists[%s].first + i;\n"
+                "            GuiRect box, after_box;\n            UiRowInfo next;\n            UiFlow after;\n"
+                "            bool more;\n",
+                it->upper);
+            out("            next.label = NULL;\n            next.image = NULL;\n            next.attr = 0;\n"
+                "            more = %s_get_row_info(app, row + 1, flow.tile_w, &next);\n",
+                it->symbol);
+            out("            info.label = NULL;\n            info.image = NULL;\n            info.attr = 0;\n"
+                "            if (!%s_get_row_info(app, row, flow.tile_w, &info)) break;\n",
+                it->symbol);
+            outs("            if (!ui_flow_next(&flow, (info.attr & UI_ATTR_LABEL) != 0, &box)) break;\n"
+                 "            after = flow;\n"
+                 "            more = more && !ui_flow_next(&after, (next.attr & UI_ATTR_LABEL) != 0, &after_box);\n"
+                 "            if (i == 0 && row > 0) info.attr |= UI_ATTR_MORE_UP;\n"
+                 "            if (more) info.attr |= UI_ATTR_MORE_DOWN;\n");
+            out("            (info.attr & UI_ATTR_LABEL ? ui_draw_row : ui_draw_tile)(app, box, info.label ? info.label : "
+                "\"(null)\", info.image,\n                %s_items[%s].color, info.attr, row == lists[%s].focus);\n"
+                "        }\n    }\n",
+                s->symbol, it->upper, it->upper);
         } else if (it->type == T_LIST) {
             out("    n = %s_shown(r, scale, %s);\n", s->symbol, it->upper);
             out("    for (i = 0; i < n; i++) {\n        size_t row = lists[%s].first + i;\n        GuiRect box = ",
@@ -1604,7 +1743,17 @@ static void write_scene(int scene) {
         const Item* it = &g_uigen.items[i];
         if (it->parent != scene) continue;
         out_from(it->line);
-        if (it->type == T_LIST) {
+        if (is_tiles(it)) { /* placed as drawn, from its first row while they fit */
+            out("    {\n        UiFlow flow;\n        GuiRect box;\n        %s_flow(r, scale, %s, &flow);\n"
+                "        ui_flow_sized(&flow, &lists[%s], scale);\n"
+                "        for (i = 0;; i++) {\n            *row = lists[%s].first + i;\n"
+                "            info.label = NULL;\n            info.image = NULL;\n            info.attr = 0;\n"
+                "            if (!%s_get_row_info(app, *row, flow.tile_w, &info)) break;\n"
+                "            if (!ui_flow_next(&flow, (info.attr & UI_ATTR_LABEL) != 0, &box)) break;\n"
+                "            if (ui_in(box, x, y)) {\n                *item = %s;\n"
+                "                return UI_HIT_HOVER | event;\n            }\n        }\n    }\n",
+                s->symbol, it->upper, it->upper, it->upper, it->symbol, it->upper);
+        } else if (it->type == T_LIST) {
             out("    n = %s_shown(r, scale, %s);\n    for (i = 0; i < n; i++) {\n        GuiRect box = ", s->symbol,
                 it->upper);
             out_row(it, i, "i");
@@ -1697,15 +1846,66 @@ static void write_c(const char* path) {
          "    return gui_rect(r.x, r.y + (int)i * (height + gap) * s, w, height * s);\n}\n");
     outs(
         "/* first set so the focus is among the shown rows of count: in their middle (center) while rows are left to "
-        "move\n   past, else as little moved as it takes */\nstatic void ui_follow(UiList* l, size_t count, size_t shown, "
-        "int center) {\n    size_t last = count > shown ? count - shown : 0;\n    if (!shown) return;\n"
-        "    if (center)\n        l->first = l->focus > (shown - 1) / 2 ? l->focus - (shown - 1) / 2 : 0;\n"
+        "move\n   past, else, and for a focus the pointer put there, as little moved as it takes */\nstatic void "
+        "ui_follow(UiList* l, size_t count, size_t shown, int center) {\n"
+        "    size_t last = count > shown ? count - shown : 0;\n    if (!shown) return;\n"
+        "    if (center && !l->pointed)\n"
+        "        l->first = l->focus > (shown - 1) / 2 ? l->focus - (shown - 1) / 2 : 0;\n"
         "    else if (l->focus < l->first)\n        l->first = l->focus;\n    else if (l->focus >= l->first + shown)\n"
         "        l->first = l->focus - shown + 1;\n    if (l->first > last) l->first = last;\n}\n");
     outs("/* the rows that fit in a list height pixels high, max_rows at most */\n"
          "static size_t ui_shown(int height, int row, int gap, int max_rows, int s) {\n"
          "    int fit = height > 0 ? (height + gap * s) / ((row + gap) * s) : 0;\n"
          "    return (size_t)(fit < max_rows ? fit : max_rows);\n}\n");
+    outs(
+        "void ui_flow_sized(UiFlow* f, const UiList* l, int s) {\n"
+        "    if (l->tile_w <= 0 || l->tile_h <= 0) return;\n"
+        "    f->tile_w = l->tile_w * s;\n    f->tile_h = l->tile_h * s;\n"
+        "    f->cols = (f->area.w + f->gap) / (f->tile_w + f->gap);\n    if (f->cols < 1) f->cols = 1;\n}\n"
+        "bool ui_flow_next(UiFlow* f, bool label, GuiRect* at) {\n"
+        "    int y = f->y, col = f->col, line = f->line, h = label ? f->row_h : f->tile_h;\n"
+        "    if (f->placed >= f->max) return false;\n"
+        "    if (f->line_h && (label || col >= f->cols)) { /* a line of its own, or the line full: the next under it */\n"
+        "        y += f->line_h + f->gap;\n        col = 0;\n        line++;\n    }\n"
+        "    if (y + h > f->area.h) return false;\n"
+        "    *at = label ? gui_rect(f->area.x, f->area.y + y, f->area.w, h)\n"
+        "                : gui_rect(f->area.x + col * (f->tile_w + f->gap), f->area.y + y, f->tile_w, h);\n"
+        "    if (!col) f->line_h = h;\n    f->y = y;\n    f->line = line;\n    f->col = label ? f->cols : col + 1;\n"
+        "    f->placed++;\n    return true;\n}\n");
+    for (i = 0; i < g_uigen.nitems && !is_tiles(&g_uigen.items[i]); i++) continue;
+    if (i < g_uigen.nitems) /* a tile list's: its tiles laid out as every row were one */
+        outs(
+            "/* the tiles a line of a list w pixels wide holds, tile_w each, gap between them: one at least */\n"
+            "static inline int ui_tile_cols(int w, int tile_w, int gap, int s) {\n"
+            "    int cols = (w + gap * s) / ((tile_w + gap) * s);\n    return cols > 0 ? cols : 1;\n}\n"
+            "/* the tiles that fit in a tile list at r, max_rows at most */\n"
+            "static inline size_t ui_tiles_shown(GuiRect r, int tile_w, int tile_h, int gap, int max_rows, int s) {\n"
+            "    size_t fit = (size_t)ui_tile_cols(r.w, tile_w, gap, s) * ui_shown(r.h, tile_h, gap, 1 << 20, s);\n"
+            "    return fit < (size_t)max_rows ? fit : (size_t)max_rows;\n}\n"
+            "/* tile i of a tile list at r */\n"
+            "static inline GuiRect ui_tile(GuiRect r, size_t i, int tile_w, int tile_h, int gap, int s) {\n"
+            "    size_t cols = (size_t)ui_tile_cols(r.w, tile_w, gap, s);\n"
+            "    return gui_rect(r.x + (int)(i % cols) * (tile_w + gap) * s, r.y + (int)(i / cols) * (tile_h + gap) * s,\n"
+            "                    tile_w * s, tile_h * s);\n}\n"
+            "/* first set at a line's first tile, so the focus's line is among the lines shown, as ui_follow keeps a "
+            "row;\n   the list's own tiles where the code sizes them, else tile_w by tile_h */\n"
+            "static inline void ui_follow_tiles(UiList* l, size_t count, GuiRect r, int tile_w, int tile_h, int gap, int "
+            "max_rows,\n                                   int s, int center) {\n"
+            "    size_t cols;\n    UiList lines;\n"
+            "    if (l->tile_w > 0 && l->tile_h > 0) {\n"
+            "        tile_w = l->tile_w;\n        tile_h = l->tile_h;\n    }\n"
+            "    cols = (size_t)ui_tile_cols(r.w, tile_w, gap, s);\n"
+            "    lines.first = l->first / cols;\n    lines.focus = l->focus / cols;\n"
+            "    lines.pointed = l->pointed;\n"
+            "    ui_follow(&lines, (count + cols - 1) / cols, ui_tiles_shown(r, tile_w, tile_h, gap, max_rows, s) / cols, "
+            "center);\n"
+            "    l->first = lines.first * cols;\n}\n"
+            "/* a flow started on a tile list at area, nothing placed yet */\n"
+            "static inline void ui_flow_start(UiFlow* f, GuiRect area, int tile_w, int tile_h, int gap, int max_rows, int "
+            "row_h,\n                                 int s) {\n"
+            "    f->area = area;\n    f->tile_w = tile_w * s;\n    f->tile_h = tile_h * s;\n    f->row_h = row_h * s;\n"
+            "    f->gap = gap * s;\n    f->cols = ui_tile_cols(area.w, tile_w, gap, s);\n    f->max = (size_t)max_rows;\n"
+            "    f->y = f->line_h = f->col = f->line = 0;\n    f->placed = 0;\n}\n");
     for (i = 0; i < g_uigen.nitems && !(g_uigen.items[i].type == T_SCENE && is_frame(i)); i++) continue;
     if (i < g_uigen.nitems) /* a frame's, laid out at run time */
         outs(

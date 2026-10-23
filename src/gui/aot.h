@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* A game's runtime JIT cache as the launcher sees it: where it is, the optimization and hook its key records, and
-   whether the game's AOT optimization may build a pack from it. */
+/* A game's runtime files as the launcher sees them: the folders the runtime keeps them in, and its JIT cache, where it
+   is, the optimization and hook its key records, and whether the game's AOT optimization may build a pack from it. */
 #ifndef SNX_GUI_AOT_H
 #define SNX_GUI_AOT_H
 #include <stdint.h>
@@ -12,6 +12,11 @@ typedef struct {
     int hook;      /* 1: hooked direct calls */
 } GuiAotInfo;
 
+/* The folder of kind (SNX_USER_CONFIG, SNX_USER_STATE or SNX_USER_CACHE) the runtime keeps the files of the game
+   <name> in folder in, as its kind_dir finds it: what <name>.folders beside it records (config=, state=, cache=) when
+   that folder is there, else its user path (snx_user_path: an installed build's) when that is there, else folder.
+   Owned; NULL when out of memory or for a path too long */
+char* gui_game_kind_dir(const char* folder, const char* name, int kind);
 /* where the runtime keeps <name>.jitcache: the .folders cache= folder when it is there, else its user path, else the
    game's folder. Owned; NULL when out of memory */
 char* gui_aot_cache_path(const char* folder, const char* name);

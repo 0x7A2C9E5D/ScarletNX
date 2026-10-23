@@ -54,6 +54,18 @@
 		[button]"C" {}
 	}
 }
+# a tile list: its rows tiles, as many a line as fit, a label on a line of its own; a phone's tiles wider
+[scene]Grid {
+	padding = 4px
+	[list]Tiles {
+		max_rows = 9
+		row_height = 10px
+		row_gap = 4px
+		tile_width = 40px
+		tile_height = 30px
+		android.tile_width = 60px
+	}
+}
 # a frame: slots main.c draws in, laid out at run time by its boxes
 [scene]Frame {
 	direction = column

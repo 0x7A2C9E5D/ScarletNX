@@ -11,6 +11,10 @@
 #else
 #include <sys/statvfs.h> /* Folders on a disk mounted noexec */
 #endif
+/* app.ini as the menu writes it: its head, and the Games options' lines that end [app], at their defaults */
+#define APP_INI_HEAD   "; Settings > App and Games' View in the launcher, as they were left\n[app]\n"
+#define GAMES_DEFAULTS                                                                                                 \
+    "recent_games = on\ngames_dumps = on\ngames_sort = title\ngames_view = list\ngames_icons = medium\n"
 /* the default theme's colours, as the checks below name them */
 static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255}, red = {255, 0, 0, 255},
                        pink = {255, 85, 255, 255}, black = {0, 0, 0, 255};
@@ -885,6 +889,573 @@ static void icon_jpeg_write(void* closure, void* data, int size) {
     assert(j->size + size <= (int)sizeof j->data);
     memcpy(j->data + j->size, data, (size_t)size);
     j->size += size;
+}
+/* a game of folder made in a folder of its own beside its data, as the recompile lays it out (gui_game_folder): a file
+   that runs nothing, which Games lists by its folder's name; its program's path, owned */
+static char* folder_game_in(const char* folder, const char* name) {
+    char *own = snx_path_join(folder, name), *data = snx_format("%s/%s_data", own, name);
+#ifdef _WIN32
+    char* program = snx_format("%s/%s.exe", own, name);
+#else
+    char* program = snx_path_join(own, name);
+#endif
+    assert(!snx_mkdirs(data) && !snx_write_file(program, "game", 4) && !snx_make_executable(program));
+    free(data);
+    free(own);
+    return program;
+}
+/* whether Games lists the game shown so, and the heading text so */
+static bool games_lists(const App* app, const char* shown) {
+    for (size_t i = 0; i < app->games.count; ++i)
+        if (!strcmp(app->games.shown[i], shown)) return true;
+    return false;
+}
+/* Games' View box (V): Recent Games and Dumps, on by default, and Sort, by title; each changed by Enter, Left, Right
+   or a click, kept in app.ini at once and Games listed again by it; an app.ini without them (an older version's) has
+   the defaults, iOS's off; a word it does not know named with the one it keeps */
+static void view_box(App* app, const char* temporary) {
+    char *was_games = app->games_dir, *was_data = app->data_dir, *was_app = app->app_file;
+    char* was_recent_file = app->recent_file;
+    GuiRecent was_recent = app->recent;
+    int was_folders = app->folder_count;
+    char *root = snx_path_join(temporary, "view box"), *dumps = snx_path_join(root, "dumps"), *dump, *game, *kept, *cia;
+    char* was_folder = app->folders[0];
+    int was_library = app->folders_library[0];
+    bool was_deep = app->folders_deep[0];
+    char expected[1024], said[1024];
+    size_t size = 0;
+    app->data_dir = root;
+    app->games_dir = snx_path_join(root, "recompiled");
+    app->app_file = snx_path_join(root, "app.ini");
+    app->recent_file = NULL; /* the list in the menu alone */
+    app->folder_count = 0;
+    game = folder_game_in(app->games_dir, "alpha game");
+    { /* two more, one played after alpha game, one never: Sort's Last opened by their logs */
+        char *delta = folder_game_in(app->games_dir, "delta game"),
+             *epsilon = folder_game_in(app->games_dir, "epsilon game");
+        char* log = snx_format("%s/alpha game/alpha game.log", app->games_dir);
+        assert(!snx_write_file(log, "log", 3) && !snx_set_file_time(log, 1000000));
+        free(log);
+        log = snx_format("%s/delta game/delta game.log", app->games_dir);
+        assert(!snx_write_file(log, "log", 3) && !snx_set_file_time(log, 2000000));
+        free(log);
+        free(epsilon);
+        free(delta);
+    }
+    dump = snx_path_join(dumps, "beta dump.nsp");
+    cia = snx_path_join(app->games_dir, "gamma.cia"); /* in the dumps' group, with them */
+    assert(!snx_mkdirs(dumps) && !snx_write_file(dump, "dump", 4) && !snx_write_file(cia, "cia", 3));
+    app->recent = (GuiRecent){0};
+    assert(!gui_recent_add(&app->recent, game, GUI_SWITCH, 0));
+    go_tab(app, GUI_TAB_GAMES);
+    assert(recent_on(app) && dumps_on(app) && app->browser.head == 1 && games_lists(app, "Dumps") &&
+           games_lists(app, "beta dump.nsp") && games_lists(app, "gamma.cia") && games_lists(app, "alpha game"));
+    render(app);
+    shows(app, "Recent Games", rgb(app->theme.soft));
+    shows(app, "dumps", rgb(app->theme.soft)); /* the side box's folders, dumps/ with them, wrapped at a slash */
+    shows_foot(app, "V", yellow);              /* its key, then what it does; its word presses V as the key does */
+    shows_foot(app, "view", normal);
+    assert(hint_keys[hint_pick("V", 0, false)].key == SDLK_V && !hint_keys[hint_pick("V", 0, false)].mod);
+    assert(hint_keys[hint_pick("View", 1, false)].key == SDLK_V); /* a phone's: the word alone */
+    assert(strstr(screen_said(app, true, said, sizeof said), "V: view."));
+    /* V opens the box, its rows the options, a value each between the arrows */
+    key(app, SDLK_V);
+    assert(app->options_shown && app->options_focus == 0 && app->menu.view == GUI_LOAD_GAMES);
+    render(app);
+    shows(app, "- Recent Games  < On >", yellow);
+    shows(app, "- Dumps         < On >", normal);
+    shows(app, "- Sort          < Title >", normal);
+    /* Enter: Recent Games off, kept at once, Games without its rows */
+    key(app, SDLK_RETURN);
+    assert(app->options_shown && !recent_on(app) && app->browser.head == 0 && games_lead(app) == 0);
+    kept = (char*)snx_read_file(app->app_file, &size);
+    assert(kept && strstr(kept, "\nrecent_games = off\ngames_dumps = on\n"));
+    free(kept);
+    render(app);
+    shows(app, "- Recent Games  < Off >", yellow);
+    hides(app, "Recent Games", rgb(app->theme.soft));
+    /* Down, then Right: Dumps off, the dumps out of the list and its side box, the groups' headings with them */
+    key(app, SDLK_DOWN);
+    assert(app->options_focus == 1);
+    key(app, SDLK_RIGHT);
+    assert(!dumps_on(app) && app->games.count == 3 && games_lists(app, "alpha game") && !games_lists(app, "gamma.cia"));
+    /* Down, then Left: Sort by the last opened, the game whose log a run wrote last first, one never run after them */
+    assert(!strcmp(app->games.names[0], "alpha game") && !strcmp(app->games.names[1], "delta game") &&
+           !strcmp(app->games.names[2], "epsilon game"));
+    key(app, SDLK_DOWN);
+    key(app, SDLK_LEFT);
+    assert(by_last_opened(app) && app->games.count == 3 && !strcmp(app->games.names[0], "delta game") &&
+           !strcmp(app->games.names[1], "alpha game") && !strcmp(app->games.names[2], "epsilon game"));
+    render(app);
+    shows(app, "- Sort          < Last opened >", yellow);
+    key(app, SDLK_UP);
+    kept = (char*)snx_read_file(app->app_file, &size);
+    assert(kept && strstr(kept, "\nrecent_games = off\ngames_dumps = off\ngames_sort = last_opened\n"));
+    free(kept);
+    key(app, SDLK_ESCAPE); /* the box closed, Games still there */
+    assert(!app->options_shown && app->menu.view == GUI_LOAD_GAMES);
+    render(app);
+    hides(app, "Dumps", rgb(app->theme.soft)); /* a group's heading */
+    hides(app, "dumps", rgb(app->theme.soft));
+    shows(app, "recompiled", rgb(app->theme.soft));
+    /* read back as the menu opens; an app.ini without them, an older version's, has the defaults: on, iOS's off */
+    memset(app->options, 0, sizeof app->options);
+    app->message[0] = 0;
+    app_load(app);
+    assert(!recent_on(app) && !dumps_on(app) && by_last_opened(app) && !app->message[0]);
+    snprintf(expected, sizeof expected, "[app]\ntheme = %s\n", app->theme.id);
+    assert(!snx_write_file(app->app_file, expected, strlen(expected)));
+    games_defaults(app, false);
+    app_load(app);
+    assert(recent_on(app) && dumps_on(app) && !by_last_opened(app) && !app->message[0]);
+    assert(app->options[GUI_OPTION_ICONS] == 1); /* Medium */
+    games_defaults(app, true);
+    app_load(app);
+    assert(!recent_on(app) && !dumps_on(app) && !by_last_opened(app) && !app->message[0]);
+    /* a word it does not know: named with the word it keeps, the file's last it knows or the default's */
+    games_defaults(app, false);
+    {
+        const char* broken =
+            "[app]\nrecent_games = maybe\ngames_dumps = off\ngames_dumps = none\ngames_sort = newest\n";
+        assert(!snx_write_file(app->app_file, broken, strlen(broken)));
+        app_load(app);
+        snprintf(expected, sizeof expected,
+                 "Not used from %s: recent_games = maybe (it keeps on), games_dumps = none (it keeps off), "
+                 "games_sort = newest (it keeps title)",
+                 app->app_file);
+        assert(recent_on(app) && !dumps_on(app) && !by_last_opened(app) && !strcmp(app->message, expected));
+        broken = "[app]\nrecent_games = maybe\nrecent_games = off\n"; /* the file's own after it, in use after it */
+        assert(!snx_write_file(app->app_file, broken, strlen(broken)));
+        games_defaults(app, false);
+        app->message[0] = 0;
+        app_load(app);
+        snprintf(expected, sizeof expected, "Not used from %s: recent_games = maybe (it keeps off)", app->app_file);
+        assert(!recent_on(app) && dumps_on(app) && !strcmp(app->message, expected));
+        broken = "[app]\ngames_icons = large\ngames_icons = huge\n"; /* Icon size's three words */
+        assert(!snx_write_file(app->app_file, broken, strlen(broken)));
+        games_defaults(app, false);
+        app->message[0] = 0;
+        app_load(app);
+        snprintf(expected, sizeof expected, "Not used from %s: games_icons = huge (it keeps large)", app->app_file);
+        assert(app->options[GUI_OPTION_ICONS] == 2 && !strcmp(app->message, expected));
+        games_defaults(app, false);
+        app->message[0] = 0;
+    }
+    /* the pointer: over a row its focus, a click changes it; a click off the box closes it */
+    list_games(app);
+    key(app, SDLK_V);
+    {
+        GuiViewBoxes d;
+        GuiRect dumps_row;
+        view_boxes(app, &d);
+        dumps_row = ui_row_box(app, ui_view_row(d.rects, app->scale, UI_VIEW_ROWS, 1));
+        point(app, dumps_row, false);
+        assert(app->options_focus == 1 && dumps_on(app));
+        point(app, dumps_row, true);
+        assert(app->options_shown && !dumps_on(app) && !games_lists(app, "beta dump.nsp"));
+        mouse_px(app, d.box.x + d.box.w + 2, d.box.y + d.box.h + 2, true);
+        assert(!app->options_shown);
+    }
+    /* Dumps off reads no dumps' folder: one that cannot be read is named with them on alone */
+    {
+        char* gone = snx_path_join(root, "gone dumps");
+        app->folders[0] = gone;
+        app->folders_library[0] = GUI_LIBRARY_DUMPS;
+        app->folders_deep[0] = false;
+        app->folder_count = 1;
+        games_defaults(app, false);
+        list_games(app);
+        assert(strstr(app->message, "gone dumps"));
+        app->options[GUI_OPTION_DUMPS] = 1;
+        list_games(app);
+        assert(!strstr(app->message, "gone dumps") && !games_lists(app, "beta dump.nsp"));
+        app->folder_count = 0;
+        free(gone);
+#ifndef _WIN32
+        assert(!chmod(dumps, 0)); /* dumps/ itself, where it cannot be read (not as root) */
+        {
+            char** names = NULL;
+            size_t count = 0;
+            bool unreadable = snx_list_dir(dumps, &names, &count) != 0;
+            if (!unreadable) snx_free_strings(names, count);
+            list_games(app);
+            assert(!app->message[0]);
+            games_defaults(app, false);
+            list_games(app);
+            assert(!unreadable || strstr(app->message, dumps));
+        }
+        assert(!chmod(dumps, 0755));
+#endif
+        app->message[0] = 0;
+    }
+    games_defaults(app, false);
+    app->recent = was_recent;
+    app->recent_file = was_recent_file;
+    app->folder_count = was_folders;
+    app->folders[0] = was_folder;
+    app->folders_library[0] = was_library;
+    app->folders_deep[0] = was_deep;
+    free(app->games_dir);
+    free(app->app_file);
+    app->games_dir = was_games;
+    app->data_dir = was_data;
+    app->app_file = was_app;
+    go_tab(app, GUI_TAB_MENU);
+    app->games_stamp = stamp_now(app);
+    app->message[0] = 0;
+    assert(!snx_remove_tree(root));
+    free(game);
+    free(dump);
+    free(cia);
+    free(dumps);
+    free(root);
+}
+/* the grid's row in focus, as games_boxes has it */
+static size_t grid_focused(App* app) {
+    GuiGamesBoxes g;
+    games_boxes(app, &g);
+    return g.grid_lists[UI_GAMES_GRID_TILES].focus;
+}
+/* where the grid puts row r of a list whose labels are those of label, by the rule ui.txt says, apart from the code
+   that places them: a label on a line of its own, the list's width; tiles cols a line, gap apart both ways */
+static GuiRect grid_model(const UiFlow* f, const bool* label, size_t r, int* line, int* col) {
+    int y = 0, h = 0, l = -1, c = 0;
+    for (size_t i = 0; i <= r; ++i) {
+        if (label[i] || c >= f->cols || l < 0) { /* a line of its own, a full line or the first */
+            if (l >= 0) y += h + f->gap;
+            ++l;
+            c = 0;
+            h = label[i] ? f->row_h : f->tile_h;
+        }
+        *line = l;
+        *col = c;
+        if (i == r)
+            return label[i] ? gui_rect(f->area.x, f->area.y + y, f->area.w, f->row_h)
+                            : gui_rect(f->area.x + c * (f->tile_w + f->gap), f->area.y + y, f->tile_w, f->tile_h);
+        c = label[i] ? f->cols : c + 1;
+    }
+    return gui_rect(0, 0, 0, 0);
+}
+/* View's Grid: Games' rows as tiles, as many a line as fit, "Recent Games" and the groups' headings each on a line of
+   its own; the arrows go to the tile beside, above or under the focus, PgUp and PgDn by the lines that show, the
+   pointer takes a tile and a click opens it; the lines scroll to the focus. Kept as games_view = grid */
+static void grid_view(App* app, const char* temporary) {
+    char *was_games = app->games_dir, *was_data = app->data_dir, *was_app = app->app_file,
+         *was_recent_file = app->recent_file;
+    GuiRecent was_recent = app->recent;
+    int was_folders = app->folder_count, was_size = app->menu.text_size;
+    char *root = snx_path_join(temporary, "grid view"), *dumps = snx_path_join(root, "dumps"), *kept;
+    char* games[7];
+    bool label[16];
+    GuiGamesBoxes g;
+    UiFlow f;
+    GuiRect at;
+    size_t size = 0, rows, r;
+    int line, col;
+    app->data_dir = root;
+    app->games_dir = snx_path_join(root, "recompiled");
+    app->app_file = snx_path_join(root, "app.ini");
+    app->recent_file = NULL;
+    app->folder_count = 0;
+    app->recent = (GuiRecent){0};
+    for (int i = 0; i < 7; ++i) { /* game a to game g; the last five recent, game c the newest */
+        char name[16];
+        snprintf(name, sizeof name, "game %c", 'a' + i);
+        games[i] = folder_game_in(app->games_dir, name);
+    }
+    { /* game b's icon, which its tile draws over its name */
+        IconJpeg jpeg = {{0}, 0};
+        char* icon = snx_format("%s/game b/game b_data/icon.jpg", app->games_dir);
+        assert(!snx_splash_jpeg("wimsy-fuddles", 32, 90, icon_jpeg_write, &jpeg));
+        assert(!snx_write_file(icon, jpeg.data, (size_t)jpeg.size));
+        free(icon);
+    }
+    for (int i = 6; i >= 2; --i) assert(!gui_recent_add(&app->recent, games[i], GUI_SWITCH, 0));
+    assert(!snx_mkdirs(dumps));
+    for (int i = 0; i < 2; ++i) {
+        char* dump = snx_format("%s/dump %c.nsp", dumps, 'x' + i);
+        assert(!snx_write_file(dump, "dump", 4));
+        free(dump);
+    }
+    app->menu.text_size = 1; /* a line holds 4 tiles at least */
+    layout(app);
+    go_tab(app, GUI_TAB_GAMES);
+    /* the View box's last row: View, List, then Grid, kept at once */
+    key(app, SDLK_V);
+    render(app);
+    shows(app, "- View          < List >", normal);
+    hides(app, "Icon size", normal); /* the grid's alone */
+    {
+        int shown_rows[GUI_VIEW_BOX_ROWS];
+        assert(view_rows(app, shown_rows) == GUI_VIEW_BOX_ROWS - 1 && shown_rows[4] == GUI_VIEW_SIDE);
+    }
+    for (int i = 0; i < 3; ++i) key(app, SDLK_DOWN);
+    key(app, SDLK_RETURN);
+    assert(games_grid(app) && app->options_focus == GUI_OPTION_VIEW);
+    kept = (char*)snx_read_file(app->app_file, &size);
+    assert(kept && strstr(kept, "\ngames_view = grid\n"));
+    free(kept);
+    render(app);
+    shows(app, "- View          < Grid >", yellow);
+    { /* under it, the grid's own, Icon size: Medium, ui.txt's tiles; Right Large, 16 cells by 6 rows and 8px, which the
+         grid places, draws and hits; Left back, and again Small, 8 by 3 and 8px; each kept at once */
+        GuiGamesBoxes sized;
+        UiFlow tiles;
+        GuiRect at[3];
+        int item;
+        size_t hit_row;
+        key(app, SDLK_DOWN);
+        assert(app->options_focus == GUI_OPTION_ICONS);
+        render(app);
+        shows(app, "- Icon size     < Medium >", yellow);
+        key(app, SDLK_RIGHT);
+        render(app);
+        shows(app, "- Icon size     < Large >", yellow);
+        kept = (char*)snx_read_file(app->app_file, &size);
+        assert(kept && strstr(kept, "\ngames_view = grid\ngames_icons = large\n"));
+        free(kept);
+        games_boxes(app, &sized);
+        grid_flow(app, &sized, &tiles);
+        assert(tiles.tile_w == 16 * cell_w(app) && tiles.tile_h == 6 * cell_h(app) + 8 * app->scale);
+        for (int i = 0; i < 3; ++i) assert(ui_flow_next(&tiles, games_row_label(app, (size_t)i), &at[i]));
+        assert(!games_row_label(app, 2) && at[2].w == 16 * cell_w(app));
+        assert(ui_games_grid_hit(app, sized.grid_rects, app->scale, sized.grid_lists, at[2].x + at[2].w - 1,
+                                 at[2].y + at[2].h / 2, 0, &item, &hit_row) &&
+               item == UI_GAMES_GRID_TILES && hit_row == 2);
+        key(app, SDLK_LEFT);
+        key(app, SDLK_LEFT);
+        render(app);
+        shows(app, "- Icon size     < Small >", yellow);
+        kept = (char*)snx_read_file(app->app_file, &size);
+        assert(kept && strstr(kept, "\ngames_icons = small\n"));
+        free(kept);
+        games_boxes(app, &sized);
+        grid_flow(app, &sized, &tiles);
+        assert(tiles.tile_w == 8 * cell_w(app) && tiles.tile_h == 3 * cell_h(app) + 8 * app->scale);
+        key(app, SDLK_RIGHT); /* Medium again, for what follows */
+        assert(app->options[GUI_OPTION_ICONS] == 1);
+    }
+    { /* under it the Side panel, Settings > App's and F2's: Right the next of Auto, On and Off, kept at once, Left
+         back, Down round to the first row */
+        int was = app->side_box;
+        char row[64], line[64];
+        key(app, SDLK_DOWN);
+        assert(app->options_focus == GUI_VIEW_SIDE);
+        render(app);
+        snprintf(row, sizeof row, "- Side panel    < %s >", side_names[was]);
+        shows(app, row, yellow);
+        key(app, SDLK_RIGHT);
+        assert(app->side_box == (was + 1) % 3);
+        kept = (char*)snx_read_file(app->app_file, &size);
+        snprintf(line, sizeof line, "\nside_box = %s\n", side_words[(was + 1) % 3]);
+        assert(kept && strstr(kept, line));
+        free(kept);
+        key(app, SDLK_LEFT);
+        assert(app->side_box == was);
+        key(app, SDLK_DOWN);
+        assert(app->options_focus == 0);
+        key(app, SDLK_UP);
+    }
+    key(app, SDLK_ESCAPE);
+    /* one page, all of it; the rows: Recent Games, three recent, Show More, Recompiled, seven games, Dumps, two */
+    rows = games_rows(app);
+    assert(rows == 16 && app->browser.page_size == app->games.count && gui_browser_pages(&app->browser) == 1);
+    for (r = 0; r < rows; ++r) label[r] = games_row_label(app, r);
+    assert(label[0] && !label[1] && !label[4] && label[5] && !label[6] && label[13] && !label[15]);
+    games_boxes(app, &g);
+    ui_games_grid_flow(g.grid_rects, app->scale, UI_GAMES_GRID_TILES, &f);
+    assert(f.cols >= 4 && f.tile_w == 12 * cell_w(app) && f.tile_h == 4 * cell_h(app) + 8 * app->scale &&
+           f.gap == 8 * app->scale && f.row_h == item_h(app));
+    { /* the grid in the wide list's place: three fifths of the screen, the side box the rest */
+        GuiPlace p;
+        place_screen(app, &p, "", GUI_SHOWS_STATUS | GUI_SHOWS_TABS | GUI_SHOWS_SIDE | GUI_SHOWS_WIDE);
+        assert(!memcmp(&g.grid_rects[UI_GAMES_GRID_TILES], &p.list, sizeof p.list));
+    }
+    /* each row where the rule puts it: the pointer over its middle finds it, and none between two tiles */
+    for (r = 0; r < rows; ++r) {
+        int item;
+        size_t hit_row;
+        at = grid_model(&f, label, r, &line, &col);
+        assert(ui_games_grid_hit(app, g.grid_rects, app->scale, g.grid_lists, at.x + at.w / 2, at.y + at.h / 2, 0,
+                                 &item, &hit_row) &&
+               item == UI_GAMES_GRID_TILES && hit_row == r);
+    }
+    at = grid_model(&f, label, 1, &line, &col);
+    {
+        int item;
+        size_t hit_row;
+        assert(!ui_games_grid_hit(app, g.grid_rects, app->scale, g.grid_lists, at.x + at.w + f.gap / 2, at.y + at.h / 2,
+                                  0, &item, &hit_row));
+    }
+    /* drawn there: the label as a row's, a tile's name under its icon, in the middle */
+    render(app);
+    {
+        int x, y;
+        GuiRect label_at = grid_model(&f, label, 0, &line, &col), tile = grid_model(&f, label, 7, &line, &col);
+        assert(find_text(app, "Recent Games", rgb(app->theme.soft), 1, &x, &y) && y >= label_at.y &&
+               y < label_at.y + label_at.h);
+        assert(find_text(app, "game b", normal, 1, &x, &y) && x == tile.x + (tile.w - 6 * cell_w(app)) / 2 &&
+               y > tile.y + tile.h / 2 && y + cell_h(app) <= tile.y + tile.h);
+        assert(find_text(app, "game c", yellow, 1, &x, &y)); /* the focus: the newest recent game */
+        shows(app, "9 game(s)", rgb(app->theme.soft));       /* one page, no page's number */
+        hides(app, "Page 1/1", rgb(app->theme.soft));
+        { /* its icon a square in the middle of its top, over the tile's own colour */
+            int side = SDL_min(tile.w - 4 * app->scale, tile.h - cell_h(app) - 6 * app->scale);
+            SDL_Color back = pixel(app, (float)(tile.x + 2), (float)(tile.y + tile.h / 2));
+            SDL_Color in = pixel(app, (float)(tile.x + tile.w / 2), (float)(tile.y + 2 * app->scale + side / 2));
+            SDL_Color beside =
+                pixel(app, (float)(tile.x + (tile.w - side) / 2 - 2), (float)(tile.y + 2 * app->scale + side / 2));
+            assert(!same_colour(in, back) && same_colour(beside, back));
+        }
+    }
+    { /* F1's box says the grid's keys: the arrows go over the tiles, PgUp and PgDn by the lines */
+        char said[1024];
+        assert(strstr(screen_said(app, true, said, sizeof said), "Arrows: select.") &&
+               strstr(said, "PgUp/PgDown: page.") && !strstr(said, "Left/Right/PgUp/PgDown: page.") &&
+               strstr(said, "V: view."));
+    }
+    /* Right and Left: the row after and before, past a label; nothing past the first */
+    assert(grid_focused(app) == 1);
+    key(app, SDLK_LEFT);
+    assert(grid_focused(app) == 1);
+    for (int i = 0; i < 4; ++i) key(app, SDLK_RIGHT);
+    assert(grid_focused(app) == 6); /* past Show More, Recompiled */
+    key(app, SDLK_LEFT);
+    assert(grid_focused(app) == 4);
+    /* Down and Up: the tile under and over, its column or its line's last; nothing past the first line */
+    key(app, SDLK_LEFT);
+    key(app, SDLK_LEFT);
+    assert(grid_focused(app) == 2);
+    key(app, SDLK_UP);
+    assert(grid_focused(app) == 2);
+    { /* the next tiles' line, its tile at the column or the line's last */
+        int from_line, from_col, l, c, next = -1;
+        size_t want = rows;
+        grid_model(&f, label, 2, &from_line, &from_col);
+        for (r = 0; r < rows && next < 0; ++r) {
+            grid_model(&f, label, r, &l, &c);
+            if (!label[r] && l > from_line) next = l;
+        }
+        for (r = 0; r < rows; ++r) {
+            grid_model(&f, label, r, &l, &c);
+            if (!label[r] && l == next && (want == rows || c <= from_col)) want = r;
+        }
+        key(app, SDLK_DOWN);
+        assert(grid_focused(app) == want && want == 7);
+        key(app, SDLK_UP);
+        assert(grid_focused(app) == 2);
+    }
+    /* PgDn: as many lines as show, here more than there are: the last line's, at its column or the last */
+    key(app, SDLK_PAGEDOWN);
+    assert(grid_focused(app) == 15);
+    key(app, SDLK_PAGEDOWN);
+    assert(grid_focused(app) == 15);
+    key(app, SDLK_PAGEUP);
+    assert(grid_focused(app) == 2);
+    /* Enter on a recent game runs it as the list's does; the pointer over a tile takes the focus, a click opens it:
+       Show More, every recent game */
+    {
+        GuiRect more = grid_model(&f, label, 4, &line, &col), game = grid_model(&f, label, 9, &line, &col);
+        point(app, game, false);
+        assert(grid_focused(app) == 9 && !app->menu.running);
+        point(app, more, true);
+        assert(app->recent_all && grid_focused(app) == 4 && games_rows(app) == 17);
+        app->recent_all = false;
+        list_games(app);
+    }
+    /* the lines from the first shown: a list exactly as tall as those from Recompiled's to the last game's shows them
+       all, from Recompiled's, with the focus on the last */
+    {
+        GuiRect from = grid_model(&f, label, 5, &line, &col), last = grid_model(&f, label, rows - 1, &line, &col);
+        games_boxes(app, &g);
+        g.grid_rects[UI_GAMES_GRID_TILES].h = last.y + last.h - from.y;
+        assert(grid_first(app, &g, rows - 1) == 5);
+        g.grid_rects[UI_GAMES_GRID_TILES].h -= 1; /* a pixel less: from the line after it */
+        assert(grid_first(app, &g, rows - 1) == 6);
+    }
+    /* a label first or last of the rows shown has the arrows of those hidden, as a row has: the grid's lines end on a
+       heading as often as on a tile */
+    {
+        GuiRect b = gui_rect(0, 0, 30 * cell_w(app), item_h(app)), box;
+        SDL_Color page = rgb(app->theme.page), soft = rgb(app->theme.soft);
+        SDL_SetRenderDrawColor(app->renderer, page.r, page.g, page.b, 255);
+        SDL_RenderClear(app->renderer);
+        ui_draw_row(app, b, "Dumps", NULL, 0, UI_ATTR_LABEL | UI_ATTR_MORE_DOWN, false);
+        box = ui_row_box(app, b);
+        text_px_is(app, box.x + box.w - cell_w(app), ui_text_y(app, box), "\x1f", soft, page);
+        SDL_RenderClear(app->renderer);
+        ui_draw_row(app, b, "Dumps", NULL, 0, UI_ATTR_LABEL | UI_ATTR_MORE_UP | UI_ATTR_MORE_DOWN, false);
+        text_px_is(app, box.x + box.w - 2 * cell_w(app), ui_text_y(app, box), "\x1e\x1f", soft, page);
+    }
+    /* big letters: the lines that show fewer than there are; the focus on the last game, the lines from a line's
+       first so it shows, the first lines scrolled out */
+    app->menu.text_size = 4;
+    layout(app);
+    app->browser.selected = app->browser.head + app->games.count - 1;
+    games_boxes(app, &g);
+    {
+        size_t first = g.grid_lists[UI_GAMES_GRID_TILES].first, focus = g.grid_lists[UI_GAMES_GRID_TILES].focus;
+        bool placed = false;
+        ui_games_grid_flow(g.grid_rects, app->scale, UI_GAMES_GRID_TILES, &f);
+        assert(focus == rows - 1 && first > 0);
+        for (r = first; r <= focus && ui_flow_next(&f, games_row_label(app, r), &at); ++r) placed = r == focus;
+        assert(placed); /* the focus fits */
+        ui_games_grid_flow(g.grid_rects, app->scale, UI_GAMES_GRID_TILES, &f);
+        f.area.h = 1 << 30; /* the rows before it, placed as though they showed */
+        f.max = rows;
+        for (r = 0; r < first; ++r) assert(ui_flow_next(&f, games_row_label(app, r), &at));
+        assert(f.col >= f.cols || games_row_label(app, first)); /* a line's first: the one before ends its line */
+    }
+    /* the pointer on a tile of a line that shows moves no line, where a key puts the focus's line in the middle: at a
+       size five lines show at, the focus on a game by the keys, the last tile shown hovered, then Left and Right back
+       to it */
+    app->menu.text_size = 2;
+    layout(app);
+    app->browser.selected = app->browser.head + 4;
+    key(app, SDLK_RIGHT);
+    key(app, SDLK_LEFT);
+    games_boxes(app, &g);
+    {
+        size_t first = g.grid_lists[UI_GAMES_GRID_TILES].first, focus = g.grid_lists[UI_GAMES_GRID_TILES].focus,
+               tile = rows;
+        int focus_line = -1, tile_line = -1;
+        GuiRect last = {0};
+        ui_games_grid_flow(g.grid_rects, app->scale, UI_GAMES_GRID_TILES, &f);
+        for (r = first; r < rows && ui_flow_next(&f, games_row_label(app, r), &at); ++r) {
+            if (r == focus) focus_line = f.line;
+            if (!games_row_label(app, r)) {
+                tile = r;
+                tile_line = f.line;
+                last = at;
+            }
+        }
+        assert(first > 0 && focus_line >= 0 && tile < rows && tile_line > focus_line);
+        point(app, last, false);
+        games_boxes(app, &g);
+        assert(grid_focused(app) == tile && g.grid_lists[UI_GAMES_GRID_TILES].first == first);
+        key(app, SDLK_LEFT);
+        key(app, SDLK_RIGHT);
+        games_boxes(app, &g);
+        assert(grid_focused(app) == tile && g.grid_lists[UI_GAMES_GRID_TILES].first > first);
+    }
+    app->menu.text_size = was_size;
+    games_defaults(app, false);
+    app->recent = was_recent;
+    app->recent_file = was_recent_file;
+    app->folder_count = was_folders;
+    free(app->games_dir);
+    free(app->app_file);
+    app->games_dir = was_games;
+    app->data_dir = was_data;
+    app->app_file = was_app;
+    layout(app);
+    go_tab(app, GUI_TAB_MENU);
+    app->games_stamp = stamp_now(app);
+    app->message[0] = 0;
+    assert(!snx_remove_tree(root));
+    for (int i = 0; i < 7; ++i) free(games[i]);
+    free(dumps);
+    free(root);
 }
 int main(int argc, char** argv) {
 #ifdef _WIN32
@@ -1830,11 +2401,10 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RIGHT); /* the next theme */
         snprintf(id, sizeof id, "%s", app.theme.id);
         assert(strcmp(id, first_id));
-        snprintf(
-            expected, sizeof expected,
-            "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\nui_scale = 1\nlanguage = auto\n"
-            "animations = 0\nside_box = auto\n",
-            id);
+        snprintf(expected, sizeof expected,
+                 APP_INI_HEAD "theme = %s\nui_scale = 1\nlanguage = auto\n"
+                              "animations = 0\nside_box = auto\n" GAMES_DEFAULTS,
+                 id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
         free(kept);
@@ -1859,8 +2429,8 @@ int main(int argc, char** argv) {
         assert(app.menu.text_size == -3);
         pick_size(&app, 0, true);
         snprintf(expected, sizeof expected,
-                 "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\nui_scale = auto\n"
-                 "language = auto\nanimations = 0\nside_box = auto\n",
+                 APP_INI_HEAD "theme = %s\nui_scale = auto\n"
+                              "language = auto\nanimations = 0\nside_box = auto\n" GAMES_DEFAULTS,
                  first_id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -1930,8 +2500,8 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RETURN); /* Enter goes round too */
         assert(app.language == 2 && snx_tr_language() == 1 && !strcmp(app.app_form.language, "Test\303\252s"));
         snprintf(expected, sizeof expected,
-                 "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\nui_scale = auto\n"
-                 "language = xx\nanimations = 0\nside_box = auto\n",
+                 APP_INI_HEAD "theme = %s\nui_scale = auto\n"
+                              "language = xx\nanimations = 0\nside_box = auto\n" GAMES_DEFAULTS,
                  app.theme.id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -4001,6 +4571,8 @@ int main(int argc, char** argv) {
         free(recent_file);
     }
 
+    view_box(&app, temporary);
+    grid_view(&app, temporary);
     /* 3DS: its own driver for drops, CIA browser and recents, with no Switch
        flags or direct execution, even when another item is hovered. */
     {
@@ -4757,7 +5329,7 @@ int main(int argc, char** argv) {
                 assert(strstr(screen_said(&app, true, said, sizeof said), "B: AOT pack."));
                 /* Games' every key at once, the most parts a foot puts together: each in F1's box, none left out */
                 assert(strstr(said, "R: recompile.") && strstr(said, "M: mods.") && strstr(said, "P: folders.") &&
-                       strstr(said, "ESC: back.") && strstr(said, "Tab: screen."));
+                       strstr(said, "V: view.") && strstr(said, "ESC: back.") && strstr(said, "Tab: screen."));
                 assert(strstr(shown_keys(&app, said, sizeof said), "R: recompile.") && strstr(said, "B: AOT pack.") &&
                        strstr(said, "P: folders.") && strstr(said, "ESC: back."));
                 app.aot_state = state;
@@ -5068,8 +5640,9 @@ int main(int argc, char** argv) {
         shows(&app, "\x1f",
               rgb(ui_menu_entries_attr_cb(&app, shown - 1) & UI_ATTR_FAILURE ? app.theme.page : app.theme.soft));
         app.clock = app.theme.blink_ms;
-        /* ui.txt's scroll, center: each focus in the middle of the rows shown, the ends where the list has no more to
-           move */
+        /* ui.txt's scroll, center: each focus the keys put in the middle of the rows shown, the ends where the list
+           has no more to move */
+        app.pointed = false;
         for (int at = 0; at < GUI_ITEM_COUNT; ++at) {
             int want = SDL_clamp(at - (shown - 1) / 2, 0, GUI_ITEM_COUNT - shown);
             app.menu.selected = at;
@@ -5093,6 +5666,24 @@ int main(int argc, char** argv) {
         menu_boxes(&app, &m);
         assert(!m.lists[UI_MENU_ENTRIES].first);
         app.clock = 0;
+        /* the pointer on a row that shows moves nothing, where a key puts the focus in the middle: the last row shown
+           hovered, then Up and Down back to it */
+        point(&app, menu_entry_box(&app, &m, shown - 1), false);
+        menu_boxes(&app, &m);
+        assert(app.menu.selected == shown - 1 && !m.lists[UI_MENU_ENTRIES].first);
+        key(&app, SDLK_UP);
+        key(&app, SDLK_DOWN);
+        menu_boxes(&app, &m);
+        assert(app.menu.selected == shown - 1 && (int)m.lists[UI_MENU_ENTRIES].first ==
+                                                     SDL_clamp(shown - 1 - (shown - 1) / 2, 1, GUI_ITEM_COUNT - shown));
+        { /* scrolled, the top row hovered: the list stays where it was last shown */
+            size_t top = m.lists[UI_MENU_ENTRIES].first;
+            point(&app, menu_entry_box(&app, &m, (int)top), false);
+            menu_boxes(&app, &m);
+            assert(app.menu.selected == (int)top && m.lists[UI_MENU_ENTRIES].first == top);
+        }
+        app.menu.selected = GUI_SWITCH;
+        render(&app);
         /* a drag down moves the focus down row by row while the finger goes, not all at once when it lifts */
         {
             SDL_Event e = {0};

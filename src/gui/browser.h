@@ -25,11 +25,20 @@ bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* erro
 bool gui_games_add_deep(GuiGames* games, const char* directory, int kinds, int depth, char* error, size_t size);
 /* games in two groups: those ready to run, then the dumps and CIAs, each in the order it had; when both have games,
    each under a heading of its own (an entry whose path is NULL, its text shown). A dump made already (made says so of
-   its path) is left out. False when out of memory, games as they were */
+   its path) is left out, and with dumps NULL every dump and CIA, the ready games alone. False when out of memory,
+   games as they were */
 bool gui_games_group(GuiGames* games, const char* ready, const char* dumps,
                      bool (*made)(const char* path, const void* user), const void* user);
 /* whether entry i of games is a group's heading, which nothing runs */
 bool gui_games_heading(const GuiGames* games, size_t i);
+/* The log the runtime writes for the game whose program is at path, again at each run: <name>.log in its state folder
+   (gui_game_kind_dir), <name> the game's folder for one of its own, else the program's name without .exe. Owned, NULL
+   when out of memory */
+char* gui_game_log(const char* path);
+/* games in each group (from a heading to the next) by when each last ran, its log's time (gui_game_log), the newest
+   first; one never run (no log), a dump, a CIA and a VPK after them, each in the order it had, as the headings stay.
+   False when out of memory, games as they were */
+bool gui_games_by_last_opened(GuiGames* games);
 /* whether directory holds a folder that is no game and not hidden: one whose games a deep add would list */
 bool gui_has_folders(const char* directory, int kinds);
 /* games/'s alone: its executable files and game folders, or with cia CIA and VPK files (case-insensitive extension, no execute

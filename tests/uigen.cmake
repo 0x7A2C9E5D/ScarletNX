@@ -55,6 +55,13 @@ ${T}${T}desktop.max_rows = 4
 ${T}${T}[button]\"One\" {}
 ${T}}
 }
+[scene]Tiles {
+${T}[list]Grid {
+${T}${T}tile_width = 40px
+${T}${T}tile_height = 30px
+${T}${T}android.tile_width = 60px
+${T}}
+}
 ")
 execute_process(COMMAND "${UIGEN}" --out "${WORK}/out" "${WORK}/ui.txt"
                 RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors)
@@ -80,6 +87,9 @@ foreach(line
         "void ui_main_draw(App* app, const GuiRect* rects, int scale, const UiList* lists);\n"
         "void ui_main_act(App* app, int item, size_t row, uint32_t hit);\n"
         "void ui_other_${long_symbol}_action_cb(App* app, uint32_t hit);\n"
+        # a tile list's scene: its flow, and its rows' callbacks
+        "void ui_tiles_flow(const GuiRect* rects, int scale, int item, UiFlow* flow);\n"
+        "bool ui_tiles_grid_get_row_info(App* app, size_t row, int width, UiRowInfo* info);\n"
         "bool ui_main_key(App* app, int key, unsigned mods);\n")
     string(FIND "${header}" "${line}" at)
     if(at LESS 0)
@@ -133,7 +143,12 @@ foreach(line
         "void ui_other_layout(GuiRect at, int scale, GuiRect* r) {\n    int s = scale;\n#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)\n"
         "    r[UI_OTHER_MORE] = gui_rect(at.x + UI_AT(0L, at.w, 0L, s), at.y + UI_AT(0L, at.h, 1114112L, s), UI_AT(65536L, at.w, 0L, s), UI_AT(0L, at.h, 2621440L, s));\n"
         "    r[UI_OTHER_MORE] = gui_rect(at.x + UI_AT(0L, at.w, 0L, s), at.y + UI_AT(0L, at.h, 1114112L, s), UI_AT(65536L, at.w, 0L, s), UI_AT(65536L, at.h, -1114112L, s));\n"
-        "bool ui_main_spare_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {\n    (void)app;\n    (void)row;\n    (void)width;\n    (void)info;\n    return false;\n}\n")
+        "bool ui_main_spare_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {\n    (void)app;\n    (void)row;\n    (void)width;\n    (void)info;\n    return false;\n}\n"
+        # a tile list's metrics, a platform's own tile_width a macro as a row's metric, its rows placed by its flow
+        "#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)\n#define UI_TILES_GRID__TILE_WIDTH 60\n#else\n#define UI_TILES_GRID__TILE_WIDTH 40\n#endif\n"
+        "        case UI_TILES_GRID: ui_flow_start(flow, r[UI_TILES_GRID], UI_TILES_GRID__TILE_WIDTH, 30, 2, 8, 17, scale); return;\n"
+        "        case UI_TILES_GRID: return ui_tiles_shown(r[UI_TILES_GRID], UI_TILES_GRID__TILE_WIDTH, 30, 2, 8, scale);\n"
+        "            if (!ui_tiles_grid_get_row_info(app, row, flow.tile_w, &info)) break;\n            if (!ui_flow_next(&flow, (info.attr & UI_ATTR_LABEL) != 0, &box)) break;\n")
     string(FIND "${c}" "${line}" at)
     if(at LESS 0)
         message(FATAL_ERROR "ui.c lacks \"${line}\":\n${c}")
@@ -216,8 +231,16 @@ refused(row_bounds_pct "${S}${T}[list]L {\n${T}${T}min_row_width = 60%\n${T}${T}
 refused(label_attr "${S}${T}[label]\"A\" {\n${T}${T}attr = callback\n${T}}\n}\n" "3: attr is not a property of a label: it takes width, height, grow, color, for-platform")
 refused(attr "${S}${T}[button]\"A\" {\n${T}${T}attr = always\n${T}}\n}\n" "3: attr = always: it is callback")
 refused(rows_attr "${S}${T}[list]L {\n${T}${T}attr = callback\n${T}}\n}\n" "2: attr = callback on a list without items: its get_row_info gives each row's attr")
-refused(platform_gap "[scene]S {\n${T}android.gap = 10px\n}\n" "2: android.gap: a platform's own value is a width, a height, or a list's row_height, row_gap or max_rows")
-refused(platform_button "${S}${T}[button]\"A\" {\n${T}${T}desktop.row_gap = 4px\n${T}}\n}\n" "3: desktop.row_gap: a platform's own value is a width, a height, or a list's row_height, row_gap or max_rows")
+refused(platform_gap "[scene]S {\n${T}android.gap = 10px\n}\n" "2: android.gap: a platform's own value is a width, a height, or a list's row_height, row_gap, max_rows, tile_width or tile_height")
+refused(platform_button "${S}${T}[button]\"A\" {\n${T}${T}desktop.row_gap = 4px\n${T}}\n}\n" "3: desktop.row_gap: a platform's own value is a width, a height, or a list's row_height, row_gap, max_rows, tile_width or tile_height")
+# a tile list: both its tiles' lengths, in pixels, a pixel at least; its rows from callbacks, its tiles' own width
+refused(tile_alone "${S}${T}[list]L {\n${T}${T}tile_width = 10cols\n${T}}\n}\n" "2: tile_width without tile_height: a tile list has both, its tiles' width and height")
+refused(tile_height_alone "${S}${T}[list]L {\n${T}${T}tile_height = 4rows\n${T}}\n}\n" "2: tile_height without tile_width: a tile list has both, its tiles' width and height")
+refused(tile_items "${S}${T}[list]L {\n${T}${T}tile_width = 10cols\n${T}${T}tile_height = 4rows\n${T}${T}[button]\"A\" {}\n${T}}\n}\n" "2: tile_width on a list with items: a tile list's rows come from its get_row_info")
+refused(tile_row_width "${S}${T}[list]L {\n${T}${T}tile_width = 10cols\n${T}${T}tile_height = 4rows\n${T}${T}max_row_width = 50%\n${T}}\n}\n" "2: max_row_width on a tile list: its tiles are tile_width wide, a label its whole width")
+refused(tile_zero "${S}${T}[list]L {\n${T}${T}tile_width = 0px\n${T}${T}tile_height = 4rows\n${T}}\n}\n" "2: tile_width = 0px: a tile is a pixel at least")
+refused(tile_percent "${S}${T}[list]L {\n${T}${T}tile_width = 10%\n${T}}\n}\n" "3: tile_width = 10%: pixels end in px, cols or rows")
+refused(tile_platform "${S}${T}[list]L {\n${T}${T}android.tile_width = 60px\n${T}}\n}\n" "2: a platform's tile_width or tile_height on a list that is no tile list: it has them on every platform, its own where a platform sets them")
 refused(platform_value "${S}${T}[list]L {\n${T}${T}android.row_height = 5%\n${T}}\n}\n" "3: row_height = 5%: pixels end in px, cols or rows")
 refused(platform_twice "${S}${T}[list]L {\n${T}${T}android.row_gap = 4px\n${T}${T}android.row_gap = 6px\n${T}}\n}\n" "4: android.row_gap is set twice for one list")
 refused(table_name "${S}${T}[list]Layout {}\n}\n" "2: ui_s_layout is the scene's own table or function: name it otherwise")
