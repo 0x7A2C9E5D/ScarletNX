@@ -411,6 +411,7 @@ static int object(const char* callee_name, const char* data_name, const char* ca
                   size_t* size) {
     return object_for("aarch64-unknown-linux-gnu", callee_name, data_name, caller_name, data, size);
 }
+#endif
 
 /* the definitions object() calls into */
 static int definitions_for(const char* triple, unsigned char** data, size_t* size) {
@@ -429,6 +430,7 @@ static int definitions_for(const char* triple, unsigned char** data, size_t* siz
     snx_ir_free(ir);
     return 0;
 }
+#ifndef __APPLE__
 static int definitions(unsigned char** data, size_t* size) {
     return definitions_for("aarch64-unknown-linux-gnu", data, size);
 }
@@ -520,6 +522,66 @@ static int jit_objects(const char* triple) {
     snx_code_loader_free(loader);
     free(caller_data);
     free(second_data);
+    return 0;
+}
+
+/* an object of nothing but bytes in a code section, which makes the load's code as large as bytes say */
+static int filler_object(const char* triple, size_t bytes, unsigned char** data, size_t* size) {
+    char error[1024];
+    SnxIr* ir = snx_ir_new_target("filler", '2', triple, error, sizeof(error));
+    LLVMTypeRef type;
+    LLVMValueRef filler;
+    if (!ir) return snx_error("%s", error);
+    type = LLVMArrayType(ir->t_i8, (unsigned)bytes);
+    filler = LLVMAddGlobal(ir->mod, type, "filler");
+    LLVMSetInitializer(filler, LLVMConstNull(type));
+    LLVMSetSection(filler, ".text.filler");
+    if (snx_ir_object(ir, '2', data, size, error, sizeof(error))) return snx_error("%s", error);
+    snx_ir_free(ir);
+    return 0;
+}
+
+/* A game's pack is one load of more code than B and BL reach (128 MiB): a call from its first object to a definition
+   in its last goes through a veneer in the caller object's island, which the call reaches, and the veneer to the
+   definition, which it does not */
+static int large_load(const char* triple) {
+    char error[1024];
+    unsigned char *caller_data, *filler_data, *defs_data;
+    size_t caller_size, filler_size, defs_size;
+    SnxLinkInput inputs[3];
+    const char* names[1] = {"caller"};
+    SnxU64 caller, target, callee;
+    SnxCodeLoader* loader;
+    int indirect = -1;
+    uint64_t distance;
+    if (object_for(triple, "ext_fn", "ext_data", "caller", &caller_data, &caller_size) ||
+        filler_object(triple, (size_t)140 << 20, &filler_data, &filler_size) ||
+        definitions_for(triple, &defs_data, &defs_size))
+        return 1;
+    inputs[0].data = caller_data;
+    inputs[0].size = caller_size;
+    inputs[0].name = "caller";
+    inputs[1].data = filler_data;
+    inputs[1].size = filler_size;
+    inputs[1].name = "filler";
+    inputs[2].data = defs_data;
+    inputs[2].size = defs_size;
+    inputs[2].name = "definitions";
+    loader = snx_code_loader_new_machine((size_t)512 << 20, EM_AARCH64, error, sizeof(error));
+    if (!loader) return snx_error("loader: %s", error);
+    if (snx_code_load(loader, inputs, 3, names, 1, &caller, error, sizeof(error)))
+        return snx_error("large load (%s): %s", triple, error);
+    target = first_branch(caller);
+    distance = target > caller ? target - caller : caller - target;
+    check(target && distance < ((uint64_t)128 << 20), "the call reaches its veneer");
+    callee = stub_target(target, &indirect);
+    check(callee && indirect == 0, "the veneer jumps directly");
+    distance = callee > caller ? callee - caller : caller - callee;
+    check(distance > ((uint64_t)128 << 20), "the definition is beyond B's reach");
+    snx_code_loader_free(loader);
+    free(caller_data);
+    free(filler_data);
+    free(defs_data);
     return 0;
 }
 
@@ -816,6 +878,7 @@ int main(void) {
     riscv_relocations();
     loongarch_relocations();
     if (llvm_objects()) ++failures;
+    if (large_load("aarch64-unknown-linux-gnu")) ++failures;
 #ifndef __APPLE__ /* AOT modules, which macOS doesn't link as ELF (link_elf.c) */
     if (ppc64le_objects() || ppc64le_tail_call()) ++failures;
     if (other_objects("riscv64-unknown-linux-gnu", EM_RISCV, "RISC-V") ||
