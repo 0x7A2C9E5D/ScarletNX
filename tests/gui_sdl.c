@@ -5675,6 +5675,8 @@ int main(int argc, char** argv) {
         GuiMenuBoxes m;
         menu_boxes(&app, &m);
         assert(ui_menu_shown(m.rects, app.scale, UI_MENU_ENTRIES) >= GUI_ITEM_COUNT && GUI_SWITCH == 0);
+        /* room past a list's default 8 rows: a ninth entry (Android's Exit) shows where it fits, no scroll */
+        assert(ui_menu_shown(m.rects, app.scale, UI_MENU_ENTRIES) > 8);
     }
     go_tab(&app, GUI_TAB_GAMES);
     assert(app.menu.view == GUI_LOAD_GAMES && app.games.count == 35 && !app.message[0]);
