@@ -14,7 +14,8 @@ static const VitaHle* find(uint32_t nid) {
     static const VitaHle* const tables[] = {vita_hle_kernel, vita_hle_io,    vita_hle_ctrl, vita_hle_display,
                                             vita_hle_audio,  vita_hle_misc, vita_hle_gxm, vita_hle_libc,
                                             vita_hle_fiber, vita_hle_ngs, vita_hle_mp4, vita_hle_videodec,
-                                            vita_hle_audiodec, vita_hle_dialog, vita_hle_net};
+                                            vita_hle_audiodec, vita_hle_dialog, vita_hle_net,
+                                            vita_hle_trophy};
     for (size_t i = 0; i < sizeof tables / sizeof *tables; ++i)
         for (const VitaHle* h = tables[i]; h->name; ++h)
             if (h->nid == nid) return h;

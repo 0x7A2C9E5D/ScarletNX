@@ -2001,8 +2001,8 @@ static void fragment_output(T* t) {
     SPV_VOID(&t->e, SPV_OP_STORE, out, SPV(&t->e, SPV_OP_COMPOSITE_CONSTRUCT, t->t_v4f, v.c[0], v.c[1], v.c[2], v.c[3]));
 }
 
-bool usse_translate(const unsigned char* gxp, size_t size, const UsseHints* hints, UsseShader* out, char* error,
-                    size_t error_size) {
+bool usse_translate(const unsigned char* gxp, size_t size, const UsseHints* hints, bool preserve_infnan,
+                    UsseShader* out, char* error, size_t error_size) {
     memset(out, 0, sizeof *out);
     if (size < 160 || gxp_u32(gxp) != GXP_MAGIC) {
         snprintf(error, error_size, "not a GXP program");
@@ -2104,6 +2104,7 @@ bool usse_translate(const unsigned char* gxp, size_t size, const UsseHints* hint
                            t->global_count);
         if (t->fragment) spv_emit_fragment_origin_upper_left(e, main);
         if (t->frag_depth) spv_emit_fragment_depth_replacing(e, main);
+        spv_emit_float_controls(e, main, 0, preserve_infnan, 0);
         out->words = spv_emit_finish(e, &out->count);
         ok = out->words != NULL;
     }

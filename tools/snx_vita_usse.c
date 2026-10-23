@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
         }
         UsseShader shader;
         char error[256];
-        if (usse_translate(program, size, &hints, &shader, error, sizeof error)) {
+        if (usse_translate(program, size, &hints, true, &shader, error, sizeof error)) {
             ++translated;
             char *spv = NULL, *base = snx_format("%.*s", (int)(length - 4), names[i]);
             if (out || validate) spv = out ? snx_format("%s/%s.spv", out, base) : snx_format("%s.spv", path);

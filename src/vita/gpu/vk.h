@@ -21,7 +21,7 @@ typedef struct {
     VkPhysicalDeviceProperties properties;
     VkPhysicalDeviceMemoryProperties memory_properties;
     VkDeviceSize host_alignment; /* minImportedHostPointerAlignment */
-    bool preserve_infnan;
+    bool preserve_infnan; /* shaderSignedZeroInfNanPreserveFloat32: the shaders declare SignedZeroInfNanPreserve */
     bool bc; /* the device samples BC1 to BC3 (textureCompressionBC) */
     bool depth16_blit; /* D16 depth images blit both ways (a depth surface scaled to and from its samples) */
     /* the color attachment read as an input attachment while rendered to (VK_KHR_dynamic_rendering_local_read), in

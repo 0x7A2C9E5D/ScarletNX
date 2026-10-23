@@ -180,6 +180,7 @@ struct VitaGxm;
 struct VitaAudio;
 struct VitaMp4;
 struct VitaNet;
+struct VitaTrophy;
 struct VitaVideodec;
 struct VitaAudiodec;
 typedef struct VitaProcess {
@@ -228,6 +229,8 @@ typedef struct VitaProcess {
     } dialog;
     /* the network's state (vita/hle/net.c), made at its first use */
     struct VitaNet* net;
+    /* the trophies (vita/hle/trophy.c), made at their first use */
+    struct VitaTrophy* trophy;
     /* each import's function (vita/hle/hle.c), looked up at its first call; unknown_logged: reported as missing */
     const void** hle;
     uint32_t* unknown_logged;

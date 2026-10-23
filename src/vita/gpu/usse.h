@@ -56,9 +56,12 @@ typedef struct {
     bool reads_color;      /* a fragment program that starts with its pixel's color in O0 (FRAGCOLOR_USED) */
 } UsseShader;
 
-/* program's bytes (size of them) to a shader: false with the reason in error (an instruction not translated yet) */
-bool usse_translate(const unsigned char* program, size_t size, const UsseHints* hints, UsseShader* out, char* error,
-                    size_t error_size);
+/* program's bytes (size of them) to a shader: false with the reason in error (an instruction not translated yet).
+   preserve_infnan declares SPV_KHR_float_controls' SignedZeroInfNanPreserve for 32-bit floats (for a device with
+   shaderSignedZeroInfNanPreserveFloat32): without it the driver may assume no infinities, NaNs or signed zeros, and
+   fold away what the SGX computes with them (a log2 of zero's -inf, a reciprocal of zero's +inf) */
+bool usse_translate(const unsigned char* program, size_t size, const UsseHints* hints, bool preserve_infnan,
+                    UsseShader* out, char* error, size_t error_size);
 void usse_shader_free(UsseShader* shader);
 
 /* The shader corpus (the vita_shader_corpus setting): a program and the hints it was translated with, written to

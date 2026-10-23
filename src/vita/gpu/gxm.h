@@ -53,6 +53,7 @@ typedef struct {
     uint32_t blend_info;
     void* shader;
 } GxmFragmentProgram;
+#define GXM_COLOR_SWIZZLE3_RGB 0x00100000u /* SCE_GXM_COLOR_SWIZZLE3_RGB: a three-component format's B first */
 /* a color surface as sceGxmColorSurfaceInit made it (the guest's SceGxmColorSurface holds these words) */
 typedef struct {
     uint32_t flags, width, height, stride, data, format, type, output_register_size;

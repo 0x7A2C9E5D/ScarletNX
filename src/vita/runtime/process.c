@@ -315,6 +315,7 @@ void vita_process_free(VitaProcess* p) {
     vita_videodec_free(p);
     vita_audiodec_free(p);
     vita_net_free(p);
+    vita_trophy_free(p);
     vita_gxm_free(p);
     if (p->mem) snx_vm_release(p->mem, VITA_SPACE + 0x10000);
     free(p->unknown_logged);
