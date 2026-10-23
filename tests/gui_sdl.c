@@ -1700,6 +1700,7 @@ static void add_mod(App* app, const char* temporary) {
     free(fonts);
     free(data);
     free(mods);
+    free(root);
 }
 /* a module's head at path, as far as the build ID the runtime names a cheats file by: an NSO's (NSO0 at 0), or an
    NRO's (NRO0 at 0x10), the ID's first 8 bytes at 0x40 those of id, 16 hex digits */
