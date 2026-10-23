@@ -301,7 +301,7 @@ static bool save_file(const char* path, const unsigned char* data, uint32_t size
     unsigned char* bytes = calloc(total ? total : 1, 1);
     bool ok = bytes != NULL;
     if (ok) {
-        memcpy(bytes, old, old_size < total ? old_size : total);
+        if (old) memcpy(bytes, old, old_size < total ? old_size : total); /* none before the first save */
         if (data) memcpy(bytes + offset, data, size);
         char* folder = snx_dirname(path);
         ok = folder && !snx_mkdirs(folder) && !snx_write_file(path, bytes, total);
