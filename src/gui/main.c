@@ -10226,7 +10226,8 @@ int snx_gui_migrate(const char* self, const char* option) {
 static struct {
     const char* dir;
     Uint64 at, deadline;
-    int step;
+    int step, page;
+    bool advance;
     char want[64];
 } tour;
 static void tour_shot(App* app) {
@@ -10250,6 +10251,20 @@ static void tour_tick(App* app) {
         tour.at = now + 3000;
     }
     if (!tour.dir[0] || now < tour.at || tour.want[0]) return;
+    if (app->setup_on) { /* the setup first, a page at a time: its picture, then Next */
+        char name[32];
+        if (tour.advance) {
+            tour.advance = false;
+            setup_next(app);
+            layout(app);
+            tour.at = now + 900;
+            return;
+        }
+        snprintf(name, sizeof name, "00-setup-%d", tour.page++);
+        snprintf(tour.want, sizeof tour.want, "%s", name);
+        tour.advance = true;
+        return;
+    }
 #define TOUR(name, wait) do { snprintf(tour.want, sizeof tour.want, "%s", name); tour.at = now + (wait); } while (0)
     switch (tour.step++) {
         case 0: TOUR("01-menu", 1500); break;
