@@ -4623,22 +4623,37 @@ int main(int argc, char** argv) {
             assert(!snx_write_file(file, "no mod", 6));
             free(file);
             assert(!snx_ini_record(ini, "mods_off", "B mod"));
+            /* three cheats in its data folder's cheats/, the second left out; the third has a | in its name, which
+               cheats_off= cannot name: it always runs */
+            file = snx_format("%s/cheats", dirs[0]);
+            assert(!snx_mkdirs(file));
+            free(file);
+            file = snx_format("%s/cheats/0123456789ABCDEF.txt", dirs[0]);
+            assert(!snx_write_file(file, "[60 FPS]\n04000000 0 1\n[Infinite HP]\n04000000 4 2\n[Speed x2|x4]\n",
+                                   strlen("[60 FPS]\n04000000 0 1\n[Infinite HP]\n04000000 4 2\n[Speed x2|x4]\n")));
+            free(file);
+            assert(!snx_ini_record(ini, "cheats_off", "Infinite HP"));
             app.menu.selected = GUI_SWITCH;
             go_tab(&app, GUI_TAB_GAMES);
             focus_game(&app, "0100ABCD12340000");
             assert(
                 app.games.addons[app.browser.page * app.browser.page_size + app.browser.selected - app.browser.head] ==
-                5);
+                8);
             key(&app, SDLK_RETURN);
-            /* rows: Update 1.2.0, Update 1.0.0, No update, DLC 1, A mod, B mod, Open mods folder, Save, Play */
+            /* rows: Update 1.2.0, Update 1.0.0, No update, DLC 1, A mod, B mod, 60 FPS, Infinite HP, Speed x2|x4, Open
+               mods folder, Open cheats folder, Save, Play */
             assert(app.addons_shown && !app.menu.running && app.addons.count == 3 && app.mods_count == 2 &&
-                   addons_rows(&app) == 9);
+                   app.cheats_count == 3 && addons_rows(&app) == 13);
             assert(!app.addons_checked[0] && !app.addons_checked[1] && app.addons_checked[2]);
             assert(app.mods_on[0] && !app.mods_on[1] && !strcmp(app.mods[0], "A mod"));
+            assert(app.cheats_on[0] && !app.cheats_on[1] && app.cheats_on[2] && !strcmp(app.cheats[1], "Infinite HP"));
             render(&app);
             assert(find_text(&app, "[x] A mod", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "[ ] B mod", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "Open mods folder", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "[x] 60 FPS", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "[ ] Infinite HP", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "Open cheats folder", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "( ) Update 1.2.0", rgb(app.theme.ink), 1, &nx, &ny) ||
                    find_text(&app, "( ) Update 1.2.0", yellow, 1, &nx, &ny));
             assert(find_text(&app, "(*) No update", rgb(app.theme.ink), 1, &nx, &ny));
@@ -4703,8 +4718,19 @@ int main(int argc, char** argv) {
             key(&app, SDLK_DOWN);
             key(&app, SDLK_RETURN);
             assert(!app.mods_on[0] && app.mods_on[1]);
-            for (i = 0; i < 2; i++) key(&app, SDLK_DOWN);
-            assert(app.addons_focus == 7);
+            /* and 60 FPS left out, Infinite HP run; Speed x2|x4 says why it stays */
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN);
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN);
+            key(&app, SDLK_DOWN);
+            app.message[0] = 0;
+            key(&app, SDLK_RETURN);
+            assert(!app.cheats_on[0] && app.cheats_on[1] && app.addons_focus == 8 &&
+                   !strcmp(app.message,
+                           "\"Speed x2|x4\" always runs: a | in its name, which cheats_off= puts between two"));
+            for (i = 0; i < 3; i++) key(&app, SDLK_DOWN);
+            assert(app.addons_focus == 11);
             key(&app, SDLK_RETURN);
             assert(!app.addons_shown && !app.menu.running && strstr(app.message, "kept"));
             checked = snx_ini_value(ini, "addons");
@@ -4712,6 +4738,9 @@ int main(int argc, char** argv) {
             free(checked);
             checked = snx_ini_value(ini, "mods_off");
             assert(checked && !strcmp(checked, "A mod"));
+            free(checked);
+            checked = snx_ini_value(ini, "cheats_off");
+            assert(checked && !strcmp(checked, "60 FPS"));
             free(checked);
             /* Play: the older update's program run, as kept */
             key(&app, SDLK_RETURN);
@@ -4735,8 +4764,8 @@ int main(int argc, char** argv) {
             key(&app, SDLK_DOWN);
             key(&app, SDLK_DOWN);
             key(&app, SDLK_RETURN);
-            for (i = 0; i < 6; i++) key(&app, SDLK_DOWN);
-            assert(app.addons_focus == 8);
+            for (i = 0; i < 10; i++) key(&app, SDLK_DOWN);
+            assert(app.addons_focus == 12);
             key(&app, SDLK_RETURN);
             assert(!app.addons_shown && app.menu.running && !app.recompile);
             {
