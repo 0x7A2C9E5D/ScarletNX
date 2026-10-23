@@ -819,6 +819,16 @@ msgid "out of memory"
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "Mod %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Cheat %s"
+msgstr ""
+
+#: src/gui/main.c
 msgid "No update"
 msgstr ""
 

@@ -4648,11 +4648,11 @@ int main(int argc, char** argv) {
             assert(app.mods_on[0] && !app.mods_on[1] && !strcmp(app.mods[0], "A mod"));
             assert(app.cheats_on[0] && !app.cheats_on[1] && app.cheats_on[2] && !strcmp(app.cheats[1], "Infinite HP"));
             render(&app);
-            assert(find_text(&app, "[x] A mod", rgb(app.theme.ink), 1, &nx, &ny));
-            assert(find_text(&app, "[ ] B mod", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "[x] Mod A mod", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "[ ] Mod B mod", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "Open mods folder", rgb(app.theme.ink), 1, &nx, &ny));
-            assert(find_text(&app, "[x] 60 FPS", rgb(app.theme.ink), 1, &nx, &ny));
-            assert(find_text(&app, "[ ] Infinite HP", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "[x] Cheat 60 FPS", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "[ ] Cheat Infinite HP", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "Open cheats folder", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "( ) Update 1.2.0", rgb(app.theme.ink), 1, &nx, &ny) ||
                    find_text(&app, "( ) Update 1.2.0", yellow, 1, &nx, &ny));

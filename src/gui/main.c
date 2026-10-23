@@ -3004,15 +3004,17 @@ static void addons_label(const App* app, int row, char* label, size_t size) {
     int item = addons_row(app, row);
     size_t i;
     bool none = true;
+    char what[256]; /* a mod's or a cheat's name with its kind, as an update's and a DLC's are */
     for (i = 0; i < addons_updates(app); ++i) none = none && !app->addons_checked[i];
-    if (addons_mod(app, item) >= 0)
-        snprintf(label, size, "%s%s %s", app->theme.marker, app->mods_on[addons_mod(app, item)] ? "[x]" : "[ ]",
-                 app->mods[addons_mod(app, item)]);
-    else if (addons_cheat(app, item) >= 0)
+    if (addons_mod(app, item) >= 0) {
+        snprintf(what, sizeof what, snx_tr("Mod %s"), app->mods[addons_mod(app, item)]);
+        snprintf(label, size, "%s%s %s", app->theme.marker, app->mods_on[addons_mod(app, item)] ? "[x]" : "[ ]", what);
+    } else if (addons_cheat(app, item) >= 0) {
+        snprintf(what, sizeof what, snx_tr("Cheat %s"), app->cheats[addons_cheat(app, item)]);
         snprintf(label, size, "%s%s %s", app->theme.marker,
                  app->cheats_on[addons_cheat(app, item)] || cheat_kept(app, addons_cheat(app, item)) ? "[x]" : "[ ]",
-                 app->cheats[addons_cheat(app, item)]);
-    else if (item >= 0)
+                 what);
+    } else if (item >= 0)
         snprintf(label, size, "%s%s %s", app->theme.marker,
                  addon_kind(app, (size_t)item) == SNX_ADDON_UPDATE ? (app->addons_checked[item] ? "(*)" : "( )")
                                                                    : (app->addons_checked[item] ? "[x]" : "[ ]"),
