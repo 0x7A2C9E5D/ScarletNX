@@ -309,7 +309,7 @@ static void test_hit(void) {
 
 static void test_follow_and_keys(void) {
     GuiRect r[UI_MAIN_ITEMS];
-    UiList list;
+    UiList list = {0};
     App app = {0};
     ui_main_layout(gui_rect(10, 20, 400, 300), 1, r);
     /* LoadList keeps its focus in the middle (center, the default), as far as its rows go */
@@ -320,6 +320,17 @@ static void test_follow_and_keys(void) {
     list.focus = 1;
     ui_main_follow(r, 1, UI_MAIN_LOAD_LIST, 4, &list);
     assert(list.first == 0);
+    /* a focus the pointer put there: on a row that shows, nothing moves (the middle would be first 0); on one that
+       does not, as little as it takes */
+    list.first = 1;
+    list.pointed = true;
+    ui_main_follow(r, 1, UI_MAIN_LOAD_LIST, 4, &list);
+    assert(list.first == 1);
+    list.first = 0;
+    list.focus = 3;
+    ui_main_follow(r, 1, UI_MAIN_LOAD_LIST, 4, &list);
+    assert(list.first == 1);
+    list.pointed = false;
     /* Games (edge) moves as little as it takes */
     list.first = 0;
     list.focus = 7;
@@ -450,6 +461,11 @@ static void test_tiles(void) {
     lists[UI_GRID_TILES].focus = 12;
     ui_grid_follow(r, 1, UI_GRID_TILES, 13, &lists[UI_GRID_TILES]);
     assert(lists[UI_GRID_TILES].first == 6); /* the last 3 lines of 5, at a line's first */
+    lists[UI_GRID_TILES].focus = 7;
+    lists[UI_GRID_TILES].pointed = true;
+    ui_grid_follow(r, 1, UI_GRID_TILES, 13, &lists[UI_GRID_TILES]);
+    assert(lists[UI_GRID_TILES].first == 6); /* the pointer's on a line that shows: nothing moves (the middle: 3) */
+    lists[UI_GRID_TILES].pointed = false;
     lists[UI_GRID_TILES].focus = 4;
     ui_grid_follow(r, 1, UI_GRID_TILES, 13, &lists[UI_GRID_TILES]);
     assert(lists[UI_GRID_TILES].first == 0);

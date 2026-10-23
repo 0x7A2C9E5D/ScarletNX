@@ -36,8 +36,9 @@
      list    width, height, grow (its share of the free length along its scene's axis; 1 when it has no length),
              max_rows (1 to 64, 8 by default: it shows the rows that fit, those at most), row_height (17px by
              default), row_gap (2px by default, under each row), scroll (center, the default, or edge: where the
-             row in focus stays as the list moves), min_row_width and max_row_width (a row's width kept between
-             them), tile_width and tile_height (both or neither, pixels: a tile list), attr, color
+             row in focus stays as the list moves; a focus the pointer put on a row moves nothing), min_row_width
+             and max_row_width (a row's width kept between them), tile_width and tile_height (both or neither,
+             pixels: a tile list), attr, color
      button  width, height, grow (17px along, the whole inside across, by default), attr, color, key, for-platform
      label   as a button, without attr and key
    An item of a list is a row: it takes attr, color, key and for-platform alone, and shows its "Text". attr = callback:
@@ -1250,8 +1251,9 @@ static void write_h(const char* path) {
     outs("/* an item of a scene: its parent's index (-1: the scene's own), its text's offset in the scene's texts */\n"
          "typedef struct {\n    uint8_t type, color; /* UiType, UiColor */\n    int16_t parent;\n    uint16_t text;\n"
          "} UiItem;\n");
-    outs("/* a list's state, the caller's: the row it shows first and the row in focus */\ntypedef struct {\n"
-         "    size_t first, focus;\n} UiList;\n");
+    outs("/* a list's state, the caller's: the row it shows first, the row in focus, and whether the pointer put the "
+         "focus\n   there, which keeps first where it is while the focus shows */\ntypedef struct {\n"
+         "    size_t first, focus;\n    bool pointed;\n} UiList;\n");
     outs(
         "/* a row a list without items asks get_row_info for: its text (NULL: \"(null)\", as printf's %s prints it), the\n"
         "   image before it (NULL: none; main.c's, which draws it) and how it is drawn */\ntypedef struct {\n"
@@ -1836,9 +1838,11 @@ static void write_c(const char* path) {
          "    return gui_rect(r.x, r.y + (int)i * (height + gap) * s, w, height * s);\n}\n");
     outs(
         "/* first set so the focus is among the shown rows of count: in their middle (center) while rows are left to "
-        "move\n   past, else as little moved as it takes */\nstatic void ui_follow(UiList* l, size_t count, size_t shown, "
-        "int center) {\n    size_t last = count > shown ? count - shown : 0;\n    if (!shown) return;\n"
-        "    if (center)\n        l->first = l->focus > (shown - 1) / 2 ? l->focus - (shown - 1) / 2 : 0;\n"
+        "move\n   past, else, and for a focus the pointer put there, as little moved as it takes */\nstatic void "
+        "ui_follow(UiList* l, size_t count, size_t shown, int center) {\n"
+        "    size_t last = count > shown ? count - shown : 0;\n    if (!shown) return;\n"
+        "    if (center && !l->pointed)\n"
+        "        l->first = l->focus > (shown - 1) / 2 ? l->focus - (shown - 1) / 2 : 0;\n"
         "    else if (l->focus < l->first)\n        l->first = l->focus;\n    else if (l->focus >= l->first + shown)\n"
         "        l->first = l->focus - shown + 1;\n    if (l->first > last) l->first = last;\n}\n");
     outs("/* the rows that fit in a list height pixels high, max_rows at most */\n"
@@ -1876,6 +1880,7 @@ static void write_c(const char* path) {
             "max_rows,\n                                   int s, int center) {\n"
             "    size_t cols = (size_t)ui_tile_cols(r.w, tile_w, gap, s);\n"
             "    UiList lines;\n    lines.first = l->first / cols;\n    lines.focus = l->focus / cols;\n"
+            "    lines.pointed = l->pointed;\n"
             "    ui_follow(&lines, (count + cols - 1) / cols, ui_tiles_shown(r, tile_w, tile_h, gap, max_rows, s) / cols, "
             "center);\n"
             "    l->first = lines.first * cols;\n}\n"

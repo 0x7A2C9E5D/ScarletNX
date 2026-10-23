@@ -1332,6 +1332,38 @@ static void grid_view(App* app, const char* temporary) {
         for (r = 0; r < first; ++r) assert(ui_flow_next(&f, games_row_label(app, r), &at));
         assert(f.col >= f.cols || games_row_label(app, first)); /* a line's first: the one before ends its line */
     }
+    /* the pointer on a tile of a line that shows moves no line, where a key puts the focus's line in the middle: at a
+       size five lines show at, the focus on a game by the keys, the last tile shown hovered, then Left and Right back
+       to it */
+    app->menu.text_size = 2;
+    layout(app);
+    app->browser.selected = app->browser.head + 4;
+    key(app, SDLK_RIGHT);
+    key(app, SDLK_LEFT);
+    games_boxes(app, &g);
+    {
+        size_t first = g.grid_lists[UI_GAMES_GRID_TILES].first, focus = g.grid_lists[UI_GAMES_GRID_TILES].focus,
+               tile = rows;
+        int focus_line = -1, tile_line = -1;
+        GuiRect last = {0};
+        ui_games_grid_flow(g.grid_rects, app->scale, UI_GAMES_GRID_TILES, &f);
+        for (r = first; r < rows && ui_flow_next(&f, games_row_label(app, r), &at); ++r) {
+            if (r == focus) focus_line = f.line;
+            if (!games_row_label(app, r)) {
+                tile = r;
+                tile_line = f.line;
+                last = at;
+            }
+        }
+        assert(first > 0 && focus_line >= 0 && tile < rows && tile_line > focus_line);
+        point(app, last, false);
+        games_boxes(app, &g);
+        assert(grid_focused(app) == tile && g.grid_lists[UI_GAMES_GRID_TILES].first == first);
+        key(app, SDLK_LEFT);
+        key(app, SDLK_RIGHT);
+        games_boxes(app, &g);
+        assert(grid_focused(app) == tile && g.grid_lists[UI_GAMES_GRID_TILES].first > first);
+    }
     app->menu.text_size = was_size;
     games_defaults(app, false);
     app->recent = was_recent;
@@ -5534,8 +5566,9 @@ int main(int argc, char** argv) {
         shows(&app, "\x1f",
               rgb(ui_menu_entries_attr_cb(&app, shown - 1) & UI_ATTR_FAILURE ? app.theme.page : app.theme.soft));
         app.clock = app.theme.blink_ms;
-        /* ui.txt's scroll, center: each focus in the middle of the rows shown, the ends where the list has no more to
-           move */
+        /* ui.txt's scroll, center: each focus the keys put in the middle of the rows shown, the ends where the list
+           has no more to move */
+        app.pointed = false;
         for (int at = 0; at < GUI_ITEM_COUNT; ++at) {
             int want = SDL_clamp(at - (shown - 1) / 2, 0, GUI_ITEM_COUNT - shown);
             app.menu.selected = at;
@@ -5559,6 +5592,24 @@ int main(int argc, char** argv) {
         menu_boxes(&app, &m);
         assert(!m.lists[UI_MENU_ENTRIES].first);
         app.clock = 0;
+        /* the pointer on a row that shows moves nothing, where a key puts the focus in the middle: the last row shown
+           hovered, then Up and Down back to it */
+        point(&app, menu_entry_box(&app, &m, shown - 1), false);
+        menu_boxes(&app, &m);
+        assert(app.menu.selected == shown - 1 && !m.lists[UI_MENU_ENTRIES].first);
+        key(&app, SDLK_UP);
+        key(&app, SDLK_DOWN);
+        menu_boxes(&app, &m);
+        assert(app.menu.selected == shown - 1 && (int)m.lists[UI_MENU_ENTRIES].first ==
+                                                     SDL_clamp(shown - 1 - (shown - 1) / 2, 1, GUI_ITEM_COUNT - shown));
+        { /* scrolled, the top row hovered: the list stays where it was last shown */
+            size_t top = m.lists[UI_MENU_ENTRIES].first;
+            point(&app, menu_entry_box(&app, &m, (int)top), false);
+            menu_boxes(&app, &m);
+            assert(app.menu.selected == (int)top && m.lists[UI_MENU_ENTRIES].first == top);
+        }
+        app.menu.selected = GUI_SWITCH;
+        render(&app);
         /* a drag down moves the focus down row by row while the finger goes, not all at once when it lifts */
         {
             SDL_Event e = {0};

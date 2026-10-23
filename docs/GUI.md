@@ -446,8 +446,9 @@ the Settings' two, the theme editor's, the choices of a question, of UI scale's 
 setup's pages, the setup's Appearance rows, the box of users, that of a game's updates, DLCs and mods, and the OK of
 a box of files. Their rows are 2 pixels apart times the text's size (on Android and iOS 40 pixels high, about Android's 48 dp
 touch target at the 3x a phone held wide gets, where the desktop's are 17), the focused one kept in the middle (on a
-group's screen, the group open in the groups' list), the cursor and the arrows of hidden rows inside each row, which a
-click takes whole as a tap does. That is the **Side panel**'s *Auto*, the
+group's screen, the group open in the groups' list; Games' grid by its lines) as the keys, a pad, the wheel or a drag
+move it, and a list still when the mouse, a pen or a tap moves it, the cursor and the arrows of hidden rows inside
+each row, which a click takes whole as a tap does. That is the **Side panel**'s *Auto*, the
 default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
 not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2 shows
 it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over

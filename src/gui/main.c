@@ -94,6 +94,21 @@ typedef struct {
 enum { GUI_PLACE_DATA, GUI_PLACE_GAMES, GUI_PLACE_WORK, GUI_PLACE_STATE, GUI_PLACE_CACHE, GUI_PLACES };
 /* Games' options, the rows of the View box its V opens, in the order of their keys in app.ini's [app] */
 enum { GUI_OPTION_RECENT, GUI_OPTION_DUMPS, GUI_OPTION_SORT, GUI_OPTION_VIEW, GUI_OPTIONS };
+/* whose choices the scene Choices shows (app->choices_of while it is drawn or hit) */
+typedef enum { GUI_CHOICES_SETUP, GUI_CHOICES_ASK, GUI_CHOICES_SIZES, GUI_CHOICES_DESTS } GuiChoicesOf;
+/* the lists whose first row App's firsts keeps between frames: Choices' a GuiChoicesOf each, then the others */
+enum {
+    GUI_LIST_USERS = GUI_CHOICES_DESTS + 1,
+    GUI_LIST_ADDONS,
+    GUI_LIST_VIEW,
+    GUI_LIST_MENU,
+    GUI_LIST_GAMES,
+    GUI_LIST_GRID,
+    GUI_LIST_FORM_LIST,
+    GUI_LIST_FORM_SIDE,
+    GUI_LIST_APPEARANCE,
+    GUI_LISTS
+};
 #define GUI_GROUPS_MAX   32
 #define GUI_FOLDERS_MAX  16    /* the player's game folders, past recompiled/ and dumps/ */
 #define GUI_FOLDER_DEPTH 4     /* how deep the games of a folder kept with its subfolders are looked for */
@@ -247,6 +262,10 @@ typedef struct App {
     bool hovering;            /* a mouse or a pen over the window, at hover_x, hover_y of the render: a key of the foot
                                  under it that a click would press is drawn lit */
     float hover_x, hover_y;
+    /* the focus last put by the pointer (a mouse, a pen, a tap), not a key, a pad, the wheel or a drag: a list keeps
+       its first row as last shown (firsts, a GUI_LIST_* each) while the focus shows; a key's goes in its middle */
+    bool pointed;
+    size_t firsts[GUI_LISTS];
     Uint32 picked;                    /* the event a file from the system's picker comes back as */
     SDL_Texture* splash;              /* the boot's splash, its drawing splash_side pixels square, until splash_until */
     const SnxSplashSvg* splash_svg;   /* the boot's pick: Wimsy, or one of dist/splash's */
@@ -1874,8 +1893,6 @@ static void render_files(App* app, int report) {
    question over the choices; or the question in a box at the area's foot, a tab with its label on the box's top edge,
    and the choices at its right above it. The choices are ui.txt's scene Choices, a row each. The questions over a
    screen, UI scale's box, the folders a recompile's game may go in and the setup's steps ---- */
-/* whose choices the scene shows (app->choices_of while it is drawn or hit) */
-typedef enum { GUI_CHOICES_SETUP, GUI_CHOICES_ASK, GUI_CHOICES_SIZES, GUI_CHOICES_DESTS } GuiChoicesOf;
 typedef struct {
     GuiRect box; /* the question's: the whole dialog in the middle, or the box at the foot */
     GuiRect tab; /* at the foot: the label on the box's top edge; no size without a label */
@@ -1896,6 +1913,15 @@ static int rows_h(void (*layout)(GuiRect, int, GuiRect*), GuiRect (*row)(const G
     first = row(rects, scale, item, 0);
     last = row(rects, scale, item, (size_t)count - 1);
     return last.y + last.h - first.y;
+}
+/* list, a scene's item, from its first row as last shown (app's firsts[which]) to where follow (the scene's
+   ui_*_follow) puts it for its focus: in its middle, or nowhere else for a focus the pointer put on a row that shows */
+static void list_follow(App* app, int which, void (*follow)(const GuiRect*, int, int, size_t, UiList*),
+                        const GuiRect* rects, int item, size_t count, UiList* list) {
+    list->first = app->firsts[which];
+    list->pointed = app->pointed;
+    follow(rects, app->scale, item, count, list);
+    app->firsts[which] = list->first;
 }
 /* the dialog of whose choices in area, the one in focus (-1 for none) among the rows shown. Rows that do not fit
    between the area's top and the question are scrolled, as the scene scrolls its list */
@@ -1932,7 +1958,7 @@ static void choices_place(App* app, int of, GuiRect area, const char* question, 
     }
     ui_choices_layout(c->at, s, c->rects);
     c->lists[UI_CHOICES_ROWS].focus = (size_t)SDL_max(focus, 0);
-    ui_choices_follow(c->rects, s, UI_CHOICES_ROWS, (size_t)c->count, &c->lists[UI_CHOICES_ROWS]);
+    list_follow(app, of, ui_choices_follow, c->rects, UI_CHOICES_ROWS, (size_t)c->count, &c->lists[UI_CHOICES_ROWS]);
     if (focus < 0) c->lists[UI_CHOICES_ROWS].focus = SIZE_MAX;
 }
 /* the dialog drawn where choices_place put it: the question and the tab, then the scene's rows */
@@ -2943,7 +2969,8 @@ static void users_boxes(App* app, GuiUsersBoxes* u) {
                     s, u->rects);
     memset(u->lists, 0, sizeof u->lists);
     u->lists[UI_USERS_ROWS].focus = (size_t)app->users_focus;
-    ui_users_follow(u->rects, s, UI_USERS_ROWS, (size_t)g_user_count, &u->lists[UI_USERS_ROWS]);
+    list_follow(app, GUI_LIST_USERS, ui_users_follow, u->rects, UI_USERS_ROWS, (size_t)g_user_count,
+                &u->lists[UI_USERS_ROWS]);
 }
 /* Users' row: the nickname, in the active colour for the one the games play as */
 bool ui_users_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
@@ -3247,7 +3274,8 @@ static void addons_boxes(App* app, GuiAddonsBoxes* d) {
         s, d->rects);
     memset(d->lists, 0, sizeof d->lists);
     d->lists[UI_ADDONS_ROWS].focus = (size_t)app->addons_focus;
-    ui_addons_follow(d->rects, s, UI_ADDONS_ROWS, (size_t)count, &d->lists[UI_ADDONS_ROWS]);
+    list_follow(app, GUI_LIST_ADDONS, ui_addons_follow, d->rects, UI_ADDONS_ROWS, (size_t)count,
+                &d->lists[UI_ADDONS_ROWS]);
 }
 /* Addons' row: an update's choice, a DLC's or a mod's box, Open Mods Folder, Save or Play (ui_draw_row puts the
    marker) */
@@ -3422,7 +3450,7 @@ static void view_boxes(App* app, GuiViewBoxes* d) {
         s, d->rects);
     memset(d->lists, 0, sizeof d->lists);
     d->lists[UI_VIEW_ROWS].focus = (size_t)app->options_focus;
-    ui_view_follow(d->rects, s, UI_VIEW_ROWS, GUI_OPTIONS, &d->lists[UI_VIEW_ROWS]);
+    list_follow(app, GUI_LIST_VIEW, ui_view_follow, d->rects, UI_VIEW_ROWS, GUI_OPTIONS, &d->lists[UI_VIEW_ROWS]);
 }
 bool ui_view_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
     (void)width; /* the box is as wide as its longest row */
@@ -3904,7 +3932,8 @@ static void menu_boxes(App* app, GuiMenuBoxes* m) {
     ui_menu_layout(m->place.list, app->scale, m->rects);
     memset(m->lists, 0, sizeof m->lists);
     m->lists[UI_MENU_ENTRIES].focus = (size_t)app->menu.selected;
-    ui_menu_follow(m->rects, app->scale, UI_MENU_ENTRIES, GUI_ITEM_COUNT, &m->lists[UI_MENU_ENTRIES]);
+    list_follow(app, GUI_LIST_MENU, ui_menu_follow, m->rects, UI_MENU_ENTRIES, GUI_ITEM_COUNT,
+                &m->lists[UI_MENU_ENTRIES]);
 }
 /* the last run's output, under what the side box says */
 static void last_output(App* app, GuiRect r, int y) {
@@ -3987,22 +4016,33 @@ static void grid_flow(App* app, const GuiGamesBoxes* g, UiFlow* f) {
     f->max = (size_t)-1;
 }
 /* the grid's first row shown: the first of the first line from where the focus's line is in the middle of those that
-   show, as Rows keeps its focus, or from where the last line is at the bottom once the lines after the focus all
-   show; the focus's line itself where it is taller than the list */
+   show, as Rows keeps its focus; for a focus the pointer put there, from the line shown first last (firsts), or as
+   little moved as it takes for the focus's line to show whole. From where the last line is at the bottom once the
+   lines after the focus all show; the focus's line itself where it is taller than the list */
 static size_t grid_first(App* app, const GuiGamesBoxes* g, size_t focus) {
     UiFlow f;
     GuiRect at, area = g->grid_rects[UI_GAMES_GRID_TILES];
-    size_t rows = games_rows(app), r;
-    int top = 0, height = 0, bottom = 0, from, line = -1;
+    size_t rows = games_rows(app), r, kept = app->firsts[GUI_LIST_GRID];
+    int top = 0, height = 0, bottom = 0, shown = -1, from, line = -1;
     grid_flow(app, g, &f);
     for (r = 0; r < rows && ui_flow_next(&f, games_row_label(app, r), &at); ++r) {
         if (r == focus) {
             top = at.y - area.y;
             height = at.h;
         }
+        if (r == kept) shown = at.y - area.y;
         bottom = at.y + at.h - area.y;
     }
-    from = SDL_min(SDL_min(top - (area.h - height) / 2, bottom - area.h), top);
+    if (shown < 0) shown = bottom; /* rows that went: past the last, which the bottom's limit brings back */
+    if (!app->pointed)
+        from = top - (area.h - height) / 2;
+    else if (top < shown)
+        from = top;
+    else if (top + height > shown + area.h)
+        from = top + height - area.h;
+    else
+        from = shown;
+    from = SDL_min(SDL_min(from, bottom - area.h), top);
     grid_flow(app, g, &f);
     for (r = 0; r < rows && ui_flow_next(&f, games_row_label(app, r), &at); ++r) {
         if (f.line == line) continue; /* a line's first alone */
@@ -4023,12 +4063,13 @@ static void games_boxes(App* app, GuiGamesBoxes* g) {
     g->lists[UI_GAMES_ROWS].focus = selected < head ? selected + 1 : (size_t)g->lead + selected - head;
     if (games_grid(app)) {
         g->grid_lists[UI_GAMES_GRID_TILES].focus = g->lists[UI_GAMES_ROWS].focus;
-        g->grid_lists[UI_GAMES_GRID_TILES].first = grid_first(app, g, g->lists[UI_GAMES_ROWS].focus);
+        g->grid_lists[UI_GAMES_GRID_TILES].first = app->firsts[GUI_LIST_GRID] =
+            grid_first(app, g, g->lists[UI_GAMES_ROWS].focus);
         return;
     }
     /* a page under the recent rows that does not fit (a short screen, a page of one) scrolls to the focus */
-    ui_games_follow(g->rects, app->scale, UI_GAMES_ROWS, (size_t)g->lead + gui_browser_items(&app->browser),
-                    &g->lists[UI_GAMES_ROWS]);
+    list_follow(app, GUI_LIST_GAMES, ui_games_follow, g->rects, UI_GAMES_ROWS,
+                (size_t)g->lead + gui_browser_items(&app->browser), &g->lists[UI_GAMES_ROWS]);
 }
 static void game_label(const App* app, const GuiGames* games, size_t i, char* out, size_t size);
 static void menu_key(App* app, GuiKey key);
@@ -6630,7 +6671,8 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
     g = theme || app->form == GUI_FORM_SETTINGS ? app->editor.row : form_group(app);
     f->left_lists[UI_FORM_LIST_ROWS].focus = g >= 0 ? (size_t)g : SIZE_MAX;
     if (g >= 0)
-        ui_form_list_follow(f->left, app->scale, UI_FORM_LIST_ROWS, (size_t)count, &f->left_lists[UI_FORM_LIST_ROWS]);
+        list_follow(app, GUI_LIST_FORM_LIST, ui_form_list_follow, f->left, UI_FORM_LIST_ROWS, (size_t)count,
+                    &f->left_lists[UI_FORM_LIST_ROWS]);
     if (!theme && app->form != GUI_FORM_SETTINGS) f->left_lists[UI_FORM_LIST_ROWS].focus = SIZE_MAX;
     if (theme || app->form == GUI_FORM_SETTINGS) { /* nothing, or the rows to see before opening their group */
         f->right_lists[UI_FORM_SIDE_ROWS].focus = SIZE_MAX;
@@ -6639,7 +6681,8 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
     count = app->form == GUI_FORM_FOLDERS ? folder_entries(app) : gui_editor_rows(&app->editor);
     f->right_lists[UI_FORM_SIDE_ROWS].focus =
         (size_t)(app->form == GUI_FORM_FOLDERS ? folder_entry(app, app->editor.row) : app->editor.row);
-    ui_form_side_follow(f->right, app->scale, UI_FORM_SIDE_ROWS, (size_t)count, &f->right_lists[UI_FORM_SIDE_ROWS]);
+    list_follow(app, GUI_LIST_FORM_SIDE, ui_form_side_follow, f->right, UI_FORM_SIDE_ROWS, (size_t)count,
+                &f->right_lists[UI_FORM_SIDE_ROWS]);
 }
 /* the columns of text a row width pixels wide has past its marker's half cell (ui_draw_row's) */
 static int form_room(const App* app, int width) {
@@ -7570,7 +7613,7 @@ typedef struct {
     GuiRect rects[UI_APPEARANCE_ITEMS];
     UiList lists[UI_APPEARANCE_ITEMS]; /* the rows' at UI_APPEARANCE_ROWS: row i is GUI_APPEARANCE_* i */
 } GuiAppearanceBoxes;
-static void appearance_boxes(const App* app, GuiRect r, GuiAppearanceBoxes* a) {
+static void appearance_boxes(App* app, GuiRect r, GuiAppearanceBoxes* a) {
     int s = app->scale, top = head_h(app) + 4 * s, h;
     h = rows_h(ui_appearance_layout, ui_appearance_row, a->rects, UI_APPEARANCE_ROWS, s, GUI_APPEARANCE_NEXT);
     a->box = gui_rect(r.x, r.y, r.w, SDL_min(top + h + 2 * s, r.h));
@@ -7579,7 +7622,8 @@ static void appearance_boxes(const App* app, GuiRect r, GuiAppearanceBoxes* a) {
                          s, a->rects);
     memset(a->lists, 0, sizeof a->lists);
     a->lists[UI_APPEARANCE_ROWS].focus = (size_t)SDL_min(app->setup_row, GUI_APPEARANCE_NEXT - 1);
-    ui_appearance_follow(a->rects, s, UI_APPEARANCE_ROWS, GUI_APPEARANCE_NEXT, &a->lists[UI_APPEARANCE_ROWS]);
+    list_follow(app, GUI_LIST_APPEARANCE, ui_appearance_follow, a->rects, UI_APPEARANCE_ROWS, GUI_APPEARANCE_NEXT,
+                &a->lists[UI_APPEARANCE_ROWS]);
     if (app->setup_row == GUI_APPEARANCE_NEXT) a->lists[UI_APPEARANCE_ROWS].focus = SIZE_MAX; /* on its choices */
 }
 /* the column a row's value starts at, in the row's text: past the marker and the longest name */
@@ -10052,6 +10096,7 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
     layout(app);
     if (!SDL_RenderCoordinatesFromWindow(app->renderer, window_x, window_y, &x, &y)) return;
     app->hovering = !click && !touch; /* a finger hovers nowhere, and a click has done what it lit */
+    app->pointed = true;
     app->hover_x = x;
     app->hover_y = y;
     if (app->help_shown) { /* F1's box: a click anywhere closes it */
@@ -10184,6 +10229,7 @@ static float drag_row(App* app) {
    going */
 static void drag(App* app, float y) {
     float row = drag_row(app);
+    app->pointed = false; /* its rows move as a key's */
     while (y <= app->finger_mark - row) {
         scroll(app, GUI_UP);
         app->finger_mark -= row;
@@ -10351,9 +10397,11 @@ static void pad_drive(App* app, bool pad) {
 static bool input_seen(App* app, const SDL_Event* e) {
     switch (e->type) {
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN: pad_drive(app, true); break;
-        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_DOWN: /* a pad's press too: the lists follow the focus again */
+            app->pointed = false;
             if (e->key.which != GUI_PAD_KEYBOARD) pad_drive(app, false);
             break;
+        case SDL_EVENT_MOUSE_WHEEL: app->pointed = false; break; /* its rows move as a key's */
         case SDL_EVENT_MOUSE_MOTION:
             if (!app->pad_driven) break;
             app->pointer_travel += SDL_fabsf(e->motion.xrel) + SDL_fabsf(e->motion.yrel);
