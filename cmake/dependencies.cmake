@@ -56,6 +56,19 @@ if(SNX_BUILD_NX)
     snx_quiet(snx_lz4)
 endif()
 
+# xxHash (BSD-2-Clause) for the renderer's content hashes (src/nx/gpu/vk/cmd.c's vk_hash): XXH3, about three times
+# XXH64's speed. src/nx/gpu/vk/xxh3.c builds the dispatcher on x86 (the CPU's SSE2, AVX2 or AVX-512 loop, chosen at
+# run time) and xxhash.c on every other architecture, by the compiler's own macros
+if(SNX_BUILD_NX)
+    CPMAddPackage(NAME xxhash VERSION 0.8.3
+                  URL https://github.com/Cyan4973/xxHash/archive/refs/tags/v0.8.3.tar.gz
+                  URL_HASH SHA256=aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80
+                  DOWNLOAD_ONLY YES)
+    add_library(snx_xxhash STATIC "${PROJECT_SOURCE_DIR}/src/nx/gpu/vk/xxh3.c")
+    target_include_directories(snx_xxhash PUBLIC "${xxhash_SOURCE_DIR}")
+    snx_quiet(snx_xxhash)
+endif()
+
 # ENet (MIT) and zstd (BSD-3-Clause) for ldn's rooms (src/common/network/net_room.c): an Eden room is ENet on UDP,
 # and a game's datagrams in it are zstd frames. ENet's own sources, with the POSIX calls every target but Windows
 # has; zstd's compressor and decompressor alone, in C (no assembly, so every target builds the same). The tests of

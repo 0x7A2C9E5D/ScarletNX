@@ -12,6 +12,7 @@
 #include "nx/gpu/renderer.h"
 #include "nx/hle/services/nvdrv.h"
 #include "nx/memory/mem.h"
+#include "nx/memory/own.h"
 #include "nx/runtime/options.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
@@ -1544,12 +1545,10 @@ static void patch_note(void* user, u64 at, u64 n) {
     p->n++;
     p->bytes += n;
 }
+static int patch_apply(const Vb* e, Patch* pt);
 static int patch_own(u32 i, const u8* host, u32 since) {
     Vb* e = &g_vb[i];
     Patch pt = {.src = host};
-    VkBuffer sb;
-    u64 so, at = 0;
-    u8* p;
     written_runs(host, e->len, since, patch_note, &pt);
     if (pt.n > PATCH_RUNS) { /* scattered: from the first written byte to the end of the last run, in one copy */
         u64 o = (u64)(host - g_mem), a = pt.r[0].dstOffset, b = e->len;
@@ -1558,10 +1557,18 @@ static int patch_own(u32 i, const u8* host, u32 since) {
         pt.n = 1;
         pt.bytes = b - a;
     }
+    return patch_apply(e, &pt);
+}
+/* pt's runs of the entry's bytes (pt->src) copied over its own buffer: staged, then copied on the GPU */
+static int patch_apply(const Vb* e, Patch* pt0) {
+    Patch pt = *pt0;
+    VkBuffer sb;
+    u64 so, at = 0;
+    u8* p;
     if (!pt.n) return 1;
     if (!(p = vk_stage_upload(pt.bytes, vk_stage_align(), &sb, &so))) return 0;
     for (u32 k = 0; k < pt.n; k++) {
-        memcpy(p + at, host + pt.r[k].dstOffset, pt.r[k].size);
+        memcpy(p + at, pt.src + pt.r[k].dstOffset, pt.r[k].size);
         pt.r[k].srcOffset = so + at;
         at += pt.r[k].size;
     }
@@ -1575,6 +1582,36 @@ static int patch_own(u32 i, const u8* host, u32 since) {
     copy_barrier(VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                  VK_ACCESS_2_MEMORY_READ_BIT);
     return 1;
+}
+/* An own buffer a GPU-side write touched (an inline upload, an engine's result landed in memory): the pages that write
+   stamped (gpu_mem_dirty_since) and those the CPU wrote since (the kernel's dirty bits, which vk_written_since reads)
+   copied again, instead of the whole range hashed again to learn whether anything changed. A write to one page of
+   a big buffer hashed all of it: most of one game's GPU thread. 0 when there is no write tracking */
+static int patch_dirty(u32 i, u64 gva, const u8* host, u64 gw, u32 ws) {
+    const Vb* e = &g_vb[i];
+    Patch pt = {.src = host};
+    u64 o = (u64)(host - g_mem), first = o >> 12, last = (o + e->len - 1) >> 12, run = 0;
+    int in = 0;
+    if (vk_written_since(host, e->len, ws) < 0) return 0; /* page_written is current from here */
+    for (u64 pg = first; pg <= last + 1; pg++) {
+        int d = 0;
+        if (pg <= last) {
+            u64 a = pg == first ? 0 : (pg << 12) - o, b = pg == last ? e->len : ((pg + 1) << 12) - o;
+            d = page_written(pg, ws) || gpu_mem_dirty_since(gw, gva + a, b - a);
+        }
+        if (d && !in) run = pg;
+        if (!d && in) {
+            u64 a = run == first ? 0 : (run << 12) - o, b = pg > last ? e->len : (pg << 12) - o;
+            patch_note(&pt, a, b - a);
+        }
+        in = d;
+    }
+    if (pt.n > PATCH_RUNS) { /* scattered: from the first dirty byte to the end of the range, in one copy */
+        pt.r[0] = (VkBufferCopy){0, pt.r[0].dstOffset, e->len - pt.r[0].dstOffset};
+        pt.n = 1;
+        pt.bytes = pt.r[0].size;
+    }
+    return patch_apply(e, &pt);
 }
 
 /* An own buffer is device memory the GPU reads at full speed, filled by a copy from this frame's staging ring. Mapped
@@ -1638,6 +1675,72 @@ static const u8* entry_host(Vb* e, u64 gva, u64 len) {
     }
     return e->host_cpu == ~0ull ? NULL : GP(e->host_cpu);
 }
+/* vk_written_since by GPU address, run by run of the host memory behind it: a range the GPU maps from several pieces
+   of guest memory (a buffer of several memory handles) has no one host pointer, and had no answer, so it was hashed
+   whole at every check. In one game's matches that was 140 GB every 600 frames, nearly all of its GPU thread */
+static int written_since_gva(u64 gva, u64 len, u32 since) {
+    int any = 0;
+    for (u64 o = 0; o < len;) {
+        u64 cpu = 0, n = gmmu_run(gva + o, len - o, &cpu);
+        if (!n) { /* an unmapped page: nothing writes it (a mapping change moves g_vb_map_gen) */
+            n = 0x1000 - ((gva + o) & 0xFFF);
+            if (n > len - o) n = len - o;
+        } else {
+            int w = vk_written_since(GP(cpu), n, since);
+            if (w < 0) return -1;
+            any |= w;
+        }
+        o += n;
+    }
+    return any;
+}
+/* whether GPU-owned bytes are on [gva, gva + len)'s pages (memory/own.c): reading them on the CPU lands them, a wait
+   for the GPU (vk_lock held, as own_hash needs) */
+static int range_owned(u64 gva, u64 len) {
+    if (!__atomic_load_n(&g_own_any, __ATOMIC_ACQUIRE)) return 0;
+    for (u64 o = 0; o < len;) {
+        u64 cpu = 0, h = 0, n = gmmu_run(gva + o, len - o, &cpu);
+        if (!n) {
+            n = 0x1000 - ((gva + o) & 0xFFF);
+            if (n > len - o) n = len - o;
+        } else if (own_hash(cpu, n, &h))
+            return 1;
+        o += n;
+    }
+    return 0;
+}
+/* A range over bytes the GPU holds: copied into this frame's staging ring, the CPU's bytes by the CPU and the owned
+   ones from their owners by the GPU (vk_guest_read), with nothing landed. It isn't hashed (the CPU's copy of the
+   owned bytes is stale) or given a buffer of its own: it is copied again when the GPU writes those bytes again
+   (gpu_mem_dirty_since) or a later submit reads it. Draws over the results of the GPU's engines landed them, a wait
+   for the GPU each */
+static int buf_get_owned(u32 i, Vb* e, u64 gva, u64 len, int strict, VkBuffer* buf, u64* off) {
+    VkBuffer sb;
+    u64 so;
+    if (!e) {
+        if (!(i = vb_new(gva, (u32)len))) return 0;
+        e = &g_vb[i];
+        e->cs_adds = vk_compute_adds(); /* checked for pending results above */
+        e->gfx_adds = vk_buf_adds();
+    }
+    drop_own(i);
+    e->hash = 0;
+    e->stable = 0;
+    vk_render_end(); /* the GPU's copies happen outside rendering passes */
+    u8* p = vk_stage_upload(len, vk_stage_align(), &sb, &so);
+    if (!p) return 0;
+    vk_guest_read(gva, len, p, sb, so);
+    if (copy_stats_on()) g_copy_stage += len;
+    e->buf = sb;
+    e->off = so;
+    e->frame = vk_submit_number();
+    e->epoch = e->chk_epoch = g_vk_epoch;
+    if (strict) e->strict_epoch = g_vk_epoch;
+    e->gw = gpu_mem_generation();
+    e->wseen = vk_ww_now();
+    use(i, buf, off);
+    return 1;
+}
 static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict, u64 align) {
     int pending;
     u32 i = 0;
@@ -1671,8 +1774,8 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict, u64 al
         }
         /* with write tracking, an own buffer is checked only when its memory was written */
         const u8* host = e->own ? entry_host(e, gva, len) : NULL;
-        int w = e->own ? vk_written_since(host, len, e->wseen) : -1;
-        if (w == 1 && len >= PATCH_MIN) { /* the written pages, not the whole range again */
+        int w = !e->own ? -1 : host ? vk_written_since(host, len, e->wseen) : written_since_gva(gva, len, e->wseen);
+        if (w == 1 && host && len >= PATCH_MIN) { /* the written pages, not the whole range again */
             u32 wnow = vk_ww_now();
             if (patch_own(i, host, e->wseen)) {
                 e->wseen = wnow;
@@ -1708,6 +1811,20 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict, u64 al
             }
         }
     }
+    else if (valid && e->own && !range_owned(gva, len)) {
+        /* a GPU-side write on its pages: those pages copied again, not the range hashed again */
+        const u8* host = entry_host(e, gva, len);
+        u32 wnow = vk_ww_now();
+        u64 gnow = gpu_mem_generation(); /* both before the bytes are read */
+        if (host && patch_dirty(i, gva, host, e->gw, e->wseen)) {
+            e->gw = gnow;
+            e->wseen = wnow;
+            e->epoch = g_vk_epoch;
+            if (strict) e->strict_epoch = g_vk_epoch;
+            use(i, buf, off);
+            return 1;
+        }
+    }
     int why = 0;
     if (copy_stats_on())
         why = !e ? ST_NEW
@@ -1716,6 +1833,7 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict, u64 al
             : gpu_mem_dirty_since(e->gw, gva, len) ? ST_DIRTY
             : e->own ? ST_WRITTEN
                      : ST_EPOCH;
+    if (range_owned(gva, len)) return buf_get_owned(i, e, gva, len, strict, buf, off);
     u32 wnow = vk_ww_now();
     const u8* src = guest_bytes(gva, len);
     if (!src) return 0;
