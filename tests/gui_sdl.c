@@ -154,10 +154,7 @@ static GuiRect entry_box(App* app, int item) {
     menu_boxes(app, &m);
     return menu_entry_box(app, &m, item);
 }
-/* Games' Add a folder, and Rows' row (the label and recent rows under the lead, then the page's), as drawn */
-static GuiRect games_add_box(const App* app, const GuiGamesBoxes* g) {
-    return ui_row_box(app, ui_games_row(g->rects, app->scale, UI_GAMES_ADD, 0));
-}
+/* Games' Rows' row (the label and the recent rows under the lead, then the page's), as drawn */
 static GuiRect games_row_box(const App* app, const GuiGamesBoxes* g, int row) {
     return ui_row_box(app, ui_games_row(g->rects, app->scale, UI_GAMES_ROWS, (size_t)row));
 }
@@ -166,7 +163,7 @@ static GuiRect game_box(App* app, int i, bool recent) {
     layout(app);
     games_boxes(app, &g);
     assert(app->menu.view == GUI_LOAD_GAMES && (!recent || i < g.lead - 1));
-    return recent ? games_row_box(app, &g, i + 1) : i ? games_row_box(app, &g, g.lead + i - 1) : games_add_box(app, &g);
+    return games_row_box(app, &g, recent ? i + 1 : g.lead + i);
 }
 /* a form's list, the left (ui.txt's FormList) or the right (FormSide): the rows it has room for, the row it shows
    first, and row's box as drawn (its row past the cursor), none while it is scrolled out */
@@ -3555,14 +3552,14 @@ int main(int argc, char** argv) {
                 assert(k < app.games.count);
                 game_kind(&app, &app.games, k, listed, sizeof listed);
                 recent_changed(&app);
-                app.browser.selected = 1;
+                app.browser.selected = 0;
                 assert(games_focus(&app, &none, &about, kind, sizeof kind) == app.recent.game[0].name &&
                        about == app.recent.game[0].path && !strcmp(kind, listed));
                 for (k = 0; k < sizeof unlisted / sizeof unlisted[0]; ++k) {
                     char* path = snx_path_join(temporary, unlisted[k].file);
                     assert(!gui_recent_add(&app.recent, path, unlisted[k].driver, 0));
                     recent_changed(&app);
-                    app.browser.selected = 1;
+                    app.browser.selected = 0;
                     games_focus(&app, &none, &about, kind, sizeof kind);
                     assert(!strcmp(kind, unlisted[k].kind));
                     free(path);
@@ -3701,8 +3698,8 @@ int main(int argc, char** argv) {
         free(dump);
     }
 
-    /* recent games: what the GUI ran, newest first in Games under Add a folder and kept in a file, named as the run
-       named it; one runs again with the options the menu has now, which the fake driver checks */
+    /* recent games: what the GUI ran, newest first at the top of Games and kept in a file, named as the run named it;
+       one runs again with the options the menu has now, which the fake driver checks */
     {
         GuiRecent kept;
         char* recent_file = snx_path_join(temporary, "prefs/recent.txt");
@@ -3710,30 +3707,25 @@ int main(int argc, char** argv) {
         SDL_Color soft = rgb(app.theme.soft);
         assert(!snx_write_file(again, "fixture", 7));
         recent_open(&app, snx_strdup(recent_file));
-        assert(!app.recent.count && app.browser.head == 1);
+        assert(!app.recent.count && !app.browser.head);
         app.menu.selected = GUI_SWITCH;
         launcher(&app, true);
         launch(&app, snx_strdup(again), false);
         finish(&app, 0);
-        assert(app.recent.count == 1 && app.browser.head == 2 && !strcmp(app.recent.game[0].name, "option flags"));
+        assert(app.recent.count == 1 && app.browser.head == 1 && !strcmp(app.recent.game[0].name, "option flags"));
         assert(app.recent.game[0].driver == GUI_SWITCH && !app.recent.game[0].prepared);
         gui_recent_load(&kept, recent_file);
         assert(kept.count == 1 && !strcmp(kept.game[0].name, "option flags"));
         assert(!strcmp(kept.game[0].path, app.recent.game[0].path));
-        /* in Games, not the menu: Add a folder, a title and the game, then the games; down from Add a folder reaches
-           it */
+        /* in Games, not the menu: a title and the game, then the games; the focus on it, first */
         render(&app);
         hides(&app, "Recent games", soft); /* the game itself shows in the last output, beside the items */
         go_tab(&app, GUI_TAB_GAMES);
         render(&app);
-        shows(&app, "- Add a folder", yellow);
+        hides(&app, "- Add a folder", normal);
         shows(&app, "Recent games", soft);
-        shows(&app, "option flags", normal); /* a dump's: the loading mark between the marker and its name */
-        key(&app, SDLK_DOWN);
-        render(&app);
-        assert(app.browser.selected == 1);
-        shows(&app, "option flags", yellow);
-        hides(&app, "- Add a folder", yellow);
+        assert(app.browser.selected == 0);
+        shows(&app, "option flags", yellow); /* a dump's: the loading mark between the marker and its name */
         {
             char start[21]; /* the tips: where it is */
             snprintf(start, sizeof start, "%s", app.recent.game[0].path);
@@ -3746,13 +3738,10 @@ int main(int argc, char** argv) {
         assert(app.menu.running && app.menu.selected == GUI_LINUX && app.recent.game[0].driver == GUI_SWITCH);
         finish(&app, 0);
         assert(app.recent.count == 1 && app.menu.view == GUI_LOAD_NONE);
-        /* the mouse: over the game it takes the focus, over Add a folder it gives it back */
+        /* the mouse over the game: the focus on it */
         go_tab(&app, GUI_TAB_GAMES);
         point(&app, game_box(&app, 0, true), false);
-        assert(app.browser.selected == 1);
-        point(&app, game_box(&app, 0, false), false);
         assert(app.browser.selected == 0);
-        point(&app, game_box(&app, 0, true), false);
         /* YoRHa: the focused game on the band, the title in its soft colour */
         app.theme = *gui_theme_builtin("yorha");
         render(&app);
@@ -3762,7 +3751,7 @@ int main(int argc, char** argv) {
         /* a game whose file went away leaves the list when chosen, and the file says so */
         assert(!remove(again));
         key(&app, SDLK_RETURN);
-        assert(!app.menu.running && !app.recent.count && app.browser.head == 1 && !app.browser.selected);
+        assert(!app.menu.running && !app.recent.count && !app.browser.head && !app.browser.selected);
         assert(strstr(app.message, "is gone"));
         gui_recent_load(&kept, recent_file);
         assert(!kept.count);
@@ -3777,14 +3766,14 @@ int main(int argc, char** argv) {
                 free(path);
             }
             recent_changed(&app);
-            assert(app.recent.count == 5 && app.browser.head == 5 && !app.recent_all);
+            assert(app.recent.count == 5 && app.browser.head == 4 && !app.recent_all);
             render(&app);
             shows(&app, "Recent games", soft);
-            shows(&app, "- a", normal);
+            shows(&app, "- a", yellow); /* the focus, the first row */
             shows(&app, "- c", normal);
             shows(&app, "- ...show more", normal);
             hides(&app, "- d", normal);
-            app.browser.selected = 4; /* the row that shows the rest */
+            app.browser.selected = 3; /* the row that shows the rest */
             app.message[0] = 0;       /* the gone game's, over the tips */
             render(&app);
             shows(&app, "- ...show more", yellow);
@@ -3798,7 +3787,7 @@ int main(int argc, char** argv) {
                 assert(found && ty >= g.place.tips.y && ty < g.place.tips.y + g.place.tips.h);
             }
             key(&app, SDLK_RETURN);                            /* all five, the focus on the first that was hidden */
-            assert(!app.menu.running && app.recent_all && app.browser.head == 6 && app.browser.selected == 4);
+            assert(!app.menu.running && app.recent_all && app.browser.head == 5 && app.browser.selected == 3);
             render(&app);
             shows(&app, "- d", yellow);
             shows(&app, "- e", normal);
@@ -3879,7 +3868,7 @@ int main(int argc, char** argv) {
         /* a CIA in games/ is one of Games', which runs it with the 3DS driver */
         go_tab(&app, GUI_TAB_GAMES);
         assert(app.menu.view == GUI_LOAD_GAMES && app.games.count == 1);
-        app.browser.selected = app.browser.head; /* the game, under Add a folder and the recent one */
+        app.browser.selected = app.browser.head; /* the game, under the recent one */
         key(&app, SDLK_RETURN);
         assert(app.menu.running && !app.native && app.menu.selected == GUI_3DS);
         finish(&app, 3);
@@ -4176,18 +4165,20 @@ int main(int argc, char** argv) {
        refreshes the folders rather than caching them */
     assert(!snx_mkdirs(app.games_dir));
     go_tab(&app, GUI_TAB_GAMES);
-    assert(app.menu.view == GUI_LOAD_GAMES && !app.games.count && app.browser.head == 1);
+    assert(app.menu.view == GUI_LOAD_GAMES && !app.games.count && !app.browser.head);
     render(&app);
-    shows(&app, "- Add a folder", yellow);
-    shows(&app, "Settings > App > Folders", normal); /* beside it, what it does */
-    /* a shortcut: Settings > App > Folders at the recompiled library's Add a folder; ESC is Games again, its list
-       read again; a tab away goes where it goes from the Settings, Games forgotten */
-    key(&app, SDLK_RETURN);
+    shows(&app, "No games", normal); /* the side box: no row, and how to add a folder */
+    shows(&app, "Settings > App > Folders", normal);
+    key(&app, SDLK_RETURN); /* no row: nothing */
+    assert(!app.editing && app.menu.view == GUI_LOAD_GAMES);
+    /* P, or the foot's: Settings > App > Folders at the recompiled library's Add a folder; ESC is Games again, its
+       list read again; a tab away goes where it goes from the Settings, Games forgotten */
+    press_key(&app, "P", 0, false, yellow);
     assert(app.editing && app.form == GUI_FORM_FOLDERS && app.folders_from_games &&
            app.editor.row == folder_row_of(&app, GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED));
     key(&app, SDLK_ESCAPE);
     assert(!app.editing && !app.folders_from_games && app.menu.view == GUI_LOAD_GAMES && !app.browser.selected);
-    key(&app, SDLK_RETURN);
+    key(&app, SDLK_P);
     assert(app.form == GUI_FORM_FOLDERS && app.folders_from_games);
     key(&app, SDLK_TAB);
     assert(!app.editing && !app.folders_from_games && app.menu.view == GUI_LOAD_NONE);
@@ -4249,9 +4240,9 @@ int main(int argc, char** argv) {
         go_tab(&app, GUI_TAB_GAMES);
         render(&app);
         games_boxes(&app, &g);
-        b = games_add_box(&app, &g);
+        b = g.place.side;
         x = b.x;
-        y = b.y + b.h / 2; /* Add a folder's frame */
+        y = b.y + b.h / 2; /* the side box's frame */
         assert(same_colour(pixel(&app, (float)x, (float)y), page));
         app.clock += GUI_FADE_MS / 2;
         render(&app);
@@ -4407,16 +4398,22 @@ int main(int argc, char** argv) {
         app.games = was;
         app.browser = browser_was;
     }
-    /* Add a folder over every page, a wider gap under it than between the games, and no Back: ESC is the menu's */
+    /* no row to add a folder, which P, the foot's, does; no Back: ESC is the menu's */
     render(&app);
-    shows(&app, "- Add a folder", yellow);
+    hides(&app, "- Add a folder", yellow);
     hides(&app, "Back [ESC]", normal);
+    shows_foot(&app, "P", yellow);
+    shows_foot(&app, "folders", normal);
     {
         GuiGamesBoxes g;
         games_boxes(&app, &g);
-        GuiRect add = games_add_box(&app, &g), first = games_row_box(&app, &g, 0), second = games_row_box(&app, &g, 1);
-        assert(first.y - (add.y + add.h) == 24 * app.scale && second.y - (first.y + first.h) == 2 * app.scale);
+        GuiRect first = games_row_box(&app, &g, 0), second = games_row_box(&app, &g, 1);
+        assert(first.y == g.place.list.y && second.y - (first.y + first.h) == 2 * app.scale);
     }
+    key(&app, SDLK_P); /* P: Settings > App > Folders, ESC back */
+    assert(app.editing && app.form == GUI_FORM_FOLDERS && app.folders_from_games);
+    key(&app, SDLK_ESCAPE);
+    assert(!app.editing && app.menu.view == GUI_LOAD_GAMES);
     key(&app, SDLK_ESCAPE);
     assert(app.menu.view == GUI_LOAD_NONE);
     go_tab(&app, GUI_TAB_GAMES);
@@ -4499,15 +4496,15 @@ int main(int argc, char** argv) {
     hides(&app, "\x1f", rgb(app.theme.soft));
     key(&app, SDLK_PAGEUP);
     key(&app, SDLK_LEFT);
-    assert(app.browser.page == 0 && app.browser.selected == 1);
+    assert(app.browser.page == 0 && app.browser.selected == 1); /* the focus kept from page to page */
     render(&app);
     hides(&app, "\x1e", rgb(app.theme.soft));
     shows(&app, "\x1f", rgb(app.theme.soft));
-    point(&app, game_box(&app, 2, false), false);
-    assert(app.browser.selected == 2 && !app.menu.running && !app.browser.activated);
+    point(&app, game_box(&app, 1, false), false);
+    assert(app.browser.selected == 1 && !app.menu.running && !app.browser.activated);
     render(&app);
     shows(&app, app.games.names[1], yellow);
-    point(&app, game_box(&app, 1, false), true); /* native prepared game, not another extraction */
+    point(&app, game_box(&app, 0, false), true); /* native prepared game, not another extraction */
     assert(app.menu.running && app.native && screen(&app) == GUI_SCREEN_LOADING);
     finish(&app, 0);
     /* a game in a folder of its own beside its data goes through the menu's driver with the settings and the data
@@ -4760,14 +4757,13 @@ int main(int argc, char** argv) {
         free(data);
         free(folder);
     }
-    go_tab(&app, GUI_TAB_GAMES); /* back from the run on the menu */
-    key(&app, SDLK_DOWN);
+    go_tab(&app, GUI_TAB_GAMES); /* back from the run on the menu, the focus on the first game */
     char* removed = snx_path_join(app.games_dir, app.games.names[0]);
     assert(!snx_remove_tree(removed));
     free(removed);
     key(&app, SDLK_RETURN);
     assert(!app.menu.running && app.menu.view == GUI_LOAD_GAMES && app.message[0]);
-    point(&app, game_box(&app, 2, false), false);
+    point(&app, game_box(&app, 1, false), false);
     render(&app);
     shows(&app, app.games.names[0], pink);
     shows(&app, app.games.names[1], yellow);
@@ -5731,18 +5727,10 @@ int main(int argc, char** argv) {
             assert(app.menu.view == GUI_LOAD_GAMES && !app.browser.selected && app.games.count > 12);
             render(&app);
             games_boxes(&app, &g);
-            b = games_add_box(&app, &g);
-            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Add a folder", yellow,
-                       black); /* the focus, first */
-            key(&app, SDLK_DOWN);
-            render(&app);
-            games_boxes(&app, &g);
             page = games_page(&app);
             assert(app.browser.page_size == page &&
                    ui_games_shown(g.rects, app.scale, UI_GAMES_ROWS) >= (size_t)g.lead + page);
-            b = games_add_box(&app, &g);
-            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Add a folder", normal, black);
-            b = games_row_box(&app, &g, g.lead);
+            b = games_row_box(&app, &g, g.lead); /* the focus, first: the page's first game */
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- ", yellow, black);
             text_px_is(&app, b.x + cw / 2 + 2 * cw, item_text_y(&app, b), app.games.names[0], yellow, black);
             text_px_is(&app, g.place.side.x + cw, g.place.side.y + 2 * s, app.games.names[0], normal, black);

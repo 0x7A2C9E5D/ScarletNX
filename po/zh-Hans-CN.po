@@ -386,6 +386,16 @@ msgstr "Tab: 切换画面. F2: 侧框."
 
 #: src/gui/main.c
 #, snx-keys
+msgid "P: folders."
+msgstr ""
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Folders: tap it."
+msgstr ""
+
+#: src/gui/main.c
+#, snx-keys
 msgid "ESC: back."
 msgstr "ESC: 返回."
 
@@ -762,7 +772,11 @@ msgid "none"
 msgstr "无"
 
 #: src/gui/main.c
-msgid "Settings > App > Folders: the libraries Games lists, and a folder added to one"
+msgid "No games"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Settings > App > Folders adds a folder of games or dumps: P, or the foot's, opens it"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
@@ -2102,6 +2116,11 @@ msgstr "Ctrl+V"
 #, snx-key
 msgid "F5"
 msgstr "F5"
+
+#: src/gui/main.c
+#, snx-key
+msgid "P"
+msgstr "P"
 
 #: src/gui/main.c
 #, snx-key

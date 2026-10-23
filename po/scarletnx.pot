@@ -596,6 +596,18 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "Folders: tap it."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "P: folders."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "ESC: back."
 msgstr ""
 
@@ -876,7 +888,9 @@ msgstr ""
 msgid "Install"
 msgstr ""
 
+#. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
+#, snx-key
 msgid "Folders"
 msgstr ""
 
@@ -971,13 +985,11 @@ msgid "Linux ARM ELF, run with scarletnx-gnuabi"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Settings > App > Folders: the libraries Games lists, and a folder added to one"
+msgid "Settings > App > Folders adds a folder of games or dumps: P, or the foot's, opens it"
 msgstr ""
 
-#. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c src/gui/ui.txt
-#, snx-key
-msgid "Add a folder"
+#: src/gui/main.c
+msgid "No games"
 msgstr ""
 
 #: src/gui/main.c
@@ -1355,6 +1367,12 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "%s, %s free. %s"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Add a folder"
 msgstr ""
 
 #: src/gui/main.c
@@ -2493,6 +2511,12 @@ msgstr ""
 #: src/gui/main.c
 #, snx-key
 msgid "M"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "P"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word

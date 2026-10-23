@@ -303,7 +303,7 @@ typedef struct App {
     SDL_Gamepad* listened[16]; /* the controllers open meanwhile: a press comes only from an open one */
     int listened_count;
     bool theme_from_app;       /* the theme editor goes back to the App's rows */
-    bool folders_from_games;   /* Folders goes back to Games, whose Add a folder opened it */
+    bool folders_from_games;   /* Folders goes back to Games, whose P opened it */
     int half;                  /* the letters in halves of a cell while text_half has them so, else 0: the scale's */
     bool help_shown;           /* F1's box over the screen: every key it has (screen_said) */
     SnxPadScreen pad;          /* the button map's, on the row gamepad_map, A and B as gamepad_swap_ab says */
@@ -1079,8 +1079,8 @@ static int recent_shown(const App* app) {
     return app->recent_all ? app->recent.count : SDL_min(app->recent.count, GUI_RECENT_SHOWN);
 }
 static int recent_more(const App* app) { return recent_shown(app) < app->recent.count; }
-/* the rows over Games' games: Add a folder, then the recent games and the row that shows the rest */
-static size_t games_head(const App* app) { return 1 + (size_t)(recent_shown(app) + recent_more(app)); }
+/* the rows over Games' games: the recent games and the row that shows the rest (P, the foot's, adds a folder) */
+static size_t games_head(const App* app) { return (size_t)(recent_shown(app) + recent_more(app)); }
 /* the list as the menu and the file have it */
 static void recent_changed(App* app) {
     app->browser.head = games_head(app);
@@ -1120,6 +1120,11 @@ static const char* shown_keys(const App* app, char* out, size_t size);
 static void aot_status_update(App* app);
 /* a screen's keys, Tab's after them; the key back of a screen whose own keys do not say it; F1's, last in a foot */
 #define SAY_TAB      SNX_TR_KEYS("Tab: screen. F2: side box.")
+#ifdef SNX_TOUCH_UI
+#define SAY_GAMES_FOLDERS SNX_TR_KEYS("Folders: tap it.")
+#else
+#define SAY_GAMES_FOLDERS SNX_TR_KEYS("P: folders.")
+#endif
 #define SAY_BACK     SNX_TR_KEYS("ESC: back.")
 #define SAY_HELP     SNX_TR_KEYS("F1: help.")
 #define SAY_PAD_HELP SNX_TR_KEYS("Select: help.")
@@ -1132,8 +1137,8 @@ static void games_place(App* app, GuiPlace* p) {
     place_screen(app, p, shown_keys(app, keys, sizeof keys), GUI_SHOWS_STATUS | GUI_SHOWS_TABS | GUI_SHOWS_SIDE);
 }
 /* the list's entries before the page's games: "Recent games" and the recent rows, none without recent games */
-static int games_lead(const App* app) { return app->browser.head > 1 ? (int)app->browser.head : 0; }
-/* the games a page of the boxed list holds: those that fit under Add a folder and the recent games */
+static int games_lead(const App* app) { return app->browser.head ? (int)app->browser.head + 1 : 0; }
+/* the games a page of the boxed list holds: those that fit under the recent games */
 static size_t games_page(App* app) {
     GuiPlace p;
     GuiRect rects[UI_GAMES_ITEMS];
@@ -2056,11 +2061,16 @@ static const char* screen_said(const App* app, bool help, char* out, size_t size
         else if (pick_screen(app))
             keys = SAY_KEYS_HOW;
         parts[n++] = keys;
+        if (!app->editing && app->menu.view == GUI_LOAD_GAMES) parts[n++] = SAY_GAMES_FOLDERS; /* to add a folder */
         if (aot_said(app)) parts[n++] = SAY_GAMES_AOT;
 #ifdef SNX_TOUCH_UI
-        /* a finger's: the words to tap are the foot, whole */
-        snprintf(out, size, "%s%s%s", snx_tr(keys), n > 1 ? " " : "", n > 1 ? snx_tr(parts[1]) : "");
-        return out;
+        { /* a finger's: the words to tap are the foot, whole */
+            size_t used = 0;
+            int i;
+            for (i = 0; i < n && used < size; ++i)
+                used += (size_t)snprintf(out + used, size - used, "%s%s", i ? " " : "", snx_tr(parts[i]));
+            return out;
+        }
 #else
         if (!app->editing && app->menu.view == GUI_LOAD_GAMES) parts[n++] = SAY_BACK; /* to the menu */
         parts[n++] = SAY_TAB;
@@ -3603,8 +3613,7 @@ static void draw_menu(App* app) {
     screen_foot(app, &m.place, item_about(app, (int)m.lists[UI_MENU_ENTRIES].focus),
                 shown_keys(app, keys, sizeof keys));
 }
-/* ---- Games: Add a folder, then "Recent games" over the recent rows and a page of the games, as many as the list's
-   box holds ---- */
+/* ---- Games: "Recent games" over the recent rows, then a page of the games, as many as the list's box holds ---- */
 typedef struct {
     GuiPlace place;
     GuiRect rects[UI_GAMES_ITEMS];
@@ -3620,22 +3629,18 @@ static void games_boxes(App* app, GuiGamesBoxes* g) {
     g->start = app->browser.page * app->browser.page_size;
     g->lead = games_lead(app);
     memset(g->lists, 0, sizeof g->lists);
-    g->lists[UI_GAMES_ADD].focus = selected ? SIZE_MAX : 0;
-    g->lists[UI_GAMES_ROWS].focus = !selected         ? SIZE_MAX
-                                    : selected < head ? selected
-                                                      : (size_t)g->lead + selected - head;
-    /* a page under the recent rows that does not fit (a short screen, a page of one) scrolls to the focus; with Add a
-       folder focused the rows stay at their top */
-    if (selected)
-        ui_games_follow(g->rects, app->scale, UI_GAMES_ROWS, (size_t)g->lead + gui_browser_items(&app->browser),
-                        &g->lists[UI_GAMES_ROWS]);
+    g->lists[UI_GAMES_ROWS].focus = selected < head ? selected + 1 : (size_t)g->lead + selected - head;
+    /* a page under the recent rows that does not fit (a short screen, a page of one) scrolls to the focus */
+    ui_games_follow(g->rects, app->scale, UI_GAMES_ROWS, (size_t)g->lead + gui_browser_items(&app->browser),
+                    &g->lists[UI_GAMES_ROWS]);
 }
 static void game_label(const App* app, const GuiGames* games, size_t i, char* out, size_t size);
 static void menu_key(App* app, GuiKey key);
-/* Rows' row i as the browser counts it (0 is Add a folder): a recent row, else a game of the page */
+/* Rows' row i as the browser counts it (0 is "Recent games" over the recent rows): a recent row, else a game of the
+   page */
 static size_t games_selected(const App* app, size_t row) {
     size_t lead = (size_t)games_lead(app);
-    return row < lead ? row : app->browser.head + row - lead;
+    return row < lead ? row - 1 : app->browser.head + row - lead;
 }
 /* Rows' row: "Recent games", the recent rows and their show more, a page's headings and games; a game in the active
    colour once activated, the pages before and after marked on the first game and the last */
@@ -3679,10 +3684,6 @@ void ui_games_rows_row_action_cb(App* app, size_t row, uint32_t hit) {
     app->browser.selected = games_selected(app, row);
     if (hit & UI_HIT_CLICK) menu_key(app, GUI_SELECT);
 }
-void ui_games_add_add_a_folder_action_cb(App* app, uint32_t hit) {
-    app->browser.selected = 0;
-    if (hit & UI_HIT_CLICK) menu_key(app, GUI_SELECT);
-}
 /* the focused row of Games: what it is, about it, and a line more for a recent game's or a game's kind */
 static bool game_was_old(const App* app, const char* path);
 /* game i's kind, by its file's name: ready, a dump or a CIA; its updates, DLCs and mods; the games/ of an older
@@ -3721,12 +3722,12 @@ static void recent_kind(const App* app, const GuiRecentGame* r, char* kind, size
 static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** about, char* kind, size_t size) {
     size_t selected = app->browser.selected, head = app->browser.head;
     kind[0] = 0;
-    if (!selected) {
-        *about = snx_tr("Settings > App > Folders: the libraries Games lists, and a folder added to one");
-        return snx_tr("Add a folder");
+    if (selected >= head + gui_browser_items(&app->browser)) { /* no game, nor a recent one */
+        *about = snx_tr("Settings > App > Folders adds a folder of games or dumps: P, or the foot's, opens it");
+        return snx_tr("No games");
     }
-    if (selected < head && (int)selected - 1 < recent_shown(app)) {
-        const GuiRecentGame* r = &app->recent.game[selected - 1];
+    if (selected < head && (int)selected < recent_shown(app)) {
+        const GuiRecentGame* r = &app->recent.game[selected];
         recent_kind(app, r, kind, size);
         *about = r->path;
         return r->name;
@@ -5077,7 +5078,7 @@ static void folders_take(App* app, const char* path) {
         snprintf(app->editor.note, sizeof app->editor.note, "%s",
                  snx_tr("Drop it on the folder it takes the place of, or on a library's row"));
 }
-/* Games' Add a folder: Settings > App > Folders, at the recompiled library's Add a folder, ESC back to Games */
+/* Games' P, or the foot's: Settings > App > Folders, at the recompiled library's Add a folder, ESC back to Games */
 static void folders_from_games(App* app) {
     app->group = 0;
     open_folders(app, folder_row_of(app, GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED));
@@ -8407,17 +8408,17 @@ static void open_game(App* app, size_t index) {
 static void recompile_focus(App* app) {
     size_t row = app->browser.selected, head = app->browser.head;
     size_t index = app->browser.page * app->browser.page_size + row - head;
-    bool recent = row && row < head && (int)row - 1 < recent_shown(app),
+    bool recent = row < head && (int)row < recent_shown(app),
          game = row >= head && index < app->games.count && !gui_games_heading(&app->games, index);
     if (!recent && !game)
         snprintf(app->message, sizeof app->message, "%s", snx_tr("No game in focus to recompile."));
-    else if (recent ? app->recent.game[row - 1].driver != GUI_SWITCH
+    else if (recent ? app->recent.game[row].driver != GUI_SWITCH
                     : gui_is_cia(app->games.names[index]) || gui_is_vpk(app->games.names[index]))
         snprintf(app->message, sizeof app->message, "%s", snx_tr("R recompiles Switch games only."));
     else {
         app->recompile = true;
         if (recent)
-            open_recent(app, (int)row - 1);
+            open_recent(app, (int)row);
         else
             open_game(app, index);
         app->recompile = false;
@@ -8437,13 +8438,13 @@ static char* aot_leaf(const char* folder) {
 static int aot_focus_game(App* app, AotFocus* f) {
     size_t row = app->browser.selected, head = app->browser.head;
     size_t index = app->browser.page * app->browser.page_size + row - head;
-    bool recent = row && row < head && (int)row - 1 < recent_shown(app), game = row >= head && index < app->games.count;
+    bool recent = row < head && (int)row < recent_shown(app), game = row >= head && index < app->games.count;
     const char* path = NULL;
     f->path = NULL;
     f->folder = f->name = NULL;
     if (recent) {
-        if (app->recent.game[row - 1].driver != GUI_SWITCH) return 0;
-        path = app->recent.game[row - 1].path;
+        if (app->recent.game[row].driver != GUI_SWITCH) return 0;
+        path = app->recent.game[row].path;
     } else if (game) {
         if (gui_games_heading(&app->games, index) || gui_is_cia(app->games.names[index]) ||
             gui_is_vpk(app->games.names[index]))
@@ -8588,10 +8589,10 @@ done:
 static void mods_focus(App* app) {
     size_t row = app->browser.selected, head = app->browser.head;
     size_t index = app->browser.page * app->browser.page_size + row - head;
-    bool recent = row && row < head && (int)row - 1 < recent_shown(app), game = row >= head && index < app->games.count;
+    bool recent = row < head && (int)row < recent_shown(app), game = row >= head && index < app->games.count;
     char* folder = NULL;
-    if (recent && app->recent.game[row - 1].driver == GUI_SWITCH)
-        gui_game_mods(app->recent.game[row - 1].path, &folder, NULL);
+    if (recent && app->recent.game[row].driver == GUI_SWITCH)
+        gui_game_mods(app->recent.game[row].path, &folder, NULL);
     else if (game)
         gui_game_mods(app->games.paths[index], &folder, NULL);
     if (folder)
@@ -9025,6 +9026,10 @@ static void list_games(App* app) {
     app->browser.count = app->games.count;
     app->browser.head = games_head(app);
     layout(app);
+    /* with no recent game first, the focus on the first game, past a group's heading */
+    while (!app->browser.head && app->browser.selected < gui_browser_items(&app->browser) &&
+           gui_games_heading(&app->games, app->browser.selected))
+        ++app->browser.selected;
 }
 /* the screen a tab opens: the menu, Games or the Settings. A theme edited and not saved keeps its screen, the note
    saying why */
@@ -9072,10 +9077,8 @@ static void menu_key(App* app, GuiKey key) {
         if (action == GUI_BROWSER_BACK) {
             app->menu.view = GUI_LOAD_NONE;
             app->message[0] = 0;
-        } else if (action == GUI_BROWSER_HEAD && !row)
-            folders_from_games(app);
-        else if (action == GUI_BROWSER_HEAD && (int)row - 1 < recent_shown(app))
-            open_recent(app, (int)row - 1);
+        } else if (action == GUI_BROWSER_HEAD && (int)row < recent_shown(app))
+            open_recent(app, (int)row);
         else if (action ==
                  GUI_BROWSER_HEAD) { /* ...show more: every recent game, the focus on the first that was hidden */
             app->recent_all = true;
@@ -9321,6 +9324,8 @@ static const struct {
                  {SNX_TR_KEY("B"), SDLK_B, 0, false},
                  {SNX_TR_KEY("AOT pack"), SDLK_B, 0, false},
                  {SNX_TR_KEY("M"), SDLK_M, 0, false},
+                 {SNX_TR_KEY("P"), SDLK_P, 0, false},
+                 {SNX_TR_KEY("Folders"), SDLK_P, 0, false},
                  {SNX_TR_KEY("Ctrl+S"), SDLK_S, SDL_KMOD_CTRL, false},
                  {SNX_TR_KEY("Ctrl+V"), SDLK_V, SDL_KMOD_CTRL, false},
                  {SNX_TR_KEY("F5"), SDLK_F5, 0, false},
@@ -9533,7 +9538,8 @@ static void scroll(App* app, GuiKey key) {
     if (app->menu.view == GUI_LOAD_GAMES) { /* over its pages as the keys go, from the head's first to the last game */
         bool last = app->browser.page + 1 >= gui_browser_pages(&app->browser) &&
                     app->browser.selected + 1 >= app->browser.head + gui_browser_items(&app->browser);
-        if (key == GUI_UP ? app->browser.selected > 0 : !last) menu_key(app, key);
+        bool first = !app->browser.selected && (app->browser.head || !app->browser.page); /* the head on every page */
+        if (key == GUI_UP ? !first : !last) menu_key(app, key);
         return;
     }
     row = app->menu.selected;
@@ -10072,6 +10078,11 @@ static void event_take(App* app, const SDL_Event* e) {
         app->menu.view == GUI_LOAD_GAMES && !app->finished) {
         layout(app);
         mods_focus(app);
+        return;
+    }
+    if (e->key.key == SDLK_P && !e->key.repeat && !(e->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
+        app->menu.view == GUI_LOAD_GAMES && !app->finished) {
+        folders_from_games(app);
         return;
     }
     if (menu_key_of(&e->key, &key)) menu_key(app, key);

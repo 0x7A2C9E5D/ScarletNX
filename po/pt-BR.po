@@ -386,6 +386,16 @@ msgstr "Tab: tela. F2: caixa ao lado."
 
 #: src/gui/main.c
 #, snx-keys
+msgid "P: folders."
+msgstr "P: pastas."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Folders: tap it."
+msgstr "Pastas: toque."
+
+#: src/gui/main.c
+#, snx-keys
 msgid "ESC: back."
 msgstr "ESC: voltar."
 
@@ -762,8 +772,12 @@ msgid "none"
 msgstr "nenhuma"
 
 #: src/gui/main.c
-msgid "Settings > App > Folders: the libraries Games lists, and a folder added to one"
-msgstr "Configurações > App > Pastas: as bibliotecas que Jogos lista, e uma pasta posta numa delas"
+msgid "No games"
+msgstr "Nenhum jogo"
+
+#: src/gui/main.c
+msgid "Settings > App > Folders adds a folder of games or dumps: P, or the foot's, opens it"
+msgstr "Configurações > App > Pastas adiciona uma pasta de jogos ou dumps: o P, ou o do rodapé, abre ela"
 
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
@@ -2106,6 +2120,11 @@ msgstr "Ctrl+V"
 #, snx-key
 msgid "F5"
 msgstr "F5"
+
+#: src/gui/main.c
+#, snx-key
+msgid "P"
+msgstr "P"
 
 #: src/gui/main.c
 #, snx-key

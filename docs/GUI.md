@@ -250,9 +250,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   in the app's own files, out of the Files app's reach, are listed a file at a time, and under them the box says how
   they go while the app is in testing: Android's Settings > Apps > ScarletNX > Storage > Clear storage, which takes
   every game, save and key in the app with them. The menu never reads them: it starts from its defaults.
-- **Recent games**, in Games under Add a folder, lists the last games run, newest first, three and a row that
+- **Recent games**, at the top of Games, lists the last games run, newest first, three and a row that
   shows the rest, by the name their run gave (the runner's `ScarletNX - <name>` line), else their file's.
-  The focus moves between them, Add a folder and the page's games in one ring, and the tips show the focused
+  The focus moves between them and the page's games in one ring, and the tips show the focused
   game's path. Choosing one runs it again with the driver it was
   loaded with and the options the menu has now; a game whose file is gone leaves the
   list instead. The list is kept in `recent.txt`, beside `last-run.log`, at the root of the menu's state
@@ -323,17 +323,17 @@ directories are excluded. The folders are looked at once a second while the menu
 names only), so a game put in or taken out shows in the open list; a folder that
 cannot be read is named and the others still listed.
 
-- **Add a folder** is the first row on every page, a wider gap under it: a shortcut to Settings > App > Folders, at
-  the recompiled library's Add a folder, where ESC comes back to Games and its list read again. Under it the recent
-  games, then the page's games. ESC returns to the menu.
-- Up/Down go round Add a folder, the recent games and the page's files. Enter/Space opens one.
+- **P** (on a phone a tap on *Folders* at the foot) opens Settings > App > Folders at the recompiled library's Add a
+  folder, where ESC comes back to Games and its list read again. The recent games are over every page, then the
+  page's games. ESC returns to the menu.
+- Up/Down go round the recent games and the page's files. Enter/Space opens one.
 - **R** (on Android a tap on *Recompile* at the foot) recompiles the Switch game in focus, recent or on the page,
   where it is, or prepares its dump again: `scarletnx -r`. It plays nothing;
   Enter then does. On another row, or a 3DS or Vita game, it says why it does nothing.
 - Left/Right and PgUp/PgDown go to the previous/next page. The page number and
   total file count are shown. Paging stops at the first and last pages.
 - Resizing adjusts the page size while keeping the selected file visible.
-- Empty or missing directories show a diagnostic and still provide Add a folder.
+- Empty or missing directories show a diagnostic, and the side box says P adds a folder.
 
 A recompiled game, in a folder of its own (`recompiled/<id>/<id>`), runs with the Settings through the menu's own
 `scarletnx` and is never extracted as a dump: it plays as it is when this build made it, and is recompiled first,
@@ -404,7 +404,7 @@ screen's keys, the whole width (the setup's beside its tips), in letters a size 
 at the left of the row, **F1** last, which opens a box over the screen with every key it has, those every screen has too
 (the arrows and the mouse, Enter, Space and a click, the pages, Tab and F2), until any key or a click closes it; on a
 phone, the words to tap, whole. The tips and the keys each in a box with a bar down
-its left (`[tips] box`, `[footer] box`) or on the page. Games lists Add a folder, the recent games and a
+its left (`[tips] box`, `[footer] box`) or on the page. Games lists the recent games and a
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
 opens the picker). The Settings list their groups, and beside them the focused group's
@@ -712,7 +712,7 @@ foot's keys and typed text), UTF-8 read with a `?` for each byte no character st
 them.
 Settings tests cover the runtime's list read into rows, picks, the options each combination
 passes, and the screens of its groups and App; menu tests cover mouse hover versus explicit
-activation, the menu without the games and Games with Add a folder and the recent games' show-more row,
+activation, the menu without the games and Games with its recent games' show-more row and P,
 yellow/pink highlighting and the tips. Theme tests cover the built-ins, a `theme.ini` over its base
 (unreadable values and unknown keys included), the `themes/` folders listed, the
 compiling and loading screens, and the YoRHa bars and band in the real renderer. Step
