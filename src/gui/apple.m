@@ -86,6 +86,58 @@ void gui_apple_stats(char* out, size_t size) {
 #endif
 }
 
+#if TARGET_OS_IPHONE
+/* P_TRACED: a debugger is attached to this process now (the loader's check before it asks one for code memory) */
+static bool debugger_traced(void) {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid()};
+    struct kinfo_proc kp;
+    size_t n = sizeof(kp);
+    memset(&kp, 0, sizeof(kp));
+    return sysctl(mib, 4, &kp, &n, NULL, 0) == 0 && (kp.kp_proc.p_flag & P_TRACED);
+}
+static void stamped(const char* what) {
+    time_t now = time(NULL);
+    struct tm local;
+    char clock[16];
+    localtime_r(&now, &local);
+    strftime(clock, sizeof clock, "%H:%M:%S", &local);
+    fprintf(stderr, "[%s] %s\n", clock, what);
+}
+/* Says in the console log when the debugger attaches or lets go, and when the app goes behind others, comes back or is
+   warned of memory: what a game finds when it asks for code memory depends on them, and a log line has no time */
+static void watch_start(void) {
+    static bool was;
+    NSNotificationCenter* center = NSNotificationCenter.defaultCenter;
+    static NSString* const names[][2] = {{@"UIApplicationDidEnterBackgroundNotification", @"app: in the background"},
+                                         {@"UIApplicationWillEnterForegroundNotification", @"app: back in the foreground"},
+                                         {@"UIApplicationDidReceiveMemoryWarningNotification", @"app: memory warning"},
+                                         {@"UIApplicationWillResignActiveNotification", @"app: resigning active"},
+                                         {@"UIApplicationDidBecomeActiveNotification", @"app: active"}};
+    size_t i;
+    was = debugger_traced();
+    stamped(was ? "debugger: attached at start" : "debugger: not attached at start");
+    for (i = 0; i < sizeof names / sizeof *names; ++i) {
+        NSString* line = names[i][1];
+        [center addObserverForName:names[i][0]
+                            object:nil
+                             queue:nil
+                        usingBlock:^(NSNotification* note) {
+                            (void)note;
+                            stamped(line.UTF8String);
+                        }];
+    }
+    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                                                     dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_SEC / 10);
+    dispatch_source_set_event_handler(timer, ^{
+        bool now = debugger_traced();
+        if (now != was) stamped(now ? "debugger: attached" : "debugger: let go");
+        was = now;
+    });
+    dispatch_resume(timer);
+}
+#endif
+
 void gui_apple_log_start(void) {
 #if TARGET_OS_IPHONE
     @autoreleasepool {
@@ -140,6 +192,7 @@ void gui_apple_log_start(void) {
         entitlement_lines();
         fprintf(stderr, "app: %s\n", NSBundle.mainBundle.bundleIdentifier.UTF8String);
         fprintf(stderr, "documents: %s\n", documents.fileSystemRepresentation);
+        watch_start();
     }
 #endif
 }
