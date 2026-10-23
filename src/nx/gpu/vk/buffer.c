@@ -1811,8 +1811,10 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict, u64 al
             }
         }
     }
-    else if (valid && e->own && !range_owned(gva, len)) {
-        /* a GPU-side write on its pages: those pages copied again, not the range hashed again */
+    else if (valid && e->own && len >= PATCH_MIN && !range_owned(gva, len)) {
+        /* a GPU-side write on its pages: those pages copied again, not the range hashed again. Not a small range: one
+           is hashed in microseconds, and GPU-side writes beside it stamp its pages (in one game 760 ranges a frame,
+           78% of them unchanged), each copy ending the rendering pass */
         const u8* host = entry_host(e, gva, len);
         u32 wnow = vk_ww_now();
         u64 gnow = gpu_mem_generation(); /* both before the bytes are read */
