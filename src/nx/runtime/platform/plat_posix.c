@@ -703,7 +703,9 @@ static void fault_stack_candidates(uintptr_t sp) {
     local.iov_len = bytes;
     remote.iov_base = (void*)sp;
     remote.iov_len = bytes;
-    n = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
+    /* Android API 21 has no libc declaration for process_vm_readv. Use the kernel interface, as the
+       userfaultfd paths do, and keep the diagnostic optional if the syscall is unavailable or denied. */
+    n = syscall(SYS_process_vm_readv, getpid(), &local, 1ul, &remote, 1ul, 0ul);
     if (n <= 0) {
         WARN("ownership-fault: stack candidates unavailable (read=%ld errno=%d)\n", (long)n, n < 0 ? errno : 0);
         return;
