@@ -9534,7 +9534,7 @@ static void drag(App* app, float y) {
 /* a finger lifted at x, y (0 to 1 across the window): a swipe turns the games' pages, left or up to the next as a
    phone's lists scroll; a tap clicks there, is ESC on a finished run and on a running one's ESC line */
 static void touch(App* app, float x, float y) {
-    float dx = x - app->finger_x, dy = y - app->finger_y, rx, ry;
+    float dx = x - app->finger_x, dy = y - app->finger_y;
     int w, h;
     bool games = app->menu.view == GUI_LOAD_GAMES && !app->menu.running && !app->finished;
     if (SDL_fabsf(dx) > 0.1f && SDL_fabsf(dx) > 2 * SDL_fabsf(dy)) {
@@ -9559,15 +9559,8 @@ static void touch(App* app, float x, float y) {
         pointer(app, x * (float)w, y * (float)h, true, true);
         return;
     }
-    if (app->menu.running) {
-        GuiPlace p;
-        layout(app);
-        if (!SDL_RenderCoordinatesFromWindow(app->renderer, x * (float)w, y * (float)h, &rx, &ry)) return;
-        if (app->theme.run != GUI_RUN_STEPS) { /* the foot the ESC line is in */
-            run_place(app, &p);
-            if (ry >= (float)p.keys.y && ry < (float)(p.keys.y + p.keys.h)) cancel(app);
-        } else if ((int)(ry / (float)(16 * app->scale)) == app->rows - 1) /* the loading screen's last row */
-            cancel(app);
+    if (app->menu.running) { /* a tap anywhere on a run asks whether to abort it or keep going: nothing is lost by it */
+        if (!app->aborting) cancel(app);
         return;
     }
     pointer(app, x * (float)w, y * (float)h, true, true);
