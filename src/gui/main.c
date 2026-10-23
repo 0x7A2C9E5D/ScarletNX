@@ -364,6 +364,8 @@ typedef struct App {
     int room_item;
     bool room_prepared, room_recompile;
     bool room_ok;       /* asked and answered: the run goes */
+    bool replace_ok;    /* asked and answered (GUI_ASK_REPLACE): the dump is made again over its game */
+    char replace_line[128]; /* that question: the game that is there */
     GuiChoice dests;    /* Recompile: which of the recompiled library's folders a dump's game goes in */
     bool dests_shown;
     char* dest_file; /* the run asked about, as room_file, and its load */
@@ -1508,6 +1510,7 @@ static const char* ask_question(const App* app) {
         case GUI_ASK_EXIT: return snx_tr("Exit ScarletNX?");
         case GUI_ASK_OUTSIDE: return snx_tr("Outside the app, Android checks every file access: games may run slower.");
         case GUI_ASK_ROOM: return app->room_line;
+        case GUI_ASK_REPLACE: return app->replace_line;
         case GUI_ASK_TEXT: return app->size_line;
         case GUI_ASK_CLEAN:
         case GUI_ASK_RESET:
@@ -1867,6 +1870,7 @@ static const char* const ask_choices[][2] = {{SNX_TR_NOOP("Keep going"), SNX_TR_
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Take it off")},
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Move")},
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Exit")},
+                                             {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Replace")},
                                              {SNX_TR_NOOP("OK"), NULL}};
 /* the question shown, over the whole screen in the middle or at its foot, a choice asked twice saying so once pressed:
    how many choices it has, one for a failure's OK */
@@ -7928,6 +7932,69 @@ static void dests_key(App* app, GuiKey key) {
         default: break;
     }
 }
+#ifdef SDL_PLATFORM_IOS
+/* the title ID in a dump's file name (16 hex digits starting 01, which no other word of a name is, alone between
+   other characters), in id; false when there is none */
+static bool dump_title_id(const char* path, char id[17]) {
+    const char* name = strrchr(path, '/');
+    size_t i, k, n;
+    name = name ? name + 1 : path;
+    n = strlen(name);
+    for (i = 0; i + 16 <= n; ++i) {
+        if (name[i] != '0' || name[i + 1] != '1' || (i && SDL_isxdigit(name[i - 1])) ||
+            (i + 16 < n && SDL_isxdigit(name[i + 16])))
+            continue;
+        for (k = 0; k < 16 && SDL_isxdigit(name[i + k]); ++k) id[k] = (char)SDL_toupper(name[i + k]);
+        if (k == 16) {
+            id[16] = 0;
+            return true;
+        }
+    }
+    return false;
+}
+/* a dump whose game is in the recompiled library already (its pack, not a folder a failed run left): the question in
+   replace_line, else false. A dump with no title ID in its name is not found, and goes as it did */
+static bool made_already(App* app, const char* dump) {
+    const char* dirs[GUI_FOLDERS_MAX + 1];
+    int i, n = dest_dirs(app, dirs);
+    char id[17];
+    if (!dump_title_id(dump, id)) return false;
+    for (i = 0; i < n; ++i) {
+        char *folder = snx_path_join(dirs[i], id), *leaf = snx_format("%s_code.snxobj", id),
+             *pack = folder ? snx_path_join(folder, leaf) : NULL;
+        bool there = pack && snx_is_file(pack);
+        free(folder);
+        free(leaf);
+        free(pack);
+        if (there) {
+            snprintf(app->replace_line, sizeof app->replace_line,
+                     snx_tr("%s is already made. Recompile it over the old one?"), id);
+            return true;
+        }
+    }
+    return false;
+}
+/* the answer to that question: Replace makes the dump again as R does (its game recompiled, nothing played), over the
+   game that is there; Back makes nothing */
+static void replace_answer(App* app, bool taken) {
+    char* file = app->room_file;
+    int item = app->menu.selected;
+    app->room_file = NULL;
+    if (!taken) {
+        free(file);
+        free(app->dest_out);
+        app->dest_out = NULL;
+        return;
+    }
+    app->replace_ok = true;
+    app->recompile = true;
+    app->menu.selected = app->room_item;
+    launch(app, file, app->room_prepared);
+    app->menu.selected = item;
+    app->replace_ok = false;
+    app->recompile = false;
+}
+#endif
 /* a folder under the pointer takes the focus, a click takes it (ui_choices_rows_row_action_cb); a click off the box
    is Back */
 static void dests_pointer(App* app, float x, float y, bool click) {
@@ -7990,6 +8057,21 @@ static void launch(App* app, char* absolute, bool prepared) {
             return;
         }
     }
+#ifdef SDL_PLATFORM_IOS
+    /* a dump whose game is in the library already: asked first, so a second make over it (which can take an hour of
+       a phone's time) is never one a tap started by mistake. Replace pressed twice */
+    if (app->menu.selected == GUI_SWITCH && !prepared && !app->recompile && !app->replace_ok &&
+        made_already(app, absolute)) {
+        free(app->room_file);
+        app->room_file = absolute;
+        app->room_item = app->menu.selected;
+        app->room_prepared = prepared;
+        app->room_recompile = app->recompile;
+        gui_confirm_open(&app->confirm, GUI_ASK_REPLACE, true);
+        free(driver);
+        return;
+    }
+#endif
     /* a dump not extracted yet may need more room than its disks have: asked first, Run anyway pressed twice */
     if (folders && !app->room_ok && !room_fits(app, absolute)) {
         free(app->room_file);
@@ -8951,6 +9033,10 @@ static void ask_key(App* app, GuiKey key) {
         outside_answer(app, second);
     else if (ask == GUI_ASK_ROOM)
         room_answer(app, second);
+#ifdef SDL_PLATFORM_IOS
+    else if (ask == GUI_ASK_REPLACE)
+        replace_answer(app, second);
+#endif
     else if (ask == GUI_ASK_TEXT)
         size_answer(app, second);
     else if (ask == GUI_ASK_CLEAN || ask == GUI_ASK_RESET || ask == GUI_ASK_PLACES || ask == GUI_ASK_PLACE ||

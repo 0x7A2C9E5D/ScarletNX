@@ -735,6 +735,10 @@ msgstr ""
 msgid "Move"
 msgstr ""
 
+#: src/gui/main.c
+msgid "Replace"
+msgstr ""
+
 #: src/gui/main.c src/gui/ui.txt
 msgid "OK"
 msgstr ""
@@ -2150,6 +2154,11 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "  default, %s free"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s is already made. Recompile it over the old one?"
 msgstr ""
 
 #: src/gui/main.c
