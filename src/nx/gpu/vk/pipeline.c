@@ -1348,6 +1348,27 @@ fail:
     free(s);
     return 0;
 }
+/* In a rebuild, a pipeline record keeps the earlier build's key with the modules of the new translation. Two of its
+   fields come from that translation: the sets with texture arrays, from each stage's indexed flag, and the attributes,
+   one for each one the vertex shader reads. A translator that came to index a shader's textures would have its
+   pipeline made with the layout without the arrays, which its module declares, and the record written into the new
+   file as it was. 1 when both fields are what the rebuilt shaders say; a record they don't hold for is dropped, and a
+   draw that needs its pipeline makes it from its own key */
+static int pf_key_holds(const PipeKey* k) {
+    const VkShaderModule mods[5] = {k->vs, k->tcs, k->tes, k->gs, k->fs};
+    u32 arrays = 0, attrs = 0, in = 0;
+    for (int i = 0; i < 5; i++) {
+        const VkSh* sh = NULL;
+        if (!mods[i]) continue;
+        for (const VkSh* q = g_pf.sh; q && !sh; q = q->next)
+            if (q->mod == mods[i]) sh = q;
+        if (!sh) return 0;
+        if (sh->indexed) arrays |= 1u << shader_vk_set(sh->stage);
+        if (i == 0) in = sh->si.in_mask;
+    }
+    for (u32 i = 0; i < k->nattr; i++) attrs |= 1u << k->attr[i].loc;
+    return arrays == k->arrays && attrs == in;
+}
 /* on the reading thread: a pipeline of the file, whose shaders were made, queued to the workers behind the draws'. In
    a file being rebuilt it is recorded in the new one, whose shader records its modules have */
 static void pf_load_pipe(void* ctx, const u64 m[5], const void* key, u32 keylen) {
@@ -1365,6 +1386,10 @@ static void pf_load_pipe(void* ctx, const u64 m[5], const void* key, u32 keylen)
     p->k.tes = mod_handle(m[2]);
     p->k.gs = mod_handle(m[3]);
     p->k.fs = mod_handle(m[4]);
+    if (((const PfLoad*)ctx)->rebuild && !pf_key_holds(&p->k)) {
+        free(p);
+        return;
+    }
     p->h = vk_hash(&p->k, sizeof p->k);
     for (Pipe* q = g_pf.pipes; q; q = q->next) /* the file has it twice */
         if (q->h == p->h && !memcmp(&q->k, &p->k, sizeof p->k)) {
