@@ -469,17 +469,18 @@ int main(void) {
     program(1);
     forget();
     CHECK(!build(folder, out[1], 0) && run(out[1]) == 42 && !snx_is_file(path_a));
-    { /* both units without room: the disk's numbers said for the first, once, both counted at the close */
+    { /* both units without room: the disk's numbers said once, both counted at the close */
         int lines = 0, i;
-        for (i = 0; i < g_unit_cache.said_count; ++i) lines += strstr(g_unit_cache.said[i], "cannot make room") != NULL;
-        CHECK(lines == 1 && said("has 0.0 GB free and keeps a tenth of its 1000.0 GB (100.0 GB) free", "code_000 ("));
-        CHECK(said("cannot make room for", "is not kept"));
-        CHECK(said("unit cache: 2 unit(s) (", "MB) not kept for the room on the disk of"));
+        for (i = 0; i < g_unit_cache.said_count; ++i) lines += strstr(g_unit_cache.said[i], "it leaves free") != NULL;
+        CHECK(lines == 1 && said("unit cache: 0.0 GB free on ", "under the 100.0 GB (a tenth of 1000.0 GB) it leaves "
+                                                                "free: units without room are not cached"));
+        CHECK(said("unit cache: 2 unit(s) (", "MB) not cached in "));
     }
     g_unit_cache.disk_fails = 1;
     forget();
     CHECK(!build(folder, out[1], 0) && run(out[1]) == 42 && !snx_is_file(path_a));
-    CHECK(said("cannot read the room on the disk of", "code_001 is not kept"));
+    CHECK(said("unit cache: cannot read the free space of ", "units are not cached") &&
+          said("unit cache: 2 unit(s) (", "MB) not cached in "));
     g_unit_cache.disk = NULL;
     g_unit_cache.disk_fails = 0;
 

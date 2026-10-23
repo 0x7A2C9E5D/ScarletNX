@@ -412,8 +412,7 @@ static void report_units(const Queue* q, const SnxLlvmBuild* build, int quiet) {
                build->unit_cache);
     if (!build->unit_cache_limit) return;
     if (snx_unit_cache_trim(build->unit_cache, build->unit_cache_limit, &trim, error, sizeof error))
-        snx_error("unit cache: %s: its size is left over the limit of %.1f MB", error,
-                  (double)build->unit_cache_limit / 1000000.0);
+        snx_error("unit cache: %s: not cut to its %.1f MB limit", error, (double)build->unit_cache_limit / 1000000.0);
     else if (trim.removed && !quiet)
         printf("unit cache: %zu files held %.1f MB, over the limit of %.1f MB: the %zu oldest removed (%.1f MB), %.1f "
                "MB left\n",
