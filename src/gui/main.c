@@ -3191,7 +3191,8 @@ static int addons_cheat(const App* app, int item) {
 }
 /* a cheat cheats_off= cannot name (a | in it), which runs whatever its box says */
 static bool cheat_kept(const App* app, int cheat) { return strchr(app->cheats[cheat], SNX_CHEATS_SEPARATOR) != NULL; }
-static void addons_open(App* app, const char* game, const char* title) {
+/* the box of game, shown as title: with always (M) even when it has nothing beside it, its Add rows to give it some */
+static void addons_open(App* app, const char* game, const char* title, bool always) {
     char *folder, *name, *ini, *text;
     SnxAddon* list;
     size_t count, i, j;
@@ -3199,7 +3200,7 @@ static void addons_open(App* app, const char* game, const char* title) {
     gui_game_addons(game, &app->addons);
     app->mods_count = gui_game_mods(game, &app->mods_folder, &app->mods);
     app->cheats_count = gui_game_cheats(game, &app->cheats_folder, &app->cheats);
-    if (!app->addons.count && !app->mods_count && !app->cheats_count) {
+    if (!always && !app->addons.count && !app->mods_count && !app->cheats_count) {
         addons_close(app);
         return;
     }
@@ -9018,7 +9019,7 @@ static void open_game(App* app, size_t index) {
     int item = app->menu.selected;
     if (gui_games_heading(&app->games, index)) return; /* a group's heading runs nothing */
     if (app->games.addons[index]) { /* its updates and DLCs: which one runs is asked first */
-        addons_open(app, app->games.paths[index], app->games.shown[index]);
+        addons_open(app, app->games.paths[index], app->games.shown[index], false);
         if (app->addons_shown) return;
     }
     app->menu.selected = gui_is_cia(app->games.names[index])   ? GUI_3DS
@@ -9209,22 +9210,28 @@ done:
     free(f.folder);
     free(f.name);
 }
-/* M on Games: the focused game's mods folder opened, made first when it isn't there; else why not */
+/* M on Games: the box of the focused game's updates, DLCs, mods and cheats, shown even when it has none of them for
+   its Add Mod and Add Cheats; else why not */
 static void mods_focus(App* app) {
     size_t row = app->browser.selected, head = app->browser.head;
     size_t index = app->browser.page * app->browser.page_size + row - head;
     bool recent = row < head && (int)row < recent_shown(app),
          game = row >= head && index < app->games.count && !gui_games_heading(&app->games, index); /* it has no path */
+    const char *path = NULL, *title = NULL;
     char* folder = NULL;
-    if (recent && app->recent.game[row].driver == GUI_SWITCH)
-        gui_game_mods(app->recent.game[row].path, &folder, NULL);
-    else if (game)
-        gui_game_mods(app->games.paths[index], &folder, NULL);
+    if (recent && app->recent.game[row].driver == GUI_SWITCH) {
+        path = app->recent.game[row].path;
+        title = app->recent.game[row].name;
+    } else if (game) {
+        path = app->games.paths[index];
+        title = app->games.shown[index];
+    }
+    if (path) gui_game_mods(path, &folder, NULL); /* a recompiled game's, in a folder of its own, has one */
     if (folder)
-        show_folder(app, folder);
+        addons_open(app, path, title, true);
     else
         snprintf(app->message, sizeof app->message, "%s",
-                 snx_tr("M opens the mods folder of a recompiled Switch game in focus."));
+                 snx_tr("M opens the mods and cheats of a recompiled Switch game in focus."));
     free(folder);
 }
 #define SNX_GUI_KEYS_MAX (1 << 20) /* a prod.keys is a few kilobytes: past this it is not one */

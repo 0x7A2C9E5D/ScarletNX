@@ -152,8 +152,8 @@ wins over an earlier one where both have the same file.
 
 Every mod in the folder is played until it is turned off. Opening a game in the launcher lists its mods under its
 updates and DLCs, each with a box to check, and Open Mods Folder opens the folder in the file manager (it is made
-first when it isn't there). M opens it too, for the game in focus on Games. The mods turned off are kept in
-`mods_off=` in the game's `.ini`, their folder names with a `/` between two.
+first when it isn't there). M on Games opens that box for the game in focus, one with nothing beside it too. The mods
+turned off are kept in `mods_off=` in the game's `.ini`, their folder names with a `/` between two.
 
 A mod's `exefs/` changes the game's code, which ScarletNX compiles ahead of time. The game's stamp (`<id>.abi`) records
 the mods' ExeFS files it was recompiled with, and playing it through the driver or the launcher recompiles it when the

@@ -2420,7 +2420,7 @@ msgid "The JIT cache is O%c, but the game's AOT optimization is O%c. They must m
 msgstr ""
 
 #: src/gui/main.c
-msgid "M opens the mods folder of a recompiled Switch game in focus."
+msgid "M opens the mods and cheats of a recompiled Switch game in focus."
 msgstr ""
 
 #: src/gui/main.c

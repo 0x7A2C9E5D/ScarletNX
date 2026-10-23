@@ -5110,7 +5110,7 @@ int main(int argc, char** argv) {
         app.browser.selected = 0;
     }
     /* a group's heading has no path: the focus on it, as the pointer over it puts it, offers no AOT pack, and M on it
-       says it opens no mods folder (it took the launcher down) */
+       says what it opens, no box (it took the launcher down); so does M on a dump, which has no data folder */
     {
         GuiGames was = app.games, two = {0};
         GuiBrowser browser_was = app.browser;
@@ -5128,10 +5128,15 @@ int main(int argc, char** argv) {
         assert(!aot_focus_game(&app, &f) && !f.path && !f.folder);
         app.message[0] = 0;
         mods_focus(&app);
-        assert(!strcmp(app.message, "M opens the mods folder of a recompiled Switch game in focus."));
+        assert(!strcmp(app.message, "M opens the mods and cheats of a recompiled Switch game in focus.") &&
+               !app.addons_shown);
         app.message[0] = 0;
         app.browser.selected = app.browser.head + 1; /* a dump: no game folder either */
         assert(!aot_focus_game(&app, &f) && !f.path);
+        mods_focus(&app);
+        assert(!strcmp(app.message, "M opens the mods and cheats of a recompiled Switch game in focus.") &&
+               !app.addons_shown);
+        app.message[0] = 0;
         app.games = was;
         app.browser = browser_was;
     }
@@ -5334,6 +5339,47 @@ int main(int argc, char** argv) {
                        strstr(said, "P: folders.") && strstr(said, "ESC: back."));
                 app.aot_state = state;
                 app.aot_match = match;
+            }
+            /* M on it, a game with no update, DLC, mod or cheat: its box all the same, for its Add rows, its mods and
+               cheats folders those of its data; ESC closes it, nothing run */
+            {
+                size_t index = app.browser.page * app.browser.page_size + app.browser.selected - app.browser.head;
+                char *mods = snx_path_join(data, "mods"), *cheats = snx_path_join(data, "cheats");
+                int nx, ny;
+                assert(!app.games.addons[index]);
+                key(&app, SDLK_M);
+                assert(app.addons_shown && !app.menu.running && !app.addons.count && !app.mods_count &&
+                       !app.cheats_count && !strcmp(app.addons_title, app.games.shown[index]) &&
+                       !strcmp(app.addons_game, app.games.paths[index]));
+                assert(same_path(app.mods_folder, mods) && same_path(app.cheats_folder, cheats));
+                render(&app);
+                assert(find_text(&app, app.games.shown[index], rgb(app.theme.ink), 1, &nx, &ny) ||
+                       find_text(&app, app.games.shown[index], rgb(app.theme.page), 1, &nx, &ny));
+                assert(find_text(&app, "Open Mods Folder", yellow, 1, &nx, &ny)); /* the first row, in focus */
+                key(&app, SDLK_ESCAPE);
+                assert(!app.addons_shown && !app.menu.running && app.menu.view == GUI_LOAD_GAMES);
+                { /* and on its row of the recent games: the same box, named as the run named it */
+                    size_t selected = app.browser.selected, page = app.browser.page;
+                    GuiRecent was = app.recent;
+                    char* absolute = snx_absolute(program);
+                    assert(!gui_recent_add(&app.recent, absolute, GUI_SWITCH, 1));
+                    snprintf(app.recent.game[0].name, sizeof app.recent.game[0].name, "%s", "Folder Quest 2.0");
+                    recent_changed(&app);
+                    assert(recent_shown(&app) && app.browser.head);
+                    app.browser.selected = 0; /* the newest */
+                    key(&app, SDLK_M);
+                    assert(app.addons_shown && !app.addons.count && !app.mods_count && !app.cheats_count &&
+                           !strcmp(app.addons_title, "Folder Quest 2.0") && !strcmp(app.addons_game, absolute));
+                    key(&app, SDLK_ESCAPE);
+                    assert(!app.addons_shown && !app.menu.running);
+                    app.recent = was;
+                    recent_changed(&app);
+                    app.browser.selected = selected;
+                    app.browser.page = page;
+                    free(absolute);
+                }
+                free(mods);
+                free(cheats);
             }
             launcher(&app, true);
             key(&app, SDLK_R);
