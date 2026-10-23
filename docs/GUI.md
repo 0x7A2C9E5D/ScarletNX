@@ -206,7 +206,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   the menu's own) and what is left on that disk, counted as the menu opens and after each run. While a recompile of
   the queue runs its tree's RAM and CPU are in the first line, and a last one says how it goes:
   `Background recompile: Full`, `Gentle`, `Gentle, a game plays` or `Gentle until it ends:` and why, the threads it
-  was started with when they were halved.
+  was started with when they were halved, and when the taskbar cannot show its progress, SDL's reason.
 - Settings > App's **Theme** switches to the next theme, or the one before: the built-in Default
   and YoRHa, then each folder of `themes/` (see [Themes](#themes)). The menu opens in YoRHa until one is picked.
   It is kept for the next start,
@@ -405,7 +405,8 @@ Games, its line seen and gone; **Del** takes out one waiting, or the line of one
 its row once in focus, plays the game of one that ended well. When one ends the next starts by itself, and the tab
 says `Recompile OK` for five seconds before the next one's percent; while one that failed is listed and none runs it
 says `Recompile FAILED`, on the failure colour, blinking as Share Log does, which blinks too. The tab goes with the
-queue's last line. `last-recompile.log`, beside `last-run.log`,
+queue's last line. The window's icon in the taskbar (Windows', a Linux desktop's launcher entry, through SDL) fills
+as the one running goes, and turns red once one failed and none runs. `last-recompile.log`, beside `last-run.log`,
 holds the queue's output since one started with no ended line left. Move Old Files and Clean Old Settings wait until
 the queue ends; the window's close, Exit and ESC on the menu ask first, naming the one running.
 

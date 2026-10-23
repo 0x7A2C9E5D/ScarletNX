@@ -1403,6 +1403,11 @@ msgid "Background recompile: %s"
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "Taskbar: no progress shown (%s)"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Menu"
 msgstr ""
 
@@ -2914,6 +2919,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "AOT pack built"
+msgstr ""
+
+#: src/gui/main.c
+msgid "SDL gave no reason"
 msgstr ""
 
 #: src/gui/main.c

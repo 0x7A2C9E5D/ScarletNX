@@ -272,9 +272,13 @@ typedef struct App {
     bool job_low;      /* its priority lowered: Background recompile Gentle, or a game playing */
     bool job_kept_low; /* the system refused to raise it again: low until it ends, job_said says why */
     char job_said[160];
-    int job_threads;          /* the threads it was started with: 0 for the driver's own count (the AOT threads') */
-    int queue_focus;          /* the Recompile tab's row, a job of the queue */
-    bool background_gentle;   /* app.ini's recompile_background = gentle: every recompile of the queue is */
+    int job_threads;        /* the threads it was started with: 0 for the driver's own count (the AOT threads') */
+    int queue_focus;        /* the Recompile tab's row, a job of the queue */
+    bool background_gentle; /* app.ini's recompile_background = gentle: every recompile of the queue is */
+    /* the taskbar's progress as SDL was last given it, the value in percent: none until a recompile runs. What SDL
+       said when it could not be shown, "" when it was */
+    int taskbar_state, taskbar_value;
+    char taskbar_error[256];
     Uint64 finger;            /* the finger on the screen (finger_id), 0 for none */
     float finger_x, finger_y; /* where it went down, 0 to 1 across the window */
     float finger_mark;        /* the height a drag last moved the focus at, a row at a time */
@@ -4127,9 +4131,10 @@ static const char* screen_title(const App* app, char* out, size_t size) {
 }
 static void job_speed(App* app, char* out, size_t size);
 /* the status box: the usage (the menu's, its run's and the queue's recompile's), the disk and the working folder, then
-   while a recompile of the queue runs how it goes; wrapped to width columns; with draw, drawn in r */
+   while a recompile of the queue runs how it goes and, when the taskbar cannot show it, why; wrapped to width
+   columns; with draw, drawn in r */
 static int status_rows(App* app, int width, GuiRect r, int y, int draw) {
-    char usage[256], disk[96], cwd[1100], *apart, speed[256], how[200];
+    char usage[256], disk[96], cwd[1100], *apart, speed[256], how[200], bar[300];
     const char* lines[6];
     int i, rows = 0;
     bool job = gui_queue_running(&app->queue) >= 0;
@@ -4139,17 +4144,19 @@ static int status_rows(App* app, int width, GuiRect r, int y, int draw) {
                    app->usage.cpu_percent + (job ? app->job_usage.cpu_percent : 0), SDL_GetNumLogicalCPUCores());
     disk_text(app, disk, sizeof disk);
     snprintf(cwd, sizeof cwd, "%s %s", snx_tr("Working folder:"), app->cwd ? app->cwd : snx_tr("(unavailable)"));
-    speed[0] = 0;
+    speed[0] = bar[0] = 0;
     if (job) {
         job_speed(app, how, sizeof how);
         snprintf(speed, sizeof speed, snx_tr("Background recompile: %s"), how);
     }
+    if (job && app->taskbar_error[0])
+        snprintf(bar, sizeof bar, snx_tr("Taskbar: no progress shown (%s)"), app->taskbar_error);
     lines[0] = usage;
     lines[1] = "";
     lines[2] = disk;
     lines[3] = cwd;
     lines[4] = speed;
-    lines[5] = "";
+    lines[5] = bar;
     /* the usage too wide for a row: the memory and the CPU a row each, at the two spaces between them, so a row breaks
        between two values and never inside one ("(0.5 cores)") */
     if (gui_text_cols(usage) > width && (apart = strstr(usage, "  ")) != NULL) {
@@ -9490,6 +9497,7 @@ static int aot_built(const GuiSteps* steps) {
 }
 static bool watch_get(App* app, uint64_t* stamp);
 static void job_pump(App* app);
+static void taskbar(App* app);
 static void games_back(App* app, const char* path);
 #ifdef SDL_PLATFORM_ANDROID
 static void tell(App* app);
@@ -9572,6 +9580,7 @@ static void pump(App* app) {
 #ifdef SDL_PLATFORM_ANDROID
     tell(app);
 #endif
+    taskbar(app);
     Uint64 now = SDL_GetTicks();
     if (!app->sampled || now - app->sampled >= 500) {
         app->usage = gui_process_usage(app->process);
@@ -10189,6 +10198,37 @@ static void job_pump(App* app) {
     if (!gui_process_finished(app->job_process, &status)) return;
     job_ended(app, i, status);
     job_start(app);
+}
+/* the taskbar's progress, SDL's (Windows' taskbar, a Linux desktop's launcher entry): how far the queue's recompile
+   running is, its failure once none runs while one that failed is listed, else none. Given SDL only as it changes;
+   what SDL said when it could not show it is kept for the Status box, and said once on stderr */
+static void taskbar(App* app) {
+    int run = gui_queue_running(&app->queue), state = SDL_PROGRESS_STATE_NONE, value = 0, i;
+    bool ok;
+    if (run >= 0) {
+        value = SDL_max(app->queue.job[run].percent, 0);
+        state = app->queue.job[run].percent < 0 ? SDL_PROGRESS_STATE_INDETERMINATE : SDL_PROGRESS_STATE_NORMAL;
+    } else
+        for (i = 0; i < app->queue.count; ++i)
+            if (app->queue.job[i].state == GUI_JOB_FAILED) {
+                state = SDL_PROGRESS_STATE_ERROR;
+                value = 100;
+            }
+    if (!app->window || (state == app->taskbar_state && value == app->taskbar_value)) return;
+    SDL_ClearError();
+    ok = SDL_SetWindowProgressValue(app->window, (float)value / 100.0f) &&
+         SDL_SetWindowProgressState(app->window, (SDL_ProgressState)state);
+    app->taskbar_state = state;
+    app->taskbar_value = value;
+    if (ok) {
+        app->taskbar_error[0] = 0;
+        return;
+    }
+    if (!app->taskbar_error[0])
+        fprintf(stderr, "scarletnx: the taskbar shows no progress of the recompile: %s\n",
+                SDL_GetError()[0] ? SDL_GetError() : "SDL gave no reason");
+    snprintf(app->taskbar_error, sizeof app->taskbar_error, "%s",
+             SDL_GetError()[0] ? SDL_GetError() : snx_tr("SDL gave no reason"));
 }
 /* ESC on the one running, or Abort taken: its tree killed now, pump reaping it */
 static void job_abort(App* app) {

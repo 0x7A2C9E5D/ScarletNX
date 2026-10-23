@@ -2219,8 +2219,9 @@ static void recompile_queue(App* app) {
     free(app->job_log); /* beside the games: Folders' Logs, which may have set it, are gone */
     app->job_log = snx_format("%s-last-recompile.log", app->games_dir);
     recent_open(app, snx_format("%s-recent.txt", app->games_dir)); /* R puts its game first in the recent games */
-    assert(gui_settings_set(settings, "aot_threads", "8"));        /* Full: the AOT threads picked; Gentle: half */
+    assert(gui_settings_set(settings, "aot_threads", "8")); /* Full: the AOT threads picked; Gentle: half */
     assert(!app->queue.count && tab_count(app) == GUI_TAB_RECOMPILE);
+    assert(SDL_GetWindowProgressState(app->window) == SDL_PROGRESS_STATE_NONE);
     /* R on a game: the Recompile tab, a fourth, shows it, its output at the letters a half step under the text's,
        the queue and the Status box beside it; the menu runs nothing, the queue's process does */
     go_tab(app, GUI_TAB_GAMES);
@@ -2245,6 +2246,8 @@ static void recompile_queue(App* app) {
     shows_foot(app, "abort", normal);
     shows_foot(app, "games", normal);    /* Tab's, which every other foot leaves to F1 */
     hides_foot(app, "take out", normal); /* the one running stays: ESC aborts it */
+    assert(SDL_GetWindowProgressState(app->window) == SDL_PROGRESS_STATE_NORMAL &&
+           SDL_fabsf(SDL_GetWindowProgressValue(app->window) - 0.25f) < 0.001f);
     /* YoRHa's: its loading screen as the panel, in its own colours and the letters a half step under the text's, the
        usage and how it goes on the footer's band at its foot */
     app->theme = *gui_theme_builtin("yorha");
@@ -2265,6 +2268,7 @@ static void recompile_queue(App* app) {
     shows(app, "- queue game one  50%", yellow);
     shows(app, "Recompiling: RECOMPILE: QUEUE GAME ONE 2 / 4",
           normal); /* the side box of its row: the theme's amount */
+    assert(SDL_fabsf(SDL_GetWindowProgressValue(app->window) - 0.5f) < 0.001f);
     /* R on another game while one runs: it joins the queue, the tips saying where; one runs at a time */
     focus_game(app, names[1]);
     key(app, SDLK_R);
@@ -2450,7 +2454,8 @@ static void recompile_queue(App* app) {
         printf("gui_sdl: the queue's recompile after the game: %s\n", said);
         free(step);
     }
-    /* a failure: FAILED on its row and its tab, blinking as Share Log does, which blinks too */
+    /* a failure: FAILED on its row and its tab, blinking as Share Log does, which blinks too; the taskbar's error
+       once none runs */
     go_tab(app, GUI_TAB_GAMES);
     focus_game(app, names[2]);
     key(app, SDLK_R);
@@ -2461,6 +2466,7 @@ static void recompile_queue(App* app) {
     job_end(app);
     assert(app->queue.job[0].state == GUI_JOB_OK && gui_queue_running(&app->queue) == 1);
     job_started(app);
+    assert(SDL_GetWindowProgressState(app->window) == SDL_PROGRESS_STATE_NORMAL);
     job_step(app, 50);
     job_step(app, 75);
     job_step(app, 100);
@@ -2468,6 +2474,7 @@ static void recompile_queue(App* app) {
     assert(app->queue.job[1].state == GUI_JOB_FAILED && app->queue.job[1].status == 3 && app->log_due);
     assert(!strcmp(app->message, "queue game fails: Recompile failed (status 3).") &&
            tab_reads(app, "Recompile FAILED"));
+    assert(SDL_GetWindowProgressState(app->window) == SDL_PROGRESS_STATE_ERROR);
     {
         GuiPlace p;
         GuiRect tab;
@@ -2505,13 +2512,13 @@ static void recompile_queue(App* app) {
         free(log);
         free(shared);
     }
-    /* ESC on an ended one: back to Games, its line gone */
+    /* ESC on an ended one: back to Games, its line gone; the taskbar's error with the failure's */
     go_tab(app, GUI_TAB_RECOMPILE);
     app->queue_focus = 1;
     key(app, SDLK_ESCAPE);
     assert(app->menu.view == GUI_LOAD_GAMES && app->queue.count == 1 && tab_count(app) == GUI_TABS);
     pump(app);
-    assert(tab_reads(app, "Recompile OK"));
+    assert(SDL_GetWindowProgressState(app->window) == SDL_PROGRESS_STATE_NONE && tab_reads(app, "Recompile OK"));
     go_tab(app, GUI_TAB_RECOMPILE);
     key(app, SDLK_ESCAPE);
     assert(app->menu.view == GUI_LOAD_GAMES && !app->queue.count && tab_count(app) == GUI_TAB_RECOMPILE);
