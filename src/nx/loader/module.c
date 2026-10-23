@@ -60,7 +60,13 @@ char* snx_chunk_label(const SnxCodegen* codegen, size_t first, size_t last) {
 void snx_report_unit(size_t done, size_t count, const char* name, const char* label, int cached, double seconds) {
     if (cached)
         printf("  compiled block %zu/%zu: %s, %s (cached)\n", done, count, name, label);
-    else
-        printf("  compiled block %zu/%zu: %s, %s (%.1f s)\n", done, count, name, label, seconds);
+    else {
+        SnxU64 used = snx_footprint();
+        if (used)
+            printf("  compiled block %zu/%zu: %s, %s (%.1f s, %llu MiB in use)\n", done, count, name, label, seconds,
+                   (unsigned long long)(used >> 20));
+        else
+            printf("  compiled block %zu/%zu: %s, %s (%.1f s)\n", done, count, name, label, seconds);
+    }
     fflush(stdout);
 }

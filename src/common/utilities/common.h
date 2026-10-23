@@ -171,6 +171,9 @@ double snx_seconds(void);
    snx_vm_protect commits the pages it makes accessible and decommits them with SNX_VM_NONE on Windows. 0 or -1 */
 enum { SNX_VM_NONE, SNX_VM_READ, SNX_VM_READ_WRITE, SNX_VM_READ_EXECUTE };
 size_t snx_vm_page_size(void);
+/* the memory this process is charged for now, in bytes: its footprint on macOS and iOS, its resident set on Linux, 0 where
+   it is not known */
+SnxU64 snx_footprint(void);
 void* snx_vm_reserve(size_t size); /* NULL when the system refuses */
 int snx_vm_protect(void* p, size_t size, int access);
 void snx_vm_release(void* p, size_t size);

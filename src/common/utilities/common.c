@@ -34,6 +34,9 @@
 #include <sys/mman.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -174,6 +177,23 @@ static DWORD attributes(const char* path) {
     return a;
 }
 #endif
+SnxU64 snx_footprint(void) {
+#ifdef __APPLE__
+    task_vm_info_data_t info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) return info.phys_footprint;
+    return 0;
+#elif defined(__linux__)
+    unsigned long long pages = 0, resident = 0;
+    FILE* f = fopen("/proc/self/statm", "r");
+    if (!f) return 0;
+    if (fscanf(f, "%llu %llu", &pages, &resident) != 2) resident = 0;
+    fclose(f);
+    return (SnxU64)resident * snx_vm_page_size();
+#else
+    return 0;
+#endif
+}
 FILE* snx_fopen(const char* path, const char* mode) {
 #ifdef _WIN32
     wchar_t *p = wide(path), *m = wide(mode);
