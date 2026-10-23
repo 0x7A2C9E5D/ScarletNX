@@ -12,6 +12,7 @@
 #define _DARWIN_C_SOURCE
 #endif
 #include "common/utilities/common.h"
+#include "common/utilities/ini_lines.h"
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -83,9 +84,10 @@ char* snx_format(const char* fmt, ...) {
     va_end(ap);
     return p;
 }
-/* snx_error's sink, snx_error_sink's: NULL for stderr */
+/* snx_error's sink, snx_error_sink's: NULL for stderr; and the kinds whose folder app.ini names wrongly, said once */
 static struct {
     void (*error_sink)(const char* line);
+    unsigned said_kinds;
 } g_common;
 
 void snx_error_sink(void (*sink)(const char* line)) {
@@ -935,12 +937,53 @@ int snx_app_dir(const char* folder) {
     free(full);
     return app;
 }
-char* snx_app_kind_dir(const char* app, int kind) {
+char* snx_app_kind_default(const char* app, int kind) {
     char* user = snx_user_data_dir();
     int own = user && same_folder(app, user);
     free(user);
     if (own) return snx_user_dir(kind);
     return kind == SNX_USER_DATA ? snx_strdup(app) : snx_path_join(app, kind_names[kind]);
+}
+/* the folder of kind the app.ini in config names in [folders] (Settings > App > Folders' Logs and Caches): 1 with *dir
+   a full path, -1 with *dir a value that is not one, 0 for none (no file, no key, an empty one) */
+static int picked_kind(const char* config, int kind, char** dir) {
+    size_t size;
+    char *path = snx_path_join(config, "app.ini"), *text = path ? (char*)snx_read_file(path, &size) : NULL, *key,
+         *value;
+    const char* wanted = kind == SNX_USER_STATE ? "state" : "cache";
+    int found = 0;
+    SnxIni ini;
+    *dir = NULL;
+    if (text) snx_ini_start(&ini, text);
+    while (text && snx_ini_next(&ini, &key, &value))
+        if (!strcmp(ini.section, "folders") && !strcmp(key, wanted)) { /* the last one, as the launcher reads it */
+            free(*dir);
+            *dir = *value ? snx_strdup(value) : NULL;
+            found = !*value ? 0 : snx_path_is_full(value) ? 1 : -1;
+        }
+    free(text);
+    free(path);
+    return found;
+}
+char* snx_app_kind_dir(const char* app, int kind) {
+    char *dir = snx_app_kind_default(app, kind), *config, *picked;
+    int found;
+    if (kind != SNX_USER_STATE && kind != SNX_USER_CACHE) return dir;
+    config = snx_app_kind_default(app, SNX_USER_CONFIG);
+    found = config ? picked_kind(config, kind, &picked) : 0;
+    if (found > 0) {
+        free(dir);
+        dir = picked;
+        picked = NULL;
+    } else if (found < 0 && !(g_common.said_kinds & 1u << kind)) {
+        g_common.said_kinds |= 1u << kind;
+        snx_error("%s/app.ini: [folders] %s = %s is not a full path: the %s go in %s", config,
+                  kind == SNX_USER_STATE ? "state" : "cache", picked, kind == SNX_USER_STATE ? "logs" : "caches",
+                  dir ? dir : "(none)");
+    }
+    if (found) free(picked);
+    free(config);
+    return dir;
 }
 /* the data folder (snx_app_dir) full, an absolute path, is in, from full itself up; NULL for none */
 static char* app_of(const char* full) {
@@ -972,13 +1015,17 @@ char* snx_user_path(const char* path, int kind) {
     free(root);
     return moved ? moved : snx_strdup(path);
 }
-char* snx_menu_dir(const char* folder, int kind) {
-    char *full = folder ? snx_absolute(folder) : NULL, *app = full ? app_of(full) : NULL;
-    char* dir = app ? snx_app_kind_dir(app, kind) : snx_user_dir(kind);
+/* snx_menu_dir, with the folder Folders picked (snx_app_kind_dir) or without it (snx_app_kind_default) */
+static char* menu_dir(const char* folder, int kind, char* (*of)(const char* app, int kind)) {
+    char *full = folder ? snx_absolute(folder) : NULL, *app = full ? app_of(full) : NULL, *dir;
+    if (!app) app = snx_user_data_dir(); /* any other folder's: the user's */
+    dir = app ? of(app, kind) : snx_user_dir(kind);
     free(app);
     free(full);
     return dir;
 }
+char* snx_menu_dir(const char* folder, int kind) { return menu_dir(folder, kind, snx_app_kind_dir); }
+char* snx_menu_kind_default(const char* folder, int kind) { return menu_dir(folder, kind, snx_app_kind_default); }
 int snx_left_behind(const char* old, const char* now) { return strcmp(old, now) && snx_path_exists(old); }
 int snx_launcher_name(const char* name) {
     static const char own[] = "scarletnx";

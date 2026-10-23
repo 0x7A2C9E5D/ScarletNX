@@ -91,9 +91,13 @@ char* snx_user_dir(int kind);
 /* 1 for a data folder that keeps each kind of file apart: the user's, a portable copy's (SNX_PORTABLE_DIR), Android's.
    Another folder's games (--repo, --outdir) keep their files in their folders */
 int snx_app_dir(const char* folder);
-/* Such a data folder's folder for one kind of file: the user's as snx_user_dir says, another's config/, state/ and
-   cache/ in it; the data folder itself for SNX_USER_DATA */
+/* Such a data folder's folder for one kind of file: for SNX_USER_STATE and SNX_USER_CACHE the one its config folder's
+   app.ini names, [folders] state = and cache = (Settings > App > Folders' Logs and Caches), a full path; else
+   snx_app_kind_default's. One app.ini names wrongly is said once */
 char* snx_app_kind_dir(const char* app, int kind);
+/* Its folder for one kind of file before Folders picks one: the user's as snx_user_dir says, another's config/, state/
+   and cache/ in it; the data folder itself for SNX_USER_DATA */
+char* snx_app_kind_default(const char* app, int kind);
 /* A path in a data folder (snx_app_dir), moved to the same place in its folder of kind: games/X/X.ini of the data
    folder is games/X/X.ini of the config folder. Any other path (another --repo, an --outdir) is returned as it is */
 char* snx_user_path(const char* path, int kind);
@@ -101,6 +105,8 @@ char* snx_user_path(const char* path, int kind);
    state) for a program in folder: the data folder's (snx_app_dir) that folder is in, else the user's. The launcher
    names its data folder, a game its own folder, so a game finds the files of the launcher whose games/ it is in */
 char* snx_menu_dir(const char* folder, int kind);
+/* The same before Folders picks one: snx_app_kind_default's */
+char* snx_menu_kind_default(const char* folder, int kind);
 /* 1 while what an older build left at old is still there, for the caller to say each run where it is and that this
    build keeps it at now. Nothing is moved: the player does that */
 int snx_left_behind(const char* old, const char* now);
