@@ -50,7 +50,8 @@ menu's driver:
   device, the system and the limits the app has, and a fatal error is also written to `logs/scarletnx-error.log`. A
   phone shows no console, so these are what to read when a run fails.
 
-The IPA is unsigned: AltStore, SideStore or a developer account signs it for the device, with
+The IPA is unsigned: AltStore, SideStore or a developer account signs it for the device (a Mac can too:
+[Installing from a Mac](#installing-from-a-mac)), with
 `dist/apple/ScarletNX.entitlements` (the larger address space and memory limit a game needs). It holds MoltenVK's
 framework.
 
@@ -69,17 +70,21 @@ pick into `dumps/`, then makes the game in `recompiled/`. Pick them from whereve
 
 1. **Install the app.** Take `ScarletNX-ios-arm64-<commit>.ipa` from a CI run, or build it (`cmake --preset ios`,
    [Building](#building)), and install it with a sideloading tool that signs it with an Apple ID: iloader or
-   SideStore. A free account signs an app for 7 days, up to three apps at a time (the app, SideStore and StikDebug).
+   SideStore. A free account signs an app for 7 days. iOS lets a device hold three apps with a free profile at a time,
+   whichever Apple IDs signed them, so a second account adds no room. The app, SideStore and StikDebug fill them, and a
+   fourth install fails with "maximum number of installed apps using a free developer profile".
 2. **Set up JIT once.** iOS makes memory executable only for an app with a debugger attached. Install StikDebug and
    LocalDevVPN, give StikDebug the pairing file (SideStore keeps one: *Storage Explorer*,
    `ALTPairingFile.mobiledevicepairing`), hold ScarletNX in StikDebug's list and *Assign Script* `universal.js`. The
-   runtime checks for the debugger first and says what to enable when there is none.
+   runtime checks for the debugger first and says what to enable when there is none. Reinstalling StikDebug removes its data,
+   assignments included, so assign the script again.
 3. **Add your keys.** Open ScarletNX, *Install Keys*, and pick the `prod.keys` of your Switch.
 4. **Prepare the game.** In *Games*, pick the `.nsp` or `.xci` and prepare it. The app extracts it and writes
    `recompiled/<id>/` with `<id>_code.snxobj` and `<id>_data/`. 64-bit games only. Keep the app in the foreground
    until it ends: iOS stops its GPU and its threads in the background.
 5. **Play.** *Enable JIT* for ScarletNX in StikDebug, open ScarletNX, *Games*, and pick the game. Do this before each
-   run, and do not leave the app while the game runs.
+   run, and do not leave the app while the game runs. Keep StikDebug open too: when it is closed, the debugger goes
+   with it and the game loses JIT.
 
 The folders the app makes in *On My iPhone > ScarletNX* are `dumps/` (your games' dumps), `keys/`, `recompiled/` (the
 games it made) and `logs/` (what to send when a run fails). Reinstalling the app can remove them with some tools.
@@ -90,6 +95,32 @@ A Mac still prepares a game the same way (`scarletnx -x "Game.nsp" --name Game`,
 Limits found on an iPhone 14 Pro (iOS 26.6.1): without the paid extended-virtual-addressing entitlement the app has
 about 13 GiB of address space and about 3 GB of memory, so the runtime takes the largest free run it can (128 GiB
 down to 5 GiB) and lays the guest out to fit, with no alias region below 12 GiB.
+
+### Installing from a Mac
+
+A Mac with Xcode can sign the IPA and install it, with no sideloading tool. `scripts/apple-resign.sh` does it:
+
+```
+scripts/apple-resign.sh ScarletNX-ios-arm64-<commit>.ipa --team TEAM --bundle org.scarletnx.TEAM \
+    --identity "Apple Development: you@example.com (ABCDE12345)" --device UDID
+```
+
+TEAM is the account's team ID, the identity one of its certificates (`security find-identity -v -p codesigning`) and
+UDID the iPhone's (`xcrun devicectl list devices`). The script:
+
+1. **Makes the provisioning profile.** It builds a stub app with the bundle ID and the team, with
+   `-allowProvisioningUpdates`, and Xcode makes the profile in the account it is signed in to.
+2. **Signs the app.** It puts that profile in the app, sets the bundle ID, takes the entitlements from the profile and
+   signs the frameworks and then the app with the certificate.
+3. **Installs it** with `xcrun devicectl device install app`. The same bundle ID replaces the app and keeps its
+   `dumps/`, `keys/` and `recompiled/`. A sideloading tool adds the team to the bundle ID, so pass the one the
+   installed app has (`org.scarletnx.TEAM`), as another counts as a new app.
+
+Run it from Terminal.app on the Mac's own screen. Over ssh the keychain is locked and codesign fails with
+`errSecInternalComponent`. A free account's profile lasts 7 days and covers three apps on a device in all, whichever
+tool installed them. A free profile lacks the paid entitlements of `dist/apple/ScarletNX.entitlements`, so the app
+is signed with the ones the profile has. Without `--device` the signed `ScarletNX.app` is left in the folder of
+`--out`.
 
 ## What is missing
 
