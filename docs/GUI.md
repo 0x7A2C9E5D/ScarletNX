@@ -341,7 +341,9 @@ cannot be read is named and the others still listed.
   that scrolls, the list three fifths of the screen as a run's output is, Recent Games and a group's heading each on
   a line of its own; the arrows go to the tile beside, above or under the focus, its column or the line's last,
   PgUp and PgDn by the lines that show, a click or a tap on a tile opens it, and the side box says the focused one as
-  the list's does), then the **Side panel** of Settings > App (`side_box`, which F2 turns too). Enter, Left, Right or
+  the list's does); in the grid alone **Icon size** (*Medium*, `games_icons = medium`: a tile 12 cells by 4 rows;
+  *Small*, `small`: 8 by 3; *Large*, `large`: 16 by 6), then the **Side panel** of Settings > App (`side_box`, which
+  F2 turns too). Enter, Left, Right or
   a click change the focused one,
   kept in `app.ini` at once, and the list is read again by it; ESC or a click off the box closes it. On iOS Recent
   Games and Dumps start *Off*, as a phone keeps the games made in the app's `recompiled/` and prepares a dump from the

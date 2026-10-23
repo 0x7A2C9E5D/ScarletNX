@@ -509,6 +509,24 @@ static void test_tiles(void) {
     assert(!ui_grid_hit(&app, r, 1, lists, 140, 20, 0, &item, &row) && item == -1);
     lists[UI_GRID_TILES].first = 6;
     assert(ui_grid_hit(&app, r, 1, lists, 50, 40, 0, &item, &row) == UI_HIT_HOVER && row == 10);
+    /* the code's own tiles (UiList's tile_w and tile_h): placed, drawn, hit and followed at them, as many a line as
+       then fit; 0 ui.txt's again */
+    lists[UI_GRID_TILES].first = 0;
+    lists[UI_GRID_TILES].tile_w = 20;
+    lists[UI_GRID_TILES].tile_h = 10;
+    ui_grid_flow(r, 1, UI_GRID_TILES, &f);
+    ui_flow_sized(&f, &lists[UI_GRID_TILES], 1);
+    assert(f.tile_w == 20 && f.tile_h == 10 && f.cols == (f.area.w + f.gap) / (20 + f.gap) && f.cols > 3);
+    g_gui_ui.ndrawn = 0;
+    ui_grid_draw(&app, r, 1, lists);
+    assert(d[1].tile && !strcmp(d[1].text, "T1"));
+    is(d[1].r, 4, 18, 20, 10);
+    is(d[2].r, 28, 18, 20, 10);
+    assert(ui_grid_hit(&app, r, 1, lists, 30, 20, 0, &item, &row) == UI_HIT_HOVER && row == 2);
+    lists[UI_GRID_TILES].focus = 12;
+    ui_grid_follow(r, 1, UI_GRID_TILES, 13, &lists[UI_GRID_TILES]);
+    assert(lists[UI_GRID_TILES].first % (size_t)f.cols == 0 && lists[UI_GRID_TILES].first + (size_t)f.cols > 12);
+    lists[UI_GRID_TILES].tile_w = lists[UI_GRID_TILES].tile_h = 0;
 #endif
     puts("PASS a tile list: its flow, tiles and labels drawn and hit where placed, shown, row and follow");
 }

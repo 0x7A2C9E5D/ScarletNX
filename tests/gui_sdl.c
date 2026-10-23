@@ -13,7 +13,8 @@
 #endif
 /* app.ini as the menu writes it: its head, and the Games options' lines that end [app], at their defaults */
 #define APP_INI_HEAD   "; Settings > App and Games' View in the launcher, as they were left\n[app]\n"
-#define GAMES_DEFAULTS "recent_games = on\ngames_dumps = on\ngames_sort = title\ngames_view = list\n"
+#define GAMES_DEFAULTS                                                                                                 \
+    "recent_games = on\ngames_dumps = on\ngames_sort = title\ngames_view = list\ngames_icons = medium\n"
 /* the default theme's colours, as the checks below name them */
 static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255}, red = {255, 0, 0, 255},
                        pink = {255, 85, 255, 255}, black = {0, 0, 0, 255};
@@ -1007,6 +1008,7 @@ static void view_box(App* app, const char* temporary) {
     games_defaults(app, false);
     app_load(app);
     assert(recent_on(app) && dumps_on(app) && !by_last_opened(app) && !app->message[0]);
+    assert(app->options[GUI_OPTION_ICONS] == 1); /* Medium */
     games_defaults(app, true);
     app_load(app);
     assert(!recent_on(app) && !dumps_on(app) && !by_last_opened(app) && !app->message[0]);
@@ -1029,6 +1031,14 @@ static void view_box(App* app, const char* temporary) {
         app_load(app);
         snprintf(expected, sizeof expected, "Not used from %s: recent_games = maybe (it keeps off)", app->app_file);
         assert(!recent_on(app) && dumps_on(app) && !strcmp(app->message, expected));
+        broken = "[app]\ngames_icons = large\ngames_icons = huge\n"; /* Icon size's three words */
+        assert(!snx_write_file(app->app_file, broken, strlen(broken)));
+        games_defaults(app, false);
+        app->message[0] = 0;
+        app_load(app);
+        snprintf(expected, sizeof expected, "Not used from %s: games_icons = huge (it keeps large)", app->app_file);
+        assert(app->options[GUI_OPTION_ICONS] == 2 && !strcmp(app->message, expected));
+        games_defaults(app, false);
         app->message[0] = 0;
     }
     /* the pointer: over a row its focus, a click changes it; a click off the box closes it */
@@ -1174,6 +1184,11 @@ static void grid_view(App* app, const char* temporary) {
     key(app, SDLK_V);
     render(app);
     shows(app, "- View          < List >", normal);
+    hides(app, "Icon size", normal); /* the grid's alone */
+    {
+        int shown_rows[GUI_VIEW_BOX_ROWS];
+        assert(view_rows(app, shown_rows) == GUI_VIEW_BOX_ROWS - 1 && shown_rows[4] == GUI_VIEW_SIDE);
+    }
     for (int i = 0; i < 3; ++i) key(app, SDLK_DOWN);
     key(app, SDLK_RETURN);
     assert(games_grid(app) && app->options_focus == GUI_OPTION_VIEW);
@@ -1182,6 +1197,44 @@ static void grid_view(App* app, const char* temporary) {
     free(kept);
     render(app);
     shows(app, "- View          < Grid >", yellow);
+    { /* under it, the grid's own, Icon size: Medium, ui.txt's tiles; Right Large, 16 cells by 6 rows and 8px, which the
+         grid places, draws and hits; Left back, and again Small, 8 by 3 and 8px; each kept at once */
+        GuiGamesBoxes sized;
+        UiFlow tiles;
+        GuiRect at[3];
+        int item;
+        size_t hit_row;
+        key(app, SDLK_DOWN);
+        assert(app->options_focus == GUI_OPTION_ICONS);
+        render(app);
+        shows(app, "- Icon size     < Medium >", yellow);
+        key(app, SDLK_RIGHT);
+        render(app);
+        shows(app, "- Icon size     < Large >", yellow);
+        kept = (char*)snx_read_file(app->app_file, &size);
+        assert(kept && strstr(kept, "\ngames_view = grid\ngames_icons = large\n"));
+        free(kept);
+        games_boxes(app, &sized);
+        grid_flow(app, &sized, &tiles);
+        assert(tiles.tile_w == 16 * cell_w(app) && tiles.tile_h == 6 * cell_h(app) + 8 * app->scale);
+        for (int i = 0; i < 3; ++i) assert(ui_flow_next(&tiles, games_row_label(app, (size_t)i), &at[i]));
+        assert(!games_row_label(app, 2) && at[2].w == 16 * cell_w(app));
+        assert(ui_games_grid_hit(app, sized.grid_rects, app->scale, sized.grid_lists, at[2].x + at[2].w - 1,
+                                 at[2].y + at[2].h / 2, 0, &item, &hit_row) &&
+               item == UI_GAMES_GRID_TILES && hit_row == 2);
+        key(app, SDLK_LEFT);
+        key(app, SDLK_LEFT);
+        render(app);
+        shows(app, "- Icon size     < Small >", yellow);
+        kept = (char*)snx_read_file(app->app_file, &size);
+        assert(kept && strstr(kept, "\ngames_icons = small\n"));
+        free(kept);
+        games_boxes(app, &sized);
+        grid_flow(app, &sized, &tiles);
+        assert(tiles.tile_w == 8 * cell_w(app) && tiles.tile_h == 3 * cell_h(app) + 8 * app->scale);
+        key(app, SDLK_RIGHT); /* Medium again, for what follows */
+        assert(app->options[GUI_OPTION_ICONS] == 1);
+    }
     { /* under it the Side panel, Settings > App's and F2's: Right the next of Auto, On and Off, kept at once, Left
          back, Down round to the first row */
         int was = app->side_box;

@@ -673,6 +673,22 @@ msgid "Grid"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Icon size"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Small"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Medium"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Large"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "Not kept for the next start: %s could not be written"
 msgstr ""

@@ -1253,7 +1253,9 @@ static void write_h(const char* path) {
          "} UiItem;\n");
     outs("/* a list's state, the caller's: the row it shows first, the row in focus, and whether the pointer put the "
          "focus\n   there, which keeps first where it is while the focus shows */\ntypedef struct {\n"
-         "    size_t first, focus;\n    bool pointed;\n} UiList;\n");
+         "    size_t first, focus;\n    bool pointed;\n"
+         "    int tile_w, tile_h; /* a tile list's tile in pixels at 1x where the code sizes it; 0: ui.txt's */\n"
+         "} UiList;\n");
     outs(
         "/* a row a list without items asks get_row_info for: its text (NULL: \"(null)\", as printf's %s prints it), the\n"
         "   image before it (NULL: none; main.c's, which draws it) and how it is drawn */\ntypedef struct {\n"
@@ -1287,7 +1289,11 @@ static void write_h(const char* path) {
         "    /* the line placed last: its top from area.y, its height (0: none yet), the tiles on it (cols: no more), its\n"
         "       index from the first's */\n    int y, line_h, col, line;\n    size_t placed;\n} UiFlow;\n"
         "/* the next row placed, a label's or a tile's rectangle in at: false where it does not fit under the list's bottom\n"
-        "   or past its max_rows, nothing placed then */\nbool ui_flow_next(UiFlow* flow, bool label, GuiRect* at);\n");
+        "   or past its max_rows, nothing placed then */\nbool ui_flow_next(UiFlow* flow, bool label, GuiRect* at);\n"
+        "/* a flow started by its scene's given its list's own tiles where the code sizes them (UiList's tile_w\n"
+        "   and tile_h), as many a line as then fit; the scene's drawing, hit and follow do it too, its shown and\n"
+        "   row keep ui.txt's */\n"
+        "void ui_flow_sized(UiFlow* flow, const UiList* list, int scale);\n");
     for (i = 0; i < g_uigen.nitems; i++) {
         const Item* s = &g_uigen.items[i];
         if (s->type != T_SCENE) continue;
@@ -1674,6 +1680,7 @@ static void write_scene(int scene) {
             /* from its first row, while the rows fit: a label on a line of its own, drawn as a row, the others tiles;
                the row after each asked first, its label maybe a buffer the row's call writes, and whether it fits */
             out("    {\n        UiFlow flow;\n        %s_flow(r, scale, %s, &flow);\n", s->symbol, it->upper);
+            out("        ui_flow_sized(&flow, &lists[%s], scale);\n", it->upper);
             out("        for (i = 0;; i++) {\n            size_t row = lists[%s].first + i;\n"
                 "            GuiRect box, after_box;\n            UiRowInfo next;\n            UiFlow after;\n"
                 "            bool more;\n",
@@ -1738,13 +1745,14 @@ static void write_scene(int scene) {
         out_from(it->line);
         if (is_tiles(it)) { /* placed as drawn, from its first row while they fit */
             out("    {\n        UiFlow flow;\n        GuiRect box;\n        %s_flow(r, scale, %s, &flow);\n"
+                "        ui_flow_sized(&flow, &lists[%s], scale);\n"
                 "        for (i = 0;; i++) {\n            *row = lists[%s].first + i;\n"
                 "            info.label = NULL;\n            info.image = NULL;\n            info.attr = 0;\n"
                 "            if (!%s_get_row_info(app, *row, flow.tile_w, &info)) break;\n"
                 "            if (!ui_flow_next(&flow, (info.attr & UI_ATTR_LABEL) != 0, &box)) break;\n"
                 "            if (ui_in(box, x, y)) {\n                *item = %s;\n"
                 "                return UI_HIT_HOVER | event;\n            }\n        }\n    }\n",
-                s->symbol, it->upper, it->upper, it->symbol, it->upper);
+                s->symbol, it->upper, it->upper, it->upper, it->symbol, it->upper);
         } else if (it->type == T_LIST) {
             out("    n = %s_shown(r, scale, %s);\n    for (i = 0; i < n; i++) {\n        GuiRect box = ", s->symbol,
                 it->upper);
@@ -1850,6 +1858,10 @@ static void write_c(const char* path) {
          "    int fit = height > 0 ? (height + gap * s) / ((row + gap) * s) : 0;\n"
          "    return (size_t)(fit < max_rows ? fit : max_rows);\n}\n");
     outs(
+        "void ui_flow_sized(UiFlow* f, const UiList* l, int s) {\n"
+        "    if (l->tile_w <= 0 || l->tile_h <= 0) return;\n"
+        "    f->tile_w = l->tile_w * s;\n    f->tile_h = l->tile_h * s;\n"
+        "    f->cols = (f->area.w + f->gap) / (f->tile_w + f->gap);\n    if (f->cols < 1) f->cols = 1;\n}\n"
         "bool ui_flow_next(UiFlow* f, bool label, GuiRect* at) {\n"
         "    int y = f->y, col = f->col, line = f->line, h = label ? f->row_h : f->tile_h;\n"
         "    if (f->placed >= f->max) return false;\n"
@@ -1875,11 +1887,15 @@ static void write_c(const char* path) {
             "    size_t cols = (size_t)ui_tile_cols(r.w, tile_w, gap, s);\n"
             "    return gui_rect(r.x + (int)(i % cols) * (tile_w + gap) * s, r.y + (int)(i / cols) * (tile_h + gap) * s,\n"
             "                    tile_w * s, tile_h * s);\n}\n"
-            "/* first set at a line's first tile, so the focus's line is among the lines shown, as ui_follow keeps a row */\n"
+            "/* first set at a line's first tile, so the focus's line is among the lines shown, as ui_follow keeps a "
+            "row;\n   the list's own tiles where the code sizes them, else tile_w by tile_h */\n"
             "static inline void ui_follow_tiles(UiList* l, size_t count, GuiRect r, int tile_w, int tile_h, int gap, int "
             "max_rows,\n                                   int s, int center) {\n"
-            "    size_t cols = (size_t)ui_tile_cols(r.w, tile_w, gap, s);\n"
-            "    UiList lines;\n    lines.first = l->first / cols;\n    lines.focus = l->focus / cols;\n"
+            "    size_t cols;\n    UiList lines;\n"
+            "    if (l->tile_w > 0 && l->tile_h > 0) {\n"
+            "        tile_w = l->tile_w;\n        tile_h = l->tile_h;\n    }\n"
+            "    cols = (size_t)ui_tile_cols(r.w, tile_w, gap, s);\n"
+            "    lines.first = l->first / cols;\n    lines.focus = l->focus / cols;\n"
             "    lines.pointed = l->pointed;\n"
             "    ui_follow(&lines, (count + cols - 1) / cols, ui_tiles_shown(r, tile_w, tile_h, gap, max_rows, s) / cols, "
             "center);\n"
