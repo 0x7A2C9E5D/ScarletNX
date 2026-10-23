@@ -69,6 +69,7 @@ int g_shader_geometry = 1;
 int g_shader_float16 = 1;
 int g_shader_tessellation = 1;
 int g_shader_clock_scopes;
+int g_shader_maximal_reconvergence;
 
 /* the Function variable of a register, predicate or flag (z, s, c, o) */
 static u32 var_of(const DirectCtx* c, u32 v) {
@@ -4338,9 +4339,14 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         /* The program's own branches and loops as structured constructs, where its control flow allows them: the
            dispatch loop below makes every register live around one big loop, and costs a driver as much to compile
            again as the program's code. Lanes that must reconverge for subgroup operations, barriers or derivatives
-           keep the loop, which runs the lowest pc first as the hardware does */
-        if (!dynamic_stack && !has_calls && !converge && !unknown_brx)
+           take them where the device reconverges them at each construct's merge (MaximallyReconvergesKHR), as the
+           hardware does at its SYNC targets, and keep the loop otherwise, which runs the lowest pc first */
+        if (!dynamic_stack && !has_calls && (!converge || g_shader_maximal_reconvergence) && !unknown_brx)
             structure = shader_structure(insn, n, block_start, pop_targets);
+        if (structure && converge) { /* the guarantee those lanes need */
+            spv_emit_extension(&c->emit, "SPV_KHR_maximal_reconvergence");
+            spv_emit_execution_mode(&c->emit, fn, 6023, 0, 0); /* MaximallyReconvergesKHR */
+        }
         if (structure) {
             se.st = structure;
             se.open = 1; /* the function's first block */

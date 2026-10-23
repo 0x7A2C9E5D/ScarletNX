@@ -41,7 +41,7 @@ static void shell_quote(char* out, size_t size, const char* path) {
 }
 int main(int argc, char** argv) {
     const char *dir = NULL, *out = NULL;
-    int validate = 0, verbose = 0, flush = 1;
+    int validate = 0, verbose = 0, flush = 1, dispatch_reconverge = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--out") && i + 1 < argc)
             out = argv[++i];
@@ -49,23 +49,28 @@ int main(int argc, char** argv) {
             validate = 1;
         else if (!strcmp(argv[i], "--verbose"))
             verbose = 1;
+        else if (!strcmp(argv[i], "--dispatch-reconverge"))
+            dispatch_reconverge = 1;
         else if (!strcmp(argv[i], "--no-flush")) /* a device without DenormFlushToZero: FTZ done per instruction */
             flush = 0;
         else if (!strcmp(argv[i], "--direct")) { /* accepted for older corpus commands */
         } else if (argv[i][0] != '-' && !dir)
             dir = argv[i];
         else {
-            fprintf(stderr, "usage: %s CORPUS_DIR [--out DIR] [--validate] [--verbose] [--no-flush]\n", argv[0]);
+            fprintf(stderr, "usage: %s CORPUS_DIR [--out DIR] [--validate] [--verbose] [--no-flush] [--dispatch-reconverge]\n", argv[0]);
             return 2;
         }
     }
     if (!dir) {
-        fprintf(stderr, "usage: %s CORPUS_DIR [--out DIR] [--validate] [--verbose] [--no-flush]\n", argv[0]);
+        fprintf(stderr, "usage: %s CORPUS_DIR [--out DIR] [--validate] [--verbose] [--no-flush] [--dispatch-reconverge]\n", argv[0]);
         return 2;
     }
     /* Match a renderer with non-uniform sampled image array indexing. Otherwise indexed
        LDC handles look like plain bindless textures and corpus validation misses them. */
     g_shader_texture_arrays = 1;
+    /* and VK_KHR_shader_maximal_reconvergence, which NVIDIA, AMD and Intel drivers have: programs whose lanes
+       reconverge take structured control flow as on such a device (--dispatch-reconverge keeps their dispatch loop) */
+    g_shader_maximal_reconvergence = !dispatch_reconverge;
     DIR* directory = opendir(dir);
     if (!directory) {
         fprintf(stderr, "cannot open %s\n", dir);
