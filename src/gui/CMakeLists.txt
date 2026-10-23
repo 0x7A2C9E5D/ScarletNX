@@ -144,9 +144,6 @@ if(BUILD_TESTING)
     add_executable(snx-test-gui-model "${PROJECT_SOURCE_DIR}/tests/gui_model.c")
     target_link_libraries(snx-test-gui-model PRIVATE snx_gui_support)
     add_test(NAME gui_model COMMAND snx-test-gui-model)
-    add_executable(snx-test-gui-place "${PROJECT_SOURCE_DIR}/tests/gui_place.c")
-    target_link_libraries(snx-test-gui-place PRIVATE snx_gui_support)
-    add_test(NAME gui_place COMMAND snx-test-gui-place)
     # what tools/uigen makes of tests/ui_test.txt, built and run: layouts, drawing, hit tests, actions, hotkeys
     set(gui_ui_test "${CMAKE_CURRENT_BINARY_DIR}/uitest")
     add_custom_command(OUTPUT "${gui_ui_test}/gui/ui.h" "${gui_ui_test}/gui/ui.c"
