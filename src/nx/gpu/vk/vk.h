@@ -785,6 +785,9 @@ int vk_written_since(const u8* host, u64 len, u32 since);
 u32 vk_ww_now(void);
 void vk_ww_new_epoch(void); /* the CPU may have written what a GPU stream reads next: write tracking scans again */
 u32 vk_ww_epoch(void);
+/* the calling thread runs a job of a stream (1: its checks see the CPU's writes from before the newest epoch now, and
+   from before the waits it ends) or stops (0: they see every epoch's) */
+void vk_ww_stream(int on);
 void vk_mem_changed(u64 cpu, u64 len); /* gpu.c's g_gpu_mem_changed: the range counts as written */
 
 /* pipeline.c */

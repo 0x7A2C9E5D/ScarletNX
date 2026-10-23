@@ -726,6 +726,7 @@ const Renderer vk_renderer = {
     .name = "Vulkan",
     .start = vkr_start,
     .mem_may_have_changed = vkr_mem_may_have_changed,
+    .stream_run = vk_ww_stream,
     .clear = vkr_clear,
     .draw_texture = vkr_draw_texture,
     .draw = vkr_draw,
