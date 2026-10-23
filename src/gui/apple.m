@@ -130,9 +130,23 @@ static void watch_start(void) {
                                                      dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
     dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_SEC / 10);
     dispatch_source_set_event_handler(timer, ^{
+        static unsigned long long shown;
+        task_vm_info_data_t info;
+        mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
         bool now = debugger_traced();
         if (now != was) stamped(now ? "debugger: attached" : "debugger: let go");
         was = now;
+        /* the footprint each time it has moved 128 MiB from the last one said: what a run of long work costs, up to the
+           system taking the app */
+        if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) {
+            unsigned long long used = info.phys_footprint >> 20;
+            if (used + 128 <= shown || used >= shown + 128) {
+                char line[64];
+                snprintf(line, sizeof line, "app: footprint %llu MiB", used);
+                stamped(line);
+                shown = used;
+            }
+        }
     });
     dispatch_resume(timer);
 }
