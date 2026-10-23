@@ -2091,6 +2091,29 @@ static int own_priority(void) {
     return getpriority(PRIO_PROCESS, 0);
 #endif
 }
+/* a low one as the queue's recompile gets it (gui_process_low): ten steps of nice under this program's, below normal
+   on Windows */
+static int low_priority(void) {
+#ifdef _WIN32
+    return BELOW_NORMAL_PRIORITY_CLASS;
+#else
+    return SDL_min(own_priority() + 10, PRIO_MAX - 1);
+#endif
+}
+/* process pid's priority as own_priority reads its own, -100 when it cannot be read */
+static int priority_of(long pid) {
+#ifdef _WIN32
+    HANDLE child = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+    int class = child ? (int)GetPriorityClass(child) : 0;
+    if (child) CloseHandle(child);
+    return class ? class : -100;
+#else
+    int n;
+    errno = 0;
+    n = getpriority(PRIO_PROCESS, (id_t)pid);
+    return errno ? -100 : n;
+#endif
+}
 /* the queue's recompile running gone a block further: <file>.step made, pump until its percent is percent */
 static void job_step(App* app, int percent) {
     int i = gui_queue_running(&app->queue);
@@ -2137,6 +2160,19 @@ static bool noted(const GuiSteps* steps, const char* text) {
         if (strstr(steps->note[i].text, text)) return true;
     return false;
 }
+/* the pid the queue's recompile running wrote beside its file */
+static long job_pid(App* app) {
+    int i = gui_queue_running(&app->queue);
+    char* path = snx_format("%s.pid", gui_queue_file(&app->queue, i));
+    size_t size;
+    char* text = (char*)snx_read_file(path, &size);
+    long pid;
+    assert(text);
+    pid = strtol(text, NULL, 10);
+    free(text);
+    free(path);
+    return pid;
+}
 /* Games' row of the game named name on the page shown, as its label reads (the whole of it, which a long one slides
    to show) */
 static bool games_row_reads(App* app, const char* name, const char* want) {
@@ -2158,9 +2194,10 @@ static bool tab_reads(App* app, const char* want) {
 /* R's and B's recompiles: a queue behind the screens and its Recompile tab (queue.h; DraVee's picks, 2026-10-23) */
 static void recompile_queue(App* app) {
     static const char* const names[] = {"queue game one", "queue game two", "queue game fails"};
-    char *folders[3], *programs[3], line[512];
-    int own = own_priority();
+    char *folders[3], *programs[3], line[512], said[1024];
+    int own = own_priority(), low = low_priority();
     GuiSettings* settings = settings_of(app);
+    bool raised;
     for (int i = 0; i < 3; ++i) { /* games of folders of their own, which R recompiles where they are */
         folders[i] = snx_path_join(app->games_dir, names[i]);
 #ifdef _WIN32
@@ -2178,10 +2215,11 @@ static void recompile_queue(App* app) {
     }
     app->theme = *gui_theme_builtin("default");
     app->side_box = GUI_SIDE_AUTO;
+    app->background_gentle = false;
     free(app->job_log); /* beside the games: Folders' Logs, which may have set it, are gone */
     app->job_log = snx_format("%s-last-recompile.log", app->games_dir);
     recent_open(app, snx_format("%s-recent.txt", app->games_dir)); /* R puts its game first in the recent games */
-    assert(gui_settings_set(settings, "aot_threads", "8")); /* passed on as the driver's threads */
+    assert(gui_settings_set(settings, "aot_threads", "8"));        /* Full: the AOT threads picked; Gentle: half */
     assert(!app->queue.count && tab_count(app) == GUI_TAB_RECOMPILE);
     /* R on a game: the Recompile tab, a fourth, shows it, its output at the letters a half step under the text's,
        the queue and the Status box beside it; the menu runs nothing, the queue's process does */
@@ -2191,7 +2229,7 @@ static void recompile_queue(App* app) {
     assert(!app->menu.running && gui_queue_running(&app->queue) == 0 && app->queue.count == 1);
     assert(app->menu.view == GUI_LOAD_RECOMPILE && tab_shown(app) == GUI_TAB_RECOMPILE && tab_count(app) == GUI_TABS);
     job_started(app);
-    assert(noted(&app->job_steps, "threads 8, priority"));
+    assert(noted(&app->job_steps, "threads 8, priority") && !app->job_low && !app->job_threads); /* Full */
     snprintf(line, sizeof line, "threads 8, priority %d", own);
     assert(noted(&app->job_steps, line));
     assert(tab_reads(app, "Recompile 25%"));
@@ -2202,18 +2240,19 @@ static void recompile_queue(App* app) {
     shows(app, "Output", normal);
     shows(app, "Queue", normal);
     shows(app, "- queue game one  25%", yellow);
+    shows_half(app, "Background recompile: Full", rgb(app->theme.soft));
     shows_half(app, "Recompiling queue game one: 25%", rgb(app->theme.ink)); /* the tips under the head */
     shows_foot(app, "abort", normal);
     shows_foot(app, "games", normal);    /* Tab's, which every other foot leaves to F1 */
     hides_foot(app, "take out", normal); /* the one running stays: ESC aborts it */
-    /* YoRHa's: its loading screen as the panel, in its own colours and the letters a half step under the text's, its
-       usage on the footer's band at its foot */
+    /* YoRHa's: its loading screen as the panel, in its own colours and the letters a half step under the text's, the
+       usage and how it goes on the footer's band at its foot */
     app->theme = *gui_theme_builtin("yorha");
     app->clock = SDL_GetTicks() + 60000; /* every line typed */
     render(app);
     shows_half(app, "RECOMPILE: QUEUE GAME ONE 25%", rgb(app->theme.run_colors.ink));
     shows_half(app, "threads 8, priority", rgb(app->theme.run_colors.soft)); /* its lines under its step */
-    shows_half(app, "RAM ", rgb(app->theme.run_colors.page));
+    shows_half(app, "Full", rgb(app->theme.run_colors.page));
     hides(app, "RECOMPILE: QUEUE GAME ONE 25%", rgb(app->theme.run_colors.ink)); /* not the text's own letters */
     app->clock = 0;
     app->theme = *gui_theme_builtin("default");
@@ -2382,12 +2421,18 @@ static void recompile_queue(App* app) {
                  ui_queue_row(q.rects, app->scale, UI_QUEUE_ROWS, 0).y + 4, true);
         assert(app->queue_focus == 0 && !app->menu.running && app->queue.count == 2);
     }
-    /* Enter on it plays its game, its line seen and gone, the one running going on */
+    /* Enter on it plays its game, its line seen and gone; while a game plays the one running goes gently, its
+       priority low; once it ended, back where the system lets a program raise it, else low until it ends, said */
     {
+        long pid = job_pid(app);
         char* step = snx_format("%s.step", programs[0]);
+        assert(priority_of(pid) == own);
         key(app, SDLK_RETURN);
         assert(app->menu.running && app->queue.count == 1 && gui_queue_running(&app->queue) == 0);
         pump(app);
+        assert(app->job_low && priority_of(pid) == low);
+        job_speed(app, said, sizeof said);
+        assert(!strcmp(said, "Gentle, a game plays"));
         assert(!snx_write_file(step, "", 0));
         for (Uint64 until = SDL_GetTicks() + 10000; app->menu.running && SDL_GetTicks() < until;) {
             pump(app);
@@ -2396,7 +2441,13 @@ static void recompile_queue(App* app) {
         assert(!app->menu.running && app->finished);
         key(app, SDLK_ESCAPE);
         pump(app);
-        assert(gui_queue_running(&app->queue) == 0);
+        raised = !app->job_kept_low;
+        job_speed(app, said, sizeof said);
+        if (raised)
+            assert(!app->job_low && priority_of(pid) == own && !strcmp(said, "Full"));
+        else /* Linux and macOS without the privilege */
+            assert(app->job_low && priority_of(pid) == low && !strncmp(said, "Gentle until it ends: ", 22));
+        printf("gui_sdl: the queue's recompile after the game: %s\n", said);
         free(step);
     }
     /* a failure: FAILED on its row and its tab, blinking as Share Log does, which blinks too */
@@ -2497,6 +2548,24 @@ static void recompile_queue(App* app) {
         assert(app->queue.count == left);
     }
     assert(!app->queue.count && app->menu.view == GUI_LOAD_GAMES && tab_count(app) == GUI_TAB_RECOMPILE);
+    /* Background recompile Gentle: half the AOT threads and a low priority from its start */
+    app->background_gentle = true;
+    go_tab(app, GUI_TAB_GAMES);
+    focus_game(app, names[0]);
+    key(app, SDLK_R);
+    job_started(app);
+    snprintf(line, sizeof line, "threads 4, priority %d", low);
+    assert(noted(&app->job_steps, line) && app->job_low && app->job_threads == 4 && priority_of(job_pid(app)) == low);
+    job_speed(app, said, sizeof said);
+    assert(!strcmp(said, "Gentle, 4 threads"));
+    job_step(app, 50);
+    job_step(app, 75);
+    job_step(app, 100);
+    job_end(app);
+    go_tab(app, GUI_TAB_RECOMPILE);
+    key(app, SDLK_ESCAPE);
+    assert(!app->queue.count);
+    app->background_gentle = false;
     /* B's AOT pack joins the same queue: its row says so, its end what the cache gave */
     {
         UiRowInfo info = {0};
@@ -3393,19 +3462,19 @@ int main(int argc, char** argv) {
     /* App: the theme and the letters, either way round, and the theme editor, which comes back here */
     app.editor.row = 0;
     key(&app, SDLK_RETURN);
-    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 10);
+    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 11);
     {
         char first[64], line[1024];
         snprintf(first, sizeof first, "%s", app.theme.name);
         render(&app);
         shows(&app, "- App", yellow); /* the group open, as focused while its rows have the focus */
-        snprintf(line, sizeof line, "- %-18s %s", "Theme", first);
+        snprintf(line, sizeof line, "- %-20s %s", "Theme", first); /* past Background recompile, the longest */
         shows(&app, line, yellow);
-        shows(&app, "- UI scale           Auto", normal);
-        shows(&app, "- Language           Auto: English", normal); /* SDL_PREFERRED_LOCALES, the test's */
+        shows(&app, "- UI scale             Auto", normal);
+        shows(&app, "- Language             Auto: English", normal); /* SDL_PREFERRED_LOCALES, the test's */
         shows(&app, "- Theme Editor", normal);
         /* under the rows, the three folders Folders moves, whole: the extractions too */
-        shows(&app, "- Folders            Defaults", normal);
+        shows(&app, "- Folders              Defaults", normal);
         shows_half(&app, "Extractions:", rgb(app.theme.soft)); /* in a half step under the text's */
         { /* out of the data folder, as XDG's cache has them: without XDG (Windows) they are in it and read work/ */
             char *games = app.games_dir, *work = app.work_dir;
@@ -3541,7 +3610,7 @@ int main(int argc, char** argv) {
         assert(strcmp(id, first_id));
         snprintf(expected, sizeof expected,
                  APP_INI_HEAD "theme = %s\nui_scale = 1\nlanguage = auto\n"
-                              "animations = 0\nside_box = auto\n" GAMES_DEFAULTS,
+                              "animations = 0\nside_box = auto\nrecompile_background = full\n" GAMES_DEFAULTS,
                  id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -3567,8 +3636,9 @@ int main(int argc, char** argv) {
         assert(app.menu.text_size == -3);
         pick_size(&app, 0, true);
         snprintf(expected, sizeof expected,
-                 APP_INI_HEAD "theme = %s\nui_scale = auto\n"
-                              "language = auto\nanimations = 0\nside_box = auto\n" GAMES_DEFAULTS,
+                 APP_INI_HEAD
+                 "theme = %s\nui_scale = auto\n"
+                 "language = auto\nanimations = 0\nside_box = auto\nrecompile_background = full\n" GAMES_DEFAULTS,
                  first_id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -3638,15 +3708,16 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RETURN); /* Enter goes round too */
         assert(app.language == 2 && snx_tr_language() == 1 && !strcmp(app.app_form.language, "Test\303\252s"));
         snprintf(expected, sizeof expected,
-                 APP_INI_HEAD "theme = %s\nui_scale = auto\n"
-                              "language = xx\nanimations = 0\nside_box = auto\n" GAMES_DEFAULTS,
+                 APP_INI_HEAD
+                 "theme = %s\nui_scale = auto\n"
+                 "language = xx\nanimations = 0\nside_box = auto\nrecompile_background = full\n" GAMES_DEFAULTS,
                  app.theme.id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
         free(kept);
         render(&app);
         /* the labels' columns as they read: xx's Language, its i accented, is 6 of them in 7 bytes (the font's one) */
-        snprintf(line, sizeof line, "- L\241ngua%12s Test", "");
+        snprintf(line, sizeof line, "- L\241ngua%14s Test", "");
         shows(&app, line, yellow);
         shows(&app, "- UI scale", normal);  /* not translated in xx: English */
         shows(&app, "Ajustes", yellow);     /* the tab */
@@ -3673,7 +3744,7 @@ int main(int argc, char** argv) {
             assert(tab_rect(&app, none, GUI_TAB_MENU).w == 6 * cell_w(&app));
             assert(tab_rect(&app, none, GUI_TAB_GAMES).x == 7 * cell_w(&app));
             assert(find_letters(&app, "\xe8\x8f\x9c\xe5\x8d\x95", normal, 1, &x, &y));
-            snprintf(line, sizeof line, "- \xe4\xb8\xbb\xe9\xa2\x98%14s %.4s", "", app.app_form.theme);
+            snprintf(line, sizeof line, "- \xe4\xb8\xbb\xe9\xa2\x98%16s %.4s", "", app.app_form.theme);
             assert(find_letters(&app, line, normal, 1, &x, &y));
             assert(hint_width("\xe4\xb8\x8a/\xe4\xb8\x8b", "linha") == 11 && up >= 0 && down >= 0 && up != down);
             assert(hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 1, false) == up &&
@@ -4091,6 +4162,51 @@ int main(int argc, char** argv) {
         free(kept);
     }
     key(&app, SDLK_DOWN);
+    /* Background recompile: Full or Gentle, either way, kept in app.ini as recompile_background = full or gentle */
+    assert(app.editor.row == GUI_APP_BACKGROUND && !app.background_gentle && !strcmp(app.app_form.background, "Full"));
+    key(&app, SDLK_RIGHT);
+    assert(app.background_gentle && !strcmp(app.app_form.background, "Gentle"));
+    {
+        size_t size;
+        char* kept = (char*)snx_read_file(app.app_file, &size);
+        assert(kept && strstr(kept, "\nrecompile_background = gentle\n"));
+        free(kept);
+    }
+    key(&app, SDLK_LEFT);
+    assert(!app.background_gentle && !strcmp(app.app_form.background, "Full"));
+    key(&app, SDLK_RETURN);
+    assert(app.background_gentle);
+    key(&app, SDLK_RETURN);
+    assert(!app.background_gentle);
+    /* read back: gentle taken; a word it does not know named, with the one the file leaves in use; an older version's
+       app.ini, without the key, Full as the menu opens, the key written with the next save */
+    {
+        size_t size;
+        char *kept = (char*)snx_read_file(app.app_file, &size), *text, said[512];
+        assert(kept);
+        text = snx_format("%srecompile_background = gentle\nrecompile_background = slow\n", kept);
+        assert(!snx_write_file(app.app_file, text, strlen(text)));
+        app.message[0] = 0;
+        app_load(&app);
+        snprintf(said, sizeof said, "Not used from %s: recompile_background = slow (it keeps gentle)", app.app_file);
+        assert(app.background_gentle && strstr(app.message, said));
+        free(text);
+        text = snx_format(APP_INI_HEAD "theme = %s\nside_box = auto\n", app.theme.id);
+        assert(!snx_write_file(app.app_file, text, strlen(text)));
+        app.background_gentle = false; /* as the menu opens */
+        app.message[0] = 0;
+        app_load(&app);
+        assert(!app.background_gentle && !strstr(app.message, "recompile_background"));
+        assert(!app_save(&app));
+        free(kept);
+        kept = (char*)snx_read_file(app.app_file, &size);
+        assert(kept && strstr(kept, "\nside_box = auto\nrecompile_background = full\n"));
+        app.message[0] = 0;
+        app_values(&app);
+        free(text);
+        free(kept);
+    }
+    key(&app, SDLK_DOWN);
     key(&app, SDLK_RIGHT); /* the editor opens with Enter only */
     assert(app.form == GUI_FORM_APP);
     key(&app, SDLK_RETURN);
@@ -4104,7 +4220,7 @@ int main(int argc, char** argv) {
        (SDL_FILE_DIALOG_DRIVER=none); Del or Enter asks before an Extra is taken off, the folder staying */
     key(&app, SDLK_DOWN);
     render(&app);
-    shows(&app, "- Folders            Defaults", yellow);
+    shows(&app, "- Folders              Defaults", yellow);
     key(&app, SDLK_RETURN);
     assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 10 && app.editor.row == 0);
     assert(FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_DATA) == 0 && FOLDER_ROW(GUI_ROW_CONFIG, -1) == 1 &&

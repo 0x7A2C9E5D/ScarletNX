@@ -126,6 +126,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **UI scale**, which opens
   its box of sizes (below), **Animations** (On by default, `animations = 1` in `app.ini`: a screen comes in from the
   page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Side panel** (below, F2 too),
+  **Background recompile** (*Full*, `recompile_background = full` in `app.ini`: the queue's recompiles take every
+  core, or the AOT threads picked; *Gentle*, `gentle`: half of them, at a low priority, ten steps of nice under the
+  launcher's, below normal on Windows, for using the computer meanwhile; [the Recompile tab](#the-recompile-tab)),
 **Theme Editor**, which comes
   back to App, and **Folders**, every folder on one screen, the whole of it, a box a group:
   - **App Folders**: **Data** (`recompiled/`, `dumps/`, `themes/` and `prod.keys`), **Settings**, shown only
@@ -201,13 +204,16 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - The Status box, after the RAM and the CPU, says what ScarletNX's folders take (recompiled/,
   work/ and themes/ of the data folder, and on Linux its config, state and cache folders, else
   the menu's own) and what is left on that disk, counted as the menu opens and after each run. While a recompile of
-  the queue runs its tree's RAM and CPU are in the first line.
+  the queue runs its tree's RAM and CPU are in the first line, and a last one says how it goes:
+  `Background recompile: Full`, `Gentle`, `Gentle, a game plays` or `Gentle until it ends:` and why, the threads it
+  was started with when they were halved.
 - Settings > App's **Theme** switches to the next theme, or the one before: the built-in Default
   and YoRHa, then each folder of `themes/` (see [Themes](#themes)). The menu opens in YoRHa until one is picked.
   It is kept for the next start,
   as are UI scale and Language, in `app.ini` beside `settings.ini`: `[app]` with `theme` (a theme's folder
   name), `ui_scale` (`auto`, `0.25`, `0.5`, `0.75` or 1 to 4; `text_size` before, still read and written again
-  as `ui_scale`, said once) and `language` (`auto`, `en` or a language's BCP 47
+  as `ui_scale`, said once), `recompile_background` (`full`, the default, or `gentle`; a word it does not know named
+  with the one kept, `recompile_background = slow (it keeps full)`) and `language` (`auto`, `en` or a language's BCP 47
   tag, as `pt-BR` or `zh-Hans-CN`), and once one
   is picked `[folders]` with Folders' `data`, `recompiled`, `work`, `state` (Logs) and `cache` (Caches) (a full path,
   nothing for the default). A value the
@@ -390,7 +396,8 @@ the main menu work as for a file picked by a load.
 ### The Recompile tab
 
 **Recompile**, the fourth tab, shows the queue while it holds a recompile, in the frame of every screen: on the left
-the one in focus, as a theme's loading screen (YoRHa's, its colours, its usage on the footer's band at its foot) or its output under *Output* (the default's), in letters a half step under the text's; on the right the
+the one in focus, as a theme's loading screen (YoRHa's, its colours, its usage and how it goes on the footer's band
+at its foot) or its output under *Output* (the default's), in letters a half step under the text's; on the right the
 **Queue**, a row each in the order asked (`42%`, `next`, `3rd`, `OK`, `FAILED`, B's saying *AOT pack*), and the
 Status box. Up/Down go over the queue, the panel following. **Tab** goes back to Games, the recompile going on;
 **ESC** aborts the one running (asked first on Android), its line gone with it, or on one that ended goes back to
@@ -402,8 +409,12 @@ queue's last line. `last-recompile.log`, beside `last-run.log`,
 holds the queue's output since one started with no ended line left. Move Old Files and Clean Old Settings wait until
 the queue ends; the window's close, Exit and ESC on the menu ask first, naming the one running.
 
-On iOS, where the driver runs on a thread of the app and a game plays once the menu closes, a game plays once the
-queue ends.
+With Background recompile *Gentle* every recompile of the queue goes gently; with *Full*, one goes gently by itself
+while a game the launcher started plays: the one running drops to the low priority at once (its threads stay as it
+started), the next starts with half of them, and once the game ended it goes back where the system lets a program
+raise a priority it lowered (Windows does; Linux and macOS without the privilege keep it low until it ends, the
+Status box saying why). On iOS, where the driver runs on a thread of the app and a game plays once the menu closes,
+a game plays once the queue ends.
 
 ## Output and resource use
 

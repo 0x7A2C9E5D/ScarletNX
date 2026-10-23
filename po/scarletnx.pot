@@ -803,6 +803,14 @@ msgid "Off"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Full"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Gentle"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Recent Games"
 msgstr ""
 
@@ -1390,6 +1398,11 @@ msgid "SCARLETNX  /  SETTINGS  /  FOLDERS"
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "Background recompile: %s"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Menu"
 msgstr ""
 
@@ -1722,6 +1735,14 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "The panel beside the list. Auto: where it fits. On: under the list where it does not. F2 turns it off and on"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Background recompile"
+msgstr ""
+
+#: src/gui/main.c
+msgid "The Recompile tab's, R's and B's. Full: every core. Gentle: half of them, at a low priority. Either goes gently while a game plays"
 msgstr ""
 
 #: src/gui/main.c
@@ -2817,6 +2838,20 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "the selected driver"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Gentle until it ends: %s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Gentle, a game plays"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid ", %d threads"
 msgstr ""
 
 #: src/gui/main.c
