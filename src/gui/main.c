@@ -2010,10 +2010,16 @@ static int splash_shown(App* app) {
 #define SAY_MENU_KEYS SNX_TR_KEYS("Arrows/mouse: move. Space/Enter/click: select. F5: refresh. ESC: exit.")
 #endif
 /* the keys the foot of the screen shown says, Tab's after them: what it draws, and what a click on one presses */
-static int folders_said(const App* app, bool pad, const char** parts);
-static int games_said(const App* app, bool pad, const char** parts);
+#define GUI_SAID_PARTS 8 /* the most sentences of keys one screen's foot puts together (screen_said) */
+/* part after the screen's others while parts has room, so one more than GUI_SAID_PARTS holds is left out of the foot
+   (the test of Games' every key shows it), never written past them */
+static void said_add(const char** parts, int* n, const char* part) {
+    if (*n < GUI_SAID_PARTS) parts[(*n)++] = part;
+}
+static void folders_said(const App* app, bool pad, const char** parts, int* n);
+static void games_said(const App* app, bool pad, const char** parts, int* n);
 static int setting_of(const App* app, int row);
-static int settings_said(const App* app, bool pad, const char** parts);
+static void settings_said(const App* app, bool pad, const char** parts, int* n);
 static int hint_next(const char** s, char* key, char* what, size_t size);
 /* a key every screen has, which F1's box says and a foot leaves out: moving and picking, paging, the tabs, the side
    box, a pad's D-pad, A, LT/RT and LB/RB. key: an English sentence's, its words between slashes */
@@ -2067,7 +2073,7 @@ static const char* keys_said(const char* const* parts, int n, bool pad, bool hel
 }
 /* the keys of the screen shown: what its foot says (help false: keys_said), or F1's box every one (help) */
 static const char* screen_said(const App* app, bool help, char* out, size_t size) {
-    const char *keys = SAY_MENU_KEYS, *parts[8];
+    const char *keys = SAY_MENU_KEYS, *parts[GUI_SAID_PARTS];
     int n = 0;
     bool pad = app->pad_driven && !(app->editing && app->form == GUI_FORM_PAD); /* the button map's speaks of pads */
     if (pad) {
@@ -2083,12 +2089,12 @@ static const char* screen_said(const App* app, bool help, char* out, size_t size
             keys = app->menu.view == GUI_LOAD_GAMES ? SAY_PAD_GAMES
                    : pick_screen(app)               ? SAY_PAD_KEYS_HOW
                                                     : SAY_PAD_MENU;
-        if (app->editing && app->form == GUI_FORM_FOLDERS) n += folders_said(app, true, parts + n);
-        if (!app->editing && app->menu.view == GUI_LOAD_GAMES) n += games_said(app, true, parts + n);
-        parts[n++] = keys;
-        if (app->editing) n += settings_said(app, true, parts + n);
-        if (aot_said(app)) parts[n++] = SAY_PAD_GAMES_AOT;
-        parts[n++] = SAY_PAD_TAB;
+        if (app->editing && app->form == GUI_FORM_FOLDERS) folders_said(app, true, parts, &n);
+        if (!app->editing && app->menu.view == GUI_LOAD_GAMES) games_said(app, true, parts, &n);
+        said_add(parts, &n, keys);
+        if (app->editing) settings_said(app, true, parts, &n);
+        if (aot_said(app)) said_add(parts, &n, SAY_PAD_GAMES_AOT);
+        said_add(parts, &n, SAY_PAD_TAB);
     } else {
         if (app->editing)
             keys = app->form == GUI_FORM_PAD        ? SAY_PAD
@@ -2103,12 +2109,13 @@ static const char* screen_said(const App* app, bool help, char* out, size_t size
             keys = SAY_GAMES;
         else if (pick_screen(app))
             keys = SAY_KEYS_HOW;
-        if (app->editing && app->form == GUI_FORM_FOLDERS) n += folders_said(app, false, parts + n);
-        if (!app->editing && app->menu.view == GUI_LOAD_GAMES) n += games_said(app, false, parts + n);
-        parts[n++] = keys;
-        if (app->editing) n += settings_said(app, false, parts + n);
-        if (!app->editing && app->menu.view == GUI_LOAD_GAMES) parts[n++] = SAY_GAMES_FOLDERS; /* to add a folder */
-        if (aot_said(app)) parts[n++] = SAY_GAMES_AOT;
+        if (app->editing && app->form == GUI_FORM_FOLDERS) folders_said(app, false, parts, &n);
+        if (!app->editing && app->menu.view == GUI_LOAD_GAMES) games_said(app, false, parts, &n);
+        said_add(parts, &n, keys);
+        if (app->editing) settings_said(app, false, parts, &n);
+        if (!app->editing && app->menu.view == GUI_LOAD_GAMES)
+            said_add(parts, &n, SAY_GAMES_FOLDERS); /* to add a folder */
+        if (aot_said(app)) said_add(parts, &n, SAY_GAMES_AOT);
 #ifdef SNX_TOUCH_UI
         { /* a finger's: the words to tap are the foot, whole */
             size_t used = 0;
@@ -2118,8 +2125,8 @@ static const char* screen_said(const App* app, bool help, char* out, size_t size
             return out;
         }
 #else
-        if (!app->editing && app->menu.view == GUI_LOAD_GAMES) parts[n++] = SAY_BACK; /* to the menu */
-        parts[n++] = SAY_TAB;
+        if (!app->editing && app->menu.view == GUI_LOAD_GAMES) said_add(parts, &n, SAY_BACK); /* to the menu */
+        said_add(parts, &n, SAY_TAB);
 #endif
     }
     if (!pad) return keys_said(parts, n, false, help, out, size);
@@ -4860,32 +4867,28 @@ static bool games_switch_focus(const App* app, bool* made) {
     return true;
 }
 /* Games' keys the focused row takes, in parts, when it does something there: R on a Switch game, M on a made one */
-static int games_said(const App* app, bool pad, const char** parts) {
+static void games_said(const App* app, bool pad, const char** parts, int* n) {
     bool made;
-    int n = 0;
-    if (!games_switch_focus(app, &made)) return 0;
-    parts[n++] = pad ? SAY_PAD_GAMES_R : SAY_GAMES_R;
-    if (made && (pad ? SAY_PAD_GAMES_M : SAY_GAMES_M)) parts[n++] = pad ? SAY_PAD_GAMES_M : SAY_GAMES_M;
-    return n;
+    if (!games_switch_focus(app, &made)) return;
+    said_add(parts, n, pad ? SAY_PAD_GAMES_R : SAY_GAMES_R);
+    if (made && (pad ? SAY_PAD_GAMES_M : SAY_GAMES_M)) said_add(parts, n, pad ? SAY_PAD_GAMES_M : SAY_GAMES_M);
 }
 /* a setting's Del (X), said where the focused row is not at its default */
-static int settings_said(const App* app, bool pad, const char** parts) {
+static void settings_said(const App* app, bool pad, const char** parts, int* n) {
     const char* said = pad ? SAY_PAD_SETTINGS_DEFAULT : SAY_SETTINGS_DEFAULT;
-    if (!said || app->form != GUI_FORM_GROUP || app->editor.typing) return 0;
-    if (gui_settings_at_start(&app->settings, setting_of(app, app->editor.row))) return 0;
-    parts[0] = said;
-    return 1;
+    if (!said || app->form != GUI_FORM_GROUP || app->editor.typing) return;
+    if (gui_settings_at_start(&app->settings, setting_of(app, app->editor.row))) return;
+    said_add(parts, n, said);
 }
-static int folders_said(const App* app, bool pad, const char** parts) {
-    int at, group, n = 0, picked = 0, kind = folder_row(app, app->editor.row, &at, &group);
+static void folders_said(const App* app, bool pad, const char** parts, int* n) {
+    int at, group, picked = 0, kind = folder_row(app, app->editor.row, &at, &group);
     for (int i = 0; i < GUI_PLACES; ++i) picked += app->place[i] != NULL;
-    if (kind == GUI_ROW_PLACE) parts[n++] = pad ? SAY_PAD_CHANGE : SAY_CHANGE;
+    if (kind == GUI_ROW_PLACE) said_add(parts, n, pad ? SAY_PAD_CHANGE : SAY_CHANGE);
     if (kind == GUI_ROW_PLACE && app->place[at] && (pad ? SAY_PAD_DEFAULT : SAY_DEFAULT))
-        parts[n++] = pad ? SAY_PAD_DEFAULT : SAY_DEFAULT;
-    if (kind == GUI_ROW_FOLDER) parts[n++] = pad ? SAY_PAD_DELETE : SAY_DELETE;
-    if (kind == GUI_ROW_ADD) parts[n++] = pad ? SAY_PAD_ADD : SAY_ADD;
-    if (kind < 0 && picked) parts[n++] = pad ? SAY_PAD_RESET : SAY_RESET;
-    return n;
+        said_add(parts, n, pad ? SAY_PAD_DEFAULT : SAY_DEFAULT);
+    if (kind == GUI_ROW_FOLDER) said_add(parts, n, pad ? SAY_PAD_DELETE : SAY_DELETE);
+    if (kind == GUI_ROW_ADD) said_add(parts, n, pad ? SAY_PAD_ADD : SAY_ADD);
+    if (kind < 0 && picked) said_add(parts, n, pad ? SAY_PAD_RESET : SAY_RESET);
 }
 /* the library row r's group lists, -1 for the app's folders and the last */
 static int folder_row_library(const App* app, int r) {
