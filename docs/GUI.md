@@ -341,7 +341,8 @@ cannot be read is named and the others still listed.
   that scrolls, the list three fifths of the screen as a run's output is, Recent Games and a group's heading each on
   a line of its own; the arrows go to the tile beside, above or under the focus, its column or the line's last,
   PgUp and PgDn by the lines that show, a click or a tap on a tile opens it, and the side box says the focused one as
-  the list's does). Enter, Left, Right or a click change the focused one,
+  the list's does), then the **Side panel** of Settings > App (`side_box`, which F2 turns too). Enter, Left, Right or
+  a click change the focused one,
   kept in `app.ini` at once, and the list is read again by it; ESC or a click off the box closes it. On iOS Recent
   Games and Dumps start *Off*, as a phone keeps the games made in the app's `recompiled/` and prepares a dump from the
   Menu; the player turns them on there. An `app.ini` without them, an older version's, has these defaults, and a word

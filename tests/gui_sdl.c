@@ -1182,6 +1182,27 @@ static void grid_view(App* app, const char* temporary) {
     free(kept);
     render(app);
     shows(app, "- View          < Grid >", yellow);
+    { /* under it the Side panel, Settings > App's and F2's: Right the next of Auto, On and Off, kept at once, Left
+         back, Down round to the first row */
+        int was = app->side_box;
+        char row[64], line[64];
+        key(app, SDLK_DOWN);
+        assert(app->options_focus == GUI_VIEW_SIDE);
+        render(app);
+        snprintf(row, sizeof row, "- Side panel    < %s >", side_names[was]);
+        shows(app, row, yellow);
+        key(app, SDLK_RIGHT);
+        assert(app->side_box == (was + 1) % 3);
+        kept = (char*)snx_read_file(app->app_file, &size);
+        snprintf(line, sizeof line, "\nside_box = %s\n", side_words[(was + 1) % 3]);
+        assert(kept && strstr(kept, line));
+        free(kept);
+        key(app, SDLK_LEFT);
+        assert(app->side_box == was);
+        key(app, SDLK_DOWN);
+        assert(app->options_focus == 0);
+        key(app, SDLK_UP);
+    }
     key(app, SDLK_ESCAPE);
     /* one page, all of it; the rows: Recent Games, three recent, Show More, Recompiled, seven games, Dumps, two */
     rows = games_rows(app);

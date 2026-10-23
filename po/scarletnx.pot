@@ -996,6 +996,10 @@ msgid "%s: its updates, DLCs, mods and cheats kept"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Side panel"
+msgstr ""
+
+#: src/gui/main.c
 msgid "SCARLETNX  /  SETTINGS"
 msgstr ""
 
@@ -1256,10 +1260,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Screens and dialogs fade in and out, 0.15 s. Off: none"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Side panel"
 msgstr ""
 
 #: src/gui/main.c

@@ -3424,37 +3424,45 @@ static void addons_pointer(App* app, float x, float y, bool click) {
 typedef struct {
     GuiRect box;
     GuiRect rects[UI_VIEW_ITEMS];
-    UiList lists[UI_VIEW_ITEMS]; /* the rows' at UI_VIEW_ROWS: row i is option i */
+    UiList lists[UI_VIEW_ITEMS]; /* the rows' at UI_VIEW_ROWS: row i is option i, then the Side panel */
 } GuiViewBoxes;
+/* the View box's rows: Games' options, then the Side panel, Settings > App's side_box, which F2 turns too */
+#define GUI_VIEW_SIDE     GUI_OPTIONS
+#define GUI_VIEW_BOX_ROWS (GUI_OPTIONS + 1)
+/* row i's name and its value as the View box shows them */
+static const char* view_name(int i) { return i == GUI_VIEW_SIDE ? snx_tr("Side panel") : snx_tr(option_keys[i].name); }
+static const char* view_value(const App* app, int i) {
+    return i == GUI_VIEW_SIDE ? snx_tr(side_names[app->side_box]) : snx_tr(option_keys[i].shown[app->options[i]]);
+}
 /* the column the values start at: past the marker and the longest name, and two more */
 static int option_column(const App* app) {
     int i, cols = 0;
-    for (i = 0; i < GUI_OPTIONS; ++i) cols = SDL_max(cols, gui_text_cols(snx_tr(option_keys[i].name)));
+    for (i = 0; i < GUI_VIEW_BOX_ROWS; ++i) cols = SDL_max(cols, gui_text_cols(view_name(i)));
     return gui_text_cols(app->theme.marker) + cols + 2;
 }
-/* option i's row as it reads: its name, then from option_column its value between the arrows Left and Right go by */
+/* row i as it reads: its name, then from option_column its value between the arrows Left and Right go by */
 static void option_row(const App* app, int i, char* out, size_t size) {
-    int pad = option_column(app) - gui_text_cols(app->theme.marker) - gui_text_cols(snx_tr(option_keys[i].name));
-    snprintf(out, size, "%s%s%*s< %s >", app->theme.marker, snx_tr(option_keys[i].name), pad, "",
-             snx_tr(option_keys[i].shown[app->options[i]]));
+    int pad = option_column(app) - gui_text_cols(app->theme.marker) - gui_text_cols(view_name(i));
+    snprintf(out, size, "%s%s%*s< %s >", app->theme.marker, view_name(i), pad, "", view_value(app, i));
 }
 static void view_boxes(App* app, GuiViewBoxes* d) {
     int i, s = app->scale, longest = SDL_max(16, gui_text_cols(snx_tr("View")) + 2);
     char label[160];
-    for (i = 0; i < GUI_OPTIONS; ++i) {
+    for (i = 0; i < GUI_VIEW_BOX_ROWS; ++i) {
         option_row(app, i, label, sizeof label);
         longest = SDL_max(longest, gui_text_cols(label) + 4);
     }
-    ui_view_layout(
-        over_rows(app, longest, rows_h(ui_view_layout, ui_view_row, d->rects, UI_VIEW_ROWS, s, GUI_OPTIONS), &d->box),
-        s, d->rects);
+    ui_view_layout(over_rows(app, longest,
+                             rows_h(ui_view_layout, ui_view_row, d->rects, UI_VIEW_ROWS, s, GUI_VIEW_BOX_ROWS),
+                             &d->box),
+                   s, d->rects);
     memset(d->lists, 0, sizeof d->lists);
     d->lists[UI_VIEW_ROWS].focus = (size_t)app->options_focus;
-    list_follow(app, GUI_LIST_VIEW, ui_view_follow, d->rects, UI_VIEW_ROWS, GUI_OPTIONS, &d->lists[UI_VIEW_ROWS]);
+    list_follow(app, GUI_LIST_VIEW, ui_view_follow, d->rects, UI_VIEW_ROWS, GUI_VIEW_BOX_ROWS, &d->lists[UI_VIEW_ROWS]);
 }
 bool ui_view_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
     (void)width; /* the box is as wide as its longest row */
-    if (row >= GUI_OPTIONS) return false;
+    if (row >= GUI_VIEW_BOX_ROWS) return false;
     option_row(app, (int)row, app->row_text, sizeof app->row_text);
     info->label = app->row_text + strlen(app->theme.marker); /* ui_draw_row puts the marker */
     return true;
@@ -3473,20 +3481,31 @@ static void option_change(App* app, int i, int step) {
     list_games(app); /* it starts the message again */
     app_save(app);
 }
+/* the box's row i a word on (step 1) or back (-1): an option (option_change), or the Side panel round its three as
+   Settings > App's row goes, kept in app.ini at once */
+static void view_change(App* app, int i, int step) {
+    if (i != GUI_VIEW_SIDE) {
+        option_change(app, i, step);
+        return;
+    }
+    app->side_box = (app->side_box + (step < 0 ? 2 : 1)) % 3;
+    layout(app);
+    app_save(app);
+}
 /* a key on the box: Up and Down move round its rows, Left, Right and Select change the focused one's value, Back
    closes it */
 static void options_key(App* app, GuiKey key) {
     if (key == GUI_UP || key == GUI_DOWN)
-        app->options_focus = (app->options_focus + (key == GUI_UP ? GUI_OPTIONS - 1 : 1)) % GUI_OPTIONS;
+        app->options_focus = (app->options_focus + (key == GUI_UP ? GUI_VIEW_BOX_ROWS - 1 : 1)) % GUI_VIEW_BOX_ROWS;
     else if (key == GUI_LEFT || key == GUI_RIGHT || key == GUI_SELECT)
-        option_change(app, app->options_focus, key == GUI_LEFT ? -1 : 1);
+        view_change(app, app->options_focus, key == GUI_LEFT ? -1 : 1);
     else if (key == GUI_CANCEL)
         app->options_shown = false;
 }
 /* a row under the pointer takes the focus, and a click changes its value */
 void ui_view_rows_row_action_cb(App* app, size_t row, uint32_t hit) {
     app->options_focus = (int)row;
-    if (hit & UI_HIT_CLICK) option_change(app, (int)row, 1);
+    if (hit & UI_HIT_CLICK) view_change(app, (int)row, 1);
 }
 /* the pointer on it: a row's (ui_view_rows_row_action_cb); a click off the box closes it */
 static void options_pointer(App* app, float x, float y, bool click) {
