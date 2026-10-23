@@ -17,7 +17,9 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++"
+        "CMAKE_CXX_COMPILER": "clang++",
+        "SNX_TRACY": "OFF",
+        "SNX_DEPLOY": "ON"
       }
     },
     {

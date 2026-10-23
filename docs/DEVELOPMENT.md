@@ -111,18 +111,19 @@ The game's `[Debug]` settings ([USAGE.md](USAGE.md#settings--input)) are for inv
 
 ## Profiling
 
-The profiler is part of the ordinary runtime: `scarletnx` carries the pinned Tracy 0.14.1 client, built as usual
-(`cmake --preset default -B build && cmake --build build`). A build made with `-DSNX_TRACY=OFF` leaves it out
-(Android's app does by default, and iOS cannot have it). The client starts only when profiling is requested: the
-launcher setting, `--tracy-capture`, `--tracy`, or `F7`. Without one, a run does not connect.
+The profiler is not part of the ordinary runtime: `SNX_TRACY` defaults to OFF, so `scarletnx` carries the pinned
+Tracy 0.14.1 client only in a build that asks for it — `cmake --preset tracy -B build/tracy && cmake --build
+build/tracy`, or `-DSNX_TRACY=ON` in a build of your own (Android's app leaves it out, and iOS cannot have it).
+The client starts only when profiling is requested: the launcher setting, `--tracy-capture`, `--tracy`, or `F7`.
+Without one, a run does not connect.
 
 A game runs profiled from the terminal, the runtime's own flags and nothing else:
 
 ```sh
-games="${XDG_DATA_HOME:-$HOME/.local/share}/scarletnx/games"
-build/scarletnx --game="$games/<id>" --tracy-capture   # records the run, and opens its trace when it ends
-build/scarletnx --game="$games/<id>" --tracy           # a run for the GUI to attach to
-build/scarletnx --game="$games/<id>" --tracy-capture --script=script --shot=shot  # a test's run, profiled
+games="${XDG_DATA_HOME:-$HOME/.local/share}/scarletnx/recompiled"
+build/tracy/scarletnx --game="$games/<id>" --tracy-capture   # records the run, and opens its trace when it ends
+build/tracy/scarletnx --game="$games/<id>" --tracy           # a run for the GUI to attach to
+build/tracy/scarletnx --game="$games/<id>" --tracy-capture --script=script --shot=shot  # a test's run, profiled
 ```
 
 The short way is the launcher: turn on `Settings > Debug > Tracy profiler` and start the game. The client comes up
@@ -187,7 +188,7 @@ so the GUI has file and line numbers but not the text of the source.
 
 ```sh
 tracy-capture -o trace.tracy -f -s 60 &
-build/scarletnx --game="$games/<id>" --tracy
+build/tracy/scarletnx --game="$games/<id>" --tracy
 wait
 ```
 
@@ -209,8 +210,9 @@ target they draw to, and the GPU clock is put on the CPU's timeline once a frame
 shows against the CPU's work that waited for it. The timestamps come from the graphics queue's, which the device
 must have; they are taken when the runtime is profiled (a GUI connected or a capture running) or when
 `SNX_VK_GPU_PROFILE=1` asks for them, which also logs what the GPU's time went to every 10 s. The binary is
-deployed like any other build, so the launcher's rows work on the runtime a game starts with. `SNX_TRACY=OFF`
-leaves the client out; iOS has none. The Windows-only `profile=1` sampler is separate.
+not deployed beside every game the way an ordinary build is, so a game it is not run through the profiled driver for
+keeps the runtime it already had: run it through the profiled driver once, and launcher rows work from then.
+`SNX_TRACY=OFF` leaves the client out; iOS has none. The Windows-only `profile=1` sampler is separate.
 
 The guest's own file I/O is in the trace too: a read or a write is a zone with the file's name and the bytes, and
 `io read MB/s` and `io write MB/s` are the rate. The game's assets are not read during a run, though: they are mapped
