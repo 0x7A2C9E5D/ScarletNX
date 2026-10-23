@@ -509,7 +509,6 @@ int snx_ctr_main(int argc, char** argv) {
     char* runtime_dir = runtime ? snx_dirname(runtime) : NULL;
     char* network_data = repo ? snx_strdup(repo) : snx_data_dir(runtime_dir);
     if (network_data) snx_ctr_uds_settings(network_data);
-    snx_ctr_image_netplay_room(!strcmp(g_settings.local_wireless, "room") && !g_settings.airplane_mode);
     free(network_data);
     free(runtime_dir);
     SnxCtrCia* cia = NULL;

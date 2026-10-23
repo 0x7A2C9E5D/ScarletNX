@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "common/network/net_internal.h"
-static void snx_sleep_ms(unsigned ms) { snx_net_sleep_us((int64_t)ms * 1000); }
 
 #define UDS_PORT      24873u
 #define UDS_DATA      1478u
@@ -111,6 +109,8 @@ struct SnxCtrUds {
     int32_t probe_data;
     uint16_t own, changed, mask, allowed_nodes;
     uint32_t scan_queries, scan_last_count;
+    uint32_t join_thread, join_header;
+    uint64_t next_join;
     Network net;
     Node me, nodes[16];
     Network found[16];
@@ -233,7 +233,9 @@ static void send_state(struct SnxCtrUds* u, unsigned type, const uint8_t* ip) {
     uint8_t b[936];
     memcpy(b, u->net.bytes, 264);
     memcpy(b + 264, u->nodes, 640);
-    memcpy(b + 904, u->secret, 32);
+    /* Discovery is public; only an authenticated unicast SYNC carries the hash. */
+    memset(b + 904, 0, 32);
+    if (type == MSG_SYNC && ip) memcpy(b + 904, u->secret, 32);
     send_message(u, type, ip, b, sizeof b);
 }
 static void clear_bindings(SnxCtrProcess* p) {
@@ -245,9 +247,37 @@ static void clear_bindings(SnxCtrProcess* p) {
         }
     memset(u->binds, 0, sizeof u->binds);
 }
+/* Retain the caller while its IPC reply is pending, never a guest RAM pointer.
+   Completion targets its TLS even when a different guest thread is running. */
+static void finish_join(SnxCtrProcess* p, uint32_t result) {
+    struct SnxCtrUds* u = p->uds;
+    uint32_t id = u->join_thread;
+    if (!id) return;
+    CtrThread* t = &p->objects[id].data.thread;
+    if (!t->dead) {
+        uint8_t out[256] = {0};
+        wr32(out, u->join_header);
+        wr32(out + 4, result);
+        uint32_t transport = snx_ctr_write_ram(p->space, t->context.tpidruro + 0x80, out, sizeof out) == SNX_CTR_MEM_OK
+                                 ? 0
+                                 : 0xe0e01bf5u;
+        t->context.r[0] = transport;
+        t->context.exit = t->context.syndrome = 0;
+        t->wake_ns = 0;
+        if (p->current_thread == id) {
+            p->cpu.state.cpu.r[0] = transport;
+            p->cpu.state.cpu.exit = p->cpu.state.cpu.syndrome = 0;
+        }
+        snx_ctr_thread_ready(p, id);
+    }
+    u->join_thread = 0;
+    u->next_join = 0;
+    snx_ctr_object_release(p, id);
+}
 void snx_ctr_uds_close(SnxCtrProcess* p) {
     struct SnxCtrUds* u = p->uds;
     if (!u) return;
+    finish_join(p, UDS_NETWORK);
     if (u->socket && (u->status == 6 || u->status == 9))
         send_message(u, u->status == 6 ? MSG_CLOSE : MSG_LEAVE, u->peer, NULL, 0);
     clear_bindings(p);
@@ -263,6 +293,20 @@ void snx_ctr_uds_poll(SnxCtrProcess* p) {
     struct SnxCtrUds* u = p->uds;
     if (!u || !u->socket) return;
     uint64_t now = snx_ctr_now_ns();
+    if (u->join_thread) {
+        CtrThread* caller = &p->objects[u->join_thread].data.thread;
+        if (caller->dead || now >= caller->wake_ns) {
+            send_message(u, MSG_LEAVE, u->peer, NULL, 0);
+            u->status = 3;
+            finish_join(p, UDS_NETWORK);
+        } else if (now >= u->next_join) {
+            uint8_t join[72];
+            memcpy(join, u->me.bytes, 40);
+            memcpy(join + 40, u->secret, 32);
+            send_message(u, MSG_JOIN, u->peer, join, sizeof join);
+            u->next_join = now + 250000000ull;
+        }
+    }
     if (u->mask == 3 && u->last_poll && now - u->last_poll > 100000000ull)
         fprintf(stderr, "3ds uds trace %.3f: local poll gap=%.1fms status=%u sent=%u received=%u\n", now / 1000000.0,
                 (now - u->last_poll) / 1000000.0, u->status, u->sent_packets, u->received_packets);
@@ -332,6 +376,7 @@ void snx_ctr_uds_poll(SnxCtrProcess* p) {
             u->reason = 1;
             if (first) {
                 u->changed = 3;
+                finish_join(p, 0);
                 status_changed(p);
                 fprintf(stderr, "3ds uds: connected to host\n");
             }
@@ -374,10 +419,11 @@ void snx_ctr_uds_poll(SnxCtrProcess* p) {
             fprintf(stderr, "3ds uds trace %.3f: received peer %s status=%u mask=%x sent=%u received=%u\n",
                     now / 1000000.0, type == MSG_CLOSE ? "CLOSE" : "LEAVE", u->status, u->mask, u->sent_packets,
                     u->received_packets);
-            u->changed |= u->mask & (uint16_t)~(1u << (u->own - 1));
+            u->changed |= u->own ? u->mask & (uint16_t)~(1u << (u->own - 1)) : u->mask;
             u->mask = u->own == 1 ? 1 : 0;
             u->reason = 4;
-            if (u->status == 9) u->status = 3;
+            if (u->status == 7 || u->status == 9) u->status = 3;
+            finish_join(p, UDS_NETWORK);
             u->net.bytes[28] = (uint8_t)population(u->mask);
             status_changed(p);
         }
@@ -682,20 +728,13 @@ static void connect_network(SnxCtrIpc* c) {
     u->session = u->found_session[i];
     memcpy(u->peer, n.bytes + 2, 4);
     u->status = 7;
-    uint8_t b[72];
-    memcpy(b, u->me.bytes, 40);
-    memcpy(b + 40, u->secret, 32);
-    uint64_t end = snx_ctr_now_ns() + 5000000000ull, next = 0;
-    while (snx_ctr_now_ns() < end && u->status == 7) {
-        if (snx_ctr_now_ns() >= next) {
-            send_message(u, MSG_JOIN, u->peer, b, 72);
-            next = snx_ctr_now_ns() + 250000000ull;
-        }
-        snx_ctr_uds_poll(c->process);
-        snx_sleep_ms(5);
-    }
-    if (u->status == 7) u->status = 3;
-    reply(c, 1, 0, u->status == 9 ? 0 : UDS_NETWORK);
+    u->own = u->mask = 0;
+    u->join_thread = c->process->current_thread;
+    u->join_header = (c->in[0] & 0xffff0000u) | 0x40;
+    ++c->process->objects[u->join_thread].refs;
+    snx_ctr_thread(c->process)->wake_ns = snx_ctr_now_ns() + 5000000000ull;
+    c->state = SNX_CTR_IPC_BLOCKED;
+    snx_ctr_uds_poll(c->process);
 }
 static void scan(SnxCtrIpc* c) {
     if (!snx_ctr_ipc_expect(c, 16, 4)) return;
@@ -998,6 +1037,7 @@ void snx_ctr_uds_dispatch(SnxCtrIpc* c) {
             fprintf(stderr, "3ds uds trace %.3f: guest requests %s status=%u mask=%x sent=%u received=%u\n",
                     snx_ctr_now_ns() / 1000000.0, cmd == 8 ? "destroy network" : "disconnect", u->status, u->mask,
                     u->sent_packets, u->received_packets);
+            finish_join(c->process, UDS_NETWORK);
             u->changed = u->mask;
             u->mask = 0;
             u->status = 3;

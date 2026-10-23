@@ -7,10 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-static struct {
-    bool room_netplay;
-} g_image;
-void snx_ctr_image_netplay_room(bool enabled) { g_image.room_netplay = enabled; }
 
 static uint32_t le32(const unsigned char* p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
@@ -31,8 +27,8 @@ void snx_ctr_image_free(SnxCtrImage* image) {
     }
 }
 /* the image an ExHeader describes, its expanded .code read exact and bounded by code(source, out, size) */
-static bool image_parse(const unsigned char* ex, bool (*code)(const void*, unsigned char*, size_t), const void* source,
-                        SnxCtrImage* image, char* error, size_t error_size) {
+static bool image_parse(const unsigned char* ex, bool (*code)(const void*, unsigned char*, size_t),
+                        const void* source, SnxCtrImage* image, char* error, size_t error_size) {
     image->stack_size = le32(ex + 0x1c);
     image->bss_size = le32(ex + 0x3c);
     image->title_id = (uint64_t)le32(ex + 0x200) | (uint64_t)le32(ex + 0x204) << 32;
@@ -69,35 +65,6 @@ static bool image_parse(const unsigned char* ex, bool (*code)(const void*, unsig
     image->code = malloc(image->code_size);
     reason = "cannot read exact bounded expanded .code";
     if (!image->code || !code(source, image->code, image->code_size)) goto fail;
-    /* NSMB2's local-wireless window is too short for internet rooms. Keep the
-       original wire history so increasing it does not overflow UdsMessage.
-       The modified image identity below forces matching AOT/JIT translation. */
-    const char* disable = getenv("SNX_3DS_NSMB2_NETPLAY");
-    if (g_image.room_netplay && !(disable && !strcmp(disable, "0")) && image->title_id == 0x000400000007ae00ull &&
-        image->code_size == 0x503000) {
-        const unsigned at = 0x485afa;
-        const unsigned char settings[8] = {32, 3, 2, 120, 3, 128, 3, 128};
-        const unsigned sites[5] = {0x4ec10, 0x4ec24, 0x4ec38, 0x4ec98, 0x4ecc8};
-        const uint32_t expected[5] = {0xe1d411b2, 0xe1d411b2, 0xe1d411b2, 0xe1d401b2, 0xe1d491b2};
-        const uint32_t replacement[5] = {0xe3a01003, 0xe3a01003, 0xe3a01003, 0xe3a00003, 0xe3a09003};
-        bool matches = !memcmp(image->code + at, settings, sizeof settings);
-        for (unsigned i = 0; i < 5; ++i) matches = matches && le32(image->code + sites[i]) == expected[i];
-        const unsigned char original_sha256[32] = {0x74, 0x48, 0xf9, 0x4e, 0x05, 0x7b, 0x17, 0x09, 0xfc, 0xd5, 0xd6,
-                                                   0x1f, 0x7e, 0x85, 0x64, 0x19, 0x81, 0xa6, 0x37, 0x34, 0x64, 0xf3,
-                                                   0x2c, 0x19, 0xbd, 0xe6, 0xc6, 0xe4, 0xb4, 0x59, 0xd9, 0x2a};
-        unsigned char digest[32];
-        unsigned digest_size = 0;
-        matches = matches && EVP_Digest(image->code, image->code_size, digest, &digest_size, EVP_sha256(), NULL) == 1 &&
-                  digest_size == sizeof digest && !memcmp(digest, original_sha256, sizeof digest);
-        if (matches) {
-            image->code[at] = 64;
-            image->code[at + 1] = 12;
-            for (unsigned i = 0; i < 5; ++i)
-                for (unsigned j = 0; j < 4; ++j) image->code[sites[i] + j] = (unsigned char)(replacement[i] >> (8 * j));
-            fprintf(stderr, "3ds netplay: NSMB2 USA v0 input window=12 frames, wire history=6\n");
-        } else
-            fprintf(stderr, "3ds netplay: NSMB2 image is not the verified USA v0 revision; patch skipped\n");
-    }
     static const char domain[] = "ScarletNX CTR image identity v1";
     EVP_MD_CTX* hash = EVP_MD_CTX_new();
     unsigned length = 0;
