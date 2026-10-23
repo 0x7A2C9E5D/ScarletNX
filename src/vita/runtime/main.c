@@ -296,18 +296,20 @@ int snx_vita_main(int argc, char** argv) {
                 return 2;
             }
         } else if (!strncmp(a, "--", 2) && strchr(a, '=')) {
-            /* the Vita debug table's, --script= being vita_script, a Switch game's press_len, and vulkan_video (which
-               the Vita's AVC decoder doesn't take yet) */
+            /* the Vita debug table's, --script= and --press_len= being vita_script and vita_press_len (a Switch
+               game's are g_unattended_ini's, whose script the Switch runtime parses), and vulkan_video (which the
+               Vita's AVC decoder doesn't take yet) */
             char key[64];
             size_t length = (size_t)(strchr(a, '=') - a - 2);
             const IniOpt* o = NULL;
             if (length < sizeof key) {
                 memcpy(key, a + 2, length);
                 key[length] = 0;
-                o = ini_find(g_vita_debug_ini, !strcmp(key, "script") ? "vita_script" : key);
+                o = ini_find(g_vita_debug_ini, !strcmp(key, "script")      ? "vita_script"
+                                               : !strcmp(key, "press_len") ? "vita_press_len"
+                                                                           : key);
                 if (!o) o = ini_find(g_debug_ini, key);
                 if (!o && !strcmp(key, "vulkan_video")) o = ini_find(g_graphics_ini, key);
-                if (!o && !strcmp(key, "press_len")) o = ini_find(g_unattended_ini, key);
             }
             if (!o) {
                 fprintf(stderr, "scarletnx-vita: unknown setting: %s\n", a);

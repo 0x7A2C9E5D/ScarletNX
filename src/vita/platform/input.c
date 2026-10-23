@@ -4,8 +4,8 @@
    Cross (south), X Circle (east), V Square (west), C Triangle (north), Q L, E R, Enter Start, Backspace Select, the
    arrows the D-pad, WASD the left stick and IJKL the right. The window's mouse is the touch screen: the left button
    touches the front panel, the right the rear one. A gamepad's buttons go by where they are; gamepad_swap_ab swaps
-   Cross and Circle. The script (vita_script) is ms:hex presses, each held for press_len ms, its bits 24 to 27 the left
-   stick pushed right, left, up or down */
+   Cross and Circle. The script (vita_script) is ms:hex presses, each held for vita_press_len ms, its bits 24 to 27 the
+   left stick pushed right, left, up or down */
 #include "vita/platform/input.h"
 #include "common/utilities/common.h"
 #include "snx_settings.h"
@@ -153,7 +153,7 @@ void vita_input_read(VitaInput* input) {
     if (g_input.presses) {
         double ms = (snx_seconds() - g_input.start) * 1000.0;
         for (size_t i = 0; i < g_input.presses; ++i)
-            if (ms >= g_input.script[i].at && ms - g_input.script[i].at < g_settings.press_length) {
+            if (ms >= g_input.script[i].at && ms - g_input.script[i].at < g_settings.vita_press_length) {
                 uint32_t mask = g_input.script[i].mask;
                 input->buttons |= mask & SCRIPT_BUTTONS;
                 if (mask & SCRIPT_STICK_RIGHT) sticks[0] = 1;
