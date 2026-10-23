@@ -70,12 +70,35 @@ typedef struct {
     u8* dst;
 } Piece;
 
+/* The guest memory the CPU made land, by 64 KB granule, with the present it landed at: a compute dispatch keeps a
+   written storage buffer on the GPU only where the CPU hasn't read it lately (vk_own_cpu_read). Direct-mapped by
+   granule, each slot holding its granule's number, under vk_lock (own_land, vk_dispatch) */
+#define CPU_READ_SLOTS 4096
+static struct {
+    u64 granule;
+    u32 present;
+} g_cpu_read[CPU_READ_SLOTS];
+static void cpu_read_note(u64 cpu, u64 size) {
+    for (u64 g = cpu >> 16, e = (cpu + size - 1) >> 16, k = 0; g <= e && k < 256; g++, k++) {
+        u32 slot = (u32)(g * 0x9E3779B97F4A7C15ull >> 52);
+        g_cpu_read[slot].granule = g + 1;
+        g_cpu_read[slot].present = g_vk_present;
+    }
+}
+int vk_own_cpu_read(u64 cpu, u64 size, u32 presents) {
+    for (u64 g = cpu >> 16, e = (cpu + size - 1) >> 16, k = 0; g <= e && k < 256; g++, k++) {
+        u32 slot = (u32)(g * 0x9E3779B97F4A7C15ull >> 52);
+        if (g_cpu_read[slot].granule == g + 1 && g_vk_present - g_cpu_read[slot].present < presents) return 1;
+    }
+    return 0;
+}
 /* own.c's land: the ranges in batches that host-cached staging takes (a range bigger than that in pieces), each batch
    one submission, waited for */
 static void own_land(const OwnRange* r, u8* const* dst, u32 n) {
     u64 cap = g_vk.alloc_cap / 4, done = 0;
     u32 i = 0;
     vk_lock();
+    for (u32 k = 0; k < n; k++) cpu_read_note(r[k].addr, r[k].size);
     vk_render_end();
     while (i < n) {
         Piece pc[64];

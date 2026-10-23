@@ -557,6 +557,8 @@ typedef struct VkOwnRes {
     u32 refs; /* the creator's, and one an owned range */
 } VkOwnRes;
 int vk_own_init(void);
+/* whether the CPU made GPU-owned bytes of guest memory [cpu, cpu + size) land within the last presents presents */
+int vk_own_cpu_read(u64 cpu, u64 size, u32 presents);
 VkOwnRes* vk_own_res_new(u64 size); /* with the caller's reference; NULL when out of memory */
 void vk_own_res_unref(VkOwnRes* r);
 /* the guest CPU bytes [cpu, cpu + size) hold r's bytes from off on once the work recorded so far is done: owned, or,
