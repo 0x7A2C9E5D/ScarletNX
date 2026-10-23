@@ -437,7 +437,7 @@ folder keeps its module, its copy of the runtime and its state alone: `sdmc/` an
 `--extract-container` left there is taken away, its compiled module and saves kept. The image's identity is the same
 either way, so a module compiled in one mode loads in the other.
 
-`--extract-container` (the launcher's *Extract game container*) extracts the CIA into its folder first and plays from
+`--extract-container` (the launcher's *Extract dump*) extracts the CIA into its folder first and plays from
 the extraction, as before. `-x` extracts only:
 
 ```sh
@@ -448,7 +448,7 @@ The output is a directory containing `contents/*.app`, `exefs/` (with
 expanded/page-padded `.code`), `romfs/`, raw container/NCCH/ExHeader metadata and
 `manifest.ini` with source/code hashes and segment layout. The default directory
 is the game's folder, `recompiled/<title ID>`, in the data folder the Switch driver uses
-(`--repo DIR`, else a portable copy's folder, else the user's data folder, from a
+(`--data DIR`, else a portable copy's folder, else the user's data folder, from a
 build tree too). On Linux the user's data folder keeps `work/` (the decrypted CIAs)
 in `~/.cache/scarletnx/work/3ds/`. No source CIA
 needs to be mounted by the future guest FS. Extraction is privately staged, then
@@ -458,7 +458,7 @@ finished extraction and used as it is, never extracted again or hashed. Keep the
 not concurrently modified; extraction is not a sandbox against hostile host
 processes racing parent directory changes.
 
-`-x`/`--extract` stops after extraction and `-r`/`--recomp` compiles without
+`-x`/`--extract` stops after extraction and `-r`/`--recompile` compiles without
 playing, as the Switch driver's do. Otherwise the driver loads
 `<title ID>_code.so` and compiles it first only when needed: when it is
 missing, or no longer loads or matches the build's module ABI or the extracted

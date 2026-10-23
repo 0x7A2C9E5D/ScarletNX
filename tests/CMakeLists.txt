@@ -38,8 +38,9 @@ endfunction()
 # what the tests reach that this list misses
 if(SNX_TEST_SANITIZERS)
     cmake_language(DEFER DIRECTORY "${PROJECT_SOURCE_DIR}" CALL snx_test_sanitize
-        # the common code: network, filesystems, the A64 reference and LZ4
+        # the common code: network, filesystems, the A64 reference, LZ4 and xxHash
         scarletnx-common scarletnx-net scarletnx-ldn scarletnx-filesystem snx_demangle snx_a64_reference snx_lz4
+        snx_xxhash
         snx-logscan
         # the recompiler and its backends
         snx_llvm snx_arm_llvm scarletnx-recompiler scarletnx-recompiler-shared
@@ -53,6 +54,8 @@ if(SNX_TEST_SANITIZERS)
         # the 3DS runtime
         scarletnx-3ds snx_ctr_program snx_ctr_board snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process snx_ctr_native
         snx_ctr_audio snx_ctr_gpu snx_ctr_gpu_reference
+        # the Vita runtime, its loader and USSE translator
+        scarletnx-vita snx_vita_program snx_vita_loader snx_vita_usse snx-vita-usse
         # scarletnx's main where it is the other drivers too
         snx_multicall
         # the menu, its splash, icon and pads
@@ -84,8 +87,10 @@ function(snx_sanitizer_path)
     endif()
 endfunction()
 # cpu_helpers.c built as the game's helpers are (snx_rtlib_flags in src/common/cpu/recompiler/llvm/CMakeLists.txt),
-# with -mcx16 on x86-64: its 16-byte compare-and-swap is then lock cmpxchg16b, not a libatomic call
+# with -mcx16 on x86-64: its 16-byte compare-and-swap is then lock cmpxchg16b, not a libatomic call. Under
+# SNX_A64_REFERENCE it includes a64_reference/reference.inc from here, so the tests directory is on the path.
 function(snx_cpu_helpers_flags target)
+    target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     if(snx_test_x86)
         target_compile_options(${target} PRIVATE -mcx16)
     endif()
@@ -293,6 +298,11 @@ add_executable(snx-test-arm-profile arm_profile.c "${PROJECT_SOURCE_DIR}/src/com
     "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/profile.c")
 snx_test_target(snx-test-arm-profile 11)
 add_test(NAME arm_isa_profiles COMMAND snx-test-arm-profile)
+# a game's cheats by their names, as the launcher lists them and cheats_off= leaves them out
+add_executable(snx-test-cheat-list cheat_list.c)
+snx_test_target(snx-test-cheat-list 99)
+target_link_libraries(snx-test-cheat-list PRIVATE scarletnx-common)
+add_test(NAME cheat_list COMMAND snx-test-cheat-list)
 # the C compiler a 3DS game's native link runs: the build's own, else a clang beside the program, else one on PATH
 add_executable(snx-test-find-compiler find_compiler.c)
 snx_test_target(snx-test-find-compiler 99)
@@ -768,12 +778,12 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(tracked_material_self_test tracked_material PROPERTIES SKIP_RETURN_CODE 77)
     # which GitHub Actions caches the cleanup workflow deletes (scripts/trim-caches.py)
     add_test(NAME trim_caches COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/trim_caches_test.py")
-    # the check that keeps a pull request red while its title says donotmerge (scripts/pr-title.py, pr-title.yml)
+    # the check that keeps a pull request red while its title says donotmerge (scripts/pr-title.py, pr-checks.yml)
     add_test(NAME pr_title COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/pr_title_test.py")
-    # the labels a title's [area] prefix asks for, which the same job adds (scripts/area-labels.py, pr-title.yml)
+    # the labels a title's [area] prefix asks for, which the same job adds (scripts/area-labels.py, pr-checks.yml)
     add_test(NAME area_labels COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/area_labels_test.py")
     # the check that holds a pull request until its assignees, its author aside, approve it (scripts/pr-assignees.py,
-    # pr-assignees.yml)
+    # pr-checks.yml)
     add_test(NAME pr_assignees COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/pr_assignees_test.py")
     # the target LLVM's llvm-config of the linux-*-cross presets, run under its machine's qemu (scripts/)
     if(UNIX)
@@ -788,6 +798,8 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME game_reports COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/game_reports_test.py"
                                            $<TARGET_FILE:snx-logscan>)
     endif()
+    # the game tools/run_game.py finds by its name (recompiled/, else an older version's games/)
+    add_test(NAME run_game COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/run_game_test.py")
     # the nightly release's title and notes (scripts/nightly-notes.py)
     add_test(NAME nightly_notes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/nightly_notes_test.py")
     # the builds published as releases and on Discord (scripts/publish-builds.py), against fakes. Where publish.yml
@@ -832,6 +844,7 @@ add_test(NAME hid_motion COMMAND snx-test-hid-motion)
 
 add_executable(snx-test-startup startup_options.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/startup.c")
 snx_test_target(snx-test-startup 99)
+target_link_libraries(snx-test-startup PRIVATE scarletnx-common) # an option's older name said (snx_option_renamed)
 if(SNX_TRACY)
     # startup.c must see SNX_TRACY so its Tracy flag checks match the runtime.
     target_compile_definitions(snx-test-startup PRIVATE SNX_TRACY=1)
@@ -1173,6 +1186,11 @@ add_executable(snx-test-jit-cache jit_cache.c)
 snx_test_target(snx-test-jit-cache 11)
 target_link_libraries(snx-test-jit-cache PRIVATE snx_llvm)
 add_test(NAME jit_cache COMMAND snx-test-jit-cache)
+# LLVM's SLP vectorizer turned off for a process (the setting slp_vectorizer), and the JIT cache's key saying so
+add_executable(snx-test-slp-vectorizer slp_vectorizer.c)
+snx_test_target(snx-test-slp-vectorizer 11)
+target_link_libraries(snx-test-slp-vectorizer PRIVATE snx_llvm)
+add_test(NAME slp_vectorizer COMMAND snx-test-slp-vectorizer)
 # the launcher's AOT pack action: the cache's path and header, and the optimization the AOT build must share
 add_executable(snx-test-aot-pack aot_pack.c "${PROJECT_SOURCE_DIR}/src/gui/aot.c")
 snx_test_target(snx-test-aot-pack 11)
@@ -1293,12 +1311,9 @@ if(TARGET OpenSSL::Crypto)
     endif()
 endif()
 if(APPLE)
-    # these build a game module and load it, which no Mac has done yet: the Mach-O linker (link_macho.c) is checked
-    # on Linux only (the link_macho test and docs/APPLE.md), and these wait for a run on a Mac. The in-process
-    # loader's tests run: it loads ELF objects on macOS too (code_loader.c). aot_variants also links a JIT cache unit,
-    # and Darwin's JIT writes ELF objects for that loader where the AOT module is Mach-O.
-    set_tests_properties(native_recompiler llvm_module recompiler_library aot_variants unit_cache llvm_differential_0
-                         llvm_differential_1 llvm_differential_2 PROPERTIES DISABLED TRUE)
+    # llvm_differential_0 to _2 ask for ELF output, which the Mach-O host's linker refuses. aot_variants links a JIT cache
+    # unit as ELF into an AOT module that is Mach-O on this host. Each needs its own fix before it can run here.
+    set_tests_properties(aot_variants llvm_differential_0 llvm_differential_1 llvm_differential_2 PROPERTIES DISABLED TRUE)
 endif()
 
 add_executable(snx_codegen_test codegen_test.c)
@@ -1333,6 +1348,24 @@ snx_test_target(snx-test-blocklinear-glsl 23)
 target_compile_options(snx-test-blocklinear-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-blocklinear-glsl PRIVATE glsl)
 add_test(NAME blocklinear_glsl COMMAND snx-test-blocklinear-glsl)
+# the Vita's texture deswizzle shader's GLSL run on the CPU against Vita3K's loops: no GPU needed
+add_executable(snx-test-vita-swizzle-glsl glsl/vita_swizzle_glsl.cpp)
+snx_test_target(snx-test-vita-swizzle-glsl 23)
+target_compile_options(snx-test-vita-swizzle-glsl PRIVATE -fwrapv)
+target_include_directories(snx-test-vita-swizzle-glsl PRIVATE glsl)
+add_test(NAME vita_swizzle_glsl COMMAND snx-test-vita-swizzle-glsl)
+# the Vita's decoded picture layout shader's GLSL run on the CPU against the decoder's layout: no GPU needed
+add_executable(snx-test-vita-picture-glsl glsl/vita_picture_glsl.cpp)
+snx_test_target(snx-test-vita-picture-glsl 23)
+target_compile_options(snx-test-vita-picture-glsl PRIVATE -fwrapv)
+target_include_directories(snx-test-vita-picture-glsl PRIVATE glsl)
+add_test(NAME vita_picture_glsl COMMAND snx-test-vita-picture-glsl)
+# the Vita's YUV420 texture shader's GLSL run on the CPU against the conversion written out: no GPU needed
+add_executable(snx-test-vita-yuv-glsl glsl/vita_yuv_glsl.cpp)
+snx_test_target(snx-test-vita-yuv-glsl 23)
+target_compile_options(snx-test-vita-yuv-glsl PRIVATE -fwrapv)
+target_include_directories(snx-test-vita-yuv-glsl PRIVATE glsl)
+add_test(NAME vita_yuv_glsl COMMAND snx-test-vita-yuv-glsl)
 # the texture conversion shader's GLSL run on the CPU against the CPU's conversions and ETC2 decoder: no GPU needed
 add_executable(snx-test-texconv-glsl glsl/texconv_glsl.cpp "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
 snx_test_target(snx-test-texconv-glsl 23)

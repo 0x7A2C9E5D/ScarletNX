@@ -1,7 +1,7 @@
 # ScarletNX
 
 ScarletNX is a Linux-first static recompiler for Switch games: ARM64 code is translated to LLVM
-IR and compiled into a game module (`games/<id>/<id>_code.so`, by title ID), and the runtime
+IR and compiled into a game module (`recompiled/<id>/<id>_code.so`, by title ID), and the runtime
 in `src/nx/` emulates the OS (kernel, IPC, services) and the GPU (Maxwell command buffers and shaders, drawn with
 Vulkan). A change is checked against the games it affects. `README.md` has setup and commands, `docs/ROADMAP.md`
 the plan and current state, `docs/ARCHITECTURE.md` how the parts fit together. This file holds the rules sessions
@@ -10,7 +10,7 @@ get wrong and points to the skills that carry the procedures.
 ## Rules
 
 - **Nothing of the game goes into git or anywhere outside this machine.** Keys, dumps (XCI, NSP, NCA), `work/`,
-  `games/` (code, data, saves, logs) and shader or texture dumps stay local. Commit messages and docs may quote
+  `recompiled/` (code, data, saves, logs) and shader or texture dumps stay local. Commit messages and docs may quote
   addresses, symbol names and short disassembly, never extracted files. `.claude/hooks/guard.py` blocks the
   obvious ways.
 - **A build is not a test.** A runtime change is verified by running the game (`snx-run` skill) through the scene
@@ -40,7 +40,7 @@ get wrong and points to the skills that carry the procedures.
   command line contains the pattern (twice that killed the session's own shell). List with `pgrep -a NAME` (or
   `pgrep -x cc1`, by process name), then `kill PID` with the numbers in a separate command. The same goes for waiting:
   `until ! pgrep -f PATTERN` matches its own shell and never ends. Wait on a file the job writes, or `pgrep -x NAME`.
-- Don't build while a timing-sensitive test runs: the build deploys a new runtime into the data folder's `games/` and loads the CPU.
+- Don't build while a timing-sensitive test runs: the build deploys a new runtime into the data folder's `recompiled/` and loads the CPU.
 - No `sudo` and no system packages: the user installs those.
 - Context is scarce. Never print a whole log (a game's `<id>.log` grows to megabytes), a whole disassembly or a
   ninja log. Use `grep -n`, `tail`, `tools/disasm.py` on one function.
@@ -49,11 +49,11 @@ get wrong and points to the skills that carry the procedures.
 
 | Task | Command |
 | --- | --- |
-| Build the runtime (hactool inside its driver) and the third-party libraries (deploys to every game in the data folder's `games/`, `~/.local/share/scarletnx/` on Linux: `SNX_GAMES_DIR`) | `cmake --preset default -B build && cmake --build build` (Windows: `scripts\bootstrap.ps1` once, `Set-ExecutionPolicy -Scope Process Bypass` and `. scripts\env.ps1` per window) |
+| Build the runtime (hactool inside its driver) and the third-party libraries (deploys to every game in the data folder's `recompiled/`, `~/.local/share/scarletnx/` on Linux: `SNX_RECOMPILED_DIR`) | `cmake --preset default -B build && cmake --build build` (Windows: `scripts\bootstrap.ps1` once, `Set-ExecutionPolicy -Scope Process Bypass` and `. scripts\env.ps1` per window) |
 | Cross-build for Windows (llvm-mingw on PATH) | `cmake --preset windows-cross && cmake --build --preset windows-cross` |
 | Extract a dump | `build/scarletnx -x "Game.xci" --name Game [--update u.nsp]` |
-| Recompile a game (into the data folder's `games/<id>/`, named by its title ID, or by a name given after the folder) | `build/scarletnx -r work/Game` |
-| Run with scripted input and a screenshot | `cd ~/.local/share/scarletnx/games/<id> && ./<id> --seconds=60 --shot=/path/out --script=ms:hexbuttons,...` |
+| Recompile a game (into the data folder's `recompiled/<id>/`, named by its title ID, or by a name given after the folder) | `build/scarletnx -r work/Game` |
+| Run with scripted input and a screenshot | `cd ~/.local/share/scarletnx/recompiled/<id> && ./<id> --seconds=60 --shot=/path/out --script=ms:hexbuttons,...` |
 | Name addresses / disassemble game code | `tools/symbols.py work/Game ADDR...` / `tools/disasm.py work/Game FUNC` |
 | Summarize a log (a player's too) / the game reports on GitHub | `build/scarletnx --scan-log LOG [--format markdown]` / `scripts/game-reports.py index [--title-id ID]`; the `scarletnx` MCP server (`build/scarletnx --mcp`, `.mcp.json`) has both and the game's code, and its GDB tools (`mcp_gdb.c`) debug a game started with `-S` or `-s` |
 | Run the tests | `ctest --test-dir build` (`-R swipc` for the IPC generator) |

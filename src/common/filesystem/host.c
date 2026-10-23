@@ -13,16 +13,66 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
 #endif
 
 /* descriptors a shared file may not take: they stay for the files opened on demand (saves, the SD card, unmapped
    RomFS files) */
 #define SHARE_RESERVE 256
 
+/* The waits pm_lock and pc_wait note while they block: a slot per thread, taken the first time it waits, read by the
+   hang report while the threads run (each field alone is atomic; a report may catch a wait as it changes) */
+#define PM_WAITS 128
+static struct {
+    uint64_t tid;
+    const void* m;
+    const void* at;
+    int cond;
+} g_pm_wait[PM_WAITS];
+static unsigned g_pm_nwait;
+static _Thread_local int t_pm_slot = -1;
+static uint64_t pm_tid(void);
+void pm_wait_note(const void* m, const void* at, int cond) {
+    int i = t_pm_slot;
+    if (i < 0) {
+        unsigned n = __atomic_fetch_add(&g_pm_nwait, 1, __ATOMIC_RELAXED);
+        i = t_pm_slot = n < PM_WAITS ? (int)n : PM_WAITS;
+        if (i < PM_WAITS) __atomic_store_n(&g_pm_wait[i].tid, pm_tid(), __ATOMIC_RELAXED);
+    }
+    if (i >= PM_WAITS) return;
+    __atomic_store_n(&g_pm_wait[i].at, at, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_pm_wait[i].cond, cond, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_pm_wait[i].m, m, __ATOMIC_RELEASE);
+}
+int pm_waits(PmWait* out, int max) {
+    unsigned n = __atomic_load_n(&g_pm_nwait, __ATOMIC_RELAXED), i;
+    int k = 0;
+    if (n > PM_WAITS) n = PM_WAITS;
+    for (i = 0; i < n && k < max; i++) {
+        const void* m = __atomic_load_n(&g_pm_wait[i].m, __ATOMIC_ACQUIRE);
+        if (!m) continue;
+        out[k].tid = __atomic_load_n(&g_pm_wait[i].tid, __ATOMIC_RELAXED);
+        out[k].m = m;
+        out[k].at = __atomic_load_n(&g_pm_wait[i].at, __ATOMIC_RELAXED);
+        out[k].cond = __atomic_load_n(&g_pm_wait[i].cond, __ATOMIC_RELAXED);
+        k++;
+    }
+    return k;
+}
+const void* pm_wait_base(void) { return g_pm_wait; }
+
 #if defined(_WIN32)
 void pm_init(PMutex* m) { InitializeSRWLock(&m->l); }
 void pm_destroy(PMutex* m) { (void)m; /* an SRW lock holds nothing */ }
-void pm_lock(PMutex* m) { AcquireSRWLockExclusive(&m->l); }
+static uint64_t pm_tid(void) { return GetCurrentThreadId(); }
+void pm_lock(PMutex* m) {
+    if (TryAcquireSRWLockExclusive(&m->l)) return;
+    pm_wait_note(m, __builtin_return_address(0), 0);
+    AcquireSRWLockExclusive(&m->l);
+    pm_wait_note(NULL, NULL, 0);
+}
 void pm_unlock(PMutex* m) { ReleaseSRWLockExclusive(&m->l); }
 int pm_trylock(PMutex* m) { return TryAcquireSRWLockExclusive(&m->l) != 0; }
 
@@ -97,7 +147,23 @@ void plat_file_unshare(int fd, const uint8_t* data, uint64_t size) {
 #else
 void pm_init(PMutex* m) { pthread_mutex_init(&m->l, NULL); }
 void pm_destroy(PMutex* m) { pthread_mutex_destroy(&m->l); }
-void pm_lock(PMutex* m) { pthread_mutex_lock(&m->l); }
+static uint64_t pm_tid(void) {
+#if defined(__APPLE__)
+    uint64_t t = 0;
+    pthread_threadid_np(NULL, &t);
+    return t;
+#elif defined(__linux__)
+    return (uint64_t)syscall(SYS_gettid);
+#else
+    return (uint64_t)(uintptr_t)pthread_self();
+#endif
+}
+void pm_lock(PMutex* m) {
+    if (pthread_mutex_trylock(&m->l) == 0) return;
+    pm_wait_note(m, __builtin_return_address(0), 0);
+    pthread_mutex_lock(&m->l);
+    pm_wait_note(NULL, NULL, 0);
+}
 void pm_unlock(PMutex* m) { pthread_mutex_unlock(&m->l); }
 int pm_trylock(PMutex* m) { return pthread_mutex_trylock(&m->l) == 0; }
 

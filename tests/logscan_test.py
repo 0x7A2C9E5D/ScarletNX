@@ -127,7 +127,7 @@ UNDEFINED = (
 """
 )
 
-# the launcher's Share log file: its build, its message, the run's output (the game's warnings again, on stderr), then
+# the launcher's Share Log file: its build, its message, the run's output (the game's warnings again, on stderr), then
 # the newest game log, one without a build: line
 LAUNCHER = (
     'ScarletNX main 9999fff (clang 23.1.3, Windows x86_64)\n'

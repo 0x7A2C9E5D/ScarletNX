@@ -18,6 +18,7 @@
 #include "nx/gpu/vk/pending_pages.h"
 #include "nx/gpu/texture/blocklinear.h"
 #include "nx/memory/own.h"
+#include "nx/runtime/platform/tracy.h"
 
 #define SURFH 4096
 static Surf* g_surfh[SURFH];
@@ -814,8 +815,18 @@ void vk_rt_before_write(u64 gva, u64 size) {
     vk_unlock();
 }
 
+static Surf* rt_create_(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch, u32 layers, u64 layer_size,
+                        int volume);
+/* a render target's lookup or creation as a profiler zone (SNX_TRACY builds) */
 static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch, u32 layers, u64 layer_size,
                        int volume) {
+    SNX_ZONE(z, "render target");
+    Surf* s = rt_create_(gva, w, h, fmt, tile, depth, pitch, layers, layer_size, volume);
+    SNX_ZONE_END(z);
+    return s;
+}
+static Surf* rt_create_(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch, u32 layers, u64 layer_size,
+                        int volume) {
     if (!w || !h) return NULL;
     u32 fkey = fmt | (depth ? 0x10000 : 0);
     /* the layout is part of what a target is: block linear with its block height, or pitch linear with its pitch */

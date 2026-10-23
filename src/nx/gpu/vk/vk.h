@@ -182,6 +182,10 @@ void vk_defer_call(void (*fn)(void*), void* arg); /* fn(arg) then */
 /* the submission being recorded (a number that grows at every submit: what a submit may have changed, results landed,
    is checked against it), and the frame (grows at vk_frame_next: frame f's work is done once f + VK_FRAMES started) */
 u64 vk_submit_number(void);
+/* iOS takes the GPU from an app in the background: a submit then loses the device ("Insufficient Permission (to submit
+   GPU work from background)"). Holds the caller until the app is shown again, or the game is leaving. Returns at once
+   everywhere else */
+void vk_wait_foreground(void);
 u32 vk_cb_begun(void); /* command buffers begun so far: changes when a new one starts recording */
 u64 vk_frame_id(void);
 /* the submission being recorded reads buffers in frame frame_id's rings: that frame's slot isn't reused until it is
@@ -668,6 +672,11 @@ void vk_tex_frame(void);    /* a frame was presented: evicts what wasn't used fo
 
 /* gpu/vk/buffer.c: guest memory [gva, gva + len) as a buffer the GPU reads, valid until the next submit */
 int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off);
+/* the same for a vertex or index buffer, whose offset needs only to be a multiple of align (a power of two) */
+int vk_buf_get_input(u64 gva, u64 len, u64 align, VkBuffer* buf, u64* off);
+/* the same inside a window shared with the ranges it overlaps (a storage buffer with no size of its own): *off is the
+   range's offset in it, a multiple of minStorageBufferOffsetAlignment */
+int vk_buf_get_window(u64 gva, u64 len, VkBuffer* buf, u64* off);
 /* the cache lines vk_buf_get(gva, len) will read, fetched ahead: step 0 its index slot, step 1 (after step 0 for every
    range) its entry. For a caller with several ranges to look up, so their misses overlap */
 void vk_buf_prefetch(u64 gva, u64 len, int step);
@@ -680,6 +689,7 @@ typedef struct {
     u64 addr;
     u32 size;
     int writable, aliased;
+    int bare; /* its address has no size beside it (SH_GBUF_*): bound in a shared window */
     VkBuffer buf;
     u64 off, range;
 } VkDrawGbuf;
@@ -816,6 +826,11 @@ VkPipelineLayout vk_playout(u32 arrays); /* arrays: a bit per set (shader_vk_set
 extern int g_vk_preserve_infnan;
 extern int g_vk_preserve_infnan64;
 extern int g_vk_flush_denorm;
+/* SH_FTZ_*: how translations get the console's FP32 flush to zero, from g_vk_flush_denorm and vk_ftz_native */
+extern int g_vk_ftz;
+/* ftz_probe.c: 1 when the device flushes FP32 subnormals in FADD, FMUL and FFMA as the console's FTZ does, in a module
+   that declares no denormal mode (it runs a compute shader and waits for it: at the renderer's start only) */
+int vk_ftz_native(void);
 extern VkShaderStageFlags g_vk_subgroup_stages;
 /* by set, shader_vk_set(stage): [0] without the indexed texture arrays, [1] with them. A set holding 512 array
    descriptors cost the driver twice the time to bind (one game's 6,700 draws a frame), so only an indexed shader's has
@@ -927,6 +942,7 @@ void vk_ui_draw(VkCommandBuffer cb, VkImage sc, const int safe[4]);
 void vk_ui_swapchain_gone(void); /* its images' views go before the swapchain does */
 void vk_render_clear(GpuChannel* ch, u32 v);
 VkViewport vk_render_viewport(const u32* r);
+VkViewport vk_render_viewport_at(const u32* r, u32 index);
 int vk_render_depth_clamp(const u32* r);
 VkFrontFace vk_render_front_face(const u32* r);
 void vk_render_draw_texture(GpuChannel* ch);
@@ -956,9 +972,10 @@ VkSampler vk_tex_bind_sampler(const u32* tsc, const ShTex* st, int num, const Su
    stores (which declare none). *bytes is set to the guest bytes t covers, every layer. A draw also refuses its own
    attachments, which a dispatch, outside any rendering pass, can write.
    vk_gbuf_desc: a storage buffer's address (*addr) and size from its descriptor's words {address low, address high,
-   size} in constant buffer 0 at off, where gbuf_tag (spirv_translate.c) found it for stage (ST_VS, ST_FS or ST_CS).
+   size} at off (SH_GBUF_*), where gbuf_tag (spirv_translate.c) found it for stage (ST_VS, ST_FS or ST_CS).
    No size takes 16 bytes, and sizes are capped at 16 MiB and rounded up to words. The vertex stage's 0xb0 holds a
-   bare 64-bit pointer with no size after it, 16 bytes (gbuf_tag tags it for the vertex stage alone). */
+   bare 64-bit pointer with no size after it, 16 bytes (gbuf_tag tags it for the vertex stage alone). A bare address
+   in a program's own constant buffer (gbuf_tag_any, v[2] unread) takes what is mapped from it on, to the cap. */
 int vk_tex_num(const u32* tic, const Surf* t);
 int vk_image_keyable(const ShaderInfo* si, int i);
 int vk_image_key(const ShaderInfo* si, int i, const u32* tic);

@@ -10,7 +10,7 @@
 #include "nx/runtime/driver/container.h"
 
 /* Indexes the game's data folder and maps RomFS and ExeFS for the run. Called once, before any guest file is loaded */
-void fs_init(void);
+void fs_init(const char* keys, const char* title_keys);
 extern u64 g_fs_bytes_read, g_fs_bytes_written; /* the game's file I/O, for the rate plot */
 /* Lookups by a path in the index. *size is 0 when the file isn't there */
 FILE* fs_open_read(const char* path, u64* size);
@@ -112,7 +112,7 @@ typedef struct {
     FileData files[FS_FILE_MAX];
     DirData dirs[FS_DIR_MAX];
     u32 fs_next, file_next, dir_next;
-    /* Extract game container off: the dump the game's folder links to, mapped for the whole run, and its program's
+    /* Extract dump off: the dump the game's folder links to, mapped for the whole run, and its program's
        ExeFS and RomFS read out of it (dump_open). dlock keeps one read at a time: their decryption is shared */
     SnxDump dump;
     SnxHacFs* dfs;

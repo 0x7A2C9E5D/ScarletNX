@@ -32,6 +32,10 @@ void jit_code_removed(u64 base);
    the range are cleared, the JIT's code is invalidated, and a block the game mapped that is no longer executable loses
    its image */
 void jit_code_invalidate(u64 addr, u64 size);
+/* the guest changed its code in [addr, addr+size) and made it visible (IC IVAU, RtAPI.code_changed): the AOT
+   functions compiled from it go stale (SnxModule.stale) and leave dispatch, and the JIT's code there goes, so what
+   runs there next is compiled from the code as it is now */
+void jit_code_changed(u64 addr, u64 size);
 /* the totals, into the log, at exit */
 void jit_report(void);
 

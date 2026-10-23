@@ -103,7 +103,7 @@ static int clean_ini(GuiCleaned* done, const char* path) {
                 snprintf(what, sizeof what, snx_tr("Not written without [Deprecated]: %s"), strerror(errno));
                 if (staged) remove(staged);
             }
-            gui_cleaned_add(done, !failed, path, failed ? what : snx_tr("[Deprecated] taken out"));
+            gui_cleaned_add(done, !failed, path, failed ? what : snx_tr("[Deprecated] removed"));
             free(staged);
         }
     }
@@ -187,6 +187,6 @@ int gui_move_entries(GuiCleaned* done, const char* old, const char* now, const c
         free(to);
     }
     snx_free_strings(names, count);
-    if (apply && !snx_remove_empty_dir(old)) gui_cleaned_add(done, true, old, snx_tr("Taken away: empty now"));
+    if (apply && !snx_remove_empty_dir(old)) gui_cleaned_add(done, true, old, snx_tr("Removed: it was empty"));
     return moves;
 }

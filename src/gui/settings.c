@@ -227,6 +227,17 @@ void gui_settings_reset(GuiSettings* s, int row) {
     for (i = first; i < end && i < s->count; ++i) set(s, i, s->values[i].start);
     gui_settings_sync(s);
 }
+int gui_settings_at_start(const GuiSettings* s, int row) {
+    int i, first = row, end = row + 1;
+    if (row < 0 || row >= s->count) return 1;
+    if (s->values[row].kind) { /* a page's or an All's: their rows */
+        first = s->values[row].first;
+        end = first + s->values[row].count;
+    }
+    for (i = first; i < end && i < s->count; ++i)
+        if (strcmp(kept(s, i), s->values[i].start)) return 0;
+    return 1;
+}
 int gui_settings_changed(const GuiSettings* s) {
     int i, n = 0;
     for (i = 0; i < s->count; ++i)
@@ -327,6 +338,13 @@ size_t gui_settings_recompile(GuiSettings* s, const char** argv) {
         argv[n++] = s->values[i].option;
     }
     return n;
+}
+size_t gui_settings_one(GuiSettings* s, const char* key, const char** argv) {
+    int i = find(s, key);
+    if (i < s->own || i >= s->count || !picked(s, i)) return 0;
+    snprintf(s->values[i].option, sizeof s->values[i].option, "--%s=%s", key, picked(s, i));
+    argv[0] = s->values[i].option;
+    return 1;
 }
 size_t gui_settings_options(GuiSettings* s, int launch, const char** argv) {
     size_t n = 0;

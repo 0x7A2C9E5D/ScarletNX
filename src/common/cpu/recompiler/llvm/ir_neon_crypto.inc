@@ -61,7 +61,7 @@ static int byte_misc(SnxIr* ir, SnxU32 w) {
     return 1;
 }
 
-/* v_expand_imm (helpers/simd.c), evaluated here */
+/* v_expand_imm (tests/a64_reference/simd.c), evaluated here */
 static SnxU64 expand_imm(unsigned op, unsigned cmode, unsigned imm8) {
     SnxU64 i = imm8, r = 0;
     unsigned k;
@@ -195,6 +195,34 @@ static int aes_portable(SnxIr* ir, unsigned op, unsigned rn, unsigned rd) {
     return 1;
 }
 
+/* AArch64's crypto instructions are the guest's own: one intrinsic each. The tables are the whole dispatch. */
+typedef struct {
+    const char* name;
+    unsigned args; /* 2: Vd, Vn; 1: Vn */
+} AesNative;
+static const AesNative aes_native[4] = {
+    {"llvm.aarch64.crypto.aese", 2},
+    {"llvm.aarch64.crypto.aesd", 2},
+    {"llvm.aarch64.crypto.aesmc", 1},
+    {"llvm.aarch64.crypto.aesimc", 1},
+};
+static int aes_arm(SnxIr* ir, unsigned op, unsigned rn, unsigned rd) {
+    LLVMTypeRef t = LLVMVectorType(ir->t_i8, 16);
+    const AesNative* e = &aes_native[op - 4];
+    V args[2], r;
+    if (e->args == 2) {
+        args[0] = ir_load(ir, t, vreg(ir, rd));
+        args[1] = ir_load(ir, t, vreg(ir, rn));
+    } else {
+        args[0] = ir_load(ir, t, vreg(ir, rn));
+    }
+    LLVMSetAlignment(args[0], 8);
+    if (e->args == 2) LLVMSetAlignment(args[1], 8);
+    r = ir_intrinsic(ir, e->name, NULL, args, e->args);
+    LLVMSetAlignment(LLVMBuildStore(B, r, vreg(ir, rd)), 8);
+    return 1;
+}
+
 /* AESE/AESD/AESMC/AESIMC. With AES-NI (x86, CPUID aes): Arm's AESE is ShiftRows(SubBytes(d^k)), x86's AESENCLAST
    ShiftRows(SubBytes(s))^rk: AESENCLAST(d^k, 0). MixColumns alone is AESENC(AESDECLAST(x, 0), 0), the inverse
    steps cancelling. Elsewhere crypto.c's: SubBytes and ShiftRows as one lookup per byte in the module's S-box,
@@ -204,6 +232,7 @@ static int aes(SnxIr* ir, SnxU32 w) {
     LLVMTypeRef t = LLVMVectorType(ir->t_i64, 2);
     V args[2], zero = LLVMConstNull(t), x, r;
     if (op < 4 || op > 7) return 0;
+    if (ir->features->aarch64 && ir->features->arm_aes && !ir->big_endian) return aes_arm(ir, op, rn, rd);
     if (!ir->features->x86 || !ir->features->aes) return aes_portable(ir, op, rn, rd);
     x = ir_load(ir, t, vreg(ir, rn));
     LLVMSetAlignment(x, 8);
@@ -252,11 +281,21 @@ static V carryless_multiply(SnxIr* ir, V x, V y) {
     return r;
 }
 
-/* PMULL/PMULL2 Vd.1Q (64x64 carry-less): PCLMULQDQ where CPUID has it (x86), carryless_multiply otherwise */
+/* PMULL/PMULL2 Vd.1Q (64x64 carry-less): the host's own PMULL on AArch64, PCLMULQDQ where CPUID has it (x86),
+   carryless_multiply otherwise */
+static int pmull_arm(SnxIr* ir, unsigned hi, unsigned rn, unsigned rm, unsigned rd) {
+    V args[2], r;
+    args[0] = ir_vd(ir, rn, hi);
+    args[1] = ir_vd(ir, rm, hi);
+    r = ir_intrinsic(ir, "llvm.aarch64.neon.pmull64", NULL, args, 2);
+    LLVMSetAlignment(LLVMBuildStore(B, r, vreg(ir, rd)), 8);
+    return 1;
+}
 static int pmull_1q(SnxIr* ir, SnxU32 w) {
     unsigned q = (w >> 30) & 1, rm = (w >> 16) & 31, rn = (w >> 5) & 31, rd = w & 31;
     LLVMTypeRef t = LLVMVectorType(ir->t_i64, 2);
     V args[3], r;
+    if (ir->features->aarch64 && ir->features->arm_aes && !ir->big_endian) return pmull_arm(ir, q, rn, rm, rd);
     if (!ir->features->x86 || !ir->features->pclmul) {
         r = carryless_multiply(ir, ir_vd(ir, rn, q), ir_vd(ir, rm, q));
         ir_set_vd(ir, rd, 0, LLVMBuildTrunc(B, r, ir->t_i64, ""));
@@ -287,10 +326,149 @@ static V sigma(SnxIr* ir, V x, unsigned a, unsigned b, unsigned c, unsigned d) {
 }
 static V add3(SnxIr* ir, V a, V b, V c) { return LLVMBuildAdd(B, LLVMBuildAdd(B, a, b, ""), c, ""); }
 
+/* AArch64's SHA instructions are the guest's own too. kind says which registers the intrinsic takes:
+   0: (hash, E, schedule), 1: (E), 2: (Vd, Vn, Vm), 3: (Vd, Vn) */
+typedef struct {
+    const char* name;
+    unsigned kind;
+} ShaNative;
+static const ShaNative sha_native[10] = {
+    {"llvm.aarch64.crypto.sha1c", 0},     {"llvm.aarch64.crypto.sha1p", 0},   {"llvm.aarch64.crypto.sha1m", 0},
+    {"llvm.aarch64.crypto.sha1su0", 2},   {"llvm.aarch64.crypto.sha256h", 2}, {"llvm.aarch64.crypto.sha256h2", 2},
+    {"llvm.aarch64.crypto.sha256su1", 2}, {"llvm.aarch64.crypto.sha1h", 1},   {"llvm.aarch64.crypto.sha1su1", 3},
+    {"llvm.aarch64.crypto.sha256su0", 3},
+};
+static int sha_arm(SnxIr* ir, unsigned op, unsigned rd, unsigned rn, unsigned rm) {
+    LLVMTypeRef t = LLVMVectorType(ir->t_i32, 4);
+    const ShaNative* e;
+    V x, y, z = NULL, args[3], r;
+    unsigned idx;
+    if (op == 7) return 0; /* unallocated: the table's 8th entry is SHA1H, the 0x10 group's first */
+    idx = op < 0x10 ? op : 7 + (op - 0x10);
+    if (idx >= sizeof(sha_native) / sizeof(sha_native[0])) return 0;
+    e = &sha_native[idx];
+    x = ir_load(ir, t, vreg(ir, rd));
+    y = ir_load(ir, t, vreg(ir, rn));
+    if (e->kind == 0 || e->kind == 2) z = ir_load(ir, t, vreg(ir, rm));
+    LLVMSetAlignment(x, 8);
+    LLVMSetAlignment(y, 8);
+    if (z) LLVMSetAlignment(z, 8);
+    switch (e->kind) {
+        case 0:
+            args[0] = x;
+            args[1] = LLVMBuildExtractElement(B, y, ir_i32(ir, 0), "");
+            args[2] = z;
+            r = ir_intrinsic(ir, e->name, NULL, args, 3);
+            break;
+        case 1:
+            args[0] = LLVMBuildExtractElement(B, y, ir_i32(ir, 0), "");
+            r = LLVMBuildInsertElement(B, LLVMConstNull(t), ir_intrinsic(ir, e->name, NULL, args, 1), ir_i32(ir, 0),
+                                       "");
+            break;
+        case 2:
+            args[0] = x;
+            args[1] = y;
+            args[2] = z;
+            r = ir_intrinsic(ir, e->name, NULL, args, 3);
+            break;
+        default:
+            args[0] = x;
+            args[1] = y;
+            r = ir_intrinsic(ir, e->name, NULL, args, 2);
+            break;
+    }
+    LLVMSetAlignment(LLVMBuildStore(B, r, vreg(ir, rd)), 8);
+    return 1;
+}
+
+static V shuf4(SnxIr* ir, V a, V b, unsigned x, unsigned y, unsigned z, unsigned w) {
+    V mask[4];
+    mask[0] = ir_i32(ir, x);
+    mask[1] = ir_i32(ir, y);
+    mask[2] = ir_i32(ir, z);
+    mask[3] = ir_i32(ir, w);
+    return LLVMBuildShuffleVector(B, a, b, LLVMConstVector(mask, 4), "");
+}
+static V rev4(SnxIr* ir, V x) { return shuf4(ir, x, x, 3, 2, 1, 0); }
+static V half4(SnxIr* ir, V x) { return shuf4(ir, x, x, 2, 3, 0, 1); }
+
+/* SHA1 and SHA256 on the host's SHA-NI (x86, CPUID sha). The word layouts differ from Arm's: x86 keeps SHA1's state
+   and message dwords high-to-low (A in dword 3), and SHA256's as {C,D,G,H}/{A,B,E,F}. Intel's SHA1RNDS4 adds the
+   round constant too, which Arm's SHA1C/P/M leave to the caller: subtract the same constant so the guest's own
+   message words (with whatever constant it added) stand. SHA1H has no host instruction and stays portable. */
+static int sha_x86(SnxIr* ir, unsigned op, unsigned rd, unsigned rn, unsigned rm) {
+    static const SnxU32 k[3] = {0x5A827999u, 0x6ED9EBA1u, 0x8F1BBCDCu};
+    V x, y, m, r, p, q, args[3];
+    unsigned i;
+    if (op == 7 || op == 0x10) return 0; /* unallocated, and SHA1H */
+    x = get_lanes(ir, vreg(ir, rd), 2, 4);
+    y = get_lanes(ir, vreg(ir, rn), 2, 4);
+    m = op < 0x10 ? get_lanes(ir, vreg(ir, rm), 2, 4) : NULL;
+    switch (op) {
+        case 0: /* SHA1C, SHA1P, SHA1M: x86 wants E folded into W0 and the state reversed */
+        case 1:
+        case 2: {
+            V constants[4];
+            for (i = 0; i < 4; ++i) constants[i] = ir_i32(ir, k[op]);
+            p = rev4(ir, m);
+            q = LLVMBuildAdd(B, LLVMBuildExtractElement(B, p, ir_i32(ir, 3), ""),
+                             LLVMBuildExtractElement(B, y, ir_i32(ir, 0), ""), "");
+            p = LLVMBuildInsertElement(B, p, q, ir_i32(ir, 3), "");
+            p = LLVMBuildSub(B, p, LLVMConstVector(constants, 4), "");
+            args[0] = rev4(ir, x);
+            args[1] = p;
+            args[2] = ir_i8(ir, op);
+            r = rev4(ir, ir_intrinsic(ir, "llvm.x86.sha1rnds4", NULL, args, 3));
+            break;
+        }
+        case 3: /* SHA1SU0: the same partial sums, with the halves swapped */
+            args[0] = half4(ir, x);
+            args[1] = half4(ir, y);
+            p = ir_intrinsic(ir, "llvm.x86.sha1msg1", NULL, args, 2);
+            r = LLVMBuildXor(B, half4(ir, p), m, "");
+            break;
+        case 4:   /* SHA256H: Vd is A..D and Vn is E..H */
+        case 5: { /* SHA256H2: the other way round */
+            V d = op == 4 ? x : y, n = op == 4 ? y : x;
+            args[0] = shuf4(ir, d, n, 7, 6, 3, 2); /* C, D, G, H */
+            args[1] = shuf4(ir, d, n, 5, 4, 1, 0); /* A, B, E, F */
+            args[2] = m;
+            p = ir_intrinsic(ir, "llvm.x86.sha256rnds2", NULL, args, 3); /* A, B, E, F after 2 rounds */
+            args[0] = args[1];
+            args[1] = p;
+            args[2] = half4(ir, m);                                      /* W2, W3 in the dwords it reads */
+            q = ir_intrinsic(ir, "llvm.x86.sha256rnds2", NULL, args, 3); /* and after 4 */
+            r = op == 4 ? shuf4(ir, q, p, 3, 2, 7, 6) : shuf4(ir, q, p, 1, 0, 5, 4);
+            break;
+        }
+        case 6: /* SHA256SU1: W9..W12 added first, then sigma1 and the pair it chains */
+            p = LLVMBuildAdd(B, x, shuf4(ir, y, m, 1, 2, 3, 4), "");
+            args[0] = p;
+            args[1] = m;
+            r = ir_intrinsic(ir, "llvm.x86.sha256msg2", NULL, args, 2);
+            break;
+        case 0x11: /* SHA1SU1: the reversed halves are exactly MSG2's operands, whose result is high-to-low */
+            args[0] = rev4(ir, x);
+            args[1] = rev4(ir, y);
+            r = rev4(ir, ir_intrinsic(ir, "llvm.x86.sha1msg2", NULL, args, 2));
+            break;
+        case 0x12: /* SHA256SU0: exactly MSG1 */
+            args[0] = x;
+            args[1] = y;
+            r = ir_intrinsic(ir, "llvm.x86.sha256msg1", NULL, args, 2);
+            break;
+        default: return 0;
+    }
+    set_lanes(ir, vreg(ir, rd), r);
+    return 1;
+}
+
 /* snx_simd's SHA ops: three registers (0-6, (w >> 12) & 7) and two (0x10-0x12) */
 static int sha(SnxIr* ir, SnxU32 w, unsigned op) {
     unsigned rm = (w >> 16) & 31, rn = (w >> 5) & 31, rd = w & 31, i;
     V x[4], y[4], m[4], r[4], t;
+    if (ir->features->aarch64 && ir->features->arm_sha2 && !ir->big_endian) return sha_arm(ir, op, rd, rn, rm);
+    if (ir->features->x86 && ir->features->sha_ni && sha_x86(ir, op, rd, rn, rm)) return 1;
     for (i = 0; i < 4; ++i) {
         x[i] = get(ir, vreg(ir, rd), 2, i);
         y[i] = get(ir, vreg(ir, rn), 2, i);

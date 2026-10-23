@@ -29,12 +29,12 @@ static void extract_help(void) {
     puts("Usage: scarletnx -x BASE.xci|BASE.nsp|BASE.dxci|BASE.dnsp [options]\n"
          "  --update FILE       Apply a same-title update during extraction, or add a DLC's RomFS image\n"
          "  --name NAME         Output name (default: base dump stem)\n"
-         "  --out DIR           Output directory (default: REPO/work/NAME)\n"
-         "  --keys FILE         prod.keys (default: REPO, then ~/.switch)\n"
+         "  --out DIR           Output folder (default: work/NAME of the data folder)\n"
+         "  --keys FILE         prod.keys (default: the data folder's, then ~/.switch)\n"
          "  --title-keys FILE   title.keys (same discovery order; optional)\n"
          "  --icon              The game's icon alone, icon.jpg into --out DIR (what Games shows), nothing extracted\n"
          "  --help              Show this help");
-    puts("REPO is the data folder: --repo, else a portable copy's or the user's (scarletnx --help).");
+    puts("The data folder: --data, else a portable copy's or the user's (scarletnx --help).");
 #ifdef SNX_XDG
     puts("The user's data folder keeps work/ in its cache folder, $XDG_CACHE_HOME/scarletnx (~/.cache/scarletnx).");
 #endif
@@ -61,7 +61,7 @@ static int option_is(const char* arg, const char* name) {
 
 static int parse_options(int argc, char** argv, ExtractOptions* options) {
     int i, positional;
-    const char **slot, *value;
+    const char **slot, *value, *option;
     memset(options, 0, sizeof *options);
     positional = 0;
     for (i = 0; i < argc; i++) {
@@ -78,7 +78,7 @@ static int parse_options(int argc, char** argv, ExtractOptions* options) {
             continue;
         }
         if (positional || argv[i][0] != '-' || !argv[i][1]) {
-            if (options->base) return snx_error("Extraction accepts one base dump");
+            if (options->base) return snx_error("-x takes one base dump, and %s is a second", argv[i]);
             options->base = argv[i];
             continue;
         }
@@ -93,16 +93,16 @@ static int parse_options(int argc, char** argv, ExtractOptions* options) {
             slot = &options->keys;
         else if (option_is(argv[i], "--title-keys"))
             slot = &options->title_keys;
-        if (!slot) return snx_error("Unknown extraction option: %s", argv[i]);
+        if (!slot) return snx_error("unknown option: %s (scarletnx -x -h lists them)", argv[i]);
+        option = argv[i];
         value = strchr(argv[i], '=');
         if (value)
             value++;
         else {
-            if (i + 1 == argc || !strncmp(argv[i + 1], "--", 2))
-                return snx_error("Extraction option requires a value: %s", argv[i]);
+            if (i + 1 == argc || !strncmp(argv[i + 1], "--", 2)) return snx_error("%s requires a value", argv[i]);
             value = argv[++i];
         }
-        if (!value[0]) return snx_error("Extraction option has an empty value");
+        if (!value[0]) return snx_error("%s has an empty value", option);
         *slot = value;
     }
     if (!options->base) {
@@ -128,41 +128,41 @@ static int prepare_paths(ExtractState* state, const ExtractOptions* options, con
     state->base = snx_absolute(options->base);
     if (options->update) state->update = snx_absolute(options->update);
     if (!state->base || (options->update && !state->update))
-        return snx_error("Cannot resolve %s", state->base ? options->update : options->base);
+        return snx_error("cannot resolve %s", state->base ? options->update : options->base);
     if (!snx_is_file(state->base) || (state->update && !snx_is_file(state->update)))
         return snx_error("%s is not a file", snx_is_file(state->base) ? state->update : state->base);
     if (snx_container_kind(state->base, &xci) || (state->update && snx_container_kind(state->update, &xci))) return 1;
     name = options->name ? text_copy(options->name, strlen(options->name)) : dump_name(state->base);
-    if (!name) return snx_error("Out of memory resolving extraction output");
+    if (!name) return snx_error("out of memory resolving extraction output");
     if (!name[0] || !strcmp(name, ".") || !strcmp(name, "..") || strpbrk(name, "/\\:")) {
+        snx_error("--name %s: one file name, not a path", name);
         free(name);
-        return snx_error("Extraction name must be a single nonempty filename");
+        return 1;
     }
     /* only when --out names none: play_dump names one, and has said where an older build's extractions are */
     work = options->out ? NULL : snx_work_dir(paths->repo);
     target = work ? snx_path_join(work, name) : NULL;
     free(work);
     free(name);
-    if (!options->out && !target) return snx_error("Out of memory resolving extraction output");
+    if (!options->out && !target) return snx_error("out of memory resolving extraction output");
     state->out = snx_absolute(options->out ? options->out : target);
     if (!state->out) {
-        int r = snx_error("Cannot resolve %s", options->out ? options->out : target);
+        int r = snx_error("cannot resolve %s", options->out ? options->out : target);
         free(target);
         return r;
     }
     free(target);
     state->exefs = snx_path_join(state->out, "exefs");
     state->romfs = snx_path_join(state->out, "romfs");
-    if (!state->exefs || !state->romfs) return snx_error("Out of memory resolving extraction output");
+    if (!state->exefs || !state->romfs) return snx_error("out of memory resolving extraction output");
     if (snx_is_file(state->exefs) || snx_is_dir(state->exefs) || snx_is_link(state->exefs))
-        return snx_error("Output already contains exefs: %s", state->out);
+        return snx_error("output already contains exefs: %s", state->out);
     if (snx_is_file(state->out)) return snx_error("%s is a file, not a folder", state->out);
     made_out = !snx_is_dir(state->out);
-    if (snx_mkdirs(state->out)) return snx_error("Cannot create %s: %s", state->out, snx_os_error(why, sizeof why));
+    if (snx_mkdirs(state->out)) return snx_error("cannot create %s: %s", state->out, snx_os_error(why, sizeof why));
     state->made_out = made_out;
     return 0;
 }
-
 
 /* "  extracted 1229 of 4096 MB (30%)", ending in a carriage return while hactool writes: a terminal and the launcher's
    console write the next over it, the last one ends the row */
@@ -297,7 +297,7 @@ static int extract_aoc(ExtractState* state) {
     }
     size = snx_hac_fs_romfs_size(fs);
     if (!size) {
-        failed = snx_error("The DLC's Data NCA has no RomFS");
+        failed = snx_error("the DLC's Data NCA has no RomFS");
         goto done;
     }
     state->total = size;
@@ -312,7 +312,7 @@ static int extract_aoc(ExtractState* state) {
     if (file && fclose(file)) failed = 1;
     if (state->said) progress_say(state, 1);
     if (failed || snx_replace(tmp, path)) {
-        failed = snx_error("Cannot write the DLC's RomFS image %s", path);
+        failed = snx_error("cannot write the DLC's RomFS image %s", path);
         if (snx_is_file(tmp)) snx_remove_tree(tmp);
     } else {
         char said[32];
@@ -376,12 +376,12 @@ static int extract_files(ExtractState* state, const ExtractOptions* options, con
                                             state->romfs);
     snx_hac_progress(NULL, NULL);
     if (state->said) progress_say(state, 1);
-    if (failed) return snx_hac_error("The Program NCA cannot be extracted");
+    if (failed) return snx_hac_error("the Program NCA cannot be extracted");
     main_path = snx_path_join(state->exefs, "main");
-    if (!main_path) return snx_error("Out of memory checking the extraction");
+    if (!main_path) return snx_error("out of memory checking the extraction");
     failed = !snx_is_file(main_path);
     free(main_path);
-    if (failed) return snx_hac_error("Extracted exefs has no main; verify that the update matches the base game");
+    if (failed) return snx_hac_error("the exefs has no main: the update may not be this game's");
     say_extracted(state);
     control_nacp(state);
     control_icon(state);
@@ -390,7 +390,7 @@ static int extract_files(ExtractState* state, const ExtractOptions* options, con
 
 static int cleanup(ExtractState* state, int result) {
     if (result && state->made_out && state->out && snx_remove_tree(state->out))
-        snx_error("Could not remove incomplete extraction output: %s", state->out);
+        snx_error("cannot remove the unfinished extraction %s", state->out);
     if (!result && state->out) printf("Done: %s\n", state->out);
     snx_dump_close(&state->dump);
     free(state->base);
@@ -413,14 +413,20 @@ static void hactool_exit(void* data) {
 int snx_extract(int argc, char** argv, const SnxPaths* paths) {
     ExtractOptions options;
     ExtractState state;
+    SnxPaths effective_paths;
     int result;
     result = parse_options(argc, argv, &options);
     if (result) return result == 2 ? 0 : 1;
-    if (!paths || !paths->repo) return snx_error("Extraction requires the repository path");
+    if (!paths || !paths->repo) return snx_error("-x needs the data folder (--repo)");
+    if (!options.keys) options.keys = paths->keys;
+    if (!options.title_keys) options.title_keys = paths->title_keys;
     if (options.icon) { /* nothing else read or written */
         if (!options.out) return snx_error("--icon writes icon.jpg into --out DIR, and none is given");
         if (snx_mkdirs(options.out)) return snx_error("cannot create %s for the icon", options.out);
-        return snx_extract_icon(options.base, paths, options.out) ? 1 : 0;
+        effective_paths = *paths;
+        effective_paths.keys = options.keys;
+        effective_paths.title_keys = options.title_keys;
+        return snx_extract_icon(options.base, &effective_paths, options.out) ? 1 : 0;
     }
     memset(&state, 0, sizeof state);
     result = prepare_paths(&state, &options, paths);
@@ -442,12 +448,13 @@ int snx_extract_icon(const char* dump, const SnxPaths* paths, const char* out) {
     memset(&state, 0, sizeof state);
     state.base = snx_absolute(dump);
     if (!state.base || !to)
-        result = snx_error("Cannot resolve %s", dump);
+        result = snx_error("cannot resolve %s", dump);
     else if (!snx_is_file(state.base))
         result = snx_error("%s is not a file", state.base);
     else {
         snx_hac_on_exit(hactool_exit, &state);
-        result = snx_dump_title(&state.dump, state.base, NULL, NULL, paths->repo, 0, &title, &game, NULL);
+        result = snx_dump_title(&state.dump, state.base, paths->keys, paths->title_keys, paths->repo, 0, &title,
+                                &game, NULL);
         if (!result) icon = snx_dump_icon(&state.dump, &size, &why);
         snx_hac_on_exit(NULL, NULL);
         if (!result && !icon)
@@ -465,12 +472,13 @@ int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title, Sn
     memset(&state, 0, sizeof state);
     state.base = snx_absolute(dump);
     if (!state.base)
-        result = snx_error("Cannot resolve %s", dump);
+        result = snx_error("cannot resolve %s", dump);
     else if (!snx_is_file(state.base))
         result = snx_error("%s is not a file", state.base);
     else {
         snx_hac_on_exit(hactool_exit, &state);
-        result = snx_dump_title(&state.dump, state.base, NULL, NULL, paths->repo, 0, title, game, version);
+        result = snx_dump_title(&state.dump, state.base, paths->keys, paths->title_keys, paths->repo, 0, title,
+                                game, version);
         snx_hac_on_exit(NULL, NULL);
     }
     return cleanup(&state, result);

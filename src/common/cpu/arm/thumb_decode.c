@@ -71,6 +71,14 @@ static unsigned thumb16(uint16_t h, SnxThumb* o) {
         o->rn = o->rd;                      /* ADD reads Rd as its first source */
         return TH_F16;
     }
+    if (g == 9) { /* LDR Rt, [PC, #imm8 * 4]: the literal, from the word-aligned PC */
+        o->shape = TH_LOAD;
+        o->rd = (h >> 8) & 7;
+        o->rn = 15;
+        o->imm = (h & 255) * 4;
+        o->flags = TH_PCB | TH_PRE | TH_UP;
+        return TH_F16;
+    }
     if (g == 10 || g == 11) { /* load/store register offset */
         unsigned sub = (h >> 9) & 7;
         o->shape = (sub >= 3) ? TH_LOAD : TH_STORE;
@@ -181,12 +189,12 @@ static unsigned thumb16(uint16_t h, SnxThumb* o) {
         }
         return 0;
     }
-    if (g == 24 || g == 25) { /* STMIA/LDMIA */
+    if (g == 24 || g == 25) { /* STMIA/LDMIA: a load with its base in the list loads it, without writeback */
         o->shape = TH_LDMSTM;
         o->op = g == 25 ? 1 : 0;
         o->rn = (h >> 8) & 7;
         o->imm = h & 255;
-        o->flags = TH_WB;
+        o->flags = g == 25 && ((h & 255) >> o->rn & 1) ? 0 : TH_WB;
         return TH_F16;
     }
     if (g == 26 || g == 27) { /* conditional branch / SVC */
@@ -411,6 +419,19 @@ static unsigned load_store(unsigned a, unsigned b, SnxThumb* o) {
 static unsigned data_register(unsigned a, unsigned b, SnxThumb* o) {
     unsigned op1 = (a >> 4) & 15, op2 = (b >> 4) & 15, n = a & 15, d = (b >> 8) & 15, m = b & 15;
     if ((b & 0xF000) != 0xF000) return 0;
+    if ((op1 & 8) && !(op2 & 8)) { /* the parallel add and subtract family: A32's op2 from Thumb's op1, its op1 (S, Q,
+                                      SH) from Thumb's op2, unsigned in hw2 bit 6 */
+        static const int op32[8] = {4, 0, 1, -1, 7, 3, 2, -1};
+        unsigned kind = op2 & 3;
+        if (op32[op1 & 7] < 0 || kind == 3) return 0;
+        return twin(o, 0xE6000F10u | (uint32_t)((op2 >> 2) & 1) << 22 | (uint32_t)(kind + 1) << 20 |
+                           (uint32_t)n << 16 | (uint32_t)d << 12 | (uint32_t)op32[op1 & 7] << 5 | m);
+    }
+    if (op1 == 8 && (op2 & 0xC) == 8) { /* QADD, QDADD, QSUB, QDSUB Rd, Rm, Rn: A32's order of them */
+        static const unsigned op32[4] = {0, 2, 1, 3};
+        return twin(o, 0xE1000050u | (uint32_t)op32[op2 & 3] << 21 | (uint32_t)n << 16 | (uint32_t)d << 12 | m);
+    }
+    if (op1 == 0xA && op2 == 8) return twin(o, 0xE6800FB0u | (uint32_t)n << 16 | (uint32_t)d << 12 | m); /* SEL */
     if (!(op1 & 8) && op2 == 0) { /* LSL/LSR/ASR/ROR.W Rd, Rn, Rm: MOV with a register-shifted operand */
         o->shape = TH_WDATA;
         o->flags = (a & 0x10 ? TH_S : 0) | TH_RSHIFT;
@@ -447,7 +468,41 @@ static unsigned multiply_long(unsigned a, unsigned b, SnxThumb* o) {
         return twin(o, longs[op1] | (uint32_t)hi << 16 | (uint32_t)lo << 12 | (uint32_t)m << 8 | n);
     if ((op1 == 1 || op1 == 3) && op2 == 15 && lo == 15)
         return twin(o, (op1 == 1 ? 0xE710F010u : 0xE730F010u) | (uint32_t)hi << 16 | (uint32_t)m << 8 | n);
+    uint32_t regs = (uint32_t)hi << 16 | (uint32_t)lo << 12 | (uint32_t)m << 8 | n;
+    if (op1 == 4 && (op2 & 0xC) == 8) /* SMLAL<x><y>: N in bit 5, M in bit 4 */
+        return twin(o, 0xE1400080u | regs | (uint32_t)(op2 & 1) << 6 | (uint32_t)((op2 >> 1) & 1) << 5);
+    if ((op1 == 4 || op1 == 5) && (op2 & 0xE) == 0xC) /* SMLALD, SMLSLD (X in bit 4) */
+        return twin(o, (op1 == 4 ? 0xE7400010u : 0xE7400050u) | regs | (uint32_t)(op2 & 1) << 5);
+    if (op1 == 6 && op2 == 6) return twin(o, 0xE0400090u | regs); /* UMAAL */
     return 0;
+}
+
+/* FB0x-FB7x past MUL, MLA and MLS: the halfword, dual and most significant word multiplies and USAD8 (hw2 = Ra Rd
+   00 op2 Rm), each its A32 twin, Ra 15 being the form without the accumulate */
+static unsigned multiply(unsigned a, unsigned b, SnxThumb* o) {
+    unsigned op1 = (a >> 4) & 7, op2 = (b >> 4) & 3, n = a & 15, ra = b >> 12, d = (b >> 8) & 15, m = b & 15;
+    uint32_t regs = (uint32_t)d << 16 | (uint32_t)m << 8 | n, acc = (uint32_t)ra << 12;
+    if (b & 0xC0) return 0;
+    switch (op1) {
+        case 1: /* SMLA<x><y>, SMUL<x><y>: N in bit 5, M in bit 4 */
+            return twin(o, (ra == 15 ? 0xE1600080u : 0xE1000080u | acc) | regs | (uint32_t)(op2 & 1) << 6 |
+                               (uint32_t)(op2 >> 1) << 5);
+        case 2: /* SMLAD, SMUAD */
+        case 4: /* SMLSD, SMUSD */
+            if (op2 & 2) return 0;
+            return twin(o, (op1 == 2 ? 0xE7000010u : 0xE7000050u) | acc | regs | (uint32_t)op2 << 5);
+        case 3: /* SMLAW<y>, SMULW<y> */
+            if (op2 & 2) return 0;
+            return twin(o, (ra == 15 ? 0xE12000A0u : 0xE1200080u | acc) | regs | (uint32_t)op2 << 6);
+        case 5: /* SMMLA, SMMUL (R in bit 4) */
+        case 6: /* SMMLS */
+            if (op2 & 2) return 0;
+            return twin(o, (op1 == 5 ? 0xE7500010u : 0xE75000D0u) | acc | regs | (uint32_t)op2 << 5);
+        case 7: /* USAD8, USADA8 */
+            if (op2) return 0;
+            return twin(o, 0xE7800010u | acc | regs);
+        default: return 0;
+    }
 }
 
 static unsigned thumb32(uint16_t a, uint16_t b, SnxThumb* o) {
@@ -482,6 +537,17 @@ static unsigned thumb32(uint16_t a, uint16_t b, SnxThumb* o) {
         o->rd = (b >> 8) & 15;
         o->imm = (((a >> 10) & 1) << 11) | (((b >> 12) & 7) << 8) | (b & 255);
         return TH_F32;
+    }
+    if ((a & 0xFF50) == 0xF300 && !(b & 0x8000)) { /* SSAT and USAT (bit 7), SSAT16 and USAT16 (sh, no shift) */
+        unsigned sh = (a >> 5) & 1, shift = (((b >> 12) & 7) << 2) | ((b >> 6) & 3), u = (a >> 7) & 1;
+        uint32_t regs = (uint32_t)((b >> 8) & 15) << 12 | (a & 15);
+        if (b & 0x20) return 0;
+        if (sh && !shift) {
+            if (b & 0x30) return 0;
+            return twin(o, (u ? 0xE6E00F30u : 0xE6A00F30u) | (uint32_t)(b & 15) << 16 | regs);
+        }
+        return twin(o, (u ? 0xE6E00010u : 0xE6A00010u) | (uint32_t)(b & 31) << 16 | (uint32_t)shift << 7 |
+                           (uint32_t)sh << 6 | regs);
     }
     if ((a & 0xFFF0) == 0xF340 || (a & 0xFFF0) == 0xF360 || (a & 0xFFF0) == 0xF3C0) { /* SBFX, BFI/BFC, UBFX */
         unsigned lsb = (((b >> 12) & 7) << 2) | ((b >> 6) & 3);
@@ -524,7 +590,7 @@ static unsigned thumb32(uint16_t a, uint16_t b, SnxThumb* o) {
             o->op = sub == 1 ? 2 : ((b >> 12) == 15 ? 0 : 1); /* MLS : MUL : MLA */
             return TH_F32;
         }
-        return 0; /* the other multiplies (SMULxy, SMMUL, ...) */
+        return multiply(a, b, o);
     }
     o->shape = TH_UNDEF;
     o->len = 0;

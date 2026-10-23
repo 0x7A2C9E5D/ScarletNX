@@ -26,6 +26,12 @@ struct SnxUnitCache {
 #else
     pthread_mutex_t lock;
 #endif
+    /* what the run's units met, said once and counted for the close: the units not cached and their bytes, the oldest
+       removed for room (to leave reserve bytes free), the reused ones whose time could not be renewed (stale_why) */
+    size_t left, trimmed, stale;
+    SnxU64 left_bytes, trimmed_bytes, reserve;
+    unsigned said; /* the reasons said, each its UNIT_SAID_ bit */
+    char stale_why[256];
     size_t folder_size, identity_size;
     char bytes[];
 };
@@ -80,6 +86,10 @@ SnxUnitCache* snx_unit_cache_open(const char* folder, const SnxUnitIdentity* ide
 #else
     pthread_mutex_init(&cache->lock, NULL);
 #endif
+    cache->left = cache->trimmed = cache->stale = 0;
+    cache->said = 0;
+    cache->left_bytes = cache->trimmed_bytes = cache->reserve = 0;
+    cache->stale_why[0] = 0;
     cache->folder_size = folder_size;
     cache->identity_size = identity_size;
     memcpy(cache->bytes, folder, folder_size);
@@ -96,6 +106,15 @@ SnxUnitCache* snx_unit_cache_open(const char* folder, const SnxUnitIdentity* ide
 
 void snx_unit_cache_close(SnxUnitCache* cache) {
     if (!cache) return;
+    if (cache->trimmed)
+        printf("unit cache: %zu oldest units removed (%.1f MB) to leave %.1f GB free on %s\n", cache->trimmed,
+               (double)cache->trimmed_bytes / 1e6, (double)cache->reserve / 1e9, cache->bytes);
+    if (cache->stale)
+        snx_error("unit cache: cannot set the time of %zu reused units (%s): the size limit sees them as never reused",
+                  cache->stale, cache->stale_why);
+    if (cache->left)
+        snx_error("unit cache: %zu unit(s) (%.1f MB) not cached in %s", cache->left, (double)cache->left_bytes / 1e6,
+                  cache->bytes);
 #ifdef _WIN32
     DeleteCriticalSection(&cache->lock);
 #else
@@ -210,34 +229,52 @@ static int trim_files(const char* folder, SnxU64 limit, SnxU64 at_least, const c
                       char* error, size_t error_size);
 #define GB(bytes) ((double)(bytes) / 1e9)
 #define MB(bytes) ((double)(bytes) / 1e6)
+/* a unit of size bytes not cached: counted for the close */
+static void not_cached(SnxUnitCache* cache, SnxU64 size) {
+    ++cache->left;
+    cache->left_bytes += size;
+}
+/* why a unit is not cached, each said for the first unit it stops */
+enum { UNIT_SAID_DISK = 1, UNIT_SAID_TRIM = 2, UNIT_SAID_ROOM = 4, UNIT_SAID_KEEP = 8 };
+static int first_said(SnxUnitCache* cache, unsigned reason) {
+    if (cache->said & reason) return 0;
+    cache->said |= reason;
+    return 1;
+}
 /* room for a kept object of size bytes on the cache's disk, which always keeps a tenth of itself free: the cache's
-   oldest objects removed for it when it is short. 0 to keep it; -1, said, when there is none */
-static int room(SnxUnitCache* cache, SnxU64 size, const char* unit) {
+   oldest objects removed for it when it is short. 0 to keep it; -1 when there is none, each reason said for the first
+   unit it stops and the units counted for the close */
+static int room(SnxUnitCache* cache, SnxU64 size) {
     const char* folder = snx_unit_cache_folder(cache);
     SnxU64 free_bytes = 0, total = 0, reserve, need;
     SnxUnitTrim trim;
     char reason[256], error[512];
     if (cache->disk(folder, &free_bytes, &total)) {
-        snx_error("unit cache: cannot read the room on the disk of %s (%s): %s is not kept", folder,
-                  snx_os_error(reason, sizeof reason), unit);
+        if (first_said(cache, UNIT_SAID_DISK))
+            snx_error("unit cache: cannot read the free space of %s (%s): units are not cached", folder,
+                      snx_os_error(reason, sizeof reason));
+        not_cached(cache, size);
         return -1;
     }
     reserve = total / 10;
     if (free_bytes >= reserve + size) return 0;
     need = reserve + size - free_bytes;
     if (trim_files(folder, 0, need, "the disk's tenth kept free", &trim, error, sizeof error)) {
-        snx_error("unit cache: %s: %s is not kept", error, unit);
+        if (first_said(cache, UNIT_SAID_TRIM)) snx_error("unit cache: %s: units are not cached", error);
+        not_cached(cache, size);
         return -1;
     }
+    cache->trimmed += trim.removed;
+    cache->trimmed_bytes += trim.removed_bytes;
+    cache->reserve = reserve;
     if (trim.removed_bytes < need) {
-        snx_error("unit cache: the disk of %s has %.1f GB free and keeps a tenth of its %.1f GB (%.1f GB) free, which "
-                  "the cache's %.1f MB cannot make room for: %s (%.1f MB) is not kept",
-                  folder, GB(free_bytes), GB(total), GB(reserve), MB(trim.held - trim.removed_bytes), unit, MB(size));
+        if (first_said(cache, UNIT_SAID_ROOM))
+            snx_error("unit cache: %.1f GB free on %s, under the %.1f GB (a tenth of %.1f GB) it leaves free: units "
+                      "without room are not cached",
+                      GB(free_bytes), folder, GB(reserve), GB(total));
+        not_cached(cache, size);
         return -1;
     }
-    printf("unit cache: the disk of %s has %.1f GB free and keeps a tenth of its %.1f GB (%.1f GB) free: the %zu "
-           "oldest objects removed (%.1f MB) for %s (%.1f MB)\n",
-           folder, GB(free_bytes), GB(total), GB(reserve), trim.removed, MB(trim.removed_bytes), unit, MB(size));
     return 0;
 }
 
@@ -279,9 +316,20 @@ int snx_unit_cache_object(SnxUnitCache* cache, SnxIr* ir, unsigned char** data, 
         *size = object_size;
         *reused = 1;
         /* the size limit removes the objects reused longest ago first */
-        if (snx_set_file_time(path, (SnxU64)time(NULL)))
-            snx_error("unit cache: cannot renew the time of %s (%s): a size limit removes it as one never reused", path,
-                      snx_os_error(reason, sizeof reason));
+        if (snx_set_file_time(path, (SnxU64)time(NULL))) {
+            snx_os_error(reason, sizeof reason);
+#ifdef _WIN32
+            EnterCriticalSection(&cache->lock);
+#else
+            pthread_mutex_lock(&cache->lock);
+#endif
+            if (!cache->stale++) snprintf(cache->stale_why, sizeof cache->stale_why, "%s: %s", path, reason);
+#ifdef _WIN32
+            LeaveCriticalSection(&cache->lock);
+#else
+            pthread_mutex_unlock(&cache->lock);
+#endif
+        }
         free(path);
         free(name);
         return 0;
@@ -298,9 +346,11 @@ int snx_unit_cache_object(SnxUnitCache* cache, SnxIr* ir, unsigned char** data, 
 #else
         pthread_mutex_lock(&cache->lock);
 #endif
-        if (!room(cache, (SnxU64)*size + SNX_UNIT_TRAILER, unit) &&
-            snx_unit_cache_keep(cache, key, *data, *size, why, sizeof why))
-            snx_error("unit cache: %s: %s is compiled again on the next recompile", why, unit);
+        if (!room(cache, (SnxU64)*size + SNX_UNIT_TRAILER) &&
+            snx_unit_cache_keep(cache, key, *data, *size, why, sizeof why)) {
+            if (first_said(cache, UNIT_SAID_KEEP)) snx_error("unit cache: %s: this run's units are not cached", why);
+            not_cached(cache, (SnxU64)*size + SNX_UNIT_TRAILER);
+        }
 #ifdef _WIN32
         LeaveCriticalSection(&cache->lock);
 #else

@@ -78,7 +78,8 @@ static void thumb_dual(ArmIR* a, const SnxThumb* t) {
 
 static void thumb_alu(ArmIR* a, const SnxThumb* t, int hi) {
     LLVMValueRef x, y, r;
-    int flags = hi ? t->op == 1 /* CMP hi sets flags */ : 1;
+    /* CMP hi sets flags; the 16-bit ones set them outside an IT block (CMP, CMN and TST always) */
+    int flags = hi ? t->op == 1 : !a->in_it;
     x = hi ? treg(a, t->rn) : treg(a, t->rd); /* most 16-bit ALU ops read rd as first source */
     y = treg(a, t->rm);
     if (t->op == ALU_ADD || t->op == ALU_SUB) {
@@ -95,15 +96,15 @@ static void thumb_alu(ArmIR* a, const SnxThumb* t, int hi) {
         case ALU_MVN: r = LLVMBuildNot(a->b, y, ""); setreg(a, t->rd, r); if (flags) nz(a, r, NULL, NULL); break;
         case ALU_TST: r = band(a, x, y); nz(a, r, NULL, NULL); break;
         case ALU_NEG: r = taddsub(a, c32(a, 0), y, 1, flags); setreg(a, t->rd, r); break;
-        case ALU_CMP: taddsub(a, x, y, 1, flags); break;
-        case ALU_CMN: taddsub(a, x, y, 0, flags); break;
+        case ALU_CMP: taddsub(a, x, y, 1, hi ? flags : 1); break;
+        case ALU_CMN: taddsub(a, x, y, 0, 1); break;
         case ALU_MUL: r = LLVMBuildMul(a->b, x, y, ""); setreg(a, t->rd, r); if (flags) nz(a, r, NULL, NULL); break;
         case ALU_LSL: case ALU_LSR: case ALU_ASR: case ALU_ROR: {
             LLVMValueRef carry;
             unsigned type = t->op == ALU_LSL ? 0 : t->op == ALU_LSR ? 1 : t->op == ALU_ASR ? 2 : 3;
             r = shift(a, x, type, y, 0, 0, &carry); /* register amount */
             setreg(a, t->rd, r);
-            nz(a, r, carry, NULL);
+            if (flags) nz(a, r, carry, NULL);
             break;
         }
         case ALU_ADC: r = arithmetic(a, x, y, flag(a, 29), flags); setreg(a, t->rd, r); break;
@@ -117,10 +118,10 @@ static void thumb_alu(ArmIR* a, const SnxThumb* t, int hi) {
 static void thumb_imm8(ArmIR* a, const SnxThumb* t) {
     LLVMValueRef imm = c32(a, t->imm), r;
     switch (t->op) {
-        case I8_MOV: r = imm; setreg(a, t->rd, r); nz(a, r, NULL, NULL); break;
+        case I8_MOV: r = imm; setreg(a, t->rd, r); if (!a->in_it) nz(a, r, NULL, NULL); break;
         case I8_CMP: taddsub(a, treg(a, t->rd), imm, 1, 1); break;
-        case I8_ADD: r = taddsub(a, treg(a, t->rd), imm, 0, 1); setreg(a, t->rd, r); break;
-        case I8_SUB: r = taddsub(a, treg(a, t->rd), imm, 1, 1); setreg(a, t->rd, r); break;
+        case I8_ADD: r = taddsub(a, treg(a, t->rd), imm, 0, !a->in_it); setreg(a, t->rd, r); break;
+        case I8_SUB: r = taddsub(a, treg(a, t->rd), imm, 1, !a->in_it); setreg(a, t->rd, r); break;
         default: trap(a, SNX_ARM_UNDEFINED, c32(a, a->word)); break;
     }
 }
@@ -257,8 +258,9 @@ static void thumb_mul(ArmIR* a, const SnxThumb* t) {
     else setreg(a, t->rd, sub(a, treg(a, t->ra), r)); /* MLS */
 }
 
+/* TBB reads the byte at Rn + Rm, TBH the halfword at Rn + Rm * 2 */
 static void thumb_table(ArmIR* a, const SnxThumb* t) {
-    LLVMValueRef base = add(a, treg(a, t->rn), treg(a, t->rm));
+    LLVMValueRef base = add(a, treg(a, t->rn), t->op ? shl(a, treg(a, t->rm), 1) : treg(a, t->rm));
     LLVMValueRef index = t->op ? readmem(a, base, 2, 0) : readmem(a, base, 1, 0);
     LLVMValueRef target = add(a, shl(a, index, 1), tpcbase(a));
     setreg(a, 15, target);
@@ -319,12 +321,12 @@ static int thumb_instruction(ArmIR* a, const SnxThumb* t) {
             LLVMValueRef carry, r = shift(a, treg(a, t->rm), t->op == ALU_LSL ? 0 : t->op == ALU_LSR ? 1 : 2,
                                           NULL, 1, t->imm, &carry);
             setreg(a, t->rd, r);
-            nz(a, r, carry, NULL);
+            if (!a->in_it) nz(a, r, carry, NULL);
             return 0;
         }
         case TH_ADDSUB: {
             LLVMValueRef y = (t->flags & TH_REG) ? treg(a, t->rm) : c32(a, t->imm);
-            setreg(a, t->rd, taddsub(a, treg(a, t->rn), y, t->op == ALU_SUB, 1));
+            setreg(a, t->rd, taddsub(a, treg(a, t->rn), y, t->op == ALU_SUB, !a->in_it));
             return 0;
         }
         case TH_IMM8: thumb_imm8(a, t); return 0;
@@ -501,6 +503,7 @@ LLVMValueRef snx_thumb_llvm_block_ex(LLVMModuleRef module, const char* name, con
         a.next = next_pc;
         setreg(&a, 15, c32(&a, a.pc));
         instruction_fetch(&a, len == TH_F32 ? (uint32_t)hw1 | ((uint32_t)hw2 << 16) : hw1, len * 2);
+        a.in_it = it_idx < it_len;
         if (it_idx < it_len) cond = it_conds[it_idx++];
         if (cond != 14) {
             LLVMBasicBlockRef execute = block(&a, "execute"), skip = block(&a, "skip"), next = block(&a, "next");

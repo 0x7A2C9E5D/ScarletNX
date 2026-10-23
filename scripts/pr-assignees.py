@@ -3,7 +3,7 @@
 # Copyright 2026 the ScarletNX contributors
 """pr-assignees.py FILE: fails while someone assigned to a pull request, its author aside, has not approved it, so a
 pull request that touches someone's pending work waits for their approval; taking them off the assignees lets it go.
-FILE (- for stdin) is the pull request as .github/workflows/pr-assignees.yml reads it from GitHub:
+FILE (- for stdin) is the pull request as .github/workflows/pr-checks.yml reads it from GitHub:
 {"author": LOGIN, "assignees": [LOGIN, ...], "reviews": [{"user": LOGIN, "state": STATE}, ...]}, the reviews oldest
 first. A reviewer's say is their last review that approves, asks for changes or was dismissed; a comment changes
 nothing, as on GitHub."""

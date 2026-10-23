@@ -25,7 +25,7 @@ int main(void) {
     feed(&s, "  compiled block 1/4: code_000 (1.0 s)\n", 30);
     assert(at(&s, 3)->value == 1 && at(&s, 3)->total == 4 && gui_steps_percent(&s) == 25);
     feed(&s, "  compiled block 3/4: code_002 (1.0 s)\nLLVM module: 1.1 MB\nBuilt /games/Game\n", 40);
-    assert(s.count == 5 && at(&s, 3)->state == GUI_STEP_DONE && !strcmp(at(&s, 4)->label, "BUILT"));
+    assert(s.count == 5 && at(&s, 3)->state == GUI_STEP_DONE && !strcmp(at(&s, 4)->label, "BUILD"));
     assert(at(&s, 4)->state == GUI_STEP_DONE && gui_steps_percent(&s) == 100);
     feed(&s, "ScarletNX - Game\nvulkan: AMD Radeon RX 6700 XT (RADV NAVI22), Vulkan 1.4.354, driver 1\n", 50);
     feed(&s, "vulkan: pipeline cache loaded (662 KB)\nvulkan: Other GPU, Vulkan 1.3\n", 60);

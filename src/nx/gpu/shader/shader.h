@@ -30,6 +30,16 @@ static inline int shader_same_indexed_table(const ShTex* a, const ShTex* b) {
     return a->bl_cbuf == b->bl_cbuf && a->cbuf_off == b->cbuf_off && a->flags == b->flags && a->type == b->type &&
            a->array == b->array && a->shadow == b->shadow;
 }
+/* A global buffer (ShaderInfo.gbuf_cbuf_off) is named by where its 64-bit address is: the constant buffer in bits 16-20,
+   the byte offset in it in bits 0-15. NVN's storage buffer descriptors, in cbuf 0 from 0x110 to 0x410 (compute) or
+   0x830, follow the address with the buffer's size (shader_gbuf_sized). A graphics program may also keep a bare
+   address in a constant buffer of its own, with nothing after it: one game's terrain vertex programs read their patch
+   data through such an address in cbuf 6, as Eden tracks them when no NVN descriptor holds the base
+   (global_memory_to_storage_buffer_pass.cpp's Track without the NVN bias). The renderer sizes those by the memory
+   mapped from the address on. The vertex stage's cbuf 0 at 0xb0 is a bare pointer of 16 bytes. */
+#define SH_GBUF_BANK(d)   ((d) >> 16)
+#define SH_GBUF_OFFSET(d) ((d) & 0xFFFFu)
+static inline int shader_gbuf_sized(int stage, u32 d) { return d >= 0x110 && d < (stage == ST_CS ? 0x410u : 0x830u); }
 /* Transform feedback (key of the last program before rasterization): for each of the 4 buffers, the attribute word
    each 4-byte word of a vertex there holds (its ISA attribute address / 4: the position's x is 28, generic i's
    component k 32 + 4 * i + k), of count words, the vertices stride bytes apart. All counts 0: nothing is captured */
@@ -56,7 +66,7 @@ typedef struct {
     /* FP32 arithmetic asking to flush denormals (FTZ/FMZ), and FP32 arithmetic that doesn't. Only flush in every
        FADD, FMUL and FFMA lets the module declare flushing, as Eden declares DenormFlushToZero */
     int fp32_flush, fp32_preserve;
-    u32 gbuf_cbuf_off[16]; /* the global buffers found, by where cbuf 0 holds their address */
+    u32 gbuf_cbuf_off[16]; /* the global buffers found, by where a constant buffer holds their address (SH_GBUF_*) */
     int ngbuf;
     int unsupported; /* instructions or forms translation refused */
     char first_unsupported[96]; /* the longest: an untracked global memory base with its writer */
@@ -89,6 +99,7 @@ typedef struct {
        reject */
     u32 early_fragment_tests;
     ShXfb xfb; /* key: transform feedback's capture of this program's outputs */
+    int writes_viewport; /* the last vertex stage selects one of the 16 viewport/scissor pairs */
 } ShaderInfo;
 #define SH_DC_COLOR_MAX  10 /* slots tex_dc_color_funcs has room for */
 /* Each stage has a descriptor set (shader_vk_set), its bindings grouped by kind. */
@@ -117,6 +128,8 @@ extern int g_shader_stage_point_size;
 /* vertex and tessellation programs may write the layer (shaderOutputLayer, the ShaderLayer capability); without it
    their layer writes go away (layer 0). 1 offline */
 extern int g_shader_output_layer;
+/* ViewportIndex output: bit 0 vertex/evaluation, bit 1 geometry. 3 offline. */
+extern int g_shader_viewport_index;
 /* the Geometry capability, for fragment programs reading Layer or PrimitiveId */
 extern int g_shader_geometry;
 /* shaderFloat16, which fp16 texture results need. 1 offline */
@@ -130,6 +143,12 @@ extern int g_shader_clock_scopes;
 #define SNX_SH_NOT_LAST (1u << 31)
 /* the descriptor set of a stage's bindings */
 int shader_vk_set(int stage);
+/* can_flush: how the module gets the console's FP32 flush to zero (FTZ on FADD, FMUL and FFMA). SH_FTZ_EMULATE: a
+   test and a select on each such operand and result; SH_FTZ_MODE: the DenormFlushToZero execution mode, in a module
+   whose every such instruction flushes; SH_FTZ_NATIVE: neither, on a device that flushes them by itself (vk/ftz_probe.c) */
+#define SH_FTZ_EMULATE 0
+#define SH_FTZ_MODE    1
+#define SH_FTZ_NATIVE  2
 /* Translates a program (code, readable up to max_bytes) to SPIR-V: malloc'd words, their count in word_count. NULL
    when the program uses something the translator can't express, with si->unsupported and the reason set. */
 u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count, int can_flush,

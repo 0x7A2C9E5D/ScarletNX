@@ -7,6 +7,17 @@ on:
     branches: [main]
     tags: ['v*'] # a version's release (publish.yml)
   pull_request:
+    # skipped when the change is only in files that no build or test reads. tracked_material.py reads them all and runs
+    # on its own (pr-checks.yml). docs/ARCHITECTURE.md, DEPRECATIONS.md and GUI.md are test inputs: they build
+    paths:
+      - '**'
+      - '!**/*.md'
+      - '!.claude/**'
+      - '!.gitignore'
+      - '!.github/ISSUE_TEMPLATE/**'
+      - 'docs/ARCHITECTURE.md'
+      - 'docs/DEPRECATIONS.md'
+      - 'docs/GUI.md'
   workflow_dispatch:
 
 # Jobs only read the repository. A push to main that builds everywhere becomes a nightly, and a pull request's run a
@@ -445,7 +456,7 @@ jobs:
       - name: Build
         run: |
           cmake --preset linux-ppc64-cross -DSNX_OPT_FLAGS="-O2 -g0" \
-            -DSNX_BUILD_NX=OFF -DSNX_BUILD_3DS=OFF -DSNX_BUILD_GUI=OFF \
+            -DSNX_BUILD_NX=OFF -DSNX_BUILD_3DS=OFF -DSNX_BUILD_VITA=OFF -DSNX_BUILD_GUI=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build --preset linux-ppc64-cross --parallel "$(getconf _NPROCESSORS_ONLN)" \
             --target scarletnx-gnuabi-run snx-test-cas128 snx-test-endian snx-test-gnuabi-runtime snx-test-gnuabi-vfs \

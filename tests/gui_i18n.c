@@ -42,7 +42,7 @@ static void mo_make(Mo* mo, const char* const (*pairs)[2], int n, int big) {
 static const char* look(const Mo* mo, const char* s) { return snx_mo_lookup(mo->bytes, mo->size, s); }
 
 static const char* const pairs[][2] = {{"", "Content-Type: text/plain; charset=UTF-8\n"},
-                                       {"Add a folder", "Adicionar pasta"},
+                                       {"Add Folder", "Adicionar pasta"},
                                        {"Back", "Voltar"},
                                        {"Exit", "Sair"},
                                        {"Games", "Jogos"},

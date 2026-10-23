@@ -44,8 +44,11 @@ typedef double f64;
   12: snx_cas128 takes the CPU, and RtAPI.cas128 is the 16-byte compare-and-swap of the RISC-V and LoongArch
       modules.
   13: the AOT module's snx_variants() table, which the runtime reads for code the recompiler missed instead of
-      compiling it at run time. */
-#define SNX_ABI 13
+      compiling it at run time.
+  14: code the guest patches at run time. IC IVAU calls RtAPI.code_changed, and each AOT function first reads its
+      byte in SnxModule.stale, which the runtime sets when a line it was compiled from changed: the function then
+      runs its entry through dispatch, where the runtime compiles the code there now. */
+#define SNX_ABI 14
 
 #if defined(_WIN32)
 #define SNX_EXPORT __declspec(dllexport)
@@ -412,7 +415,7 @@ SNX_INLINE u64 sat_u(i64 v, int bits) {
     return (u64)v > hi ? hi : (u64)v;
 }
 
-/* ---- AdvSIMD helpers out of line (helpers/simd.c, helpers/crypto.c) ---- */
+/* ---- AdvSIMD helpers out of line (tests/a64_reference/simd.c, helpers/crypto.c) ---- */
 void v_tbl(CPU* c, u32 d, u32 n, u32 len, u32 m, int q, int tbx);
 void v_aes(V128* d, const V128* k, int dec);         /* AESE (dec 0), AESD (1): d = round(d ^ k) */
 void v_aesmc(V128* d, const V128* s, int inv);       /* AESMC (inv 0), AESIMC (1) */
@@ -530,6 +533,8 @@ SNX_INLINE u32 stxp(CPU* c, u8* M, u64 a, u32 sz, u64 v1, u64 v2) {
 /* ---- system registers EL0 reaches, by o0:op1:CRn:CRm:op2 (the MRS/MSR word's bits 19:5) ---- */
 u64 snx_mrs(CPU* c, u32 sysreg);
 void snx_msr(CPU* c, u32 sysreg, u64 v);
+/* IC IVAU Xt: the instruction cache line at Xt invalidated, for code the guest wrote there */
+void snx_ic_ivau(CPU* c, u64 a);
 
 /* ---- what the templates' C uses ---- */
 #define RX(n) ((n) == 31 ? (u64)0 : c->x[n])

@@ -6,6 +6,7 @@
 #include "nx/loader/codegen_view.h"
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/llvm/link.h"
+#include "common/cpu/recompiler/llvm/objects_pack.h"
 #include "nx/loader/module_abi.h"
 #include "nx/loader/unit_cache.h"
 #include "common/cpu/recompiler/llvm/rtlib_object.h"
@@ -65,6 +66,11 @@ static int save_ir(SnxIr* ir, const char* dir, const char* name) {
     return rc;
 }
 
+static SnxIr* new_ir(const SnxLlvmBuild* build, const char* name, char* error, size_t error_size) {
+    return build->triple ? snx_ir_new_target(name, build->opt, build->triple, error, error_size)
+                         : snx_ir_new(name, build->opt, error, error_size);
+}
+
 /* one chunk of functions, as module.c's code_NNN.c */
 static int compile_unit(Queue* q, size_t index, char* error, size_t error_size) {
     Unit* u = &q->units[index];
@@ -73,9 +79,10 @@ static int compile_unit(Queue* q, size_t index, char* error, size_t error_size) 
     SnxIr* ir;
     int rc;
     sprintf(name, "code_%03lu", (unsigned long)index);
-    ir = snx_ir_new(name, q->build->opt, error, error_size);
+    ir = new_ir(q->build, name, error, error_size);
     if (!ir) return -1;
     snx_ir_tune(ir, q->build->tuning);
+    snx_ir_stale_checks(ir);
     for (i = u->first; i < u->last; ++i) snx_ir_emit(ir, q->codegen, &q->codegen->functions[i]);
     rc = q->build->keep_ir && save_ir(ir, q->build->keep_ir, name);
     if (rc) snprintf(error, error_size, "cannot save the IR of %s", name);
@@ -265,7 +272,8 @@ static int emit_module(SnxIr* ir, const SnxCodegen* codegen, const SnxCodegenOpt
                        int wrappers, size_t* wrapped, size_t* entry_count, char* error, size_t error_size) {
     SnxModuleEntry* entries;
     size_t count, arraysize, i, nfns = codegen->function_count ? codegen->function_count : 1;
-    LLVMValueRef *values, fns, ent_off, ent_fn, ent_addr, ent_ptr, mods, mod, fn, loop_i, phi_values[2];
+    LLVMValueRef *values, fns, fn_lo, fn_len, stale, ent_off, ent_fn, ent_addr, ent_ptr, mods, mod, fn, loop_i,
+        phi_values[2];
     LLVMTypeRef info, t_fns, t_u32s, t_addrs, t_ptrs;
     LLVMBasicBlockRef start, head, body, done, phi_blocks[2];
     SnxU64 lo = ~(SnxU64)0, hi = 0;
@@ -289,6 +297,32 @@ static int emit_module(SnxIr* ir, const SnxCodegen* codegen, const SnxCodegenOpt
     if (!codegen->function_count) values[0] = LLVMConstNull(ir->t_ptr);
     t_fns = LLVMArrayType(ir->t_ptr, (unsigned)nfns);
     fns = global(ir, t_fns, "FNS", LLVMConstArray(ir->t_ptr, values, (unsigned)nfns), 1);
+    /* static const u64 FN_LO[]; static const u32 FN_LEN[]: the guest code each function was compiled from, from its
+       lowest instruction to the end of its highest (SNX_ABI 14: what a line the guest changes makes stale) */
+    for (i = 0; i < nfns; ++i) {
+        const SnxFunction* f = i < codegen->function_count ? &codegen->functions[i] : NULL;
+        values[i] = ir_i64(ir, f && f->count ? snx_function_address(f, 0) : 0);
+    }
+    fn_lo = global(ir, LLVMArrayType(ir->t_i64, (unsigned)nfns), "FN_LO",
+                   LLVMConstArray(ir->t_i64, values, (unsigned)nfns), 1);
+    for (i = 0; i < nfns; ++i) {
+        const SnxFunction* f = i < codegen->function_count ? &codegen->functions[i] : NULL;
+        SnxU64 first = f && f->count ? snx_function_address(f, 0) : 0;
+        SnxU64 end = f && f->count ? snx_function_address(f, f->count - 1) + 4 : 0;
+        if (end - first > 0xFFFFFFFFu) {
+            free(values);
+            free(entries);
+            snprintf(error, error_size, "a function's code spans more than the module ABI's 32-bit length");
+            return -1;
+        }
+        values[i] = ir_i32(ir, (SnxU32)(end - first));
+    }
+    fn_len = global(ir, LLVMArrayType(ir->t_i32, (unsigned)nfns), "FN_LEN",
+                    LLVMConstArray(ir->t_i32, values, (unsigned)nfns), 1);
+    /* u8 snx_stale[]: the byte each function reads first (ir_codegen.c's stale_check), the runtime's to set */
+    stale = LLVMAddGlobal(ir->mod, LLVMArrayType(ir->t_i8, (unsigned)nfns), SNX_IR_STALE);
+    LLVMSetInitializer(stale, LLVMConstNull(LLVMArrayType(ir->t_i8, (unsigned)nfns)));
+    LLVMSetVisibility(stale, LLVMHiddenVisibility);
     /* static const u32 ENT_OFF[], ENT_FN[] */
     t_u32s = LLVMArrayType(ir->t_i32, (unsigned)arraysize);
     for (i = 0; i < arraysize; ++i)
@@ -376,6 +410,11 @@ static int emit_module(SnxIr* ir, const SnxCodegen* codegen, const SnxCodegenOpt
     field(ir, mod, offsetof(SnxModule, main_stack), ir_i32(ir, (SnxU32)npdm->stack));
     field(ir, mod, offsetof(SnxModule, main_prio), ir_i32(ir, npdm->prio));
     field(ir, mod, offsetof(SnxModule, main_core), ir_i32(ir, npdm->core));
+    field(ir, mod, offsetof(SnxModule, nfns), ir_i32(ir, (SnxU32)codegen->function_count));
+    field(ir, mod, offsetof(SnxModule, fn), fns);
+    field(ir, mod, offsetof(SnxModule, fn_lo), fn_lo);
+    field(ir, mod, offsetof(SnxModule, fn_len), fn_len);
+    field(ir, mod, offsetof(SnxModule, stale), stale);
     LLVMBuildRet(ir->b, mod);
     free(entries);
     *entry_count = count;
@@ -406,8 +445,7 @@ static void report_units(const Queue* q, const SnxLlvmBuild* build, int quiet) {
                build->unit_cache);
     if (!build->unit_cache_limit) return;
     if (snx_unit_cache_trim(build->unit_cache, build->unit_cache_limit, &trim, error, sizeof error))
-        snx_error("unit cache: %s: its size is left over the limit of %.1f MB", error,
-                  (double)build->unit_cache_limit / 1000000.0);
+        snx_error("unit cache: %s: not cut to its %.1f MB limit", error, (double)build->unit_cache_limit / 1000000.0);
     else if (trim.removed && !quiet)
         printf("unit cache: %zu files held %.1f MB, over the limit of %.1f MB: the %zu oldest removed (%.1f MB), %.1f "
                "MB left\n",
@@ -433,8 +471,12 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     memset(&codegen, 0, sizeof(codegen));
     memset(&q, 0, sizeof(q));
     memset(&linked, 0, sizeof(linked));
-    if (!loaded->module_count) return snx_error("No modules to generate");
+    if (!loaded->module_count) return snx_error("no modules to generate");
     if (snx_ir_init(error, sizeof(error))) return snx_error("%s", error);
+    if (options->jit_cache && build->triple) {
+        snx_error("--jit-cache cannot go with --target %s: a JIT cache is this host's", build->triple);
+        goto done;
+    }
     if (options->jit_cache) {
         char* key = snx_jit_cache_key(build->opt, options->hook_direct_calls, 1);
         if (!key) {
@@ -491,7 +533,7 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     }
     /* the module descriptor */
     start = snx_seconds();
-    ir = snx_ir_new("module", build->opt, error, sizeof(error));
+    ir = new_ir(build, "module", error, sizeof(error));
     if (!ir) {
         snx_error("LLVM backend: %s", error);
         goto done;
@@ -520,15 +562,20 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
         snx_report_unit(q.count + 1, q.count + 1, "module", label, 0, snx_seconds() - start);
         free(label);
     }
-    if (snx_ir_rtlib_object(build->opt, &rtlib_object, &rtlib_size, error, sizeof(error))) {
+    /* link: runtime library, descriptor, chunks. A module for another machine has no runtime library of its own
+       (this host has none for that machine): the app that loads it brings its own */
+    if (!build->triple && snx_ir_rtlib_object(build->opt, &rtlib_object, &rtlib_size, error, sizeof(error))) {
         snx_error("LLVM backend: %s", error);
         goto done;
     }
-    /* link: runtime library, descriptor, chunks, the profile cache's units */
+    /* link: runtime library, descriptor, chunks, the profile cache's units. A module for another machine has no
+       runtime library of its own (this host has none for that machine): the app that loads it brings its own */
     inputs = (SnxLinkInput*)snx_alloc((q.count + 2 + cache_count) * sizeof(*inputs));
-    inputs[n].data = rtlib_object;
-    inputs[n].size = rtlib_size;
-    inputs[n++].name = "rtlib";
+    if (rtlib_object) {
+        inputs[n].data = rtlib_object;
+        inputs[n].size = rtlib_size;
+        inputs[n++].name = "rtlib";
+    }
     inputs[n].data = module_object;
     inputs[n].size = module_size;
     inputs[n++].name = "module";
@@ -545,13 +592,19 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     }
     exports[0] = "snx_module";
     if (variant_count) exports[export_count++] = "snx_variants";
-    if (snx_link(inputs, n, exports, export_count, base_name(build->output), &linked, error, sizeof(error))) {
-        snx_error("Linking failed: %s", error);
+    if (build->triple) {
+        linked.data = snx_objects_pack(inputs, n, &linked.size);
+        if (!linked.data) {
+            snx_error("packing failed: out of memory");
+            goto done;
+        }
+    } else if (snx_link(inputs, n, exports, export_count, base_name(build->output), &linked, error, sizeof(error))) {
+        snx_error("linking failed: %s", error);
         goto done;
     }
     tmp = snx_format("%s.tmp", build->output);
     if (snx_write_file(tmp, linked.data, linked.size) || snx_replace(tmp, build->output)) {
-        snx_error("Linking failed: cannot write %s", build->output);
+        snx_error("linking failed: cannot write %s", build->output);
         if (snx_is_file(tmp)) snx_remove_tree(tmp);
         goto done;
     }

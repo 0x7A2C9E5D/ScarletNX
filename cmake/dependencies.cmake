@@ -56,6 +56,19 @@ if(SNX_BUILD_NX)
     snx_quiet(snx_lz4)
 endif()
 
+# xxHash (BSD-2-Clause) for the renderer's content hashes (src/nx/gpu/vk/cmd.c's vk_hash): XXH3, about three times
+# XXH64's speed. src/nx/gpu/vk/xxh3.c builds the dispatcher on x86 (the CPU's SSE2, AVX2 or AVX-512 loop, chosen at
+# run time) and xxhash.c on every other architecture, by the compiler's own macros
+if(SNX_BUILD_NX)
+    CPMAddPackage(NAME xxhash VERSION 0.8.3
+                  URL https://github.com/Cyan4973/xxHash/archive/refs/tags/v0.8.3.tar.gz
+                  URL_HASH SHA256=aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80
+                  DOWNLOAD_ONLY YES)
+    add_library(snx_xxhash STATIC "${PROJECT_SOURCE_DIR}/src/nx/gpu/vk/xxh3.c")
+    target_include_directories(snx_xxhash PUBLIC "${xxhash_SOURCE_DIR}")
+    snx_quiet(snx_xxhash)
+endif()
+
 # ENet (MIT) and zstd (BSD-3-Clause) for ldn's rooms (src/common/network/net_room.c): an Eden room is ENet on UDP,
 # and a game's datagrams in it are zstd frames. ENet's own sources, with the POSIX calls every target but Windows
 # has; zstd's compressor and decompressor alone, in C (no assembly, so every target builds the same). The tests of
@@ -89,12 +102,20 @@ if(SNX_BUILD_NX OR SNX_BUILD_3DS OR BUILD_TESTING)
     snx_quiet(snx_zstd)
 endif()
 
-# OpenSSL for the hashes and ciphers (the NX and 3DS loaders, ldr, csrng, hactool) and the ssl service's TLS. It builds
-# with its own Configure and make, which cmake/openssl.cmake runs
+# the Vita driver (src/vita), which the root CMakeLists.txt adds when it is built and the build isn't tools-only: its
+# loader's OpenSSL, its renderer's Vulkan headers and volk, its movies' FFmpeg and its window's SDL3
+if(SNX_BUILD_VITA AND NOT SNX_TOOLS_ONLY)
+    set(snx_vita_runtime ON)
+else()
+    set(snx_vita_runtime OFF)
+endif()
+
+# OpenSSL for the hashes and ciphers (the NX, 3DS and Vita loaders, ldr, csrng, hactool) and the ssl service's TLS. It
+# builds with its own Configure and make, which cmake/openssl.cmake runs
 # The archives' SHA-256 are also part of their cache keys (cmake/deps_cache.cmake)
 include("${CMAKE_SOURCE_DIR}/cmake/deps_cache.cmake")
 include("${CMAKE_SOURCE_DIR}/cmake/apple.cmake")
-if(SNX_BUILD_NX OR SNX_BUILD_3DS OR SNX_BUILD_GNUABI) # the GNU ABI runtime's random bytes and TLS sockets
+if(SNX_BUILD_NX OR SNX_BUILD_3DS OR SNX_BUILD_GNUABI OR snx_vita_runtime) # the GNU ABI runtime's random bytes and TLS sockets
     set(snx_openssl_sha256 325b5c806167c13b40b1ffeadfe0248197c00eccc4cf123ec1e28d2d2fd216d9)
     CPMAddPackage(NAME OpenSSL VERSION 4.0.3
                   URL https://github.com/openssl/openssl/releases/download/openssl-4.0.3/openssl-4.0.3.tar.gz
@@ -103,7 +124,7 @@ if(SNX_BUILD_NX OR SNX_BUILD_3DS OR SNX_BUILD_GNUABI) # the GNU ABI runtime's ra
     include("${CMAKE_SOURCE_DIR}/cmake/openssl.cmake")
 endif()
 
-if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY) OR SNX_BUILD_3DS)
+if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY) OR SNX_BUILD_3DS OR snx_vita_runtime)
     CPMAddPackage(NAME Vulkan-Headers VERSION 1.4.365
                   URL https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.365.tar.gz
                   URL_HASH SHA256=ed832b3292cce324ebba6522fd2d3004bf1b797fa49bfbcad0b302ff23d56abc
@@ -143,16 +164,19 @@ if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY) OR SNX_BUILD_3DS)
     endif()
 endif()
 
-# Extraction-only and tools-only builds do not contain the NX runtime or its graphics/media dependencies.
-if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
-    # FFmpeg builds with its own configure and make, which cmake/ffmpeg.cmake runs
+# FFmpeg for the Switch runtime's NVDEC and hwopus and the Vita's movies. It builds with its own configure and make,
+# which cmake/ffmpeg.cmake runs
+if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY) OR snx_vita_runtime)
     set(snx_ffmpeg_sha256 8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e)
     CPMAddPackage(NAME FFmpeg VERSION 9.0.2
                   URL https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
                   URL_HASH SHA256=${snx_ffmpeg_sha256}
                   DOWNLOAD_ONLY YES)
     include("${CMAKE_SOURCE_DIR}/cmake/ffmpeg.cmake")
+endif()
 
+# Extraction-only and tools-only builds do not contain the NX runtime or its graphics/media dependencies.
+if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
     # the shared fonts' stand-ins (cmake/shared_fonts.cmake): DejaVu Sans 2.37 (the Bitstream Vera license, see
     # dist/licenses/DejaVu/LICENSE) for the five text fonts, because a game asks the font for the box and the symbols
     # it draws and the Open Sans Eden ships has none of them, and yuzu's controller button glyphs (GPL-2.0-or-later)
@@ -200,7 +224,7 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
 endif()
 
 set(SNX_SDL3_FROM_SOURCE OFF)
-if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY) OR SNX_BUILD_GUI OR SNX_BUILD_3DS)
+if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY) OR SNX_BUILD_GUI OR SNX_BUILD_3DS OR snx_vita_runtime)
     # Prefer a compatible system package. CPM handles the pinned static fallback and user overrides. SDL_ALTIVEC only
     # changes PowerPC builds: SDL's AltiVec blitters prefetch with dstt, which the ISA phased out and qemu's POWER10
     # traps as illegal (the window icon's and the menu's software surfaces, which nothing here needs fast)

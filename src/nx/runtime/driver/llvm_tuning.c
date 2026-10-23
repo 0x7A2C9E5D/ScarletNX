@@ -70,14 +70,14 @@ static struct {
 static void builder(LLVMPassBuilderOptionsRef options) { settings_llvm_builder(&g_settings, options); }
 static void machine(LLVMTargetMachineRef target) { settings_llvm_machine(&g_settings, target); }
 
-/* tuning.text, a line each: "pipeline=" the one that runs (default: LLVM's own for the level), then every key of the
-   llvm table with its value. 0, or -1 with why */
+/* tuning.text, a line each: "pipeline=" the one that runs (default: LLVM's own for the level), whether the SLP
+   vectorizer runs (snx_ir_slp), then every key of the llvm table with its value. 0, or -1 with why */
 static int describe(char* error, size_t error_size) {
     char* text = g_llvm_tuning.text;
     size_t size = sizeof g_llvm_tuning.text, at;
     const IniOpt* o;
-    int n = snprintf(text, size, "pipeline=%s\n",
-                     g_llvm_tuning.tuning.pipeline ? g_llvm_tuning.tuning.pipeline : "default");
+    int n = snprintf(text, size, "pipeline=%s\nslp_vectorizer=%d\n",
+                     g_llvm_tuning.tuning.pipeline ? g_llvm_tuning.tuning.pipeline : "default", snx_ir_slp());
     for (at = (size_t)n, o = g_llvm_ini; n >= 0 && at < size && o->key; o++, at += (size_t)n) {
         char value[64];
         ini_format(o, value, sizeof value);
@@ -103,11 +103,9 @@ const struct SnxIrTuning* snx_llvm_tuning(char opt, char* error, size_t error_si
         const IniOpt* o;
         for (o = g_llvm_ini; o->key; o++)
             if (!strncmp(o->key, "llvm_pass_", 10) && !*(const int*)o->var) {
-                snprintf(
-                    error, error_size,
-                    "LLVM Internals turn off %s, but this build has no pipeline for -O%c to cut it from (no opt of "
-                    "its LLVM printed one where it was built)",
-                    o->key, opt);
+                snprintf(error, error_size,
+                         "LLVM Internals turn off %s, and this build has no -O%c pipeline to remove it from", o->key,
+                         opt);
                 return NULL;
             }
     }

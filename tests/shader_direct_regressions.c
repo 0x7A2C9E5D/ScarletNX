@@ -649,6 +649,30 @@ static void global_buffers(void) {
     check_refused(code, &info, "global memory base R2 not tracked at 58: no write before",
                   "an untracked global base without a writer says so");
     free(code);
+    /* an index plus a bare address in a constant buffer of the program's own, with no NVN descriptor behind it: one
+       game's terrain vertex programs read their patch data so, and weren't translated (their draws all skipped) */
+    const u64 bare[] = {
+        0x4C10801800070A0Aull, /* IADD.CC R10, R10, c[6][0x0] */
+        0x4C1008180017FF0Bull, /* IADD.X R11, RZ, c[6][0x4] */
+        0xEED4A00000070A0Bull, /* LDG.E R11, [R10] */
+    };
+    code = translate(bare, 3, ST_FS, &info, &words, 1);
+    check(code && !info.unsupported && info.ngbuf == 1 && info.gbuf_cbuf_off[0] == (6u << 16) &&
+              SH_GBUF_BANK(info.gbuf_cbuf_off[0]) == 6 && SH_GBUF_OFFSET(info.gbuf_cbuf_off[0]) == 0 &&
+              info.cbuf_max[6] >= 16,
+          "a bare address in a program's own constant buffer is a global buffer");
+    free(code);
+    /* an offset from one constant buffer, then the address from another: the address, added last, is the base */
+    const u64 offset_then_bare[] = {
+        0x4C1801C000470200ull, /* ISCADD R0, R2, c[16][0x10], 3 */
+        0x4C10801800070000ull, /* IADD.CC R0, R0, c[6][0x0] */
+        0x4C1008180017FF01ull, /* IADD.X R1, RZ, c[6][0x4] */
+        0xEED5A00000070000ull, /* LDG.E.64 R0, [R0] */
+    };
+    code = translate(offset_then_bare, 4, ST_FS, &info, &words, 1);
+    check(code && !info.unsupported && info.ngbuf == 1 && info.gbuf_cbuf_off[0] == (6u << 16),
+          "of an offset and a bare address, the one added last is the base");
+    free(code);
     /* LEA.LO R2, R0, c[0][0x510], 4: the base plus an index, as a 64-bit address's low word (Pokemon Legends Z-A) */
     const u64 lea[] = {0x4BD7020014470002ull, 0xEED4200000070200ull};
     code = translate(lea, 2, ST_FS, &info, &words, 1);
@@ -687,15 +711,17 @@ static void float_controls(void) {
                             {FMUL_KEEP, FMUL_KEEP},
                             {FFMA_FMZ, FFMA_FMZ},
                             {FFMA_FMZ, FFMA_KEEP}};
+    /* available: SH_FTZ_EMULATE, SH_FTZ_MODE, or SH_FTZ_NATIVE (a device that flushes by itself: neither the mode nor a
+       flush of its own) */
     for (int i = 0; i < 5; i++) {
-        for (int available = 0; available < 2; available++) {
+        for (int available = SH_FTZ_EMULATE; available <= SH_FTZ_NATIVE; available++) {
             ShaderInfo info;
             size_t words = 0;
             u32* code = translate(cases[i], 2, ST_FS, &info, &words, available);
             check_translated(code, &info, "FP32 mode translates");
             if (code) {
-                int flush = i == 0 && available;
-                int soft_ftz = (i == 0 && !available) || i == 1;
+                int flush = i == 0 && available == SH_FTZ_MODE;
+                int soft_ftz = available != SH_FTZ_NATIVE && ((i == 0 && available == SH_FTZ_EMULATE) || i == 1);
                 check(info.fp32_flush == (i == 0 || i == 1) && info.fp32_preserve == (i != 0),
                       "FP32 modes recorded");
                 check((count_opcode(code, words, 17, 4465) > 0) == flush, "FP32 flush capability");
@@ -1294,6 +1320,36 @@ static void layer_capabilities(void) {
         }
     }
     g_shader_output_layer = g_shader_geometry = 1;
+}
+
+static void viewport_capabilities(void)
+{
+	const u64 write = 0xeff07f800687ff00ull; /* AST a[0x68], R0 */
+	const u32 geometry_sph[3] = {1u << 24, 7u << 24, 3};
+	const u32 none[3] = {0};
+	int stages[3] = {ST_VS, ST_TES, ST_GS};
+
+	for (int i = 0; i < 3; i++) {
+		ShaderInfo info = {0};
+		size_t words = 0;
+		u32* code = translate_stage(&write, 1, stages[i], i == 2 ? geometry_sph : none, i == 2 ? 3 : 0,
+					    &info, &words);
+		check_translated(code, &info, "viewport index stores translate in vertex, evaluation and geometry stages");
+		if (code) {
+			check(info.writes_viewport, "viewport writes request indexed dynamic state");
+			check(has_builtin(code, words, 10), "viewport index has its own scalar output");
+			check(!has_builtin(code, words, 0), "viewport index is not a position component");
+			check(count_opcode(code, words, 17, i == 2 ? 57 : 70) == 1, "viewport output declares the stage capability");
+		}
+		free(code);
+	}
+	g_shader_viewport_index = 0;
+	ShaderInfo info = {0};
+	size_t words = 0;
+	u32* code = translate(&write, 1, ST_VS, &info, &words, 1);
+	check_refused(code, &info, "viewport index output unavailable", "unsupported devices refuse viewport output");
+	free(code);
+	g_shader_viewport_index = 3;
 }
 
 /* Loads from a constant buffer (a Uniform variable bound below 18) by result type: u32 or anything else. */
@@ -2439,6 +2495,7 @@ int main(int argc, char** argv) {
     issue126_shader_modes();
     between_stages();
     layer_capabilities();
+    viewport_capabilities();
     fragment_queries();
     eden_forms();
     pexit_flow();

@@ -87,3 +87,9 @@ void snx_msr(CPU* c, u32 sysreg, u64 v) {
     }
 }
 #undef SYSREG
+
+/* IC IVAU: code the guest wrote in the 64-byte line at a (CTR_EL0's IminLine) is to be fetched from now on, so what
+   was compiled from the line is stale (RtAPI.code_changed, which a runtime without code changes leaves NULL) */
+void snx_ic_ivau(CPU* c, u64 a) {
+    if (c->rt && c->rt->code_changed) c->rt->code_changed(c, a & ~(u64)63);
+}

@@ -211,6 +211,16 @@ static void hint(SnxIr* ir, SnxU32 w) {
 static void sys(SnxIr* ir, SnxU32 w) {
     if (F(16, 3) == 3 && F(12, 4) == 7 && F(8, 4) == 4 && F(5, 3) == 1)
         call2(ir, SNX_IR_DC_ZVA, ir->M, ir_rx(ir, F(0, 5)));
+    else if (F(16, 3) == 3 && F(12, 4) == 7 && F(8, 4) == 5 && F(5, 3) == 1) { /* IC IVAU: snx_ic_ivau(c, Xt) */
+        LLVMTypeRef p[2];
+        V args[2];
+        p[0] = ir->t_ptr;
+        p[1] = ir->t_i64;
+        args[0] = ir->c;
+        args[1] = ir_rx(ir, F(0, 5));
+        ir_call(ir, ir_extern(ir, "snx_ic_ivau", ir->t_void, p, 2), args, 2);
+        ir_state_invalidate(ir); /* the runtime may read or change the CPU there */
+    }
 }
 
 static void mrs(SnxIr* ir, SnxU32 w) {
@@ -589,6 +599,21 @@ static V clmul_low(SnxIr* ir, V a, V b) {
 static V crc32(SnxIr* ir, V acc, V value, unsigned bytes, unsigned castagnoli) {
     V table, x;
     unsigned i;
+    if (ir->features->aarch64 && ir->features->arm_crc) {
+        static const char* const names[2][4] = {
+            {"llvm.aarch64.crc32b", "llvm.aarch64.crc32h", NULL, "llvm.aarch64.crc32w"},
+            {"llvm.aarch64.crc32cb", "llvm.aarch64.crc32ch", NULL, "llvm.aarch64.crc32cw"},
+        };
+        static const char* const names64[2] = {"llvm.aarch64.crc32x", "llvm.aarch64.crc32cx"};
+        V args[2];
+        args[0] = acc;
+        if (bytes == 8) {
+            args[1] = ir_u64(ir, value);
+            return ir_intrinsic(ir, names64[castagnoli], NULL, args, 2);
+        }
+        args[1] = ir_cast(ir, value, ir->t_i32, 0);
+        return ir_intrinsic(ir, names[castagnoli][bytes - 1], NULL, args, 2);
+    }
     if (castagnoli && ir->features->x86 && ir->features->crc32) {
         static const char* const names[4] = {"llvm.x86.sse42.crc32.32.8", "llvm.x86.sse42.crc32.32.16", NULL,
                                              "llvm.x86.sse42.crc32.32.32"};

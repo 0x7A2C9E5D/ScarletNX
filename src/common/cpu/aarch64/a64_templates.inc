@@ -397,7 +397,7 @@ static const SnxA64Case cases_MSR_IMM[] = {
 static const SnxA64Case cases_SYS[] = {
     { SNX_FLOW_PLAIN,
       "const u32 f_CRm=(w>>8)&15; const u32 f_CRn=(w>>12)&15; const u32 f_op1=(w>>16)&7; const u32 f_op2=(w>>5)&7; const u32 f_rt=(w>>0)&31; ",
-      "if(f_op1==3&&f_CRn==7&&f_CRm==4&&f_op2==1) dc_zva(M,RX(f_rt));",
+      "if(f_op1==3&&f_CRn==7&&f_CRm==4&&f_op2==1) dc_zva(M,RX(f_rt)); else if(f_op1==3&&f_CRn==7&&f_CRm==5&&f_op2==1) snx_ic_ivau(c,RX(f_rt));",
       "" },
 };
 

@@ -5,8 +5,8 @@
    byte land the owner first, the CPU's bytes on a page it shares with an owner stay, a neighbour writing during the
    move into the pool loses nothing, a system call fails on owned memory until it is acquired, dropping and unmapping
    land nothing, a view of owned memory lands it first, a fault on the thread holding the producer's lock ends the
-   process, and threads faulting at once on many pages while owners come and go read every owner's bytes. Skips (77)
-   where the host has no traps */
+   process, the write watch's scan skips owned spans, and threads faulting at once on many pages while owners come
+   and go read every owner's bytes. Skips (77) where the host has no traps */
 #include "nx/memory/mem.h"
 #include "nx/memory/own.h"
 #include "nx/runtime/platform/plat.h"
@@ -337,6 +337,33 @@ static void test_busy_unowned(void) {
     res_free(r);
 }
 
+/* the write watch's scan over memory with an owned span in it: the span, in minor mode for its trap, is skipped and
+   the scan goes on, reporting the pages written around it. A failed scan turns write tracking off for the run */
+static u64 g_scan_lo, g_scan_hi;
+static void on_scan(u8* p, u64 size) {
+    u64 lo = (u64)(p - g_mem), hi = lo + size;
+    if (!g_scan_lo || lo < g_scan_lo) g_scan_lo = lo;
+    if (hi > g_scan_hi) g_scan_hi = hi;
+}
+static void test_scan_owned(void) {
+    u64 a = region(R0 + 0xA00000, 0x8000);
+    Res* r = res_new(0x2000, 0x40);
+    if (plat_ww_scan(GP(a), 0x8000, on_scan)) { /* no write tracking here (SNX_NO_WW, or before Linux 6.7) */
+        CHECK(mem_unmap(a, 0x8000) == 0);
+        res_free(r);
+        return;
+    }
+    CHECK(own_begin(a + 0x2000, 0x2000, r, 0) == 0);
+    GP(a)[0x6010] = 0x99;
+    g_scan_lo = g_scan_hi = 0;
+    CHECK(plat_ww_scan(GP(a), 0x8000, on_scan) == 0);
+    CHECK(g_scan_lo == a + 0x6000 && g_scan_hi == a + 0x7000); /* the written page, and nothing in the span */
+    own_acquire(a + 0x2000, 0x2000);
+    CHECK(refs(r) == 0 && GP(a)[0x2000] == 0x40);
+    CHECK(mem_unmap(a, 0x8000) == 0);
+    res_free(r);
+}
+
 /* many threads fault on many owned pages at once while the owners change between rounds */
 #define THREADS 8
 static u64 g_sa;
@@ -403,6 +430,7 @@ int main(int argc, char** argv) {
     test_busy("/proc/self/exe");
     test_release_order();
     test_busy_unowned();
+    test_scan_owned();
     test_stress();
     CHECK(!g_own_any);
     printf("memory_own: %u checks passed (%d landings, %d bytes)\n", checks, g_lands, g_landed_bytes);

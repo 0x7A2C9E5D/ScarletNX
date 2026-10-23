@@ -148,6 +148,8 @@ def build(directory, cc, ops, sanitize=False):
             str(A64),
             '-I',
             str(ROOT / 'src'),
+            '-I',
+            str(ROOT / 'tests'),
             str(source),
             '-o',
             str(library),

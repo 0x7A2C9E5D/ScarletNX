@@ -21,6 +21,7 @@ static void put32(unsigned char* p, uint32_t v) {
 static char* expected_cache_path(const char* dir, const char* name) {
     char* absolute = snx_absolute(dir);
     char* path = absolute ? snx_format("%s/%s.jitcache", absolute, name) : NULL;
+    snx_path_native(path); /* the system's separators, as the launcher's path has */
     free(absolute);
     return path;
 }

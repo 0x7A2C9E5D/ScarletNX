@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_CLI_H
 #define SNX_CLI_H
+#include "common/utilities/common.h"
 #include <string.h>
 
 enum {
@@ -13,7 +14,7 @@ enum {
     SNX_FULLSCREEN = 32,
     SNX_WINDOWED = 64, /* --fullscreen=0: windowed over the .ini's fullscreen=1 */
     SNX_TMPFS = 128,   /* the driver's --tmpfs (the launcher's Extract to tmpfs), which snx_cli_flag leaves to it */
-    /* the driver's --extract-container (the launcher's Extract game container): a dump played is extracted into its
+    /* the driver's --extract-container (the launcher's Extract dump): a dump played is extracted into its
        game's data folder, instead of read in place. snx_cli_flag leaves it to the driver too */
     SNX_EXTRACT_CONTAINER = 256,
     /* --tracy-capture: record this run with tracy-capture (SNX_TRACY builds only) */
@@ -29,9 +30,12 @@ static int snx_cli_flag(const char* arg, unsigned* flags) {
     const char* p;
     if (!strcmp(arg, "--extract"))
         bits = SNX_EXTRACT;
-    else if (!strcmp(arg, "--recomp"))
+    else if (!strcmp(arg, "--recompile"))
         bits = SNX_RECOMP;
-    else if (!strcmp(arg, "--headless"))
+    else if (!strcmp(arg, "--recomp")) {
+        snx_option_renamed("--recomp", "--recompile");
+        bits = SNX_RECOMP;
+    } else if (!strcmp(arg, "--headless"))
         bits = SNX_HEADLESS;
     else if (!strncmp(arg, "--headless=", 11))
         return -1;

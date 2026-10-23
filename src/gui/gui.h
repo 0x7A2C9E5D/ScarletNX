@@ -10,7 +10,7 @@ int snx_gui_main(const char* self);
    owned by the caller; NULL leaves the menu to ask the program that runs Switch inputs */
 extern char* (*snx_menu_settings)(void);
 /* scarletnx --migrate: what an older version left where this one no longer looks, an entry a line on stdout and where
-   it would go; --migrate=yes moves it there (Settings > App > Move old files). Any other --migrate= is refused, 2.
+   it would go; --migrate=yes moves it there (Settings > App > Move Old Files). Any other --migrate= is refused, 2.
    0, or 1 when an entry could not be moved */
 int snx_gui_migrate(const char* self, const char* option);
 /* the menu's languages, for the driver's setup in a terminal: the i-th's code and its name, NULL past the last */

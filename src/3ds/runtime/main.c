@@ -37,11 +37,12 @@ static void usage(FILE* out) {
         "  --extract-container\n"
         "                  Extract the CIA into its folder first and play from the extraction\n"
         "  -x, --extract   Extract only\n"
-        "  -r, --recomp    Recompile without playing\n"
+        "  -r, --recompile Recompile without playing\n"
         "  --model old|new The console to model (default old)\n"
         "  --keys FILE     The 3DS AES keys, in Azahar's aes_keys.txt format, to decrypt an encrypted CIA\n"
         "                  with (default ~/.3ds/aes_keys.txt)\n"
         "  --repo DIR      The data folder (default: a portable copy's folder, else the user's data\n"
+        "  --data DIR      The data folder (default: a portable copy's folder, else the user's data\n"
         "                  folder, as scarletnx picks it; the user's keeps work/ in its cache folder)\n"
         "  --outdir DIR    The folder of the games, in which the game's folder is made (default recompiled/ of\n"
         "                  the data folder)\n"
@@ -375,13 +376,12 @@ static bool parse_seconds(const char* text, double* seconds) {
    after a title ID, or after the module beside it. NULL for the driver under its own names. The caller's to free */
 static char* own_game(const char* argv0) {
     char *name = last_part(argv0), *exe = name && strncmp(name, "scarletnx", 9) ? snx_executable(argv0) : NULL;
-    char* dir = exe ? snx_dirname(exe) : NULL;
-    char* module = dir ? snx_format("%s/%s%s", dir, name, SNX_CTR_MODULE_SUFFIX) : NULL;
-    if (dir && !snx_ctr_title_name(name) && !(module && snx_is_file(module))) {
+    char *dir = exe ? snx_dirname(exe) : NULL, module[SNX_PATH_SIZE];
+    if (dir && !snx_ctr_title_name(name) &&
+        (snx_path_format(module, sizeof module, "%s/%s%s", dir, name, SNX_CTR_MODULE_SUFFIX) || !snx_is_file(module))) {
         free(dir);
         dir = NULL;
     }
-    free(module);
     free(exe);
     free(name);
     return dir;
@@ -410,9 +410,12 @@ int snx_ctr_main(int argc, char** argv) {
             extract_only = true;
         else if (!positional && !strcmp(arg, "--extract-container"))
             extract_container = true;
-        else if (!positional && (!strcmp(arg, "-r") || !strcmp(arg, "--recomp")))
+        else if (!positional && (!strcmp(arg, "-r") || !strcmp(arg, "--recompile") || !strcmp(arg, "--recomp"))) {
+            if (!strcmp(arg, "--recomp")) snx_option_renamed("--recomp", "--recompile");
             recompile = true;
-        else if (!positional && (!strcmp(arg, "--output") || !strcmp(arg, "--outdir") || !strcmp(arg, "--repo"))) {
+        } else if (!positional && (!strcmp(arg, "--output") || !strcmp(arg, "--outdir") || !strcmp(arg, "--repo") ||
+                                   !strcmp(arg, "--data"))) {
+            if (!strcmp(arg, "--repo")) snx_option_renamed("--repo", "--data");
             if (++i == argc || !*argv[i]) {
                 fprintf(stderr, "scarletnx-3ds: %s requires a directory\n", arg);
                 return 2;

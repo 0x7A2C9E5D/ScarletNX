@@ -2,6 +2,13 @@
    Copyright 2026 the ScarletNX contributors
    Ported in part from QEMU (target/arm/tcg/helper-a64.c, translate-a64.c), LGPL-2.1-or-later:
    Copyright (c) 2013 Alexander Graf <agraf@suse.de> */
+/* ================================================================================================
+   TEST ONLY. NOT IN PRODUCTION.
+   tests/a64_reference/reference.inc includes this file; cpu_helpers.c includes that only under
+   SNX_A64_REFERENCE. It is the C reference interpreter the differential tests compare the LLVM
+   backend against. No game module compiles it, no runtime path calls it. Its job is to be the slow,
+   obvious oracle, so do not optimize it for speed.
+   ================================================================================================ */
 /* Integer helpers only the C reference interpreter needs: logical-immediate decoding and CRC32. The LLVM backend
    evaluates both at compile time. */
 

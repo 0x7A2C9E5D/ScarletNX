@@ -13,8 +13,9 @@ typedef struct {
     size_t count;
     size_t room; /* the entries the lists have room for, one past the last included */
 } GuiGames;
-/* what a folder's games are: ready to run (executables; on Android a game's code or a dump), CIA files, and dumps
-   (NSP, XCI and NRO files), prepared when they run */
+/* what a folder's games are: ready to run (executables; on Android a game's code or a dump), the other consoles'
+   packages (3DS CIA and Vita VPK files, each opened with its driver), and dumps (NSP, XCI and NRO files), prepared when
+   they run */
 enum { GUI_GAMES_RUN = 1, GUI_GAMES_CIA = 2, GUI_GAMES_DUMP = 4 };
 /* A folder's games of kinds added after those listed: its own files, and each folder of it that holds its game
    (<name>/<name>), named by the folder; nothing deeper. False, error saying why, when it cannot be read */
@@ -24,14 +25,23 @@ bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* erro
 bool gui_games_add_deep(GuiGames* games, const char* directory, int kinds, int depth, char* error, size_t size);
 /* games in two groups: those ready to run, then the dumps and CIAs, each in the order it had; when both have games,
    each under a heading of its own (an entry whose path is NULL, its text shown). A dump made already (made says so of
-   its path) is left out. False when out of memory, games as they were */
+   its path) is left out, and with dumps NULL every dump and CIA, the ready games alone. False when out of memory,
+   games as they were */
 bool gui_games_group(GuiGames* games, const char* ready, const char* dumps,
                      bool (*made)(const char* path, const void* user), const void* user);
 /* whether entry i of games is a group's heading, which nothing runs */
 bool gui_games_heading(const GuiGames* games, size_t i);
+/* The log the runtime writes for the game whose program is at path, again at each run: <name>.log in its state folder
+   (gui_game_kind_dir), <name> the game's folder for one of its own, else the program's name without .exe. Owned, NULL
+   when out of memory */
+char* gui_game_log(const char* path);
+/* games in each group (from a heading to the next) by when each last ran, its log's time (gui_game_log), the newest
+   first; one never run (no log), a dump, a CIA and a VPK after them, each in the order it had, as the headings stay.
+   False when out of memory, games as they were */
+bool gui_games_by_last_opened(GuiGames* games);
 /* whether directory holds a folder that is no game and not hidden: one whose games a deep add would list */
 bool gui_has_folders(const char* directory, int kinds);
-/* games/'s alone: its executable files and game folders, or with cia CIA files (case-insensitive extension, no execute
+/* games/'s alone: its executable files and game folders, or with cia CIA and VPK files (case-insensitive extension, no execute
    bit needed). Never recurse into data/save directories. */
 bool gui_games_scan(GuiGames* games, const char* directory, bool cia, char* error, size_t size);
 void gui_games_free(GuiGames* games);
@@ -63,6 +73,11 @@ bool gui_game_addons(const char* path, GuiGames* addons);
    into *folder (owned, NULL for any other game), and its mods (snx_mods_list) into *names when names is not NULL:
    their count */
 size_t gui_game_mods(const char* path, char** folder, char*** names);
-/* A 3DS CIA by its name */
+/* The cheats folder of the game at path, a program in a folder of its own (<name>/<name>_data/cheats/,
+   snx_cheats_folder), into *folder (owned, NULL for any other game), and its cheats' names (snx_cheats_list) into
+   *names when names is not NULL: their count */
+size_t gui_game_cheats(const char* path, char** folder, char*** names);
+/* A 3DS CIA, a Vita VPK, by its name */
 bool gui_is_cia(const char* name);
+bool gui_is_vpk(const char* name);
 #endif

@@ -152,7 +152,7 @@ done:
     free(startup.lpAttributeList);
     free(command);
     free(executable);
-    if (!success) snprintf(error, size, snx_tr("Cannot launch driver (Windows error %lu)"), (unsigned long)failure);
+    if (!success) snprintf(error, size, snx_tr("Cannot start the run (Windows error %lu)"), (unsigned long)failure);
     return success;
 }
 int gui_process_read(GuiProcess* process, char* buffer, size_t size) {

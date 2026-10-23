@@ -15,20 +15,32 @@ typedef struct {
     const char* build;
     const char* executable;
     const char* source; /* the checkout the build came from (snx_checkout), to build tools in; NULL without one */
+    const char* keys; /* optional prod.keys path supplied with --keys */
+    const char* title_keys; /* optional title.keys path supplied with --title-keys */
 } SnxPaths;
 
 void* snx_alloc(size_t size);
 void* snx_realloc(void* ptr, size_t size);
 char* snx_strdup(const char* s);
 char* snx_format(const char* fmt, ...);
+/* a path's / turned into \ on Windows, the separator its system shows (C:\Users\...); nothing elsewhere */
+void snx_path_native(char* path);
+/* the room of a path made in a caller's buffer: Linux's PATH_MAX, past what Windows takes without its long paths */
+#define SNX_PATH_SIZE 4096
+/* fmt's path into out, of size bytes, its separators the system's (snx_path_native). 0; -1 when it does not fit,
+   said with snx_error, out empty */
+int snx_path_format(char* out, size_t size, const char* fmt, ...);
 /* says a line of error, "scarletnx: " and the line on stderr, or to the sink given to snx_error_sink. Returns 1 */
 int snx_error(const char* fmt, ...);
+/* an option given by the name an older version had, old (a literal), said once a run with its name now */
+void snx_option_renamed(const char* old, const char* now);
 /* where snx_error's lines go from now on instead of stderr (the runtime's log, which a game's process on Android has
    no other way to keep them in), NULL for stderr again. Set before the threads that say errors start */
 void snx_error_sink(void (*sink)(const char* line));
 /* the system's reason for the file or folder call that just failed, into out: strerror(errno), or on Windows the
    text of GetLastError, which its calls set instead of errno */
 char* snx_os_error(char* out, size_t size);
+/* a, then b, a separator between: one path in the system's separators (snx_path_native) */
 char* snx_path_join(const char* a, const char* b);
 char* snx_dirname(const char* path);
 char* snx_absolute(const char* path);
@@ -91,9 +103,13 @@ char* snx_user_dir(int kind);
 /* 1 for a data folder that keeps each kind of file apart: the user's, a portable copy's (SNX_PORTABLE_DIR), Android's.
    Another folder's games (--repo, --outdir) keep their files in their folders */
 int snx_app_dir(const char* folder);
-/* Such a data folder's folder for one kind of file: the user's as snx_user_dir says, another's config/, state/ and
-   cache/ in it; the data folder itself for SNX_USER_DATA */
+/* Such a data folder's folder for one kind of file: for SNX_USER_STATE and SNX_USER_CACHE the one its config folder's
+   app.ini names, [folders] state = and cache = (Settings > App > Folders' Logs and Caches), a full path; else
+   snx_app_kind_default's. One app.ini names wrongly is said once */
 char* snx_app_kind_dir(const char* app, int kind);
+/* Its folder for one kind of file before Folders picks one: the user's as snx_user_dir says, another's config/, state/
+   and cache/ in it; the data folder itself for SNX_USER_DATA */
+char* snx_app_kind_default(const char* app, int kind);
 /* A path in a data folder (snx_app_dir), moved to the same place in its folder of kind: games/X/X.ini of the data
    folder is games/X/X.ini of the config folder. Any other path (another --repo, an --outdir) is returned as it is */
 char* snx_user_path(const char* path, int kind);
@@ -101,6 +117,8 @@ char* snx_user_path(const char* path, int kind);
    state) for a program in folder: the data folder's (snx_app_dir) that folder is in, else the user's. The launcher
    names its data folder, a game its own folder, so a game finds the files of the launcher whose games/ it is in */
 char* snx_menu_dir(const char* folder, int kind);
+/* The same before Folders picks one: snx_app_kind_default's */
+char* snx_menu_kind_default(const char* folder, int kind);
 /* 1 while what an older build left at old is still there, for the caller to say each run where it is and that this
    build keeps it at now. Nothing is moved: the player does that */
 int snx_left_behind(const char* old, const char* now);
@@ -196,6 +214,9 @@ int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, 
 /* Foreground workflow stage with inherited stdio, interruption forwarding and diagnostics.
    A stopped POSIX child is aborted so a rerun can restart that stage. Not thread safe. */
 int snx_run_stage(const char* const* argv, const char* cwd, const char* stage);
+/* iOS starts no process: a stage then calls run(argc, argv) in this one, argv[0] being the program a child would be.
+   Set once by the driver, whose own main it is */
+void snx_set_stage_runner(int (*run)(int argc, char** argv));
 /* As above, but intentional debugger stops do not abort the game. */
 int snx_run_debug_stage(const char* const* argv, const char* cwd, const char* stage);
 FILE* snx_fopen(const char* path, const char* mode);

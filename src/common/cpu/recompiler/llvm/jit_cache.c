@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "common/cpu/recompiler/llvm/jit_cache.h"
+#include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/llvm/rtlib_object.h"
 #include <llvm-c/Core.h>
 #include <llvm-c/TargetMachine.h>
@@ -171,8 +172,8 @@ char* snx_jit_cache_key(char opt, int hook, int svc) {
     key = (char*)malloc(n);
     if (key) {
         rtlib = fnv(snx_rtlib_object, (size_t)snx_rtlib_object_size, 0xCBF29CE484222325ULL);
-        sprintf(key, "abi=%d llvm=%s rtlib=%016llx cpu=%s opt=%c hook=%d svc=%d features=%s", SNX_ABI,
-                LLVM_VERSION_STRING, (unsigned long long)rtlib, cpu, opt, hook, svc, features);
+        sprintf(key, "abi=%d llvm=%s rtlib=%016llx cpu=%s opt=%c hook=%d svc=%d slp=%d features=%s", SNX_ABI,
+                LLVM_VERSION_STRING, (unsigned long long)rtlib, cpu, opt, hook, svc, snx_ir_slp(), features);
     }
     LLVMDisposeMessage(cpu);
     LLVMDisposeMessage(features);

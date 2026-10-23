@@ -52,7 +52,7 @@ int snx_record_folders(const char* folder, const char* name) {
     int kind, rc = 0;
     for (kind = SNX_USER_CONFIG; !rc && kind <= SNX_USER_CACHE; ++kind) {
         moved = snx_user_path(folder, kind);
-        user = snx_user_dir(kind);
+        user = snx_menu_dir(NULL, kind); /* the user's, or the one Folders picked */
         if (user && strcmp(moved, folder) && snx_path_within(moved, user)) {
             if (moved[strcspn(moved, "\r\n")])
                 rc = snx_error("the folder %s has a line break, which %s cannot keep", moved, record);

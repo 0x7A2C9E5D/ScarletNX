@@ -12,6 +12,7 @@
 #include "nx/runtime/platform/log.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/memory/own.h"
+#include "nx/runtime/platform/tracy.h"
 
 /* the block height and depth (log2 GOBs) of a mip level of a block-linear texture. The hardware shrinks them for
    small levels: the height from the base level on, the depth only from level 1 on and by one step a level
@@ -338,7 +339,15 @@ void vk_tex_stats(u64* uploads, u64* bytes) {
     *bytes = g_tex_upload_bytes;
 }
 /* 1 when every subresource was copied; 0 when memory or staging ran out, and upload_valid keeps it for a retry */
+static int tex_upload_(Surf* t);
+/* a texture's upload as a profiler zone (SNX_TRACY builds) */
 static int tex_upload(Surf* t) {
+    SNX_ZONE_V(z, "texture upload", t->size);
+    int r = tex_upload_(t);
+    SNX_ZONE_END(z);
+    return r;
+}
+static int tex_upload_(Surf* t) {
     const VkFmt* f = &t->f;
     g_tex_uploads++;
     g_tex_upload_bytes += t->size;

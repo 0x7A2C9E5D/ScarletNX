@@ -12,7 +12,9 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,11 +45,23 @@ typedef struct {
     double cpu;
     bool live;
 } Sample;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+/* iOS starts no process: the driver is this program's own (snx_driver), run on a thread of its own with the
+   output it prints (this process's stdout and stderr, for as long as it runs) in the pipe the menu reads */
+#define GUI_DRIVER_THREAD 1
+int snx_driver(int argc, char** argv);
+#endif
 struct GuiProcess {
     pid_t pid;
     int output, status;
     bool exited, eof;
     GuiCpuBase cpu_base;
+#ifdef GUI_DRIVER_THREAD
+    pthread_t thread;
+    int argc, saved[2], writer;
+    char** argv;
+    _Atomic int done;
+#endif
 };
 static double seconds(void) {
     struct timespec now;
@@ -190,22 +204,85 @@ GuiProcess* gui_process_create(void) {
     }
     return process;
 }
+#ifdef GUI_DRIVER_THREAD
+/* LLVM's passes recurse deeply: a thread's default stack on iOS (512 KiB) is not enough */
+#define GUI_DRIVER_STACK ((size_t)64 << 20)
+static void* driver_thread(void* data) {
+    GuiProcess* process = data;
+    int status = snx_driver(process->argc, process->argv);
+    fflush(stdout);
+    fflush(stderr);
+    /* the process's own output back first, then the pipe's end: closing the writer is the menu's end of file */
+    dup2(process->saved[0], STDOUT_FILENO);
+    dup2(process->saved[1], STDERR_FILENO);
+    close(process->saved[0]);
+    close(process->saved[1]);
+    close(process->writer);
+    for (int i = 0; i < process->argc; ++i) free(process->argv[i]);
+    free(process->argv);
+    process->status = status;
+    atomic_store(&process->done, 1);
+    return NULL;
+}
+static bool driver_start(GuiProcess* process, const char* const* argv, char* error, size_t size) {
+    int output[2] = {-1, -1};
+    pthread_attr_t attributes;
+    int argc = 0, saved = 0;
+    while (argv[argc]) ++argc;
+    if (pipe(output) || fcntl(output[0], F_SETFL, O_NONBLOCK)) goto failed;
+    process->saved[0] = dup(STDOUT_FILENO);
+    process->saved[1] = dup(STDERR_FILENO);
+    saved = 1;
+    if (process->saved[0] < 0 || process->saved[1] < 0) goto failed;
+    process->argv = calloc((size_t)argc + 1, sizeof(*process->argv));
+    if (!process->argv) goto failed;
+    for (process->argc = 0; process->argc < argc; ++process->argc)
+        if (!(process->argv[process->argc] = strdup(argv[process->argc]))) goto failed;
+    process->writer = output[1];
+    fflush(NULL);
+    if (dup2(output[1], STDOUT_FILENO) < 0 || dup2(output[1], STDERR_FILENO) < 0) goto failed;
+    atomic_store(&process->done, 0);
+    if (pthread_attr_init(&attributes) || pthread_attr_setstacksize(&attributes, GUI_DRIVER_STACK) ||
+        pthread_create(&process->thread, &attributes, driver_thread, process)) {
+        dup2(process->saved[0], STDOUT_FILENO);
+        dup2(process->saved[1], STDERR_FILENO);
+        errno = EAGAIN;
+        goto failed;
+    }
+    pthread_attr_destroy(&attributes);
+    process->output = output[0];
+    process->status = 0;
+    process->exited = process->eof = false;
+    return true;
+failed:
+    {
+        int saved_errno = errno;
+        for (int i = 0; i < 2; ++i) {
+            if (output[i] >= 0) close(output[i]);
+            if (saved && process->saved[i] >= 0) close(process->saved[i]);
+        }
+        if (process->argv) {
+            for (int i = 0; i < process->argc; ++i) free(process->argv[i]);
+            free(process->argv);
+            process->argv = NULL;
+        }
+        snprintf(error, size, snx_tr("Cannot start the run: %s"), strerror(saved_errno));
+        return false;
+    }
+}
+#endif
 bool gui_process_start(GuiProcess* process, const char* const* argv, char* error, size_t size) {
     int output[2] = {-1, -1}, failure[2] = {-1, -1};
     int previous_status;
     if (!gui_process_finished(process, &previous_status)) {
-        snprintf(error, size, "%s", snx_tr("A driver is already running"));
+        snprintf(error, size, "%s", snx_tr("A run is already going"));
         return false;
     }
-#if defined(__APPLE__) && TARGET_OS_IPHONE
-    /* an iOS app may not start a process: fork fails there. Games are prepared on a computer and played in the app's
-       own process (docs/APPLE.md) */
-    (void)argv;
+#ifdef GUI_DRIVER_THREAD
+    /* an iOS app may not start a process: fork fails there */
     (void)output;
     (void)failure;
-    snprintf(error, size, "%s",
-             snx_tr("iOS runs no other programs: prepare games on a computer, then copy them to games/"));
-    return false;
+    return driver_start(process, argv, error, size);
 #endif
     if (pipe(output) || pipe(failure)) goto failed;
     for (int i = 0; i < 2; ++i)
@@ -290,6 +367,16 @@ int gui_process_read(GuiProcess* process, char* buffer, size_t size) {
     return -1;
 }
 bool gui_process_finished(GuiProcess* process, int* status) {
+#ifdef GUI_DRIVER_THREAD
+    if (!process->exited) {
+        if (!atomic_load(&process->done)) return false;
+        pthread_join(process->thread, NULL);
+        process->exited = true;
+    }
+    if (!process->eof) return false;
+    *status = process->status;
+    return true;
+#endif
     if (!process->exited) {
         int result;
         pid_t waited = waitpid(process->pid, &result, WNOHANG);
@@ -335,6 +422,9 @@ GuiUsage gui_process_usage(GuiProcess* process) {
 }
 void gui_process_terminate(GuiProcess* process) {
     if (!process) return;
+#ifdef GUI_DRIVER_THREAD
+    return; /* a thread cannot be killed: the driver runs to its end, which the menu waits for */
+#endif
     if (process->pid) {
         /* Freeze the session before killing it, so a compiler cannot fork a new
            worker between enumeration and cleanup. Three passes for a concurrent fork, then the kill. */
@@ -351,6 +441,12 @@ void gui_process_terminate(GuiProcess* process) {
 }
 void gui_process_destroy(GuiProcess* process) {
     if (!process) return;
+#ifdef GUI_DRIVER_THREAD
+    /* the app is ending: a driver still running ends with it */
+    if (process->output >= 0) close(process->output);
+    if (atomic_load(&process->done)) free(process);
+    return;
+#endif
     gui_process_terminate(process);
     if (process->pid && !process->exited)
         while (waitpid(process->pid, NULL, 0) < 0 && errno == EINTR) {}

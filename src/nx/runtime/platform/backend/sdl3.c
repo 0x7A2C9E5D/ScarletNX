@@ -16,6 +16,9 @@
 #include "nx/runtime/platform/overlay.h"
 #include "nx/runtime/platform/fatal_screen.h"
 #include "nx/runtime/platform/touch.h"
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 #include "nx/runtime/platform/ui.h"
 #include "nx/runtime/platform/vpad.h"
 #include "nx/runtime/platform/gamepad.h"
@@ -238,9 +241,24 @@ void backend_window_safe(int* x, int* y, int* w, int* h) {
    background, and presenting must stop before that */
 static bool SDLCALL lifecycle(void* unused, SDL_Event* e) {
     (void)unused;
+    /* what the system did to the app, in the log: a GPU lost after a minute with nobody touching the screen was the
+       system locking it (the app goes to the background and loses the GPU), and a low memory event comes before a kill */
+    switch (e->type) {
+        case SDL_EVENT_WILL_ENTER_BACKGROUND: LOG("lifecycle: the app will enter the background\n"); break;
+        case SDL_EVENT_DID_ENTER_BACKGROUND: LOG("lifecycle: the app is in the background\n"); break;
+        case SDL_EVENT_WILL_ENTER_FOREGROUND: LOG("lifecycle: the app will enter the foreground\n"); break;
+        case SDL_EVENT_DID_ENTER_FOREGROUND: LOG("lifecycle: the app is in the foreground\n"); break;
+        case SDL_EVENT_LOW_MEMORY: LOG("lifecycle: the system warns of low memory\n"); break;
+        case SDL_EVENT_TERMINATING: LOG("lifecycle: the system is ending the app\n"); break;
+        default: break;
+    }
     if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND) __atomic_store_n(&g_hidden, 1, __ATOMIC_RELEASE);
     if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND) {
+#ifndef SDL_PLATFORM_IOS
+        /* Android makes the window's surface anew when the app comes back. iOS keeps it: making another from the
+           renderer's thread is UIKit work off the main thread, which aborts the app */
         __atomic_add_fetch(&g_generation, 1, __ATOMIC_RELEASE);
+#endif
         __atomic_store_n(&g_hidden, 0, __ATOMIC_RELEASE);
     }
     return true;
@@ -332,6 +350,8 @@ void video_init(const char* title, const char* addons) {
         SDL_VERSIONNUM_MICRO(SDL_GetVersion()), SDL_GetCurrentVideoDriver());
     unattended_start();
     SDL_AddEventWatch(lifecycle, NULL);
+    /* a game runs for minutes with nobody touching the screen: a phone that locks it takes the GPU from the app */
+    SDL_DisableScreenSaver();
     int w, h;
     char header[768];
     snprintf(g_title, sizeof g_title, "%s", title);
@@ -483,7 +503,7 @@ static int android_share(const char* path) {
     return ok;
 }
 #endif
-/* Share log, as the launcher's: scarletnx.log beside the game's log, sent to the app the player picks on Android; its
+/* Share Log, as the launcher's: scarletnx.log beside the game's log, sent to the app the player picks on Android; its
    path in saved once written (else left as it was), what it did in said */
 static void fatal_share(const char* msg, const char* game_log, char* saved, size_t saved_size, char* said,
                         size_t size) {
@@ -499,7 +519,7 @@ static void fatal_share(const char* msg, const char* game_log, char* saved, size
     if (ok) snprintf(saved, saved_size, "%s", made);
     free(folder);
 }
-/* Copy path: the log Share log saved, else the game's own, to paste where it is asked for */
+/* Copy path: the log Share Log saved, else the game's own, to paste where it is asked for */
 static void fatal_copy(const char* path, char* said, size_t size) {
     if (SDL_SetClipboardText(path))
         snprintf(said, size, "Path copied: %s", path);
@@ -517,7 +537,7 @@ static int fatal_at(const SnxOverlayError* panel, float x, float y) {
 }
 static int fatal_screen(const char* msg) {
 #ifdef __ANDROID__
-    static const char* const how = "Share log sends the game's log, which has what ran last.";
+    static const char* const how = "Share Log sends the game's log, which has what ran last.";
 #else
     static const char* const how = "The game's log has what ran last: ";
     char log_url[3608];
@@ -569,7 +589,7 @@ static int fatal_screen(const char* msg) {
     panel.how = what;
     panel.focus = SNX_OVERLAY_ERROR_CLOSE;
     /* the log plat.c writes, in the state folder. Beside the game that is argv[0]'s folder, which may be relative (./
-       for ./MyGame): Share log and a file URI need an absolute path */
+       for ./MyGame): Share Log and a file URI need an absolute path */
     snprintf(log_path, sizeof log_path, "%s%s.log", g_statedir, g_exename);
     full = snx_absolute(log_path);
     if (full && strlen(full) < sizeof log_path) memcpy(log_path, full, strlen(full) + 1);
@@ -696,6 +716,18 @@ static int fatal_screen(const char* msg) {
    thread doesn't come (held up elsewhere), Windows' own box (it takes any thread) and none on Linux: the error is in
    the log and on stderr. Nothing for an unattended run, where nobody would close it */
 void win_fatal_box(const char* msg) {
+#ifdef SDL_PLATFORM_IOS
+    /* a phone shows no stderr and no log of the app's: the Files app shows this file, in the app's Documents */
+    {
+        FILE* file;
+        mkdir("logs", 0755);
+        file = fopen("logs/scarletnx-error.log", "a");
+        if (file) {
+            fprintf(file, "%s\n", msg);
+            fclose(file);
+        }
+    }
+#endif
     if (g_opt_headless || unattended_active()) return;
     if (SDL_IsMainThread()) {
         /* an error another thread left first: this one followed from it */

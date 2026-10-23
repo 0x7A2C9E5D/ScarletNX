@@ -284,8 +284,7 @@ static int create_device(void) {
     g_vk_flush_denorm = p12.shaderDenormFlushToZeroFloat32 &&
                         p12.denormBehaviorIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE &&
                         p12.driverID != VK_DRIVER_ID_QUALCOMM_PROPRIETARY;
-    if (!g_vk_flush_denorm)
-        WARN("vulkan: FP32 denormal flush mode unavailable; graphics shaders use per-instruction FTZ fallback\n");
+    /* without it, vk_pipeline_init measures whether the device flushes by itself (vk_ftz_native) */
     if (!g_vk_preserve_infnan) WARN("vulkan: FP32 signed-zero/Inf/NaN preservation unavailable on this GPU\n");
 
     /* compute gets a queue of its own: of a compute-only family, or else a second one of the graphics family */
@@ -317,6 +316,7 @@ static int create_device(void) {
     WANT(depthBounds);
     WANT(wideLines);
     WANT(largePoints);
+    WANT(multiViewport);
     WANT(samplerAnisotropy);
     WANT(occlusionQueryPrecise); /* samples-passed counts (query.c) are exact */
     WANT(sampleRateShading);
@@ -503,6 +503,7 @@ static int create_device(void) {
     g_shader_texture_arrays = q12.shaderSampledImageArrayNonUniformIndexing != 0;
     g_shader_float16 = q12.shaderFloat16 != 0;
     g_shader_output_layer = q12.shaderOutputLayer != 0; /* ShaderLayer: a vertex or tessellation program's layer */
+    g_shader_viewport_index = have.multiViewport ? 2 | (q12.shaderOutputViewportIndex ? 1 : 0) : 0;
     VkPhysicalDeviceVulkan13Features f13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
                                             .pNext = &f12,
                                             .synchronization2 = VK_TRUE,

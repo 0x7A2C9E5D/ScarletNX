@@ -25,6 +25,7 @@
 #include "nx/hle/hle.c"
 
 u8* g_mem;
+u64 g_as_size = AS_MAX; /* the reservation's size, mem.c's, which this test does not link */
 char g_datadir[1024], g_exename[256], g_exedir[1024], g_confdir[1024], g_addondir[1024], g_gamename[256];
 u64 g_addon;
 const u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull}; /* am.c's: the first user */
@@ -1052,7 +1053,7 @@ static void test_raw_romfs(SvcObj* proxy) {
 #undef romfs_build
 #endif
 #if !defined(_WIN32)
-/* Extract game container off: dump-data/Game_data has no ExeFS or RomFS of its own, and dump-data/Game.source links to
+/* Extract dump off: dump-data/Game_data has no ExeFS or RomFS of its own, and dump-data/Game.source links to
    an NSP of decrypted NCAs, which fs_init opens and maps. The game's ExeFS (exefs/...) and RomFS come out of it, read
    in place: nothing is written beside it. With source, the settings' source= names the NSP instead, and Game.source
    is a file that is no dump, which the setting is read over */
@@ -1282,7 +1283,7 @@ static void test_overlay(void) {
     strcpy(g_settings.game_addons, "0100000000AB1001");
     strcpy(g_addondir, "overlay-data/0100000000AB0000_0100000000AB0800_data/");
     strcpy(g_datadir, "overlay-data/0100000000AB0000_data/");
-    fs_init();
+    fs_init(NULL, NULL);
     data = fs_read_file("exefs/main", &size);
     CHECK(data && size == 17 && !memcmp(data, "the update's main", 17));
     free(data);
@@ -1736,7 +1737,7 @@ int main(int argc, char** argv) {
         dump_write(source);
         if (source) strcpy(g_settings.game_dump, "dump-data/Game.nsp");
         strcpy(g_datadir, "dump-data/Game_data/");
-        fs_init();
+        fs_init(NULL, NULL);
         test_scans_allowed = 0;
         svc_fs_init();
         romfs_init();
@@ -1756,7 +1757,7 @@ int main(int argc, char** argv) {
         addon_write(update, !strcmp(argv[3], "dump-update-extracted"));
         strcpy(g_settings.game_dump, "dump-data/Game.nsp"); /* the game's .ini's, which the add-on runs with */
         strcpy(g_datadir, "dump-data/Game_data/");
-        fs_init();
+        fs_init(NULL, NULL);
         test_scans_allowed = 0;
         svc_fs_init();
         romfs_init();
@@ -1785,7 +1786,7 @@ int main(int argc, char** argv) {
         CHECK(strcmp(ini, ini_file()) != 0);
         if (gone) strcpy(g_settings.game_dump, "dump-data/Gone.nsp");
         strcpy(g_datadir, "dump-data/Game_data/");
-        fs_init();
+        fs_init(NULL, NULL);
         if (strcmp(test_fs_text, said)) fprintf(stderr, "said:     %sexpected: %s", test_fs_text, said);
         CHECK(!strcmp(test_fs_text, said) && g_hle.fs.dfs == NULL);
         free(dir);
@@ -1800,7 +1801,7 @@ int main(int argc, char** argv) {
     if (argc == 4 && (!strcmp(argv[3], "mods") || !strcmp(argv[3], "mods-image") || !strcmp(argv[3], "mods-stale"))) {
         int image = !strcmp(argv[3], "mods-image"), stale = !strcmp(argv[3], "mods-stale");
         mods_write(image, stale);
-        fs_init();
+        fs_init(NULL, NULL);
         test_scans_allowed = 0;
         svc_fs_init();
         romfs_init();
@@ -1821,7 +1822,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     strcpy(g_datadir, raw ? "raw-data/" : "service-data/");
-    fs_init();
+    fs_init(NULL, NULL);
     CHECK(test_scans > 0);
     /* the temporary storage the fixture left is gone, from the index and the disk: each launch starts it empty */
     FILE* left = fopen("service-data/save/temp/last-launch.bin", "rb");

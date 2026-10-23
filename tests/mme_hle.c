@@ -22,7 +22,8 @@ static unsigned checks;
 #define SENT_MAX 0x10000
 static u32 sent_m[SENT_MAX], sent_v[SENT_MAX], nsent;
 void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
-    CHECK(last == 1);
+    /* constant buffer data stays held for the method after it (mme_out): every other method is written at once */
+    CHECK(last == !((m & 0xFFF) >= 0x8E4 && (m & 0xFFF) <= 0x8F3));
     CHECK(nsent < SENT_MAX);
     ch->r3d[m & 0xFFF] = v; /* what the 3D engine keeps, which a macro may read back */
     sent_m[nsent] = m;

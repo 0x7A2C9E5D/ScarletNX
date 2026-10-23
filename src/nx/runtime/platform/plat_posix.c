@@ -79,7 +79,7 @@ void pc_init(PCond* c) {
 }
 void pc_signal(PCond* c) { pthread_cond_signal(&c->c); }
 void pc_broadcast(PCond* c) { pthread_cond_broadcast(&c->c); }
-int pc_wait(PCond* c, PMutex* m, i64 timeout_ns) {
+static int cond_wait(PCond* c, PMutex* m, i64 timeout_ns) {
     struct timespec ts;
     int r;
     if (timeout_ns < 0) {
@@ -105,6 +105,14 @@ int pc_wait(PCond* c, PMutex* m, i64 timeout_ns) {
     r = pthread_cond_timedwait(&c->c, &m->l, &ts);
 #endif
     return r == ETIMEDOUT;
+}
+/* the wait noted while it lasts, for a hang report (pm_waits) */
+int pc_wait(PCond* c, PMutex* m, i64 timeout_ns) {
+    int r;
+    pm_wait_note(m, __builtin_return_address(0), 1);
+    r = cond_wait(c, m, timeout_ns);
+    pm_wait_note(NULL, NULL, 0);
+    return r;
 }
 
 /* ================================================================ threads */
@@ -430,7 +438,10 @@ int plat_ww_scan(u8* p, u64 size, void (*cb)(u8* p, u64 size)) {
         int i, n;
         memset(&arg, 0, sizeof arg);
         arg.size = sizeof arg;
-        arg.flags = PM_SCAN_WP_MATCHING | PM_SCAN_CHECK_WPASYNC;
+        /* no PM_SCAN_CHECK_WPASYNC: a range not registered for the write watch (an owned span, in minor mode for its
+           trap: plat_trap_arm) is skipped rather than failing the scan with EPERM. Its consumers use the ownership
+           map (docs/GPU_OWNERSHIP.md) */
+        arg.flags = PM_SCAN_WP_MATCHING;
         arg.start = start;
         arg.end = end;
         arg.vec = (u64)(uintptr_t)regions;

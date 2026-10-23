@@ -25,6 +25,7 @@ typedef struct {
     u8 tainted[256];
     int taint_known;
     int ftz_float; /* the module preserves signed zeros (SignedZeroInfNanPreserve): float_ftz flushes with a float test */
+    int soft_ftz_on; /* FTZ instructions flush their operands and results with float_ftz (SH_FTZ_EMULATE's way) */
     /* A pure instruction's guard while it is translated: it runs unguarded and each register, predicate and flag it
        writes keeps its old value where the guard is false, in place of a branch around it. 0 otherwise */
     u32 guard;
@@ -50,6 +51,7 @@ typedef struct {
 int g_shader_texture_arrays;
 int g_shader_stage_point_size;
 int g_shader_output_layer = 1;
+int g_shader_viewport_index = 3;
 int g_shader_geometry = 1;
 int g_shader_float16 = 1;
 int g_shader_tessellation = 1;
@@ -1040,10 +1042,19 @@ static u32 integer_mul_high(DirectCtx* c, u32 lhs, u32 rhs, int signed_lhs, int 
     return high;
 }
 static int gbuf_tag(int stage, u32 index, u32 offset) {
-    u32 end = stage == ST_CS ? 0x410 : 0x830;
     /* The vertex system buffer also supplies a bare 64-bit output pointer at 0xb0. */
     if (stage == ST_VS && index == 0 && offset == 0xb0) return 0xb1;
-    return index == 0 && offset >= 0x110 && offset < end && !(offset & 15) ? (int)offset + 1 : 0;
+    return index == 0 && shader_gbuf_sized(stage, offset) && !(offset & 15) ? (int)offset + 1 : 0;
+}
+/* A bare 64-bit address in a constant buffer of the program's own (1 to 17: cbuf 0 is NVN's, its descriptors and
+   system values), 16-byte aligned as Eden requires of one (SH_GBUF_*). Taken only where neither an NVN descriptor
+   (gbuf_tag) nor a register already holding a base explains the access, and not for compute dispatches, which copy
+   each buffer whole and would have no size for one. Without it such a graphics program wasn't translated, and its
+   draws were skipped: one game's terrain, all of it */
+static int gbuf_tag_any(int stage, u32 index, u32 offset) {
+    return stage != ST_CS && index > 0 && index < 18 && offset < 0x10000 && !(offset & 15)
+               ? (int)((index << 16) | offset) + 1
+               : 0;
 }
 static int texs_outputs(u64 w, u32 regs[4], u32 comps[4]) {
     u32 da = B(w, 0, 8), db = B(w, 28, 8), sw = B(w, 50, 3);
@@ -1511,7 +1522,8 @@ static u32 gbuf_word_index(DirectCtx* c, int stage, u32 slot, u32 word) {
 }
 
 static u32 global_atomic_pointer(DirectCtx* c, int stage, u32 slot, u32 base_off, u32 a, u64 w) {
-    u32 base = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, base_off));
+    u32 base = cbuf_read_dynamic(c, SH_GBUF_BANK(base_off),
+                                 spv_emit_constant_u32(&c->emit, c->u32_type, SH_GBUF_OFFSET(base_off)));
     u32 immediate = (u32)((i32)(B(w, 28, 20) << 12) >> 12);
     u32 address = spv_emit_iadd_u32(&c->emit, c->u32_type, reg_read(c, a),
                                     spv_emit_constant_u32(&c->emit, c->u32_type, immediate));
@@ -1650,7 +1662,7 @@ static int supported(u64 w, int op) {
             u32 addr = B(w, 20, 10), count = B(w, 47, 2) + 1;
             if (B(w, 8, 8) != 255 || !(B(w, 0, 8) + count <= 255 || (B(w, 0, 8) == 255 && count == 1))) return 0;
             if (B(w, 31, 1)) return addr + count * 4 <= 0x200;
-            return ((addr == 0x64 || addr == 0x6c) && count == 1) || (addr >= 0x70 && addr + count * 4 <= 0x80) ||
+            return ((addr == 0x64 || addr == 0x68 || addr == 0x6c) && count == 1) || (addr >= 0x70 && addr + count * 4 <= 0x80) ||
                    (addr >= 0x80 && addr + count * 4 <= 0x280) || (addr >= 0x2c0 && addr + count * 4 <= 0x2e0);
         }
         /* OUT emits and ends geometry primitives on the stream its third operand names */
@@ -2269,12 +2281,17 @@ static void global_dynamic(DirectCtx* c, int stage, u64 w, int op, const u32* gb
         for (k = 0; k < words; k++) reg_write(c, d + k, c->zero);
     for (int slot = 0; slot < ngbuf; slot++) {
         u32 then_label, merge_label, base_lo, base_hi, size, relative, borrow, inside;
+        u32 bank = SH_GBUF_BANK(gbuf_off[slot]), at = SH_GBUF_OFFSET(gbuf_off[slot]);
         if (gbuf_off[slot] == 0xb0) continue; /* the vertex stage's bare pointer, a buffer of its own */
-        base_lo = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot]));
-        base_hi = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot] + 4));
-        size = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot] + 8));
-        size = spv_emit_select(&c->emit, c->u32_type, spv_emit_i_equal(&c->emit, c->bool_type, size, c->zero),
-                               spv_emit_constant_u32(&c->emit, c->u32_type, 16), size);
+        base_lo = cbuf_read_dynamic(c, bank, spv_emit_constant_u32(&c->emit, c->u32_type, at));
+        base_hi = cbuf_read_dynamic(c, bank, spv_emit_constant_u32(&c->emit, c->u32_type, at + 4));
+        /* a bare address has no size beside it: the cap below, of which the renderer binds what is mapped */
+        if (shader_gbuf_sized(stage, gbuf_off[slot])) {
+            size = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, at + 8));
+            size = spv_emit_select(&c->emit, c->u32_type, spv_emit_i_equal(&c->emit, c->bool_type, size, c->zero),
+                                   spv_emit_constant_u32(&c->emit, c->u32_type, 16), size);
+        } else
+            size = spv_emit_constant_u32(&c->emit, c->u32_type, 16u << 20);
         size = spv_emit_select(
             &c->emit, c->u32_type,
             spv_emit_u_less(&c->emit, c->bool_type, spv_emit_constant_u32(&c->emit, c->u32_type, 16u << 20), size),
@@ -2339,6 +2356,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     u8 outputs_used[32] = {0};
     int indexed_store = 0;
     int position_used = 0, layer_output_used = 0, layer_input_used = 0, point_size_used = 0;
+    int viewport_used = 0;
     /* the stages between the vertex and fragment ones: their input arrays' length (32 for tessellation, the input
        primitive's vertices for geometry), the control program's output vertices, and what they read and write */
     int between = stage == ST_TCS || stage == ST_TES || stage == ST_GS;
@@ -2594,6 +2612,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                     inputs_used[(location - 0x80) >> 4] = 1;
                 else if (location == 0x64)
                     layer_output_used = 1;
+                else if (location == 0x68)
+                    viewport_used = 1;
                 else if (location == 0x6c)
                     point_size_used = 1;
                 else if (location >= 0x2c0 && location < 0x2e0) {
@@ -3314,6 +3334,10 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
        different iterations, and VOTE, SHFL and BAR would see part of the warp. Each iteration runs only the lanes
        at the subgroup's lowest pc, as the hardware reconverges: lanes ahead wait for the others to reach them. */
     converge = has_flow && can_subgroup && (needs_subgroup || has_barrier || needs_derivatives);
+    /* FTZ per instruction: without the execution mode, or with it where some FADD, FMUL or FFMA keeps subnormals (the
+       mode is the whole module's). Never on a device that flushes by itself, which also flushes those that keep them:
+       the flush would change no bit */
+    int soft_ftz_on = can_flush != SH_FTZ_NATIVE && (can_flush == SH_FTZ_EMULATE || fp32_preserve);
     if (needs_shared && (stage != ST_CS || si->shared_size <= 0)) return direct_reject(si, "shared memory size");
     for (int i = 0; i < texture_count; i++)
         if (textures[i].shadow && (si->tex_int_mask & (1ull << i))) return direct_reject(si, "integer shadow texture");
@@ -3344,11 +3368,13 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
            compiler's unused direct-export stores do not require a guest global-buffer descriptor. */
         if (op == O_S2R && B(w, 20, 8) == 0x15)
             tag = 0xcbe;
-        else if (op == O_MOV_C)
+        else if (op == O_MOV_C) {
             tag = gbuf_tag(stage, B(w, 34, 5), B(w, 20, 14) * 4);
-        else if (op == O_LDC && a == 255 && (B(w, 48, 3) == 4 || B(w, 48, 3) == 5))
+            if (!tag) tag = gbuf_tag_any(stage, B(w, 34, 5), B(w, 20, 14) * 4);
+        } else if (op == O_LDC && a == 255 && (B(w, 48, 3) == 4 || B(w, 48, 3) == 5)) {
             tag = gbuf_tag(stage, B(w, 36, 5), (u32)(i32)(i16)B(w, 20, 16));
-        else if (op == O_MOV_R)
+            if (!tag) tag = gbuf_tag_any(stage, B(w, 36, 5), (u32)(i32)(i16)B(w, 20, 16));
+        } else if (op == O_MOV_R)
             tag = b == 255 ? 0 : gtags[b];
         else if (op == O_IADD32I && a < 255)
             tag = gtags[a];
@@ -3357,6 +3383,14 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         else if (op == O_IADD_C) {
             tag = gbuf_tag(stage, B(w, 34, 5), B(w, 20, 14) * 4);
             if (!tag && B(w, 48, 2) != 2 && a < 255) tag = gtags[a];
+            /* an index plus a bare address of the program's own, neither negated. Of two such constants added
+               (an offset into the buffer, then its address), the one nearest the access is the base, as Eden's
+               breadth-first search back from the access finds it: one game adds c[16][0x10], an offset, and then
+               c[6][0x0], the address. An NVN descriptor's address already in Ra stays the base */
+            if (!B(w, 48, 2) && (!tag || tag > 0xFFFF)) {
+                int bare = gbuf_tag_any(stage, B(w, 34, 5), B(w, 20, 14) * 4);
+                if (bare) tag = bare;
+            }
             if (B(w, 48, 2) == 1) tag = 0;
         } else if (op == O_IADD_R) {
             tag = B(w, 48, 2) == 1      ? (a < 255 ? gtags[a] : 0)
@@ -3370,15 +3404,17 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                   : cr < 255 && gtags[cr]      ? gtags[cr]
                   : op == O_IADD3_R && b < 255 ? gtags[b]
                                                : 0;
-        } else if (op == O_ISCADD_C && B(w, 48, 2) != 1)
+        } else if (op == O_ISCADD_C && B(w, 48, 2) != 1) {
             tag = gbuf_tag(stage, B(w, 34, 5), B(w, 20, 14) * 4);
-        else if (op == O_ISCADD_R && B(w, 48, 2) != 1 && b < 255)
+            if (!tag) tag = gbuf_tag_any(stage, B(w, 34, 5), B(w, 20, 14) * 4);
+        } else if (op == O_ISCADD_R && B(w, 48, 2) != 1 && b < 255)
             tag = gtags[b];
         /* LEA's low word adds the base the same way, with its carry out for the high word's LEA.HI.X; negated
            (bit 45) or with a carry in (bit 46) it is no base plus an index */
-        else if (op == O_LEA_LC && !B(w, 45, 2))
+        else if (op == O_LEA_LC && !B(w, 45, 2)) {
             tag = gbuf_tag(stage, B(w, 34, 5), B(w, 20, 14) * 4);
-        else if (op == O_LEA_LR && !B(w, 45, 2) && b < 255)
+            if (!tag) tag = gbuf_tag_any(stage, B(w, 34, 5), B(w, 20, 14) * 4);
+        } else if (op == O_LEA_LR && !B(w, 45, 2) && b < 255)
             tag = gtags[b];
         if (tag == 0xb1 && op != O_MOV_C && op != O_LDC && op != O_MOV_R) tag = 0;
         if (op == O_LDG || op == O_STG || op == O_RED || op == O_ATOM || op == O_ATOM_CAS) {
@@ -3425,8 +3461,11 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 }
                 gb_at[i] = (u8)(slot + 1);
                 if (op != O_LDG) gbuf_wmask |= 1u << slot;
-                cbuf_used[0] = 1;
-                if ((descriptor | 15u) + 1 > cbuf_max[0]) cbuf_max[0] = (descriptor | 15u) + 1;
+                {
+                    u32 bank = SH_GBUF_BANK(descriptor), at = SH_GBUF_OFFSET(descriptor);
+                    cbuf_used[bank] = 1;
+                    if ((at | 15u) + 1 > cbuf_max[bank]) cbuf_max[bank] = (at | 15u) + 1;
+                }
             }
         }
         /* every register the instruction writes stops being a pointer, then its destination takes the new tag */
@@ -3457,6 +3496,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
        program's input and output primitives */
     if (stage == ST_TCS && (!out_vertices || out_vertices > 32))
         return direct_reject_with_buffers(si, "patch output vertices", pop_targets, gb_at);
+    if (viewport_used && (stage == ST_TCS || !(g_shader_viewport_index & (stage == ST_GS ? 2 : 1))))
+        return direct_reject_with_buffers(si, "viewport index output unavailable", pop_targets, gb_at);
     if (stage == ST_TCS && (clip_used || layer_output_used || point_size_used))
         return direct_reject_with_buffers(si, "clip distance, layer or point size in tessellation control", pop_targets,
                                           gb_at);
@@ -3497,6 +3538,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         return NULL;
     }
     c->ftz_float = can_preserve;
+    c->soft_ftz_on = soft_ftz_on;
     spv_emit_init(&c->emit, (size_t)n * 20 + 128);
     spv_emit_shader_capability(&c->emit);
     if (stage == ST_TCS || stage == ST_TES) spv_emit_capability(&c->emit, 3); /* Tessellation */
@@ -3516,7 +3558,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     /* the per-instruction flush to zero tests the absolute value, GLSL.std.450's FAbs, where the module keeps signed
        zeros (float_ftz): without the import its OpExtInst named id 0, which NVIDIA's SPIR-V front end (615.78)
        crashed on, a shader of FADD and FMUL with nothing else from the set */
-    if (fp32_flush && (!can_flush || fp32_preserve) && can_preserve) needs_glsl = 1;
+    if (fp32_flush && soft_ftz_on && can_preserve) needs_glsl = 1;
     if (needs_glsl) c->glsl = spv_emit_glsl450_import(&c->emit);
     u32 fn = spv_emit_id(&c->emit), label = spv_emit_id(&c->emit);
     u32 void_type = spv_emit_type_void(&c->emit);
@@ -3547,6 +3589,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     /* Maximum VS interface: point size, position, 32 outputs, 32 inputs, 18 buffers, 32 samplers, push constants. */
     u32 outputs[8], inputs[32] = {0}, input_vec_type[32] = {0}, input_component_type[32] = {0};
     u32 output_attrs[32] = {0}, position = 0, point_size = 0, layer_output = 0, layer_input = 0;
+    u32 viewport_output = 0;
     /* transform feedback: each output word's buffer (0xFF none) and offset, the outputs written to a private vec4,
        and their component outputs (xfb_store) */
     u8 xfb_buf[160], attr_private[32] = {0};
@@ -3599,6 +3642,11 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             if (stage == ST_GS) spv_emit_capability(&c->emit, 24);  /* GeometryPointSize */
             point_size = spv_emit_point_size_output(&c->emit, c->f32_type);
             interfaces[count++] = point_size;
+        }
+        if (viewport_used) {
+            spv_emit_capability(&c->emit, stage == ST_GS ? 57 : 70); /* MultiViewport, ShaderViewportIndex */
+            viewport_output = spv_emit_interface_variable(&c->emit, 3, i32_type, c->u32_type, 0, 10, 0, 0);
+            interfaces[count++] = viewport_output;
         }
         if (layer_output_used) {
             layer_output = spv_emit_layer_output(&c->emit, i32_type);
@@ -3925,7 +3973,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     if (stage == ST_FS) spv_emit_fragment_origin_upper_left(&c->emit, fn);
     if (stage == ST_FS && si->early_fragment_tests) spv_emit_execution_mode(&c->emit, fn, 9, 0, 0); /* EarlyFragmentTests */
     if (depth_output) spv_emit_fragment_depth_replacing(&c->emit, fn);
-    spv_emit_float_controls(&c->emit, fn, fp32_flush && !fp32_preserve && can_flush, can_preserve,
+    spv_emit_float_controls(&c->emit, fn, fp32_flush && !fp32_preserve && can_flush == SH_FTZ_MODE, can_preserve,
                             needs_f64 && can_preserve_f64);
     spv_emit_function_void(&c->emit, void_type, fn, fn_type);
     spv_emit_label(&c->emit, label);
@@ -3947,7 +3995,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     /* On the per-instruction FTZ path, the registers only FTZ float instructions write hold flushed values (from zero,
        their first value): their reads need no flush. Anything else that may write a register taints it, its
        destinations taken wide (d to d+3, and the second field texture instructions write, bits 28 to 35) */
-    if (!can_flush || fp32_preserve) {
+    if (soft_ftz_on) {
         for (u32 i = 11; i < n; i++) {
             if (!IDX_OK(i)) continue;
             if (ftz_writer(insn[i])) continue;
@@ -4338,6 +4386,10 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                     if (point_size)
                         spv_emit_store(&c->emit, point_size,
                                        reg_read_as(c, d + k, c->f32_type));
+                    continue;
+                }
+                if (location == 0x68) {
+                    spv_emit_store(&c->emit, viewport_output, reg_read_as(c, d + k, i32_type));
                     continue;
                 }
                 if (location == 0x64) {
@@ -4901,8 +4953,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             global_dynamic(c, stage, w, op, gbuf_off, ngbuf);
         } else if (op == O_LDG || op == O_STG) {
             u32 slot = gb_at[i] - 1;
-            u32 offset = spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot]);
-            u32 base = cbuf_read_dynamic(c, 0, offset);
+            u32 offset = spv_emit_constant_u32(&c->emit, c->u32_type, SH_GBUF_OFFSET(gbuf_off[slot]));
+            u32 base = cbuf_read_dynamic(c, SH_GBUF_BANK(gbuf_off[slot]), offset);
             u32 immediate = spv_emit_constant_u32(&c->emit, c->u32_type, (u32)((i32)(B(w, 20, 24) << 8) >> 8));
             u32 address = spv_emit_iadd_u32(&c->emit, c->u32_type, reg_read(c, a), immediate);
             address = spv_emit_isub_u32(&c->emit, c->u32_type, address, base);
@@ -5853,7 +5905,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                        : op == O_FMUL32I                                    ? B(w, 53, 2)
                        : op == O_FADD_R || op == O_FADD_C || op == O_FADD_I ? B(w, 44, 1)
                                                                             : B(w, 44, 2);
-            int soft_ftz = (mode & 1) && (!can_flush || fp32_preserve);
+            int soft_ftz = (mode & 1) && c->soft_ftz_on;
             if (soft_ftz) {
                 left = float_ftz(c, left);
                 right = float_ftz(c, right);
@@ -5903,7 +5955,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 right = float_mod(c, right, 0, B(w, 48, 1));
                 addend = float_mod(c, addend, 0, B(w, 49, 1));
             }
-            int soft_ftz = (B(w, 53, 2) & 1) && (!can_flush || fp32_preserve);
+            int soft_ftz = (B(w, 53, 2) & 1) && c->soft_ftz_on;
             if (soft_ftz) {
                 left = float_ftz(c, left);
                 right = float_ftz(c, right);
@@ -7046,6 +7098,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     next.clip_enable = si->clip_enable;
     memcpy(next.gp_skip_mask, si->gp_skip_mask, sizeof next.gp_skip_mask);
     next.uses_clip_mask = clip_used;
+    next.writes_viewport = viewport_used;
     next.rt_int_mask = si->rt_int_mask;
     next.rt_sint_mask = si->rt_sint_mask;
     next.tex_int_mask = si->tex_int_mask;

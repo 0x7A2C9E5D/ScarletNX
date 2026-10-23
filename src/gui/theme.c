@@ -19,7 +19,6 @@ typedef char snx_gui_id_slot[sizeof(((GuiThemes*)0)->ids[0]) == sizeof(((GuiThem
 typedef char snx_gui_word_int[sizeof(GuiStyle) == sizeof(int) && sizeof(GuiRunLayout) == sizeof(int) &&
                                       sizeof(GuiRing) == sizeof(int) && sizeof(GuiLineIn) == sizeof(int) &&
                                       sizeof(GuiAlign) == sizeof(int) && sizeof(GuiPanels) == sizeof(int) &&
-                                      sizeof(GuiHeadPlace) == sizeof(int) && sizeof(GuiTipsPlace) == sizeof(int) &&
                                       sizeof(GuiDialog) == sizeof(int) && sizeof(GuiPicture) == sizeof(int)
                                   ? 1
                                   : -1];
@@ -34,11 +33,8 @@ static const char* const aligns[] = {"left", "center", "right", NULL};
 static const char* const entrances[] = {"none", "typing", "slide", "fade", NULL};
 static const char* const typings[] = {"async", "sync", NULL};
 static const char* const panel_words[] = {"outline", "fill", NULL};
-static const char* const sizings[] = {"fixed", "adaptive", NULL};
 static const char* const flows[] = {"wrap", "slide", NULL};
-static const char* const head_places[] = {"tabs", "below", NULL};
 static const char* const pictures[] = {"none", "square", "round", NULL}; /* GuiPicture's order */
-static const char* const tips_places[] = {"bottom", "top", NULL};
 static const char* const dialogs[] = {"default", "yorha", NULL}; /* GuiDialog's order */
 #define FIELD(f)                    offsetof(GuiTheme, f), sizeof(((GuiTheme*)0)->f)
 #define TEXT(s, k, f, about)        {s, k, GUI_KEY_TEXT, FIELD(f), NULL, 0, about}
@@ -61,10 +57,8 @@ const GuiThemeKey gui_theme_keys[] = {
            SNX_TR_NOOP("a diff's added lines, as failure its removed ones; no screen uses it yet")),
     WORD("head", "style", head, heads, SNX_TR_NOOP("bar: the tabs and the title on a band of ink")),
     FLAG("head", "rule", head_rule, SNX_TR_NOOP("a line under the head")),
-    WORD("head", "place", head_place, head_places,
-         SNX_TR_NOOP("the title after the tabs, or on a row of its own under them")),
     NUMBER("head", "size", title_size, 3, SNX_TR_NOOP("the title's letters, times the text's, 1 to 3")),
-    FLAG("head", "shadow", title_shadow, SNX_TR_NOOP("a shadow under the title's letters, in the dim colour")),
+    FLAG("head", "shadow", title_shadow, SNX_TR_NOOP("a shadow under the title's letters, in the dim color")),
     WORD("head", "picture", picture, pictures,
          SNX_TR_NOOP("the user at the head's right, their nickname and picture in a box: none, square or round")),
     TEXT("head", "menu", title[GUI_SCREEN_MENU], SNX_TR_NOOP("the menu's title")),
@@ -73,25 +67,20 @@ const GuiThemeKey gui_theme_keys[] = {
     TEXT("head", "compiling", title[GUI_SCREEN_COMPILING], SNX_TR_NOOP("a run's title until the game loads")),
     TEXT("head", "loading", title[GUI_SCREEN_LOADING], SNX_TR_NOOP("a run's title once the runner's banner came")),
     TEXT("body", "marker", marker, SNX_TR_NOOP("before each item")),
-    WORD("body", "focus", focus_bar, focuses, SNX_TR_NOOP("the focused box in the focus colour, or on a band of it")),
+    WORD("body", "focus", focus_bar, focuses, SNX_TR_NOOP("the focused box in the focus color, or on a band of it")),
     WORD("body", "panels", panels, panel_words, SNX_TR_NOOP("the boxes outlined or filled")),
-    WORD("body", "sizing", sizing, sizings,
-         SNX_TR_NOOP(
-             "fixed: the list two fifths of every screen, alone on a narrow one; adaptive: as wide as its entries")),
     WORD("body", "text", text, flows, SNX_TR_NOOP("a text too long for its box over its rows, or on one that slides")),
     TEXT("body", "cursor", cursor, SNX_TR_NOOP("in the margin, beside the focused box")),
     WORD(
         "body", "options-dialog", dialog, dialogs,
         SNX_TR_NOOP("a question: default, a box in the middle; yorha, at the foot, its choices at its right above it")),
-    FLAG("backdrop", "grid", grid, SNX_TR_NOOP("a faint grid on the page, in the dim colour")),
-    WORD("tips", "place", tips_place, tips_places,
-         SNX_TR_NOOP("in a box at the foot beside the keys, or on a row under the head")),
+    FLAG("backdrop", "grid", grid, SNX_TR_NOOP("a faint grid on the page, in the dim color")),
     FLAG("tips", "box", tips_box, SNX_TR_NOOP("in a box with a bar at its left, or on the page")),
     FLAG("tips", "wrap", tips_wrap, SNX_TR_NOOP("over the foot's rows, or on one row that slides")),
     WORD("footer", "style", footer, styles, SNX_TR_NOOP("bar: on a band of ink; none: no Status box")),
     FLAG("footer", "rule", footer_rule, SNX_TR_NOOP("a line over the foot")),
     FLAG("footer", "box", footer_box, SNX_TR_NOOP("the keys in a box with a bar at its left, or on the page")),
-    WORD("run", "layout", run, layouts, SNX_TR_NOOP("steps: the loading screen; the keys below but colours are its")),
+    WORD("run", "layout", run, layouts, SNX_TR_NOOP("steps: the loading screen, in the colors of the keys below")),
     COLOUR("run", "page", run_colors.page, SNX_TR_NOOP("the loading screen's background")),
     COLOUR("run", "ink", run_colors.ink, SNX_TR_NOOP("its text, the cursor, the ring's turning bar")),
     COLOUR("run", "soft", run_colors.soft, SNX_TR_NOOP("older steps, the name, the inner ring")),
@@ -121,13 +110,13 @@ const GuiThemeKey gui_theme_keys[] = {
            SNX_TR_NOOP("a character of the running line, any other line whole")),
     WORD("transitions", "typing", typing_sync, typings, SNX_TR_NOOP("sync: one line at a time")),
     NUMBER("transitions", "blink_ms", blink_ms, 10000,
-           SNX_TR_NOOP("the cursor's, the prompt's and Setup device keys' blink")),
+           SNX_TR_NOOP("the cursor's, the prompt's and Install Keys' blink")),
     NUMBER("transitions", "scroll_ms", scroll_ms, 10000,
            SNX_TR_NOOP("a line too long for its row slides a column each")),
     COLOUR("splash", "page", splash_page, SNX_TR_NOOP("behind the drawing")),
     NUMBER("splash", "ms", splash_ms, 10000, SNX_TR_NOOP("how long; 0: none")),
     NUMBER("splash", "chance", splash_chance, 100,
-           SNX_TR_NOOP("the boots in 100 that show this theme's, the default's the others")),
+           SNX_TR_NOOP("how many boots in 100 show this theme's splash; the others show the default's")),
     {NULL, NULL, GUI_KEY_TEXT, 0, 0, NULL, 0, NULL}};
 static const char* const sections[][2] = {
     {"theme", "Who made it. The theme's id is its folder's name."},
@@ -255,7 +244,7 @@ static void takes(const GuiThemeKey* k, char* out, size_t size) {
     size_t n = 0;
     int i, count = 0;
     switch (k->type) {
-        case GUI_KEY_COLOUR: snprintf(out, size, "%s", snx_tr("a colour as #RRGGBB")); return;
+        case GUI_KEY_COLOUR: snprintf(out, size, "%s", snx_tr("a color as #RRGGBB")); return;
         case GUI_KEY_FLAG: snprintf(out, size, "%s", snx_tr("true or false")); return;
         case GUI_KEY_NUMBER: snprintf(out, size, snx_tr("a whole number from 0 to %lu"), (unsigned long)k->max); return;
         case GUI_KEY_TEXT:
@@ -329,6 +318,11 @@ static void apply(GuiTheme* t, const char* section, const char* key, const char*
     }
     if (!strcmp(section, "body") && (!strcmp(key, "gap") || !strcmp(key, "scroll"))) { /* docs/DEPRECATIONS.md */
         say(to, snx_tr("[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"), key, value);
+        return;
+    }
+    if ((!strcmp(section, "head") && !strcmp(key, "place")) || (!strcmp(section, "tips") && !strcmp(key, "place")) ||
+        (!strcmp(section, "body") && !strcmp(key, "sizing"))) { /* docs/DEPRECATIONS.md */
+        say(to, snx_tr("[%s] %s = %s does nothing: ui.txt lays out the screens now (delete it)"), section, key, value);
         return;
     }
     k = gui_theme_key(section, key);

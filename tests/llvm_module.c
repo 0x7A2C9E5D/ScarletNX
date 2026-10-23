@@ -7,7 +7,11 @@
    misses, from the same state; every register, the flags, FP state, stack memory and the SVC calls must match.
    CPU.poll is set when each run starts: the AOT code must call rt->poll at the loop's backward branch, resuming at
    its head (the interpreter polls on any taken branch). A second LLVM module built with --hook-direct-calls must run
-   the same, with main's BL to func reaching func through CPU.disp, where a wrapper counts it.
+   the same, with main's BL to func reaching func through CPU.disp, where a wrapper counts it. With func's functions
+   stale (SnxModule.stale, as the runtime marks them when the guest patches their code: SNX_ABI 14) and out of
+   CPU.disp, main's direct BL must leave the AOT code at func's entry for rt->miss, and the run end the same. With
+   main made stale while it runs (from rt->poll, as a mod patches its caller from inside a call), the next call that
+   returns into main must leave its AOT code too, for the dispatch loop the runtime's threads run, and end the same.
      llvm_module SCARLETNX REPO CLANG */
 #include "common/cpu/aarch64/a64.h"
 #include "common/cpu/aarch64/a64_emit.h"
@@ -71,6 +75,8 @@ typedef struct {
     int polls; /* rt->poll calls, and c->pc at the first */
     u64 poll_pc;
     int watched; /* calls through the dispatch entry run() wrapped */
+    int stale, stale_misses; /* functions run() made stale, and rt->miss calls at the pc it made them stale at */
+    int stale_on_poll, left;  /* main made stale at the first poll; returns to run()'s loop before the end */
 } Run;
 static Run* current;
 static GuestFn watched_entry;
@@ -78,13 +84,36 @@ static void watch(CPU* c, u64 e) {
     ++current->watched;
     watched_entry(c, e);
 }
+static GuestFn reference; /* the templates' interpreter, built by build_reference */
+static u64 g_stale_pc;
+static void stale_miss(CPU* c, u64 pc) {
+    if (pc == g_stale_pc) ++current->stale_misses;
+    reference(c, pc);
+}
+/* what jit_code_changed does to the functions covering pc: out of dispatch first, then the byte. Their number */
+static const SnxModule* g_running;
+static int make_stale(CPU* c, u64 pc) {
+    u64 slots = (g_running->code_hi - g_running->code_lo) / 4, k;
+    u32 f;
+    int n = 0;
+    for (f = 0; f < g_running->nfns; ++f)
+        if (pc >= g_running->fn_lo[f] && pc - g_running->fn_lo[f] < g_running->fn_len[f]) {
+            for (k = 0; k < slots; ++k)
+                if (c->disp[k] == g_running->fn[f]) c->disp[k] = NULL;
+            g_running->stale[f] = 1;
+            ++n;
+        }
+    return n;
+}
 /* the runtime takes the thread off its core here, then gives it back: once, the flag cleared */
 static void on_poll(CPU* c) {
-    if (!current->polls++) current->poll_pc = c->pc;
+    if (!current->polls++) {
+        current->poll_pc = c->pc;
+        if (current->stale_on_poll) current->stale += make_stale(c, g_running->mods[0].base + 0x80);
+    }
     c->poll = 0;
 }
 
-static GuestFn reference; /* the templates' interpreter, built by build_reference */
 #ifdef _WIN32
 static HMODULE reference_library; /* unloaded before the fixture goes: Windows deletes no loaded library */
 #else
@@ -94,7 +123,7 @@ static void* reference_library;
 /* the interpreter of a64_templates.inc's C, compiled into a library of its own with compiler and loaded: 0, or -1 */
 static int build_reference(const char* root, const char* repo, const char* compiler) {
     char *source = snx_path_join(root, "reference.c"), *include = snx_path_join(repo, "src"),
-         *output = NULL;
+         *tests = snx_path_join(repo, "tests"), *output = NULL;
 #ifdef _WIN32
     char* library = snx_path_join(root, "reference.dll");
 #else
@@ -122,6 +151,8 @@ static int build_reference(const char* root, const char* repo, const char* compi
     args[n++] = "-w";
     args[n++] = "-I";
     args[n++] = include;
+    args[n++] = "-I";
+    args[n++] = tests;
     args[n++] = source;
     args[n++] = "-o";
     args[n++] = library;
@@ -139,12 +170,14 @@ static int build_reference(const char* root, const char* repo, const char* compi
 #endif
     free(source);
     free(include);
+    free(tests);
     free(library);
     return reference ? 0 : -1;
 }
 
 /* watch_at: an offset in the image whose dispatch entry counts its calls (0: none) */
-static int run(const char* path, const unsigned char* image, int interp, u64 watch_at, Run* out) {
+static int run(const char* path, const unsigned char* image, int interp, u64 watch_at, u64 stale_at, int stale_on_poll,
+               Run* out) {
     typedef const SnxModule* (*ModuleFn)(void);
     ModuleFn get;
     const SnxModule* mod;
@@ -161,7 +194,9 @@ static int run(const char* path, const unsigned char* image, int interp, u64 wat
 #endif
     if (!get) return -1;
     mod = get();
+    g_running = mod;
     memset(out, 0, sizeof(*out));
+    out->stale_on_poll = stale_on_poll;
     memset(&rt, 0, sizeof(rt));
     rt.svc = svc;
     rt.undef = undefined;
@@ -178,6 +213,11 @@ static int run(const char* path, const unsigned char* image, int interp, u64 wat
         watched_entry = *slot;
         if (watched_entry) *slot = watch;
     }
+    if (stale_at) {
+        out->stale = make_stale(&out->cpu, mod->mods[0].base + stale_at);
+        g_stale_pc = mod->mods[0].base + stale_at;
+        rt.miss = stale_miss;
+    }
     out->cpu.mem = memory;
     out->cpu.rt = &rt;
     out->cpu.code_lo = mod->code_lo;
@@ -187,9 +227,19 @@ static int run(const char* path, const unsigned char* image, int interp, u64 wat
     out->cpu.poll = 1;
     if (interp)
         reference(&out->cpu, mod->mods[0].base);
-    else if (out->cpu.disp[0])
+    else if (out->cpu.disp[0]) {
+        int steps;
         out->cpu.disp[0](&out->cpu, mod->mods[0].base);
+        /* the runtime's thread loop: what the code left at c->pc runs through dispatch, or rt->miss */
+        for (steps = 0; out->cpu.pc && out->cpu.pc != 0xDEAD0000 && steps < 1000; ++steps) {
+            u64 pc = out->cpu.pc;
+            GuestFn f = pc >= mod->code_lo && pc < mod->code_hi ? out->cpu.disp[(pc - mod->code_lo) / 4] : NULL;
+            ++out->left;
+            (f ? f : rt.miss)(&out->cpu, pc);
+        }
+    }
     memcpy(out->memory, memory + mod->mods[0].base, MEMORY);
+    if (stale_at || stale_on_poll) memset(mod->stale, 0, mod->nfns); /* the module's own data, should it stay loaded */
     free(memory);
     free(out->cpu.disp);
 #ifdef _WIN32
@@ -235,7 +285,7 @@ static void differences(const Run* a, const Run* b, const char* what) {
 }
 
 int main(int argc, char** argv) {
-    static Run runs[2], hooked, unhooked;
+    static Run runs[2], hooked, unhooked, stale, stale_running;
     unsigned char image[IMAGE];
     char *root, *input, *self, *out[2], *module[2], *text = NULL;
     const char* args[24];
@@ -294,11 +344,21 @@ int main(int argc, char** argv) {
         text = NULL;
         if (b) break;
         for (interp = 0; interp < 2; ++interp)
-            check(!run(module[0], image, interp, 0, &runs[interp]), interp ? "interpreter run" : "AOT run");
+            check(!run(module[0], image, interp, 0, 0, 0, &runs[interp]), interp ? "interpreter run" : "AOT run");
     }
     /* func, which main's BL at 0x90 calls on each pass of the loop */
-    check(!run(module[0], image, 0, 0xE8, &unhooked) && !run(module[1], image, 0, 0xE8, &hooked),
+    check(!run(module[0], image, 0, 0xE8, 0, 0, &unhooked) && !run(module[1], image, 0, 0xE8, 0, 0, &hooked),
           "hooked and unhooked runs");
+    check(!run(module[0], image, 0, 0, 0xE8, 0, &stale), "a run with func stale");
+    check(!run(module[0], image, 0, 0, 0, 1, &stale_running), "a run with main made stale while it runs");
+    check(stale_running.stale > 0 && stale_running.left > 0,
+          "a call returning into a function made stale while it ran leaves its AOT code for dispatch");
+    if (!same(&runs[0], &stale_running)) differences(&runs[0], &stale_running, "stale while running");
+    check(same(&runs[0], &stale_running), "the run with main made stale while it runs is the same");
+    check(runs[0].left == 0, "an ordinary run never leaves its AOT code early");
+    check(stale.stale > 0 && stale.stale_misses > 0, "a stale function's direct caller reaches it through rt->miss");
+    if (!same(&runs[0], &stale)) differences(&runs[0], &stale, "stale");
+    check(same(&runs[0], &stale), "the run with func stale is the same");
     check(same(&runs[0], &hooked), "the --hook-direct-calls module runs the same");
     check(!unhooked.watched && hooked.watched > 0,
           "a direct BL reaches its function through CPU.disp only with --hook-direct-calls");

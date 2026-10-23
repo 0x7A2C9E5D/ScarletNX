@@ -569,7 +569,7 @@ int snx_build_module_arm(SnxProgram* loaded, const SnxCodegenOptions* options, c
     memset(&d, 0, sizeof(d));
     memset(&q, 0, sizeof(q));
     memset(&linked, 0, sizeof(linked));
-    if (!loaded->module_count) return snx_error("No modules to generate");
+    if (!loaded->module_count) return snx_error("no modules to generate");
     if (snx_ir_init(error, sizeof(error))) return snx_error("%s", error);
     d.program = loaded;
     start = snx_seconds();
@@ -631,12 +631,12 @@ int snx_build_module_arm(SnxProgram* loaded, const SnxCodegenOptions* options, c
     }
     exports[0] = "snx_module_arm";
     if (snx_link(inputs, n, exports, 1, base_name(build->output), &linked, error, sizeof(error))) {
-        snx_error("Linking failed: %s", error);
+        snx_error("linking failed: %s", error);
         goto done;
     }
     tmp = snx_format("%s.tmp", build->output);
     if (snx_write_file(tmp, linked.data, linked.size) || snx_replace(tmp, build->output)) {
-        snx_error("Linking failed: cannot write %s", build->output);
+        snx_error("linking failed: cannot write %s", build->output);
         if (snx_is_file(tmp)) snx_remove_tree(tmp);
         goto done;
     }

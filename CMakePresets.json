@@ -206,7 +206,17 @@
         "SNX_DEPLOY": "OFF",
         "SNX_BUILD_GNUABI": "OFF",
         "SNX_BUILD_3DS": "OFF",
+        "SNX_BUILD_VITA": "OFF",
         "BUILD_TESTING": "OFF"
+      }
+    },
+    {
+      "name": "ios-simulator",
+      "displayName": "The iOS simulator on Apple silicon, built like the ios preset; LLVM_DIR names scripts/apple-llvm.sh iossim's",
+      "inherits": "ios",
+      "cacheVariables": {
+        "CMAKE_OSX_SYSROOT": "iphonesimulator",
+        "CMAKE_Swift_COMPILER_TARGET": "arm64-apple-ios16.0-simulator"
       }
     }
   ],
@@ -258,6 +268,10 @@
     {
       "name": "ios",
       "configurePreset": "ios"
+    },
+    {
+      "name": "ios-simulator",
+      "configurePreset": "ios-simulator"
     }
   ],
   "testPresets": [

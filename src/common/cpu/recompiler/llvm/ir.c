@@ -5,6 +5,7 @@
 #include <llvm-c/Analysis.h>
 #include <llvm-c/BitReader.h>
 #include <llvm/Config/llvm-config.h>
+#include <llvm-c/Support.h>
 #include <llvm-c/Transforms/PassBuilder.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,10 @@
 /* ---- setup ---- */
 
 SnxIrFeatures snx_ir_host;
+/* snx_ir_slp's */
+static struct {
+    int slp_off;
+} g_ir;
 static const SnxIrFeatures generic_features;
 
 static int has_feature(const char* features, const char* name) {
@@ -34,6 +39,14 @@ static int has_feature(const char* features, const char* name) {
 static int riscv_triple(const char* triple) { return !strncmp(triple, "riscv64", 7); }
 static int loongarch_triple(const char* triple) { return !strncmp(triple, "loongarch64", 11); }
 
+void snx_ir_slp_vectorizer(int on) {
+    /* the pass builder's SLPVectorization leaves default<O?>'s slp-vectorizer in (LLVM 22): its own switch stops it */
+    static const char* const off[] = {"scarletnx", "-vectorize-slp=false"};
+    if (on || g_ir.slp_off) return;
+    LLVMParseCommandLineOptions(2, off, NULL);
+    g_ir.slp_off = 1;
+}
+int snx_ir_slp(void) { return !g_ir.slp_off; }
 int snx_ir_init(char* error, size_t error_size) {
     char* triple;
     int x86, arm, ppc, other;
@@ -62,6 +75,7 @@ int snx_ir_init(char* error, size_t error_size) {
         snx_ir_host.crc32 = snx_ir_host.sse42 && has_feature(f, "crc32");
         snx_ir_host.pclmul = has_feature(f, "pclmul");
         snx_ir_host.aes = has_feature(f, "aes");
+        snx_ir_host.sha_ni = has_feature(f, "sha");
         snx_ir_host.gfni = has_feature(f, "gfni");
         snx_ir_host.fma = has_feature(f, "fma");
         snx_ir_host.avx2 = has_feature(f, "avx2");
@@ -70,6 +84,14 @@ int snx_ir_init(char* error, size_t error_size) {
         snx_ir_host.avx512bitalg = has_feature(f, "avx512bitalg");
         LLVMDisposeMessage(f);
         snx_ir_host.x86 = 1; /* last: snx_ir_init may run again, the features stay as read */
+    }
+    if (arm && !snx_ir_host.aarch64) {
+        char* f = LLVMGetHostCPUFeatures();
+        snx_ir_host.arm_aes = has_feature(f, "aes") || has_feature(f, "crypto");
+        snx_ir_host.arm_sha2 = has_feature(f, "sha2") || has_feature(f, "crypto");
+        snx_ir_host.arm_crc = has_feature(f, "crc");
+        LLVMDisposeMessage(f);
+        snx_ir_host.aarch64 = 1; /* last, as x86 above */
     }
     return x86 || arm || ppc || other ? 0 : -1;
 }
