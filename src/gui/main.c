@@ -7715,7 +7715,10 @@ static void pump(App* app) {
         for (int reads = 0; reads < 16; ++reads) {
             int n = gui_process_read(app->process, buffer, sizeof(buffer));
             if (n <= 0) break;
-            if (app->run_out) fwrite(buffer, 1, (size_t)n, app->run_out);
+            if (app->run_out) { /* flushed: a run the system ends (iOS, out of memory) leaves what it printed */
+                fwrite(buffer, 1, (size_t)n, app->run_out);
+                fflush(app->run_out);
+            }
             gui_console_feed(&app->console, buffer, (size_t)n);
             gui_steps_feed(&app->steps, buffer, (size_t)n, now_ms(app));
             app->has_output = true;
@@ -8529,13 +8532,87 @@ static char* log_summary(const char* path) {
     free(markdown);
     return out;
 }
+/* Log level 2 (Log level under Debug, the runtime's detail): the shared log holds everything the app knows, whole
+   files rather than their ends */
+static bool log_everything(App* app) {
+    const char* level = gui_settings_value(settings_of(app), "log");
+    return level && !strcmp(level, "2");
+}
+/* text and more joined, both freed */
+static char* joined(char* text, char* more) {
+    char* out = snx_format("%s%s", text, more);
+    free(text);
+    free(more);
+    return out;
+}
+/* a file whole under its title, or a line saying it is not there */
+static char* whole_file(const char* title, const char* path) {
+    char* text = path && snx_is_file(path) ? log_tail(path, (size_t)-1) : NULL;
+    char* out = snx_format("\n== %s: %s ==\n%s\n", title, path ? path : "(none)", text ? text : "not there");
+    free(text);
+    return out;
+}
+/* a folder's files and their sizes, depth folders further in: names and sizes only, never a file's content */
+static char* folder_listing(const char* path, const char* indent, int depth) {
+    char **names = NULL, *out = snx_strdup("");
+    size_t count = 0, i;
+    snx_list_dir(path, &names, &count);
+    for (i = 0; i < count; ++i) {
+        char* file = snx_path_join(path, names[i]);
+        if (file && snx_is_dir(file)) {
+            char *deeper = snx_format("%s    ", indent), *inner = depth ? folder_listing(file, deeper, depth - 1) : NULL;
+            out = joined(out, snx_format("%s%s/\n%s", indent, names[i], inner ? inner : ""));
+            free(inner);
+            free(deeper);
+        } else if (file)
+            out = joined(out, snx_format("%s%s  %llu bytes\n", indent, names[i],
+                                         (unsigned long long)snx_file_size(file)));
+        free(file);
+    }
+    snx_free_strings(names, count);
+    return out;
+}
+/* what Log level 2 adds to the shared log: the app's console log and error log whole, the picks kept for the games and
+   the folders, what the data folder holds, and the device's state now */
+static char* everything_else(App* app) {
+    static const char* const folders[] = {"dumps", "keys", "recompiled", "logs"};
+    char *text = snx_strdup("\n== Log level 2: everything the app knows ==\n"), *logs, *file;
+    size_t i;
+    logs = app->cwd ? snx_path_join(app->cwd, "logs") : NULL;
+    if (logs) {
+        file = snx_path_join(logs, "scarletnx-console.log");
+        text = joined(text, whole_file("the app's console log", file));
+        free(file);
+        file = snx_path_join(logs, "scarletnx-error.log");
+        text = joined(text, whole_file("the error log", file));
+        free(file);
+    }
+    free(logs);
+    text = joined(text, whole_file("settings", app->settings_file));
+    text = joined(text, whole_file("folders", app->folders_file));
+    text = joined(text, whole_file("app", app->app_file));
+#ifdef SDL_PLATFORM_APPLE
+    {
+        char stats[512] = "";
+        gui_apple_stats(stats, sizeof stats);
+        text = joined(text, snx_format("\n== the device now ==\n%s\n", stats));
+    }
+#endif
+    for (i = 0; app->cwd && i < sizeof folders / sizeof *folders; ++i) {
+        char *folder = snx_path_join(app->cwd, folders[i]), *list = folder ? folder_listing(folder, "  ", 2) : NULL;
+        text = joined(text, snx_format("\n== files in %s ==\n%s", folder ? folder : folders[i], list ? list : ""));
+        free(list);
+        free(folder);
+    }
+    return text;
+}
 /* the message on the screen, the summary of the newest game log, the last run's output and that log, as scarletnx.log in the data folder's state
    folder (the working folder without one: started from the desktop, that is the home folder), then on Android handed
    to the share sheet, elsewhere its path copied */
 static void share_log(App* app) {
-    char *game, *run, *played, *summary, *text, *saved, *state = NULL;
+    char *game, *run, *played, *summary, *more, *text, *saved, *state = NULL;
     const char* folder;
-    bool written;
+    bool written, everything;
     folder = app->cwd;
     if (app->data_dir && snx_app_dir(app->data_dir)) state = snx_app_kind_dir(app->data_dir, SNX_USER_STATE);
     if (state && snx_mkdirs(state)) {
@@ -8545,13 +8622,15 @@ static void share_log(App* app) {
     if (state) folder = state;
     left_behind(app);
     game = newest_log(app);
-    run = log_tail(app->run_log, 1 << 20);
-    played = log_tail(game, 4 << 20);
+    everything = log_everything(app);
+    run = log_tail(app->run_log, everything ? (size_t)-1 : 1 << 20);
+    played = log_tail(game, everything ? (size_t)-1 : 4 << 20);
     summary = game ? log_summary(game) : snx_strdup("");
-    text = snx_format("%s\nMessage: %s\n%s%s%s%s\n%s== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(),
+    more = everything ? everything_else(app) : snx_strdup("");
+    text = snx_format("%s\nMessage: %s\n%s%s%s%s\n%s== the last run: %s ==\n%s\n\n== %s ==\n%s\n%s", snx_build_info(),
                       app->message, app->left ? app->left : "", app->left_clear ? SAY_LEFT_CLEAR "\n" : "",
                       app->cleaned.count ? "Clean old settings:\n" : "", app->cleaned.text ? app->cleaned.text : "",
-                      summary, app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
+                      summary, app->run_log ? app->run_log : "", run, game ? game : "no game log", played, more);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
     written = saved && !snx_write_file(saved, text, strlen(text));
     if (written) app->log_due = false; /* the crash's log is out */
@@ -8579,6 +8658,7 @@ static void share_log(App* app) {
     free(saved);
     free(text);
     free(summary);
+    free(more);
     free(played);
     free(run);
     free(game);
