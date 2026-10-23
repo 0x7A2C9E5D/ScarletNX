@@ -155,6 +155,15 @@ updates and DLCs, each with a box to check, and Open Mods Folder opens the folde
 first when it isn't there). M on Games opens that box for the game in focus, one with nothing beside it too. The mods
 turned off are kept in `mods_off=` in the game's `.ini`, their folder names with a `/` between two.
 
+Add Mod, in the same box, opens the system's folder picker and copies the folder picked, whole, into the mods folder
+under its own name, the original left where it is; the mod shows checked at once, and the message says where it went.
+The copy goes into a hidden `.<name>.adding` first and takes the mod's name once every file is in, so a copy that
+stops never shows as a mod. It refuses, naming the folder: a name the mods folder has already, a folder inside the
+mods folder or one that holds it, one with neither `exefs/` nor `romfs/`, a name that starts with a dot (the mods list
+hides those), a link inside the folder, and on a phone a folder of an app or a cloud that no path reaches; a file that
+cannot be copied is named with the system's reason. On Android and iOS the box has Add Mod and no Open Mods Folder or
+Open Cheats Folder, as a phone has no file manager to show a folder in.
+
 A mod's `exefs/` changes the game's code, which ScarletNX compiles ahead of time. The game's stamp (`<id>.abi`) records
 the mods' ExeFS files it was recompiled with, and playing it through the driver or the launcher recompiles it when the
 mods played have other ones. Run directly, a game made with other mods' files runs the ExeFS it was made from, and the

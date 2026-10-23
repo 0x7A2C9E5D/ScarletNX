@@ -308,7 +308,10 @@ typedef struct App {
     bool* mods_on; /* each of mods': played, not in mods_off= */
     char *cheats_folder, **cheats; /* the game's cheats folder and its cheats' names (gui_game_cheats), cheats_count */
     size_t cheats_count;
-    bool* cheats_on; /* each of cheats': run, not in cheats_off= */
+    bool* cheats_on;     /* each of cheats': run, not in cheats_off= */
+    Uint32 addon_picked; /* the event the system's picker answers Add Mod's folder with */
+    int addon_adding;    /* the row it was opened for, ROW_ADD_MOD; 0 while none waits */
+    char* adding_game;   /* and the game whose box it was, which the answer goes to only while that box shows */
     bool previewing; /* drawing the theme editor's preview, on a copy of the app put back after it */
     Uint64 splash_until;
     GuiRgb splash_page;
@@ -3074,9 +3077,9 @@ static void users_pointer(App* app, float x, float y, bool click) {
 }
 /* ---- the box of a game's updates and DLCs (gui_game_addons) and mods (gui_game_mods), which opening the game shows,
    as the game's addons= and mods_off= have them picked: its updates as a choice of one (each version installed,
-   newest first, or No update), its DLCs and mods a box to check each by, and Open Mods Folder; then Save, which keeps
-   them in addons= and mods_off=, and Play, which keeps them and plays the game with them, from the picked update's
-   program, else its own ---- */
+   newest first, or No update), its DLCs and mods a box to check each by, Add Mod and Open Mods Folder; then Save,
+   which keeps them in addons= and mods_off=, and Play, which keeps them and plays the game with them, from the picked
+   update's program, else its own ---- */
 static void addons_close(App* app) {
     gui_games_free(&app->addons);
     free(app->addons_game);
@@ -3162,19 +3165,30 @@ static size_t addons_updates(const App* app) {
     while (n < app->addons.count && addon_kind(app, n) == SNX_ADDON_UPDATE) n++;
     return n;
 }
-/* the box's rows: the updates and No update (with any update), the DLCs, the mods, Open Mods Folder, Save, then Play */
-enum { ROW_NO_UPDATE = -1, ROW_SAVE = -2, ROW_PLAY = -3, ROW_MODS_FOLDER = -4, ROW_CHEATS_FOLDER = -5 };
+/* the box's rows: the updates and No update (with any update), the DLCs, the mods, the cheats, then addons_tail's */
+enum {
+    ROW_NO_UPDATE = -1,
+    ROW_SAVE = -2,
+    ROW_PLAY = -3,
+    ROW_MODS_FOLDER = -4,
+    ROW_CHEATS_FOLDER = -5,
+    ROW_ADD_MOD = -6
+};
+/* the rows after the cheats: Add Mod, the folders' (a phone has no file manager to show them in), Save and Play */
+static const int addons_tail[] = {ROW_ADD_MOD,
+#ifndef SNX_TOUCH_UI
+                                  ROW_MODS_FOLDER, ROW_CHEATS_FOLDER,
+#endif
+                                  ROW_SAVE, ROW_PLAY};
+#define ADDONS_TAIL ((int)SDL_arraysize(addons_tail))
 static int addons_rows(const App* app) {
-    return (int)(app->addons.count + app->mods_count + app->cheats_count) + (addons_updates(app) ? 1 : 0) + 4;
+    return (int)(app->addons.count + app->mods_count + app->cheats_count) + (addons_updates(app) ? 1 : 0) + ADDONS_TAIL;
 }
 /* what row is: its add-on's index in addons, a mod's (mods' index past addons' count), a cheat's (cheats' past the
-   mods'), or ROW_NO_UPDATE, ROW_MODS_FOLDER, ROW_CHEATS_FOLDER, ROW_SAVE or ROW_PLAY */
+   mods'), ROW_NO_UPDATE, or one of addons_tail */
 static int addons_row(const App* app, int row) {
     int updates = (int)addons_updates(app), rows = addons_rows(app);
-    if (row == rows - 1) return ROW_PLAY;
-    if (row == rows - 2) return ROW_SAVE;
-    if (row == rows - 3) return ROW_CHEATS_FOLDER;
-    if (row == rows - 4) return ROW_MODS_FOLDER;
+    if (row >= rows - ADDONS_TAIL) return addons_tail[row - (rows - ADDONS_TAIL)];
     if (row < updates) return row;
     if (updates && row == updates) return ROW_NO_UPDATE;
     return row - (updates ? 1 : 0);
@@ -3258,6 +3272,8 @@ static void addons_label(const App* app, int row, char* label, size_t size) {
                  app->addons.shown[item]);
     else if (item == ROW_NO_UPDATE)
         snprintf(label, size, "%s%s %s", app->theme.marker, none ? "(*)" : "( )", snx_tr("No update"));
+    else if (item == ROW_ADD_MOD)
+        snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Add Mod"));
     else if (item == ROW_MODS_FOLDER)
         snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Open Mods Folder"));
     else if (item == ROW_CHEATS_FOLDER)
@@ -3349,9 +3365,154 @@ static int addons_save(App* app, char** program) {
     free(name);
     return saved;
 }
+/* the row of item, one of addons_tail */
+static int addons_row_of(const App* app, int item) {
+    int i = 0;
+    while (i < ADDONS_TAIL - 1 && addons_tail[i] != item) ++i;
+    return addons_rows(app) - ADDONS_TAIL + i;
+}
+/* the mods listed again once one was added: each one listed before as the box had it, a new one checked; the focus on
+   row, the Add row, and the game's count on Games (its +N) what the box has now */
+static void addons_relist(App* app, int row) {
+    char **names = NULL, *folder = NULL;
+    size_t n = gui_game_mods(app->addons_game, &folder, &names), i, j;
+    bool* on = (bool*)calloc(n + 1, sizeof *on);
+    free(folder);
+    if (!on) {
+        snx_free_strings(names, n);
+        snprintf(app->message, sizeof app->message, snx_tr("Not enough memory to list %s."), app->mods_folder);
+        return;
+    }
+    for (i = 0; i < n; ++i) {
+        on[i] = true;
+        for (j = 0; j < app->mods_count; ++j)
+            if (!strcmp(names[i], app->mods[j])) on[i] = app->mods_on[j];
+    }
+    snx_free_strings(app->mods, app->mods_count);
+    free(app->mods_on);
+    app->mods = names;
+    app->mods_count = n;
+    app->mods_on = on;
+    app->addons_focus = addons_row_of(app, row);
+    for (i = 0; i < app->games.count; ++i)
+        if (app->games.paths[i] && snx_same_file(app->games.paths[i], app->addons_game))
+            app->games.addons[i] = app->addons.count + app->mods_count + app->cheats_count;
+}
+/* the last part of path, owned: its name, any separator after it left out; "" for a root */
+static char* path_leaf(const char* path) {
+    size_t end = strlen(path), start;
+    char* leaf;
+    while (end && (path[end - 1] == '/' || path[end - 1] == '\\')) --end;
+    for (start = end; start && path[start - 1] != '/' && path[start - 1] != '\\'; --start) continue;
+    leaf = (char*)snx_alloc(end - start + 1);
+    memcpy(leaf, path + start, end - start);
+    leaf[end - start] = 0;
+    return leaf;
+}
+/* Add Mod's folder, as the picker gave it (a path, or a phone's URI): copied whole into the game's mods folder under
+   its own name, the original left as it is, and checked in the box. Else app->message says why not, with the path or
+   the name it is about */
+static void mod_add(App* app, const char* picked) {
+    char *path = gui_document_path(picked), *name, *to, *exefs, *romfs, why[1024];
+    if (!path) { /* Android's tree of an app or a cloud, which no path reaches */
+        snprintf(app->message, sizeof app->message, snx_tr("Not added: %s is not a folder of this device's storage"),
+                 picked);
+        return;
+    }
+    name = path_leaf(path);
+    to = snx_path_join(app->mods_folder, name);
+    exefs = snx_path_join(path, "exefs");
+    romfs = snx_path_join(path, "romfs");
+    if (!snx_is_dir(path))
+        snprintf(app->message, sizeof app->message, snx_tr("Not added: %s is not a folder"), path);
+    else if (!name[0])
+        snprintf(app->message, sizeof app->message, snx_tr("Not added: %s has no name to give the mod"), path);
+    else if (name[0] == '.')
+        snprintf(app->message, sizeof app->message,
+                 snx_tr("Not added: the mod would be named %s, and the mods list hides a name that starts with a dot"),
+                 name);
+    else if (snx_path_within(path, app->mods_folder))
+        snprintf(app->message, sizeof app->message, snx_tr("Not added: %s is in the mods folder already, %s"), path,
+                 app->mods_folder);
+    else if (snx_path_within(app->mods_folder, path))
+        snprintf(app->message, sizeof app->message,
+                 snx_tr("Not added: %s holds the mods folder %s, which it would copy into itself"), path,
+                 app->mods_folder);
+    else if (!snx_is_dir(exefs) && !snx_is_dir(romfs))
+        snprintf(app->message, sizeof app->message,
+                 snx_tr("Not added: %s has no exefs/ or romfs/ folder, which a mod is made of"), path);
+    else if (snx_path_exists(to))
+        snprintf(app->message, sizeof app->message, snx_tr("Not added: the mods folder has %s already: %s"), name, to);
+    else if (snx_mkdirs(app->mods_folder)) {
+        snprintf(app->message, sizeof app->message, snx_tr("Not added: cannot make %s: %s"), app->mods_folder,
+                 snx_os_error(why, sizeof why));
+        say_failure(app, app->message);
+    } else if (!gui_copy_mod(path, to, why, sizeof why)) {
+        snprintf(app->message, sizeof app->message, snx_tr("Not added: %s"), why);
+        say_failure(app, app->message);
+    } else {
+        addons_relist(app, ROW_ADD_MOD);
+        snprintf(app->message, sizeof app->message, snx_tr("Mod %s added: %s"), name, to);
+    }
+    free(romfs);
+    free(exefs);
+    free(to);
+    free(name);
+    free(path);
+}
+static void SDLCALL folder_picked(void* userdata, const char* const* files, int filter);
+/* Add Mod pressed: the system's folder picker, its answer an app->addon_picked event (addons_picked) for this box;
+   app->message says why when it cannot open */
+static void addons_pick(App* app, int row) {
+    char why[sizeof app->message - 64] = "";
+    bool opened = true;
+    if (!app->addon_picked) app->addon_picked = SDL_RegisterEvents(1);
+    if (!app->addon_picked) {
+        snprintf(app->message, sizeof app->message, snx_tr("Add Mod: the folder picker could not open: %s"),
+                 SDL_GetError());
+        say_failure(app, app->message);
+        return;
+    }
+    app->addon_adding = row;
+    free(app->adding_game);
+    app->adding_game = snx_strdup(app->addons_game);
+#ifdef SDL_PLATFORM_ANDROID /* SDL has no folder picker there: the system's own, through the app */
+    opened = gui_android_pick_folder(folder_picked, &app->addon_picked, why, sizeof why) != 0;
+#elif defined(SDL_PLATFORM_IOS) /* nor there: the document picker (dist/apple) */
+    opened = gui_apple_pick(app->window, 1, folder_picked, &app->addon_picked, why, sizeof why) != 0;
+#else
+    /* its answer comes as an event even when it cannot open, which says why */
+    SDL_ShowOpenFolderDialog(folder_picked, &app->addon_picked, app->window, NULL, false);
+#endif
+    if (opened) return;
+    app->addon_adding = 0;
+    snprintf(app->message, sizeof app->message, snx_tr("Add Mod: the folder picker could not open: %s"), why);
+    say_failure(app, app->message);
+}
+/* the picker's answer: picked (NULL for none), or error when it could not open; to the box it was opened for while
+   that one shows, else said not added */
+static void addons_picked(App* app, const char* picked, const char* error, bool failed) {
+    int row = app->addon_adding;
+    bool here = row && app->addons_shown && app->adding_game && !strcmp(app->adding_game, app->addons_game);
+    app->addon_adding = 0;
+    free(app->adding_game);
+    app->adding_game = NULL;
+    if (failed) {
+        snprintf(app->message, sizeof app->message, snx_tr("Add Mod: the folder picker could not open: %s"),
+                 error ? error : snx_tr("no reason given"));
+        say_failure(app, app->message);
+    } else if (!picked)
+        snprintf(app->message, sizeof app->message, "%s", snx_tr("Add Mod: no folder was picked."));
+    else if (!here)
+        snprintf(app->message, sizeof app->message,
+                 snx_tr("Not added: %s came back after the box it was picked for closed"), picked);
+    else
+        mod_add(app, picked);
+}
 static void launch(App* app, char* absolute, bool prepared);
 /* row pressed: an update picked (the others not: one runs at a time), No update, a DLC's, a mod's or a cheat's box
-   checked or not; Open Mods Folder or Open Cheats Folder, the folder opened; Save, the picks kept and the box closed;
+   checked or not; Add Mod, the folder picker, which copies the folder picked into the mods folder (mod_add); Open Mods
+   Folder or Open Cheats Folder, the folder opened; Save, the picks kept and the box closed;
    or Play, the picks kept and the game played (or recompiled) through the driver, from the picked update's program. A
    mod's exefs/ changes the program, which the driver recompiles before it plays */
 static void addons_press(App* app, int row) {
@@ -3371,6 +3532,10 @@ static void addons_press(App* app, int row) {
                      app->cheats[cheat]);
         else
             app->cheats_on[cheat] = !app->cheats_on[cheat];
+        return;
+    }
+    if (item == ROW_ADD_MOD) {
+        if (app->mods_folder) addons_pick(app, item);
         return;
     }
     if (item == ROW_MODS_FOLDER) {
@@ -10627,6 +10792,13 @@ static void event_take(App* app, const SDL_Event* e) {
         drop(app, e->drop.data, e->type == SDL_EVENT_DROP_TEXT);
         return; /* SDL3 owns the event's data, unlike SDL2. */
     }
+    /* Add Mod's picker's answer: a folder, none, or why it could not open */
+    if (app->addon_picked && e->type == app->addon_picked) {
+        addons_picked(app, (const char*)e->user.data1, (const char*)e->user.data2, e->user.code != 0);
+        SDL_free(e->user.data1);
+        SDL_free(e->user.data2);
+        return;
+    }
     /* the folder picker's answer: a folder, none, or why it could not open */
     if (app->picked_folder && e->type == app->picked_folder) {
         char* error = (char*)e->user.data2;
@@ -10922,6 +11094,7 @@ static void forget(App* app) {
     free(app->settings_file);
     for (int i = 0; i < app->folder_count; ++i) free(app->folders[i]);
     free(app->folder_asked);
+    free(app->adding_game);
     free(app->own_dir);
     free(app->menu_old);
     free(app->outside_path);

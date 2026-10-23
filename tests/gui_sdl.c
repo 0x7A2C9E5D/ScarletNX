@@ -9,6 +9,8 @@
 #ifdef _WIN32
 #include "win32_crash.h"
 #else
+#include <errno.h>
+#include <sys/stat.h>    /* a mod's file it may not read */
 #include <sys/statvfs.h> /* Folders on a disk mounted noexec */
 #endif
 /* app.ini as the menu writes it: its head, and the Games options' lines that end [app], at their defaults */
@@ -1456,6 +1458,246 @@ static void grid_view(App* app, const char* temporary) {
     for (int i = 0; i < 7; ++i) free(games[i]);
     free(dumps);
     free(root);
+}
+/* the system's picker's own answer to the box's Add row, which with no picker here is that it could not open: waited
+   for (on Windows it comes from the dialog's thread), then dropped, or taken as the menu takes it */
+static void addon_own_answer(App* app, bool take) {
+    SDL_Event own;
+    Uint64 until = SDL_GetTicks() + 2000;
+    int got = 0;
+    assert(app->addon_picked && app->addon_adding);
+    while (!got && SDL_GetTicks() < until) {
+        got = SDL_PeepEvents(&own, 1, SDL_GETEVENT, app->addon_picked, app->addon_picked) == 1;
+        if (!got) SDL_Delay(1);
+    }
+    assert(got && own.user.code && !own.user.data1);
+    if (take)
+        event(app, &own);
+    else {
+        SDL_free(own.user.data1);
+        SDL_free(own.user.data2);
+    }
+}
+/* what the picker answers the Add row pressed with, its own answer dropped first (addon_answer_is): path, NULL for
+   none picked */
+static void addon_answer(App* app, const char* path) {
+    SDL_Event e = {0};
+    e.type = app->addon_picked;
+    e.user.data1 = path ? SDL_strdup(path) : NULL;
+    event(app, &e);
+}
+static void addon_answer_is(App* app, const char* path) {
+    addon_own_answer(app, false);
+    addon_answer(app, path);
+}
+/* the folder at path, made with a file at its relative file holding text */
+static void fixture_file(const char* path, const char* file, const char* text) {
+    char *at = snx_path_join(path, file), *folder = snx_dirname(at);
+    assert(!snx_mkdirs(folder) && !snx_write_file(at, text, strlen(text)));
+    free(folder);
+    free(at);
+}
+/* file at path has text */
+static bool file_is(const char* path, const char* file, const char* text) {
+    char* at = snx_path_join(path, file);
+    size_t size = 0;
+    char* data = (char*)snx_read_file(at, &size);
+    bool same = data && size == strlen(text) && !memcmp(data, text, size);
+    free(data);
+    free(at);
+    return same;
+}
+/* the box M opened on a game with nothing beside it: Add Mod first, in focus, then the folders, Save and Play. Add
+   Mod opens the folder picker; the folder it gives is copied whole into the game's mods folder by its name, checked
+   in the box and counted on Games, the original left as it is. Each folder it refuses is said with its path or name,
+   and nothing is copied: no mods folder is even made until a mod goes in. ESC on the box while the picker is open
+   leaves its answer nowhere to go, which says so. The box is closed at the end */
+static void add_mod(App* app, const char* temporary) {
+    char *root = snx_path_join(temporary, "add mod"), *mods = snx_strdup(app->mods_folder), *data = snx_dirname(mods);
+    char *fonts = snx_path_join(root, "Better Fonts"), *first = snx_path_join(root, "A first");
+    char *bare = snx_path_join(root, "Bare"), *hidden = snx_path_join(root, ".hidden"),
+         *file = snx_path_join(root, "x");
+    char *to = snx_path_join(mods, "Better Fonts"), *to_first = snx_path_join(mods, "A first"), want[2048];
+    const char* cloud = "content://com.example.cloud.documents/tree/abc%3Amods";
+    static const int tail[] = {ROW_ADD_MOD, ROW_MODS_FOLDER, ROW_CHEATS_FOLDER, ROW_SAVE, ROW_PLAY};
+    size_t index = 0;
+    int i, nx, ny;
+    while (index < app->games.count &&
+           !(app->games.paths[index] && snx_same_file(app->games.paths[index], app->addons_game)))
+        ++index;
+    assert(index < app->games.count && !app->games.addons[index]);
+    fixture_file(fonts, "romfs/font/a.bin", "font bytes");
+    fixture_file(fonts, "romfs/readme.txt", "read me");
+    assert(!snx_mkdirs(first) && !snx_path_exists(mods));
+    {
+        char* exefs = snx_path_join(first, "exefs"); /* an empty exefs/ is a mod's all the same */
+        assert(!snx_mkdirs(exefs));
+        free(exefs);
+    }
+    fixture_file(bare, "notes.txt", "no exefs, no romfs");
+    fixture_file(hidden, "romfs/a", "hidden");
+    assert(!snx_write_file(file, "a file", 6));
+    assert(addons_rows(app) == ADDONS_TAIL && ADDONS_TAIL == (int)SDL_arraysize(tail) && !app->addons_focus);
+    for (i = 0; i < ADDONS_TAIL; ++i) assert(addons_row(app, i) == tail[i]);
+    render(app);
+    assert(find_text(app, "Add Mod", yellow, 1, &nx, &ny));
+    assert(find_text(app, "Open Mods Folder", rgb(app->theme.ink), 1, &nx, &ny));
+    /* the picker that cannot open says why, in the failure's box over the box */
+    key(app, SDLK_RETURN);
+    assert(app->addon_adding == ROW_ADD_MOD && !strcmp(app->adding_game, app->addons_game));
+    addon_own_answer(app, true);
+    assert(!app->addon_adding && !app->adding_game && app->addons_shown);
+    assert(!strncmp(app->message, "Add Mod: the folder picker could not open: ", 43) && app->message[43]);
+    assert(app->confirm.shown && app->confirm.ask == GUI_ASK_ERROR && !strcmp(app->error_line, app->message));
+    key(app, SDLK_ESCAPE);
+    assert(!app->confirm.shown && app->addons_shown);
+    /* none picked */
+    key(app, SDLK_RETURN);
+    addon_answer_is(app, NULL);
+    assert(!strcmp(app->message, "Add Mod: no folder was picked.") && !app->addon_adding);
+    /* a phone's folder of an app or a cloud, which no path reaches */
+    key(app, SDLK_RETURN);
+    addon_answer_is(app, cloud);
+    snprintf(want, sizeof want, "Not added: %s is not a folder of this device's storage", cloud);
+    assert(!strcmp(app->message, want));
+    /* a file */
+    key(app, SDLK_RETURN);
+    addon_answer_is(app, file);
+    snprintf(want, sizeof want, "Not added: %s is not a folder", file);
+    assert(!strcmp(app->message, want));
+    /* a folder with neither exefs/ nor romfs/ */
+    key(app, SDLK_RETURN);
+    addon_answer_is(app, bare);
+    snprintf(want, sizeof want, "Not added: %s has no exefs/ or romfs/ folder, which a mod is made of", bare);
+    assert(!strcmp(app->message, want));
+    /* one whose name the mods list hides */
+    key(app, SDLK_RETURN);
+    addon_answer_is(app, hidden);
+    assert(!strcmp(app->message,
+                   "Not added: the mod would be named .hidden, and the mods list hides a name that starts with a dot"));
+    /* the game's data folder, which holds the mods folder */
+    key(app, SDLK_RETURN);
+    addon_answer_is(app, data);
+    snprintf(want, sizeof want, "Not added: %s holds the mods folder %s, which it would copy into itself", data, mods);
+    assert(!strcmp(app->message, want));
+    assert(!snx_path_exists(mods) && !app->mods_count && app->addons_shown && !app->confirm.shown);
+    /* a mod: copied whole, the original as it was; checked, the focus still on Add Mod, a row down; Games counts it */
+    key(app, SDLK_RETURN);
+    addon_answer_is(app, fonts);
+    snprintf(want, sizeof want, "Mod Better Fonts added: %s", to);
+    assert(!strcmp(app->message, want) && !app->confirm.shown);
+    assert(app->mods_count == 1 && !strcmp(app->mods[0], "Better Fonts") && app->mods_on[0]);
+    assert(addons_rows(app) == ADDONS_TAIL + 1 && app->addons_focus == 1 && addons_row(app, 1) == ROW_ADD_MOD);
+    assert(file_is(to, "romfs/font/a.bin", "font bytes") && file_is(to, "romfs/readme.txt", "read me"));
+    assert(file_is(fonts, "romfs/font/a.bin", "font bytes") && file_is(fonts, "romfs/readme.txt", "read me"));
+    {
+        char* staged = snx_path_join(mods, ".Better Fonts.adding");
+        assert(!snx_path_exists(staged));
+        free(staged);
+    }
+    assert(app->games.addons[index] == 1);
+    render(app);
+    assert(find_text(app, "[x] Mod Better Fonts", rgb(app->theme.ink), 1, &nx, &ny));
+    assert(find_text(app, "Add Mod", yellow, 1, &nx, &ny));
+    /* the same name again, and a mod of the mods folder itself */
+    key(app, SDLK_RETURN);
+    addon_answer_is(app, fonts);
+    snprintf(want, sizeof want, "Not added: the mods folder has Better Fonts already: %s", to);
+    assert(!strcmp(app->message, want));
+    key(app, SDLK_RETURN);
+    addon_answer_is(app, to);
+    snprintf(want, sizeof want, "Not added: %s is in the mods folder already, %s", to, mods);
+    assert(!strcmp(app->message, want) && app->mods_count == 1);
+    /* another, named before it, over what a copy that stopped left of it: the list read again keeps Better Fonts as the
+       box has it (off), the new one checked, and nothing of the stopped copy in it */
+    {
+        char* stopped = snx_path_join(mods, ".A first.adding");
+        fixture_file(stopped, "romfs/half.bin", "half");
+        free(stopped);
+    }
+    key(app, SDLK_UP);
+    key(app, SDLK_RETURN);
+    assert(!app->mods_on[0] && app->addons_focus == 0);
+    key(app, SDLK_DOWN);
+    key(app, SDLK_RETURN);
+    addon_answer_is(app, first);
+    snprintf(want, sizeof want, "Mod A first added: %s", to_first);
+    assert(!strcmp(app->message, want) && app->mods_count == 2 && !strcmp(app->mods[0], "A first") &&
+           !strcmp(app->mods[1], "Better Fonts") && app->mods_on[0] && !app->mods_on[1]);
+    assert(app->addons_focus == 2 && addons_row(app, 2) == ROW_ADD_MOD && app->games.addons[index] == 2);
+    {
+        char *exefs = snx_path_join(to_first, "exefs"), *half = snx_path_join(to_first, "romfs"),
+             *staged = snx_path_join(mods, ".A first.adding");
+        assert(snx_is_dir(exefs) && !snx_path_exists(half) && !snx_path_exists(staged));
+        free(staged);
+        free(half);
+        free(exefs);
+    }
+#ifndef _WIN32
+    { /* a link in the folder: refused, said in the failure's box, nothing of it left in the mods folder */
+        char *linked = snx_path_join(root, "Linked"), *link = snx_path_join(linked, "romfs/link");
+        char *gone = snx_path_join(mods, "Linked"), *staged = snx_path_join(mods, ".Linked.adding");
+        fixture_file(linked, "romfs/a.bin", "a");
+        assert(!snx_symlink(fonts, link));
+        key(app, SDLK_RETURN);
+        addon_answer_is(app, linked);
+        snprintf(want, sizeof want, "Not added: %s is a link, which a mod cannot hold", link);
+        assert(!strcmp(app->message, want) && app->confirm.shown && !strcmp(app->error_line, want));
+        key(app, SDLK_ESCAPE);
+        assert(!snx_path_exists(gone) && !snx_path_exists(staged) && app->mods_count == 2 && app->addons_shown);
+        free(staged);
+        free(gone);
+        free(link);
+        free(linked);
+    }
+    { /* a file the system does not let it read: its path and the system's reason, nothing left */
+        char *locked = snx_path_join(root, "Locked"), *secret = snx_path_join(locked, "romfs/secret.bin");
+        char *staged = snx_path_join(mods, ".Locked.adding"), *gone = snx_path_join(mods, "Locked");
+        FILE* f;
+        fixture_file(locked, "romfs/secret.bin", "secret");
+        assert(!chmod(secret, 0));
+        f = fopen(secret, "rb");
+        if (f) /* root reads it all the same: a container's */
+            fclose(f);
+        else {
+            char* into = snx_path_join(staged, "romfs/secret.bin");
+            snprintf(want, sizeof want, "Not added: cannot copy %s to %s: %s", secret, into, strerror(EACCES));
+            key(app, SDLK_RETURN);
+            addon_answer_is(app, locked);
+            assert(!strcmp(app->message, want) && app->confirm.shown);
+            key(app, SDLK_ESCAPE);
+            assert(!snx_path_exists(gone) && !snx_path_exists(staged) && app->mods_count == 2);
+            free(into);
+        }
+        assert(!chmod(secret, 0600));
+        free(gone);
+        free(staged);
+        free(secret);
+        free(locked);
+    }
+#endif
+    /* the box closed while the picker is open: its answer is not added */
+    key(app, SDLK_RETURN);
+    addon_own_answer(app, false);
+    key(app, SDLK_ESCAPE);
+    assert(!app->addons_shown && app->addon_adding == ROW_ADD_MOD);
+    addon_answer(app, fonts);
+    snprintf(want, sizeof want, "Not added: %s came back after the box it was picked for closed", fonts);
+    assert(!strcmp(app->message, want) && !app->addon_adding && !app->adding_game);
+    /* the mods the test added taken away, Games' count with them */
+    assert(!snx_remove_tree(mods));
+    app->games.addons[index] = 0;
+    app->message[0] = 0;
+    assert(!snx_remove_tree(root));
+    free(to_first);
+    free(to);
+    free(file);
+    free(hidden);
+    free(bare);
+    free(first);
+    free(fonts);
+    free(data);
+    free(mods);
 }
 int main(int argc, char** argv) {
 #ifdef _WIN32
@@ -5341,7 +5583,7 @@ int main(int argc, char** argv) {
                 app.aot_match = match;
             }
             /* M on it, a game with no update, DLC, mod or cheat: its box all the same, for its Add rows, its mods and
-               cheats folders those of its data; ESC closes it, nothing run */
+               cheats folders those of its data (add_mod adds to it); ESC closes it, nothing run */
             {
                 size_t index = app.browser.page * app.browser.page_size + app.browser.selected - app.browser.head;
                 char *mods = snx_path_join(data, "mods"), *cheats = snx_path_join(data, "cheats");
@@ -5355,7 +5597,11 @@ int main(int argc, char** argv) {
                 render(&app);
                 assert(find_text(&app, app.games.shown[index], rgb(app.theme.ink), 1, &nx, &ny) ||
                        find_text(&app, app.games.shown[index], rgb(app.theme.page), 1, &nx, &ny));
-                assert(find_text(&app, "Open Mods Folder", yellow, 1, &nx, &ny)); /* the first row, in focus */
+                assert(find_text(&app, "Add Mod", yellow, 1, &nx, &ny)); /* the first row, in focus */
+                add_mod(&app, temporary);
+                assert(!app.addons_shown && !app.menu.running && app.menu.view == GUI_LOAD_GAMES);
+                key(&app, SDLK_M);
+                assert(app.addons_shown && !app.mods_count);
                 key(&app, SDLK_ESCAPE);
                 assert(!app.addons_shown && !app.menu.running && app.menu.view == GUI_LOAD_GAMES);
                 { /* and on its row of the recent games: the same box, named as the run named it */
@@ -5452,16 +5698,20 @@ int main(int argc, char** argv) {
                 app.games.addons[app.browser.page * app.browser.page_size + app.browser.selected - app.browser.head] ==
                 8);
             key(&app, SDLK_RETURN);
-            /* rows: Update 1.2.0, Update 1.0.0, No update, DLC 1, A mod, B mod, 60 FPS, Infinite HP, Speed x2|x4, Open
-               Mods Folder, Open Cheats Folder, Save, Play */
+            /* rows: Update 1.2.0, Update 1.0.0, No update, DLC 1, A mod, B mod, 60 FPS, Infinite HP, Speed x2|x4, Add
+               Mod, Open Mods Folder, Open Cheats Folder, Save, Play */
             assert(app.addons_shown && !app.menu.running && app.addons.count == 3 && app.mods_count == 2 &&
-                   app.cheats_count == 3 && addons_rows(&app) == 13);
+                   app.cheats_count == 3 && addons_rows(&app) == 14);
+            assert(addons_row(&app, 9) == ROW_ADD_MOD && addons_row(&app, 10) == ROW_MODS_FOLDER &&
+                   addons_row(&app, 11) == ROW_CHEATS_FOLDER && addons_row(&app, 12) == ROW_SAVE &&
+                   addons_row(&app, 13) == ROW_PLAY);
             assert(!app.addons_checked[0] && !app.addons_checked[1] && app.addons_checked[2]);
             assert(app.mods_on[0] && !app.mods_on[1] && !strcmp(app.mods[0], "A mod"));
             assert(app.cheats_on[0] && !app.cheats_on[1] && app.cheats_on[2] && !strcmp(app.cheats[1], "Infinite HP"));
             render(&app);
             assert(find_text(&app, "[x] Mod A mod", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "[ ] Mod B mod", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "Add Mod", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "Open Mods Folder", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "[x] Cheat 60 FPS", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "[ ] Cheat Infinite HP", rgb(app.theme.ink), 1, &nx, &ny));
@@ -5541,8 +5791,8 @@ int main(int argc, char** argv) {
             assert(!app.cheats_on[0] && app.cheats_on[1] && app.addons_focus == 8 &&
                    !strcmp(app.message,
                            "\"Speed x2|x4\" always runs: a | in its name, which cheats_off= puts between two"));
-            for (i = 0; i < 3; i++) key(&app, SDLK_DOWN);
-            assert(app.addons_focus == 11);
+            for (i = 0; i < 4; i++) key(&app, SDLK_DOWN);
+            assert(app.addons_focus == 12);
             key(&app, SDLK_RETURN);
             assert(!app.addons_shown && !app.menu.running && strstr(app.message, "kept"));
             checked = snx_ini_value(ini, "addons");
@@ -5576,8 +5826,8 @@ int main(int argc, char** argv) {
             key(&app, SDLK_DOWN);
             key(&app, SDLK_DOWN);
             key(&app, SDLK_RETURN);
-            for (i = 0; i < 10; i++) key(&app, SDLK_DOWN);
-            assert(app.addons_focus == 12);
+            for (i = 0; i < 11; i++) key(&app, SDLK_DOWN);
+            assert(app.addons_focus == 13);
             key(&app, SDLK_RETURN);
             assert(!app.addons_shown && app.menu.running && !app.recompile);
             {
