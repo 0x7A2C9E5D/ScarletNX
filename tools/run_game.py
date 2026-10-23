@@ -5,12 +5,12 @@
 
     tools/run_game.py 0100DA801624E000                        # one 60 s run of the New Game script
     tools/run_game.py 0100DA801624E000 --runs 5 --seconds 45  # five runs, for an intermittent bug
-    tools/run_game.py ~/.local/share/scarletnx/games/0100DA801624E000 --script 15000:400 --out /tmp/x
+    tools/run_game.py ~/.local/share/scarletnx/recompiled/0100DA801624E000 --script 15000:400 --out /tmp/x
     tools/run_game.py Game --fps_limit=0                      # options it doesn't know go to the runtime
 
-The game is its folder in the user's data folder's games/ (where the driver puts it when no --repo names another),
-named by its title ID or by the name -r was given, a path to that folder, or the program the recompile's "Built" line
-names. A game an older version left loose in games/ runs from there.
+The game is its folder in the user's data folder's recompiled/ (where the driver puts it when no --data names
+another), named by its title ID or by the name -r was given, a path to that folder, or the program the recompile's
+"Built" line names. A game an older version left in games/, in its folder or loose, runs from there.
 
 Each run writes run<N>.log and run<N>.png (the last frame; .ppm without Pillow) into --out (default: a new folder in
 the system's temporary folder). The summary line has the exit, the crash site (game pc and the symbol, with --dump),
@@ -31,7 +31,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def data_folder():
-    """The user's data folder, the driver's when no --repo names one (snx_user_data_dir in common.c)"""
+    """The user's data folder, the driver's when no --data names one (snx_user_data_dir in common.c)"""
     if sys.platform == 'win32':
         return os.path.join(os.environ.get('APPDATA', ''), 'scarletnx')
     if sys.platform == 'darwin':
@@ -40,7 +40,9 @@ def data_folder():
     return os.path.join(xdg if os.path.isabs(xdg) else os.path.expanduser('~/.local/share'), 'scarletnx')
 
 
-GAMES = os.path.join(data_folder(), 'games')
+# where the driver puts a game (snx_recompiled_dir), and where an older version did, which still runs from there
+RECOMPILED = os.path.join(data_folder(), 'recompiled')
+OLD_GAMES = os.path.join(data_folder(), 'games')
 # Catherine from boot to the New Game cutscene: skip the intro movie, accept the terms, pick New Game, skip prompts
 NEW_GAME = '15000:400,16000:1,18000:400,21000:1,31000:1,36000:1,40000:1,44000:1'
 
@@ -77,27 +79,33 @@ def summarize(log, dump, seconds):
 
 
 def find_game(game):
-    """The game's program: games/<id>/<id>[.exe] as the driver lays it out (driver.c, recompile.c)"""
+    """The game's program: recompiled/<id>/<id>[.exe] as the driver lays it out (driver.c, recompile.c), else
+    games/<id>/ as an older version did (snx_recompiled_game)"""
     ext = '.exe' if sys.platform == 'win32' else ''
     if os.path.isfile(game):
         return os.path.abspath(game)
-    folder = game if os.path.isdir(game) else os.path.join(GAMES, game)
-    folder = os.path.abspath(folder)
-    exe = os.path.join(folder, os.path.basename(folder) + ext)
-    if os.path.isfile(exe):
-        return exe
+    folders = [game] if os.path.isdir(game) else [os.path.join(RECOMPILED, game), os.path.join(OLD_GAMES, game)]
+    programs = []
+    for folder in folders:
+        folder = os.path.abspath(folder)
+        programs.append(os.path.join(folder, os.path.basename(folder) + ext))
+        if os.path.isfile(programs[-1]):
+            return programs[-1]
     # an older version's game, its program loose in games/
-    old = os.path.join(GAMES, game + ext)
+    old = os.path.join(OLD_GAMES, game + ext)
     if os.path.isfile(old):
         return old
-    raise SystemExit('%s does not exist: recompile the game (scarletnx -r)' % exe)
+    if len(programs) == 1:
+        raise SystemExit('%s does not exist: recompile the game (scarletnx -r)' % programs[0])
+    raise SystemExit('neither %s nor %s exists: recompile the game (scarletnx -r)' % tuple(programs))
 
 
 def main():
     # No abbreviations: a runtime option must never be taken for a prefix of one of these
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0], allow_abbrev=False)
     ap.add_argument(
-        'game', help='its folder in games/ (the title ID, or the name -r gave it), or a path to the folder or program'
+        'game',
+        help='its folder in recompiled/ (the title ID, or the name -r gave it), or a path to the folder or program',
     )
     ap.add_argument('--runs', type=int, default=1)
     ap.add_argument('--seconds', type=int, default=60)
