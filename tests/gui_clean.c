@@ -29,6 +29,11 @@ static char* read_text(const char* path) {
 }
 static void write_text(const char* path, const char* text) { assert(!snx_write_file(path, text, strlen(text))); }
 /* the entries as "+file|what" lines */
+/* text, made with /, in the system's separators as the paths it names are */
+static char* native(char* text) {
+    snx_path_native(text);
+    return text;
+}
 static const char* entries(const GuiCleaned* done, const char* base) {
     static char out[8192];
     char file[4400], what[4400];
@@ -116,9 +121,13 @@ int main(void) {
     assert(gui_clean_inis(&done, games) == 3 && done.count == 3 && done.done == 3);
     {
         const char* list = entries(&done, games);
-        assert(strstr(list, "+/First.ini|[Deprecated] taken out\n") &&
-               strstr(list, "+/Second.INI|[Deprecated] taken out\n") &&
-               strstr(list, "+/0100ABCD12345000/0100ABCD12345000.ini|[Deprecated] taken out\n"));
+        char *first = native(snx_strdup("+/First.ini|[Deprecated] taken out\n")),
+             *second = native(snx_strdup("+/Second.INI|[Deprecated] taken out\n")),
+             *own = native(snx_strdup("+/0100ABCD12345000/0100ABCD12345000.ini|[Deprecated] taken out\n"));
+        assert(strstr(list, first) && strstr(list, second) && strstr(list, own));
+        free(first);
+        free(second);
+        free(own);
     }
     path = snx_path_join(games, "0100ABCD12345000/other.ini");
     text = read_text(path);
@@ -184,7 +193,7 @@ int main(void) {
     /* Move old files: each entry into the new folder, one already there left and said; nothing touched without
        apply, the new folder made with it, the old one gone once empty; only the entries named; a file by its name */
     {
-        char *old = snx_path_join(root, "old"), *now = snx_path_join(root, "now"), *base = snx_format("%s/", root);
+        char *old = snx_path_join(root, "old"), *now = snx_path_join(root, "now"), *base = snx_path_join(root, "");
         char *a = snx_path_join(old, "a"), *b = snx_path_join(old, "b"), *kept = snx_path_join(now, "b");
         char *c = snx_format("%s/c", b), *moved = snx_path_join(now, "a");
         const char* only[] = {"x", NULL};
@@ -193,7 +202,7 @@ int main(void) {
         write_text(c, "c");
         assert(gui_move_entries(&done, old, now, NULL, false) == 1);
         {
-            char* said = snx_format("+old/a|Moves to %s/now/a\n!old/b|Stays: %s/now/b is there\n", root, root);
+            char* said = native(snx_format("+old/a|Moves to %s/now/a\n!old/b|Stays: %s/now/b is there\n", root, root));
             assert(!strcmp(entries(&done, base), said) && done.count == 2 && done.done == 1);
             free(said);
         }
@@ -201,7 +210,7 @@ int main(void) {
         gui_cleaned_free(&done);
         assert(gui_move_entries(&done, old, now, NULL, true) == 1);
         {
-            char* said = snx_format("+old/a|Moved to %s/now/a\n!old/b|Stays: %s/now/b is there\n", root, root);
+            char* said = native(snx_format("+old/a|Moved to %s/now/a\n!old/b|Stays: %s/now/b is there\n", root, root));
             assert(!strcmp(entries(&done, base), said));
             free(said);
         }
@@ -212,7 +221,7 @@ int main(void) {
         assert(!snx_remove_tree(moved));
         assert(gui_move_entries(&done, old, now, NULL, true) == 1 && !snx_path_exists(old) && snx_is_file(moved));
         {
-            char* said = snx_format("+old/a|Moved to %s/now/a\n+old|Taken away: empty now\n", root);
+            char* said = native(snx_format("+old/a|Moved to %s/now/a\n+old|Taken away: empty now\n", root));
             assert(!strcmp(entries(&done, base), said));
             free(said);
         }

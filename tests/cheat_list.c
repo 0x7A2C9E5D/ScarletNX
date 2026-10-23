@@ -15,7 +15,7 @@ static void put(const char* dir, const char* name, const char* text) {
 }
 
 int main(void) {
-    char name[64], *root = snx_temp_dir(NULL), *data, *folder, **names;
+    char name[64], *root = snx_temp_dir(NULL), *data, *folder, *tail, **names;
     size_t n;
     assert(root);
     /* a line's name: [name] or the master code's {name}, spaces before it; a code line has none */
@@ -28,7 +28,9 @@ int main(void) {
     /* a folder's .txt files by their names, each name once as the first file has it; other files and hidden ones out */
     data = snx_path_join(root, "Game_data");
     folder = snx_cheats_folder(data);
-    assert(!strcmp(folder + strlen(folder) - strlen("Game_data/cheats"), "Game_data/cheats"));
+    tail = snx_path_join("Game_data", "cheats"); /* in the system's separators, as the folder is */
+    assert(strlen(folder) > strlen(tail) && !strcmp(folder + strlen(folder) - strlen(tail), tail));
+    free(tail);
     assert(!snx_cheats_list(folder, &names) && !names); /* no folder: none */
     assert(!snx_mkdirs(folder));
     put(folder, "B000000000000000.txt", "[Infinite HP]\n04000000 00000010 00000063\n[60 FPS]\n04000000 0 1\n");

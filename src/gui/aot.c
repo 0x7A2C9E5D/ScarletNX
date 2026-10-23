@@ -15,15 +15,15 @@ static uint32_t get32(const unsigned char* p) {
 }
 
 char* gui_aot_cache_path(const char* folder, const char* name) {
-    char* record;
+    char record[SNX_PATH_SIZE], path[SNX_PATH_SIZE];
     char* recorded;
     char* dir = NULL;
     char* moved;
-    char* path;
+    int cut;
     if (!folder || !name) return NULL;
     /* the runtime's .folders cache=, when it names a folder that is there; else its user path, as kind_dir */
-    record = snx_format("%s/%s.folders", folder, name);
-    recorded = record ? snx_ini_value(record, "cache") : NULL;
+    if (snx_path_format(record, sizeof record, "%s/%s.folders", folder, name)) return NULL;
+    recorded = snx_ini_value(record, "cache");
     if (recorded && snx_is_dir(recorded)) {
         dir = snx_strdup(recorded);
     } else {
@@ -33,16 +33,15 @@ char* gui_aot_cache_path(const char* folder, const char* name) {
         free(moved);
     }
     free(recorded);
-    free(record);
     if (!dir) return NULL;
     moved = snx_absolute(dir);
     if (moved) {
         free(dir);
         dir = moved;
     }
-    path = snx_format("%s/%s.jitcache", dir, name);
+    cut = snx_path_format(path, sizeof path, "%s/%s.jitcache", dir, name);
     free(dir);
-    return path;
+    return cut ? NULL : snx_strdup(path);
 }
 
 int gui_aot_cache_info(const char* path, GuiAotInfo* info) {

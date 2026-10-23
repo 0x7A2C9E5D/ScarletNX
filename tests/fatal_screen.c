@@ -93,8 +93,10 @@ int main(void) {
         free(big);
         free(log);
         log = snx_path_join(root, "no/such/folder");
-        assert(fatal_share_log(log, "build", "message", NULL, saved, sizeof saved) && strstr(saved, "no/such/folder"));
+        text = snx_path_join("no", "such/folder"); /* in the system's separators, as the folder said is */
+        assert(fatal_share_log(log, "build", "message", NULL, saved, sizeof saved) && strstr(saved, text));
         assert(fatal_share_log(NULL, "build", "message", NULL, saved, sizeof saved));
+        free(text);
         free(log);
         assert(!snx_remove_tree(root));
         free(root);

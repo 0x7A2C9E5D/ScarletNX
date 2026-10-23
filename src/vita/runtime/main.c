@@ -128,7 +128,8 @@ static bool link_dump(const char* folder, const char* name, const char* target) 
 /* a dumped game's update: patch/<title ID> beside its app/<title ID> */
 static char* dump_patch(const char* app, const char* title) {
     char *full = snx_absolute(app), *parent = full ? snx_dirname(full) : NULL, *root = parent ? snx_dirname(parent) : NULL;
-    char* patch = root ? snx_format("%s/patch/%s", root, title) : NULL;
+    char made[SNX_PATH_SIZE];
+    char* patch = root && !snx_path_format(made, sizeof made, "%s/patch/%s", root, title) ? snx_strdup(made) : NULL;
     free(full);
     free(parent);
     free(root);
@@ -178,15 +179,12 @@ static int play(const char* folder, bool recompile, double seconds, const char* 
     VitaNative native = {0};
     VitaProcess* process = NULL;
     /* the update's eboot.bin when there is one */
-    char error[512], *eboot = snx_format("%s/patch/eboot.bin", folder), *module = vita_game_file(folder, VITA_MODULE_SUFFIX);
+    char error[512], eboot[SNX_PATH_SIZE], *module = vita_game_file(folder, VITA_MODULE_SUFFIX);
     int status = 1;
-    if (eboot && !snx_is_file(eboot)) {
-        free(eboot);
-        eboot = snx_format("%s/app/eboot.bin", folder);
-    }
-    if (!eboot || !module || !vita_image_load(eboot, &image, error, sizeof error)) {
-        fprintf(stderr, "scarletnx-vita: %s\n", eboot && module ? error : "out of memory");
-        free(eboot);
+    bool made = !snx_path_format(eboot, sizeof eboot, "%s/patch/eboot.bin", folder);
+    if (made && !snx_is_file(eboot)) made = !snx_path_format(eboot, sizeof eboot, "%s/app/eboot.bin", folder);
+    if (!made || !module || !vita_image_load(eboot, &image, error, sizeof error)) {
+        if (made) fprintf(stderr, "scarletnx-vita: %s\n", module ? error : "out of memory"); /* else said */
         free(module);
         return 1;
     }
@@ -231,15 +229,16 @@ static int play(const char* folder, bool recompile, double seconds, const char* 
         goto done;
     }
     process->module = native.module;
-    char *sfo_path = snx_format("%s/%s/sce_sys/param.sfo", folder, snx_is_dir(process->patch) ? "patch" : "app"),
-         *title = NULL;
+    char sfo_path[SNX_PATH_SIZE], *title = NULL;
     size_t sfo_size = 0;
-    unsigned char* sfo = sfo_path ? snx_read_file(sfo_path, &sfo_size) : NULL;
+    unsigned char* sfo = snx_path_format(sfo_path, sizeof sfo_path, "%s/%s/sce_sys/param.sfo", folder,
+                                         snx_is_dir(process->patch) ? "patch" : "app")
+                             ? NULL
+                             : snx_read_file(sfo_path, &sfo_size);
     title = sfo ? vita_sfo_string(sfo, sfo_size, "TITLE") : NULL;
     printf("Game: %s - %s\n", title ? title : image.name, snx_build_info());
     vita_present_init(title ? title : image.name, shot);
     free(sfo);
-    free(sfo_path);
     free(title);
     status = vita_run(process, seconds);
     vita_present_shot(process);
@@ -249,7 +248,6 @@ done:
     vita_process_free(process);
     vita_native_close(&native);
     vita_image_free(&image);
-    free(eboot);
     free(module);
     return status;
 }
@@ -331,10 +329,11 @@ int snx_vita_main(int argc, char** argv) {
         }
         char error[512] = "no sce_sys/param.sfo";
         size_t size = 0;
-        char* sfo_path = dump ? snx_format("%s/sce_sys/param.sfo", input) : NULL;
-        unsigned char* sfo = dump ? (sfo_path ? snx_read_file(sfo_path, &size) : NULL)
+        char sfo_path[SNX_PATH_SIZE];
+        unsigned char* sfo = dump ? (snx_path_format(sfo_path, sizeof sfo_path, "%s/sce_sys/param.sfo", input)
+                                         ? NULL
+                                         : snx_read_file(sfo_path, &size))
                                   : vita_vpk_member(input, "sce_sys/param.sfo", &size, error, sizeof error);
-        free(sfo_path);
         char* title = sfo ? vita_sfo_string(sfo, size, "TITLE_ID") : NULL;
         free(sfo);
         if (!vita_title_id(title)) {

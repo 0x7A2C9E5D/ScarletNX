@@ -84,6 +84,32 @@ char* snx_format(const char* fmt, ...) {
     va_end(ap);
     return p;
 }
+void snx_path_native(char* path) {
+#ifdef _WIN32
+    for (; path && *path; ++path)
+        if (*path == '/') *path = '\\';
+#else
+    (void)path;
+#endif
+}
+int snx_path_format(char* out, size_t size, const char* fmt, ...) {
+    va_list ap;
+    int n;
+    va_start(ap, fmt);
+    n = vsnprintf(out, size, fmt, ap);
+    va_end(ap);
+    if (n < 0 || (size_t)n >= size) {
+        if (n < 0)
+            snx_error("cannot make a path of %s (%s)", fmt, strerror(errno));
+        else
+            snx_error("the path %.80s... is %d bytes, over the %zu it has room for", size ? out : fmt, n,
+                      size ? size - 1 : 0);
+        if (size) *out = 0;
+        return -1;
+    }
+    snx_path_native(out);
+    return 0;
+}
 /* snx_error's sink, snx_error_sink's: NULL for stderr; and the kinds whose folder app.ini names wrongly, said once */
 static struct {
     void (*error_sink)(const char* line);
@@ -134,6 +160,7 @@ char* snx_path_join(const char* a, const char* b) {
     memcpy(p, a, n);
     if (n && !separator(a[n - 1])) p[n++] = '/';
     memcpy(p + n, b, m + 1);
+    snx_path_native(p);
     return p;
 }
 char* snx_dirname(const char* path) {

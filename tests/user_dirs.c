@@ -111,6 +111,25 @@ int main(void) {
         assert(dir[kind]);
         free(base);
     }
+    /* one separator in a path made here, the system's: on Windows a / given becomes \, as every folder shown is; a
+       path made in a buffer it does not fit leaves it empty, said with its length and the room */
+    {
+        char *joined = snx_path_join("top/a", "b/c"), formatted[16], small[8];
+        assert(!snx_path_format(formatted, sizeof formatted, "%s/%s.ini", "top/a", "G"));
+#ifdef _WIN32
+        assert(!strcmp(joined, "top\\a\\b\\c") && !strcmp(formatted, "top\\a\\G.ini"));
+        for (kind = SNX_USER_DATA; kind <= SNX_USER_CACHE; ++kind) assert(!strchr(dir[kind], '/'));
+#else
+        assert(!strcmp(joined, "top/a/b/c") && !strcmp(formatted, "top/a/G.ini"));
+#endif
+        free(joined);
+        snx_error_sink(error_line);
+        g_test.says = 0;
+        assert(snx_path_format(small, sizeof small, "%s/%s", "top", "name") == -1 && !small[0]);
+        assert(g_test.says == 1 && !strcmp(g_test.said, "the path top/nam... is 8 bytes, over the 7 it has room for"));
+        g_test.says = 0;
+        snx_error_sink(NULL);
+    }
     games = join(dir[SNX_USER_DATA], "games");
     assert(!snx_mkdirs(games));
 #ifdef SNX_XDG

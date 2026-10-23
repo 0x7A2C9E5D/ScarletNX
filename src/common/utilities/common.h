@@ -21,6 +21,13 @@ void* snx_alloc(size_t size);
 void* snx_realloc(void* ptr, size_t size);
 char* snx_strdup(const char* s);
 char* snx_format(const char* fmt, ...);
+/* a path's / turned into \ on Windows, the separator its system shows (C:\Users\...); nothing elsewhere */
+void snx_path_native(char* path);
+/* the room of a path made in a caller's buffer: Linux's PATH_MAX, past what Windows takes without its long paths */
+#define SNX_PATH_SIZE 4096
+/* fmt's path into out, of size bytes, its separators the system's (snx_path_native). 0; -1 when it does not fit,
+   said with snx_error, out empty */
+int snx_path_format(char* out, size_t size, const char* fmt, ...);
 /* says a line of error, "scarletnx: " and the line on stderr, or to the sink given to snx_error_sink. Returns 1 */
 int snx_error(const char* fmt, ...);
 /* where snx_error's lines go from now on instead of stderr (the runtime's log, which a game's process on Android has
@@ -29,6 +36,7 @@ void snx_error_sink(void (*sink)(const char* line));
 /* the system's reason for the file or folder call that just failed, into out: strerror(errno), or on Windows the
    text of GetLastError, which its calls set instead of errno */
 char* snx_os_error(char* out, size_t size);
+/* a, then b, a separator between: one path in the system's separators (snx_path_native) */
 char* snx_path_join(const char* a, const char* b);
 char* snx_dirname(const char* path);
 char* snx_absolute(const char* path);

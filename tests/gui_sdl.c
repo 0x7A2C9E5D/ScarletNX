@@ -953,9 +953,12 @@ int main(int argc, char** argv) {
         /* a dump read in place (Extract game container off) has no extraction either */
         assert(i + (nro || !extract ? 4 : 6) == argc && argv[i + 1][0] && !strcmp(argv[i + 2], "--outdir") &&
                strstr(argv[i + 3], "picked games"));
+        /* the extraction's folder named after the dump, in the system's separators as every path made is */
+        char* tail = snx_path_join("work", "picked folders");
         assert(nro || !extract ||
                (!strcmp(argv[i + 4], "--out") && strstr(argv[i + 5], "picked work") &&
-                !strcmp(argv[i + 5] + strlen(argv[i + 5]) - 15, "/picked folders")));
+                !strcmp(argv[i + 5] + strlen(argv[i + 5]) - 15, tail + 4)));
+        free(tail);
         puts("Recompiling picked folders\nScarletNX - picked folders");
         return 0;
     }
@@ -1163,12 +1166,16 @@ int main(int argc, char** argv) {
     {
         char *blocker = snx_path_join(temporary, "a file"), *data = app.data_dir, *games = app.games_dir;
         char *themes = app.themes_dirs[0], *work = app.work_dir, *keys = app.keys_path, *home = app.home_dir, *said;
+        char* whole;
         assert(!snx_write_file(blocker, "", 0));
         app.home_dir = snx_path_join(blocker, "data"); /* the data folder places_apply takes, none picked */
         app.data_dir = NULL;
         app.games_dir = app.themes_dirs[0] = app.work_dir = app.keys_path = NULL;
         places_apply(&app);
-        said = snx_format("Could not make %s/dumps", app.data_dir);
+        said = snx_path_join(app.data_dir, "dumps"); /* in the system's separators, as the box says it */
+        whole = snx_format("Could not make %s", said);
+        free(said);
+        said = whole;
         assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR && !strcmp(app.error_line, said));
         render(&app);
         shows(&app, said, rgb(app.theme.warning));
@@ -3497,6 +3504,16 @@ int main(int argc, char** argv) {
         launch(&app, snx_strdup(dump), false);
         assert(app.dests_shown && app.dests.count == 2 && !app.menu.running && app.dest_file);
         render(&app);
+#ifndef _WIN32
+        { /* off Windows a \ is a letter of the file's name, which the question keeps whole */
+            char* was = app.dest_file;
+            char odd[] = "/somewhere/odd\\name.nsp";
+            app.dest_file = odd;
+            dests_question(&app, question, sizeof question);
+            assert(!strcmp(question, "odd\\name.nsp: into which folder of the recompiled library?"));
+            app.dest_file = was;
+        }
+#endif
         snprintf(question, sizeof question, "%s", "elsewhere dump.nsp: into which folder of the recompiled library?");
         shows(&app, question, rgb(app.theme.warning));
         shows(&app, "default, ", yellow); /* the Main first, in focus */

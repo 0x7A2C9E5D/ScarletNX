@@ -167,7 +167,7 @@ SnxCtrExtractResult snx_ctr_extract(const char* input, const char* destination, 
                                     char* error, size_t error_size) {
     CtrReader r = {.error = error, .error_size = error_size};
     CtrCia cia = {0};
-    char *target = NULL, *parent = NULL, *stage = NULL, *generated = NULL;
+    char *target = NULL, *parent = NULL, *stage = NULL, generated[SNX_PATH_SIZE];
     if (published) *published = NULL;
     if (error_size) error[0] = 0;
     if (!input || !snx_is_file(input) || !(r.input = snx_fopen(input, "rb"))) {
@@ -196,7 +196,11 @@ SnxCtrExtractResult snx_ctr_extract(const char* input, const char* destination, 
     if (!destination) {
         char hex[65];
         for (size_t i = 0; i < 32; ++i) snprintf(hex + i * 2, 3, "%02x", cia.input_hash[i]);
-        generated = snx_format("%s/%016" PRIx64 "-%s", work ? work : "work/3ds", cia.title_id, hex);
+        if (snx_path_format(generated, sizeof generated, "%s/%016" PRIx64 "-%s", work ? work : "work/3ds", cia.title_id,
+                            hex)) {
+            ctr_fail(&r, SNX_CTR_EXTRACT_IO, "the output path is over %d bytes", SNX_PATH_SIZE - 1);
+            goto done;
+        }
         destination = generated;
     }
     if (!*destination || !no_links(destination) || !(target = snx_absolute(destination))) {
@@ -238,6 +242,5 @@ done:
     if (target) free(target);
     if (parent) free(parent);
     if (stage) free(stage);
-    if (generated) free(generated);
     return r.result;
 }

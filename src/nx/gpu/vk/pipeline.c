@@ -316,6 +316,7 @@ void vk_pipeline_init(void) {
     snprintf(g_cache_dir, sizeof g_cache_dir, "%sshader_cache", g_cachedir);
     plat_mkdir(g_cache_dir);
     snprintf(g_pcache_path, sizeof g_pcache_path, "%s/vk_pipelines.bin", g_cache_dir);
+    snx_path_native(g_pcache_path);
     /* the temporary name is the process's own: two games running at once would otherwise write the same file */
     snprintf(g_pcache_tmp, sizeof g_pcache_tmp, "%s.%u.tmp", g_pcache_path, pf_pid());
     /* the driver's compiled pipelines from earlier runs; it ignores data from another device or driver version */
@@ -1842,6 +1843,8 @@ static void pf_start_load(void) {
     null_fs(); /* made here, before the reading thread uses it */
     snprintf(g_pf.path, sizeof g_pf.path, "%s/%s.vkshaders", g_cache_dir, g_exename);
     snprintf(g_pf.ship_path, sizeof g_pf.ship_path, "%s/%s.vkshipped", g_cache_dir, g_exename);
+    snx_path_native(g_pf.path);
+    snx_path_native(g_pf.ship_path);
     if (g_settings.prepare_shaders) ship_snapshot(); /* before the game's first thread writes its data */
     /* the translator's recursion wants the GPU thread's stack */
     if (plat_thread(pf_load, &g_pf, (size_t)16 << 20)) pf_load(NULL); /* no thread: read here */
