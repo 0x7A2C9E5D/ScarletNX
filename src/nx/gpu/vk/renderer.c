@@ -338,12 +338,12 @@ static void flip_src(VkImageBlit* b, u32 transform) {
 }
 
 #if defined(SNX_TRACY)
-/* The heap the caches manage, as vk_mem_use reads it for their own trimming, in MB. */
+/* The heap the caches manage, as vk_mem_use reads it for their own trimming, in bytes (the plot is a Memory one). */
 static void gpu_memory_plots(void) {
     u64 used, budget;
     vk_mem_use(&used, &budget);
-    SNX_PLOT("gpu memory MB", (double)used / (1024.0 * 1024.0));
-    SNX_PLOT("gpu memory budget MB", (double)budget / (1024.0 * 1024.0));
+    SNX_PLOT("gpu memory", used);
+    SNX_PLOT("gpu memory budget", budget);
 }
 #endif
 
@@ -471,7 +471,7 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
             SNX_PLOT("pipeline cache hits", (double)(is[1] - was[1]));
             SNX_PLOT("pipeline make ms", (double)(is[2] - was[2]));
             SNX_PLOT("pipeline wait ms", (double)(is[3] - was[3]));
-            SNX_PLOT("texture MB", (double)(is[7] - was[7]) / (1024.0 * 1024.0));
+            SNX_PLOT("texture memory", is[7] - was[7]);
             was_drawn = g_vk_drawn;
             if (d > 50000000) {
                 slow_frames++;

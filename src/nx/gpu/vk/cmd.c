@@ -249,7 +249,7 @@ static void ring_reset(Ring* r, const VmaBudget* budget) {
 static void timeline_wait(u64 value) {
     VkSemaphoreWaitInfo wi = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &g_gsem, .pValues = &value};
-    SNX_ZONE(z_wait, "vk timeline wait");
+    SNX_ZONE_C(z_wait, "vk timeline wait", 0xb05252);
     gpu_wait_note("a graphics submission", value);
     SNX_ZONE_V(z, "timeline wait", value);
     VK_OK(vkWaitSemaphores(g_vk.dev, &wi, UINT64_MAX));

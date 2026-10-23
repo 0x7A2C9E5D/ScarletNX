@@ -2055,6 +2055,7 @@ int audren_frame(ARState* s, i16* stereo) {
     u32 j;
     u32 n = s->frame;
     u32 played = 0;
+    SNX_FRAME_SCOPED(f_audio, "audio"); /* the tick's own frame set: discontinuous, one of them now and then */
     SNX_ZONE(z_frame, "audio frame");
     memset(s->buf, 0, (size_t)(s->buffers + SNX_AUDREN_CHANNELS) * n * sizeof *s->buf);
     u32 nsorted = sort_mixes(s);
