@@ -358,6 +358,7 @@ static int extract_files(ExtractState* state, const ExtractOptions* options, con
     snx_hac_progress(progress_tick, state);
     puts(patch->found ? "Extracting the base with the update applied" : "Extracting the base game");
     fflush(stdout);
+    snx_progress("extract", -1, -1, NULL);
     { /* what is used, under the step's line */
         char size[32], other[32], title[17];
         snx_size_text(program->size, size, sizeof size);

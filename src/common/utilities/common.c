@@ -110,6 +110,43 @@ int snx_path_format(char* out, size_t size, const char* fmt, ...) {
     snx_path_native(out);
     return 0;
 }
+/* text into out as JSON string characters */
+static size_t json_escape(char* out, size_t size, const char* text) {
+    size_t n = 0;
+    for (; *text && n + 7 < size; ++text) {
+        unsigned char c = (unsigned char)*text;
+        if (c == '"' || c == '\\') {
+            out[n++] = '\\';
+            out[n++] = (char)c;
+        } else if (c < 0x20) {
+            n += (size_t)snprintf(out + n, size - n, "\\u%04x", c);
+        } else
+            out[n++] = (char)c;
+    }
+    out[n] = 0;
+    return n;
+}
+void snx_progress(const char* event, int done, int total, const char* title) {
+    const char* path = getenv("SNX_PROGRESS_FILE");
+    char line[1024], text[512];
+    int n;
+    FILE* f;
+    if (!path || !path[0] || !event) return;
+    n = snprintf(line, sizeof line, "{\"v\":1,\"event\":\"%s\"", event);
+    if (done >= 0) n += snprintf(line + n, sizeof line - (size_t)n, ",\"done\":%d", done);
+    if (total >= 0) n += snprintf(line + n, sizeof line - (size_t)n, ",\"total\":%d", total);
+    if (title) {
+        json_escape(text, sizeof text, title);
+        n += snprintf(line + n, sizeof line - (size_t)n, ",\"title\":\"%s\"", text);
+    }
+    if (n < 0 || (size_t)n + 3 > sizeof line) return;
+    line[n++] = '}';
+    line[n++] = '\n';
+    f = snx_fopen(path, "ab");
+    if (!f) return;
+    fwrite(line, 1, (size_t)n, f);
+    fclose(f);
+}
 /* snx_error's sink, snx_error_sink's: NULL for stderr; the kinds whose folder app.ini names wrongly, and the options
    given by an older name, said once */
 static struct {

@@ -228,9 +228,20 @@ Remaining examples: POSIX.
 ./build/scarletnx -r -h
 ```
 
-- **Keys:** encrypted content uses flags → the data folder ([Folders](#folders)) → `~/.switch`
+- **Keys:** encrypted content uses flags → `SNX_KEYS`/`SNX_TITLE_KEYS` (files, set by a frontend with keys of its own and
+  inherited by the recompile and the game) → the data folder ([Folders](#folders)) → `~/.switch`
   (`%USERPROFILE%\.switch` on Windows).
   Common NSP tickets supplement title keys. Fully decrypted content needs neither key file.
+- **Progress:** with `SNX_PROGRESS_FILE` set, each process of a run appends one JSON line per event to that file:
+  ```json
+  {"v":1,"event":"extract"}
+  {"v":1,"event":"recompile","title":"Game"}
+  {"v":1,"event":"block","done":3,"total":6}
+  {"v":1,"event":"built","title":"Game"}
+  {"v":1,"event":"launched","title":"Game"}
+  ```
+  `block` counts the compiled units, as the printed `compiled block N/M` lines do. A step skipped because it was
+  completed earlier writes nothing. Readers should skip unknown events and versions.
 - **Extraction:** defaults to the data folder's `work/<dump stem>`; `--name`/`--out DIR` override. Refuses existing
   `exefs`. hactool runs inside the driver and reads each NCA where it lies in the XCI or NSP, so the ExeFS and RomFS
   are written straight into the output and nothing is unpacked beside it

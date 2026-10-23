@@ -811,6 +811,7 @@ int snx_main(int argc, char** argv) {
     /* the header the log summary reads (common/utilities/logscan.c): no folder in it, since players attach the log to
        public reports and the folder names their account */
     LOG("ScarletNX - %s\n", title);
+    snx_progress("launched", -1, -1, title);
     LOG("build: %s\n", snx_build_info());
     {
         char sys[384];

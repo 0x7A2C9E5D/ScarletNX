@@ -566,7 +566,10 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     gen.title = title;
     gen.jit_cache = jit_cache;
     gen.hints = read_hints(base, program.npdm.is64, &gen.hint_count);
-    if (!compile.quiet) printf("Recompiling %s (%zu modules)\n", title, program.module_count);
+    if (!compile.quiet) {
+        printf("Recompiling %s (%zu modules)\n", title, program.module_count);
+        snx_progress("recompile", -1, -1, title);
+    }
     /* an add-on's files: its dump, read in place, or what the driver extracts into its data folder */
     if (addon ? snx_mkdirs(data)
               : dump ? drop_extraction(data, compile.quiet) : copy_data(&program, data, compile.quiet, tmpfs)) {
@@ -679,7 +682,10 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             goto done;
         }
     }
-    if (!compile.quiet) printf("Built %s\n", exe);
+    if (!compile.quiet) {
+        printf("Built %s\n", exe);
+        snx_progress("built", -1, -1, title);
+    }
     rc = 0;
 done:
     snx_free_program(&program);
