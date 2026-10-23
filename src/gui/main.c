@@ -8602,7 +8602,8 @@ done:
 static void mods_focus(App* app) {
     size_t row = app->browser.selected, head = app->browser.head;
     size_t index = app->browser.page * app->browser.page_size + row - head;
-    bool recent = row < head && (int)row < recent_shown(app), game = row >= head && index < app->games.count;
+    bool recent = row < head && (int)row < recent_shown(app),
+         game = row >= head && index < app->games.count && !gui_games_heading(&app->games, index); /* it has no path */
     char* folder = NULL;
     if (recent && app->recent.game[row].driver == GUI_SWITCH)
         gui_game_mods(app->recent.game[row].path, &folder, NULL);

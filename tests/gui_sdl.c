@@ -4377,7 +4377,8 @@ int main(int argc, char** argv) {
         app.browser.page = 1;
         app.browser.selected = 0;
     }
-    /* a group's heading has no path: the focus on it, as the pointer over it puts it, offers no AOT pack */
+    /* a group's heading has no path: the focus on it, as the pointer over it puts it, offers no AOT pack, and M on it
+       says it opens no mods folder (it took the launcher down) */
     {
         GuiGames was = app.games, two = {0};
         GuiBrowser browser_was = app.browser;
@@ -4393,6 +4394,10 @@ int main(int argc, char** argv) {
         app.browser.page = 0;
         app.browser.selected = app.browser.head; /* the heading */
         assert(!aot_focus_game(&app, &f) && !f.path && !f.folder);
+        app.message[0] = 0;
+        mods_focus(&app);
+        assert(!strcmp(app.message, "M opens the mods folder of a recompiled Switch game in focus."));
+        app.message[0] = 0;
         app.browser.selected = app.browser.head + 1; /* a dump: no game folder either */
         assert(!aot_focus_game(&app, &f) && !f.path);
         app.games = was;
