@@ -3,5 +3,3 @@
 # different outcomes), and the words differing in the default run and in --sweep. A group missing here
 # fails the test, and so does a listed one that no longer differs in a run whose count isn't 0.
 # --update rewrites the counts of the run it is given with. qemu-diff-triage.md has the judgement on each.
-SYS                  llvm-runs/qemu-UNDEF             57     61
-SYS                  x                                 1      1

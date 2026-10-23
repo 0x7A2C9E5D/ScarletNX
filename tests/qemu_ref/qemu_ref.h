@@ -89,8 +89,9 @@ uint8_t snx_qref_seed_byte(uint32_t kind, uint64_t seed, uint64_t base, uint64_t
 const char* snx_qref_outcome_name(uint32_t outcome);
 
 /* System registers QEMU can't read as the Switch does (MRS Xt of them): their name, and the Switch's value when it
-   is a constant. A comparison takes the Switch's value for Xt, or leaves Xt out when it varies */
-enum { SNX_QREF_SYSREG_NONE, SNX_QREF_SYSREG_FIXED, SNX_QREF_SYSREG_VARIES };
+   is a constant. A comparison takes the Switch's value for Xt, leaves Xt out when it varies, and takes UNDEF for
+   QEMU's outcome when the Switch raises it (UNDEF) */
+enum { SNX_QREF_SYSREG_NONE, SNX_QREF_SYSREG_FIXED, SNX_QREF_SYSREG_VARIES, SNX_QREF_SYSREG_UNDEF };
 int snx_qref_switch_sysreg(uint32_t word, uint64_t* value, const char** name);
 
 #endif

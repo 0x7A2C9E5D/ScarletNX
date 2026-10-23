@@ -278,11 +278,17 @@ int snx_qref_switch_sysreg(uint32_t word, uint64_t* value, const char** name) {
         {0xD53BE040u, SNX_QREF_SYSREG_VARIES, 0, "CNTVCT_EL0"},
         {0xD53BE000u, SNX_QREF_SYSREG_FIXED, 19200000, "CNTFRQ_EL0"},
         {0xD53BD060u, SNX_QREF_SYSREG_VARIES, 0, "TPIDRRO_EL0"}, /* the thread's TLS, the runtime's to choose */
-        {0xD5380000u, SNX_QREF_SYSREG_FIXED, 0x411FD071u, "MIDR_EL1"},
         {0xD53B0020u, SNX_QREF_SYSREG_FIXED, 0x8444C004u, "CTR_EL0"},
         {0xD53B00E0u, SNX_QREF_SYSREG_FIXED, 4, "DCZID_EL0"},
     };
     size_t i;
+    /* MRS of the ID registers (op0 3, op1 0, CRn 0: MIDR_EL1, MPIDR_EL1, the ID_* ones) is UNDEF at EL0, and Horizon
+       doesn't emulate it as Linux, and so QEMU's user mode, does */
+    if ((word & 0xFFFFF000u) == 0xD5380000u) {
+        if (value) *value = 0;
+        if (name) *name = "ID register";
+        return SNX_QREF_SYSREG_UNDEF;
+    }
     for (i = 0; i < sizeof(regs) / sizeof(regs[0]); ++i) {
         if ((word & ~0x1Fu) != regs[i].mrs) continue;
         if (value) *value = regs[i].value;

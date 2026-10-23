@@ -396,6 +396,30 @@ static int load_probe(SnxCodeLoader* loader) {
     return 0;
 }
 
+/* SYS, SYSL, MRS and MSR (register) of what EL0 can't reach on the Switch: the C reference runs them (a NOP, a read
+   of 0, an ignored write), the LLVM emitters (ir_int.c) raise UNDEF as the console and QEMU do. llvm_qemu_differential
+   compares them with QEMU instead */
+static int el1_system(SnxU32 w) {
+    unsigned op0 = (w >> 19) & 3, l = (w >> 21) & 1, op1 = (w >> 16) & 7, crn = (w >> 12) & 15, crm = (w >> 8) & 15,
+             op2 = (w >> 5) & 7, key = op1 << 11 | crn << 7 | crm << 3 | op2;
+    if ((w & 0xFFC00000UL) != 0xD5000000UL || !op0) return 0;
+    if (op0 == 1) return l || op1 != 3 || crn != 7 || op2 != 1 || (crm != 4 && crm != 5 && crm != 10 && crm != 11 && crm != 14);
+    if (op0 != 3) return 1;
+    switch (key) {
+        case 3 << 11 | 4 << 7 | 2 << 3 | 0: /* NZCV */
+        case 3 << 11 | 4 << 7 | 4 << 3 | 0: /* FPCR */
+        case 3 << 11 | 4 << 7 | 4 << 3 | 1: /* FPSR */
+        case 3 << 11 | 13 << 7 | 0 << 3 | 2: return 0; /* TPIDR_EL0 */
+        case 3 << 11 | 13 << 7 | 0 << 3 | 3:          /* TPIDRRO_EL0 */
+        case 3 << 11 | 0 << 7 | 0 << 3 | 1:           /* CTR_EL0 */
+        case 3 << 11 | 0 << 7 | 0 << 3 | 7:           /* DCZID_EL0 */
+        case 3 << 11 | 14 << 7 | 0 << 3 | 0:          /* CNTFRQ_EL0 */
+        case 3 << 11 | 14 << 7 | 0 << 3 | 1:          /* CNTPCT_EL0 */
+        case 3 << 11 | 14 << 7 | 0 << 3 | 2: return !l; /* CNTVCT_EL0: read-only */
+        default: return 1;
+    }
+}
+
 /* words of one case: random operand fields, the case's specialization fields set, valid encodings only */
 static size_t generate(const SnxA64Pattern* p, size_t index, size_t want, Word* out) {
     size_t got = 0, attempts;
@@ -408,7 +432,7 @@ static size_t generate(const SnxA64Pattern* p, size_t index, size_t want, Word* 
             w = (w & ~(mask << p->fields[n].lo)) | ((SnxU32)(k & mask) << p->fields[n].lo);
             k >>= p->fields[n].width;
         }
-        if (snx_a64_decode(w) != &p->cases[index]) continue;
+        if (snx_a64_decode(w) != &p->cases[index] || el1_system(w)) continue;
         out[got].word = w;
         out[got].pattern = p;
         out[got++].index = index;

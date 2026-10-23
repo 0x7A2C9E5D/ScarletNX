@@ -430,8 +430,9 @@ SNX_INLINE void dc_zva(u8* M, u64 a) { memset(MP(a & ~(u64)63), 0, 64); }
 /* ---- exclusives and ordering ----
    Load-exclusive, load-acquire and store-release are sequentially consistent host atomics of the access size
    (LDACQ, STREL), so no later access moves above an acquire load and no earlier one below a release store, which
-   plain or volatile accesses don't guarantee once the compiler reorders them. Every DMB, DSB and ISB is a seq_cst
-   fence (SNX_FENCE in a64_templates.inc's BARRIER). Nothing else orders guest memory, so plain guest loads and
+   plain or volatile accesses don't guarantee once the compiler reorders them. A DMB or DSB of the loads type is an
+   acquire fence, of the stores type a release fence, and every other one and ISB a seq_cst fence (ir_int.c's
+   barriers). Nothing else orders guest memory, so plain guest loads and
    stores stay plain host ones, on x86-64, AArch64 and PowerPC64 hosts alike.
    The monitor is value based: a store-exclusive succeeds when the monitor is armed for the same address and size
    and a compare-and-swap from the value the load read succeeds. It is cleared after each store-exclusive. Status

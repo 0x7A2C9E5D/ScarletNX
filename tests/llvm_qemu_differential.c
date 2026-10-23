@@ -861,6 +861,9 @@ int main(int argc, char** argv) {
                 l.imm = ev.imm;
                 state_of(&c, &l.state);
                 qe.outcome = r->outcome;
+                if (snx_qref_switch_sysreg(it->words[it->nwords - 1], NULL, NULL) == SNX_QREF_SYSREG_UNDEF &&
+                    r->outcome == SNX_QREF_NEXT)
+                    qe.outcome = SNX_QREF_UNDEF; /* QEMU's user mode reads the ID registers EL0 can't */
                 qe.pc = r->pc;
                 qe.imm = r->imm;
                 qe.state = r->state;
