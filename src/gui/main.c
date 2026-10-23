@@ -10175,6 +10175,49 @@ const char* snx_menu_language(int i, const char** name) {
     return snx_gui_languages[i].code;
 }
 #if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
+/* Move old files without the menu, to out: each entry and what it does or would, then how many; with apply, done.
+   0, or 1 when one could not be moved; 2 when the folders cannot be found */
+static int migrate(const char* self, bool apply, FILE* out) {
+    App app;
+    char file[4400], what[4400];
+    const char* at;
+    bool ok;
+    int moves, rc;
+    memset(&app, 0, sizeof app);
+    snx_tr_languages(snx_gui_languages, snx_gui_language_count);
+    app.look_only = !apply;
+    if (!paths_start(&app, self)) {
+        fprintf(stderr, "scarletnx: %s\n", SDL_GetError());
+        forget(&app);
+        return 2;
+    }
+    open_files(&app); /* the folders the menu picked, which tell where things go */
+    left_behind(&app);
+    moves = move_old(&app, &app.cleaned, apply);
+    for (at = app.cleaned.text; at;) {
+        at = gui_cleaned_entry(at, &ok, file, what, sizeof file);
+        fprintf(out, "%s: %s\n", file, what);
+    }
+    if (!app.cleaned.count)
+        snprintf(what, sizeof what, "%s", snx_tr("Nothing left by an older version"));
+    else if (!apply)
+        snprintf(what, sizeof what, snx_tr("%d to move, %d staying: --migrate=yes moves them"), moves,
+                 app.cleaned.count - moves);
+    else
+        snprintf(what, sizeof what, snx_tr("%d moved, %d not"), moves, app.cleaned.count - app.cleaned.done);
+    fprintf(out, "%s\n", what);
+    rc = apply && app.cleaned.done < app.cleaned.count;
+    forget(&app);
+    return rc;
+}
+int snx_gui_migrate(const char* self, const char* option) {
+    if (!strcmp(option, "--migrate") || !strcmp(option, "--migrate=yes"))
+        return migrate(self, option[9] == '=', stdout);
+    fprintf(stderr, "scarletnx: %s is not --migrate (it says what would move) or --migrate=yes (it moves it)\n",
+            option);
+    return 2;
+}
+#endif
 #ifdef SNX_GUI_TOUR
 /* A walk through the screens for the simulator, to see them as a phone draws them: SNX_TOUR_DIR names the folder it
    writes a picture of each to, as the menu draws it, and the app ends after the last. Built only by a build that sets
@@ -10301,49 +10344,6 @@ static void tour_tick(App* app) {
         default: app->menu.quit = true; break;
     }
 #undef TOUR
-}
-#endif
-/* Move old files without the menu, to out: each entry and what it does or would, then how many; with apply, done.
-   0, or 1 when one could not be moved; 2 when the folders cannot be found */
-static int migrate(const char* self, bool apply, FILE* out) {
-    App app;
-    char file[4400], what[4400];
-    const char* at;
-    bool ok;
-    int moves, rc;
-    memset(&app, 0, sizeof app);
-    snx_tr_languages(snx_gui_languages, snx_gui_language_count);
-    app.look_only = !apply;
-    if (!paths_start(&app, self)) {
-        fprintf(stderr, "scarletnx: %s\n", SDL_GetError());
-        forget(&app);
-        return 2;
-    }
-    open_files(&app); /* the folders the menu picked, which tell where things go */
-    left_behind(&app);
-    moves = move_old(&app, &app.cleaned, apply);
-    for (at = app.cleaned.text; at;) {
-        at = gui_cleaned_entry(at, &ok, file, what, sizeof file);
-        fprintf(out, "%s: %s\n", file, what);
-    }
-    if (!app.cleaned.count)
-        snprintf(what, sizeof what, "%s", snx_tr("Nothing left by an older version"));
-    else if (!apply)
-        snprintf(what, sizeof what, snx_tr("%d to move, %d staying: --migrate=yes moves them"), moves,
-                 app.cleaned.count - moves);
-    else
-        snprintf(what, sizeof what, snx_tr("%d moved, %d not"), moves, app.cleaned.count - app.cleaned.done);
-    fprintf(out, "%s\n", what);
-    rc = apply && app.cleaned.done < app.cleaned.count;
-    forget(&app);
-    return rc;
-}
-int snx_gui_migrate(const char* self, const char* option) {
-    if (!strcmp(option, "--migrate") || !strcmp(option, "--migrate=yes"))
-        return migrate(self, option[9] == '=', stdout);
-    fprintf(stderr, "scarletnx: %s is not --migrate (it says what would move) or --migrate=yes (it moves it)\n",
-            option);
-    return 2;
 }
 #endif
 int snx_gui_main(const char* self) {
