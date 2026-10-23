@@ -3,6 +3,7 @@
 #include "gui/browser.h"
 #include "common/utilities/common.h"
 #include "common/utilities/cheat_list.h"
+#include "gui/aot.h"
 #include "common/utilities/mods.h"
 #include "gui/i18n.h"
 #include <ctype.h>
@@ -503,6 +504,59 @@ bool gui_games_group(GuiGames* games, const char* ready, const char* dumps,
     out.count = n;
     gui_games_free(games); /* what was left out: dumps made already, earlier headings */
     *games = out;
+    return true;
+}
+char* gui_game_log(const char* path) {
+    char *folder = snx_dirname(path), *name, *state, *log;
+    const char* leaf;
+    if (!folder) return NULL;
+    if (gui_game_folder(path)) { /* <name>/<name>: its folder's name, whatever the program's suffix */
+        for (leaf = folder + strlen(folder); leaf > folder && leaf[-1] != '/' && leaf[-1] != '\\'; --leaf) continue;
+        name = snx_strdup(leaf);
+    } else {
+        for (leaf = path + strlen(path); leaf > path && leaf[-1] != '/' && leaf[-1] != '\\'; --leaf) continue;
+        name = snx_strdup(leaf);
+        if (suffix(name, ".exe")) name[strlen(name) - 4] = 0;
+    }
+    state = name ? gui_game_kind_dir(folder, name, SNX_USER_STATE) : NULL;
+    log = state ? snx_format("%s/%s.log", state, name) : NULL;
+    free(state);
+    free(name);
+    free(folder);
+    return log;
+}
+bool gui_games_by_last_opened(GuiGames* games) {
+    SnxU64* times = (SnxU64*)calloc(games->count + 1, sizeof *times);
+    size_t i, j;
+    if (!times) return false;
+    for (i = 0; i < games->count; ++i)
+        if (games->paths[i] && !dump_entry(games, i)) { /* a game ready to run: its log's, 0 for none */
+            char* log = gui_game_log(games->paths[i]);
+            if (!log) {
+                free(times);
+                return false;
+            }
+            times[i] = snx_file_time(log);
+            free(log);
+        }
+    /* each moved up past those that ran before it, not past a heading: the others' order kept */
+    for (i = 1; i < games->count; ++i)
+        for (j = i; j > 0 && games->paths[j] && games->paths[j - 1] && times[j - 1] < times[j]; --j) {
+            char *name = games->names[j], *shown = games->shown[j], *path = games->paths[j];
+            size_t addons = games->addons[j];
+            SnxU64 time = times[j];
+            games->names[j] = games->names[j - 1];
+            games->shown[j] = games->shown[j - 1];
+            games->paths[j] = games->paths[j - 1];
+            games->addons[j] = games->addons[j - 1];
+            times[j] = times[j - 1];
+            games->names[j - 1] = name;
+            games->shown[j - 1] = shown;
+            games->paths[j - 1] = path;
+            games->addons[j - 1] = addons;
+            times[j - 1] = time;
+        }
+    free(times);
     return true;
 }
 bool gui_has_folders(const char* directory, int kinds) {

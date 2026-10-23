@@ -641,6 +641,18 @@ msgid "Dumps"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Sort"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Title"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Last opened"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "Not kept for the next start: %s could not be written"
 msgstr ""
@@ -2449,6 +2461,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Not enough memory to list the games in their groups."
+msgstr ""
+
+#: src/gui/main.c
+msgid "Not enough memory to sort the games by the last opened: by title."
 msgstr ""
 
 #: src/gui/main.c

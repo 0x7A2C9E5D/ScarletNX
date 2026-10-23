@@ -93,7 +93,7 @@ typedef struct {
 /* Settings > App > Folders' rows, in the order of their keys in app.ini's [folders] */
 enum { GUI_PLACE_DATA, GUI_PLACE_GAMES, GUI_PLACE_WORK, GUI_PLACE_STATE, GUI_PLACE_CACHE, GUI_PLACES };
 /* Games' options, the rows of the View box its V opens, in the order of their keys in app.ini's [app] */
-enum { GUI_OPTION_RECENT, GUI_OPTION_DUMPS, GUI_OPTIONS };
+enum { GUI_OPTION_RECENT, GUI_OPTION_DUMPS, GUI_OPTION_SORT, GUI_OPTIONS };
 #define GUI_GROUPS_MAX   32
 #define GUI_FOLDERS_MAX  16    /* the player's game folders, past recompiled/ and dumps/ */
 #define GUI_FOLDER_DEPTH 4     /* how deep the games of a folder kept with its subfolders are looked for */
@@ -902,7 +902,8 @@ static const struct {
     const char *key, *name, *words[2], *shown[2];
 } option_keys[GUI_OPTIONS] = {
     {"recent_games", SNX_TR_NOOP("Recent Games"), {"on", "off"}, {SNX_TR_NOOP("On"), SNX_TR_NOOP("Off")}},
-    {"games_dumps", SNX_TR_NOOP("Dumps"), {"on", "off"}, {SNX_TR_NOOP("On"), SNX_TR_NOOP("Off")}}};
+    {"games_dumps", SNX_TR_NOOP("Dumps"), {"on", "off"}, {SNX_TR_NOOP("On"), SNX_TR_NOOP("Off")}},
+    {"games_sort", SNX_TR_NOOP("Sort"), {"title", "last_opened"}, {SNX_TR_NOOP("Title"), SNX_TR_NOOP("Last opened")}}};
 /* the option a key of app.ini's [app] sets, -1 for none; the index of value among its words, -1 for none */
 static int option_of(const char* key) {
     int i;
@@ -914,9 +915,10 @@ static int option_word(int option, const char* value) {
     for (w = 0; w < 2 && strcmp(value, option_keys[option].words[w]); ++w) {}
     return w < 2 ? w : -1;
 }
-/* the options as Games reads them: the recent games over the list, the dumps in it */
+/* the options as Games reads them: the recent games over the list, the dumps in it, sorted by the last opened */
 static bool recent_on(const App* app) { return app->options[GUI_OPTION_RECENT] == 0; }
 static bool dumps_on(const App* app) { return app->options[GUI_OPTION_DUMPS] == 0; }
+static bool by_last_opened(const App* app) { return app->options[GUI_OPTION_SORT] == 1; }
 /* the options before app.ini names them: each its first word, but on iOS (ios) Recent Games and Dumps off, as a phone
    keeps the games made in the app's recompiled/, which Games lists whole (a second list of them only repeats it), and
    prepares a dump from the Menu */
@@ -9285,8 +9287,9 @@ static void share_log(App* app) {
 /* gui_games_group's made: a dump a game of recompiled/ was made from already, of made_read's */
 static bool made_dump(const char* path, const void* made) { return made_program((const MadeGames*)made, path) != NULL; }
 /* the Games list: recompiled/, dumps/ (with its subfolders) and the Library's folders, every kind, in two groups: the
-   games ready to run, then the dumps not made already, which Dumps off leaves out. The first folder that cannot be read
-   is named, the others still listed */
+   games ready to run, then the dumps not made already, which Dumps off leaves out; each by what it is shown as in each
+   folder, or with Sort's Last opened the game that last ran first. The first folder that cannot be read is named, the
+   others still listed */
 static void games_scan(App* app, GuiGames* games, char* message, size_t size) {
     int kinds = GUI_GAMES_RUN | GUI_GAMES_CIA | GUI_GAMES_DUMP, i; /* the old games/'s: it held both */
     char error[sizeof app->message];
@@ -9317,6 +9320,8 @@ static void games_scan(App* app, GuiGames* games, char* message, size_t size) {
     if (!gui_games_group(games, snx_tr("Recompiled"), dumps_on(app) ? snx_tr("Dumps") : NULL, made_dump, &made) &&
         !message[0])
         snprintf(message, size, "%s", snx_tr("Not enough memory to list the games in their groups."));
+    if (by_last_opened(app) && !gui_games_by_last_opened(games) && !message[0])
+        snprintf(message, size, "%s", snx_tr("Not enough memory to sort the games by the last opened: by title."));
     made_free(&made);
     free(dumps);
 }

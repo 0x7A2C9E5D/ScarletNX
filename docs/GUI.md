@@ -331,13 +331,16 @@ cannot be read is named and the others still listed.
   folder, where ESC comes back to Games and its list read again. The recent games are over every page, then the
   page's games. ESC returns to the menu.
 - **V** (on a phone a tap on *View* at the foot) opens the View box over the list, an option a row, its value between
-  the arrows: **Recent Games** (*On*, `recent_games = on` in `app.ini`: the recent games over the list; *Off*: none)
-  and **Dumps** (*On*, `games_dumps = on`: the dumps of `dumps/` and of the dumps library's folders under their
-  heading; *Off*: the games ready to run alone, a CIA or a VPK left out with the dumps). Enter, Left, Right or a click
-  change the focused one, kept in `app.ini` at once, and the list is read again by it; ESC or a click off the box
-  closes it. On iOS both start *Off*, as a phone keeps the games made in the app's `recompiled/` and prepares a dump
-  from the Menu; the player turns them on there. An `app.ini` without them, an older version's, has these defaults,
-  and a word it does not know is named in the message with the one kept: `recent_games = maybe (it keeps on)`.
+  the arrows: **Recent Games** (*On*, `recent_games = on` in `app.ini`: the recent games over the list; *Off*: none),
+  **Dumps** (*On*, `games_dumps = on`: the dumps of `dumps/` and of the dumps library's folders under their
+  heading; *Off*: the games ready to run alone, a CIA or a VPK left out with the dumps) and **Sort** (*Title*,
+  `games_sort = title`: by the name shown, in each folder; *Last opened*, `games_sort = last_opened`: the game whose
+  log a run wrote last first, as every run writes its game's log again, then the games never run in their order,
+  each group on its own, its dumps, CIAs and VPKs in theirs). Enter, Left, Right or a click change the focused one,
+  kept in `app.ini` at once, and the list is read again by it; ESC or a click off the box closes it. On iOS Recent
+  Games and Dumps start *Off*, as a phone keeps the games made in the app's `recompiled/` and prepares a dump from the
+  Menu; the player turns them on there. An `app.ini` without them, an older version's, has these defaults, and a word
+  it does not know is named in the message with the one kept: `recent_games = maybe (it keeps on)`.
 - Up/Down go round the recent games and the page's files. Enter/Space opens one.
 - **R** (on Android a tap on *Recompile* at the foot) recompiles the Switch game in focus, recent or on the page,
   where it is, or prepares its dump again: `scarletnx -r`. It plays nothing;

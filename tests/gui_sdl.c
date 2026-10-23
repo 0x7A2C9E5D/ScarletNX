@@ -13,7 +13,7 @@
 #endif
 /* app.ini as the menu writes it: its head, and the Games options' lines that end [app], at their defaults */
 #define APP_INI_HEAD   "; Settings > App and Games' View in the launcher, as they were left\n[app]\n"
-#define GAMES_DEFAULTS "recent_games = on\ngames_dumps = on\n"
+#define GAMES_DEFAULTS "recent_games = on\ngames_dumps = on\ngames_sort = title\n"
 /* the default theme's colours, as the checks below name them */
 static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255}, red = {255, 0, 0, 255},
                        pink = {255, 85, 255, 255}, black = {0, 0, 0, 255};
@@ -909,9 +909,9 @@ static bool games_lists(const App* app, const char* shown) {
         if (!strcmp(app->games.shown[i], shown)) return true;
     return false;
 }
-/* Games' View box (V): Recent Games and Dumps, on by default, each changed by Enter, Left, Right or a click, kept in
-   app.ini at once and Games listed again by it; an app.ini without them (an older version's) has the defaults, iOS's
-   off; a word it does not know named with the one it keeps */
+/* Games' View box (V): Recent Games and Dumps, on by default, and Sort, by title; each changed by Enter, Left, Right
+   or a click, kept in app.ini at once and Games listed again by it; an app.ini without them (an older version's) has
+   the defaults, iOS's off; a word it does not know named with the one it keeps */
 static void view_box(App* app, const char* temporary) {
     char *was_games = app->games_dir, *was_data = app->data_dir, *was_app = app->app_file;
     char* was_recent_file = app->recent_file;
@@ -929,6 +929,18 @@ static void view_box(App* app, const char* temporary) {
     app->recent_file = NULL; /* the list in the menu alone */
     app->folder_count = 0;
     game = folder_game_in(app->games_dir, "alpha game");
+    { /* two more, one played after alpha game, one never: Sort's Last opened by their logs */
+        char *delta = folder_game_in(app->games_dir, "delta game"),
+             *epsilon = folder_game_in(app->games_dir, "epsilon game");
+        char* log = snx_format("%s/alpha game/alpha game.log", app->games_dir);
+        assert(!snx_write_file(log, "log", 3) && !snx_set_file_time(log, 1000000));
+        free(log);
+        log = snx_format("%s/delta game/delta game.log", app->games_dir);
+        assert(!snx_write_file(log, "log", 3) && !snx_set_file_time(log, 2000000));
+        free(log);
+        free(epsilon);
+        free(delta);
+    }
     dump = snx_path_join(dumps, "beta dump.nsp");
     cia = snx_path_join(app->games_dir, "gamma.cia"); /* in the dumps' group, with them */
     assert(!snx_mkdirs(dumps) && !snx_write_file(dump, "dump", 4) && !snx_write_file(cia, "cia", 3));
@@ -951,6 +963,7 @@ static void view_box(App* app, const char* temporary) {
     render(app);
     shows(app, "- Recent Games  < On >", yellow);
     shows(app, "- Dumps         < On >", normal);
+    shows(app, "- Sort          < Title >", normal);
     /* Enter: Recent Games off, kept at once, Games without its rows */
     key(app, SDLK_RETURN);
     assert(app->options_shown && !recent_on(app) && app->browser.head == 0 && games_lead(app) == 0);
@@ -964,9 +977,19 @@ static void view_box(App* app, const char* temporary) {
     key(app, SDLK_DOWN);
     assert(app->options_focus == 1);
     key(app, SDLK_RIGHT);
-    assert(!dumps_on(app) && app->games.count == 1 && games_lists(app, "alpha game"));
+    assert(!dumps_on(app) && app->games.count == 3 && games_lists(app, "alpha game") && !games_lists(app, "gamma.cia"));
+    /* Down, then Left: Sort by the last opened, the game whose log a run wrote last first, one never run after them */
+    assert(!strcmp(app->games.names[0], "alpha game") && !strcmp(app->games.names[1], "delta game") &&
+           !strcmp(app->games.names[2], "epsilon game"));
+    key(app, SDLK_DOWN);
+    key(app, SDLK_LEFT);
+    assert(by_last_opened(app) && app->games.count == 3 && !strcmp(app->games.names[0], "delta game") &&
+           !strcmp(app->games.names[1], "alpha game") && !strcmp(app->games.names[2], "epsilon game"));
+    render(app);
+    shows(app, "- Sort          < Last opened >", yellow);
+    key(app, SDLK_UP);
     kept = (char*)snx_read_file(app->app_file, &size);
-    assert(kept && strstr(kept, "\nrecent_games = off\ngames_dumps = off\n"));
+    assert(kept && strstr(kept, "\nrecent_games = off\ngames_dumps = off\ngames_sort = last_opened\n"));
     free(kept);
     key(app, SDLK_ESCAPE); /* the box closed, Games still there */
     assert(!app->options_shown && app->menu.view == GUI_LOAD_GAMES);
@@ -978,25 +1001,27 @@ static void view_box(App* app, const char* temporary) {
     memset(app->options, 0, sizeof app->options);
     app->message[0] = 0;
     app_load(app);
-    assert(!recent_on(app) && !dumps_on(app) && !app->message[0]);
+    assert(!recent_on(app) && !dumps_on(app) && by_last_opened(app) && !app->message[0]);
     snprintf(expected, sizeof expected, "[app]\ntheme = %s\n", app->theme.id);
     assert(!snx_write_file(app->app_file, expected, strlen(expected)));
     games_defaults(app, false);
     app_load(app);
-    assert(recent_on(app) && dumps_on(app) && !app->message[0]);
+    assert(recent_on(app) && dumps_on(app) && !by_last_opened(app) && !app->message[0]);
     games_defaults(app, true);
     app_load(app);
-    assert(!recent_on(app) && !dumps_on(app) && !app->message[0]);
+    assert(!recent_on(app) && !dumps_on(app) && !by_last_opened(app) && !app->message[0]);
     /* a word it does not know: named with the word it keeps, the file's last it knows or the default's */
     games_defaults(app, false);
     {
-        const char* broken = "[app]\nrecent_games = maybe\ngames_dumps = off\ngames_dumps = none\n";
+        const char* broken =
+            "[app]\nrecent_games = maybe\ngames_dumps = off\ngames_dumps = none\ngames_sort = newest\n";
         assert(!snx_write_file(app->app_file, broken, strlen(broken)));
         app_load(app);
         snprintf(expected, sizeof expected,
-                 "Not used from %s: recent_games = maybe (it keeps on), games_dumps = none (it keeps off)",
+                 "Not used from %s: recent_games = maybe (it keeps on), games_dumps = none (it keeps off), "
+                 "games_sort = newest (it keeps title)",
                  app->app_file);
-        assert(recent_on(app) && !dumps_on(app) && !strcmp(app->message, expected));
+        assert(recent_on(app) && !dumps_on(app) && !by_last_opened(app) && !strcmp(app->message, expected));
         broken = "[app]\nrecent_games = maybe\nrecent_games = off\n"; /* the file's own after it, in use after it */
         assert(!snx_write_file(app->app_file, broken, strlen(broken)));
         games_defaults(app, false);
