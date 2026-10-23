@@ -38,8 +38,9 @@ endfunction()
 # what the tests reach that this list misses
 if(SNX_TEST_SANITIZERS)
     cmake_language(DEFER DIRECTORY "${PROJECT_SOURCE_DIR}" CALL snx_test_sanitize
-        # the common code: network, filesystems, the A64 reference and LZ4
+        # the common code: network, filesystems, the A64 reference, LZ4 and xxHash
         scarletnx-common scarletnx-net scarletnx-ldn scarletnx-filesystem snx_demangle snx_a64_reference snx_lz4
+        snx_xxhash
         snx-logscan
         # the recompiler and its backends
         snx_llvm snx_arm_llvm scarletnx-recompiler scarletnx-recompiler-shared
