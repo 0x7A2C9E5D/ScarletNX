@@ -3,8 +3,9 @@
 # macOS and iOS
 
 Both build on a Mac with Xcode, for Apple silicon (arm64), with Xcode's Clang, and the CI builds both on every push
-(`.github/workflows/build.yml`). They are new and have only been built by CI. No game has run on either yet, for the
-reasons under [What is missing](#what-is-missing).
+(`.github/workflows/build.yml`). They are new. On a Mac, one game's module loads and runs as far as its title
+background, without the logo or the menu. On an iPhone, one game has been prepared on the device and played with JIT on.
+The rest is under [What is missing](#what-is-missing).
 
 ## The frontend
 
@@ -96,11 +97,11 @@ Apple silicon's 16 KiB pages no longer stop the runtime: it commits guest memory
 PowerPC64 ([PowerPC64](./PPC64.md)), and views of memory are copies there, as Windows has them. What still keeps
 games from running:
 
-- **Game modules on a Mac, untested.** The recompiler links an arm64 Mach-O dylib
+- **A game's frame on a Mac.** The recompiler links an arm64 Mach-O dylib
   (`src/common/cpu/recompiler/llvm/link_macho.c`) with the ad hoc signature ld64 gives one, which Apple silicon
-  needs to run it. Its layout, rebases, exports and signature were checked on Linux against LLVM's tools and
-  `ld64.lld`, and its code was run there under qemu. No Mac has loaded one yet.
-- **Game modules on iOS, untested on a device.** iOS loads no code it did not ship with, so a game's code is a pack of
+  needs to run it. A Mac loads one and the game runs, but the frame stops at the title background. Which part of the
+  renderer on MoltenVK drops the rest is not known yet.
+- **Game modules on iOS, one game checked.** iOS loads no code it did not ship with, so a game's code is a pack of
   objects (`scarletnx -r Game --target ios` writes `<id>_code.snxobj`, 64-bit games only) that the app loads into
   memory a debugger made executable (`load_pack` in `src/nx/runtime/main.c`, the JIT loader's iOS arena in
   `code_loader.c`). The app makes it itself, or a Mac does.
