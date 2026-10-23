@@ -77,63 +77,25 @@ static u64 g_sub_ns;       /* when the last submission was made */
 static VkSemaphoreSubmitInfo g_after[2]; /* vk_submit_after's wait and signal, for the next submission (semaphore 0: none) */
 u32 g_vk_epoch, g_vk_present;
 
-/* XXH64 (Yann Collet's xxHash, BSD-2-Clause), the algorithm as its specification gives it. The hash it replaced
-   multiplied each lane by an odd constant, which carries a change only towards the high bits, and shifted lanes
-   before combining them: a change confined to a word's top bits (a float's sign, a Maxwell opcode's high bits) left
-   the hash the same, so a buffer kept a stale copy and two programs could share one translation. Each round here
-   rotates the high bits down before the next multiply, and the avalanche at the end mixes every bit into every other */
-#define XXH_P1 0x9E3779B185EBCA87ull
-#define XXH_P2 0xC2B2AE3D27D4EB4Full
-#define XXH_P3 0x165667B19E3779F9ull
-#define XXH_P4 0x85EBCA77C2B2AE63ull
-#define XXH_P5 0x27D4EB2F165667C5ull
-static u64 xxh_rotl(u64 x, int r) { return (x << r) | (x >> (64 - r)); }
-static u64 xxh_round(u64 acc, u64 in) { return xxh_rotl(acc + in * XXH_P2, 31) * XXH_P1; }
-static u64 xxh_merge(u64 h, u64 v) { return (h ^ xxh_round(0, v)) * XXH_P1 + XXH_P4; }
-/* XXH64 of size bytes at s, each byte copied to out on the way when it isn't NULL: the bytes are read once */
-static u64 xxh64(const u8* s, u64 size, u8* out) {
-    const u8* end = s + size;
-    u64 h, w;
-    u32 w4;
-    if (size >= 32) {
-        u64 a = XXH_P1 + XXH_P2, b = XXH_P2, c = 0, d = 0 - XXH_P1;
-        for (; end - s >= 32; s += 32) {
-            u64 q[4];
-            memcpy(q, s, 32);
-            if (out) {
-                memcpy(out, q, 32);
-                out += 32;
-            }
-            a = xxh_round(a, q[0]);
-            b = xxh_round(b, q[1]);
-            c = xxh_round(c, q[2]);
-            d = xxh_round(d, q[3]);
-        }
-        h = xxh_rotl(a, 1) + xxh_rotl(b, 7) + xxh_rotl(c, 12) + xxh_rotl(d, 18);
-        h = xxh_merge(xxh_merge(xxh_merge(xxh_merge(h, a), b), c), d);
-    } else
-        h = XXH_P5;
-    h += size;
-    if (out) memcpy(out, s, (size_t)(end - s)); /* the tail, under 32 bytes */
-    for (; end - s >= 8; s += 8) {
-        memcpy(&w, s, 8);
-        h = xxh_rotl(h ^ xxh_round(0, w), 27) * XXH_P1 + XXH_P4;
-    }
-    if (end - s >= 4) {
-        memcpy(&w4, s, 4);
-        h = xxh_rotl(h ^ (u64)w4 * XXH_P1, 23) * XXH_P2 + XXH_P3;
-        s += 4;
-    }
-    for (; s < end; s++) h = xxh_rotl(h ^ *s * XXH_P5, 11) * XXH_P1;
-    h ^= h >> 33;
-    h *= XXH_P2;
-    h ^= h >> 29;
-    h *= XXH_P3;
-    return h ^ (h >> 32);
+/* XXH3 (Yann Collet's xxHash 0.8.3, BSD-2-Clause, cmake/dependencies.cmake): the quality XXH64 gave the hash it
+   replaced (a change in a word's high bits shows, and two don't cancel), at about three times its speed. On x86-64
+   xxHash's dispatcher runs the AVX-512, AVX2 or SSE2 loop the CPU has (60 GB/s on a Zen 4 core, against XXH64's 19),
+   from a build for any x86-64. Buffers' checks hashed hundreds of megabytes a frame in one game */
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86) /* as xxh3.c builds it */
+#include "xxh_x86dispatch.h"
+#define SNX_XXH3(p, n) XXH3_64bits_dispatch(p, n)
+#else
+#include "xxhash.h"
+#define SNX_XXH3(p, n) XXH3_64bits(p, n)
+#endif
+u64 vk_hash(const void* p, u64 size) { return (u64)SNX_XXH3(p, (size_t)size); }
+/* the same hash as vk_hash, which an entry's next check may compute instead, with src copied to dst: the bytes are
+   hashed where they are (dst may be write-combined staging, slow to read back) and then copied, from cache */
+u64 vk_hash_copy(void* dst, const void* src, u64 size) {
+    u64 h = (u64)SNX_XXH3(src, (size_t)size);
+    memcpy(dst, src, (size_t)size);
+    return h;
 }
-u64 vk_hash(const void* p, u64 size) { return xxh64(p, size, NULL); }
-/* the same hash as vk_hash, which an entry's next check may compute instead */
-u64 vk_hash_copy(void* dst, const void* src, u64 size) { return xxh64(src, size, dst); }
 
 u64 vk_sample_hash(u64 gva, u64 len) {
     u8 tmp[2048 + 128];
