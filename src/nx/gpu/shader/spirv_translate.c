@@ -6,14 +6,20 @@
 #include <assert.h>
 #include <stdlib.h>
 
+enum { VAR_PRED = 255, VAR_FLAG = VAR_PRED + 7, VAR_COUNT = VAR_FLAG + 4 };
+
 typedef struct {
     SpvEmitter emit;
     u32 u32_type, f32_type, f16_type, f64_type, bool_type, zero, true_value, false_value, glsl;
     u32 reg[255];
-    /* Each register's value in the block being written, so that reading it again takes no load: the value, a bitcast
-       of it to alt_type, and the emitter's block they were made in. Stores stay where they were, so the variables
-       hold every value at a block's end and the driver sees the same memory as before */
-    u32 reg_val[255], reg_alt[255], reg_alt_type[255], reg_block[255];
+    /* The registers, predicates and flags (VAR_PRED + p, VAR_FLAG + k) as values in the block being written, so that
+       reading one again takes no load and only its last value in the block is stored: the value (0 for a register
+       written as reg_alt only, bitcast to its bits when read so), the emitter's block it was read or written in, and
+       whether the variable still has to take it. Each is stored before the branch or merge that ends its block
+       (var_flush, the emitter's block_end): blocks that follow read the variables. A register's bitcast to another
+       32-bit type in the block is reg_alt, of reg_alt_type */
+    u32 var_val[VAR_COUNT], var_block[VAR_COUNT], reg_alt[255], reg_alt_type[255];
+    u8 var_dirty[VAR_COUNT];
     u8* ftz; /* a bit per id: values with no subnormal (float_ftz's, and reads of registers not tainted) */
     size_t ftz_bytes;
     /* each value's flush in the block it was made in (by id, ftz_of_cap of them): a value read once and used by
@@ -59,43 +65,86 @@ int g_shader_float16 = 1;
 int g_shader_tessellation = 1;
 int g_shader_clock_scopes;
 
+/* the Function variable of a register, predicate or flag (z, s, c, o) */
+static u32 var_of(const DirectCtx* c, u32 v) {
+    if (v < VAR_PRED) return c->reg[v];
+    if (v < VAR_FLAG) return c->pred[v - VAR_PRED];
+    v -= VAR_FLAG;
+    return v == 0 ? c->cc_z : v == 1 ? c->cc_s : v == 2 ? c->cc_c : c->cc_o;
+}
+static u32 flag_var(const DirectCtx* c, u32 variable) {
+    return VAR_FLAG + (variable == c->cc_z ? 0 : variable == c->cc_s ? 1 : variable == c->cc_c ? 2 : 3);
+}
+
+/* a predicate or flag's value: its variable's, loaded once a block */
+static u32 var_read(DirectCtx* c, u32 v) {
+    if (c->var_val[v] && c->var_block[v] == c->emit.block) return c->var_val[v];
+    c->var_val[v] = spv_emit_load(&c->emit, c->bool_type, var_of(c, v));
+    c->var_block[v] = c->emit.block;
+    c->var_dirty[v] = 0;
+    return c->var_val[v];
+}
+static void var_write(DirectCtx* c, u32 v, u32 value) {
+    c->var_val[v] = value;
+    c->var_block[v] = c->emit.block;
+    c->var_dirty[v] = 1;
+}
+
+/* Before a merge or a branch: the block's last values into their variables. One written in a block that ended in a
+   return or a kill, which store nothing, is dropped */
+static void var_flush(void* user) {
+    DirectCtx* c = user;
+    for (u32 v = 0; v < VAR_COUNT; v++) {
+        if (!c->var_dirty[v]) continue;
+        c->var_dirty[v] = 0;
+        if (c->var_block[v] != c->emit.block) continue;
+        if (!c->var_val[v]) c->var_val[v] = spv_emit_bitcast(&c->emit, c->u32_type, c->reg_alt[v]);
+        spv_emit_store(&c->emit, var_of(c, v), c->var_val[v]);
+    }
+}
+
 static u32 reg_read(DirectCtx* c, u32 r) {
     if (r >= 255) return c->zero;
-    if (c->reg_val[r] && c->reg_block[r] == c->emit.block) return c->reg_val[r];
-    c->reg_val[r] = spv_emit_load(&c->emit, c->u32_type, c->reg[r]);
-    c->reg_block[r] = c->emit.block;
+    if (c->var_block[r] == c->emit.block && (c->var_val[r] || c->reg_alt_type[r])) {
+        if (!c->var_val[r]) c->var_val[r] = spv_emit_bitcast(&c->emit, c->u32_type, c->reg_alt[r]);
+        return c->var_val[r];
+    }
+    c->var_val[r] = spv_emit_load(&c->emit, c->u32_type, c->reg[r]);
+    c->var_block[r] = c->emit.block;
+    c->var_dirty[r] = 0;
     c->reg_alt_type[r] = 0;
-    return c->reg_val[r];
+    return c->var_val[r];
 }
 
 static void reg_write(DirectCtx* c, u32 r, u32 value) {
     if (r >= 255) return;
     if (c->guard) value = spv_emit_select(&c->emit, c->u32_type, c->guard, value, reg_read(c, r));
-    spv_emit_store(&c->emit, c->reg[r], value);
-    c->reg_val[r] = value;
-    c->reg_block[r] = c->emit.block;
+    var_write(c, r, value);
     c->reg_alt_type[r] = 0;
 }
 
-/* value, of another 32-bit type, stored as the register's bits: a read of that type in the block takes value back */
+/* value, of another 32-bit type, stored as the register's bits: a read of that type in the block takes value back,
+   and its bits are a bitcast made when something reads or stores them */
 static void reg_write_as(DirectCtx* c, u32 r, u32 value, u32 type) {
-    reg_write(c, r, spv_emit_bitcast(&c->emit, c->u32_type, value));
-    if (r < 255 && !c->guard) { /* a guarded write's bits are a select of value's, not value's */
-        c->reg_alt[r] = value;
-        c->reg_alt_type[r] = type;
+    if (r >= 255) return;
+    if (c->guard) { /* a guarded write's bits are a select of value's, not value's */
+        reg_write(c, r, spv_emit_bitcast(&c->emit, c->u32_type, value));
+        return;
     }
+    var_write(c, r, 0);
+    c->reg_alt[r] = value;
+    c->reg_alt_type[r] = type;
 }
 
 /* the register's bits as another 32-bit type, bitcast once a block */
 static void ftz_mark(DirectCtx* c, u32 value);
 static u32 reg_read_as(DirectCtx* c, u32 r, u32 type) {
+    if (r >= 255) return spv_emit_bitcast(&c->emit, type, c->zero);
+    if (c->var_block[r] == c->emit.block && c->reg_alt_type[r] == type) return c->reg_alt[r];
     u32 bits = reg_read(c, r);
-    if (r >= 255) return spv_emit_bitcast(&c->emit, type, bits);
-    if (c->reg_alt_type[r] != type) {
-        c->reg_alt[r] = spv_emit_bitcast(&c->emit, type, bits);
-        c->reg_alt_type[r] = type;
-        if (type == c->f32_type && c->taint_known && !c->tainted[r]) ftz_mark(c, c->reg_alt[r]);
-    }
+    c->reg_alt[r] = spv_emit_bitcast(&c->emit, type, bits);
+    c->reg_alt_type[r] = type;
+    if (type == c->f32_type && c->taint_known && !c->tainted[r]) ftz_mark(c, c->reg_alt[r]);
     return c->reg_alt[r];
 }
 
@@ -296,21 +345,22 @@ static u32 shared_atomic_opcode(u64 w) {
 }
 
 static u32 pred_read(DirectCtx* c, u32 p, int negative) {
-    u32 value = p == 7 ? c->true_value : spv_emit_load(&c->emit, c->bool_type, c->pred[p]);
+    u32 value = p == 7 ? c->true_value : var_read(c, VAR_PRED + p);
     return negative ? spv_emit_bool_not(&c->emit, c->bool_type, value) : value;
 }
 
 static void pred_write(DirectCtx* c, u32 p, u32 value) {
     if (p >= 7) return;
     if (c->guard) value = spv_emit_select(&c->emit, c->bool_type, c->guard, value, pred_read(c, p, 0));
-    spv_emit_store(&c->emit, c->pred[p], value);
+    var_write(c, VAR_PRED + p, value);
 }
 
-/* a condition code flag written, kept as it was where a pure instruction's guard is false */
+/* a condition code flag (its variable, c->cc_z...): its value, and written, kept as it was where a pure
+   instruction's guard is false */
+static u32 flag_read(DirectCtx* c, u32 flag) { return var_read(c, flag_var(c, flag)); }
 static void cc_store(DirectCtx* c, u32 flag, u32 value) {
-    if (c->guard)
-        value = spv_emit_select(&c->emit, c->bool_type, c->guard, value, spv_emit_load(&c->emit, c->bool_type, flag));
-    spv_emit_store(&c->emit, flag, value);
+    if (c->guard) value = spv_emit_select(&c->emit, c->bool_type, c->guard, value, flag_read(c, flag));
+    var_write(c, flag_var(c, flag), value);
 }
 
 /* Instructions that only compute registers, predicates and flags from registers, constants and immediates: no memory,
@@ -569,7 +619,7 @@ static u32 integer_add(DirectCtx* c, u32 left, u32 right, u32 avg, int extended,
     u32 carry0 = spv_emit_u_less(&c->emit, c->bool_type, sum0, left);
     u32 cin = avg ? spv_emit_constant_u32(&c->emit, c->u32_type, 1) : c->zero;
     if (extended) {
-        u32 old_carry = spv_emit_load(&c->emit, c->bool_type, c->cc_c);
+        u32 old_carry = flag_read(c, c->cc_c);
         u32 extra =
             spv_emit_select(&c->emit, c->u32_type, old_carry, spv_emit_constant_u32(&c->emit, c->u32_type, 1), c->zero);
         cin = spv_emit_iadd_u32(&c->emit, c->u32_type, cin, extra);
@@ -588,7 +638,7 @@ static u32 integer_add(DirectCtx* c, u32 left, u32 right, u32 avg, int extended,
         u32 zero = spv_emit_i_equal(&c->emit, c->bool_type, sum, c->zero);
         if (extended)
             zero =
-                spv_emit_bool_binary(&c->emit, c->bool_type, 0, zero, spv_emit_load(&c->emit, c->bool_type, c->cc_z));
+                spv_emit_bool_binary(&c->emit, c->bool_type, 0, zero, flag_read(c, c->cc_z));
         u32 sign = spv_emit_i_not_equal(&c->emit, c->bool_type,
                                         spv_emit_bitwise_and_u32(&c->emit, c->u32_type, sum, top), c->zero);
         cc_store(c, c->cc_c, carry);
@@ -613,7 +663,7 @@ static void flags_logic(DirectCtx* c, u32 value) {
 /* LOP, LOP32I and LOP3 flags: X retains zero only when the previous word was also zero, as IADD.X chains across
    the words of a wider value. */
 static void flags_logic_extended(DirectCtx* c, u32 value, int extended) {
-    u32 previous = extended ? spv_emit_load(&c->emit, c->bool_type, c->cc_z) : 0;
+    u32 previous = extended ? flag_read(c, c->cc_z) : 0;
     u32 zero = spv_emit_i_equal(&c->emit, c->bool_type, value, c->zero);
     if (extended) zero = spv_emit_bool_binary(&c->emit, c->bool_type, 0, previous, zero);
     u32 sign = spv_emit_i_not_equal(&c->emit, c->bool_type,
@@ -652,10 +702,10 @@ static u32 cc_or(DirectCtx* c, u32 x, u32 y) { return spv_emit_bool_binary(&c->e
 static u32 cc_xor(DirectCtx* c, u32 x, u32 y) { return spv_emit_bool_binary(&c->emit, c->bool_type, 2, x, y); }
 static u32 cc_test(DirectCtx* c, u32 code) {
     if (code == 0 || code == 15) return code == 15 ? c->true_value : c->false_value;
-    u32 s = spv_emit_load(&c->emit, c->bool_type, c->cc_s);
-    u32 z = spv_emit_load(&c->emit, c->bool_type, c->cc_z);
-    u32 carry = spv_emit_load(&c->emit, c->bool_type, c->cc_c);
-    u32 overflow = spv_emit_load(&c->emit, c->bool_type, c->cc_o);
+    u32 s = flag_read(c, c->cc_s);
+    u32 z = flag_read(c, c->cc_z);
+    u32 carry = flag_read(c, c->cc_c);
+    u32 overflow = flag_read(c, c->cc_o);
     switch (code) {
         case 1: return cc_xor(c, cc_and(c, s, cc_not(c, z)), overflow);
         case 2: return cc_and(c, cc_not(c, s), z);
@@ -694,8 +744,8 @@ static u32 integer_compare(DirectCtx* c, u32 i32_type, u64 w, u32 left, u32 righ
         u64 strict = cmp == 3 ? 1 : cmp == 6 ? 4 : cmp;
         u32 base = integer_compare(c, i32_type, (plain & ~(7ull << 49)) | (strict << 49), left, right);
         u32 equal = integer_compare(c, i32_type, (plain & ~(7ull << 49)) | (2ull << 49), left, right);
-        u32 carry = spv_emit_load(&c->emit, c->bool_type, c->cc_c);
-        u32 zero = spv_emit_load(&c->emit, c->bool_type, c->cc_z);
+        u32 carry = flag_read(c, c->cc_c);
+        u32 zero = flag_read(c, c->cc_z);
         u32 no_carry = spv_emit_bool_not(&c->emit, c->bool_type, carry);
         if (cmp == 1 || cmp == 6)
             return spv_emit_bool_binary(
@@ -4177,6 +4227,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                             needs_f64 && can_preserve_f64);
     spv_emit_function_void(&c->emit, void_type, fn, fn_type);
     spv_emit_label(&c->emit, label);
+    c->emit.block_end = var_flush;
+    c->emit.block_end_user = c;
     u32 local_array = 0, local_element_pointer = 0, local_words = 0;
     if (needs_local) {
         u32 bytes = (sph[1] & 0xffffffu) + (sph[2] & 0xffffffu);
@@ -4749,7 +4801,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 if (!immediate32 && B(w, 49, 1))
                     addend = spv_emit_iadd_u32(
                         &c->emit, c->u32_type, addend,
-                        spv_emit_select(&c->emit, c->u32_type, spv_emit_load(&c->emit, c->bool_type, c->cc_c),
+                        spv_emit_select(&c->emit, c->u32_type, flag_read(c, c->cc_c),
                                         spv_emit_constant_u32(&c->emit, c->u32_type, 1), c->zero));
             }
             high = B(w, immediate32 ? 53 : mad ? 54 : 39, 1);
@@ -4896,7 +4948,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             u32 carry1 = spv_emit_u_less(&c->emit, c->bool_type, sum2, sum);
             u32 carry2 = c->false_value;
             if (B(w, 48, 1)) {
-                u32 cin = spv_emit_select(&c->emit, c->u32_type, spv_emit_load(&c->emit, c->bool_type, c->cc_c),
+                u32 cin = spv_emit_select(&c->emit, c->u32_type, flag_read(c, c->cc_c),
                                           spv_emit_constant_u32(&c->emit, c->u32_type, 1), c->zero);
                 u32 final = spv_emit_iadd_u32(&c->emit, c->u32_type, sum2, cin);
                 carry2 = spv_emit_u_less(&c->emit, c->bool_type, final, sum2);
@@ -4908,7 +4960,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 u32 zero = spv_emit_i_equal(&c->emit, c->bool_type, sum2, c->zero);
                 if (B(w, 48, 1))
                     zero = spv_emit_bool_binary(&c->emit, c->bool_type, 0, zero,
-                                                spv_emit_load(&c->emit, c->bool_type, c->cc_z));
+                                                flag_read(c, c->cc_z));
                 u32 sign = spv_emit_i_not_equal(
                     &c->emit, c->bool_type,
                     spv_emit_bitwise_and_u32(&c->emit, c->u32_type, sum2,
@@ -5493,7 +5545,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 mask = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, mask,
                                                 spv_emit_constant_u32(&c->emit, c->u32_type, 255));
             u32 bits = c->zero;
-            u32 flags[4] = {c->cc_z, c->cc_s, c->cc_c, c->cc_o};
+            u32 flags[4] = {VAR_FLAG, VAR_FLAG + 1, VAR_FLAG + 2, VAR_FLAG + 3}; /* z, s, c, o */
             for (u32 p = 0; p < (B(w, 40, 1) ? 4u : 7u); p++) {
                 u32 value = B(w, 40, 1) ? spv_emit_load(&c->emit, c->bool_type, flags[p]) : pred_read(c, p, 0);
                 u32 bit = spv_emit_select(&c->emit, c->u32_type, value,
@@ -5523,10 +5575,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 u32 bit = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, source,
                                                    spv_emit_constant_u32(&c->emit, c->u32_type, 1u << p));
                 u32 value = spv_emit_i_not_equal(&c->emit, c->bool_type, bit, c->zero);
-                u32 ptr = B(w, 40, 1) ? flags[p] : c->pred[p];
-                spv_emit_store(&c->emit, ptr,
-                               spv_emit_select(&c->emit, c->bool_type, enabled, value,
-                                               spv_emit_load(&c->emit, c->bool_type, ptr)));
+                u32 v = B(w, 40, 1) ? flags[p] : VAR_PRED + p;
+                var_write(c, v, spv_emit_select(&c->emit, c->bool_type, enabled, value, var_read(c, v)));
             }
         } else if (op == O_ISETP_R || op == O_ISETP_C || op == O_ISETP_I) {
             u32 left = reg_read(c, a), right = integer_right(c, w, op - O_ISETP_R);
@@ -6060,7 +6110,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             /* .X adds the carry in (LO at 46, HI at 38 or 57), .CC writes the flags, and LO's predicate takes the
                add's carry out: LEA.LO ... P0 then LEA.HI.X is how a 64-bit address is formed */
             extended = B(w, op == O_LEA_HR ? 38 : op == O_LEA_HC ? 57 : 46, 1);
-            old_carry = extended ? spv_emit_load(&c->emit, c->bool_type, c->cc_c) : 0;
+            old_carry = extended ? flag_read(c, c->cc_c) : 0;
             sum = integer_add(c, value, rhs, 0, extended, B(w, 47, 1));
             reg_write(c, d, sum);
             if (B(w, 48, 3) < 7) {

@@ -415,18 +415,25 @@ static size_t register_values(const u32* code, size_t words, u32 pointer, u32* v
     return n;
 }
 
-static int prmt_selector_uses_seeded_register(const u32* code, size_t words) {
-    u32 register_pointer = 0;
+/* the values a register seeded with a constant takes: the loads and stores of the variable the constant is stored
+   to, or the constant itself, which a read in the block of its write takes with no store or load between */
+static size_t seeded_values(const u32* code, size_t words, u32 seed, u32* values, size_t max) {
+    u32 pointer = 0;
+    size_t n = 0;
     for (size_t i = 5; i < words;) {
         u32 width = code[i] >> 16;
         if (!width || i + width > words) return 0;
-        if ((code[i] & 0xffff) == 62 && width == 3 && is_constant_value(code, words, code[i + 2], 0x1234))
-            register_pointer = code[i + 1];
+        if ((code[i] & 0xffff) == 62 && width == 3 && is_constant_value(code, words, code[i + 2], seed))
+            pointer = code[i + 1];
+        if ((code[i] & 0xffff) == 43 && width == 4 && code[i + 3] == seed && n < max) values[n++] = code[i + 2];
         i += width;
     }
-    if (!register_pointer) return 0;
+    return n + (pointer ? register_values(code, words, pointer, values + n, max - n) : 0);
+}
+
+static int prmt_selector_uses_seeded_register(const u32* code, size_t words) {
     u32 values[64];
-    size_t nvalues = register_values(code, words, register_pointer, values, 64);
+    size_t nvalues = seeded_values(code, words, 0x1234, values, 64);
     for (size_t v = 0; v < nvalues; v++) {
         u32 loaded = values[v];
         for (size_t j = 5; j < words;) {
@@ -443,17 +450,8 @@ static int prmt_selector_uses_seeded_register(const u32* code, size_t words) {
 }
 
 static int seeded_register_feeds(const u32* code, size_t words, u32 seed, u32 opcode, u32 operand_index) {
-    u32 pointer = 0;
-    for (size_t i = 5; i < words;) {
-        u32 width = code[i] >> 16;
-        if (!width || i + width > words) return 0;
-        if ((code[i] & 0xffff) == 62 && width == 3 && is_constant_value(code, words, code[i + 2], seed))
-            pointer = code[i + 1];
-        i += width;
-    }
-    if (!pointer) return 0;
     u32 values[64];
-    size_t nvalues = register_values(code, words, pointer, values, 64);
+    size_t nvalues = seeded_values(code, words, seed, values, 64);
     for (size_t v = 0; v < nvalues; v++) {
         u32 loaded = values[v];
         for (size_t j = 5; j < words;) {
@@ -475,16 +473,8 @@ static int seeded_register_feeds(const u32* code, size_t words, u32 seed, u32 op
 }
 
 static int seeded_gradient_component(const u32* code, size_t words, u32 seed, u32 gradient, u32 component) {
-    u32 pointer = 0;
-    for (size_t i = 5; i < words;) {
-        u32 width = code[i] >> 16;
-        if (!width || i + width > words) return 0;
-        if ((code[i] & 0xffff) == 62 && width == 3 && is_constant_value(code, words, code[i + 2], seed))
-            pointer = code[i + 1];
-        i += width;
-    }
     u32 values[64];
-    size_t nvalues = pointer ? register_values(code, words, pointer, values, 64) : 0;
+    size_t nvalues = seeded_values(code, words, seed, values, 64);
     for (size_t v = 0; v < nvalues; v++) {
         u32 loaded = values[v];
         for (size_t j = 5; j < words;) {
@@ -1583,7 +1573,6 @@ static void eden_forms(void) {
     size_t words = 0;
     u32* code = translate(halves, 7, ST_FS, &info, &words, 0);
     check_translated(code, &info, "the half-float immediates, ISCADD32I, MEMBAR and a sparse TEX translate");
-    int sparse_stores = code ? count_opcode(code, words, 62, 0xffffffffu) : -1;
     if (code) {
         check(count_opcode(code, words, 225, 0xffffffffu) == 1, "MEMBAR is a memory barrier");
         check(count_opcode(code, words, 180, 0xffffffffu) >= 8,
@@ -1596,10 +1585,17 @@ static void eden_forms(void) {
     check_translated(code, &info, "ISCADD32I with shift 3 translates");
     if (code) check(shift_uses_amount(code, words, 3), "ISCADD32I uses bits 53-57 for its shift");
     free(code);
-    u64 no_sparse[7];
-    memcpy(no_sparse, halves, sizeof no_sparse);
+    /* A conditional EXIT after the TEX ends its block, where the block's last values are stored: the sparse
+       predicate's among them */
+    u64 sparse[8], no_sparse[8];
+    memcpy(sparse, halves, sizeof halves);
+    sparse[7] = 0xE30000000001000Full; /* @P1 EXIT */
+    code = translate(sparse, 8, ST_FS, &info, &words, 0);
+    int sparse_stores = code ? count_opcode(code, words, 62, 0xffffffffu) : -1;
+    free(code);
+    memcpy(no_sparse, sparse, sizeof no_sparse);
     no_sparse[6] = (no_sparse[6] & ~(7ull << 51)) | (7ull << 51);
-    code = translate(no_sparse, 7, ST_FS, &info, &words, 0);
+    code = translate(no_sparse, 8, ST_FS, &info, &words, 0);
     check_translated(code, &info, "TEX with no sparse predicate translates");
     if (code)
         check(sparse_stores == count_opcode(code, words, 62, 0xffffffffu) + 1,
@@ -2197,11 +2193,15 @@ static void attribute_pointer(void) {
     check(code && !info.ngbuf, "disabled CBE export does not bind guest global memory");
     if (code) save_fixture(attribute_paths[4], code, words);
     free(code);
-    const u64 handles[] = {mov32i(2, 3), 0xefd0000100070200ull, 0xefd1000300070201ull};
+    /* a conditional EXIT ends the block, where R0 and R1 are stored with the value of R2 */
+    const u64 handles[] = {mov32i(2, 3), 0xefd0000100070200ull, 0xefd1000300070201ull, 0xE30000000001000Full};
     const u32 sph[3] = {4u << 24, 0, 0};
-    code = translate_stage(handles, 3, ST_TCS, sph, 0, &info, &words);
+    code = translate_stage(handles, 4, ST_TCS, sph, 0, &info, &words);
     check_translated(code, &info, "ISBERD output-buffer handles translate");
-    check(code && seeded_register_feeds(code, words, 3, 62, 2), "ISBERD preserves the vertex index");
+    int seed_stores = 0;
+    for (size_t i = 5; code && i < words && code[i] >> 16; i += code[i] >> 16)
+        seed_stores += (code[i] & 0xffff) == 62 && (code[i] >> 16) == 3 && is_constant_value(code, words, code[i + 2], 3);
+    check(seed_stores == 3, "ISBERD preserves the vertex index");
     if (code) save_fixture(attribute_paths[5], code, words);
     free(code);
 }
