@@ -243,7 +243,15 @@ static void title_id(VitaProcess* p) {
         free(sfo);
         free(path);
     }
-    const char* name = title ? title : strrchr(p->folder, '/') ? strrchr(p->folder, '/') + 1 : p->folder;
+    const char* name = title;
+#ifdef _WIN32
+    const char* separators = "/\\"; /* Windows' absolute paths have backslashes */
+#else
+    const char* separators = "/";
+#endif
+    if (!name) /* the folder's last name */
+        for (const char* c = name = p->folder; *c; ++c)
+            if (strchr(separators, *c)) name = c + 1;
     snprintf(p->title_id, sizeof p->title_id, "%s", name);
     free(title);
 }
