@@ -1778,7 +1778,7 @@ static void add_cheats(App* app, const char* temporary) {
     char *other = snx_path_join(root, "1111111111111111.TXT"), *empty = snx_path_join(root, "empty.txt");
     char *cht = snx_path_join(root, "cheats.cht"), *big = snx_path_join(root, "big.txt");
     char *to = snx_path_join(cheats, "0123456789ABCDEF.txt"), *to_mine = snx_path_join(cheats, "FEDCBA9876543210.txt");
-    char *to_other = snx_path_join(cheats, "1111111111111111.txt"), want[2048], size_text[32];
+    char *to_other = snx_path_join(cheats, "1111111111111111.txt"), want[2048];
     const char* cloud = "content://com.example.cloud.documents/document/abc%3Acheats.txt";
     const char* named_text = "[60 FPS]\n04000000 0 1\n[Moon Jump]\n04000000 4 2\n";
     const char* mine_text = "; my own\n[Infinite HP]\n04000000 8 3\n[60 FPS]\n04000000 0 1\n";
@@ -1832,8 +1832,8 @@ static void add_cheats(App* app, const char* temporary) {
     assert(!strcmp(app->message, want));
     key(app, SDLK_RETURN);
     addon_answer_is(app, big);
-    gui_size_text(size_text, sizeof size_text, SNX_GUI_CHEATS_MAX + 1);
-    snprintf(want, sizeof want, "Not added: %s is %s, and a cheats file is text of 1 MiB at most", big, size_text);
+    snprintf(want, sizeof want,
+             "Not added: %s is 1048577 bytes, and a cheats file is text of 1048576 bytes (1 MiB) at most", big);
     assert(!strcmp(app->message, want));
     key(app, SDLK_RETURN);
     addon_answer_is(app, empty);

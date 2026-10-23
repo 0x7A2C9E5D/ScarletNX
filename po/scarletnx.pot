@@ -1127,7 +1127,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Not added: %s is %s, and a cheats file is text of 1 MiB at most"
+msgid "Not added: %s is %llu bytes, and a cheats file is text of %d bytes (1 MiB) at most"
 msgstr ""
 
 #: src/gui/main.c

@@ -3554,7 +3554,7 @@ static size_t cheats_in(const char* text) {
    the box; else app->message says why not, with the file, the name or the build IDs it is about */
 static void cheats_add(App* app, const char* picked) {
     char *path = gui_document_path(picked), *leaf, *text = NULL, *module = NULL, *to = NULL, *staged = NULL;
-    char name[24], given[17], known[17], why[256], size_text[32];
+    char name[24], given[17], known[17], why[256];
     size_t size = 0, count = 0, i;
     bool hex;
     int has_id = 0;
@@ -3575,11 +3575,11 @@ static void cheats_add(App* app, const char* picked) {
         snprintf(app->message, sizeof app->message, snx_tr("Not added: %s is not a file"), path);
     else if (strlen(leaf) < 4 || SDL_strcasecmp(leaf + strlen(leaf) - 4, ".txt"))
         snprintf(app->message, sizeof app->message, snx_tr("Not added: %s is not a .txt file, which cheats are"), path);
-    else if (snx_file_size(path) > SNX_GUI_CHEATS_MAX) {
-        gui_size_text(size_text, sizeof size_text, snx_file_size(path));
+    else if (snx_file_size(path) > SNX_GUI_CHEATS_MAX) /* in bytes: a size rounded to 1 MB would hide it is past */
         snprintf(app->message, sizeof app->message,
-                 snx_tr("Not added: %s is %s, and a cheats file is text of 1 MiB at most"), path, size_text);
-    } else if (!(text = (char*)snx_read_file(path, &size)))
+                 snx_tr("Not added: %s is %llu bytes, and a cheats file is text of %d bytes (1 MiB) at most"), path,
+                 (unsigned long long)snx_file_size(path), SNX_GUI_CHEATS_MAX);
+    else if (!(text = (char*)snx_read_file(path, &size)))
         snprintf(app->message, sizeof app->message, snx_tr("Not added: cannot read %s: %s"), path,
                  snx_os_error(why, sizeof why));
     else if (!(count = cheats_in(text)))
