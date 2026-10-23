@@ -30,6 +30,7 @@ struct SnxUnitCache {
        removed for room (to leave reserve bytes free), the reused ones whose time could not be renewed (stale_why) */
     size_t left, trimmed, stale;
     SnxU64 left_bytes, trimmed_bytes, reserve;
+    unsigned said; /* the reasons said, each its UNIT_SAID_ bit */
     char stale_why[256];
     size_t folder_size, identity_size;
     char bytes[];
@@ -86,6 +87,7 @@ SnxUnitCache* snx_unit_cache_open(const char* folder, const SnxUnitIdentity* ide
     pthread_mutex_init(&cache->lock, NULL);
 #endif
     cache->left = cache->trimmed = cache->stale = 0;
+    cache->said = 0;
     cache->left_bytes = cache->trimmed_bytes = cache->reserve = 0;
     cache->stale_why[0] = 0;
     cache->folder_size = folder_size;
@@ -232,16 +234,23 @@ static void not_cached(SnxUnitCache* cache, SnxU64 size) {
     ++cache->left;
     cache->left_bytes += size;
 }
+/* why a unit is not cached, each said for the first unit it stops */
+enum { UNIT_SAID_DISK = 1, UNIT_SAID_TRIM = 2, UNIT_SAID_ROOM = 4, UNIT_SAID_KEEP = 8 };
+static int first_said(SnxUnitCache* cache, unsigned reason) {
+    if (cache->said & reason) return 0;
+    cache->said |= reason;
+    return 1;
+}
 /* room for a kept object of size bytes on the cache's disk, which always keeps a tenth of itself free: the cache's
-   oldest objects removed for it when it is short. 0 to keep it; -1 when there is none, the reason said for the first
-   unit of the cache and the units counted for the close */
+   oldest objects removed for it when it is short. 0 to keep it; -1 when there is none, each reason said for the first
+   unit it stops and the units counted for the close */
 static int room(SnxUnitCache* cache, SnxU64 size) {
     const char* folder = snx_unit_cache_folder(cache);
     SnxU64 free_bytes = 0, total = 0, reserve, need;
     SnxUnitTrim trim;
     char reason[256], error[512];
     if (cache->disk(folder, &free_bytes, &total)) {
-        if (!cache->left)
+        if (first_said(cache, UNIT_SAID_DISK))
             snx_error("unit cache: cannot read the free space of %s (%s): units are not cached", folder,
                       snx_os_error(reason, sizeof reason));
         not_cached(cache, size);
@@ -251,7 +260,7 @@ static int room(SnxUnitCache* cache, SnxU64 size) {
     if (free_bytes >= reserve + size) return 0;
     need = reserve + size - free_bytes;
     if (trim_files(folder, 0, need, "the disk's tenth kept free", &trim, error, sizeof error)) {
-        if (!cache->left) snx_error("unit cache: %s: units are not cached", error);
+        if (first_said(cache, UNIT_SAID_TRIM)) snx_error("unit cache: %s: units are not cached", error);
         not_cached(cache, size);
         return -1;
     }
@@ -259,7 +268,7 @@ static int room(SnxUnitCache* cache, SnxU64 size) {
     cache->trimmed_bytes += trim.removed_bytes;
     cache->reserve = reserve;
     if (trim.removed_bytes < need) {
-        if (!cache->left)
+        if (first_said(cache, UNIT_SAID_ROOM))
             snx_error("unit cache: %.1f GB free on %s, under the %.1f GB (a tenth of %.1f GB) it leaves free: units "
                       "without room are not cached",
                       GB(free_bytes), folder, GB(reserve), GB(total));
@@ -339,7 +348,7 @@ int snx_unit_cache_object(SnxUnitCache* cache, SnxIr* ir, unsigned char** data, 
 #endif
         if (!room(cache, (SnxU64)*size + SNX_UNIT_TRAILER) &&
             snx_unit_cache_keep(cache, key, *data, *size, why, sizeof why)) {
-            if (!cache->left) snx_error("unit cache: %s: this run's units are not cached", why);
+            if (first_said(cache, UNIT_SAID_KEEP)) snx_error("unit cache: %s: this run's units are not cached", why);
             not_cached(cache, (SnxU64)*size + SNX_UNIT_TRAILER);
         }
 #ifdef _WIN32
