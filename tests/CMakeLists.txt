@@ -64,7 +64,7 @@ if(SNX_TEST_SANITIZERS)
         scarletnx-gui snx_gui_support snx_gui_ui snx_i18n snx_gui_languages snx_gui_languages_test snx_splash snx-test-splash
         snx_window_icon snx-test-window-icon snx_pad_sdl snx_gui_pad
         # the code generators, which tests run on files they refuse
-        snx-swipc snx-svcgen snx-shaderdec snx-settingsgen snx-uigen)
+        snx-swipc snx-svcgen snx-shaderdec snx-settingsgen snx-uigen snx-a64dec)
 endif()
 # one Python for the scripted tests: without it they are left out
 find_package(Python3 QUIET COMPONENTS Interpreter)
@@ -472,6 +472,13 @@ if(NOT WIN32)
     target_link_libraries(snx-test-a64-fp-arithmetic PRIVATE m)
 endif()
 add_test(NAME a64_fp_arithmetic_witnesses COMMAND snx-test-a64-fp-arithmetic)
+
+# the A64 decoder tools/a64dec generates from src/common/cpu/aarch64/decode/ (a64.decode and a64.profile)
+include("${PROJECT_SOURCE_DIR}/cmake/a64dec.cmake")
+add_executable(snx-test-a64-decode a64_decode_test.c)
+snx_test_target(snx-test-a64-decode 99)
+snx_a64dec(snx-test-a64-decode)
+add_test(NAME a64_decode COMMAND snx-test-a64-decode)
 
 option(SNX_TEST_A64_FP_DIFF "Run the Linux AArch64 FP differential harness (requires Python unicorn 2.1.4)" OFF)
 if(SNX_TEST_A64_FP_DIFF)
