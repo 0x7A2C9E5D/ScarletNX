@@ -14,8 +14,9 @@ BOUNDARIES = {
     'nx': {'nx', 'common'},
     'gnuabi': {'gnuabi', 'common'},
     '3ds': {'3ds', 'common'},
+    'vita': {'vita', 'common'},
     # scarletnx's main where it is also the other drivers (SNX_MULTICALL): their entries, by the name it runs under
-    'multicall': {'multicall', 'nx', 'gnuabi', '3ds', 'common'},
+    'multicall': {'multicall', 'nx', 'gnuabi', '3ds', 'vita', 'common'},
 }
 INCLUDE = re.compile(r'^\s*#\s*include\s*(["<])([^">]+)[">]', re.MULTILINE)
 

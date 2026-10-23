@@ -20,6 +20,7 @@ static bool suffix(const char* name, const char* extension) {
     return true;
 }
 bool gui_is_cia(const char* name) { return suffix(name, ".cia"); }
+bool gui_is_vpk(const char* name) { return suffix(name, ".vpk"); }
 bool gui_is_dump(const char* name) {
     return suffix(name, ".nro") || suffix(name, ".xci") || suffix(name, ".nsp") || suffix(name, ".dxci") ||
            suffix(name, ".dnsp");
@@ -74,14 +75,14 @@ uint64_t gui_tree_size(const char* path, const int* stop) {
 #else
 #define GAME_CODE "_code.so"
 #endif
-/* whether a folder's entry is a game of kinds: a CIA, or one ready to run. Libraries often carry executable bits but
+/* whether a folder's entry is a game of kinds: a CIA or VPK, or one ready to run. Libraries often carry executable bits but
    are not games, and hidden files are not shown. On Android the shared storage runs nothing: a game is <name> beside
    <name>_code.so (name is cut there), and a dump put there, to be prepared, shows with its own name */
 static bool playable(const char* directory, char* name, int kinds) {
     char* path;
     bool listed;
     if (name[0] == '.') return false;
-    if (suffix(name, ".cia")) {
+    if (gui_is_cia(name) || gui_is_vpk(name)) {
         if (!(kinds & GUI_GAMES_CIA)) return false;
         path = snx_path_join(directory, name);
         listed = path && snx_is_file(path);
@@ -420,7 +421,7 @@ bool gui_games_add_deep(GuiGames* games, const char* directory, int kinds, int d
 }
 bool gui_games_heading(const GuiGames* games, size_t i) { return i < games->count && !games->paths[i]; }
 static bool dump_entry(const GuiGames* games, size_t i) {
-    return gui_is_dump(games->names[i]) || gui_is_cia(games->names[i]);
+    return gui_is_dump(games->names[i]) || gui_is_cia(games->names[i]) || gui_is_vpk(games->names[i]);
 }
 bool gui_games_group(GuiGames* games, const char* ready, const char* dumps,
                      bool (*made)(const char* path, const void* user), const void* user) {

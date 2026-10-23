@@ -63,7 +63,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   pages, left or up to the next as a phone's lists scroll, right or down back; a tap on a finished run returns to the menu, and one on a
   running run's ESC line aborts it. Android's back button is ESC. On a screen packed with
   pixels (a phone) the text takes the display's own scale, as far as the menu still fits.
-- **Load Switch NSP/XCI/NRO**, **Load Linux ARM ELF** and **Load 3DS CIA** open a screen as the
+- **Load Switch NSP/XCI/NRO**, **Load Linux ARM ELF**, **Load 3DS CIA** and **Load Vita VPK** open a screen as the
   keys': a click on its blinking **[ Pick or drop a file ]**, or Enter, opens the system's file
   picker (on Linux the desktop's, else zenity's). Dropping a file on the window and Ctrl+V with
   a path work too. ESC returns to the menu. On Android the picker opens at once. A dump is read where it lies
@@ -82,7 +82,11 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Full HLE/devices remain incomplete. Like the Switch driver, it uses an
   extraction (or the CIA itself) and a compiled module already there, and recompiles only when needed.
   See [3DS port](3DS.md) for limits.
-- **Setup device keys**, immediately after the three load entries, blinks red (the theme's `failure` colour, at its
+- **Load Vita VPK** uses `scarletnx-vita`, with the menu's data folder as its `--repo`. The driver extracts the VPK
+  into its game's folder of `recompiled/` (named after its title ID), compiles its code ahead of time and plays it,
+  compiling at run time what it missed. A VPK extracted and compiled before plays at once. See
+  [Vita driver](VITA.md) for limits.
+- **Setup device keys**, immediately after the four load entries, blinks red (the theme's `failure` colour, at its
   `blink_ms`) while no `prod.keys` is in use. It prompts you to
   pick `prod.keys` (a click on the blinking **[ Pick or drop prod.keys ]** in the middle of
   the screen, the theme's `[prompt]`, or Enter), drop it, or paste its path with Ctrl+V. It installs the file to `~/.switch/prod.keys`, or
@@ -308,13 +312,13 @@ setup, writing nothing.
 ## Games: the games of recompiled/ and the player's folders
 
 **Games**, the tab, lists the games: the ones ready to run (a recompiled game runs directly), the dumps to prepare
-on Android, and CIA files, which go to the 3DS driver. It reads the `recompiled/` of the
+on Android, CIA files, which go to the 3DS driver, and VPK files, which go to the Vita driver. It reads the `recompiled/` of the
 folder the driver works in, which the menu passes it as `--repo`: a portable copy's `.scarletnx/` beside the
 AppImage (or the GUI), else the user's data folder, a build tree's menu's too ([USAGE](USAGE.md#folders)), then each
 Extra of Settings > App > Folders. Each game is shown by the name in its `control.nacp`, which the recompile copies into
 its data, else by its folder's or file's name, sorted by it in each folder. Only immediate files are listed:
-executables (execute permission on UNIX, `.exe` on Windows) and `.cia` files (case-insensitive,
-no execute permission needed), which run with the 3DS driver. Hidden files, shared libraries and
+executables (execute permission on UNIX, `.exe` on Windows), `.cia` files (case-insensitive,
+no execute permission needed), which run with the 3DS driver, and `.vpk` files, which run with the Vita driver. Hidden files, shared libraries and
 directories are excluded. The folders are looked at once a second while the menu is open (their
 names only), so a game put in or taken out shows in the open list; a folder that
 cannot be read is named and the others still listed.
@@ -324,7 +328,7 @@ cannot be read is named and the others still listed.
 - Up/Down go round Add a folder, the recent games and the page's files. Enter/Space opens one.
 - **R** (on Android a tap on *Recompile* at the foot) recompiles the Switch game in focus, recent or on the page,
   where it is, or prepares its dump again: `scarletnx -r`. It plays nothing;
-  Enter then does. On another row, or a 3DS game, it says why it does nothing.
+  Enter then does. On another row, or a 3DS or Vita game, it says why it does nothing.
 - Left/Right and PgUp/PgDown go to the previous/next page. The page number and
   total file count are shown. Paging stops at the first and last pages.
 - Resizing adjusts the page size while keeping the selected file visible.

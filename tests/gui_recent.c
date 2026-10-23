@@ -60,6 +60,13 @@ int main(void) {
     assert(again.count == r.count && again.game[0].driver == GUI_3DS && !again.game[0].prepared);
     assert(gui_recent_add(&r, games[6], GUI_KEYS, 0));
     r = before_ctr;
+    /* and Vita ones, VPKs */
+    assert(!gui_recent_add(&r, games[6], GUI_VITA, 1));
+    assert(!r.game[0].prepared && r.game[0].driver == GUI_VITA);
+    assert(!gui_recent_save(&r, file));
+    gui_recent_load(&again, file);
+    assert(again.count == r.count && again.game[0].driver == GUI_VITA && !again.game[0].prepared);
+    r = before_ctr;
 
     /* a file that is gone, a line it cannot read, a second copy: left out; CRLF read too */
     assert(!remove(games[1]));

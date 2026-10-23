@@ -53,6 +53,8 @@ if(SNX_TEST_SANITIZERS)
         # the 3DS runtime
         scarletnx-3ds snx_ctr_program snx_ctr_board snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process snx_ctr_native
         snx_ctr_audio snx_ctr_gpu snx_ctr_gpu_reference
+        # the Vita runtime, its loader and USSE translator
+        scarletnx-vita snx_vita_program snx_vita_loader snx_vita_usse snx-vita-usse
         # scarletnx's main where it is the other drivers too
         snx_multicall
         # the menu, its splash, icon and pads
@@ -1317,6 +1319,24 @@ snx_test_target(snx-test-blocklinear-glsl 23)
 target_compile_options(snx-test-blocklinear-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-blocklinear-glsl PRIVATE glsl)
 add_test(NAME blocklinear_glsl COMMAND snx-test-blocklinear-glsl)
+# the Vita's texture deswizzle shader's GLSL run on the CPU against Vita3K's loops: no GPU needed
+add_executable(snx-test-vita-swizzle-glsl glsl/vita_swizzle_glsl.cpp)
+snx_test_target(snx-test-vita-swizzle-glsl 23)
+target_compile_options(snx-test-vita-swizzle-glsl PRIVATE -fwrapv)
+target_include_directories(snx-test-vita-swizzle-glsl PRIVATE glsl)
+add_test(NAME vita_swizzle_glsl COMMAND snx-test-vita-swizzle-glsl)
+# the Vita's decoded picture layout shader's GLSL run on the CPU against the decoder's layout: no GPU needed
+add_executable(snx-test-vita-picture-glsl glsl/vita_picture_glsl.cpp)
+snx_test_target(snx-test-vita-picture-glsl 23)
+target_compile_options(snx-test-vita-picture-glsl PRIVATE -fwrapv)
+target_include_directories(snx-test-vita-picture-glsl PRIVATE glsl)
+add_test(NAME vita_picture_glsl COMMAND snx-test-vita-picture-glsl)
+# the Vita's YUV420 texture shader's GLSL run on the CPU against the conversion written out: no GPU needed
+add_executable(snx-test-vita-yuv-glsl glsl/vita_yuv_glsl.cpp)
+snx_test_target(snx-test-vita-yuv-glsl 23)
+target_compile_options(snx-test-vita-yuv-glsl PRIVATE -fwrapv)
+target_include_directories(snx-test-vita-yuv-glsl PRIVATE glsl)
+add_test(NAME vita_yuv_glsl COMMAND snx-test-vita-yuv-glsl)
 # the texture conversion shader's GLSL run on the CPU against the CPU's conversions and ETC2 decoder: no GPU needed
 add_executable(snx-test-texconv-glsl glsl/texconv_glsl.cpp "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
 snx_test_target(snx-test-texconv-glsl 23)
