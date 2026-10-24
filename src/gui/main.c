@@ -11963,10 +11963,12 @@ static void touch(App* app, float x, float y) {
         pointer(app, x * (float)w, y * (float)h, true, true);
         return;
     }
+#ifdef SNX_TOUCH_UI
     if (app->menu.running) { /* a tap anywhere on a run asks whether to abort it or keep going: nothing is lost by it */
         if (!app->aborting) cancel(app);
         return;
     }
+#endif
     pointer(app, x * (float)w, y * (float)h, true, true);
 }
 #ifdef SDL_PLATFORM_ANDROID
