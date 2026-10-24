@@ -449,6 +449,9 @@ static void composite_line(AgbBoard* board, int y) {
     AgbPpu* ppu = &board->ppu;
     uint32_t* out = ppu->framebuffer + y * AGB_SCREEN_WIDTH;
     int forced_blank = ppu->dispcnt & 0x80;
+    /* a second target among the layers shown, the backdrop always: what a semi transparent sprite's light needs */
+    int seconds = ppu->bldcnt >> 13 & 1;
+    for (int i = 0; i < 4; ++i) seconds |= (ppu->dispcnt >> (8 + i) & 1) && (ppu->bldcnt >> (8 + i) & 1);
     for (int x = 0; x < AGB_SCREEN_WIDTH; ++x) {
         int top = -1, second = -1, top_key = 99, second_key = 99;
         uint8_t mask = window_mask(ppu, x, scan.objwin[x]);
@@ -490,20 +493,21 @@ static void composite_line(AgbBoard* board, int y) {
             int first_target = ppu->bldcnt >> top & 1;
             int second_target = second >= 0 && (ppu->bldcnt >> (second + 8) & 1);
             int semi = top == 4 && scan.obj_mode[x] == 1;
+            /* the brightness effect lights the first targets, and a semi transparent sprite that has nothing to blend
+               with below when OBJ is a first target or another layer a second one, as mGBA's reblend has it */
+            int lit = (mask & 0x20) && (effect == 2 || effect == 3) && (first_target || (semi && seconds));
             color = first_color;
-            if ((mask & 0x20) && (semi || (effect == 1 && first_target && second_target))) {
+            if ((mask & 0x20) && second_target && (semi || (effect == 1 && first_target))) {
                 /* alpha blend: the semi transparent sprites blend whether or not the effect selects them */
-                if (second_target && (semi || first_target)) {
-                    int32_t eva = weight(ppu->bldalpha), evb = weight(ppu->bldalpha >> 8);
-                    uint32_t result = 0;
-                    for (int component = 0; component < 3; ++component) {
-                        int32_t c1 = first_color >> (component * 5) & 31, c2 = second_color >> (component * 5) & 31;
-                        int32_t mixed = (c1 * eva + c2 * evb) >> 4;
-                        result |= (uint32_t)(mixed > 31 ? 31 : mixed) << (component * 5);
-                    }
-                    color = (uint16_t)result;
+                int32_t eva = weight(ppu->bldalpha), evb = weight(ppu->bldalpha >> 8);
+                uint32_t result = 0;
+                for (int component = 0; component < 3; ++component) {
+                    int32_t c1 = first_color >> (component * 5) & 31, c2 = second_color >> (component * 5) & 31;
+                    int32_t mixed = (c1 * eva + c2 * evb) >> 4;
+                    result |= (uint32_t)(mixed > 31 ? 31 : mixed) << (component * 5);
                 }
-            } else if ((mask & 0x20) && first_target && (effect == 2 || effect == 3)) {
+                color = (uint16_t)result;
+            } else if (lit) {
                 int32_t evy = weight(ppu->bldy);
                 uint32_t result = 0;
                 for (int component = 0; component < 3; ++component) {

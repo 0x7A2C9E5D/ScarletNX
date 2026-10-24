@@ -375,6 +375,34 @@ int main(void) {
     agb_ppu_write(&board, 0x054, 0);
     agb_ppu_write(&board, 0x008, 0);
 
+    /* a semi transparent sprite with nothing to blend with below takes the brightness effect when OBJ is a first target,
+       or when another layer shown is a second one (BG0 here, empty): green 31 over the backdrop lights to white, or
+       darkens to 15 */
+    memset(board.memory.vram, 0, AGB_VRAM_SIZE);
+    agb_write16(&board, 0x05000202, 0x03E0);                                          /* OBJ entry 1: green */
+    for (uint32_t i = 0; i < 32; i += 2) agb_write16(&board, 0x06010020 + i, 0x1111); /* OBJ tile 1 */
+    agb_write16(&board, 0x07000000, 0x0400); /* sprite 0: semi transparent, y 0 */
+    agb_write16(&board, 0x07000002, 100);
+    agb_write16(&board, 0x07000004, 1);
+    agb_ppu_write(&board, 0x008, 0x1F00);
+    agb_ppu_write(&board, 0x000, 0x1140);          /* BG0 and OBJ, 1D */
+    agb_ppu_write(&board, 0x050, 0x0120 | 2 << 6); /* the backdrop first, BG0 second, brighten */
+    agb_ppu_write(&board, 0x054, 16);
+    run_frame();
+    CHECK(pixel(100, 0) == PIX(31, 31, 31));
+    agb_ppu_write(&board, 0x050, 0x0010 | 3 << 6); /* OBJ first, no second, darken */
+    agb_ppu_write(&board, 0x054, 8);
+    run_frame();
+    CHECK(pixel(100, 0) == PIX(0, 16, 0));
+    agb_ppu_write(&board, 0x050, 0x0020 | 2 << 6); /* neither: as it is */
+    run_frame();
+    CHECK(pixel(100, 0) == PIX(0, 31, 0));
+    agb_ppu_write(&board, 0x050, 0);
+    agb_ppu_write(&board, 0x054, 0);
+    agb_write16(&board, 0x07000000, 0x0200);
+    agb_ppu_write(&board, 0x008, 0);
+    agb_ppu_write(&board, 0x000, 0x0100);
+
     /* an HBlank DMA runs on the 160 visible lines alone, a game's table having one entry a line: a repeating 16 bit one
        moves its source 160 halfwords a frame, not 228 */
     agb_write16(&board, 0x040000B0, 0x0000);
