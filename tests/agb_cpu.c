@@ -252,29 +252,35 @@ int main(void) {
     }
 #ifdef SNX_AGB_JIT
     {
-        /* a recompile (-r) builds every block of the map into the module, the hints too; a run that saves after
-           another process's recompile keeps each block as a hint, its symbols naming that module's functions no
-           more */
+        /* a recompile (-r) builds every block of the map into the module, the hints too: here from a copy of the map
+           under another name, as Windows keeps a module this process has loaded from being written */
         AgbRecomp made, after;
-        agb_recomp_init(&made, "agb_cpu_test.code", SNX_AGB_TEST_CC);
+        FILE *from = fopen("agb_cpu_test.code.map", "rb"), *to = fopen("agb_cpu_made.code.map", "wb");
+        char bytes[4096];
+        size_t n;
+        result = !from || !to;
+        while (!result && (n = fread(bytes, 1, sizeof bytes, from)) > 0) result = fwrite(bytes, 1, n, to) != n;
+        if (from) fclose(from);
+        if (to) fclose(to);
+        CHECK(!result);
+        agb_recomp_init(&made, "agb_cpu_made.code", SNX_AGB_TEST_CC);
         result = agb_recomp_load_map(&made, &board, error, sizeof error) ||
-                 agb_recomp_build(&made, &board, error, sizeof error) || !made.count;
+                 agb_recomp_build(&made, &board, error, sizeof error) || made.count < 2;
         if (result) fprintf(stderr, "agb_cpu: the recompile from the map: %s\n", error);
-        agb_recomp_free(&made);
-        /* its map, as the next run reads it (this process keeps the run's module of the same path loaded, which a
-           dlopen of it hands back) */
-        agb_recomp_init(&made, "agb_cpu_test.code", SNX_AGB_TEST_CC);
-        if (!result) result = agb_recomp_load_map(&made, &board, error, sizeof error) || made.count < 2;
         for (size_t i = 1; !result && i <= made.count; ++i)
-            if (made.blocks[i].hint || !made.blocks[i].symbol) {
-                fprintf(stderr, "agb_cpu: block %zu at 0x%08X after the recompile: hint %u, symbol %u\n", i,
-                        made.blocks[i].pc, made.blocks[i].hint, made.blocks[i].symbol);
+            if (!made.blocks[i].fn || made.blocks[i].hint || !made.blocks[i].symbol) {
+                fprintf(stderr, "agb_cpu: block %zu at 0x%08X after the recompile: fn %p, hint %u, symbol %u\n", i,
+                        made.blocks[i].pc, (void*)made.blocks[i].fn, made.blocks[i].hint, made.blocks[i].symbol);
                 result = 1;
             }
         agb_recomp_free(&made);
         CHECK(!result);
-        recomp.dirty = 1; /* this run's save, after that recompile */
+        /* a save after another process's recompile, the module file not the one this run loaded (its size here):
+           every block is kept as a hint, that module's functions numbered its own way */
+        recomp.module_size += 1;
+        recomp.dirty = 1;
         CHECK(!agb_recomp_save(&recomp, &board, error, sizeof error));
+        recomp.module_size -= 1;
         agb_recomp_init(&after, "agb_cpu_test.code", SNX_AGB_TEST_CC);
         result = agb_recomp_load_map(&after, &board, error, sizeof error) || !after.count;
         for (size_t i = 1; !result && i <= after.count; ++i)
@@ -315,6 +321,8 @@ done:
     free(audio);
     remove("agb_cpu_test.code.map");
     remove("agb_cpu_test.code.so");
+    remove("agb_cpu_made.code.map");
+    remove("agb_cpu_made.code.so");
     if (!result) puts("agb_cpu: ok");
     return result;
 }
