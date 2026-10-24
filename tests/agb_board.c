@@ -43,6 +43,10 @@ int main(void) {
 
     AgbBoard board;
     agb_board_init(&board);
+    /* the registers as the BIOS leaves them: forced blank, the serial port in its general purpose mode (a game reads it
+       to tell a link boot from its own), the sound's bias at its middle, POSTFLG */
+    CHECK(agb_read16(&board, 0x04000000) == 0x0080 && agb_read16(&board, 0x04000134) == 0x8000);
+    CHECK(agb_read16(&board, 0x04000088) == 0x0200 && agb_read8(&board, 0x04000300) == 1);
     CHECK(!agb_board_insert(&board, rom, ROM_SIZE, error, sizeof error));
     CHECK(board.has_cartridge);
     const AgbCartridge* cartridge = &board.cartridge;

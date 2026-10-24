@@ -8,6 +8,14 @@ void agb_board_init(AgbBoard* board) {
     memset(board, 0, sizeof(*board));
     agb_memory_init(&board->memory);
     board->bios_prefetch = AGB_BIOS_PREFETCH_BOOT;
+    /* the registers as the BIOS leaves them for the cartridge, which the machine starts at: the screen in forced blank,
+       the serial port in its general purpose mode, the sound's bias at its middle, the affine backgrounds unscaled and
+       POSTFLG saying the boot is done. A game that only ORs bits into SOUNDBIAS keeps the bias */
+    board->ppu.dispcnt = 0x0080;
+    board->io[0x134 >> 1] = 0x8000;
+    board->apu.soundbias = 0x200;
+    board->ppu.bgpa[2] = board->ppu.bgpd[2] = board->ppu.bgpa[3] = board->ppu.bgpd[3] = 0x100;
+    board->io[0x300 >> 1] = 1;
 }
 
 int agb_board_insert(AgbBoard* board, const void* image, size_t size, char* error, size_t error_size) {
