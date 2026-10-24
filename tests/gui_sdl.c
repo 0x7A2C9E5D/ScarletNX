@@ -2494,7 +2494,7 @@ static void recompile_queue(App* app) {
         key(app, SDLK_ESCAPE);
         free(step);
     }
-    /* the end: its line OK, the tab OK a while, then the next one's percent; the next runs by itself */
+    /* the end: its line OK, the tab OK a while, then the queue's percent; the next runs by itself */
     go_tab(app, GUI_TAB_RECOMPILE);
     job_step(app, 75);
     job_step(app, 100);
@@ -2507,10 +2507,11 @@ static void recompile_queue(App* app) {
            !strstr(line, ".."));
     job_started(app);
     app->clock = app->queue.job[0].ended_ms + GUI_JOB_SAID_MS;
-    assert(tab_reads(app, "Compile 25%"));
+    assert(tab_reads(app, "Compile 62%")); /* the queue's: game one whole, game two at 25% */
     render(app);
     shows(app, "- queue game one  OK", yellow);
-    shows(app, "- queue game two  25%", normal);
+    shows(app, "- queue game two  25%", normal); /* each row its own */
+    assert(SDL_fabsf(SDL_GetWindowProgressValue(app->window) - 0.62f) < 0.001f);
     shows_half(app, "Built queue game one", normal); /* its output kept, beside its row */
     shows_foot(app, "play", normal);
     app->clock = 0;

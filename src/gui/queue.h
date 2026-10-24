@@ -35,6 +35,7 @@ typedef struct {
     GuiJob job[GUI_QUEUE_MAX];
     int count;
     uint32_t serial; /* the last job's */
+    uint32_t first;  /* the first job of the compiles going on: the one added while none waited or ran */
 } GuiQueue;
 
 /* argv (its strings up to a NULL), the game's file, the path it is listed by and its name as a job waiting at the
@@ -49,6 +50,10 @@ int gui_queue_find(const GuiQueue* queue, const char* path);
 int gui_queue_running(const GuiQueue* queue);
 int gui_queue_next(const GuiQueue* queue);
 int gui_queue_waiting(const GuiQueue* queue);
+/* how far the compiles going on have gone, in percent: the jobs from queue->first on, each ended one whole however it
+   ended, the running one as far as it said and a waiting one at 0, of one weight each (a game's size is known only once
+   it runs); -1 while none has said how far */
+int gui_queue_percent(const GuiQueue* queue);
 /* job i's place in the line, 1 the running one's (or the first waiting's while none runs); 0 for one that ended */
 int gui_queue_place(const GuiQueue* queue, int i);
 /* job i's argv into out (GUI_QUEUE_ARGS of them, a NULL after the last): its count */

@@ -43,6 +43,7 @@ int gui_queue_add(GuiQueue* queue, const char* const* argv, const char* file, co
     job->state = GUI_JOB_WAITING;
     job->native = native;
     job->percent = -1;
+    if (gui_queue_running(queue) < 0 && gui_queue_next(queue) < 0) queue->first = queue->serial + 1; /* compiles anew */
     job->serial = ++queue->serial;
     if (added) *added = true;
     return queue->count++;
@@ -68,6 +69,23 @@ int gui_queue_waiting(const GuiQueue* queue) {
     int n = 0;
     for (int i = 0; i < queue->count; ++i) n += queue->job[i].state == GUI_JOB_WAITING;
     return n;
+}
+int gui_queue_percent(const GuiQueue* queue) {
+    int sum = 0, n = 0;
+    bool said = false;
+    for (int i = 0; i < queue->count; ++i) {
+        const GuiJob* job = &queue->job[i];
+        if (job->serial < queue->first) continue;
+        ++n;
+        if (job->state == GUI_JOB_OK || job->state == GUI_JOB_FAILED) {
+            sum += 100;
+            said = true;
+        } else if (job->state == GUI_JOB_RUNNING && job->percent >= 0) {
+            sum += job->percent;
+            said = true;
+        }
+    }
+    return said ? sum / n : -1;
 }
 int gui_queue_place(const GuiQueue* queue, int i) {
     int place = 0;

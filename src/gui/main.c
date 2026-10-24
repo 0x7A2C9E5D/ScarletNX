@@ -4224,10 +4224,11 @@ static int recompile_tab(const App* app, char* out, size_t size) {
         if (q->job[i].state >= GUI_JOB_OK) last = SDL_max(last, q->job[i].ended_ms);
     }
     if (run >= 0 && (!last || now - last >= GUI_JOB_SAID_MS || now < last)) {
-        if (q->job[run].percent < 0)
+        int percent = gui_queue_percent(q); /* the queue's, each row its own game's */
+        if (percent < 0)
             snprintf(out, size, "%s", snx_tr("Compile"));
         else
-            snprintf(out, size, snx_tr("Compile %d%%"), q->job[run].percent);
+            snprintf(out, size, snx_tr("Compile %d%%"), percent);
         return GUI_TAB_GOES;
     }
     snprintf(out, size, "%s", failed ? snx_tr("Compile FAILED") : ok ? snx_tr("Compile OK") : snx_tr("Compile"));
@@ -10388,15 +10389,16 @@ static void job_pump(App* app) {
     job_ended(app, i, status);
     job_start(app);
 }
-/* the taskbar's progress, SDL's (Windows' taskbar, a Linux desktop's launcher entry): how far the queue's recompile
-   running is, its failure once none runs while one that failed is listed, else none. Given SDL only as it changes;
+/* the taskbar's progress, SDL's (Windows' taskbar, a Linux desktop's launcher entry): how far the queue's compiles have
+   gone (gui_queue_percent), its failure once none runs while one that failed is listed, else none. Given SDL only as it changes;
    what SDL said when it could not show it is kept for the Status box, and said once on stderr */
 static void taskbar(App* app) {
     int run = gui_queue_running(&app->queue), state = SDL_PROGRESS_STATE_NONE, value = 0, i;
     bool ok;
     if (run >= 0) {
-        value = SDL_max(app->queue.job[run].percent, 0);
-        state = app->queue.job[run].percent < 0 ? SDL_PROGRESS_STATE_INDETERMINATE : SDL_PROGRESS_STATE_NORMAL;
+        int percent = gui_queue_percent(&app->queue);
+        value = SDL_max(percent, 0);
+        state = percent < 0 ? SDL_PROGRESS_STATE_INDETERMINATE : SDL_PROGRESS_STATE_NORMAL;
     } else
         for (i = 0; i < app->queue.count; ++i)
             if (app->queue.job[i].state == GUI_JOB_FAILED) {
