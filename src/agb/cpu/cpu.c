@@ -497,7 +497,7 @@ static int interpret(AgbBoard* board, AgbCpu* cpu, uint32_t word, int thumb) {
 
 int agb_cpu_run(AgbBoard* board, AgbCpu* cpu, AgbRecomp* recomp, uint32_t cycles, int16_t* audio,
                 uint32_t audio_capacity, uint32_t* audio_written, char* error, size_t error_size) {
-    AgbSink sink = {board, audio, audio_capacity, 0, 0};
+    AgbSink sink = {board, audio, audio_capacity, 0, cpu->over};
     while (sink.elapsed < cycles) {
         const AgbBlock* block;
         /* IntrWait, outside the interrupt handler: over once the handler flagged what it waits for, which it takes out
@@ -545,6 +545,7 @@ int agb_cpu_run(AgbBoard* board, AgbCpu* cpu, AgbRecomp* recomp, uint32_t cycles
             return -1;
         }
     }
+    cpu->over = sink.elapsed - cycles;
     if (audio_written) *audio_written = sink.written;
     return 0;
 }

@@ -177,6 +177,29 @@ int main(void) {
         flat[0x06010004] = 0xA5;
         CHECK(flat[0x06018004] == 0xA5 && flat[0x06038004] == 0xA5);
     }
+    {
+        /* a block that ends past a frame's cycles, at each frame: 200 moves and the branch back, 402 cycles, run for
+           frames of 280896, 300 more than 698 of them. Each run ends where the machine's frame does, before line 0
+           is drawn, not 102 cycles later at each frame */
+        for (uint32_t i = 0; i < 200; ++i) agb_write32(&board, 0x02001000 + i * 4, 0xE1A00000); /* mov r0, r0 */
+        agb_write32(&board, 0x02001320, 0xEAFFFF36);                                            /* b 0x02001000 */
+        agb_write16(&board, 0x04000208, 0);                                                     /* IME off */
+        cpu.arm.r[15] = 0x02001000;
+        cpu.arm.cpsr = 0x1F;
+        for (int frame = 0; frame < 20; ++frame) {
+            uint32_t written = 0;
+            if (agb_cpu_run(&board, &cpu, &recomp, AGB_SCANLINE_CYCLES * AGB_FRAME_LINES, audio, AGB_APU_RATE, &written,
+                            error, sizeof error)) {
+                fprintf(stderr, "agb_cpu: %s\n", error);
+                goto done;
+            }
+            if (board.ppu.vcount || board.ppu.dot >= 402) {
+                fprintf(stderr, "agb_cpu: frame %d ended at line %u, cycle %u of it\n", frame, board.ppu.vcount,
+                        board.ppu.dot);
+                goto done;
+            }
+        }
+    }
     /* the instructions after the interpreted ones start blocks the discovery step did not see: they were compiled as
        the run reached them, and saving the run keeps them, in the map as hints with SNX_AGB_JIT (the module as it
        was, at once), else folded into the module */

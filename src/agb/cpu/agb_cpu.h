@@ -19,10 +19,13 @@ typedef struct {
     /* IntrWait's interrupts while it waits: the machine halts until the game's handler flags one of them in the BIOS's
        flags (0x03007FF8), as the BIOS does; 0 when it waits for none */
     uint16_t wait;
+    /* the cycles the last run went past its budget, which the next run's takes back: a run of a frame's cycles then
+       ends where the machine's frame does, not later at each frame */
+    uint32_t over;
 } AgbCpu;
 
 void agb_cpu_init(AgbCpu* cpu, AgbBoard* board, uint8_t* map);
-/* Runs the board for the given number of CPU cycles. audio collects interleaved stereo samples at
+/* Runs the board for the given number of CPU cycles, less those the last run went past its own. audio collects interleaved stereo samples at
    AGB_APU_RATE, up to capacity. Returns 0, or -1 with a message when the machine stops. */
 int agb_cpu_run(AgbBoard* board, AgbCpu* cpu, AgbRecomp* recomp, uint32_t cycles, int16_t* audio,
                 uint32_t audio_capacity, uint32_t* audio_written, char* error, size_t error_size);
