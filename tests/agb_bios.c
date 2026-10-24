@@ -252,6 +252,20 @@ int main(void) {
     CHECK(agb_read32(&board, 0x02000000) == 0);
     CHECK(agb_read32(&board, 0x06000000) == 0);
     CHECK(agb_read32(&board, 0x03007FFC) == 0xCAFEBABE);
+    /* and the registers go back to the BIOS's values, written through the bus: a game reads RCNT 0x8000 as no link
+       cable, which a cleared register file was not */
+    agb_write16(&board, 0x04000134, 0);      /* RCNT: the serial port in its multiplayer mode */
+    agb_write16(&board, 0x04000088, 0);      /* SOUNDBIAS */
+    agb_write16(&board, 0x04000000, 0x1100); /* DISPCNT: BG0 and OBJ */
+    agb_write16(&board, 0x04000020, 0x40);   /* BG2PA */
+    agb_write16(&board, 0x04000200, 1);      /* IE: vblank */
+    regs[0] = 0xE0;
+    CHECK(call(regs, AGB_SWI_REGISTER_RAM_RESET) == 0);
+    CHECK(agb_read16(&board, 0x04000134) == 0x8000);
+    CHECK(agb_read16(&board, 0x04000088) == 0x200);
+    CHECK(agb_read16(&board, 0x04000000) == 0x0080);
+    CHECK(board.ppu.bgpa[2] == 0x100);
+    CHECK(agb_read16(&board, 0x04000200) == 0);
 
     /* the memory map's mirrors */
     agb_write32(&board, 0x02000000, 0xAABBCCDD);
