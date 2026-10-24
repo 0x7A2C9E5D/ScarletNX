@@ -354,7 +354,7 @@ interface nn::irsensor::IIrSensorServer is irs {
     @stub [311] GetNpadIrCameraHandle(u32 npad_id) -> nn::irsensor::IrCameraHandle handle;
 }
 
-# ================================================================ mii: an empty database
+# ================================================================ mii: a fixed database of eight pre-baked Miis
 type nn::mii::CharInfoElement = bytes<0x5c, 4>;
 type nn::mii::CharInfo = bytes<0x58, 4>;
 
@@ -362,7 +362,8 @@ type nn::mii::CharInfo = bytes<0x58, 4>;
 interface nn::mii::detail::IStaticService is mii:e, mii:u {
     [0] GetDatabaseService(i32 key_code) -> object<nn::mii::detail::IDatabaseService> database;
 }
-# the database (source 1) holds no Mii here: what is counted and given are the six defaults (source 2)
+# the database (source flag 1) holds eight pre-baked Miis that never change, so it is never updated or full, and the
+# six defaults (source flag 2) follow them
 interface nn::mii::detail::IDatabaseService {
     @stub [0] IsUpdated(i32 source_flag) -> b8 updated;
     @stub [1] IsFullDatabase() -> b8 full;

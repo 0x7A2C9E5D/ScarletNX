@@ -780,13 +780,9 @@ static void test_mii_default(void) {
     argument32(&r, 0, 2);
     call(db, &r);
     CHECK(reply32(&r, 0) == 6);
-    request(&r, 2);
-    argument32(&r, 0, 1);
-    call(db, &r);
-    CHECK(reply32(&r, 0) == 0);
     memset(g_mem + 0x4000, 0xee, 8 * 0x5c);
     request(&r, 3);
-    argument32(&r, 0, 3);
+    argument32(&r, 0, 2);
     r.c.nb = 1;
     r.c.b[0].addr = 0x4000;
     r.c.b[0].size = 8 * 0x5c;
@@ -1110,9 +1106,62 @@ static void test_mii_random(void) {
     svcobj_unref(service);
 }
 
-/* UpdateLatest (5) and GetIndex (21) of a Mii: NotFound, whatever the source, as the empty database holds none. A game
-   that asks UpdateLatest for the Mii its save holds at boot got an empty CharInfo from a success, built no Mii from it,
-   and crashed */
+/* the database (source flag 1): eight fixed Miis, each valid with its own name and create id, the same on every
+   call, given before the six defaults when both are asked for */
+static void test_mii_database(void) {
+    SvcObj* service = new_mii();
+    Request r;
+    request(&r, 0);
+    call(service, &r);
+    SvcObj* db = r.c.out_objs[0];
+    request(&r, 2);
+    argument32(&r, 0, 1);
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 8);
+    request(&r, 2);
+    argument32(&r, 0, 3);
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 14);
+    memset(g_mem + 0x4000, 0xee, 15 * 0x5c);
+    request(&r, 3);
+    argument32(&r, 0, 3);
+    r.c.nb = 1;
+    r.c.b[0].addr = 0x4000;
+    r.c.b[0].size = 14 * 0x5c;
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 14);
+    for (u32 i = 0; i < 14; i++) {
+        const u8* c = g_mem + 0x4000 + i * 0x5c;
+        CHECK(mii_valid(c));
+        CHECK(gr32(0x4000 + i * 0x5c + 0x58) == (i >= 8));
+        for (u32 j = 0; j < i && i < 8; j++) {
+            CHECK(memcmp(c, g_mem + 0x4000 + j * 0x5c, 16) != 0);
+            CHECK(memcmp(c + 0x10, g_mem + 0x4000 + j * 0x5c + 0x10, 0x16) != 0);
+        }
+    }
+    CHECK(g_mem[0x4000 + 14 * 0x5c] == 0xee);
+    CHECK(g_mem[0x4000 + 8 * 0x5c + 0x10] == 'n');
+    request(&r, 4);
+    argument32(&r, 0, 1);
+    r.c.nb = 1;
+    r.c.b[0].addr = 0x6000;
+    r.c.b[0].size = 8 * 0x58;
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 8);
+    for (u32 i = 0; i < 8; i++) CHECK(memcmp(g_mem + 0x6000 + i * 0x58, g_mem + 0x4000 + i * 0x5c, 0x58) == 0);
+    /* a buffer short of the whole database is InvalidArgumentSize, after the Miis that fit */
+    request(&r, 4);
+    argument32(&r, 0, 3);
+    r.c.nb = 1;
+    r.c.b[0].addr = 0x6000;
+    r.c.b[0].size = 10 * 0x58;
+    CHECK(db->dispatch(db, &r.c) == RC(126, 2));
+    svcobj_unref(db);
+    svcobj_unref(service);
+}
+/* UpdateLatest (5) and GetIndex (21) of a Mii not in the database (a default's random create id): NotFound, whatever
+   the source. A game that asks UpdateLatest for the Mii its save holds at boot got an empty CharInfo from a success,
+   built no Mii from it, and crashed. A database Mii is found by its create id */
 static void test_mii_latest(void) {
     SvcObj* service = new_mii();
     Request r;
@@ -1136,6 +1185,38 @@ static void test_mii_latest(void) {
     memcpy(r.raw, mii, sizeof mii);
     CHECK(db->dispatch(db, &r.c) == RC(126, 4));
     CHECK(r.c.out_size == 0);
+    /* a database Mii is its own latest (NotUpdated), found by its create id whatever else changed, and not when the
+       source is Default only or its type differs */
+    request(&r, 4);
+    argument32(&r, 0, 1);
+    r.c.nb = 1;
+    r.c.b[0].addr = 0x4000;
+    r.c.b[0].size = 8 * 0x58;
+    call(db, &r);
+    memcpy(mii, g_mem + 0x4000 + 2 * 0x58, sizeof mii);
+    request(&r, 5);
+    memcpy(r.raw, mii, sizeof mii);
+    argument32(&r, 0x58, 1);
+    CHECK(db->dispatch(db, &r.c) == RC(126, 3));
+    request(&r, 5);
+    memcpy(r.raw, mii, sizeof mii);
+    argument32(&r, 0x58, 2);
+    CHECK(db->dispatch(db, &r.c) == RC(126, 4));
+    mii[0x31] ^= 1;
+    request(&r, 5);
+    memcpy(r.raw, mii, sizeof mii);
+    argument32(&r, 0x58, 3);
+    call(db, &r);
+    CHECK(r.c.out_size == 0x58 && memcmp(r.c.out, g_mem + 0x4000 + 2 * 0x58, 0x58) == 0);
+    mii[0x2b] = 1;
+    request(&r, 5);
+    memcpy(r.raw, mii, sizeof mii);
+    argument32(&r, 0x58, 1);
+    CHECK(db->dispatch(db, &r.c) == RC(126, 4));
+    request(&r, 21);
+    memcpy(r.raw, mii, sizeof mii);
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 2);
     svcobj_unref(db);
     svcobj_unref(service);
 }
@@ -1164,6 +1245,7 @@ int main(void) {
     test_aoc_list();
     test_aoc_content();
     test_mii_random();
+    test_mii_database();
     test_mii_latest();
     CHECK(test_objects == 0 && test_kobjs == 0);
     free(g_mem);

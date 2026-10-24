@@ -882,11 +882,15 @@ static int nn_irsensor_IIrSensorServer_GetIrsensorSharedMemoryHandle(SvcObj* sel
     R_SUCCEED();
 }
 
-/* ============================================================ mii: the six default Miis */
+/* ============================================================ mii: a fixed database and the six default Miis */
 #define MII_INVALID_ARGUMENT      RC(126, 1)
 #define MII_INVALID_ARGUMENT_SIZE RC(126, 2)
-#define MII_SOURCE_DEFAULT        2 /* nn::mii::SourceFlag::Default */
+#define MII_NOT_UPDATED           RC(126, 3)
 #define MII_NOT_FOUND             RC(126, 4)
+#define MII_SOURCE_DATABASE       1 /* nn::mii::SourceFlag::Database */
+#define MII_SOURCE_DEFAULT        2 /* nn::mii::SourceFlag::Default */
+#define MII_NAME                  0x10 /* CharInfo's nickname, UTF-16, after the create id */
+#define MII_TYPE                  0x2b /* CharInfo's type: a special Mii's differs */
 
 /* nn::mii's DefaultMii, the fields in this order (colors in the 3DS's numbering): face type, color, wrinkle, makeup;
    hair type, color, flip; eye type, color, scale, aspect, rotate, x, y; eyebrow type, color, scale, aspect, rotate,
@@ -907,6 +911,48 @@ static const u8 mii_defaults[6][MII_FIELDS] = {
      0, 4, 3, 13, 0, 0, 0, 4, 10, 0, 0, 4, 10, 0, 4, 2, 20, 64, 64, 1, 6, 0, 0, 0},
     {0, 0, 0, 0, 12, 1, 0, 4, 0, 4, 3, 3, 2, 12, 0, 1, 4, 3, 6, 2, 10, 1, 4, 9, 23,
      0, 4, 3, 13, 0, 0, 0, 4, 10, 0, 0, 4, 10, 0, 4, 2, 20, 64, 64, 1, 7, 0, 0, 0},
+};
+/* The database the console keeps in its system save, here pre-baked and never changed: what a game asks of source
+   Database is these eight, before the defaults. Their fields are the defaults' with other parts, each in the range
+   CharInfo::Verify takes, and their create ids are fixed, so a Mii a game saved is found again on the next run */
+#define MII_DATABASE_COUNT 8
+static const struct {
+    u8 create_id[16];
+    char name[11];
+    u8 f[MII_FIELDS];
+} mii_database[MII_DATABASE_COUNT] = {
+    {{0x5d, 0xb8, 0xe6, 0x89, 0xf3, 0xad, 0x4a, 0xb8, 0xa6, 0x4b, 0xa4, 0x92, 0xce, 0xb8, 0xf7, 0xed},
+     "Alex",
+     {1, 1, 0, 0, 33, 1, 0, 2, 4, 4, 3, 4, 2, 12, 6, 1, 4, 3, 6, 2, 10, 1, 4, 9, 23,
+      0, 4, 3, 13, 0, 0, 1, 4, 10, 0, 0, 4, 10, 0, 4, 2, 20, 72, 60, 0, 0, 0, 0, 0}},
+    {{0xd8, 0xb0, 0x80, 0x1e, 0xea, 0xc1, 0x45, 0xd0, 0xb3, 0xd9, 0x4f, 0xb2, 0x36, 0x22, 0xc8, 0xe5},
+     "Sam",
+     {0, 0, 0, 0, 12, 6, 1, 4, 5, 4, 3, 3, 2, 12, 0, 6, 4, 3, 6, 2, 10, 1, 4, 9, 23,
+      1, 4, 3, 13, 0, 0, 6, 4, 10, 0, 0, 4, 10, 0, 4, 2, 20, 58, 56, 1, 6, 0, 0, 0}},
+    {{0xf6, 0x70, 0x42, 0x18, 0x0e, 0xef, 0x41, 0x2a, 0x9e, 0xc1, 0xad, 0xeb, 0xb4, 0x93, 0xa2, 0xc4},
+     "Kai",
+     {2, 2, 0, 0, 7, 0, 0, 0, 0, 4, 3, 4, 2, 12, 3, 0, 4, 3, 6, 2, 10, 5, 4, 9, 11,
+      0, 4, 3, 13, 1, 2, 0, 4, 10, 0, 0, 4, 10, 0, 4, 2, 20, 80, 76, 0, 8, 0, 0, 0}},
+    {{0x8e, 0x0b, 0x19, 0x1d, 0xb3, 0xcb, 0x4c, 0x75, 0xb8, 0xe1, 0x36, 0xee, 0xe5, 0x53, 0x6e, 0xad},
+     "Robin",
+     {3, 3, 0, 0, 90, 4, 0, 13, 1, 4, 3, 3, 2, 12, 10, 4, 4, 3, 6, 2, 10, 2, 4, 9, 1,
+      2, 4, 3, 13, 0, 0, 4, 4, 10, 1, 1, 4, 10, 0, 4, 2, 20, 50, 64, 1, 10, 0, 0, 0}},
+    {{0xfc, 0xb5, 0xd0, 0xc8, 0xe4, 0x2e, 0x42, 0x56, 0xa4, 0xb7, 0x7e, 0x52, 0x2c, 0x4f, 0x2a, 0x2f},
+     "Jamie",
+     {4, 5, 0, 0, 112, 3, 1, 19, 2, 4, 3, 4, 2, 12, 15, 3, 4, 3, 6, 2, 10, 8, 4, 9, 6,
+      0, 4, 3, 13, 0, 0, 3, 4, 10, 0, 0, 4, 10, 0, 4, 2, 20, 96, 40, 0, 3, 0, 0, 0}},
+    {{0x19, 0x23, 0xeb, 0xb3, 0xf1, 0xa5, 0x4a, 0x70, 0xac, 0x40, 0xdc, 0xc1, 0x55, 0x56, 0x30, 0xd2},
+     "Taylor",
+     {5, 4, 0, 0, 45, 2, 0, 27, 3, 4, 3, 3, 2, 12, 20, 2, 4, 3, 6, 2, 10, 3, 4, 9, 30,
+      3, 4, 3, 13, 0, 0, 2, 4, 10, 0, 0, 4, 10, 0, 4, 2, 20, 64, 64, 1, 1, 0, 0, 0}},
+    {{0xc0, 0x2c, 0x74, 0x19, 0xbe, 0xd2, 0x43, 0x9e, 0x9d, 0x51, 0xd4, 0x31, 0xe8, 0x29, 0xe0, 0x30},
+     "Morgan",
+     {6, 0, 0, 0, 128, 7, 0, 40, 5, 4, 3, 4, 2, 12, 22, 7, 4, 3, 6, 2, 10, 12, 4, 9, 17,
+      0, 4, 3, 13, 2, 0, 7, 4, 10, 5, 3, 4, 10, 0, 4, 2, 20, 40, 88, 0, 5, 0, 0, 0}},
+    {{0xaf, 0x62, 0x27, 0xb5, 0xcb, 0x66, 0x46, 0x1a, 0x92, 0x34, 0x58, 0x88, 0x3a, 0x0e, 0x16, 0xe0},
+     "Riley",
+     {8, 1, 0, 0, 77, 5, 1, 50, 2, 4, 3, 3, 2, 12, 12, 5, 4, 3, 6, 2, 10, 6, 4, 9, 34,
+      4, 4, 3, 13, 0, 0, 5, 4, 10, 0, 0, 4, 10, 0, 4, 2, 20, 70, 52, 1, 9, 0, 0, 0}},
 };
 /* where each field goes in nn::mii::CharInfo, and the table that turns its 3DS color into the Switch's (0 none) */
 static const u8 mii_char_offset[MII_FIELDS] = {
@@ -932,6 +978,35 @@ static u8 mii_color(int kind, u8 v) {
     }
     return v;
 }
+/* a CharInfo of those fields and that name (ASCII, as UTF-16), under a new random create id (a version 4 UUID) when
+   none is given; never zero in its first byte, so no check of it reads it as the invalid all-zero id. What is not
+   built is nought: Get builds over the last one, not a zeroed reply */
+static void mii_build(nn_mii_CharInfo* info, const u8* create_id, const char* name, const u8* f) {
+    u8* c = info->v;
+    int i;
+    memset(c, 0, sizeof info->v);
+    if (create_id)
+        memcpy(c, create_id, 16);
+    else {
+        do {
+            if (RAND_bytes(c, 16) != 1) fatal("The host's random number generator failed");
+        } while (!c[0]);
+        c[6] = (u8)(0x40 | (c[6] & 0x0f));
+        c[8] = (u8)(0x80 | (c[8] & 0x3f));
+    }
+    for (i = 0; name[i]; i++) c[MII_NAME + 2 * i] = (u8)name[i];
+    for (i = 0; i < MII_FIELDS; i++) c[mii_char_offset[i]] = mii_color(mii_color_kind[i], f[i]);
+}
+static void mii_build_database(nn_mii_CharInfo* info, u32 index) {
+    mii_build(info, mii_database[index].create_id, mii_database[index].name, mii_database[index].f);
+}
+/* the database Mii with that CharInfo's create id, or -1 */
+static int mii_find(const nn_mii_CharInfo* info) {
+    int i;
+    for (i = 0; i < MII_DATABASE_COUNT; i++)
+        if (!memcmp(info->v, mii_database[i].create_id, 16)) return i;
+    return -1;
+}
 
 static int nn_mii_detail_IStaticService_GetDatabaseService(SvcObj* self, i32 key_code, SvcObj** database) {
     (void)self, (void)key_code;
@@ -939,62 +1014,62 @@ static int nn_mii_detail_IStaticService_GetDatabaseService(SvcObj* self, i32 key
     R_SUCCEED();
 }
 static int nn_mii_detail_IDatabaseService_BuildDefault(SvcObj* self, u32 index, nn_mii_CharInfo* info) {
-    static const char name[] = "no name";
-    u8* c = info->v;
-    int i;
     (void)self;
     R_UNLESS(index < 6, MII_INVALID_ARGUMENT);
-    memset(c, 0, sizeof info->v); /* what is not built is nought: Get builds over the last one, not a zeroed reply */
-    /* a new random create id (a version 4 UUID); never zero in its first byte, so no check of it reads it as the
-       invalid all-zero id */
-    do {
-        if (RAND_bytes(c, 16) != 1) fatal("The host's random number generator failed");
-    } while (!c[0]);
-    c[6] = (u8)(0x40 | (c[6] & 0x0f));
-    c[8] = (u8)(0x80 | (c[8] & 0x3f));
-    for (i = 0; name[i]; i++) c[0x10 + 2 * i] = (u8)name[i]; /* UTF-16 */
-    for (i = 0; i < MII_FIELDS; i++) c[mii_char_offset[i]] = mii_color(mii_color_kind[i], mii_defaults[index][i]);
+    mii_build(info, NULL, "no name", mii_defaults[index]);
     R_SUCCEED();
 }
 static int nn_mii_detail_IDatabaseService_GetCount(SvcObj* self, i32 source_flag, i32* count) {
     (void)self;
-    *count = source_flag & MII_SOURCE_DEFAULT ? 6 : 0;
+    *count = (source_flag & MII_SOURCE_DATABASE ? MII_DATABASE_COUNT : 0) + (source_flag & MII_SOURCE_DEFAULT ? 6 : 0);
     R_SUCCEED();
 }
-/* the six default Miis in index order, each built anew as Eden gives them, into elements of size bytes: the CharInfo,
-   then for Get its source (1, Default). A buffer with no room for the next one is InvalidArgumentSize */
-static int mii_give_defaults(i32 source_flag, IpcBuf out, u32 size, i32* count) {
+/* the database's Miis then the six defaults, each as the source flag asks, in index order into elements of size bytes:
+   the CharInfo, then for Get its source (0 Database, 1 Default). A buffer with no room for the next one is
+   InvalidArgumentSize, after the ones that fit */
+static int mii_give(i32 source_flag, IpcBuf out, u32 size, i32* count) {
     nn_mii_CharInfo info;
-    u32 i;
+    u32 i, n = 0;
     *count = 0;
-    if (!(source_flag & MII_SOURCE_DEFAULT)) R_SUCCEED();
-    for (i = 0; i < 6; i++) {
-        if (out.size < (u64)(i + 1) * size) R_THROW(MII_INVALID_ARGUMENT_SIZE);
-        nn_mii_detail_IDatabaseService_BuildDefault(NULL, i, &info);
-        memcpy(GP(out.addr + (u64)i * size), info.v, sizeof info.v);
-        if (size > sizeof info.v) gw32(out.addr + (u64)i * size + sizeof info.v, 1);
-        (*count)++;
+    for (i = 0; i < MII_DATABASE_COUNT + 6; i++) {
+        int is_default = i >= MII_DATABASE_COUNT;
+        if (!(source_flag & (is_default ? MII_SOURCE_DEFAULT : MII_SOURCE_DATABASE))) continue;
+        if (out.size < (u64)(n + 1) * size) R_THROW(MII_INVALID_ARGUMENT_SIZE);
+        if (is_default)
+            nn_mii_detail_IDatabaseService_BuildDefault(NULL, i - MII_DATABASE_COUNT, &info);
+        else
+            mii_build_database(&info, i);
+        memcpy(GP(out.addr + (u64)n * size), info.v, sizeof info.v);
+        if (size > sizeof info.v) gw32(out.addr + (u64)n * size + sizeof info.v, (u32)is_default);
+        *count = (i32)++n;
     }
     R_SUCCEED();
 }
 static int nn_mii_detail_IDatabaseService_Get(SvcObj* self, i32 source_flag, IpcBuf elements, i32* count) {
     (void)self;
-    return mii_give_defaults(source_flag, elements, 0x5c, count);
+    return mii_give(source_flag, elements, 0x5c, count);
 }
 static int nn_mii_detail_IDatabaseService_Get1(SvcObj* self, i32 source_flag, IpcBuf infos, i32* count) {
     (void)self;
-    return mii_give_defaults(source_flag, infos, 0x58, count);
+    return mii_give(source_flag, infos, 0x58, count);
 }
-/* a Mii's newest version and its place in the database, which has no Miis: NotFound, and the game keeps the Mii it has
-   (a game may ask both for the Mii its save holds, and take a successful UpdateLatest's as that Mii) */
+/* the database's version of a Mii, found by its create id: NotFound when it isn't there (or is of another type), and
+   NotUpdated when the game's copy already is that version. A game keeps the Mii it has on either failure */
 static int nn_mii_detail_IDatabaseService_UpdateLatest(SvcObj* self, const nn_mii_CharInfo* info, i32 source_flag,
                                                        nn_mii_CharInfo* latest) {
-    (void)self, (void)info, (void)source_flag, (void)latest;
-    R_THROW(MII_NOT_FOUND);
+    int index = mii_find(info);
+    (void)self;
+    if (!(source_flag & MII_SOURCE_DATABASE) || index < 0) R_THROW(MII_NOT_FOUND);
+    mii_build_database(latest, (u32)index);
+    if (latest->v[MII_TYPE] != info->v[MII_TYPE]) R_THROW(MII_NOT_FOUND);
+    if (!memcmp(latest->v, info->v, sizeof latest->v)) R_THROW(MII_NOT_UPDATED);
+    R_SUCCEED();
 }
 static int nn_mii_detail_IDatabaseService_GetIndex(SvcObj* self, const nn_mii_CharInfo* info, i32* index) {
-    (void)self, (void)info, (void)index;
-    R_THROW(MII_NOT_FOUND);
+    (void)self;
+    *index = mii_find(info);
+    R_UNLESS(*index >= 0, MII_NOT_FOUND);
+    R_SUCCEED();
 }
 /* ------------------------------------------------------------ BuildRandom */
 #include "nx/hle/services/mii_random.inc"
@@ -1102,7 +1177,7 @@ static int nn_mii_detail_IDatabaseService_BuildRandom(SvcObj* self, u32 age, u32
     } while (!c[0]);
     c[6] = (u8)(0x40 | (c[6] & 0x0f));
     c[8] = (u8)(0x80 | (c[8] & 0x3f));
-    for (i = 0; name[i]; i++) c[0x10 + 2 * i] = (u8)name[i];
+    for (i = 0; name[i]; i++) c[MII_NAME + 2 * i] = (u8)name[i];
     for (i = 0; i < MII_FIELDS; i++) c[mii_char_offset[i]] = f[i];
     R_SUCCEED();
 }
