@@ -153,7 +153,7 @@ static void bios_bit_unpack(AgbBoard* board, uint32_t regs[16]) {
     uint32_t offset = agb_read32(board, info + 4);
     uint32_t accumulator = 0, mask;
     unsigned held = 0;
-    int zero_only = (int)(offset >> 31 & 1);
+    int zero_too = (int)(offset >> 31 & 1); /* the zero data flag: zero units take the offset too */
     if ((in_width != 1 && in_width != 2 && in_width != 4 && in_width != 8) ||
         (out_width != 1 && out_width != 2 && out_width != 4 && out_width != 8 && out_width != 16 && out_width != 32) ||
         out_width < in_width)
@@ -164,7 +164,7 @@ static void bios_bit_unpack(AgbBoard* board, uint32_t regs[16]) {
         uint32_t unit = agb_read8(board, source++);
         for (uint32_t bit = 0; bit < 8; bit += in_width) {
             uint32_t value = unit >> bit & mask;
-            if (value || !zero_only) value = (value + offset) & (out_width == 32 ? 0xFFFFFFFFu : (1u << out_width) - 1);
+            if (value || zero_too) value = (value + offset) & (out_width == 32 ? 0xFFFFFFFFu : (1u << out_width) - 1);
             accumulator |= value << held;
             held += out_width;
             if (held == 32) {
