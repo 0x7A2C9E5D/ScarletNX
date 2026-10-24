@@ -82,6 +82,10 @@ FsTreeResult fs_tree_add_virtual(FsTree* tree, const char* relative_path, const 
 /* Startup only: opens and maps every regular file under node (plat_file_share) and makes the subtree readonly, so no
    mapped file is ever truncated, replaced or renamed. A file that can't be mapped keeps fd -1 and is read on demand. */
 FsTreeResult fs_tree_share(FsTree* tree, FsNode* node, unsigned* shared, unsigned* failed);
+/* What fs_tree_share may map in all from now on: bytes and files, 0 for no limit on either. A file past a limit is
+   counted as failed and read on demand. A device that gives a process a few GiB of address space and some thousand
+   descriptors has none left for threads and graphics after a game's tens of thousands of files */
+void fs_tree_share_limit(uint64_t bytes, unsigned files);
 void fs_tree_retain(FsNode* node);
 void fs_tree_release(FsNode* node);
 
