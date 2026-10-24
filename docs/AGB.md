@@ -125,8 +125,11 @@ The miss starts a discovery walk of its own; a build with the LLVM backend
 compiles each block it finds in the process at its first dispatch
 (`src/common/cpu/arm/exec.c`), and one without it puts them in a module of their
 own (`<name>_code.<n>.so`), so a miss costs those blocks and not the whole ROM.
-When the run ends the blocks it ran are folded into the cached module, so the
-next run starts with every block the last one reached. A block built from RAM
+When the run ends, the blocks it compiled are kept in the map as hints, at once,
+as the 3DS and Vita drivers keep theirs: the next run compiles them again in the
+process when it reaches them, and a recompile (`-r`, R in the launcher) builds
+every block the runs reached into the module. A build without the LLVM backend
+folds them into the module instead. A block built from RAM
 runs while RAM holds the words it was built from, and is built again once the
 game writes over them; the map names the ROM's hash, and a map of another ROM is
 refused with both.

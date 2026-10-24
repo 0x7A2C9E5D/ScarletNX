@@ -175,7 +175,8 @@ int main(void) {
         CHECK(flat[0x06018004] == 0xA5 && flat[0x06038004] == 0xA5);
     }
     /* the instructions after the interpreted ones start blocks the discovery step did not see: they were compiled as
-       the run reached them, and saving the run folds them into the cached module */
+       the run reached them, and saving the run keeps them, in the map as hints with SNX_AGB_JIT (the module as it
+       was, at once), else folded into the module */
     CHECK(recomp.compiled > 0 && recomp.dirty);
     if (agb_recomp_save(&recomp, &board, error, sizeof error)) {
         fprintf(stderr, "agb_cpu: saving the module: %s\n", error);
@@ -183,9 +184,10 @@ int main(void) {
     }
     CHECK(!recomp.patch_count && !recomp.dirty); /* no module file left */
     {
-        /* the cache holds every block of the run, each with its function and size */
+        /* the cache holds every block of the run, each with its size: a block of the module its function, a hint
+           none until a run reaches it (with SNX_AGB_JIT), which compiles it again and counts it as no new one */
         AgbRecomp cached;
-        size_t count = recomp.count;
+        size_t count = recomp.count, hints = 0;
         agb_recomp_init(&cached, "agb_cpu_test.code", SNX_AGB_TEST_CC);
         if (agb_recomp_load_cache(&cached, &board, error, sizeof error)) {
             fprintf(stderr, "agb_cpu: loading the cache: %s\n", error);
@@ -193,8 +195,21 @@ int main(void) {
             goto done;
         }
         result = cached.count == count ? 0 : 1;
+        for (size_t i = 1; i <= cached.count; ++i) {
+            const AgbBlock* block = &cached.blocks[i];
+            if (!block->instructions || (block->fn == NULL) != (block->hint != 0)) result = 1;
+            hints += block->hint;
+        }
+#ifdef SNX_AGB_JIT
+        if (!hints) result = 1;
         for (size_t i = 1; i <= cached.count; ++i)
-            if (!cached.blocks[i].fn || !cached.blocks[i].instructions) result = 1;
+            if (cached.blocks[i].hint && (!agb_recomp_lookup(&cached, &board, cached.blocks[i].pc,
+                                                             cached.blocks[i].thumb, error, sizeof error) ||
+                                          cached.compiled))
+                result = 1;
+#else
+        if (hints) result = 1;
+#endif
         agb_recomp_free(&cached);
         CHECK(!result);
         result = 1;
@@ -225,7 +240,7 @@ int main(void) {
         CHECK(!agb_recomp_save(&recomp, &board, error, sizeof error));
         agb_recomp_init(&next, "agb_cpu_test.code", SNX_AGB_TEST_CC);
         CHECK(!agb_recomp_load_cache(&next, &board, error, sizeof error));
-        /* the same code in RAM: the cached block runs, nothing compiled */
+        /* the same code in RAM: the cached block runs, no new one compiled */
         block = agb_recomp_lookup(&next, &board, 0x03000000, 1, error, sizeof error);
         result = block && !next.compiled && run_block(&cpu, block) == 2 ? 0 : 1;
         agb_write16(&board, 0x03000000, 0x2003); /* movs r0, #3 */
@@ -235,6 +250,40 @@ int main(void) {
         CHECK(!result);
         result = 1;
     }
+#ifdef SNX_AGB_JIT
+    {
+        /* a recompile (-r) builds every block of the map into the module, the hints too; a run that saves after
+           another process's recompile keeps each block as a hint, its symbols naming that module's functions no
+           more */
+        AgbRecomp made, after;
+        agb_recomp_init(&made, "agb_cpu_test.code", SNX_AGB_TEST_CC);
+        result = agb_recomp_load_map(&made, &board, error, sizeof error) ||
+                 agb_recomp_build(&made, &board, error, sizeof error) || !made.count;
+        if (result) fprintf(stderr, "agb_cpu: the recompile from the map: %s\n", error);
+        agb_recomp_free(&made);
+        /* its map, as the next run reads it (this process keeps the run's module of the same path loaded, which a
+           dlopen of it hands back) */
+        agb_recomp_init(&made, "agb_cpu_test.code", SNX_AGB_TEST_CC);
+        if (!result) result = agb_recomp_load_map(&made, &board, error, sizeof error) || made.count < 2;
+        for (size_t i = 1; !result && i <= made.count; ++i)
+            if (made.blocks[i].hint || !made.blocks[i].symbol) {
+                fprintf(stderr, "agb_cpu: block %zu at 0x%08X after the recompile: hint %u, symbol %u\n", i,
+                        made.blocks[i].pc, made.blocks[i].hint, made.blocks[i].symbol);
+                result = 1;
+            }
+        agb_recomp_free(&made);
+        CHECK(!result);
+        recomp.dirty = 1; /* this run's save, after that recompile */
+        CHECK(!agb_recomp_save(&recomp, &board, error, sizeof error));
+        agb_recomp_init(&after, "agb_cpu_test.code", SNX_AGB_TEST_CC);
+        result = agb_recomp_load_map(&after, &board, error, sizeof error) || !after.count;
+        for (size_t i = 1; !result && i <= after.count; ++i)
+            if (after.blocks[i].symbol || !after.blocks[i].hint) result = 1;
+        agb_recomp_free(&after);
+        CHECK(!result);
+        result = 1;
+    }
+#endif
     {
         /* an LDM the console's bus wraps past 4 GiB lands in the window's guard (memmap.c) instead of aborting */
         const AgbBlock* block;

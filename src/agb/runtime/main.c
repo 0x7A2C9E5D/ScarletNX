@@ -267,7 +267,9 @@ int main(int argc, char** argv) {
         }
         agb_cpu_init(&cpu, &board, map.base);
         agb_recomp_init(&recomp, base, SNX_AGB_CC);
-        if (recompile || agb_recomp_load_cache(&recomp, &board, error, sizeof error)) {
+        /* a recompile builds the module from every block the runs reached, the map's; else the cache is loaded */
+        if (recompile ? (agb_recomp_load_map(&recomp, &board, error, sizeof error), 1)
+                      : agb_recomp_load_cache(&recomp, &board, error, sizeof error)) {
             if (error[0])
                 printf("Recompiling %s: %s\n", path, error);
             else
@@ -343,8 +345,14 @@ int main(int argc, char** argv) {
         agb_host_close(host);
         if (board.save.dirty && agb_save_size(&board) && save_write(&board, save)) status = 1;
         error[0] = 0;
+#ifdef SNX_AGB_JIT
+        if (recomp.compiled)
+            printf("%zu blocks compiled at run time were added to the hints, which a recompile (-r) starts from\n",
+                   recomp.compiled);
+#else
         if (recomp.dirty)
             printf("Keeping the %zu blocks this run compiled in %s.so for the next one\n", recomp.compiled, base);
+#endif
         if (agb_recomp_save(&recomp, &board, error, sizeof error))
             fprintf(stderr, "scarletnx-agb: cannot save the recompiled ROM: %s\n", error);
         if (played && !status) puts("Exit."); /* a run that ended well says so last, as every driver's */

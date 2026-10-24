@@ -143,6 +143,27 @@ def main():
         ini = (work / stem / ('%s.ini' % stem)).read_text()
         if not copy.is_file() or 'system=gba' not in ini or 'source=%s' % rom.resolve() not in ini:
             sys.exit("%s: no copy of the runtime %s, or its .ini is not a GBA game's:\n%s" % (args.name, copy, ini))
+        if args.name == 'arm' and 'added to the hints' in run.stdout:
+            # the blocks the run compiled are in the map as hints ('-'), the module left as it was; a run that
+            # reaches them again adds none, and a recompile (-r) builds every one of them into the module
+            cache = work / stem / ('%s_code.map' % stem)
+            hints = [line for line in cache.read_text().splitlines()[1:] if line.endswith(' -')]
+            if not hints:
+                sys.exit('%s: the run said it kept hints, and %s has none' % (args.name, cache))
+            again = subprocess.run(
+                [args.runner, '--frames=%d' % args.frames, '--outdir', str(work), str(rom)],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            if again.returncode or 'added to the hints' in again.stdout:
+                sys.exit('%s: a run over the same blocks added hints\n%s%s' % (args.name, again.stdout, again.stderr))
+            made = subprocess.run(
+                [args.runner, '-r', '--outdir', str(work), str(rom)], capture_output=True, text=True, timeout=600
+            )
+            blocks = cache.read_text().splitlines()[1:]
+            if made.returncode or any(line.endswith(' -') for line in blocks) or len(blocks) < len(hints):
+                sys.exit('%s: -r left hints out of the module\n%s%s' % (args.name, made.stdout, made.stderr))
         if args.name == 'arm':
             own = subprocess.run([str(copy), '--frames=1'], capture_output=True, text=True, timeout=600)
             if own.returncode or 'ScarletNX - ' not in own.stdout:
