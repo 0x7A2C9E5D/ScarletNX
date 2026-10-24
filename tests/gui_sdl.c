@@ -2092,11 +2092,13 @@ static int own_priority(void) {
     return getpriority(PRIO_PROCESS, 0);
 #endif
 }
-/* a low one as the queue's recompile gets it (gui_process_low): ten steps of nice under this program's, below normal
-   on Windows */
+/* a low one as the queue's recompile gets it (gui_process_low): ten steps of nice under this program's, on Windows
+   the class under its own */
 static int low_priority(void) {
 #ifdef _WIN32
-    return BELOW_NORMAL_PRIORITY_CLASS;
+    int own = own_priority(); /* a runner may start this program below normal */
+    return own == BELOW_NORMAL_PRIORITY_CLASS || own == IDLE_PRIORITY_CLASS ? IDLE_PRIORITY_CLASS
+                                                                            : BELOW_NORMAL_PRIORITY_CLASS;
 #else
     return SDL_min(own_priority() + 10, PRIO_MAX - 1);
 #endif

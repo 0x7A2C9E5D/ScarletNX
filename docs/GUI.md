@@ -128,7 +128,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Side panel** (below, F2 too),
   **Background recompile** (*Full*, `recompile_background = full` in `app.ini`: the queue's recompiles take every
   core, or the AOT threads picked; *Gentle*, `gentle`: half of them, at a low priority, ten steps of nice under the
-  launcher's, below normal on Windows, for using the computer meanwhile; [the Recompile tab](#the-recompile-tab)),
+  launcher's, on Windows the class under the launcher's, for using the computer meanwhile;
+  [the Recompile tab](#the-recompile-tab)),
 **Theme Editor**, which comes
   back to App, and **Folders**, every folder on one screen, the whole of it, a box a group:
   - **App Folders**: **Data** (`recompiled/`, `dumps/`, `themes/` and `prod.keys`), **Settings**, shown only

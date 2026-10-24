@@ -17,6 +17,17 @@ struct GuiProcess {
     double retired_cpu;
     GuiCpuBase cpu_base, tree_base;
 };
+/* the launcher's class, which a recompile at full speed runs at, and one under it for a low one: a child started
+   without a class takes NORMAL, not the launcher's, unless the launcher is below normal itself */
+static DWORD own_class(void) {
+    DWORD own = GetPriorityClass(GetCurrentProcess());
+    return own ? own : NORMAL_PRIORITY_CLASS;
+}
+static DWORD low_class(void) {
+    DWORD own = own_class();
+    return own == BELOW_NORMAL_PRIORITY_CLASS || own == IDLE_PRIORITY_CLASS ? IDLE_PRIORITY_CLASS
+                                                                            : BELOW_NORMAL_PRIORITY_CLASS;
+}
 static wchar_t* wide(const char* text) {
     int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, NULL, 0);
     wchar_t* out = n ? malloc((size_t)n * sizeof(*out)) : NULL;
@@ -119,10 +130,10 @@ bool gui_process_start(GuiProcess* process, const char* const* argv, char* error
     if (!UpdateProcThreadAttribute(startup.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
                                    sizeof(inherited), NULL, NULL))
         goto failed;
-    /* below normal before it starts: the processes it starts take its class */
+    /* its class before it starts: the processes it starts take it */
     if (!CreateProcessW(executable, command, NULL, NULL, TRUE,
                         EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW |
-                            (process->low ? BELOW_NORMAL_PRIORITY_CLASS : 0),
+                            (process->low ? low_class() : own_class()),
                         NULL, NULL, &startup.StartupInfo, &child))
         goto failed;
     /* Assign before resuming: no grandchild can escape the job during startup.
@@ -284,8 +295,7 @@ bool gui_process_low(GuiProcess* process, bool low, char* error, size_t size) {
     n = job_processes(process->job, PROCESS_SET_INFORMATION, children, (int)(sizeof children / sizeof *children));
     if (n < 0 && !(failure = GetLastError())) failure = ERROR_NOT_ENOUGH_MEMORY;
     for (int i = 0; i < n; ++i) {
-        if (!SetPriorityClass(children[i], low ? BELOW_NORMAL_PRIORITY_CLASS : NORMAL_PRIORITY_CLASS) && !failure)
-            failure = GetLastError();
+        if (!SetPriorityClass(children[i], low ? low_class() : own_class()) && !failure) failure = GetLastError();
         CloseHandle(children[i]);
     }
     if (failure) snprintf(error, size, snx_tr("Windows error %lu"), (unsigned long)failure);

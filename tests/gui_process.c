@@ -151,7 +151,10 @@ static long ready_pid(GuiProcess* process) {
    this program's */
 static void priority(const char* self) {
 #ifdef _WIN32
-    int own = NORMAL_PRIORITY_CLASS, low = BELOW_NORMAL_PRIORITY_CLASS;
+    /* the launcher's class and the one under it, as process_win32.c takes them: a runner may start tests below normal */
+    int own = (int)GetPriorityClass(GetCurrentProcess()),
+        low = own == BELOW_NORMAL_PRIORITY_CLASS || own == IDLE_PRIORITY_CLASS ? IDLE_PRIORITY_CLASS
+                                                                               : BELOW_NORMAL_PRIORITY_CLASS;
 #else
     int own = getpriority(PRIO_PROCESS, 0), low = own + 10 < PRIO_MAX - 1 ? own + 10 : PRIO_MAX - 1;
 #endif
