@@ -171,14 +171,14 @@ static void job_random(void) {
     u32 yuv = fmt >= 0x43, tl = below(2) ? 0 : below(sw + 8), tt = below(2) ? 0 : below(sh + 4);
     u32 tr = below(2) ? sw + below(9) : tl + below(sw), tb = below(2) ? sh + below(5) : tt + below(sh);
     memset(regs, 0, sizeof regs);
-    memset(arena + CFG, 0, CFG_SIZE);
+    memset(arena + CFG, 0, VIC_CONFIG_SIZE);
     w64(CFG + 0x10, (u64)below(1024) << 6 | (u64)below(1024) << 16 | (u64)below(1024) << 26 | (u64)below(1024) << 36);
     w32(CFG + 0x18, (tl & 0x3FFF) | (tr & 0x3FFF) << 16);
     w32(CFG + 0x1C, (tt & 0x3FFF) | (tb & 0x3FFF) << 16);
     surface(0x20, fmt, sw, sh, yuv ? 1 : 4, OUT_AT, ARENA, 1, 0x720 / 4, 0x724 / 4);
     if (!yuv) regs[0x724 / 4] = 0;
     for (s = 0; s < 8; s++) {
-        u32 sl = CFG + SLOT_BASE + SLOT_SIZE * s, k, iw = 1 + below(200), ih = 1 + below(100);
+        u32 sl = CFG + VIC_CONFIG_SLOT_STRUCTS + VIC_SLOT_STRUCT_SIZE * s, k, iw = 1 + below(200), ih = 1 + below(100);
         u32 sx0 = below(iw + 4), sx1 = sx0 + below(iw + 8), sy0 = below(ih + 4), sy1 = sy0 + below(ih + 8);
         u32 dx0 = below(sw + 8), dy0 = below(sh + 4), dx1, dy1;
         u32 lo = below(1024), hi = below(1024);

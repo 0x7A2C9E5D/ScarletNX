@@ -4,6 +4,7 @@
 #ifndef SNX_VIC_H
 #define SNX_VIC_H
 #include "nx/gpu/gpu.h"
+#include "nx/gpu/video/vic_regs.h" /* the formats composed, VIC_PIXEL_* */
 
 typedef struct VicGpuPlane VicGpuPlane;
 typedef struct VicGpuSlot VicGpuSlot;
@@ -19,13 +20,6 @@ typedef struct {
 } VicGpuParams;
 _Static_assert(sizeof(VicGpuPlane) == 32 && sizeof(VicGpuSlot) == 176 && sizeof(VicGpuJob) == 128,
                "vic_params.glsl's structs are not std140's");
-
-/* the output and slot formats vic.c composes */
-#define FMT_ABGR 0x1Fu /* A8B8G8R8 */
-#define FMT_ARGB 0x20u /* A8R8G8B8 */
-#define FMT_XBGR 0x23u /* X8B8G8R8 */
-#define FMT_NV21 0x43u /* Y8___U8V8_N420: V in each chroma pair's even byte (NVIDIA names bytes from the high one) */
-#define FMT_NV12 0x44u /* Y8___V8U8_N420 */
 
 /* the shader's parameters for job j: in_base[2s] and [2s + 1] are slot s's luma and chroma planes' byte offsets in the input
    buffer, oc_base the output chroma's in the output buffer (the luma, or RGBA, plane starts it) */
