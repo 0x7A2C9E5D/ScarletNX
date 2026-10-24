@@ -708,11 +708,17 @@ static Surf* tex_from_tic(const u32* tic, int raw) {
     u32 bh = (tic[3] >> 3) & 7, bd = (tic[3] >> 6) & 7, pitch = bl ? 0 : ((tic[3] & 0xFFFF) << 5);
     if (!gva) return NULL;
     if (hv == 0 || type == 6) {
-        /* Buffer TICs describe a linear row of texels. The guest's 1D fetch is represented by our
-           height-one 2D image and the texture shader already supplies y = 0. */
+        /* Buffer TICs describe a linear row of texels, bound as a 2D image the shader's 1D fetch reads at
+           (x mod row, x / row): one row, or rows of 2^SH_TEXEL_ROW_SHIFT texels after another in memory for a longer
+           buffer (UE4's vertex factories keep a mesh's texture coordinates and colors in such buffers, of tens of
+           thousands of texels) */
         if (hv != 0 || type != 6) return NULL;
         w = (((tic[3] & 0xFFFFu) << 16) | (tic[4] & 0xFFFFu)) + 1;
         h = d = 1;
+        if (w > (1u << SH_TEXEL_ROW_SHIFT)) {
+            h = (w + (1u << SH_TEXEL_ROW_SHIFT) - 1) >> SH_TEXEL_ROW_SHIFT;
+            w = 1u << SH_TEXEL_ROW_SHIFT;
+        }
         glevels = 1;
         bl = 0;
         bh = bd = 0;
@@ -734,10 +740,6 @@ static Surf* tex_from_tic(const u32* tic, int raw) {
         f.sint = 0;
     }
     if (type == 6 && f.bpp && w <= UINT32_MAX / f.bpp) pitch = w * f.bpp;
-    if (type == 6 && w > 16384) { /* the row of a 2D image: drawing has no texel buffer binding for it */
-        LOG_LIMIT(1, "vulkan: a buffer texture of %u texels is longer than a texture row here (read as zeros)\n", w);
-        return NULL;
-    }
     if (!f.bpp || !w || w > 16384 || h > 16384 || d > 2048) return NULL;
     if ((u64)w * h * d * (f.bw > 1 ? 1 : f.bpp) > (512ull << 20)) return NULL;
     if (!bl && pitch < (w + f.bw - 1) / f.bw * f.bpp) {

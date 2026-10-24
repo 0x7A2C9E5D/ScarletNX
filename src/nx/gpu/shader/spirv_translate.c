@@ -1538,6 +1538,16 @@ static int direct_track_image_handle_pair(const u64* insn, u32 n, u32 index, u32
                ? 2
                : 0;
 }
+/* x of a 1D texel fetch as the row and column of the 2D image a 1D texture is bound as (SH_TEXEL_ROW_SHIFT). A
+   negative x lands in a negative row, out of the image as it is out of the texture */
+static void texel_row_coord(DirectCtx* c, u32 i32_type, u32* x, u32* y) {
+    u32 shift = spv_emit_constant_u32(&c->emit, c->u32_type, SH_TEXEL_ROW_SHIFT);
+    u32 column = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, spv_emit_bitcast(&c->emit, c->u32_type, *x),
+                                          spv_emit_constant_u32(&c->emit, c->u32_type,
+                                                                (1u << SH_TEXEL_ROW_SHIFT) - 1));
+    *y = spv_emit_shift_right_s32(&c->emit, i32_type, *x, shift);
+    *x = spv_emit_bitcast(&c->emit, i32_type, column);
+}
 static u32 cbuf_read_dynamic(DirectCtx* c, u32 bank, u32 address) {
     u32 four = spv_emit_constant_u32(&c->emit, c->u32_type, 4);
     u32 two = spv_emit_constant_u32(&c->emit, c->u32_type, 2);
@@ -6786,6 +6796,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                                                                      spv_emit_constant_u32(&c->emit, c->u32_type, 8),
                                                                      four));
             }
+            if (type == 0 && !array) texel_row_coord(c, i32_type, &x, &y);
             u32 coord = z ? spv_emit_vec3_construct(&c->emit, vec3_i32, x, y, z)
                           : spv_emit_vec2_construct(&c->emit, vec2_i32, x, y);
             u32 sample =
@@ -6903,6 +6914,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 x = spv_emit_iadd_u32(&c->emit, i32_type, x, ox);
                 y = spv_emit_iadd_u32(&c->emit, i32_type, y, oy);
             }
+            if (type == 0) texel_row_coord(c, i32_type, &x, &y);
             u32 coord = type == 2 ? spv_emit_vec3_construct(&c->emit, vec3_i32, x, y,
                                                             reg_read_as(c, b, i32_type))
                         : array   ? spv_emit_vec3_construct(
