@@ -17,7 +17,7 @@
    notice that the work is derivative, and (2) they include prominent notice akin to these four paragraphs for those
    parts of the code that are retained.
    The ARM-specific rules (FPUnpack, FPRound, FPProcessNaNs, FPMax/FPMin[Num], FPCompare, FPRoundInt) follow the Arm
-   Architecture Reference Manual's shared pseudocode for ARMv8.0 (no FPCR.AH, no FZ16). */
+   Architecture Reference Manual's shared pseudocode for ARMv8.0, with FEAT_FP16's FPCR.FZ16 (no FPCR.AH). */
 /* The FP of the generated-code ABI: IEEE encodings in and out, integer arithmetic only, so a result is the same on
    any host and under any host rounding mode, and exceptions accumulate in the guest's FPSR, never in the host's.
    This file has the representation, rounding and NaN rules, and the compare, min/max and round-to-integral
@@ -27,6 +27,7 @@
 #define FPCR_AHP (1u << 26)
 #define FPCR_DN  (1u << 25)
 #define FPCR_FZ  (1u << 24)
+#define FPCR_FZ16 (1u << 19)
 #define FPSR_IOC 0x01u
 #define FPSR_DZC 0x02u
 #define FPSR_OFC 0x04u
@@ -56,9 +57,11 @@ static u64 fp_default_nan(int width) { return fp_inf(0, width) | ((u64)1 << (fp_
 static u64 fp_max_normal(int sign, int width) { return fp_inf(sign, width) - 1; }
 static int fp_rmode(const CPU* c) { return (int)((c->fpcr >> 22) & 3); }
 
-/* FPUnpack: single and double denormals become zeros of their sign under FPCR.FZ, with IDC, before anything looks
-   at them; halves are never flushed (FZ16 is RES0 on the A57), and with FPCR.AHP their top exponent is a number */
-static FpValue fp_unpack(CPU* c, u64 bits, int width) {
+/* FPUnpack (cv 0) and FPUnpackCV (cv 1, the conversions between FP formats): single and double denormals become
+   zeros of their sign under FPCR.FZ, with IDC, before anything looks at them. Halves are flushed under FPCR.FZ16
+   without IDC, and never by a conversion (FZ16 is RES0 on the A57); a conversion's halves take FPCR.AHP, where the
+   top exponent is a number */
+static FpValue fp_unpack_as(CPU* c, u64 bits, int width, int cv) {
     int fb = fp_fbits(width), emax = (1 << fp_ebits(width)) - 1, bias = fp_bias(width);
     int e = (int)((bits >> fb) & (u64)emax);
     u64 m = bits & (((u64)1 << fb) - 1);
@@ -66,13 +69,16 @@ static FpValue fp_unpack(CPU* c, u64 bits, int width) {
     v.sign = (int)((bits >> (width - 1)) & 1);
     v.exp = 0;
     v.frac = m;
-    if (e == emax && !(width == 16 && (c->fpcr & FPCR_AHP))) {
+    if (e == emax && !(width == 16 && cv && (c->fpcr & FPCR_AHP))) {
         v.kind = !m ? FPV_INF : (m >> (fb - 1)) & 1 ? FPV_QNAN : FPV_SNAN;
     } else if (e == 0) {
         if (!m) {
             v.kind = FPV_ZERO;
         } else if (width != 16 && (c->fpcr & FPCR_FZ)) {
             c->fpsr |= FPSR_IDC;
+            v.kind = FPV_ZERO;
+            v.frac = 0;
+        } else if (width == 16 && !cv && (c->fpcr & FPCR_FZ16)) {
             v.kind = FPV_ZERO;
             v.frac = 0;
         } else { /* denormal: m * 2^(1 - bias - fb), normalized */
@@ -88,6 +94,7 @@ static FpValue fp_unpack(CPU* c, u64 bits, int width) {
     }
     return v;
 }
+static FpValue fp_unpack(CPU* c, u64 bits, int width) { return fp_unpack_as(c, bits, width, 0); }
 
 /* FPProcessNaN: a signalling NaN raises IOC; the result is the default NaN under FPCR.DN, else the operand quieted
    with its sign and payload */
@@ -115,16 +122,18 @@ static u64 fp_invalid(CPU* c, int width) {
     return fp_default_nan(width);
 }
 
-/* FPRound (FPRoundBase): sign * frac * 2^(exp - 62) (frac nonzero, its lowest bit a sticky bit of anything below)
-   rounded once in mode rm (0-5) to the format.
+/* FPRound (FPRoundBase; cv 1: FPRoundCV, for the conversions between FP formats): sign * frac * 2^(exp - 62) (frac
+   nonzero, its lowest bit a sticky bit of anything below) rounded once in mode rm (0-6) to the format.
    - FPCR.FZ: a single or double result whose unrounded value is below the smallest normal is a zero of its sign,
-     with UFC and without IXC, inexact or not. Halves are never flushed.
+     with UFC and without IXC, inexact or not. FPCR.FZ16 does the same to halves, except in a conversion.
    - Tininess is detected before rounding: a tiny inexact result raises UFC (and IXC).
    - Overflow raises OFC and IXC and gives infinity, or the largest finite value where the mode rounds toward zero.
-   - A half with FPCR.AHP has no infinities: past its largest exponent it raises IOC alone and gives 0x7FFF. */
-static u64 fp_round_pack(CPU* c, int sign, int exp, u64 frac, int width, int rm) {
+   - A conversion's half with FPCR.AHP has no infinities: past its largest exponent it raises IOC alone and gives
+     0x7FFF. */
+static u64 fp_round_pack_as(CPU* c, int sign, int exp, u64 frac, int width, int rm, int cv) {
     int fb = fp_fbits(width), bias = fp_bias(width), emax = (1 << fp_ebits(width)) - 1, shift, biased, up, to_inf;
-    int inexact, half_cmp, ahp = width == 16 && (c->fpcr & FPCR_AHP);
+    int inexact, half_cmp, ahp = width == 16 && cv && (c->fpcr & FPCR_AHP);
+    int flush = width == 16 ? !cv && (c->fpcr & FPCR_FZ16) : (c->fpcr & FPCR_FZ) != 0;
     u64 mant, encoded;
     if (frac >> 63) {
         frac = (frac >> 1) | (frac & 1);
@@ -134,7 +143,7 @@ static u64 fp_round_pack(CPU* c, int sign, int exp, u64 frac, int width, int rm)
         frac <<= lead;
         exp -= lead;
     }
-    if (width != 16 && (c->fpcr & FPCR_FZ) && exp < 1 - bias) {
+    if (flush && exp < 1 - bias) {
         c->fpsr |= FPSR_UFC;
         return fp_zero(sign, width);
     }
@@ -173,9 +182,10 @@ static u64 fp_round_pack(CPU* c, int sign, int exp, u64 frac, int width, int rm)
             to_inf = 1;
             break;
         case 5: /* to odd: a dropped nonzero part sets the lowest bit */
+        case 6: /* the same, overflowing to infinity (BFDOT's and BFMMLA's products and sums) */
             up = 0;
             if (inexact) mant |= 1;
-            to_inf = 0;
+            to_inf = rm == 6;
             break;
         default:
             up = 0;
@@ -197,6 +207,9 @@ static u64 fp_round_pack(CPU* c, int sign, int exp, u64 frac, int width, int rm)
     }
     if (inexact) c->fpsr |= FPSR_IXC;
     return fp_signbit(sign, width) | encoded;
+}
+static u64 fp_round_pack(CPU* c, int sign, int exp, u64 frac, int width, int rm) {
+    return fp_round_pack_as(c, sign, exp, frac, width, rm, 0);
 }
 /* an unpacked zero, infinity or finite value encoded again (exact, so no flags) */
 static u64 fp_repack(CPU* c, FpValue v, int width) {

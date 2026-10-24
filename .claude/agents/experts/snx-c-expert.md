@@ -18,7 +18,8 @@ clause, what Clang does with each undefined behavior at -O2, and how that differ
   arithmetic that can wrap is done in unsigned types and converted back (Clang defines the out-of-range
   conversion as modular), products that can overflow get a wider intermediate, and a signed overflow you find
   that only `-fwrapv` makes work is a bug to report. Check with `-fsanitize=signed-integer-overflow` and without
-  `-fwrapv`, or `tests/a64_audit.py --sanitize --strict-c` for the instruction helpers.
+  `-fwrapv`; for the instruction helpers, the witness tests (`a64_fp_witnesses`, `a64_fp_arithmetic_witnesses`)
+  built that way.
 - A function or global used by another file is declared once in the header next to its definition, everything
   else is `static` (`-Werror=missing-prototypes`, `missing-variable-declarations`).
 - Generated game code and the runtime share `src/common/cpu/aarch64/cpu.h`. Changing a struct there changes the

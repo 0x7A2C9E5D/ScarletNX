@@ -33,9 +33,10 @@ typedef struct {
 } SnxJitCacheRecord;
 
 /* What the objects depend on beyond the code: the ABI, LLVM, the runtime
-   library, the host CPU and its features, the -O level, hooked direct calls
-   and direct SVCs. The profile run and the AOT build must pass the same. */
-char* snx_jit_cache_key(char opt, int hook, int svc);
+   library, the host CPU and its features, the -O level, hooked direct calls,
+   direct SVCs, the guest's A64 features (0: the Switch's) and the decoder's
+   tables. The profile run and the AOT build must pass the same. */
+char* snx_jit_cache_key(char opt, int hook, int svc, SnxU64 features);
 
 /* Opens and validates the whole file: a wrong key, a corrupt record, or a
    trailing unfinished record returns NULL with the reason in error. An empty

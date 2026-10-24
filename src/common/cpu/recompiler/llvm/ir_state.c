@@ -14,7 +14,6 @@ void ir_registers_invalidate(SnxIr* ir) {
 void ir_state_invalidate(SnxIr* ir) {
     ir_registers_invalidate(ir);
     ir_flags_invalidate(ir);
-    ir_fp_guards_invalidate(ir);
 }
 
 static void registers_block(SnxIr* ir) {
@@ -169,9 +168,6 @@ LLVMValueRef ir_cpu_load(SnxIr* ir, LLVMTypeRef type, size_t offset) {
 void ir_cpu_store(SnxIr* ir, LLVMValueRef value, size_t offset) {
     for (unsigned i = 0; i < 4; ++i)
         if (offset == flag_offsets[i]) ir_flags_invalidate(ir);
-    /* FPCR and FPSR are adjacent but independent 32-bit fields. A known CPU
-       store outside them cannot invalidate a floating-point guard. */
-    if (offset < ir_off_fpcr() + 8 && offset + 8 > ir_off_fpcr()) ir_fp_guards_invalidate(ir);
     /* Flag and FP-state stores cannot change the disjoint GPR array. */
     if (offset >= offsetof(CPU, x) && offset < offsetof(CPU, x) + sizeof(((CPU*)0)->x)) ir_registers_invalidate(ir);
     ir_tag_cpu(ir, LLVMBuildStore(ir->b, value, ir_cpu(ir, offset)));
@@ -179,10 +175,7 @@ void ir_cpu_store(SnxIr* ir, LLVMValueRef value, size_t offset) {
 
 size_t ir_off_x(unsigned n) { return offsetof(CPU, x) + 8 * (size_t)n; }
 size_t ir_off_v(unsigned n) { return offsetof(CPU, v) + 16 * (size_t)n; }
-size_t ir_off_pc(void) { return offsetof(CPU, pc); }
-size_t ir_off_cf(void) { return offsetof(CPU, cf); }
 size_t ir_off_excl_on(void) { return offsetof(CPU, excl_on); }
-size_t ir_off_fpcr(void) { return offsetof(CPU, fpcr); }
 size_t ir_off_mem(void) { return offsetof(CPU, mem); }
 
 LLVMValueRef ir_x(SnxIr* ir, unsigned n) {
@@ -284,15 +277,6 @@ void ir_wr(SnxIr* ir, LLVMValueRef address, unsigned bits, LLVMValueRef value) {
     LLVMSetAlignment(store, 1);
     LLVMSetVolatile(store, 1);
     ir_tag_guest(ir, store);
-}
-void ir_rdq(SnxIr* ir, LLVMValueRef destination, LLVMValueRef address) {
-    LLVMValueRef store = LLVMBuildStore(ir->b, ir_rd_bytes(ir, address, 16), destination);
-    LLVMSetAlignment(store, 1);
-}
-void ir_wrq(SnxIr* ir, LLVMValueRef address, LLVMValueRef source) {
-    LLVMValueRef load = LLVMBuildLoad2(ir->b, LLVMVectorType(ir->t_i8, 16), source, "");
-    LLVMSetAlignment(load, 1);
-    ir_wr_bytes(ir, address, load);
 }
 /* __atomic_load_n/__atomic_store_n on T* (cpu.h LDACQ/STREL): seq_cst, naturally aligned as the C type says */
 LLVMValueRef ir_ldacq(SnxIr* ir, LLVMValueRef address, unsigned bits) {

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "common/cpu/recompiler/llvm/jit_cache.h"
+#include "common/cpu/aarch64/a64_decoder.h"
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/llvm/rtlib_object.h"
 #include <llvm-c/Core.h>
@@ -157,7 +158,7 @@ static int parse_record(const unsigned char* body, size_t length, Record* r, cha
     return 0;
 }
 
-char* snx_jit_cache_key(char opt, int hook, int svc) {
+char* snx_jit_cache_key(char opt, int hook, int svc, SnxU64 guest) {
     char* cpu = LLVMGetHostCPUName();
     char* features = LLVMGetHostCPUFeatures();
     char* key;
@@ -168,12 +169,15 @@ char* snx_jit_cache_key(char opt, int hook, int svc) {
         LLVMDisposeMessage(features);
         return NULL;
     }
-    n = strlen(cpu) + strlen(features) + 160;
+    n = strlen(cpu) + strlen(features) + 224;
     key = (char*)malloc(n);
     if (key) {
         rtlib = fnv(snx_rtlib_object, (size_t)snx_rtlib_object_size, 0xCBF29CE484222325ULL);
-        sprintf(key, "abi=%d llvm=%s rtlib=%016llx cpu=%s opt=%c hook=%d svc=%d slp=%d features=%s", SNX_ABI,
-                LLVM_VERSION_STRING, (unsigned long long)rtlib, cpu, opt, hook, svc, snx_ir_slp(), features);
+        /* dec: the decoding (a64.decode and its profile) and a64: the guest's features choose what each word does */
+        sprintf(key,
+                "abi=%d llvm=%s rtlib=%016llx dec=%016llx a64=%016llx cpu=%s opt=%c hook=%d svc=%d slp=%d features=%s",
+                SNX_ABI, LLVM_VERSION_STRING, (unsigned long long)rtlib, (unsigned long long)snx_a64_decoder_hash(),
+                (unsigned long long)snx_a64_features(guest), cpu, opt, hook, svc, snx_ir_slp(), features);
     }
     LLVMDisposeMessage(cpu);
     LLVMDisposeMessage(features);

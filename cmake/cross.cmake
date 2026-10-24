@@ -75,7 +75,7 @@ endif()
 list(APPEND SNX_TARGET_FLAGS ${SNX_ARCH_FLAGS})
 
 # SNX_TARGET_C_COMPILER: a C compiler for the target, for the tests that give one to the program they run
-# (native_codegen, native_recompiler, llvm_differential), which builds a library with it and loads it. In a cross
+# (native_recompiler), which builds a library with it and loads it. In a cross
 # build that program runs under the emulator, so the compiler is this one with the target's flags, in a wrapper
 set(SNX_TARGET_C_COMPILER "${CMAKE_C_COMPILER}")
 if(SNX_TARGET_LDFLAGS)

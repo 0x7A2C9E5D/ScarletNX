@@ -1,11 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The LLVM backend: A64 to LLVM IR through the LLVM-C API, mirroring the instructions' C.
-   Each emitter builds the IR of the C a64.c writes for the same instruction (a64_templates.inc, snx_a64_fast_simd,
-   codegen.c's snx_codegen_emit, as the interpreter and the static steps have it), with the instruction word and pc
-   constant. cpu.h's inline helpers
-   become internal always-inline IR functions (ir.c); its out-of-line helpers are called in the runtime library
-   (rtlib.c), which every module links. */
+/* The LLVM backend: A64 to LLVM IR through the LLVM-C API. ir_codegen.c walks a function's instructions as the
+   generated decoder (a64_decoder.h) decodes them, and the emitters ported from QEMU's translate-a64.c (ir_int.c,
+   ir_ldst.c, ir_fpu.c, ir_vec*.c) build each one's IR with the instruction word and pc constant. cpu.h's inline
+   helpers become internal always-inline IR functions (ir.c); its out-of-line helpers are called in the runtime
+   library (rtlib.c), which every module links. */
 #ifndef SNX_RECOMPILER_LLVM_IR_H
 #define SNX_RECOMPILER_LLVM_IR_H
 
@@ -83,13 +82,6 @@ typedef struct {
     uint32_t valid;
 } SnxIrRegisterCache;
 
-/* Values are owned by one LLVM basic block, never by the guest CPU.
-   Any FP-state mutation or unknown call drops them. */
-typedef struct {
-    LLVMBasicBlockRef block;
-    LLVMValueRef nearest, ixc;
-} SnxIrFpGuards;
-
 /* SSA flags are a per-block forwarding table, not a second CPU state.
    Every write still commits to the architectural structure immediately. */
 typedef struct {
@@ -102,7 +94,6 @@ typedef struct {
 typedef struct {
     SnxIrRegisterCache registers;
     SnxIrFlags flags;
-    SnxIrFpGuards fp_guards;
 } SnxIrBlockState;
 
 /* the AOT recompile's LLVM settings (nx/runtime/settings_llvm.h): the pipeline run in place of default<O?>, NULL for
@@ -150,6 +141,8 @@ typedef struct SnxIr {
     int big_endian;
     /* PowerPC64's ABI is ELFv2, else ELFv1 (new_ir): what a function pointer is, where the TOC is saved */
     int elfv2;
+    /* the guest's features (snx_a64_features) for the function being emitted: what its system registers keep */
+    SnxU64 guest_features;
 } SnxIr;
 
 void ir_state_invalidate(SnxIr* ir);
@@ -162,7 +155,6 @@ void ir_flags_logic(SnxIr* ir, LLVMValueRef value, unsigned bits);
 void ir_flags_set_nzcv(SnxIr* ir, LLVMValueRef nzcv);
 LLVMValueRef ir_flags_cond(SnxIr* ir, unsigned cond);
 
-void ir_fp_guards_invalidate(SnxIr* ir);
 /* Once per process, before any other call; threads may then each own SnxIrs. 0, or -1 with the reason */
 int snx_ir_init(char* error, size_t error_size);
 /* LLVM's SLP vectorizer on or off for every module this process makes (the setting slp_vectorizer): an option of
@@ -208,115 +200,20 @@ char* snx_ir_text(SnxIr* ir);
 /* F_<address>, declared on first use, defined by snx_ir_emit */
 LLVMValueRef snx_ir_guest_function(SnxIr* ir, SnxU64 address);
 void snx_ir_emit(SnxIr* ir, SnxCodegen* codegen, const SnxFunction* function);
-/* u64 name(CPU* c): one instruction at pc, as snx_a64_static_step writes it (tests and audit tools) */
-LLVMValueRef snx_ir_static_step(SnxIr* ir, SnxU32 word, SnxU64 pc, const char* name);
+/* u64 name(CPU* c): one instruction at pc, for a guest with these A64 features (0: the Switch's; tests and audit
+   tools) */
+LLVMValueRef snx_ir_static_step(SnxIr* ir, SnxU32 word, SnxU64 pc, SnxU64 features, const char* name);
 /* Starts a function body: entry block, c and M */
 void snx_ir_begin(SnxIr* ir, LLVMValueRef function);
 
-/* ---- instructions (ir_a64.c, ir_simd.c, ir_fp.c) ---- */
-/* The body of a PLAIN instruction (snx_a64_body with "c->rt->undef(c,pc,w)" for UNDEF, after snx_a64_fast_simd).
-   0 when no emitter covers the pattern: the module then fails (SnxIr.fallbacks) */
-int snx_ir_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Decoded* instruction);
-/* The case's first operand of a flow instruction: the i1 condition of BC, the i64 target of BR/BLR/RET, the i32
-   immediate of SVC/BRK */
-LLVMValueRef snx_ir_flow_operand(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Decoded* instruction);
-int snx_ir_fp_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Pattern* pattern, size_t index);
-/* snx_a64_fast_simd's shortcuts: 1 when it emitted the instruction */
-int snx_ir_fast_simd(SnxIr* ir, SnxU32 word);
-/* the SIMD patterns the C reference hands to snx_simd, emitted inline with the same semantics (loads/stores,
-   permutes, byte ops, immediates; AES and PMULL where CPUID shows the x86 extensions); 0 is an invalid encoding */
-int snx_ir_more_simd(SnxIr* ir, SnxU32 word);
-
-/* ---- floating point fast paths (ir_fp.c) ----
-   The host's IEEE arithmetic gives the soft-float helpers' exact result and flags when the rounding mode is
-   to-nearest, the operands are normal or zero and the result is well inside the normal range or an exact zero: no
-   denormal, overflow, underflow or NaN can occur, FZ/DN/AHP don't apply, and the only flag is IXC. A zero result is
-   exact when a product's operand or a dividend is zero, or for any sum (floats only cancel exactly); nonzero
-   operands that round to zero underflowed and take the helper. Zeros keep IEEE's signs, which are the
-   architecture's in round to nearest. IXC is computed exactly (TwoSum for add/sub, an FMA residual for mul/div/sqrt
-   where the host has FMA), or not needed: it is sticky, and once set an inexact result changes nothing. Everything
-   else takes the helper call. All of this assumes the host thread never flushes denormals (x86 MXCSR.FTZ/DAZ, or
-   FPCR.FZ on an AArch64 host): a sum of normals that is a denormal would read as an exact zero */
-enum { SNX_IR_FP_ADD, SNX_IR_FP_SUB, SNX_IR_FP_MUL, SNX_IR_FP_DIV, SNX_IR_FP_SQRT, SNX_IR_FP_FMA };
-typedef struct {
-    LLVMValueRef value;   /* result bits: iN, or <lanes x iN> */
-    LLVMValueRef ok;      /* i1: the fast path is exact */
-    LLVMValueRef inexact; /* i1: IXC to set */
-} SnxFpFast;
-/* a, b, add: bits as iN (lanes 1) or <lanes x iN>; FMA computes add + a*b, SQRT reads a */
-void ir_fp_fast(SnxIr* ir, unsigned op, unsigned width, unsigned lanes, LLVMValueRef a, LLVMValueRef b,
-                LLVMValueRef add, SnxFpFast* out);
-/* if (ok) { fast } else { slow }: returns the join block, positions at the fast block; ir_fp_else moves to the slow
-   block (setting IXC from inexact on the way out of the fast one), ir_fp_join to the join */
-LLVMBasicBlockRef ir_fp_branch(SnxIr* ir, LLVMValueRef ok, LLVMBasicBlockRef* slow);
-void ir_fp_else(SnxIr* ir, LLVMBasicBlockRef join, LLVMBasicBlockRef slow, LLVMValueRef inexact);
-void ir_fp_join(SnxIr* ir, LLVMBasicBlockRef join);
-/* FMAX/FMIN (and the NM forms, which differ only for NaNs) with no NaN operand in any lane, and no denormal one
-   when FPCR.FZ is set (flushing it sets IDC): FPMax/FPMin then return the larger or smaller operand unchanged, and
-   for equal operands their bitwise AND (max: +0 beats -0) or OR (min: -0 beats +0), raising nothing. inexact is
-   false */
-void ir_fp_minmax_fast(SnxIr* ir, unsigned width, unsigned lanes, LLVMValueRef a, LLVMValueRef b, unsigned minimum,
-                       SnxFpFast* out);
-/* snx_fp_minmax(c, a, b, width, minimum, numeric) */
-LLVMValueRef ir_fp_minmax(SnxIr* ir, LLVMValueRef a, LLVMValueRef b, unsigned width, unsigned minimum,
-                          unsigned numeric);
-/* the AdvSIMD compares' lane masks (simd.c's fcmpmask): a == b, a >= b, a > b, a <= b, a < b */
-enum { SNX_IR_CMP_EQ, SNX_IR_CMP_GE, SNX_IR_CMP_GT, SNX_IR_CMP_LE, SNX_IR_CMP_LT };
-/* all ones where the comparison holds, under the minmax guard: without a NaN no FPSR bit changes (only NaNs raise
-   IOC, quiet ones for every predicate but EQ), and the host's ordered comparison is FPCompare's */
-void ir_fp_compare_fast(SnxIr* ir, unsigned cmp, unsigned width, unsigned lanes, LLVMValueRef a, LLVMValueRef b,
-                        SnxFpFast* out);
-/* one lane through snx_fp_compare, signalling for all but EQ: all ones (iN) or zero */
-LLVMValueRef ir_fp_compare_mask(SnxIr* ir, unsigned cmp, LLVMValueRef a, LLVMValueRef b, unsigned width);
-/* SCVTF/UCVTF of integer lanes v (one iN, or lanes as wide as the float) scaled by 2^-fbits: exact when every magnitude fits the
-   precision, or once IXC is set, in round to nearest (the host rounds the same way, and no conversion can overflow
-   or be tiny). inexact is false */
-void ir_fp_from_int_fast(SnxIr* ir, unsigned width, unsigned lanes, LLVMValueRef v, unsigned uns, unsigned fbits,
-                         SnxFpFast* out);
-/* FCVT[NPMZA][SU] (rm 0-4 as snx_fp_to_int's) of float lanes scaled by 2^fbits, to integer lanes of the integer's
-   width: fast for finite values whose rounded value is in range (no IOC), denormals only without FZ (flushing sets
-   IDC), inexact when rounding changed the value. 0 when the host can't round inline (no fast path: out unset) */
-int ir_fp_to_int_fast(SnxIr* ir, unsigned width, unsigned lanes, LLVMValueRef bits, unsigned integer, unsigned uns,
-                      unsigned rm, unsigned fbits, SnxFpFast* out);
-/* FRECPE (rsqrt 0) or FRSQRTE (1): snx_fp_unary's 8-bit estimate computed inline for the lanes whose result is a
-   normal number and raises nothing (a normal operand, positive for FRSQRTE, and for FRECPE an exponent below
-   emax-2: from there the reciprocal is denormal, or flushed under FZ). inexact is false */
-void ir_fp_estimate_fast(SnxIr* ir, unsigned rsqrt, unsigned width, unsigned lanes, LLVMValueRef bits, SnxFpFast* out);
-/* FRECPS (rsqrt 0: 2 - a*b) or FRSQRTS (1: (3 - a*b) / 2), fused with one rounding, under ir_fp_fast's FMA guard
-   (which also keeps out the infinity-times-zero lanes) */
-void ir_fp_step_fast(SnxIr* ir, unsigned rsqrt, unsigned width, unsigned lanes, LLVMValueRef a, LLVMValueRef b,
-                     SnxFpFast* out);
-/* FCVTN (odd 0: FPCR's rounding, fast only in round to nearest) or FCVTXN (odd 1: round to odd, whatever the mode)
-   of float lanes of from bits (64 or 32) to half that width, in integer arithmetic: fast for normal operands whose
-   result is normal before rounding and finite after it (no flush, underflow, overflow, NaN or infinity, so FZ, DN
-   and AHP don't apply). value: <lanes x i(from/2)> or i(from/2); inexact when bits were dropped */
-void ir_fp_narrow_fast(SnxIr* ir, unsigned from, unsigned lanes, LLVMValueRef bits, unsigned odd, SnxFpFast* out);
-/* one lane through snx_fp_convert from from bits to half that width, rounded per FPCR or (odd) to odd (result i64) */
-LLVMValueRef ir_fp_narrow(SnxIr* ir, LLVMValueRef bits, unsigned from, unsigned odd);
-/* one lane through snx_fp_convert from from bits (16 or 32) to twice that width: exact, so the rounding mode
-   only reaches the helper's flush-to-zero and NaN processing (result i64) */
-LLVMValueRef ir_fp_wide(SnxIr* ir, LLVMValueRef bits, unsigned from);
-/* one lane through snx_fp_round (FRINT*), rounding to integral: mode 0-4 fixed by the encoding (SNX_IR_FP_RM_FPCR
-   for FRINTX and FRINTI, by the FPCR), exact raising the inexact flag (FRINTX). Result i64 */
-#define SNX_IR_FP_RM_FPCR 5
-LLVMValueRef ir_fp_round_to(SnxIr* ir, LLVMValueRef bits, unsigned width, unsigned mode, unsigned exact);
-/* one lane through the helpers: snx_fp_binary, snx_fp_unary, snx_fp_to_int and snx_fp_from_int (result i64) */
-LLVMValueRef ir_fp_binary(SnxIr* ir, LLVMValueRef a, LLVMValueRef b, unsigned width, unsigned op);
-LLVMValueRef ir_fp_unary(SnxIr* ir, LLVMValueRef bits, unsigned width, unsigned op);
-LLVMValueRef ir_fp_to_int(SnxIr* ir, LLVMValueRef bits, unsigned fp, unsigned integer, unsigned uns, unsigned fbits,
-                          unsigned rm);
-LLVMValueRef ir_fp_from_int(SnxIr* ir, LLVMValueRef bits, unsigned integer, unsigned fp, unsigned uns, unsigned fbits);
-
 /* ---- building blocks (ir.c) ---- */
 LLVMValueRef ir_i8(SnxIr* ir, unsigned v);
-LLVMValueRef ir_i16(SnxIr* ir, unsigned v);
 LLVMValueRef ir_i32(SnxIr* ir, SnxU32 v);
 LLVMValueRef ir_i64(SnxIr* ir, SnxU64 v);
 /* integer conversions as C casts do them: to a narrower type truncates, to a wider one extends by sign or zero */
 LLVMValueRef ir_cast(SnxIr* ir, LLVMValueRef v, LLVMTypeRef to, int is_signed);
 LLVMValueRef ir_u32(SnxIr* ir, LLVMValueRef v);            /* (u32) */
 LLVMValueRef ir_u64(SnxIr* ir, LLVMValueRef v);            /* (u64) from an unsigned value */
-LLVMValueRef ir_s64(SnxIr* ir, LLVMValueRef v);            /* (u64)(i64) from a signed value */
 LLVMValueRef ir_bool32(SnxIr* ir, LLVMValueRef condition); /* a C comparison's int */
 
 /* pointer to the CPU field at byte offset */
@@ -330,10 +227,7 @@ LLVMValueRef ir_cpu_load(SnxIr* ir, LLVMTypeRef type, size_t offset);
 void ir_cpu_store(SnxIr* ir, LLVMValueRef value, size_t offset);
 size_t ir_off_x(unsigned n);
 size_t ir_off_v(unsigned n);
-size_t ir_off_pc(void);
-size_t ir_off_cf(void);
 size_t ir_off_excl_on(void);
-size_t ir_off_fpcr(void);
 size_t ir_off_mem(void);
 LLVMValueRef ir_x(SnxIr* ir, unsigned n);                 /* c->x[n] */
 void ir_set_x(SnxIr* ir, unsigned n, LLVMValueRef value); /* c->x[n]=(u64)value */
@@ -350,15 +244,13 @@ void ir_set_pc(SnxIr* ir, LLVMValueRef value);
 /* A number (or a vector of them, integer or floating) read from or written to the guest's little-endian bytes, in
    guest memory or a vector register: byte-swapped on a big-endian target, as it is; the same both ways */
 LLVMValueRef ir_guest_order(SnxIr* ir, LLVMValueRef value);
-/* guest memory: MP(a), RDn(a) as iN, WRn(a,v) storing (uN)v, RDQ/WRQ as 16-byte copies */
+/* guest memory: MP(a), an N-bit read as iN, an N-bit write storing (uN)v */
 LLVMValueRef ir_mp(SnxIr* ir, LLVMValueRef address);
 LLVMValueRef ir_rd(SnxIr* ir, LLVMValueRef address, unsigned bits);
 void ir_wr(SnxIr* ir, LLVMValueRef address, unsigned bits, LLVMValueRef value);
 /* n bytes as <n x i8> */
 LLVMValueRef ir_rd_bytes(SnxIr* ir, LLVMValueRef address, unsigned bytes);
 void ir_wr_bytes(SnxIr* ir, LLVMValueRef address, LLVMValueRef value);
-void ir_rdq(SnxIr* ir, LLVMValueRef destination, LLVMValueRef address); /* RDQ(*destination, address) */
-void ir_wrq(SnxIr* ir, LLVMValueRef address, LLVMValueRef source);      /* WRQ(address, *source) */
 LLVMValueRef ir_ldacq(SnxIr* ir, LLVMValueRef address, unsigned bits);  /* LDACQ(uN,a) */
 void ir_strel(SnxIr* ir, LLVMValueRef address, unsigned bits, LLVMValueRef value);
 
@@ -376,7 +268,6 @@ LLVMValueRef ir_rt_table_call(SnxIr* ir, size_t offset, unsigned entry, LLVMType
 size_t ir_rt_svc(void);
 size_t ir_rt_svcs(void);
 size_t ir_rt_undef(void);
-size_t ir_rt_note_hint(void);
 size_t ir_rt_brk(void);
 size_t ir_rt_sev(void);
 size_t ir_rt_wfe(void);
@@ -401,6 +292,5 @@ void ir_argmem(SnxIr* ir, LLVMValueRef function);
 LLVMBasicBlockRef ir_block(SnxIr* ir, const char* name);
 /* a stack slot in the entry block, as a C local whose address is taken */
 LLVMValueRef ir_local(SnxIr* ir, LLVMTypeRef type);
-LLVMTypeRef ir_v128(SnxIr* ir); /* [16 x i8] with V128's alignment */
 
 #endif

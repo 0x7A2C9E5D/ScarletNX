@@ -8,7 +8,6 @@
 /* ---- values ---- */
 
 LLVMValueRef ir_i8(SnxIr* ir, unsigned v) { return LLVMConstInt(ir->t_i8, v & 0xFF, 0); }
-LLVMValueRef ir_i16(SnxIr* ir, unsigned v) { return LLVMConstInt(ir->t_i16, v & 0xFFFF, 0); }
 LLVMValueRef ir_i32(SnxIr* ir, SnxU32 v) { return LLVMConstInt(ir->t_i32, v, 0); }
 LLVMValueRef ir_i64(SnxIr* ir, SnxU64 v) { return LLVMConstInt(ir->t_i64, v, 0); }
 
@@ -20,7 +19,6 @@ LLVMValueRef ir_cast(SnxIr* ir, LLVMValueRef v, LLVMTypeRef to, int is_signed) {
 }
 LLVMValueRef ir_u32(SnxIr* ir, LLVMValueRef v) { return ir_cast(ir, v, ir->t_i32, 0); }
 LLVMValueRef ir_u64(SnxIr* ir, LLVMValueRef v) { return ir_cast(ir, v, ir->t_i64, 0); }
-LLVMValueRef ir_s64(SnxIr* ir, LLVMValueRef v) { return ir_cast(ir, v, ir->t_i64, 1); }
 LLVMValueRef ir_bool32(SnxIr* ir, LLVMValueRef condition) { return LLVMBuildZExt(ir->b, condition, ir->t_i32, ""); }
 
 /* ---- functions and calls ---- */
@@ -49,7 +47,6 @@ static LLVMValueRef rt_pointer(SnxIr* ir) { return ir_cpu_load(ir, ir->t_ptr, of
 size_t ir_rt_svc(void) { return offsetof(RtAPI, svc); }
 size_t ir_rt_svcs(void) { return offsetof(RtAPI, svcs); }
 size_t ir_rt_undef(void) { return offsetof(RtAPI, undef); }
-size_t ir_rt_note_hint(void) { return offsetof(RtAPI, note_hint); }
 size_t ir_rt_brk(void) { return offsetof(RtAPI, brk); }
 size_t ir_rt_sev(void) { return offsetof(RtAPI, sev); }
 size_t ir_rt_wfe(void) { return offsetof(RtAPI, wfe); }
@@ -188,5 +185,3 @@ LLVMValueRef ir_local(SnxIr* ir, LLVMTypeRef type) {
     LLVMBuildMemCpy(ir->b, slot, 8, zero, 1, ir_i64(ir, (SnxU64)size));
     return slot;
 }
-
-LLVMTypeRef ir_v128(SnxIr* ir) { return LLVMArrayType(ir->t_i8, 16); }

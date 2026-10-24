@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
 """edenprobe (https://github.com/scarletnx/edenprobe), a homebrew program of hardware probes, recompiled and run
-headless, its report held against a baseline: the cases that passed before. docs/EDENPROBE.md has the how and why.
+headless, its report held against a baseline: how each case ended before. docs/EDENPROBE.md has the how and why.
 
     scripts/edenprobe.py run --runtime SCARLETNX --nro edenprobe.nro --mode WORDS --out DIR
                              [--baseline FILE | --advisory REPORT] [--summary FILE] [--timeout SECONDS]
@@ -13,17 +13,18 @@ run recompiles the NRO into DIR/work, writes WORDS to its sdmc:/edenprobe/mode, 
 folders in DIR/work. A launch that ends before the report's summary, crashed or killed after --timeout seconds without
 a new report line, is followed by another, which edenprobe goes on from after the case the last one ended inside
 (reported as crashed), until the summary, a launch that adds no case, or --launches. DIR then holds report.jsonl, the
-failures' images/, the recompile's and each launch's log, baseline.txt (this run's passing cases) and summary.md,
-which --summary FILE also appends to (CI: $GITHUB_STEP_SUMMARY). With --baseline, a case of it that does not pass is a
-regression: run exits 1 and names it; a passing case it lacks is listed, to be added. A run that never reached its
-summary exits 1 too.
+failures' images/, the recompile's and each launch's log, baseline.txt (this run's passing cases, and those the
+--baseline expects to end otherwise that did) and summary.md, which --summary FILE also appends to (CI:
+$GITHUB_STEP_SUMMARY). With --baseline, a case of it that does not end as its line says (pass, or the RESULT of a
+"[RESULT] suite: name" line) is a regression: run exits 1 and names it; a passing case it lacks is listed, to be added.
+A run that never reached its summary exits 1 too.
 
 With --advisory REPORT, the pinned release's report.jsonl, the NRO is another build (edenprobe's main) and the run never
 fails: its cases REPORT lacks that do not pass, REPORT's passing cases that it does not pass, and what would have failed
 the run are warnings (GitHub's ::warning:: lines).
 
-baseline writes the cases that pass in every BASELINE given (baseline.txt of runs of one build and one mode): a case
-that passes only now and then stays out.
+baseline writes the cases that end the same way in every BASELINE given (baseline.txt of runs of one build and one
+mode): a case that passes only now and then stays out.
 """
 
 import argparse
@@ -108,25 +109,37 @@ class Report:
 
 
 class Baseline:
-    """a baseline file: "# build: B" and "# mode: WORDS", then one passing case a line"""
+    """a baseline file: "# build: B" and "# mode: WORDS", then one case a line: "suite: name" for one that passes,
+    "[RESULT] suite: name" for one that ends as RESULT, the report's result as the summary lists it ("skip (crashed)",
+    "fail: DETAIL"), with no "]" in it. cases: each case's expected result"""
 
     def __init__(self, path):
-        self.path, self.build, self.mode, self.cases = path, None, None, set()
+        self.path, self.build, self.mode, self.cases = path, None, None, {}
         for line in Path(path).read_text(encoding='utf-8').splitlines():
             if line.startswith('# build:'):
                 self.build = line.split(':', 1)[1].strip()
             elif line.startswith('# mode:'):
                 self.mode = words(line.split(':', 1)[1])
             elif line.strip() and not line.startswith('#'):
-                self.cases.add(line)
+                expected = re.fullmatch(r'\[([^\]]+)\] (.+)', line)
+                if expected:
+                    self.cases[expected[2]] = expected[1]
+                else:
+                    self.cases[line] = 'pass'
         if not self.build or self.mode is None:
             raise Failed(f'{path} names no build or no mode: "# build: ..." and "# mode: ..." come first')
 
     @staticmethod
     def text(build, mode, cases):
+        """cases: each case's expected result"""
         return (
-            '# edenprobe cases that pass, one "suite: name" a line (scripts/edenprobe.py, docs/EDENPROBE.md)\n'
-            f'# build: {build}\n# mode: {" ".join(words(mode))}\n' + ''.join(f'{case}\n' for case in sorted(cases))
+            '# edenprobe cases, one a line: "suite: name" passes, "[RESULT] suite: name" ends as RESULT '
+            '(docs/EDENPROBE.md)\n'
+            f'# build: {build}\n# mode: {" ".join(words(mode))}\n'
+            + ''.join(
+                f'{case}\n' if expected == 'pass' else f'[{expected}] {case}\n'
+                for case, expected in sorted(cases.items())
+            )
         )
 
 
@@ -150,16 +163,31 @@ def compare(report, baseline, mode):
         return problems, lines
     regressed = [
         f'{key}: {report.cases.get(key, "not run")}'
-        for key in sorted(baseline.cases)
-        if report.cases.get(key) != 'pass'
+        for key, expected in sorted(baseline.cases.items())
+        if expected == 'pass' and report.cases.get(key) != 'pass'
+    ]
+    # a case whose line expects another result (a crash, as on the console) and that ends any other way, passing
+    # included
+    changed = [
+        f'{key}: {report.cases.get(key, "not run")}, expected {expected}'
+        for key, expected in sorted(baseline.cases.items())
+        if expected != 'pass' and report.cases.get(key) != expected
     ]
     new = [key for key in report.passed() if key not in baseline.cases]
     if regressed:
         problems.append(f"{len(regressed)} of the baseline's {len(baseline.cases)} cases no longer pass")
+    if changed:
+        problems.append(f"{len(changed)} of the baseline's {len(baseline.cases)} cases no longer end as it expects")
     lines += listed('No longer passing', regressed)
+    lines += listed('No longer ending as the baseline expects', changed)
     lines += listed(f"Passing and not in {baseline.path} (add them: this run's baseline.txt has them)", new)
-    if not regressed:
-        lines.insert(0, f'All {len(baseline.cases)} cases of {baseline.path} pass.')
+    if not regressed and not changed:
+        others = sorted(expected for expected in baseline.cases.values() if expected != 'pass')
+        if others:
+            ends = ', '.join(f'{others.count(result)} {result}' for result in sorted(set(others)))
+            lines.insert(0, f'All {len(baseline.cases)} cases of {baseline.path} end as it expects ({ends}).')
+        else:
+            lines.insert(0, f'All {len(baseline.cases)} cases of {baseline.path} pass.')
     return problems, lines
 
 
@@ -310,16 +338,26 @@ def run(args):
         if report.unknown:
             problems.append(f'edenprobe ignored words of the mode: {"; ".join(report.unknown)}')
     if report and report.summary:
-        text = Baseline.text(report.build, args.mode, report.passed())
-        (out / 'baseline.txt').write_text(text, encoding='utf-8')
+        ends = dict.fromkeys(report.passed(), 'pass')
         if args.baseline and not args.baseline.is_file():
             problems.append(f"no baseline at {args.baseline}: this run's baseline.txt is the one to put there")
         elif args.baseline:
             try:
-                found, lines = compare(report, Baseline(args.baseline), args.mode)
+                against = Baseline(args.baseline)
+                found, lines = compare(report, against, args.mode)
                 problems += found
+                # the other results the baseline expects and this run had stay in its baseline.txt, so a baseline
+                # written again from runs keeps them
+                if (against.build, against.mode) == (report.build, words(args.mode)):
+                    ends.update(
+                        (key, expected)
+                        for key, expected in against.cases.items()
+                        if expected != 'pass' and report.cases.get(key) == expected
+                    )
             except Failed as error:
                 problems.append(str(error))
+        text = Baseline.text(report.build, args.mode, ends)
+        (out / 'baseline.txt').write_text(text, encoding='utf-8')
     warnings = []
     if report and report.summary and args.advisory:
         try:
@@ -365,12 +403,20 @@ def baseline(args):
                 f'{other.path} is of {other.build} in mode "{" ".join(other.mode)}", {first.path} of '
                 f'{first.build} in mode "{" ".join(first.mode)}": one build and one mode only'
             )
-    cases = set.intersection(*(file.cases for file in files))
+    # a case that ends the same way in every file: the result each file gives it
+    cases = {
+        key: expected
+        for key, expected in first.cases.items()
+        if all(other.cases.get(key) == expected for other in files[1:])
+    }
     args.output.write_text(Baseline.text(first.build, ' '.join(first.mode), cases), encoding='utf-8')
-    dropped = set.union(*(file.cases for file in files)) - cases
-    print(f'{args.output}: {len(cases)} cases of edenprobe {first.build}; {len(dropped)} did not pass in every run')
+    dropped = set().union(*(file.cases for file in files)) - set(cases)
+    print(
+        f'{args.output}: {len(cases)} cases of edenprobe {first.build}; {len(dropped)} did not end the same way in every run'
+    )
     for case in sorted(dropped):
-        print(f'  left out: {case}')
+        ends = ', '.join(file.cases.get(case, 'not there') for file in files)
+        print(f'  left out: {case} ({ends})')
     return 0
 
 
@@ -391,7 +437,7 @@ def main():
     )
     runs.add_argument('--launches', type=int, default=16, help='launches at most (default 16)')
     runs.add_argument('--jobs', type=int, default=os.cpu_count() or 2)
-    writes = commands.add_parser('baseline', help='the cases every baseline.txt given passes')
+    writes = commands.add_parser('baseline', help='the cases that end the same way in every baseline.txt given')
     writes.add_argument('baselines', type=Path, nargs='+')
     writes.add_argument('-o', '--output', type=Path, required=True)
     args = parser.parse_args()

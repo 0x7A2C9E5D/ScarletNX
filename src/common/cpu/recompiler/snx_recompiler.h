@@ -67,6 +67,14 @@ SNX_RECOMPILER_API unsigned snx_recompiler_abi(void);
 SNX_RECOMPILER_API const char* snx_recompiler_error(const struct snx_recompiler* r);
 /* The -O letter the generated code is optimized at: '0', '1', '2' (the default), '3', 's' or 'z' */
 SNX_RECOMPILER_API int snx_recompiler_set_optimization(struct snx_recompiler* r, char opt);
+/* The A64 features of the guest's CPU (FEAT_* of the Arm ARM): an encoding that needs one the target lacks raises an
+   undefined instruction, as on a CPU without it. SNX_RECOMPILER_A64_SWITCH, the default, is the Switch's Cortex-A57
+   (Armv8.0 with CRC32 and the Cryptographic Extension); SNX_RECOMPILER_A64_MAX has every feature the decoder knows,
+   though an instruction the backend has no code for yet still raises an undefined instruction (docs/LIBRARY.md).
+   Modules made afterwards take it. 0, or -1 for an unknown target */
+#define SNX_RECOMPILER_A64_SWITCH 0
+#define SNX_RECOMPILER_A64_MAX    1
+SNX_RECOMPILER_API int snx_recompiler_set_a64_target(struct snx_recompiler* r, int target);
 /* Code units compiled at once, on host threads; 0, the default, uses one per processor */
 SNX_RECOMPILER_API void snx_recompiler_set_jobs(struct snx_recompiler* r, unsigned jobs);
 /* Progress lines on stdout, as the scarletnx command prints them; off by default */

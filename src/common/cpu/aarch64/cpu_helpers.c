@@ -3,15 +3,11 @@
    Ported in part from QEMU (target/arm/tcg/translate-a64.c), LGPL-2.1-or-later:
    Copyright (c) 2013 Alexander Graf <agraf@suse.de> */
 /* The out-of-line helpers of the generated-code ABI (cpu.h), compiled into every game module's runtime library
-   (llvm/rtlib.c) and into the tests, after cpu.h. LLVM IR calls snx_fp_*, snx_cas128 and snx_mrs/snx_msr by name;
-   the reference-interpreter helpers are compiled only for tests. They are plain portable C: the library is built
-   for no particular host CPU. */
+   (llvm/rtlib.c) and into the tests, after cpu.h. LLVM IR calls snx_fp_*, snx_vec_*, the crypto rounds, snx_cas128
+   and snx_mrs/snx_msr by name. They are plain portable C: the library is built for no particular host CPU. */
 #include "cpu.h"
 
 #include "helpers/fp.c"
 #include "helpers/integer.c"
-#ifdef SNX_A64_REFERENCE
-/* the C reference interpreter still runs the words the LLVM backend lowers inline; its code is test-only and lives
-   under tests/a64_reference (the include path is what tests/CMakeLists.txt adds) */
-#include "a64_reference/reference.inc"
-#endif
+#include "helpers/crypto.c"
+#include "helpers/vector.c"

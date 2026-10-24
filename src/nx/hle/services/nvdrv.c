@@ -35,10 +35,13 @@ int nvmap_get(u32 h, u64* addr, u32* size) {
     return alive;
 }
 /* the live handle an id names, 0 for none. Called with the lock held */
+/* CREATE gives a handle its own number as its id, so the id is the index (Eden's IocFromId: handles and ids are the
+   same value); the check on id keeps that an assumption this function states rather than one it hides */
 static u32 nvmap_from_id(u32 id) {
-    for (u32 i = 1; i < g_hle.nvdrv.nvh_next; i++)
-        if (g_hle.nvdrv.nvh[i].alive && g_hle.nvdrv.nvh[i].id == id) return i;
-    return 0;
+    const NvMapH* m;
+    if (!id || id >= NVMAP_HANDLES) return 0;
+    m = &g_hle.nvdrv.nvh[id];
+    return m->alive && m->id == id ? id : 0;
 }
 u64 nvmap_addr_by_id(u32 id) {
     pm_lock(&g_hle.nvdrv.lock);

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "common/cpu/recompiler/codegen.h"
+#include "common/cpu/aarch64/a64_decoder.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -211,6 +212,12 @@ static int is_known(const Known* known, SnxU64 address) {
     return set_has(known->set, address) || (known->callback && known->callback(known->user, address));
 }
 
+/* what word does to the flow, for the guest's features, with insn its decode (a branch's target) */
+static SnxA64Flow decode(const SnxCodegen* codegen, SnxU32 word, SnxA64Insn* insn) {
+    snx_a64_decode_word(word, codegen->features, insn);
+    return insn->flow;
+}
+
 /* whether a BR on reg follows within a few instructions of address: the address taken there is a jump table's base,
    a place in the function its cases are reached from, not a function */
 static int jump_table_base(SnxCodegen* codegen, SnxU64 address, SnxU32 reg) {
@@ -219,7 +226,7 @@ static int jump_table_base(SnxCodegen* codegen, SnxU64 address, SnxU32 reg) {
     for (i = 1; i <= 6; ++i) {
         if (!snx_codegen_word(codegen, address + (SnxU64)i * 4, &after)) return 0;
         if ((after & 0xfffffc1fUL) == 0xd61f0000UL) return ((after >> 5) & 31) == reg; /* BR */
-        if (snx_a64_decode(after)->kind != SNX_FLOW_PLAIN) return 0;
+        if (snx_a64_flow(after, codegen->features) != SNX_A64_FLOW_PLAIN) return 0;
     }
     return 0;
 }
@@ -250,7 +257,7 @@ static SnxU64 taken_address(SnxCodegen* codegen, SnxU64 address, SnxU32 word) {
                    ((SnxU64)((word >> 10) & 0xfff) << ((word & (1UL << 22)) ? 12 : 0));
         }
         /* the register written in between (or perhaps only stored: bits 0-4 are Rt too), or a way in from elsewhere */
-        if ((before & 31) == reg || snx_a64_decode(before)->kind != SNX_FLOW_PLAIN) return 0;
+        if ((before & 31) == reg || snx_a64_flow(before, codegen->features) != SNX_A64_FLOW_PLAIN) return 0;
     }
     return 0;
 }
@@ -274,7 +281,8 @@ static Addresses explore(SnxCodegen* codegen, SnxU64 start, const Known* known, 
     AddressSet seen;
     SnxU64 address, target, distance;
     SnxU32 word;
-    enum SnxFlow kind;
+    SnxA64Insn insn;
+    SnxA64Flow kind;
     size_t i;
     memset(&result, 0, sizeof(result));
     memset(&todo, 0, sizeof(todo));
@@ -288,22 +296,22 @@ static Addresses explore(SnxCodegen* codegen, SnxU64 start, const Known* known, 
             if (!snx_codegen_word(codegen, address, &word)) break;
             set_add(&seen, address);
             push(&result, address);
-            kind = snx_a64_decode(word)->kind;
-            if (kind == SNX_FLOW_UNDEF) break;
-            if (kind == SNX_FLOW_BC || kind == SNX_FLOW_B || kind == SNX_FLOW_BL) {
-                target = snx_a64_target(word, address);
-                if (kind == SNX_FLOW_BC) {
+            kind = decode(codegen, word, &insn);
+            if (kind == SNX_A64_FLOW_UNDEF) break;
+            if (kind == SNX_A64_FLOW_BC || kind == SNX_A64_FLOW_B || kind == SNX_A64_FLOW_BL) {
+                target = snx_a64_branch_target(&insn, address);
+                if (kind == SNX_A64_FLOW_BC) {
                     if (snx_codegen_module(codegen, target)) push(&todo, target);
-                } else if (kind == SNX_FLOW_B) {
+                } else if (kind == SNX_A64_FLOW_B) {
                     distance = target > start ? target - start : start - target;
                     if (snx_codegen_module(codegen, target) && !is_known(known, target) && distance < 0x100000UL)
                         push(&todo, target);
                     break;
                 } else if (work && snx_codegen_module(codegen, target))
                     push(work, target);
-            } else if (kind == SNX_FLOW_BR || kind == SNX_FLOW_RET || kind == SNX_FLOW_BRK)
+            } else if (kind == SNX_A64_FLOW_BR || kind == SNX_A64_FLOW_RET || kind == SNX_A64_FLOW_BRK)
                 break;
-            else if (work && inner && kind == SNX_FLOW_PLAIN) {
+            else if (work && inner && kind == SNX_A64_FLOW_PLAIN) {
                 target = taken_address(codegen, address, word);
                 if (target && !(target & 3) && snx_codegen_module(codegen, target)) push(&taken, target);
             }
@@ -337,7 +345,8 @@ static void leaders(SnxCodegen* codegen, const AddressSet* extra, const AddressS
     SnxFunction* f;
     SnxU64 address;
     SnxU32 word;
-    enum SnxFlow kind;
+    SnxA64Insn insn;
+    SnxA64Flow kind;
     int previous_terminal;
     for (i = 0; i < codegen->function_count; ++i) {
         f = &codegen->functions[i];
@@ -348,11 +357,12 @@ static void leaders(SnxCodegen* codegen, const AddressSet* extra, const AddressS
         for (j = 0; j < f->count; ++j) {
             address = snx_function_address(f, j);
             if (previous_terminal || set_has(extra, address) || set_has(hints, address)) mark_leader(f, address);
-            kind = snx_codegen_word(codegen, address, &word) ? snx_a64_decode(word)->kind : SNX_FLOW_UNDEF;
-            if (kind == SNX_FLOW_B || kind == SNX_FLOW_BC) mark_leader(f, snx_a64_target(word, address));
-            if (kind == SNX_FLOW_BL || kind == SNX_FLOW_BLR) mark_leader(f, address + 4);
-            previous_terminal = kind == SNX_FLOW_B || kind == SNX_FLOW_BR || kind == SNX_FLOW_RET ||
-                                kind == SNX_FLOW_BRK || kind == SNX_FLOW_UNDEF;
+            kind = snx_codegen_word(codegen, address, &word) ? decode(codegen, word, &insn) : SNX_A64_FLOW_UNDEF;
+            if (kind == SNX_A64_FLOW_B || kind == SNX_A64_FLOW_BC)
+                mark_leader(f, snx_a64_branch_target(&insn, address));
+            if (kind == SNX_A64_FLOW_BL || kind == SNX_A64_FLOW_BLR) mark_leader(f, address + 4);
+            previous_terminal = kind == SNX_A64_FLOW_B || kind == SNX_A64_FLOW_BR || kind == SNX_A64_FLOW_RET ||
+                                kind == SNX_A64_FLOW_BRK || kind == SNX_A64_FLOW_UNDEF;
         }
         codegen->instruction_count += f->count;
     }
@@ -390,7 +400,7 @@ static void explored_add(SnxCodegen* codegen, size_t* explored, const Addresses*
 }
 
 int snx_codegen_analyze(SnxCodegen* codegen, const SnxCodeImage* modules, size_t module_count, const SnxU64* hints,
-                        size_t hint_count, int quiet) {
+                        size_t hint_count, int quiet, SnxU64 features) {
     Range* ranges;
     const Range* range;
     size_t nranges, capranges, i, j, covered, round, pending_start, pending_end, next_start;
@@ -401,9 +411,11 @@ int snx_codegen_analyze(SnxCodegen* codegen, const SnxCodeImage* modules, size_t
     SnxCodeImage* m;
     SnxU64 a, end, text_end, target;
     SnxU32 word;
-    enum SnxFlow kind;
+    SnxA64Insn insn;
+    SnxA64Flow kind;
     SnxFunction* f;
     memset(codegen, 0, sizeof(*codegen));
+    codegen->features = features;
     codegen->modules = (SnxCodeImage*)snx_alloc(module_count * sizeof(*modules));
     memcpy(codegen->modules, modules, module_count * sizeof(*modules));
     codegen->module_count = module_count;
@@ -498,28 +510,28 @@ int snx_codegen_analyze(SnxCodegen* codegen, const SnxCodeImage* modules, size_t
             for (j = 0; j < f->count; ++j) {
                 a = snx_function_address(f, j);
                 if (!snx_codegen_word(codegen, a, &word)) continue;
-                kind = snx_a64_decode(word)->kind;
-                if (kind == SNX_FLOW_PLAIN) { /* an address taken (taken_address): a call through it to come */
+                kind = decode(codegen, word, &insn);
+                if (kind == SNX_A64_FLOW_PLAIN) { /* an address taken (taken_address): a call through it to come */
                     target = taken_address(codegen, a, word);
                     if (!target || (target & 3)) continue;
                     if (snx_function_contains(f, target)) {
                         if (target != f->start) set_add(&extra, target);
                         continue;
                     }
-                    kind = SNX_FLOW_BL;
-                } else if (kind != SNX_FLOW_BL && kind != SNX_FLOW_B && kind != SNX_FLOW_BC)
+                    kind = SNX_A64_FLOW_BL;
+                } else if (kind != SNX_A64_FLOW_BL && kind != SNX_A64_FLOW_B && kind != SNX_A64_FLOW_BC)
                     continue;
                 else
-                    target = snx_a64_target(word, a);
+                    target = snx_a64_branch_target(&insn, a);
                 if (set_has(&known, target) || set_has(&seen_seed, target) || !snx_codegen_module(codegen, target))
                     continue;
-                if (kind != SNX_FLOW_BL && snx_function_contains(f, target)) continue;
+                if (kind != SNX_A64_FLOW_BL && snx_function_contains(f, target)) continue;
                 range = inside_range(ranges, nranges, target);
                 if (range) {
-                    if (kind == SNX_FLOW_BL && target != range->start) set_add(&extra, target);
+                    if (kind == SNX_A64_FLOW_BL && target != range->start) set_add(&extra, target);
                     continue;
                 }
-                if (kind == SNX_FLOW_BL || target < f->start || target > snx_function_address(f, f->count - 1))
+                if (kind == SNX_A64_FLOW_BL || target < f->start || target > snx_function_address(f, f->count - 1))
                     push(&fresh, target);
             }
         }
@@ -562,13 +574,14 @@ int snx_codegen_analyze(SnxCodegen* codegen, const SnxCodeImage* modules, size_t
 }
 
 int snx_codegen_discover(SnxCodegen* codegen, const SnxCodeImage* modules, size_t module_count, const SnxU64* roots,
-                         size_t root_count, SnxCodegenKnown known, void* user, size_t budget) {
+                         size_t root_count, SnxCodegenKnown known, void* user, size_t budget, SnxU64 features) {
     Addresses work, found, inner;
     AddressSet local, seen_seed, entries, inside, none;
     Known stop;
     size_t next, total, i, searched;
     SnxU64 a;
     memset(codegen, 0, sizeof(*codegen));
+    codegen->features = features;
     codegen->modules = (SnxCodeImage*)snx_alloc((module_count ? module_count : 1) * sizeof(*modules));
     memcpy(codegen->modules, modules, module_count * sizeof(*modules));
     codegen->module_count = module_count;
@@ -646,13 +659,14 @@ const SnxFunction* snx_codegen_entry(const SnxCodegen* codegen, SnxU64 address) 
    target compiled already (skip) is not explored again: the call to it goes through the dispatch table */
 int snx_codegen_analyze_from(SnxCodegen* codegen, const SnxCodeImage* modules, size_t module_count, const SnxU64* hints,
                              size_t hint_count, size_t limit, int (*skip)(void* context, SnxU64 address),
-                             void* context) {
+                             void* context, SnxU64 features) {
     Addresses work, found, calls;
     AddressSet known, seen, extra, hint_set;
     Known stop;
     size_t i, j, next, total;
     SnxU64 a;
     memset(codegen, 0, sizeof(*codegen));
+    codegen->features = features;
     codegen->modules = (SnxCodeImage*)snx_alloc(module_count * sizeof(*modules));
     memcpy(codegen->modules, modules, module_count * sizeof(*modules));
     codegen->module_count = module_count;
@@ -704,12 +718,14 @@ int snx_codegen_analyze_from(SnxCodegen* codegen, const SnxCodeImage* modules, s
         const SnxFunction* f = &codegen->functions[i];
         for (j = 0; j < f->count; ++j) {
             SnxU32 word;
-            enum SnxFlow kind;
+            SnxA64Insn insn;
+    SnxA64Flow kind;
             a = snx_function_address(f, j);
             if (!snx_codegen_word(codegen, a, &word)) continue;
-            kind = snx_a64_decode(word)->kind;
-            if ((kind == SNX_FLOW_B || kind == SNX_FLOW_BC) && !snx_function_contains(f, snx_a64_target(word, a)))
-                set_add(&extra, snx_a64_target(word, a));
+            kind = decode(codegen, word, &insn);
+            if ((kind == SNX_A64_FLOW_B || kind == SNX_A64_FLOW_BC) &&
+                !snx_function_contains(f, snx_a64_branch_target(&insn, a)))
+                set_add(&extra, snx_a64_branch_target(&insn, a));
         }
     }
     leaders(codegen, &extra, &hint_set);

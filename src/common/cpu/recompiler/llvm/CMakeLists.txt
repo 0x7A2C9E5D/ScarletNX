@@ -4,7 +4,7 @@
 # Clang and the flags toolchain.c gives generated C
 set(snx_cpu "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
 add_subdirectory("${PROJECT_SOURCE_DIR}/src/common/cpu/arm" arm-backend)
-file(GLOB snx_rtlib_sources CONFIGURE_DEPENDS "${snx_cpu}/*.h" "${snx_cpu}/*.c" "${snx_cpu}/*.inc"
+file(GLOB snx_rtlib_sources CONFIGURE_DEPENDS "${snx_cpu}/*.h" "${snx_cpu}/*.c"
     "${snx_cpu}/helpers/*.c" "${PROJECT_SOURCE_DIR}/src/common/runtime/interface.h")
 if(CMAKE_CROSSCOMPILING)
     # it runs during the build: a cross build makes it for the machine doing that, with that machine's compiler
@@ -12,12 +12,10 @@ if(CMAKE_CROSSCOMPILING)
     set(snx_rtlib_gen "${CMAKE_CURRENT_BINARY_DIR}/snx-rtlib-gen-host")
     add_custom_command(OUTPUT "${snx_rtlib_gen}"
         COMMAND "${SNX_HOST_CC}" -O1 -w -I "${PROJECT_SOURCE_DIR}/src"
-            "${CMAKE_CURRENT_SOURCE_DIR}/rtlib_gen.c" "${snx_cpu}/a64.c" "${snx_cpu}/a64_emit.c"
-            -o "${snx_rtlib_gen}"
-        DEPENDS rtlib_gen.c ${snx_rtlib_sources} VERBATIM)
+            "${CMAKE_CURRENT_SOURCE_DIR}/rtlib_gen.c" -o "${snx_rtlib_gen}"
+        DEPENDS rtlib_gen.c VERBATIM)
 else()
-    add_executable(snx-rtlib-gen rtlib_gen.c "${snx_cpu}/a64_emit.c")
-    target_link_libraries(snx-rtlib-gen PRIVATE scarletnx-common)
+    add_executable(snx-rtlib-gen rtlib_gen.c)
     set(snx_rtlib_gen snx-rtlib-gen)
 endif()
 # No -march=native: the recompiler builds modules for the machine it runs on, which is often not the one that built
@@ -131,7 +129,7 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/armlib_bitcode.c"
     DEPENDS "${snx_rtlib_gen}" "${CMAKE_CURRENT_BINARY_DIR}/armlib.bc" VERBATIM)
 
 add_library(snx_llvm STATIC ir.c ir_state.c ir_emit.c ir_profile.c ir_helpers.c
-    ir_a64.c ir_simd.c ir_fp.c ir_codegen.c link.c link_elf.c link_coff.c link_macho.c elf_object.c objects_pack.c
+    ir_int.c ir_ldst.c ir_fpu.c ir_vec.c ir_vec_fp.c ir_vec_crypto.c ir_codegen.c link.c link_elf.c link_coff.c link_macho.c elf_object.c objects_pack.c
     code_loader.c code_loader_coff.c gdb_jit.c jit_service.c jit_cache.c "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/exec.c"
     "${CMAKE_CURRENT_BINARY_DIR}/rtlib_object.c" "${CMAKE_CURRENT_BINARY_DIR}/rtlib_bitcode.c"
     "${CMAKE_CURRENT_BINARY_DIR}/armlib_bitcode.c")

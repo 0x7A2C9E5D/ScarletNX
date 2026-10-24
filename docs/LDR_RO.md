@@ -75,14 +75,14 @@ cmake --build --preset default --target snx-test-ldr-service snx-test-memory snx
 ctest --test-dir build/default -R '^(ldr_service|memory_accounting|runtime_nro)$' --output-on-failure
 ```
 
-`ldr_service` uses synthetic images and the real service, memory block list, and generated AArch64 interpreter.
+`ldr_service` uses synthetic images and the real service and memory block list.
 It covers PID placeholders, initialization/handle validation, malformed ranges/headers/hash lists, hash snapshots,
 unauthorized/duplicate images, commit failure rollback, permissions, preserved bytes/BSS, no premature
 relocations, unload-by-base, copy-back, reloading, session cleanup, simultaneous loads, and both capacity limits.
-It executes a dynamically mapped `mov x0, #42; ret` function, then an NRO-to-AOT-dispatch callback and return.
+Running code the module lacks (an NRO's, through `RtAPI.miss`) is `llvm_module`'s.
 SHA-256 has independent standard test vectors. Platform backing and IPC transport are test doubles.
 
-Validation in the coding container: these three CTest targets passed using Clang 22; the full interpreter witness
-also passed UBSan. Service/memory tests without the interpreter passed GCC 14 ASan+UBSan. The runtime translation
+Validation in the coding container: these three CTest targets passed using Clang 22. Service/memory tests passed
+GCC 14 ASan+UBSan. The runtime translation
 units changed here compiled with Clang's missing-prototype/declaration checks. No game dump was supplied, so no
-retail-game scene or full Vulkan runtime build was tested; interpreted NRO performance remains unmeasured.
+retail-game scene or full Vulkan runtime build was tested.

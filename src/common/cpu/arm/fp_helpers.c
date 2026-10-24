@@ -21,6 +21,9 @@
 #define snx_fp_compare  snx_arm_soft_compare
 #define snx_fp_minmax   snx_arm_soft_minmax
 #define snx_fp_round    snx_arm_soft_round
+#define snx_fp_round_int snx_arm_soft_round_int
+#define snx_fp_jcvt     snx_arm_soft_jcvt
+#define snx_fp_bfcvt    snx_arm_soft_bfcvt
 #define urecpe32        snx_arm_soft_urecpe32
 #define ursqrte32       snx_arm_soft_ursqrte32
 #include "common/cpu/aarch64/cpu.h"

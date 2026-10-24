@@ -163,9 +163,9 @@ static u64 fp_divide(CPU* c, FpValue x, FpValue y, int width, int rm) {
 /* FPAdd, FPSub, FPMul, FPDiv, FPMulX, FABD (the difference, then the sign cleared, NaNs included), and the fused
    steps FPRecipStepFused (2 - a * b) and FPRSqrtStepFused ((3 - a * b) / 2), which negate a before anything else,
    so a NaN a comes out with its sign flipped */
-u64 snx_fp_binary(CPU* c, u64 a, u64 b, int width, int op) {
+static u64 fp_binary_rm(CPU* c, u64 a, u64 b, int width, int op, int rm) {
     FpValue x, y;
-    int rm = fp_rmode(c), sign;
+    int sign;
     u64 r;
     if (op == SNX_FP_RECPS || op == SNX_FP_RSQRTS) a ^= fp_signbit(1, width);
     x = fp_unpack(c, a, width);
@@ -220,6 +220,7 @@ u64 snx_fp_binary(CPU* c, u64 a, u64 b, int width, int op) {
         default: return 0;
     }
 }
+u64 snx_fp_binary(CPU* c, u64 a, u64 b, int width, int op) { return fp_binary_rm(c, a, b, width, op, fp_rmode(c)); }
 
 /* ---- the reciprocal and reciprocal square root estimates (vfp_helper.c) ---- */
 
@@ -384,7 +385,7 @@ u64 snx_fp_unary(CPU* c, u64 bits, int width, int op) {
    top of their payload (default NaN under DN), and a half with FPCR.AHP takes no NaN or infinity: IOC, and a zero
    or the largest magnitude. Numbers are rounded once, from the source (f64 to f16 directly). */
 u64 snx_fp_convert(CPU* c, u64 bits, int src_width, int dst_width, int rm) {
-    FpValue v = fp_unpack(c, bits, src_width);
+    FpValue v = fp_unpack_as(c, bits, src_width, 1);
     int alt = dst_width == 16 && (c->fpcr & FPCR_AHP), sfb = fp_fbits(src_width), dfb = fp_fbits(dst_width);
     if (v.kind >= FPV_QNAN) {
         u64 payload = v.frac & (((u64)1 << (sfb - 1)) - 1);
@@ -400,7 +401,7 @@ u64 snx_fp_convert(CPU* c, u64 bits, int src_width, int dst_width, int rm) {
         return fp_signbit(v.sign, 16) | 0x7FFF;
     }
     if (v.kind == FPV_ZERO) return fp_zero(v.sign, dst_width);
-    return fp_round_pack(c, v.sign, v.exp, v.frac, dst_width, rm);
+    return fp_round_pack_as(c, v.sign, v.exp, v.frac, dst_width, rm, 1);
 }
 
 /* FixedToFP (SCVTF, UCVTF): the operand masked to its width (and two's complement for signed), divided by
@@ -444,4 +445,78 @@ u64 snx_fp_to_int(CPU* c, u64 bits, int fp_width, int int_width, int uns, int fb
     }
     if (inexact) c->fpsr |= FPSR_IXC;
     return (v.sign ? 0 - mag : mag) & mask;
+}
+
+/* FPRoundIntN (FRINT32Z, FRINT32X, FRINT64Z, FRINT64X; vfp_helper.c's frint_s, frint_d): rounded to an integral value
+   in mode rm as FPRoundInt does, IXC when that changed it, then checked against the intsize-bit integers. A NaN, an
+   infinity or a value out of their range raises IOC alone and gives -2^(intsize-1). */
+u64 snx_fp_round_int(CPU* c, u64 bits, int width, int rm, int intsize) {
+    FpValue v = fp_unpack(c, bits, width);
+    u64 mag, top = (u64)1 << (intsize - 1);
+    int inexact = 0, huge = 0;
+    if (v.kind == FPV_ZERO) return fp_zero(v.sign, width);
+    if (v.kind == FPV_FINITE) {
+        mag = fp_round_magnitude(v, 0, rm, &inexact, &huge);
+        if (!huge && (v.sign ? mag <= top : mag < top)) {
+            if (inexact) c->fpsr |= FPSR_IXC;
+            if (!mag) return fp_zero(v.sign, width);
+            return fp_repack(c, fp_from_magnitude(v.sign, mag, 0), width);
+        }
+    }
+    c->fpsr |= FPSR_IOC;
+    return fp_signbit(1, width) | (u64)(fp_bias(width) + intsize - 1) << fp_fbits(width);
+}
+
+/* FPToFixedJS (FJCVTZS; vfp_helper.c's fjcvtzs, softfloat's float_to_sint_modulo): a double rounded toward zero, the
+   low 32 bits of the integer whatever its size, and bit 32 the Z flag: set when the double was exactly that integer
+   in the int32 range, not -0, and not a denormal flushed by FPCR.FZ. A NaN, an infinity or an integer outside the
+   int32 range raises IOC (and gives 0 for the first two), else a dropped fraction raises IXC */
+u64 snx_fp_jcvt(CPU* c, u64 bits) {
+    FpValue v = fp_unpack(c, bits, 64);
+    u64 mag;
+    int inexact = 0, huge = 0, overflow;
+    if (v.kind >= FPV_INF) {
+        c->fpsr |= FPSR_IOC;
+        return 0;
+    }
+    if (v.kind == FPV_ZERO) return (u64)(!v.sign && !(bits & (((u64)1 << 52) - 1))) << 32;
+    if (v.exp > 62) { /* integral, at least 2^63: only its low bits survive */
+        int shift = v.exp - 62;
+        mag = shift < 64 ? v.frac << shift : 0;
+        overflow = 1;
+    } else {
+        mag = fp_round_magnitude(v, 0, 3, &inexact, &huge);
+        overflow = v.sign ? mag > ((u64)1 << 31) : mag >= ((u64)1 << 31);
+    }
+    mag = (u32)(v.sign ? 0 - mag : mag);
+    if (overflow)
+        c->fpsr |= FPSR_IOC;
+    else if (inexact)
+        c->fpsr |= FPSR_IXC;
+    return mag | (u64)(!overflow && !inexact) << 32;
+}
+
+/* FPConvertBF (BFCVT; vfp_helper.c's bfcvt, softfloat's float32_to_bfloat16): a single to a bfloat16, its top half,
+   rounded in FPCR's mode. The formats share the exponent range and their denormal grids, so a number is its
+   encoding with the low 16 bits rounded off: a carry reaches the exponent, and past the largest number infinity
+   (OFC). Tiny before rounding is a denormal, which raises UFC when inexact; FPCR.FZ flushed it already (IDC) */
+u64 snx_fp_bfcvt(CPU* c, u64 bits) {
+    FpValue v = fp_unpack(c, bits, 32);
+    u64 magnitude = bits & 0x7FFFFFFFu, low = magnitude & 0xFFFF, mant = magnitude >> 16, up;
+    if (v.kind >= FPV_QNAN) return fp_nan(c, v, 32) >> 16;
+    if (v.kind == FPV_ZERO) return (u64)v.sign << 15;
+    if (v.kind == FPV_INF) return fp_inf(v.sign, 32) >> 16;
+    switch (fp_rmode(c)) {
+        case 0: up = low > 0x8000 || (low == 0x8000 && (mant & 1)); break;
+        case 1: up = low && !v.sign; break;
+        case 2: up = low && v.sign; break;
+        default: up = 0; break;
+    }
+    mant += up;
+    if (low) {
+        c->fpsr |= FPSR_IXC;
+        if (!(magnitude >> 23)) c->fpsr |= FPSR_UFC;
+        if (mant == 0x7F80) c->fpsr |= FPSR_OFC;
+    }
+    return (u64)v.sign << 15 | mant;
 }

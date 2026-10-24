@@ -540,13 +540,12 @@ int fs_add_virtual_file(const char* path, const void* data, u64 size) {
 static void put32(u8* p, u32 v) { snx_st_le32(p, v); } /* the image is the guest's: little-endian */
 static void put64(u8* p, u64 v) { snx_st_le64(p, v); }
 /* the bucket of an entry named name in the directory at table offset parent. The name's bytes count unsigned */
+/* The format fixes both the seed (the parent's offset xor 123456789) and the step (rotate right by 5, then xor in the
+   next byte): the game's own tables were built with it */
 static u32 rhash(u32 parent, const char* name) {
-    const unsigned char* p = (const unsigned char*)name;
     u32 h = parent ^ 123456789u;
-    while (*p) {
-        h = (h >> 5) | (h << 27);
-        h ^= *p++;
-    }
+    const unsigned char* p;
+    for (p = (const unsigned char*)name; *p; p++) h = ((h >> 5) | (h << 27)) ^ *p;
     return h;
 }
 /* the buckets of a hash table for n entries */

@@ -127,10 +127,10 @@ or writes a guest value as a number converts it:
 - The recompiler swaps where generated code reads memory as numbers (`ir_rd`, `ir_wr`, `ir_ldacq`, `ir_strel` in
   `ir_state.c`) and where it compares in memory (`cas` in `ir_helpers.c`, `snx_cas128`). LLVM folds the swaps into
   POWER's byte-reversed loads and stores. The vector registers hold the guest's bytes too: the views that read a lane
-  as a number swap it (`ir_vd`, `ir_ve`, the lane helpers of `ir_simd.c`), and Q loads, LD1 to LD4, TBL and EXT stay
+  as a number swap it (`ir_vd`, `ir_ve`, the lane helpers of `ir_vec.c`), and Q loads, LD1 to LD4, TBL and EXT stay
   byte copies. The emitters decide by the target's data layout, so a little-endian host's code is what it was. The
-  templates' C and the reference interpreter's helpers, which the tests hold the emitters to, read and write a lane
-  as a number through `SNX_VS` and its kin in `cpu.h`, which swap on a big-endian host.
+  helpers and the tests that set and check lanes read and write a lane as a number through `SNX_VS` and its kin in
+  `cpu.h`, which swap on a big-endian host.
 - The Linux runtime's system calls read and write the guest's structures through `common/utilities/endian.h`
   (`snx_ld_le32`, `snx_st_le64` and their kin), which compile to plain copies on a little-endian host.
 - `scripts/le-unchanged.sh` builds a base commit and the working tree on a little-endian machine and lists every
@@ -211,9 +211,9 @@ the host's CPU, or for this one where the host's name isn't known. What changes 
 - **STXP's 16-byte compare-and-swap goes through the runtime** (`RtAPI.cas128`, `common/runtime/cas128.c`), as on
   RISC-V and LoongArch. It runs POWER8's `lqarx`/`stqcx.` where the kernel reports ISA 2.07, and takes a lock of the
   address's stripe elsewhere, which keeps the 16 bytes atomic against other STXPs but not against plain stores.
-- **Single-precision vector lanes take the slow path** (`altivec_lanes` in `ir_fp.c`). Without VSX, LLVM puts them
-  on AltiVec, whose VSCR[NJ] is set when Linux starts a thread, so denormals flush to zero. Double lanes and scalars
-  use the FPU.
+- **Single-precision vector lanes can flush denormals.** Without VSX, LLVM puts them on AltiVec, whose VSCR[NJ] is
+  set when Linux starts a thread, so denormals flush to zero where an emitter (`ir_vec_fp.c`) uses the host's vector
+  arithmetic. Double lanes and scalars use the FPU.
 - Rounding, `floor`, `trunc`, `rint`, `minnum` and the half conversions would be libm calls on these CPUs, which the
   emitters already avoid on PowerPC64.
 
