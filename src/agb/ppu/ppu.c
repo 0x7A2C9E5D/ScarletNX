@@ -183,13 +183,19 @@ void agb_ppu_step(AgbBoard* board, uint32_t cycles) {
 
 /* ---- backgrounds ---- */
 
+/* MOSAIC's block sizes, each its field + 1: the backgrounds' width at shift 0 and height at 4, the sprites' at 8 and
+   12. A block of a layer that has mosaic on shows what its first pixel would, as mGBA draws it */
+static int mosaic_size(const AgbPpu* ppu, int shift) { return (ppu->mosaic >> shift & 15) + 1; }
+
 static void text_bg(AgbBoard* board, uint32_t index, int y) {
     AgbPpu* ppu = &board->ppu;
     uint16_t* out = scan.color[index];
     uint32_t cnt = ppu->bgcnt[index], charbase = (cnt >> 2 & 3) * 0x4000, screen = (cnt >> 8 & 0x1F) * 0x800;
-    int bpp8 = cnt & 0x80, size = cnt >> 14;
+    int bpp8 = cnt & 0x80, size = cnt >> 14, mosaic = cnt & 0x40;
     int width = size & 1 ? 512 : 256, height = size & 2 ? 512 : 256;
-    int py = (y + ppu->bgvofs[index]) & (height - 1);
+    int py, block = mosaic ? mosaic_size(ppu, 0) : 1;
+    if (mosaic) y -= y % mosaic_size(ppu, 4); /* the line its block of lines starts at */
+    py = (y + ppu->bgvofs[index]) & (height - 1);
     for (int x = 0; x < AGB_SCREEN_WIDTH; ++x) {
         int px = (x + ppu->bghofs[index]) & (width - 1);
         uint32_t block = ((uint32_t)(py >> 8) * (uint32_t)(width >> 8) + (uint32_t)(px >> 8)) * 0x800;
@@ -210,19 +216,33 @@ static void text_bg(AgbBoard* board, uint32_t index, int y) {
         }
         out[x] = color ? palette(board, color) : LAYER_TRANSPARENT;
     }
+    for (int x = 0; block > 1 && x < AGB_SCREEN_WIDTH; ++x) out[x] = out[x - x % block];
 }
 
-/* The affine backgrounds walk the reference points their lines latched, so the line is not a parameter. */
-static void affine_bg(AgbBoard* board, uint32_t index) {
+/* The affine backgrounds walk the reference points their lines latched; y only places a line in its block of mosaic
+   lines. A block's first pixel off a background that doesn't wrap leaves it open, and the next pixel starts the block */
+static void affine_bg(AgbBoard* board, uint32_t index, int y) {
     AgbPpu* ppu = &board->ppu;
     uint16_t* out = scan.color[index];
     uint32_t cnt = ppu->bgcnt[index], charbase = (cnt >> 2 & 3) * 0x4000, screen = (cnt >> 8 & 0x1F) * 0x800;
-    int wrap = cnt & 0x2000, pixels = 128 << (cnt >> 14), tiles = pixels / 8;
+    int wrap = cnt & 0x2000, pixels = 128 << (cnt >> 14), tiles = pixels / 8, block = 1, wait = 0;
     int64_t sx = ppu->bgx_line[index], sy = ppu->bgy_line[index];
     int32_t pa = (int16_t)ppu->bgpa[index], pc = (int16_t)ppu->bgpc[index];
+    uint16_t held = LAYER_TRANSPARENT;
+    if (cnt & 0x40) { /* the reference points of the line its block of lines starts at */
+        int back = y % mosaic_size(ppu, 4);
+        sx -= (int64_t)back * (int16_t)ppu->bgpb[index];
+        sy -= (int64_t)back * (int16_t)ppu->bgpd[index];
+        block = mosaic_size(ppu, 0);
+    }
     for (int x = 0; x < AGB_SCREEN_WIDTH; ++x, sx += pa, sy += pc) {
         int32_t tx = (int32_t)(sx >> 8), ty = (int32_t)(sy >> 8);
         uint32_t tile, color;
+        if (wait) {
+            --wait;
+            out[x] = held;
+            continue;
+        }
         if (wrap) {
             tx &= pixels - 1;
             ty &= pixels - 1;
@@ -232,28 +252,43 @@ static void affine_bg(AgbBoard* board, uint32_t index) {
         }
         tile = board->memory.vram[screen + (uint32_t)(ty >> 3) * (uint32_t)tiles + (uint32_t)(tx >> 3)];
         color = board->memory.vram[charbase + tile * 64 + (uint32_t)(ty & 7) * 8 + (uint32_t)(tx & 7)];
-        out[x] = color ? palette(board, color) : LAYER_TRANSPARENT;
+        out[x] = held = color ? palette(board, color) : LAYER_TRANSPARENT;
+        wait = block - 1;
     }
 }
 
-/* The bitmap modes draw into BG2's layer and use its priority and blend flags. */
+/* The bitmap modes draw into BG2's layer and use its priority, blend flags and mosaic, whose blocks start as an affine
+   background's do. */
 static void bitmap_bg(AgbBoard* board, int y, int mode) {
     AgbPpu* ppu = &board->ppu;
     uint16_t* out = scan.color[2];
     uint32_t page = ppu->dispcnt & 0x10 ? 0xA000 : 0;
-    int height = mode == 5 ? 128 : AGB_SCREEN_HEIGHT;
+    int height = mode == 5 ? 128 : AGB_SCREEN_HEIGHT, width = mode == 5 ? 160 : AGB_SCREEN_WIDTH, block = 1, wait = 0;
+    uint16_t held = LAYER_TRANSPARENT;
+    if (ppu->bgcnt[2] & 0x40) {
+        y -= y % mosaic_size(ppu, 4);
+        block = mosaic_size(ppu, 0);
+    }
     for (int x = 0; x < AGB_SCREEN_WIDTH; ++x) {
-        uint16_t color = LAYER_TRANSPARENT;
-        if (y < height) {
-            if (mode == 3)
-                color = vram16(board, ((uint32_t)y * 240 + (uint32_t)x) * 2) & 0x7FFF;
-            else if (mode == 4) {
-                uint8_t index = board->memory.vram[page + (uint32_t)y * 240 + (uint32_t)x];
-                color = index ? palette(board, index) : LAYER_TRANSPARENT;
-            } else if (x < 160)
-                color = vram16(board, page + ((uint32_t)y * 160 + (uint32_t)x) * 2) & 0x7FFF;
+        uint16_t color;
+        if (wait) {
+            --wait;
+            out[x] = held;
+            continue;
         }
-        out[x] = color;
+        if (y >= height || x >= width) {
+            out[x] = LAYER_TRANSPARENT;
+            continue;
+        }
+        if (mode == 3)
+            color = vram16(board, ((uint32_t)y * 240 + (uint32_t)x) * 2) & 0x7FFF;
+        else if (mode == 4) {
+            uint8_t index = board->memory.vram[page + (uint32_t)y * 240 + (uint32_t)x];
+            color = index ? palette(board, index) : LAYER_TRANSPARENT;
+        } else
+            color = vram16(board, page + ((uint32_t)y * 160 + (uint32_t)x) * 2) & 0x7FFF;
+        out[x] = held = color;
+        wait = block - 1;
     }
 }
 
@@ -268,6 +303,7 @@ static const uint8_t obj_sizes[3][4][2] = {
 static void obj_line(AgbBoard* board, int y) {
     AgbPpu* ppu = &board->ppu;
     int bitmap = (ppu->dispcnt & 7) >= 3, one_d = ppu->dispcnt & 0x40;
+    int mosaic_w = mosaic_size(ppu, 8), mosaic_h = mosaic_size(ppu, 12);
     /* in OAM order, as the hardware: a sprite's pixel goes over one already drawn only with a lower priority value,
        so the lower index wins between sprites of one priority (a character over its shadow) */
     for (int i = 0; i < 128; ++i) {
@@ -275,7 +311,7 @@ static void obj_line(AgbBoard* board, int y) {
         uint16_t a2 = oam16(board, (uint32_t)i * 8 + 4);
         int affine = a0 & 0x100, objwin_mode = (a0 & 0xC00) == 0x800, semi = (a0 & 0xC00) == 0x400;
         int shape = a0 >> 14, size_index = a1 >> 14, width, height, draw_width, draw_height;
-        int sx, rel, bpp8 = a0 & 0x2000, priority = a2 >> 10 & 3, tile = a2 & 0x3FF;
+        int sx, rel, bpp8 = a0 & 0x2000, priority = a2 >> 10 & 3, tile = a2 & 0x3FF, mosaic = a0 & 0x1000, block, span;
         int32_t pa = 0x100, pb = 0, pc = 0, pd = 0x100;
         /* a sprite that is not affine and has bit 9 is hidden (an affine one's bit 9 doubles its size) */
         if (shape == 3 || (a0 & 0xC00) == 0xC00 || (!affine && (a0 & 0x200))) continue;
@@ -291,6 +327,13 @@ static void obj_line(AgbBoard* board, int y) {
         if (rel >= draw_height) continue;
         sx = (int)(a1 & 0x1FF);
         if (sx >= 256) sx -= 512;
+        /* mosaic: the row of the line its block of lines starts at, the sprite's first if that is above it, and blocks
+           of pixels on the screen's grid, the last reaching past the sprite's right edge. A sprite of the OBJ window
+           takes the rows alone, as in mGBA */
+        if (mosaic) rel = rel < y % mosaic_h ? 0 : rel - y % mosaic_h;
+        block = mosaic && !objwin_mode ? mosaic_w : 1;
+        span = draw_width;
+        if (block > 1 && sx + span > 0 && (sx + span) % block) span += block - (sx + span) % block;
         if (bitmap && tile < 512) continue;
         if (affine) {
             uint32_t group = a1 >> 9 & 31;
@@ -299,18 +342,29 @@ static void obj_line(AgbBoard* board, int y) {
             pc = (int16_t)oam16(board, group * 32 + 22);
             pd = (int16_t)oam16(board, group * 32 + 30);
         }
-        for (int px = 0; px < draw_width; ++px) {
-            int screen_x = sx + px, tx, ty;
+        for (int px = 0; px < span; ++px) {
+            int screen_x = sx + px, tx, ty, from = px;
             uint32_t units, address;
             uint8_t color;
             if (screen_x < 0 || screen_x >= AGB_SCREEN_WIDTH) continue;
             if (affine) {
-                int64_t cx = px - draw_width / 2, cy = rel - draw_height / 2;
+                /* the pixel its block starts at, or the one before the sprite when the block starts left of it */
+                int64_t cx, cy = rel - draw_height / 2;
+                if (block > 1) {
+                    int start = screen_x - screen_x % block;
+                    from = start < sx ? -1 : start - sx;
+                }
+                cx = from - draw_width / 2;
                 tx = (int)((pa * cx + pb * cy) >> 8) + width / 2;
                 ty = (int)((pc * cx + pd * cy) >> 8) + height / 2;
                 if (tx < 0 || ty < 0 || tx >= width || ty >= height) continue;
             } else {
-                tx = a1 & 0x1000 ? width - 1 - px : px;
+                /* the column its block starts at, held to the sprite's own */
+                if (block > 1) {
+                    from = px - screen_x % block;
+                    from = from < 0 ? 0 : from > width - 1 ? width - 1 : from;
+                }
+                tx = a1 & 0x1000 ? width - 1 - from : from;
                 ty = a1 & 0x2000 ? height - 1 - rel : rel;
             }
             /* tiles are 32 byte units; 8bpp sprites take two of them per tile */
@@ -458,10 +512,10 @@ static void render_line(AgbBoard* board, int y) {
         } else if (mode == 1) {
             if (ppu->dispcnt & 0x100) text_bg(board, 0, y);
             if (ppu->dispcnt & 0x200) text_bg(board, 1, y);
-            if (ppu->dispcnt & 0x400) affine_bg(board, 2);
+            if (ppu->dispcnt & 0x400) affine_bg(board, 2, y);
         } else if (mode == 2) {
-            if (ppu->dispcnt & 0x400) affine_bg(board, 2);
-            if (ppu->dispcnt & 0x800) affine_bg(board, 3);
+            if (ppu->dispcnt & 0x400) affine_bg(board, 2, y);
+            if (ppu->dispcnt & 0x800) affine_bg(board, 3, y);
         } else if (ppu->dispcnt & 0x400)
             bitmap_bg(board, y, mode);
         if (ppu->dispcnt & 0x1000) obj_line(board, y);

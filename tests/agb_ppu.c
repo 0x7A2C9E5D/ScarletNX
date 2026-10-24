@@ -162,6 +162,125 @@ int main(void) {
     agb_ppu_write(&board, 0x050, 0);
     agb_ppu_write(&board, 0x052, 0);
 
+    /* mosaic: a block of a layer that has it on shows its first pixel, and a block of lines its first line, as mGBA
+       draws them. A 4bpp tile whose row 0 is red, green green green, then blue, and row 1 all blue */
+    memset(board.memory.vram, 0, AGB_VRAM_SIZE);
+    memset(board.memory.palette, 0, AGB_PALETTE_SIZE);
+    memset(board.memory.oam, 0, AGB_OAM_SIZE);
+    agb_write16(&board, 0x05000002, 0x001F); /* entry 1: red */
+    agb_write16(&board, 0x05000004, 0x03E0); /* entry 2: green */
+    agb_write16(&board, 0x05000006, 0x7C00); /* entry 3: blue */
+    agb_write16(&board, 0x06000000, 0x2221); /* pixels 0 to 3: 1 2 2 2 */
+    agb_write16(&board, 0x06000002, 0x3333);
+    agb_write16(&board, 0x06000004, 0x3333); /* row 1 */
+    agb_write16(&board, 0x06000006, 0x3333);
+    agb_ppu_write(&board, 0x000, 0x0100); /* mode 0, BG0 on */
+    agb_ppu_write(&board, 0x008, 0x1F00); /* BG0: char base 0, screen base 31, every entry tile 0 */
+    agb_ppu_write(&board, 0x04C, 0x0003); /* BG blocks 4 pixels wide */
+    run_frame();
+    CHECK(pixel(1, 0) == PIX(0, 31, 0)); /* MOSAIC alone changes nothing: BG0CNT's bit 6 is off */
+    agb_ppu_write(&board, 0x008, 0x1F40);
+    run_frame();
+    CHECK(pixel(1, 0) == PIX(31, 0, 0)); /* the block's first pixel, red */
+    CHECK(pixel(3, 0) == PIX(31, 0, 0));
+    CHECK(pixel(4, 0) == PIX(0, 0, 31));  /* the next block starts on blue */
+    agb_ppu_write(&board, 0x04C, 0x0010); /* blocks 2 lines high */
+    run_frame();
+    CHECK(pixel(1, 1) == PIX(0, 31, 0)); /* line 1 shows row 0 */
+    CHECK(pixel(1, 2) == PIX(0, 0, 0));  /* line 2 starts a block on row 2, which is empty */
+    agb_ppu_write(&board, 0x008, 0);
+
+    /* an affine background: BG2 in mode 1, the same pixels as 8bpp, screen base 30, no rotation */
+    memset(board.memory.vram, 0, AGB_VRAM_SIZE);
+    agb_write16(&board, 0x06000000, 0x0201);
+    agb_write16(&board, 0x06000002, 0x0202);
+    agb_write16(&board, 0x06000004, 0x0303);
+    agb_write16(&board, 0x06000006, 0x0303);
+    for (int i = 8; i < 16; i += 2) agb_write16(&board, 0x06000000 + (uint32_t)i, 0x0303); /* row 1 */
+    agb_ppu_write(&board, 0x020, 0x100);                                                   /* BG2PA */
+    agb_ppu_write(&board, 0x026, 0x100);                                                   /* BG2PD */
+    agb_ppu_write(&board, 0x000, 0x0401);
+    agb_ppu_write(&board, 0x00C, 0x1E40); /* BG2: screen base 30, mosaic */
+    agb_ppu_write(&board, 0x04C, 0x0003);
+    run_frame();
+    CHECK(pixel(1, 0) == PIX(31, 0, 0));
+    CHECK(pixel(4, 0) == PIX(0, 0, 31));
+    agb_ppu_write(&board, 0x04C, 0x0010);
+    run_frame();
+    CHECK(pixel(1, 1) == PIX(0, 31, 0)); /* line 1 walks from line 0's reference point */
+    agb_ppu_write(&board, 0x00C, 0x1E00);
+    run_frame();
+    CHECK(pixel(1, 1) == PIX(0, 0, 31)); /* row 1 without it */
+
+    /* a bitmap: mode 3's BG2 */
+    memset(board.memory.vram, 0, AGB_VRAM_SIZE);
+    agb_write16(&board, 0x06000000, 0x001F);
+    agb_write16(&board, 0x06000002, 0x03E0);
+    agb_write16(&board, 0x06000000 + 240 * 2, 0x7C00);
+    agb_write16(&board, 0x06000002 + 240 * 2, 0x7C00);
+    agb_ppu_write(&board, 0x000, 0x0403);
+    agb_ppu_write(&board, 0x00C, 0x0040);
+    agb_ppu_write(&board, 0x04C, 0x0001); /* 2 pixels wide */
+    run_frame();
+    CHECK(pixel(1, 0) == PIX(31, 0, 0));
+    agb_ppu_write(&board, 0x04C, 0x0010);
+    run_frame();
+    CHECK(pixel(1, 1) == PIX(0, 31, 0));
+    agb_ppu_write(&board, 0x00C, 0);
+
+    /* a sprite at x 10: its pixel 0 red, 2 green and 6 blue. OBJ blocks 4 wide sit on the screen's grid (8, 12, 16),
+       so x 10 and 11 show its pixel 0 (held to the sprite's first), 12 to 15 pixel 2, and 16 to 19 pixel 6, two
+       columns past its right edge */
+    memset(board.memory.vram, 0, AGB_VRAM_SIZE);
+    agb_write16(&board, 0x05000202, 0x001F);
+    agb_write16(&board, 0x05000204, 0x03E0);
+    agb_write16(&board, 0x05000206, 0x7C00);
+    agb_write16(&board, 0x06010000, 0x0201); /* pixels 0 to 3: 1 0 2 0 */
+    agb_write16(&board, 0x06010002, 0x0300); /* pixels 4 to 7: 0 0 3 0 */
+    agb_write16(&board, 0x07000000, 0x1000); /* y 0, mosaic */
+    agb_write16(&board, 0x07000002, 10);
+    agb_ppu_write(&board, 0x000, 0x1000); /* OBJ on */
+    agb_ppu_write(&board, 0x04C, 0x0300);
+    run_frame();
+    CHECK(pixel(11, 0) == PIX(31, 0, 0));
+    CHECK(pixel(13, 0) == PIX(0, 31, 0));
+    CHECK(pixel(17, 0) == PIX(0, 0, 31));
+    CHECK(pixel(19, 0) == PIX(0, 0, 31));
+    CHECK(pixel(20, 0) == PIX(0, 0, 0));
+    agb_write16(&board, 0x07000000, 0x0000);
+    run_frame();
+    CHECK(pixel(11, 0) == PIX(0, 0, 0)); /* the sprite's own pixel 1 without it */
+    CHECK(pixel(19, 0) == PIX(0, 0, 0));
+    agb_write16(&board, 0x07000000, 0x1000);
+    agb_ppu_write(&board, 0x04C, 0x1000); /* OBJ blocks 2 lines high: line 1 shows row 0 */
+    run_frame();
+    CHECK(pixel(10, 1) == PIX(31, 0, 0));
+    /* the same sprite affine, no rotation: a block that starts left of it samples the pixel before it, which is off
+       the sprite, so x 10 and 11 stay open */
+    agb_write16(&board, 0x07000000, 0x1100);
+    agb_write16(&board, 0x07000006, 0x0100); /* group 0: pa */
+    agb_write16(&board, 0x0700001E, 0x0100); /* pd */
+    agb_ppu_write(&board, 0x04C, 0x0300);
+    run_frame();
+    CHECK(pixel(10, 0) == PIX(0, 0, 0));
+    CHECK(pixel(13, 0) == PIX(0, 31, 0));
+    CHECK(pixel(19, 0) == PIX(0, 0, 31));
+    agb_write16(&board, 0x07000000, 0x0100);
+    run_frame();
+    CHECK(pixel(10, 0) == PIX(31, 0, 0));
+    /* stretched by 4/3 (pa 0xC0), the pixel before the sprite lands on its pixel 0, red, which x 10 shows; without
+       mosaic x 10 is its pixel 1 */
+    agb_write16(&board, 0x07000006, 0x00C0);
+    run_frame();
+    CHECK(pixel(10, 0) == PIX(0, 0, 0));
+    agb_write16(&board, 0x07000000, 0x1100);
+    run_frame();
+    CHECK(pixel(10, 0) == PIX(31, 0, 0));
+    CHECK(pixel(13, 0) == PIX(0, 31, 0));
+    memset(board.memory.oam, 0, AGB_OAM_SIZE);
+    agb_ppu_write(&board, 0x04C, 0);
+    agb_ppu_write(&board, 0x000, 0x0100);
+
     /* an HBlank DMA runs on the 160 visible lines alone, a game's table having one entry a line: a repeating 16 bit one
        moves its source 160 halfwords a frame, not 228 */
     agb_write16(&board, 0x040000B0, 0x0000);
