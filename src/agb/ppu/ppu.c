@@ -497,8 +497,9 @@ static void composite_line(AgbBoard* board, int y) {
                with below when OBJ is a first target or another layer a second one, as mGBA's reblend has it */
             int lit = (mask & 0x20) && (effect == 2 || effect == 3) && (first_target || (semi && seconds));
             color = first_color;
-            if ((mask & 0x20) && second_target && (semi || (effect == 1 && first_target))) {
-                /* alpha blend: the semi transparent sprites blend whether or not the effect selects them */
+            if (second_target && (semi || ((mask & 0x20) && effect == 1 && first_target))) {
+                /* alpha blend: a semi transparent sprite blends whether or not the effect selects it, or the window
+                   lets effects through, as mGBA has it */
                 int32_t eva = weight(ppu->bldalpha), evb = weight(ppu->bldalpha >> 8);
                 uint32_t result = 0;
                 for (int component = 0; component < 3; ++component) {

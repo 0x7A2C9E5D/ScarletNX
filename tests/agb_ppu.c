@@ -403,6 +403,29 @@ int main(void) {
     agb_ppu_write(&board, 0x008, 0);
     agb_ppu_write(&board, 0x000, 0x0100);
 
+    /* a semi transparent sprite blends with a second target below inside a window that lets no effect through: green
+       over BG0's red at 8 and 8 sixteenths, in WIN0 */
+    agb_write16(&board, 0x05000002, 0x001F);
+    for (uint32_t i = 0; i < 32; i += 2) agb_write16(&board, 0x06000000 + i, 0x1111); /* BG0 tile 0: red */
+    agb_write16(&board, 0x07000000, 0x0400);
+    agb_ppu_write(&board, 0x008, 0x1F00);
+    agb_ppu_write(&board, 0x040, 90 << 8 | 110);
+    agb_ppu_write(&board, 0x044, 0 << 8 | 8);
+    agb_ppu_write(&board, 0x048, 0x0011); /* inside: BG0 and OBJ, no effect */
+    agb_ppu_write(&board, 0x04A, 0x0031);
+    agb_ppu_write(&board, 0x000, 0x3140);
+    agb_ppu_write(&board, 0x050, 0x0100);
+    agb_ppu_write(&board, 0x052, 0x0808);
+    run_frame();
+    run_frame();
+    CHECK(pixel(100, 0) == PIX(15, 15, 0));
+    for (uint32_t r = 0x040; r <= 0x04A; r += 2) agb_ppu_write(&board, r, 0);
+    agb_ppu_write(&board, 0x050, 0);
+    agb_ppu_write(&board, 0x052, 0);
+    agb_write16(&board, 0x07000000, 0x0200);
+    agb_ppu_write(&board, 0x008, 0);
+    agb_ppu_write(&board, 0x000, 0x0100);
+
     /* an HBlank DMA runs on the 160 visible lines alone, a game's table having one entry a line: a repeating 16 bit one
        moves its source 160 halfwords a frame, not 228 */
     agb_write16(&board, 0x040000B0, 0x0000);
