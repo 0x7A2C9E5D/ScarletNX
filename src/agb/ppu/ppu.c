@@ -444,7 +444,7 @@ static void composite_line(AgbBoard* board, int y) {
                 key = scan.obj_pri[x] * 8;
             } else {
                 if (!(mask & (1 << layer))) continue;
-                key = (ppu->bgcnt[layer] & 3) * 8 + 5 - layer;
+                key = (ppu->bgcnt[layer] & 3) * 8 + 1 + layer;
             }
             if (key < top_key) {
                 second = top;

@@ -281,6 +281,28 @@ int main(void) {
     agb_ppu_write(&board, 0x04C, 0);
     agb_ppu_write(&board, 0x000, 0x0100);
 
+    /* two backgrounds of one priority: the lower number goes over the higher, BG0's red over BG1's green */
+    memset(board.memory.vram, 0, AGB_VRAM_SIZE);
+    memset(board.memory.palette, 0, AGB_PALETTE_SIZE);
+    agb_write16(&board, 0x05000002, 0x001F);
+    agb_write16(&board, 0x05000004, 0x03E0);
+    agb_write16(&board, 0x06000000, 0x1111); /* char base 0, tile 0's row 0: entry 1 */
+    agb_write16(&board, 0x06000002, 0x1111);
+    agb_write16(&board, 0x06004000, 0x2222); /* char base 1: entry 2 */
+    agb_write16(&board, 0x06004002, 0x2222);
+    agb_ppu_write(&board, 0x008, 0x1F01); /* BG0: priority 1, screen base 31 */
+    agb_ppu_write(&board, 0x00A, 0x1E05); /* BG1: priority 1, char base 1, screen base 30 */
+    agb_ppu_write(&board, 0x000, 0x0300);
+    run_frame();
+    CHECK(pixel(0, 0) == PIX(31, 0, 0));
+    agb_ppu_write(&board, 0x00A, 0x1E04); /* BG1 at priority 0 goes over it */
+    run_frame();
+    CHECK(pixel(0, 0) == PIX(0, 31, 0));
+    agb_ppu_write(&board, 0x00A, 0);
+
+    agb_ppu_write(&board, 0x008, 0);
+    agb_ppu_write(&board, 0x000, 0x0100);
+
     /* an HBlank DMA runs on the 160 visible lines alone, a game's table having one entry a line: a repeating 16 bit one
        moves its source 160 halfwords a frame, not 228 */
     agb_write16(&board, 0x040000B0, 0x0000);
