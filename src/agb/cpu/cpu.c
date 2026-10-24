@@ -150,10 +150,32 @@ static void irq_return(AgbBoard* board, AgbCpu* cpu) {
 
 /* ---- software interrupts and the privileged residue ---- */
 
+/* SoftReset, as the BIOS runs it: the top 0x200 bytes of IWRAM (the stacks, the BIOS's flags and its IRQ vector)
+   cleared, r0 to r12 zero, the irq and svc stacks set with their lr and spsr cleared, then system mode in ARM state
+   from EWRAM's start when the byte at 0x03007FFA asks for it (a game that copied a program there, as multiboot does),
+   else from the cartridge's */
+static void soft_reset(AgbBoard* board, AgbCpu* cpu) {
+    uint32_t entry = agb_read8(board, 0x03007FFA) ? 0x02000000u : 0x08000000u;
+    switch_mode(cpu, 0x1F);
+    memset(board->memory.iwram + AGB_IWRAM_SIZE - 0x200, 0, 0x200);
+    for (int i = 0; i < 13; ++i) cpu->arm.r[i] = 0;
+    cpu->arm.r[13] = 0x03007F00;
+    cpu->banked_r13[2] = 0x03007FA0;
+    cpu->banked_r13[3] = 0x03007FE0;
+    cpu->banked_r14[2] = cpu->banked_r14[3] = cpu->spsr[2] = cpu->spsr[3] = 0;
+    cpu->arm.cpsr = 0x1F;
+    cpu->arm.r[15] = entry;
+    cpu->wait = 0;
+}
+
 static int handle_swi(AgbCpu* cpu, AgbSink* sink, uint32_t syndrome, int thumb) {
     AgbBoard* board = sink->board;
     uint32_t number = thumb ? syndrome & 0xFF : (syndrome >> 16) & 0xFF;
     board->bios_prefetch = AGB_BIOS_PREFETCH_SWI;
+    if (number == AGB_SWI_SOFT_RESET) {
+        soft_reset(board, cpu);
+        return 0;
+    }
     if (number == AGB_SWI_HALT || number == AGB_SWI_STOP) {
         board->cpu_halted = 1;
         return 0;
