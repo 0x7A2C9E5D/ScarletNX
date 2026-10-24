@@ -1207,6 +1207,10 @@ msgid "Open Cheats Folder"
 msgstr ""
 
 #: src/gui/main.c
+msgid "  (Debug on)"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "Not added: %s is not a folder of this device's storage"
 msgstr ""
@@ -1598,6 +1602,11 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "R on another game: it joins the queue"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Debug on: %s"
 msgstr ""
 
 #: src/gui/main.c

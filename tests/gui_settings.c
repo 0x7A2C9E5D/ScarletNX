@@ -382,6 +382,32 @@ int main(int argc, char** argv) {
         gui_settings_free(&s);
         free(output);
     }
+    /* the Debug settings a run of a game takes off their default: its .ini's, a pick over it, a text by its key alone,
+       the GDB stub; another section's never */
+    {
+        static const char debug[] = "Display\tfullscreen\t0\tint\t0\t1\tWhole screen\tFullscreen\t0=Off|1=On\n"
+                                    "Debug\tlog\t1\tint\t0\t2\tLog detail\t\t0=0|1=1|2=2\n"
+                                    "Debug\tvk_budget_mb\t0\tint\t0\t2147483647\tBudget\tVulkan memory budget\t\n"
+                                    "Debug\trenderdoc\t\ttext\t0\t0\tCaptures\tRenderDoc captures\t";
+        static const char file[] =
+            "[Display]\nfullscreen=1\n[Debug]\nlog=1\nvk_budget_mb=512\nrenderdoc=/home/someone/caps\n";
+        char *dir = snx_temp_dir(NULL), *ini = snx_path_join(dir, "game.ini"), out[256];
+        assert(!gui_settings_read(&s, debug));
+        assert(gui_settings_debug(&s, NULL, 1, out, sizeof out) == 0 && !out[0]);
+        assert(!snx_write_file(ini, file, strlen(file)));
+        assert(gui_settings_debug(&s, ini, 0, out, sizeof out) == 2 && !strcmp(out, "vk_budget_mb=512, renderdoc"));
+        assert(gui_settings_set(&s, "log", "2") && gui_settings_set(&s, "vk_budget_mb", "0"));
+        assert(gui_settings_debug(&s, ini, 0, out, sizeof out) == 2); /* the file's alone: the picks left out */
+        assert(gui_settings_debug(&s, ini, 1, out, sizeof out) == 2 && !strcmp(out, "log=2, renderdoc"));
+        assert(gui_settings_set(&s, "gdbstub", "on"));
+        assert(gui_settings_debug(&s, NULL, 1, out, sizeof out) == 2 && !strcmp(out, "log=2, gdbstub"));
+        assert(gui_settings_debug(&s, ini, 1, out, 8) == 3 && !strcmp(out, "log=2, ")); /* cut, every one counted */
+        assert(gui_settings_debug(&s, "/nonexistent/game.ini", 0, out, sizeof out) == 0);
+        gui_settings_free(&s);
+        assert(!snx_remove_tree(dir));
+        free(ini);
+        free(dir);
+    }
     puts("GUI settings: the runtime's list, picks and a run's options passed");
     return 0;
 }

@@ -955,6 +955,11 @@ static char* built_in_settings(void) {
     return snx_strdup("Display\tfullscreen\t0\tint\t0\t1\t1 = start in fullscreen\t\t0=0|1=1\n"
                       "Network\tbuilt_in\t0\tint\t0\t1\tOne the program's own list has\t\t0=Off|1=On\n");
 }
+/* a runtime's list with a Debug row, for the games run with one off its default */
+static char* debug_settings(void) {
+    return snx_strdup("Display\tfullscreen\t0\tint\t0\t1\t1 = start in fullscreen\t\t0=0|1=1\n"
+                      "Debug\tlog\t1\tint\t0\t2\tThe log's detail\tLog level\t0=0|1=1|2=2\n");
+}
 static int SDLCALL hang(void* unused) {
     (void)unused;
     for (;;) SDL_Delay(100);
@@ -6940,6 +6945,56 @@ int main(int argc, char** argv) {
                        strstr(said, "P: folders.") && strstr(said, "ESC: back."));
                 app.aot_state = state;
                 app.aot_match = match;
+            }
+            /* a game whose .ini has a Debug setting off its default: its row says so, as no other game's, its side
+               panel lists it in the failure colour and its Play says so too; the GDB stub on puts it on every game */
+            {
+                char *ini = snx_game_ini(folder, "folder game"), *dir = ini ? snx_dirname(ini) : NULL, row[256];
+                size_t index, other, size = 0;
+                char *was = ini ? (char*)snx_read_file(ini, &size) : NULL, *debug;
+                int nx, ny, r;
+                bool play = false;
+                debug = snx_format("%s\n[Debug]\nlog=2\n", was ? was : ""); /* beside what the folder's .ini has */
+                assert(dir && debug && !snx_mkdirs(dir) && !snx_write_file(ini, debug, strlen(debug)));
+                snx_menu_settings = debug_settings;
+                settings_forget(&app);
+                focus_game(&app, "folder game");
+                index = app.browser.page * app.browser.page_size + app.browser.selected - app.browser.head;
+                for (other = 0; other < app.games.count && (other == index || !app.games.paths[other]); ++other) {}
+                assert(other < app.games.count);
+                render(&app);
+                game_label(&app, &app.games, index, row, sizeof row);
+                assert(strstr(row, "  (Debug on)"));
+                game_label(&app, &app.games, other, row, sizeof row);
+                assert(!strstr(row, "(Debug on)"));
+                assert(!strcmp(app.debug_focus, "log=2"));
+                assert(find_text(&app, "Debug on: log=2", rgb(app.theme.failure), 1, &nx, &ny));
+                key(&app, SDLK_M);
+                assert(app.addons_shown && app.addons_debug);
+                for (r = 0; r < addons_rows(&app); ++r) {
+                    addons_label(&app, r, row, sizeof row);
+                    play = play || strstr(row, "Play  (Debug on)");
+                }
+                assert(play);
+                key(&app, SDLK_ESCAPE);
+                assert(!app.addons_shown);
+                launcher(&app, true);
+                render(&app);
+                game_label(&app, &app.games, other, row, sizeof row);
+                assert(strstr(row, "(Debug on)") && app.debug_picks);
+                launcher(&app, false);
+                assert(was ? !snx_write_file(ini, was, size) : !remove(ini));
+                settings_forget(&app);
+                snx_menu_settings = NULL;
+                list_games(&app);
+                render(&app);
+                game_label(&app, &app.games, other, row, sizeof row);
+                assert(!strstr(row, "(Debug on)") && !app.debug_picks);
+                focus_game(&app, "folder game");
+                free(debug);
+                free(was);
+                free(dir);
+                free(ini);
             }
             /* M on it, a game with no update, DLC, mod or cheat: its box all the same, for its Add rows, its mods and
                cheats folders those of its data (add_mod adds to it); ESC closes it, nothing run */
