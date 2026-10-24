@@ -149,10 +149,13 @@ void agb_ppu_step(AgbBoard* board, uint32_t cycles) {
         cycles -= run;
         if (ppu->dot != boundary) continue;
         if (boundary == 960) {
-            /* the horizontal blank starts when the visible dots are over */
-            if (ppu->vcount < AGB_SCREEN_HEIGHT) render_line(board, ppu->vcount);
+            /* the horizontal blank starts when the visible dots are over; its DMA only on the visible lines, as a game's
+               table of one entry a line takes (the interrupt on every line) */
             ppu->dispstat |= 2;
-            agb_dma_event(board, AGB_DMA_HBLANK);
+            if (ppu->vcount < AGB_SCREEN_HEIGHT) {
+                render_line(board, ppu->vcount);
+                agb_dma_event(board, AGB_DMA_HBLANK);
+            }
             if (ppu->dispstat & 0x10) agb_irq_request(board, AGB_IRQ_HBLANK);
         } else {
             ppu->dot = 0;

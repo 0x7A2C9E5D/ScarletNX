@@ -149,6 +149,17 @@ int main(void) {
     agb_ppu_write(&board, 0x050, 0);
     agb_ppu_write(&board, 0x052, 0);
 
+    /* an HBlank DMA runs on the 160 visible lines alone, a game's table having one entry a line: a repeating 16 bit one
+       moves its source 160 halfwords a frame, not 228 */
+    agb_write16(&board, 0x040000B0, 0x0000);
+    agb_write16(&board, 0x040000B2, 0x0200); /* DMA0SAD: 0x02000000 */
+    agb_write16(&board, 0x040000B4, 0x0010);
+    agb_write16(&board, 0x040000B6, 0x0400); /* DMA0DAD: BG0HOFS */
+    agb_write16(&board, 0x040000B8, 1);
+    agb_write16(&board, 0x040000BA, 0xA240); /* on, at HBlank, repeating, the destination fixed */
+    run_frame();
+    CHECK(board.dma[0].source_now == 0x02000000 + 160 * 2);
+    agb_write16(&board, 0x040000BA, 0);
     agb_board_destroy(&board);
     puts("agb_ppu: ok");
     return 0;
