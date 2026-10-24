@@ -27,7 +27,7 @@
 #     float LO HI         a float, clamped
 #     text SIZE           text, up to SIZE - 1 bytes
 #     default VALUE       its value until one is read, as the .ini writes it ("" or none for empty text)
-#     default-if MACRO V  its default where MACRO is defined (#ifdef)
+#     default-if MACRO V  its default where MACRO is defined (#if defined): up to four, the first that holds
 #     once                written to the .ini only once it is set (the default stays its value until then)
 #     words W|W...        the menus' words (ini.h): an int's for LO, LO + step..., a text's value=word
 #     step N, shift N     the menus' step and shift (ini.h)
