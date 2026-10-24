@@ -320,6 +320,31 @@ int main(void) {
     agb_ppu_write(&board, 0x008, 0);
     agb_ppu_write(&board, 0x000, 0x0100);
 
+    /* a window's lines latch as the line counter meets its top and bottom, as mGBA's do: a WIN0V top of 231 is never
+       met, so with its bottom at 195 the window stays off, where a range would wrap over every line; a top of 100 and
+       a bottom of 50 hold it on from line 100 through the next frame's line 49 */
+    memset(board.memory.vram, 0, AGB_VRAM_SIZE);
+    memset(board.memory.palette, 0, AGB_PALETTE_SIZE);
+    for (int i = 0; i < 128; ++i) agb_write16(&board, 0x07000000 + (uint32_t)i * 8, 0x0200);
+    agb_write16(&board, 0x05000002, 0x001F);
+    for (uint32_t i = 0; i < 32; i += 2) agb_write16(&board, 0x06000000 + i, 0x1111); /* tile 0: entry 1, red */
+    agb_ppu_write(&board, 0x008, 0x1F00);
+    agb_ppu_write(&board, 0x040, 0x00F0); /* WIN0: x 0 to 240 */
+    agb_ppu_write(&board, 0x044, 0xE7C3);
+    agb_ppu_write(&board, 0x048, 0x0000); /* inside: nothing */
+    agb_ppu_write(&board, 0x04A, 0x0001); /* outside: BG0 */
+    agb_ppu_write(&board, 0x000, 0x2100);
+    run_frame();
+    run_frame();
+    CHECK(pixel(10, 10) == PIX(31, 0, 0) && pixel(10, 150) == PIX(31, 0, 0));
+    agb_ppu_write(&board, 0x044, 100 << 8 | 50);
+    run_frame();
+    run_frame();
+    CHECK(pixel(10, 10) == PIX(0, 0, 0) && pixel(10, 70) == PIX(31, 0, 0) && pixel(10, 120) == PIX(0, 0, 0));
+    for (uint32_t r = 0x040; r <= 0x04A; r += 2) agb_ppu_write(&board, r, 0);
+    agb_ppu_write(&board, 0x008, 0);
+    agb_ppu_write(&board, 0x000, 0x0100);
+
     /* an HBlank DMA runs on the 160 visible lines alone, a game's table having one entry a line: a repeating 16 bit one
        moves its source 160 halfwords a frame, not 228 */
     agb_write16(&board, 0x040000B0, 0x0000);

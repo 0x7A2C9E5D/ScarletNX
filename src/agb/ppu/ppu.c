@@ -162,8 +162,14 @@ void agb_ppu_step(AgbBoard* board, uint32_t cycles) {
             ppu->dispstat &= (uint16_t)~2u;
             if (++ppu->vcount == AGB_FRAME_LINES) ppu->vcount = 0;
             if (ppu->vcount == AGB_SCREEN_HEIGHT) {
-                /* the vertical blank starts: the reference points reload for the next frame */
+                /* the vertical blank starts: the reference points reload for the next frame, and a window's edge in
+                   the blank's lines turns it as those lines would, as mGBA's FinishFrame has it */
                 ppu->dispstat |= 1;
+                for (int i = 0; i < 2; ++i) {
+                    unsigned top = (i ? ppu->win1v : ppu->win0v) >> 8, bottom = (i ? ppu->win1v : ppu->win0v) & 0xFF;
+                    if (bottom >= AGB_SCREEN_HEIGHT && bottom < AGB_FRAME_LINES) ppu->window_on[i] = 0;
+                    if (top >= AGB_SCREEN_HEIGHT && top < AGB_FRAME_LINES && top > bottom) ppu->window_on[i] = 1;
+                }
                 for (int i = 2; i < 4; ++i) {
                     ppu->bgx_line[i] = ppu->bgx[i];
                     ppu->bgy_line[i] = ppu->bgy[i];
@@ -412,19 +418,25 @@ static void obj_line(AgbBoard* board, int y) {
 
 /* ---- composition ---- */
 
-static uint8_t window_mask(const AgbPpu* ppu, int x, int y, int objwin) {
-    if (!(ppu->dispcnt & 0xE000)) return 0x3F;
-    if (ppu->dispcnt & 0x2000) {
-        uint8_t x1 = ppu->win0h >> 8, x2 = ppu->win0h, y1 = ppu->win0v >> 8, y2 = ppu->win0v;
-        int inside_x = x1 <= x2 ? x >= x1 && x < x2 : x >= x1 || x < x2;
-        int inside_y = y1 <= y2 ? y >= y1 && y < y2 : y >= y1 || y < y2;
-        if (inside_x && inside_y) return ppu->winin & 0x3F;
+/* WIN0's and WIN1's lines as the line counter meets their top and bottom: a window turns on at its top's line and off
+   at its bottom's, and stays as it is in between, across the frame's end too (mGBA's StepWindow) */
+static void window_step(AgbPpu* ppu, int y) {
+    for (int i = 0; i < 2; ++i) {
+        uint16_t edges = i ? ppu->win1v : ppu->win0v;
+        if (y == edges >> 8) ppu->window_on[i] = 1;
+        if (y == (edges & 0xFF)) ppu->window_on[i] = 0;
     }
-    if (ppu->dispcnt & 0x4000) {
-        uint8_t x1 = ppu->win1h >> 8, x2 = ppu->win1h, y1 = ppu->win1v >> 8, y2 = ppu->win1v;
-        int inside_x = x1 <= x2 ? x >= x1 && x < x2 : x >= x1 || x < x2;
-        int inside_y = y1 <= y2 ? y >= y1 && y < y2 : y >= y1 || y < y2;
-        if (inside_x && inside_y) return (ppu->winin >> 8) & 0x3F;
+}
+
+static uint8_t window_mask(const AgbPpu* ppu, int x, int objwin) {
+    if (!(ppu->dispcnt & 0xE000)) return 0x3F;
+    if ((ppu->dispcnt & 0x2000) && ppu->window_on[0]) {
+        uint8_t x1 = ppu->win0h >> 8, x2 = ppu->win0h;
+        if (x1 <= x2 ? x >= x1 && x < x2 : x >= x1 || x < x2) return ppu->winin & 0x3F;
+    }
+    if ((ppu->dispcnt & 0x4000) && ppu->window_on[1]) {
+        uint8_t x1 = ppu->win1h >> 8, x2 = ppu->win1h;
+        if (x1 <= x2 ? x >= x1 && x < x2 : x >= x1 || x < x2) return (ppu->winin >> 8) & 0x3F;
     }
     if ((ppu->dispcnt & 0x8000) && objwin) return (ppu->winout >> 8) & 0x3F;
     return ppu->winout & 0x3F;
@@ -436,7 +448,7 @@ static void composite_line(AgbBoard* board, int y) {
     int forced_blank = ppu->dispcnt & 0x80;
     for (int x = 0; x < AGB_SCREEN_WIDTH; ++x) {
         int top = -1, second = -1, top_key = 99, second_key = 99;
-        uint8_t mask = window_mask(ppu, x, y, scan.objwin[x]);
+        uint8_t mask = window_mask(ppu, x, scan.objwin[x]);
         uint16_t color;
         int effect = ppu->bldcnt >> 6 & 3;
         if (forced_blank) {
@@ -507,6 +519,7 @@ static void composite_line(AgbBoard* board, int y) {
 static void render_line(AgbBoard* board, int y) {
     AgbPpu* ppu = &board->ppu;
     int mode = ppu->dispcnt & 7;
+    window_step(ppu, y);
     for (int layer = 0; layer < LAYERS; ++layer)
         for (int x = 0; x < AGB_SCREEN_WIDTH; ++x) scan.color[layer][x] = LAYER_TRANSPARENT;
     memset(scan.obj_pri, 0, sizeof(scan.obj_pri));
