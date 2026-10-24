@@ -54,10 +54,11 @@ The board is under construction, piece by piece:
 | Memory map | done: every region and mirror, the I/O window as plain storage |
 | HLE BIOS interface | mostly done: the software interrupts run as board routines, the waits and sound driver stubs |
 | PPU and display | done: the text, affine and bitmap layers, sprites, windows and blending |
-| APU (audio) | done: the four PSG channels, the two FIFOs and the stereo mixer |
+| APU (audio) | done: the four PSG channels, the two FIFOs at their timer's rate and the stereo mixer |
 | Keypad (HID) | done: KEYINPUT and the KEYCNT interrupt, from the keyboard and gamepads |
 | Save memory | SRAM and flash, kept in the game's folder; EEPROM not yet |
-| CPU, DMA, timers, interrupts | done |
+| CPU, DMA, timers, interrupts | done, and the BIOS's IntrWait waits for the game's handler to flag the interrupt |
+| Serial (link) | no cable: answers as a console with none plugged, as mGBA does without a link |
 
 A ROM is recompiled when it is loaded, the same process the other system
 types use, and runs on the board from its native module.
@@ -150,10 +151,13 @@ interworking) and sends the BIOS, I/O window, palette, VRAM, OAM and save memory
 accesses to the board's bus hook. The privileged instructions the recompiler refuses, the mode
 switching MSR/MRS forms, SWP and the exception return, are interpreted against
 the banked register state. Software interrupts go to the HLE BIOS and
-interrupts follow the entry and return the BIOS stub performs. Recompiled
-blocks are charged two cycles per instruction, and the waits, the save memory
-width rules and the timer driven FIFO rates are approximations documented
-divergences.
+interrupts follow the entry and return the BIOS stub performs. The board starts
+with the registers as the BIOS leaves them (forced blank, the serial port's
+general purpose mode, the sound's bias at its middle, POSTFLG), which a game reads
+to tell a link boot from its own. Recompiled blocks are charged two cycles per
+instruction, and the waits and the save memory width rules are approximations
+documented divergences; a serial transfer ends at once, where mGBA waits for its
+time.
 
 ## The ROM header
 
