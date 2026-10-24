@@ -272,7 +272,8 @@ static void obj_line(AgbBoard* board, int y) {
         int shape = a0 >> 14, size_index = a1 >> 14, width, height, draw_width, draw_height;
         int sx, rel, bpp8 = a0 & 0x2000, priority = a2 >> 10 & 3, tile = a2 & 0x3FF;
         int32_t pa = 0x100, pb = 0, pc = 0, pd = 0x100;
-        if (shape == 3 || (a0 & 0xC00) == 0xC00) continue;
+        /* a sprite that is not affine and has bit 9 is hidden (an affine one's bit 9 doubles its size) */
+        if (shape == 3 || (a0 & 0xC00) == 0xC00 || (!affine && (a0 & 0x200))) continue;
         width = obj_sizes[shape][size_index][0];
         height = obj_sizes[shape][size_index][1];
         draw_width = width;

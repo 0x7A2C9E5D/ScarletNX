@@ -103,6 +103,11 @@ int main(void) {
     run_frame();
     CHECK(pixel(10, 0) == PIX(0, 31, 0)); /* the background tile's third pixel */
     agb_write16(&board, 0x07000004, 0);
+    /* attr0's bit 9 hides a sprite that is not affine (an affine one it draws at twice its size) */
+    agb_write16(&board, 0x07000000, 0x0200);
+    run_frame();
+    CHECK(pixel(10, 0) == PIX(0, 31, 0)); /* the background, the sprite hidden */
+    agb_write16(&board, 0x07000000, 0x0000);
     agb_ppu_write(&board, 0x000, 0x0100); /* OBJ off */
     run_frame();
     CHECK(pixel(10, 0) == PIX(0, 31, 0));
