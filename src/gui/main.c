@@ -11112,6 +11112,10 @@ static size_t games_listed(const App* app) {
 }
 /* the names dir holds into h, and with depth those of its folders, down that many levels, hidden ones left alone; it
    ends where it is once *stop is set */
+static bool name_ends(const char* name, const char* end) {
+    size_t n = strlen(name), e = strlen(end);
+    return n >= e && !strcmp(name + n - e, end);
+}
 static uint64_t stamp_dir(uint64_t h, const char* dir, int depth, const int* stop) {
     char** names = NULL;
     size_t count = 0, k;
@@ -11122,7 +11126,8 @@ static uint64_t stamp_dir(uint64_t h, const char* dir, int depth, const int* sto
             h = (h ^ (unsigned char)*c) * 1099511628211ull;
             if (!*c) break;
         }
-        if (depth > 0 && names[k][0] != '.') {
+        /* a game's data folder (its extracted RomFS: thousands of files) holds no game: not walked each second */
+        if (depth > 0 && names[k][0] != '.' && !name_ends(names[k], "_data")) {
             char* sub = snx_path_join(dir, names[k]);
             if (sub && snx_is_dir(sub)) h = stamp_dir(h, sub, depth - 1, stop);
             free(sub);
@@ -11938,7 +11943,7 @@ static void drag(App* app, float y) {
 /* a finger lifted at x, y (0 to 1 across the window): a swipe turns the games' pages, left or up to the next as a
    phone's lists scroll; a tap clicks there, is ESC on a finished run and on a running one's ESC line */
 static void touch(App* app, float x, float y) {
-    float dx = x - app->finger_x, dy = y - app->finger_y;
+    float dx = x - app->finger_x, dy = y - app->finger_y, rx, ry;
     int w, h;
     bool games = app->menu.view == GUI_LOAD_GAMES && !app->menu.running && !app->finished;
     if (SDL_fabsf(dx) > 0.1f && SDL_fabsf(dx) > 2 * SDL_fabsf(dy)) {
@@ -11963,12 +11968,23 @@ static void touch(App* app, float x, float y) {
         pointer(app, x * (float)w, y * (float)h, true, true);
         return;
     }
+    if (app->menu.running) {
 #ifdef SNX_TOUCH_UI
-    if (app->menu.running) { /* a tap anywhere on a run asks whether to abort it or keep going: nothing is lost by it */
+        /* a tap anywhere on a run asks whether to abort it or keep going: nothing is lost by it */
+        (void)rx, (void)ry;
         if (!app->aborting) cancel(app);
+#else
+        GuiPlace p;
+        layout(app);
+        if (!SDL_RenderCoordinatesFromWindow(app->renderer, x * (float)w, y * (float)h, &rx, &ry)) return;
+        if (app->theme.run != GUI_RUN_STEPS) { /* the foot the ESC line is in */
+            run_place(app, &p);
+            if (ry >= (float)p.keys.y && ry < (float)(p.keys.y + p.keys.h)) cancel(app);
+        } else if ((int)(ry / (float)(16 * app->scale)) == app->rows - 1) /* the loading screen's last row */
+            cancel(app);
+#endif
         return;
     }
-#endif
     pointer(app, x * (float)w, y * (float)h, true, true);
 }
 #ifdef SDL_PLATFORM_ANDROID
@@ -12886,6 +12902,19 @@ static void autorun_tick(App* app) {
     unsigned char* data;
     size_t size = 0, i, pick = (size_t)-1;
     bool dump_wanted = false;
+    static bool listed;
+    /* the list of games is made when Games opens, and a start on the Menu has none: with an autorun.txt waiting, Games is
+       opened once, so the game it names is found */
+    if (!done && !listed && !app->menu.running && !app->setup_on && !app->games.count && app->data_dir) {
+        char* waiting = snx_path_join(app->data_dir, "autorun.txt");
+        bool there = waiting && snx_is_file(waiting);
+        free(waiting);
+        if (there) {
+            listed = true;
+            go_tab(app, GUI_TAB_GAMES);
+            return;
+        }
+    }
     if (done || app->menu.running || app->setup_on || app->games_fresh || !app->games.count || !app->data_dir) return;
     done = true;
     file = snx_path_join(app->data_dir, "autorun.txt");
