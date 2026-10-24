@@ -917,6 +917,34 @@ static int check_rt_overlap(void) {
     CHECK(g_renderer->dma_copy(&o));
     CHECK(g_vk_rt_readbacks == readbacks + 1);
     CHECK(all_bytes(GP(DMA_A + 0x40000), 160 * 128 * 4, 0x11));
+    /* A render target and a newer buffer can use different GPU aliases of the
+       same memory. A later partial read of the image must not restore its old
+       pixels over the buffer written through the other alias. */
+    const u64 alias = DMA_GA + 0x800000;
+    gmmu_map(alias, DMA_A, DMA_SPAN);
+    rt_clear(ch, alias, 160, 256, 4, 1);
+    memset(GP(DMA_B), 0x6d, 512);
+    o.src = pitch_side(DMA_GB, 512);
+    o.dst = pitch_side(DMA_GA + 0x10000, 512);
+    o.width = o.line_in = o.line_out = 512;
+    o.lines = 1;
+    CHECK(g_renderer->dma_copy(&o));
+    o.src = pitch_side(alias + 0x1000, 512);
+    o.dst = pitch_side(DMA_GA + 0x40000, 512);
+    CHECK(g_renderer->dma_copy(&o));
+    CHECK(all_bytes(GP(DMA_A + 0x10000), 512, 0x6d));
+    CHECK(all_blue(GP(DMA_A), 512));
+    /* Replacing a GPU mapping must resolve the old target against its old
+       backing, before an image read can reach the replacement buffer. */
+    rt_clear(ch, alias, 160, 256, 4, 1);
+    memset(GP(DMA_B), 0x37, 0x28000);
+    gmmu_map(alias, DMA_B, DMA_SPAN);
+    CHECK(all_blue(GP(DMA_A), 0x28000));
+    o.src = pitch_side(alias + 0x1000, 512);
+    o.dst = pitch_side(DMA_GA + 0x40000, 512);
+    CHECK(g_renderer->dma_copy(&o));
+    CHECK(all_bytes(GP(DMA_B), 0x28000, 0x37));
+    CHECK(all_bytes(GP(DMA_A + 0x40000), 512, 0x37));
     free(ch);
     return 0;
 }
