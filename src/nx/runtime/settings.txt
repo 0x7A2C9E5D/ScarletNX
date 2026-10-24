@@ -130,6 +130,20 @@ setting Showcase corner
     set vpad_showcase_corner_set
     words tl=Top left|tr=Top right|bl=Bottom left|br=Bottom right
     help The corner showcase draws in: tl top left, tr top right, bl bottom left, br bottom right
+setting Stats
+    key stats
+    int 0 1
+    default 0
+    words Off|On
+    help 1 = the frames a second, the last frame's time, the processor and memory the game takes and a graph of its
+    help last 120 frames' times, in a corner over the game. F8 or the game's menu turns it on and off
+setting Stats corner
+    key stats_corner
+    text 3
+    default tl
+    set stats_corner_set
+    words tl=Top left|tr=Top right|bl=Bottom left|br=Bottom right
+    help The corner stats draws in, as showcase_corner's; in showcase's own corner it goes beside showcase's box
 
 table g_graphics_ini
 setting Resolution scale

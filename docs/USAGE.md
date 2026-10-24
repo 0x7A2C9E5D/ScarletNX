@@ -585,6 +585,8 @@ type, range and help, tab-separated. Every setting, the recompiler's too, is des
 | `language` | `1` | The game's language, English (US). The `.ini` lists the others, `0` to `17`. One the runtime doesn't know is English (US) |
 | `showcase` | `0` | `1` draws player 1's buttons and sticks, as the game gets them, and the frames a second in a corner of the window, for a video. F6 turns it on and off |
 | `showcase_corner` | `br` | The corner `showcase` draws in: `tl` top left, `tr` top right, `bl` bottom left, `br` bottom right |
+| `stats` | `0` | `1` draws the frames a second, the last frame's time, the processor and memory the game takes (`?` where the system does not tell) and a graph of its last 120 frames' times (guides at 60 and 30 FPS, a frame slower than 30 FPS in red) in a corner over the game. F8 or the game's menu turns it on and off |
+| `stats_corner` | `tl` | The corner `stats` draws in, as `showcase_corner`'s; in showcase's own corner it goes beside showcase's box, toward the middle |
 | `resolution` | `1` | Internal 3D scale, `0.25` to `4`: `1` native, `2` double, `0.75` and `0.5` faster |
 | `shadows` | `1` | `0` skips shadow maps |
 | `vsync` | `1` | Images are shown only on the display's refresh, so nothing tears. `0` doesn't wait for it: the newest image is shown on the next refresh where the display can do that, else at once (which may tear). A display that can do neither waits for the refresh as `1` does |
@@ -681,7 +683,7 @@ after installation. Other HIDAPI controllers may need their vendor's own hidraw 
 | Enter / Backspace | Plus / Minus |
 
 F1 help; F2 the game's menu; F3 screenshot; F4 FPS limit off and on; F5 thread dump; F6 showcase on and off;
-F7 60-second Tracy capture (SNX_TRACY builds); F11/Alt+Enter fullscreen; Escape quit. A window shows at most one
+F7 60-second Tracy capture (SNX_TRACY builds); F8 stats on and off; F11/Alt+Enter fullscreen; Escape quit. A window shows at most one
 image per refresh and drops the rest unless images tear, and the game keeps the pace `fps_limit` sets.
 
 In the game's menu the arrows, Enter and Escape move, select and go back; a gamepad's D-pad or left stick, A and

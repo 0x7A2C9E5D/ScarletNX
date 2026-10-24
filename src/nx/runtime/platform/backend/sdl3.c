@@ -412,6 +412,7 @@ static const char* HELP =
     "  F4  turn the FPS limit off or back on\n"
     "  F5  write every thread's state to the log\n"
     "  F6  turn showcase mode on or off\n"
+    "  F8  turn the stats on or off\n"
 #if defined(SNX_TRACY)
     "  F7  record a 60 second Tracy capture\n"
 #endif
@@ -811,6 +812,16 @@ static void hotkey(SDL_Keycode k) {
                 LOG("showcase: on, showcase_corner=%s\n", g_settings.showcase_corner);
             else
                 LOG("showcase: off\n");
+            break;
+        }
+        case SDLK_F8: {
+            int on = !__atomic_load_n(&g_settings.stats, __ATOMIC_RELAXED);
+            __atomic_store_n(&g_settings.stats, on, __ATOMIC_RELAXED);
+            ini_set("stats", on ? "1" : "0");
+            if (on)
+                LOG("stats: on, stats_corner=%s\n", g_settings.stats_corner);
+            else
+                LOG("stats: off\n");
             break;
         }
 #if defined(SNX_TRACY)
@@ -1348,7 +1359,8 @@ void frontend_frame(void) {
     g_press.kind = PRESS_NONE;
     /* the controls and the menu stay on the window while the game shows nothing new */
     if (g_renderer->refresh &&
-        (overlay_shown() || vpad_shown() || __atomic_load_n(&g_settings.showcase, __ATOMIC_RELAXED)))
+        (overlay_shown() || vpad_shown() || __atomic_load_n(&g_settings.showcase, __ATOMIC_RELAXED) ||
+         __atomic_load_n(&g_settings.stats, __ATOMIC_RELAXED)))
         g_renderer->refresh();
     if (g_shot_req) {
         g_shot_req = 0;
