@@ -108,7 +108,20 @@ int main(void) {
     run_frame();
     CHECK(pixel(10, 0) == PIX(0, 31, 0)); /* the background, the sprite hidden */
     agb_write16(&board, 0x07000000, 0x0000);
-    agb_ppu_write(&board, 0x000, 0x0100); /* OBJ off */
+    /* two sprites on one pixel: the lower OAM index over the higher at one priority, a lower priority value over a
+       higher whatever the index, as on the hardware (a character drawn over its shadow) */
+    agb_write16(&board, 0x05000222, 0x001F); /* OBJ palette bank 1, entry 1: red */
+    agb_write16(&board, 0x07000008, 0x0000); /* sprite 1: y = 0 */
+    agb_write16(&board, 0x0700000A, 10);     /* x = 10, over sprite 0 */
+    agb_write16(&board, 0x0700000C, 0x1000); /* tile 0, priority 0, palette bank 1 */
+    run_frame();
+    CHECK(pixel(10, 0) == PIX(0, 0, 31));     /* sprite 0's blue over sprite 1's red */
+    agb_write16(&board, 0x07000004, 1 << 10); /* sprite 0 at priority 1 */
+    run_frame();
+    CHECK(pixel(10, 0) == PIX(31, 0, 0)); /* sprite 1, priority 0, over it */
+    agb_write16(&board, 0x07000004, 0);
+    agb_write16(&board, 0x07000008, 0x0200); /* sprite 1 hidden */
+    agb_ppu_write(&board, 0x000, 0x0100);    /* OBJ off */
     run_frame();
     CHECK(pixel(10, 0) == PIX(0, 31, 0));
 

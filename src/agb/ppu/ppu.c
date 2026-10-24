@@ -268,7 +268,9 @@ static const uint8_t obj_sizes[3][4][2] = {
 static void obj_line(AgbBoard* board, int y) {
     AgbPpu* ppu = &board->ppu;
     int bitmap = (ppu->dispcnt & 7) >= 3, one_d = ppu->dispcnt & 0x40;
-    for (int i = 127; i >= 0; --i) {
+    /* in OAM order, as the hardware: a sprite's pixel goes over one already drawn only with a lower priority value,
+       so the lower index wins between sprites of one priority (a character over its shadow) */
+    for (int i = 0; i < 128; ++i) {
         uint16_t a0 = oam16(board, (uint32_t)i * 8), a1 = oam16(board, (uint32_t)i * 8 + 2);
         uint16_t a2 = oam16(board, (uint32_t)i * 8 + 4);
         int affine = a0 & 0x100, objwin_mode = (a0 & 0xC00) == 0x800, semi = (a0 & 0xC00) == 0x400;
@@ -301,7 +303,7 @@ static void obj_line(AgbBoard* board, int y) {
             int screen_x = sx + px, tx, ty;
             uint32_t units, address;
             uint8_t color;
-            if (screen_x < 0 || screen_x >= AGB_SCREEN_WIDTH || scan.drawn[screen_x]) continue;
+            if (screen_x < 0 || screen_x >= AGB_SCREEN_WIDTH) continue;
             if (affine) {
                 int64_t cx = px - draw_width / 2, cy = rel - draw_height / 2;
                 tx = (int)((pa * cx + pb * cy) >> 8) + width / 2;
@@ -337,6 +339,7 @@ static void obj_line(AgbBoard* board, int y) {
                 scan.objwin[screen_x] = 1;
                 continue;
             }
+            if (scan.drawn[screen_x] && priority >= scan.obj_pri[screen_x]) continue;
             scan.drawn[screen_x] = 1;
             scan.color[4][screen_x] = palette(board, 0x100 + color);
             scan.obj_pri[screen_x] = (uint8_t)priority;
