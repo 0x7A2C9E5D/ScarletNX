@@ -84,7 +84,7 @@ static void memory(CPU* c, u64 base, u32 kind) {
     u32 i;
     g.base = base;
     for (i = 0; i < WINDOW; ++i) g.window[i] = snx_qref_seed_byte(kind, 0, base, base + i);
-    c->mem = g.window - (size_t)base;
+    c->mem = (u8*)((uintptr_t)g.window - (uintptr_t)base); /* as integers: the pointer would leave the array */
 }
 static u8* at(u8* window, u64 address, u64 size) {
     if (address - g.base >= WINDOW || address - g.base + size > WINDOW) return NULL;
