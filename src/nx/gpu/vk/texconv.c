@@ -64,7 +64,8 @@ static u32 tc_mode(const VkFmt* f) {
         case VKC_D32S8: return TC_D32S8;
         case VKC_NONE: return f->bpp == 8 ? TC_D32S8 : TC_D24S8; /* a depth and stencil format as it is in memory */
     }
-    return TC_ETC2_RGB + (f->conv - VKC_ETC2); /* the ETC2 and EAC kinds, in the same order */
+    /* the ETC2 and EAC kinds, and the BCn ones, each in the same order */
+    return f->conv >= VKC_BC1 ? TC_BC1 + (f->conv - VKC_BC1) : TC_ETC2_RGB + (f->conv - VKC_ETC2);
 }
 
 int vk_tc_converts(const VkFmt* f) {
@@ -76,6 +77,12 @@ static VkTcShape tc_shape(u32 mode, u32 w) {
     if (mode <= TC_A5B5G5R1 || (mode >= TC_VI_RGB565 && mode <= TC_VI_RGBA4444)) {
         s.units = (w + 1) / 2;
         s.out_texels = s.units * 2;
+    } else if (mode >= TC_BC1 && mode <= TC_BC7) {
+        s.units = (w + 3) / 4;
+        s.out_texels = s.units * 4;
+        s.out_rows = 4;
+        if (mode == TC_BC4 || mode == TC_BC4_SNORM) s.out_bpp = 2;
+        if (mode == TC_BC6H_UF || mode == TC_BC6H_SF) s.out_bpp = 8;
     } else if (mode >= TC_VI_RGBX8888) {
         s.units = s.out_texels = w;
     } else if (mode == TC_RGB32F) {

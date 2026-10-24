@@ -343,14 +343,26 @@ enum {
     VKC_S8D24,
     VKC_D24X8,
     VKC_D32S8,
-    /* ETC2 and EAC, decoded on the CPU (gpu/texture/etc2.c): in the order of its kinds */
+    /* ETC2 and EAC decoded where the GPU lacks textureCompressionETC2, in texconv's TC_ETC2_RGB to TC_EAC_RG_SNORM
+       order */
     VKC_ETC2,
     VKC_ETC2_PTA,
     VKC_ETC2_RGBA,
     VKC_EAC_R,
     VKC_EAC_R_SNORM,
     VKC_EAC_RG,
-    VKC_EAC_RG_SNORM
+    VKC_EAC_RG_SNORM,
+    /* BC1 to BC7 decoded where the GPU lacks textureCompressionBC, in texconv's TC_BC1 to TC_BC7 order */
+    VKC_BC1,
+    VKC_BC2,
+    VKC_BC3,
+    VKC_BC4,
+    VKC_BC4_SNORM,
+    VKC_BC5,
+    VKC_BC5_SNORM,
+    VKC_BC6H_UF,
+    VKC_BC6H_SF,
+    VKC_BC7
 };
 VkFmt vk_rt_format(u32 fmt);
 VkFmt vk_zt_format(u32 fmt);

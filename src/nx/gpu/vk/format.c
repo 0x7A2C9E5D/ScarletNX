@@ -157,16 +157,18 @@ static VkFmt TC(VkFormat f, int bpp) { /* block compressed, 4x4 */
     VkFmt r = {f, (u8)bpp, 4, 4, 0, 0, 0, 1};
     return r;
 }
-/* which block formats the device samples as they are: textureCompressionASTC_LDR and textureCompressionETC2, which
-   the native_astc and native_etc2 settings turn on (device.c). A texture in them takes the game's own bytes (a
-   12x12 ASTC one a 36th of RGBA8's); the others are decoded on the GPU as they are uploaded */
-enum { NATIVE_ASTC = 1, NATIVE_ETC2 = 2 };
+/* which block formats the device samples as they are: textureCompressionASTC_LDR, textureCompressionETC2 and
+   textureCompressionBC, which the native_astc, native_etc2 and native_bc settings turn on (device.c). A texture in
+   them takes the game's own bytes (a 12x12 ASTC one a 36th of RGBA8's); the others are decoded on the GPU as they
+   are uploaded */
+enum { NATIVE_ASTC = 1, NATIVE_ETC2 = 2, NATIVE_BC = 4 };
 static u32 native_blocks(void) {
     return (g_vk.feat.textureCompressionASTC_LDR ? NATIVE_ASTC : 0) |
-           (g_vk.feat.textureCompressionETC2 ? NATIVE_ETC2 : 0);
+           (g_vk.feat.textureCompressionETC2 ? NATIVE_ETC2 : 0) | (g_vk.feat.textureCompressionBC ? NATIVE_BC : 0);
 }
 static int is_native_block(VkFormat f) {
-    return (f >= VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK && f <= VK_FORMAT_EAC_R11G11_SNORM_BLOCK) ||
+    return (f >= VK_FORMAT_BC1_RGB_UNORM_BLOCK && f <= VK_FORMAT_BC7_SRGB_BLOCK) ||
+           (f >= VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK && f <= VK_FORMAT_EAC_R11G11_SNORM_BLOCK) ||
            (f >= VK_FORMAT_ASTC_4x4_UNORM_BLOCK && f <= VK_FORMAT_ASTC_12x12_SRGB_BLOCK);
 }
 /* the ASTC format of a footprint, UNORM: its SRGB twin follows it (the footprints in Vulkan's order) */
@@ -188,9 +190,10 @@ static VkFmt TA(int bw, int bh, int srgb, u32 native) {
     r.conv = VKC_ASTC;
     return r;
 }
-/* ETC2 and EAC 4x4 blocks: as they are (blocks), else decoded into f on upload */
+/* ETC2, EAC and BCn 4x4 blocks: as they are (blocks) where the device samples them (native, its NATIVE_* bit), else
+   decoded into f on upload */
 static VkFmt TE(VkFormat blocks, VkFormat f, int bpp, int conv, u32 native) {
-    if (native & NATIVE_ETC2) return TC(blocks, bpp);
+    if (native) return TC(blocks, bpp);
     VkFmt r = {f, (u8)bpp, 4, 4, 0, 0, 0, 0};
     r.conv = (u8)conv;
     return r;
@@ -210,6 +213,7 @@ int vk_tic_reads_stencil(const u32* tic) {
 static VkFmt tic_format(u32 w0, int srgb, u32 native) {
     u32 f = w0 & 0x7F, ct = (w0 >> 7) & 7;
     int flt = ct == 7, sn = ct == 1, ui = ct == 4, si = ct == 3;
+    u32 etc2 = native & NATIVE_ETC2, bc = native & NATIVE_BC; /* sampled as blocks (TE) */
 #define PICK(F_, SN_, UI_, SI_, UN_, bpp_)                                                                             \
     return flt  ? T(F_, bpp_, 0, 0)                                                                                    \
            : sn ? T(SN_, bpp_, 0, 0)                                                                                   \
@@ -239,19 +243,19 @@ static VkFmt tic_format(u32 w0, int srgb, u32 native) {
         /* ETC2 to RGBA8; EAC's 11 bits to 16 bit channels, so none are lost */
         case 0x06:
             return TE(srgb ? VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK : VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK,
-                      srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, 8, VKC_ETC2, native);
+                      srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, 8, VKC_ETC2, etc2);
         case 0x0A:
             return TE(srgb ? VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK : VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK,
-                      srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, 8, VKC_ETC2_PTA, native);
+                      srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, 8, VKC_ETC2_PTA, etc2);
         case 0x0B:
             return TE(srgb ? VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK : VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK,
-                      srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, 16, VKC_ETC2_RGBA, native);
+                      srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, 16, VKC_ETC2_RGBA, etc2);
         case 0x19:
-            return sn ? TE(VK_FORMAT_EAC_R11_SNORM_BLOCK, VK_FORMAT_R16_SNORM, 8, VKC_EAC_R_SNORM, native)
-                      : TE(VK_FORMAT_EAC_R11_UNORM_BLOCK, VK_FORMAT_R16_UNORM, 8, VKC_EAC_R, native);
+            return sn ? TE(VK_FORMAT_EAC_R11_SNORM_BLOCK, VK_FORMAT_R16_SNORM, 8, VKC_EAC_R_SNORM, etc2)
+                      : TE(VK_FORMAT_EAC_R11_UNORM_BLOCK, VK_FORMAT_R16_UNORM, 8, VKC_EAC_R, etc2);
         case 0x1A:
-            return sn ? TE(VK_FORMAT_EAC_R11G11_SNORM_BLOCK, VK_FORMAT_R16G16_SNORM, 16, VKC_EAC_RG_SNORM, native)
-                      : TE(VK_FORMAT_EAC_R11G11_UNORM_BLOCK, VK_FORMAT_R16G16_UNORM, 16, VKC_EAC_RG, native);
+            return sn ? TE(VK_FORMAT_EAC_R11G11_SNORM_BLOCK, VK_FORMAT_R16G16_SNORM, 16, VKC_EAC_RG_SNORM, etc2)
+                      : TE(VK_FORMAT_EAC_R11G11_UNORM_BLOCK, VK_FORMAT_R16G16_UNORM, 16, VKC_EAC_RG, etc2);
         case 0x0C:
             PICK(VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_R16G16_SNORM, VK_FORMAT_R16G16_UINT, VK_FORMAT_R16G16_SINT,
                  VK_FORMAT_R16G16_UNORM, 4);
@@ -274,14 +278,30 @@ static VkFmt tic_format(u32 w0, int srgb, u32 native) {
             PICK(VK_FORMAT_R8_UNORM, VK_FORMAT_R8_SNORM, VK_FORMAT_R8_UINT, VK_FORMAT_R8_SINT, VK_FORMAT_R8_UNORM, 1);
         case 0x20: return T(VK_FORMAT_E5B9G9R9_UFLOAT_PACK32, 4, 0, 0);
         case 0x21: return T(VK_FORMAT_B10G11R11_UFLOAT_PACK32, 4, 0, 0);
-        case 0x24: return TC(srgb ? VK_FORMAT_BC1_RGBA_SRGB_BLOCK : VK_FORMAT_BC1_RGBA_UNORM_BLOCK, 8);
-        case 0x25: return TC(srgb ? VK_FORMAT_BC2_SRGB_BLOCK : VK_FORMAT_BC2_UNORM_BLOCK, 16);
-        case 0x26: return TC(srgb ? VK_FORMAT_BC3_SRGB_BLOCK : VK_FORMAT_BC3_UNORM_BLOCK, 16);
-        case 0x27: return TC(sn ? VK_FORMAT_BC4_SNORM_BLOCK : VK_FORMAT_BC4_UNORM_BLOCK, 8);
-        case 0x28: return TC(sn ? VK_FORMAT_BC5_SNORM_BLOCK : VK_FORMAT_BC5_UNORM_BLOCK, 16);
-        case 0x17: return TC(srgb ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK, 16);
-        case 0x10: return TC(VK_FORMAT_BC6H_SFLOAT_BLOCK, 16);
-        case 0x11: return TC(VK_FORMAT_BC6H_UFLOAT_BLOCK, 16);
+        /* BCn to RGBA8; BC4 and BC5 to 16 bit channels and BC6H to half floats, so their interpolants keep the
+           precision a GPU decodes them in */
+        case 0x24:
+            return TE(srgb ? VK_FORMAT_BC1_RGBA_SRGB_BLOCK : VK_FORMAT_BC1_RGBA_UNORM_BLOCK,
+                      srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, 8, VKC_BC1, bc);
+        case 0x25:
+            return TE(srgb ? VK_FORMAT_BC2_SRGB_BLOCK : VK_FORMAT_BC2_UNORM_BLOCK,
+                      srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, 16, VKC_BC2, bc);
+        case 0x26:
+            return TE(srgb ? VK_FORMAT_BC3_SRGB_BLOCK : VK_FORMAT_BC3_UNORM_BLOCK,
+                      srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, 16, VKC_BC3, bc);
+        case 0x27:
+            return sn ? TE(VK_FORMAT_BC4_SNORM_BLOCK, VK_FORMAT_R16_SNORM, 8, VKC_BC4_SNORM, bc)
+                      : TE(VK_FORMAT_BC4_UNORM_BLOCK, VK_FORMAT_R16_UNORM, 8, VKC_BC4, bc);
+        case 0x28:
+            return sn ? TE(VK_FORMAT_BC5_SNORM_BLOCK, VK_FORMAT_R16G16_SNORM, 16, VKC_BC5_SNORM, bc)
+                      : TE(VK_FORMAT_BC5_UNORM_BLOCK, VK_FORMAT_R16G16_UNORM, 16, VKC_BC5, bc);
+        case 0x17:
+            return TE(srgb ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK,
+                      srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, 16, VKC_BC7, bc);
+        case 0x10:
+            return TE(VK_FORMAT_BC6H_SFLOAT_BLOCK, VK_FORMAT_R16G16B16A16_SFLOAT, 16, VKC_BC6H_SF, bc);
+        case 0x11:
+            return TE(VK_FORMAT_BC6H_UFLOAT_BLOCK, VK_FORMAT_R16G16B16A16_SFLOAT, 16, VKC_BC6H_UF, bc);
         case 0x40: return TA(4, 4, srgb, native);
         case 0x50: return TA(5, 4, srgb, native);
         case 0x41: return TA(5, 5, srgb, native);
