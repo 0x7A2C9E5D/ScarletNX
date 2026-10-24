@@ -9,14 +9,6 @@
 
 /* The pack of count inputs (their data and size), malloc'd, or NULL when out of memory */
 unsigned char* snx_objects_pack(const SnxLinkInput* inputs, size_t count, size_t* size);
-/* The same pack written to path a record at a time, with no second copy of the objects in memory. released(arg, i), when
-   given, is called as input i is written so that the caller can free it. 0 with the file's size in *size, or 1 when the
-   file can't be written. An input whose data is NULL is read when its turn comes by load(arg, i, &size), which returns
-   it malloc'd with its size (the input's) and is freed once written, or NULL, which fails the write: a caller that keeps
-   an object on disk need not hold it in memory until then */
-int snx_objects_pack_write(const SnxLinkInput* inputs, size_t count, const char* path, size_t* size,
-                           void (*released)(void* arg, size_t index),
-                           unsigned char* (*load)(void* arg, size_t index, size_t* size), void* arg);
 /* The inputs of the pack at data (size bytes), whose data point into it, malloc'd with their count in *count; each
    name is name. NULL when it is not a pack, is cut short or is out of memory */
 SnxLinkInput* snx_objects_unpack(const unsigned char* data, size_t size, const char* name, size_t* count);

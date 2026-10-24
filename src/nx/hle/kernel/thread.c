@@ -2,9 +2,6 @@
    Copyright 2026 the ScarletNX contributors */
 /* guest threads (each on a host thread of its own), the thread table, process exit, and the four cores the threads
    take turns on */
-#include <errno.h>
-#include <string.h>
-
 #include "nx/hle/kernel/kernel_int.h"
 #include "nx/runtime/arm.h"
 #include "nx/runtime/loader.h"
@@ -303,13 +300,7 @@ KThread* kthread_create(u64 entry, u64 arg, u64 stack_top, int prio, int core) {
 
 /* the host thread's stack: the recompiled code makes each guest call a host call, so it has to hold as many frames as
    the guest's stack does, and more bytes for each */
-#ifdef SNX_IOS
-/* an app's 13 GiB of address space has about a GiB left after the game's memory, the code arenas and the graphics: the
-   eighth thread of a game with some twenty did not fit at 32 MiB each (EAGAIN) */
-#define HOST_STACK ((size_t)8 << 20)
-#else
 #define HOST_STACK ((size_t)32 << 20)
-#endif
 /* A guest RET sets the pc and returns, and a call whose return address isn't that pc returns too (codegen.c checks
    c->pc against pc + 4 after each BL), so a return past the host frames, like libnx's exit resetting the stack and
    returning to the LR crt0 saved, comes back here with the pc where the guest goes on. Only 0, the entry's own return
@@ -336,16 +327,8 @@ void kthread_start(KThread* t) {
     pm_unlock(&g_hle.kernel.klock);
     LOGV("StartThread %llu entry=%llx prio=%d core=%d\n", (unsigned long long)t->id, (unsigned long long)t->entry,
          t->prio, t->core);
-    {
-        static int first = 1;
-        if (first) mem_log_address_space("the game's first thread starts");
-        first = 0;
-    }
-    if (plat_thread(thread_main, t, HOST_STACK)) {
-        int reason = errno;
-        mem_log_address_space("a host thread could not start");
-        fatal("Could not start a host thread for guest thread %llu: %s", (unsigned long long)t->id, strerror(reason));
-    }
+    if (plat_thread(thread_main, t, HOST_STACK))
+        fatal("Could not start a host thread for guest thread %llu", (unsigned long long)t->id);
 }
 /* svcExitThread: the thread's waiters (joins) are woken, and its core goes to the next thread. Then its host thread
    lets go of it: its last use of the KThread, which may be freed with that reference */

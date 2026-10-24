@@ -189,16 +189,6 @@ double snx_seconds(void);
    snx_vm_protect commits the pages it makes accessible and decommits them with SNX_VM_NONE on Windows. 0 or -1 */
 enum { SNX_VM_NONE, SNX_VM_READ, SNX_VM_READ_WRITE, SNX_VM_READ_EXECUTE };
 size_t snx_vm_page_size(void);
-/* the memory this process is charged for now, in bytes: its footprint on macOS and iOS, its resident set on Linux, 0 where
-   it is not known */
-SnxU64 snx_footprint(void);
-#ifdef SNX_IOS
-size_t snx_ios_code_arena_bytes(void); /* what the code arenas asked of the debugger (code_loader.c) */
-#endif
-/* A run on a thread (an iOS app cannot start a process, and a thread cannot be killed) is stopped by asking: the player's
-   abort sets this, and the long loops (the recompiler's units) look at it between their steps and end early */
-void snx_abort_request(int on);
-int snx_abort_requested(void);
 void* snx_vm_reserve(size_t size); /* NULL when the system refuses */
 int snx_vm_protect(void* p, size_t size, int access);
 void snx_vm_release(void* p, size_t size);

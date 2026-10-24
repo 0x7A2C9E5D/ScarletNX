@@ -175,40 +175,26 @@ static const SnxModule* load_pack(const char* path) {
     const char* names[1];
     SnxU64 address = 0;
     ModuleFn get;
-    size_t count = 0, need[3], rtneed[3], room[3], k;
-    PFileMap map;
-    const unsigned char* data;
+    size_t size = 0, count = 0, reserve;
+    unsigned char* data = (unsigned char*)snx_read_file(path, &size);
     char error[1024];
-    /* mapped, not read: the pages are the file's, which the system can take back, and the pack is gone from the
-       address space once the loader has copied it */
-    if (plat_file_map(&map, path) || !map.data) fatal("%s could not be read", path);
-    data = map.data;
-    inputs = snx_objects_unpack(data, (size_t)map.size, "game code", &count);
+    if (!data) fatal("%s could not be read", path);
+    inputs = snx_objects_unpack(data, size, "game code", &count);
     if (!inputs) fatal("%s is not a pack of recompiled code: recompile the game with --target ios", path);
-    /* the guest's address space before the code's arena: the arena lands in the middle of the 13 GiB or so an app has
-       and, with its write alias, leaves no run of the 5 GiB the guest needs at least */
-    mem_reserve();
-    /* each region as large as the pack's sections need, not a share of twice the file: the debugger prepares the whole
-       arena (every page touched, so it is memory the app is charged for) and the arena, with its write alias, takes
-       address space of the 13 GiB or so an app has */
+    /* at least 64 MiB, and twice the objects' size up to the 2 GiB an arena holds */
+    reserve = size < ((size_t)1 << 25) ? ((size_t)1 << 26) : size < ((size_t)1 << 30) ? size * 2 : ((size_t)1 << 31);
+    loader = snx_code_loader_new(reserve, error, sizeof(error));
+    if (!loader) fatal("The game's code cannot be loaded: %s", error);
     memset(&rtlib, 0, sizeof(rtlib));
     rtlib.data = snx_rtlib_object;
     rtlib.size = snx_rtlib_object_size;
     rtlib.name = "rtlib";
-    if (snx_code_need(inputs, count, need, error, sizeof(error)) ||
-        snx_code_need(&rtlib, 1, rtneed, error, sizeof(error)))
-        fatal("The game's code cannot be loaded: %s", error);
-    for (k = 0; k < 3; ++k) room[k] = need[k] + rtneed[k];
-    fprintf(stderr, "jit arena: the pack's sections need code %lu, read-only data %lu, data %lu MiB\n",
-            (unsigned long)(room[0] >> 20), (unsigned long)(room[1] >> 20), (unsigned long)(room[2] >> 20));
-    loader = snx_code_loader_new_regions(room, error, sizeof(error));
-    if (!loader) fatal("The game's code cannot be loaded: %s", error);
     names[0] = "snx_module";
     if (snx_code_load(loader, &rtlib, 1, NULL, 0, NULL, error, sizeof(error)) ||
         snx_code_load(loader, inputs, count, names, 1, &address, error, sizeof(error)))
         fatal("The game's code cannot be loaded: %s", error);
     free(inputs);
-    plat_file_unmap(&map); /* the loaded code is a copy */
+    free(data); /* the loaded code is a copy */
     {
         SnxU64 variants = 0;
         if (snx_code_lookup(loader, "snx_variants", &variants)) { /* a global of the pack, in the loader's table */
@@ -431,15 +417,6 @@ static void say_old_layout(void) {
 /* ---- the program's metadata ---- */
 
 static u32 rd32le(const u8* p) { return (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24; }
-
-/* whether exefs/main.npdm names a system resource size, which read_npdm sets up later: the layout needs it before */
-static int npdm_system_resource(void) {
-    u64 size = 0;
-    u8* d = fs_read_file("exefs/main.npdm", &size);
-    int r = d && size >= 0x80 && size <= 0x4000 && !memcmp(d, "META", 4) && rd32le(d + 0x14);
-    free(d);
-    return r;
-}
 
 /* exefs/main.npdm: the system resource size (newer SDKs set up their memory allocator only with one) and the cores
    and priorities its kernel capabilities allow, from the first ThreadInfo one (svcGetInfo 0 and 1, svcCreateThread's
@@ -915,7 +892,6 @@ int snx_main(int argc, char** argv) {
 #ifdef MODULE_PACK
     g_settings.log_level = 2; /* a phone's log is the only way to see what a run did: everything, until it is steadier */
 #endif
-    if (npdm_system_resource()) mem_layout_vamm();
     mem_init();
     kernel_init();
     dispatch_init();

@@ -54,13 +54,9 @@ int snx_unit_cache_keep(const SnxUnitCache* cache, const char* key, const unsign
    always keeps a tenth of itself free: the cache's oldest objects are removed to make room for a new one, and one
    there is no room for is not cached. Each reason a unit is not cached is said once, for the first unit it stops; the counts (units
    not cached, objects removed for room, reused ones whose time could not be renewed) at snx_unit_cache_close. Units
-   of one cache may run on several threads. 0, or -1 with why in error (snx_ir_object's). key, when not NULL, gets the
-   unit's key if its object is kept whole in the cache when this returns, else an empty string: snx_unit_cache_read
-   has it again from there */
-int snx_unit_cache_object(SnxUnitCache* cache, SnxIr* ir, unsigned char** data, size_t* size, int* reused, char* key,
-                          char* error, size_t error_size);
-/* The object kept under key, malloc'd, its size in *size: NULL when there is none, it is not whole, or memory is out */
-unsigned char* snx_unit_cache_read(const SnxUnitCache* cache, const char* key, size_t* size);
+   of one cache may run on several threads. 0, or -1 with why in error (snx_ir_object's) */
+int snx_unit_cache_object(SnxUnitCache* cache, SnxIr* ir, unsigned char** data, size_t* size, int* reused, char* error,
+                          size_t error_size);
 /* The cache's files in folder (its .o, and the .tmp a write left) held to limit bytes, the oldest by their time (the
    last write or reuse) removed first, then by name; 0 for no limit. Each file it cannot remove is said on stderr. 0, or
    -1 with why in error when the folder cannot be listed */

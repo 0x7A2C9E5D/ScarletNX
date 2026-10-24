@@ -13,7 +13,7 @@
 
 u8* g_mem;
 MemLayout g_layout = {0x08000000ull,   0x2000000000ull, 0x100000000ull, 0x200000000ull,  0x300000000ull,
-                      0x1000000000ull, 0x1300000000ull, 0x100000000ull, 0x1400000000ull, 0x1800000000ull, 0};
+                      0x1000000000ull, 0x1300000000ull, 0x100000000ull, 0x1400000000ull, 0x1800000000ull};
 GuestFn* g_disp;
 u64 g_code_lo, g_code_hi, g_code_memory, g_main_stack_size;
 const RtAPI g_rtapi;
@@ -58,7 +58,6 @@ int mem_map(u64 addr, u64 size, u32 state, u32 perm) {
     return 0;
 }
 u64 mem_total(void) { return 0; }
-void mem_log_address_space(const char* why) { (void)why; }
 u64 used_memory(void) { return 0; }
 void plat_exit_now(int code) { exit(code); }
 int plat_thread(PThreadFn fn, void* arg, size_t stack) {

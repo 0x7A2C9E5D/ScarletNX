@@ -23,7 +23,6 @@ typedef struct {
     u64 alias, alias_size;
     u64 stack, stack_size;
     u64 kern, kern_end; /* the kernel's own pages (TLS) */
-    u64 alias_virtual; /* the alias region's size GetInfo reports when it is larger than the host backs: 0, alias_size */
 } MemLayout;
 #define AS_BASE    (g_layout.base)
 #define AS_END     (g_layout.end)
@@ -85,15 +84,6 @@ enum { MEM_BADSTATE = -1, MEM_NOMEM = -2, MEM_LIMIT = -3 };
 /* the console's layout below 4 GiB for a 32-bit process, by the NPDM's address space type: 0 with the alias region, 2
    without */
 void mem_layout32(unsigned aspace);
-/* iOS: the guest's address space reserved now rather than in mem_init (which finds it kept), before the game's code
-   takes a share of the app's 13 GiB or so and leaves no run of the 5 GiB the guest needs at least. Elsewhere nothing */
-void mem_reserve(void);
-/* the layout of a game with a system resource size (VAMM), once the program's metadata says so: before mem_init */
-void mem_layout_vamm(void);
-/* what the address space holds, said on stderr (iOS: its 13 GiB are scarce; elsewhere nothing) */
-void mem_log_address_space(const char* why);
-/* the most memory the guest may be told it has: 0 for no limit (anywhere but iOS) */
-u64 mem_ios_budget(void);
 void mem_init(void);
 int mem_map(u64 addr, u64 size, u32 state, u32 perm); /* 0, MEM_BADSTATE when it isn't free, MEM_NOMEM */
 int mem_unmap(u64 addr, u64 size);
