@@ -11,6 +11,13 @@
 #define AGB_DMA_WORD   0x0400
 #define AGB_DMA_TIMING 0x3000
 
+/* the channel a register at offset belongs to, 12 bytes each from DMA0SAD (0xB0), and its place in that channel */
+static int channel_of(uint32_t offset, int* part) {
+    uint32_t at = offset - 0xB0;
+    *part = (int)(at % 12);
+    return at < 4 * 12 ? (int)(at / 12) : -1;
+}
+
 static void dma_transfer(AgbBoard* board, int index, int fifo) {
     AgbDmaChannel* channel = &board->dma[index];
     uint32_t count = channel->count ? channel->count : (index == 3 ? 0x10000 : 0x4000);
@@ -58,7 +65,7 @@ static void dma_transfer(AgbBoard* board, int index, int fifo) {
 }
 
 void agb_dma_write(AgbBoard* board, uint32_t offset, uint16_t value) {
-    int index = (int)((offset - 0xB0) >> 4), part = (int)(offset & 0xF);
+    int part, index = channel_of(offset, &part);
     AgbDmaChannel* channel;
     if (index < 0 || index > 3) return;
     channel = &board->dma[index];
@@ -84,7 +91,7 @@ void agb_dma_write(AgbBoard* board, uint32_t offset, uint16_t value) {
 }
 
 uint16_t agb_dma_written(AgbBoard* board, uint32_t offset) {
-    int index = (int)((offset - 0xB0) >> 4), part = (int)(offset & 0xF);
+    int part, index = channel_of(offset, &part);
     const AgbDmaChannel* channel;
     if (index < 0 || index > 3) return 0;
     channel = &board->dma[index];
@@ -98,7 +105,7 @@ uint16_t agb_dma_written(AgbBoard* board, uint32_t offset) {
 }
 
 uint16_t agb_dma_read(AgbBoard* board, uint32_t offset) {
-    int index = (int)((offset - 0xB0) >> 4), part = (int)(offset & 0xF);
+    int part, index = channel_of(offset, &part);
     AgbDmaChannel* channel;
     if (index < 0 || index > 3) return 0;
     channel = &board->dma[index];

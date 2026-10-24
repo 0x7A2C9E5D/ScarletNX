@@ -166,6 +166,18 @@ int main(void) {
     agb_write16(&board, 0x04000000, 0x0403); /* DISPCNT */
     agb_write8(&board, 0x04000001, 0x01);
     CHECK(board.ppu.dispcnt == 0x0103);
+
+    /* the DMA channels' registers, 12 bytes apart from 0xB0: DMA3 copies at a 32-bit store of its count and control,
+       as a game copies its interrupt handler to IWRAM, and DMA1's control is DMA1's alone */
+    agb_write32(&board, 0x040000D4, 0x08000000); /* DMA3SAD */
+    agb_write32(&board, 0x040000D8, 0x03000100); /* DMA3DAD */
+    agb_write32(&board, 0x040000DC, 0x84000002); /* DMA3CNT: two words of 32 bits, now */
+    CHECK(agb_read32(&board, 0x03000100) == agb_read32(&board, 0x08000000) &&
+          agb_read32(&board, 0x03000104) == agb_read32(&board, 0x08000004));
+    CHECK(board.dma[3].count == 2 && !(board.dma[3].control & 0x8000)); /* done: the enable bit clears */
+    agb_write16(&board, 0x040000C6, 0xB640); /* DMA1CNT_H: the sound FIFO's timing, repeat, 32 bits */
+    CHECK(board.dma[1].control == 0xB640 && !board.dma[0].control && !board.dma[2].control);
+    CHECK(agb_read16(&board, 0x040000C6) == 0xB640);
     agb_board_destroy(&board);
     CHECK(!board.has_cartridge && !board.cartridge.data);
 
