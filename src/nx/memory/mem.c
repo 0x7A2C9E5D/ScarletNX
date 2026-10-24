@@ -531,7 +531,10 @@ static void layout_for(u64 size) {
 static u64 g_ios_budget;
 u64 mem_ios_budget(void) { return g_ios_budget; }
 static void ios_budget_read(void) {
-    u64 limit = (u64)os_proc_available_memory() + snx_footprint();
+    u64 avail = (u64)os_proc_available_memory();
+    /* the simulator says none is available (it has no limit): a game is told what the phone it stands in for has, the
+       4 GiB the increased memory limit gives */
+    u64 limit = avail ? avail + snx_footprint() : (4096ull << 20);
     g_ios_budget = limit > IOS_OTHER_MEMORY + (1024ull << 20) ? limit - IOS_OTHER_MEMORY : (1024ull << 20);
     fprintf(stderr, "memory: the game may have %llu MiB (the app's limit is %llu MiB, %llu MiB go to the rest)\n",
             (unsigned long long)(g_ios_budget >> 20), (unsigned long long)(limit >> 20),
