@@ -25,6 +25,9 @@ typedef struct {
     unsigned char* object;
     size_t size;
     int reused; /* the object came from the unit cache */
+    /* a pack's unit the unit cache holds whole: its key, which the pack's write reads the object back by (object NULL
+       until then). Empty for one in memory */
+    char key[65];
 } Unit;
 
 typedef struct {
@@ -66,12 +69,25 @@ static int save_ir(SnxIr* ir, const char* dir, const char* name) {
     return rc;
 }
 
-/* The pack's write (snx_objects_pack_write) of inputs, units[0] the first-th of them: each unit's object freed once
-   written */
+/* The pack's write (snx_objects_pack_write) of inputs, units[0] the first-th of them: each unit's object read back
+   from the unit cache when it is there, freed once written */
 typedef struct {
     Unit* units;
     size_t first, count;
+    const SnxUnitCache* cache;
 } PackUnits;
+static unsigned char* read_unit(void* arg, size_t index, size_t* size, char* why, size_t why_size) {
+    const PackUnits* p = (const PackUnits*)arg;
+    unsigned char* object;
+    char reason[640];
+    if (index < p->first || index - p->first >= p->count || !p->units[index - p->first].key[0]) {
+        snprintf(why, why_size, "input %zu is no unit the unit cache holds", index);
+        return NULL;
+    }
+    object = snx_unit_cache_read(p->cache, p->units[index - p->first].key, size, reason, sizeof reason);
+    if (!object) snprintf(why, why_size, "code_%03zu: %s", index - p->first, reason);
+    return object;
+}
 static void written_unit(void* arg, size_t index) {
     PackUnits* p = (PackUnits*)arg;
     if (index < p->first || index - p->first >= p->count) return;
@@ -100,10 +116,17 @@ static int compile_unit(Queue* q, size_t index, char* error, size_t error_size) 
     rc = q->build->keep_ir && save_ir(ir, q->build->keep_ir, name);
     if (rc) snprintf(error, error_size, "cannot save the IR of %s", name);
     if (!rc && q->cache)
-        rc = snx_unit_cache_object(q->cache, ir, &u->object, &u->size, &u->reused, error, error_size);
+        rc = snx_unit_cache_object(q->cache, ir, &u->object, &u->size, &u->reused, q->build->triple ? u->key : NULL,
+                                   error, error_size);
     else if (!rc)
         rc = snx_ir_object(ir, q->build->opt, &u->object, &u->size, error, error_size);
     snx_ir_free(ir);
+    /* a pack is written a record at a time: an object the cache holds is read back then, not kept in memory with every
+       other unit's until the last is compiled */
+    if (!rc && u->key[0]) {
+        free(u->object);
+        u->object = NULL;
+    }
     return rc;
 }
 
@@ -614,8 +637,10 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
         pack.units = q.units;
         pack.first = n - q.count - cache_count;
         pack.count = q.count;
+        pack.cache = unit_cache;
         snx_codegen_free(&codegen);
-        if (snx_objects_pack_write(inputs, n, tmp, &linked.size, NULL, written_unit, &pack, error, sizeof(error))) {
+        if (snx_objects_pack_write(inputs, n, tmp, &linked.size, read_unit, written_unit, &pack, error,
+                                   sizeof(error))) {
             snx_error("packing failed: %s", error);
             if (snx_is_file(tmp)) snx_remove_tree(tmp);
             goto done;
