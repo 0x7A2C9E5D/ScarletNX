@@ -24,7 +24,11 @@ its 59.73 frames a second. `--fullscreen=1` starts it fullscreen, and F11
 switches. The keyboard is the Switch runtime's: the arrows are the D-pad, X or
 Space A, Z B, Q L, E R, Enter Start and Backspace Select. A gamepad's buttons are
 where the console has them (A east, B south), its shoulders and triggers L and
-R, its left stick the D-pad.
+R, its left stick the D-pad. `--script=ms:hex,...` presses keys unattended, as the
+3DS and Vita drivers take it: each press at its time in ms from the start of the
+run, by the console's frames (the same with a window or without), its keys in
+KEYINPUT's bits (1 A, 2 B, 4 Select, 8 Start, 10 Right, 20 Left, 40 Up, 80 Down,
+100 R, 200 L), held for `--press_len=` ms (300).
 
 The game's folder is `recompiled/<name>/` of the data folder (`--data`, else the
 user's), named after the ROM's file, or `<name>/` of `--outdir`. It holds the

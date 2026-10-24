@@ -75,8 +75,13 @@ if(BUILD_TESTING)
     target_compile_options(snx-test-agb-cpu PRIVATE -Wall -Wextra -Werror)
     set_target_properties(snx-test-agb-cpu PROPERTIES C_STANDARD 23 C_STANDARD_REQUIRED ON)
     add_test(NAME agb_cpu COMMAND snx-test-agb-cpu)
-    # jsmolka's gba-tests (cmake/dependencies.cmake), each ROM a test of its own
     find_package(Python3 COMPONENTS Interpreter)
+    # the runner's scripted presses, read by a ROM the test makes
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME agb_keys COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/agb_keys.py"
+            $<TARGET_FILE:scarletnx-agb-run>)
+    endif()
+    # jsmolka's gba-tests (cmake/dependencies.cmake), each ROM a test of its own
     if(Python3_Interpreter_FOUND AND gba-tests_SOURCE_DIR)
         foreach(rom IN ITEMS arm thumb memory bios nes unsafe save_none save_sram save_flash64 save_flash128 ppu_hello
                         ppu_shades ppu_stripes)

@@ -11,6 +11,7 @@
 #include "agb/runtime/host.h"
 #include "common/utilities/common.h"
 #include "common/utilities/game_ini.h"
+#include "common/utilities/script.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +22,10 @@
 
 /* a save the game writes goes on disk this many frames (a second) after its first write, and at the end */
 #define SAVE_QUIET_FRAMES 60
+/* a frame's time in ms, the console's: the clock a script's presses go by, the same with a window or without */
+#define FRAME_MS          ((double)AGB_SCANLINE_CYCLES * AGB_FRAME_LINES * 1000.0 / 16777216.0)
+/* KEYINPUT's ten keys, the bits a script's press may hold */
+#define SCRIPT_KEYS       0x3FFu
 
 static void usage(void) {
     puts("Usage: scarletnx-agb [OPTIONS] ROM.gba\n"
@@ -35,6 +40,9 @@ static void usage(void) {
          "  --fullscreen=1    start fullscreen (F11 switches)\n"
          "  --frames=N        run N frames with no window, sound or pacing, and exit (tests)\n"
          "  --shot=FILE       write the final frame as a PPM image\n"
+         "  --script=MS:KEYS,...  press keys at a time of the run, MS after its start, KEYS in hex as KEYINPUT has\n"
+         "                    them (1 A, 2 B, 4 Select, 8 Start, 10 Right, 20 Left, 40 Up, 80 Down, 100 R, 200 L)\n"
+         "  --press_len=MS    how long each scripted press is held (default 300)\n"
          "  --registers       print the CPU's registers when the run ends\n"
          "\n"
          "The game's folder, named after the ROM's file, holds its save (<name>.sav), the recompiled module\n"
@@ -147,8 +155,8 @@ static int save_write(AgbBoard* board, const char* path) {
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IOLBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
-    const char *path = NULL, *shot = NULL, *data = NULL, *outdir = NULL, *game = NULL;
-    long frames = -1;
+    const char *path = NULL, *shot = NULL, *data = NULL, *outdir = NULL, *game = NULL, *script = NULL;
+    long frames = -1, press_len = 300;
     int recompile = 0, registers = 0, fullscreen = 0;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
@@ -159,7 +167,16 @@ int main(int argc, char** argv) {
             recompile = 1;
         else if (!strncmp(argv[i], "--frames=", 9))
             frames = strtol(argv[i] + 9, NULL, 0);
-        else if (!strncmp(argv[i], "--shot=", 7))
+        else if (!strncmp(argv[i], "--script=", 9))
+            script = argv[i] + 9;
+        else if (!strncmp(argv[i], "--press_len=", 12)) {
+            char* end;
+            press_len = strtol(argv[i] + 12, &end, 10);
+            if (end == argv[i] + 12 || *end || press_len < 0 || press_len > 0x7FFFFFFF) {
+                fprintf(stderr, "scarletnx-agb: --press_len=%s is not a whole number of ms\n", argv[i] + 12);
+                return 2;
+            }
+        } else if (!strncmp(argv[i], "--shot=", 7))
             shot = argv[i] + 7;
         else if (!strncmp(argv[i], "--game=", 7) && argv[i][7])
             game = argv[i] + 7;
@@ -200,6 +217,8 @@ int main(int argc, char** argv) {
         size_t length = 0;
         int16_t* audio = NULL;
         int status = 1, played = 0; /* played: the frames ran to their end or the window closed */
+        SnxPress* presses = NULL;   /* --script's */
+        size_t press_count = 0;
         long written_at = -1; /* the frame the game last wrote its save at, -1 for none since it was kept */
         /* a ROM's game is made in its folder; a game's folder (--game=, or the copy's own) names its ROM */
         if (path) {
@@ -314,13 +333,13 @@ int main(int argc, char** argv) {
             }
         }
         printf("ScarletNX - %s (GBA)\n", board.cartridge.title[0] ? board.cartridge.title : name);
+        press_count = snx_script_parse("scarletnx-agb", script, SCRIPT_KEYS, &presses);
         for (long frame = 0; frames < 0 || frame < frames; ++frame) {
             uint32_t written = 0;
             uint16_t keys = 0;
-            if (host) {
-                if (!agb_host_poll(host, &keys)) break;
-                agb_board_keys(&board, keys);
-            }
+            if (host && !agb_host_poll(host, &keys)) break;
+            keys |= (uint16_t)snx_script_held(presses, press_count, (double)frame * FRAME_MS, (uint32_t)press_len);
+            agb_board_keys(&board, keys);
             if (agb_cpu_run(&board, &cpu, &recomp, AGB_SCANLINE_CYCLES * AGB_FRAME_LINES, audio, AGB_APU_RATE, &written,
                             error, sizeof error)) {
                 fprintf(stderr, "scarletnx-agb: %s\n", error);
@@ -357,6 +376,7 @@ int main(int argc, char** argv) {
             fprintf(stderr, "scarletnx-agb: cannot save the recompiled ROM: %s\n", error);
         if (played && !status) puts("Exit."); /* a run that ended well says so last, as every driver's */
         free(audio);
+        free(presses);
         agb_recomp_free(&recomp);
     map:
         agb_map_destroy(&map, &board);
