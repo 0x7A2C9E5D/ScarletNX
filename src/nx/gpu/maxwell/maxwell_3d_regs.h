@@ -29,22 +29,29 @@ enum {
     MAXWELL3D_INVALIDATE_SHADER_CACHE = 0x087,
     MAXWELL3D_SYNC_INFO = 0x0B2,
     MAXWELL3D_TESSELLATION = 0x0C8,
+    MAXWELL3D_RASTERIZE_ENABLE = 0x0DF,
     /* transform_feedback.buffers[4]: 8 words each, start_offset the fifth (open-gpu-doc's
        SET_STREAM_OUT_BUFFER_LOAD_WRITE_POINTER) */
     MAXWELL3D_TRANSFORM_FEEDBACK_BUFFERS = 0x0E0,
     MAXWELL3D_TRANSFORM_FEEDBACK_CONTROLS = 0x1C0, /* 4 controls of 4 words */
     MAXWELL3D_TRANSFORM_FEEDBACK_ENABLED = 0x1D1,
     MAXWELL3D_RT = 0x200, /* the 8 color targets, 16 words each, format the fifth */
+    MAXWELL3D_VIEWPORT_TRANSFORM = 0x280, /* 16 ViewportTransforms of 8 words, the swizzle the seventh */
+    MAXWELL3D_VIEWPORTS = 0x300,          /* 16 Viewports of 4 words, depth_range_far the fourth */
     /* vertex_buffer: the non-indexed draw's first vertex and count */
     MAXWELL3D_VERTEX_BUFFER_FIRST = 0x35D,
     MAXWELL3D_VERTEX_BUFFER_COUNT = 0x35E,
     MAXWELL3D_INVALIDATE_SHADER_CACHE_NO_WFI = 0x369,
     MAXWELL3D_POLYGON_MODE_FRONT = 0x36B,
+    MAXWELL3D_POLYGON_MODE_BACK = 0x36C,
     MAXWELL3D_PATCH_VERTICES = 0x373,
     MAXWELL3D_FRAGMENT_BARRIER = 0x378,
+    MAXWELL3D_STENCIL_BACK_MASK = 0x3D6,
+    MAXWELL3D_STENCIL_BACK_FUNC_MASK = 0x3D7,
     MAXWELL3D_INVALIDATE_TEXTURE_DATA_CACHE = 0x3DD,
     MAXWELL3D_TILED_CACHE_BARRIER = 0x3DF,
     MAXWELL3D_COLOR_MASK_COMMON = 0x3E4,
+    MAXWELL3D_COLOR_TARGET_MRT_ENABLE = 0x3EB,
     /* draw_texture (12 words, Eden's Regs::DrawTexture): its last, src_y0, starts it */
     MAXWELL3D_DRAW_TEXTURE = 0x420,
     MAXWELL3D_DRAW_TEXTURE_SRC_Y0 = 0x42B,
@@ -56,19 +63,28 @@ enum {
     MAXWELL3D_BLEND_PER_TARGET_ENABLED = 0x4B9,
     MAXWELL3D_INLINE_INDEX_4X8 = 0x4C0, /* count and start, then the word of four 8-bit indices */
     MAXWELL3D_INLINE_INDEX_4X8_INDEX0 = 0x4C1,
+    MAXWELL3D_DEPTH_TEST_FUNC = 0x4C3,
     MAXWELL3D_BLEND = 0x4CF, /* the common blend state, 17 words; the renderer reads the 16 after the first */
+    MAXWELL3D_STENCIL_FRONT_OP = 0x4E1, /* a StencilOp: fail, zfail, zpass, func */
+    MAXWELL3D_STENCIL_FRONT_FUNC_MASK = 0x4E6,
+    MAXWELL3D_STENCIL_FRONT_MASK = 0x4E7,
     MAXWELL3D_WINDOW_ORIGIN = 0x4EB,
+    MAXWELL3D_LINE_WIDTH_SMOOTH = 0x4EC,
+    MAXWELL3D_LINE_WIDTH_ALIASED = 0x4ED,
     MAXWELL3D_INVALIDATE_SAMPLER_CACHE_NO_WFI = 0x509,
     MAXWELL3D_INVALIDATE_TEXTURE_HEADER_CACHE_NO_WFI = 0x50A,
     MAXWELL3D_GLOBAL_BASE_VERTEX_INDEX = 0x50D,
     MAXWELL3D_GLOBAL_BASE_INSTANCE_INDEX = 0x50E,
     MAXWELL3D_USER_CLIP_ENABLE = 0x544,
     MAXWELL3D_ZPASS_PIXEL_COUNT_ENABLE = 0x545,
+    MAXWELL3D_POINT_SIZE = 0x546,
     MAXWELL3D_CLEAR_REPORT_VALUE = 0x54C,
     /* render_enable: the address of the reports it compares, and its mode */
     MAXWELL3D_RENDER_ENABLE_ADDRESS_HIGH = 0x554,
     MAXWELL3D_RENDER_ENABLE_ADDRESS_LOW = 0x555,
     MAXWELL3D_RENDER_ENABLE_MODE = 0x556,
+    MAXWELL3D_STENCIL_TWO_SIDE_ENABLE = 0x565,
+    MAXWELL3D_STENCIL_BACK_OP = 0x566, /* a StencilOp */
     MAXWELL3D_FRAMEBUFFER_SRGB = 0x56E,
     MAXWELL3D_DRAW_INLINE_INDEX = 0x57A,  /* one 32-bit inline index */
     MAXWELL3D_INLINE_INDEX_2X16 = 0x57B,  /* count and start, then the word of two 16-bit indices */
@@ -87,6 +103,8 @@ enum {
     MAXWELL3D_INDEX_BUFFER16_SUBSEQUENT = 0x5FD,
     MAXWELL3D_INDEX_BUFFER8_SUBSEQUENT = 0x5FE,
     MAXWELL3D_VERTEX_STREAM_INSTANCES = 0x620, /* 32 words */
+    MAXWELL3D_GL_FRONT_FACE = 0x647,
+    MAXWELL3D_GL_CULL_FACE = 0x648,
     MAXWELL3D_VIEWPORT_CLIP_CONTROL = 0x64F,
     MAXWELL3D_RENDER_ENABLE_OVERRIDE = 0x651,
     MAXWELL3D_LOGIC_OP = 0x671, /* 2 words */
@@ -122,6 +140,14 @@ enum {
 #define MAXWELL3D_BIND_GROUP_STRIDE 8u
 #define MAXWELL3D_BIND_GROUP_RAW_CONFIG 4u
 #define MAXWELL3D_TRANSFORM_FEEDBACK_BUFFERS_N 4u
+#define MAXWELL3D_VIEWPORT_TRANSFORM_STRIDE 8u
+#define MAXWELL3D_VIEWPORT_TRANSFORM_SWIZZLE 6u
+#define MAXWELL3D_VIEWPORT_STRIDE 4u
+#define MAXWELL3D_VIEWPORT_DEPTH_RANGE_FAR 3u
+#define MAXWELL3D_NUM_VIEWPORTS 16u
+#define MAXWELL3D_NUM_RENDER_TARGETS 8u
+#define MAXWELL3D_NUM_VERTEX_ATTRIBUTES 32u
+#define MAXWELL3D_BLEND_PER_TARGET_STRIDE 8u
 #define MAXWELL3D_SHADER_STAGES 5u /* the bind groups: vertex, tessellation control and evaluation, geometry,
                                       fragment */
 
@@ -255,5 +281,53 @@ enum {
     CLEAR_REPORT_PIXEL_SHADER_INVOCATIONS = 0x1E,
     CLEAR_REPORT_VTG_PRIMITIVES_OUT = 0x1F
 };
+
+/* the words of the state a channel starts from (reset_3d in gpu.c) */
+
+/* Blend (Eden's Regs::Blend), words from MAXWELL3D_BLEND, and BlendPerTarget, words from MAXWELL3D_BLEND_PER_TARGET
+   + i * MAXWELL3D_BLEND_PER_TARGET_STRIDE. The common one has enable_global_color_key before alpha_dest */
+enum {
+    MAXWELL3D_BLEND_COLOR_OP = 1,
+    MAXWELL3D_BLEND_COLOR_SOURCE = 2,
+    MAXWELL3D_BLEND_COLOR_DEST = 3,
+    MAXWELL3D_BLEND_ALPHA_OP = 4,
+    MAXWELL3D_BLEND_ALPHA_SOURCE = 5,
+    MAXWELL3D_BLEND_ALPHA_DEST = 7,
+    MAXWELL3D_BLEND_PER_TARGET_ALPHA_DEST = 6
+};
+/* Blend::Equation and Blend::Factor, the D3D values the reset uses */
+enum { MAXWELL3D_BLEND_EQUATION_ADD_D3D = 1 };
+enum { MAXWELL3D_BLEND_FACTOR_ZERO_D3D = 1, MAXWELL3D_BLEND_FACTOR_ONE_D3D = 2 };
+
+/* StencilOp (Eden's Regs::StencilOp), words from MAXWELL3D_STENCIL_FRONT_OP or _BACK_OP, and its Op's D3D Keep */
+enum { MAXWELL3D_STENCIL_OP_FAIL = 0, MAXWELL3D_STENCIL_OP_ZFAIL = 1, MAXWELL3D_STENCIL_OP_ZPASS = 2,
+       MAXWELL3D_STENCIL_OP_FUNC = 3 };
+enum { MAXWELL3D_STENCIL_OP_KEEP_D3D = 1 };
+
+/* ComparisonOp's GL Always, FrontFace, CullFace and PolygonMode (GL's enums, as Eden's) */
+enum { MAXWELL3D_COMPARISON_ALWAYS_GL = 0x207 };
+enum { MAXWELL3D_FRONT_FACE_CLOCKWISE = 0x900, MAXWELL3D_FRONT_FACE_COUNTER_CLOCKWISE = 0x901 };
+enum { MAXWELL3D_CULL_FACE_BACK = 0x405 };
+enum { MAXWELL3D_POLYGON_MODE_FILL = 0x1B02 };
+
+/* ViewportTransform's swizzle: x, y, z, w in 4-bit fields from bit 0, each a ViewportSwizzle (PositiveX 0,
+   PositiveY 2, PositiveZ 4, PositiveW 6) */
+enum {
+    MAXWELL3D_VIEWPORT_SWIZZLE_POSITIVE_X = 0,
+    MAXWELL3D_VIEWPORT_SWIZZLE_POSITIVE_Y = 2,
+    MAXWELL3D_VIEWPORT_SWIZZLE_POSITIVE_Z = 4,
+    MAXWELL3D_VIEWPORT_SWIZZLE_POSITIVE_W = 6
+};
+#define MAXWELL3D_VIEWPORT_SWIZZLE_BITS 4u
+#define MAXWELL3D_VIEWPORT_SWIZZLE_IDENTITY                                                                          \
+    (MAXWELL3D_VIEWPORT_SWIZZLE_POSITIVE_X | MAXWELL3D_VIEWPORT_SWIZZLE_POSITIVE_Y << MAXWELL3D_VIEWPORT_SWIZZLE_BITS | \
+     MAXWELL3D_VIEWPORT_SWIZZLE_POSITIVE_Z << 2 * MAXWELL3D_VIEWPORT_SWIZZLE_BITS |                                    \
+     MAXWELL3D_VIEWPORT_SWIZZLE_POSITIVE_W << 3 * MAXWELL3D_VIEWPORT_SWIZZLE_BITS)
+
+/* VertexAttribute's constant bit (bit 6): the attribute reads a constant, not a buffer */
+#define MAXWELL3D_VERTEX_ATTRIB_CONSTANT (1u << 6)
+/* ColorMask (Eden's Regs::ColorMask): R, G, B, A in 4-bit fields from bit 0. The reset value sets each of the
+   word's eight fields to 1, so R, G, B and A are written */
+#define MAXWELL3D_COLOR_MASK_ALL 0x11111111u
 
 #endif

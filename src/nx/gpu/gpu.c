@@ -32,6 +32,7 @@
 #include "nx/gpu/maxwell/kepler_compute_regs.h"
 #include "nx/gpu/maxwell/maxwell_3d_regs.h"
 #include "nx/gpu/maxwell/maxwell_dma_regs.h"
+#include "nx/gpu/maxwell/fermi2d_regs.h"
 #include "nx/gpu/texture/blocklinear.h"
 #include "nx/gpu/renderer.h"
 #include "nx/hle/services/nvdrv.h"
@@ -344,50 +345,60 @@ void i2m_data(GpuChannel* ch, u32 v) {
 
 /* ------------------------------------------------------------ channels */
 /* the 3D state a channel starts from: zero, but for what games expect without setting it (Eden's
-   InitializeRegisterDefaults), and ScarletNX's own: color masks enabled (Fire Emblem Three Houses and Unicorn
-   Overlord never write them), sRGB writes on (0x56E, else sRGB targets come out too dark), the render enable TRUE
-   (0x556) and its override USE_RENDER_ENABLE (0x651, as deko3d never writes it) */
-/* The registers are named in each line's comment after Eden's Maxwell3D::Regs fields, with their values' enums
-   (Blend::Equation and Factor's D3D values, ComparisonOp's GL ones, StencilOp's D3D ones, GL's polygon modes and
-   faces). Indices are method indices */
+   InitializeRegisterDefaults), and ScarletNX's own: color masks enabled (two games never write them), sRGB writes
+   on (framebuffer_srgb, else sRGB targets come out too dark), the render enable TRUE and its override
+   USE_RENDER_ENABLE (deko3d never writes it). The registers and their values are Eden's Maxwell3D::Regs fields
+   and enums (maxwell_3d_regs.h) */
 static void reset_3d(u32* r) {
     static const float one = 1.0f;
     u32 i, f1;
     memcpy(&f1, &one, 4);
-    for (i = 0; i < 16; i++) {
-        r[0x300 + i * 4 + 3] = f1;     /* viewports[i].depth_range_far 1.0 */
-        r[0x280 + i * 8 + 6] = 0x6420; /* viewport_transform[i].swizzle: PositiveX, Y, Z, W in nibbles 0, 4, 8, 12 */
+    for (i = 0; i < MAXWELL3D_NUM_VIEWPORTS; i++) {
+        r[MAXWELL3D_VIEWPORTS + i * MAXWELL3D_VIEWPORT_STRIDE + MAXWELL3D_VIEWPORT_DEPTH_RANGE_FAR] = f1;
+        r[MAXWELL3D_VIEWPORT_TRANSFORM + i * MAXWELL3D_VIEWPORT_TRANSFORM_STRIDE + MAXWELL3D_VIEWPORT_TRANSFORM_SWIZZLE] =
+            MAXWELL3D_VIEWPORT_SWIZZLE_IDENTITY;
     }
-    r[0x4D0] = 1; /* blend.color_op Add_D3D */
-    r[0x4D1] = 2; /* blend.color_source One_D3D */
-    r[0x4D2] = 1; /* blend.color_dest Zero_D3D */
-    r[0x4D3] = 1; /* blend.alpha_op Add_D3D */
-    r[0x4D4] = 2; /* blend.alpha_source One_D3D */
-    r[0x4D6] = 1; /* blend.alpha_dest Zero_D3D */
-    for (i = 0; i < 8; i++) {
-        u32* b = &r[0x780 + i * 8]; /* blend_per_target[i]: the same, from its word 1 */
-        b[1] = 1, b[2] = 2, b[3] = 1, b[4] = 1, b[5] = 2, b[6] = 1;
+    /* blending off in effect: dst = src * One + dst * Zero, the common state and each target's */
+    r[MAXWELL3D_BLEND + MAXWELL3D_BLEND_COLOR_OP] = MAXWELL3D_BLEND_EQUATION_ADD_D3D;
+    r[MAXWELL3D_BLEND + MAXWELL3D_BLEND_COLOR_SOURCE] = MAXWELL3D_BLEND_FACTOR_ONE_D3D;
+    r[MAXWELL3D_BLEND + MAXWELL3D_BLEND_COLOR_DEST] = MAXWELL3D_BLEND_FACTOR_ZERO_D3D;
+    r[MAXWELL3D_BLEND + MAXWELL3D_BLEND_ALPHA_OP] = MAXWELL3D_BLEND_EQUATION_ADD_D3D;
+    r[MAXWELL3D_BLEND + MAXWELL3D_BLEND_ALPHA_SOURCE] = MAXWELL3D_BLEND_FACTOR_ONE_D3D;
+    r[MAXWELL3D_BLEND + MAXWELL3D_BLEND_ALPHA_DEST] = MAXWELL3D_BLEND_FACTOR_ZERO_D3D;
+    for (i = 0; i < MAXWELL3D_NUM_RENDER_TARGETS; i++) {
+        u32* b = &r[MAXWELL3D_BLEND_PER_TARGET + i * MAXWELL3D_BLEND_PER_TARGET_STRIDE];
+        b[MAXWELL3D_BLEND_COLOR_OP] = MAXWELL3D_BLEND_EQUATION_ADD_D3D;
+        b[MAXWELL3D_BLEND_COLOR_SOURCE] = MAXWELL3D_BLEND_FACTOR_ONE_D3D;
+        b[MAXWELL3D_BLEND_COLOR_DEST] = MAXWELL3D_BLEND_FACTOR_ZERO_D3D;
+        b[MAXWELL3D_BLEND_ALPHA_OP] = MAXWELL3D_BLEND_EQUATION_ADD_D3D;
+        b[MAXWELL3D_BLEND_ALPHA_SOURCE] = MAXWELL3D_BLEND_FACTOR_ONE_D3D;
+        b[MAXWELL3D_BLEND_PER_TARGET_ALPHA_DEST] = MAXWELL3D_BLEND_FACTOR_ZERO_D3D;
     }
-    r[0x4E1] = r[0x4E2] = r[0x4E3] = 1; /* stencil_front_op fail, zfail, zpass Keep_D3D */
-    r[0x4E4] = 0x207;                   /* stencil_front_op.func Always_GL */
-    r[0x4E6] = r[0x4E7] = 0xFFFFFFFF;   /* stencil_front_func_mask, stencil_front_mask */
-    r[0x565] = 1;                       /* stencil_two_side_enable */
-    r[0x566] = r[0x567] = r[0x568] = 1; /* stencil_back_op fail, zfail, zpass Keep_D3D */
-    r[0x569] = 0x207;                   /* stencil_back_op.func Always_GL */
-    r[0x3D6] = r[0x3D7] = 0xFFFFFFFF;   /* stencil_back_func_mask, stencil_back_mask */
-    r[0x4C3] = 0x207;                   /* depth_test_func Always_GL */
-    r[0x647] = 0x900; /* gl_front_face: ClockWise, NVN's default (Eden starts CounterClockWise, 0x901) */
-    r[0x648] = 0x405; /* gl_cull_face Back */
-    r[0x546] = f1;    /* point_size 1.0 */
-    for (i = 0; i < 32; i++) r[0x458 + i] = 1u << 6; /* vertex_attrib_format[i].constant: constant until set */
-    r[0xDF] = 1;                                      /* rasterize_enable */
-    r[0x3EB] = 1;                                     /* color_target_mrt_enable */
-    r[0x4EC] = r[0x4ED] = f1;                         /* line_width_smooth, line_width_aliased 1.0 */
-    r[0x36B] = r[0x36C] = 0x1B02;                     /* polygon_mode_front and _back Fill (GL_FILL) */
-    for (i = 0; i < 8; i++) r[0x680 + i] = 0x11111111; /* color_mask[i]: R, G, B, A enabled (bits 0, 4, 8, 12) */
-    r[0x56E] = 1; /* framebuffer_srgb */
-    r[0x556] = 1; /* render_enable.mode True */
-    r[0x651] = 0; /* render_enable_override UseRenderEnable */
+    /* stencil: both faces keep every value and always pass, with full masks */
+    for (i = MAXWELL3D_STENCIL_OP_FAIL; i <= MAXWELL3D_STENCIL_OP_ZPASS; i++) {
+        r[MAXWELL3D_STENCIL_FRONT_OP + i] = MAXWELL3D_STENCIL_OP_KEEP_D3D;
+        r[MAXWELL3D_STENCIL_BACK_OP + i] = MAXWELL3D_STENCIL_OP_KEEP_D3D;
+    }
+    r[MAXWELL3D_STENCIL_FRONT_OP + MAXWELL3D_STENCIL_OP_FUNC] = MAXWELL3D_COMPARISON_ALWAYS_GL;
+    r[MAXWELL3D_STENCIL_BACK_OP + MAXWELL3D_STENCIL_OP_FUNC] = MAXWELL3D_COMPARISON_ALWAYS_GL;
+    r[MAXWELL3D_STENCIL_FRONT_FUNC_MASK] = r[MAXWELL3D_STENCIL_FRONT_MASK] = 0xFFFFFFFFu;
+    r[MAXWELL3D_STENCIL_BACK_FUNC_MASK] = r[MAXWELL3D_STENCIL_BACK_MASK] = 0xFFFFFFFFu;
+    r[MAXWELL3D_STENCIL_TWO_SIDE_ENABLE] = 1;
+    r[MAXWELL3D_DEPTH_TEST_FUNC] = MAXWELL3D_COMPARISON_ALWAYS_GL;
+    /* clockwise front faces are NVN's default; Eden starts counter-clockwise */
+    r[MAXWELL3D_GL_FRONT_FACE] = MAXWELL3D_FRONT_FACE_CLOCKWISE;
+    r[MAXWELL3D_GL_CULL_FACE] = MAXWELL3D_CULL_FACE_BACK;
+    r[MAXWELL3D_POINT_SIZE] = f1;
+    for (i = 0; i < MAXWELL3D_NUM_VERTEX_ATTRIBUTES; i++)
+        r[MAXWELL3D_VERTEX_ATTRIB_FORMAT + i] = MAXWELL3D_VERTEX_ATTRIB_CONSTANT; /* constant until set */
+    r[MAXWELL3D_RASTERIZE_ENABLE] = 1;
+    r[MAXWELL3D_COLOR_TARGET_MRT_ENABLE] = 1;
+    r[MAXWELL3D_LINE_WIDTH_SMOOTH] = r[MAXWELL3D_LINE_WIDTH_ALIASED] = f1;
+    r[MAXWELL3D_POLYGON_MODE_FRONT] = r[MAXWELL3D_POLYGON_MODE_BACK] = MAXWELL3D_POLYGON_MODE_FILL;
+    for (i = 0; i < MAXWELL3D_NUM_RENDER_TARGETS; i++) r[MAXWELL3D_COLOR_MASK + i] = MAXWELL3D_COLOR_MASK_ALL;
+    r[MAXWELL3D_FRAMEBUFFER_SRGB] = 1;
+    r[MAXWELL3D_RENDER_ENABLE_MODE] = MAXWELL3D_RENDER_ENABLE_TRUE;
+    r[MAXWELL3D_RENDER_ENABLE_OVERRIDE] = MAXWELL3D_RENDER_ENABLE_OVERRIDE_USE_RENDER_ENABLE;
 }
 static void channel_reset(GpuChannel* ch) {
     /* the subchannels as NVN binds them; Eden's channel binds the same classes by the stream's BindObject */
@@ -404,7 +415,7 @@ static void channel_reset(GpuChannel* ch) {
     memcpy(ch->r3d_shadow, ch->r3d, sizeof ch->r3d_shadow); /* the reset values count as tracked */
     ch->r3d_dirty = ~0u; /* nothing the renderer derived from another channel's registers holds for these */
     /* Eden's Fermi2D dst.depth and src.depth: the 2D surfaces' depth, as NVIDIA's driver assumes */
-    ch->r2d[0x83] = ch->r2d[0x8F] = 1;
+    ch->r2d[FERMI2D_DST + FERMI2D_SURFACE_DEPTH] = ch->r2d[FERMI2D_SRC + FERMI2D_SURFACE_DEPTH] = 1;
 }
 /* the channel of syncpoint id, made at its first submission. The queue's lock held */
 static GpuChannel* channel_get(u32 id) {
