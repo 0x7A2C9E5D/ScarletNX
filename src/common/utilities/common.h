@@ -192,6 +192,10 @@ size_t snx_vm_page_size(void);
 /* the memory this process is charged for now, in bytes: its footprint on macOS and iOS, its resident set on Linux, 0 where
    it is not known */
 SnxU64 snx_footprint(void);
+/* A run on a thread (an iOS app cannot start a process, and a thread cannot be killed) is stopped by asking: the player's
+   abort sets this, and the long loops (the recompiler's units) look at it between their steps and end early */
+void snx_abort_request(int on);
+int snx_abort_requested(void);
 void* snx_vm_reserve(size_t size); /* NULL when the system refuses */
 int snx_vm_protect(void* p, size_t size, int access);
 void snx_vm_release(void* p, size_t size);

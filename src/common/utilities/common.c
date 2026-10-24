@@ -217,6 +217,9 @@ static DWORD attributes(const char* path) {
     return a;
 }
 #endif
+static volatile int g_abort_requested;
+void snx_abort_request(int on) { g_abort_requested = on; }
+int snx_abort_requested(void) { return g_abort_requested; }
 SnxU64 snx_footprint(void) {
 #ifdef __APPLE__
     task_vm_info_data_t info;
