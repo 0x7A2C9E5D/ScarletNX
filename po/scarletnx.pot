@@ -1107,6 +1107,16 @@ msgstr ""
 msgid "Move"
 msgstr ""
 
+#: src/gui/main.c
+msgid "Play"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Recompile"
+msgstr ""
+
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -1194,16 +1204,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Open Cheats Folder"
-msgstr ""
-
-#. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
-#, snx-key
-msgid "Recompile"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Play"
 msgstr ""
 
 #: src/gui/main.c
@@ -2829,6 +2829,11 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "  default, %s free"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s is compiled already, in %s"
 msgstr ""
 
 #: src/gui/main.c

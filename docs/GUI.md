@@ -368,7 +368,9 @@ cannot be read is named and the others still listed.
 - In the list, Up/Down go round the recent games and the page's files. Enter/Space opens one. A game no game of the
   recompiled library was made from yet (a dump, a package, a ROM) compiles first, through the queue of compiles R's
   goes through: the Compile tab shows it, and it plays once its compile ended if the tab still shows it; sent away
-  first (Tab), the tips say it is ready, and Enter then plays it.
+  first (Tab), the tips say it is ready, and Enter then plays it. One a game was made from already, in `recompiled/` or
+  a recompiled folder of the Library, asks first, naming the game and its folder: **Play**, in focus, plays it,
+  **Recompile** recompiles it where it is, as R does, and Back does neither.
 - **R** (on Android a tap on *Recompile* at the foot) recompiles the game in focus, recent or on the page, whichever
   console's, where it is, or makes its dump or package again: its driver's `-r` (`scarletnx -r`, `scarletnx-3ds -r`,
   `scarletnx-vita -r`, `scarletnx-agb -r`). It plays nothing, and goes in the queue of compiles, which runs them one

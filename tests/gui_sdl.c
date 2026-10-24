@@ -470,6 +470,13 @@ static char* made_game(const App* app, const char* dump, const char* name) {
     free(data_name);
     return folder;
 }
+/* the question a dump whose game is made asks (GUI_ASK_MADE), naming the game and where it is: Play, in focus, taken */
+static void play_made(App* app) {
+    assert(app->confirm.shown && app->confirm.ask == GUI_ASK_MADE && !app->confirm.selected && app->made_file);
+    assert(strstr(app->ask_line, " is compiled already, in "));
+    key(app, SDLK_RETURN);
+    assert(!(app->confirm.shown && app->confirm.ask == GUI_ASK_MADE) && !app->made_file); /* a failure may say why */
+}
 /* made_game's game gone, and with it the games folder when nothing else is left in it (made_game made it), as the tests
    after it expect the folder; folder freed */
 static void made_gone(const App* app, char* folder) {
@@ -2718,8 +2725,41 @@ static void compile_first(App* app, const char* dir) {
     assert(!strcmp(app->message, "first compile: compiled, Enter on it plays it"));
     remove(got);
     queue_drop(app, 0);
-    driver_will(NULL, 0, NULL);
     made_gone(app, made);
+    /* made already in a folder of the Library's recompiled ones, where a recompile keeps it: opening the dump asks,
+       naming the game and its folder, Play first. Back does nothing, Recompile queues it as R does, Play runs it */
+    {
+        char *library = snx_path_join(dir, "library recompiled"), *games_was = app->games_dir, expected[1024];
+        app->games_dir = library; /* made_game's place, for the game alone */
+        made = made_game(app, dump, "first compile");
+        app->games_dir = games_was;
+        folder_keep(app, library, GUI_LIBRARY_RECOMPILED, false);
+        go_tab(app, GUI_TAB_MENU);
+        launch(app, snx_strdup(dump), false);
+        snprintf(expected, sizeof expected, "first compile is compiled already, in %s", made);
+        assert(app->confirm.shown && app->confirm.ask == GUI_ASK_MADE && !launched(app));
+        assert(!strcmp(app->ask_line, expected));
+        key(app, SDLK_ESCAPE);
+        assert(!app->confirm.shown && !launched(app) && !app->made_file);
+        launch(app, snx_strdup(dump), false);
+        key(app, SDLK_DOWN);
+        key(app, SDLK_RETURN); /* Recompile */
+        assert(!app->menu.running && app->queue.job[0].kind == GUI_JOB_RECOMPILE);
+        argv_got = ran(app, 0);
+        assert(has_arg(argv_got, "-r", dump));
+        free(argv_got);
+        launch(app, snx_strdup(dump), false);
+        key(app, SDLK_RETURN); /* Play: the dump, its driver playing the game made */
+        assert(app->menu.running && !app->queue.count);
+        argv_got = ran(app, 0);
+        assert(strstr(argv_got, dump) && !has_arg(argv_got, "-r", NULL));
+        free(argv_got);
+        free(app->folders[--app->folder_count]); /* off the list, no screen of Folders opened for it */
+        assert(!snx_remove_tree(library));
+        free(made);
+        free(library);
+    }
+    driver_will(NULL, 0, NULL);
     assert(!remove(dump));
     go_tab(app, GUI_TAB_MENU);
     free(got);
@@ -5291,6 +5331,7 @@ int main(int argc, char** argv) {
     free(app.run_log);                                      /* Folders' Logs may have set one */
     app.run_log = snx_path_join(temporary, "last-run.log"); /* the run's output, kept as it comes */
     event(&app, &e);
+    play_made(&app);
     assert(app.menu.running && app.menu.selected == GUI_SWITCH);
     finish(&app, 0);
     assert(!app.native && !gui_steps_last(&app.steps, "LAUNCH")); /* a driver that started no game stayed compiling */
@@ -5301,6 +5342,7 @@ int main(int argc, char** argv) {
         app.self = NULL;
         set_env("PATH", "/nonexistent");
         launch(&app, snx_strdup(input), false);
+        play_made(&app);
         assert(!app.menu.running && !strcmp(app.message, "Cannot find scarletnx beside ScarletNX or on PATH."));
         assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR && !strcmp(app.error_line, app.message));
         key(&app, SDLK_RETURN); /* in the box too, whole, until OK */
@@ -5340,6 +5382,7 @@ int main(int argc, char** argv) {
     app.menu.selected = GUI_SWITCH;
     launcher(&app, true);
     launch(&app, snx_strdup(flags_input), false);
+    play_made(&app);
     finish(&app, 0);
     assert(!app.native && gui_steps_last(&app.steps, "LAUNCH"));
     launcher(&app, false);
@@ -5590,7 +5633,8 @@ int main(int argc, char** argv) {
             assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ROOM && !app.menu.running);
             key(&app, SDLK_RETURN); /* Back */
             assert(!app.confirm.shown && !snx_copy_file(self, program) && !snx_make_executable(program));
-            launch(&app, snx_strdup(dump), false);
+            launch(&app, snx_strdup(dump), false); /* made: played or recompiled, as asked */
+            play_made(&app);
             assert(!app.confirm.shown && app.menu.running);
             finish(&app, 0);
             app.recent = (GuiRecent){0};
@@ -5749,7 +5793,8 @@ int main(int argc, char** argv) {
             ini = snx_game_ini(out, "0100ABCD12345000"); /* the link alone, no source= */
             assert(!remove(ini));
             if (!snx_symlink(dump, link)) { /* Windows without the right to make one: none to test */
-                launch(&app, snx_strdup(dump), false);
+                launch(&app, snx_strdup(dump), false); /* made, an older version's way: asked as well */
+                play_made(&app);
                 assert(!app.confirm.shown && app.menu.running);
                 finish(&app, 0);
             }
@@ -5826,6 +5871,7 @@ int main(int argc, char** argv) {
         again_made = made_game(&app, again, "option flags");
         app.menu.selected = GUI_LINUX;
         key(&app, SDLK_RETURN);
+        play_made(&app);
         assert(app.menu.running && app.menu.selected == GUI_LINUX && app.recent.game[0].driver == GUI_SWITCH);
         finish(&app, 0);
         assert(app.recent.count == 1 && app.menu.view == GUI_LOAD_NONE);
@@ -5901,6 +5947,7 @@ int main(int argc, char** argv) {
             app.menu.selected = GUI_SWITCH;
             launcher(&app, true);
             launch(&app, game, false);
+            play_made(&app);
             for (Uint64 until = SDL_GetTicks() + 10000; app.menu.running && SDL_GetTicks() < until; SDL_Delay(5))
                 pump(&app);
             assert(app.finished && !app.abnormal_exit);
@@ -7637,6 +7684,7 @@ int main(int argc, char** argv) {
         app.menu.selected = GUI_SWITCH;
         launcher(&app, true);
         launch(&app, snx_strdup(steps_input), false);
+        play_made(&app);
         assert(app.menu.running && app.fade_ms);
         for (until = SDL_GetTicks() + 10000; app.menu.running && SDL_GetTicks() < until; SDL_Delay(5)) {
             pump(&app);
@@ -8442,6 +8490,7 @@ int main(int argc, char** argv) {
             char* input_made = made_game(&app, input, "game with spaces");
             app.menu.selected = GUI_SWITCH;
             launch(&app, snx_strdup(input), false);
+            play_made(&app);
             made_gone(&app, input_made);
             for (until = SDL_GetTicks() + 5000; app.menu.running && SDL_GetTicks() < until; SDL_Delay(5)) pump(&app);
             assert(app.finished && !app.abnormal_exit);

@@ -438,6 +438,9 @@ typedef struct App {
     char* own_dir;      /* Android: the app's own storage; a folder outside it is asked about (GUI_ASK_OUTSIDE) */
     char* outside_path; /* the folder asked about, for the row outside_place */
     int outside_place;
+    char* made_file; /* a dump whose game is made, asked about (GUI_ASK_MADE): played or recompiled, by made_item */
+    int made_item;
+    bool made_ok;    /* asked and answered Play: the dump runs, its driver playing the game made */
     char* room_file; /* a run asked about (GUI_ASK_ROOM): its file, its load and whether it was prepared */
     int room_item;
     bool room_prepared, room_recompile;
@@ -1857,7 +1860,8 @@ static const char* ask_question(App* app) {
         case GUI_ASK_PLACES:
         case GUI_ASK_PLACE:
         case GUI_ASK_FOLDER:
-        case GUI_ASK_MOVE: return app->ask_line;
+        case GUI_ASK_MOVE:
+        case GUI_ASK_MADE: return app->ask_line;
         case GUI_ASK_ERROR: return app->error_line;
         case GUI_ASK_CLOSE:
             if (!app->menu.running && !app->finished) return job_leaving(app);
@@ -2224,6 +2228,7 @@ static const char* const ask_choices[][2] = {{SNX_TR_NOOP("Continue"), SNX_TR_NO
                                              {SNX_TR_NOOP("Cancel"), SNX_TR_NOOP("Remove")},
                                              {SNX_TR_NOOP("Cancel"), SNX_TR_NOOP("Move")},
                                              {SNX_TR_NOOP("Cancel"), SNX_TR_NOOP("Exit")},
+                                             {SNX_TR_NOOP("Play"), SNX_TR_NOOP("Recompile")},
                                              {SNX_TR_NOOP("OK"), NULL}};
 /* the question shown, over the whole screen in the middle or at its foot, a choice asked twice saying so once pressed:
    how many choices it has, one for a failure's OK */
@@ -6384,17 +6389,22 @@ typedef struct {
     MadeGame* game;
     size_t count;
 } MadeGames;
-static void made_read(const App* app, MadeGames* made) {
+/* the games made in dir (recompiled/ or a folder of the Library's recompiled ones), each with the dump it names */
+static void made_read_dir(MadeGames* made, const char* dir) {
     char** names = NULL;
     size_t count = 0, i;
-    *made = (MadeGames){0};
-    if (!app->games_dir || snx_list_dir(app->games_dir, &names, &count) || !count) return;
-    made->game = (MadeGame*)snx_alloc(count * sizeof *made->game);
+    MadeGame* grown;
+    if (!dir || snx_list_dir(dir, &names, &count) || !count) return;
+    if (!(grown = (MadeGame*)realloc(made->game, (made->count + count) * sizeof *grown))) {
+        snx_free_strings(names, count);
+        return;
+    }
+    made->game = grown;
     for (i = 0; i < count; ++i) {
-        char *program = gui_folder_game(app->games_dir, names[i]), *folder, *dump;
+        char *program = gui_folder_game(dir, names[i]), *folder, *dump;
         int recorded = 0;
         if (!program) continue;
-        folder = snx_path_join(app->games_dir, names[i]);
+        folder = snx_path_join(dir, names[i]);
         dump = snx_game_source(folder, names[i], &recorded);
         free(folder);
         if (!recorded) {
@@ -6405,6 +6415,16 @@ static void made_read(const App* app, MadeGames* made) {
         made->game[made->count++] = (MadeGame){program, dump};
     }
     snx_free_strings(names, count);
+}
+/* the games made in recompiled/ and in the Library's recompiled folders, the places a dump's game is made in
+   (dest_dirs): a game the driver recompiles stays where it is */
+static void made_read(const App* app, MadeGames* made) {
+    *made = (MadeGames){0};
+    made_read_dir(made, app->games_dir);
+    for (int i = 0; i < app->folder_count; ++i)
+        if (app->folders_library[i] == GUI_LIBRARY_RECOMPILED &&
+            !(app->games_dir && snx_same_file(app->folders[i], app->games_dir)))
+            made_read_dir(made, app->folders[i]);
 }
 /* the program of the game made from dump, else NULL */
 #ifdef SDL_PLATFORM_IOS
@@ -9720,6 +9740,41 @@ static void dests_pointer(App* app, float x, float y, bool click) {
     if (!choices_pointer(app, &c, x, y, click, &on) && click && !on) dest_take(app, -1);
 }
 static void job_add(App* app, const char* const* argv, const char* file, bool native, bool prepared, GuiJobKind kind);
+/* file, a dump whose game is made: asked whether that game plays or the dump recompiles (GUI_ASK_MADE), file kept */
+static void made_ask(App* app, char* file) {
+    MadeGames made;
+    const char* program;
+    char *shown, *folder;
+    made_read(app, &made);
+    program = made_program(&made, file);
+    shown = program ? gui_game_shown(program) : snx_strdup(file);
+    folder = program ? snx_dirname(program) : snx_strdup("?");
+    snprintf(app->ask_line, sizeof app->ask_line, snx_tr("%s is compiled already, in %s"), shown, folder);
+    free(folder);
+    free(shown);
+    made_free(&made);
+    free(app->made_file);
+    app->made_file = file;
+    app->made_item = app->menu.selected;
+    gui_confirm_open(&app->confirm, GUI_ASK_MADE, false);
+}
+/* the answer about a made game's dump: Play runs the dump, its driver playing the game made (one gone since compiles
+   first), Recompile recompiles it as R does; Back neither */
+static void made_answer(App* app, bool taken, bool second) {
+    char* file = app->made_file;
+    app->made_file = NULL;
+    if (!taken || !file) {
+        free(file);
+        return;
+    }
+    int item = app->menu.selected; /* the menu keeps its item, as a recent game's run does (open_recent) */
+    app->menu.selected = app->made_item;
+    app->recompile = second;
+    app->made_ok = !second;
+    launch(app, file, false);
+    app->recompile = app->made_ok = false;
+    app->menu.selected = item;
+}
 static void queue_show(App* app, int i);
 static void launch(App* app, char* absolute, bool prepared) {
     int queued;
@@ -9748,6 +9803,12 @@ static void launch(App* app, char* absolute, bool prepared) {
         return;
     }
 #endif
+    /* a dump, package or ROM a game was made from already: played or recompiled, as the player answers (made_answer;
+       DraVee, 2026-10-24) */
+    if (!app->recompile && !app->made_ok && !prepared && app->menu.selected != GUI_LINUX && made_from(app, absolute)) {
+        made_ask(app, absolute);
+        return;
+    }
     /* a game opened that no game of the library was made from yet compiles first through the queue, as R's recompile
        does: the Compile tab shows it, and it plays once it ended if the tab still shows it (job_play) */
     bool compile = !app->recompile && !prepared && app->menu.selected != GUI_LINUX && !made_from(app, absolute);
@@ -9796,8 +9857,9 @@ static void launch(App* app, char* absolute, bool prepared) {
         free(game_option);
         return;
     }
-    /* a dump made into the folder the player picks, when the recompiled library has more than one that can take it */
-    if (app->menu.selected == GUI_SWITCH && !prepared && !app->dest_out) {
+    /* a dump made into the folder the player picks, when the recompiled library has more than one that can take it; one
+       made already is recompiled where it is */
+    if (app->menu.selected == GUI_SWITCH && !prepared && !app->dest_out && !made_from(app, absolute)) {
         const char* dirs[GUI_FOLDERS_MAX + 1];
         if (dest_dirs(app, dirs) > 1) {
             dests_open(app, absolute, prepared);
@@ -9808,6 +9870,7 @@ static void launch(App* app, char* absolute, bool prepared) {
     }
     /* a dump not extracted yet may need more room than its disks have: asked first, Run Anyway pressed twice */
     if (folders && !app->room_ok && !room_fits(app, absolute)) {
+        free(app->made_file);
         free(app->room_file);
         app->room_file = absolute;
         app->room_item = app->menu.selected;
@@ -11259,6 +11322,8 @@ static void ask_key(App* app, GuiKey key) {
         outside_answer(app, second);
     else if (ask == GUI_ASK_ROOM)
         room_answer(app, second);
+    else if (ask == GUI_ASK_MADE)
+        made_answer(app, key == GUI_SELECT, second);
     else if (ask == GUI_ASK_TEXT)
         size_answer(app, second);
     else if (ask == GUI_ASK_CLEAN || ask == GUI_ASK_RESET || ask == GUI_ASK_PLACES || ask == GUI_ASK_PLACE ||
