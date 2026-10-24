@@ -5294,7 +5294,11 @@ int main(int argc, char** argv) {
         app.games_dir = snx_path_join(temporary, "gba-games");
         char* rom = snx_path_join(app.games_dir, "agb input.gba");
         char* folder = snx_path_join(app.games_dir, "made");
+#ifdef _WIN32
+        char* program = snx_path_join(folder, "made.exe"); /* a game there is an .exe */
+#else
         char* program = snx_path_join(folder, "made");
+#endif
         char kind[160];
         size_t i;
         assert(!snx_mkdirs(app.games_dir) && !snx_write_file(rom, "fixture", 7));
