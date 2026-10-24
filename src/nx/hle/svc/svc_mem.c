@@ -90,9 +90,9 @@ static int user_writable(u64 a, u64 size) {
 /* The application pool for each memory_gb (Mesosphere's KSystemControl application pool sizes for the 4, 6 and 8 GiB
    boards), see docs/MEMORY_ACCOUNTING.md */
 u64 mem_total(void) {
-    if (g_settings.memory_gb >= 8) return 6964 * MIB;
-    if (g_settings.memory_gb >= 6) return 4916 * MIB;
-    return 3285 * MIB;
+    u64 total = g_settings.memory_gb >= 8 ? 6964 * MIB : g_settings.memory_gb >= 6 ? 4916 * MIB : 3285 * MIB;
+    u64 budget = mem_ios_budget();
+    return budget && budget < total ? budget : total;
 }
 /* the loaded images, the main thread's stack, the heap, physical memory and the system resource, charged once */
 u64 used_memory(void) {

@@ -90,6 +90,10 @@ void mem_layout32(unsigned aspace);
 void mem_reserve(void);
 /* the layout of a game with a system resource size (VAMM), once the program's metadata says so: before mem_init */
 void mem_layout_vamm(void);
+/* what the address space holds, said on stderr (iOS: its 13 GiB are scarce; elsewhere nothing) */
+void mem_log_address_space(const char* why);
+/* the most memory the guest may be told it has: 0 for no limit (anywhere but iOS) */
+u64 mem_ios_budget(void);
 void mem_init(void);
 int mem_map(u64 addr, u64 size, u32 state, u32 perm); /* 0, MEM_BADSTATE when it isn't free, MEM_NOMEM */
 int mem_unmap(u64 addr, u64 size);
