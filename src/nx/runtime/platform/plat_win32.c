@@ -7,6 +7,7 @@
 #include "nx/runtime/main.h"
 #include "nx/runtime/options.h"
 #include "nx/runtime/platform/log.h"
+#include <errno.h>
 #include <io.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -235,7 +236,12 @@ u8* plat_vm_reserve(u64 size) {
         g_ww_size = size;
         return (u8*)p;
     }
-    return (u8*)VirtualAlloc(NULL, (SIZE_T)size, MEM_RESERVE, PAGE_NOACCESS);
+    p = VirtualAlloc(NULL, (SIZE_T)size, MEM_RESERVE, PAGE_NOACCESS);
+    if (!p) { /* the reason in errno, as mmap's */
+        DWORD why = GetLastError();
+        errno = why == ERROR_NOT_ENOUGH_MEMORY || why == ERROR_COMMITMENT_LIMIT ? ENOMEM : EINVAL;
+    }
+    return (u8*)p;
 }
 
 int plat_ww_scan(u8* p, u64 size, void (*cb)(u8* p, u64 size)) {

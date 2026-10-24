@@ -6,6 +6,7 @@
 #include "nx/hle/hle.h"
 #include "nx/runtime/clock.h"
 #include "nx/gpu/gpu.h"
+#include <errno.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdarg.h>
@@ -37,8 +38,14 @@ u64 plat_vm_page(void) { return host_page; }
 /* aligned to host_page, a page more reserved for that (the unaligned head and tail stay inaccessible) */
 static u8* reservation;
 static u64 reservation_size;
+static u64 refuse_above; /* a system that gives no more than this much address space (0: any) */
 u8* plat_vm_reserve(u64 size) {
-    void* p = mmap(NULL, size + host_page, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    void* p;
+    if (refuse_above && size > refuse_above) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    p = mmap(NULL, size + host_page, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (p == MAP_FAILED) return NULL;
     reservation = (u8*)p;
     reservation_size = size + host_page;
@@ -438,8 +445,20 @@ int main(void) {
         test_mapped_runs();
         test_mapping_boundary(); /* last: every commit after it must be inside a mapping */
         CHECK(munmap(reservation, reservation_size) == 0);
+        g_mem = NULL; /* the next round reserves it again */
         printf("memory accounting with %llu KiB host pages: %u checks passed\n",
                (unsigned long long)(host_page >> 10), checks);
     }
+    /* a system that gives less than the console's 128 GiB: the largest tier it gives, in a layout of that size */
+    host_page = (u64)sysconf(_SC_PAGESIZE);
+    refuse_above = 24ull << 30;
+    mem_reserve();
+    CHECK(g_mem && g_as_size == 24ull << 30 && g_layout.end == 24ull << 30);
+    CHECK(g_layout.alias == 4ull << 30 && g_layout.alias_size == 4ull << 30 && g_layout.heap == 8ull << 30 &&
+          g_layout.heap_size == 8ull << 30 && g_layout.stack == 16ull << 30 && g_layout.stack_size == 2ull << 30 &&
+          g_layout.kern == 23ull << 30 && g_layout.kern_end == 24ull << 30);
+    CHECK(munmap(reservation, reservation_size) == 0);
+    g_mem = NULL;
+    refuse_above = 0;
     return 0;
 }
