@@ -24,7 +24,7 @@ interrupts are out of scope: if a question seems to need them, the answer is in 
   `native_codegen` (expected values through the LLVM steps), and by the FP helpers' witnesses
   (`a64_fp_witnesses`, `a64_fp_arithmetic_witnesses`).
 - `src/common/cpu/aarch64/cpu.h` holds the guest CPU state and `SNX_ABI`. `cpu_helpers.c` and `helpers/` (`fp.c`,
-  `integer.c`, `simd.c`, `crypto.c`, `simd_mem.c`) are compiled into every game module. Changing anything there or
+  `integer.c`, `fp_arithmetic.c`, `crypto.c`, `vector.c`) are compiled into every game module. Changing anything there or
   in the recompiler means recompiling games, and changing the ABI means bumping `SNX_ABI`.
 - The agreed direction (October 2026): FP and SIMD get native IR instead of calls into runtime decoders
   (`snx_simd`, `snx_step`), staying ARMv8-A exact; QEMU is the test oracle. Never trade

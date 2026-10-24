@@ -376,10 +376,10 @@ int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char*
     *data = NULL;
     *size = 0;
     if (ir->fallbacks) {
-        size_t index;
-        const SnxA64Pattern* pattern = snx_a64_case_pattern(snx_a64_decode(ir->fallback_word), &index);
+        SnxA64Insn insn;
+        SnxA64Op op = snx_a64_decode_word(ir->fallback_word, ir->guest_features, &insn);
         snprintf(error, error_size, "no IR emitter for %s (%08lx at %llx), %lu instruction%s in all",
-                 pattern ? pattern->name : "?", (unsigned long)ir->fallback_word, (unsigned long long)ir->fallback_pc,
+                 snx_a64_op_text(op), (unsigned long)ir->fallback_word, (unsigned long long)ir->fallback_pc,
                  ir->fallbacks, ir->fallbacks == 1 ? "" : "s");
         return -1;
     }

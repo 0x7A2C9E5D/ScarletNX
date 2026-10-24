@@ -4,8 +4,8 @@
    division and exclusive-monitor rules cross-checked against QEMU (target/arm/tcg/translate-a64.c,
    helper-a64.c), LGPL-2.1-or-later:
    Copyright (c) 2013 Alexander Graf <agraf@suse.de> */
-/* The guest CPU of a game module (a Cortex-A57 at EL0) and the small helpers generated code and the interpreter
-   inline. Every module and its runtime library include it, and the emitters reach the fields by offsetof, so the
+/* The guest CPU of a game module (a Cortex-A57 at EL0) and the small helpers generated code
+   inlines. Every module and its runtime library include it, and the emitters reach the fields by offsetof, so the
    layout below is the binary contract that SNX_ABI versions. */
 #ifndef SNX_CPU_H
 #define SNX_CPU_H
@@ -145,19 +145,6 @@ typedef char snx_check_cpu_tail[sizeof(void*) != 8 || (offsetof(CPU, disp) == 85
 #define SNX_VSET_H(v, i, x)  ((v).h[i] = (u16)SNX_GUEST16((u16)(x)))
 #define SNX_VSET_S(v, i, x)  ((v).s[i] = (u32)SNX_GUEST32((u32)(x)))
 #define SNX_VSET_D(v, i, x)  ((v).d[i] = (u64)SNX_GUEST64((u64)(x)))
-#define RD8(a)      (*(u8*)MP(a))
-#define RD16(a)     ((u16)SNX_GUEST16(*(u16*)MP(a)))
-#define RD32(a)     ((u32)SNX_GUEST32(*(u32*)MP(a)))
-#define RD64(a)     ((u64)SNX_GUEST64(*(u64*)MP(a)))
-#define RDS8(a)     (*(i8*)MP(a))
-#define RDS16(a)    ((i16)RD16(a))
-#define RDS32(a)    ((i32)RD32(a))
-#define WR8(a, v)   (*(u8*)MP(a) = (u8)(v))
-#define WR16(a, v)  (*(u16*)MP(a) = SNX_GUEST16((u16)(v)))
-#define WR32(a, v)  (*(u32*)MP(a) = SNX_GUEST32((u32)(v)))
-#define WR64(a, v)  (*(u64*)MP(a) = SNX_GUEST64((u64)(v)))
-#define RDQ(dst, a) memcpy(&(dst), MP(a), 16)
-#define WRQ(a, src) memcpy(MP(a), &(src), 16)
 
 /* ---- indirect calls: the function compiled for a pc, or the runtime JIT for one discovery missed ---- */
 /* A slot goes from NULL to a function while other threads read it (the runtime JIT publishes with release ordering,
@@ -236,8 +223,6 @@ SNX_INLINE u32 subs32(CPU* c, u32 a, u32 b) {
     c->vf = ((a ^ b) & (a ^ diff)) >> 31;
     return diff;
 }
-SNX_INLINE u64 sbcs64(CPU* c, u64 a, u64 b, u32 cin) { return adds64(c, a, ~b, cin); }
-SNX_INLINE u32 sbcs32(CPU* c, u32 a, u32 b, u32 cin) { return adds32(c, a, ~b, cin); }
 /* ANDS/BICS: N and Z from the result, C and V cleared */
 SNX_INLINE void logic64(CPU* c, u64 r) {
     c->n = (u32)(r >> 63);
@@ -291,7 +276,6 @@ SNX_INLINE u64 ext64(u64 x, u32 opt, u32 sh) {
 /* ---- bit counts and reversals ---- */
 SNX_INLINE u32 clz64(u64 x) { return x ? (u32)__builtin_clzll(x) : 64; }
 SNX_INLINE u32 clz32(u32 x) { return x ? (u32)__builtin_clz(x) : 32; }
-SNX_INLINE u32 popc8(u8 x) { return (u32)__builtin_popcount(x); }
 /* FreeBSD defines these */
 #ifndef bswap32
 SNX_INLINE u32 bswap32(u32 x) { return __builtin_bswap32(x); }
@@ -351,7 +335,7 @@ SNX_INLINE i64 smulh64(i64 a, i64 b) {
     return (i64)high;
 }
 
-/* ---- UBFM, SBFM, BFM for the interpreter (DecodeBitMasks with immediate false) ----
+/* ---- UBFM, SBFM, BFM, as ir_helpers.c builds them in IR (DecodeBitMasks with immediate false) ----
    wmask is the rotated field of imms+1 ones, tmask the d+1 low ones, d = (imms - immr) mod datasize */
 SNX_INLINE u64 bmask(u32 n) { return n >= 64 ? ~(u64)0 : ((u64)1 << n) - 1; }
 SNX_INLINE u64 snx_bf_ror(u64 x, u32 s, u32 ds) { return ds == 32 ? ror32((u32)x, s) : ror64(x, s); }
@@ -369,17 +353,12 @@ SNX_INLINE u64 bfm_(u64 dst, u64 src, u32 immr, u32 imms, u32 ds) {
     u64 bot = (dst & ~wmask) | (snx_bf_ror(src, immr, ds) & wmask);
     return ((dst & ~tmask) | (bot & tmask)) & bmask(ds);
 }
-/* the logical immediate (DecodeBitMasks with immediate true), replicated to ds bits; 0 for a reserved encoding */
-u64 snx_decode_bitmask(u32 N, u32 imms, u32 immr, u32 ds);
 
 /* ---- host instruction set extensions ----
    The helpers are plain C with no host-specific paths. The runtime library (rtlib.c) is compiled without -march,
    since the recompiler that embeds it runs on other machines than the one that built it; the LLVM backend compiles
    it for the CPU each module is built on (snx_ir_rtlib_object), and the generated code uses the host's extensions
    itself (ir.c's snx_ir_host). */
-
-/* ---- CRC32 and CRC32C (castagnoli) of the low bytes (1, 2, 4 or 8) of val ---- */
-u32 snx_crc32(u32 acc, u64 val, int bytes, int castagnoli);
 
 /* ---- floating point (helpers/fp.c) ----
    Raw IEEE encodings in and out, with integer arithmetic only: no host floating point, libm or host rounding
@@ -407,26 +386,12 @@ u64 snx_fp_bfcvt(CPU* c, u64 bits); /* BFCVT: a single's bfloat16 */
 u32 urecpe32(u32 x);
 u32 ursqrte32(u32 x);
 
-/* ---- saturation of a value to a signed or unsigned bits-wide integer ---- */
-SNX_INLINE i64 sat_s(i64 v, int bits) {
-    i64 hi = bits >= 64 ? (i64)0x7FFFFFFFFFFFFFFFull : (i64)(((u64)1 << (bits - 1)) - 1);
-    i64 lo = -hi - 1;
-    return v > hi ? hi : v < lo ? lo : v;
-}
-SNX_INLINE u64 sat_u(i64 v, int bits) {
-    u64 hi = bmask((u32)bits);
-    if (v < 0) return 0;
-    return (u64)v > hi ? hi : (u64)v;
-}
-
-/* ---- AdvSIMD helpers out of line (tests/a64_reference/simd.c, helpers/crypto.c, helpers/vector.c) ---- */
-void v_tbl(CPU* c, u32 d, u32 n, u32 len, u32 m, int q, int tbx);
+/* ---- AdvSIMD helpers out of line (helpers/crypto.c, helpers/vector.c) ---- */
 void v_aes(V128* d, const V128* k, int dec);         /* AESE (dec 0), AESD (1): d = round(d ^ k) */
 void v_aesmc(V128* d, const V128* s, int inv);       /* AESMC (inv 0), AESIMC (1) */
 void v_sha1(CPU* c, u32 op, u32 d, u32 n, u32 m);    /* op 0-3: SHA1C/P/M/SU0; 0x10, 0x11: SHA1H, SHA1SU1 */
 void v_sha256(CPU* c, u32 op, u32 d, u32 n, u32 m);  /* op 4-6: SHA256H/H2/SU1; 0x12: SHA256SU0 */
 void v_pmull(V128* d, const V128* a, const V128* b, int hi); /* PMULL 1Q (hi: PMULL2) */
-u64 v_expand_imm(u32 op, u32 cmode, u32 imm8);       /* AdvSIMDExpandImm */
 /* helpers/vector.c: SRSHL, URSHL, [SU]Q[R]SHL by register (desc: esz | lanes << 2 | flags << 8, flags 1 unsigned,
    2 rounding, 4 saturating); SHA512H/H2/SU0/SU1 (op 0-3); SM3PARTW1/W2, SM3TT1A/1B/2A/2B (op 0-5, imm2);
    SM4E, SM4EKEY (op 0, 1); and BFDOT's step */
@@ -441,7 +406,7 @@ SNX_INLINE void dc_zva(u8* M, u64 a) { memset(MP(a & ~(u64)63), 0, 64); }
 
 /* ---- exclusives and ordering ----
    Load-exclusive, load-acquire and store-release are sequentially consistent host atomics of the access size
-   (LDACQ, STREL), so no later access moves above an acquire load and no earlier one below a release store, which
+   (LDACQ), so no later access moves above an acquire load and no earlier one below a release store, which
    plain or volatile accesses don't guarantee once the compiler reorders them. A DMB or DSB of the loads type is an
    acquire fence, of the stores type a release fence, and every other one and ISB a seq_cst fence (ir_int.c's
    barriers). Nothing else orders guest memory, so plain guest loads and
@@ -464,7 +429,6 @@ SNX_INLINE u32 snx_cas8(u8* p, u8 expected, u8 desired) {
 /* one atomic 16-byte compare-and-swap of both halves (p[0] the low one): cmpxchg16b on x86-64, lqarx/stqcx. on
    POWER8, c->rt->cas128 on RISC-V, LoongArch and PowerPC64 builds for an older baseline */
 u32 snx_cas128(CPU* c, u64* p, u64 o0, u64 o1, u64 n0, u64 n1);
-#define SNX_FENCE()    __atomic_thread_fence(__ATOMIC_SEQ_CST)
 /* ABI 3 made these and snx_cas128 atomic, so modules from before are refused */
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 /* the T's byte-swapped, as one access (T of 1, 2, 4 or 8 bytes) */
@@ -474,10 +438,8 @@ u32 snx_cas128(CPU* c, u64* p, u64 o0, u64 o1, u64 n0, u64 n1);
          : sizeof(T) == 8 ? __builtin_bswap64((u64)(v))                                                              \
                           : (v)))
 #define LDACQ(T, a)    SNX_GUEST_T(T, __atomic_load_n((T*)MP(a), __ATOMIC_SEQ_CST))
-#define STREL(T, a, v) __atomic_store_n((T*)MP(a), SNX_GUEST_T(T, (T)(v)), __ATOMIC_SEQ_CST)
 #else
 #define LDACQ(T, a)    __atomic_load_n((T*)MP(a), __ATOMIC_SEQ_CST)
-#define STREL(T, a, v) __atomic_store_n((T*)MP(a), (T)(v), __ATOMIC_SEQ_CST)
 #endif
 /* LDXR/LDAXR of 1 << sz bytes */
 SNX_INLINE u64 ldx(CPU* c, u8* M, u64 a, u32 sz) {
@@ -549,53 +511,6 @@ void snx_msr(CPU* c, u32 sysreg, u64 v);
 /* IC IVAU Xt: the instruction cache line at Xt invalidated, for code the guest wrote there */
 void snx_ic_ivau(CPU* c, u64 a);
 
-/* ---- what the templates' C uses ---- */
-#define RX(n) ((n) == 31 ? (u64)0 : c->x[n])
-#define SETX(n, e)                                                                                                     \
-    do {                                                                                                               \
-        u64 t__ = (e);                                                                                                 \
-        if ((n) != 31) c->x[n] = t__;                                                                                  \
-    } while (0)
-/* a scalar FP/SIMD result: the low 32, 64 or 16 bits of Vd, the rest of the register zeroed */
-#define SETSB(D_, E_)                                                                                                  \
-    do {                                                                                                               \
-        u32 t__ = (u32)(E_);                                                                                           \
-        V128* p__ = &c->v[D_];                                                                                         \
-        p__->d[1] = 0;                                                                                                 \
-        SNX_VSET_D(*p__, 0, t__);                                                                                      \
-    } while (0)
-#define SETDB(D_, E_)                                                                                                  \
-    do {                                                                                                               \
-        u64 t__ = (u64)(E_);                                                                                           \
-        V128* p__ = &c->v[D_];                                                                                         \
-        p__->d[1] = 0;                                                                                                 \
-        SNX_VSET_D(*p__, 0, t__);                                                                                      \
-    } while (0)
-#define SETH(D_, E_)                                                                                                   \
-    do {                                                                                                               \
-        u16 t__ = (u16)(E_);                                                                                           \
-        V128* p__ = &c->v[D_];                                                                                         \
-        p__->d[1] = 0;                                                                                                 \
-        SNX_VSET_D(*p__, 0, t__);                                                                                      \
-    } while (0)
-#define SETHB(d, e) SETH(d, e)
-#define FPRM        ((int)((c->fpcr >> 22) & 3)) /* FPCR.RMode */
-#define CBAR()      __asm__ __volatile__("" ::: "memory")
-/* YIELD marks spin-wait loops. The compiler barrier makes such a loop reload guest memory (a loop with no call
-   could otherwise keep it in registers), and x86's pause tells the CPU the loop spins, which frees the sibling
-   hyperthread and avoids a pipeline flush when the loop ends. POWER's yield hint (or 27,27,27) lowers the hardware
-   thread's priority the same way */
-#if defined(__x86_64__)
-#define YIELD()                                                                                                        \
-    do {                                                                                                               \
-        __builtin_ia32_pause();                                                                                        \
-        CBAR();                                                                                                        \
-    } while (0)
-#elif defined(__powerpc64__)
-#define YIELD() __asm__ __volatile__("or 27,27,27" ::: "memory")
-#else
-#define YIELD() CBAR()
-#endif
 /* FMOV (immediate): VFPExpandImm of imm8 = a:b:cdefgh to a single or double */
 SNX_INLINE u32 vfp_imm32(u32 i) {
     u32 b = (i >> 6) & 1;
@@ -607,6 +522,4 @@ SNX_INLINE u64 vfp_imm64(u32 i) {
     u64 exponent = ((b ^ 1) << 10) | (b ? 0x3FCu : 0) | ((i >> 4) & 3); /* NOT(b):Replicate(b,8):cd */
     return (u64)((i >> 7) & 1) << 63 | exponent << 52 | (u64)(i & 15) << 48;
 }
-/* every AdvSIMD, crypto and SIMD load/store word: 0 for an unallocated one (UNDEFINED) */
-int snx_simd(CPU* c, u8* M, u32 w);
 #endif

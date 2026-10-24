@@ -4,7 +4,7 @@
 #define SNX_TOOL_CODEGEN_H
 
 #include "common/cpu/recompiler/image.h"
-#include "common/cpu/aarch64/a64.h"
+#include "common/cpu/aarch64/a64_decoder.h"
 
 typedef struct {
     SnxU64 start, end;
@@ -56,6 +56,5 @@ const SnxFunction* snx_codegen_function(const SnxCodegen* codegen, SnxU64 addres
 /* the function that starts at address, or else one that has a leader there: what GuestFn(c, address) enters. NULL when
    none has */
 const SnxFunction* snx_codegen_entry(const SnxCodegen* codegen, SnxU64 address);
-void snx_codegen_emit(FILE* out, SnxCodegen* codegen, const SnxFunction* function);
 
 #endif

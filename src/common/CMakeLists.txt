@@ -4,7 +4,7 @@ add_library(scarletnx-common STATIC
     utilities/common.c utilities/process.c utilities/font.c utilities/ini_lines.c utilities/game_ini.c utilities/pad_map.c
     utilities/pad_screen.c utilities/users.c utilities/logscan.c utilities/language_tag.c utilities/mods.c utilities/patches.c utilities/cheat_list.c
     utilities/spirv_emit.c memory/host.c
-    cpu/aarch64/a64.c cpu/aarch64/a64_decoder.c cpu/recompiler/codegen.c cpu/recompiler/variants.c runtime/cas128.c)
+    cpu/aarch64/a64_decoder.c cpu/recompiler/codegen.c cpu/recompiler/variants.c runtime/cas128.c)
 target_compile_definitions(scarletnx-common PRIVATE _CRT_SECURE_NO_WARNINGS
     SNX_HOST_COMPILER="${CMAKE_C_COMPILER}"
     SNX_CPU_INCLUDE="${CMAKE_CURRENT_SOURCE_DIR}/cpu/aarch64"
@@ -38,12 +38,6 @@ if(NOT ANDROID AND NOT IOS)
     target_compile_options(snx-logscan PRIVATE -pedantic-errors -Wall -Wextra -Werror -Werror=missing-prototypes)
     target_link_libraries(snx-logscan PRIVATE snx_demangle)
 endif()
-
-# The C emitter and its static-step reference. Tests build modules against it; the recompiler and every game module
-# use the LLVM backend instead.
-add_library(snx_a64_reference STATIC cpu/aarch64/a64_emit.c cpu/recompiler/codegen_emit.c)
-target_compile_options(snx_a64_reference PRIVATE -fno-strict-aliasing -Wall -Wextra -Werror=missing-prototypes)
-target_link_libraries(snx_a64_reference PUBLIC scarletnx-common)
 
 # The setup a first start goes through (utilities/setup.h), the launcher's and the driver's: OpenSSL for the first
 # user's random uid

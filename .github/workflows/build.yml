@@ -377,7 +377,7 @@ jobs:
   #         path: .cache/deps
   #         key: ${{ steps.deps-used.outputs.key }}
   #     # every test through qemu-ppc64le (the preset's emulator and QEMU_LD_PREFIX), the recompiler's included: the
-  #     # LLVM backend's PowerPC code against the C templates (llvm_differential), linked by link_elf.c and loaded
+  #     # LLVM backend's PowerPC code (native_codegen, native_recompiler), linked by link_elf.c and loaded
   #     - name: Test under qemu-user
   #       run: ctest --preset linux-ppc64le-cross --parallel "$(getconf _NPROCESSORS_ONLN)"
 

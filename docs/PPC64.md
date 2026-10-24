@@ -211,9 +211,9 @@ the host's CPU, or for this one where the host's name isn't known. What changes 
 - **STXP's 16-byte compare-and-swap goes through the runtime** (`RtAPI.cas128`, `common/runtime/cas128.c`), as on
   RISC-V and LoongArch. It runs POWER8's `lqarx`/`stqcx.` where the kernel reports ISA 2.07, and takes a lock of the
   address's stripe elsewhere, which keeps the 16 bytes atomic against other STXPs but not against plain stores.
-- **Single-precision vector lanes take the slow path** (`altivec_lanes` in `ir_fp.c`). Without VSX, LLVM puts them
-  on AltiVec, whose VSCR[NJ] is set when Linux starts a thread, so denormals flush to zero. Double lanes and scalars
-  use the FPU.
+- **Single-precision vector lanes can flush denormals.** Without VSX, LLVM puts them on AltiVec, whose VSCR[NJ] is
+  set when Linux starts a thread, so denormals flush to zero where an emitter (`ir_vec_fp.c`) uses the host's vector
+  arithmetic. Double lanes and scalars use the FPU.
 - Rounding, `floor`, `trunc`, `rint`, `minnum` and the half conversions would be libm calls on these CPUs, which the
   emitters already avoid on PowerPC64.
 
