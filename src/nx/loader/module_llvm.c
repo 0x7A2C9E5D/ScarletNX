@@ -66,6 +66,19 @@ static int save_ir(SnxIr* ir, const char* dir, const char* name) {
     return rc;
 }
 
+/* The pack's write (snx_objects_pack_write) of inputs, units[0] the first-th of them: each unit's object freed once
+   written */
+typedef struct {
+    Unit* units;
+    size_t first, count;
+} PackUnits;
+static void written_unit(void* arg, size_t index) {
+    PackUnits* p = (PackUnits*)arg;
+    if (index < p->first || index - p->first >= p->count) return;
+    free(p->units[index - p->first].object);
+    p->units[index - p->first].object = NULL;
+}
+
 static SnxIr* new_ir(const SnxLlvmBuild* build, const char* name, char* error, size_t error_size) {
     return build->triple ? snx_ir_new_target(name, build->opt, build->triple, error, error_size)
                          : snx_ir_new(name, build->opt, error, error_size);
@@ -592,21 +605,37 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     }
     exports[0] = "snx_module";
     if (variant_count) exports[export_count++] = "snx_variants";
+    tmp = snx_format("%s.tmp", build->output);
     if (build->triple) {
-        linked.data = snx_objects_pack(inputs, n, &linked.size);
-        if (!linked.data) {
-            snx_error("packing failed: out of memory");
+        /* the pack to its file a record at a time, the code generator's tables gone first: a game of hundreds of
+           thousands of functions has them, its objects and a copy of them as one pack in memory otherwise */
+        PackUnits pack;
+        char reason[256];
+        pack.units = q.units;
+        pack.first = n - q.count - cache_count;
+        pack.count = q.count;
+        snx_codegen_free(&codegen);
+        if (snx_objects_pack_write(inputs, n, tmp, &linked.size, NULL, written_unit, &pack, error, sizeof(error))) {
+            snx_error("packing failed: %s", error);
+            if (snx_is_file(tmp)) snx_remove_tree(tmp);
             goto done;
         }
-    } else if (snx_link(inputs, n, exports, export_count, base_name(build->output), &linked, error, sizeof(error))) {
-        snx_error("linking failed: %s", error);
-        goto done;
-    }
-    tmp = snx_format("%s.tmp", build->output);
-    if (snx_write_file(tmp, linked.data, linked.size) || snx_replace(tmp, build->output)) {
-        snx_error("linking failed: cannot write %s", build->output);
-        if (snx_is_file(tmp)) snx_remove_tree(tmp);
-        goto done;
+        if (snx_replace(tmp, build->output)) {
+            snx_error("packing failed: cannot rename %s to %s: %s", tmp, build->output,
+                      snx_os_error(reason, sizeof reason));
+            snx_remove_tree(tmp);
+            goto done;
+        }
+    } else {
+        if (snx_link(inputs, n, exports, export_count, base_name(build->output), &linked, error, sizeof(error))) {
+            snx_error("linking failed: %s", error);
+            goto done;
+        }
+        if (snx_write_file(tmp, linked.data, linked.size) || snx_replace(tmp, build->output)) {
+            snx_error("linking failed: cannot write %s", build->output);
+            if (snx_is_file(tmp)) snx_remove_tree(tmp);
+            goto done;
+        }
     }
     if (!options->quiet) {
         printf("LLVM module: %.1f MB, %lu entries\n", (double)linked.size / 1000000.0, (unsigned long)entry_count);
