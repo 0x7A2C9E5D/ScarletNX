@@ -194,6 +194,26 @@ __attribute__((noinline, optnone, naked)) static void* ios_jit_prepare(void* add
     __asm__ volatile("mov x16, #1\n brk #0xf00d\n ret\n");
 }
 
+/* The debugger answers a request only while its script runs, and a game that maps tens of thousands of files can
+   take a minute and a half to ask again (the JIT's own arena, the GPU macros' after it). So the first arena also asks
+   for the regions the later ones are, while the debugger is there, and a later arena of that size takes one of them */
+#define IOS_SPARES 2
+#define IOS_SPARE_SIZE ((size_t)1 << 27)
+static struct {
+    unsigned char* base;
+} g_ios_spare[IOS_SPARES];
+static int g_ios_spares_asked;
+
+static unsigned char* ios_take_spare(size_t size) {
+    int i;
+    if (size != IOS_SPARE_SIZE) return NULL;
+    for (i = 0; i < IOS_SPARES; ++i) {
+        unsigned char* base = __atomic_exchange_n(&g_ios_spare[i].base, NULL, __ATOMIC_ACQ_REL);
+        if (base) return base;
+    }
+    return NULL;
+}
+
 /* P_TRACED: a debugger is attached now. CS_DEBUGGED stays set after it lets go, so it says nothing about the brk */
 static int debugger_attached(void) {
     int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid()};
@@ -225,8 +245,22 @@ static int ios_arena(SnxCodeLoader* loader, char* error, size_t error_size) {
     fprintf(stderr, "jit arena: debugger attached, asking it for %lu MiB (CODE %lu, RODATA %lu, DATA %lu MiB)\n",
             (unsigned long)(loader->reserved >> 20), (unsigned long)(loader->region[CODE].size >> 20),
             (unsigned long)(loader->region[RODATA].size >> 20), (unsigned long)(loader->region[DATA].size >> 20));
-    base = (unsigned char*)ios_jit_prepare(NULL, loader->reserved);
-    fprintf(stderr, "jit arena: the debugger answered %p\n", (void*)base);
+    base = ios_take_spare(loader->reserved);
+    if (base)
+        fprintf(stderr, "jit arena: the region the debugger prepared at the start, %p\n", (void*)base);
+    else {
+        base = (unsigned char*)ios_jit_prepare(NULL, loader->reserved);
+        fprintf(stderr, "jit arena: the debugger answered %p\n", (void*)base);
+        if (base && base != (unsigned char*)(size_t)-1 && !__atomic_exchange_n(&g_ios_spares_asked, 1, __ATOMIC_ACQ_REL)) {
+            int i;
+            for (i = 0; i < IOS_SPARES; ++i) {
+                void* spare = ios_jit_prepare(NULL, IOS_SPARE_SIZE);
+                fprintf(stderr, "jit arena: a region kept for a later arena: %p\n", spare);
+                if (!spare || spare == (void*)(size_t)-1 || (size_t)spare % loader->page) break;
+                g_ios_spare[i].base = (unsigned char*)spare;
+            }
+        }
+    }
     if (!base || base == (unsigned char*)(size_t)-1 || (size_t)base % loader->page) {
         snprintf(error, error_size, "the debugger did not prepare %lu MiB of code memory",
                  (unsigned long)(loader->reserved >> 20));
