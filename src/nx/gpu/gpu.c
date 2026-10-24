@@ -30,6 +30,8 @@
 #include "nx/gpu/maxwell/engines_int.h"
 #include "nx/gpu/maxwell/inline_to_memory_regs.h"
 #include "nx/gpu/maxwell/kepler_compute_regs.h"
+#include "nx/gpu/maxwell/maxwell_3d_regs.h"
+#include "nx/gpu/maxwell/maxwell_dma_regs.h"
 #include "nx/gpu/texture/blocklinear.h"
 #include "nx/gpu/renderer.h"
 #include "nx/hle/services/nvdrv.h"
@@ -1012,11 +1014,8 @@ typedef struct {
 } GpuScan;
 static GpuScan g_scan[GPU_CHANNELS];
 static PMutex g_submit_lk = PMUTEX_INIT; /* the scans in queue order */
-/* the engine methods the scan looks for: the 3D engine's report_semaphore operation (Eden's Maxwell3D
-   report_semaphore.query), at the same method in compute (KEPLER_COMPUTE_REPORT_SEMAPHORE_QUERY), and the copy
-   engine's launch (Eden's MaxwellDMA launch_dma, ASSERT_REG_POSITION(launch_dma, 0xC0)) */
-#define SCAN_3D_REPORT_SEMAPHORE_QUERY 0x6C3
-#define SCAN_DMA_LAUNCH_DMA 0xC0
+/* the engine methods the scan looks for: the 3D engine's report_semaphore operation, at the same method in compute
+   (KEPLER_COMPUTE_REPORT_SEMAPHORE_QUERY), and the copy engine's launch */
 /* 0 when the scan stops at this method */
 static int scan_method(GpuScan* s, u32 chan, u64 job, u32* launches, u32 sub, u32 m, u32 v) {
     int eng;
@@ -1031,12 +1030,12 @@ static int scan_method(GpuScan* s, u32 chan, u64 job, u32* launches, u32 sub, u3
         return 1;
     }
     eng = engine_of(s->sub_class[sub]);
-    if (eng == ENG_3D && (m >= MAXWELL3D_NUM_REGS || m == SCAN_3D_REPORT_SEMAPHORE_QUERY))
+    if (eng == ENG_3D && (m >= MAXWELL3D_NUM_REGS || m == MAXWELL3D_REPORT_SEMAPHORE_QUERY))
         return 0; /* a macro call (it can wait), or a report operation */
     if (eng == ENG_COMPUTE && m == KEPLER_COMPUTE_REPORT_SEMAPHORE_QUERY) return 0;
     if (eng == ENG_DMA && m < MAXWELL_DMA_METHODS) {
         s->rdma[m] = v;
-        if (m == SCAN_DMA_LAUNCH_DMA) dma_snap_launch(chan, job, (*launches)++, s->rdma, v);
+        if (m == MAXWELL_DMA_LAUNCH_DMA) dma_snap_launch(chan, job, (*launches)++, s->rdma, v);
     }
     return 1;
 }
