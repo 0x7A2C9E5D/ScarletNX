@@ -44,6 +44,42 @@ static int check_hash_copy(void) {
     return 0;
 }
 
+/* A long buffer texture keeps consecutive texels across an image-row boundary,
+   including a final row that is only partly used. Read actual uploaded pixels. */
+static int check_buffer_texture_rows(void) {
+    const u64 gva = 0x6000000, cpu = HEAP_BASE + 0x600000;
+    const u32 row = 1u << SH_TEXEL_ROW_SHIFT, count = row + 3;
+    const u32 samples[] = {row - 1, row, count - 1};
+    u32 tic[8] = {0x08 | (2u << 7) | (2u << 10) | (2u << 13) | (2u << 16),
+                  (u32)gva, 0, (count - 1) >> 16,
+                  ((count - 1) & 0xffff) | (6u << 23), 0, 0, 0};
+    gmmu_map(gva, cpu, (u64)row * 8);
+    memset(GP(cpu), 0xcd, (size_t)row * 8);
+    for (u32 i = 0; i < count; i++) snx_st_le32(GP(cpu) + (u64)i * 4, 0xff000000u | i);
+    vk_lock();
+    Surf* texture = vk_tex_from_tic(tic);
+    CHECK(texture && texture->upload_valid && texture->f.bpp == 4);
+    CHECK(texture->w == row && texture->h == 2);
+    VkBuffer buffer;
+    u8* result = vk_readback_buffer(sizeof samples, &buffer);
+    CHECK(result);
+    vk_surf_use(vk_cmd(), texture, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    VkBufferImageCopy copies[3] = {{0}};
+    for (u32 i = 0; i < 3; i++) {
+        copies[i].bufferOffset = i * 4;
+        copies[i].imageSubresource = (VkImageSubresourceLayers){VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copies[i].imageOffset = (VkOffset3D){(i32)(samples[i] % row), (i32)(samples[i] / row), 0};
+        copies[i].imageExtent = (VkExtent3D){1, 1, 1};
+    }
+    rec_CmdCopyImageToBuffer(vk_cmd(), texture->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 3, copies);
+    vk_finish();
+    vk_readback_ready();
+    for (u32 i = 0; i < 3; i++) CHECK(snx_ld_le32(result + i * 4) == (0xff000000u | samples[i]));
+    vk_unlock();
+    return 0;
+}
+
 /* Overflow blocks remain live through submission, then return with their slot. */
 static int check_staging_overflow(void)
 {
@@ -971,6 +1007,7 @@ int main(int argc, char** argv) {
     CHECK(g_opt_headless && g_renderer_up && g_vk.dev && !g_vk.surface && !g_vk.swapchain && !g_vk.sc_count);
     CHECK(!check_hash_copy());
     CHECK(!check_staging_overflow());
+    CHECK(!check_buffer_texture_rows());
     CHECK(!check_viewport_orientation());
     CHECK(!check_packed_depth());
     CHECK(!check_depth_array());
