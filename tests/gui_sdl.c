@@ -8,6 +8,7 @@
 #include <assert.h>
 #ifdef _WIN32
 #include "win32_crash.h"
+#include <windows.h> /* the queue's recompile's priority class */
 #else
 #include <errno.h>
 #include <sys/resource.h> /* the queue's recompile's priority */

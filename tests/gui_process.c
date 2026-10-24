@@ -1,6 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
+#ifndef __FreeBSD__
 #define _POSIX_C_SOURCE 200809L
+#endif
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE /* PRIO_MAX, which the POSIX name above hides, as process_posix.c */
+#endif
 #include "gui/gui_process.h"
 #include "common/utilities/common.h"
 #include <assert.h>
