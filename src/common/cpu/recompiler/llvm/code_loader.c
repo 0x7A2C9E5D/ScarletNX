@@ -197,6 +197,9 @@ __attribute__((noinline, optnone, naked)) static void* ios_jit_prepare(void* add
 /* The debugger answers a request only while its script runs, and a game that maps tens of thousands of files can
    take a minute and a half to ask again (the JIT's own arena, the GPU macros' after it). So the first arena also asks
    for the regions the later ones are, while the debugger is there, and a later arena of that size takes one of them */
+/* what the code arenas asked of the debugger so far: memory the game's own pool does not have */
+static size_t g_ios_arena_bytes;
+size_t snx_ios_code_arena_bytes(void) { return __atomic_load_n(&g_ios_arena_bytes, __ATOMIC_RELAXED); }
 #define IOS_SPARES 2
 #define IOS_SPARE_SIZE ((size_t)1 << 27)
 static struct {
@@ -245,6 +248,7 @@ static int ios_arena(SnxCodeLoader* loader, char* error, size_t error_size) {
     fprintf(stderr, "jit arena: debugger attached, asking it for %lu MiB (CODE %lu, RODATA %lu, DATA %lu MiB)\n",
             (unsigned long)(loader->reserved >> 20), (unsigned long)(loader->region[CODE].size >> 20),
             (unsigned long)(loader->region[RODATA].size >> 20), (unsigned long)(loader->region[DATA].size >> 20));
+    __atomic_add_fetch(&g_ios_arena_bytes, loader->reserved, __ATOMIC_RELAXED);
     base = ios_take_spare(loader->reserved);
     if (base)
         fprintf(stderr, "jit arena: the region the debugger prepared at the start, %p\n", (void*)base);

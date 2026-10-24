@@ -596,18 +596,25 @@ static void layout_for(u64 size) {
    how much it has and sizes its pools by it: less than the console's 3.2 GB broke one game's startup, which a game
    told 3.2 GB on a phone with the increased memory limit (a 4 GiB limit) did not fill, for the memory is the game's
    to touch */
-#define IOS_OTHER_MEMORY ((u64)700 << 20)
+#define IOS_OTHER_MEMORY   ((u64)700 << 20) /* the least that goes to the rest */
+#define IOS_GRAPHICS_MARGIN ((u64)256 << 20) /* the graphics' first allocations */
 static u64 g_ios_budget;
 u64 mem_ios_budget(void) { return g_ios_budget; }
+/* what the rest takes: the app's footprint now, the code arenas (a large game's pack is large) and a margin for the
+   graphics, never less than IOS_OTHER_MEMORY, which was what one game's run measured */
+static u64 ios_other_memory(void) {
+    u64 other = snx_footprint() + snx_ios_code_arena_bytes() + IOS_GRAPHICS_MARGIN;
+    return other > IOS_OTHER_MEMORY ? other : IOS_OTHER_MEMORY;
+}
 static void ios_budget_read(void) {
     u64 avail = (u64)os_proc_available_memory();
     /* the simulator says none is available (it has no limit): a game is told what the phone it stands in for has, the
        4 GiB the increased memory limit gives */
     u64 limit = avail ? avail + snx_footprint() : (4096ull << 20);
-    g_ios_budget = limit > IOS_OTHER_MEMORY + (1024ull << 20) ? limit - IOS_OTHER_MEMORY : (1024ull << 20);
+    u64 other = ios_other_memory();
+    g_ios_budget = limit > other + (1024ull << 20) ? limit - other : (1024ull << 20);
     fprintf(stderr, "memory: the game may have %llu MiB (the app's limit is %llu MiB, %llu MiB go to the rest)\n",
-            (unsigned long long)(g_ios_budget >> 20), (unsigned long long)(limit >> 20),
-            (unsigned long long)(IOS_OTHER_MEMORY >> 20));
+            (unsigned long long)(g_ios_budget >> 20), (unsigned long long)(limit >> 20), (unsigned long long)(other >> 20));
 }
 
 /* A game with a system resource size manages its address space itself (nn::os's VammManager): it takes the alias region

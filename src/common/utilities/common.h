@@ -192,6 +192,9 @@ size_t snx_vm_page_size(void);
 /* the memory this process is charged for now, in bytes: its footprint on macOS and iOS, its resident set on Linux, 0 where
    it is not known */
 SnxU64 snx_footprint(void);
+#ifdef SNX_IOS
+size_t snx_ios_code_arena_bytes(void); /* what the code arenas asked of the debugger (code_loader.c) */
+#endif
 /* A run on a thread (an iOS app cannot start a process, and a thread cannot be killed) is stopped by asking: the player's
    abort sets this, and the long loops (the recompiler's units) look at it between their steps and end early */
 void snx_abort_request(int on);
