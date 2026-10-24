@@ -6,13 +6,16 @@
    the memory it changed and how it ended (the next pc, UNDEF, BRK or SVC) must match. A store-exclusive also runs
    after a load-exclusive of its address, so that it can succeed.
      snx-test-llvm-qemu-differential QEMU RUNNER DIR EXPECTED [--sweep] [--states N] [--seed N] [--quiet] [--update]
+                                     [--jit] [--portable]
      snx-test-llvm-qemu-differential --skip REASON
    The words: samples of every row of the generated decoder's table with every value of each field of 3 bits or
-   fewer, and llvm_differential.c's directed() words. The default run takes 2 samples of each row, 20 directed rounds
-   and 3 states of each word; --sweep takes 4 samples, 300 rounds and 6 states.
-   A word the backend leaves UNDEF (the generated decoder for the Switch target, or the old decoder a64.c, which its
-   emitters still take), or decodes without an emitter, while QEMU runs it, has no emitter yet: it is listed in
-   DIR/llvm_qemu_coverage.txt, not failed. So is a word that
+   fewer, directed() words, and the words the other instruction tests hand-check (kept[]). The default run takes 2
+   samples of each row, 20 directed rounds and 3 states of each word; --sweep takes 4 samples, 300 rounds and 6
+   states. The steps are linked into a module for dlopen, as the AOT path loads a game's; --jit loads them with the
+   JIT's loader (code_loader.c) instead, and --portable builds them without the host's extensions (x86's PSHUFB,
+   PCLMULQDQ, AES-NI, SSE4.2's CRC32C, AArch64's CRC32 and crypto...), so the emitters' portable forms are compared.
+   A word the backend leaves UNDEF (the generated decoder for the Switch target), or decodes without an emitter,
+   while QEMU runs it, has no emitter yet: it is listed in DIR/llvm_qemu_coverage.txt, not failed. So is a word that
    differs where the Switch target decodes it as another name (a hint's NOP) or, as the backend does, as UNDEF: what
    max makes of it is beyond the Cortex-A57. The mismatches are
    grouped by the max target's name for the word and their cause, with examples in DIR/llvm_qemu_mismatches.txt.
@@ -25,20 +28,15 @@
 #include "common/cpu/recompiler/llvm/ir_ldst.h"
 #include "common/cpu/recompiler/llvm/ir_fpu.h"
 #include "common/cpu/recompiler/llvm/ir_vec.h"
-#include "common/cpu/recompiler/llvm/link.h"
 #include "llvm_qemu_words.h"
+#include "llvm_steps.h"
 #include "qemu_ref/qemu_ref.h"
 #include <stdlib.h>
 #include <string.h>
-#include <dlfcn.h>
-
-extern const unsigned char snx_rtlib_object[];
-extern const unsigned long snx_rtlib_object_size;
 
 typedef u64 (*StepFn)(CPU* c);
-typedef StepFn* (*TableFn)(void);
 
-#define WINDOW      0x0ull /* the window starts at guest address 0 on both sides, as llvm_differential's memory */
+#define WINDOW      0x0ull /* the window starts at guest address 0 on both sides */
 #define WINDOW_SIZE SNX_QREF_WINDOW_SIZE
 #define PC          (WINDOW + 0x100000ull)
 /* a pair's code, apart from the window: the runner makes a full diff's window writable, code pages in it too */
@@ -67,7 +65,7 @@ static u64 next_random(void) {
     return g_test.rng;
 }
 
-/* ---- the states: llvm_differential.c's random_state(), its FP edges and directed() words ---- */
+/* ---- the states: random_state(), its FP edges, and the directed() and kept[] words ---- */
 static u64 special64(void) {
     static const u64 values[] = {0,
                                  1,
@@ -252,7 +250,7 @@ static void random_state(CPU* c, u32 word, int addresses) {
     c->fpsr = next_random() % 4 ? (next_random() % 2 ? 0x10 : 0) : (u32)(next_random() & 0x0800009Fu);
 }
 
-/* llvm_differential.c's directed() words, the encodings random fields rarely produce, unfiltered */
+/* directed() words, the encodings random fields rarely produce, unfiltered */
 static size_t directed(size_t rounds, u32* out) {
     static const u32 same_ops[] = {3, 0x10, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F},
                      element_ops[] = {1, 5, 9}, copy_ops[] = {0, 1, 3, 7}, fp_ops[] = {0x18, 0x1A, 0x1C, 0x1D, 0x1E};
@@ -339,13 +337,32 @@ static size_t directed(size_t rounds, u32* out) {
     return got;
 }
 
+/* the words the other instruction tests hand-check against expected values (llvm_module's program, native_codegen's
+   semantic cases and the FP witnesses' vector and reserved encodings), so that QEMU checks them from random states
+   too */
+static const u32 kept[] = {
+    /* llvm_module.c: its program[] and tail[] */
+    0xD2800000, 0xD2800181, 0x1E6F1001, 0x6F00E402, 0x94000016, 0x9E620003, 0x1E632800, 0x1E610800, 0x4EA28442,
+    0x4E040C24, 0x4EA48442, 0xF1000421, 0x54FFFF01, 0x10000062, 0xD61F0040, 0xD4200020, 0xF81F0FE0, 0xA8C113E3,
+    0xB4000043, 0x910FA000, 0x885FFFE7, 0x8808FFE0, 0x37180040, 0xD2401C00, 0xAA1F03FE, 0x14000047, 0x8B010000,
+    0xD37FF804, 0xCA440C00, 0x9B011005, 0x9AC108A6, 0x9A868000, 0xD65F03C0, 0xAA0003E6, 0xD40000E1, 0x9E780009,
+    /* codegen_test.c's semantic cases */
+    0x31000420, 0xBA1F03E0, 0xDA1F03E0, 0xD3485C20, 0x93401C20, 0x93C12020, 0x9E220020, 0x9E660020, 0x1E620C20,
+    0x4EA28420, 0x4E22CC20, 0x4E040C20, 0x4E183C20, 0x5FA21820, 0xF94007E0, 0xF900043F, 0x17FFFFFF, 0x1200FC00,
+    0x1E221820, 0x1F020C20, 0x1E22C020, 0x1E200020, 0x4E22D420, 0x1E63C020, 0x9E580020, 0x1E61C020, 0x1E228820,
+    0x1E23C020, 0x0E216820, 0x1F420C20, 0x1F620C20, 0x4E62CC20, 0x7EE1D820, 0x4EA1D820, 0x4EE1D820, 0x5EE1D820,
+    0x9E630020, 0x6E61D820, 0x4E218800, 0x6E20D400,
+    /* the FP witnesses' reserved encodings */
+    0x5E218820, 0x0E618820, 0x5E217820, 0x5EA1C820, 0x7EA1C820, 0x7EA1F820};
+#define KEPT (sizeof(kept) / sizeof(kept[0]))
+
 /* ---- the cases ---- */
 
 /* a word, or a store-exclusive after the load-exclusive that arms its monitor */
 typedef struct {
     u32 words[2], nwords;
     u32 step;  /* its steps' first index in the LLVM table */
-    int skip;  /* no emitter yet: the old decoder has no case or the backend no emitter for a word */
+    int skip;  /* no emitter yet: the Switch target leaves a word UNDEF or the backend has no emitter for it */
     char op[40], switch_op[40]; /* the max and Switch targets' names for the (last) word, "" for UNDEF */
 } Item;
 
@@ -363,13 +380,12 @@ static u32 load_exclusive(u32 st) {
 
 static u64 item_pc(const Item* it) { return it->nwords > 1 ? PAIR_PC : PC; }
 
+/* a word whose registers should point into the window: a load or store, a system instruction (DC ZVA), or one the
+   Switch leaves UNDEF, which QEMU may still run */
 static int memory_pattern(u32 word) {
-    const SnxA64Decoded d = snx_a64_decode_inst(word);
-    const char* name;
-    if (d.instruction->kind == SNX_FLOW_UNDEF || !d.pattern) return 1; /* QEMU may still run it: keep it in the window */
-    name = d.pattern->name;
-    return !strncmp(name, "LDST", 4) || !strcmp(name, "LDR_LIT") || !strncmp(name, "SIMD_LDST", 9) ||
-           !strcmp(name, "SYS");
+    SnxA64Insn insn;
+    const SnxA64Op op = snx_a64_decode_word(word, 0, &insn);
+    return op == SNX_A64_OP_UNDEF || op == SNX_A64_OP_SYS || snx_ir_ldst_handles(op);
 }
 
 /* ---- the runtime's callbacks, recorded for the outcome ---- */
@@ -680,20 +696,14 @@ int main(int argc, char** argv) {
     const char* expected_path;
     size_t states, samples, rounds, nwords, nitems = 0, i, k, nsteps = 0, compared = 0, mismatched = 0,
                                                     no_emitter = 0, nexpected;
-    int sweep = 0, update = 0, a, failed = 0;
+    int sweep = 0, update = 0, jit = 0, portable = 0, a, failed = 0;
     u32* words = NULL;
     Item* items;
     Groups groups = {0}, missing = {0};
     Expected* expected;
-    char error[1024], *tmp, *l_lib, *path;
+    char error[1024], *path;
+    LlvmSteps built;
     SnxIr* ir;
-    unsigned char* object = NULL;
-    size_t object_size;
-    SnxLinkInput inputs[2];
-    SnxLinkOutput linked;
-    const char* exports[1] = {"snx_test_steps"};
-    void* handle;
-    TableFn table;
     StepFn* steps;
     RtAPI rt = {0};
     u8 *initial, *work;
@@ -706,7 +716,7 @@ int main(int argc, char** argv) {
     }
     if (argc < 5) {
         fputs("usage: snx-test-llvm-qemu-differential QEMU RUNNER DIR EXPECTED [--sweep] [--states N] [--seed N] "
-              "[--quiet] [--update] | --skip REASON\n",
+              "[--quiet] [--update] [--jit] [--portable] | --skip REASON\n",
               stderr);
         return 2;
     }
@@ -723,6 +733,10 @@ int main(int argc, char** argv) {
             q.quiet = 1;
         else if (!strcmp(argv[a], "--update"))
             update = 1;
+        else if (!strcmp(argv[a], "--jit"))
+            jit = 1;
+        else if (!strcmp(argv[a], "--portable"))
+            portable = 1;
         else if (a + 1 < argc && !strcmp(argv[a], "--states"))
             states = strtoul(argv[++a], NULL, 10);
         else if (a + 1 < argc && !strcmp(argv[a], "--seed"))
@@ -736,8 +750,10 @@ int main(int argc, char** argv) {
 
     /* the words */
     nwords = lqd_row_words((unsigned)samples, next_random, &words);
-    words = (u32*)snx_realloc(words, (nwords + DIRECTED * rounds) * sizeof(*words));
+    words = (u32*)snx_realloc(words, (nwords + DIRECTED * rounds + KEPT) * sizeof(*words));
     nwords += directed(rounds, words + nwords);
+    memcpy(words + nwords, kept, sizeof(kept));
+    nwords += KEPT;
     items = (Item*)snx_alloc((2 * nwords) * sizeof(*items));
     for (i = 0; i < nwords; ++i) {
         int unrunnable;
@@ -757,66 +773,36 @@ int main(int argc, char** argv) {
     free(words);
 
     /* the LLVM steps, one function a word, at the word's pc; a word without an emitter is noted and left out */
-    if (snx_ir_init(error, sizeof(error))) return snx_error("%s", error);
-    ir = snx_ir_new("steps", '2', error, sizeof(error));
-    if (!ir) return snx_error("%s", error);
-    {
-        LLVMValueRef *fns = (LLVMValueRef*)snx_alloc(2 * nitems * sizeof(*fns)), tbl, getter;
-        for (i = 0; i < nitems; ++i) {
-            Item* it = &items[i];
-            it->step = (u32)nsteps;
-            for (k = 0; k < it->nwords; ++k) {
-                char name[32];
-                unsigned long before = ir->fallbacks;
-                SnxA64Insn max;
-                SnxU64 features = 0;
-                sprintf(name, "S_%lu", (unsigned long)nsteps);
-                /* the load/store emitters (ir_ldst.c) implement the LSE and RCpc atomics too, the scalar FP ones
-                   (ir_fpu.c) FEAT_FP16, FEAT_JSCVT, FEAT_FRINTTS and BFCVT, the AdvSIMD ones (ir_vec.c) the vector
-                   extensions: a word the Switch lacks that they emit runs with max's features, against QEMU's
-                   -cpu max */
-                if (snx_a64_decode_word(it->words[k], SNX_A64_TARGET_MAX, &max) != SNX_A64_OP_UNDEF &&
-                    (snx_ir_ldst_handles(max.op) || snx_ir_fpu_handles(max.op) || snx_ir_vec_handles(max.op)) &&
-                    (max.feature & ~(SnxU64)SNX_A64_TARGET_SWITCH))
-                    features = SNX_A64_TARGET_MAX;
-                else if (snx_a64_decode(it->words[k])->kind == SNX_FLOW_UNDEF)
-                    it->skip = 1;
-                fns[nsteps] = snx_ir_static_step(ir, it->words[k], item_pc(it) + 4 * k, features, name);
-                LLVMSetVisibility(fns[nsteps++], LLVMHiddenVisibility);
-                if (ir->fallbacks != before) {
-                    it->skip = 1;
-                    ir->fallbacks = before; /* noted here: the module is still wanted for the rest */
-                }
+    if (llvm_steps_begin(&built, jit, portable, error, sizeof(error))) return snx_error("%s", error);
+    ir = built.ir;
+    for (i = 0; i < nitems; ++i) {
+        Item* it = &items[i];
+        it->step = (u32)nsteps;
+        for (k = 0; k < it->nwords; ++k) {
+            unsigned long before = ir->fallbacks;
+            SnxA64Insn max, sw;
+            SnxU64 features = 0;
+            /* the load/store emitters (ir_ldst.c) implement the LSE and RCpc atomics too, the scalar FP ones
+               (ir_fpu.c) FEAT_FP16, FEAT_JSCVT, FEAT_FRINTTS and BFCVT, the AdvSIMD ones (ir_vec.c) the vector
+               extensions: a word the Switch lacks that they emit runs with max's features, against QEMU's -cpu max */
+            if (snx_a64_decode_word(it->words[k], SNX_A64_TARGET_MAX, &max) != SNX_A64_OP_UNDEF &&
+                (snx_ir_ldst_handles(max.op) || snx_ir_fpu_handles(max.op) || snx_ir_vec_handles(max.op)) &&
+                (max.feature & ~(SnxU64)SNX_A64_TARGET_SWITCH))
+                features = SNX_A64_TARGET_MAX;
+            else if (snx_a64_decode_word(it->words[k], 0, &sw) == SNX_A64_OP_UNDEF)
+                it->skip = 1;
+            llvm_steps_add(&built, it->words[k], item_pc(it) + 4 * k, features);
+            ++nsteps;
+            if (ir->fallbacks != before) {
+                it->skip = 1;
+                ir->fallbacks = before; /* noted here: the module is still wanted for the rest */
             }
         }
-        tbl = LLVMAddGlobal(ir->mod, LLVMArrayType(ir->t_ptr, (unsigned)nsteps), "TABLE");
-        LLVMSetLinkage(tbl, LLVMInternalLinkage);
-        LLVMSetInitializer(tbl, LLVMConstArray(ir->t_ptr, fns, (unsigned)nsteps));
-        getter = LLVMAddFunction(ir->mod, "snx_test_steps", LLVMFunctionType(ir->t_ptr, NULL, 0, 0));
-        LLVMPositionBuilderAtEnd(ir->b, LLVMAppendBasicBlockInContext(ir->ctx, getter, "entry"));
-        LLVMBuildRet(ir->b, tbl);
-        free(fns);
     }
     if (!q.quiet) printf("%lu cases of %lu words; compiling %lu LLVM steps\n", (unsigned long)nitems,
                          (unsigned long)nwords, (unsigned long)nsteps);
-    if (snx_ir_object(ir, '2', &object, &object_size, error, sizeof(error))) return snx_error("%s", error);
-    snx_ir_free(ir);
-    inputs[0].data = snx_rtlib_object;
-    inputs[0].size = snx_rtlib_object_size;
-    inputs[0].name = "rtlib";
-    inputs[1].data = object;
-    inputs[1].size = object_size;
-    inputs[1].name = "steps";
-    tmp = snx_temp_dir(NULL);
-    l_lib = snx_path_join(tmp, "llvm.so");
-    if (snx_link(inputs, 2, exports, 1, "llvm.so", &linked, error, sizeof(error))) return snx_error("link: %s", error);
-    if (snx_write_file(l_lib, linked.data, linked.size)) return snx_error("cannot write %s", l_lib);
-    free(linked.data);
-    free(object);
-    handle = dlopen(l_lib, RTLD_NOW | RTLD_LOCAL);
-    table = handle ? (TableFn)dlsym(handle, "snx_test_steps") : NULL;
-    if (!table) return snx_error("cannot load the LLVM steps: %s", dlerror());
-    steps = table();
+    if (llvm_steps_load(&built, error, sizeof(error))) return snx_error("%s", error);
+    steps = built.steps;
     rt.svc = cb_svc;
     rt.undef = cb_undef;
     rt.note_hint = cb_note;
@@ -990,7 +976,7 @@ int main(int argc, char** argv) {
     f = fopen(path, "w");
     if (f) {
         fprintf(f, "# the names (max target) of words QEMU runs and the backend has no emitter for yet, with the words;\n"
-                   "# Switch: the old decoder leaves UNDEF a word the Switch target decodes as the same name\n");
+                   "# Switch: the Switch target decodes the word, as the same name, and no emitter takes it\n");
         for (i = 0; i < missing.ngroups; ++i)
             fprintf(f, "%s\t%lu\t%s\n", missing.groups[i].op, missing.groups[i].count, missing.groups[i].cause);
         fclose(f);
@@ -1012,10 +998,7 @@ int main(int argc, char** argv) {
            (unsigned long)missing.ngroups, q.dir, snx_seconds() - started,
            failed ? "FAILED" : "passed");
     free(path);
-    dlclose(handle);
-    snx_remove_tree(tmp);
-    free(tmp);
-    free(l_lib);
+    llvm_steps_end(&built);
     free(initial);
     free(work);
     free(items);

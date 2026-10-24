@@ -2,6 +2,13 @@
 <!-- Copyright 2026 the ScarletNX contributors -->
 # Cortex-A57 / AArch64 divergences
 
+This report is the audit of the instruction semantics the recompiler took from C templates, against Unicorn. The
+templates and the audit harness are retired: the LLVM emitters are ported from QEMU's `translate-a64.c` and keyed
+on the decoder generated from QEMU's `a64.decode` and `a64.profile`, and `tests/llvm_qemu_differential.c` checks them
+against `qemu-aarch64` instruction by instruction, with the groups still known to differ in
+`tests/llvm_qemu_expected.txt`. The figures below are the old audit's, kept for its findings on system and memory
+behavior.
+
 ## Index
 
 * [Verdict and scope](#verdict-and-scope)
@@ -28,8 +35,8 @@ AArch32 execution, or a complete system emulator. It follows the earlier
 [rounding/min/max/comparison repair](../tests/a64_fp.md). The shallow-clone
 starting revision was `e7c4210`; both sets of changes are cumulative.
 
-The instruction ledger, `docs/A57_INSTRUCTION_AUDIT.tsv` as
-[regenerated](../tests/a64_audit.md#instruction-ledger) (not checked in), indexes all **575 instruction
+The instruction ledger, `docs/A57_INSTRUCTION_AUDIT.tsv` as the audit harness
+regenerated it (not checked in), indexed all **575 instruction
 descriptions** in the selected ARM ARM, including aliases and separately
 specified forms. Evidence in that ledger is explicitly **mnemonic-family level**:
 it does not imply that every addressing mode, lane arrangement, condition,
@@ -218,10 +225,9 @@ Unicorn comparisons:
 
 ## Evidence and reproduction
 
-See [the harness guide](../tests/a64_audit.md) for exact commands and limitations.
-`--report` writes a run's output: each word's family, check and mismatch counts
-and first counterexample, and the totals. No summary of the runs is checked in,
-and there is no known-failure suppression list.
+The audit harness (`tests/a64_audit.py`) was retired with the templates it
+compared. Its `--report` wrote each word's family, check and mismatch counts
+and first counterexample, and the totals.
 
 The extended pre-fix portable corpus found **39,153 differences / 704,096
 comparisons**, across 708 words. Decoder corrections removed the 67 failing

@@ -42,43 +42,19 @@ expected results are raw IEEE encodings. The checks include:
 
 Both tests run under all four host rounding modes. The arithmetic test also
 checks that operations leave host rounding and exception state unchanged.
-`native_codegen` checks selected scalar, vector and by-element witnesses
-through the actual decoder and both emitted AOT/static and interpreter paths.
+`native_codegen` checks selected scalar, vector and by-element witnesses, the vector ones of these tests among
+them, through the LLVM backend's steps, and the reserved encodings through the generated decoder.
 
 References: ARM DDI0487A.k instruction and shared FP pseudocode (`FPUnpack`,
 `FPRound`, `FPProcessNaNs`, `FPProcessNaNs3`, arithmetic, conversions and estimates)
 and Cortex-A57 DDI0488H Tables 14-3/14-4. A57 FP exception-enable bits and FZ16
 are RES0; later optional alternate-FP behavior is not part of this target.
 
-## Additional rounding/min/max/comparison differential tests
+## Against QEMU
 
-The optional Linux harness covers these earlier FP families, not the entire
-arithmetic/conversion suite:
-
-```sh
-python3 -m venv .venv
-.venv/bin/pip install unicorn==2.1.4
-.venv/bin/python tests/a64_fp_diff.py --cc clang
-.venv/bin/python tests/a64_fp_diff.py --cc clang --random 128 --aliases --sanitize
-.venv/bin/python tests/a64_fp_diff.py --cc clang --match FRINT
-```
-
-CTest enables it with `-DSNX_TEST_A64_FP_DIFF=ON` and
-`-DPython3_EXECUTABLE=/path/to/venv/bin/python`. It builds temporary emitted
-sources and a shared library, then removes them. `--sanitize` enables Clang's
-undefined-behavior trap mode. Any compilation failure, unexpected trap, result
-mismatch or exception mismatch fails the test.
-
-`a64_fp_emit.c` uses the actual decoder, AOT shortcuts and interpreter emitter;
-it does not duplicate instruction semantics. The Python harness compares all
-128 destination bits, FPSR and NZCV with Unicorn's QEMU-derived AArch64 model.
-NaN payloads, status bits and unused vector lanes are not masked away.
-
-Inputs include signed zeros, NaNs of both kinds/signs and multiple payloads,
-infinities, subnormal boundaries, finite extremes, rounding boundaries and
-seeded random patterns. Binary operations cross the directed edge corpus;
-mixed lanes check cumulative exceptions and pairwise ordering. Guest rounding,
-DN and FZ are varied. `--aliases` additionally exercises overlapping registers.
+The Unicorn harness that compared these families with the C templates is retired with them. The LLVM emitters
+run against `qemu-aarch64` instead (`llvm_qemu_differential`, `tests/llvm_qemu_differential.c`): every row of the
+generated decoder, FP edge values, FPCR's RMode, FZ and DN varied, all 128 destination bits, FPSR and NZCV.
 
 These tests are regressions, not architectural certification, hardware
 measurements, full-runtime validation or gameplay/performance benchmarks.

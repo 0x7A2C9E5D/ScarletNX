@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* llvm_qemu_differential's words from the generated decoder (tools/a64dec): a translation unit of its own, because
-   the decoder's names (SNX_A64_ADR...) collide with the old decoder's (a64.h), which the LLVM backend still uses */
+/* llvm_qemu_differential's words from the generated decoder (tools/a64dec): a translation unit of its own, which
+   includes the decoder's table (a64_decode.inc) for its rows and fields */
 #ifndef SNX_LLVM_QEMU_WORDS_H
 #define SNX_LLVM_QEMU_WORDS_H
 

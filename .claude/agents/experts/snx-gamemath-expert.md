@@ -22,7 +22,8 @@ efficient.
 
 ## Where the math lives
 - **CPU FP helpers**: `src/common/cpu/aarch64/helpers/` (`fp.c`, `fp_arithmetic.c`, `simd.c`), checked by the
-  witness tests (`a64_fp_witnesses`, `a64_fp_arithmetic_witnesses`, `a64_fp_differential`). What an instruction
+  witness tests (`a64_fp_witnesses`, `a64_fp_arithmetic_witnesses`) and, through the LLVM emitters, against
+  `qemu-aarch64` (`llvm_qemu_differential`). What an instruction
   must compute is `snx-arm64-expert`'s call. How to compute it soundly (correct rounding, no double rounding,
   exact special cases) is yours.
 - **Shader translator**: `src/nx/gpu/shader/spirv_translate.c` and `spirv_compute.c`: `MUFU` (RCP, RSQ, LG2, EX2,

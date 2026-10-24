@@ -101,9 +101,11 @@ build/scarletnx -r work/<Game>             # runtime and game module, both with 
 ```
 
 `scarletnx -r` uses the LLVM backend, the only one. Its objects aren't
-cached: each recompile builds every unit again. A change to `a64_templates.inc`
-needs the matching change in `src/common/cpu/recompiler/llvm/ir_*.c` (`snx-test-llvm-differential` finds the
-difference).
+cached: each recompile builds every unit again. A change to the decoder's profile
+(`src/common/cpu/aarch64/decode/a64.profile`) or to an emitter (`src/common/cpu/recompiler/llvm/ir_int.c`,
+`ir_ldst.c`, `ir_fpu.c`, `ir_vec*.c`, ported from QEMU) is checked against `qemu-aarch64` by
+`llvm_qemu_differential` (`ctest -R llvm_qemu_differential`; the binary's `--sweep` takes more words and states). A
+difference not listed in `tests/llvm_qemu_expected.txt` fails it, and so does a listed one that is gone.
 
 ## Adding or bumping a third-party package
 

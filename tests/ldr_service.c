@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* Real ldr:ro, memory block list and generated A64 interpreter; only platform and IPC transport are fakes.
+/* Real ldr:ro and memory block list; only platform and IPC transport are fakes.
    No game assets, RSA keys or precompiled NRO host libraries are required. */
 #include "nx/hle/services/services_int.h"
 #include "nx/gpu/gpu.h"
@@ -61,7 +61,7 @@ void plat_vm_decommit(u8* p, u64 size) {
     CHECK(!madvise(p, size, MADV_DONTNEED));
     CHECK(!mprotect(p, size, PROT_NONE));
 }
-/* runtime/guest_jit.c: what ldr:ro tells the JIT. -1: no JIT here, the NRO stays the interpreter's */
+/* runtime/guest_jit.c: what ldr:ro tells the JIT. -1: no JIT here */
 static u64 jit_base, jit_text, jit_removed_base;
 static int jit_added, jit_removed;
 int jit_code_added(u64 base, u64 text_size, u64 size) {
@@ -239,37 +239,6 @@ static u64 load(SvcObj* o) {
     CHECK(!call(o));
     return output();
 }
-#ifdef SNX_RO_INTERP_TEST
-void snx_interp(CPU* c, u64 entry);
-static void compiled_callee(CPU* cpu, u64 entry) {
-    CHECK(entry == 0x200);
-    cpu->x[0] = 41;
-    cpu->pc = cpu->x[30];
-}
-static void execute(u64 base) {
-    CPU cpu = {0};
-    GuestFn dispatch[1] = {0};
-    cpu.mem = g_mem;
-    cpu.disp = dispatch;
-    cpu.code_lo = 0;
-    cpu.code_hi = 4;
-    /* RtAPI.miss: the reference interpreter (ldr_interp.c), standing in for the runtime JIT */
-    const RtAPI rt = {.miss = snx_interp};
-    cpu.rt = &rt;
-    cpu.x[30] = 0x1234;
-    CHECK(snx_lookup(&cpu, base + 0x80) == snx_interp);
-    snx_lookup(&cpu, base + 0x80)(&cpu, base + 0x80);
-    CHECK(cpu.x[0] == 42 && cpu.pc == 0x1234);
-    /* NRO -> AOT dispatch -> NRO -> caller, with a saved link register. */
-    const u32 code[] = {0xaa1e03f3, 0xd2804001, 0xd63f0020, 0xaa1303fe, 0x91000400, 0xd65f03c0};
-    for (size_t i = 0; i < sizeof code / sizeof code[0]; i++) gw32(base + 0x90 + i * 4, code[i]); /* little-endian */
-    dispatch[0] = compiled_callee;
-    cpu.code_lo = 0x200;
-    cpu.code_hi = 0x204;
-    snx_lookup(&cpu, base + 0x90)(&cpu, base + 0x90);
-    CHECK(cpu.x[0] == 42 && cpu.pc == 0x1234);
-}
-#endif
 /* the two loads and the main thread start together, at a gate the three wait at once: a barrier, which Darwin's
    pthreads don't have */
 typedef struct {
@@ -471,9 +440,6 @@ int main(void) {
     block_is(SRC, MS_NORMAL, PERM_NONE, 1);
     CHECK(g_code_memory == 0 && g_heap_size == 0x10000);
     CHECK(mem_heap_set(0, 0x10000) == MEM_BADSTATE);
-#ifdef SNX_RO_INTERP_TEST
-    execute(base);
-#endif
     request(0, SRC2, 0x3000, SRC2 + 0x3000, 0x1000);
     CHECK(call(o) == RO(3));
     block_is(SRC2, MS_NORMAL, PERM_RW, 0);
@@ -537,8 +503,5 @@ int main(void) {
     CHECK(!mem_heap_set(0, 0x10000));
     CHECK(!munmap(g_mem, AS_SIZE));
     puts("ldr:ro: IPC, authorization, mapping, rollback, unload, concurrency and capacity checks passed");
-#ifdef SNX_RO_INTERP_TEST
-    puts("ldr:ro: generated A64 interpreter and AOT callback execution checks passed");
-#endif
     return 0;
 }
