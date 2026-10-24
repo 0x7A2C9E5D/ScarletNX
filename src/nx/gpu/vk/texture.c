@@ -746,6 +746,7 @@ static Surf* tex_from_tic(const u32* tic, int raw) {
     if (vt == VK_IMAGE_VIEW_TYPE_CUBE && d != 6) vt = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     if (vt == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY && !g_vk.feat.imageCubeArray) vt = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     u32 layers = vt == VK_IMAGE_VIEW_TYPE_3D ? 1 : d, d3 = vt == VK_IMAGE_VIEW_TYPE_3D ? d : 1;
+    if (vt == VK_IMAGE_VIEW_TYPE_3D && !raw) f = vk_tic_format_3d(tic[0], srgb);
     /* bytes from one layer to the next: all the levels the header has, whichever of them it shows */
     u64 stride = bl ? bl_layer_size(w, h, d3, &f, bh, bd, glevels) : (u64)pitch * ((h + f.bh - 1) / f.bh) * d3;
     /* A texture upload reads guest memory. Complete any compute storage writes that overlap it first. */

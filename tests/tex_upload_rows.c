@@ -275,6 +275,7 @@ VkFmt vk_tic_format(u32 w0, int srgb) {
     (void)w0, (void)srgb;
     return (VkFmt){0};
 }
+VkFmt vk_tic_format_3d(u32 w0, int srgb) { return vk_tic_format(w0, srgb); }
 VkImage vk_unscaled_image(const Surf* s, u32 layers, VmaAllocation* mem) {
     (void)s, (void)layers, (void)mem;
     return VK_NULL_HANDLE;

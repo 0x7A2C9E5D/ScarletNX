@@ -344,6 +344,8 @@ enum {
 VkFmt vk_rt_format(u32 fmt);
 VkFmt vk_zt_format(u32 fmt);
 VkFmt vk_tic_format(u32 w0, int srgb); /* bpp 0: not supported */
+/* vk_tic_format for a 3D image: ASTC and ETC2 blocks decoded where the device can't make 3D images of them */
+VkFmt vk_tic_format_3d(u32 w0, int srgb);
 int vk_tic_reads_stencil(const u32* tic);
 /* sRGB and linear views of the same bytes: the twin of a color format, or the format itself when it has none */
 VkFormat vk_srgb_as(VkFormat f, int srgb);
