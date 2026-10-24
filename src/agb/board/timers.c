@@ -12,6 +12,7 @@ static const uint32_t prescalers[4] = {1, 64, 256, 1024};
 static void timer_overflow(AgbBoard* board, int index) {
     AgbTimer* timer = &board->timer[index];
     timer->counter = timer->reload;
+    if (index < 2) agb_apu_timer_overflow(board, index); /* the sound FIFOs play at timer 0's or 1's rate */
     if (timer->control & AGB_TIMER_IRQ) agb_irq_request(board, AGB_IRQ_TIMER(index));
     if (index < 3 && (board->timer[index + 1].control & AGB_TIMER_ENABLE) &&
         (board->timer[index + 1].control & AGB_TIMER_CASCADE)) {

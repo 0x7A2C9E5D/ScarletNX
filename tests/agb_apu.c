@@ -29,6 +29,25 @@ static uint32_t run_samples(uint32_t count) {
     return agb_apu_run(&board, count * 512, out, count);
 }
 
+/* the same with the timers running beside the sound, in steps of 64 cycles as the machine runs them */
+static uint32_t run_timed(uint32_t count) {
+    uint32_t written = 0;
+    CHECK(count * 2 <= sizeof(out) / sizeof(out[0]));
+    memset(out, 0, sizeof(out));
+    for (uint32_t cycles = 0; cycles < count * 512; cycles += 64) {
+        agb_timer_step(&board, 64);
+        written += agb_apu_run(&board, 64, out + written * 2, count - written);
+    }
+    return written;
+}
+
+/* how many of the first count left samples are value */
+static int left_count(uint32_t count, int16_t value) {
+    int n = 0;
+    for (uint32_t i = 0; i < count; ++i) n += out[i * 2] == value;
+    return n;
+}
+
 int main(void) {
     /* square 2: 50 percent duty at 128 Hz, envelope volume 15 held constant */
     reset();
@@ -83,26 +102,27 @@ int main(void) {
     CHECK(run_samples(64) == 64);
     CHECK(out[0] == 960 && out[2 * 63] == 960); /* every digit is 15 */
 
-    /* the FIFOs play the bytes the direct sound DMA queues */
+    /* the FIFOs play the bytes the direct sound DMA queues, one each time their timer overflows, held between: none
+       while no timer runs, and with timer 0 at 1024 cycles each byte lasts two output samples of 512 */
     reset();
-    agb_apu_write(&board, 0x082, 0x0304); /* FIFO A at full volume to both sides */
+    agb_apu_write(&board, 0x082, 0x0304); /* FIFO A at full volume to both sides, on timer 0 */
     agb_apu_write(&board, 0x0A0, 0x9C64); /* the bytes 100 and -100 */
-    CHECK(run_samples(4) == 4);
-    CHECK(out[0] == 6400 && out[1] == 6400);
-    CHECK(out[2] == -6400 && out[3] == -6400);
-    CHECK(out[4] == 0 && out[5] == 0); /* the queue is empty after the two samples */
+    CHECK(run_samples(4) == 4 && left_count(4, 0) == 4 && board.apu.fifo_count[0] == 2);
+    agb_timer_write(&board, 0x100, 0xFC00); /* TM0 reloads 1024 below its overflow */
+    agb_timer_write(&board, 0x102, 0x0080);
+    CHECK(run_timed(8) == 8);
+    CHECK(left_count(8, 6400) == 2 && left_count(8, -6400) == 2 && out[1] == out[0]);
+    CHECK(board.apu.fifo_count[0] == 0); /* both bytes played, then the empty queue's 0 */
 
-    /* FIFO B at half volume to both sides (bits 12 and 13); its left bit leaves FIFO A's queue alone (bit 11 is FIFO
-       A's reset) */
+    /* FIFO B at half volume to both sides (bits 12 and 13), on timer 0 too; its left bit leaves FIFO A's queue alone
+       (bit 11 is FIFO A's reset) */
     agb_apu_write(&board, 0x0A0, 0x1010);
     agb_apu_write(&board, 0x082, 0x3000);
     CHECK(board.apu.fifo_count[0] == 2);
+    agb_apu_write(&board, 0x0A4, 100);
+    CHECK(run_timed(4) == 4 && left_count(4, 3200) >= 1 && out[1] == out[0]);
     agb_apu_write(&board, 0x082, 0x0800); /* FIFO A's reset */
     CHECK(board.apu.fifo_count[0] == 0);
-    agb_apu_write(&board, 0x082, 0x3000);
-    agb_apu_write(&board, 0x0A4, 100);
-    CHECK(run_samples(1) == 1);
-    CHECK(out[0] == 3200 && out[1] == 3200);
 
     /* panning: a channel sent to one side leaves the other silent */
     reset();

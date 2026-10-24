@@ -307,14 +307,22 @@ static void mix_sample(AgbBoard* board, int16_t* left, int16_t* right) {
     l = psg_left * (int)((apu->soundcnt_l >> 4) & 7) / 7;
     r = psg_right * (int)(apu->soundcnt_l & 7) / 7;
     for (int fifo = 0; fifo < 2; ++fifo) {
-        int sample = fifo_pop(apu, fifo);
-        if (apu->fifo_count[fifo] <= 16) agb_dma_event(board, fifo ? AGB_DMA_FIFO_B : AGB_DMA_FIFO_A);
+        int sample = apu->fifo_sample[fifo];                    /* held between its timer's overflows */
         if (!(apu->soundcnt_h & (4 << fifo))) sample >>= 1;     /* the 50 percent volume setting */
         if (apu->soundcnt_h & (0x100 << fifo * 4)) r += sample; /* bits 8 and 12: to the right */
         if (apu->soundcnt_h & (0x200 << fifo * 4)) l += sample; /* bits 9 and 13: to the left */
     }
     *left = (int16_t)(l * 64);
     *right = (int16_t)(r * 64);
+}
+
+void agb_apu_timer_overflow(AgbBoard* board, int timer) {
+    AgbApu* apu = &board->apu;
+    for (int fifo = 0; fifo < 2; ++fifo) {
+        if ((int)(apu->soundcnt_h >> (10 + fifo * 4) & 1) != timer) continue; /* bits 10 and 14: its timer */
+        apu->fifo_sample[fifo] = (int8_t)fifo_pop(apu, fifo);
+        if (apu->fifo_count[fifo] <= 16) agb_dma_event(board, fifo ? AGB_DMA_FIFO_B : AGB_DMA_FIFO_A);
+    }
 }
 
 uint32_t agb_apu_run(AgbBoard* board, uint32_t cycles, int16_t* stereo, uint32_t capacity) {
