@@ -97,6 +97,11 @@ done:
 char* snx_game_source(const char* folder, const char* name, int* recorded) {
     char *ini = snx_game_ini(folder, name), *source = snx_ini_value(ini, "source"), path[SNX_PATH_SIZE];
     free(ini);
+    if (!source) { /* a console driver's, in the folder: the user's config folder is elsewhere (snx_user_path) */
+        ini = snx_format("%s/%s.ini", folder, name);
+        source = snx_ini_value(ini, "source");
+        free(ini);
+    }
     if (recorded) *recorded = source != NULL;
     if (source) return source;
     if (snx_path_format(path, sizeof path, "%s/%s.source", folder, name)) return NULL;

@@ -15,7 +15,8 @@ char* snx_ini_value(const char* path, const char* key);
    it is when it has the value already. value has no line break. 0, or nonzero with a line saying why */
 int snx_ini_record(const char* path, const char* key, const char* value);
 /* the dump the game was made from, owned: what Extract to tmpfs extracts again, and what a game made from its dump
-   without extracting it reads its ExeFS and RomFS from. source= in the game's .ini, else <folder>/<name>.source, the
+   without extracting it reads its ExeFS and RomFS from. source= in the game's .ini (snx_game_ini's, else the one in its
+   folder, where the 3DS, Vita and GBA drivers keep theirs), else <folder>/<name>.source, the
    link an older version made (Windows makes links only with the right to); NULL when that path does not fit (said).
    recorded, when not NULL: 1 when either names a dump, there or not */
 char* snx_game_source(const char* folder, const char* name, int* recorded);
