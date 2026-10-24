@@ -138,6 +138,11 @@ AgbHost* agb_host_open(const char* title, bool fullscreen, char* error, size_t e
         agb_host_close(host);
         return NULL;
     }
+    /* each frame whole on screen, as the launcher presents its own */
+    if (!SDL_SetRenderVSync(host->renderer, 1))
+        fprintf(stderr,
+                "scarletnx-agb: the display refused vsync 1 (%s): frames go on screen with vsync 0 and may tear\n",
+                SDL_GetError());
     snx_window_icon(host->window);
     snx_pad_map_position(&host->pad); /* A where the console has it, east */
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO) ||
