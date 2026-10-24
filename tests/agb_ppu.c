@@ -357,6 +357,24 @@ int main(void) {
     agb_write16(&board, 0x05000000, 0);
     agb_ppu_write(&board, 0x000, 0x0100);
 
+    /* the blend weights hold to 16 sixteenths past it: BG0's red 8 at 31/16 over the backdrop stays 8, and darkened by
+       31/16 goes black */
+    agb_write16(&board, 0x05000002, 0x0008);
+    agb_ppu_write(&board, 0x008, 0x1F00); /* BG0: tile 0, entry 1, everywhere */
+    agb_ppu_write(&board, 0x000, 0x0100);
+    agb_ppu_write(&board, 0x050, 0x2001 | 1 << 6);
+    agb_ppu_write(&board, 0x052, 31);
+    run_frame();
+    CHECK(pixel(10, 10) == PIX(8, 0, 0));
+    agb_ppu_write(&board, 0x050, 0x0001 | 3 << 6);
+    agb_ppu_write(&board, 0x054, 31);
+    run_frame();
+    CHECK(pixel(10, 10) == PIX(0, 0, 0));
+    agb_ppu_write(&board, 0x050, 0);
+    agb_ppu_write(&board, 0x052, 0);
+    agb_ppu_write(&board, 0x054, 0);
+    agb_ppu_write(&board, 0x008, 0);
+
     /* an HBlank DMA runs on the 160 visible lines alone, a game's table having one entry a line: a repeating 16 bit one
        moves its source 160 halfwords a frame, not 228 */
     agb_write16(&board, 0x040000B0, 0x0000);

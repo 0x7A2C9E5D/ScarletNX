@@ -442,6 +442,9 @@ static uint8_t window_mask(const AgbPpu* ppu, int x, int objwin) {
     return ppu->winout & 0x3F;
 }
 
+/* a blend weight of BLDALPHA's or BLDY's, its five bits held to 16 sixteenths, as the hardware and mGBA hold them */
+static int32_t weight(uint32_t field) { return (field & 0x1F) > 16 ? 16 : (int32_t)(field & 0x1F); }
+
 static void composite_line(AgbBoard* board, int y) {
     AgbPpu* ppu = &board->ppu;
     uint32_t* out = ppu->framebuffer + y * AGB_SCREEN_WIDTH;
@@ -491,7 +494,7 @@ static void composite_line(AgbBoard* board, int y) {
             if ((mask & 0x20) && (semi || (effect == 1 && first_target && second_target))) {
                 /* alpha blend: the semi transparent sprites blend whether or not the effect selects them */
                 if (second_target && (semi || first_target)) {
-                    int32_t eva = ppu->bldalpha & 0x1F, evb = ppu->bldalpha >> 8 & 0x1F;
+                    int32_t eva = weight(ppu->bldalpha), evb = weight(ppu->bldalpha >> 8);
                     uint32_t result = 0;
                     for (int component = 0; component < 3; ++component) {
                         int32_t c1 = first_color >> (component * 5) & 31, c2 = second_color >> (component * 5) & 31;
@@ -501,7 +504,7 @@ static void composite_line(AgbBoard* board, int y) {
                     color = (uint16_t)result;
                 }
             } else if ((mask & 0x20) && first_target && (effect == 2 || effect == 3)) {
-                int32_t evy = ppu->bldy & 0x1F;
+                int32_t evy = weight(ppu->bldy);
                 uint32_t result = 0;
                 for (int component = 0; component < 3; ++component) {
                     int32_t c1 = first_color >> (component * 5) & 31;
