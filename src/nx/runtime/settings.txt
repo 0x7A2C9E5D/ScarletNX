@@ -483,6 +483,24 @@ setting Vulkan validation layer
     words Off|On
     help 1 = the Vulkan validation layer (VK_LAYER_KHRONOS_validation, the Vulkan SDK's) checks every Vulkan call and
     help logs what it finds. It slows the game down a lot, and a missing layer is only a warning
+setting Native ASTC
+    key native_astc
+    int 0 1
+    default 1
+    startup
+    words Off|On
+    help 1 = ASTC textures are sampled as the game's blocks where the GPU samples ASTC (most phone and tablet GPUs),
+    help in a quarter to a 36th of the memory. 0 = they are decoded to RGBA8 on the GPU, as they are on GPUs without
+    help ASTC (most desktop ones), to compare the two. On such a GPU 1 is a warning at start
+setting Native ETC2
+    key native_etc2
+    int 0 1
+    default 1
+    startup
+    words Off|On
+    help 1 = ETC2 and EAC textures are sampled as the game's blocks where the GPU samples ETC2 (most phone and tablet
+    help GPUs), in a quarter to an eighth of the memory. 0 = they are decoded on the GPU, as they are on GPUs without
+    help ETC2 (most desktop ones), to compare the two. On such a GPU 1 is a warning at start
 setting SLP vectorizer
     key slp_vectorizer
     int 0 1

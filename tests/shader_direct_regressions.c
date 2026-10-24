@@ -37,7 +37,8 @@ static const char* global_dynamic_path;
 static const char* xfb_path;
 static const char* passthrough_paths[6];
 static const char* structured_paths[2];
-static char* fixture_paths[70];
+static const char* fswzadd_path;
+static char* fixture_paths[71];
 static size_t fixture_count;
 
 static const char* fixture_path(const char* directory, const char* name) {
@@ -2481,6 +2482,53 @@ static void unfed_fragment_input(void) {
     check(locations[1] == locations[0] - 1, "an unfed input isn't declared, and the others still are");
 }
 
+/* FSWZADD R0, R1, R2 with this swizzle: each quad lane's mode in two bits, the upper left lane's the top two */
+static u64 fswzadd(u32 swizzle) { return 0x50F8000000070000ull | (u64)swizzle << 28 | 2ull << 20 | 1ull << 8; }
+static u32* fswzadd_spirv(u64 instruction, int stage, int can_subgroup, ShaderInfo* info, size_t* words) {
+    size_t slots;
+    u64* code = guest_program(&instruction, 1, NULL, &slots);
+    if (!code) return NULL;
+    memset(info, 0, sizeof *info);
+    u32* result = spirv_of(code, slots * sizeof *code, stage, info, words, 0, 1, 1, can_subgroup);
+    free(code);
+    return result;
+}
+
+/* FSWZADD is lane-local: the lanes of a quad pick their mode from the subgroup's lane, with no derivative, in any
+   stage. One mode for every lane needs no subgroup, and the flags (CC) aren't written */
+static void fswzadd_forms(void) {
+    ShaderInfo info;
+    size_t words = 0;
+    u32* code = fswzadd_spirv(fswzadd(0x99), ST_FS, 1, &info, &words); /* dFdx after SHFL.BFLY 1 */
+    check_translated(code, &info, "FSWZADD with a swizzle per lane translates");
+    if (code) {
+        check(count_opcode(code, words, 207, 0xffffffffu) == 0 && count_opcode(code, words, 208, 0xffffffffu) == 0,
+              "FSWZADD reads no derivative");
+        check(count_opcode(code, words, 169, 0xffffffffu) == 2, "FSWZADD 0x99 selects the negated a and b per lane");
+        save_fixture(fswzadd_path, code, words);
+    }
+    free(code);
+    code = fswzadd_spirv(fswzadd(0xcc), ST_VS, 1, &info, &words); /* nouveau's TXD: a + b on the right, b left */
+    check_translated(code, &info, "FSWZADD translates outside fragment programs");
+    if (code) check(count_opcode(code, words, 169, 0xffffffffu) == 1, "FSWZADD 0xcc selects b on the left lanes");
+    free(code);
+    code = fswzadd_spirv(fswzadd(0xcc), ST_FS, 0, &info, &words);
+    check_refused(code, &info, "subgroup", "FSWZADD with lanes that differ needs the subgroup's lane");
+    free(code);
+    int adds[4];
+    for (u32 mode = 0; mode < 4; mode++) {
+        code = fswzadd_spirv(fswzadd(mode * 0x55), ST_FS, 0, &info, &words);
+        check_translated(code, &info, "FSWZADD with one mode for every lane translates without subgroups");
+        adds[mode] = code ? count_opcode(code, words, 129, 0xffffffffu) : -1;
+        if (code) check(count_opcode(code, words, 169, 0xffffffffu) == 0, "one FSWZADD mode for all lanes selects nothing");
+        free(code);
+    }
+    check(adds[0] == adds[3] + 1 && adds[1] == adds[0] && adds[2] == adds[0], "FSWZADD mode 3 moves b, the others add");
+    code = fswzadd_spirv(fswzadd(0) | 1ull << 47, ST_FS, 1, &info, &words);
+    check_refused(code, &info, "FSWZADD", "FSWZADD.CC is refused");
+    free(code);
+}
+
 int main(int argc, char** argv) {
     g_shader_clock_scopes = 3; /* Exercise both optional Vulkan clock scopes in offline SPIR-V fixtures. */
     if (argc != 1 && argc != 2) {
@@ -2545,7 +2593,8 @@ int main(int argc, char** argv) {
             snprintf(name, sizeof name, "structured_%d", i);
             structured_paths[i] = fixture_path(argv[1], name);
         }
-        if (fixture_count != 70) {
+        fswzadd_path = fixture_path(argv[1], "fswzadd");
+        if (fixture_count != 71) {
             fprintf(stderr, "failed to allocate fixture paths\n");
             return 2;
         }
@@ -2582,6 +2631,7 @@ int main(int argc, char** argv) {
     system_values();
     attribute_pointer();
     structured_flow();
+    fswzadd_forms();
     for (size_t i = 0; i < fixture_count; i++) free(fixture_paths[i]);
     return failures ? 1 : 0;
 }

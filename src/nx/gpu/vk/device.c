@@ -323,6 +323,14 @@ static int create_device(void) {
     WANT(occlusionQueryPrecise); /* samples-passed counts (query.c) are exact */
     WANT(sampleRateShading);
     WANT(textureCompressionBC);
+    /* ASTC and ETC2 sampled as they are (format.c) where the settings ask for it and the device has them, else
+       decoded on the GPU as they are uploaded */
+    if (g_settings.native_astc) WANT(textureCompressionASTC_LDR);
+    if (g_settings.native_etc2) WANT(textureCompressionETC2);
+    if (g_settings.native_astc && !want->textureCompressionASTC_LDR)
+        WARN("vulkan: native ASTC textures were asked for, but the GPU can't sample ASTC: they are decoded to RGBA8\n");
+    if (g_settings.native_etc2 && !want->textureCompressionETC2)
+        WARN("vulkan: native ETC2 textures were asked for, but the GPU can't sample ETC2: they are decoded\n");
     WANT(vertexPipelineStoresAndAtomics);
     WANT(fragmentStoresAndAtomics);
     WANT(shaderImageGatherExtended);
