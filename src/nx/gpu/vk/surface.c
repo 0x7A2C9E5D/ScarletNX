@@ -755,6 +755,9 @@ int vk_surf_publish(Surf* s) {
         return 0;
     }
     vk_all_barrier(cb);
+    /* The buffer now holds this image. Publishing it retires older images over
+       the same backing, and must not flush this image a second time. */
+    s->mem_wgen = s->wgen;
     while (off < size) {
         u64 cpu = 0, n = gmmu_run(s->gva + off, size - off, &cpu);
         if (!n) { /* an unmapped page takes no write */
@@ -767,7 +770,6 @@ int vk_surf_publish(Surf* s) {
     gpu_mem_written(s->gva, size);
     vk_own_res_unref(r);
     /* guest memory (its owner) has the image's pixels now: the texture cache finds them current, by their owner */
-    s->mem_wgen = s->wgen;
     s->gw = gpu_mem_generation();
     vk_surf_relist(s);
     if (!s->is_rt) vk_tex_note_writeback(s);
@@ -811,6 +813,59 @@ void vk_rt_before_write(u64 gva, u64 size) {
         for (i = 0; i < count; i++) vk_surf_flush(list[i], NULL);
         if (list != local) free(list);
     }
+    g_rt_flushing = 0;
+    vk_unlock();
+}
+
+typedef struct {
+    Surf** surfaces;
+    u32 count, capacity;
+} RtPendingList;
+
+/* Collect under the GMMU alias lock, then flush after it is released. A flush
+   writes guest memory and asks the alias index about those writes itself. */
+static void rt_pending_alias(void* ctx, u64 gva, u64 size) {
+    RtPendingList* pending = ctx;
+    Surf *local[16], **list;
+    u32 count;
+    if (!pend_hit_va(&g_rt_pages, gva, size)) return;
+    count = rt_pending_over(gva, size, local, 16, &list);
+    for (u32 i = 0; i < count; i++) {
+        Surf* s = list[i];
+        u32 at = 0;
+        while (at < pending->count && pending->surfaces[at]->wseq < s->wseq) at++;
+        if (at < pending->count && pending->surfaces[at] == s) continue;
+        if (pending->count == pending->capacity) {
+            u32 capacity = pending->capacity * 2;
+            if (capacity < pending->capacity || (u64)capacity > SIZE_MAX / sizeof *pending->surfaces)
+                fatal("Too many render target aliases");
+            Surf** grown = malloc((size_t)capacity * sizeof *grown);
+            if (!grown) fatal("Out of memory collecting render target aliases");
+            memcpy(grown, pending->surfaces, (size_t)pending->count * sizeof *grown);
+            if (pending->capacity > 16) free(pending->surfaces);
+            pending->surfaces = grown;
+            pending->capacity = capacity;
+        }
+        memmove(pending->surfaces + at + 1, pending->surfaces + at,
+                (size_t)(pending->count - at) * sizeof *pending->surfaces);
+        pending->surfaces[at] = s;
+        pending->count++;
+    }
+    if (list != local) free(list);
+}
+
+/* A producer can replace image memory through another GPU address. Land every
+   older image over that backing before publishing the new owner, so a later
+   partial image read cannot write its old pixels over the producer's result. */
+void vk_rt_before_write_cpu(u64 cpu, u64 size) {
+    Surf* local[16];
+    RtPendingList pending = {local, 0, 16};
+    if (!size || g_rt_flushing) return;
+    vk_lock();
+    g_rt_flushing = 1;
+    gmmu_aliases(cpu, size, rt_pending_alias, &pending);
+    for (u32 i = 0; i < pending.count; i++) vk_surf_flush(pending.surfaces[i], NULL);
+    if (pending.surfaces != local) free(pending.surfaces);
     g_rt_flushing = 0;
     vk_unlock();
 }

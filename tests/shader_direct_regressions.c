@@ -1216,6 +1216,26 @@ static void issue126_shader_modes(void) {
                   "a 3D surface store writes a 3D storage image");
         free(code);
     }
+    /* UE4's vertex factories fetch texture coordinates from buffer textures of tens of thousands of texels: a 1D
+       TLD.B reads (x mod row, x / row) of the 2D image they are bound as, a 2D one its coordinates as they are */
+    {
+        const u64 tld_b = (0xdd3a0007a0070200ull & ~(0xffull << 20)) | (6ull << 20); /* TLD.B R0, R2, R6, 2D */
+        const u64 fetch_1d[] = {0x4c98078800070006ull, tld_b & ~(7ull << 28)};
+        const u64 fetch_2d[] = {0x4c98078800070006ull, tld_b};
+        ShaderInfo info;
+        size_t words = 0;
+        u32* code = translate(fetch_1d, 2, ST_VS, &info, &words, 1);
+        check_translated(code, &info, "a 1D buffer texel fetch translates");
+        if (code)
+            check(count_opcode(code, words, 195, 0xffffffffu) == 1 && count_opcode(code, words, 95, 0xffffffffu) == 1,
+                  "a 1D texel fetch splits x into the row and column of its 2D image");
+        free(code);
+        code = translate(fetch_2d, 2, ST_VS, &info, &words, 1);
+        check_translated(code, &info, "a 2D texel fetch translates");
+        if (code)
+            check(count_opcode(code, words, 195, 0xffffffffu) == 0, "a 2D texel fetch keeps its coordinates");
+        free(code);
+    }
     /* A TEX.B with all four results (mask 15) to R4-R7 overwrites the handle in R6. */
     const u64 clobbered_handle[] = {
         0x4c98078800070006ull,
@@ -1264,6 +1284,40 @@ static void issue126_shader_modes(void) {
     code = translate(skipped_write, 4, ST_FS, &info, &words, 1);
     check_refused(code, &info, "untracked texture handle",
                   "a handle written in code a branch skips doesn't reach the target");
+    free(code);
+    /* One game's blur: the handle loaded before a loop, sampled in its body, @P0 BRA back to the sample. It reaches
+       every iteration unless the body writes it after the sample */
+    const u64 back = 0xe24000000000000full | ((u64)(0x1000000 - 32) << 20); /* @P0 BRA to the TEX.B */
+    const u64 loop[] = {0x4c98078800070006ull, tex_b, FMUL_KEEP | 5, back};
+    code = translate(loop, 4, ST_FS, &info, &words, 1);
+    check_translated(code, &info, "a handle loaded before a loop reaches the sample in its body");
+    free(code);
+    const u64 loop_rewrites[] = {0x4c98078800070006ull, tex_b, FMUL_KEEP | 6, back};
+    code = translate(loop_rewrites, 4, ST_FS, &info, &words, 1);
+    check_refused(code, &info, "untracked texture handle",
+                  "a handle the loop body writes after the sample doesn't reach the next iteration");
+    free(code);
+    /* a handle loaded and sampled under P0 with another predicate written between, and with P0 itself written */
+    const u64 fsetp_p4 = 0x4bb183900527ff27ull, fsetp_p0 = 0x4bb1838c30f7ff07ull;
+    const u64 other_predicate[] = {0x4c98078800000006ull, fsetp_p4, tex_b & ~(0xfull << 16)};
+    code = translate(other_predicate, 3, ST_FS, &info, &words, 1);
+    check_translated(code, &info, "another predicate written between a guarded load and its use keeps the handle");
+    free(code);
+    const u64 guard_rewritten[] = {0x4c98078800000006ull, fsetp_p0, tex_b & ~(0xfull << 16)};
+    code = translate(guard_rewritten, 3, ST_FS, &info, &words, 1);
+    check_refused(code, &info, "untracked texture handle", "the guard written between a guarded load and its use");
+    free(code);
+    /* SSY to the block that samples, the handle loaded right after it: the token's SYNCs come after the load. A SYNC
+       between the SSY and the load goes around it */
+    const u64 ssy = 0xe290000000000000ull | (40ull << 20), sync_not_p0 = 0xf0f800000008000full,
+              sync = 0xf0f800000007000full;
+    const u64 ssy_load[] = {ssy, 0x4c98078800070006ull, sync_not_p0, FMUL_KEEP | 5, sync, tex_b};
+    code = translate(ssy_load, 6, ST_FS, &info, &words, 1);
+    check_translated(code, &info, "a handle loaded right after an SSY reaches its reconvergence point");
+    free(code);
+    const u64 ssy_around[] = {ssy, sync_not_p0, 0x4c98078800070006ull, FMUL_KEEP | 5, sync, tex_b};
+    code = translate(ssy_around, 6, ST_FS, &info, &words, 1);
+    check_refused(code, &info, "untracked texture handle", "a SYNC before the load goes around it");
     free(code);
 }
 

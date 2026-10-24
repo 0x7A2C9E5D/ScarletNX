@@ -73,6 +73,8 @@ static void vkr_mapping_begin(u64 gva, u64 size, int full) {
         vk_buf_mem_need_map(gva, size);
         vk_gfx_image_mem_need(gva, size);
         vk_compute_mem_need_map(gva, size);
+        /* Images still describe the old backing until the page table changes. */
+        vk_rt_before_write(gva, size);
     }
 }
 /* the pages changed count what is pending at the guest pages they show now. A change of guest memory (full) leaves

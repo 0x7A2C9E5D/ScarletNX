@@ -12,6 +12,10 @@ extern "C" {
 enum { ST_VS = 0, ST_TCS = 1, ST_TES = 2, ST_GS = 3, ST_FS = 4, ST_CS = 5 };
 #define SH_MAXTEX         64 /* texture slots per program */
 #define SH_INDEXED_TABLES 10 /* indexed texture tables per program */
+/* A 1D texture is bound as a 2D image, and a buffer texture longer than a row of one as rows of 2^SH_TEXEL_ROW_SHIFT
+   texels (texture.c): a 1D texel fetch at x reads (x mod row, x / row) of it, which is (x, 0) for every texture that
+   fits one row */
+#define SH_TEXEL_ROW_SHIFT 14
 /* a texture slot */
 typedef struct {
     u32 cbuf_off; /* where its handle is in the texture constant buffer, in words */

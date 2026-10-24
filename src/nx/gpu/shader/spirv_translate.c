@@ -1309,9 +1309,11 @@ int shader_writes_reg(u64 w, int op, u32 reg) {
     return d != 255 && reg >= d && reg - d < count;
 }
 
-/* Whether w may write a predicate register. LOP, LOP3 and LEA name theirs in bits 48-50, PT for none. */
+/* The predicates w may write, a bit each (p0 to p6). The comparisons write two, in bits 3-5 and 0-2; LOP, LOP3 and
+   LEA name theirs in bits 48-50; PT is none. The rest that write any are taken to write them all. */
 static u32 sparse_predicate(u64 w, int op);
-static int direct_writes_pred(u64 w, int op) {
+static u32 direct_pred_writes(u64 w, int op) {
+    u32 p;
     switch (op) {
         case O_FSETP_R:
         case O_FSETP_C:
@@ -1327,7 +1329,7 @@ static int direct_writes_pred(u64 w, int op) {
         case O_DSETP_I:
         case O_PSETP:
         case O_CSETP:
-        case O_VSETP:
+        case O_VSETP: return (1u << B(w, 3, 3) | 1u << B(w, 0, 3)) & 0x7f;
         case O_FCHK_R:
         case O_FCHK_C:
         case O_FCHK_I:
@@ -1335,7 +1337,7 @@ static int direct_writes_pred(u64 w, int op) {
         case O_R2P_C:
         case O_R2P_I:
         case O_SHFL:
-        case O_VOTE: return 1;
+        case O_VOTE: return 0x7f;
         case O_LOP_R:
         case O_LOP_C:
         case O_LOP_I:
@@ -1344,9 +1346,10 @@ static int direct_writes_pred(u64 w, int op) {
         case O_LEA_HC:
         case O_LEA_LR:
         case O_LEA_LC:
-        case O_LEA_LI: return B(w, 48, 3) != 7;
-        default: return sparse_predicate(w, op) != 7;
+        case O_LEA_LI: p = B(w, 48, 3); break;
+        default: p = sparse_predicate(w, op); break;
     }
+    return p < 7 ? 1u << p : 0;
 }
 
 /* Where control can arrive from the flow instruction at k, besides the next instruction: a branch, SSY, PBK or PCNT
@@ -1385,37 +1388,85 @@ static int direct_flow_targets(const u64* insn, u32 n, u32 k, u32 targets[64], u
     }
 }
 
-/* Whether every path to use passes def and then stays in (def, use], which the caller has checked writes nothing
-   of interest. Paths enter the region only by falling through from def, unless control arrives in it from before
-   def (a branch, or the SYNC or BRK of an SSY or PBK set up before def), from a loop or a jump after use, or from
-   instructions that aren't known (CONTs, RETs). */
-static int direct_def_dominates(const u64* insn, u32 n, u32 def, u32 use) {
+/* Whether control goes from the instruction at from straight on to the one at to, with nothing between that leaves */
+static int direct_straight(const u64* insn, u32 from, u32 to) {
     u32 k;
-    for (k = 11; k < n; k++) {
-        u32 targets[64];
-        u8 elsewhere[64];
-        int count;
-        int t;
+    for (k = from + 1; k < to; k++) {
+        const Op* op;
         if (!IDX_OK(k)) continue;
-        const Op* op = decode(insn[k]);
+        op = decode(insn[k]);
         if (!op) return 0;
-        count = direct_flow_targets(insn, n, k, targets, elsewhere);
-        if (count < 0) return 0;
-        for (t = 0; t < count; t++) {
-            if (targets[t] <= def || targets[t] > use) continue;
-            if (elsewhere[t] || k < def || k > use) return 0;
+        switch (op->id) {
+            case O_BRA:
+            case O_BRX:
+            case O_SSY:
+            case O_SYNC:
+            case O_PBK:
+            case O_BRK:
+            case O_PCNT:
+            case O_CONT:
+            case O_EXIT:
+            case O_KIL:
+            case O_JMP:
+            case O_CAL:
+            case O_RET:
+            case O_PRET:
+            case O_PEXIT: return 0;
+            default: break;
         }
     }
     return 1;
 }
 
+/* Whether every path to use passes def, and reg keeps def's value on the way: the caller has checked (def, use]
+   writes no reg. Paths enter the region only by falling through from def, unless control arrives in it from before
+   def (a branch, or the SYNC or BRK of an SSY or PBK set up before def) or from instructions that aren't known
+   (CONTs, RETs). An SSY or PBK that goes straight on to def is no way around it: its token's SYNCs and BRKs all come
+   after def (the compiler loads a handle first thing in the block whose reconvergence point samples it). A branch
+   back into the region from after use is a loop the region grows to take in: a handle loaded before a loop and
+   sampled in its body (a blur's taps) reaches every iteration when the rest of the body keeps reg. */
+static int direct_def_dominates(const u64* insn, u32 n, u32 def, u32 use, u32 reg) {
+    u32 end = use;
+    for (;;) {
+        u32 k, grown = end;
+        for (k = 11; k < n; k++) {
+            u32 targets[64];
+            u8 elsewhere[64];
+            int count;
+            int t;
+            if (!IDX_OK(k)) continue;
+            const Op* op = decode(insn[k]);
+            if (!op) return 0;
+            count = direct_flow_targets(insn, n, k, targets, elsewhere);
+            if (count < 0) return 0;
+            for (t = 0; t < count; t++) {
+                if (targets[t] <= def || targets[t] > end) continue;
+                if (elsewhere[t]) return 0;
+                if (k < def) {
+                    if ((op->id == O_SSY || op->id == O_PBK) && direct_straight(insn, k, def)) continue;
+                    return 0;
+                }
+                if (k > grown) grown = k;
+            }
+        }
+        if (grown == end) return 1;
+        for (k = end + 1; k <= grown; k++) {
+            const Op* op;
+            if (!IDX_OK(k)) continue;
+            op = decode(insn[k]);
+            if (!op || shader_writes_reg(insn[k], op->id, reg)) return 0;
+        }
+        end = grown;
+    }
+}
+
 /* The instruction that last wrote reg before index, as its first destination, or -1. In index's basic block, a
-   write under a predicate reaches only an instruction under the same one, with no predicate written between them:
-   the compiler loads a handle and uses it under the guard of one side of a branch it made predicated. Across flow,
+   write under a predicate reaches only an instruction under the same one, with that predicate not written between
+   them (others may be): the compiler loads a handle and uses it under the guard of one side of a branch it made predicated. Across flow,
    the write has to be unconditional and dominate index. */
 static int direct_reaching_def(const u64* insn, u32 n, u32 index, u32 reg) {
-    u32 guard;
-    int pred_written = 0, crossed = 0;
+    u32 guard, pred_written = 0;
+    int crossed = 0;
     /* where index's basic block starts: the last place control can arrive at before it */
     u32 block_start = 11;
     u32 k;
@@ -1442,13 +1493,14 @@ static int direct_reaching_def(const u64* insn, u32 n, u32 index, u32 reg) {
             op->id == O_SYNC || op->id == O_BRK || op->id == O_CONT || op->id == O_EXIT || op->id == O_KIL)
             crossed = 1;
         if (!shader_writes_reg(insn[j], op->id, reg)) {
-            pred_written |= direct_writes_pred(insn[j], op->id);
+            pred_written |= direct_pred_writes(insn[j], op->id);
             continue;
         }
         /* A write that reaches reg from a lower destination leaves no single source. */
         if (B(insn[j], 0, 8) != reg) return -1;
-        if (B(insn[j], 16, 4) != 7 && (crossed || B(insn[j], 16, 4) != guard || pred_written)) return -1;
-        return !crossed || direct_def_dominates(insn, n, j, index) ? (int)j : -1;
+        if (B(insn[j], 16, 4) != 7 && (crossed || B(insn[j], 16, 4) != guard || (pred_written >> (guard & 7) & 1)))
+            return -1;
+        return !crossed || direct_def_dominates(insn, n, j, index, reg) ? (int)j : -1;
     }
     return -1;
 }
@@ -1537,6 +1589,16 @@ static int direct_track_image_handle_pair(const u64* insn, u32 n, u32 index, u32
                    direct_track_image_handle(insn, n, (u32)j, rhs, bank2, off2, depth + 1)
                ? 2
                : 0;
+}
+/* x of a 1D texel fetch as the row and column of the 2D image a 1D texture is bound as (SH_TEXEL_ROW_SHIFT). A
+   negative x lands in a negative row, out of the image as it is out of the texture */
+static void texel_row_coord(DirectCtx* c, u32 i32_type, u32* x, u32* y) {
+    u32 shift = spv_emit_constant_u32(&c->emit, c->u32_type, SH_TEXEL_ROW_SHIFT);
+    u32 column = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, spv_emit_bitcast(&c->emit, c->u32_type, *x),
+                                          spv_emit_constant_u32(&c->emit, c->u32_type,
+                                                                (1u << SH_TEXEL_ROW_SHIFT) - 1));
+    *y = spv_emit_shift_right_s32(&c->emit, i32_type, *x, shift);
+    *x = spv_emit_bitcast(&c->emit, i32_type, column);
 }
 static u32 cbuf_read_dynamic(DirectCtx* c, u32 bank, u32 address) {
     u32 four = spv_emit_constant_u32(&c->emit, c->u32_type, 4);
@@ -6786,6 +6848,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                                                                      spv_emit_constant_u32(&c->emit, c->u32_type, 8),
                                                                      four));
             }
+            if (type == 0 && !array) texel_row_coord(c, i32_type, &x, &y);
             u32 coord = z ? spv_emit_vec3_construct(&c->emit, vec3_i32, x, y, z)
                           : spv_emit_vec2_construct(&c->emit, vec2_i32, x, y);
             u32 sample =
@@ -6903,6 +6966,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 x = spv_emit_iadd_u32(&c->emit, i32_type, x, ox);
                 y = spv_emit_iadd_u32(&c->emit, i32_type, y, oy);
             }
+            if (type == 0) texel_row_coord(c, i32_type, &x, &y);
             u32 coord = type == 2 ? spv_emit_vec3_construct(&c->emit, vec3_i32, x, y,
                                                             reg_read_as(c, b, i32_type))
                         : array   ? spv_emit_vec3_construct(
