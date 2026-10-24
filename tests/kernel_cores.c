@@ -58,6 +58,7 @@ int mem_map(u64 addr, u64 size, u32 state, u32 perm) {
     return 0;
 }
 u64 mem_total(void) { return 0; }
+void mem_log_address_space(const char* why) { (void)why; }
 u64 used_memory(void) { return 0; }
 void plat_exit_now(int code) { exit(code); }
 int plat_thread(PThreadFn fn, void* arg, size_t stack) {
