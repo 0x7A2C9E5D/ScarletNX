@@ -20,7 +20,7 @@ typedef struct {
 } AgbBlock;
 
 typedef struct {
-    AgbBlock* blocks;
+    AgbBlock* blocks; /* from index 1, capacity of them, then their index: 2 * capacity slots (recomp.c) */
     size_t count, capacity;
     void* handle;   /* the loaded native module */
     void** patches; /* the modules of the blocks compiled at run time, <base>.<n>.so, without SNX_AGB_JIT */

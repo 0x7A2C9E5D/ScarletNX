@@ -118,10 +118,39 @@ static void* module_symbol(void* handle, size_t index) {
 
 /* ---- block discovery ---- */
 
+/* The blocks' index: an open addressing table of block indices, twice the blocks' capacity, carved after them from
+   their allocation. Every dispatch finds its block here, in a probe or two whatever the number of blocks, where a scan
+   of thousands cost the run nearly all its time. Index 0 is none, so a 0 slot is empty: the project's rule */
+static uint32_t* slots(const AgbRecomp* recomp) { return (uint32_t*)(recomp->blocks + recomp->capacity); }
+
+static size_t slot_of(const AgbRecomp* recomp, uint32_t pc, int thumb) {
+    uint64_t key = pc ^ (uint32_t)thumb; /* a Thumb pc is even and an ARM pc a multiple of 4: bit 0 is free */
+    return (size_t)((key * 0x9E3779B97F4A7C15ull) >> 32) & (recomp->capacity * 2 - 1);
+}
+
+static void index_put(AgbRecomp* recomp, size_t i) {
+    uint32_t* slot = slots(recomp);
+    size_t at = slot_of(recomp, recomp->blocks[i].pc, recomp->blocks[i].thumb);
+    while (slot[at]) at = (at + 1) & (recomp->capacity * 2 - 1);
+    slot[at] = (uint32_t)i;
+}
+
+/* the index again from the blocks, after they moved: grown, dropped or compacted */
+static void index_build(AgbRecomp* recomp) {
+    if (!recomp->capacity) return;
+    memset(slots(recomp), 0, recomp->capacity * 2 * sizeof(uint32_t));
+    for (size_t i = 1; i <= recomp->count; ++i) index_put(recomp, i);
+}
+
 static AgbBlock* find(AgbRecomp* recomp, uint32_t pc, int thumb) {
-    /* index 0 is none: the project's rule for indices */
-    for (size_t i = 1; i <= recomp->count; ++i)
-        if (recomp->blocks[i].pc == pc && recomp->blocks[i].thumb == (uint8_t)thumb) return &recomp->blocks[i];
+    const uint32_t* slot;
+    size_t at;
+    if (!recomp->capacity) return NULL;
+    slot = slots(recomp);
+    for (at = slot_of(recomp, pc, thumb); slot[at]; at = (at + 1) & (recomp->capacity * 2 - 1)) {
+        AgbBlock* block = &recomp->blocks[slot[at]];
+        if (block->pc == pc && block->thumb == (uint8_t)thumb) return block;
+    }
     return NULL;
 }
 
@@ -132,23 +161,28 @@ static void drop(AgbRecomp* recomp, AgbBlock* block) {
     memmove(block, block + 1, (recomp->count - i) * sizeof(*block));
     --recomp->count;
     recomp->dirty = 1;
+    index_build(recomp);
 }
 
 static AgbBlock* add(AgbRecomp* recomp, uint32_t pc, int thumb) {
     AgbBlock* block = find(recomp, pc, thumb);
     if (block) return block;
     if (recomp->count + 1 >= recomp->capacity) {
-        size_t capacity = recomp->capacity ? recomp->capacity * 2 : 257;
-        AgbBlock* grown = (AgbBlock*)realloc(recomp->blocks, capacity * sizeof(*grown));
-        if (!grown) return NULL;
+        /* a power of two, the index's twice as many slots after the blocks in the same allocation */
+        size_t capacity = recomp->capacity ? recomp->capacity * 2 : 256, each = sizeof(AgbBlock) + 2 * sizeof(uint32_t);
+        AgbBlock* grown;
+        if (capacity > UINT32_MAX / 2 || capacity > (size_t)-1 / each) return NULL;
+        if (!(grown = (AgbBlock*)realloc(recomp->blocks, capacity * each))) return NULL;
         recomp->blocks = grown;
         recomp->capacity = capacity;
+        index_build(recomp);
     }
     block = &recomp->blocks[++recomp->count];
     memset(block, 0, sizeof(*block));
     block->pc = pc;
     block->thumb = (uint8_t)thumb;
     recomp->dirty = 1;
+    index_put(recomp, recomp->count);
     return block;
 }
 
@@ -623,6 +657,7 @@ int agb_recomp_save(AgbRecomp* recomp, AgbBoard* board, char* error, size_t erro
         for (size_t i = 1; i <= recomp->count; ++i)
             if (recomp->blocks[i].instructions) recomp->blocks[++kept] = recomp->blocks[i];
         recomp->count = kept;
+        index_build(recomp);
     }
     {
         /* a recompile in another process since this run loaded the module: its functions are numbered its own

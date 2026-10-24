@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #define CHECK(expression)                                                                                              \
     do {                                                                                                               \
         if (!(expression)) {                                                                                           \
@@ -325,6 +326,48 @@ int main(void) {
         block = agb_recomp_lookup(&recomp, &board, 0x03000100, 0, error, sizeof error);
         CHECK(block && run_block(&cpu, block) == 0xFFFFFFE8);
     }
+#ifdef SNX_AGB_JIT
+    {
+        /* finding a block costs the same however many the map names: one named after 32768 others, as a run that once
+           went through 32 MiB of zeros left, against the same one named first, each found 200000 times. A scan of the
+           blocks took thousands of times longer for the one named last */
+        clock_t took[2] = {0, 0};
+        for (int last = 0; last < 2; ++last) {
+            AgbRecomp many;
+            FILE *from = fopen("agb_cpu_test.code.map", "r"), *to = fopen("agb_cpu_index.code.map", "w");
+            char header[128];
+            const AgbBlock* block;
+            clock_t start;
+            result = !from || !to || !fgets(header, sizeof header, from) || fputs(header, to) < 0;
+            if (!result && !last) result = fputs("080000C0 0 1 0 -\n", to) < 0;
+            for (uint32_t i = 0; !result && i < 32768; ++i)
+                result = fprintf(to, "%08X 0 1 0 -\n", 0x0A000000u + i * 4) < 0;
+            if (!result && last) result = fputs("080000C0 0 1 0 -\n", to) < 0;
+            if (from) fclose(from);
+            if (to && fclose(to)) result = 1;
+            CHECK(!result);
+            agb_recomp_init(&many, "agb_cpu_index.code", SNX_AGB_TEST_CC);
+            CHECK(!agb_recomp_load_map(&many, &board, error, sizeof error) && many.count == 32769);
+            block = agb_recomp_lookup(&many, &board, 0x080000C0, 0, error, sizeof error); /* compiled here, once */
+            result = !block;
+            start = clock();
+            for (int i = 0; !result && i < 200000; ++i)
+                result = agb_recomp_lookup(&many, &board, 0x080000C0, 0, error, sizeof error) != block;
+            took[last] = clock() - start;
+            agb_recomp_free(&many);
+            CHECK(!result);
+        }
+        remove("agb_cpu_index.code.map");
+        result = 1;
+        if (took[1] > took[0] * 8 + CLOCKS_PER_SEC / 50) {
+            fprintf(stderr,
+                    "agb_cpu: 200000 lookups took %ld ms for the block named after 32768 others, %ld ms named "
+                    "first\n",
+                    (long)(took[1] * 1000 / CLOCKS_PER_SEC), (long)(took[0] * 1000 / CLOCKS_PER_SEC));
+            goto done;
+        }
+    }
+#endif
     {
         /* the cache is the ROM's it was built from: another one's, named the same, recompiles and says why */
         AgbRecomp other;
