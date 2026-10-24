@@ -6517,6 +6517,18 @@ static bool made_here(const char* program) {
     free(base);
     return here;
 }
+/* the game of the library made from file (a dump, package or ROM) when another build made it, or this one with other
+   mods: Play on its dump compiles it again first, as its driver would on the run's screen */
+static bool made_elsewhere(const App* app, const char* file) {
+    MadeGames made;
+    const char* program;
+    bool elsewhere;
+    made_read(app, &made);
+    program = made_program(&made, file);
+    elsewhere = program && gui_game_folder(program) && !made_here(program);
+    made_free(&made);
+    return elsewhere;
+}
 /* the recent rows as Games has their games: a dump or a package made into a game of recompiled/ since runs that game's
    program from then on, whichever console's, and a game of a folder of its own goes by the name Games shows it by, its
    control.nacp's */
@@ -9818,8 +9830,8 @@ static void made_ask(App* app, char* file) {
     app->made_item = app->menu.selected;
     gui_confirm_open(&app->confirm, GUI_ASK_MADE, false);
 }
-/* the answer about a made game's dump: Play runs the dump, its driver playing the game made (one gone since compiles
-   first), Recompile recompiles it as R does; Back neither */
+/* the answer about a made game's dump: Play runs the dump, its driver playing the game made (one gone since, or one
+   another build made, compiles first), Recompile recompiles it as R does; Back neither */
 static void made_answer(App* app, bool taken, bool second) {
     char* file = app->made_file;
     app->made_file = NULL;
@@ -9871,11 +9883,13 @@ static void launch(App* app, char* absolute, bool prepared) {
     }
     /* a game opened that no game of the library was made from yet compiles first through the queue, as R's recompile
        does: the Compile tab shows it, and it plays once it ended if the tab still shows it (job_play). So does a Switch
-       game another build made, which its driver would recompile on the run's screen */
+       game another build made, which its driver would recompile on the run's screen: its program opened, or its dump
+       with Play answered */
     bool compile = !app->recompile && !prepared && app->menu.selected != GUI_LINUX && !made_from(app, absolute);
 #ifndef SDL_PLATFORM_IOS /* the games there are packs the app loads, with no stamp */
     compile = compile || (!app->recompile && !app->compiled && prepared && app->menu.selected == GUI_SWITCH &&
                           gui_game_folder(absolute) && !made_here(absolute));
+    compile = compile || (app->made_ok && app->menu.selected == GUI_SWITCH && made_elsewhere(app, absolute));
 #endif
     bool make = app->recompile || compile; /* the driver's -r: a run that makes the game and plays nothing */
     bool native = prepared && app->menu.selected == GUI_SWITCH;
