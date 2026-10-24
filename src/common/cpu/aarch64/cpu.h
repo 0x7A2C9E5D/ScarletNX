@@ -384,9 +384,10 @@ u32 snx_crc32(u32 acc, u64 val, int bytes, int castagnoli);
 /* ---- floating point (helpers/fp.c) ----
    Raw IEEE encodings in and out, with integer arithmetic only: no host floating point, libm or host rounding
    state, so results don't depend on the host. Only c->fpcr is read and only c->fpsr written (its cumulative flags,
-   never cleared), so exceptions never reach process-global state. Widths: 32 and 64 for arithmetic, also 16 for
-   format conversion. Rounding modes: 0 ties to even, 1 toward +inf, 2 toward -inf, 3 toward zero, 4 ties away,
-   5 to odd (FCVTXN). Integer widths are 32 or 64, with 0 <= fbits <= the integer width.
+   never cleared), so exceptions never reach process-global state. Widths: 16 (FEAT_FP16's halves, under FPCR.FZ16
+   and never FPCR.AHP, which only snx_fp_convert's halves take), 32 and 64. Rounding modes: 0 ties to even,
+   1 toward +inf, 2 toward -inf, 3 toward zero, 4 ties away, 5 to odd (FCVTXN). Integer widths are 32 or 64, with
+   0 <= fbits <= the integer width.
    Generated code passes the operation numbers below as literals: they are ABI. */
 enum { SNX_FP_ADD, SNX_FP_SUB, SNX_FP_MUL, SNX_FP_DIV, SNX_FP_MULX, SNX_FP_ABD, SNX_FP_RECPS, SNX_FP_RSQRTS };
 enum { SNX_FP_SQRT, SNX_FP_RECPE, SNX_FP_RSQRTE, SNX_FP_RECPX };
@@ -400,6 +401,9 @@ u64 snx_fp_from_int(CPU* c, u64 bits, int int_width, int fp_width, int uns, int 
 u32 snx_fp_compare(CPU* c, u64 a, u64 b, int width, int signal); /* the NZCV nibble of FCMP (signal: FCMPE) */
 u64 snx_fp_minmax(CPU* c, u64 a, u64 b, int width, int minimum, int numeric);
 u64 snx_fp_round(CPU* c, u64 bits, int width, int rm, int exact); /* FRINT*; exact: FRINTX's inexact flag */
+u64 snx_fp_round_int(CPU* c, u64 bits, int width, int rm, int intsize); /* FRINT32*, FRINT64* (intsize 32, 64) */
+u64 snx_fp_jcvt(CPU* c, u64 bits); /* FJCVTZS: the W result, and Z in bit 32 */
+u64 snx_fp_bfcvt(CPU* c, u64 bits); /* BFCVT: a single's bfloat16 */
 u32 urecpe32(u32 x);
 u32 ursqrte32(u32 x);
 

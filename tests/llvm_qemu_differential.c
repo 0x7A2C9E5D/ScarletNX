@@ -23,6 +23,7 @@
 #include "common/cpu/aarch64/cpu.h"
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/llvm/ir_ldst.h"
+#include "common/cpu/recompiler/llvm/ir_fpu.h"
 #include "common/cpu/recompiler/llvm/link.h"
 #include "llvm_qemu_words.h"
 #include "qemu_ref/qemu_ref.h"
@@ -142,6 +143,25 @@ static u64 conversion_edge(void) {
     return lane[1] << 32 | lane[0];
 }
 
+/* a half (FEAT_FP16): zeros, denormals, the normal range's ends, infinities, quiet and signalling NaNs, or any */
+static u64 half_value(void) {
+    u64 k = next_random(), sign = (k & 1) << 15, bits = k >> 8;
+    switch ((k >> 1) % 8) {
+        case 0: return sign;
+        case 1: return sign | (1 + bits % 0x3FF);
+        case 2: return sign | 0x7C00;
+        case 3: return sign | 0x7E00 | (bits & 0x1FF);
+        case 4: return sign | 0x7C01 | (bits & 0x1FE);
+        case 5: return sign | 0x0400 | (bits & 0x3FF);
+        case 6: return sign | 0x7800 | (bits & 0x3FF);
+        default: return bits & 0xFFFF;
+    }
+}
+/* a scalar FP instruction (data processing, compares, selects, conversions) on halves: ftype 3 */
+static int half_word(u32 word) {
+    return ((word & 0x5F000000u) == 0x1E000000u || (word & 0x5F000000u) == 0x1F000000u) && ((word >> 22) & 3) == 3;
+}
+
 /* FCVTN/FCVTXN inputs at the narrower format's normal range ends, dropped bits near half an ulp */
 static u64 narrow_edge(unsigned doubles) {
     static const u32 exponents64[] = {897, 898, 1149, 1150, 897, 898, 1150, 1150, 896, 1151},
@@ -218,6 +238,15 @@ static void random_state(CPU* c, u32 word, int addresses) {
     c->vf = next_random() & 1;
     c->fpcr = fpcr[next_random() % 8] | (next_random() % 2 ? (u32)(next_random() & 0x07C00000u) : 0);
     if ((word & 0x8F3FFC00u) == 0x0E216800u && next_random() % 2) c->fpcr &= ~(3u << 22);
+    if (half_word(word)) { /* the operands as halves, and FPCR.FZ16 */
+        unsigned operands[3], i;
+        operands[0] = rn;
+        operands[1] = rm;
+        operands[2] = ra;
+        for (i = 0; i < 3; ++i)
+            if (next_random() % 4) c->v[operands[i]].d[0] = (c->v[operands[i]].d[0] & ~0xFFFFull) | half_value();
+        if (next_random() % 2) c->fpcr |= 1u << 19;
+    }
     /* FPSR's cumulative flags and QC: its AArch32 NZCV bits are not A64 state */
     c->fpsr = next_random() % 4 ? (next_random() % 2 ? 0x10 : 0) : (u32)(next_random() & 0x0800009Fu);
 }
@@ -741,10 +770,12 @@ int main(int argc, char** argv) {
                 SnxA64Insn max;
                 SnxU64 features = 0;
                 sprintf(name, "S_%lu", (unsigned long)nsteps);
-                /* the load/store emitters (ir_ldst.c) implement the LSE and RCpc atomics too: a word the Switch lacks
-                   that they emit runs with max's features, against QEMU's -cpu max */
+                /* the load/store emitters (ir_ldst.c) implement the LSE and RCpc atomics too, the scalar FP ones
+                   (ir_fpu.c) FEAT_FP16, FEAT_JSCVT, FEAT_FRINTTS and BFCVT: a word the Switch lacks that they emit
+                   runs with max's features, against QEMU's -cpu max */
                 if (snx_a64_decode_word(it->words[k], SNX_A64_TARGET_MAX, &max) != SNX_A64_OP_UNDEF &&
-                    snx_ir_ldst_handles(max.op) && (max.feature & ~(SnxU64)SNX_A64_TARGET_SWITCH))
+                    (snx_ir_ldst_handles(max.op) || snx_ir_fpu_handles(max.op)) &&
+                    (max.feature & ~(SnxU64)SNX_A64_TARGET_SWITCH))
                     features = SNX_A64_TARGET_MAX;
                 else if (snx_a64_decode(it->words[k])->kind == SNX_FLOW_UNDEF)
                     it->skip = 1;

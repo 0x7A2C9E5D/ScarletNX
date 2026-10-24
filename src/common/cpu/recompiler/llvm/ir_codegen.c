@@ -3,6 +3,7 @@
 /* Guest functions: the IR of what snx_codegen_emit (codegen.c) prints for a function, and of snx_a64_static_step */
 #include "common/cpu/recompiler/llvm/ir_int.h"
 #include "common/cpu/recompiler/llvm/ir_ldst.h"
+#include "common/cpu/recompiler/llvm/ir_fpu.h"
 #include "common/runtime/interface.h" /* SNX_SVC_COUNT */
 #include <stdio.h>
 #include <stdlib.h>
@@ -189,9 +190,9 @@ static void brk(SnxIr* ir, SnxU64 pc, LLVMValueRef imm) {
     ir_rt_call(ir, ir_rt_brk(), ir->t_void, params, args, 3);
 }
 
-/* The body of a PLAIN instruction: ir_int.c's or ir_ldst.c's for the ops they have, else the older emitters'
-   (ir_a64.c, ir_fp.c, ir_simd.c) until theirs move too. One without an emitter is noted, and snx_ir_object refuses
-   the module */
+/* The body of a PLAIN instruction: ir_int.c's, ir_ldst.c's or ir_fpu.c's for the ops they have, else the older
+   emitters' (ir_a64.c, ir_fp.c, ir_simd.c: the AdvSIMD instructions) until theirs move too. One without an emitter is
+   noted, and snx_ir_object refuses the module */
 static void plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Insn* insn, const SnxA64Decoded* instruction) {
     if (snx_ir_int_handles(insn->op)) {
         snx_ir_int(ir, insn, word, pc);
@@ -199,6 +200,10 @@ static void plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Insn* insn, con
     }
     if (snx_ir_ldst_handles(insn->op)) {
         snx_ir_ldst(ir, insn, word, pc);
+        return;
+    }
+    if (snx_ir_fpu_handles(insn->op)) {
+        snx_ir_fpu(ir, insn, word, pc);
         return;
     }
     if (snx_ir_plain(ir, word, pc, instruction)) return;
@@ -237,17 +242,19 @@ static LLVMValueRef flow_operand(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64
 }
 
 /* What word does to the flow for a guest with these features, insn its decode, and the emitters' own decode of it
-   (decoded), which the older ones still take: an op ir_int.c or ir_ldst.c emits needs none. ir_ldst.c implements its
-   ops for every feature the decode allows (the LSE and RCpc atomics); the others implement the Switch's
-   instructions, so one of theirs that needs another feature, or that the older decode gives another flow, is UNDEF
-   until they implement it, as a word no row matches is */
+   (decoded), which the older ones still take: an op ir_int.c, ir_ldst.c or ir_fpu.c emits needs none. ir_ldst.c and
+   ir_fpu.c implement their ops for every feature the decode allows (the LSE and RCpc atomics, FEAT_FP16's halves,
+   FEAT_JSCVT, FEAT_FRINTTS, BFCVT); the others implement the Switch's instructions, so one of theirs that needs another
+   feature, or that the older decode gives another flow, is UNDEF until they implement it, as a word no row matches
+   is */
 static SnxA64Flow decode(SnxU32 word, SnxU64 features, SnxA64Insn* insn, SnxA64Decoded* decoded) {
     static const SnxA64Flow emitted[] = {SNX_A64_FLOW_UNDEF, SNX_A64_FLOW_PLAIN, SNX_A64_FLOW_B,   SNX_A64_FLOW_BL,
                                          SNX_A64_FLOW_BC,    SNX_A64_FLOW_BR,    SNX_A64_FLOW_BLR, SNX_A64_FLOW_RET,
                                          SNX_A64_FLOW_SVC,   SNX_A64_FLOW_BRK}; /* by enum SnxFlow */
     snx_a64_decode_word(word, features, insn);
     memset(decoded, 0, sizeof(*decoded));
-    if (insn->flow != SNX_A64_FLOW_UNDEF && snx_ir_ldst_handles(insn->op)) return insn->flow;
+    if (insn->flow != SNX_A64_FLOW_UNDEF && (snx_ir_ldst_handles(insn->op) || snx_ir_fpu_handles(insn->op)))
+        return insn->flow;
     if (insn->flow == SNX_A64_FLOW_UNDEF || (insn->feature & ~(SnxU64)SNX_A64_TARGET_SWITCH)) return SNX_A64_FLOW_UNDEF;
     if (snx_ir_int_handles(insn->op)) return insn->flow;
     *decoded = snx_a64_decode_inst(word);
