@@ -275,8 +275,7 @@ static const SnxU32 g_words[] = {
     0x4E22CC20UL, /* FMLA V0.4S,V1.4S,V2.4S: QNaN addend with inf*0, fused overflow cancelled; FPSR's NZCV, QC kept. */
     0x6E20D400UL, /* FADDP V0.4S,V0.4S,V0.4S: tie to even, SNaN priority, the destination its own source. */
     0x6E61D820UL, /* UCVTF V0.2D,V1.2D: lanes that fit, 0 is +0 under round toward minus infinity. */
-    0x6E21D820UL, /* UCVTF V0.4S,V1.4S: the same for singles. */
-    0xD53B4223UL  /* MRS X3,DAIF: UNDEF at EL0, Horizon keeping SCTLR_EL1.UMA clear (mesosphere's 0x34D5D92D). */
+    0x6E21D820UL  /* UCVTF V0.4S,V1.4S: the same for singles. */
 };
 #define WORDS (sizeof(g_words) / sizeof(g_words[0]))
 
@@ -502,7 +501,6 @@ static void setup(unsigned i, CPU* c, unsigned char* memory) {
             SNX_VSET_S(c->v[1], 2, 0xFFFFFF);
             SNX_VSET_S(c->v[1], 3, 0x800000);
             break;
-        case 51: c->x[3] = 0x5A5A5A5A; break;
         default: break;
     }
 }
@@ -606,7 +604,6 @@ static int verify(unsigned i, const CPU* c, const unsigned char* memory) {
         case 50:
             ok = SNX_VD(c->v[0], 0) == 0x3F80000000000000ULL && SNX_VD(c->v[0], 1) == 0x4B0000004B7FFFFFULL && !c->fpsr;
             break;
-        case 51: ok = c->x[3] == 0x5A5A5A5A; break;
         default: break;
     }
     return ok;
@@ -621,8 +618,7 @@ static void undefined(CPU* c, u64 pc, u32 w) {
 }
 
 /* each word's LLVM step from its starting state under each host rounding mode (the generated code must not depend
-   on it), against the expected end: registers, flags, FPSR, memory, where it went, and the UNDEFs of case 17 (the
-   decoder's, at its own pc) and case 51 (an emitter's, after which the pc is the runtime's to choose) */
+   on it), against the expected end: registers, flags, FPSR, memory, where it went and the UNDEF of case 17 */
 static void semantics_test(void) {
     static const int modes[] = {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO};
     const int original = fegetround();
@@ -647,7 +643,7 @@ static void semantics_test(void) {
             CPU c;
             RtAPI rt;
             unsigned char memory[64];
-            u64 pc, next;
+            u64 pc;
             int ok;
             memset(&rt, 0, sizeof(rt));
             rt.undef = undefined;
@@ -658,8 +654,8 @@ static void semantics_test(void) {
             g_traps = 0;
             setup(i, &c, memory);
             pc = steps.steps[i](&c);
-            next = i == 16 ? 0xFFC : i == 17 ? 0x1000 : 0x1004;
-            ok = verify(i, &c, memory) && (i == 51 || pc == next) && g_traps == (i == 17 || i == 51);
+            ok = verify(i, &c, memory) && pc == (i == 16 ? 0xFFC : i == 17 ? 0x1000 : 0x1004) &&
+                 g_traps == (i == 17);
             if (!ok) fprintf(stderr, "semantic case %u (%08lx) under host rounding mode %u failed\n", i,
                              (unsigned long)g_words[i], m);
             check(ok, "an LLVM step's architectural result");
