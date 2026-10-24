@@ -164,12 +164,16 @@ int main(void) {
     /* past the image every cartridge window reads the address / 2 pattern, in the flat map as on the board */
     CHECK(map.base[0x08000400] == 0x00 && map.base[0x08000401] == 0x02 && map.base[0x0C000402] == 0x01);
     CHECK(agb_read32(&board, 0x0A000400) == 0x02010200);
-    /* a region and its mirrors are one memory in the flat map: EWRAM's every 256 KiB and past bit 31, VRAM's last 32
-       KiB of each 128 KiB the 32 KiB above the bitmap */
-    map.base[0x0203FFF0] = 0x5A;
-    CHECK(map.base[0x0207FFF0] == 0x5A && map.base[0x8203FFF0] == 0x5A);
-    map.base[0x06010004] = 0xA5;
-    CHECK(map.base[0x06018004] == 0xA5 && map.base[0x06038004] == 0xA5);
+    {
+        /* a region and its mirrors are one memory in the flat map: EWRAM's every 256 KiB and past bit 31, VRAM's last
+           32 KiB of each 128 KiB the 32 KiB above the bitmap. volatile: the compiler sees two addresses where the
+           host maps one page, and may read the mirror before the store */
+        volatile uint8_t* flat = map.base;
+        flat[0x0203FFF0] = 0x5A;
+        CHECK(flat[0x0207FFF0] == 0x5A && flat[0x8203FFF0] == 0x5A);
+        flat[0x06010004] = 0xA5;
+        CHECK(flat[0x06018004] == 0xA5 && flat[0x06038004] == 0xA5);
+    }
     /* the instructions after the interpreted ones start blocks the discovery step did not see: they ran from a
        module of their own, and saving the run folds them into the cached module */
     CHECK(recomp.patch_count > 0 && recomp.dirty);
