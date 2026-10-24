@@ -7,7 +7,7 @@
    the output surface, over the background colour the target rectangle is filled with. host1x.c's channel worker
    calls vic_execute when the stream writes Execute; this file resolves the ConfigStruct (vic_regs.h) into a VicJob
    and hands it to the renderer, which composes it as a compute shader (vic.comp, through the renderer's
-   vic_compose). vic_ref.c is the same composition on the CPU, for the tests.
+   vic_compose). tests/support/vic_ref.c is the same composition on the CPU, for the tests.
 
    The pixel pipeline is Eden's (Vic::Blend): a sample becomes a 10 bit pixel, Y, U and V in R, G and B (the pair's
    chroma for both of its pixels) and the slot's planar alpha in A. With the slot's colour matrix enabled each

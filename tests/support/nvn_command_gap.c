@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "nx/gpu/nvn_command_gap.h"
+#include "nvn_command_gap.h"
 
 int nvn_command_gap_methods(const u32* words, u32 length, NvnGapMethodVisitor visit, void* context) {
     if (!words || !length || length > 16384) return 0;

@@ -6,7 +6,7 @@
    by pixel, nearest neighbor, from the source columns and rows the engine worked out (maxwell/fermi2d.c). The tests
    hold the renderer's blit_mem to it (tests/fermi2d_blit.c, tests/vulkan_headless.c). The runtime blits on the GPU
    (vk/blit.c, docs/GPU_OWNERSHIP.md), so this file isn't built into it */
-#include "nx/gpu/gpu.h"
+#include "fermi2d_ref.h"
 
 /* the largest pixel a blit copies, in bytes (a 128-bit format) */
 #define BLIT_MAX_BPP 16u

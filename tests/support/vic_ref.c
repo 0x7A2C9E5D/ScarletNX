@@ -12,7 +12,7 @@
    word, or for NV12 and NV21 a luma byte and, on even pixels of even rows, the pair's two chroma bytes. Planes are
    pitch linear or block linear, addressed through gpu.c's bl_offset */
 #include <string.h>
-#include "nx/gpu/video/vic.h"
+#include "vic_ref.h"
 
 /* the 10 bit pixels VIC composes in: an 8 bit sample << 2, and >> 2 back to the output's 8 bit */
 #define SAMPLE_TO_PIXEL_SHIFT 2u

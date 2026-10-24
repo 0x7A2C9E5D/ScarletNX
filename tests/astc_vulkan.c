@@ -14,10 +14,10 @@
 #include <stdlib.h>
 #include "nx/gpu/gpu.h"
 #include "nx/gpu/vk/vk.h"
-#include "nx/gpu/texture/astc.h"
+#include "support/astc.h"
 #include "nx/gpu/texture/blocklinear.h"
-#include "nx/gpu/texture/etc2.h"
-#include "nx/gpu/texture/bcn.h"
+#include "support/etc2.h"
+#include "support/bcn.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/main.h"
 #include "nx/runtime/options.h"
@@ -566,7 +566,7 @@ static void bc_blocks(int kind, u8* b, u32 n) {
     }
 }
 
-/* texconv.comp's SPIR-V on the device against the CPU's BCn decoder (bcn.c), random blocks of every kind in an image
+/* texconv.comp's SPIR-V on the device against the CPU's BCn decoder (tests/support/bcn.c), random blocks of every kind in an image
    whose sides aren't multiples of 4: byte for byte */
 static void bc_case(void) {
     u32 w = 13, h = 9, bw = 4, bh = 3;

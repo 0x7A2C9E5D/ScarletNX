@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "common/utilities/endian.h"
-#include "nx/gpu/gpu.h"
+#include "dma_ref.h"
 #include "nx/gpu/maxwell/gob.h"
 #include "nx/gpu/maxwell/maxwell_dma_regs.h"
 

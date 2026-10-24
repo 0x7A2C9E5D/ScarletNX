@@ -3,6 +3,7 @@
 /* Compile the production implementation with either the isolated FFmpeg double (default CTest target),
    or real FFmpeg headers/libraries and -DSNX_TEST_REAL_FFMPEG for synthetic I_PCM decode coverage. */
 #include "nx/gpu/video/nvdec.c"
+#include "support/nvdec_ref.h"
 
 static unsigned checks;
 #define CHECK(x)                                                                                                       \

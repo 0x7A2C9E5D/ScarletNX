@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* BC1 to BC7 blocks built by hand, against values worked out from the Khronos Data Format Specification's S3TC, RGTC
    and BPTC chapters */
-#include "nx/gpu/texture/bcn.h"
+#include "support/bcn.h"
 #include "common/utilities/endian.h"
 #include <stdio.h>
 #include <string.h>

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* BC1 to BC7 decoding on the CPU (bcn.c): the Khronos Data Format Specification's S3TC, RGTC and BPTC chapters, 4x4
+/* BC1 to BC7 decoding on the CPU (bcn.c), for the tests only: the Khronos Data Format Specification's S3TC, RGTC and BPTC chapters, 4x4
    blocks. The reference the GPU's decoder (texconv.glsl, for GPUs without textureCompressionBC) is tested against */
 #ifndef SNX_BCN_H
 #define SNX_BCN_H

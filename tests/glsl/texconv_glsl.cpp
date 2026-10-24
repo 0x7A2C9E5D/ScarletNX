@@ -4,8 +4,8 @@
 // compared byte for byte with the CPU's conversions: every 2 byte texel of the three 2 byte formats, every 24 bit
 // depth as a float against the CPU's float division, RGB32F, packed depth and stencil in rows not a multiple of the
 // four texels an invocation owns, and random ETC2 and EAC blocks of every kind (with the T, H and planar modes made
-// often) against src/nx/gpu/texture/etc2.c and random BC1 to BC7 blocks of every kind (every BC6H and BC7 mode
-// made often) against src/nx/gpu/texture/bcn.c, in images whose sides aren't multiples of 4, and vi's pixel formats
+// often) against tests/support/etc2.c and random BC1 to BC7 blocks of every kind (every BC6H and BC7 mode
+// made often) against tests/support/bcn.c, in images whose sides aren't multiples of 4, and vi's pixel formats
 // against present.c's former CPU conversion. tests/astc_vulkan.c runs the
 // SPIR-V build of the same file on a Vulkan device.
 #include <cstdio>
@@ -13,11 +13,11 @@
 #include <cstring>
 #include <vector>
 #include "glsl.hpp"
-// nx/gpu/texture/etc2.h's functions and kinds (its header brings the recompiler's C helpers, which C++ warns about)
+// tests/support/etc2.h's functions and kinds (its header brings the recompiler's C helpers, which C++ warns about)
 extern "C" void etc2_decode_image(const uint8_t* src, uint32_t w, uint32_t h, int kind, uint8_t* dst);
 extern "C" uint32_t etc2_block_bytes(int kind);
 extern "C" uint32_t etc2_pixel_bytes(int kind);
-// nx/gpu/texture/bcn.h's, in the order of texconv's TC_BC1 to TC_BC7
+// tests/support/bcn.h's, in the order of texconv's TC_BC1 to TC_BC7
 extern "C" void bcn_decode_image(const uint8_t* src, uint32_t w, uint32_t h, int kind, uint8_t* dst);
 extern "C" uint32_t bcn_block_bytes(int kind);
 extern "C" uint32_t bcn_pixel_bytes(int kind);

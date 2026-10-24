@@ -8,6 +8,7 @@
    up to eight slots overlapping in any order, odd source columns and rows (RGBA out), target rectangles, crops,
    planes cut short by the end of their mapping or unmapped, and colour matrices with their shifts and clamps. */
 #include "nx/gpu/video/vic.c"
+#include "../support/vic_ref.h"
 #include <stdarg.h>
 
 void vic_glsl_run(const void* params, const u32* inputs, u32* outputs, int unaligned);

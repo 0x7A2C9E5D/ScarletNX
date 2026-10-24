@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* EAC R11 and RG11 blocks from rEden's decode_eac.cpp: the KDFS 1.3 examples and edenprobe's */
-#include "nx/gpu/texture/etc2.h"
+#include "support/etc2.h"
 #include "common/utilities/endian.h"
 #include <stdio.h>
 #include <string.h>

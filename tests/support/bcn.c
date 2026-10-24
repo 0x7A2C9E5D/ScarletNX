@@ -3,7 +3,7 @@
 /* BC1 to BC7 decoding, from the Khronos Data Format Specification's S3TC, RGTC and BPTC chapters. A block is
    little-endian; pixel (x, y) of a 4x4 block is number y * 4 + x (rows first). Where the specification leaves the
    rounding of an interpolated value to the implementation (BC1 to BC5) it is rounded to nearest */
-#include "nx/gpu/texture/bcn.h"
+#include "bcn.h"
 #include "common/utilities/endian.h"
 #include <string.h>
 
