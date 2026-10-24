@@ -9,18 +9,13 @@
 #include "gui_theme_colors.h"
 #include "common/utilities/pad_screen.h"
 #include "common/utilities/users.h"
-#include "common/utilities/common.h"
-#include "nx/runtime/main.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#ifndef _WIN32
-#include <sys/resource.h>
-#endif
 
 enum { FIRST = 3, VISIBLE = OVERLAY_ROWS - FIRST - 1 }; /* the items' first row, and how many show at once */
 enum { PAGE_MAIN, PAGE_CONTROLS, PAGE_BUTTONS, PAGE_PADS, PAGE_MAP };
-enum { M_RESUME, M_CONTROLS, M_PADS, M_RES, M_HUD, M_EXIT, M_COUNT };                                          /* the first page's items */
+enum { M_CONTROLS, M_PADS, M_EXIT, M_COUNT };                                          /* the first page's items */
 enum { P_PLAYER, P_SWAP, P_DEADZONE, P_RUMBLE, P_BACKGROUND, P_MAP, P_BACK, P_COUNT }; /* the gamepads' page's */
 /* the controls page's items */
 enum {
@@ -60,19 +55,6 @@ static const char* const PADS[P_COUNT] = {SNX_GAMEPAD_PLAYERS,
                                           SNX_GAMEPAD_MAP,
                                           "Back"};
 static int shown, page, focus, top; /* top: the first item showing */
-static int hud;                     /* the frame rate and the memory in a corner, on or off */
-/* the scales the resolution steps through: it is read as a game starts, so the one chosen counts from the next */
-static const float RES_STEPS[] = {0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f};
-enum { RES_COUNT = (int)(sizeof RES_STEPS / sizeof *RES_STEPS) };
-static int res_pick = -1; /* the index in RES_STEPS, from the setting until the player steps it */
-static int res_index(void) {
-    int i, best = 0;
-    float at = g_settings.resolution_scale;
-    if (res_pick >= 0) return res_pick;
-    for (i = 1; i < RES_COUNT; ++i)
-        if (fabsf(RES_STEPS[i] - at) < fabsf(RES_STEPS[best] - at)) best = i;
-    return best;
-}
 static int pad_player;              /* the player the gamepads' page shows: 0 every player's, 1 to SNX_GAMEPADS */
 /* the YoRHa menu's colours, from its theme.ini (gui_theme_colors.h), as R G B A bytes; the page hides the game under
    it, whose text would show through its letters */
@@ -129,16 +111,9 @@ static void label(int i, char* text, size_t size, char* value, size_t vsize) {
         return;
     }
     if (page == PAGE_MAIN) {
-#ifdef SNX_IOS
-        const char* quit = "Quit app"; /* the game runs inside the app: leaving it ends the app */
-#else
-        const char* quit = "Exit";
-#endif
-        const char* const main_items[M_COUNT] = {"Resume", SNX_VPAD_PAGE, SNX_GAMEPAD_PAGE, "Resolution", "Fps and memory", quit};
+        static const char* const main_items[M_COUNT] = {SNX_VPAD_PAGE, SNX_GAMEPAD_PAGE, "Exit"};
         snprintf(text, size, "%s", main_items[i]);
-        if (i == M_CONTROLS || i == M_PADS) snprintf(value, vsize, ">");
-        if (i == M_RES) snprintf(value, vsize, "< %gx >", (double)RES_STEPS[res_index()]);
-        if (i == M_HUD) snprintf(value, vsize, "%s", hud ? "On" : "Off");
+        if (i != M_EXIT) snprintf(value, vsize, ">");
         return;
     }
     if (page == PAGE_BUTTONS) {
@@ -285,20 +260,7 @@ static int act(int i, int step) {
         return OVERLAY_NONE;
     }
     if (page == PAGE_MAIN) {
-        if (i == M_RES) {
-            char text[16];
-            /* a tap (no step) goes to the next scale and round to the first after the last: a finger has no left arrow */
-            res_pick = step ? clamp(res_index() + (step < 0 ? -1 : 1), 0, RES_COUNT - 1) : (res_index() + 1) % RES_COUNT;
-            snprintf(text, sizeof text, "%g", (double)RES_STEPS[res_pick]);
-            vpad_store_text("resolution", text);
-            return OVERLAY_NONE;
-        }
-        if (i == M_HUD) {
-            hud = !hud;
-            return OVERLAY_NONE;
-        }
         if (step) return OVERLAY_NONE;
-        if (i == M_RESUME) return OVERLAY_CLOSE;
         if (i == M_EXIT) return OVERLAY_EXIT;
         page_open(i == M_PADS ? PAGE_PADS : PAGE_CONTROLS);
         return OVERLAY_NONE;
@@ -564,7 +526,7 @@ static void menu_dialog(Dialog* d, char (*text)[OVERLAY_COLS_MAX + 1], char (*va
                         size_t size) {
     static const char* const titles[] = {"SCARLETNX  /  MENU", "SCARLETNX  /  CONTROLS", "SCARLETNX  /  BUTTONS",
                                          "SCARLETNX  /  CONTROLLERS"};
-    static const char* const hints[] = {"Back or Home: back to the game. Resolution counts from the next start.", "Back: the menu.",
+    static const char* const hints[] = {"Back or Home: back to the game.", "Back: the menu.",
                                         "Tap one to show or hide it."};
     int r, n = items();
     memset(d, 0, sizeof *d);
@@ -631,66 +593,11 @@ static const char* pads_hint(char* out, size_t size) {
         snprintf(out, size, "%s", gamepad_name(0));
     return out;
 }
-/* the processor time this process has used, all its threads: its share of the machine over a second is the rise over it */
-static u64 process_cpu_ns(void) {
-#ifndef _WIN32
-    struct rusage u;
-    if (getrusage(RUSAGE_SELF, &u)) return 0;
-    return ((u64)u.ru_utime.tv_sec + (u64)u.ru_stime.tv_sec) * 1000000000u +
-           ((u64)u.ru_utime.tv_usec + (u64)u.ru_stime.tv_usec) * 1000u;
-#else
-    return 0;
-#endif
-}
-#ifdef SNX_IOS
-int gui_apple_thermal(void); /* apple.m: the system's thermal state, 0 nominal to 3 critical */
-#endif
-/* the frame rate, the app's memory, the processor's share and the heat, over the last second or more, in two lines
-   away from the screen's rounded corner */
-static void hud_draw(SnxUiList* l, int sw, int sh) {
-    static u64 at, cpu_was;
-    static int frames_was, rate10, cpu_percent;
-    char line[2][48];
-    int px, py, s, i, now_frames = __atomic_load_n(&g_frames, __ATOMIC_RELAXED);
-    u64 now = plat_ns();
-    float cw, ch, x, y, w = 0;
-    if (!at || now - at >= 1000000000u) {
-        u64 cpu = process_cpu_ns();
-        if (at) {
-            rate10 = (int)((double)(now_frames - frames_was) * 1e10 / (double)(now - at));
-            cpu_percent = (int)((double)(cpu - cpu_was) * 100.0 / (double)(now - at) / (double)snx_cpu_count());
-        }
-        at = now;
-        frames_was = now_frames;
-        cpu_was = cpu;
-    }
-#ifdef SNX_IOS
-    {
-        static const char* const heat[] = {"cool", "warm", "hot", "critical"};
-        int t = gui_apple_thermal();
-        snprintf(line[0], sizeof line[0], "%d.%d fps  %d MiB", rate10 / 10, rate10 % 10, (int)(snx_footprint() >> 20));
-        snprintf(line[1], sizeof line[1], "cpu %d%%  heat %s", cpu_percent, heat[t < 0 ? 0 : t > 3 ? 3 : t]);
-    }
-#else
-    snprintf(line[0], sizeof line[0], "%d.%d fps", rate10 / 10, rate10 % 10);
-    snprintf(line[1], sizeof line[1], "cpu %d%%", cpu_percent);
-#endif
-    overlay_place(sw, sh, &px, &py, &s);
-    cw = 8.0f * (float)s;
-    ch = 16.0f * (float)s;
-    x = (float)sw / 14.0f; /* a phone's corner is rounded: in from it, and down from the camera's side */
-    y = (float)sh / 10.0f;
-    for (i = 0; i < 2; ++i)
-        if ((float)strlen(line[i]) * cw > w) w = (float)strlen(line[i]) * cw;
-    ui_fill(l, x, y, w + 2 * cw, 2 * ch, INK);
-    for (i = 0; i < 2; ++i) ui_text(l, x + cw, y + ch * (float)i, s, line[i], LIGHT);
-}
 void overlay_draw(SnxUiList* l, int sw, int sh) {
     static DialogRows rows_of; /* the renderer's */
     char text[VISIBLE][OVERLAY_COLS_MAX + 1], value[VISIBLE][OVERLAY_COLS_MAX + 1], pads[OVERLAY_COLS_MAX];
     Dialog d;
     DialogDrawn at;
-    if (hud) hud_draw(l, sw, sh);
     if (!shown) return;
     if (page == PAGE_MAP) {
         map_draw(l, sw, sh);

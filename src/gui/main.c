@@ -514,7 +514,7 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define GUI_RECENT_SHOWN 3 /* the recent games Games shows before a row that shows the rest */
 /* what the screens say to press: a phone has a finger, the back button and the system's file picker, nothing to drop;
    a computer has the picker too (on Linux the desktop's portal, else zenity), on a screen of its own as the keys' */
-#ifdef SNX_TOUCH_UI
+#ifdef SDL_PLATFORM_ANDROID
 #ifdef SNX_TOUCH_UI
 #define SAY_MENU SNX_TR_KEYS("Tap: select. Refresh. Back.")
 #else
@@ -539,7 +539,7 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_PICK_BOX   SNX_TR_NOOP("tap the box to open the file picker")
 #define SAY_FILE_WAIT  SNX_TR_NOOP("Pick a file")
 #define SAY_DONE       SNX_TR_NOOP("Tap to return to menu")
-#define SAY_ABORT      SNX_TR_NOOP("Tap the screen: abort or keep going")
+#define SAY_ABORT      SNX_TR_NOOP("Tap here to abort and return to menu")
 #define SAY_NO_GAMES   SNX_TR_NOOP("No games in recompiled/ or dumps/: put a game's .nro, .xci or .nsp in dumps/.")
 #ifdef SDL_PLATFORM_ANDROID
 #define SAY_EDITOR SNX_TR_KEYS("Tap: change. Back.")
@@ -917,19 +917,6 @@ static void disk_text(const App* app, char* out, size_t size) {
     } else
         snprintf(out, size, snx_tr("Disk: counting, %s free"), left);
 }
-/* a path as the person sees it: on an iPhone what follows the app's Documents folder, which the Files app shows as the
-   app's own (On My iPhone > ScarletNX), the container's long path before it being nothing they can open */
-static const char* visible_path(const char* path) {
-#ifdef SDL_PLATFORM_IOS
-    const char* documents = path ? strstr(path, "/Documents") : NULL;
-    if (documents && (documents[10] == '/' || !documents[10])) {
-        documents += 10;
-        while (*documents == '/') ++documents;
-        return *documents ? documents : "/"; /* the app's own folder is the root there */
-    }
-#endif
-    return path;
-}
 static void footer(App* app, int row, int rows, GuiRgb page, GuiRgb ink, GuiRgb soft) {
     char usage[256], disk[96];
     int bar = app->theme.footer == GUI_STYLE_BAR;
@@ -938,15 +925,12 @@ static void footer(App* app, int row, int rows, GuiRgb page, GuiRgb ink, GuiRgb 
     if (app->theme.footer_rule) rule(app, row, soft);
     gui_usage_text(usage, sizeof(usage), app->usage.available, app->usage.memory_bytes, app->usage.cpu_percent,
                    SDL_GetNumLogicalCPUCores());
-#ifdef SDL_PLATFORM_IOS
-    usage[0] = 0; /* an app runs no children, so there is nothing of them to say */
-#endif
     disk_text(app, disk, sizeof disk);
     n = strlen(usage);
-    if (disk[0]) snprintf(usage + n, sizeof usage - n, "%s%s", n ? "  " : "", disk);
+    if (disk[0]) snprintf(usage + n, sizeof usage - n, "  %s", disk);
     text(app, 1, row, usage, rgb(bar ? page : soft));
     text(app, 1, row + 1, snx_tr("Working folder:"), rgb(bar ? page : soft));
-    text(app, 2 + gui_text_cols(snx_tr("Working folder:")), row + 1, app->cwd ? visible_path(app->cwd) : snx_tr("(unavailable)"),
+    text(app, 2 + gui_text_cols(snx_tr("Working folder:")), row + 1, app->cwd ? app->cwd : snx_tr("(unavailable)"),
          rgb(bar ? page : ink));
 }
 /* the screen a file is picked or dropped on: the keys', and a load option's */
@@ -4166,10 +4150,7 @@ static int status_rows(App* app, int width, GuiRect r, int y, int draw) {
                    app->usage.memory_bytes + (job ? app->job_usage.memory_bytes : 0),
                    app->usage.cpu_percent + (job ? app->job_usage.cpu_percent : 0), SDL_GetNumLogicalCPUCores());
     disk_text(app, disk, sizeof disk);
-    snprintf(cwd, sizeof cwd, "%s %s", snx_tr("Working folder:"), app->cwd ? visible_path(app->cwd) : snx_tr("(unavailable)"));
-#ifdef SDL_PLATFORM_IOS
-    usage[0] = 0; /* an app runs no children: the row is left out */
-#endif
+    snprintf(cwd, sizeof cwd, "%s %s", snx_tr("Working folder:"), app->cwd ? app->cwd : snx_tr("(unavailable)"));
     speed[0] = bar[0] = 0;
     if (job) {
         job_speed(app, how, sizeof how);
@@ -4621,28 +4602,15 @@ static void menu_boxes(App* app, GuiMenuBoxes* m) {
 /* the last run's output, under what the side box says */
 static void last_output(App* app, GuiRect r, int y) {
     SDL_Color soft = rgb(app->theme.soft);
-    int i, x, fit = r.w / cell_w(app);
-    bool clipped = false; /* the row before was cut at the box's edge: the one that follows may be its rest */
+    int i, x;
     if (!app->has_output || entering(app)) return;
     y += cell_h(app);
     y += wrap_in(app, r, r.x, y, snx_tr("Last output:"), 0, soft) * cell_h(app);
     SDL_SetTextureColorMod(app->font, app->theme.ink.r, app->theme.ink.g, app->theme.ink.b);
-    for (i = 0; i < app->console.rows && y + cell_h(app) <= r.y + r.h; ++i) {
-        int end = app->console.cols - 1, shown;
-        bool wrapped = i && clipped && app->console.cells[i - 1][app->console.cols - 1] != ' ';
-        if (wrapped) { /* the console wrapped a long line: its start, cut with "...", says what it was */
-            clipped = true;
-            continue;
-        }
-        while (end >= 0 && app->console.cells[i][end] == ' ') --end;
-        clipped = end + 1 > fit && fit > 3;
-        shown = clipped ? fit - 3 : end + 1 < fit ? end + 1 : fit;
-        for (x = 0; x < shown; ++x)
+    for (i = 0; i < app->console.rows && y + cell_h(app) <= r.y + r.h; ++i, y += cell_h(app))
+        for (x = 0; x < app->console.cols && (x + 1) * cell_w(app) <= r.w; ++x)
             if (app->console.cells[i][x] != ' ')
                 glyph(app, (float)(r.x + x * cell_w(app)), (float)y, app->console.cells[i][x]);
-        for (x = 0; clipped && x < 3; ++x) glyph(app, (float)(r.x + (shown + x) * cell_w(app)), (float)y, '.');
-        y += cell_h(app);
-    }
 }
 /* the side box: the focused item, and for the keys the ones in use; the last run's output under it. What the item
    does is the tips', not said twice */
@@ -4981,7 +4949,7 @@ static void draw_games(App* app) {
     if (g.place.side.h) {
         y = pane(app, g.place.side, name);
         r = gui_rect(r.x, y, r.w, g.place.side.y + g.place.side.h - y);
-        y += wrap_in(app, r, r.x, y, visible_path(about), app->browser.selected != 0, ink) * cell_h(app);
+        y += wrap_in(app, r, r.x, y, about, app->browser.selected != 0, ink) * cell_h(app);
         if (kind[0]) y += wrap_in(app, r, r.x, y, kind, 0, soft) * cell_h(app);
         if (app->aot_state == GUI_AOT_CACHE) {
             char size[32];
@@ -5010,19 +4978,19 @@ static void draw_games(App* app) {
                          gui_browser_pages(&app->browser), games_listed(app));
             y += wrap_in(app, r, r.x, y, line, 0, soft) * cell_h(app);
         }
-        y += wrap_in(app, r, r.x, y, app->games_dir ? visible_path(app->games_dir) : "recompiled/", 1, soft) * cell_h(app);
+        y += wrap_in(app, r, r.x, y, app->games_dir ? app->games_dir : "recompiled/", 1, soft) * cell_h(app);
         if (dumps_on(app)) { /* Dumps off: the games made alone */
             char* dumps = app->data_dir ? snx_path_join(app->data_dir, "dumps") : NULL;
-            y += wrap_in(app, r, r.x, y, dumps ? visible_path(dumps) : "dumps/", 1, soft) * cell_h(app);
+            y += wrap_in(app, r, r.x, y, dumps ? dumps : "dumps/", 1, soft) * cell_h(app);
             free(dumps);
         }
         for (i = 0; i < (size_t)app->folder_count; ++i)
             if (dumps_on(app) || app->folders_library[i] == GUI_LIBRARY_RECOMPILED)
-                y += wrap_in(app, r, r.x, y, visible_path(app->folders[i]), 1, soft) * cell_h(app);
+                y += wrap_in(app, r, r.x, y, app->folders[i], 1, soft) * cell_h(app);
         last_output(app, r, y);
     }
     status_box(app, g.place.status);
-    screen_foot(app, &g.place, kind[0] ? kind : visible_path(about), shown_keys(app, keys, sizeof keys));
+    screen_foot(app, &g.place, kind[0] ? kind : about, shown_keys(app, keys, sizeof keys));
 }
 /* a line that waits on the user, at pixel row y of r: plain at its left, or framed, placed and blinking as the theme's
    prompt says */
@@ -5064,7 +5032,7 @@ static void draw_pick(App* app) {
     r = gui_rect(r.x, y, r.w, r.y + r.h - y);
     if (keys) {
         snprintf(line, sizeof line, snx_tr("Installs to: %s"),
-                 app->keys_path ? visible_path(app->keys_path) : snx_tr("No home folder"));
+                 app->keys_path ? app->keys_path : snx_tr("No home folder"));
         y += wrap_in(app, r, r.x, y, line, 1, rgb(app->theme.ink)) * cell_h(app);
     }
     if (keys && keys_left(app)) { /* what the last try did, and when the menu comes back */
@@ -7143,9 +7111,6 @@ static void pad_load_mappings(App* app) {
     free(path);
 }
 static void render(App* app);
-#ifdef SNX_GUI_TOUR
-static void tour_shot(App* app);
-#endif
 /* two Joy-Cons one pad, or two, as the games take them (gamepad_joycon_pair, 1 when not picked): before SDL's gamepads
    start, which read it then */
 static void joycon_pairs(App* app) {
@@ -8085,7 +8050,7 @@ static void form_pointer(App* app, float x, float y) {
    notices of what older versions did, then each step setup.ini has left. Its boxes say what the page is about, its
    question and choices come as the theme's options-dialog places them, its tip in the foot. What a step does is done
    as it is taken; setup.ini is written once the last one is ---- */
-#ifdef SNX_TOUCH_UI
+#ifdef SDL_PLATFORM_ANDROID
 #ifdef SNX_TOUCH_UI
 #define SAY_SETUP SNX_TR_KEYS("Tap: choose. Back.")
 #else
@@ -8856,7 +8821,7 @@ static void setup_panes(App* app, GuiRect r) {
             free(path);
             break;
         case SNX_SETUP_FOLDERS:
-            snx_home_short(app->games_dir ? visible_path(app->games_dir) : "recompiled/", shown, sizeof shown);
+            snx_home_short(app->games_dir ? app->games_dir : "recompiled/", shown, sizeof shown);
             SETUP_LINE("%s%s%s", m, setup_pad(pad, sizeof pad, folder_names[0], setup_cols(folder_names, 2, 2)), shown);
             /* the data folder's dumps/, always listed, then the player's folders of games or dumps */
             path = app->data_dir ? snx_path_join(app->data_dir, "dumps") : NULL;
@@ -9040,9 +9005,6 @@ static void render(App* app) {
     if (app->cleaned_shown) render_files(app, 1); /* over the menu, or the App's rows it was started from */
     if (app->help_shown) render_help(app);
     fades_draw(app);
-#ifdef SNX_GUI_TOUR
-    tour_shot(app);
-#endif
     SDL_RenderPresent(app->renderer);
 }
 /* the game's name as its run gave it, from the step that names it, for its recent game */
@@ -9591,10 +9553,7 @@ static void pump(App* app) {
         for (int reads = 0; reads < 16; ++reads) {
             int n = gui_process_read(app->process, buffer, sizeof(buffer));
             if (n <= 0) break;
-            if (app->run_out) { /* flushed: a run the system ends (iOS, out of memory) leaves what it printed */
-                fwrite(buffer, 1, (size_t)n, app->run_out);
-                fflush(app->run_out);
-            }
+            if (app->run_out) fwrite(buffer, 1, (size_t)n, app->run_out);
             gui_console_feed(&app->console, buffer, (size_t)n);
             gui_steps_feed(&app->steps, buffer, (size_t)n, now_ms(app));
             app->has_output = true;
@@ -10952,87 +10911,13 @@ static char* log_summary(const char* path) {
     free(markdown);
     return out;
 }
-/* Log level 2 (Log level under Debug, the runtime's detail): the shared log holds everything the app knows, whole
-   files rather than their ends */
-static bool log_everything(App* app) {
-    const char* level = gui_settings_value(settings_of(app), "log");
-    return level && !strcmp(level, "2");
-}
-/* text and more joined, both freed */
-static char* joined(char* text, char* more) {
-    char* out = snx_format("%s%s", text, more);
-    free(text);
-    free(more);
-    return out;
-}
-/* a file whole under its title, or a line saying it is not there */
-static char* whole_file(const char* title, const char* path) {
-    char* text = path && snx_is_file(path) ? log_tail(path, (size_t)-1) : NULL;
-    char* out = snx_format("\n== %s: %s ==\n%s\n", title, path ? path : "(none)", text ? text : "not there");
-    free(text);
-    return out;
-}
-/* a folder's files and their sizes, depth folders further in: names and sizes only, never a file's content */
-static char* folder_listing(const char* path, const char* indent, int depth) {
-    char **names = NULL, *out = snx_strdup("");
-    size_t count = 0, i;
-    snx_list_dir(path, &names, &count);
-    for (i = 0; i < count; ++i) {
-        char* file = snx_path_join(path, names[i]);
-        if (file && snx_is_dir(file)) {
-            char *deeper = snx_format("%s    ", indent), *inner = depth ? folder_listing(file, deeper, depth - 1) : NULL;
-            out = joined(out, snx_format("%s%s/\n%s", indent, names[i], inner ? inner : ""));
-            free(inner);
-            free(deeper);
-        } else if (file)
-            out = joined(out, snx_format("%s%s  %llu bytes\n", indent, names[i],
-                                         (unsigned long long)snx_file_size(file)));
-        free(file);
-    }
-    snx_free_strings(names, count);
-    return out;
-}
-/* what Log level 2 adds to the shared log: the app's console log and error log whole, the picks kept for the games and
-   the folders, what the data folder holds, and the device's state now */
-static char* everything_else(App* app) {
-    static const char* const folders[] = {"dumps", "keys", "recompiled", "logs"};
-    char *text = snx_strdup("\n== Log level 2: everything the app knows ==\n"), *logs, *file;
-    size_t i;
-    logs = app->cwd ? snx_path_join(app->cwd, "logs") : NULL;
-    if (logs) {
-        file = snx_path_join(logs, "scarletnx-console.log");
-        text = joined(text, whole_file("the app's console log", file));
-        free(file);
-        file = snx_path_join(logs, "scarletnx-error.log");
-        text = joined(text, whole_file("the error log", file));
-        free(file);
-    }
-    free(logs);
-    text = joined(text, whole_file("settings", app->settings_file));
-    text = joined(text, whole_file("folders", app->folders_file));
-    text = joined(text, whole_file("app", app->app_file));
-#ifdef SDL_PLATFORM_APPLE
-    {
-        char stats[512] = "";
-        gui_apple_stats(stats, sizeof stats);
-        text = joined(text, snx_format("\n== the device now ==\n%s\n", stats));
-    }
-#endif
-    for (i = 0; app->cwd && i < sizeof folders / sizeof *folders; ++i) {
-        char *folder = snx_path_join(app->cwd, folders[i]), *list = folder ? folder_listing(folder, "  ", 2) : NULL;
-        text = joined(text, snx_format("\n== files in %s ==\n%s", folder ? folder : folders[i], list ? list : ""));
-        free(list);
-        free(folder);
-    }
-    return text;
-}
 /* the message on the screen, the summary of the newest game log, the last run's output and that log, as scarletnx.log in the data folder's state
    folder (the working folder without one: started from the desktop, that is the home folder), then on Android handed
    to the share sheet, elsewhere its path copied */
 static void share_log(App* app) {
-    char *game, *run, *recompiled, *played, *summary, *more, *text, *saved, *state = NULL;
+    char *game, *run, *recompiled, *played, *summary, *text, *saved, *state = NULL;
     const char* folder;
-    bool written, everything;
+    bool written;
     folder = app->cwd;
     if (app->data_dir && snx_app_dir(app->data_dir)) state = snx_app_kind_dir(app->data_dir, SNX_USER_STATE);
     if (state && snx_mkdirs(state)) {
@@ -11042,19 +10927,17 @@ static void share_log(App* app) {
     if (state) folder = state;
     left_behind(app);
     game = newest_log(app);
-    everything = log_everything(app);
-    run = log_tail(app->run_log, everything ? (size_t)-1 : 1 << 20);
-    recompiled = log_tail(app->job_log, everything ? (size_t)-1 : 1 << 20);
-    played = log_tail(game, everything ? (size_t)-1 : 4 << 20);
+    run = log_tail(app->run_log, 1 << 20);
+    recompiled = log_tail(app->job_log, 1 << 20);
+    played = log_tail(game, 4 << 20);
     summary = game ? log_summary(game) : snx_strdup("");
-    more = everything ? everything_else(app) : snx_strdup("");
     text =
         snx_format("%s\nMessage: %s\n%s%s%s%s\n%s== the last run: %s ==\n%s\n\n== the last recompile of the queue: %s "
-                   "==\n%s\n\n== %s ==\n%s\n%s",
+                   "==\n%s\n\n== %s ==\n%s\n",
                    snx_build_info(), app->message, app->left ? app->left : "",
                    app->left_clear ? SAY_LEFT_CLEAR "\n" : "", app->cleaned.count ? "Clean Old Settings:\n" : "",
                    app->cleaned.text ? app->cleaned.text : "", summary, app->run_log ? app->run_log : "", run,
-                   app->job_log ? app->job_log : "", recompiled, game ? game : "no game log", played, more);
+                   app->job_log ? app->job_log : "", recompiled, game ? game : "no game log", played);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
     written = saved && !snx_write_file(saved, text, strlen(text));
     if (written) app->log_due = false; /* the crash's log is out */
@@ -11082,7 +10965,6 @@ static void share_log(App* app) {
     free(saved);
     free(text);
     free(summary);
-    free(more);
     free(played);
     free(recompiled);
     free(run);
@@ -11140,10 +11022,6 @@ static size_t games_listed(const App* app) {
 }
 /* the names dir holds into h, and with depth those of its folders, down that many levels, hidden ones left alone; it
    ends where it is once *stop is set */
-static bool name_ends(const char* name, const char* end) {
-    size_t n = strlen(name), e = strlen(end);
-    return n >= e && !strcmp(name + n - e, end);
-}
 static uint64_t stamp_dir(uint64_t h, const char* dir, int depth, const int* stop) {
     char** names = NULL;
     size_t count = 0, k;
@@ -11154,8 +11032,7 @@ static uint64_t stamp_dir(uint64_t h, const char* dir, int depth, const int* sto
             h = (h ^ (unsigned char)*c) * 1099511628211ull;
             if (!*c) break;
         }
-        /* a game's data folder (its extracted RomFS: thousands of files) holds no game: not walked each second */
-        if (depth > 0 && names[k][0] != '.' && !name_ends(names[k], "_data")) {
+        if (depth > 0 && names[k][0] != '.') {
             char* sub = snx_path_join(dir, names[k]);
             if (sub && snx_is_dir(sub)) h = stamp_dir(h, sub, depth - 1, stop);
             free(sub);
@@ -11801,16 +11678,11 @@ static bool foot_press(App* app, float x, float y) {
     app->scale = s;
     return hit.key[0] && hint_press(app, hit.key, hit.col);
 }
-static void cancel(App* app);
 static void pointer(App* app, float window_x, float window_y, bool click, bool touch) {
     float x, y;
     bool picking = app->editing && app->editor.picking;
     if ((app->menu.running && !app->confirm.shown) || app->finished) {
         app->hovering = false; /* a run's foot presses nothing */
-#ifdef SNX_TOUCH_UI
-        /* a phone has no ESC: a tap on a run that goes asks whether to abort it or keep going */
-        if (click && app->menu.running && !app->finished && !app->aborting) cancel(app);
-#endif
         return;
     }
     layout(app);
@@ -11997,11 +11869,6 @@ static void touch(App* app, float x, float y) {
         return;
     }
     if (app->menu.running) {
-#ifdef SNX_TOUCH_UI
-        /* a tap anywhere on a run asks whether to abort it or keep going: nothing is lost by it */
-        (void)rx, (void)ry;
-        if (!app->aborting) cancel(app);
-#else
         GuiPlace p;
         layout(app);
         if (!SDL_RenderCoordinatesFromWindow(app->renderer, x * (float)w, y * (float)h, &rx, &ry)) return;
@@ -12010,7 +11877,6 @@ static void touch(App* app, float x, float y) {
             if (ry >= (float)p.keys.y && ry < (float)(p.keys.y + p.keys.h)) cancel(app);
         } else if ((int)(ry / (float)(16 * app->scale)) == app->rows - 1) /* the loading screen's last row */
             cancel(app);
-#endif
         return;
     }
     pointer(app, x * (float)w, y * (float)h, true, true);
@@ -12546,7 +12412,6 @@ static bool initialize(App* app, const char* self) {
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
     SDL_SetHint(SDL_HINT_PEN_MOUSE_EVENTS, "0");
 #ifdef SDL_PLATFORM_IOS
-    app->ask_abort = true; /* no ESC: a tap on a run asks what to do with it (pointer) */
     gui_apple_start();
 #endif
     if (!SDL_Init(SDL_INIT_VIDEO)) return false;
@@ -12756,169 +12621,6 @@ int snx_gui_migrate(const char* self, const char* option) {
     return 2;
 }
 #endif
-#ifdef SNX_GUI_TOUR
-/* A walk through the screens for the simulator, to see them as a phone draws them: SNX_TOUR_DIR names the folder it
-   writes a picture of each to, as the menu draws it, and the app ends after the last. Built only by a build that sets
-   SNX_GUI_TOUR (no release has it). The run is the driver's stand-in (process_posix.c's tour_driver), which prints a
-   made-up recompile slowly, so the run's screen, its questions and its end are the real ones */
-static struct {
-    const char* dir;
-    Uint64 at, deadline, hold;
-    int step, page;
-    bool advance;
-    char want[64], pending[64];
-} tour;
-static void tour_shot(App* app) {
-    SDL_Surface* surface;
-    char path[700];
-    if (!tour.want[0]) return;
-    surface = SDL_RenderReadPixels(app->renderer, NULL);
-    if (surface) {
-        snprintf(path, sizeof path, "%s/%s.bmp", tour.dir, tour.want);
-        SDL_SaveBMP(surface, path);
-        SDL_DestroySurface(surface);
-    }
-    tour.want[0] = 0;
-}
-static void tour_tick(App* app) {
-    Uint64 now = now_ms(app);
-    char file[700];
-    if (!tour.dir) {
-        tour.dir = getenv("SNX_TOUR_DIR");
-        if (!tour.dir) tour.dir = "";
-        tour.at = now + 3000;
-    }
-    if (!tour.dir[0] || now < tour.at || tour.want[0]) return;
-    if (tour.pending[0]) { /* the screen has faded in: now its picture */
-        snprintf(tour.want, sizeof tour.want, "%s", tour.pending);
-        tour.pending[0] = 0;
-        tour.at = now + tour.hold;
-        return;
-    }
-    if (app->setup_on) { /* the setup first, a page at a time: its picture, then Next */
-        char name[32];
-        if (tour.advance) {
-            tour.advance = false;
-            setup_next(app);
-            layout(app);
-            tour.at = now + 900;
-            return;
-        }
-        snprintf(name, sizeof name, "00-setup-%d", tour.page++);
-        snprintf(tour.want, sizeof tour.want, "%s", name);
-        tour.advance = true;
-        return;
-    }
-#define TOUR(name, wait) do { snprintf(tour.pending, sizeof tour.pending, "%s", name); tour.hold = (wait); tour.at = now + 700; } while (0)
-    switch (tour.step++) {
-        case 0: TOUR("01-menu", 1500); break;
-        case 1: app->menu.selected = GUI_KEYS; TOUR("02-menu-keys-focused", 1200); break;
-        case 2:
-            app->menu.selected = GUI_SWITCH;
-            app->menu.view = GUI_LOAD_GAMES;
-            list_games(app);
-            layout(app);
-            TOUR("03-games", 1500);
-            break;
-        case 3:
-            app->menu.view = GUI_LOAD_KEYS;
-            layout(app);
-            TOUR("04-keys", 1500);
-            break;
-        case 4:
-            app->menu.view = GUI_LOAD_NONE;
-            open_settings(app);
-            layout(app);
-            TOUR("05-settings", 1500);
-            break;
-        case 5:
-            editor_key(app, GUI_SELECT);
-            layout(app);
-            TOUR("06-settings-group", 1500);
-            break;
-        case 6:
-            editor_key(app, GUI_CANCEL);
-            editor_key(app, GUI_DOWN);
-            editor_key(app, GUI_DOWN);
-            editor_key(app, GUI_SELECT);
-            layout(app);
-            TOUR("07-settings-group-2", 1500);
-            break;
-        case 7:
-            editor_key(app, GUI_CANCEL);
-            editor_key(app, GUI_CANCEL);
-            if (app->editing) leave_editor(app);
-            layout(app);
-            TOUR("08-menu-after-settings", 1200);
-            break;
-        case 8: { /* a run: the stand-in prints a recompile, a block every half second */
-            FILE* f;
-            snprintf(file, sizeof file, "%s/Stand-in Game.nsp", tour.dir);
-            f = fopen(file, "wb");
-            if (f) fclose(f);
-            setenv("SNX_TOUR_FAKE_RUN", "1", 1);
-            app->menu.selected = GUI_SWITCH;
-            launch(app, snx_strdup(file), false);
-            tour.at = now + 4000;
-            break;
-        }
-        case 9: TOUR("09-run-start", 5000); break;
-        case 10: TOUR("10-run-progress", 800); break;
-        case 11:
-            cancel(app); /* what a tap on the run does */
-            layout(app);
-            TOUR("11-run-abort-question", 1500);
-            break;
-        case 12: /* the first choice, Keep going */
-            ask_key(app, GUI_SELECT);
-            tour.deadline = now + 150000;
-            TOUR("12-run-keep-going", 1000);
-            break;
-        case 13: /* the stand-in ends after a minute and a half: wait for the menu to come back */
-            if ((app->menu.running || app->finished) && now < tour.deadline) {
-                --tour.step;
-                tour.at = now + 1000;
-            } else
-                TOUR("13-after-run", 1500);
-            break;
-        case 14:
-        case 15:
-        case 16: { /* what the other loads do on an iPhone: a file of theirs, as if the picker had given it */
-            static const struct { int item; const char* file; const char* shot; } other[3] = {
-                {GUI_3DS, "Stand-in.cia", "14-load-3ds"},
-                {GUI_LINUX, "Stand-in.elf", "15-load-linux"},
-                {GUI_VITA, "Stand-in.vpk", "16-load-vita"}};
-            int k = tour.step - 15; /* tour.step was already moved on */
-            FILE* f;
-            app->confirm.shown = false;
-            snprintf(file, sizeof file, "%s/%s", tour.dir, other[k].file);
-            f = fopen(file, "wb");
-            if (f) fclose(f);
-            app->menu.selected = other[k].item;
-            launch(app, snx_strdup(file), false);
-            TOUR(other[k].shot, 1500);
-            break;
-        }
-        case 17: app->confirm.shown = false; break;
-        case 18:
-            app->confirm.shown = false;
-            snprintf(app->room_line, sizeof app->room_line, "Needs about 4.3 GB, 1.2 GB free.");
-            gui_confirm_open(&app->confirm, GUI_ASK_ROOM, true);
-            TOUR("18-room-question", 1500);
-            break;
-        case 19:
-            app->confirm.shown = false;
-            say_failure(app, "The game's code cannot be loaded: iOS makes memory executable only for an attached "
-                             "debugger: enable JIT for this app (StikDebug, with universal.js assigned to it) before "
-                             "opening a game");
-            TOUR("19-error-box", 1500);
-            break;
-        case 20: app->confirm.shown = false; TOUR("20-menu-end", 1000); break;
-        default: app->menu.quit = true; break;
-    }
-#undef TOUR
-}
-#endif
 int snx_gui_main(const char* self) {
     App app;
     if (!initialize(&app, self)) {
@@ -12959,9 +12661,6 @@ int snx_gui_main(const char* self) {
         while (SDL_PollEvent(&e)) event(&app, &e);
         pads_repeat(&app);
         pump(&app);
-#ifdef SNX_GUI_TOUR
-        tour_tick(&app);
-#endif
 #ifdef SDL_PLATFORM_ANDROID
         if (!app.hidden)
 #endif

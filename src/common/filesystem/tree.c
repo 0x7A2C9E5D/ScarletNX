@@ -675,14 +675,6 @@ FsTreeResult fs_tree_mtime(FsTree* tree, const FsNode* node, uint64_t* unix_ms) 
 #endif
     return FS_TREE_OK;
 }
-static uint64_t g_share_bytes_left;
-static unsigned g_share_files_left;
-static int g_share_limited;
-void fs_tree_share_limit(uint64_t bytes, unsigned files) {
-    g_share_limited = bytes || files;
-    g_share_bytes_left = bytes ? bytes : UINT64_MAX;
-    g_share_files_left = files ? files : UINT_MAX;
-}
 FsTreeResult fs_tree_share(FsTree* tree, FsNode* node, unsigned* shared, unsigned* failed) {
     if (!belongs_to(tree, node)) return FS_TREE_NOTFOUND;
     node->readonly = 1;
@@ -697,19 +689,10 @@ FsTreeResult fs_tree_share(FsTree* tree, FsNode* node, unsigned* shared, unsigne
     char path[FS_TREE_PATH_MAX];
     FsTreeResult rc = fs_tree_path(tree, node, path, sizeof path);
     if (rc) return rc;
-    if (g_share_limited && (!g_share_files_left || node->size > g_share_bytes_left)) {
-        (*failed)++;
-        return FS_TREE_OK;
-    }
     if (plat_file_share(path, node->size, &node->fd, &node->map))
         (*failed)++;
-    else {
+    else
         (*shared)++;
-        if (g_share_limited) {
-            --g_share_files_left;
-            g_share_bytes_left -= node->size;
-        }
-    }
     return FS_TREE_OK;
 }
 
