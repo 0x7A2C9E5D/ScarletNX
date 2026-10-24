@@ -8,6 +8,7 @@
 #include "nx/hle/kernel/kernel_int.h"
 #include "nx/hle/hle.h"
 #include "nx/runtime/options.h"
+#include "nx/runtime/platform/tracy.h"
 #include <assert.h>
 
 #define SFCI                 0x49434653u /* the CmifInHeader's magic */
@@ -476,6 +477,7 @@ static void respond(IpcCtx* c) {
 /* the request goes to o's dispatcher, and its result into the reply */
 static void serve(IpcCtx* c, SvcObj* o, u32 seq) {
     u32 in[2];
+    SNX_ZONE_TV(z_ipc, "ipc", c->cmd, "%s cmd %u", o->name, c->cmd);
     ipc_in(c, 0, &in[0], 4);
     ipc_in(c, 4, &in[1], 4);
     snx_le32_array(in, 2);

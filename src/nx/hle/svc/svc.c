@@ -12,6 +12,7 @@
 #include "nx/hle/hle.h"
 #include "nx/runtime/arm.h"
 #include "nx/runtime/clock.h"
+#include "nx/runtime/platform/tracy.h"
 
 #define R_BADPERM      0xD801 /* InvalidNewMemoryPermission */
 #define R_OUTOFHANDLES 0xD201 /* OutOfHandles */
@@ -535,16 +536,20 @@ static void svc64_unknown(CPU* c, u32 imm) {
     KThread* t = (KThread*)c->thread;
     SvcRec in;
     u32 n = svc_begin64(t, &in, imm, c, 0);
+    SNX_ZONE(svc_zone, "unknown");
     not_implemented(imm, c->x[0], c->x[1], c->x[2]);
     c->x[0] = R_NOTIMPL;
+    SNX_ZONE_END(svc_zone);
     svc_end(t, &in, n, 0, c->x[0], c->x[1]);
 }
 static void svc32_unknown(SnxArmCPU* a, u32 imm) {
     KThread* t = kthread_cur();
     SvcRec in;
     u32 n = svc_begin32(t, &in, imm, a, 0);
+    SNX_ZONE(svc_zone, "unknown");
     not_implemented(imm, a->r[0], a->r[1], a->r[2]);
     a->r[0] = R_NOTIMPL;
+    SNX_ZONE_END(svc_zone);
     svc_end(t, &in, n, 0, a->r[0], a->r[1]);
 }
 

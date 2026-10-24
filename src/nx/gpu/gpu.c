@@ -591,6 +591,11 @@ static _Thread_local int t_gpu;
 static u32 g_run_chan;
 static u64 g_run_since;
 static const char* g_wait_what;
+/* where the running job's stream is, for the stall report: the phase between methods, and the method begun last.
+   Read unlocked, each field on its own; the values stay at the last job's when between jobs */
+enum { GPU_AT_BETWEEN, GPU_AT_METHOD, GPU_AT_FETCH, GPU_AT_JOB_END, GPU_AT_STREAM_STOP, GPU_AT_SYNCWAIT };
+static u32 g_run_at;
+static u32 g_run_sub, g_run_method, g_run_class, g_run_entry, g_run_word;
 static u64 g_wait_value, g_wait_since;
 
 /* a job's block after the item: its entries, each fetched entry's first word (in the words fetched at submission,
@@ -608,6 +613,7 @@ static const u32* job_words(const GpuItem* j, u32 e) {
 static int fetch_late(GpuItem* j, u32 e) {
     u32 end = e + 1, k;
     u64 total = entry_words(job_ent(j)[e]);
+    SNX_ZONE_V(z, "gpu fetch late", e);
     while (end < j->n && !(job_ent(j)[end] >> 63)) total += entry_words(job_ent(j)[end++]);
     if (total > j->late_cap) {
         u32* b;
@@ -632,12 +638,14 @@ static int fetch_late(GpuItem* j, u32 e) {
 }
 /* what the stream leaves for the renderer when it stops, at its end or at a wait */
 static void stream_stop(GpuChannel* ch) {
+    SNX_ZONE(z, "gpu stream stop");
     r3d_const_flush(ch);
     r3d_pending_flush();
     if (g_renderer->stream_end) g_renderer->stream_end();
 }
 static void job_end(const GpuItem* j, GpuChannel* ch) {
     u32 i, v;
+    SNX_ZONE_V(z, "gpu job end", j->chan);
     r3d_const_flush(ch);
     r3d_pending_flush();
     /* without a renderer that queues the increments, the work's results land before the game can see its fence. A
@@ -661,7 +669,11 @@ static int run_job(GpuItem* j) {
         ch->dma_launch_index = 0;
         if (j->wait_id != ~0u) { /* the fence is the stream's first wait, as nvgpu puts a syncpoint wait first */
             gpu_park(ch, GPU_PARK_FENCE, j->wait_id, j->wait_val, 1);
-            if (ch->park && g_renderer->before_syncwait) g_renderer->before_syncwait(); /* as at SYNCPOINTB */
+            if (ch->park) {
+                __atomic_store_n(&g_run_at, GPU_AT_SYNCWAIT, __ATOMIC_RELAXED);
+                if (g_renderer->before_syncwait) g_renderer->before_syncwait(); /* as at SYNCPOINTB */
+                __atomic_store_n(&g_run_at, GPU_AT_BETWEEN, __ATOMIC_RELAXED);
+            }
             if (ch->park) {
                 stream_stop(ch);
                 return 0;
@@ -678,13 +690,25 @@ static int run_job(GpuItem* j) {
     while (j->entry < j->n) {
         u32 e = j->entry, len = entry_words(job_ent(j)[e]);
         const u32* w;
-        if (e >= j->pf && (e < j->late_first || e >= j->late_end) && !fetch_late(j, e)) len = 0;
+        if (e >= j->pf && (e < j->late_first || e >= j->late_end)) {
+            __atomic_store_n(&g_run_at, GPU_AT_FETCH, __ATOMIC_RELAXED);
+            int got = fetch_late(j, e);
+            __atomic_store_n(&g_run_at, GPU_AT_BETWEEN, __ATOMIC_RELAXED);
+            if (!got) len = 0;
+        }
         w = len ? job_words(j, e) : NULL;
         while (j->word < len) {
             u32 sub, m, v;
             int last;
             if (pb_decode(&ch->pb, w[j->word++], &sub, &m, &v, &last)) {
+                __atomic_store_n(&g_run_sub, sub, __ATOMIC_RELAXED);
+                __atomic_store_n(&g_run_method, m, __ATOMIC_RELAXED);
+                __atomic_store_n(&g_run_class, ch->sub_class[sub], __ATOMIC_RELAXED);
+                __atomic_store_n(&g_run_entry, e, __ATOMIC_RELAXED);
+                __atomic_store_n(&g_run_word, j->word, __ATOMIC_RELAXED);
+                __atomic_store_n(&g_run_at, GPU_AT_METHOD, __ATOMIC_RELAXED);
                 method_call(ch, sub, m, v, last);
+                __atomic_store_n(&g_run_at, ch->park ? GPU_AT_STREAM_STOP : GPU_AT_BETWEEN, __ATOMIC_RELAXED);
                 if (ch->park) {
                     stream_stop(ch);
                     return 0;
@@ -694,7 +718,9 @@ static int run_job(GpuItem* j) {
         j->entry++;
         j->word = 0;
     }
+    __atomic_store_n(&g_run_at, GPU_AT_JOB_END, __ATOMIC_RELAXED);
     job_end(j, ch);
+    __atomic_store_n(&g_run_at, GPU_AT_BETWEEN, __ATOMIC_RELAXED);
     return 1;
 }
 static void item_free(GpuItem* it) {
@@ -733,7 +759,9 @@ static int run_pass(i64* wake) {
                 g_qhead = it->next;
             if (g_qtail == it) g_qtail = prev;
             pm_unlock(&g_qlk);
+            SNX_ZONE(z_call, "gpu call");
             it->fn(it->arg);
+            SNX_ZONE_END(z_call);
             item_free(it);
             pm_lock(&g_qlk);
             return 1;
@@ -757,12 +785,15 @@ static int run_pass(i64* wake) {
         __atomic_store_n(&g_run_since, plat_ns(), __ATOMIC_RELAXED);
         __atomic_store_n(&g_run_chan, it->chan + 1, __ATOMIC_RELEASE);
         {
-            SNX_ZONE_V(z, "gpu job", it->chan);
+            SNX_ZONE_C(z, "gpu job", 0x4a7fb5);
+            SNX_ZONE_VALUE(z, it->chan);
+            SNX_ZONE_TEXT(z, "channel %u", it->chan);
             if (g_renderer->stream_run) g_renderer->stream_run(1);
             done = run_job(it);
             if (g_renderer->stream_run) g_renderer->stream_run(0);
             SNX_ZONE_END(z);
         }
+
         __atomic_store_n(&g_run_chan, 0, __ATOMIC_RELEASE);
         pm_lock(&g_qlk);
         if (!done)
@@ -804,6 +835,16 @@ void gpu_report_stall(void) {
              (unsigned long long)((now - __atomic_load_n(&g_run_since, __ATOMIC_RELAXED)) / 1000000u));
     else
         WARN("gpu: the GPU thread is between jobs\n");
+    if (run) {
+        static const char* const at[] = {"between methods", "in a method", "fetching an entry's words",
+                                         "ending the submission", "stopping the stream at a wait",
+                                         "before a stream's wait"};
+        u32 ati = __atomic_load_n(&g_run_at, __ATOMIC_RELAXED);
+        WARN("gpu: the job is at entry %u word %u, %s; its last method %x on subchannel %u (class %x)\n",
+             __atomic_load_n(&g_run_entry, __ATOMIC_RELAXED), __atomic_load_n(&g_run_word, __ATOMIC_RELAXED),
+             ati < sizeof at / sizeof *at ? at[ati] : "?", __atomic_load_n(&g_run_method, __ATOMIC_RELAXED),
+             __atomic_load_n(&g_run_sub, __ATOMIC_RELAXED), __atomic_load_n(&g_run_class, __ATOMIC_RELAXED));
+    }
     if (what)
         WARN("gpu: it has waited %llu ms for %s (%llx)\n",
              (unsigned long long)((now - __atomic_load_n(&g_wait_since, __ATOMIC_RELAXED)) / 1000000u), what,
@@ -838,15 +879,15 @@ static void gpu_thread(void* arg) {
         u64 gen = g_qgen;
         i64 wake = -1;
         if (run_pass(&wake)) continue;
-        /* a whole pass ran nothing: sleep until a new item, a kick, or the next look at a wait */
-        if (gen == g_qgen) {
-            SNX_ZONE(z, "gpu idle");
-            pc_wait(&g_qcv, &g_qlk, wake);
-            SNX_ZONE_END(z);
-        }
+        /* A whole pass ran nothing: sleep until a new item, a kick, or the next look at a wait. A plot, not a zone:
+           this wait can last the rest of the run. */
+        SNX_PLOT("gpu idle", 1);
+        if (gen == g_qgen) pc_wait(&g_qcv, &g_qlk, wake);
+        SNX_PLOT("gpu idle", 0);
     }
 }
 static void queue_init(void) {
+    pm_lock_announce(&g_qlk, "gpu queue"); /* the jobs' handoff, game threads to the GPU thread */
     if (!g_qcv_ready) {
         pc_init(&g_qcv);
         g_qcv_ready = 1;

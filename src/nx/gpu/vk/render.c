@@ -222,7 +222,9 @@ static int xfb_counters(void) {
                               .usage = VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_COUNTER_BUFFER_BIT_EXT,
                               .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
     VmaAllocationCreateInfo aci = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
-    return VK_OK(vmaCreateBuffer(g_vk.vma, &bci, &aci, &g_xfb.buf, &g_xfb.mem, NULL));
+    if (!VK_OK(vmaCreateBuffer(g_vk.vma, &bci, &aci, &g_xfb.buf, &g_xfb.mem, NULL))) return 0;
+    vk_mem_track(g_xfb.mem);
+    return 1;
 }
 
 /* Feedback loops. A Maxwell draw may sample a color target it renders to: a game may blend in its shaders,
@@ -256,6 +258,7 @@ static int feedback_order(u32 read, u32 write) {
     if (!(read & g_rp.fb_written) && !(write & g_rp.fb_read)) return 1;
     if (!g_vk.has_local_read) {
         Surf* rt[8];
+        SNX_ZONE(z, "vk pass restart");
         memcpy(rt, g_rp.rt, sizeof rt);
         vk_render_end();
         g_vk_fb_restarts++;
@@ -1163,6 +1166,7 @@ static size_t image_find(const u8* original) {
 }
 static void image_flush_at(size_t index) {
     GfxImageOut out = g_img_out[index];
+    SNX_ZONE(z, "vk image flush");
     if (out.sub) { /* its copy is recorded: once its submit is done, from there */
         if (out.sub > vk_last_submit()) vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
         vk_wait_submit(out.sub);
@@ -1177,6 +1181,7 @@ static void image_flush_at(size_t index) {
 }
 void vk_gfx_image_mem_need(u64 gva, u64 size) {
     if (!g_gfx_img_any || g_img_landing || !size) return;
+    SNX_ZONE(z, "vk image mem need");
     vk_lock();
     g_img_landing = 1;
     for (size_t i = 0; i < g_img_count;)
@@ -1203,6 +1208,7 @@ int vk_gfx_image_pending(u64 gva, u64 size) {
 }
 void vk_gfx_image_land(void) {
     if (!g_gfx_img_any || g_img_landing) return;
+    SNX_ZONE(z, "vk image land");
     vk_lock();
     g_img_landing = 1;
     while (g_img_count) image_flush_at(0);
@@ -1211,6 +1217,7 @@ void vk_gfx_image_land(void) {
 }
 void vk_gfx_image_put_aside(void) {
     if (!g_gfx_img_any || g_img_landing) return;
+    SNX_ZONE(z, "vk image put aside");
     vk_lock();
     g_img_landing = 1;
     vk_cmd(); /* a new frame, if one begins, lands what it lands before the entries are walked */

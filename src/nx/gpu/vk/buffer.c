@@ -1818,6 +1818,7 @@ static int make_own_(u32 i, VkBuffer sb, u64 so) {
     VkBuffer b;
     VmaAllocation m;
     if (vmaCreateBuffer(g_vk.vma, &bci, &aci, &b, &m, NULL) != VK_SUCCESS) return 0;
+    vk_mem_track(m);
     if (copy_stats_on()) g_copy_owned += len;
     vk_render_end(); /* copies happen outside rendering passes */
     VkBufferCopy r = {so, 0, len};

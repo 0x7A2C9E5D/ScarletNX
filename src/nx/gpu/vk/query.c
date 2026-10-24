@@ -95,6 +95,7 @@ static int pool_make(void) {
         g_qpool = VK_NULL_HANDLE;
         return 0;
     }
+    vk_mem_track(g_qmem);
     g_qres = info.pMappedData;
     /* a query is reset before its first use, outside a rendering pass */
     vk_render_end();
@@ -319,6 +320,7 @@ static int pred_init(void) {
                              .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
     VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
     if (!VK_OK(vmaCreateBuffer(g_vk.vma, &bi, &ai, &g_pbuf, &g_pmem, NULL))) return 0;
+    vk_mem_track(g_pmem);
     VkDescriptorSetLayoutBinding b[3];
     for (u32 i = 0; i < 3; i++)
         b[i] = (VkDescriptorSetLayoutBinding){i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT,

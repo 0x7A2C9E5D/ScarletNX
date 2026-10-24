@@ -519,7 +519,7 @@ static void frontend_loop(void) {
         frontend_frame();
         SNX_ZONE_END(z_frontend);
 #if defined(SNX_TRACY)
-        SNX_PLOT("guest memory MB", (double)used_memory() / (1024.0 * 1024.0));
+        SNX_PLOT("guest memory", used_memory());
         {
             /* the io plots' bases */
             static u64 was_read, was_written, last_ns;

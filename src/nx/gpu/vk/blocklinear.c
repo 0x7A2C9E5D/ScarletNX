@@ -76,6 +76,7 @@ VkBuffer vk_bl_scratch(u64 size, u64* cap_out) {
         *cap_out = 0;
         return VK_NULL_HANDLE;
     }
+    vk_mem_track(g_bl_mem);
     *cap_out = g_bl_cap = cap;
     return g_bl_scratch;
 }

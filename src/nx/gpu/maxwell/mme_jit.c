@@ -18,6 +18,7 @@
 #include "common/cpu/recompiler/llvm/code_loader.h"
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "nx/runtime/options.h"
+#include "nx/runtime/platform/tracy.h"
 
 /* the functions' -O level: they are small, and the first call of a macro waits for its compilation */
 #define MME_JIT_OPT '1'
@@ -700,15 +701,18 @@ int mme_jit_run(GpuChannel* ch, MmeRec* rec, u32 idx, u32 np) {
         n++;
     }
     if (!n) return 0;
+    SNX_ZONE_TV(z_jit, "mme jit", n, "hash %016llx", (unsigned long long)hash);
     if (jit_compile(mme_jit.ir, mme_jit.loader, hash, s, ch->mme_code, n, &entry->fn, error, sizeof error)) {
         LOG_LIMIT(16, "mme: macro %u (hash %016llx) is interpreted: %s\n", idx, (unsigned long long)hash,
                   error[0] ? error : "its code is not one the compiler can follow");
         entry->hash = hash; /* the failure stays: the interpreter runs it from now on */
         mme_jit.count++;
+        SNX_ZONE_END(z_jit);
         return 0;
     }
     entry->hash = hash;
     mme_jit.count++;
+    SNX_ZONE_END(z_jit);
     entry->fn(ch, rec, np, s);
     return 1;
 }

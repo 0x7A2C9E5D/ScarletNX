@@ -81,6 +81,7 @@ static void astc_init(void) {
     VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
     if (!VK_OK(vmaCreateBuffer(g_vk.vma, &bi, &ai, &g_astc_scratch, &g_astc_mem, NULL)))
         fatal("vulkan: cannot allocate ASTC scratch memory");
+    vk_mem_track(g_astc_mem);
 }
 
 static VkPipeline astc_pipeline(u32 bw, u32 bh) {

@@ -391,6 +391,7 @@ void pf_open(PFile* pf, const char* path, const char* key, size_t guest, PfLoad*
     if (f && length >= (long)hsize && (unsigned long)length <= 2ul * PF_MAX && !fseek(f, 0, SEEK_SET)) {
         size = (size_t)length;
         buf = (u8*)malloc(size);
+        SNX_ZONE_V(z, "shader cache read", size);
         if (buf && fread(buf, 1, size, f) != size) {
             free(buf);
             buf = NULL;

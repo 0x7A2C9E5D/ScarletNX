@@ -13,6 +13,7 @@
 #include "nx/hle/services/services_int.h"
 #include "nx/hle/hle.h"
 #include "nx/hle/services/audren_dsp.h"
+#include "nx/runtime/platform/tracy.h"
 #include <math.h>
 #ifndef SNX_NO_H264
 #include "nx/gpu/video/host1x.h"
@@ -656,11 +657,15 @@ void audio_init(void) { g_hle.audio.ev = owned_event("IAudioRenderer"); }
 void audio_clock(void* arg) {
     u64 next = plat_ns(), now;
     (void)arg;
+    SNX_THREAD_NAME("audio");
     for (;;) {
+        SNX_ZONE(z_audio, "audio tick");
         audren_tick();
         kevent_signal(g_hle.audio.ev);
         now = plat_ns();
+        SNX_ZONE_VALUE(z_audio, now > next ? (u64)(now - next) / AUDIO_FRAME_NS : 0);
         audout_tick(now);
+        SNX_ZONE_END(z_audio);
         next += AUDIO_FRAME_NS;
         if (now > next + 10 * (u64)AUDIO_FRAME_NS) next = now + AUDIO_FRAME_NS;
         if (next > now) plat_sleep_ns((i64)(next - now));

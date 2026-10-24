@@ -30,6 +30,7 @@ static void test_fail(const char* expr, int line) {
 void pm_init(PMutex* m) { pthread_mutex_init(&m->l, NULL); }
 void pm_lock(PMutex* m) { pthread_mutex_lock(&m->l); }
 void pm_unlock(PMutex* m) { pthread_mutex_unlock(&m->l); }
+void pm_lock_announce(PMutex* m, const char* name) { (void)m, (void)name; }
 /* the host page mem.c works in: the suite runs with this host's, then as with 16 and 64 KiB ones (main) */
 static u64 host_page;
 u64 plat_vm_page(void) { return host_page; }
