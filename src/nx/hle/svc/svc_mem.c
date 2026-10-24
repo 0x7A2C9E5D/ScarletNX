@@ -141,7 +141,11 @@ static u32 check_physical(u64 addr, u64 size) {
     R_UNLESS(size && !(size & 0xFFF), R_BADSIZE);
     R_UNLESS(addr + size > addr, R_BADREGION);
     R_UNLESS(g_hle.kernel.sysres_size, R_BADSTATE);
-    R_UNLESS(in_region(addr, size, ALIAS_BASE, ALIAS_SIZE), R_BADREGION);
+    if (!in_region(addr, size, ALIAS_BASE, ALIAS_SIZE)) {
+        LOG("map physical: %llx+%llx is outside the alias region %llx+%llx\n", (unsigned long long)addr,
+            (unsigned long long)size, (unsigned long long)ALIAS_BASE, (unsigned long long)ALIAS_SIZE);
+        R_THROW(R_BADREGION);
+    }
     R_SUCCEED();
 }
 u32 svc_map_physical(u64 addr, u64 size) {

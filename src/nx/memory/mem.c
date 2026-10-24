@@ -521,17 +521,20 @@ static void layout_for(u64 size) {
     }
     g_layout.kern_end = size;
 }
-/* What an app may use before the system ends it, less what the runtime, the graphics and the code arenas take besides
-   the game's own memory (about 1.1 GiB when the game starts: the footprint says), read once before the game allocates.
-   A game told it has the console's 3.2 GB uses it, and the graphics fail with the app well short of its limit */
-#define IOS_OTHER_MEMORY ((u64)1100 << 20)
+/* What an app may use before the system ends it (its footprint now and what os_proc_available_memory still gives), less
+   what the runtime, the graphics and the code arenas take besides the game's own memory (about 700 MiB: the app's own
+   290 MiB, the code arenas and the graphics' first allocations), read once before the game allocates. A game is told
+   how much it has and sizes its pools by it: less than the console's 3.2 GB broke one game's startup, which a game
+   told 3.2 GB on a phone with the increased memory limit (a 4 GiB limit) did not fill, for the memory is the game's
+   to touch */
+#define IOS_OTHER_MEMORY ((u64)700 << 20)
 static u64 g_ios_budget;
 u64 mem_ios_budget(void) { return g_ios_budget; }
 static void ios_budget_read(void) {
-    u64 available = (u64)os_proc_available_memory();
-    g_ios_budget = available > IOS_OTHER_MEMORY + (1024ull << 20) ? available - IOS_OTHER_MEMORY : (1024ull << 20);
-    fprintf(stderr, "memory: the game may have %llu MiB (the app has %llu MiB to use, %llu MiB go to the rest)\n",
-            (unsigned long long)(g_ios_budget >> 20), (unsigned long long)(available >> 20),
+    u64 limit = (u64)os_proc_available_memory() + snx_footprint();
+    g_ios_budget = limit > IOS_OTHER_MEMORY + (1024ull << 20) ? limit - IOS_OTHER_MEMORY : (1024ull << 20);
+    fprintf(stderr, "memory: the game may have %llu MiB (the app's limit is %llu MiB, %llu MiB go to the rest)\n",
+            (unsigned long long)(g_ios_budget >> 20), (unsigned long long)(limit >> 20),
             (unsigned long long)(IOS_OTHER_MEMORY >> 20));
 }
 
@@ -542,6 +545,19 @@ static void ios_budget_read(void) {
    region (which that game never sets) shrinks to make the room, the alias region taking all that is left above the code */
 void mem_layout_vamm(void) {
     if (g_as_size >= 64 * GIB) return;
+    if (g_as_size >= 24 * GIB) {
+        /* room for the 12 GiB it asks: an alias region of 16 GiB, reported as it is, so the block it maps at the
+           region's top lies inside the address space */
+        g_layout.alias = 4 * GIB;
+        g_layout.alias_size = 16 * GIB;
+        g_layout.heap = g_layout.alias + g_layout.alias_size;
+        g_layout.heap_size = 4 * GIB;
+        g_layout.stack = g_layout.heap + g_layout.heap_size;
+        g_layout.stack_size = 2 * GIB;
+        g_layout.kern = g_as_size - GIB;
+        g_layout.alias_virtual = 0;
+        return;
+    }
     if (g_as_size < 12 * GIB) {
         g_layout.alias = GIB / 2;
         g_layout.kern = g_as_size - GIB / 4;
