@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The queue of R's and B's recompiles (gui/queue.h): a job's argv kept whole until it starts, one of the same game and
-   kind not added twice, its place in the line, a full queue and an argv too long refused, a line taken out, and the
-   places as the rows say them */
+   kind not added twice, its place in the line, a full queue and an argv too long refused, a line taken out, how far the
+   compiles going on have gone, and the places as the rows say them */
 #include "gui/queue.h"
 #include <assert.h>
 #include <stdio.h>
@@ -84,6 +84,32 @@ int main(void) {
     many[GUI_QUEUE_ARGS - 1] = NULL;
     assert(gui_queue_add(&q, many, "/games/x/x", "/games/x/x", "X", GUI_JOB_RECOMPILE, false, &added) == 0);
     gui_queue_free(&q);
+    /* how far the compiles going on have gone: from the one added while none waited or ran, an ended one whole, the
+       running one as far as it said, a waiting one at 0; the ended ones of the compiles before count for nothing */
+    assert(gui_queue_add(&q, one, "/games/a/a", "/games/a/a", "A", GUI_JOB_RECOMPILE, false, &added) == 0);
+    assert(gui_queue_percent(&q) == -1); /* none said yet */
+    q.job[0].state = GUI_JOB_RUNNING;
+    assert(gui_queue_percent(&q) == -1);
+    q.job[0].percent = 40;
+    assert(gui_queue_percent(&q) == 40); /* one game: its own */
+    assert(gui_queue_add(&q, two, "/games/b/b", "/games/b/b", "B", GUI_JOB_RECOMPILE, false, &added) == 1);
+    assert(gui_queue_add(&q, two, "/games/c/c", "/games/c/c", "C", GUI_JOB_AOT, false, &added) == 2);
+    assert(gui_queue_percent(&q) == 13); /* 40 + 0 + 0 of three */
+    q.job[0].state = GUI_JOB_OK;
+    q.job[1].state = GUI_JOB_RUNNING;
+    q.job[1].percent = 50;
+    assert(gui_queue_percent(&q) == 50); /* 100 + 50 + 0 */
+    q.job[1].state = GUI_JOB_FAILED;
+    q.job[2].state = GUI_JOB_RUNNING; /* it has not said how far: 0 of it */
+    assert(gui_queue_percent(&q) == 66);
+    q.job[2].state = GUI_JOB_OK;
+    assert(gui_queue_percent(&q) == 100);
+    assert(gui_queue_add(&q, one, "/games/d/d", "/games/d/d", "D", GUI_JOB_RECOMPILE, false, &added) == 3);
+    assert(gui_queue_percent(&q) == -1); /* compiles anew: the three that ended are not in it */
+    q.job[3].state = GUI_JOB_RUNNING;
+    q.job[3].percent = 30;
+    assert(gui_queue_percent(&q) == 30);
+    gui_queue_free(&q);
     /* the places as the rows say them: next, then English's ordinals, 11th to 13th apart */
     place_is(2, "next");
     place_is(3, "3rd");
@@ -96,6 +122,6 @@ int main(void) {
     place_is(23, "23rd");
     place_is(101, "101st");
     place_is(111, "111th");
-    puts("GUI queue: added once, places, full, taken out and its words passed");
+    puts("GUI queue: added once, places, full, taken out, its percent and its words passed");
     return 0;
 }

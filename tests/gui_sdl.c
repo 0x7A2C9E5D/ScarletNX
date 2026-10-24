@@ -2494,7 +2494,7 @@ static void recompile_queue(App* app) {
         key(app, SDLK_ESCAPE);
         free(step);
     }
-    /* the end: its line OK, the tab OK a while, then the next one's percent; the next runs by itself */
+    /* the end: its line OK, the tab OK a while, then the queue's percent; the next runs by itself */
     go_tab(app, GUI_TAB_RECOMPILE);
     job_step(app, 75);
     job_step(app, 100);
@@ -2507,10 +2507,11 @@ static void recompile_queue(App* app) {
            !strstr(line, ".."));
     job_started(app);
     app->clock = app->queue.job[0].ended_ms + GUI_JOB_SAID_MS;
-    assert(tab_reads(app, "Compile 25%"));
+    assert(tab_reads(app, "Compile 62%")); /* the queue's: game one whole, game two at 25% */
     render(app);
     shows(app, "- queue game one  OK", yellow);
-    shows(app, "- queue game two  25%", normal);
+    shows(app, "- queue game two  25%", normal); /* each row its own */
+    assert(SDL_fabsf(SDL_GetWindowProgressValue(app->window) - 0.62f) < 0.001f);
     shows_half(app, "Built queue game one", normal); /* its output kept, beside its row */
     shows_foot(app, "play", normal);
     app->clock = 0;
@@ -2767,6 +2768,38 @@ static void compile_first(App* app, const char* dir) {
         argv_got = ran(app, 0);
         assert(strstr(argv_got, dump) && !has_arg(argv_got, "-r", NULL));
         free(argv_got);
+        /* made by another build (its stamp another ABI's): Play compiles the dump in the queue first, as a first
+           compile does, -r and the dump, and plays the game once it ended while the tab shows it */
+        {
+            char *base = snx_path_join(made, "first compile"), *stamp = snx_format("%s.abi", base),
+                 *other = snx_game_stamp_for(SNX_ABI + 1, ""), *program;
+            const char* job_argv[GUI_QUEUE_ARGS];
+            int n, k;
+#ifdef _WIN32
+            program = snx_format("%s.exe", base);
+#else
+            program = snx_strdup(base);
+#endif
+            assert(!snx_write_file(stamp, other, strlen(other)));
+            launch(app, snx_strdup(dump), false);
+            key(app, SDLK_RETURN); /* Play */
+            assert(!app->menu.running && app->queue.count == 1 && app->queue.job[0].kind == GUI_JOB_COMPILE);
+            assert(app->menu.view == GUI_LOAD_RECOMPILE && tab_reads(app, "Compile"));
+            n = gui_queue_argv(&app->queue, 0, job_argv);
+            for (k = 1; k + 1 < n && strcmp(job_argv[k], "-r"); ++k) continue;
+            assert(k + 1 < n && !strcmp(job_argv[k + 1], dump));
+            stamp_here(made, "first compile"); /* as the driver's -r leaves it */
+            for (until = SDL_GetTicks() + 10000; !app->menu.running && SDL_GetTicks() < until; SDL_Delay(2)) pump(app);
+            assert(app->queue.job[0].state == GUI_JOB_OK && app->menu.running && app->queue.count == 1);
+            argv_got = ran(app, 0); /* the game's program, played */
+            assert(strstr(argv_got, program) && !has_arg(argv_got, "-r", NULL));
+            free(argv_got);
+            queue_drop(app, 0);
+            free(program);
+            free(other);
+            free(stamp);
+            free(base);
+        }
         free(app->folders[--app->folder_count]); /* off the list, no screen of Folders opened for it */
         assert(!snx_remove_tree(library));
         free(made);
@@ -5686,6 +5719,7 @@ int main(int argc, char** argv) {
             assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ROOM && !app.menu.running);
             key(&app, SDLK_RETURN); /* Back */
             assert(!app.confirm.shown && !snx_copy_file(self, program) && !snx_make_executable(program));
+            stamp_here(out, "0100ABCD12345000");   /* this build's: Play plays it */
             launch(&app, snx_strdup(dump), false); /* made: played or recompiled, as asked */
             play_made(&app);
             assert(!app.confirm.shown && app.menu.running);
