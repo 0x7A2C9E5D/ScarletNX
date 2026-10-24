@@ -273,7 +273,9 @@ static const SnxU32 g_words[] = {
     0x9E630020UL, /* UCVTF D0,X1: 2^63+1 rounds up, once, toward plus infinity. */
     0x4E218800UL, /* FRINTN V0.4S,V0.4S: SNaN quieted, signed zero, tie to even, QNaN kept, cumulative IOC. */
     0x4E22CC20UL, /* FMLA V0.4S,V1.4S,V2.4S: QNaN addend with inf*0, fused overflow cancelled; FPSR's NZCV, QC kept. */
-    0x6E20D400UL  /* FADDP V0.4S,V0.4S,V0.4S: tie to even, SNaN priority, the destination its own source. */
+    0x6E20D400UL, /* FADDP V0.4S,V0.4S,V0.4S: tie to even, SNaN priority, the destination its own source. */
+    0x6E61D820UL, /* UCVTF V0.2D,V1.2D: lanes that fit, 0 is +0 under round toward minus infinity. */
+    0x6E21D820UL  /* UCVTF V0.4S,V1.4S: the same for singles. */
 };
 #define WORDS (sizeof(g_words) / sizeof(g_words[0]))
 
@@ -488,6 +490,17 @@ static void setup(unsigned i, CPU* c, unsigned char* memory) {
             SNX_VSET_S(c->v[0], 2, 0x7FC00123);
             SNX_VSET_S(c->v[0], 3, 0x7F800456);
             break;
+        /* UCVTF of lanes that fit, 0 among them, in round toward minus infinity */
+        case 49:
+            c->fpcr = 0x800000;
+            SNX_VSET_D(c->v[1], 1, 0x1FFFFFFFFFFFFFULL);
+            break;
+        case 50:
+            c->fpcr = 0x800000;
+            SNX_VSET_S(c->v[1], 1, 1);
+            SNX_VSET_S(c->v[1], 2, 0xFFFFFF);
+            SNX_VSET_S(c->v[1], 3, 0x800000);
+            break;
         default: break;
     }
 }
@@ -586,6 +599,10 @@ static int verify(unsigned i, const CPU* c, const unsigned char* memory) {
             ok = SNX_VS(c->v[0], 0) == 0x3F800000 && SNX_VS(c->v[0], 1) == 0x7FC00456 &&
                  SNX_VS(c->v[0], 2) == SNX_VS(c->v[0], 0) && SNX_VS(c->v[0], 3) == SNX_VS(c->v[0], 1) &&
                  c->fpsr == 0xA8000011u;
+            break;
+        case 49: ok = !SNX_VD(c->v[0], 0) && SNX_VD(c->v[0], 1) == 0x433FFFFFFFFFFFFFULL && !c->fpsr; break;
+        case 50:
+            ok = SNX_VD(c->v[0], 0) == 0x3F80000000000000ULL && SNX_VD(c->v[0], 1) == 0x4B0000004B7FFFFFULL && !c->fpsr;
             break;
         default: break;
     }

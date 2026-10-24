@@ -544,10 +544,8 @@ static void fp_from_int(SnxIr* ir, const SnxA64Args* a, unsigned uns) {
     V v = gpr(ir, (unsigned)a->rn, a->sf), r;
     if (width != 16) {
         LLVMTypeRef type = float_type(ir, width);
-        V f = uns ? LLVMBuildUIToFP(B, v, type, "") : LLVMBuildSIToFP(B, v, type, ""), ok, fast;
+        V f, ok, fast;
         Split s;
-        if (fbits) f = LLVMBuildFMul(B, f, kfloat(ir, width, 1.0 / (double)((SnxU64)1 << (fbits - 1)) / 2.0), "");
-        fast = as_bits(ir, f, width);
         if (integer <= precision)
             ok = LLVMConstInt(ir->t_i1, 1, 0);
         else if (uns)
@@ -555,6 +553,14 @@ static void fp_from_int(SnxIr* ir, const SnxA64Args* a, unsigned uns) {
         else
             ok = LLVMBuildICmp(B, LLVMIntULT, LLVMBuildAdd(B, v, kint(ir, integer, (SnxU64)1 << precision), ""),
                                kint(ir, integer, (SnxU64)1 << (precision + 1)), "");
+        /* an unsigned value that fits converts as a signed one: x86 before AVX-512 has no unsigned conversion from
+           64 bits, and LLVM's sum of two exact halves there is -0 for 0 when the host rounds toward minus infinity */
+        if (uns && integer > precision)
+            f = LLVMBuildSelect(B, ok, LLVMBuildSIToFP(B, v, type, ""), LLVMBuildUIToFP(B, v, type, ""), "");
+        else
+            f = uns ? LLVMBuildUIToFP(B, v, type, "") : LLVMBuildSIToFP(B, v, type, "");
+        if (fbits) f = LLVMBuildFMul(B, f, kfloat(ir, width, 1.0 / (double)((SnxU64)1 << (fbits - 1)) / 2.0), "");
+        fast = as_bits(ir, f, width);
         ok = either(ir, ok, both(ir, fpcr_clear(ir, FPCR_RMODE), ixc_set(ir)));
         split_begin(ir, ok, fast, NULL, &s);
         r = split_end(ir, &s, call_from_int(ir, v, integer, width, uns, fbits));

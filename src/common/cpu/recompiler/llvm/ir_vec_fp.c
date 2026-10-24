@@ -516,14 +516,20 @@ static V from_int(SnxIr* ir, unsigned width, unsigned uns, unsigned fbits, V v) 
     if (width != 16) {
         unsigned precision = width == 32 ? 24 : 53, lanes = lanes_of(v);
         LLVMTypeRef type = fvec(ir, width, lanes);
-        V f = uns ? LLVMBuildUIToFP(B, v, type, "") : LLVMBuildSIToFP(B, v, type, ""), fits, ok;
+        V f, fits, ok;
         Split s;
-        if (fbits) f = LLVMBuildFMul(B, f, KF(ir, width, lanes, 1.0 / (double)((SnxU64)1 << (fbits - 1)) / 2.0), "");
         if (uns)
             fits = LLVMBuildICmp(B, LLVMIntULT, v, K(ir, v, (SnxU64)1 << precision), "");
         else
             fits = LLVMBuildICmp(B, LLVMIntULT, LLVMBuildAdd(B, v, K(ir, v, (SnxU64)1 << precision), ""),
                                  K(ir, v, (SnxU64)1 << (precision + 1)), "");
+        /* an unsigned lane that fits converts as a signed one: x86 before AVX-512 has no unsigned lane conversion,
+           and LLVM's sum of two exact parts there is -0 for 0 when the host rounds toward minus infinity */
+        if (uns)
+            f = LLVMBuildSelect(B, fits, LLVMBuildSIToFP(B, v, type, ""), LLVMBuildUIToFP(B, v, type, ""), "");
+        else
+            f = LLVMBuildSIToFP(B, v, type, "");
+        if (fbits) f = LLVMBuildFMul(B, f, KF(ir, width, lanes, 1.0 / (double)((SnxU64)1 << (fbits - 1)) / 2.0), "");
         ok = either(ir, ir_vec_all(ir, fits), both(ir, fpcr_clear(ir, FPCR_RMODE), ixc_set(ir)));
         split_begin(ir, ok, as_bits(ir, f, width), NULL, &s);
         return split_end(ir, &s, map(ir, &o, v, NULL, NULL, width));
