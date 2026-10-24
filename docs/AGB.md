@@ -16,6 +16,34 @@ build/agb/scarletnx-agb Game.gba
 `scarletnx-agb` is also a menu entry of `scarletnx-gui` ("Load GBA ROM"), next
 to the Switch, Linux and 3DS loaders.
 
+## Playing
+
+`scarletnx-agb Game.gba` plays the ROM in a window four times the console's
+screen, scaled by whole steps when it is resized, with the console's sound and
+its 59.73 frames a second. `--fullscreen=1` starts it fullscreen, and F11
+switches. The keyboard is the Switch runtime's: the arrows are the D-pad, X or
+Space A, Z B, Q L, E R, Enter Start and Backspace Select. A gamepad's buttons are
+where the console has them (A east, B south), its shoulders and triggers L and
+R, its left stick the D-pad. `--script=ms:hex,...` presses keys unattended, as the
+3DS and Vita drivers take it: each press at its time in ms from the start of the
+run, by the console's frames (the same with a window or without), its keys in
+KEYINPUT's bits (1 A, 2 B, 4 Select, 8 Start, 10 Right, 20 Left, 40 Up, 80 Down,
+100 R, 200 L), held for `--press_len=` ms (300).
+
+The game's folder is `recompiled/<name>/` of the data folder (`--data`, else the
+user's), named after the ROM's file, or `<name>/` of `--outdir`. It holds the
+module, the save (`<name>.sav`), a copy of the runtime named after the game
+(`<name>`, `<name>.exe` on Windows) and `<name>.ini`, whose `source=` names the
+ROM and `system=gba` the console the launcher plays it with, as a 3DS or Vita
+game's folder does; the ROM's folder stays as it is. The copy plays its game
+alone, from the ROM its `.ini` names, and `scarletnx-agb --game=recompiled/<name>`
+plays it the same way; `-r` compiles the module again without playing. A build
+copies its runner beside every GBA game again (`cmake/deploy.cmake`), which it
+tells by that `system=gba`. A
+`<ROM>.sav` beside the ROM, which another emulator keeps, is read once, when the
+folder has none. What the game writes to its SRAM or flash reaches the disk a
+second after it writes, and when the window closes.
+
 ## Status
 
 The board is under construction, piece by piece:
@@ -26,9 +54,11 @@ The board is under construction, piece by piece:
 | Memory map | done: every region and mirror, the I/O window as plain storage |
 | HLE BIOS interface | mostly done: the software interrupts run as board routines, the waits and sound driver stubs |
 | PPU and display | done: the text, affine and bitmap layers, sprites, windows and blending |
-| APU (audio) | done: the four PSG channels, the two FIFOs and the stereo mixer |
-| Keypad (HID) | not yet: KEYINPUT reads as every button released |
-| CPU, DMA, timers, interrupts | done |
+| APU (audio) | done: the four PSG channels, the two FIFOs at their timer's rate and the stereo mixer |
+| Keypad (HID) | done: KEYINPUT and the KEYCNT interrupt, from the keyboard and gamepads |
+| Save memory | SRAM and flash, kept in the game's folder; EEPROM not yet |
+| CPU, DMA, timers, interrupts | done, and the BIOS's IntrWait waits for the game's handler to flag the interrupt |
+| Serial (link) | no cable: answers as a console with none plugged, as mGBA does without a link |
 
 A ROM is recompiled when it is loaded, the same process the other system
 types use, and runs on the board from its native module.
@@ -78,10 +108,14 @@ as board routines (`bios/bios.c`), the way the Switch runtime turns SVC calls
 into HLE and the GNU ABI runtime turns `SVC #0` into Linux system calls. Div,
 Sqrt, ArcTan and ArcTan2 compute in fixed point, CpuSet and CpuFastSet move
 memory, the LZ77, run length and difference calls decompress, BitUnPack widens
-packed fields, and BgAffineSet and ObjAffineSet build the rotation matrices. The
-calls that need the interrupt controller or the sound hardware (Halt, Stop,
-IntrWait, VBlankIntrWait, SoundBias and the sound driver) are known stubs that
-land with those devices.
+packed fields, and BgAffineSet and ObjAffineSet build the rotation matrices.
+RegisterRamReset clears the memories it is asked to and puts the registers back
+to the BIOS's values (RCNT 0x8000, SOUNDBIAS 0x200, the affine identities), and
+SoftReset starts the machine again from EWRAM or the cartridge, as the byte at
+0x03007FFA says. Halt and Stop halt the machine until an interrupt, and
+IntrWait and VBlankIntrWait until the game's handler flags it in the BIOS's
+flags at 0x03007FF8. HuffUnComp, SoundBias and the sound driver's calls are
+known stubs.
 
 Angles are turns in 16 bits, the way the BIOS counts them, and the affine matrix
 drops the low byte of the rotation angle, giving 256 steps around the circle.
@@ -92,14 +126,19 @@ The trigonometry rounds to 1.14 fixed point like the BIOS's own tables.
 `cpu/recomp.c` takes the ROM's ARM and Thumb code through the existing ARM
 recompiler of `src/common/cpu/arm`, block by block, and links the emitted
 objects into a native module with the host compiler. Loading a ROM does this
-automatically and caches the module beside it as `<ROM>.code.so`, the way the
-NX system type caches `<Game>_code.so`; `-r` rebuilds it. Blocks the discovery
-step does not reach, a branch through a register or the instruction after one
-the board interpreted, are compiled when they are first dispatched. The miss
-starts a discovery walk of its own, and the blocks it finds go into a module of
-their own (`<ROM>.code.<n>.so`), so a miss costs those blocks and not the
-whole ROM. When the run ends they are folded into the cached module, so the
-next run starts with every block the last one reached. A block built from RAM
+automatically and caches the module in the game's folder as `<name>_code.so`,
+as the NX system type caches `<Game>_code.so`; `-r` rebuilds it. Blocks the
+discovery step does not reach, a branch through a register or the instruction
+after one the board interpreted, are compiled when they are first dispatched.
+The miss starts a discovery walk of its own; a build with the LLVM backend
+compiles each block it finds in the process at its first dispatch
+(`src/common/cpu/arm/exec.c`), and one without it puts them in a module of their
+own (`<name>_code.<n>.so`), so a miss costs those blocks and not the whole ROM.
+When the run ends, the blocks it compiled are kept in the map as hints, at once,
+as the 3DS and Vita drivers keep theirs: the next run compiles them again in the
+process when it reaches them, and a recompile (`-r`, R in the launcher) builds
+every block the runs reached into the module. A build without the LLVM backend
+folds them into the module instead. A block built from RAM
 runs while RAM holds the words it was built from, and is built again once the
 game writes over them; the map names the ROM's hash, and a map of another ROM is
 refused with both.
@@ -116,10 +155,13 @@ interworking) and sends the BIOS, I/O window, palette, VRAM, OAM and save memory
 accesses to the board's bus hook. The privileged instructions the recompiler refuses, the mode
 switching MSR/MRS forms, SWP and the exception return, are interpreted against
 the banked register state. Software interrupts go to the HLE BIOS and
-interrupts follow the entry and return the BIOS stub performs. Recompiled
-blocks are charged two cycles per instruction, and the waits, the save memory
-width rules and the timer driven FIFO rates are approximations documented
-divergences.
+interrupts follow the entry and return the BIOS stub performs. The board starts
+with the registers as the BIOS leaves them (forced blank, the serial port's
+general purpose mode, the sound's bias at its middle, POSTFLG), which a game reads
+to tell a link boot from its own. Recompiled blocks are charged two cycles per
+instruction, and the waits and the save memory width rules are approximations
+documented divergences; a serial transfer ends at once, where mGBA waits for its
+time.
 
 ## The ROM header
 

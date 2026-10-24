@@ -18,7 +18,7 @@
 #include "nx/hle/services/nvdrv.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
-#include "nx/runtime/platform/tracy.h"
+#include "nx/runtime/platform/tracy.h" /* tests/vulkan_release.c stubs vk.h */
 
 typedef struct {
     u64 gate;  /* the graphics submit whose completion it waits for */
@@ -170,6 +170,7 @@ static void release_thread(void* p) {
         gate = g_rq[g_rtail % RQ_N].gate;
         cgate = g_rq[g_rtail % RQ_N].cgate;
         pm_unlock(&g_rlock);
+        SNX_ZONE(z_release, "vk release");
         vk_wait_submit(gate);
         vk_compute_wait(cgate);
         {
@@ -187,6 +188,7 @@ static void submit_through(u64 gate) {
 /* r once everything recorded before it has landed: now, when nothing is pending or queued */
 static void release(Release* r) {
     int queued;
+    SNX_ZONE_V(z, "vk release queue", r->samples);
     vk_lock();
     vk_gfx_image_put_aside();
     r->cgate = vk_compute_put_aside();
@@ -253,6 +255,7 @@ void vk_release_write(u64 gva, const void* data, u32 len) {
 /* the GPFIFO submission ended or waits: a release still gated on the submit being recorded goes to the GPU, as the
    guest may look at it now */
 void vk_release_submit(void) {
+    SNX_ZONE(z, "vk release submit");
     vk_lock();
     pm_lock(&g_rlock);
     u64 gate = g_rhead != g_rtail ? g_rq[(g_rhead - 1) % RQ_N].gate : 0; /* the gates only grow */

@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #define CHECK(expression)                                                                                              \
     do {                                                                                                               \
         if (!(expression)) {                                                                                           \
@@ -96,24 +97,27 @@ static uint8_t* make_rom(size_t* size) {
     put32(rom + 0xFC, 0x03007FFC);
     put32(rom + 0x100, 0x08000121); /* the handler, Thumb */
     put32(rom + 0x104, 0x02000000); /* marker 1 */
-    /* the interrupt handler at 0x120 */
+    /* the interrupt handler at 0x120: it acknowledges the vblank and flags it for the BIOS's wait, as a game does */
     put16(rom + 0x120, 0x2101); /* movs r1, #1 */
-    put16(rom + 0x122, 0x4803); /* ldr r0, [pc, #12]: IF */
+    put16(rom + 0x122, 0x4804); /* ldr r0, [pc, #16]: IF */
     put16(rom + 0x124, 0x8001); /* strh r1, [r0]: acknowledge */
-    put16(rom + 0x126, 0x2107); /* movs r1, #7 */
-    put16(rom + 0x128, 0x4802); /* ldr r0, [pc, #8]: marker 2 */
-    put16(rom + 0x12A, 0x6001); /* str r1, [r0] */
-    put16(rom + 0x12C, 0x4770); /* bx lr */
-    put16(rom + 0x12E, 0x46C0);
-    put32(rom + 0x130, 0x04000202);
-    put32(rom + 0x134, 0x02000004); /* marker 2 */
+    put16(rom + 0x126, 0x4804); /* ldr r0, [pc, #16]: the BIOS's flags */
+    put16(rom + 0x128, 0x8001); /* strh r1, [r0]: the vblank VBlankIntrWait waits for */
+    put16(rom + 0x12A, 0x2107); /* movs r1, #7 */
+    put16(rom + 0x12C, 0x4803); /* ldr r0, [pc, #12]: marker 2 */
+    put16(rom + 0x12E, 0x6001); /* str r1, [r0] */
+    put16(rom + 0x130, 0x4770); /* bx lr */
+    put16(rom + 0x132, 0x46C0);
+    put32(rom + 0x134, 0x04000202);
+    put32(rom + 0x138, 0x03007FF8);
+    put32(rom + 0x13C, 0x02000004); /* marker 2 */
     return rom;
 }
 
-/* a Thumb block run as the machine runs it, from its own address: its r0 */
+/* a block run as the machine runs it, from its own address in its own state: its r0 */
 static uint32_t run_block(AgbCpu* cpu, const AgbBlock* block) {
     cpu->arm.r[15] = block->pc;
-    cpu->arm.cpsr |= SNX_ARM_T;
+    cpu->arm.cpsr = block->thumb ? cpu->arm.cpsr | SNX_ARM_T : cpu->arm.cpsr & ~(uint32_t)SNX_ARM_T;
     cpu->arm.exit = SNX_ARM_OK;
     block->fn(&cpu->arm);
     return cpu->arm.exit == SNX_ARM_OK ? cpu->arm.r[0] : 0xFFFFFFFFu;
@@ -174,18 +178,43 @@ int main(void) {
         flat[0x06010004] = 0xA5;
         CHECK(flat[0x06018004] == 0xA5 && flat[0x06038004] == 0xA5);
     }
-    /* the instructions after the interpreted ones start blocks the discovery step did not see: they ran from a
-       module of their own, and saving the run folds them into the cached module */
-    CHECK(recomp.patch_count > 0 && recomp.dirty);
+    {
+        /* a block that ends past a frame's cycles, at each frame: 200 moves and the branch back, 402 cycles, run for
+           frames of 280896, 300 more than 698 of them. Each run ends where the machine's frame does, before line 0
+           is drawn, not 102 cycles later at each frame */
+        for (uint32_t i = 0; i < 200; ++i) agb_write32(&board, 0x02001000 + i * 4, 0xE1A00000); /* mov r0, r0 */
+        agb_write32(&board, 0x02001320, 0xEAFFFF36);                                            /* b 0x02001000 */
+        agb_write16(&board, 0x04000208, 0);                                                     /* IME off */
+        cpu.arm.r[15] = 0x02001000;
+        cpu.arm.cpsr = 0x1F;
+        for (int frame = 0; frame < 20; ++frame) {
+            uint32_t written = 0;
+            if (agb_cpu_run(&board, &cpu, &recomp, AGB_SCANLINE_CYCLES * AGB_FRAME_LINES, audio, AGB_APU_RATE, &written,
+                            error, sizeof error)) {
+                fprintf(stderr, "agb_cpu: %s\n", error);
+                goto done;
+            }
+            if (board.ppu.vcount || board.ppu.dot >= 402) {
+                fprintf(stderr, "agb_cpu: frame %d ended at line %u, cycle %u of it\n", frame, board.ppu.vcount,
+                        board.ppu.dot);
+                goto done;
+            }
+        }
+    }
+    /* the instructions after the interpreted ones start blocks the discovery step did not see: they were compiled as
+       the run reached them, and saving the run keeps them, in the map as hints with SNX_AGB_JIT (the module as it
+       was, at once), else folded into the module */
+    CHECK(recomp.compiled > 0 && recomp.dirty);
     if (agb_recomp_save(&recomp, &board, error, sizeof error)) {
         fprintf(stderr, "agb_cpu: saving the module: %s\n", error);
         goto done;
     }
-    CHECK(!recomp.patch_count && !recomp.dirty);
+    CHECK(!recomp.patch_count && !recomp.dirty); /* no module file left */
     {
-        /* the cache holds every block of the run, each with its function and size */
+        /* the cache holds every block of the run, each with its size: a block of the module its function, a hint
+           none until a run reaches it (with SNX_AGB_JIT), which compiles it again and counts it as no new one */
         AgbRecomp cached;
-        size_t count = recomp.count;
+        size_t count = recomp.count, hints = 0;
         agb_recomp_init(&cached, "agb_cpu_test.code", SNX_AGB_TEST_CC);
         if (agb_recomp_load_cache(&cached, &board, error, sizeof error)) {
             fprintf(stderr, "agb_cpu: loading the cache: %s\n", error);
@@ -193,8 +222,21 @@ int main(void) {
             goto done;
         }
         result = cached.count == count ? 0 : 1;
+        for (size_t i = 1; i <= cached.count; ++i) {
+            const AgbBlock* block = &cached.blocks[i];
+            if (!block->instructions || (block->fn == NULL) != (block->hint != 0)) result = 1;
+            hints += block->hint;
+        }
+#ifdef SNX_AGB_JIT
+        if (!hints) result = 1;
         for (size_t i = 1; i <= cached.count; ++i)
-            if (!cached.blocks[i].fn || !cached.blocks[i].instructions) result = 1;
+            if (cached.blocks[i].hint && (!agb_recomp_lookup(&cached, &board, cached.blocks[i].pc,
+                                                             cached.blocks[i].thumb, error, sizeof error) ||
+                                          cached.compiled))
+                result = 1;
+#else
+        if (hints) result = 1;
+#endif
         agb_recomp_free(&cached);
         CHECK(!result);
         result = 1;
@@ -214,9 +256,9 @@ int main(void) {
         CHECK(block);
         CHECK(run_block(&cpu, block) == 2);
         {
-            size_t patches = recomp.patch_count; /* while RAM holds the same code, its block is the one already built */
+            size_t compiled = recomp.compiled; /* while RAM holds the same code, its block is the one already built */
             CHECK(agb_recomp_lookup(&recomp, &board, 0x03000000, 1, error, sizeof error) == block &&
-                  recomp.patch_count == patches);
+                  recomp.compiled == compiled);
         }
         agb_write16(&board, 0x03000002, 0x4708); /* bx r1: the block's last word alone */
         cpu.arm.r[1] = 0x08000201;
@@ -225,9 +267,9 @@ int main(void) {
         CHECK(!agb_recomp_save(&recomp, &board, error, sizeof error));
         agb_recomp_init(&next, "agb_cpu_test.code", SNX_AGB_TEST_CC);
         CHECK(!agb_recomp_load_cache(&next, &board, error, sizeof error));
-        /* the same code in RAM: the cached block runs, nothing compiled */
+        /* the same code in RAM: the cached block runs, no new one compiled */
         block = agb_recomp_lookup(&next, &board, 0x03000000, 1, error, sizeof error);
-        result = block && !next.patch_count && run_block(&cpu, block) == 2 ? 0 : 1;
+        result = block && !next.compiled && run_block(&cpu, block) == 2 ? 0 : 1;
         agb_write16(&board, 0x03000000, 0x2003); /* movs r0, #3 */
         block = agb_recomp_lookup(&next, &board, 0x03000000, 1, error, sizeof error);
         if (!block || run_block(&cpu, block) != 3) result = 1;
@@ -235,6 +277,97 @@ int main(void) {
         CHECK(!result);
         result = 1;
     }
+#ifdef SNX_AGB_JIT
+    {
+        /* a recompile (-r) builds every block of the map into the module, the hints too: here from a copy of the map
+           under another name, as Windows keeps a module this process has loaded from being written */
+        AgbRecomp made, after;
+        FILE *from = fopen("agb_cpu_test.code.map", "rb"), *to = fopen("agb_cpu_made.code.map", "wb");
+        char bytes[4096];
+        size_t n;
+        result = !from || !to;
+        while (!result && (n = fread(bytes, 1, sizeof bytes, from)) > 0) result = fwrite(bytes, 1, n, to) != n;
+        if (from) fclose(from);
+        if (to) fclose(to);
+        CHECK(!result);
+        agb_recomp_init(&made, "agb_cpu_made.code", SNX_AGB_TEST_CC);
+        result = agb_recomp_load_map(&made, &board, error, sizeof error) ||
+                 agb_recomp_build(&made, &board, error, sizeof error) || made.count < 2;
+        if (result) fprintf(stderr, "agb_cpu: the recompile from the map: %s\n", error);
+        for (size_t i = 1; !result && i <= made.count; ++i)
+            if (!made.blocks[i].fn || made.blocks[i].hint || !made.blocks[i].symbol) {
+                fprintf(stderr, "agb_cpu: block %zu at 0x%08X after the recompile: fn %p, hint %u, symbol %u\n", i,
+                        made.blocks[i].pc, (void*)made.blocks[i].fn, made.blocks[i].hint, made.blocks[i].symbol);
+                result = 1;
+            }
+        agb_recomp_free(&made);
+        CHECK(!result);
+        /* a save after another process's recompile, the module file not the one this run loaded (its size here):
+           every block is kept as a hint, that module's functions numbered its own way */
+        recomp.module_size += 1;
+        recomp.dirty = 1;
+        CHECK(!agb_recomp_save(&recomp, &board, error, sizeof error));
+        recomp.module_size -= 1;
+        agb_recomp_init(&after, "agb_cpu_test.code", SNX_AGB_TEST_CC);
+        result = agb_recomp_load_map(&after, &board, error, sizeof error) || !after.count;
+        for (size_t i = 1; !result && i <= after.count; ++i)
+            if (after.blocks[i].symbol || !after.blocks[i].hint) result = 1;
+        agb_recomp_free(&after);
+        CHECK(!result);
+        result = 1;
+    }
+#endif
+    {
+        /* an LDM the console's bus wraps past 4 GiB lands in the window's guard (memmap.c) instead of aborting */
+        const AgbBlock* block;
+        agb_write32(&board, 0x03000100, 0xE3E00017); /* mvn r0, #23: 0xFFFFFFE8 */
+        agb_write32(&board, 0x03000104, 0xE89001FE); /* ldmia r0, {r1-r8}: to 0x00000007 */
+        agb_write32(&board, 0x03000108, 0xE12FFF1E); /* bx lr */
+        block = agb_recomp_lookup(&recomp, &board, 0x03000100, 0, error, sizeof error);
+        CHECK(block && run_block(&cpu, block) == 0xFFFFFFE8);
+    }
+#ifdef SNX_AGB_JIT
+    {
+        /* finding a block costs the same however many the map names: one named after 32768 others, as a run that once
+           went through 32 MiB of zeros left, against the same one named first, each found 200000 times. A scan of the
+           blocks took thousands of times longer for the one named last */
+        clock_t took[2] = {0, 0};
+        for (int last = 0; last < 2; ++last) {
+            AgbRecomp many;
+            FILE *from = fopen("agb_cpu_test.code.map", "r"), *to = fopen("agb_cpu_index.code.map", "w");
+            char header[128];
+            const AgbBlock* block;
+            clock_t start;
+            result = !from || !to || !fgets(header, sizeof header, from) || fputs(header, to) < 0;
+            if (!result && !last) result = fputs("080000C0 0 1 0 -\n", to) < 0;
+            for (uint32_t i = 0; !result && i < 32768; ++i)
+                result = fprintf(to, "%08X 0 1 0 -\n", 0x0A000000u + i * 4) < 0;
+            if (!result && last) result = fputs("080000C0 0 1 0 -\n", to) < 0;
+            if (from) fclose(from);
+            if (to && fclose(to)) result = 1;
+            CHECK(!result);
+            agb_recomp_init(&many, "agb_cpu_index.code", SNX_AGB_TEST_CC);
+            CHECK(!agb_recomp_load_map(&many, &board, error, sizeof error) && many.count == 32769);
+            block = agb_recomp_lookup(&many, &board, 0x080000C0, 0, error, sizeof error); /* compiled here, once */
+            result = !block;
+            start = clock();
+            for (int i = 0; !result && i < 200000; ++i)
+                result = agb_recomp_lookup(&many, &board, 0x080000C0, 0, error, sizeof error) != block;
+            took[last] = clock() - start;
+            agb_recomp_free(&many);
+            CHECK(!result);
+        }
+        remove("agb_cpu_index.code.map");
+        result = 1;
+        if (took[1] > took[0] * 8 + CLOCKS_PER_SEC / 50) {
+            fprintf(stderr,
+                    "agb_cpu: 200000 lookups took %ld ms for the block named after 32768 others, %ld ms named "
+                    "first\n",
+                    (long)(took[1] * 1000 / CLOCKS_PER_SEC), (long)(took[0] * 1000 / CLOCKS_PER_SEC));
+            goto done;
+        }
+    }
+#endif
     {
         /* the cache is the ROM's it was built from: another one's, named the same, recompiles and says why */
         AgbRecomp other;
@@ -257,6 +390,8 @@ done:
     free(audio);
     remove("agb_cpu_test.code.map");
     remove("agb_cpu_test.code.so");
+    remove("agb_cpu_made.code.map");
+    remove("agb_cpu_made.code.so");
     if (!result) puts("agb_cpu: ok");
     return result;
 }

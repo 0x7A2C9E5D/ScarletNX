@@ -387,6 +387,22 @@ static const char* flag_names(int flags) {
     }
 }
 
+/* Handlers that don't return: a zone begun before one would never end. Break returns for its high bit. */
+static int svc_returns(const Svc* s) {
+    return strcmp(s->name, "ExitThread") && strcmp(s->name, "ExitProcess") && strcmp(s->name, "Break") &&
+           strcmp(s->name, "ReturnFromException");
+}
+/* Waits can last the rest of the run, so they get no zone. */
+static int svc_zones(const Svc* s) {
+    static const char* const blocking[] = {"SleepThread", "WaitSynchronization", "ArbitrateLock",
+                                           "WaitProcessWideKeyAtomic", "WaitForAddress"};
+    size_t i;
+    if (!svc_returns(s)) return 0;
+    for (i = 0; i < sizeof blocking / sizeof blocking[0]; i++)
+        if (!strcmp(s->name, blocking[i])) return 0;
+    return 1;
+}
+
 static void wrapper(const Svc* s, int abi) {
     const char* w = abi == A64 ? "x" : "r";
     int i, first = 1;
@@ -400,6 +416,7 @@ static void wrapper(const Svc* s, int abi) {
     if (s->nret_regs[abi]) out("    %s ret;\n", ctype(s->ret));
     out("    u32 n = svc_begin%d(t, &in, imm, %s, %s);\n", abi == A64 ? 64 : 32, abi == A64 ? "c" : "a",
         flag_names(s->flags));
+    if (svc_zones(s)) out("    SNX_ZONE(svc_zone, \"%s\");\n", s->name);
     out("    %ssvc_%s(", s->nret_regs[abi] ? "ret = " : "", s->name);
     for (i = 0; i < s->nargs; i++) {
         const Arg* a = &s->args[i];
@@ -416,6 +433,7 @@ static void wrapper(const Svc* s, int abi) {
         const Arg* a = &s->args[i];
         if (is_output(a)) scatter(a->name, types[a->type].size[abi], a->regs[abi], a->nregs[abi], abi);
     }
+    if (svc_zones(s)) out("    SNX_ZONE_END(svc_zone);\n");
     out("    svc_end(t, &in, n, %s, %s->%s[0], %s->%s[1]);\n}\n", flag_names(s->flags), abi == A64 ? "c" : "a", w,
         abi == A64 ? "c" : "a", w);
 }

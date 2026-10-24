@@ -43,6 +43,10 @@ int main(void) {
 
     AgbBoard board;
     agb_board_init(&board);
+    /* the registers as the BIOS leaves them: forced blank, the serial port in its general purpose mode (a game reads it
+       to tell a link boot from its own), the sound's bias at its middle, POSTFLG */
+    CHECK(agb_read16(&board, 0x04000000) == 0x0080 && agb_read16(&board, 0x04000134) == 0x8000);
+    CHECK(agb_read16(&board, 0x04000088) == 0x0200 && agb_read8(&board, 0x04000300) == 1);
     CHECK(!agb_board_insert(&board, rom, ROM_SIZE, error, sizeof error));
     CHECK(board.has_cartridge);
     const AgbCartridge* cartridge = &board.cartridge;
@@ -105,6 +109,45 @@ int main(void) {
     CHECK(agb_read8(&board, 0x0E008010) == 0x5A && agb_read8(&board, 0x0F018010) == 0x5A);
     agb_write8(&board, 0x0E008020, 0xA5);
     CHECK(agb_read8(&board, 0x0E000020) == 0xA5);
+    /* the runner keeps a save its kind's size once the game wrote it */
+    CHECK(agb_save_size(&board) == 0x8000 && board.save.dirty);
+    board.save.dirty = 0;
+    agb_write8(&board, 0x0E000020, 0xA5); /* the same byte again: nothing new to keep */
+    CHECK(!board.save.dirty);
+    agb_save_reset(&board, AGB_SAVE_FLASH64);
+    CHECK(agb_save_size(&board) == 0x10000 && !board.save.dirty);
+    /* a 128 KiB flash's chip erase clears both of its banks, whichever is selected */
+    agb_save_reset(&board, AGB_SAVE_FLASH128);
+    CHECK(agb_save_size(&board) == 0x20000);
+    board.memory.sram[0x00005] = 0x12;
+    board.memory.sram[0x10005] = 0x34;
+    {
+        static const uint32_t addresses[] = {0x5555, 0x2AAA, 0x5555, 0x5555, 0x2AAA, 0x5555};
+        static const uint8_t values[] = {0xAA, 0x55, 0x80, 0xAA, 0x55, 0x10};
+        for (int i = 0; i < 6; ++i) agb_write8(&board, 0x0E000000 + addresses[i], values[i]);
+    }
+    CHECK(board.memory.sram[0x00005] == 0xFF && board.memory.sram[0x10005] == 0xFF && board.save.dirty);
+
+    /* the keypad: KEYINPUT reads a key held as 0, and KEYCNT's interrupt comes once its keys meet its condition */
+    agb_board_keys(&board, 0x009); /* A and Start */
+    CHECK(agb_read16(&board, 0x04000130) == (0x3FF & ~0x009));
+    board.irq_if = 0;
+    agb_write16(&board, 0x04000132, 0x4000 | 0x003); /* A or B */
+    agb_board_keys(&board, 0x008);
+    CHECK(!(board.irq_if & AGB_IRQ_KEYPAD));
+    agb_board_keys(&board, 0x00A);
+    CHECK(board.irq_if & AGB_IRQ_KEYPAD);
+    board.irq_if = 0;
+    agb_write16(&board, 0x04000132, 0xC000 | 0x003); /* A and B */
+    agb_board_keys(&board, 0x001);
+    CHECK(!(board.irq_if & AGB_IRQ_KEYPAD));
+    agb_board_keys(&board, 0x003);
+    CHECK(board.irq_if & AGB_IRQ_KEYPAD);
+    board.irq_if = 0;
+    agb_write16(&board, 0x04000132, 0x0003); /* the same keys, the interrupt off */
+    agb_board_keys(&board, 0x003);
+    CHECK(!(board.irq_if & AGB_IRQ_KEYPAD));
+    agb_board_keys(&board, 0);
 
     /* a byte store to the I/O window writes its lane alone, the other as the register holds it written */
     board.irq_if = 0x0101;
@@ -127,6 +170,34 @@ int main(void) {
     agb_write16(&board, 0x04000000, 0x0403); /* DISPCNT */
     agb_write8(&board, 0x04000001, 0x01);
     CHECK(board.ppu.dispcnt == 0x0103);
+
+    /* SIOCNT with no cable plugged: the multi-player mode says a child (SI) and a ready line (SD), and a transfer ends at
+       once with no partner's words and the serial interrupt; the normal mode's SI is pulled up */
+    agb_write16(&board, 0x04000134, 0x0000); /* RCNT: the serial modes */
+    board.irq_if = 0;
+    agb_write16(&board, 0x04000128, 0x2003); /* multi-player, 115200 bauds */
+    CHECK((agb_read16(&board, 0x04000128) & 0x000C) == 0x000C);
+    agb_write16(&board, 0x04000120, 0x1234); /* SIOMULTI0, before the transfer */
+    agb_write16(&board, 0x04000128, 0x6083); /* start, the interrupt asked for */
+    CHECK(!(agb_read16(&board, 0x04000128) & 0x0080) && agb_read16(&board, 0x04000120) == 0);
+    CHECK(board.irq_if & AGB_IRQ_SERIAL);
+    board.irq_if = 0;
+    agb_write16(&board, 0x04000128, 0x0001); /* normal 8 bit mode, internal clock */
+    CHECK(agb_read16(&board, 0x04000128) & 0x0004);
+    agb_write16(&board, 0x04000128, 0x0081); /* start, no interrupt */
+    CHECK(!(agb_read16(&board, 0x04000128) & 0x0080) && !(board.irq_if & AGB_IRQ_SERIAL));
+
+    /* the DMA channels' registers, 12 bytes apart from 0xB0: DMA3 copies at a 32-bit store of its count and control,
+       as a game copies its interrupt handler to IWRAM, and DMA1's control is DMA1's alone */
+    agb_write32(&board, 0x040000D4, 0x08000000); /* DMA3SAD */
+    agb_write32(&board, 0x040000D8, 0x03000100); /* DMA3DAD */
+    agb_write32(&board, 0x040000DC, 0x84000002); /* DMA3CNT: two words of 32 bits, now */
+    CHECK(agb_read32(&board, 0x03000100) == agb_read32(&board, 0x08000000) &&
+          agb_read32(&board, 0x03000104) == agb_read32(&board, 0x08000004));
+    CHECK(board.dma[3].count == 2 && !(board.dma[3].control & 0x8000)); /* done: the enable bit clears */
+    agb_write16(&board, 0x040000C6, 0xB640); /* DMA1CNT_H: the sound FIFO's timing, repeat, 32 bits */
+    CHECK(board.dma[1].control == 0xB640 && !board.dma[0].control && !board.dma[2].control);
+    CHECK(agb_read16(&board, 0x040000C6) == 0xB640);
     agb_board_destroy(&board);
     CHECK(!board.has_cartridge && !board.cartridge.data);
 

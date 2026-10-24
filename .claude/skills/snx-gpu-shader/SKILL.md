@@ -14,7 +14,7 @@ slower on lavapipe. Write the source as the machine code you want.
 
 ## Before changing anything
 
-1. Read the CPU reference (`astc.c`, `vic.c`'s `compose_cpu`) and the invariants its callers guarantee
+1. Read the CPU reference (`tests/support/astc.c`, `vic.c`'s `compose_cpu`) and the invariants its callers guarantee
    (`slot_resolve` clips slots to the target, NV12 starts are even). Invariants are free optimizations; write
    each one down where it is used, and make the host refuse jobs that break it (`vic_gpu_params` returns 0,
    the CPU composes) instead of paying for them per pixel.

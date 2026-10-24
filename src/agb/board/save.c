@@ -27,6 +27,16 @@ void agb_save_reset(AgbBoard* board, uint8_t type) {
     board->save.erase_armed = board->save.program_armed = board->save.bank_armed = 0;
     board->save.id_mode = 0;
     board->save.bank = 0;
+    board->save.dirty = 0;
+}
+
+uint32_t agb_save_size(const AgbBoard* board) {
+    switch (board->save.type) {
+        case AGB_SAVE_SRAM: return AGB_SAVE_SRAM_SIZE;
+        case AGB_SAVE_FLASH64: return 0x10000;
+        case AGB_SAVE_FLASH128: return 0x20000;
+        default: return 0;
+    }
 }
 
 static uint32_t save_offset(const AgbBoard* board, uint32_t address) {
@@ -52,21 +62,25 @@ uint8_t agb_save_read8(AgbBoard* board, uint32_t address) {
 static void flash_erase(AgbBoard* board, uint32_t address, int chip) {
     AgbSave* save = &board->save;
     uint32_t base = save->type == AGB_SAVE_FLASH128 ? (uint32_t)save->bank << 16 : 0;
-    if (chip)
-        memset(board->memory.sram + base, 0xFF, 0x10000);
+    if (chip) /* the whole chip, both banks of a 128 KiB one */
+        memset(board->memory.sram, 0xFF, agb_save_size(board));
     else
         memset(board->memory.sram + (base | (address & 0xF000)), 0xFF, 0x1000); /* 4 KiB sectors */
+    save->dirty = 1;
 }
 
 void agb_save_write8(AgbBoard* board, uint32_t address, uint8_t value) {
     AgbSave* save = &board->save;
     if (save->type == AGB_SAVE_NONE || save->type == AGB_SAVE_SRAM) {
-        board->memory.sram[save_offset(board, address)] = value;
+        uint8_t* byte = &board->memory.sram[save_offset(board, address)];
+        if (*byte != value) save->dirty = 1;
+        *byte = value;
         return;
     }
     /* flash: the command set is addressed by offsets inside the window */
     if (save->program_armed) {
         board->memory.sram[save_offset(board, address)] &= value; /* programming can only clear bits */
+        save->dirty = 1;
         save->program_armed = 0;
         save->phase = 0;
         return;

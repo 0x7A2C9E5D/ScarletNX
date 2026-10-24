@@ -22,7 +22,8 @@ efficient.
 
 ## Where the math lives
 - **CPU FP helpers**: `src/common/cpu/aarch64/helpers/` (`fp.c`, `fp_arithmetic.c`, `simd.c`), checked by the
-  witness tests (`a64_fp_witnesses`, `a64_fp_arithmetic_witnesses`, `a64_fp_differential`). What an instruction
+  witness tests (`a64_fp_witnesses`, `a64_fp_arithmetic_witnesses`) and, through the LLVM emitters, against
+  `qemu-aarch64` (`llvm_qemu_differential`). What an instruction
   must compute is `snx-arm64-expert`'s call. How to compute it soundly (correct rounding, no double rounding,
   exact special cases) is yours.
 - **Shader translator**: `src/nx/gpu/shader/spirv_translate.c` and `spirv_compute.c`: `MUFU` (RCP, RSQ, LG2, EX2,
@@ -31,7 +32,8 @@ efficient.
 - **Renderer**: `src/nx/gpu/vk/` (`render.c` viewports with signed scales and swizzles, depth range,
   scissors; `renderer.c` letterboxing and scaled render targets; `surface.c` and `format.c` format conversion;
   `texture.c` samplers, LOD and anisotropy), and `src/nx/gpu/maxwell/` for the engine state it reads.
-- **Textures**: `src/nx/gpu/texture/` (`astc.c`, `etc2.c`, `depth.c`), `src/nx/gpu/vk/astc.c` on the GPU.
+- **Textures**: `src/nx/gpu/texture/` (`depth.c`, `texconv.glsl`, `astc.comp`), `src/nx/gpu/vk/astc.c` on the
+  GPU, and the CPU references the tests hold them to in `tests/support/` (`astc.c`, `etc2.c`, `bcn.c`).
 - **Video**: `src/nx/gpu/video/vic.c` and `vic_compose.glsl` (color matrix, soft clamp, scaling), `nvdec.c`.
 - **Audio**: `src/nx/hle/services/audren_dsp.c` (polyphase resampling, Q15 mixing, biquads, volume ramps) and
   `audren.c`.

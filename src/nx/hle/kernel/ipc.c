@@ -8,6 +8,7 @@
 #include "nx/hle/kernel/kernel_int.h"
 #include "nx/hle/hle.h"
 #include "nx/runtime/options.h"
+#include "nx/runtime/platform/tracy.h"
 #include <assert.h>
 
 #define SFCI                 0x49434653u /* the CmifInHeader's magic */
@@ -476,6 +477,7 @@ static void respond(IpcCtx* c) {
 /* the request goes to o's dispatcher, and its result into the reply */
 static void serve(IpcCtx* c, SvcObj* o, u32 seq) {
     u32 in[2];
+    SNX_ZONE_TV(z_ipc, "ipc", c->cmd, "%s cmd %u", o->name, c->cmd);
     ipc_in(c, 0, &in[0], 4);
     ipc_in(c, 4, &in[1], 4);
     snx_le32_array(in, 2);
@@ -622,24 +624,35 @@ u32 ipc_handle(u32 handle, u64 msg_addr, u64 msg_size) {
 }
 
 /* ============================================================ what dispatchers answer */
-/* the count stops at 4, past the three warnings; once the table is full a new pair is never warned of, which is said
-   once */
+/* A game that polls a command nothing implements would fill the log with it: each pair is reported the first time
+   only. Past WARN_PAIRS pairs the table stops growing and new pairs go unreported, which the log is told once */
 int ipc_warn_once(const char* name, u32 cmd) {
-    int i, r = 0;
+    char key[128];
+    u32 h = 2166136261u, i;
+    size_t k;
+    int report = 0, full = 0;
+    snprintf(key, sizeof key, "%s", name && *name ? name : "?");
+    for (k = 0; key[k]; k++) h = (h ^ (u8)key[k]) * 16777619u; /* FNV-1a over the name, then the command */
+    h = (h ^ cmd) * 16777619u;
     pm_lock(&g_hle.ipc.lk);
-    for (i = 0; i < g_hle.ipc.nseen && (g_hle.ipc.seen[i].cmd != cmd || strncmp(g_hle.ipc.seen[i].name, name, 127)); i++) {}
-    if (i == g_hle.ipc.nseen && g_hle.ipc.nseen < WARN_PAIRS) {
-        strncpy(g_hle.ipc.seen[i].name, name, 127);
-        g_hle.ipc.seen[i].cmd = cmd;
-        g_hle.ipc.nseen++;
+    for (i = h % WARN_SLOTS;; i = (i + 1) % WARN_SLOTS) {
+        if (!g_hle.ipc.seen[i].name[0]) break;
+        if (g_hle.ipc.seen[i].cmd == cmd && !strcmp(g_hle.ipc.seen[i].name, key)) break;
     }
-    if (i < g_hle.ipc.nseen) {
-        r = g_hle.ipc.seen[i].n < 3;
-        if (g_hle.ipc.seen[i].n < 4) g_hle.ipc.seen[i].n++;
+    if (!g_hle.ipc.seen[i].name[0]) {
+        if (g_hle.ipc.nseen < WARN_PAIRS) {
+            memcpy(g_hle.ipc.seen[i].name, key, sizeof key);
+            g_hle.ipc.seen[i].cmd = cmd;
+            g_hle.ipc.nseen++;
+            report = 1;
+        } else if (!g_hle.ipc.warn_full) {
+            g_hle.ipc.warn_full = 1;
+            full = 1;
+        }
     }
     pm_unlock(&g_hle.ipc.lk);
-    if (i == WARN_PAIRS) WARN_LIMIT(1, "ipc: %d service commands warned of, no more are\n", WARN_PAIRS);
-    return r;
+    if (full) WARN("ipc: %d unimplemented commands reported, further ones are not\n", WARN_PAIRS);
+    return report;
 }
 /* "undeclared", not "stub": a success carrying none of the command's outputs. The SDK still reads them from the reply,
    past what respond writes, so they are zeroed here: a count, an object or a handle reads as none, not as the request's

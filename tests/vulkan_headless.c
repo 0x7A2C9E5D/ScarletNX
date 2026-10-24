@@ -12,6 +12,10 @@
 #include "nx/hle/services/nvdrv.h"
 #include "nx/runtime/platform/backend.h"
 #include "spirv_emitter_fixture.h"
+#include "support/dma_ref.h"
+#include "support/fermi2d_ref.h"
+#include "support/nvdec_ref.h"
+#include "support/vic_ref.h"
 #include <libavutil/buffer.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -287,6 +287,8 @@ def main():
             assert not list(root.rglob('.snx-*')), (cases, 'private staging leaked')
             if status:
                 assert 'Guest ExitProcess' not in text
+            elif 'Guest ExitProcess' in text:  # a game that ended well says so last, as every driver's
+                assert p.stdout.rstrip().endswith('\nExit.'), (cases, p.stdout)
             return output, text
 
         extract = ('--extract-container',)

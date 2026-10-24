@@ -3,8 +3,9 @@
 # Copyright 2026 the ScarletNX contributors
 """scripts/edenprobe.py against a fake runtime that recompiles into a fake game, whose launches write report lines as
 each test asks: a clean run, a regression, a case not run, a new pass, a crash and a hang each followed by another
-launch, launches that add nothing, no report, an exit after the summary, words edenprobe ignored, a baseline of
-another build or mode or none, broken lines; then the baseline of several runs. Offline, no GPU."""
+launch, a baseline line that expects a crash, launches that add nothing, no report, an exit after the summary, words
+edenprobe ignored, a baseline of another build or mode or none, broken lines; then the baseline of several runs.
+Offline, no GPU."""
 
 import json
 import os
@@ -182,6 +183,50 @@ with tempfile.TemporaryDirectory() as temporary:
     check('each launch said', 'launch 1: exit -11' in text and 'launch 2: exit 0' in text, text)
     check('both launches logged', (out / 'launch-1.log').is_file() and (out / 'launch-2.log').is_file())
     check('the run one report', 'cpu: multiplies' in (out / 'baseline.txt').read_text())
+
+    # a line that expects another result: divides crashes, as the console ends it too
+    expects = BASELINE + 'cpu: multiplies\n[skip (crashed)] cpu: divides\n'
+    status, text, out, calls = run([{'lines': crash, 'signal': 11}, resumed + [summary(2, 0, 1, 1)]], baseline=expects)
+    check('an expected crash that crashes passes', status == 0, text)
+    check(
+        'the summary says every case ends as the baseline expects',
+        'All 3 cases of' in text and 'end as it expects (1 skip (crashed))' in text,
+        text,
+    )
+    check(
+        "this run's baseline.txt keeps the expected crash it had",
+        (out / 'baseline.txt').read_text().endswith('cpu: adds\n[skip (crashed)] cpu: divides\ncpu: multiplies\n'),
+        (out / 'baseline.txt').read_text(),
+    )
+    status, text, out, calls = run([WHOLE], baseline=expects)
+    check(
+        'an expected crash that fails instead is a regression',
+        status == 1
+        and "1 of the baseline's 3 cases no longer end as it expects" in text
+        and '- `cpu: divides: fail: got 3, wanted 4, expected skip (crashed)`' in text,
+        text,
+    )
+    check(
+        "one that did not crash is not in this run's baseline.txt", 'divides' not in (out / 'baseline.txt').read_text()
+    )
+    passing = START + CASES[:2] + [case('cpu', 'divides')] + CASES[3:] + [summary(3, 0, 1)]
+    status, text, out, calls = run([passing], baseline=expects)
+    check(
+        'an expected crash that passes now is a regression, not a new pass',
+        status == 1 and '- `cpu: divides: pass, expected skip (crashed)`' in text and 'Passing and not in' not in text,
+        text,
+    )
+    status, text, out, calls = run(
+        [{'lines': crash, 'signal': 11}, resumed + [summary(2, 0, 1, 1)]], baseline=expects + 'cpu: gone\n'
+    )
+    check(
+        'a plain line beside it fails as before, alone',
+        status == 1
+        and "1 of the baseline's 4 cases no longer pass" in text
+        and '- `cpu: gone: not run`' in text
+        and 'no longer end as it expects' not in text,
+        text,
+    )
 
     status, text, out, calls = run(
         [{'lines': START + CASES[:1], 'hang': True}, CASES[1:] + [summary(2, 1, 1)]], extra=['--timeout', '3']
@@ -365,6 +410,24 @@ with tempfile.TemporaryDirectory() as temporary:
     written.unlink()
     status, text = baseline(first, other)
     check('runs of two builds refused', status == 1 and 'one build and one mode only' in text and not written.exists())
+    crashed, again, passed = root / 'crashed.txt', root / 'again.txt', root / 'passed.txt'
+    crashed.write_text('# build: abc1234\n# mode: quick cpu\ncpu: adds\n[skip (crashed)] cpu: reads\n')
+    again.write_text('# build: abc1234\n# mode: quick cpu\n[skip (crashed)] cpu: reads\ncpu: adds\n')
+    passed.write_text('# build: abc1234\n# mode: quick cpu\ncpu: adds\ncpu: reads\n')
+    status, text = baseline(crashed, again)
+    check(
+        'a case every run ended the same other way is written with its result',
+        status == 0 and written.read_text().endswith('# mode: cpu quick\ncpu: adds\n[skip (crashed)] cpu: reads\n'),
+        written.read_text() if written.exists() else text,
+    )
+    status, text = baseline(crashed, passed)
+    check(
+        'one that ended two ways is left out, with each',
+        status == 0
+        and 'left out: cpu: reads (skip (crashed), pass)' in text
+        and written.read_text().endswith('# mode: cpu quick\ncpu: adds\n'),
+        text,
+    )
 
 for failure in failures:
     print('FAIL:', failure)

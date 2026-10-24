@@ -349,6 +349,8 @@ static int tex_upload(Surf* t) {
 }
 static int tex_upload_(Surf* t) {
     const VkFmt* f = &t->f;
+    SNX_ZONE_T(z_up, "texture upload", "%ux%u", t->w, t->h);
+    SNX_ZONE_VALUE(z_up, t->size);
     g_tex_uploads++;
     g_tex_upload_bytes += t->size;
     t->upload_valid = 0;
@@ -746,6 +748,7 @@ static Surf* tex_from_tic(const u32* tic, int raw) {
     if (vt == VK_IMAGE_VIEW_TYPE_CUBE && d != 6) vt = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     if (vt == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY && !g_vk.feat.imageCubeArray) vt = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     u32 layers = vt == VK_IMAGE_VIEW_TYPE_3D ? 1 : d, d3 = vt == VK_IMAGE_VIEW_TYPE_3D ? d : 1;
+    if (vt == VK_IMAGE_VIEW_TYPE_3D && !raw) f = vk_tic_format_3d(tic[0], srgb);
     /* bytes from one layer to the next: all the levels the header has, whichever of them it shows */
     u64 stride = bl ? bl_layer_size(w, h, d3, &f, bh, bd, glevels) : (u64)pitch * ((h + f.bh - 1) / f.bh) * d3;
     /* A texture upload reads guest memory. Complete any compute storage writes that overlap it first. */
@@ -926,6 +929,7 @@ VkImageView vk_null_view(VkImageViewType type, int num) {
             free(s);
             return VK_NULL_HANDLE;
         }
+        vk_mem_track(s->mem);
         vk_render_end(); /* clears happen outside rendering passes */
         VkCommandBuffer cb = vk_cmd();
         vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_CLEAR_BIT,

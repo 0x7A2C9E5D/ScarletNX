@@ -20,6 +20,12 @@ set_target_properties(scarletnx-agb PROPERTIES OUTPUT_NAME scarletnx-agb-runtime
 target_link_libraries(scarletnx-agb PUBLIC scarletnx-common snx_arm_llvm)
 target_compile_definitions(scarletnx-agb PRIVATE SNX_AGB_CC="${CMAKE_C_COMPILER}")
 target_compile_options(scarletnx-agb PRIVATE -Wall -Wextra -Werror)
+# the blocks a run reaches, compiled in this process by the LLVM backend's executor (exec.c, in snx_llvm, which the
+# Switch driver's build defines), as the 3DS and the Vita do; without it each batch is a module linked by the compiler
+if(TARGET snx_llvm)
+    target_link_libraries(scarletnx-agb PUBLIC snx_llvm)
+    target_compile_definitions(scarletnx-agb PUBLIC SNX_AGB_JIT) # the runner says how its blocks are kept
+endif()
 # The runtime library the blocks call (cpu/runtime.h), which the ROM's module links as the 3DS driver's does
 set(agb_runtime_source "${CMAKE_CURRENT_BINARY_DIR}/agb-runtime-$<CONFIG>.c")
 add_custom_command(OUTPUT "${agb_runtime_source}"
@@ -28,10 +34,19 @@ add_custom_command(OUTPUT "${agb_runtime_source}"
     DEPENDS snx_arm_rt "${PROJECT_SOURCE_DIR}/cmake/ctr-runtime.cmake" VERBATIM)
 target_sources(scarletnx-agb PRIVATE "${agb_runtime_source}")
 
-add_executable(scarletnx-agb-run runtime/main.c)
-target_link_libraries(scarletnx-agb-run PRIVATE scarletnx-agb)
+# the runner: the board in a window, with sound and the keypad (runtime/host.c), SDL here and never in the board
+add_executable(scarletnx-agb-run runtime/main.c runtime/host.c)
+target_link_libraries(scarletnx-agb-run PRIVATE scarletnx-agb SDL3::SDL3 snx_window_icon)
 set_target_properties(scarletnx-agb-run PROPERTIES OUTPUT_NAME scarletnx-agb
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" C_STANDARD 23 C_STANDARD_REQUIRED ON)
+# after each build the runner is copied beside every GBA game (recompiled/<name>/<name>, its .ini saying system=gba),
+# as scarletnx is beside every Switch game (cmake/deploy.cmake). A sanitized test build's stays here
+if(SNX_DEPLOY AND NOT (SNX_TEST_SANITIZERS AND BUILD_TESTING))
+    add_custom_command(TARGET scarletnx-agb-run POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" "-DAGB_RUNTIME=$<TARGET_FILE:scarletnx-agb-run>" "-DGAMES=${SNX_RECOMPILED_DIR}"
+                "-DWINDOWS=${WIN32}" "-DMACOS=${APPLE}" -P "${PROJECT_SOURCE_DIR}/cmake/deploy.cmake"
+        VERBATIM)
+endif()
 
 if(BUILD_TESTING)
     add_executable(snx-test-agb-board "${PROJECT_SOURCE_DIR}/tests/agb_board.c")
@@ -60,8 +75,22 @@ if(BUILD_TESTING)
     target_compile_options(snx-test-agb-cpu PRIVATE -Wall -Wextra -Werror)
     set_target_properties(snx-test-agb-cpu PROPERTIES C_STANDARD 23 C_STANDARD_REQUIRED ON)
     add_test(NAME agb_cpu COMMAND snx-test-agb-cpu)
-    # jsmolka's gba-tests (cmake/dependencies.cmake), each ROM a test of its own
+    add_executable(snx-test-agb-host "${PROJECT_SOURCE_DIR}/tests/agb_host.c" runtime/host.c)
+    target_link_libraries(snx-test-agb-host PRIVATE scarletnx-agb SDL3::SDL3 snx_window_icon)
+    target_compile_options(snx-test-agb-host PRIVATE -Wall -Wextra -Werror)
+    set_target_properties(snx-test-agb-host PROPERTIES C_STANDARD 23 C_STANDARD_REQUIRED ON)
+    add_test(NAME agb_host COMMAND snx-test-agb-host)
     find_package(Python3 COMPONENTS Interpreter)
+    # the runner's scripted presses, the BIOS's interrupt wait and its SoftReset, each through a ROM the test makes
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME agb_keys COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/agb_keys.py"
+            $<TARGET_FILE:scarletnx-agb-run>)
+        add_test(NAME agb_irq COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/agb_irq.py"
+            $<TARGET_FILE:scarletnx-agb-run>)
+        add_test(NAME agb_reset COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/agb_reset.py"
+            $<TARGET_FILE:scarletnx-agb-run>)
+    endif()
+    # jsmolka's gba-tests (cmake/dependencies.cmake), each ROM a test of its own
     if(Python3_Interpreter_FOUND AND gba-tests_SOURCE_DIR)
         foreach(rom IN ITEMS arm thumb memory bios nes unsafe save_none save_sram save_flash64 save_flash128 ppu_hello
                         ppu_shades ppu_stripes)
@@ -74,6 +103,7 @@ endif()
 include(GNUInstallDirs)
 install(TARGETS scarletnx-agb-run RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 if(COMMAND snx_sanitizer_path) # tests/CMakeLists.txt: this folder's tests
-    snx_test_sanitize(snx-test-agb-board snx-test-agb-bios snx-test-agb-ppu snx-test-agb-apu snx-test-agb-cpu)
+    snx_test_sanitize(snx-test-agb-board snx-test-agb-bios snx-test-agb-ppu snx-test-agb-apu snx-test-agb-cpu
+                      snx-test-agb-host)
     snx_sanitizer_path()
 endif()

@@ -94,7 +94,7 @@ int main(void) {
     CHECK(ok);
     snx_jit_service_free(service);
 
-    key = snx_jit_cache_key('2', 0, 0);
+    key = snx_jit_cache_key('2', 0, 0, 0);
     CHECK(key != NULL);
     cache = snx_jit_cache_open(path, key, error, sizeof(error));
     CHECK(cache != NULL);
@@ -120,12 +120,19 @@ int main(void) {
         }
         snx_jit_cache_close(cache);
     }
-    wrong = snx_jit_cache_key('3', 0, 0);
+    wrong = snx_jit_cache_key('3', 0, 0, 0);
     CHECK(wrong != NULL);
     if (wrong) {
         error[0] = 0;
         CHECK(snx_jit_cache_open(path, wrong, error, sizeof(error)) == NULL);
         CHECK(strstr(error, "key") != NULL);
+        free(wrong);
+    }
+    /* another guest's features decode other instructions: their code is another cache's */
+    wrong = snx_jit_cache_key('2', 0, 0, ~(SnxU64)0);
+    CHECK(wrong != NULL);
+    if (wrong) {
+        CHECK(snx_jit_cache_open(path, wrong, error, sizeof(error)) == NULL);
         free(wrong);
     }
     free(key);
@@ -135,7 +142,7 @@ int main(void) {
     if (f) fclose(f);
     CHECK(size > 1);
     if (size > 1 && copy_prefix(path, cut, (size_t)size - 1)) {
-        key = snx_jit_cache_key('2', 0, 0);
+        key = snx_jit_cache_key('2', 0, 0, 0);
         CHECK(key != NULL);
         if (key) {
             error[0] = 0;

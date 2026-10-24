@@ -15,7 +15,7 @@ Implemented: Clang/CMake, Linux/Windows CI, SDL3/Vulkan, shader caches, componen
   reader and Maxwell instruction scanner.
 - **Audio:** `audren` splitters, voice biquads, delay/reverb/biquad effects. Validate hwopus playback.
 - **GPU:** per-channel scheduling so a blocked channel cannot stall its fence producer.
-  90-degree framebuffer rotation, attachment feedback, BCn fallback.
+  90-degree framebuffer rotation, attachment feedback. Check the BCn fallback (decoded on the GPU) on a Mali device.
 - **CPU:** ARM NaN propagation/default-NaN and directed FP rounding. Thread suspension at WFE.
   32-bit games run (A32 and Thumb, `src/nx/runtime/arm.c`), checked only with the synthetic program
   (`tests/nx_arm32_smoke.py`): a real one, ldr:ro's NROs in a 32-bit process, the Thumb32 DSP and

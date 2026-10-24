@@ -12,7 +12,7 @@ static void helper_attribute(SnxIr* ir, LLVMValueRef function, LLVMAttributeInde
 
 /* ---- cpu.h's inline helpers ----
    Each mirrors its C body. They are internal and always inlined, as SNX_INLINE asks, so a constant argument
-   (a condition, a shift type, an access size) folds away as it does in the templates' C compiled with a constant word. */
+   (a condition, a shift type, an access size) folds away. */
 
 typedef struct {
     LLVMBasicBlockRef block;

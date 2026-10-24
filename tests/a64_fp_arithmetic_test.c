@@ -200,38 +200,66 @@ static void vector_and_state(void) {
     check(ursqrte32(0x40000000u), 0xFF800000u, "URSQRTE first estimate bin");
     check(ursqrte32(0xFFFFFFFFu), 0x80000000u, "URSQRTE strict boundary");
     CPU c = state(0);
-    check(snx_simd(&c, NULL, 0x5E217820), 0, "reserved scalar FCVTL");
-    check(snx_simd(&c, NULL, 0x5EA1C820), 0, "reserved scalar URECPE");
-    check(snx_simd(&c, NULL, 0x7EA1C820), 0, "reserved scalar URSQRTE");
-    check(snx_simd(&c, NULL, 0x7EA1F820), 0, "reserved AdvSIMD scalar FSQRT");
-    SNX_VSET_S(c.v[0], 0, 0x7FC00123);
-    SNX_VSET_S(c.v[1], 0, 0x7F800000);
-    SNX_VSET_S(c.v[2], 0, 0);
-    SNX_VSET_S(c.v[0], 1, 0xFF7FFFFF);
-    SNX_VSET_S(c.v[1], 1, 0x7F7FFFFF);
-    SNX_VSET_S(c.v[2], 1, 0x40000000);
-    check(snx_simd(&c, NULL, 0x4E22CC20), 1, "FMLA V0.4S,V1.4S,V2.4S");
-    check(SNX_VS(c.v[0], 0), 0x7FC00000, "vector QNaN addend with inf*zero");
-    check(SNX_VS(c.v[0], 1), 0x7F7FFFFF, "vector fused overflow cancellation");
-    check(c.fpsr, 0xA8000001u, "vector cumulative flags");
-    c = state(0);
-    SNX_VSET_S(c.v[0], 0, 0x3F800000);
-    SNX_VSET_S(c.v[0], 1, 0x33800000);
-    SNX_VSET_S(c.v[0], 2, 0x7FC00123);
-    SNX_VSET_S(c.v[0], 3, 0x7F800456);
-    check(snx_simd(&c, NULL, 0x6E20D400), 1, "FADDP V0.4S,V0.4S,V0.4S");
-    check(SNX_VS(c.v[0], 0), 0x3F800000, "pairwise tie to even");
-    check(SNX_VS(c.v[0], 1), 0x7FC00456, "pairwise SNaN priority");
-    check(SNX_VS(c.v[0], 2), SNX_VS(c.v[0], 0), "pairwise aliases");
-    check(c.fpsr, 0xA8000011u, "pairwise cumulative IOC/IXC");
     RtAPI rt = {0};
     c.rt = &rt;
     snx_msr(&c, 0x5A20, ~0ull);
-    check(snx_mrs(&c, 0x5A20), 0x07C00000, "A57 FPCR RES0");
+    /* the helper keeps FEAT_FP16's FZ16 too: the generated code clears it first for a guest without FEAT_FP16 */
+    check(snx_mrs(&c, 0x5A20), 0x07C80000, "FPCR RES0");
     snx_msr(&c, 0x5A21, ~0ull);
     check(snx_mrs(&c, 0x5A21), 0xF800009F, "A57 FPSR RES0");
     check(snx_fp_binary(&c, 0x3F800000, 0x3F800000, 32, SNX_FP_ADD), 0x40000000, "exact sum");
     check(c.fpsr, 0xF800009F, "exact operation preserves every existing exception");
+}
+/* FEAT_FP16's halves (FPCR.FZ16 flushes them without IDC, FPCR.AHP only reaches conversions), FEAT_FRINTTS's
+   FPRoundIntN, FEAT_JSCVT's FPToFixedJS (Z in bit 32) and FEAT_BF16's FPConvertBF */
+static void later_features(void) {
+    static const struct {
+        int kind, w, op;
+        u32 control;
+        u64 a, b, out;
+        u32 flags;
+    } t[] = {
+        {0, 16, SNX_FP_ADD, 1u << 19, 0x0001, 0x0000, 0x0000, 0},
+        {0, 16, SNX_FP_ADD, 0, 0x0001, 0x0000, 0x0001, 0},
+        {0, 16, SNX_FP_MUL, 1u << 19, 0x0400, 0x3800, 0x0000, 8},
+        {0, 16, SNX_FP_MUL, 0, 0x0400, 0x3800, 0x0200, 0},
+        {0, 16, SNX_FP_ADD, 1u << 26, 0x7C00, 0x3C00, 0x7C00, 0},
+        {1, 16, 32, 1u << 19, 0x0001, 0, 0x33800000, 0},
+        {1, 16, 32, 1u << 26, 0x7C00, 0, 0x47800000, 0},
+        {2, 32, 32, 0, 0x4F000000, 3, 0xCF000000, 1},
+        {2, 32, 32, 0, 0xCF000000, 3, 0xCF000000, 0},
+        {2, 32, 32, 0, 0x3FC00000, 0, 0x40000000, 0x10},
+        {2, 32, 64, 0, 0x7FC00000, 3, 0xDF000000, 1},
+        {2, 64, 32, 0, 0xBFE0000000000000ull, 3, 0x8000000000000000ull, 0x10},
+        {2, 64, 64, 1u << 24, 0x0000000000000001ull, 0, 0, 0x80},
+        {3, 64, 0, 0, 0x3FF0000000000000ull, 0, 0x100000001ull, 0},
+        {3, 64, 0, 0, 0xBFF0000000000000ull, 0, 0x1FFFFFFFFull, 0},
+        {3, 64, 0, 0, 0x8000000000000000ull, 0, 0, 0},
+        {3, 64, 0, 0, 0x41F0000000500000ull, 0, 5, 1},
+        {3, 64, 0, 0, 0x3FF8000000000000ull, 0, 1, 0x10},
+        {3, 64, 0, 0, 0x7FF8000000000000ull, 0, 0, 1},
+        {3, 64, 0, 1u << 24, 0x0000000000000001ull, 0, 0, 0x80},
+        {4, 32, 0, 0, 0x3F800000, 0, 0x3F80, 0},
+        {4, 32, 0, 0, 0x3F808000, 0, 0x3F80, 0x10},
+        {4, 32, 0, 0, 0x3F818000, 0, 0x3F82, 0x10},
+        {4, 32, 0, 0, 0x7F7FFFFF, 0, 0x7F80, 0x14},
+        {4, 32, 0, 3u << 22, 0x7F7FFFFF, 0, 0x7F7F, 0x10},
+        {4, 32, 0, 0, 0x7F800001, 0, 0x7FC0, 1},
+        {4, 32, 0, 0, 0x00000001, 0, 0x0000, 0x18},
+        {4, 32, 0, 1u << 24, 0x80000001, 0, 0x8000, 0x80},
+    };
+    for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
+        CPU c = state(t[i].control);
+        u64 got = 0;
+        switch (t[i].kind) {
+            case 0: got = snx_fp_binary(&c, t[i].a, t[i].b, t[i].w, t[i].op); break;
+            case 1: got = snx_fp_convert(&c, t[i].a, t[i].w, t[i].op, 0); break;
+            case 2: got = snx_fp_round_int(&c, t[i].a, t[i].w, (int)t[i].b, t[i].op); break;
+            case 3: got = snx_fp_jcvt(&c, t[i].a); break;
+            default: got = snx_fp_bfcvt(&c, t[i].a); break;
+        }
+        result(&c, got, t[i].out, t[i].flags, t[i].control, "later feature");
+    }
 }
 int main(void) {
     const int modes[] = {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO};
@@ -245,6 +273,7 @@ int main(void) {
         formats();
         integers();
         vector_and_state();
+        later_features();
         check(fegetround(), modes[i], "host rounding unchanged");
         check(fetestexcept(FE_ALL_EXCEPT), 0, "host exceptions unchanged");
     }

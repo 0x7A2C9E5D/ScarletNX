@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "nx/gpu/nvn_command_gap.h"
+#include "support/nvn_command_gap.h"
 #undef NDEBUG /* the checks are the test */
 #include <assert.h>
 #include <string.h>

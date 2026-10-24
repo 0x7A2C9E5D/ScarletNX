@@ -5,6 +5,7 @@
    the target rectangle (clipping, an odd left edge, wholly outside the surface), and the GPU asked only once the
    renderer is up. The stand-in renderer declines every job, so the CPU composes; surfaces are pitch linear */
 #include "nx/gpu/video/vic.c"
+#include "support/vic_ref.h"
 #include <stdarg.h>
 
 static unsigned checks;

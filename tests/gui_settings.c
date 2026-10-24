@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
        order, the other line left out; a page's row and its All before its settings */
     int tracy = at(&s, "tracy_capture") >= 0; /* the row a runtime without SNX_TRACY does not list */
     int opt = 3 + tracy;                      /* the optimization level's row, after it */
-    assert(s.own > 5 && s.count == s.own + 16 + tracy && !strcmp(s.keys[0].key, "GDB stub"));
+    assert(s.own > 5 && s.count == s.own + 16 && !strcmp(s.keys[0].key, "GDB stub"));
     assert(!tracy || at(&s, "tracy_capture") == 3); /* after Extract dump, before the optimization level */
     assert(!strcmp(s.keys[0].section, "Launch") && !strcmp(s.keys[0].about, "Enables gdbstub on port 1234") &&
            words(&s.keys[0]) == 2 && !strcmp(s.values[0].key, "gdbstub"));

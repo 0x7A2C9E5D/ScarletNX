@@ -49,7 +49,7 @@ target_link_libraries(snx_gui_ui PRIVATE SDL3::SDL3) # its platform macros and k
 set_target_properties(snx_gui_ui PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_compile_options(snx_gui_ui PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 add_library(snx_gui_support STATIC aot.c model.c browser.c steps.c theme.c recent.c editor.c settings.c place.c clean.c
-            latin.c wide.c ${gui_process}
+            queue.c latin.c wide.c ${gui_process}
             "${CMAKE_BINARY_DIR}/generated/gui_themes.c" "${CMAKE_BINARY_DIR}/generated/gui_glyphs.c")
 target_link_libraries(snx_gui_support PUBLIC scarletnx-common snx_setup snx_i18n snx_settings)
 target_include_directories(snx_gui_support PRIVATE "${CMAKE_BINARY_DIR}/generated")
@@ -161,6 +161,9 @@ if(BUILD_TESTING)
     add_executable(snx-test-gui-recent "${PROJECT_SOURCE_DIR}/tests/gui_recent.c")
     target_link_libraries(snx-test-gui-recent PRIVATE snx_gui_support scarletnx-common)
     add_test(NAME gui_recent COMMAND snx-test-gui-recent)
+    add_executable(snx-test-gui-queue "${PROJECT_SOURCE_DIR}/tests/gui_queue.c")
+    target_link_libraries(snx-test-gui-queue PRIVATE snx_gui_support)
+    add_test(NAME gui_queue COMMAND snx-test-gui-queue)
     add_executable(snx-test-gui-pad "${PROJECT_SOURCE_DIR}/tests/gui_pad.c")
     target_link_libraries(snx-test-gui-pad PRIVATE snx_gui_pad)
     add_test(NAME gui_pad COMMAND snx-test-gui-pad)

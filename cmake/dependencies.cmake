@@ -214,10 +214,12 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
     # Tracy client, for SNX_TRACY development builds.
     if(SNX_TRACY)
         # The sampler and the callstacks it needs are on; the zones take no callstacks of their own, so it costs
-        # nothing per zone. The wait stacks are off: they walk the stack at every context switch.
+        # nothing per zone. The wait stacks are off: they walk the stack at every context switch. The zones' own
+        # validation is off: it queues a ZoneValidation next to every zone begin, end, text and value, which in a
+        # build whose whole purpose is to observe zones doubles the queue traffic they cost.
         set(snx_tracy_options "TRACY_ENABLE ON" "TRACY_ON_DEMAND ON" "TRACY_NO_CRASH_HANDLER ON" "TRACY_STATIC ON"
                               "TRACY_MANUAL_LIFETIME ON" "TRACY_NO_CODE_TRANSFER ON" "TRACY_NO_FRAME_IMAGE ON"
-                              "TRACY_NO_WAIT_STACKS ON")
+                              "TRACY_NO_WAIT_STACKS ON" "TRACY_NO_VERIFY ON")
         if(NOT ANDROID)
             list(APPEND snx_tracy_options "TRACY_ONLY_LOCALHOST ON" "TRACY_NO_BROADCAST ON")
         endif()
@@ -234,7 +236,7 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
 endif()
 
 set(SNX_SDL3_FROM_SOURCE OFF)
-if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY) OR SNX_BUILD_GUI OR SNX_BUILD_3DS OR snx_vita_runtime)
+if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY) OR SNX_BUILD_GUI OR SNX_BUILD_3DS OR snx_vita_runtime OR SNX_BUILD_AGB)
     # Prefer a compatible system package. CPM handles the pinned static fallback and user overrides. SDL_ALTIVEC only
     # changes PowerPC builds: SDL's AltiVec blitters prefetch with dstt, which the ISA phased out and qemu's POWER10
     # traps as illegal (the window icon's and the menu's software surfaces, which nothing here needs fast)

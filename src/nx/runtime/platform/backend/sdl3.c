@@ -393,19 +393,30 @@ int backend_vk_surface(VkInstance instance, VkSurfaceKHR* surface) {
     LOG("video: no Vulkan surface: %s\n", SDL_GetError());
     return 0;
 }
-static const char* HELP = "Controller: A, B, X and Y where the console's are (gamepad_swap_ab=1 swaps A and B). Home: "
-                          "the game's menu.\n\n"
-                          "Keyboard (keys by position, as on a US layout):\n"
-                          "  Arrows = D-Pad     W A S D = left stick    I J K L = right stick\n"
-                          "  X / Space = A    Z = B    C = X    V = Y\n"
-                          "  Q = L   E = R   1 = ZL   3 = ZR   Enter = +   Backspace = -\n\n"
-                          "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
-                          "F5 = thread dump   F6 = showcase on / off   "
+/* F1's text. It follows keymap (the game's buttons), hotkey and menu_event (the runtime's keys): a binding changed there
+   changes here */
+static const char* HELP =
+    "Controller: A, B, X and Y sit where the console has them (gamepad_swap_ab=1 swaps A and B). "
+    "Home opens the game's menu.\n\n"
+    "Keyboard, by key position on a US layout:\n"
+    "  Buttons      A: X or Space    B: Z    X: C    Y: V\n"
+    "  Shoulders    L: Q    R: E    ZL: 1    ZR: 3\n"
+    "  Plus, minus  +: Enter    -: Backspace\n"
+    "  D-Pad        the arrow keys\n"
+    "  Left stick   W, A, S and D\n"
+    "  Right stick  I, J, K and L\n\n"
+    "Runtime keys:\n"
+    "  F1  this help\n"
+    "  F2  open or close the game's menu (arrows move, Enter or Space picks, Esc or Backspace goes back)\n"
+    "  F3  take a screenshot\n"
+    "  F4  turn the FPS limit off or back on\n"
+    "  F5  write every thread's state to the log\n"
+    "  F6  turn showcase mode on or off\n"
 #if defined(SNX_TRACY)
-                          "F7 = 60 s Tracy capture   "
+    "  F7  record a 60 second Tracy capture\n"
 #endif
-                          "F11 / Alt+Enter = fullscreen\n"
-                          "Esc = quit";
+    "  F11 or Alt+Enter  switch fullscreen\n"
+    "  Esc  quit the game";
 
 static PadKind gamepad_kind(int type) {
     switch (type) {

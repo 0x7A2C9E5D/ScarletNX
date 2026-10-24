@@ -3,8 +3,7 @@
    Ported in part from QEMU (target/arm/tcg/helper-a64.c, translate-a64.c), LGPL-2.1-or-later:
    Copyright (c) 2013 Alexander Graf <agraf@suse.de> */
 /* The integer helpers every generated-code module keeps: the 16-byte compare-and-swap and the system registers EL0
-   reaches. The compiler evaluates logical immediates itself, and CRC32 is emitted as IR; both live in
-   integer_reference.c for the C reference interpreter. */
+   reaches. The compiler evaluates logical immediates itself, and CRC32 is emitted as IR. */
 
 /* STXP of two doublewords: one atomic compare-and-swap of all 16 bytes. Swapping the halves one at a time let
    Tears of the Kingdom's lock-free lists pair one thread's pointer with another's counter. Clang emits
@@ -52,9 +51,10 @@ u32 snx_cas128(CPU* c, u64* p, u64 o0, u64 o1, u64 n0, u64 n1) {
 #define A57_CTR_EL0   0x8444C004u
 #define A57_DCZID_EL0 4u
 #define CNTFRQ_HZ     19200000u
-/* the FPCR bits the A57 implements (AHP, DN, FZ, RMode; the trap enables and FZ16 are RES0, TRM tables 14-3 and
-   14-4), and FPSR's N, Z, C, V, QC and cumulative flags */
-#define A57_FPCR_MASK 0x07C00000u
+/* the FPCR bits the A57 implements (AHP, DN, FZ, RMode; the trap enables are RES0, TRM tables 14-3 and 14-4) and
+   FEAT_FP16's FZ16, which the generated code clears first for a guest without it (the Switch's, where it is RES0),
+   and FPSR's N, Z, C, V, QC and cumulative flags */
+#define A64_FPCR_MASK 0x07C80000u
 #define A57_FPSR_MASK 0xF800009Fu
 
 u64 snx_mrs(CPU* c, u32 sysreg) {
@@ -78,7 +78,7 @@ void snx_msr(CPU* c, u32 sysreg, u64 v) {
     switch (sysreg) {
         case SYSREG(3, 4, 2, 0): set_nzcv(c, (u32)(v >> 28)); break;
         case SYSREG(3, 4, 4, 0):
-            c->fpcr = (u32)v & A57_FPCR_MASK;
+            c->fpcr = (u32)v & A64_FPCR_MASK;
             if (c->rt && c->rt->fpcr_changed) c->rt->fpcr_changed(c);
             break;
         case SYSREG(3, 4, 4, 1): c->fpsr = (u32)v & A57_FPSR_MASK; break;

@@ -34,6 +34,7 @@
 #include "common/cpu/aarch64/cpu.h"
 #include "common/utilities/endian.h"
 #include "nx/gpu/gpu.h"
+#include "nx/runtime/platform/tracy.h"
 #include "volk.h"
 #include "vk_mem_alloc.h"
 #include "nx/gpu/shader/shader.h"
@@ -81,6 +82,8 @@ typedef struct {
     VkPhysicalDeviceFeatures feat;
     int has_divisor;      /* VK_EXT_vertex_attribute_divisor: instance divisors above 1 */
     int has_dynamic_stride; /* a binding's stride is dynamic state, which MoltenVK refuses: a pipeline holds it then */
+    int has_calibrated_host; /* VK_EXT_calibrated_timestamps with CLOCK_MONOTONIC_RAW: the GPU's clock goes next to
+                                the client's, one driver call (gpuprof.c's calibration) */
     int has_xfb;          /* VK_EXT_transform_feedback: draws capture their outputs into guest memory */
     int has_border_color; /* VK_EXT_custom_border_color */
     u32 border_color_max; /* maxCustomBorderColorSamplers: past it, samplers take the nearest built-in color */
@@ -131,6 +134,14 @@ int vk_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* me
 /* the same, with the result of the call that failed in res (VK_ERROR_OUT_OF_DEVICE_MEMORY: no memory for it) */
 int vk_image_create_r(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem, VkResult* res);
 void vk_image_destroy(VkImage img, VmaAllocation mem);
+/* Tracy memory events for VMA allocations. */
+#if defined(SNX_TRACY)
+void vk_mem_track(VmaAllocation a);
+void vk_mem_untrack(VmaAllocation a);
+#else
+static inline void vk_mem_track(VmaAllocation a) { (void)a; }
+static inline void vk_mem_untrack(VmaAllocation a) { (void)a; }
+#endif
 /* The caches of textures, render targets and buffers are kept within the driver's budget for the heap images go to
    (VK_EXT_memory_budget through VMA; vk_budget_mb lowers it, for testing): past it the driver pages memory out,
    which took 160 ms frames and then the device in one game. Ages are kept in presents, and measured in time as well
@@ -332,18 +343,32 @@ enum {
     VKC_S8D24,
     VKC_D24X8,
     VKC_D32S8,
-    /* ETC2 and EAC, decoded on the CPU (gpu/texture/etc2.c): in the order of its kinds */
+    /* ETC2 and EAC decoded where the GPU lacks textureCompressionETC2, in texconv's TC_ETC2_RGB to TC_EAC_RG_SNORM
+       order */
     VKC_ETC2,
     VKC_ETC2_PTA,
     VKC_ETC2_RGBA,
     VKC_EAC_R,
     VKC_EAC_R_SNORM,
     VKC_EAC_RG,
-    VKC_EAC_RG_SNORM
+    VKC_EAC_RG_SNORM,
+    /* BC1 to BC7 decoded where the GPU lacks textureCompressionBC, in texconv's TC_BC1 to TC_BC7 order */
+    VKC_BC1,
+    VKC_BC2,
+    VKC_BC3,
+    VKC_BC4,
+    VKC_BC4_SNORM,
+    VKC_BC5,
+    VKC_BC5_SNORM,
+    VKC_BC6H_UF,
+    VKC_BC6H_SF,
+    VKC_BC7
 };
 VkFmt vk_rt_format(u32 fmt);
 VkFmt vk_zt_format(u32 fmt);
 VkFmt vk_tic_format(u32 w0, int srgb); /* bpp 0: not supported */
+/* vk_tic_format for a 3D image: ASTC and ETC2 blocks decoded where the device can't make 3D images of them */
+VkFmt vk_tic_format_3d(u32 w0, int srgb);
 int vk_tic_reads_stencil(const u32* tic);
 /* sRGB and linear views of the same bytes: the twin of a color format, or the format itself when it has none */
 VkFormat vk_srgb_as(VkFormat f, int srgb);
@@ -935,6 +960,9 @@ int vk_compute_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off);
 extern VkSemaphore g_vk_csem;  /* timeline semaphore the compute queue signals */
 extern u64 g_vk_cs_wait_value; /* the value graphics work waits for before reading compute results */
 extern u64 g_vk_dispatches, g_vk_cs_batches, g_vk_cs_wait_ns; /* statistics */
+#if defined(SNX_TRACY)
+extern u64 g_vk_cs_cpu_reads; /* dispatches kept on the compute queue because the CPU reads what they write */
+#endif
 /* the dispatches skipped so far; why (size bytes) gets their reasons with each one's count, " (12 not translated, 3
    a texture not bound)", or "" when none was */
 u64 vk_cs_skipped(char* why, size_t size);
@@ -998,9 +1026,16 @@ extern u64 g_vk_draw_kept, g_vk_draw_checked;
 extern u64 g_vk_fb_draws, g_vk_fb_barriers, g_vk_fb_restarts, g_vk_rt_copies;
 
 /* gpuprof.c, vk_gpu_profile=1: GPU time per rendering pass, summed per target and logged every 10 s */
+/* the Tracy GPU track's contexts, one per queue: the graphics queue's render passes, the compute queue's batches */
+#define VK_GPU_CTX_GRAPHICS 1
+#define VK_GPU_CTX_COMPUTE  2
 void vk_gpuprof_pass_begin(VkCommandBuffer cb, const Surf* rt, const Surf* zt);
 void vk_gpuprof_pass_end(VkCommandBuffer cb);
 void vk_gpuprof_frame_done(u32 slot);
+/* the device's timestamps next to the client's clock (VK_EXT_calibrated_timestamps with a host time domain) */
+int vk_gpuprof_calibrated(void);
+/* a fresh pair of the GPU's clock and the client's, for the track's calibration (0 without the extension) */
+int vk_gpuprof_clock(i64* cpu, i64* gpu);
 extern u64 g_rec_xfers, g_rec_barriers; /* record.c: copies and blits, and barriers, put in the frame's ring */
 extern u64 g_rec_xfer_kind[3], g_rec_buf_bytes; /* buffer, buffer-image, image copies; buffer copies' bytes */
 

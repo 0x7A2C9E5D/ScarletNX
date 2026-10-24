@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* ASTC blocks from rEden's decoder tests: within one of the reference, exact with -DSNX_ASTCB_FINDINGS */
-#include "nx/gpu/texture/astc.h"
+#include "support/astc.h"
 #include <stdio.h>
 #include <string.h>
 

@@ -1656,6 +1656,15 @@ static int texture_sample_supported(u64 w, int bindless) {
            !B(w, bindless ? 40 : 58, 1);
 }
 
+/* FSWZADD's lanes (bit L for quad lane L) whose two bits of the swizzle (28-35) are mode: lane L's are bits
+   6 - 2L of it, the upper left lane's the top two, as nouveau's QUADOP lays them out (nv50_ir_lowering_gm107.cpp) */
+static u32 fswzadd_lanes(u64 w, u32 mode) {
+    u32 lanes = 0;
+    for (u32 lane = 0; lane < 4; lane++)
+        if ((B(w, 28, 8) >> (6 - 2 * lane) & 3) == mode) lanes |= 1u << lane;
+    return lanes;
+}
+
 static int supported(u64 w, int op) {
     switch (op) {
         case O_EXIT: return cc_valid(B(w, 0, 5));
@@ -1671,10 +1680,7 @@ static int supported(u64 w, int op) {
         case O_POPC_C:
         case O_POPC_I: return 1;
         case O_SHFL: return 1;
-        case O_FSWZADD: {
-            u32 quad = B(w, 28, 8);
-            return !B(w, 47, 1) && (quad == 0x99 || quad == 0x66 || quad == 0xa5 || quad == 0x5a);
-        }
+        case O_FSWZADD: return !B(w, 47, 1);
         case O_VMNMX: return !B(w, 47, 1);
         case O_VMAD:
             return (((w >> 48) & ~3ull) == 0x5f04 || ((w >> 48) & ~3ull) == 0x5f00) && !B(w, 47, 1) && !B(w, 51, 5);
@@ -2043,8 +2049,7 @@ static int stage_has(u64 w, int op, int stage) {
         return stage == ST_CS;
     if (op == O_S2R && B(w, 20, 8) == 0x11) return stage == ST_TCS || stage == ST_GS;
     if (op == O_BAR) return stage == ST_CS || stage == ST_TCS;
-    if (op == O_FSWZADD || op == O_TMML || op == O_TMML_B || op == O_IPA || op == O_KIL || op == O_PIXLD)
-        return stage == ST_FS;
+    if (op == O_TMML || op == O_TMML_B || op == O_IPA || op == O_KIL || op == O_PIXLD) return stage == ST_FS;
     return 1;
 }
 
@@ -2841,6 +2846,12 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             else
                 fp32_preserve = 1;
         }
+        if (op->id == O_FSWZADD) {
+            if (B(insn[i], 44, 1))
+                fp32_flush = 1;
+            else
+                fp32_preserve = 1;
+        }
         u32 d = B(insn[i], 0, 8), a = B(insn[i], 8, 8), b = B(insn[i], 20, 8);
         u32 guard = B(insn[i], 16, 3);
         if (guard < 7) pred_used[guard] = 1;
@@ -3572,7 +3583,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         if (op->id == O_EXIT && flow_always(insn[i])) has_exit = 1;
         if (op->id == O_KIL) needs_demote = 1;
         if (stage == ST_FS &&
-            (op->id == O_FSWZADD || op->id == O_TMML || op->id == O_TMML_B ||
+            (op->id == O_TMML || op->id == O_TMML_B ||
              (op->id == O_TEXS && !texs_explicit(B(insn[i], 53, 4))) ||
              ((op->id == O_TEX || op->id == O_TEX_B) &&
               (B(insn[i], op->id == O_TEX_B ? 37 : 55, 3) == 0 || B(insn[i], op->id == O_TEX_B ? 37 : 55, 3) == 2 ||
@@ -3580,6 +3591,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             needs_derivatives = 1;
         if (stage == ST_FS && helper_side_effect(op->id)) needs_demote = 1;
         if (op->id == O_VOTE || op->id == O_SHFL) needs_subgroup = 1;
+        /* FSWZADD's lanes in a quad are the subgroup's, as SHFL's are, when they don't all do the same */
+        if (op->id == O_FSWZADD && fswzadd_lanes(insn[i], B(insn[i], 28, 2)) != 15) needs_subgroup = 1;
         if (op->id == O_S2R && (B(insn[i], 20, 8) == 0 || (B(insn[i], 20, 8) >= 0x38 && B(insn[i], 20, 8) <= 0x3c)))
             lane_used = 1;
     }
@@ -6526,15 +6539,54 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             }
             reg_write_as(c, d, value, c->f32_type);
         } else if (op == O_FSWZADD) {
-            u32 quad = B(w, 28, 8);
-            u32 lhs = reg_read_as(c, a, c->f32_type);
-            u32 rhs = reg_read_as(c, b, c->f32_type);
-            u32 result;
-            if (quad == 0x99 || quad == 0x66 || quad == 0xa5 || quad == 0x5a) {
-                result = spv_emit_derivative(&c->emit, c->f32_type, rhs, quad == 0xa5 || quad == 0x5a);
-                if (quad == 0x66 || quad == 0x5a) result = spv_emit_fnegate(&c->emit, c->f32_type, result);
-            } else
+            /* Each lane of a quad (0 the upper left, 1 the upper right, 2 the lower left, 3 the lower right) does the
+               mode in its bits of the swizzle (fswzadd_lanes): a + b (0), b - a (1), a - b (2) or b (3). Nothing
+               crosses lanes: compilers read the neighbour with SHFL.BFLY first, and dFdx is FSWZADD of it and x with
+               0x99 (nouveau's handleDFDX, NAK's ddx). Nouveau's manual TXD fixes the order of the lanes and the
+               modes: 0xcc adds the gradient in a to b on the right lanes and keeps b on the left ones. Eden and
+               Ryujinx count the lanes from the low bits, and Eden negates every mode. The rounding mode (39-40) is
+               round to nearest, as FADD's is, and NDV (38) changes nothing computed */
+            u32 left = ftz_read(c, insn, block_start, i, a, reg_read_as(c, a, c->f32_type));
+            u32 right = ftz_read(c, insn, block_start, i, b, reg_read_as(c, b, c->f32_type));
+            int soft_ftz = B(w, 44, 1) && c->soft_ftz_on;
+            if (soft_ftz) {
+                left = float_ftz(c, left);
+                right = float_ftz(c, right);
+            }
+            u32 lane = 0;
+            if (fswzadd_lanes(w, B(w, 28, 2)) != 15)
+                lane = spv_emit_bitwise_and_u32(&c->emit, c->u32_type,
+                                                spv_emit_load(&c->emit, c->u32_type, c->subgroup_lane_input),
+                                                spv_emit_constant_u32(&c->emit, c->u32_type, 3));
+            /* pick[k]: whether this lane's mode is k + 1, where some lanes' are and others' aren't */
+            u32 masks[3] = {fswzadd_lanes(w, 1), fswzadd_lanes(w, 2), fswzadd_lanes(w, 3)};
+            u32 pick[3] = {0, 0, 0};
+            for (int k = 0; k < 3; k++) {
+                if (!masks[k] || masks[k] == 15) continue;
+                u32 bit = spv_emit_bitwise_and_u32(
+                    &c->emit, c->u32_type,
+                    spv_emit_shift_right_u32(&c->emit, c->u32_type,
+                                             spv_emit_constant_u32(&c->emit, c->u32_type, masks[k]), lane),
+                    spv_emit_constant_u32(&c->emit, c->u32_type, 1));
+                pick[k] = spv_emit_i_not_equal(&c->emit, c->bool_type, bit,
+                                               spv_emit_constant_u32(&c->emit, c->u32_type, 0));
+            }
+            u32 result = right;
+            if (masks[2] != 15) {
+                u32 lhs = left, rhs = right;
+                if (masks[0] == 15) lhs = spv_emit_fnegate(&c->emit, c->f32_type, left);
+                if (pick[0])
+                    lhs = spv_emit_select(&c->emit, c->f32_type, pick[0], spv_emit_fnegate(&c->emit, c->f32_type, left),
+                                          left);
+                if (masks[1] == 15) rhs = spv_emit_fnegate(&c->emit, c->f32_type, right);
+                if (pick[1])
+                    rhs = spv_emit_select(&c->emit, c->f32_type, pick[1],
+                                          spv_emit_fnegate(&c->emit, c->f32_type, right), right);
                 result = spv_emit_fadd(&c->emit, c->f32_type, lhs, rhs);
+                spv_emit_no_contraction(&c->emit, result);
+                if (soft_ftz) result = float_ftz(c, result);
+                if (pick[2]) result = spv_emit_select(&c->emit, c->f32_type, pick[2], right, result);
+            }
             reg_write_as(c, d, result, c->f32_type);
         } else if (half_arithmetic(op)) {
             /* Each form's operands and fields, as Eden's half_floating_point_*.cpp decode them. A constant buffer

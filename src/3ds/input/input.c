@@ -7,6 +7,7 @@
    ms:hex presses, each held for press_len ms */
 #include "3ds/input/input.h"
 #include "common/utilities/common.h"
+#include "common/utilities/script.h"
 #include "snx_settings.h"
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -16,38 +17,17 @@
 
 #define INPUT_PADS 4
 
-typedef struct {
-    uint32_t at, mask; /* ms after snx_ctr_input_init, SNX_CTR_PAD_* */
-} Press;
 static struct {
     SDL_Gamepad* pads[INPUT_PADS];
-    Press* script;
+    SnxPress* script; /* ms after snx_ctr_input_init, SNX_CTR_PAD_* */
     size_t presses;
     double start; /* snx_seconds() at snx_ctr_input_init */
     bool gamepads;
 } g_input;
 
-/* ctr_script: ms:hex, comma between; a press it cannot read ends it, with a line saying where */
-static void script_parse(const char* text) {
-    size_t most = 1;
-    for (const char* c = text; *c; ++c) most += *c == ',';
-    if (!*text || !(g_input.script = calloc(most, sizeof *g_input.script))) return;
-    for (const char* c = text; *c && g_input.presses < most;) {
-        char* end;
-        unsigned long at = strtoul(c, &end, 10), mask;
-        if (end == c || *end != ':') break;
-        c = end + 1;
-        mask = strtoul(c, &end, 16);
-        if (end == c || (*end && *end != ',') || at > UINT32_MAX || mask > SNX_CTR_PAD_BUTTONS) break;
-        g_input.script[g_input.presses++] = (Press){(uint32_t)at, (uint32_t)mask};
-        c = *end ? end + 1 : end;
-    }
-    if (g_input.presses < most)
-        fprintf(stderr, "scarletnx-3ds: the script stops after %zu presses, at what is not ms:hex\n", g_input.presses);
-}
 void snx_ctr_input_init(void) {
     g_input.start = snx_seconds();
-    script_parse(g_settings.ctr_script);
+    g_input.presses = snx_script_parse("scarletnx-3ds", g_settings.ctr_script, SNX_CTR_PAD_BUTTONS, &g_input.script);
     /* SDL sends an added event for each gamepad already connected */
     g_input.gamepads = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
     if (!g_input.gamepads) fprintf(stderr, "scarletnx-3ds: no gamepads: %s\n", SDL_GetError());
@@ -128,9 +108,7 @@ void snx_ctr_input_read(SnxCtrInput* input) {
     }
     if (g_input.presses) {
         double ms = (snx_seconds() - g_input.start) * 1000.0;
-        for (size_t i = 0; i < g_input.presses; ++i)
-            if (ms >= g_input.script[i].at && ms - g_input.script[i].at < g_settings.press_length)
-                input->buttons |= g_input.script[i].mask;
+        input->buttons |= snx_script_held(g_input.script, g_input.presses, ms, (uint32_t)g_settings.press_length);
     }
 }
 void snx_ctr_input_free(void) {

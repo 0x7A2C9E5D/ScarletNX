@@ -634,9 +634,10 @@ static int hash_runs(const SnxCodeImage* images, size_t image_count, const unsig
 }
 
 /* What the objects depend on beyond the code: the ABI, LLVM, the runtime library, the host CPU and its features (the
-   code is compiled for them), the -O level, hooked direct calls and direct SVCs */
+   code is compiled for them), the -O level, hooked direct calls, direct SVCs, the guest's A64 features and the
+   decoder */
 static char* cache_key(const SnxJitService* s) {
-    return snx_jit_cache_key(s->config.opt, s->config.hook_direct_calls, s->config.direct_svc);
+    return snx_jit_cache_key(s->config.opt, s->config.hook_direct_calls, s->config.direct_svc, s->config.features);
 }
 
 /* the records of buffer (size bytes after the header), parsed until the first that isn't whole: their count, and the
@@ -1077,7 +1078,9 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count, SnxU64 st
     lock(&s->lock);
     epoch = s->epoch; /* memory changing after the code is read makes this batch's code stale: the publish skips it */
     unlock(&s->lock);
-    rc = images ? snx_codegen_discover(&codegen, images, image_count, pcs, count, known, &batch, s->config.budget) : -1;
+    rc = images ? snx_codegen_discover(&codegen, images, image_count, pcs, count, known, &batch, s->config.budget,
+                                       s->config.features)
+              : -1;
     if (!images) memset(&codegen, 0, sizeof(codegen));
     discovered = !rc;
     if (rc) snprintf(error, sizeof(error), "no guest code to compile at %llx", (unsigned long long)pcs[0]);

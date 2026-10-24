@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "nx/gpu/nvn_control.h"
+#include "support/nvn_control.h"
 #undef NDEBUG /* the checks are the test */
 #include <assert.h>
 

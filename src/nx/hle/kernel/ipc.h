@@ -137,7 +137,8 @@ SvcObj* ipc_in_obj(IpcCtx* c, int i); /* the request's object i, with a referenc
 int stub_ok(SvcObj* o, IpcCtx* c);
 int quiet_ok(SvcObj* o, IpcCtx* c);
 int ipc_unknown(SvcObj* o, IpcCtx* c);
-/* 1 for the first three times a (service, command) pair comes, among the first 512 pairs */
+/* 1 the first time a (service, command) pair comes, among the first WARN_PAIRS pairs (names told apart by their
+   first 127 characters), else 0 */
 int ipc_warn_once(const char* name, u32 cmd);
 void svc_register(const char* name, SvcCtor ctor);
 SvcObj* svc_open(const char* name);
@@ -206,7 +207,8 @@ void ipc_ring_text(u32 seq, char* out, size_t n);
 #define SVCOBJ_MAX  8192 /* sessions' objects, domains', and those services keep (am's storages) */
 #define SESSION_MAX (H_MAX + THREAD_MAX + 1) /* each is made with a handle, and only a request in flight outlives it */
 #define DOMAIN_MAX  64 /* one per session that called ConvertCurrentObjectToDomain, shared by its clones */
-#define WARN_PAIRS  512 /* the (service, command) pairs ipc_warn_once counts */
+#define WARN_PAIRS  512 /* the (service, command) pairs ipc_warn_once reports */
+#define WARN_SLOTS  (2 * WARN_PAIRS) /* its hash table, kept half empty so a lookup ends at a free slot soon */
 /* the names sm hands out: the runtime registers about a hundred (services.c), and 256 leaves room for more */
 #define SVCREG_MAX  256
 
@@ -224,13 +226,13 @@ typedef struct {
     KSession sessions[SESSION_MAX];
     Domain domains[DOMAIN_MAX];
     u32 svcobj_next, session_next, domain_next;
-    /* ipc_warn_once's (service, command) pairs */
+    /* ipc_warn_once's reported (service, command) pairs, open addressing on a hash of both. A slot is free while its
+       name is empty (names compare as their first 127 characters; an empty one is kept as "?") */
     struct {
         char name[128];
         u32 cmd;
-        int n;
-    } seen[WARN_PAIRS];
-    int nseen;
+    } seen[WARN_SLOTS];
+    int nseen, warn_full; /* pairs reported; whether the log was told the table is full */
     /* the service registry, a slot array: a live entry has a name, and none is ever freed. Registering more asserts */
     SvcReg reg[SVCREG_MAX];
     u32 reg_next;

@@ -9,8 +9,7 @@
 #include "common/cpu/aarch64/cpu.h"
 #include "common/cpu/aarch64/cpu_helpers.c"
 
-/* No interpreter here any more: what a module lacks is compiled by the runtime JIT, and every pattern has an IR
-   emitter. The tests that compare against the templates' C generate it themselves (snx_a64_interp) */
+/* No interpreter here: what a module lacks is compiled by the runtime JIT, and every decoded op has an IR emitter */
 
 #include "common/cpu/recompiler/llvm/libc.inc"
 

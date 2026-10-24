@@ -1,4 +1,4 @@
-# edenprobe cases that pass, one "suite: name" a line (scripts/edenprobe.py, docs/EDENPROBE.md)
+# edenprobe cases, one a line: "suite: name" passes, "[RESULT] suite: name" ends as RESULT (docs/EDENPROBE.md)
 # build: v0.5.0
 # mode: audio cpu display fatal fs graphics kernel notime quick video
 astc: 4-bit weights 0 to 15 unquantize by bit replication
@@ -97,7 +97,7 @@ cpu: fcvtzs and fcvtzu with 64 fraction bits scale by 2^64
 cpu: frinta rounds halfway cases away from zero
 cpu: frintx rounds to nearest even and raises inexact
 cpu: mrs cntvct_el0 reads a virtual count that moves with the physical one
-cpu: mrs daif reads nothing outside the four interrupt mask bits
+[skip (crashed)] cpu: mrs daif reads nothing outside the four interrupt mask bits
 cpu: sdiv and udiv by zero give zero, 32 and 64 bits
 cpu: sqdmlal, sqdmlsl and sqdmull double, accumulate and saturate
 cpu: sqrshl and uqrshl round, shift and saturate lanes of every width

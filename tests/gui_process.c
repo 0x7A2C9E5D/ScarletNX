@@ -1,6 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
+#ifndef __FreeBSD__
 #define _POSIX_C_SOURCE 200809L
+#endif
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE /* PRIO_MAX, which the POSIX name above hides, as process_posix.c */
+#endif
 #include "gui/gui_process.h"
 #include "common/utilities/common.h"
 #include <assert.h>
@@ -11,8 +16,11 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <dirent.h>
+#include <errno.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #endif
 static double now(void) {
@@ -85,6 +93,108 @@ static void grandchild(const char* self, const char* mode, const char* marker) {
     }
 #endif
 }
+/* the priority every thread of process pid has, -100 when they differ or it cannot be read: the nice value; on Windows
+   its class */
+static int tree_priority(long pid) {
+#ifdef _WIN32
+    HANDLE child = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+    int class = child ? (int)GetPriorityClass(child) : -100;
+    if (child) CloseHandle(child);
+    return class ? class : -100;
+#elif defined(__linux__)
+    char path[64];
+    struct dirent* entry;
+    DIR* tasks;
+    int first = -100, threads = 0, same = 1;
+    snprintf(path, sizeof path, "/proc/%ld/task", pid);
+    if (!(tasks = opendir(path))) return -100;
+    while ((entry = readdir(tasks))) {
+        long tid = strtol(entry->d_name, NULL, 10);
+        int n;
+        if (tid <= 0) continue;
+        errno = 0;
+        n = getpriority(PRIO_PROCESS, (id_t)tid);
+        if (errno)
+            same = 0;
+        else if (!threads)
+            first = n;
+        else if (n != first)
+            same = 0;
+        ++threads;
+    }
+    closedir(tasks);
+    return same && threads > 1 ? first : -100; /* its idle threads beside the main one */
+#else
+    int n;
+    errno = 0;
+    n = getpriority(PRIO_PROCESS, (id_t)pid);
+    return errno ? -100 : n;
+#endif
+}
+/* the pid a --threads child says once its threads run */
+static long ready_pid(GuiProcess* process) {
+    char buffer[256] = {0};
+    size_t got = 0;
+    double end = now() + 5;
+    const char* at;
+    while (now() < end && !strchr(buffer, '\n')) {
+        int n = gui_process_read(process, buffer + got, sizeof buffer - 1 - got);
+        if (n > 0) got += (size_t)n;
+        delay(5);
+    }
+    at = strstr(buffer, "pid ");
+    assert(at);
+    return strtol(at + 4, NULL, 10);
+}
+/* a tree's priority: low from its start, its threads too; raised again only where the system lets it, as it says;
+   one started normal lowered while it runs, its threads made before too. Its usage alone has its memory, none of
+   this program's */
+static void priority(const char* self) {
+#ifdef _WIN32
+    /* the launcher's class and the one under it, as process_win32.c takes them: a runner may start tests below normal */
+    int own = (int)GetPriorityClass(GetCurrentProcess()),
+        low = own == BELOW_NORMAL_PRIORITY_CLASS || own == IDLE_PRIORITY_CLASS ? IDLE_PRIORITY_CLASS
+                                                                               : BELOW_NORMAL_PRIORITY_CLASS;
+#else
+    int own = getpriority(PRIO_PROCESS, 0), low = own + 10 < PRIO_MAX - 1 ? own + 10 : PRIO_MAX - 1;
+#endif
+    GuiProcess *tree = gui_process_create(), *idle = gui_process_create();
+    const char* threads[] = {self, "--threads", NULL};
+    char error[256];
+    long pid;
+    int status;
+    bool raised;
+    GuiUsage usage;
+    assert(tree && idle);
+    usage = gui_process_usage_of(idle);
+    assert(usage.available && !usage.memory_bytes);
+    assert(gui_process_low(tree, true, error, sizeof error)); /* nothing runs: the next start takes it */
+    assert(gui_process_start(tree, threads, error, sizeof error));
+    pid = ready_pid(tree);
+    assert(tree_priority(pid) == low);
+    usage = gui_process_usage_of(tree);
+    assert(usage.available && usage.memory_bytes > 0);
+    error[0] = 0;
+    raised = gui_process_low(tree, false, error, sizeof error);
+    if (raised)
+        assert(tree_priority(pid) == own);
+    else /* Linux and macOS without the privilege: said, the tree as it was */
+        assert(error[0] && tree_priority(pid) == low);
+    printf("gui_process: a lowered tree raised again: %s\n", raised ? "yes" : error);
+    gui_process_terminate(tree);
+    while (!gui_process_finished(tree, &status)) {
+        char buffer[256];
+        gui_process_read(tree, buffer, sizeof buffer);
+        delay(5);
+    }
+    assert(gui_process_low(tree, false, error, sizeof error)); /* the next start's, normal */
+    assert(gui_process_start(tree, threads, error, sizeof error));
+    pid = ready_pid(tree);
+    assert(tree_priority(pid) == own);
+    assert(gui_process_low(tree, true, error, sizeof error) && tree_priority(pid) == low);
+    gui_process_destroy(tree);
+    gui_process_destroy(idle);
+}
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
@@ -118,6 +228,16 @@ int main(int argc, char** argv) {
         grandchild(argv[0], "--sleeper", argv[2]);
         if (!strcmp(argv[1], "--orphan")) return 0;
         for (;;) delay(1000);
+    }
+    if (argc > 1 && !strcmp(argv[1], "--threads")) { /* three idle threads, then its pid, for the priority's checks */
+        idle_threads(3);
+#ifdef _WIN32
+        printf("pid %lu\n", (unsigned long)GetCurrentProcessId());
+#else
+        printf("pid %ld\n", (long)getpid());
+#endif
+        delay(10000);
+        return 0;
     }
     if (argc > 1 && !strcmp(argv[1], "--sleeper")) {
 #ifndef _WIN32
@@ -233,11 +353,12 @@ int main(int argc, char** argv) {
         delay(1200);
         assert(!snx_is_file(marker));
     }
+    priority(self);
     snx_remove_tree(temporary);
     gui_process_destroy(alone);
     free(marker);
     free(temporary);
     free(self);
-    puts("GUI process tree: inherited output, quoting, usage, exit and cleanup passed");
+    puts("GUI process tree: inherited output, quoting, usage, priority, exit and cleanup passed");
     return 0;
 }

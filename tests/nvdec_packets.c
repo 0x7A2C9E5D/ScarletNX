@@ -3,6 +3,7 @@
 /* Compile the production implementation with either the isolated FFmpeg double (default CTest target),
    or real FFmpeg headers/libraries and -DSNX_TEST_REAL_FFMPEG for synthetic I_PCM decode coverage. */
 #include "nx/gpu/video/nvdec.c"
+#include "support/nvdec_ref.h"
 
 static unsigned checks;
 #define CHECK(x)                                                                                                       \
@@ -348,37 +349,37 @@ static void submission_tests(void) {
 #else
 static void pcm_slice(u8 y, u8 u, u8 v) {
     u8 rb[512] = {0};
-    BW bw = {.p = rb, .cap = sizeof rb};
-    bw_ue(&bw, 0);   /* first_mb_in_slice */
-    bw_ue(&bw, 2);   /* I slice */
-    bw_ue(&bw, 0);   /* PPS id */
-    bw_u(&bw, 0, 4); /* frame_num */
-    bw_ue(&bw, 0);   /* idr_pic_id; POC type 2 has no extra fields */
-    bw_bit(&bw, 0);
-    bw_bit(&bw, 0); /* IDR reference marking */
-    bw_se(&bw, 0);  /* slice_qp_delta */
-    bw_ue(&bw, 25); /* I_PCM macroblock */
-    while (bw.nb) bw_bit(&bw, 0);
-    for (unsigned i = 0; i < 384; ++i) bw_u(&bw, i < 256 ? y : i < 320 ? u : v, 8);
-    bw_trailing(&bw);
-    u32 n = nal_out(stream, 0x1000, 0x65, rb, bw.bytes);
+    H264BitWriter bw = {.buf = rb, .cap = sizeof rb};
+    h264_write_ue(&bw, 0);   /* first_mb_in_slice */
+    h264_write_ue(&bw, 2);   /* I slice */
+    h264_write_ue(&bw, 0);   /* PPS id */
+    h264_write_bits(&bw, 0, 4); /* frame_num */
+    h264_write_ue(&bw, 0);   /* idr_pic_id; POC type 2 has no extra fields */
+    h264_write_bit(&bw, 0);
+    h264_write_bit(&bw, 0); /* IDR reference marking */
+    h264_write_se(&bw, 0);  /* slice_qp_delta */
+    h264_write_ue(&bw, 25); /* I_PCM macroblock */
+    while (bw.bit_pos) h264_write_bit(&bw, 0);
+    for (unsigned i = 0; i < 384; ++i) h264_write_bits(&bw, i < 256 ? y : i < 320 ? u : v, 8);
+    h264_write_end(&bw);
+    u32 n = h264_nal_unit(stream, 0x1000, 0x65, rb, bw.bytes);
     CHECK(n != 0);
     put32(0x48, n);
 }
 static void skip_slice(u32 frame_num) {
     u8 rb[32] = {0};
-    BW bw = {.p = rb, .cap = sizeof rb};
-    bw_ue(&bw, 0);
-    bw_ue(&bw, 0);
-    bw_ue(&bw, 0); /* first MB, P slice, PPS */
-    bw_u(&bw, frame_num, 4);
-    bw_bit(&bw, 0); /* num_ref_idx_active_override_flag */
-    bw_bit(&bw, 0); /* ref_pic_list_modification_flag_l0 */
-    bw_bit(&bw, 0); /* adaptive_ref_pic_marking_mode_flag */
-    bw_se(&bw, 0);  /* slice_qp_delta */
-    bw_ue(&bw, 1);  /* one skipped MB, predicted from the previous reference */
-    bw_trailing(&bw);
-    u32 n = nal_out(stream, 0x1000, 0x41, rb, bw.bytes);
+    H264BitWriter bw = {.buf = rb, .cap = sizeof rb};
+    h264_write_ue(&bw, 0);
+    h264_write_ue(&bw, 0);
+    h264_write_ue(&bw, 0); /* first MB, P slice, PPS */
+    h264_write_bits(&bw, frame_num, 4);
+    h264_write_bit(&bw, 0); /* num_ref_idx_active_override_flag */
+    h264_write_bit(&bw, 0); /* ref_pic_list_modification_flag_l0 */
+    h264_write_bit(&bw, 0); /* adaptive_ref_pic_marking_mode_flag */
+    h264_write_se(&bw, 0);  /* slice_qp_delta */
+    h264_write_ue(&bw, 1);  /* one skipped MB, predicted from the previous reference */
+    h264_write_end(&bw);
+    u32 n = h264_nal_unit(stream, 0x1000, 0x41, rb, bw.bytes);
     CHECK(n != 0);
     put32(0x48, n);
 }

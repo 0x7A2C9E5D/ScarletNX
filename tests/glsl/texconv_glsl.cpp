@@ -4,7 +4,8 @@
 // compared byte for byte with the CPU's conversions: every 2 byte texel of the three 2 byte formats, every 24 bit
 // depth as a float against the CPU's float division, RGB32F, packed depth and stencil in rows not a multiple of the
 // four texels an invocation owns, and random ETC2 and EAC blocks of every kind (with the T, H and planar modes made
-// often) against src/nx/gpu/texture/etc2.c, in images whose sides aren't multiples of 4, and vi's pixel formats
+// often) against tests/support/etc2.c and random BC1 to BC7 blocks of every kind (every BC6H and BC7 mode
+// made often) against tests/support/bcn.c, in images whose sides aren't multiples of 4, and vi's pixel formats
 // against present.c's former CPU conversion. tests/astc_vulkan.c runs the
 // SPIR-V build of the same file on a Vulkan device.
 #include <cstdio>
@@ -12,10 +13,14 @@
 #include <cstring>
 #include <vector>
 #include "glsl.hpp"
-// nx/gpu/texture/etc2.h's functions and kinds (its header brings the recompiler's C helpers, which C++ warns about)
+// tests/support/etc2.h's functions and kinds (its header brings the recompiler's C helpers, which C++ warns about)
 extern "C" void etc2_decode_image(const uint8_t* src, uint32_t w, uint32_t h, int kind, uint8_t* dst);
 extern "C" uint32_t etc2_block_bytes(int kind);
 extern "C" uint32_t etc2_pixel_bytes(int kind);
+// tests/support/bcn.h's, in the order of texconv's TC_BC1 to TC_BC7
+extern "C" void bcn_decode_image(const uint8_t* src, uint32_t w, uint32_t h, int kind, uint8_t* dst);
+extern "C" uint32_t bcn_block_bytes(int kind);
+extern "C" uint32_t bcn_pixel_bytes(int kind);
 
 namespace texconv_shader {
 using namespace glsl;
@@ -58,6 +63,8 @@ struct Shape {
 };
 static Shape shape(uint32_t mode, uint32_t w) {
     if (mode <= 2 || (mode >= 15 && mode <= 17)) return {(w + 1) / 2, (w + 1) / 2 * 2, 4, 1, 0};
+    if (mode >= 23 && mode <= 32) // BCn: BC4 2 bytes a texel, BC6H 8
+        return {(w + 3) / 4, (w + 3) / 4 * 4, mode == 26 || mode == 27 ? 2u : mode == 30 || mode == 31 ? 8u : 4u, 4, 0};
     if (mode >= 18) return {w, w, 4, 1, 0};
     if (mode == 3) return {w, w, 16, 1, 0};
     if (mode <= 7) return {(w + 3) / 4, (w + 3) / 4 * 4, 4, 1, 1};
@@ -351,6 +358,42 @@ static void etc2_kinds() {
         }
 }
 
+// random BCn blocks: BC6H's codes and BC7's modes each made as often as the others, a reserved one now and then
+static void random_bc_block(int kind, uint8_t* b) {
+    for (int i = 0; i < 16; i++) b[i] = (uint8_t)random_word();
+    if (random_word() % 16 == 0) return;
+    if (kind == 7 || kind == 8) {
+        static const uint8_t codes[14] = {0, 1, 2, 6, 10, 14, 18, 22, 26, 30, 3, 7, 11, 15};
+        uint8_t c = codes[random_word() % 14];
+        b[0] = (uint8_t)((b[0] & (c < 2 ? ~3 : ~31)) | c);
+    }
+    if (kind == 9) {
+        uint32_t m = random_word() % 8;
+        b[0] = (uint8_t)((b[0] & ~((2u << m) - 1)) | 1u << m);
+    }
+}
+static void bcn_kinds() {
+    const uint32_t sizes[][2] = {{4, 4}, {13, 9}, {1, 1}, {18, 7}};
+    for (int kind = 0; kind < 10; kind++)
+        for (const auto& sz : sizes) {
+            uint32_t w = sz[0], h = sz[1], bw = (w + 3) / 4, bh = (h + 3) / 4, bb = bcn_block_bytes(kind);
+            uint32_t pb = bcn_pixel_bytes(kind), pitch = (bw * bb + 15) / 16 * 16;
+            std::vector<uint8_t> tight((size_t)bw * bh * bb + 16);
+            for (uint32_t i = 0; i < bw * bh; i++) random_bc_block(kind, &tight[i * bb]);
+            std::vector<glsl::leuint> in(pitch / 4 * bh);
+            for (uint32_t y = 0; y < bh; y++) std::memcpy((uint8_t*)in.data() + y * pitch, &tight[y * bw * bb], bw * bb);
+            std::vector<uint8_t> want((size_t)w * h * pb);
+            bcn_decode_image(tight.data(), w, h, kind, want.data());
+            std::vector<glsl::leuint> out = convert(23 + kind, 0, w, bh, 1, in, pitch);
+            uint32_t ow = bw * 4;
+            for (uint32_t y = 0; y < h; y++)
+                for (uint32_t x = 0; x < w; x++)
+                    CHECK(!std::memcmp((const uint8_t*)out.data() + ((size_t)y * ow + x) * pb, &want[((size_t)y * w + x) * pb],
+                                       pb),
+                          "BCn kind %d %ux%u (%u, %u)", kind, w, h, x, y);
+        }
+}
+
 int main() {
     two_byte_texels();
     vi_frames();
@@ -360,6 +403,7 @@ int main() {
     rgb32f();
     depth_stencil();
     for (int i = 0; i < 200; i++) etc2_kinds();
+    for (int i = 0; i < 200; i++) bcn_kinds();
     if (failures) {
         std::printf("texconv_glsl: %u failures\n", failures);
         return 1;

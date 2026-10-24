@@ -101,20 +101,26 @@ the game's image read from that image.
   it through hactool's storage chains (`snx_hac.h`'s `SnxHacFs`), the sections decrypted, an update's patch applied
   and compressed blocks expanded as they are read. Nothing is cached.
 - `src/nx/loader/loader.c`: NSO/NRO, LZ4, SHA-256, NPDM, MOD0, symbols/relocs/FDEs.
-- `src/common/cpu/aarch64/a64.c` + `a64_templates.inc`: shared instruction semantics for the backends, gnuabi's C path and the tests' reference interpreter.
+- `src/common/cpu/aarch64/a64_decoder.c`: the A64 decoder `tools/a64dec` generates from QEMU's `a64.decode` and
+  ScarletNX's `a64.profile` (`src/common/cpu/aarch64/decode/`): each op's flow and the feature it needs, so a target's
+  feature set (the Switch's Cortex-A57 by default) decides what is UNDEF.
 - `src/common/cpu/recompiler/codegen.c`: function/CFG discovery over platform-neutral image views.
   `src/nx/loader/codegen_view.c` adapts NX images; `module.c` holds what the backends share (the dispatch entry
   table, chunk labels, progress lines); chunks batch whole functions up to `SNX_CHUNK_INSTRUCTIONS`, 90000 (20000 on Android).
 - `toolchain.c`: the runtime build for deployment.
 - The code generator, LLVM (`src/common/cpu/recompiler/llvm/`, a required dependency), builds LLVM IR with the
-  LLVM-C API: `ir_a64.c`, `ir_simd.c` and `ir_fp.c` emit each
-  `a64_templates.inc` case as the IR of the C it holds, `ir_codegen.c` the functions of `codegen.c`, and
+  LLVM-C API: `ir_int.c`, `ir_ldst.c`, `ir_fpu.c` and `ir_vec*.c`, ported from QEMU's `translate-a64.c`, emit each
+  op of the generated decoder, `ir_codegen.c` the functions of `codegen.c`, and
   `src/nx/loader/module_llvm.c` the chunks and `SnxModule` of `module.c`. It links the objects itself (`link_elf.c`,
   `link_coff.c`, `link_macho.c`) with `rtlib.c`, the helpers compiled when the recompiler is built, into a module
   with no imports, for the host it runs on: x86-64 (ELF or COFF), AArch64 (ELF, or on macOS and iOS a Mach-O dylib
-  with an ad hoc signature, either with a veneer for a branch past 128 MiB) or PowerPC64 (ELF, ELFv1 or ELFv2, with a stub for a branch past 32 MiB: [PowerPC64](./PPC64.md)). `tests/llvm_differential.c` runs its step functions against the templates' C on random
-  states (every pattern, failing if any instruction has no emitter: the backend refuses such a module), `tests/llvm_module.c`
-  a whole program, `tests/llvm_bench.c` times it on assembly kernels.
+  with an ad hoc signature, either with a veneer for a branch past 128 MiB) or PowerPC64 (ELF, ELFv1 or ELFv2, with a stub for a branch past 32 MiB: [PowerPC64](./PPC64.md)). `tests/llvm_qemu_differential.c` runs its step functions against
+  `qemu-aarch64 -cpu max` (`tests/qemu_ref/`) on random states, for words of every row of the generated decoder, with
+  the groups known to differ in `tests/llvm_qemu_expected.txt` (a new group, or a listed one that no longer differs,
+  fails it; `--sweep` runs more of each), loaded as a module, with the JIT's loader and in the emitters' portable
+  forms. `tests/a64_ported.c` runs rEden's cases through the steps against their expected values and QEMU,
+  `tests/llvm_module.c` a whole program against the end state QEMU gives it, `tests/llvm_bench.c` times it on
+  assembly kernels.
 - The generated code polls `CPU.poll` on backward branches inside a function and at the `D_` dispatch, as `codegen.c`'s C
   does, so a loop without SVCs gives its core to a waiting thread of higher priority.
 - The LLVM backend's speed: guest memory and the CPU structure are separate alias scopes (registers stay in host
@@ -229,7 +235,7 @@ covers hooks in code the game maps itself (NROs), which only the JIT runs.
 
 Guest thread = host thread + `CPU` + TLS. `hle/kernel/thread.c`: one owner/core, four cores; release on kernel block,
 sleep/yield, IPC, WFE. Waiters: priority then FIFO; a waiter of higher priority takes the core at the holder's next SVC
-or backward branch, any taken branch in the interpreter (`CPU.poll`, `RtAPI.poll`). A ready thread that would wait
+or backward branch (`CPU.poll`, `RtAPI.poll`). A ready thread that would wait
 behind its core's holder runs on an idle core of its mask, and an idle core takes such a waiter (only
 `svcSleepThread(0)` keeps a yielding thread on its core). A mutex owner runs at its best waiter's priority
 (`hle/kernel/sync.c`).

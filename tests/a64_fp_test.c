@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* ARMv8-A pseudocode witnesses, independent of the differential emulator.
-   FPRoundInt, FPProcessNaNs, FPMax/Min[Num], FPCompare and FPUnpack.
+/* ARMv8-A pseudocode witnesses for the FP helpers (helpers/fp.c), which the LLVM backend's code calls:
+   FPRoundInt, FPProcessNaNs, FPMax/Min[Num], FPCompare and FPUnpack. The vector and reserved-encoding witnesses
+   are native_codegen's (codegen_test.c), through the LLVM steps.
    All operands/results are IEEE encodings, never host NaN literals. */
 #include "common/cpu/aarch64/cpu.h"
 #include <fenv.h>
@@ -95,22 +96,6 @@ static void selection_and_comparison(void) {
     }
 }
 
-static void vector_rounding(void) {
-    CPU c = {0};
-    SNX_VSET_S(c.v[0], 0, 0x7F800123);
-    SNX_VSET_S(c.v[0], 1, 0xBF000000);
-    SNX_VSET_S(c.v[0], 2, 0x3FC00000);
-    SNX_VSET_S(c.v[0], 3, 0xFFC00456);
-    check(snx_simd(&c, NULL, 0x4E218800), 1, "FRINTN V0.4S,V0.4S");
-    check(SNX_VS(c.v[0], 0), 0x7FC00123, "vector SNaN");
-    check(SNX_VS(c.v[0], 1), 0x80000000, "vector signed zero");
-    check(SNX_VS(c.v[0], 2), 0x40000000, "vector tie");
-    check(SNX_VS(c.v[0], 3), 0xFFC00456, "vector QNaN");
-    check(c.fpsr, 1, "vector cumulative IOC");
-    check(snx_simd(&c, NULL, 0x5E218820), 0, "reserved scalar SIMD FRINT");
-    check(snx_simd(&c, NULL, 0x0E618820), 0, "reserved FRINT .1D");
-}
-
 int main(void) {
     static const int modes[] = {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO};
     int original = fegetround();
@@ -118,7 +103,6 @@ int main(void) {
         if (fesetround(modes[i])) return 2;
         rounding();
         selection_and_comparison();
-        vector_rounding();
     }
     fesetround(original);
     if (!failures) puts("ARMv8 FP witnesses passed under all four host rounding modes");

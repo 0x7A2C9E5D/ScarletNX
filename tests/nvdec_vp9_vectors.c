@@ -10,6 +10,7 @@
 
    usage: snx-test-nvdec-vp9-vectors VECTOR MD5-LIST */
 #include "nx/gpu/video/nvdec.c"
+#include "support/nvdec_ref.h"
 #include "nvdec_vp9_jobs.h"
 #include <libavutil/md5.h>
 #include <stdarg.h>
@@ -105,7 +106,7 @@ static int run(const char* path, const char* md5_path) {
     }
     g_mem = g_guest;
     memset(regs, 0, sizeof regs);
-    regs[0x200 / 4] = APP_VP9;
+    regs[0x200 / 4] = NVDEC_CODEC_VP9;
     regs[0x404 / 4] = (u32)((BASE + AT_SETUP) >> 8);
     regs[0x408 / 4] = (u32)((BASE + AT_BODY) >> 8);
     regs[0x424 / 4] = (u32)((BASE + AT_STATUS) >> 8);

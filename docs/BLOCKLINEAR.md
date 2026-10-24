@@ -41,8 +41,9 @@ compare drops those and the ones past the end.
 
 `gpu/texture/texconv.comp` (body `texconv.glsl`, host `vk/texconv.c`) converts linear rows: 2 byte RGBA texels, RGB32F
 (A becomes 1.0), packed depth and stencil (into a depth aspect and a stencil aspect, the float for
-`D32_SFLOAT_S8_UINT` when D24S8 isn't supported), ETC2 and EAC blocks (`gpu/texture/etc2.c` is the reference), and
-vi's pixel formats. An invocation owns whole output words (a pair of 2 byte texels, a texel, four depth texels whose
+`D32_SFLOAT_S8_UINT` when D24S8 isn't supported), ETC2 and EAC blocks (`tests/support/etc2.c` is the reference), BC1
+to BC7 blocks where the device lacks `textureCompressionBC` or the `native_bc` setting is 0 (`tests/support/bcn.c` is the
+reference; RGBA8 out, 16 bit channels for BC4 and BC5, RGBA16F for BC6H), and vi's pixel formats. An invocation owns whole output words (a pair of 2 byte texels, a texel, four depth texels whose
 stencil bytes make one word, or a block), and output rows are padded to them, so no two invocations write one word.
 The copies into the image take the padding through `bufferRowLength`.
 
@@ -90,9 +91,12 @@ conversion. Otherwise each row is copied into rows that do.
 - `blocklinear_glsl` and `texconv_glsl` run the bodies on the CPU (`tests/glsl/glsl.hpp`). The first checks moves
   both ways against `bl_offset` byte by byte, with random shapes, blocks, biases and moves starting inside a GOB, and
   that nothing outside the moved runs is written. The second checks every 2 byte texel and vi pixel, every 24 bit
-  depth, RGB32F, depth and stencil rows, and random ETC2 and EAC blocks of every kind against `etc2.c`.
+  depth, RGB32F, depth and stencil rows, and random ETC2, EAC and BCn blocks of every kind against `etc2.c` and
+  `bcn.c` (`tests/support/`). `bcn_decode` checks `bcn.c` itself on blocks built by hand.
 - `tex_upload_rows` runs `texture.c` with a CPU model of the dispatches, which checks the barriers' order, and checks
   every copied byte against the layout. It covers each strip mode and a converted format.
 - `astc_vulkan` (with `SNX_TEST_VULKAN`, on lavapipe) runs the SPIR-V: moves both ways for a range of shapes, banded
   and by slice, a swizzle landed with `bl_land` over other memory, ASTC fed from block linear blocks, and conversions.
+  Where the device samples BCn it also compares the device's own decoding of random BCn blocks with `bcn.c`: BC6H and
+  BC7 exactly, BC1 to BC5 within two steps, the rounding the specification leaves to the device.
   `vulkan_headless` converts packed depth and stencil on the device.
