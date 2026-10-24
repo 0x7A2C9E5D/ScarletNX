@@ -10,6 +10,7 @@
 #include "nx/loader/module_abi.h"
 #include "nx/loader/unit_cache.h"
 #include "common/cpu/recompiler/llvm/rtlib_object.h"
+#include "snx_settings.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -497,7 +498,7 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     codegen.direct_svc = 1; /* the runtime's RtAPI.svcs (svc.c's g_svc64) */
     codegen.hook_direct_calls = options->hook_direct_calls;
     /* chunks of whole functions, as module.c splits the C */
-    limit = options->chunk_instrs ? options->chunk_instrs : SNX_CHUNK_INSTRUCTIONS;
+    limit = options->chunk_instrs ? options->chunk_instrs : (size_t)g_settings.unit_size;
     q.units = (Unit*)snx_alloc((codegen.function_count + 1) * sizeof(*q.units));
     memset(q.units, 0, (codegen.function_count + 1) * sizeof(*q.units));
     for (first = 0; first < codegen.function_count; first = last) {

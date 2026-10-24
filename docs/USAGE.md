@@ -281,7 +281,8 @@ Remaining examples: POSIX.
   its checkout's `build/native-recomp` (`build/win64-recomp` on Windows). `-q` (`--quiet`) prints no progress.
   `--keep-c` is the deprecated spelling of `--keep-ir`.
 - **Codegen:** `--no-build` stages data/INI only; `--jit-only` omits AOT functions.
-  `--chunk N` sets instructions per code unit. Each unit's object is kept in `units/` of the cache folder
+  `--chunk N` (`--unit_instructions=N`) sets the instructions per code unit: 90000 by default, 20000 on Android and
+  iOS, where a smaller unit takes less memory at once. Each unit's object is kept in `units/` of the cache folder
   ([Folders](#folders)), which every game's recompile shares, under the SHA-256 of the unit's LLVM IR, the LLVM, the
   CPU and its features, the optimization level and the LLVM Internals: a unit found there is not compiled again (a
   recompile after an `SNX_ABI` change that leaves the unit's IR alone, or of a game whose code changed in a few units),

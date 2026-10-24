@@ -872,6 +872,17 @@ setting AOT threads
     default 0
     words Auto|#
     help The threads compiling the game's code when it is recompiled: 0 = one for each of the computer's cores
+setting Unit size
+    key unit_instructions
+    int 1 INT_MAX
+    default 90000
+    default-if __ANDROID__ 20000
+    default-if SNX_IOS 20000
+    words # instructions
+    help The instructions a code unit takes, whole functions at a time, when the game is recompiled: each is compiled
+    help on its own, and a smaller one takes less memory at once, which a phone needs (Android's allocator ran out at
+    help 90000 on several threads, and iOS ends an app at its limit). A game made already keeps its units until it is
+    help recompiled
 setting Unit cache limit
     key unit_cache_gb
     int 0 100000

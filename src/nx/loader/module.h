@@ -10,22 +10,13 @@
 
 typedef struct {
     const char* title;
-    size_t chunk_instrs; /* instructions per unit, 0 for SNX_CHUNK_INSTRUCTIONS */
+    size_t chunk_instrs; /* instructions per unit, 0 for the setting unit_instructions' */
     int interp_only, quiet, hook_direct_calls;
     const SnxU64* hints; /* guest addresses a run found code at (the game's .hints file) */
     size_t hint_count;
     const char* jit_cache; /* the profile run's .jitcache, linked into the module; NULL for none */
     unsigned abi;
 } SnxCodegenOptions;
-
-/* A unit (one LLVM module, compiled on its own) takes whole functions until it holds about this
-   many instructions. Android gets smaller units: its allocator keeps a region per allocation size, and several
-   threads' worth of large units at once exhausted it */
-#ifdef __ANDROID__
-#define SNX_CHUNK_INSTRUCTIONS 20000
-#else
-#define SNX_CHUNK_INSTRUCTIONS 90000
-#endif
 
 /* An address the runtime can enter: a leader of a function, and that function's index */
 typedef struct {
