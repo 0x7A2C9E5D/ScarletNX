@@ -509,7 +509,16 @@ static void sys(SnxIr* ir, const SnxA64Args* a, SnxU32 word, SnxU64 pc) {
             case 4: /* DC ZVA (SCTLR_EL1.DZE): the 64-byte block holding Xt */
                 ir_call_helper(ir, SNX_IR_DC_ZVA, (V[]){ir->M, ir_rx(ir, rt)}, 2);
                 return;
-            case 5:  /* IC IVAU */
+            case 5: { /* IC IVAU: what was compiled from the line Xt is in is stale (helpers/integer.c's snx_ic_ivau) */
+                LLVMTypeRef params[2];
+                V args[2];
+                params[0] = ir->t_ptr;
+                params[1] = ir->t_i64;
+                args[0] = ir->c;
+                args[1] = ir_rx(ir, rt);
+                ir_call(ir, ir_extern(ir, "snx_ic_ivau", ir->t_void, params, 2), args, 2);
+                return;
+            }
             case 10: /* DC CVAC */
             case 11: /* DC CVAU */
             case 14: /* DC CIVAC (SCTLR_EL1.UCI): the host keeps instruction and data coherent */
