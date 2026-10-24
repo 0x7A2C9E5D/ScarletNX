@@ -92,8 +92,14 @@ int main(void) {
     CHECK(out[2] == -6400 && out[3] == -6400);
     CHECK(out[4] == 0 && out[5] == 0); /* the queue is empty after the two samples */
 
-    /* FIFO B at half volume follows the same path */
-    agb_apu_write(&board, 0x082, 0x0C04);
+    /* FIFO B at half volume to both sides (bits 12 and 13); its left bit leaves FIFO A's queue alone (bit 11 is FIFO
+       A's reset) */
+    agb_apu_write(&board, 0x0A0, 0x1010);
+    agb_apu_write(&board, 0x082, 0x3000);
+    CHECK(board.apu.fifo_count[0] == 2);
+    agb_apu_write(&board, 0x082, 0x0800); /* FIFO A's reset */
+    CHECK(board.apu.fifo_count[0] == 0);
+    agb_apu_write(&board, 0x082, 0x3000);
     agb_apu_write(&board, 0x0A4, 100);
     CHECK(run_samples(1) == 1);
     CHECK(out[0] == 3200 && out[1] == 3200);

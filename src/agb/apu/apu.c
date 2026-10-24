@@ -133,10 +133,10 @@ void agb_apu_write(AgbBoard* board, uint32_t offset, uint16_t value) {
         case 0x080: apu->soundcnt_l = value & 0xFF77; return;
         case 0x082: {
             apu->soundcnt_h = value;
-            /* bits 13 and 15 clear the FIFOs as the write lands */
-            if (value & 0x2000) {
+            /* bits 11 and 15 clear the FIFOs as the write lands */
+            if (value & 0x0800) {
                 apu->fifo_count[0] = apu->fifo_read[0] = apu->fifo_write[0] = 0;
-                apu->soundcnt_h &= (uint16_t)~0x2000;
+                apu->soundcnt_h &= (uint16_t)~0x0800;
             }
             if (value & 0x8000) {
                 apu->fifo_count[1] = apu->fifo_read[1] = apu->fifo_write[1] = 0;
@@ -310,8 +310,8 @@ static void mix_sample(AgbBoard* board, int16_t* left, int16_t* right) {
         int sample = fifo_pop(apu, fifo);
         if (apu->fifo_count[fifo] <= 16) agb_dma_event(board, fifo ? AGB_DMA_FIFO_B : AGB_DMA_FIFO_A);
         if (!(apu->soundcnt_h & (4 << fifo))) sample >>= 1;     /* the 50 percent volume setting */
-        if (apu->soundcnt_h & (0x100 << fifo * 2)) r += sample; /* bits 8 and 10: to the right */
-        if (apu->soundcnt_h & (0x200 << fifo * 2)) l += sample; /* bits 9 and 11: to the left */
+        if (apu->soundcnt_h & (0x100 << fifo * 4)) r += sample; /* bits 8 and 12: to the right */
+        if (apu->soundcnt_h & (0x200 << fifo * 4)) l += sample; /* bits 9 and 13: to the left */
     }
     *left = (int16_t)(l * 64);
     *right = (int16_t)(r * 64);
