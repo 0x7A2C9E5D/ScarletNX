@@ -119,6 +119,9 @@ def main():
         )
         if run.returncode:
             sys.exit('%s: scarletnx-agb exited with %d\n%s%s' % (args.name, run.returncode, run.stdout, run.stderr))
+        # a run that ended well says so last, as every driver's: the launcher shows it at the end of the output
+        if not run.stdout.rstrip().endswith('\nExit.'):
+            sys.exit('%s: the run did not end its output with Exit.\n%s' % (args.name, run.stdout))
         frame = read_ppm(shot)
         if isinstance(check, int):
             found = re.search(r'\br%d=([0-9A-F]{8})' % check, run.stdout)

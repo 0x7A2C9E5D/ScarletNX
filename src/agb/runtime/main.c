@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
         unsigned char* image = NULL;
         size_t length = 0;
         int16_t* audio = NULL;
-        int status = 1;
+        int status = 1, played = 0; /* played: the frames ran to their end or the window closed */
         long written_at = -1; /* the frame the game last wrote its save at, -1 for none since it was kept */
         /* a ROM's game is made in its folder; a game's folder (--game=, or the copy's own) names its ROM */
         if (path) {
@@ -338,6 +338,7 @@ int main(int argc, char** argv) {
             printf("cpsr=%08X\n", cpu.arm.cpsr);
         }
         status = 0;
+        played = 1;
     done:
         agb_host_close(host);
         if (board.save.dirty && agb_save_size(&board) && save_write(&board, save)) status = 1;
@@ -346,6 +347,7 @@ int main(int argc, char** argv) {
             printf("Keeping the %zu blocks this run compiled in %s.so for the next one\n", recomp.compiled, base);
         if (agb_recomp_save(&recomp, &board, error, sizeof error))
             fprintf(stderr, "scarletnx-agb: cannot save the recompiled ROM: %s\n", error);
+        if (played && !status) puts("Exit."); /* a run that ended well says so last, as every driver's */
         free(audio);
         agb_recomp_free(&recomp);
     map:

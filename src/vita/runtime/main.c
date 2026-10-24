@@ -235,6 +235,7 @@ static int play(const char* folder, bool recompile, double seconds, const char* 
     vita_present_shot(process);
     vita_gxm_free(process); /* the renderer, before the device it draws on */
     vita_present_free();
+    if (!status) puts("Exit."); /* a run that ended well says so last, as every driver's */
 done:
     vita_process_free(process);
     vita_native_close(&native);

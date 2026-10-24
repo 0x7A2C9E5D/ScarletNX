@@ -252,6 +252,7 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
         if (hinted) printf(", %zu new in the title's hints, which a recompile (-r) starts from", hinted);
         putchar('\n');
     }
+    if (!result) puts("Exit."); /* a run that ended well says so last, as every driver's */
 done:
     ctr_host_faults(NULL, NULL, NULL, NULL);
     snx_ctr_jit_free(jit);
