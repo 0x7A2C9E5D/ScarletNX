@@ -10415,6 +10415,48 @@ static void tour_tick(App* app) {
 #undef TOUR
 }
 #endif
+#ifdef SNX_IOS
+/* A game named in autorun.txt of the data folder (its title ID, or any part of its path), played once the games are
+   listed: how a script plays a game on a phone without touching the screen. The file is removed first, so a game that
+   stops the app is not started again, and a prepared game is preferred to its dump. "dump:" before the name opens
+   the dump, which prepares it */
+static void autorun_tick(App* app) {
+    static bool done;
+    char *file, *text = NULL, *want;
+    unsigned char* data;
+    size_t size = 0, i, pick = (size_t)-1;
+    bool dump_wanted = false;
+    if (done || app->menu.running || app->setup_on || app->games_fresh || !app->games.count || !app->data_dir) return;
+    done = true;
+    file = snx_path_join(app->data_dir, "autorun.txt");
+    data = snx_is_file(file) ? snx_read_file(file, &size) : NULL;
+    if (data) snx_remove_tree(file);
+    free(file);
+    if (!data) return;
+    text = snx_alloc(size + 1);
+    memcpy(text, data, size);
+    text[size] = 0;
+    free(data);
+    while (size && (text[size - 1] == '\n' || text[size - 1] == '\r' || text[size - 1] == ' ')) text[--size] = 0;
+    want = text;
+    if (!strncmp(want, "dump:", 5)) {
+        dump_wanted = true;
+        want += 5;
+    }
+    for (i = 0; i < app->games.count; ++i) {
+        if (gui_games_heading(&app->games, i) || !strstr(app->games.paths[i], want)) continue;
+        if (gui_is_dump(app->games.names[i]) == dump_wanted) {
+            pick = i;
+            break;
+        }
+    }
+    if (pick == (size_t)-1)
+        snprintf(app->message, sizeof app->message, "autorun: no %s matching %s", dump_wanted ? "dump" : "game", want);
+    else
+        open_game(app, pick);
+    free(text);
+}
+#endif
 int snx_gui_main(const char* self) {
     App app;
     if (!initialize(&app, self)) {
@@ -10457,6 +10499,9 @@ int snx_gui_main(const char* self) {
         pump(&app);
 #ifdef SNX_GUI_TOUR
         tour_tick(&app);
+#endif
+#ifdef SNX_IOS
+        autorun_tick(&app);
 #endif
 #ifdef SDL_PLATFORM_ANDROID
         if (!app.hidden)
