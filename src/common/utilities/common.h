@@ -193,9 +193,11 @@ size_t snx_vm_page_size(void);
    asking: the player's abort sets this, and the long loops (the recompiler's units) end early once it is set */
 void snx_abort_request(int on);
 int snx_abort_requested(void);
-/* the memory this process is charged for now, in bytes: its footprint on macOS and iOS, its resident set on Linux and
-   Android, its working set on Windows; 0 where the system does not tell */
+/* the memory this process is charged for now, in bytes: its footprint on macOS and iOS, its resident set on Linux,
+   Android and FreeBSD, its working set on Windows; 0 where the system does not tell */
 SnxU64 snx_footprint(void);
+/* the processor time this process has used, every thread's together, in ns; 0 where the system does not tell */
+SnxU64 snx_process_cpu_ns(void);
 /* the memory the system can still give this process, in bytes, into *bytes: what iOS lets the app take before it ends
    it, the memory available on Linux and Android (MemAvailable), on macOS (free, inactive and purgeable pages) and on
    Windows (available physical memory); whether the system told it */

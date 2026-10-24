@@ -43,6 +43,7 @@
 #ifdef __FreeBSD__
 #include <sys/types.h>
 #include <sys/sysctl.h>
+#include <sys/user.h> /* struct kinfo_proc */
 #endif
 #ifdef __APPLE__
 #include <TargetConditionals.h>
@@ -1333,8 +1334,28 @@ SnxU64 snx_footprint(void) {
 #elif defined(_WIN32)
     PROCESS_MEMORY_COUNTERS info;
     return GetProcessMemoryInfo(GetCurrentProcess(), &info, sizeof info) ? (SnxU64)info.WorkingSetSize : 0;
+#elif defined(__FreeBSD__)
+    struct kinfo_proc proc;
+    size_t size = sizeof proc;
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid()};
+    if (sysctl(mib, 4, &proc, &size, NULL, 0) || size != sizeof proc) return 0;
+    return (SnxU64)proc.ki_rssize * snx_vm_page_size();
 #else
     return 0;
+#endif
+}
+SnxU64 snx_process_cpu_ns(void) {
+#ifdef _WIN32
+    FILETIME created, exited, kernel, user;
+    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) return 0;
+    /* 100 ns ticks */
+    return (((SnxU64)kernel.dwHighDateTime << 32 | kernel.dwLowDateTime) +
+            ((SnxU64)user.dwHighDateTime << 32 | user.dwLowDateTime)) *
+           100;
+#else
+    struct timespec t;
+    if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t)) return 0;
+    return (SnxU64)t.tv_sec * 1000000000u + (SnxU64)t.tv_nsec;
 #endif
 }
 int snx_memory_available(SnxU64* bytes) {
