@@ -51,4 +51,38 @@ enum {
     QMD_LOCAL_CRS_ALLOC = 0x2F   /* local_crs_alloc 19:0, sass_version 28:24 */
 };
 
+/* the QMD's fields (Eden's LaunchParams BitFields), from its words */
+static inline u32 qmd_grid_dim_x(const u32* q) { return q[QMD_GRID_DIM_X] & 0x7FFFFFFFu; }
+static inline u32 qmd_grid_dim_y(const u32* q) { return q[QMD_GRID_DIM_YZ] & 0xFFFFu; }
+static inline u32 qmd_grid_dim_z(const u32* q) { return q[QMD_GRID_DIM_YZ] >> 16; }
+static inline u32 qmd_block_dim_x(const u32* q) { return q[QMD_BLOCK_DIM_X] >> 16; }
+static inline u32 qmd_block_dim_y(const u32* q) { return q[QMD_BLOCK_DIM_YZ] & 0xFFFFu; }
+static inline u32 qmd_block_dim_z(const u32* q) { return q[QMD_BLOCK_DIM_YZ] >> 16; }
+static inline u32 qmd_shared_alloc(const u32* q) { return q[QMD_SHARED_ALLOC] & 0x3FFFFu; }
+static inline u32 qmd_program_start(const u32* q) { return q[QMD_PROGRAM_START]; }
+/* the constant buffers: NumConstBuffers of them, each enabled by its bit of const_buffer_enable_mask, with a
+   ConstBufferConfig of two words (address low; address high 7:0 and size 31:15) */
+#define QMD_NUM_CONST_BUFFERS 8u
+#define QMD_CONST_BUFFER_CONFIG_WORDS 2u
+#define MAX_CONST_BUFFER_BYTES 0x10000u /* Eden's Maxwell3D::Regs::MaxConstBufferSize, 64 KiB */
+static inline int qmd_const_buffer_enabled(const u32* q, u32 i) { return (q[QMD_CONST_BUFFER_ENABLE] >> i) & 1u; }
+static inline u64 qmd_const_buffer_address(const u32* q, u32 i) {
+    const u32* c = &q[QMD_CONST_BUFFER_CONFIG + i * QMD_CONST_BUFFER_CONFIG_WORDS];
+    return (u64)(c[1] & 0xFFu) << 32 | c[0];
+}
+static inline u32 qmd_const_buffer_size(const u32* q, u32 i) {
+    return q[QMD_CONST_BUFFER_CONFIG + i * QMD_CONST_BUFFER_CONFIG_WORDS + 1] >> 15;
+}
+
+/* the register pairs holding a 40-bit address, high word first (Eden's tsc/tic Address()), and tex_cb_index's
+   index (bits 2:0) */
+static inline u64 kepler_compute_address(const u32* r, u32 high) { return (u64)r[high] << 32 | r[high + 1]; }
+static inline u32 kepler_compute_tex_cb_index(const u32* r) { return r[KEPLER_COMPUTE_TEX_CB_INDEX] & 7u; }
+
+/* a texture handle (Eden's Tegra::Texture::TextureHandle): tic_id bits 19:0 and tsc_id bits 31:20, entries of the
+   texture and sampler pools, each entry 32 bytes */
+static inline u32 texture_handle_tic_id(u32 h) { return h & 0xFFFFFu; }
+static inline u32 texture_handle_tsc_id(u32 h) { return h >> 20; }
+#define TEXTURE_POOL_ENTRY_BYTES 32u
+
 #endif
