@@ -2803,7 +2803,7 @@ int main(int argc, char** argv) {
     }
     if (argc > 1 && getenv("SNX_TEST_ARGV")) {
         /* a driver doing what the test asked (driver_will): its argv kept, a string a line, for the test to check */
-        FILE* kept = fopen(getenv("SNX_TEST_ARGV"), "w");
+        FILE* kept = fopen(getenv("SNX_TEST_ARGV"), "wb"); /* "\n" alone, as has_arg reads, on Windows too */
         for (int i = 0; kept && i < argc; ++i) fprintf(kept, "%s\n", argv[i]);
         assert(kept && !fclose(kept));
         puts(getenv("SNX_TEST_SAY") ? getenv("SNX_TEST_SAY") : "the fake driver ran");
