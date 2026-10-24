@@ -54,6 +54,9 @@ static int maps_stored;
 static unsigned pads_held[3];               /* what each holds */
 static int pad_of_player[3] = {-1, -1, -1}; /* each player's pad, as gamepad_name counts them */
 void gamepad_store_map(void) { ++maps_stored; }
+/* the counter in the corner reads the frames shown and the clock */
+int g_frames;
+u64 plat_ns(void) { return 0; }
 int gamepad_layout(int i, int labels[4], int* symmetric) {
     static const int sony[4] = {SNX_PAD_LABEL_CROSS, SNX_PAD_LABEL_CIRCLE, SNX_PAD_LABEL_SQUARE,
                                 SNX_PAD_LABEL_TRIANGLE};

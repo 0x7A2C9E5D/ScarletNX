@@ -151,6 +151,9 @@ int vpad_ini(const char* key, const char* value) {
     return 1;
 }
 void vpad_set_store(void (*store)(const char* key, const char* value)) { g_store = store; }
+void vpad_store_text(const char* key, const char* value) {
+    if (g_store) g_store(key, value);
+}
 void vpad_store(const int* setting) {
     char v[64];
     const IniOpt* o;

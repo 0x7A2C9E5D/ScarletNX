@@ -67,6 +67,15 @@ static void entitlement_lines(void) {
 }
 #endif
 
+/* the system's thermal state as the menu's counter shows it: 0 nominal, 1 fair, 2 serious, 3 critical (the app is not told degrees) */
+int gui_apple_thermal(void) {
+#if TARGET_OS_IPHONE
+    return (int)NSProcessInfo.processInfo.thermalState;
+#else
+    return 0;
+#endif
+}
+
 void gui_apple_stats(char* out, size_t size) {
 #if TARGET_OS_IPHONE
     task_vm_info_data_t info;
