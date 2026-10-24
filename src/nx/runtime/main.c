@@ -29,6 +29,7 @@
 #include "nx/runtime/rtapi.h"
 #include "nx/runtime/startup.h"
 #include "nx/runtime/platform/backend.h"
+#include "nx/runtime/platform/hud.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/prepare_screen.h"
 #include "nx/runtime/platform/plat.h"
@@ -870,6 +871,11 @@ int snx_main(int argc, char** argv) {
         char sys[384];
         plat_system_info(sys, sizeof sys);
         LOG("system: %s\n", sys);
+    }
+    {
+        char list[HUD_DEBUG_MAX];
+        if (options_debug(INI_CHANGED_DEFAULT, list, sizeof list))
+            LOG("debug: %s; shown at the top of the picture while the game runs\n", list);
     }
     /* after the header, so the client's own lines do not come before it and a capture that cannot start still leaves
        a log: it is asked for by a setting, and a run without it is better than no run */

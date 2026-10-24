@@ -743,6 +743,13 @@ target_link_libraries(snx-test-vpad PRIVATE scarletnx-common snx_splash m)
 target_include_directories(snx-test-vpad PRIVATE "${CMAKE_BINARY_DIR}/generated") # ui.c's theme
 add_test(NAME vpad COMMAND snx-test-vpad)
 
+add_executable(snx-test-hud hud.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/hud.c"
+    "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c")
+snx_test_target(snx-test-hud 11)
+target_link_libraries(snx-test-hud PRIVATE scarletnx-common snx_splash m)
+target_include_directories(snx-test-hud PRIVATE "${CMAKE_BINARY_DIR}/generated") # the theme's colours
+add_test(NAME hud COMMAND snx-test-hud)
+
 add_executable(snx-test-ini-deprecated ini_deprecated.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-ini-deprecated 11)
 add_test(NAME ini_deprecated COMMAND snx-test-ini-deprecated)
