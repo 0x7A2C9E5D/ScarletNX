@@ -143,7 +143,12 @@ address and runs it, as the Linux runtime (`src/gnuabi/runtime/jit.c`) does. A c
 keeps `snx_runtime_defaults`' miss can instead name that handler with
 `snx_recompiled_set_fallback`, which the module's misses then run instead of its own JIT. `snx_recompiler_set_cache` names a
 folder that keeps linked modules (LLVM) by a hash of everything they are made from, and
-the compiled runtime library: a module found there is loaded instead of compiled.
+the compiled runtime library: a module found there is loaded instead of compiled. The
+units its lazy JIT compiles on a miss are kept in `library-jit.cache` in the same folder,
+and a later miss loads a unit instead of compiling it when its code is the same, byte for
+byte, and the file was made with the same settings, LLVM and host CPU. The modules of one
+program and other programs may share the file. A damaged file is made again, and a folder
+that can't be written to leaves the JIT working without the file.
 
 For A32 and Thumb, `snx_recompile32` prepares an address range whose blocks are compiled
 on first use by the LLVM block compiler (`src/common/cpu/arm/`), and

@@ -94,6 +94,48 @@ static uint64_t read64(const uint8_t* p) {
     return v;
 }
 
+/* the JIT's cache file: the module's JIT compiles far at its miss and the unit lands in library-jit.cache in the cache
+   folder, and a second module of the same code runs far again, now from that file. Without a cache folder, no file */
+static void jit_cache(struct snx_recompiler* r, uint8_t* mem, const char* folder) {
+    struct snx_recompiled* m;
+    char* file = snx_path_join(folder, "library-jit.cache");
+    unsigned pass;
+    check(file != NULL, "a path for the JIT cache file");
+    if (!file) return;
+    for (pass = 0; pass < 2; ++pass) {
+        Seen seen = {0};
+        RtAPI rt;
+        CPU cpu = {0};
+        FILE* f;
+        long size = 0;
+        check(snx_recompiler_set_cache(r, folder) == 0, "a cache folder");
+        m = snx_recompile(r, CODE64, mem + CODE64, A64_SIZE);
+        check(m != NULL, "jit cache: a module with a cache folder");
+        if (!m) break;
+        snx_runtime_defaults(&rt);
+        rt.svc = svc64;
+        rt.undef = undef64;
+        rt.brk = brk64;
+        cpu.mem = mem;
+        cpu.rt = &rt;
+        cpu.thread = &seen;
+        check(snx_recompiled_bind(m, &cpu) == 0, "jit cache: bind");
+        cpu.x[30] = STOP;
+        snx_recompiled_run(m, &cpu, FAR, STOP);
+        check(seen.brks == 1 && seen.brk_imm == 7 && cpu.x[0] == 99, "jit cache: far compiled by the JIT, run");
+        snx_recompiled_free(m); /* stops the JIT's threads: nothing writes the file after this */
+        f = fopen(file, "rb");
+        if (f) {
+            if (!fseek(f, 0, SEEK_END)) size = ftell(f);
+            fclose(f);
+        }
+        check(size > 0,
+              pass ? "jit cache: the file is still there for a second module" : "jit cache: the unit was kept");
+    }
+    check(snx_recompiler_set_cache(r, NULL) == 0, "the cache folder off");
+    free(file);
+}
+
 static void run64(struct snx_recompiler* r, const char* backend, uint8_t* mem, const char* keep_ir) {
     struct snx_recompiled *m, *first;
     RtAPI rt;
@@ -250,7 +292,7 @@ static void run32(struct snx_recompiler* r, uint8_t* mem) {
 int main(int argc, char** argv) {
     uint8_t* mem = (uint8_t*)calloc(MEMORY, 1);
     struct snx_recompiler* r;
-    char* keep_ir;
+    char *keep_ir, *cache;
     int verbose = argc > 1 && !strcmp(argv[1], "--verbose");
     if (!mem) return 2;
     place(mem, CODE64, a64_words, sizeof(a64_words) / sizeof(a64_words[0]));
@@ -261,6 +303,8 @@ int main(int argc, char** argv) {
     check(snx_recompiler_has(SNX_RECOMPILER_FLAG_LLVM), "LLVM is always built in");
     keep_ir = snx_temp_dir(NULL);
     check(keep_ir != NULL, "a folder for the IR");
+    cache = snx_temp_dir(NULL);
+    check(cache != NULL, "a folder for the caches");
     r = snx_recompiler_new(SNX_RECOMPILER_FLAG_LLVM);
     check(r != NULL, "snx_recompiler_new(LLVM)");
     if (r) {
@@ -274,12 +318,17 @@ int main(int argc, char** argv) {
               "the Switch and max A64 targets");
         snx_recompiler_set_jobs(r, 2);
         run64(r, "llvm", mem, keep_ir);
+        jit_cache(r, mem, cache);
         run32(r, mem);
         snx_recompiler_free(r);
     }
     if (keep_ir) {
         snx_remove_tree(keep_ir);
         free(keep_ir);
+    }
+    if (cache) {
+        snx_remove_tree(cache);
+        free(cache);
     }
     free(mem);
     if (failures) {

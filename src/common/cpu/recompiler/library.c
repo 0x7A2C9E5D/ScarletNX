@@ -100,6 +100,7 @@ struct snx_recompiled {
     const uint64_t* entry_addresses;
     const GuestFn* entry_functions;
     size_t entry_count;
+    char* jit_cache_path; /* the file of the module's JIT units, in the recompiler's cache folder: NULL for none */
     struct snx_recompiler* arena_owner; /* PowerPC64: the recompiler whose arena holds the module's code */
     char opt;
     SnxU64 features; /* the recompiler's when the module was made: its JIT decodes as its code was */
@@ -267,6 +268,7 @@ static SnxJitService* module_jit(struct snx_recompiled* m) {
     config.aot_count = m->entry_count;
     config.opt = m->opt;
     config.features = m->features;
+    config.cache_path = m->jit_cache_path; /* read when the service starts */
     s = snx_jit_service_new(&config, error, sizeof(error));
     if (!__atomic_compare_exchange_n(&m->jit, &expected, s ? s : JIT_NONE, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
         snx_jit_service_free(s);
@@ -1191,6 +1193,9 @@ static int keep_code(struct snx_recompiler* r, struct snx_recompiled* m, const s
 static struct snx_recompiled* recompile(struct snx_recompiler* r, struct snx_recompiled* m, SnxCodegen* codegen) {
     int rc;
     m->functions = codegen->function_count;
+    /* A module that keeps its code has a JIT, and its units go in one file of the cache folder that the modules and
+       processes using the folder share. Without the memory for the path there is no file, and the JIT still works */
+    if (r->cache && m->view_count) m->jit_cache_path = snx_path_join(r->cache, "library-jit.cache");
     rc = recompile_llvm(r, m, codegen);
     snx_codegen_free(codegen);
     if (rc) {
@@ -1296,6 +1301,7 @@ void snx_recompiled_free(struct snx_recompiled* m) {
     }
     if (m->jit && m->jit != JIT_NONE)
         snx_jit_service_free(m->jit); /* its threads stop before the code they read goes */
+    free(m->jit_cache_path);
     free(m->views);
     if (m->dispatch) free((void**)m->dispatch - 1); /* load_descriptor's block, with the module in front */
     unload_image(m);

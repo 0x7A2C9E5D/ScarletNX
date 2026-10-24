@@ -84,8 +84,9 @@ SNX_RECOMPILER_API void snx_recompiler_set_verbose(struct snx_recompiler* r, int
 SNX_RECOMPILER_API int snx_recompiler_set_keep_ir(struct snx_recompiler* r, const char* folder);
 /* A folder of linked modules (LLVM), made if missing, by a hash of everything a module is made from: the code and its
    addresses, the entries, the settings, SNX_ABI and the host CPU. A module found there is loaded instead of compiled,
-   and one compiled is saved there; NULL (the default) keeps none. The string is copied. 0, or -1 when the folder
-   can't be made */
+   and one compiled is saved there. The units its lazy JIT compiles are kept in library-jit.cache in the folder, and
+   loaded again when their code is the same: modules and processes may share it. NULL (the default) keeps neither. The
+   string is copied. 0, or -1 when the folder can't be made */
 SNX_RECOMPILER_API int snx_recompiler_set_cache(struct snx_recompiler* r, const char* folder);
 
 /* ---- A64 ---- */
