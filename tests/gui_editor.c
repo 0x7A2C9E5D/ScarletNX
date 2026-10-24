@@ -307,10 +307,10 @@ int main(void) {
         assert(e.row == 1 && gui_editor_key(&e, GUI_SELECT) == GUI_EDITOR_STAY && e.typing); /* no Save to reach */
         gui_editor_stop(&e);
         /* with an action: a last row of that label, which Select asks the screen to do */
-        gui_editor_form(&e, form, 2, &values, "Reset all");
+        gui_editor_form(&e, form, 2, &values, "Reset to Defaults");
         assert(gui_editor_rows(&e) == 3 && !gui_editor_key_of(&e, 2));
         gui_editor_label(&e, 2, label, sizeof label);
-        assert(!strcmp(label, "Reset all") && !value_of(2)[0]);
+        assert(!strcmp(label, "Reset to Defaults") && !value_of(2)[0]);
         gui_editor_key(&e, GUI_PAGE_DOWN);
         assert(e.row == 2 && gui_editor_key(&e, GUI_SELECT) == GUI_EDITOR_SAVE && !e.typing);
         gui_editor_stop(&e);
@@ -322,7 +322,7 @@ int main(void) {
             char shown[16];
         } object = {"Default"};
         const GuiThemeKey rows[] = {{"", "Theme", GUI_KEY_ACTION, 0, sizeof object.shown, NULL, 0, "the theme"},
-                                    {"", "Theme editor", GUI_KEY_ACTION, 0, 0, NULL, 0, "the editor"}};
+                                    {"", "Theme Editor", GUI_KEY_ACTION, 0, 0, NULL, 0, "the editor"}};
         GuiEditor e;
         char label[64], value[32];
         gui_editor_form(&e, rows, 2, &object, NULL);

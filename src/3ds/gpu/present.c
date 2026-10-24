@@ -224,6 +224,7 @@ static void write_ppm(unsigned screen, unsigned width, unsigned height, const un
         snprintf(path, sizeof path, "%s/frame-%u-latest.ppm", g_present.frame_dir, screen);
     else
         snprintf(path, sizeof path, "%s/frame-%u-%02u.ppm", g_present.frame_dir, screen, g_present.dumps);
+    snx_path_native(path);
     snprintf(staged, sizeof staged, "%s.partial", path);
     FILE* file = fopen(latest ? staged : path, "wb");
     if (!file) return;

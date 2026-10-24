@@ -38,8 +38,9 @@ endfunction()
 # what the tests reach that this list misses
 if(SNX_TEST_SANITIZERS)
     cmake_language(DEFER DIRECTORY "${PROJECT_SOURCE_DIR}" CALL snx_test_sanitize
-        # the common code: network, filesystems, the A64 reference and LZ4
+        # the common code: network, filesystems, the A64 reference, LZ4 and xxHash
         scarletnx-common scarletnx-net scarletnx-ldn scarletnx-filesystem snx_demangle snx_a64_reference snx_lz4
+        snx_xxhash
         snx-logscan
         # the recompiler and its backends
         snx_llvm snx_arm_llvm scarletnx-recompiler scarletnx-recompiler-shared
@@ -55,6 +56,8 @@ if(SNX_TEST_SANITIZERS)
         snx_ctr_audio snx_ctr_gpu snx_ctr_gpu_reference
         # the Vita runtime, its loader and USSE translator
         scarletnx-vita snx_vita_program snx_vita_loader snx_vita_usse snx-vita-usse
+        # the GBA board and its runner
+        scarletnx-agb scarletnx-agb-run
         # scarletnx's main where it is the other drivers too
         snx_multicall
         # the menu, its splash, icon and pads
@@ -297,6 +300,16 @@ add_executable(snx-test-arm-profile arm_profile.c "${PROJECT_SOURCE_DIR}/src/com
     "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/profile.c")
 snx_test_target(snx-test-arm-profile 11)
 add_test(NAME arm_isa_profiles COMMAND snx-test-arm-profile)
+# a game's cheats by their names, as the launcher lists them and cheats_off= leaves them out
+add_executable(snx-test-cheat-list cheat_list.c)
+snx_test_target(snx-test-cheat-list 99)
+target_link_libraries(snx-test-cheat-list PRIVATE scarletnx-common)
+add_test(NAME cheat_list COMMAND snx-test-cheat-list)
+# a mod's IPS, IPS32 and IPSwitch patches: their formats, which module takes one, the played mods' in their order
+add_executable(snx-test-patches patches.c)
+snx_test_target(snx-test-patches 99)
+target_link_libraries(snx-test-patches PRIVATE scarletnx-common)
+add_test(NAME patches COMMAND snx-test-patches)
 # the C compiler a 3DS game's native link runs: the build's own, else a clang beside the program, else one on PATH
 add_executable(snx-test-find-compiler find_compiler.c)
 snx_test_target(snx-test-find-compiler 99)
@@ -366,6 +379,11 @@ add_executable(snx-test-os-error os_error.c)
 snx_test_target(snx-test-os-error 99)
 target_link_libraries(snx-test-os-error PRIVATE scarletnx-common)
 add_test(NAME os_error COMMAND snx-test-os-error)
+# the host's side of a flat guest space (common/memory/host.c): views of one object are the same memory, a commit zeros
+add_executable(snx-test-host-memory host_memory.c)
+snx_test_target(snx-test-host-memory 99)
+target_link_libraries(snx-test-host-memory PRIVATE scarletnx-common)
+add_test(NAME host_memory COMMAND snx-test-host-memory)
 # RtAPI.cas128: the host's 16-byte compare-and-swap and the locked one, a pair stored whole or not at all
 add_executable(snx-test-cas128 cas128.c)
 snx_test_target(snx-test-cas128 11)
@@ -375,7 +393,25 @@ add_test(NAME cas128 COMMAND snx-test-cas128)
 add_executable(snx-test-endian endian.c)
 snx_test_target(snx-test-endian 99)
 add_test(NAME endian COMMAND snx-test-endian)
+if(SNX_BUILD_3DS)
+    add_executable(snx-test-3ds-uds 3ds_uds.c fake_room.c)
+    snx_test_target(snx-test-3ds-uds 11)
+    target_link_libraries(snx-test-3ds-uds PRIVATE snx_ctr_process scarletnx-ldn snx_enet)
+    add_test(NAME 3ds_uds_relay COMMAND snx-test-3ds-uds)
+    add_test(NAME 3ds_uds_delayed_relay COMMAND snx-test-3ds-uds --delay)
+    set_tests_properties(3ds_uds_delayed_relay PROPERTIES TIMEOUT 60)
+    set_tests_properties(3ds_uds_relay PROPERTIES TIMEOUT 60)
+endif()
 if(NOT SNX_BUILD_NX AND NOT SNX_BUILD_GNUABI)
+    # The shared room transport also serves 3DS UDS; keep its socket regression
+    # available when building only the 3DS driver.
+    if(SNX_BUILD_3DS)
+        add_executable(snx-test-ldn-room ldn_room.c fake_room.c)
+        snx_test_target(snx-test-ldn-room 23)
+        target_link_libraries(snx-test-ldn-room PRIVATE scarletnx-ldn snx_enet)
+        add_test(NAME ldn_room COMMAND snx-test-ldn-room)
+        set_tests_properties(ldn_room PROPERTIES TIMEOUT 120)
+    endif()
     include(architecture.cmake)
     snx_sanitizer_path()
     return()
@@ -754,12 +790,12 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(tracked_material_self_test tracked_material PROPERTIES SKIP_RETURN_CODE 77)
     # which GitHub Actions caches the cleanup workflow deletes (scripts/trim-caches.py)
     add_test(NAME trim_caches COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/trim_caches_test.py")
-    # the check that keeps a pull request red while its title says donotmerge (scripts/pr-title.py, pr-title.yml)
+    # the check that keeps a pull request red while its title says donotmerge (scripts/pr-title.py, pr-checks.yml)
     add_test(NAME pr_title COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/pr_title_test.py")
-    # the labels a title's [area] prefix asks for, which the same job adds (scripts/area-labels.py, pr-title.yml)
+    # the labels a title's [area] prefix asks for, which the same job adds (scripts/area-labels.py, pr-checks.yml)
     add_test(NAME area_labels COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/area_labels_test.py")
     # the check that holds a pull request until its assignees, its author aside, approve it (scripts/pr-assignees.py,
-    # pr-assignees.yml)
+    # pr-checks.yml)
     add_test(NAME pr_assignees COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/pr_assignees_test.py")
     # the target LLVM's llvm-config of the linux-*-cross presets, run under its machine's qemu (scripts/)
     if(UNIX)
@@ -774,6 +810,8 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME game_reports COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/game_reports_test.py"
                                            $<TARGET_FILE:snx-logscan>)
     endif()
+    # the game tools/run_game.py finds by its name (recompiled/, else an older version's games/)
+    add_test(NAME run_game COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/run_game_test.py")
     # the nightly release's title and notes (scripts/nightly-notes.py)
     add_test(NAME nightly_notes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/nightly_notes_test.py")
     # the builds published as releases and on Discord (scripts/publish-builds.py), against fakes. Where publish.yml
@@ -818,6 +856,7 @@ add_test(NAME hid_motion COMMAND snx-test-hid-motion)
 
 add_executable(snx-test-startup startup_options.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/startup.c")
 snx_test_target(snx-test-startup 99)
+target_link_libraries(snx-test-startup PRIVATE scarletnx-common) # an option's older name said (snx_option_renamed)
 if(SNX_TRACY)
     # startup.c must see SNX_TRACY so its Tracy flag checks match the runtime.
     target_compile_definitions(snx-test-startup PRIVATE SNX_TRACY=1)
@@ -909,7 +948,7 @@ add_test(NAME loader_native COMMAND snx-test-loader)
 
 add_executable(snx-test-runtime-nro runtime_nro.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/loader.c")
 snx_test_target(snx-test-runtime-nro 11)
-target_link_libraries(snx-test-runtime-nro PRIVATE snx_lz4)
+target_link_libraries(snx-test-runtime-nro PRIVATE snx_lz4 scarletnx-common)
 add_test(NAME runtime_nro COMMAND snx-test-runtime-nro)
 
 if(NOT WIN32)
@@ -1159,6 +1198,11 @@ add_executable(snx-test-jit-cache jit_cache.c)
 snx_test_target(snx-test-jit-cache 11)
 target_link_libraries(snx-test-jit-cache PRIVATE snx_llvm)
 add_test(NAME jit_cache COMMAND snx-test-jit-cache)
+# LLVM's SLP vectorizer turned off for a process (the setting slp_vectorizer), and the JIT cache's key saying so
+add_executable(snx-test-slp-vectorizer slp_vectorizer.c)
+snx_test_target(snx-test-slp-vectorizer 11)
+target_link_libraries(snx-test-slp-vectorizer PRIVATE snx_llvm)
+add_test(NAME slp_vectorizer COMMAND snx-test-slp-vectorizer)
 # the launcher's AOT pack action: the cache's path and header, and the optimization the AOT build must share
 add_executable(snx-test-aot-pack aot_pack.c "${PROJECT_SOURCE_DIR}/src/gui/aot.c")
 snx_test_target(snx-test-aot-pack 11)
@@ -1207,6 +1251,9 @@ if(UNIX AND NOT CMAKE_CROSSCOMPILING)
     if(Python3_Interpreter_FOUND)
         add_test(NAME arm_llvm_witnesses COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/arm_test.py"
             --emitter $<TARGET_FILE:snx-test-arm-emit> --runtime $<TARGET_FILE:snx_arm_rt> --cc "${CMAKE_C_COMPILER}")
+        add_test(NAME arm7tdmi_witnesses COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/arm7tdmi_test.py"
+            --arm-emitter $<TARGET_FILE:snx-test-arm-emit> --thumb-emitter $<TARGET_FILE:snx-test-thumb-emit>
+            --runtime $<TARGET_FILE:snx_arm_rt> --cc "${CMAKE_C_COMPILER}")
         if(SNX_TEST_ARM_DIFF)
             add_test(NAME arm_llvm_differential COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/arm_test.py"
                 --emitter $<TARGET_FILE:snx-test-arm-emit> --runtime $<TARGET_FILE:snx_arm_rt> --cc "${CMAKE_C_COMPILER}" --unicorn)
@@ -1279,12 +1326,9 @@ if(TARGET OpenSSL::Crypto)
     endif()
 endif()
 if(APPLE)
-    # these build a game module and load it, which no Mac has done yet: the Mach-O linker (link_macho.c) is checked
-    # on Linux only (the link_macho test and docs/APPLE.md), and these wait for a run on a Mac. The in-process
-    # loader's tests run: it loads ELF objects on macOS too (code_loader.c). aot_variants also links a JIT cache unit,
-    # and Darwin's JIT writes ELF objects for that loader where the AOT module is Mach-O.
-    set_tests_properties(native_recompiler llvm_module recompiler_library aot_variants unit_cache llvm_differential_0
-                         llvm_differential_1 llvm_differential_2 PROPERTIES DISABLED TRUE)
+    # llvm_differential_0 to _2 ask for ELF output, which the Mach-O host's linker refuses. aot_variants links a JIT cache
+    # unit as ELF into an AOT module that is Mach-O on this host. Each needs its own fix before it can run here.
+    set_tests_properties(aot_variants llvm_differential_0 llvm_differential_1 llvm_differential_2 PROPERTIES DISABLED TRUE)
 endif()
 
 add_executable(snx_codegen_test codegen_test.c)
@@ -1337,6 +1381,19 @@ snx_test_target(snx-test-vita-yuv-glsl 23)
 target_compile_options(snx-test-vita-yuv-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-vita-yuv-glsl PRIVATE glsl)
 add_test(NAME vita_yuv_glsl COMMAND snx-test-vita-yuv-glsl)
+# the Vita's 24-bit color surface shader's GLSL run on the CPU against the layout written out: no GPU needed
+add_executable(snx-test-vita-rgb24-glsl glsl/vita_rgb24_glsl.cpp)
+snx_test_target(snx-test-vita-rgb24-glsl 23)
+target_compile_options(snx-test-vita-rgb24-glsl PRIVATE -fwrapv)
+target_include_directories(snx-test-vita-rgb24-glsl PRIVATE glsl)
+add_test(NAME vita_rgb24_glsl COMMAND snx-test-vita-rgb24-glsl)
+# the Vita's imports given memory that isn't the game's: their errors, and no access there
+if(TARGET snx_vita_program)
+    add_executable(snx-test-vita-hle-memory vita_hle_memory.c)
+    snx_test_target(snx-test-vita-hle-memory 11)
+    target_link_libraries(snx-test-vita-hle-memory PRIVATE snx_vita_program)
+    add_test(NAME vita_hle_memory COMMAND snx-test-vita-hle-memory)
+endif()
 # the texture conversion shader's GLSL run on the CPU against the CPU's conversions and ETC2 decoder: no GPU needed
 add_executable(snx-test-texconv-glsl glsl/texconv_glsl.cpp "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
 snx_test_target(snx-test-texconv-glsl 23)
@@ -1581,6 +1638,14 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
         target_link_libraries(snx-test-shader-program PRIVATE m)
     endif()
     add_test(NAME shader_program COMMAND snx-test-shader-program "${CMAKE_CURRENT_BINARY_DIR}")
+    # structured control flow (gpu/shader/structure.c) against random programs' own
+    add_executable(snx-test-shader-structure shader_structure.c)
+    snx_test_target(snx-test-shader-structure 23)
+    target_link_libraries(snx-test-shader-structure PRIVATE snx_shader)
+    if(NOT WIN32)
+        target_link_libraries(snx-test-shader-structure PRIVATE m)
+    endif()
+    add_test(NAME shader_structure COMMAND snx-test-shader-structure)
     if(NOT CMAKE_CROSSCOMPILING)
         # the SVC registers tools/svcgen lays out from src/nx/hle/svc/hos.svc, in both ABIs
         include("${PROJECT_SOURCE_DIR}/cmake/svcgen.cmake")

@@ -56,11 +56,34 @@ if(SNX_BUILD_NX)
     snx_quiet(snx_lz4)
 endif()
 
+# xxHash (BSD-2-Clause) for the renderer's content hashes (src/nx/gpu/vk/cmd.c's vk_hash): XXH3, about three times
+# XXH64's speed. src/nx/gpu/vk/xxh3.c builds the dispatcher on x86 (the CPU's SSE2, AVX2 or AVX-512 loop, chosen at
+# run time) and xxhash.c on every other architecture, by the compiler's own macros
+if(SNX_BUILD_NX)
+    CPMAddPackage(NAME xxhash VERSION 0.8.3
+                  URL https://github.com/Cyan4973/xxHash/archive/refs/tags/v0.8.3.tar.gz
+                  URL_HASH SHA256=aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80
+                  DOWNLOAD_ONLY YES)
+    add_library(snx_xxhash STATIC "${PROJECT_SOURCE_DIR}/src/nx/gpu/vk/xxh3.c")
+    target_include_directories(snx_xxhash PUBLIC "${xxhash_SOURCE_DIR}")
+    snx_quiet(snx_xxhash)
+endif()
+
+# jsmolka's gba-tests (MIT), ROMs that check the ARM7TDMI, the BIOS's open bus, the memory map, the save memory and
+# the display, each leaving the number of its first failed test in a register. The AGB board's tests run them
+# (tests/agb_gba_tests.py). Test data, not shipped
+if(SNX_BUILD_AGB AND BUILD_TESTING)
+    CPMAddPackage(NAME gba-tests VERSION 2025.04.19
+                  URL https://github.com/jsmolka/gba-tests/archive/a7113b67e63f83a9b321696ddd7042ccfad6c881.tar.gz
+                  URL_HASH SHA256=b9373ef18700c48ccab0940ec480517fba47accc86516df5fd43ed9ec6cdf082
+                  DOWNLOAD_ONLY YES)
+endif()
+
 # ENet (MIT) and zstd (BSD-3-Clause) for ldn's rooms (src/common/network/net_room.c): an Eden room is ENet on UDP,
 # and a game's datagrams in it are zstd frames. ENet's own sources, with the POSIX calls every target but Windows
 # has; zstd's compressor and decompressor alone, in C (no assembly, so every target builds the same). The tests of
 # the network services link them in a build without the runtime too
-if(SNX_BUILD_NX OR BUILD_TESTING)
+if(SNX_BUILD_NX OR SNX_BUILD_3DS OR BUILD_TESTING)
     CPMAddPackage(NAME enet VERSION 1.3.18
                   URL https://github.com/lsalzman/enet/archive/refs/tags/v1.3.18.tar.gz
                   URL_HASH SHA256=28603c895f9ed24a846478180ee72c7376b39b4bb1287b73877e5eae7d96b0dd

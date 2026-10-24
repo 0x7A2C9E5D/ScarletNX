@@ -293,7 +293,7 @@ failed:
             free(process->argv);
             process->argv = NULL;
         }
-        snprintf(error, size, snx_tr("Cannot launch driver: %s"), strerror(saved_errno));
+        snprintf(error, size, snx_tr("Cannot start the run: %s"), strerror(saved_errno));
         return false;
     }
 }
@@ -302,7 +302,7 @@ bool gui_process_start(GuiProcess* process, const char* const* argv, char* error
     int output[2] = {-1, -1}, failure[2] = {-1, -1};
     int previous_status;
     if (!gui_process_finished(process, &previous_status)) {
-        snprintf(error, size, "%s", snx_tr("A driver is already running"));
+        snprintf(error, size, "%s", snx_tr("A run is already going"));
         return false;
     }
 #ifdef GUI_DRIVER_THREAD

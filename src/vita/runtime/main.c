@@ -31,13 +31,13 @@ static void usage(FILE* out) {
           "  --game=DIR      Play the game in its folder DIR, as its copy of the runtime does\n"
           "  --patch DIR     The dumped game's update (default: patch/<title ID> beside its app/<title ID>)\n"
           "  -x, --extract   Extract only\n"
-          "  -r, --recomp    Compile again, without playing\n"
-          "  --repo DIR      The data folder (default: a portable copy's folder, else the user's data folder)\n"
+          "  -r, --recompile Compile again, without playing\n"
+          "  --data DIR      The data folder (default: a portable copy's folder, else the user's data folder)\n"
           "  --outdir DIR    The folder of the games, in which the game's folder is made (default recompiled/)\n"
           "  --output DIR    The game's folder itself\n"
           "  --seconds N     Stop after N seconds, reporting where each thread is\n"
           "  --shot=PATH     Save the last frame shown to PATH.ppm when the run ends\n"
-          "  --KEY=VALUE     A setting of the Vita debug table (g_vita_debug_ini in src/nx/runtime/settings.txt):\n"
+          "  --KEY=VALUE     A Vita debug setting:\n"
           "                  --vita_hle_trace=1 logs each import the runtime lacks (2 every call),\n"
           "                  --vita_gxm_trace=1 each scene, --script=ms:buttons,... (vita_script) presses buttons\n",
           out);
@@ -128,7 +128,8 @@ static bool link_dump(const char* folder, const char* name, const char* target) 
 /* a dumped game's update: patch/<title ID> beside its app/<title ID> */
 static char* dump_patch(const char* app, const char* title) {
     char *full = snx_absolute(app), *parent = full ? snx_dirname(full) : NULL, *root = parent ? snx_dirname(parent) : NULL;
-    char* patch = root ? snx_format("%s/patch/%s", root, title) : NULL;
+    char made[SNX_PATH_SIZE];
+    char* patch = root && !snx_path_format(made, sizeof made, "%s/patch/%s", root, title) ? snx_strdup(made) : NULL;
     free(full);
     free(parent);
     free(root);
@@ -178,31 +179,29 @@ static int play(const char* folder, bool recompile, double seconds, const char* 
     VitaNative native = {0};
     VitaProcess* process = NULL;
     /* the update's eboot.bin when there is one */
-    char error[512], *eboot = snx_format("%s/patch/eboot.bin", folder), *module = vita_game_file(folder, VITA_MODULE_SUFFIX);
+    char error[512], eboot[SNX_PATH_SIZE], *module = vita_game_file(folder, VITA_MODULE_SUFFIX);
     int status = 1;
-    if (eboot && !snx_is_file(eboot)) {
-        free(eboot);
-        eboot = snx_format("%s/app/eboot.bin", folder);
-    }
-    if (!eboot || !module || !vita_image_load(eboot, &image, error, sizeof error)) {
-        fprintf(stderr, "scarletnx-vita: %s\n", eboot && module ? error : "out of memory");
-        free(eboot);
+    bool made = !snx_path_format(eboot, sizeof eboot, "%s/patch/eboot.bin", folder);
+    if (made && !snx_is_file(eboot)) made = !snx_path_format(eboot, sizeof eboot, "%s/app/eboot.bin", folder);
+    if (!made || !module || !vita_image_load(eboot, &image, error, sizeof error)) {
+        if (made) fprintf(stderr, "scarletnx-vita: %s\n", module ? error : "out of memory"); /* else said */
         free(module);
         return 1;
     }
     printf("Module %s: %u imports, module_start 0x%08x\n", image.name, (unsigned)image.import_count,
            (unsigned)image.module_start);
     bool opened = !recompile && vita_native_open(module, &image, &native, error, sizeof error);
-    /* the blocks earlier runs compiled at run time (the hints) that the module lacks: compiled ahead of time now */
+    /* the blocks earlier runs compiled at run time (the hints) that the module lacks: the run-time compiler compiles
+       them again, and a recompile (-r) starts from them, as the 3DS driver's. An existing module that matches is
+       played as it is */
     size_t hint_count = 0, missing = 0;
     uint32_t* hints = opened ? vita_hints_read(folder, &hint_count) : NULL;
     for (size_t i = 0; i < hint_count; ++i) missing += !vita_module_block(native.module, hints[i]);
     free(hints);
-    if (missing) {
-        printf("%zu blocks earlier runs compiled at run time aren't in the game's module: compiling it again\n", missing);
-        vita_native_close(&native);
-        opened = false;
-    }
+    if (missing)
+        printf("%zu blocks earlier runs compiled at run time aren't in the game's module, which a recompile (-r) "
+               "starts from\n",
+               missing);
     if (!opened) {
         printf("Compiling the game's code\n");
         if (vita_aot_compile(folder, &image, error, sizeof error) ||
@@ -231,15 +230,19 @@ static int play(const char* folder, bool recompile, double seconds, const char* 
         goto done;
     }
     process->module = native.module;
-    char *sfo_path = snx_format("%s/%s/sce_sys/param.sfo", folder, snx_is_dir(process->patch) ? "patch" : "app"),
-         *title = NULL;
+    char sfo_path[SNX_PATH_SIZE], *title = NULL;
     size_t sfo_size = 0;
-    unsigned char* sfo = sfo_path ? snx_read_file(sfo_path, &sfo_size) : NULL;
+    unsigned char* sfo = snx_path_format(sfo_path, sizeof sfo_path, "%s/%s/sce_sys/param.sfo", folder,
+                                         snx_is_dir(process->patch) ? "patch" : "app")
+                             ? NULL
+                             : snx_read_file(sfo_path, &sfo_size);
     title = sfo ? vita_sfo_string(sfo, sfo_size, "TITLE") : NULL;
-    printf("Game: %s - %s\n", title ? title : image.name, snx_build_info());
-    vita_present_init(title ? title : image.name, shot);
+    /* the window's title as the 3DS driver's and a Switch game's: the game's name, then the build */
+    char* header = snx_format("%s - %s", title ? title : image.name, snx_build_info());
+    printf("Game: %s\n", header ? header : image.name);
+    vita_present_init(header ? header : image.name, shot);
+    free(header);
     free(sfo);
-    free(sfo_path);
     free(title);
     status = vita_run(process, seconds);
     vita_present_shot(process);
@@ -249,7 +252,6 @@ done:
     vita_process_free(process);
     vita_native_close(&native);
     vita_image_free(&image);
-    free(eboot);
     free(module);
     return status;
 }
@@ -270,9 +272,12 @@ int snx_vita_main(int argc, char** argv) {
             return 0;
         } else if (!strcmp(a, "-x") || !strcmp(a, "--extract"))
             extract_only = true;
-        else if (!strcmp(a, "-r") || !strcmp(a, "--recomp"))
+        else if (!strcmp(a, "-r") || !strcmp(a, "--recompile") || !strcmp(a, "--recomp")) {
+            if (!strcmp(a, "--recomp")) snx_option_renamed("--recomp", "--recompile");
             recompile = true;
-        else if (!strcmp(a, "--output") || !strcmp(a, "--outdir") || !strcmp(a, "--repo") || !strcmp(a, "--patch")) {
+        } else if (!strcmp(a, "--output") || !strcmp(a, "--outdir") || !strcmp(a, "--repo") || !strcmp(a, "--data") ||
+                   !strcmp(a, "--patch")) {
+            if (!strcmp(a, "--repo")) snx_option_renamed("--repo", "--data");
             if (++i == argc || !*argv[i]) {
                 fprintf(stderr, "scarletnx-vita: %s requires a directory\n", a);
                 return 2;
@@ -291,15 +296,18 @@ int snx_vita_main(int argc, char** argv) {
                 return 2;
             }
         } else if (!strncmp(a, "--", 2) && strchr(a, '=')) {
-            /* the Vita debug table's, --script= being vita_script, a Switch game's press_len, and vulkan_video (which
-               the Vita's AVC decoder doesn't take yet) */
+            /* the Vita debug table's, --script= and --press_len= being vita_script and vita_press_len (a Switch
+               game's are g_unattended_ini's, whose script the Switch runtime parses), and vulkan_video (which the
+               Vita's AVC decoder doesn't take yet) */
             char key[64];
             size_t length = (size_t)(strchr(a, '=') - a - 2);
             const IniOpt* o = NULL;
             if (length < sizeof key) {
                 memcpy(key, a + 2, length);
                 key[length] = 0;
-                o = ini_find(g_vita_debug_ini, !strcmp(key, "script") ? "vita_script" : key);
+                o = ini_find(g_vita_debug_ini, !strcmp(key, "script")      ? "vita_script"
+                                               : !strcmp(key, "press_len") ? "vita_press_len"
+                                                                           : key);
                 if (!o) o = ini_find(g_debug_ini, key);
                 if (!o && !strcmp(key, "vulkan_video")) o = ini_find(g_graphics_ini, key);
             }
@@ -331,10 +339,11 @@ int snx_vita_main(int argc, char** argv) {
         }
         char error[512] = "no sce_sys/param.sfo";
         size_t size = 0;
-        char* sfo_path = dump ? snx_format("%s/sce_sys/param.sfo", input) : NULL;
-        unsigned char* sfo = dump ? (sfo_path ? snx_read_file(sfo_path, &size) : NULL)
+        char sfo_path[SNX_PATH_SIZE];
+        unsigned char* sfo = dump ? (snx_path_format(sfo_path, sizeof sfo_path, "%s/sce_sys/param.sfo", input)
+                                         ? NULL
+                                         : snx_read_file(sfo_path, &size))
                                   : vita_vpk_member(input, "sce_sys/param.sfo", &size, error, sizeof error);
-        free(sfo_path);
         char* title = sfo ? vita_sfo_string(sfo, size, "TITLE_ID") : NULL;
         free(sfo);
         if (!vita_title_id(title)) {

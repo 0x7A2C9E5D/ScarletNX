@@ -14,9 +14,9 @@ static uint32_t read32(const unsigned char* p) {
 /* whether control never reaches the instruction after the A32 instruction w when it runs: a branch without link, a
    write to the PC, BKPT. A call returns there, as does an instruction the block compiler leaves to the backend
    (SnxArmRt.undefined), which may run it */
-static int a32_ends(uint32_t w) {
+static int a32_ends(SnxArmProfile profile, uint32_t w) {
     unsigned rd = (w >> 12) & 15;
-    switch (snx_a32_decode(w)) {
+    switch (snx_a32_decode_profile(profile, w)) {
         case SNX_A32_BRANCH: return !(w & (1u << 24)); /* B; BL returns */
         case SNX_A32_BX: return !(w & 0x20);           /* BX; BLX returns */
         case SNX_A32_DATA: return rd == 15;
@@ -27,15 +27,16 @@ static int a32_ends(uint32_t w) {
         default: return 0;
     }
 }
-static void a32_next(uint32_t pc, uint32_t w, void (*found)(void*, uint32_t, int), void* context) {
-    SnxA32Kind kind = snx_a32_decode(w);
+static void a32_next(SnxArmProfile profile, uint32_t pc, uint32_t w, void (*found)(void*, uint32_t, int),
+                     void* context) {
+    SnxA32Kind kind = snx_a32_decode_profile(profile, w);
     unsigned cond = w >> 28;
     if (kind == SNX_A32_BRANCH) found(context, pc + 8 + (sign_extend(w & 0xFFFFFF, 24) << 2), 0);
     if (kind == SNX_A32_BLX_IMM) found(context, pc + 8 + (sign_extend(w & 0xFFFFFF, 24) << 2) + ((w >> 23) & 2), 1);
-    if (!(a32_ends(w) && (cond == 14 || cond == 15))) found(context, pc + 4, 0);
+    if (!(a32_ends(profile, w) && (cond == 14 || cond == 15))) found(context, pc + 4, 0);
 }
 /* Its instructions are walked as the block compiler walks them, IT state included, to its last one */
-static void thumb_next(uint32_t pc, const unsigned char* code, size_t units, size_t count,
+static void thumb_next(SnxArmProfile profile, uint32_t pc, const unsigned char* code, size_t units, size_t count,
                        void (*found)(void*, uint32_t, int), void* context) {
     size_t used = 0, len = 1;
     unsigned it_len = 0, it_idx = 0, it_conds[4], cond = 14, i;
@@ -44,7 +45,7 @@ static void thumb_next(uint32_t pc, const unsigned char* code, size_t units, siz
     while (used < units) {
         unsigned hw1 = code[used * 2] | (unsigned)code[used * 2 + 1] << 8;
         unsigned hw2 = used + 1 < count ? code[used * 2 + 2] | (unsigned)code[used * 2 + 3] << 8 : 0;
-        len = snx_thumb_decode((uint16_t)hw1, (uint16_t)hw2, &t);
+        len = snx_thumb_decode_profile(profile, (uint16_t)hw1, (uint16_t)hw2, &t);
         if (!len || (len == TH_F32 && used + 1 >= count)) { /* as the block compiler steps over it */
             t.shape = TH_UNDEF;
             len = (hw1 >> 11) >= 0x1D && used + 1 < count ? 2 : 1;
@@ -118,16 +119,16 @@ static void thumb_next(uint32_t pc, const unsigned char* code, size_t units, siz
         case TH_HI: ends = t.rd == 15 && t.op != 1; break; /* MOV or ADD to the PC; not CMP */
         case TH_LOAD: ends = t.rd == 15; break;
         case TH_PUSHPOP: ends = t.op == 1 && t.ra; break; /* POP with the PC */
-        case TH_A32: ends = a32_ends(t.imm); break;
+        case TH_A32: ends = a32_ends(profile, t.imm); break;
         default: break;
     }
     if (!(ends && always)) found(context, next, 1);
 }
-void snx_arm_successors(uint32_t pc, const unsigned char* code, size_t units, size_t count, int thumb,
-                        void (*found)(void* context, uint32_t address, int thumb), void* context) {
+void snx_arm_successors(SnxArmProfile profile, uint32_t pc, const unsigned char* code, size_t units, size_t count,
+                        int thumb, void (*found)(void* context, uint32_t address, int thumb), void* context) {
     if (!units) return;
     if (thumb)
-        thumb_next(pc, code, units, count, found, context);
+        thumb_next(profile, pc, code, units, count, found, context);
     else
-        a32_next(pc + (uint32_t)(units - 1) * 4, read32(code + (units - 1) * 4), found, context);
+        a32_next(profile, pc + (uint32_t)(units - 1) * 4, read32(code + (units - 1) * 4), found, context);
 }

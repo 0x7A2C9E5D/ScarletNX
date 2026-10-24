@@ -6,7 +6,7 @@
 
 Discord: https://discord.gg/tRTRXXbyjp (my god why don't we just use IRC like good people?)
 
-A GPLv3 static ARM64 to x86 recompiler with a Switch translation layer for Linux, Windows, FreeBSD and Android.
+A GPLv3 static ARM64 to x86 recompiler with a Switch, GBA and GNU/Linux ABI translation layer for Solaris, Linux, Windows, FreeBSD and Android.
 
 ## Quick start
 
@@ -25,7 +25,7 @@ and [ScarletNX-android-universal.apk](https://github.com/scarletnx/nightly/relea
 Games need a Vulkan 1.3 driver.
 
 Keys and games must be dumped from your own console. Started with no arguments, the program opens the
-[launcher](docs/GUI.md). **Setup device keys** installs your `prod.keys`. For NSPs, also put `title.keys` in
+[launcher](docs/GUI.md). **Install Keys** installs your `prod.keys`. For NSPs, also put `title.keys` in
 `~/.switch` (`%USERPROFILE%\.switch` on Windows). **Load Switch NSP/XCI/NRO** then picks a dump, extracts and
 recompiles it and starts the game, which the **Games** tab lists from then on. See [Usage](docs/USAGE.md) for the
 command line and [Folders](docs/USAGE.md#folders) for where games, saves and settings go.
@@ -45,7 +45,8 @@ through pipes and read and write files through a sysroot, as QEMU's `-L` gives o
 (`linux/` of the data folder by default). See [Linux ABI execution and QEMU validation](docs/GNUABI.md)
 for the sysroot, the JIT and AOT modes, supported syscalls, and current limits. The NX executable is
 also installed as `scarletnx-switch`, and on Linux and macOS as `scarletnx-3ds` and `scarletnx-gnuabi`, the one
-program running the driver its name says.
+program running the driver its name says. Game Boy Advance ROMs run under the `scarletnx-agb` system type,
+on the emulated AGB board being built under `src/agb/` (licensed under MPL-2.0), see [AGB board](docs/AGB.md).
 
 The recompiler is also a library on its own, `libscarletnx-recompiler`: a program hands
 it ARM64 or AArch32 code in memory and runs the result in its own process with its own
@@ -122,5 +123,6 @@ runs on macOS yet: see [macOS and iOS](./docs/APPLE.md). Every document: [docs](
 - [Switchbrew](https://switchbrew.org) for research.
 - [Azahar](https://github.com/azahar-emu/azahar) and Citra, for all of the 3DS emulation.
 - [Vita3K](https://github.com/Vita3K/Vita3K), for the PS Vita's GXM and shader translation, and [vita-headers](https://github.com/vitasdk/vita-headers) for its NIDs.
+- [mGBA](https://github.com/mgba-emu/mgba) as a direct reference for the AGB board.
 
 Wimsy, the mascot and the runtime's icon (`dist/wimsy.svg`) was drawn by Liz.

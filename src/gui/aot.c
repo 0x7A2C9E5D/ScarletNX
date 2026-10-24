@@ -14,35 +14,36 @@ static uint32_t get32(const unsigned char* p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
 
-char* gui_aot_cache_path(const char* folder, const char* name) {
-    char* record;
-    char* recorded;
-    char* dir = NULL;
-    char* moved;
-    char* path;
-    if (!folder || !name) return NULL;
-    /* the runtime's .folders cache=, when it names a folder that is there; else its user path, as kind_dir */
-    record = snx_format("%s/%s.folders", folder, name);
-    recorded = record ? snx_ini_value(record, "cache") : NULL;
-    if (recorded && snx_is_dir(recorded)) {
-        dir = snx_strdup(recorded);
-    } else {
-        /* the runtime creates its user path; when that is not there, the cache is still beside the game */
-        moved = snx_user_path(folder, SNX_USER_CACHE);
-        dir = snx_strdup(moved && strcmp(moved, folder) && snx_is_dir(moved) ? moved : folder);
-        free(moved);
-    }
+char* gui_game_kind_dir(const char* folder, const char* name, int kind) {
+    static const char* const keys[] = {"config", "state", "cache"}; /* SNX_USER_CONFIG's on */
+    char record[SNX_PATH_SIZE], *recorded, *moved;
+    if (kind < SNX_USER_CONFIG || kind > SNX_USER_CACHE ||
+        snx_path_format(record, sizeof record, "%s/%s.folders", folder, name))
+        return NULL;
+    recorded = snx_ini_value(record, keys[kind - SNX_USER_CONFIG]);
+    if (recorded && snx_is_dir(recorded)) return recorded;
     free(recorded);
-    free(record);
+    /* the runtime makes its user path; where it could not, the files stay beside the game */
+    moved = snx_user_path(folder, kind);
+    if (moved && strcmp(moved, folder) && snx_is_dir(moved)) return moved;
+    free(moved);
+    return snx_strdup(folder);
+}
+char* gui_aot_cache_path(const char* folder, const char* name) {
+    char path[SNX_PATH_SIZE];
+    char *dir, *moved;
+    int cut;
+    if (!folder || !name) return NULL;
+    dir = gui_game_kind_dir(folder, name, SNX_USER_CACHE);
     if (!dir) return NULL;
     moved = snx_absolute(dir);
     if (moved) {
         free(dir);
         dir = moved;
     }
-    path = snx_format("%s/%s.jitcache", dir, name);
+    cut = snx_path_format(path, sizeof path, "%s/%s.jitcache", dir, name);
     free(dir);
-    return path;
+    return cut ? NULL : snx_strdup(path);
 }
 
 int gui_aot_cache_info(const char* path, GuiAotInfo* info) {

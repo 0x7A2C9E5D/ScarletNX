@@ -107,8 +107,8 @@
 71 1:1 2:2>0:0 1:1 ManageNamedPort (stub)
 72 1:1>0:0 1:1 ConnectToPort (stub)
 73 0:0 1:2+3 2:1+4 3:5>0:0 SetProcessMemoryPermission (stub)
-74 0:0 1:1 2:2+3 3:4>0:0 MapProcessMemory (stub)
-75 0:0 1:1 2:2+3 3:4>0:0 UnmapProcessMemory (stub)
+74 0:0 1:1 2:2+3 3:4>0:0 MapProcessMemory
+75 0:0 1:1 2:2+3 3:4>0:0 UnmapProcessMemory
 76 0:0 2:2 3:1+3>0:0 1:1 QueryProcessMemory (stub)
 77 0:0 1:2+3 2:1+4 3:5+6>0:0 MapProcessCodeMemory (stub)
 78 0:0 1:2+3 2:1+4 3:5+6>0:0 UnmapProcessCodeMemory (stub)

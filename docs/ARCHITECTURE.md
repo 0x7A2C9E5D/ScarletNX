@@ -74,13 +74,13 @@ syscalls, ELF execution, filesystem scope, and differential testing.
 ## Recompiler + module ABI
 
 NX tooling under `src/nx/runtime/driver/` and `src/nx/loader/`:
-a dump, read in place, or `work/<Game>/{exefs,romfs}` -> `games/<id>/`: `<id>[.exe]`, `<id>_code.{so,dll}`,
+a dump, read in place, or `work/<Game>/{exefs,romfs}` -> `recompiled/<id>/`: `<id>[.exe]`, `<id>_code.{so,dll}`,
 `<id>_data/`, and the dump's path as `source=` in the game's `<id>.ini` (`<id>.source`, a link to it, from older
 versions):
 
 An update or a DLC is recorded beside its game (`snx_addon_name`), its own `.ini` naming only its dump, and checked
 in the game's `addons=` (`common/utilities/game_ini.c`, which the driver and the launcher write). An update also gets a
-program, `games/<id>/<id>_<its title ID>`; a DLC runs its game's code. The runtime (`main.c`'s `addon_init`) runs an
+program, `recompiled/<id>/<id>_<its title ID>`; a DLC runs its game's code. The runtime (`main.c`'s `addon_init`) runs an
 update's program with the game's `.ini` and data folder, and `fs.c` lays the checked DLCs' data folders and then the
 update's over that folder (`fs_tree_overlay`, which takes only their ExeFS, RomFS, control data and `system/`). It
 reads an update's dump with the game's in one `SnxDump` (its Patch RomFS reads the game's NCA), and each checked DLC's
@@ -97,7 +97,7 @@ the game's image read from that image.
 - `driver.c`: CLI dispatch only; `extract.c` and `recompile.c` own their workflows.
 - `container.c`: a dump opened with hactool, its keys loaded and its NCAs picked, shared by the extraction, the
   recompiler (a dump given to `-r`, its ExeFS read through `SnxExefsReader`) and the runtime's `fs.c`. Without
-  Extract game container, `fs.c` maps the dump `source=` names (else the one `<id>.source` links to) and serves `exefs/*` and the RomFS image from
+  Extract dump, `fs.c` maps the dump `source=` names (else the one `<id>.source` links to) and serves `exefs/*` and the RomFS image from
   it through hactool's storage chains (`snx_hac.h`'s `SnxHacFs`), the sections decrypted, an update's patch applied
   and compressed blocks expanded as they are read. Nothing is cached.
 - `src/nx/loader/loader.c`: NSO/NRO, LZ4, SHA-256, NPDM, MOD0, symbols/relocs/FDEs.
@@ -194,6 +194,25 @@ function's arguments, or a field added into a struct's tail padding: for those t
 | 11 | the reworked LLVM backend's modules |
 | 12 | `RtAPI.cas128`, and `snx_cas128` takes the CPU |
 | 13 | the AOT module's `snx_variants()` table, read as optional |
+| 14 | `RtAPI.code_changed` for IC IVAU, and `SnxModule`'s function table with the byte each AOT function checks first |
+
+#### Code the game patches
+
+Mods for Atmosphère (Skyline, exlaunch) hook a game by writing branches into its code through a writable view of it
+(`svcMapProcessMemory`), then make the new instructions visible the way Arm requires, with `IC IVAU` on each line
+they wrote. The AOT code was compiled from the bytes before, so since SNX_ABI 14 `IC IVAU` reaches the runtime
+(`snx_ic_ivau`, `RtAPI.code_changed`), and `jit_code_changed` (`runtime/guest_jit.c`) finds the AOT functions compiled
+from the line by the descriptor's `fn_lo` and `fn_len`. Each one loses its dispatch slots and its entries in
+`entry_fn` (which the JIT calls AOT functions through), then its byte in `SnxModule.stale` is set. Every AOT function
+reads its byte first (`stale_check` in `ir_codegen.c`) and, once it is set, runs its entry through dispatch, where the
+lookup finds no code and the JIT compiles the instructions as they are now, the patch included. A direct call from
+other AOT code arrives at the same check, so a hook in the middle of a function takes effect for every caller. A call
+returning into an AOT function reads the byte too: a loader may patch a function from inside a call it makes, and once
+the byte is set the function leaves for the thread's dispatch loop at the return address, which runs the new code from
+there. The
+JIT's code goes as any other code change drops it (`jit_code_invalidate`): `snx_jit_invalidate` drops every unit
+whose span of guest code the change touches, all its leaders, since a unit's functions call each other directly. That
+covers hooks in code the game maps itself (NROs), which only the JIT runs.
 
 ## Runtime ownership
 

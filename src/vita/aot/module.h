@@ -9,12 +9,14 @@
 #include <stdint.h>
 
 /* A game's compiled code: <title ID>_code.so (.dll on Windows) in its folder, the blocks the compiler found in the
-   image as it loads (vita/loader/image.h), for the A57 profile on the flat guest memory (cpu/arm/README.md): the
-   Vita's Cortex-A9 is ARMv7-A, whose user-mode A32, Thumb-2, VFPv3 and NEON the ARMv8-A AArch32 instruction set holds */
+   image as it loads (vita/loader/image.h), for the A9 profile on the flat guest memory (cpu/arm/README.md): the
+   Vita's Cortex-A9 is ARMv7-A, whose user-mode A32, Thumb-2, VFPv3 and NEON the ARMv8-A AArch32 instruction set holds,
+   with the UNPREDICTABLE forms its games rely on run as the A9 runs them */
 #define VITA_MODULE_MAGIC 0x31415449564e5853ull /* "SNXVITA1" */
 /* 2: Thumb literal loads, saturation, parallel arithmetic and DSP multiplies; 3: TBH; 4: no flags from 16-bit data
-   processing in an IT block; 5: a 16-bit LDM loading its base */
-#define VITA_MODULE_ABI   5u
+   processing in an IT block; 5: a 16-bit LDM loading its base; 6: the A9 profile (stores with writeback into the
+   register they store) */
+#define VITA_MODULE_ABI   6u
 #ifdef _WIN32
 #define VITA_MODULE_SUFFIX "_code.dll"
 #else

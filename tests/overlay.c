@@ -66,7 +66,7 @@ unsigned gamepad_held(int i) { return i < 0 ? pads_held[0] | pads_held[1] | pads
 const char* gamepad_name(int i) { return i >= 0 && i < 3 ? pad_names[i] : NULL; }
 int gamepad_of_player(int slot) { return slot >= 0 && slot < 3 ? pad_of_player[slot] : -1; }
 const IniOpt g_backend_ini[] = {
-    {"touch", "2", NULL, INI_INT, 0, &touch, 0, 2, NULL, "Touch screen", "Off|Fingers|Mouse too", 0, 0, 0},
+    {"touch", "2", NULL, INI_INT, 0, &touch, 0, 2, NULL, "Touch screen", "Off|Fingers|Fingers and mouse", 0, 0, 0},
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0, 0}};
 /* each player's own, two of them here: swap and vibration, every player's until picked, and a map */
 static SnxPlayerConfig players[2];
@@ -308,7 +308,7 @@ int main(void) {
     tap(8, 3);
     assert(touch == 2);
     draw();
-    assert(text_at(C - 10, 11, "Mouse too"));
+    assert(text_at(C - 1 - (int)strlen("Fingers and mouse"), 11, "Fingers and mouse"));
     tap(8, 3);
     assert(touch == 0);
     draw();
@@ -588,14 +588,14 @@ int main(void) {
         free(sprites);
     }
     /* a fatal error's panel: the menu's, centred on its own rows; the head, the game's name, the error in the
-       failure's colour, its hint, then Share log and Close at its foot, Close in focus. UTF-8 comes out in the font's
-       bytes, and on a short picture the last paragraphs give up rows so the panel stays on it, what Share log did last */
+       failure's colour, its hint, then Share Log and Close at its foot, Close in focus. UTF-8 comes out in the font's
+       bytes, and on a short picture the last paragraphs give up rows so the panel stays on it, what Share Log did last */
     {
         float top, row_h;
         int total, i, close_band = -1, share_band = -1;
         unsigned plain, focused;
         SnxOverlayError panel = panel_of("ENDER MAGNOLIA", "vulkan: the GPU device was lost (driver reset or crash)",
-                                         "Share log sends the game's log, which has what ran last.", NULL, NULL);
+                                         "Share Log sends the game's log, which has what ran last.", NULL, NULL);
         list.n = 0;
         overlay_error_draw(&list, SW, SH, &panel);
         overlay_place(SW, SH, &px, &py, &s);
@@ -617,7 +617,7 @@ int main(void) {
             if (list.q[i].y == top + row_h * (float)(total - 2) && list.q[i].h == row_h && list.q[i].w == list.q[0].w)
                 close_band = i;
         assert(close_band >= 0 && text_at(1, total - 2, "\xFE Close") && text_at(1, total - 3, "\xFE Copy path") &&
-               text_at(1, total - 4, "\xFE Share log"));
+               text_at(1, total - 4, "\xFE Share Log"));
         i = glyph_at(3, total - 4, 'S');
         assert(i >= 0);
         plain = list.q[i].rgba;
@@ -641,7 +641,7 @@ int main(void) {
         assert(i >= 0 && list.q[i].rgba == plain);
         i = glyph_at(3, total - 4, 'S');
         assert(i >= 0 && list.q[i].rgba == focused);
-        /* what Share log did, over the items, and kept when the picture is short */
+        /* what Share Log did, over the items, and kept when the picture is short */
         panel.said = "Log saved to /home/player/.local/state/scarletnx/games/0100ABCD12345000/scarletnx.log.";
         list.n = 0;
         overlay_error_draw(&list, SW, 260, &panel);
@@ -695,10 +695,10 @@ int main(void) {
         overlay_error_draw(&list, SW, 160, &panel);
         assert(!overlay_error_hit(&panel.link, panel.link.x, panel.link.y) && !panel.link.h);
         list.n = 0;
-        panel = panel_of("GAME", "message", "Share log", NULL, NULL);
+        panel = panel_of("GAME", "message", "Share Log", NULL, NULL);
         overlay_error_draw(&list, SW, SH, &panel);
         assert(!panel.link.w && !panel.link.h && !overlay_error_hit(NULL, 0, 0));
-        /* Share log's line takes room from the log's label and the hint first: on a picture the panel just fills with
+        /* Share Log's line takes room from the log's label and the hint first: on a picture the panel just fills with
            both, the whole path is still there and still a link */
         {
             const char* said =

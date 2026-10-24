@@ -16,6 +16,13 @@ typedef struct FakeMember {
     char nickname[64];
     uint8_t ip[4];
 } FakeMember;
+typedef struct DelayedDatagram {
+    struct DelayedDatagram* next;
+    ENetPeer* sender;
+    int64_t due;
+    size_t size;
+    uint8_t bytes[];
+} DelayedDatagram;
 struct FakeRoom {
     SnxLock lk;
     ENetHost* host;
@@ -29,6 +36,8 @@ struct FakeRoom {
     uint64_t last_game_id;
     int ldn_count[8];
     size_t ldn_size[8];
+    unsigned delay_ms;
+    DelayedDatagram* pending;
 };
 
 static void fail(const char* what) {
@@ -187,8 +196,21 @@ static void room_message(FakeRoom* f, ENetPeer* peer, const uint8_t* data, size_
             snx_lock(&f->lk);
             f->last_datagram_size = size;
             memcpy(f->last_datagram, data, size < sizeof f->last_datagram ? size : sizeof f->last_datagram);
+            unsigned delay_ms = f->delay_ms;
             snx_unlock(&f->lk);
-            room_relay(f, peer, data, size, 9, 16);
+            if (delay_ms) {
+                DelayedDatagram* d = malloc(sizeof *d + size);
+                if (!d) fail("delayed datagram allocation");
+                d->sender = peer;
+                d->due = snx_net_now_us() + delay_ms * 1000;
+                d->size = size;
+                memcpy(d->bytes, data, size);
+                DelayedDatagram** link = &f->pending;
+                while (*link && (*link)->due <= d->due) link = &(*link)->next;
+                d->next = *link;
+                *link = d;
+            } else
+                room_relay(f, peer, data, size, 9, 16);
             break;
         case 6: /* IdLdnPacket: type, ldn type, local ip, remote ip (at 6), broadcast (at 10), u32 size (at 11) */
             if (size < 15 || data[1] >= 8) fail("an ldn message that isn't one");
@@ -219,6 +241,16 @@ static void room_thread(void* arg) {
         f->kick[0] = 0;
         snx_unlock(&f->lk);
         if (stop) break;
+        DelayedDatagram** link = &f->pending;
+        while (*link) {
+            DelayedDatagram* d = *link;
+            if (snx_net_now_us() >= d->due) {
+                *link = d->next;
+                room_relay(f, d->sender, d->bytes, d->size, 9, 16);
+                free(d);
+            } else
+                link = &d->next;
+        }
         if (close_now) {
             uint8_t closing = 12; /* IdCloseRoom */
             for (i = 0; i < SLOTS; i++)
@@ -234,7 +266,7 @@ static void room_thread(void* arg) {
                 memset(&f->members[i], 0, sizeof f->members[i]);
                 room_information(f);
             }
-        while (enet_host_service(f->host, &ev, 5) > 0) {
+        for (int k = enet_host_service(f->host, &ev, 5); k > 0; k = enet_host_check_events(f->host, &ev)) {
             if (ev.type == ENET_EVENT_TYPE_RECEIVE) {
                 room_message(f, ev.peer, ev.packet->data, ev.packet->dataLength);
                 enet_packet_destroy(ev.packet);
@@ -245,8 +277,18 @@ static void room_thread(void* arg) {
             }
         }
     }
+    while (f->pending) {
+        DelayedDatagram* d = f->pending;
+        f->pending = d->next;
+        free(d);
+    }
     snx_lock(&f->lk);
     f->done = 1;
+    snx_unlock(&f->lk);
+}
+void fake_room_datagram_delay(FakeRoom* f, unsigned milliseconds) {
+    snx_lock(&f->lk);
+    f->delay_ms = milliseconds;
     snx_unlock(&f->lk);
 }
 

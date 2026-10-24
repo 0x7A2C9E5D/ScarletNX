@@ -12,6 +12,7 @@
   * [FreeBSD](#freebsd)
   * [Configure and build](#configure-and-build)
   * [SDL3 troubleshooting](#sdl3-troubleshooting)
+* [macOS](#macos)
 * [Windows / PowerShell](#windows--powershell)
 * [Windows / MSYS2 CLANG64](#windows--msys2-clang64)
 * [Rebuild, deploy, cache](#rebuild-deploy-cache)
@@ -27,6 +28,8 @@ Run from checkout root. [Extract/AOT/run](USAGE.md) · [Tests/diagnostics](DEVEL
   NASM on x86-64, Perl, Python 3 (the menu's languages), Git, pkg-config and `patch`.
   Use a system SDL3 development package, or X11/Wayland and audio development libraries for the bundled
   SDL3 build.
+- **macOS:** Apple silicon, macOS 13 or newer, Xcode (its Clang and SDKs), CMake ≥3.25, Ninja, Python 3 and Git.
+  LLVM's libraries come from `scripts/apple-llvm.sh` or Homebrew ([steps](#macos)).
 - **Windows:** Win10/11 x64. CI builds in MSYS2's CLANG64 environment, which has LLVM's development files
   ([steps](#windows--msys2-clang64)). Bootstrap stages SHA-256-checked llvm-mingw/Clang, CMake, Ninja,
   NASM, Strawberry Perl and w64devkit in `deps/tools`. llvm-mingw has no LLVM libraries, so that route also needs a
@@ -164,6 +167,55 @@ cmake --preset default -B build && cmake --build build
 
 If that directory was configured with a different compiler or generator, use a new build directory
 (for example `-B build/clang`) rather than mixing the old cache with the new toolchain.
+
+## macOS
+
+Apple silicon only, with Xcode's Clang. The preset is `macos`, and the Linux presets and `default` do not apply.
+Install Xcode, then the build tools:
+
+```sh
+xcode-select --install
+brew install cmake ninja
+```
+
+1. **LLVM's libraries**, once (about 10 minutes on an M1). The script builds the AArch64 code generator alone,
+   which is the one the recompiler uses:
+
+   ```sh
+   scripts/apple-llvm.sh macos ~/apple-llvm/macos
+   ```
+
+   Homebrew's LLVM also works (`brew install llvm`). Pass `-DSNX_LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"`
+   to the configure step below in place of `-DLLVM_DIR`.
+
+2. **Configure, build and install:**
+
+   ```sh
+   cmake --preset macos -DLLVM_DIR=$HOME/apple-llvm/macos/lib/cmake/llvm
+   cmake --build --preset macos
+   cmake --install build/macos --prefix stage
+   # -> build/macos/{scarletnx,snx-shaderc}
+   ```
+
+   `build/macos/scarletnx` runs from the terminal as on Linux ([USAGE](USAGE.md)). It loads the system's Vulkan
+   loader, so it needs Homebrew's `molten-vk` and `vulkan-loader`.
+
+3. **The app** (optional), for a double-clickable `ScarletNX.app` that carries its own MoltenVK:
+
+   ```sh
+   scripts/apple-app.sh macos stage out <moltenvk>   # out/ScarletNX.app
+   ```
+
+   `<moltenvk>` is the extracted `MoltenVK-macos.tar` of the
+   [Ryujinx MoltenVK release](https://github.com/V380-Ori/Ryujinx.MoltenVK/releases) that
+   `.github/workflows/build.yml` pins (`MOLTENVK_RELEASE`, with its SHA-256). **Do not leave it out.** Without it the
+   app has no MoltenVK, and on a Mac without Homebrew's it stops at startup with
+   `SDL could not open a Vulkan window: Failed to load Vulkan Portability library`.
+
+CI's `macOS and iOS (arm64)` job builds the app on every push, and its zip, `ScarletNX-macos-arm64-<commit>.zip`,
+already has MoltenVK. The app is signed ad hoc, so a downloaded copy may need *Open* from the Finder's menu the first
+time (`xattr -cr ScarletNX.app` clears the quarantine). More on the frontend, the data folder, iOS and what is missing
+in [macOS and iOS](APPLE.md).
 
 ## Windows / PowerShell
 
@@ -368,7 +420,7 @@ Extraction needs nothing beside the driver: hactool runs inside it. Recompilatio
 running full runtime; the tools-only build creates one in its checkout's `build/native-recomp`, or accepts
 `--runtime FILE`. A build tree's programs work in the same data folder as an installed copy's: the user's
 (`~/.local/share/scarletnx`, `%APPDATA%\scarletnx` on Windows), and on Linux the XDG config, state and cache folders
-hold its settings, logs and caches ([USAGE](USAGE.md#folders)). `--repo DIR` before the command names another data
+hold its settings, logs and caches ([USAGE](USAGE.md#folders)). `--data DIR` before the command names another data
 folder, `--build-dir DIR` another build tree.
 The menu (`SNX_BUILD_GUI`) needs Python 3 to build its languages (`scripts/build-languages.py`,
 [GUI](GUI.md#languages)). Python ≥3.12 is optional for `tools/*.py` diagnostics.

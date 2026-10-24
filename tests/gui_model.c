@@ -43,6 +43,11 @@ int main(void) {
     assert(menu.active == GUI_VITA && menu.view == GUI_LOAD_DROP);
     gui_menu_key(&menu, GUI_CANCEL);
     gui_menu_key(&menu, GUI_RIGHT);
+    assert(menu.selected == GUI_GBA);
+    gui_menu_key(&menu, GUI_SELECT);
+    assert(menu.active == GUI_GBA && menu.view == GUI_LOAD_DROP);
+    gui_menu_key(&menu, GUI_CANCEL);
+    gui_menu_key(&menu, GUI_RIGHT);
     assert(menu.selected == GUI_KEYS);
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.view == GUI_LOAD_KEYS && !menu.running);
@@ -80,15 +85,15 @@ int main(void) {
     {
         char use[128];
         gui_usage_text(use, sizeof use, true, 812ull << 20, 52, 4);
-        assert(!strcmp(use, "GUI + children: RAM 812 MB  CPU 13% (0.5 cores)"));
+        assert(!strcmp(use, "RAM 812 MB  CPU 13% (0.5 cores)"));
         gui_usage_text(use, sizeof use, true, 1404ull << 20, 216, 8); /* a game compiling on 8 cores */
-        assert(!strcmp(use, "GUI + children: RAM 1.4 GB  CPU 27% (2.2 cores)"));
+        assert(!strcmp(use, "RAM 1.4 GB  CPU 27% (2.2 cores)"));
         gui_usage_text(use, sizeof use, true, 1, 830, 8);
-        assert(!strcmp(use, "GUI + children: RAM 1 KB  CPU 100% (8.0 cores)"));
+        assert(!strcmp(use, "RAM 1 KB  CPU 100% (8.0 cores)"));
         gui_usage_text(use, sizeof use, true, 0, 150, 0); /* SDL knows no cores: one */
-        assert(!strcmp(use, "GUI + children: RAM 0 MB  CPU 100% (1.0 cores)"));
+        assert(!strcmp(use, "RAM 0 MB  CPU 100% (1.0 cores)"));
         gui_usage_text(use, sizeof use, false, 1, 1, 1);
-        assert(!strcmp(use, "GUI + children: resource usage unavailable"));
+        assert(!strcmp(use, "RAM and CPU: unavailable"));
         /* sizes, as the footer and the Settings' disk line write them: KB under a MB, rounded up, MB under a GB */
         gui_size_text(use, sizeof use, 0);
         assert(!strcmp(use, "0 MB"));
@@ -137,7 +142,7 @@ int main(void) {
     assert(gui_wrap("\xe8\x8f\x9c\xe5\x8d\x95\xe8\x8f\x9c", 5) == 6 && gui_wrap("\xe8\x8f\x9c\xe5\x8d\x95", 4) == 6);
     assert(gui_wrap("a/\xe8\x8f\x9c", 3) == 2 && gui_wrap("\xe8\x8f\x9c\xe5\x8d\x95", 1) == 3);
 
-    /* the head (Add a folder and two recent games) over each page of the games: Up and Down go over the whole list, a
+    /* the head (Add Folder and two recent games) over each page of the games: Up and Down go over the whole list, a
        page's last game to the next one's first and back, one ring from the list's last game round to the head */
     /* items no one picks (headings): the focus steps over them, Select on one asks nothing, a page that opens with
        its focus on one moves it off */
@@ -215,7 +220,7 @@ int main(void) {
     gui_browser_key(&browser, GUI_DOWN);
     assert(browser.selected == 3);
     assert(gui_browser_key(&browser, GUI_CANCEL) == GUI_BROWSER_BACK);
-    browser = (GuiBrowser){.head = 1}; /* no games: Add a folder alone */
+    browser = (GuiBrowser){.head = 1}; /* no games: Add Folder alone */
     gui_browser_resize(&browser, 0);
     gui_browser_key(&browser, GUI_DOWN);
     gui_browser_key(&browser, GUI_PAGE_DOWN);
@@ -461,7 +466,7 @@ int main(void) {
     assert(!gui_confirm_key(&confirm, GUI_SELECT) && !gui_confirm_key(&confirm, GUI_DOWN));
     assert(!confirm.shown && confirm.selected == GUI_CONFIRM_KEEP);
     confirm.shown = true;
-    assert(!gui_confirm_key(&confirm, GUI_SELECT) && !confirm.shown); /* Keep going is the first choice */
+    assert(!gui_confirm_key(&confirm, GUI_SELECT) && !confirm.shown); /* Continue is the first choice */
     confirm.shown = true;
     assert(!gui_confirm_key(&confirm, GUI_DOWN) && confirm.selected == GUI_CONFIRM_ABORT && confirm.shown);
     assert(!gui_confirm_key(&confirm, GUI_PAGE_DOWN) && confirm.selected == GUI_CONFIRM_ABORT && confirm.shown);

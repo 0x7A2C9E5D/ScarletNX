@@ -16,8 +16,8 @@ char* snx_ini_value(const char* path, const char* key);
 int snx_ini_record(const char* path, const char* key, const char* value);
 /* the dump the game was made from, owned: what Extract to tmpfs extracts again, and what a game made from its dump
    without extracting it reads its ExeFS and RomFS from. source= in the game's .ini, else <folder>/<name>.source, the
-   link an older version made (Windows makes links only with the right to). recorded, when not NULL: 1 when either
-   names a dump, there or not */
+   link an older version made (Windows makes links only with the right to); NULL when that path does not fit (said).
+   recorded, when not NULL: 1 when either names a dump, there or not */
 char* snx_game_source(const char* folder, const char* name, int* recorded);
 /* dump, absolute, as source= in [Game] of the game's .ini, the file made when there is none and left as it is when it
    names dump already. 0, or nonzero with a line saying why */

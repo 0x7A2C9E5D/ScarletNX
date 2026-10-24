@@ -63,6 +63,36 @@ int main(void) {
             failures++;
         }
     }
+    /* The Vita's A9 profile: a store with writeback into the register it stores (a Vita game's Thumb
+       str r0, [r0, #28]!, then A32's) stores the register as it was, then writes the base back */
+    static const unsigned char thumb_store[] = {0x40, 0xf8, 0x1c, 0x0f, 0x00, 0xdf};     /* str.w; svc #0 */
+    static const unsigned char a32_store[] = {0x1c, 0x00, 0xa0, 0xe5, 0x00, 0x00, 0x00, 0xef}; /* str; svc #0 */
+    for (int thumb = 1; thumb >= 0; --thumb) {
+        const unsigned char* bytes = thumb ? thumb_store : a32_store;
+        size_t size = thumb ? sizeof thumb_store : sizeof a32_store;
+        memset(mem, 0, sizeof mem);
+        memcpy(mem + 0x1000, bytes, size);
+        memset(&cpu, 0, sizeof cpu);
+        cpu.mem = mem;
+        cpu.mem_size = sizeof mem;
+        cpu.cpsr = thumb ? 0x30 : 0x10;
+        cpu.r[15] = 0x1000;
+        cpu.r[0] = 0x2000;
+        SnxArmExecRange store_range = {0x1000, mem + 0x1000, size};
+        SnxArmExec* a9 = snx_arm_exec_new(NULL, 0);
+        if (!a9) return 1;
+        snx_arm_exec_set_profile(a9, SNX_ARM_PROFILE_A9);
+        Svc stop = {0};
+        exit = snx_arm_exec_run(a9, &cpu, &store_range, 1, syscall, &stop);
+        snx_arm_exec_free(a9);
+        uint32_t stored = mem[0x201c] | (uint32_t)mem[0x201d] << 8 | (uint32_t)mem[0x201e] << 16 |
+                          (uint32_t)mem[0x201f] << 24;
+        if (!stop.seen || stored != 0x2000 || cpu.r[0] != 0x201c) {
+            fprintf(stderr, "FAIL: A9 %s store with writeback: exit %d, stored %08x, r0 %08x\n", thumb ? "Thumb" : "A32",
+                    exit, (unsigned)stored, (unsigned)cpu.r[0]);
+            failures++;
+        }
+    }
     if (!failures) puts("A32 executor and DRY zero-extending SVC passed");
     return failures ? 1 : 0;
 }

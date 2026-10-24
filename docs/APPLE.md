@@ -3,8 +3,9 @@
 # macOS and iOS
 
 Both build on a Mac with Xcode, for Apple silicon (arm64), with Xcode's Clang, and the CI builds both on every push
-(`.github/workflows/build.yml`). They are new and have only been built by CI. No game has run on either yet, for the
-reasons under [What is missing](#what-is-missing).
+(`.github/workflows/build.yml`). They are new. On a Mac, one game's module loads and runs as far as its title
+background, without the logo or the menu. On an iPhone, one game has been prepared on the device and played with JIT on.
+The rest is under [What is missing](#what-is-missing).
 
 ## The frontend
 
@@ -21,7 +22,7 @@ same shape as Android's `MainActivity` and `src/gui/android.c`:
 `ScarletNX.app` is the desktop program in a bundle: `scarletnx` in `Contents/MacOS`, the themes and the
 licenses in `Contents/share`, where an installed copy looks for them. It works as on Linux. The menu extracts and
 recompiles through the driver as a child process, with SDL's own file and folder dialogs. Its data folder is
-`~/Library/Application Support/scarletnx`. *Share log* saves the log and selects it in a Finder window. The app is
+`~/Library/Application Support/scarletnx`. *Share Log* saves the log and selects it in a Finder window. The app is
 signed ad hoc, as Apple silicon runs no unsigned code. A copy from a download may need *Open* from the Finder's menu
 the first time.
 
@@ -44,12 +45,13 @@ menu's driver:
   copied into it first. The thread has a 64 MiB stack, which LLVM's passes need.
 - **A game** runs in the app's process once the menu closes (`src/nx/runtime/entry.c`): the runtime starts once per
   process, so the app ends with the game.
-- **Share log** opens the share sheet with `scarletnx.log`.
+- **Share Log** opens the share sheet with `scarletnx.log`.
 - **Logs.** Everything the app prints goes to `logs/scarletnx-console.log` in its Documents, after a banner with the
   device, the system and the limits the app has, and a fatal error is also written to `logs/scarletnx-error.log`. A
   phone shows no console, so these are what to read when a run fails.
 
-The IPA is unsigned: AltStore, SideStore or a developer account signs it for the device, with
+The IPA is unsigned: AltStore, SideStore or a developer account signs it for the device (a Mac can too:
+[Installing from a Mac](#installing-from-a-mac)), with
 `dist/apple/ScarletNX.entitlements` (the larger address space and memory limit a game needs). It holds MoltenVK's
 framework.
 
@@ -68,17 +70,21 @@ pick into `dumps/`, then makes the game in `recompiled/`. Pick them from whereve
 
 1. **Install the app.** Take `ScarletNX-ios-arm64-<commit>.ipa` from a CI run, or build it (`cmake --preset ios`,
    [Building](#building)), and install it with a sideloading tool that signs it with an Apple ID: iloader or
-   SideStore. A free account signs an app for 7 days, up to three apps at a time (the app, SideStore and StikDebug).
+   SideStore. A free account signs an app for 7 days. iOS lets a device hold three apps with a free profile at a time,
+   whichever Apple IDs signed them, so a second account adds no room. The app, SideStore and StikDebug fill them, and a
+   fourth install fails with "maximum number of installed apps using a free developer profile".
 2. **Set up JIT once.** iOS makes memory executable only for an app with a debugger attached. Install StikDebug and
    LocalDevVPN, give StikDebug the pairing file (SideStore keeps one: *Storage Explorer*,
    `ALTPairingFile.mobiledevicepairing`), hold ScarletNX in StikDebug's list and *Assign Script* `universal.js`. The
-   runtime checks for the debugger first and says what to enable when there is none.
-3. **Add your keys.** Open ScarletNX, *Setup device keys*, and pick the `prod.keys` of your Switch.
+   runtime checks for the debugger first and says what to enable when there is none. Reinstalling StikDebug removes its data,
+   assignments included, so assign the script again.
+3. **Add your keys.** Open ScarletNX, *Install Keys*, and pick the `prod.keys` of your Switch.
 4. **Prepare the game.** In *Games*, pick the `.nsp` or `.xci` and prepare it. The app extracts it and writes
    `recompiled/<id>/` with `<id>_code.snxobj` and `<id>_data/`. 64-bit games only. Keep the app in the foreground
    until it ends: iOS stops its GPU and its threads in the background.
 5. **Play.** *Enable JIT* for ScarletNX in StikDebug, open ScarletNX, *Games*, and pick the game. Do this before each
-   run, and do not leave the app while the game runs.
+   run, and do not leave the app while the game runs. Keep StikDebug open too: when it is closed, the debugger goes
+   with it and the game loses JIT.
 
 The folders the app makes in *On My iPhone > ScarletNX* are `dumps/` (your games' dumps), `keys/`, `recompiled/` (the
 games it made) and `logs/` (what to send when a run fails). Reinstalling the app can remove them with some tools.
@@ -90,17 +96,43 @@ Limits found on an iPhone 14 Pro (iOS 26.6.1): without the paid extended-virtual
 about 13 GiB of address space and about 3 GB of memory, so the runtime takes the largest free run it can (128 GiB
 down to 5 GiB) and lays the guest out to fit, with no alias region below 12 GiB.
 
+### Installing from a Mac
+
+A Mac with Xcode can sign the IPA and install it, with no sideloading tool. `scripts/apple-resign.sh` does it:
+
+```
+scripts/apple-resign.sh ScarletNX-ios-arm64-<commit>.ipa --team TEAM --bundle org.scarletnx.TEAM \
+    --identity "Apple Development: you@example.com (ABCDE12345)" --device UDID
+```
+
+TEAM is the account's team ID, the identity one of its certificates (`security find-identity -v -p codesigning`) and
+UDID the iPhone's (`xcrun devicectl list devices`). The script:
+
+1. **Makes the provisioning profile.** It builds a stub app with the bundle ID and the team, with
+   `-allowProvisioningUpdates`, and Xcode makes the profile in the account it is signed in to.
+2. **Signs the app.** It puts that profile in the app, sets the bundle ID, takes the entitlements from the profile and
+   signs the frameworks and then the app with the certificate.
+3. **Installs it** with `xcrun devicectl device install app`. The same bundle ID replaces the app and keeps its
+   `dumps/`, `keys/` and `recompiled/`. A sideloading tool adds the team to the bundle ID, so pass the one the
+   installed app has (`org.scarletnx.TEAM`), as another counts as a new app.
+
+Run it from Terminal.app on the Mac's own screen. Over ssh the keychain is locked and codesign fails with
+`errSecInternalComponent`. A free account's profile lasts 7 days and covers three apps on a device in all, whichever
+tool installed them. A free profile lacks the paid entitlements of `dist/apple/ScarletNX.entitlements`, so the app
+is signed with the ones the profile has. Without `--device` the signed `ScarletNX.app` is left in the folder of
+`--out`.
+
 ## What is missing
 
 Apple silicon's 16 KiB pages no longer stop the runtime: it commits guest memory in whole host pages, as on
 PowerPC64 ([PowerPC64](./PPC64.md)), and views of memory are copies there, as Windows has them. What still keeps
 games from running:
 
-- **Game modules on a Mac, untested.** The recompiler links an arm64 Mach-O dylib
+- **A game's frame on a Mac.** The recompiler links an arm64 Mach-O dylib
   (`src/common/cpu/recompiler/llvm/link_macho.c`) with the ad hoc signature ld64 gives one, which Apple silicon
-  needs to run it. Its layout, rebases, exports and signature were checked on Linux against LLVM's tools and
-  `ld64.lld`, and its code was run there under qemu. No Mac has loaded one yet.
-- **Game modules on iOS, untested on a device.** iOS loads no code it did not ship with, so a game's code is a pack of
+  needs to run it. A Mac loads one and the game runs, but the frame stops at the title background. Which part of the
+  renderer on MoltenVK drops the rest is not known yet.
+- **Game modules on iOS, one game checked.** iOS loads no code it did not ship with, so a game's code is a pack of
   objects (`scarletnx -r Game --target ios` writes `<id>_code.snxobj`, 64-bit games only) that the app loads into
   memory a debugger made executable (`load_pack` in `src/nx/runtime/main.c`, the JIT loader's iOS arena in
   `code_loader.c`). The app makes it itself, or a Mac does.

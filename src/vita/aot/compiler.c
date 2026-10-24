@@ -125,8 +125,9 @@ static LLVMValueRef emit(LLVMModuleRef module, const VitaImage* image, uint32_t 
     if (!code || count > available) return NULL;
     void* input = units_of(code, count, thumb);
     if (!input) return NULL;
-    LLVMValueRef fn = thumb ? snx_thumb_llvm_block(module, name, input, count, key & ~1u, consumed)
-                            : snx_arm_llvm_block(module, name, input, count, key & ~1u, consumed);
+    const SnxArmCodegenOptions options = {SNX_ARM_CODEGEN_OPTIONS_ABI, SNX_ARM_PROFILE_A9, SNX_ARM_MEMORY_FLAT};
+    LLVMValueRef fn = thumb ? snx_thumb_llvm_block_ex(module, name, input, count, key & ~1u, consumed, &options)
+                            : snx_arm_llvm_block_ex(module, name, input, count, key & ~1u, consumed, &options);
     free(input);
     return fn;
 }
@@ -162,7 +163,7 @@ static bool discover(Discovery* d, const char* folder, char* error, size_t error
             d->blocks = grown, d->capacity = capacity;
         }
         d->blocks[d->count++] = (Block){key, (uint32_t)consumed};
-        snx_arm_successors(key & ~1u, code, consumed, count, (int)(key & 1), queue, d);
+        snx_arm_successors(SNX_ARM_PROFILE_A9, key & ~1u, code, consumed, count, (int)(key & 1), queue, d);
     }
     LLVMDisposeModule(scratch);
     LLVMContextDispose(context);
@@ -302,8 +303,7 @@ static void worker(Work* w) {
         if (i >= w->chunks) break;
         ok = chunk(&h, w, i, error, sizeof error);
         work_lock(w);
-        if (ok && (!(++w->finished % 16) || w->finished == w->chunks))
-            printf("Compiled %u/%u chunks of blocks\n", w->finished, w->chunks);
+        if (ok) printf("Compiled %u/%u chunks of blocks\n", ++w->finished, w->chunks);
         work_unlock(w);
     }
     host_free(&h);
@@ -460,7 +460,11 @@ int vita_aot_compile(const char* folder, const VitaImage* image, char* error, si
         goto done;
     }
     objects[0] = snx_path_join(stage, "index.o");
-    for (unsigned i = 1; i < files; ++i) objects[i] = snx_format("%s/blocks-%05u.o", stage, i);
+    for (unsigned i = 1; i < files; ++i) {
+        char name[32];
+        snprintf(name, sizeof name, "blocks-%05u.o", i);
+        objects[i] = snx_path_join(stage, name);
+    }
     work = (Work){.image = image, .blocks = d.blocks, .objects = objects + 1, .count = d.count, .chunks = chunks};
     if (chunks && !compile_chunks(&work)) {
         snprintf(error, error_size, "%s", work.error);

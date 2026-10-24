@@ -38,8 +38,46 @@ static int vfp2(uint32_t w) {
         default: return 0;
     }
 }
+/* The Cortex-A9's: a store with writeback into the register it stores (STR r0, [r0, #28]!) is UNPREDICTABLE in
+   ARMv7, and A57's decoders reject it. The A9 stores the register as it was, then writes the base back, which a Vita
+   game's code relies on (one stores a structure's address in its field and passes the field to a callback): decoded
+   as the same instruction with another base, which the emitters run so (they read the stored register before they
+   write the base back). A load's writeback into the register it loads stays rejected, as do the doubleword stores */
+static unsigned other_register(unsigned a, unsigned b) {
+    unsigned r = 0;
+    while (r == a || r == b) ++r;
+    return r;
+}
+static SnxA32Kind a9_a32(uint32_t w) {
+    SnxA32Kind kind = snx_a32_decode(w);
+    unsigned n = (w >> 16) & 15, d = (w >> 12) & 15;
+    int store_writeback = !(w & (1u << 20)) && (!(w & (1u << 24)) || (w & (1u << 21)));
+    if (kind != SNX_A32_UNDEFINED || n != d || n == 15 || !store_writeback || (w >> 28) == 15) return kind;
+    SnxA32Kind twin = snx_a32_decode((w & ~(15u << 16)) | other_register(d, w & 15) << 16);
+    if (twin == SNX_A32_SINGLE || (twin == SNX_A32_EXTRA && ((w >> 5) & 3) == 1)) return twin; /* STR, STRB, STRH */
+    return kind;
+}
+static unsigned a9_thumb(uint16_t h, uint16_t h2, SnxThumb* o) {
+    unsigned len = snx_thumb_decode(h, h2, o), n = h & 15, t = h2 >> 12;
+    /* F8xx/F9xx stores (hw1 bit 4 clear) of the imm8 form (hw2 bit 11) with writeback (hw2 bit 8) */
+    if (len || (h & 0xfe90) != 0xf800 || (h2 & 0x900) != 0x900 || n != t || n == 15) return len;
+    len = snx_thumb_decode((uint16_t)((h & ~15u) | other_register(t, 15)), h2, o);
+    if (len != TH_F32 || o->shape != TH_STORE || !(o->flags & TH_WB)) {
+        memset(o, 0, sizeof *o);
+        return 0;
+    }
+    o->rn = n;
+    return len;
+}
 SnxA32Kind snx_a32_decode_profile(SnxArmProfile profile, uint32_t w) {
     if (profile == SNX_ARM_PROFILE_A57) return snx_a32_decode(w);
+    if (profile == SNX_ARM_PROFILE_A9) return a9_a32(w);
+    if (profile == SNX_ARM_PROFILE_ARM7TDMI) {
+        /* An MSR that writes the control or extension byte switches modes on the AGB board, which banks the
+           registers: the board runs it. A57's EL0 MSR would drop the mode bits */
+        SnxA32Kind kind = snx_a32_decode(w);
+        return kind == SNX_A32_MSR && ((w >> 16) & 3) ? SNX_A32_UNDEFINED : kind;
+    }
     if (profile != SNX_ARM_PROFILE_ARM11) return SNX_A32_UNDEFINED;
     /* ARM11 CP15 barrier operations, not ARMv7's unconditional encodings.
        Only these user-accessible maintenance operations are admitted. */
@@ -84,7 +122,8 @@ SnxA32Kind snx_a32_decode_profile(SnxArmProfile profile, uint32_t w) {
     }
 }
 unsigned snx_thumb_decode_profile(SnxArmProfile profile, uint16_t h, uint16_t h2, SnxThumb* o) {
-    if (profile == SNX_ARM_PROFILE_A57) return snx_thumb_decode(h, h2, o);
+    if (profile == SNX_ARM_PROFILE_A57 || profile == SNX_ARM_PROFILE_ARM7TDMI) return snx_thumb_decode(h, h2, o);
+    if (profile == SNX_ARM_PROFILE_A9) return a9_thumb(h, h2, o);
     memset(o, 0, sizeof *o);
     if (profile != SNX_ARM_PROFILE_ARM11) return 0;
     /* ARMv6K Thumb BL is two separately executable 16-bit instructions. Its

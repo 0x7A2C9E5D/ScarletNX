@@ -10,11 +10,14 @@
 #include "nx/runtime/driver/container.h"
 
 /* Indexes the game's data folder and maps RomFS and ExeFS for the run. Called once, before any guest file is loaded */
-void fs_init(void);
+void fs_init(const char* keys, const char* title_keys);
 extern u64 g_fs_bytes_read, g_fs_bytes_written; /* the game's file I/O, for the rate plot */
 /* Lookups by a path in the index. *size is 0 when the file isn't there */
 FILE* fs_open_read(const char* path, u64* size);
 int fs_map_file(const char* path, PFileMap* map); /* 0, or -1 */
+/* the mods' patches the program was recompiled with (HleFs' patches), which the loader writes over the modules they
+   are for: their count, and their paths in *paths */
+size_t fs_patches(char* const** paths);
 /* 1 when id is a DLC read in place from its dump (one the game's addons= checks), which OpenDataStorageByDataId serves
    as installed */
 int fs_aoc_has(u64 id);
@@ -112,7 +115,7 @@ typedef struct {
     FileData files[FS_FILE_MAX];
     DirData dirs[FS_DIR_MAX];
     u32 fs_next, file_next, dir_next;
-    /* Extract game container off: the dump the game's folder links to, mapped for the whole run, and its program's
+    /* Extract dump off: the dump the game's folder links to, mapped for the whole run, and its program's
        ExeFS and RomFS read out of it (dump_open). dlock keeps one read at a time: their decryption is shared */
     SnxDump dump;
     SnxHacFs* dfs;
@@ -131,6 +134,10 @@ typedef struct {
        the game's (mexefs_names, mexefs_paths, nmexefs of them), and how many romfs/ folders are grafted as mods.<i> */
     char **mexefs_names, **mexefs_paths;
     size_t nmexefs, nmromfs;
+    /* and their patches (common/utilities/patches.h) the program was recompiled with, which the loader writes over the
+       modules they are made for, npatches of them */
+    char** patches;
+    size_t npatches;
     int rlayered; /* the RomFS image is made up with the mods' over the game's (romfs_init) */
 } HleFs;
 /* all zero: fs_init sets the tree up */

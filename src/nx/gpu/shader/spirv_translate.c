@@ -6,14 +6,20 @@
 #include <assert.h>
 #include <stdlib.h>
 
+enum { VAR_PRED = 255, VAR_FLAG = VAR_PRED + 7, VAR_COUNT = VAR_FLAG + 4 };
+
 typedef struct {
     SpvEmitter emit;
     u32 u32_type, f32_type, f16_type, f64_type, bool_type, zero, true_value, false_value, glsl;
     u32 reg[255];
-    /* Each register's value in the block being written, so that reading it again takes no load: the value, a bitcast
-       of it to alt_type, and the emitter's block they were made in. Stores stay where they were, so the variables
-       hold every value at a block's end and the driver sees the same memory as before */
-    u32 reg_val[255], reg_alt[255], reg_alt_type[255], reg_block[255];
+    /* The registers, predicates and flags (VAR_PRED + p, VAR_FLAG + k) as values in the block being written, so that
+       reading one again takes no load and only its last value in the block is stored: the value (0 for a register
+       written as reg_alt only, bitcast to its bits when read so), the emitter's block it was read or written in, and
+       whether the variable still has to take it. Each is stored before the branch or merge that ends its block
+       (var_flush, the emitter's block_end): blocks that follow read the variables. A register's bitcast to another
+       32-bit type in the block is reg_alt, of reg_alt_type */
+    u32 var_val[VAR_COUNT], var_block[VAR_COUNT], reg_alt[255], reg_alt_type[255];
+    u8 var_dirty[VAR_COUNT];
     u8* ftz; /* a bit per id: values with no subnormal (float_ftz's, and reads of registers not tainted) */
     size_t ftz_bytes;
     /* each value's flush in the block it was made in (by id, ftz_of_cap of them): a value read once and used by
@@ -25,12 +31,18 @@ typedef struct {
     u8 tainted[256];
     int taint_known;
     int ftz_float; /* the module preserves signed zeros (SignedZeroInfNanPreserve): float_ftz flushes with a float test */
+    int soft_ftz_on; /* FTZ instructions flush their operands and results with float_ftz (SH_FTZ_EMULATE's way) */
     /* A pure instruction's guard while it is translated: it runs unguarded and each register, predicate and flag it
        writes keeps its old value where the guard is false, in place of a branch around it. 0 otherwise */
     u32 guard;
     u32 pred[7];
     u32 cc_c, cc_o, cc_z, cc_s;
     u32 cbuf[18], cbuf_pointer[18];
+    /* constant buffer words read in the block being written, by bank and offset (a cache: a word that collides is
+       read again), and their bitcast to a float, 0 until made. A draw's constant buffers don't change under it */
+    struct {
+        u32 key, block, word, as_float;
+    } cbuf_seen[512];
     u32 scale_buffer, scale_pointer;
     u32 sampler[SH_MAXTEX], sampled_type[SH_MAXTEX];
     u32 texture_array, tex_index[SH_MAXTEX], tex_map_buffer, tex_map_pointer, active_index;
@@ -45,53 +57,100 @@ typedef struct {
        driver drop a quad's remaining helpers from execution while they still hold the loop open: AMD's Windows
        compiler then repeats the loop with no lane left to end it, until the GPU is reset. */
     u32 discarded;
+    u32 branch_cond; /* with structured flow, the condition of the branch that ends the block, 0 for always */
+    u32 branch_target; /* and the word a BRX that ends it goes to */
 } DirectCtx;
 
 int g_shader_texture_arrays;
 int g_shader_stage_point_size;
 int g_shader_output_layer = 1;
+int g_shader_viewport_index = 3;
 int g_shader_geometry = 1;
 int g_shader_float16 = 1;
 int g_shader_tessellation = 1;
 int g_shader_clock_scopes;
+int g_shader_maximal_reconvergence;
+
+/* the Function variable of a register, predicate or flag (z, s, c, o) */
+static u32 var_of(const DirectCtx* c, u32 v) {
+    if (v < VAR_PRED) return c->reg[v];
+    if (v < VAR_FLAG) return c->pred[v - VAR_PRED];
+    v -= VAR_FLAG;
+    return v == 0 ? c->cc_z : v == 1 ? c->cc_s : v == 2 ? c->cc_c : c->cc_o;
+}
+static u32 flag_var(const DirectCtx* c, u32 variable) {
+    return VAR_FLAG + (variable == c->cc_z ? 0 : variable == c->cc_s ? 1 : variable == c->cc_c ? 2 : 3);
+}
+
+/* a predicate or flag's value: its variable's, loaded once a block */
+static u32 var_read(DirectCtx* c, u32 v) {
+    if (c->var_val[v] && c->var_block[v] == c->emit.block) return c->var_val[v];
+    c->var_val[v] = spv_emit_load(&c->emit, c->bool_type, var_of(c, v));
+    c->var_block[v] = c->emit.block;
+    c->var_dirty[v] = 0;
+    return c->var_val[v];
+}
+static void var_write(DirectCtx* c, u32 v, u32 value) {
+    c->var_val[v] = value;
+    c->var_block[v] = c->emit.block;
+    c->var_dirty[v] = 1;
+}
+
+/* Before a merge or a branch: the block's last values into their variables. One written in a block that ended in a
+   return or a kill, which store nothing, is dropped */
+static void var_flush(void* user) {
+    DirectCtx* c = user;
+    for (u32 v = 0; v < VAR_COUNT; v++) {
+        if (!c->var_dirty[v]) continue;
+        c->var_dirty[v] = 0;
+        if (c->var_block[v] != c->emit.block) continue;
+        if (!c->var_val[v]) c->var_val[v] = spv_emit_bitcast(&c->emit, c->u32_type, c->reg_alt[v]);
+        spv_emit_store(&c->emit, var_of(c, v), c->var_val[v]);
+    }
+}
 
 static u32 reg_read(DirectCtx* c, u32 r) {
     if (r >= 255) return c->zero;
-    if (c->reg_val[r] && c->reg_block[r] == c->emit.block) return c->reg_val[r];
-    c->reg_val[r] = spv_emit_load(&c->emit, c->u32_type, c->reg[r]);
-    c->reg_block[r] = c->emit.block;
+    if (c->var_block[r] == c->emit.block && (c->var_val[r] || c->reg_alt_type[r])) {
+        if (!c->var_val[r]) c->var_val[r] = spv_emit_bitcast(&c->emit, c->u32_type, c->reg_alt[r]);
+        return c->var_val[r];
+    }
+    c->var_val[r] = spv_emit_load(&c->emit, c->u32_type, c->reg[r]);
+    c->var_block[r] = c->emit.block;
+    c->var_dirty[r] = 0;
     c->reg_alt_type[r] = 0;
-    return c->reg_val[r];
+    return c->var_val[r];
 }
 
 static void reg_write(DirectCtx* c, u32 r, u32 value) {
     if (r >= 255) return;
     if (c->guard) value = spv_emit_select(&c->emit, c->u32_type, c->guard, value, reg_read(c, r));
-    spv_emit_store(&c->emit, c->reg[r], value);
-    c->reg_val[r] = value;
-    c->reg_block[r] = c->emit.block;
+    var_write(c, r, value);
     c->reg_alt_type[r] = 0;
 }
 
-/* value, of another 32-bit type, stored as the register's bits: a read of that type in the block takes value back */
+/* value, of another 32-bit type, stored as the register's bits: a read of that type in the block takes value back,
+   and its bits are a bitcast made when something reads or stores them */
 static void reg_write_as(DirectCtx* c, u32 r, u32 value, u32 type) {
-    reg_write(c, r, spv_emit_bitcast(&c->emit, c->u32_type, value));
-    if (r < 255 && !c->guard) { /* a guarded write's bits are a select of value's, not value's */
-        c->reg_alt[r] = value;
-        c->reg_alt_type[r] = type;
+    if (r >= 255) return;
+    if (c->guard) { /* a guarded write's bits are a select of value's, not value's */
+        reg_write(c, r, spv_emit_bitcast(&c->emit, c->u32_type, value));
+        return;
     }
+    var_write(c, r, 0);
+    c->reg_alt[r] = value;
+    c->reg_alt_type[r] = type;
 }
 
 /* the register's bits as another 32-bit type, bitcast once a block */
 static void ftz_mark(DirectCtx* c, u32 value);
 static u32 reg_read_as(DirectCtx* c, u32 r, u32 type) {
+    if (r >= 255) return spv_emit_bitcast(&c->emit, type, c->zero);
+    if (c->var_block[r] == c->emit.block && c->reg_alt_type[r] == type) return c->reg_alt[r];
     u32 bits = reg_read(c, r);
-    if (r >= 255) return spv_emit_bitcast(&c->emit, type, bits);
-    if (c->reg_alt_type[r] != type) {
-        c->reg_alt[r] = spv_emit_bitcast(&c->emit, type, bits);
-        c->reg_alt_type[r] = type;
-        if (type == c->f32_type && c->taint_known && !c->tainted[r]) ftz_mark(c, c->reg_alt[r]);
-    }
+    c->reg_alt[r] = spv_emit_bitcast(&c->emit, type, bits);
+    c->reg_alt_type[r] = type;
+    if (type == c->f32_type && c->taint_known && !c->tainted[r]) ftz_mark(c, c->reg_alt[r]);
     return c->reg_alt[r];
 }
 
@@ -292,21 +351,22 @@ static u32 shared_atomic_opcode(u64 w) {
 }
 
 static u32 pred_read(DirectCtx* c, u32 p, int negative) {
-    u32 value = p == 7 ? c->true_value : spv_emit_load(&c->emit, c->bool_type, c->pred[p]);
+    u32 value = p == 7 ? c->true_value : var_read(c, VAR_PRED + p);
     return negative ? spv_emit_bool_not(&c->emit, c->bool_type, value) : value;
 }
 
 static void pred_write(DirectCtx* c, u32 p, u32 value) {
     if (p >= 7) return;
     if (c->guard) value = spv_emit_select(&c->emit, c->bool_type, c->guard, value, pred_read(c, p, 0));
-    spv_emit_store(&c->emit, c->pred[p], value);
+    var_write(c, VAR_PRED + p, value);
 }
 
-/* a condition code flag written, kept as it was where a pure instruction's guard is false */
+/* a condition code flag (its variable, c->cc_z...): its value, and written, kept as it was where a pure
+   instruction's guard is false */
+static u32 flag_read(DirectCtx* c, u32 flag) { return var_read(c, flag_var(c, flag)); }
 static void cc_store(DirectCtx* c, u32 flag, u32 value) {
-    if (c->guard)
-        value = spv_emit_select(&c->emit, c->bool_type, c->guard, value, spv_emit_load(&c->emit, c->bool_type, flag));
-    spv_emit_store(&c->emit, flag, value);
+    if (c->guard) value = spv_emit_select(&c->emit, c->bool_type, c->guard, value, flag_read(c, flag));
+    var_write(c, flag_var(c, flag), value);
 }
 
 /* Instructions that only compute registers, predicates and flags from registers, constants and immediates: no memory,
@@ -565,7 +625,7 @@ static u32 integer_add(DirectCtx* c, u32 left, u32 right, u32 avg, int extended,
     u32 carry0 = spv_emit_u_less(&c->emit, c->bool_type, sum0, left);
     u32 cin = avg ? spv_emit_constant_u32(&c->emit, c->u32_type, 1) : c->zero;
     if (extended) {
-        u32 old_carry = spv_emit_load(&c->emit, c->bool_type, c->cc_c);
+        u32 old_carry = flag_read(c, c->cc_c);
         u32 extra =
             spv_emit_select(&c->emit, c->u32_type, old_carry, spv_emit_constant_u32(&c->emit, c->u32_type, 1), c->zero);
         cin = spv_emit_iadd_u32(&c->emit, c->u32_type, cin, extra);
@@ -584,7 +644,7 @@ static u32 integer_add(DirectCtx* c, u32 left, u32 right, u32 avg, int extended,
         u32 zero = spv_emit_i_equal(&c->emit, c->bool_type, sum, c->zero);
         if (extended)
             zero =
-                spv_emit_bool_binary(&c->emit, c->bool_type, 0, zero, spv_emit_load(&c->emit, c->bool_type, c->cc_z));
+                spv_emit_bool_binary(&c->emit, c->bool_type, 0, zero, flag_read(c, c->cc_z));
         u32 sign = spv_emit_i_not_equal(&c->emit, c->bool_type,
                                         spv_emit_bitwise_and_u32(&c->emit, c->u32_type, sum, top), c->zero);
         cc_store(c, c->cc_c, carry);
@@ -609,7 +669,7 @@ static void flags_logic(DirectCtx* c, u32 value) {
 /* LOP, LOP32I and LOP3 flags: X retains zero only when the previous word was also zero, as IADD.X chains across
    the words of a wider value. */
 static void flags_logic_extended(DirectCtx* c, u32 value, int extended) {
-    u32 previous = extended ? spv_emit_load(&c->emit, c->bool_type, c->cc_z) : 0;
+    u32 previous = extended ? flag_read(c, c->cc_z) : 0;
     u32 zero = spv_emit_i_equal(&c->emit, c->bool_type, value, c->zero);
     if (extended) zero = spv_emit_bool_binary(&c->emit, c->bool_type, 0, previous, zero);
     u32 sign = spv_emit_i_not_equal(&c->emit, c->bool_type,
@@ -648,10 +708,10 @@ static u32 cc_or(DirectCtx* c, u32 x, u32 y) { return spv_emit_bool_binary(&c->e
 static u32 cc_xor(DirectCtx* c, u32 x, u32 y) { return spv_emit_bool_binary(&c->emit, c->bool_type, 2, x, y); }
 static u32 cc_test(DirectCtx* c, u32 code) {
     if (code == 0 || code == 15) return code == 15 ? c->true_value : c->false_value;
-    u32 s = spv_emit_load(&c->emit, c->bool_type, c->cc_s);
-    u32 z = spv_emit_load(&c->emit, c->bool_type, c->cc_z);
-    u32 carry = spv_emit_load(&c->emit, c->bool_type, c->cc_c);
-    u32 overflow = spv_emit_load(&c->emit, c->bool_type, c->cc_o);
+    u32 s = flag_read(c, c->cc_s);
+    u32 z = flag_read(c, c->cc_z);
+    u32 carry = flag_read(c, c->cc_c);
+    u32 overflow = flag_read(c, c->cc_o);
     switch (code) {
         case 1: return cc_xor(c, cc_and(c, s, cc_not(c, z)), overflow);
         case 2: return cc_and(c, cc_not(c, s), z);
@@ -690,8 +750,8 @@ static u32 integer_compare(DirectCtx* c, u32 i32_type, u64 w, u32 left, u32 righ
         u64 strict = cmp == 3 ? 1 : cmp == 6 ? 4 : cmp;
         u32 base = integer_compare(c, i32_type, (plain & ~(7ull << 49)) | (strict << 49), left, right);
         u32 equal = integer_compare(c, i32_type, (plain & ~(7ull << 49)) | (2ull << 49), left, right);
-        u32 carry = spv_emit_load(&c->emit, c->bool_type, c->cc_c);
-        u32 zero = spv_emit_load(&c->emit, c->bool_type, c->cc_z);
+        u32 carry = flag_read(c, c->cc_c);
+        u32 zero = flag_read(c, c->cc_z);
         u32 no_carry = spv_emit_bool_not(&c->emit, c->bool_type, carry);
         if (cmp == 1 || cmp == 6)
             return spv_emit_bool_binary(
@@ -999,15 +1059,28 @@ static void geometry_passthrough(DirectCtx* c, const ShaderInfo* si, u32 vertice
 
 /* A constant buffer word is loaded as an integer: a float load may flush the bits of an integer that look like a
    denormal (Adreno does, in a shader that declares DenormFlushToZero), and a jump table of small offsets reads 0. */
-static u32 cbuf_word(DirectCtx* c, u64 w) {
-    u32 idx = B(w, 34, 5), off = B(w, 20, 14) * 4;
+/* the cache entry of instruction w's constant buffer operand, read in this block if it wasn't */
+static u32 cbuf_entry(DirectCtx* c, u64 w) {
+    u32 idx = B(w, 34, 5), off = B(w, 20, 14) * 4, key = (idx << 16 | off >> 2) + 1;
+    u32 at = (key * 2654435761u) >> 23; /* 9 bits */
+    if (c->cbuf_seen[at].key == key && c->cbuf_seen[at].block == c->emit.block) return at;
     u32 member = spv_emit_constant_u32(&c->emit, c->u32_type, 0);
     u32 element = spv_emit_constant_u32(&c->emit, c->u32_type, off >> 4);
     u32 component = spv_emit_constant_u32(&c->emit, c->u32_type, (off >> 2) & 3);
-    return spv_emit_uniform_component(&c->emit, c->cbuf_pointer[idx], c->cbuf[idx], member, element, component,
-                                      c->u32_type);
+    c->cbuf_seen[at].key = key;
+    c->cbuf_seen[at].block = c->emit.block;
+    c->cbuf_seen[at].word = spv_emit_uniform_component(&c->emit, c->cbuf_pointer[idx], c->cbuf[idx], member, element,
+                                                       component, c->u32_type);
+    c->cbuf_seen[at].as_float = 0;
+    return at;
 }
-static u32 cbuf_read(DirectCtx* c, u64 w) { return spv_emit_bitcast(&c->emit, c->f32_type, cbuf_word(c, w)); }
+static u32 cbuf_word(DirectCtx* c, u64 w) { return c->cbuf_seen[cbuf_entry(c, w)].word; }
+static u32 cbuf_read(DirectCtx* c, u64 w) {
+    u32 at = cbuf_entry(c, w);
+    if (!c->cbuf_seen[at].as_float)
+        c->cbuf_seen[at].as_float = spv_emit_bitcast(&c->emit, c->f32_type, c->cbuf_seen[at].word);
+    return c->cbuf_seen[at].as_float;
+}
 static u32 integer_right(DirectCtx* c, u64 w, int kind) {
     if (kind == 0) return reg_read(c, B(w, 20, 8));
     if (kind == 1) return cbuf_word(c, w);
@@ -1660,7 +1733,7 @@ static int supported(u64 w, int op) {
             u32 addr = B(w, 20, 10), count = B(w, 47, 2) + 1;
             if (B(w, 8, 8) != 255 || !(B(w, 0, 8) + count <= 255 || (B(w, 0, 8) == 255 && count == 1))) return 0;
             if (B(w, 31, 1)) return addr + count * 4 <= 0x200;
-            return ((addr == 0x64 || addr == 0x6c) && count == 1) || (addr >= 0x70 && addr + count * 4 <= 0x80) ||
+            return ((addr == 0x64 || addr == 0x68 || addr == 0x6c) && count == 1) || (addr >= 0x70 && addr + count * 4 <= 0x80) ||
                    (addr >= 0x80 && addr + count * 4 <= 0x280) || (addr >= 0x2c0 && addr + count * 4 <= 0x2e0);
         }
         /* OUT emits and ends geometry primitives on the stream its third operand names */
@@ -2328,6 +2401,204 @@ static void global_dynamic(DirectCtx* c, int stage, u64 w, int op, const u32* gb
 }
 
 /* insn: code's words as host numbers (shader_words) */
+/* Writing a program's structured control flow (shader_structure): the labels of each scope (header, body, continue
+   target and merge, made when it opens), and the open selections */
+typedef struct {
+    const ShStructure* st;
+    u32 next;       /* the token to write next */
+    u32* label;     /* 4 a scope, then the selections' merge and else labels, 2 each */
+    u8* used;       /* a scope's merge or a selection's merge has a branch to it: a byte each */
+    u32 selections; /* open */
+    u32 flag;       /* the Function variable of the pending exit: the scope + 1 a break goes on to, 0 for none */
+    int open;       /* a block is being written: no branch or return has ended it */
+    u32 body_start, body_end;
+} StructEmit;
+
+enum { SE_DONE, SE_BODY, SE_END };
+
+static void se_branch(DirectCtx* c, StructEmit* se, u32 label) {
+    spv_emit_branch(&c->emit, label);
+    se->open = 0;
+}
+
+/* a scope's merge: from a break, or from running off its end */
+static void se_break(DirectCtx* c, StructEmit* se, u32 scope) {
+    se->used[scope] = 1;
+    se_branch(c, se, se->label[4 * scope + 3]);
+}
+
+static void se_ensure_open(DirectCtx* c, StructEmit* se) {
+    if (se->open) return;
+    spv_emit_label(&c->emit, spv_emit_id(&c->emit)); /* code nothing reaches, which SPIR-V takes in a block */
+    se->open = 1;
+}
+
+/* At the merge of a scope that a pending exit may leave through: it goes on to the parent scope (which it leaves
+   by its merge, or repeats when it is the exit's loop) when the variable is set, and the code after the scope runs
+   when it isn't */
+static void se_pending(DirectCtx* c, StructEmit* se, u32 scope) {
+    const ShsScope* s = &se->st->scope[scope];
+    u32 parent = s->parent - 1;
+    u32 t = spv_emit_load(&c->emit, c->u32_type, se->flag);
+    u32 go = spv_emit_id(&c->emit), pending = spv_emit_id(&c->emit);
+    u32 here = spv_emit_constant_u32(&c->emit, c->u32_type, parent + 1);
+    u32 set = spv_emit_i_not_equal(&c->emit, c->bool_type, t, c->zero);
+    spv_emit_selection_merge(&c->emit, go);
+    spv_emit_branch_conditional(&c->emit, set, pending, go);
+    spv_emit_label(&c->emit, pending);
+    if (!se->st->scope[parent].loop) {
+        if (s->arrive && s->beyond)
+            spv_emit_store(&c->emit, se->flag,
+                           spv_emit_select(&c->emit, c->u32_type, spv_emit_i_equal(&c->emit, c->bool_type, t, here),
+                                           c->zero, t));
+        else if (s->arrive)
+            spv_emit_store(&c->emit, se->flag, c->zero);
+        se_break(c, se, parent);
+    } else if (s->arrive && s->beyond) {
+        u32 again = spv_emit_id(&c->emit), out = spv_emit_id(&c->emit), merge = spv_emit_id(&c->emit);
+        u32 arrived = spv_emit_i_equal(&c->emit, c->bool_type, t, here);
+        spv_emit_selection_merge(&c->emit, merge);
+        spv_emit_branch_conditional(&c->emit, arrived, again, out);
+        spv_emit_label(&c->emit, again);
+        spv_emit_store(&c->emit, se->flag, c->zero);
+        spv_emit_branch(&c->emit, se->label[4 * parent + 2]);
+        spv_emit_label(&c->emit, out);
+        se_break(c, se, parent);
+        spv_emit_label(&c->emit, merge);
+        spv_emit_void_op(&c->emit, SPV_OP_UNREACHABLE, NULL, 0);
+    } else if (s->arrive) {
+        spv_emit_store(&c->emit, se->flag, c->zero);
+        spv_emit_branch(&c->emit, se->label[4 * parent + 2]);
+    } else
+        se_break(c, se, parent);
+    spv_emit_label(&c->emit, go);
+    se->open = 1;
+}
+
+/* Writes the tokens up to the next body (SE_BODY, its words in body_start and body_end), the program's end that
+   control runs off (SE_END: the caller writes what EXIT writes, without the outputs, and returns), or the last
+   (SE_DONE) */
+static int structure_step(DirectCtx* c, StructEmit* se) {
+    const ShStructure* st = se->st;
+    while (se->next < st->ntokens) {
+        const ShsToken* t = &st->token[se->next++];
+        u32* sel = se->label + 4 * st->nscopes + 2 * (se->selections ? se->selections - 1 : 0);
+        u8* sel_used = se->used + st->nscopes + (se->selections ? se->selections - 1 : 0);
+        u32* l = se->label + 4 * t->a;
+        switch (t->kind) {
+            case SHS_BODY:
+                se_ensure_open(c, se);
+                se->body_start = t->a;
+                se->body_end = t->b;
+                return SE_BODY;
+            case SHS_END: se_ensure_open(c, se); return SE_END;
+            case SHS_RETURNED: se->open = 0; break;
+            case SHS_OPEN_BLOCK:
+            case SHS_OPEN_LOOP:
+                for (u32 k = 0; k < 4; k++) l[k] = spv_emit_id(&c->emit);
+                if (se->open) spv_emit_branch(&c->emit, l[0]);
+                spv_emit_label(&c->emit, l[0]);
+                spv_emit_loop_merge(&c->emit, l[3], l[2]);
+                spv_emit_branch(&c->emit, l[1]);
+                spv_emit_label(&c->emit, l[1]);
+                se->open = 1;
+                break;
+            case SHS_CLOSE:
+                if (se->open) se_break(c, se, t->a);
+                /* a block scope's continue target is never reached: the loop it would repeat runs once */
+                spv_emit_label(&c->emit, l[2]);
+                spv_emit_branch(&c->emit, l[0]);
+                spv_emit_label(&c->emit, l[3]);
+                if (!se->used[t->a]) {
+                    spv_emit_void_op(&c->emit, SPV_OP_UNREACHABLE, NULL, 0);
+                    se->open = 0;
+                } else {
+                    se->open = 1;
+                    if (st->scope[t->a].check) se_pending(c, se, t->a);
+                }
+                break;
+            case SHS_IF:
+                se_ensure_open(c, se);
+                sel += se->selections ? 2 : 0;
+                sel_used += se->selections ? 1 : 0;
+                se->selections++;
+                sel[0] = spv_emit_id(&c->emit);
+                sel[1] = spv_emit_id(&c->emit);
+                *sel_used = 0;
+                {
+                    u32 then = spv_emit_id(&c->emit);
+                    spv_emit_selection_merge(&c->emit, sel[0]);
+                    spv_emit_branch_conditional(&c->emit, c->branch_cond ? c->branch_cond : c->true_value, then,
+                                                sel[1]);
+                    spv_emit_label(&c->emit, then);
+                }
+                se->open = 1;
+                break;
+            case SHS_ELSE:
+                if (se->open) {
+                    *sel_used = 1;
+                    se_branch(c, se, sel[0]);
+                }
+                spv_emit_label(&c->emit, sel[1]);
+                se->open = 1;
+                break;
+            case SHS_SWITCH: {
+                /* the cases' words, from their tokens up to the switch's end */
+                u32 literals[64], labels[64], count = 0, depth = 0;
+                for (u32 k = se->next; k < st->ntokens && count < 64; k++) {
+                    u32 kind = st->token[k].kind;
+                    if (kind == SHS_SWITCH) depth++;
+                    if (kind == SHS_ENDSWITCH && !depth--) break;
+                    if (kind == SHS_CASE && !depth) literals[count++] = st->token[k].b;
+                }
+                se_ensure_open(c, se);
+                sel += se->selections ? 2 : 0;
+                sel_used += se->selections ? 1 : 0;
+                se->selections++;
+                sel[0] = spv_emit_id(&c->emit);
+                sel[1] = spv_emit_id(&c->emit); /* the default's label, the cases' from the next id on */
+                for (u32 k = 0; k < count; k++) labels[k] = spv_emit_id(&c->emit);
+                *sel_used = 0;
+                spv_emit_selection_merge(&c->emit, sel[0]);
+                spv_emit_switch_u32(&c->emit, c->branch_target, sel[1], literals, labels, count);
+                se->open = 0;
+                break;
+            }
+            case SHS_CASE:
+            case SHS_DEFAULT:
+                if (se->open) {
+                    *sel_used = 1;
+                    se_branch(c, se, sel[0]);
+                }
+                spv_emit_label(&c->emit, t->kind == SHS_DEFAULT ? sel[1] : sel[1] + 1 + t->a);
+                se->open = 1;
+                break;
+            case SHS_ENDSWITCH:
+            case SHS_ENDIF:
+                if (se->open) {
+                    *sel_used = 1;
+                    se_branch(c, se, sel[0]);
+                }
+                spv_emit_label(&c->emit, sel[0]);
+                se->open = *sel_used;
+                if (!se->open) spv_emit_void_op(&c->emit, SPV_OP_UNREACHABLE, NULL, 0);
+                se->selections--;
+                break;
+            case SHS_BREAK:
+                se_ensure_open(c, se);
+                if (t->b) spv_emit_store(&c->emit, se->flag, spv_emit_constant_u32(&c->emit, c->u32_type, t->b));
+                se_break(c, se, t->a);
+                break;
+            case SHS_CONTINUE:
+                se_ensure_open(c, se);
+                se_branch(c, se, l[2]);
+                break;
+            default: break;
+        }
+    }
+    return SE_DONE;
+}
+
 static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count,
                      int can_flush, int can_preserve, int can_preserve_f64, int can_subgroup) {
     u32 clip;
@@ -2354,6 +2625,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     u8 outputs_used[32] = {0};
     int indexed_store = 0;
     int position_used = 0, layer_output_used = 0, layer_input_used = 0, point_size_used = 0;
+    int viewport_used = 0;
     /* the stages between the vertex and fragment ones: their input arrays' length (32 for tessellation, the input
        primitive's vertices for geometry), the control program's output vertices, and what they read and write */
     int between = stage == ST_TCS || stage == ST_TES || stage == ST_GS;
@@ -2609,6 +2881,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                     inputs_used[(location - 0x80) >> 4] = 1;
                 else if (location == 0x64)
                     layer_output_used = 1;
+                else if (location == 0x68)
+                    viewport_used = 1;
                 else if (location == 0x6c)
                     point_size_used = 1;
                 else if (location >= 0x2c0 && location < 0x2e0) {
@@ -3329,6 +3603,10 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
        different iterations, and VOTE, SHFL and BAR would see part of the warp. Each iteration runs only the lanes
        at the subgroup's lowest pc, as the hardware reconverges: lanes ahead wait for the others to reach them. */
     converge = has_flow && can_subgroup && (needs_subgroup || has_barrier || needs_derivatives);
+    /* FTZ per instruction: without the execution mode, or with it where some FADD, FMUL or FFMA keeps subnormals (the
+       mode is the whole module's). Never on a device that flushes by itself, which also flushes those that keep them:
+       the flush would change no bit */
+    int soft_ftz_on = can_flush != SH_FTZ_NATIVE && (can_flush == SH_FTZ_EMULATE || fp32_preserve);
     if (needs_shared && (stage != ST_CS || si->shared_size <= 0)) return direct_reject(si, "shared memory size");
     for (int i = 0; i < texture_count; i++)
         if (textures[i].shadow && (si->tex_int_mask & (1ull << i))) return direct_reject(si, "integer shadow texture");
@@ -3487,6 +3765,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
        program's input and output primitives */
     if (stage == ST_TCS && (!out_vertices || out_vertices > 32))
         return direct_reject_with_buffers(si, "patch output vertices", pop_targets, gb_at);
+    if (viewport_used && (stage == ST_TCS || !(g_shader_viewport_index & (stage == ST_GS ? 2 : 1))))
+        return direct_reject_with_buffers(si, "viewport index output unavailable", pop_targets, gb_at);
     if (stage == ST_TCS && (clip_used || layer_output_used || point_size_used))
         return direct_reject_with_buffers(si, "clip distance, layer or point size in tessellation control", pop_targets,
                                           gb_at);
@@ -3527,6 +3807,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         return NULL;
     }
     c->ftz_float = can_preserve;
+    c->soft_ftz_on = soft_ftz_on;
     spv_emit_init(&c->emit, (size_t)n * 20 + 128);
     spv_emit_shader_capability(&c->emit);
     if (stage == ST_TCS || stage == ST_TES) spv_emit_capability(&c->emit, 3); /* Tessellation */
@@ -3546,7 +3827,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     /* the per-instruction flush to zero tests the absolute value, GLSL.std.450's FAbs, where the module keeps signed
        zeros (float_ftz): without the import its OpExtInst named id 0, which NVIDIA's SPIR-V front end (615.78)
        crashed on, a shader of FADD and FMUL with nothing else from the set */
-    if (fp32_flush && (!can_flush || fp32_preserve) && can_preserve) needs_glsl = 1;
+    if (fp32_flush && soft_ftz_on && can_preserve) needs_glsl = 1;
     if (needs_glsl) c->glsl = spv_emit_glsl450_import(&c->emit);
     u32 fn = spv_emit_id(&c->emit), label = spv_emit_id(&c->emit);
     u32 void_type = spv_emit_type_void(&c->emit);
@@ -3577,6 +3858,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     /* Maximum VS interface: point size, position, 32 outputs, 32 inputs, 18 buffers, 32 samplers, push constants. */
     u32 outputs[8], inputs[32] = {0}, input_vec_type[32] = {0}, input_component_type[32] = {0};
     u32 output_attrs[32] = {0}, position = 0, point_size = 0, layer_output = 0, layer_input = 0;
+    u32 viewport_output = 0;
     /* transform feedback: each output word's buffer (0xFF none) and offset, the outputs written to a private vec4,
        and their component outputs (xfb_store) */
     u8 xfb_buf[160], attr_private[32] = {0};
@@ -3629,6 +3911,11 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             if (stage == ST_GS) spv_emit_capability(&c->emit, 24);  /* GeometryPointSize */
             point_size = spv_emit_point_size_output(&c->emit, c->f32_type);
             interfaces[count++] = point_size;
+        }
+        if (viewport_used) {
+            spv_emit_capability(&c->emit, stage == ST_GS ? 57 : 70); /* MultiViewport, ShaderViewportIndex */
+            viewport_output = spv_emit_interface_variable(&c->emit, 3, i32_type, c->u32_type, 0, 10, 0, 0);
+            interfaces[count++] = viewport_output;
         }
         if (layer_output_used) {
             layer_output = spv_emit_layer_output(&c->emit, i32_type);
@@ -3955,10 +4242,12 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     if (stage == ST_FS) spv_emit_fragment_origin_upper_left(&c->emit, fn);
     if (stage == ST_FS && si->early_fragment_tests) spv_emit_execution_mode(&c->emit, fn, 9, 0, 0); /* EarlyFragmentTests */
     if (depth_output) spv_emit_fragment_depth_replacing(&c->emit, fn);
-    spv_emit_float_controls(&c->emit, fn, fp32_flush && !fp32_preserve && can_flush, can_preserve,
+    spv_emit_float_controls(&c->emit, fn, fp32_flush && !fp32_preserve && can_flush == SH_FTZ_MODE, can_preserve,
                             needs_f64 && can_preserve_f64);
     spv_emit_function_void(&c->emit, void_type, fn, fn_type);
     spv_emit_label(&c->emit, label);
+    c->emit.block_end = var_flush;
+    c->emit.block_end_user = c;
     u32 local_array = 0, local_element_pointer = 0, local_words = 0;
     if (needs_local) {
         u32 bytes = (sph[1] & 0xffffffu) + (sph[2] & 0xffffffu);
@@ -3977,7 +4266,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     /* On the per-instruction FTZ path, the registers only FTZ float instructions write hold flushed values (from zero,
        their first value): their reads need no flush. Anything else that may write a register taints it, its
        destinations taken wide (d to d+3, and the second field texture instructions write, bits 28 to 35) */
-    if (!can_flush || fp32_preserve) {
+    if (soft_ftz_on) {
         for (u32 i = 11; i < n; i++) {
             if (!IDX_OK(i)) continue;
             if (ftz_writer(insn[i])) continue;
@@ -4012,22 +4301,9 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     u32 *case_labels = NULL, *case_literals = NULL;
     u8* block_start = NULL;
     size_t case_count = 0;
-    /* every OpVariable comes before the first block's other instructions, the clip distances' stores included */
-    if (has_flow)
-        pc = spv_emit_function_variable_init(&c->emit, reg_ptr, spv_emit_constant_u32(&c->emit, c->u32_type, 11));
-    c->discarded = has_flow && stage == ST_FS ? spv_emit_function_variable_init(&c->emit, pred_ptr, c->false_value) : 0;
-    for (clip = 0; clip < clip_count; clip++) {
-        u32 index = spv_emit_constant_u32(&c->emit, c->u32_type, clip);
-        u32 ptr = spv_emit_output_element_pointer(&c->emit, c->f32_type, clip_output, index);
-        spv_emit_store(&c->emit, ptr, zero_f);
-    }
+    ShStructure* structure = NULL;
+    StructEmit se = {0};
     if (has_flow) {
-        loop_header = spv_emit_id(&c->emit);
-        loop_dispatch = spv_emit_id(&c->emit);
-        dispatch_default = spv_emit_id(&c->emit);
-        dispatch_merge = spv_emit_id(&c->emit);
-        loop_continue = spv_emit_id(&c->emit);
-        loop_merge = spv_emit_id(&c->emit);
         /* one case for each instruction, and the case of lanes waiting to reconverge */
         case_labels = calloc(n + 1, sizeof *case_labels + sizeof *case_literals + 1);
         if (!case_labels) abort();
@@ -4060,6 +4336,43 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         if (unknown_brx)
             for (u32 i = 11; i < n; i++)
                 if (IDX_OK(i)) block_start[i] = 1;
+        /* The program's own branches and loops as structured constructs, where its control flow allows them: the
+           dispatch loop below makes every register live around one big loop, and costs a driver as much to compile
+           again as the program's code. Lanes that must reconverge for subgroup operations, barriers or derivatives
+           take them where the device reconverges them at each construct's merge (MaximallyReconvergesKHR), as the
+           hardware does at its SYNC targets, and keep the loop otherwise, which runs the lowest pc first */
+        if (!dynamic_stack && !has_calls && (!converge || g_shader_maximal_reconvergence) && !unknown_brx)
+            structure = shader_structure(insn, n, block_start, pop_targets);
+        if (structure && converge) { /* the guarantee those lanes need */
+            spv_emit_extension(&c->emit, "SPV_KHR_maximal_reconvergence");
+            spv_emit_execution_mode(&c->emit, fn, 6023, 0, 0); /* MaximallyReconvergesKHR */
+        }
+        if (structure) {
+            se.st = structure;
+            se.open = 1; /* the function's first block */
+            se.label = calloc(4 * (size_t)structure->nscopes + 2 * (size_t)structure->ntokens,
+                              sizeof *se.label + 1);
+            if (!se.label) abort();
+            se.used = (u8*)(se.label + 4 * (size_t)structure->nscopes + 2 * (size_t)structure->ntokens);
+        }
+    }
+    /* every OpVariable comes before the first block's other instructions, the clip distances' stores included */
+    if (has_flow && !structure)
+        pc = spv_emit_function_variable_init(&c->emit, reg_ptr, spv_emit_constant_u32(&c->emit, c->u32_type, 11));
+    if (structure && structure->uses_flag) se.flag = spv_emit_function_variable_init(&c->emit, reg_ptr, c->zero);
+    c->discarded = has_flow && stage == ST_FS ? spv_emit_function_variable_init(&c->emit, pred_ptr, c->false_value) : 0;
+    for (clip = 0; clip < clip_count; clip++) {
+        u32 index = spv_emit_constant_u32(&c->emit, c->u32_type, clip);
+        u32 ptr = spv_emit_output_element_pointer(&c->emit, c->f32_type, clip_output, index);
+        spv_emit_store(&c->emit, ptr, zero_f);
+    }
+    if (has_flow && !structure) {
+        loop_header = spv_emit_id(&c->emit);
+        loop_dispatch = spv_emit_id(&c->emit);
+        dispatch_default = spv_emit_id(&c->emit);
+        dispatch_merge = spv_emit_id(&c->emit);
+        loop_continue = spv_emit_id(&c->emit);
+        loop_merge = spv_emit_id(&c->emit);
         for (u32 i = 11; i < n; i++)
             if (IDX_OK(i) && block_start[i]) {
                 case_literals[case_count] = i;
@@ -4101,7 +4414,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         spv_emit_selection_merge(&c->emit, dispatch_merge);
         spv_emit_switch_u32(&c->emit, selector, dispatch_default, case_literals, case_labels, case_count);
     }
-    if ((stage == ST_VS || stage == ST_TES || stage == ST_GS) && !has_flow) {
+    if ((stage == ST_VS || stage == ST_TES || stage == ST_GS) && (!has_flow || structure)) {
         u32 one_f = spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f);
         if (point_size) spv_emit_store(&c->emit, point_size, one_f);
         u32 components[4] = {zero_f, zero_f, zero_f, one_f};
@@ -4112,14 +4425,45 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     }
 
     size_t case_index = 0;
-    for (u32 i = 11; i < n; i++) {
+    for (u32 i = 11; structure || i < n; i++) {
+        /* structured: the blocks in the order their constructs need, the constructs written between them */
+        while (structure && i >= se.body_end) {
+            int step = structure_step(c, &se);
+            if (step == SE_BODY) {
+                i = se.body_start;
+                break;
+            }
+            if (step == SE_DONE) {
+                i = n;
+                break;
+            }
+            /* control runs off the program's end, which ends the dispatch loop: what follows it */
+            if (c->discarded) {
+                u32 kill_label = spv_emit_id(&c->emit), kept = spv_emit_id(&c->emit);
+                u32 discard = spv_emit_load(&c->emit, c->bool_type, c->discarded);
+                spv_emit_selection_merge(&c->emit, kept);
+                spv_emit_branch_conditional(&c->emit, discard, kill_label, kept);
+                spv_emit_label(&c->emit, kill_label);
+                spv_emit_kill(&c->emit);
+                spv_emit_label(&c->emit, kept);
+            }
+            if (passthrough)
+                geometry_passthrough(c, si, in_vertices, vec4, position, position_in, output_attrs, inputs, point_size,
+                                     layer_output, i32_type, clip_output, clip_count, primitive_id, primitive_id_out,
+                                     depth_fix, push, push_pointer);
+            if (xfb_on && stage != ST_GS) xfb_store(c, vec4, output_attrs, attr_private, xfb_components);
+            if (depth_fix && stage != ST_GS) vertex_depth_fix(c, position, push, push_pointer, vec4);
+            spv_emit_return(&c->emit);
+            se.open = 0;
+        }
+        if (i >= n) break;
         if (!IDX_OK(i)) continue;
         if (c->swapped) { /* the array element an indexed texture took for the instruction before */
             c->sampler[c->swapped - 1] = c->texture_array;
             c->swapped = 0;
         }
-        if (has_flow && block_start[i]) { spv_emit_label(&c->emit, case_labels[case_index++]); }
-        if (has_flow && (next_instruction(i, n) >= n || block_start[next_instruction(i, n)])) {
+        if (has_flow && !structure && block_start[i]) { spv_emit_label(&c->emit, case_labels[case_index++]); }
+        if (has_flow && !structure && (next_instruction(i, n) >= n || block_start[next_instruction(i, n)])) {
             u32 following = spv_emit_constant_u32(&c->emit, c->u32_type, next_instruction(i, n));
             spv_emit_store(&c->emit, pc, following);
         }
@@ -4128,6 +4472,15 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
         u32 d = B(w, 0, 8), a = B(w, 8, 8), b = B(w, 20, 8);
         u32 guard_merge = 0;
         c->guard = 0; /* the instruction before may have ended its translation early */
+        if (structure && (op == O_BRA || op == O_SYNC || op == O_BRK || op == O_CONT)) {
+            /* the branch that ends the block: the structure's SHS_IF takes its condition */
+            c->branch_cond = 0;
+            if (!flow_always(w)) {
+                c->branch_cond = pred_read(c, B(w, 16, 3), B(w, 19, 1));
+                if (B(w, 0, 5) != 15) c->branch_cond = cc_and(c, c->branch_cond, cc_test(c, B(w, 0, 5)));
+            }
+            continue;
+        }
         int skip_helper = stage == ST_FS && helper_side_effect(op);
         if (op != O_SSY && op != O_PBK && op != O_PCNT && op != O_PEXIT && op != O_CAL &&
             (B(w, 16, 3) != 7 || B(w, 19, 1) || (flow_has_cc(op) && B(w, 0, 5) != 15) || skip_helper)) {
@@ -4221,7 +4574,10 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             target = spv_emit_iadd_u32(&c->emit, c->u32_type, target,
                                        spv_emit_select(&c->emit, c->u32_type, needs_skip,
                                                        spv_emit_constant_u32(&c->emit, c->u32_type, 1), c->zero));
-            spv_emit_store(&c->emit, pc, target);
+            if (structure)
+                c->branch_target = target; /* the structure's SHS_SWITCH */
+            else
+                spv_emit_store(&c->emit, pc, target);
         } else if (op == O_S2R) {
             u32 sr = B(w, 20, 8);
             u32 value = c->zero;
@@ -4370,6 +4726,10 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                                        reg_read_as(c, d + k, c->f32_type));
                     continue;
                 }
+                if (location == 0x68) {
+                    spv_emit_store(&c->emit, viewport_output, reg_read_as(c, d + k, i32_type));
+                    continue;
+                }
                 if (location == 0x64) {
                     if (layer_output) /* none: the device can't take this stage's layer */
                         spv_emit_store(&c->emit, layer_output,
@@ -4465,7 +4825,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 if (!immediate32 && B(w, 49, 1))
                     addend = spv_emit_iadd_u32(
                         &c->emit, c->u32_type, addend,
-                        spv_emit_select(&c->emit, c->u32_type, spv_emit_load(&c->emit, c->bool_type, c->cc_c),
+                        spv_emit_select(&c->emit, c->u32_type, flag_read(c, c->cc_c),
                                         spv_emit_constant_u32(&c->emit, c->u32_type, 1), c->zero));
             }
             high = B(w, immediate32 ? 53 : mad ? 54 : 39, 1);
@@ -4612,7 +4972,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             u32 carry1 = spv_emit_u_less(&c->emit, c->bool_type, sum2, sum);
             u32 carry2 = c->false_value;
             if (B(w, 48, 1)) {
-                u32 cin = spv_emit_select(&c->emit, c->u32_type, spv_emit_load(&c->emit, c->bool_type, c->cc_c),
+                u32 cin = spv_emit_select(&c->emit, c->u32_type, flag_read(c, c->cc_c),
                                           spv_emit_constant_u32(&c->emit, c->u32_type, 1), c->zero);
                 u32 final = spv_emit_iadd_u32(&c->emit, c->u32_type, sum2, cin);
                 carry2 = spv_emit_u_less(&c->emit, c->bool_type, final, sum2);
@@ -4624,7 +4984,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 u32 zero = spv_emit_i_equal(&c->emit, c->bool_type, sum2, c->zero);
                 if (B(w, 48, 1))
                     zero = spv_emit_bool_binary(&c->emit, c->bool_type, 0, zero,
-                                                spv_emit_load(&c->emit, c->bool_type, c->cc_z));
+                                                flag_read(c, c->cc_z));
                 u32 sign = spv_emit_i_not_equal(
                     &c->emit, c->bool_type,
                     spv_emit_bitwise_and_u32(&c->emit, c->u32_type, sum2,
@@ -5209,7 +5569,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 mask = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, mask,
                                                 spv_emit_constant_u32(&c->emit, c->u32_type, 255));
             u32 bits = c->zero;
-            u32 flags[4] = {c->cc_z, c->cc_s, c->cc_c, c->cc_o};
+            u32 flags[4] = {VAR_FLAG, VAR_FLAG + 1, VAR_FLAG + 2, VAR_FLAG + 3}; /* z, s, c, o */
             for (u32 p = 0; p < (B(w, 40, 1) ? 4u : 7u); p++) {
                 u32 value = B(w, 40, 1) ? spv_emit_load(&c->emit, c->bool_type, flags[p]) : pred_read(c, p, 0);
                 u32 bit = spv_emit_select(&c->emit, c->u32_type, value,
@@ -5239,10 +5599,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 u32 bit = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, source,
                                                    spv_emit_constant_u32(&c->emit, c->u32_type, 1u << p));
                 u32 value = spv_emit_i_not_equal(&c->emit, c->bool_type, bit, c->zero);
-                u32 ptr = B(w, 40, 1) ? flags[p] : c->pred[p];
-                spv_emit_store(&c->emit, ptr,
-                               spv_emit_select(&c->emit, c->bool_type, enabled, value,
-                                               spv_emit_load(&c->emit, c->bool_type, ptr)));
+                u32 v = B(w, 40, 1) ? flags[p] : VAR_PRED + p;
+                var_write(c, v, spv_emit_select(&c->emit, c->bool_type, enabled, value, var_read(c, v)));
             }
         } else if (op == O_ISETP_R || op == O_ISETP_C || op == O_ISETP_I) {
             u32 left = reg_read(c, a), right = integer_right(c, w, op - O_ISETP_R);
@@ -5776,7 +6134,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             /* .X adds the carry in (LO at 46, HI at 38 or 57), .CC writes the flags, and LO's predicate takes the
                add's carry out: LEA.LO ... P0 then LEA.HI.X is how a 64-bit address is formed */
             extended = B(w, op == O_LEA_HR ? 38 : op == O_LEA_HC ? 57 : 46, 1);
-            old_carry = extended ? spv_emit_load(&c->emit, c->bool_type, c->cc_c) : 0;
+            old_carry = extended ? flag_read(c, c->cc_c) : 0;
             sum = integer_add(c, value, rhs, 0, extended, B(w, 47, 1));
             reg_write(c, d, sum);
             if (B(w, 48, 3) < 7) {
@@ -5883,7 +6241,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                        : op == O_FMUL32I                                    ? B(w, 53, 2)
                        : op == O_FADD_R || op == O_FADD_C || op == O_FADD_I ? B(w, 44, 1)
                                                                             : B(w, 44, 2);
-            int soft_ftz = (mode & 1) && (!can_flush || fp32_preserve);
+            int soft_ftz = (mode & 1) && c->soft_ftz_on;
             if (soft_ftz) {
                 left = float_ftz(c, left);
                 right = float_ftz(c, right);
@@ -5933,7 +6291,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 right = float_mod(c, right, 0, B(w, 48, 1));
                 addend = float_mod(c, addend, 0, B(w, 49, 1));
             }
-            int soft_ftz = (B(w, 53, 2) & 1) && (!can_flush || fp32_preserve);
+            int soft_ftz = (B(w, 53, 2) & 1) && c->soft_ftz_on;
             if (soft_ftz) {
                 left = float_ftz(c, left);
                 right = float_ftz(c, right);
@@ -7003,26 +7361,38 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                                    reg_read_as(c, reg + 1, c->f32_type));
                 if (push && (target & 15)) alpha_test(c, push, push_pointer, alpha);
             }
-            if (c->discarded) { /* the lane leaves the flow loop, and a discarded one is discarded after it */
+            if (c->discarded && !structure) { /* the lane leaves the flow loop, and a discarded one is discarded after it */
                 spv_emit_store(&c->emit, pc, spv_emit_constant_u32(&c->emit, c->u32_type, UINT32_MAX));
                 if (has_pexit) spv_emit_branch(&c->emit, pexit_merge);
-            } else
+            } else {
+                if (c->discarded) { /* structured: a discarded lane is discarded as it ends */
+                    u32 kill_label = spv_emit_id(&c->emit), kept = spv_emit_id(&c->emit);
+                    u32 discard = spv_emit_load(&c->emit, c->bool_type, c->discarded);
+                    spv_emit_selection_merge(&c->emit, kept);
+                    spv_emit_branch_conditional(&c->emit, discard, kill_label, kept);
+                    spv_emit_label(&c->emit, kill_label);
+                    spv_emit_kill(&c->emit);
+                    spv_emit_label(&c->emit, kept);
+                }
                 spv_emit_return(&c->emit);
+            }
             if (has_pexit) spv_emit_label(&c->emit, pexit_merge);
         }
         /* no texture is sparse, so every texel a fetch reads is resident */
         pred_write(c, sparse_predicate(w, op), c->false_value);
         c->guard = 0;
         if (guard_merge) {
-            if (op != O_EXIT || c->discarded) spv_emit_branch(&c->emit, guard_merge);
+            if (op != O_EXIT || (c->discarded && !structure)) spv_emit_branch(&c->emit, guard_merge);
             spv_emit_label(&c->emit, guard_merge);
         } else if (op == O_EXIT && !has_flow)
             break;
         u32 next = next_instruction(i, n);
-        if (has_flow && (next >= n || block_start[next]) && (guard_merge || op != O_EXIT || has_pexit || c->discarded))
+        if (has_flow && !structure && (next >= n || block_start[next]) &&
+            (guard_merge || op != O_EXIT || has_pexit || c->discarded))
             spv_emit_branch(&c->emit, dispatch_merge);
     }
-    if (has_flow) {
+    if (structure && se.open) spv_emit_void_op(&c->emit, SPV_OP_UNREACHABLE, NULL, 0); /* every path ended before */
+    if (has_flow && !structure) {
         /* A branch outside the decoded instruction range must terminate. A switch
            default that simply loops would leave a GPU invocation spinning forever. */
         if (converge) { /* lanes ahead of the subgroup's lowest pc wait for this iteration */
@@ -7065,6 +7435,8 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     free(c->ftz_of_block);
     free(c);
     free(case_labels); /* the literals and block starts too */
+    free(structure);
+    free(se.label); /* and what was used */
     free(pop_targets);
     free(gb_at);
     ShaderInfo next = {0};
@@ -7076,6 +7448,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     next.clip_enable = si->clip_enable;
     memcpy(next.gp_skip_mask, si->gp_skip_mask, sizeof next.gp_skip_mask);
     next.uses_clip_mask = clip_used;
+    next.writes_viewport = viewport_used;
     next.rt_int_mask = si->rt_int_mask;
     next.rt_sint_mask = si->rt_sint_mask;
     next.tex_int_mask = si->tex_int_mask;

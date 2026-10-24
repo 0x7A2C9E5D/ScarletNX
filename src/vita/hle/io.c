@@ -2,7 +2,8 @@
    Copyright 2026 the ScarletNX contributors */
 /* SceIofilemgr and SceLibKernel's sceIo*: the game's files. app0: is the application's folder as the VPK holds it (the
    game folder's app/, with the update's files in patch/ over it), read-only on the console and here; ux0: the memory card, the game folder's ux0/, which the game
-   writes its data to (ux0:data/...). A path leaving its device ("..") is refused */
+   writes its data to (ux0:data/...); savedata0: the game's save data, mounted for it as the console mounts it
+   (VitaProcess.savedata, in ux0/). A path leaving its device ("..") is refused */
 #if !defined(_WIN32) && !defined(_FILE_OFFSET_BITS)
 #define _FILE_OFFSET_BITS 64
 #endif
@@ -52,6 +53,9 @@ static char* host_path(VitaProcess* p, uint32_t address, bool* writable) {
         root = p->app, app = true;
     else if (!strcmp(path, "ux0") || !strcmp(path, "uma0")) {
         root = p->ux0;
+        *writable = true;
+    } else if (!strcmp(path, "savedata0")) {
+        root = p->savedata;
         *writable = true;
     } else
         return NULL;

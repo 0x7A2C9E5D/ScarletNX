@@ -99,6 +99,7 @@ typedef struct {
        reject */
     u32 early_fragment_tests;
     ShXfb xfb; /* key: transform feedback's capture of this program's outputs */
+    int writes_viewport; /* the last vertex stage selects one of the 16 viewport/scissor pairs */
 } ShaderInfo;
 #define SH_DC_COLOR_MAX  10 /* slots tex_dc_color_funcs has room for */
 /* Each stage has a descriptor set (shader_vk_set), its bindings grouped by kind. */
@@ -127,6 +128,8 @@ extern int g_shader_stage_point_size;
 /* vertex and tessellation programs may write the layer (shaderOutputLayer, the ShaderLayer capability); without it
    their layer writes go away (layer 0). 1 offline */
 extern int g_shader_output_layer;
+/* ViewportIndex output: bit 0 vertex/evaluation, bit 1 geometry. 3 offline. */
+extern int g_shader_viewport_index;
 /* the Geometry capability, for fragment programs reading Layer or PrimitiveId */
 extern int g_shader_geometry;
 /* shaderFloat16, which fp16 texture results need. 1 offline */
@@ -135,11 +138,20 @@ extern int g_shader_float16;
 extern int g_shader_tessellation;
 /* VK_KHR_shader_clock's scopes: bit 0 subgroup, bit 1 device */
 extern int g_shader_clock_scopes;
+/* VK_KHR_shader_maximal_reconvergence: a structured program's lanes reconverge where its constructs merge, so one
+   whose lanes must reconverge (subgroup operations, barriers, derivatives) takes structured control flow too */
+extern int g_shader_maximal_reconvergence;
 /* in clip_enable: a later stage before rasterization (tessellation or geometry) follows, and the last one applies
    the depth mode and the clip distances */
 #define SNX_SH_NOT_LAST (1u << 31)
 /* the descriptor set of a stage's bindings */
 int shader_vk_set(int stage);
+/* can_flush: how the module gets the console's FP32 flush to zero (FTZ on FADD, FMUL and FFMA). SH_FTZ_EMULATE: a
+   test and a select on each such operand and result; SH_FTZ_MODE: the DenormFlushToZero execution mode, in a module
+   whose every such instruction flushes; SH_FTZ_NATIVE: neither, on a device that flushes them by itself (vk/ftz_probe.c) */
+#define SH_FTZ_EMULATE 0
+#define SH_FTZ_MODE    1
+#define SH_FTZ_NATIVE  2
 /* Translates a program (code, readable up to max_bytes) to SPIR-V: malloc'd words, their count in word_count. NULL
    when the program uses something the translator can't express, with si->unsupported and the reason set. */
 u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count, int can_flush,

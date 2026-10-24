@@ -70,7 +70,7 @@ size_t ini_list_text(const IniSection* sections, int count, char* out, size_t si
 /* a key an older version used, which does nothing now (docs/DEPRECATIONS.md): what became of it, NULL for another */
 const char* ini_deprecated(const char* key);
 /* the game's .ini's [Deprecated] section, its last: its head, then each key under what became of it. The launcher's
-   Clean old settings takes it from its head to the next section or the end */
+   Clean Old Settings takes it from its head to the next section or the end */
 void ini_deprecated_head(FILE* f);
 void ini_deprecated_key(FILE* f, const char* key, const char* value);
 /* the line a run says about the n deprecated keys path has into out: 1, or 0 for none */

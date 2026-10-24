@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "vita/gpu/vk.h"
+#include "common/utilities/window_icon.h"
 #include <SDL3/SDL_vulkan.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,6 +108,11 @@ static bool make_device(VitaVk* v, VkPhysicalDevice phys, uint32_t family) {
     v->host_alignment = host.minImportedHostPointerAlignment ? host.minImportedHostPointerAlignment : 4096;
     v->preserve_infnan = p12.shaderSignedZeroInfNanPreserveFloat32;
     v->bc = features.features.textureCompressionBC;
+    VkFormatProperties d16;
+    vkGetPhysicalDeviceFormatProperties(phys, VK_FORMAT_D16_UNORM, &d16);
+    const VkFormatFeatureFlags blit = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
+                                      VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    v->depth16_blit = (d16.optimalTilingFeatures & blit) == blit;
     return true;
 }
 static void swapchain_free(VitaVk* v) {
@@ -177,6 +183,7 @@ bool vita_vk_init(const char* title, char* error, size_t error_size) {
     }
     if (SDL_InitSubSystem(SDL_INIT_VIDEO))
         v->window = SDL_CreateWindow(title ? title : "ScarletNX Vita", 960, 544, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+    if (v->window) snx_window_icon(v->window);
     VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
                              .pApplicationName = "scarletnx-vita",
                              .apiVersion = VK_API_VERSION_1_3};

@@ -38,7 +38,8 @@ static struct {
     char said[16][1024];
     int said_count;
     size_t wrappers; /* the last build's snx_aot_ wrappers */
-    /* a disk of disk_total bytes with disk_free free, when disk is set; one whose room cannot be read with disk_fails */
+    /* a disk of disk_total bytes with disk_free free, when disk is set; its room cannot be read the next disk_fails
+       times */
     SnxUnitDisk disk;
     SnxU64 disk_free, disk_total;
     int disk_fails;
@@ -61,6 +62,7 @@ static void forget(void) { g_unit_cache.said_count = 0; }
 static int fake_disk(const char* folder, SnxU64* free_bytes, SnxU64* total) {
     (void)folder;
     if (g_unit_cache.disk_fails) {
+        --g_unit_cache.disk_fails;
         errno = EACCES;
         return -1;
     }
@@ -466,15 +468,29 @@ int main(void) {
     CHECK(!build(folder, out[5], 0) && run(out[5]) == 46 && !g_unit_cache.said_count);
     CHECK(!snx_is_file(path_a) && snx_is_file(path_b));
     g_unit_cache.disk_free = 0;
+    CHECK(!snx_remove_tree(folder)); /* none reused: each unit needs room, whatever the times left kept */
     program(1);
     forget();
     CHECK(!build(folder, out[1], 0) && run(out[1]) == 42 && !snx_is_file(path_a));
-    CHECK(said("has 0.0 GB free and keeps a tenth of its 1000.0 GB (100.0 GB) free", "code_001 ("));
-    CHECK(said("cannot make room for", "is not kept"));
+    { /* both units without room: the disk's numbers said once, both counted at the close */
+        int lines = 0, i;
+        for (i = 0; i < g_unit_cache.said_count; ++i) lines += strstr(g_unit_cache.said[i], "it leaves free") != NULL;
+        CHECK(lines == 1 && said("unit cache: 0.0 GB free on ", "under the 100.0 GB (a tenth of 1000.0 GB) it leaves "
+                                                                "free: units without room are not cached"));
+        CHECK(said("unit cache: 2 unit(s) (", "MB) not cached in "));
+    }
+    g_unit_cache.disk_fails = 2;
+    forget();
+    CHECK(!build(folder, out[1], 0) && run(out[1]) == 42 && !snx_is_file(path_a));
+    CHECK(said("unit cache: cannot read the free space of ", "units are not cached") &&
+          said("unit cache: 2 unit(s) (", "MB) not cached in "));
+    /* one unit's room unreadable, the other's short: each reason said, not only the first unit's */
     g_unit_cache.disk_fails = 1;
     forget();
     CHECK(!build(folder, out[1], 0) && run(out[1]) == 42 && !snx_is_file(path_a));
-    CHECK(said("cannot read the room on the disk of", "code_001 is not kept"));
+    CHECK(said("unit cache: cannot read the free space of ", "units are not cached") &&
+          said("unit cache: 0.0 GB free on ", "it leaves free: units without room are not cached") &&
+          said("unit cache: 2 unit(s) (", "MB) not cached in "));
     g_unit_cache.disk = NULL;
     g_unit_cache.disk_fails = 0;
 

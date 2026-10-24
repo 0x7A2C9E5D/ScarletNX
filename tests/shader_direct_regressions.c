@@ -36,7 +36,8 @@ static const char* pexit_path;
 static const char* global_dynamic_path;
 static const char* xfb_path;
 static const char* passthrough_paths[6];
-static char* fixture_paths[68];
+static const char* structured_paths[2];
+static char* fixture_paths[70];
 static size_t fixture_count;
 
 static const char* fixture_path(const char* directory, const char* name) {
@@ -414,18 +415,25 @@ static size_t register_values(const u32* code, size_t words, u32 pointer, u32* v
     return n;
 }
 
-static int prmt_selector_uses_seeded_register(const u32* code, size_t words) {
-    u32 register_pointer = 0;
+/* the values a register seeded with a constant takes: the loads and stores of the variable the constant is stored
+   to, or the constant itself, which a read in the block of its write takes with no store or load between */
+static size_t seeded_values(const u32* code, size_t words, u32 seed, u32* values, size_t max) {
+    u32 pointer = 0;
+    size_t n = 0;
     for (size_t i = 5; i < words;) {
         u32 width = code[i] >> 16;
         if (!width || i + width > words) return 0;
-        if ((code[i] & 0xffff) == 62 && width == 3 && is_constant_value(code, words, code[i + 2], 0x1234))
-            register_pointer = code[i + 1];
+        if ((code[i] & 0xffff) == 62 && width == 3 && is_constant_value(code, words, code[i + 2], seed))
+            pointer = code[i + 1];
+        if ((code[i] & 0xffff) == 43 && width == 4 && code[i + 3] == seed && n < max) values[n++] = code[i + 2];
         i += width;
     }
-    if (!register_pointer) return 0;
+    return n + (pointer ? register_values(code, words, pointer, values + n, max - n) : 0);
+}
+
+static int prmt_selector_uses_seeded_register(const u32* code, size_t words) {
     u32 values[64];
-    size_t nvalues = register_values(code, words, register_pointer, values, 64);
+    size_t nvalues = seeded_values(code, words, 0x1234, values, 64);
     for (size_t v = 0; v < nvalues; v++) {
         u32 loaded = values[v];
         for (size_t j = 5; j < words;) {
@@ -442,17 +450,8 @@ static int prmt_selector_uses_seeded_register(const u32* code, size_t words) {
 }
 
 static int seeded_register_feeds(const u32* code, size_t words, u32 seed, u32 opcode, u32 operand_index) {
-    u32 pointer = 0;
-    for (size_t i = 5; i < words;) {
-        u32 width = code[i] >> 16;
-        if (!width || i + width > words) return 0;
-        if ((code[i] & 0xffff) == 62 && width == 3 && is_constant_value(code, words, code[i + 2], seed))
-            pointer = code[i + 1];
-        i += width;
-    }
-    if (!pointer) return 0;
     u32 values[64];
-    size_t nvalues = register_values(code, words, pointer, values, 64);
+    size_t nvalues = seeded_values(code, words, seed, values, 64);
     for (size_t v = 0; v < nvalues; v++) {
         u32 loaded = values[v];
         for (size_t j = 5; j < words;) {
@@ -474,16 +473,8 @@ static int seeded_register_feeds(const u32* code, size_t words, u32 seed, u32 op
 }
 
 static int seeded_gradient_component(const u32* code, size_t words, u32 seed, u32 gradient, u32 component) {
-    u32 pointer = 0;
-    for (size_t i = 5; i < words;) {
-        u32 width = code[i] >> 16;
-        if (!width || i + width > words) return 0;
-        if ((code[i] & 0xffff) == 62 && width == 3 && is_constant_value(code, words, code[i + 2], seed))
-            pointer = code[i + 1];
-        i += width;
-    }
     u32 values[64];
-    size_t nvalues = pointer ? register_values(code, words, pointer, values, 64) : 0;
+    size_t nvalues = seeded_values(code, words, seed, values, 64);
     for (size_t v = 0; v < nvalues; v++) {
         u32 loaded = values[v];
         for (size_t j = 5; j < words;) {
@@ -711,15 +702,17 @@ static void float_controls(void) {
                             {FMUL_KEEP, FMUL_KEEP},
                             {FFMA_FMZ, FFMA_FMZ},
                             {FFMA_FMZ, FFMA_KEEP}};
+    /* available: SH_FTZ_EMULATE, SH_FTZ_MODE, or SH_FTZ_NATIVE (a device that flushes by itself: neither the mode nor a
+       flush of its own) */
     for (int i = 0; i < 5; i++) {
-        for (int available = 0; available < 2; available++) {
+        for (int available = SH_FTZ_EMULATE; available <= SH_FTZ_NATIVE; available++) {
             ShaderInfo info;
             size_t words = 0;
             u32* code = translate(cases[i], 2, ST_FS, &info, &words, available);
             check_translated(code, &info, "FP32 mode translates");
             if (code) {
-                int flush = i == 0 && available;
-                int soft_ftz = (i == 0 && !available) || i == 1;
+                int flush = i == 0 && available == SH_FTZ_MODE;
+                int soft_ftz = available != SH_FTZ_NATIVE && ((i == 0 && available == SH_FTZ_EMULATE) || i == 1);
                 check(info.fp32_flush == (i == 0 || i == 1) && info.fp32_preserve == (i != 0),
                       "FP32 modes recorded");
                 check((count_opcode(code, words, 17, 4465) > 0) == flush, "FP32 flush capability");
@@ -922,6 +915,77 @@ static int invalid_brx_table(u32 bank, u32 offset, u32* value) {
     if (bank || offset) return 0;
     *value = 1024;
     return 1;
+}
+
+static int three_way_table(u32 bank, u32 offset, u32* value) {
+    if (bank || offset > 8) return 0;
+    *value = offset == 0 ? 8 : offset == 4 ? 32 : 56; /* words 17, 20 and 23, after the BRX at 15 */
+    return 1;
+}
+
+/* the cases of each OpSwitch in a module, added up, and the switches */
+static int switch_cases(const u32* code, size_t words, int* switches) {
+    int cases = 0;
+    *switches = 0;
+    for (size_t i = 5; i < words && code[i] >> 16;) {
+        if ((code[i] & 0xffff) == 251) {
+            cases += (int)((code[i] >> 16) - 3) / 2;
+            ++*switches;
+        }
+        i += code[i] >> 16;
+    }
+    return cases;
+}
+
+/* Structured control flow: a jump table becomes an OpSwitch of its own targets and a loop its own loop construct, in
+   place of the dispatch loop's switch over every block */
+static void structured_flow(void) {
+    u64 code[32] = {0};
+    ShaderInfo info;
+    size_t words = 0;
+    int switches;
+    for (u32 i = 10; i < 32; i += 4) code[i] = SCHED;
+    code[11] = 0x3820000000270b0bull; /* IMNMX R11, R11, 2: three entries */
+    code[12] = 0x3848000000270b0dull; /* SHL R13, R11, 2 */
+    code[13] = 0xef94000000070d0dull; /* LDC.B32 R13, c[0][R13] */
+    code[15] = 0xe250000000070d0full; /* BRX R13 */
+    code[16] = EXIT;
+    code[17] = 0x010000000007F001ull; /* MOV32I R1 */
+    code[19] = EXIT;
+    code[20] = 0x010000000007F001ull;
+    code[21] = EXIT;
+    code[23] = 0x50B0000000070F00ull; /* NOP */
+    code[24] = EXIT;
+    int (*old)(u32, u32, u32*) = g_shader_cb_read;
+    g_shader_cb_read = three_way_table;
+    memset(&info, 0, sizeof info);
+    u32* spv = spirv_of(code, 25 * 8, ST_FS, &info, &words, 1, 1, 1, 1);
+    g_shader_cb_read = old;
+    check(spv != NULL, "a program with a jump table translates");
+    if (spv) {
+        check(switch_cases(spv, words, &switches) == 3 && switches == 1,
+              "a jump table is a switch of its three targets, with no dispatch loop");
+        save_fixture(structured_paths[0], spv, words);
+    }
+    free(spv);
+    /* a loop (@P0 BRA back to 12) and an if after it (@P1 BRA over a NOP) */
+    memset(code, 0, sizeof code);
+    for (u32 i = 10; i < 32; i += 4) code[i] = SCHED;
+    code[11] = 0x010000000007F001ull;
+    code[12] = 0x50B0000000070F00ull;
+    code[13] = (0xE24ull << 52 | (u64)(((12u - 14u) * 8) & 0xFFFFFF) << 20 | 0x7000Full) & ~0xF0000ull;
+    code[15] = (0xE24ull << 52 | (u64)(((17u - 16u) * 8) & 0xFFFFFF) << 20 | 0x7000Full) & ~0xE0000ull;
+    code[16] = 0x50B0000000070F00ull;
+    code[17] = EXIT;
+    memset(&info, 0, sizeof info);
+    spv = spirv_of(code, 18 * 8, ST_FS, &info, &words, 1, 1, 1, 1);
+    check(spv != NULL, "a program with a loop translates");
+    if (spv) {
+        check(switch_cases(spv, words, &switches) == 0 && count_opcode(spv, words, 246, 0xffffffffu) >= 2,
+              "a loop and an if are loop constructs, with no dispatch loop");
+        save_fixture(structured_paths[1], spv, words);
+    }
+    free(spv);
 }
 
 static void brx_length(void) {
@@ -1320,6 +1384,36 @@ static void layer_capabilities(void) {
     g_shader_output_layer = g_shader_geometry = 1;
 }
 
+static void viewport_capabilities(void)
+{
+	const u64 write = 0xeff07f800687ff00ull; /* AST a[0x68], R0 */
+	const u32 geometry_sph[3] = {1u << 24, 7u << 24, 3};
+	const u32 none[3] = {0};
+	int stages[3] = {ST_VS, ST_TES, ST_GS};
+
+	for (int i = 0; i < 3; i++) {
+		ShaderInfo info = {0};
+		size_t words = 0;
+		u32* code = translate_stage(&write, 1, stages[i], i == 2 ? geometry_sph : none, i == 2 ? 3 : 0,
+					    &info, &words);
+		check_translated(code, &info, "viewport index stores translate in vertex, evaluation and geometry stages");
+		if (code) {
+			check(info.writes_viewport, "viewport writes request indexed dynamic state");
+			check(has_builtin(code, words, 10), "viewport index has its own scalar output");
+			check(!has_builtin(code, words, 0), "viewport index is not a position component");
+			check(count_opcode(code, words, 17, i == 2 ? 57 : 70) == 1, "viewport output declares the stage capability");
+		}
+		free(code);
+	}
+	g_shader_viewport_index = 0;
+	ShaderInfo info = {0};
+	size_t words = 0;
+	u32* code = translate(&write, 1, ST_VS, &info, &words, 1);
+	check_refused(code, &info, "viewport index output unavailable", "unsupported devices refuse viewport output");
+	free(code);
+	g_shader_viewport_index = 3;
+}
+
 /* Loads from a constant buffer (a Uniform variable bound below 18) by result type: u32 or anything else. */
 static void cbuf_load_types(const u32* code, size_t words, int* integer, int* other) {
     u32 bound = words > 5 ? code[3] : 0, uint_type = 0;
@@ -1479,7 +1573,6 @@ static void eden_forms(void) {
     size_t words = 0;
     u32* code = translate(halves, 7, ST_FS, &info, &words, 0);
     check_translated(code, &info, "the half-float immediates, ISCADD32I, MEMBAR and a sparse TEX translate");
-    int sparse_stores = code ? count_opcode(code, words, 62, 0xffffffffu) : -1;
     if (code) {
         check(count_opcode(code, words, 225, 0xffffffffu) == 1, "MEMBAR is a memory barrier");
         check(count_opcode(code, words, 180, 0xffffffffu) >= 8,
@@ -1492,10 +1585,17 @@ static void eden_forms(void) {
     check_translated(code, &info, "ISCADD32I with shift 3 translates");
     if (code) check(shift_uses_amount(code, words, 3), "ISCADD32I uses bits 53-57 for its shift");
     free(code);
-    u64 no_sparse[7];
-    memcpy(no_sparse, halves, sizeof no_sparse);
+    /* A conditional EXIT after the TEX ends its block, where the block's last values are stored: the sparse
+       predicate's among them */
+    u64 sparse[8], no_sparse[8];
+    memcpy(sparse, halves, sizeof halves);
+    sparse[7] = 0xE30000000001000Full; /* @P1 EXIT */
+    code = translate(sparse, 8, ST_FS, &info, &words, 0);
+    int sparse_stores = code ? count_opcode(code, words, 62, 0xffffffffu) : -1;
+    free(code);
+    memcpy(no_sparse, sparse, sizeof no_sparse);
     no_sparse[6] = (no_sparse[6] & ~(7ull << 51)) | (7ull << 51);
-    code = translate(no_sparse, 7, ST_FS, &info, &words, 0);
+    code = translate(no_sparse, 8, ST_FS, &info, &words, 0);
     check_translated(code, &info, "TEX with no sparse predicate translates");
     if (code)
         check(sparse_stores == count_opcode(code, words, 62, 0xffffffffu) + 1,
@@ -2093,11 +2193,15 @@ static void attribute_pointer(void) {
     check(code && !info.ngbuf, "disabled CBE export does not bind guest global memory");
     if (code) save_fixture(attribute_paths[4], code, words);
     free(code);
-    const u64 handles[] = {mov32i(2, 3), 0xefd0000100070200ull, 0xefd1000300070201ull};
+    /* a conditional EXIT ends the block, where R0 and R1 are stored with the value of R2 */
+    const u64 handles[] = {mov32i(2, 3), 0xefd0000100070200ull, 0xefd1000300070201ull, 0xE30000000001000Full};
     const u32 sph[3] = {4u << 24, 0, 0};
-    code = translate_stage(handles, 3, ST_TCS, sph, 0, &info, &words);
+    code = translate_stage(handles, 4, ST_TCS, sph, 0, &info, &words);
     check_translated(code, &info, "ISBERD output-buffer handles translate");
-    check(code && seeded_register_feeds(code, words, 3, 62, 2), "ISBERD preserves the vertex index");
+    int seed_stores = 0;
+    for (size_t i = 5; code && i < words && code[i] >> 16; i += code[i] >> 16)
+        seed_stores += (code[i] & 0xffff) == 62 && (code[i] >> 16) == 3 && is_constant_value(code, words, code[i + 2], 3);
+    check(seed_stores == 3, "ISBERD preserves the vertex index");
     if (code) save_fixture(attribute_paths[5], code, words);
     free(code);
 }
@@ -2437,7 +2541,11 @@ int main(int argc, char** argv) {
             snprintf(name, sizeof name, "audit_%d", i);
             audit_paths[i] = fixture_path(argv[1], name);
         }
-        if (fixture_count != 68) {
+        for (int i = 0; i < 2; i++) {
+            snprintf(name, sizeof name, "structured_%d", i);
+            structured_paths[i] = fixture_path(argv[1], name);
+        }
+        if (fixture_count != 70) {
             fprintf(stderr, "failed to allocate fixture paths\n");
             return 2;
         }
@@ -2463,6 +2571,7 @@ int main(int argc, char** argv) {
     issue126_shader_modes();
     between_stages();
     layer_capabilities();
+    viewport_capabilities();
     fragment_queries();
     eden_forms();
     pexit_flow();
@@ -2472,6 +2581,7 @@ int main(int argc, char** argv) {
     beyond_eden();
     system_values();
     attribute_pointer();
+    structured_flow();
     for (size_t i = 0; i < fixture_count; i++) free(fixture_paths[i]);
     return failures ? 1 : 0;
 }

@@ -140,6 +140,10 @@ typedef struct SnxIr {
        snx_aot_<target> (the JIT's loader resolves it), 0 for CALLDYN. NULL in the AOT build */
     SnxU64 (*direct)(void* user, SnxU64 target);
     void* direct_user;
+    /* the AOT build's (snx_ir_stale_checks): snx_stale, the module's byte per function, which each function reads
+       first and, once the runtime has set it, runs its entry through dispatch (SNX_ABI 14). NULL elsewhere */
+    LLVMValueRef stale;
+    size_t stale_index; /* the function being emitted's byte in it */
     const SnxIrTuning* tuning; /* snx_ir_tune's, NULL for LLVM's own */
     /* the target stores values big-endian (ppc64): guest memory and the vector registers hold the guest's
        little-endian bytes, so the accesses that read them as numbers swap (ir_rd, ir_vd and their siblings) */
@@ -161,6 +165,11 @@ LLVMValueRef ir_flags_cond(SnxIr* ir, unsigned cond);
 void ir_fp_guards_invalidate(SnxIr* ir);
 /* Once per process, before any other call; threads may then each own SnxIrs. 0, or -1 with the reason */
 int snx_ir_init(char* error, size_t error_size);
+/* LLVM's SLP vectorizer on or off for every module this process makes (the setting slp_vectorizer): an option of
+   LLVM's command line, so once per process, from one thread, before any module is made */
+void snx_ir_slp_vectorizer(int on);
+/* whether it runs: LLVM's own, on, until snx_ir_slp_vectorizer. The caches' keys carry it */
+int snx_ir_slp(void);
 /* opt is the -O letter: 0,1,2,3,s,z */
 SnxIr* snx_ir_new(const char* name, char opt, char* error, size_t error_size);
 /* the same for code the JIT loader loads into this process (code_loader.h): the host's target, CPU and calling
@@ -172,6 +181,10 @@ void snx_ir_free(SnxIr* ir);
 /* the settings the SnxIr's objects are made with, kept (NULL: LLVM's own): the target machine's set now, the pipeline
    and the pass builder's at each snx_ir_object */
 void snx_ir_tune(SnxIr* ir, const SnxIrTuning* tuning);
+/* the AOT module's functions emitted from here check their stale byte in snx_stale, which the module descriptor
+   defines (SNX_IR_STALE) */
+#define SNX_IR_STALE "snx_stale"
+void snx_ir_stale_checks(SnxIr* ir);
 /* Optimizes the module as Clang does at the -O level and returns the host object file (malloc'd) */
 int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char* error, size_t error_size);
 /* What makes an object of a module besides its IR, LLVM, the target machine's triple, CPU and features, the -O letter

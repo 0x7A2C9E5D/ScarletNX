@@ -73,7 +73,7 @@ static int kind_of(const char* path) {
 int snx_container_kind(const char* path, int* xci) {
     char why[256];
     int kind = kind_of(path);
-    if (kind < 0) return snx_error("Cannot read %s: %s", path, snx_os_error(why, sizeof why));
+    if (kind < 0) return snx_error("cannot read %s: %s", path, snx_os_error(why, sizeof why));
     if (kind == 2) return snx_error("%s is not an NSP/DNSP (PFS0) or an XCI/DXCI (HEAD/DXCI)", path);
     *xci = kind;
     return 0;
@@ -159,6 +159,13 @@ int snx_hac_error(const char* what) {
     const char* said = snx_hac_message();
     return said[0] ? snx_error("%s (hactool: %s)", what, said) : snx_error("%s", what);
 }
+/* every NCA's header unreadable: the prod.keys that has no right header_key named */
+static int headers_unreadable(const SnxDump* dump) {
+    char what[1200];
+    snprintf(what, sizeof what, "the NCAs' headers cannot be decrypted: %s's header_key is missing or wrong",
+             dump->keys ? dump->keys : "prod.keys");
+    return snx_hac_error(what);
+}
 
 static int hex_bytes(const char* text, size_t size, unsigned char* out) {
     size_t i;
@@ -212,27 +219,28 @@ static void generation_text(int generation, char* text) {
 static int load_prod_keys(SnxDump* dump, int say) {
     unsigned char* data;
     size_t size, start, end;
-    unsigned long dropped, known = 0;
+    unsigned long dropped, known = 0, line_number = 0, first_dropped = 0;
     char *name, *value;
     KeyLine line;
     int failed;
     char why[256];
     data = snx_read_file(dump->keys, &size);
-    if (!data) return snx_error("Cannot read %s: %s", dump->keys, snx_os_error(why, sizeof why));
+    if (!data) return snx_error("cannot read %s: %s", dump->keys, snx_os_error(why, sizeof why));
     start = 0;
     dropped = 0;
     failed = 0;
     while (start < size && !failed) {
         end = start;
         while (end < size && data[end] != '\n') end++;
+        ++line_number;
         if (key_line((const char*)data + start, end - start, &line)) {
-            if (line.value_size % 32)
-                dropped++;
-            else {
+            if (line.value_size % 32) {
+                if (!dropped++) first_dropped = line_number;
+            } else {
                 name = text_copy(line.name, line.name_size);
                 value = text_copy(line.value, line.value_size);
                 if (!name || !value)
-                    failed = snx_error("Out of memory reading prod.keys");
+                    failed = snx_error("out of memory reading prod.keys");
                 else
                     known += snx_hac_set_key(dump->hac, name, value);
                 if (name) secret_free(name, line.name_size);
@@ -244,7 +252,9 @@ static int load_prod_keys(SnxDump* dump, int say) {
     secret_free(data, size);
     if (failed) return 1;
     snx_hac_derive_keys(dump->hac);
-    if (dropped && say) printf("Left out %lu malformed key lines\n", dropped);
+    if (dropped == 1 && say) printf("%s: line %lu is not a key\n", dump->keys, first_dropped);
+    if (dropped > 1 && say)
+        printf("%s: %lu lines are not keys, the first line %lu\n", dump->keys, dropped, first_dropped);
     if (say) { /* where they are and how many, never one of them */
         int newest = snx_hac_newest_generation(dump->hac);
         char text[96];
@@ -267,7 +277,7 @@ static int load_title_keys(SnxDump* dump) {
     unsigned long given = 0;
     if (!snx_is_file(dump->title_keys)) return 0;
     data = snx_read_file(dump->title_keys, &size);
-    if (!data) return snx_error("Cannot read %s: %s", dump->title_keys, snx_os_error(why, sizeof why));
+    if (!data) return snx_error("cannot read %s: %s", dump->title_keys, snx_os_error(why, sizeof why));
     start = 0;
     while (start < size) {
         end = start;
@@ -286,6 +296,12 @@ static int load_title_keys(SnxDump* dump) {
 }
 
 /* the title keys of a container's tickets: common tickets, whose key is stored as is */
+/* the file of container, as a message names it */
+static const char* dump_file(const SnxDump* dump, int container) {
+    return container >= 0 && container < (int)(sizeof dump->opened / sizeof *dump->opened) && dump->opened[container]
+               ? dump->opened[container]
+               : "the dump";
+}
 static int read_tickets(SnxDump* dump, int container, unsigned* tickets, unsigned* personal) {
     unsigned char data[1024];
     const SnxHacEntry* entries;
@@ -297,7 +313,7 @@ static int read_tickets(SnxDump* dump, int container, unsigned* tickets, unsigne
         ++*tickets;
         size = entries[i].size < sizeof data ? (size_t)entries[i].size : sizeof data;
         if (snx_hac_read(dump->hac, container, i, data, size))
-            return snx_error("Cannot read the ticket %s", entries[i].name);
+            return snx_error("cannot read the ticket %s", entries[i].name);
         if (size < 4) continue;
         switch ((SnxU32)le_bytes(data, 4)) {
             case 0x10000UL:
@@ -363,9 +379,8 @@ int snx_nca_keys(const SnxNcaRef* nca, const char* what) {
                          "that firmware or later",
                          what, keys);
     if (nca->info.title_key < 0)
-        return snx_error("%s is encrypted with a title key, which no ticket of the dump and no title.keys gives. A "
-                         "personalized ticket's is encrypted for the console the game was bought on: dump that "
-                         "console's title keys into title.keys",
+        return snx_error("%s needs a title key that no ticket in the dump and no title.keys has: a personalized "
+                         "ticket's key is its console's, so dump that console's title.keys",
                          what);
     return 0;
 }
@@ -378,24 +393,25 @@ static int read_ncas(SnxDump* dump, int container, const SnxHacEntry** entries, 
     *count = snx_hac_entries(dump->hac, container, entries);
     *ncas = (SnxHacNca*)calloc(*count ? *count : 1, sizeof **ncas);
     *unreadable = 0;
-    if (!*ncas) return snx_error("Out of memory reading the NCAs' headers");
+    if (!*ncas) return snx_error("out of memory reading the NCAs' headers");
     for (i = 0; i < *count; i++) {
         (*ncas)[i].type = SNX_HAC_OTHER;
         if (!has_suffix((*entries)[i].name, ".nca") || has_suffix((*entries)[i].name, ".cnmt.nca")) continue;
         if (!dump->has_keys && nca_needs_keys(dump, container, i)) {
             free(*ncas);
             *ncas = NULL;
-            return snx_error("Encrypted content needs prod.keys. Provide --keys, or put it at %s or in ~/.switch",
+            return snx_error("encrypted content needs prod.keys. Provide --keys, or put it at %s or in ~/.switch",
                              dump->keys);
         }
         if (snx_hac_nca(dump->hac, container, i, &(*ncas)[i])) {
             (*ncas)[i].type = SNX_HAC_OTHER;
             ++*unreadable;
-            if (dump->say && !(dump->said & 1u << container))
-                puts("  an NCA whose header cannot be decrypted: prod.keys' header_key is missing or wrong");
         } else if (dump->say && !(dump->said & 1u << container))
             say_nca(&(*ncas)[i], &(*entries)[i]);
     }
+    if (*unreadable && dump->say && !(dump->said & 1u << container))
+        printf("  %u NCAs whose headers cannot be decrypted: prod.keys' header_key is missing or wrong\n",
+               (unsigned)*unreadable);
     if (dump->say && !(dump->said & 1u << container)) fflush(stdout);
     dump->said |= 1u << container;
     return 0;
@@ -567,8 +583,9 @@ static int select_ncas(SnxDump* dump, int container, SnxNcaRef* selected, SnxNca
     metas_free(metas, nmetas);
     dump->game = selected->title_id;
     if (selected->found) return 0;
-    if (unreadable) return snx_hac_error("The NCAs' headers cannot be decrypted. Check that prod.keys is current");
-    return snx_error("Container has no base Program NCA (possibly an update or DLC). Supply a base game");
+    if (unreadable) return headers_unreadable(dump);
+    return snx_error("%s has no base Program NCA: an update's or a DLC's dump goes with --update, after the game's",
+                     dump_file(dump, container));
 }
 
 /* An add-on's container: an update (its Program NCA, the patch, with its Control NCA) or else a DLC (its Data NCA), as
@@ -644,16 +661,21 @@ static int select_addon(SnxDump* dump, int container) {
     free(ncas);
     metas_free(metas, nmetas);
     if (dump->patch.found || dump->aoc.found) return 0;
-    if (unreadable) return snx_hac_error("The NCAs' headers cannot be decrypted. Check that prod.keys is current");
+    if (unreadable) return headers_unreadable(dump);
     if (other) {
         char of[17], given[17];
         snx_title_text(other, of);
         snx_title_text(game, given);
-        return snx_error("The update or DLC belongs to the game %s, not to the selected base game %s", of, given);
+        return snx_error("the update or DLC belongs to the game %s, not to the selected base game %s", of, given);
     }
-    if (game && patches) return snx_error("Update has no Program NCA matching the selected base game");
-    return snx_error(game ? "The DLC is not the selected base game's"
-                          : "Container has no base Program NCA, and no update or DLC either: it is no game's dump");
+    {
+        char given[17];
+        const char* dump_path = dump_file(dump, container);
+        snx_title_text(game, given);
+        if (game && patches) return snx_error("%s has no Program NCA of the game %s", dump_path, given);
+        if (game) return snx_error("%s is not a DLC of the game %s", dump_path, given);
+        return snx_error("%s has no base Program NCA, and no update or DLC either: it is no game's dump", dump_path);
+    }
 }
 
 static int open_container(SnxDump* dump, const char* path, int say) {
@@ -668,7 +690,8 @@ static int open_container(SnxDump* dump, const char* path, int say) {
         fflush(stdout);
     }
     container = snx_hac_open(dump->hac, path, xci);
-    if (container < 0) snx_hac_error(xci ? "Cannot read the XCI's secure partition" : "Cannot read the NSP");
+    if (container >= 0 && container < (int)(sizeof dump->opened / sizeof *dump->opened)) dump->opened[container] = path;
+    if (container < 0) snx_hac_error(xci ? "cannot read the XCI's secure partition" : "cannot read the NSP");
     if (container < 0 || read_tickets(dump, container, &tickets, &personal)) return -1;
     if (say) { /* what it holds: its NCAs, said each as they are read, and its tickets */
         count = snx_hac_entries(dump->hac, container, &entries);
@@ -695,7 +718,7 @@ static int dump_start(SnxDump* dump, const char* keys, const char* title_keys, c
     dump->keys = snx_find_keys(keys, "prod.keys", repo);
     dump->title_keys = snx_find_keys(title_keys, "title.keys", repo);
     dump->hac = snx_hac_new();
-    if (!dump->keys || !dump->title_keys || !dump->hac) return snx_error("Out of memory reading the dump");
+    if (!dump->keys || !dump->title_keys || !dump->hac) return snx_error("out of memory reading the dump");
     dump->has_keys = snx_is_file(dump->keys);
     if (keys && !dump->has_keys) return snx_error("%s is not a file", dump->keys);
     return (dump->has_keys && load_prod_keys(dump, say)) || load_title_keys(dump);
@@ -757,7 +780,7 @@ SnxHacFs* snx_dump_fs(SnxDump* dump) {
     int under = dump->patch.found && dump->program.found;
     SnxHacFs* fs = snx_hac_fs_open(dump->hac, top->container, top->entry, under ? dump->program.container : -1,
                                    dump->program.entry);
-    if (!fs) snx_hac_error("The Program NCA cannot be read");
+    if (!fs) snx_hac_error("the Program NCA cannot be read");
     return fs;
 }
 
@@ -768,7 +791,7 @@ SnxHacFs* snx_dump_html_fs(SnxDump* dump) {
 
 SnxHacFs* snx_dump_aoc_fs(SnxDump* dump) {
     SnxHacFs* fs = snx_hac_fs_open(dump->hac, dump->aoc.container, dump->aoc.entry, -1, 0);
-    if (!fs) snx_hac_error("The DLC's Data NCA cannot be read");
+    if (!fs) snx_hac_error("the DLC's Data NCA cannot be read");
     return fs;
 }
 

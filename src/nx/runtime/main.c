@@ -5,6 +5,7 @@
    then the frontend's loop at the display's rate until the run ends, saving what outlives it */
 #include "nx/runtime/main.h"
 #include "common/cpu/recompiler/llvm/gdb_jit.h"
+#include "common/cpu/recompiler/llvm/ir.h"
 #include "common/utilities/build_info.h"
 #include "common/utilities/common.h"
 #include "common/utilities/ini_lines.h"
@@ -232,7 +233,7 @@ static const SnxModule* load_module(const char* path) {
     if (snx_module_static) return snx_module_static();
     if (!snx_is_file(path))
         fatal("Cannot find the recompiled code: %s. A copy of the runtime runs the game it is named after, with "
-              "that code beside it, or --game=PATH names the game (--game=games/Game)",
+              "that code beside it, or --game=PATH names the game (--game=recompiled/Game)",
               path);
 #ifdef MODULE_PACK
     m = load_pack(path);
@@ -296,6 +297,7 @@ static void kind_dir(char* out, size_t cap, int kind, const char* what, const ch
     char *moved, *full;
     if (recorded && snx_is_dir(recorded)) {
         snprintf(out, cap, "%s/", recorded);
+        snx_path_native(out);
         return;
     }
     snprintf(out, cap, "%s", g_exedir);
@@ -305,8 +307,10 @@ static void kind_dir(char* out, size_t cap, int kind, const char* what, const ch
         if (moved && strcmp(moved, here)) {
             if (snx_mkdirs(moved))
                 WARN("%s cannot be created, so the game's %s stay beside it\n", moved, what);
-            else
+            else {
                 snprintf(out, cap, "%s/", moved);
+                snx_path_native(out);
+            }
         }
         free(moved);
     }
@@ -759,30 +763,88 @@ static int open_menu(const char* argv0) {
     return status;
 }
 
+/* Key paths belong to the runtime as well as the driver: an unextracted game opens its dump again at startup. */
+static int runtime_key_options(int* argc, char** argv, char** keys, char** title_keys) {
+    int read = 1, write = 1;
+    while (read < *argc && strcmp(argv[read], "--")) {
+        const char *arg = argv[read], *value = NULL;
+        char** slot = NULL;
+        if (!strcmp(arg, "--keys")) slot = keys;
+        else if (!strcmp(arg, "--title-keys")) slot = title_keys;
+        else if (!strncmp(arg, "--keys=", 7)) { slot = keys; value = arg + 7; }
+        else if (!strncmp(arg, "--title-keys=", 13)) { slot = title_keys; value = arg + 13; }
+        if (!slot) {
+            argv[write++] = argv[read++];
+            continue;
+        }
+        if (!value) {
+            if (read + 1 >= *argc || !argv[read + 1][0] || argv[read + 1][0] == '-')
+                return snx_error("%s requires a file", arg);
+            value = argv[++read];
+        } else if (!value[0])
+            return snx_error("%s requires a file", arg);
+        {
+            char* path = snx_absolute(value);
+            if (!path || !snx_is_file(path)) {
+                int result = snx_error("%s is not a file: %s", !path ? "cannot resolve key path" : arg,
+                                       path ? path : value);
+                free(path);
+                return result;
+            }
+            free(*slot);
+            *slot = path;
+        }
+        ++read;
+    }
+    while (read < *argc) argv[write++] = argv[read++];
+    argv[write] = NULL;
+    *argc = write;
+    return 0;
+}
+
 int snx_main(int argc, char** argv) {
     char module[sizeof g_exedir + sizeof g_exename + 16], ini[sizeof g_confdir + sizeof g_exename + 8];
     char base[sizeof g_exename];
+    char *keys = NULL, *title_keys = NULL;
     const char *game, *title;
     const SnxModule* mod;
     int status, i;
     hle_init(); /* before anything, the options included, touches g_hle */
+    /* The driver's dump-play options also belong to the runtime when it reads the dump in place. */
+    status = runtime_key_options(&argc, argv, &keys, &title_keys);
+    if (status) {
+        status = 2;
+        goto done;
+    }
     status = snx_startup_options(argc, argv);
-    if (status) return status;
+    if (status) goto done;
     if (argc == 2 && !strcmp(argv[1], "--settings")) {
         ini_list(g_ini_sections, g_ini_sections_count);
-        return 0;
+        status = 0;
+        goto done;
     }
     if (argc == 2 && !strcmp(argv[1], "--settings=recompile")) {
         ini_list(g_launch_sections, g_launch_sections_count);
-        return 0;
+        status = 0;
+        goto done;
     }
-    if (g_opt_gdb && snx_gdb_start(g_opt_gdb_stop, SNX_GDB_PORT)) return 2; /* before any other thread */
+    if (g_opt_gdb && snx_gdb_start(g_opt_gdb_stop, SNX_GDB_PORT)) {
+        status = 2;
+        goto done; /* before any other thread */
+    }
+    if (argc == 2 && !strncmp(argv[1], "--settings=", 11)) {
+        fprintf(stderr, "scarletnx: %s: not --settings (the game's) or --settings=recompile\n", argv[1]);
+        status = 2;
+        goto done;
+    }
     game = game_option(argc, argv);
     refuse_dumps(argc, argv, game);
     name_game(game ? game : program_path(argv[0]));
     snprintf(module, sizeof module, "%s%s%s", g_exedir, g_exename, MODULE_SUFFIX);
-    if (argc == 1 && !snx_module_static && snx_menu && snx_launcher_name(g_exename) && !snx_is_file(module))
-        return open_menu(argv[0]);
+    if (argc == 1 && !snx_module_static && snx_menu && snx_launcher_name(g_exename) && !snx_is_file(module)) {
+        status = open_menu(argv[0]);
+        goto done;
+    }
     /* the game's errors in its log, where a fatal's "the line before" is: a game's process on Android has no stderr */
     snx_error_sink(log_error_line);
     /* the code before anything is written: a mistyped --game leaves no .ini and no log behind */
@@ -844,8 +906,12 @@ int snx_main(int argc, char** argv) {
             "attached\n");
     }
     if (g_addon) LOG("game: the update of the game in %s, with its settings and saves\n", base);
+    snx_ir_slp_vectorizer(g_settings.slp_vectorizer); /* before the JIT's first compile too */
 
-    fs_init(); /* the npdm is read through it, and mem_init's layout comes before */
+    fs_init(keys, title_keys); /* the npdm is read through it, and mem_init's layout comes before */
+    free(keys);
+    free(title_keys);
+    keys = title_keys = NULL;
 #ifdef MODULE_PACK
     g_settings.log_level = 2; /* a phone's log is the only way to see what a run did: everything, until it is steadier */
 #endif
@@ -894,5 +960,9 @@ int snx_main(int argc, char** argv) {
         kernel_run_main(mod->mods[0].base + mod->mods[0].text_off, mod->main_stack, (int)mod->main_prio,
                         (int)mod->main_core);
     frontend_loop();
-    return 0;
+    status = 0;
+done:
+    free(keys);
+    free(title_keys);
+    return status;
 }

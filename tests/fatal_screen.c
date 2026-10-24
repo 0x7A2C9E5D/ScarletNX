@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* What a fatal error's box says (runtime/platform/fatal_screen.c): the hint for each known error, the text cut into
-   the box's rows at spaces, a long word cut, UTF-8 counted as characters, those in the font's bytes, and Share log's
+   the box's rows at spaces, a long word cut, UTF-8 counted as characters, those in the font's bytes, and Share Log's
    file */
 #include "nx/runtime/platform/fatal_screen.h"
 #include "common/utilities/common.h"
@@ -58,7 +58,7 @@ int main(void) {
         fatal_cp437("abcdef", out, 4);
         assert(!strcmp(out, "abc"));
     }
-    /* Share log's file, as the launcher's: the build, the error and the game's log, its last 4 MiB of a bigger one; a
+    /* Share Log's file, as the launcher's: the build, the error and the game's log, its last 4 MiB of a bigger one; a
        log not there yet says so, and a folder that cannot take it fails with the path it tried */
     {
         enum { BIG = (4 << 20) + 100 };
@@ -93,12 +93,14 @@ int main(void) {
         free(big);
         free(log);
         log = snx_path_join(root, "no/such/folder");
-        assert(fatal_share_log(log, "build", "message", NULL, saved, sizeof saved) && strstr(saved, "no/such/folder"));
+        text = snx_path_join("no", "such/folder"); /* in the system's separators, as the folder said is */
+        assert(fatal_share_log(log, "build", "message", NULL, saved, sizeof saved) && strstr(saved, text));
         assert(fatal_share_log(NULL, "build", "message", NULL, saved, sizeof saved));
+        free(text);
         free(log);
         assert(!snx_remove_tree(root));
         free(root);
     }
-    puts("fatal screen: hints, rows, the font's bytes and Share log's file");
+    puts("fatal screen: hints, rows, the font's bytes and Share Log's file");
     return 0;
 }

@@ -28,6 +28,7 @@ struct SnxArmExec {
     SnxCodeLoader* loader;
     CachedBlock* blocks; /* open addressing, a power of two slots, at most half full */
     size_t count, capacity, compiles;
+    SnxArmProfile profile; /* the one snx_arm_exec_block compiles for, A57 unless set */
 };
 
 static size_t code_span(const SnxArmExecRange* ranges, size_t n, uint32_t pc, unsigned unit) {
@@ -112,7 +113,7 @@ SnxArmBlock snx_arm_exec_block(SnxArmExec* e, const SnxArmExecRange* ranges, siz
                 ((uint32_t*)swapped)[i] = snx_ld_le32(base + pc + i * 4);
         code = swapped;
     }
-    SnxArmBlock block = snx_arm_exec_compile(e, code, span, pc, thumb, SNX_ARM_PROFILE_A57, 0, &consumed);
+    SnxArmBlock block = snx_arm_exec_compile(e, code, span, pc, thumb, e->profile, 0, &consumed);
     free(swapped);
     if (!block) return NULL;
     size_t slot = slot_of(e, key);
@@ -177,6 +178,7 @@ SnxArmExec* snx_arm_exec_new(char* error, size_t error_size) {
     return e;
 }
 
+void snx_arm_exec_set_profile(SnxArmExec* e, SnxArmProfile profile) { e->profile = profile; }
 void snx_arm_exec_free(SnxArmExec* e) {
     if (!e) return;
     snx_code_loader_free(e->loader);

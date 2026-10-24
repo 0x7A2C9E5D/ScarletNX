@@ -14,7 +14,8 @@ static const VitaHle* find(uint32_t nid) {
     static const VitaHle* const tables[] = {vita_hle_kernel, vita_hle_io,    vita_hle_ctrl, vita_hle_display,
                                             vita_hle_audio,  vita_hle_misc, vita_hle_gxm, vita_hle_libc,
                                             vita_hle_fiber, vita_hle_ngs, vita_hle_mp4, vita_hle_videodec,
-                                            vita_hle_audiodec};
+                                            vita_hle_audiodec, vita_hle_dialog, vita_hle_net,
+                                            vita_hle_trophy};
     for (size_t i = 0; i < sizeof tables / sizeof *tables; ++i)
         for (const VitaHle* h = tables[i]; h->name; ++h)
             if (h->nid == nid) return h;
@@ -31,13 +32,17 @@ void vita_hle_call(VitaProcess* p, VitaThread* t, uint32_t index) {
     ++p->hle_calls;
     uint32_t r[4] = {t->cpu.r[0], t->cpu.r[1], t->cpu.r[2], t->cpu.r[3]};
     if (!h) {
-        /* the game goes on with 0, success for most of the system's functions, logged the first time */
+        /* the game goes on with 0, success for most of the system's functions, and with the offline console's error
+           for the network's (net.c), logged the first time */
+        uint32_t error = vita_net_offline_error(import->library);
         if (p->unknown_logged[index] == 1 || g_settings.vita_import_trace) {
-            printf("vita: %s's 0x%08" PRIx32 " is not implemented (thread \"%s\", lr 0x%08" PRIx32 ")\n",
-                   import->library, import->nid, t->name, t->cpu.r[14]);
+            printf("vita: %s's 0x%08" PRIx32 " is not implemented (thread \"%s\", lr 0x%08" PRIx32 ")", import->library,
+                   import->nid, t->name, t->cpu.r[14]);
+            if (error) printf(": offline, 0x%08" PRIx32, error);
+            putchar('\n');
             p->unknown_logged[index] = 2;
         }
-        t->cpu.r[0] = 0;
+        t->cpu.r[0] = error;
         return;
     }
     t->call.redirected = false;

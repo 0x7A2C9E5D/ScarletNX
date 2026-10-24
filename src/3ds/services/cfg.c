@@ -11,6 +11,7 @@
 #include "3ds/services/cfg.h"
 #include "3ds/memory/ctr_memory.h"
 #include "3ds/runtime/internal.h"
+#include "common/utilities/users.h"
 #include <openssl/evp.h>
 #include <stdio.h>
 #include <string.h>
@@ -49,9 +50,9 @@ static void put32(uint8_t* p, uint32_t v) {
 static uint32_t block(SnxCtrProcess* p, uint32_t id, uint8_t out[0x800]) {
     memset(out, 0, 0x800);
     switch (id) {
-        case 0x00030001: return 8; /* UserTimeOffset */
+        case 0x00030001: return 8;             /* UserTimeOffset */
         case 0x00050001: out[1] = 2; return 2; /* BacklightControls: power saving off, brightness 2 */
-        case 0x00050005: { /* StereoCameraSettings, which fix NaN uniforms in some games */
+        case 0x00050005: {                     /* StereoCameraSettings, which fix NaN uniforms in some games */
             static const float settings[8] = {62.0f, 289.0f, 76.80000305175781f, 46.08000183105469f,
                                               10.0f, 5.0f,   55.58000183105469f, 21.56999969482422f};
             for (unsigned i = 0; i < 8; ++i) {
@@ -61,14 +62,17 @@ static uint32_t block(SnxCtrProcess* p, uint32_t id, uint8_t out[0x800]) {
             }
             return 32;
         }
-        case 0x00050009: return 8;  /* BacklightControlNew3ds */
+        case 0x00050009: return 8;             /* BacklightControlNew3ds */
         case 0x00070001: out[0] = 1; return 1; /* SoundOutputMode: stereo */
-        case 0x00090000:            /* ConsoleUniqueID1 */
-        case 0x00090001: return 8;  /* ConsoleUniqueID2 */
-        case 0x00090002: return 4;  /* ConsoleUniqueID3 */
-        case 0x000a0000: {          /* Username "AZAHAR", ten UTF-16 units, then two zero words */
-            static const char name[] = "AZAHAR";
-            for (unsigned i = 0; name[i]; ++i) out[i * 2] = (uint8_t)name[i];
+        case 0x00090000:                       /* ConsoleUniqueID1 */
+        case 0x00090001: return 8;             /* ConsoleUniqueID2 */
+        case 0x00090002: return 4;             /* ConsoleUniqueID3 */
+        case 0x000a0000: {                     /* Console username: ten UTF-16 units, then two zero words. */
+            const SnxUser* user = snx_users_selected();
+            /* ScarletNX validates profile names as ASCII. The 3DS limit is ten
+               characters, shorter than the launcher's twenty-character limit. */
+            const char* name = user && user->nickname[0] ? user->nickname : "Player";
+            for (unsigned i = 0; i < 10 && name[i]; ++i) out[i * 2] = (uint8_t)name[i];
             return 0x1c;
         }
         case 0x000a0001: out[0] = 11, out[1] = 7; return 2; /* Birthday: November 7th */
@@ -79,19 +83,19 @@ static uint32_t block(SnxCtrProcess* p, uint32_t id, uint8_t out[0x800]) {
             return 4;
         case 0x000b0001: location_names(out, "United States"); return 0x800;
         case 0x000b0002: location_names(out, "Washington DC"); return 0x800;
-        case 0x000b0003: return 4;     /* LatitudeLongitude */
-        case 0x000c0000: return 0xc0;  /* RestrictedPhotoExchange */
-        case 0x000c0001: return 0x14;  /* CoppacsRestriction */
-        case 0x000c0002: return 0x200; /* ParentalRestrictionEmail */
+        case 0x000b0003: return 4;                               /* LatitudeLongitude */
+        case 0x000c0000: return 0xc0;                            /* RestrictedPhotoExchange */
+        case 0x000c0001: return 0x14;                            /* CoppacsRestriction */
+        case 0x000c0002: return 0x200;                           /* ParentalRestrictionEmail */
         case 0x000d0000: out[0] = 0x7f, out[1] = 0x7f; return 4; /* EULAVersion 127.127 */
         case 0x000e0000: return 1;
         case 0x000f0004: /* ConsoleModel, as the board is */
             out[0] = snx_ctr_memory_profile(p->memory)->model == SNX_CTR_NEW ? MODEL_NEW_3DS_XL : MODEL_3DS_XL;
             return 4;
-        case 0x000f0006: return 0x28; /* XDeviceToken */
-        case 0x00110000: out[0] = 1; return 4; /* SystemSetupRequired */
-        case 0x00130000: return 4;             /* DebugMode off */
-        case 0x00150000: return 4;             /* ClockSequence */
+        case 0x000f0006: return 0x28;                          /* XDeviceToken */
+        case 0x00110000: out[0] = 1; return 4;                 /* SystemSetupRequired */
+        case 0x00130000: return 4;                             /* DebugMode off */
+        case 0x00150000: return 4;                             /* ClockSequence */
         case 0x00150002: out[0] = 'L', out[1] = '1'; return 4; /* ServerType */
         case 0x00160000: return 4;
         case 0x00170000: return 4; /* MiiverseAccessKey */

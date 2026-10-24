@@ -60,6 +60,9 @@ Each run of the Build workflow (`.github/workflows/build.yml`) on a pull request
 any job that did not build (`scripts/pr-builds.sh`). A pull request from a fork gets no comment, since its token may
 not write.
 
+GitHub asks the owners of the files a pull request changes for their review once it is out of draft:
+`.github/CODEOWNERS` names those of the CI, GUI, GPU and CPU code, and of the 3DS and the Vita.
+
 ## C code
 
 New C follows the rules of [RFC #142](https://github.com/scarletnx/ScarletNX/issues/142): strict ISO C99, no state

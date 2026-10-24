@@ -20,6 +20,7 @@
 #include "nx/gpu/renderer.h"
 #include "nx/gpu/shader/shipped.h"
 #include "nx/gpu/shipped_pass.h"
+#include "nx/runtime/platform/tracy.h"
 #include "common/utilities/build_info.h"
 #include "common/utilities/common.h"
 #include <sys/stat.h>
@@ -41,9 +42,11 @@ static VkPipelineLayout g_playouts[1u << 5]; /* by the sets with texture arrays,
 static PMutex g_playout_lock = PMUTEX_INIT;  /* making one: the file's reading thread asks for them too */
 u32 g_vk_stage_sets;
 static VkPipelineCache g_pcache;
+int g_vk_ftz; /* SH_FTZ_*: how translations flush FP32 subnormals (vk_pipeline_init) */
 static void pf_start_load(void);
 static void pf_merge(void);
-static void pf_shader_record(const VkSh* s, const u32* spv, size_t nw);
+static void pf_shader_record(const VkSh* s, const u32* spv, size_t nw, const u8* code, u32 ncode, const ShXfb* xfb);
+static u32 src_bytes(u32 mlen);
 static void pf_ship_found(VkSh* s);
 static VkSh* pf_ship_take(u64 h, int stage, const u32 mask[20], u32 len, u64 qh, u32 len_a, u64 qh_a);
 /* the channel and stage whose bound constant buffers the translator reads, for the vk_shader_get call running */
@@ -132,7 +135,7 @@ u32* vk_translate_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si
                                             VK_SHADER_STAGE_FRAGMENT_BIT,
                                             VK_SHADER_STAGE_COMPUTE_BIT};
     VkShaderStageFlagBits shader_stage = stages[stage];
-    u32* result = shader_to_spirv(code, max_bytes, stage, si, words, g_vk_flush_denorm, g_vk_preserve_infnan,
+    u32* result = shader_to_spirv(code, max_bytes, stage, si, words, g_vk_ftz, g_vk_preserve_infnan,
                                   g_vk_preserve_infnan64, (g_vk_subgroup_stages & shader_stage) != 0);
     g_shader_cb_read = old;
     g_rec = NULL;
@@ -313,6 +316,7 @@ void vk_pipeline_init(void) {
     snprintf(g_cache_dir, sizeof g_cache_dir, "%sshader_cache", g_cachedir);
     plat_mkdir(g_cache_dir);
     snprintf(g_pcache_path, sizeof g_pcache_path, "%s/vk_pipelines.bin", g_cache_dir);
+    snx_path_native(g_pcache_path);
     /* the temporary name is the process's own: two games running at once would otherwise write the same file */
     snprintf(g_pcache_tmp, sizeof g_pcache_tmp, "%s.%u.tmp", g_pcache_path, pf_pid());
     /* the driver's compiled pipelines from earlier runs; it ignores data from another device or driver version */
@@ -329,6 +333,17 @@ void vk_pipeline_init(void) {
     }
     if (ci.initialDataSize) LOG("vulkan: pipeline cache loaded (%zu KB)\n", ci.initialDataSize >> 10);
     plat_file_unmap(&data); /* the cache copied it, and a mapped file can't be replaced on Windows */
+    /* how shaders get the console's FP32 flush to zero, settled before the reading thread translates any */
+    if (g_vk_flush_denorm)
+        g_vk_ftz = SH_FTZ_MODE;
+    else if (g_vk_preserve_infnan && vk_ftz_native()) {
+        g_vk_ftz = SH_FTZ_NATIVE;
+        LOG("vulkan: this GPU flushes FP32 subnormals as the console's FTZ instructions do, so shaders are translated "
+            "without a flush of their own\n");
+    } else {
+        g_vk_ftz = SH_FTZ_EMULATE;
+        WARN("vulkan: FP32 denormal flush mode unavailable; graphics shaders use per-instruction FTZ fallback\n");
+    }
     pf_start_load();
 }
 
@@ -433,14 +448,17 @@ static u32* sh_spirv(VkSh* s, const u8* code, u64 h, int stage, const u32 mask[2
     }
     return spv;
 }
-/* A draw's shader (sh_spirv's arguments): translated, its module made, kept in the shader file. One that couldn't be
-   translated comes back failed; NULL when out of memory */
-static VkSh* sh_make(const u8* code, u64 h, int stage, const u32 mask[20], u32 len, u64 qh, u32 len_a, u64 qh_a,
-                     const ShXfb* xfb, VkCbReader read) {
+/* A draw's shader (sh_spirv's arguments, and mlen, the bytes of code the translation reads): translated, its module
+   made, kept in the shader file with its program. One that couldn't be translated comes back failed; NULL when out
+   of memory */
+static VkSh* sh_make(const u8* code, u32 mlen, u64 h, int stage, const u32 mask[20], u32 len, u64 qh, u32 len_a,
+                     u64 qh_a, const ShXfb* xfb, VkCbReader read) {
     size_t nw;
     VkSh* s = calloc(1, sizeof *s);
     if (!s) return NULL;
+    SNX_ZONE(z, "shader translate");
     u32* spv = sh_spirv(s, code, h, stage, mask, len, qh, len_a, qh_a, xfb, read, 0, &nw);
+    SNX_ZONE_END(z);
     if (spv) {
         VkShaderModuleCreateInfo mi = {
             .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = nw * 4, .pCode = spv};
@@ -448,7 +466,7 @@ static VkSh* sh_make(const u8* code, u64 h, int stage, const u32 mask[20], u32 l
             s->failed = 1;
             snprintf(s->si.first_unsupported, sizeof s->si.first_unsupported, "vkCreateShaderModule failed");
         } else
-            pf_shader_record(s, spv, nw);
+            pf_shader_record(s, spv, nw, code, src_bytes(mlen), xfb);
         free(spv);
     } else
         s->failed = 1;
@@ -559,7 +577,7 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
             shader_corpus_save(vk_corpus_dir(), code, mlen, SH_CODE, stage, &si, h ^ mix);
         }
         u64 t0 = plat_ns();
-        s = sh_make(code, h, stage, mask, len, qh, len_a, qh_a, xfb, sh_cb_read);
+        s = sh_make(code, mlen, h, stage, mask, len, qh, len_a, qh_a, xfb, sh_cb_read);
         if (!s) {
             free(code);
             return NULL;
@@ -875,7 +893,9 @@ static VkPipeline pipe_create(const Pipe* e) {
    makes it (record), and when it queues it for a worker otherwise, as the file's tables are the GPU thread's */
 static VkPipeline pipe_make(const Pipe* e, int record) {
     u64 t0 = plat_ns();
+    SNX_ZONE(z, "pipeline make");
     VkPipeline p = pipe_create(e);
+    SNX_ZONE_END(z);
     pcache_note();
     if (e->prewarm)
         __atomic_add_fetch(&g_pf.made, 1, __ATOMIC_RELAXED);
@@ -895,6 +915,7 @@ static Pipe *g_pw_head, *g_pw_tail; /* the file's */
 static int g_pj_started, g_pj_threads;
 static void pipe_worker(void* arg) {
     (void)arg;
+    SNX_THREAD_NAME("Vulkan pipelines");
     for (;;) {
         Pipe* e;
         VkPipeline p;
@@ -976,6 +997,7 @@ static int pipe_promote(Pipe* e) {
 /* e's pipeline once ready, waiting at most ns for it (a negative ns: until it is) */
 static VkPipeline pipe_wait(Pipe* e, i64 ns) {
     u64 until = ns < 0 ? 0 : plat_ns() + (u64)ns;
+    SNX_ZONE(z, "pipeline wait");
     pm_lock(&g_pj_lock);
     while (!e->ready) {
         u64 now = plat_ns();
@@ -983,6 +1005,7 @@ static VkPipeline pipe_wait(Pipe* e, i64 ns) {
         pc_wait(&g_pj_done, &g_pj_lock, ns < 0 ? -1 : (i64)(until - now));
     }
     pm_unlock(&g_pj_lock);
+    SNX_ZONE_END(z);
     return __atomic_load_n(&e->ready, __ATOMIC_ACQUIRE) ? e->p : VK_NULL_HANDLE;
 }
 /* Stand-ins for pipelines still being made, which the GPU thread hands the recording thread in their place
@@ -1181,10 +1204,32 @@ static VkShaderModule mod_handle(u64 v) {
 }
 typedef char pf_cbr_words[sizeof(VkCbRead) == 16 ? 1 : -1]; /* the file's reads are VkCbRead's four words */
 
-/* s's record, of spv (nw words), into pf for module (0 for none): where it starts in the file, 0 when not written */
-static u64 pf_shader_into(PFile* pf, const VkSh* s, u64 module, const u32* spv, size_t nw) {
+/* the bytes of a program kept with its shader (PF_SOURCE): mlen, the program as shader_hash sizes it, which is what
+   the translation reads, with the words after it that a lookahead past its last instruction would read */
+static u32 src_bytes(u32 mlen) {
+    u32 n = ((mlen + 7u) & ~7u) + 64u;
+    return n < SH_CODE ? n : SH_CODE;
+}
+/* s's record, of spv (nw words), into pf for module (0 for none): where it starts in the file, 0 when not written.
+   With code (its first ncode bytes, src_bytes) and xfb, the program it was translated from goes before it
+   (PF_SOURCE), which a later build or driver translates again (pf_load_source) */
+static u64 pf_shader_into(PFile* pf, const VkSh* s, u64 module, const u32* spv, size_t nw, const u8* code, u32 ncode,
+                          const ShXfb* xfb) {
     PfShader r = {0};
+    PfSource src = {0};
     if (!g_pf.on || nw > 0xFFFFFFFFu) return 0;
+    if (code) {
+        src.hash = s->hash;
+        src.qh = s->qh;
+        src.qh_a = s->qh_a;
+        src.stage = (u32)s->stage;
+        src.clen = s->clen;
+        src.clen_a = s->clen_a;
+        src.ncbr = s->cbr.n;
+        src.ncode = ncode;
+        src.flags = xfb ? PF_SRC_XFB : 0;
+        memcpy(src.mask, s->mask, sizeof src.mask);
+    }
     r.hash = s->hash;
     r.qh = s->qh;
     r.qh_a = s->qh_a;
@@ -1196,11 +1241,11 @@ static u64 pf_shader_into(PFile* pf, const VkSh* s, u64 module, const u32* spv, 
     r.nspv = (u32)nw;
     memcpy(r.mask, s->mask, sizeof r.mask);
     memcpy(&r.si, &s->si, sizeof r.si);
-    return pf_shader(pf, module, &r, (const u32*)(const void*)s->cbr.r, spv);
+    return pf_shader(pf, module, &r, (const u32*)(const void*)s->cbr.r, spv, code ? &src : NULL, code, xfb);
 }
-/* s, made this run from spv: kept for the next one */
-static void pf_shader_record(const VkSh* s, const u32* spv, size_t nw) {
-    pf_shader_into(&g_pf.file, s, mod_bits(s->mod), spv, nw);
+/* s, made this run from spv translated from code (ncode bytes of it kept, with xfb): kept for the next one */
+static void pf_shader_record(const VkSh* s, const u32* spv, size_t nw, const u8* code, u32 ncode, const ShXfb* xfb) {
+    pf_shader_into(&g_pf.file, s, mod_bits(s->mod), spv, nw, code, ncode, xfb);
 }
 /* a draw's pipeline, made: kept for the next run, its modules by their shaders' records (any thread) */
 static void pf_pipe_record(const PipeKey* k) {
@@ -1268,10 +1313,75 @@ static u64 pf_load_shader(void* ctx, const PfShader* r, const u32* cbr, const u3
     pf_sh_append(s);
     return mod_bits(s->mod);
 }
-/* on the reading thread: a pipeline of the file, whose shaders were made, queued to the workers behind the draws' */
+/* the reads a shader of a file being rebuilt was translated with, which its translation again answers from (the
+   reading thread's alone). A read it didn't make answers that the buffer isn't bound: the shader then keeps that read,
+   and a draw whose buffers hold more translates its own (vk_shader_get checks every read) */
+static const VkCbReads* g_replay;
+static int replay_read(u32 idx, u32 off, u32* out) {
+    for (u32 i = 0; i < g_replay->n; i++)
+        if (g_replay->r[i].idx == idx && g_replay->r[i].off == off) {
+            *out = g_replay->r[i].v;
+            return (int)g_replay->r[i].ok;
+        }
+    return 0;
+}
+/* on the reading thread, in a file of another build or driver being rebuilt: the program a shader was translated
+   from, translated again with this build's translator as vk_shader_get would, and recorded in the new file */
+static u64 pf_load_source(void* ctx, const PfSource* r, const u32* cbr, const u8* code, const ShXfb* xfb) {
+    VkCbRead* reads = r->ncbr ? malloc(r->ncbr * sizeof *reads) : NULL;
+    VkCbReads replay = {reads, r->ncbr};
+    u8* window = calloc(1, SH_CODE);
+    VkSh* s = calloc(1, sizeof *s);
+    u32* spv = NULL;
+    size_t nw = 0;
+    (void)ctx;
+    if ((r->ncbr && !reads) || !window || !s || r->ncode > SH_CODE) goto fail;
+    if (r->ncbr) memcpy(reads, cbr, r->ncbr * sizeof *reads);
+    memcpy(window, code, r->ncode);
+    g_replay = &replay;
+    spv = sh_spirv(s, window, r->hash, (int)r->stage, r->mask, r->clen, r->qh, r->clen_a, r->qh_a, xfb, replay_read, 0,
+                   &nw);
+    g_replay = NULL;
+    if (!spv || vk_spirv_unavailable(spv, nw) || !(s->mod = vk_module_spv(spv, nw))) goto fail;
+    pf_shader_into(&g_pf.file, s, mod_bits(s->mod), spv, nw, window, r->ncode, xfb);
+    free(spv);
+    free(window);
+    free(reads);
+    pf_sh_append(s);
+    return mod_bits(s->mod);
+fail:
+    free(spv);
+    free(window);
+    free(reads);
+    if (s) free(s->cbr.r);
+    free(s);
+    return 0;
+}
+/* In a rebuild, a pipeline record keeps the earlier build's key with the modules of the new translation. Two of its
+   fields come from that translation: the sets with texture arrays, from each stage's indexed flag, and the attributes,
+   one for each one the vertex shader reads. A translator that came to index a shader's textures would have its
+   pipeline made with the layout without the arrays, which its module declares, and the record written into the new
+   file as it was. 1 when both fields are what the rebuilt shaders say; a record they don't hold for is dropped, and a
+   draw that needs its pipeline makes it from its own key */
+static int pf_key_holds(const PipeKey* k) {
+    const VkShaderModule mods[5] = {k->vs, k->tcs, k->tes, k->gs, k->fs};
+    u32 arrays = 0, attrs = 0, in = 0;
+    for (int i = 0; i < 5; i++) {
+        const VkSh* sh = NULL;
+        if (!mods[i]) continue;
+        for (const VkSh* q = g_pf.sh; q && !sh; q = q->next)
+            if (q->mod == mods[i]) sh = q;
+        if (!sh) return 0;
+        if (sh->indexed) arrays |= 1u << shader_vk_set(sh->stage);
+        if (i == 0) in = sh->si.in_mask;
+    }
+    for (u32 i = 0; i < k->nattr; i++) attrs |= 1u << k->attr[i].loc;
+    return arrays == k->arrays && attrs == in;
+}
+/* on the reading thread: a pipeline of the file, whose shaders were made, queued to the workers behind the draws'. In
+   a file being rebuilt it is recorded in the new one, whose shader records its modules have */
 static void pf_load_pipe(void* ctx, const u64 m[5], const void* key, u32 keylen) {
     Pipe* p;
-    (void)ctx;
     if (keylen != sizeof p->k || !m[0]) return;
     p = calloc(1, sizeof *p);
     if (!p) return;
@@ -1285,6 +1395,10 @@ static void pf_load_pipe(void* ctx, const u64 m[5], const void* key, u32 keylen)
     p->k.tes = mod_handle(m[2]);
     p->k.gs = mod_handle(m[3]);
     p->k.fs = mod_handle(m[4]);
+    if (((const PfLoad*)ctx)->rebuild && !pf_key_holds(&p->k)) {
+        free(p);
+        return;
+    }
     p->h = vk_hash(&p->k, sizeof p->k);
     for (Pipe* q = g_pf.pipes; q; q = q->next) /* the file has it twice */
         if (q->h == p->h && !memcmp(&q->k, &p->k, sizeof p->k)) {
@@ -1294,6 +1408,7 @@ static void pf_load_pipe(void* ctx, const u64 m[5], const void* key, u32 keylen)
     p->layout = vk_playout(p->k.arrays);
     p->fs = p->k.fs ? p->k.fs : null_fs();
     p->prewarm = 1;
+    if (((const PfLoad*)ctx)->rebuild) pf_pipe_record(&p->k);
     pm_lock(&g_pj_lock);
     if (!pipe_workers()) { /* made when a draw asks for it, then */
         pm_unlock(&g_pj_lock);
@@ -1307,11 +1422,17 @@ static void pf_load_pipe(void* ctx, const u64 m[5], const void* key, u32 keylen)
     g_pf.npipe++;
 }
 
-/* The file's key: whatever changes the SPIR-V translation makes or what a PipeKey means. The build (commit, compiler,
-   host), and for a tree with changes, which has one commit for every build of it, the runtime's own file; the device
-   and its driver; the features and limits the translator, vk_shader_get and pipe_create consult; the sizes of what
-   records hold whole */
-static void pf_key(char* out, size_t n) {
+/* PF_GUEST_VERSION: what a PF_SOURCE or PF_PIPE record means, beyond the sizes the key holds. Raised when a PipeKey
+   field or a key word (vk_shader_get's mask) comes to mean something else, so that the records of an earlier build
+   are dropped rather than made into pipelines and shaders of the wrong state */
+#define PF_GUEST_VERSION 1
+/* The file's key: whatever changes the SPIR-V translation makes or what a PipeKey means. First its guest part, which
+   the PF_SOURCE and PF_PIPE records depend on (pf_open): the device; the features and limits the translator,
+   vk_shader_get and pipe_create consult; the sizes of what those records hold whole. Then the rest, which only the
+   SPIR-V and ShaderInfo of the PF_SHADER records depend on: the build (commit, compiler, host), and for a tree with
+   changes, which has one commit for every build of it, the runtime's own file; the driver. The guest part's length
+   goes in *guest */
+static void pf_key(char* out, size_t n, size_t* guest) {
     const VkPhysicalDeviceProperties* d = &g_vk.props;
     const char* commit = snx_build_commit();
     size_t len = strlen(commit);
@@ -1349,10 +1470,16 @@ static void pf_key(char* out, size_t n) {
         free(self);
     }
     for (int i = 0; i < 16; i++) snprintf(uuid + 2 * i, 3, "%02x", d->pipelineCacheUUID[i]);
-    snprintf(out, n, "%s%s gpu=%04x:%04x driver=%u api=%u uuid=%s features=%016llx caps=%016llx sizes=%u,%u,%u",
-             snx_build_info(), exe, d->vendorID, d->deviceID, d->driverVersion, d->apiVersion, uuid,
-             (unsigned long long)vk_hash(&g_vk.feat, sizeof g_vk.feat), (unsigned long long)vk_hash(caps, sizeof caps),
-             (unsigned)sizeof(ShaderInfo), (unsigned)sizeof(PipeKey), (unsigned)sizeof(PfShader));
+    int g = snprintf(out, n, "guest=%d gpu=%04x:%04x features=%016llx caps=%016llx sizes=%u,%u,%u,%u;",
+                     PF_GUEST_VERSION, d->vendorID, d->deviceID,
+                     (unsigned long long)vk_hash(&g_vk.feat, sizeof g_vk.feat),
+                     (unsigned long long)vk_hash(caps, sizeof caps), (unsigned)sizeof(PipeKey),
+                     (unsigned)sizeof(PfSource), (unsigned)sizeof(PfPipe), (unsigned)sizeof(ShXfb));
+    *guest = g > 0 && (size_t)g < n ? (size_t)g : 0;
+    if (*guest)
+        snprintf(out + *guest, n - *guest, " %s%s driver=%u api=%u uuid=%s ftz=%d sizes=%u,%u", snx_build_info(), exe,
+                 d->driverVersion, d->apiVersion, uuid, g_vk_ftz, (unsigned)sizeof(ShaderInfo),
+                 (unsigned)sizeof(PfShader));
 }
 
 /* ---- the shaders of the programs the game ships (gpu/shipped_pass.c finds them), translated before a draw asks */
@@ -1537,7 +1664,7 @@ static int ship_make(const u8* code, u64 h, int stage, u32 len, u64 qh, u32 len_
     if (e && e->at) return SHIP_KNOWN;
     u32* spv = sh_spirv(&s, code, h, stage, mask, len, qh, len_a, qh_a, NULL, ship_no_read, 1, &nw);
     int translated = spv != NULL;
-    if (spv) at = pf_shader_into(&g_pf.ship, &s, 0, spv, nw);
+    if (spv) at = pf_shader_into(&g_pf.ship, &s, 0, spv, nw, NULL, 0, NULL);
     free(spv);
     free(s.cbr.r);
     /* An allocation failing inside the translator comes back as a program it can't translate, with no reason given,
@@ -1677,14 +1804,16 @@ void vk_pipeline_prepare(RendererPrepare* p) {
 /* the reading thread (arg non-NULL), or vk_pipeline_init's when there is none, which doesn't run the pass: the
    shipped file first, whose records the main file's PF_SHIPREFs name, then the main file, then the pass */
 static void pf_load(void* arg) {
-    PfLoad load = {pf_load_shader, pf_load_pipe, pf_load_shipref, NULL};
+    PfLoad load = {pf_load_shader, pf_load_pipe, pf_load_shipref, pf_load_source, NULL, 0};
     char key[1024];
+    size_t guest;
     u32 loaded[2] = {0, 0};
     u64 t0 = plat_ns();
-    pf_key(key, sizeof key);
+    load.ctx = &load; /* pf_load_pipe reads rebuild */
+    pf_key(key, sizeof key, &guest);
     g_pf.ship.max = SHIP_MAX;
     pf_open_mapped(&g_pf.ship, g_pf.ship_path, key, pf_ship_rec, NULL);
-    pf_open(&g_pf.file, g_pf.path, key, &load, loaded);
+    pf_open(&g_pf.file, g_pf.path, key, guest, &load, loaded);
     LOG("vulkan: %u shaders and %u pipelines of earlier runs loaded from %s in %llu ms, the pipelines to be made in "
         "the background; %u shaders of the game's own programs in %s\n",
         g_pf.nsh, g_pf.npipe, g_pf.path, (unsigned long long)((plat_ns() - t0) / 1000000), g_pf.nidx, g_pf.ship_path);
@@ -1714,6 +1843,8 @@ static void pf_start_load(void) {
     null_fs(); /* made here, before the reading thread uses it */
     snprintf(g_pf.path, sizeof g_pf.path, "%s/%s.vkshaders", g_cache_dir, g_exename);
     snprintf(g_pf.ship_path, sizeof g_pf.ship_path, "%s/%s.vkshipped", g_cache_dir, g_exename);
+    snx_path_native(g_pf.path);
+    snx_path_native(g_pf.ship_path);
     if (g_settings.prepare_shaders) ship_snapshot(); /* before the game's first thread writes its data */
     /* the translator's recursion wants the GPU thread's stack */
     if (plat_thread(pf_load, &g_pf, (size_t)16 << 20)) pf_load(NULL); /* no thread: read here */

@@ -131,13 +131,32 @@ static void branch(SnxIr* ir, const SnxCodegen* codegen, const SnxFunction* func
         call(ir, codegen, target, 1);
 }
 
-/* if(UNLIKELY(c->pc!=pc+4)) return; */
+/* snx_stale[ir->stale_index] != 0, read with a relaxed load (the runtime sets it while guest threads run) */
+static LLVMValueRef stale_flag(SnxIr* ir) {
+    LLVMValueRef at = ir_i64(ir, ir->stale_index), flag;
+    flag = LLVMBuildLoad2(B, ir->t_i8, LLVMBuildInBoundsGEP2(B, ir->t_i8, ir->stale, &at, 1, ""), "");
+    LLVMSetOrdering(flag, LLVMAtomicOrderingMonotonic);
+    LLVMSetAlignment(flag, 1);
+    return LLVMBuildICmp(B, LLVMIntNE, flag, LLVMConstInt(ir->t_i8, 0, 0), "");
+}
+
+/* if(UNLIKELY(c->pc!=pc+4)) return; and in the AOT build if(UNLIKELY(snx_stale[index])) return; with c->pc at pc+4:
+   the guest changed this function's code while the call ran (a mod's hooks, written from inside the call: ozone's
+   MountRom hook loads the plugins that patch its caller). The callers return as for any other pc, and the thread's
+   loop runs pc+4 through dispatch, compiled from the code there now, as the console's CPU fetches it */
 static void check_return(SnxIr* ir, SnxU64 next) {
     LLVMBasicBlockRef leave = ir_block(ir, "leave"), stay = ir_block(ir, "stay");
     ir_unlikely(ir, LLVMBuildCondBr(B, LLVMBuildICmp(B, LLVMIntNE, ir_pc(ir), ir_i64(ir, next), ""), leave, stay));
     LLVMPositionBuilderAtEnd(B, leave);
     ret(ir);
     LLVMPositionBuilderAtEnd(B, stay);
+    if (ir->stale) {
+        LLVMBasicBlockRef gone = ir_block(ir, "stale_return"), live = ir_block(ir, "live_return");
+        ir_unlikely(ir, LLVMBuildCondBr(B, stale_flag(ir), gone, live));
+        LLVMPositionBuilderAtEnd(B, gone);
+        ret(ir); /* c->pc is pc+4, which the callee's return set */
+        LLVMPositionBuilderAtEnd(B, live);
+    }
 }
 
 /* SVC #imm: c->rt->svcs[imm](c, imm), the SVC's own entry, in an NX module (codegen->direct_svc), else
@@ -178,6 +197,27 @@ static void plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Decoded* instru
     }
 }
 
+void snx_ir_stale_checks(SnxIr* ir) {
+    LLVMValueRef g = LLVMGetNamedGlobal(ir->mod, SNX_IR_STALE);
+    if (!g) {
+        g = LLVMAddGlobal(ir->mod, LLVMArrayType(ir->t_i8, 0), SNX_IR_STALE);
+        LLVMSetLinkage(g, LLVMExternalLinkage);
+        LLVMSetVisibility(g, LLVMHiddenVisibility); /* the module's own: reached PC-relative, not through the GOT */
+    }
+    ir->stale = g;
+}
+
+/* if(UNLIKELY(__atomic_load_n(&snx_stale[index],__ATOMIC_RELAXED))){ CALLDYN(e); return; }: the guest changed code
+   this function was compiled from (RtAPI.code_changed), and the runtime has taken its entries out of dispatch, where
+   a lookup of e compiles the code there now */
+static void stale_check(SnxIr* ir, LLVMValueRef e) {
+    LLVMBasicBlockRef stale = ir_block(ir, "stale"), live = ir_block(ir, "live");
+    ir_unlikely(ir, LLVMBuildCondBr(B, stale_flag(ir), stale, live));
+    LLVMPositionBuilderAtEnd(B, stale);
+    must_tail(ir, call_dynamic(ir, e));
+    LLVMPositionBuilderAtEnd(B, live);
+}
+
 void snx_ir_emit(SnxIr* ir, SnxCodegen* codegen, const SnxFunction* function) {
     LLVMValueRef fn = snx_ir_guest_function(ir, function->start), e, sw;
     LLVMBasicBlockRef *labels, mismatch, body, dispatch_block = NULL;
@@ -190,6 +230,10 @@ void snx_ir_emit(SnxIr* ir, SnxCodegen* codegen, const SnxFunction* function) {
     labels = (LLVMBasicBlockRef*)calloc(function->count ? function->count : 1, sizeof(*labels));
     snx_ir_begin(ir, fn);
     e = LLVMGetParam(fn, 1);
+    if (ir->stale) {
+        ir->stale_index = (size_t)(function - codegen->functions);
+        stale_check(ir, e);
+    }
     for (i = 0; i < function->count; ++i)
         if (function->leaders[i]) labels[i] = ir_block(ir, "L");
     dispatch = function->leader_count > 1;

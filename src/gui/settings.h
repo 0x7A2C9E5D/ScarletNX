@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The menu's Settings: the launcher's own rows and the recompiler's (settings.txt's launcher sections: gdbstub, Extract
-   to tmpfs, Extract game container, the optimization level, the AOT threads and the LLVM Internals page), then every
+   to tmpfs, Extract dump, the optimization level, the AOT threads and the LLVM Internals page), then every
    setting of the game's .ini as the runtime lists them (scarletnx --settings, its tables), each a row of the form
    (editor.h), named and its values worded as the game's menu shows them. A setting is the .ini's,
    passed to no run, until one is picked. The picks are kept in a file, an .ini of the game's sections and keys, and go
@@ -57,6 +57,8 @@ int gui_settings_unread(GuiSettings* settings, const char* path, char* out, size
 /* row back to its start (a page's or an All's: their rows), every row for -1 */
 void gui_settings_reset(GuiSettings* settings, int row);
 /* the rows whose value is not their start: what a reset of every row changes */
+/* 1 for row (a page's or an All's: each of its rows) at the value it started with, what Del would put back; else 0 */
+int gui_settings_at_start(const GuiSettings* settings, int row);
 int gui_settings_changed(const GuiSettings* settings);
 /* an All's row stepped (-1 or 1, 0 for a select) with every row it steps: 1, else 0 */
 int gui_settings_step_all(GuiSettings* settings, int row, int step);
@@ -72,11 +74,13 @@ const char* gui_settings_value(const GuiSettings* settings, const char* key);
 size_t gui_settings_options(GuiSettings* settings, int launch, const char** argv);
 /* Extract to tmpfs: --tmpfs while it is on, else NULL (extractions on disk) */
 const char* gui_settings_tmpfs(const GuiSettings* settings);
-/* Extract game container: --extract-container while it is on, else NULL (a dump read in place, nothing extracted).
+/* Extract dump: --extract-container while it is on, else NULL (a dump read in place, nothing extracted).
    Both drivers take it */
 const char* gui_settings_extract(const GuiSettings* settings);
 /* argv's --key=value for each of the recompiler's settings picked (the optimization level, the AOT threads, LLVM
    Internals), which the Switch driver takes for a run (which recompiles when it must) and for R's recompile. Their
    count */
 size_t gui_settings_recompile(GuiSettings* settings, const char** argv);
+/* argv's --key=value of the game's setting key when it is picked: its count, 1 or 0 */
+size_t gui_settings_one(GuiSettings* settings, const char* key, const char** argv);
 #endif

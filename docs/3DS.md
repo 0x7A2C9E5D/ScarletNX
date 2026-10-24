@@ -118,9 +118,9 @@ through the flat space and the API with a stand-in renderer.
 
 Compiled code addresses the guest flat: a 4 GiB host reservation where guest
 address `va` is `base + va`, each mapping a view of the board's RAM held in one
-host memory object (`src/3ds/memory/host.c`: a memfd on Linux and Android, an
-unlinked `shm_open` object on the other POSIX systems, a pagefile section mapped
-into placeholders on Windows 10 1803 and later). Every guest address of a physical
+host memory object (`src/common/memory/host.c`, the GBA window's too: a memfd on
+Linux and Android, an unlinked `shm_open` object on the other POSIX systems, a
+pagefile section mapped into placeholders on Windows 10 1803 and later). Every guest address of a physical
 page (a heap page and its MAP mirror, shared memory, the linear heap) is the same
 memory, and the HLE and the GPU read and write that object directly. Blocks read and
 write `cpu->mem + va` with no callback; a host fault in the reservation is the
@@ -437,7 +437,7 @@ folder keeps its module, its copy of the runtime and its state alone: `sdmc/` an
 `--extract-container` left there is taken away, its compiled module and saves kept. The image's identity is the same
 either way, so a module compiled in one mode loads in the other.
 
-`--extract-container` (the launcher's *Extract game container*) extracts the CIA into its folder first and plays from
+`--extract-container` (the launcher's *Extract dump*) extracts the CIA into its folder first and plays from
 the extraction, as before. `-x` extracts only:
 
 ```sh
@@ -448,7 +448,7 @@ The output is a directory containing `contents/*.app`, `exefs/` (with
 expanded/page-padded `.code`), `romfs/`, raw container/NCCH/ExHeader metadata and
 `manifest.ini` with source/code hashes and segment layout. The default directory
 is the game's folder, `recompiled/<title ID>`, in the data folder the Switch driver uses
-(`--repo DIR`, else a portable copy's folder, else the user's data folder, from a
+(`--data DIR`, else a portable copy's folder, else the user's data folder, from a
 build tree too). On Linux the user's data folder keeps `work/` (the decrypted CIAs)
 in `~/.cache/scarletnx/work/3ds/`. No source CIA
 needs to be mounted by the future guest FS. Extraction is privately staged, then
@@ -458,7 +458,7 @@ finished extraction and used as it is, never extracted again or hashed. Keep the
 not concurrently modified; extraction is not a sandbox against hostile host
 processes racing parent directory changes.
 
-`-x`/`--extract` stops after extraction and `-r`/`--recomp` compiles without
+`-x`/`--extract` stops after extraction and `-r`/`--recompile` compiles without
 playing, as the Switch driver's do. Otherwise the driver loads
 `<title ID>_code.so` and compiles it first only when needed: when it is
 missing, or no longer loads or matches the build's module ABI or the extracted
@@ -874,3 +874,28 @@ policies require explicit support or documented unsupported results; never claim
 that every peripheral is wired when only button input works.
 Gate: injected input/touch tests, ring wrap/events, disconnect/reconnect, New/Old
 model differences, camera/mic bounds and end-to-end homebrew interaction.
+
+### Experimental local wireless over rooms
+
+`nwm::UDS` supports two ScarletNX instances using an explicitly selected Eden-compatible
+room in Network settings. Enable Room wireless on both players and choose the same room.
+The selected profile supplies the console username, limited to the 3DS's ten characters.
+
+The backend implements discovery, host/join, node status, channel bindings, packet send/pull
+and disconnect. It uses a private protocol inside the room's datagram transport. It does
+not connect to physical consoles, Citra/Azahar rooms or Switch LDN sessions. LAN mode is
+not implemented by this backend and does not silently join a public room.
+
+No game image or synchronization window is patched. NSMB2 internet co-op still has
+input-delay and synchronization limits. The development runs with title-specific
+buffering experiments do not establish stock-game WAN compatibility for this backend.
+
+Synthetic IPC tests cover discovery, a duplicate join, packet bounds, FIFO bursts and
+disconnect through a local relay and a relay with 120 ms delay in each forwarding leg.
+They also check that discovery beacons omit the passphrase hash, a beacon-only join
+is rejected, and pending joins leave other guest threads, display and DSP scheduling
+running. Both connect commands finish asynchronously; timeout, CLOSE before SYNC,
+disconnect, shutdown and caller exit exercise their cleanup and reply ownership.
+`ldn_room` covers a 512-packet socket burst and the 4 MiB low-latency queue bound.
+Optional `snx-test-3ds-uds --public` uses `SNX_TEST_UDS_ROOM=host:port` rather than a
+hardcoded public server. No game data is needed for these tests.

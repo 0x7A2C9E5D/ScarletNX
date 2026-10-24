@@ -165,6 +165,16 @@ static void list_values(Listing* l, const IniOpt* o) {
         first = 0;
     }
 }
+/* the help of a repeated setting's later instance (a player's), which only its first has: that of the row before it
+   with its name, "" for none */
+static const char* repeated_help(const IniOpt* table, const IniOpt* o) {
+    const IniOpt* p;
+    for (p = o; p > table;) {
+        --p;
+        if (p->help && p->name && o->name && !strcmp(p->name, o->name)) return p->help;
+    }
+    return "";
+}
 size_t ini_list_text(const IniSection* sections, int count, char* out, size_t size) {
     static const char* const types[] = {"int", "float", "text"};
     Listing l;
@@ -178,7 +188,11 @@ size_t ini_list_text(const IniSection* sections, int count, char* out, size_t si
         for (t = 0; t < 3 && sections[s].table[t]; t++) {
             const IniOpt* o;
             for (o = sections[s].table[t]; o->key; o++) {
-                if (o->help) help = o->help; /* none: the one before covers it */
+                if (o->help)
+                    help = o->help;
+                else if (repeated_help(sections[s].table[t], o)[0]) /* a later instance: its first's */
+                    help = repeated_help(sections[s].table[t], o);
+                /* else none: the one before covers it */
                 if (o->flags & INI_IN_GAME) continue;
                 put(&l, "%s%s%s\t%s\t%s\t%s\t%g\t%g\t", sections[s].name, sections[s].page[t] ? "/" : "",
                     sections[s].page[t] ? sections[s].page[t] : "", o->key, o->def ? o->def : "", types[o->type],
@@ -193,7 +207,7 @@ size_t ini_list_text(const IniSection* sections, int count, char* out, size_t si
 }
 
 /* what became of each: the rewritten file keeps them under [Deprecated] with it, and a run names them, for the player
-   to delete (the launcher's Settings > App > Clean old settings does it) */
+   to delete (the launcher's Settings > App > Clean Old Settings does it) */
 static const struct {
     const char *key, *now;
 } INI_DEPRECATED[] = {{"audio_device", "playback follows the system's default"},
@@ -232,7 +246,7 @@ const char* ini_deprecated(const char* k) {
 void ini_deprecated_head(FILE* f) {
     fprintf(f,
             "\n[Deprecated]\n; keys an older version used, which do nothing now (docs/DEPRECATIONS.md): delete them, "
-            "or use Settings > App >\n;   Clean old settings in the launcher\n");
+            "or use Settings > App >\n;   Clean Old Settings in the launcher\n");
 }
 void ini_deprecated_key(FILE* f, const char* key, const char* value) {
     fprintf(f, "; %s: %s\n%s=%s\n", key, ini_deprecated(key), key, value);
@@ -246,7 +260,7 @@ int ini_deprecated_note(char* out, size_t size, const char* path, const char* co
     for (i = 0; i < n && at < size; i++) at += (size_t)snprintf(out + at, size - at, "%s%s", i ? ", " : "", keys[i]);
     if (at < size)
         snprintf(out + at, size - at,
-                 "), under [Deprecated]: delete %s, or use Settings > App > Clean old settings in "
+                 "), under [Deprecated]: delete %s, or use Settings > App > Clean Old Settings in "
                  "the launcher",
                  n > 1 ? "them" : "it");
     return 1;

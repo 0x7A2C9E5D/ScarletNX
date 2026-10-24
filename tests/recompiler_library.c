@@ -25,13 +25,15 @@ static void check(int ok, const char* what) {
            svc #0x42                                   (the handler checks x0 and sets it to 7)
            str x0,[x2]; mov x30,x3; ret
    helper: add x0,x0,#1000; ret
-   far:    mov x0,#99; brk #7; ret                     (reached by no call: a hint, or the JIT) */
+   far:    mov x0,#99; brk #7; ret                     (reached by no call: a hint, or the JIT)
+   ivau:   ic ivau,x0; ret                             (reached by no call: RtAPI.code_changed gets x0's line) */
 #define CODE64 0x1000u
 #define FAR    (CODE64 + 13 * 4)
+#define IVAU   (CODE64 + 16 * 4)
 #define UNDEF  (CODE64 + 20 * 4) /* zero words: UDF #0 */
 static const uint32_t a64_words[] = {0xd2800000, 0xd2800141, 0xaa1e03e3, 0x8b010000, 0xd1000421, 0xb5ffffc1,
                                      0x94000005, 0xd4000841, 0xf9000040, 0xaa0303fe, 0xd65f03c0, 0x910fa000,
-                                     0xd65f03c0, 0xd2800c60, 0xd42000e0, 0xd65f03c0};
+                                     0xd65f03c0, 0xd2800c60, 0xd42000e0, 0xd65f03c0, 0xd50b7520, 0xd65f03c0};
 #define A64_SIZE (sizeof(a64_words))
 /* ---- the A32 program (llvm-mc -triple=armv8a), at CODE32: mov r0,#5; add r0,r0,#2; mov r7,#0x11; svc #0; bx lr */
 #define CODE32   0x2000u
@@ -53,9 +55,9 @@ static void place(uint8_t* mem, uint64_t address, const uint32_t* words, size_t 
 
 /* the caller's runtime: the hooks record what they saw in the CPU's own context */
 typedef struct {
-    unsigned svcs, brks, undefs;
+    unsigned svcs, brks, undefs, changes;
     uint32_t svc_imm, brk_imm, undef_word;
-    uint64_t svc_x0, brk_pc, undef_pc;
+    uint64_t svc_x0, brk_pc, undef_pc, changed;
 } Seen;
 static void svc64(CPU* c, uint32_t imm) {
     Seen* s = (Seen*)c->thread;
@@ -77,6 +79,12 @@ static void undef64(CPU* c, uint64_t pc, uint32_t word) {
     s->undef_word = word;
     s->undef_pc = pc;
     c->pc = STOP;
+}
+
+static void code_changed64(CPU* c, uint64_t line) {
+    Seen* s = (Seen*)c->thread;
+    ++s->changes;
+    s->changed = line;
 }
 
 static uint64_t read64(const uint8_t* p) {
@@ -148,6 +156,20 @@ static void run64(struct snx_recompiler* r, const char* backend, uint8_t* mem, c
     check(snx_recompiled_lookup(m, FAR) && snx_recompiled_lookup(m, FAR) != snx_recompiled_lookup(m, CODE64),
           "far has code of its own, the JIT's");
     check(!snx_recompiled_lookup(m, CODE64 + A64_SIZE + 0x100000), "nothing compiles outside the code ranges");
+    /* IC IVAU, compiled at its miss: the runtime hears of the line, 64 bytes from x0 rounded down. Without the hook
+       (snx_runtime_defaults leaves it NULL) it does nothing */
+    memset(&seen, 0, sizeof(seen));
+    cpu.x[0] = 0x123457F;
+    cpu.x[30] = STOP;
+    snx_recompiled_run(m, &cpu, IVAU, STOP);
+    check(cpu.pc == STOP && !seen.changes, "IC IVAU without RtAPI.code_changed does nothing");
+    rt.code_changed = code_changed64;
+    cpu.x[30] = STOP;
+    snx_recompiled_run(m, &cpu, IVAU, STOP);
+    snprintf(what, sizeof(what), "%s: IC IVAU reaches RtAPI.code_changed with its line (%u calls, %#llx)", backend,
+             seen.changes, (unsigned long long)seen.changed);
+    check(seen.changes == 1 && seen.changed == 0x1234540 && cpu.pc == STOP, what);
+    rt.code_changed = NULL;
     /* an undefined word */
     memset(&seen, 0, sizeof(seen));
     snx_recompiled_run(m, &cpu, UNDEF, STOP);

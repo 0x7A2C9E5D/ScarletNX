@@ -20,6 +20,7 @@
 #include "vita/gpu/usse.h"
 #include "vita/gpu/gxp.h"
 #include "common/utilities/spirv_emit.h"
+#include "common/utilities/common.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -1628,7 +1629,9 @@ static void store_input(T* t, Bank bank, unsigned offset, Type type, Value v) {
         store(t, dest, part, (1u << part.n) - 1, (int)(at / per));
     }
 }
-/* SceGxmAttributeFormat: whether the host gives the shader integers (the non-normalized integer formats) */
+/* SceGxmAttributeFormat: whether the host gives the shader integers (the non-normalized integer formats). UNTYPED's
+   words reach the registers as they are (vertex_inputs) */
+#define GXM_ATTRIBUTE_UNTYPED 10u
 static int attribute_kind(unsigned format) {
     switch (format) {
         case 0: case 2: return K_UINT; /* U8, U16 */
@@ -1652,6 +1655,19 @@ static void vertex_inputs(T* t) {
         if (hint >= 0) {
             kind = attribute_kind(t->hints->attributes[hint].format);
             t->out->attribute_location[hint] = (int)slot;
+        }
+        if (hint >= 0 && t->hints->attributes[hint].format == GXM_ATTRIBUTE_UNTYPED) {
+            /* its 32-bit words as they are, one a register from the resource's, whatever the parameter's type */
+            unsigned words = t->hints->attributes[hint].components;
+            for (unsigned s = 0; s < (words + 3) / 4; ++s) {
+                uint32_t input = spv_emit_location(&t->e, SPV_STORAGE_INPUT, t->t_v4u, slot + s);
+                global(t, input);
+                uint32_t vec = SPV(&t->e, SPV_OP_LOAD, t->t_v4u, input);
+                for (unsigned i = 0; i < 4 && s * 4 + i < words; ++i)
+                    store_word(t, B_PA, resource + s * 4 + i, SPV(&t->e, SPV_OP_COMPOSITE_EXTRACT, t->t_u32, vec, i));
+            }
+            slot += (words + 3) / 4;
+            continue;
         }
         for (unsigned s = 0; s < slots; ++s) {
             uint32_t type4 = kind == K_FLOAT ? t->t_v4f : kind == K_UINT ? t->t_v4u : t->t_v4i;
@@ -1985,8 +2001,8 @@ static void fragment_output(T* t) {
     SPV_VOID(&t->e, SPV_OP_STORE, out, SPV(&t->e, SPV_OP_COMPOSITE_CONSTRUCT, t->t_v4f, v.c[0], v.c[1], v.c[2], v.c[3]));
 }
 
-bool usse_translate(const unsigned char* gxp, size_t size, const UsseHints* hints, UsseShader* out, char* error,
-                    size_t error_size) {
+bool usse_translate(const unsigned char* gxp, size_t size, const UsseHints* hints, bool preserve_infnan,
+                    UsseShader* out, char* error, size_t error_size) {
     memset(out, 0, sizeof *out);
     if (size < 160 || gxp_u32(gxp) != GXP_MAGIC) {
         snprintf(error, error_size, "not a GXP program");
@@ -2088,6 +2104,7 @@ bool usse_translate(const unsigned char* gxp, size_t size, const UsseHints* hint
                            t->global_count);
         if (t->fragment) spv_emit_fragment_origin_upper_left(e, main);
         if (t->frag_depth) spv_emit_fragment_depth_replacing(e, main);
+        spv_emit_float_controls(e, main, 0, preserve_infnan, 0);
         out->words = spv_emit_finish(e, &out->count);
         ok = out->words != NULL;
     }
@@ -2110,6 +2127,7 @@ bool usse_corpus_write(const char* folder, const unsigned char* program, size_t 
         for (size_t i = 0; i < sizes[k]; ++i) h = (h ^ parts[k][i]) * 0x100000001b3ull;
     char path[1200];
     snprintf(path, sizeof path, "%s/%016llx.gxp", folder, (unsigned long long)h);
+    snx_path_native(path);
     FILE* f = fopen(path, "rb");
     if (f) { /* there already */
         fclose(f);

@@ -84,7 +84,7 @@ typedef struct {
             uint32_t priority; /* SetPriority's, given back by GetPriority */
             uint32_t position; /* CTR_FILE_DIR: the entries Read has given so far */
             void* host;        /* FILE* for CTR_FILE_HOST */
-            void* node; /* FsNode*, retained for the file's lifetime */
+            void* node;        /* FsNode*, retained for the file's lifetime */
         } file;
         struct {
             uint32_t physical, size, permissions;
@@ -187,7 +187,7 @@ struct SnxCtrProcess {
     /* the cores take turns on the one host thread: the one the next scheduling serves, and each one's thread last run */
     uint32_t next_core, core_thread[4];
     uint32_t last_ipc_service, last_ipc_header;
-    uint32_t apt_lock; /* manager-owned object index; independent of client sessions */
+    uint32_t apt_lock;         /* manager-owned object index; independent of client sessions */
     uint32_t srv_notification; /* srv:'s notification semaphore (retained), made at the first EnableNotification */
     uint32_t apt_phase, apt_notification, apt_parameter;
     uint32_t hid_objects[6]; /* the shared memory, then the events: pad 1, pad 2, accelerometer, gyroscope, debug pad */
@@ -199,9 +199,10 @@ struct SnxCtrProcess {
     uint32_t fs_priority; /* fs:USER's SetPriority, UINT32_MAX until one */
     SnxCtrGsp gsp;
     SnxCtrDspService dsp;
+    struct SnxCtrUds* uds;
     SnxCtrY2rService y2r;
     uint64_t svc_count, svc_counts[256]; /* all, and each SVC's */
-    uint64_t idle_ns, idle_waits;          /* the host time the scheduler slept with no thread to run, and how often */
+    uint64_t idle_ns, idle_waits;        /* the host time the scheduler slept with no thread to run, and how often */
     /* the codeset GetProcessInfo describes: segments as loaded, BSS, title and name (ExHeader) */
     SnxCtrSegment segment[3];
     uint32_t bss_size, stack_size; /* the main thread's stack, page-rounded, below SNX_CTR_STACK_TOP */

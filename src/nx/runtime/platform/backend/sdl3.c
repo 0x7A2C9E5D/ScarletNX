@@ -503,7 +503,7 @@ static int android_share(const char* path) {
     return ok;
 }
 #endif
-/* Share log, as the launcher's: scarletnx.log beside the game's log, sent to the app the player picks on Android; its
+/* Share Log, as the launcher's: scarletnx.log beside the game's log, sent to the app the player picks on Android; its
    path in saved once written (else left as it was), what it did in said */
 static void fatal_share(const char* msg, const char* game_log, char* saved, size_t saved_size, char* said,
                         size_t size) {
@@ -519,7 +519,7 @@ static void fatal_share(const char* msg, const char* game_log, char* saved, size
     if (ok) snprintf(saved, saved_size, "%s", made);
     free(folder);
 }
-/* Copy path: the log Share log saved, else the game's own, to paste where it is asked for */
+/* Copy path: the log Share Log saved, else the game's own, to paste where it is asked for */
 static void fatal_copy(const char* path, char* said, size_t size) {
     if (SDL_SetClipboardText(path))
         snprintf(said, size, "Path copied: %s", path);
@@ -537,7 +537,7 @@ static int fatal_at(const SnxOverlayError* panel, float x, float y) {
 }
 static int fatal_screen(const char* msg) {
 #ifdef __ANDROID__
-    static const char* const how = "Share log sends the game's log, which has what ran last.";
+    static const char* const how = "Share Log sends the game's log, which has what ran last.";
 #else
     static const char* const how = "The game's log has what ran last: ";
     char log_url[3608];
@@ -589,7 +589,7 @@ static int fatal_screen(const char* msg) {
     panel.how = what;
     panel.focus = SNX_OVERLAY_ERROR_CLOSE;
     /* the log plat.c writes, in the state folder. Beside the game that is argv[0]'s folder, which may be relative (./
-       for ./MyGame): Share log and a file URI need an absolute path */
+       for ./MyGame): Share Log and a file URI need an absolute path */
     snprintf(log_path, sizeof log_path, "%s%s.log", g_statedir, g_exename);
     full = snx_absolute(log_path);
     if (full && strlen(full) < sizeof log_path) memcpy(log_path, full, strlen(full) + 1);

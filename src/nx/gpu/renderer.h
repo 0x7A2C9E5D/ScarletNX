@@ -34,6 +34,10 @@ typedef struct Renderer {
        submitting thread), or a stream goes on after a wait (gpu_park, on the GPU thread) that the CPU may have ended
        after writing data. Caches read guest memory again. Any thread */
     void (*mem_may_have_changed)(void);
+    /* the GPU thread starts running a job (1) or stops (0): the caches' checks while it runs need the CPU's writes from
+       before the submissions and wait ends so far (mem_may_have_changed), and from before those its own waits end,
+       but not those a later submission makes meanwhile */
+    void (*stream_run)(int on);
     /* the 3D engine (maxwell3d.c) */
     void (*clear)(GpuChannel* ch, u32 v);
     void (*draw)(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 base_vertex, u32 base_instance,

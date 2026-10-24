@@ -19,7 +19,7 @@
 const int snx_setup_since[SNX_SETUP_STEPS] = {1, 1, 1, 1, 1};
 const SnxNotice snx_notices[SNX_NOTICES] = {
     {SNX_TR_NOOP("Game settings"), SNX_TR_NOOP("removed or renamed keys in a game's .ini"),
-     SNX_TR_NOOP("under [Deprecated]: Clean old settings takes them"), "`.ini` key", SNX_NOTICE_ALL},
+     SNX_TR_NOOP("under [Deprecated]: Clean Old Settings takes them"), "`.ini` key", SNX_NOTICE_ALL},
     {SNX_TR_NOOP("An option"), "--keep-c", "--keep-ir", "`--keep-c`", SNX_NOTICE_ALL},
     {SNX_TR_NOOP("An installed copy's files"), "~/.local/share/scarletnx: gui/, games/<Game>.ini, work/",
      SNX_TR_NOOP("the scarletnx folders of ~/.config, ~/.local/state and ~/.cache"), "An installed copy's files",
@@ -44,7 +44,14 @@ const SnxNotice snx_notices[SNX_NOTICES] = {
     {SNX_TR_NOOP("The launcher's Text size"), SNX_TR_NOOP("text_size = in app.ini"),
      SNX_TR_NOOP("ui_scale =, shown as UI scale"), "`text_size =` in `app.ini`", SNX_NOTICE_ALL},
     {SNX_TR_NOOP("A theme's lists"), SNX_TR_NOOP("[body] gap and scroll in its theme.ini"),
-     SNX_TR_NOOP("nothing: ui.txt lays out every list"), "A theme's `[body] gap` and `[body] scroll`", SNX_NOTICE_ALL}};
+     SNX_TR_NOOP("nothing: ui.txt lays out every list"), "A theme's `[body] gap` and `[body] scroll`", SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("A theme's screens"), SNX_TR_NOOP("[head] place, [tips] place and [body] sizing in its theme.ini"),
+     SNX_TR_NOOP("nothing: ui.txt lays out every screen"), "A theme's `[head] place`", SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("Options"), "--recomp, --repo, --debug, -r --out, --interp-only",
+     "--recompile, --data, --no-setup, -r --name, --jit-only", "[cli] the options' names", SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("SLP vectorizer"), SNX_TR_NOOP("LLVM's, on in the recompile and the JIT"),
+     SNX_TR_NOOP("off, as LLVM 23 can break a module with it: Settings > Debug turns it on"), "LLVM's SLP vectorizer",
+     SNX_NOTICE_ALL}};
 int snx_notice_here(int notice) {
     int systems = snx_notices[notice].systems;
 #if defined(__ANDROID__)
@@ -143,6 +150,17 @@ int snx_setup_due(const SnxSetup* setup) {
 }
 
 int snx_setup_skip, snx_setup_again;
+static struct {
+    const char *prod_keys_override, *title_keys_override;
+} g_setup;
+SnxSetupKeysOverride snx_setup_keys_override_get(void) {
+    SnxSetupKeysOverride current = {g_setup.prod_keys_override, g_setup.title_keys_override};
+    return current;
+}
+void snx_setup_keys_override_set(const char* prod, const char* title) {
+    g_setup.prod_keys_override = prod;
+    g_setup.title_keys_override = title;
+}
 int snx_setup_options(int argc, char** argv, char* why, size_t why_size) {
     int i, n = 1, skips = 0, debug = 0;
     snx_setup_skip = snx_setup_again = 0;
@@ -151,9 +169,12 @@ int snx_setup_options(int argc, char** argv, char* why, size_t why_size) {
             while (i < argc) argv[n++] = argv[i++];
             break;
         }
-        if (!strcmp(argv[i], "--debug"))
+        if (!strcmp(argv[i], "--no-setup"))
             debug = 1;
-        else if (!strcmp(argv[i], "--skip"))
+        else if (!strcmp(argv[i], "--debug")) {
+            snx_option_renamed("--debug", "--no-setup");
+            debug = 1;
+        } else if (!strcmp(argv[i], "--skip"))
             ++skips;
         else if (!strcmp(argv[i], "--setup"))
             snx_setup_again = 1;
@@ -162,13 +183,14 @@ int snx_setup_options(int argc, char** argv, char* why, size_t why_size) {
     }
     argv[n] = NULL;
     if (skips == 1) {
-        snprintf(why, why_size, "--skip leaves the setup out given twice, --skip --skip, as --debug does");
+        snprintf(why, why_size, "--skip leaves the setup out given twice, --skip --skip, which is --no-setup now");
         return -1;
     }
+    if (skips) snx_option_renamed("--skip --skip", "--no-setup");
     snx_setup_skip = debug || skips;
     if (snx_setup_skip && snx_setup_again) {
         snprintf(why, why_size, "--setup goes through the setup, and %s leaves it out: one or the other",
-                 debug ? "--debug" : "--skip --skip");
+                 debug ? "--no-setup" : "--skip --skip");
         return -1;
     }
     return n;
@@ -197,9 +219,9 @@ int snx_setup_first_saves(const char* games) {
     if (!games || snx_list_dir(games, &names, &count)) return 0;
     snx_users_uid_text(first, text);
     for (i = 0; i < count; ++i) {
-        char* save = snx_format("%s/%s/%s_data/save/user.%s", games, names[i], names[i], text);
-        found += save && snx_is_dir(save);
-        free(save);
+        char save[SNX_PATH_SIZE];
+        found += !snx_path_format(save, sizeof save, "%s/%s/%s_data/save/user.%s", games, names[i], names[i], text) &&
+                 snx_is_dir(save);
     }
     snx_free_strings(names, count);
     return found;
@@ -247,7 +269,16 @@ static char* keys_home(void) {
     return home && home[0] ? snx_path_join(home, ".switch") : NULL;
 }
 char* snx_keys_found(const char* data, const char* name) {
-    char *path = data ? snx_path_join(data, name) : NULL, *home;
+    const char* override;
+    char *path, *home;
+    if (!strcmp(name, "prod.keys"))
+        override = g_setup.prod_keys_override;
+    else if (!strcmp(name, "title.keys"))
+        override = g_setup.title_keys_override;
+    else
+        override = NULL;
+    if (override) return snx_is_file(override) ? snx_strdup(override) : NULL;
+    path = data ? snx_path_join(data, name) : NULL;
 #ifdef SNX_IOS
     free(path); /* the data folder keeps them in keys/ */
     path = data ? snx_path_join(data, "keys") : NULL;

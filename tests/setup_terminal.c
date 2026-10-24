@@ -105,13 +105,13 @@ static void test_defaults(void) {
                  snx_notices[SNX_NOTICES - 1].now);
         said(last);
     }
-    said("[1/5] Language (the launcher's)\n  1) English 2) Portugu\xc3\xaas (Brasil) 3) "
+    said("[1/5] Language\n  1) English 2) Portugu\xc3\xaas (Brasil) 3) "
          "\xe7\xae\x80\xe4\xbd\x93\xe4\xb8\xad\xe6\x96\x87\n  [1] ");
-    said_with("[2/5] Install type\n  Installed: settings %s, data %s", config, data);
-    said_with("[3/5] Folders (the launcher's)\n  Games: %s/games\n  Dumps: none yet\n", data, NULL);
+    said_with("[2/5] Install Type\n  Installed: settings %s, data %s", config, data);
+    said_with("[3/5] Folders\n  Recompiled: %s/recompiled\n  Dumps: none yet\n", data, NULL);
     said("[4/5] Keys\n  prod.keys missing\n  title.keys missing: only some .nsp need it\n  1) Choose folder  2) Later\n"
          "  [2] ");
-    said("[5/5] First user\n  uid ");
+    said("[5/5] First User\n  uid ");
     said_with("Done: %s/setup.ini\n", config, NULL);
     {
         char seen[64]; /* every notice there is, seen */
@@ -148,7 +148,7 @@ static void test_again(void) {
     said_with("prod.keys found, %s/prod.keys", keys_dir, NULL);
     said("[5/5] users.ini has 1 user: Player\n  Overwrite? (users.ini.old keeps it) [y/N] ");
     said("maybe: answer y or n");
-    expect(config, "app.ini", "[folders]\ngames = ");
+    expect(config, "app.ini", "[folders]\nrecompiled = ");
     expect(config, "app.ini", "\n[app]\nlanguage = pt-BR\n");
     path = text_of(config, "folders.txt");
     assert(path && !strcmp(strstr(path, "dumps"), "dumps\n")); /* once */
@@ -195,16 +195,22 @@ static void test_ended(void) {
     puts("PASS answers that end too soon");
 }
 
-/* games with saves of the fixed uid: user 1 keeps it */
+/* games with saves of the fixed uid, in recompiled/ where the launcher puts them or in the games/ an older version
+   left: user 1 keeps it */
 static void test_first_saves(void) {
-    char *games = join(data, "games/0100A/0100A_data/save/user." FIRST), *users = join(data, "users");
-    fresh();
-    assert(!snx_mkdirs(games));
-    assert(!run("\n\n\n\n\n\n", 0));
-    said("uid " FIRST ", the uid of the saves of 1 game\n");
-    expect(users, "users.ini", "uid=" FIRST "\nnickname=Player\n");
-    free(users);
-    free(games);
+    static const char* const saves[] = {"recompiled/0100A/0100A_data/save/user." FIRST,
+                                        "games/0100A/0100A_data/save/user." FIRST};
+    size_t i;
+    for (i = 0; i < sizeof saves / sizeof *saves; ++i) {
+        char *games = join(data, saves[i]), *users = join(data, "users");
+        fresh();
+        assert(!snx_mkdirs(games));
+        assert(!run("\n\n\n\n\n\n", 0));
+        said("uid " FIRST ", the uid of the saves of 1 game\n");
+        expect(users, "users.ini", "uid=" FIRST "\nnickname=Player\n");
+        free(users);
+        free(games);
+    }
     puts("PASS the fixed uid kept for its saves");
 }
 

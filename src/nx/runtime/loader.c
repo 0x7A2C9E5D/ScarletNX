@@ -6,11 +6,13 @@
 #include "nx/runtime/loader.h"
 #include "nx/runtime/main.h"
 #include "nx/hle/filesystem/fs.h"
+#include "common/utilities/patches.h"
 #include "nx/memory/mem.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
 #include <lz4.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 u64 g_code_lo, g_code_hi;
@@ -112,6 +114,26 @@ static int copy_nso(const SnxModInfo* mi, const PFileMap* map) {
     return 0;
 }
 
+/* The mods' patches the program was recompiled with (fs_patches) written over the NSO's segments as copied, as the
+   recompiler wrote them over the code it made: 0, else -1, said */
+static int patch_nso(const SnxModInfo* mi) {
+    u32 end = mi->text_off + mi->text_size;
+    char error[1024], *const *patches;
+    size_t count = fs_patches(&patches), i;
+    unsigned char* applied = (unsigned char*)snx_alloc(count + 1);
+    int rc = 0;
+    if (mi->ro_off + mi->ro_size > end) end = mi->ro_off + mi->ro_size;
+    if (mi->data_off + mi->data_size > end) end = mi->data_off + mi->data_size;
+    if (snx_patch_module(GP(mi->base), end, mi->build_id, patches, count, applied, error, sizeof error)) {
+        WARN("%s: %s\n", mi->name, error);
+        rc = -1;
+    }
+    for (i = 0; !rc && i < count; i++)
+        if (applied[i]) LOG("%s patched by the mod's %s\n", mi->name, patches[i]);
+    free(applied);
+    return rc;
+}
+
 /* Text executable, rodata read-only, data and BSS writable to the end of the mapping. A byte-packed NRO can share a
    page between segments: the page takes the earlier segment's permission for text, the later one's for data */
 static int protect(const SnxModInfo* mi) {
@@ -145,8 +167,8 @@ static int load_module(const SnxModInfo* mi) {
         memset(GP(mi->base), 0, (size_t)mi->size);
         if (mi->is_nro)
             memcpy(GP(mi->base), map.data, rd32(map.data + 0x18));
-        else
-            rc = copy_nso(mi, &map);
+        else if (!(rc = copy_nso(mi, &map)))
+            rc = patch_nso(mi);
     }
     plat_file_unmap(&map);
     if (rc) return rc;

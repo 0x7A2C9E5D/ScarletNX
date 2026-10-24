@@ -158,13 +158,14 @@ bool ctr_ncch_write(CtrReader* r, const CtrCia* cia, const CtrNcch* n, const cha
     free(path);
     for (size_t i = 0; i < 10 && ok; ++i) {
         if (!*n->names[i]) continue;
-        path = snx_format("%s/exefs/%s", stage, n->names[i]);
+        char file[SNX_PATH_SIZE];
+        if (snx_path_format(file, sizeof file, "%s/exefs/%s", stage, n->names[i]))
+            return ctr_fail(r, SNX_CTR_EXTRACT_IO, "an ExeFS file's path is over %d bytes", SNX_PATH_SIZE - 1);
         const unsigned char* file_hash = n->exefs + 0x1e0 - i * 32;
         if ((int)i == n->code_index)
-            ok = ctr_hash_matches(r, n->files[i], file_hash) && ctr_write(r, path, n->code, n->code_size);
+            ok = ctr_hash_matches(r, n->files[i], file_hash) && ctr_write(r, file, n->code, n->code_size);
         else
-            ok = ctr_copy(r, n->files[i], path, file_hash);
-        free(path);
+            ok = ctr_copy(r, n->files[i], file, file_hash);
     }
     if (!ok) return false;
     path = snx_path_join(stage, "ncch.bin");

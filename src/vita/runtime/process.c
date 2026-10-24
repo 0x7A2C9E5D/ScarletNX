@@ -5,6 +5,7 @@
 #endif
 #include "vita/runtime/process.h"
 #include "vita/hle/hle.h"
+#include "vita/loader/vpk.h"
 #include "common/utilities/common.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -230,6 +231,30 @@ static bool trampolines(VitaProcess* p) {
     for (size_t i = 0; i < sizeof code / sizeof *code; ++i) vita_write32(p, VITA_RUNTIME_PAGE + (uint32_t)i * 4, code[i]);
     return true;
 }
+/* the game's title ID, from its param.sfo (the update's when it has one), else the folder's name */
+static void title_id(VitaProcess* p) {
+    char* title = NULL;
+    for (int i = 0; i < 2 && !title; ++i) {
+        char* path = snx_path_join(i ? p->app : p->patch, "sce_sys/param.sfo");
+        size_t size = 0;
+        unsigned char* sfo = path ? snx_read_file(path, &size) : NULL;
+        title = sfo ? vita_sfo_string(sfo, size, "TITLE_ID") : NULL;
+        if (title && !vita_title_id(title)) free(title), title = NULL;
+        free(sfo);
+        free(path);
+    }
+    const char* name = title;
+#ifdef _WIN32
+    const char* separators = "/\\"; /* Windows' absolute paths have backslashes */
+#else
+    const char* separators = "/";
+#endif
+    if (!name) /* the folder's last name */
+        for (const char* c = name = p->folder; *c; ++c)
+            if (strchr(separators, *c)) name = c + 1;
+    snprintf(p->title_id, sizeof p->title_id, "%s", name);
+    free(title);
+}
 VitaProcess* vita_process_new(const VitaImage* image, const char* folder, char* error, size_t error_size) {
     VitaProcess* p = calloc(1, sizeof *p);
     if (!p) {
@@ -254,6 +279,12 @@ VitaProcess* vita_process_new(const VitaImage* image, const char* folder, char* 
     }
     if (snx_mkdirs(p->ux0)) {
         snprintf(error, error_size, "cannot create %s", p->ux0);
+        goto fail;
+    }
+    title_id(p);
+    p->savedata = snx_format("%s/user/00/savedata/%s", p->ux0, p->title_id);
+    if (!p->savedata || snx_mkdirs(p->savedata)) {
+        snprintf(error, error_size, "cannot create the game's save data folder in %s", p->ux0);
         goto fail;
     }
     for (unsigned i = 0; i < image->segment_count; ++i) {
@@ -291,6 +322,8 @@ void vita_process_free(VitaProcess* p) {
     vita_mp4_free(p);
     vita_videodec_free(p);
     vita_audiodec_free(p);
+    vita_net_free(p);
+    vita_trophy_free(p);
     vita_gxm_free(p);
     if (p->mem) snx_vm_release(p->mem, VITA_SPACE + 0x10000);
     free(p->unknown_logged);
@@ -299,5 +332,6 @@ void vita_process_free(VitaProcess* p) {
     free(p->app);
     free(p->patch);
     free(p->ux0);
+    free(p->savedata);
     free(p);
 }

@@ -211,6 +211,16 @@ static void hint(SnxIr* ir, SnxU32 w) {
 static void sys(SnxIr* ir, SnxU32 w) {
     if (F(16, 3) == 3 && F(12, 4) == 7 && F(8, 4) == 4 && F(5, 3) == 1)
         call2(ir, SNX_IR_DC_ZVA, ir->M, ir_rx(ir, F(0, 5)));
+    else if (F(16, 3) == 3 && F(12, 4) == 7 && F(8, 4) == 5 && F(5, 3) == 1) { /* IC IVAU: snx_ic_ivau(c, Xt) */
+        LLVMTypeRef p[2];
+        V args[2];
+        p[0] = ir->t_ptr;
+        p[1] = ir->t_i64;
+        args[0] = ir->c;
+        args[1] = ir_rx(ir, F(0, 5));
+        ir_call(ir, ir_extern(ir, "snx_ic_ivau", ir->t_void, p, 2), args, 2);
+        ir_state_invalidate(ir); /* the runtime may read or change the CPU there */
+    }
 }
 
 static void mrs(SnxIr* ir, SnxU32 w) {

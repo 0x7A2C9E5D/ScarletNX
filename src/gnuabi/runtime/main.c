@@ -27,12 +27,11 @@ static const char usage[] =
     "recompiler.\n"
     "\n"
     "  -L DIR, --sysroot=DIR  The guest's root: a guest path names DIR's file when DIR has it, the host's\n"
-    "                         otherwise, as with QEMU's -L. The default is linux/ of the data folder games/ is\n"
-    "                         in; SNX_LINUX_SYSROOT names another\n"
+    "                         otherwise, as with QEMU's -L. The default is linux/ in the data folder;\n"
+    "                         SNX_LINUX_SYSROOT names another\n"
     "  --isolated             No host files: /tmp in memory, the program alone as /program\n"
-    "  --jit                  Compile the guest's code as it runs (the only mode)\n"
-    "  --jit-cache=DIR        Where compiled code is kept between runs (default: the user's cache folder);\n"
-    "  --no-jit-cache         keep none\n"
+    "  --jit-cache=DIR        Where compiled code is kept between runs (default: the user's cache folder)\n"
+    "  --no-jit-cache         Keep no compiled code between runs\n"
     "  --jit-opt=LEVEL        The JIT's LLVM optimization level: 0, 1, 2 (the default), 3, s or z\n"
     "  --verbose-jit          Say what the JIT compiles\n"
     "  -E VAR=VALUE, -U VAR   Set or remove a variable of the guest's environment (the host's otherwise)\n"
@@ -199,7 +198,7 @@ int snx_gnuabi_main(int argc, char** argv) {
         if (cache_option)
             cache = snx_absolute(cache_option);
         else {
-            char* user = snx_user_dir(SNX_USER_CACHE);
+            char* user = snx_menu_dir(NULL, SNX_USER_CACHE);
             cache = user ? snx_path_join(user, "linux-jit") : NULL;
             free(user);
         }

@@ -8,6 +8,7 @@
 #include "nx/loader/loader.h"
 #include "nx/loader/module.h"
 #include "nx/loader/module_llvm.h"
+#include "common/cpu/recompiler/llvm/ir.h"
 
 /* the triple of the iOS app's code: Darwin's calling convention and the generic AArch64 CPU, in the object format the
    JIT loader reads (recompiler/llvm/ir.c's host_triple). The version only names the ABI */
@@ -16,6 +17,7 @@
 #include "snx_settings.h"
 #include "common/utilities/build_info.h"
 #include "common/utilities/mods.h"
+#include "common/utilities/patches.h"
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -24,28 +26,28 @@
 
 const IniOpt* snx_recompile_setting(const char* key) {
     const IniOpt* o = ini_find(g_recompile_ini, key);
-    return o ? o : ini_find(g_llvm_ini, key);
+    if (!o) o = ini_find(g_llvm_ini, key);
+    return o ? o : ini_find(g_recompile_game_ini, key);
 }
 static void usage(void) {
     puts("Usage: scarletnx -r INPUT [NAME] [OPTIONS]\n"
-         "  INPUT                  Game/ExeFS directory, .nro, or an XCI or NSP dump (read in place)\n"
-         "  -o, --name, --out NAME  Output name (default: the title ID, else the NPDM's or input name)\n"
-         "  --outdir DIR           Where the game's folder goes (default: games/ in the data folder)\n"
+         "  INPUT                  Game/ExeFS folder, .nro, or an XCI or NSP dump (read in place)\n"
+         "  --name NAME            Output name (default: the title ID, else the NPDM's or input name)\n"
+         "  --outdir DIR           Where the game's folder goes (default: recompiled/)\n"
          "  -O LEVEL               Optimization: 0,1,2,3,s,z (default: 2), the setting opt\n"
          "  --jobs N               Parallel compiles (default: CPU count), the setting aot_threads");
-    puts("  --jit-cache FILE       Link a profile run's .jitcache into the module as runtime code");
-    puts("  --KEY=VALUE            A setting of the recompile: opt, aot_threads, unit_cache_gb (the most GB the\n"
-         "                         cache of compiled code units holds: 0, the default, for no limit; it always\n"
-         "                         leaves a tenth of its disk free), and LLVM's\n"
-         "                         (llvm_pass_<pass>=0 turns that pass off); scarletnx --settings=recompile\n"
-         "                         lists them");
+    puts("  --jit-cache FILE       Link a profile run's .jitcache into the module as runtime code\n"
+         "  --keys FILE            prod.keys for a dump (default: the data folder, then ~/.switch)\n"
+         "  --title-keys FILE      title.keys for a dump, found the same way (optional)");
+    puts("  --KEY=VALUE            A recompile setting: opt, aot_threads, unit_cache_gb, llvm_pass_<pass>=0\n"
+         "                         (scarletnx --settings=recompile lists them)");
     printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",
            SNX_CHUNK_INSTRUCTIONS);
     puts("  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
          "  --target ios           A pack of objects for the iOS app, which loads them into JIT memory (docs/APPLE.md)\n"
          "  --no-build             Stage data/INI only, generate no code\n"
          "  --tmpfs                Leave the RomFS in the extraction (in tmpfs), which the game reads it from");
-    puts("  --interp-only          Generate no code: the runtime JIT compiles all of it\n"
+    puts("  --jit-only             Generate no code: the runtime JIT compiles all of it\n"
          "  --runtime FILE         Deploy this runtime instead of building one\n"
          "  --hook-direct-calls    Route calls and branches between functions through dispatch (nvn_trace)\n"
          "  --keep-ir              Save the generated code (LLVM IR) in <NAME>/<NAME>_build\n"
@@ -144,7 +146,9 @@ static char* settings_path(const char* out, const char* title) {
         old = snx_format("%s.ini", base);
         free(base);
         if (snx_left_behind(old, path))
-            fprintf(stderr, "scarletnx: %s was left by an older version: this one keeps it in %s\n", old, path);
+            fprintf(stderr,
+                    "scarletnx: %s was left by an older version: this one keeps it in %s (docs/DEPRECATIONS.md)\n", old,
+                    path);
         free(old);
     }
     free(folder);
@@ -204,6 +208,7 @@ static int dump_read(void* source, const char* name, unsigned char** data, size_
    its control.nacp out of its Control NCA: nothing is extracted. 0, else nonzero, said why */
 static int load_dump(const char* dump, const char* update, const SnxPaths* paths, int quiet, char* const* names,
                      char* const* files, size_t count, SnxProgram* program, char* error, size_t error_size) {
+    /* paths->keys and paths->title_keys, when given, are the files the keys are read from */
     SnxDump opened;
     SnxHacFs* fs = NULL;
     SnxExefsReader reader;
@@ -212,7 +217,7 @@ static int load_dump(const char* dump, const char* update, const SnxPaths* paths
     const char* why;
     size_t nacp_size = 0;
     /* an update's ExeFS is whole: read without its game's, which only its RomFS is made of */
-    int rc = snx_dump_open(&opened, update ? NULL : dump, update, NULL, NULL, paths->repo, !quiet);
+    int rc = snx_dump_open(&opened, update ? NULL : dump, update, paths->keys, paths->title_keys, paths->repo, !quiet);
     if (!rc && opened.program.found) rc = snx_nca_keys(&opened.program, "The game's Program NCA");
     if (!rc && opened.patch.found) rc = snx_nca_keys(&opened.patch, "The update's Program NCA");
     if (!rc && !(fs = snx_dump_fs(&opened))) rc = 1;
@@ -267,7 +272,7 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs)
     if (!p->modules[0].is_nro) {
         dst = snx_path_join(dir, "romfs.bin");
         if (snx_is_file(dst)) {
-            snx_error("cached romfs.bin conflicts with NSO input; remove that cache before recompiling");
+            snx_error("%s conflicts with the NSO input: remove it before recompiling", dst);
             free(dst);
             free(ex);
             return 1;
@@ -325,9 +330,29 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs)
     free(ex);
     return rc;
 }
+/* the played mods' patches (common/utilities/patches.h) written over each NSO module of program they are made for,
+   every one said: 0, else nonzero with the patch that could not be applied said */
+static int patch_modules(SnxProgram* program, const char* mods, const char* off, int quiet) {
+    char error[1024], **patches;
+    size_t count = snx_mods_patches(mods, off, &patches), i, j;
+    unsigned char* applied = (unsigned char*)snx_alloc(count + 1);
+    int rc = 0;
+    for (i = 0; !rc && i < program->module_count; ++i) {
+        SnxModuleImage* m = &program->modules[i];
+        if (m->is_nro) continue;
+        if (snx_patch_module(m->image, m->image_size, m->build_id, patches, count, applied, error, sizeof error))
+            rc = snx_error("%s: the mod's patch can't be applied to %s, so it is not recompiled", error, m->name);
+        for (j = 0; !rc && !quiet && j < count; ++j)
+            if (applied[j]) printf("%s patched by the mod's %s\n", m->name, patches[j]);
+    }
+    free(applied);
+    snx_free_strings(patches, count);
+    return rc;
+}
 int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *jit_cache = NULL,
-               *arg, *value;
+               *keys = NULL, *title_keys = NULL, *arg, *value;
+    SnxPaths key_paths;
     SnxU64 addon = 0, owner = 0, version = SNX_NO_VERSION; /* an update, its game and version, as its content meta
                                                                 names them */
     SnxLlvmBuild llvm;
@@ -374,9 +399,10 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             no_build = 1;
         else if (!strcmp(arg, "--tmpfs"))
             tmpfs = 1;
-        else if (!strcmp(arg, "--interp-only"))
+        else if (!strcmp(arg, "--jit-only") || !strcmp(arg, "--interp-only")) {
+            if (!strcmp(arg, "--interp-only")) snx_option_renamed("--interp-only", "--jit-only");
             gen.interp_only = 1;
-        else if (!strcmp(arg, "--hook-direct-calls"))
+        } else if (!strcmp(arg, "--hook-direct-calls"))
             gen.hook_direct_calls = 1;
         else if (!strcmp(arg, "--keep-ir") || !strcmp(arg, "--keep-c")) {
             if (!strcmp(arg, "--keep-c"))
@@ -391,7 +417,8 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
                 arg = "-O";
             } else if ((equal = strchr(arg, '=')) != NULL) {
                 option_size = (size_t)(equal - arg);
-                if (option_size >= sizeof(option)) return snx_error("unknown recompiler option: %s", arg);
+                if (option_size >= sizeof(option))
+                    return snx_error("unknown option: %s (scarletnx -r -h lists them)", arg);
                 memcpy(option, arg, option_size);
                 option[option_size] = 0;
                 value = equal + 1;
@@ -404,16 +431,23 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
                 }
             }
             if (strcmp(arg, "-o") && strcmp(arg, "--name") && strcmp(arg, "--out") && strcmp(arg, "--outname") &&
-                strcmp(arg, "--outdir") && strcmp(arg, "--runtime") && strcmp(arg, "--target") && strcmp(arg, "-O") &&
-                strcmp(arg, "--jobs") && strcmp(arg, "--chunk") && strcmp(arg, "--jit-cache"))
-                return snx_error("unknown recompiler option: %s", arg);
+                strcmp(arg, "--keys") && strcmp(arg, "--title-keys") && strcmp(arg, "--outdir") &&
+                strcmp(arg, "--runtime") && strcmp(arg, "--target") && strcmp(arg, "-O") && strcmp(arg, "--jobs") &&
+                strcmp(arg, "--chunk") && strcmp(arg, "--jit-cache"))
+                return snx_error("unknown option: %s (scarletnx -r -h lists them)", arg);
             if (!value) {
                 if (++i == argc) return snx_error("%s requires a value", arg);
                 value = argv[i];
             }
             if (!*value) return snx_error("%s requires a nonempty value", arg);
+            if (!strcmp(arg, "-o") || !strcmp(arg, "--out") || !strcmp(arg, "--outname"))
+                snx_option_renamed(!strcmp(arg, "-o") ? "-o" : !strcmp(arg, "--out") ? "--out" : "--outname", "--name");
             if (!strcmp(arg, "-o") || !strcmp(arg, "--name") || !strcmp(arg, "--out") || !strcmp(arg, "--outname"))
                 name = value;
+            else if (!strcmp(arg, "--keys"))
+                keys = value;
+            else if (!strcmp(arg, "--title-keys"))
+                title_keys = value;
             else if (!strcmp(arg, "--outdir"))
                 outdir = value;
             else if (!strcmp(arg, "--runtime"))
@@ -421,16 +455,17 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             else if (!strcmp(arg, "--target"))
                 target = value;
             else if (!strcmp(arg, "-O")) {
-                if (strlen(value) != 1 || !strchr("0123sz", value[0])) return snx_error("-O expects 0,1,2,3,s,z");
+                if (strlen(value) != 1 || !strchr("0123sz", value[0]))
+                    return snx_error("-O %s: not 0, 1, 2, 3, s or z", value);
                 strcpy(g_settings.optimization_level, value);
             } else if (!strcmp(arg, "--jobs")) {
                 g_settings.aot_threads = (int)number(value, 1024);
-                if (!g_settings.aot_threads) return snx_error("--jobs expects 1..1024");
+                if (!g_settings.aot_threads) return snx_error("--jobs %s: not a whole number from 1 to 1024", value);
             } else if (!strcmp(arg, "--jit-cache")) {
                 jit_cache = value;
             } else {
                 gen.chunk_instrs = number(value, INT_MAX);
-                if (!gen.chunk_instrs) return snx_error("--chunk expects a positive instruction count");
+                if (!gen.chunk_instrs) return snx_error("--chunk %s: not a whole number of instructions from 1", value);
             }
         } else if (!input)
             input = arg;
@@ -445,7 +480,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     }
     /* the settings, whichever way they came: -O and --jobs, or --opt= and --aot_threads= as the launcher passes them */
     if (strlen(g_settings.optimization_level) != 1 || !strchr("0123sz", g_settings.optimization_level[0]))
-        return snx_error("opt expects 0,1,2,3,s,z");
+        return snx_error("opt = %s: not 0, 1, 2, 3, s or z", g_settings.optimization_level);
     compile.opt = g_settings.optimization_level;
     compile.jobs = g_settings.aot_threads > 0 ? (unsigned)g_settings.aot_threads : snx_cpu_count();
     if (!strcmp(target, "win64"))
@@ -455,13 +490,18 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     else if (!strcmp(target, "ios"))
         ios = 1;
     else if (strcmp(target, "auto"))
-        return snx_error("--target expects auto, linux, win64 or ios");
+        return snx_error("--target %s: not auto, linux, win64 or ios", target);
     /* The backends write the module for the machine they run on (build == host == target) */
-    if (compile.target_win != host_win) return snx_error("--target: modules are built for this host only");
+    if (compile.target_win != host_win)
+        return snx_error("--target %s: modules are built for this host only (%s)", target,
+                         host_win ? "win64" : "linux");
     gen.abi = snx_game_abi();
     /* a dump, read in place, else an ExeFS folder or an NRO. An update's dump is its own program; a DLC has none */
     dump = snx_is_file(input) && snx_is_dump(input);
-    if (dump && snx_extract_title(input, paths, &addon, &owner, &version)) return 1;
+    key_paths = *paths;
+    if (keys) key_paths.keys = keys;
+    if (title_keys) key_paths.title_keys = title_keys;
+    if (dump && snx_extract_title(input, &key_paths, &addon, &owner, &version)) return 1;
     if (snx_addon_kind(owner, addon) == SNX_ADDON_NONE)
         addon = 0;
     else if (name)
@@ -469,7 +509,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     if (addon && snx_addon_kind(owner, addon) == SNX_ADDON_DLC)
         return snx_error("a DLC runs its game's code and has no program of its own: play its dump, which checks it "
                          "in the game's list of updates and DLCs");
-    if (dump ? load_dump(input, addon ? input : NULL, paths, compile.quiet, NULL, NULL, 0, &program, error,
+    if (dump ? load_dump(input, addon ? input : NULL, &key_paths, compile.quiet, NULL, NULL, 0, &program, error,
                          sizeof(error))
              : snx_load_program(input, &program, error, sizeof(error)))
         return dump ? 1 : snx_error("%s", error);
@@ -490,7 +530,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         game = snx_format("%s_%s", of, own);
     } else
         game = snx_game_name(name, &program.npdm, program.entry_path);
-    out = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
+    out = outdir ? snx_absolute(outdir) : snx_recompiled_dir(paths->repo);
     if (!out) {
         snx_error("cannot resolve %s", outdir ? outdir : paths->repo);
         goto done;
@@ -532,7 +572,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
     }
     if (mod_count) {
         snx_free_program(&program);
-        if (dump ? load_dump(input, addon ? input : NULL, paths, compile.quiet, mod_names, mod_files, mod_count,
+        if (dump ? load_dump(input, addon ? input : NULL, &key_paths, compile.quiet, mod_names, mod_files, mod_count,
                              &program, error, sizeof error)
                  : snx_load_program_mods(input, mod_names, mod_files, mod_count, &program, error, sizeof error)) {
             if (!dump) snx_error("%s", error);
@@ -541,6 +581,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         if (!compile.quiet)
             for (i = 0; i < (int)mod_count; ++i) printf("ExeFS %s from the mod's %s\n", mod_names[i], mod_files[i]);
     }
+    if (patch_modules(&program, mods, mods_off, compile.quiet)) goto done; /* before any code is made from them */
     base = snx_path_join(folder, game);
     /* Invalidate the completion stamp before touching an existing game's data
        or module. Failed recompilation must never leave a trusted checkpoint. */
@@ -608,6 +649,7 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
         llvm.output = code;
         llvm.triple = ios ? SNX_IOS_TRIPLE : NULL;
         llvm.opt = compile.opt[0];
+        snx_ir_slp_vectorizer(g_settings.slp_vectorizer);
         llvm.tuning = snx_llvm_tuning(llvm.opt, error, sizeof error);
         if (!llvm.tuning) {
             snx_error("%s", error);
@@ -622,8 +664,9 @@ int snx_recompile_game(int argc, char** argv, const SnxPaths* paths) {
             units = folder ? snx_path_join(folder, "units") : NULL;
             free(folder);
             if (!units) {
-                snx_error("unit cache: no cache folder, as the environment names no home (HOME, or APPDATA on "
-                          "Windows): the game is not recompiled");
+                snx_error(
+                    "unit cache: HOME is not set (APPDATA on Windows), so there is no cache folder: the game is not "
+                    "recompiled");
                 free(kept);
                 goto done;
             }

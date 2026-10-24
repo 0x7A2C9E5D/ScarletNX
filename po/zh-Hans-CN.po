@@ -214,14 +214,36 @@ msgstr "轻触一行以更改或打开. 返回: 后退."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: tap it. Tap an Extra to take it off. Refresh: tap it. Back: go back."
-msgstr "添加文件夹: 轻触它. 轻触另外的文件夹将其移除. 更新: 轻触它. 返回: 后退."
+msgid "Tap: add."
+msgstr "轻触: 添加."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap a folder to pick another. Refresh: tap it. Back: go back."
-msgstr "轻触文件夹以另选一个. 更新: 轻触它. 返回: 后退."
+msgid "Tap: change."
+msgstr "轻触: 更改."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap: delete."
+msgstr "轻触: 删除."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap: reset."
+msgstr "轻触: 恢复."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Refresh: tap it. Back: go back."
+msgstr "更新: 轻触它. 返回: 后退."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Refresh: tap it."
+msgstr "更新: 轻触它."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -304,14 +326,37 @@ msgstr "上/下: 行. 左/右: 更改. Enter: 更改或打开. ESC: 返回."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Add a folder: pick, drop or paste one. Del: take an Extra off. F5: refresh. ESC: back."
-msgstr "添加文件夹: 选取、拖入或粘贴一个. Del: 移除另外的文件夹. F5: 更新. ESC: 返回."
+msgid "Enter: add."
+msgstr "Enter: 添加."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: folder. Enter: pick another. Del: the default. F5: refresh. ESC: back."
-msgstr "上/下: 文件夹. Enter: 另选一个. Del: 默认. F5: 更新. ESC: 返回."
+msgid "Enter: change."
+msgstr "Enter: 更改."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Del: default."
+msgstr "Del: 默认."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Del: delete."
+msgstr "Del: 删除."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Enter: reset."
+msgstr "Enter: 恢复."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: folder. F5: refresh. ESC: back."
+msgstr "上/下: 文件夹. F5: 更新. ESC: 返回."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -350,6 +395,14 @@ msgid "Extractions"
 msgstr "提取"
 
 #: src/gui/main.c
+msgid "Logs"
+msgstr "日志"
+
+#: src/gui/main.c
+msgid "Caches"
+msgstr "缓存"
+
+#: src/gui/main.c
 #, c-format
 msgid "Not kept for the next start: %s could not be written"
 msgstr "下次启动时不保留：无法写入 %s"
@@ -383,6 +436,31 @@ msgstr "...显示更多"
 #, snx-keys
 msgid "Tab: screen. F2: side box."
 msgstr "Tab: 切换画面. F2: 侧框."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "P: folders."
+msgstr ""
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Folders: tap it."
+msgstr ""
+
+#: src/gui/main.c
+#, snx-keys
+msgid "ESC: back."
+msgstr "ESC: 返回."
+
+#: src/gui/main.c
+#, snx-keys
+msgid "F1: help."
+msgstr ""
+
+#: src/gui/main.c
+#, snx-keys
+msgid "Select: help."
+msgstr ""
 
 #: src/gui/main.c
 msgid "Recent games"
@@ -661,8 +739,8 @@ msgstr "SCARLETNX  /  设置  /  文件夹"
 
 #: src/gui/main.c
 #, c-format
-msgid "%d picked, %d Extra(s)"
-msgstr "已选 %d 个，%d 个另外的文件夹"
+msgid "%d custom, %d Extra(s)"
+msgstr "自定义 %d 个，%d 个另外的文件夹"
 
 #: src/gui/main.c
 #, c-format
@@ -747,7 +825,11 @@ msgid "none"
 msgstr "无"
 
 #: src/gui/main.c
-msgid "Pick a folder of games or dumps, listed after recompiled/ and dumps/"
+msgid "No games"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Settings > App > Folders adds a folder of games or dumps: P, or the foot's, opens it"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
@@ -755,14 +837,6 @@ msgstr ""
 #, snx-key
 msgid "Add a folder"
 msgstr "添加文件夹"
-
-#: src/gui/main.c
-msgid "ready to run"
-msgstr "可以运行"
-
-#: src/gui/main.c
-msgid "prepared when it runs"
-msgstr "运行时准备"
 
 #: src/gui/main.c
 msgid "The recent games not shown"
@@ -894,8 +968,8 @@ msgstr "默认，%d 个另外的文件夹"
 
 #: src/gui/main.c
 #, c-format
-msgid "%d picked"
-msgstr "已选 %d 个"
+msgid "%d custom"
+msgstr "自定义 %d 个"
 
 #: src/gui/main.c
 msgid "Defaults"
@@ -1030,20 +1104,32 @@ msgid "Each dump's extraction"
 msgstr "每个转储的提取文件"
 
 #: src/gui/main.c
-msgid "Tap: pick another. The last row: all back to the defaults"
-msgstr "轻触：另选一个。最后一行：全部恢复默认"
+msgid "The games' logs, threads.txt and recent.txt"
+msgstr "游戏的日志、threads.txt 和 recent.txt"
 
 #: src/gui/main.c
-msgid "Enter: pick another. Del: the default"
-msgstr "Enter：另选一个。Del：默认"
+msgid "units/, the shader caches and the dumps' icons"
+msgstr "units/、着色器缓存和转储的图标"
+
+#: src/gui/main.c
+msgid "app.ini, which names the other folders, and each game's .ini: XDG_CONFIG_HOME moves it"
+msgstr "app.ini（指定其他文件夹）和每个游戏的 .ini：用 XDG_CONFIG_HOME 移动它"
+
+#: src/gui/main.c
+msgid "app.ini, which names the other folders, and each game's .ini: a portable copy (.scarletnx beside the program) keeps its own"
+msgstr "app.ini（指定其他文件夹）和每个游戏的 .ini：便携版（程序旁的 .scarletnx）有自己的"
 
 #: src/gui/main.c
 msgid "outside the app"
 msgstr "在应用之外"
 
 #: src/gui/main.c
-msgid "picked"
-msgstr "已选"
+msgid "custom"
+msgstr "自定义"
+
+#: src/gui/main.c
+msgid "shown only"
+msgstr "仅显示"
 
 #: src/gui/main.c
 msgid "default"
@@ -1051,12 +1137,12 @@ msgstr "默认"
 
 #: src/gui/main.c
 #, c-format
-msgid "%s, %s free. %s"
-msgstr "%s，可用 %s。%s"
+msgid "%s, %s free"
+msgstr "%s，可用 %s"
 
 #: src/gui/main.c
-msgid "All back to the defaults"
-msgstr "全部恢复默认"
+msgid "Reset to Defaults"
+msgstr "恢复默认"
 
 #: src/gui/main.c
 #, c-format
@@ -1067,6 +1153,11 @@ msgstr "文件夹：%s"
 #, c-format
 msgid "Used, not kept for the next start: %s could not be written"
 msgstr "已使用，但下次启动不保留：无法写入 %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Logs and Caches not changed: %s, which the runs read them from, could not be written"
+msgstr "日志和缓存未更改：无法写入 %s，运行时从中读取它们"
 
 #: src/gui/main.c
 #, c-format
@@ -1094,12 +1185,12 @@ msgstr "已是默认：%s"
 
 #: src/gui/main.c
 #, c-format
-msgid "Back to the defaults: %s? The folders before keep what they have."
-msgstr "全部恢复默认：%s？原来的文件夹保留其内容。"
+msgid "Reset to Defaults? %s. Nothing is moved."
+msgstr "恢复默认？%s。不移动任何文件。"
 
 #: src/gui/main.c
-msgid "All back to the defaults. The folders before keep what they have"
-msgstr "全部恢复默认。之前的文件夹保留其内容"
+msgid "Reset to Defaults: nothing was moved"
+msgstr "已恢复默认：未移动任何文件"
 
 #: src/gui/main.c
 #, c-format
@@ -1198,8 +1289,8 @@ msgid "Paste one local folder's path"
 msgstr "粘贴一个本地文件夹的路径"
 
 #: src/gui/main.c
-msgid "Data, Extractions and the recompiled library's Main"
-msgstr "数据、提取和已重编译游戏库的主文件夹"
+msgid "Data, Logs, Caches, Extractions and the recompiled library's Main"
+msgstr "数据、日志、缓存、提取和已重编译游戏库的主文件夹"
 
 #: src/gui/main.c
 msgid "For the next runs. [default]: as the game's .ini says"
@@ -1222,8 +1313,8 @@ msgid "Pick, drop or paste a folder of dumps: Games lists them too"
 msgstr "选取、拖入或粘贴一个转储文件夹：游戏也会列出它们"
 
 #: src/gui/main.c
-msgid "Each folder back to its default. What is in them stays"
-msgstr "每个文件夹恢复默认。其中的内容保留"
+msgid "Nothing is moved"
+msgstr "不移动任何文件"
 
 #: src/gui/main.c
 msgid "The folder of themes/ it is saved in"
@@ -2096,6 +2187,21 @@ msgstr "Ctrl+V"
 msgid "F5"
 msgstr "F5"
 
+#: src/gui/main.c
+#, snx-key
+msgid "P"
+msgstr "P"
+
+#: src/gui/main.c
+#, snx-key
+msgid "F1"
+msgstr "F1"
+
+#: src/gui/main.c
+#, snx-key
+msgid "Select"
+msgstr "Select"
+
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
 #, snx-key
@@ -2118,8 +2224,8 @@ msgid "%s%s %s, made when needed"
 msgstr "%s%s %s，需要时创建"
 
 #: src/gui/main.c
-msgid "Data, Recompiled and Extractions are there"
-msgstr "数据、已重编译和提取都存在"
+msgid "Data, Recompiled, Extractions, Logs and Caches are there"
+msgstr "数据、已重编译、提取、日志和缓存都存在"
 
 #: src/gui/main.c
 #, c-format
@@ -2318,10 +2424,6 @@ msgid "a line under the head"
 msgstr "页头下方的一条线"
 
 #: src/gui/theme.c
-msgid "the title after the tabs, or on a row of its own under them"
-msgstr "标题位于标签页之后，或在其下方单独一行"
-
-#: src/gui/theme.c
 msgid "the title's letters, times the text's, 1 to 3"
 msgstr "标题文字的大小，为正文的倍数，1 到 3"
 
@@ -2366,16 +2468,16 @@ msgid "the boxes outlined or filled"
 msgstr "框为描边或填充"
 
 #: src/gui/theme.c
-msgid "fixed: the list two fifths of every screen, alone on a narrow one; adaptive: as wide as its entries"
-msgstr "fixed：列表占每个画面的五分之二，窄画面上单独显示；adaptive：与条目同宽"
-
-#: src/gui/theme.c
 msgid "a text too long for its box over its rows, or on one that slides"
 msgstr "文字超出框时分多行显示，或单行滚动"
 
 #: src/gui/theme.c
 msgid "[body] %s = %s does nothing: ui.txt lays out the lists now (delete it)"
 msgstr "[body] %s = %s 已无效：列表现在由 ui.txt 布局（请删除）"
+
+#: src/gui/theme.c
+msgid "[%s] %s = %s does nothing: ui.txt lays out the screens now (delete it)"
+msgstr "[%s] %s = %s 已无效：画面现在由 ui.txt 布局（请删除）"
 
 #: src/gui/theme.c
 msgid "a colour as #RRGGBB"
@@ -2450,10 +2552,6 @@ msgstr "提问框：default 为居中的框；yorha 在底部，选项在其右�
 #: src/gui/theme.c
 msgid "a faint grid on the page, in the dim colour"
 msgstr "页面上的淡网格，使用 dim 色"
-
-#: src/gui/theme.c
-msgid "in a box at the foot beside the keys, or on a row under the head"
-msgstr "在页脚按键旁的框中，或在页头下方一行"
 
 #: src/gui/theme.c
 msgid "in a box with a bar at its left, or on the page"
@@ -2913,6 +3011,15 @@ msgstr "theme.ini 中的 [body] gap 和 scroll"
 
 msgid "nothing: ui.txt lays out every list"
 msgstr "不再有作用：所有列表由 ui.txt 布局"
+
+msgid "A theme's screens"
+msgstr "主题的画面"
+
+msgid "[head] place, [tips] place and [body] sizing in its theme.ini"
+msgstr "theme.ini 中的 [head] place、[tips] place 和 [body] sizing"
+
+msgid "nothing: ui.txt lays out every screen"
+msgstr "不再有作用：所有画面由 ui.txt 布局"
 
 #: src/common/utilities/setup.c
 msgid "text_size = in app.ini"

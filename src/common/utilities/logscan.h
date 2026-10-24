@@ -6,7 +6,7 @@
    methods, macros, SVCs, guest code the recompiler missed), warnings, and a signature, the same for every log that
    failed the same way.
 
-   It reads a game's .log and the launcher's Share log file (its game log section). What it writes is meant for public
+   It reads a game's .log and the launcher's Share Log file (its game log section). What it writes is meant for public
    reports: paths under a home folder become ~, a line is cut at SNX_LOGSCAN_LINE bytes, and the crash report's code
    and memory dumps (the game's own bytes) are never copied. Only the C library: the launcher, the runtime's driver
    (scarletnx --scan-log) and the game reports workflow's snx-logscan build it alike.
@@ -87,7 +87,7 @@ typedef struct {
     size_t used, cap;
     /* the header: the game log's lines, else the launcher's build line */
     unsigned title, title_id, game_version, build, branch, commit, system, gpu, vulkan, driver;
-    unsigned launcher_build, launcher_message; /* the Share log file's; launcher_build 0 for a game log */
+    unsigned launcher_build, launcher_message; /* the Share Log file's; launcher_build 0 for a game log */
     long centiseconds;                         /* the last line's time, -1 without one */
     int outcome;
     unsigned signature;
@@ -162,7 +162,7 @@ void snx_logscan_free(SnxLogScan* s);
 const char* snx_logscan_text(const SnxLogScan* s, unsigned at);
 const char* snx_logscan_outcome_name(int outcome);
 const SnxLogSym* snx_logscan_function(const SnxLogScan* s);
-/* The summary as one JSON object (one line) or as markdown for an issue or the Share log file, malloc'd, NULL out of
+/* The summary as one JSON object (one line) or as markdown for an issue or the Share Log file, malloc'd, NULL out of
    memory. The markdown escapes everything the log said (no mentions, links, images or closed code blocks): heading is
    its title's level ("###"), and brief leaves out the log's last lines, for a file that holds the whole log anyway.
    demangle may be NULL */

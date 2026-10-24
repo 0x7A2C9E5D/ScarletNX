@@ -41,15 +41,25 @@ int main(void) {
     /* A57: a CP15 barrier is a coprocessor access, which the backend allows or refuses (SnxArmRt.coproc) */
     assert(snx_a32_decode(0xee070fba) == SNX_A32_COPROC);
     assert(snx_a32_decode_profile((SnxArmProfile)99, 0xe1a00000) == SNX_A32_UNDEFINED);
+    /* ARM7TDMI: A57's decoder, but for an MSR that writes the control or extension byte, a mode switch the AGB board
+       runs (msr cpsr_c, #0xd2; msr cpsr_fc, r0); the flags alone stay an MSR (msr cpsr_f, r0) */
+    assert(snx_a32_decode(0xe321f0d2) == SNX_A32_MSR && snx_a32_decode(0xe129f000) == SNX_A32_MSR);
+    assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM7TDMI, 0xe321f0d2) == SNX_A32_UNDEFINED);
+    assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM7TDMI, 0xe129f000) == SNX_A32_UNDEFINED);
+    assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM7TDMI, 0xe128f000) == SNX_A32_MSR);
     uint32_t state = 1234;
     for (unsigned i = 0; i < 100000; ++i) {
         state = state * 1664525u + 1013904223u;
         assert(snx_a32_decode_profile(SNX_ARM_PROFILE_A57, state) == snx_a32_decode(state));
+        if (snx_a32_decode(state) != SNX_A32_MSR || !((state >> 16) & 3))
+            assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM7TDMI, state) == snx_a32_decode(state));
     }
     for (unsigned i = 0; i <= 65535; ++i) {
         SnxThumb a = {0}, b = {0};
         unsigned x = snx_thumb_decode((uint16_t)i, 0xf800, &a);
         unsigned y = snx_thumb_decode_profile(SNX_ARM_PROFILE_A57, (uint16_t)i, 0xf800, &b);
+        assert(x == y && !memcmp(&a, &b, sizeof a));
+        y = snx_thumb_decode_profile(SNX_ARM_PROFILE_ARM7TDMI, (uint16_t)i, 0xf800, &b);
         assert(x == y && !memcmp(&a, &b, sizeof a));
         y = snx_thumb_decode_profile(SNX_ARM_PROFILE_ARM11, (uint16_t)i, 0xf800, &b);
         assert(y <= TH_F16); /* never accidentally decode Thumb-2 */
@@ -61,5 +71,30 @@ int main(void) {
     assert(snx_thumb_decode_profile(SNX_ARM_PROFILE_ARM11, 0xe800, 0, &t) == 1 && t.op == 2);
     assert(snx_thumb_decode_profile(SNX_ARM_PROFILE_ARM11, 0xc903, 0, &t) == 1 && !(t.flags & TH_WB));
     puts("ARM11 profile and unchanged default decoder witnesses passed");
+    /* The Cortex-A9's stores with writeback into the register they store (llvm-mc -mcpu=cortex-a9, which warns that
+       they are UNPREDICTABLE): str r0, [r0, #28]!; strb r1, [r1], #4; strh r2, [r2, #-2]!; str r3, [r3, r4]!. A57
+       rejects them; a load into its base with writeback, and STRD, stay rejected */
+    const uint32_t stores[] = {0xe5a0001c, 0xe4c11004, 0xe16220b2, 0xe7a33004};
+    for (unsigned i = 0; i < sizeof stores / sizeof *stores; ++i) {
+        SnxA32Kind kind = i == 2 ? SNX_A32_EXTRA : SNX_A32_SINGLE;
+        assert(snx_a32_decode(stores[i]) == SNX_A32_UNDEFINED);
+        assert(snx_a32_decode_profile(SNX_ARM_PROFILE_A9, stores[i]) == kind);
+        assert(snx_a32_decode_profile(SNX_ARM_PROFILE_A9, stores[i] | (1u << 20)) == SNX_A32_UNDEFINED); /* loads */
+    }
+    assert(snx_a32_decode_profile(SNX_ARM_PROFILE_A9, 0xe1e000f8) == SNX_A32_UNDEFINED); /* strd r0, r1, [r0, #8]! */
+    assert(snx_a32_decode_profile(SNX_ARM_PROFILE_A9, 0xe5af001c) == SNX_A32_UNDEFINED); /* str r0, [pc, #28]! */
+    assert(snx_a32_decode_profile(SNX_ARM_PROFILE_A9, 0xe1a00000) == SNX_A32_DATA);
+    /* Thumb: str.w r0, [r0, #28]! (f840 0f1c, a Vita game's), strb r1, [r1], #1 (f801 1b01), strh r2, [r2, #-2]!
+       (f822 2d02); ldr.w r0, [r0, #28]! (f850 0f1c) stays rejected, and str.w r0, [r1, #28]! decodes everywhere */
+    const uint16_t thumb[][2] = {{0xf840, 0x0f1c}, {0xf801, 0x1b01}, {0xf822, 0x2d02}};
+    for (unsigned i = 0; i < sizeof thumb / sizeof *thumb; ++i) {
+        SnxThumb t;
+        assert(!snx_thumb_decode(thumb[i][0], thumb[i][1], &t));
+        assert(snx_thumb_decode_profile(SNX_ARM_PROFILE_A9, thumb[i][0], thumb[i][1], &t) == TH_F32);
+        assert(t.shape == TH_STORE && (t.flags & TH_WB) && t.rn == i && t.rd == i);
+        assert(!snx_thumb_decode_profile(SNX_ARM_PROFILE_A9, thumb[i][0] | 0x10, thumb[i][1], &t)); /* loads */
+    }
+    SnxThumb other;
+    assert(snx_thumb_decode_profile(SNX_ARM_PROFILE_A9, 0xf841, 0x0f1c, &other) == TH_F32 && other.rn == 1);
     return 0;
 }

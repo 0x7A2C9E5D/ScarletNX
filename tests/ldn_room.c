@@ -317,8 +317,7 @@ static void datagrams(void) {
     CHECK(snx_room_socket_open(ra, &a2, SNX_AF_INET, SNX_SOCK_DGRAM, 0) == 0);
     addr = to_of(any, 1236);
     CHECK(snx_socket_bind(a2, &addr) == 0);
-    CHECK(snx_socket_name(a, &addr) == 0 && snx_ld_be16(&addr.port) == 1234 &&
-          !memcmp(addr.addr, any, 4));
+    CHECK(snx_socket_name(a, &addr) == 0 && snx_ld_be16(&addr.port) == 1234 && !memcmp(addr.addr, any, 4));
     /* to a member: from the sender's address and the port its first send took; poll says so first */
     addr = to_of(ip_a, 1234);
     CHECK(snx_socket_send(b, "hello", 5, 0, &addr) == 5);
@@ -354,7 +353,8 @@ static void datagrams(void) {
     CHECK(snx_socket_recv(a, buf, sizeof buf, 0, NULL, NULL) == -SNX_EAGAIN); /* a hasn't SO_BROADCAST */
     CHECK(snx_socket_setsockopt(a, SNX_SOL_SOCKET, SNX_SO_BROADCAST, &one, sizeof one) == 0);
     size = sizeof value;
-    CHECK(snx_socket_getsockopt(a, SNX_SOL_SOCKET, SNX_SO_BROADCAST, &value, &size) == 0 && snx_le32((uint32_t)value) == 1);
+    CHECK(snx_socket_getsockopt(a, SNX_SOL_SOCKET, SNX_SO_BROADCAST, &value, &size) == 0 &&
+          snx_le32((uint32_t)value) == 1);
     CHECK(snx_socket_send(b, "all", 3, 0, &addr) == 3);
     n = recv_wait(a, buf, sizeof buf, &from, NULL);
     CHECK(n == 3 && !memcmp(buf, "all", 3) && !memcmp(from.addr, ip_b, 4));
@@ -386,6 +386,55 @@ static void datagrams(void) {
     CHECK(snx_socket_connect(c, &addr) == 0 && snx_socket_send(c, "conn", 4, 0, NULL) == 4);
     n = recv_wait(a, buf, sizeof buf, NULL, NULL);
     CHECK(n == 4 && !memcmp(buf, "conn", 4));
+    /* UDS uses low-latency rooms. A stalled consumer must retain a reliable
+       burst larger than the old 256-datagram socket queue, in FIFO order.
+       The fence uses another socket on the same ordered ENet connection, so
+       all burst packets have reached the room socket before any are read. */
+    snx_room_low_latency(ra);
+    {
+        uint8_t burst[1480], back[1480];
+        memset(burst, 0x5a, sizeof burst);
+        addr = to_of(ip_a, 1234);
+        for (uint32_t i = 0; i < 512; ++i) {
+            uint32_t sequence = snx_le32(i);
+            memcpy(burst, &sequence, sizeof sequence);
+            CHECK(snx_socket_send(b, burst, sizeof burst, 0, &addr) == sizeof burst);
+        }
+        addr = to_of(ip_a, 1236);
+        CHECK(snx_socket_send(b, "fence", 5, 0, &addr) == 5);
+        CHECK(recv_wait(a2, buf, sizeof buf, NULL, NULL) == 5 && !memcmp(buf, "fence", 5));
+        for (uint32_t i = 0; i < 512; ++i) {
+            uint32_t sequence;
+            CHECK(recv_wait(a, back, sizeof back, NULL, NULL) == sizeof back);
+            memcpy(&sequence, back, sizeof sequence);
+            CHECK(snx_le32(sequence) == i && back[sizeof back - 1] == 0x5a);
+        }
+        CHECK(snx_socket_recv(a, buf, sizeof buf, SNX_MSG_DONTWAIT, NULL, NULL) == -SNX_EAGAIN);
+        /* The byte cap still bounds large datagrams independently of count.
+           64 maximum UDP datagrams fit in 4 MiB; the 65th must be dropped. */
+        big = malloc(SNX_ROOM_DATAGRAM_MAX);
+        uint8_t* large_back = malloc(SNX_ROOM_DATAGRAM_MAX);
+        CHECK(big && large_back);
+        memset(big, 0x5a, SNX_ROOM_DATAGRAM_MAX);
+        addr = to_of(ip_a, 1234);
+        for (uint32_t i = 0; i < 65; ++i) {
+            uint32_t sequence = snx_le32(i);
+            memcpy(big, &sequence, sizeof sequence);
+            CHECK(snx_socket_send(b, big, SNX_ROOM_DATAGRAM_MAX, 0, &addr) == SNX_ROOM_DATAGRAM_MAX);
+        }
+        addr = to_of(ip_a, 1236);
+        CHECK(snx_socket_send(b, "fence", 5, 0, &addr) == 5);
+        CHECK(recv_wait(a2, buf, sizeof buf, NULL, NULL) == 5);
+        for (uint32_t i = 0; i < 64; ++i) {
+            uint32_t sequence;
+            CHECK(recv_wait(a, large_back, SNX_ROOM_DATAGRAM_MAX, NULL, NULL) == SNX_ROOM_DATAGRAM_MAX);
+            memcpy(&sequence, large_back, sizeof sequence);
+            CHECK(snx_le32(sequence) == i);
+        }
+        CHECK(snx_socket_recv(a, buf, sizeof buf, SNX_MSG_DONTWAIT, NULL, NULL) == -SNX_EAGAIN);
+        free(large_back);
+        free(big);
+    }
     /* out of the room: a send says so; the sockets still close after */
     snx_room_leave(rb);
     CHECK(snx_socket_send(c, "late", 4, 0, NULL) == -SNX_ENETDOWN);

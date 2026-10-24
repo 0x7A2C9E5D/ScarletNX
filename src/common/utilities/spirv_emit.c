@@ -1700,13 +1700,19 @@ uint32_t spv_emit_read_clock(SpvEmitter* e, uint32_t vec2_u32_type, uint32_t sco
     put(&e->functions, scope);
     return id;
 }
+static void block_ends(SpvEmitter* e) {
+    if (e->block_end) e->block_end(e->block_end_user);
+}
+
 void spv_emit_selection_merge(SpvEmitter* e, uint32_t merge_label) {
+    block_ends(e);
     instruction(&e->functions, SPV_OP_SELECTION_MERGE, 3);
     put(&e->functions, merge_label);
     put(&e->functions, 0); /* SelectionControlMaskNone */
 }
 
 void spv_emit_branch_conditional(SpvEmitter* e, uint32_t condition, uint32_t yes_label, uint32_t no_label) {
+    block_ends(e);
     instruction(&e->functions, SPV_OP_BRANCH_CONDITIONAL, 4);
     put(&e->functions, condition);
     put(&e->functions, yes_label);
@@ -1714,11 +1720,13 @@ void spv_emit_branch_conditional(SpvEmitter* e, uint32_t condition, uint32_t yes
 }
 
 void spv_emit_branch(SpvEmitter* e, uint32_t label) {
+    block_ends(e);
     instruction(&e->functions, SPV_OP_BRANCH, 2);
     put(&e->functions, label);
 }
 
 void spv_emit_loop_merge(SpvEmitter* e, uint32_t merge_label, uint32_t continue_label) {
+    block_ends(e);
     instruction(&e->functions, SPV_OP_LOOP_MERGE, 4);
     put(&e->functions, merge_label);
     put(&e->functions, continue_label);
@@ -1728,6 +1736,7 @@ void spv_emit_loop_merge(SpvEmitter* e, uint32_t merge_label, uint32_t continue_
 void spv_emit_switch_u32(SpvEmitter* e, uint32_t selector, uint32_t default_label, const uint32_t* literals,
                          const uint32_t* labels, size_t count) {
     assert(count <= (UINT16_MAX - 3) / 2);
+    block_ends(e);
     instruction(&e->functions, SPV_OP_SWITCH, (uint32_t)(3 + count * 2));
     put(&e->functions, selector);
     put(&e->functions, default_label);
@@ -1931,6 +1940,9 @@ uint32_t spv_emit_op(SpvEmitter* e, uint32_t opcode, uint32_t type, const uint32
 }
 void spv_emit_void_op(SpvEmitter* e, uint32_t opcode, const uint32_t* operands, size_t count) {
     assert(count <= UINT16_MAX - 1);
+    if (opcode == SPV_OP_LOOP_MERGE || opcode == SPV_OP_SELECTION_MERGE || opcode == SPV_OP_BRANCH ||
+        opcode == SPV_OP_BRANCH_CONDITIONAL || opcode == SPV_OP_SWITCH)
+        block_ends(e);
     instruction(&e->functions, opcode, (uint32_t)(count + 1));
     for (size_t i = 0; i < count; i++) put(&e->functions, operands[i]);
 }

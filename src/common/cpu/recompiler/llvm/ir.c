@@ -5,6 +5,7 @@
 #include <llvm-c/Analysis.h>
 #include <llvm-c/BitReader.h>
 #include <llvm/Config/llvm-config.h>
+#include <llvm-c/Support.h>
 #include <llvm-c/Transforms/PassBuilder.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,10 @@
 /* ---- setup ---- */
 
 SnxIrFeatures snx_ir_host;
+/* snx_ir_slp's */
+static struct {
+    int slp_off;
+} g_ir;
 static const SnxIrFeatures generic_features;
 
 static int has_feature(const char* features, const char* name) {
@@ -34,6 +39,14 @@ static int has_feature(const char* features, const char* name) {
 static int riscv_triple(const char* triple) { return !strncmp(triple, "riscv64", 7); }
 static int loongarch_triple(const char* triple) { return !strncmp(triple, "loongarch64", 11); }
 
+void snx_ir_slp_vectorizer(int on) {
+    /* the pass builder's SLPVectorization leaves default<O?>'s slp-vectorizer in (LLVM 22): its own switch stops it */
+    static const char* const off[] = {"scarletnx", "-vectorize-slp=false"};
+    if (on || g_ir.slp_off) return;
+    LLVMParseCommandLineOptions(2, off, NULL);
+    g_ir.slp_off = 1;
+}
+int snx_ir_slp(void) { return !g_ir.slp_off; }
 int snx_ir_init(char* error, size_t error_size) {
     char* triple;
     int x86, arm, ppc, other;

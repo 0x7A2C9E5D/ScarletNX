@@ -22,6 +22,7 @@
 #include "nx/gpu/renderer.h"
 #include "nx/gpu/vk/backing.h"
 #include "nx/gpu/vk/pending_pages.h"
+#include "nx/memory/own.h"
 
 typedef struct CsPipe {
     u64 key;
@@ -679,6 +680,65 @@ static void cs_read_code(u64 pa, u8* dst) {
     gmem_read_code(pa, dst + 80, code_size);
 }
 
+/* Storage buffers kept on the GPU (the model of Citron Neo's buffer cache, buffer_cache.h's
+   BindHostComputeStorageBuffers and MarkWrittenBuffer, Copyright 2022 yuzu Emulator Project and 2025 citron Emulator
+   Project, GPL-3.0-or-later), on the ownership ScarletNX's engines already use (docs/GPU_OWNERSHIP.md), so that the
+   guest's own pages are trapped and land only when the CPU touches them, not at a sync point. A range one resource
+   holds whole is bound where it is. Any other is copied, the CPU's bytes by the CPU and the GPU's by the GPU
+   (vk_guest_read): into staging when it is only read, into a resource of its own when it is written, which then
+   holds those bytes (res_publish). Nothing is waited for, compared or written back */
+/* how recently the CPU must have made a written range land for a dispatch writing it to run on the compute queue */
+#define CS_CPU_READ_PRESENTS 1200
+static int res_bind(u64 gva, u64 len, int written, VkBuffer* buf, u64* off, VkOwnRes** made) {
+    OwnRange o[2];
+    VkBuffer sb;
+    u64 cpu = 0, so;
+    u8* p;
+    *made = NULL;
+    if (!gva) return vk_buf_copy(0, len, buf, off);
+    if (gmmu_run(gva, len, &cpu) == len && own_lookup(cpu, len, o, 2) == 1 && o[0].addr == cpu && o[0].size == len &&
+        !(o[0].res_off & (vk_stage_align() - 1))) {
+        *buf = ((const VkOwnRes*)o[0].res)->buf;
+        *off = o[0].res_off;
+        return 1;
+    }
+    /* one only read takes the buffer cache's copy, which is copied again only when its bytes change (written, by the
+       CPU through the write tracking or by the GPU): Citron Neo's SynchronizeBuffer uploads only the pages the CPU
+       changed. Copied whole at every dispatch, the inputs were nearly all of one game's GPU thread (its passes read
+       four buffers for every one they write) */
+    if (!written) return vk_buf_get_strict(gva, len, buf, off);
+    vk_render_end(); /* the copies happen outside rendering passes */
+    if (!(p = vk_stage_upload(len, vk_stage_align(), &sb, &so))) return 0;
+    vk_guest_read(gva, len, p, sb, so);
+    VkOwnRes* r = vk_own_res_new(len);
+    if (!r) return 0;
+    VkBufferCopy c = {so, 0, len};
+    rec_CmdCopyBuffer(vk_cmd(), sb, r->buf, 1, &c);
+    *buf = r->buf;
+    *off = 0;
+    *made = r;
+    return 1;
+}
+/* r's bytes are [gva, gva + len)'s from now on, GPU-owned run by run of guest memory, as a DMA copy's destination */
+static void res_publish(u64 gva, u64 len, VkOwnRes* r) {
+    for (u64 at = 0; at < len;) {
+        u64 cpu = 0, n = gmmu_run(gva + at, len - at, &cpu);
+        if (!n) { /* an unmapped page takes no write */
+            n = 0x1000 - ((gva + at) & 0xFFF);
+            if (n > len - at) n = len - at;
+        } else
+            vk_own_publish(cpu, n, r, at);
+        at += n;
+    }
+}
+static void res_unref_all(VkOwnRes** made, int n) {
+    for (int i = 0; i < n; i++)
+        if (made[i]) {
+            vk_own_res_unref(made[i]);
+            made[i] = NULL;
+        }
+}
+
 void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     u32* rc = ch->rcomp;
     u32 gx = q[12] & 0x7FFFFFFF, gy = q[13] & 0xFFFF, gz = q[13] >> 16, lx = q[18] >> 16, ly = q[19] & 0xFFFF,
@@ -836,6 +896,21 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
        dispatch, about 9 a frame in one game. Its storage images are published over their guest bytes, GPU-owned
        (vk_surf_publish), and land at once only where they can't be */
     int deferred = gfx;
+    /* one of storage buffers alone, where the host traps guest memory, keeps them on the GPU (res_bind). On the compute
+       queue each landed at the next dispatch that read it: one game's passes update the same buffers dispatch after
+       dispatch, and waited for the GPU at nearly every one, about 14 frames a second on any machine */
+    int resident = !gfx && own_traps();
+    /* but not one that writes a range the CPU has made land lately: kept on the GPU, each read of it by the CPU trapped
+       and waited for the GPU, and one game reads its compute results every frame (34,000 landings in two minutes, its
+       frame rate down from 54 to 39). Such a dispatch runs on the compute queue as before, alongside the draws, its
+       results landing where they are read. One whose results only later dispatches and draws read stays resident */
+    for (int i = 0; i < ng && resident; i++) {
+        u64 cpu = 0, run;
+        if (!((p->si.gbuf_wmask >> i) & 1) || !sa[i]) continue;
+        if ((run = gmmu_run(sa[i], ss[i], &cpu)) && vk_own_cpu_read(cpu, run, CS_CPU_READ_PRESENTS)) resident = 0;
+    }
+    VkOwnRes* made[16] = {0};
+    deferred = deferred || resident;
     /* a read-only input inside a pending result of this batch is read from the arena on the GPU, after a barrier
        (multi-pass skinning reads what the pass before wrote); any other overlap lands the results first */
     i64 chain[16];
@@ -940,11 +1015,26 @@ rebind:
             nw++;
         }
     u64 so[16];
+    VkBuffer bi_buf[16];
     int chained = 0;
     for (int i = 0; i < ng; i++) {
         VkBuffer sbuf = g_ar;
         u64 o;
-        if (deferred) {
+        int alias = -1;
+        for (int k = 0; k < i && resident && alias < 0; k++)
+            if (sa[k] && sa[k] == sa[i] && ss[k] == ss[i]) alias = k; /* one range bound twice names one buffer */
+        if (resident && alias >= 0) {
+            sbuf = bi_buf[alias];
+            o = so[alias];
+            so[i] = o;
+        } else if (resident) {
+            if (!res_bind(sa[i], ss[i], (p->si.gbuf_wmask >> i) & 1, &sbuf, &o, &made[i])) {
+                res_unref_all(made, ng);
+                g_cs_skips[CS_SKIP_STORAGE_BUFFER]++;
+                return;
+            }
+            so[i] = o;
+        } else if (deferred) {
             /* written: a pending result of its own, from its original bytes; read: the bytes draws would read,
                which may be an earlier draw's or dispatch's result on the GPU */
             int ok = (p->si.gbuf_wmask >> i) & 1 ? vk_buf_copy_writable(sa[i], ss[i], &sbuf, &o)
@@ -966,6 +1056,7 @@ rebind:
             else
                 memset(g_ar_ptr + o, 0, ss[i]);
         }
+        bi_buf[i] = sbuf;
         bi[nw] = (VkDescriptorBufferInfo){sbuf, o, ss[i]};
         w[nw] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                        .dstSet = set,
@@ -1175,6 +1266,7 @@ rebind:
                 bufimg_view[i] = VK_NULL_HANDLE;
             }
         vk_buf_writable_abort();
+        res_unref_all(made, ng);
         if (++retries < 4) goto rebind;
         g_cs_skips[CS_SKIP_INPUTS_MOVED]++;
         return;
@@ -1200,7 +1292,7 @@ rebind:
             pend_add(&g_pages, bimg[i].gva, bimg[i].bytes, 1);
         }
     }
-    if (gfx) {
+    if (gfx || resident) {
         vk_render_end();
         cb = vk_cmd();
     } else {
@@ -1213,6 +1305,7 @@ rebind:
         cb = g_ccb;
     }
     vkUpdateDescriptorSets(g_vk.dev, nw, w, 0, NULL);
+    if (resident) vk_all_barrier(cb); /* the copies into its buffers, and earlier work on them, before it */
     if (chained) {
         VkMemoryBarrier2 cmb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
                                 .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -1226,6 +1319,17 @@ rebind:
     rec_CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, p->p);
     rec_CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, g_vk_playout, 0, 1, &set, 0, NULL);
     rec_CmdDispatch(cb, gx, gy, gz);
+    if (resident) {
+        vk_all_barrier(cb); /* its writes before what reads them next */
+        for (int i = 0; i < ng; i++) {
+            if (!(((p->si.gbuf_wmask >> i) & 1) && sa[i])) continue;
+            if (made[i]) res_publish(sa[i], ss[i], made[i]);
+            gpu_mem_written(sa[i], ss[i]); /* what is built from these bytes (buffers, textures) takes the new ones */
+        }
+        res_unref_all(made, ng);
+        g_vk_dispatches++;
+        return;
+    }
     if (deferred) {
         /* pending from here: the submit copies them where the host reads them (vk_buf_host_barrier). Submitted at
            once, the GPU runs it while the stream goes on, and a reader of its results waits for that submit alone,

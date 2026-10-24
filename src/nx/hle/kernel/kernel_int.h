@@ -84,6 +84,8 @@ u32 svc_wait_sync(KThread* t, u64 hptr, u32 n, i64 timeout, u32* out_idx);
 /* ---- svc_mem.c: the memory SVCs */
 u32 svc_query(u64 info, u64 addr);
 u32 svc_map_memory(u64 dst, u64 src, u64 size);
+u32 svc_map_process_memory(u64 dst, u32 process, u64 src, u64 size);
+u32 svc_unmap_process_memory(u64 dst, u32 process, u64 src, u64 size);
 u32 svc_unmap_memory(u64 dst, u64 src, u64 size);
 u32 svc_map_shm(u32 h, u64 addr, u64 size, u32 perm);
 u32 svc_unmap_shm(u32 h, u64 addr, u64 size);
@@ -208,6 +210,13 @@ typedef struct {
     KWEvent wevents[KHANDLED_MAX];
     u32 wevent_next;
 } HleSvc;
+/* svcMapProcessMemory's view of code at dst, of size bytes of src, and src as it was mapped (snap, size bytes; NULL
+   when it could not be kept): what a line the guest flushes (svc_code_line) is compared with */
+typedef struct {
+    u64 dst, src, size;
+    u8* snap;
+} KCodeView;
+#define KCODEVIEW_MAX 64 /* the views a mod keeps at once: exlaunch's are its module's text and its hook pools */
 /* svc_mem.c */
 typedef struct {
     /* the cores and priorities the npdm's kernel capabilities allow (svcGetInfo 0 and 1) */
@@ -220,6 +229,8 @@ typedef struct {
     u64 entropy[4];
     int entropy_made;
     u64 local_region; /* UserExceptionContextAddress's page, 0 until made */
+    KCodeView views[KCODEVIEW_MAX]; /* under views_lk: a free one has size 0 */
+    PMutex views_lk;
 } HleSvcMem;
 /* until the npdm says (main.c): an application's */
 #endif

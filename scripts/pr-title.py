@@ -3,7 +3,7 @@
 # Copyright 2026 the ScarletNX contributors
 """pr-title.py TITLE: fails while a pull request's title still holds a donotmerge mark (`[donotmerge needs #N]`, on a
 pull request that waits for another), so its check stays red until what it needs is in and the mark is out of the
-title. .github/workflows/pr-title.yml runs it whenever the title changes."""
+title. .github/workflows/pr-checks.yml runs it whenever the pull request changes."""
 
 import re
 import sys

@@ -557,6 +557,8 @@ typedef struct VkOwnRes {
     u32 refs; /* the creator's, and one an owned range */
 } VkOwnRes;
 int vk_own_init(void);
+/* whether the CPU made GPU-owned bytes of guest memory [cpu, cpu + size) land within the last presents presents */
+int vk_own_cpu_read(u64 cpu, u64 size, u32 presents);
 VkOwnRes* vk_own_res_new(u64 size); /* with the caller's reference; NULL when out of memory */
 void vk_own_res_unref(VkOwnRes* r);
 /* the guest CPU bytes [cpu, cpu + size) hold r's bytes from off on once the work recorded so far is done: owned, or,
@@ -783,6 +785,9 @@ int vk_written_since(const u8* host, u64 len, u32 since);
 u32 vk_ww_now(void);
 void vk_ww_new_epoch(void); /* the CPU may have written what a GPU stream reads next: write tracking scans again */
 u32 vk_ww_epoch(void);
+/* the calling thread runs a job of a stream (1: its checks see the CPU's writes from before the newest epoch now, and
+   from before the waits it ends) or stops (0: they see every epoch's) */
+void vk_ww_stream(int on);
 void vk_mem_changed(u64 cpu, u64 len); /* gpu.c's g_gpu_mem_changed: the range counts as written */
 
 /* pipeline.c */
@@ -826,6 +831,11 @@ VkPipelineLayout vk_playout(u32 arrays); /* arrays: a bit per set (shader_vk_set
 extern int g_vk_preserve_infnan;
 extern int g_vk_preserve_infnan64;
 extern int g_vk_flush_denorm;
+/* SH_FTZ_*: how translations get the console's FP32 flush to zero, from g_vk_flush_denorm and vk_ftz_native */
+extern int g_vk_ftz;
+/* ftz_probe.c: 1 when the device flushes FP32 subnormals in FADD, FMUL and FFMA as the console's FTZ does, in a module
+   that declares no denormal mode (it runs a compute shader and waits for it: at the renderer's start only) */
+int vk_ftz_native(void);
 extern VkShaderStageFlags g_vk_subgroup_stages;
 /* by set, shader_vk_set(stage): [0] without the indexed texture arrays, [1] with them. A set holding 512 array
    descriptors cost the driver twice the time to bind (one game's 6,700 draws a frame), so only an indexed shader's has
@@ -937,6 +947,7 @@ void vk_ui_draw(VkCommandBuffer cb, VkImage sc, const int safe[4]);
 void vk_ui_swapchain_gone(void); /* its images' views go before the swapchain does */
 void vk_render_clear(GpuChannel* ch, u32 v);
 VkViewport vk_render_viewport(const u32* r);
+VkViewport vk_render_viewport_at(const u32* r, u32 index);
 int vk_render_depth_clamp(const u32* r);
 VkFrontFace vk_render_front_face(const u32* r);
 void vk_render_draw_texture(GpuChannel* ch);

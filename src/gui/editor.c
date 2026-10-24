@@ -128,7 +128,7 @@ static void take(GuiEditor* editor) {
             snprintf(editor->note, sizeof editor->note, snx_tr("At most %u bytes"), (unsigned)key->size - 1);
         else
             snprintf(editor->note, sizeof editor->note, "%s",
-                     key->type == GUI_KEY_COLOUR ? snx_tr("A colour: #RRGGBB, as #1A2B3C")
+                     key->type == GUI_KEY_COLOUR ? snx_tr("A color: #RRGGBB, as #1A2B3C")
                                                  : snx_tr("A whole number, 0 to 10000"));
         return;
     }

@@ -16,7 +16,7 @@ recompiles on the phone, then the game opens.
   (`/data/data/org.scarletnx/files`): `games/` goes there, the extractions in its `cache/work/`, the games' logs in
   its `state/` and the menu's own files in its `config/` and `state/` ([USAGE](USAGE.md#folders)). It needs no permission and nothing slows it down as the shared storage's
   FUSE does; it goes with the app, which Android 10 and later ask about before uninstalling it. The system's Files app
-  shows it as *ScarletNX*, to copy dumps, keys and saves in and out, and the menu's *Open data folder* opens it there.
+  shows it as *ScarletNX*, to copy dumps, keys and saves in and out, and the menu's *Open Data Folder* opens it there.
   Settings > App > Folders may move the data, the games or the extractions to the shared storage; it asks first, as
   games may run slower there, and takes the folder at a second tap.
   `HOME` stays the app's own files, for `.switch/prod.keys`. An older version kept the data in `/sdcard/ScarletNX`
@@ -25,7 +25,7 @@ recompiles on the phone, then the game opens.
   version kept in the app's files themselves, out of the Files app's reach, which the menu no longer reads: while the
   app is in testing, *Clear storage* in its Android settings takes them, with everything else of the app's
   ([DEPRECATIONS](DEPRECATIONS.md)).
-- **Loading** (a *Load* item, *Setup device keys*) opens its screen, a box the whole width, and a tap in the box
+- **Loading** (a *Load* item, *Install Keys*) opens its screen, a box the whole width, and a tap in the box
   opens the system's file picker. A game's file is read by its path, so the app asks for access to the files when
   it starts (all files from Android 11): the picker's path, or for a document without one the file its descriptor
   opens. A cloud's document has none and is refused, its URI in the message. Wherever the dump is, its extraction
@@ -39,14 +39,14 @@ recompiles on the phone, then the game opens.
   returns to the menu. A run that ends there leaves a notification saying so, and its game opens once the menu shows.
   The first run asks to show it (Android 13) and to lift the battery limit; on a phone whose maker adds its own limit
   (Samsung, Xiaomi, OPPO, vivo, Huawei...) it names the setting, with a button to its screen.
-- **A game** runs in `GameActivity`, in a process of its own: the runtime's `main` with `--game=games/<game>`.
+- **A game** runs in `GameActivity`, in a process of its own: the runtime's `main` with `--game=recompiled/<game>`.
   Its process ends with the game, and the menu comes back on its first screen. `<game>_code.so` loads where it is;
   from a game folder on the shared storage, which maps nothing executable, the runtime loads a copy in the app's
   cache. The back button opens the
   game's menu over it, in the menu's look (a gamepad's Home does on every system): the on-screen controls'
   settings, the touch screen's, and *Exit*; back again returns to the game. Leaving it for the home screen keeps it:
   its window is made anew when it comes back.
-- **Share log**, in the menu, saves the message on the screen, the last run's output (`last-run.log`, which the
+- **Share Log**, in the menu, saves the message on the screen, the last run's output (`last-run.log`, which the
   menu keeps on every system) and the newest game log to `scarletnx.log` in the data folder's `state/`, then opens
   the share sheet with that file.
 
@@ -59,14 +59,14 @@ works beside them; the menu's *On-screen controls* item hides them.
 
 ## Keys
 
-*Setup device keys* copies `prod.keys` into the app's own files, as `.switch/prod.keys` in its `HOME`, and its screen
+*Install Keys* copies `prod.keys` into the app's own files, as `.switch/prod.keys` in its `HOME`, and its screen
 names that path. Pick it from the device's storage: it is read through the picker, so it needs no access to the
 device's files. The picker gives no name to go by, so the file has to read as a prod.keys (`name = hex` lines),
 whatever it is called; any other is refused. The menu installs no `title.keys`. It is optional, as an NSP's tickets
 give the title keys too.
 
 The keys may also be copied by hand into the data folder, *ScarletNX* in the Files app: `prod.keys`, and `title.keys`
-if you have one. The driver reads both there before the app's own files. The *Setup device keys* screen shows only
+if you have one. The driver reads both there before the app's own files. The *Install Keys* screen shows only
 the keys it installed, so it does not name these.
 
 ## Building

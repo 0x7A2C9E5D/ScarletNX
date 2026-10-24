@@ -47,7 +47,7 @@ body:
     attributes:
       label: Log
       description: |
-        Drag the log file here. In the launcher, Share log saves one with the last run's output (and copies its path, or opens the share sheet on a phone). The game's own log is `<game>.log` in `~/.local/state/scarletnx/games/<game>/` on Linux, `%APPDATA%\scarletnx\state\games\<game>\` on Windows and `~/Library/Application Support/scarletnx/state/games/<game>/` on macOS. A log over 25 MB can be zipped or gzipped first.
+        Drag the log file here. In the launcher, Share log saves one with the last run's output (and copies its path, or opens the share sheet on a phone). The game's own log is `<game>.log` in `~/.local/state/scarletnx/recompiled/<game>/` on Linux, `%APPDATA%\scarletnx\state\recompiled\<game>\` on Windows and `~/Library/Application Support/scarletnx/state/recompiled/<game>/` on macOS. A log over 25 MB can be zipped or gzipped first.
       placeholder: Drop the .log, .zip or .gz file here
     validations:
       required: true
@@ -56,7 +56,7 @@ body:
     attributes:
       label: Save
       description: |
-        Optional, and a great help when the problem is a while into the game. Zip the game's save folder and drag the .zip here. It is `games/<title ID>/<title ID>_data/save/` in the data folder: `~/.local/share/scarletnx` on Linux, `%APPDATA%\scarletnx` on Windows and `~/Library/Application Support/scarletnx` on macOS. The title ID is the game's folder name, and the log summary names it too.
+        Optional, and a great help when the problem is a while into the game. Zip the game's save folder and drag the .zip here. It is `recompiled/<title ID>/<title ID>_data/save/` in the data folder: `~/.local/share/scarletnx` on Linux, `%APPDATA%\scarletnx` on Windows and `~/Library/Application Support/scarletnx` on macOS. The title ID is the game's folder name, and the log summary names it too.
       placeholder: Drop the save's .zip file here
   - type: textarea
     id: pictures

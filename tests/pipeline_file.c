@@ -119,6 +119,30 @@ static u64 load_shipref(void* ctx, u64 at, u64 check) {
 }
 static void make_shader(int n, PfShader* s, u32* cbr, u32* spv);
 static long file_size(void);
+/* the bytes of open_file's key that are its guest part (pf_open's guest) */
+static size_t guest_bytes;
+/* a rebuild's sources handed back: each one's shader number (its code's first byte) and whether a transform feedback
+   layout came with it; each recorded into the new file as shader n again, made into module source_module + i */
+static PFile* rebuilding;
+static struct {
+    int n, shader[8], xfb[8], rebuild;
+} source_got;
+static u64 source_module;
+static void add_sourced(PFile* pf, int n, u64 module, int with_xfb);
+static u64 load_source(void* ctx, const PfSource* s, const u32* cbr, const u8* code, const ShXfb* xfb) {
+    PfShader sh;
+    u32 want[8], spv[16];
+    (void)ctx;
+    make_shader(code[0], &sh, want, spv);
+    CHECK(source_got.n < 8 && s->ncode == 64 && s->hash == sh.hash && s->stage == sh.stage && s->ncbr == sh.ncbr &&
+          !memcmp(cbr, want, sh.ncbr * 16) && !memcmp(s->mask, sh.mask, sizeof s->mask));
+    CHECK(!xfb == !(s->flags & PF_SRC_XFB) && (!xfb || xfb->stride[3] == 4321));
+    source_got.shader[source_got.n] = code[0];
+    source_got.xfb[source_got.n] = xfb != NULL;
+    source_got.n++;
+    add_sourced(rebuilding, code[0], source_module + (u64)source_got.n - 1, xfb != NULL);
+    return source_module + (u64)source_got.n - 1;
+}
 static void open_file(PFile* pf, const char* key, u64 first_module, int fail_first, u32 loaded[2]);
 static void close_file(PFile* pf);
 static void add_shader(PFile* pf, int n, u64 module);
@@ -167,10 +191,10 @@ static void mapped(void) {
     pf_unseal(&pf);
     CHECK(pf.f && !pf.view.data);
     make_shader(1, &s, cbr, spv);
-    at[0] = pf_shader(&pf, 0, &s, cbr, spv);
+    at[0] = pf_shader(&pf, 0, &s, cbr, spv, NULL, NULL, NULL);
     pf_scan(&pf, 1, 77);
     make_shader(2, &s, cbr, spv);
-    at[1] = pf_shader(&pf, 0, &s, cbr, spv);
+    at[1] = pf_shader(&pf, 0, &s, cbr, spv, NULL, NULL, NULL);
     CHECK(at[0] && at[1] > at[0] && pf.nmap == 0); /* no module: nothing for pipelines to name */
     CHECK(!pf_payload(&pf, at[1], &len, &check));  /* unmapped while appended to */
     pf_seal(&pf);
@@ -262,13 +286,15 @@ static void open_file(PFile* pf, const char* key, u64 first_module, int fail_fir
     load.shader = load_shader;
     load.pipe = load_pipe;
     load.shipref = load_shipref;
+    load.source = load_source;
     load.ctx = NULL;
+    load.rebuild = 0;
     memset(&got, 0, sizeof got);
     got.next_module = first_module;
     got.fail_first = fail_first;
     memset(pf, 0, sizeof *pf);
     pm_init(&pf->lock);
-    pf_open(pf, PATH, key, &load, loaded);
+    pf_open(pf, PATH, key, guest_bytes, &load, loaded);
 }
 static void close_file(PFile* pf) {
     if (pf->f) fclose(pf->f);
@@ -321,7 +347,78 @@ static void add_shader(PFile* pf, int n, u64 module) {
     PfShader s;
     u32 cbr[8], spv[16];
     make_shader(n, &s, cbr, spv);
-    pf_shader(pf, module, &s, cbr, spv);
+    pf_shader(pf, module, &s, cbr, spv, NULL, NULL, NULL);
+}
+/* shader n with its source: 64 bytes of code starting with n, and a transform feedback layout when with_xfb */
+static void add_sourced(PFile* pf, int n, u64 module, int with_xfb) {
+    PfShader s;
+    PfSource src;
+    ShXfb xfb;
+    u32 cbr[8], spv[16];
+    u8 code[64];
+    make_shader(n, &s, cbr, spv);
+    memset(&src, 0, sizeof src);
+    src.hash = s.hash;
+    src.stage = s.stage;
+    src.ncbr = s.ncbr;
+    src.ncode = sizeof code;
+    src.flags = with_xfb ? PF_SRC_XFB : 0;
+    memcpy(src.mask, s.mask, sizeof src.mask);
+    memset(code, 0xC5, sizeof code);
+    code[0] = (u8)n;
+    memset(&xfb, 0, sizeof xfb);
+    xfb.stride[3] = 4321;
+    pf_shader(pf, module, &s, cbr, spv, &src, code, with_xfb ? &xfb : NULL);
+}
+/* a file of another build or driver whose guest part is the same: rebuilt from its sources, into a file of the new
+   key that the next run reads as it is */
+static void rebuilds(void) {
+    PFile pf;
+    u32 loaded[2] = {0, 0};
+    remove(PATH);
+    guest_bytes = 6;
+    open_file(&pf, "guest;build one", 0x10, 0, loaded);
+    add_sourced(&pf, 0, 0x8001, 0);
+    add_shader(&pf, 1, 0x8002); /* without a source: can't be translated again */
+    add_sourced(&pf, 2, 0x8003, 1);
+    add_pipe(&pf, 0, 0x8001, 0, 0, 0, 0x8003);
+    add_pipe(&pf, 1, 0x8001, 0, 0, 0, 0x8002); /* dropped with the shader */
+    add_pipe(&pf, 2, 0x8003, 0, 0, 0, 0);
+    close_file(&pf);
+    /* the same build: the sources aren't looked at */
+    memset(&source_got, 0, sizeof source_got);
+    open_file(&pf, "guest;build one", 0x20, 0, loaded);
+    CHECK(loaded[0] == 3 && loaded[1] == 3 && source_got.n == 0);
+    close_file(&pf);
+    /* another build: each source handed back, recorded in the new file, and the pipelines of its shaders */
+    memset(&source_got, 0, sizeof source_got);
+    source_module = 0x30;
+    rebuilding = &pf;
+    open_file(&pf, "guest;build two", 0x90, 0, loaded);
+    CHECK(source_got.n == 2 && source_got.shader[0] == 0 && !source_got.xfb[0] && source_got.shader[1] == 2 &&
+          source_got.xfb[1] && got.nsh == 0 && loaded[0] == 2);
+    CHECK(loaded[1] == 2 && got.npipe == 2);
+    check_pipe(0, 0, 0x30, 0, 0, 0, 0x31);
+    check_pipe(1, 2, 0x31, 0, 0, 0, 0);
+    CHECK(pf.nsh == 2); /* the new file's */
+    add_pipe(&pf, 0, 0x30, 0, 0, 0, 0x31); /* as pipeline.c records each one again */
+    add_pipe(&pf, 2, 0x31, 0, 0, 0, 0);
+    close_file(&pf);
+    /* the next run of that build reads the rebuilt file as it is */
+    memset(&source_got, 0, sizeof source_got);
+    open_file(&pf, "guest;build two", 0xA0, 0, loaded);
+    CHECK(source_got.n == 0 && loaded[0] == 2 && loaded[1] == 2);
+    check_shader(0, 0);
+    check_shader(1, 2);
+    check_pipe(0, 0, 0xA0, 0, 0, 0, 0xA1);
+    close_file(&pf);
+    /* another guest part (another device): started over */
+    open_file(&pf, "gues2;build two", 0xB0, 0, loaded);
+    CHECK(source_got.n == 0 && loaded[0] == 0 && loaded[1] == 0);
+    close_file(&pf);
+    rebuilding = NULL;
+    guest_bytes = 0;
+    remove(PATH);
 }
 static void add_pipe(PFile* pf, int n, u64 vs, u64 tcs, u64 tes, u64 gs, u64 fs) {
     u64 m[5];
@@ -452,17 +549,20 @@ int main(void) {
         load.shader = load_shader;
         load.pipe = load_pipe;
         load.shipref = load_shipref;
+        load.source = load_source;
         load.ctx = NULL;
+        load.rebuild = 0;
         memset(&pf, 0, sizeof pf);
         pm_init(&pf.lock);
         warned[0] = 0;
-        pf_open(&pf, "/dev/full", "key one", &load, loaded);
+        pf_open(&pf, "/dev/full", "key one", 0, &load, loaded);
         CHECK(!pf.f && strstr(warned, "cannot write /dev/full (") && strstr(warned, strerror(ENOSPC)));
         close_file(&pf);
     }
 #endif
     mapped();
     shiprefs();
+    rebuilds();
     printf("pipeline_file: %u checks passed\n", checks);
     return 0;
 }
