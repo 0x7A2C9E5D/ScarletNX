@@ -388,7 +388,15 @@ static void obj_line(AgbBoard* board, int y) {
                 color = tx & 1 ? byte >> 4 : byte & 15;
                 if (color) color |= (uint8_t)(a2 >> 12) << 4;
             }
-            if (!color) continue;
+            if (!color) {
+                /* an open pixel still gives its priority, and whether it is semi transparent, to the pixel a sprite
+                   of a lower one drew there, as mGBA draws it: that pixel goes over the backgrounds this one would */
+                if (scan.drawn[screen_x] && priority < scan.obj_pri[screen_x]) {
+                    scan.obj_pri[screen_x] = (uint8_t)priority;
+                    scan.obj_mode[screen_x] = (uint8_t)(semi ? 1 : 0);
+                }
+                continue;
+            }
             if (objwin_mode) {
                 scan.objwin[screen_x] = 1;
                 continue;

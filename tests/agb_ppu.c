@@ -300,6 +300,23 @@ int main(void) {
     CHECK(pixel(0, 0) == PIX(0, 31, 0));
     agb_ppu_write(&board, 0x00A, 0);
 
+    /* a sprite's open pixel lends its priority to the one an earlier sprite drew there: sprite 0, priority 3, under
+       BG0 (priority 1), comes over it where sprite 1, priority 0, is open */
+    agb_write16(&board, 0x05000202, 0x7C00);  /* OBJ entry 1: blue */
+    agb_write16(&board, 0x06010000, 0x0001);  /* tile 0's pixel 0; tile 1 open */
+    agb_write16(&board, 0x07000000, 0x0000);  /* sprite 0: y 0 */
+    agb_write16(&board, 0x07000002, 0);       /* x 0 */
+    agb_write16(&board, 0x07000004, 3 << 10); /* tile 0, priority 3 */
+    for (int i = 1; i < 128; ++i) agb_write16(&board, 0x07000000 + (uint32_t)i * 8, 0x0200); /* the rest hidden */
+    agb_ppu_write(&board, 0x000, 0x1100);
+    run_frame();
+    CHECK(pixel(0, 0) == PIX(31, 0, 0)); /* BG0 over sprite 0 */
+    agb_write16(&board, 0x07000008, 0x0000);
+    agb_write16(&board, 0x0700000A, 0);
+    agb_write16(&board, 0x0700000C, 1); /* tile 1, priority 0 */
+    run_frame();
+    CHECK(pixel(0, 0) == PIX(0, 0, 31));
+    memset(board.memory.oam, 0, AGB_OAM_SIZE);
     agb_ppu_write(&board, 0x008, 0);
     agb_ppu_write(&board, 0x000, 0x0100);
 
