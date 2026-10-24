@@ -40,6 +40,9 @@ int main(void) {
     assert(!added && q.count == 2);
     assert(gui_queue_add(&q, two, "/games/two/two", "/games/two/two", "Two", GUI_JOB_AOT, false, &added) == 2);
     assert(added && q.count == 3 && q.job[2].kind == GUI_JOB_AOT);
+    /* a game's compile, opened before it was made, and its recompile are one job: R on it while it waits adds none */
+    assert(gui_queue_add(&q, two, "/games/two/two", "/games/two/two", "Two", GUI_JOB_COMPILE, false, &added) == 1);
+    assert(!added && q.count == 3 && q.job[1].kind == GUI_JOB_RECOMPILE);
     /* found by its file or the path it is listed by, while it waits or runs */
     assert(gui_queue_find(&q, "/games/one/one") == 0 && gui_queue_find(&q, "games/one/one") == 0);
     assert(gui_queue_find(&q, "/games/three/three") == -1);

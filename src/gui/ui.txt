@@ -91,7 +91,7 @@
 		android.row_height = 40px
 	}
 }
-# the Recompile tab's queue, under its box's head: a row a recompile in the order they were asked, those that ended
+# the Compile tab's queue, under its box's head: a row a compile in the order they were asked, those that ended
 # until seen, the one running and those waiting
 [scene]Queue {
 	[list]Rows {

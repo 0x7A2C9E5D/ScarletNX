@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The recompiles that play nothing, R's and B's (an AOT pack), asked on Games and run one at a time in the order
-   asked, behind the menu's screens: each keeps the driver's argv as it was asked, its game's file and the name it is
-   shown by, in one block of its own. The queue starts no process: main.c starts the first waiting one when none runs,
-   reads it, and says here how it ended */
+/* The compiles, run one at a time in the order asked, behind the menu's screens: R's recompile and B's AOT pack, which
+   play nothing, and the first compile of a game opened that no game was made from yet, which plays once it ended. Each
+   keeps the driver's argv as it was asked, its game's file and the name it is shown by, in one block of its own. The
+   queue starts no process: main.c starts the first waiting one when none runs, reads it, and says here how it ended */
 #ifndef SNX_GUI_QUEUE_H
 #define SNX_GUI_QUEUE_H
 #include <stdbool.h>
@@ -13,7 +13,7 @@
 #define GUI_QUEUE_MAX  16 /* the jobs a queue holds: waiting, running and ended */
 #define GUI_QUEUE_ARGS 64 /* a job's argv, its NULL included */
 typedef enum { GUI_JOB_WAITING, GUI_JOB_RUNNING, GUI_JOB_OK, GUI_JOB_FAILED } GuiJobState;
-typedef enum { GUI_JOB_RECOMPILE, GUI_JOB_AOT } GuiJobKind;
+typedef enum { GUI_JOB_RECOMPILE, GUI_JOB_AOT, GUI_JOB_COMPILE } GuiJobKind;
 typedef struct {
     char* text;                    /* the block: argv's strings, the file, its path listed and the name, a NUL each */
     uint32_t args[GUI_QUEUE_ARGS]; /* argv[i] at text + args[i], argc of them */
@@ -24,6 +24,7 @@ typedef struct {
     GuiJobKind kind;
     GuiJobState state;
     bool native; /* a game made already, which its recompile's line names */
+    int console; /* the menu's item whose driver runs it (GUI_SWITCH, GUI_3DS...), which main.c sets */
     int status;  /* the driver's exit status, once it ended */
     int percent; /* how far it went, -1 before it said */
     uint64_t started_ms, ended_ms;
@@ -37,7 +38,8 @@ typedef struct {
 } GuiQueue;
 
 /* argv (its strings up to a NULL), the game's file, the path it is listed by and its name as a job waiting at the
-   queue's end: its index. A job of the same file and kind that waits or runs is that one, and *added says which
+   queue's end: its index. A job of the same file that waits or runs, a compile or recompile for either, an AOT pack for
+   an AOT pack, is that one, and *added says which
    (NULL: not said). -1 when the queue is full, or argv has more than GUI_QUEUE_ARGS - 1 strings */
 int gui_queue_add(GuiQueue* queue, const char* const* argv, const char* file, const char* listed, const char* name,
                   GuiJobKind kind, bool native, bool* added);

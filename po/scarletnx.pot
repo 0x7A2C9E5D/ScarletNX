@@ -979,12 +979,12 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s is recompiling (%d%%), %d more in the queue: exiting stops them. Exit?"
+msgid "%s is compiling (%d%%), %d more in the queue: exiting stops them. Exit?"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s is recompiling (%d%%): exiting stops it. Exit?"
+msgid "%s is compiling (%d%%): exiting stops it. Exit?"
 msgstr ""
 
 #: src/gui/main.c
@@ -996,7 +996,7 @@ msgid "Outside the app, Android checks every file access: games may run slower."
 msgstr ""
 
 #: src/gui/main.c
-msgid "A recompile goes: exiting ScarletNX stops it, its work lost."
+msgid "A compile goes: exiting ScarletNX stops it, its work lost."
 msgstr ""
 
 #: src/gui/main.c
@@ -1004,7 +1004,7 @@ msgid "A game runs: exiting ScarletNX ends it."
 msgstr ""
 
 #: src/gui/main.c
-msgid "Abort the recompile? Its work is lost."
+msgid "Abort the compile? Its work is lost."
 msgstr ""
 
 #: src/gui/main.c
@@ -1422,16 +1422,20 @@ msgid "Settings"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Compile"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
-msgid "Recompile %d%%"
+msgid "Compile %d%%"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Recompile FAILED"
+msgid "Compile FAILED"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Recompile OK"
+msgid "Compile OK"
 msgstr ""
 
 #: src/gui/main.c
@@ -1576,11 +1580,11 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Recompiling: %s%s%s"
+msgid "Compiling: %s%s%s"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Recompiling: starting"
+msgid "Compiling: starting"
 msgstr ""
 
 #: src/gui/main.c
@@ -1589,7 +1593,7 @@ msgid "In the queue: %s"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Enter or the Recompile tab: its output"
+msgid "Enter or the Compile tab: its output"
 msgstr ""
 
 #: src/gui/main.c
@@ -1680,7 +1684,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Recompiling %s: %d%%"
+msgid "Compiling %s: %d%%"
 msgstr ""
 
 #: src/gui/main.c
@@ -1690,7 +1694,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s recompiles now (%d%%)"
+msgid "%s compiles now (%d%%)"
 msgstr ""
 
 #: src/gui/main.c
@@ -1747,7 +1751,7 @@ msgid "Background recompile"
 msgstr ""
 
 #: src/gui/main.c
-msgid "The Recompile tab's, R's and B's. Full: every core. Gentle: half of them, at a low priority. Either goes gently while a game plays"
+msgid "The Compile tab's: R's, B's and a game's first. Full: every core. Gentle: half of them, at a low priority. Either goes gently while a game plays"
 msgstr ""
 
 #: src/gui/main.c
@@ -2188,7 +2192,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s is recompiling (%d%%): %s waits until the queue ends"
+msgid "%s is compiling (%d%%): %s waits until the queue ends"
 msgstr ""
 
 #: src/gui/main.c
@@ -2833,7 +2837,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s is recompiling (%d%%): the game plays once the queue ends"
+msgid "%s is compiling (%d%%): the game plays once the queue ends"
 msgstr ""
 
 #: src/gui/main.c
@@ -2861,7 +2865,12 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s is not in the queue: it holds %d recompiles, and its run %d options at most"
+msgid "%s joins the queue: %s. %s compiles now (%d%%)"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s is not in the queue: it holds %d compiles, and its run %d options at most"
 msgstr ""
 
 #: src/gui/main.c
@@ -2871,7 +2880,12 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s joins the queue: %s. %s recompiles now (%d%%)"
+msgid "%s: compiled, but no game of %s names it as its source, so it does not play"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: compiled, Enter on it plays it"
 msgstr ""
 
 #: src/gui/main.c
@@ -2909,6 +2923,16 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "Compile failed (status %d)."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Compiled in %s."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "Recompile failed (status %d)."
 msgstr ""
 
@@ -2922,12 +2946,16 @@ msgid "AOT pack built"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Compiled"
+msgstr ""
+
+#: src/gui/main.c
 msgid "SDL gave no reason"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s recompiles now: ESC aborts it, Del takes out one waiting"
+msgid "%s compiles now: ESC aborts it, Del takes out one waiting"
 msgstr ""
 
 #: src/gui/main.c

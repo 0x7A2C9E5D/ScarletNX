@@ -7,6 +7,8 @@
 #include <string.h>
 
 static bool live(const GuiJob* job) { return job->state == GUI_JOB_WAITING || job->state == GUI_JOB_RUNNING; }
+/* a compile and a recompile of one file are one job: both make its game; an AOT pack is another */
+static bool same_kind(GuiJobKind a, GuiJobKind b) { return (a == GUI_JOB_AOT) == (b == GUI_JOB_AOT); }
 /* text at at in the job's block, where it goes past it */
 static size_t put(GuiJob* job, size_t at, const char* text) {
     memcpy(job->text + at, text, strlen(text) + 1);
@@ -19,7 +21,8 @@ int gui_queue_add(GuiQueue* queue, const char* const* argv, const char* file, co
     int argc = 0, i;
     if (added) *added = false;
     for (i = 0; i < queue->count; ++i)
-        if (live(&queue->job[i]) && queue->job[i].kind == kind && !strcmp(gui_queue_file(queue, i), file)) return i;
+        if (live(&queue->job[i]) && same_kind(queue->job[i].kind, kind) && !strcmp(gui_queue_file(queue, i), file))
+            return i;
     while (argv[argc]) size += strlen(argv[argc++]) + 1;
     if (queue->count == GUI_QUEUE_MAX || argc >= GUI_QUEUE_ARGS || size > UINT32_MAX) return -1;
     job = &queue->job[queue->count];
