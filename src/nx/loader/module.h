@@ -20,8 +20,10 @@ typedef struct {
 
 /* A unit (one LLVM module, compiled on its own) takes whole functions until it holds about this
    many instructions. Android gets smaller units: its allocator keeps a region per allocation size, and several
-   threads' worth of large units at once exhausted it */
-#ifdef __ANDROID__
+   threads' worth of large units at once exhausted it. So does iOS, which ends an app at its memory limit: a unit's IR
+   and code take memory in proportion to its size, and a small game's recompile peaked at 1103 MiB with 90000, 554 with
+   30000 and 418 with 10000, in the same time */
+#if defined(__ANDROID__) || defined(SNX_IOS)
 #define SNX_CHUNK_INSTRUCTIONS 20000
 #else
 #define SNX_CHUNK_INSTRUCTIONS 90000
