@@ -33,7 +33,8 @@ typedef struct {
 
 static int options_valid(const SnxArmCodegenOptions* o) {
     return !o || (o->abi == SNX_ARM_CODEGEN_OPTIONS_ABI &&
-                  (o->profile == SNX_ARM_PROFILE_A57 || o->profile == SNX_ARM_PROFILE_ARM11) &&
+                  (o->profile == SNX_ARM_PROFILE_A57 || o->profile == SNX_ARM_PROFILE_ARM11 ||
+                   o->profile == SNX_ARM_PROFILE_A9) &&
                   (o->memory == SNX_ARM_MEMORY_FLAT || o->memory == SNX_ARM_MEMORY_CHECKED));
 }
 static LLVMValueRef host_order(ArmIR* a, LLVMValueRef v, unsigned bytes);

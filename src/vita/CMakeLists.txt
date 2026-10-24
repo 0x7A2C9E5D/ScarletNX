@@ -18,19 +18,20 @@ add_library(snx_vita_program STATIC
     aot/compiler.c aot/load.c
     runtime/process.c runtime/run.c runtime/jit.c runtime/lockstep.c
     hle/hle.c hle/kernel.c hle/io.c hle/ctrl.c hle/display.c hle/audio.c hle/misc.c hle/gxm.c hle/heap.c hle/libc.c hle/fiber.c hle/ngs.c
-    hle/mp4.c hle/videodec.c hle/audiodec.c
+    hle/mp4.c hle/videodec.c hle/audiodec.c hle/dialog.c hle/net.c hle/trophy.c
     gpu/present.c gpu/render.c gpu/vk.c "${volk_SOURCE_DIR}/volk.c"
     platform/input.c)
 # FFmpeg: the movies' demuxer and decoders (hle/mp4.c, videodec.c, audiodec.c); scarletnx-filesystem: the game
 # module's path as Windows takes it (snx_host_wpath, aot/load.c)
 target_link_libraries(snx_vita_program PUBLIC snx_vita_loader snx_vita_usse scarletnx-filesystem FFmpeg::avformat FFmpeg::avcodec
-                      snx_settings_runtime snx_build_info SDL3::SDL3
+                      snx_settings_runtime snx_build_info snx_window_icon SDL3::SDL3
                       Vulkan::Headers ${CMAKE_DL_LIBS})
 target_include_directories(snx_vita_program PUBLIC "${volk_SOURCE_DIR}")
-# the compute shaders (the texture deswizzle, the decoded pictures' layout, YUV textures), compiled at build time
+# the compute shaders (the texture deswizzle, the decoded pictures' layout, YUV textures, 24-bit color surfaces),
+# compiled at build time
 # (cmake/glsl.cmake)
 include("${PROJECT_SOURCE_DIR}/cmake/glsl.cmake")
-foreach(shader swizzle picture yuv)
+foreach(shader swizzle picture yuv rgb24)
     snx_glsl_spirv(snx_vita_program SOURCE gpu/${shader}.comp NAME vita_${shader}_spv HEADER vita/gpu/${shader}_spv.h)
 endforeach()
 set_source_files_properties("${volk_SOURCE_DIR}/volk.c" PROPERTIES COMPILE_OPTIONS "${snx_third_party_flags}")

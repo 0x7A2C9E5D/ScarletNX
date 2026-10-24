@@ -125,7 +125,7 @@ static unsigned group(VitaProcess* p, uint32_t pc, bool thumb, unsigned* instruc
         uint16_t h1 = (uint16_t)(p->mem[pc + units * 2] | p->mem[pc + units * 2 + 1] << 8);
         uint16_t h2 = (uint16_t)(p->mem[pc + units * 2 + 2] | p->mem[pc + units * 2 + 3] << 8);
         SnxThumb t;
-        unsigned len = snx_thumb_decode(h1, h2, &t);
+        unsigned len = snx_thumb_decode_profile(SNX_ARM_PROFILE_A9, h1, h2, &t);
         if (!len) len = (h1 >> 11) >= 0x1d ? 2 : 1;
         if (!count && (h1 & 0xff00) == 0xdf00) *svc = true;
         if (!count && t.shape == TH_IT) {
@@ -153,7 +153,7 @@ static SnxArmBlock compile(VitaProcess* p, uint32_t pc, bool thumb, unsigned uni
     }
     size_t consumed = 0;
     SnxArmBlock block = snx_arm_exec_compile(g.exec, thumb ? (const void*)halves : (const void*)words, units, pc, thumb,
-                                             SNX_ARM_PROFILE_A57, 0, &consumed);
+                                             SNX_ARM_PROFILE_A9, 0, &consumed);
     g.cache[slot].key = key, g.cache[slot].block = block;
     return block;
 }

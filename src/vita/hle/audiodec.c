@@ -5,8 +5,10 @@
    vitasdk headers (MIT) declare them; the sizes a decoder reports are Vita3K's (GPL-2.0-or-later,
    modules/SceAudiodec/SceAudiodecUser.cpp).
 
-   ATRAC9: each frame is the configuration's frame size (configData's average frame size, constant: the bit rate is),
-   FFmpeg's decoder decoding as many as its packet holds, so a packet of one frame gives one. AAC: a raw frame, no
+   ATRAC9: a superframe of one, two or four frames is the configuration's size (configData's average frame size times
+   its frames), and its frames' own sizes vary, so FFmpeg's decoder takes it whole: its first frame decodes it, giving
+   the first frame's samples and using the superframe's bytes, and the others give theirs from it, using none. The
+   caller's stream goes on a superframe at a time, its padding included, as the console's does. AAC: a raw frame, no
    ADTS, of the size SceMp4 gave the unit at that address (vita_mp4_unit_size: a raw frame says nothing of its length),
    or the most a decoder reads */
 #include "vita/hle/hle.h"
@@ -33,6 +35,10 @@
 typedef struct {
     bool used;
     uint32_t type, channels, frame_bytes, frame_samples;
+    /* ATRAC9: the superframe's frames, the next one's index in it, and its samples decoded (interleaved 16-bit, made at
+       the decoder's creation for a superframe of more than one frame) */
+    uint32_t superframe_frames, superframe_index;
+    unsigned char* superframe_pcm;
     AVCodecContext* codec;
     AVPacket* packet;
     AVFrame* frame;
@@ -56,6 +62,7 @@ static Decoder* decoder_of(VitaProcess* p, uint32_t ctrl) {
                : NULL;
 }
 static void release(Decoder* d) {
+    free(d->superframe_pcm);
     avcodec_free_context(&d->codec);
     av_packet_free(&d->packet);
     av_frame_free(&d->frame);
@@ -136,6 +143,11 @@ static uint32_t create(VitaProcess* p, uint32_t ctrl, uint32_t type) {
             return SCE_AUDIODEC_ERROR_API_FAIL;
         }
         d->channels = (uint32_t)d->codec->ch_layout.nb_channels;
+        d->superframe_frames = frames;
+        if (frames > 1 && !(d->superframe_pcm = malloc((size_t)frames * d->frame_samples * d->channels * 2))) {
+            release(d);
+            return SCE_AUDIODEC_ERROR_OUT_OF_MEMORY;
+        }
         uint32_t rate = (uint32_t)d->codec->sample_rate, superframe = d->frame_bytes * frames;
         vita_write32(p, info + 8, d->channels);
         vita_write32(p, info + 12, (uint32_t)((uint64_t)superframe * 8 * rate / (d->frame_samples * frames)));
@@ -162,25 +174,10 @@ static uint32_t delete_decoder(VitaProcess* p, VitaThread* t) {
     vita_write32(p, arg(p, t, 0) + 4, 0);
     return 0;
 }
-/* one frame from es into pcm: the bytes of each, false when it can't be decoded */
-static bool decode_frame(VitaProcess* p, Decoder* d, uint32_t es, uint32_t pcm, uint32_t most_es, uint32_t* used,
-                         uint32_t* given) {
-    uint32_t size = d->type == TYPE_AT9 ? d->frame_bytes : vita_mp4_unit_size(p, es);
-    if (!size || size > most_es) size = most_es;
-    if (!vita_mapped(p, es, size) || av_new_packet(d->packet, (int)size) < 0) return false;
-    memcpy(d->packet->data, vita_ptr(p, es), size);
-    int r = avcodec_send_packet(d->codec, d->packet);
-    av_packet_unref(d->packet);
-    if (r < 0 || avcodec_receive_frame(d->codec, d->frame) < 0) return false;
-    /* FFmpeg's planar or packed samples, float or 16-bit, as interleaved 16-bit ones */
-    AVFrame* f = d->frame;
-    uint32_t channels = (uint32_t)f->ch_layout.nb_channels, samples = (uint32_t)f->nb_samples;
-    if (!vita_mapped(p, pcm, samples * channels * 2)) {
-        av_frame_unref(f);
-        return false;
-    }
-    unsigned char* out = vita_ptr(p, pcm);
-    for (uint32_t i = 0; i < samples; ++i)
+/* samples [first, first + count) of FFmpeg's frame (planar or packed, float or 16-bit) as interleaved 16-bit ones at out */
+static void interleave(const AVFrame* f, uint32_t first, uint32_t count, unsigned char* out) {
+    uint32_t channels = (uint32_t)f->ch_layout.nb_channels;
+    for (uint32_t i = first; i < first + count; ++i)
         for (uint32_t c = 0; c < channels; ++c) {
             int v;
             switch (f->format) {
@@ -190,8 +187,49 @@ static bool decode_frame(VitaProcess* p, Decoder* d, uint32_t es, uint32_t pcm, 
                 default: v = ((const int16_t*)f->data[0])[i * channels + c]; break;
             }
             v = v < -32768 ? -32768 : v > 32767 ? 32767 : v;
-            out[(i * channels + c) * 2] = (unsigned char)v, out[(i * channels + c) * 2 + 1] = (unsigned char)(v >> 8);
+            *out++ = (unsigned char)v, *out++ = (unsigned char)(v >> 8);
         }
+}
+/* a packet of size bytes at es through FFmpeg's decoder into d->frame: false when it can't be decoded */
+static bool decode_packet(VitaProcess* p, Decoder* d, uint32_t es, uint32_t size) {
+    if (!vita_mapped(p, es, size) || av_new_packet(d->packet, (int)size) < 0) return false;
+    memcpy(d->packet->data, vita_ptr(p, es), size);
+    int r = avcodec_send_packet(d->codec, d->packet);
+    av_packet_unref(d->packet);
+    return r >= 0 && avcodec_receive_frame(d->codec, d->frame) >= 0;
+}
+/* one frame from es into pcm: the bytes of each, false when it can't be decoded */
+static bool decode_frame(VitaProcess* p, Decoder* d, uint32_t es, uint32_t pcm, uint32_t most_es, uint32_t* used,
+                         uint32_t* given) {
+    if (d->superframe_pcm) { /* an ATRAC9 superframe of several frames: decoded at its first */
+        uint32_t frame_pcm = d->frame_samples * d->channels * 2, superframe = d->frame_bytes * d->superframe_frames;
+        *used = 0;
+        if (!d->superframe_index) {
+            if (!decode_packet(p, d, es, superframe)) return false;
+            AVFrame* f = d->frame;
+            bool whole = (uint32_t)f->nb_samples == d->frame_samples * d->superframe_frames &&
+                         (uint32_t)f->ch_layout.nb_channels == d->channels;
+            if (whole) interleave(f, 0, (uint32_t)f->nb_samples, d->superframe_pcm);
+            av_frame_unref(f);
+            if (!whole) return false;
+            *used = superframe;
+        }
+        if (!vita_mapped(p, pcm, frame_pcm)) return false;
+        memcpy(vita_ptr(p, pcm), d->superframe_pcm + d->superframe_index * frame_pcm, frame_pcm);
+        d->superframe_index = (d->superframe_index + 1) % d->superframe_frames;
+        *given = frame_pcm;
+        return true;
+    }
+    uint32_t size = d->type == TYPE_AT9 ? d->frame_bytes : vita_mp4_unit_size(p, es);
+    if (!size || size > most_es) size = most_es;
+    if (!decode_packet(p, d, es, size)) return false;
+    AVFrame* f = d->frame;
+    uint32_t channels = (uint32_t)f->ch_layout.nb_channels, samples = (uint32_t)f->nb_samples;
+    if (!vita_mapped(p, pcm, samples * channels * 2)) {
+        av_frame_unref(f);
+        return false;
+    }
+    interleave(f, 0, samples, vita_ptr(p, pcm));
     *used = size, *given = samples * channels * 2;
     av_frame_unref(f);
     return true;
@@ -224,6 +262,7 @@ static uint32_t clear_context(VitaProcess* p, VitaThread* t) {
     Decoder* d = decoder_of(p, arg(p, t, 0));
     if (!d) return SCE_AUDIODEC_ERROR_INVALID_HANDLE;
     avcodec_flush_buffers(d->codec);
+    d->superframe_index = 0;
     return 0;
 }
 

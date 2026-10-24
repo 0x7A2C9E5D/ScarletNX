@@ -11,8 +11,9 @@
 #include "vita/gpu/gxp.h"
 #include "vita/gpu/usse.h"
 #include "vita/gpu/vk.h"
-/* compiled from swizzle.comp, picture.comp and yuv.comp by the build (cmake/glsl.cmake) */
+/* compiled from swizzle.comp, picture.comp, yuv.comp and rgb24.comp by the build (cmake/glsl.cmake) */
 #include "vita/gpu/picture_spv.h"
+#include "vita/gpu/rgb24_spv.h"
 #include "vita/gpu/swizzle_spv.h"
 #include "vita/gpu/yuv_spv.h"
 #include "snx_settings.h"
@@ -37,10 +38,16 @@ typedef struct {
 typedef struct {
     uint32_t address, width, height, stride, format;
     bool depth;
+    VkFormat vk_format; /* its image's: a color surface's color_format, a depth surface's D16 or D32 */
     VkImage image;
     VkImageView view;
     VkDeviceMemory memory;
     VkImageLayout layout;
+    /* a multisampled D16 depth surface's samples, as its memory holds them (depth_memory), made at its first load or
+       store */
+    VkImage samples;
+    VkImageView samples_view;
+    VkDeviceMemory samples_memory;
 } Surface;
 typedef struct {
     uint32_t address, format, width, height, stride, type, levels;
@@ -50,7 +57,7 @@ typedef struct {
     VkImageLayout layout;
     uint64_t scene; /* the scene it was copied in last */
 } Texture;
-/* swizzle.comp's, yuv.comp's and picture.comp's push constants, member for member */
+/* swizzle.comp's, yuv.comp's, picture.comp's and rgb24.comp's push constants, member for member */
 typedef struct {
     uint32_t words, elements, src_base, es, width, wl, k, tiled, tiles_x;
 } SwizzleParams;
@@ -60,6 +67,9 @@ typedef struct {
 typedef struct {
     uint32_t words, luma, pitch, width, height, u_at, v_at, packed, vu;
 } PictureParams;
+typedef struct {
+    uint32_t words, src_at, dst_at, width, height, stride, pack, bgr;
+} Rgb24Params;
 typedef struct {
     VkShaderModule module;
     UsseShader meta; /* without its words */
@@ -85,11 +95,11 @@ struct VitaRender {
         VkDeviceSize used;
     } staging[VITA_VK_SLOTS];
     /* the compute shaders, a buffer read and a buffer written each (swizzle.comp: textures' rows made linear,
-       picture.comp: decoded pictures laid out, yuv.comp: YUV textures made RGBA), and the device memory their rows go
-       to, a ring a slot */
+       picture.comp: decoded pictures laid out, yuv.comp: YUV textures made RGBA, rgb24.comp: 24-bit color surfaces
+       to and from RGBA rows), and the device memory their rows go to, a ring a slot */
     VkDescriptorSetLayout swizzle_set;
     VkPipelineLayout swizzle_layout;
-    VkPipeline swizzle, picture, yuv;
+    VkPipeline swizzle, picture, yuv, rgb24;
     struct {
         VkBuffer buffer;
         VkDeviceMemory memory;
@@ -121,6 +131,10 @@ static void once(struct VitaRender* r, unsigned bit, const char* format, ...) {
     va_end(list);
 }
 static void retire(unsigned slot);
+static void rendering_pause(VkCommandBuffer cb);
+static void rendering_resume(struct VitaRender* r, VkCommandBuffer cb);
+static bool color_copy(struct VitaRender* r, VkCommandBuffer cb, const Surface* s, const Import* m, VkDeviceSize at,
+                       bool store);
 static struct VitaRender* g_retiring; /* the renderer whose staging the device's retire frees */
 
 /* ---- guest memory as buffers ---- */
@@ -177,10 +191,17 @@ static void import_free(struct VitaRender* r, Import* m) {
     vkFreeMemory(r->vk->device, m->memory, NULL);
     *m = (Import){0};
 }
+/* The scene being drawn may read the memory in the work recorded so far, not submitted until it ends: a movie player
+   unmaps and frees its frames from one thread while another draws the last one. That work runs now, while the memory
+   is there, and the scene goes on after it, before the buffer it reads goes */
 void vita_render_unmap(VitaProcess* p, uint32_t address) {
     struct VitaRender* r = render_of(p);
     if (!r) return;
+    bool rendering = r->rendering;
+    if (rendering) rendering_pause(vita_vk_commands());
+    vita_vk_submit();
     vita_render_idle(p, true);
+    if (rendering) rendering_resume(r, vita_vk_commands());
     for (unsigned i = 0; i < IMPORTS; ++i)
         if (r->imports[i].size && r->imports[i].address == address) import_free(r, &r->imports[i]);
 }
@@ -266,6 +287,25 @@ static void memory_barrier(VkCommandBuffer cb) {
     VkDependencyInfo d = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &b};
     vkCmdPipelineBarrier2(cb, &d);
 }
+/* SceGxmColorFormat as a color surface's image format and the bytes of its pixels: the A8B8G8R8 family (the bytes R,
+   G, B, A), U8U8U8 in its BGR and RGB swizzles (three bytes, R first for BGR, in an R8G8B8A8 image: color_copy) and
+   U16_R (one 16-bit unsigned normalized channel, the program's first output component, as an attachment takes it
+   unswizzled). False for the others, not drawn yet */
+static bool color_format(uint32_t format, VkFormat* vk, unsigned* bytes) {
+    if ((format & 0xffff0000u) == 0x00000000u) {
+        *vk = VK_FORMAT_R8G8B8A8_UNORM, *bytes = 4;
+        return true;
+    }
+    if ((format & ~GXM_COLOR_SWIZZLE3_RGB) == 0x10000000u) { /* SCE_GXM_COLOR_FORMAT_U8U8U8_BGR, _RGB */
+        *vk = VK_FORMAT_R8G8B8A8_UNORM, *bytes = 3;
+        return true;
+    }
+    if (format == 0x40800000u) { /* SCE_GXM_COLOR_FORMAT_U16_R */
+        *vk = VK_FORMAT_R16_UNORM, *bytes = 2;
+        return true;
+    }
+    return false;
+}
 /* the surface for a color surface's memory (or a depth surface), made at its first scene */
 static Surface* surface(struct VitaRender* r, uint32_t address, uint32_t width, uint32_t height, uint32_t stride,
                         uint32_t format, bool depth) {
@@ -280,16 +320,22 @@ static Surface* surface(struct VitaRender* r, uint32_t address, uint32_t width, 
     if (!free_slot) return NULL;
     Surface* s = free_slot;
     VkComponentMapping identity = {0};
-    bool ok = depth ? image_make(r, VK_FORMAT_D32_SFLOAT, width, height, 1, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+    /* a D16 depth surface (format: its GXM_DEPTH_* format) as D16, which its memory holds, else D32 */
+    VkFormat vk = depth && format == GXM_DEPTH_D16 && r->vk->depth16_blit ? VK_FORMAT_D16_UNORM : VK_FORMAT_D32_SFLOAT;
+    unsigned bytes;
+    if (!depth && !color_format(format, &vk, &bytes)) return NULL;
+    bool ok = depth ? image_make(r, vk, width, height, 1,
+                                 VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                     VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                                  VK_IMAGE_ASPECT_DEPTH_BIT, identity, &s->image, &s->view, &s->memory)
-                    : image_make(r, VK_FORMAT_R8G8B8A8_UNORM, width, height, 1,
+                    : image_make(r, vk, width, height, 1,
                                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                                      (r->vk->local_read ? VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT : 0),
                                  VK_IMAGE_ASPECT_COLOR_BIT, identity, &s->image, &s->view, &s->memory);
     if (!ok) return NULL;
     s->address = address, s->width = width, s->height = height, s->stride = stride, s->format = format;
-    s->depth = depth;
+    s->depth = depth, s->vk_format = vk;
     s->layout = VK_IMAGE_LAYOUT_UNDEFINED;
     return s;
 }
@@ -390,11 +436,13 @@ bool vita_render_init(VitaProcess* p) {
          vkCreatePipelineLayout(v->device, &sli, NULL, &r->swizzle_layout) == VK_SUCCESS &&
          compute_pipeline(r, vita_swizzle_spv, (size_t)vita_swizzle_spv_size, &r->swizzle) &&
          compute_pipeline(r, vita_picture_spv, (size_t)vita_picture_spv_size, &r->picture) &&
-         compute_pipeline(r, vita_yuv_spv, (size_t)vita_yuv_spv_size, &r->yuv);
+         compute_pipeline(r, vita_yuv_spv, (size_t)vita_yuv_spv_size, &r->yuv) &&
+         compute_pipeline(r, vita_rgb24_spv, (size_t)vita_rgb24_spv_size, &r->rgb24);
     for (unsigned s = 0; ok && s < VITA_VK_SLOTS; ++s) {
         VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                  .size = LINEAR,
-                                 .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                 .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                  .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
         ok = vkCreateBuffer(v->device, &bi, NULL, &r->linear[s].buffer) == VK_SUCCESS;
         VkMemoryRequirements req;
@@ -445,6 +493,11 @@ void vita_render_free(VitaProcess* p) {
             vkDestroyImageView(d, r->surfaces[i].view, NULL);
             vkDestroyImage(d, r->surfaces[i].image, NULL);
             vkFreeMemory(d, r->surfaces[i].memory, NULL);
+            if (r->surfaces[i].samples) {
+                vkDestroyImageView(d, r->surfaces[i].samples_view, NULL);
+                vkDestroyImage(d, r->surfaces[i].samples, NULL);
+                vkFreeMemory(d, r->surfaces[i].samples_memory, NULL);
+            }
         }
     for (unsigned i = 0; i < TEXTURES; ++i)
         if (r->textures[i].image) {
@@ -463,6 +516,7 @@ void vita_render_free(VitaProcess* p) {
     if (r->swizzle) vkDestroyPipeline(d, r->swizzle, NULL);
     if (r->picture) vkDestroyPipeline(d, r->picture, NULL);
     if (r->yuv) vkDestroyPipeline(d, r->yuv, NULL);
+    if (r->rgb24) vkDestroyPipeline(d, r->rgb24, NULL);
     if (r->swizzle_layout) vkDestroyPipelineLayout(d, r->swizzle_layout, NULL);
     if (r->swizzle_set) vkDestroyDescriptorSetLayout(d, r->swizzle_set, NULL);
     for (unsigned i = 0; i < 16; ++i) {
@@ -476,8 +530,51 @@ void vita_render_free(VitaProcess* p) {
 }
 
 /* ---- scenes ---- */
-/* SceGxmColorFormat's A8B8G8R8 family: the bytes R, G, B, A, the one surface format drawn yet */
-static bool color_format_known(uint32_t format) { return (format & 0xffff0000u) == 0x00000000u; }
+/* The scene's D16 depth surface as its memory holds it, when the game loads or stores it (mask: GXM_DEPTH_FORCE_LOAD
+   or _STORE) and the GPU reaches it: rows of the stride's samples, 16 bits each, a pixel's samples side by side (2x1
+   for SCE_GXM_MULTISAMPLE_2X, 2x2 for 4X). Its buffer and offset, and the sample grid's factors; NULL for none. A
+   multisampled one is made from (or into) the pixels' depth through the surface's sample image, each pixel's depth its
+   samples' */
+static const Import* depth_memory(struct VitaRender* r, VitaProcess* p, const GxmContext* c, uint32_t mask,
+                                  VkDeviceSize* at, uint32_t* fx, uint32_t* fy) {
+    uint32_t control = c->depth.control, stride = control >> GXM_DEPTH_STRIDE_SHIFT;
+    if (!r->depth || r->depth->vk_format != VK_FORMAT_D16_UNORM || !(control & mask) || (control & GXM_DEPTH_TILED))
+        return NULL;
+    uint32_t multisample = p->gxm->targets[c->target].multisample;
+    *fx = multisample ? 2 : 1, *fy = multisample == 2 ? 2 : 1;
+    if (stride < r->depth->width * *fx) return NULL;
+    const Import* m = buffer_of(r, p, c->depth.depth, stride * 2 * r->depth->height * *fy, at);
+    if (!m) {
+        once(r, 20, "the depth surface at 0x%08" PRIx32 " is not in memory the GPU can reach", c->depth.depth);
+        return NULL;
+    }
+    if ((*fx > 1 || *fy > 1) && !r->depth->samples) {
+        VkComponentMapping identity = {0};
+        Surface* s = r->depth;
+        if (!image_make(r, VK_FORMAT_D16_UNORM, s->width * *fx, s->height * *fy, 1,
+                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_ASPECT_DEPTH_BIT,
+                        identity, &s->samples, &s->samples_view, &s->samples_memory))
+            return NULL;
+    }
+    return m;
+}
+/* the blit of one depth image's whole extent onto another's, nearest: a pixel's depth to its samples, or a sample
+   to its pixel */
+static void depth_blit(VkCommandBuffer cb, VkImage from, uint32_t fw, uint32_t fh, VkImage to, uint32_t tw,
+                       uint32_t th) {
+    VkImageBlit region = {.srcSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1},
+                          .srcOffsets = {{0, 0, 0}, {(int32_t)fw, (int32_t)fh, 1}},
+                          .dstSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1},
+                          .dstOffsets = {{0, 0, 0}, {(int32_t)tw, (int32_t)th, 1}}};
+    vkCmdBlitImage(cb, from, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, to, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
+                   VK_FILTER_NEAREST);
+}
+/* the bytes of the color surface's memory, 0 for a format not drawn yet */
+static uint32_t color_bytes(const GxmContext* c) {
+    VkFormat vk;
+    unsigned bytes;
+    return color_format(c->color.format, &vk, &bytes) ? c->color.stride * bytes * c->color.height : 0;
+}
 void vita_render_begin_scene(VitaProcess* p, GxmContext* c) {
     struct VitaRender* r = render_of(p);
     if (!r) return;
@@ -490,7 +587,7 @@ void vita_render_begin_scene(VitaProcess* p, GxmContext* c) {
         once(r, 1, "a scene without a color surface is not drawn");
         return;
     }
-    if (!color_format_known(c->color.format)) {
+    if (!color_bytes(c)) {
         once(r, 2, "color format 0x%08" PRIx32 " is not drawn yet", c->color.format);
         return;
     }
@@ -499,28 +596,51 @@ void vita_render_begin_scene(VitaProcess* p, GxmContext* c) {
     r->height = c->color.height < target->height ? c->color.height : target->height;
     r->color = surface(r, c->color.data, c->color.width, c->color.height, c->color.stride, c->color.format, false);
     VkDeviceSize at;
-    const Import* m = r->color ? buffer_of(r, p, c->color.data, c->color.stride * 4 * c->color.height, &at) : NULL;
+    const Import* m = r->color ? buffer_of(r, p, c->color.data, color_bytes(c), &at) : NULL;
     if (!m) {
         once(r, 3, "the color surface at 0x%08" PRIx32 " is not in memory the GPU can reach", c->color.data);
         r->color = NULL;
         return;
     }
     if (c->has_depth && c->depth.depth)
-        r->depth = surface(r, c->depth.depth, c->color.width, c->color.height, 0, 0, true);
+        r->depth = surface(r, c->depth.depth, c->color.width, c->color.height, 0,
+                           c->depth.control & GXM_DEPTH_FORMAT_MASK, true);
     VkCommandBuffer cb = vita_vk_commands();
     /* the surface's memory into the image: what the CPU or earlier scenes left there */
     barrier(cb, r->color->image, VK_IMAGE_ASPECT_COLOR_BIT, r->color->layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    VkBufferImageCopy copy = {.bufferOffset = at,
-                              .bufferRowLength = c->color.stride,
-                              .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                              .imageExtent = {c->color.width, c->color.height, 1}};
-    vkCmdCopyBufferToImage(cb, m->buffer, r->color->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    color_copy(r, cb, r->color, m, at, false);
     barrier(cb, r->color->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, color_layout(r));
     r->color->layout = color_layout(r);
+    /* the depth: what its memory holds when the game loads it (force load), else the background depth */
+    bool depth_loaded = false;
     if (r->depth) {
-        barrier(cb, r->depth->image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-        r->depth->layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        uint32_t fx, fy;
+        VkDeviceSize depth_at;
+        const Import* dm = depth_memory(r, p, c, GXM_DEPTH_FORCE_LOAD, &depth_at, &fx, &fy);
+        Surface* d = r->depth;
+        if (dm) {
+            bool sampled = fx * fy > 1;
+            VkImage into = sampled ? d->samples : d->image;
+            barrier(cb, into, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            VkBufferImageCopy load = {.bufferOffset = depth_at,
+                                      .bufferRowLength = c->depth.control >> GXM_DEPTH_STRIDE_SHIFT,
+                                      .imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1},
+                                      .imageExtent = {d->width * fx, d->height * fy, 1}};
+            vkCmdCopyBufferToImage(cb, dm->buffer, into, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &load);
+            if (sampled) {
+                barrier(cb, d->samples, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+                barrier(cb, d->image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                depth_blit(cb, d->samples, d->width * fx, d->height * fy, d->image, d->width, d->height);
+            }
+            barrier(cb, d->image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+            depth_loaded = true;
+        } else
+            barrier(cb, d->image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+        d->layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     }
     VkRenderingAttachmentInfo color = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                                        .imageView = r->color->view,
@@ -530,7 +650,7 @@ void vita_render_begin_scene(VitaProcess* p, GxmContext* c) {
     VkRenderingAttachmentInfo depth = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                                        .imageView = r->depth ? r->depth->view : VK_NULL_HANDLE,
                                        .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                                       .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                       .loadOp = depth_loaded ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR,
                                        .storeOp = VK_ATTACHMENT_STORE_OP_STORE, /* a texture's copy restarts the pass */
                                        .clearValue.depthStencil = {c->depth.background_depth, 0}};
     VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
@@ -550,14 +670,33 @@ uint64_t vita_render_end_scene(VitaProcess* p, GxmContext* c) {
         vkCmdEndRendering(cb);
         /* the image back into the surface's memory, which the display and the game read */
         VkDeviceSize at;
-        const Import* m = buffer_of(r, p, c->color.data, c->color.stride * 4 * c->color.height, &at);
+        const Import* m = buffer_of(r, p, c->color.data, color_bytes(c), &at);
         barrier(cb, r->color->image, VK_IMAGE_ASPECT_COLOR_BIT, color_layout(r), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         r->color->layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        VkBufferImageCopy copy = {.bufferOffset = at,
-                                  .bufferRowLength = c->color.stride,
-                                  .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                                  .imageExtent = {c->color.width, c->color.height, 1}};
-        if (m) vkCmdCopyImageToBuffer(cb, r->color->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m->buffer, 1, &copy);
+        if (m) color_copy(r, cb, r->color, m, at, true);
+        /* the depth into its memory when the game keeps it (force store), which it reads as a texture */
+        uint32_t fx, fy;
+        VkDeviceSize depth_at;
+        const Import* dm = depth_memory(r, p, c, GXM_DEPTH_FORCE_STORE, &depth_at, &fx, &fy);
+        if (dm) {
+            Surface* d = r->depth;
+            bool sampled = fx * fy > 1;
+            barrier(cb, d->image, VK_IMAGE_ASPECT_DEPTH_BIT, d->layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            d->layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            if (sampled) {
+                barrier(cb, d->samples, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                depth_blit(cb, d->image, d->width, d->height, d->samples, d->width * fx, d->height * fy);
+                barrier(cb, d->samples, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            }
+            VkBufferImageCopy store = {.bufferOffset = depth_at,
+                                       .bufferRowLength = c->depth.control >> GXM_DEPTH_STRIDE_SHIFT,
+                                       .imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1},
+                                       .imageExtent = {d->width * fx, d->height * fy, 1}};
+            vkCmdCopyImageToBuffer(cb, sampled ? d->samples : d->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                   dm->buffer, 1, &store);
+        }
         memory_barrier(cb);
         r->rendering = false;
     }
@@ -598,7 +737,8 @@ static Shader* shader_for(struct VitaRender* r, VitaProcess* p, void** slot, uin
     if (g_settings.vita_shader_corpus[0] &&
         !usse_corpus_write(g_settings.vita_shader_corpus, vita_ptr(p, program), gxp_u32(vita_ptr(p, program + 8)), hints))
         once(r, 15, "cannot write the shader corpus in %s", g_settings.vita_shader_corpus);
-    if (!usse_translate(vita_ptr(p, program), gxp_u32(vita_ptr(p, program + 8)), hints, &out, error, sizeof error)) {
+    if (!usse_translate(vita_ptr(p, program), gxp_u32(vita_ptr(p, program + 8)), hints, r->vk->preserve_infnan, &out,
+                        error, sizeof error)) {
         printf("gxm: the program at 0x%08" PRIx32 " is not drawn: %s\n", program, error);
         s->failed = true;
         return s;
@@ -628,6 +768,10 @@ static VkFormat attribute_format(unsigned format, unsigned n) {
         {VK_FORMAT_R16_SNORM, VK_FORMAT_R16G16_SNORM, VK_FORMAT_R16G16B16_SNORM, VK_FORMAT_R16G16B16A16_SNORM},
         {VK_FORMAT_R16_SFLOAT, VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_R16G16B16_SFLOAT, VK_FORMAT_R16G16B16A16_SFLOAT},
         {VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT}};
+    /* UNTYPED (10): its 32-bit words, which the shader takes as they are (usse.c) */
+    static const VkFormat untyped[4] = {VK_FORMAT_R32_UINT, VK_FORMAT_R32G32_UINT, VK_FORMAT_R32G32B32_UINT,
+                                        VK_FORMAT_R32G32B32A32_UINT};
+    if (format == 10 && n >= 1 && n <= 4) return untyped[n - 1];
     return format < 10 && n >= 1 && n <= 4 ? formats[format][n - 1] : VK_FORMAT_UNDEFINED;
 }
 /* SceGxmBlendFactor and SceGxmBlendFunc as Vulkan's */
@@ -650,6 +794,7 @@ static VkPipeline pipeline_for(struct VitaRender* r, GxmContext* c, const GxmVer
     uint64_t key = 0xcbf29ce484222325ull;
     key = hash(key, (uintptr_t)vs), key = hash(key, (uintptr_t)fs), key = hash(key, fp->blend_info | (uint64_t)fp->blend << 32);
     key = hash(key, topology), key = hash(key, c->cull_mode), key = hash(key, r->depth != NULL);
+    key = hash(key, r->color->vk_format), key = hash(key, r->depth ? r->depth->vk_format : 0);
     key = hash(key, c->depth_func), key = hash(key, c->depth_write);
     for (unsigned i = 0; i < vp->stream_count; ++i) key = hash(key, vp->streams[i].stride | (uint64_t)vp->streams[i].index_source << 16);
     for (unsigned i = 0; i < vp->attribute_count; ++i) {
@@ -742,11 +887,11 @@ static VkPipeline pipeline_for(struct VitaRender* r, GxmContext* c, const GxmVer
     VkPipelineDynamicStateCreateInfo dynamic = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
                                                 .dynamicStateCount = 2,
                                                 .pDynamicStates = states};
-    VkFormat color_format = VK_FORMAT_R8G8B8A8_UNORM;
+    VkFormat attachment = r->color->vk_format;
     VkPipelineRenderingCreateInfo rendering = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
                                                .colorAttachmentCount = 1,
-                                               .pColorAttachmentFormats = &color_format,
-                                               .depthAttachmentFormat = r->depth ? VK_FORMAT_D32_SFLOAT
+                                               .pColorAttachmentFormats = &attachment,
+                                               .depthAttachmentFormat = r->depth ? r->depth->vk_format
                                                                                  : VK_FORMAT_UNDEFINED};
     VkGraphicsPipelineCreateInfo gi = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
                                        .pNext = &rendering,
@@ -791,10 +936,11 @@ static bool texture_format(const VitaVk* v, uint32_t format, VkFormat* vk, unsig
         *map = swizzle4[swizzle];
         return true;
     }
-    if (base == 0x00000000u) { /* SWIZZLE1: R, 000R, 111R, RRRR, 0RRR, 1RRR, R000, R111 (the letters A, B, G, R) */
+    if (base == 0x00000000u || base == 0x09000000u) { /* U8 and U16, SWIZZLE1: R, 000R, 111R, RRRR, 0RRR, 1RRR,
+                                                           R000, R111 (the letters A, B, G, R) */
         static const VkComponentMapping maps[8] = {{R, Z, Z, O}, {R, Z, Z, Z}, {R, O, O, O}, {R, R, R, R},
                                                    {R, R, R, Z}, {R, R, R, O}, {Z, Z, Z, R}, {O, O, O, R}};
-        *vk = VK_FORMAT_R8_UNORM, *bytes = 1, *map = maps[swizzle];
+        *vk = base ? VK_FORMAT_R16_UNORM : VK_FORMAT_R8_UNORM, *bytes = base ? 2 : 1, *map = maps[swizzle];
         return true;
     }
     return false;
@@ -856,6 +1002,47 @@ static bool deswizzle(struct VitaRender* r, VkCommandBuffer cb, VkBuffer source,
     if (!compute(r, cb, r->swizzle, source, base, ring, at, size, &params, sizeof params, words)) return false;
     *out = ring, *out_offset = at;
     return true;
+}
+/* A color surface's memory (at in m) into its image (in TRANSFER_DST), or the image (in TRANSFER_SRC) into its memory
+   (store). A 24-bit surface goes through R8G8B8A8 rows in the slot's ring, made from its memory or made its memory by
+   rgb24.comp, which keeps the bytes of the rows' padding. False when the ring has no room for them */
+static bool color_copy(struct VitaRender* r, VkCommandBuffer cb, const Surface* s, const Import* m, VkDeviceSize at,
+                       bool store) {
+    VkFormat vk;
+    unsigned bytes;
+    if (!color_format(s->format, &vk, &bytes)) return false;
+    VkBufferImageCopy copy = {.bufferOffset = at,
+                              .bufferRowLength = s->stride,
+                              .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                              .imageExtent = {s->width, s->height, 1}};
+    if (bytes != 3) {
+        if (store)
+            vkCmdCopyImageToBuffer(cb, s->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m->buffer, 1, &copy);
+        else
+            vkCmdCopyBufferToImage(cb, m->buffer, s->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        return true;
+    }
+    uint32_t pixels = s->width * s->height;
+    VkDeviceSize rows, size = (VkDeviceSize)pixels * 4, align = storage_align(r), base = at / align * align;
+    /* the words from base to the surface's end, inside the import (an allocation's pages) */
+    uint32_t words = (uint32_t)((at - base + (VkDeviceSize)s->stride * 3 * s->height + 3) / 4);
+    if (base + (VkDeviceSize)words * 4 > m->size || !linear_room(r, size, &rows)) {
+        once(r, 18, "a 24-bit color surface of %ux%u is not drawn: no room for its rows", (unsigned)s->width,
+             (unsigned)s->height);
+        return false;
+    }
+    VkBuffer ring = r->linear[vita_vk_slot()].buffer;
+    bool bgr = (s->format & GXM_COLOR_SWIZZLE3_RGB) != 0;
+    copy.bufferOffset = rows, copy.bufferRowLength = s->width;
+    if (!store) {
+        Rgb24Params params = {pixels, (uint32_t)(at - base), 0, s->width, s->height, s->stride, 0, bgr};
+        if (!compute(r, cb, r->rgb24, m->buffer, base, ring, rows, size, &params, sizeof params, pixels)) return false;
+        vkCmdCopyBufferToImage(cb, ring, s->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        return true;
+    }
+    vkCmdCopyImageToBuffer(cb, s->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, ring, 1, &copy);
+    Rgb24Params params = {words, 0, (uint32_t)(at - base), s->width, s->height, s->stride, 1, bgr};
+    return compute(r, cb, r->rgb24, ring, rows, m->buffer, base, (VkDeviceSize)words * 4, &params, sizeof params, words);
 }
 /* A YUV420 texture (format base 0x90000000 P2, 0x91000000 P3; its swizzle YUV or YVU, CSC0 or CSC1) at offset in the
    imported buffer, its Y rows stride bytes and its chroma after them, made R8G8B8A8 rows on the GPU (yuv.comp) in the
@@ -942,6 +1129,29 @@ static unsigned texture_levels(const GxmTexture* x, uint32_t type, unsigned byte
     return count;
 }
 #define LEVELS 13u /* 4096 texels on a side */
+/* whether [address, address + size) overlaps the color surface's memory */
+static bool overlaps_color(const struct VitaRender* r, uint32_t address, uint32_t size) {
+    VkFormat vk;
+    unsigned bytes;
+    if (!r->color || !color_format(r->color->format, &vk, &bytes)) return false;
+    uint64_t start = r->color->address, end = start + (uint64_t)r->color->stride * bytes * r->color->height;
+    return address < end && (uint64_t)address + size > start;
+}
+/* the color image into the surface's memory, between barriers, its layout as it was (rendering paused) */
+static void color_write_back(struct VitaRender* r, VitaProcess* p, VkCommandBuffer cb) {
+    Surface* s = r->color;
+    VkFormat vk;
+    unsigned bytes;
+    VkDeviceSize at;
+    const Import* m = color_format(s->format, &vk, &bytes)
+                          ? buffer_of(r, p, s->address, s->stride * bytes * s->height, &at)
+                          : NULL;
+    if (!m) return;
+    barrier(cb, s->image, VK_IMAGE_ASPECT_COLOR_BIT, s->layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    color_copy(r, cb, s, m, at, true);
+    barrier(cb, s->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s->layout);
+    memory_barrier(cb);
+}
 static Texture* texture_for(struct VitaRender* r, VitaProcess* p, VkCommandBuffer cb, const GxmTexture* x) {
     uint32_t type = gxm_texture_type(x), format = gxm_texture_format(x), data = gxm_texture_data(x);
     uint32_t width = gxm_texture_width(x), height = gxm_texture_height(x);
@@ -999,8 +1209,14 @@ static Texture* texture_for(struct VitaRender* r, VitaProcess* p, VkCommandBuffe
         t->type = type, t->levels = count;
         t->layout = VK_IMAGE_LAYOUT_UNDEFINED;
     }
-    if (t->scene != r->scene) { /* its memory again, once a scene: the CPU may have changed it */
-        const Level* last = &levels[count - 1];
+    /* Its memory again once a scene, the CPU may have changed it; and at each draw while it overlaps the color surface
+       being drawn, with what the scene drew so far written back first. The console's GPU draws a scene a tile at a
+       time and writes each tile back as it finishes it, so a draw reads what the scene drew in the tiles before: a
+       game reads a pass's result back in the same scene (one blurs a region another pass of the scene drew), from
+       memory it may have used for something else before the scene began */
+    const Level* last = &levels[count - 1];
+    bool drawn_over = r->rendering && overlaps_color(r, data, last->offset + last->size);
+    if (t->scene != r->scene || drawn_over) {
         VkDeviceSize at;
         const Import* m = buffer_of(r, p, data, last->offset + last->size, &at);
         if (!m) {
@@ -1008,6 +1224,7 @@ static Texture* texture_for(struct VitaRender* r, VitaProcess* p, VkCommandBuffe
             return NULL;
         }
         rendering_pause(cb);
+        if (drawn_over) color_write_back(r, p, cb);
         /* each level from the guest's bytes, a swizzled or tiled one made linear rows first */
         VkBufferImageCopy copies[LEVELS];
         VkBuffer from[LEVELS];
@@ -1102,9 +1319,12 @@ void vita_render_draw(VitaProcess* p, GxmContext* c, uint32_t primitive, uint32_
         if (!(fs->meta.sampler_mask & (1u << i))) continue;
         Texture* t = texture_for(r, p, cb, &c->textures[i]);
         if (!t) return;
-        unsigned linear = gxm_texture_min_filter(&c->textures[i]) != 0 || gxm_texture_mag_filter(&c->textures[i]) != 0;
+        /* a strided texture's min and mip filter bits are its stride's: its min filter is its mag filter */
+        bool strided = gxm_texture_type(&c->textures[i]) == GXM_TEXTURE_LINEAR_STRIDED;
+        unsigned linear = (!strided && gxm_texture_min_filter(&c->textures[i]) != 0) ||
+                          gxm_texture_mag_filter(&c->textures[i]) != 0;
         unsigned mode = gxm_texture_uaddr(&c->textures[i]);
-        unsigned mip = gxm_texture_mip_filter(&c->textures[i]);
+        unsigned mip = strided ? 0 : gxm_texture_mip_filter(&c->textures[i]);
         images[i] = (VkDescriptorImageInfo){r->samplers[linear][mip][mode == 0 ? 0 : mode == 1 ? 1 : 2], t->view,
                                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     }

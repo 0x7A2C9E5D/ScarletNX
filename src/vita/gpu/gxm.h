@@ -53,10 +53,20 @@ typedef struct {
     uint32_t blend_info;
     void* shader;
 } GxmFragmentProgram;
+#define GXM_COLOR_SWIZZLE3_RGB 0x00100000u /* SCE_GXM_COLOR_SWIZZLE3_RGB: a three-component format's B first */
 /* a color surface as sceGxmColorSurfaceInit made it (the guest's SceGxmColorSurface holds these words) */
 typedef struct {
     uint32_t flags, width, height, stride, data, format, type, output_register_size;
 } GxmColorSurface;
+/* a depth and stencil surface as sceGxmDepthStencilSurfaceInit made it: its control word (the runtime's own layout,
+   which nothing of the game reads: SceGxmDepthStencilFormat >> 12, the force load and store modes, tiled, the stride
+   in samples from bit 17), the depth and stencil data, the background depth and its control */
+#define GXM_DEPTH_FORMAT_MASK 0x3fffu
+#define GXM_DEPTH_FORCE_LOAD  0x4000u
+#define GXM_DEPTH_FORCE_STORE 0x8000u
+#define GXM_DEPTH_TILED       0x10000u
+#define GXM_DEPTH_STRIDE_SHIFT 17u
+#define GXM_DEPTH_D16         0x2444u /* SCE_GXM_DEPTH_STENCIL_FORMAT_D16 >> 12 */
 typedef struct {
     uint32_t control, depth, stencil;
     float background_depth;
