@@ -142,7 +142,7 @@ endif()
 # as their own programs instead of names of scarletnx, and only scarletnx has the client.
 if(SNX_TRACY AND SNX_MULTICALL)
     set(SNX_MULTICALL OFF)
-    foreach(name scarletnx-3ds scarletnx-gnuabi)
+    foreach(name scarletnx-3ds scarletnx-vita scarletnx-gnuabi)
         if(IS_SYMLINK "${CMAKE_BINARY_DIR}/${name}")
             file(REMOVE "${CMAKE_BINARY_DIR}/${name}") # a link of an earlier configure would be written through
         endif()
