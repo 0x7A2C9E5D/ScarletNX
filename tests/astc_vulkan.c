@@ -9,6 +9,7 @@
    to check synchronization too (docs/ASTC.md). --vk_max_allocation_mb=N lowers
    the allocation cap, so images in pieces are tested at small sizes; --large
    decodes a 2D and a 3D texture of 512 MiB each. */
+#include <math.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include "nx/gpu/gpu.h"
@@ -16,6 +17,7 @@
 #include "nx/gpu/texture/astc.h"
 #include "nx/gpu/texture/blocklinear.h"
 #include "nx/gpu/texture/etc2.h"
+#include "nx/gpu/texture/bcn.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/main.h"
 #include "nx/runtime/options.h"
@@ -140,6 +142,7 @@ static void init(void) {
     VkPhysicalDeviceFeatures have;
     vkGetPhysicalDeviceFeatures(g_vk.phys, &have);
     g_vk.feat.sparseBinding = sparse_queue && have.sparseBinding;
+    g_vk.feat.textureCompressionBC = have.textureCompressionBC; /* bc_native_case compares the device's decoding */
     g_vk.gfx_family = family;
     float priority = 1;
     VkDeviceQueueCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -546,6 +549,172 @@ static void tc_case(void) {
     fflush(stdout);
 }
 
+/* random BCn blocks: BC6H's codes and BC7's modes each made as often as the others, a reserved one now and then */
+static void bc_blocks(int kind, u8* b, u32 n) {
+    static const u8 codes[14] = {0, 1, 2, 6, 10, 14, 18, 22, 26, 30, 3, 7, 11, 15};
+    for (u32 i = 0; i < n; i++, b += bcn_block_bytes(kind)) {
+        for (u32 j = 0; j < bcn_block_bytes(kind); j++) b[j] = (u8)random_word();
+        if (random_word() % 16 == 0) continue;
+        if (kind == BCN_BC6H_UF || kind == BCN_BC6H_SF) {
+            u8 c = codes[random_word() % 14];
+            b[0] = (u8)((b[0] & (c < 2 ? ~3 : ~31)) | c);
+        }
+        if (kind == BCN_BC7) {
+            u32 m = random_word() % 8;
+            b[0] = (u8)((b[0] & ~((2u << m) - 1)) | 1u << m);
+        }
+    }
+}
+
+/* texconv.comp's SPIR-V on the device against the CPU's BCn decoder (bcn.c), random blocks of every kind in an image
+   whose sides aren't multiples of 4: byte for byte */
+static void bc_case(void) {
+    u32 w = 13, h = 9, bw = 4, bh = 3;
+    for (int kind = BCN_BC1; kind <= BCN_BC7; kind++) {
+        u32 bb = bcn_block_bytes(kind), pb = bcn_pixel_bytes(kind), pitch = (bw * bb + 15) / 16 * 16;
+        u64 at, cap;
+        VkBuffer staged, rb;
+        u8* blocks = malloc((size_t)bw * bh * bb);
+        bc_blocks(kind, blocks, bw * bh);
+        u8* p = vk_stage((u64)pitch * bh, vk_stage_align(), &staged, &at);
+        for (u32 y = 0; y < bh; y++) memcpy(p + (u64)y * pitch, blocks + (size_t)y * bw * bb, bw * bb);
+        VkFmt f = {.vk = VK_FORMAT_UNDEFINED, .bpp = (u8)bb, .bw = 4, .bh = 4, .conv = (u8)(VKC_BC1 + kind)};
+        VkTcShape s = vk_tc_shape(&f, w);
+        u64 out_size = vk_tc_out_size(&s, bh, 1);
+        VkBuffer scratch = vk_bl_scratch(out_size, &cap);
+        u8* out = vk_readback_buffer(out_size, &rb);
+        vk_bl_barrier(vk_cmd(), 1);
+        if (!vk_tc_convert(vk_cmd(), &f, w, bh, 1, staged, at, pitch, scratch, 0)) fatal("conversion refused\n");
+        vk_bl_barrier(vk_cmd(), 0);
+        VkBufferCopy c = {0, 0, out_size};
+        rec_CmdCopyBuffer(vk_cmd(), scratch, rb, 1, &c);
+        vk_finish();
+        vk_readback_ready();
+        u8* want = malloc((size_t)w * h * pb);
+        bcn_decode_image(blocks, w, h, kind, want);
+        for (u32 y = 0; y < h; y++)
+            if (memcmp(out + (u64)y * s.out_texels * pb, want + (u64)y * w * pb, (size_t)w * pb))
+                fatal("texconv BCn kind %d: row %u differs from the CPU's\n", kind, y);
+        free(blocks);
+        free(want);
+    }
+    puts("PASS texture conversions (BC1 to BC7)");
+    fflush(stdout);
+}
+
+static float half_float(u16 h) {
+    int e = h >> 10 & 31, m = h & 1023;
+    float v = e == 0 ? m / 16777216.0f : e == 31 ? (m ? NAN : INFINITY) : (1024 + m) * ldexpf(1, e - 25);
+    return h & 0x8000 ? -v : v;
+}
+/* where the device samples BCn: its own decoding of random blocks of every kind, blitted into RGBA32F, against
+   bcn.c's. BC6H's halves and BC7's bytes are exact by the specification; BC1 to BC5 leave the interpolants' precision
+   to the device, so they may differ by two steps (llvmpipe divides BC3's alpha by 5 as x * 51 >> 8: 918 / 5 is 183.6,
+   which bcn.c rounds to 184, and llvmpipe gives 182). This tells a reference drifted from what GPUs decode, which
+   the comparison of texconv with the reference can't */
+static void bc_native_case(void) {
+    static const VkFormat formats[10] = {VK_FORMAT_BC1_RGBA_UNORM_BLOCK, VK_FORMAT_BC2_UNORM_BLOCK,
+                                         VK_FORMAT_BC3_UNORM_BLOCK,      VK_FORMAT_BC4_UNORM_BLOCK,
+                                         VK_FORMAT_BC4_SNORM_BLOCK,      VK_FORMAT_BC5_UNORM_BLOCK,
+                                         VK_FORMAT_BC5_SNORM_BLOCK,      VK_FORMAT_BC6H_UFLOAT_BLOCK,
+                                         VK_FORMAT_BC6H_SFLOAT_BLOCK,    VK_FORMAT_BC7_UNORM_BLOCK};
+    if (!g_vk.feat.textureCompressionBC) {
+        puts("SKIP native BCn: the device doesn't sample BCn");
+        return;
+    }
+    u32 w = 64, h = 64, nb = w / 4 * (h / 4);
+    for (int kind = BCN_BC1; kind <= BCN_BC7; kind++) {
+        VkFormatProperties fp;
+        vkGetPhysicalDeviceFormatProperties(g_vk.phys, formats[kind], &fp);
+        if (!(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT)) {
+            printf("SKIP native BCn kind %d: the device can't blit from it\n", kind);
+            continue;
+        }
+        u32 bb = bcn_block_bytes(kind), pb = bcn_pixel_bytes(kind);
+        u8* blocks = malloc((size_t)nb * bb);
+        bc_blocks(kind, blocks, nb);
+        VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                                .imageType = VK_IMAGE_TYPE_2D,
+                                .format = formats[kind],
+                                .extent = {w, h, 1},
+                                .mipLevels = 1,
+                                .arrayLayers = 1,
+                                .samples = VK_SAMPLE_COUNT_1_BIT,
+                                .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT};
+        VkImage src, dst;
+        VmaAllocation src_mem, dst_mem;
+        if (!vk_image_create(&ii, &src, &src_mem)) fatal("cannot create a native BCn image\n");
+        ii.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        if (!vk_image_create(&ii, &dst, &dst_mem)) fatal("cannot create an RGBA32F image\n");
+        u64 at;
+        VkBuffer staged, rb;
+        memcpy(vk_stage((u64)nb * bb, vk_stage_align(), &staged, &at), blocks, (size_t)nb * bb);
+        barrier(src, VK_PIPELINE_STAGE_2_NONE, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        barrier(dst, VK_PIPELINE_STAGE_2_NONE, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        VkBufferImageCopy up = {.bufferOffset = at,
+                                .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                .imageExtent = {w, h, 1}};
+        rec_CmdCopyBufferToImage(vk_cmd(), staged, src, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &up);
+        barrier(src, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                            .srcOffsets = {{0, 0, 0}, {(i32)w, (i32)h, 1}},
+                            .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                            .dstOffsets = {{0, 0, 0}, {(i32)w, (i32)h, 1}}};
+        rec_CmdBlitImage(vk_cmd(), src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                         1, &blit, VK_FILTER_NEAREST);
+        barrier(dst, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        float* got = (float*)vk_readback_buffer((u64)w * h * 16, &rb);
+        VkBufferImageCopy down = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {w, h, 1}};
+        rec_CmdCopyImageToBuffer(vk_cmd(), dst, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, rb, 1, &down);
+        vk_finish();
+        vk_readback_ready();
+        u8* want = malloc((size_t)w * h * pb);
+        bcn_decode_image(blocks, w, h, kind, want);
+        /* RGBA8 (BC1 to BC3, BC7), one or two 16 bit channels (BC4, BC5), or halves */
+        int sn = kind == BCN_BC4_SNORM || kind == BCN_BC5_SNORM, ch = pb == 2 ? 1 : 2;
+        int hdr = kind == BCN_BC6H_UF || kind == BCN_BC6H_SF, bytes = kind <= BCN_BC3 || kind == BCN_BC7;
+        /* BC7's bytes within half a step, as the device's unorm to float conversion may round q / 255 otherwise */
+        float step = hdr ? 0 : kind == BCN_BC7 ? 0.5f / 255 : sn ? 2.0f / 127 : 2.0f / 255, worst = 0;
+        u32 differ = 0;
+        for (u32 i = 0; i < w * h; i++)
+            for (int c = 0; c < 4; c++) {
+                const u8* q = want + (size_t)i * pb;
+                float e;
+                if (hdr)
+                    e = half_float(snx_ld_le16(q + 2 * c));
+                else if (bytes)
+                    e = q[c] / 255.0f;
+                else if (c >= ch)
+                    e = c == 3 ? 1.0f : 0.0f;
+                else if (sn)
+                    e = fmaxf((i16)snx_ld_le16(q + 2 * c) / 32767.0f, -1.0f);
+                else
+                    e = snx_ld_le16(q + 2 * c) / 65535.0f;
+                float g = got[(size_t)i * 4 + c], d = fabsf(g - e);
+                if (d > worst) worst = d;
+                if (!(d <= step) && !(e != e && g != g)) { /* the same NaN aside */
+                    if (differ++ < 4)
+                        fprintf(stderr, "native BCn kind %d: texel %u channel %d: the device %.9g, the CPU %.9g\n",
+                                kind, i, c, g, e);
+                }
+            }
+        if (differ) fatal("native BCn kind %d: %u channels differ from the CPU's by more than allowed\n", kind, differ);
+        printf("PASS native BCn kind %d (largest difference %.3g)\n", kind, worst);
+        free(blocks);
+        free(want);
+        vk_image_destroy(src, src_mem);
+        vk_image_destroy(dst, dst_mem);
+    }
+    fflush(stdout);
+}
+
 int main(int argc, char** argv) {
     int large = 0;
     /* --vk_max_allocation_mb=N as the runtime takes it (ctest's astc_vulkan_pieces: 4), and --large */
@@ -584,6 +753,8 @@ int main(int argc, char** argv) {
     run(4, 4, 1, 2051, 1101, 1, 1, 1, 0, NULL, NULL);
     g_bl_source = 0;
     tc_case();
+    bc_case();
+    bc_native_case();
     /* Known solid color, independent of the CPU reference, catches its old
        11-bit header bug. The GPU is compared to this reference below. */
     const u8 solid[16] = {0xfc, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0x12, 0, 0x34, 0, 0x56, 0, 0x78};

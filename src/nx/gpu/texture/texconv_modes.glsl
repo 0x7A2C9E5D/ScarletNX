@@ -44,5 +44,17 @@
    bpp bytes (remap) from the source pixel its column and row name in two tables in the input (words from const_a: a
    column's source column, from const_b: a row's source row). Source rows are in_pitch bytes apart from in_bias */
 #define TC_BLIT 22u
+/* BC1 to BC7 4x4 blocks to pixels, a block an invocation (gpu/texture/bcn.c is the reference): RGBA8 for BC1 to BC3
+   and BC7, 16 bit unorm or snorm channels for BC4 and BC5, RGBA16F for BC6H */
+#define TC_BC1 23u
+#define TC_BC2 24u
+#define TC_BC3 25u
+#define TC_BC4 26u
+#define TC_BC4_SNORM 27u
+#define TC_BC5 28u
+#define TC_BC5_SNORM 29u
+#define TC_BC6H_UF 30u
+#define TC_BC6H_SF 31u
+#define TC_BC7 32u
 
 #endif

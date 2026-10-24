@@ -1425,8 +1425,10 @@ if(TARGET snx_vita_program)
     target_link_libraries(snx-test-vita-hle-memory PRIVATE snx_vita_program)
     add_test(NAME vita_hle_memory COMMAND snx-test-vita-hle-memory)
 endif()
-# the texture conversion shader's GLSL run on the CPU against the CPU's conversions and ETC2 decoder: no GPU needed
-add_executable(snx-test-texconv-glsl glsl/texconv_glsl.cpp "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
+# the texture conversion shader's GLSL run on the CPU against the CPU's conversions and ETC2 and BCn decoders: no GPU
+# needed
+add_executable(snx-test-texconv-glsl glsl/texconv_glsl.cpp "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c"
+               "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/bcn.c")
 snx_test_target(snx-test-texconv-glsl 23)
 target_compile_options(snx-test-texconv-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-texconv-glsl PRIVATE glsl)
@@ -1551,6 +1553,9 @@ add_test(NAME shipped_pass COMMAND snx-test-shipped-pass)
 add_executable(snx-test-etc2 etc2_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
 snx_test_target(snx-test-etc2 23)
 add_test(NAME etc2_decode COMMAND snx-test-etc2)
+add_executable(snx-test-bcn bcn_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/bcn.c")
+snx_test_target(snx-test-bcn 23)
+add_test(NAME bcn_decode COMMAND snx-test-bcn)
 
 # the LLVM backend's IR rewrite for an older llvm-as (a cross build's LLVM older than its Clang): what it takes out
 add_test(NAME rtlib_ir_compat COMMAND "${CMAKE_COMMAND}"

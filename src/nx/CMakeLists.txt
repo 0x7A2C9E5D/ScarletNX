@@ -270,7 +270,7 @@ if(BUILD_TESTING AND SNX_TEST_VULKAN)
     endif()
     add_executable(snx-test-astc-vulkan "${PROJECT_SOURCE_DIR}/tests/astc_vulkan.c" "${PROJECT_SOURCE_DIR}/tests/tracy_stubs.c"
         gpu/texture/astc.c gpu/vk/astc.c
-        gpu/vk/blocklinear.c gpu/texture/blocklinear.c gpu/vk/texconv.c gpu/texture/etc2.c
+        gpu/vk/blocklinear.c gpu/texture/blocklinear.c gpu/vk/texconv.c gpu/texture/etc2.c gpu/texture/bcn.c
         gpu/vk/cmd.c gpu/vk/memory.c gpu/vk/record.c gpu/vk/vma.cpp ${snx_astc_plat} "${volk_SOURCE_DIR}/volk.c"
         "${CMAKE_BINARY_DIR}/generated/spirv/astc_spv.c" "${CMAKE_BINARY_DIR}/generated/spirv/blocklinear_spv.c"
         "${CMAKE_BINARY_DIR}/generated/spirv/texconv_spv.c")
