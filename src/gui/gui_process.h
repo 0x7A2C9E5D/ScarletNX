@@ -40,6 +40,14 @@ int gui_process_read(GuiProcess* process, char* buffer, size_t size);
 /* True only after the driver AND its descendants have exited. */
 bool gui_process_finished(GuiProcess* process, int* status);
 GuiUsage gui_process_usage(GuiProcess* process);
+/* The tree alone, without this program: its RAM, and its CPU since the last look at it this way */
+GuiUsage gui_process_usage_of(GuiProcess* process);
+/* The tree's priority: low, under the one this program has, or the same as it again; for the tree that runs now,
+   each of its processes and threads, and for the next start. False with why in error when the system keeps the tree
+   as it was: a priority lowered is raised again only where it lets a program do it (Windows does; Linux and macOS
+   without the privilege do not), and the driver iOS runs on a thread of this program has its priority. The next
+   start takes it either way */
+bool gui_process_low(GuiProcess* process, bool low, char* error, size_t size);
 /* Force-kill the owned process tree without waiting for exit or pipe EOF.
    Keep reading and polling finished before reusing the process. */
 void gui_process_terminate(GuiProcess* process);

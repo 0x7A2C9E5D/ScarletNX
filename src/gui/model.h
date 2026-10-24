@@ -26,8 +26,8 @@ enum {
 };
 typedef enum { GUI_UP, GUI_DOWN, GUI_LEFT, GUI_RIGHT, GUI_SELECT, GUI_CANCEL, GUI_PAGE_UP, GUI_PAGE_DOWN } GuiKey;
 #define GUI_TEXT_MAX 4
-/* the screen over the menu: none, a load's file to pick, the games' browser, the keys' */
-typedef enum { GUI_LOAD_NONE, GUI_LOAD_DROP, GUI_LOAD_GAMES, GUI_LOAD_KEYS } GuiLoadView;
+/* the screen over the menu: none, a load's file to pick, the games' browser, the keys', the recompiles' queue */
+typedef enum { GUI_LOAD_NONE, GUI_LOAD_DROP, GUI_LOAD_GAMES, GUI_LOAD_KEYS, GUI_LOAD_RECOMPILE } GuiLoadView;
 typedef struct {
     int selected; /* keyboard/mouse focus, not activation */
     int active;   /* the last explicitly activated item: the load a picked file goes to */
@@ -58,6 +58,7 @@ typedef enum {
     GUI_ASK_FOLDER, /* a game folder taken off the Library */
     GUI_ASK_MOVE,   /* App's Move Old Files: how many entries move, how many stay */
     GUI_ASK_CLOSE,  /* the window closed while a run goes: it ends with the menu */
+    GUI_ASK_MADE,   /* a dump, package or ROM a game was made from already: play the game, or recompile it */
     GUI_ASK_ERROR   /* a failure of the system's, said whole (main.c's say_failure): OK alone, which closes it */
 } GuiAsk;
 typedef struct {

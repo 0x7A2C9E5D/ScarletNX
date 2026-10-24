@@ -21,6 +21,7 @@
 #include "gui/wide.h"
 #include "gui/model.h"
 #include "gui/place.h"
+#include "gui/queue.h"
 #include "gui/ui.h" /* generated from ui.txt by tools/uigen */
 #include "gui/gui_process.h"
 #include "gui/steps.h"
@@ -107,6 +108,7 @@ enum {
     GUI_LIST_FORM_LIST,
     GUI_LIST_FORM_SIDE,
     GUI_LIST_APPEARANCE,
+    GUI_LIST_QUEUE,
     GUI_LISTS
 };
 #define GUI_GROUPS_MAX   32
@@ -170,7 +172,7 @@ typedef struct {
 } GuiDumpIcons;
 /* the App screen's values, as its rows show them, and Folders' (what each row's folder is, past its path) */
 typedef struct {
-    char theme[64], text[16], language[64], animations[16], side[16], places[48], moves[32];
+    char theme[64], text[16], language[64], animations[16], side[16], background[16], places[48], moves[32];
     char folder[GUI_FOLDER_ROWS][64];
 } GuiAppForm;
 /* the head's measures: the row of tabs (its height and the tabs' width), the title's height and width (0: none), the
@@ -255,6 +257,28 @@ typedef struct App {
     char* aot_cache;       /* its .jitcache, owned */
     char aot_opt[2];       /* the -O the build uses */
     int aot_hook;          /* --hook-direct-calls */
+    /* R's and B's recompiles, which play nothing: a queue (queue.h) run one at a time behind the menu's screens, the
+       one running on a process of its own with its output, its steps and its log; the last one that ended kept as it
+       was, for its row on the Compile tab */
+    GuiQueue queue;
+    GuiProcess* job_process;
+    GuiConsole job_console, ended_console;
+    GuiSteps job_steps, ended_steps;
+    uint32_t ended_serial; /* the job ended_console and ended_steps are of, 0 for none */
+    FILE* job_out;
+    char* job_log;      /* where the running one's output goes, beside run_log; NULL keeps none */
+    GuiUsage job_usage; /* its tree alone */
+    bool job_aborting;
+    bool job_low;      /* its priority lowered: Background recompile Gentle, or a game playing */
+    bool job_kept_low; /* the system refused to raise it again: low until it ends, job_said says why */
+    char job_said[160];
+    int job_threads;        /* the threads it was started with: 0 for the driver's own count (the AOT threads') */
+    int queue_focus;        /* the Compile tab's row, a job of the queue */
+    bool background_gentle; /* app.ini's recompile_background = gentle: every recompile of the queue is */
+    /* the taskbar's progress as SDL was last given it, the value in percent: none until a recompile runs. What SDL
+       said when it could not be shown, "" when it was */
+    int taskbar_state, taskbar_value;
+    char taskbar_error[256];
     Uint64 finger;            /* the finger on the screen (finger_id), 0 for none */
     float finger_x, finger_y; /* where it went down, 0 to 1 across the window */
     float finger_mark;        /* the height a drag last moved the focus at, a row at a time */
@@ -414,6 +438,9 @@ typedef struct App {
     char* own_dir;      /* Android: the app's own storage; a folder outside it is asked about (GUI_ASK_OUTSIDE) */
     char* outside_path; /* the folder asked about, for the row outside_place */
     int outside_place;
+    char* made_file; /* a dump whose game is made, asked about (GUI_ASK_MADE): played or recompiled, by made_item */
+    int made_item;
+    bool made_ok;    /* asked and answered Play: the dump runs, its driver playing the game made */
     char* room_file; /* a run asked about (GUI_ASK_ROOM): its file, its load and whether it was prepared */
     int room_item;
     bool room_prepared, room_recompile;
@@ -460,6 +487,9 @@ typedef struct App {
     char told[340];  /* the run's notification: its step's line, its percent, when; 0 before its first */
     int told_percent;
     Uint64 told_ms;
+    bool telling;            /* the notification shows a run, the menu's or a recompile of the queue */
+    const char* told_result; /* how the last of them ended, English (snx_tr's), for the one left once none runs */
+    bool playing; /* a game started here plays in the game activity, the menu behind it until it shows again */
 #endif
 } App;
 
@@ -552,6 +582,15 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #else
 #define SAY_USERS SNX_TR_KEYS("Tap: rename.")
 #endif
+/* the Compile tab's, each when it can be done there (queue_said); then its panel's line once the one in focus ended */
+#define SAY_QUEUE_MOVE   SNX_TR_KEYS("Tap: select.")
+#define SAY_QUEUE_TAB    SNX_TR_KEYS("Games.")
+#define SAY_QUEUE_DEL    SNX_TR_KEYS("Take out.")
+#define SAY_QUEUE_ABORT  SNX_TR_KEYS("Back: abort.")
+#define SAY_QUEUE_BACK   SNX_TR_KEYS("Back.")
+#define SAY_QUEUE_PLAY   SNX_TR_KEYS("Tap again: play.")
+#define SAY_QUEUE_DONE   SNX_TR_NOOP("Back: to Games. Tap its row again: play")
+#define SAY_QUEUE_FAILED SNX_TR_NOOP("Back: to Games")
 #else
 #define SAY_MENU       SNX_TR_KEYS("Arrows/mouse: move. Space/Enter/click: select.")
 #define SAY_GAMES      SNX_TR_KEYS("Up/Down: select. Enter/Space: open. Left/Right/PgUp/PgDown: page. F5: refresh.")
@@ -582,6 +621,15 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_RESET      SNX_TR_KEYS("Enter: reset.")
 #define SAY_PAD              SNX_TR_KEYS("Arrows/pad: move, change. Enter/A: select. Del: default. ESC: back.")
 #define SAY_USERS            SNX_TR_KEYS("Up/Down: user. Left/Right: current user. Enter: rename. ESC: back.")
+/* the Compile tab's, each when it can be done there (queue_said); then its panel's line once the one in focus ended */
+#define SAY_QUEUE_MOVE       SNX_TR_KEYS("Up/Down: queue.")
+#define SAY_QUEUE_TAB        SNX_TR_KEYS("Tab: games.")
+#define SAY_QUEUE_DEL        SNX_TR_KEYS("Del: take out.")
+#define SAY_QUEUE_ABORT      SNX_TR_KEYS("ESC: abort.")
+#define SAY_QUEUE_BACK       SNX_TR_KEYS("ESC: games.")
+#define SAY_QUEUE_PLAY       SNX_TR_KEYS("Enter: play.")
+#define SAY_QUEUE_DONE       SNX_TR_NOOP("Press [ESC] to return to Games, Enter to play")
+#define SAY_QUEUE_FAILED     SNX_TR_NOOP("Press [ESC] to return to Games")
 #endif
 /* and what they say while a pad drives the menu (pad_menu.h's keys), on every system: its face's letters as an Xbox
    pad's and a Switch one's name them, a PlayStation pad's shapes in their place (gui_pad_keys_named) */
@@ -605,6 +653,12 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_PAD_RESET     SNX_TR_KEYS("A: reset.")
 #define SAY_PAD_USERS            SNX_TR_KEYS("D-pad: user, current user. A: rename. B: back.")
 #define SAY_PAD_TAB       SNX_TR_KEYS("LB/RB: screen.")
+#define SAY_PAD_QUEUE_MOVE       SNX_TR_KEYS("D-pad: queue.")
+#define SAY_PAD_QUEUE_TAB        SNX_TR_KEYS("RB: games.")
+#define SAY_PAD_QUEUE_DEL        SNX_TR_KEYS("X: take out.")
+#define SAY_PAD_QUEUE_ABORT      SNX_TR_KEYS("B: abort.")
+#define SAY_PAD_QUEUE_BACK       SNX_TR_KEYS("B: games.")
+#define SAY_PAD_QUEUE_PLAY       SNX_TR_KEYS("A: play.")
 /* a failure of the system's (a file not written, a picker that did not open): in a box over the screen, whole, until
    OK, once in the session; the tips or the note keep it after. Over a run or another question, those alone */
 static void say_failure(App* app, const char* text) {
@@ -736,11 +790,13 @@ static void text(App* app, int x, int y, const char* value, SDL_Color color) {
     if (shorter) value = shorter;
 #endif
     int skip = gui_slide(gui_text_cols(value) - (app->cols - 1 - x), now_ms(app), app->theme.scroll_ms);
-    text_px(app, (float)(x * 8 * app->scale), (float)(y * 16 * app->scale), gui_cols_skip(value, skip), SIZE_MAX, color,
-            1);
+    int w = 4 * (app->half ? app->half : 2 * app->scale); /* a cell of the letters in use, as cell_w and cell_h */
+    text_px(app, (float)(x * w), (float)(y * 2 * w), gui_cols_skip(value, skip), SIZE_MAX, color, 1);
 }
 static int cell_h(const App* app) { return app->half ? 8 * app->half : 16 * app->scale; }
 static int cell_w(const App* app) { return app->half ? 4 * app->half : 8 * app->scale; }
+/* the letters in use as a scale, the text's, or a half step's (1.5 by a 2x text): what a run's ring and bar follow */
+static float letters(const App* app) { return (float)(app->half ? app->half : 2 * app->scale) / 2.0f; }
 static void prompt_in(App* app, GuiRect r, int y, GuiPromptLine line, const char* value, SDL_Color color);
 /* a line of the loading screen that waits on the user, on row y as the theme's prompt places it */
 static void prompt(App* app, GuiPromptLine line, int x, int y, const char* value, SDL_Color color) {
@@ -815,7 +871,7 @@ static bool installed(const App* app) {
 #endif
 /* the menu's own files: those of its config folder, then those of its state folder */
 static const char* const menu_files[2][4] = {{"settings.ini", "app.ini", "folders.txt", "gamecontrollerdb.txt"},
-                                             {"recent.txt", "last-run.log", "", ""}};
+                                             {"recent.txt", "last-run.log", "last-recompile.log", ""}};
 /* the folder of kind for the menu's own files (menu_files), made: its data folder's (snx_app_dir: the user's, a
    portable copy's, Android's in the app's own storage), else the user's. Made with make; NULL when none can be */
 static char* menu_folder(const App* app, int kind, bool make) {
@@ -921,6 +977,9 @@ static const char* const place_labels[GUI_PLACES] = {SNX_TR_NOOP("Data"), SNX_TR
 /* side_box's words in app.ini, GuiSide's order, and as Settings > App shows them */
 static const char* const side_words[] = {"auto", "on", "off"};
 static const char* const side_names[] = {SNX_TR_NOOP("Auto"), SNX_TR_NOOP("On"), SNX_TR_NOOP("Off")};
+/* recompile_background's, full its default: the queue's recompiles at full speed, or gentle (job_gentle) */
+static const char* const background_words[] = {"full", "gentle"};
+static const char* const background_names[] = {SNX_TR_NOOP("Full"), SNX_TR_NOOP("Gentle")};
 /* ui_scale's quarters of Auto (-1 to -3) as app.ini names them */
 static const char* const text_quarters[] = {"0.25", "0.5", "0.75"};
 /* Games' options (GUI_OPTION_*): each one's key in app.ini, its row in the View box, and its two words or three in
@@ -988,6 +1047,7 @@ static int app_write(App* app) {
                   app->language ? snx_gui_languages[app->language - 1].code : "auto");
     n += snprintf(text + n, size - (size_t)n, "animations = %d\n", !app->animations_off);
     n += snprintf(text + n, size - (size_t)n, "side_box = %s\n", side_words[app->side_box]);
+    n += snprintf(text + n, size - (size_t)n, "recompile_background = %s\n", background_words[app->background_gentle]);
     for (i = 0; i < GUI_OPTIONS; ++i)
         n += snprintf(text + n, size - (size_t)n, "%s = %s\n", option_keys[i].key,
                       option_keys[i].words[app->options[i]]);
@@ -1055,7 +1115,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
     const char* const* dirs = (const char* const*)app->themes_dirs;
     int scale = app->menu.text_size, language = app->language, n = 0, count = 0, moved = 0;
     int options[GUI_OPTIONS];
-    bool still = app->animations_off;
+    bool still = app->animations_off, gentle = app->background_gentle, kept;
     int side = app->side_box;
     SnxIni ini;
     if (size) bad[0] = 0;
@@ -1069,8 +1129,12 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
     while (snx_ini_next(&ini, &key, &value)) {
         int option = strcmp(ini.section, "app") ? -1 : option_of(key);
         if (option >= 0 && option_word(option, value) >= 0) options[option] = option_word(option, value);
+        if (!strcmp(ini.section, "app") && !strcmp(key, "recompile_background") &&
+            (!strcmp(value, "full") || !strcmp(value, "gentle")))
+            gentle = !strcmp(value, "gentle");
     }
     free(copy);
+    kept = gentle; /* what a word it does not know leaves in use */
     snx_ini_start(&ini, text);
     while (snx_ini_next(&ini, &key, &value)) {
         char* end = NULL;
@@ -1120,6 +1184,8 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
                 side = w;
                 continue;
             }
+        } else if (!strcmp(ini.section, "app") && !strcmp(key, "recompile_background")) {
+            if (!strcmp(value, "full") || !strcmp(value, "gentle")) continue; /* taken in the first read */
         } else if (!strcmp(ini.section, "app") && !strcmp(key, "animations")) {
             if (!strcmp(value, "0") || !strcmp(value, "1")) {
                 still = !strcmp(value, "0");
@@ -1143,6 +1209,8 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
         if (n < (int)size && option >= 0)
             n += snprintf(bad + n, size - (size_t)n, snx_tr(" (it keeps %s)"),
                           option_keys[option].words[options[option]]);
+        else if (n < (int)size && !strcmp(ini.section, "app") && !strcmp(key, "recompile_background"))
+            n += snprintf(bad + n, size - (size_t)n, snx_tr(" (it keeps %s)"), background_words[kept]);
         if (n >= (int)size) n = (int)size - 1;
     }
     free(text);
@@ -1156,6 +1224,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
         language_apply(app);
     }
     if (apply) app->animations_off = still;
+    if (apply) app->background_gentle = gentle;
     if (apply && side != app->side_box) {
         app->side_box = side;
         layout(app);
@@ -1337,6 +1406,7 @@ static void run_console(App* app, const GuiPlace* p, int* cols, int* rows) {
 static void run_place(App* app, GuiPlace* p) {
     place_screen(app, p, snx_tr(SAY_ABORT), GUI_SHOWS_STATUS | GUI_SHOWS_WIDE | GUI_SHOWS_SIDE);
 }
+static void job_console_size(App* app, int* cols, int* rows);
 static void layout(App* app) {
     int run;
     int width, height, whole_width, whole_height;
@@ -1368,6 +1438,11 @@ static void layout(App* app) {
         run_console(app, &p, &cols, &rows);
         gui_console_resize(&app->console, cols, rows);
     }
+    if (gui_queue_running(&app->queue) >= 0 && app->theme.run != GUI_RUN_STEPS) { /* the Compile tab's */
+        int cols, rows;
+        job_console_size(app, &cols, &rows);
+        gui_console_resize(&app->job_console, cols, rows);
+    }
 }
 /* an arc of a circle, from and sweep in degrees, thickness pixels inward */
 static void arc(App* app, float cx, float cy, float r, float from, float sweep, float thickness, GuiRgb c) {
@@ -1384,33 +1459,101 @@ static void arc(App* app, float cx, float cy, float r, float from, float sweep, 
         SDL_RenderLines(app->renderer, p, 49);
     }
 }
+/* what a run's screen draws: the run the menu started and shows (run_of), or a recompile of the queue (job_view) */
+typedef struct {
+    const GuiSteps* steps;
+    const GuiConsole* console;
+    const char* file; /* its input, "" for none */
+    const char* said; /* how it ended, once it did */
+    bool native;      /* a game made already, which its recompile's line names */
+    bool finished, aborting, failed;
+    Uint64 since; /* a line that came while the menu faded out comes in with the run, from here */
+} GuiRunView;
+static GuiRunView run_of(const App* app) {
+    GuiRunView v = {&app->steps,   &app->console, app->file ? app->file : "", app->message, app->native != 0,
+                    app->finished, app->aborting, app->abnormal_exit,         app->fade_ms};
+    return v;
+}
+/* ---- R's and B's recompiles, which play nothing: a queue run one at a time behind the screens (queue.h), the
+   Compile tab showing it ---- */
+static bool jobs_live(const App* app) {
+    return gui_queue_running(&app->queue) >= 0 || gui_queue_next(&app->queue) >= 0;
+}
+/* job i as its panel draws it: its output while it runs, or the last one's to end once kept (ended_*); none else
+   (steps NULL): one waiting, or one whose output a later one's replaced */
+static GuiRunView job_view(const App* app, int i) {
+    const GuiJob* job = &app->queue.job[i];
+    bool running = job->state == GUI_JOB_RUNNING, kept = !running && app->ended_serial == job->serial;
+    GuiRunView v = {running ? &app->job_steps
+                    : kept  ? &app->ended_steps
+                            : NULL,
+                    running ? &app->job_console
+                    : kept  ? &app->ended_console
+                            : NULL,
+                    gui_queue_file(&app->queue, i),
+                    job->said,
+                    job->native,
+                    job->state >= GUI_JOB_OK,
+                    running && app->job_aborting,
+                    job->state == GUI_JOB_FAILED,
+                    job->started_ms};
+    return v;
+}
+/* where job i is, as its row on the Compile tab says it (games: as Games' row, in the queue's words): how far the
+   one running is, the place of one waiting, how one ended */
+static void job_where(const App* app, int i, bool games, char* out, size_t size) {
+    const GuiJob* job = &app->queue.job[i];
+    char place[32];
+    if (job->state == GUI_JOB_RUNNING && job->percent < 0)
+        snprintf(out, size, "%s", "--%");
+    else if (job->state == GUI_JOB_RUNNING)
+        snprintf(out, size, "%d%%", job->percent);
+    else if (job->state == GUI_JOB_WAITING) {
+        int at = gui_queue_place(&app->queue, i);
+        gui_queue_place_text(at, place, sizeof place);
+        if (games && at > 2)
+            snprintf(out, size, snx_tr("%s in queue"), place);
+        else
+            snprintf(out, size, "%s", place);
+    } else
+        snprintf(out, size, "%s", job->state == GUI_JOB_OK ? snx_tr("OK") : snx_tr("FAILED"));
+}
+/* the row of a game of Games or the recent ones at path: two columns after its name, where it is in the queue while it
+   waits or runs; nothing else */
+static void job_suffix(const App* app, const char* path, char* out, size_t size) {
+    int i = path ? gui_queue_find(&app->queue, path) : -1;
+    out[0] = 0;
+    if (i < 0) return;
+    memcpy(out, "  ", 3);
+    job_where(app, i, true, out + 2, size - 2);
+}
 /* the ring that turns while a run goes: a thin outer ring, a thicker inner one and a bar going round it */
-static void ring(App* app, float cx, float cy) {
-    float r = 7.0f * (float)app->scale, inner = r * 0.62f, thick = SDL_max(1.0f, 1.5f * (float)app->scale);
-    float angle = app->finished ? 0 : (float)((now_ms(app) / 4) % 360);
-    arc(app, cx, cy, r, 0, 360, SDL_max(1.0f, 0.5f * (float)app->scale), app->theme.run_colors.dim);
+static void ring(App* app, float cx, float cy, bool still) {
+    float s = letters(app), r = 7.0f * s, inner = r * 0.62f, thick = SDL_max(1.0f, 1.5f * s);
+    float angle = still ? 0 : (float)((now_ms(app) / 4) % 360);
+    arc(app, cx, cy, r, 0, 360, SDL_max(1.0f, 0.5f * s), app->theme.run_colors.dim);
     arc(app, cx, cy, inner, 0, 360, thick, app->theme.run_colors.soft);
     arc(app, cx, cy, inner, angle, 70, thick, app->theme.run_colors.ink);
 }
 /* "", ".", "..", "..." round and round; "..." once the run is over */
-static const char* dots(const App* app) {
+static const char* dots(const App* app, bool finished) {
     static const char* const turn[] = {"", ".", "..", "..."};
-    return app->finished ? "..." : turn[(now_ms(app) / 400) % 4];
+    return finished ? "..." : turn[(now_ms(app) / 400) % 4];
 }
 static void launch(App* app, char* absolute, bool prepared);
 static void render_dests(App* app);
 /* the game's name as the run knows it: the runner's banner, else the file's own, in capitals */
-static void run_name(const App* app, char* out, size_t size) {
+static void run_name_of(const GuiSteps* steps, bool native, const char* file, char* out, size_t size) {
     const char* q;
     size_t n;
     const char* dot;
-    const GuiStep *launch = gui_steps_last(&app->steps, "LAUNCH"), *made = gui_steps_last(&app->steps, "RECOMPILE");
+    const GuiStep *launch = gui_steps_last(steps, "LAUNCH"), *made = gui_steps_last(steps, "RECOMPILE");
     /* a game made already is named by its title ID: its recompile's line says what it is shown as */
-    const char* name = launch ? launch->detail : app->native && made ? made->detail : app->file ? app->file : "";
+    const char* name = launch ? launch->detail : native && made ? made->detail : file ? file : "";
     for (q = name; *q; ++q)
         if (*q == '/' || *q == '\\') name = q + 1;
     n = 0;
-    dot = launch || (app->native && made) ? NULL : strrchr(name, '.');
+    dot = launch || (native && made) ? NULL : strrchr(name, '.');
     for (q = name; *q && q != dot && n + 1 < size; ++q) out[n++] = *q >= 'a' && *q <= 'z' ? (char)(*q - 32) : *q;
     out[n] = 0;
 }
@@ -1474,8 +1617,10 @@ static int type_rows(const GuiTheme* theme, int rows, int first, const size_t* t
 static void foot(App* app, const GuiPlace* p, const char* tips, SDL_Color color, const char* keys);
 static int hint_pick(const char* key, int col, bool pad);
 /* a run as a loading screen: the title, the name and the ring; the steps typed down the page, their status last;
-   the progress bar and its percentage */
-static void render_steps(App* app) {
+   the progress bar and its percentage; the footer and the ESC line. As a panel (a recompile of the queue on its tab,
+   in its letters and the cells of the viewport it is drawn in): a band of a row at its foot in their place, its
+   usage while it goes (band, "" for none), the line to go on once it ended */
+static void steps_draw(App* app, const GuiRunView* v, bool panel, const char* band, const char* ended) {
     /* the rows: each step, then every line it kept when detailed, folded once it is done when collapse says so;
        each ends before the right edge, with room for a step's dots and the cursor */
     enum { ROWS = GUI_STEPS_MAX + GUI_NOTES_MAX, SEGMENTS = 40 };
@@ -1488,10 +1633,11 @@ static void render_steps(App* app) {
     const GuiTheme* theme = &app->theme;
     const GuiPalette* colors = &theme->run_colors;
     /* since: a line that came while the menu faded out comes in with the run */
-    Uint64 now = now_ms(app), since = app->fade_ms;
-    float cw = 8.0f * (float)app->scale, ch = 16.0f * (float)app->scale;
+    Uint64 now = now_ms(app), since = v->since;
+    const GuiSteps* steps = v->steps;
+    float cw = (float)cell_w(app), ch = (float)cell_h(app), s = letters(app);
     int width, height, name_col, col, y, i, r, rows = 0, last_step = -1, typing, top = 3, bottom, fit, first, cursor;
-    int foot = theme->footer != GUI_STYLE_NONE ? 2 : 0; /* the footer's rows, over the ESC line */
+    int foot = !panel && theme->footer != GUI_STYLE_NONE ? 2 : 0; /* the footer's rows, over the ESC line */
     const char* title;
     char name[96], head[128];
     SDL_Color ink, soft, failure;
@@ -1502,34 +1648,34 @@ static void render_steps(App* app) {
     soft = rgb(colors->soft);
     failure = rgb(colors->failure);
 
-    run_name(app, name, sizeof name);
+    run_name_of(steps, v->native, v->file, name, sizeof name);
     col = theme->ring == GUI_RING_LEFT ? 4 : 1;
-    title = theme->title[screen(app)];
+    title = theme->title[panel ? GUI_SCREEN_COMPILING : screen(app)];
     name_col = col + gui_text_cols(title) + (title[0] ? 1 : 0);
-    if (theme->ring == GUI_RING_LEFT) ring(app, cw * 2, ch * 1.5f);
-    if (theme->ring == GUI_RING_RIGHT) ring(app, (float)width - cw * 2, ch * 1.5f);
+    if (theme->ring == GUI_RING_LEFT) ring(app, cw * 2, ch * 1.5f, v->finished);
+    if (theme->ring == GUI_RING_RIGHT) ring(app, (float)width - cw * 2, ch * 1.5f, v->finished);
     if (theme->ring == GUI_RING_NEAR_TEXT) /* after the name and the dots' whole width, so it stays put */
-        ring(app, cw * (float)(name_col + gui_text_cols(name) + 4) + 7.0f * (float)app->scale, ch * 1.5f);
+        ring(app, cw * (float)(name_col + gui_text_cols(name) + 4) + 7.0f * s, ch * 1.5f, v->finished);
     text(app, col, 1, title, ink);
-    snprintf(head, sizeof head, "%s%s", name, dots(app));
+    snprintf(head, sizeof head, "%s%s", name, dots(app, v->finished));
     text(app, name_col, 1, head, soft);
-    if (app->finished) text(app, 1, 2, app->message, app->abnormal_exit ? failure : soft);
-    for (i = 0; i < app->steps.count; ++i) {
+    if (v->finished) text(app, 1, 2, v->said, v->failed ? failure : soft);
+    for (i = 0; i < steps->count; ++i) {
         int n;
         const GuiNote* notes[GUI_NOTES_MAX];
         int k;
-        const GuiStep* s = &app->steps.step[i];
-        owner[rows] = s;
+        const GuiStep* step = &steps->step[i];
+        owner[rows] = step;
         is_note[rows] = 0;
-        shown[rows] = SDL_max(s->shown_ms, since);
-        step_runs(s, theme->progress, now, runs[rows], lengths[rows]);
+        shown[rows] = SDL_max(step->shown_ms, since);
+        step_runs(step, theme->progress, now, runs[rows], lengths[rows]);
         clip_row(runs[rows], lengths[rows], 0, app->cols - 6);
         last_step = rows++;
-        if (!theme->detailed || (theme->collapse && s->state == GUI_STEP_DONE)) continue;
+        if (!theme->detailed || (theme->collapse && step->state == GUI_STEP_DONE)) continue;
 
-        n = gui_step_notes(&app->steps, s, notes, GUI_NOTES_MAX);
+        n = gui_step_notes(steps, step, notes, GUI_NOTES_MAX);
         for (k = 0; k < n; ++k, ++rows) {
-            owner[rows] = s;
+            owner[rows] = step;
             is_note[rows] = 1;
             shown[rows] = SDL_max(notes[k]->shown_ms, since);
             snprintf(runs[rows][0], sizeof runs[rows][0], "%s", notes[k]->text);
@@ -1553,15 +1699,14 @@ static void render_steps(App* app) {
     for (r = first; r < rows; ++r) {
         int working, blink, k;
         size_t left;
-        const GuiStep* s = owner[r];
-        int last = s == &app->steps.step[app->steps.count - 1];
-        int failed = s->state == GUI_STEP_FAILED, active = s->state == GUI_STEP_ACTIVE;
+        const GuiStep* step = owner[r];
+        int last = step == &steps->step[steps->count - 1];
+        int failed = step->state == GUI_STEP_FAILED, active = step->state == GUI_STEP_ACTIVE;
         size_t total = lengths[r][0] + lengths[r][1] + lengths[r][2];
         Uint64 age = now > shown[r] ? now - shown[r] : 0;
         int moving = theme->line_in == GUI_LINE_SLIDE || theme->line_in == GUI_LINE_FADE;
         float p = moving && theme->line_in_ms ? SDL_min(1.0f, (float)age / (float)theme->line_in_ms) : 1.0f;
-        float x = cw * (is_note[r] ? 3 : 1) -
-                  (theme->line_in == GUI_LINE_SLIDE ? 16.0f * (float)app->scale * (1 - p) * (1 - p) : 0);
+        float x = cw * (is_note[r] ? 3 : 1) - (theme->line_in == GUI_LINE_SLIDE ? 2 * cw * (1 - p) * (1 - p) : 0);
         float y = ch * (float)(top + r - first);
         SDL_Color color[3];
         color[0] = failed ? failure : last ? ink : soft;
@@ -1574,19 +1719,18 @@ static void render_steps(App* app) {
             x = text_px(app, x, y, runs[r][k], drawn, color[k], p);
             left -= drawn;
         }
-        if (!is_note[r] && typed[r] == total && active) x = text_px(app, x, y, dots(app), 3, ink, p);
+        if (!is_note[r] && typed[r] == total && active) x = text_px(app, x, y, dots(app, v->finished), 3, ink, p);
         blink = !theme->blink_ms || (now / theme->blink_ms) % 2 == 0;
         working = typing == r || (typing < 0 && active);
         if (r == cursor && working && blink) text_px(app, x, y, "_", 1, ink, p);
     }
     if (theme->bar) {
-        int k, percent = gui_steps_percent(&app->steps);
+        int k, percent = gui_steps_percent(steps);
         int filled = percent < 0 ? 0 : (percent * SEGMENTS + 50) / 100;
-        float span = (float)(app->cols - 8) * cw, gap = 2.0f * (float)app->scale;
+        float span = (float)(app->cols - 8) * cw, gap = 2.0f * s;
         float seg = (span - gap * (SEGMENTS - 1)) / SEGMENTS, sy = ch * (float)(app->rows - foot - 3) + ch * 0.3f;
         char number[16];
-        fill(app, cw, ch * (float)(app->rows - foot - 4) + ch / 2, (float)(app->cols - 2) * cw, (float)app->scale,
-             colors->dim, 255);
+        fill(app, cw, ch * (float)(app->rows - foot - 4) + ch / 2, (float)(app->cols - 2) * cw, s, colors->dim, 255);
         for (k = 0; k < SEGMENTS; ++k) {
             SDL_FRect r = {cw + (float)k * (seg + gap), sy, seg, ch * 0.4f};
             if (k < filled)
@@ -1604,12 +1748,23 @@ static void render_steps(App* app) {
         text(app, 1, app->rows - foot - 2, name, ink);
     }
     if (foot) footer(app, app->rows - 3, 2, colors->page, colors->ink, colors->soft);
-    if (app->finished)
-        prompt(app, app->abnormal_exit ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE, 1, app->rows - 1, snx_tr(SAY_DONE), soft);
-    else if (app->aborting)
+    if (panel && !v->finished && !v->aborting && band[0]) { /* its usage on the footer's band, or over its rule */
+        bool bar = theme->footer == GUI_STYLE_BAR;
+        if (bar) fill(app, 0, ch * (float)(app->rows - 1), (float)width, ch, colors->ink, 255);
+        if (theme->footer_rule)
+            fill(app, cw, ch * (float)(app->rows - 1) - s, (float)(app->cols - 2) * cw, s, colors->soft, 255);
+        text(app, 1, app->rows - 1, band, rgb(bar ? colors->page : colors->soft));
+    } else if (v->finished)
+        prompt(app, v->failed ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE, 1, app->rows - 1, panel ? ended : snx_tr(SAY_DONE),
+               soft);
+    else if (v->aborting)
         prompt(app, GUI_PROMPT_ABORTING, 1, app->rows - 1, snx_tr("Aborting..."), rgb(colors->warning));
-    else
+    else if (!panel)
         text(app, 1, app->rows - 1, snx_tr(SAY_ABORT), soft);
+}
+static void render_steps(App* app) {
+    GuiRunView v = run_of(app);
+    steps_draw(app, &v, false, "", "");
 }
 /* the whole window darkened, alpha of 255, the cutout beside the text too: the fades, and a box over the screen */
 #define GUI_FADE_MS 150 /* a screen's fade in, a box's shade coming or going */
@@ -1676,10 +1831,27 @@ static void overlay(App* app) {
         a = 1.0f - (float)(now > app->fade_ms ? now - app->fade_ms : 0) / (float)theme->fade_in_ms;
     if (a > 0) shade(app, (Uint8)(a * 255));
 }
-static const char* ask_question(const App* app) {
+static bool jobs_live(const App* app);
+/* leaving the menu while the queue's recompile runs, its line in ask_line (no other question of a menu that is
+   leaving uses it): which runs and how far, how many wait */
+static const char* job_leaving(App* app) {
+    int run = gui_queue_running(&app->queue), waiting = gui_queue_waiting(&app->queue);
+    if (run < 0) run = gui_queue_next(&app->queue);
+    if (run < 0) return snx_tr("Exit ScarletNX?"); /* it ended while asked */
+    if (waiting > (app->queue.job[run].state == GUI_JOB_WAITING))
+        snprintf(app->ask_line, sizeof app->ask_line,
+                 snx_tr("%s is compiling (%d%%), %d more in the queue: exiting stops them. Exit?"),
+                 gui_queue_name(&app->queue, run), SDL_max(app->queue.job[run].percent, 0),
+                 waiting - (app->queue.job[run].state == GUI_JOB_WAITING));
+    else
+        snprintf(app->ask_line, sizeof app->ask_line, snx_tr("%s is compiling (%d%%): exiting stops it. Exit?"),
+                 gui_queue_name(&app->queue, run), SDL_max(app->queue.job[run].percent, 0));
+    return app->ask_line;
+}
+static const char* ask_question(App* app) {
     switch (app->confirm.ask) {
         case GUI_ASK_DEEP: return snx_tr("List the games in its subfolders too?");
-        case GUI_ASK_EXIT: return snx_tr("Exit ScarletNX?");
+        case GUI_ASK_EXIT: return jobs_live(app) ? job_leaving(app) : snx_tr("Exit ScarletNX?");
         case GUI_ASK_OUTSIDE: return snx_tr("Outside the app, Android checks every file access: games may run slower.");
         case GUI_ASK_ROOM: return app->room_line;
         case GUI_ASK_TEXT: return app->size_line;
@@ -1688,15 +1860,18 @@ static const char* ask_question(const App* app) {
         case GUI_ASK_PLACES:
         case GUI_ASK_PLACE:
         case GUI_ASK_FOLDER:
-        case GUI_ASK_MOVE: return app->ask_line;
+        case GUI_ASK_MOVE:
+        case GUI_ASK_MADE: return app->ask_line;
         case GUI_ASK_ERROR: return app->error_line;
         case GUI_ASK_CLOSE:
+            if (!app->menu.running && !app->finished) return job_leaving(app);
             return screen(app) == GUI_SCREEN_COMPILING
-                       ? snx_tr("A recompile goes: exiting ScarletNX stops it, its work lost.")
+                       ? snx_tr("A compile goes: exiting ScarletNX stops it, its work lost.")
                        : snx_tr("A game runs: exiting ScarletNX ends it.");
-        default:
-            return screen(app) == GUI_SCREEN_COMPILING ? snx_tr("Abort the recompile? Its work is lost.")
-                                                       : snx_tr("Abort the run?");
+        default: /* the run's, or on the Compile tab the queue's one running */
+            return !app->menu.running || screen(app) == GUI_SCREEN_COMPILING
+                       ? snx_tr("Abort the compile? Its work is lost.")
+                       : snx_tr("Abort the run?");
     }
 }
 /* app->left's lines, Share Log's: English whatever the menu shows */
@@ -2053,6 +2228,7 @@ static const char* const ask_choices[][2] = {{SNX_TR_NOOP("Continue"), SNX_TR_NO
                                              {SNX_TR_NOOP("Cancel"), SNX_TR_NOOP("Remove")},
                                              {SNX_TR_NOOP("Cancel"), SNX_TR_NOOP("Move")},
                                              {SNX_TR_NOOP("Cancel"), SNX_TR_NOOP("Exit")},
+                                             {SNX_TR_NOOP("Play"), SNX_TR_NOOP("Recompile")},
                                              {SNX_TR_NOOP("OK"), NULL}};
 /* the question shown, over the whole screen in the middle or at its foot, a choice asked twice saying so once pressed:
    how many choices it has, one for a failure's OK */
@@ -2189,6 +2365,12 @@ static bool key_generic(const char* key) {
     }
     return true;
 }
+/* a sentence of a key every screen has that does a screen's own thing there, and so stays in its foot: the Recompile
+   tab's Tab back to Games and Enter that plays */
+static bool key_own(const char* part) {
+    return !strcmp(part, SAY_QUEUE_TAB) || !strcmp(part, SAY_QUEUE_PLAY) || !strcmp(part, SAY_PAD_QUEUE_TAB) ||
+           !strcmp(part, SAY_PAD_QUEUE_PLAY);
+}
 /* parts' sentences as a translation says them, for a foot (help false): the key back first and a \x1f after it,
    which hints() puts alone at the left, then the sentences of the screen's own keys, F1's last; for F1's box (help)
    every one. A translation has the sentences with keys of its English in their order (scripts/build-languages.py),
@@ -2210,7 +2392,7 @@ static const char* keys_said(const char* const* parts, int n, bool pad, bool hel
                 snprintf(back, sizeof back, "%.*s", (int)(said - from), from);
                 continue;
             }
-            if (!help && found && key_generic(ekey)) continue;
+            if (!help && found && key_generic(ekey) && !key_own(parts[i])) continue;
             used += (size_t)snprintf(kept + used, sizeof kept - SDL_min(used, sizeof kept), "%.*s ", (int)(said - from),
                                      from);
             if (used >= sizeof kept) used = sizeof kept - 1;
@@ -2223,11 +2405,25 @@ static const char* keys_said(const char* const* parts, int n, bool pad, bool hel
     return out;
 }
 /* the keys of the screen shown: what its foot says (help false: keys_said), or F1's box every one (help) */
+static void queue_said(const App* app, bool pad, const char** parts, int* n);
+#define SAY_SIDE SNX_TR_KEYS("F2: side box.")
 static const char* screen_said(const App* app, bool help, char* out, size_t size) {
     const char *keys = SAY_MENU_KEYS, *parts[GUI_SAID_PARTS];
     int n = 0;
     bool pad = app->pad_driven && !(app->editing && app->form == GUI_FORM_PAD); /* the button map's speaks of pads */
-    if (pad) {
+    if (!app->editing && !app->setup_on && app->menu.view == GUI_LOAD_RECOMPILE) { /* its Tab goes to Games */
+        queue_said(app, pad, parts, &n);
+#ifdef SNX_TOUCH_UI
+        if (!pad) { /* a finger's: the words to tap are the foot, whole */
+            size_t used = 0;
+            for (int i = 0; i < n && used < size; ++i)
+                used += (size_t)snprintf(out + used, size - used, "%s%s", i ? " " : "", snx_tr(parts[i]));
+            return out;
+        }
+#else
+        if (!pad) said_add(parts, &n, SAY_SIDE);
+#endif
+    } else if (pad) {
         if (app->editing)
             keys = app->editor.picking              ? SAY_PAD_PICKER
                    : app->form == GUI_FORM_THEME    ? SAY_PAD_EDITOR
@@ -3911,10 +4107,13 @@ static void big_text(App* app, GuiRect r, int x, int y, const char* value, int s
         x += n * (int)w;
     }
 }
-#define SAY_SETTINGS_TITLE SNX_TR_NOOP("SCARLETNX  /  SETTINGS")
+#define SAY_SETTINGS_TITLE  SNX_TR_NOOP("SCARLETNX  /  SETTINGS")
+#define SAY_COMPILE_TITLE SNX_TR_NOOP("SCARLETNX  /  COMPILE")
 static const char* screen_title(const App* app, char* out, size_t size) {
     char* c;
     if (app->setup_on && !app->editing) return snx_tr("SCARLETNX  /  SETUP");
+    if (!app->editing && app->menu.view == GUI_LOAD_RECOMPILE && !app->menu.running && !app->finished)
+        return snx_tr(SAY_COMPILE_TITLE);
     if (!app->editing)
         return app->theme
             .title[(app->menu.running || app->finished) && !entering(app) ? screen(app) : menu_screen(app)];
@@ -3935,27 +4134,41 @@ static const char* screen_title(const App* app, char* out, size_t size) {
         snprintf(out, size, "%s", snx_tr(SAY_SETTINGS_TITLE));
     return out;
 }
-/* the status box: the usage, the disk and the working folder, wrapped to width columns; with draw, drawn in r */
+static void job_speed(App* app, char* out, size_t size);
+/* the status box: the usage (the menu's, its run's and the queue's recompile's), the disk and the working folder, then
+   while a recompile of the queue runs how it goes and, when the taskbar cannot show it, why; wrapped to width
+   columns; with draw, drawn in r */
 static int status_rows(App* app, int width, GuiRect r, int y, int draw) {
-    char usage[256], disk[96], cwd[1100], *apart;
-    const char* lines[4];
+    char usage[256], disk[96], cwd[1100], *apart, speed[256], how[200], bar[300];
+    const char* lines[6];
     int i, rows = 0;
+    bool job = gui_queue_running(&app->queue) >= 0;
     SDL_Color soft = rgb(app->theme.soft), ink = rgb(app->theme.ink);
-    gui_usage_text(usage, sizeof usage, app->usage.available, app->usage.memory_bytes, app->usage.cpu_percent,
-                   SDL_GetNumLogicalCPUCores());
+    gui_usage_text(usage, sizeof usage, app->usage.available,
+                   app->usage.memory_bytes + (job ? app->job_usage.memory_bytes : 0),
+                   app->usage.cpu_percent + (job ? app->job_usage.cpu_percent : 0), SDL_GetNumLogicalCPUCores());
     disk_text(app, disk, sizeof disk);
     snprintf(cwd, sizeof cwd, "%s %s", snx_tr("Working folder:"), app->cwd ? app->cwd : snx_tr("(unavailable)"));
+    speed[0] = bar[0] = 0;
+    if (job) {
+        job_speed(app, how, sizeof how);
+        snprintf(speed, sizeof speed, snx_tr("Background recompile: %s"), how);
+    }
+    if (job && app->taskbar_error[0])
+        snprintf(bar, sizeof bar, snx_tr("Taskbar: no progress shown (%s)"), app->taskbar_error);
     lines[0] = usage;
     lines[1] = "";
     lines[2] = disk;
     lines[3] = cwd;
+    lines[4] = speed;
+    lines[5] = bar;
     /* the usage too wide for a row: the memory and the CPU a row each, at the two spaces between them, so a row breaks
        between two values and never inside one ("(0.5 cores)") */
     if (gui_text_cols(usage) > width && (apart = strstr(usage, "  ")) != NULL) {
         *apart = 0;
         lines[1] = apart + 2;
     }
-    for (i = 0; i < 4; ++i) {
+    for (i = 0; i < 6; ++i) {
         if (!lines[i][0]) continue;
         if (draw)
             rows += wrap_in(app, r, r.x, y + rows * cell_h(app), lines[i], i == 3, i == 3 ? ink : soft);
@@ -3964,44 +4177,84 @@ static int status_rows(App* app, int width, GuiRect r, int y, int draw) {
     }
     return rows;
 }
-/* the screens the tabs go round, Tab and Shift+Tab or a click on one: the menu, Games and the Settings */
-enum { GUI_TAB_MENU, GUI_TAB_GAMES, GUI_TAB_SETTINGS, GUI_TABS };
-static const char* const tab_names[GUI_TABS] = {SNX_TR_NOOP("Menu"), SNX_TR_NOOP("Games"), SNX_TR_NOOP("Settings")};
+/* the screens the tabs go round, Tab and Shift+Tab or a click on one: the menu, Games and the Settings, then the
+   Compile tab while the queue holds a recompile */
+enum { GUI_TAB_MENU, GUI_TAB_GAMES, GUI_TAB_SETTINGS, GUI_TAB_RECOMPILE, GUI_TABS };
+static const char* const tab_names[GUI_TABS] = {SNX_TR_NOOP("Menu"), SNX_TR_NOOP("Games"), SNX_TR_NOOP("Settings"),
+                                                SNX_TR_NOOP("Compile")};
 static int tab_shown(const App* app) {
     if (app->setup_on && !app->editing) return app->setup_page;
     if (app->editing) return GUI_TAB_SETTINGS;
-    return app->menu.view == GUI_LOAD_GAMES ? GUI_TAB_GAMES : GUI_TAB_MENU;
+    return app->menu.view == GUI_LOAD_GAMES       ? GUI_TAB_GAMES
+           : app->menu.view == GUI_LOAD_RECOMPILE ? GUI_TAB_RECOMPILE
+                                                  : GUI_TAB_MENU;
+}
+/* the Compile tab's label: how far the one running is (Compile alone before it says), or for a while once one
+   ended (GUI_JOB_SAID_MS), and while none runs, how the queue's ended: FAILED while one failed, else OK */
+#define GUI_JOB_SAID_MS 5000
+enum { GUI_TAB_GOES, GUI_TAB_OK, GUI_TAB_FAILED };
+static int recompile_tab(const App* app, char* out, size_t size) {
+    const GuiQueue* q = &app->queue;
+    int run = gui_queue_running(q), failed = 0, ok = 0, i;
+    Uint64 last = 0, now = now_ms(app);
+    for (i = 0; i < q->count; ++i) {
+        failed |= q->job[i].state == GUI_JOB_FAILED;
+        ok |= q->job[i].state == GUI_JOB_OK;
+        if (q->job[i].state >= GUI_JOB_OK) last = SDL_max(last, q->job[i].ended_ms);
+    }
+    if (run >= 0 && (!last || now - last >= GUI_JOB_SAID_MS || now < last)) {
+        if (q->job[run].percent < 0)
+            snprintf(out, size, "%s", snx_tr("Compile"));
+        else
+            snprintf(out, size, snx_tr("Compile %d%%"), q->job[run].percent);
+        return GUI_TAB_GOES;
+    }
+    snprintf(out, size, "%s", failed ? snx_tr("Compile FAILED") : ok ? snx_tr("Compile OK") : snx_tr("Compile"));
+    return failed ? GUI_TAB_FAILED : ok ? GUI_TAB_OK : GUI_TAB_GOES;
 }
 /* the tabs while the setup shows: its pages, the notices' then each step's, numbered */
 enum { SETUP_NOTICE = SNX_SETUP_STEPS }; /* a page's: a step's, or the notices' */
 static const char* const setup_step_names[SNX_SETUP_STEPS] = {SNX_TR_NOOP("Appearance"), SNX_TR_NOOP("Install"),
                                                               SNX_TR_NOOP("Folders"), SNX_TR_NOOP("Keys"),
                                                               SNX_TR_NOOP("User")};
-static int tab_count(const App* app) { return app->setup_on && !app->editing ? app->setup_count : GUI_TABS; }
+static int tab_count(const App* app) {
+    if (app->setup_on && !app->editing) return app->setup_count;
+    return app->queue.count ? GUI_TABS : GUI_TAB_RECOMPILE;
+}
 /* page i's number among the steps, from 1; 0 for the notices' */
 static int setup_number(const App* app, int i) {
     return app->setup_pages[i] == SETUP_NOTICE ? 0 : i + (app->setup_pages[0] != SETUP_NOTICE);
 }
 static void tab_label(const App* app, int i, char* out, size_t size) {
-    if (!app->setup_on || app->editing)
+    if ((!app->setup_on || app->editing) && i == GUI_TAB_RECOMPILE)
+        recompile_tab(app, out, size);
+    else if (!app->setup_on || app->editing)
         snprintf(out, size, "%s", snx_tr(tab_names[i]));
     else if (app->setup_pages[i] == SETUP_NOTICE)
         snprintf(out, size, "%s", snx_tr("Notice"));
     else
         snprintf(out, size, "%d %s", setup_number(app, i), snx_tr(setup_step_names[app->setup_pages[i]]));
 }
-/* tab i in the row of tabs: two columns wider than its name, a column after the one before it */
-static GuiRect tab_rect(const App* app, GuiRect row, int i) {
+/* the columns tab i's name takes: the Compile tab's as many as its longest, so the head stays put as it changes */
+static int tab_cols(const App* app, int i) {
     char label[64];
-    int x = row.x, k;
-    for (k = 0; k < i; ++k) {
-        tab_label(app, k, label, sizeof label);
-        x += (gui_text_cols(label) + 3) * cell_w(app);
+    if ((!app->setup_on || app->editing) && i == GUI_TAB_RECOMPILE) {
+        snprintf(label, sizeof label, snx_tr("Compile %d%%"), 100);
+        return SDL_max(gui_text_cols(label),
+                       SDL_max(gui_text_cols(snx_tr("Compile OK")), gui_text_cols(snx_tr("Compile FAILED"))));
     }
     tab_label(app, i, label, sizeof label);
-    return gui_rect(x, row.y, (gui_text_cols(label) + 2) * cell_w(app), row.h);
+    return gui_text_cols(label);
 }
-/* the tabs, the one shown as the focused box is; on the head's band in its colours swapped */
+/* tab i in the row of tabs: two columns wider than its name, a column after the one before it */
+static GuiRect tab_rect(const App* app, GuiRect row, int i) {
+    int x = row.x, k;
+    for (k = 0; k < i; ++k) x += (tab_cols(app, k) + 3) * cell_w(app);
+    return gui_rect(x, row.y, (tab_cols(app, i) + 2) * cell_w(app), row.h);
+}
+/* the tabs, the one shown as the focused box is; on the head's band in its colours swapped. The Compile tab once
+   its queue ended: OK in the focus colour, FAILED on the failure colour blinking at the theme's blink_ms, as Share
+   Log does */
 static void draw_tabs(App* app, GuiRect row, int band) {
     const GuiTheme* t = &app->theme;
     GuiRgb ink = band ? t->page : t->ink, page = band ? t->ink : t->page, focus = band ? t->page : t->focus;
@@ -4010,14 +4263,23 @@ static void draw_tabs(App* app, GuiRect row, int band) {
     if (!row.h) return;
     for (i = 0; i < tab_count(app); ++i) {
         GuiRect r = tab_rect(app, row, i);
-        int on = i == shown, inverted = on && t->focus_bar;
-        if (inverted)
+        int on = i == shown, inverted = on && t->focus_bar, ended = GUI_TAB_GOES;
+        bool failing;
+        if ((!app->setup_on || app->editing) && i == GUI_TAB_RECOMPILE) ended = recompile_tab(app, label, sizeof label);
+        failing = ended == GUI_TAB_FAILED && !(t->blink_ms && (now_ms(app) / t->blink_ms) % 2);
+        if (failing)
+            fill_rect(app, r, t->failure);
+        else if (inverted)
             fill_rect(app, r, focus);
         else if (t->panels == GUI_PANELS_FILL)
             fill_rect(app, r, t->dim);
-        if (!inverted && (t->panels == GUI_PANELS_OUTLINE || on)) outline(app, r, on ? focus : t->dim);
+        if (!failing && !inverted && (t->panels == GUI_PANELS_OUTLINE || on)) outline(app, r, on ? focus : t->dim);
         tab_label(app, i, label, sizeof label);
-        text_in(app, r, r.x + cell_w(app), r.y + 2 * s, label, rgb(inverted ? page : on ? focus : ink));
+        text_in(app, r, r.x + cell_w(app), r.y + 2 * s, label,
+                rgb(failing                     ? t->page
+                    : inverted                  ? page
+                    : on || ended == GUI_TAB_OK ? focus
+                                                : ink));
     }
 }
 /* the page's faint grid behind the boxes, in the dim colour */
@@ -4060,10 +4322,10 @@ static int head_room(const App* app, int size) {
    translation too long for it leaves out first parts too. A screen deeper in the Settings leaves out what more it
    must, and a last part still too wide is cut. The setup's head, its steps for tabs, keeps its title as it is */
 static const char* head_title(const App* app, bool tabs, char* out, size_t size, int* letters) {
-    const char *titles[4], *english[4];
+    const char *titles[5], *english[5];
     char own[160];
     const char* title = screen_title(app, own, sizeof own);
-    int big = title_size(app), parts = 0, room = 0, i;
+    int big = title_size(app), parts = 0, room = 0, i, n = app->queue.count ? 5 : 4; /* the Compile tab's with it */
     *letters = big;
     snprintf(out, size, "%s", title);
     if (!tabs || !title[0] || (app->setup_on && !app->editing)) return out; /* the setup's steps are its tabs */
@@ -4072,11 +4334,13 @@ static const char* head_title(const App* app, bool tabs, char* out, size_t size,
     titles[2] = english[2] = app->theme.title[GUI_SCREEN_KEYS];
     english[3] = SAY_SETTINGS_TITLE;
     titles[3] = snx_tr(SAY_SETTINGS_TITLE);
+    english[4] = SAY_COMPILE_TITLE;
+    titles[4] = snx_tr(SAY_COMPILE_TITLE);
     for (parts = 0; parts < 4; ++parts) {
         for (*letters = big; *letters >= 1; --*letters) {
             room = head_room(app, *letters);
-            for (i = 0; i < 4 && title_px(app, title_tail(english[i], parts), *letters) <= room; ++i) {}
-            if (i == 4) break;
+            for (i = 0; i < n && title_px(app, title_tail(english[i], parts), *letters) <= room; ++i) {}
+            if (i == n) break;
         }
         if (*letters >= 1) break;
     }
@@ -4086,8 +4350,8 @@ static const char* head_title(const App* app, bool tabs, char* out, size_t size,
         return out;
     }
     for (parts = 0; parts < 3; ++parts) { /* at that size, the first parts the translations leave out, alike */
-        for (i = 0; i < 4 && title_px(app, title_tail(titles[i], parts), *letters) <= room; ++i) {}
-        if (i == 4) break;
+        for (i = 0; i < n && title_px(app, title_tail(titles[i], parts), *letters) <= room; ++i) {}
+        if (i == n) break;
     }
     title = title_tail(title, parts);
     while (title_px(app, title, *letters) > room && strchr(title, '/')) title = title_tail(title, 1);
@@ -4494,8 +4758,10 @@ bool ui_games_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info
     }
     if (row < lead) {
         int index = (int)row - 1;
-        snprintf(label, sizeof app->row_text, "%s",
-                 index < recent_shown(app) ? app->recent.game[index].name : snx_tr("Show More"));
+        char queued[64];
+        job_suffix(app, index < recent_shown(app) ? app->recent.game[index].path : NULL, queued, sizeof queued);
+        snprintf(label, sizeof app->row_text, "%s%s",
+                 index < recent_shown(app) ? app->recent.game[index].name : snx_tr("Show More"), queued);
         info->label = label;
         if (index < recent_shown(app) && app->recent.game[index].driver == GUI_SWITCH)
             info->image = game_icon(app, app->recent.game[index].path);
@@ -4604,14 +4870,60 @@ static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** ab
     *about = app->games.paths[g->start + selected - head];
     return app->games.shown[g->start + selected - head];
 }
-/* a game's row in Games: its name, how many updates, DLCs and mods it has, and (games/) when an older version's
-   games/ holds it */
+/* a game's row in Games: its name, how many updates, DLCs and mods it has, (games/) when an older version's games/
+   holds it, and where it is in the queue of recompiles while it waits or runs there */
 static void game_label(const App* app, const GuiGames* games, size_t i, char* out, size_t size) {
     const char* was = game_was_old(app, games->paths[i]) ? snx_tr("  (games/)") : "";
+    char queued[64];
+    job_suffix(app, games->paths[i], queued, sizeof queued);
     if (games->addons[i]) /* its updates, DLCs and mods, which opening it offers */
-        snprintf(out, size, "%s%s  +%zu%s", app->theme.marker, games->shown[i], games->addons[i], was);
+        snprintf(out, size, "%s%s  +%zu%s%s", app->theme.marker, games->shown[i], games->addons[i], was, queued);
     else
-        snprintf(out, size, "%s%s%s", app->theme.marker, games->shown[i], was);
+        snprintf(out, size, "%s%s%s%s", app->theme.marker, games->shown[i], was, queued);
+}
+/* the path of the game Games' focus is on, recent (*recent says so) or of the page; NULL on a heading, Show More or
+   no game */
+static const char* games_focused_path(const App* app, bool* recent) {
+    size_t selected = app->browser.selected, head = app->browser.head;
+    size_t index = app->browser.page * app->browser.page_size + selected - head;
+    *recent = selected < head;
+    if (selected < head) return (int)selected < recent_shown(app) ? app->recent.game[selected].path : NULL;
+    if (selected >= head + gui_browser_items(&app->browser) || gui_games_heading(&app->games, index)) return NULL;
+    return app->games.paths[index];
+}
+/* Games' focus on the game at path as Games lists it, its page shown; false when Games does not list it */
+static bool games_focus_on(App* app, const char* path) {
+    for (size_t i = 0; path && app->browser.page_size && i < app->games.count; ++i)
+        if (app->games.paths[i] && !strcmp(app->games.paths[i], path)) {
+            app->browser.page = i / app->browser.page_size;
+            app->browser.selected = app->browser.head + i % app->browser.page_size;
+            return true;
+        }
+    return false;
+}
+/* the side box's lines of a game the queue recompiles or will: how far it is, or where it waits, and how to see it */
+static int games_queued(App* app, GuiRect r, int y) {
+    bool recent;
+    const char* path = games_focused_path(app, &recent);
+    int i = path ? gui_queue_find(&app->queue, path) : -1, top = y;
+    char line[400], where[64];
+    SDL_Color soft = rgb(app->theme.soft), ink = rgb(app->theme.ink);
+    if (i < 0) return 0;
+    if (app->queue.job[i].state == GUI_JOB_RUNNING && app->job_steps.count) {
+        char runs[3][112];
+        size_t lengths[3];
+        step_runs(&app->job_steps.step[app->job_steps.count - 1], app->theme.progress, now_ms(app), runs, lengths);
+        snprintf(line, sizeof line, snx_tr("Compiling: %s%s%s"), runs[0], runs[1], runs[2]);
+    } else if (app->queue.job[i].state == GUI_JOB_RUNNING)
+        snprintf(line, sizeof line, "%s", snx_tr("Compiling: starting"));
+    else {
+        job_where(app, i, false, where, sizeof where);
+        snprintf(line, sizeof line, snx_tr("In the queue: %s"), where);
+    }
+    y += wrap_in(app, r, r.x, y, line, 0, ink) * cell_h(app);
+    y += wrap_in(app, r, r.x, y, snx_tr("Enter or the Compile tab: its output"), 0, soft) * cell_h(app);
+    y += wrap_in(app, r, r.x, y, snx_tr("R on another game: it joins the queue"), 0, soft) * cell_h(app);
+    return y - top;
 }
 static void draw_games(App* app) {
     GuiGamesBoxes g;
@@ -4652,6 +4964,7 @@ static void draw_games(App* app) {
             y += wrap_in(app, r, r.x, y, snx_tr("JIT cache: unreadable. Play once to rebuild it."), 0, failure) *
                  cell_h(app);
         }
+        y += games_queued(app, r, y);
         y += cell_h(app);
         if (!app->games.count)
             y += wrap_in(app, r, r.x, y, snx_tr(SAY_NO_GAMES), 0, soft) * cell_h(app);
@@ -4788,6 +5101,184 @@ static void draw_run(App* app) {
                 rgb(t->failure));
     app->scale = s;
 }
+/* ---- the Compile tab: the queue's recompile in focus, its loading screen or its output, in letters a half step
+   under the text's; beside it the queue, a row each (ui.txt's scene Queue), and the Status box ---- */
+typedef struct {
+    GuiPlace place;
+    GuiRect rects[UI_QUEUE_ITEMS];
+    UiList lists[UI_QUEUE_ITEMS]; /* the rows' at UI_QUEUE_ROWS: row i is the queue's job i */
+} GuiQueueBoxes;
+/* the frame as Wide lays it out, the output three fifths, the queue's rows under the side box's head */
+static void queue_boxes(App* app, GuiQueueBoxes* q) {
+    char keys[256];
+    GuiRect r;
+    int y, s = app->scale;
+    place_screen(app, &q->place, shown_keys(app, keys, sizeof keys),
+                 GUI_SHOWS_STATUS | GUI_SHOWS_TABS | GUI_SHOWS_WIDE | GUI_SHOWS_SIDE);
+    r = inner(app, q->place.side);
+    y = q->place.side.y + head_h(app) + 2 * s; /* where pane() starts its text */
+    ui_queue_layout(gui_rect(r.x, y, r.w, SDL_max(0, q->place.side.y + q->place.side.h - y - 2 * s)), s, q->rects);
+    memset(q->lists, 0, sizeof q->lists);
+    q->lists[UI_QUEUE_ROWS].focus = (size_t)SDL_max(app->queue_focus, 0);
+    list_follow(app, GUI_LIST_QUEUE, ui_queue_follow, q->rects, UI_QUEUE_ROWS, (size_t)app->queue.count,
+                &q->lists[UI_QUEUE_ROWS]);
+}
+/* the output box of its console layout in cells of its letters: as the Compile tab lays it out, whichever screen
+   shows */
+static void job_console_size(App* app, int* cols, int* rows) {
+    GuiQueueBoxes q;
+    GuiLoadView view = app->menu.view;
+    int half, top;
+    app->menu.view = GUI_LOAD_RECOMPILE;
+    queue_boxes(app, &q);
+    app->menu.view = view;
+    top = q.place.list.y + head_h(app) + 2 * app->scale;
+    half = text_half(app);
+    *cols = SDL_max(1, inner(app, q.place.list).w / cell_w(app));
+    *rows = SDL_max(1, (q.place.list.y + q.place.list.h - top - 2 * app->scale) / cell_h(app));
+    app->half = half;
+}
+/* the Compile tab's row: its game, AOT pack for B's, and where it is (job_where); one that failed in the failure
+   colour */
+bool ui_queue_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
+    char where[64];
+    const GuiJob* job;
+    (void)width; /* a name too long for its row slides, as Games' rows do */
+    if (row >= (size_t)app->queue.count) return false;
+    job = &app->queue.job[row];
+    job_where(app, (int)row, false, where, sizeof where);
+    if (job->kind == GUI_JOB_AOT)
+        snprintf(app->row_text, sizeof app->row_text, snx_tr("%s, AOT pack  %s"), gui_queue_name(&app->queue, (int)row),
+                 where);
+    else
+        snprintf(app->row_text, sizeof app->row_text, "%s  %s", gui_queue_name(&app->queue, (int)row), where);
+    info->label = app->row_text;
+    if (job->state == GUI_JOB_FAILED) info->attr |= UI_ATTR_FAILURE;
+    return true;
+}
+static void queue_play(App* app);
+/* a row under the pointer takes the focus, its recompile shown beside; a click on one that ended well plays its game,
+   as Enter does (a finger's first tap the focus, its second the play) */
+void ui_queue_rows_row_action_cb(App* app, size_t row, uint32_t hit) {
+    bool again = (int)row == app->queue_focus;
+    app->queue_focus = (int)row;
+    if ((hit & UI_HIT_CLICK) && again && app->queue.job[row].state == GUI_JOB_OK) queue_play(app);
+}
+/* a recompile as its panel shows it once it has no output to show: one waiting, or one a later one's replaced */
+static void job_note(App* app, GuiRect r, int i) {
+    const GuiJob* job = &app->queue.job[i];
+    char line[300], where[64];
+    GuiRect text = inner(app, r);
+    int y = pane(app, r, gui_queue_name(&app->queue, i));
+    text = gui_rect(text.x, y, text.w, r.y + r.h - y);
+    if (job->state == GUI_JOB_WAITING) {
+        job_where(app, i, false, where, sizeof where);
+        snprintf(line, sizeof line, snx_tr("Waits in the queue: %s"), where);
+    } else
+        snprintf(line, sizeof line, "%s", job->said);
+    y += wrap_in(app, text, text.x, y, line, 0,
+                 rgb(job->state == GUI_JOB_FAILED ? app->theme.failure : app->theme.ink)) *
+         cell_h(app);
+    wrap_in(app, text, text.x, y, gui_queue_file(&app->queue, i), 1, rgb(app->theme.soft));
+}
+/* job i's panel in r: its loading screen in its own colours (a theme's steps layout), or its output under the Output
+   head (the console layout), its letters a half step under the text's */
+static void job_panel(App* app, GuiRect r, int i) {
+    GuiRunView v = job_view(app, i);
+    const GuiTheme* t = &app->theme;
+    if (!v.steps) {
+        job_note(app, r, i);
+        return;
+    }
+    if (t->run == GUI_RUN_STEPS) {
+        SDL_Rect safe, at;
+        int cols = app->cols, rows = app->rows, half;
+        char band[400], usage[256], how[200];
+        gui_usage_text(usage, sizeof usage, app->job_usage.available, app->job_usage.memory_bytes,
+                       app->job_usage.cpu_percent, SDL_GetNumLogicalCPUCores());
+        job_speed(app, how, sizeof how);
+        snprintf(band, sizeof band, "%s  %s", usage, how);
+        fill_rect(app, r, t->run_colors.page);
+        SDL_GetRenderViewport(app->renderer, &safe);
+        at.x = safe.x + r.x;
+        at.y = safe.y + r.y;
+        at.w = r.w;
+        at.h = r.h;
+        SDL_SetRenderViewport(app->renderer, &at);
+        half = text_half(app);
+        app->cols = SDL_min(r.w / cell_w(app), GUI_MAX_COLS);
+        app->rows = SDL_min(r.h / cell_h(app), GUI_MAX_ROWS);
+        steps_draw(app, &v, true, band, snx_tr(v.failed ? SAY_QUEUE_FAILED : SAY_QUEUE_DONE));
+        app->cols = cols;
+        app->rows = rows;
+        app->half = half;
+        SDL_SetRenderViewport(app->renderer, &safe);
+        outline(app, r, t->dim);
+    } else {
+        GuiRect text = inner(app, r);
+        int y = pane(app, r, snx_tr("Output")), half = text_half(app), x, k;
+        int cols = text.w / cell_w(app), rows = (r.y + r.h - y - 2 * app->scale) / cell_h(app);
+        SDL_SetTextureColorMod(app->font, t->ink.r, t->ink.g, t->ink.b);
+        for (k = 0; k < SDL_min(rows, v.console->rows); ++k)
+            for (x = 0; x < SDL_min(cols, v.console->cols); ++x)
+                if (v.console->cells[k][x] != ' ')
+                    glyph(app, (float)(text.x + x * cell_w(app)), (float)(y + k * cell_h(app)), v.console->cells[k][x]);
+        app->half = half;
+    }
+}
+/* the tips under the head: how the one in focus is, what runs after it */
+static void queue_tips(App* app, char* out, size_t size) {
+    int i = app->queue_focus, run = gui_queue_running(&app->queue), waiting = gui_queue_waiting(&app->queue);
+    const GuiJob* job;
+    size_t n;
+    out[0] = 0;
+    if (i < 0 || i >= app->queue.count) return;
+    job = &app->queue.job[i];
+    if (job->state == GUI_JOB_RUNNING)
+        snprintf(out, size, snx_tr("Compiling %s: %d%%"), gui_queue_name(&app->queue, i), SDL_max(job->percent, 0));
+    else if (job->state == GUI_JOB_WAITING) {
+        char where[64];
+        job_where(app, i, false, where, sizeof where);
+        snprintf(out, size, snx_tr("%s waits in the queue: %s"), gui_queue_name(&app->queue, i), where);
+    } else
+        snprintf(out, size, "%s: %s", gui_queue_name(&app->queue, i), job->said);
+    n = strlen(out);
+    if (run >= 0 && run != i && n < size) { /* after how one ended, its own period */
+        snprintf(out + n, size - n, "%s", n && out[n - 1] == '.' ? " " : ". ");
+        n = strlen(out);
+        snprintf(out + n, size - n, snx_tr("%s compiles now (%d%%)"), gui_queue_name(&app->queue, run),
+                 SDL_max(app->queue.job[run].percent, 0));
+    }
+    n = strlen(out);
+    if (waiting && n < size) snprintf(out + n, size - n, snx_tr(", %d in the queue"), waiting);
+}
+static void draw_recompile(App* app) {
+    GuiQueueBoxes q;
+    char keys[256], tips[600];
+    queue_boxes(app, &q);
+    chrome(app, &q.place);
+    if (app->queue_focus >= 0 && app->queue_focus < app->queue.count) job_panel(app, q.place.list, app->queue_focus);
+    if (q.place.side.h) {
+        pane(app, q.place.side, snx_tr("Queue"));
+        ui_queue_draw(app, q.rects, app->scale, q.lists);
+    }
+    status_box(app, q.place.status);
+    queue_tips(app, tips, sizeof tips);
+    screen_foot(app, &q.place, tips, shown_keys(app, keys, sizeof keys));
+}
+/* the Compile tab's keys, each where it does something: Del on one waiting or ended, ESC aborting the one running or
+   back to Games, Enter playing one that ended well */
+static void queue_said(const App* app, bool pad, const char** parts, int* n) {
+    int i = app->queue_focus;
+    GuiJobState state = i >= 0 && i < app->queue.count ? app->queue.job[i].state : GUI_JOB_WAITING;
+    said_add(parts, n, pad ? SAY_PAD_QUEUE_MOVE : SAY_QUEUE_MOVE);
+    if (state == GUI_JOB_OK) said_add(parts, n, pad ? SAY_PAD_QUEUE_PLAY : SAY_QUEUE_PLAY);
+    said_add(parts, n, pad ? SAY_PAD_QUEUE_TAB : SAY_QUEUE_TAB);
+    if (state != GUI_JOB_RUNNING) said_add(parts, n, pad ? SAY_PAD_QUEUE_DEL : SAY_QUEUE_DEL);
+    said_add(parts, n,
+             state == GUI_JOB_RUNNING ? (pad ? SAY_PAD_QUEUE_ABORT : SAY_QUEUE_ABORT)
+                                      : (pad ? SAY_PAD_QUEUE_BACK : SAY_QUEUE_BACK));
+}
 /* the menu's screen or a run's, in app->theme, on the render target as it is; the boxes over it */
 static void draw_screen(App* app) {
     const GuiTheme* t = &app->theme;
@@ -4800,6 +5291,8 @@ static void draw_screen(App* app) {
         draw_run(app);
     else if (app->menu.view == GUI_LOAD_GAMES)
         draw_games(app);
+    else if (app->menu.view == GUI_LOAD_RECOMPILE)
+        draw_recompile(app);
     else if (pick_screen(app))
         draw_pick(app);
     else
@@ -4844,24 +5337,31 @@ static char* find_driver(const App* app, int item) {
     free(local);
     return found ? found : snx_find_tool(name);
 }
-/* what argv prints, NULL unless it ends with 0, killed after ten seconds; owned */
+/* what argv prints, NULL unless it ends with 0, killed after ten seconds; owned. On a process of its own: the menu's
+   run and the queue's recompile go on */
 static char* capture(App* app, const char* const* argv) {
     char buffer[4096], *out = snx_strdup("");
     size_t size = 0;
     int status = 1, n;
     Uint64 until = SDL_GetTicks() + 10000;
-    if (!gui_process_start(app->process, argv, app->message, sizeof(app->message))) status = -1;
-    while (status >= 0 && !gui_process_finished(app->process, &status) && SDL_GetTicks() < until + 5000) {
+    GuiProcess* process = gui_process_create();
+    if (!process) {
+        snprintf(app->message, sizeof app->message, "%s", snx_tr("Cannot start the run: out of memory"));
+        status = -1;
+    } else if (!gui_process_start(process, argv, app->message, sizeof(app->message)))
+        status = -1;
+    while (status >= 0 && !gui_process_finished(process, &status) && SDL_GetTicks() < until + 5000) {
         char* grown;
-        n = gui_process_read(app->process, buffer, sizeof buffer);
+        n = gui_process_read(process, buffer, sizeof buffer);
         if (n > 0 && (grown = realloc(out, size + (size_t)n + 1)) != NULL) {
             out = grown;
             memcpy(out + size, buffer, (size_t)n);
             out[size += (size_t)n] = 0;
         } else if (n <= 0)
             SDL_Delay(1);
-        if (SDL_GetTicks() > until) gui_process_terminate(app->process);
+        if (SDL_GetTicks() > until) gui_process_terminate(process);
     }
+    gui_process_destroy(process);
     if (status) {
         free(out);
         return NULL;
@@ -5078,6 +5578,10 @@ static const GuiThemeKey app_keys[] = {
     {"", SNX_TR_NOOP("Side panel"), GUI_KEY_ACTION, offsetof(GuiAppForm, side), sizeof(((GuiAppForm*)0)->side), NULL, 0,
      SNX_TR_NOOP(
          "The panel beside the list. Auto: where it fits. On: under the list where it does not. F2 turns it off and on")},
+    {"", SNX_TR_NOOP("Background recompile"), GUI_KEY_ACTION, offsetof(GuiAppForm, background),
+     sizeof(((GuiAppForm*)0)->background), NULL, 0,
+     SNX_TR_NOOP("The Compile tab's: R's, B's and a game's first. Full: every core. Gentle: half of them, at a low "
+                 "priority. Either goes gently while a game plays")},
     {"", SNX_TR_NOOP("Theme Editor"), GUI_KEY_ACTION, 0, 0, NULL, 0,
      SNX_TR_NOOP("This theme's keys with a preview, saved as themes/<name>/theme.ini")},
     {"", SNX_TR_NOOP("Folders"), GUI_KEY_ACTION, offsetof(GuiAppForm, places), sizeof(((GuiAppForm*)0)->places), NULL,
@@ -5094,6 +5598,7 @@ enum {
     GUI_APP_LANGUAGE,
     GUI_APP_ANIMATIONS,
     GUI_APP_SIDE,
+    GUI_APP_BACKGROUND,
     GUI_APP_EDITOR,
     GUI_APP_PLACES,
     GUI_APP_CLEAN,
@@ -5132,6 +5637,7 @@ static void app_values(App* app) {
         snprintf(f->language, sizeof f->language, snx_tr("Auto: %s"), snx_gui_languages[snx_tr_language()].name);
     snprintf(f->animations, sizeof f->animations, "%s", app->animations_off ? snx_tr("Off") : snx_tr("On"));
     snprintf(f->side, sizeof f->side, "%s", snx_tr(side_names[app->side_box]));
+    snprintf(f->background, sizeof f->background, "%s", snx_tr(background_names[app->background_gentle]));
     moved = 0;
     for (int i = 0; i < GUI_PLACES; ++i) moved += app->place[i] != NULL;
     if (moved && app->folder_count)
@@ -5734,6 +6240,8 @@ static void run_log_follow(App* app) {
     if (!state) return;
     free(app->run_log);
     app->run_log = snx_path_join(state, "last-run.log");
+    free(app->job_log);
+    app->job_log = snx_path_join(state, "last-recompile.log");
     free(state);
 }
 /* a place picked, absolute, or its default (NULL), kept in app.ini */
@@ -5881,17 +6389,22 @@ typedef struct {
     MadeGame* game;
     size_t count;
 } MadeGames;
-static void made_read(const App* app, MadeGames* made) {
+/* the games made in dir (recompiled/ or a folder of the Library's recompiled ones), each with the dump it names */
+static void made_read_dir(MadeGames* made, const char* dir) {
     char** names = NULL;
     size_t count = 0, i;
-    *made = (MadeGames){0};
-    if (!app->games_dir || snx_list_dir(app->games_dir, &names, &count) || !count) return;
-    made->game = (MadeGame*)snx_alloc(count * sizeof *made->game);
+    MadeGame* grown;
+    if (!dir || snx_list_dir(dir, &names, &count) || !count) return;
+    if (!(grown = (MadeGame*)realloc(made->game, (made->count + count) * sizeof *grown))) {
+        snx_free_strings(names, count);
+        return;
+    }
+    made->game = grown;
     for (i = 0; i < count; ++i) {
-        char *program = gui_folder_game(app->games_dir, names[i]), *folder, *dump;
+        char *program = gui_folder_game(dir, names[i]), *folder, *dump;
         int recorded = 0;
         if (!program) continue;
-        folder = snx_path_join(app->games_dir, names[i]);
+        folder = snx_path_join(dir, names[i]);
         dump = snx_game_source(folder, names[i], &recorded);
         free(folder);
         if (!recorded) {
@@ -5902,6 +6415,16 @@ static void made_read(const App* app, MadeGames* made) {
         made->game[made->count++] = (MadeGame){program, dump};
     }
     snx_free_strings(names, count);
+}
+/* the games made in recompiled/ and in the Library's recompiled folders, the places a dump's game is made in
+   (dest_dirs): a game the driver recompiles stays where it is */
+static void made_read(const App* app, MadeGames* made) {
+    *made = (MadeGames){0};
+    made_read_dir(made, app->games_dir);
+    for (int i = 0; i < app->folder_count; ++i)
+        if (app->folders_library[i] == GUI_LIBRARY_RECOMPILED &&
+            !(app->games_dir && snx_same_file(app->folders[i], app->games_dir)))
+            made_read_dir(made, app->folders[i]);
 }
 /* the program of the game made from dump, else NULL */
 #ifdef SDL_PLATFORM_IOS
@@ -6374,6 +6897,17 @@ static void text_left(App* app) {
     snprintf(app->size_line, sizeof app->size_line, snx_tr("Keep this UI scale? Back to %s in %d s"), was,
              (int)((app->size_until - now + 999) / 1000));
 }
+/* Move Old Files and Clean Old Settings move or rewrite what a recompile of the queue may use (a game's folder, its
+   .ini, where the driver records its dump): what (English) waits while the queue has one to run, the note saying
+   which; true then */
+static bool queue_waits(App* app, const char* what) {
+    int run = gui_queue_running(&app->queue);
+    if (!jobs_live(app)) return false;
+    if (run < 0) run = gui_queue_next(&app->queue);
+    snprintf(app->editor.note, sizeof app->editor.note, snx_tr("%s is compiling (%d%%): %s waits until the queue ends"),
+             gui_queue_name(&app->queue, run), SDL_max(app->queue.job[run].percent, 0), snx_tr(what));
+    return true;
+}
 /* the App's rows: the theme and the language go round, either way, UI scale opens its box, and the editor opens */
 static void app_action(App* app, int row, int step) {
     if (row == GUI_APP_THEME)
@@ -6386,6 +6920,8 @@ static void app_action(App* app, int row, int step) {
     } else if (row == GUI_APP_SIDE) {
         app->side_box = (app->side_box + (step < 0 ? 2 : 1)) % 3;
         layout(app);
+    } else if (row == GUI_APP_BACKGROUND) { /* the one running follows at once (job_priority), its threads as started */
+        app->background_gentle = !app->background_gentle;
     } else if (row == GUI_APP_LANGUAGE) {
         app->language = (app->language + (step < 0 ? snx_gui_language_count : 1)) % (snx_gui_language_count + 1);
         language_apply(app);
@@ -6397,17 +6933,17 @@ static void app_action(App* app, int row, int step) {
         open_folders(app, 0);
         return;
     } else if (row == GUI_APP_CLEAN) {
-        if (!step) clean_row(app);
+        if (!step && !queue_waits(app, SNX_TR_NOOP("Clean Old Settings"))) clean_row(app);
         return;
     } else if (row == GUI_APP_MOVE) {
-        if (!step) move_row(app);
+        if (!step && !queue_waits(app, SNX_TR_NOOP("Move Old Files"))) move_row(app);
         return;
     } else if (row == GUI_APP_RESET) {
         if (!step) settings_reset_ask(app);
         return;
     }
     if (row == GUI_APP_THEME || row == GUI_APP_TEXT || row == GUI_APP_LANGUAGE || row == GUI_APP_ANIMATIONS ||
-        row == GUI_APP_SIDE)
+        row == GUI_APP_SIDE || row == GUI_APP_BACKGROUND)
         app_save(app);
     app_values(app);
 }
@@ -7702,8 +8238,9 @@ static void data_moved(App* app) {
     free(app->folders_file);
     free(app->app_file);
     free(app->run_log);
+    free(app->job_log);
     free(app->users_dir);
-    app->settings_file = app->folders_file = app->app_file = app->run_log = app->users_dir = NULL;
+    app->settings_file = app->folders_file = app->app_file = app->run_log = app->job_log = app->users_dir = NULL;
     gui_settings_free(&app->settings);
     open_files(app);
     space_start(app);
@@ -8497,6 +9034,7 @@ static int play(App* app, const char* game) {
     argv[0] = option;
     argv[1 + gui_settings_options(s, 0, argv + 1)] = NULL;
     ok = gui_android_play(argv, app->message, sizeof(app->message));
+    if (ok) app->playing = true; /* the queue's recompile goes gently until the menu shows again */
     free(argv);
     free(option);
     return ok;
@@ -8515,25 +9053,40 @@ static int ready(App* app) {
     free(folder);
     return ok;
 }
-/* the run in its notification: the game, the step on the screen and the percent, as they change, a second apart at
-   most (Android drops notifications that come faster) */
+/* the run in its notification, which keeps the app going behind others: the menu's while one runs, else the queue's
+   recompile running. The game, the step on the screen and the percent, as they change, a second apart at most
+   (Android drops notifications that come faster); once neither runs, how the last ended stays, while the app is behind
+   others (seen here, the end needs no word) */
 static void tell(App* app) {
     char name[96], runs[3][112], line[sizeof app->told];
     size_t lengths[3];
-    int percent = gui_steps_percent(&app->steps);
+    int job = gui_queue_running(&app->queue), percent;
+    const GuiSteps* steps = app->menu.running ? &app->steps : job >= 0 ? &app->job_steps : NULL;
     Uint64 now = SDL_max(SDL_GetTicks(), 1);
+    if (!steps) {
+        if (app->telling) gui_android_ran(app->hidden && app->told_result ? snx_tr(app->told_result) : NULL);
+        app->telling = false;
+        app->told_ms = 0;
+        return;
+    }
+    percent = gui_steps_percent(steps);
     line[0] = 0;
-    if (app->steps.count) {
-        step_runs(&app->steps.step[app->steps.count - 1], app->theme.progress, now_ms(app), runs, lengths);
+    if (steps->count) {
+        step_runs(&steps->step[steps->count - 1], app->theme.progress, now_ms(app), runs, lengths);
         snprintf(line, sizeof line, "%s%s%s", runs[0], runs[1], runs[2]);
     }
-    if (app->told_ms && (now - app->told_ms < 1000 || (percent == app->told_percent && !strcmp(line, app->told))))
+    if (app->telling && app->told_ms &&
+        (now - app->told_ms < 1000 || (percent == app->told_percent && !strcmp(line, app->told))))
         return;
-    run_name(app, name, sizeof name);
+    if (app->menu.running)
+        run_name_of(&app->steps, app->native != 0, app->file, name, sizeof name);
+    else
+        snprintf(name, sizeof name, "%s", gui_queue_name(&app->queue, job));
     gui_android_running(name, line, percent);
     snprintf(app->told, sizeof app->told, "%s", line);
     app->told_percent = percent;
     app->told_ms = now;
+    app->telling = true;
 }
 #endif
 #ifdef SDL_PLATFORM_IOS
@@ -8955,16 +9508,25 @@ static void change_answer(App* app, GuiAsk ask, bool taken) {
         folder_remove(app, app->folder_off);
 }
 /* the functions an AOT pack used, from the driver's line, -1 when it printed none */
-static int aot_built(const App* app) {
+static int aot_built(const GuiSteps* steps) {
     int i, n;
-    for (i = app->steps.notes - 1; i >= 0; --i)
-        if (sscanf(app->steps.note[i].text, "AOT pack: %d", &n) == 1) return n;
+    for (i = steps->notes - 1; i >= 0; --i)
+        if (sscanf(steps->note[i].text, "AOT pack: %d", &n) == 1) return n;
     return -1;
 }
 static bool watch_get(App* app, uint64_t* stamp);
+static void job_pump(App* app);
+static void taskbar(App* app);
+static void games_back(App* app, const char* path);
+#ifdef SDL_PLATFORM_ANDROID
+static void tell(App* app);
+#endif
 static void pump(App* app) {
     keys_left(app);
     text_left(app);
+    job_pump(app);
+    if (!app->queue.count && app->menu.view == GUI_LOAD_RECOMPILE)
+        games_back(app, NULL); /* its tab went with its last line */
     if (app->menu.running) {
         char buffer[4096];
         /* Bounded work per frame keeps keyboard/window events responsive even
@@ -8978,9 +9540,6 @@ static void pump(App* app) {
             app->has_output = true;
         }
         recent_name(app, "LAUNCH");
-#ifdef SDL_PLATFORM_ANDROID
-        tell(app);
-#endif
         int status;
         if (gui_process_finished(app->process, &status)) {
             app->menu.running = false;
@@ -9000,31 +9559,12 @@ static void pump(App* app) {
             recent_name(app, "RECOMPILE"); /* a run that ended before its game loaded */
             recent_as_games(app);          /* a dump's run made its game */
             app->menu.view = GUI_LOAD_NONE;
-            if (app->aot_pack && app->aborting)
-                snprintf(app->message, sizeof(app->message), "%s", snx_tr("AOT pack build aborted."));
-            else if (app->aot_pack && app->abnormal_exit)
-                snprintf(app->message, sizeof(app->message), snx_tr("AOT pack build failed (status %d)."), status);
-            else if (app->aot_pack) {
-                int built = aot_built(app);
-                if (built > 0)
-                    snprintf(app->message, sizeof(app->message), snx_tr("AOT pack built from %d cached function%s."),
-                             built, built == 1 ? "" : "s");
-                else if (built == 0)
-                    snprintf(app->message, sizeof(app->message), "%s",
-                             snx_tr("AOT pack built, but no cached function matched the game."));
-                else
-                    snprintf(app->message, sizeof(app->message), "%s", snx_tr("AOT pack built."));
-            } else if (app->aborting)
+            if (app->aborting)
                 snprintf(app->message, sizeof(app->message), "%s", snx_tr("Aborted with ESC."));
             else if (app->abnormal_exit)
                 snprintf(app->message, sizeof(app->message), snx_tr("Program ended abnormally (status %d)."), status);
             else
                 snprintf(app->message, sizeof(app->message), snx_tr("The run ended with status %d."), status);
-            if (app->aot_pack) {
-                app->aot_pack = false;
-                free(app->aot_cache);
-                app->aot_cache = NULL;
-            }
             recent_note(app);
             app->aborting = false;
             app->confirm.shown = false; /* a run that ended while asking has nothing left to abort */
@@ -9036,8 +9576,8 @@ static void pump(App* app) {
                 app->play_later = true;
             else if (!app->abnormal_exit && ready(app))
                 leave_run(app);
-            /* seen here, the end needs no word; behind other apps one stays until the menu shows */
-            gui_android_ran(!app->hidden ? NULL : app->abnormal_exit ? snx_tr("Failed") : snx_tr("Ready"));
+            /* seen here, the end needs no word; behind other apps one stays until the menu shows (tell) */
+            app->told_result = app->abnormal_exit ? SNX_TR_NOOP("Failed") : SNX_TR_NOOP("Ready");
 #elif defined(SDL_PLATFORM_IOS)
             /* a phone has no ESC to dismiss the end of the run: a prepared game goes back to the menu, where it is
                listed; a failure stays on the screen with its messages */
@@ -9056,9 +9596,14 @@ static void pump(App* app) {
         if (ready(app)) leave_run(app);
     }
 #endif
+#ifdef SDL_PLATFORM_ANDROID
+    tell(app);
+#endif
+    taskbar(app);
     Uint64 now = SDL_GetTicks();
     if (!app->sampled || now - app->sampled >= 500) {
         app->usage = gui_process_usage(app->process);
+        app->job_usage = gui_process_usage_of(app->job_process);
         app->sampled = now;
     }
     if (app->left_shown && (!app->left_at || now - app->left_at >= 5000)) { /* the player may have moved them */
@@ -9194,13 +9739,80 @@ static void dests_pointer(App* app, float x, float y, bool click) {
     dests_place(app, &c, question, sizeof question);
     if (!choices_pointer(app, &c, x, y, click, &on) && click && !on) dest_take(app, -1);
 }
+static void job_add(App* app, const char* const* argv, const char* file, bool native, bool prepared, GuiJobKind kind);
+/* file, a dump whose game is made: asked whether that game plays or the dump recompiles (GUI_ASK_MADE), file kept */
+static void made_ask(App* app, char* file) {
+    MadeGames made;
+    const char* program;
+    char *shown, *folder;
+    made_read(app, &made);
+    program = made_program(&made, file);
+    shown = program ? gui_game_shown(program) : snx_strdup(file);
+    folder = program ? snx_dirname(program) : snx_strdup("?");
+    snprintf(app->ask_line, sizeof app->ask_line, snx_tr("%s is compiled already, in %s"), shown, folder);
+    free(folder);
+    free(shown);
+    made_free(&made);
+    free(app->made_file);
+    app->made_file = file;
+    app->made_item = app->menu.selected;
+    gui_confirm_open(&app->confirm, GUI_ASK_MADE, false);
+}
+/* the answer about a made game's dump: Play runs the dump, its driver playing the game made (one gone since compiles
+   first), Recompile recompiles it as R does; Back neither */
+static void made_answer(App* app, bool taken, bool second) {
+    char* file = app->made_file;
+    app->made_file = NULL;
+    if (!taken || !file) {
+        free(file);
+        return;
+    }
+    int item = app->menu.selected; /* the menu keeps its item, as a recent game's run does (open_recent) */
+    app->menu.selected = app->made_item;
+    app->recompile = second;
+    app->made_ok = !second;
+    launch(app, file, false);
+    app->recompile = app->made_ok = false;
+    app->menu.selected = item;
+}
+static void queue_show(App* app, int i);
 static void launch(App* app, char* absolute, bool prepared) {
+    int queued;
     if (!absolute || !snx_is_file(absolute)) {
         snprintf(app->message, sizeof(app->message), "%s",
                  snx_tr("That path is not a readable file. Try again or press ESC."));
         free(absolute);
         return;
     }
+    /* a game the queue recompiles, or will, cannot be played meanwhile (its folder holds a new library with the old
+       runtime copy and stamp, the program written last): its recompile shows instead */
+    if (!app->recompile && (queued = gui_queue_find(&app->queue, absolute)) >= 0) {
+        queue_show(app, queued);
+        free(absolute);
+        return;
+    }
+#ifdef SDL_PLATFORM_IOS
+    /* the driver runs on a thread of the app, the game in it once the menu closes: one at a time */
+    if (!app->recompile && jobs_live(app)) {
+        int run = gui_queue_running(&app->queue);
+        snprintf(app->message, sizeof app->message,
+                 snx_tr("%s is compiling (%d%%): the game plays once the queue ends"),
+                 gui_queue_name(&app->queue, run >= 0 ? run : gui_queue_next(&app->queue)),
+                 run >= 0 ? SDL_max(app->queue.job[run].percent, 0) : 0);
+        free(absolute);
+        return;
+    }
+#endif
+    /* a dump, package or ROM a game was made from already: played or recompiled, as the player answers (made_answer;
+       DraVee, 2026-10-24) */
+    if (!app->recompile && !app->made_ok && !prepared && app->menu.selected != GUI_LINUX && made_from(app, absolute)) {
+        made_ask(app, absolute);
+        return;
+    }
+    /* a game opened that no game of the library was made from yet compiles first through the queue, as R's recompile
+       does: the Compile tab shows it, and it plays once it ended if the tab still shows it (job_play) */
+    bool compile = !app->recompile && !prepared && app->menu.selected != GUI_LINUX && !made_from(app, absolute);
+    bool make = app->recompile || compile; /* the driver's -r: a run that makes the game and plays nothing */
     bool native = prepared && app->menu.selected == GUI_SWITCH;
     /* another console's made game plays through its driver in its folder (--game=), as its copy of the runtime does */
     char* game_dir = prepared && app->menu.selected != GUI_SWITCH ? snx_dirname(absolute) : NULL;
@@ -9245,8 +9857,9 @@ static void launch(App* app, char* absolute, bool prepared) {
         free(game_option);
         return;
     }
-    /* a dump made into the folder the player picks, when the recompiled library has more than one that can take it */
-    if (app->menu.selected == GUI_SWITCH && !prepared && !app->dest_out) {
+    /* a dump made into the folder the player picks, when the recompiled library has more than one that can take it; one
+       made already is recompiled where it is */
+    if (app->menu.selected == GUI_SWITCH && !prepared && !app->dest_out && !made_from(app, absolute)) {
         const char* dirs[GUI_FOLDERS_MAX + 1];
         if (dest_dirs(app, dirs) > 1) {
             dests_open(app, absolute, prepared);
@@ -9257,6 +9870,7 @@ static void launch(App* app, char* absolute, bool prepared) {
     }
     /* a dump not extracted yet may need more room than its disks have: asked first, Run Anyway pressed twice */
     if (folders && !app->room_ok && !room_fits(app, absolute)) {
+        free(app->made_file);
         free(app->room_file);
         app->room_file = absolute;
         app->room_item = app->menu.selected;
@@ -9273,11 +9887,11 @@ static void launch(App* app, char* absolute, bool prepared) {
     char* out = NULL; /* a dump's extraction in the picked extractions folder */
     size_t n = 1;
     argv[0] = direct ? absolute : driver;
-    if (app->recompile) argv[n++] = "-r";
+    if (make) argv[n++] = "-r";
     if (!direct) argv[n++] = game_option ? game_option : absolute;
     /* Switch options only, never guest argv for the CPU-only Linux driver or the 3DS one; R's recompile takes no
        option of a run. The drivers work in the menu's data folder, so they list the same games */
-    if (app->recompile && app->menu.selected == GUI_SWITCH && gui_settings_tmpfs(s)) argv[n++] = gui_settings_tmpfs(s);
+    if (make && app->menu.selected == GUI_SWITCH && gui_settings_tmpfs(s)) argv[n++] = gui_settings_tmpfs(s);
     if (!direct && app->menu.selected == GUI_SWITCH) n += gui_settings_recompile(s, argv + n);
     /* B's pack: the cache the profile run left, and the level and hook its key was made with. -O after the
        settings' --opt= so the matched level is the one the build uses */
@@ -9288,12 +9902,11 @@ static void launch(App* app, char* absolute, bool prepared) {
         argv[n++] = app->aot_opt;
         if (app->aot_hook) argv[n++] = "--hook-direct-calls";
     }
-    if (app->menu.selected == GUI_SWITCH && !app->recompile) n += gui_settings_options(s, 1, argv + n);
+    if (app->menu.selected == GUI_SWITCH && !make) n += gui_settings_options(s, 1, argv + n);
     /* Debug's SLP vectorizer, which R's recompile takes too: a run passes it with the game's settings */
-    if (app->menu.selected == GUI_SWITCH && app->recompile) n += gui_settings_one(s, "slp_vectorizer", argv + n);
+    if (app->menu.selected == GUI_SWITCH && make) n += gui_settings_one(s, "slp_vectorizer", argv + n);
     /* Extract dump, which both drivers take, for a run and for R's recompile: off, nothing is extracted */
-    if ((app->menu.selected == GUI_3DS || (app->menu.selected == GUI_SWITCH && app->recompile)) &&
-        gui_settings_extract(s))
+    if ((app->menu.selected == GUI_3DS || (app->menu.selected == GUI_SWITCH && make)) && gui_settings_extract(s))
         argv[n++] = gui_settings_extract(s);
     if (folders || (native && !direct)) {
         argv[n++] = "--data";
@@ -9305,8 +9918,8 @@ static void launch(App* app, char* absolute, bool prepared) {
         argv[n++] = "--outdir";
         argv[n++] = app->dest_out ? app->dest_out : app->games_dir;
     }
-    /* the GBA's window starts fullscreen as a Switch game's does */
-    if (app->menu.selected == GUI_GBA) n += gui_settings_one(s, "fullscreen", argv + n);
+    /* the GBA's window starts fullscreen as a Switch game's does; a compile opens none */
+    if (app->menu.selected == GUI_GBA && !make) n += gui_settings_one(s, "fullscreen", argv + n);
     /* the picked extractions folder, which Extract to tmpfs leaves for the temporary one, and a Switch dump read in
        place (Extract dump off) has no use for */
     if (folders && app->place[GUI_PLACE_WORK] && app->menu.selected == GUI_SWITCH && !nro_file(absolute) &&
@@ -9316,6 +9929,20 @@ static void launch(App* app, char* absolute, bool prepared) {
         argv[n++] = out;
     }
     argv[n] = NULL;
+    /* R's, B's and a first compile, whichever console's: the queue runs them behind the screens, one at a time */
+    if (make) {
+        job_add(app, argv, absolute, native, prepared,
+                compile         ? GUI_JOB_COMPILE
+                : app->aot_pack ? GUI_JOB_AOT
+                                : GUI_JOB_RECOMPILE);
+        free(argv);
+        free(out);
+        free(app->dest_out); /* the run's, which argv held until here: a next one asks again */
+        app->dest_out = NULL;
+        free(driver);
+        free(absolute);
+        return;
+    }
 #ifndef SDL_PLATFORM_ANDROID /* there the data folder's config/, which every game reads (gamepad.c) */
     pad_mappings_share(app);
 #endif
@@ -9381,6 +10008,421 @@ static void room_answer(App* app, bool taken) {
     app->room_ok = false;
     app->recompile = false;
 }
+/* ---- the queue's runner: a recompile started when none runs, read each frame, the next one started as it ends ---- */
+/* a game the menu started plays: its run's process, or on Android the game's activity, in front of the menu */
+static bool game_plays(const App* app) {
+#ifdef SDL_PLATFORM_ANDROID
+    return app->menu.running || app->playing;
+#else
+    return app->menu.running;
+#endif
+}
+/* a recompile of the queue goes gently: Background recompile Gentle, or a game playing */
+static bool job_gentle(const App* app) { return app->background_gentle || game_plays(app); }
+/* how the one running goes, for the Status box: Full, or Gentle and why (the option, a game playing, a priority the
+   system keeps low until it ends), with the threads it was started with when they were halved */
+static void job_speed(App* app, char* out, size_t size) {
+    size_t n;
+    if (app->job_kept_low && !job_gentle(app))
+        snprintf(out, size, snx_tr("Gentle until it ends: %s"), app->job_said);
+    else if (!app->job_low)
+        snprintf(out, size, "%s", snx_tr("Full"));
+    else if (!app->background_gentle)
+        snprintf(out, size, "%s", snx_tr("Gentle, a game plays"));
+    else
+        snprintf(out, size, "%s", snx_tr("Gentle"));
+    n = strlen(out);
+    if (app->job_threads && n < size) snprintf(out + n, size - n, snx_tr(", %d threads"), app->job_threads);
+    n = strlen(out);
+    if (app->job_said[0] && !app->job_kept_low && n < size) /* the priority it could not have */
+        snprintf(out + n, size - n, " (%s)", app->job_said);
+}
+/* the threads a recompile of the queue takes at full speed: the AOT threads picked, else one a core */
+static int job_cores(App* app) {
+    const char* picked = gui_settings_value(settings_of(app), "aot_threads");
+    int n = picked ? SDL_atoi(picked) : 0;
+    return n > 0 ? n : SDL_max(1, SDL_GetNumLogicalCPUCores());
+}
+/* the Compile tab, its focus on job i */
+static void queue_show(App* app, int i) {
+    if (app->editing) leave_editor(app);
+    app->menu.view = GUI_LOAD_RECOMPILE;
+    app->queue_focus = SDL_max(0, i);
+    app->message[0] = 0;
+}
+/* the output box of the Compile tab's console layout, in cells of the letters a half step under the text's */
+static void job_console_size(App* app, int* cols, int* rows);
+/* the first recompile waiting, when none runs: its argv, half the threads and a low priority while it goes gently
+   (job_gentle); one that cannot start ends there, saying why, and the next is tried */
+static void job_start(App* app) {
+    const char* argv[GUI_QUEUE_ARGS + 1];
+    char threads[32], why[256];
+    int i, n, cols, rows;
+    GuiJob* job;
+    bool gentle;
+    while ((i = gui_queue_next(&app->queue)) >= 0 && gui_queue_running(&app->queue) < 0) {
+        job = &app->queue.job[i];
+        n = gui_queue_argv(&app->queue, i, argv);
+        gentle = job_gentle(app);
+        app->job_threads = gentle ? SDL_max(1, job_cores(app) / 2) : 0;
+        if (gentle) { /* after the settings' --aot_threads=, which the last one given replaces */
+            snprintf(threads, sizeof threads, "--aot_threads=%d", app->job_threads);
+            argv[n++] = threads;
+            argv[n] = NULL;
+        }
+        app->job_said[0] = 0;
+        app->job_kept_low = false;
+        if (!gui_process_low(app->job_process, gentle, why, sizeof why)) /* iOS's thread: its threads alone */
+            snprintf(app->job_said, sizeof app->job_said, "%s", why);
+        app->job_low = gentle;
+        if (!gui_process_start(app->job_process, argv, why, sizeof why)) {
+            job->state = GUI_JOB_FAILED;
+            job->status = -1;
+            job->ended_ms = SDL_max(now_ms(app), 1);
+            snprintf(job->said, sizeof job->said, "%s", why);
+            snprintf(app->message, sizeof app->message, "%s: %s", gui_queue_name(&app->queue, i), why);
+            continue;
+        }
+        job->state = GUI_JOB_RUNNING;
+        job->started_ms = SDL_max(now_ms(app), 1);
+        job->percent = -1;
+        app->job_aborting = false;
+        gui_steps_reset(&app->job_steps);
+        job_console_size(app, &cols, &rows);
+        gui_console_init(&app->job_console, cols, rows);
+        /* the log holds the queue's recompiles since one started with no ended one's line left: a failure's output
+           stays for Share Log while the next ones run */
+        bool fresh = true;
+        for (int k = 0; k < app->queue.count; ++k) fresh = fresh && app->queue.job[k].state < GUI_JOB_OK;
+        if (app->job_out) fclose(app->job_out);
+        app->job_out = app->job_log ? snx_fopen(app->job_log, fresh ? "wb" : "ab") : NULL;
+        for (int k = 0; app->job_out && argv[k]; ++k) fprintf(app->job_out, "%s%s", k ? " " : "$ ", argv[k]);
+        if (app->job_out) fputc('\n', app->job_out);
+#ifdef SDL_PLATFORM_ANDROID
+        tell(app); /* now, while the menu may show: Android 12 starts no notification's service for an app behind */
+#endif
+    }
+}
+/* the tips for job i, which joined the queue behind the one running: where it waits, and how far that one went */
+static void join_said(App* app, int i, int run, const char* name) {
+    char where[64];
+    job_where(app, i, false, where, sizeof where);
+    snprintf(app->message, sizeof app->message, snx_tr("%s joins the queue: %s. %s compiles now (%d%%)"), name, where,
+             gui_queue_name(&app->queue, run), SDL_max(app->queue.job[run].percent, 0));
+}
+/* R's, B's or a first compile's run, its argv as launch() made it: into the queue, started at once when none runs, the
+   Compile tab then showing it; else the tips say where it waits, but for a compile, a game opened to play, whose line
+   the tab shows. Games' recent rows have it first, as a run that starts */
+static void job_add(App* app, const char* const* argv, const char* file, bool native, bool prepared, GuiJobKind kind) {
+    char name[256], listed[4200];
+    const char* shown = NULL;
+    bool added;
+    int i, run = gui_queue_running(&app->queue);
+    /* the path Games or the recent games list it by, and the name Games shows it as */
+    snprintf(listed, sizeof listed, "%s", file);
+    for (size_t g = 0; !shown && g < app->games.count; ++g)
+        if (app->games.paths[g] && !gui_games_heading(&app->games, g) &&
+            (!strcmp(app->games.paths[g], file) || snx_same_file(app->games.paths[g], file))) {
+            shown = app->games.shown[g];
+            snprintf(listed, sizeof listed, "%s", app->games.paths[g]);
+        }
+    for (int r = 0; !shown && r < app->recent.count; ++r)
+        if (!strcmp(app->recent.game[r].path, file)) shown = app->recent.game[r].name;
+    if (shown)
+        snprintf(name, sizeof name, "%s", shown);
+    else {
+        const char *leaf = file + strlen(file), *dot;
+        while (leaf > file && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
+        dot = strrchr(leaf, '.');
+        snprintf(name, sizeof name, "%.*s", (int)(dot && dot != leaf ? (size_t)(dot - leaf) : strlen(leaf)), leaf);
+    }
+    i = gui_queue_add(&app->queue, argv, file, listed, name, kind, native, &added);
+    if (i < 0) {
+        snprintf(app->message, sizeof app->message,
+                 snx_tr("%s is not in the queue: it holds %d compiles, and its run %d options at most"), name,
+                 GUI_QUEUE_MAX, GUI_QUEUE_ARGS - 2);
+        return;
+    }
+    if (added) app->queue.job[i].console = app->menu.selected;
+    if (app->recent_file && !gui_recent_add(&app->recent, file, app->menu.selected, prepared)) {
+        /* the rows under the recent games moved: Games' focus kept on the game R was pressed on, the recent one first */
+        bool recent = false;
+        const char* was = app->menu.view == GUI_LOAD_GAMES ? games_focused_path(app, &recent) : NULL;
+        char* focus = was ? snx_strdup(was) : NULL;
+        recent_changed(app);
+        layout(app); /* its page as long as the rows over it leave it */
+        if (focus && recent)
+            app->browser.selected = 0;
+        else if (focus)
+            games_focus_on(app, focus);
+        free(focus);
+    }
+    if (!added || run < 0 || kind == GUI_JOB_COMPILE) { /* the tab first: a start that fails says why there */
+        queue_show(app, i);
+        job_start(app);
+        if (!added)
+            snprintf(app->message, sizeof app->message, snx_tr("%s is in the queue already"), name);
+        else if (run >= 0)
+            join_said(app, i, run, name);
+        return;
+    }
+    join_said(app, i, run, name);
+}
+/* job i's line out of the queue, the focus kept on the row it was on */
+static void queue_drop(App* app, int i) {
+    gui_queue_remove(&app->queue, i);
+    if (app->queue_focus > i) --app->queue_focus;
+    app->queue_focus = SDL_clamp(app->queue_focus, 0, SDL_max(app->queue.count - 1, 0));
+}
+/* a first compile's game, once it ended well: played when the Compile tab still shows its line and no game runs, as
+   the run that compiled and played it at once went (DraVee's pick, 2026-10-24); else the tips say it is ready */
+static void job_play(App* app, int i) {
+    const char* name = gui_queue_name(&app->queue, i);
+    bool shown = app->menu.view == GUI_LOAD_RECOMPILE && app->queue_focus == i && !app->menu.running && !app->editing &&
+                 !app->setup_on;
+    MadeGames made;
+    const char* program;
+    made_read(app, &made);
+    program = made_program(&made, gui_queue_file(&app->queue, i));
+    if (!program)
+        snprintf(app->message, sizeof app->message,
+                 snx_tr("%s: compiled, but no game of %s names it as its source, so it does not play"), name,
+                 app->games_dir ? app->games_dir : "recompiled/");
+    else if (!shown)
+        snprintf(app->message, sizeof app->message, snx_tr("%s: compiled, Enter on it plays it"), name);
+    else {
+        app->menu.selected = app->queue.job[i].console;
+        launch(app, snx_strdup(program), true);
+    }
+    made_free(&made);
+}
+/* the recompile running ended with status: its line kept as it ended (its output with it, for its row), the end of
+   its log; one aborted taken out. Games and the recent ones follow what it made */
+static void job_ended(App* app, int i, int status) {
+    GuiJob* job = &app->queue.job[i];
+    bool aborted = app->job_aborting, failed = aborted || status != 0;
+    const char* name = gui_queue_name(&app->queue, i);
+    const GuiStep* named = gui_steps_last(&app->job_steps, "RECOMPILE");
+    char took[64];
+    Uint64 now = SDL_max(now_ms(app), 1);
+    gui_steps_finish(&app->job_steps, !failed);
+    if (app->job_out) {
+        fprintf(app->job_out, "\n[%s, status %d]\n", aborted ? "aborted" : "ended", status);
+        fclose(app->job_out);
+        app->job_out = NULL;
+    }
+    /* the recent game named as its recompile named it, as a run of the menu's is */
+    if (app->recent_file && named && named->detail[0] && !job->native &&
+        gui_recent_rename(&app->recent, gui_queue_file(&app->queue, i), named->detail))
+        recent_changed(app);
+    recent_as_games(app); /* a dump's recompile made its game */
+    space_start(app);     /* it took disk */
+    if (job->kind == GUI_JOB_AOT) app->aot_checked = 0;
+    app->job_aborting = false;
+    app->job_low = app->job_kept_low = false;
+    /* Android's question before an abort, asked of this one: the next is no answer's */
+    if (app->confirm.shown && app->confirm.ask == GUI_ASK_ABORT && !app->menu.running) app->confirm.shown = false;
+    if (aborted) {
+        snprintf(app->message, sizeof app->message, snx_tr("%s: aborted with ESC"), name);
+        queue_drop(app, i);
+        return;
+    }
+    job->state = failed ? GUI_JOB_FAILED : GUI_JOB_OK;
+    job->status = status;
+    job->ended_ms = now;
+    if (gui_steps_percent(&app->job_steps) >= 0) job->percent = gui_steps_percent(&app->job_steps);
+    {
+        Uint64 s = (now - SDL_min(job->started_ms, now)) / 1000;
+        if (s >= 60)
+            snprintf(took, sizeof took, snx_tr("%d min %d s"), (int)(s / 60), (int)(s % 60));
+        else
+            snprintf(took, sizeof took, snx_tr("%d s"), (int)s);
+    }
+    if (job->kind == GUI_JOB_AOT) {
+        int built = aot_built(&app->job_steps);
+        if (failed)
+            snprintf(job->said, sizeof job->said, snx_tr("AOT pack build failed (status %d)."), status);
+        else if (built > 0)
+            snprintf(job->said, sizeof job->said, snx_tr("AOT pack built from %d cached function%s."), built,
+                     built == 1 ? "" : "s");
+        else if (built == 0)
+            snprintf(job->said, sizeof job->said, "%s",
+                     snx_tr("AOT pack built, but no cached function matched the game."));
+        else
+            snprintf(job->said, sizeof job->said, "%s", snx_tr("AOT pack built."));
+    } else if (job->kind == GUI_JOB_COMPILE) {
+        if (failed)
+            snprintf(job->said, sizeof job->said, snx_tr("Compile failed (status %d)."), status);
+        else
+            snprintf(job->said, sizeof job->said, snx_tr("Compiled in %s."), took);
+    } else if (failed)
+        snprintf(job->said, sizeof job->said, snx_tr("Recompile failed (status %d)."), status);
+    else
+        snprintf(job->said, sizeof job->said, snx_tr("Recompiled in %s."), took);
+    app->ended_console = app->job_console;
+    app->ended_steps = app->job_steps;
+    app->ended_serial = job->serial;
+    if (failed) app->log_due = true; /* Share Log blinks, its log holding this one's output */
+    snprintf(app->message, sizeof app->message, "%s: %s", name, job->said);
+#ifdef SDL_PLATFORM_ANDROID
+    app->told_result = failed                         ? SNX_TR_NOOP("Failed")
+                       : job->kind == GUI_JOB_AOT     ? SNX_TR_NOOP("AOT pack built")
+                       : job->kind == GUI_JOB_COMPILE ? SNX_TR_NOOP("Compiled")
+                                                      : SNX_TR_NOOP("Recompiled");
+#endif
+    if (job->kind == GUI_JOB_COMPILE && !failed) job_play(app, i);
+}
+/* the priority of the one running as job_gentle says, now: low while a game plays, the option's once it ended; one the
+   system keeps low stays so until it ends (job_kept_low), job_said saying why */
+static void job_priority(App* app) {
+    bool want = job_gentle(app);
+    char why[128];
+    if (want == app->job_low || (!want && app->job_kept_low)) return;
+    if (!gui_process_low(app->job_process, want, why, sizeof why)) {
+        snprintf(app->job_said, sizeof app->job_said, "%s", why);
+        if (!want) {
+            app->job_kept_low = true;
+            return;
+        }
+    }
+    app->job_low = want;
+}
+/* the recompile running: its output read, a bounded amount a frame as a run's is; once it ended, the next one */
+static void job_pump(App* app) {
+    int i = gui_queue_running(&app->queue), status;
+    char buffer[4096];
+    if (i < 0) return;
+    for (int reads = 0; reads < 16; ++reads) {
+        int n = gui_process_read(app->job_process, buffer, sizeof buffer);
+        if (n <= 0) break;
+        if (app->job_out) fwrite(buffer, 1, (size_t)n, app->job_out);
+        gui_console_feed(&app->job_console, buffer, (size_t)n);
+        gui_steps_feed(&app->job_steps, buffer, (size_t)n, now_ms(app));
+    }
+    app->queue.job[i].percent = gui_steps_percent(&app->job_steps);
+    job_priority(app);
+    if (!gui_process_finished(app->job_process, &status)) return;
+    job_ended(app, i, status);
+    job_start(app);
+}
+/* the taskbar's progress, SDL's (Windows' taskbar, a Linux desktop's launcher entry): how far the queue's recompile
+   running is, its failure once none runs while one that failed is listed, else none. Given SDL only as it changes;
+   what SDL said when it could not show it is kept for the Status box, and said once on stderr */
+static void taskbar(App* app) {
+    int run = gui_queue_running(&app->queue), state = SDL_PROGRESS_STATE_NONE, value = 0, i;
+    bool ok;
+    if (run >= 0) {
+        value = SDL_max(app->queue.job[run].percent, 0);
+        state = app->queue.job[run].percent < 0 ? SDL_PROGRESS_STATE_INDETERMINATE : SDL_PROGRESS_STATE_NORMAL;
+    } else
+        for (i = 0; i < app->queue.count; ++i)
+            if (app->queue.job[i].state == GUI_JOB_FAILED) {
+                state = SDL_PROGRESS_STATE_ERROR;
+                value = 100;
+            }
+    if (!app->window || (state == app->taskbar_state && value == app->taskbar_value)) return;
+    SDL_ClearError();
+    ok = SDL_SetWindowProgressValue(app->window, (float)value / 100.0f) &&
+         SDL_SetWindowProgressState(app->window, (SDL_ProgressState)state);
+    app->taskbar_state = state;
+    app->taskbar_value = value;
+    if (ok) {
+        app->taskbar_error[0] = 0;
+        return;
+    }
+    if (!app->taskbar_error[0])
+        fprintf(stderr, "scarletnx: the taskbar shows no progress of the recompile: %s\n",
+                SDL_GetError()[0] ? SDL_GetError() : "SDL gave no reason");
+    snprintf(app->taskbar_error, sizeof app->taskbar_error, "%s",
+             SDL_GetError()[0] ? SDL_GetError() : snx_tr("SDL gave no reason"));
+}
+/* ESC on the one running, or Abort taken: its tree killed now, pump reaping it */
+static void job_abort(App* app) {
+    if (app->job_aborting || gui_queue_running(&app->queue) < 0) return;
+    gui_process_terminate(app->job_process);
+    app->job_aborting = true;
+}
+/* Enter on one that ended well, or a click on it: its game played as Games plays it, its line seen and gone. A dump's
+   recompile plays the game it made */
+static void queue_play(App* app) {
+    int i = app->queue_focus, item = app->menu.selected;
+    MadeGames made;
+    const char* program = NULL;
+    char* file;
+    bool native;
+    if (i < 0 || i >= app->queue.count || app->queue.job[i].state != GUI_JOB_OK) return;
+    native = app->queue.job[i].native;
+    if (!native) {
+        made_read(app, &made);
+        program = made_program(&made, gui_queue_file(&app->queue, i));
+    }
+    file = snx_strdup(program ? program : gui_queue_file(&app->queue, i));
+    if (!native) made_free(&made);
+    queue_drop(app, i);
+    app->menu.selected = GUI_SWITCH;
+    launch(app, file, native || program);
+    app->menu.selected = item;
+}
+/* Del on the Compile tab: one waiting taken out of the queue, one that ended its line gone; the one running stays,
+   ESC aborts it */
+static void queue_take_out(App* app) {
+    int i = app->queue_focus;
+    char name[256];
+    if (i < 0 || i >= app->queue.count) return;
+    snprintf(name, sizeof name, "%s", gui_queue_name(&app->queue, i));
+    if (app->queue.job[i].state == GUI_JOB_RUNNING) {
+        snprintf(app->message, sizeof app->message, snx_tr("%s compiles now: ESC aborts it, Del takes out one waiting"),
+                 name);
+        return;
+    }
+    snprintf(app->message, sizeof app->message,
+             app->queue.job[i].state == GUI_JOB_WAITING ? snx_tr("%s taken out of the queue")
+                                                        : snx_tr("%s's line taken off the queue"),
+             name);
+    queue_drop(app, i);
+}
+/* back to Games from the Compile tab, where R was pressed: listed again (a recompile made its game), the focus on
+   the game at path (the recompile in focus's, as Games lists it), else on the row it was on */
+static void games_back(App* app, const char* path) {
+    char* game = path ? snx_strdup(path) : NULL;
+    GuiBrowser was = app->browser;
+    app->menu.view = GUI_LOAD_GAMES;
+    list_games(app);
+    if (!games_focus_on(app, game)) { /* none in Games: the row it was on */
+        app->browser.page = was.page;
+        app->browser.selected = was.selected;
+        gui_browser_resize(&app->browser, app->browser.page_size);
+    }
+    free(game);
+}
+/* the game of the Compile tab's focus, as Games lists it: what Tab and ESC there go back to; NULL with none */
+static const char* queue_game(const App* app) {
+    int i = app->queue_focus;
+    return i >= 0 && i < app->queue.count ? gui_queue_listed(&app->queue, i) : NULL;
+}
+/* a key on the Compile tab: Up and Down go over the queue, Enter plays one that ended well, ESC aborts the one
+   running (asked first where ask_abort says so) or goes back to Games, a line that ended seen and gone with it */
+static void queue_key(App* app, GuiKey key) {
+    int i = app->queue_focus, n = app->queue.count;
+    if (!n) return;
+    i = SDL_clamp(i, 0, n - 1);
+    if (key == GUI_UP || key == GUI_DOWN)
+        app->queue_focus = (i + (key == GUI_UP ? n - 1 : 1)) % n;
+    else if (key == GUI_SELECT)
+        queue_play(app);
+    else if (key == GUI_CANCEL && app->queue.job[i].state == GUI_JOB_RUNNING) {
+        if (app->ask_abort)
+            gui_confirm_open(&app->confirm, GUI_ASK_ABORT, false);
+        else
+            job_abort(app);
+    } else if (key == GUI_CANCEL) {
+        char* game = snx_strdup(gui_queue_listed(&app->queue, i)); /* its line may go */
+        if (app->queue.job[i].state >= GUI_JOB_OK) queue_drop(app, i);
+        app->message[0] = 0;
+        games_back(app, game);
+        free(game);
+    }
+}
 /* a recent game, run as the menu would: its driver, the options the menu has now */
 static void open_recent(App* app, int index) {
     GuiRecentGame game = app->recent.game[index];
@@ -9428,6 +10470,14 @@ static int row_driver(const GuiGames* games, size_t i) {
 static void open_game(App* app, size_t index) {
     int item = app->menu.selected;
     if (gui_games_heading(&app->games, index)) return; /* a group's heading runs nothing */
+    if (gui_queue_find(&app->queue, app->games.paths[index]) >= 0) { /* it cannot play yet: its recompile shows */
+        int queued = gui_queue_find(&app->queue, app->games.paths[index]);
+        queue_show(app, queued);
+        if (app->recompile) /* R again */
+            snprintf(app->message, sizeof app->message, snx_tr("%s is in the queue already"),
+                     gui_queue_name(&app->queue, queued));
+        return;
+    }
     if (app->games.addons[index]) { /* its updates and DLCs: which one runs is asked first */
         addons_open(app, app->games.paths[index], app->games.shown[index], false);
         if (app->addons_shown) return;
@@ -9608,11 +10658,9 @@ static void aot_focus(App* app) {
         app->menu.selected = item;
     }
     app->recompile = false;
-    if (!app->menu.running) {
-        app->aot_pack = false;
-        free(app->aot_cache);
-        app->aot_cache = NULL;
-    }
+    app->aot_pack = false; /* the queue keeps its argv, the cache's path in it */
+    free(app->aot_cache);
+    app->aot_cache = NULL;
 done:
     free(cache);
     free(f.folder);
@@ -9839,7 +10887,7 @@ static char* log_summary(const char* path) {
    folder (the working folder without one: started from the desktop, that is the home folder), then on Android handed
    to the share sheet, elsewhere its path copied */
 static void share_log(App* app) {
-    char *game, *run, *played, *summary, *text, *saved, *state = NULL;
+    char *game, *run, *recompiled, *played, *summary, *text, *saved, *state = NULL;
     const char* folder;
     bool written;
     folder = app->cwd;
@@ -9852,12 +10900,16 @@ static void share_log(App* app) {
     left_behind(app);
     game = newest_log(app);
     run = log_tail(app->run_log, 1 << 20);
+    recompiled = log_tail(app->job_log, 1 << 20);
     played = log_tail(game, 4 << 20);
     summary = game ? log_summary(game) : snx_strdup("");
-    text = snx_format("%s\nMessage: %s\n%s%s%s%s\n%s== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(),
-                      app->message, app->left ? app->left : "", app->left_clear ? SAY_LEFT_CLEAR "\n" : "",
-                      app->cleaned.count ? "Clean Old Settings:\n" : "", app->cleaned.text ? app->cleaned.text : "",
-                      summary, app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
+    text =
+        snx_format("%s\nMessage: %s\n%s%s%s%s\n%s== the last run: %s ==\n%s\n\n== the last recompile of the queue: %s "
+                   "==\n%s\n\n== %s ==\n%s\n",
+                   snx_build_info(), app->message, app->left ? app->left : "",
+                   app->left_clear ? SAY_LEFT_CLEAR "\n" : "", app->cleaned.count ? "Clean Old Settings:\n" : "",
+                   app->cleaned.text ? app->cleaned.text : "", summary, app->run_log ? app->run_log : "", run,
+                   app->job_log ? app->job_log : "", recompiled, game ? game : "no game log", played);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
     written = saved && !snx_write_file(saved, text, strlen(text));
     if (written) app->log_due = false; /* the crash's log is out */
@@ -9886,6 +10938,7 @@ static void share_log(App* app) {
     free(text);
     free(summary);
     free(played);
+    free(recompiled);
     free(run);
     free(game);
     free(state);
@@ -10099,6 +11152,15 @@ static void go_tab(App* app, int tab) {
     }
     if (tab == tab_shown(app)) return;
     app->message[0] = 0;
+    if (tab == GUI_TAB_RECOMPILE) { /* the one running in focus, else the last that ended */
+        int run = gui_queue_running(&app->queue);
+        queue_show(app, run >= 0 ? run : app->queue.count - 1);
+        return;
+    }
+    if (tab == GUI_TAB_GAMES && app->menu.view == GUI_LOAD_RECOMPILE) {
+        games_back(app, queue_game(app));
+        return;
+    }
     app->menu.view = tab == GUI_TAB_GAMES ? GUI_LOAD_GAMES : GUI_LOAD_NONE;
     if (tab == GUI_TAB_GAMES)
         list_games(app);
@@ -10153,10 +11215,15 @@ static void grid_key(App* app, GuiKey key) {
         if (f.line == target && !games_row_label(app, r) && (to == rows || f.col - 1 <= col)) to = r;
     if (to < rows) grid_focus(app, to);
 }
-/* the tab step tabs from the one shown, round the three: Tab and Shift+Tab, a pad's shoulders */
+/* the tab step tabs from the one shown, round them: Tab and Shift+Tab, a pad's shoulders. Tab on the Compile tab
+   goes back to Games, where R was pressed, the recompile going on */
 static void screen_tab(App* app, int step) {
+    int n = tab_count(app);
     if (app->menu.running || app->finished || app->confirm.shown || app->splash) return;
-    go_tab(app, ((tab_shown(app) + step) % GUI_TABS + GUI_TABS) % GUI_TABS);
+    if (step > 0 && tab_shown(app) == GUI_TAB_RECOMPILE && !app->editing && !app->setup_on)
+        go_tab(app, GUI_TAB_GAMES);
+    else
+        go_tab(app, ((tab_shown(app) + step) % n + n) % n);
 }
 static void menu_key(App* app, GuiKey key) {
     GuiLoadView before = app->menu.view; /* the screen this key was pressed on */
@@ -10165,6 +11232,10 @@ static void menu_key(App* app, GuiKey key) {
             app->leaving_ms = SDL_max(now_ms(app), 1); /* the run fades out first; pump() comes back */
         else if (key == GUI_CANCEL)
             leave_run(app);
+        return;
+    }
+    if (app->menu.view == GUI_LOAD_RECOMPILE) {
+        queue_key(app, key);
         return;
     }
     if (app->menu.view == GUI_LOAD_GAMES) {
@@ -10196,6 +11267,12 @@ static void menu_key(App* app, GuiKey key) {
     switch (gui_menu_key(&app->menu, key)) {
         case GUI_MENU_SETTINGS: open_settings(app); break;
         case GUI_MENU_LOG: share_log(app); break;
+        case GUI_MENU_STAY:
+            if (app->menu.quit && jobs_live(app)) { /* Exit: the queue's recompiles go with the menu, asked first */
+                app->menu.quit = false;
+                gui_confirm_open(&app->confirm, GUI_ASK_EXIT, false);
+            }
+            break;
 #ifdef SDL_PLATFORM_ANDROID
         case GUI_MENU_DATA: gui_android_open_data(app->message, sizeof app->message); break;
 #endif
@@ -10218,6 +11295,10 @@ static void menu_key(App* app, GuiKey key) {
     }
 }
 static void abort_run(App* app) {
+    if (!app->menu.running) { /* the Compile tab's question: the queue's one running */
+        job_abort(app);
+        return;
+    }
     if (app->aborting) return;
     /* Do not ask a hung program to shut down or wait on it in the event
        handler. Kill its tree now and let pump reap it without blocking. */
@@ -10241,13 +11322,16 @@ static void ask_key(App* app, GuiKey key) {
         outside_answer(app, second);
     else if (ask == GUI_ASK_ROOM)
         room_answer(app, second);
+    else if (ask == GUI_ASK_MADE)
+        made_answer(app, key == GUI_SELECT, second);
     else if (ask == GUI_ASK_TEXT)
         size_answer(app, second);
     else if (ask == GUI_ASK_CLEAN || ask == GUI_ASK_RESET || ask == GUI_ASK_PLACES || ask == GUI_ASK_PLACE ||
              ask == GUI_ASK_FOLDER || ask == GUI_ASK_MOVE)
         change_answer(app, ask, second);
-    else if (ask == GUI_ASK_CLOSE && second) { /* the run ends with the menu */
-        abort_run(app);
+    else if (ask == GUI_ASK_CLOSE && second) { /* the run ends with the menu, the queue's recompile too */
+        if (app->menu.running) abort_run(app);
+        job_abort(app);
         closing_start(app);
     } else if (ask == GUI_ASK_EXIT && second)
         closing_start(app);
@@ -10320,7 +11404,7 @@ static int tab_hit(App* app, float x, float y) {
     GuiPlace p;
     int i;
     place_screen(app, &p, "", GUI_SHOWS_TABS);
-    for (i = 0; i < GUI_TABS; ++i) {
+    for (i = 0; i < tab_count(app); ++i) {
         GuiRect r = tab_rect(app, p.tabs, i);
         if (x >= (float)r.x && x < (float)(r.x + r.w) && y >= (float)r.y && y < (float)(r.y + r.h)) return i;
     }
@@ -10338,6 +11422,15 @@ static void screen_pointer(App* app, float x, float y, bool click, bool touch) {
     }
     if (user_hit(app, x, y)) {
         if (click) users_open(app);
+        return;
+    }
+    if (app->menu.view == GUI_LOAD_RECOMPILE) {
+        GuiQueueBoxes q;
+        size_t row;
+        uint32_t hit;
+        queue_boxes(app, &q);
+        hit = ui_queue_hit(app, q.rects, app->scale, q.lists, (int)x, (int)y, click ? UI_HIT_CLICK : 0, &i, &row);
+        if (hit) ui_queue_act(app, i, row, hit);
         return;
     }
     if (app->menu.view == GUI_LOAD_GAMES) {
@@ -10428,6 +11521,8 @@ static const struct {
                  {SNX_TR_KEY("PgDown"), SDLK_PAGEDOWN, 0, false},
                  {SNX_TR_KEY("Swipe"), SDLK_PAGEDOWN, 0, false},
                  {SNX_TR_KEY("Del"), SDLK_DELETE, 0, false},
+                 {SNX_TR_KEY("Take out"), SDLK_DELETE, 0, false}, /* a finger's, on the Compile tab */
+                 {SNX_TR_KEY("Games"), SDLK_TAB, 0, false},
                  {SNX_TR_KEY("R"), SDLK_R, 0, false},
                  {SNX_TR_KEY("Recompile"), SDLK_R, 0, false},
                  {SNX_TR_KEY("B"), SDLK_B, 0, false},
@@ -10518,7 +11613,11 @@ static const char* shown_place(App* app, GuiPlace* p, char* keys, size_t size) {
         *p = f.place;
     } else if (app->menu.view == GUI_LOAD_GAMES)
         games_place(app, p);
-    else if (pick_screen(app)) {
+    else if (app->menu.view == GUI_LOAD_RECOMPILE) {
+        GuiQueueBoxes q;
+        queue_boxes(app, &q);
+        *p = q.place;
+    } else if (pick_screen(app)) {
         GuiPickBoxes k;
         pick_boxes(app, &k);
         *p = k.place;
@@ -10644,6 +11743,10 @@ static void scroll(App* app, GuiKey key) {
         editor_key(app, key); /* stops at its ends */
         return;
     }
+    if (app->menu.view == GUI_LOAD_RECOMPILE) { /* its first row and its last stop it */
+        if (key == GUI_UP ? app->queue_focus > 0 : app->queue_focus + 1 < app->queue.count) queue_key(app, key);
+        return;
+    }
     if (app->menu.view == GUI_LOAD_GAMES) { /* over its pages as the keys go, from the head's first to the last game */
         bool last = app->browser.page + 1 >= gui_browser_pages(&app->browser) &&
                     app->browser.selected + 1 >= app->browser.head + gui_browser_items(&app->browser);
@@ -10671,7 +11774,12 @@ static float drag_row(App* app) {
     int width, height;
     layout(app);
     area(app, &width, &height);
-    if (!app->editing) {
+    if (!app->editing && app->menu.view == GUI_LOAD_RECOMPILE) {
+        GuiQueueBoxes q;
+        queue_boxes(app, &q);
+        first = ui_queue_row(q.rects, app->scale, UI_QUEUE_ROWS, 0);
+        second = ui_queue_row(q.rects, app->scale, UI_QUEUE_ROWS, 1);
+    } else if (!app->editing) {
         GuiMenuBoxes m;
         menu_boxes(app, &m);
         first = ui_menu_row(m.rects, app->scale, UI_MENU_ENTRIES, 0);
@@ -10750,7 +11858,7 @@ static void touch(App* app, float x, float y) {
 static bool SDLCALL lifecycle(void* data, SDL_Event* e) {
     App* app = (App*)data;
     if (e->type == SDL_EVENT_DID_ENTER_BACKGROUND) app->hidden = true;
-    if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND) app->hidden = false;
+    if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND) app->hidden = app->playing = false; /* the game, if any, behind */
     return true;
 }
 #endif
@@ -10927,9 +12035,9 @@ static void event_take(App* app, const SDL_Event* e) {
     GuiKey key;
     /* the window closed: asked first while a run goes, unless it asks already; else the screen of what is kept */
     if (e->type == SDL_EVENT_QUIT || e->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
-        if ((app->menu.running || app->finished) && !app->aborting && !app->closing_ms &&
+        if ((app->menu.running || app->finished || jobs_live(app)) && !app->aborting && !app->closing_ms &&
             !(app->confirm.shown && app->confirm.ask == GUI_ASK_CLOSE)) {
-            if (app->finished) {
+            if (app->finished && !jobs_live(app)) {
                 closing_start(app);
                 return;
             }
@@ -11186,6 +12294,10 @@ static void event_take(App* app, const SDL_Event* e) {
         screen_tab(app, e->key.mod & SDL_KMOD_SHIFT ? -1 : 1);
         return;
     }
+    if (e->key.key == SDLK_DELETE && !e->key.repeat && app->menu.view == GUI_LOAD_RECOMPILE && !app->finished) {
+        queue_take_out(app);
+        return;
+    }
     if (e->key.key == SDLK_R && !e->key.repeat && !(e->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
         app->menu.view == GUI_LOAD_GAMES && !app->finished) {
         layout(app); /* the page a resize in the same poll gave */
@@ -11295,7 +12407,8 @@ static bool initialize(App* app, const char* self) {
         return SDL_SetError(snx_tr("Cannot make the menu's font: %s"), why);
     }
     app->process = gui_process_create();
-    if (!app->process) return SDL_SetError("%s", snx_tr("Cannot start the menu: out of memory"));
+    app->job_process = gui_process_create();
+    if (!app->process || !app->job_process) return SDL_SetError("%s", snx_tr("Cannot start the menu: out of memory"));
 #ifdef SDL_PLATFORM_ANDROID
     app->cwd = SDL_GetCurrentDirectory();
     app->drivers = gui_android_libraries() ? snx_strdup(gui_android_libraries()) : NULL;
@@ -11376,6 +12489,10 @@ static void forget(App* app) {
     free(app->recent_file);
     if (app->run_out) fclose(app->run_out);
     free(app->run_log);
+    gui_process_destroy(app->job_process); /* the queue's recompile ends with the menu */
+    gui_queue_free(&app->queue);
+    if (app->job_out) fclose(app->job_out);
+    free(app->job_log);
     gui_games_free(&app->games);
     free(app->games_drivers);
     addons_close(app);
@@ -11407,6 +12524,7 @@ static void open_files(App* app) {
          *config = menu_folder(app, SNX_USER_CONFIG, !app->look_only);
     if (prefs) recent_open(app, snx_path_join(prefs, "recent.txt"));
     if (prefs) app->run_log = snx_path_join(prefs, "last-run.log");
+    if (prefs) app->job_log = snx_path_join(prefs, "last-recompile.log");
     app->settings_file = settings_path(config);
     free(app->config_dir);
     app->config_dir = config ? snx_strdup(config) : NULL;
@@ -11509,8 +12627,8 @@ int snx_gui_main(const char* self) {
     while (!app.menu.quit) {
         SDL_Event e;
 #ifdef SDL_PLATFORM_ANDROID
-        /* behind other apps with no run to read, the menu waits to show again */
-        if (app.hidden && !app.menu.running && SDL_WaitEvent(&e)) event(&app, &e);
+        /* behind other apps with no run to read, the queue's neither, the menu waits to show again */
+        if (app.hidden && !app.menu.running && gui_queue_running(&app.queue) < 0 && SDL_WaitEvent(&e)) event(&app, &e);
 #endif
         while (SDL_PollEvent(&e)) event(&app, &e);
         pads_repeat(&app);

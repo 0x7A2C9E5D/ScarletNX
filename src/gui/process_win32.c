@@ -13,9 +13,21 @@ struct GuiProcess {
     HANDLE process, job, output;
     int status;
     bool exited, eof;
+    bool low; /* the tree below normal priority (gui_process_low), the next start's too */
     double retired_cpu;
-    GuiCpuBase cpu_base;
+    GuiCpuBase cpu_base, tree_base;
 };
+/* the launcher's class, which a recompile at full speed runs at, and one under it for a low one: a child started
+   without a class takes NORMAL, not the launcher's, unless the launcher is below normal itself */
+static DWORD own_class(void) {
+    DWORD own = GetPriorityClass(GetCurrentProcess());
+    return own ? own : NORMAL_PRIORITY_CLASS;
+}
+static DWORD low_class(void) {
+    DWORD own = own_class();
+    return own == BELOW_NORMAL_PRIORITY_CLASS || own == IDLE_PRIORITY_CLASS ? IDLE_PRIORITY_CLASS
+                                                                            : BELOW_NORMAL_PRIORITY_CLASS;
+}
 static wchar_t* wide(const char* text) {
     int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, NULL, 0);
     wchar_t* out = n ? malloc((size_t)n * sizeof(*out)) : NULL;
@@ -118,9 +130,11 @@ bool gui_process_start(GuiProcess* process, const char* const* argv, char* error
     if (!UpdateProcThreadAttribute(startup.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
                                    sizeof(inherited), NULL, NULL))
         goto failed;
+    /* its class before it starts: the processes it starts take it */
     if (!CreateProcessW(executable, command, NULL, NULL, TRUE,
-                        EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW, NULL, NULL,
-                        &startup.StartupInfo, &child))
+                        EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW |
+                            (process->low ? low_class() : own_class()),
+                        NULL, NULL, &startup.StartupInfo, &child))
         goto failed;
     /* Assign before resuming: no grandchild can escape the job during startup.
        Nested jobs also cover the jobs used internally by the native driver. */
@@ -189,6 +203,29 @@ static uint64_t resident(HANDLE process) {
     PROCESS_MEMORY_COUNTERS info;
     return GetProcessMemoryInfo(process, &info, sizeof(info)) ? (uint64_t)info.WorkingSetSize : 0;
 }
+/* the processes of the job, each opened with access, in out (count of them at most, each closed by the caller): how
+   many, -1 when Windows cannot list them */
+static int job_processes(HANDLE job, DWORD access, HANDLE* out, int count) {
+    DWORD capacity = 64;
+    int n = 0;
+    for (;;) {
+        size_t bytes = sizeof(JOBOBJECT_BASIC_PROCESS_ID_LIST) + (size_t)capacity * sizeof(ULONG_PTR);
+        JOBOBJECT_BASIC_PROCESS_ID_LIST* ids = malloc(bytes);
+        if (!ids) return -1;
+        if (QueryInformationJobObject(job, JobObjectBasicProcessIdList, ids, (DWORD)bytes, NULL)) {
+            for (DWORD i = 0; i < ids->NumberOfProcessIdsInList && n < count; ++i) {
+                HANDLE child = OpenProcess(access, FALSE, (DWORD)ids->ProcessIdList[i]);
+                if (child) out[n++] = child; /* one gone meanwhile is none */
+            }
+            free(ids);
+            return n;
+        }
+        DWORD failure = GetLastError();
+        free(ids);
+        if (failure != ERROR_MORE_DATA || capacity >= 65536) return -1;
+        capacity *= 2;
+    }
+}
 GuiUsage gui_process_usage(GuiProcess* process) {
     GuiUsage usage = {.memory_bytes = resident(GetCurrentProcess()), .available = true};
     FILETIME created, exited, kernel, user;
@@ -231,6 +268,38 @@ GuiUsage gui_process_usage(GuiProcess* process) {
     }
     usage.cpu_percent = gui_cpu_percent(&process->cpu_base, cpu, now);
     return usage;
+}
+GuiUsage gui_process_usage_of(GuiProcess* process) {
+    GuiUsage usage = {.available = true};
+    HANDLE children[256];
+    int n = process->job ? job_processes(process->job, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, children,
+                                         (int)(sizeof children / sizeof *children))
+                         : 0;
+    if (n < 0) {
+        usage.available = false;
+        return usage;
+    }
+    for (int i = 0; i < n; ++i) {
+        usage.memory_bytes += resident(children[i]);
+        CloseHandle(children[i]);
+    }
+    usage.cpu_percent = gui_cpu_percent(&process->tree_base, job_cpu(process->job), (double)GetTickCount64() / 1000);
+    return usage;
+}
+bool gui_process_low(GuiProcess* process, bool low, char* error, size_t size) {
+    HANDLE children[256];
+    DWORD failure = 0;
+    int n;
+    process->low = low;
+    if (!process->job) return true;
+    n = job_processes(process->job, PROCESS_SET_INFORMATION, children, (int)(sizeof children / sizeof *children));
+    if (n < 0 && !(failure = GetLastError())) failure = ERROR_NOT_ENOUGH_MEMORY;
+    for (int i = 0; i < n; ++i) {
+        if (!SetPriorityClass(children[i], low ? low_class() : own_class()) && !failure) failure = GetLastError();
+        CloseHandle(children[i]);
+    }
+    if (failure) snprintf(error, size, snx_tr("Windows error %lu"), (unsigned long)failure);
+    return !failure;
 }
 void gui_process_terminate(GuiProcess* process) {
     if (process && process->job) TerminateJobObject(process->job, 1);

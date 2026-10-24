@@ -6,6 +6,7 @@
 
 * [Setup](#setup)
 * [Games: the games of recompiled/ and the player's folders](#games-the-games-of-recompiled-and-the-players-folders)
+  * [The Compile tab](#the-compile-tab)
 * [Output and resource use](#output-and-resource-use)
 * [Themes](#themes)
   * [Theme formats](#theme-formats)
@@ -33,8 +34,9 @@ shorter side on the theme's `[splash] page` for its `ms`; a key, a click or a fi
 built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lunasvg)).
 
 - Up/Down and Left/Right move the yellow focus, wrapping at the ends.
-- Tab and Shift+Tab go round the menu, Games and the Settings, the tabs at the top; a click on a tab
-  opens it. A theme edited and not saved keeps its screen.
+- Tab and Shift+Tab go round the menu, Games and the Settings, the tabs at the top, and **Compile** while the
+  queue of compiles holds one ([below](#the-compile-tab)); a click on a tab opens it. A theme edited
+  and not saved keeps its screen.
 - A list with rows out of sight (the menu with big letters, `recompiled/`'s pages, the Settings, the theme
   editor) shows an arrow at the right end of its first row, up, and of its last, down, in the soft colour.
 - Moving the mouse over an item focuses it in yellow without activating it; in the Settings, a row of the list the
@@ -124,11 +126,15 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **UI scale**, which opens
   its box of sizes (below), **Animations** (On by default, `animations = 1` in `app.ini`: a screen comes in from the
   page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Side panel** (below, F2 too),
+  **Background recompile** (*Full*, `recompile_background = full` in `app.ini`: the queue's recompiles take every
+  core, or the AOT threads picked; *Gentle*, `gentle`: half of them, at a low priority, ten steps of nice under the
+  launcher's, on Windows the class under the launcher's, for using the computer meanwhile;
+  [the Compile tab](#the-compile-tab)),
 **Theme Editor**, which comes
   back to App, and **Folders**, every folder on one screen, the whole of it, a box a group:
   - **App Folders**: **Data** (`recompiled/`, `dumps/`, `themes/` and `prod.keys`), **Settings**, shown only
     (`app.ini`, which names the others, and each game's `.ini`: `XDG_CONFIG_HOME` moves it, a portable copy keeps its
-    own), **Logs** (the games' logs and `threads.txt`, `recent.txt` and `last-run.log`), **Caches** (the recompile's
+    own), **Logs** (the games' logs and `threads.txt`, `recent.txt`, `last-run.log` and `last-recompile.log`), **Caches** (the recompile's
     `units/`, the shader caches, the dumps' icons, and Extractions by default) and **Extractions**;
   - **Recompiled Library**: its **Main**, `recompiled/`, where recompiled games go, then its **Extra** folders, whose games
     ready to run Games lists too, and **Add a folder**;
@@ -198,13 +204,17 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   neither the Linux nor the 3DS driver.
 - The Status box, after the RAM and the CPU, says what ScarletNX's folders take (recompiled/,
   work/ and themes/ of the data folder, and on Linux its config, state and cache folders, else
-  the menu's own) and what is left on that disk, counted as the menu opens and after each run.
+  the menu's own) and what is left on that disk, counted as the menu opens and after each run. While a recompile of
+  the queue runs its tree's RAM and CPU are in the first line, and a last one says how it goes:
+  `Background recompile: Full`, `Gentle`, `Gentle, a game plays` or `Gentle until it ends:` and why, the threads it
+  was started with when they were halved, and when the taskbar cannot show its progress, SDL's reason.
 - Settings > App's **Theme** switches to the next theme, or the one before: the built-in Default
   and YoRHa, then each folder of `themes/` (see [Themes](#themes)). The menu opens in YoRHa until one is picked.
   It is kept for the next start,
   as are UI scale and Language, in `app.ini` beside `settings.ini`: `[app]` with `theme` (a theme's folder
   name), `ui_scale` (`auto`, `0.25`, `0.5`, `0.75` or 1 to 4; `text_size` before, still read and written again
-  as `ui_scale`, said once) and `language` (`auto`, `en` or a language's BCP 47
+  as `ui_scale`, said once), `recompile_background` (`full`, the default, or `gentle`; a word it does not know named
+  with the one kept, `recompile_background = slow (it keeps full)`) and `language` (`auto`, `en` or a language's BCP 47
   tag, as `pt-BR` or `zh-Hans-CN`), and once one
   is picked `[folders]` with Folders' `data`, `recompiled`, `work`, `state` (Logs) and `cache` (Caches) (a full path,
   nothing for the default). A value the
@@ -234,13 +244,15 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   which it took. A language written in two scripts goes by its script, written or implied by its country (`zh-CN`,
   `zh-SG` simplified, `zh-TW`, `zh-HK`, `zh-MO` traditional): a system in one never takes a catalog of the other. The
   words change at once; a phrase the language has not translated stays English.
-- **Share Log** saves the last run's output and game log to `scarletnx.log`. After a run that ended abnormally (not
-  by ESC) it blinks red, as Install Keys does, until its log is saved or a run ends well. On the
+- **Share Log** saves the last run's output, the queue's recompiles' (`last-recompile.log`) and the game log to
+  `scarletnx.log`. After a run or a recompile of the queue that ended abnormally (not by ESC) it blinks red, as
+  Install Keys does, until its log is saved or a run ends well. On the
   desktop it goes in the working folder with its path copied. On Android it goes to the
   data folder's `state/` and is shared.
 - **Open Data Folder**, on Android, opens the data folder, the app's own storage, in the
   system's Files app ([ANDROID](ANDROID.md)).
-- **Exit** closes the launcher, once asked (ESC on the menu asks too), a screen saying for half a second which of its
+- **Exit** closes the launcher, once asked (ESC on the menu asks too, and while a recompile of the queue runs or waits
+  the question names it), a screen saying for half a second which of its
   files it keeps for the next start (Settings, the picks of Settings > App, the libraries' folders, the recent games), a second
   close skipping it. Closing its window during a run asks first: Exit terminates the entire owned process tree (a
   recompile's work lost), so let the game exit normally to preserve its saves.
@@ -353,11 +365,20 @@ cannot be read is named and the others still listed.
   Games and Dumps start *Off*, as a phone keeps the games made in the app's `recompiled/` and prepares a dump from the
   Menu; the player turns them on there. An `app.ini` without them, an older version's, has these defaults, and a word
   it does not know is named in the message with the one kept: `recent_games = maybe (it keeps on)`.
-- In the list, Up/Down go round the recent games and the page's files. Enter/Space opens one.
+- In the list, Up/Down go round the recent games and the page's files. Enter/Space opens one. A game no game of the
+  recompiled library was made from yet (a dump, a package, a ROM) compiles first, through the queue of compiles R's
+  goes through: the Compile tab shows it, and it plays once its compile ended if the tab still shows it; sent away
+  first (Tab), the tips say it is ready, and Enter then plays it. One a game was made from already, in `recompiled/` or
+  a recompiled folder of the Library, asks first, naming the game and its folder: **Play**, in focus, plays it,
+  **Recompile** recompiles it where it is, as R does, and Back does neither.
 - **R** (on Android a tap on *Recompile* at the foot) recompiles the game in focus, recent or on the page, whichever
   console's, where it is, or makes its dump or package again: its driver's `-r` (`scarletnx -r`, `scarletnx-3ds -r`,
-  `scarletnx-vita -r`, `scarletnx-agb -r`). It plays nothing; Enter then does. On a Linux program, or another row, it
-  says why it does nothing.
+  `scarletnx-vita -r`, `scarletnx-agb -r`). It plays nothing, and goes in the queue of compiles, which runs them one
+  at a time behind the screens: with none running it starts at once, the Compile tab showing it; else the tips say
+  where it waits. A game of the queue says it on its row (`42%`, `next`, `3rd in queue`) and in the side box; Enter
+  on it, or R again, shows it on the Compile tab, and it plays once its compile ended. On a Linux
+  program, or another row, R says why it does nothing. **B** builds the focused game's AOT pack from its JIT cache
+  ([AOT packs](AOT_PACKS.md)) through the same queue.
 - **M** (on Android a tap on *Mods* at the foot) opens the box of the recompiled Switch game in focus, recent or on
   the page, that Enter opens for a game with updates, DLCs, mods or cheats beside it, and for a game with none of them
   too, whose **Add Mod** and **Add Cheats** copy a folder or a `.txt` the system's picker gives into the game's mods
@@ -377,6 +398,31 @@ its layout, a 3DS `.ini`'s `model=`, a Vita folder's `ux0/`): its row says "3DS 
 Enter and R go through that driver, in the game's folder (`--game=`), with none of the Switch's Settings. A CIA goes
 to `scarletnx-3ds`, which is never executed on it directly. Output capture, resource accounting and the return to
 the main menu work as for a file picked by a load.
+
+### The Compile tab
+
+**Compile**, the fourth tab, shows the queue while it holds a compile (R's recompile, B's AOT pack, or the first of a
+game opened before it was made), in the frame of every screen: on the left
+the one in focus, as a theme's loading screen (YoRHa's, its colours, its usage and how it goes on the footer's band
+at its foot) or its output under *Output* (the default's), in letters a half step under the text's; on the right the
+**Queue**, a row each in the order asked (`42%`, `next`, `3rd`, `OK`, `FAILED`, B's saying *AOT pack*), and the
+Status box. Up/Down go over the queue, the panel following. **Tab** goes back to Games, the recompile going on;
+**ESC** aborts the one running (asked first on Android), its line gone with it, or on one that ended goes back to
+Games, its line seen and gone; **Del** takes out one waiting, or the line of one that ended; **Enter**, or a click on
+its row once in focus, plays the game of one that ended well. When one ends the next starts by itself, and the tab
+says `Compile OK` for five seconds before the next one's percent; while one that failed is listed and none runs it
+says `Compile FAILED`, on the failure colour, blinking as Share Log does, which blinks too. The tab goes with the
+queue's last line. The window's icon in the taskbar (Windows', a Linux desktop's launcher entry, through SDL) fills
+as the one running goes, and turns red once one failed and none runs. `last-recompile.log`, beside `last-run.log`,
+holds the queue's output since one started with no ended line left. Move Old Files and Clean Old Settings wait until
+the queue ends; the window's close, Exit and ESC on the menu ask first, naming the one running.
+
+With Background recompile *Gentle* every recompile of the queue goes gently; with *Full*, one goes gently by itself
+while a game the launcher started plays: the one running drops to the low priority at once (its threads stay as it
+started), the next starts with half of them, and once the game ended it goes back where the system lets a program
+raise a priority it lowered (Windows does; Linux and macOS without the privilege keep it low until it ends, the
+Status box saying why). On iOS, where the driver runs on a thread of the app and a game plays once the menu closes,
+a game plays once the queue ends.
 
 ## Output and resource use
 
@@ -416,15 +462,16 @@ and to the run, which is **compiling** until the runner prints its `ScarletNX - 
 **loading** from then on.
 
 The screens are boxes side by side, nothing over another, the default framing them in thin lines and YoRHa
-filling them. At the top the tabs, Menu, Games and Settings, and the screen's title after them against the
-right, and at its right the user games play as
+filling them. At the top the tabs, Menu, Games and Settings (and Recompile while its queue holds a recompile), and
+the screen's title after them against the right, and at its right the user games play as
 (Settings > User, which lists them under **Current user**, Left/Right picking, and renames each: Enter types its
 nickname, the rule [USAGE](USAGE.md#users) gives checked, then written to `users.ini`): a box framed as the others are
 holding their nickname and their picture, `users/<uid>.jpg` or Wimsy
 without one ([USAGE](USAGE.md#users)), square or round (`[head] picture`; `none` for no box). A click on it opens
 the users over the screen, each with their picture; the one picked is Settings' user from then on, and ESC or a click
 off them leaves it as it was. The head is the same on every screen of one window: when the main screens' titles
-(the menu's, Games', the keys' and `SCARLETNX  /  SETTINGS`) do not all fit beside the tabs, every one takes letters a
+(the menu's, Games', the keys', `SCARLETNX  /  SETTINGS` and while its tab shows `SCARLETNX  /  RECOMPILE`) do not all
+fit beside the tabs, every one takes letters a
 size smaller, down to the text's, else leaves out the same first parts (`SCARLETNX  /` first), else shows no title.
 The size is the one the English titles take, so the head is as big in every language, and a translation too long for
 it leaves out first parts too (its last part alone, big, where `SCARLETNX  /  SETTINGS` fits whole); a

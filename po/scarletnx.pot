@@ -379,6 +379,44 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "Tap: select."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Games."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Take out."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Back: abort."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap again: play."
+msgstr ""
+
+#: src/gui/main.c
+msgid "Back: to Games. Tap its row again: play"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Back: to Games"
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "Arrows/mouse: move. Space/Enter/click: select."
 msgstr ""
 
@@ -523,6 +561,50 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "Up/Down: queue."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tab: games."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Del: take out."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "ESC: abort."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "ESC: games."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Enter: play."
+msgstr ""
+
+#: src/gui/main.c
+msgid "Press [ESC] to return to Games, Enter to play"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Press [ESC] to return to Games"
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "D-pad: move. A: select. Start: refresh. B: back."
 msgstr ""
 
@@ -634,6 +716,42 @@ msgstr ""
 msgid "LB/RB: screen."
 msgstr ""
 
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "D-pad: queue."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "RB: games."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "X: take out."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "B: abort."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "B: games."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "A: play."
+msgstr ""
+
 #: src/gui/main.c
 #, c-format
 msgid "Disk: %s, %s free"
@@ -682,6 +800,14 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Off"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Full"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Gentle"
 msgstr ""
 
 #: src/gui/main.c
@@ -823,6 +949,19 @@ msgid "Select: help."
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "%s in queue"
+msgstr ""
+
+#: src/gui/main.c src/gui/ui.txt
+msgid "OK"
+msgstr ""
+
+#: src/gui/main.c
+msgid "FAILED"
+msgstr ""
+
+#: src/gui/main.c
 msgid "...FAILED"
 msgstr ""
 
@@ -835,11 +974,21 @@ msgid "Aborting..."
 msgstr ""
 
 #: src/gui/main.c
-msgid "List the games in its subfolders too?"
+msgid "Exit ScarletNX?"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Exit ScarletNX?"
+#, c-format
+msgid "%s is compiling (%d%%), %d more in the queue: exiting stops them. Exit?"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s is compiling (%d%%): exiting stops it. Exit?"
+msgstr ""
+
+#: src/gui/main.c
+msgid "List the games in its subfolders too?"
 msgstr ""
 
 #: src/gui/main.c
@@ -847,7 +996,7 @@ msgid "Outside the app, Android checks every file access: games may run slower."
 msgstr ""
 
 #: src/gui/main.c
-msgid "A recompile goes: exiting ScarletNX stops it, its work lost."
+msgid "A compile goes: exiting ScarletNX stops it, its work lost."
 msgstr ""
 
 #: src/gui/main.c
@@ -855,7 +1004,7 @@ msgid "A game runs: exiting ScarletNX ends it."
 msgstr ""
 
 #: src/gui/main.c
-msgid "Abort the recompile? Its work is lost."
+msgid "Abort the compile? Its work is lost."
 msgstr ""
 
 #: src/gui/main.c
@@ -958,14 +1107,26 @@ msgstr ""
 msgid "Move"
 msgstr ""
 
-#: src/gui/main.c src/gui/ui.txt
-msgid "OK"
+#: src/gui/main.c
+msgid "Play"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Recompile"
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
 msgid "Arrows/mouse: move. Space/Enter/click: select. F5: refresh. ESC: exit."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "F2: side box."
 msgstr ""
 
 #: src/gui/main.c
@@ -1043,16 +1204,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Open Cheats Folder"
-msgstr ""
-
-#. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
-#, snx-key
-msgid "Recompile"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Play"
 msgstr ""
 
 #: src/gui/main.c
@@ -1220,6 +1371,10 @@ msgid "SCARLETNX  /  SETTINGS"
 msgstr ""
 
 #: src/gui/main.c
+msgid "SCARLETNX  /  COMPILE"
+msgstr ""
+
+#: src/gui/main.c
 msgid "SCARLETNX  /  SETUP"
 msgstr ""
 
@@ -1243,15 +1398,44 @@ msgid "SCARLETNX  /  SETTINGS  /  FOLDERS"
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "Background recompile: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Taskbar: no progress shown (%s)"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Menu"
 msgstr ""
 
+#. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c src/common/utilities/setup.c
+#, snx-key
 msgid "Games"
 msgstr ""
 
 #: src/gui/main.c src/gui/ui.txt
 msgid "Settings"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Compile"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Compile %d%%"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Compile FAILED"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Compile OK"
 msgstr ""
 
 #: src/gui/main.c
@@ -1396,6 +1580,28 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "Compiling: %s%s%s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Compiling: starting"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "In the queue: %s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Enter or the Compile tab: its output"
+msgstr ""
+
+#: src/gui/main.c
+msgid "R on another game: it joins the queue"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "JIT cache: %s, O%c"
 msgstr ""
 
@@ -1467,6 +1673,44 @@ msgid "Output"
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "%s, AOT pack  %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Waits in the queue: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Compiling %s: %d%%"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s waits in the queue: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s compiles now (%d%%)"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid ", %d in the queue"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Queue"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Cannot start the run: out of memory"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Theme"
 msgstr ""
 
@@ -1500,6 +1744,14 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "The panel beside the list. Auto: where it fits. On: under the list where it does not. F2 turns it off and on"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Background recompile"
+msgstr ""
+
+#: src/gui/main.c
+msgid "The Compile tab's: R's, B's and a game's first. Full: every core. Gentle: half of them, at a low priority. Either goes gently while a game plays"
 msgstr ""
 
 #: src/gui/main.c
@@ -1936,6 +2188,11 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "Keep this UI scale? Back to %s in %d s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s is compiling (%d%%): %s waits until the queue ends"
 msgstr ""
 
 #: src/gui/main.c
@@ -2533,28 +2790,6 @@ msgid "%d moved, %d not"
 msgstr ""
 
 #: src/gui/main.c
-msgid "AOT pack build aborted."
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
-msgid "AOT pack build failed (status %d)."
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
-msgid "AOT pack built from %d cached function%s."
-msgstr ""
-
-#: src/gui/main.c
-msgid "AOT pack built, but no cached function matched the game."
-msgstr ""
-
-#: src/gui/main.c
-msgid "AOT pack built."
-msgstr ""
-
-#: src/gui/main.c
 msgid "Aborted with ESC."
 msgstr ""
 
@@ -2597,7 +2832,17 @@ msgid "  default, %s free"
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "%s is compiled already, in %s"
+msgstr ""
+
+#: src/gui/main.c
 msgid "That path is not a readable file. Try again or press ESC."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s is compiling (%d%%): the game plays once the queue ends"
 msgstr ""
 
 #: src/gui/main.c
@@ -2607,6 +2852,125 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "the selected driver"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Gentle until it ends: %s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Gentle, a game plays"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid ", %d threads"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s joins the queue: %s. %s compiles now (%d%%)"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s is not in the queue: it holds %d compiles, and its run %d options at most"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s is in the queue already"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: compiled, but no game of %s names it as its source, so it does not play"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: compiled, Enter on it plays it"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: aborted with ESC"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%d min %d s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%d s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "AOT pack build failed (status %d)."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "AOT pack built from %d cached function%s."
+msgstr ""
+
+#: src/gui/main.c
+msgid "AOT pack built, but no cached function matched the game."
+msgstr ""
+
+#: src/gui/main.c
+msgid "AOT pack built."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Compile failed (status %d)."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Compiled in %s."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Recompile failed (status %d)."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Recompiled in %s."
+msgstr ""
+
+#: src/gui/main.c
+msgid "AOT pack built"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Compiled"
+msgstr ""
+
+#: src/gui/main.c
+msgid "SDL gave no reason"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s compiles now: ESC aborts it, Del takes out one waiting"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s taken out of the queue"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s's line taken off the queue"
 msgstr ""
 
 #: src/gui/main.c
@@ -2914,6 +3278,12 @@ msgstr ""
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
 #, snx-key
+msgid "Take out"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
 msgid "R"
 msgstr ""
 
@@ -3087,6 +3457,10 @@ msgstr ""
 msgid "Cannot launch driver: %s"
 msgstr ""
 
+#: src/gui/process_posix.c
+msgid "the driver runs on a thread of the app, at the app's priority"
+msgstr ""
+
 #: src/gui/process_win32.c
 msgid "A driver is already running"
 msgstr ""
@@ -3094,6 +3468,35 @@ msgstr ""
 #: src/gui/process_win32.c
 #, c-format
 msgid "Cannot start the run (Windows error %lu)"
+msgstr ""
+
+#: src/gui/process_win32.c
+#, c-format
+msgid "Windows error %lu"
+msgstr ""
+
+#: src/gui/queue.c
+#, c-format
+msgid "%dth"
+msgstr ""
+
+#: src/gui/queue.c
+#, c-format
+msgid "%dst"
+msgstr ""
+
+#: src/gui/queue.c
+#, c-format
+msgid "%dnd"
+msgstr ""
+
+#: src/gui/queue.c
+#, c-format
+msgid "%drd"
+msgstr ""
+
+#: src/gui/queue.c
+msgid "next"
 msgstr ""
 
 #: src/gui/settings.c
