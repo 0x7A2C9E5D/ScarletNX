@@ -168,6 +168,9 @@ void vk_own_publish(u64 cpu, u64 size, VkOwnRes* r, u64 off) {
     if (g_own_traps && !own_begin(cpu, size, r, off)) return;
     /* not trapped here: older owners of the bytes let go of them, and the result lands now */
     own_drop(cpu, size);
+    /* Other owned bytes can still trap the edge pages after this range is
+       dropped. Land those neighbors before the fallback writes through GP. */
+    own_acquire(cpu, size);
     o.addr = cpu;
     o.size = size;
     o.res = r;
