@@ -16,6 +16,9 @@ typedef struct {
     /* the banked registers of the ARM7TDMI's modes: usr and sys share one bank */
     uint32_t banked_r13[6], banked_r14[6], spsr[6];
     uint32_t fiq_r8[5], usr_r8[5]; /* the ARM7TDMI banks r8 to r12 in FIQ mode */
+    /* IntrWait's interrupts while it waits: the machine halts until the game's handler flags one of them in the BIOS's
+       flags (0x03007FF8), as the BIOS does; 0 when it waits for none */
+    uint16_t wait;
 } AgbCpu;
 
 void agb_cpu_init(AgbCpu* cpu, AgbBoard* board, uint8_t* map);

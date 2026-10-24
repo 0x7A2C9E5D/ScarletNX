@@ -76,9 +76,11 @@ if(BUILD_TESTING)
     set_target_properties(snx-test-agb-cpu PROPERTIES C_STANDARD 23 C_STANDARD_REQUIRED ON)
     add_test(NAME agb_cpu COMMAND snx-test-agb-cpu)
     find_package(Python3 COMPONENTS Interpreter)
-    # the runner's scripted presses, read by a ROM the test makes
+    # the runner's scripted presses, and the BIOS's interrupt wait, each through a ROM the test makes
     if(Python3_Interpreter_FOUND)
         add_test(NAME agb_keys COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/agb_keys.py"
+            $<TARGET_FILE:scarletnx-agb-run>)
+        add_test(NAME agb_irq COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/agb_irq.py"
             $<TARGET_FILE:scarletnx-agb-run>)
     endif()
     # jsmolka's gba-tests (cmake/dependencies.cmake), each ROM a test of its own

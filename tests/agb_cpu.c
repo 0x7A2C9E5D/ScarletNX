@@ -96,17 +96,20 @@ static uint8_t* make_rom(size_t* size) {
     put32(rom + 0xFC, 0x03007FFC);
     put32(rom + 0x100, 0x08000121); /* the handler, Thumb */
     put32(rom + 0x104, 0x02000000); /* marker 1 */
-    /* the interrupt handler at 0x120 */
+    /* the interrupt handler at 0x120: it acknowledges the vblank and flags it for the BIOS's wait, as a game does */
     put16(rom + 0x120, 0x2101); /* movs r1, #1 */
-    put16(rom + 0x122, 0x4803); /* ldr r0, [pc, #12]: IF */
+    put16(rom + 0x122, 0x4804); /* ldr r0, [pc, #16]: IF */
     put16(rom + 0x124, 0x8001); /* strh r1, [r0]: acknowledge */
-    put16(rom + 0x126, 0x2107); /* movs r1, #7 */
-    put16(rom + 0x128, 0x4802); /* ldr r0, [pc, #8]: marker 2 */
-    put16(rom + 0x12A, 0x6001); /* str r1, [r0] */
-    put16(rom + 0x12C, 0x4770); /* bx lr */
-    put16(rom + 0x12E, 0x46C0);
-    put32(rom + 0x130, 0x04000202);
-    put32(rom + 0x134, 0x02000004); /* marker 2 */
+    put16(rom + 0x126, 0x4804); /* ldr r0, [pc, #16]: the BIOS's flags */
+    put16(rom + 0x128, 0x8001); /* strh r1, [r0]: the vblank VBlankIntrWait waits for */
+    put16(rom + 0x12A, 0x2107); /* movs r1, #7 */
+    put16(rom + 0x12C, 0x4803); /* ldr r0, [pc, #12]: marker 2 */
+    put16(rom + 0x12E, 0x6001); /* str r1, [r0] */
+    put16(rom + 0x130, 0x4770); /* bx lr */
+    put16(rom + 0x132, 0x46C0);
+    put32(rom + 0x134, 0x04000202);
+    put32(rom + 0x138, 0x03007FF8);
+    put32(rom + 0x13C, 0x02000004); /* marker 2 */
     return rom;
 }
 
