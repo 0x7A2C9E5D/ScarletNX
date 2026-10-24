@@ -4,7 +4,7 @@
    nvdec_write to (tests/nvdec_packets.c, tests/nvdec_vp9_vectors.c, tests/vulkan_headless.c). The runtime lays every
    picture out on the GPU (vk/nvdec.c, docs/GPU_OWNERSHIP.md), so this file isn't built into it */
 #include <string.h>
-#include "nx/gpu/gpu.h"
+#include "nvdec_ref.h"
 #include "nx/memory/mem.h"
 
 /* NV12 planes, block linear. The layout's offset is separable, offset(x, y) = offset(x, 0) + offset(0, y), so the

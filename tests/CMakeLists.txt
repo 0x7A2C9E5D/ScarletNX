@@ -990,13 +990,13 @@ endif()
 
 # Deterministic FFmpeg API double: no decoder dependency in tools-only builds.
 add_executable(snx-test-nvdec-packets nvdec_packets.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vp9_rebuild.cpp"
-    "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/nvdec_ref.c")
+    support/nvdec_ref.c)
 snx_test_target(snx-test-nvdec-packets 11)
 target_include_directories(snx-test-nvdec-packets BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg_stub")
 add_test(NAME nvdec_packets COMMAND snx-test-nvdec-packets)
 if(NOT SNX_TOOLS_ONLY)
     add_executable(snx-test-nvdec-decode nvdec_packets.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vp9_rebuild.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/nvdec_ref.c")
+        support/nvdec_ref.c)
     snx_test_target(snx-test-nvdec-decode 11)
     target_compile_definitions(snx-test-nvdec-decode PRIVATE SNX_TEST_REAL_FFMPEG)
     target_link_libraries(snx-test-nvdec-decode PRIVATE FFmpeg::avcodec)
@@ -1054,7 +1054,7 @@ if(SNX_TEST_VP9_VECTORS)
     target_link_libraries(snx-test-nvdec-vp9-jobs PUBLIC FFmpeg::avcodec)
     add_executable(snx-test-nvdec-vp9-vectors nvdec_vp9_vectors.c
                    "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vp9_rebuild.cpp"
-                   "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/nvdec_ref.c")
+                   support/nvdec_ref.c)
     snx_test_target(snx-test-nvdec-vp9-vectors 11)
     target_link_libraries(snx-test-nvdec-vp9-vectors PRIVATE snx-test-nvdec-vp9-jobs)
     while(snx_vp9_vectors)
@@ -1095,11 +1095,11 @@ snx_test_target(snx-test-vp9-rebuild 23)
 add_test(NAME vp9_rebuild COMMAND snx-test-vp9-rebuild)
 # the 2D engine's blit in guest memory (fermi2d.c, dma.c's bl_span_ptr): block linear scaling, an odd window, the
 # renderer's hooks once a blit
-add_executable(snx-test-fermi2d-blit fermi2d_blit.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/fermi2d_ref.c")
+add_executable(snx-test-fermi2d-blit fermi2d_blit.c support/fermi2d_ref.c)
 snx_test_target(snx-test-fermi2d-blit 23)
 add_test(NAME fermi2d_blit COMMAND snx-test-fermi2d-blit)
 # vic.c's CPU composition, through vic_execute, with a renderer that declines the GPU
-add_executable(snx-test-vic-compose vic_compose.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vic_ref.c")
+add_executable(snx-test-vic-compose vic_compose.c support/vic_ref.c)
 snx_test_target(snx-test-vic-compose 23)
 add_test(NAME vic_compose COMMAND snx-test-vic-compose)
 if(NOT WIN32)
@@ -1373,17 +1373,17 @@ else()
     add_test(NAME a64_ported_cases COMMAND snx-test-a64-ported)
 endif()
 
-add_executable(snx-test-astc astc_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/astc.c")
+add_executable(snx-test-astc astc_decode.c support/astc.c)
 snx_test_target(snx-test-astc 23)
 add_test(NAME astc_decode COMMAND snx-test-astc)
 # the ASTC shader's GLSL run on the CPU (tests/glsl/glsl.hpp) against the same decoder: no GPU needed
-add_executable(snx-test-astc-glsl glsl/astc_glsl.cpp "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/astc.c")
+add_executable(snx-test-astc-glsl glsl/astc_glsl.cpp support/astc.c)
 snx_test_target(snx-test-astc-glsl 23)
 target_compile_options(snx-test-astc-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-astc-glsl PRIVATE glsl)
 add_test(NAME astc_glsl COMMAND snx-test-astc-glsl)
 # the VIC shader's GLSL, both builds, run on the CPU against vic.c's composition of random jobs: no GPU needed
-add_executable(snx-test-vic-glsl glsl/vic_jobs.c glsl/vic_glsl.cpp "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vic_ref.c")
+add_executable(snx-test-vic-glsl glsl/vic_jobs.c glsl/vic_glsl.cpp support/vic_ref.c)
 snx_test_target(snx-test-vic-glsl 23)
 target_compile_options(snx-test-vic-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-vic-glsl PRIVATE glsl)
@@ -1427,23 +1427,22 @@ if(TARGET snx_vita_program)
 endif()
 # the texture conversion shader's GLSL run on the CPU against the CPU's conversions and ETC2 and BCn decoders: no GPU
 # needed
-add_executable(snx-test-texconv-glsl glsl/texconv_glsl.cpp "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c"
-               "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/bcn.c")
+add_executable(snx-test-texconv-glsl glsl/texconv_glsl.cpp support/etc2.c support/bcn.c)
 snx_test_target(snx-test-texconv-glsl 23)
 target_compile_options(snx-test-texconv-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-texconv-glsl PRIVATE glsl)
 add_test(NAME texconv_glsl COMMAND snx-test-texconv-glsl)
 
 # single blocks from rEden's ASTC decoder tests, against edenprobe's and astcenc's texels (astc_blocks.c)
-add_executable(snx-test-astc-blocks astc_blocks.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/astc.c")
+add_executable(snx-test-astc-blocks astc_blocks.c support/astc.c)
 snx_test_target(snx-test-astc-blocks 23)
 add_test(NAME astc_blocks COMMAND snx-test-astc-blocks)
 
-add_executable(snx-test-nvn-command-gap nvn_command_gap.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/nvn_command_gap.c")
+add_executable(snx-test-nvn-command-gap nvn_command_gap.c support/nvn_command_gap.c)
 snx_test_target(snx-test-nvn-command-gap 23)
 add_test(NAME nvn_command_gap COMMAND snx-test-nvn-command-gap)
 
-add_executable(snx-test-nvn-control nvn_control.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/nvn_control.c")
+add_executable(snx-test-nvn-control nvn_control.c support/nvn_control.c)
 snx_test_target(snx-test-nvn-control 23)
 add_test(NAME nvn_control COMMAND snx-test-nvn-control)
 
@@ -1516,7 +1515,7 @@ if(UNIX)
         "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/engines.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/write_pages.c"
         "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme_hle.c"
         "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/dma.c"
-        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/dma_ref.c" own_stub.c)
+        support/dma_ref.c own_stub.c)
     snx_test_target(snx-test-gpu-park 23)
     target_link_libraries(snx-test-gpu-park PRIVATE scarletnx-common) # gpu.c says why a thread did not start
         add_test(NAME gpu_park COMMAND snx-test-gpu-park)
@@ -1550,10 +1549,10 @@ add_executable(snx-test-shipped-pass shipped_pass.c "${PROJECT_SOURCE_DIR}/src/n
 snx_test_target(snx-test-shipped-pass 99)
 add_test(NAME shipped_pass COMMAND snx-test-shipped-pass)
 
-add_executable(snx-test-etc2 etc2_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
+add_executable(snx-test-etc2 etc2_decode.c support/etc2.c)
 snx_test_target(snx-test-etc2 23)
 add_test(NAME etc2_decode COMMAND snx-test-etc2)
-add_executable(snx-test-bcn bcn_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/bcn.c")
+add_executable(snx-test-bcn bcn_decode.c support/bcn.c)
 snx_test_target(snx-test-bcn 23)
 add_test(NAME bcn_decode COMMAND snx-test-bcn)
 
@@ -1580,7 +1579,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 # EAC worked examples and edenprobe's blocks from rEden's decode_eac test (eac_blocks.c)
-add_executable(snx-test-eac-blocks eac_blocks.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
+add_executable(snx-test-eac-blocks eac_blocks.c support/etc2.c)
 snx_test_target(snx-test-eac-blocks 23)
 add_test(NAME eac_blocks COMMAND snx-test-eac-blocks)
 

@@ -16,7 +16,7 @@
 #define TC_S8D24 5u /* stencil in the low 8 bits, depth the top 24 */
 #define TC_D24X8 6u /* depth in the low 24 bits, stencil 0 */
 #define TC_D32S8 7u /* 8 bytes: float depth, then the stencil byte */
-/* ETC2 and EAC 4x4 blocks to pixels, a block an invocation (gpu/texture/etc2.c is the reference) */
+/* ETC2 and EAC 4x4 blocks to pixels, a block an invocation (tests/support/etc2.c is the reference) */
 #define TC_ETC2_RGB 8u
 #define TC_ETC2_PTA 9u
 #define TC_ETC2_RGBA 10u
@@ -44,7 +44,7 @@
    bpp bytes (remap) from the source pixel its column and row name in two tables in the input (words from const_a: a
    column's source column, from const_b: a row's source row). Source rows are in_pitch bytes apart from in_bias */
 #define TC_BLIT 22u
-/* BC1 to BC7 4x4 blocks to pixels, a block an invocation (gpu/texture/bcn.c is the reference): RGBA8 for BC1 to BC3
+/* BC1 to BC7 4x4 blocks to pixels, a block an invocation (tests/support/bcn.c is the reference): RGBA8 for BC1 to BC3
    and BC7, 16 bit unorm or snorm channels for BC4 and BC5, RGBA16F for BC6H */
 #define TC_BC1 23u
 #define TC_BC2 24u

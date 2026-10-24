@@ -10,6 +10,7 @@
 
    usage: snx-test-nvdec-vp9-vectors VECTOR MD5-LIST */
 #include "nx/gpu/video/nvdec.c"
+#include "support/nvdec_ref.h"
 #include "nvdec_vp9_jobs.h"
 #include <libavutil/md5.h>
 #include <stdarg.h>

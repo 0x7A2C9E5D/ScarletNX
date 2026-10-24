@@ -236,14 +236,6 @@ typedef struct {
     const u32* scol;
     const u32* srow;
 } GpuBlit;
-/* maxwell/fermi2d_ref.c: the blit done on the CPU in guest memory, the reference for the tests (not in the runtime) */
-void blit_mem_ref(const GpuBlit* b);
-/* maxwell/dma_ref.c: the launch done on the CPU in guest memory, the reference the tests hold the renderer's dma_copy
-   to (not in the runtime) */
-void dma_copy_ref(const GpuDmaOp* o);
-/* video/nvdec_ref.c: the picture written into guest memory on the CPU, the reference the tests hold the renderer's
-   nvdec_write to (not in the runtime) */
-void nvdec_write_ref(const NvdecPic* p);
 
 /* ---- gpu.c: guest memory through the GPU's address space. A read lands the renderer's pending results over the
    range first, a write lets it land what would overwrite the write later, and records the write (gpu_mem_written).

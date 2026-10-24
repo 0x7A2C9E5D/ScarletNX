@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "nx/gpu/nvn_control.h"
+#include "nvn_control.h"
 #include <string.h>
 
 static int packet_header(u32 word, u32 mode, u32 method, u32 count) {

@@ -10,6 +10,7 @@
 #include "nx/gpu/gpu.h"
 #include "nx/gpu/maxwell/engines_int.h"
 #include "nx/gpu/renderer.h"
+#include "support/dma_ref.h"
 #include "nx/hle/services/nvdrv.h"
 #include "nx/memory/mem.h"
 #include "nx/runtime/clock.h"

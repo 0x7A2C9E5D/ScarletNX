@@ -3,7 +3,7 @@
 /* The body of texconv.comp: texels of a format the host can't take as they are, converted on the GPU from linear rows
    (what blocklinear.comp made of a block linear level, or a pitch linear level's rows staged as they are) into rows
    that copy into the image. GLSL that is also C++ (tests/glsl/glsl.hpp): tests/glsl/texconv_glsl.cpp runs it against
-   the CPU's conversions (gpu/texture/etc2.c for ETC2 and EAC, gpu/texture/bcn.c for BCn).
+   the CPU's conversions (tests/support/etc2.c for ETC2 and EAC, bcn.c for BCn).
 
    It also converts the frames vi presents from memory to RGBA8 (vk/renderer.c).
 
@@ -197,7 +197,7 @@ uint bc3_alpha(uint hi, uint lo, uint i) {
     return k == 6u ? 0u : 255u;
 }
 
-/* BPTC's tables (bcn.c's, packed): the subset bit of each pixel of the two subset partitions, 16 bits each; the
+/* BPTC's tables (tests/support/bcn.c's, packed): the subset bit of each pixel of the two subset partitions, 16 bits each; the
    subset of each pixel of the three subset ones, 2 bits each; the anchor pixel of subset 1 of the two subset
    partitions and of subsets 1 (A) and 2 (B) of the three subset ones, a nibble each */
 const uint BC_PART2[32] = {

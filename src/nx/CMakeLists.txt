@@ -243,8 +243,9 @@ endif()
 # Opt-in because normal unit-test runs need neither an ICD nor a GPU. All rendering uses the real runtime.
 if(BUILD_TESTING AND SNX_TEST_VULKAN)
     add_executable(snx-test-vulkan "${PROJECT_SOURCE_DIR}/tests/vulkan_headless.c"
-        "${PROJECT_SOURCE_DIR}/tests/spirv_emitter_fixture.c" gpu/video/nvdec_ref.c gpu/video/vic_ref.c
-        gpu/maxwell/dma_ref.c gpu/maxwell/fermi2d_ref.c)
+        "${PROJECT_SOURCE_DIR}/tests/spirv_emitter_fixture.c" "${PROJECT_SOURCE_DIR}/tests/support/nvdec_ref.c"
+        "${PROJECT_SOURCE_DIR}/tests/support/vic_ref.c" "${PROJECT_SOURCE_DIR}/tests/support/dma_ref.c"
+        "${PROJECT_SOURCE_DIR}/tests/support/fermi2d_ref.c")
     target_link_libraries(snx-test-vulkan PRIVATE snx_nx_flags ${components} snx_driver FFmpeg::avutil Threads::Threads
                                                   ${CMAKE_DL_LIBS})
     set_target_properties(snx-test-vulkan PROPERTIES LINKER_LANGUAGE CXX)
@@ -269,8 +270,9 @@ if(BUILD_TESTING AND SNX_TEST_VULKAN)
         set(snx_astc_plat runtime/platform/plat_posix.c)
     endif()
     add_executable(snx-test-astc-vulkan "${PROJECT_SOURCE_DIR}/tests/astc_vulkan.c" "${PROJECT_SOURCE_DIR}/tests/tracy_stubs.c"
-        gpu/texture/astc.c gpu/vk/astc.c
-        gpu/vk/blocklinear.c gpu/texture/blocklinear.c gpu/vk/texconv.c gpu/texture/etc2.c gpu/texture/bcn.c
+        "${PROJECT_SOURCE_DIR}/tests/support/astc.c" gpu/vk/astc.c
+        gpu/vk/blocklinear.c gpu/texture/blocklinear.c gpu/vk/texconv.c "${PROJECT_SOURCE_DIR}/tests/support/etc2.c"
+        "${PROJECT_SOURCE_DIR}/tests/support/bcn.c"
         gpu/vk/cmd.c gpu/vk/memory.c gpu/vk/record.c gpu/vk/vma.cpp ${snx_astc_plat} "${volk_SOURCE_DIR}/volk.c"
         "${CMAKE_BINARY_DIR}/generated/spirv/astc_spv.c" "${CMAKE_BINARY_DIR}/generated/spirv/blocklinear_spv.c"
         "${CMAKE_BINARY_DIR}/generated/spirv/texconv_spv.c")

@@ -7,6 +7,7 @@
    formula); an odd destination window, and nothing written outside it; a source whose rows end inside a 16 byte run;
    the renderer's blit asked once, and the render target over the destination reloaded once */
 #include "nx/gpu/maxwell/fermi2d.c"
+#include "support/fermi2d_ref.h"
 
 static unsigned checks;
 #define CHECK(x)                                                                                                       \

@@ -12,7 +12,7 @@
    8 bits the way astc.comp does it (as a UNORM16 value rounded to nearest), in integers. Where Eden decodes HDR
    endpoints and makes errors transparent black, this follows the LDR profile, as the hardware's decode is taken
    to: errors and HDR partitions are opaque magenta. */
-#include "nx/gpu/texture/astc.h"
+#include "astc.h"
 #include <string.h>
 
 /* a little-endian bit stream over one 16 byte block: bits past the end read as zero */
