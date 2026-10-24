@@ -241,8 +241,22 @@ static int room(SnxUnitCache* cache, SnxU64 size, const char* unit) {
     return 0;
 }
 
-int snx_unit_cache_object(SnxUnitCache* cache, SnxIr* ir, unsigned char** data, size_t* size, int* reused, char* error,
-                          size_t error_size) {
+unsigned char* snx_unit_cache_read(const SnxUnitCache* cache, const char* key, size_t* size) {
+    char *name = snx_format("%s.o", key), *path = snx_path_join(snx_unit_cache_folder(cache), name), why[256];
+    size_t file_size = 0, object_size = 0;
+    unsigned char* file = snx_read_file(path, &file_size);
+    free(path);
+    free(name);
+    if (file && whole(file, file_size, key, &object_size, why, sizeof why)) {
+        free(file);
+        file = NULL;
+    }
+    if (file) *size = object_size;
+    return file;
+}
+
+int snx_unit_cache_object(SnxUnitCache* cache, SnxIr* ir, unsigned char** data, size_t* size, int* reused, char* kept,
+                          char* error, size_t error_size) {
     char key[65], why[512], reason[256], *triple, *cpu, *features, *name, *path;
     LLVMMemoryBufferRef bitcode;
     unsigned char* file;
@@ -252,6 +266,7 @@ int snx_unit_cache_object(SnxUnitCache* cache, SnxIr* ir, unsigned char** data, 
     *data = NULL;
     *size = 0;
     *reused = 0;
+    if (kept) kept[0] = 0;
     /* snx_ir_object refuses a unit with an instruction no emitter covers, which nothing is looked up for */
     if (ir->fallbacks) return snx_ir_object(ir, cache->opt, data, size, error, error_size);
     bitcode = LLVMWriteBitcodeToMemoryBuffer(ir->mod);
@@ -278,6 +293,7 @@ int snx_unit_cache_object(SnxUnitCache* cache, SnxIr* ir, unsigned char** data, 
         *data = file;
         *size = object_size;
         *reused = 1;
+        if (kept) memcpy(kept, key, sizeof key);
         /* the size limit removes the objects reused longest ago first */
         if (snx_set_file_time(path, (SnxU64)time(NULL)))
             snx_error("unit cache: cannot renew the time of %s (%s): a size limit removes it as one never reused", path,
@@ -298,9 +314,12 @@ int snx_unit_cache_object(SnxUnitCache* cache, SnxIr* ir, unsigned char** data, 
 #else
         pthread_mutex_lock(&cache->lock);
 #endif
-        if (!room(cache, (SnxU64)*size + SNX_UNIT_TRAILER, unit) &&
-            snx_unit_cache_keep(cache, key, *data, *size, why, sizeof why))
-            snx_error("unit cache: %s: %s is compiled again on the next recompile", why, unit);
+        if (!room(cache, (SnxU64)*size + SNX_UNIT_TRAILER, unit)) {
+            if (snx_unit_cache_keep(cache, key, *data, *size, why, sizeof why))
+                snx_error("unit cache: %s: %s is compiled again on the next recompile", why, unit);
+            else if (kept)
+                memcpy(kept, key, sizeof key);
+        }
 #ifdef _WIN32
         LeaveCriticalSection(&cache->lock);
 #else

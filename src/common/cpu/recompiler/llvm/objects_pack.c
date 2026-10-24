@@ -31,7 +31,8 @@ unsigned char* snx_objects_pack(const SnxLinkInput* inputs, size_t count, size_t
 }
 
 int snx_objects_pack_write(const SnxLinkInput* inputs, size_t count, const char* path, size_t* size,
-                           void (*released)(void* arg, size_t index), void* arg) {
+                           void (*released)(void* arg, size_t index),
+                           unsigned char* (*load)(void* arg, size_t index, size_t* size), void* arg) {
     unsigned char head[16];
     size_t i, total = sizeof head;
     int bad;
@@ -41,10 +42,20 @@ int snx_objects_pack_write(const SnxLinkInput* inputs, size_t count, const char*
     snx_link_put64(head + 8, count);
     bad = fwrite(head, 1, sizeof head, f) != sizeof head;
     for (i = 0; i < count && !bad; ++i) {
-        unsigned char length[8];
-        snx_link_put64(length, inputs[i].size);
-        bad = fwrite(length, 1, sizeof length, f) != sizeof length ||
-              fwrite(inputs[i].data, 1, inputs[i].size, f) != inputs[i].size;
+        unsigned char length[8], *loaded = NULL;
+        const unsigned char* data = inputs[i].data;
+        size_t loaded_size = 0;
+        if (!data && load) {
+            loaded = load(arg, i, &loaded_size);
+            data = loaded;
+            bad = !loaded || loaded_size != inputs[i].size;
+        }
+        if (!bad) {
+            snx_link_put64(length, inputs[i].size);
+            bad = fwrite(length, 1, sizeof length, f) != sizeof length ||
+                  fwrite(data, 1, inputs[i].size, f) != inputs[i].size;
+        }
+        free(loaded);
         total += 8 + inputs[i].size;
         if (released) released(arg, i);
     }
