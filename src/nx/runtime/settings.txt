@@ -210,6 +210,14 @@ setting Map limit (files)
     words No limit|#
     help The most of the game's files mapped at start; 0 = no limit. A file past it is read from disk when the game
     help asks: each mapped file holds a descriptor, of which a device may give the whole app a few thousand
+setting Thread stack (MB)
+    key thread_stack_mb
+    int 1 256
+    default 32
+    default-if SNX_IOS 8
+    startup
+    help The host stack of each of the game's threads, in MB: a game's deep calls take it. Less leaves address space
+    help for more threads where a device has little, and a game that calls very deep may then stop
 setting Pipeline threads
     key pipeline_threads
     int 0 32
