@@ -1371,7 +1371,7 @@ msgid "SCARLETNX  /  SETTINGS"
 msgstr ""
 
 #: src/gui/main.c
-msgid "SCARLETNX  /  RECOMPILE"
+msgid "SCARLETNX  /  COMPILE"
 msgstr ""
 
 #: src/gui/main.c

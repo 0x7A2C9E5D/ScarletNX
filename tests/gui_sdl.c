@@ -2325,7 +2325,8 @@ static void recompile_queue(App* app) {
     assert(tab_reads(app, "Compile 25%"));
     render(app);
     shows(app, "Compile 25%", yellow);   /* the tab, in focus */
-    shows(app, "RECOMPILE", normal);     /* the head's title, its first part left out beside four tabs */
+    shows(app, "COMPILE", normal);       /* the head's title, its first part left out beside four tabs */
+    hides(app, "RECOMPILE", normal);     /* the tab's name, not the action's */
     shows_half(app, "Recompiling queue game one (1 modules)", normal); /* its output, in the Output box */
     shows(app, "Output", normal);
     shows(app, "Queue", normal);

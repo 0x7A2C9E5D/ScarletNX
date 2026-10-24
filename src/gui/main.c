@@ -4108,12 +4108,12 @@ static void big_text(App* app, GuiRect r, int x, int y, const char* value, int s
     }
 }
 #define SAY_SETTINGS_TITLE  SNX_TR_NOOP("SCARLETNX  /  SETTINGS")
-#define SAY_RECOMPILE_TITLE SNX_TR_NOOP("SCARLETNX  /  RECOMPILE")
+#define SAY_COMPILE_TITLE SNX_TR_NOOP("SCARLETNX  /  COMPILE")
 static const char* screen_title(const App* app, char* out, size_t size) {
     char* c;
     if (app->setup_on && !app->editing) return snx_tr("SCARLETNX  /  SETUP");
     if (!app->editing && app->menu.view == GUI_LOAD_RECOMPILE && !app->menu.running && !app->finished)
-        return snx_tr(SAY_RECOMPILE_TITLE);
+        return snx_tr(SAY_COMPILE_TITLE);
     if (!app->editing)
         return app->theme
             .title[(app->menu.running || app->finished) && !entering(app) ? screen(app) : menu_screen(app)];
@@ -4334,8 +4334,8 @@ static const char* head_title(const App* app, bool tabs, char* out, size_t size,
     titles[2] = english[2] = app->theme.title[GUI_SCREEN_KEYS];
     english[3] = SAY_SETTINGS_TITLE;
     titles[3] = snx_tr(SAY_SETTINGS_TITLE);
-    english[4] = SAY_RECOMPILE_TITLE;
-    titles[4] = snx_tr(SAY_RECOMPILE_TITLE);
+    english[4] = SAY_COMPILE_TITLE;
+    titles[4] = snx_tr(SAY_COMPILE_TITLE);
     for (parts = 0; parts < 4; ++parts) {
         for (*letters = big; *letters >= 1; --*letters) {
             room = head_room(app, *letters);
