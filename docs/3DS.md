@@ -118,9 +118,9 @@ through the flat space and the API with a stand-in renderer.
 
 Compiled code addresses the guest flat: a 4 GiB host reservation where guest
 address `va` is `base + va`, each mapping a view of the board's RAM held in one
-host memory object (`src/3ds/memory/host.c`: a memfd on Linux and Android, an
-unlinked `shm_open` object on the other POSIX systems, a pagefile section mapped
-into placeholders on Windows 10 1803 and later). Every guest address of a physical
+host memory object (`src/common/memory/host.c`, the GBA window's too: a memfd on
+Linux and Android, an unlinked `shm_open` object on the other POSIX systems, a
+pagefile section mapped into placeholders on Windows 10 1803 and later). Every guest address of a physical
 page (a heap page and its MAP mirror, shared memory, the linear heap) is the same
 memory, and the HLE and the GPU read and write that object directly. Blocks read and
 write `cpu->mem + va` with no callback; a host fault in the reservation is the

@@ -468,6 +468,7 @@ typedef struct App {
 typedef char gui_entries_in_order
     [GUI_ENTRY(GUI_LINUX) == UI_MENU_ENTRIES_LOAD_LINUX_ARM_ELF && GUI_ENTRY(GUI_3DS) == UI_MENU_ENTRIES_LOAD_3DS_CIA &&
              GUI_ENTRY(GUI_VITA) == UI_MENU_ENTRIES_LOAD_VITA_VPK &&
+             GUI_ENTRY(GUI_GBA) == UI_MENU_ENTRIES_LOAD_GBA_ROM &&
              GUI_ENTRY(GUI_KEYS) == UI_MENU_ENTRIES_INSTALL_KEYS &&
              GUI_ENTRY(GUI_SETTINGS) == UI_MENU_ENTRIES_SETTINGS && GUI_ENTRY(GUI_LOG) == UI_MENU_ENTRIES_SHARE_LOG &&
 #ifdef SDL_PLATFORM_ANDROID
@@ -4310,8 +4311,9 @@ static const char* item_about(const App* app, int item) {
     static const char* const loads[] = {SNX_TR_NOOP("Recompiles a game's .nsp, .xci or .nro, then runs it"),
                                         SNX_TR_NOOP("Runs a Linux ARM program, 64 or 32-bit"),
                                         SNX_TR_NOOP("Recompiles a 3DS .cia, then runs it"),
-                                        SNX_TR_NOOP("Recompiles a PS Vita homebrew .vpk, then runs it")};
-    if (item >= GUI_SWITCH && item <= GUI_VITA) return snx_tr(loads[item - GUI_SWITCH]);
+                                        SNX_TR_NOOP("Recompiles a PS Vita homebrew .vpk, then runs it"),
+                                        SNX_TR_NOOP("Runs a GBA ROM on the emulated AGB board")};
+    if (item >= GUI_SWITCH && item <= GUI_GBA) return snx_tr(loads[item - GUI_SWITCH]);
     if (item == GUI_KEYS) return snx_tr("Installs prod.keys, which games are extracted with");
     if (item == GUI_EXIT) return snx_tr("Closes ScarletNX");
     {
@@ -4807,6 +4809,7 @@ static const char* driver_name(int item) {
         case GUI_LINUX: return "scarletnx-gnuabi";
         case GUI_3DS: return "scarletnx-3ds";
         case GUI_VITA: return "scarletnx-vita";
+        case GUI_GBA: return "scarletnx-agb";
 #endif
         default: return NULL;
     }
@@ -10321,6 +10324,7 @@ void ui_menu_entries_load_switch_nsp_xci_nro_action_cb(App* app, uint32_t hit) {
 void ui_menu_entries_load_linux_arm_elf_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_LINUX, hit); }
 void ui_menu_entries_load_3ds_cia_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_3DS, hit); }
 void ui_menu_entries_load_vita_vpk_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_VITA, hit); }
+void ui_menu_entries_load_gba_rom_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_GBA, hit); }
 void ui_menu_entries_install_keys_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_KEYS, hit); }
 void ui_menu_entries_settings_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_SETTINGS, hit); }
 void ui_menu_entries_share_log_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_LOG, hit); }

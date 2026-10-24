@@ -2429,6 +2429,10 @@ int main(int argc, char** argv) {
     render(&app);
     shows(&app, "- Load Vita VPK", yellow);
     key(&app, SDLK_RIGHT);
+    assert(app.menu.selected == GUI_GBA);
+    render(&app);
+    shows(&app, "- Load GBA ROM", yellow);
+    key(&app, SDLK_RIGHT);
     assert(app.menu.selected == GUI_KEYS);
     /* Never touch the real user's keys: exercise installation in a private home. */
     free(app.keys_path);
@@ -4524,6 +4528,7 @@ int main(int argc, char** argv) {
     key(&app, SDLK_LEFT);
     key(&app, SDLK_LEFT);
     key(&app, SDLK_LEFT);
+    key(&app, SDLK_LEFT);
     /* a load opens the screen its file is picked on at once: games/ is Games' now, not an option under it */
     assert(app.menu.selected == GUI_SWITCH);
     pump(&app);
@@ -5675,6 +5680,8 @@ int main(int argc, char** argv) {
         GuiMenuBoxes m;
         menu_boxes(&app, &m);
         assert(ui_menu_shown(m.rects, app.scale, UI_MENU_ENTRIES) >= GUI_ITEM_COUNT && GUI_SWITCH == 0);
+        /* room past a list's default 8 rows: a ninth entry (Android's Exit) shows where it fits, no scroll */
+        assert(ui_menu_shown(m.rects, app.scale, UI_MENU_ENTRIES) > 8);
     }
     go_tab(&app, GUI_TAB_GAMES);
     assert(app.menu.view == GUI_LOAD_GAMES && app.games.count == 35 && !app.message[0]);

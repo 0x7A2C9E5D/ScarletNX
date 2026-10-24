@@ -56,6 +56,8 @@ if(SNX_TEST_SANITIZERS)
         snx_ctr_audio snx_ctr_gpu snx_ctr_gpu_reference
         # the Vita runtime, its loader and USSE translator
         scarletnx-vita snx_vita_program snx_vita_loader snx_vita_usse snx-vita-usse
+        # the GBA board and its runner
+        scarletnx-agb scarletnx-agb-run
         # scarletnx's main where it is the other drivers too
         snx_multicall
         # the menu, its splash, icon and pads
@@ -377,6 +379,11 @@ add_executable(snx-test-os-error os_error.c)
 snx_test_target(snx-test-os-error 99)
 target_link_libraries(snx-test-os-error PRIVATE scarletnx-common)
 add_test(NAME os_error COMMAND snx-test-os-error)
+# the host's side of a flat guest space (common/memory/host.c): views of one object are the same memory, a commit zeros
+add_executable(snx-test-host-memory host_memory.c)
+snx_test_target(snx-test-host-memory 99)
+target_link_libraries(snx-test-host-memory PRIVATE scarletnx-common)
+add_test(NAME host_memory COMMAND snx-test-host-memory)
 # RtAPI.cas128: the host's 16-byte compare-and-swap and the locked one, a pair stored whole or not at all
 add_executable(snx-test-cas128 cas128.c)
 snx_test_target(snx-test-cas128 11)
@@ -1244,6 +1251,9 @@ if(UNIX AND NOT CMAKE_CROSSCOMPILING)
     if(Python3_Interpreter_FOUND)
         add_test(NAME arm_llvm_witnesses COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/arm_test.py"
             --emitter $<TARGET_FILE:snx-test-arm-emit> --runtime $<TARGET_FILE:snx_arm_rt> --cc "${CMAKE_C_COMPILER}")
+        add_test(NAME arm7tdmi_witnesses COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/arm7tdmi_test.py"
+            --arm-emitter $<TARGET_FILE:snx-test-arm-emit> --thumb-emitter $<TARGET_FILE:snx-test-thumb-emit>
+            --runtime $<TARGET_FILE:snx_arm_rt> --cc "${CMAKE_C_COMPILER}")
         if(SNX_TEST_ARM_DIFF)
             add_test(NAME arm_llvm_differential COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/arm_test.py"
                 --emitter $<TARGET_FILE:snx-test-arm-emit> --runtime $<TARGET_FILE:snx_arm_rt> --cc "${CMAKE_C_COMPILER}" --unicorn)

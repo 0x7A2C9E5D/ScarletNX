@@ -4,12 +4,15 @@
 	# in the order of model.h's items, which main.c checks; the code gives the active one and the keys' state
 	[list]Entries {
 		attr = callback
+		# every entry where they fit: a list shows 8 rows at most by default
+		max_rows = 64
 		# a finger's: 40px at the 3x a phone held wide gets is about 48dp, Android's touch target
 		android.row_height = 40px
 		[button]"Load Switch NSP/XCI/NRO" {}
 		[button]"Load Linux ARM ELF" {}
 		[button]"Load 3DS CIA" {}
 		[button]"Load Vita VPK" {}
+		[button]"Load GBA ROM" {}
 		[button]"Install Keys" {}
 		[button]"Settings" {}
 		[button]"Share Log" {}
