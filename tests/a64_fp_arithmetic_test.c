@@ -227,7 +227,8 @@ static void vector_and_state(void) {
     RtAPI rt = {0};
     c.rt = &rt;
     snx_msr(&c, 0x5A20, ~0ull);
-    check(snx_mrs(&c, 0x5A20), 0x07C00000, "A57 FPCR RES0");
+    /* the helper keeps FEAT_FP16's FZ16 too: the generated code clears it first for a guest without FEAT_FP16 */
+    check(snx_mrs(&c, 0x5A20), 0x07C80000, "FPCR RES0");
     snx_msr(&c, 0x5A21, ~0ull);
     check(snx_mrs(&c, 0x5A21), 0xF800009F, "A57 FPSR RES0");
     check(snx_fp_binary(&c, 0x3F800000, 0x3F800000, 32, SNX_FP_ADD), 0x40000000, "exact sum");

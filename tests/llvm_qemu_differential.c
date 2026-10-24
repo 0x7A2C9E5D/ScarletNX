@@ -24,6 +24,7 @@
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/llvm/ir_ldst.h"
 #include "common/cpu/recompiler/llvm/ir_fpu.h"
+#include "common/cpu/recompiler/llvm/ir_vec.h"
 #include "common/cpu/recompiler/llvm/link.h"
 #include "llvm_qemu_words.h"
 #include "qemu_ref/qemu_ref.h"
@@ -771,10 +772,11 @@ int main(int argc, char** argv) {
                 SnxU64 features = 0;
                 sprintf(name, "S_%lu", (unsigned long)nsteps);
                 /* the load/store emitters (ir_ldst.c) implement the LSE and RCpc atomics too, the scalar FP ones
-                   (ir_fpu.c) FEAT_FP16, FEAT_JSCVT, FEAT_FRINTTS and BFCVT: a word the Switch lacks that they emit
-                   runs with max's features, against QEMU's -cpu max */
+                   (ir_fpu.c) FEAT_FP16, FEAT_JSCVT, FEAT_FRINTTS and BFCVT, the AdvSIMD ones (ir_vec.c) the vector
+                   extensions: a word the Switch lacks that they emit runs with max's features, against QEMU's
+                   -cpu max */
                 if (snx_a64_decode_word(it->words[k], SNX_A64_TARGET_MAX, &max) != SNX_A64_OP_UNDEF &&
-                    (snx_ir_ldst_handles(max.op) || snx_ir_fpu_handles(max.op)) &&
+                    (snx_ir_ldst_handles(max.op) || snx_ir_fpu_handles(max.op) || snx_ir_vec_handles(max.op)) &&
                     (max.feature & ~(SnxU64)SNX_A64_TARGET_SWITCH))
                     features = SNX_A64_TARGET_MAX;
                 else if (snx_a64_decode(it->words[k])->kind == SNX_FLOW_UNDEF)

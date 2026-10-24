@@ -419,7 +419,7 @@ SNX_INLINE u64 sat_u(i64 v, int bits) {
     return (u64)v > hi ? hi : (u64)v;
 }
 
-/* ---- AdvSIMD helpers out of line (tests/a64_reference/simd.c, helpers/crypto.c) ---- */
+/* ---- AdvSIMD helpers out of line (tests/a64_reference/simd.c, helpers/crypto.c, helpers/vector.c) ---- */
 void v_tbl(CPU* c, u32 d, u32 n, u32 len, u32 m, int q, int tbx);
 void v_aes(V128* d, const V128* k, int dec);         /* AESE (dec 0), AESD (1): d = round(d ^ k) */
 void v_aesmc(V128* d, const V128* s, int inv);       /* AESMC (inv 0), AESIMC (1) */
@@ -427,6 +427,14 @@ void v_sha1(CPU* c, u32 op, u32 d, u32 n, u32 m);    /* op 0-3: SHA1C/P/M/SU0; 0
 void v_sha256(CPU* c, u32 op, u32 d, u32 n, u32 m);  /* op 4-6: SHA256H/H2/SU1; 0x12: SHA256SU0 */
 void v_pmull(V128* d, const V128* a, const V128* b, int hi); /* PMULL 1Q (hi: PMULL2) */
 u64 v_expand_imm(u32 op, u32 cmode, u32 imm8);       /* AdvSIMDExpandImm */
+/* helpers/vector.c: SRSHL, URSHL, [SU]Q[R]SHL by register (desc: esz | lanes << 2 | flags << 8, flags 1 unsigned,
+   2 rounding, 4 saturating); SHA512H/H2/SU0/SU1 (op 0-3); SM3PARTW1/W2, SM3TT1A/1B/2A/2B (op 0-5, imm2);
+   SM4E, SM4EKEY (op 0, 1); and BFDOT's step */
+void snx_vec_shl(CPU* c, u32 d, u32 n, u32 m, u32 desc);
+void snx_vec_sha512(CPU* c, u32 op, u32 d, u32 n, u32 m);
+void snx_vec_sm3(CPU* c, u32 op, u32 d, u32 n, u32 m, u32 imm2);
+void snx_vec_sm4(CPU* c, u32 op, u32 d, u32 n, u32 m);
+u32 snx_vec_bfdot(CPU* c, u32 sum, u32 e1, u32 e2); /* BFDOT's step: sum plus the two bfloat16 products */
 
 /* DC ZVA: DCZID_EL0 gives 64-byte blocks */
 SNX_INLINE void dc_zva(u8* M, u64 a) { memset(MP(a & ~(u64)63), 0, 64); }

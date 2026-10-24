@@ -150,6 +150,8 @@ typedef struct SnxIr {
     int big_endian;
     /* PowerPC64's ABI is ELFv2, else ELFv1 (new_ir): what a function pointer is, where the TOC is saved */
     int elfv2;
+    /* the guest's features (snx_a64_features) for the function being emitted: what its system registers keep */
+    SnxU64 guest_features;
 } SnxIr;
 
 void ir_state_invalidate(SnxIr* ir);
@@ -214,7 +216,8 @@ LLVMValueRef snx_ir_static_step(SnxIr* ir, SnxU32 word, SnxU64 pc, SnxU64 featur
 /* Starts a function body: entry block, c and M */
 void snx_ir_begin(SnxIr* ir, LLVMValueRef function);
 
-/* ---- instructions (ir_a64.c, ir_simd.c, ir_fp.c) ---- */
+/* ---- the older instruction emitters (ir_a64.c, ir_simd.c, ir_fp.c): nothing calls them since ir_codegen.c
+   dispatches to ir_int.c, ir_ldst.c, ir_fpu.c and ir_vec.c; they go with the templates ---- */
 /* The body of a PLAIN instruction (snx_a64_body with "c->rt->undef(c,pc,w)" for UNDEF, after snx_a64_fast_simd).
    0 when no emitter covers the pattern: the module then fails (SnxIr.fallbacks) */
 int snx_ir_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Decoded* instruction);

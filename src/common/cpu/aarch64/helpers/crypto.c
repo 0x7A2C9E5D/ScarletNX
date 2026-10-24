@@ -2,16 +2,13 @@
    Copyright 2026 the ScarletNX contributors
    Ported from QEMU (target/arm/tcg/crypto_helper.c), LGPL-2.1-or-later:
    Copyright (C) 2013 - 2018 Linaro Ltd <ard.biesheuvel@linaro.org> */
-/* ================================================================================================
-   BUILD SCOPE. READ BEFORE OPTIMIZING.
-   NOT in a 64-bit game module's runtime library: tests/a64_reference/reference.inc includes it, and
-   cpu_helpers.c includes that only under SNX_A64_REFERENCE, so for A64 it is the reference
-   interpreter and the differential tests' oracle.
-   It IS production for 32-bit games: arm/crypto_helpers.c includes it, and armlib.c links that into
-   every 32-bit module. The 64-bit production crypto path is ir_neon_crypto.inc, not this file.
-   ================================================================================================ */
+/* Compiled into every game module's runtime library through cpu_helpers.c (the LLVM backend's AES rounds where the
+   host has no AES instructions, SHA-1, SHA-256, PMULL without carry-less multiplication), and again for 32-bit
+   games by arm/crypto_helpers.c under other names. The guard keeps a second inclusion in the same unit out. */
+#ifndef SNX_HELPERS_CRYPTO_C
+#define SNX_HELPERS_CRYPTO_C
 /* The Cortex-A57's crypto extension: AESE/AESD/AESMC/AESIMC, SHA-1, SHA-256 and the 64-bit PMULL, on the vector
-   registers in plain C. The A32 backend compiles this file again under other names (arm/crypto_helpers.c). */
+   registers in plain C. */
 
 /* FIPS-197's forward and inverse S-boxes, constant: an inverse table built on first use raced when guest threads
    ran AES at once */
@@ -219,3 +216,5 @@ void v_pmull(V128* d, const V128* a, const V128* b, int hi) {
     SNX_VSET_D(*d, 0, (u64)r);
     SNX_VSET_D(*d, 1, (u64)(r >> 64));
 }
+
+#endif

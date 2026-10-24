@@ -484,8 +484,13 @@ static int write_sysreg(SnxIr* ir, SnxU32 key, V value) {
         case SYSREG(3, 4, 2, 0): /* NZCV from bits 31:28 */
             ir_flags_set_nzcv(ir, ir_u32(ir, LLVMBuildLShr(B, value, ir_i64(ir, 28), "")));
             return 1;
-        case SYSREG(3, 4, 4, 0): /* FPCR and FPSR: the bits the A57 keeps, and the runtime's FPCR hook */
-        case SYSREG(3, 4, 4, 1): msr_helper(ir, key, value); return 1;
+        case SYSREG(3, 4, 4, 0): /* FPCR: the bits the guest's features implement (FZ16 with FEAT_FP16), the
+                                    runtime's FPCR hook */
+            if (!(ir->guest_features & SNX_A64_FEAT_FP16))
+                value = LLVMBuildAnd(B, value, ir_i64(ir, ~(SnxU64)(1u << 19)), "");
+            msr_helper(ir, key, value);
+            return 1;
+        case SYSREG(3, 4, 4, 1): msr_helper(ir, key, value); return 1; /* FPSR: the bits the A57 keeps */
         case SYSREG(3, 13, 0, 2): ir_cpu_store(ir, value, offsetof(CPU, tpidr)); return 1;
         default: return 0;
     }

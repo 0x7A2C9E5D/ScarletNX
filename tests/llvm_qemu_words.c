@@ -46,8 +46,8 @@ size_t lqd_row_words(unsigned samples, LqdRandom random, uint32_t** out) {
     *out = NULL;
     for (i = 0; i < ROWS; ++i) {
         const SnxA64Row* row = &snx_a64_rows[i];
-        uint32_t first = row->value;
-        unsigned s, k;
+        uint32_t bases[2], first = row->value, second = row->value;
+        unsigned s, k, b;
         if (row->feature & (SNX_A64_FEAT_SME | SNX_A64_FEAT_MOPS)) continue;
         for (s = 0; s < samples; ++s) {
             uint32_t word = row->value;
@@ -59,15 +59,21 @@ size_t lqd_row_words(unsigned samples, LqdRandom random, uint32_t** out) {
                 if (snx_a64_decode(word, SNX_A64_TARGET_MAX, &insn) == (SnxA64Op)row->op) break;
             }
             if (!s) first = word;
+            if (s == 1) second = word;
             if (push(out, &count, &capacity, word)) return count;
         }
-        for (k = 0; k < snx_a64_row_fields[i].count; ++k) {
-            const uint32_t mask = snx_a64_field_masks[snx_a64_row_fields[i].first + k];
-            uint32_t v;
-            if (popcount(mask) > 3) continue;
-            for (v = 0; v < 1u << popcount(mask); ++v)
-                if (push(out, &count, &capacity, (first & ~mask) | deposit(v, mask))) return count;
-        }
+        /* every value of each small field, from the sample with no free bit set and from the one with all of them
+           (when it decodes): an AdvSIMD row's Q and size fields then meet in both halves' lane sizes */
+        bases[0] = first;
+        bases[1] = second;
+        for (b = 0; b < (samples > 1 && second != first ? 2u : 1u); ++b)
+            for (k = 0; k < snx_a64_row_fields[i].count; ++k) {
+                const uint32_t mask = snx_a64_field_masks[snx_a64_row_fields[i].first + k];
+                uint32_t v;
+                if (popcount(mask) > 3) continue;
+                for (v = 0; v < 1u << popcount(mask); ++v)
+                    if (push(out, &count, &capacity, (bases[b] & ~mask) | deposit(v, mask))) return count;
+            }
     }
     return count;
 }

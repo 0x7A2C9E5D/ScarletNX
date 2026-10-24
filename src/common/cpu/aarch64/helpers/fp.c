@@ -123,7 +123,7 @@ static u64 fp_invalid(CPU* c, int width) {
 }
 
 /* FPRound (FPRoundBase; cv 1: FPRoundCV, for the conversions between FP formats): sign * frac * 2^(exp - 62) (frac
-   nonzero, its lowest bit a sticky bit of anything below) rounded once in mode rm (0-5) to the format.
+   nonzero, its lowest bit a sticky bit of anything below) rounded once in mode rm (0-6) to the format.
    - FPCR.FZ: a single or double result whose unrounded value is below the smallest normal is a zero of its sign,
      with UFC and without IXC, inexact or not. FPCR.FZ16 does the same to halves, except in a conversion.
    - Tininess is detected before rounding: a tiny inexact result raises UFC (and IXC).
@@ -182,9 +182,10 @@ static u64 fp_round_pack_as(CPU* c, int sign, int exp, u64 frac, int width, int 
             to_inf = 1;
             break;
         case 5: /* to odd: a dropped nonzero part sets the lowest bit */
+        case 6: /* the same, overflowing to infinity (BFDOT's and BFMMLA's products and sums) */
             up = 0;
             if (inexact) mant |= 1;
-            to_inf = 0;
+            to_inf = rm == 6;
             break;
         default:
             up = 0;

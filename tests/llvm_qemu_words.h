@@ -12,7 +12,8 @@ typedef uint64_t (*LqdRandom)(void);
 
 /* words of every row of the decoder's table, decoded under the max target: samples of each (the row's free bits
    clear, set, then random, each tried until the word decodes to the row's name), then every value of each field of
-   3 bits or fewer in the first sample. Rows of SME and MOPS are left out (lqd_op_name). *out is
+   3 bits or fewer in the first sample and in the second (free bits set, when it differs). Rows of SME and MOPS are
+   left out (lqd_op_name). *out is
    allocated; the count is returned */
 size_t lqd_row_words(unsigned samples, LqdRandom random, uint32_t** out);
 /* the name a word decodes to under the max target, or the space of words no row decodes: "(SVE space)",

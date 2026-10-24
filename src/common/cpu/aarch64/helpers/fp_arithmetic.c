@@ -163,9 +163,9 @@ static u64 fp_divide(CPU* c, FpValue x, FpValue y, int width, int rm) {
 /* FPAdd, FPSub, FPMul, FPDiv, FPMulX, FABD (the difference, then the sign cleared, NaNs included), and the fused
    steps FPRecipStepFused (2 - a * b) and FPRSqrtStepFused ((3 - a * b) / 2), which negate a before anything else,
    so a NaN a comes out with its sign flipped */
-u64 snx_fp_binary(CPU* c, u64 a, u64 b, int width, int op) {
+static u64 fp_binary_rm(CPU* c, u64 a, u64 b, int width, int op, int rm) {
     FpValue x, y;
-    int rm = fp_rmode(c), sign;
+    int sign;
     u64 r;
     if (op == SNX_FP_RECPS || op == SNX_FP_RSQRTS) a ^= fp_signbit(1, width);
     x = fp_unpack(c, a, width);
@@ -220,6 +220,7 @@ u64 snx_fp_binary(CPU* c, u64 a, u64 b, int width, int op) {
         default: return 0;
     }
 }
+u64 snx_fp_binary(CPU* c, u64 a, u64 b, int width, int op) { return fp_binary_rm(c, a, b, width, op, fp_rmode(c)); }
 
 /* ---- the reciprocal and reciprocal square root estimates (vfp_helper.c) ---- */
 
