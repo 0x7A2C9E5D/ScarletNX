@@ -84,7 +84,10 @@ The recompiler also takes the `-O` level (`snx_recompiler_set_optimization`, `2`
 default), how many code units compile at once (`snx_recompiler_set_jobs`, on
 threads),
 progress lines (`snx_recompiler_set_verbose`) and a folder to save the generated
-code's text in (`snx_recompiler_set_keep_ir`).
+code's text in (`snx_recompiler_set_keep_ir`). `snx_recompiler_set_hook_direct_calls`
+routes calls between discovered functions through the CPU's dispatch table. Enable it
+when the runtime can invalidate guest code, so callers do not retain direct pointers to
+retired functions.
 
 `snx_recompiler_set_a64_target` chooses the A64 features of the guest's CPU, which
 decide what the decoder (`tools/a64dec`, from QEMU's `a64.decode`) accepts: an
@@ -149,6 +152,9 @@ and a later miss loads a unit instead of compiling it when its code is the same,
 byte, and the file was made with the same settings, LLVM and host CPU. The modules of one
 program and other programs may share the file. A damaged file is made again, and a folder
 that can't be written to leaves the JIT working without the file.
+`snx_recompiled_invalidate` clears dispatch entries for compiled functions overlapping
+[addr, addr+size) and purges matching lazy JIT units. Host code stays loaded for running
+threads. An optional callback receives each retired [start, end) span.
 
 For A32 and Thumb, `snx_recompile32` prepares an address range whose blocks are compiled
 on first use by the LLVM block compiler (`src/common/cpu/arm/`), and

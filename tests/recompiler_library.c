@@ -248,6 +248,66 @@ static void run64(struct snx_recompiler* r, const char* backend, uint8_t* mem, c
     snx_recompiled_free(m);
 }
 
+typedef struct {
+    size_t count;
+    uint64_t start, end;
+} Invalidated;
+
+static void invalidated(void* context, uint64_t start, uint64_t end) {
+    Invalidated* seen = (Invalidated*)context;
+    ++seen->count;
+    seen->start = start;
+    seen->end = end;
+}
+
+static void invalidation_fallback(CPU* cpu, uint64_t pc) {
+    unsigned* calls = (unsigned*)cpu->thread;
+    ++*calls;
+    cpu->pc = STOP;
+    (void)pc;
+}
+
+static void invalidate64(struct snx_recompiler* r, uint8_t* mem) {
+    const uint64_t helper = CODE64 + 11 * 4;
+    struct snx_recompiled* module;
+    Invalidated seen = {0};
+    RtAPI rt;
+    CPU cpu = {0};
+    unsigned fallback_calls = 0;
+    snx_recompiler_set_hook_direct_calls(r, 1);
+    module = snx_recompile(r, CODE64, mem + CODE64, A64_SIZE);
+    check(module != NULL, "invalidation: compile a hook-enabled module");
+    if (!module) {
+        snx_recompiler_set_hook_direct_calls(r, 0);
+        return;
+    }
+    check(snx_recompiled_invalidate(module, helper, 0, invalidated, &seen) == 0,
+          "invalidation: zero-size range is ignored");
+    check(snx_recompiled_invalidate(module, UINT64_MAX - 3, 8, invalidated, &seen) == 0,
+          "invalidation: overflowing range is ignored");
+    check(snx_recompiled_function(module, helper) != NULL, "invalidation: helper starts compiled");
+    check(snx_recompiled_invalidate(module, helper, 4, invalidated, &seen) == 1,
+          "invalidation: retire the overlapping helper before the JIT starts");
+    check(seen.count == 1 && seen.start <= helper && seen.end > helper,
+          "invalidation: callback reports the helper's source span");
+    check(snx_recompiled_function(module, helper) == NULL &&
+              snx_recompiled_function(module, CODE64) != NULL,
+          "invalidation: clear only the helper's dispatch entries");
+    snx_runtime_defaults(&rt);
+    rt.svc = svc64;
+    rt.undef = undef64;
+    rt.brk = brk64;
+    cpu.mem = mem;
+    cpu.rt = &rt;
+    cpu.thread = &fallback_calls;
+    snx_recompiled_set_fallback(module, invalidation_fallback);
+    snx_recompiled_call(module, &cpu, helper);
+    check(fallback_calls == 1 && cpu.pc == STOP,
+          "invalidation: the cleared entry runs the embedder's live-code fallback");
+    snx_recompiled_free(module);
+    snx_recompiler_set_hook_direct_calls(r, 0);
+}
+
 /* ---- A32 ---- */
 typedef struct {
     unsigned calls;
@@ -318,6 +378,7 @@ int main(int argc, char** argv) {
               "the Switch and max A64 targets");
         snx_recompiler_set_jobs(r, 2);
         run64(r, "llvm", mem, keep_ir);
+        invalidate64(r, mem);
         jit_cache(r, mem, cache);
         run32(r, mem);
         snx_recompiler_free(r);
