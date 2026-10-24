@@ -872,7 +872,8 @@ endif()
 add_test(NAME startup_options COMMAND snx-test-startup)
 
 add_library(snx_test_common STATIC "${PROJECT_SOURCE_DIR}/src/common/utilities/common.c"
-    "${PROJECT_SOURCE_DIR}/src/common/utilities/ini_lines.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/game_ini.c")
+    "${PROJECT_SOURCE_DIR}/src/common/utilities/ini_lines.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/game_ini.c"
+    "${PROJECT_SOURCE_DIR}/src/common/utilities/script.c")
 snx_test_target(snx_test_common 99)
 if(WIN32)
     target_link_libraries(snx_test_common PUBLIC advapi32)
@@ -883,6 +884,12 @@ add_executable(snx-test-game-system game_system.c)
 snx_test_target(snx-test-game-system 99)
 target_link_libraries(snx-test-game-system PRIVATE snx_test_common)
 add_test(NAME game_system COMMAND snx-test-game-system)
+
+# a run's scripted presses (common/utilities/script.c), which the 3DS, Vita and GBA drivers read
+add_executable(snx-test-script script.c)
+snx_test_target(snx-test-script 99)
+target_link_libraries(snx-test-script PRIVATE snx_test_common)
+add_test(NAME script COMMAND snx-test-script)
 
 add_executable(snx-test-driver driver_workflow.c
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/driver.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/game_name.c"
