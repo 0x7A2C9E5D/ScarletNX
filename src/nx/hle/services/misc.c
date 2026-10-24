@@ -4,12 +4,14 @@
    nfc/nfc_result.h, nfc/nfc_types.h, nfc/common/device_manager.cpp, nfc/nfc_interface.cpp, bcat/bcat_types.h,
    bcat/bcat_result.h, bcat/backend/backend.cpp, bcat/delivery_cache_file_service.cpp,
    aoc/purchase_event_manager.cpp, src/core/file_sys/common_funcs.h, mii/mii_result.h, mii/types/store_data.cpp,
-   mii/types/char_info.h, mii/types/char_info.cpp, mii/types/core_data.cpp, mii/mii.cpp, mii/mii_manager.cpp,
+   mii/types/char_info.h, mii/types/char_info.cpp, mii/types/core_data.h, mii/types/core_data.cpp, mii/mii.cpp,
+   mii/mii_manager.cpp,
    ptm/psm.cpp, lm/lm.cpp, audio/errors.h):
    SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
    SPDX-FileCopyrightText: Copyright 2018, 2019, 2020, 2022, 2023 yuzu Emulator Project (GPL-2.0-or-later)
    and the default Miis and the random Miis' tables (mii_random.inc) from Eden's
-   src/core/hle/service/mii/types/raw_data.cpp:
+   src/core/hle/service/mii/types/raw_data.cpp, and StoreData's checksums from Ryubing's
+   src/Ryujinx.HLE/HOS/Services/Mii/Helper.cs and Types/StoreData.cs:
    SPDX-FileCopyrightText: Ryujinx Team and Contributors (MIT) */
 /* The smaller services: apm, lm, pctl, friend, ns, prepo, caps, ectx, psm, fatal, csrng, spl, mm, nfp, nfc, bcat,
    aoc, irs, mii, btm and audin, each as a console offline, with no NFC device or microphone, and the add-on
@@ -1008,6 +1010,61 @@ static int mii_find(const nn_mii_CharInfo* info) {
     return -1;
 }
 
+/* ------------------------------------------------------------ StoreData */
+/* nn::mii::StoreData (0x44 bytes): CoreData, the create id, and two CRC-16s. CoreData is seven little-endian words of
+   bit fields, then the nickname (ten UTF-16 characters, CharInfo's without its terminator). Each field below: where
+   it is in CharInfo, its word, its first bit and its width */
+#define MII_STORE_SIZE  0x44
+#define MII_STORE_NAME  0x1c
+#define MII_STORE_ID    0x30
+#define MII_STORE_CRC   0x40
+#define MII_EYEBROW_Y   0x41 /* CharInfo's eyebrow height is CoreData's plus 3 */
+static const u8 mii_store_field[][4] = {
+    {0x31, 0, 0, 8},  {0x29, 0, 8, 7},  {0x53, 0, 15, 1}, {0x2a, 0, 16, 7}, {0x33, 0, 23, 1}, {0x32, 0, 24, 7},
+    {0x2b, 0, 31, 1}, {0x35, 1, 0, 7},  {0x28, 1, 7, 1},  {0x3c, 1, 8, 7},  {0x46, 1, 16, 7}, {0x4a, 1, 24, 7},
+    {0x50, 2, 0, 7},  {0x34, 2, 8, 6},  {0x2c, 2, 14, 2}, {0x45, 2, 16, 6}, {0x26, 2, 22, 2}, {0x3a, 2, 24, 5},
+    {0x51, 2, 29, 3}, {0x3b, 3, 0, 5},  {0x4c, 3, 5, 3},  {0x42, 3, 8, 5},  {0x4b, 3, 13, 3}, {0x44, 3, 16, 5},
+    {0x48, 3, 21, 3}, {0x49, 3, 24, 5}, {0x3e, 3, 29, 3}, {0x4e, 4, 0, 5},  {0x38, 4, 5, 3},  {0x52, 4, 8, 5},
+    {0x37, 4, 13, 3}, {0x55, 4, 16, 5}, {0x36, 4, 21, 3}, {0x56, 4, 24, 5}, {0x4f, 5, 0, 5},  {0x27, 5, 8, 4},
+    {0x2d, 5, 12, 4}, {0x2e, 5, 16, 4}, {0x2f, 5, 20, 4}, {0x30, 5, 24, 4}, {0x39, 5, 28, 4}, {0x3d, 6, 0, 4},
+    {0x3f, 6, 4, 4},  {0x40, 6, 8, 4},  {MII_EYEBROW_Y, 6, 12, 4}, {0x43, 6, 16, 4}, {0x47, 6, 20, 4},
+    {0x4d, 6, 24, 4}, {0x54, 6, 28, 4}};
+/* the console's Mii author id (set:sys GetMiiAuthorId), which the device checksum binds a StoreData to */
+static const u8 mii_author_id[16] = {0x53, 0x63, 0x61, 0x72, 0x6c, 0x65, 0x74, 0x4e,
+                                     0x58, 0x4d, 0x69, 0x69, 0x00, 0x00, 0x00, 0x00}; /* "ScarletNXMii" */
+/* CRC-16/XMODEM (polynomial 0x1021, MSB first) from crc over the bytes */
+static u32 mii_crc16(const u8* p, u32 n, u32 crc) {
+    u32 i, j;
+    for (i = 0; i < n; i++) {
+        crc ^= (u32)p[i] << 8;
+        for (j = 0; j < 8; j++) {
+            crc <<= 1;
+            if (crc & 0x10000) crc = (crc ^ 0x1021) & 0xffff;
+        }
+    }
+    return crc;
+}
+/* a CharInfo as StoreData, as Eden's CoreData::BuildFromCharInfo packs it. Both checksums are stored big-endian, so
+   the CRC over what they cover and the checksum itself is zero: the data's over CoreData and the create id, the
+   device's over those and the data's checksum, starting from the CRC of the author id */
+static void mii_store(u8* out, const nn_mii_CharInfo* info) {
+    const u8* c = info->v;
+    u32 w[7] = {0}, i, crc;
+    for (i = 0; i < sizeof mii_store_field / sizeof mii_store_field[0]; i++) {
+        const u8* f = mii_store_field[i];
+        u32 v = c[f[0]] - (f[0] == MII_EYEBROW_Y ? 3u : 0u);
+        w[f[1]] |= (v & ((1u << f[3]) - 1)) << f[2];
+    }
+    memset(out, 0, MII_STORE_SIZE);
+    for (i = 0; i < 4 * 7; i++) out[i] = (u8)(w[i / 4] >> 8 * (i % 4));
+    memcpy(out + MII_STORE_NAME, c + MII_NAME, 0x14);
+    memcpy(out + MII_STORE_ID, c, 16);
+    crc = mii_crc16(out, MII_STORE_CRC, 0);
+    out[MII_STORE_CRC] = (u8)(crc >> 8), out[MII_STORE_CRC + 1] = (u8)crc;
+    crc = mii_crc16(out, MII_STORE_CRC + 2, mii_crc16(mii_author_id, sizeof mii_author_id, 0));
+    out[MII_STORE_CRC + 2] = (u8)(crc >> 8), out[MII_STORE_CRC + 3] = (u8)crc;
+}
+
 static int nn_mii_detail_IStaticService_GetDatabaseService(SvcObj* self, i32 key_code, SvcObj** database) {
     (void)self, (void)key_code;
     *database = nn_mii_detail_IDatabaseService_new();
@@ -1025,33 +1082,45 @@ static int nn_mii_detail_IDatabaseService_GetCount(SvcObj* self, i32 source_flag
     R_SUCCEED();
 }
 /* the database's Miis then the six defaults, each as the source flag asks, in index order into elements of size bytes:
-   the CharInfo, then for Get its source (0 Database, 1 Default). A buffer with no room for the next one is
-   InvalidArgumentSize, after the ones that fit */
-static int mii_give(i32 source_flag, IpcBuf out, u32 size, i32* count) {
+   the CharInfo (or for Get2 and Get3 the StoreData), then for Get and Get2 its source (0 Database, 1 Default). A
+   buffer with no room for the next one is InvalidArgumentSize, after the ones that fit */
+static int mii_give(i32 source_flag, IpcBuf out, u32 size, int store, i32* count) {
     nn_mii_CharInfo info;
-    u32 i, n = 0;
+    u32 i, n = 0, len = store ? MII_STORE_SIZE : sizeof info.v;
     *count = 0;
     for (i = 0; i < MII_DATABASE_COUNT + 6; i++) {
         int is_default = i >= MII_DATABASE_COUNT;
+        u64 at = out.addr + (u64)n * size;
         if (!(source_flag & (is_default ? MII_SOURCE_DEFAULT : MII_SOURCE_DATABASE))) continue;
         if (out.size < (u64)(n + 1) * size) R_THROW(MII_INVALID_ARGUMENT_SIZE);
         if (is_default)
             nn_mii_detail_IDatabaseService_BuildDefault(NULL, i - MII_DATABASE_COUNT, &info);
         else
             mii_build_database(&info, i);
-        memcpy(GP(out.addr + (u64)n * size), info.v, sizeof info.v);
-        if (size > sizeof info.v) gw32(out.addr + (u64)n * size + sizeof info.v, (u32)is_default);
+        if (store)
+            mii_store(GP(at), &info);
+        else
+            memcpy(GP(at), info.v, sizeof info.v);
+        if (size > len) gw32(at + len, (u32)is_default);
         *count = (i32)++n;
     }
     R_SUCCEED();
 }
 static int nn_mii_detail_IDatabaseService_Get(SvcObj* self, i32 source_flag, IpcBuf elements, i32* count) {
     (void)self;
-    return mii_give(source_flag, elements, 0x5c, count);
+    return mii_give(source_flag, elements, 0x5c, 0, count);
 }
 static int nn_mii_detail_IDatabaseService_Get1(SvcObj* self, i32 source_flag, IpcBuf infos, i32* count) {
     (void)self;
-    return mii_give(source_flag, infos, 0x58, count);
+    return mii_give(source_flag, infos, 0x58, 0, count);
+}
+static int nn_mii_detail_IDatabaseService_Get2(SvcObj* self, i32 source_flag, IpcBuf elements, i32* count) {
+    (void)self;
+    return mii_give(source_flag, elements, 0x48, 1, count);
+}
+static int nn_mii_detail_IDatabaseService_Get3(SvcObj* self, i32 source_flag, IpcBuf infos, i32* count) {
+    (void)self;
+    return mii_give(source_flag, infos, MII_STORE_SIZE, 1, count);
 }
 /* the database's version of a Mii, found by its create id: NotFound when it isn't there (or is of another type), and
    NotUpdated when the game's copy already is that version. A game keeps the Mii it has on either failure */
