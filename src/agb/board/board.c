@@ -52,6 +52,35 @@ static uint16_t io_written(AgbBoard* board, uint32_t byte, uint32_t offset) {
     return board->io[offset];
 }
 
+/* SIOCNT with no link cable plugged, as mGBA's machine without a link driver answers it: the multi-player mode's SI says
+   a child with no parent and SD that the line is ready, the normal modes' SI is pulled up, and a transfer started ends
+   at once (mGBA after the transfer's time) with the data no partner sent, 0, the start bit cleared and the serial
+   interrupt raised when SIOCNT asks for it. A game that looks for a partner finds none and plays alone */
+static void sio_write(AgbBoard* board, uint16_t value) {
+    uint16_t old = board->io[0x128 >> 1], rcnt = board->io[0x134 >> 1];
+    unsigned mode = ((rcnt & 0xC000) | (value & 0x3000)) >> 12;
+    int multi = mode < 8 && (mode & 3) == 2, normal = mode < 8 && (mode & 3) < 2;
+    if (multi) {
+        value = (uint16_t)((value & 0xFF83) | (old & 0x00FC) | 0x0004); /* SI: a child, ID 0 */
+        value &= (uint16_t)~0x0030;
+        if ((value & 0x80) && !(old & 0x80)) {
+            for (uint32_t r = 0x120; r <= 0x126; r += 2) board->io[r >> 1] = 0; /* no partner's word */
+            value &= (uint16_t)~0x0080;
+            if (value & 0x4000) agb_irq_request(board, AGB_IRQ_SERIAL);
+        }
+        value |= 0x0008; /* SD: ready */
+    } else if (normal) {
+        if ((value & 0x80) && !(old & 0x80)) {
+            board->io[0x12A >> 1] = 0; /* SIODATA8, and SIODATA32's halves */
+            board->io[0x120 >> 1] = board->io[0x122 >> 1] = 0;
+            value &= (uint16_t)~0x0080;
+            if (value & 0x4000) agb_irq_request(board, AGB_IRQ_SERIAL);
+        }
+        value |= 0x0004; /* SI pulled up */
+    }
+    board->io[0x128 >> 1] = value;
+}
+
 void agb_io_write16(AgbBoard* board, uint32_t address, uint16_t value, uint16_t mask) {
     uint32_t offset = (address >> 1) & (AGB_IO_COUNT - 1), byte = offset * 2;
     if (byte == 0x202) {
@@ -81,6 +110,10 @@ void agb_io_write16(AgbBoard* board, uint32_t address, uint16_t value, uint16_t 
     }
     if (byte == 0x208) {
         board->irq_ime = value & 1;
+        return;
+    }
+    if (byte == 0x128) {
+        sio_write(board, value);
         return;
     }
     board->io[offset] = value;

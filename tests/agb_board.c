@@ -167,6 +167,22 @@ int main(void) {
     agb_write8(&board, 0x04000001, 0x01);
     CHECK(board.ppu.dispcnt == 0x0103);
 
+    /* SIOCNT with no cable plugged: the multi-player mode says a child (SI) and a ready line (SD), and a transfer ends at
+       once with no partner's words and the serial interrupt; the normal mode's SI is pulled up */
+    agb_write16(&board, 0x04000134, 0x0000); /* RCNT: the serial modes */
+    board.irq_if = 0;
+    agb_write16(&board, 0x04000128, 0x2003); /* multi-player, 115200 bauds */
+    CHECK((agb_read16(&board, 0x04000128) & 0x000C) == 0x000C);
+    agb_write16(&board, 0x04000120, 0x1234); /* SIOMULTI0, before the transfer */
+    agb_write16(&board, 0x04000128, 0x6083); /* start, the interrupt asked for */
+    CHECK(!(agb_read16(&board, 0x04000128) & 0x0080) && agb_read16(&board, 0x04000120) == 0);
+    CHECK(board.irq_if & AGB_IRQ_SERIAL);
+    board.irq_if = 0;
+    agb_write16(&board, 0x04000128, 0x0001); /* normal 8 bit mode, internal clock */
+    CHECK(agb_read16(&board, 0x04000128) & 0x0004);
+    agb_write16(&board, 0x04000128, 0x0081); /* start, no interrupt */
+    CHECK(!(agb_read16(&board, 0x04000128) & 0x0080) && !(board.irq_if & AGB_IRQ_SERIAL));
+
     /* the DMA channels' registers, 12 bytes apart from 0xB0: DMA3 copies at a 32-bit store of its count and control,
        as a game copies its interrupt handler to IWRAM, and DMA1's control is DMA1's alone */
     agb_write32(&board, 0x040000D4, 0x08000000); /* DMA3SAD */
