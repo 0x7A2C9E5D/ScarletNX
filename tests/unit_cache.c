@@ -381,8 +381,14 @@ int main(void) {
         CHECK(!snx_mkdirs(dirs[i]));
     }
 
-    /* cold: both units compiled and kept */
+    /* an abort asked of a build: it stops before its next unit, saying how many it compiled, and keeps none */
     program(1);
+    forget();
+    snx_abort_request(1);
+    CHECK(build(folder, out[0], 0) && said("aborted by the player, 0 of 2 code units compiled", NULL));
+    CHECK(objects(folder, NULL) == 0);
+    snx_abort_request(0);
+    /* cold: both units compiled and kept */
     CHECK(!build(folder, out[0], 0) && run(out[0]) == 42);
     CHECK(g_unit_cache.wrappers == 0); /* no profile cache, whose units alone call them */
     CHECK(objects(folder, f1) == 2 && f1[0][0] && !f1[1][0]);
