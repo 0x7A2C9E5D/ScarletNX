@@ -46,6 +46,7 @@ typedef u64 (*StepFn)(CPU* c);
 #define DIRECTED    51u  /* words directed() makes per round */
 #define BATCH       8192 /* QEMU cases per run of the runner */
 #define EXAMPLES    3    /* kept per group */
+#define SIGBUS_A64  7u   /* QEMU's alignment fault: SIGBUS, as Linux on AArch64 numbers it */
 
 /* the runtime's callbacks' record of a step (llvm_qemu_differential's outcome) */
 typedef struct {
@@ -675,8 +676,9 @@ static int write_expected(const char* path, Expected* e, size_t n) {
     qsort(e, n, sizeof(*e), order_expected);
     fputs("# llvm_qemu_differential's expected mismatches until the emitters are rewritten from QEMU's translate-a64.c:\n"
           "# the max target's name for the word, the cause (the state parts that differ, or llvm-X/qemu-Y for\n"
-          "# different outcomes), and the words differing in the default run and in --sweep. A group missing here\n"
-          "# fails the test, and so does a listed one that no longer differs in a run whose count isn't 0.\n"
+          "# different outcomes, or qemu-alignment-fault for an alignment fault the LLVM side doesn't run), and the\n"
+          "# words differing in the default run and in --sweep. A group missing here fails the test, and so does a\n"
+          "# listed one that no longer differs in a run whose count isn't 0.\n"
           "# --update rewrites the counts of the run it is given with. qemu-diff-triage.md has the judgement on each.\n",
           f);
     for (i = 0; i < n; ++i)
@@ -870,6 +872,22 @@ int main(int argc, char** argv) {
                         ++group(&missing, it->op, it->switch_op[0] ? "Switch" : "")->count;
                         ++no_emitter;
                     }
+                    break;
+                }
+                /* an alignment fault (an ordered access across 16 bytes, LDAPUR's or STLUR's): the backend
+                   raises none, and on an AArch64 host the access faults the host and ends this test, so the LLVM
+                   side doesn't run it. It differs alike on every host */
+                if (r->outcome == SNX_QREF_FAULT && r->signo == SIGBUS_A64) {
+                    Group* g = group(&groups, it->op, "qemu-alignment-fault");
+                    const u32 word = it->words[it->nwords - 1], rn = (word >> 5) & 31;
+                    if (g->nexamples < EXAMPLES)
+                        snprintf(g->examples[g->nexamples++], sizeof(text),
+                                 "  word %08x (the Switch target decodes it as %s)\n  start x%u=%016llx\n"
+                                 "  qemu fault pc %llx (signal %u, fault %llx), not run on the LLVM side\n",
+                                 word, it->switch_op[0] ? it->switch_op : "UNDEF", rn, (unsigned long long)start->x[rn],
+                                 (unsigned long long)r->pc, r->signo, (unsigned long long)r->fault);
+                    ++g->count;
+                    ++mismatched;
                     break;
                 }
                 /* the LLVM side */
