@@ -5,6 +5,9 @@
 #include "common/utilities/common.h"
 #include "common/cpu/arm/llvm.h"
 #include "agb/cpu/runtime.h"
+#ifdef SNX_AGB_JIT
+#include "common/cpu/arm/exec.h"
+#endif
 #include <llvm-c/Analysis.h>
 #include <llvm-c/Core.h>
 #include <llvm-c/Target.h>
@@ -20,7 +23,7 @@
 #include <dlfcn.h>
 #endif
 
-#define AGB_RECOMP_ABI 4   /* the ROM's hash and each block's in the map */
+#define AGB_RECOMP_ABI 6   /* a map's block names its module function, or none ("-") for a hint */
 #define AGB_BLOCK_MAX  256 /* words compiled per block at most */
 
 /* the ARM7TDMI's rules (arm.h) on the flat window: the A57 default would run the ROM as ARMv8-A */
@@ -61,6 +64,9 @@ static void close_patches(AgbRecomp* recomp) {
 
 void agb_recomp_free(AgbRecomp* recomp) {
     close_patches(recomp);
+#ifdef SNX_AGB_JIT
+    snx_arm_exec_free(recomp->exec);
+#endif
     if (recomp->handle) close_module(recomp->handle);
     free(recomp->blocks);
     free(recomp->base);
@@ -112,10 +118,39 @@ static void* module_symbol(void* handle, size_t index) {
 
 /* ---- block discovery ---- */
 
+/* The blocks' index: an open addressing table of block indices, twice the blocks' capacity, carved after them from
+   their allocation. Every dispatch finds its block here, in a probe or two whatever the number of blocks, where a scan
+   of thousands cost the run nearly all its time. Index 0 is none, so a 0 slot is empty: the project's rule */
+static uint32_t* slots(const AgbRecomp* recomp) { return (uint32_t*)(recomp->blocks + recomp->capacity); }
+
+static size_t slot_of(const AgbRecomp* recomp, uint32_t pc, int thumb) {
+    uint64_t key = pc ^ (uint32_t)thumb; /* a Thumb pc is even and an ARM pc a multiple of 4: bit 0 is free */
+    return (size_t)((key * 0x9E3779B97F4A7C15ull) >> 32) & (recomp->capacity * 2 - 1);
+}
+
+static void index_put(AgbRecomp* recomp, size_t i) {
+    uint32_t* slot = slots(recomp);
+    size_t at = slot_of(recomp, recomp->blocks[i].pc, recomp->blocks[i].thumb);
+    while (slot[at]) at = (at + 1) & (recomp->capacity * 2 - 1);
+    slot[at] = (uint32_t)i;
+}
+
+/* the index again from the blocks, after they moved: grown, dropped or compacted */
+static void index_build(AgbRecomp* recomp) {
+    if (!recomp->capacity) return;
+    memset(slots(recomp), 0, recomp->capacity * 2 * sizeof(uint32_t));
+    for (size_t i = 1; i <= recomp->count; ++i) index_put(recomp, i);
+}
+
 static AgbBlock* find(AgbRecomp* recomp, uint32_t pc, int thumb) {
-    /* index 0 is none: the project's rule for indices */
-    for (size_t i = 1; i <= recomp->count; ++i)
-        if (recomp->blocks[i].pc == pc && recomp->blocks[i].thumb == (uint8_t)thumb) return &recomp->blocks[i];
+    const uint32_t* slot;
+    size_t at;
+    if (!recomp->capacity) return NULL;
+    slot = slots(recomp);
+    for (at = slot_of(recomp, pc, thumb); slot[at]; at = (at + 1) & (recomp->capacity * 2 - 1)) {
+        AgbBlock* block = &recomp->blocks[slot[at]];
+        if (block->pc == pc && block->thumb == (uint8_t)thumb) return block;
+    }
     return NULL;
 }
 
@@ -126,23 +161,28 @@ static void drop(AgbRecomp* recomp, AgbBlock* block) {
     memmove(block, block + 1, (recomp->count - i) * sizeof(*block));
     --recomp->count;
     recomp->dirty = 1;
+    index_build(recomp);
 }
 
 static AgbBlock* add(AgbRecomp* recomp, uint32_t pc, int thumb) {
     AgbBlock* block = find(recomp, pc, thumb);
     if (block) return block;
     if (recomp->count + 1 >= recomp->capacity) {
-        size_t capacity = recomp->capacity ? recomp->capacity * 2 : 257;
-        AgbBlock* grown = (AgbBlock*)realloc(recomp->blocks, capacity * sizeof(*grown));
-        if (!grown) return NULL;
+        /* a power of two, the index's twice as many slots after the blocks in the same allocation */
+        size_t capacity = recomp->capacity ? recomp->capacity * 2 : 256, each = sizeof(AgbBlock) + 2 * sizeof(uint32_t);
+        AgbBlock* grown;
+        if (capacity > UINT32_MAX / 2 || capacity > (size_t)-1 / each) return NULL;
+        if (!(grown = (AgbBlock*)realloc(recomp->blocks, capacity * each))) return NULL;
         recomp->blocks = grown;
         recomp->capacity = capacity;
+        index_build(recomp);
     }
     block = &recomp->blocks[++recomp->count];
     memset(block, 0, sizeof(*block));
     block->pc = pc;
     block->thumb = (uint8_t)thumb;
     recomp->dirty = 1;
+    index_put(recomp, recomp->count);
     return block;
 }
 
@@ -380,8 +420,18 @@ static void* open_module(AgbRecomp* recomp, const char* path, size_t first, char
 #endif
         return NULL;
     }
-    for (size_t i = first; i <= recomp->count; ++i) recomp->blocks[i].fn = (SnxArmBlock)module_symbol(handle, i);
+    for (size_t i = first; i <= recomp->count; ++i)
+        recomp->blocks[i].fn =
+            recomp->blocks[i].symbol ? (SnxArmBlock)module_symbol(handle, recomp->blocks[i].symbol) : NULL;
     return handle;
+}
+
+/* the module file's size and time now, which saving compares with the ones its symbols came from */
+static void stamp(const AgbRecomp* recomp, unsigned long long* size, unsigned long long* time) {
+    char* library = snx_format("%s.so", recomp->base);
+    *size = library ? snx_file_size(library) : 0;
+    *time = library ? snx_file_time(library) : 0;
+    free(library);
 }
 
 /* Links every known block into the cached module. */
@@ -391,14 +441,20 @@ static int relink(AgbRecomp* recomp, AgbBoard* board, char* error, size_t error_
         close_module(recomp->handle);
         recomp->handle = NULL;
     }
-    for (size_t i = 1; i <= recomp->count; ++i) recomp->blocks[i].fn = NULL;
+    for (size_t i = 1; i <= recomp->count; ++i) {
+        recomp->blocks[i].fn = NULL;
+        recomp->blocks[i].symbol = (uint32_t)i; /* emit_module names each block's function by its index */
+        recomp->blocks[i].hint = 0;
+    }
     if (emit_module(recomp, board, recomp->base, 1, error, error_size)) return -1;
     recomp->handle = open_module(recomp, recomp->base, 1, error, error_size);
     if (!recomp->handle) return -1;
+    stamp(recomp, &recomp->module_size, &recomp->module_time);
     recomp->dirty = 0;
     return 0;
 }
 
+#ifndef SNX_AGB_JIT
 /* Compiles the blocks from index first on into a module of their own. Linking everything again for each
    block a run reaches would cost the whole ROM's compile per block. */
 static int patch(AgbRecomp* recomp, AgbBoard* board, size_t first, char* error, size_t error_size) {
@@ -412,6 +468,7 @@ static int patch(AgbRecomp* recomp, AgbBoard* board, size_t first, char* error, 
         return -1;
     }
     sprintf(path, "%s.%zu", recomp->base, recomp->patch_count + 1);
+    for (size_t i = first; i <= recomp->count; ++i) recomp->blocks[i].symbol = (uint32_t)i;
     if (!emit_module(recomp, board, path, first, error, error_size))
         handle = open_module(recomp, path, first, error, error_size);
     free(path);
@@ -419,6 +476,39 @@ static int patch(AgbRecomp* recomp, AgbBoard* board, size_t first, char* error, 
     recomp->patches[recomp->patch_count++] = handle;
     return 0;
 }
+#endif
+
+#ifdef SNX_AGB_JIT
+/* The block compiled in this process by the backend's executor (exec.c), at its first dispatch: no module file and no
+   link, which cost a run about a second for each batch of blocks it reached */
+static int compile_block(AgbRecomp* recomp, AgbBoard* board, AgbBlock* block, char* error, size_t error_size) {
+    size_t consumed = 0;
+    if (!recomp->exec && !(recomp->exec = snx_arm_exec_new(error, error_size))) return -1;
+    if (block->thumb) {
+        uint16_t words[AGB_BLOCK_MAX];
+        for (uint32_t j = 0; j < AGB_BLOCK_MAX; ++j) words[j] = agb_read16(board, block->pc + j * 2);
+        block->fn =
+            snx_arm_exec_compile(recomp->exec, words, AGB_BLOCK_MAX, block->pc, 1, agb_codegen.profile, 0, &consumed);
+    } else {
+        uint32_t words[AGB_BLOCK_MAX];
+        for (uint32_t j = 0; j < AGB_BLOCK_MAX; ++j) words[j] = agb_read32(board, block->pc + j * 4);
+        block->fn =
+            snx_arm_exec_compile(recomp->exec, words, AGB_BLOCK_MAX, block->pc, 0, agb_codegen.profile, 0, &consumed);
+    }
+    if (!block->fn || !consumed) {
+        snprintf(error, error_size, "the ARM recompiler rejected the block at 0x%08X", block->pc);
+        return -1;
+    }
+    block->instructions = (uint16_t)(consumed > 0xFFFF ? 0xFFFF : consumed);
+    block->code = code_hash(board, block->pc, block->thumb, block->instructions);
+    if (!block->hint) { /* a hint the map named is kept already */
+        block->hint = 1;
+        ++recomp->compiled;
+        recomp->dirty = 1;
+    }
+    return 0;
+}
+#endif
 
 /* The cache beside the ROM: the module plus a map of the blocks it holds, under the ROM's hash. */
 static int write_cache(AgbRecomp* recomp, const AgbBoard* board) {
@@ -431,14 +521,20 @@ static int write_cache(AgbRecomp* recomp, const AgbBoard* board) {
     free(map_path);
     if (!file) return -1;
     fprintf(file, "snx-agb-code %d %u %016llX\n", AGB_RECOMP_ABI, SNX_ARM_ABI, (unsigned long long)rom_hash(board));
-    for (size_t i = 1; i <= recomp->count; ++i)
-        fprintf(file, "%08X %u %u %016llX snx_agb_%zu\n", recomp->blocks[i].pc, recomp->blocks[i].thumb,
-                recomp->blocks[i].instructions, (unsigned long long)recomp->blocks[i].code, i);
+    for (size_t i = 1; i <= recomp->count; ++i) {
+        const AgbBlock* block = &recomp->blocks[i];
+        fprintf(file, "%08X %u %u %016llX ", block->pc, block->thumb, block->instructions,
+                (unsigned long long)block->code);
+        if (block->symbol)
+            fprintf(file, "snx_agb_%u\n", (unsigned)block->symbol);
+        else
+            fputs("-\n", file);
+    }
     fclose(file);
     return 0;
 }
 
-int agb_recomp_load_cache(AgbRecomp* recomp, AgbBoard* board, char* error, size_t error_size) {
+int agb_recomp_load_map(AgbRecomp* recomp, AgbBoard* board, char* error, size_t error_size) {
     size_t length = strlen(recomp->base);
     char* map_path = (char*)malloc(length + 8);
     char line[128];
@@ -470,19 +566,31 @@ int agb_recomp_load_cache(AgbRecomp* recomp, AgbBoard* board, char* error, size_
     }
     free(map_path);
     while (fgets(line, sizeof(line), file)) {
-        unsigned pc, thumb, instructions;
+        unsigned pc, thumb, instructions, symbol = 0;
         unsigned long long code;
-        if (sscanf(line, "%X %u %u %llX", &pc, &thumb, &instructions, &code) != 4 || !instructions) continue;
-        if (!add(recomp, pc, (int)thumb)) {
+        char name[32];
+        AgbBlock* block;
+        if (sscanf(line, "%X %u %u %llX %31s", &pc, &thumb, &instructions, &code, name) != 5 || !instructions) continue;
+        if (strcmp(name, "-") && sscanf(name, "snx_agb_%u", &symbol) != 1) continue;
+        if (!(block = add(recomp, pc, (int)thumb))) {
             fclose(file);
+            snprintf(error, error_size, "out of memory");
             return -1;
         }
-        recomp->blocks[recomp->count].instructions = (uint16_t)instructions;
-        recomp->blocks[recomp->count].code = (uint64_t)code;
+        block->instructions = (uint16_t)instructions;
+        block->code = (uint64_t)code;
+        block->symbol = symbol;
+        block->hint = !symbol;
     }
     fclose(file);
     recomp->dirty = 0;
+    return 0;
+}
+
+int agb_recomp_load_cache(AgbRecomp* recomp, AgbBoard* board, char* error, size_t error_size) {
+    if (agb_recomp_load_map(recomp, board, error, error_size)) return -1;
     recomp->handle = open_module(recomp, recomp->base, 1, error, error_size);
+    if (recomp->handle) stamp(recomp, &recomp->module_size, &recomp->module_time);
     return recomp->handle ? 0 : -1;
 }
 
@@ -509,10 +617,7 @@ const AgbBlock* agb_recomp_lookup(AgbRecomp* recomp, AgbBoard* board, uint32_t p
     }
     first = recomp->count + 1;
     if (block && block->fn && block->instructions) return block;
-    if (block) {
-        /* a block the cached module lacks: link everything again */
-        if (relink(recomp, board, error, error_size)) return NULL;
-    } else {
+    if (!block) {
         /* a block the discovery step did not reach, a branch through a register or the instruction after one
            the board interpreted: the code it reaches comes with it */
         discover(recomp, board, pc, thumb);
@@ -520,8 +625,20 @@ const AgbBlock* agb_recomp_lookup(AgbRecomp* recomp, AgbBoard* board, uint32_t p
             snprintf(error, error_size, "out of memory");
             return NULL;
         }
+#ifndef SNX_AGB_JIT
         if (patch(recomp, board, first, error, error_size)) return NULL;
+        recomp->compiled += recomp->count + 1 - first;
+#endif
+        block = find(recomp, pc, thumb);
     }
+#ifdef SNX_AGB_JIT
+    /* this one alone: the others discovery found wait for their own dispatch, and the saved module for all of them */
+    if (block && !block->fn && compile_block(recomp, board, block, error, error_size)) return NULL;
+#else
+    /* a block the cached module lacks: link everything again */
+    else if (!block->fn && relink(recomp, board, error, error_size))
+        return NULL;
+#endif
     block = find(recomp, pc, thumb);
     if (!block || !block->fn || !block->instructions) {
         if (!error[0]) snprintf(error, error_size, "no block at 0x%08X", pc);
@@ -532,6 +649,38 @@ const AgbBlock* agb_recomp_lookup(AgbRecomp* recomp, AgbBoard* board, uint32_t p
 
 int agb_recomp_save(AgbRecomp* recomp, AgbBoard* board, char* error, size_t error_size) {
     if (!recomp->dirty) return 0;
+#ifdef SNX_AGB_JIT
+    {
+        /* the blocks the run ran: the ones discovery found that never did would cost the module's optimized compile
+           (about 15 ms each), and a run that reaches them compiles them then */
+        size_t kept = 0;
+        for (size_t i = 1; i <= recomp->count; ++i)
+            if (recomp->blocks[i].instructions) recomp->blocks[++kept] = recomp->blocks[i];
+        recomp->count = kept;
+        index_build(recomp);
+    }
+    {
+        /* a recompile in another process since this run loaded the module: its functions are numbered its own
+           way, and every block is a hint the next run compiles again */
+        unsigned long long size, time;
+        stamp(recomp, &size, &time);
+        if (size != recomp->module_size || time != recomp->module_time)
+            for (size_t i = 1; i <= recomp->count; ++i) {
+                recomp->blocks[i].symbol = 0;
+                recomp->blocks[i].hint = 1;
+            }
+    }
+    /* the map alone, at once: compiling every block into the module, which grows with the game, waits for a
+       recompile (-r), which starts from them */
+    if (write_cache(recomp, board)) {
+        char why[256];
+        snprintf(error, error_size, "cannot write %s.map: %s", recomp->base, snx_os_error(why, sizeof why));
+        return -1;
+    }
+    recomp->dirty = 0;
+    return 0;
+#else
     if (relink(recomp, board, error, error_size)) return -1;
     return write_cache(recomp, board);
+#endif
 }

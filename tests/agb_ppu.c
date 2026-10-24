@@ -103,7 +103,25 @@ int main(void) {
     run_frame();
     CHECK(pixel(10, 0) == PIX(0, 31, 0)); /* the background tile's third pixel */
     agb_write16(&board, 0x07000004, 0);
-    agb_ppu_write(&board, 0x000, 0x0100); /* OBJ off */
+    /* attr0's bit 9 hides a sprite that is not affine (an affine one it draws at twice its size) */
+    agb_write16(&board, 0x07000000, 0x0200);
+    run_frame();
+    CHECK(pixel(10, 0) == PIX(0, 31, 0)); /* the background, the sprite hidden */
+    agb_write16(&board, 0x07000000, 0x0000);
+    /* two sprites on one pixel: the lower OAM index over the higher at one priority, a lower priority value over a
+       higher whatever the index, as on the hardware (a character drawn over its shadow) */
+    agb_write16(&board, 0x05000222, 0x001F); /* OBJ palette bank 1, entry 1: red */
+    agb_write16(&board, 0x07000008, 0x0000); /* sprite 1: y = 0 */
+    agb_write16(&board, 0x0700000A, 10);     /* x = 10, over sprite 0 */
+    agb_write16(&board, 0x0700000C, 0x1000); /* tile 0, priority 0, palette bank 1 */
+    run_frame();
+    CHECK(pixel(10, 0) == PIX(0, 0, 31));     /* sprite 0's blue over sprite 1's red */
+    agb_write16(&board, 0x07000004, 1 << 10); /* sprite 0 at priority 1 */
+    run_frame();
+    CHECK(pixel(10, 0) == PIX(31, 0, 0)); /* sprite 1, priority 0, over it */
+    agb_write16(&board, 0x07000004, 0);
+    agb_write16(&board, 0x07000008, 0x0200); /* sprite 1 hidden */
+    agb_ppu_write(&board, 0x000, 0x0100);    /* OBJ off */
     run_frame();
     CHECK(pixel(10, 0) == PIX(0, 31, 0));
 
@@ -144,6 +162,17 @@ int main(void) {
     agb_ppu_write(&board, 0x050, 0);
     agb_ppu_write(&board, 0x052, 0);
 
+    /* an HBlank DMA runs on the 160 visible lines alone, a game's table having one entry a line: a repeating 16 bit one
+       moves its source 160 halfwords a frame, not 228 */
+    agb_write16(&board, 0x040000B0, 0x0000);
+    agb_write16(&board, 0x040000B2, 0x0200); /* DMA0SAD: 0x02000000 */
+    agb_write16(&board, 0x040000B4, 0x0010);
+    agb_write16(&board, 0x040000B6, 0x0400); /* DMA0DAD: BG0HOFS */
+    agb_write16(&board, 0x040000B8, 1);
+    agb_write16(&board, 0x040000BA, 0xA240); /* on, at HBlank, repeating, the destination fixed */
+    run_frame();
+    CHECK(board.dma[0].source_now == 0x02000000 + 160 * 2);
+    agb_write16(&board, 0x040000BA, 0);
     agb_board_destroy(&board);
     puts("agb_ppu: ok");
     return 0;

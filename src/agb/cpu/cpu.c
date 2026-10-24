@@ -8,6 +8,7 @@
 
 /* The handler returns to this address: the machine takes the interrupt's epilogue from there. */
 #define AGB_IRQ_RETURN             0x00000004u
+#define AGB_BIOS_FLAGS             0x03007FF8u /* the interrupt flags a game's handler sets for IntrWait */
 /* Recompiled blocks are charged two cycles per instruction, the ARM7TDMI's average. */
 #define AGB_CYCLES_PER_INSTRUCTION 2
 
@@ -80,7 +81,7 @@ void agb_cpu_init(AgbCpu* cpu, AgbBoard* board, uint8_t* map) {
     memset(cpu, 0, sizeof(*cpu));
     cpu->board = board;
     cpu->arm.mem = map; /* the flat window: one pointer add per guest access */
-    cpu->arm.mem_size = AGB_MAP_SIZE;
+    cpu->arm.mem_size = AGB_MAP_SIZE + AGB_MAP_GUARD;
     cpu->arm.io = bus;
     /* the boot state the BIOS leaves behind: system mode with every stack set up */
     cpu->arm.cpsr = 0x1F;
@@ -149,24 +150,45 @@ static void irq_return(AgbBoard* board, AgbCpu* cpu) {
 
 /* ---- software interrupts and the privileged residue ---- */
 
+/* SoftReset, as the BIOS runs it: the top 0x200 bytes of IWRAM (the stacks, the BIOS's flags and its IRQ vector)
+   cleared, r0 to r12 zero, the irq and svc stacks set with their lr and spsr cleared, then system mode in ARM state
+   from EWRAM's start when the byte at 0x03007FFA asks for it (a game that copied a program there, as multiboot does),
+   else from the cartridge's */
+static void soft_reset(AgbBoard* board, AgbCpu* cpu) {
+    uint32_t entry = agb_read8(board, 0x03007FFA) ? 0x02000000u : 0x08000000u;
+    switch_mode(cpu, 0x1F);
+    memset(board->memory.iwram + AGB_IWRAM_SIZE - 0x200, 0, 0x200);
+    for (int i = 0; i < 13; ++i) cpu->arm.r[i] = 0;
+    cpu->arm.r[13] = 0x03007F00;
+    cpu->banked_r13[2] = 0x03007FA0;
+    cpu->banked_r13[3] = 0x03007FE0;
+    cpu->banked_r14[2] = cpu->banked_r14[3] = cpu->spsr[2] = cpu->spsr[3] = 0;
+    cpu->arm.cpsr = 0x1F;
+    cpu->arm.r[15] = entry;
+    cpu->wait = 0;
+}
+
 static int handle_swi(AgbCpu* cpu, AgbSink* sink, uint32_t syndrome, int thumb) {
     AgbBoard* board = sink->board;
     uint32_t number = thumb ? syndrome & 0xFF : (syndrome >> 16) & 0xFF;
     board->bios_prefetch = AGB_BIOS_PREFETCH_SWI;
+    if (number == AGB_SWI_SOFT_RESET) {
+        soft_reset(board, cpu);
+        return 0;
+    }
     if (number == AGB_SWI_HALT || number == AGB_SWI_STOP) {
         board->cpu_halted = 1;
         return 0;
     }
     if (number == AGB_SWI_INTR_WAIT || number == AGB_SWI_VBLANK_INTR_WAIT) {
-        uint32_t mask = number == AGB_SWI_VBLANK_INTR_WAIT ? AGB_IRQ_VBLANK : (cpu->arm.r[1] & 0x3FF);
-        /* the console waits forever here; the machine gives up after a second so a broken ROM cannot
-           hang the emulator */
-        uint32_t patience = AGB_SCANLINE_CYCLES * AGB_FRAME_LINES * 60;
-        if (number == AGB_SWI_INTR_WAIT && cpu->arm.r[0]) board->irq_if &= (uint16_t)~mask;
-        while (!(board->irq_if & mask) && patience) {
-            advance(cpu, sink, 64);
-            patience -= 64;
-        }
+        /* the BIOS's way: the flags asked for, cleared first when r0 says so (VBlankIntrWait always), then halts with
+           IME on until the game's interrupt handler sets one of them in its flags at 0x03007FF8 (agb_cpu_run). The
+           hardware's IF is the handler's to acknowledge */
+        int discard = number == AGB_SWI_VBLANK_INTR_WAIT || cpu->arm.r[0];
+        cpu->wait = number == AGB_SWI_VBLANK_INTR_WAIT ? AGB_IRQ_VBLANK : (uint16_t)(cpu->arm.r[1] & 0x3FFF);
+        if (discard) agb_write16(board, AGB_BIOS_FLAGS, agb_read16(board, AGB_BIOS_FLAGS) & (uint16_t)~cpu->wait);
+        board->irq_ime = 1;
+        if (discard) board->cpu_halted = 1;
         return 0;
     }
     return agb_bios_call(board, number, cpu->arm.r) < 0 ? -1 : 0;
@@ -497,9 +519,19 @@ static int interpret(AgbBoard* board, AgbCpu* cpu, uint32_t word, int thumb) {
 
 int agb_cpu_run(AgbBoard* board, AgbCpu* cpu, AgbRecomp* recomp, uint32_t cycles, int16_t* audio,
                 uint32_t audio_capacity, uint32_t* audio_written, char* error, size_t error_size) {
-    AgbSink sink = {board, audio, audio_capacity, 0, 0};
+    AgbSink sink = {board, audio, audio_capacity, 0, cpu->over};
     while (sink.elapsed < cycles) {
         const AgbBlock* block;
+        /* IntrWait, outside the interrupt handler: over once the handler flagged what it waits for, which it takes out
+           of the flags; else it halts for the next interrupt */
+        if (cpu->wait && !board->cpu_halted && (cpu->arm.cpsr & 0x1F) != 0x12) {
+            uint16_t flags = agb_read16(board, AGB_BIOS_FLAGS), done = flags & cpu->wait;
+            if (done) {
+                agb_write16(board, AGB_BIOS_FLAGS, (uint16_t)(flags & ~done));
+                cpu->wait = 0;
+            } else
+                board->cpu_halted = 1;
+        }
         if (board->cpu_halted && (board->irq_if & board->irq_ie)) board->cpu_halted = 0;
         if (board->cpu_halted) {
             advance(cpu, &sink, 64);
@@ -535,6 +567,7 @@ int agb_cpu_run(AgbBoard* board, AgbCpu* cpu, AgbRecomp* recomp, uint32_t cycles
             return -1;
         }
     }
+    cpu->over = sink.elapsed - cycles;
     if (audio_written) *audio_written = sink.written;
     return 0;
 }

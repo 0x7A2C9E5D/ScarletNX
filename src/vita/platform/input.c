@@ -8,6 +8,7 @@
    left stick pushed right, left, up or down */
 #include "vita/platform/input.h"
 #include "common/utilities/common.h"
+#include "common/utilities/script.h"
 #include "snx_settings.h"
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -17,12 +18,9 @@
 
 #define INPUT_PADS 4
 
-typedef struct {
-    uint32_t at, mask;
-} Press;
 static struct {
     SDL_Gamepad* pads[INPUT_PADS];
-    Press* script;
+    SnxPress* script;
     size_t presses;
     double start;
     bool gamepads;
@@ -33,26 +31,13 @@ static struct {
 #define SCRIPT_STICK_LEFT  0x02000000u
 #define SCRIPT_STICK_UP    0x04000000u
 #define SCRIPT_STICK_DOWN  0x08000000u
-static void script_parse(const char* text) {
-    size_t most = 1;
-    for (const char* c = text; *c; ++c) most += *c == ',';
-    if (!*text || !(g_input.script = calloc(most, sizeof *g_input.script))) return;
-    for (const char* c = text; *c && g_input.presses < most;) {
-        char* end;
-        unsigned long at = strtoul(c, &end, 10), mask;
-        if (end == c || *end != ':') break;
-        c = end + 1;
-        mask = strtoul(c, &end, 16);
-        if (end == c || (*end && *end != ',') || at > UINT32_MAX || (mask & ~(unsigned long)VITA_CTRL_BUTTONS)) break;
-        g_input.script[g_input.presses++] = (Press){(uint32_t)at, (uint32_t)mask};
-        c = *end ? end + 1 : end;
-    }
-    if (g_input.presses < most)
-        fprintf(stderr, "scarletnx-vita: the script stops after %zu presses, at what is not ms:hex\n", g_input.presses);
-}
 void vita_input_init(void) {
     g_input.start = snx_seconds();
-    script_parse(g_settings.vita_script);
+    /* its buttons, and the left stick's directions in bits 24 to 27 */
+    g_input.presses = snx_script_parse("scarletnx-vita", g_settings.vita_script,
+                                       VITA_CTRL_BUTTONS | SCRIPT_STICK_RIGHT | SCRIPT_STICK_LEFT | SCRIPT_STICK_UP |
+                                           SCRIPT_STICK_DOWN,
+                                       &g_input.script);
     g_input.gamepads = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
 }
 void vita_input_event(const union SDL_Event* event) {
@@ -152,15 +137,12 @@ void vita_input_read(VitaInput* input) {
     /* the script's presses: buttons, and the left stick pushed all the way by bits 24 to 27 (right, left, up, down) */
     if (g_input.presses) {
         double ms = (snx_seconds() - g_input.start) * 1000.0;
-        for (size_t i = 0; i < g_input.presses; ++i)
-            if (ms >= g_input.script[i].at && ms - g_input.script[i].at < g_settings.vita_press_length) {
-                uint32_t mask = g_input.script[i].mask;
-                input->buttons |= mask & SCRIPT_BUTTONS;
-                if (mask & SCRIPT_STICK_RIGHT) sticks[0] = 1;
-                if (mask & SCRIPT_STICK_LEFT) sticks[0] = -1;
-                if (mask & SCRIPT_STICK_UP) sticks[1] = -1;
-                if (mask & SCRIPT_STICK_DOWN) sticks[1] = 1;
-            }
+        uint32_t mask = snx_script_held(g_input.script, g_input.presses, ms, (uint32_t)g_settings.vita_press_length);
+        input->buttons |= mask & SCRIPT_BUTTONS;
+        if (mask & SCRIPT_STICK_RIGHT) sticks[0] = 1;
+        if (mask & SCRIPT_STICK_LEFT) sticks[0] = -1;
+        if (mask & SCRIPT_STICK_UP) sticks[1] = -1;
+        if (mask & SCRIPT_STICK_DOWN) sticks[1] = 1;
     }
     input->lx = stick(sticks[0]), input->ly = stick(sticks[1]);
     input->rx = stick(sticks[2]), input->ry = stick(sticks[3]);

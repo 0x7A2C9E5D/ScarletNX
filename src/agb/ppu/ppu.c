@@ -149,10 +149,13 @@ void agb_ppu_step(AgbBoard* board, uint32_t cycles) {
         cycles -= run;
         if (ppu->dot != boundary) continue;
         if (boundary == 960) {
-            /* the horizontal blank starts when the visible dots are over */
-            if (ppu->vcount < AGB_SCREEN_HEIGHT) render_line(board, ppu->vcount);
+            /* the horizontal blank starts when the visible dots are over; its DMA only on the visible lines, as a game's
+               table of one entry a line takes (the interrupt on every line) */
             ppu->dispstat |= 2;
-            agb_dma_event(board, AGB_DMA_HBLANK);
+            if (ppu->vcount < AGB_SCREEN_HEIGHT) {
+                render_line(board, ppu->vcount);
+                agb_dma_event(board, AGB_DMA_HBLANK);
+            }
             if (ppu->dispstat & 0x10) agb_irq_request(board, AGB_IRQ_HBLANK);
         } else {
             ppu->dot = 0;
@@ -265,14 +268,17 @@ static const uint8_t obj_sizes[3][4][2] = {
 static void obj_line(AgbBoard* board, int y) {
     AgbPpu* ppu = &board->ppu;
     int bitmap = (ppu->dispcnt & 7) >= 3, one_d = ppu->dispcnt & 0x40;
-    for (int i = 127; i >= 0; --i) {
+    /* in OAM order, as the hardware: a sprite's pixel goes over one already drawn only with a lower priority value,
+       so the lower index wins between sprites of one priority (a character over its shadow) */
+    for (int i = 0; i < 128; ++i) {
         uint16_t a0 = oam16(board, (uint32_t)i * 8), a1 = oam16(board, (uint32_t)i * 8 + 2);
         uint16_t a2 = oam16(board, (uint32_t)i * 8 + 4);
         int affine = a0 & 0x100, objwin_mode = (a0 & 0xC00) == 0x800, semi = (a0 & 0xC00) == 0x400;
         int shape = a0 >> 14, size_index = a1 >> 14, width, height, draw_width, draw_height;
         int sx, rel, bpp8 = a0 & 0x2000, priority = a2 >> 10 & 3, tile = a2 & 0x3FF;
         int32_t pa = 0x100, pb = 0, pc = 0, pd = 0x100;
-        if (shape == 3 || (a0 & 0xC00) == 0xC00) continue;
+        /* a sprite that is not affine and has bit 9 is hidden (an affine one's bit 9 doubles its size) */
+        if (shape == 3 || (a0 & 0xC00) == 0xC00 || (!affine && (a0 & 0x200))) continue;
         width = obj_sizes[shape][size_index][0];
         height = obj_sizes[shape][size_index][1];
         draw_width = width;
@@ -297,7 +303,7 @@ static void obj_line(AgbBoard* board, int y) {
             int screen_x = sx + px, tx, ty;
             uint32_t units, address;
             uint8_t color;
-            if (screen_x < 0 || screen_x >= AGB_SCREEN_WIDTH || scan.drawn[screen_x]) continue;
+            if (screen_x < 0 || screen_x >= AGB_SCREEN_WIDTH) continue;
             if (affine) {
                 int64_t cx = px - draw_width / 2, cy = rel - draw_height / 2;
                 tx = (int)((pa * cx + pb * cy) >> 8) + width / 2;
@@ -333,6 +339,7 @@ static void obj_line(AgbBoard* board, int y) {
                 scan.objwin[screen_x] = 1;
                 continue;
             }
+            if (scan.drawn[screen_x] && priority >= scan.obj_pri[screen_x]) continue;
             scan.drawn[screen_x] = 1;
             scan.color[4][screen_x] = palette(board, 0x100 + color);
             scan.obj_pri[screen_x] = (uint8_t)priority;

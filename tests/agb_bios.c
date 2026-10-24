@@ -109,12 +109,13 @@ int main(void) {
     CHECK(agb_read32(&board, 0x03000000) == 0x1000);
     CHECK(agb_read32(&board, 0x0300001C) == 0x1007);
 
-    /* BitUnPack: 4 bit fields to bytes, offset only on nonzero fields */
+    /* BitUnPack: 4 bit fields to bytes, the offset on the nonzero fields, and on the zero ones only with the zero data
+       flag (bit 31): a font's empty pixels stay 0, the color a background shows through */
     agb_write16(&board, 0x02000000, 0x20F1); /* fields 1 F 0 2 */
     agb_write16(&board, 0x02000010, 2);      /* source length in bytes */
     agb_write8(&board, 0x02000012, 4);
     agb_write8(&board, 0x02000013, 8);
-    agb_write32(&board, 0x02000014, 0x80000000u | 0x10);
+    agb_write32(&board, 0x02000014, 0x10);
     memset(regs, 0, sizeof(regs));
     regs[0] = 0x02000000;
     regs[1] = 0x02000200;
@@ -124,6 +125,13 @@ int main(void) {
     CHECK(agb_read8(&board, 0x02000201) == 0x1F);
     CHECK(agb_read8(&board, 0x02000202) == 0x00);
     CHECK(agb_read8(&board, 0x02000203) == 0x12);
+    agb_write32(&board, 0x02000014, 0x80000000u | 0x10);
+    memset(regs, 0, sizeof(regs));
+    regs[0] = 0x02000000;
+    regs[1] = 0x02000200;
+    regs[2] = 0x02000010;
+    CHECK(call(regs, AGB_SWI_BIT_UNPACK) == 0);
+    CHECK(agb_read8(&board, 0x02000201) == 0x1F && agb_read8(&board, 0x02000202) == 0x10);
 
     /* LZ77: three literals and one back reference, through both bus widths */
     agb_write32(&board, 0x02000000, (8u << 8) | 0x10);
@@ -244,6 +252,20 @@ int main(void) {
     CHECK(agb_read32(&board, 0x02000000) == 0);
     CHECK(agb_read32(&board, 0x06000000) == 0);
     CHECK(agb_read32(&board, 0x03007FFC) == 0xCAFEBABE);
+    /* and the registers go back to the BIOS's values, written through the bus: a game reads RCNT 0x8000 as no link
+       cable, which a cleared register file was not */
+    agb_write16(&board, 0x04000134, 0);      /* RCNT: the serial port in its multiplayer mode */
+    agb_write16(&board, 0x04000088, 0);      /* SOUNDBIAS */
+    agb_write16(&board, 0x04000000, 0x1100); /* DISPCNT: BG0 and OBJ */
+    agb_write16(&board, 0x04000020, 0x40);   /* BG2PA */
+    agb_write16(&board, 0x04000200, 1);      /* IE: vblank */
+    regs[0] = 0xE0;
+    CHECK(call(regs, AGB_SWI_REGISTER_RAM_RESET) == 0);
+    CHECK(agb_read16(&board, 0x04000134) == 0x8000);
+    CHECK(agb_read16(&board, 0x04000088) == 0x200);
+    CHECK(agb_read16(&board, 0x04000000) == 0x0080);
+    CHECK(board.ppu.bgpa[2] == 0x100);
+    CHECK(agb_read16(&board, 0x04000200) == 0);
 
     /* the memory map's mirrors */
     agb_write32(&board, 0x02000000, 0xAABBCCDD);

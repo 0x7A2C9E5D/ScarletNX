@@ -153,7 +153,7 @@ static void bios_bit_unpack(AgbBoard* board, uint32_t regs[16]) {
     uint32_t offset = agb_read32(board, info + 4);
     uint32_t accumulator = 0, mask;
     unsigned held = 0;
-    int zero_only = (int)(offset >> 31 & 1);
+    int zero_too = (int)(offset >> 31 & 1); /* the zero data flag: zero units take the offset too */
     if ((in_width != 1 && in_width != 2 && in_width != 4 && in_width != 8) ||
         (out_width != 1 && out_width != 2 && out_width != 4 && out_width != 8 && out_width != 16 && out_width != 32) ||
         out_width < in_width)
@@ -164,7 +164,7 @@ static void bios_bit_unpack(AgbBoard* board, uint32_t regs[16]) {
         uint32_t unit = agb_read8(board, source++);
         for (uint32_t bit = 0; bit < 8; bit += in_width) {
             uint32_t value = unit >> bit & mask;
-            if (value || !zero_only) value = (value + offset) & (out_width == 32 ? 0xFFFFFFFFu : (1u << out_width) - 1);
+            if (value || zero_too) value = (value + offset) & (out_width == 32 ? 0xFFFFFFFFu : (1u << out_width) - 1);
             accumulator |= value << held;
             held += out_width;
             if (held == 32) {
@@ -302,16 +302,48 @@ static void bios_midi_key_to_freq(AgbBoard* board, uint32_t regs[16]) {
     regs[0] = (uint32_t)(frequency / pow(2.0, (180.0 - key) / 12.0));
 }
 
-/* RegisterRamReset: r0's flags clear the work RAMs, the video areas and the register file. The IWRAM
-   clear leaves the top 0x200 bytes alone, where the stacks live. */
+/* RegisterRamReset: r0's flags clear the work RAMs and the video areas, the IWRAM clear leaving the top 0x200 bytes
+   alone, where the stacks live, and put registers back to the values the BIOS gives them, written through the bus so
+   the video, sound and DMA units take them: the serial port's (bit 5) back in general purpose mode, RCNT 0x8000, which
+   a game reads to tell a link cable; the sound's (bit 6) with SOUNDBIAS 0x200; the rest (bit 7) zero but the affine
+   identities and IF, all acknowledged. DISPCNT is 0x80 whatever the flags, as mGBA's BIOS does */
 static void bios_register_ram_reset(AgbBoard* board, uint32_t regs[16]) {
+    static const uint16_t sound[] = {0x60, 0x62, 0x64, 0x68, 0x6C, 0x70, 0x72, 0x74, 0x78, 0x7C, 0x80, 0x82, 0x84};
     uint32_t flags = regs[0];
+    agb_write16(board, 0x04000000, 0x0080);
     if (flags & 0x01) memset(board->memory.ewram, 0, AGB_EWRAM_SIZE);
     if (flags & 0x02) memset(board->memory.iwram, 0, AGB_IWRAM_SIZE - 0x200);
     if (flags & 0x04) memset(board->memory.palette, 0, AGB_PALETTE_SIZE);
     if (flags & 0x08) memset(board->memory.vram, 0, AGB_VRAM_SIZE);
     if (flags & 0x10) memset(board->memory.oam, 0, AGB_OAM_SIZE);
-    if (flags & 0xE0) memset(board->io, 0, sizeof(board->io));
+    if (flags & 0x20) {
+        agb_write16(board, 0x04000128, 0);      /* SIOCNT */
+        agb_write16(board, 0x04000134, 0x8000); /* RCNT */
+        agb_write16(board, 0x0400012A, 0);      /* SIOMLT_SEND */
+        agb_write16(board, 0x04000140, 0);      /* JOYCNT */
+        agb_write32(board, 0x04000150, 0);      /* JOY_RECV */
+        agb_write32(board, 0x04000154, 0);      /* JOY_TRANS */
+    }
+    if (flags & 0x40) {
+        for (size_t i = 0; i < sizeof(sound) / sizeof(sound[0]); ++i) agb_write16(board, 0x04000000u + sound[i], 0);
+        agb_write16(board, 0x04000088, 0x200);                                                /* SOUNDBIAS */
+        for (uint32_t at = 0x90; at < 0xA0; at += 4) agb_write32(board, 0x04000000u + at, 0); /* wave RAM */
+    }
+    if (flags & 0x80) {
+        /* DISPSTAT to BLDY, the DMA channels and the timers: zero, the affine parameters' identity aside */
+        for (uint32_t at = 0x04; at < 0x56; at += 2)
+            if (at != 0x06) agb_write16(board, 0x04000000u + at, 0); /* VCOUNT is the PPU's to count */
+        agb_write16(board, 0x04000020, 0x100);                       /* BG2PA */
+        agb_write16(board, 0x04000026, 0x100);                       /* BG2PD */
+        agb_write16(board, 0x04000030, 0x100);                       /* BG3PA */
+        agb_write16(board, 0x04000036, 0x100);                       /* BG3PD */
+        for (uint32_t at = 0xB0; at < 0xE0; at += 2) agb_write16(board, 0x04000000u + at, 0);
+        for (uint32_t at = 0x100; at < 0x110; at += 2) agb_write16(board, 0x04000000u + at, 0);
+        agb_write16(board, 0x04000200, 0);      /* IE */
+        agb_write16(board, 0x04000202, 0xFFFF); /* IF: every flag acknowledged */
+        agb_write16(board, 0x04000204, 0);      /* WAITCNT */
+        agb_write16(board, 0x04000208, 0);      /* IME */
+    }
 }
 
 typedef struct {
