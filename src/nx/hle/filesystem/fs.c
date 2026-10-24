@@ -419,6 +419,11 @@ void fs_init(const char* keys, const char* title_keys) {
        (macOS allows 61440 a process), and a game with more files than that left its executables unmapped */
     static const char* const shared_paths[] = {"exefs", "romfs", "romfs.bin"};
     unsigned shared = 0, failed = 0;
+#ifdef SNX_IOS
+    /* 13 GiB of address space and 10240 descriptors, of which the game's memory takes 5 GiB: the 10000 files of a game
+       of tens of thousands mapped left no room for a third host thread */
+    fs_tree_share_limit((uint64_t)256 << 20, 2048);
+#endif
     pm_lock(&g_hle.fs.tree.lock);
     /* the console empties the application's temporary storage when the application is launched, and a game finds it
        empty at first use */

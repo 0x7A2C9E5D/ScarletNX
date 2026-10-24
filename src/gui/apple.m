@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <sys/resource.h>
 #include <sys/mman.h>
 #include <sys/sysctl.h>
@@ -66,6 +67,15 @@ static void entitlement_lines(void) {
 }
 #endif
 
+/* the system's thermal state as the menu's counter shows it: 0 nominal, 1 fair, 2 serious, 3 critical (the app is not told degrees) */
+int gui_apple_thermal(void) {
+#if TARGET_OS_IPHONE
+    return (int)NSProcessInfo.processInfo.thermalState;
+#else
+    return 0;
+#endif
+}
+
 void gui_apple_stats(char* out, size_t size) {
 #if TARGET_OS_IPHONE
     task_vm_info_data_t info;
@@ -85,6 +95,77 @@ void gui_apple_stats(char* out, size_t size) {
     snprintf(out, size, "resources: (not iOS)");
 #endif
 }
+
+#if TARGET_OS_IPHONE
+/* P_TRACED: a debugger is attached to this process now (the loader's check before it asks one for code memory) */
+static bool debugger_traced(void) {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid()};
+    struct kinfo_proc kp;
+    size_t n = sizeof(kp);
+    memset(&kp, 0, sizeof(kp));
+    return sysctl(mib, 4, &kp, &n, NULL, 0) == 0 && (kp.kp_proc.p_flag & P_TRACED);
+}
+static void stamped(const char* what) {
+    time_t now = time(NULL);
+    struct tm local;
+    char clock[16];
+    localtime_r(&now, &local);
+    strftime(clock, sizeof clock, "%H:%M:%S", &local);
+    fprintf(stderr, "[%s] %s\n", clock, what);
+}
+/* Says in the console log when the debugger attaches or lets go, and when the app goes behind others, comes back or is
+   warned of memory: what a game finds when it asks for code memory depends on them, and a log line has no time */
+static bool watched_debugger;
+/* once a second: whether a debugger is there, and the footprint each time it has moved 128 MiB from the last one said,
+   which is what a run of long work costs, up to the system taking the app */
+static void* watch_thread(void* unused) {
+    unsigned long long shown = 0;
+    (void)unused;
+    for (;;) {
+        task_vm_info_data_t info;
+        mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+        bool now = debugger_traced();
+        sleep(1);
+        if (now != watched_debugger) stamped(now ? "debugger: attached" : "debugger: let go");
+        watched_debugger = now;
+        if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) {
+            unsigned long long used = info.phys_footprint >> 20;
+            if (used + 128 <= shown || used >= shown + 128) {
+                char line[64];
+                snprintf(line, sizeof line, "app: footprint %llu MiB", used);
+                stamped(line);
+                shown = used;
+            }
+        }
+    }
+    return NULL;
+}
+static void watch_start(void) {
+    NSNotificationCenter* center = NSNotificationCenter.defaultCenter;
+    static NSString* const names[][2] = {{@"UIApplicationDidEnterBackgroundNotification", @"app: in the background"},
+                                         {@"UIApplicationWillEnterForegroundNotification", @"app: back in the foreground"},
+                                         {@"UIApplicationDidReceiveMemoryWarningNotification", @"app: memory warning"},
+                                         {@"UIApplicationWillResignActiveNotification", @"app: resigning active"},
+                                         {@"UIApplicationDidBecomeActiveNotification", @"app: active"}};
+    size_t i;
+    watched_debugger = debugger_traced();
+    stamped(watched_debugger ? "debugger: attached at start" : "debugger: not attached at start");
+    for (i = 0; i < sizeof names / sizeof *names; ++i) {
+        NSString* line = names[i][1];
+        [center addObserverForName:names[i][0]
+                            object:nil
+                             queue:nil
+                        usingBlock:^(NSNotification* note) {
+                            (void)note;
+                            stamped(line.UTF8String);
+                        }];
+    }
+    {
+        pthread_t thread;
+        if (!pthread_create(&thread, NULL, watch_thread, NULL)) pthread_detach(thread);
+    }
+}
+#endif
 
 void gui_apple_log_start(void) {
 #if TARGET_OS_IPHONE
@@ -140,6 +221,7 @@ void gui_apple_log_start(void) {
         entitlement_lines();
         fprintf(stderr, "app: %s\n", NSBundle.mainBundle.bundleIdentifier.UTF8String);
         fprintf(stderr, "documents: %s\n", documents.fileSystemRepresentation);
+        watch_start();
     }
 #endif
 }

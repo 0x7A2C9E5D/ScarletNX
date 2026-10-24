@@ -66,6 +66,7 @@ void vpad_set_store(void (*store)(const char* key, const char* value));
 /* a setting's current value to the store, named by its variable (&g_settings.controls_scale); a control's place
    with vpad_store_control, whether it is shown with vpad_store_shown */
 void vpad_store(const int* setting);
+void vpad_store_text(const char* key, const char* value); /* one setting of the game .ini by its key, as text */
 void vpad_store_control(int control);
 void vpad_store_shown(int control);
 

@@ -28,7 +28,7 @@
    is the 1 GiB the kernel's own pages (TLS) need. The alias region starts at 4 GiB, which leaves the code below it
    up to 3.9 GiB, as the end of the code isn't known yet when the layout is made */
 MemLayout g_layout = {0x8000000ull,  AS_MAX,      0x1100000000ull, 8 * GIB, 0x100000000ull, 64 * GIB,
-                      0x1300000000ull, 2 * GIB, 0x1380000000ull, 0x13C0000000ull};
+                      0x1300000000ull, 2 * GIB, 0x1380000000ull, 0x13C0000000ull, 0};
 u64 g_as_size = AS_MAX;
 u8* g_mem;
 u64 g_heap_size, g_phys_mapped, g_heap_max, g_code_memory, g_main_stack_size;
@@ -553,6 +553,7 @@ static int alias_map_nl(u64 dst, u64 src, u64 size, u32 state, u32 perm) {
 #ifdef SNX_IOS
 #include <mach/mach.h>
 #include <mach/vm_map.h>
+#include <os/proc.h>
 /* The layout in size bytes of address space, smaller than the console's: the alias and heap regions shrink, in the
    same order and below the stack, with the kernel's pages in the last GiB. The game finds the sizes it asks of
    GetInfo (the alias region 4 GiB to 32 GiB, the heap region 4 GiB to 8 GiB) */
@@ -589,6 +590,87 @@ static void layout_for(u64 size) {
     }
     g_layout.kern_end = size;
 }
+/* What an app may use before the system ends it (its footprint now and what os_proc_available_memory still gives), less
+   what the runtime, the graphics and the code arenas take besides the game's own memory (about 700 MiB: the app's own
+   290 MiB, the code arenas and the graphics' first allocations), read once before the game allocates. A game is told
+   how much it has and sizes its pools by it: less than the console's 3.2 GB broke one game's startup, which a game
+   told 3.2 GB on a phone with the increased memory limit (a 4 GiB limit) did not fill, for the memory is the game's
+   to touch */
+#define IOS_OTHER_MEMORY   ((u64)700 << 20) /* the least that goes to the rest */
+#define IOS_GRAPHICS_MARGIN ((u64)256 << 20) /* the graphics' first allocations */
+static u64 g_ios_budget;
+u64 mem_ios_budget(void) { return g_ios_budget; }
+/* what the rest takes: the app's footprint now, the code arenas (a large game's pack is large) and a margin for the
+   graphics, never less than IOS_OTHER_MEMORY, which was what one game's run measured */
+static u64 ios_other_memory(void) {
+    u64 other = snx_footprint() + snx_ios_code_arena_bytes() + IOS_GRAPHICS_MARGIN;
+    return other > IOS_OTHER_MEMORY ? other : IOS_OTHER_MEMORY;
+}
+static void ios_budget_read(void) {
+    u64 avail = (u64)os_proc_available_memory();
+    /* the simulator says none is available (it has no limit): a game is told what the phone it stands in for has, the
+       4 GiB the increased memory limit gives */
+    u64 limit = avail ? avail + snx_footprint() : (4096ull << 20);
+    u64 other = ios_other_memory();
+    g_ios_budget = limit > other + (1024ull << 20) ? limit - other : (1024ull << 20);
+    fprintf(stderr, "memory: the game may have %llu MiB (the app's limit is %llu MiB, %llu MiB go to the rest)\n",
+            (unsigned long long)(g_ios_budget >> 20), (unsigned long long)(limit >> 20), (unsigned long long)(other >> 20));
+}
+
+/* A game with a system resource size manages its address space itself (nn::os's VammManager): it takes the alias region
+   the kernel reports and asks for 12 GiB of it, mapping pages in with svcMapPhysicalMemory as it grows. The console
+   reports 64 GiB. Here the region is reported at that size and backed as far as the address space reaches: a game that
+   maps past that is refused, and it has no more memory than the app is allowed in any case. Under 12 GiB the heap
+   region (which that game never sets) shrinks to make the room, the alias region taking all that is left above the code */
+void mem_layout_vamm(void) {
+    if (g_as_size >= 64 * GIB) return;
+    if (g_as_size >= 24 * GIB) {
+        /* room for the 12 GiB it asks: an alias region of 16 GiB, reported as it is, so the block it maps at the
+           region's top lies inside the address space */
+        g_layout.alias = 4 * GIB;
+        g_layout.alias_size = 16 * GIB;
+        g_layout.heap = g_layout.alias + g_layout.alias_size;
+        g_layout.heap_size = 4 * GIB;
+        g_layout.stack = g_layout.heap + g_layout.heap_size;
+        g_layout.stack_size = 2 * GIB;
+        g_layout.kern = g_as_size - GIB;
+        g_layout.alias_virtual = 0;
+        return;
+    }
+    if (g_as_size < 12 * GIB) {
+        g_layout.alias = GIB / 2;
+        g_layout.kern = g_as_size - GIB / 4;
+        g_layout.stack = g_layout.kern - GIB / 4;
+        g_layout.stack_size = GIB / 4;
+        g_layout.heap = g_layout.stack - GIB / 4;
+        g_layout.heap_size = GIB / 4;
+        g_layout.alias_size = g_layout.heap - g_layout.alias;
+    }
+    g_layout.alias_virtual = 64 * GIB;
+}
+/* What the task's address space holds, by the kind of memory the system tags each region as, for a run that fails for
+   want of it (a thread's stack, a mapping): the mapped total and each kind of 8 MiB or more */
+void mem_log_address_space(const char* why) {
+    vm_address_t at = 0;
+    u64 by_tag[256] = {0}, total = 0;
+    size_t i;
+    for (;;) {
+        vm_size_t size = 0;
+        vm_region_extended_info_data_t info;
+        mach_msg_type_number_t count = VM_REGION_EXTENDED_INFO_COUNT;
+        mach_port_t object = MACH_PORT_NULL;
+        if (vm_region_64(mach_task_self(), &at, &size, VM_REGION_EXTENDED_INFO, (vm_region_info_t)&info, &count,
+                         &object) != KERN_SUCCESS)
+            break;
+        by_tag[info.user_tag & 255] += size;
+        total += size;
+        at += size;
+    }
+    fprintf(stderr, "memory: the address space (%s): %llu MiB mapped\n", why, (unsigned long long)(total >> 20));
+    for (i = 0; i < 256; ++i)
+        if (by_tag[i] >= (8u << 20))
+            fprintf(stderr, "memory:   tag %u: %llu MiB\n", (unsigned)i, (unsigned long long)(by_tag[i] >> 20));
+}
 /* The largest run of address space in the task that nothing maps, from its range (TASK_VM_INFO) and its regions
    (vm_region): what a reservation can be at most, whatever the system would say to a bigger one */
 static u64 largest_hole(void) {
@@ -609,11 +691,20 @@ static u64 largest_hole(void) {
         if (vm_region_64(mach_task_self(), &at, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&region, &n,
                          &object) != KERN_SUCCESS)
             break;
-        if (at > end && at - end > best) best = at - end, best_at = end;
+        {
+            u64 stop = (u64)at < hi ? (u64)at : hi; /* a run ends where the task's range does, not at a region past it */
+            if (stop > end && stop - end >= (u64)256 << 20)
+                fprintf(stderr, "memory: a free run of %llu MiB at %#llx\n", (unsigned long long)((stop - end) >> 20),
+                        (unsigned long long)end);
+            if (stop > end && stop - end > best) best = stop - end, best_at = end;
+        }
         end = (u64)at + size;
         at += size;
         if (end >= hi) break;
     }
+    if (hi > end && hi - end >= (u64)256 << 20)
+        fprintf(stderr, "memory: a free run of %llu MiB at %#llx\n", (unsigned long long)((hi - end) >> 20),
+                (unsigned long long)end);
     if (hi > end && hi - end > best) best = hi - end, best_at = end;
     fprintf(stderr, "memory: the task's address space is %#llx to %#llx, its largest free run %llu MiB at %#llx\n",
             (unsigned long long)lo, (unsigned long long)hi, (unsigned long long)(best >> 20),
@@ -642,14 +733,26 @@ static u8* reserve_ios(void) {
     }
     return NULL;
 }
+#else
+u64 mem_ios_budget(void) { return 0; }
+void mem_layout_vamm(void) {}
+void mem_log_address_space(const char* why) { (void)why; }
 #endif
+
+void mem_reserve(void) {
+#ifdef SNX_IOS
+    if (g_mem) return;
+    g_mem = reserve_ios();
+    if (!g_mem) fatal("Could not reserve even 5 GiB of address space for the game's memory");
+#endif
+}
 
 void mem_init(void) {
     pm_lock_announce(&g_mem_lk, "guest memory"); /* every thread's reads and writes of the game's memory */
     g_host_page = plat_vm_page();
 #ifdef SNX_IOS
-    g_mem = reserve_ios();
-    if (!g_mem) fatal("Could not reserve even 5 GiB of address space for the game's memory");
+    mem_reserve();
+    ios_budget_read();
     LOG("memory: %llu GiB of address space reserved%s\n", (unsigned long long)(g_as_size >> 30),
         g_as_size < AS_MAX ? " (a smaller layout: this app has no extended virtual addressing)" : "");
 #else

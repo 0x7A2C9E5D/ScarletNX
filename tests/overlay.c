@@ -54,6 +54,9 @@ static int maps_stored;
 static unsigned pads_held[3];               /* what each holds */
 static int pad_of_player[3] = {-1, -1, -1}; /* each player's pad, as gamepad_name counts them */
 void gamepad_store_map(void) { ++maps_stored; }
+/* the counter in the corner reads the frames shown and the clock */
+int g_frames;
+u64 plat_ns(void) { return 0; }
 int gamepad_layout(int i, int labels[4], int* symmetric) {
     static const int sony[4] = {SNX_PAD_LABEL_CROSS, SNX_PAD_LABEL_CIRCLE, SNX_PAD_LABEL_SQUARE,
                                 SNX_PAD_LABEL_TRIANGLE};
@@ -228,14 +231,14 @@ int main(void) {
     overlay_toggle();
     assert(overlay_shown());
     /* letters half the screen's height at most, in whole steps, in the middle: a phone held wide, a small window. The
-       page is as tall as its items (three here, under three rows of head, over a blank one), at the scale of the
+       page is as tall as its items (six here, under three rows of head, over a blank one), at the scale of the
        tallest page, and as wide as three quarters of the picture hold, between 40 and 72 columns */
     overlay_place(SW, SH, &px, &py, &s);
     C = overlay_cols(SW, s);
-    assert(s == 2 && C == OVERLAY_COLS_MAX && px == (SW - C * 16) / 2 && py == (SH - 7 * 32) / 2);
+    assert(s == 2 && C == OVERLAY_COLS_MAX && px == (SW - C * 16) / 2 && py == (SH - 10 * 32) / 2);
     assert(overlay_cols(1280, 2) == 60 && overlay_cols(500, 1) == 46 && overlay_cols(400, 1) == OVERLAY_COLS &&
            overlay_cols(3840, 4) == OVERLAY_COLS_MAX);
-    overlay_place(500, 120, &x, &y, &sc);
+    overlay_place(500, 168, &x, &y, &sc);
     assert(sc == 1 && x == (500 - 46 * 8) / 2 && y == 4);
     /* a phone's display scale: the Poco F8 (408 dpi, 2510x1156) and the Pixel 9 (420 dpi) at 3x, where half the
        picture gave 2x; a 4K picture at 100% keeps the 4x half of it gives */
@@ -252,21 +255,32 @@ int main(void) {
     /* the first page: the title on a band of ink, the items under it, the focused one on a band; the page hides the
        game, whose text would show through it */
     draw();
-    assert(list.q[0].w == (float)(C * 16) && list.q[0].h == 7 * 32 && list.q[1].rgba == ink && list.q[1].h == 32);
+    assert(list.q[0].w == (float)(C * 16) && list.q[0].h == 10 * 32 && list.q[1].rgba == ink && list.q[1].h == 32);
     assert(list.q[0].rgba >> 24 == 0xFFu);
-    assert(text_at(C - 2, 3, ">") && text_at(C - 2, 4, ">")); /* a page under each */
-    assert(text_at(1, 0, "SCARLETNX  /  MENU") && text_at(1, 3, "\xFE On-screen controls") &&
-           text_at(1, 4, "\xFE Controllers") && text_at(1, 5, "\xFE Exit"));
+    assert(text_at(C - 2, 4, ">") && text_at(C - 2, 5, ">")); /* a page under each */
+    assert(text_at(1, 0, "SCARLETNX  /  MENU") && text_at(1, 3, "\xFE Resume") &&
+           text_at(1, 4, "\xFE On-screen controls") && text_at(1, 5, "\xFE Controllers") &&
+           text_at(1, 6, "\xFE Resolution") && text_at(1, 7, "\xFE Fps and memory") && text_at(1, 8, "\xFE Exit"));
+    /* Fps and memory goes on and off at a tap, and Resolution goes round its scales, kept in the game's .ini; Resume
+       closes the menu */
+    draw();
+    assert(text_at(C - 4, 7, "Off"));
+    assert(tap(4, 3) == OVERLAY_NONE);
+    draw();
+    assert(text_at(C - 3, 7, "On"));
+    assert(tap(4, 3) == OVERLAY_NONE);
+    assert(tap(3, 3) == OVERLAY_NONE && !strcmp(stored, "resolution"));
+    assert(tap(0, 3) == OVERLAY_CLOSE);
     /* a tap on Exit exits; on the title, nothing; outside the panel, it closes */
-    assert(tap(2, 3) == OVERLAY_EXIT && tap(-3, 3) == OVERLAY_NONE);
+    assert(tap(5, 3) == OVERLAY_EXIT && tap(-3, 3) == OVERLAY_NONE);
     assert(overlay_tap(5.0f, 5.0f, SW, SH) == OVERLAY_CLOSE);
     /* the focus goes round, from Exit to the first item and back over the top; Back from here closes */
     overlay_move(1);
-    overlay_move(-4);
+    overlay_move(-1);
     assert(overlay_select() == OVERLAY_EXIT && overlay_back() == OVERLAY_CLOSE);
 
     /* the controls' page: each setting shown with its value, changed and kept */
-    assert(tap(0, 3) == OVERLAY_NONE);
+    assert(tap(1, 3) == OVERLAY_NONE);
     draw();
     assert(text_at(1, 0, "SCARLETNX  /  CONTROLS") && text_at(1, 3, "\xFE Show controls"));
     assert(list.q[0].h == 16 * 32 && text_at(C - 2, 12, ">")); /* twelve items: the tallest; Buttons opens a page */
@@ -363,10 +377,12 @@ int main(void) {
            left stick past half way as one, goes on after a while, then on and on; with the menu closed, nothing, and
            a press held as it opens does not act */
         assert(overlay_controls(0, still, 1000) == OVERLAY_NONE); /* the focus back on Controllers */
+        overlay_move(2);                                          /* on Fps and memory, one above Exit */
         assert(overlay_controls(0, down, 1000) == OVERLAY_NONE);  /* to Exit */
         assert(overlay_controls(0, down, 1000 + SNX_OVERLAY_REPEAT_DELAY - 1) == OVERLAY_NONE);
         assert(overlay_controls(1ull << 0, down, 1000 + SNX_OVERLAY_REPEAT_DELAY - 1) == OVERLAY_EXIT); /* not yet */
         assert(overlay_controls(0, down, 1000 + SNX_OVERLAY_REPEAT_DELAY) == OVERLAY_NONE); /* round to the top */
+        overlay_move(1);                                                                    /* to the controls */
         assert(overlay_controls(1ull << 0, down, 1001 + SNX_OVERLAY_REPEAT_DELAY) == OVERLAY_NONE); /* a page */
         draw();
         assert(text_at(1, 0, "SCARLETNX  /  CONTROLS"));
@@ -375,6 +391,7 @@ int main(void) {
         assert(overlay_controls(1ull << 15, still, 2001 + SNX_OVERLAY_REPEAT_DELAY) == OVERLAY_NONE); /* Exit */
         assert(overlay_controls(1ull << 15, still, 2001 + SNX_OVERLAY_REPEAT_DELAY + SNX_OVERLAY_REPEAT_MS - 1) ==
                OVERLAY_NONE);
+        overlay_move(2); /* the held direction stopped on Resolution: on to Exit */
         assert(overlay_controls(1ull << 0, still, 3000) == OVERLAY_EXIT);
         assert(overlay_controls(1ull << 13, still, 3001) == OVERLAY_NONE &&
                overlay_controls(0, left, 3002) == OVERLAY_NONE);
@@ -393,6 +410,7 @@ int main(void) {
             float dx = v->at[SNX_VPAD_DPAD].x * SW, dy = v->at[SNX_VPAD_DPAD].y * SH + 0.6f * 0.25f * SH / 2;
             u64 b;
             i32 st[4];
+            overlay_move(1); /* the menu opened on Resume: on the controls, so the D-pad goes down to Controllers */
             assert(vpad_ini("controls", "1"));
             overlay_pointer_down(SNX_TOUCH_MOUSE, dx, dy, area);
             vpad_state(&b, st);
@@ -417,7 +435,7 @@ int main(void) {
 
     /* the controllers' page: the ones connected, the Player row (every player's, or one's own), Swap A/B, the dead
        zone by fives, the vibration by tens down to Off and the background input, each kept */
-    assert(tap(1, 3) == OVERLAY_NONE);
+    assert(tap(2, 3) == OVERLAY_NONE);
     draw();
     assert(text_at(1, 0, "SCARLETNX  /  CONTROLLERS") && text_at(1, 1, "None connected."));
     assert(list.q[0].h == 11 * 32 && text_at(1, 3, "\xFE Player") && shows("< All >"));

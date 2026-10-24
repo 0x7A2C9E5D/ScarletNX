@@ -91,9 +91,9 @@ static int user_writable(u64 a, u64 size) {
 /* The application pool for each memory_gb (Mesosphere's KSystemControl application pool sizes for the 4, 6 and 8 GiB
    boards), see docs/MEMORY_ACCOUNTING.md */
 u64 mem_total(void) {
-    if (g_settings.memory_gb >= 8) return 6964 * MIB;
-    if (g_settings.memory_gb >= 6) return 4916 * MIB;
-    return 3285 * MIB;
+    u64 total = g_settings.memory_gb >= 8 ? 6964 * MIB : g_settings.memory_gb >= 6 ? 4916 * MIB : 3285 * MIB;
+    u64 budget = mem_ios_budget();
+    return budget && budget < total ? budget : total;
 }
 /* the loaded images, the main thread's stack, the heap, physical memory and the system resource, charged once */
 u64 used_memory(void) {
@@ -142,7 +142,11 @@ static u32 check_physical(u64 addr, u64 size) {
     R_UNLESS(size && !(size & 0xFFF), R_BADSIZE);
     R_UNLESS(addr + size > addr, R_BADREGION);
     R_UNLESS(g_hle.kernel.sysres_size, R_BADSTATE);
-    R_UNLESS(in_region(addr, size, ALIAS_BASE, ALIAS_SIZE), R_BADREGION);
+    if (!in_region(addr, size, ALIAS_BASE, ALIAS_SIZE)) {
+        LOG("map physical: %llx+%llx is outside the alias region %llx+%llx\n", (unsigned long long)addr,
+            (unsigned long long)size, (unsigned long long)ALIAS_BASE, (unsigned long long)ALIAS_SIZE);
+        R_THROW(R_BADREGION);
+    }
     R_SUCCEED();
 }
 u32 svc_map_physical(u64 addr, u64 size) {
@@ -596,7 +600,7 @@ static u32 process_info(u32 id, u64* out) {
         case 0: *out = g_hle.svcmem.core_mask; R_SUCCEED();
         case 1: *out = g_hle.svcmem.prio_mask; R_SUCCEED();
         case 2: *out = ALIAS_BASE; R_SUCCEED();
-        case 3: *out = ALIAS_SIZE; R_SUCCEED();
+        case 3: *out = g_layout.alias_virtual ? g_layout.alias_virtual : ALIAS_SIZE; R_SUCCEED();
         case 4: *out = HEAP_BASE; R_SUCCEED();
         case 5: *out = HEAP_SIZE; R_SUCCEED();
         case 6: *out = mem_total(); R_SUCCEED();

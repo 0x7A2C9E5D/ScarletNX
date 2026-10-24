@@ -77,6 +77,12 @@ SnxCodeLoader* snx_code_loader_new_toc(size_t reserve, SnxU64 toc, char* error, 
 /* The same for objects of another machine (an ELF e_machine: 62 x86-64, 183 AArch64; or SNX_CODE_COFF_X64), for tests
    of the loader on a host that cannot run them: their code is placed and relocated, and must never run */
 SnxCodeLoader* snx_code_loader_new_machine(size_t reserve, unsigned machine, char* error, size_t error_size);
+/* An arena of the regions' own sizes in bytes (code, read-only data, data) rather than a total split in fixed shares,
+   for snx_code_need's: a game's code arena is prepared in full (a debugger touches every page of it on iOS) */
+SnxCodeLoader* snx_code_loader_new_regions(const size_t size[3], char* error, size_t error_size);
+/* What snx_code_load of inputs takes of each region (code, read-only data, data, in that order), counted from their
+   section headers and relocations with room for the call veneers and GOT slots: 0, or -1 with the reason in error */
+int snx_code_need(const SnxLinkInput* inputs, size_t count, size_t need[3], char* error, size_t error_size);
 /* Gives the arena back: nothing may run the loaded code any more */
 void snx_code_loader_free(SnxCodeLoader* loader);
 /* Defines name at address for the loads that follow. 0, or -1 when the table has the name already */
