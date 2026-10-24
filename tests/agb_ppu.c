@@ -426,6 +426,26 @@ int main(void) {
     agb_ppu_write(&board, 0x008, 0);
     agb_ppu_write(&board, 0x000, 0x0100);
 
+    /* a bitmap goes through BG2's rotation and scaling: halved across (PA 2.0) its pixel 2 shows at x 1, moved 8 down
+       (BG2Y 8.0) its line 8 shows at line 0, and past its edge the backdrop shows */
+    memset(board.memory.vram, 0, AGB_VRAM_SIZE);
+    agb_write16(&board, 0x05000000, 0x7C00);               /* the backdrop: blue */
+    agb_write16(&board, 0x06000000 + 2 * 2, 0x001F);       /* (2, 0): red */
+    agb_write16(&board, 0x06000000 + 8 * 480 + 4, 0x03E0); /* (2, 8): green */
+    agb_ppu_write(&board, 0x000, 0x0403);
+    agb_ppu_write(&board, 0x020, 0x200);
+    run_frame();
+    CHECK(pixel(1, 0) == PIX(31, 0, 0) && pixel(120, 0) == PIX(0, 0, 31)); /* x 120 reads past 239 */
+    agb_write16(&board, 0x0400002C, 8 << 8);                               /* BG2Y */
+    agb_write16(&board, 0x0400002E, 0);
+    run_frame();
+    CHECK(pixel(1, 0) == PIX(0, 31, 0));
+    agb_write16(&board, 0x0400002C, 0);
+    agb_ppu_write(&board, 0x020, 0x100);
+    agb_write16(&board, 0x05000000, 0);
+    agb_ppu_write(&board, 0x000, 0x0100);
+    run_frame();
+
     /* an HBlank DMA runs on the 160 visible lines alone, a game's table having one entry a line: a repeating 16 bit one
        moves its source 160 halfwords a frame, not 228 */
     agb_write16(&board, 0x040000B0, 0x0000);

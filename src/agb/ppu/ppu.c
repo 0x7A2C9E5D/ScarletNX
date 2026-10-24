@@ -263,36 +263,43 @@ static void affine_bg(AgbBoard* board, uint32_t index, int y) {
     }
 }
 
-/* The bitmap modes draw into BG2's layer and use its priority, blend flags and mosaic, whose blocks start as an affine
-   background's do. */
+/* The bitmap modes draw into BG2's layer through BG2's rotation and scaling, walking its reference points as an affine
+   background does, and use its priority, blend flags and mosaic. A pixel off the bitmap is open, and a mosaic block
+   that starts there starts again on the next pixel, as mGBA draws them */
 static void bitmap_bg(AgbBoard* board, int y, int mode) {
     AgbPpu* ppu = &board->ppu;
     uint16_t* out = scan.color[2];
     uint32_t page = ppu->dispcnt & 0x10 ? 0xA000 : 0;
-    int height = mode == 5 ? 128 : AGB_SCREEN_HEIGHT, width = mode == 5 ? 160 : AGB_SCREEN_WIDTH, block = 1, wait = 0;
+    int32_t height = mode == 5 ? 128 : AGB_SCREEN_HEIGHT, width = mode == 5 ? 160 : AGB_SCREEN_WIDTH;
+    int block = 1, wait = 0;
+    int64_t sx = ppu->bgx_line[2], sy = ppu->bgy_line[2];
+    int32_t pa = (int16_t)ppu->bgpa[2], pc = (int16_t)ppu->bgpc[2];
     uint16_t held = LAYER_TRANSPARENT;
-    if (ppu->bgcnt[2] & 0x40) {
-        y -= y % mosaic_size(ppu, 4);
+    if (ppu->bgcnt[2] & 0x40) { /* the reference points of the line its block of lines starts at */
+        int back = y % mosaic_size(ppu, 4);
+        sx -= (int64_t)back * (int16_t)ppu->bgpb[2];
+        sy -= (int64_t)back * (int16_t)ppu->bgpd[2];
         block = mosaic_size(ppu, 0);
     }
-    for (int x = 0; x < AGB_SCREEN_WIDTH; ++x) {
+    for (int x = 0; x < AGB_SCREEN_WIDTH; ++x, sx += pa, sy += pc) {
+        int32_t tx = (int32_t)(sx >> 8), ty = (int32_t)(sy >> 8);
         uint16_t color;
         if (wait) {
             --wait;
             out[x] = held;
             continue;
         }
-        if (y >= height || x >= width) {
+        if (tx < 0 || ty < 0 || tx >= width || ty >= height) {
             out[x] = LAYER_TRANSPARENT;
             continue;
         }
         if (mode == 3)
-            color = vram16(board, ((uint32_t)y * 240 + (uint32_t)x) * 2) & 0x7FFF;
+            color = vram16(board, ((uint32_t)ty * 240 + (uint32_t)tx) * 2) & 0x7FFF;
         else if (mode == 4) {
-            uint8_t index = board->memory.vram[page + (uint32_t)y * 240 + (uint32_t)x];
+            uint8_t index = board->memory.vram[page + (uint32_t)ty * 240 + (uint32_t)tx];
             color = index ? palette(board, index) : LAYER_TRANSPARENT;
         } else
-            color = vram16(board, page + ((uint32_t)y * 160 + (uint32_t)x) * 2) & 0x7FFF;
+            color = vram16(board, page + ((uint32_t)ty * 160 + (uint32_t)tx) * 2) & 0x7FFF;
         out[x] = held = color;
         wait = block - 1;
     }
