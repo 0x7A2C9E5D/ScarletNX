@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "nx/gpu/gpu.h"
+#include "nx/gpu/maxwell/kepler_compute_regs.h"
 #include "nx/gpu/shader/shader.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
@@ -137,10 +138,10 @@ u64 vk_cs_skipped(char* why, size_t size) {
     return total;
 }
 
-static u8 g_cb[8][0x10000];
-static u32 g_cbn[8];
+static u8 g_cb[QMD_NUM_CONST_BUFFERS][MAX_CONST_BUFFER_BYTES];
+static u32 g_cbn[QMD_NUM_CONST_BUFFERS];
 static int cs_cb_read(u32 idx, u32 off, u32* out) {
-    if (idx < 8 && off + 4 <= g_cbn[idx]) {
+    if (idx < QMD_NUM_CONST_BUFFERS && off + 4 <= g_cbn[idx]) {
         *out = snx_ld_le32(g_cb[idx] + off); /* g_cb keeps the guest's bytes, for the uniform buffers */
         return 1;
     }
@@ -838,8 +839,8 @@ static void res_unref_all(VkOwnRes** made, int n) {
 
 void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     u32* rc = ch->rcomp;
-    u32 gx = q[12] & 0x7FFFFFFF, gy = q[13] & 0xFFFF, gz = q[13] >> 16, lx = q[18] >> 16, ly = q[19] & 0xFFFF,
-        lz = q[19] >> 16, shm = q[17] & 0x3FFFF;
+    u32 gx = qmd_grid_dim_x(q), gy = qmd_grid_dim_y(q), gz = qmd_grid_dim_z(q), lx = qmd_block_dim_x(q),
+        ly = qmd_block_dim_y(q), lz = qmd_block_dim_z(q), shm = qmd_shared_alloc(q);
     CsKey ck = {0, 0, 0};
     u32 tcb_key;
     u64 tic_key_base;
@@ -861,13 +862,13 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     }
     cs_init();
     /* constant buffers from the QMD (reading them lands results they overlap) */
-    u64 cba[8] = {0};
-    for (int i = 0; i < 8; i++) {
+    u64 cba[QMD_NUM_CONST_BUFFERS] = {0};
+    for (u32 i = 0; i < QMD_NUM_CONST_BUFFERS; i++) {
         g_cbn[i] = 0;
-        if (!((q[20] >> i) & 1)) continue;
-        cba[i] = ((u64)(q[30 + 2 * i] & 0xFF) << 32) | q[29 + 2 * i];
-        u32 sz = (q[30 + 2 * i] >> 15) & 0x1FFFF;
-        if (!sz || sz > 0x10000) sz = 0x10000;
+        if (!qmd_const_buffer_enabled(q, i)) continue;
+        cba[i] = qmd_const_buffer_address(q, i);
+        u32 sz = qmd_const_buffer_size(q, i);
+        if (!sz || sz > sizeof g_cb[i]) sz = sizeof g_cb[i];
         g_cbn[i] = sz;
         gmem_read(cba[i], g_cb[i], sz);
     }
@@ -879,7 +880,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
 		CsPipe *p;
 	};
 	static struct cs_fast fc[64];
-    u64 pa = code + q[8];
+    u64 pa = code + qmd_program_start(q);
 	struct cs_fast *fe = &fc[((pa >> 8) ^ (pa >> 16)) & 63];
     CsPipe* p = fe->p;
 	if (!p || fe->addr != pa || fe->shader_generation != g_vk.shader_generation ||
@@ -898,8 +899,8 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     }
     /* A 2D store is translated unsigned for a bindless image and float for a bound one. An image of the other
        class (a bindless RGBA8 target), or an integer texture, needs the program translated again, keyed on it. */
-    tcb_key = rc[0x982] & 7;
-    tic_key_base = ((u64)rc[0x55D] << 32) | rc[0x55E];
+    tcb_key = kepler_compute_tex_cb_index(rc);
+    tic_key_base = kepler_compute_address(rc, KEPLER_COMPUTE_TIC);
     if (!p->failed)
         for (i = 0; i < p->si.ntex && i < SH_MAXTEX; i++) {
             ShTex* st = &p->si.tex[i];
@@ -966,9 +967,9 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         u64 tic_base;
         u32 h = 0, tic[8];
         if (p->si.img[i].type != 1) continue;
-        tic_base = ((u64)rc[0x55D] << 32) | rc[0x55E];
+        tic_base = kepler_compute_address(rc, KEPLER_COMPUTE_TIC);
         if ((u32)i >= g_vk_buffer_image_slots ||
-            !cs_cb_read(p->si.img[i].bindless ? (p->si.img[i].bl_cbuf & 7) : (rc[0x982] & 7), p->si.img[i].cbuf_off * 4,
+            !cs_cb_read(p->si.img[i].bindless ? (p->si.img[i].bl_cbuf & 7) : kepler_compute_tex_cb_index(rc), p->si.img[i].cbuf_off * 4,
                         &h)) {
             g_cs_skips[CS_SKIP_BUFFER_IMAGE]++;
             return;
@@ -1172,8 +1173,8 @@ rebind:
     if (gfx) {
         /* textures from the compute engine's headers; texture handles from its texture constant buffer bank. Their
            number types are what the program was keyed on (vk_tex_num), and depth textures aren't sampled here */
-        u64 tic_base = ((u64)rc[0x55D] << 32) | rc[0x55E], tsc_base = ((u64)rc[0x557] << 32) | rc[0x558];
-        u32 tcb = rc[0x982] & 7;
+        u64 tic_base = kepler_compute_address(rc, KEPLER_COMPUTE_TIC), tsc_base = kepler_compute_address(rc, KEPLER_COMPUTE_TSC);
+        u32 tcb = kepler_compute_tex_cb_index(rc);
         int fmt_used = 0;
         i32 fmt[320] = {0}; /* SNX_FMT, std140: snx_ic[8] snx_tc[32] snx_ib[8] snx_tb[32], 16 bytes each */
         for (int i = 0; i < p->si.ntex && i < SH_MAXTEX; i++) {
@@ -1182,8 +1183,8 @@ rebind:
             cs_cb_read(st->bindless ? (st->bl_cbuf & 7) : tcb, st->cbuf_off * 4, &h);
             if (st->bindless && st->bl2 && cs_cb_read(st->bl2_cbuf & 7, st->bl2_off * 4, &h2)) h |= h2;
             u32 tic[8], tsc[8];
-            vk_gmem_words(tic_base + (h & 0xFFFFF) * 32ull, tic, 8);
-            vk_gmem_words(tsc_base + ((h >> 20) & 0xFFF) * 32ull, tsc, 8);
+            vk_gmem_words(tic_base + (u64)texture_handle_tic_id(h) * TEXTURE_POOL_ENTRY_BYTES, tic, 8);
+            vk_gmem_words(tsc_base + (u64)texture_handle_tsc_id(h) * TEXTURE_POOL_ENTRY_BYTES, tsc, 8);
             VkImageViewType want = vk_tex_view_type(st);
             if (st->flags & 2) {
                 LOG_LIMIT(4, "vulkan: multisample texture upload is unavailable (skipped)\n");

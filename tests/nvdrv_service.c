@@ -271,7 +271,7 @@ static void test_ioctl2(u32 gpu) {
     CHECK(nvdrv->dispatch(nvdrv, &ctx) == 0 && ctx.out_size == 4 && reply(0) == 0);
     CHECK(test_gpu.submits == 1 && test_gpu.n == 3 && !memcmp(test_gpu.entries, entries, sizeof entries));
     u32 sp = test_gpu.channel;
-    CHECK(sp >= 20 && sp < SYNCPT_N && test_gpu.incs == 2 && test_gpu.expect == 2);
+    CHECK(sp >= SYNCPT_FIRST && sp < SYNCPT_N && test_gpu.incs == 2 && test_gpu.expect == 2);
     /* the fence the submission promises comes back in the output */
     CHECK(gr32(OUT0 + 16) == sp && gr32(OUT0 + 20) == 2);
 
@@ -975,7 +975,7 @@ int main(void) {
     for (u32 h = 0x100; h < test_next_handle; h++) kobj_unref(test_handles[h - 0x100]);
     CHECK(test_kobjs == 0 && test_locks == 0);
     svcobj_unref(nvdrv);
-    for (u32 i = 0; i < GL1; i++) free(g_hle.nvdrv.gmmu[i]);
+    for (u32 i = 0; i < NV_GMMU_L1; i++) free(g_hle.nvdrv.gmmu[i]);
     free(g_hle.nvdrv.gmaps);
     free(g_mem);
     printf("nvdrv_service: %u checks passed\n", test_checks);

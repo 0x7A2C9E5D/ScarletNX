@@ -1,13 +1,18 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors
-   Ported from Eden (src/video_core/host1x/codecs/h264.cpp, codecs/decoder.cpp, nvdec.cpp, ffmpeg.cpp,
+   Ported from Eden (src/video_core/host1x/codecs/h264.cpp, codecs/decoder.cpp, nvdec.cpp, nvdec_common.h, ffmpeg.cpp,
    codec_types.h):
    SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
    SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
    SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project */
 /* NVDEC: H.264 and VP9 jobs decoded with FFmpeg's libavcodec, each picture written into the surface its job names, on
-   the GPU (the renderer's nvdec_write). FFmpeg decodes on the CPU, or H.264 with Vulkan Video on the renderer's GPU
-   when the vulkan_video setting asks for it (experimental and untested).
+   the GPU (the renderer's nvdec_write). host1x.c's channel worker calls nvdec_execute when the stream writes Execute,
+   with the channel's method registers (nvdec_regs.h). FFmpeg decodes on the CPU, or H.264 with Vulkan Video on the
+   renderer's GPU when the vulkan_video setting asks for it (experimental and untested).
+
+   NVDEC takes a job's slice data alone, with the stream's parameters in its picture info, so H.264's sequence and
+   picture parameter sets are rebuilt from it (Eden's H264::ComposeFrame and H264BitWriter); vp9_rebuild.cpp does the
+   same for VP9's headers.
 
    NVDEC writes a picture into its job's surface as it decodes it, in decode order, and the game shows surfaces in
    display order on its own. FFmpeg hands pictures out in display order, later, or not at all for one it judges out
@@ -17,6 +22,7 @@
 
    FFmpeg is a hard dependency: a build without the decoder once left every movie black without a word */
 #include "nx/gpu/video/host1x_int.h"
+#include "nx/gpu/video/nvdec_regs.h"
 #include "nx/gpu/renderer.h"
 #include "nx/gpu/video/vp9_rebuild.h"
 #include <libavcodec/avcodec.h>
@@ -24,30 +30,32 @@
 #include <libavutil/frame.h>
 #include <libavutil/log.h>
 
-#define APP_H264    3u /* SET_APPLICATION_ID (0x200), written before every job */
-#define APP_VP9     9u
-#define CTX_MAGIC   0x534E5856u /* "SNXV": what cmake/ffmpeg-vp9-nvdec.patch looks for at the context's start */
-#define VP9_PROBS   0xEA0u      /* nvdec_vp9EntropyProbs_t */
-#define HDR_CAP     1024u       /* an SPS and a PPS with full scaling lists and emulation prevention take ~800 */
-#define MAX_STREAM  (16u << 20)
-#define MAX_DIM     4096u
-#define H264_SLOTS  17u
-#define FF_LOG_MAX  20u
-#define STATUS_TIME 100000u
+#define CTX_MAGIC  0x534E5856u /* "SNXV": what cmake/ffmpeg-vp9-nvdec.patch looks for at the context's start */
+#define HDR_CAP    1024u       /* an SPS and a PPS with full scaling lists and emulation prevention take ~800 */
+#define MAX_STREAM (16u << 20) /* the largest bitstream a job may name */
+#define MAX_DIM    4096u       /* the largest picture width or height NVDEC decodes */
+#define MB_SIZE    16u         /* a macroblock is 16x16 pixels (VP9's superblock sizes are counted in them too) */
+#define FF_LOG_MAX 20u
+/* the cycle count a status reports: players only check that it is there */
+#define STATUS_CYCLES 100000u
+/* a GOB, the unit of the block linear layout: 64 bytes wide, 8 rows high, stacked 1 << gob_height high in a block */
+#define GOB_WIDTH       64u
+#define GOB_HEIGHT_LOG2 3u
+#define MAX_GOB_HEIGHT  5u /* blocks of up to 32 GOBs */
 
 /* The patched VP9 decoder reads the first three fields through AVCodecContext.opaque: they stay first, in order */
 struct NvdecCtx {
     u32 magic;
-    u32 prev_invisible;   /* the previous picture was not shown: NVDEC says so only in the next job's setup */
-    u8 probs[VP9_PROBS];  /* the job's probability table, which the rebuilt compressed header can't carry whole */
-    u32 app;              /* the codec the decoder was opened for (0 none). dec NULL with app set: it failed */
-    int cur_new;          /* cur was started during this job */
-    u32 last_hdr_n;       /* the SPS and PPS the decoder last accepted (0: send them with the next job) */
+    u32 prev_invisible;            /* the previous picture was not shown: NVDEC says so only in the next job's setup */
+    u8 probs[VP9_PROB_TABLE_SIZE]; /* the job's probability table, which the rebuilt compressed header can't carry */
+    u32 app;                       /* the codec the decoder was opened for (0 none). dec NULL with app set: it failed */
+    int cur_new;                   /* cur was started during this job */
+    u32 last_hdr_n;                /* the SPS and PPS the decoder last accepted (0: send them with the next job) */
     AVCodecContext* dec;
-    SnxVp9Builder* vp9;   /* VP9's reference state across jobs */
+    SnxVp9Builder* vp9; /* VP9's reference state across jobs */
     AVPacket* pkt;
-    AVFrame* cur;         /* the last buffer the decoder started */
-    AVFrame* out;         /* FFmpeg's output, dropped */
+    AVFrame* cur; /* the last buffer the decoder started */
+    AVFrame* out; /* FFmpeg's output, dropped */
     u8 last_hdr[HDR_CAP];
 };
 
@@ -59,7 +67,15 @@ typedef struct {
 
 static void wr32(u8* p, u32 off, u32 v) { snx_st_le32(p + off, v); }
 static u32 rd16(const u8* p, u32 off) { return (u32)p[off] | (u32)p[off + 1] << 8; }
+static u32 rd32be(const u8* p) { return (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3]; }
 static u32 min_u32(u32 a, u32 b) { return a < b ? a : b; }
+static u32 max_u32(u32 a, u32 b) { return a > b ? a : b; }
+/* the low b bits of v, as a signed number */
+static int sign_extend(u32 v, u32 b) {
+    u32 m = 1u << (b - 1);
+    v &= (m << 1) - 1;
+    return (int)(v ^ m) - (int)m;
+}
 
 /* ---- FFmpeg's log */
 /* the lines logged, by any decoding thread, and whether the callback is set, each on a cache line of its own */
@@ -98,52 +114,71 @@ static void ff_warn(const char* what, int err) {
     WARN_LIMIT(16, "video: NVDEC %s: %s\n", what, msg);
 }
 
-/* ---- an H.264 bit writer (RBSP) and NAL units */
+/* ---- H.264 bitstream writing (Eden's H264BitWriter), into an RBSP, then NAL units */
+/* NAL unit types (H.264 Table 7-1: 24 to 31 are unspecified) and the header byte: forbidden_zero_bit, nal_ref_idc
+   in bits 5-6, the type in 0-4 */
+enum { H264_NAL_SLICE = 1, H264_NAL_IDR_SLICE = 5, H264_NAL_SPS = 7, H264_NAL_PPS = 8, H264_NAL_LAST_RESERVED = 23 };
+#define H264_NAL_REF_IDC_HIGHEST 3u
+static u32 h264_nal_header(u32 ref_idc, u32 type) { return ref_idc << 5 | type; }
+static u32 h264_nal_type(u8 header) { return header & 0x1Fu; }
+static int h264_nal_forbidden_bit(u8 header) { return header >> 7; }
+/* the start code before each NAL unit in an Annex B stream (H.264 Annex B), and the byte that keeps two zeros and a
+   byte up to 3 in the RBSP from looking like one (emulation_prevention_three_byte, 7.4.1) */
+#define H264_START_CODE_SIZE  4u
+#define H264_EMULATION_PREVENTION 0x03u
+
 typedef struct {
-    u8* p;
-    u32 cap, bytes, nb; /* whole bytes written, bits in the one being filled */
-    int over;           /* a bit didn't fit */
-} BW;
-static void bw_bit(BW* w, u32 b) {
+    u8* buf;
+    u32 cap, bytes, bit_pos; /* whole bytes written, bits of the one being filled (from its top) */
+    int overflow;            /* a bit didn't fit */
+} H264BitWriter;
+static void h264_write_bit(H264BitWriter* w, u32 b) {
     if (w->bytes >= w->cap) {
-        w->over = 1;
+        w->overflow = 1;
         return;
     }
-    if (!w->nb) w->p[w->bytes] = 0;
-    if (b) w->p[w->bytes] |= (u8)(0x80u >> w->nb);
-    if (++w->nb == 8) {
-        w->nb = 0;
+    if (!w->bit_pos) w->buf[w->bytes] = 0;
+    if (b) w->buf[w->bytes] |= (u8)(0x80u >> w->bit_pos);
+    if (++w->bit_pos == 8) {
+        w->bit_pos = 0;
         w->bytes++;
     }
 }
-static void bw_u(BW* w, u32 v, u32 n) {
-    while (n--) bw_bit(w, (v >> n) & 1);
+/* u(n): the n low bits of v, the highest first */
+static void h264_write_bits(H264BitWriter* w, u32 v, u32 n) {
+    while (n--) h264_write_bit(w, (v >> n) & 1);
 }
-static void bw_ue(BW* w, u32 v) {
+/* ue(v), unsigned Exp-Golomb (9.1): len zeros, then v + 1 in len + 1 bits. v + 1 is taken in 64 bits, so v up to
+   0xFFFFFFFF codes */
+static void h264_write_ue(H264BitWriter* w, u32 v) {
     u64 x = (u64)v + 1;
     u32 len = 0;
     int i;
     while (x >> (len + 1)) len++;
-    bw_u(w, 0, len);
-    for (i = (int)len; i >= 0; i--) bw_bit(w, (u32)(x >> i) & 1);
+    h264_write_bits(w, 0, len);
+    for (i = (int)len; i >= 0; i--) h264_write_bit(w, (u32)(x >> i) & 1);
 }
-static void bw_se(BW* w, int v) { bw_ue(w, v > 0 ? 2u * (u32)v - 1 : 2u * (0u - (u32)v)); }
-static void bw_trailing(BW* w) {
-    bw_bit(w, 1);
-    while (w->nb) bw_bit(w, 0);
+/* se(v), signed Exp-Golomb (9.1.1): k > 0 codes as 2k - 1, k <= 0 as -2k */
+static void h264_write_se(H264BitWriter* w, int v) {
+    h264_write_ue(w, v > 0 ? 2u * (u32)v - 1 : 2u * (0u - (u32)v));
+}
+/* rbsp_trailing_bits: a one, then zeros to the byte's end (Eden's End) */
+static void h264_write_end(H264BitWriter* w) {
+    h264_write_bit(w, 1);
+    while (w->bit_pos) h264_write_bit(w, 0);
 }
 /* a NAL unit: a 4-byte start code, the header byte, the RBSP with emulation prevention. Its length, 0 when it
    doesn't fit cap */
-static u32 nal_out(u8* dst, u32 cap, u32 hdr, const u8* rbsp, u32 n) {
-    u32 o = 5, zeros = 0, i;
-    if (cap < 5) return 0;
+static u32 h264_nal_unit(u8* dst, u32 cap, u32 header, const u8* rbsp, u32 n) {
+    u32 o = H264_START_CODE_SIZE + 1, zeros = 0, i;
+    if (cap < o) return 0;
     dst[0] = dst[1] = dst[2] = 0;
     dst[3] = 1;
-    dst[4] = (u8)hdr;
+    dst[4] = (u8)header;
     for (i = 0; i < n; i++) {
-        if (zeros >= 2 && rbsp[i] <= 3) {
+        if (zeros >= 2 && rbsp[i] <= H264_EMULATION_PREVENTION) {
             if (o >= cap) return 0;
-            dst[o++] = 3;
+            dst[o++] = H264_EMULATION_PREVENTION;
             zeros = 0;
         }
         if (o >= cap) return 0;
@@ -152,123 +187,143 @@ static u32 nal_out(u8* dst, u32 cap, u32 hdr, const u8* rbsp, u32 n) {
     }
     return o;
 }
-/* a field of b bits, sign extended */
-static int sext(u32 v, u32 b) {
-    u32 m = 1u << (b - 1);
-    v &= (m << 1) - 1;
-    return (int)(v ^ m) - (int)m;
-}
-static void scaling_list(BW* w, const u8* list, u32 n) {
-    static const u8 zz4[16] = {0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15};
-    static const u8 zz8[64] = {0,  1,  8,  16, 9,  2,  3,  10, 17, 24, 32, 25, 18, 11, 4,  5,
-                               12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6,  7,  14, 21, 28,
-                               35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51,
-                               58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63};
-    int last = 8;
+/* scaling_list() (7.3.2.1.1.1), every entry sent: NVDEC keeps a list in raster order, the stream codes it in
+   zig-zag order as deltas from the last entry, wrapped to a signed byte, from 8. The frame zig-zag scans of
+   H.264 Tables 8-12 and 8-13 (Eden's zig-zag tables, from libavcodec) */
+static void h264_write_scaling_list(H264BitWriter* w, const u8* list, u32 n) {
+    static const u8 zig_zag_scan_4x4[16] = {0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15};
+    static const u8 zig_zag_scan_8x8[64] = {0,  1,  8,  16, 9,  2,  3,  10, 17, 24, 32, 25, 18, 11, 4,  5,
+                                            12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6,  7,  14, 21, 28,
+                                            35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51,
+                                            58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63};
+    int last_scale = 8;
     u32 i;
     for (i = 0; i < n; i++) {
-        int v = list[n == 16 ? zz4[i] : zz8[i]], delta = v - last;
-        if (delta > 127) delta -= 256;
-        if (delta < -128) delta += 256;
-        bw_se(w, delta);
-        last = v;
+        int v = list[n == 16 ? zig_zag_scan_4x4[i] : zig_zag_scan_8x8[i]], delta_scale = v - last_scale;
+        if (delta_scale > 127) delta_scale -= 256;
+        if (delta_scale < -128) delta_scale += 256;
+        h264_write_se(w, delta_scale);
+        last_scale = v;
     }
 }
-/* the SPS and PPS of nvdec_h264_pic_s s (the job's setup, offsets from its start). Their length in out, 0 when the
-   setup can't make them or they don't fit */
-static u32 h264_headers(const u8* s, u8* out, u32 cap) {
-    u8 rb[HDR_CAP];
-    BW w;
-    u32 lo = rd32(s, 0xB0), hi = rd32(s, 0xB4), chroma = (lo >> 12) & 3, poc = (lo >> 14) & 3;
-    u32 wmb = rd32(s, 0x64), hmb = rd32(s, 0x68), frame_mbs = rd32(s, 0x60) != 0, t8 = rd32(s, 0x88) != 0;
-    u32 l0 = rd32(s, 0x78), l1 = rd32(s, 0x7C), refs, n, k, i;
-    if (!wmb || !hmb || wmb > MAX_DIM / 16 || hmb > MAX_DIM / 16 || (!frame_mbs && hmb < 2)) return 0;
-    refs = (l0 > l1 ? l0 : l1) < 15 ? (l0 > l1 ? l0 : l1) + 1 : 16;
-    if (refs < 4) refs = 4;
-    memset(&w, 0, sizeof w);
-    w.p = rb;
-    w.cap = sizeof rb;
-    bw_u(&w, 100, 8); /* High */
-    bw_u(&w, 0, 8);
-    bw_u(&w, 51, 8);
-    bw_ue(&w, 0); /* seq_parameter_set_id */
-    bw_ue(&w, chroma);
-    if (chroma == 3) bw_bit(&w, 0); /* separate_colour_plane_flag */
-    bw_ue(&w, 0);                   /* bit depths 8 */
-    bw_ue(&w, 0);
-    bw_bit(&w, (rd32(s, 0x2D0) >> 1) & 1); /* qpprime_y_zero_transform_bypass_flag */
-    bw_bit(&w, 0);                         /* seq_scaling_matrix_present_flag: the PPS carries them */
-    bw_ue(&w, (lo >> 8) & 0xF);            /* log2_max_frame_num_minus4 */
-    bw_ue(&w, poc);
-    if (poc == 0)
-        bw_ue(&w, rd32(s, 0x58));
-    else if (poc == 1) {
-        bw_bit(&w, rd32(s, 0x5C) != 0);
-        bw_se(&w, 0);
-        bw_se(&w, 0);
-        bw_ue(&w, 0);
-    }
-    bw_ue(&w, refs);
-    bw_bit(&w, 0); /* gaps_in_frame_num_value_allowed_flag */
-    bw_ue(&w, wmb - 1);
-    bw_ue(&w, (frame_mbs ? hmb : hmb / 2) - 1);
-    bw_bit(&w, frame_mbs);
-    if (!frame_mbs) bw_bit(&w, lo & 1); /* mb_adaptive_frame_field_flag */
-    bw_bit(&w, (lo >> 1) & 1);          /* direct_8x8_inference_flag */
-    bw_bit(&w, 0);                      /* frame_cropping_flag */
-    bw_bit(&w, 0);                      /* vui_parameters_present_flag */
-    bw_trailing(&w);
-    if (w.over || !(n = nal_out(out, cap, 0x67, rb, w.bytes))) return 0;
 
-    memset(&w, 0, sizeof w);
-    w.p = rb;
-    w.cap = sizeof rb;
-    bw_ue(&w, 0); /* pic_parameter_set_id */
-    bw_ue(&w, 0);
-    bw_bit(&w, rd32(s, 0x70) != 0); /* entropy_coding_mode_flag */
-    bw_bit(&w, rd32(s, 0x74) != 0); /* bottom_field_pic_order_in_frame_present_flag */
-    bw_ue(&w, 0);                   /* num_slice_groups_minus1 */
-    bw_ue(&w, l0);
-    bw_ue(&w, l1);
-    bw_bit(&w, (lo >> 2) & 1); /* weighted_pred_flag */
-    bw_u(&w, hi & 3, 2);       /* weighted_bipred_idc */
-    bw_se(&w, sext(lo >> 16, 6));
-    bw_se(&w, 0); /* pic_init_qs_minus26 */
-    bw_se(&w, sext(lo >> 22, 5));
-    bw_bit(&w, rd32(s, 0x80) != 0); /* deblocking_filter_control_present_flag */
-    bw_bit(&w, (lo >> 3) & 1);      /* constrained_intra_pred_flag */
-    bw_bit(&w, rd32(s, 0x84) != 0); /* redundant_pic_cnt_present_flag */
-    bw_bit(&w, t8);
-    bw_bit(&w, 1); /* pic_scaling_matrix_present_flag */
-    for (i = 0; i < 6; i++) {
-        bw_bit(&w, 1);
-        scaling_list(&w, s + 0x1C0 + 16 * i, 16);
+/* The SPS's profile and level: High (100), so 8x8 transforms and scaling matrices are allowed, at level 5.1 (51),
+   high enough for any picture size and reference count a job can name (Eden writes 31) */
+#define H264_PROFILE_HIGH 100u
+#define H264_LEVEL_5_1    51u
+#define H264_CHROMA_444   3u /* chroma_format_idc of 4:4:4: its SPS has separate_colour_plane_flag */
+#define H264_MAX_REF_FRAMES 16u
+#define H264_MIN_REF_FRAMES 4u /* Eden's floor */
+
+/* the SPS (7.3.2.1.1) and PPS (7.3.2.2) of the H264DecoderContext at s (Eden's H264::ComposeFrame). Their length in
+   out, 0 when the setup can't make them or they don't fit */
+static u32 h264_compose_parameter_sets(const u8* s, u8* out, u32 cap) {
+    u8 rb[HDR_CAP];
+    H264BitWriter w = {rb, sizeof rb, 0, 0, 0};
+    u32 lo = rd32(s, H264_FLAGS), hi = rd32(s, H264_FLAGS + 4);
+    u32 chroma_format_idc = h264_chroma_format_idc(lo), pic_order_cnt_type = h264_pic_order_cnt_type(lo);
+    u32 pic_width_in_mbs = rd32(s, H264_PIC_WIDTH_IN_MBS), frame_height_in_mbs = rd32(s, H264_FRAME_HEIGHT_IN_MBS);
+    u32 frame_mbs_only = rd32(s, H264_FRAME_MBS_ONLY_FLAG) != 0;
+    u32 transform_8x8 = rd32(s, H264_TRANSFORM_8X8_MODE_FLAG) != 0;
+    u32 l0 = rd32(s, H264_NUM_REFIDX_L0_DEFAULT_ACTIVE), l1 = rd32(s, H264_NUM_REFIDX_L1_DEFAULT_ACTIVE);
+    u32 max_num_ref_frames, n, k, i;
+    if (!pic_width_in_mbs || !frame_height_in_mbs || pic_width_in_mbs > MAX_DIM / MB_SIZE ||
+        frame_height_in_mbs > MAX_DIM / MB_SIZE || (!frame_mbs_only && frame_height_in_mbs < 2))
+        return 0;
+    /* as many references as either list's default holds, from Eden's floor of 4 to the standard's 16 */
+    max_num_ref_frames = max_u32(l0, l1) < H264_MAX_REF_FRAMES - 1 ? max_u32(l0, l1) + 1 : H264_MAX_REF_FRAMES;
+    if (max_num_ref_frames < H264_MIN_REF_FRAMES) max_num_ref_frames = H264_MIN_REF_FRAMES;
+    h264_write_bits(&w, H264_PROFILE_HIGH, 8); /* profile_idc */
+    h264_write_bits(&w, 0, 8);                 /* constraint_set flags, reserved_zero_2bits */
+    h264_write_bits(&w, H264_LEVEL_5_1, 8);    /* level_idc */
+    h264_write_ue(&w, 0);                      /* seq_parameter_set_id */
+    h264_write_ue(&w, chroma_format_idc);
+    if (chroma_format_idc == H264_CHROMA_444) h264_write_bit(&w, 0); /* separate_colour_plane_flag */
+    h264_write_ue(&w, 0);                                            /* bit_depth_luma_minus8 */
+    h264_write_ue(&w, 0);                                            /* bit_depth_chroma_minus8 */
+    h264_write_bit(&w, h264_qpprime_y_zero_transform_bypass(rd32(s, H264_TRANSFORM_BYPASS)));
+    h264_write_bit(&w, 0); /* seq_scaling_matrix_present_flag: the PPS carries them */
+    h264_write_ue(&w, h264_log2_max_frame_num_minus4(lo));
+    h264_write_ue(&w, pic_order_cnt_type);
+    if (pic_order_cnt_type == 0)
+        h264_write_ue(&w, rd32(s, H264_LOG2_MAX_PIC_ORDER_CNT_LSB_MINUS4));
+    else if (pic_order_cnt_type == 1) {
+        h264_write_bit(&w, rd32(s, H264_DELTA_PIC_ORDER_ALWAYS_ZERO_FLAG) != 0);
+        h264_write_se(&w, 0); /* offset_for_non_ref_pic */
+        h264_write_se(&w, 0); /* offset_for_top_to_bottom_field */
+        h264_write_ue(&w, 0); /* num_ref_frames_in_pic_order_cnt_cycle */
     }
-    if (t8)
-        for (i = 0; i < (chroma == 3 ? 6u : 2u); i++) {
-            bw_bit(&w, i < 2); /* NVDEC has two 8x8 lists: 4:4:4's chroma ones fall back to them */
-            if (i < 2) scaling_list(&w, s + 0x220 + 64 * i, 64);
+    h264_write_ue(&w, max_num_ref_frames);
+    h264_write_bit(&w, 0); /* gaps_in_frame_num_value_allowed_flag */
+    h264_write_ue(&w, pic_width_in_mbs - 1);
+    /* pic_height_in_map_units_minus1: field pictures count map units of two macroblock rows */
+    h264_write_ue(&w, (frame_mbs_only ? frame_height_in_mbs : frame_height_in_mbs / 2) - 1);
+    h264_write_bit(&w, frame_mbs_only);
+    if (!frame_mbs_only) h264_write_bit(&w, h264_mbaff_frame(lo)); /* mb_adaptive_frame_field_flag */
+    h264_write_bit(&w, h264_direct_8x8_inference(lo));
+    h264_write_bit(&w, 0); /* frame_cropping_flag */
+    h264_write_bit(&w, 0); /* vui_parameters_present_flag */
+    h264_write_end(&w);
+    if (w.overflow ||
+        !(n = h264_nal_unit(out, cap, h264_nal_header(H264_NAL_REF_IDC_HIGHEST, H264_NAL_SPS), rb, w.bytes)))
+        return 0;
+
+    w = (H264BitWriter){rb, sizeof rb, 0, 0, 0}; /* the PPS's RBSP, in the same buffer */
+    h264_write_ue(&w, 0); /* pic_parameter_set_id */
+    h264_write_ue(&w, 0); /* seq_parameter_set_id */
+    h264_write_bit(&w, rd32(s, H264_ENTROPY_CODING_MODE_FLAG) != 0);
+    h264_write_bit(&w, rd32(s, H264_PIC_ORDER_PRESENT_FLAG) != 0); /* bottom_field_pic_order_in_frame_present */
+    h264_write_ue(&w, 0);                                          /* num_slice_groups_minus1 */
+    h264_write_ue(&w, l0);                                         /* num_ref_idx_l0_default_active_minus1 */
+    h264_write_ue(&w, l1);
+    h264_write_bit(&w, h264_weighted_pred(lo));
+    h264_write_bits(&w, h264_weighted_bipred_idc(hi), 2);
+    h264_write_se(&w, sign_extend(h264_pic_init_qp_minus26_bits(lo), H264_PIC_INIT_QP_MINUS26_BITS));
+    h264_write_se(&w, 0); /* pic_init_qs_minus26 */
+    h264_write_se(&w, sign_extend(h264_chroma_qp_index_offset_bits(lo), H264_CHROMA_QP_INDEX_OFFSET_BITS));
+    h264_write_bit(&w, rd32(s, H264_DEBLOCKING_FILTER_CONTROL_PRESENT_FLAG) != 0);
+    h264_write_bit(&w, h264_constrained_intra_pred(lo));
+    h264_write_bit(&w, rd32(s, H264_REDUNDANT_PIC_CNT_PRESENT_FLAG) != 0);
+    h264_write_bit(&w, transform_8x8); /* transform_8x8_mode_flag */
+    h264_write_bit(&w, 1);             /* pic_scaling_matrix_present_flag */
+    for (i = 0; i < H264_SCALING_LISTS_4X4; i++) {
+        h264_write_bit(&w, 1); /* pic_scaling_list_present_flag */
+        h264_write_scaling_list(&w, s + H264_WEIGHT_SCALE_4X4 + 16 * i, 16);
+    }
+    if (transform_8x8)
+        for (i = 0; i < (chroma_format_idc == H264_CHROMA_444 ? 6u : H264_SCALING_LISTS_8X8); i++) {
+            /* NVDEC has two 8x8 lists: 4:4:4's chroma ones fall back to them */
+            h264_write_bit(&w, i < H264_SCALING_LISTS_8X8);
+            if (i < H264_SCALING_LISTS_8X8) h264_write_scaling_list(&w, s + H264_WEIGHT_SCALE_8X8 + 64 * i, 64);
         }
-    bw_se(&w, sext(lo >> 27, 5)); /* second_chroma_qp_index_offset */
-    bw_trailing(&w);
-    if (w.over || !(k = nal_out(out + n, cap - n, 0x68, rb, w.bytes))) return 0;
+    h264_write_se(&w, sign_extend(h264_second_chroma_qp_index_offset_bits(lo), H264_CHROMA_QP_INDEX_OFFSET_BITS));
+    h264_write_end(&w);
+    if (w.overflow ||
+        !(k = h264_nal_unit(out + n, cap - n, h264_nal_header(H264_NAL_REF_IDC_HIGHEST, H264_NAL_PPS), rb, w.bytes)))
+        return 0;
     return n + k;
 }
 
 /* ---- packets */
-static int nal_ok(u8 b) { return !(b & 0x80) && (b & 0x1F) >= 1 && (b & 0x1F) <= 23; }
-/* complete 4-byte big-endian length-prefixed NAL units, end to end */
+/* a header byte a slice data NAL unit could have: forbidden bit clear, a type from 1 to 23 */
+static int nal_ok(u8 b) {
+    return !h264_nal_forbidden_bit(b) && h264_nal_type(b) >= H264_NAL_SLICE &&
+           h264_nal_type(b) <= H264_NAL_LAST_RESERVED;
+}
+#define AVCC_LENGTH_SIZE 4u /* length-prefixed NAL units: a 4-byte big-endian length before each */
+/* complete length-prefixed NAL units, end to end */
 static int is_avcc(const u8* s, u32 n) {
     u32 o = 0;
     while (o < n) {
         u32 len;
-        if (n - o < 5) return 0;
-        len = (u32)s[o] << 24 | (u32)s[o + 1] << 16 | (u32)s[o + 2] << 8 | s[o + 3];
-        if (!len || len > n - o - 4 || !nal_ok(s[o + 4])) return 0;
-        o += 4 + len;
+        if (n - o < AVCC_LENGTH_SIZE + 1) return 0;
+        len = rd32be(s + o);
+        if (!len || len > n - o - AVCC_LENGTH_SIZE || !nal_ok(s[o + AVCC_LENGTH_SIZE])) return 0;
+        o += AVCC_LENGTH_SIZE + len;
     }
     return n != 0;
 }
+/* Annex B: at least two zeros, a one, then a NAL header */
 static int is_annexb(const u8* s, u32 n) {
     u32 i = 0;
     while (i < n && !s[i]) i++;
@@ -277,35 +332,36 @@ static int is_annexb(const u8* s, u32 n) {
 /* the job's packet: hn bytes of headers, then the bitstream as Annex B. It comes as Annex B, as length-prefixed NAL
    units (tried first: a length of 256..511 starts 00 00 01) or as one bare NAL unit. 0 or an AVERROR */
 static int make_packet(AVPacket* p, const u8* hdr, u32 hn, const u8* s, u32 n) {
-    int kind, r;
+    enum { PACKET_ANNEX_B, PACKET_AVCC, PACKET_BARE_NAL } kind;
+    int r;
     u32 size, o, i;
     av_packet_unref(p);
     if (is_avcc(s, n))
-        kind = 1;
+        kind = PACKET_AVCC;
     else if (is_annexb(s, n))
-        kind = 0;
+        kind = PACKET_ANNEX_B;
     else if (n && nal_ok(s[0]))
-        kind = 2;
+        kind = PACKET_BARE_NAL;
     else
         return AVERROR_INVALIDDATA;
-    size = hn + n + (kind == 2 ? 3 : 0);
+    size = hn + n + (kind == PACKET_BARE_NAL ? 3 : 0); /* a 3-byte start code before a bare NAL unit */
     if ((r = av_new_packet(p, (int)size)) < 0) return r;
     memcpy(p->data, hdr, hn);
     o = hn;
-    if (kind == 0)
+    if (kind == PACKET_ANNEX_B)
         memcpy(p->data + o, s, n);
-    else if (kind == 2) {
+    else if (kind == PACKET_BARE_NAL) {
         p->data[o] = p->data[o + 1] = 0;
         p->data[o + 2] = 1;
         memcpy(p->data + o + 3, s, n);
-    } else
+    } else /* each length becomes a 4-byte start code */
         for (i = 0; i < n;) {
-            u32 len = (u32)s[i] << 24 | (u32)s[i + 1] << 16 | (u32)s[i + 2] << 8 | s[i + 3];
+            u32 len = rd32be(s + i);
             p->data[o] = p->data[o + 1] = p->data[o + 2] = 0;
             p->data[o + 3] = 1;
-            memcpy(p->data + o + 4, s + i + 4, len);
-            o += 4 + len;
-            i += 4 + len;
+            memcpy(p->data + o + AVCC_LENGTH_SIZE, s + i + AVCC_LENGTH_SIZE, len);
+            o += AVCC_LENGTH_SIZE + len;
+            i += AVCC_LENGTH_SIZE + len;
         }
     return 0;
 }
@@ -314,22 +370,23 @@ static int make_packet(AVPacket* p, const u8* hdr, u32 hn, const u8* s, u32 n) {
 /* NV12 planes, block linear, laid out on the GPU (the renderer's nvdec_write), which keeps them there for VIC
    (docs/GPU_OWNERSHIP.md). 1 when written */
 static int write_pic(const AVFrame* f, const PicOut* t) {
-    NvdecPic p;
+    NvdecPic p = {0};
     u64 gob_rows;
     u8 *py, *pc;
     if (f->format != AV_PIX_FMT_YUV420P && f->format != AV_PIX_FMT_YUVJ420P && f->format != AV_PIX_FMT_VULKAN) {
         WARN_LIMIT(4, "video: NVDEC picture format %d isn't written (4:2:0 only)\n", f->format);
         return 0;
     }
-    if (f->width <= 0 || f->height <= 0 || t->bh > 5) return 0;
-    memset(&p, 0, sizeof p);
+    if (f->width <= 0 || f->height <= 0 || t->bh > MAX_GOB_HEIGHT) return 0;
     p.w = min_u32(min_u32((u32)f->width, t->w), min_u32(min_u32(t->pitch_y, t->pitch_c / 2 * 2), MAX_DIM));
     p.h = min_u32(min_u32((u32)f->height, t->h), MAX_DIM);
     if (!p.w || !p.h) return 0;
     /* the surfaces mapped for their whole block linear extent: whole GOBs wide, whole blocks high */
-    gob_rows = 8u << t->bh;
-    p.ext_y = (u64)((t->pitch_y + 63) / 64 * 64) * ((t->h + gob_rows - 1) / gob_rows * gob_rows);
-    p.ext_c = (u64)((t->pitch_c + 63) / 64 * 64) * (((t->h + 1) / 2 + gob_rows - 1) / gob_rows * gob_rows);
+    gob_rows = 1u << (GOB_HEIGHT_LOG2 + t->bh); /* a block's rows */
+    p.ext_y = (u64)((t->pitch_y + GOB_WIDTH - 1) / GOB_WIDTH * GOB_WIDTH) *
+              ((t->h + gob_rows - 1) / gob_rows * gob_rows);
+    p.ext_c = (u64)((t->pitch_c + GOB_WIDTH - 1) / GOB_WIDTH * GOB_WIDTH) *
+              (((t->h + 1) / 2 + gob_rows - 1) / gob_rows * gob_rows);
     py = iova_ptr(t->luma, p.ext_y);
     pc = iova_ptr(t->chroma, p.ext_c);
     if (!py || !pc) {
@@ -346,7 +403,7 @@ static int write_pic(const AVFrame* f, const PicOut* t) {
     if (f->format == AV_PIX_FMT_VULKAN)
         p.hw = f; /* decoded with Vulkan Video, in a GPU image */
     else
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 3; i++) { /* Y, U, V */
             p.plane[i] = f->data[i];
             p.stride[i] = f->linesize[i];
         }
@@ -382,28 +439,29 @@ static void dec_close(NvdecCtx* d) {
     d->last_hdr_n = 0;
     d->prev_invisible = 0;
 }
-/* a fresh decoder for codec app: 1 when it opened. Slice threads only, since frame threads would still be decoding a
-   picture when its surface is written; VP9's tile columns decode side by side on four */
+/* a fresh decoder for codec app (NVDEC_CODEC_*): 1 when it opened. Slice threads only, since frame threads would
+   still be decoding a picture when its surface is written; VP9's tile columns decode side by side on four */
+#define VP9_THREADS 4 /* 1.8x on 1080p content of four tile columns */
 static int dec_open(NvdecCtx* d, u32 app) {
     const AVCodec* codec;
     int r;
     dec_close(d);
     d->app = app;
     ffmpeg_log_init();
-    codec = avcodec_find_decoder(app == APP_VP9 ? AV_CODEC_ID_VP9 : AV_CODEC_ID_H264);
+    codec = avcodec_find_decoder(app == NVDEC_CODEC_VP9 ? AV_CODEC_ID_VP9 : AV_CODEC_ID_H264);
     if (!codec) {
-        WARN("video: FFmpeg has no %s decoder, so the movies stay black\n", app == APP_VP9 ? "VP9" : "H.264");
+        WARN("video: FFmpeg has no %s decoder, so the movies stay black\n", app == NVDEC_CODEC_VP9 ? "VP9" : "H.264");
         return 0;
     }
-    if (app == APP_VP9 && !(d->vp9 = snx_vp9_new())) return 0;
+    if (app == NVDEC_CODEC_VP9 && !(d->vp9 = snx_vp9_new())) return 0;
     if (!(d->dec = avcodec_alloc_context3(codec))) goto fail;
     d->dec->opaque = d;
     d->dec->get_buffer2 = get_buf;
     d->dec->thread_type = FF_THREAD_SLICE;
-    d->dec->thread_count = app == APP_VP9 ? 4 : 1;
+    d->dec->thread_count = app == NVDEC_CODEC_VP9 ? VP9_THREADS : 1;
     /* H.264 with Vulkan Video on the renderer's GPU when the vulkan_video setting asks for it (experimental). FFmpeg
        decodes a stream its Vulkan decoder can't take on the CPU, as it does without */
-    if (app == APP_H264 && g_renderer_up && g_renderer && g_renderer->nvdec_hw_device &&
+    if (app == NVDEC_CODEC_H264 && g_renderer_up && g_renderer && g_renderer->nvdec_hw_device &&
         (d->dec->hw_device_ctx = g_renderer->nvdec_hw_device()))
         LOG_LIMIT(1, "video: H.264 decodes with Vulkan Video (experimental)\n");
     if ((r = avcodec_open2(d->dec, codec, NULL)) < 0) {
@@ -453,10 +511,10 @@ static int send(NvdecCtx* d) {
    for a failure too */
 static void put_status(u8* st, int ok, u32 mbs) {
     if (!st) return;
-    wr32(st, 0, ok ? mbs : 0);
-    wr32(st, 4, ok ? 0 : mbs);
-    wr32(st, 8, STATUS_TIME);
-    wr32(st, 12, !ok);
+    wr32(st, NVDEC_STATUS_MBS_CORRECTLY_DECODED, ok ? mbs : 0);
+    wr32(st, NVDEC_STATUS_MBS_IN_ERROR, ok ? 0 : mbs);
+    wr32(st, NVDEC_STATUS_CYCLE_COUNT, STATUS_CYCLES);
+    wr32(st, NVDEC_STATUS_ERROR_STATUS, !ok);
 }
 /* a failed job: what it captured goes, so a later second field can't publish stale pixels, and the decoder is sent
    the headers again */
@@ -467,22 +525,24 @@ static void job_fail(NvdecCtx* d, u8* st, u32 mbs) {
     d->last_hdr_n = 0;
     put_status(st, 0, mbs);
 }
+/* an H.264 job (Eden's H264::ComposeFrame and its surface offsets): the parameter sets rebuilt from the picture info,
+   the slice data decoded, the picture written into surface CurrPicIdx */
 static void h264_job(NvdecCtx* d, const u32* r, u8* st) {
     u8 hdr[HDR_CAP];
-    const u8 *s = iova_ptr((u64)r[0x404 / 4] << 8, 0x300), *bits = NULL;
-    u32 mbs = 0, len = 0, hn, prefix, lo, idx, tile;
+    const u8 *s = iova_ptr(nvdec_offset_address(r[NVDEC_PICTURE_INFO_OFFSET]), H264_CONTEXT_SIZE), *bits = NULL;
+    u32 mbs = 0, len = 0, hn, prefix, lo, idx, surface_format;
     PicOut t;
     if (s) {
-        mbs = rd32(s, 0x64) * rd32(s, 0x68);
-        len = rd32(s, 0x48);
+        mbs = rd32(s, H264_PIC_WIDTH_IN_MBS) * rd32(s, H264_FRAME_HEIGHT_IN_MBS);
+        len = rd32(s, H264_STREAM_LEN);
     }
-    if (len && len <= MAX_STREAM) bits = iova_ptr((u64)r[0x408 / 4] << 8, len);
+    if (len && len <= MAX_STREAM) bits = iova_ptr(nvdec_offset_address(r[NVDEC_FRAME_BITSTREAM_OFFSET]), len);
     if (!bits) {
         WARN_LIMIT(8, "video: an H.264 job's setup or bitstream isn't mapped (length %u)\n", len);
         job_fail(d, st, mbs);
         return;
     }
-    if (!(hn = h264_headers(s, hdr, sizeof hdr))) {
+    if (!(hn = h264_compose_parameter_sets(s, hdr, sizeof hdr))) {
         WARN_LIMIT(8, "video: an H.264 job's parameter sets can't be built\n");
         job_fail(d, st, mbs);
         return;
@@ -508,43 +568,49 @@ static void h264_job(NvdecCtx* d, const u32* r, u8* st) {
         return;
     }
     /* a second field completes the picture its first field started */
-    lo = rd32(s, 0xB0);
-    if (!d->cur_new && !((lo & 0xA0) == 0xA0 && d->cur->buf[0])) {
+    lo = rd32(s, H264_FLAGS);
+    if (!d->cur_new && !(h264_field_pic(lo) && h264_second_field(lo) && d->cur->buf[0])) {
         WARN_LIMIT(8, "video: an H.264 job started no picture\n");
         job_fail(d, st, mbs);
         return;
     }
-    idx = (rd32(s, 0xB4) >> 2) & 0x7F; /* CurrPicIdx */
-    tile = rd32(s, 0x6C);
-    if (idx >= H264_SLOTS || (tile & 3)) {
-        WARN_LIMIT(4, "video: an H.264 picture into surface %u, tile format %u, isn't written\n", idx, tile & 3);
+    idx = h264_curr_pic_idx(rd32(s, H264_FLAGS + 4));
+    surface_format = rd32(s, H264_SURFACE_FORMAT);
+    if (idx >= NVDEC_SURFACES || h264_tile_format(surface_format)) {
+        WARN_LIMIT(4, "video: an H.264 picture into surface %u, tile format %u, isn't written\n", idx,
+                   h264_tile_format(surface_format));
         job_fail(d, st, mbs);
         return;
     }
-    t.luma = ((u64)r[0x430 / 4 + idx] + rd32(s, 0x9C)) << 8;
-    t.chroma = ((u64)r[0x474 / 4 + idx] + rd32(s, 0xA8)) << 8;
-    t.pitch_y = rd32(s, 0x8C);
-    t.pitch_c = rd32(s, 0x90);
-    t.bh = ((tile >> 2) & 7) + 1;
-    t.w = rd32(s, 0x64) * 16;
-    t.h = rd32(s, 0x68) * 16;
+    /* the surface's offset plus the picture's frame offset in it, both IOVA >> 8 */
+    t.luma = nvdec_offset_address((u64)r[NVDEC_SURFACE_LUMA_OFFSETS + idx] + rd32(s, H264_LUMA_FRAME_OFFSET));
+    t.chroma = nvdec_offset_address((u64)r[NVDEC_SURFACE_CHROMA_OFFSETS + idx] + rd32(s, H264_CHROMA_FRAME_OFFSET));
+    t.pitch_y = rd32(s, H264_PITCH_LUMA);
+    t.pitch_c = rd32(s, H264_PITCH_CHROMA);
+    t.bh = h264_gob_height(surface_format) + 1; /* gob_height counts from 2 GOBs */
+    t.w = rd32(s, H264_PIC_WIDTH_IN_MBS) * MB_SIZE;
+    t.h = rd32(s, H264_FRAME_HEIGHT_IN_MBS) * MB_SIZE;
     if (!write_pic(d->cur, &t)) {
         job_fail(d, st, mbs);
         return;
     }
     put_status(st, 1, mbs);
 }
+/* a VP9 job: the frame's headers rebuilt from the picture info and the probability table (vp9_rebuild.cpp), the
+   frame decoded and, when it starts a picture, written into the surface it names */
 static void vp9_job(NvdecCtx* d, const u32* r, u8* st) {
-    const u8 *s = iova_ptr((u64)r[0x404 / 4] << 8, 0x100), *probs = iova_ptr((u64)r[0x5C0 / 4] << 8, VP9_PROBS);
+    const u8* s = iova_ptr(nvdec_offset_address(r[NVDEC_PICTURE_INFO_OFFSET]), VP9_PICTURE_INFO_SIZE);
+    const u8* probs = iova_ptr(nvdec_offset_address(r[NVDEC_VP9_PROB_TAB_BUFFER_OFFSET]), VP9_PROB_TABLE_SIZE);
     const u8* body = NULL;
     u32 mbs = 0, len = 0;
     SnxVp9Frame f;
     PicOut t;
     if (s) {
-        mbs = ((rd16(s, 0x60) + 15) / 16) * ((rd16(s, 0x62) + 15) / 16);
-        len = rd32(s, 0x30);
+        mbs = ((rd16(s, VP9_CURRENT_FRAME_WIDTH) + MB_SIZE - 1) / MB_SIZE) *
+              ((rd16(s, VP9_CURRENT_FRAME_HEIGHT) + MB_SIZE - 1) / MB_SIZE);
+        len = rd32(s, VP9_BITSTREAM_SIZE);
     }
-    if (len && len <= MAX_STREAM) body = iova_ptr((u64)r[0x408 / 4] << 8, len);
+    if (len && len <= MAX_STREAM) body = iova_ptr(nvdec_offset_address(r[NVDEC_FRAME_BITSTREAM_OFFSET]), len);
     if (!probs || !body) {
         WARN_LIMIT(8, "video: a VP9 job's setup, probabilities or frame (%u bytes) aren't mapped\n", len);
         job_fail(d, st, mbs);
@@ -557,7 +623,7 @@ static void vp9_job(NvdecCtx* d, const u32* r, u8* st) {
     }
     /* what the patched decoder reads through opaque, for this picture */
     d->prev_invisible = !f.previous_visible;
-    memcpy(d->probs, probs, VP9_PROBS);
+    memcpy(d->probs, probs, VP9_PROB_TABLE_SIZE);
     av_packet_unref(d->pkt);
     if (av_new_packet(d->pkt, (int)f.size) < 0) {
         job_fail(d, st, mbs);
@@ -576,11 +642,11 @@ static void vp9_job(NvdecCtx* d, const u32* r, u8* st) {
         t.chroma = f.chroma;
         t.pitch_y = f.pitch_y;
         t.pitch_c = f.pitch_c;
-        t.bh = ((f.layout >> 2) & 7) + 1;
+        t.bh = h264_gob_height(f.layout) + 1; /* the same surface format word as H.264's */
         t.w = f.width;
         t.h = f.height;
-        if (f.layout & 3)
-            WARN_LIMIT(4, "video: a VP9 picture in tile format %u isn't written\n", f.layout & 3);
+        if (h264_tile_format(f.layout))
+            WARN_LIMIT(4, "video: a VP9 picture in tile format %u isn't written\n", h264_tile_format(f.layout));
         else
             write_pic(d->cur, &t);
     }
@@ -608,12 +674,13 @@ void nvdec_free(NvdecCtx* d) {
     av_frame_free(&d->out);
     free(d);
 }
+/* Execute: the job of the codec set_codec_id names, its status written at frame_stats_offset */
 void nvdec_execute(NvdecCtx* d, const u32* r) {
-    u32 app = r[0x200 / 4];
-    u8* st = iova_ptr((u64)r[0x424 / 4] << 8, 16);
+    u32 app = r[NVDEC_SET_CODEC_ID];
+    u8* st = iova_ptr(nvdec_offset_address(r[NVDEC_FRAME_STATS_OFFSET]), NVDEC_STATUS_SIZE);
     if (!d) return;
-    /* VP8 (5) and HEVC (7) aren't decoded: the job fails and the decoder stays as it is */
-    if (app != APP_H264 && app != APP_VP9) {
+    /* VP8 and H.265 aren't decoded: the job fails and the decoder stays as it is */
+    if (app != NVDEC_CODEC_H264 && app != NVDEC_CODEC_VP9) {
         WARN_LIMIT(4, "video: NVDEC jobs of codec %u aren't decoded\n", app);
         put_status(st, 0, 0);
         return;
@@ -624,7 +691,7 @@ void nvdec_execute(NvdecCtx* d, const u32* r) {
         job_fail(d, st, 0);
         return;
     }
-    if (app == APP_H264)
+    if (app == NVDEC_CODEC_H264)
         h264_job(d, r, st);
     else
         vp9_job(d, r, st);

@@ -13,12 +13,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The little-endian u32 or u64 at byte off of p, at any alignment */
+/* The little-endian u32 or u64 at byte off of p, at any alignment: how the engines read the structures in guest
+   memory and the ioctls' buffers */
 static inline u32 rd32(const u8* p, u32 off) { return snx_ld_le32(p + off); }
 static inline u64 rd64(const u8* p, u32 off) { return snx_ld_le64(p + off); }
 
 /* host1x.c: the guest memory behind [iova, iova + len), or NULL unless one mapping holds all of it (len 0 is NULL
-   too). Callable from any thread */
+   too). Callable from any thread. An engine register names memory as IOVA >> 8 in 32 bits, so the IOVAs it can reach
+   are 40 bits wide; MAP_BUFFER only hands out IOVAs below 4 GiB, and anything above is unmapped */
 u8* iova_ptr(u64 iova, u64 len);
 
 /* nvdec.c: one decoder per NVDEC channel. The channel's worker calls nvdec_execute with the engines' lock held, and

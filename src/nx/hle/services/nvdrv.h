@@ -7,8 +7,18 @@
 #include "nx/runtime/platform/plat.h" /* PMutex, PCond */
 
 /* The syncpoint ids the table holds. An id at or past it would alias a smaller one: it reads 0, never counts as
-   reached, and the ioctls refuse it. syncpt_alloc hands out fewer (NVIDIA's stream library has room for 128) */
+   reached, and the ioctls refuse it. syncpt_alloc hands out fewer (NVIDIA's stream library has room for 128). Wider
+   than both the 128 below and Eden's MaxSyncPoints (192), so an id a game names that syncpt_alloc didn't hand out
+   still reads, increments and waits as itself */
 #define SYNCPT_IDS 256
+/* The ids syncpt_alloc hands out, [SYNCPT_FIRST, SYNCPT_N), 108 of them: GPU channels and host1x's NVDEC and VIC
+   channels alike. SYNCPT_N is the 128 NVIDIA's stream library (NvRmStream) sizes its per-syncpoint tables at, since
+   NvRmChannelNumSyncPoints in the game's library is a stub that fails: an id of 128 or more crashed the first VIC
+   job in NvRmStreamBegin and wrote past the table into the game's heap (host1x once took ids from 200). The first 20
+   are never handed out, as the allocator has always started there; nothing in its history says why. Eden's fixed ids
+   (12 VIC, 26 and 27 the vblanks, 0x36 NVDEC, 0x37 NVJPG) aren't kept out: nothing here uses a fixed id */
+#define SYNCPT_FIRST 20u
+#define SYNCPT_N     128u
 
 void nv_init(void);
 
@@ -60,13 +70,31 @@ int syncpt_wait(u32 id, u32 thresh, i64 timeout_ns);
    nothing queued has promised is waited for here instead, for at most 1 s, and its id[i] is set to ~0 */
 void nv_gpu_call_after(u32 n, u32* id, const u32* val, void (*fn)(void*), void* arg);
 /* ---- HLE state in g_hle (hle.h) */
-#define SYNCPT_N      128   /* the syncpoint ids syncpt_alloc hands out (see there) */
-#define NVMAP_HANDLES 8192  /* nvmap's handles, numbered 1..8191 */
-#define NV_FDS        256   /* nvdrv's fds */
-#define NV_GMMU_L1    65536 /* the GPU page table's first-level entries (nvdrv.c's GL1) */
+#define NVMAP_HANDLES 8192 /* nvmap's handles, numbered 1..8191 */
+#define NV_FDS        256  /* nvdrv's fds, numbered 1..255 */
+
+/* The GPU's page table (gmmu_*), Eden's Tegra::MemoryManager geometry: a 40-bit GPU address space
+   (address_space_bits, the characteristics' gpu_va_bit_count 0x28) in 4 KiB pages (page_bits), looked up in two
+   levels. A second-level table holds 2^GMMU_L2_BITS page entries (16 MiB of GPU addresses), and the first level the
+   2^16 tables the remaining bits name */
+#define GMMU_ADDRESS_SPACE_BITS 40
+#define GMMU_PAGE_BITS          12
+#define GMMU_PAGE_SIZE          (1ull << GMMU_PAGE_BITS)
+#define GMMU_PAGE_MASK          (GMMU_PAGE_SIZE - 1)
+#define GMMU_L2_BITS            12
+#define GMMU_L2_ENTRIES         (1u << GMMU_L2_BITS)
+#define GMMU_L1_BITS            (GMMU_ADDRESS_SPACE_BITS - GMMU_PAGE_BITS - GMMU_L2_BITS)
+#define NV_GMMU_L1              (1u << GMMU_L1_BITS) /* the first level's entries */
+#define GMMU_PAGES              (1ull << (GMMU_ADDRESS_SPACE_BITS - GMMU_PAGE_BITS)) /* pages in the space */
+
 /* ctrl fds with event slots in use at once. Each NvRm user (NVN, a movie player, the video decoder) opens one: games
-   hold a handful, Metroid Dread two */
+   hold a handful, one game two */
 #define NV_CTRL_TABLES 64
+/* a ctrl fd's event slots (Eden's MaxNvEvents) */
+#define NV_CTRL_EVENT_SLOTS 64u
+/* a channel fd's QueryEvent events, by id: 1 SM exception, 2 SM pause, 3 error notifier (Ryujinx's numbering), 0
+   unused */
+#define NV_CHANNEL_EVENTS 4u
 
 /* an nvmap handle (nvh, by handle number). CREATE and each FROM_ID take a reference, FREE gives one back and the
    last one ends the handle. allocated: ALLOC gave it guest memory at addr */
@@ -79,7 +107,7 @@ typedef struct {
     u8 kind;
 } NvMapH;
 /* what MAP_BUFFER_EX mapped, for UNMAP_BUFFER: [gva, gva+size) maps cpu. base is the address UNMAP_BUFFER names; a
-   modify (flag 0x100) or FREE_SPACE splits a mapping into pieces that keep it. va is the VA the mapping took from
+   modify (NVHOST_AS_MAP_REMAP) or FREE_SPACE splits a mapping into pieces that keep it. va is the VA the mapping took from
    the allocator (0 when the game placed it), given back when it is unmapped */
 typedef struct {
     u64 gva, size, cpu;
@@ -113,19 +141,19 @@ typedef struct {
     u32 id, thresh;
     int armed;
 } NvEvent;
-/* a ctrl fd's 64 event slots (ctrl_evt, a pool under nvev_lk) */
+/* a ctrl fd's event slots (ctrl_evt, a pool under nvev_lk) */
 typedef struct {
     u32 fd; /* 1 + the fd whose slots these are, set while it's taken */
-    NvEvent slot[64];
+    NvEvent slot[NV_CTRL_EVENT_SLOTS];
 } NvEventTable;
 /* an fd (nvf, by number) */
 typedef struct {
     int dev;       /* a DEV_* value, DEV_NONE while the entry is free */
     u32 syncpt;    /* DEV_GPU: the channel's syncpoint, 0 until its first use */
     u64 user_data; /* DEV_GPU: SET_USER_DATA's value, for GET_USER_DATA */
-    /* QueryEvent's events of a channel (1 SM exception, 2 SM pause, 3 error notifier, as Ryujinx numbers them), made
-       on first query and never signaled: nothing here raises them */
-    struct KEvent* ev[4];
+    /* QueryEvent's events of a channel (NV_CHANNEL_EVENTS), made on first query and never signaled: nothing here
+       raises them */
+    struct KEvent* ev[NV_CHANNEL_EVENTS];
     struct H1Ch* h1x; /* DEV_NVDEC, DEV_VIC: the fd's host1x channel (host1x_open) */
     /* the ioctls running on the fd. Close during one only marks it closed, and the last ioctl to leave releases it:
        the entry and its channel stay while an ioctl uses them, and Open doesn't hand the fd out again meanwhile */
@@ -146,7 +174,7 @@ typedef struct {
     u32 nvh_free[NVMAP_HANDLES];
     u32 nvh_nfree;
     PMutex lock;
-    u64* gmmu[NV_GMMU_L1]; /* gmmu[i] -> 4096 entries of (guest addr | 1) */
+    u64* gmmu[NV_GMMU_L1]; /* gmmu[i] -> GMMU_L2_ENTRIES page entries (nvdrv.c's GMMU_PTE_*) */
     PMutex aslock;         /* held across ioctl_as: the mappings below and the VA allocator */
     GMap* gmaps;
     u32 ngmaps, capgmaps;
@@ -157,7 +185,7 @@ typedef struct {
     u32 ngruns, capgruns;
     GAlias alias;
     PMutex alias_lock;
-    u32 big_page_bits; /* 64K unless asked otherwise */
+    u32 big_page_bits; /* 64K (AS_BIG_PAGE_BITS_64K) until ALLOC_AS_EX asks otherwise */
     VaRange* vafree;
     u32 nvafree, capvafree;
     int va_ready; /* the free ranges hold the whole region at first (va_init) */
@@ -169,7 +197,7 @@ typedef struct {
     u8 syncpt_gpu[SYNCPT_N]; /* a GPU channel's: submissions promise its increments (syncpt_max), the GPU thread makes
                                 them (sync_lk) */
     PMutex submit_lk;        /* a submission's promise and its place in the GPU queue, in the same order */
-    /* each ctrl fd's 64 event slots, a table of ctrl_evt taken on first use and given back with the fd, under
+    /* each ctrl fd's event slots, a table of ctrl_evt taken on first use and given back with the fd, under
        nvev_lk: 1 + its index, 0 for none. As on the console, the slots are the fd's (Ryujinx's NvHostCtrlDeviceFile
        keeps them per open). A game's GPU fence waits (one fd) and its movie player (another) both use slot 0,
        and with one table between them a thread resetting its event took the other's wake, which then waited for

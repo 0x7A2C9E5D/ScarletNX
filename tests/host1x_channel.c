@@ -194,13 +194,13 @@ static void iova_tests(H1Ch* ch) {
     host1x_forget_handle(7);
     host1x_forget_handle(2);
     host1x_forget_handle(6);
-    CHECK(g_niova == 0);
+    CHECK(g_host1x.niova == 0);
     dead[3] = 0, size_of[2] = size_of[4] = 0;
     for (h = 1; h <= IOVA_SLOTS; h++) CHECK(map(ch, h, &iovas[h - 1]) == 0);
     CHECK(map(ch, IOVA_SLOTS + 1, &c) == 6);
     for (h = 1; h < IOVA_SLOTS; h++) CHECK(iovas[h] == iovas[h - 1] + 2 * IOVA_PAGE);
     for (h = 1; h <= IOVA_SLOTS; h++) host1x_forget_handle(h);
-    CHECK(g_niova == 0);
+    CHECK(g_host1x.niova == 0);
     memset(buf, 0, sizeof buf); /* UNMAP_BUFFER keeps the mapping */
     r = map(ch, 9, &c);
     CHECK(r == 0);
