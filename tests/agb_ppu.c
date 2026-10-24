@@ -345,6 +345,18 @@ int main(void) {
     agb_ppu_write(&board, 0x008, 0);
     agb_ppu_write(&board, 0x000, 0x0100);
 
+    /* the backdrop alone has nothing under it to blend with, though BLDCNT names it both targets */
+    agb_write16(&board, 0x05000000, 0x7FFF);
+    agb_ppu_write(&board, 0x000, 0x0000); /* no layer: the backdrop everywhere */
+    agb_ppu_write(&board, 0x050, 0x2020 | 1 << 6);
+    agb_ppu_write(&board, 0x052, 0x0404);
+    run_frame();
+    CHECK(pixel(10, 10) == PIX(31, 31, 31));
+    agb_ppu_write(&board, 0x050, 0);
+    agb_ppu_write(&board, 0x052, 0);
+    agb_write16(&board, 0x05000000, 0);
+    agb_ppu_write(&board, 0x000, 0x0100);
+
     /* an HBlank DMA runs on the 160 visible lines alone, a game's table having one entry a line: a repeating 16 bit one
        moves its source 160 halfwords a frame, not 228 */
     agb_write16(&board, 0x040000B0, 0x0000);

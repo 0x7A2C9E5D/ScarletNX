@@ -476,17 +476,16 @@ static void composite_line(AgbBoard* board, int y) {
                 second_key = key;
             }
         }
-        /* the backdrop fills the pixel or stands under everything else */
-        if (top < 0) {
+        /* the backdrop fills the pixel or stands under everything else; under the backdrop is nothing to blend with */
+        if (top < 0)
             top = 5;
-            second = 5;
-        } else if (second < 0)
+        else if (second < 0)
             second = 5;
         {
             uint16_t first_color = top == 5 ? palette(board, 0) : scan.color[top][x];
-            uint16_t second_color = second == 5 ? palette(board, 0) : scan.color[second][x];
+            uint16_t second_color = second < 0 ? 0 : second == 5 ? palette(board, 0) : scan.color[second][x];
             int first_target = ppu->bldcnt >> top & 1;
-            int second_target = ppu->bldcnt >> (second + 8) & 1;
+            int second_target = second >= 0 && (ppu->bldcnt >> (second + 8) & 1);
             int semi = top == 4 && scan.obj_mode[x] == 1;
             color = first_color;
             if ((mask & 0x20) && (semi || (effect == 1 && first_target && second_target))) {
