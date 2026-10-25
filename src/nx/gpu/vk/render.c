@@ -855,6 +855,23 @@ u32 vk_gbuf_desc(int stage, u32 off, const u32* v, u64* addr) {
     return (size + 3) & ~3u;
 }
 
+/* the images of s, stage's program, whose bound texture is integer where the program's handle form stores floats, or
+   the other way (vk_image_key): a bit each, which bits 8 on of the program's rt_int_mask take to pick its variant */
+static u32 image_variant(const GpuChannel* ch, int stage, const VkSh* s) {
+    const u32* r = ch->r3d;
+    u64 tic_base = ((u64)r[0x55D] << 32) | r[0x55E];
+    u32 bits = 0;
+    for (int i = 0; i < s->si.nimg; i++) {
+        if (!vk_image_keyable(&s->si, i)) continue;
+        ShTex handle_info = {
+            .cbuf_off = s->si.img[i].cbuf_off, .bindless = s->si.img[i].bindless, .bl_cbuf = s->si.img[i].bl_cbuf};
+        u32 handle = tex_handle(ch, stage, r[0x982], &handle_info), tic[8];
+        vk_gmem_words(tic_base + (handle & 0xFFFFF) * 32ull, tic, 8);
+        if (vk_image_key(&s->si, i, tic)) bits |= 1u << i;
+    }
+    return bits;
+}
+
 /* What picks the fragment shader's variant: which of its textures and outputs are integer (signed), its color textures
    compared as depth and their functions, and its inputs the stage before doesn't write. 0s when the program itself
    is drawn */
@@ -907,15 +924,7 @@ static void fs_key(GpuChannel* ch, const VkSh* s0, TexRes* res, u32 last_out, u3
         if (num == 2) fk->ts |= 1ull << i;
     }
     fk->rm &= s0->si.sph[18] ? 0xFF : 0;
-    u64 tic_base = ((u64)r[0x55D] << 32) | r[0x55E];
-    for (int i = 0; i < s0->si.nimg; i++) {
-        if (!vk_image_keyable(&s0->si, i)) continue;
-        ShTex handle_info = {
-            .cbuf_off = s0->si.img[i].cbuf_off, .bindless = s0->si.img[i].bindless, .bl_cbuf = s0->si.img[i].bl_cbuf};
-        u32 handle = tex_handle(ch, 4, r[0x982], &handle_info), tic[8];
-        vk_gmem_words(tic_base + (handle & 0xFFFFF) * 32ull, tic, 8);
-        if (vk_image_key(&s0->si, i, tic)) fk->rm |= 1u << (8 + i);
-    }
+    fk->rm |= image_variant(ch, 4, s0) << 8;
 }
 /* the fragment shader at addr in the variant fk names, s0 when it names none */
 static VkSh* fs_variant(GpuChannel* ch, u64 addr, VkSh* s0, const FsKey* fk) {
@@ -1265,10 +1274,10 @@ void vk_gfx_image_frame_done(u64 sub) {
     g_img_landing = landing;
 }
 
-typedef struct {
-    Surf* surf[8];
-    u8* original[8];
-    u32 size[8];
+typedef struct { /* the vertex and fragment programs' images, 8 each */
+    Surf* surf[16];
+    u8* original[16];
+    u32 size[16];
     int n;
 } DrawImages;
 static void draw_images_discard(DrawImages* images) {
@@ -1683,12 +1692,15 @@ static VkDescriptorSet stage_set_(GpuChannel* ch, int stage, VkSh* s, Surf** rt,
             surf && is_target(surf, rt, zt, n) ? VK_NULL_HANDLE : vk_storage_image_view(surf, &s->si, i, &size);
         if (!view) {
             LOG_LIMIT(4,
-                      "vulkan: unsupported fragment storage image (draw skipped): %s handle %08x image %p format %u "
-                      "raw %d integer %d storage %d levels %u depth %u size %llu target %d\n",
+                      "vulkan: unsupported storage image (draw skipped): %s handle %08x image %p format %u "
+                      "raw %d integer %d storage %d levels %u depth %u size %llu target %d view type %d block "
+                      "linear %d %ux%u at %ux%u, the program's surface type %d\n",
                       kind == 1 ? "atomic" : "store", handle, (void*)surf, surf ? surf->f.vk : 0,
                       surf ? surf->f.raw : 0, surf ? surf->f.is_int : 0, surf ? surf->storage_capable : 0,
                       surf ? surf->levels : 0, surf ? surf->depth3d : 0, (unsigned long long)size,
-                      surf ? is_target(surf, rt, zt, n) : 0);
+                      surf ? is_target(surf, rt, zt, n) : 0, surf ? (int)surf->type : -1, surf ? (int)surf->bl : -1,
+                      surf ? surf->w : 0, surf ? surf->h : 0, surf ? surf->sw : 0, surf ? surf->sh : 0,
+                      s->si.img[i].type);
             return VK_NULL_HANDLE;
         }
         int seen = 0;
@@ -1708,7 +1720,8 @@ static VkDescriptorSet stage_set_(GpuChannel* ch, int stage, VkSh* s, Surf** rt,
         images->surf[images->n] = surf;
         images->size[images->n] = (u32)size;
         images->n++;
-        vk_surf_use(vk_cmd(), surf, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        vk_surf_use(vk_cmd(), surf, VK_IMAGE_LAYOUT_GENERAL,
+                    stage ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
                     VK_STORAGE_IMAGE_ACCESS);
         u32 binding = SNX_VKB_IMG + (u32)i;
         d.ii[binding] = (VkDescriptorImageInfo){VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_GENERAL};
@@ -2016,6 +2029,12 @@ static int draw_shaders(GpuChannel* ch, u32 topology, DrawShaders* o) {
     o->vs = vk_shader_get(ch, code + r[0x811], (r[0x800] & 1) ? code + r[0x801] : 0, ST_VS, attr_int, attr_sint, 0, 0,
                           tes_on || gs_on ? SNX_SH_NOT_LAST : clip, 0, 0, 0,
                           xfb_on && !tes_on && !gs_on ? &xfb : NULL);
+    /* a vertex program's images pick its variant as a fragment program's do (fs_key) */
+    u32 vs_images = o->vs && !o->vs->failed && o->vs->si.nimg ? image_variant(ch, 0, o->vs) : 0;
+    if (vs_images)
+        o->vs = vk_shader_get(ch, code + r[0x811], (r[0x800] & 1) ? code + r[0x801] : 0, ST_VS, attr_int, attr_sint,
+                              vs_images << 8, 0, tes_on || gs_on ? SNX_SH_NOT_LAST : clip, 0, 0, 0,
+                              xfb_on && !tes_on && !gs_on ? &xfb : NULL);
     o->tcs =
         tcs_on ? vk_shader_get(ch, code + r[0x821], 0, ST_TCS, 0, 0, 0, 0, SNX_SH_NOT_LAST, 0, 0, 0, NULL) : NULL;
     o->tes = tes_on ? vk_shader_get(ch, code + r[0x831], 0, ST_TES, 0, 0, r[0xC8] & 0x333, 0,
@@ -2568,7 +2587,7 @@ retry:
     int zt_ro = 0;
     u32 fb = 0;
     DrawImages images = {0};
-    VkDescriptorSet vset = stage_set(ch, 0, vs, rt, zt, n, &zt_ro, NULL, NULL, &storage, NULL);
+    VkDescriptorSet vset = stage_set(ch, 0, vs, rt, zt, n, &zt_ro, NULL, NULL, &storage, &images);
     VkDescriptorSet fset = fs ? stage_set(ch, 4, fs, rt, zt, n, &zt_ro, &fb, fres, &storage, &images) : VK_NULL_HANDLE;
     /* the sets of the stages between, at their stage's index (shader_vk_set) */
     between[0] = tcs;
