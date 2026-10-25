@@ -438,7 +438,7 @@ IT_BITS = 0x0600FC00
 # Blocks that start or end around an IT block, as halfwords: the conditions are a block's, decided when it compiles
 IT_WITNESSES = (
     ('it-alone', [0xBF08]),  # IT EQ the block can't hold the instruction of: ITSTATE 0x08 left in CPSR
-    ('it-entry', [0x4688]),  # MOV r8, r1 entered with ITSTATE in CPSR: a bad entry
+    ('it-entry', [0x4688]),  # MOV r8, r1 entered with ITSTATE in CPSR: it stops, saying the ITSTATE
     ('it-end', [0x2000, 0xBF08]),  # MOVS r0, #0; IT EQ, the code ending before its instruction
     ('it-skip', [0xBF1C, 0xEE10, 0x0F10, 0x4688]),  # ITT NE; MRCNE p15 (undefined here); MOVNE r8, r1
 )
@@ -459,7 +459,9 @@ def it_witnesses(lib, base):
     cpu = run(0, thumb)
     assert cpu.exit == 0 and cpu.r[15] == PC + 2 and cpu.cpsr & IT_BITS == 0x0800, f'it-alone: {cpu.cpsr:x}'
     cpu = run(1, thumb | 0x0800)
-    assert cpu.exit == 8, f'it-entry: exit {cpu.exit}'
+    assert cpu.exit == 13 and cpu.syndrome == 0x08 and cpu.r[8] == 0x8888, f'it-entry: exit {cpu.exit} {cpu.syndrome:x}'
+    cpu = run(1, thumb | 1 << 25 | 0x0C00)  # ITSTATE 0x0D: its bits 1:0 in 26:25, 7:2 in 15:10
+    assert cpu.exit == 13 and cpu.syndrome == 0x0D, f'it-entry 0d: exit {cpu.exit} {cpu.syndrome:x}'
     cpu = run(2, thumb)
     assert cpu.exit == 0 and cpu.r[15] == PC + 4 and cpu.cpsr & IT_BITS == 0x0800, f'it-end: {cpu.r[15]:x}'
     cpu = run(3, thumb | 1 << 30)  # Z: NE fails, the MRC is skipped and so is the MOV after it

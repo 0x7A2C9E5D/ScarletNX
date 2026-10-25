@@ -458,7 +458,7 @@ static int thumb_instruction(ArmIR* a, const SnxThumb* t) {
    stream, honouring IT conditions, ending at a control transfer or the end. An IT block's conditions are the
    block's, decided when it compiles: an instruction that traps under one that fails lets the block go on, a block
    the code ends inside one (callers give the rest of the code) or an SVC or BKPT inside one leaves ITSTATE in
-   CPSR, and a block entered with ITSTATE there stops (SNX_ARM_BAD_ENTRY) */
+   CPSR, and a block entered with ITSTATE there stops (SNX_ARM_IT_ENTRY, the ITSTATE its syndrome) */
 LLVMValueRef snx_thumb_llvm_block(LLVMModuleRef module, const char* name, const uint16_t* halfwords,
                                   size_t count, uint32_t pc, size_t* consumed) {
     return snx_thumb_llvm_block_ex(module, name, halfwords, count, pc, consumed, NULL);
@@ -492,8 +492,13 @@ LLVMValueRef snx_thumb_llvm_block_ex(LLVMModuleRef module, const char* name, con
     PUT(&a, syndrome, c32(&a, 0));
     require(&a, cmp(&a, LLVMIntEQ, get(&a, offsetof(SnxArmCPU, r) + 60, a.i32), c32(&a, pc)), SNX_ARM_BAD_ENTRY,
             c32(&a, pc));
-    require(&a, cmp(&a, LLVMIntEQ, band(&a, GET(&a, cpsr), c32(&a, SNX_ARM_T | IT_BITS)), c32(&a, SNX_ARM_T)),
-            SNX_ARM_BAD_ENTRY, c32(&a, halfwords[0]));
+    require(&a, cmp(&a, LLVMIntNE, band(&a, GET(&a, cpsr), c32(&a, SNX_ARM_T)), c32(&a, 0)), SNX_ARM_BAD_ENTRY,
+            c32(&a, halfwords[0]));
+    {
+        LLVMValueRef cpsr = GET(&a, cpsr), itstate;
+        itstate = bor(&a, band(&a, lsr(&a, cpsr, 25), c32(&a, 3)), band(&a, lsr(&a, cpsr, 8), c32(&a, 0xFC)));
+        require(&a, cmp(&a, LLVMIntEQ, itstate, c32(&a, 0)), SNX_ARM_IT_ENTRY, itstate);
+    }
     require(&a, cmp(&a, LLVMIntEQ, band(&a, GET(&a, cpsr), c32(&a, SNX_ARM_E)), c32(&a, 0)), SNX_ARM_ENDIAN_UNSUPPORTED,
             c32(&a, halfwords[0]));
     memory_entry(&a);

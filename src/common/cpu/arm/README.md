@@ -44,7 +44,7 @@ Programs linking blocks link `snx_arm_rt`. The executor (`exec.h`, built into `s
 
 Many Thumb32 instructions are A32 ones with their fields elsewhere: coprocessor, VFP and Advanced SIMD (the same bits, or the top byte moved), LDM/STM and PUSH.W/POP.W, the exclusives and acquire/release, barriers, MRS/MSR, long multiplies and divides, REV/RBIT/CLZ and the extends with add. `thumb_decode.c` decodes them to `TH_A32`, the A32 word and its kind, and the A32 emitter runs them reading Thumb's PC. A doubleword exclusive's second register, which Thumb names freely, comes with it, as does the offset T1's LDREX and STREX add to their base. LDRD/STRD (`TH_DUAL`) are Thumb's own, as their register pair and offset are.
 
-An IT block's conditions are its block's, decided when the block compiles: an instruction that traps under a condition that fails lets the block go on. A block the code ends inside an IT block (callers give the rest of the code, so only at its end), or an SVC or BKPT inside one, leaves ITSTATE in CPSR, and a Thumb block entered with ITSTATE there stops with `SNX_ARM_BAD_ENTRY`. A block compiled again from the halfwords it consumed is the same block, which the AOT compilers check.
+An IT block's conditions are its block's, decided when the block compiles: an instruction that traps under a condition that fails lets the block go on. A block the code ends inside an IT block (callers give the rest of the code, so only at its end), or an SVC or BKPT inside one, leaves ITSTATE in CPSR, and a Thumb block entered with ITSTATE there stops with `SNX_ARM_IT_ENTRY`, the ITSTATE its syndrome. A block compiled again from the halfwords it consumed is the same block, which the AOT compilers check.
 
 ## Opt-in ARM11 profile and checked memory
 

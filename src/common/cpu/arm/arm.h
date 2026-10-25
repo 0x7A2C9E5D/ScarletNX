@@ -25,7 +25,8 @@ typedef enum {
     SNX_ARM_ENDIAN_UNSUPPORTED,
     SNX_ARM_BACKEND_UNSUPPORTED,
     SNX_ARM_PREFETCH_ABORT,
-    SNX_ARM_CODE_CHANGED
+    SNX_ARM_CODE_CHANGED,
+    SNX_ARM_IT_ENTRY /* a Thumb block entered with ITSTATE in CPSR, inside an IT block: the syndrome is the ITSTATE */
 } SnxArmExit;
 
 struct SnxArmRt;

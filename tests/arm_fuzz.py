@@ -35,7 +35,7 @@ import tempfile
 from arm_test import CPU, PC, SIZE
 
 EXITS = ('ok', 'undefined', 'thumb16-unsupported', 'thumb32-unsupported', 'svc', 'bkpt', 'data-abort',
-         'alignment', 'bad-entry', 'endian', 'unsupported', 'prefetch-abort', 'code-changed')
+         'alignment', 'bad-entry', 'endian', 'unsupported', 'prefetch-abort', 'code-changed', 'it-entry')
 UNDEF = {1, 2, 3, 10}
 
 # (isa, [(mask, value)]): the bits under mask are value, the others random. A32 words take cond AL three times
