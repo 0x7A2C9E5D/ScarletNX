@@ -160,7 +160,7 @@ typedef enum {
     TH_TABLE,     /* TBB/TBH */
     TH_IT,        /* If-Then */
     TH_HINT,      /* NOP/YIELD/WFE/WFI/SEV */
-    TH_LEGACY_BL, /* ARM11 only: separate Thumb BL prefix / BL or BLX suffix */
+    TH_LEGACY_BL, /* ARM11 and ARM7TDMI: separate Thumb BL prefix / BL or (ARM11) BLX suffix */
     TH_REV,       /* ARM11 Thumb REV/REV16/REVSH */
     TH_A32,       /* a Thumb32 instruction that is an A32 one in another encoding: .imm is the A32 word (condition
                      AL) and .op its SnxA32Kind, emitted by the A32 emitter with Thumb's PC. .ra is a doubleword
