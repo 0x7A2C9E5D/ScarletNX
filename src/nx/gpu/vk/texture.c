@@ -1106,10 +1106,13 @@ void vk_tex_frame(void) {
        memory if they are needed again. Those whose pixels would be lost (vk_surf_reclaim) go before five minutes
        only under the budget's pressure (vk_mem_trim), and a target holding a draw a texture would take stays until
        then. The recency lists hand out the oldest first, so this costs what goes. The lossy pass looks every 600
-       presents: it passes over the targets it keeps, and asking whether one holds such a draw can hash its memory */
+       presents: it passes over the targets it keeps, and asking whether one holds such a draw can hash its memory.
+       Render targets later ones drew all over hold nothing: every 30 presents those unused for a second and eight
+       presents go (a game at a dynamic resolution makes its scene's targets again each frame) */
     u32 before = vk_present_before(20000000000ull, 120);
     vk_surf_reclaim(VK_LRU_TEX, before, ~0ull, VK_RECLAIM_LOSSLESS);
     vk_surf_reclaim(VK_LRU_RT, before, ~0ull, VK_RECLAIM_LOSSLESS);
+    if (g_vk_present % 30 == 0) vk_rt_reclaim_superseded(vk_present_before(1000000000ull, 8), ~0ull);
     if (g_vk_present % 600 == 0) {
         u32 lossy_before = vk_present_before(300000000000ull, 600);
         vk_surf_reclaim(VK_LRU_TEX, lossy_before, ~0ull, VK_RECLAIM_IDLE);

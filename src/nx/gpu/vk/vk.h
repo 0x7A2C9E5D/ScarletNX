@@ -427,6 +427,7 @@ typedef struct Surf {
     u64 wseq;       /* when its image last changed, counted across surfaces: of two over the same bytes, the higher
                        holds them (vk_surf_wrote) */
     u32 drawn_at;   /* render targets: g_vk_present when last drawn to */
+    u64 draw_wseq;  /* render targets: wseq at its last draw or clear (vk_rt_drawn), 0 before one */
     int in_drawn;   /* in surface.c's list of drawn targets, entered at drawn_from */
     int in_linear;  /* a pitch-linear color target in surface.c's list of those drawn since the last release */
     u64 drawn_from;
@@ -548,6 +549,8 @@ VkImageAspectFlags vk_aspect(const VkFmt* f);
 #define VK_RECLAIM_IDLE     1
 #define VK_RECLAIM_ANY      2
 u64 vk_surf_reclaim(int kind, u32 before, u64 want, int lossy);
+/* the render targets later ones drew all over (no pixels to lose), last used before `before`, up to `want` bytes */
+u64 vk_rt_reclaim_superseded(u32 before, u64 want);
 void vk_surf_stats(int kind, u32* count, u64* bytes, u32* parked);
 /* frees cache entries (surfaces and own buffers), the least recently used first, when the heap's use with `extra`
    bytes more would be past 90% of its budget: idle lossless ones down to 80%, the lossless working set down to 95%,
