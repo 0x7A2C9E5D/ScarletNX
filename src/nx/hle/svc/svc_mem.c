@@ -90,10 +90,14 @@ static int user_writable(u64 a, u64 size) {
 /* ============================================================ accounting */
 /* The application pool for each memory_gb (Mesosphere's KSystemControl application pool sizes for the 4, 6 and 8 GiB
    boards), see docs/MEMORY_ACCOUNTING.md */
-u64 mem_total(void) {
+static u64 pool(void) {
     if (g_settings.memory_gb >= 8) return 6964 * MIB;
     if (g_settings.memory_gb >= 6) return 4916 * MIB;
     return 3285 * MIB;
+}
+u64 mem_total(void) {
+    u64 total = pool();
+    return g_hle.svcmem.fit && g_hle.svcmem.fit < total ? g_hle.svcmem.fit : total;
 }
 /* the most memory a process may have: Mesosphere's m_max_process_memory, the heap region's size. A 32-bit process
    gets 2 GiB without an alias region and 1 GiB with one, however large the application pool is; a game that asks
@@ -101,6 +105,31 @@ u64 mem_total(void) {
 static u64 process_memory_total(void) {
     u64 total = mem_total();
     return total < HEAP_SIZE ? total : HEAP_SIZE;
+}
+/* what the game may have of what the process can reach: the rest takes the runtime as it is now and the graphics'
+   first allocations, never less than a phone's run measured, and the game keeps a GiB however little is left */
+#define FIT_GRAPHICS    (256 * MIB)
+#define FIT_OTHER_LEAST (700 * MIB)
+#define FIT_LEAST       (1024 * MIB)
+u64 mem_fit_budget(u64 available, u64 footprint) {
+    u64 limit = available + footprint, other = footprint + FIT_GRAPHICS;
+    if (other < FIT_OTHER_LEAST) other = FIT_OTHER_LEAST;
+    return limit > other + FIT_LEAST ? limit - other : FIT_LEAST;
+}
+void mem_fit(int measured, u64 available, u64 footprint) {
+    g_hle.svcmem.fit = 0;
+    if (!measured) {
+        LOG("memory: memory_fit=1, but this system tells neither what it can still give nor what the process holds: "
+            "the game is told the console's %llu MiB\n",
+            (unsigned long long)(process_memory_total() >> 20));
+        return;
+    }
+    g_hle.svcmem.fit = mem_fit_budget(available, footprint);
+    LOG("memory: memory_fit=1: the game is told %llu MiB, the console's being %llu (the system can still give %llu MiB, "
+        "the process holds %llu)\n",
+        (unsigned long long)(process_memory_total() >> 20),
+        (unsigned long long)((pool() < HEAP_SIZE ? pool() : HEAP_SIZE) >> 20), (unsigned long long)(available >> 20),
+        (unsigned long long)(footprint >> 20));
 }
 /* the loaded images, the main thread's stack, the heap, physical memory and the system resource, charged once */
 u64 used_memory(void) {
