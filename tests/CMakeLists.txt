@@ -1430,43 +1430,36 @@ add_test(NAME astc_decode COMMAND snx-test-astc)
 # the ASTC shader's GLSL run on the CPU (tests/glsl/glsl.hpp) against the same decoder: no GPU needed
 add_executable(snx-test-astc-glsl glsl/astc_glsl.cpp support/astc.c)
 snx_test_target(snx-test-astc-glsl 23)
-target_compile_options(snx-test-astc-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-astc-glsl PRIVATE glsl)
 add_test(NAME astc_glsl COMMAND snx-test-astc-glsl)
 # the VIC shader's GLSL, both builds, run on the CPU against vic.c's composition of random jobs: no GPU needed
 add_executable(snx-test-vic-glsl glsl/vic_jobs.c glsl/vic_glsl.cpp support/vic_ref.c)
 snx_test_target(snx-test-vic-glsl 23)
-target_compile_options(snx-test-vic-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-vic-glsl PRIVATE glsl)
 add_test(NAME vic_glsl COMMAND snx-test-vic-glsl)
 # the block linear deswizzle and swizzle shader's GLSL run on the CPU against bl_offset's layout: no GPU needed
 add_executable(snx-test-blocklinear-glsl glsl/blocklinear_glsl.cpp)
 snx_test_target(snx-test-blocklinear-glsl 23)
-target_compile_options(snx-test-blocklinear-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-blocklinear-glsl PRIVATE glsl)
 add_test(NAME blocklinear_glsl COMMAND snx-test-blocklinear-glsl)
 # the Vita's texture deswizzle shader's GLSL run on the CPU against Vita3K's loops: no GPU needed
 add_executable(snx-test-vita-swizzle-glsl glsl/vita_swizzle_glsl.cpp)
 snx_test_target(snx-test-vita-swizzle-glsl 23)
-target_compile_options(snx-test-vita-swizzle-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-vita-swizzle-glsl PRIVATE glsl)
 add_test(NAME vita_swizzle_glsl COMMAND snx-test-vita-swizzle-glsl)
 # the Vita's decoded picture layout shader's GLSL run on the CPU against the decoder's layout: no GPU needed
 add_executable(snx-test-vita-picture-glsl glsl/vita_picture_glsl.cpp)
 snx_test_target(snx-test-vita-picture-glsl 23)
-target_compile_options(snx-test-vita-picture-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-vita-picture-glsl PRIVATE glsl)
 add_test(NAME vita_picture_glsl COMMAND snx-test-vita-picture-glsl)
 # the Vita's YUV420 texture shader's GLSL run on the CPU against the conversion written out: no GPU needed
 add_executable(snx-test-vita-yuv-glsl glsl/vita_yuv_glsl.cpp)
 snx_test_target(snx-test-vita-yuv-glsl 23)
-target_compile_options(snx-test-vita-yuv-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-vita-yuv-glsl PRIVATE glsl)
 add_test(NAME vita_yuv_glsl COMMAND snx-test-vita-yuv-glsl)
 # the Vita's 24-bit color surface shader's GLSL run on the CPU against the layout written out: no GPU needed
 add_executable(snx-test-vita-rgb24-glsl glsl/vita_rgb24_glsl.cpp)
 snx_test_target(snx-test-vita-rgb24-glsl 23)
-target_compile_options(snx-test-vita-rgb24-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-vita-rgb24-glsl PRIVATE glsl)
 add_test(NAME vita_rgb24_glsl COMMAND snx-test-vita-rgb24-glsl)
 # the Vita's imports given memory that isn't the game's: their errors, and no access there
@@ -1480,7 +1473,6 @@ endif()
 # needed
 add_executable(snx-test-texconv-glsl glsl/texconv_glsl.cpp support/etc2.c support/bcn.c)
 snx_test_target(snx-test-texconv-glsl 23)
-target_compile_options(snx-test-texconv-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-texconv-glsl PRIVATE glsl)
 add_test(NAME texconv_glsl COMMAND snx-test-texconv-glsl)
 

@@ -21,7 +21,7 @@ target_link_libraries(snx_nx_flags INTERFACE scarletnx-common scarletnx-net scar
 # Every function and global used across files is declared once, in the header of the file that defines it, and
 # everything else is static: a declaration that disagrees with the definition is then a compile error instead of a
 # miscompile. Third-party sources keep their own warnings off.
-target_compile_options(snx_nx_flags INTERFACE -fno-strict-aliasing
+target_compile_options(snx_nx_flags INTERFACE
                        $<$<COMPILE_LANGUAGE:C>:-Werror=missing-prototypes -Werror=missing-variable-declarations>)
 target_compile_definitions(snx_nx_flags INTERFACE VK_NO_PROTOTYPES)
 target_link_libraries(snx_nx_flags INTERFACE Vulkan::Headers)

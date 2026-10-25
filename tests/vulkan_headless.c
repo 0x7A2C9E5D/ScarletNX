@@ -1152,9 +1152,9 @@ int main(int argc, char** argv) {
     CHECK(vk_pipeline_worker_count(5, 12) == 5 && vk_pipeline_worker_count(32, 4) == 32 &&
           vk_pipeline_worker_count(1, 64) == 1);
     /* FFmpeg takes the device for Vulkan Video exactly when it has the decode queue */
-    void* video_device = g_renderer->nvdec_hw_device();
+    AVBufferRef* video_device = g_renderer->nvdec_hw_device();
     CHECK(!video_device == (g_vk.video_family == ~0u));
-    av_buffer_unref((AVBufferRef**)&video_device);
+    av_buffer_unref(&video_device);
     CHECK(g_renderer->method_barrier);
     u32 epoch = g_vk_epoch;
     u64 finishes = g_vk_finishes;
