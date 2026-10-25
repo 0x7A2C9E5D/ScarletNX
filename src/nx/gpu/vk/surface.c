@@ -730,13 +730,22 @@ void vk_rt_flush(u64 gva) { vk_surf_flush(vk_rt_find(gva), NULL); }
    staged as the GPU sees it into a buffer of its own (the bytes between its texels keep theirs), its texels laid out
    over that in the guest's layout, and the buffer published over the span run by run of guest memory. Nothing waits:
    the bytes land when the CPU touches them. A 3D volume a game writes twice a frame and only samples took a wait
-   each, a fifth of the run. 0 when it can't be (pitch linear, no room): the caller flushes at once */
+   each, a fifth of the run. A pitch-linear one's rows go at the guest's pitch, over the bytes between them as the
+   guest has them. 0 when it can't be (pitch-linear rows of part texels, or layers not a pitch's rows apart, no room):
+   the caller flushes at once */
 int vk_surf_publish(Surf* s) {
     u64 size = flush_bytes(s), at, off = 0;
+    u32 mem_wgen = s ? s->mem_wgen : 0;
     VkBuffer staged;
     VkOwnRes* r;
     VkCommandBuffer cb;
-    if (!size || !s->bl || (s->gva >> 63)) return 0;
+    if (!size || (s->gva >> 63)) return 0;
+    if (!s->bl) {
+        if (s->pitch % s->f.bpp || s->type == VK_IMAGE_VIEW_TYPE_3D ||
+            (s->layers > 1 && s->layer_size != (u64)s->pitch * s->h))
+            return 0;
+        size = rt_bytes(s);
+    }
     vk_render_end();
     r = vk_own_res_new(size);
     if (!r) return 0;
@@ -746,12 +755,18 @@ int vk_surf_publish(Surf* s) {
         return 0;
     }
     vk_guest_read(s->gva, size, p, staged, at);
+    /* the other targets over the span: s's own pixels go over them below, in the guest's layout, so a target leaves
+       itself out (its tight rows would be a pitch-linear one's padding) */
+    s->mem_wgen = s->wgen;
     vk_rt_overlay(s->gva, size, staged, at);
+    s->mem_wgen = mem_wgen;
     cb = vk_cmd();
     VkBufferCopy c = {at, 0, size};
     rec_CmdCopyBuffer(cb, staged, r->buf, 1, &c);
     vk_all_barrier(cb);
-    if (!flush_record(cb, s, r->buf, 0)) {
+    if (!s->bl)
+        flush_copy(cb, s, r->buf, 0, s->pitch);
+    else if (!flush_record(cb, s, r->buf, 0)) {
         vk_own_res_unref(r);
         return 0;
     }
@@ -1073,7 +1088,64 @@ static u64 rt_mem_hash(const Surf* s) {
     }
     return h;
 }
+/* Pitch-linear color targets drawn since the last release. A target's pixels reach guest memory only when something
+   asks for them, and the CPU can't ask. Reading back on the CPU what the GPU drew is what pitch-linear targets are
+   mostly for, and they are few: one game draws its ambient light's spherical harmonics into seven 8x8 RGBA32F targets
+   and reads them after a fence, and lit its scenes with the old bytes there, values up to 1e31. A release publishes
+   them, GPU-owned (vk_surf_publish): the GPU copies them over their guest bytes, and they land only if the CPU
+   touches those. A block linear target the CPU reads still gets no write-back */
+static Surf** g_linear;
+static u32 g_nlinear, g_caplinear;
+static void linear_note(Surf* s) {
+    if (s->bl || s->f.depth || s->in_linear) return;
+    if (g_nlinear == g_caplinear) {
+        u32 cap = g_caplinear ? g_caplinear * 2 : 16;
+        Surf** n = realloc(g_linear, (size_t)cap * sizeof *n);
+        if (!n) return;
+        g_linear = n;
+        g_caplinear = cap;
+    }
+    g_linear[g_nlinear++] = s;
+    s->in_linear = 1;
+}
+static void linear_drop(Surf* s) {
+    u32 i = 0;
+    if (!s->in_linear) return;
+    while (i < g_nlinear && g_linear[i] != s) i++;
+    if (i < g_nlinear) g_linear[i] = g_linear[--g_nlinear];
+    s->in_linear = 0;
+}
+void vk_rt_publish_linear(void) {
+    /* publishing can submit and land, which leaves the list alone: it is taken whole first */
+    while (g_nlinear) {
+        Surf* s = g_linear[--g_nlinear];
+        s->in_linear = 0;
+        if (!(s->gva >> 63) && flush_bytes(s) && !vk_surf_publish(s)) vk_surf_flush(s, NULL);
+    }
+}
+static u64 g_drawn_max; /* the biggest span a listed target has: how far before an address one over it can start */
+/* Whether every byte of s's span was drawn over after s last changed, by targets drawn later, each over its own span:
+   memory holds their pixels now (or would on the console), so s's are no one's to read and it goes without loss. A
+   game rendering at a dynamic resolution makes its scene's targets again at another size each frame over the same
+   memory, and each old one held a draw memory never got: kept as precious, a few thousand took the budget from the
+   targets that are (one game's ink maps, drawn once at a level's start, went under that pressure with the budget
+   lowered, and its walls took no ink). The drawn list is in order of address, so the targets over s are a sweep from its start */
+static int rt_superseded(const Surf* s) {
+    u64 lo = s->gva & ~(1ull << 63), hi = lo + s->rt_size, reach = lo;
+    if (!s->is_rt || !s->rt_size) return 0;
+    for (int i = drawn_lower(lo > g_drawn_max ? lo - g_drawn_max : 0); i < g_ndrawn && g_drawn[i]->drawn_from <= reach;
+         i++) {
+        const Surf* o = g_drawn[i];
+        if (o == s || o->draw_wseq <= s->wseq || o->drawn_from + o->rt_size <= reach) continue;
+        reach = o->drawn_from + o->rt_size;
+        if (reach >= hi) return 1;
+    }
+    return 0;
+}
 void vk_rt_drawn(Surf* s) {
+    linear_note(s);
+    s->draw_wseq = s->wseq;
+    if (s->rt_size > g_drawn_max) g_drawn_max = s->rt_size;
     /* A memory write after the first draw can leave untouched pixels stale even when later draws touch the target.
        Keep that first baseline until the next present instead of scanning the whole target on every draw. */
     if (!s->draw_wseen || s->drawn_at != g_vk_present) {
@@ -1148,6 +1220,7 @@ static void surf_free(Surf* s) {
     }
     if (s->is_rt) rt_pages(s, -1);
     if (s->gva >> 63) g_parked--;
+    linear_drop(s);
     if (s->in_drawn) {
         int i = drawn_lower(s->drawn_from);
         while (i < g_ndrawn && g_drawn[i] != s) i++;
@@ -1170,13 +1243,13 @@ static int keeps_drawn(Surf* s) {
 }
 /* a surface whose pixels can be had again once it goes. A texture: loaded from memory, unless it took pixels from
    render targets since. A render target: without defined contents, or with memory holding what it holds (written back
-   or loaded since its last draw, in a format that moves between the two; rt_create loads it again). A parked one too
-   only then: taken out of parking it gives back its own pixels, which memory, written by neither target's draws,
-   doesn't have */
+   or loaded since its last draw, in a format that moves between the two; rt_create loads it again), or with every
+   byte drawn over by later targets (rt_superseded). A parked one too only then: taken out of parking it gives back
+   its own pixels, which memory, written by neither target's draws, doesn't have */
 static int lossless(const Surf* s) {
     if (!s->is_rt) return !s->took_drawn;
     if (s->layout == VK_IMAGE_LAYOUT_UNDEFINED) return 1;
-    return !s->f.depth && s->f.raw && s->mem_wgen == s->wgen && moves_scaled(s);
+    return (!s->f.depth && s->f.raw && s->mem_wgen == s->wgen && moves_scaled(s)) || rt_superseded(s);
 }
 /* s out of the table and freed, with its copies (gpu/vk/texture.c rt_crop): the device memory that releases */
 static u64 surf_evict(Surf* s) {
@@ -1236,6 +1309,19 @@ u64 vk_surf_reclaim(int kind, u32 before, u64 want, int lossy) {
     }
     return freed;
 }
+/* the render targets last used before `before` that later ones drew all over (rt_superseded), from either list: the
+   aged one holds those that went there with pixels memory lacked, which draws since may have made lossless */
+u64 vk_rt_reclaim_superseded(u32 before, u64 want) {
+    u64 freed = 0;
+    for (int lru = VK_LRU_RT + LRU_AGED; lru >= VK_LRU_RT && freed < want; lru -= LRU_AGED)
+        for (Surf *s = g_lru[lru].head, *n; s && freed < want; s = n) {
+            n = s->lru_next;
+            if ((i32)((u32)s->last_used - before) >= 0) break;
+            if (s->layout != VK_IMAGE_LAYOUT_UNDEFINED && rt_superseded(s) && !vk_gfx_image_holds(s))
+                freed += surf_evict(s);
+        }
+    return freed;
+}
 
 /* ------------------------------------------------------------ the budget */
 static u64 g_trimmed;   /* statistics: bytes freed for the budget */
@@ -1269,13 +1355,15 @@ void vk_mem_trim(u64 extra, int force) {
        (memory has older ones: draws aren't written back, see vk_surf_reclaim) and textures that took such pixels lose
        them when they go, so they go only when the lossless steps leave the heap past 90%: those unused for five
        seconds, then, past 95%, those unused for a second and eight presents, the youngest a lossy entry can be. Every
-       step frees the least recently used first */
+       step frees the least recently used first. Before them all go the render targets later ones drew all over, unused
+       for two presents: what they hold is no one's (rt_superseded) */
+    u64 superseded = vk_rt_reclaim_superseded(vk_present_before(0, 2), ~0ull);
     static const struct {
         u32 ms, presents;
         int lossy;
         u32 mark; /* percent of the budget the step frees down to */
     } steps[] = {{1000, 8, 0, 80}, {0, 2, 0, 95}, {5000, 30, 1, 90}, {1000, 8, 1, 95}};
-    u64 freed = 0, by[3] = {0, 0, 0};
+    u64 freed = superseded, by[3] = {0, 0, superseded};
     int short_of = 0;
     for (u32 i = 0; i < sizeof steps / sizeof steps[0]; i++) {
         u64 mark = budget / 100 * steps[i].mark, left = usage > freed ? usage - freed : 0;
