@@ -36,6 +36,28 @@ find_package(ScarletNXRecompiler REQUIRED)
 target_link_libraries(my_emulator PRIVATE ScarletNX::recompiler)
 ```
 
+A project can also build the library in its own tree, fetched with
+[CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) (or added with `add_subdirectory`).
+With every driver off, the configure needs LLVM and nothing else: no third-party
+package is downloaded and no font or other asset of the runtimes is fetched. ScarletNX's
+tests are left out when another project includes it (`SNX_BUILD_TESTING`, on only at the
+top level), without changing that project's `BUILD_TESTING`:
+
+```cmake
+CPMAddPackage(NAME ScarletNX
+              GIT_REPOSITORY https://github.com/scarletnx/ScarletNX.git
+              GIT_TAG main   # a commit, for a reproducible build
+              GIT_SHALLOW YES
+              EXCLUDE_FROM_ALL YES
+              OPTIONS "SNX_BUILD_NX OFF" "SNX_BUILD_GNUABI OFF" "SNX_BUILD_3DS OFF"
+                      "SNX_BUILD_VITA OFF" "SNX_BUILD_AGB OFF" "SNX_DEPLOY OFF")
+target_link_libraries(my_emulator PRIVATE ScarletNX::recompiler)
+```
+
+`EXCLUDE_FROM_ALL` builds only what the project links. The project builds with Clang,
+as ScarletNX does, and finds LLVM the same way (`llvm-config` on the PATH,
+`SNX_LLVM_CONFIG` or `LLVM_DIR`, `cmake/llvm.cmake`).
+
 The archive carries the function discovery, the LLVM emitters, the linker and
 the prebuilt runtime library every module gets. Its link line adds LLVM, which the
 package records. The backend generates code for the machine it runs on, as the `scarletnx`

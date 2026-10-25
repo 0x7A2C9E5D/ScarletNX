@@ -739,7 +739,7 @@ add_executable(snx-test-overlay overlay.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/
 snx_test_target(snx-test-overlay 11)
 target_link_libraries(snx-test-overlay PRIVATE scarletnx-common snx_splash m)
 include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
-target_include_directories(snx-test-overlay PRIVATE "${CMAKE_BINARY_DIR}/generated")
+target_include_directories(snx-test-overlay PRIVATE "${PROJECT_BINARY_DIR}/generated")
 add_test(NAME overlay COMMAND snx-test-overlay)
 
 add_executable(snx-test-vpad vpad.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/vpad.c"
@@ -747,14 +747,14 @@ add_executable(snx-test-vpad vpad.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platfo
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-vpad 11)
 target_link_libraries(snx-test-vpad PRIVATE scarletnx-common snx_splash m)
-target_include_directories(snx-test-vpad PRIVATE "${CMAKE_BINARY_DIR}/generated") # ui.c's theme
+target_include_directories(snx-test-vpad PRIVATE "${PROJECT_BINARY_DIR}/generated") # ui.c's theme
 add_test(NAME vpad COMMAND snx-test-vpad)
 
 add_executable(snx-test-hud hud.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/hud.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c")
 snx_test_target(snx-test-hud 11)
 target_link_libraries(snx-test-hud PRIVATE scarletnx-common snx_splash m)
-target_include_directories(snx-test-hud PRIVATE "${CMAKE_BINARY_DIR}/generated") # the theme's colours
+target_include_directories(snx-test-hud PRIVATE "${PROJECT_BINARY_DIR}/generated") # the theme's colours
 add_test(NAME hud COMMAND snx-test-hud)
 
 add_executable(snx-test-stats stats.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/stats.c"
@@ -762,7 +762,7 @@ add_executable(snx-test-stats stats.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/plat
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-stats 11)
 target_link_libraries(snx-test-stats PRIVATE scarletnx-common snx_splash m)
-target_include_directories(snx-test-stats PRIVATE "${CMAKE_BINARY_DIR}/generated") # the theme's colours
+target_include_directories(snx-test-stats PRIVATE "${PROJECT_BINARY_DIR}/generated") # the theme's colours
 add_test(NAME stats COMMAND snx-test-stats)
 
 add_executable(snx-test-ini-deprecated ini_deprecated.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
@@ -783,7 +783,7 @@ add_executable(snx-test-gamepad gamepad.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-gamepad 11)
 target_link_libraries(snx-test-gamepad PRIVATE scarletnx-common snx_pad_sdl snx_splash m)
-target_include_directories(snx-test-gamepad PRIVATE "${CMAKE_BINARY_DIR}/generated") # ui.c's theme
+target_include_directories(snx-test-gamepad PRIVATE "${PROJECT_BINARY_DIR}/generated") # ui.c's theme
 add_test(NAME gamepad COMMAND snx-test-gamepad)
 
 add_executable(snx-test-fatal-screen fatal_screen.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/fatal_screen.c")
@@ -1486,7 +1486,7 @@ add_test(NAME nvn_control COMMAND snx-test-nvn-control)
 
 # the shared fonts pl.c hands out when a game folder has none: the stand-ins compiled in (cmake/shared_fonts.cmake)
 if(NOT SNX_TOOLS_ONLY)
-    add_executable(snx-test-pl-fonts pl_fonts.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/pl_font.c" "${CMAKE_BINARY_DIR}/generated/shared_fonts.c")
+    add_executable(snx-test-pl-fonts pl_fonts.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/pl_font.c" "${PROJECT_BINARY_DIR}/generated/shared_fonts.c")
     snx_test_target(snx-test-pl-fonts 23)
     snx_service_swipc(snx-test-pl-fonts hle/services/pl.swipc)
     add_test(NAME pl_fonts COMMAND snx-test-pl-fonts)
