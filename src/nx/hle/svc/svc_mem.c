@@ -95,6 +95,13 @@ u64 mem_total(void) {
     if (g_settings.memory_gb >= 6) return 4916 * MIB;
     return 3285 * MIB;
 }
+/* the most memory a process may have: Mesosphere's m_max_process_memory, the heap region's size. A 32-bit process
+   gets 2 GiB without an alias region and 1 GiB with one, however large the application pool is; a game that asks
+   GetInfo for the total and sets its heap to nearly all of it would otherwise ask for more than its heap region */
+static u64 process_memory_total(void) {
+    u64 total = mem_total();
+    return total < HEAP_SIZE ? total : HEAP_SIZE;
+}
 /* the loaded images, the main thread's stack, the heap, physical memory and the system resource, charged once */
 u64 used_memory(void) {
     return g_code_memory + g_main_stack_size + __atomic_load_n(&g_heap_size, __ATOMIC_ACQUIRE) +
@@ -599,7 +606,7 @@ static u32 process_info(u32 id, u64* out) {
         case 3: *out = ALIAS_SIZE; R_SUCCEED();
         case 4: *out = HEAP_BASE; R_SUCCEED();
         case 5: *out = HEAP_SIZE; R_SUCCEED();
-        case 6: *out = mem_total(); R_SUCCEED();
+        case 6: *out = process_memory_total(); R_SUCCEED();
         case 7: *out = used_memory(); R_SUCCEED();
         case 12: *out = AS_BASE; R_SUCCEED();
         case 13: *out = AS_END - AS_BASE; R_SUCCEED();
@@ -614,7 +621,7 @@ static u32 process_info(u32 id, u64* out) {
         }
         case 18: *out = g_hle.kernel.title_id; R_SUCCEED();
         case 20: *out = process_local_region(); R_SUCCEED();
-        case 21: *out = mem_total() - g_hle.kernel.sysres_size; R_SUCCEED();
+        case 21: *out = process_memory_total() - g_hle.kernel.sysres_size; R_SUCCEED();
         case 22: *out = used_memory() - g_hle.kernel.sysres_size; R_SUCCEED();
         case 23: *out = 1; R_SUCCEED(); /* IsApplication */
         case 24: {                   /* FreeThreadCount */

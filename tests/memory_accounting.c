@@ -187,6 +187,28 @@ static void test_heap(void) {
         CHECK(svc_set_heap_size(0) == 0);
     }
 }
+/* a 32-bit process's GetInfo total is its heap region's size (2 GiB without an alias region), not the application
+   pool's: a title that sets its heap to nearly the total it reads otherwise asks for 3.2 GiB and gets none */
+static void test_heap32(void) {
+    MemLayout saved = g_layout;
+    mem_layout32(2);
+    base_process();
+    g_code_memory = 22 * MIB;
+    CHECK(info(5) == 2ull << 30);
+    CHECK(info(6) == 2ull << 30 && info(7) == 23 * MIB);
+    CHECK(info(21) == 2ull << 30 && info(22) == 23 * MIB);
+    CHECK(svc_set_heap_size(3260 * MIB) == R_OUTOFMEM); /* the pool's total, more than the heap region */
+    CHECK(svc_set_heap_size(2022 * MIB) == 0);          /* what it asks once GetInfo names the heap region */
+    CHECK(svc_set_heap_size(0) == 0);
+    mem_layout32(1); /* with an alias region the heap is 1 GiB */
+    base_process();
+    g_code_memory = 22 * MIB;
+    CHECK(info(5) == 1ull << 30 && info(6) == 1ull << 30 && info(21) == 1ull << 30);
+    CHECK(svc_set_heap_size(3260 * MIB) == R_OUTOFMEM);
+    CHECK(svc_set_heap_size(1000 * MIB) == 0);
+    CHECK(svc_set_heap_size(0) == 0);
+    g_layout = saved;
+}
 static void test_system_resource(void) {
     base_process();
     CHECK(svc_map_physical(ALIAS_BASE, 0x1000) == R_BADSTATE);
@@ -428,6 +450,7 @@ int main(void) {
         mapping_begins = mapping_ends = 0; /* test_mapping_boundary's, from the round before */
         mem_init();
         test_heap();
+        test_heap32();
         test_system_resource();
         test_rollback();
         test_locked_shrink();
