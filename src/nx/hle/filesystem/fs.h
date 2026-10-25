@@ -19,6 +19,8 @@ FILE* fs_open_read(const char* path, u64* size);
    let go of before a load writes g_hle over it (fs_state_resolve, below, finds the state's again) */
 struct StateIo;
 int fs_state_save(struct StateIo* io);
+/* and the application's temporary storage, save/temp, whole: every launch empties it (fs_init) */
+int fs_state_temp_save(struct StateIo* io);
 void fs_state_drop(void);
 int fs_map_file(const char* path, PFileMap* map); /* 0, or -1 */
 /* the mods' patches the program was recompiled with (HleFs' patches), which the loader writes over the modules they
@@ -156,9 +158,11 @@ extern const StateFnTable g_fs_state_fns; /* the functions a save state may hold
 /* a load's: the state's open file systems, files and folders found by path in this process's tree and opened, files as
    the loaded fs (loaded, the state's g_hle.fs) had them, before anything of the running game changes (NULL, with
    why, when one isn't there any more), then put in place in g_hle once it is the state's, or let go of when the load
-   is refused */
+   is refused. With temp, the state's save/temp (fs_state_temp_save) is read too: the ones it had open under save/temp
+   are checked against it, and once installed it takes the running game's place and they are opened there. io NULL:
+   the state had nothing open */
 typedef struct FsStaged FsStaged;
-FsStaged* fs_state_resolve(struct StateIo* io, const HleFs* loaded, char* why, size_t whysize);
+FsStaged* fs_state_resolve(struct StateIo* io, struct StateIo* temp, const HleFs* loaded, char* why, size_t whysize);
 void fs_state_install(FsStaged* st);
 void fs_state_staged_free(FsStaged* st);
 

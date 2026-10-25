@@ -1177,8 +1177,8 @@ static void video_install(VideoStaged* v) {
 int state_save(const char* path, char* why, size_t whysize) {
     SnxStateHeader h;
     StateWriter* w;
-    Buf hle = {0}, heap = {0}, gpu = {0}, surf = {0}, video = {0};
-    StateIo gio = buf_io(&gpu), sio = buf_io(&surf), vio = buf_io(&video);
+    Buf hle = {0}, heap = {0}, gpu = {0}, surf = {0}, video = {0}, temp = {0};
+    StateIo gio = buf_io(&gpu), sio = buf_io(&surf), vio = buf_io(&video), tio = buf_io(&temp);
     Names names = {0};
     char folder[sizeof g_exedir + 16];
     u64 t0 = plat_ns(), t_land = 0, t_gather = 0, t_memory = 0;
@@ -1204,7 +1204,7 @@ int state_save(const char* path, char* why, size_t whysize) {
     header_make(&h);
     h.thumb_w = SNX_UI_IMAGE_W;
     h.thumb_h = SNX_UI_IMAGE_H;
-    if (save_hle(&hle, &heap, &names) || gpu_state_save(&gio) || video_save(&vio) ||
+    if (save_hle(&hle, &heap, &names) || gpu_state_save(&gio) || video_save(&vio) || fs_state_temp_save(&tio) ||
         (g_renderer->save_targets && g_renderer->save_targets(&sio))) {
         snprintf(why, whysize, "the game's state couldn't be gathered (the log says what)");
         goto end;
@@ -1216,7 +1216,8 @@ int state_save(const char* path, char* why, size_t whysize) {
     if (!w) goto end;
     if (section_write(w, "HLE", state_schema(), &hle) || names_write(w, &names) || section_write(w, "HEAP", 1, &heap) ||
         section_write(w, "GPU", 1, &gpu) || section_write(w, "VIDEO", 1, &video) ||
-        (surf.n && section_write(w, "SURF", 1, &surf)) || (t_memory = plat_ns(), save_memory(w, why, whysize))) {
+        (surf.n && section_write(w, "SURF", 1, &surf)) || section_write(w, "TEMP", 1, &temp) ||
+        (t_memory = plat_ns(), save_memory(w, why, whysize))) {
         sw_abort(w);
         if (!why[0]) snprintf(why, whysize, "the file couldn't be written");
         goto end;
@@ -1233,6 +1234,7 @@ resume:
     free(gpu.p);
     free(surf.p);
     free(video.p);
+    free(temp.p);
     if (r)
         WARN("state: %s wasn't saved: %s\n", path, why);
     else
@@ -1247,8 +1249,8 @@ resume:
 int state_load(const char* path, char* why, size_t whysize) {
     SnxStateHeader h;
     StateReader* r;
-    Buf hle = {0}, heap = {0}, gpu = {0}, fs_paths = {0}, surf = {0}, video = {0};
-    StateIo gio = buf_io(&gpu), sio = buf_io(&surf), vio = buf_io(&video), fio;
+    Buf hle = {0}, heap = {0}, gpu = {0}, fs_paths = {0}, surf = {0}, video = {0}, temp = {0};
+    StateIo gio = buf_io(&gpu), sio = buf_io(&surf), vio = buf_io(&video), tio = buf_io(&temp), fio;
     Names names = {0};
     ShmPlan plan;
     GpuStaged* gs = NULL;
@@ -1257,7 +1259,7 @@ int state_load(const char* path, char* why, size_t whysize) {
     u8* cur_host[KSHMEM_MAX];
     u64 cur_off[KSHMEM_MAX], cur_size[KSHMEM_MAX], schema = 0, t0 = plat_ns(), t_checked;
     u32 i;
-    int staged = 0;
+    int staged = 0, has_temp;
     why[0] = 0;
     memset(&vs, 0, sizeof vs);
     r = sr_open(path, &h, why, whysize);
@@ -1281,6 +1283,12 @@ int state_load(const char* path, char* why, size_t whysize) {
         free(surf.p);
         memset(&surf, 0, sizeof surf);
     }
+    /* the game's temporary storage, which a state from before states held it doesn't have */
+    has_temp = !sr_begin(r, "TEMP", NULL);
+    if (has_temp && section_read(r, "TEMP", NULL, &temp)) {
+        snprintf(why, whysize, "it is damaged");
+        goto refuse;
+    }
     if (stage_hle((Hle*)hle.p, &heap, &names, &fs_paths)) {
         snprintf(why, whysize, "its game state is damaged");
         goto refuse;
@@ -1295,7 +1303,9 @@ int state_load(const char* path, char* why, size_t whysize) {
         goto refuse;
     }
     fio = buf_io(&fs_paths);
-    if (fs_paths.n && !(fss = fs_state_resolve(&fio, &((Hle*)hle.p)->fs, why, whysize))) goto refuse;
+    if ((fs_paths.n || has_temp) &&
+        !(fss = fs_state_resolve(fs_paths.n ? &fio : NULL, has_temp ? &tio : NULL, &((Hle*)hle.p)->fs, why, whysize)))
+        goto refuse;
     if (check_memory(r, why, whysize)) goto refuse;
     t_checked = plat_ns();
     if (game_pause()) {
@@ -1340,6 +1350,7 @@ int state_load(const char* path, char* why, size_t whysize) {
     free(gpu.p);
     free(surf.p);
     free(video.p);
+    free(temp.p);
     LOG("state: loaded %s (guest time %.3f s) at frame %d in %.0f ms (checked %.0f)\n", path, (double)h.guest_ns / 1e9,
         __atomic_load_n(&g_frames, __ATOMIC_RELAXED), (double)(plat_ns() - t0) / 1e6, (double)(t_checked - t0) / 1e6);
     return 0;
@@ -1355,6 +1366,7 @@ refuse:
     free(gpu.p);
     free(surf.p);
     free(video.p);
+    free(temp.p);
     WARN("state: %s wasn't loaded: %s\n", path, why);
     return -1;
 }
