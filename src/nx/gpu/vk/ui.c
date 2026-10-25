@@ -8,6 +8,7 @@
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/vk/ui_spv.h"
 #include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/hud.h"
 #include "nx/runtime/platform/overlay.h"
 #include "nx/runtime/platform/prepare_screen.h"
 #include "nx/runtime/platform/plat.h"
@@ -276,6 +277,11 @@ void vk_ui_draw(VkCommandBuffer cb, VkImage sc, const int safe[4]) {
     else {
         vpad_draw(&list, safe);
         vpad_showcase_draw(&list, safe, vpad_showcase_fps(g_vk_present, plat_ns()));
+    }
+    {
+        int px, py, scale;
+        overlay_place(sw, sh, &px, &py, &scale); /* the menu's letters */
+        hud_draw(&list, safe, scale);
     }
     overlay_draw(&list, sw, sh);
     ui_unlock();
