@@ -284,7 +284,7 @@ int snx_log_lines(const char* path, const char* text) {
 int snx_lock_file(const char* path, intptr_t* lock) {
 #ifdef _WIN32
     wchar_t* p = wide(path);
-    OVERLAPPED far = {0};
+    OVERLAPPED past = {0}; /* not far: windef.h defines it */
     HANDLE h = p ? CreateFileW(p, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL)
                  : INVALID_HANDLE_VALUE;
@@ -293,8 +293,8 @@ int snx_lock_file(const char* path, intptr_t* lock) {
         errno = EACCES;
         return -1;
     }
-    far.OffsetHigh = 0x7fffffffu; /* past any end, so the bytes are never what is locked */
-    if (!LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &far)) {
+    past.OffsetHigh = 0x7fffffffu; /* past any end, so the bytes are never what is locked */
+    if (!LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &past)) {
         DWORD error = GetLastError();
         CloseHandle(h);
         if (error == ERROR_LOCK_VIOLATION || error == ERROR_IO_PENDING) return 1;
