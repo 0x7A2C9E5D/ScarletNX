@@ -192,6 +192,24 @@ setting Heap limit (MB)
     startup
     set options_heap_max_set
     help The most heap the game can allocate, in MB; 0 = as much as its memory allows
+setting Map limit (MB)
+    key map_limit_mb
+    int 0 1048576
+    default 0
+    default-if SNX_IOS 256
+    startup
+    words No limit|#
+    help The most of the game's files mapped into memory at start, in MB; 0 = no limit. A file past it is read from
+    help disk when the game asks, slower, which leaves address space for threads and graphics where a device has little
+setting Map limit (files)
+    key map_limit_files
+    int 0 1000000
+    default 0
+    default-if SNX_IOS 2048
+    startup
+    words No limit|#
+    help The most of the game's files mapped at start; 0 = no limit. A file past it is read from disk when the game
+    help asks: each mapped file holds a descriptor, of which a device may give the whole app a few thousand
 setting Pipeline threads
     key pipeline_threads
     int 0 32

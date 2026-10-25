@@ -418,7 +418,7 @@ void fs_init(const char* keys, const char* title_keys) {
        of opening them on demand like the save and SD card files. ExeFS first: each mapped file holds a descriptor
        (macOS allows 61440 a process), and a game with more files than that left its executables unmapped */
     static const char* const shared_paths[] = {"exefs", "romfs", "romfs.bin"};
-    unsigned shared = 0, failed = 0;
+    FsShare share = {.bytes = (uint64_t)g_settings.map_limit_mb << 20, .files = (unsigned)g_settings.map_limit_files};
     pm_lock(&g_hle.fs.tree.lock);
     /* the console empties the application's temporary storage when the application is launched, and a game finds it
        empty at first use */
@@ -433,12 +433,16 @@ void fs_init(const char* keys, const char* title_keys) {
         FsNode* node;
         if (g_hle.fs.dump.patch.found) break; /* an update's, read over the game's dump: the game's files unread */
         if (fs_tree_lookup(&g_hle.fs.tree, NULL, shared_paths[i], &node)) continue;
-        r = fs_tree_share(&g_hle.fs.tree, node, &shared, &failed);
+        r = fs_tree_share(&g_hle.fs.tree, node, &share);
         if (r != FS_TREE_OK) fatal("Could not map %s%s (error %d)", g_datadir, shared_paths[i], r);
     }
     pm_unlock(&g_hle.fs.tree.lock);
-    LOG("fs: %u RomFS/ExeFS files mapped for the whole run\n", shared);
-    if (failed) WARN("fs: %u RomFS/ExeFS files could not be mapped, they are read on demand\n", failed);
+    LOG("fs: %u RomFS/ExeFS files mapped for the whole run, %.1f MB\n", share.shared,
+        (double)share.mapped_bytes / 1048576.0);
+    if (share.skipped)
+        LOG("fs: %u RomFS/ExeFS files past map_limit_mb=%d or map_limit_files=%d are read on demand\n", share.skipped,
+            g_settings.map_limit_mb, g_settings.map_limit_files);
+    if (share.failed) WARN("fs: %u RomFS/ExeFS files could not be mapped, they are read on demand\n", share.failed);
 }
 
 /* Contents held in memory, read without the host: an injected file, or one mapped at startup */
