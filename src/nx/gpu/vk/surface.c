@@ -391,8 +391,13 @@ static u64 rt_bytes(const Surf* s) {
 }
 u64 vk_surf_guest_size(const Surf* s) { return s ? rt_bytes(s) : 0; }
 static u64 g_wseq;
+/* every image's write generations, its uploads' and its writes' alike, from one count: a surface counting its own
+   writes ran ahead of the uploads' count, and an upload then handed it a generation its image would reach again with
+   guest memory still at it, so its next write looked written back already and never landed */
+static u32 g_surf_gen;
+u32 vk_surf_gen(void) { return ++g_surf_gen; }
 void vk_surf_wrote(Surf* s) {
-    s->wgen++;
+    s->wgen = vk_surf_gen();
     s->wseq = ++g_wseq;
 }
 /* the GPU pages the render targets not parked cover, so a write that meets none (almost all) skips the walk over every

@@ -258,6 +258,10 @@ VkFormat vk_srgb_as(VkFormat f, int srgb) {
 void vk_surf_add(Surf* s) { (void)s; }
 void vk_surf_touch(Surf* s) { (void)s; }
 void vk_surf_relist(Surf* s) { (void)s; }
+u32 vk_surf_gen(void) {
+    static u32 gen;
+    return ++gen;
+}
 u64 vk_surf_reclaim(int list, u32 before, u64 want, int lossy) {
     (void)list, (void)before, (void)want, (void)lossy;
     return 0;

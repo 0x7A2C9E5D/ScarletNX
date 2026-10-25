@@ -350,7 +350,6 @@ static int level_upload_pitch(Upload* u, const UpLevel* lv, u64 gva, u64 lsz, u6
     return 1;
 }
 
-static u32 g_tex_upload_gen;
 /* the most staging one piece of a level takes: a bigger level is staged in strips, as no allocation may be bigger
    than g_vk.alloc_cap (memory.c) */
 #define TEX_BAND (64ull << 20)
@@ -376,7 +375,7 @@ static int tex_upload_(Surf* t) {
     g_tex_uploads++;
     g_tex_upload_bytes += t->size;
     t->upload_valid = 0;
-    t->wgen = ++g_tex_upload_gen; /* even a new texture at a reused address invalidates an old target's copy */
+    t->wgen = vk_surf_gen();      /* even a new texture at a reused address invalidates an old target's copy */
     t->took_drawn = 0;            /* memory's own texels again, until tex_take_drawn copies targets in */
     vk_surf_relist(t);
     vk_render_end();              /* copies and clears happen outside rendering passes */
