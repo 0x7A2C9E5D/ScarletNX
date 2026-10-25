@@ -1299,9 +1299,12 @@ static void tex_take_drawn(Surf* t) {
                              ((u64)s->w * s->f.bpp + 63) / 64 == ((u64)lw * t->f.bpp + 63) / 64;
             if (rem == lo && (s->w == lw || padded_row) && s->h == lh) {
                 if (!vk_rt_drawn_fresh(s)) break; /* newer guest memory at this address takes precedence */
-                /* a layered target spaced as the texture's layers fills as many of them as it has */
+                /* a layered target spaced as the texture's layers fills as many of them as it has, at any level: one
+                   game draws each level of its reflection cube through a target of six layers a whole face apart,
+                   whose layer k is face k of that level (taken at level 0 alone, faces 1 to 5 of the blurred levels
+                   kept guest memory's bytes, and its shiny surfaces reflected noise) */
                 u32 count = 1;
-                if (s->layers > 1 && !s->volume && l == 0 && s->layer_size == stride) /* a volume's are GOB slices */
+                if (s->layers > 1 && !s->volume && s->layer_size == stride) /* a volume's are GOB slices */
                     count = s->layers < t->layers - layer ? s->layers : t->layers - layer;
                 copy_layers(copy_begin(s, t), s, t, l, layer, count, lw, lh, 0);
                 mark_copied(s, t);
