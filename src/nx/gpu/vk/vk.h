@@ -850,6 +850,9 @@ u32 vk_ww_epoch(void);
    from before the waits it ends) or stops (0: they see every epoch's) */
 void vk_ww_stream(int on);
 void vk_mem_changed(u64 cpu, u64 len); /* gpu.c's g_gpu_mem_changed: the range counts as written */
+/* own.c's landed hook: host pages [cpu, cpu + size) a landing wrote, with their bytes then, whose next report as
+   written counts only if those changed */
+void vk_ww_landed(u64 cpu, u64 size, const u8* bytes);
 
 /* pipeline.c */
 /* the constant buffer words a translation read (the translator resolves BRX jump tables through them): what it made
