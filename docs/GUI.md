@@ -490,7 +490,7 @@ screen's keys, the whole width (the setup's beside its tips), in letters a size 
 at the left of the row, **F1** last, which opens a box over the screen with every key it has, those every screen has too
 (the arrows and the mouse, Enter, Space and a click, the pages, Tab and F2), until any key or a click closes it; on a
 phone, the words to tap, whole, in the text's letters, each row of them as tall as a list's row (40 pixels times
-the text's size) for a finger. The tips and the keys each in a box with a bar down
+the text's size) for a finger, and so are the tabs. The tips and the keys each in a box with a bar down
 its left (`[tips] box`, `[footer] box`) or on the page. Games lists the recent games and a
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box

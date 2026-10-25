@@ -8297,6 +8297,22 @@ int main(int argc, char** argv) {
         r = tab_rect(&app, m.place.tabs, GUI_TAB_MENU);
         mouse_px(&app, r.x + 4, r.y + 4, true);
         assert(!app.editing && app.menu.view == GUI_LOAD_NONE);
+        /* on a screen of fingers (Android, iOS) the tabs are a finger's row high, as the lists' rows there, their names
+           in their middle, and so is a row of the foot's keys, in the text's letters; a tap low on a tab opens it */
+        app.fingers = true;
+        render(&app);
+        menu_boxes(&app, &m);
+        r = tab_rect(&app, m.place.tabs, GUI_TAB_GAMES);
+        assert(m.place.tabs.h == GUI_FINGER_ROW * s && r.h == m.place.tabs.h && r.y + r.h <= m.place.list.y);
+        text_px_is(&app, r.x + cw, r.y + (r.h - 16 * s) / 2, "Games", normal, black);
+        assert(hint_pitch(&app) == GUI_FINGER_ROW * s && foot_scale(&app) == s);
+        mouse_px(&app, r.x + 4, r.y + r.h - 4, true);
+        assert(app.menu.view == GUI_LOAD_GAMES);
+        key(&app, SDLK_ESCAPE);
+        assert(app.menu.view == GUI_LOAD_NONE);
+        app.fingers = false;
+        render(&app);
+        menu_boxes(&app, &m);
         app.menu.selected = GUI_KEYS;
         render(&app);
         r = m.place.tips;

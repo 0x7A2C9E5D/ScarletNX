@@ -47,6 +47,9 @@
 #if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
 #define SNX_TOUCH_UI 1
 #endif
+/* a finger's row in pixels at 1x, as ui.txt's android.row_height has the lists' rows: the tabs' and the foot's keys'
+   on a screen of fingers */
+#define GUI_FINGER_ROW 40
 #ifdef SDL_PLATFORM_APPLE
 #include "gui/apple.h"
 #endif
@@ -412,6 +415,8 @@ typedef struct App {
     /* app.ini's animations: a screen comes in from the page's colour and a box's shade comes and goes, GUI_FADE_MS
        each; with it off (0) each shows at once */
     bool animations_off;
+    bool
+        fingers; /* a screen of fingers (SNX_TOUCH_UI): the tabs and the foot's keys a finger's row high, its letters */
     int side_box;        /* app.ini's side_box (GuiSide): auto, on or off; F2 shows or hides it */
     int options[GUI_OPTIONS]; /* Games' options, each its word's index in option_keys (0 its first word) */
     bool options_shown;       /* the View box over Games, a row an option, options_focus's in focus */
@@ -2684,14 +2689,10 @@ typedef struct {
 } GuiHintHit;
 /* the rows keys take in width columns; with draw, drawn from pixel y in r, on the foot's band of ink when band; with
    hit, the sentence its pixel is on, a column of the gap either side of one its own */
-/* a row of the foot's keys: a cell of its letters; on a phone a finger's, 40px times the scale as ui.txt's rows */
-static int hint_pitch(const App* app) {
-#ifdef SNX_TOUCH_UI
-    return SDL_max(cell_h(app), 40 * app->scale);
-#else
-    return cell_h(app);
-#endif
-}
+/* h pixels, or on a screen of fingers a finger's row at the least (GUI_FINGER_ROW times the scale, as ui.txt's rows) */
+static int finger_h(const App* app, int h) { return app->fingers ? SDL_max(h, GUI_FINGER_ROW * app->scale) : h; }
+/* a row of the foot's keys: a cell of its letters, a finger's on a phone */
+static int hint_pitch(const App* app) { return finger_h(app, cell_h(app)); }
 static int hints(App* app, const char* keys, int width, GuiRect r, int y, int draw, int band, GuiHintHit* hit) {
     const GuiTheme* t = &app->theme;
     char key[128], what[128];
@@ -2751,13 +2752,9 @@ static int hints(App* app, const char* keys, int width, GuiRect r, int y, int dr
     return SDL_max(rows, 1);
 }
 /* ---- the foot and the tips: the keys' box, the tips' beside it or on a row under the head ---- */
-/* the foot's letters, a size under the rest's but 1 at the least: what draws or measures the keys, and the tips when
-   they are in the foot, does it with app->scale set to them, then puts the menus' back */
-#ifdef SNX_TOUCH_UI
-static int foot_scale(const App* app) { return app->scale; } /* a finger's buttons: the text's letters */
-#else
-static int foot_scale(const App* app) { return SDL_max(1, app->scale - 1); }
-#endif
+/* the foot's letters, a size under the rest's but 1 at the least (a finger's buttons, the text's): what draws or measures
+   the keys, and the tips when they are in the foot, does it with app->scale set to them, then puts the menus' back */
+static int foot_scale(const App* app) { return app->fingers ? app->scale : SDL_max(1, app->scale - 1); }
 /* the tips under the head, a Settings box's note and the Status box: their letters a half step under the text's,
    between its size and the foot's (1.5x by a 2x text); app->half as it was, to put back */
 static int text_half(App* app) {
@@ -4549,6 +4546,8 @@ static int tab_cols(const App* app, int i) {
     tab_label(app, i, label, sizeof label);
     return gui_text_cols(label);
 }
+/* the row of tabs' height: a box head's, a finger's row on a phone, as its lists' rows are */
+static int tabs_h(const App* app) { return finger_h(app, cell_h(app) + 4 * app->scale); }
 /* tab i in the row of tabs: two columns wider than its name, a column after the one before it */
 static GuiRect tab_rect(const App* app, GuiRect row, int i) {
     int x = row.x, k;
@@ -4561,7 +4560,7 @@ static GuiRect tab_rect(const App* app, GuiRect row, int i) {
 static void draw_tabs(App* app, GuiRect row, int band) {
     const GuiTheme* t = &app->theme;
     GuiRgb ink = band ? t->page : t->ink, page = band ? t->ink : t->page, focus = band ? t->page : t->focus;
-    int i, s = app->scale, shown = tab_shown(app);
+    int i, shown = tab_shown(app);
     char label[64];
     if (!row.h) return;
     for (i = 0; i < tab_count(app); ++i) {
@@ -4578,7 +4577,7 @@ static void draw_tabs(App* app, GuiRect row, int band) {
             fill_rect(app, r, t->dim);
         if (!failing && !inverted && (t->panels == GUI_PANELS_OUTLINE || on)) outline(app, r, on ? focus : t->dim);
         tab_label(app, i, label, sizeof label);
-        text_in(app, r, r.x + cell_w(app), r.y + 2 * s, label,
+        text_in(app, r, r.x + cell_w(app), r.y + (r.h - cell_h(app)) / 2, label, /* in its middle, a finger's too */
                 rgb(failing                     ? t->page
                     : inverted                  ? page
                     : on || ended == GUI_TAB_OK ? focus
@@ -4611,7 +4610,7 @@ static int title_px(const App* app, const char* title, int size) {
    the user */
 static int head_room(const App* app, int size) {
     GuiRect none = {0, 0, 0, 0}, last = tab_rect(app, none, tab_count(app) - 1);
-    int width, height, tabs = cell_h(app) + 4 * app->scale, title = size * cell_h(app), badge;
+    int width, height, tabs = tabs_h(app), title = size * cell_h(app), badge;
     if (app->theme.title_shadow) title += size * app->scale;
     area(app, &width, &height);
     badge = user_width(app, SDL_max(title, tabs));
@@ -4738,7 +4737,7 @@ static void place_screen(App* app, GuiPlace* p, const char* keys, int shows) {
     f->head.ch = cell_h(app);
     if (shows & GUI_SHOWS_TABS) {
         GuiRect last = tab_rect(app, none, tab_count(app) - 1);
-        f->head.tabs = cell_h(app) + 4 * s;
+        f->head.tabs = tabs_h(app);
         f->head.tabs_w = last.x + last.w;
     }
     if (title[0]) {
@@ -12791,6 +12790,9 @@ static bool initialize(App* app, const char* self) {
     games_defaults(app, false);
 #endif
     app->menu.selected = GUI_SWITCH; /* the first item until Games shows */
+#ifdef SNX_TOUCH_UI
+    app->fingers = true;
+#endif
     if (self) app->self = snx_strdup(self);
     app->theme = *gui_theme_builtin("yorha"); /* every platform's look until Settings > App picks another */
 #ifdef SDL_PLATFORM_ANDROID
