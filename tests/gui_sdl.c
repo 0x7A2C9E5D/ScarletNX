@@ -340,6 +340,13 @@ static void focus_game(App* app, const char* name) {
     app->browser.selected = app->browser.head + i % app->browser.page_size;
 }
 static void finish(App* app, int status) {
+    /* the fake driver's game run waits for this, so the menu has shown it running before it ends: without it the
+       process could exit before the test's first pump, which made compile_first fail now and then */
+    const char* argv_file = getenv("SNX_TEST_ARGV");
+    char* go = argv_file ? snx_format("%s.go", argv_file) : NULL;
+    if (go) {
+        assert(!snx_write_file(go, "", 0));
+    }
     assert(app->menu.running && !app->finished && !app->aborting && !app->abnormal_exit);
     int selected = app->menu.selected;
     Uint64 until = SDL_GetTicks() + 10000;
@@ -380,6 +387,10 @@ static void finish(App* app, int status) {
     /* the item the run was started from has the focus again */
     assert(app->menu.selected == selected && setting_is(app, "fullscreen", "1"));
     render(app);
+    if (go) {
+        remove(go);
+        free(go);
+    }
 }
 /* the queue's recompile running, through to its end as pump reads it: how it ended (OK for status 0, else FAILED) on its
    row, its output kept; then ESC on the Recompile tab, back to Games, the line seen and gone with the tab, and the menu
@@ -2952,10 +2963,19 @@ int main(int argc, char** argv) {
     if (argc > 1 && getenv("SNX_TEST_ARGV")) {
         /* a driver doing what the test asked (driver_will): its argv kept, a string a line, for the test to check */
         FILE* kept = fopen(getenv("SNX_TEST_ARGV"), "wb"); /* "\n" alone, as has_arg reads, on Windows too */
+        int compiling = 0, status;
+        for (int i = 1; i < argc; ++i) compiling |= !strcmp(argv[i], "-r");
         for (int i = 0; kept && i < argc; ++i) fprintf(kept, "%s\n", argv[i]);
         assert(kept && !fclose(kept));
         puts(getenv("SNX_TEST_SAY") ? getenv("SNX_TEST_SAY") : "the fake driver ran");
-        return getenv("SNX_TEST_STATUS") ? atoi(getenv("SNX_TEST_STATUS")) : 0;
+        status = getenv("SNX_TEST_STATUS") ? atoi(getenv("SNX_TEST_STATUS")) : 0;
+        if (!compiling) { /* a game: let the menu show it running, then the test's finish lets it end */
+            char* go = snx_format("%s.go", getenv("SNX_TEST_ARGV"));
+            for (int n = 0; n < 100 && !snx_is_file(go); ++n) SDL_Delay(5);
+            remove(go);
+            free(go);
+        }
+        return status;
     }
     if (argc == 3 && !strcmp(argv[1], "--fullscreen=1") && !strcmp(argv[2], "--controls=0")) {
         puts("prepared game stdout");
