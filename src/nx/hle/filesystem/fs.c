@@ -588,9 +588,12 @@ static void rnode_free(RNode* n) {
     }
 }
 /* dir's child named name, made where it has none. One of the other kind is replaced, everything under it gone: a mod's
-   file over the game's folder of its name, or its folder over a file */
-static RNode* rnode_child(RNode* dir, const char* name, int is_dir) {
-    RNode **at = &dir->children, *n;
+   file over the game's folder of its name, or its folder over a file. last: the child this returned before for dir
+   (NULL for none), where the search starts when name comes after it. Its callers place a folder's entries in strcmp
+   order, so each is found a step past the last, and a folder of n files is laid out in n steps, not n * n / 2 (one
+   game's folder of 75,940 took a minute at every start) */
+static RNode* rnode_child(RNode* dir, RNode* last, const char* name, int is_dir) {
+    RNode **at = last && strcmp(last->name, name) < 0 ? &last->next : &dir->children, *n;
     int c = 1;
     while (*at && (c = strcmp((*at)->name, name)) < 0) at = &(*at)->next;
     if (*at && !c) {
@@ -609,8 +612,9 @@ static RNode* rnode_child(RNode* dir, const char* name, int is_dir) {
    folders over those of the folder of its name */
 static void rnode_lay(RNode* into, const FsNode* dir) {
     const FsNode* c;
+    RNode* n = NULL;
     for (c = dir->children; c; c = c->next) {
-        RNode* n = rnode_child(into, c->name, c->is_dir);
+        n = rnode_child(into, n, c->name, c->is_dir);
         if (c->is_dir)
             rnode_lay(n, c);
         else {
@@ -822,6 +826,7 @@ static char* image_name(const u8* p, u32 length) {
    the tables don't hold */
 static int image_dir(RImage* im, u32 off, RNode* into, unsigned depth) {
     u32 child, file;
+    RNode* last = NULL;
     if (depth > ROM_DEPTH_MAX || (u64)off + ROM_DIR_ENTRY > im->dir_bytes) return -1;
     child = snx_ld_le32(im->dirs + off + 8);
     file = snx_ld_le32(im->dirs + off + 12);
@@ -841,7 +846,7 @@ static int image_dir(RImage* im, u32 off, RNode* into, unsigned depth) {
             free(name);
             return -1;
         }
-        n = rnode_child(into, name, 0);
+        n = last = rnode_child(into, last, name, 0);
         free(name);
         n->node = NULL;
         n->base = im->data + at;
@@ -857,7 +862,7 @@ static int image_dir(RImage* im, u32 off, RNode* into, unsigned depth) {
         length = snx_ld_le32(e + 20);
         if (length > im->dir_bytes - child - ROM_DIR_ENTRY || !(name = image_name(e + ROM_DIR_ENTRY, length)))
             return -1;
-        n = rnode_child(into, name, 1);
+        n = last = rnode_child(into, last, name, 1);
         free(name);
         if (image_dir(im, child, n, depth + 1)) return -1;
         child = snx_ld_le32(e + 4);
