@@ -711,6 +711,10 @@ static struct {
        and the draws read the index once ship_ready says it no longer changes */
     PFile ship;
     char ship_path[1400];
+    /* the files the pass found nothing in (SHIP_NONE), kept across builds and drivers in a file of their own (scan,
+       <game>.vkscan) under the walk's version, which an update of either leaves: the ship file's are started over */
+    PFile scan;
+    char scan_path[1400];
     ShipIdx* idx; /* its shaders by hash, open addressing (icap a power of two) */
     u32 icap, nidx;
     u64* scans; /* the PF_SCAN records, scan_key's, open addressing (scap a power of two) */
@@ -1614,6 +1618,15 @@ static void pf_ship_rec(void* ctx, u32 type, const u8* p, u32 len, u64 at) {
     } else if (type == PF_SHADER && ship_record(p, len, &r) && ship_key_only_clip(r.mask))
         idx_add(r.hash, (int)r.stage, r.mask[6], r.clen, r.qh, r.clen_a, r.qh_a, at);
 }
+/* on the reading thread: a record of the scan file, into the scans' set */
+static void pf_scan_rec(void* ctx, u32 type, const u8* p, u32 len, u64 at) {
+    u64 w[2];
+    (void)ctx;
+    (void)at;
+    if (type != PF_SCAN || len != sizeof w) return;
+    memcpy(w, p, sizeof w);
+    if (w[0] == SHIP_NONE) scan_add(w[0], w[1]);
+}
 /* the shipped file's record that starts at at, into r, its check and its SPIR-V: NULL when it isn't one */
 static const u32* ship_payload(u64 at, PfShader* r, u64* check) {
     u32 n = 0;
@@ -1756,7 +1769,7 @@ static int ship_scanned(void* ctx, u32 what, u64 id) {
 }
 static void ship_mark(void* ctx, u32 what, u64 id) {
     (void)ctx;
-    pf_scan(&g_pf.ship, what, id);
+    pf_scan(what == SHIP_NONE ? &g_pf.scan : &g_pf.ship, what, id);
     scan_add(what, id);
 }
 /* the shipped file takes no more (a write failed, or it is full): the pass's translations would be thrown away. The
@@ -1783,9 +1796,14 @@ static void pf_ship_pass(void) {
     if (g_pf.ship.f && g_pf.ship.size + PF_REC + sizeof(PfShader) + 32 > (g_pf.ship.max ? g_pf.ship.max : PF_MAX))
         LOG("vulkan: %s is full, so the game's own shaders aren't looked for\n", g_pf.ship_path);
     else if (g_pf.ship.f) {
+        char key[64];
+        snprintf(key, sizeof key, "walk=%s", ship_walk_version());
+        pf_open_mapped(&g_pf.scan, g_pf.scan_path, key, pf_scan_rec, NULL);
+        pf_unseal(&g_pf.scan);
         __atomic_store_n(&g_pf.scanning, 1, __ATOMIC_RELAXED);
         int rc = ship_walk(&sink, &g_pf.progress, g_settings.prepare_shaders == 2);
         __atomic_store_n(&g_pf.scanning, 0, __ATOMIC_RELAXED);
+        pf_close(&g_pf.scan);
         LOG("vulkan: the game's own shaders: %u translated new, %u in %s, in %llu ms%s\n",
             __atomic_load_n(&g_pf.ship_new, __ATOMIC_RELAXED), g_pf.nidx, g_pf.ship_path,
             (unsigned long long)((plat_ns() - t0) / 1000000),
@@ -1858,6 +1876,7 @@ static void pf_load_thread(void* arg) {
 static void pf_start_load(void) {
     pm_init(&g_pf.file.lock);
     pm_init(&g_pf.ship.lock);
+    pm_init(&g_pf.scan.lock);
     pm_init(&g_pf.note_lock);
     pm_init(&g_pf.lock);
     pc_init(&g_pf.done);
@@ -1870,8 +1889,10 @@ static void pf_start_load(void) {
     null_fs(); /* made here, before the reading thread uses it */
     snprintf(g_pf.path, sizeof g_pf.path, "%s/%s.vkshaders", g_cache_dir, g_exename);
     snprintf(g_pf.ship_path, sizeof g_pf.ship_path, "%s/%s.vkshipped", g_cache_dir, g_exename);
+    snprintf(g_pf.scan_path, sizeof g_pf.scan_path, "%s/%s.vkscan", g_cache_dir, g_exename);
     snx_path_native(g_pf.path);
     snx_path_native(g_pf.ship_path);
+    snx_path_native(g_pf.scan_path);
     if (g_settings.prepare_shaders) ship_snapshot(); /* before the game's first thread writes its data */
     /* the translator's recursion wants the GPU thread's stack */
     if (plat_thread(pf_load_thread, &g_pf, (size_t)16 << 20)) pf_load(NULL); /* no thread: read here */
