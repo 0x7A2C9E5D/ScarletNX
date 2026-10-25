@@ -730,13 +730,22 @@ void vk_rt_flush(u64 gva) { vk_surf_flush(vk_rt_find(gva), NULL); }
    staged as the GPU sees it into a buffer of its own (the bytes between its texels keep theirs), its texels laid out
    over that in the guest's layout, and the buffer published over the span run by run of guest memory. Nothing waits:
    the bytes land when the CPU touches them. A 3D volume a game writes twice a frame and only samples took a wait
-   each, a fifth of the run. 0 when it can't be (pitch linear, no room): the caller flushes at once */
+   each, a fifth of the run. A pitch-linear one's rows go at the guest's pitch, over the bytes between them as the
+   guest has them. 0 when it can't be (pitch-linear rows of part texels, or layers not a pitch's rows apart, no room):
+   the caller flushes at once */
 int vk_surf_publish(Surf* s) {
     u64 size = flush_bytes(s), at, off = 0;
+    u32 mem_wgen = s ? s->mem_wgen : 0;
     VkBuffer staged;
     VkOwnRes* r;
     VkCommandBuffer cb;
-    if (!size || !s->bl || (s->gva >> 63)) return 0;
+    if (!size || (s->gva >> 63)) return 0;
+    if (!s->bl) {
+        if (s->pitch % s->f.bpp || s->type == VK_IMAGE_VIEW_TYPE_3D ||
+            (s->layers > 1 && s->layer_size != (u64)s->pitch * s->h))
+            return 0;
+        size = rt_bytes(s);
+    }
     vk_render_end();
     r = vk_own_res_new(size);
     if (!r) return 0;
@@ -746,12 +755,18 @@ int vk_surf_publish(Surf* s) {
         return 0;
     }
     vk_guest_read(s->gva, size, p, staged, at);
+    /* the other targets over the span: s's own pixels go over them below, in the guest's layout, so a target leaves
+       itself out (its tight rows would be a pitch-linear one's padding) */
+    s->mem_wgen = s->wgen;
     vk_rt_overlay(s->gva, size, staged, at);
+    s->mem_wgen = mem_wgen;
     cb = vk_cmd();
     VkBufferCopy c = {at, 0, size};
     rec_CmdCopyBuffer(cb, staged, r->buf, 1, &c);
     vk_all_barrier(cb);
-    if (!flush_record(cb, s, r->buf, 0)) {
+    if (!s->bl)
+        flush_copy(cb, s, r->buf, 0, s->pitch);
+    else if (!flush_record(cb, s, r->buf, 0)) {
         vk_own_res_unref(r);
         return 0;
     }
@@ -1073,7 +1088,43 @@ static u64 rt_mem_hash(const Surf* s) {
     }
     return h;
 }
+/* Pitch-linear color targets drawn since the last release. A target's pixels reach guest memory only when something
+   asks for them, and the CPU can't ask. Reading back on the CPU what the GPU drew is what pitch-linear targets are
+   mostly for, and they are few: one game draws its ambient light's spherical harmonics into seven 8x8 RGBA32F targets
+   and reads them after a fence, and lit its scenes with the old bytes there, values up to 1e31. A release publishes
+   them, GPU-owned (vk_surf_publish): the GPU copies them over their guest bytes, and they land only if the CPU
+   touches those. A block linear target the CPU reads still gets no write-back */
+static Surf** g_linear;
+static u32 g_nlinear, g_caplinear;
+static void linear_note(Surf* s) {
+    if (s->bl || s->f.depth || s->in_linear) return;
+    if (g_nlinear == g_caplinear) {
+        u32 cap = g_caplinear ? g_caplinear * 2 : 16;
+        Surf** n = realloc(g_linear, (size_t)cap * sizeof *n);
+        if (!n) return;
+        g_linear = n;
+        g_caplinear = cap;
+    }
+    g_linear[g_nlinear++] = s;
+    s->in_linear = 1;
+}
+static void linear_drop(Surf* s) {
+    u32 i = 0;
+    if (!s->in_linear) return;
+    while (i < g_nlinear && g_linear[i] != s) i++;
+    if (i < g_nlinear) g_linear[i] = g_linear[--g_nlinear];
+    s->in_linear = 0;
+}
+void vk_rt_publish_linear(void) {
+    /* publishing can submit and land, which leaves the list alone: it is taken whole first */
+    while (g_nlinear) {
+        Surf* s = g_linear[--g_nlinear];
+        s->in_linear = 0;
+        if (!(s->gva >> 63) && flush_bytes(s) && !vk_surf_publish(s)) vk_surf_flush(s, NULL);
+    }
+}
 void vk_rt_drawn(Surf* s) {
+    linear_note(s);
     /* A memory write after the first draw can leave untouched pixels stale even when later draws touch the target.
        Keep that first baseline until the next present instead of scanning the whole target on every draw. */
     if (!s->draw_wseen || s->drawn_at != g_vk_present) {
@@ -1148,6 +1199,7 @@ static void surf_free(Surf* s) {
     }
     if (s->is_rt) rt_pages(s, -1);
     if (s->gva >> 63) g_parked--;
+    linear_drop(s);
     if (s->in_drawn) {
         int i = drawn_lower(s->drawn_from);
         while (i < g_ndrawn && g_drawn[i] != s) i++;

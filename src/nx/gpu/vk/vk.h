@@ -428,6 +428,7 @@ typedef struct Surf {
                        holds them (vk_surf_wrote) */
     u32 drawn_at;   /* render targets: g_vk_present when last drawn to */
     int in_drawn;   /* in surface.c's list of drawn targets, entered at drawn_from */
+    int in_linear;  /* a pitch-linear color target in surface.c's list of those drawn since the last release */
     u64 drawn_from;
     u64 draw_gw;    /* guest-memory generation at the first draw this present or since a full replacement */
     u64 draw_hash;  /* fallback guest-memory hash at that baseline */
@@ -506,6 +507,8 @@ int vk_surf_can_writeback(const Surf* s);
 void vk_surf_flush(Surf* s, const u8* original); /* original preserves newer guest writes for storage images */
 /* s's pixels published over its guest bytes, GPU-owned and not waited for: 1, or 0 when only vk_surf_flush can */
 int vk_surf_publish(Surf* s);
+/* a release: the pitch-linear color targets drawn since the last one published, for the CPU to read */
+void vk_rt_publish_linear(void);
 void vk_surf_wrote(Surf* s); /* its image changed: its copies are out of date (wgen), and it is the newest (wseq) */
 /* vk_surf_flush in two halves, the GPU not waited for: the bytes a write-back of s copies (0 for none), its copy
    recorded into buf at at (host-readable once the submit being recorded is done), and its landing from those bytes p,
