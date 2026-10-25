@@ -262,7 +262,7 @@ int main(void) {
     assert(text_at(C - 2, 3, ">") && text_at(C - 2, 4, ">")); /* a page under each */
     assert(text_at(1, 0, "SCARLETNX  /  MENU") && text_at(1, 3, "\xFE On-screen controls") &&
            text_at(1, 4, "\xFE Controllers") && text_at(1, 5, "\xFE Stats") && text_at(1, 6, "\xFE Exit"));
-    /* Stats: a tap turns it on and keeps it in the game's .ini, as F8 does, and again off */
+    /* Stats: a tap turns it on and keeps it in the game's .ini, as F12 does, and again off */
     assert(text_at(C - 4, 5, "Off") && !g_settings.stats);
     assert(tap(2, 3) == OVERLAY_NONE && g_settings.stats && !strcmp(stored, "stats"));
     draw();

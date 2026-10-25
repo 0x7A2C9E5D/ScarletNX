@@ -412,11 +412,11 @@ static const char* HELP =
     "  F4  turn the FPS limit off or back on\n"
     "  F5  write every thread's state to the log\n"
     "  F6  turn showcase mode on or off\n"
-    "  F8  turn the stats on or off\n"
 #if defined(SNX_TRACY)
     "  F7  record a 60 second Tracy capture\n"
 #endif
     "  F11 or Alt+Enter  switch fullscreen\n"
+    "  F12  turn the stats on or off\n"
     "  Esc  quit the game";
 
 static PadKind gamepad_kind(int type) {
@@ -814,7 +814,7 @@ static void hotkey(SDL_Keycode k) {
                 LOG("showcase: off\n");
             break;
         }
-        case SDLK_F8: {
+        case SDLK_F12: {
             int on = !__atomic_load_n(&g_settings.stats, __ATOMIC_RELAXED);
             __atomic_store_n(&g_settings.stats, on, __ATOMIC_RELAXED);
             ini_set("stats", on ? "1" : "0");
