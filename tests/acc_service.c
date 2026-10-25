@@ -253,6 +253,18 @@ static void test_one_user(void) {
     puts("PASS user 1 alone without users.ini");
 }
 
+/* InitializeApplicationInfoV2, which Tears of the Kingdom and Super Mario Bros. Wonder call at boot (13.0.0+): a
+   pid in, nothing out, as on the console */
+static void test_initialize_application_info_v2(void) {
+    SvcObj* acc = new_acc();
+    Request r;
+    IpcCtx* c = request(&r, 160);
+    c->has_pid = 1;
+    call(acc, &r);
+    CHECK(c->out_size == 0 && c->nout_objs == 0 && c->nout_copy == 0);
+    svcobj_unref(acc);
+}
+
 static void test_users(void) {
     static u8 memory[0x400];
     char why[512];
@@ -515,6 +527,7 @@ int main(void) {
     CHECK(g_mem != NULL);
     test_picture();
     free(g_mem);
+    test_initialize_application_info_v2();
     test_users();
     test_first_uid();
     test_start();
