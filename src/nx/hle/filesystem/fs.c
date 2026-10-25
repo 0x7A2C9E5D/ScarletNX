@@ -284,6 +284,7 @@ static void mods_open(void) {
     size_t count, i, size = 0;
     snprintf(path, sizeof path, "%s%s.abi", g_exedir, g_exename);
     built = (char*)snx_read_file(path, &size);
+    if (built) built[snx_game_stamp_size(built, size)] = 0; /* the made line after it says how, not with what */
     recorded = built ? strstr(built, " mods ") : NULL;
     recorded = recorded ? recorded + 6 : "";
     if (!strcmp(recorded, stamp)) {
