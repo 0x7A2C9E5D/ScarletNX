@@ -32,6 +32,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/file.h> /* flock */
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/statvfs.h>
@@ -279,6 +280,48 @@ int snx_log_lines(const char* path, const char* text) {
 #endif
     free(out);
     return failed ? -1 : 0;
+}
+int snx_lock_file(const char* path, intptr_t* lock) {
+#ifdef _WIN32
+    wchar_t* p = wide(path);
+    OVERLAPPED far = {0};
+    HANDLE h = p ? CreateFileW(p, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL)
+                 : INVALID_HANDLE_VALUE;
+    free(p);
+    if (h == INVALID_HANDLE_VALUE) {
+        errno = EACCES;
+        return -1;
+    }
+    far.OffsetHigh = 0x7fffffffu; /* past any end, so the bytes are never what is locked */
+    if (!LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &far)) {
+        DWORD error = GetLastError();
+        CloseHandle(h);
+        if (error == ERROR_LOCK_VIOLATION || error == ERROR_IO_PENDING) return 1;
+        errno = EACCES;
+        return -1;
+    }
+    *lock = (intptr_t)h;
+    return 0;
+#else
+    int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0) return -1;
+    if (flock(fd, LOCK_EX | LOCK_NB)) {
+        int error = errno;
+        close(fd);
+        errno = error;
+        return error == EWOULDBLOCK ? 1 : -1;
+    }
+    *lock = fd;
+    return 0;
+#endif
+}
+void snx_unlock_file(intptr_t lock) {
+#ifdef _WIN32
+    CloseHandle((HANDLE)lock); /* its lock with it */
+#else
+    close((int)lock);
+#endif
 }
 int snx_path_is_full(const char* path) {
 #ifdef _WIN32

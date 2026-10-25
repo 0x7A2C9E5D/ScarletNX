@@ -241,6 +241,12 @@ FILE* snx_fopen(const char* path, const char* mode);
    ("2026-10-25 11:30:02 [4242] "), in one write: two programs appending at once keep each line whole and named, and a
    text without an ending newline gets one. 0, or -1 with errno set */
 int snx_log_lines(const char* path, const char* text);
+/* An exclusive lock on the file at path, made when it is not there and left as it is, held until snx_unlock_file: 0
+   with *lock set, 1 when another holder has it (another program, or another lock of this one), -1 with errno. The
+   file's bytes stay free to be read and written by anyone: POSIX's flock, which only other locks see, and on Windows a
+   lock of one byte past any end the file reaches */
+int snx_lock_file(const char* path, intptr_t* lock);
+void snx_unlock_file(intptr_t lock);
 /* f to offset from its start, past 2 GiB too (fseek takes a long, 32 bits on Windows); 0, or nonzero */
 int snx_seek(FILE* f, SnxU64 offset);
 

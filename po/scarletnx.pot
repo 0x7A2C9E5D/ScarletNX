@@ -2234,6 +2234,11 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "%d launchers hold the run logs of %s: this one's runs keep none"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "%s: %s. The folder before keeps what it has"
 msgstr ""
 

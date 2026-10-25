@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* The launcher's logs (gui/log.h): nothing without a folder; with one, each line of what it says after the time and
    its pid in scarletnx-console.log, a fatal error in scarletnx-error.log too; two programs writing at once keep their
-   lines whole, each named by its pid. */
+   lines whole, each named by its pid; a run log held by one launcher is seen taken by another. */
 #include "gui/log.h"
 #include "common/utilities/common.h"
 #include <assert.h>
@@ -147,6 +147,37 @@ int main(void) {
         free(text);
     }
 #endif
+    /* a run log held by a launcher (snx_lock_file): another holder finds it taken, its bytes free to write and read;
+       let go, it is free again; a folder not there says so */
+    {
+        char *held = snx_path_join(dir, "last-run.log"), *gone = snx_path_join(dir, "not there/last-run.log");
+        intptr_t lock, again;
+        size_t size = 0;
+        char* text;
+        assert(!snx_lock_file(held, &lock) && snx_path_exists(held));
+        assert(snx_lock_file(held, &again) == 1);
+        assert(!snx_write_file(held, "run output\n", 11));
+        text = (char*)snx_read_file(held, &size);
+        assert(text && size == 11);
+        free(text);
+#ifndef _WIN32
+        {
+            pid_t child;
+            int status;
+            fflush(NULL);
+            child = fork(); /* another program: it sees the lock too */
+            assert(child >= 0);
+            if (!child) _exit(snx_lock_file(held, &again) == 1 ? 0 : 1);
+            assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && !WEXITSTATUS(status));
+        }
+#endif
+        snx_unlock_file(lock);
+        assert(!snx_lock_file(held, &again));
+        snx_unlock_file(again);
+        assert(snx_lock_file(gone, &again) == -1);
+        free(gone);
+        free(held);
+    }
     gui_log_folder(NULL);
     free(console);
     free(error);

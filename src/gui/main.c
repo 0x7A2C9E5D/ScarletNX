@@ -261,6 +261,8 @@ typedef struct App {
     Uint64 left_at;    /* when they were looked for */
     char* recent_file; /* where the recent games are kept; NULL keeps none */
     char* run_log;     /* where a run's output goes as it comes, the last run's; NULL keeps none */
+    intptr_t run_lock; /* run_log held (snx_lock_file) while run_locked, so another launcher takes a pair of its own */
+    bool run_locked;
     FILE* run_out;
     int recent_named;           /* the run's own name went to its recent game */
     bool recent_unsaved;        /* the list could not be written the last time it changed: the message says so */
@@ -7073,17 +7075,47 @@ static int places_keep(App* app, char* const* before, char* note, size_t size) {
              app->app_file);
     return 1;
 }
-/* the next run's log in the Logs folder in use, made as the menu opens it (open_files) */
+#define GUI_RUN_LOGS 8 /* launchers open at once on one Logs folder, each with run logs of its own */
+/* the run logs of the Logs folder in use, made as the menu opens it (open_files) and as Folders' Logs changes: the
+   first pair no other launcher holds, last-run.log and last-recompile.log, else last-run-2.log and last-recompile-2.log
+   and on (#675), held until the menu closes or takes another folder; the log says which */
 static void run_log_follow(App* app) {
     char* state = menu_folder(app, SNX_USER_STATE, !app->look_only);
+    int n, held = 1;
     if (!state) return;
-    free(app->run_log);
-    app->run_log = snx_path_join(state, "last-run.log");
-    free(app->job_log);
-    app->job_log = snx_path_join(state, "last-recompile.log");
 #ifndef SDL_PLATFORM_IOS /* there in Documents' logs/, which the Files app shows (initialize) */
-    gui_log_folder(state);
+    if (!app->look_only) gui_log_folder(state);
 #endif
+    if (app->run_locked) snx_unlock_file(app->run_lock);
+    app->run_locked = false;
+    free(app->run_log);
+    free(app->job_log);
+    app->run_log = app->job_log = NULL;
+    for (n = 1; n <= GUI_RUN_LOGS && !app->run_log; ++n) {
+        char* run = n == 1 ? snx_strdup("last-run.log") : snx_format("last-run-%d.log", n);
+        char* job = n == 1 ? snx_strdup("last-recompile.log") : snx_format("last-recompile-%d.log", n);
+        char* path = snx_path_join(state, run);
+        held = app->look_only ? 0 : snx_lock_file(path, &app->run_lock);
+        if (held <= 0) {
+            app->run_locked = held == 0 && !app->look_only;
+            app->run_log = path;
+            app->job_log = snx_path_join(state, job);
+            path = NULL;
+        }
+        free(path);
+        free(job);
+        free(run);
+    }
+    if (held < 0) { /* the first that could not be opened: kept unheld, as before */
+        char why[160];
+        gui_log("%s cannot be held for this launcher's runs (%s): another launcher may write it too", app->run_log,
+                snx_os_error(why, sizeof why));
+    } else if (!app->run_log) {
+        snprintf(app->message, sizeof app->message,
+                 snx_tr("%d launchers hold the run logs of %s: this one's runs keep none"), GUI_RUN_LOGS, state);
+        say_failure(app, app->message);
+    } else if (!app->look_only)
+        gui_log("its runs' logs %s and %s", app->run_log, app->job_log);
     free(state);
 }
 /* a place picked, absolute, or its default (NULL), kept in app.ini */
@@ -13664,6 +13696,8 @@ static void forget(App* app) {
     free(app->app_file);
     gui_cleaned_free(&app->cleaned);
     free(app->left);
+    if (app->run_locked) snx_unlock_file(app->run_lock);
+    app->run_locked = false;
     free(app->self);
     free(app->drivers);
     free(app->file);
@@ -13722,14 +13756,10 @@ static char* settings_path(const char* config) { return config ? snx_path_join(c
 static void open_files(App* app) {
     char *prefs = menu_folder(app, SNX_USER_STATE, !app->look_only),
          *config = menu_folder(app, SNX_USER_CONFIG, !app->look_only);
-#ifndef SDL_PLATFORM_IOS /* there in Documents' logs/ (initialize) */
+#ifndef SDL_PLATFORM_IOS /* there in Documents' logs/ (initialize); app.ini's Logs folder once it is read */
     if (prefs && !app->look_only) gui_log_folder(prefs);
 #endif
-    if (!app->look_only)
-        gui_log("%s starts, its data folder %s", snx_build_info(), app->data_dir ? app->data_dir : "(none)");
     if (prefs) recent_open(app, snx_path_join(prefs, "recent.txt"));
-    if (prefs) app->run_log = snx_path_join(prefs, "last-run.log");
-    if (prefs) app->job_log = snx_path_join(prefs, "last-recompile.log");
     app->settings_file = settings_path(config);
     free(app->config_dir);
     app->config_dir = config ? snx_strdup(config) : NULL;
@@ -13739,6 +13769,9 @@ static void open_files(App* app) {
         folders_load(app);
         app_load(app);
     }
+    if (!app->look_only)
+        gui_log("%s starts, its data folder %s", snx_build_info(), app->data_dir ? app->data_dir : "(none)");
+    if (prefs) run_log_follow(app);  /* in the Logs folder app.ini picked */
     if (prefs) recent_as_games(app); /* by the recompiled/ app.ini picked */
     app->users_dir = snx_users_dir(app->home_dir ? app->home_dir : app->data_dir);
     if (!app->users_dir) {

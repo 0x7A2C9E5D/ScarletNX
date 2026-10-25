@@ -9976,6 +9976,53 @@ int main(int argc, char** argv) {
         free(portable);
         free(saved);
     }
+    /* two launchers open on one Logs folder: the first holds last-run.log and last-recompile.log, the next takes
+       last-run-2.log and last-recompile-2.log, its log saying so; the first gone, the pair is free again (#675) */
+    {
+        char *run_was = app.run_log, *job_was = app.job_log, *place_was = app.place[GUI_PLACE_STATE];
+        char *state = snx_path_join(temporary, "two launchers"), *first = snx_path_join(state, "last-run.log");
+        char *second = snx_path_join(state, "last-run-2.log"),
+             *second_job = snx_path_join(state, "last-recompile-2.log");
+        char *console = snx_path_join(state, SNX_CONSOLE_LOG), *said, *line;
+        size_t size = 0;
+        intptr_t other, third;
+        bool locked_was = app.run_locked;
+        intptr_t lock_was = app.run_lock;
+        assert(!snx_mkdirs(state));
+        app.run_log = app.job_log = NULL;
+        app.run_locked = false;
+        app.place[GUI_PLACE_STATE] = snx_strdup(state);
+        assert(!snx_lock_file(first, &other)); /* the launcher opened first */
+        run_log_follow(&app);
+        assert(app.run_locked && !strcmp(app.run_log, second) && !strcmp(app.job_log, second_job));
+        said = (char*)snx_read_file(console, &size);
+        line = snx_format("] its runs' logs %s and %s\n", second, second_job);
+        assert(said && strstr(said, line));
+        free(line);
+        free(said);
+        assert(snx_lock_file(second, &third) == 1); /* this one's, which a third would leave */
+        snx_unlock_file(other);
+        run_log_follow(&app); /* Logs taken again: the first pair, free now, the second let go */
+        assert(app.run_locked && !strcmp(app.run_log, first) && snx_lock_file(first, &other) == 1);
+        assert(!snx_lock_file(second, &third));
+        snx_unlock_file(third);
+        snx_unlock_file(app.run_lock);
+        free(app.run_log);
+        free(app.job_log);
+        free(app.place[GUI_PLACE_STATE]);
+        app.place[GUI_PLACE_STATE] = place_was;
+        app.run_log = run_was;
+        app.job_log = job_was;
+        app.run_locked = locked_was;
+        app.run_lock = lock_was;
+        gui_log_folder(NULL);
+        assert(!snx_remove_tree(state));
+        free(console);
+        free(second_job);
+        free(second);
+        free(first);
+        free(state);
+    }
     /* Android's menu: its own files in its data folder's config/ and state/ (.scarletnx/ in the app's own files, which
        the Files app shows). An older version's, in the app's own files, are neither moved nor read: the menu starts
        from its defaults, and the box of what older versions left names each file with its size, then how they go while
@@ -9990,7 +10037,7 @@ int main(int argc, char** argv) {
         char *old = snx_path_join(temporary, "own files"), *data = snx_path_join(old, SNX_PORTABLE_DIR);
         char *home = app.home_dir, *data_dir = app.data_dir, *full, *config, *state, *path, *text, *expected;
         char *settings_file = app.settings_file, *folders_file = app.folders_file, *app_file = app.app_file;
-        char *recent_file = app.recent_file, *run_log = app.run_log;
+        char *recent_file = app.recent_file, *run_log = app.run_log, *job_log = app.job_log;
         GuiRecent recent = app.recent;
         size_t head = app.browser.head, size;
         int i, j, text_size = app.menu.text_size, folder_count = app.folder_count;
@@ -10014,6 +10061,7 @@ int main(int argc, char** argv) {
         app.menu_old = old;
         free(app.users_dir); /* the users test's: open_files names the new data folder's */
         app.users_dir = NULL;
+        app.run_log = app.job_log = NULL; /* kept for after: open_files takes the folder's own, and its log */
         open_files(&app);
         config = menu_folder(&app, SNX_USER_CONFIG, false);
         state = menu_folder(&app, SNX_USER_STATE, false);
@@ -10081,11 +10129,16 @@ int main(int argc, char** argv) {
         free(app.app_file);
         free(app.recent_file);
         free(app.run_log);
+        free(app.job_log);
+        if (app.run_locked) snx_unlock_file(app.run_lock);
+        app.run_locked = false;
+        gui_log_folder(NULL);
         app.settings_file = settings_file;
         app.folders_file = folders_file;
         app.app_file = app_file;
         app.recent_file = recent_file;
         app.run_log = run_log;
+        app.job_log = job_log;
         app.recent = recent;
         app.browser.head = head;
         app.message[0] = 0;

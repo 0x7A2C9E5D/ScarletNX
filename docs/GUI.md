@@ -271,7 +271,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   ID, `2026-10-25 11:30:02 [4242] `, so two launchers open at once write theirs apart, and the lines go to stderr
   too. A fatal error, the launcher's that stops it as it starts or a game's, is also kept in `scarletnx-error.log`
   beside it, a game's after its name (a game of no data folder, an `--outdir`'s, beside its own log). Each start adds
-  to them.
+  to them. Launchers open at once on one Logs folder each keep their runs' output apart: the first `last-run.log` and
+  `last-recompile.log`, the next `last-run-2.log` and `last-recompile-2.log`, and on to 8, each held while its
+  launcher is open (a lock on the file, which leaves it to be read); the log says which a launcher took, and Share Log
+  sends its own.
 - **Exit** closes the launcher, once asked (ESC on the menu asks too, and while a recompile of the queue runs or waits
   the question names it), a screen saying for half a second which of its
   files it keeps for the next start (Settings, the picks of Settings > App, the libraries' folders, the recent games), a second
