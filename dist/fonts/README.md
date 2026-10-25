@@ -1,10 +1,10 @@
 # The shared fonts' Noto stand-ins
 
-The seven Switch shared fonts are Nintendo's own and cannot be shipped. When a game folder has no
+The seven Switch shared fonts are the console firmware's and cannot be shipped. When a game folder has no
 `fonts/` of its own, `src/nx/hle/services/pl.c` hands out the fonts in this folder instead: one Noto
 Sans subset per script, and yuzu's controller button glyphs for `FontNintendoExtended`, which
 `cmake/shared_fonts.cmake` takes from Eden's source. `cmake/shared_fonts.cmake` compiles these four
-files into the runtime, and `pl_font.c` gives every one of them blank glyphs for Nintendo's
+files into the runtime, and `pl_font.c` gives every one of them blank glyphs for the console's
 private-use icon block (U+E000 to U+E1FF), so a layout that names an icon gets a glyph rather than a
 null one.
 
