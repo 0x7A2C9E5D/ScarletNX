@@ -1277,7 +1277,11 @@ target_link_libraries(snx-llvm-bench PRIVATE snx_driver ${CMAKE_DL_LIBS})
 # not a test: a game's functions recompiled on their own (llvm_pieces DUMP ADDR...), for the recompile's time and output
 add_executable(snx-llvm-pieces llvm_pieces.c)
 snx_test_target(snx-llvm-pieces 11)
-target_link_libraries(snx-llvm-pieces PRIVATE scarletnx-recompiler snx_llvm)
+target_link_libraries(snx-llvm-pieces PRIVATE scarletnx-recompiler)
+# the backend's own switches (ir.h), in the library's objects: its headers, not its target, whose objects the library
+# holds already
+target_include_directories(snx-llvm-pieces PRIVATE "$<TARGET_PROPERTY:snx_llvm,INTERFACE_INCLUDE_DIRECTORIES>")
+target_include_directories(snx-llvm-pieces SYSTEM PRIVATE "${SNX_LLVM_INCLUDE_DIR}")
 # A32 emits self-contained host objects, without the A64 interpreter or RtAPI.
 add_executable(snx-test-arm-emit arm_emit.c)
 snx_test_target(snx-test-arm-emit 11)
