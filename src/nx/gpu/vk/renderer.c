@@ -18,6 +18,7 @@
 #include "nx/runtime/platform/backend.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/stats.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/memory/mem.h"
 #include "nx/memory/own.h"
@@ -504,6 +505,7 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
         memcpy(was, is, sizeof was);
         last_present_ns = now_ns;
         g_vk_present++;
+        stats_frame(now_ns);
         vk_mem_present();
         if (g_last) vk_surf_touch(g_last); /* what screenshots read stays */
         vk_tex_frame();

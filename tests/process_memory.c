@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The process's memory as common.c reads it (snx_footprint, snx_memory_available), which memory_fit takes: told on
-   Linux, Android, macOS, iOS and Windows, and the footprint grows with the pages the process touches; neither told
-   elsewhere */
+/* The process's memory as common.c reads it (snx_footprint, snx_memory_available), which memory_fit and the stats
+   take: the footprint told on Linux, Android, macOS, iOS, Windows and FreeBSD, growing with the pages the process
+   touches, the memory available on all but FreeBSD; neither elsewhere. And its processor time (snx_process_cpu_ns),
+   which grows with the work it does */
 #include "common/utilities/common.h"
 #include <assert.h>
 #include <stdio.h>
@@ -17,15 +18,29 @@ int main(void) {
     assert(block);
     for (size_t i = 0; i < size; i += 4096) touch[i] = 1;
     after = snx_footprint();
-#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32)
+#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32) || defined(__FreeBSD__)
     assert(before > 0 && after >= before + size / 2);
+#else
+    assert(!before && !after);
+#endif
+#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32)
     assert(snx_memory_available(&available) && available > 0);
 #else
-    assert(!before && !after && !snx_memory_available(&available));
+    assert(!snx_memory_available(&available));
 #endif
     printf("process memory: footprint %llu MiB, then %llu MiB with %zu MiB touched; %llu MiB available\n",
            (unsigned long long)(before >> 20), (unsigned long long)(after >> 20), size >> 20,
            (unsigned long long)(available >> 20));
     free(block);
+    /* 20 ms of the processor's time, spent in a loop: a loaded machine takes longer, ten seconds at most */
+    {
+        SnxU64 start = snx_process_cpu_ns(), now = start;
+        double give_up = snx_seconds() + 10;
+        volatile unsigned spin = 0;
+        while ((now = snx_process_cpu_ns()) < start + 20000000u && snx_seconds() < give_up) ++spin;
+        assert(start > 0 && now >= start + 20000000u);
+        printf("process time: %llu ms, then %llu ms\n", (unsigned long long)(start / 1000000),
+               (unsigned long long)(now / 1000000));
+    }
     return 0;
 }
