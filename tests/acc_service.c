@@ -16,6 +16,9 @@
 
 u8* g_mem;
 const u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull};
+/* acc.c's IsUserAccountSwitchLocked asks am.c, which this test doesn't compile: the NACP field is a switch here */
+static int test_account_switch_lock;
+int am_user_account_switch_lock(void) { return test_account_switch_lock; }
 char g_exedir[1024];
 static unsigned test_checks, test_objects;
 
@@ -262,6 +265,26 @@ static void test_initialize_application_info_v2(void) {
     c->has_pid = 1;
     call(acc, &r);
     CHECK(c->out_size == 0 && c->nout_objs == 0 && c->nout_copy == 0);
+    svcobj_unref(acc);
+}
+
+/* the two acc replies: users may register, and the NACP's switch lock is what the game said */
+static void test_account_command_replies(void) {
+    SvcObj* acc = new_acc();
+    Request r;
+    IpcCtx* c;
+    c = request(&r, 50);
+    c->has_pid = 1;
+    call(acc, &r);
+    CHECK(c->out_size >= 1 && c->out[0] == 1);
+    test_account_switch_lock = 0;
+    c = request(&r, 150);
+    call(acc, &r);
+    CHECK(c->out_size >= 1 && c->out[0] == 0);
+    test_account_switch_lock = 1;
+    c = request(&r, 150);
+    call(acc, &r);
+    CHECK(c->out_size >= 1 && c->out[0] == 1);
     svcobj_unref(acc);
 }
 
@@ -528,6 +551,7 @@ int main(void) {
     test_picture();
     free(g_mem);
     test_initialize_application_info_v2();
+    test_account_command_replies();
     test_users();
     test_first_uid();
     test_start();
