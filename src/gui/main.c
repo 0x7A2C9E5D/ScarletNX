@@ -8799,12 +8799,13 @@ static unsigned form_icon(const App* app, const GuiEditor* e, int r) {
     return GUI_ICON_NONE;
 }
 /* row r of e as a list of ui.txt asks for it, in a row width pixels wide: false past its last. In a form with icons a
-   row without one starts where their text does, its values in their column */
+   row without one starts where their text does, its values in their column; but for Folders', whose rows hold paths
+   that need the room (a long one would lose what it is, default, beside it) */
 static bool form_row_info(App* app, const GuiEditor* e, size_t r, int labels, int width, UiRowInfo* info) {
     char* line = app->row_text;
     int i, rows = gui_editor_rows(e), gutter = 0;
     if (r >= (size_t)rows) return false;
-    for (i = 0; i < rows && !gutter; ++i) gutter = form_icon(app, e, i) != GUI_ICON_NONE;
+    for (i = 0; i < rows && !gutter && e->keys != app->folder_keys; ++i) gutter = form_icon(app, e, i) != GUI_ICON_NONE;
     info->icon = form_icon(app, e, (int)r);
     gutter = gutter && !info->icon;
     form_line(app, e, (int)r, labels, form_room(app, width) - (gutter || info->icon ? 3 : 0), line + 3 * gutter,

@@ -3739,7 +3739,8 @@ int main(int argc, char** argv) {
             app.work_dir = work;
             app_values(&app);
         }
-        shows(&app, "- " ICON_ERASER " Clean Old Settings", rgb(app.theme.soft)); /* nothing to clean here: greyed (#614) */
+        /* nothing to clean here: greyed (#614) */
+        shows(&app, "- " ICON_ERASER " Clean Old Settings", rgb(app.theme.soft));
         hides(&app, "- Layout", normal);
         { /* a row with nothing to do greyed, still there (#614): Move Old Files with nothing left, Clean Old Settings
              with nothing to clean; something to do, F5 looking again, in ink; Enter on a greyed one says why */
@@ -4615,7 +4616,7 @@ int main(int argc, char** argv) {
         { /* the names' column as wide as the longest of the rows with a folder (Extractions), not Add Folder's or the
              last's; the folder after it */
             char start[64];
-            snprintf(start, sizeof start, "-    %-11s %c", "Data", app.data_dir[0]);
+            snprintf(start, sizeof start, "- %-11s %c", "Data", app.data_dir[0]);
             shows(&app, start, yellow);
         }
         { /* what a row is at its end; with no room for it beside the folder whole, it goes and the folder stays */
@@ -4684,7 +4685,7 @@ int main(int argc, char** argv) {
         app.editor.row = FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES);
         render(&app);
         shows_half(&app, "The recompiled games, ", normal);
-        shows(&app, "-    Main", yellow);
+        shows(&app, "- Main", yellow);
         shows(&app, "- " ICON_FOLDER_PLUS " Add Folder", normal);
         assert(!strcmp(app.app_form.folder[app.editor.row], "default") && !strcmp(form_note(&app), app.games_dir));
         /* at its default: Del says so, no box */
@@ -4783,7 +4784,7 @@ int main(int argc, char** argv) {
         event(&app, &e);
         assert(app.folder_count == 1 && !strncmp(app.editor.note, "Already in the dumps library: ", 30));
         render(&app);
-        shows(&app, "-    Extra", yellow);
+        shows(&app, "- Extra", yellow);
         row_start(kept_as, line, sizeof line);
         shows(&app, line + 2, yellow); /* its folder, from its root */
         /* F5 looks at the folders again: one gone from the disk says so on its row, and the note counts them */
@@ -5067,13 +5068,14 @@ int main(int argc, char** argv) {
         assert(app.form == GUI_FORM_FOLDERS && app.editor.row == 0 && gui_editor_rows(&app.editor) == 11);
         render(&app);
         shows(&app, "FOLDERS", normal);
-        shows(&app, "-    Data", yellow);
+        shows(&app, "- Data", yellow);
         shows(&app, "default", yellow);
         /* under the rows, the folder in use: its start, as a long one wraps (Windows' %APPDATA% does) */
         snprintf(line, sizeof line, "%.24s", data);
         shows_half(&app, line, rgb(app.theme.soft));
-        shows(&app, "-    Extractions", normal);
-        shows(&app, "- " ICON_ROTATE_CCW " Reset to Defaults", rgb(app.theme.soft)); /* every folder its default: greyed (#614) */
+        shows(&app, "- Extractions", normal);
+        /* every folder its default: greyed (#614) */
+        shows(&app, "- " ICON_ROTATE_CCW " Reset to Defaults", rgb(app.theme.soft));
         assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir) &&
                !strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES)], "default"));
         assert(strstr(app.place_about[GUI_PLACE_GAMES], "The recompiled games, ") &&
@@ -5191,7 +5193,7 @@ int main(int argc, char** argv) {
             snprintf(line, sizeof line, "Logs: %s. The folder before keeps what it has", app.state_dir);
             assert(!strcmp(app.editor.note, line) && snx_path_within(app.run_log, logs));
             render(&app);
-            shows(&app, "-    Logs", yellow);
+            shows(&app, "- Logs", yellow);
             /* custom, at the row's end where the folder leaves room (a long one, as Windows' temporary folder, none) */
             assert(!strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_STATE)], "custom"));
             kept = (char*)snx_read_file(app.app_file, &size);
@@ -5220,7 +5222,7 @@ int main(int argc, char** argv) {
             assert(in_use && same_path(in_use, caches));
             free(in_use);
             render(&app);
-            shows(&app, "-    Caches", yellow);
+            shows(&app, "- Caches", yellow);
             /* back to the defaults, app.ini's keys empty */
             place_use(&app, GUI_PLACE_STATE, NULL);
             place_use(&app, GUI_PLACE_CACHE, NULL);
@@ -5243,14 +5245,14 @@ int main(int argc, char** argv) {
                 assert(strstr(said, "F5: refresh.") && !strstr(said, "Del:") && !strstr(said, "Add Folder"));
             }
             render(&app);
-            shows(&app, "-    Settings", yellow); /* a row without an icon, where Add Folder has one */
+            shows(&app, "- Settings", yellow); /* no column for the icons: Folders' room is its paths' */
             app.editor.row = FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES); /* where the checks below look */
             free(fallback);
             free(logs);
             free(caches);
         }
         render(&app);
-        shows(&app, "-    Main", yellow);
+        shows(&app, "- Main", yellow);
         assert(!strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES)], "custom"));
         assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir));
         app_values(&app); /* App's note, the folder now */
