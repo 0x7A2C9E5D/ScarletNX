@@ -144,6 +144,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
     ready to run Games lists too, and **Add a folder**;
   - **Reset to Defaults**, last, which asks first.
 
+  A row with nothing to do now is greyed, still there, and Enter on it says why: Clean Old Settings with nothing to
+  clean, Move Old Files with nothing left, App's Reset to Defaults with every setting at its default, Folders' with
+  every folder its default.
+
   A row is its name, its folder (one too long for the row cut in its middle: its root and first folder, `...`, as
   many of its last folders as fit; the whole path under the boxes) and what it is. Data, Logs, Caches, Extractions and
   the recompiled Main are each their default or a folder picked: Enter opens the folder picker, a folder dropped or
@@ -359,7 +363,7 @@ cannot be read is named and the others still listed.
   that scrolls, the list three fifths of the screen as a run's output is, Recent Games and a group's heading each on
   a line of its own; the arrows go to the tile beside, above or under the focus, its column or the line's last,
   PgUp and PgDn by the lines that show, a click or a tap on a tile opens it, and the side box says the focused one as
-  the list's does); in the grid alone **Icon size** (*Medium*, `games_icons = medium`: a tile 12 cells by 4 rows;
+  the list's does); **Icon size**, the grid's, greyed in the list and saying so there (*Medium*, `games_icons = medium`: a tile 12 cells by 4 rows;
   *Small*, `small`: 8 by 3; *Large*, `large`: 16 by 6), then the **Side panel** of Settings > App (`side_box`, which
   F2 turns too). Enter, Left, Right or
   a click change the focused one,

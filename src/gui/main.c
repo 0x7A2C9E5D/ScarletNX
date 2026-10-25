@@ -220,6 +220,7 @@ typedef struct App {
     uint64_t free_bytes; /* on the data folder's disk, when the count started */
     char* left;          /* what older builds left where this one no longer looks, a line each, lefts of them */
     int lefts;
+    int clean_found;   /* what Clean Old Settings would take out, as App last looked (clean_left); -1 before a look */
     bool left_shown;   /* in a box as the menu opens, until a key, a button or a finger closes it */
     bool left_clear;   /* the menu's own files of menu_old among them: the box says how they go (SAY_LEFT_CLEAR) */
     char* menu_old;    /* Android: SDL's folder for the app, its own files, where an older version kept the menu's own
@@ -4043,13 +4044,17 @@ typedef struct {
 /* the View box's rows: Games' options, then the Side panel, Settings > App's side_box, which F2 turns too */
 #define GUI_VIEW_SIDE     GUI_OPTIONS
 #define GUI_VIEW_BOX_ROWS (GUI_OPTIONS + 1)
-/* the rows the box shows in rows, each its GUI_OPTION_* or GUI_VIEW_SIDE, Icon size for the grid alone; how many */
+/* the rows the box shows in rows, each its GUI_OPTION_* or GUI_VIEW_SIDE; how many. Icon size is the grid's: greyed
+   in the list, still there (#614) */
 static int view_rows(const App* app, int* rows) {
     int i, n = 0;
-    for (i = 0; i < GUI_VIEW_BOX_ROWS; ++i)
-        if (i != GUI_OPTION_ICONS || games_grid(app)) rows[n++] = i;
+    (void)app;
+    for (i = 0; i < GUI_VIEW_BOX_ROWS; ++i) rows[n++] = i;
     return n;
 }
+/* option i has nothing to change now: Icon size while View is List */
+static bool option_off(const App* app, int i) { return i == GUI_OPTION_ICONS && !games_grid(app); }
+#define SAY_ICONS_OFF SNX_TR_NOOP("Icon size is the grid's: View is List")
 /* row i's name and its value as the View box shows them */
 static const char* view_name(int i) { return i == GUI_VIEW_SIDE ? snx_tr("Side panel") : snx_tr(option_keys[i].name); }
 static const char* view_value(const App* app, int i) {
@@ -4086,6 +4091,7 @@ bool ui_view_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info)
     if (row >= (size_t)view_rows(app, rows)) return false;
     option_row(app, rows[row], app->row_text, sizeof app->row_text);
     info->label = app->row_text + strlen(app->theme.marker); /* ui_draw_row puts the marker */
+    if (option_off(app, rows[row])) info->attr |= UI_ATTR_OFF;
     return true;
 }
 static void render_view(App* app) {
@@ -4106,7 +4112,9 @@ static void option_change(App* app, int i, int step) {
    Settings > App's row goes, kept in app.ini at once; the focus kept among the rows that show after it */
 static void view_change(App* app, int at, int step) {
     int rows[GUI_VIEW_BOX_ROWS], n = view_rows(app, rows), i = rows[SDL_min(at, n - 1)];
-    if (i != GUI_VIEW_SIDE)
+    if (option_off(app, i))
+        snprintf(app->message, sizeof app->message, "%s", snx_tr(SAY_ICONS_OFF));
+    else if (i != GUI_VIEW_SIDE)
         option_change(app, i, step);
     else {
         app->side_box = (app->side_box + (step < 0 ? 2 : 1)) % 3;
@@ -6268,6 +6276,7 @@ static void settings_top(App* app, int row) {
     app->editing = true;
 }
 static void open_app(App* app, int row) {
+    app->clean_found = -1; /* looked at again as its rows show */
     app_values(app);
     gui_editor_form(&app->editor, app_keys, GUI_APP_ROWS, &app->app_form, NULL);
     app->editor.flat = true;
@@ -8060,12 +8069,35 @@ static void form_line(App* app, const GuiEditor* e, int r, int labels, int room,
         snprintf(line, size, "%s%s%*s ...%s", app->theme.marker, label, pad, "", tail);
     }
 }
+static int clean_inis(App* app, GuiCleaned* done);
+static int settings_unread(App* app, char* out, size_t size);
+/* what Clean Old Settings would take out: the [Deprecated] sections and old keys, looked for once after App opens (it
+   reads every game's .ini) and again after a clean and with F5 */
+static int clean_left(App* app) {
+    char unread[16];
+    if (app->clean_found < 0)
+        app->clean_found = clean_inis(app, NULL) + settings_unread(app, unread, sizeof unread) +
+                           app_read(app, false, unread, sizeof unread, NULL, 0);
+    return app->clean_found;
+}
+/* a row of App or Folders with nothing to do now, greyed, whose Enter says why (#614): nothing to clean or move, every
+   setting at its default, no folder picked */
+static bool form_row_off(App* app, const GuiEditor* e, int r) {
+    int picked = 0;
+    if (e->keys == app_keys)
+        return (r == GUI_APP_MOVE && !app->lefts) || (r == GUI_APP_CLEAN && !clean_left(app)) ||
+               (r == GUI_APP_RESET && app->settings.keys && !gui_settings_changed(&app->settings));
+    if (app->form != GUI_FORM_FOLDERS || e != &app->editor || r != folder_rows(app)) return false;
+    for (int i = 0; i < GUI_PLACES; ++i) picked += app->place[i] != NULL;
+    return !picked;
+}
 /* row r of e as a list of ui.txt asks for it, in a row width pixels wide: false past its last */
 static bool form_row_info(App* app, const GuiEditor* e, size_t r, int labels, int width, UiRowInfo* info) {
     char* line = app->row_text;
     if (r >= (size_t)gui_editor_rows(e)) return false;
     form_line(app, e, (int)r, labels, form_room(app, width), line, sizeof app->row_text);
     info->label = line + strlen(app->theme.marker); /* ui_draw_row puts the marker */
+    if (form_row_off(app, e, (int)r)) info->attr |= UI_ATTR_OFF;
     return true;
 }
 /* FormList's row: the theme editor's keys; else the groups, the one open beside them in the focus's look */
@@ -9850,6 +9882,7 @@ static void change_answer(App* app, GuiAsk ask, bool taken) {
     if (!taken) return;
     if (ask == GUI_ASK_CLEAN) {
         clean_old(app);
+        app->clean_found = -1;
         snprintf(app->editor.note, sizeof app->editor.note, snx_tr("Cleaned: %d done, %d not"), app->cleaned.done,
                  app->cleaned.count - app->cleaned.done);
     } else if (ask == GUI_ASK_RESET) {
@@ -12315,6 +12348,7 @@ static void files_step(App* app, int step) {
 /* F5, or the foot's Refresh: what the screen shows of the folders and the disks looked at again now, not at pump's
    next look; the Library and Folders say how many of their folders are there, Games how many games it lists */
 static void refresh(App* app) {
+    app->clean_found = -1; /* Clean Old Settings looks again */
     if (app->left_shown) {
         left_behind(app);
         app->left_shown = app->lefts > 0;
@@ -12810,6 +12844,7 @@ static bool initialize(App* app, const char* self) {
     games_defaults(app, false);
 #endif
     app->menu.selected = GUI_SWITCH; /* the first item until Games shows */
+    app->clean_found = -1;
 #ifdef SNX_TOUCH_UI
     app->fingers = true;
 #endif

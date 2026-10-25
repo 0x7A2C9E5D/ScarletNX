@@ -1323,10 +1323,18 @@ static void grid_view(App* app, const char* temporary) {
     key(app, SDLK_V);
     render(app);
     shows(app, "- View          < List >", normal);
-    hides(app, "Icon size", normal); /* the grid's alone */
+    /* Icon size, the grid's: still there in the list, greyed, Enter on it saying why and changing nothing (#614) */
+    shows(app, "- Icon size     < Medium >", rgb(app->theme.soft));
     {
-        int shown_rows[GUI_VIEW_BOX_ROWS];
-        assert(view_rows(app, shown_rows) == GUI_VIEW_BOX_ROWS - 1 && shown_rows[4] == GUI_VIEW_SIDE);
+        int shown_rows[GUI_VIEW_BOX_ROWS], icons = app->options[GUI_OPTION_ICONS];
+        assert(view_rows(app, shown_rows) == GUI_VIEW_BOX_ROWS && shown_rows[GUI_OPTION_ICONS] == GUI_OPTION_ICONS &&
+               shown_rows[GUI_VIEW_BOX_ROWS - 1] == GUI_VIEW_SIDE);
+        app->options_focus = GUI_OPTION_ICONS;
+        key(app, SDLK_RETURN);
+        assert(app->options[GUI_OPTION_ICONS] == icons && !games_grid(app) &&
+               !strcmp(app->message, "Icon size is the grid's: View is List"));
+        app->options_focus = 0;
+        app->message[0] = 0;
     }
     for (int i = 0; i < 3; ++i) key(app, SDLK_DOWN);
     key(app, SDLK_RETURN);
@@ -3369,7 +3377,8 @@ int main(int argc, char** argv) {
     shows(&app, "- Overlay", normal); /* the runtime's On-screen controls */
     hides(&app, "On-screen controls", normal);
     shows(&app, "- User", normal);
-    shows(&app, "Reset to Defaults", normal); /* App's last row, beside: none among the groups */
+    /* App's last row, beside: none among the groups; greyed, every setting at its default (#614) */
+    shows(&app, "Reset to Defaults", rgb(app.theme.soft));
     hides(&app, "\x1e", rgb(app.theme.soft)); /* every row shows: no arrows */
     hides(&app, "\x1f", rgb(app.theme.soft));
     key(&app, SDLK_DOWN);
@@ -3567,8 +3576,35 @@ int main(int argc, char** argv) {
             app.work_dir = work;
             app_values(&app);
         }
-        shows(&app, "- Clean Old Settings", normal);
+        shows(&app, "- Clean Old Settings", rgb(app.theme.soft)); /* nothing to clean here: greyed (#614) */
         hides(&app, "- Layout", normal);
+        { /* a row with nothing to do greyed, still there (#614): Move Old Files with nothing left, Clean Old Settings
+             with nothing to clean; something to do, F5 looking again, in ink; Enter on a greyed one says why */
+            size_t size = 0;
+            char *was = (char*)snx_read_file(app.app_file, &size), *old;
+            int row = app.editor.row;
+            assert(!app.lefts);
+            shows(&app, "- Move Old Files", rgb(app.theme.soft));
+            app.editor.row = GUI_APP_CLEAN;
+            key(&app, SDLK_RETURN);
+            assert(!app.confirm.shown && strstr(app.editor.note, "Nothing to clean"));
+            app.lefts = 1;
+            old = snx_format("%s[app]\nan_old_key = 1\n", was ? was : "");
+            assert(!snx_write_file(app.app_file, old, strlen(old)));
+            app.editor.row = row; /* off them, so they read in ink */
+            key(&app, SDLK_F5);
+            render(&app);
+            shows(&app, "- Move Old Files", normal);
+            shows(&app, "- Clean Old Settings", normal);
+            assert(!snx_write_file(app.app_file, was ? was : "", was ? size : 0));
+            app.lefts = 0;
+            app.clean_found = -1;
+            app.editor.row = row;
+            app.editor.note[0] = 0;
+            render(&app);
+            free(old);
+            free(was);
+        }
         key(&app, SDLK_RIGHT);
         assert(strcmp(app.theme.name, first) && !strcmp(app.app_form.theme, app.theme.name));
         key(&app, SDLK_LEFT);
@@ -4320,8 +4356,9 @@ int main(int argc, char** argv) {
             assert(ui_form_side_rows_get_row_info(&app, 9 + GUI_FOLDER_GROUPS + 1, 100, &info) &&
                    info.attr == UI_ATTR_TITLE && !strcmp(info.label, "Defaults"));
             info = (UiRowInfo){0};
-            assert(ui_form_side_rows_get_row_info(&app, 9 + GUI_FOLDER_GROUPS + 2, 100, &info) && !info.attr &&
-                   !strcmp(info.label, "Reset to Defaults"));
+            /* greyed while no folder is picked: nothing to reset (#614) */
+            assert(ui_form_side_rows_get_row_info(&app, 9 + GUI_FOLDER_GROUPS + 2, 100, &info) &&
+                   info.attr == UI_ATTR_OFF && !strcmp(info.label, "Reset to Defaults"));
             assert(!ui_form_side_rows_get_row_info(&app, 9 + GUI_FOLDER_GROUPS + 3, 100, &info));
             assert(ui_form_side_rows_get_row_info(&app, 0, 100, &info) && info.attr == UI_ATTR_TITLE &&
                    !strcmp(info.label, "App Folders"));
@@ -4824,7 +4861,7 @@ int main(int argc, char** argv) {
         snprintf(line, sizeof line, "%.24s", data);
         shows_half(&app, line, rgb(app.theme.soft));
         shows(&app, "- Extractions", normal);
-        shows(&app, "- Reset to Defaults", normal);
+        shows(&app, "- Reset to Defaults", rgb(app.theme.soft)); /* every folder its default: greyed (#614) */
         assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir) &&
                !strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES)], "default"));
         assert(strstr(app.place_about[GUI_PLACE_GAMES], "The recompiled games, ") &&
