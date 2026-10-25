@@ -32,7 +32,7 @@ import subprocess
 import sys
 import tempfile
 
-from arm_test import CPU, PC, SIZE
+from arm_test import CPU, PC, SIZE, unicorn_dies
 
 EXITS = ('ok', 'undefined', 'thumb16-unsupported', 'thumb32-unsupported', 'svc', 'bkpt', 'data-abort',
          'alignment', 'bad-entry', 'endian', 'unsupported', 'prefetch-abort', 'code-changed', 'it-entry')
@@ -467,6 +467,9 @@ def main():
                 if fn is None:
                     entry['refused'].append(text)
                     continue
+                if unicorn_dies(isa, item):  # left to another host, as arm_test.py says
+                    entry['unicorn-dies'].append(f'{text}  [{isa}:{",".join(f"{w:x}" for w in item)}]')
+                    continue
                 for state in range(args.states):
                     rng = random.Random(f'{args.seed}:{name}:{index}:{state}')
                     kind, detail = run_one(fn, uni, isa, item, text, rng)
@@ -481,7 +484,7 @@ def main():
                             entry['unpredictable'].append(f'{text}  [{isa}:{",".join(f"{w:x}" for w in item)}]')
                         break
             kinds = ('wrong', 'missing', 'extra', 'fault', 'refused', 'pc-undefined', 'alignment', 'unpredictable',
-                     'impl-defined')
+                     'impl-defined', 'unicorn-dies')
             bad = {k: v for k, v in report.items() if any(v[x] for x in kinds)}
             print(f'== {name}: {len(items)} encodings, {runs} runs, {len(bad)} mnemonics disagree', flush=True)
             for mnemonic in sorted(bad, key=lambda m: -sum(len(bad[m][x]) for x in kinds)):
