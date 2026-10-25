@@ -4,8 +4,10 @@
    piece at a time. DIR is a module dump (scarletnx --dump-modules PROGRAM DIR), ADDR the guest addresses of the
    functions (hex, the F_<address> of a game module's symbols), or @FILE a file of them, one per line. Only those
    functions are compiled: a call out of them is left to the dispatch table.
-     snx-llvm-pieces DIR [-O LEVEL] [--keep-ir FOLDER] [--each] ADDR... | @FILE
-   Prints the seconds the recompile took, or with --each one line per function, its seconds and address */
+     snx-llvm-pieces DIR [-O LEVEL] [--keep-ir FOLDER] [--each] [--volatile] ADDR... | @FILE
+   Prints the seconds the recompile took, or with --each one line per function, its seconds and address. --volatile
+   makes the guest's loads and stores volatile, as the setting volatile_memory does */
+#include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/snx_recompiler.h"
 #include "common/utilities/common.h"
 #include <stdio.h>
@@ -98,6 +100,8 @@ int main(int argc, char** argv) {
             keep_ir = argv[++a];
         else if (!strcmp(argv[a], "--each"))
             each = 1;
+        else if (!strcmp(argv[a], "--volatile"))
+            snx_ir_volatile_memory(1);
         else if (argv[a][0] == '@') {
             char line[128];
             FILE* f = fopen(argv[a] + 1, "r");

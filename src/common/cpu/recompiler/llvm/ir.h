@@ -174,6 +174,11 @@ int snx_ir_slp(void);
    any module is made; the caches' keys carry it */
 void snx_ir_fpsr_flags(int exact);
 int snx_ir_fpsr_exact(void);
+/* Whether the guest's loads and stores are volatile (the setting volatile_memory, off by default): on, LLVM keeps
+   each where the guest has it (ir_state.c's ir_rd). Once per process, before any module is made; the caches' keys
+   carry it */
+void snx_ir_volatile_memory(int on);
+int snx_ir_volatile(void);
 /* opt is the -O letter: 0,1,2,3,s,z */
 SnxIr* snx_ir_new(const char* name, char opt, char* error, size_t error_size);
 /* the same for code the JIT loader loads into this process (code_loader.h): the host's target, CPU and calling

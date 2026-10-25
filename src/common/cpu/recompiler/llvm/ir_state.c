@@ -304,32 +304,36 @@ LLVMValueRef ir_mp(SnxIr* ir, LLVMValueRef address) {
 static LLVMTypeRef int_type(SnxIr* ir, unsigned bits) { return LLVMIntTypeInContext(ir->ctx, bits); }
 /* Guest addresses carry no alignment the host may rely on: the C dereferences of RDn/WRn compile to the same plain
    x86 moves as these align-1 accesses */
-/* Every guest access is volatile: it happens exactly as the guest wrote it, as on the hardware. LLVM may otherwise
-   hoist a load out of a loop that polls memory another thread writes (a relaxed atomic is a plain LDR), or sink a
-   store out of one, now that the alias scopes let it move everything else */
+/* A guest access is volatile only under the setting volatile_memory (snx_ir_volatile_memory): otherwise LLVM may
+   merge two loads of one address, forward a store to a load or drop a store written over, between the barriers and
+   atomics, which are fences and seq_cst accesses. The ARMv8 memory model allows all of that: a load may return what
+   an earlier one of the same address did, and stores may coalesce. A loop that polls memory another thread writes (a
+   relaxed atomic is a plain LDR) keeps its load: every backward branch in a function polls (ir_codegen.c's poll),
+   calling the runtime through a pointer on its cold path, which LLVM must take to write any memory, so it hoists no
+   load out of the loop and sinks no store; a loop through other functions has their calls */
 LLVMValueRef ir_rd(SnxIr* ir, LLVMValueRef address, unsigned bits) {
     LLVMValueRef load = LLVMBuildLoad2(ir->b, int_type(ir, bits), ir_mp(ir, address), "");
     LLVMSetAlignment(load, 1);
-    LLVMSetVolatile(load, 1);
+    LLVMSetVolatile(load, snx_ir_volatile());
     return ir_guest_order(ir, ir_tag_guest(ir, load));
 }
 LLVMValueRef ir_rd_bytes(SnxIr* ir, LLVMValueRef address, unsigned bytes) {
     LLVMValueRef load = LLVMBuildLoad2(ir->b, LLVMVectorType(ir->t_i8, bytes), ir_mp(ir, address), "");
     LLVMSetAlignment(load, 1);
-    LLVMSetVolatile(load, 1);
+    LLVMSetVolatile(load, snx_ir_volatile());
     return ir_tag_guest(ir, load);
 }
 void ir_wr_bytes(SnxIr* ir, LLVMValueRef address, LLVMValueRef value) {
     LLVMValueRef store = LLVMBuildStore(ir->b, value, ir_mp(ir, address));
     LLVMSetAlignment(store, 1);
-    LLVMSetVolatile(store, 1);
+    LLVMSetVolatile(store, snx_ir_volatile());
     ir_tag_guest(ir, store);
 }
 void ir_wr(SnxIr* ir, LLVMValueRef address, unsigned bits, LLVMValueRef value) {
     LLVMValueRef pointer = ir_mp(ir, address);
     LLVMValueRef store = LLVMBuildStore(ir->b, ir_guest_order(ir, ir_cast(ir, value, int_type(ir, bits), 0)), pointer);
     LLVMSetAlignment(store, 1);
-    LLVMSetVolatile(store, 1);
+    LLVMSetVolatile(store, snx_ir_volatile());
     ir_tag_guest(ir, store);
 }
 /* __atomic_load_n/__atomic_store_n on T* (cpu.h LDACQ/STREL): seq_cst, naturally aligned as the C type says */

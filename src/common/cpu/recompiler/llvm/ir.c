@@ -26,6 +26,7 @@ static struct {
     int slp_off;
     int domain_off; /* snx_ir_init's, of X86DomainReassignment */
     int fpsr_loose; /* snx_ir_fpsr_flags(0)'s */
+    int volatile_memory; /* snx_ir_volatile_memory's */
 } g_ir;
 static const SnxIrFeatures generic_features;
 
@@ -51,6 +52,8 @@ void snx_ir_slp_vectorizer(int on) {
 int snx_ir_slp(void) { return !g_ir.slp_off; }
 void snx_ir_fpsr_flags(int exact) { g_ir.fpsr_loose = !exact; }
 int snx_ir_fpsr_exact(void) { return !g_ir.fpsr_loose; }
+void snx_ir_volatile_memory(int on) { g_ir.volatile_memory = on != 0; }
+int snx_ir_volatile(void) { return g_ir.volatile_memory; }
 int snx_ir_init(char* error, size_t error_size) {
     char* triple;
     int x86, arm, ppc, other;
