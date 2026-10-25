@@ -310,9 +310,10 @@ its defaults have it, what Next, OK or Enter on each would take (the notices rea
 they are, Keep, Later, the nickname `Player`), writes `setup.ini` and opens the menu; a page whose default fails (a
 `users.ini` that cannot be written) stays, saying why.
 
-- **Appearance**: a box of Settings > App's Language, Theme and UI scale, a row each, and Next (with Skip, on the first
-  page) under them. Up/Down go over the rows and Next; Left/Right (or a click, on the left arrow back) change the language among
-  the menu's and the theme, at once, the screen with them; UI scale opens its box of sizes, the size picked asked
+- **Appearance**: a box of Settings > App's Language, Theme, UI scale and Side panel, and Games' View and Icon size
+  as its View box has them (Icon size greyed in the list), a row each, and Next (with Skip, on the first page) under
+  them. Up/Down go over the rows and Next; Left/Right (or a click, on the left arrow back) change the language among
+  the menu's, the theme and the others, at once, the screen with them; UI scale opens its box of sizes, the size picked asked
   about for 15 s as App's is; Enter does as App's (the language or the theme a step on, UI scale's box), and on
   Next goes on. What was changed is kept in `app.ini` once the setup is done, in the folders Install picks; Auto
   stays Auto while the language is the system's.

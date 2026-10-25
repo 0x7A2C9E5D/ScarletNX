@@ -64,10 +64,11 @@
 		android.row_height = 48px
 	}
 }
-# the setup's Appearance page: Settings > App's Language, Theme and UI scale, a row each, under the page box's head
+# the setup's Appearance page: Settings > App's Language, Theme, UI scale and Side panel, Games' View and Icon size, a
+# row each, under the page box's head
 [scene]Appearance {
 	[list]Rows {
-		max_rows = 3
+		max_rows = 6
 		android.row_height = 48px
 	}
 }

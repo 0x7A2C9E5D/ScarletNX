@@ -8809,13 +8809,23 @@ static int setup_notices(const App* app, int* list) {
         if (snx_setup_shows(&app->setup, i)) list[n++] = i;
     return n;
 }
-/* the Appearance's row changed a step either way, at once, as Settings > App's: the language among the menu's (Auto
-   again on the system's, where the setup found Auto), the theme among the themes */
+/* the Appearance's row changed a step either way, at once, as Settings > App's and the View box's: the language among
+   the menu's (Auto again on the system's, where the setup found Auto), the theme among the themes, the Side panel
+   round its three, View and Icon size round their words, Icon size saying why it does not in the list (#614) */
 static void appearance_change(App* app, int row, int step) {
     if (row == GUI_APPEARANCE_LANGUAGE) {
         app->language = (snx_tr_language() + step + snx_gui_language_count) % snx_gui_language_count + 1;
         if (!app->setup_language && app->language - 1 == language_auto()) app->language = 0;
         language_apply(app);
+    } else if (row == GUI_APPEARANCE_SIDE) {
+        app->side_box = (app->side_box + (step < 0 ? 2 : 1)) % 3;
+        layout(app);
+    } else if (row == GUI_APPEARANCE_ICONS && option_off(app, GUI_OPTION_ICONS)) {
+        snprintf(app->message, sizeof app->message, "%s", snx_tr(SAY_ICONS_OFF));
+        return;
+    } else if (row == GUI_APPEARANCE_VIEW || row == GUI_APPEARANCE_ICONS) {
+        int i = row == GUI_APPEARANCE_VIEW ? GUI_OPTION_VIEW : GUI_OPTION_ICONS;
+        app->options[i] = (app->options[i] + option_words(i) + step) % option_words(i);
     } else
         next_theme(app, step);
     app->setup_save = true;
@@ -8962,8 +8972,9 @@ static int setup_focus(const App* app) {
 }
 /* ---- the Appearance page's box: at the top of r, as high as its rows; under its head the rows, ui.txt's scene
    Appearance ---- */
-static const char* const appearance_names[GUI_APPEARANCE_NEXT] = {SNX_TR_NOOP("Language"), SNX_TR_NOOP("Theme"),
-                                                                  SNX_TR_NOOP("UI scale")};
+static const char* const appearance_names[GUI_APPEARANCE_NEXT] = {
+    SNX_TR_NOOP("Language"),   SNX_TR_NOOP("Theme"), SNX_TR_NOOP("UI scale"),
+    SNX_TR_NOOP("Side panel"), SNX_TR_NOOP("View"),  SNX_TR_NOOP("Icon size")}; /* Settings > App's, the View box's */
 typedef struct {
     GuiRect box; /* the page's box, its head over the rows */
     GuiRect rects[UI_APPEARANCE_ITEMS];
@@ -8997,7 +9008,12 @@ static void appearance_row(const App* app, int i, char* out, size_t size) {
         snprintf(value, sizeof value, "< %s >", snx_gui_languages[snx_tr_language()].name);
     else if (i == GUI_APPEARANCE_THEME)
         snprintf(value, sizeof value, "< %s >", app->theme.name);
-    else {
+    else if (i == GUI_APPEARANCE_SIDE)
+        snprintf(value, sizeof value, "< %s >", snx_tr(side_names[app->side_box]));
+    else if (i == GUI_APPEARANCE_VIEW || i == GUI_APPEARANCE_ICONS) {
+        int o = i == GUI_APPEARANCE_VIEW ? GUI_OPTION_VIEW : GUI_OPTION_ICONS;
+        snprintf(value, sizeof value, "< %s >", snx_tr(option_keys[o].shown[app->options[o]]));
+    } else {
         char shown[96];
         if (app->menu.text_size)
             size_name(app, app->menu.text_size, shown, sizeof shown);
@@ -9291,6 +9307,7 @@ bool ui_appearance_rows_get_row_info(App* app, size_t row, int width, UiRowInfo*
     if (row >= GUI_APPEARANCE_NEXT) return false;
     appearance_row(app, (int)row, app->row_text, sizeof app->row_text);
     info->label = app->row_text + strlen(app->theme.marker);
+    if (row == GUI_APPEARANCE_ICONS && option_off(app, GUI_OPTION_ICONS)) info->attr |= UI_ATTR_OFF;
     return true;
 }
 /* a row under the pointer takes the focus; a click changes its value a step on, or back on its left arrow, which the

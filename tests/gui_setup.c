@@ -295,6 +295,39 @@ static void test_first(App* app) {
     assert(app->sizes_shown);
     key(app, SDLK_ESCAPE);
     assert(!app->sizes_shown && app->setup_on && page(app) == SNX_SETUP_LANGUAGE);
+    /* the Side panel, and Games' View and Icon size, as Settings > App and the View box have them, their words: a step
+       either way, kept for the setup's end; Icon size the grid's, greyed in the list, a step there saying why (#614) */
+    key(app, SDLK_DOWN);
+    assert(app->setup_row == GUI_APPEARANCE_SIDE && app->side_box == GUI_SIDE_AUTO);
+    render(app);
+    shows(app, "< Auto >", rgb(app->theme.page)); /* in focus, inverted */
+    key(app, SDLK_RIGHT);
+    assert(app->side_box == GUI_SIDE_ON && app->setup_save);
+    key(app, SDLK_DOWN);
+    assert(app->setup_row == GUI_APPEARANCE_VIEW && !games_grid(app));
+    render(app);
+    shows(app, "< List >", rgb(app->theme.page));
+    shows(app, "< Medium >", rgb(app->theme.soft)); /* Icon size, greyed */
+    key(app, SDLK_DOWN);
+    assert(app->setup_row == GUI_APPEARANCE_ICONS);
+    key(app, SDLK_RIGHT);
+    assert(app->options[GUI_OPTION_ICONS] == 1 && !strcmp(app->message, "Icon size is the grid's: View is List"));
+    app->message[0] = 0;
+    key(app, SDLK_UP);
+    key(app, SDLK_RETURN); /* Grid */
+    assert(games_grid(app) && app->setup_row == GUI_APPEARANCE_VIEW);
+    key(app, SDLK_DOWN);
+    key(app, SDLK_RIGHT);
+    assert(app->options[GUI_OPTION_ICONS] == 2);
+    render(app);
+    shows(app, "< Large >", rgb(app->theme.page));
+    key(app, SDLK_UP);
+    key(app, SDLK_LEFT); /* the list again */
+    assert(!games_grid(app));
+    path = join(home, ".config/scarletnx/app.ini");
+    assert(!snx_is_file(path)); /* still for the setup's end */
+    free(path);
+    key(app, SDLK_DOWN);
     key(app, SDLK_DOWN);
     assert(app->setup_row == GUI_APPEARANCE_NEXT);
     render(app);
@@ -420,6 +453,9 @@ static void test_first(App* app) {
     }
     holds(config, "app.ini", "language = xx\n");
     holds(config, "app.ini", "theme = yorha\nui_scale = 1\n");
+    holds(config, "app.ini", "side_box = on\n");
+    holds(config, "app.ini", "games_view = list\n");
+    holds(config, "app.ini", "games_icons = large\n");
     path = join(home, ".config/scarletnx/setup.ini");
     assert(!snx_is_file(path)); /* nothing in the user's folders */
     free(path);
