@@ -323,6 +323,7 @@ matching `Game_code.so/.dll`, in the data folder's `recompiled/` ([USAGE](USAGE.
 CPM uses [pinned sources](../cmake/dependencies.cmake) and a shared `.cache/cpm` cache. Archive downloads are
 checked by SHA-256. Offline configuration needs the matching sources already in the cache. Cached sources stay unmodified: FFmpeg's patch goes on a copy in the build tree.
 With tests on (`BUILD_TESTING`, the default) and the runtime, libvpx's VP9 test vectors download there too ([tests](../tests/CMakeLists.txt)).
+The Switch runtime's shared font stand-ins download only when it is built ([SHARED_FONTS.md](SHARED_FONTS.md)).
 Override via CMake/env `CPM_SOURCE_CACHE`. SDL3 uses CPM's system-package discovery with a pinned static
 source fallback. Use `-DCPM_DOWNLOAD_SDL3=ON` to request the bundled source build.
 
@@ -362,6 +363,8 @@ cmake --preset default -B build -DSNX_FFMPEG_ASM=OFF && cmake --build build
 - `-DSNX_TOOLS_ONLY=ON`: build the extraction/recompilation driver without the runtime, see below (default OFF).
 - `-DSNX_RECOMPILER_SHARED=ON`, `-DSNX_RECOMPILER_INSTALL=ON`: also build the recompiler as a shared library, and
   install the library, see [LIBRARY.md](LIBRARY.md) (defaults OFF and the value of `SNX_TOOLS_ONLY`).
+- `-DSNX_BUILD_TESTING=OFF`: leave the tests out whatever `BUILD_TESTING` says. ON by default when ScarletNX is the
+  top-level project, OFF when another project adds it with CPM or `add_subdirectory` ([LIBRARY.md](LIBRARY.md)).
 
 Test options, read when `BUILD_TESTING` is on (CTest's default), all OFF by default:
 
