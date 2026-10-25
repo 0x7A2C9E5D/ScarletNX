@@ -23,7 +23,7 @@ clause, what Clang does with each undefined behavior at -O2, and how that differ
   the rtlib flags in `src/common/cpu/recompiler/llvm/CMakeLists.txt` included). C you write or touch must not
   overflow a signed type: arithmetic that can wrap is done in unsigned types and converted back (Clang defines the
   out-of-range conversion as modular), products that can overflow get a wider intermediate. Check with
-  `-fsanitize=signed-integer-overflow` (`SNX_TEST_SANITIZERS`), or a `-DSNX_TRAPV=ON` build, whose `-ftrapv` reaches
+  `-fsanitize=signed-integer-overflow` (`SNX_TEST_SANITIZERS`), or a `-DSNX_TRAPV=ON` build (`-ftrapv`, and a trap on left shifts of negative values, which `-fwrapv` defined too), which reaches
   the game modules' helpers as well; for the instruction helpers, the witness tests (`a64_fp_witnesses`,
   `a64_fp_arithmetic_witnesses`) and `llvm_qemu_differential`.
 - A function or global used by another file is declared once in the header next to its definition, everything

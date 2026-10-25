@@ -37,7 +37,7 @@ list(APPEND snx_rtlib_flags -O2 -fvisibility=hidden -w -fno-semantic-interpositi
 # its own flags, which no target carries (cmake/banned_flags.cmake checks those)
 include("${PROJECT_SOURCE_DIR}/cmake/banned_flags.cmake")
 if(SNX_TRAPV)
-    list(APPEND snx_rtlib_flags -ftrapv)
+    list(APPEND snx_rtlib_flags ${SNX_TRAPV_FLAGS})
 endif()
 snx_check_banned_flags("The runtime library's flags (snx_rtlib_flags)" "${snx_rtlib_flags}")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")

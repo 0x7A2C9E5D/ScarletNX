@@ -10,13 +10,17 @@
 # keep their own flags. The LLVM backend's runtime library, which is compiled by a custom command, checks its own flags
 # (src/common/cpu/recompiler/llvm/).
 #
-# SNX_TRAPV builds that same code, and the runtime library, with -ftrapv: a signed overflow left in it stops the program
-# there (an illegal instruction) instead of giving whatever the optimizer made of it. A build to find them with
-# (the tests, a game run), never one to ship. -fsanitize=signed-integer-overflow (SNX_TEST_SANITIZERS) says where.
+# SNX_TRAPV builds that same code, and the runtime library, with -ftrapv and a trap on a left shift of a negative value
+# (-fsanitize=shift-base in trap mode, which -ftrapv doesn't cover and -fwrapv also defined): a signed overflow left in
+# it stops the program there (an illegal instruction) instead of giving whatever the optimizer made of it. Neither needs
+# a sanitizer runtime, so the game modules' library takes them too. A build to find them with (the tests, a game run),
+# never one to ship. -fsanitize=undefined (SNX_TEST_SANITIZERS) says where.
 include_guard(GLOBAL)
 
-option(SNX_TRAPV "Build ScarletNX's own code and the game modules' runtime library with -ftrapv, to find signed \
-overflows (cmake/banned_flags.cmake)" OFF)
+option(SNX_TRAPV "Build ScarletNX's own code and the game modules' runtime library to trap on signed overflow and \
+on left shifts of negative values (cmake/banned_flags.cmake)" OFF)
+# in the cache: the guard runs this file once, in the first directory to include it (the LLVM backend's)
+set(SNX_TRAPV_FLAGS -ftrapv -fsanitize=shift-base -fsanitize-trap=shift-base CACHE INTERNAL "SNX_TRAPV's flags")
 
 function(snx_check_banned_flags what flags)
     if("${flags}" MATCHES "fno-strict-aliasing")
@@ -46,8 +50,9 @@ function(snx_check_banned_flags_dir dir)
                 snx_check_banned_flags("The target ${target} (${prop})" "${value}")
             endif()
         endforeach()
+        set(trapv OFF)
         if(SNX_TRAPV AND type MATCHES "^(EXECUTABLE|STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY)$")
-            target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:C,CXX>:-ftrapv>)
+            set(trapv ON)
         endif()
         if(NOT type STREQUAL "INTERFACE_LIBRARY")
             get_target_property(sources ${target} SOURCES)
@@ -60,6 +65,12 @@ function(snx_check_banned_flags_dir dir)
                 get_source_file_property(value "${source}" TARGET_DIRECTORY ${target} COMPILE_OPTIONS)
                 get_source_file_property(flags "${source}" TARGET_DIRECTORY ${target} COMPILE_FLAGS)
                 snx_check_banned_flags("The source ${source} of ${target}" "${value} ${flags}")
+                # each of our sources: a package's compiled into one of our targets (plutovg's in the splash) keeps
+                # its own behavior, as it keeps its flags
+                if(trapv AND NOT source MATCHES "/(\\.cache|_deps)/")
+                    set_property(SOURCE "${source}" TARGET_DIRECTORY ${target} APPEND PROPERTY COMPILE_OPTIONS
+                                 "$<$<COMPILE_LANGUAGE:C,CXX>:${SNX_TRAPV_FLAGS}>")
+                endif()
             endforeach()
         endif()
     endforeach()
