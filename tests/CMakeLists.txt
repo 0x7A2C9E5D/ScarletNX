@@ -1621,6 +1621,7 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(snx-test-plat-cpus plat_cpus.c)
     snx_test_target(snx-test-plat-cpus 11)
+    target_link_libraries(snx-test-plat-cpus PRIVATE SDL3::SDL3) # plat_posix.c's threads end SDL's per-thread state
     add_test(NAME plat_cpus COMMAND snx-test-plat-cpus)
 endif()
 
@@ -1647,18 +1648,18 @@ if(UNIX)
         "${PROJECT_SOURCE_DIR}/src/nx/memory/mem.c" "${PROJECT_SOURCE_DIR}/src/nx/memory/own.c"
         "${PROJECT_SOURCE_DIR}/src/nx/hle/svc/svc_mem.c"
         "${PROJECT_SOURCE_DIR}/src/nx/hle/hle.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/plat_posix.c"
-        "${PROJECT_SOURCE_DIR}/src/common/filesystem/host.c")
+        "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/plat_sdl.c" "${PROJECT_SOURCE_DIR}/src/common/filesystem/host.c")
     snx_test_target(snx-test-memory-alias 11)
-    target_link_libraries(snx-test-memory-alias PRIVATE ${CMAKE_DL_LIBS})
+    target_link_libraries(snx-test-memory-alias PRIVATE SDL3::SDL3 ${CMAKE_DL_LIBS})
     add_test(NAME memory_alias COMMAND snx-test-memory-alias)
     set_tests_properties(memory_alias PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
     # GPU-owned memory over the real pool and traps, owners whose GPU copy is host memory (77 without traps)
     add_executable(snx-test-memory-own memory_own.c
         "${PROJECT_SOURCE_DIR}/src/nx/memory/mem.c" "${PROJECT_SOURCE_DIR}/src/nx/memory/own.c"
         "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/plat_posix.c"
-        "${PROJECT_SOURCE_DIR}/src/common/filesystem/host.c")
+        "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/plat_sdl.c" "${PROJECT_SOURCE_DIR}/src/common/filesystem/host.c")
     snx_test_target(snx-test-memory-own 11)
-    target_link_libraries(snx-test-memory-own PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+    target_link_libraries(snx-test-memory-own PRIVATE Threads::Threads SDL3::SDL3 ${CMAKE_DL_LIBS})
     add_test(NAME memory_own COMMAND snx-test-memory-own)
     set_tests_properties(memory_own PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 endif()
@@ -1695,10 +1696,12 @@ add_executable(snx-test-platform-log platform_log.c "${PROJECT_SOURCE_DIR}/src/c
 snx_test_target(snx-test-platform-log 11)
 add_test(NAME platform_log COMMAND snx-test-platform-log "${CMAKE_CURRENT_BINARY_DIR}")
 if(NOT WIN32)
-    # written-page tracking, decommit, pread, file maps, replace, folders, waits and threads (platform/plat_posix.c)
-    add_executable(snx-test-platform-posix platform_posix.c "${PROJECT_SOURCE_DIR}/src/common/filesystem/host.c")
+    # written-page tracking, decommit, pread, file maps, replace, folders, waits and threads (platform/plat_posix.c and
+    # plat_sdl.c)
+    add_executable(snx-test-platform-posix platform_posix.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/plat_sdl.c"
+        "${PROJECT_SOURCE_DIR}/src/common/filesystem/host.c")
     snx_test_target(snx-test-platform-posix 11)
-    target_link_libraries(snx-test-platform-posix PRIVATE ${CMAKE_DL_LIBS})
+    target_link_libraries(snx-test-platform-posix PRIVATE SDL3::SDL3 ${CMAKE_DL_LIBS})
     add_test(NAME platform_posix COMMAND snx-test-platform-posix "${CMAKE_CURRENT_BINARY_DIR}")
 endif()
 if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)

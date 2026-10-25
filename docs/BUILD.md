@@ -188,12 +188,11 @@ brew install cmake ninja
    Homebrew's LLVM also works (`brew install llvm`). Pass `-DSNX_LLVM_CONFIG="$(brew --prefix llvm)/bin/llvm-config"`
    to the configure step below in place of `-DLLVM_DIR`.
 
-2. **Configure, build and install:**
+2. **Configure and build:**
 
    ```sh
    cmake --preset macos -DLLVM_DIR=$HOME/apple-llvm/macos/lib/cmake/llvm
    cmake --build --preset macos
-   cmake --install build/macos --prefix stage
    # -> build/macos/{scarletnx,snx-shaderc}
    ```
 
@@ -203,7 +202,8 @@ brew install cmake ninja
 3. **The app** (optional), for a double-clickable `ScarletNX.app` that carries its own MoltenVK:
 
    ```sh
-   scripts/apple-app.sh macos stage out <moltenvk>   # out/ScarletNX.app
+   cmake build/macos -DSNX_MOLTENVK=<moltenvk>
+   cpack --config build/macos/CPackConfig.cmake -B out   # out/ScarletNX-macos-arm64.zip
    ```
 
    `<moltenvk>` is the extracted `MoltenVK-macos.tar` of the

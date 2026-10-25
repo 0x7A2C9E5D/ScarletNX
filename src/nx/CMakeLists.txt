@@ -76,7 +76,8 @@ target_link_libraries(snx_gpu PRIVATE snx_llvm)
 
 include("${PROJECT_SOURCE_DIR}/cmake/controls_atlas.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
-set(platform runtime/platform/plat.c runtime/platform/unattended.c runtime/platform/backend/sdl3.c
+set(platform runtime/platform/plat.c runtime/platform/plat_sdl.c runtime/platform/unattended.c
+             runtime/platform/backend/sdl3.c
              runtime/platform/backend/gamepad.c runtime/platform/tracy.c
              runtime/platform/hud.c runtime/platform/overlay.c runtime/platform/stats.c runtime/platform/touch.c
              runtime/platform/ui.c runtime/platform/vpad.c runtime/platform/fatal_screen.c
@@ -273,9 +274,9 @@ if(BUILD_TESTING AND SNX_TEST_VULKAN)
     # images in pieces are tested too. `snx-test-astc-vulkan --large` decodes two 512 MiB textures (minutes on lavapipe)
     # cmd.c records the frame's commands through record.c's thread, with the platform's threads and locks
     if(WIN32)
-        set(snx_astc_plat runtime/platform/plat_win32.c)
+        set(snx_astc_plat runtime/platform/plat_win32.c runtime/platform/plat_sdl.c)
     else()
-        set(snx_astc_plat runtime/platform/plat_posix.c)
+        set(snx_astc_plat runtime/platform/plat_posix.c runtime/platform/plat_sdl.c)
     endif()
     add_executable(snx-test-astc-vulkan "${PROJECT_SOURCE_DIR}/tests/astc_vulkan.c" "${PROJECT_SOURCE_DIR}/tests/tracy_stubs.c"
         "${PROJECT_SOURCE_DIR}/tests/support/astc.c" gpu/vk/astc.c
@@ -285,7 +286,7 @@ if(BUILD_TESTING AND SNX_TEST_VULKAN)
         "${CMAKE_BINARY_DIR}/generated/spirv/astc_spv.c" "${CMAKE_BINARY_DIR}/generated/spirv/blocklinear_spv.c"
         "${CMAKE_BINARY_DIR}/generated/spirv/texconv_spv.c")
     target_link_libraries(snx-test-astc-vulkan PRIVATE snx_nx_flags scarletnx-filesystem snx_xxhash Threads::Threads
-                                                      ${CMAKE_DL_LIBS})
+                                                      SDL3::SDL3 ${CMAKE_DL_LIBS})
     set_target_properties(snx-test-astc-vulkan PROPERTIES LINKER_LANGUAGE CXX)
     add_test(NAME astc_vulkan COMMAND snx-test-astc-vulkan)
     add_test(NAME astc_vulkan_pieces COMMAND snx-test-astc-vulkan --vk_max_allocation_mb=4)
@@ -343,6 +344,6 @@ elseif(NOT ANDROID AND NOT IOS)
             COMMAND "${CMAKE_COMMAND}" -E rm -f "${CMAKE_BINARY_DIR}/${name}"
             COMMAND "${CMAKE_COMMAND}" -E create_symlink "$<TARGET_FILE_NAME:scarletnx>" "${CMAKE_BINARY_DIR}/${name}"
             VERBATIM)
-        install(PROGRAMS "${CMAKE_BINARY_DIR}/${name}" DESTINATION bin)
+        install(PROGRAMS "${CMAKE_BINARY_DIR}/${name}" DESTINATION ${CMAKE_INSTALL_BINDIR})
     endforeach()
 endif()
