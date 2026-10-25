@@ -3111,6 +3111,49 @@ int main(int argc, char** argv) {
     assert(app.menu.selected == GUI_GBA);
     render(&app);
     shows(&app, "- Load GBA ROM", yellow);
+    /* a load whose driver is neither beside the menu nor on PATH (on iOS the four the app leaves out) is greyed, still
+       there, as soon as the folder or PATH it is looked for in changes, and Enter on it says which driver rather than
+       opening its screen; put back, Enter looks again and opens it; gone again, the row greys within a second (#640) */
+    {
+#ifdef _WIN32
+        char* vita = snx_path_join(app.drivers, "scarletnx-vita.exe");
+#else
+        char* vita = snx_path_join(app.drivers, "scarletnx-vita");
+#endif
+        char* aside = snx_format("%s.aside", vita);
+        char* path = SDL_strdup(getenv("PATH"));
+        assert(!rename(vita, aside));
+        set_env("PATH", "/nonexistent"); /* none of the machine's own */
+        render(&app);
+        shows(&app, "- Load Vita VPK", rgb(app.theme.soft)); /* not focused, greyed */
+        shows(&app, "- Load 3DS game", normal);              /* its driver there */
+        app.menu.selected = GUI_VITA;
+        key(&app, SDLK_RETURN);
+        assert(app.menu.view == GUI_LOAD_NONE && !app.menu.activated && app.menu.selected == GUI_VITA);
+        assert(!strcmp(app.message, "Cannot find scarletnx-vita beside ScarletNX or on PATH."));
+        render(&app);
+        shows(&app, "- Load Vita VPK", rgb(app.theme.soft)); /* focused, greyed */
+        hides(&app, "- Load Vita VPK", yellow);
+        assert(!rename(aside, vita));
+        key(&app, SDLK_RETURN); /* looked for again as it is pressed */
+        assert(app.menu.view == GUI_LOAD_DROP && app.menu.active == GUI_VITA);
+        key(&app, SDLK_ESCAPE);
+        /* gone again, nothing else changed: greyed once it was looked for a second ago */
+        assert(!rename(vita, aside));
+        if (SDL_GetTicks() < 1001) SDL_Delay((Uint32)(1001 - SDL_GetTicks()));
+        app.loads_at = SDL_GetTicks() - 1000;
+        render(&app);
+        shows(&app, "- Load Vita VPK", rgb(app.theme.soft));
+        assert(!rename(aside, vita));
+        set_env("PATH", path);
+        SDL_free(path);
+        free(aside);
+        free(vita);
+        app.menu.activated = false;
+        app.menu.active = GUI_SWITCH;
+        app.menu.selected = GUI_GBA;
+        app.message[0] = 0;
+    }
     key(&app, SDLK_RIGHT);
     assert(app.menu.selected == GUI_KEYS);
     /* Never touch the real user's keys: exercise installation in a private home. */

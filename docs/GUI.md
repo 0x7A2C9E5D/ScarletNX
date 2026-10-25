@@ -56,7 +56,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
   presses the key when its words all press one. `Arrows`, `mouse`, `pad` and `D-pad` press nothing.
 - The menu, top to bottom: the three loads, **Install Keys**, **Settings**, **Share Log**, on
-  Android **Open Data Folder**, and **Exit**. The games, and the recent ones, are the Games tab's.
+  Android **Open Data Folder**, and **Exit**. The games, and the recent ones, are the Games tab's. A load whose driver
+  is neither beside ScarletNX nor on PATH, as those an app leaves out ([APPLE](APPLE.md)), is greyed out, still there,
+  and Enter or a tap on it says which driver it misses rather than opening its screen; the drivers are looked for
+  again each second, and with F5.
 - Space, Enter or a left click explicitly activates an item, marking it bright
   pink. Activation is tracked separately from hover/focus, so the activated item
   stays pink while another item is hovered in yellow. Mouse controls also work

@@ -251,6 +251,11 @@ typedef struct App {
     Uint64 entering_ms;         /* the menu fading out since, before a run fades in */
     char* self;    /* the program that runs Switch inputs: the runtime the menu is part of, NULL to look for one */
     char* drivers; /* the folder the other drivers are looked for in first */
+    /* the menu's loads whose driver is not there (loads_off), a bit an item, as looked for at loads_at with drivers,
+       self and PATH hashing to loads_key */
+    unsigned loads_off;
+    uint64_t loads_key;
+    Uint64 loads_at;
     char *cwd, *file, *games_dir, *keys_path;
     char*
         data_dir; /* recompiled/, dumps/, work/ and themes/: the driver's too, which gets it as --repo (snx_data_dir) */
@@ -3014,6 +3019,7 @@ static int SDLCALL dump_icons_run(void* data) {
     return 0;
 }
 static char* find_driver(const App* app, int item);
+static unsigned loads_off(App* app);
 /* a dump's icon to ask the driver for, once: false when it cannot be asked (no driver, the queue full) */
 static bool dump_icon_ask(App* app, const char* dump, const char* dir) {
     GuiDumpIcons* d = &app->dump_icons;
@@ -5189,7 +5195,7 @@ static void menu_side(App* app, const GuiMenuBoxes* m) {
 }
 /* the entries' attributes: the one activated last in the active colour; blinking in the failure colour, Setup device
    keys while no prod.keys is in use, so a first start shows what to do first, and Share Log after a run crashed until
-   its log is saved */
+   its log is saved; greyed, a load whose driver is not there */
 unsigned ui_menu_entries_attr_cb(App* app, size_t row) {
     unsigned attr = app->menu.activated && (size_t)app->menu.active == row ? UI_ATTR_ACTIVE : 0;
     if (row == GUI_KEYS) {
@@ -5198,6 +5204,7 @@ unsigned ui_menu_entries_attr_cb(App* app, size_t row) {
         free(in_use);
     }
     if (row == GUI_LOG && app->log_due) attr |= UI_ATTR_FAILURE | UI_ATTR_BLINK;
+    if (row <= GUI_GBA && (loads_off(app) >> row & 1u)) attr |= UI_ATTR_OFF;
     return attr;
 }
 static void draw_menu(App* app) {
@@ -5911,6 +5918,8 @@ static const char* driver_name(int item) {
         case GUI_SWITCH: return "libscarletnx-run.so";
         case GUI_LINUX: return "libscarletnx-gnuabi.so";
         case GUI_3DS: return "libscarletnx-3ds.so";
+        case GUI_VITA: return "libscarletnx-vita.so";
+        case GUI_GBA: return "libscarletnx-agb.so";
 #else
         case GUI_SWITCH: return "scarletnx";
         case GUI_LINUX: return "scarletnx-gnuabi";
@@ -5935,6 +5944,34 @@ static char* find_driver(const App* app, int item) {
     free(filename);
     free(local);
     return found ? found : snx_find_tool(name);
+}
+/* a load's driver is there to run: on iOS the Switch's is the app's own, on a thread (launch) */
+static bool driver_there(const App* app, int item) {
+    char* driver;
+#ifdef SDL_PLATFORM_IOS
+    if (item == GUI_SWITCH) return true;
+#endif
+    driver = find_driver(app, item);
+    free(driver);
+    return driver != NULL;
+}
+static uint64_t text_hash(uint64_t h, const char* text) {
+    for (const char* c = text ? text : ""; *c; ++c) h = (h ^ (unsigned char)*c) * 1099511628211ull;
+    return (h ^ 0xffu) * 1099511628211ull; /* where it ends, so "a" then "bc" is not "ab" then "c" */
+}
+/* the menu's loads whose driver is not there, a bit an item (1u << GUI_LINUX): their rows greyed, Enter on one saying
+   which driver (#640). Looked for again once a second, as a driver put in or taken out shows, and at once when the
+   folder they are looked for in, the menu's own program or PATH change */
+static unsigned loads_off(App* app) {
+    uint64_t key = text_hash(text_hash(text_hash(1469598103934665603ull, app->drivers), app->self), getenv("PATH"));
+    Uint64 now = SDL_GetTicks();
+    if (app->loads_at && key == app->loads_key && now - app->loads_at < 1000) return app->loads_off;
+    app->loads_off = 0;
+    for (int item = GUI_SWITCH; item <= GUI_GBA; ++item)
+        if (!driver_there(app, item)) app->loads_off |= 1u << item;
+    app->loads_key = key;
+    app->loads_at = SDL_max(now, 1);
+    return app->loads_off;
 }
 /* what argv prints, NULL unless it ends with 0, killed after ten seconds; owned. On a process of its own: the menu's
    run and the queue's recompile go on */
@@ -12140,6 +12177,15 @@ static void menu_key(App* app, GuiKey key) {
         return;
     }
     if (pick_screen(app) && key != GUI_SELECT && key != GUI_CANCEL) return; /* nothing there to move to */
+    /* a load whose driver is not there opens no screen: it says which driver, looked for again now (#640) */
+    if (key == GUI_SELECT && app->menu.view == GUI_LOAD_NONE && !app->menu.running && app->menu.selected <= GUI_GBA) {
+        app->loads_at = 0;
+        if (loads_off(app) >> app->menu.selected & 1u) {
+            snprintf(app->message, sizeof(app->message), snx_tr("Cannot find %s beside ScarletNX or on PATH."),
+                     driver_name(app->menu.selected));
+            return;
+        }
+    }
     switch (gui_menu_key(&app->menu, key)) {
         case GUI_MENU_SETTINGS: open_settings(app); break;
         case GUI_MENU_LOG: share_log(app); break;
@@ -12792,6 +12838,7 @@ static void files_step(App* app, int step) {
    next look; the Library and Folders say how many of their folders are there, Games how many games it lists */
 static void refresh(App* app) {
     app->clean_found = -1; /* Clean Old Settings looks again */
+    app->loads_at = 0;     /* the loads' drivers looked for again */
     if (app->left_shown) {
         left_behind(app);
         app->left_shown = app->lefts > 0;
