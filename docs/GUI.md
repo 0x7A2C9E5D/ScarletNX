@@ -20,8 +20,8 @@ embedded public-domain 8x16 VGA BIOS font, with GNU Unifont's 8x16 glyphs fitted
 lacks and its 16x16 ones, two columns each, for the wide letters a language shows (Chinese), and nearest-neighbor
 integer scaling; its words are English or a language compiled into it ([Languages](#languages)). An item of a menu
 has an icon beside its name, 16x16 in the font's stroke (`src/gui/icons.hex`): the menu's, the groups of the Settings and
-their rows that open a screen or do something (the others keep its columns), a game's box's actions and the setup's
-pages. No font files or localization packages are needed.
+their rows that open a screen or do something (the others keep its columns), a game's box's actions, the setup's pages
+and the game's menu's. No font files or localization packages are needed.
 
 ```sh
 ./build/scarletnx
