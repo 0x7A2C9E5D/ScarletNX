@@ -69,8 +69,11 @@ the primary key (slot 0x2C) and the secondary one its crypto method names (0x2C,
 0x25, 0x18, 0x1B). The decrypted CIA says NoCrypto and carries the decrypted
 contents' hashes, and it is checked as any game is before it is published, so keys
 that are not the console's never leave a game behind. Seed crypto (seeddb) is not
-supported yet. An encrypted cartridge image or bare NCCH has no CIA layer for this
-to take off, and its NCCH's own layer is not taken off yet: one is refused, and an
+supported yet. An encrypted cartridge image or bare NCCH has no CIA layer: its
+NCCHs' own layer is taken off where each NCCH lies (the game partition and an update
+partition both), and the whole image copied through into the copy beside the title's
+folder (`<folder>.decrypted.cci`), named by the input's extension, then checked as
+any image is. A copy of a card-sized image takes its size in disk, and an
 already-decrypted image is read as it is.
 
 Code the static discovery misses (an indirect call's target, a return into it)

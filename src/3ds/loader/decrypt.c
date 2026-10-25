@@ -13,9 +13,9 @@
    A normal key is the console's key scrambler of KeyX and KeyY: ((KeyX <<< 2) ^ KeyY) + C <<< 87, C the generator
    constant. Every key and the constant come from the user's aes_keys.txt (Azahar's format), none is in this code.
    The decrypted CIA's NCCHs say NoCrypto, and its TMD the contents' new hashes, so the loader checks it as any other
-   decrypted CIA. A cartridge image (a CCI or a .3ds) and a bare NCCH (.cxi, an .app, homebrew's .hbb) have
-   no CIA layer: their NCCH's is the same layer a CIA's contents carry, and it is not taken off here yet, so
-   an encrypted cartridge image is refused until the decrypted copy carries it. */
+   decrypted CIA. A cartridge image (a CCI or a .3ds) and a bare NCCH (.cxi, an .app, homebrew's .hbb) have no CIA
+   layer: their NCCHs' own is the same layer a CIA's contents carry, and it is taken off where each NCCH lies, the
+   whole image copied through, the copy checked as any image is before it is published. */
 #include "3ds/loader/internal.h"
 #include <ctype.h>
 #include <inttypes.h>
@@ -304,6 +304,117 @@ static bool verified(CtrReader* r, const char* path) {
     return ok;
 }
 
+/* One NCCH of an image to decrypt: where it lies (a cartridge's partition, or a bare NCCH's whole file), its
+   0x200 header with the NoCrypto the decryption writes into it, and the ranges ncch_begin laid out over it */
+typedef struct {
+    CtrSpan span;
+    unsigned char header[0x200];
+    Ncch ncch;
+} Layer;
+/* A cartridge image's or a bare NCCH's own layer, taken off where each NCCH lies: every partition that holds an
+   NCCH is decrypted as a CIA's content is (ncch_begin lays its ranges out, ncch_chunk decrypts them), and the
+   whole file copied through, so the copy reads as any image of its kind does, its NCCHs saying NoCrypto. An image
+   with nothing encrypted is left alone, *encrypted false and nothing written; the keys are read only then. The
+   copy is published only after it passes the checks the loader makes of any image, so keys that are not the
+   console's never leave one behind. */
+static bool ncch_image(CtrReader* r, const char* keys_path, const char* output, bool* encrypted) {
+    unsigned char header[0x200];
+    Layer* layers = calloc(8, sizeof *layers); /* a cartridge image's eight partitions, or a bare NCCH's one */
+    FILE* out = NULL;
+    char* stage = NULL;
+    unsigned char* buffer = NULL;
+    Keys* k = NULL;
+    size_t count = 0, encrypted_count = 0;
+    bool ok = false;
+    if (!layers) return ctr_fail(r, SNX_CTR_EXTRACT_LIMIT, "out of memory");
+    if (!ctr_read(r, (CtrSpan){0, r->size}, 0, header, sizeof header)) goto done;
+    if (!memcmp(header + 0x100, "NCCH", 4)) {
+        layers[count].span = (CtrSpan){0, r->size};
+        memcpy(layers[count++].header, header, sizeof header);
+    } else {
+        for (unsigned index = 0; index < 8; ++index) {
+            const unsigned char* p = header + 0x120 + index * 8;
+            uint64_t at = (uint64_t)ctr_le32(p) * 0x200, size = (uint64_t)ctr_le32(p + 4) * 0x200;
+            if (!size || !at || !ctr_fits(r->size, at, size)) continue;
+            if (!ctr_read(r, (CtrSpan){0, r->size}, at, layers[count].header, sizeof layers[count].header))
+                goto done;
+            layers[count].span = (CtrSpan){at, size};
+            ++count;
+        }
+    }
+    for (size_t i = 0; i < count; ++i)
+        if (!memcmp(layers[i].header + 0x100, "NCCH", 4) && !(layers[i].header[0x18f] & 4)) ++encrypted_count;
+    if (!encrypted_count) {
+        *encrypted = false; /* nothing to write: the image is read as it is */
+        ok = true;
+        goto done;
+    }
+    k = calloc(1, sizeof *k);
+    if (!k) {
+        ctr_fail(r, SNX_CTR_EXTRACT_LIMIT, "out of memory");
+        goto done;
+    }
+    if (!keys_load(r, keys_path, k)) goto done;
+    for (size_t i = 0; i < count; ++i) {
+        if (memcmp(layers[i].header + 0x100, "NCCH", 4) || (layers[i].header[0x18f] & 4)) continue;
+        /* the partition is the NCCH's container: its sections must fit in it, as a CIA content's do in it */
+        if (!ncch_begin(r, k, layers[i].header, layers[i].span.size, &layers[i].ncch) || !layers[i].ncch.active)
+            goto done;
+    }
+    stage = snx_format("%s.partial", output);
+    if (!stage || !(out = fopen(stage, "wb"))) {
+        ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot create %s", stage ? stage : output);
+        goto done;
+    }
+    buffer = malloc(CHUNK);
+    if (!buffer) {
+        ctr_fail(r, SNX_CTR_EXTRACT_LIMIT, "out of memory");
+        goto done;
+    }
+    for (uint64_t at = 0; at < r->size;) {
+        size_t n = r->size - at < CHUNK ? (size_t)(r->size - at) : CHUNK;
+        if (!ctr_read(r, (CtrSpan){0, r->size}, at, buffer, n)) goto done;
+        for (size_t i = 0; i < count; ++i) {
+            const Layer* l = &layers[i];
+            if (!l->ncch.active) continue;
+            uint64_t from = l->span.offset > at ? l->span.offset : at;
+            uint64_t to = l->span.offset + l->span.size < at + n ? l->span.offset + l->span.size : at + n;
+            if (from < to &&
+                !ncch_chunk(r, &layers[i].ncch, from - l->span.offset, buffer + (from - at), (size_t)(to - from)))
+                goto done;
+            /* the header itself is plain, and carries the NoCrypto the decryption gave it */
+            if (l->span.offset >= at && l->span.offset < at + n)
+                memcpy(buffer + (l->span.offset - at), l->header, sizeof l->header);
+        }
+        if (fwrite(buffer, 1, n, out) != n) {
+            ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot write the decrypted game");
+            goto done;
+        }
+        at += n;
+    }
+    if (fclose(out)) {
+        out = NULL;
+        ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot write the decrypted game");
+        goto done;
+    }
+    out = NULL;
+    if (!verified(r, stage)) goto done;
+    if (snx_replace(stage, output)) {
+        ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot move %s to %s", stage, output);
+        goto done;
+    }
+    *encrypted = true;
+    ok = true;
+done:
+    if (out) fclose(out);
+    if (!ok && stage) remove(stage);
+    if (k) OPENSSL_cleanse(k, sizeof *k);
+    free(k);
+    free(buffer);
+    free(stage);
+    free(layers);
+    return ok;
+}
 static bool decrypt(CtrReader* r, const char* keys_path, const char* output, bool* encrypted) {
     unsigned char header[0x2020], *ticket = NULL, *tmd = NULL, *buffer = NULL, title_key[16];
     FILE* out = NULL;
@@ -317,26 +428,10 @@ static bool decrypt(CtrReader* r, const char* keys_path, const char* output, boo
         goto done;
     }
     if (!ctr_read(r, (CtrSpan){0, r->size}, 0, header, sizeof header)) goto done;
-    /* A cartridge image and a bare NCCH have no CIA layer to take off: their NCCH's own is the same layer the
-       CIA's contents carry, and taking it off where the NCCH lies is not written yet, so an encrypted one is
-       refused until then. An image whose NCCH says NoCrypto already is read as it is. The flag is the game NCCH's,
-       which for a cartridge is the game partition's, not the NCSD header's */
+    /* A cartridge image and a bare NCCH have no CIA layer: their NCCHs' own is the same layer the CIA's contents
+       carry, taken off where each NCCH lies, and the whole image copied through with it */
     if (!memcmp(header + 0x100, "NCSD", 4) || !memcmp(header + 0x100, "NCCH", 4)) {
-        CtrReader read = {.error = r->error, .error_size = r->error_size, .quick = true, .input = r->input,
-                          .size = r->size};
-        CtrSource s = {0};
-        bool parsed = ctr_source_load(&read, &s);
-        if (parsed) {
-            const CtrNcch* n = s.overlay ? &s.over : &s.base;
-            if (n->header[0x18f] & 4)
-                *encrypted = false; /* nothing to write: the game is read as it is */
-            else
-                ctr_fail(r, SNX_CTR_EXTRACT_UNSUPPORTED,
-                         "the game's NCCH is encrypted, and decrypting a cartridge image or an NCCH is not "
-                         "implemented yet (a CIA is)");
-        }
-        ctr_source_free(&s);
-        ok = parsed && r->result == SNX_CTR_EXTRACT_OK;
+        ok = ncch_image(r, keys_path, output, encrypted);
         goto done;
     }
     if (ctr_le32(header) != 0x2020) {
