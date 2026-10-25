@@ -420,6 +420,9 @@ endif()
 
 # Validate the direct writer against SPIRV-Tools when the system tools are installed.
 if(SNX_BUILD_NX)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME maxwell_reference COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/maxwell_reference_test.py")
+    endif()
     find_program(SNX_SPIRV_VAL spirv-val)
     find_program(SNX_SPIRV_DIS spirv-dis)
     if(SNX_SPIRV_VAL AND SNX_SPIRV_DIS AND Python3_Interpreter_FOUND)
