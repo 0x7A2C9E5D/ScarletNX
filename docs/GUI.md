@@ -395,8 +395,8 @@ cannot be read is named and the others still listed.
   and cheats, **Open Folder** lists the game's folders to open (its dump's, its own, saves, settings, logs, caches; one
   not there greyed) and **Clean Cache** deletes its shader and code caches, asked first ([USAGE](USAGE.md#mods)). On
   another row, a dump, a package or another console's game, it says what it opens. The side panel of a recompiled
-  game says how its code was made (`Made with: O2, AOT 81% of the code`, `?` for one an older version made) and, in
-  the failure colour, `Needs Recompile` when Play compiles it first.
+  game says how its code was made (`Made with: O2, AOT 81%`, `?` for one an older version made), or, in the failure
+  colour, `Needs Recompile` when Play compiles it first.
 - In the list, Left/Right and PgUp/PgDown go to the previous/next page. The page number and
   total file count are shown. Paging stops at the first and last pages.
 - Resizing adjusts the page size while keeping the selected file visible.

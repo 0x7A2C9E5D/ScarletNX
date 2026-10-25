@@ -47,13 +47,13 @@ later session adds to it.
    it found:
 
    ```
-   Made with: O2, AOT 81% of the code
+   Made with: O2, AOT 81%
    JIT cache: 49 KB, O2
    AOT build: O2
    ```
 
-   `Needs Recompile` in the failure colour under the first line means another build made the game, or with other mods:
-   Play compiles it first.
+   `Needs Recompile` in the failure colour in the first line's place means another build made the game, or with other
+   mods: Play compiles it first.
 
    `levels differ` in the failure colour means the cache and the current AOT level do not match; the build is
    refused until they do. `JIT cache: none yet` means the game has not been played with the current runtime;

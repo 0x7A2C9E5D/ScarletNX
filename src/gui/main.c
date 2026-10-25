@@ -5491,8 +5491,8 @@ static int games_queued(App* app, GuiRect r, int y) {
     y += wrap_in(app, r, r.x, y, snx_tr("R on another game: it joins the queue"), 0, soft) * cell_h(app);
     return y - top;
 }
-/* how a game's code was made, as the side panel says it: its -O, and the share of the modules' code the analysis made
-   ahead of time, or JIT only; ? for what its stamp does not say (an older version's) */
+/* how a game's code was made, as the side panel says it in a line: its -O, and the share of the modules' code the
+   analysis made ahead of time, or JIT only; ? for what its stamp does not say (an older version's) */
 static void made_text(const SnxGameMade* m, char* out, size_t size) {
     char share[32];
     if (!m->opt) {
@@ -5509,7 +5509,7 @@ static void made_text(const SnxGameMade* m, char* out, size_t size) {
         snprintf(share, sizeof share, "<1%%");
     else
         snprintf(share, sizeof share, "%llu%%", m->found * 100 / m->code);
-    snprintf(out, size, snx_tr("Made with: O%c, AOT %s of the code"), m->opt, share);
+    snprintf(out, size, snx_tr("Made with: O%c, AOT %s"), m->opt, share);
 }
 static void draw_games(App* app) {
     GuiGamesBoxes g;
@@ -5541,12 +5541,11 @@ static void draw_games(App* app) {
             snprintf(line, sizeof line, snx_tr("Debug on: %s"), app->debug_focus);
             y += wrap_in(app, r, r.x, y, line, 0, failure) * cell_h(app);
         }
-        if (app->aot_focus) { /* a recompiled game's: how its code was made, and whether Play makes it again first */
+        if (app->aot_focus && !app->made_here) /* a recompiled game Play compiles first: what was made goes */
+            y += wrap_in(app, r, r.x, y, snx_tr("Needs Recompile"), 0, failure) * cell_h(app);
+        else if (app->aot_focus) { /* how its code was made: a line, the side box's folders under it */
             made_text(&app->made, line, sizeof line);
             y += wrap_in(app, r, r.x, y, line, 0, soft) * cell_h(app);
-            if (!app->made_here)
-                y += wrap_in(app, r, r.x, y, snx_tr("Needs Recompile: Play compiles it first"), 0, failure) *
-                     cell_h(app);
         }
         if (app->aot_state == GUI_AOT_CACHE) {
             char size[32];

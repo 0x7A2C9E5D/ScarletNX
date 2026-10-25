@@ -1737,7 +1737,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Made with: O%c, AOT %s of the code"
+msgid "Made with: O%c, AOT %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -1746,7 +1746,7 @@ msgid "Debug on: %s"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Needs Recompile: Play compiles it first"
+msgid "Needs Recompile"
 msgstr ""
 
 #: src/gui/main.c

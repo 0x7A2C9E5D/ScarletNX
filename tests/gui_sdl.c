@@ -7376,19 +7376,19 @@ int main(int argc, char** argv) {
                 assert(!strcmp(line, "Made with: ?"));
                 m = (SnxGameMade){'3', 1, 812345, 1003210};
                 made_text(&m, line, sizeof line);
-                assert(!strcmp(line, "Made with: O3, AOT 80% of the code"));
+                assert(!strcmp(line, "Made with: O3, AOT 80%"));
                 m = (SnxGameMade){'2', 1, 1, 1000};
                 made_text(&m, line, sizeof line);
-                assert(!strcmp(line, "Made with: O2, AOT <1% of the code"));
+                assert(!strcmp(line, "Made with: O2, AOT <1%"));
                 m = (SnxGameMade){'2', 1, 0, 0}; /* a 32-bit game's */
                 made_text(&m, line, sizeof line);
-                assert(!strcmp(line, "Made with: O2, AOT ? of the code"));
+                assert(!strcmp(line, "Made with: O2, AOT ?"));
                 m = (SnxGameMade){'0', 0, 0, 4096};
                 made_text(&m, line, sizeof line);
                 assert(!strcmp(line, "Made with: O0, JIT only"));
             }
-            { /* the focused game's side panel: made with what its stamp says, and Needs Recompile, in the failure
-                 colour, once its stamp is another ABI's (Play compiles it first, as made_here says) */
+            { /* the focused game's side panel: made with what its stamp says; once its stamp is another ABI's (Play
+                 compiles it first, as made_here says), Needs Recompile in the failure colour in that line's place */
                 char *stamp = snx_path_join(own, "0100ABCD12340000.abi"), /* beside the program, .exe or not */
                     *text = snx_format("%u\nmade opt=3 aot=1 found=1 code=2\n", (unsigned)SNX_ABI);
                 assert(!snx_write_file(stamp, text, strlen(text)));
@@ -7405,8 +7405,8 @@ int main(int argc, char** argv) {
                 aot_clear_focus(&app);
                 render(&app);
                 assert(!app.made.opt && !app.made_here);
-                assert(find_text(&app, "Made with: ?", rgb(app.theme.soft), 1, &nx, &ny));
                 assert(find_text(&app, "Needs Recompile", rgb(app.theme.failure), 1, &nx, &ny));
+                assert(!find_text(&app, "Made with", rgb(app.theme.soft), 1, &nx, &ny)); /* a line: what goes */
                 stamp_here(own, "0100ABCD12340000");
                 aot_clear_focus(&app);
                 free(text);
@@ -7423,7 +7423,7 @@ int main(int argc, char** argv) {
                 app.addons_focus = 13;
                 key(&app, SDLK_RETURN);
                 assert(app.addons_folders_shown && addons_rows(&app) == GUI_GAME_FOLDERS && !app.addons_focus);
-                assert(!app.addons_folders[GUI_FOLDER_DUMP]); /* made with no source= */
+                assert(!app.addons_folders[GUI_FOLDER_DUMP]);                    /* made with no source= */
                 assert(snx_same_file(app.addons_folders[GUI_FOLDER_GAME], own)); /* in the system's separators */
                 free(saves);
                 saves = snx_strdup(app.addons_folders[GUI_FOLDER_SAVES]); /* as the code stored it */
