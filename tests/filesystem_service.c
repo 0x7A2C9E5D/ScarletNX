@@ -1609,13 +1609,16 @@ static void temp_empty(void) { /* as fs_init leaves it: every launch starts the 
     pm_unlock(&g_hle.fs.tree.lock);
     CHECK(r == FS_TREE_OK || r == FS_TREE_NOTFOUND);
 }
-/* the state's open file systems, files and folders found again and put in place, as state_load does: found first,
-   then what the running game had open let go of, then the state's in place. 0, or -1 with why when refused */
-static int load_fs(StateBytes* list, StateBytes* temp, const HleFs* saved, char* why, size_t size) {
+/* the state's open file systems, files and folders found again, as state_load does first: NULL with why when refused */
+static FsStaged* resolve_fs(StateBytes* list, StateBytes* temp, const HleFs* saved, char* why, size_t size) {
     StateIo lio = {list, bytes_put, bytes_get}, tio = {temp, bytes_put, bytes_get};
     list->at = 0;
     if (temp) temp->at = 0;
-    FsStaged* st = fs_state_resolve(&lio, temp ? &tio : NULL, saved, why, size);
+    return fs_state_resolve(&lio, temp ? &tio : NULL, saved, why, size);
+}
+/* and then what the running game had open let go of, and the state's in place: 0, or -1 with why when refused */
+static int load_fs(StateBytes* list, StateBytes* temp, const HleFs* saved, char* why, size_t size) {
+    FsStaged* st = resolve_fs(list, temp, saved, why, size);
     if (!st) return -1;
     fs_state_drop();
     fs_state_install(st);
@@ -1644,11 +1647,16 @@ static void test_state_temp(SvcObj* proxy) {
     *saved = g_hle.fs; /* what the state's g_hle holds of fs */
     CHECK(!fs_state_save(&lio) && !fs_state_temp_save(&tio));
 
-    /* a fresh process: save/temp empty, and the game had it and a.bin in it open */
+    /* a fresh process: nothing open (Windows deletes no open file), save/temp empty, and the game had it and a.bin in it
+       open */
+    fs_state_drop();
     temp_empty();
     CHECK(!tree_has("save/temp"));
-    CHECK(load_fs(&list, NULL, saved, why, sizeof why) && strstr(why, "the game had save/temp open, which isn't there"));
-    CHECK(!load_fs(&list, &temp, saved, why, sizeof why));
+    CHECK(!resolve_fs(&list, NULL, saved, why, sizeof why) &&
+          strstr(why, "the game had save/temp open, which isn't there"));
+    FsStaged* fresh = resolve_fs(&list, &temp, saved, why, sizeof why);
+    CHECK(fresh != NULL);
+    fs_state_install(fresh);
     CHECK(tree_has("save/temp/a.bin") && tree_has("save/temp/d") && tree_has("save/temp/d/b.bin"));
     CHECK(read_data(a, 0, 16, 0) == 5 && !memcmp(GP(0x5000), "hello", 5)); /* a.bin open again, its bytes the state's */
     b = open_object(fs, 8, "/d/b.bin", 1);
