@@ -1287,6 +1287,15 @@ if(UNIX AND NOT CMAKE_CROSSCOMPILING)
                     --emitter $<TARGET_FILE:snx-test-thumb-emit> --runtime $<TARGET_FILE:snx_arm_rt> --mc "${SNX_LLVM_MC}"
                     --cc "${CMAKE_C_COMPILER}")
                 set_tests_properties(thumb_llvm PROPERTIES TIMEOUT 900)
+                # random encodings of every class, llvm-objdump keeping the A57's, from random FP and flag state
+                find_program(SNX_LLVM_OBJDUMP llvm-objdump HINTS "${snx_llvm_bin}" NO_DEFAULT_PATH)
+                if(SNX_LLVM_OBJDUMP)
+                    add_test(NAME arm_llvm_fuzz COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/arm_fuzz.py"
+                        --arm-emitter $<TARGET_FILE:snx-test-arm-emit> --thumb-emitter $<TARGET_FILE:snx-test-thumb-emit>
+                        --runtime $<TARGET_FILE:snx_arm_rt> --mc "${SNX_LLVM_MC}" --objdump "${SNX_LLVM_OBJDUMP}"
+                        --cc "${CMAKE_C_COMPILER}" --count 1500)
+                    set_tests_properties(arm_llvm_fuzz PROPERTIES TIMEOUT 1800)
+                endif()
             endif()
         endif()
     endif()

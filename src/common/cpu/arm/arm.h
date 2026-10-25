@@ -163,7 +163,8 @@ typedef enum {
     TH_REV,       /* ARM11 Thumb REV/REV16/REVSH */
     TH_A32,       /* a Thumb32 instruction that is an A32 one in another encoding: .imm is the A32 word (condition
                      AL) and .op its SnxA32Kind, emitted by the A32 emitter with Thumb's PC. .ra is a doubleword
-                     exclusive's second register + 1 (A32's is the first + 1), else 0. Coprocessor, VFP and Advanced
+                     exclusive's second register + 1 (A32's is the first + 1), else 0, and .rd the offset T1's LDREX
+                     and STREX add to the base (A32's have none). Coprocessor, VFP and Advanced
                      SIMD, LDM/STM, exclusives, barriers, MRS/MSR, long multiplies and divides, REV and CLZ */
     TH_DUAL       /* LDRD/STRD: .op 1 to load, .rd and .rm the pair, .imm the offset, P/U/W in .flags */
 } SnxThumbShape;

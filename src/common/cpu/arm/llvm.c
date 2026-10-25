@@ -24,7 +24,9 @@ typedef struct {
     uint32_t next; /* the next instruction's address */
     int thumb;     /* a Thumb block: an A32 emitter running a Thumb32 instruction's A32 twin reads Thumb's PC */
     int in_it;     /* the Thumb instruction being emitted is in an IT block: its 16-bit data processing sets no flags */
-    unsigned pair; /* a Thumb32 doubleword exclusive's second register + 1 (TH_A32's .ra); 0: A32's first + 1 */
+    unsigned it_next; /* ITSTATE after it: an SVC or BKPT that ends the block inside one leaves it in CPSR */
+    unsigned pair;   /* a Thumb32 doubleword exclusive's second register + 1 (TH_A32's .ra); 0: A32's first + 1 */
+    uint32_t offset; /* what a Thumb32 LDREX or STREX adds to its base (TH_A32's .rd); A32's add nothing */
     SnxArmProfile profile;
     SnxArmMemoryMode memory;
     LLVMValueRef transfer_base, transfer_buffer;
@@ -681,7 +683,7 @@ static void exclusive(ArmIR* a) {
     static const unsigned widths[] = {4, 8, 1, 2};
     unsigned bytes = widths[op >> 1];
     LLVMTypeRef type = LLVMIntTypeInContext(a->ctx, bytes * 8);
-    LLVMValueRef addr = reg(a, n), p, value;
+    LLVMValueRef addr = add(a, reg(a, n), c32(a, a->offset)), p, value;
     bounds(a, addr, bytes, bytes);
     p = memptr(a, addr);
     if (op & 1) {
