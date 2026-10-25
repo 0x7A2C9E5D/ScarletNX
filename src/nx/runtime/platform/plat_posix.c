@@ -481,7 +481,7 @@ u64 plat_vm_page(void) {
 /* mmap aligns to the host's own page: a larger plat_vm_page (SNX_HOST_PAGE) takes a page more and trims the rest, so
    guest addresses sit at the same place in a page as their host addresses */
 int plat_address_space(u64* mapped, u64* largest_free) {
-    u64 total = 0, hole = 0, last = 0;
+    u64 total = 0, hole = 0;
 #if defined(__linux__)
     /* each mapping's range, in address order, a line each */
     char line[PATH_MAX + 128];
