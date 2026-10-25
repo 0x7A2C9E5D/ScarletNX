@@ -677,6 +677,13 @@ detected joystick, whether it has an SDL mapping, and any gamepad open error. On
 the hidraw nodes of the console's controllers, for Joy-Con features. Reload udev rules and reconnect the controller
 after installation. Other HIDAPI controllers may need their vendor's own hidraw rule.
 
+On FreeBSD SDL reads the pads itself, over HIDAPI and libusb (the only way an Xbox pad is read: its own protocol is
+not HID) and the `usbhid` stack's `/dev/uhid*` nodes. Install `games/devd-controller-rules` and put your user in the
+`games` group: its devd rules give SDL's libusb the controller's USB device. The `libusb` package must be installed,
+which SDL loads when HIDAPI starts. A pad a driver has claimed — `xb360gp(4)`, `hgame(4)` or `webcamd`, which hand it
+out as `/dev/input/event*` and `/dev/input/js*` — sits where SDL cannot read it: stop that driver and reconnect the
+pad.
+
 | Keyboard | Switch |
 | --- | --- |
 | Arrows; WASD / IJKL | D-pad; L/R sticks |
