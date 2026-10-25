@@ -58,8 +58,25 @@ IPC requests allow 0x300-byte paths excluding NUL. Host limits also apply.
 
 ## Shared fonts
 
-Place `fonts/FontStandard.ttf` inside the game's data directory before starting the game. For the default
-title-ID layout, the full path is `recompiled/<id>/<id>_data/fonts/FontStandard.ttf` under the
-[data folder](USAGE.md#folders). Named or older deployments use their existing `<Game>_data/` directory.
-`FontStandard.bfttf` is also accepted and takes priority over `.ttf`. Both take priority over the built-in
-stand-in fonts. Font substitution can change text weight and spacing.
+The six fonts of `pl:u` (FontStandard, the two simplified Chinese fonts, traditional Chinese, Korean and
+NintendoExtended) live in one shared memory, each behind the 8-byte header the SDK reads its size from. The
+console's memory is 0x1100000 bytes and the SDK maps exactly that much, as Eden's `pl_u.cpp` does, so the
+fonts have to fit in it.
+
+A console font can be placed in the game's data directory first: `fonts/FontStandard.ttf` for the default
+title-ID layout is `recompiled/<id>/<id>_data/fonts/FontStandard.ttf` under the [data folder](USAGE.md#folders),
+and the same for `FontChineseSimplified`, `FontExtendedChineseSimplified`, `FontChineseTraditional`,
+`FontKorean` and `FontNintendoExtended`. Named or older deployments use their existing `<Game>_data/`
+directory. `.bfttf` is accepted too and takes priority over `.ttf`; both take priority over the stand-ins.
+
+Without one, the runtime uses the stand-ins compiled in (`cmake/shared_fonts.cmake`): Noto Sans JP, SC, TC
+and KR subsets in `dist/fonts`, one per script, and yuzu's controller button glyphs for
+`FontNintendoExtended`. The subsets cover ASCII, Latin-1, common punctuation and the script's standard set
+(JIS X 0208, GB 2312, Big5, KS X 1001); they total about 11 MB. The console's private-use icon block,
+U+E000 to U+E1FF (buttons, symbols), is not in any free font, so `pl_font.c` gives every stand-in blank
+glyphs there: a game's font map that names one gets a glyph instead of a null pointer, and the icon draws
+as nothing. A console font is not touched.
+
+`dist/fonts/README.md` has where the subsets came from and how `tools/subset_fonts.py` regenerates them;
+the text is under the SIL Open Font License 1.1 (`dist/licenses/Noto/OFL.txt`). Font substitution can
+change text weight and spacing.
