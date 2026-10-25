@@ -161,28 +161,31 @@ static int parse_record(const unsigned char* body, size_t length, Record* r, cha
 char* snx_jit_cache_key(char opt, int hook, int svc, SnxU64 guest) {
     char* cpu = LLVMGetHostCPUName();
     char* features = LLVMGetHostCPUFeatures();
+    char* triple = LLVMGetDefaultTargetTriple();
     char* key;
     SnxU64 rtlib;
     size_t n;
-    if (!cpu || !features) {
+    if (!cpu || !features || !triple) {
         LLVMDisposeMessage(cpu);
         LLVMDisposeMessage(features);
+        LLVMDisposeMessage(triple);
         return NULL;
     }
-    n = strlen(cpu) + strlen(features) + 224;
+    n = strlen(cpu) + strlen(features) + strlen(triple) + 256;
     key = (char*)malloc(n);
     if (key) {
         rtlib = fnv(snx_rtlib_object, (size_t)snx_rtlib_object_size, 0xCBF29CE484222325ULL);
         /* dec: the decoding (a64.decode and its profile) and a64: the guest's features choose what each word does */
-        sprintf(key,
-                "abi=%d llvm=%s rtlib=%016llx dec=%016llx a64=%016llx cpu=%s opt=%c hook=%d svc=%d slp=%d fpsr=%d "
-                "volatile=%d features=%s",
-                SNX_ABI, LLVM_VERSION_STRING, (unsigned long long)rtlib, (unsigned long long)snx_a64_decoder_hash(),
-                (unsigned long long)snx_a64_features(guest), cpu, opt, hook, svc, snx_ir_slp(),
-                snx_ir_fpsr_exact(), snx_ir_volatile(), features);
+        snprintf(key, n,
+                 "abi=%d obj=%d llvm=%s triple=%s rtlib=%016llx dec=%016llx a64=%016llx cpu=%s opt=%c hook=%d svc=%d "
+                 "slp=%d fpsr=%d volatile=%d features=%s",
+                 SNX_ABI, SNX_IR_OBJECT_VERSION, LLVM_VERSION_STRING, triple, (unsigned long long)rtlib,
+                 (unsigned long long)snx_a64_decoder_hash(), (unsigned long long)snx_a64_features(guest), cpu, opt,
+                 hook, svc, snx_ir_slp(), snx_ir_fpsr_exact(), snx_ir_volatile(), features);
     }
     LLVMDisposeMessage(cpu);
     LLVMDisposeMessage(features);
+    LLVMDisposeMessage(triple);
     return key;
 }
 
