@@ -11,7 +11,14 @@ clause, what Clang does with each undefined behavior at -O2, and how that differ
 - RFC #142's rules are the house style: load the `snx-code-quality` skill before writing C in `src/`. Strict C99
   (`-std=c99 -pedantic-errors` where the target builds that way), `/* */` comments, `__atomic_*` builtins on plain
   integers instead of `<stdatomic.h>`, size checks as `n > SIZE_MAX / size`, 64-bit literals as `0x...ull`. A file's own build flags decide what it may use: read them in its `CMakeLists.txt`
-  before relying on `-fno-strict-aliasing` or a newer standard.
+  before relying on a newer standard.
+- **Strict aliasing is on everywhere and `-fno-strict-aliasing` is banned** (`cmake/strict_aliasing.cmake` stops the
+  configure on it). An object is read and written through its own type (or a signed/unsigned variant, or a struct
+  whose first member it is), a character type, or `memcpy`: `common/utilities/endian.h`'s `snx_ld_le*`/`snx_st_le*`
+  for guest and wire bytes, a union member for a value of several types, a local copied in and out for a
+  `sockaddr_in` in a `sockaddr_storage`. Carving typed arrays out of one `malloc` is fine, a declared byte or `u64`
+  array read through another type is not. Guest memory reached through typed pointers in the helpers uses cpu.h's
+  `may_alias` `snx_guest_u*` types.
 - **Never rely on `-fwrapv`.** It is still passed where game code and helpers are compiled (the rtlib flags in
   `src/common/cpu/recompiler/llvm/CMakeLists.txt`, `src/common/cpu/execution/execution.c`, the
   codegen and differential tests), and the goal is to remove it. C you write or touch must be correct without it:

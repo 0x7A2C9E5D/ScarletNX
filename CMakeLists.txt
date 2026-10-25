@@ -313,3 +313,7 @@ endif()
 if(APPLE) # the app's own files, its signature and CPack's package of it
     include(cmake/apple_package.cmake)
 endif()
+
+# No -fno-strict-aliasing in ScarletNX's own code, once every target is defined (cmake/strict_aliasing.cmake)
+include(cmake/strict_aliasing.cmake)
+snx_check_strict_aliasing()
