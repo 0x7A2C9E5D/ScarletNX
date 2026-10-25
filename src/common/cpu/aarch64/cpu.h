@@ -48,7 +48,7 @@ typedef double f64;
   14: code the guest patches at run time. IC IVAU calls RtAPI.code_changed, and each AOT function first reads its
       byte in SnxModule.stale, which the runtime sets when a line it was compiled from changed: the function then
       runs its entry through dispatch, where the runtime compiles the code there now. */
-#define SNX_ABI 14
+#define SNX_ABI 15
 
 #if defined(_WIN32)
 #define SNX_EXPORT __declspec(dllexport)
