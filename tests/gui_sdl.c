@@ -199,14 +199,6 @@ static GuiRect row_box(App* app, int row, bool right) {
 /* text drawn from pixel x, y in the font's own bytes: its glyphs in color, around them back but on the font's last row,
    empty, which a box's frame may cover; a pixel that differs is named with the check's line */
 #define text_px_is(app, x0, y0, text, color, back) text_px_is_at(__LINE__, app, x0, y0, text, color, back)
-/* the 16 rows of the font's glyph c (gui_menu_glyph's), as create_font puts them in its texture */
-static const uint8_t* glyph_rows(int c) {
-    int wide = 256 + gui_latin_count + 2 * gui_wide_count;
-    return c < 256                     ? gui_vga_font + c * 16
-           : c < 256 + gui_latin_count ? gui_latin_font + (c - 256) * 16
-           : c < wide                  ? gui_wide_font + (c - 256 - gui_latin_count) * 16
-                                       : gui_icon_font + (c - wide) * 16;
-}
 static void text_px_is_at(int line, App* app, int x0, int y0, const char* text, SDL_Color color, SDL_Color back) {
     SDL_Surface* image = SDL_RenderReadPixels(app->renderer, NULL);
     int half = app->half ? app->half : 2 * app->scale; /* the letters' size, in halves of a cell */
@@ -224,7 +216,7 @@ static void text_px_is_at(int line, App* app, int x0, int y0, const char* text, 
                     Uint8 r, g, b, a;
                     int px = x0 + font_px(i * 8 + x, half), py = y0 + font_px(y, half);
                     assert(SDL_ReadSurfacePixel(image, px, py, &r, &g, &b, &a));
-                    bool ink = (glyph_rows(c + half_of)[y] & (0x80 >> x)) != 0;
+                    bool ink = (font_rows(c + half_of)[y] & (0x80 >> x)) != 0;
                     SDL_Color want = ink ? color : back;
                     if ((y == 15 && !ink) || (r == want.r && g == want.g && b == want.b)) continue;
                     fprintf(stderr,
@@ -585,7 +577,7 @@ static void players_view(App* app) {
     assert(row_of(app, setting_row(app, "gamepad_swap_ab")) == 1 &&
            row_of(app, setting_row(app, "gamepad_p1_map")) < 0);
     render(app);
-    shows(app, "- Player", yellow); /* focused */
+    shows(app, "-    Player", yellow); /* focused */
     /* Right: player 1, its own rows and the dead zone; no every player's Swap A/B, Vibration or Button map */
     key(app, SDLK_RIGHT);
     assert(app->player == 1 && app->view_count == 5 && !strcmp(app->settings.values[setting_of(app, 0)].text, "< 1 >"));
@@ -1006,6 +998,40 @@ static void button_map(App* app) {
         free(db);
         free(folder);
     }
+}
+/* every section of settings.txt has its group's icon (group_icon, by group_title's name) and every page its row's
+   (page_icon), but Controllers' Player, a row that steps the player and opens none: one without is named */
+static void icons_named(void) {
+    size_t size;
+    char* text = (char*)snx_read_file(SNX_GUI_SETTINGS_TXT, &size);
+    const char* line;
+    int sections = 0, pages = 0;
+    assert(text && group_icon("App") != GUI_ICON_NONE);
+    icons_are();
+    for (line = text; line; line = strchr(line, '\n') ? strchr(line, '\n') + 1 : NULL) {
+        char name[64], rest[256];
+        const char* page;
+        if (sscanf(line, "section %63[^:]: %255[^\n]", name, rest) != 2) continue;
+        if (group_icon(group_title(name)) == GUI_ICON_NONE) {
+            fprintf(stderr, "settings.txt's section %s has no icon in main.c's group_icon\n", name);
+            assert(!"a group's icon");
+        }
+        ++sections;
+        for (page = strchr(rest, '/'); page; page = strchr(page + 1, '/')) {
+            char p[64];
+            assert(sscanf(page + 1, "%63[^,\t\n]", p) == 1);
+            if (strstr(p, "  ")) *strstr(p, "  ") = 0; /* the section's words after its tables: backend, launcher */
+            while (p[0] && p[strlen(p) - 1] == ' ') p[strlen(p) - 1] = 0;
+            if (!strcmp(p, "Player")) continue;
+            if (page_icon(p) == GUI_ICON_NONE) {
+                fprintf(stderr, "settings.txt's page %s of %s has no icon in main.c's page_icon\n", p, name);
+                assert(!"a page's icon");
+            }
+            ++pages;
+        }
+    }
+    assert(sections >= 10 && pages >= 3);
+    free(text);
 }
 /* a running step's line ends in its progress as the theme says, a done one in OK */
 static void step_line(void) {
@@ -3184,22 +3210,22 @@ int main(int argc, char** argv) {
         app.message[0] = 0;
     }
     render(&app);
-    shows(&app, "- Load Switch NSP/XCI/NRO", yellow);
+    shows(&app, "- " ICON_GAMEPAD_2 " Load Switch NSP/XCI/NRO", yellow);
     assert(!app.menu.activated);
     key(&app, SDLK_DOWN);
     key(&app, SDLK_RIGHT);
     assert(app.menu.selected == GUI_3DS);
     render(&app);
-    shows(&app, "- Load 3DS game", yellow);
-    shows(&app, "- Load Switch NSP/XCI/NRO", normal);
+    shows(&app, "- " ICON_BOX " Load 3DS game", yellow);
+    shows(&app, "- " ICON_GAMEPAD_2 " Load Switch NSP/XCI/NRO", normal);
     key(&app, SDLK_RIGHT);
     assert(app.menu.selected == GUI_VITA);
     render(&app);
-    shows(&app, "- Load Vita VPK", yellow);
+    shows(&app, "- " ICON_PACKAGE " Load Vita VPK", yellow);
     key(&app, SDLK_RIGHT);
     assert(app.menu.selected == GUI_GBA);
     render(&app);
-    shows(&app, "- Load GBA ROM", yellow);
+    shows(&app, "- " ICON_GAMEPAD " Load GBA ROM", yellow);
     /* a load whose driver is neither beside the menu nor on PATH (on iOS the four the app leaves out) is greyed, still
        there, as soon as the folder or PATH it is looked for in changes, and Enter on it says which driver rather than
        opening its screen; put back, Enter looks again and opens it; gone again, the row greys within a second (#640) */
@@ -3214,15 +3240,15 @@ int main(int argc, char** argv) {
         assert(!rename(vita, aside));
         set_env("PATH", "/nonexistent"); /* none of the machine's own */
         render(&app);
-        shows(&app, "- Load Vita VPK", rgb(app.theme.soft)); /* not focused, greyed */
-        shows(&app, "- Load 3DS game", normal);              /* its driver there */
+        shows(&app, "- " ICON_PACKAGE " Load Vita VPK", rgb(app.theme.soft)); /* not focused, greyed */
+        shows(&app, "- " ICON_BOX " Load 3DS game", normal);                  /* its driver there */
         app.menu.selected = GUI_VITA;
         key(&app, SDLK_RETURN);
         assert(app.menu.view == GUI_LOAD_NONE && !app.menu.activated && app.menu.selected == GUI_VITA);
         assert(!strcmp(app.message, "Cannot find scarletnx-vita beside ScarletNX or on PATH."));
         render(&app);
-        shows(&app, "- Load Vita VPK", rgb(app.theme.soft)); /* focused, greyed */
-        hides(&app, "- Load Vita VPK", yellow);
+        shows(&app, "- " ICON_PACKAGE " Load Vita VPK", rgb(app.theme.soft)); /* focused, greyed */
+        hides(&app, "- " ICON_PACKAGE " Load Vita VPK", yellow);
         assert(!rename(aside, vita));
         key(&app, SDLK_RETURN); /* looked for again as it is pressed */
         assert(app.menu.view == GUI_LOAD_DROP && app.menu.active == GUI_VITA);
@@ -3232,7 +3258,7 @@ int main(int argc, char** argv) {
         if (SDL_GetTicks() < 1001) SDL_Delay((Uint32)(1001 - SDL_GetTicks()));
         app.loads_at = SDL_GetTicks() - 1000;
         render(&app);
-        shows(&app, "- Load Vita VPK", rgb(app.theme.soft));
+        shows(&app, "- " ICON_PACKAGE " Load Vita VPK", rgb(app.theme.soft));
         assert(!rename(aside, vita));
         set_env("PATH", path);
         SDL_free(path);
@@ -3260,7 +3286,7 @@ int main(int argc, char** argv) {
         assert(!snx_mkdirs(bare));
         set_env("HOME", bare);
         assert(!keys_red(&app, off) && keys_red(&app, on));
-        shows(&app, "- Install Keys", rgb(app.theme.page));
+        shows(&app, "- " ICON_KEY_ROUND " Install Keys", rgb(app.theme.page));
         key(&app, SDLK_DOWN);
         assert(app.menu.selected != GUI_KEYS && keys_red(&app, on) && !keys_red(&app, off));
         key(&app, SDLK_UP);
@@ -3503,13 +3529,13 @@ int main(int argc, char** argv) {
     assert(app.form == GUI_FORM_SETTINGS && app.groups == 6 && gui_editor_rows(&app.editor) == 6);
     shows(&app, "SETTINGS", normal);
     shows_half(&app, "The theme, the menu's", normal); /* in the tips, a half step under the text's */
-    shows(&app, "- App", yellow);
-    shows(&app, "- Launch", normal);
-    shows(&app, "- Display", normal);
-    shows(&app, "- Graphics", normal);
-    shows(&app, "- Overlay", normal); /* the runtime's On-screen controls */
+    shows(&app, "- " ICON_APP_WINDOW " App", yellow);
+    shows(&app, "- " ICON_ROCKET " Launch", normal);
+    shows(&app, "- " ICON_MONITOR " Display", normal);
+    shows(&app, "- " ICON_IMAGE " Graphics", normal);
+    shows(&app, "- " ICON_POINTER " Overlay", normal); /* the runtime's On-screen controls */
     hides(&app, "On-screen controls", normal);
-    shows(&app, "- User", normal);
+    shows(&app, "- " ICON_USER " User", normal);
     /* App's last row, beside: none among the groups; greyed, every setting at its default (#614) */
     shows(&app, "Reset to Defaults", rgb(app.theme.soft));
     hides(&app, "\x1e", rgb(app.theme.soft)); /* every row shows: no arrows */
@@ -3530,14 +3556,14 @@ int main(int argc, char** argv) {
     render(&app);
     shows(&app, "Launch", normal);
     shows_half(&app, "Enables gdbstub", normal); /* in the tips */
-    shows(&app, "- GDB stub ", yellow); /* its value in the column after the longest name, Optimization level's */
-    shows(&app, "- Extract to tmpfs ", normal);
+    shows(&app, "-    GDB stub ", yellow); /* its value in the column after the longest name, Optimization level's */
+    shows(&app, "-    Extract to tmpfs ", normal);
     {
         char row[64];
-        snprintf(row, sizeof row, "- %-*s off", (int)strlen("Optimization level"), "Extract dump");
+        snprintf(row, sizeof row, "-    %-*s off", (int)strlen("Optimization level"), "Extract dump");
         shows(&app, row, normal);
     }
-    if (tracy) shows(&app, "- Tracy capture", normal);
+    if (tracy) shows(&app, "-    Tracy capture", normal);
     { /* Del is said where it does something: on a setting away from its default */
         char said[512];
         assert(!strstr(screen_said(&app, true, said, sizeof said), "Del: default."));
@@ -3595,9 +3621,10 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RETURN);
         render(&app);
         shows(&app, "Overlay", normal);
-        snprintf(line, sizeof line, "- %-13s %s", "Show controls", "Off"); /* the launcher's choice, 0 */
+        /* the rows' text past the gutter of Buttons' icon */
+        snprintf(line, sizeof line, "-    %-13s %s", "Show controls", "Off"); /* the launcher's choice, 0 */
         shows(&app, line, yellow);
-        snprintf(line, sizeof line, "- %-13s %s", "Buttons", ">");
+        snprintf(line, sizeof line, "- " ICON_LAYOUT_GRID " %-13s %s", "Buttons", ">");
         shows(&app, line, normal);
         key(&app, SDLK_DOWN);
         key(&app, SDLK_RIGHT); /* a page opens with Enter only */
@@ -3643,7 +3670,7 @@ int main(int argc, char** argv) {
         app.editor.row = GUI_APP_RESET;
         assert(app.form == GUI_FORM_APP && GUI_APP_RESET == GUI_APP_ROWS - 1);
         render(&app);
-        shows(&app, "- Reset to Defaults", yellow);
+        shows(&app, "- " ICON_ROTATE_CCW " Reset to Defaults", yellow);
         key(&app, SDLK_RETURN);
         assert(app.confirm.shown && app.confirm.ask == GUI_ASK_RESET && !strcmp(app.ask_line, asked));
         render(&app);
@@ -3681,15 +3708,17 @@ int main(int argc, char** argv) {
         char first[64], line[1024];
         snprintf(first, sizeof first, "%s", app.theme.name);
         render(&app);
-        shows(&app, "- App", yellow); /* the group open, as focused while its rows have the focus */
-        snprintf(line, sizeof line, "- %-20s %s", "Theme", first); /* past Background recompile, the longest */
+        shows(&app, "- " ICON_APP_WINDOW " App", yellow); /* the group open, as focused while its rows have the focus */
+        /* past Background recompile, the longest; after the gutter of the icons of the rows that open or do
+           something */
+        snprintf(line, sizeof line, "-    %-20s %s", "Theme", first);
         shows(&app, line, yellow);
-        shows(&app, "- UI scale", normal); /* its slider, the size at the row's end (#613) */
+        shows(&app, "-    UI scale", normal); /* its slider, the size at the row's end (#613) */
         shows(&app, "Auto", normal);
-        shows(&app, "- Language             Auto: English", normal); /* SDL_PREFERRED_LOCALES, the test's */
-        shows(&app, "- Theme Editor", normal);
+        shows(&app, "-    Language             Auto: English", normal); /* SDL_PREFERRED_LOCALES, the test's */
+        shows(&app, "- " ICON_PAINTBRUSH " Theme Editor", normal);
         /* under the rows, the three folders Folders moves, whole: the extractions too */
-        shows(&app, "- Folders              Defaults", normal);
+        shows(&app, "- " ICON_FOLDER " Folders              Defaults", normal);
         shows_half(&app, "Extractions:", rgb(app.theme.soft)); /* in a half step under the text's */
         { /* out of the data folder, as XDG's cache has them: without XDG (Windows) they are in it and read work/ */
             char *games = app.games_dir, *work = app.work_dir;
@@ -3710,7 +3739,7 @@ int main(int argc, char** argv) {
             app.work_dir = work;
             app_values(&app);
         }
-        shows(&app, "- Clean Old Settings", rgb(app.theme.soft)); /* nothing to clean here: greyed (#614) */
+        shows(&app, "- " ICON_ERASER " Clean Old Settings", rgb(app.theme.soft)); /* nothing to clean here: greyed (#614) */
         hides(&app, "- Layout", normal);
         { /* a row with nothing to do greyed, still there (#614): Move Old Files with nothing left, Clean Old Settings
              with nothing to clean; something to do, F5 looking again, in ink; Enter on a greyed one says why */
@@ -3718,7 +3747,7 @@ int main(int argc, char** argv) {
             char *was = (char*)snx_read_file(app.app_file, &size), *old;
             int row = app.editor.row;
             assert(!app.lefts);
-            shows(&app, "- Move Old Files", rgb(app.theme.soft));
+            shows(&app, "- " ICON_FOLDER_INPUT " Move Old Files", rgb(app.theme.soft));
             app.editor.row = GUI_APP_CLEAN;
             key(&app, SDLK_RETURN);
             assert(!app.confirm.shown && strstr(app.editor.note, "Nothing to clean"));
@@ -3728,8 +3757,8 @@ int main(int argc, char** argv) {
             app.editor.row = row; /* off them, so they read in ink */
             key(&app, SDLK_F5);
             render(&app);
-            shows(&app, "- Move Old Files", normal);
-            shows(&app, "- Clean Old Settings", normal);
+            shows(&app, "- " ICON_FOLDER_INPUT " Move Old Files", normal);
+            shows(&app, "- " ICON_ERASER " Clean Old Settings", normal);
             assert(!snx_write_file(app.app_file, was ? was : "", was ? size : 0));
             app.lefts = 0;
             app.clean_found = -1;
@@ -4008,12 +4037,12 @@ int main(int argc, char** argv) {
         free(kept);
         render(&app);
         /* the labels' columns as they read: xx's Language, its i accented, is 6 of them in 7 bytes (the font's one) */
-        snprintf(line, sizeof line, "- L\241ngua%14s Test", "");
+        snprintf(line, sizeof line, "-    L\241ngua%14s Test", "");
         shows(&app, line, yellow);
-        shows(&app, "- UI scale", normal); /* not translated in xx: English */
-        shows(&app, "Ajustes", yellow);    /* the tab */
-        shows_foot(&app, "volta", normal); /* the foot's own key, ESC alone at its left, translated */
-        hides_foot(&app, "linha", normal); /* the keys every screen has: in F1's box alone */
+        shows(&app, "-    UI scale", normal); /* not translated in xx: English */
+        shows(&app, "Ajustes", yellow);       /* the tab */
+        shows_foot(&app, "volta", normal);    /* the foot's own key, ESC alone at its left, translated */
+        hides_foot(&app, "linha", normal);    /* the keys every screen has: in F1's box alone */
         hides_foot(&app, "tela", normal);
         hides_foot(&app, "change or open", normal);
         {
@@ -4035,7 +4064,7 @@ int main(int argc, char** argv) {
             assert(tab_rect(&app, none, GUI_TAB_MENU).w == 6 * cell_w(&app));
             assert(tab_rect(&app, none, GUI_TAB_GAMES).x == 7 * cell_w(&app));
             assert(find_letters(&app, "\xe8\x8f\x9c\xe5\x8d\x95", normal, 1, &x, &y));
-            snprintf(line, sizeof line, "- \xe4\xb8\xbb\xe9\xa2\x98%16s %.4s", "", app.app_form.theme);
+            snprintf(line, sizeof line, "-    \xe4\xb8\xbb\xe9\xa2\x98%16s %.4s", "", app.app_form.theme);
             assert(find_letters(&app, line, normal, 1, &x, &y));
             /* its button: the keys' 5 columns, a space, "linha", a column inside either side */
             assert(hint_width("\xe4\xb8\x8a/\xe4\xb8\x8b", "linha") == 13 && up >= 0 && down >= 0 && up != down);
@@ -4512,7 +4541,7 @@ int main(int argc, char** argv) {
        (SDL_FILE_DIALOG_DRIVER=none); Del or Enter asks before an Extra is taken off, the folder staying */
     key(&app, SDLK_DOWN);
     render(&app);
-    shows(&app, "- Folders              Defaults", yellow);
+    shows(&app, "- " ICON_FOLDER " Folders              Defaults", yellow);
     key(&app, SDLK_RETURN);
     assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 10 && app.editor.row == 0);
     assert(FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_DATA) == 0 && FOLDER_ROW(GUI_ROW_CONFIG, -1) == 1 &&
@@ -4586,7 +4615,7 @@ int main(int argc, char** argv) {
         { /* the names' column as wide as the longest of the rows with a folder (Extractions), not Add Folder's or the
              last's; the folder after it */
             char start[64];
-            snprintf(start, sizeof start, "- %-11s %c", "Data", app.data_dir[0]);
+            snprintf(start, sizeof start, "-    %-11s %c", "Data", app.data_dir[0]);
             shows(&app, start, yellow);
         }
         { /* what a row is at its end; with no room for it beside the folder whole, it goes and the folder stays */
@@ -4629,7 +4658,7 @@ int main(int argc, char** argv) {
             app.theme.scroll_ms = 100; /* the default theme slides nothing */
             for (app.clock = 1; gui_slide(1000, app.clock, app.theme.scroll_ms) != 3;) app.clock += 100;
             render(&app);
-            shows(&app, "- Add Folder", normal);
+            shows(&app, "- " ICON_FOLDER_PLUS " Add Folder", normal);
             app.theme.scroll_ms = kept;
             app.clock = 0;
         }
@@ -4655,8 +4684,8 @@ int main(int argc, char** argv) {
         app.editor.row = FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES);
         render(&app);
         shows_half(&app, "The recompiled games, ", normal);
-        shows(&app, "- Main", yellow);
-        shows(&app, "- Add Folder", normal);
+        shows(&app, "-    Main", yellow);
+        shows(&app, "- " ICON_FOLDER_PLUS " Add Folder", normal);
         assert(!strcmp(app.app_form.folder[app.editor.row], "default") && !strcmp(form_note(&app), app.games_dir));
         /* at its default: Del says so, no box */
         key(&app, SDLK_DELETE);
@@ -4754,7 +4783,7 @@ int main(int argc, char** argv) {
         event(&app, &e);
         assert(app.folder_count == 1 && !strncmp(app.editor.note, "Already in the dumps library: ", 30));
         render(&app);
-        shows(&app, "- Extra", yellow);
+        shows(&app, "-    Extra", yellow);
         row_start(kept_as, line, sizeof line);
         shows(&app, line + 2, yellow); /* its folder, from its root */
         /* F5 looks at the folders again: one gone from the disk says so on its row, and the note counts them */
@@ -5038,13 +5067,13 @@ int main(int argc, char** argv) {
         assert(app.form == GUI_FORM_FOLDERS && app.editor.row == 0 && gui_editor_rows(&app.editor) == 11);
         render(&app);
         shows(&app, "FOLDERS", normal);
-        shows(&app, "- Data", yellow);
+        shows(&app, "-    Data", yellow);
         shows(&app, "default", yellow);
         /* under the rows, the folder in use: its start, as a long one wraps (Windows' %APPDATA% does) */
         snprintf(line, sizeof line, "%.24s", data);
         shows_half(&app, line, rgb(app.theme.soft));
-        shows(&app, "- Extractions", normal);
-        shows(&app, "- Reset to Defaults", rgb(app.theme.soft)); /* every folder its default: greyed (#614) */
+        shows(&app, "-    Extractions", normal);
+        shows(&app, "- " ICON_ROTATE_CCW " Reset to Defaults", rgb(app.theme.soft)); /* every folder its default: greyed (#614) */
         assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir) &&
                !strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES)], "default"));
         assert(strstr(app.place_about[GUI_PLACE_GAMES], "The recompiled games, ") &&
@@ -5162,7 +5191,7 @@ int main(int argc, char** argv) {
             snprintf(line, sizeof line, "Logs: %s. The folder before keeps what it has", app.state_dir);
             assert(!strcmp(app.editor.note, line) && snx_path_within(app.run_log, logs));
             render(&app);
-            shows(&app, "- Logs", yellow);
+            shows(&app, "-    Logs", yellow);
             /* custom, at the row's end where the folder leaves room (a long one, as Windows' temporary folder, none) */
             assert(!strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_STATE)], "custom"));
             kept = (char*)snx_read_file(app.app_file, &size);
@@ -5191,7 +5220,7 @@ int main(int argc, char** argv) {
             assert(in_use && same_path(in_use, caches));
             free(in_use);
             render(&app);
-            shows(&app, "- Caches", yellow);
+            shows(&app, "-    Caches", yellow);
             /* back to the defaults, app.ini's keys empty */
             place_use(&app, GUI_PLACE_STATE, NULL);
             place_use(&app, GUI_PLACE_CACHE, NULL);
@@ -5214,14 +5243,14 @@ int main(int argc, char** argv) {
                 assert(strstr(said, "F5: refresh.") && !strstr(said, "Del:") && !strstr(said, "Add Folder"));
             }
             render(&app);
-            shows(&app, "- Settings", yellow);
+            shows(&app, "-    Settings", yellow); /* a row without an icon, where Add Folder has one */
             app.editor.row = FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES); /* where the checks below look */
             free(fallback);
             free(logs);
             free(caches);
         }
         render(&app);
-        shows(&app, "- Main", yellow);
+        shows(&app, "-    Main", yellow);
         assert(!strcmp(app.app_form.folder[FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES)], "custom"));
         assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir));
         app_values(&app); /* App's note, the folder now */
@@ -5476,7 +5505,7 @@ int main(int argc, char** argv) {
     assert(app.menu.selected == GUI_SWITCH);
     pump(&app);
     render(&app);
-    shows(&app, "- Load Switch NSP/XCI/NRO", yellow);
+    shows(&app, "- " ICON_GAMEPAD_2 " Load Switch NSP/XCI/NRO", yellow);
     const char* screenshot = getenv("SNX_GUI_SCREENSHOT");
     if (screenshot) {
         SDL_Surface* image = SDL_RenderReadPixels(app.renderer, NULL);
@@ -5491,8 +5520,8 @@ int main(int argc, char** argv) {
     point(&app, entry_box(&app, GUI_LINUX), false);
     assert(app.menu.selected == GUI_LINUX && app.menu.active == GUI_SWITCH && app.menu.view == GUI_LOAD_NONE);
     render(&app);
-    shows(&app, "- Load Switch NSP/XCI/NRO", pink);
-    shows(&app, "- Load Linux ARM ELF", yellow);
+    shows(&app, "- " ICON_GAMEPAD_2 " Load Switch NSP/XCI/NRO", pink);
+    shows(&app, "- " ICON_SQUARE_TERMINAL " Load Linux ARM ELF", yellow);
     point(&app, entry_box(&app, GUI_SWITCH), true);
     assert(app.menu.view == GUI_LOAD_DROP && app.menu.active == GUI_SWITCH);
     {
@@ -7592,6 +7621,7 @@ int main(int argc, char** argv) {
                 focus_game(&app, "0100ABCD12340000");
                 key(&app, SDLK_RETURN);
                 assert(app.addons_shown && addons_row(&app, 13) == ROW_OPEN_FOLDER);
+                assert(addons_icon(&app, 13) == GUI_ICON_FOLDER_OPEN && addons_icon(&app, 14) == GUI_ICON_ERASER);
                 app.addons_focus = 13;
                 key(&app, SDLK_RETURN);
                 assert(app.addons_folders_shown && addons_rows(&app) == GUI_GAME_FOLDERS && !app.addons_focus);
@@ -7605,6 +7635,7 @@ int main(int argc, char** argv) {
                     assert(ui_addons_rows_get_row_info(&app, (size_t)i, 0, &info));
                     addons_folder_off(&app, i, why, sizeof why);
                     assert(!(info.attr & UI_ATTR_OFF) == !why[0]);
+                    assert(info.icon == GUI_ICON_NONE); /* the page's title says what its rows do */
                 }
                 info = (UiRowInfo){0};
                 assert(ui_addons_rows_get_row_info(&app, GUI_FOLDER_GAME, 0, &info) && !(info.attr & UI_ATTR_OFF));
@@ -7727,7 +7758,7 @@ int main(int argc, char** argv) {
         assert(app.menu.selected == GUI_LOG && !app.menu.text_size);
         app.clock = 1; /* a description too long for its box rests before it slides */
         render(&app);
-        shows(&app, "- Share Log", yellow);
+        shows(&app, "- " ICON_SHARE_2 " Share Log", yellow);
         shows_half(&app, "Saves the last run", normal);
         app.clock = 0;
         {
@@ -7997,9 +8028,9 @@ int main(int argc, char** argv) {
         render(&app);
         page = rgb(app.theme.page);
         ink = rgb(app.theme.ink);
-        shows_big(&app, "SCARLETNX  /  MENU", ink, 2); /* its head plain, as NieR's titles */
-        shows(&app, "\xfe Settings", page);            /* the focused box on a band */
-        shows(&app, "\xfe Exit", ink);
+        shows_big(&app, "SCARLETNX  /  MENU", ink, 2);        /* its head plain, as NieR's titles */
+        shows(&app, "\xfe " ICON_SETTINGS " Settings", page); /* the focused box on a band */
+        shows(&app, "\xfe " ICON_LOG_OUT " Exit", ink);
         shows_half(&app, "Working folder: ", ink);
         {
             GuiMenuBoxes
@@ -8031,8 +8062,8 @@ int main(int argc, char** argv) {
         page.g = 0x20;
         page.b = 0x30;
         shows_big(&app, "TEST  /  MENU", ink, 2);
-        shows(&app, "> Settings", page);
-        shows(&app, "> Exit", ink);
+        shows(&app, "> " ICON_SETTINGS " Settings", page);
+        shows(&app, "> " ICON_LOG_OUT " Exit", ink);
         app_select(&app, GUI_APP_THEME);
         assert(!strcmp(app.theme.id, "default") && !strcmp(app.app_form.theme, "Default"));
         free(custom_ini);
@@ -8225,7 +8256,7 @@ int main(int argc, char** argv) {
             assert(app.editing && app.form == GUI_FORM_APP && app.editor.row == GUI_APP_EDITOR);
             leave_editor(&app);
             render(&app);
-            shows(&app, "- Share Log", normal); /* on its own page */
+            shows(&app, "- " ICON_SHARE_2 " Share Log", normal); /* on its own page */
             assert(same_colour(pixel(&app, 2, 2), night));
             /* opened on a theme of themes/, it saves there under its own name */
             app_select(&app, GUI_APP_EDITOR);
@@ -8540,19 +8571,20 @@ int main(int argc, char** argv) {
         assert(focus >= 0 && (int)m.lists[UI_MENU_ENTRIES].focus == focus && exit_entry > focus && !m.place.stacked);
         b = menu_entry_box(&app, &m, focus);
         assert(same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), yellow)); /* framed in the focus colour */
-        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Install Keys", yellow, black);
+        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- " ICON_KEY_ROUND " Install Keys", yellow, black);
         b = menu_entry_box(&app, &m, exit_entry);
         assert(same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), dim)); /* the others in the dim one */
-        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Exit", normal, black);
+        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- " ICON_LOG_OUT " Exit", normal, black);
         /* the load activated last in the active colour, the focus kept where it is */
         app.menu.activated = true;
         app.menu.active = GUI_3DS;
         render(&app);
         b = menu_entry_box(&app, &m, GUI_3DS);
-        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Load 3DS game", rgb(app.theme.active), black);
+        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- " ICON_BOX " Load 3DS game", rgb(app.theme.active),
+                   black);
         app.menu.activated = false;
         render(&app);
-        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Load 3DS game", normal, black);
+        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- " ICON_BOX " Load 3DS game", normal, black);
         /* a row taller than a cell and a pixel, as Android's 40px: its text in the middle, not at its top */
         b = gui_rect(b.x, b.y, b.w, 40 * s);
         fill_rect(&app, b, app.theme.page); /* the rows it covers, gone */
@@ -8822,7 +8854,7 @@ int main(int argc, char** argv) {
         {
             GuiFormBoxes f;
             int launch, row;
-            char last[80];
+            char last[80], glyph[4];
             open_settings(&app);
             assert(app.editing && app.form == GUI_FORM_SETTINGS && !app.editor.row && app.groups > 3);
             render(&app);
@@ -8840,9 +8872,10 @@ int main(int argc, char** argv) {
             b = form_row_box(&app, &f, false, 1);
             assert(b.y - form_row_box(&app, &f, false, 0).y == item_h(&app) + 2 * s && b.h == item_h(&app));
             b = form_row_box(&app, &f, false, 0);
-            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- App", yellow, black);
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- " ICON_APP_WINDOW " App", yellow, black);
             b = form_row_box(&app, &f, false, app.groups - 1); /* the last group, whole */
-            snprintf(last, sizeof last, "- %s", app.group_keys[app.groups - 1].key);
+            snprintf(last, sizeof last, "- %s %s", gui_icon_utf8(group_icon(app.group_keys[app.groups - 1].key), glyph),
+                     app.group_keys[app.groups - 1].key);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), last, normal, black);
             text_px_is(&app, f.place.side.x + cw, f.place.side.y + 2 * s, "App", normal, black);
             /* the note at the foot of the rows whole, wrapped to the box, a half step under the text's letters: at 2x
@@ -8879,7 +8912,7 @@ int main(int argc, char** argv) {
             render(&app);
             form_boxes(&app, &f);
             b = form_row_box(&app, &f, true, GUI_APP_THEME);
-            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Theme", normal,
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "-    Theme", normal,
                        black); /* no focus on the right yet */
             for (launch = 0; launch < app.groups && strcmp(app.group_keys[launch].key, "Launch"); ++launch) {}
             assert(launch < app.groups);
@@ -8899,7 +8932,7 @@ int main(int argc, char** argv) {
             form_boxes(&app, &f);
             text_px_is(&app, f.place.side.x + cw, f.place.side.y + 2 * s, "Launch", normal, black);
             b = form_row_box(&app, &f, true, 0);
-            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- GDB stub", normal, black);
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "-    GDB stub", normal, black);
             /* a click on one of those rows opens the group on it */
             b = form_row_box(&app, &f, true, 1);
             mouse_px(&app, b.x + 4, b.y + 4, true);
@@ -8911,9 +8944,10 @@ int main(int argc, char** argv) {
             render(&app);
             form_boxes(&app, &f);
             b = form_row_box(&app, &f, false, launch);
-            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Launch", yellow, black); /* the group open */
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- " ICON_ROCKET " Launch", yellow,
+                       black); /* the group open */
             b = form_row_box(&app, &f, true, 0);
-            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- GDB stub", yellow, black);
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "-    GDB stub", yellow, black);
             {
                 char start[16]; /* in the tips, its first row, under the head */
                 snprintf(start, sizeof start, "%s", app.settings.keys[0].about);
@@ -9381,10 +9415,12 @@ int main(int argc, char** argv) {
         render(&app);
         menu_boxes(&app, &m);
         b = menu_entry_box(&app, &m, (int)m.lists[UI_MENU_ENTRIES].focus);
-        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe Install Keys", page, rgb(app.theme.focus));
+        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe " ICON_KEY_ROUND " Install Keys", page,
+                   rgb(app.theme.focus));
         text_px_is(&app, m.rects[UI_MENU_ENTRIES].x, item_text_y(&app, b), "\x10", rgb(app.theme.focus), page);
         b = menu_entry_box(&app, &m, GUI_EXIT);
-        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe Exit", ink, dim = rgb(app.theme.dim));
+        text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe " ICON_LOG_OUT " Exit", ink,
+                   dim = rgb(app.theme.dim));
         r = m.place.side;
         text_px_is(&app, r.x + cw, r.y + 2 * s, "Install Keys", page, ink);
         assert(m.place.tips.y < m.place.list.y); /* the tips in their box under the head, off the band */
@@ -10590,6 +10626,7 @@ int main(int argc, char** argv) {
         leave_editor(&app);
     }
     players_view(&app);
+    icons_named();
     step_line();
     /* YoRHa's Settings: its groups' column wide enough for the last row with its cursor; a page of a group open, its
        name over its rows */
@@ -10610,8 +10647,10 @@ int main(int argc, char** argv) {
         form_boxes(&app, &f);
         b = form_row_box(&app, &f, false, app.groups - 1);
         {
-            char last[80];
-            snprintf(last, sizeof last, "\xfe %s", app.group_keys[app.groups - 1].key);
+            char last[80], glyph[4];
+            snprintf(last, sizeof last, "\xfe %s %s",
+                     gui_icon_utf8(group_icon(app.group_keys[app.groups - 1].key), glyph),
+                     app.group_keys[app.groups - 1].key);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), last, rgb(app.theme.page), rgb(app.theme.focus));
         }
         for (row = 0; row < app.groups && strcmp(app.group_keys[row].key, "Display"); ++row) {}
@@ -10633,7 +10672,7 @@ int main(int argc, char** argv) {
             assert(!strcmp(app.theme.cursor, "\xe2\x96\xba ") && app.theme.focus_bar);
             text_px_is(&app, b.x - 2 * cw, item_text_y(&app, b), "\x10 ", rgb(app.theme.focus), rgb(app.theme.page));
             b = form_row_box(&app, &f, false, row);
-            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe Display", rgb(app.theme.page),
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe " ICON_MONITOR " Display", rgb(app.theme.page),
                        rgb(app.theme.focus));
             text_px_is(&app, b.x - 2 * cw, item_text_y(&app, b), "  ", rgb(app.theme.focus), rgb(app.theme.page));
         }
