@@ -535,8 +535,8 @@ first run from. It says first what older versions did that this one does otherwi
 only said, nothing is moved), then asks:
 
 1. **Appearance**: the launcher's language (app.ini's `language`), starting on the one it has (the system's, until
-   one is picked), and in the launcher's setup its theme and UI scale beside it; the terminal's asks the language
-   alone.
+   one is picked), and in the launcher's setup its theme, UI scale, side panel and Games' view and icon size beside it;
+   the terminal's asks the language alone.
 2. **Install type**: installed, in the user's folders ([Folders](#folders)), or portable, everything in
    `.scarletnx/` beside the program (or the AppImage), which it makes. An app (Android, iOS) has no other.
 3. **Folders**, the launcher's: where its recompiled games go and the folders of dumps it lists (Settings > App >
