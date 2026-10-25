@@ -116,11 +116,15 @@ sudo pacman -Syu --needed base-devel git cmake ninja clang llvm nasm perl pkgcon
 
 ### FreeBSD
 
-FreeBSD provides Clang in the base system. Install the remaining tools and the SDL3 package:
+FreeBSD provides Clang in the base system. Install the remaining tools, the SDL3 package, and libusb, which SDL's
+HIDAPI loads at run time to read controllers (an Xbox pad is only read that way):
 
 ```sh
-sudo pkg install git cmake ninja gmake nasm perl5 pkgconf python3 sdl3 llvm
+sudo pkg install git cmake ninja gmake nasm perl5 pkgconf python3 sdl3 llvm libusb
 ```
+
+The build uses that `sdl3` package by default (`SNX_SYSTEM_SDL3`, see [SDL3 troubleshooting](#sdl3-troubleshooting));
+pass `-DSNX_SYSTEM_SDL3=OFF` for CPM's pinned SDL3 source build instead.
 
 ### Configure and build
 
@@ -135,6 +139,11 @@ cmake --preset default -B build && cmake --build build
 On all platforms, CPM first looks for a compatible SDL3 development package (3.4.18 or newer) through
 `SDL3Config.cmake`. If none is found, CPM downloads and builds the SHA-256-pinned SDL3. The fallback is static, so no separate SDL3 runtime
 installation is needed. It still needs your platform's window-system development libraries.
+
+- `SNX_SYSTEM_SDL3=ON` (the default on FreeBSD) takes the system's package from `find_package` whatever its version,
+  needing only 3.4.16, the version every SDL call in the tree is in, and never downloads. FreeBSD's ports `sdl3`
+  (3.4.16) is older than the pin, so without it CPM's version check builds SDL3 from source. `SNX_SYSTEM_SDL3=OFF`
+  keeps the pinned build everywhere.
 
 - An old checkout showing `Could not find a package configuration file provided by SDL3` needs either
   the SDL3 **development** package or this updated fallback. Pull the latest checkout and configure again.
@@ -155,7 +164,9 @@ installation is needed. It still needs your platform's window-system development
   an SDL mapping in `gamecontrollerdb.txt`, as described in [USAGE](USAGE.md). If no joystick appears on Linux,
   check whether `/dev/input/event*` is readable and whether udev marks its event node `ID_INPUT_JOYSTICK=1`.
   The supplied `dist/72-scarletnx-input.rules` grants seat access to recognized joystick event nodes and to the
-  hidraw nodes of the console's controllers. Other HIDAPI controllers may need their vendor's own udev rule. If
+  hidraw nodes of the console's controllers. Other HIDAPI controllers may need their vendor's own udev rule. On
+  FreeBSD the gamepad comes from HIDAPI over libusb or `/dev/uhid*`, never from `/dev/input/event*`: a pad `xb360gp(4)`,
+  `hgame(4)` or `webcamd` claimed is invisible to SDL. See [USAGE](USAGE.md) for the access rules and the packages. If
   the gamepad opens but sends no input, compare the log's controller name and GUID with its mapping and test its
   event node with `evtest`.
 
