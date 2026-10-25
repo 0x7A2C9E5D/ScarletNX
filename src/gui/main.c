@@ -8015,13 +8015,53 @@ static void pad_mappings_share(const App* app) {
     free(file);
 }
 #endif
-/* the first pad plugged in, when none is open */
+/* the pad of player (1 to 8) among the n plugged in, as the games give them their players (snx_pad_slot): each, in the
+   order they came, the player that names it, else the first that names none; 0 for none */
+static SDL_JoystickID player_pad(const App* app, const SDL_JoystickID* ids, int n, int player) {
+    const char* players[SNX_GUI_PLAYERS];
+    char key[32], guid[33], before[33];
+    unsigned taken = 0;
+    bool took[64] = {false}; /* each pad before: it took a player */
+    int i, k, p;
+    for (p = 0; p < SNX_GUI_PLAYERS; ++p) {
+        snprintf(key, sizeof key, "gamepad_p%d_device", p + 1);
+        players[p] = gui_settings_value(&app->settings, key);
+    }
+    for (i = 0; i < n && i < (int)SDL_arraysize(took); ++i) {
+        int alike = 0, slot;
+        SDL_GUIDToString(SDL_GetGamepadGUIDForID(ids[i]), guid, sizeof guid);
+        for (k = 0; k < i; ++k) { /* those before it with its GUID that took a player */
+            SDL_GUIDToString(SDL_GetGamepadGUIDForID(ids[k]), before, sizeof before);
+            alike += took[k] && !SDL_strcasecmp(before, guid);
+        }
+        slot = snx_pad_slot(guid, alike, players, SNX_GUI_PLAYERS, taken);
+        took[i] = slot >= 0;
+        if (slot >= 0) taken |= 1u << slot;
+        if (slot == player - 1) return ids[i];
+    }
+    return 0;
+}
+/* the pad the page shows, when none is open: a player's map its player's (player_pad), every player's map the first
+   plugged in */
 static void pad_attach(App* app) {
     SDL_JoystickID* ids;
     int i, n = 0;
     if (app->gamepad || !app->pads_read) return;
     ids = SDL_GetGamepads(&n);
-    for (i = 0; ids && i < n && !app->gamepad; i++) {
+    if (app->pad_player > 0 && ids && n > 0) {
+        SDL_JoystickID mine = player_pad(app, ids, n, app->pad_player);
+        char key[32];
+        const char* device;
+        snprintf(key, sizeof key, "gamepad_p%d_device", app->pad_player);
+        device = gui_settings_value(&app->settings, key);
+        if (mine && !(app->gamepad = SDL_OpenGamepad(mine)))
+            snprintf(app->pad.note, sizeof app->pad.note, "The controller could not be opened: %s", SDL_GetError());
+        else if (!mine) /* the page's texts are English, in the font's bytes, as the game's menu draws them */
+            snprintf(app->pad.note, sizeof app->pad.note,
+                     "No controller plugged in is player %d's (its Controller: %s): the %d there are other players'",
+                     app->pad_player, device && device[0] ? device : "Any", n);
+    }
+    for (i = 0; app->pad_player <= 0 && ids && i < n && !app->gamepad; i++) {
         app->gamepad = SDL_OpenGamepad(ids[i]);
         if (!app->gamepad) /* the page's texts, pad_screen.c's as the game's menu draws them: English, in the font's bytes */
             snprintf(app->pad.note, sizeof app->pad.note, "The controller could not be opened: %s", SDL_GetError());

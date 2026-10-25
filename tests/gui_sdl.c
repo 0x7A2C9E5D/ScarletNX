@@ -628,6 +628,70 @@ static void players_view(App* app) {
         assert(SDL_DetachVirtualJoystick(one) && SDL_DetachVirtualJoystick(two));
         SDL_QuitSubSystem(SDL_INIT_JOYSTICK);
     }
+    /* a player's button map draws that player's pad, as the games give the pads their players: each in the order it
+       came, the player naming it, else the first naming none; one with none plugged in says so (#305's gap 8) */
+    {
+        SDL_VirtualJoystickDesc d;
+        SDL_JoystickID one, two;
+        char guid[33];
+        int map1 = setting_row(app, "gamepad_p1_map"), swap1 = setting_row(app, "gamepad_p1_swap_ab");
+        int map2 = setting_row(app, "gamepad_p2_map"), swap2 = setting_row(app, "gamepad_p2_swap_ab");
+        int row = app->editor.row;
+        assert(SDL_InitSubSystem(SDL_INIT_JOYSTICK));
+        SDL_INIT_INTERFACE(&d);
+        d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+        d.naxes = SDL_GAMEPAD_AXIS_COUNT;
+        d.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+        d.vendor_id = 0x045e;
+        d.product_id = 0x02ea;
+        d.name = "One Pad";
+        one = SDL_AttachVirtualJoystick(&d);
+        d.product_id = 0x0b13;
+        d.name = "Two Pad";
+        two = SDL_AttachVirtualJoystick(&d);
+        assert(one && two);
+        open_pad_on(app, map2, map2, swap2, 2);
+        assert(app->gamepad && !strcmp(SDL_GetGamepadName(app->gamepad), "Two Pad") &&
+               !strcmp(app->pad.pad, "Two Pad"));
+        key(app, SDLK_ESCAPE);
+        open_pad_on(app, map1, map1, swap1, 1);
+        assert(app->gamepad && !strcmp(SDL_GetGamepadName(app->gamepad), "One Pad"));
+        key(app, SDLK_ESCAPE);
+        SDL_GUIDToString(SDL_GetJoystickGUIDForID(one), guid, sizeof guid);
+        assert(gui_settings_set(&app->settings, "gamepad_p2_device", guid)); /* player 2 names the first */
+        open_pad_on(app, map2, map2, swap2, 2);
+        assert(app->gamepad && !strcmp(SDL_GetGamepadName(app->gamepad), "One Pad"));
+        key(app, SDLK_ESCAPE);
+        open_pad_on(app, map1, map1, swap1, 1);
+        assert(app->gamepad && !strcmp(SDL_GetGamepadName(app->gamepad), "Two Pad"));
+        key(app, SDLK_ESCAPE);
+        { /* a second alike plugged in: the player naming its GUID with /2 takes it */
+            SDL_JoystickID three;
+            char second[40];
+            d.product_id = 0x02ea;
+            d.name = "One Pad";
+            three = SDL_AttachVirtualJoystick(&d);
+            assert(three);
+            snprintf(second, sizeof second, "%s/2", guid);
+            assert(gui_settings_set(&app->settings, "gamepad_p2_device", second));
+            open_pad_on(app, map2, map2, swap2, 2);
+            assert(app->gamepad && SDL_GetGamepadID(app->gamepad) == three);
+            key(app, SDLK_ESCAPE);
+            assert(SDL_DetachVirtualJoystick(three));
+        }
+        assert(gui_settings_set(&app->settings, "gamepad_p2_device", "03000000ffffffff0000000000000000"));
+        open_pad_on(app, map2, map2, swap2, 2);
+        assert(!app->gamepad && !strcmp(app->pad.note, "No controller plugged in is player 2's (its Controller: "
+                                                       "03000000ffffffff0000000000000000): the 2 there are other "
+                                                       "players'"));
+        key(app, SDLK_ESCAPE);
+        assert(gui_settings_set(&app->settings, "gamepad_p2_device", "") &&
+               !gui_settings_value(&app->settings, "gamepad_p2_device"));
+        assert(SDL_DetachVirtualJoystick(one) && SDL_DetachVirtualJoystick(two));
+        SDL_QuitSubSystem(SDL_INIT_JOYSTICK);
+        assert(app->form == GUI_FORM_GROUP);
+        app->editor.row = row;
+    }
     /* round: Left twice is 8 (no rows of its own here), Right twice back to 1 */
     app->editor.row = 0;
     key(app, SDLK_LEFT);

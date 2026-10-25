@@ -119,8 +119,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   side with the console button it sends (where the console's is, unless the player's map says otherwise, A and B
   swapped when the group's **Swap A/B** is on), and what the focus does at the bottom. Up/Down move, Left/Right
   change a control's button and Enter (or the pad's A) waits for a press on the pad, which takes it; a change keeps
-  the whole map as `gamepad_map`, and Del puts it back to the `.ini`'s. The first pad plugged in is shown, its held
-  buttons lit; with none, the middle says why (a joystick SDL has no mapping for is named, with its GUID and the
+  the whole map as `gamepad_map`, and Del puts it back to the `.ini`'s. The first pad plugged in is shown, on a
+  player's map that player's, as the games give the pads their players (each in the order it came takes the player
+  whose *Controller* names it, else the first naming none), its held buttons lit; with none, the middle says why (a joystick SDL has no mapping for is named, with its GUID and the
   file its line goes in). The launcher reads pads only on this page.
   Controllers' **Player** row, first, goes round *All* and 1 to 8, as Eden's tabs (Left/Right or Enter): *All*
   shows the settings every player shares; a player its own, *Controller*, *Connected*, *Type*, *Swap A/B*,
