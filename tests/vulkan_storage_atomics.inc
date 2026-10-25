@@ -113,9 +113,15 @@ static int check_volume_surface_atomics(void)
 								op, signed_compare, bound, base, family);
 						CHECK(g_vk_dispatches == dispatches + 1);
 						CHECK(!gmem_read(target, result, sizeof(result)));
-						if (memcmp(result, expected, sizeof(result)))
-							fprintf(stderr, "3D atomic differs: op %u signed %u bound %u base %u family %u\n",
-								op, signed_compare, bound, base, family);
+						if (memcmp(result, expected, sizeof(result))) {
+							u32 first = 0;
+							while (first < sizeof(result) && result[first] == expected[first]) first++;
+							fprintf(stderr, "3D atomic differs: op %u signed %u bound %u base %u family %u: voxel %08x, "
+								"expected %08x (initial %08x, operand %08x); first byte apart at %u of %u\n",
+								op, signed_compare, bound, base, family, snx_ld_le32(result + offset),
+								snx_ld_le32(expected + offset), cases[operation].initial, cases[operation].operand,
+								first, (u32)offset);
+						}
 						CHECK(!memcmp(result, expected, sizeof(result)));
 						count++;
 					}
