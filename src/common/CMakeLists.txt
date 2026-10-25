@@ -15,6 +15,9 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
     set_source_files_properties(runtime/cas128.c PROPERTIES COMPILE_OPTIONS -mcx16)
 endif()
 target_link_libraries(scarletnx-common PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+# the menus' icons, beside the VGA font (utilities/font.c): the launcher's font and the game menu's atlas draw them
+include("${PROJECT_SOURCE_DIR}/cmake/gui_icons.cmake")
+target_sources(scarletnx-common PRIVATE "${snx_gui_icons_c}")
 # the A64 decoder (cpu/aarch64/a64_decoder.c) tools/a64dec generates from cpu/aarch64/decode/
 include("${PROJECT_SOURCE_DIR}/cmake/a64dec.cmake")
 snx_a64dec(scarletnx-common)

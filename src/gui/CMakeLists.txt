@@ -211,6 +211,9 @@ if(BUILD_TESTING)
     add_executable(snx-test-gui-log "${PROJECT_SOURCE_DIR}/tests/gui_log.c")
     target_link_libraries(snx-test-gui-log PRIVATE snx_gui_support scarletnx-common)
     add_test(NAME gui_log COMMAND snx-test-gui-log)
+    # cmake/gui_icons.cmake compiles icons.hex, and refuses a glyph missing, blank or out of its place by its icon
+    add_test(NAME gui_icons COMMAND "${CMAKE_COMMAND}" "-DSOURCE=${PROJECT_SOURCE_DIR}"
+             "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/gui-icons-test" -P "${PROJECT_SOURCE_DIR}/tests/gui_icons.cmake")
     add_executable(snx-test-gui-process "${PROJECT_SOURCE_DIR}/tests/gui_process.c")
     target_link_libraries(snx-test-gui-process PRIVATE snx_gui_support scarletnx-common)
     add_test(NAME gui_process_tree COMMAND snx-test-gui-process)
@@ -235,6 +238,9 @@ if(BUILD_TESTING)
         target_link_libraries(snx-test-gui-sdl PRIVATE snx_apple_frontend "-framework Foundation")
         set_target_properties(snx-test-gui-sdl PROPERTIES LINKER_LANGUAGE CXX)
     endif()
+    # the runtime's sections and pages, each of which has an icon in the Settings
+    target_compile_definitions(snx-test-gui-sdl PRIVATE
+                               SNX_GUI_SETTINGS_TXT="${PROJECT_SOURCE_DIR}/src/nx/runtime/settings.txt")
     # TODO: fix this
     if (NOT APPLE)
         add_test(NAME gui_sdl_events COMMAND snx-test-gui-sdl)
