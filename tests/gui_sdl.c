@@ -2709,6 +2709,23 @@ static void recompile_queue(App* app) {
     }
     go_tab(app, GUI_TAB_MENU);
 }
+/* the queue's compile run to its end and its game played, a pump every few milliseconds for up to 10 s; on a timeout
+   what the menu saw, for the assert that follows: the first job's state, whether one still runs, the view, the
+   queue's focus and the menu's line */
+static void wait_played(App* app, int line) {
+    static const char* const states[] = {"waiting", "running", "OK", "failed"};
+    Uint64 until = SDL_GetTicks() + 10000;
+    while (!app->menu.running && SDL_GetTicks() < until) {
+        pump(app);
+        SDL_Delay(2);
+    }
+    if (!app->menu.running)
+        fprintf(stderr,
+                "gui_sdl.c:%d: no game played after 10 s: job 0 %s of %d, %s running, view %d, focus %d, said \"%s\"\n",
+                line, app->queue.count ? states[app->queue.job[0].state] : "none", app->queue.count,
+                gui_queue_running(&app->queue) >= 0 ? "one" : "none", (int)app->menu.view, (int)app->queue_focus,
+                app->message);
+}
 /* a game opened that no game of the library was made from: its first compile in the queue, the Compile tab showing it.
    It plays once it ended while the tab still shows it; sent away from the tab first, the tips say it is ready instead
    (DraVee's pick, 2026-10-24) */
@@ -2724,7 +2741,7 @@ static void compile_first(App* app, const char* dir) {
     assert(!app->menu.running && gui_queue_running(&app->queue) == 0 && app->queue.job[0].kind == GUI_JOB_COMPILE);
     assert(app->menu.view == GUI_LOAD_RECOMPILE && tab_shown(app) == GUI_TAB_RECOMPILE && tab_reads(app, "Compile"));
     made = made_game(app, dump, "first compile"); /* as its driver leaves it, before the menu sees it end */
-    for (until = SDL_GetTicks() + 10000; !app->menu.running && SDL_GetTicks() < until; SDL_Delay(2)) pump(app);
+    wait_played(app, __LINE__);
     assert(app->queue.job[0].state == GUI_JOB_OK && app->menu.running && app->menu.selected == GUI_SWITCH);
     argv_got = ran(app, 0); /* the game it made, played */
     assert(strstr(argv_got, made) && !has_arg(argv_got, "-r", NULL));
@@ -2794,7 +2811,7 @@ static void compile_first(App* app, const char* dir) {
             for (k = 1; k + 1 < n && strcmp(job_argv[k], "-r"); ++k) continue;
             assert(k + 1 < n && !strcmp(job_argv[k + 1], dump));
             stamp_here(made, "first compile"); /* as the driver's -r leaves it */
-            for (until = SDL_GetTicks() + 10000; !app->menu.running && SDL_GetTicks() < until; SDL_Delay(2)) pump(app);
+            wait_played(app, __LINE__);
             assert(app->queue.job[0].state == GUI_JOB_OK && app->menu.running && app->queue.count == 1);
             argv_got = ran(app, 0); /* the game's program, played */
             assert(strstr(argv_got, program) && !has_arg(argv_got, "-r", NULL));
@@ -2838,7 +2855,7 @@ static void compile_first(App* app, const char* dir) {
         for (k = 1; k + 1 < n && strcmp(job_argv[k], "-r"); ++k) continue;
         assert(k + 1 < n && !strcmp(job_argv[k + 1], program));
         if (!kept) stamp_here(made, "first compile"); /* as the driver's -r leaves it */
-        for (until = SDL_GetTicks() + 10000; !app->menu.running && SDL_GetTicks() < until; SDL_Delay(2)) pump(app);
+        wait_played(app, __LINE__);
         assert(app->queue.job[0].state == GUI_JOB_OK && app->menu.running && app->native && app->queue.count == 1);
         argv_got = ran(app, 0); /* the game's program, played */
         assert(strstr(argv_got, program) && !has_arg(argv_got, "-r", NULL));
