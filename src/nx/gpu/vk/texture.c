@@ -677,8 +677,15 @@ static Surf* tex_check(Surf* t, u64 gva) {
         t->ww_epoch = vk_ww_epoch();
         if (wr >= 0) {
             t->checked = g_vk_present;
-            if (wr && !fresh) tex_rehash(t);
-            t->wseen = wnow; /* captured before reading texels; the next stamp must remain newer */
+            /* Written: hashed again after the check took in the scans that found the writes, so the new contents hold
+               what their marks (the clock as it is now, at most) stand for. A rehash for the front end's writes came
+               before those scans, and is done again. Unchanged, the texture keeps its baseline: the clock before the
+               check plus one is what the next scans taken in are marked with, and the texture took their writes as
+               seen (one game's glyph cache missed the glyphs its CPU drew after a check that marked nothing) */
+            if (wr) {
+                t->wseen = wnow;
+                tex_rehash(t);
+            }
             return t->upload_valid ? t : NULL;
         }
         /* without it, hashed whole once in each epoch it is used in until it settles: what the CPU wrote before a
