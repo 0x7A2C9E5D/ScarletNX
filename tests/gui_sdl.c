@@ -628,6 +628,70 @@ static void players_view(App* app) {
         assert(SDL_DetachVirtualJoystick(one) && SDL_DetachVirtualJoystick(two));
         SDL_QuitSubSystem(SDL_INIT_JOYSTICK);
     }
+    /* a player's button map draws that player's pad, as the games give the pads their players: each in the order it
+       came, the player naming it, else the first naming none; one with none plugged in says so (#305's gap 8) */
+    {
+        SDL_VirtualJoystickDesc d;
+        SDL_JoystickID one, two;
+        char guid[33];
+        int map1 = setting_row(app, "gamepad_p1_map"), swap1 = setting_row(app, "gamepad_p1_swap_ab");
+        int map2 = setting_row(app, "gamepad_p2_map"), swap2 = setting_row(app, "gamepad_p2_swap_ab");
+        int row = app->editor.row;
+        assert(SDL_InitSubSystem(SDL_INIT_JOYSTICK));
+        SDL_INIT_INTERFACE(&d);
+        d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+        d.naxes = SDL_GAMEPAD_AXIS_COUNT;
+        d.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+        d.vendor_id = 0x045e;
+        d.product_id = 0x02ea;
+        d.name = "One Pad";
+        one = SDL_AttachVirtualJoystick(&d);
+        d.product_id = 0x0b13;
+        d.name = "Two Pad";
+        two = SDL_AttachVirtualJoystick(&d);
+        assert(one && two);
+        open_pad_on(app, map2, map2, swap2, 2);
+        assert(app->gamepad && !strcmp(SDL_GetGamepadName(app->gamepad), "Two Pad") &&
+               !strcmp(app->pad.pad, "Two Pad"));
+        key(app, SDLK_ESCAPE);
+        open_pad_on(app, map1, map1, swap1, 1);
+        assert(app->gamepad && !strcmp(SDL_GetGamepadName(app->gamepad), "One Pad"));
+        key(app, SDLK_ESCAPE);
+        SDL_GUIDToString(SDL_GetJoystickGUIDForID(one), guid, sizeof guid);
+        assert(gui_settings_set(&app->settings, "gamepad_p2_device", guid)); /* player 2 names the first */
+        open_pad_on(app, map2, map2, swap2, 2);
+        assert(app->gamepad && !strcmp(SDL_GetGamepadName(app->gamepad), "One Pad"));
+        key(app, SDLK_ESCAPE);
+        open_pad_on(app, map1, map1, swap1, 1);
+        assert(app->gamepad && !strcmp(SDL_GetGamepadName(app->gamepad), "Two Pad"));
+        key(app, SDLK_ESCAPE);
+        { /* a second alike plugged in: the player naming its GUID with /2 takes it */
+            SDL_JoystickID three;
+            char second[40];
+            d.product_id = 0x02ea;
+            d.name = "One Pad";
+            three = SDL_AttachVirtualJoystick(&d);
+            assert(three);
+            snprintf(second, sizeof second, "%s/2", guid);
+            assert(gui_settings_set(&app->settings, "gamepad_p2_device", second));
+            open_pad_on(app, map2, map2, swap2, 2);
+            assert(app->gamepad && SDL_GetGamepadID(app->gamepad) == three);
+            key(app, SDLK_ESCAPE);
+            assert(SDL_DetachVirtualJoystick(three));
+        }
+        assert(gui_settings_set(&app->settings, "gamepad_p2_device", "03000000ffffffff0000000000000000"));
+        open_pad_on(app, map2, map2, swap2, 2);
+        assert(!app->gamepad && !strcmp(app->pad.note, "No controller plugged in is player 2's (its Controller: "
+                                                       "03000000ffffffff0000000000000000): the 2 there are other "
+                                                       "players'"));
+        key(app, SDLK_ESCAPE);
+        assert(gui_settings_set(&app->settings, "gamepad_p2_device", "") &&
+               !gui_settings_value(&app->settings, "gamepad_p2_device"));
+        assert(SDL_DetachVirtualJoystick(one) && SDL_DetachVirtualJoystick(two));
+        SDL_QuitSubSystem(SDL_INIT_JOYSTICK);
+        assert(app->form == GUI_FORM_GROUP);
+        app->editor.row = row;
+    }
     /* round: Left twice is 8 (no rows of its own here), Right twice back to 1 */
     app->editor.row = 0;
     key(app, SDLK_LEFT);
@@ -2781,10 +2845,23 @@ int main(int argc, char** argv) {
         IconJpeg jpeg = {{0}, 0};
         char* to = snx_path_join(argv[6], "icon.jpg");
         int rc = 1;
-        if (strstr(argv[8], "no icon"))
+#ifndef _WIN32
+        /* started as the menu starts its drivers (gui_process.h), which works where SDL's processes do not (Android's
+           API 21): in a session of its own, the leader of its process group */
+        if (getpgrp() != getpid()) {
+            fputs("scarletnx: not started through the menu's processes\n", stderr);
+            free(to);
+            return 9;
+        }
+#endif
+        if (strstr(argv[8], "hung icon")) /* never answers: the menu stops it */
+            SDL_Delay(60000);
+        if (strstr(argv[8], "no icon")) {
+            puts("Reading the dump's Control NCA");
+            fflush(stdout);
             fprintf(stderr, "scarletnx: Games shows no icon for %s: it has no Control NCA\n",
                     argv[8]); /* as snx_error */
-        else
+        } else
             rc = snx_splash_jpeg("wimsy-fuddles", 32, 90, icon_jpeg_write, &jpeg) ||
                  snx_write_file(to, jpeg.data, (size_t)jpeg.size);
         free(to);
@@ -3111,6 +3188,49 @@ int main(int argc, char** argv) {
     assert(app.menu.selected == GUI_GBA);
     render(&app);
     shows(&app, "- Load GBA ROM", yellow);
+    /* a load whose driver is neither beside the menu nor on PATH (on iOS the four the app leaves out) is greyed, still
+       there, as soon as the folder or PATH it is looked for in changes, and Enter on it says which driver rather than
+       opening its screen; put back, Enter looks again and opens it; gone again, the row greys within a second (#640) */
+    {
+#ifdef _WIN32
+        char* vita = snx_path_join(app.drivers, "scarletnx-vita.exe");
+#else
+        char* vita = snx_path_join(app.drivers, "scarletnx-vita");
+#endif
+        char* aside = snx_format("%s.aside", vita);
+        char* path = SDL_strdup(getenv("PATH"));
+        assert(!rename(vita, aside));
+        set_env("PATH", "/nonexistent"); /* none of the machine's own */
+        render(&app);
+        shows(&app, "- Load Vita VPK", rgb(app.theme.soft)); /* not focused, greyed */
+        shows(&app, "- Load 3DS game", normal);              /* its driver there */
+        app.menu.selected = GUI_VITA;
+        key(&app, SDLK_RETURN);
+        assert(app.menu.view == GUI_LOAD_NONE && !app.menu.activated && app.menu.selected == GUI_VITA);
+        assert(!strcmp(app.message, "Cannot find scarletnx-vita beside ScarletNX or on PATH."));
+        render(&app);
+        shows(&app, "- Load Vita VPK", rgb(app.theme.soft)); /* focused, greyed */
+        hides(&app, "- Load Vita VPK", yellow);
+        assert(!rename(aside, vita));
+        key(&app, SDLK_RETURN); /* looked for again as it is pressed */
+        assert(app.menu.view == GUI_LOAD_DROP && app.menu.active == GUI_VITA);
+        key(&app, SDLK_ESCAPE);
+        /* gone again, nothing else changed: greyed once it was looked for a second ago */
+        assert(!rename(vita, aside));
+        if (SDL_GetTicks() < 1001) SDL_Delay((Uint32)(1001 - SDL_GetTicks()));
+        app.loads_at = SDL_GetTicks() - 1000;
+        render(&app);
+        shows(&app, "- Load Vita VPK", rgb(app.theme.soft));
+        assert(!rename(aside, vita));
+        set_env("PATH", path);
+        SDL_free(path);
+        free(aside);
+        free(vita);
+        app.menu.activated = false;
+        app.menu.active = GUI_SWITCH;
+        app.menu.selected = GUI_GBA;
+        app.message[0] = 0;
+    }
     key(&app, SDLK_RIGHT);
     assert(app.menu.selected == GUI_KEYS);
     /* Never touch the real user's keys: exercise installation in a private home. */
@@ -5792,16 +5912,26 @@ int main(int argc, char** argv) {
                 assert(!remove(icon));
                 free(icon);
             }
-            { /* a dump's icon, asked of the driver (-x --icon) into the menu's cache: none until it answers, once, then
-                 its row's; one it has none for keeps what the driver said and is not asked again */
+            { /* a dump's icon, asked of the driver (-x --icon, through the menu's processes) into the menu's cache: none
+                 until it answers, once, then its row's; an answer an older launcher left there (why.txt) is not read. One
+                 the driver gives none for is not asked again in the session, its kind saying why and the launcher's log
+                 what the driver said, once; on disk nothing of it, so the next start asks again. A driver that does not
+                 answer is stopped */
                 char* cache_was = getenv("XDG_CACHE_HOME") ? snx_strdup(getenv("XDG_CACHE_HOME")) : NULL;
                 char *cache = snx_path_join(temporary, "icon cache"), *with = snx_path_join(temporary, "with icon.nsp");
-                char *without = snx_path_join(temporary, "no icon.nsp"), *dir, *why;
-                char* said;
+                char *without = snx_path_join(temporary, "no icon.nsp"), *dir, *why, *old_dir, *old_why;
+                char *hung = snx_path_join(temporary, "hung icon.nsp"), *logs = snx_path_join(temporary, "icon logs");
+                char *console = snx_path_join(logs, SNX_CONSOLE_LOG), *said, *line, reason[160], kind[256];
                 size_t said_size = 0;
                 unsigned answered;
+                GuiRecentGame recent_dump = {0};
                 set_env("XDG_CACHE_HOME", cache);
-                assert(!snx_write_file(with, "x", 1) && !snx_write_file(without, "x", 1));
+                assert(!snx_write_file(with, "x", 1) && !snx_write_file(without, "x", 1) &&
+                       !snx_write_file(hung, "x", 1) && !snx_mkdirs(logs));
+                gui_log_folder(logs);
+                old_dir = dump_icon_dir(&app, with); /* an older launcher's answer, which no longer holds it back */
+                old_why = snx_path_join(old_dir, "why.txt");
+                assert(!snx_mkdirs(old_dir) && !snx_write_file(old_why, "That operation is not supported", 31));
                 icons_free(&app);
                 dump_icons_pass(&app.dump_icons); /* the dumps Games' rows asked for before this */
                 pump(&app);
@@ -5818,16 +5948,28 @@ int main(int argc, char** argv) {
                 pump(&app); /* an answer: the rows without one look again */
                 assert(app.dump_icons_seen == answered + 1 && game_icon(&app, with) &&
                        game_icon(&app, with) != app.icon_loading);
+                assert(!dump_icon_why(&app, with, reason, sizeof reason));
                 assert(game_icon(&app, without) == app.icon_loading);
                 dump_icons_pass(&app.dump_icons);
                 pump(&app);
                 assert(!game_icon(&app, without)); /* none, and no loading mark */
                 dir = dump_icon_dir(&app, without);
                 why = snx_path_join(dir, "why.txt");
-                said = (char*)snx_read_file(why, &said_size);
-                assert(said && strstr(said, "no icon.nsp: it has no Control NCA"));
+                assert(snx_is_dir(dir) && !snx_path_exists(why)); /* the driver's folder, nothing of the answer kept */
+                assert(dump_icon_why(&app, without, reason, sizeof reason) &&
+                       strstr(reason, "no icon.nsp: it has no Control NCA"));
+                snprintf(recent_dump.path, sizeof recent_dump.path, "%s", without); /* its kind says it, a row's too */
+                recent_kind(&app, &recent_dump, kind, sizeof kind);
+                assert(!strncmp(kind, "A dump, prepared when it runs. No icon: ", 40) &&
+                       strstr(kind, "it has no Control NCA"));
                 icons_free(&app);
                 assert(!game_icon(&app, without) && !app.dump_icons.count); /* said once: not asked again */
+                said = (char*)snx_read_file(console, &said_size);
+                line = snx_format("] no icon for %s: ", without);
+                assert(said && strstr(said, line) && !strstr(strstr(said, line) + 1, line) &&
+                       strstr(said, "] the driver said:\n") && strstr(said, "] Reading the dump's Control NCA\n"));
+                free(line);
+                free(said);
                 { /* keys put in: a dump the driver could not read is asked again */
                     char* keys_was = app.keys_path;
                     app.keys_path = snx_path_join(temporary, "icon cache keys");
@@ -5839,10 +5981,28 @@ int main(int argc, char** argv) {
                     free(app.keys_path);
                     app.keys_path = keys_was;
                 }
+                /* a driver that does not answer, stopped once its time is up, says so */
+                app.dump_icons.wait_ms = 300;
+                icons_free(&app);
+                assert(game_icon(&app, hung) == app.icon_loading);
+                dump_icons_pass(&app.dump_icons);
+                assert(dump_icon_why(&app, hung, reason, sizeof reason) &&
+                       !strcmp(reason, "the driver gave no answer in 1 s"));
+                /* the next start: what the driver gave none for is asked again */
                 dump_icons_stop(&app);
+                icons_free(&app);
+                assert(!dump_icon_why(&app, without, reason, sizeof reason));
+                assert(game_icon(&app, without) == app.icon_loading && app.dump_icons.count == 1);
+                dump_icons_stop(&app);
+                gui_log_folder(NULL);
                 set_env("XDG_CACHE_HOME", cache_was);
                 icons_free(&app);
-                free(said);
+                assert(!snx_remove_tree(logs));
+                free(console);
+                free(logs);
+                free(hung);
+                free(old_why);
+                free(old_dir);
                 free(why);
                 free(dir);
                 free(without);
@@ -9811,12 +9971,41 @@ int main(int argc, char** argv) {
                 "[   2.25]    #0 163d18d8 <_ZN2nn4diag6detail10VAbortImplEv+d8>\r\n"
                 "[   2.25]    #1 1683a358 <_ZN2nn3hid18GetNpadJoyHoldTypeEv+38>\r\n"
                 "[   2.32] FATAL: The game stopped (svcBreak, reason 0). See the .log for details.\r\n";
+            /* the launcher's log: a failure written once however often it is said, shown in its box or not; a fatal
+               error in the other log too; both in the shared file under their paths, after the recompile's */
+            char *logs = snx_path_join(temporary, "launcher logs"), *console = snx_path_join(logs, SNX_CONSOLE_LOG);
+            char *errors = snx_path_join(logs, SNX_ERROR_LOG), *line, *mine;
+            assert(!snx_mkdirs(logs));
+            gui_log_folder(logs);
+            say_failure(&app, "a failure the log keeps");
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR);
+            key(&app, SDLK_RETURN);
+            say_failure(&app, "a failure the log keeps"); /* not shown again, nor written */
+            assert(!app.confirm.shown);
+            gui_log_fatal("a fatal error the log keeps");
+            text = (char*)snx_read_file(console, &size);
+            assert(text && (line = strstr(text, "] a failure the log keeps\n")) &&
+                   !strstr(line + 1, "] a failure the log"));
+            assert(strstr(text, "] a fatal error the log keeps\n"));
+            free(text);
             assert(!snx_mkdirs(game) && !snx_write_file(log, crashed, sizeof crashed - 1));
             snprintf(app.message, sizeof(app.message), "before the log");
             key(&app, SDLK_RETURN);
             assert(!strncmp(app.message, "Log saved to ", 13) && strstr(app.message, "scarletnx.log"));
             text = (char*)snx_read_file(saved, &size);
             assert(text && strstr(text, "Message: before the log") && strstr(text, "== the last run: "));
+            mine = snx_format("== the launcher's log: %s ==\n", console);
+            assert((line = strstr(text, mine)) && strstr(line, "] a failure the log keeps\n") &&
+                   line > strstr(text, "== the last recompile of the queue: "));
+            free(mine);
+            mine = snx_format("== fatal errors: %s ==\n", errors);
+            assert((line = strstr(text, mine)) && strstr(line, "] a fatal error the log keeps\n"));
+            free(mine);
+            gui_log_folder(NULL);
+            assert(!snx_remove_tree(logs));
+            free(errors);
+            free(console);
+            free(logs);
             assert(strstr(text, "== summary ==\n### `Some Game`") &&
                    strstr(text, "**Build:** `ScarletNX main 1234abc (clang 23.1.3, Windows x86_64)`") &&
                    strstr(text, "**Signature:** `svcBreak in _ZN2nn3hid18GetNpadJoyHoldTypeEv`") &&
@@ -9851,6 +10040,53 @@ int main(int argc, char** argv) {
         free(portable);
         free(saved);
     }
+    /* two launchers open on one Logs folder: the first holds last-run.log and last-recompile.log, the next takes
+       last-run-2.log and last-recompile-2.log, its log saying so; the first gone, the pair is free again (#675) */
+    {
+        char *run_was = app.run_log, *job_was = app.job_log, *place_was = app.place[GUI_PLACE_STATE];
+        char *state = snx_path_join(temporary, "two launchers"), *first = snx_path_join(state, "last-run.log");
+        char *second = snx_path_join(state, "last-run-2.log"),
+             *second_job = snx_path_join(state, "last-recompile-2.log");
+        char *console = snx_path_join(state, SNX_CONSOLE_LOG), *said, *line;
+        size_t size = 0;
+        intptr_t other, third;
+        bool locked_was = app.run_locked;
+        intptr_t lock_was = app.run_lock;
+        assert(!snx_mkdirs(state));
+        app.run_log = app.job_log = NULL;
+        app.run_locked = false;
+        app.place[GUI_PLACE_STATE] = snx_strdup(state);
+        assert(!snx_lock_file(first, &other)); /* the launcher opened first */
+        run_log_follow(&app);
+        assert(app.run_locked && !strcmp(app.run_log, second) && !strcmp(app.job_log, second_job));
+        said = (char*)snx_read_file(console, &size);
+        line = snx_format("] its runs' logs %s and %s\n", second, second_job);
+        assert(said && strstr(said, line));
+        free(line);
+        free(said);
+        assert(snx_lock_file(second, &third) == 1); /* this one's, which a third would leave */
+        snx_unlock_file(other);
+        run_log_follow(&app); /* Logs taken again: the first pair, free now, the second let go */
+        assert(app.run_locked && !strcmp(app.run_log, first) && snx_lock_file(first, &other) == 1);
+        assert(!snx_lock_file(second, &third));
+        snx_unlock_file(third);
+        snx_unlock_file(app.run_lock);
+        free(app.run_log);
+        free(app.job_log);
+        free(app.place[GUI_PLACE_STATE]);
+        app.place[GUI_PLACE_STATE] = place_was;
+        app.run_log = run_was;
+        app.job_log = job_was;
+        app.run_locked = locked_was;
+        app.run_lock = lock_was;
+        gui_log_folder(NULL);
+        assert(!snx_remove_tree(state));
+        free(console);
+        free(second_job);
+        free(second);
+        free(first);
+        free(state);
+    }
     /* Android's menu: its own files in its data folder's config/ and state/ (.scarletnx/ in the app's own files, which
        the Files app shows). An older version's, in the app's own files, are neither moved nor read: the menu starts
        from its defaults, and the box of what older versions left names each file with its size, then how they go while
@@ -9865,7 +10101,7 @@ int main(int argc, char** argv) {
         char *old = snx_path_join(temporary, "own files"), *data = snx_path_join(old, SNX_PORTABLE_DIR);
         char *home = app.home_dir, *data_dir = app.data_dir, *full, *config, *state, *path, *text, *expected;
         char *settings_file = app.settings_file, *folders_file = app.folders_file, *app_file = app.app_file;
-        char *recent_file = app.recent_file, *run_log = app.run_log;
+        char *recent_file = app.recent_file, *run_log = app.run_log, *job_log = app.job_log;
         GuiRecent recent = app.recent;
         size_t head = app.browser.head, size;
         int i, j, text_size = app.menu.text_size, folder_count = app.folder_count;
@@ -9889,6 +10125,7 @@ int main(int argc, char** argv) {
         app.menu_old = old;
         free(app.users_dir); /* the users test's: open_files names the new data folder's */
         app.users_dir = NULL;
+        app.run_log = app.job_log = NULL; /* kept for after: open_files takes the folder's own, and its log */
         open_files(&app);
         config = menu_folder(&app, SNX_USER_CONFIG, false);
         state = menu_folder(&app, SNX_USER_STATE, false);
@@ -9956,11 +10193,16 @@ int main(int argc, char** argv) {
         free(app.app_file);
         free(app.recent_file);
         free(app.run_log);
+        free(app.job_log);
+        if (app.run_locked) snx_unlock_file(app.run_lock);
+        app.run_locked = false;
+        gui_log_folder(NULL);
         app.settings_file = settings_file;
         app.folders_file = folders_file;
         app.app_file = app_file;
         app.recent_file = recent_file;
         app.run_log = run_log;
+        app.job_log = job_log;
         app.recent = recent;
         app.browser.head = head;
         app.message[0] = 0;
