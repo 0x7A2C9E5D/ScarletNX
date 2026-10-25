@@ -7389,8 +7389,8 @@ int main(int argc, char** argv) {
             }
             { /* the focused game's side panel: made with what its stamp says, and Needs Recompile, in the failure
                  colour, once its stamp is another ABI's (Play compiles it first, as made_here says) */
-                char *stamp = snx_format("%s.abi", base),
-                     *text = snx_format("%u\nmade opt=3 aot=1 found=1 code=2\n", (unsigned)SNX_ABI);
+                char *stamp = snx_path_join(own, "0100ABCD12340000.abi"), /* beside the program, .exe or not */
+                    *text = snx_format("%u\nmade opt=3 aot=1 found=1 code=2\n", (unsigned)SNX_ABI);
                 assert(!snx_write_file(stamp, text, strlen(text)));
                 go_tab(&app, GUI_TAB_GAMES);
                 focus_game(&app, "0100ABCD12340000");
@@ -7424,8 +7424,10 @@ int main(int argc, char** argv) {
                 key(&app, SDLK_RETURN);
                 assert(app.addons_folders_shown && addons_rows(&app) == GUI_GAME_FOLDERS && !app.addons_focus);
                 assert(!app.addons_folders[GUI_FOLDER_DUMP]); /* made with no source= */
-                assert(!strcmp(app.addons_folders[GUI_FOLDER_GAME], own));
-                assert(!strcmp(app.addons_folders[GUI_FOLDER_SAVES], saves) && !snx_path_exists(saves));
+                assert(snx_same_file(app.addons_folders[GUI_FOLDER_GAME], own)); /* in the system's separators */
+                free(saves);
+                saves = snx_strdup(app.addons_folders[GUI_FOLDER_SAVES]); /* as the code stored it */
+                assert(!snx_path_exists(saves) && snx_path_within(saves, own));
                 for (i = 0; i < GUI_GAME_FOLDERS; ++i) { /* greyed exactly when it says why */
                     info = (UiRowInfo){0};
                     assert(ui_addons_rows_get_row_info(&app, (size_t)i, 0, &info));
