@@ -234,8 +234,9 @@ setting Map limit (MB)
     default-if SNX_IOS 256
     startup
     words No limit|#
-    help The most of the game's files mapped into memory at start, in MB; 0 = no limit. A file past it is read from
-    help disk when the game asks, slower, which leaves address space for threads and graphics where a device has little
+    help The most of the game's files mapped into memory, in MB, as the game first reads them; 0 = no limit. A file past
+    help it is read from disk when the game asks, slower, which leaves address space for threads and graphics where a
+    help device has little
 setting Map limit (files)
     key map_limit_files
     int 0 1000000
@@ -243,8 +244,9 @@ setting Map limit (files)
     default-if SNX_IOS 2048
     startup
     words No limit|#
-    help The most of the game's files mapped at start; 0 = no limit. A file past it is read from disk when the game
-    help asks: each mapped file holds a descriptor, of which a device may give the whole app a few thousand
+    help The most of the game's files mapped, as the game first reads them; 0 = no limit. A file past it is read from
+    help disk when the game asks: each mapped file holds a descriptor, of which a device may give the whole app a few
+    help thousand
 setting Thread stack (MB)
     key thread_stack_mb
     int 1 256

@@ -73,6 +73,8 @@ snx_component(gpu gpu/gpu.c gpu/maxwell/engines.c gpu/maxwell/mme.c gpu/maxwell/
               gpu/nvn_trace.c gpu/shipped_pass.c)
 # mme_jit.c compiles the macros mme_hle.c has no implementation for with the LLVM backend
 target_link_libraries(snx_gpu PRIVATE snx_llvm)
+include("${PROJECT_SOURCE_DIR}/cmake/ship_walk.cmake")
+snx_ship_walk(gpu/shipped_pass.c)
 
 include("${PROJECT_SOURCE_DIR}/cmake/controls_atlas.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
