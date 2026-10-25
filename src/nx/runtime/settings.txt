@@ -582,6 +582,17 @@ setting SLP vectorizer
     help LLVM's SLP vectorizer, which packs scalar instructions into SIMD ones, in the recompile and the JIT. Off
     help while LLVM 23 can break a module with it and stop the recompile (llvm-project issue 231525). It applies to
     help the next recompile, and to the JIT's next run
+setting FPSR flags
+    key fpsr_flags
+    int 0 1
+    default 1
+    startup
+    words Off|On
+    recompile
+    help 1 = the game's code keeps FPSR's flags (floating point's inexact, underflow, overflow, division by zero and
+    help invalid, and the saturation flag QC) as the console raises them, which costs every such operation tests of
+    help its result. 0 = only the results are the console's: a game that never reads FPSR (few do) runs its floating
+    help point and saturating arithmetic faster. It applies to the next recompile, and to the JIT's next run
 setting GDB JIT symbols
     key gdb_jit
     int 0 1
