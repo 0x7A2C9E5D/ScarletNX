@@ -43,7 +43,8 @@ typedef struct Renderer {
     void (*draw)(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 base_vertex, u32 base_instance,
                  u32 instances);
     /* Maxwell ordering methods: 0 texture barrier, 1 tiled barrier, 2 data-cache invalidate,
-       3 descriptor-cache invalidate, 4 wait for idle, 5 shader instruction invalidate. */
+       3 descriptor-cache invalidate, 4 wait for idle, 5 shader instruction invalidate,
+       6 publish render target writes for CPU visibility before a release. */
     void (*method_barrier)(int kind);
     /* DRAW_TEXTURE: a texture's rectangle onto color target 0. NULL: not drawn */
     void (*draw_texture)(GpuChannel* ch);

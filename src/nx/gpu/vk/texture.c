@@ -672,14 +672,14 @@ static Surf* tex_check(Surf* t, u64 gva) {
     /* the CPU's writes, once a frame and again after each submission or stream wait that can make new ones the
        stream's to see (vk_ww_epoch): write tracking proves the memory unchanged without hashing its texels */
     if (t->checked != g_vk_present || t->ww_epoch != vk_ww_epoch()) {
-        u32 wnow = vk_ww_now();
         int wr = vk_written_since(gmem_host(gva, t->size), t->size, t->wseen);
+        u32 wnow = vk_ww_now(); /* the scan advances it only when it found writes */
         int epoch = t->ww_epoch != vk_ww_epoch();
         t->ww_epoch = vk_ww_epoch();
         if (wr >= 0) {
             t->checked = g_vk_present;
             if (wr && !fresh) tex_rehash(t);
-            t->wseen = wnow + 1; /* this scan's marks are stamped with the clock after wnow */
+            t->wseen = wnow; /* captured before reading texels; the next stamp must remain newer */
             return t->upload_valid ? t : NULL;
         }
         /* without it, hashed whole once in each epoch it is used in until it settles: what the CPU wrote before a
@@ -719,7 +719,7 @@ static Surf* tex_check(Surf* t, u64 gva) {
     }
     return t->upload_valid ? t : NULL;
 }
-static Surf* tex_from_tic(const u32* tic, int raw) {
+static Surf* tex_from_tic(const u32* tic, int raw, int storage) {
     u64 gva = ((u64)(tic[2] & 0xFFFF) << 32) | tic[1];
     u32 hv = (tic[2] >> 21) & 7;
     int bl = hv == 3 || hv == 4;
@@ -807,6 +807,12 @@ static Surf* tex_from_tic(const u32* tic, int raw) {
         if (f.bpp == rt->f.bpp || f.depth || rt->f.depth) {
             vk_rt_note_read(rt);
             if (rt->layout == VK_IMAGE_LAYOUT_UNDEFINED) goto texture_from_memory;
+            /* Crops are sampling snapshots, without storage usage or a guest
+               layout for publishing writes. Resolve writable mismatches into
+               a surface with the descriptor's own guest layout instead. */
+            if (storage && (rt->w != w || rt->h != h || rt->layers != layers ||
+                            rt->depth3d != d3 || rt->f.vk != f.vk || !rt->storage_capable))
+                goto texture_from_memory;
             /* the same bytes in another color format (an RGBA8 target read as R32_Uint): sampling the target itself
                would convert its texels, so a copy in the texture's format holds them as they are. sRGB and linear
                twins are views of one image and need no copy */
@@ -857,7 +863,8 @@ texture_from_memory:
     return tex_upload(t) ? t : NULL;
 }
 
-VkImageView vk_tex_view(Surf* s, VkImageViewType type, int srgb, const VkComponentMapping* map, int stencil) {
+static VkImageView tex_view(Surf* s, VkImageViewType type, int srgb, const VkComponentMapping* map, int stencil,
+                            u32 levels) {
     /* what a view of each image type can be */
     u32 layers;
     switch (type) {
@@ -888,7 +895,7 @@ VkImageView vk_tex_view(Surf* s, VkImageViewType type, int srgb, const VkCompone
     VkFormat fmt = s->f.depth ? s->f.vk : vk_srgb_as(s->f.vk, srgb);
     stencil = stencil && s->f.stencil;
     u64 key = (u64)type | (u64)map->r << 4 | (u64)map->g << 8 | (u64)map->b << 12 | (u64)map->a << 16 | (u64)fmt << 20 |
-              (u64)stencil << 60;
+              (u64)stencil << 60 | (u64)(levels != s->levels) << 61;
     for (int i = 0; i < s->nsv; i++)
         if (s->sv[i].key == key) return s->sv[i].v;
     VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -899,7 +906,7 @@ VkImageView vk_tex_view(Surf* s, VkImageViewType type, int srgb, const VkCompone
                                 .subresourceRange = {stencil      ? VK_IMAGE_ASPECT_STENCIL_BIT
                                                      : s->f.depth ? VK_IMAGE_ASPECT_DEPTH_BIT
                                                                   : VK_IMAGE_ASPECT_COLOR_BIT,
-                                                     0, s->levels, 0, layers}};
+                                                     0, levels, 0, layers}};
     /* a view in the image's sRGB twin is sampled only: storage, which a render target may have, has no sRGB format */
     VkImageViewUsageCreateInfo vu = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO,
                                      .usage = VK_IMAGE_USAGE_SAMPLED_BIT};
@@ -913,6 +920,17 @@ VkImageView vk_tex_view(Surf* s, VkImageViewType type, int srgb, const VkCompone
     }
     s->sv[s->nsv++] = (SurfView){key, v};
     return v;
+}
+
+VkImageView vk_tex_view(Surf* s, VkImageViewType type, int srgb, const VkComponentMapping* map, int stencil) {
+    return tex_view(s, type, srgb, map, stencil, s->levels);
+}
+
+VkImageView vk_tex_storage_view(Surf* s, VkImageViewType type) {
+    const VkComponentMapping identity = {0};
+    /* A storage descriptor exposes the first level selected by its TIC, not
+       the entire sampled mip chain. Both views share the existing image. */
+    return tex_view(s, type, 0, &identity, 0, 1);
 }
 
 /* empty textures for slots whose texture is missing or doesn't match the shader: zero, or depth 1.0 for shadow
@@ -1326,7 +1344,12 @@ static void tex_take_drawn(Surf* t) {
     if (d != small) free(d);
 }
 Surf* vk_tex_from_tic(const u32* tic) {
-    Surf* t = tex_from_tic(tic, 0);
+    Surf* t = tex_from_tic(tic, 0, 0);
+    tex_take_drawn(t);
+    return t;
+}
+Surf* vk_tex_from_tic_storage(const u32* tic) {
+    Surf* t = tex_from_tic(tic, 0, 1);
     tex_take_drawn(t);
     return t;
 }
@@ -1337,7 +1360,7 @@ Surf* vk_tex_recheck(Surf* t) {
     return t;
 }
 Surf* vk_tex_from_tic_raw(const u32* tic) {
-    Surf* t = tex_from_tic(tic, 1);
+    Surf* t = tex_from_tic(tic, 1, 0);
     tex_take_drawn(t);
     return t;
 }
