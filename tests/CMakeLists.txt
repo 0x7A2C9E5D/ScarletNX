@@ -311,6 +311,11 @@ add_executable(snx-test-patches patches.c)
 snx_test_target(snx-test-patches 99)
 target_link_libraries(snx-test-patches PRIVATE scarletnx-common)
 add_test(NAME patches COMMAND snx-test-patches)
+# a recompiled game's stamp: what it is compared by, the made line after it, and the save states' copy of it
+add_executable(snx-test-game-stamp game_stamp.c)
+snx_test_target(snx-test-game-stamp 99)
+target_link_libraries(snx-test-game-stamp PRIVATE scarletnx-common)
+add_test(NAME game_stamp COMMAND snx-test-game-stamp)
 # the C compiler a 3DS game's native link runs: the build's own, else a clang beside the program, else one on PATH
 add_executable(snx-test-find-compiler find_compiler.c)
 snx_test_target(snx-test-find-compiler 99)

@@ -1518,7 +1518,9 @@ static void mods_write(int image, int stale) {
     mods = snx_mods_folder("mods-data/0100000000AB0000_data");
     stamp = snx_mods_stamp(mods, g_settings.game_mods_off);
     CHECK(strlen(stamp) == 16);
-    text = stale ? snx_strdup("1") : snx_format("1 mods %s", stamp);
+    /* the image run's stamp ends with the made line the recompile writes now, the other's is one from before it */
+    text = stale ? snx_strdup("1")
+                 : snx_format("1 mods %s%s", stamp, image ? "\nmade opt=2 aot=1 found=10 code=20\n" : "");
     CHECK(!snx_write_file("mods-data/0100000000AB0000.abi", text, strlen(text)));
     free(text);
     free(stamp);

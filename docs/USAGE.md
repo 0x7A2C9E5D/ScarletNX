@@ -204,7 +204,11 @@ Run the same command again to retry after a failure or interruption:
   code unit whose code is the same. One another build of the same ABI made keeps its code,
   and its `recompiled/<id>/<id>` is replaced by this build's runtime when the two differ, so a newer build's fixes reach
   it. Failed builds never publish a valid ABI checkpoint. A change to the recompiler that keeps `SNX_ABI` isn't
-  seen: there `-r` recompiles.
+  seen: there `-r` recompiles. The stamp's last line says how the code was made, which no check reads: `made opt=2
+  aot=1 found=812345 code=1003210`, the `-O`, `aot=0` for `--jit-only` (the JIT compiles it all), and of the
+  instructions in the modules' code (`code`) those the analysis found and compiled ahead of time (`found`; both 0 for a
+  32-bit game). The launcher's side panel shows them. A version from before it reads a stamp with it as another
+  build's, and recompiles the game once.
 - Changing directory and running the game happen on every launch. A game failure never invalidates the build.
 
 Failures stop the workflow and print the failed stage and exit status or signal. On POSIX, stopping a
