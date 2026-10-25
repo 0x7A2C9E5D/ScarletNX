@@ -3551,7 +3551,8 @@ int main(int argc, char** argv) {
         shows(&app, "- App", yellow); /* the group open, as focused while its rows have the focus */
         snprintf(line, sizeof line, "- %-20s %s", "Theme", first); /* past Background recompile, the longest */
         shows(&app, line, yellow);
-        shows(&app, "- UI scale             Auto", normal);
+        shows(&app, "- UI scale", normal); /* its slider, the size at the row's end (#613) */
+        shows(&app, "Auto", normal);
         shows(&app, "- Language             Auto: English", normal); /* SDL_PREFERRED_LOCALES, the test's */
         shows(&app, "- Theme Editor", normal);
         /* under the rows, the three folders Folders moves, whole: the extractions too */
@@ -3611,9 +3612,9 @@ int main(int argc, char** argv) {
         assert(!strcmp(app.theme.name, first));
     }
     key(&app, SDLK_DOWN);
-    /* UI scale: its sizes in a box, Auto's parts first; the one picked is used at once and asked about: Keep keeps it,
-       Back, ESC or no answer in 15 s bring the one before it back */
-    key(&app, SDLK_RIGHT);
+    /* UI scale: its sizes in a box Enter opens, Auto's parts first; the one picked is used at once and asked about:
+       Keep keeps it, Back, ESC or no answer in 15 s bring the one before it back */
+    key(&app, SDLK_RETURN);
     assert(app.sizes_shown && app.sizes.count == GUI_TEXT_MAX + 4 && app.sizes.focus == 3 && !app.menu.text_size);
     render(&app);
     { /* the pointer over a size: its focus; a click off the box closes it, nothing taken */
@@ -3625,7 +3626,7 @@ int main(int argc, char** argv) {
         assert(app.sizes_shown && app.sizes.focus == 5 && !app.menu.text_size);
         mouse_px(&app, c.box.x - 4, c.box.y + c.box.h / 2, true);
         assert(!app.sizes_shown && !app.menu.text_size && !app.confirm.shown);
-        key(&app, SDLK_RIGHT);
+        key(&app, SDLK_RETURN);
         assert(app.sizes_shown && app.sizes.focus == 3);
     }
     { /* in an area too short for them: the rows that fit, from the focus's; the arrow of those hidden above in the first
@@ -3681,6 +3682,55 @@ int main(int argc, char** argv) {
     pump(&app);
     assert(!app.confirm.shown && !app.menu.text_size && !app.size_until);
     app.clock = 0;
+    /* UI scale as a slider (#613): the row a bar, a tick a step, the knob on the size in use, in the focus colour on the
+       focused row. Left and Right step it, the size used at once and asked about as the box's is; Left/Right again
+       while it is asked go on stepping, the size before them kept to go back to, and back on it no question; a press
+       on the bar takes the step under it and a drag follows it, over the question too, until the button lifts */
+    {
+        SDL_Event up = {0};
+        GuiRect bar;
+        int span, cw = cell_w(&app);
+        render(&app);
+        bar = app.slider_bar;
+        span = bar.w - cw;
+        assert(app.editor.row == GUI_APP_TEXT && bar.w >= GUI_SIZE_STEPS * cw && span > 0);
+        assert(same_colour(
+            pixel(&app, (float)(bar.x + 3 * span / (GUI_SIZE_STEPS - 1) + cw / 2), (float)(bar.y + bar.h / 2)),
+            yellow)); /* Auto, the fourth step */
+        key(&app, SDLK_RIGHT);
+        assert(app.menu.text_size == 1 && app.confirm.shown && app.confirm.ask == GUI_ASK_TEXT && app.size_slid);
+        key(&app, SDLK_RIGHT);
+        assert(app.menu.text_size == 2 && app.confirm.shown && strstr(app.size_line, "Back to Auto in 15 s"));
+        key(&app, SDLK_LEFT);
+        key(&app, SDLK_LEFT);
+        assert(!app.menu.text_size && !app.confirm.shown && !app.size_until); /* back on Auto: nothing to ask */
+        key(&app, SDLK_LEFT);
+        assert(app.menu.text_size == -3 && app.confirm.shown);
+        key(&app, SDLK_ESCAPE);
+        assert(!app.menu.text_size && !app.confirm.shown);
+        for (int k = 0; k < 9; ++k) key(&app, SDLK_RIGHT); /* past its last: 4x, there it stays */
+        assert(app.menu.text_size == GUI_TEXT_MAX && app.confirm.shown);
+        key(&app, SDLK_ESCAPE);
+        assert(!app.menu.text_size);
+        render(&app);
+        bar = app.slider_bar;
+        span = bar.w - cw;
+        mouse_px(&app, bar.x + cw / 2 + 5 * span / (GUI_SIZE_STEPS - 1), bar.y + bar.h / 2, true); /* 2x's step */
+        assert(app.slider_drag && app.menu.text_size == 2 && app.confirm.shown);
+        render(&app); /* laid out again at 2x: the bar where it is now */
+        bar = app.slider_bar;
+        span = bar.w - cell_w(&app);
+        assert(bar.w && span > 0);
+        mouse_px(&app, bar.x + cell_w(&app) / 2 + 4 * span / (GUI_SIZE_STEPS - 1), bar.y + bar.h / 2, false);
+        assert(app.slider_drag && app.menu.text_size == 1 && app.confirm.shown);
+        up.type = SDL_EVENT_MOUSE_BUTTON_UP;
+        up.button.button = SDL_BUTTON_LEFT;
+        event(&app, &up);
+        assert(!app.slider_drag);
+        key(&app, SDLK_ESCAPE); /* Auto again, as it was before the press */
+        assert(!app.menu.text_size && !app.confirm.shown);
+        render(&app);
+    }
     /* a part of Auto is Auto's scale times it, rounded, never under 1x */
     {
         int was = app.auto_scale;

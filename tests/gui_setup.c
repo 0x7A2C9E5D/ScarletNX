@@ -188,10 +188,20 @@ static void test_first(App* app) {
         assert(x == row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app) && y > row.y);
     }
     shows(app, "< YoRHa >", rgb(app->theme.ink));
-    {
+    { /* UI scale: its slider, the size at the row's end (#613) */
         char line[64];
-        snprintf(line, sizeof line, "  Auto (%dx)  ...", app->auto_scale);
-        shows(app, line, rgb(app->theme.ink));
+        GuiSetupBoxes c;
+        GuiAppearanceBoxes a;
+        GuiRect row;
+        int x, y;
+        snprintf(line, sizeof line, "Auto (%dx)", app->auto_scale);
+        setup_boxes(app, &c);
+        appearance_boxes(app, c.content, &a);
+        row = appearance_row_box(app, &a, GUI_APPEARANCE_TEXT);
+        assert(find_text(app, line, rgb(app->theme.ink), 1, &x, &y));
+        assert(x + (int)strlen(line) * cell_w(app) <= row.x + row.w - cell_w(app) && x > row.x + row.w / 2);
+        assert(app->slider_bar.w >= GUI_SIZE_STEPS * cell_w(app) && app->slider_bar.y == row.y &&
+               app->slider_bar.x == row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app));
     }
     hides(app, "Next", rgb(app->theme.page));      /* drawn, not in focus */
     key(app, SDLK_RETURN); /* as Settings > App's Enter: the language a step on, the page kept */
@@ -241,7 +251,10 @@ static void test_first(App* app) {
         assert(app->setup_row == GUI_APPEARANCE_NEXT && page(app) == SNX_SETUP_LANGUAGE);
         point(app, appearance_row_box(app, &a, GUI_APPEARANCE_THEME), false);
         assert(app->setup_row == GUI_APPEARANCE_THEME);
-        point(app, appearance_row_box(app, &a, GUI_APPEARANCE_TEXT), true); /* UI scale clicked: its box */
+        { /* UI scale clicked on its name, off its slider: its box */
+            GuiRect text = appearance_row_box(app, &a, GUI_APPEARANCE_TEXT);
+            mouse_px(app, text.x + 2 * cell_w(app), text.y + text.h / 2, true);
+        }
         assert(app->sizes_shown && app->setup_row == GUI_APPEARANCE_TEXT && app->language == 2);
         key(app, SDLK_ESCAPE);
         assert(!app->sizes_shown);
@@ -291,7 +304,11 @@ static void test_first(App* app) {
     path = join(home, ".config/scarletnx/app.ini");
     assert(!snx_is_file(path)); /* kept for the setup's end, in the folders Install picks */
     free(path);
-    key(app, SDLK_LEFT); /* UI scale's box again, closed by ESC */
+    key(app, SDLK_LEFT); /* its slider a step back: Auto, asked about as App's is, ESC bringing 1x back */
+    assert(!app->menu.text_size && app->confirm.shown && app->confirm.ask == GUI_ASK_TEXT && app->size_slid);
+    key(app, SDLK_ESCAPE);
+    assert(!app->confirm.shown && app->menu.text_size == 1 && app->setup_row == GUI_APPEARANCE_TEXT);
+    key(app, SDLK_RETURN); /* its box again, closed by ESC */
     assert(app->sizes_shown);
     key(app, SDLK_ESCAPE);
     assert(!app->sizes_shown && app->setup_on && page(app) == SNX_SETUP_LANGUAGE);

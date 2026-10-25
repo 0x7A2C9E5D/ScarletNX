@@ -2433,13 +2433,13 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: row. Enter: open. ESC: back."
+msgid "Up/Down: row. Left/Right: change. Enter: open. ESC: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: row. Enter: open. ESC: exit."
+msgid "Up/Down: row. Left/Right: change. Enter: open. ESC: exit."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
