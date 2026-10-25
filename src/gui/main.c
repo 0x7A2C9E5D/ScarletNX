@@ -156,11 +156,27 @@ typedef struct {
     SDL_Texture* texture;
     bool loading; /* a dump's, which the driver has not answered for yet: the row shows the loading one */
 } GuiIcon;
-/* the dumps whose icons the driver is asked for (-x --icon), on a thread of its own: reading a dump's Control NCA takes
-   the keys and the disk, which the window's thread waits for neither. Games puts a dump in (dump_icon_ask); the thread
-   asks the driver for each, a dump at a time, into its folder of the cache (dump_icon_dir), and counts the answers,
-   which the menu takes to look at those rows again */
-#define GUI_DUMP_ASKS 128 /* the dumps waiting at most: a page's and more */
+/* the dumps whose icons the driver is asked for (-x --icon), through the menu's own processes (gui_process.h), on a
+   thread of its own: reading a dump's Control NCA takes the keys and the disk, which the window's thread waits for
+   neither. iOS runs the driver on a thread of the app, one at a time, so there the menu's loop asks them as the queue's
+   recompiles go (icons_pump). Games puts a dump in (dump_icon_ask); each is asked a dump at a time into its folder of
+   the cache (dump_icon_dir), and the answers counted, which the menu takes to look at those rows again. A dump the
+   driver gave no icon for is kept with why for the session, in memory alone: its row says why, the log has what the
+   driver said, and the next start asks again */
+#define GUI_DUMP_ASKS 128   /* the dumps waiting at most: a page's and more */
+#define GUI_ICON_WAIT 30000 /* the milliseconds the driver has to answer, then it is stopped */
+typedef struct {
+    char name[24]; /* the dump's folder in the cache, dump_icon_dir's last part */
+    char why[160]; /* what the driver's answer came to, its last line */
+} GuiIconFailure;
+/* a dump being asked: the driver's process, what it printed (its first said bytes), since when */
+typedef struct {
+    GuiProcess* process;
+    char *dump, *dir;
+    char said[16384];
+    size_t size;
+    Uint64 since;
+} GuiIconAsk;
 typedef struct {
     SDL_Mutex* lock;
     SDL_Condition* wake;
@@ -172,6 +188,10 @@ typedef struct {
     int count, stop;
     unsigned answered; /* how many the driver answered, said or not */
     bool live;         /* the program's: a thread answers (the tests answer with dump_icons_pass) */
+    int wait_ms;       /* GUI_ICON_WAIT, a test's own less */
+    GuiIconFailure* failed; /* failed_count of them, room for failed_room */
+    int failed_count, failed_room;
+    GuiIconAsk ask; /* iOS: the one icons_pump asks now (process set) */
 } GuiDumpIcons;
 /* the App screen's values, as its rows show them, and Folders' (what each row's folder is, past its path) */
 typedef struct {
@@ -2959,36 +2979,114 @@ static char* dump_icon_dir(const App* app, const char* dump) {
     free(cache);
     return dir;
 }
-/* one dump asked of the driver: its icon.jpg in dir, else why.txt there with what the driver said */
-static void dump_icon_answer(const GuiDumpIcons* d, const char* dump, const char* dir) {
+/* dir's last part, its name among the failed ones */
+static const char* icon_name(const char* dir) {
+    const char* leaf = dir + strlen(dir);
+    while (leaf > dir && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
+    return leaf;
+}
+/* a dump the driver gave no icon for, kept for the session with why: said once in the log, with all the driver said */
+static void icon_failed_keep(GuiDumpIcons* d, const char* dump, const char* dir, const char* why, const char* said) {
+    GuiIconFailure* grown;
+    SDL_LockMutex(d->lock);
+    if (d->failed_count == d->failed_room &&
+        (grown = (GuiIconFailure*)realloc(d->failed, (size_t)(d->failed_room * 2 + 16) * sizeof *grown)) != NULL) {
+        d->failed = grown;
+        d->failed_room = d->failed_room * 2 + 16;
+    }
+    if (d->failed_count < d->failed_room) {
+        GuiIconFailure* f = &d->failed[d->failed_count++];
+        snprintf(f->name, sizeof f->name, "%s", icon_name(dir));
+        snprintf(f->why, sizeof f->why, "%s", why);
+    }
+    SDL_UnlockMutex(d->lock);
+    size_t n = said ? strlen(said) : 0;
+    while (n && (said[n - 1] == '\n' || said[n - 1] == '\r')) --n;
+    gui_log("no icon for %s: %s%s%.*s", dump, why, n ? "\nthe driver said:\n" : "", (int)n, said ? said : "");
+}
+/* why the driver gave no icon for the dump whose folder in the cache is dir, in this session: true and why in out */
+static bool icon_failed(const GuiDumpIcons* d, const char* dir, char* out, size_t size) {
+    bool found = false;
+    if (!d->lock) return false;
+    SDL_LockMutex(d->lock);
+    for (int i = 0; i < d->failed_count && !found; ++i)
+        if (!strcmp(d->failed[i].name, icon_name(dir))) {
+            found = true;
+            snprintf(out, size, "%s", d->failed[i].why);
+        }
+    SDL_UnlockMutex(d->lock);
+    return found;
+}
+/* the last line of text that is not blank, at most size - 1 bytes of it, into out */
+static void last_line(const char* text, char* out, size_t size) {
+    const char *end = text + strlen(text), *start;
+    while (end > text && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ')) --end;
+    for (start = end; start > text && start[-1] != '\n';) --start;
+    snprintf(out, size, "%.*s", (int)(end - start), start);
+}
+/* a dump's ask started: the driver's process, its output read from then on; false when it could not start, kept as
+   failed then */
+static bool icon_ask_start(GuiDumpIcons* d, GuiIconAsk* a, char* dump, char* dir) {
     const char* args[] = {d->driver, "--data", d->repo, "-x", "--icon", "--out", dir, "--", dump, NULL};
-    SDL_PropertiesID how;
-    SDL_Process* run = NULL;
-    char *said = NULL, *why, *icon;
-    size_t size = 0;
-    int status = -1;
-    if (snx_mkdirs(dir)) return;               /* asked again next time: nowhere to answer */
-    if ((how = SDL_CreateProperties()) != 0) { /* its stderr with its stdout: why it has none is an error line */
-        SDL_SetPointerProperty(how, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void*)args);
-        SDL_SetNumberProperty(how, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
-        SDL_SetNumberProperty(how, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_APP);
-        SDL_SetBooleanProperty(how, SDL_PROP_PROCESS_CREATE_STDERR_TO_STDOUT_BOOLEAN, true);
-        run = SDL_CreateProcessWithProperties(how);
-        SDL_DestroyProperties(how);
+    char why[256];
+    *a = (GuiIconAsk){0};
+    a->dump = dump;
+    a->dir = dir;
+    a->since = SDL_GetTicks();
+    if (snx_mkdirs(dir)) {
+        char error[160];
+        snprintf(why, sizeof why, snx_tr("%s cannot be made: %s"), dir, snx_os_error(error, sizeof error));
+    } else if (!(a->process = gui_process_create()))
+        snprintf(why, sizeof why, "%s", snx_tr("Cannot start the run: out of memory"));
+    else if (gui_process_start(a->process, args, why, sizeof why))
+        return true;
+    icon_failed_keep(d, dump, dir, why, NULL);
+    gui_process_destroy(a->process);
+    a->process = NULL;
+    return false;
+}
+/* the ask looked at: what the driver printed since, and once it ended (or was stopped past wait_ms) its answer, the
+   icon in its folder or why not kept. True once it ended, its process gone */
+static bool icon_ask_poll(GuiDumpIcons* d, GuiIconAsk* a) {
+    char buffer[4096], why[256], line[200];
+    int n, status = 1;
+    bool late = SDL_GetTicks() - a->since > (Uint64)d->wait_ms;
+    while ((n = gui_process_read(a->process, buffer, sizeof buffer)) > 0) {
+        size_t take = SDL_min((size_t)n, sizeof a->said - 1 - a->size);
+        memcpy(a->said + a->size, buffer, take);
+        a->said[a->size += take] = 0;
     }
-    if (run) said = (char*)SDL_ReadProcess(run, &size, &status);
-    icon = snx_path_join(dir, "icon.jpg");
-    if (!run || status || !snx_is_file(icon)) {
-        why = snx_path_join(dir, "why.txt");
-        if (!run)
-            snx_write_file(why, SDL_GetError(), strlen(SDL_GetError()));
-        else
-            snx_write_file(why, said ? said : "", said ? strlen(said) : 0);
-        free(why);
+    if (late) gui_process_terminate(a->process);
+    if (!gui_process_finished(a->process, &status)) return false;
+    {
+        char* icon = snx_path_join(a->dir, "icon.jpg");
+        if (late || status || !snx_is_file(icon)) {
+            last_line(a->said, line, sizeof line);
+            if (late)
+                snprintf(why, sizeof why, snx_tr("the driver gave no answer in %d s"), (d->wait_ms + 999) / 1000);
+            else if (line[0])
+                snprintf(why, sizeof why, "%s", line);
+            else if (status)
+                snprintf(why, sizeof why, snx_tr("the driver ended with status %d"), status);
+            else
+                snprintf(why, sizeof why, "%s", snx_tr("the driver ended without one"));
+            /* all the driver said, past the line that is why */
+            icon_failed_keep(d, a->dump, a->dir, why,
+                             strcmp(why, line) || strstr(a->said, line) != a->said ? a->said : NULL);
+        }
+        free(icon);
     }
-    free(icon);
-    SDL_free(said);
-    if (run) SDL_DestroyProcess(run);
+    gui_process_destroy(a->process);
+    a->process = NULL;
+    return true;
+}
+/* one dump asked of the driver, waiting for its answer: its icon.jpg in dir, else why kept */
+static void dump_icon_answer(GuiDumpIcons* d, char* dump, char* dir) {
+    GuiIconAsk* a = (GuiIconAsk*)malloc(sizeof *a); /* its said is too big for a thread's stack */
+    if (!a) return;
+    if (icon_ask_start(d, a, dump, dir))
+        while (!icon_ask_poll(d, a)) SDL_Delay(5);
+    free(a);
 }
 /* the dumps asked so far, here: what the thread does, and the tests' look of their own */
 static void dump_icons_pass(GuiDumpIcons* d) {
@@ -3024,19 +3122,33 @@ static int SDLCALL dump_icons_run(void* data) {
     return 0;
 }
 static char* find_driver(const App* app, int item);
+static const char* driver_name(int item);
 static unsigned loads_off(App* app);
-/* a dump's icon to ask the driver for, once: false when it cannot be asked (no driver, the queue full) */
+/* a dump's icon to ask the driver for, once: false when it cannot be asked (the queue full, or no driver, kept as why
+   it has none) */
 static bool dump_icon_ask(App* app, const char* dump, const char* dir) {
     GuiDumpIcons* d = &app->dump_icons;
     bool asked = false;
     int i;
-    if (!d->lock) {
-        char* driver = find_driver(app, GUI_SWITCH);
-        if (!driver || !app->data_dir || !(d->lock = SDL_CreateMutex()) || !(d->wake = SDL_CreateCondition())) {
-            free(driver);
+    if (!app->data_dir) return false;
+    if (!d->lock && (!(d->lock = SDL_CreateMutex()) || !(d->wake = SDL_CreateCondition()))) {
+        if (d->lock) SDL_DestroyMutex(d->lock);
+        d->lock = NULL;
+        return false;
+    }
+    if (!d->wait_ms) d->wait_ms = GUI_ICON_WAIT;
+    if (!d->driver) {
+        d->driver = find_driver(app, GUI_SWITCH);
+#ifdef SDL_PLATFORM_IOS /* the app's own, which gui_process_start runs on a thread: its name is only argv[0] */
+        if (!d->driver) d->driver = snx_strdup("scarletnx");
+#endif
+        if (!d->driver) {
+            char why[256];
+            snprintf(why, sizeof why, snx_tr("Cannot find %s beside ScarletNX or on PATH."), driver_name(GUI_SWITCH));
+            icon_failed_keep(d, dump, dir, why, NULL);
             return false;
         }
-        d->driver = driver;
+        free(d->repo);
         d->repo = snx_strdup(app->data_dir);
     }
     SDL_LockMutex(d->lock);
@@ -3050,12 +3162,65 @@ static bool dump_icon_ask(App* app, const char* dump, const char* dir) {
     SDL_UnlockMutex(d->lock);
     return asked || i < d->count;
 }
-/* the asker's thread, answering from now on: the program's alone (tests answer with dump_icons_pass) */
+/* the asker's thread, answering from now on: the program's alone (tests answer with dump_icons_pass); none on iOS,
+   whose loop asks them (icons_pump) */
 static void dump_icons_start(App* app) {
+#ifndef SDL_PLATFORM_IOS
     GuiDumpIcons* d = &app->dump_icons;
-    if (d->lock && !d->thread && !(d->thread = SDL_CreateThread(dump_icons_run, "dump icons", d)))
+    if (d->lock && !d->thread && !(d->thread = SDL_CreateThread(dump_icons_run, "dump icons", d))) {
         snprintf(app->message, sizeof app->message, snx_tr("The dumps' icons are not asked for (%s)"), SDL_GetError());
+        say_failure(app, app->message);
+    }
+#else
+    (void)app;
+#endif
 }
+#ifdef SDL_PLATFORM_IOS
+/* iOS: the driver runs on a thread of the app, one at a time (process_posix.c), so a dump's icon is asked by the menu's
+   loop while neither a run nor the queue's recompile goes, as the queue's are: the next once one ended. job_start waits
+   for it, and launch until it ended */
+static void icons_pump(App* app) {
+    GuiDumpIcons* d = &app->dump_icons;
+    char *dump, *dir;
+    if (!d->lock) return;
+    if (d->ask.process) {
+        if (icon_ask_poll(d, &d->ask)) {
+            free(d->ask.dump);
+            free(d->ask.dir);
+            d->ask.dump = d->ask.dir = NULL;
+            SDL_LockMutex(d->lock);
+            ++d->answered;
+            SDL_UnlockMutex(d->lock);
+        }
+        return;
+    }
+    if (app->menu.running || gui_queue_running(&app->queue) >= 0) return;
+    SDL_LockMutex(d->lock);
+    if (!d->count) {
+        SDL_UnlockMutex(d->lock);
+        return;
+    }
+    dump = d->dumps[0];
+    dir = d->dirs[0];
+    memmove(d->dumps, d->dumps + 1, (size_t)--d->count * sizeof *d->dumps);
+    memmove(d->dirs, d->dirs + 1, (size_t)d->count * sizeof *d->dirs);
+    SDL_UnlockMutex(d->lock);
+    if (!icon_ask_start(d, &d->ask, dump, dir)) {
+        free(dump);
+        free(dir);
+        SDL_LockMutex(d->lock);
+        ++d->answered;
+        SDL_UnlockMutex(d->lock);
+    }
+}
+/* iOS: the icon being asked, answered first, as a run or a recompile takes the one driver thread */
+static void icons_wait(App* app) {
+    while (app->dump_icons.ask.process) {
+        icons_pump(app);
+        if (app->dump_icons.ask.process) SDL_Delay(5);
+    }
+}
+#endif
 static void dump_icons_stop(App* app) {
     GuiDumpIcons* d = &app->dump_icons;
     int i;
@@ -3066,10 +3231,17 @@ static void dump_icons_stop(App* app) {
         SDL_UnlockMutex(d->lock);
     }
     if (d->thread) SDL_WaitThread(d->thread, NULL);
+    if (d->ask.process) { /* iOS's: asked to stop, then reaped */
+        gui_process_terminate(d->ask.process);
+        while (!icon_ask_poll(d, &d->ask)) SDL_Delay(5);
+    }
+    free(d->ask.dump);
+    free(d->ask.dir);
     for (i = 0; i < d->count; ++i) {
         free(d->dumps[i]);
         free(d->dirs[i]);
     }
+    free(d->failed);
     free(d->driver);
     free(d->repo);
     if (d->wake) SDL_DestroyCondition(d->wake);
@@ -3077,24 +3249,23 @@ static void dump_icons_stop(App* app) {
     *d = (GuiDumpIcons){0};
 }
 /* the icon file of the game or dump at path, owned: a game's own icon.jpg (gui_game_icon); a dump's in its folder of
-   the cache, asked of the driver when it has neither it nor the driver's why, *loading then saying so. NULL while
-   there is none */
+   the cache, asked of the driver when it has none and the driver gave none in this session, *loading then saying so.
+   NULL while there is none */
 static char* icon_file(App* app, const char* path, bool* loading) {
-    char *dir, *file, *why;
+    char *dir, *file, why[8];
     const char* leaf = path + strlen(path);
     *loading = false;
     while (leaf > path && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
     if (!gui_is_dump(leaf)) return gui_game_icon(path);
     if (!(dir = dump_icon_dir(app, path))) return NULL;
     file = snx_path_join(dir, "icon.jpg");
-    why = snx_path_join(dir, "why.txt");
     if (!snx_is_file(file)) {
-        if (!snx_is_file(why) && (*loading = dump_icon_ask(app, path, dir)) && app->dump_icons.live)
+        if (!icon_failed(&app->dump_icons, dir, why, sizeof why) && (*loading = dump_icon_ask(app, path, dir)) &&
+            app->dump_icons.live)
             dump_icons_start(app);
         free(file);
         file = NULL;
     }
-    free(why);
     free(dir);
     return file;
 }
@@ -3157,6 +3328,13 @@ static SDL_Texture* game_icon(App* app, const char* path) {
     free(jpeg);
     free(file);
     return icon->texture;
+}
+/* why the dump at path shows no icon, the driver's answer in this session, into out: false when none was given */
+static bool dump_icon_why(const App* app, const char* path, char* out, size_t size) {
+    char* dir = gui_is_dump(path) ? dump_icon_dir(app, path) : NULL;
+    bool failed = dir && icon_failed(&app->dump_icons, dir, out, size);
+    free(dir);
+    return failed;
 }
 /* the rows without an icon looked at again: the driver answered for a dump */
 static void icons_forget_none(App* app) {
@@ -5382,8 +5560,14 @@ static const char* ready_kind(int driver) {
            : driver == GUI_GBA  ? snx_tr("GBA game, ready to run")
                                 : snx_tr("Ready to run");
 }
-/* game i's kind, by its file's name: ready (whose console its folder says), a dump or a package; its updates, DLCs and
-   mods; the games/ of an older version that holds it, as its row's (games/) says */
+/* after a dump's kind, why it shows no icon (dump_icon_why), in out; the bytes written */
+static size_t icon_why_said(const App* app, const char* path, char* out, size_t size) {
+    char why[160];
+    int n = dump_icon_why(app, path, why, sizeof why) ? snprintf(out, size, snx_tr(". No icon: %s"), why) : 0;
+    return n > 0 ? SDL_min((size_t)n, size ? size - 1 : 0) : 0;
+}
+/* game i's kind, by its file's name: ready (whose console its folder says), a dump or a package; why a dump shows no
+   icon; its updates, DLCs and mods; the games/ of an older version that holds it, as its row's (games/) says */
 static void game_kind(const App* app, const GuiGames* games, size_t i, char* kind, size_t size) {
     const char* name = games->names[i];
     size_t n;
@@ -5399,6 +5583,8 @@ static void game_kind(const App* app, const GuiGames* games, size_t i, char* kin
                                      /* Games' own rows by what list_games read, another list's from its folder */
                                      : ready_kind(games == &app->games ? app->games_drivers[i] : row_driver(games, i)));
     n = strlen(kind);
+    if (!games->addons[i] && gui_is_dump(name) && games->paths[i])
+        n += icon_why_said(app, games->paths[i], kind + n, size - n);
     if (game_was_old(app, games->paths[i]))
         snprintf(kind + n, size - n, "%s",
                  snx_tr(", in the games/ an older version made: new games go to recompiled/"));
@@ -5419,6 +5605,10 @@ static void recent_kind(const App* app, const GuiRecentGame* r, char* kind, size
              : r->driver == GUI_GBA  ? snx_tr("GBA ROM, played with scarletnx-agb")
              : gui_is_dump(r->path)  ? snx_tr("A dump, prepared when it runs")
                                      : snx_tr("Ready to run"));
+    if (!r->prepared && gui_is_dump(r->path)) {
+        size_t n = strlen(kind);
+        icon_why_said(app, r->path, kind + n, size - n);
+    }
 }
 static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** about, char* kind, size_t size) {
     size_t selected = app->browser.selected, head = app->browser.head;
@@ -10382,6 +10572,9 @@ static void pump(App* app) {
     keys_left(app);
     text_left(app);
     job_pump(app);
+#ifdef SDL_PLATFORM_IOS
+    icons_pump(app);
+#endif
     if (!app->queue.count && app->menu.view == GUI_LOAD_RECOMPILE)
         games_back(app, NULL); /* its tab went with its last line */
     if (app->menu.running) {
@@ -10812,6 +11005,9 @@ static void launch(App* app, char* absolute, bool prepared) {
 #ifndef SDL_PLATFORM_ANDROID /* there the data folder's config/, which every game reads (gamepad.c) */
     pad_mappings_share(app);
 #endif
+#ifdef SDL_PLATFORM_IOS
+    icons_wait(app); /* the one driver thread, a dump's icon's first */
+#endif
     bool started = gui_process_start(app->process, argv, app->message, sizeof(app->message));
     if (started && app->run_log) {
         size_t k;
@@ -10941,6 +11137,9 @@ static void job_start(App* app) {
         if (!gui_process_low(app->job_process, gentle, why, sizeof why)) /* iOS's thread: its threads alone */
             snprintf(app->job_said, sizeof app->job_said, "%s", why);
         app->job_low = gentle;
+#ifdef SDL_PLATFORM_IOS
+        icons_wait(app); /* the one driver thread, a dump's icon's first */
+#endif
         if (!gui_process_start(app->job_process, argv, why, sizeof why)) {
             job->state = GUI_JOB_FAILED;
             job->status = -1;

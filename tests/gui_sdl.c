@@ -2781,10 +2781,23 @@ int main(int argc, char** argv) {
         IconJpeg jpeg = {{0}, 0};
         char* to = snx_path_join(argv[6], "icon.jpg");
         int rc = 1;
-        if (strstr(argv[8], "no icon"))
+#ifndef _WIN32
+        /* started as the menu starts its drivers (gui_process.h), which works where SDL's processes do not (Android's
+           API 21): in a session of its own, the leader of its process group */
+        if (getpgrp() != getpid()) {
+            fputs("scarletnx: not started through the menu's processes\n", stderr);
+            free(to);
+            return 9;
+        }
+#endif
+        if (strstr(argv[8], "hung icon")) /* never answers: the menu stops it */
+            SDL_Delay(60000);
+        if (strstr(argv[8], "no icon")) {
+            puts("Reading the dump's Control NCA");
+            fflush(stdout);
             fprintf(stderr, "scarletnx: Games shows no icon for %s: it has no Control NCA\n",
                     argv[8]); /* as snx_error */
-        else
+        } else
             rc = snx_splash_jpeg("wimsy-fuddles", 32, 90, icon_jpeg_write, &jpeg) ||
                  snx_write_file(to, jpeg.data, (size_t)jpeg.size);
         free(to);
@@ -5835,16 +5848,26 @@ int main(int argc, char** argv) {
                 assert(!remove(icon));
                 free(icon);
             }
-            { /* a dump's icon, asked of the driver (-x --icon) into the menu's cache: none until it answers, once, then
-                 its row's; one it has none for keeps what the driver said and is not asked again */
+            { /* a dump's icon, asked of the driver (-x --icon, through the menu's processes) into the menu's cache: none
+                 until it answers, once, then its row's; an answer an older launcher left there (why.txt) is not read. One
+                 the driver gives none for is not asked again in the session, its kind saying why and the launcher's log
+                 what the driver said, once; on disk nothing of it, so the next start asks again. A driver that does not
+                 answer is stopped */
                 char* cache_was = getenv("XDG_CACHE_HOME") ? snx_strdup(getenv("XDG_CACHE_HOME")) : NULL;
                 char *cache = snx_path_join(temporary, "icon cache"), *with = snx_path_join(temporary, "with icon.nsp");
-                char *without = snx_path_join(temporary, "no icon.nsp"), *dir, *why;
-                char* said;
+                char *without = snx_path_join(temporary, "no icon.nsp"), *dir, *why, *old_dir, *old_why;
+                char *hung = snx_path_join(temporary, "hung icon.nsp"), *logs = snx_path_join(temporary, "icon logs");
+                char *console = snx_path_join(logs, SNX_CONSOLE_LOG), *said, *line, reason[160], kind[256];
                 size_t said_size = 0;
                 unsigned answered;
+                GuiRecentGame recent_dump = {0};
                 set_env("XDG_CACHE_HOME", cache);
-                assert(!snx_write_file(with, "x", 1) && !snx_write_file(without, "x", 1));
+                assert(!snx_write_file(with, "x", 1) && !snx_write_file(without, "x", 1) &&
+                       !snx_write_file(hung, "x", 1) && !snx_mkdirs(logs));
+                gui_log_folder(logs);
+                old_dir = dump_icon_dir(&app, with); /* an older launcher's answer, which no longer holds it back */
+                old_why = snx_path_join(old_dir, "why.txt");
+                assert(!snx_mkdirs(old_dir) && !snx_write_file(old_why, "That operation is not supported", 31));
                 icons_free(&app);
                 dump_icons_pass(&app.dump_icons); /* the dumps Games' rows asked for before this */
                 pump(&app);
@@ -5861,16 +5884,28 @@ int main(int argc, char** argv) {
                 pump(&app); /* an answer: the rows without one look again */
                 assert(app.dump_icons_seen == answered + 1 && game_icon(&app, with) &&
                        game_icon(&app, with) != app.icon_loading);
+                assert(!dump_icon_why(&app, with, reason, sizeof reason));
                 assert(game_icon(&app, without) == app.icon_loading);
                 dump_icons_pass(&app.dump_icons);
                 pump(&app);
                 assert(!game_icon(&app, without)); /* none, and no loading mark */
                 dir = dump_icon_dir(&app, without);
                 why = snx_path_join(dir, "why.txt");
-                said = (char*)snx_read_file(why, &said_size);
-                assert(said && strstr(said, "no icon.nsp: it has no Control NCA"));
+                assert(snx_is_dir(dir) && !snx_path_exists(why)); /* the driver's folder, nothing of the answer kept */
+                assert(dump_icon_why(&app, without, reason, sizeof reason) &&
+                       strstr(reason, "no icon.nsp: it has no Control NCA"));
+                snprintf(recent_dump.path, sizeof recent_dump.path, "%s", without); /* its kind says it, a row's too */
+                recent_kind(&app, &recent_dump, kind, sizeof kind);
+                assert(!strncmp(kind, "A dump, prepared when it runs. No icon: ", 40) &&
+                       strstr(kind, "it has no Control NCA"));
                 icons_free(&app);
                 assert(!game_icon(&app, without) && !app.dump_icons.count); /* said once: not asked again */
+                said = (char*)snx_read_file(console, &said_size);
+                line = snx_format("] no icon for %s: ", without);
+                assert(said && strstr(said, line) && !strstr(strstr(said, line) + 1, line) &&
+                       strstr(said, "] the driver said:\n") && strstr(said, "] Reading the dump's Control NCA\n"));
+                free(line);
+                free(said);
                 { /* keys put in: a dump the driver could not read is asked again */
                     char* keys_was = app.keys_path;
                     app.keys_path = snx_path_join(temporary, "icon cache keys");
@@ -5882,10 +5917,28 @@ int main(int argc, char** argv) {
                     free(app.keys_path);
                     app.keys_path = keys_was;
                 }
+                /* a driver that does not answer, stopped once its time is up, says so */
+                app.dump_icons.wait_ms = 300;
+                icons_free(&app);
+                assert(game_icon(&app, hung) == app.icon_loading);
+                dump_icons_pass(&app.dump_icons);
+                assert(dump_icon_why(&app, hung, reason, sizeof reason) &&
+                       !strcmp(reason, "the driver gave no answer in 1 s"));
+                /* the next start: what the driver gave none for is asked again */
                 dump_icons_stop(&app);
+                icons_free(&app);
+                assert(!dump_icon_why(&app, without, reason, sizeof reason));
+                assert(game_icon(&app, without) == app.icon_loading && app.dump_icons.count == 1);
+                dump_icons_stop(&app);
+                gui_log_folder(NULL);
                 set_env("XDG_CACHE_HOME", cache_was);
                 icons_free(&app);
-                free(said);
+                assert(!snx_remove_tree(logs));
+                free(console);
+                free(logs);
+                free(hung);
+                free(old_why);
+                free(old_dir);
                 free(why);
                 free(dir);
                 free(without);
