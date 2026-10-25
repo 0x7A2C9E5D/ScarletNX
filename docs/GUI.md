@@ -491,7 +491,9 @@ at the left of the row, **F1** last, which opens a box over the screen with ever
 (the arrows and the mouse, Enter, Space and a click, the pages, Tab and F2), until any key or a click closes it; on a
 phone, the words to tap, whole, in the text's letters, each row of them as tall as a list's row (48 pixels times
 the text's size) for a finger, and so are the tabs. The tips and the keys each in a box with a bar down
-its left (`[tips] box`, `[footer] box`) or on the page. Games lists the recent games and a
+its left (`[tips] box`, `[footer] box`) or on the page, each key with what it does a button as a tab is: a box as the
+theme's are (filled in the dim colour, framed in it, or on the foot's band framed in the soft one), its text a column
+inside, a column between two, as tall as a tab where it has a row of its own. Games lists the recent games and a
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
 opens the picker). The Settings list their groups, and beside them the focused group's

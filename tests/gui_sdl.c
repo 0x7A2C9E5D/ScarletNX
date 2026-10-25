@@ -3818,7 +3818,8 @@ int main(int argc, char** argv) {
             assert(find_letters(&app, "\xe8\x8f\x9c\xe5\x8d\x95", normal, 1, &x, &y));
             snprintf(line, sizeof line, "- \xe4\xb8\xbb\xe9\xa2\x98%16s %.4s", "", app.app_form.theme);
             assert(find_letters(&app, line, normal, 1, &x, &y));
-            assert(hint_width("\xe4\xb8\x8a/\xe4\xb8\x8b", "linha") == 11 && up >= 0 && down >= 0 && up != down);
+            /* its button: the keys' 5 columns, a space, "linha", a column inside either side */
+            assert(hint_width("\xe4\xb8\x8a/\xe4\xb8\x8b", "linha") == 13 && up >= 0 && down >= 0 && up != down);
             assert(hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 1, false) == up &&
                    hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 2, false) == up);
             assert(hint_pick("\xe4\xb8\x8a/\xe4\xb8\x8b", 3, false) == down &&
@@ -8258,16 +8259,21 @@ int main(int argc, char** argv) {
            focus colour; the default's on the page, no box */
         r = m.place.keys;
         assert(r.y > m.place.list.y + m.place.list.h && r.y + r.h == 800 - 8 * s);
-        { /* the keys in the foot's letters, a size under the rest's: ESC alone against the left edge of the first row,
-             F1's the last key, against the right edge of the keys' last row */
-            int fs = foot_scale(&app), rows;
+        { /* the keys in the foot's letters, a size under the rest's, each sentence a button as a tab is (a box a cell
+             and 4 pixels of its letters high, the sentence a column inside, a column between two, the rows 2 pixels
+             apart): ESC alone against the left edge of the first row, F1's the last key, against the right edge of the
+             keys' last row */
+            int fs = foot_scale(&app), rows, pitch = 20 * fs;
             assert(fs == s - 1);
-            rows = (r.h - 4 * fs) / (16 * fs);
-            assert(rows >= 1 && r.h == rows * 16 * fs + 4 * fs);
-            foot_px_is(&app, r.x, r.y + 2 * fs, "ESC", yellow, black);
+            rows = r.h / pitch;
+            assert(rows >= 1 && r.h == rows * pitch); /* one row as tall as before the buttons: 16 and 4 pixels */
+            foot_px_is(&app, r.x + 8 * fs, r.y + 2 * fs, "ESC", yellow, black);
+            assert(
+                same_colour(pixel(&app, (float)r.x, (float)(r.y + 10 * fs)), rgb(app.theme.dim))); /* its box's edge */
+            assert(same_colour(pixel(&app, (float)(r.x + 4 * fs), (float)r.y), rgb(app.theme.dim)));
             shows_foot(&app, "exit", normal);
             hides(&app, "ESC", yellow);
-            foot_px_is(&app, r.x + r.w - 7 * 8 * fs, r.y + 2 * fs + (rows - 1) * 16 * fs, "F1", yellow, black);
+            foot_px_is(&app, r.x + r.w - 8 * 8 * fs, r.y + 2 * fs + (rows - 1) * pitch, "F1", yellow, black);
             app.menu.text_size = 1; /* 1x: the foot's too, never under it */
             render(&app);
             assert(app.scale == 1 && foot_scale(&app) == 1);
@@ -8308,14 +8314,15 @@ int main(int argc, char** argv) {
             free(text);
         }
         /* on a screen of fingers (Android, iOS) the tabs are a finger's row high, as the lists' rows there, their names
-           in their middle, and so is a row of the foot's keys, in the text's letters; a tap low on a tab opens it */
+           in their middle, and so are the foot's keys' buttons, in the text's letters; a tap low on a tab opens it */
         app.fingers = true;
         render(&app);
         menu_boxes(&app, &m);
         r = tab_rect(&app, m.place.tabs, GUI_TAB_GAMES);
         assert(m.place.tabs.h == GUI_FINGER_ROW * s && r.h == m.place.tabs.h && r.y + r.h <= m.place.list.y);
         text_px_is(&app, r.x + cw, r.y + (r.h - 16 * s) / 2, "Games", normal, black);
-        assert(hint_pitch(&app) == GUI_FINGER_ROW * s && foot_scale(&app) == s);
+        assert(button_h(&app) == GUI_FINGER_ROW * s && hint_pitch(&app) == (GUI_FINGER_ROW - 4) * s &&
+               foot_scale(&app) == s);
         mouse_px(&app, r.x + 4, r.y + r.h - 4, true);
         assert(app.menu.view == GUI_LOAD_GAMES);
         key(&app, SDLK_ESCAPE);
@@ -8778,9 +8785,10 @@ int main(int argc, char** argv) {
                 menu_boxes(&app, &mb);
                 room = foot_room(&app, mb.place.keys, app.theme.footer_box);
                 app.scale = foot_scale(&app);
-                assert(find_text(&app, "ESC", yellow, 1, &x, &y) && x == room.x);
+                /* each in its button, a column inside its edges */
+                assert(find_text(&app, "ESC", yellow, 1, &x, &y) && x == room.x + GUI_BUTTON_PAD * 8 * app.scale);
                 assert(find_text(&app, "F1", yellow, 1, &x, &y) &&
-                       x + (int)(strlen("F1 help") * 8) * app.scale == room.x + room.w);
+                       x + (int)(strlen("F1 help") + GUI_BUTTON_PAD) * 8 * app.scale == room.x + room.w);
                 app.scale = scale;
                 hides_foot(&app, "Arrows/mouse", yellow);
                 hides_foot(&app, "Tab", yellow);

@@ -587,7 +587,8 @@ static void test_places(App* app) {
         app->theme.tips_wrap = true;
         render(app);
         setup_boxes(app, &b);
-        assert(b.place.keys.h == 2 * 16 * fs + 4 * fs && b.place.tips.h == b.place.keys.h);
+        /* two, four pixels between them for the keys' buttons (hints_h) */
+        assert(b.place.keys.h == 2 * 16 * fs + 4 * fs + 4 * fs && b.place.tips.h == b.place.keys.h);
         app->theme.tips_wrap = false;
     }
     assert(SDL_SetWindowSize(app->window, 800, 1024));

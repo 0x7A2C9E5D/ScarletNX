@@ -2639,6 +2639,7 @@ const char* ui_tr(const char* english) { return snx_tr(english); }
 /* The keys of a screen: "Keys: what they do." sentences, each drawn as the keys, inverted (the theme's focus bar) or in
    the focus colour, and what they do; a row holds as many as fit, against its right edge */
 static int hint_word(const char* word, size_t n, bool pad);
+static bool in_rect(GuiRect r, float x, float y);
 static int hint_next(const char** s, char* key, char* what, size_t size) {
     const char *p = *s, *end, *colon;
     size_t n;
@@ -2666,8 +2667,13 @@ static int hint_off(const char* s) {
     while (*s == ' ') ++s;
     return *s == '~';
 }
+/* a button's measures in columns of its letters, the tabs' and the foot's keys' alike: a column inside either side of
+   its text, and one between two */
+#define GUI_BUTTON_PAD 1
+#define GUI_BUTTON_GAP 1
+/* a sentence of the foot's keys as a button: its key, a space and what it does, a column inside either side */
 static int hint_width(const char* key, const char* what) {
-    return gui_text_cols(key) + (key[0] ? 1 : 0) + gui_text_cols(what);
+    return gui_text_cols(key) + (key[0] ? 1 : 0) + gui_text_cols(what) + 2 * GUI_BUTTON_PAD;
 }
 /* the columns the key back takes alone at the left of a foot (keys_said: what is before its \x1f), 0 for none */
 static int hints_cols(const char* keys) {
@@ -2677,7 +2683,7 @@ static int hints_cols(const char* keys) {
     int cols = 0;
     if (!apart) return 0;
     snprintf(back, sizeof back, "%.*s", (int)(apart - keys), keys);
-    while (hint_next(&at, key, what, sizeof key)) cols += hint_width(key, what) + (cols ? 2 : 0);
+    while (hint_next(&at, key, what, sizeof key)) cols += hint_width(key, what) + (cols ? GUI_BUTTON_GAP : 0);
     return cols;
 }
 /* a click or a tap, for hints() to say which sentence with keys it is on: their keys, and how many columns into the
@@ -2687,29 +2693,34 @@ typedef struct {
     char key[128];
     int col;
 } GuiHintHit;
-/* the rows keys take in width columns; with draw, drawn from pixel y in r, on the foot's band of ink when band; with
-   hit, the sentence its pixel is on, a column of the gap either side of one its own */
+/* the rows keys take in width columns, each sentence a button as a tab is (a box button_h high, two pixels times the
+   scale over and under its row, its text a column inside, a column between two); with draw, drawn from pixel y in r,
+   on the foot's band of ink when band; with hit, the sentence whose button its pixel is in */
 /* h pixels, or on a screen of fingers a finger's row at the least (GUI_FINGER_ROW times the scale, as ui.txt's rows) */
 static int finger_h(const App* app, int h) { return app->fingers ? SDL_max(h, GUI_FINGER_ROW * app->scale) : h; }
-/* a row of the foot's keys: a cell of its letters, a finger's on a phone */
-static int hint_pitch(const App* app) { return finger_h(app, cell_h(app)); }
+/* a button's height, a tab's and a row of the foot's keys' alike: a cell of its letters and two pixels times the scale
+   above and below, a finger's row on a phone */
+static int button_h(const App* app) { return finger_h(app, cell_h(app) + 4 * app->scale); }
+/* a row of the foot's keys, in the foot's letters: a button's without the two pixels above and below, which the foot's
+   margins give it */
+static int hint_pitch(const App* app) { return button_h(app) - 4 * app->scale; }
 static int hints(App* app, const char* keys, int width, GuiRect r, int y, int draw, int band, GuiHintHit* hit) {
     const GuiTheme* t = &app->theme;
     char key[128], what[128];
     const char *row = keys, *apart = strchr(keys, '\x1f');
-    int rows = 0, s = app->scale, lit, off;
+    int rows = 0, s = app->scale, lit, off, filled = t->panels == GUI_PANELS_FILL;
     if (apart) { /* the key back alone at the left of the first row (keys_said), three columns before the others */
         char back[192];
         int cols = hints_cols(keys);
         snprintf(back, sizeof back, "%.*s", (int)(apart - keys), keys);
         if (cols) hints(app, back, cols, gui_rect(r.x, r.y, cols * cell_w(app), r.h), y, draw, band, hit);
-        return hints(app, apart + 1, width - (cols ? cols + 3 : 0), r, y, draw, band, hit);
+        return hints(app, apart + 1, width - (cols ? cols + 3 * GUI_BUTTON_GAP : 0), r, y, draw, band, hit);
     }
     for (;;) {
         const char *at = row, *end = row, *u = row;
         int used = 0, x;
         while (hint_next(&at, key, what, sizeof key)) {
-            int w = hint_width(key, what) + (used ? 2 : 0);
+            int w = hint_width(key, what) + (used ? GUI_BUTTON_GAP : 0);
             if (used && used + w > width) break;
             used += w;
             end = at;
@@ -2717,20 +2728,26 @@ static int hints(App* app, const char* keys, int width, GuiRect r, int y, int dr
         if (end == row) break;
         for (x = r.x + r.w - used * cell_w(app);
              (draw || hit) && u != end && (off = hint_off(u), hint_next(&u, key, what, sizeof key));) {
-            int cy = y + rows * hint_pitch(app), k = gui_text_cols(key), w = hint_width(key, what) * cell_w(app);
+            int cy = y + rows * (hint_pitch(app) + 4 * s), k = gui_text_cols(key),
+                w = hint_width(key, what) * cell_w(app);
             int ty = cy + (hint_pitch(app) - cell_h(app)) / 2; /* the text in the middle of its row */
-            if (hit && k && !off && hit->y >= (float)cy && hit->y < (float)(cy + hint_pitch(app)) &&
-                hit->x >= (float)(x - cell_w(app)) && hit->x < (float)(x + w + cell_w(app))) {
+            GuiRect button = gui_rect(x, cy - 2 * s, w, button_h(app));
+            x += GUI_BUTTON_PAD * cell_w(app); /* its text */
+            if (hit && k && !off && in_rect(button, hit->x, hit->y)) {
                 snprintf(hit->key, sizeof hit->key, "%s", key);
                 hit->col = (int)SDL_floorf((hit->x - (float)x) / (float)cell_w(app));
             }
-            lit = draw && k && !off && app->hovering && app->hover_y >= (float)cy &&
-                  app->hover_y < (float)(cy + hint_pitch(app)) && app->hover_x >= (float)(x - cell_w(app)) &&
-                  app->hover_x < (float)(x + w + cell_w(app)) &&
+            lit = draw && k && !off && app->hovering && in_rect(button, app->hover_x, app->hover_y) &&
                   hint_pick(key, (int)SDL_floorf((app->hover_x - (float)x) / (float)cell_w(app)), app->pad_driven) >= 0;
-            if (lit) /* the whole sentence, as a button under the pointer: inverted */
-                fill_rect(app, gui_rect(x - s, ty, w + 2 * s, cell_h(app)), band ? t->page : t->focus);
-            else if (draw && k && !off && t->focus_bar)
+            if (lit) /* the button under the pointer: inverted */
+                fill_rect(app, button, band ? t->page : t->focus);
+            else if (draw && band) /* on the band of ink: framed in the soft colour */
+                outline(app, button, t->soft);
+            else if (draw && filled)
+                fill_rect(app, button, t->dim);
+            else if (draw)
+                outline(app, button, t->dim);
+            if (draw && k && !off && !lit && t->focus_bar)
                 fill_rect(app, gui_rect(x - s, ty, k * cell_w(app) + 2 * s, cell_h(app)), band ? t->soft : t->focus);
             if (draw && k)
                 text_in(app, r, x, ty, key,
@@ -2744,13 +2761,15 @@ static int hints(App* app, const char* keys, int width, GuiRect r, int y, int dr
                             : lit  ? (band ? t->ink : t->page)
                             : band ? t->page
                                    : t->ink));
-            x += w + 2 * cell_w(app);
+            x += w - GUI_BUTTON_PAD * cell_w(app) + GUI_BUTTON_GAP * cell_w(app);
         }
         ++rows;
         row = end;
     }
     return SDL_max(rows, 1);
 }
+/* the pixels rows rows of the foot's keys take, their buttons' four pixels times the scale between two */
+static int hints_h(const App* app, int rows) { return rows * hint_pitch(app) + (rows - 1) * 4 * app->scale; }
 /* ---- the foot and the tips: the keys' box, the tips' beside it or on a row under the head ---- */
 /* the foot's letters, a size under the rest's but 1 at the least (a finger's buttons, the text's): what draws or measures
    the keys, and the tips when they are in the foot, does it with app->scale set to them, then puts the menus' back */
@@ -4546,13 +4565,14 @@ static int tab_cols(const App* app, int i) {
     tab_label(app, i, label, sizeof label);
     return gui_text_cols(label);
 }
-/* the row of tabs' height: a box head's, a finger's row on a phone, as its lists' rows are */
-static int tabs_h(const App* app) { return finger_h(app, cell_h(app) + 4 * app->scale); }
-/* tab i in the row of tabs: two columns wider than its name, a column after the one before it */
+/* the row of tabs' height: a button's, as the foot's keys' rows */
+static int tabs_h(const App* app) { return button_h(app); }
+/* tab i in the row of tabs, a button (GUI_BUTTON_*): a column wider than its name either side, a column after the one
+   before it */
 static GuiRect tab_rect(const App* app, GuiRect row, int i) {
     int x = row.x, k;
-    for (k = 0; k < i; ++k) x += (tab_cols(app, k) + 3) * cell_w(app);
-    return gui_rect(x, row.y, (tab_cols(app, i) + 2) * cell_w(app), row.h);
+    for (k = 0; k < i; ++k) x += (tab_cols(app, k) + 2 * GUI_BUTTON_PAD + GUI_BUTTON_GAP) * cell_w(app);
+    return gui_rect(x, row.y, (tab_cols(app, i) + 2 * GUI_BUTTON_PAD) * cell_w(app), row.h);
 }
 /* the tabs, the one shown as the focused box is; on the head's band in its colours swapped. The Compile tab once
    its queue ended: OK in the focus colour, FAILED on the failure colour blinking at the theme's blink_ms, as Share
@@ -4577,7 +4597,7 @@ static void draw_tabs(App* app, GuiRect row, int band) {
             fill_rect(app, r, t->dim);
         if (!failing && !inverted && (t->panels == GUI_PANELS_OUTLINE || on)) outline(app, r, on ? focus : t->dim);
         tab_label(app, i, label, sizeof label);
-        text_in(app, r, r.x + cell_w(app), r.y + (r.h - cell_h(app)) / 2, label, /* in its middle, a finger's too */
+        text_in(app, r, r.x + GUI_BUTTON_PAD * cell_w(app), r.y + (r.h - cell_h(app)) / 2, label, /* in its middle */
                 rgb(failing                     ? t->page
                     : inverted                  ? page
                     : on || ended == GUI_TAB_OK ? focus
@@ -4793,10 +4813,10 @@ static int frame_keys(App* app, int width) {
     GuiRect none = {0, 0, 0, 0};
     int s = app->scale, h;
     app->scale = foot_scale(app);
-    h = SDL_max(!app->frame.tips_foot || !t->tips_wrap ? 1 : 2,
-                hints(app, app->frame.keys, foot_text(app, gui_rect(0, 0, width, 0), t->footer_box).w / cell_w(app),
-                      none, 0, 0, 0, NULL)) *
-            hint_pitch(app) +
+    h = hints_h(app, SDL_max(!app->frame.tips_foot || !t->tips_wrap ? 1 : 2,
+                             hints(app, app->frame.keys,
+                                   foot_text(app, gui_rect(0, 0, width, 0), t->footer_box).w / cell_w(app), none, 0, 0,
+                                   0, NULL))) +
         4 * app->scale;
     app->scale = s;
     return h;
@@ -4809,7 +4829,7 @@ static int frame_keys_least(App* app) {
     int s = app->scale, cols = 0, back = hints_cols(app->frame.keys), least;
     while (hint_next(&at, key, what, sizeof key)) cols = SDL_max(cols, hint_width(key, what));
     app->scale = foot_scale(app);
-    least = (cols + (back ? back + 3 : 0) + (t->footer_box ? 4 : 0)) * cell_w(app);
+    least = (cols + (back ? back + 3 * GUI_BUTTON_GAP : 0) + (t->footer_box ? 4 : 0)) * cell_w(app);
     app->scale = s;
     return least;
 }
@@ -12048,7 +12068,7 @@ static bool foot_press(App* app, float x, float y) {
     text = foot_text(app, p.keys, app->theme.footer_box);
     rows = hints(app, say, text.w / cell_w(app), text, text.y, 0, 0, NULL);
     hit.x = x;
-    hit.y = SDL_clamp(y, (float)text.y, (float)(text.y + rows * hint_pitch(app) - 1));
+    hit.y = SDL_clamp(y, (float)text.y, (float)(text.y + hints_h(app, rows) - 1));
     hit.key[0] = 0;
     hints(app, say, text.w / cell_w(app), text, text.y, 0, 0, &hit);
     app->scale = s;
