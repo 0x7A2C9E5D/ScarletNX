@@ -139,7 +139,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   back to App, and **Folders**, every folder on one screen, the whole of it, a box a group:
   - **App Folders**: **Data** (`recompiled/`, `dumps/`, `themes/` and `prod.keys`), **Settings**, shown only
     (`app.ini`, which names the others, and each game's `.ini`: `XDG_CONFIG_HOME` moves it, a portable copy keeps its
-    own), **Logs** (the games' logs and `threads.txt`, `recent.txt`, `last-run.log` and `last-recompile.log`), **Caches** (the recompile's
+    own), **Logs** (the games' logs and `threads.txt`, `recent.txt`, `last-run.log`, `last-recompile.log` and the
+    launcher's `scarletnx-console.log` and `scarletnx-error.log`), **Caches** (the recompile's
     `units/`, the shader caches, the dumps' icons, and Extractions by default) and **Extractions**;
   - **Dumps Library**: its **Main**, the data folder's `dumps/` (with its subfolders, going with the data folder), then its
     **Extra** folders, whose dumps Games lists, and **Add a folder**;
@@ -256,13 +257,21 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   which it took. A language written in two scripts goes by its script, written or implied by its country (`zh-CN`,
   `zh-SG` simplified, `zh-TW`, `zh-HK`, `zh-MO` traditional): a system in one never takes a catalog of the other. The
   words change at once; a phrase the language has not translated stays English.
-- **Share Log** saves the last run's output, the queue's recompiles' (`last-recompile.log`) and the game log to
-  `scarletnx.log`. After a run or a recompile of the queue that ended abnormally (not by ESC) it blinks red, as
+- **Share Log** saves the last run's output, the queue's recompiles' (`last-recompile.log`), the launcher's own log
+  and its fatal errors (below) and the game log to `scarletnx.log`. After a run or a recompile of the queue that ended abnormally (not by ESC) it blinks red, as
   Install Keys does, until its log is saved or a run ends well. On the
   desktop it goes in the working folder with its path copied. On Android it goes to the
   data folder's `state/` and is shared.
 - **Open Data Folder**, on Android, opens the data folder, the app's own storage, in the
   system's Files app ([ANDROID](ANDROID.md)).
+- The launcher's log, `scarletnx-console.log` in its state folder (Settings > App > Folders' Logs; on iOS in `logs/`
+  of the app's Documents, [APPLE](APPLE.md)), holds what it says: its start (its build and data folder), each failure
+  once in a session (what the box over the screen says, shown or not), the warnings it gives as it opens, a dump whose
+  icon the driver did not give with what the driver said. Each line starts with the time and the launcher's process
+  ID, `2026-10-25 11:30:02 [4242] `, so two launchers open at once write theirs apart, and the lines go to stderr
+  too. A fatal error, the launcher's that stops it as it starts or a game's, is also kept in `scarletnx-error.log`
+  beside it, a game's after its name (a game of no data folder, an `--outdir`'s, beside its own log). Each start adds
+  to them.
 - **Exit** closes the launcher, once asked (ESC on the menu asks too, and while a recompile of the queue runs or waits
   the question names it), a screen saying for half a second which of its
   files it keeps for the next start (Settings, the picks of Settings > App, the libraries' folders, the recent games), a second

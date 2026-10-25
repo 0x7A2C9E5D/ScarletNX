@@ -233,6 +233,53 @@ FILE* snx_fopen(const char* path, const char* mode) {
     return fopen(path, mode);
 #endif
 }
+int snx_log_lines(const char* path, const char* text) {
+    char stamp[64];
+    time_t now = time(NULL);
+    struct tm local = {0};
+    size_t lines = 1, n = 0, w;
+    const char *c, *line;
+    char* out;
+    int failed;
+#ifdef _WIN32
+    unsigned long pid = (unsigned long)GetCurrentProcessId();
+    FILE* f;
+    localtime_s(&local, &now);
+#else
+    unsigned long pid = (unsigned long)getpid();
+    int fd;
+    localtime_r(&now, &local);
+#endif
+    w = strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", &local);
+    snprintf(stamp + w, sizeof stamp - w, " [%lu] ", pid);
+    w = strlen(stamp);
+    for (c = text; *c; ++c) lines += *c == '\n';
+    out = (char*)snx_alloc(strlen(text) + lines * w + 2);
+    for (line = text; *line;) { /* each line its stamp, its newline */
+        const char* end = strchr(line, '\n');
+        size_t len = end ? (size_t)(end - line) : strlen(line);
+        memcpy(out + n, stamp, w);
+        memcpy(out + n + w, line, len);
+        n += w + len;
+        out[n++] = '\n';
+        line += len + (end != NULL);
+    }
+#ifdef _WIN32
+    f = snx_fopen(path, "ab");
+    failed = !f || fwrite(out, 1, n, f) != n;
+    if (f && fclose(f)) failed = 1;
+#else
+    fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+    failed = fd < 0 || write(fd, out, n) != (ssize_t)n;
+    if (fd >= 0) {
+        int saved = errno;
+        close(fd);
+        errno = saved;
+    }
+#endif
+    free(out);
+    return failed ? -1 : 0;
+}
 int snx_path_is_full(const char* path) {
 #ifdef _WIN32
     if (isalpha((unsigned char)path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) return 1;

@@ -20,6 +20,7 @@
 #include "gui/gui.h"
 #include "gui/i18n.h"
 #include "gui/latin.h"
+#include "gui/log.h"
 #include "gui/wide.h"
 #include "gui/model.h"
 #include "gui/place.h"
@@ -56,9 +57,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
-#include <sys/stat.h>
-#endif
 /* the checkout the drivers were built from and its build tree, where an older version kept games/ and work/ */
 #ifdef SNX_SOURCE_DIR
 #define GUI_CHECKOUT SNX_SOURCE_DIR
@@ -507,6 +505,8 @@ typedef struct App {
     char ask_line[4400]; /* GUI_ASK_CLEAN's to GUI_ASK_FOLDER's question, with what the change takes or where */
     char error_line[4400];    /* GUI_ASK_ERROR's: the failure, whole */
     uint32_t errors_said[16]; /* the failures it said in the session, by their text's FNV-1a: each said once */
+    uint32_t errors_logged[64]; /* and those it wrote in its log (gui_log), shown or not: each written once */
+    int logged_count;
     int errors_count;
     int place_off;       /* the folder GUI_ASK_PLACE puts back to its default */
     uint64_t room_free; /* fixed free space for tests; 0 asks the disk */
@@ -714,13 +714,20 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_PAD_QUEUE_BACK       SNX_TR_KEYS("B: games.")
 #define SAY_PAD_QUEUE_PLAY       SNX_TR_KEYS("A: play.")
 /* a failure of the system's (a file not written, a picker that did not open): in a box over the screen, whole, until
-   OK, once in the session; the tips or the note keep it after. Over a run or another question, those alone */
+   OK, once in the session; the tips or the note keep it after. Over a run or another question, those alone. In the
+   launcher's log once in the session either way */
 static void say_failure(App* app, const char* text) {
     uint32_t hash = 2166136261u;
     const char* c;
     int i;
-    if (app->menu.running || app->finished || app->confirm.shown) return;
     for (c = text; *c; ++c) hash = (hash ^ (unsigned char)*c) * 16777619u;
+    for (i = 0; i < app->logged_count && i < (int)SDL_arraysize(app->errors_logged) && app->errors_logged[i] != hash;
+         ++i) {}
+    if (i == SDL_min(app->logged_count, (int)SDL_arraysize(app->errors_logged))) {
+        gui_log("%s", text);
+        app->errors_logged[app->logged_count++ % (int)SDL_arraysize(app->errors_logged)] = hash;
+    }
+    if (app->menu.running || app->finished || app->confirm.shown) return;
     for (i = 0; i < app->errors_count && i < (int)SDL_arraysize(app->errors_said); ++i)
         if (app->errors_said[i] == hash) return;
     app->errors_said[app->errors_count++ % (int)SDL_arraysize(app->errors_said)] = hash;
@@ -2327,8 +2334,7 @@ static SDL_Texture* splash_texture(App* app, int side) {
     }
     SDL_free(pixels);
     if (!texture && app->splash_drawing) {
-        fprintf(stderr, "scarletnx: the splash's %s could not be drawn %d pixels square, so the icon shows\n",
-                app->splash_svg->name, side);
+        gui_log("the splash's %s could not be drawn %d pixels square, so the icon shows", app->splash_svg->name, side);
         snx_splash_close(app->splash_drawing);
         app->splash_drawing = NULL;
     }
@@ -2351,8 +2357,7 @@ static void splash_end(App* app) {
 static void splash_with(App* app, const GuiTheme* t, const SnxSplashSvg* svg) {
     app->splash_svg = svg;
     app->splash_drawing = snx_splash_open(svg);
-    if (!app->splash_drawing)
-        fprintf(stderr, "scarletnx: the splash's %s could not be read, so the icon shows\n", svg->name);
+    if (!app->splash_drawing) gui_log("the splash's %s could not be read, so the icon shows", svg->name);
     app->splash_side = splash_size(app);
     app->splash = splash_texture(app, app->splash_side);
     if (!app->splash) {
@@ -6886,6 +6891,9 @@ static void run_log_follow(App* app) {
     app->run_log = snx_path_join(state, "last-run.log");
     free(app->job_log);
     app->job_log = snx_path_join(state, "last-recompile.log");
+#ifndef SDL_PLATFORM_IOS /* there in Documents' logs/, which the Files app shows (initialize) */
+    gui_log_folder(state);
+#endif
     free(state);
 }
 /* a place picked, absolute, or its default (NULL), kept in app.ini */
@@ -11194,7 +11202,7 @@ static void taskbar(App* app) {
         return;
     }
     if (!app->taskbar_error[0])
-        fprintf(stderr, "scarletnx: the taskbar shows no progress of the recompile: %s\n",
+        gui_log("the taskbar shows no progress of the recompile: %s",
                 SDL_GetError()[0] ? SDL_GetError() : "SDL gave no reason");
     snprintf(app->taskbar_error, sizeof app->taskbar_error, "%s",
              SDL_GetError()[0] ? SDL_GetError() : snx_tr("SDL gave no reason"));
@@ -11790,11 +11798,13 @@ static char* log_summary(const char* path) {
     free(markdown);
     return out;
 }
-/* the message on the screen, the summary of the newest game log, the last run's output and that log, as scarletnx.log in the data folder's state
-   folder (the working folder without one: started from the desktop, that is the home folder), then on Android handed
-   to the share sheet, elsewhere its path copied */
+/* the message on the screen, the summary of the newest game log, the last run's output, the launcher's own log and its
+   fatal errors, and that game log, as scarletnx.log in the data folder's state folder (the working folder without one:
+   started from the desktop, that is the home folder), then on Android handed to the share sheet, elsewhere its path
+   copied */
 static void share_log(App* app) {
-    char *game, *run, *recompiled, *played, *summary, *text, *saved, *state = NULL;
+    char *game, *run, *recompiled, *said, *fatal, *played, *summary, *text, *saved, *state = NULL;
+    char console[4096], errors[4096];
     const char* folder;
     bool written;
     folder = app->cwd;
@@ -11808,15 +11818,19 @@ static void share_log(App* app) {
     game = newest_log(app);
     run = log_tail(app->run_log, 1 << 20);
     recompiled = log_tail(app->job_log, 1 << 20);
+    gui_log_path(SNX_CONSOLE_LOG, console, sizeof console);
+    gui_log_path(SNX_ERROR_LOG, errors, sizeof errors);
+    said = log_tail(console[0] ? console : NULL, 1 << 20);
+    fatal = log_tail(errors[0] ? errors : NULL, 64 << 10);
     played = log_tail(game, 4 << 20);
     summary = game ? log_summary(game) : snx_strdup("");
-    text =
-        snx_format("%s\nMessage: %s\n%s%s%s%s\n%s== the last run: %s ==\n%s\n\n== the last recompile of the queue: %s "
-                   "==\n%s\n\n== %s ==\n%s\n",
-                   snx_build_info(), app->message, app->left ? app->left : "",
-                   app->left_clear ? SAY_LEFT_CLEAR "\n" : "", app->cleaned.count ? "Clean Old Settings:\n" : "",
-                   app->cleaned.text ? app->cleaned.text : "", summary, app->run_log ? app->run_log : "", run,
-                   app->job_log ? app->job_log : "", recompiled, game ? game : "no game log", played);
+    text = snx_format(
+        "%s\nMessage: %s\n%s%s%s%s\n%s== the last run: %s ==\n%s\n\n== the last recompile of the queue: %s "
+        "==\n%s\n\n== the launcher's log: %s ==\n%s\n\n== fatal errors: %s ==\n%s\n\n== %s ==\n%s\n",
+        snx_build_info(), app->message, app->left ? app->left : "", app->left_clear ? SAY_LEFT_CLEAR "\n" : "",
+        app->cleaned.count ? "Clean Old Settings:\n" : "", app->cleaned.text ? app->cleaned.text : "", summary,
+        app->run_log ? app->run_log : "", run, app->job_log ? app->job_log : "", recompiled,
+        console[0] ? console : "none", said, errors[0] ? errors : "none", fatal, game ? game : "no game log", played);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
     written = saved && !snx_write_file(saved, text, strlen(text));
     if (written) app->log_due = false; /* the crash's log is out */
@@ -11845,6 +11859,8 @@ static void share_log(App* app) {
     free(text);
     free(summary);
     free(played);
+    free(fatal);
+    free(said);
     free(recompiled);
     free(run);
     free(game);
@@ -13361,6 +13377,12 @@ static bool initialize(App* app, const char* self) {
     SDL_SetHint(SDL_HINT_PEN_MOUSE_EVENTS, "0");
 #ifdef SDL_PLATFORM_IOS
     gui_apple_start();
+    { /* the log in Documents' logs/, which gui_apple_start made and the Files app shows */
+        char *documents = SDL_GetCurrentDirectory(), *logs = documents ? snx_path_join(documents, "logs") : NULL;
+        gui_log_folder(logs);
+        free(logs);
+        SDL_free(documents);
+    }
 #endif
     if (!SDL_Init(SDL_INIT_VIDEO)) return false;
     snx_tr_languages(snx_gui_languages, snx_gui_language_count);
@@ -13501,6 +13523,11 @@ static char* settings_path(const char* config) { return config ? snx_path_join(c
 static void open_files(App* app) {
     char *prefs = menu_folder(app, SNX_USER_STATE, !app->look_only),
          *config = menu_folder(app, SNX_USER_CONFIG, !app->look_only);
+#ifndef SDL_PLATFORM_IOS /* there in Documents' logs/ (initialize) */
+    if (prefs && !app->look_only) gui_log_folder(prefs);
+#endif
+    if (!app->look_only)
+        gui_log("%s starts, its data folder %s", snx_build_info(), app->data_dir ? app->data_dir : "(none)");
     if (prefs) recent_open(app, snx_path_join(prefs, "recent.txt"));
     if (prefs) app->run_log = snx_path_join(prefs, "last-run.log");
     if (prefs) app->job_log = snx_path_join(prefs, "last-recompile.log");
@@ -13520,6 +13547,7 @@ static void open_files(App* app) {
         say_failure(app, app->message);
     }
     users_read(app);
+    if (app->message[0] && !app->look_only) gui_log("%s", app->message); /* what app.ini and the theme had wrong */
     free(config);
     free(prefs);
 }
@@ -13575,22 +13603,31 @@ int snx_gui_migrate(const char* self, const char* option) {
 int snx_gui_main(const char* self) {
     App app;
     if (!initialize(&app, self)) {
-        fprintf(stderr, "scarletnx: %s\n", SDL_GetError());
-#ifdef SDL_PLATFORM_IOS
-        /* a phone shows no stderr, and a message box needs the window that may be what failed: the Files app shows
-           this file, in the app's Documents (gui_apple_start's folder) */
-        {
-            FILE* file;
-            mkdir("logs", 0755);
-            file = fopen("logs/scarletnx-error.log", "w");
-            if (file) {
-                fprintf(file, "%s\n", SDL_GetError());
-                fclose(file);
+        char why[1024];
+        SDL_strlcpy(why, SDL_GetError(), sizeof why);
+#ifndef SDL_PLATFORM_IOS /* there the folder is known from the start (initialize) */
+        { /* the log's folder, as open_files takes it, from the data folder paths_start would find when it did not yet */
+            char *drivers = NULL, *data = NULL, *state;
+#ifndef SDL_PLATFORM_ANDROID
+            if (!app.data_dir) {
+                drivers = self ? snx_dirname(self) : SDL_GetBasePath() ? snx_strdup(SDL_GetBasePath()) : NULL;
+                data = drivers ? snx_data_dir(drivers) : NULL;
             }
-        }
-        if (app.window)
 #endif
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", SDL_GetError(), app.window);
+            state = app.data_dir || data ? snx_menu_dir(app.data_dir ? app.data_dir : data, SNX_USER_STATE) : NULL;
+            if (state && !snx_mkdirs(state)) gui_log_folder(state);
+            free(state);
+            free(data);
+            free(drivers);
+        }
+#endif
+        gui_log_fatal(why); /* a phone shows no stderr */
+#ifdef SDL_PLATFORM_IOS
+        if (app.window) /* a message box there needs the window, which may be what failed */
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", why, app.window);
+#else
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", why, app.window);
+#endif
         cleanup(&app);
         return 1;
     }
