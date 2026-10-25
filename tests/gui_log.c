@@ -88,6 +88,15 @@ int main(void) {
     /* appended: a second start keeps the first's */
     gui_log("again");
     assert(lines_of(console, own_pid(), said, sizeof said) == 8 && strstr(said, "|again"));
+    /* a program's lines as Windows ends them, \r\n: their \r left out, so every line ends as the others do */
+    gui_log("a driver's\r\nWindows lines\r\n");
+    assert(lines_of(console, own_pid(), said, sizeof said) == 10 && strstr(said, "|again|a driver's|Windows lines"));
+    {
+        size_t size = 0;
+        char* text = (char*)snx_read_file(console, &size);
+        assert(text && !memchr(text, '\r', size));
+        free(text);
+    }
 
     /* a folder that is not there: nothing made, the line on stderr with why */
     {

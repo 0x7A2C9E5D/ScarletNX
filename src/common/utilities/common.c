@@ -258,10 +258,11 @@ int snx_log_lines(const char* path, const char* text) {
     out = (char*)snx_alloc(strlen(text) + lines * w + 2);
     for (line = text; *line;) { /* each line its stamp, its newline */
         const char* end = strchr(line, '\n');
-        size_t len = end ? (size_t)(end - line) : strlen(line);
+        size_t len = end ? (size_t)(end - line) : strlen(line), kept = len;
+        if (kept && line[kept - 1] == '\r') --kept; /* a Windows program's \r\n: the line ends as the others do */
         memcpy(out + n, stamp, w);
-        memcpy(out + n + w, line, len);
-        n += w + len;
+        memcpy(out + n + w, line, kept);
+        n += w + kept;
         out[n++] = '\n';
         line += len + (end != NULL);
     }
