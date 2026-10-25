@@ -223,6 +223,8 @@ if(BUILD_TESTING)
     # a language of its own (tests/po), not the menu's: the screens' checks hold whatever po/ has
     snx_gui_languages(snx_gui_languages_test "${PROJECT_SOURCE_DIR}/tests/po"
                       "${PROJECT_BINARY_DIR}/generated/gui_languages_test.c")
+    # ui.txt read back: its phones' rows a finger's, as main.c's GUI_FINGER_ROW
+    target_compile_definitions(snx-test-gui-sdl PRIVATE SNX_GUI_UI_TXT="${PROJECT_SOURCE_DIR}/src/gui/ui.txt")
     target_link_libraries(snx-test-gui-sdl PRIVATE snx_gui_support snx_gui_ui scarletnx-common SDL3::SDL3
                           snx_window_icon snx_build_info snx_pad_sdl snx_gui_pad snx_splash snx_gui_languages_test snx_demangle)
     if(APPLE) # it compiles main.c itself, which calls the frontend (apple.m and its Swift), as scarletnx-gui links it

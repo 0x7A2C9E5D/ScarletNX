@@ -489,7 +489,7 @@ a long one sliding, or wrap over its rows with `[tips] wrap`, the last sliding w
 screen's keys, the whole width (the setup's beside its tips), in letters a size under the rest's: its own keys, ESC alone
 at the left of the row, **F1** last, which opens a box over the screen with every key it has, those every screen has too
 (the arrows and the mouse, Enter, Space and a click, the pages, Tab and F2), until any key or a click closes it; on a
-phone, the words to tap, whole, in the text's letters, each row of them as tall as a list's row (40 pixels times
+phone, the words to tap, whole, in the text's letters, each row of them as tall as a list's row (48 pixels times
 the text's size) for a finger, and so are the tabs. The tips and the keys each in a box with a bar down
 its left (`[tips] box`, `[footer] box`) or on the page. Games lists the recent games and a
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
@@ -510,8 +510,8 @@ Screen and Wide (a theme's `[head] place`, `[tips] place` and `[body] sizing` ar
 (a theme's `[body] gap` and `[body] scroll` are deprecated too): the menu's, Games',
 the Settings' two, the theme editor's, the choices of a question, of UI scale's box, of the Recompile box and of the
 setup's pages, the setup's Appearance rows, the box of users, that of a game's updates, DLCs and mods, and the OK of
-a box of files. Their rows are 2 pixels apart times the text's size (on Android and iOS 40 pixels high, about Android's 48 dp
-touch target at the 3x a phone held wide gets, where the desktop's are 17), the focused one kept in the middle (on a
+a box of files. Their rows are 2 pixels apart times the text's size (on Android and iOS 48 pixels high: a phone held wide gets
+3x, so 144, Android's 48 dp touch target at a density of 3 and more under it, iOS's 44 pt at its 3x; the desktop's are 17), the focused one kept in the middle (on a
 group's screen, the group open in the groups' list; Games' grid by its lines) as the keys, a pad, the wheel or a drag
 move it, and a list still when the mouse, a pen or a tap moves it, the cursor and the arrows of hidden rows inside
 each row, which a click takes whole as a tap does. That is the **Side panel**'s *Auto*, the

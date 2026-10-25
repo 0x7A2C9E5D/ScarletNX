@@ -8297,6 +8297,16 @@ int main(int argc, char** argv) {
         r = tab_rect(&app, m.place.tabs, GUI_TAB_MENU);
         mouse_px(&app, r.x + 4, r.y + 4, true);
         assert(!app.editing && app.menu.view == GUI_LOAD_NONE);
+        { /* a finger's row is ui.txt's phones' rows, every list's */
+            size_t size = 0;
+            char *text = (char*)snx_read_file(SNX_GUI_UI_TXT, &size), *at;
+            int rows = 0, px;
+            assert(text);
+            for (at = text; (at = strstr(at, "android.row_height = ")) != NULL; ++at, ++rows)
+                assert(sscanf(at, "android.row_height = %dpx", &px) == 1 && px == GUI_FINGER_ROW);
+            assert(rows >= 13);
+            free(text);
+        }
         /* on a screen of fingers (Android, iOS) the tabs are a finger's row high, as the lists' rows there, their names
            in their middle, and so is a row of the foot's keys, in the text's letters; a tap low on a tab opens it */
         app.fingers = true;

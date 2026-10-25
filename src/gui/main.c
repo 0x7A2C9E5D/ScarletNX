@@ -49,7 +49,7 @@
 #endif
 /* a finger's row in pixels at 1x, as ui.txt's android.row_height has the lists' rows: the tabs' and the foot's keys'
    on a screen of fingers */
-#define GUI_FINGER_ROW 40
+#define GUI_FINGER_ROW 48
 #ifdef SDL_PLATFORM_APPLE
 #include "gui/apple.h"
 #endif
