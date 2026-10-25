@@ -11397,9 +11397,13 @@ static int aot_focus_game(App* app, AotFocus* f) {
     f->folder = snx_dirname(path);
     f->name = f->folder ? aot_leaf(f->folder) : NULL;
     {
-        /* the base program, not an add-on's: one pack for the game, the add-ons run from it */
+        /* the base program, not an add-on's: one pack for the game, the add-ons run from it. Its name is the folder's,
+           .exe on Windows */
         char* file = aot_leaf(path);
-        int base = f->folder && f->name && file && !strcmp(file, f->name);
+        size_t n = file ? strlen(file) : 0;
+        int base;
+        if (n > 4 && !SDL_strcasecmp(file + n - 4, ".exe")) file[n - 4] = 0;
+        base = f->folder && f->name && file && !strcmp(file, f->name);
         free(file);
         if (!base) {
             free(f->folder);
