@@ -117,6 +117,9 @@ int vk_window_release(void); /* Renderer.release_window */
 /* logs a failed call with where it happened; evaluates to 1 on success */
 #define VK_OK(call) vk_ok_((call), #call, __FILE__, __LINE__)
 int vk_ok_(VkResult r, const char* what, const char* file, int line);
+/* messages the validation layer's debug messenger logged (0 without vk_validation): a test that enables the layer
+   holds a path to zero more of them */
+extern u32 g_vk_validation_messages;
 /* The renderer's lock, reentrant on the thread that holds it. The outermost vk_unlock, once the lock is let go,
    signals the event slots this thread's syncpoint releases under it reached (vk_release_events): that takes nvdrv's
    nvev_lk and the kernel's lock, so a hold that performs releases is never let go under either */
