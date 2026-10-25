@@ -240,6 +240,9 @@ if(TARGET snx_ctr_board)
             target_link_libraries(snx-test-3ds-container PRIVATE snx_ctr_process)
             add_test(NAME 3ds_container COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_container.py"
                 "${SNX_CTR_PROGRAM}" $<TARGET_FILE:snx-test-3ds-container>)
+            # a cartridge image or a bare NCCH against its extraction, and the update partition played as the update
+            add_test(NAME 3ds_cci COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_cci.py"
+                "${SNX_CTR_PROGRAM}" $<TARGET_FILE:snx-test-3ds-container>)
             set(snx_ctr_extract_test_args "")
 
             set(snx_ctr_extract_test_args --aot)

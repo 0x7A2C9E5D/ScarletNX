@@ -21,7 +21,11 @@ static bool suffix(const char* name, const char* extension) {
         if (tolower((unsigned char)name[n - e + i]) != extension[i]) return false;
     return true;
 }
-bool gui_is_cia(const char* name) { return suffix(name, ".cia"); }
+bool gui_is_cia(const char* name) {
+    /* a 3DS game by its extension: the driver reads the file's own header, this is the browser's filter */
+    return suffix(name, ".cia") || suffix(name, ".cci") || suffix(name, ".3ds") || suffix(name, ".cxi") ||
+           suffix(name, ".app") || suffix(name, ".hbb");
+}
 bool gui_is_vpk(const char* name) { return suffix(name, ".vpk"); }
 bool gui_is_gba(const char* name) { return suffix(name, ".gba"); }
 bool gui_is_dump(const char* name) {

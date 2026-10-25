@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors
-   An encrypted application CIA made into the decrypted one the loader reads. The two layers, as 3dbrew documents them
-   and Azahar decrypts them (core/hw/aes/key.cpp, file_sys/ncch_container.cpp, file_sys/ticket.cpp, GPL-2.0-or-later,
-   read, not ported):
+   An encrypted application game made into the decrypted one the loader reads. An installable CIA's layers, as 3dbrew
+   documents them and Azahar decrypts them (core/hw/aes/key.cpp, file_sys/ncch_container.cpp, file_sys/ticket.cpp,
+   GPL-2.0-or-later, read, not ported):
    - the CIA's: each content AES-128-CBC with the ticket's title key, whose IV is the content's index (big-endian, in
      the first two bytes); the title key itself AES-128-CBC with the common key the ticket names (slot 0x3D), its IV
      the title ID (big-endian, in the first eight bytes)
@@ -13,7 +13,9 @@
    A normal key is the console's key scrambler of KeyX and KeyY: ((KeyX <<< 2) ^ KeyY) + C <<< 87, C the generator
    constant. Every key and the constant come from the user's aes_keys.txt (Azahar's format), none is in this code.
    The decrypted CIA's NCCHs say NoCrypto, and its TMD the contents' new hashes, so the loader checks it as any other
-   decrypted CIA. */
+   decrypted CIA. A cartridge image (a CCI or a .3ds) and a bare NCCH (.cxi, an .app, homebrew's .hbb) have
+   no CIA layer: their NCCH's is the same layer a CIA's contents carry, and it is not taken off here yet, so
+   an encrypted cartridge image is refused until the decrypted copy carries it. */
 #include "3ds/loader/internal.h"
 #include <ctype.h>
 #include <inttypes.h>
@@ -57,7 +59,7 @@ static bool keys_load(CtrReader* r, const char* path, Keys* k) {
     FILE* f = path ? fopen(path, "rb") : NULL;
     if (!f)
         return ctr_fail(r, SNX_CTR_EXTRACT_UNSUPPORTED,
-                        "the CIA is encrypted, and there are no 3DS keys to decrypt it with at %s (aes_keys.txt in "
+                        "the game is encrypted, and there are no 3DS keys to decrypt it with at %s (aes_keys.txt in "
                         "Azahar's format, from your own console; --keys names another file)",
                         path ? path : "~/.3ds/aes_keys.txt");
     char line[1024];
@@ -247,7 +249,7 @@ static bool copy_span(CtrReader* r, FILE* out, uint64_t at, uint64_t size, unsig
     for (uint64_t done = 0; done < size;) {
         size_t n = size - done < CHUNK ? (size_t)(size - done) : CHUNK;
         if (!ctr_read(r, (CtrSpan){0, r->size}, at + done, buffer, n)) return false;
-        if (fwrite(buffer, 1, n, out) != n) return ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot write the decrypted CIA");
+        if (fwrite(buffer, 1, n, out) != n) return ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot write the decrypted game");
         done += n;
     }
     return true;
@@ -257,7 +259,7 @@ static bool pad64(CtrReader* r, FILE* out) {
     long at = ftell(out);
     size_t n = at < 0 ? 0 : (size_t)(align64((uint64_t)at) - (uint64_t)at);
     return (at >= 0 && fwrite(zero, 1, n, out) == n) ||
-           ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot write the decrypted CIA");
+           ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot write the decrypted game");
 }
 /* whether the CIA has a layer to decrypt: a content its TMD says is encrypted, or a present content's NCCH header
    without NoCrypto */
@@ -281,28 +283,27 @@ static bool cia_layers(CtrReader* r, const unsigned char* header, const unsigned
     }
     return true;
 }
-/* the decrypted CIA checked as the loader checks any (hashes, bounds, the boot NCCH): keys that are not the console's
-   decrypt to nonsense, which is never published */
+/* the decrypted game checked as the loader checks any (hashes, bounds, the boot NCCH): keys that are not the
+   console's decrypt to nonsense, which is never published */
 static bool verified(CtrReader* r, const char* path) {
     /* the headers' and superblocks' hashes and every bound: wrong keys fail those. The contents' hashes are the ones the
        decryption itself just wrote */
     CtrReader check = {.error = r->error, .error_size = r->error_size, .quick = true};
-    CtrCia cia = {0};
-    CtrNcch ncch = {0};
+    CtrSource s = {0};
     if (!(check.input = fopen(path, "rb"))) return ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot read %s", path);
     check.size = snx_file_size(path);
-    bool ok = ctr_cia_load(&check, &cia) && ctr_cia_contents(&check, &cia, NULL) && ctr_ncch_parse(&check, &cia, &ncch);
-    ctr_ncch_free(&ncch);
-    ctr_cia_free(&cia);
+    bool ok = ctr_source_load(&check, &s) && (s.kind != CTR_KIND_CIA || ctr_cia_contents(&check, &s, NULL));
+    ctr_source_free(&s);
     fclose(check.input);
     if (!ok) {
         char detail[256];
         snprintf(detail, sizeof detail, "%s", r->error_size ? r->error : "");
-        ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "the decrypted CIA fails its checks (%s): are the keys your console's?",
+        ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "the decrypted game fails its checks (%s): are the keys your console's?",
                  detail);
     }
     return ok;
 }
+
 static bool decrypt(CtrReader* r, const char* keys_path, const char* output, bool* encrypted) {
     unsigned char header[0x2020], *ticket = NULL, *tmd = NULL, *buffer = NULL, title_key[16];
     FILE* out = NULL;
@@ -310,9 +311,37 @@ static bool decrypt(CtrReader* r, const char* keys_path, const char* output, boo
     bool ok = false;
     Keys* k = calloc(1, sizeof *k);
     if (!k) return ctr_fail(r, SNX_CTR_EXTRACT_LIMIT, "out of memory");
+    /* a file too short for any container's header is malformed data, as the loader's own read of it says */
+    if (r->size < 0x200) {
+        ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "truncated or out-of-range archive section");
+        goto done;
+    }
     if (!ctr_read(r, (CtrSpan){0, r->size}, 0, header, sizeof header)) goto done;
+    /* A cartridge image and a bare NCCH have no CIA layer to take off: their NCCH's own is the same layer the
+       CIA's contents carry, and taking it off where the NCCH lies is not written yet, so an encrypted one is
+       refused until then. An image whose NCCH says NoCrypto already is read as it is. The flag is the game NCCH's,
+       which for a cartridge is the game partition's, not the NCSD header's */
+    if (!memcmp(header + 0x100, "NCSD", 4) || !memcmp(header + 0x100, "NCCH", 4)) {
+        CtrReader read = {.error = r->error, .error_size = r->error_size, .quick = true, .input = r->input,
+                          .size = r->size};
+        CtrSource s = {0};
+        bool parsed = ctr_source_load(&read, &s);
+        if (parsed) {
+            const CtrNcch* n = s.overlay ? &s.over : &s.base;
+            if (n->header[0x18f] & 4)
+                *encrypted = false; /* nothing to write: the game is read as it is */
+            else
+                ctr_fail(r, SNX_CTR_EXTRACT_UNSUPPORTED,
+                         "the game's NCCH is encrypted, and decrypting a cartridge image or an NCCH is not "
+                         "implemented yet (a CIA is)");
+        }
+        ctr_source_free(&s);
+        ok = parsed && r->result == SNX_CTR_EXTRACT_OK;
+        goto done;
+    }
     if (ctr_le32(header) != 0x2020) {
-        ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "unsupported CIA header");
+        ctr_fail(r, SNX_CTR_EXTRACT_FORMAT,
+                 "the game is not a CIA, a cartridge image (a CCI or a .3ds) or an NCCH");
         goto done;
     }
     uint64_t cert = 0x2040, cert_size = ctr_le32(header + 8);
@@ -424,7 +453,7 @@ static bool decrypt(CtrReader* r, const char* keys_path, const char* output, boo
     }
     if (fseek(out, (long)tmd_at, SEEK_SET) || fwrite(tmd, 1, (size_t)tmd_size, out) != tmd_size || fclose(out)) {
         out = NULL;
-        ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot write the decrypted CIA");
+        ctr_fail(r, SNX_CTR_EXTRACT_IO, "cannot write the decrypted game");
         goto done;
     }
     out = NULL;
@@ -446,13 +475,13 @@ done:
     free(buffer);
     return ok;
 }
-SnxCtrExtractResult snx_ctr_cia_decrypt(const char* input, const char* keys, const char* output, bool* encrypted,
-                                        char* error, size_t error_size) {
+SnxCtrExtractResult snx_ctr_decrypt(const char* input, const char* keys, const char* output, bool* encrypted,
+                                    char* error, size_t error_size) {
     CtrReader r = {.error = error, .error_size = error_size};
     if (error_size) error[0] = 0;
     *encrypted = false;
     if (!input || !(r.input = fopen(input, "rb"))) {
-        ctr_fail(&r, SNX_CTR_EXTRACT_IO, "cannot open CIA input");
+        ctr_fail(&r, SNX_CTR_EXTRACT_IO, "cannot open the game");
         return r.result;
     }
     r.size = snx_file_size(input);

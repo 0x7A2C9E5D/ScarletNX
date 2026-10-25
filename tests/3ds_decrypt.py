@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
 """An application CIA encrypted at both layers, as a retail one is, with keys made up for the test, decrypted by the
-driver (snx_ctr_cia_decrypt) and extracted: its extraction is the plain CIA's. The layers as 3dbrew documents them:
+driver (snx_ctr_decrypt) and extracted: its extraction is the plain CIA's. The layers as 3dbrew documents them:
 each content AES-CBC under the ticket's title key (itself AES-CBC under the common key), and the NCCH's AES-CTR, the
 ExHeader, ExeFS header, icon and banner under the primary key (slot 0x2C) and the rest under the secondary one the
 crypto method names, every normal key the key scrambler of a KeyX and KeyY."""
@@ -156,8 +156,8 @@ def main():
         }
         decrypted_cia = (root / 'encrypted.decrypted.cia').read_bytes()
         assert len(decrypted_cia) == len(encrypted)
-        # The decrypted CIA is taken as it is the next time, not decrypted again
-        assert 'Using the decrypted CIA' in subprocess.run(
+        # The decrypted copy is taken as it is the next time, not decrypted again
+        assert 'Using the decrypted copy' in subprocess.run(
             [driver, '-x', '--keys', str(keys), '--output', str(root / 'encrypted'), str(root / 'encrypted.cia')],
             capture_output=True, text=True, cwd=root, timeout=60, env=env,
         ).stdout

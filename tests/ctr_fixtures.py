@@ -145,6 +145,48 @@ def ncch(
     return bytes(header + exheader + exefs + rom)
 
 
+UPDATE_TITLE = (TITLE & 0xFFFFFFFF) | 0x0004000E00000000
+
+
+def titled(tid):
+    """The patches giving an NCCH and its ExHeader another program ID, as an update partition's title has: the
+    NCCH header's at 0x118 and the ExHeader's at 0x200 must both say it, as the loader checks them against each
+    other."""
+
+    def header(h):
+        put(h, 0x118, '<Q', tid)
+
+    def exheader(d):
+        put(d, 0x200, '<Q', tid)
+
+    return header, exheader
+
+
+def ncsd(game=None, update=None, media_size=None, patch=None):
+    """A cartridge image (a CCI): an NCSD header, then partitions in 0x200-byte media units, each an NCCH. The
+    game is partition 0, on the media unit after the header's, as a card lays it out; the update is partition 7
+    when given, and the slots a manual and a DLP child usually hold are zero."""
+    if game is None:
+        game = ncch()
+    body, table = bytearray(), bytearray(0x40)
+    for slot, content in [(0, game)] + ([(7, update)] if update else []):
+        content = content.ljust(align(len(content), 0x200), b'\0')
+        put(table, slot * 8, '<II', (0x200 + len(body)) // 0x200, len(content) // 0x200)
+        body += content
+    header = bytearray(0x200)
+    header[0x100:0x104] = b'NCSD'
+    put(header, 0x104, '<I', (media_size if media_size is not None else 0x200 + len(body)) // 0x200)
+    header[0x110] = 1  # the game partition is a normal one, as a card's is
+    if update is not None:
+        header[0x110 + 7] = 1
+    header[0x120:0x160] = table
+    put(header, 0x180, '<I', 0)  # no additional header: the ExHeaders live in the NCCHs
+    put(header, 0x184, '<I', 0)  # sector zero holds the header itself, as a dump's does
+    if patch:
+        patch(header)
+    return bytes(header + body)
+
+
 def cia(
     application=None,
     signature=0x10004,

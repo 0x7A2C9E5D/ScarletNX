@@ -1448,8 +1448,8 @@ msgid "Ready to run, with %zu update(s), DLC(s), mod(s) or cheat(s) to pick from
 msgstr "可以运行，有 %zu 个更新、DLC、模组或金手指可供选择"
 
 #: src/gui/main.c
-msgid "3DS CIA, opened with scarletnx-3ds"
-msgstr "3DS CIA，用 scarletnx-3ds 打开"
+msgid "3DS game, opened with scarletnx-3ds"
+msgstr "3DS 游戏，用 scarletnx-3ds 打开"
 
 #: src/gui/main.c
 msgid "Vita VPK, opened with scarletnx-vita"
@@ -3753,8 +3753,8 @@ msgid "Load Linux ARM ELF"
 msgstr "载入 Linux ARM ELF"
 
 #: src/gui/ui.txt
-msgid "Load 3DS CIA"
-msgstr "载入 3DS CIA"
+msgid "Load 3DS game"
+msgstr "载入 3DS 游戏"
 
 #: src/gui/ui.txt
 msgid "Load Vita VPK"

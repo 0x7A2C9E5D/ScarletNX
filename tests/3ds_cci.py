@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 the ScarletNX contributors
+"""A cartridge image or a bare NCCH read where it lies against its extraction: the same images accepted and
+refused, the same bytes read, and a cartridge's update partition played as the update."""
+
+import os
+import random
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from ctr_fixtures import NONE, ncsd, ncch, put, titled, UPDATE_TITLE
+
+
+def main():
+    # absolute, not resolved: scarletnx-3ds may be a link to scarletnx, which runs the driver its name says
+    driver, probe = [str(Path(p).absolute()) for p in sys.argv[1:3]]
+    checked = 0
+    with tempfile.TemporaryDirectory(prefix='snx-ctr-cci-') as temp:
+        root = Path(temp)
+
+        def both(blob, name, extension='cci'):
+            nonlocal checked
+            checked += 1
+            source, out = root / f'{name}.{extension}', root / name
+            source.write_bytes(blob)
+            # the home folder is the test's: no 3DS keys of the user's decrypt an encrypted case
+            env = {**os.environ, 'HOME': str(root), 'USERPROFILE': str(root)}
+            x = subprocess.run([driver, '-x', '--output', str(out), str(source)], capture_output=True, text=True,
+                               timeout=20, env=env)
+            args = [probe, str(source)] + ([str(out)] if x.returncode == 0 else [])
+            p = subprocess.run(args, capture_output=True, text=True, timeout=20)
+            text = x.stdout + x.stderr + p.stdout + p.stderr
+            assert 'AddressSanitizer' not in text and 'runtime error:' not in text, text
+            if x.returncode and not p.returncode:
+                # the read in place takes no whole-data hash (an ExeFS file's), so it also accepts an image whose
+                # only fault is one of those, as the CIA's test does
+                assert 'SHA-256 mismatch' in text, (name, text)
+                source.unlink()
+                shutil.rmtree(out, ignore_errors=True)
+                return x.returncode, text
+            assert (x.returncode == 0) == (p.returncode == 0), (name, x.returncode, p.returncode, text)
+            if x.returncode:
+                assert x.returncode in (1, 3) and p.returncode in range(21, 26), (name, text)
+                assert (x.returncode == 3) == (p.returncode == 23), (name, text)
+                source.unlink()
+                return x.returncode, text
+            assert 'match its extraction' in p.stdout, (name, text)
+            source.unlink()
+            return 0, text
+
+        def manifest(name):
+            text = (root / name / 'manifest.ini').read_text()
+            assert 'state=extracted' in text, text
+            return text
+
+        update_header, update_exheader = titled(UPDATE_TITLE)
+        update = ncch(patch_header=update_header, patch_exheader=update_exheader)
+        other_header, other_exheader = titled(UPDATE_TITLE + 1)
+
+        # the plain cartridge, its compressed code, and one without a RomFS
+        assert both(ncsd(), 'plain')[0] == 0
+        assert both(ncsd(ncch(compressed=True)), 'compressed')[0] == 0
+        assert both(ncsd(ncch(with_romfs=False)), 'no-romfs')[0] == 0
+        # the .3ds name of the same image, and a bare NCCH as a .cxi, an .app and homebrew's .hbb
+        assert both(ncsd(), 'as-3ds', extension='3ds')[0] == 0
+        assert both(ncch(), 'as-cxi', extension='cxi')[0] == 0
+        assert both(ncch(), 'as-app', extension='app')[0] == 0
+        assert both(ncch(), 'as-hbb', extension='hbb')[0] == 0
+        # the update partition is the game: its ExHeader and code are extracted, and the manifest says so
+        status, text = both(ncsd(update=update), 'update')
+        assert status == 0, text
+        assert 'overlay=1' in manifest('update'), text
+        # an update partition of another title is not this game's update: the game's own runs
+        status, text = both(ncsd(update=ncch(patch_header=other_header, patch_exheader=other_exheader)), 'no-overlay')
+        assert status == 0 and 'overlay=0' in manifest('no-overlay'), text
+        # a dump declaring a larger card than its file holds, as a trimmed one does
+        assert both(ncsd(media_size=0x100000), 'declared-large')[0] == 0
+        # refusals: no game in partition 0, a partition outside the image, a game that is not an application
+        empty = bytearray(ncsd())
+        put(empty, 0x120, '<II', 0, 0)  # partition 0 at nowhere
+        status, text = both(bytes(empty), 'no-game')
+        assert status == 3 and 'game partition (0)' in text, text
+        beyond = bytearray(ncsd())
+        put(beyond, 0x120, '<II', 0x400000, 8)  # 512 MiB into a 12 KiB image
+        status, text = both(bytes(beyond), 'beyond')
+        assert status == 1, text
+        notapp = bytearray(ncsd())
+        put(notapp, 0x200 + 0x18D, '<B', 0)  # the game NCCH is data, not an executable application
+        status, text = both(bytes(notapp), 'not-app')
+        assert status == 3 and 'holds no game' in text, text
+        encrypted = bytearray(ncsd())
+        put(encrypted, 0x200 + 0x18F, '<B', 0)  # the game NCCH's NoCrypto off: encrypted, refused as yet
+        status, text = both(bytes(encrypted), 'encrypted')
+        assert status == 3 and 'encrypted' in text, text
+        seed = bytearray(ncsd())
+        put(seed, 0x200 + 0x18F, '<B', 0x20)  # seed crypto, which no keys of this loader's take off
+        status, text = both(bytes(seed), 'seed')
+        assert status == 3, text
+        short = bytearray(ncsd())
+        put(short, 0x200 + 0x104, '<I', 3)  # a game NCCH claiming three media units, too few for its sections
+        assert both(bytes(short), 'size')[0] == 1
+        # the bare NCCH's own refusal: a size that is neither its media units nor its bytes
+        wrong = bytearray(ncch())
+        put(wrong, 0x104, '<I', 3)
+        assert both(bytes(wrong), 'wrong-size', extension='cxi')[0] == 1
+        # mutation smoke tests over the plain image and its header's table
+        plain = ncsd()
+        rng = random.Random(0x43434921)
+        for i in range(40):
+            mutant = bytearray(plain)
+            for _ in range(1 + i % 4):
+                at = rng.randrange(len(mutant))
+                mutant[at] ^= 1 << rng.randrange(8)
+            both(bytes(mutant), f'mutant-{i}')
+        for i in range(24):
+            offset = rng.choice([0x100, 0x104, 0x120, 0x128, 0x130, 0x138, 0x180, 0x184, 0x188])
+            value = rng.choice([0, NONE, 1, 2, 8, 0x1000, 0xFFFFFFF0])
+
+            def patch(h):
+                put(h, offset, '<I', value)
+
+            both(ncsd(patch=patch), f'header-mutant-{i}')
+        assert not list(root.rglob('.snx-*'))
+    print(f'CCI and NCCH read where it lies: {checked} images accepted and refused as their extraction, '
+          'the update partition played as the update')
+
+
+if __name__ == '__main__':
+    main()
