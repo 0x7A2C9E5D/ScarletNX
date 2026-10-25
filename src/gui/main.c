@@ -125,11 +125,11 @@ static const char* const library_words[GUI_LIBRARIES] = {"recompiled", "dumps"};
    library's Main), a folder of the player's (an Extra), a library's Add a folder, or Settings, shown only: app.ini in it
    names the others; by group, a box each */
 typedef enum { GUI_ROW_PLACE, GUI_ROW_DUMPS, GUI_ROW_FOLDER, GUI_ROW_ADD, GUI_ROW_CONFIG } GuiFolderRow;
-enum { GUI_GROUP_APP, GUI_GROUP_RECOMPILED, GUI_GROUP_DUMPS, GUI_FOLDER_GROUPS };
+enum { GUI_GROUP_APP, GUI_GROUP_DUMPS, GUI_GROUP_RECOMPILED, GUI_FOLDER_GROUPS }; /* as the screen has them */
 #define GUI_VIEW_ROWS    24    /* a group's rows shown as a view of them */
 #define SNX_GUI_PLAYERS  8     /* Controllers' players, as the runtime's gamepad_p<N>_ keys */
 /* Settings > App > Folders' rows, its last aside: the app's places and Settings, then each library's Main, its Extras
-   and Add a folder */
+   and Add a folder, the dumps' library first */
 #define GUI_FOLDER_ROWS  (GUI_PLACES + 2 + GUI_FOLDERS_MAX + 2)
 /* the game folders watched on a thread of their own: listing them, a library's with its subfolders, can keep a busy
    disk a while, the window frozen if the menu's thread waited for it. Once a second the thread hashes what they hold
@@ -6339,21 +6339,23 @@ static bool outside_app(const App* app, const char* path) {
     return app->own_dir && !snx_path_within(path, app->own_dir);
 }
 static const char* const group_titles[GUI_FOLDER_GROUPS + 1] = {
-    SNX_TR_NOOP("App Folders"), SNX_TR_NOOP("Recompiled Library"), SNX_TR_NOOP("Dumps Library"),
+    SNX_TR_NOOP("App Folders"), SNX_TR_NOOP("Dumps Library"), SNX_TR_NOOP("Recompiled Library"),
     SNX_TR_NOOP("Defaults")}; /* the last's, Reset to Defaults' */
 /* row r's kind (GuiFolderRow), its place, folder or library in *at and its group in *group; -1 past the rows (the
    last, Reset to Defaults, is the form's own) */
 static int folder_row(const App* app, int r, int* at, int* group) {
     /* -1: Settings, between Data and the two whose folders app.ini in it names */
     static const int app_places[] = {GUI_PLACE_DATA, -1, GUI_PLACE_STATE, GUI_PLACE_CACHE, GUI_PLACE_WORK};
-    int i, n = 0, l;
+    static const int libraries[GUI_LIBRARIES] = {GUI_LIBRARY_DUMPS, GUI_LIBRARY_RECOMPILED}; /* the dumps first */
+    int i, n = 0, k, l;
     *group = GUI_GROUP_APP;
     for (i = 0; i < (int)SDL_arraysize(app_places); ++i)
         if (n++ == r) {
             *at = app_places[i];
             return app_places[i] < 0 ? GUI_ROW_CONFIG : GUI_ROW_PLACE;
         }
-    for (l = 0; l < GUI_LIBRARIES; ++l) {
+    for (k = 0; k < GUI_LIBRARIES; ++k) {
+        l = libraries[k];
         *group = l == GUI_LIBRARY_RECOMPILED ? GUI_GROUP_RECOMPILED : GUI_GROUP_DUMPS;
         if (n++ == r) {
             *at = l == GUI_LIBRARY_RECOMPILED ? GUI_PLACE_GAMES : -1;

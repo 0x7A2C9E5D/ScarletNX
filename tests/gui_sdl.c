@@ -4286,8 +4286,8 @@ int main(int argc, char** argv) {
     key(&app, SDLK_ESCAPE);
     assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_EDITOR);
     /* Folders, every folder on one screen, a box a group: the app's (Data, Settings read-only, Logs, Caches,
-       Extractions), the recompiled library (its
-       Main, recompiled/, its Extras, Add Folder), the dumps one (its Main, dumps/, its Extras, Add Folder); one
+       Extractions), the dumps library (its Main, dumps/, its Extras, Add Folder), then the recompiled one (its
+       Main, recompiled/, its Extras, Add Folder); one
        dropped on a library's row is added to it and kept, once; the picker answers none here
        (SDL_FILE_DIALOG_DRIVER=none); Del or Enter asks before an Extra is taken off, the folder staying */
     key(&app, SDLK_DOWN);
@@ -4297,9 +4297,9 @@ int main(int argc, char** argv) {
     assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 10 && app.editor.row == 0);
     assert(FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_DATA) == 0 && FOLDER_ROW(GUI_ROW_CONFIG, -1) == 1 &&
            FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_STATE) == 2 && FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_CACHE) == 3 &&
-           FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_WORK) == 4 && FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES) == 5 &&
-           FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED) == 6 && FOLDER_ROW(GUI_ROW_DUMPS, -1) == 7 &&
-           FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_DUMPS) == 8);
+           FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_WORK) == 4 && FOLDER_ROW(GUI_ROW_DUMPS, -1) == 5 &&
+           FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_DUMPS) == 6 && FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_GAMES) == 7 &&
+           FOLDER_ROW(GUI_ROW_ADD, GUI_LIBRARY_RECOMPILED) == 8);
     /* no Back row over the rows: the foot's ESC, clicked, does what the key does, back on the App's row */
     {
         GuiFormBoxes f;
@@ -4328,9 +4328,14 @@ int main(int argc, char** argv) {
         render(&app);
         { /* each group's title: in the page's colour on a band of ink in a theme of filled boxes, else in ink */
             SDL_Color title = rgb(app.theme.panels == GUI_PANELS_FILL ? app.theme.page : app.theme.ink);
+            int ax, ay, dx, dy, rx, ry;
             shows(&app, "App Folders", title);
             shows(&app, "Recompiled Library", title);
             shows(&app, "Dumps Library", title);
+            /* the dumps' library above the recompiled one, under the app's */
+            assert(find_text(&app, "App Folders", title, 1, &ax, &ay) &&
+                   find_text(&app, "Dumps Library", title, 1, &dx, &dy) &&
+                   find_text(&app, "Recompiled Library", title, 1, &rx, &ry) && ay < dy && dy < ry);
         }
         { /* each group in a box as far as it shows, half a cell wider than its rows, in the dim colour; Reset to
              Defaults, the last row, in one of its own */

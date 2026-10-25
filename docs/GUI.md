@@ -138,10 +138,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
     (`app.ini`, which names the others, and each game's `.ini`: `XDG_CONFIG_HOME` moves it, a portable copy keeps its
     own), **Logs** (the games' logs and `threads.txt`, `recent.txt`, `last-run.log` and `last-recompile.log`), **Caches** (the recompile's
     `units/`, the shader caches, the dumps' icons, and Extractions by default) and **Extractions**;
-  - **Recompiled Library**: its **Main**, `recompiled/`, where recompiled games go, then its **Extra** folders, whose games
-    ready to run Games lists too, and **Add a folder**;
   - **Dumps Library**: its **Main**, the data folder's `dumps/` (with its subfolders, going with the data folder), then its
     **Extra** folders, whose dumps Games lists, and **Add a folder**;
+  - **Recompiled Library**: its **Main**, `recompiled/`, where recompiled games go, then its **Extra** folders, whose games
+    ready to run Games lists too, and **Add a folder**;
   - **Reset to Defaults**, last, which asks first.
 
   A row is its name, its folder (one too long for the row cut in its middle: its root and first folder, `...`, as

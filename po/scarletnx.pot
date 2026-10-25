@@ -2048,11 +2048,11 @@ msgid "App Folders"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Recompiled Library"
+msgid "Dumps Library"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Dumps Library"
+msgid "Recompiled Library"
 msgstr ""
 
 #: src/gui/main.c
