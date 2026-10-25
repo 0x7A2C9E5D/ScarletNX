@@ -187,6 +187,32 @@ def ncsd(game=None, update=None, media_size=None, patch=None):
     return bytes(header + body)
 
 
+def tar(*entries, patch=None):
+    """A tar bundle, what Azahar's .bcci/.bcxi/.bcia is: ustar headers of 512 bytes, each entry's data after its
+    header rounded to 512, two zero blocks at the end, every header's checksum set."""
+    out = bytearray()
+    for name, blob in entries:
+        h = bytearray(512)
+        n = name.encode()[:100]
+        h[: len(n)] = n
+        h[100:108] = b'0000644\0'
+        h[108:116] = h[116:124] = b'0000000\0'
+        h[124:136] = f'{len(blob):011o}\0'.encode()
+        h[136:148] = b'00000000000\0'
+        h[148:156] = b' ' * 8  # the checksum, taken over the field as spaces
+        h[156:157] = b'0'
+        h[257:263] = b'ustar\0'
+        h[263:265] = b'00'
+        put(h, 148, '<6sbb', b'%06o' % sum(h), 0, 32)  # six octal digits, NUL, space
+        out += h
+        out += blob
+        out += b'\0' * (-len(blob) % 512)
+    out += bytes(1024)
+    if patch:
+        patch(out)
+    return bytes(out)
+
+
 def cia(
     application=None,
     signature=0x10004,

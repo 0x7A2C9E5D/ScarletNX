@@ -22,9 +22,11 @@ static bool suffix(const char* name, const char* extension) {
     return true;
 }
 bool gui_is_cia(const char* name) {
-    /* a 3DS game by its extension: the driver reads the file's own header, this is the browser's filter */
+    /* a 3DS game by its extension: the driver reads the file's own header, this is the browser's filter. A
+       .bcci/.bcxi/.bcia is a bundle of one, as Azahar's is */
     return suffix(name, ".cia") || suffix(name, ".cci") || suffix(name, ".3ds") || suffix(name, ".cxi") ||
-           suffix(name, ".app") || suffix(name, ".hbb");
+           suffix(name, ".app") || suffix(name, ".hbb") || suffix(name, ".bcci") || suffix(name, ".bcxi") ||
+           suffix(name, ".bcia");
 }
 bool gui_is_vpk(const char* name) { return suffix(name, ".vpk"); }
 bool gui_is_gba(const char* name) { return suffix(name, ".gba"); }

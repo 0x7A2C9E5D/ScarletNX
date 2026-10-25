@@ -76,7 +76,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   take a game (its Main, and each Extra that can be written and runs programs), a box asks which the dump's game goes
   in, **Recompile** on its tab: each folder with what it is and its free room, the Main first and in focus; ESC runs
   nothing. The one taken is the run's `--outdir`, and the room asked about is that folder's.
-- **Load 3DS game** uses `scarletnx-3ds`. Its `games/` browser lists CIA, CCI, 3DS, CXI, APP and HBB inputs,
+- **Load 3DS game** uses `scarletnx-3ds`. Its `games/` browser lists CIA, CCI, 3DS, CXI, APP, HBB and BCCI/BCXI/BCIA inputs,
   not host executables. The driver reads supported decrypted application CIAs, cartridge images (a card's
   update partition played as the update) and bare NCCHs where they lie, or extracts them with *Extract dump*.
   The driver then compiles the ARM11 code ahead of time and runs it, on Linux and
@@ -338,7 +338,7 @@ folder the driver works in, which the menu passes it as `--data`: a portable cop
 AppImage (or the GUI), else the user's data folder, a build tree's menu's too ([USAGE](USAGE.md#folders)), then each
 Extra of Settings > App > Folders. Each game is shown by the name in its `control.nacp`, which the recompile copies into
 its data, else by its folder's or file's name, sorted by it in each folder. Only immediate files are listed:
-executables (execute permission on UNIX, `.exe` on Windows), `.cia`, `.cci`, `.3ds`, `.cxi`, `.app` and `.hbb` files
+executables (execute permission on UNIX, `.exe` on Windows), `.cia`, `.cci`, `.3ds`, `.cxi`, `.app`, `.hbb`, `.bcci`, `.bcxi` and `.bcia` files
 (case-insensitive, no execute permission needed), which run with the 3DS driver, and `.vpk` files, which run with the Vita driver. Hidden files, shared libraries and
 directories are excluded. The folders are looked at once a second while the menu is open (their
 names only), so a game put in or taken out shows in the open list; a folder that

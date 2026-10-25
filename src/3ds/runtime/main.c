@@ -70,7 +70,8 @@ static void usage(FILE* out) {
 /* the extensions a game of this system may have. The loader reads the file's own header, so this is a guard against a
    mistyped path and the GUI's filter, not the identification: .app and .hbb are NCCHs a manual and the Homebrew
    Launcher keep, .cci and .3ds cartridge images */
-static const char* const game_extensions[] = {".cia", ".cci", ".3ds", ".cxi", ".app", ".hbb"};
+static const char* const game_extensions[] = {".cia", ".cci", ".3ds", ".cxi", ".app", ".hbb",
+                                              ".bcci", ".bcxi", ".bcia"};
 static bool game_path(const char* path) {
     size_t n = strlen(path);
     for (size_t i = 0; i < sizeof game_extensions / sizeof *game_extensions; ++i) {

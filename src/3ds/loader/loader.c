@@ -24,7 +24,7 @@ bool ctr_fail(CtrReader* r, SnxCtrExtractResult result, const char* format, ...)
 bool ctr_read(CtrReader* r, CtrSpan span, uint64_t at, void* output, size_t size) {
     if (!ctr_fits(r->size, span.offset, span.size) || !ctr_fits(span.size, at, size))
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "truncated or out-of-range archive section");
-    uint64_t offset = span.offset + at;
+    uint64_t offset = r->base + span.offset + at;
     if (r->map) {
         if (size) memcpy(output, r->map + offset, size);
         return true;
@@ -155,6 +155,14 @@ static bool container(CtrReader* r, CtrSource* s) {
     size_t have = r->size < sizeof h ? (size_t)r->size : sizeof h;
     if (have < 0x200 || !ctr_read(r, (CtrSpan){0, r->size}, 0, h, have))
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "truncated or out-of-range archive section");
+    /* a bundle first: the game is one of its entries, and everything after reads that entry as the game */
+    bool tar = false;
+    if (!ctr_tar_game(r, &tar)) return false;
+    if (tar) {
+        have = r->size < sizeof h ? (size_t)r->size : sizeof h;
+        if (have < 0x200 || !ctr_read(r, (CtrSpan){0, r->size}, 0, h, have))
+            return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "truncated or out-of-range archive section");
+    }
     if (!memcmp(h + 0x100, "NCSD", 4)) return ctr_ncsd_load(r, s);
     if (!memcmp(h + 0x100, "NCCH", 4)) return ctr_ncch_load(r, s);
     if (have >= 0x2020 && ctr_le32(h) == 0x2020) return ctr_cia_load(r, s);

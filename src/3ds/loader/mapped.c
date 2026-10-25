@@ -14,6 +14,8 @@ struct SnxCtrSource {
     int fd;
     const unsigned char* map;
     uint64_t size, mtime;
+    uint64_t base; /* where the game lies in the mapped file: a bundle's entry (ctr_tar_game), else 0, and the
+                      spans the parsed source holds are relative to it */
     CtrSource source;
 };
 /* the host's modification time of path, UTC Unix milliseconds, as fs_tree_mtime reads it; 0 when it can't say */
@@ -83,6 +85,7 @@ SnxCtrExtractResult snx_ctr_source_open(const char* input, SnxCtrSource** out, c
     /* a CIA's contents' hashes, which the extraction checks as it copies them; a cartridge image and a bare NCCH
        have no content table, and their own headers' and superblocks' hashes are already checked */
     if (c->source.kind == CTR_KIND_CIA && !ctr_cia_contents(&r, &c->source, NULL)) goto done;
+    c->base = r.base; /* the container may be a bundle's entry: the views below read from it */
 done:
     if (r.result == SNX_CTR_EXTRACT_OK)
         *out = c;
@@ -108,7 +111,7 @@ const unsigned char* snx_ctr_source_exefs(const SnxCtrSource* c, const char* nam
     for (size_t i = 0; i < 10; ++i)
         if (*n->names[i] && !strcmp(n->names[i], name)) {
             *size = n->files[i].size;
-            return c->map + n->files[i].offset;
+            return c->map + c->base + n->files[i].offset;
         }
     *size = 0;
     return NULL;
@@ -116,5 +119,5 @@ const unsigned char* snx_ctr_source_exefs(const SnxCtrSource* c, const char* nam
 const unsigned char* snx_ctr_source_romfs(const SnxCtrSource* c, uint64_t* size) {
     const CtrNcch* n = game_ncch(c);
     *size = n->level3.size;
-    return *size ? c->map + n->level3.offset : NULL;
+    return *size ? c->map + c->base + n->level3.offset : NULL;
 }

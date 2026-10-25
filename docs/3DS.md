@@ -22,7 +22,8 @@
 ## Status: stage 1 + stage 2a + stages 2b1–2b4 + initial 3a/3b/FS
 
 `scarletnx-3ds` runs **application games** — a `.cia`, a cartridge image
-(`.cci`, `.3ds`), or a bare NCCH (`.cxi`, an `.app`, homebrew's `.hbb`) — through
+(`.cci`, `.3ds`), a bare NCCH (`.cxi`, an `.app`, homebrew's `.hbb`), or a bundle
+of one (`.bcci`, `.bcxi`, `.bcia`) — through
 **offline static AOT -> native module -> checked ARM/Thumb execution**,
 with the compiler built into the driver. A launch reuses a finished extraction
 and module and runs until the game exits or its window closes (or for `--seconds N`,
@@ -45,7 +46,10 @@ an older version kept in `work/3ds/<the game's name>` moves into its new folder 
 first time it is played, its module and hints renamed.
 
 What a file holds is read from its own header, not its name: a CIA's magic at 0, an
-NCSD's at 0x100, a bare NCCH's at 0x100 (`src/3ds/loader/loader.c`). A cartridge
+NCSD's at 0x100, a bare NCCH's at 0x100 (`src/3ds/loader/loader.c`). A bundle is a
+tar whose game is its first entry named as a game's, read where it lies in the
+archive (`src/3ds/loader/tar.c`), each header held to its checksum and no entry's
+data read past the archive's end. A cartridge
 image's game is its NCSD partition 0, and the whole image is read where it lies (the
 loader takes a card-sized image, up to 8 GiB, since nothing of it is written). A
 cartridge whose partitions carry the game's update title (the base title ID with the
@@ -73,7 +77,7 @@ supported yet. An encrypted cartridge image or bare NCCH has no CIA layer: its
 NCCHs' own layer is taken off where each NCCH lies (the game partition and an update
 partition both), and the whole image copied through into the copy beside the title's
 folder (`<folder>.decrypted.cci`), named by the input's extension, then checked as
-any image is. A copy of a card-sized image takes its size in disk, and an
+any image is (a bundle's copy is the bare game, read from then on by its content). A copy of a card-sized image takes its size in disk, and an
 already-decrypted image is read as it is.
 
 Code the static discovery misses (an indirect call's target, a return into it)
@@ -475,7 +479,8 @@ build/3ds/scarletnx-3ds -x --output work/my-title game.cia
 The output is a directory containing `contents/*.app`, `exefs/` (with
 expanded/page-padded `.code`), `romfs/`, raw container/NCCH/ExHeader metadata and
 `manifest.ini` with source/code hashes and segment layout (a CIA's `contents/` and
-container metadata; a cartridge image's and a bare NCCH's without them). The default directory
+container metadata; a cartridge image's, a bare NCCH's and a bundle's without them,
+a bundle's game read from its entry). The default directory
 is the game's folder, `recompiled/<title ID>`, in the data folder the Switch driver uses
 (`--data DIR`, else a portable copy's folder, else the user's data folder, from a
 build tree too). On Linux the user's data folder keeps `work/` (the decrypted CIAs)
@@ -632,6 +637,11 @@ constants from `src/core/core_timing.h`, and the system-initialization design in
 title_metadata,ticket,signature,ncch_container}.*`, `src/core/loader/ncch.cpp`
 and `src/core/hle/romfs.cpp`. The bounded BLZ implementation credits the
 Citra/Azahar algorithm; the extractor and page controller are new C code.
+The bundle support (`src/3ds/loader/tar.c`) reads Azahar's `TarArchive`
+(`common/tar_file.cpp`, GPL-3.0-or-later) for what a bundle is taken to be: a ustar
+archive, the game its first entry named as a game's, hidden and non-file entries
+skipped, and duplicate names refused; the reader is new C code over the POSIX
+header layout.
 The cartridge-image support (`src/3ds/loader/ncsd.c`, the container
 dispatch, the update overlay) reads `ncch_container.cpp`'s `AutoOpenNCCHNCSD`,
 `LoadHeader` and `is_proto`, and `loader/ncch.cpp`'s `OpenUpdateNCCH`,

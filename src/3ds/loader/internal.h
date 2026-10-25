@@ -18,6 +18,8 @@ typedef struct {
 typedef struct {
     FILE* input;
     const unsigned char* map; /* the input mapped (snx_ctr_source_open), read in place of input */
+    uint64_t base; /* where the game lies in the input: a bundle's entry (ctr_tar_game), else 0. Every span and
+                      the whole-file reads are relative to it */
     uint64_t size, output_bytes;
     size_t entries;
     SnxCtrExtractResult result;
@@ -115,4 +117,10 @@ bool ctr_ncch_extract(CtrReader* r, const CtrSource* s, const char* stage);
 /* The RomFS section's level 3 and its metadata walked as the extraction walks it, its files copied into
    stage/romfs, or with stage NULL only checked */
 bool ctr_romfs_check(CtrReader* r, CtrSpan romfs, const char* stage, CtrSpan* level3);
+/* Whether the input is a tar bundle holding the game, and which bytes of it are the game's: a bundle is what
+   Azahar's .bcci/.bcxi/.bcia is, a tar of a game file beside what a publisher's note is, and the game is its
+   first entry whose name is a game's (a .cia, .cci, .3ds, .cxi, .app or .hbb). True, the reader continuing either
+   way: not a tar (*is_tar false, the reader untouched), or a bundle whose game is at r->base and r->size (*is_tar
+   true). False with the reader's error set: a malformed bundle, or one holding no game */
+bool ctr_tar_game(CtrReader* r, bool* is_tar);
 #endif

@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from ctr_fixtures import NONE, ncsd, ncch, put, titled, UPDATE_TITLE
+from ctr_fixtures import NONE, cia, ncsd, ncch, put, tar, titled, UPDATE_TITLE
 
 
 def main():
@@ -123,6 +123,46 @@ def main():
                 put(h, offset, '<I', value)
 
             both(ncsd(patch=patch), f'header-mutant-{i}')
+        # a bundle holds the game beside what a publisher's note is, and its game is read where it lies: a
+        # cartridge image's, a CIA's, and one whose game entry is not the first
+        game = ncch()
+        assert both(tar(('game.cci', ncsd(game=game)), ('readme.txt', b'thanks for playing')), 'bundle',
+                    extension='bcci')[0] == 0
+        assert both(tar(('note.txt', b'a note'), ('game.cia', cia())), 'bundle-cia', extension='bcia')[0] == 0
+        # a bare NCCH in a bundle, as a .bcxi
+        assert both(tar(('game.cxi', game)), 'bundle-cxi', extension='bcxi')[0] == 0
+        # an entry named as a game whose content is none: refused, as Azahar's first-name-match is, whatever the
+        # content's own refusal says
+        status, text = both(tar(('game.cci', b'not a game'), ('real.cci', ncsd())), 'bundle-not-game',
+                            extension='bcci')
+        assert status and text, text
+        # refusals: no game entry, two entries of one name, a wrong checksum, an entry cut short
+        status, text = both(tar(('note.txt', b'a note'), ('other.txt', b'another')), 'bundle-no-game',
+                            extension='bcci')
+        assert status == 3 and 'holds no game' in text, text
+        status, text = both(tar(('game.cci', ncsd()), ('game.cci', ncsd())), 'bundle-duplicate', extension='bcci')
+        assert status == 1 and 'two entries named' in text, text
+
+        def break_checksum(blob):
+            blob[148] = (blob[148] + 1) % 128
+
+        status, text = both(tar(('game.cci', ncsd()), patch=break_checksum), 'bundle-checksum', extension='bcci')
+        assert status == 1 and 'checksum' in text, text
+        # an entry's data cut short is refused, while a byte of the trailing zero padding missing is not, as no
+        # entry is the less whole for it
+        whole = tar(('game.cci', ncsd()))
+        status, text = both(bytes(whole[:-1]), 'bundle-cut-pad', extension='bcci')
+        assert status == 0, text
+        status, text = both(whole[:-1024], 'bundle-cut-data', extension='bcci')
+        assert status == 1 and 'ends inside an entry' in text, text
+        # mutation smoke tests over the bundle
+        rng = random.Random(0x54415221)
+        for i in range(24):
+            mutant = bytearray(tar(('game.cci', ncsd())))
+            for _ in range(1 + i % 4):
+                at = rng.randrange(len(mutant))
+                mutant[at] ^= 1 << rng.randrange(8)
+            both(bytes(mutant), f'bundle-mutant-{i}', extension='bcci')
         assert not list(root.rglob('.snx-*'))
     print(f'CCI and NCCH read where it lies: {checked} images accepted and refused as their extraction, '
           'the update partition played as the update')

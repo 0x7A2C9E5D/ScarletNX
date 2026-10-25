@@ -427,6 +427,9 @@ static bool decrypt(CtrReader* r, const char* keys_path, const char* output, boo
         ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "truncated or out-of-range archive section");
         goto done;
     }
+    /* a bundle first: the game is one of its entries, and the layers come off that entry */
+    bool tar = false;
+    if (!ctr_tar_game(r, &tar)) goto done;
     if (!ctr_read(r, (CtrSpan){0, r->size}, 0, header, sizeof header)) goto done;
     /* A cartridge image and a bare NCCH have no CIA layer: their NCCHs' own is the same layer the CIA's contents
        carry, taken off where each NCCH lies, and the whole image copied through with it */
