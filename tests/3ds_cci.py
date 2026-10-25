@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from ctr_fixtures import NONE, cia, ncsd, ncch, put, tar, titled, UPDATE_TITLE
+from ctr_fixtures import NONE, cia, ncsd, ncch, put, tar, titled, UPDATE_TITLE, z3ds
 
 
 def main():
@@ -56,6 +56,11 @@ def main():
             assert 'state=extracted' in text, text
             return text
 
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('ctr_decrypt_test', Path(__file__).parent / '3ds_decrypt.py')
+        decrypt_helpers = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(decrypt_helpers)
+        enc_image = decrypt_helpers.encrypt_ncch(ncch())
         update_header, update_exheader = titled(UPDATE_TITLE)
         update = ncch(patch_header=update_header, patch_exheader=update_exheader)
         other_header, other_exheader = titled(UPDATE_TITLE + 1)
@@ -163,6 +168,43 @@ def main():
                 at = rng.randrange(len(mutant))
                 mutant[at] ^= 1 << rng.randrange(8)
             both(bytes(mutant), f'bundle-mutant-{i}', extension='bcci')
+        # A z3ds game, what Azahar's launcher keeps one in, is unpacked once into the plain container beside the
+        # title's folder and read from then on. The probe reads the plain container, so these are the driver's
+        # alone: the extraction of the unpacked game is the plain image's
+        def alone(blob, name, extension, keys=None, status=0, message=None):
+            source, out = root / f'{name}.{extension}', root / name
+            source.write_bytes(blob)
+            env2 = {**os.environ, 'HOME': str(root), 'USERPROFILE': str(root)}
+            args = [driver, '-x', '--output', str(out), str(source)]
+            if keys:
+                args += ['--keys', str(keys)]
+            p = subprocess.run(args, capture_output=True, text=True, timeout=60, env=env2)
+            text = p.stdout + p.stderr
+            assert p.returncode == status, (name, p.returncode, text)
+            assert 'AddressSanitizer' not in text and 'runtime error:' not in text, text
+            if message:
+                assert message in text, (name, text)
+            source.unlink()
+            return out, text
+
+        def files(folder):
+            return {p2.relative_to(folder).as_posix(): p2.read_bytes() for p2 in sorted(folder.rglob('*')) if p2.is_file()}
+
+        plain_image = ncsd()
+        out, _ = alone(plain_image, 'zcci-plain', 'cci')
+        want = files(out)
+        _, text = alone(z3ds(plain_image), 'zcci-game', 'zcci', message='Unpacked')
+        assert files(root / 'zcci-game') == want, text
+        assert (root / 'zcci-game.unpacked.cci').read_bytes() == plain_image, text
+        alone(z3ds(plain_image), 'zcci-game', 'zcci', message='Using the unpacked game')
+        # an encrypted one is unpacked, then decrypted, and without the keys it is the decryption that refuses
+        alone(z3ds(enc_image), 'zcci-encrypted', 'zcci', status=3, message='no 3DS keys')
+        # a stream that is not the game its header says, and one whose version no reader takes
+        alone(z3ds(b'not a game at all'), 'zcci-garbage', 'zcci', status=1)  # whatever the content's own refusal says
+        alone(z3ds(plain_image, patch_header=lambda h: put(h, 8, '<B', 2)), 'zcci-version', 'zcci', status=3,
+              message='unsupported z3ds version')
+        short = bytearray(z3ds(plain_image))
+        status, _ = alone(bytes(short[:-1]), 'zcci-cut', 'zcci', status=1)
         assert not list(root.rglob('.snx-*'))
     print(f'CCI and NCCH read where it lies: {checked} images accepted and refused as their extraction, '
           'the update partition played as the update')

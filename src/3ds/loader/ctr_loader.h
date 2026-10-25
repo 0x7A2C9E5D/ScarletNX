@@ -49,6 +49,10 @@ const unsigned char* snx_ctr_source_romfs(const SnxCtrSource* source, uint64_t* 
    refused */
 SnxCtrExtractResult snx_ctr_decrypt(const char* input, const char* keys, const char* output, bool* encrypted,
                                     char* error, size_t error_size);
+/* A z3ds game (what Azahar's launcher keeps a game in, a .zcci, .zcxi or .zcia) unpacked into the plain container
+   the loader reads, published only complete. The input must be a z3ds file; the output is its game's bytes, to be
+   identified as any game is */
+SnxCtrExtractResult snx_ctr_unzstd(const char* input, const char* output, char* error, size_t error_size);
 /* ExeFS backward LZSS/BLZ, exact bounded expansion; output_size is authoritative.
    The input and output buffers must not overlap. */
 bool snx_ctr_blz(const unsigned char* input, size_t input_size, unsigned char* output, size_t output_size);

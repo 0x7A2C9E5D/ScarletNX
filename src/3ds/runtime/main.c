@@ -71,7 +71,7 @@ static void usage(FILE* out) {
    mistyped path and the GUI's filter, not the identification: .app and .hbb are NCCHs a manual and the Homebrew
    Launcher keep, .cci and .3ds cartridge images */
 static const char* const game_extensions[] = {".cia", ".cci", ".3ds", ".cxi", ".app", ".hbb",
-                                              ".bcci", ".bcxi", ".bcia"};
+                                              ".bcci", ".bcxi", ".bcia", ".zcci", ".zcxi", ".zcia"};
 static bool game_path(const char* path) {
     size_t n = strlen(path);
     for (size_t i = 0; i < sizeof game_extensions / sizeof *game_extensions; ++i) {
@@ -126,17 +126,47 @@ static char* default_keys(void) {
     free(folder);
     return keys;
 }
-/* The game the driver reads: input itself when nothing in it is encrypted, else its decryption, made once with the
-   keys beside the title's folder (<folder>.decrypted.cia for a CIA, <folder>.decrypted.cci for a cartridge image,
-   published only complete) and read from then on. *path is the caller's */
+/* whether the file is a z3ds one, by its magic: what Azahar's launcher keeps a game in */
+static bool is_z3ds(const char* path) {
+    unsigned char magic[4];
+    FILE* f = path ? fopen(path, "rb") : NULL;
+    bool z = f && fread(magic, 1, sizeof magic, f) == sizeof magic && !memcmp(magic, "Z3DS", 4);
+    if (f) fclose(f);
+    return z;
+}
+/* The game the driver reads: a z3ds game unpacked once into <folder>.unpacked.<its container's extension>, then an
+   encrypted game decrypted once into <folder>.decrypted.<its extension>, both beside the title's folder, published
+   only complete, and read from then on. *path is the caller's */
 static int readable_game(const char* input, const char* folder, const char* keys, char** path) {
-    char* suffix = snx_format(".decrypted.%s", strrchr(input, '.') ? strrchr(input, '.') + 1 : "game");
+    char *unpacked = NULL, *suffix = snx_format(".decrypted.%s", strrchr(input, '.') ? strrchr(input, '.') + 1 : "game");
     char* decrypted = suffix ? snx_format("%s%s", folder, suffix) : NULL;
     char *parent = snx_dirname(folder), *found = NULL;
     char error[512], why[256];
     int status = 1;
     *path = NULL;
     if (!decrypted || !parent) goto done;
+    if (is_z3ds(input)) {
+        const char* ext = strrchr(input, '.');
+        unpacked = snx_format("%s.unpacked.%s", folder, ext && ext[1] == 'z' ? ext + 2 : "game");
+        if (!unpacked) goto done;
+        if (snx_is_file(unpacked)) {
+            printf("Using the unpacked game %s\n", unpacked);
+        } else {
+            SnxCtrExtractResult made = snx_ctr_unzstd(input, unpacked, error, sizeof error);
+            if (made != SNX_CTR_EXTRACT_OK) {
+                fprintf(stderr, "scarletnx-3ds: %s\n", error);
+                status = made == SNX_CTR_EXTRACT_UNSUPPORTED ? 3 : 1;
+                goto done;
+            }
+            printf("Unpacked %s into %s\n", input, unpacked);
+        }
+        input = unpacked;
+        free(suffix);
+        suffix = snx_format(".decrypted.%s", strrchr(input, '.') ? strrchr(input, '.') + 1 : "game");
+        free(decrypted);
+        decrypted = suffix ? snx_format("%s%s", folder, suffix) : NULL;
+        if (!decrypted) goto done;
+    }
     if (snx_is_file(decrypted)) {
         printf("Using the decrypted copy %s\n", decrypted);
         *path = decrypted, decrypted = NULL;
@@ -163,6 +193,7 @@ done:
     free(found);
     free(parent);
     free(decrypted);
+    free(unpacked);
     free(suffix);
     return status;
 }

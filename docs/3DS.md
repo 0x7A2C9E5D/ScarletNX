@@ -22,8 +22,8 @@
 ## Status: stage 1 + stage 2a + stages 2b1–2b4 + initial 3a/3b/FS
 
 `scarletnx-3ds` runs **application games** — a `.cia`, a cartridge image
-(`.cci`, `.3ds`), a bare NCCH (`.cxi`, an `.app`, homebrew's `.hbb`), or a bundle
-of one (`.bcci`, `.bcxi`, `.bcia`) — through
+(`.cci`, `.3ds`), a bare NCCH (`.cxi`, an `.app`, homebrew's `.hbb`), a bundle of
+one (`.bcci`, `.bcxi`, `.bcia`), or a z3ds one (`.zcci`, `.zcxi`, `.zcia`) — through
 **offline static AOT -> native module -> checked ARM/Thumb execution**,
 with the compiler built into the driver. A launch reuses a finished extraction
 and module and runs until the game exits or its window closes (or for `--seconds N`,
@@ -49,7 +49,11 @@ What a file holds is read from its own header, not its name: a CIA's magic at 0,
 NCSD's at 0x100, a bare NCCH's at 0x100 (`src/3ds/loader/loader.c`). A bundle is a
 tar whose game is its first entry named as a game's, read where it lies in the
 archive (`src/3ds/loader/tar.c`), each header held to its checksum and no entry's
-data read past the archive's end. A cartridge
+data read past the archive's end. A z3ds game is Azahar's launcher's compressed one:
+its frames are decompressed once into the plain container beside the title's folder
+(`<folder>.unpacked.cci`, named by the input's extension without its z) and read from
+then on as that container is (`src/3ds/loader/z3ds.c`), the stream held to the size
+its header declares. A cartridge
 image's game is its NCSD partition 0, and the whole image is read where it lies (the
 loader takes a card-sized image, up to 8 GiB, since nothing of it is written). A
 cartridge whose partitions carry the game's update title (the base title ID with the
@@ -637,6 +641,11 @@ constants from `src/core/core_timing.h`, and the system-initialization design in
 title_metadata,ticket,signature,ncch_container}.*`, `src/core/loader/ncch.cpp`
 and `src/core/hle/romfs.cpp`. The bounded BLZ implementation credits the
 Citra/Azahar algorithm; the extractor and page controller are new C code.
+The z3ds support (`src/3ds/loader/z3ds.c`) reads Azahar's `Z3DSWriteIOFile` and
+`Z3DSReadIOFile` (`common/file_derived.{h,cpp}`, GPL-3.0-or-later) for the container's
+header and its zstd seekable stream, whose frames a streaming decompressor takes in
+order and whose seek-table footer is the skippable frame it skips; the unpacker is new
+C code over zstd's own streaming API.
 The bundle support (`src/3ds/loader/tar.c`) reads Azahar's `TarArchive`
 (`common/tar_file.cpp`, GPL-3.0-or-later) for what a bundle is taken to be: a ustar
 archive, the game its first entry named as a game's, hidden and non-file entries
