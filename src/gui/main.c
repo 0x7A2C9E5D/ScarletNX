@@ -266,6 +266,8 @@ typedef struct App {
     char aot_build_opt;  /* the launcher's opt setting, one char */
     int aot_match;         /* the cache's level is the build's */
     Uint64 aot_checked;    /* when aot_focus was looked at */
+    SnxGameMade made;      /* how the focused game's code was made, its stamp's made line (unknown: opt 0) */
+    bool made_here;        /* this build made it with the mods it plays: false, Play compiles it first */
     /* the Debug settings a run of the focused row takes off their default (game_debug), for its path, owned, as it
        was looked at */
     char debug_focus[1024], *debug_path;
@@ -5265,6 +5267,26 @@ static int games_queued(App* app, GuiRect r, int y) {
     y += wrap_in(app, r, r.x, y, snx_tr("R on another game: it joins the queue"), 0, soft) * cell_h(app);
     return y - top;
 }
+/* how a game's code was made, as the side panel says it: its -O, and the share of the modules' code the analysis made
+   ahead of time, or JIT only; ? for what its stamp does not say (an older version's) */
+static void made_text(const SnxGameMade* m, char* out, size_t size) {
+    char share[32];
+    if (!m->opt) {
+        snprintf(out, size, "%s", snx_tr("Made with: ?"));
+        return;
+    }
+    if (!m->aot) {
+        snprintf(out, size, snx_tr("Made with: O%c, JIT only"), m->opt);
+        return;
+    }
+    if (!m->code)
+        snprintf(share, sizeof share, "?");
+    else if (m->found && m->found * 100 < m->code)
+        snprintf(share, sizeof share, "<1%%");
+    else
+        snprintf(share, sizeof share, "%llu%%", m->found * 100 / m->code);
+    snprintf(out, size, snx_tr("Made with: O%c, AOT %s of the code"), m->opt, share);
+}
 static void draw_games(App* app) {
     GuiGamesBoxes g;
     GuiRect r;
@@ -5294,6 +5316,13 @@ static void draw_games(App* app) {
         if (app->debug_focus[0]) { /* what the game will say over its picture */
             snprintf(line, sizeof line, snx_tr("Debug on: %s"), app->debug_focus);
             y += wrap_in(app, r, r.x, y, line, 0, failure) * cell_h(app);
+        }
+        if (app->aot_focus) { /* a recompiled game's: how its code was made, and whether Play makes it again first */
+            made_text(&app->made, line, sizeof line);
+            y += wrap_in(app, r, r.x, y, line, 0, soft) * cell_h(app);
+            if (!app->made_here)
+                y += wrap_in(app, r, r.x, y, snx_tr("Needs Recompile: Play compiles it first"), 0, failure) *
+                     cell_h(app);
         }
         if (app->aot_state == GUI_AOT_CACHE) {
             char size[32];
@@ -11176,8 +11205,12 @@ static void aot_clear_focus(App* app) {
     app->aot_checked = 0;
     app->aot_match = 0;
     memset(&app->aot_info, 0, sizeof app->aot_info);
+    app->made = (SnxGameMade){0, -1, 0, 0};
+    app->made_here = true;
 }
-/* the focused game's cache, for the side panel and the B key: looked at again when the focus moves or a second passes */
+static bool made_here(const char* program);
+/* the focused game's cache, for the side panel and the B key, and how its code was made and whether this build plays
+   it as it is: looked at again when the focus moves or a second passes */
 static void aot_status_update(App* app) {
     AotFocus f = {0};
     GuiAotInfo info = {0};
@@ -11203,6 +11236,12 @@ static void aot_status_update(App* app) {
     app->aot_info = info;
     app->aot_state = state;
     app->aot_match = 0;
+    {
+        char* base = snx_path_join(f.folder, f.name);
+        snx_game_made_read(base, &app->made);
+        free(base);
+    }
+    app->made_here = made_here(f.path);
     if (state == GUI_AOT_CACHE) {
         opt = aot_build_opt(app);
         app->aot_build_opt = opt && opt[0] ? opt[0] : '2';

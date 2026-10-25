@@ -7366,6 +7366,51 @@ int main(int argc, char** argv) {
             free(checked);
             job_done(&app, 0);
             launcher(&app, false);
+            { /* how a game's code was made, as the side panel says it: its -O and the share of the code made ahead of
+                 time from its stamp's made line, JIT only, and ? for what a stamp from before it does not say */
+                char line[128];
+                SnxGameMade m = {0, -1, 0, 0};
+                made_text(&m, line, sizeof line);
+                assert(!strcmp(line, "Made with: ?"));
+                m = (SnxGameMade){'3', 1, 812345, 1003210};
+                made_text(&m, line, sizeof line);
+                assert(!strcmp(line, "Made with: O3, AOT 80% of the code"));
+                m = (SnxGameMade){'2', 1, 1, 1000};
+                made_text(&m, line, sizeof line);
+                assert(!strcmp(line, "Made with: O2, AOT <1% of the code"));
+                m = (SnxGameMade){'2', 1, 0, 0}; /* a 32-bit game's */
+                made_text(&m, line, sizeof line);
+                assert(!strcmp(line, "Made with: O2, AOT ? of the code"));
+                m = (SnxGameMade){'0', 0, 0, 4096};
+                made_text(&m, line, sizeof line);
+                assert(!strcmp(line, "Made with: O0, JIT only"));
+            }
+            { /* the focused game's side panel: made with what its stamp says, and Needs Recompile, in the failure
+                 colour, once its stamp is another ABI's (Play compiles it first, as made_here says) */
+                char *stamp = snx_format("%s.abi", base),
+                     *text = snx_format("%u\nmade opt=3 aot=1 found=1 code=2\n", (unsigned)SNX_ABI);
+                assert(!snx_write_file(stamp, text, strlen(text)));
+                go_tab(&app, GUI_TAB_GAMES);
+                focus_game(&app, "0100ABCD12340000");
+                aot_clear_focus(&app);
+                render(&app);
+                assert(app.made.opt == '3' && app.made.aot == 1 && app.made.code == 2 && app.made_here);
+                assert(find_text(&app, "Made with: O3", rgb(app.theme.soft), 1, &nx, &ny));
+                assert(!find_text(&app, "Needs Recompile", rgb(app.theme.failure), 1, &nx, &ny));
+                free(text);
+                text = snx_format("%u", (unsigned)SNX_ABI + 1);
+                assert(!snx_write_file(stamp, text, strlen(text)));
+                aot_clear_focus(&app);
+                render(&app);
+                assert(!app.made.opt && !app.made_here);
+                assert(find_text(&app, "Made with: ?", rgb(app.theme.soft), 1, &nx, &ny));
+                assert(find_text(&app, "Needs Recompile", rgb(app.theme.failure), 1, &nx, &ny));
+                stamp_here(own, "0100ABCD12340000");
+                aot_clear_focus(&app);
+                free(text);
+                free(stamp);
+                go_tab(&app, GUI_TAB_MENU); /* off Games, which lists its folders again as it shows next */
+            }
             assert(!snx_remove_tree(own));
             free(own);
             free(base);

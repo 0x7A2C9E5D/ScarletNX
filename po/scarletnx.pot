@@ -1664,8 +1664,26 @@ msgid "R on another game: it joins the queue"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Made with: ?"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Made with: O%c, JIT only"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Made with: O%c, AOT %s of the code"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "Debug on: %s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Needs Recompile: Play compiles it first"
 msgstr ""
 
 #: src/gui/main.c
