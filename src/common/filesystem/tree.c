@@ -709,8 +709,8 @@ static int named(const char* const* names, const char* name) {
         if (!strcmp(names[i], name)) return 1;
     return 0;
 }
-/* The initial scan uses native directory APIs because PDir cannot distinguish end-of-directory from failures,
-   and its POSIX implementation follows symlinks and skips failed stats. Neither behavior can build a full index.
+/* The initial scan uses native directory APIs: a full index has to tell the end of a folder from a failure to read
+   it, and must not follow symlinks or skip entries whose stat failed.
    host's entries named in skipped are left out, as if they weren't there; its folders' are all scanned */
 static FsTreeResult scan_directory(FsTree* tree, FsNode* parent, char* host, unsigned depth,
                                    const char* const* skipped) {

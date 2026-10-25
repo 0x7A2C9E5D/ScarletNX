@@ -27,6 +27,14 @@ if(NOT CMAKE_C_COMPILER_ID MATCHES "^(Apple)?Clang$" OR NOT CMAKE_CXX_COMPILER_I
                         "(${CMAKE_C_COMPILER}). Use a preset, or -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ "
                         "in a new build folder.")
 endif()
+# The Apple apps are what `cmake --install` makes (cmake/apple_package.cmake): on macOS the prefix is ScarletNX.app's
+# Contents, the programs in its MacOS/ and share/ beside them; on iOS share/ goes in the app the build makes. Over
+# GNUInstallDirs' defaults, which a build folder configured before keeps in its cache
+if(IOS AND NOT CMAKE_INSTALL_DATADIR)
+    set(CMAKE_INSTALL_DATADIR scarletnx.app/share)
+elseif(APPLE AND NOT IOS AND (NOT CMAKE_INSTALL_BINDIR OR CMAKE_INSTALL_BINDIR STREQUAL "bin"))
+    set(CMAKE_INSTALL_BINDIR MacOS)
+endif()
 # the CPU baseline (POWER8 on PowerPC64) and a Linux cross build's target and sysroot, for FFmpeg, OpenSSL and the
 # recompiler's runtime library
 include(cmake/cross.cmake)
@@ -233,7 +241,7 @@ add_subdirectory(tools)
 # `cmake --install` puts the runtime, the desktop entry and the licenses under CMAKE_INSTALL_PREFIX, which is
 # what the AppImage and the CI artifacts are made from (.github/workflows/build.yml)
 include(GNUInstallDirs)
-if(IOS) # the app itself (dist/apple), which scripts/ios-app.sh packs
+if(IOS) # the app itself (dist/apple), which cmake/apple_package.cmake packs
     install(TARGETS scarletnx BUNDLE DESTINATION .)
 elseif(NOT ANDROID) # src/nx puts Android's in the app's libraries
     install(TARGETS scarletnx RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -288,4 +296,7 @@ if(TARGET hactool_lib)
     string(SUBSTRING "${cjson}" 0 ${cjson_end} cjson)
     file(WRITE "${CMAKE_BINARY_DIR}/cJSON-LICENSE.txt" "${cjson}*/\n")
     install(FILES "${CMAKE_BINARY_DIR}/cJSON-LICENSE.txt" DESTINATION ${licenses}/hactool/cJSON RENAME LICENSE.txt)
+endif()
+if(APPLE) # the app's own files, its signature and CPack's package of it
+    include(cmake/apple_package.cmake)
 endif()
