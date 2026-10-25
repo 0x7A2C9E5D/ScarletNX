@@ -137,6 +137,11 @@ static void worker(Queue* q) {
         size_t i;
         int rc;
         lock(q);
+        if (snx_abort_requested() && !q->failed) {
+            q->failed = 1;
+            snprintf(q->error, sizeof(q->error), "aborted by the player, %zu of %zu code units compiled", q->done,
+                     q->count);
+        }
         if (q->failed || q->next == q->count) {
             unlock(q);
             return;

@@ -117,6 +117,7 @@ static struct {
     unsigned said_kinds;
     const char* renamed[16];
     size_t renamed_count;
+    volatile int abort_requested; /* snx_abort_request's, from another thread than the one that asks */
 } g_common;
 void snx_option_renamed(const char* old, const char* now) {
     size_t i;
@@ -1297,6 +1298,8 @@ unsigned snx_cpu_count(void) {
 }
 /* Code arenas (code_loader.c) reserve their address space once and give each page access only when it is used: the
    loader writes into read-write pages and makes them executable before anything jumps there */
+void snx_abort_request(int on) { g_common.abort_requested = on; }
+int snx_abort_requested(void) { return g_common.abort_requested; }
 size_t snx_vm_page_size(void) {
 #ifdef _WIN32
     SYSTEM_INFO info;
