@@ -1081,7 +1081,9 @@ static int check_rt_overlap(void) {
     memset(GP(tracked_cpu + 16), 0x39, 16);
     g_renderer->mem_may_have_changed();
     vk_lock();
-    CHECK(!vk_rt_drawn_fresh(target));
+    /* without write tracking the first query takes the target's pixels unhashed (vk_rt_drawn_fresh), so only a host
+       that tracks writes sees the CPU's */
+    if (vk_written_since(GP(tracked_cpu), 0x4000, 0) >= 0) CHECK(!vk_rt_drawn_fresh(target));
     vk_unlock();
     syncpt_free(fence);
     puts("Render target CPU fences: full reuse, partial edits, aliases and sparse mappings checked");
