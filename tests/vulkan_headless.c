@@ -548,6 +548,7 @@ static int check_flush_subnormal(void) {
 #define VIC_BASE (HEAP_BASE + 0x100000)
 static int check_vic(void) {
     enum { W = 32, H = 16, SENTINEL = 0xA5 };
+    u32 validation = g_vk_validation_messages; /* the job's first words are a uniform buffer (vk/vic.c, owned.c) */
     u8 *y = GP(VIC_BASE), *uv = GP(VIC_BASE + 0x1000), *out = GP(VIC_BASE + 0x2000);
     u64 lands = own_landings();
     for (u32 j = 0; j < H; ++j)
@@ -638,6 +639,7 @@ static int check_vic(void) {
     }
     /* each picture was read here: landed once, by the trap, where the host has traps */
     CHECK(!own_traps() || own_landings() >= lands + sizeof cases / sizeof cases[0]);
+    CHECK(g_vk_validation_messages == validation);
     return 0;
 }
 /* two jobs into the same output with no CPU access between: the second's picture outside its target rectangle is the
@@ -1005,6 +1007,13 @@ int main(int argc, char** argv) {
     g_settings.vulkan_video_decode = 1; /* a Vulkan Video decode queue where the device has one (lavapipe has none) */
     video_init("Headless Vulkan fixture", "");
     CHECK(g_opt_headless && g_renderer_up && g_vk.dev && !g_vk.surface && !g_vk.swapchain && !g_vk.sc_count);
+    if (getenv("SNX_TEST_VIC_ONLY")) { /* the validation test: VIC's bindings, none of the other checks' traffic */
+        CHECK(!check_vic());
+        CHECK(!check_vic_chain(shot));
+        CHECK(!check_nvdec_vic());
+        printf("PASS headless Vulkan VIC only: %u validation messages\n", g_vk_validation_messages);
+        return 0;
+    }
     CHECK(!check_hash_copy());
     CHECK(!check_staging_overflow());
     CHECK(!check_buffer_texture_rows());
