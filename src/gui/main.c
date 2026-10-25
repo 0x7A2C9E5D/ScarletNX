@@ -192,6 +192,17 @@ typedef struct {
     const char* keys;
     bool side, status, tips_foot;
 } GuiFrame;
+/* the folders of a recompiled game its box's Open Folder lists, in its order (the mods' and the cheats' have rows of
+   their own, beside Add Mod and Add Cheats) */
+enum {
+    GUI_FOLDER_DUMP,
+    GUI_FOLDER_GAME,
+    GUI_FOLDER_SAVES,
+    GUI_FOLDER_SETTINGS,
+    GUI_FOLDER_LOGS,
+    GUI_FOLDER_CACHES,
+    GUI_GAME_FOLDERS
+};
 typedef struct App {
     SDL_Window* window;
     SDL_Renderer* renderer;
@@ -344,6 +355,11 @@ typedef struct App {
        by, the game's addons= and mods_off= when it opened, then Play, which runs as recompile was when it opened */
     bool addons_shown, addons_recompile;
     int addons_focus;
+    /* Open Folder's page of the box over its rows, a folder of the game a row (GUI_FOLDER_*): each one's path, owned,
+       NULL for one not known; addons_back the box's focus to go back to */
+    bool addons_folders_shown;
+    char* addons_folders[GUI_GAME_FOLDERS];
+    int addons_back;
     char *addons_game, *addons_title; /* the game's path and what it is shown as */
     bool addons_debug;                /* it runs with a Debug setting off its default: its Play says so */
     GuiGames addons;
@@ -1899,7 +1915,8 @@ static const char* ask_question(App* app) {
         case GUI_ASK_FOLDER:
         case GUI_ASK_MOVE:
         case GUI_ASK_MADE:
-        case GUI_ASK_STATE: return app->ask_line;
+        case GUI_ASK_STATE:
+        case GUI_ASK_CACHE: return app->ask_line;
         case GUI_ASK_ERROR: return app->error_line;
         case GUI_ASK_CLOSE:
             if (!app->menu.running && !app->finished) return job_leaving(app);
@@ -2266,9 +2283,12 @@ static const char* const ask_choices[][2] = {{SNX_TR_NOOP("Continue"), SNX_TR_NO
                                              {SNX_TR_NOOP("Cancel"), SNX_TR_NOOP("Remove")},
                                              {SNX_TR_NOOP("Cancel"), SNX_TR_NOOP("Move")},
                                              {SNX_TR_NOOP("Cancel"), SNX_TR_NOOP("Delete")},
+                                             {SNX_TR_NOOP("Cancel"), SNX_TR_NOOP("Delete")},
                                              {SNX_TR_NOOP("Cancel"), SNX_TR_NOOP("Exit")},
                                              {SNX_TR_NOOP("Play"), SNX_TR_NOOP("Recompile")},
                                              {SNX_TR_NOOP("OK"), NULL}};
+/* a question added to GuiAsk takes its choices here, in its place */
+typedef char snx_gui_ask_choices[SDL_arraysize(ask_choices) == GUI_ASK_ERROR + 1 ? 1 : -1];
 /* the question shown, over the whole screen in the middle or at its foot, a choice asked twice saying so once pressed:
    how many choices it has, one for a failure's OK */
 static int ask_place(App* app, GuiChoices* c) {
@@ -3335,7 +3355,9 @@ static void users_pointer(App* app, float x, float y, bool click) {
    by, Add Mod and Add Cheats, each with its folder's Open; then Save, which keeps them in addons=, mods_off= and
    cheats_off=, and Play, which keeps them and plays the game with them, from the picked update's program, else its
    own ---- */
+static void addons_folders_free(App* app);
 static void addons_close(App* app) {
+    addons_folders_free(app);
     gui_games_free(&app->addons);
     free(app->addons_game);
     free(app->addons_title);
@@ -3354,14 +3376,20 @@ static void addons_close(App* app) {
     app->mods_count = 0;
     app->addons_shown = false;
 }
-/* folder as a file:// URL, owned: its bytes other than letters, digits and -._~/: written %XX, a \\ as / */
+/* folder as a URL the system's file manager opens, owned: file://, on iOS shareddocuments:// (the Files app's), its
+   bytes other than letters, digits and -._~/: written %XX, a \\ as / */
 static char* file_url(const char* folder) {
     static const char hex[] = "0123456789ABCDEF";
+#ifdef SDL_PLATFORM_IOS
+    static const char scheme[] = "shareddocuments://";
+#else
+    static const char scheme[] = "file://";
+#endif
     size_t n = strlen(folder), i, at = 0;
-    char* url = (char*)malloc(8 + 3 * n + 1);
+    char* url = (char*)malloc(sizeof scheme + 1 + 3 * n + 1);
     if (!url) return NULL;
-    memcpy(url, "file://", 7);
-    at = 7;
+    memcpy(url, scheme, sizeof scheme - 1);
+    at = sizeof scheme - 1;
     if (folder[0] != '/' && folder[0] != '\\') url[at++] = '/'; /* C:/... */
     for (i = 0; i < n; ++i) {
         unsigned char c = (unsigned char)folder[i];
@@ -3377,8 +3405,8 @@ static char* file_url(const char* folder) {
     url[at] = 0;
     return url;
 }
-/* folder opened in the system's file manager, made first when it isn't there: app->message says where it is, or why
-   it could not be opened */
+/* folder opened in the system's file manager (Android's and iOS's Files app), made first when it isn't there:
+   app->message says where it is, or why it could not be opened */
 static void show_folder(App* app, const char* folder) {
     char why[256], *url;
     if (snx_mkdirs(folder)) {
@@ -3386,6 +3414,13 @@ static void show_folder(App* app, const char* folder) {
                  snx_os_error(why, sizeof why));
         return;
     }
+#ifdef SDL_PLATFORM_ANDROID /* a file:// URL is no app's to open there: the Files app through MainActivity */
+    if (gui_android_open_folder(folder, why, sizeof why))
+        snprintf(app->message, sizeof app->message, snx_tr("Opened %s"), folder);
+    else
+        snprintf(app->message, sizeof app->message, snx_tr("Could not open %s: %s"), folder, why);
+    return;
+#endif
     url = file_url(folder);
     if (url && SDL_OpenURL(url))
         snprintf(app->message, sizeof app->message, snx_tr("Opened %s"), folder);
@@ -3428,16 +3463,18 @@ enum {
     ROW_MODS_FOLDER = -4,
     ROW_CHEATS_FOLDER = -5,
     ROW_ADD_MOD = -6,
-    ROW_ADD_CHEATS = -7
+    ROW_ADD_CHEATS = -7,
+    ROW_OPEN_FOLDER = -8,
+    ROW_CLEAN_CACHE = -9
 };
-/* the rows after the cheats: Add Mod and Add Cheats, each with its folder's Open after it, Save and Play */
-#ifdef SNX_TOUCH_UI /* a phone has no file manager to show a folder in */
-static const int addons_tail[] = {ROW_ADD_MOD, ROW_ADD_CHEATS, ROW_SAVE, ROW_PLAY};
-#else
-static const int addons_tail[] = {ROW_ADD_MOD, ROW_MODS_FOLDER, ROW_ADD_CHEATS, ROW_CHEATS_FOLDER, ROW_SAVE, ROW_PLAY};
-#endif
+/* the rows after the cheats: Add Mod and Add Cheats, each with its folder's Open after it, Open Folder (the game's other
+   folders), Clean Cache, Save and Play; on every system, a phone's Files app showing the folders */
+static const int addons_tail[] = {ROW_ADD_MOD,     ROW_MODS_FOLDER, ROW_ADD_CHEATS, ROW_CHEATS_FOLDER,
+                                  ROW_OPEN_FOLDER, ROW_CLEAN_CACHE, ROW_SAVE,       ROW_PLAY};
 #define ADDONS_TAIL ((int)SDL_arraysize(addons_tail))
+/* the box's rows; on Open Folder's page, a folder of the game's each */
 static int addons_rows(const App* app) {
+    if (app->addons_folders_shown) return GUI_GAME_FOLDERS;
     return (int)(app->addons.count + app->mods_count + app->cheats_count) + (addons_updates(app) ? 1 : 0) + ADDONS_TAIL;
 }
 /* what row is: its add-on's index in addons, a mod's (mods' index past addons' count), a cheat's (cheats' past the
@@ -3461,6 +3498,155 @@ static int addons_cheat(const App* app, int item) {
 }
 /* a cheat cheats_off= cannot name (a | in it), which runs whatever its box says */
 static bool cheat_kept(const App* app, int cheat) { return strchr(app->cheats[cheat], SNX_CHEATS_SEPARATOR) != NULL; }
+/* Open Folder's rows, GUI_FOLDER_*'s order */
+static const char* const game_folder_names[GUI_GAME_FOLDERS] = {SNX_TR_NOOP("Dump"),  SNX_TR_NOOP("Game"),
+                                                                SNX_TR_NOOP("Saves"), SNX_TR_NOOP("Settings"),
+                                                                SNX_TR_NOOP("Logs"),  SNX_TR_NOOP("Caches")};
+static void addons_folders_free(App* app) {
+    for (int i = 0; i < GUI_GAME_FOLDERS; ++i) {
+        free(app->addons_folders[i]);
+        app->addons_folders[i] = NULL;
+    }
+    app->addons_folders_shown = false;
+}
+/* why Open Folder's folder i cannot be opened now, in out (it is then greyed): not known, not there, or where the
+   system's file manager does not reach; "" when it can */
+static void addons_folder_off(const App* app, int i, char* out, size_t size) {
+    const char* path = app->addons_folders[i];
+    out[0] = 0;
+    if (!path)
+        snprintf(out, size, "%s", snx_tr("its dump is not known: the game was made before the recompile named it"));
+    else if (!snx_is_dir(path))
+        snprintf(out, size, snx_tr("%s is not there yet"), path);
+#ifdef SDL_PLATFORM_IOS /* the app's Library, where its settings, state and caches are, is not in it */
+    else if (!app->data_dir || !snx_path_within(path, app->data_dir))
+        snprintf(out, size, snx_tr("%s is out of the Files app's reach, which shows the app's Documents alone"), path);
+#endif
+}
+/* Open Folder: the game's folders as they are now, on its page, the box's focus kept to go back to */
+static void addons_folders_open(App* app) {
+    char *folder, *name, *base, *data, *dump;
+    int recorded = 0;
+    addons_folders_free(app);
+    addons_where(app, &folder, &name);
+    base = snx_path_join(folder, name);
+    data = snx_format("%s_data", base);
+    dump = snx_game_source(folder, name, &recorded);
+    app->addons_folders[GUI_FOLDER_DUMP] = recorded && dump ? snx_dirname(dump) : NULL;
+    app->addons_folders[GUI_FOLDER_GAME] = snx_strdup(folder);
+    app->addons_folders[GUI_FOLDER_SAVES] = snx_path_join(data, "save");
+    app->addons_folders[GUI_FOLDER_SETTINGS] = gui_game_kind_dir(folder, name, SNX_USER_CONFIG);
+    app->addons_folders[GUI_FOLDER_LOGS] = gui_game_kind_dir(folder, name, SNX_USER_STATE);
+    app->addons_folders[GUI_FOLDER_CACHES] = gui_game_kind_dir(folder, name, SNX_USER_CACHE);
+    free(dump);
+    free(data);
+    free(base);
+    free(folder);
+    free(name);
+    app->addons_back = app->addons_focus;
+    app->addons_focus = 0;
+    app->addons_folders_shown = true;
+}
+/* Open Folder's page left for the box's rows, as they were */
+static void addons_folders_close(App* app) {
+    addons_folders_free(app);
+    app->addons_focus = SDL_min(app->addons_back, addons_rows(app) - 1);
+}
+/* folder i of Open Folder's page opened, or why it cannot be */
+static void addons_folder_press(App* app, int i) {
+    char why[1024];
+    addons_folder_off(app, i, why, sizeof why);
+    if (why[0])
+        snprintf(app->message, sizeof app->message, "%s: %s", snx_tr(game_folder_names[i]), why);
+    else
+        show_folder(app, app->addons_folders[i]);
+}
+/* ---- Clean Cache: the game's shader cache (its cache folder's shader_cache/: the pipeline cache, the translated
+   shaders and those prepared ahead of time) and its code cache (<name>.jitcache), deleted when asked, each with its
+   size. The game makes both again as it runs; its saves, settings and dump stay ---- */
+/* the bytes of the files under path, a folder whole, links not followed */
+static uint64_t tree_bytes(const char* path) {
+    SDL_PathInfo info;
+    char** names = NULL;
+    size_t count = 0, i;
+    uint64_t total = 0;
+    if (snx_is_link(path) || !SDL_GetPathInfo(path, &info)) return 0;
+    if (info.type == SDL_PATHTYPE_FILE) return info.size;
+    if (info.type != SDL_PATHTYPE_DIRECTORY || snx_list_dir(path, &names, &count)) return 0;
+    for (i = 0; i < count; ++i) {
+        char* child = snx_path_join(path, names[i]);
+        if (child) total += tree_bytes(child);
+        free(child);
+    }
+    snx_free_strings(names, count);
+    return total;
+}
+/* the box's game's two caches, owned: [0] the shader cache's folder, [1] the code cache's file */
+static void game_caches(const App* app, char* caches[2]) {
+    char *folder, *name, *dir;
+    addons_where(app, &folder, &name);
+    dir = gui_game_kind_dir(folder, name, SNX_USER_CACHE);
+    caches[0] = dir ? snx_path_join(dir, "shader_cache") : NULL;
+    caches[1] = gui_aot_cache_path(folder, name);
+    free(dir);
+    free(folder);
+    free(name);
+}
+/* whether the box's game has a cache to delete */
+static bool caches_there(const App* app) {
+    char* caches[2];
+    bool any;
+    game_caches(app, caches);
+    any = (caches[0] && snx_path_exists(caches[0])) || (caches[1] && snx_path_exists(caches[1]));
+    free(caches[0]);
+    free(caches[1]);
+    return any;
+}
+/* Clean Cache pressed: what it deletes asked first (GUI_ASK_CACHE), each with its size; with none, why */
+static void caches_ask(App* app) {
+    char *caches[2], shader[32], code[32];
+    bool there[2];
+    game_caches(app, caches);
+    for (int i = 0; i < 2; ++i) there[i] = caches[i] && snx_path_exists(caches[i]);
+    if (!there[0] && !there[1])
+        snprintf(app->message, sizeof app->message, snx_tr("%s has no cache to delete: no %s, no %s"),
+                 app->addons_title, caches[0] ? caches[0] : "shader_cache/", caches[1] ? caches[1] : ".jitcache");
+    else {
+        gui_size_text(shader, sizeof shader, there[0] ? tree_bytes(caches[0]) : 0);
+        gui_size_text(code, sizeof code, there[1] ? tree_bytes(caches[1]) : 0);
+        snprintf(app->ask_line, sizeof app->ask_line,
+                 snx_tr("Delete the caches of %s? The shader cache, %s (%s), and the code cache, %s (%s). The game "
+                        "makes them again as it runs; its saves, settings and dump stay."),
+                 app->addons_title, there[0] ? shader : snx_tr("none"), caches[0] ? caches[0] : "shader_cache/",
+                 there[1] ? code : snx_tr("none"), caches[1] ? caches[1] : ".jitcache");
+        gui_confirm_open(&app->confirm, GUI_ASK_CACHE, false);
+    }
+    free(caches[0]);
+    free(caches[1]);
+}
+/* the deletion taken: each cache gone, the message saying what went, or what could not and why */
+static void caches_delete(App* app) {
+    char *caches[2], why[256], size[32];
+    uint64_t bytes = 0;
+    game_caches(app, caches);
+    app->message[0] = 0;
+    for (int i = 0; i < 2 && !app->message[0]; ++i) {
+        uint64_t these;
+        if (!caches[i] || !snx_path_exists(caches[i])) continue;
+        these = tree_bytes(caches[i]);
+        if (snx_remove_tree(caches[i]))
+            snprintf(app->message, sizeof app->message, snx_tr("Could not delete %s: %s"), caches[i],
+                     snx_os_error(why, sizeof why));
+        else
+            bytes += these;
+    }
+    if (!app->message[0]) {
+        gui_size_text(size, sizeof size, bytes);
+        snprintf(app->message, sizeof app->message, snx_tr("Deleted the caches of %s: %s"), app->addons_title, size);
+    }
+    free(caches[0]);
+    free(caches[1]);
+}
 /* the box of game, shown as title: with always (M) even when it has nothing beside it, its Add rows to give it some */
 static void addons_open(App* app, const char* game, const char* title, bool always) {
     char *folder, *name, *ini, *text;
@@ -3509,10 +3695,15 @@ static void addons_open(App* app, const char* game, const char* title, bool alwa
     app->addons_shown = true;
 }
 static void addons_label(const App* app, int row, char* label, size_t size) {
-    int item = addons_row(app, row);
+    int item;
     size_t i;
     bool none = true;
     char what[256]; /* a mod's or a cheat's name with its kind, as an update's and a DLC's are */
+    if (app->addons_folders_shown) { /* Open Folder's page */
+        snprintf(label, size, "%s%s", app->theme.marker, snx_tr(game_folder_names[row]));
+        return;
+    }
+    item = addons_row(app, row);
     for (i = 0; i < addons_updates(app); ++i) none = none && !app->addons_checked[i];
     if (addons_mod(app, item) >= 0) {
         snprintf(what, sizeof what, snx_tr("Mod %s"), app->mods[addons_mod(app, item)]);
@@ -3537,6 +3728,10 @@ static void addons_label(const App* app, int row, char* label, size_t size) {
         snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Add Cheats"));
     else if (item == ROW_CHEATS_FOLDER)
         snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Open Cheats Folder"));
+    else if (item == ROW_OPEN_FOLDER)
+        snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Open Folder"));
+    else if (item == ROW_CLEAN_CACHE)
+        snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Clean Cache"));
     else if (item == ROW_SAVE)
         snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Save"));
     else
@@ -3552,7 +3747,8 @@ typedef struct {
 } GuiAddonsBoxes;
 static void addons_boxes(App* app, GuiAddonsBoxes* d) {
     int i, s = app->scale, count = addons_rows(app);
-    int longest = SDL_max(16, (int)SDL_utf8strlen(app->addons_title) + 2);
+    int longest = SDL_max(16, (int)SDL_utf8strlen(app->addons_title) + 2 +
+                                  (app->addons_folders_shown ? 2 + gui_text_cols(snx_tr("Open Folder")) : 0));
     char label[160];
     for (i = 0; i < count; ++i) {
         addons_label(app, i, label, sizeof label);
@@ -3569,16 +3765,28 @@ static void addons_boxes(App* app, GuiAddonsBoxes* d) {
 /* Addons' row: an update's choice, a DLC's or a mod's box, Open Mods Folder, Save or Play (ui_draw_row puts the
    marker) */
 bool ui_addons_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
+    char why[1024];
     (void)width; /* a long name slides, as the menu's rows do */
     if (row >= (size_t)addons_rows(app)) return false;
     addons_label(app, (int)row, app->row_text, sizeof app->row_text);
     info->label = app->row_text + strlen(app->theme.marker);
+    /* greyed: a folder Open Folder cannot open, Clean Cache with none */
+    if (app->addons_folders_shown)
+        addons_folder_off(app, (int)row, why, sizeof why);
+    else
+        why[0] = addons_row(app, (int)row) == ROW_CLEAN_CACHE && !caches_there(app);
+    if (why[0]) info->attr |= UI_ATTR_OFF;
     return true;
 }
 static void render_addons(App* app) {
     GuiAddonsBoxes d;
+    char title[512];
     addons_boxes(app, &d);
-    over_box(app, d.box, app->addons_title);
+    if (app->addons_folders_shown)
+        snprintf(title, sizeof title, "%s: %s", app->addons_title, snx_tr("Open Folder"));
+    else
+        snprintf(title, sizeof title, "%s", app->addons_title);
+    over_box(app, d.box, title);
     ui_addons_draw(app, d.rects, app->scale, d.lists);
 }
 /* what is picked kept as the game's addons=, mods_off= and cheats_off=: 1, else 0 with app->message saying why. The
@@ -3955,14 +4163,28 @@ static void addons_picked(App* app, const char* picked, const char* error, bool 
 static void launch(App* app, char* absolute, bool prepared);
 /* row pressed: an update picked (the others not: one runs at a time), No update, a DLC's, a mod's or a cheat's box
    checked or not; Add Mod or Add Cheats, the picker, whose folder or file goes into the mods or cheats folder (mod_add,
-   cheats_add); Open Mods Folder or Open Cheats Folder, the folder opened; Save, the picks kept and the box closed; or
-   Play, the picks kept and the game played (or recompiled) through the driver, from the picked update's program. A
-   mod's exefs/ changes the program, which the driver recompiles before it plays */
+   cheats_add); Open Mods Folder or Open Cheats Folder, the folder opened; Open Folder, its page of the game's other
+   folders, one opened as it is pressed there; Clean Cache, the caches' deletion asked; Save, the picks kept and the box
+   closed; or Play, the picks kept and the game played (or recompiled) through the driver, from the picked update's
+   program. A mod's exefs/ changes the program, which the driver recompiles before it plays */
 static void addons_press(App* app, int row) {
-    int item = addons_row(app, row), selected = app->menu.selected;
+    int item, selected = app->menu.selected;
     size_t i;
     char* path;
     bool recompile = app->recompile;
+    if (app->addons_folders_shown) {
+        addons_folder_press(app, row);
+        return;
+    }
+    item = addons_row(app, row);
+    if (item == ROW_OPEN_FOLDER) {
+        addons_folders_open(app);
+        return;
+    }
+    if (item == ROW_CLEAN_CACHE) {
+        caches_ask(app);
+        return;
+    }
     if (addons_mod(app, item) >= 0) {
         app->mods_on[addons_mod(app, item)] = !app->mods_on[addons_mod(app, item)];
         return;
@@ -4019,6 +4241,8 @@ static void addons_key(App* app, GuiKey key) {
         app->addons_focus = (app->addons_focus + (key == GUI_UP ? count - 1 : 1)) % count;
     else if (key == GUI_SELECT)
         addons_press(app, app->addons_focus);
+    else if (key == GUI_CANCEL && app->addons_folders_shown) /* Open Folder's page: back to the box's rows */
+        addons_folders_close(app);
     else if (key == GUI_CANCEL)
         addons_close(app);
 }
@@ -10093,6 +10317,8 @@ static void change_answer(App* app, GuiAsk ask, bool taken) {
         folder_remove(app, app->folder_off);
     else if (ask == GUI_ASK_STATE)
         state_delete(app);
+    else if (ask == GUI_ASK_CACHE)
+        caches_delete(app);
 }
 /* the functions an AOT pack used, from the driver's line, -1 when it printed none */
 static int aot_built(const GuiSteps* steps) {
@@ -11979,7 +12205,7 @@ static void ask_key(App* app, GuiKey key) {
     else if (ask == GUI_ASK_TEXT)
         size_answer(app, second);
     else if (ask == GUI_ASK_CLEAN || ask == GUI_ASK_RESET || ask == GUI_ASK_PLACES || ask == GUI_ASK_PLACE ||
-             ask == GUI_ASK_FOLDER || ask == GUI_ASK_MOVE || ask == GUI_ASK_STATE)
+             ask == GUI_ASK_FOLDER || ask == GUI_ASK_MOVE || ask == GUI_ASK_STATE || ask == GUI_ASK_CACHE)
         change_answer(app, ask, second);
     else if (ask == GUI_ASK_CLOSE && second) { /* the run ends with the menu, the queue's recompile too */
         if (app->menu.running) abort_run(app);

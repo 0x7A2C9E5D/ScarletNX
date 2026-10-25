@@ -161,8 +161,18 @@ The copy goes into a hidden `.<name>.adding` first and takes the mod's name once
 stops never shows as a mod. It refuses, naming the folder: a name the mods folder has already, a folder inside the
 mods folder or one that holds it, one with neither `exefs/` nor `romfs/`, a name that starts with a dot (the mods list
 hides those), a link inside the folder, and on a phone a folder of an app or a cloud that no path reaches; a file that
-cannot be copied is named with the system's reason. On Android and iOS the box has Add Mod and no Open Mods Folder or
-Open Cheats Folder, as a phone has no file manager to show a folder in.
+cannot be copied is named with the system's reason. On Android and iOS Open Mods Folder, Open Cheats Folder and Open
+Folder show the folder in the system's Files app: Android's shows the app's data folder and the shared storage (a
+dump's folder in `Download/`), iOS's the app's Documents alone, so there a folder of the app's `Library/` is greyed and
+says so.
+
+The box also has **Open Folder**, the game's other folders a row each: its dump's (as the recompile named it), the game's
+own, its saves (`<id>_data/save/`), its settings, its logs and its caches, each where the table below puts it. One not
+known (a game made before the recompile named its dump) or not there yet is greyed, and pressed it says why and makes
+nothing; Back goes back to the box's rows. **Clean Cache** deletes the game's shader cache (`shader_cache/` of its cache
+folder: the pipeline cache, the translated shaders and those prepared ahead of time) and its code cache
+(`<id>.jitcache`), asked first with each one's size and folder; the game makes them again as it runs, and its saves,
+settings and dump stay. It is greyed while the game has neither.
 
 A mod's `exefs/` changes the game's code, which ScarletNX compiles ahead of time. The game's stamp (`<id>.abi`) records
 the mods' ExeFS files it was recompiled with, and playing it through the driver or the launcher recompiles it when the

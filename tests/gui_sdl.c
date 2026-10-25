@@ -1665,7 +1665,8 @@ static void add_mod(App* app, const char* temporary) {
          *file = snx_path_join(root, "x");
     char *to = snx_path_join(mods, "Better Fonts"), *to_first = snx_path_join(mods, "A first"), want[2048];
     const char* cloud = "content://com.example.cloud.documents/tree/abc%3Amods";
-    static const int tail[] = {ROW_ADD_MOD, ROW_MODS_FOLDER, ROW_ADD_CHEATS, ROW_CHEATS_FOLDER, ROW_SAVE, ROW_PLAY};
+    static const int tail[] = {ROW_ADD_MOD,     ROW_MODS_FOLDER, ROW_ADD_CHEATS, ROW_CHEATS_FOLDER,
+                               ROW_OPEN_FOLDER, ROW_CLEAN_CACHE, ROW_SAVE,       ROW_PLAY};
     size_t index = 0;
     int i, nx, ny;
     while (index < app->games.count &&
@@ -7223,12 +7224,13 @@ int main(int argc, char** argv) {
                 8);
             key(&app, SDLK_RETURN);
             /* rows: Update 1.2.0, Update 1.0.0, No update, DLC 1, A mod, B mod, 60 FPS, Infinite HP, Speed x2|x4, Add
-               Mod, Open Mods Folder, Add Cheats, Open Cheats Folder, Save, Play */
+               Mod, Open Mods Folder, Add Cheats, Open Cheats Folder, Open Folder, Clean Cache, Save, Play */
             assert(app.addons_shown && !app.menu.running && app.addons.count == 3 && app.mods_count == 2 &&
-                   app.cheats_count == 3 && addons_rows(&app) == 15);
+                   app.cheats_count == 3 && addons_rows(&app) == 17);
             assert(addons_row(&app, 9) == ROW_ADD_MOD && addons_row(&app, 10) == ROW_MODS_FOLDER &&
                    addons_row(&app, 11) == ROW_ADD_CHEATS && addons_row(&app, 12) == ROW_CHEATS_FOLDER &&
-                   addons_row(&app, 13) == ROW_SAVE && addons_row(&app, 14) == ROW_PLAY);
+                   addons_row(&app, 13) == ROW_OPEN_FOLDER && addons_row(&app, 14) == ROW_CLEAN_CACHE &&
+                   addons_row(&app, 15) == ROW_SAVE && addons_row(&app, 16) == ROW_PLAY);
             build_ids(&app, dirs);
             assert(!app.addons_checked[0] && !app.addons_checked[1] && app.addons_checked[2]);
             assert(app.mods_on[0] && !app.mods_on[1] && !strcmp(app.mods[0], "A mod"));
@@ -7317,8 +7319,8 @@ int main(int argc, char** argv) {
             assert(!app.cheats_on[0] && app.cheats_on[1] && app.addons_focus == 8 &&
                    !strcmp(app.message,
                            "\"Speed x2|x4\" always runs: a | in its name, which cheats_off= puts between two"));
-            for (i = 0; i < 5; i++) key(&app, SDLK_DOWN);
-            assert(app.addons_focus == 13);
+            for (i = 0; i < 7; i++) key(&app, SDLK_DOWN); /* past Open Folder and Clean Cache */
+            assert(app.addons_focus == 15);
             key(&app, SDLK_RETURN);
             assert(!app.addons_shown && !app.menu.running && strstr(app.message, "kept"));
             checked = snx_ini_value(ini, "addons");
@@ -7352,8 +7354,8 @@ int main(int argc, char** argv) {
             key(&app, SDLK_DOWN);
             key(&app, SDLK_DOWN);
             key(&app, SDLK_RETURN);
-            for (i = 0; i < 12; i++) key(&app, SDLK_DOWN);
-            assert(app.addons_focus == 14);
+            for (i = 0; i < 14; i++) key(&app, SDLK_DOWN); /* Recompile, the last row */
+            assert(app.addons_focus == 16);
             key(&app, SDLK_RETURN);
             assert(!app.addons_shown && !app.menu.running && !app.recompile && gui_queue_running(&app.queue) == 0);
             {
@@ -7409,7 +7411,96 @@ int main(int argc, char** argv) {
                 aot_clear_focus(&app);
                 free(text);
                 free(stamp);
+            }
+            { /* its box's Open Folder: the game's folders a row each, on every system; one not known or not there
+                 greyed, and pressed it says why and opens nothing; Back goes back to the box's rows, at Open Folder */
+                char why[1024], *saves = snx_path_join(dirs[0], "save"), want[2048];
+                UiRowInfo info;
+                go_tab(&app, GUI_TAB_GAMES);
+                focus_game(&app, "0100ABCD12340000");
+                key(&app, SDLK_RETURN);
+                assert(app.addons_shown && addons_row(&app, 13) == ROW_OPEN_FOLDER);
+                app.addons_focus = 13;
+                key(&app, SDLK_RETURN);
+                assert(app.addons_folders_shown && addons_rows(&app) == GUI_GAME_FOLDERS && !app.addons_focus);
+                assert(!app.addons_folders[GUI_FOLDER_DUMP]); /* made with no source= */
+                assert(!strcmp(app.addons_folders[GUI_FOLDER_GAME], own));
+                assert(!strcmp(app.addons_folders[GUI_FOLDER_SAVES], saves) && !snx_path_exists(saves));
+                for (i = 0; i < GUI_GAME_FOLDERS; ++i) { /* greyed exactly when it says why */
+                    info = (UiRowInfo){0};
+                    assert(ui_addons_rows_get_row_info(&app, (size_t)i, 0, &info));
+                    addons_folder_off(&app, i, why, sizeof why);
+                    assert(!(info.attr & UI_ATTR_OFF) == !why[0]);
+                }
+                info = (UiRowInfo){0};
+                assert(ui_addons_rows_get_row_info(&app, GUI_FOLDER_GAME, 0, &info) && !(info.attr & UI_ATTR_OFF));
+                info = (UiRowInfo){0};
+                assert(ui_addons_rows_get_row_info(&app, GUI_FOLDER_SAVES, 0, &info) && (info.attr & UI_ATTR_OFF));
+                render(&app);
+                assert(find_text(&app, "Dump", rgb(app.theme.soft), 1, &nx, &ny)); /* in focus, greyed all the same */
+                assert(find_text(&app, "Game", rgb(app.theme.ink), 1, &nx, &ny));
+                assert(find_text(&app, "Saves", rgb(app.theme.soft), 1, &nx, &ny));
+                app.message[0] = 0;
+                key(&app, SDLK_RETURN); /* Dump */
+                assert(!strcmp(app.message,
+                               "Dump: its dump is not known: the game was made before the recompile named it"));
+                app.addons_focus = GUI_FOLDER_SAVES;
+                key(&app, SDLK_RETURN);
+                snprintf(want, sizeof want, "Saves: %s is not there yet", saves);
+                assert(!strcmp(app.message, want) && !snx_path_exists(saves)); /* nothing made */
+                key(&app, SDLK_ESCAPE);
+                assert(app.addons_shown && !app.addons_folders_shown && app.addons_focus == 13);
+                assert(!app.addons_folders[GUI_FOLDER_GAME]);
+                free(saves);
+            }
+            { /* Clean Cache: greyed with no cache, saying where it looked; with them, asked first with each one's
+                 size, Back keeping them; Delete takes both, the saves and the game staying */
+                char *caches[2], *shader, *saves = snx_path_join(dirs[0], "save"), *keep, *dir, want[2048], size[32];
+                UiRowInfo info;
+                char bytes[3000] = {0};
+                game_caches(&app, caches);
+                assert(caches[0] && caches[1] && !snx_path_exists(caches[0]) && !snx_path_exists(caches[1]));
+                assert(snx_path_within(caches[0], own) && snx_path_within(caches[1], own)); /* the test's own */
+                info = (UiRowInfo){0};
+                assert(ui_addons_rows_get_row_info(&app, 14, 0, &info) && addons_row(&app, 14) == ROW_CLEAN_CACHE &&
+                       (info.attr & UI_ATTR_OFF));
+                app.addons_focus = 14;
+                key(&app, SDLK_RETURN);
+                snprintf(want, sizeof want, "%s has no cache to delete: no %s, no %s", app.addons_title, caches[0],
+                         caches[1]);
+                assert(!app.confirm.shown && !strcmp(app.message, want));
+                shader = snx_path_join(caches[0], "vk_pipelines.bin");
+                dir = snx_dirname(caches[1]);
+                assert(!snx_mkdirs(caches[0]) && !snx_write_file(shader, bytes, sizeof bytes));
+                assert(!snx_mkdirs(dir) && !snx_write_file(caches[1], bytes, 100));
+                keep = snx_path_join(saves, "user.1");
+                assert(!snx_mkdirs(saves) && !snx_write_file(keep, "save", 4));
+                info = (UiRowInfo){0};
+                assert(ui_addons_rows_get_row_info(&app, 14, 0, &info) && !(info.attr & UI_ATTR_OFF));
+                key(&app, SDLK_RETURN);
+                gui_size_text(size, sizeof size, sizeof bytes);
+                assert(app.confirm.shown && app.confirm.ask == GUI_ASK_CACHE && strstr(app.ask_line, size) &&
+                       strstr(app.ask_line, caches[0]) && strstr(app.ask_line, caches[1]) &&
+                       strstr(app.ask_line, "its saves, settings and dump stay"));
+                key(&app, SDLK_ESCAPE);
+                assert(!app.confirm.shown && app.addons_shown && snx_is_file(shader) && snx_is_file(caches[1]));
+                key(&app, SDLK_RETURN);
+                key(&app, SDLK_DOWN);
+                key(&app, SDLK_RETURN);
+                gui_size_text(size, sizeof size, sizeof bytes + 100);
+                snprintf(want, sizeof want, "Deleted the caches of %s: %s", app.addons_title, size);
+                assert(!app.confirm.shown && app.addons_shown && !strcmp(app.message, want));
+                assert(!snx_path_exists(caches[0]) && !snx_path_exists(caches[1]));
+                assert(snx_is_file(keep) && snx_is_file(base));
+                key(&app, SDLK_ESCAPE);
+                assert(!app.addons_shown);
                 go_tab(&app, GUI_TAB_MENU); /* off Games, which lists its folders again as it shows next */
+                free(dir);
+                free(keep);
+                free(shader);
+                free(saves);
+                free(caches[0]);
+                free(caches[1]);
             }
             assert(!snx_remove_tree(own));
             free(own);
