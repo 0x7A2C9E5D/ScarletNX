@@ -8170,6 +8170,44 @@ int main(int argc, char** argv) {
             text_px_is(&app, x + side + cw / 2, b.y + (40 * s - 16 * s + s) / 2, "Exit", normal, black);
             SDL_DestroyTexture(red);
         }
+        { /* a row with nothing to do now (UI_ATTR_OFF): greyed, still there, its text in the soft colour, focused or
+             not, activated or not; framed in the focus colour while focused; a failure's look over it */
+            int ty = b.y + (40 * s - 16 * s + s) / 2;
+            GuiRect in;
+            fill_rect(&app, b, app.theme.page);
+            ui_draw_row(&app, b, "Exit", NULL, UI_COLOR_NONE, UI_ATTR_OFF, false);
+            text_px_is(&app, b.x + cw / 2, ty, "- Exit", rgb(app.theme.soft), black);
+            fill_rect(&app, b, app.theme.page);
+            ui_draw_row(&app, b, "Exit", NULL, UI_COLOR_NONE, UI_ATTR_OFF | UI_ATTR_ACTIVE, true);
+            text_px_is(&app, b.x + cw / 2, ty, "- Exit", rgb(app.theme.soft), black);
+            assert(same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), yellow));
+            fill_rect(&app, b, app.theme.page);
+            ui_draw_row(&app, b, "Exit", NULL, UI_COLOR_NONE, UI_ATTR_OFF | UI_ATTR_FAILURE, false);
+            text_px_is(&app, b.x + cw / 2, ty, "- Exit", black, rgb(app.theme.failure));
+            /* where the focus inverts (YoRHa's bar), on the soft colour rather than the focus's; unfocused, on its box */
+            app.theme = *gui_theme_builtin("yorha");
+            assert(app.theme.focus_bar && app.theme.panels == GUI_PANELS_FILL);
+            in = ui_row_box(&app, b);
+            fill_rect(&app, b, app.theme.page);
+            ui_draw_row(&app, b, "Exit", NULL, UI_COLOR_NONE, UI_ATTR_OFF, true);
+            in.x += cw / 2 + gui_text_cols(app.theme.marker) * cw; /* the text after the marker */
+            text_px_is(&app, in.x, ty, "Exit", rgb(app.theme.page), rgb(app.theme.soft));
+            fill_rect(&app, b, app.theme.page);
+            ui_draw_row(&app, b, "Exit", NULL, UI_COLOR_NONE, UI_ATTR_OFF, false);
+            text_px_is(&app, in.x, ty, "Exit", rgb(app.theme.soft), rgb(app.theme.dim));
+            { /* a tile (Games' grid) the same */
+                GuiRect tile = gui_rect(b.x, b.y, 12 * cw, 4 * 16 * s + 8 * s);
+                int tx = tile.x + (tile.w - 4 * cw) / 2, tty = tile.y + tile.h - 16 * s - 2 * s;
+                fill_rect(&app, tile, app.theme.page);
+                ui_draw_tile(&app, tile, "Exit", NULL, UI_COLOR_NONE, UI_ATTR_OFF, true);
+                text_px_is(&app, tx, tty, "Exit", rgb(app.theme.page), rgb(app.theme.soft));
+                fill_rect(&app, tile, app.theme.page);
+                ui_draw_tile(&app, tile, "Exit", NULL, UI_COLOR_NONE, UI_ATTR_OFF, false);
+                text_px_is(&app, tx, tty, "Exit", rgb(app.theme.soft), rgb(app.theme.dim));
+            }
+            app.theme = *gui_theme_builtin("default");
+            render(&app);
+        }
         /* the side box: the focus's name over a rule and the keys in use, what it does left to the tips; the status
            box under it */
         r = m.place.side;

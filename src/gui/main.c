@@ -2535,7 +2535,8 @@ static GuiRect ui_row_box(const App* app, GuiRect r) {
    on the focus colour or framed and written in it: the theme's cursor and the arrows of hidden rows inside it, the box
    between them; the failure colour fills it (every other blink_ms with UI_ATTR_BLINK, steady with 0), the active
    colour writes the one activated last, and an open one (UI_ATTR_OPEN) has the focus's look without the cursor; a
-   title (UI_ATTR_TITLE) is on a band of ink in a theme of filled boxes, else over a rule */
+   title (UI_ATTR_TITLE) is on a band of ink in a theme of filled boxes, else over a rule. One with nothing to do now
+   (UI_ATTR_OFF) is greyed, still there: written in the soft colour, or inverted on it where the focus inverts */
 /* a row's text's top: as item_text_y has it in a row a cell and a pixel high, in the middle of a taller one */
 static int ui_text_y(const App* app, GuiRect b) { return b.y + (b.h - cell_h(app) + app->scale) / 2; }
 static int user_side(const App* app, int h);
@@ -2552,6 +2553,7 @@ void ui_draw_row(App* app, GuiRect r, const char* text, const void* image, unsig
     int look = focused || (attr & UI_ATTR_OPEN), filled = t->panels == GUI_PANELS_FILL, inverted = look && t->focus_bar;
     int failing =
         (attr & UI_ATTR_FAILURE) && !((attr & UI_ATTR_BLINK) && t->blink_ms && (now_ms(app) / t->blink_ms) % 2);
+    int off = (attr & UI_ATTR_OFF) != 0;
     GuiRect b = ui_row_box(app, r);
     char label[400];
     if (attr & UI_ATTR_LABEL) { /* between rows, as "Recent Games": no box, no marker */
@@ -2569,12 +2571,13 @@ void ui_draw_row(App* app, GuiRect r, const char* text, const void* image, unsig
     }
     snprintf(label, sizeof label, "%s%s", t->marker, text);
     if (failing || inverted)
-        fill_rect(app, b, failing ? t->failure : t->focus);
+        fill_rect(app, b, failing ? t->failure : off ? t->soft : t->focus);
     else if (filled)
         fill_rect(app, b, t->dim);
     if (!failing && !inverted && (!filled || look)) outline(app, b, look ? t->focus : t->dim);
     {
         SDL_Color ink = rgb(failing || inverted     ? t->page
+                            : off                   ? t->soft
                             : attr & UI_ATTR_ACTIVE ? t->active
                             : look                  ? t->focus
                                                     : ui_colour(app, color, t->ink));
@@ -2598,23 +2601,25 @@ void ui_draw_label(App* app, GuiRect r, const char* text, unsigned color) {
 }
 /* a tile of a tile list (Games' grid), framed as a row's box is in its look: the image a square in the middle of its
    top, the text under it in the middle (from its left, sliding, where it is longer than the tile), the arrows of the
-   rows hidden above and below at its top right */
+   rows hidden above and below at its top right; greyed as a row (UI_ATTR_OFF) */
 void ui_draw_tile(App* app, GuiRect r, const char* text, const void* image, unsigned color, unsigned attr,
                   bool focused) {
     const GuiTheme* t = &app->theme;
     int look = focused || (attr & UI_ATTR_OPEN), filled = t->panels == GUI_PANELS_FILL, inverted = look && t->focus_bar;
     int failing =
         (attr & UI_ATTR_FAILURE) && !((attr & UI_ATTR_BLINK) && t->blink_ms && (now_ms(app) / t->blink_ms) % 2);
+    int off = (attr & UI_ATTR_OFF) != 0;
     int s = app->scale, cw = cell_w(app), ch = cell_h(app), side = SDL_min(r.w - 4 * s, r.h - ch - 6 * s);
     int cols = gui_text_cols(text), room = (r.w - cw) / cw;
     SDL_Color ink = rgb(failing || inverted     ? t->page
+                        : off                   ? t->soft
                         : attr & UI_ATTR_ACTIVE ? t->active
                         : look                  ? t->focus
                                                 : ui_colour(app, color, t->ink));
     SDL_Color soft = rgb(failing || inverted ? t->page : t->soft);
     GuiRect in = gui_rect(r.x + cw / 2, r.y, r.w - cw, r.h); /* half a cell either side */
     if (failing || inverted)
-        fill_rect(app, r, failing ? t->failure : t->focus);
+        fill_rect(app, r, failing ? t->failure : off ? t->soft : t->focus);
     else if (filled)
         fill_rect(app, r, t->dim);
     if (!failing && !inverted && (!filled || look)) outline(app, r, look ? t->focus : t->dim);
