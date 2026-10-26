@@ -3,12 +3,13 @@
 /* Views of guest memory through the alias pool, with the real POSIX platform layer (memfd, userfaultfd write
    tracking): MapMemory's view and its source, code memory's owner and slave, ldr:ro's code view and shared memory are
    the same pages; the pool gives everything back; write tracking keeps working over remapped ranges. Skips (77)
-   where the host has no pool. --copies runs the same calls with SNX_NO_ALIAS_POOL, as Windows has them: views are
+   where the host has no pool. --copies runs the same calls with alias_pool=0, as Windows has them: views are
    copies, and a flush of a line written through one copies it back into the code */
 #include "nx/hle/kernel/kernel_int.h"
 #include "nx/hle/hle.h"
 #include "nx/gpu/gpu.h"
 #include "nx/runtime/clock.h"
+#include "snx_settings.h"
 #include <dirent.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -248,7 +249,7 @@ static void test_code_view(void) {
     check_tracking(m.source, 0x3000);
 }
 
-/* MapProcessMemory on a host without the pool (Windows, or SNX_NO_ALIAS_POOL): the view is a copy, and a mod that
+/* MapProcessMemory on a host without the pool (Windows, or alias_pool=0): the view is a copy, and a mod that
    keeps it mapped writes its hook pool through the RW bytes and flushes the line it wrote (IC IVAU). The flush must
    copy the line back into the code before the runtime compiles it, as a host with the pool gets for free */
 static void test_process_memory_copies(void) {
@@ -385,8 +386,8 @@ static void test_physical_pool(void)
 
 int main(int argc, char** argv) {
     int copies = argc > 1 && strcmp(argv[1], "--copies") == 0;
-    /* --copies runs the Windows path on a host that has a pool (SNX_NO_ALIAS_POOL) */
-    if (copies) setenv("SNX_NO_ALIAS_POOL", "1", 1);
+    /* --copies runs the Windows path on a host that has a pool (alias_pool=0) */
+    if (copies) g_settings.alias_pool = 0;
     hle_init();
     u64 info = STACK_BASE, off, mapped = 0, hole = 0;
     u8* p;

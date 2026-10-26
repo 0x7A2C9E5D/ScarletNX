@@ -1660,7 +1660,7 @@ if(UNIX)
     target_link_libraries(snx-test-memory-alias PRIVATE SDL3::SDL3 ${CMAKE_DL_LIBS})
     add_test(NAME memory_alias COMMAND snx-test-memory-alias)
     set_tests_properties(memory_alias PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
-    # the same calls with SNX_NO_ALIAS_POOL: views are copies, as on Windows
+    # the same calls with the alias pool off (alias_pool=0): views are copies, as on Windows
     add_test(NAME memory_alias_copies COMMAND snx-test-memory-alias --copies)
     set_tests_properties(memory_alias_copies PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
     # GPU-owned memory over the real pool and traps, owners whose GPU copy is host memory (77 without traps)

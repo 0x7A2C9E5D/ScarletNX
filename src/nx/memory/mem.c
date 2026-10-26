@@ -13,6 +13,7 @@
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
 #include "nx/runtime/platform/tracy.h"
+#include "snx_settings.h"
 #include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -673,9 +674,9 @@ void mem_init(void) {
     runs_stale_nl();
     mem_unlock();
     /* a view shares pages only at the same place in a host page as its source, which a game picking addresses in
-       4 KiB steps leaves to chance with larger pages: they copy, as hosts without a pool do. SNX_NO_ALIAS_POOL
-       asks for the copy path on a host that has a pool, as Windows runs it (tests, and a player's diagnosis) */
-    g_pool_on = g_host_page == PAGE && !getenv("SNX_NO_ALIAS_POOL") && !plat_alias_init(g_pool_size);
+       4 KiB steps leaves to chance with larger pages: they copy, as hosts without a pool do. Alias pool off asks for
+       the copy path on a host that has a pool, as Windows runs it (tests, and a player's diagnosis) */
+    g_pool_on = g_settings.alias_pool && g_host_page == PAGE && !plat_alias_init(g_pool_size);
     LOG("memory: %llu KiB host pages, %s\n", (unsigned long long)(g_host_page >> 10),
         g_pool_on ? "views share their source's pages (alias pool)" : "views are copies (no alias pool)");
 }
