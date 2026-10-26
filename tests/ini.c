@@ -8,7 +8,7 @@
 #include <string.h>
 
 static int number, told;
-static float resolution;
+static float base_resolution_mult;
 static char text[16];
 static void tell(const IniOpt* o, const char* v) {
     (void)o;
@@ -25,7 +25,7 @@ static char line_said[256];
 static void catch_said(const char* line) { snprintf(line_said, sizeof line_said, "%s", line); }
 static const IniOpt TABLE[] = {
     {"number", "1", "help", INI_INT, 0, &number, -5, 10, tell, NULL, NULL, 0, 0, 0},
-    {"resolution", "1", NULL, INI_FLOAT, INI_STARTUP, &resolution, 0.25, 16, NULL, NULL, NULL, 0, 0, 0},
+    {"resolution", "1", NULL, INI_FLOAT, INI_STARTUP, &base_resolution_mult, 0.25, 16, NULL, NULL, NULL, 0, 0, 0},
     {"text", NULL, NULL, INI_TEXT, 0, held, 0, 0, keep, NULL, NULL, 0, 0, sizeof held},
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0, 0}};
 
@@ -48,20 +48,20 @@ int main(void) {
     ini_read(n, "nan");
     assert(number == 3 && told == 4);
     ini_read(r, "inf");
-    assert(resolution == 16);
+    assert(base_resolution_mult == 16);
     ini_read(r, "0.5");
-    assert(resolution == 0.5f);
+    assert(base_resolution_mult == 0.5f);
     /* written back as it reads */
     ini_format(n, out, sizeof out);
     assert(!strcmp(out, "3"));
     ini_format(r, out, sizeof out);
     assert(!strcmp(out, "0.5"));
     /* a resolution forced as nothing or no number keeps the default it starts with, 1 */
-    resolution = 1.0f;
+    base_resolution_mult = 1.0f;
     ini_read(r, "high");
-    assert(resolution == 1.0f);
+    assert(base_resolution_mult == 1.0f);
     ini_read(r, "");
-    assert(resolution == 1.0f);
+    assert(base_resolution_mult == 1.0f);
     /* text: kept whole at var, then set; written back as it is. One too long for var is left out, set not called */
     ini_read(t, "a b c");
     assert(!strcmp(text, "a b c") && !strcmp(held, "a b c"));
@@ -90,20 +90,20 @@ int main(void) {
        given says nothing */
     ini_set_say(catch_said);
     /* a forced resolution that is no number, or nothing, is 1 and said: the line names the value it keeps */
-    resolution = 1.0f;
+    base_resolution_mult = 1.0f;
     ini_read(r, "high");
-    assert(resolution == 1.0f &&
+    assert(base_resolution_mult == 1.0f &&
            !strcmp(line_said, "settings: resolution=high is not a number from 0.25 to 16: it keeps 1"));
-    resolution = 1.0f;
+    base_resolution_mult = 1.0f;
     ini_read(r, "");
-    assert(resolution == 1.0f &&
+    assert(base_resolution_mult == 1.0f &&
            !strcmp(line_said, "settings: resolution= is not a number from 0.25 to 16: it keeps 1"));
-    resolution = 1.0f;
+    base_resolution_mult = 1.0f;
     ini_read(r, "e");
-    assert(resolution == 1.0f &&
+    assert(base_resolution_mult == 1.0f &&
            !strcmp(line_said, "settings: resolution=e is not a number from 0.25 to 16: it keeps 1"));
     ini_read(r, "0.05");
-    assert(resolution == 0.25f &&
+    assert(base_resolution_mult == 0.25f &&
            !strcmp(line_said, "settings: resolution=0.05 is not a number from 0.25 to 16: it keeps 0.25"));
     ini_read(n, "abc");
     assert(number == 3 && !strcmp(line_said, "settings: number=abc is not a whole number from -5 to 10: it keeps 3"));
@@ -114,7 +114,7 @@ int main(void) {
     ini_read(n, "7x");
     assert(number == 7 && !strcmp(line_said, "settings: number=7x is not a whole number from -5 to 10: it keeps 7"));
     ini_read(r, "20");
-    assert(resolution == 16 &&
+    assert(base_resolution_mult == 16 &&
            !strcmp(line_said, "settings: resolution=20 is not a number from 0.25 to 16: it keeps 16"));
     ini_read(t, "too long for it");
     assert(!strcmp(line_said, "settings: text's value is longer than 7 bytes: it keeps \"a b c\""));
@@ -122,7 +122,7 @@ int main(void) {
     ini_read(n, "3");
     ini_read(r, "0.5");
     ini_read(t, "fits");
-    assert(number == 3 && resolution == 0.5f && !strcmp(held, "fits") && !line_said[0]);
+    assert(number == 3 && base_resolution_mult == 0.5f && !strcmp(held, "fits") && !line_said[0]);
     ini_set_say(NULL);
     /* the menus' words: one a value from lo by step; a '#' word for its value and the ones above, plus shift; the
        number where there is none. Words go round, numbers stop at the ends */
