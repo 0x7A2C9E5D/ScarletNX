@@ -545,7 +545,7 @@ Screen and Wide (a theme's `[head] place`, `[tips] place` and `[body] sizing` ar
 the Settings' two, the theme editor's, the choices of a question, of UI scale's box, of the Recompile box and of the
 setup's pages, the setup's Appearance rows, the box of users, that of a game's updates, DLCs and mods, and the OK of
 a box of files. Their rows are 2 pixels apart times the text's size (on Android and iOS 48 pixels high: a phone held wide gets
-3x, so 144, Android's 48 dp touch target at a density of 3 and more under it, iOS's 44 pt at its 3x; the desktop's are 17), the focused one kept in the middle (on a
+2x by default, so 96, about 37 dp at a density of 2.6, Android's 48 dp touch target at 3x; the desktop's are 17), the focused one kept in the middle (on a
 group's screen, the group open in the groups' list; Games' grid by its lines) as the keys, a pad, the wheel or a drag
 move it, and a list still when the mouse, a pen or a tap moves it, the cursor and the arrows of hidden rows inside
 each row, which a click takes whole as a tap does. That is the **Side panel**'s *Auto*, the

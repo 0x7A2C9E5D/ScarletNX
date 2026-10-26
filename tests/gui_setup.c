@@ -625,6 +625,41 @@ static void test_places(App* app) {
     assert(b.content.y + b.content.h <= b.choices.at.y && b.content.h > 0);
     assert(!strcmp(b.tab, "ScarletNX  2/5"));
     shows(app, "ScarletNX  2/5", rgb(app->theme.ink));
+    { /* where the choices leave the page's boxes too few rows above them (a phone's, a finger's row each: here the
+         largest letters, a phone held wide's 2340 pixels), the boxes go beside them, down to the question: a notice
+         there to its "now" line, which the rows above the choices cut */
+        int h, above = 0, list[SNX_NOTICES];
+        char now[64], pad[32];
+        const SnxNotice* notice;
+        app->setup_page = 0;
+        setup_enter(app);
+        assert(page(app) == SETUP_NOTICE);
+        app->menu.text_size = GUI_TEXT_MAX;
+        for (h = 1080; h > 200; h -= 10) {
+            assert(SDL_SetWindowSize(app->window, 2340, h));
+            SDL_SyncWindow(app->window);
+            render(app);
+            setup_boxes(app, &b);
+            above = b.choices.at.y - cell_h(app) / 2 - b.place.list.y;
+            if (above < GUI_SETUP_CONTENT_ROWS * cell_h(app)) break;
+        }
+        assert(h > 200 && app->scale == GUI_TEXT_MAX);
+        assert(b.content.x + b.content.w < b.choices.at.x && b.content.h > above &&
+               b.content.y + b.content.h == b.choices.tab.y - cell_h(app) / 2);
+        assert(setup_notices(app, list) > 0);
+        notice = &snx_notices[list[0]];
+        snprintf(now, sizeof now, "%s%.3s",
+                 setup_pad(pad, sizeof pad, "now", setup_cols((const char* const[]){"before", "now"}, 2, 2)),
+                 notice->now);
+        shows(app, now, rgb(app->theme.ink));
+        app->menu.text_size = 0;
+        assert(SDL_SetWindowSize(app->window, width, height));
+        SDL_SyncWindow(app->window);
+        app->setup_page = 2;
+        setup_enter(app);
+        render(app);
+        setup_boxes(app, &b);
+    }
     app->theme = *gui_theme_builtin("default");
     render(app);
     setup_boxes(app, &b);
