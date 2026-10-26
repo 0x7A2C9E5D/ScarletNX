@@ -174,6 +174,7 @@ u8* vk_stage_back(u64 size, VkBuffer* buf, u64* off, VmaAllocation* mem);
    The frame goes on: its staging, pools and deferred resources live until vk_frame_next and its slot's next use.
    Either semaphore may be VK_NULL_HANDLE */
 void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal);
+void vk_submit_for_readback(void);
 /* the next submission waits for a timeline semaphore of someone else's (FFmpeg's picture's) at one value and signals
    it at another: whichever submit comes next takes them, so commands recorded from now on never run before the wait */
 void vk_submit_after(VkSemaphore sem, u64 wait, u64 signal);
