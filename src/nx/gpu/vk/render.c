@@ -1538,16 +1538,18 @@ static VkDescriptorSet desc_set_cached(VkDescriptorSetLayout layout, DescWrites*
     return set;
 }
 static VkDescriptorSet stage_set_(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro,
-                                  u32* fb, TexRes* res, const VkDrawStorage* draw, DrawImages* images);
+                                  u32* fb, u64* scaled, TexRes* res, const VkDrawStorage* draw, DrawImages* images);
+/* scaled: the texture slots whose bound image is a scaled render target, a bit each, for the fragment program's texel
+   fetches and size queries (scaled_factor in spirv_translate.c) */
 static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro, u32* fb,
-                                 TexRes* res, const VkDrawStorage* draw, DrawImages* images) {
+                                 u64* scaled, TexRes* res, const VkDrawStorage* draw, DrawImages* images) {
     SNX_ZONE(z, "stage set");
-    VkDescriptorSet set = stage_set_(ch, stage, s, rt, zt, n, zt_ro, fb, res, draw, images);
+    VkDescriptorSet set = stage_set_(ch, stage, s, rt, zt, n, zt_ro, fb, scaled, res, draw, images);
     SNX_ZONE_END(z);
     return set;
 }
 static VkDescriptorSet stage_set_(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro,
-                                  u32* fb, TexRes* res, const VkDrawStorage* draw, DrawImages* images) {
+                                  u32* fb, u64* scaled, TexRes* res, const VkDrawStorage* draw, DrawImages* images) {
     u32* r = ch->r3d;
     VkDescriptorSetLayout layout = g_vk_dslayout[s->indexed][shader_vk_set(stage)];
     VkDescriptorSet set = VK_NULL_HANDLE; /* the writes take it once their contents are known (desc_set_cached) */
@@ -1658,6 +1660,8 @@ static VkDescriptorSet stage_set_(GpuChannel* ch, int stage, VkSh* s, Surf** rt,
         } else
             view = vk_tex_bind_view(t, want, x->tic, x->tsc, num);
         const Surf* sampled = view ? t : NULL; /* the texture whose own view is bound, for the sampler */
+        if (scaled && sampled && i < 64 && (sampled->sw != sampled->w || sampled->sh != sampled->h))
+            *scaled |= 1ull << i;
         if (view && depth_ro) {
             *zt_ro = 1; /* render_begin moves it to the read-only layout */
             layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
@@ -2621,9 +2625,11 @@ retry:
     }
     int zt_ro = 0;
     u32 fb = 0;
+    u64 scaled = 0;
     DrawImages images = {0};
-    VkDescriptorSet vset = stage_set(ch, 0, vs, rt, zt, n, &zt_ro, NULL, NULL, &storage, &images);
-    VkDescriptorSet fset = fs ? stage_set(ch, 4, fs, rt, zt, n, &zt_ro, &fb, fres, &storage, &images) : VK_NULL_HANDLE;
+    VkDescriptorSet vset = stage_set(ch, 0, vs, rt, zt, n, &zt_ro, NULL, NULL, NULL, &storage, &images);
+    VkDescriptorSet fset =
+        fs ? stage_set(ch, 4, fs, rt, zt, n, &zt_ro, &fb, &scaled, fres, &storage, &images) : VK_NULL_HANDLE;
     /* the sets of the stages between, at their stage's index (shader_vk_set) */
     between[0] = tcs;
     between[1] = tes;
@@ -2637,7 +2643,7 @@ retry:
             bset_ok = 0;
             break;
         }
-        bset[b] = stage_set(ch, b + 1, between[b], rt, zt, n, &zt_ro, NULL, NULL, &storage, NULL);
+        bset[b] = stage_set(ch, b + 1, between[b], rt, zt, n, &zt_ro, NULL, NULL, NULL, &storage, NULL);
         if (!bset[b]) bset_ok = 0;
     }
     if (!vset || (fs && !fset) || !bset_ok) {
@@ -3051,8 +3057,8 @@ retry:
     /* push constants: the depth mode (snx_vp.y) for the vertex stage, the alpha test (0x4BB on, 0x4C4 reference,
        0x4C5 function) and the point sprite's T flip for the fragment stage. PointCoord's T is 0 at row 0, which is a
        lower-left window's bottom (0x4EB bit 0): it flips when the sprite's origin (0x581 bit 2, 1 the top) is the
-       other side */
-    float pc[8] = {0, (r[0x35F] & 1) ? 0.0f : 1.0f, 0, 0};
+       other side. Then the fragment stage's scaled textures (stage_set) */
+    float pc[12] = {0, (r[0x35F] & 1) ? 0.0f : 1.0f, 0, 0};
     memcpy(&pc[0], &r[0x50E], sizeof(u32));
     {
         u32 fn = r[0x4C5];
@@ -3062,7 +3068,9 @@ retry:
         memcpy(&pc[6], &r[0x4C4], 4);
         pc[7] = ((r[0x581] >> 2) & 1) == (r[0x4EB] & 1) ? 1.0f : 0.0f;
     }
-    rec_CmdPushConstants(cb, g_vk_playout, VK_PUSH_STAGES, 0, 32, pc);
+    u32 scaled_words[2] = {(u32)scaled, (u32)(scaled >> 32)};
+    memcpy(&pc[8], scaled_words, sizeof scaled_words);
+    rec_CmdPushConstants(cb, g_vk_playout, VK_PUSH_STAGES, 0, sizeof pc, pc);
 
     vk_query_draw(cb, ch->id, r[0x574]); /* counted by the channel's samples-passed counter when it runs */
     VkBuffer counters[4] = {g_xfb.buf, g_xfb.buf, g_xfb.buf, g_xfb.buf};
