@@ -98,6 +98,7 @@ int main(void) {
 
     key = snx_jit_cache_key('2', 0, 0, 0);
     CHECK(key != NULL);
+    CHECK(key && strstr(key, "fpsr=1") != NULL);
     if (key) {
         char expected[32];
         char* triple = LLVMGetDefaultTargetTriple();
@@ -105,6 +106,14 @@ int main(void) {
         CHECK(strstr(key, expected) != NULL);
         CHECK(triple != NULL && strstr(key, triple) != NULL);
         if (triple) LLVMDisposeMessage(triple);
+    }
+    if (key) {
+        char* loose;
+        snx_ir_fpsr_flags(0);
+        loose = snx_jit_cache_key('2', 0, 0, 0);
+        CHECK(loose != NULL && strstr(loose, "fpsr=0") != NULL && strcmp(key, loose));
+        free(loose);
+        snx_ir_fpsr_flags(1);
     }
     cache = snx_jit_cache_open(path, key, error, sizeof(error));
     CHECK(cache != NULL);
