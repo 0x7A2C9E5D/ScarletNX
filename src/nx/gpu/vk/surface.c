@@ -391,8 +391,13 @@ static u64 rt_bytes(const Surf* s) {
 }
 u64 vk_surf_guest_size(const Surf* s) { return s ? rt_bytes(s) : 0; }
 static u64 g_wseq;
+/* every image's write generations, its uploads' and its writes' alike, from one count: a surface counting its own
+   writes ran ahead of the uploads' count, and an upload then handed it a generation its image would reach again with
+   guest memory still at it, so its next write looked written back already and never landed */
+static u32 g_surf_gen;
+u32 vk_surf_gen(void) { return ++g_surf_gen; }
 void vk_surf_wrote(Surf* s) {
-    s->wgen++;
+    s->wgen = vk_surf_gen();
     s->wseq = ++g_wseq;
 }
 /* the GPU pages the render targets not parked cover, so a write that meets none (almost all) skips the walk over every
@@ -1192,7 +1197,9 @@ void vk_rt_drawn(Surf* s) {
         /* without write tracking, a hash of the whole target: only for one a texture takes pixels from (feeds_tex),
            where it is the one answer vk_rt_drawn_fresh has. Hashing every target on its first draw of each present
            took most of the GPU thread (FreeBSD, Linux before 6.7) */
-        s->draw_has_hash = vk_written_since(gmem_ptr_untracked(s->gva, size), size, 0) < 0 && s->feeds_tex;
+        /* Dirty metadata needs the mapping's address, without acquiring pixels
+           that can still be GPU-owned. The hash fallback acquires its own data. */
+        s->draw_has_hash = vk_written_since(gmem_host(s->gva, size), size, 0) < 0 && s->feeds_tex;
         if (s->draw_has_hash) s->draw_hash = rt_mem_hash(s);
         s->draw_wseen = vk_ww_now();
         s->draw_gw = gpu_mem_generation();
@@ -1223,7 +1230,7 @@ int vk_rt_drawn_fresh(Surf* s) {
     if (!s->draw_wseen || s->layout == VK_IMAGE_LAYOUT_UNDEFINED || gpu_mem_dirty_since(s->draw_gw, s->gva, size))
         return 0;
     if (s->draw_has_hash) return rt_mem_hash(s) == s->draw_hash;
-    int written = vk_written_since(gmem_ptr_untracked(s->gva, size), size, s->draw_wseen);
+    int written = vk_written_since(gmem_host(s->gva, size), size, s->draw_wseen);
     if (written < 0) {
         /* no write tracking, and no baseline yet: the target's pixels are taken this once, as the GPU's writes to its
            memory are known and the game's own seldom land in a target it draws to. Its next baselines are hashed */
