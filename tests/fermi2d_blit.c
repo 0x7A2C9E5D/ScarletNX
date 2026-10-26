@@ -5,12 +5,13 @@
    vk/blit.c is held to it on a device by vulkan_headless). A block linear source scaled down by two into a block
    linear destination, read back pixel by pixel through the block linear layout itself (bl_offset below, the whole
    formula); an odd destination window, and nothing written outside it; a source whose rows end inside a 16 byte run;
-   the renderer's blit asked once, and the render target over the destination reloaded once. Between float formats of
-   different sizes, which the renderer's blit doesn't convert: half floats to floats and back for every half, the
-   rounding of floats to halves, and a pitch linear RGBA32F source into a block linear RGBA16F window, converted on the
-   CPU through gmem with the renderer's blit not asked */
+   the renderer's blit asked once, and the render target over the destination reloaded once. Between float formats:
+   half floats to floats and back for every half and the rounding of floats to halves (half.c, the reference
+   texconv.glsl's TC_BLIT_FLOAT is held to), and a pitch linear RGBA32F source into a block linear RGBA16F window, the
+   renderer's blit asked with the conversion */
 #include "nx/gpu/maxwell/fermi2d.c"
 #include "support/fermi2d_ref.h"
+#include "support/half.h"
 
 static unsigned checks;
 #define CHECK(x)                                                                                                       \
@@ -160,17 +161,17 @@ static void odd_source(void) {
 /* ------------------------------------------------ between float formats */
 static void halves(void) {
     for (u32 h = 0; h < 0x10000; h++) {
-        float f = f2d_from_half((u16)h);
+        float f = half_to_float((u16)h);
         if ((h & 0x7C00) == 0x7C00 && (h & 0x3FF))
-            CHECK(f != f && (f2d_to_half(f) & 0x7FFF) > 0x7C00); /* a NaN stays one */
+            CHECK(f != f && (float_to_half(f) & 0x7FFF) > 0x7C00); /* a NaN stays one */
         else
-            CHECK(f2d_to_half(f) == h);
+            CHECK(float_to_half(f) == h);
     }
-    CHECK(f2d_from_half(0x3C00) == 1.0f && f2d_from_half(0xC000) == -2.0f && f2d_from_half(0x0001) == 0x1p-24f);
-    CHECK(f2d_to_half(0.1f) == 0x2E66);
-    CHECK(f2d_to_half(2049.0f) == 0x6800 && f2d_to_half(2051.0f) == 0x6802); /* ties to even */
-    CHECK(f2d_to_half(65504.0f) == 0x7BFF && f2d_to_half(65520.0f) == 0x7C00 && f2d_to_half(-1e9f) == 0xFC00);
-    CHECK(f2d_to_half(1e-7f) == 0x0002 && f2d_to_half(1e-9f) == 0 && f2d_to_half(-0.0f) == 0x8000);
+    CHECK(half_to_float(0x3C00) == 1.0f && half_to_float(0xC000) == -2.0f && half_to_float(0x0001) == 0x1p-24f);
+    CHECK(float_to_half(0.1f) == 0x2E66);
+    CHECK(float_to_half(2049.0f) == 0x6800 && float_to_half(2051.0f) == 0x6802); /* ties to even */
+    CHECK(float_to_half(65504.0f) == 0x7BFF && float_to_half(65520.0f) == 0x7C00 && float_to_half(-1e9f) == 0xFC00);
+    CHECK(float_to_half(1e-7f) == 0x0002 && float_to_half(1e-9f) == 0 && float_to_half(-0.0f) == 0x8000);
 }
 enum { FW = 24, FH = 12 };
 static float float_px(u32 x, u32 y, u32 k) { return (float)((i32)(x * 7 + y * 131 + k * 1000) - 2000) / 64.0f; }
@@ -200,14 +201,14 @@ static void convert(void) {
     r[0x233] = 1;
     blits = reloads = 0;
     fermi2d_method(&ch, 0x237, 0);
-    CHECK(blits == 0 && reloads == 1);
+    CHECK(blits == 1 && reloads == 1);
     for (u32 y = 0; y < FH; y++)
         for (u32 x = 0; x < FW; x++)
             for (u32 k = 0; k < 4; k++) {
                 u16 v;
                 memcpy(&v, mem + DST + bl_offset(x * 8, y, 0, FW * 8, FH, 1, 0) + k * 2, 2);
                 int inside = x >= 3 && x < 20 && y >= 2 && y < 9;
-                CHECK(inside ? v == f2d_to_half(float_px(x - 3, y - 2, k)) : v == 0xEEEE);
+                CHECK(inside ? v == float_to_half(float_px(x - 3, y - 2, k)) : v == 0xEEEE);
             }
 }
 
