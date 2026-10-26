@@ -9358,11 +9358,15 @@ static void setup_type(App* app) {
         say_failure(app, app->message);
         return;
     }
-    app->setup_typing = true;
+    app->setup_typing = true; /* its keyboard comes up with the next frame (setup_keyboard) */
     snprintf(app->setup_name, sizeof app->setup_name, "Player");
     app->setup_choice.count = 1;
     app->setup_choice.focus = 0;
-    SDL_StartTextInput(app->window);
+}
+/* the nickname's keyboard, a frame after its page asks for it: Skip types the nickname and takes it in one call, and
+   on Android a keyboard asked for and dropped before it showed stays up (SDL hides only one Android says is shown) */
+static void setup_keyboard(App* app) {
+    if (app->setup_on && app->setup_typing && !SDL_TextInputActive(app->window)) SDL_StartTextInput(app->window);
 }
 /* the notices' choices: Next (OK on the last), Back before it past the first; the focus on Back while back says so and
    there is one, else on Next */
@@ -10839,6 +10843,7 @@ static void tell(App* app);
 static void pump(App* app) {
     keys_left(app);
     text_left(app);
+    setup_keyboard(app);
     warn_tick(app);
     job_pump(app);
 #ifdef SDL_PLATFORM_IOS
