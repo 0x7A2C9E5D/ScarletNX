@@ -1702,7 +1702,7 @@ add_test(NAME unattended_script COMMAND snx-test-unattended-script)
 add_executable(snx-test-platform-log platform_log.c "${PROJECT_SOURCE_DIR}/src/common/filesystem/host.c")
 snx_test_target(snx-test-platform-log 11)
 add_test(NAME platform_log COMMAND snx-test-platform-log "${CMAKE_CURRENT_BINARY_DIR}")
-if(NOT WIN32)
+if(NOT WIN32 AND TARGET SDL3::SDL3) # SDL3 is there with a driver that draws (cmake/dependencies.cmake)
     # written-page tracking, decommit, pread, file maps, replace, folders, waits and threads (platform/plat_posix.c and
     # plat_sdl.c)
     add_executable(snx-test-platform-posix platform_posix.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/plat_sdl.c"

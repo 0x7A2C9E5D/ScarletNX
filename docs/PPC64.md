@@ -142,9 +142,12 @@ root is Debian ports' unstable:
 ```bash
 scripts/ppc64-sysroot.sh ppc64 .cache/sysroot-ppc64
 export SNX_SYSROOT=$PWD/.cache/sysroot-ppc64
-cmake --preset linux-ppc64-cross -DSNX_BUILD_NX=OFF -DSNX_BUILD_3DS=OFF -DSNX_BUILD_GUI=OFF
-cmake --build --preset linux-ppc64-cross --target scarletnx-gnuabi-run
+cmake --preset linux-ppc64-cross -DSNX_BUILD_NX=OFF -DSNX_BUILD_3DS=OFF -DSNX_BUILD_VITA=OFF -DSNX_BUILD_AGB=OFF \
+    -DSNX_BUILD_GUI=OFF
+cmake --build --preset linux-ppc64-cross --target scarletnx
 ```
+
+`scarletnx` is then the Linux runtime alone, and `scarletnx-gnuabi` a link to it.
 
 CI's `linux-ppc64` job builds it this way against that system root, made weekly, and runs the Linux runtime's tests
 (`gnuabi_*`, `endian`, `cas128`) under qemu-ppc64. Debian ports' unstable can break for a day, so the job may fail

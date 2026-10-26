@@ -48,9 +48,9 @@ music through this path, without input yet. See [3DS port](3DS.md) for coverage 
 and remaining cache/ISA work.
 
 The common target has no runtime-specific imports. NX and GNU ABI each link
-common and have no dependency on each other. The GNU executable target is
-`scarletnx-gnuabi-run`, whose output is `scarletnx-gnuabi`; its library output is
-`scarletnx-gnuabi-runtime`. `SNX_BUILD_NX=OFF` builds GNU ABI without fetching or
+common and have no dependency on each other. The GNU ABI driver is the library
+`scarletnx-gnuabi` (its file `scarletnx-gnuabi-runtime`), command line included, which
+`scarletnx` runs as `scarletnx-gnuabi`. `SNX_BUILD_NX=OFF` builds GNU ABI without fetching or
 linking NX graphics/media packages. CTest checks include ownership and the actual
 transitive CMake dependency graph and target source ownership.
 
