@@ -278,26 +278,35 @@ static Set live_through(const Block* block, const Event* events, Site* sites, in
 
 /* the definition of each register reaching each block: UNSEEN before any path reaches it, ENTRY the entry's load,
    else the index of the block that defines it (a write or a site's reload), or of the block a PHI joins it in, where
-   its predecessors bring different ones. Each pass takes every block's meet of its predecessors again, until none
-   changes. phis[slot] counts the PHIs where the register is live. 0, or -1 out of memory */
+   its predecessors bring different ones. A block takes its predecessors' meet again whenever one of them changed,
+   until none does: sweeping every block until nothing changed moved a change one block a sweep wherever a successor
+   came first, and a function of 58185 blocks took minutes of sweeps. phis[slot] counts the PHIs where the register is
+   live. 0, or -1 out of memory */
 #define UNSEEN ((size_t)-1)
 #define ENTRY  ((size_t)-2)
 static int count_phis(const Block* blocks, size_t nblocks, const BlockKey* keys, const Event* events,
                       const Site* sites, size_t* phis) {
     size_t *in = (size_t*)malloc(nblocks * SLOTS * sizeof(*in)), *pred_first = (size_t*)calloc(nblocks + 1, sizeof(size_t));
-    size_t *preds = NULL, npreds = 0, i, k, e, pass;
+    size_t *succ_first = (size_t*)calloc(nblocks + 1, sizeof(size_t));
+    size_t* work = (size_t*)malloc((nblocks ? nblocks : 1) * sizeof(*work));
+    size_t *preds = NULL, *succs = NULL, npreds = 0, nsucc = 0, i, k, e, pass, head = 0, queued_n = 0;
     Set* defines = (Set*)calloc(nblocks, sizeof(*defines));
+    unsigned char* queued = (unsigned char*)calloc(nblocks ? nblocks : 1, 1);
     int changed, rc = -1;
     unsigned slot;
-    if (!in || !pred_first || !defines) goto done;
-    /* the predecessors, as lists by block: counted, then placed */
+    if (!in || !pred_first || !succ_first || !work || !defines || !queued) goto done;
+    /* the predecessors and successors, as lists by block: counted, then placed */
     for (pass = 0; pass < 2; ++pass) {
         size_t* fill = NULL;
         if (pass) {
-            for (i = 0; i < nblocks; ++i) pred_first[i + 1] += pred_first[i];
+            for (i = 0; i < nblocks; ++i) {
+                pred_first[i + 1] += pred_first[i];
+                succ_first[i + 1] += succ_first[i];
+            }
             preds = (size_t*)malloc((npreds ? npreds : 1) * sizeof(*preds));
+            succs = (size_t*)malloc((npreds ? npreds : 1) * sizeof(*succs));
             fill = (size_t*)malloc((nblocks ? nblocks : 1) * sizeof(*fill));
-            if (!preds || !fill) {
+            if (!preds || !succs || !fill) {
                 free(fill);
                 goto done;
             }
@@ -309,10 +318,12 @@ static int count_phis(const Block* blocks, size_t nblocks, const BlockKey* keys,
             for (j = 0; j < n; ++j) {
                 k = block_index(keys, nblocks, LLVMGetSuccessor(term, j));
                 if (k >= nblocks) continue;
-                if (pass)
+                if (pass) {
                     preds[fill[k]++] = i;
-                else {
+                    succs[nsucc++] = k;
+                } else {
                     ++pred_first[k + 1];
+                    ++succ_first[i + 1];
                     ++npreds;
                 }
             }
@@ -328,28 +339,43 @@ static int count_phis(const Block* blocks, size_t nblocks, const BlockKey* keys,
                 (void)set_join(&defines[i], &sites[ev->index].reload);
         }
     for (i = 0; i < nblocks * SLOTS; ++i) in[i] = i < SLOTS ? ENTRY : UNSEEN;
-    /* a PHI stays one (the meet only moves up: UNSEEN, one definition, a PHI), so passes are bounded */
-    do {
+    /* every block but the entry once, in order, then again each block a predecessor of changed: a PHI stays one (the
+       meet only moves up: UNSEEN, one definition, a PHI), so the work is bounded */
+    for (k = 1; k < nblocks; ++k) {
+        work[queued_n++] = k;
+        queued[k] = 1;
+    }
+    while (queued_n) {
+        k = work[head];
+        head = head + 1 == nblocks ? 0 : head + 1;
+        --queued_n;
+        queued[k] = 0;
         changed = 0;
-        for (k = 1; k < nblocks; ++k)
-            for (slot = 0; slot < SLOTS; ++slot) {
-                size_t meet = UNSEEN, p;
-                if (in[k * SLOTS + slot] == k) continue;
-                for (p = pred_first[k]; p < pred_first[k + 1]; ++p) {
-                    size_t from = preds[p], out = set_has(&defines[from], slot) ? from : in[from * SLOTS + slot];
-                    if (out == UNSEEN || out == meet) continue;
-                    if (meet != UNSEEN) {
-                        meet = k;
-                        break;
-                    }
-                    meet = out;
+        for (slot = 0; slot < SLOTS; ++slot) {
+            size_t meet = UNSEEN, p;
+            if (in[k * SLOTS + slot] == k) continue;
+            for (p = pred_first[k]; p < pred_first[k + 1]; ++p) {
+                size_t from = preds[p], out = set_has(&defines[from], slot) ? from : in[from * SLOTS + slot];
+                if (out == UNSEEN || out == meet) continue;
+                if (meet != UNSEEN) {
+                    meet = k;
+                    break;
                 }
-                if (meet != in[k * SLOTS + slot]) {
-                    in[k * SLOTS + slot] = meet;
-                    changed = 1;
-                }
+                meet = out;
             }
-    } while (changed);
+            if (meet != in[k * SLOTS + slot]) {
+                in[k * SLOTS + slot] = meet;
+                changed = 1;
+            }
+        }
+        if (changed)
+            for (i = succ_first[k]; i < succ_first[k + 1]; ++i) {
+                size_t to = succs[i];
+                if (!to || queued[to]) continue;
+                work[(head + queued_n++) % nblocks] = to;
+                queued[to] = 1;
+            }
+    }
     memset(phis, 0, SLOTS * sizeof(*phis));
     for (k = 1; k < nblocks; ++k)
         for (slot = 0; slot < SLOTS; ++slot)
@@ -358,8 +384,12 @@ static int count_phis(const Block* blocks, size_t nblocks, const BlockKey* keys,
 done:
     free(in);
     free(pred_first);
+    free(succ_first);
+    free(work);
     free(preds);
+    free(succs);
     free(defines);
+    free(queued);
     return rc;
 }
 
