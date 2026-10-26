@@ -684,6 +684,32 @@ unsigned char* snx_read_file(const char* path, size_t* size) {
     *size = n;
     return p;
 }
+int snx_file_has_record(const char* path, const void* magic, size_t magic_size, size_t size,
+                        int (*accept)(const unsigned char* record, const void* context), const void* context) {
+    /* read a MiB at a time, the last size - 1 bytes kept for a record that runs into the next */
+    size_t cap = ((size_t)1 << 20) + size, have = 0, got;
+    FILE* f = magic_size && magic_size <= size ? snx_fopen(path, "rb") : NULL;
+    unsigned char* p;
+    int found = 0;
+    if (!f) return 0;
+    p = (unsigned char*)snx_alloc(cap);
+    do {
+        got = fread(p + have, 1, cap - have, f);
+        have += got;
+        if (have >= size) {
+            unsigned char *at = p, *end = p + have - size + 1;
+            while (!found && (at = (unsigned char*)memchr(at, *(const unsigned char*)magic, (size_t)(end - at)))) {
+                found = !memcmp(at, magic, magic_size) && accept(at, context);
+                ++at;
+            }
+            memmove(p, p + have - (size - 1), size - 1);
+            have = size - 1;
+        }
+    } while (!found && got);
+    fclose(f);
+    free(p);
+    return found;
+}
 int snx_write_file(const char* path, const void* data, size_t size) {
     FILE* f = snx_fopen(path, "wb");
     int result;

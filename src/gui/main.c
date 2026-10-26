@@ -6163,9 +6163,15 @@ static const char* driver_name(int item) {
         default: return NULL;
     }
 }
+int (*snx_menu_has_driver)(const char* name) = NULL;
+/* whether item's driver is the menu's own program, run with the driver's name first (snx_menu_has_driver) */
+static bool driver_in_self(const App* app, int item) {
+    const char* name = driver_name(item);
+    return app->self && item != GUI_SWITCH && name && snx_menu_has_driver && snx_menu_has_driver(name);
+}
 static char* find_driver(const App* app, int item) {
     const char* name = driver_name(item);
-    if (app->self && item == GUI_SWITCH) return snx_strdup(app->self);
+    if (app->self && (item == GUI_SWITCH || driver_in_self(app, item))) return snx_strdup(app->self);
     if (!name) return NULL;
 #ifdef _WIN32
     char* filename = snx_format("%s.exe", name);
@@ -11189,10 +11195,11 @@ static void launch(App* app, char* absolute, bool prepared) {
     }
     /* the driver, the file, the settings, --repo and its folder, the picked games and extraction folders, NULL */
     GuiSettings* s = settings_of(app);
-    const char** argv = (const char**)snx_alloc((size_t)(s->count + 16) * sizeof(*argv));
+    const char** argv = (const char**)snx_alloc((size_t)(s->count + 17) * sizeof(*argv));
     char* out = NULL; /* a dump's extraction in the picked extractions folder */
     size_t n = 1;
     argv[0] = direct ? absolute : driver;
+    if (!direct && driver_in_self(app, app->menu.selected)) argv[n++] = driver_name(app->menu.selected);
     if (make) argv[n++] = "-r";
     if (!direct) argv[n++] = game_option ? game_option : absolute;
     /* Switch options only, never guest argv for the CPU-only Linux driver or the 3DS one; R's recompile takes no
