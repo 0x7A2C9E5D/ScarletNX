@@ -805,6 +805,44 @@ int snx_symlink(const char* target, const char* link) {
     return symlink(target, link) != 0;
 #endif
 }
+char* snx_vulkan_driver(const char* program) {
+#ifdef __APPLE__
+    /* beside the program: the copy a game's runtime is deployed with (snx_deploy_vulkan_driver), which is outside the
+       app that carries the library; then the app bundle's Frameworks, ../Frameworks from its Contents/MacOS; then the
+       framework an iOS app holds in the bundle itself */
+    static const char* const own[] = {"libMoltenVK.dylib", "../Frameworks/libMoltenVK.dylib",
+                                      "Frameworks/MoltenVK.framework/MoltenVK"};
+    char* dir = snx_dirname(program);
+    char* path = NULL;
+    size_t i;
+    for (i = 0; !path && dir && i < sizeof own / sizeof* own; ++i) {
+        char* found = snx_path_join(dir, own[i]);
+        if (found && snx_is_file(found)) path = found;
+        else free(found);
+    }
+    free(dir);
+    return path;
+#else
+    (void)program;
+    return NULL;
+#endif
+}
+int snx_deploy_vulkan_driver(const char* program, const char* folder) {
+    char *from = snx_vulkan_driver(program), *to;
+    int rc = 0;
+    /* the system's loader serves everywhere else, and a build that carries none (a checkout's) leaves the system's */
+    if (!from) return 0;
+    to = snx_path_join(folder, "libMoltenVK.dylib");
+    /* a second name where the disk allows one, so each game does not hold a copy, else a copy. A name of another app's
+       library is broken rather than written through, which would change that app's library and signature too */
+    if (!to || (snx_is_file(to) && snx_remove_tree(to)) || snx_link_file(from, to) || snx_copy_file(from, to)) {
+        snx_error("cannot put the Vulkan driver %s in %s", from, folder);
+        rc = 1;
+    }
+    free(to);
+    free(from);
+    return rc;
+}
 int snx_path_within(const char* path, const char* parent) {
     char *a = snx_absolute(path), *b = snx_absolute(parent);
     size_t i = 0, n;
