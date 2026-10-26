@@ -887,6 +887,40 @@ void vk_rt_before_write_cpu(u64 cpu, u64 size) {
 }
 
 static void zt_restore(Surf* s);
+/* Another format over the same bytes: one game draws its scene to an sRGB target and the overlay over it to a UNORM
+   one at the same address, and presents that. The target taking the address starts from the pixels of the one it
+   parks (fresh: newer than memory) when they are newer than its own and both images hold the guest's bytes as they
+   are, in the same shape. Memory, which neither target's draws wrote, doesn't have them. 1 when it took them */
+static int rt_take_pixels(Surf* to, Surf* from, int fresh) {
+    if (!from || from == to || !fresh || from->layout == VK_IMAGE_LAYOUT_UNDEFINED || from->wseq <= to->wseq ||
+        from->f.depth || to->f.depth || !from->f.raw || !to->f.raw || from->f.bpp != to->f.bpp || from->w != to->w ||
+        from->h != to->h || from->sw != to->sw || from->sh != to->sh || from->bl != to->bl || from->bh != to->bh ||
+        from->bd != to->bd || from->pitch != to->pitch || from->layers != to->layers ||
+        from->layer_size != to->layer_size || from->volume || to->volume)
+        return 0;
+    vk_render_end();
+    VkCommandBuffer cb = vk_cmd();
+    vk_surf_use(cb, from, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT);
+    vk_surf_use(cb, to, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    VkImageCopy c = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, to->layers},
+                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, to->layers},
+                     .extent = {to->sw, to->sh, 1}};
+    rec_CmdCopyImage(cb, from->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, to->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                     1, &c);
+    LOG_LIMIT(10, "vulkan: the %ux%u render target at %llx in format %x takes the pixels of the one in format %x\n",
+              to->w, to->h, (unsigned long long)to->gva, to->fkey, from->fkey);
+    vk_surf_wrote(to);
+    if (from->mem_wgen == from->wgen) to->mem_wgen = to->wgen;
+    /* drawn as from was: fresh as long as memory isn't written after from's baseline */
+    vk_rt_drawn(to);
+    to->draw_wseen = from->draw_wseen;
+    to->draw_gw = from->draw_gw;
+    to->draw_has_hash = from->draw_has_hash;
+    to->draw_hash = from->draw_hash;
+    return 1;
+}
 static Surf* rt_create_(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch, u32 layers, u64 layer_size,
                         int volume);
 /* a render target's lookup or creation as a profiler zone (SNX_TRACY builds) */
@@ -920,6 +954,10 @@ static Surf* rt_create_(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32
         }
     /* another size, format or layout at this address: park the current one, reuse a parked one that fits */
     Surf* parked = NULL;
+    /* the one parked here, whose freshness is asked while it holds the address (not when only the size changes, as
+       dynamic resolution does every frame in some games) */
+    Surf* cur = depth ? NULL : vk_rt_find(gva);
+    int cur_fresh = cur && cur->w == w && cur->h == h && cur->layers == layers && !volume && vk_rt_drawn_fresh(cur);
     for (Surf* s = g_surfh[hkey(gva)]; s; s = s->next)
         if (s->gva == (gva | 1ull << 63) && s->is_rt && s->w == w && s->h == h && s->fkey == fkey && s->bl == bl &&
             s->bh == bh && s->pitch == pitch && s->layers == layers && s->layer_size == layer_size && s->bd == bd &&
@@ -940,6 +978,7 @@ static Surf* rt_create_(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32
         g_vk_surf_epoch++;
         rt_pages(parked, 1);
         vk_rt_note_read(parked);
+        rt_take_pixels(parked, cur, cur_fresh);
         return parked;
     }
     VkFmt f = depth ? vk_zt_format(fmt) : vk_rt_format(fmt);
@@ -954,10 +993,10 @@ static Surf* rt_create_(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32
     s->gw = gpu_mem_generation();
     /* the CPU may have written the memory already (a cleared or decoded frame): start from it. A depth target never
        comes from memory, but a loaded save state may hold its pixels */
-    if (!depth)
-        vk_rt_reload(gva);
-    else
+    if (depth)
         zt_restore(s);
+    else if (!rt_take_pixels(s, cur, cur_fresh))
+        vk_rt_reload(gva);
     return s;
 }
 
