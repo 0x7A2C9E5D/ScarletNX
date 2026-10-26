@@ -10,6 +10,9 @@
 
 /* The most host address space the guest gets (128 GiB), which tables indexed by guest address are sized for */
 #define AS_MAX 0x2000000000ull
+/* A 64-bit application of the pre-2.0 address space type: the console gives these 64 GiB, and everything the game
+   holds (an IPC buffer descriptor's address among them) has to fit in 36 bits */
+#define AS36 (1ull << 36)
 /* The host reservation, which a guest address of either width is an offset below: AS_MAX, or less where the system
    allows an app less address space (iOS without the paid extended-virtual-addressing entitlement), when mem_init picks
    a smaller layout to fit it */
@@ -87,6 +90,9 @@ enum { MEM_BADSTATE = -1, MEM_NOMEM = -2, MEM_LIMIT = -3 };
 /* the console's layout below 4 GiB for a 32-bit process, by the NPDM's address space type: 0 with the alias region, 2
    without */
 void mem_layout32(unsigned aspace);
+/* the console's 64 GiB layout for a 64-bit process of the pre-2.0 address space type (the NPDM's 1), where every
+   guest address has to fit in 36 bits */
+void mem_layout36(void);
 /* The guest's address space reserved now, the largest tier the system gives from the console's 128 GiB down to 5 GiB,
    each refused one said: before the game's code takes a share of a small one. mem_init finds it kept */
 void mem_reserve(void);
