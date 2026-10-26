@@ -160,10 +160,10 @@ setting Stats corner
 table g_graphics_ini
 setting Resolution scale
     key resolution
-    float 0.25 4
+    float 0.25 16
     default 1
     startup
-    help The scale of the game's 3D rendering, 0.25 to 4: 1 = the console's, 2 = double, 0.5 = half
+    help The scale of the game's 3D rendering, 0.25 to 16: 1 = the console's, 2 = double, 0.5 = half
 setting Shadows
     key shadows
     int 0 1
