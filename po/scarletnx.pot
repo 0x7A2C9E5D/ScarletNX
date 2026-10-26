@@ -3280,6 +3280,16 @@ msgid "Pick the file from this computer's storage (%s)."
 msgstr ""
 
 #: src/gui/main.c
+#, c-format
+msgid "%s opens with %s: cannot find %s beside ScarletNX or on PATH."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s opens with %s, not %s."
+msgstr ""
+
+#: src/gui/main.c
 msgid "Drop one local file path, not a list or remote URL."
 msgstr ""
 
