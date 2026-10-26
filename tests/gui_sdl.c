@@ -7772,10 +7772,12 @@ int main(int argc, char** argv) {
     const int sizes[][4] = {{2560, 1440, 45, 160}, {1280, 960, 30, 80}, {800, 480, 16, 50}, {1280, 800, 25, 80}};
     assert(app.auto_scale == 2);
     /* Auto is twice the display's scale, as far as 16 rows fit on a computer: 100%, 125%, 150% and 200%; a phone keeps
-       20, so the Poco F8 (408 dpi, 1156 rows of pixels) and the Pixel 9 (420 dpi, 1080) get 3x, with 24 and 22 rows */
+       30, so the Poco F8 (408 dpi, 1156 rows of pixels) and the Pixel 9 (420 dpi, 1080) get 2x, with 36 and 33 rows */
     assert(pick_auto_scale(1.0f, 800, 16) == 2 && pick_auto_scale(1.25f, 1000, 16) == 2);
     assert(pick_auto_scale(1.5f, 1200, 16) == 3 && pick_auto_scale(2.0f, 1600, 16) == 4);
-    assert(pick_auto_scale(408.0f / 160, 1156, 20) == 3 && pick_auto_scale(420.0f / 160, 1080, 20) == 3);
+    assert(GUI_AUTO_ROWS_PHONE == 30);
+    assert(pick_auto_scale(408.0f / 160, 1156, GUI_AUTO_ROWS_PHONE) == 2 &&
+           pick_auto_scale(420.0f / 160, 1080, GUI_AUTO_ROWS_PHONE) == 2);
     assert(pick_auto_scale(408.0f / 160, 1156, 16) == 4);
     assert(pick_auto_scale(1.0f, 480, 16) == 1 && pick_auto_scale(0.5f, 800, 16) == 1 &&
            pick_auto_scale(3.0f, 2400, 16) == 6);

@@ -1431,9 +1431,11 @@ static void recent_open(App* app, char* file) {
 static int entering(const App* app) {
     return app->entering_ms && now_ms(app) < app->entering_ms + app->theme.fade_out_ms;
 }
-/* the rows Auto keeps at the least: a phone held wide is short, and its menu needs room for its items */
+/* the rows Auto keeps at the least: a phone held wide is short, and its menu needs room for its items, a finger's row
+   each, and the setup's boxes for their lines: 2x on the phones of 1080 and 1156 rows of pixels */
+#define GUI_AUTO_ROWS_PHONE 30
 #ifdef SNX_TOUCH_UI
-#define GUI_AUTO_ROWS 20
+#define GUI_AUTO_ROWS GUI_AUTO_ROWS_PHONE
 #else
 #define GUI_AUTO_ROWS 16
 #endif
