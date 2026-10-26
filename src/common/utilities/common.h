@@ -66,6 +66,14 @@ int snx_link_file(const char* src, const char* dst);
 /* link a symbolic link to target, which it names as given: nonzero when it cannot be made (on Windows, without the
    right to make one: developer mode or an administrator) */
 int snx_symlink(const char* target, const char* link);
+/* on Apple, the Vulkan driver a program's own folders carry, for SDL to load instead of the system's loader: the
+   MoltenVK beside it (a game's runtime copy), the app bundle's Frameworks, or the framework in an iOS app. NULL
+   elsewhere, and when its folders have none (the system's loader, which the app's own bundle finds by itself) */
+char* snx_vulkan_driver(const char* program);
+/* put the Vulkan driver program carries in folder, beside the program a game runs there: its copy of the runtime is
+   outside the app's bundle, where neither SDL's search nor a system's loader reaches the library. 0, or 1 with the
+   reason said. Nothing to do, and 0, where the system's loader serves or the program carries none */
+int snx_deploy_vulkan_driver(const char* program, const char* folder);
 int snx_path_within(const char* path, const char* parent);
 int snx_replace(const char* src, const char* dst);
 int snx_list_dir(const char* path, char*** names, size_t* count);

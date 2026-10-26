@@ -910,8 +910,11 @@ int vk_swapchain_create(int srgb) {
 int vk_init(void) {
     pm_init(&g_vklock);
     if (g_opt_headless) {
-        /* Load libvulkan/vulkan-1 directly. No SDL video driver or headless-surface extension is needed. */
-        if (!VK_OK(volkInitialize())) return 0;
+        /* Load libvulkan/vulkan-1 directly, or the driver the program's folders carry (an Apple app's MoltenVK): no SDL
+           video driver or headless-surface extension is needed. */
+        void* own = backend_vk_driver();
+        if (own) volkInitializeCustom((PFN_vkGetInstanceProcAddr)own);
+        else if (!VK_OK(volkInitialize())) return 0;
     } else {
         PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)backend_vk_loader();
         if (!gipa) {

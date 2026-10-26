@@ -33,6 +33,9 @@
 #include "common/utilities/window_icon.h"
 #include "nx/runtime/platform/controls_png.h"
 #include "common/utilities/build_info.h"
+#ifdef __APPLE__
+#include <dlfcn.h>
+#endif
 #ifdef __ANDROID__
 #include <jni.h>
 #endif
@@ -328,16 +331,15 @@ void video_init(const char* title, const char* addons) {
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
     SDL_SetHint(SDL_HINT_PEN_MOUSE_EVENTS, "0");
 #ifdef __APPLE__
-    { /* the apps carry their MoltenVK (cmake/apple_package.cmake), in the bundle's Frameworks, which SDL does not search:
-         macOS's beside Resources/ (SDL's base folder), iOS's in the bundle itself. Elsewhere the system's loader */
-        const char* base = SDL_GetBasePath();
-        const char* const own[] = {"../Frameworks/libMoltenVK.dylib", "Frameworks/MoltenVK.framework/MoltenVK"};
-        size_t i;
-        for (i = 0; base && !SDL_GetHint(SDL_HINT_VULKAN_LIBRARY) && i < sizeof own / sizeof *own; i++) {
-            char* path = snx_format("%s%s", base, own[i]);
-            if (snx_is_file(path)) SDL_SetHint(SDL_HINT_VULKAN_LIBRARY, path);
-            free(path);
+    { /* the app's MoltenVK, or the copy deployed beside a game's runtime, which is outside the bundle: SDL's own search
+         finds neither there, and the system may have no loader (docs/APPLE.md). Elsewhere the system's loader */
+        char* self = snx_executable(NULL), *driver = self ? snx_vulkan_driver(self) : NULL;
+        if (driver && !SDL_GetHint(SDL_HINT_VULKAN_LIBRARY)) {
+            SDL_SetHint(SDL_HINT_VULKAN_LIBRARY, driver);
+            LOG("vulkan: the Vulkan driver at %s\n", driver);
         }
+        free(self);
+        free(driver);
     }
 #endif
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) fatal("SDL could not start its video: %s", SDL_GetError());
@@ -381,6 +383,26 @@ void video_init(const char* title, const char* addons) {
 }
 
 void* backend_vk_loader(void) { return (void*)SDL_Vulkan_GetVkGetInstanceProcAddr(); }
+void* backend_vk_driver(void) {
+#ifdef __APPLE__
+    /* The library the program's folders carry (snx_vulkan_driver), for a run with no window: SDL's own search of the
+       bundle needs its video subsystem, and a game's runtime copy is outside the bundle. It stays loaded for the run,
+       as SDL's does */
+    static void* module;
+    static int looked;
+    if (!looked) {
+        char* self = snx_executable(NULL), *driver = self ? snx_vulkan_driver(self) : NULL;
+        looked = 1;
+        if (driver && (module = dlopen(driver, RTLD_NOW | RTLD_LOCAL)) != NULL)
+            LOG("vulkan: the Vulkan driver at %s\n", driver);
+        free(self);
+        free(driver);
+    }
+    return module ? (void*)dlsym(module, "vkGetInstanceProcAddr") : NULL;
+#else
+    return NULL;
+#endif
+}
 const char* const* backend_vk_extensions(u32* n) {
     Uint32 c = 0;
     const char* const* e = SDL_Vulkan_GetInstanceExtensions(&c);
