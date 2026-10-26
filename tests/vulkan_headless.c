@@ -6,6 +6,10 @@
 #include "nx/runtime/options.h"
 #include "nx/gpu/renderer.h"
 #include "nx/gpu/vk/vk.h"
+#include "nx/gpu/maxwell/kepler_compute_regs.h"
+#include "nx/gpu/maxwell/engines_int.h"
+#include "nx/gpu/maxwell/maxwell_3d_regs.h"
+#include "nx/gpu/maxwell/gob.h"
 #include "nx/gpu/video/vic.h"
 #include "nx/memory/mem.h"
 #include "nx/memory/own.h"
@@ -902,7 +906,7 @@ static int check_blit(void) {
 }
 
 /* a block linear A8B8G8R8 target of w by h at gva (blocks 2^bh GOBs high) cleared to red or blue */
-static void rt_clear(GpuChannel* ch, u64 gva, u32 w, u32 h, u32 bh, int blue) {
+static void rt_clear_format(GpuChannel* ch, u64 gva, u32 w, u32 h, u32 bh, int blue, u32 format) {
     u32* r = ch->r3d;
     const float color[4] = {blue ? 0.0f : 1.0f, 0, blue ? 1.0f : 0.0f, 1};
     r[0x487] = 1;
@@ -910,13 +914,16 @@ static void rt_clear(GpuChannel* ch, u64 gva, u32 w, u32 h, u32 bh, int blue) {
     r[0x201] = (u32)gva;
     r[0x202] = w;
     r[0x203] = h;
-    r[0x204] = 0xD5;
+    r[0x204] = format;
     r[0x205] = bh << 4;
     r[0x206] = 1;
     r[0x207] = 0;
     memcpy(&r[0x360], color, sizeof color);
     vk_render_clear(ch, 15 << 2);
     vk_render_end();
+}
+static void rt_clear(GpuChannel* ch, u64 gva, u32 w, u32 h, u32 bh, int blue) {
+    rt_clear_format(ch, gva, w, h, bh, blue, 0xD5);
 }
 /* n bytes at p all blue pixels */
 static int all_blue(const u8* p, u32 n) {
@@ -1017,7 +1024,11 @@ static int check_rt_overlap(void) {
 }
 
 #include "vulkan_shader_invalidate.inc"
+#include "vulkan_storage_formats.inc"
+#include "vulkan_storage_atomics.inc"
+#include "vulkan_surface_loads.inc"
 #include "vulkan_owned_readback.inc"
+#include "vulkan_mesh_inputs.inc"
 
 int main(int argc, char** argv) {
     const u32 w = 32, h = 16;
@@ -1049,7 +1060,11 @@ int main(int argc, char** argv) {
     CHECK(!check_owned_readback());
     CHECK(!check_owned_writable());
     CHECK(!check_buffer_texture_rows());
+    CHECK(!check_storage_image_formats());
+    CHECK(!check_volume_surface_atomics());
+    CHECK(!check_layered_surface_loads());
     CHECK(!check_viewport_orientation());
+    CHECK(!check_mesh_inputs());
     CHECK(!check_packed_depth());
     CHECK(!check_depth_array());
     CHECK(!check_srgb_write());
