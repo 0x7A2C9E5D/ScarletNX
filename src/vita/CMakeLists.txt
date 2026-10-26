@@ -68,26 +68,8 @@ foreach(target snx_vita_loader snx_vita_usse snx-vita-usse snx_vita_program)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 endforeach()
 
-# the driver: scarletnx-vita's own program, or where scarletnx is also this driver (SNX_MULTICALL, src/multicall) its
-# main in this library, the name scarletnx-vita a link to scarletnx
-if(SNX_MULTICALL)
-    target_sources(snx_vita_program PRIVATE runtime/main.c)
-    target_compile_definitions(snx_vita_program PRIVATE SNX_MULTICALL)
-else()
-    add_executable(scarletnx-vita runtime/main.c)
-    target_link_libraries(scarletnx-vita PRIVATE snx_vita_program)
-    set_target_properties(scarletnx-vita PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
-    target_compile_options(scarletnx-vita PRIVATE -Wall -Wextra -Werror=missing-prototypes)
-    if(SNX_DEPLOY AND NOT (SNX_TEST_SANITIZERS AND BUILD_TESTING))
-        add_custom_command(TARGET scarletnx-vita POST_BUILD
-            COMMAND "${CMAKE_COMMAND}" "-DVITA_RUNTIME=$<TARGET_FILE:scarletnx-vita>" "-DGAMES=${SNX_RECOMPILED_DIR}"
-                    "-DWINDOWS=${WIN32}" "-DMACOS=${APPLE}" -P "${PROJECT_SOURCE_DIR}/cmake/deploy.cmake"
-            VERBATIM)
-    endif()
-    include(GNUInstallDirs)
-    install(TARGETS scarletnx-vita RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    if(SNX_LLVM_SHARED)
-        target_link_options(scarletnx-vita PRIVATE "-Wl,-rpath,${SNX_LLVM_LIBRARY_DIR}")
-    endif()
+# the driver's command line (runtime/main.c's snx_vita_main), which scarletnx runs as scarletnx-vita (src/multicall)
+target_sources(snx_vita_program PRIVATE runtime/main.c)
+if(SNX_LLVM_SHARED)
+    target_link_options(snx_vita_program INTERFACE "-Wl,-rpath,${SNX_LLVM_LIBRARY_DIR}")
 endif()

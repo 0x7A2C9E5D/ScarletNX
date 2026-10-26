@@ -9,6 +9,7 @@
 #include "agb/cpu/memmap.h"
 #include "agb/cpu/recomp.h"
 #include "agb/runtime/host.h"
+#include "agb/runtime/main.h"
 #include "common/utilities/common.h"
 #include "common/utilities/game_ini.h"
 #include "common/utilities/script.h"
@@ -111,6 +112,15 @@ static char* own_game(const char* argv0) {
     return folder;
 }
 
+bool snx_agb_game_name(const char* argv0) {
+    char *folder = own_game(argv0), *exe = folder ? snx_executable(argv0) : NULL, *name = exe ? program_name(exe) : NULL;
+    bool gba = name && snx_game_system(folder, name) == SNX_SYSTEM_GBA;
+    free(name);
+    free(exe);
+    free(folder);
+    return gba;
+}
+
 /* The game's folder: in outdir, else the data folder's recompiled/ as the Switch and 3DS drivers make theirs. Made,
    resolved; NULL with a line saying why */
 static char* game_folder(const char* data, const char* outdir, const char* argv0, const char* name) {
@@ -153,7 +163,7 @@ static int save_write(AgbBoard* board, const char* path) {
     return -1;
 }
 
-int main(int argc, char** argv) {
+int snx_agb_main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IOLBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
     const char *path = NULL, *shot = NULL, *data = NULL, *outdir = NULL, *game = NULL, *script = NULL;

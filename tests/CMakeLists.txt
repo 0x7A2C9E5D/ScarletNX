@@ -50,16 +50,16 @@ if(SNX_TEST_SANITIZERS)
         # the Switch runtime: its components, the shader translator and the Vulkan backend
         scarletnx snx_core snx_kernel snx_hle snx_video snx_gpu snx_platform snx_shader snx_vk
         # the GNU ABI runtime
-        scarletnx-gnuabi scarletnx-gnuabi-run snx_gnuabi_program
+        scarletnx-gnuabi
         # the 3DS runtime
         scarletnx-3ds snx_ctr_program snx_ctr_board snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process snx_ctr_native
         snx_ctr_audio snx_ctr_gpu snx_ctr_gpu_reference
         # the Vita runtime, its loader and USSE translator
         scarletnx-vita snx_vita_program snx_vita_loader snx_vita_usse snx-vita-usse
         # the GBA board and its runner
-        scarletnx-agb scarletnx-agb-run
-        # scarletnx's main where it is the other drivers too
-        snx_multicall
+        scarletnx-agb snx_agb_program
+        # the Switch driver's entry, which scarletnx runs as it runs the others
+        snx_switch_program
         # the menu, its splash, icon and pads
         scarletnx-gui snx_gui_support snx_gui_ui snx_i18n snx_gui_languages snx_gui_languages_test snx_splash snx-test-splash
         snx_window_icon snx-test-window-icon snx_pad_sdl snx_gui_pad
