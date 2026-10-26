@@ -155,7 +155,8 @@ int vk_own_init(void) {
                   .release = res_release,
                   .busy_tid = lock_owner,
                   .lock = vk_lock,
-                  .unlock = vk_unlock};
+                  .unlock = vk_unlock,
+                  .landed = vk_ww_landed};
     g_own_traps = !own_init(&h);
     return g_own_traps ? 0 : -1;
 }
