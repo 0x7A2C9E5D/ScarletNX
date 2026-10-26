@@ -3,11 +3,13 @@
 /* The Vulkan driver an Apple app carries (MoltenVK): found beside a program or in its bundle, and put beside the runtime
    copy a game runs, which is outside the bundle where SDL finds neither the app's Frameworks nor a system loader
    (docs/APPLE.md) */
+#define _DARWIN_C_SOURCE /* chflags and UF_IMMUTABLE, which hide behind it in a strict C99 compile */
 #include "common/utilities/common.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 static void put(const char* path, const char* text) { assert(!snx_write_file(path, text, strlen(text))); }
 static void holds(const char* path, const char* text) {
@@ -30,6 +32,7 @@ int main(void) {
     char *app, *app_macos, *app_frameworks, *app_program, *app_driver;
     char *phone, *phone_frameworks, *phone_program, *phone_driver;
     char *game_dir, *game, *game_driver, *plain_dir, *plain;
+    struct stat app_st, game_st;
     assert(dir);
     app = snx_path_join(dir, "ScarletNX.app");
     app_macos = snx_path_join(app, "Contents/MacOS");
@@ -64,6 +67,15 @@ int main(void) {
     put(app_driver, "MoltenVK, the app's, newer");
     assert(!snx_deploy_vulkan_driver(app_program, game_dir));
     holds(game_driver, "MoltenVK, the app's, newer");
+    /* a program the disk takes no second name from (an app on a read-only image, or one macOS translocated) leaves the
+       copy: the deploy fails the run without it */
+    assert(!snx_remove_tree(game_driver));
+    assert(!chflags(app_driver, UF_IMMUTABLE));
+    assert(snx_link_file(app_driver, game_driver)); /* the disk refuses this name */
+    assert(!snx_deploy_vulkan_driver(app_program, game_dir));
+    holds(game_driver, "MoltenVK, the app's, newer");
+    assert(!stat(app_driver, &app_st) && !stat(game_driver, &game_st) && app_st.st_ino != game_st.st_ino);
+    assert(!chflags(app_driver, 0));
     /* nothing to put beside a game from a program that carries none, and the game's stays */
     assert(!snx_deploy_vulkan_driver(plain, game_dir));
     holds(game_driver, "MoltenVK, the app's, newer");

@@ -828,17 +828,24 @@ char* snx_vulkan_driver(const char* program) {
 #endif
 }
 int snx_deploy_vulkan_driver(const char* program, const char* folder) {
-    char *from = snx_vulkan_driver(program), *to;
+    char *from = snx_vulkan_driver(program), *to, why[256];
     int rc = 0;
     /* the system's loader serves everywhere else, and a build that carries none (a checkout's) leaves the system's */
     if (!from) return 0;
     to = snx_path_join(folder, "libMoltenVK.dylib");
-    /* a second name where the disk allows one, so each game does not hold a copy, else a copy. A name of another app's
-       library is broken rather than written through, which would change that app's library and signature too */
-    if (!to || (snx_is_file(to) && snx_remove_tree(to)) || snx_link_file(from, to) || snx_copy_file(from, to)) {
-        snx_error("cannot put the Vulkan driver %s in %s", from, folder);
-        rc = 1;
+    if (!to) {
+        snx_error("cannot name the Vulkan driver's place in %s", folder);
+        free(from);
+        return 1;
     }
+    /* A second name where the disk allows one, so each game does not hold a copy, else a copy. A read-only app image,
+       and an app macOS translocated, take no second name of the library they carry, which is why the copy follows a
+       link that failed. A name of another app's library is broken rather than written through, which would change that
+       app's library and signature too */
+    if (snx_is_file(to) && snx_remove_tree(to))
+        rc = snx_error("cannot remove the Vulkan driver at %s: %s", to, snx_os_error(why, sizeof why));
+    else if (snx_link_file(from, to) && snx_copy_file(from, to))
+        rc = snx_error("cannot put the Vulkan driver %s in %s: %s", from, folder, snx_os_error(why, sizeof why));
     free(to);
     free(from);
     return rc;
