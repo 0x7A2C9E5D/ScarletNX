@@ -169,6 +169,7 @@ static SnxIr* new_ir(const char* name, char opt, const char* target_triple, int 
     LLVMTypeRef params[2];
     ir = (SnxIr*)calloc(1, sizeof(*ir));
     if (!ir) return NULL;
+    ir->promote = opt != '0';
     triple = target_triple ? LLVMCreateMessage(target_triple) : host_triple(jit);
     if (LLVMGetTargetFromTriple(triple, &target, &message)) {
         snprintf(error, error_size, "LLVM target %s: %s", triple, message ? message : "unavailable");

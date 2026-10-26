@@ -284,11 +284,11 @@ setting Prepare shaders
     help Esc quits (on Android, back opens the menu)
 setting JIT threads
     key jit_threads
-    int 0 8
+    int 0 4
     default 0
     startup
     words Auto|#
-    help Threads compiling the code the recompiler missed: 0 = every CPU the game may use but two (at most 8).
+    help Threads compiling the code the recompiler missed: 0 = every CPU the game may use but two (at most 4).
     help They yield to the game
 setting JIT optimization
     key jit_opt
@@ -592,7 +592,7 @@ setting FPSR flags
     words Off|On
     recompile
     help 1 = the game's code keeps FPSR's flags (floating point's inexact, underflow, overflow, division by zero and
-    help invalid, and the saturation flag QC) as the console raises them, which costs every such operation tests of
+    help invalid, and the saturation flag QC) as the console raises them, which costs every such operation a test of
     help its result. 0 = only the results are the console's: a game that never reads FPSR (few do) runs its floating
     help point and saturating arithmetic faster. It applies to the next recompile, and to the JIT's next run
 setting Volatile load/stores

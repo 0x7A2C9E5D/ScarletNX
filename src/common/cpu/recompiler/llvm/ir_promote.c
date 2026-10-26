@@ -4,15 +4,18 @@
    in the CPU structure, and a call that takes c can read or change any of them, so LLVM keeps each in memory across
    every loop that has one, even a call it never makes (the poll on each backward branch, an FP helper's slow path).
    Once the function is emitted, ir_promote_registers moves those accesses onto a stack slot per register, which
-   SROA and mem2reg make SSA values. Two passes over the function's blocks keep the copies to the few that matter: a
-   call or return (a site) stores the registers written since the last site on some path to it (dirty), and the
-   function loads a register on entry and after a call only where it is read before it is written or stored by a
-   site (live). A store of part of a register (a lane) reads the rest. The CPU structure holds the architectural
-   registers wherever anything else can look at them: in the runtime, a callee, a helper. In between (a fault's crash
-   report) it holds them as they were at the last call. FPCR and FPSR are locals too, for the FP fast paths' tests:
-   the helpers that use only them (ir_noregs) are sites for those two alone, which read FPCR and change FPSR */
+   SROA and mem2reg make SSA values. It runs at O1 and above: at O0 those passes do not run, so the slots and the
+   copies at every site stay, which costs call-heavy code and grows the JIT's arena. Two passes over the function's
+   blocks keep the copies to the few that matter: a call or return (a site) stores the registers written since the
+   last site on some path to it (dirty), and the function loads a register on entry and after a call only where it is
+   read before it is written or stored by a site (live). A store of part of a register (a lane) reads the rest. The
+   CPU structure holds the architectural registers wherever anything else can look at them: in the runtime, a callee,
+   a helper. In between (a fault's crash report) it holds them as they were at the last call. FPCR and FPSR are
+   locals too, for the FP fast paths' tests: the helpers that use only them (ir_noregs) are sites for those two
+   alone, which read FPCR and change FPSR */
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/aarch64/cpu.h"
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -192,7 +195,7 @@ static int set_join(Set* to, const Set* from) {
 }
 
 static int access_by_inst(const void* a, const void* b) {
-    LLVMValueRef x = ((const Access*)a)->inst, y = ((const Access*)b)->inst;
+    SnxU64 x = (SnxU64)(uintptr_t)((const Access*)a)->inst, y = (SnxU64)(uintptr_t)((const Access*)b)->inst;
     return x < y ? -1 : x > y;
 }
 
@@ -202,7 +205,7 @@ typedef struct {
     size_t index;
 } BlockKey;
 static int key_by_block(const void* a, const void* b) {
-    LLVMBasicBlockRef x = ((const BlockKey*)a)->block, y = ((const BlockKey*)b)->block;
+    SnxU64 x = (SnxU64)(uintptr_t)((const BlockKey*)a)->block, y = (SnxU64)(uintptr_t)((const BlockKey*)b)->block;
     return x < y ? -1 : x > y;
 }
 static size_t block_index(const BlockKey* keys, size_t count, LLVMBasicBlockRef block) {
