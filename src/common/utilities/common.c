@@ -458,24 +458,6 @@ char* snx_absolute(const char* path) {
     return result;
 #endif
 }
-char* snx_find_compiler(const char* built, const char* beside, char* error, size_t error_size) {
-#ifdef _WIN32
-    static const char clang[] = "clang.exe";
-#else
-    static const char clang[] = "clang";
-#endif
-    char *found = built && *built ? snx_find_tool(built) : NULL, *local;
-    if (found) return found;
-    local = beside ? snx_path_join(beside, clang) : NULL;
-    found = local ? snx_find_tool(local) : NULL;
-    free(local);
-    if (!found) found = snx_find_tool("clang");
-    if (!found)
-        snprintf(error, error_size, "%s is not on this machine, %s%s holds no %s, and no folder of PATH has one",
-                 built && *built ? built : "the build's compiler", beside ? "" : "the program's folder",
-                 beside ? beside : "", clang);
-    return found;
-}
 char* snx_executable(const char* argv0) {
 #ifdef _WIN32
     wchar_t buf[32768];

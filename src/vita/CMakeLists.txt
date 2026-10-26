@@ -39,20 +39,11 @@ include("${PROJECT_SOURCE_DIR}/cmake/llvm.cmake")
 if(NOT TARGET snx_arm_llvm)
     add_subdirectory("${PROJECT_SOURCE_DIR}/src/common/cpu/arm" vita-arm-backend)
 endif()
-target_link_libraries(snx_vita_program PUBLIC snx_arm_llvm)
-# the helpers compiled blocks call, which the offline compiler links each game module with
-set(vita_runtime_source "${CMAKE_CURRENT_BINARY_DIR}/vita-runtime-$<CONFIG>.c")
-add_custom_command(OUTPUT "${vita_runtime_source}"
-    COMMAND "${CMAKE_COMMAND}" "-DINPUT=$<TARGET_FILE:snx_arm_rt>" "-DOUTPUT=${vita_runtime_source}"
-        -P "${PROJECT_SOURCE_DIR}/cmake/vita-runtime.cmake"
-    DEPENDS snx_arm_rt "${PROJECT_SOURCE_DIR}/cmake/vita-runtime.cmake" VERBATIM)
-target_sources(snx_vita_program PRIVATE "${vita_runtime_source}")
-target_compile_definitions(snx_vita_program PRIVATE "SNX_VITA_HOST_CC=\"${CMAKE_C_COMPILER}\"" _CRT_SECURE_NO_WARNINGS)
-# the run-time compiler for the blocks the module lacks: the LLVM backend's executor (exec.c, in snx_llvm)
-if(TARGET snx_llvm)
-    target_link_libraries(snx_vita_program PUBLIC snx_llvm)
-    target_compile_definitions(snx_vita_program PRIVATE SNX_VITA_JIT)
-endif()
+# The LLVM backend (snx_llvm, which the Switch driver's tree, the GNU ABI runtime's or the top level configures): the
+# offline compiler's objects and their helpers (armlib.c) linked by its linker, and the blocks the module lacks
+# compiled at run time by its executor (exec.c)
+target_link_libraries(snx_vita_program PUBLIC snx_arm_llvm snx_llvm)
+target_compile_definitions(snx_vita_program PRIVATE _CRT_SECURE_NO_WARNINGS)
 # The backend checked against Unicorn as the game runs (runtime/lockstep.h), for debugging the AArch32 backend: Unicorn's
 # headers and library (its Python package's libunicorn.so.2 will do) where the build is told
 option(SNX_VITA_LOCKSTEP "Check the Vita's AArch32 code against Unicorn while it runs (VITA_LOCKSTEP=import call)" OFF)

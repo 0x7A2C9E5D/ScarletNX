@@ -64,14 +64,11 @@ include("${PROJECT_SOURCE_DIR}/cmake/llvm.cmake")
 if(NOT TARGET snx_arm_llvm)
     add_subdirectory("${PROJECT_SOURCE_DIR}/src/common/cpu/arm" ctr-arm-backend)
 endif()
-set(ctr_runtime_source "${CMAKE_CURRENT_BINARY_DIR}/ctr-runtime-$<CONFIG>.c")
-add_custom_command(OUTPUT "${ctr_runtime_source}"
-    COMMAND "${CMAKE_COMMAND}" "-DINPUT=$<TARGET_FILE:snx_arm_rt>" "-DOUTPUT=${ctr_runtime_source}"
-        -P "${PROJECT_SOURCE_DIR}/cmake/ctr-runtime.cmake"
-    DEPENDS snx_arm_rt "${PROJECT_SOURCE_DIR}/cmake/ctr-runtime.cmake" VERBATIM)
-# The offline compiler is part of the driver, as the Switch driver's recompiler is part of scarletnx
-target_sources(snx_ctr_program PRIVATE aot/compiler.c aot/discover.c "${ctr_runtime_source}")
-target_link_libraries(snx_ctr_program PUBLIC snx_arm_llvm)
+# The offline compiler is part of the driver, as the Switch driver's recompiler is part of scarletnx. The LLVM backend
+# (snx_llvm, which the Switch driver's tree, the GNU ABI runtime's or the top level configures) links its objects and
+# their helpers (armlib.c) with its own linker, and compiles the blocks the static module lacks at run time (exec.c)
+target_sources(snx_ctr_program PRIVATE aot/compiler.c aot/discover.c)
+target_link_libraries(snx_ctr_program PUBLIC snx_arm_llvm snx_llvm)
 # The compiler loads the LLVM toolchain's own libraries (including its z3)
 # at startup: resolve them without a caller-provided environment. A static
 # LLVM (SNX_LLVM_SHARED off, cmake/llvm.cmake) has none to load.
@@ -104,16 +101,9 @@ if(SNX_LLVM_SHARED)
         target_link_options(snx_ctr_program INTERFACE "-Wl,-rpath,${ctr_llvm_rpath}")
     endif()
 endif()
-target_compile_definitions(snx_ctr_program PRIVATE "SNX_CTR_HOST_CC=\"${CMAKE_C_COMPILER}\"")
 add_library(snx_ctr_native STATIC aot/load.c)
 target_link_libraries(snx_ctr_native PUBLIC snx_ctr_process ${CMAKE_DL_LIBS})
 set_target_properties(snx_ctr_native PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_compile_options(snx_ctr_native PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 target_sources(snx_ctr_program PRIVATE aot/run.c aot/jit.c)
-# the run-time compiler for the blocks the static module lacks: the LLVM backend's executor (exec.c, in snx_llvm, which
-# the Switch driver's build defines)
-if(TARGET snx_llvm)
-    target_link_libraries(snx_ctr_program PUBLIC snx_llvm)
-    target_compile_definitions(snx_ctr_program PRIVATE SNX_CTR_JIT)
-endif()
 target_link_libraries(snx_ctr_program PUBLIC snx_ctr_native)
