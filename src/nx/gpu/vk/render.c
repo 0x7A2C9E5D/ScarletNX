@@ -2974,9 +2974,11 @@ retry:
         DYN(front, front, rec_CmdSetFrontFace(cb, front));
         DYN(topo, topo, rec_CmdSetPrimitiveTopology(cb, topo));
         DYN(restart, prim_restart, rec_CmdSetPrimitiveRestartEnable(cb, prim_restart));
-        /* RASTERIZE_ENABLE (0xDF) off discards the primitives once captured: only a capture draws without them here,
-           as the register's reset value isn't known to be on (1 off, 2 on: 0 is a new command buffer's) */
-        u32 discard = xfb_on && !r[0xDF] ? 2 : 1;
+        /* RASTERIZE_ENABLE (0xDF) off discards the primitives, after a capture or the vertex program's stores. One game
+           draws points whose vertex program only stores to memory and writes no position: rasterized, they all lit
+           the pixel in the middle of the screen. A channel starts with it on (reset_3d, as Eden's register defaults)
+           (1 off, 2 on: 0 is a new command buffer's) */
+        u32 discard = !r[0xDF] ? 2 : 1;
         DYN(discard, discard, rec_CmdSetRasterizerDiscardEnable(cb, discard == 2));
     }
     {
