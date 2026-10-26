@@ -1540,7 +1540,7 @@ static VkDescriptorSet desc_set_cached(VkDescriptorSetLayout layout, DescWrites*
 static VkDescriptorSet stage_set_(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro,
                                   u32* fb, u64* scaled, TexRes* res, const VkDrawStorage* draw, DrawImages* images);
 /* scaled: the texture slots whose bound image is a scaled render target, a bit each, for the fragment program's texel
-   fetches and size queries (scaled_factor in spirv_translate.c) */
+   fetches and size queries (scaled_coords in spirv_translate.c) */
 static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro, u32* fb,
                                  u64* scaled, TexRes* res, const VkDrawStorage* draw, DrawImages* images) {
     SNX_ZONE(z, "stage set");
@@ -1660,7 +1660,7 @@ static VkDescriptorSet stage_set_(GpuChannel* ch, int stage, VkSh* s, Surf** rt,
         } else
             view = vk_tex_bind_view(t, want, x->tic, x->tsc, num);
         const Surf* sampled = view ? t : NULL; /* the texture whose own view is bound, for the sampler */
-        if (scaled && sampled && i < 64 && (sampled->sw != sampled->w || sampled->sh != sampled->h))
+        if (scaled && sampled && (sampled->sw != sampled->w || sampled->sh != sampled->h))
             *scaled |= 1ull << i;
         if (view && depth_ro) {
             *zt_ro = 1; /* render_begin moves it to the read-only layout */

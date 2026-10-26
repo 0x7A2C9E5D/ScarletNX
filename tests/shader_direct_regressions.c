@@ -2786,18 +2786,28 @@ static void tlds_fp16(void) {
 }
 
 /* Render targets are scaled (resolution=) and a fragment program's FragCoord is the guest's: its texel fetches from a
-   target the draw binds read at their coordinates times the scale, picked by the texture's bit in the push constants.
-   Below 1 one game's lighting pass otherwise drew the scene into the top-left corner (issue #730) */
+   target the draw binds read at the scale times their centre, and its size queries answer the guest's size, picked by
+   the texture's bit in the push constants. Below 1 one game's lighting pass otherwise drew the scene into the top-left
+   corner (issue #730) */
 static void scaled_texel_fetch(void) {
     static const u64 tld_2d[] = {0xdc00000000000000ull | 7ull << 51 | 0xfull << 31 | 2ull << 28 | 0x10ull << 36 |
                                  0xffull << 20 | 7ull << 16 | 2ull << 8}; /* TLD.LZ R0, R2, RZ, 2D */
+    /* TXQ.B: the handle in R4, the level in R5 */
+    static const u64 txq_2d[] = {HANDLE_CBUF_R4, 0x5c9807800ff70005ull, 0xdf50000180470400ull};
     ShaderInfo info;
     size_t words = 0;
     u32* code = translate(tld_2d, 1, ST_FS, &info, &words, 0);
     check_translated(code, &info, "fragment TLD 2D translates");
     if (code)
-        check(count_opcode(code, words, 111, 0xffffffffu) >= 2 && count_opcode(code, words, 169, 0xffffffffu) >= 1,
-              "fragment TLD 2D scales x and y by the scale its texture's bit selects");
+        check(count_opcode(code, words, 111, 0xffffffffu) == 2 && count_opcode(code, words, 110, 0xffffffffu) == 2 &&
+                  count_opcode(code, words, 169, 0xffffffffu) == 1,
+              "fragment TLD 2D takes x and y at the scale its texture's bit selects");
+    free(code);
+    code = translate(txq_2d, 3, ST_FS, &info, &words, 0);
+    check_translated(code, &info, "fragment TXQ translates");
+    if (code)
+        check(count_opcode(code, words, 112, 0xffffffffu) == 2 && count_opcode(code, words, 109, 0xffffffffu) == 2,
+              "fragment TXQ answers width and height over the scale its texture's bit selects");
     free(code);
     code = translate(tld_2d, 1, ST_VS, &info, &words, 0);
     check_translated(code, &info, "vertex TLD 2D translates");

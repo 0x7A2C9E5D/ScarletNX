@@ -975,49 +975,40 @@ static void alpha_test(DirectCtx* c, u32 push, u32 push_pointer, u32 alpha) {
 }
 
 /* A fragment program's texel fetch from a render target: targets are scaled (resolution=) and FragCoord is made the
-   guest's, so the game's texel is at its coordinates times the scale in the image, and a size query answers the
-   guest's size, the image's over the scale. The draw sets the texture's bit in the second vec4 of the push constants,
-   x for slots 0 to 31 and y for 32 to 63 (vk/render.c); other textures are the guest's size. The factor is the
-   uniform's component (2 the scale, 0 its reciprocal) for a scaled texture, 1 for others */
-static u32 scaled_factor(DirectCtx* c, u32 push, u32 push_pointer, int slot, u32 component) {
+   guest's, so the game's texel p is at the scale times its centre, p + 0.5, in the image, and a size query answers the
+   guest's size, the image's over the scale. The draw sets the texture's bit in the uvec4 after the stage's push
+   constants, x for slots 0 to 31 and y for 32 to 63 (vk/render.c); other textures are the guest's size. A target
+   whose size vk_sc rounded or clamped to 1 is off by up to a texel at its edge */
+_Static_assert(SH_MAXTEX <= 64, "the scaled textures' mask has a bit a slot");
+static void scaled_coords(DirectCtx* c, u32 push, int slot, int size, u32 i32_type, u32* x, u32* y) {
     u32 one = spv_emit_constant_u32(&c->emit, c->u32_type, 1);
-    u32 bits = spv_emit_bitcast(&c->emit, c->u32_type,
-                                spv_emit_push_component_f32(&c->emit, push_pointer, push, one,
-                                                            slot >= 32 ? one : c->zero, c->f32_type));
+    u32 bits = spv_emit_push_component_f32(&c->emit, spv_emit_type_pointer(&c->emit, 9, c->u32_type), push, one,
+                                           slot >= 32 ? one : c->zero, c->u32_type); /* PushConstant */
     u32 bit = spv_emit_bitwise_and_u32(
         &c->emit, c->u32_type,
         spv_emit_shift_right_u32(&c->emit, c->u32_type, bits, spv_emit_constant_u32(&c->emit, c->u32_type, slot & 31)),
         one);
+    /* the uniform's component 2 is the scale, 0 its reciprocal (frame_consts) */
     u32 factor = spv_emit_uniform_component(&c->emit, c->scale_pointer, c->scale_buffer, c->zero, c->zero,
-                                            spv_emit_constant_u32(&c->emit, c->u32_type, component), c->f32_type);
-    return spv_emit_select(&c->emit, c->f32_type, spv_emit_i_not_equal(&c->emit, c->bool_type, bit, c->zero), factor,
-                           spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f));
-}
-
-/* TLD's and TLDS's 2D coordinates, signed */
-static void scaled_texel(DirectCtx* c, u32 push, u32 push_pointer, int slot, u32 i32_type, u32* x, u32* y) {
-    if (slot >= 64) return;
-    u32 factor = scaled_factor(c, push, push_pointer, slot, 2);
+                                            size ? c->zero : spv_emit_constant_u32(&c->emit, c->u32_type, 2),
+                                            c->f32_type);
+    factor = spv_emit_select(&c->emit, c->f32_type, spv_emit_i_not_equal(&c->emit, c->bool_type, bit, c->zero), factor,
+                             spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f));
+    u32 half = spv_emit_constant_f32(&c->emit, c->f32_type, 0.5f);
     u32* v[2] = {x, y};
     for (int k = 0; k < 2; k++) {
-        u32 f = spv_emit_fmul(&c->emit, c->f32_type, spv_emit_convert_s_to_f(&c->emit, c->f32_type, *v[k]), factor);
+        u32 f = size ? spv_emit_convert_u_to_f(&c->emit, c->f32_type, *v[k])
+                     : spv_emit_fadd(&c->emit, c->f32_type, spv_emit_convert_s_to_f(&c->emit, c->f32_type, *v[k]), half);
         spv_emit_no_contraction(&c->emit, f);
-        *v[k] = spv_emit_convert_f_to_s(&c->emit, i32_type, f);
-    }
-}
-
-/* TXQ's 2D width and height, unsigned, rounded to the nearest: the scaled size is rounded so (vk_sc) */
-static void scaled_size(DirectCtx* c, u32 push, u32 push_pointer, int slot, u32* w, u32* h) {
-    if (slot >= 64) return;
-    u32 factor = scaled_factor(c, push, push_pointer, slot, 0);
-    u32 half = spv_emit_constant_f32(&c->emit, c->f32_type, 0.5f);
-    u32* v[2] = {w, h};
-    for (int k = 0; k < 2; k++) {
-        u32 f = spv_emit_fmul(&c->emit, c->f32_type, spv_emit_convert_u_to_f(&c->emit, c->f32_type, *v[k]), factor);
+        f = spv_emit_fmul(&c->emit, c->f32_type, f, factor);
         spv_emit_no_contraction(&c->emit, f);
-        f = spv_emit_fadd(&c->emit, c->f32_type, f, half);
-        spv_emit_no_contraction(&c->emit, f);
-        *v[k] = spv_emit_convert_f_to_u(&c->emit, c->u32_type, f);
+        if (size) { /* rounded, as vk_sc rounds the scaled size */
+            f = spv_emit_fadd(&c->emit, c->f32_type, f, half);
+            spv_emit_no_contraction(&c->emit, f);
+            *v[k] = spv_emit_convert_f_to_u(&c->emit, c->u32_type, f);
+        } else /* floored, so a coordinate below 0 stays out of the image */
+            *v[k] = spv_emit_convert_f_to_s(&c->emit, i32_type,
+                                            spv_emit_glsl_unary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FLOOR, f));
     }
 }
 
@@ -3673,10 +3664,10 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             texs_mark_outputs(insn[i], used);
         }
         /* a fragment program's texel fetches and size queries may read a render target, which is scaled
-           (scaled_factor) */
+           (scaled_coords) */
         if ((op->id == O_TLD || op->id == O_TLD_B || op->id == O_TLDS || op->id == O_TXQ || op->id == O_TXQ_B) &&
             stage == ST_FS)
-            needs_texel_scale = 1;
+            needs_texel_scale = needs_glsl = 1;
         if (op->id == O_TLD || op->id == O_TLD_B) {
             u32 indexed = 0, ldc = 0;
             u32 off = B(insn[i], 36, 13), ty = B(insn[i], 28, 3);
@@ -4710,9 +4701,9 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     }
     u32 push = 0, push_pointer = 0;
     if ((stage == ST_FS && ((target & 15) || needs_point_coord || needs_texel_scale)) || depth_fix || needs_instance) {
-        /* the fragment stage's second vec4 holds the mask of its scaled textures (scaled_factor) */
+        /* the fragment stage's uvec4 after its vec4 holds the mask of its scaled textures (scaled_coords) */
         push = spv_emit_push_vec4(&c->emit, vec4, c->f32_type, stage == ST_FS ? 16 : 0,
-                                  stage == ST_FS && needs_texel_scale ? 2 : 1, &push_pointer);
+                                  stage == ST_FS && needs_texel_scale ? vec4_u32 : 0, &push_pointer);
         interfaces[count++] = push;
     }
     spv_emit_entry_str(&c->emit, (SpvShaderStage)stage, fn, "main", interfaces, count); /* ST_ is SPIR-V's model */
@@ -7370,7 +7361,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                                                                      four));
             }
             if (type == 0 && !array) texel_row_coord(c, i32_type, &x, &y);
-            if (type == 1 && needs_texel_scale) scaled_texel(c, push, push_pointer, slot, i32_type, &x, &y);
+            if (type == 1 && needs_texel_scale) scaled_coords(c, push, slot, 0, i32_type, &x, &y);
             u32 coord = z ? spv_emit_vec3_construct(&c->emit, vec3_i32, x, y, z)
                           : spv_emit_vec2_construct(&c->emit, vec2_i32, x, y);
             u32 sample =
@@ -7493,7 +7484,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 y = spv_emit_iadd_u32(&c->emit, i32_type, y, oy);
             }
             if (type == 0) texel_row_coord(c, i32_type, &x, &y);
-            if (type == 1 && needs_texel_scale) scaled_texel(c, push, push_pointer, slot, i32_type, &x, &y);
+            if (type == 1 && needs_texel_scale) scaled_coords(c, push, slot, 0, i32_type, &x, &y);
             u32 coord = type == 2 ? spv_emit_vec3_construct(&c->emit, vec3_i32, x, y,
                                                             reg_read_as(c, b, i32_type))
                         : array   ? spv_emit_vec3_construct(
@@ -7758,7 +7749,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
                 third ? spv_emit_vec4_extract(&c->emit, c->u32_type, dimensions, 2)
                       : spv_emit_constant_u32(&c->emit, c->u32_type, 1),
                 spv_emit_image_query_levels(&c->emit, c->u32_type, c->sampled_type[slot], c->sampler[slot])};
-            if (qtype == 1 && needs_texel_scale) scaled_size(c, push, push_pointer, slot, &values[0], &values[1]);
+            if (qtype == 1 && needs_texel_scale) scaled_coords(c, push, slot, 1, i32_type, &values[0], &values[1]);
             u32 dst = d;
             for (u32 k = 0; k < 4; k++)
                 if (B(w, 31 + k, 1)) {
