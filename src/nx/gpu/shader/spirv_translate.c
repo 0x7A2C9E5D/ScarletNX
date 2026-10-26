@@ -1819,32 +1819,86 @@ static int reads_predicate(u64 w, int op, u32 p) {
 
 /* AL2P's predicate (bits 44-46) is a range check no source describes. The NVN compiler gives every AL2P one, P0 to P6
    in turn, and overwrites or leaves them, so a program is translated without it only when nothing can see it: no
-   instruction reads the predicate, or, in the straight run after the AL2P, a comparison or AL2P without a guard writes
-   it whole before anything reads it or branches. An EXIT without a guard ends the run, unless a PEXIT may take it */
+   instruction reads the predicate, or every path from the AL2P meets a comparison or AL2P without a guard that writes
+   it whole before anything reads it. Paths follow branches, jump tables and the pops' targets as shader_resolve_crs
+   gives them. A pop it can't resolve, a call, a return, a JMP, or an EXIT a PEXIT may take counts as a read */
 static int al2p_predicate_unseen(const u64* insn, u32 n, u32 at) {
-    u32 p = B(insn[at], 44, 3), i;
-    int read = 0, pexit = 0;
+    u32 p = B(insn[at], 44, 3), i, nwork = 0, *work = NULL, *pops = NULL, targets[64];
+    int read = 0, pexit = 0, stack = 0, crs = 0, unseen = 0, count, t;
+    u8* seen = NULL;
     if (p == 7) return 1;
     for (i = 11; i < n; i++) {
         const Op* op = IDX_OK(i) && i != at ? decode(insn[i]) : NULL;
         if (!op) continue;
         read |= reads_predicate(insn[i], op->id, p);
         pexit |= op->id == O_PEXIT;
+        stack |= op->id == O_SYNC || op->id == O_BRK || op->id == O_CONT;
     }
     if (!read) return 1;
-    for (i = at + 1; i < n; i++) {
-        const Op* op = IDX_OK(i) ? decode(insn[i]) : NULL;
-        if (!IDX_OK(i)) continue;
-        if (!op || reads_predicate(insn[i], op->id, p)) return 0;
-        if (B(insn[i], 16, 4) == 7 && (op->id == O_AL2P || predicate_comparison(op->id)) &&
-            writes_predicate(insn[i], op->id, p))
-            return 1;
-        if (op->id == O_BRA || op->id == O_BRX || op->id == O_JMP || op->id == O_SYNC || op->id == O_BRK ||
-            op->id == O_CONT || op->id == O_CAL || op->id == O_RET || op->id == O_PRET)
-            return 0;
-        if (op->id == O_EXIT && flow_always(insn[i])) return !pexit;
+    seen = calloc(n, 1);
+    work = malloc(n * sizeof *work);
+    if (stack) pops = calloc(n, sizeof *pops);
+    if (!seen || !work || (stack && !pops)) goto done;
+    crs = stack && shader_resolve_crs(insn, n, pops);
+    seen[at] = 1;
+    i = at + 1 + ((at + 1 - 10) % 4 == 0);
+    if (i < n) {
+        seen[i] = 1;
+        work[nwork++] = i;
     }
-    return 1;
+    while (nwork) {
+        i = work[--nwork];
+        for (;;) {
+            u64 w = insn[i];
+            const Op* op = decode(w);
+            u32 next = i + 1 + ((i + 1 - 10) % 4 == 0);
+            count = 0;
+            if (!op || reads_predicate(w, op->id, p)) goto done;
+            if (B(w, 16, 4) == 7 && (op->id == O_AL2P || predicate_comparison(op->id)) && writes_predicate(w, op->id, p))
+                break;
+            switch (op->id) {
+                case O_BRA:
+                    if (B(w, 5, 1)) goto done;
+                    targets[count++] = bra_target(w, i);
+                    break;
+                case O_BRX:
+                    count = shader_brx_targets(insn, i, n, targets, 64);
+                    if (count < 0) goto done;
+                    break;
+                case O_SYNC:
+                case O_BRK:
+                case O_CONT:
+                    if (!crs || !pops[i]) goto done;
+                    targets[count++] = pops[i];
+                    break;
+                case O_EXIT:
+                    if (pexit) goto done;
+                    break;
+                case O_JMP:
+                case O_CAL:
+                case O_RET:
+                case O_PRET: goto done;
+                default: break;
+            }
+            for (t = 0; t < count; t++) {
+                if (targets[t] >= n || !IDX_OK(targets[t])) goto done;
+                if (!seen[targets[t]]) {
+                    seen[targets[t]] = 1;
+                    work[nwork++] = targets[t];
+                }
+            }
+            if ((count || op->id == O_EXIT) && flow_always(w)) break;
+            if (next >= n || seen[next]) break;
+            seen[next] = 1;
+            i = next;
+        }
+    }
+    unseen = 1;
+done:
+    free(seen);
+    free(work);
+    free(pops);
+    return unseen;
 }
 
 static int supported(u64 w, int op) {

@@ -2309,6 +2309,18 @@ static void attribute_pointer(void) {
     code = translate(overwritten, 3, ST_VS, &info, &words, 0);
     check_translated(code, &info, "AL2P range predicate overwritten before its read translates");
     free(code);
+    /* Paths follow the branches: another game's fragment programs branch between the AL2P and the comparison that
+       overwrites its predicate, and a read is refused only when a path to it skips the comparison */
+    const u64 branch_p1 = 0xe24000000001000full | (16ull << 20); /* @P1 BRA over the next instruction */
+    const u64 joined[] = {predicate, branch_p1, mov32i(3, 2), fsetp_p0, guarded_mov};
+    code = translate(joined, 5, ST_VS, &info, &words, 0);
+    check_translated(code, &info, "AL2P range predicate overwritten where a branch joins translates");
+    free(code);
+    const u64 skipped[] = {predicate, branch_p1, fsetp_p0, guarded_mov};
+    code = translate(skipped, 4, ST_VS, &info, &words, 0);
+    check_refused(code, &info, "AL2P range predicate read",
+                  "AL2P range predicate read past a branch over its overwrite is refused");
+    free(code);
     /* The driver offers a direct CBE export path and ordinary attribute exports. With direct export disabled,
        its address registers are zero and its stores must not allocate or access a global-buffer descriptor. */
     const u64 export[] = {
