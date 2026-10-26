@@ -2875,6 +2875,9 @@ retry:
     }
     VkViewport viewport[GUEST_VIEWPORTS] = {{0}};
     VkRect2D scissor[GUEST_VIEWPORTS] = {{{0}}};
+    u32 sub = g_vk.props.limits.viewportSubPixelBits < g_vk.props.limits.subPixelPrecisionBits
+                  ? g_vk.props.limits.viewportSubPixelBits
+                  : g_vk.props.limits.subPixelPrecisionBits; /* the points' nudge below */
     for (u32 i = 0; i < viewports; i++) {
         viewport[i] = vk_render_viewport_at(r, i);
         /* A point a pixel wide covers the pixel its window position falls in on the console (OpenGL's aliased point
@@ -2882,11 +2885,13 @@ retry:
            in the point's square, and leaves a center on its edge to the device: RADV takes the pixel before. One game
            projects a cube map onto spherical harmonics by drawing every sample as a point at the middle of an 8x8
            target, window (4, 4), and reads texel (4, 4) back on the CPU: its ambient light came out zero, and rooms
-           lit by it black. Points move 1/128 pixel up the guest's window axes (down a lower-left window's y), past the
-           rasterizer's subpixel grid and too little to see. Only in the modes that game draws them in, the OpenGL
-           point center (0x597) and half-integer pixel centers (0x649): the others' rules aren't known */
-        if (topo == VK_PRIMITIVE_TOPOLOGY_POINT_LIST && !gs && !tes && !r[0x597] && !r[0x649]) {
-            float e = vk_scf(1.0f / 128);
+           lit by it black. Points move up the guest's window axes (down a lower-left window's y) by 1/128 pixel, too
+           little to see, or by a step of the coarser of the device's viewport and rasterizer subpixel grids when that
+           is larger (Vulkan only requires 4 bits of the rasterizer's and none of the viewport's): a smaller move
+           rounds away. Not at all on a viewport without subpixel bits. Only in the modes that game draws them in,
+           the OpenGL point center (0x597) and half-integer pixel centers (0x649): the others' rules aren't known */
+        if (topo == VK_PRIMITIVE_TOPOLOGY_POINT_LIST && !gs && !tes && !r[0x597] && !r[0x649] && sub) {
+            float e = vk_scf(1.0f / (float)(1u << (sub < 7 ? sub : 7)));
             viewport[i].x += e;
             viewport[i].y += (r[0x4EB] & 1) ? -e : e;
         }
