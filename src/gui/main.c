@@ -9307,6 +9307,9 @@ static void form_pointer(App* app, float x, float y) {
 #define SAY_SETUP_ON_FIRST   SNX_TR_KEYS("Up/Down: row. Enter: next. ESC: exit.")
 #endif
 #define GUI_SETUP_CHOICES 4 /* a page's, at most: Folders' and Keys' three, and Skip on the first page */
+/* a page's boxes above YoRHa's choices at least, else beside them: a notice's, its head and four lines, and a row */
+#define GUI_SETUP_CONTENT_ROWS 6
+#define GUI_SETUP_CONTENT_COLS 24 /* and the columns beside them it takes */
 static void open_files(App* app);
 static void left_behind(App* app);
 static void ask_key(App* app, GuiKey key);
@@ -9912,8 +9915,17 @@ static void setup_boxes(App* app, GuiSetupBoxes* b) {
     }
     choices_place(app, GUI_CHOICES_SETUP, area, b->question, b->tab, setup_focus(app), &b->choices);
     b->content = b->place.list;
-    if (app->theme.dialog == GUI_DIALOG_YORHA) /* above the choices */
-        b->content.h = SDL_max(0, b->choices.at.y - cell_h(app) / 2 - b->content.y);
+    if (app->theme.dialog == GUI_DIALOG_YORHA) { /* above the choices, or beside them down to the question where that
+                                                    leaves too few rows (a phone's choices, a finger's row each) */
+        int above = b->choices.at.y - cell_h(app) / 2 - b->content.y;
+        int cursor = app->theme.cursor[0] ? gui_text_cols(app->theme.cursor) : 0;
+        int beside = b->choices.at.x - (cursor + 1) * cell_w(app) - b->content.x;
+        int foot = (b->choices.tab.h ? b->choices.tab.y : b->choices.box.y) - cell_h(app) / 2;
+        if (above >= GUI_SETUP_CONTENT_ROWS * cell_h(app) || beside < GUI_SETUP_CONTENT_COLS * cell_w(app))
+            b->content.h = SDL_max(0, above);
+        else
+            b->content = gui_rect(b->content.x, b->content.y, beside, SDL_max(0, foot - b->content.y));
+    }
 }
 /* a box of lines under its label, each wrapped from a row of its own (at its slashes, as paths); the rows they took */
 static int setup_box(App* app, GuiRect r, const char* label, const char* const* lines, int n) {
