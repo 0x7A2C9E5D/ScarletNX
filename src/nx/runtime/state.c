@@ -1329,6 +1329,7 @@ int state_load(const char* path, char* why, size_t whysize) {
         if (cur_host[i] && cur_host[i] != plan.host[i]) mem_pool_host_free(cur_host[i], cur_off[i], cur_size[i]);
     fs_state_install(fss);
     audio_state_rebuild();
+    am_state_loaded();
     video_install(&vs);
     /* the renderer forgets the old memory, and the state's channels and queue take the old ones' place */
     if (g_renderer->reset) g_renderer->reset();

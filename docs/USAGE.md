@@ -730,6 +730,15 @@ state FILE the same way.
 In the game's menu the arrows, Enter and Escape move, select and go back; a gamepad's D-pad or left stick, A and
 B do the same, the on-screen controls' too, and a direction held goes on after a moment.
 
+A game that asks for text (a name, a password, a search) shows a box over the game, in the menu's look and the same
+on every platform: the game's own words for it, the line with the text the game started it with, and how many
+characters it holds against the game's least and most. What you type goes in, from the keyboard or an input method,
+and on Android and iOS the system's keyboard comes up with the box (a tap on the line brings it back). Backspace takes
+the last character away, Enter or A gives the line, and Esc or B cancels; a tap on the box's OK or Cancel does the
+same. Short of the game's least, Enter says how many more it needs. The menu (Home, F2) opens over the box, and
+`swkbd_text` answers in its place. With no window to show it in (`-H`), the game's text is the answer, or the
+nickname of the user playing when the game gives none, and the log says which.
+
 A game that stops on an error shows a panel with **Share Log**, **Copy path** and **Close**. Share Log saves
 `scarletnx.log` (the build, the error and the game's log) beside the game's log, as the menu's does, and on Android
 sends it to the app you pick; Copy path copies that file's path once it is saved, else the game's log's. The panel says
