@@ -3861,12 +3861,12 @@ int main(int argc, char** argv) {
         shows(&app, "- OK", yellow);
         shows(&app, "- Cancel", normal);
         assert(same_colour(
-            pixel(&app, (float)(bar.x + 3 * span / (GUI_SIZE_STEPS - 1) + cw / 2), (float)(bar.y + bar.h / 2)),
-            yellow)); /* Auto, the fourth step, its knob in the focus colour */
+            pixel(&app, (float)(bar.x + 0 * span / (GUI_SIZE_STEPS - 1) + cw / 2), (float)(bar.y + bar.h / 2)),
+            yellow)); /* Auto, the first step, its knob in the focus colour */
         text_px_is(&app, bar.x + bar.w + cw, c.body.y, "Auto", rgb(app.theme.ink), rgb(app.theme.page));
         /* each step: the screen as it was, the bar where it was, the step's name where Auto's was */
         for (k = 0; k < GUI_SIZE_STEPS; ++k) {
-            app.size_pick = size_of_choice(k);
+            app.size_pick = k;
             render(&app);
             sizes_place(&app, &c);
             bar = sizes_bar(&app, &c);
@@ -3878,8 +3878,8 @@ int main(int argc, char** argv) {
         assert(app.size_pick == 1 && !app.menu.text_size && app.scale == scale && size_picking(&app));
         for (k = 0; k < 9; ++k) key(&app, SDLK_RIGHT); /* past its last: 4x, there it stays */
         assert(app.size_pick == GUI_TEXT_MAX && !app.menu.text_size);
-        for (k = 0; k < 9; ++k) key(&app, SDLK_LEFT); /* and 0.25 the first */
-        assert(app.size_pick == -1 && !app.menu.text_size && !app.sizes.focus);
+        for (k = 0; k < 9; ++k) key(&app, SDLK_LEFT); /* and Auto the first */
+        assert(!app.size_pick && !app.menu.text_size && !app.sizes.focus);
         key(&app, SDLK_DOWN); /* Cancel: nothing changed */
         key(&app, SDLK_RETURN);
         assert(!app.sizes_shown && !app.menu.text_size && !app.size_until && app.scale == scale);
@@ -3895,8 +3895,8 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RIGHT);
         assert(size_picking(&app) && app.size_pick == 1 && !app.menu.text_size);
         key(&app, SDLK_ESCAPE);
-        key(&app, SDLK_LEFT);
-        assert(size_picking(&app) && app.size_pick == -3 && !app.menu.text_size);
+        key(&app, SDLK_LEFT); /* from Auto, the first: Auto */
+        assert(size_picking(&app) && !app.size_pick && !app.menu.text_size);
         key(&app, SDLK_ESCAPE);
         assert(!app.sizes_shown && app.editor.row == GUI_APP_TEXT);
     }
@@ -3964,9 +3964,9 @@ int main(int argc, char** argv) {
         text_px_is(&app, bar.x + bar.w + cw, c.body.y, "1x", rgb(app.theme.ink), rgb(app.theme.page));
         /* the slider shows what OK took, out of the pointer's and the keys' reach: Left/Right go round Keep and Back */
         assert(same_colour(
-            pixel(&app, (float)(bar.x + 4 * (bar.w - cw) / (GUI_SIZE_STEPS - 1) + cw / 2), (float)(bar.y + bar.h / 2)),
+            pixel(&app, (float)(bar.x + 1 * (bar.w - cw) / (GUI_SIZE_STEPS - 1) + cw / 2), (float)(bar.y + bar.h / 2)),
             rgb(app.theme.ink)));
-        mouse_px(&app, bar.x + cw / 2 + 6 * (bar.w - cw) / (GUI_SIZE_STEPS - 1), bar.y + bar.h / 2, true);
+        mouse_px(&app, bar.x + cw / 2 + 3 * (bar.w - cw) / (GUI_SIZE_STEPS - 1), bar.y + bar.h / 2, true);
         assert(!app.slider_drag && app.size_pick == 1 && app.menu.text_size == 1 && app.sizes_shown);
         key(&app, SDLK_LEFT);
         assert(!app.sizes.focus && app.size_pick == 1 && app.sizes_shown);
@@ -3992,23 +3992,22 @@ int main(int argc, char** argv) {
         sizes_place(&app, &c);
         bar = sizes_bar(&app, &c);
         span = bar.w - cw;
-        mouse_px(&app, bar.x + cw / 2 + 5 * span / (GUI_SIZE_STEPS - 1), bar.y + bar.h / 2, true); /* 2x's step */
-        assert(app.slider_drag && app.size_pick == 2 && !app.menu.text_size && size_picking(&app));
-        mouse_px(&app, bar.x + cw / 2 + 1 * span / (GUI_SIZE_STEPS - 1), bar.y + bar.h / 2, false);
-        assert(app.slider_drag && app.size_pick == -2 && !app.menu.text_size);
+        mouse_px(&app, bar.x + cw / 2 + 3 * span / (GUI_SIZE_STEPS - 1), bar.y + bar.h / 2, true); /* 3x's step */
+        assert(app.slider_drag && app.size_pick == 3 && !app.menu.text_size && size_picking(&app));
+        mouse_px(&app, bar.x + cw / 2 + 2 * span / (GUI_SIZE_STEPS - 1), bar.y + bar.h / 2, false);
+        assert(app.slider_drag && app.size_pick == 2 && !app.menu.text_size);
         mouse_px(&app, bar.x - 5 * cw, bar.y + bar.h / 2, false); /* past its left end: its first */
-        assert(app.slider_drag && app.size_pick == -1);
+        assert(app.slider_drag && !app.size_pick);
         mouse_px(&app, bar.x + cw / 2 + 1 * span / (GUI_SIZE_STEPS - 1), bar.y, false);
         up.type = SDL_EVENT_MOUSE_BUTTON_UP;
         up.button.button = SDL_BUTTON_LEFT;
         event(&app, &up);
-        assert(!app.slider_drag && app.size_pick == -2 && !app.menu.text_size);
+        assert(!app.slider_drag && app.size_pick == 1 && !app.menu.text_size);
         render(&app);
         sizes_place(&app, &c);
         point(&app, choice_box(&app, &c, 0), true); /* OK clicked */
     }
-    assert(app.menu.text_size == -2 && app.scale == SDL_max(1, (app.auto_scale * 2 + 2) / 4) &&
-           !strcmp(app.app_form.text, "0.5")); /* the step's number alone */
+    assert(app.menu.text_size == 1 && app.scale == 1 && !strcmp(app.app_form.text, "1x"));
     app.clock = 1000 + GUI_TEXT_KEEP_MS - 1;
     pump(&app);
     assert(app.sizes_shown && strstr(app.size_line, "in 1 s"));
@@ -4022,26 +4021,6 @@ int main(int argc, char** argv) {
         assert(!app.slider_bar.w);
         snprintf(line, sizeof line, "-    %-20s %s", "UI scale", "Auto");
         shows(&app, line, yellow);
-    }
-    /* a part of Auto is Auto's scale times it, rounded, never under 1x */
-    {
-        int was = app.auto_scale;
-        app.auto_scale = 4;
-        for (int q = 1; q <= 3; ++q) {
-            app.menu.text_size = -q;
-            layout(&app);
-            assert(app.scale == q);
-        }
-        app.auto_scale = 2;
-        app.menu.text_size = -1;
-        layout(&app);
-        assert(app.scale == 1);
-        app.menu.text_size = -3;
-        layout(&app);
-        assert(app.scale == 2);
-        app.auto_scale = was;
-        app.menu.text_size = 0;
-        layout(&app);
     }
     assert(!app.menu.text_size && app.editor.row == GUI_APP_TEXT);
     /* the App's picks kept at once in app.ini, which the next start reads back */
@@ -4076,15 +4055,29 @@ int main(int argc, char** argv) {
         key(&app, SDLK_DOWN);
         pick_size(&app, 0, true);
         assert(!strcmp(app.theme.id, first_id) && !app.menu.text_size && !app.editor.note[0]);
-        /* a part of Auto kept as app.ini names it, and read back */
-        pick_size(&app, -3, true);
-        kept = (char*)snx_read_file(app.app_file, &size);
-        assert(kept && strstr(kept, "\nui_scale = 0.75\n"));
-        free(kept);
-        app.menu.text_size = 0;
-        app_load(&app);
-        assert(app.menu.text_size == -3);
-        pick_size(&app, 0, true);
+        /* a part of Auto an older version kept (ui_scale = 0.75; text_size = 0.5 before ui_scale = was named so): Auto,
+           the file written again with ui_scale = auto and said once with the value read; the next start says nothing */
+        {
+            static const char* const old[] = {"ui_scale = 0.75", "text_size = 0.5"};
+            for (int i = 0; i < 2; ++i) {
+                char* text = snx_format("[app]\ntheme = %s\n%s\n", first_id, old[i]);
+                assert(text && !snx_write_file(app.app_file, text, strlen(text)));
+                free(text);
+                app.menu.text_size = 2;
+                app.message[0] = 0;
+                app_load(&app);
+                snprintf(expected, sizeof expected, "%s: %s is no longer a UI scale: ui_scale = auto now", app.app_file,
+                         old[i]);
+                assert(!app.menu.text_size && app.scale == app.auto_scale && !strcmp(app.message, expected));
+                kept = (char*)snx_read_file(app.app_file, &size);
+                assert(kept && strstr(kept, "\nui_scale = auto\n") && !strstr(kept, "0.75") && !strstr(kept, "0.5"));
+                assert(!strstr(kept, "text_size"));
+                free(kept);
+                app.message[0] = 0;
+                app_load(&app);
+                assert(!app.menu.text_size && !app.message[0]);
+            }
+        }
         snprintf(expected, sizeof expected,
                  APP_INI_HEAD
                  "theme = %s\nui_scale = auto\n"

@@ -34,7 +34,7 @@ typedef struct {
     bool activated;
     GuiLoadView view;
     bool running, quit;
-    /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen (Auto); -1 to -3 that many quarters of Auto's */
+    /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen (Auto) */
     int text_size;
 } GuiMenu;
 /* what a key on the menu asks of the GUI: nothing more, the Settings or the logs shared */

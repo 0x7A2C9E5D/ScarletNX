@@ -305,15 +305,14 @@ static void test_first(App* app) {
     shows_foot(app, "open", rgb(head_ink(app)));
     key(app, SDLK_RETURN); /* its dialog, over the page, as App's */
     assert(size_picking(app) && !app->size_pick && page(app) == SNX_SETUP_LANGUAGE);
-    key(app, SDLK_LEFT);
-    key(app, SDLK_LEFT);
+    key(app, SDLK_LEFT); /* Auto, the first: it stays */
+    assert(!app->size_pick);
+    key(app, SDLK_RIGHT);
+    key(app, SDLK_RIGHT);
     render(app);
-    shows(app, "0.5", rgb(app->theme.page));    /* on YoRHa's band of ink */
-    hides(app, "0.5 of", rgb(app->theme.page)); /* the step's number alone */
-    assert(app->size_pick == -2 && !app->menu.text_size);
-    key(app, SDLK_RIGHT);
-    key(app, SDLK_RIGHT);
-    key(app, SDLK_RIGHT);
+    shows(app, "2x", rgb(app->theme.page)); /* on YoRHa's band of ink */
+    assert(app->size_pick == 2 && !app->menu.text_size);
+    key(app, SDLK_LEFT);
     key(app, SDLK_RETURN); /* OK on 1x */
     assert(app->sizes_shown && app->size_until && app->menu.text_size == 1 && !app->confirm.shown);
     render(app);
