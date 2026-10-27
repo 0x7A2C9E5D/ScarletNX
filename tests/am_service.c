@@ -433,13 +433,15 @@ static void test_inline_unasked(void) {
                   "least\n"));
     appear_min = 0;
     g_settings.keyboard_text[0] = 0;
-    /* no window: the game's text ("hi", as the last answer left it) */
+    /* no window: the game's text ("hi", as the last answer left it), said */
     no_window = 1;
+    test_log[0] = 0;
     send_request(a, 0xA, 4, 1);
     svcobj_unref(reply(a, 3, 1, 8));
     svcobj_unref(reply(a, 3, 7, 0x7EC));
     s = reply(a, 3, 9, 0x7E0);
     CHECK(!strcmp((char*)((StorageData*)s->data)->d + 8, "hi") && box_shows == shows);
+    CHECK(log_has("am: no window to show the inline keyboard's box in: it answers the game's text \"hi\"\n"));
     svcobj_unref(s);
     svcobj_unref(reply(a, 1, 1, 8));
     no_window = 0;
@@ -592,13 +594,28 @@ static void test_swkbd(void) {
     CHECK(get32(((StorageData*)out->data)->d) == 1 && ((StorageData*)out->data)->d[4] == 0);
     svcobj_unref(out);
     player_cancels = 0;
-    /* no window: cancelled, said */
+    /* no window: the game's text, else the user's nickname, each said; cut to the most, and short of the least
+       cancelled, as swkbd_text is */
     no_window = 1;
     shows = box_shows;
     test_log[0] = 0;
     out = swkbd(0, 0, 1, "Ann");
+    CHECK(get32(((StorageData*)out->data)->d) == 0 && !strcmp((char*)((StorageData*)out->data)->d + 4, "Ann"));
+    CHECK(log_has("am: no window to show the software keyboard's box in: it answers the game's text \"Ann\"\n"));
+    svcobj_unref(out);
+    out = swkbd(0, 0, 1, NULL);
+    CHECK(get32(((StorageData*)out->data)->d) == 0 && !strcmp((char*)((StorageData*)out->data)->d + 4, "Nadia"));
+    CHECK(log_has("am: no window to show the software keyboard's box in: it answers the user's nickname \"Nadia\"\n"));
+    svcobj_unref(out);
+    out = swkbd(3, 0, 1, NULL);
+    CHECK(get32(((StorageData*)out->data)->d) == 0 && !strcmp((char*)((StorageData*)out->data)->d + 4, "Nad"));
+    CHECK(log_has("am: the software keyboard answers \"Nad\" (the user's nickname \"Nadia\", cut to the game's 3 "
+                  "characters)\n"));
+    svcobj_unref(out);
+    out = swkbd(0, 6, 1, NULL);
     CHECK(get32(((StorageData*)out->data)->d) == 1 && box_shows == shows);
-    CHECK(log_has("am: no window to show the software keyboard's box in: the keyboard is cancelled\n"));
+    CHECK(log_has("am: the software keyboard is cancelled: the user's nickname \"Nadia\" is 5 characters, the game "
+                  "asks for 6 at least\n"));
     svcobj_unref(out);
     no_window = 0;
     /* malformed UTF-8 from the host: an overlong form, a surrogate and a cut sequence, each part U+FFFD */

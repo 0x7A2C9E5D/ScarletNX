@@ -58,7 +58,7 @@ u8* fs_read_file(const char* path, u64* size) {
 }
 
 const SnxUser* snx_users_selected(void) {
-    static SnxUser first;
+    static SnxUser first = {.nickname = "Nadia"}; /* not users.c's "Player": a keyboard that answers it says which */
     memcpy(first.uid, g_user_id, 16);
     return &first;
 }

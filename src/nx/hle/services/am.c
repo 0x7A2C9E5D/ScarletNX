@@ -1044,22 +1044,29 @@ static void am_kb_text(const u8* p, u32 chars, char* out, size_t size) {
     for (i = 0; i < chars && i < 256; i++) wide[i] = snx_ld_le16(p + 2 * i);
     am_utf16_to_8(wide, i, out, size);
 }
-/* swkbd_text's answer, text: cut to the most, and cancelled short of the least, each said. 0 with the answer in out,
-   1 cancelled */
-static int am_kb_given(const char* text, u32 min, u32 max, char* out, size_t size) {
+/* text answered in the player's place, from where (swkbd_text, the game's text, the user's nickname): cut to the
+   most, and cancelled short of the least, each said. 0 with the answer in out, 1 cancelled */
+static int am_kb_given(const char* where, const char* text, u32 min, u32 max, char* out, size_t size) {
     u16 wide[OVERLAY_KB_UNITS];
     u32 all = am_utf8_to_16(text, wide, OVERLAY_KB_UNITS), n = am_utf8_to_16(text, wide, max);
     if (n < min) {
-        WARN("am: the software keyboard is cancelled: swkbd_text \"%s\" is %u character%s, the game asks for %u at "
-             "least\n",
-             text, n, n == 1 ? "" : "s", min);
+        WARN("am: the software keyboard is cancelled: %s \"%s\" is %u character%s, the game asks for %u at least\n",
+             where, text, n, n == 1 ? "" : "s", min);
         return 1;
     }
     am_utf16_to_8(wide, n, out, size);
     if (n < all)
-        LOG("am: the software keyboard answers \"%s\" (swkbd_text \"%s\", cut to the game's %u character%s)\n", out,
+        LOG("am: the software keyboard answers \"%s\" (%s \"%s\", cut to the game's %u character%s)\n", out, where,
             text, max, max == 1 ? "" : "s");
     return 0;
+}
+/* with no window for the box of what (headless): the game's text, else the nickname of the user playing, as
+   am_kb_given takes it. 0 with the answer in out, 1 cancelled */
+static int am_kb_unasked(const char* what, const OverlayKeyboard* k, char* out, size_t size) {
+    const char* where = k->text[0] ? "the game's text" : "the user's nickname";
+    const char* text = k->text[0] ? k->text : snx_users_selected()->nickname;
+    LOG("am: no window to show the %s's box in: it answers %s \"%s\"\n", what, where, text);
+    return am_kb_given(where, text, k->min, k->max, out, size);
 }
 /* the box for k, its answer waited for on the game's thread, as the console's applet holds the game until it is done:
    a game pause counts the thread as stopped, and a save state's load makes the request again. 0 with the text in
@@ -1086,7 +1093,7 @@ static int am_kb_wait(OverlayKeyboard* k, char* out, size_t size) {
 }
 
 /* the software keyboard as a whole applet: swkbd_text's answer (--swkbd_text=, for scripted runs), else the box's
-   (cancelled without a window). KeyboardConfig (SwkbdConfigCommon, the second storage, as Eden's
+   (am_kb_unasked's without a window). KeyboardConfig (SwkbdConfigCommon, the second storage, as Eden's
    applet_software_keyboard_types.h lays it out) gives the texts, the kind, the length limits, whether the answer is
    UTF-8, and where the initial text is in the work buffer (the third) */
 #define AM_SWKBD_OUT   0x7d8                       /* SwkbdResult and the 0x7d4 byte string buffer */
@@ -1131,11 +1138,9 @@ static SvcObj* am_swkbd(LibApplet* a) {
         }
     }
     if (env)
-        r = am_kb_given(env, k.min, k.max, text, sizeof text);
-    else if ((r = am_kb_wait(&k, text, sizeof text)) < 0) {
-        WARN_LIMIT(1, "am: no window to show the software keyboard's box in: the keyboard is cancelled\n");
-        r = 1;
-    }
+        r = am_kb_given("swkbd_text", env, k.min, k.max, text, sizeof text);
+    else if ((r = am_kb_wait(&k, text, sizeof text)) < 0)
+        r = am_kb_unasked("software keyboard", &k, text, sizeof text);
     if (!r) n = am_utf8_to_16(text, wide, k.max);
     out = am_storage_new(AM_SWKBD_OUT, NULL);
     d = am_storage_bytes(out);
@@ -1206,7 +1211,7 @@ static void kb_decide(LibApplet* a, const char* text) {
 }
 /* Appear, its SwkbdAppearArg at arg (the kind, the OK's label, the limits): shown, and answered by swkbd_text at once,
    by the player in the box over the game (kb_decide once am_keyboard_answered has it, the game going on meanwhile),
-   or without a window with the game's text. Under the lock */
+   or without a window as am_kb_unasked answers. Under the lock */
 static void kb_appear(LibApplet* a, const u8* arg) {
     OverlayKeyboard k = {0};
     char text[OVERLAY_KB_TEXT];
@@ -1221,7 +1226,7 @@ static void kb_appear(LibApplet* a, const u8* arg) {
     am_kb_text(arg + 0x4, 8, k.ok, sizeof k.ok);
     am_utf16_to_8(a->kb_text, a->kb_len, k.text, sizeof k.text);
     if (env) {
-        kb_decide(a, am_kb_given(env, k.min, k.max, text, sizeof text) ? NULL : text);
+        kb_decide(a, am_kb_given("swkbd_text", env, k.min, k.max, text, sizeof text) ? NULL : text);
         return;
     }
     k.ticket = am_kb_ticket(a);
@@ -1230,8 +1235,7 @@ static void kb_appear(LibApplet* a, const u8* arg) {
         return;
     }
     g_host.am.kb_open = 0;
-    LOG("am: no window to show the inline keyboard's box in: it answers \"%s\"\n", k.text);
-    kb_decide(a, k.text);
+    kb_decide(a, am_kb_unasked("inline keyboard", &k, text, sizeof text) ? NULL : text);
 }
 /* Calc: the SwkbdCalcArg after the command word, either layout */
 static void kb_calc(LibApplet* a, const u8* req, u64 size) {
@@ -1326,14 +1330,14 @@ void am_state_loaded(void) {
     for (i = 0; i < AM_APPLETS; i++) { /* its least isn't in the state: the box gives any line */
         LibApplet* a = &g_hle.am.applets[i];
         OverlayKeyboard k = {0};
+        char text[OVERLAY_KB_TEXT];
         if (!a->obj || !am_is_inline(a) || a->kb_state != SWKBD_SHOWN) continue;
         k.max = a->kb_max;
         am_utf16_to_8(a->kb_text, a->kb_len, k.text, sizeof k.text);
         k.ticket = am_kb_ticket(a);
         if (backend_keyboard_show(&k)) {
             g_host.am.kb_open = 0;
-            LOG("am: no window to show the inline keyboard's box in: it answers \"%s\"\n", k.text);
-            kb_decide(a, k.text);
+            kb_decide(a, am_kb_unasked("inline keyboard", &k, text, sizeof text) ? NULL : text);
         }
         break;
     }
