@@ -546,20 +546,24 @@ uint32_t spv_emit_uniform_component(SpvEmitter* e, uint32_t pointer_type, uint32
 }
 
 uint32_t spv_emit_push_vec4(SpvEmitter* e, uint32_t vec4_type, uint32_t f32_type, uint32_t offset,
-                            uint32_t* component_pointer_type) {
+                            uint32_t second_type, uint32_t* component_pointer_type) {
     assert(component_pointer_type && !(offset & 15));
+    uint32_t members = second_type ? 2 : 1;
     uint32_t structure = spv_emit_id(e);
     instruction(&e->decorations, SPV_OP_DECORATE, 3);
     put(&e->decorations, structure);
     put(&e->decorations, 2); /* Block */
-    instruction(&e->decorations, SPV_OP_MEMBER_DECORATE, 5);
-    put(&e->decorations, structure);
-    put(&e->decorations, 0);
-    put(&e->decorations, 35); /* Offset */
-    put(&e->decorations, offset);
-    instruction(&e->types, SPV_OP_TYPE_STRUCT, 3);
+    for (uint32_t m = 0; m < members; m++) {
+        instruction(&e->decorations, SPV_OP_MEMBER_DECORATE, 5);
+        put(&e->decorations, structure);
+        put(&e->decorations, m);
+        put(&e->decorations, 35); /* Offset */
+        put(&e->decorations, offset + 16 * m);
+    }
+    instruction(&e->types, SPV_OP_TYPE_STRUCT, 2 + members);
     put(&e->types, structure);
     put(&e->types, vec4_type);
+    if (second_type) put(&e->types, second_type);
     uint32_t pointer = spv_emit_type_pointer(e, 9, structure); /* PushConstant */
     uint32_t variable = spv_emit_id(e);
     instruction(&e->types, SPV_OP_VARIABLE, 4);
