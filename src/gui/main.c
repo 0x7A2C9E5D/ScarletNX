@@ -2197,16 +2197,13 @@ static void render_files(App* app, int report) {
 typedef struct {
     GuiRect box; /* the question's: the whole dialog in the middle, or the box at the foot */
     GuiRect tab; /* at the foot: the label on the box's top edge; no size without a label */
-    GuiRect body; /* under the question, what the dialog shows there (choices_body); no size without */
-    GuiRect at;   /* the choices' rows, the scene's area */
+    GuiRect at;  /* the choices' rows, the scene's area */
     GuiRect rects[UI_CHOICES_ITEMS];
     UiList lists[UI_CHOICES_ITEMS]; /* the rows' at UI_CHOICES_ROWS: row i is choice i */
     int of, count;                  /* whose (GuiChoicesOf), and how many */
 } GuiChoices;
 /* choice i of whose choices (GuiChoicesOf) as its row reads, in out when it is made there; NULL past the last */
 static const char* choice_text(App* app, int of, int i, char* out, size_t size);
-/* the rows a dialog of whose choices keeps under its question, cols columns wide: UI scale's slider and its step */
-static int choices_body(const App* app, int of, int* cols);
 /* the height count rows of a scene's list take, from the first one's top to the last one's foot, as the scene lays
    them out: its layout and its row functions, rects room for its items, item the list's */
 static int rows_h(void (*layout)(GuiRect, int, GuiRect*), GuiRect (*row)(const GuiRect*, int, int, size_t),
@@ -2227,15 +2224,21 @@ static void list_follow(App* app, int which, void (*follow)(const GuiRect*, int,
     follow(rects, app->scale, item, count, list);
     app->firsts[which] = list->first;
 }
+/* the choices' rows laid out in c->at, the one in focus (-1 for none) followed as the scene scrolls its list */
+static void choices_rows(App* app, GuiChoices* c, int focus) {
+    ui_choices_layout(c->at, app->scale, c->rects);
+    c->lists[UI_CHOICES_ROWS].focus = (size_t)SDL_max(focus, 0);
+    list_follow(app, c->of, ui_choices_follow, c->rects, UI_CHOICES_ROWS, (size_t)c->count, &c->lists[UI_CHOICES_ROWS]);
+    if (focus < 0) c->lists[UI_CHOICES_ROWS].focus = SIZE_MAX;
+}
 /* the dialog of whose choices in area, the one in focus (-1 for none) among the rows shown. Rows that do not fit
    between the area's top and the question are scrolled, as the scene scrolls its list */
 static void choices_place(App* app, int of, GuiRect area, const char* question, const char* tab, int focus,
                           GuiChoices* c) {
-    int s = app->scale, cw = cell_w(app), longest = 16, rows, list_h, body_cols, body;
+    int s = app->scale, cw = cell_w(app), longest = 16, rows, list_h;
     int marker = gui_text_cols(app->theme.marker), tab_w = tab && tab[0] ? gui_text_cols(tab) + 2 : 0;
     const char* label;
     memset(c, 0, sizeof *c);
-    body = choices_body(app, of, &body_cols);
     c->of = of;
     for (; (label = choice_text(app, of, c->count, app->row_text, sizeof app->row_text)); ++c->count)
         longest = SDL_max(longest, gui_text_cols(label) + marker + 2);
@@ -2244,11 +2247,7 @@ static void choices_place(App* app, int of, GuiRect area, const char* question, 
         int margin = app->theme.cursor[0] ? gui_text_cols(app->theme.cursor) * cw : 0;
         int w = SDL_min(SDL_max(longest, 24) * cw + margin, area.w), top;
         rows = wrap_rows(app, question, (area.w - 4 * cw) / cw, 0);
-        c->box = gui_rect(area.x, area.y + area.h - (rows + body + 2) * cell_h(app), area.w,
-                          (rows + body + 2) * cell_h(app));
-        if (body)
-            c->body =
-                gui_rect(c->box.x + 2 * cw, c->box.y + (rows + 1) * cell_h(app), c->box.w - 4 * cw, body * cell_h(app));
+        c->box = gui_rect(area.x, area.y + area.h - (rows + 2) * cell_h(app), area.w, (rows + 2) * cell_h(app));
         if (tab_w) c->tab = gui_rect(c->box.x + 2 * cw, c->box.y - cell_h(app), tab_w * cw, cell_h(app) + 4 * s);
         top = (tab_w ? c->tab.y : c->box.y) - cell_h(app) / 2 - list_h;
         if (top < area.y) { /* the rows from the area's top */
@@ -2257,21 +2256,15 @@ static void choices_place(App* app, int of, GuiRect area, const char* question, 
         }
         c->at = gui_rect(area.x + area.w - w - 2 * cw, top, w, list_h);
     } else { /* in the middle, as wide as the question or the longest choice */
-        int cols = SDL_max(SDL_max(gui_text_cols(question) + tab_w, longest), body_cols), w, h;
+        int cols = SDL_max(gui_text_cols(question) + tab_w, longest), w, h;
         w = SDL_min((cols + 2) * cw, area.w - 2 * cw);
         rows = wrap_rows(app, question, (w - 2 * cw - tab_w * cw) / cw, 0);
-        list_h = SDL_min(list_h, SDL_max(0, area.h - (rows + body) * cell_h(app) - 12 * s)); /* kept in the area */
-        h = (rows + body) * cell_h(app) + list_h + 12 * s;
+        list_h = SDL_min(list_h, SDL_max(0, area.h - rows * cell_h(app) - 12 * s)); /* the box kept in the area */
+        h = rows * cell_h(app) + list_h + 12 * s;
         c->box = gui_rect(area.x + (area.w - w) / 2, area.y + SDL_max(0, (area.h - h) / 2), w, h);
-        if (body)
-            c->body =
-                gui_rect(c->box.x + cw, c->box.y + rows * cell_h(app) + 4 * s, c->box.w - 2 * cw, body * cell_h(app));
-        c->at = gui_rect(c->box.x + cw, c->box.y + (rows + body) * cell_h(app) + 10 * s, c->box.w - 2 * cw, list_h);
+        c->at = gui_rect(c->box.x + cw, c->box.y + rows * cell_h(app) + 10 * s, c->box.w - 2 * cw, list_h);
     }
-    ui_choices_layout(c->at, s, c->rects);
-    c->lists[UI_CHOICES_ROWS].focus = (size_t)SDL_max(focus, 0);
-    list_follow(app, of, ui_choices_follow, c->rects, UI_CHOICES_ROWS, (size_t)c->count, &c->lists[UI_CHOICES_ROWS]);
-    if (focus < 0) c->lists[UI_CHOICES_ROWS].focus = SIZE_MAX;
+    choices_rows(app, c, focus);
 }
 /* the dialog drawn where choices_place put it: the question and the tab, then the scene's rows */
 static void choices_draw(App* app, const GuiChoices* c, const char* question, const char* tab) {
@@ -7826,36 +7819,59 @@ static int size_name_cols(void) {
     for (k = 0; k < GUI_SIZE_STEPS; ++k) cols = SDL_max(cols, gui_text_cols(snx_tr(size_labels[k])));
     return cols;
 }
-static int choices_body(const App* app, int of, int* cols) {
-    (void)app;
-    *cols = of == GUI_CHOICES_SIZES ? GUI_SIZE_BAR + 1 + size_name_cols() : 0;
-    return of == GUI_CHOICES_SIZES;
-}
-static const char* sizes_question(const App* app) { return app->size_until ? app->size_line : snx_tr("UI scale"); }
-static void sizes_place(App* app, GuiChoices* c) {
-    choices_place(app, GUI_CHOICES_SIZES, choices_over(app), sizes_question(app), NULL, app->sizes.focus, c);
+/* the dialog's boxes: its choices' (box the whole dialog's), the slider's row and the question's rows under it */
+typedef struct {
+    GuiChoices c;
+    GuiRect body, line;
+} GuiSizesBoxes;
+/* the dialog in the middle of the screen in every theme, as a box over it is (over_rect): its title on its head, the
+   slider and the size picked under it, the question once OK took it, then its choices, as many rows as fit */
+static void sizes_place(App* app, GuiSizesBoxes* b) {
+    GuiChoices* c = &b->c;
+    int s = app->scale, cw = cell_w(app), ch = cell_h(app), width, height, cols, rows = 0, top, line_h, list_h;
+    const char* text;
+    area(app, &width, &height);
+    memset(b, 0, sizeof *b);
+    c->of = GUI_CHOICES_SIZES;
+    cols = SDL_max(GUI_SIZE_BAR + 1 + size_name_cols(), gui_text_cols(snx_tr("UI scale")) + 2);
+    for (; (text = choice_text(app, c->of, c->count, app->row_text, sizeof app->row_text)); ++c->count)
+        cols = SDL_max(cols, gui_text_cols(text) + gui_text_cols(app->theme.marker) + 2);
+    if (app->size_until) {
+        cols = SDL_max(cols, gui_text_cols(app->size_line));
+        rows = wrap_rows(app, app->size_line, SDL_min(cols, width / cw - 4), 0);
+    }
+    top = head_h(app) + 4 * s;             /* the slider's row, under the head */
+    line_h = rows ? rows * ch + 4 * s : 0; /* the question's, under it */
+    list_h = rows_h(ui_choices_layout, ui_choices_row, c->rects, UI_CHOICES_ROWS, s, c->count);
+    list_h = SDL_min(list_h, SDL_max(0, height - top - ch - line_h - 10 * s)); /* the box kept in the area */
+    c->box = over_rect(app, cols, top + ch + line_h + 6 * s + list_h + 4 * s);
+    b->body = gui_rect(c->box.x + cw, c->box.y + top, c->box.w - 2 * cw, ch);
+    b->line = gui_rect(c->box.x + cw, b->body.y + ch + 4 * s, c->box.w - 2 * cw, rows * ch);
+    c->at = gui_rect(c->box.x + cw, b->body.y + ch + line_h + 6 * s, c->box.w - 2 * cw, list_h);
+    choices_rows(app, c, app->sizes.focus);
 }
 /* the slider in the dialog's body: GUI_SIZE_BAR columns, fewer where they do not fit, whatever the step */
-static GuiRect sizes_bar(const App* app, const GuiChoices* c) {
-    int cols = SDL_clamp(c->body.w / cell_w(app) - 1 - size_name_cols(), GUI_SIZE_STEPS, GUI_SIZE_BAR);
-    return gui_rect(c->body.x, c->body.y, cols * cell_w(app), cell_h(app));
+static GuiRect sizes_bar(const App* app, const GuiSizesBoxes* b) {
+    int cols = SDL_clamp(b->body.w / cell_w(app) - 1 - size_name_cols(), GUI_SIZE_STEPS, GUI_SIZE_BAR);
+    return gui_rect(b->body.x, b->body.y, cols * cell_w(app), cell_h(app));
 }
-static void slider_draw(App* app, GuiRect bar, int at, bool focused, bool inverted);
-/* the dialog: its question, the slider on the size picked and its name after it, then its choices; the slider in the
-   focus's colour while it picks, on YoRHa's band of ink in the page's */
+static void slider_draw(App* app, GuiRect bar, int at, bool focused);
+/* the dialog, a box over the screen: its head, the slider on the size picked (in the focus's colour while it picks)
+   and its name after it, the question in the warning's, then its choices */
 static void render_sizes(App* app) {
     const GuiTheme* t = &app->theme;
-    bool inverted = t->dialog == GUI_DIALOG_YORHA && t->panels == GUI_PANELS_FILL;
-    GuiChoices c;
+    GuiSizesBoxes b;
     GuiRect bar;
     char name[64];
-    sizes_place(app, &c);
-    box_shade(app); /* over the App's rows */
-    choices_draw(app, &c, sizes_question(app), NULL);
-    bar = sizes_bar(app, &c);
-    slider_draw(app, bar, app->size_pick, size_picking(app), inverted);
+    sizes_place(app, &b);
+    over_box(app, b.c.box, snx_tr("UI scale"));
+    bar = sizes_bar(app, &b);
+    slider_draw(app, bar, app->size_pick, size_picking(app));
     size_name(app->size_pick, name, sizeof name);
-    text_in(app, c.body, bar.x + bar.w + cell_w(app), c.body.y, name, rgb(inverted ? t->page : t->ink));
+    text_in(app, b.body, bar.x + bar.w + cell_w(app), b.body.y, name, rgb(t->ink));
+    if (app->size_until) wrap_in(app, b.line, b.line.x, b.line.y, app->size_line, 0, rgb(t->warning));
+    app->choices_of = b.c.of;
+    ui_choices_draw(app, b.c.rects, app->scale, b.c.lists);
 }
 static void text_left(App* app);
 /* OK: the size picked in use, asked about until GUI_TEXT_KEEP_MS from now, Back in focus; the one in use already
@@ -7877,13 +7893,13 @@ static void size_take(App* app) {
 static void slider_to(App* app, int k) {
     if (size_picking(app)) app->size_pick = SDL_clamp(k, 0, GUI_TEXT_MAX);
 }
-/* the slider in bar: a line, a tick a step, the knob on step at (in the focus's colour while focused, in the page's
-   on an inverted box); kept for the pointer (slider_at) */
-static void slider_draw(App* app, GuiRect bar, int at, bool focused, bool inverted) {
+/* the slider in bar: a line, a tick a step, the knob on step at, in the focus's colour while focused; kept for the
+   pointer (slider_at) */
+static void slider_draw(App* app, GuiRect bar, int at, bool focused) {
     const GuiTheme* t = &app->theme;
     int s = app->scale, cw = cell_w(app), k, mid = bar.y + bar.h / 2;
     int span = bar.w - cw; /* the knob a cell wide, its left from bar.x to bar.x + span */
-    GuiRgb line = inverted ? t->page : t->soft, knob = inverted ? t->page : focused ? t->focus : t->ink;
+    GuiRgb line = t->soft, knob = focused ? t->focus : t->ink;
     app->slider_bar = bar;
     if (span <= 0) return;
     fill_rect(app, gui_rect(bar.x + cw / 2, mid - s, span, 2 * s), line);
@@ -7929,10 +7945,10 @@ static void sizes_key(App* app, GuiKey key) {
 /* a choice under the pointer takes the focus, a click takes it (ui_choices_rows_row_action_cb); a click off the dialog
    is Cancel or Back */
 static void sizes_pointer(App* app, float x, float y, bool click) {
-    GuiChoices c;
+    GuiSizesBoxes b;
     bool on;
-    sizes_place(app, &c);
-    if (!choices_pointer(app, &c, x, y, click, &on) && click && !on) size_choice(app, 1);
+    sizes_place(app, &b);
+    if (!choices_pointer(app, &b.c, x, y, click, &on) && click && !on) size_choice(app, 1);
 }
 /* the new size kept in app.ini (the setup's once it is done), or the one before it back (Back, ESC, or no answer in
    time); the dialog closes */

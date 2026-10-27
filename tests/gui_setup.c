@@ -310,13 +310,27 @@ static void test_first(App* app) {
     key(app, SDLK_RIGHT);
     key(app, SDLK_RIGHT);
     render(app);
-    shows(app, "2x", rgb(app->theme.page)); /* on YoRHa's band of ink */
     assert(app->size_pick == 2 && !app->menu.text_size);
+    { /* in YoRHa too a box in the middle of the screen, as the View box is, not its foot: its title on its head, then
+         the slider and the step picked, above OK and Cancel */
+        GuiSizesBoxes b;
+        GuiRect bar;
+        int width, height, x, y;
+        sizes_place(app, &b);
+        bar = sizes_bar(app, &b);
+        area(app, &width, &height);
+        assert(app->theme.dialog == GUI_DIALOG_YORHA && app->theme.panels == GUI_PANELS_FILL);
+        assert(b.c.box.x * 2 + b.c.box.w == width && b.c.box.y + b.c.box.h < height - cell_h(app));
+        assert(find_text(app, "UI scale", rgb(app->theme.page), 1, &x, &y)); /* on the head's band of ink */
+        assert(x == b.c.box.x + cell_w(app) && y == b.c.box.y + 2 * app->scale);
+        assert(b.body.y >= b.c.box.y + head_h(app) && bar.y + bar.h <= choice_box(app, &b.c, 0).y);
+        assert(find_text(app, "2x", rgb(app->theme.ink), 1, &x, &y) && x == bar.x + bar.w + cell_w(app));
+    }
     key(app, SDLK_LEFT);
     key(app, SDLK_RETURN); /* OK on 1x */
     assert(app->sizes_shown && app->size_until && app->menu.text_size == 1 && !app->confirm.shown);
     render(app);
-    shows(app, app->size_line, rgb(app->theme.page));
+    shows(app, app->size_line, rgb(app->theme.warning));
     key(app, SDLK_UP); /* Keep */
     key(app, SDLK_RETURN);
     assert(!app->sizes_shown && app->menu.text_size == 1 && app->setup_on && page(app) == SNX_SETUP_LANGUAGE);

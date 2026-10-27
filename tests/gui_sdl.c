@@ -3848,30 +3848,39 @@ int main(int argc, char** argv) {
     assert(size_picking(&app) && app.size_pick == 0 && app.sizes.count == 2 && !app.sizes.focus && !app.menu.text_size);
     render(&app);
     {
-        GuiChoices c;
+        GuiSizesBoxes b;
         GuiRect bar, first;
         int cw = cell_w(&app), span, scale = app.scale, k;
-        sizes_place(&app, &c);
-        bar = sizes_bar(&app, &c);
+        sizes_place(&app, &b);
+        bar = sizes_bar(&app, &b);
         first = bar;
         span = bar.w - cw;
-        assert(bar.w == GUI_SIZE_BAR * cw && c.body.h && bar.y == c.body.y &&
+        assert(bar.w == GUI_SIZE_BAR * cw && b.body.h && bar.y == b.body.y &&
                !memcmp(&app.slider_bar, &bar, sizeof bar));
-        shows(&app, "UI scale", rgb(app.theme.warning));
+        { /* a box in the middle of the screen in every theme, as the View box is: its title on its head, the slider and
+             its step under it, above OK and Cancel */
+            bool filled = app.theme.panels == GUI_PANELS_FILL;
+            int width, height;
+            area(&app, &width, &height);
+            assert(b.c.box.x * 2 + b.c.box.w == width && b.c.box.y > 0 && b.c.box.y + b.c.box.h < height);
+            text_px_is(&app, b.c.box.x + cw, b.c.box.y + 2 * app.scale, "UI scale",
+                       rgb(filled ? app.theme.page : app.theme.ink), rgb(filled ? app.theme.ink : app.theme.page));
+            assert(b.body.y >= b.c.box.y + head_h(&app) && bar.y + bar.h <= choice_box(&app, &b.c, 0).y);
+        }
         shows(&app, "- OK", yellow);
         shows(&app, "- Cancel", normal);
         assert(same_colour(
             pixel(&app, (float)(bar.x + 0 * span / (GUI_SIZE_STEPS - 1) + cw / 2), (float)(bar.y + bar.h / 2)),
             yellow)); /* Auto, the first step, its knob in the focus colour */
-        text_px_is(&app, bar.x + bar.w + cw, c.body.y, "Auto", rgb(app.theme.ink), rgb(app.theme.page));
+        text_px_is(&app, bar.x + bar.w + cw, b.body.y, "Auto", rgb(app.theme.ink), rgb(app.theme.page));
         /* each step: the screen as it was, the bar where it was, the step's name where Auto's was */
         for (k = 0; k < GUI_SIZE_STEPS; ++k) {
             app.size_pick = k;
             render(&app);
-            sizes_place(&app, &c);
-            bar = sizes_bar(&app, &c);
+            sizes_place(&app, &b);
+            bar = sizes_bar(&app, &b);
             assert(!memcmp(&bar, &first, sizeof bar) && app.scale == scale && !app.menu.text_size);
-            text_px_is(&app, bar.x + bar.w + cw, c.body.y, size_labels[k], rgb(app.theme.ink), rgb(app.theme.page));
+            text_px_is(&app, bar.x + bar.w + cw, b.body.y, size_labels[k], rgb(app.theme.ink), rgb(app.theme.page));
         }
         app.size_pick = 0;
         key(&app, SDLK_RIGHT);
@@ -3902,26 +3911,26 @@ int main(int argc, char** argv) {
     }
     { /* the pointer over a choice: its focus; a click on the box off its choices and its slider does nothing, one off
          the box is Cancel */
-        GuiChoices c;
+        GuiSizesBoxes b;
         key(&app, SDLK_RETURN);
         render(&app);
-        sizes_place(&app, &c);
-        point(&app, choice_box(&app, &c, 1), false);
+        sizes_place(&app, &b);
+        point(&app, choice_box(&app, &b.c, 1), false);
         assert(size_picking(&app) && app.sizes.focus == 1);
-        mouse_px(&app, c.box.x + c.box.w - 2, c.box.y + 2, true);
+        mouse_px(&app, b.c.box.x + b.c.box.w - 2, b.c.box.y + b.c.box.h - 2, true);
         assert(size_picking(&app) && app.sizes.focus == 1 && !app.size_pick);
-        mouse_px(&app, c.box.x - 4, c.box.y + c.box.h / 2, true);
+        mouse_px(&app, b.c.box.x - 4, b.c.box.y + b.c.box.h / 2, true);
         assert(!app.sizes_shown && !app.menu.text_size && !app.confirm.shown);
     }
-    { /* in an area too short for them: the rows that fit, from the focus's; the arrow of those hidden above in the first
-         row's box, at its right; YoRHa's rows from the area's top down to the question */
+    { /* a question's choices in an area too short for them: the rows that fit, from the focus's; the arrow of those
+         hidden above in the first row's box, at its right; YoRHa's rows from the area's top down to the question */
         GuiChoices c;
         GuiTheme was = app.theme;
         GuiRect first, short_area;
         size_t rows;
         int cw = cell_w(&app);
         key(&app, SDLK_RETURN);
-        short_area = gui_rect(0, 0, 60 * cw, 2 * cell_h(&app) + 12 * app.scale + item_h(&app) * 3 / 2);
+        short_area = gui_rect(0, 0, 60 * cw, cell_h(&app) + 12 * app.scale + item_h(&app) * 3 / 2);
         choices_place(&app, GUI_CHOICES_SIZES, short_area, "UI scale", NULL, 1, &c); /* Cancel, the last */
         rows = ui_choices_shown(c.rects, app.scale, UI_CHOICES_ROWS);
         assert(c.count == 2 && rows == 1);
@@ -3937,10 +3946,10 @@ int main(int argc, char** argv) {
             hides(&app, "\x1f", rgb(app.theme.soft)); /* the last in focus: none hidden below */
         }
         app.theme = *gui_theme_builtin("yorha");
-        short_area.h = 4 * cell_h(&app) + cell_h(&app) / 2 + item_h(&app) * 3 / 2;
+        short_area.h = 3 * cell_h(&app) + cell_h(&app) / 2 + item_h(&app) * 3 / 2;
         choices_place(&app, GUI_CHOICES_SIZES, short_area, "UI scale", NULL, 0, &c);
         rows = ui_choices_shown(c.rects, app.scale, UI_CHOICES_ROWS);
-        assert(c.at.y == short_area.y && c.at.y + c.at.h <= c.box.y && rows == 1 && c.body.y > c.box.y);
+        assert(c.at.y == short_area.y && c.at.y + c.at.h <= c.box.y && rows == 1);
         assert(!c.lists[UI_CHOICES_ROWS].first);
         app.theme = was;
         key(&app, SDLK_ESCAPE);
@@ -3953,15 +3962,15 @@ int main(int argc, char** argv) {
     assert(!strcmp(app.app_form.text, "1x") && !app.confirm.shown && strstr(app.size_line, "Back to Auto in 15 s"));
     render(&app);
     {
-        GuiChoices c;
+        GuiSizesBoxes b;
         GuiRect bar;
         int cw = cell_w(&app);
         shows(&app, app.size_line, rgb(app.theme.warning));
         shows(&app, "- Keep", normal);
         shows(&app, "- Back", yellow);
-        sizes_place(&app, &c);
-        bar = sizes_bar(&app, &c);
-        text_px_is(&app, bar.x + bar.w + cw, c.body.y, "1x", rgb(app.theme.ink), rgb(app.theme.page));
+        sizes_place(&app, &b);
+        bar = sizes_bar(&app, &b);
+        text_px_is(&app, bar.x + bar.w + cw, b.body.y, "1x", rgb(app.theme.ink), rgb(app.theme.page));
         /* the slider shows what OK took, out of the pointer's and the keys' reach: Left/Right go round Keep and Back */
         assert(same_colour(
             pixel(&app, (float)(bar.x + 1 * (bar.w - cw) / (GUI_SIZE_STEPS - 1) + cw / 2), (float)(bar.y + bar.h / 2)),
@@ -3985,12 +3994,12 @@ int main(int argc, char** argv) {
     { /* a press on the slider takes the step under it, and a drag follows it until the button lifts; nothing changes
          until OK, clicked */
         SDL_Event up = {0};
-        GuiChoices c;
+        GuiSizesBoxes b;
         GuiRect bar;
         int cw = cell_w(&app), span;
         render(&app);
-        sizes_place(&app, &c);
-        bar = sizes_bar(&app, &c);
+        sizes_place(&app, &b);
+        bar = sizes_bar(&app, &b);
         span = bar.w - cw;
         mouse_px(&app, bar.x + cw / 2 + 3 * span / (GUI_SIZE_STEPS - 1), bar.y + bar.h / 2, true); /* 3x's step */
         assert(app.slider_drag && app.size_pick == 3 && !app.menu.text_size && size_picking(&app));
@@ -4004,8 +4013,8 @@ int main(int argc, char** argv) {
         event(&app, &up);
         assert(!app.slider_drag && app.size_pick == 1 && !app.menu.text_size);
         render(&app);
-        sizes_place(&app, &c);
-        point(&app, choice_box(&app, &c, 0), true); /* OK clicked */
+        sizes_place(&app, &b);
+        point(&app, choice_box(&app, &b.c, 0), true); /* OK clicked */
     }
     assert(app.menu.text_size == 1 && app.scale == 1 && !strcmp(app.app_form.text, "1x"));
     app.clock = 1000 + GUI_TEXT_KEEP_MS - 1;

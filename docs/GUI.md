@@ -247,10 +247,11 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   a built-in is saved as a new theme, `mytheme` until renamed. ESC leaves, asking first if
   there are unsaved changes.
 - Settings > App's **UI scale** row shows the size in use: Auto (fit the screen), then 1x to 4x, the letters' whole
-  sizes. Enter, a click or a tap on it opens its dialog, and
-  so do Left/Right, a step that way: a slider, a tick a size, as wide whatever the size, the size picked named after it,
-  then OK and Cancel. Left/Right, a click or a tap on the bar (a drag along it following) pick a size, and nothing else
-  changes until OK; Cancel or ESC close it as it was. OK uses the size picked, and the dialog asks there to keep it,
+  sizes. Enter, a click or a tap on it opens its dialog, and so do Left/Right, a step that way: a box in the middle of
+  the screen whatever the theme's dialogs, as the View box, its title on its head, then a slider, a tick a size, as
+  wide whatever the size, the size picked named after it, and under them OK and Cancel. Left/Right, a click or a tap
+  on the bar (a drag along it following) pick a size, and nothing else changes until OK; Cancel or ESC close it as it
+  was. OK uses the size picked, and the dialog asks there to keep it,
   Back in focus: Keep keeps it in `app.ini`; Back, ESC or no answer in 15 s bring the one before it back. Bigger
   letters scroll the menu. The foot's letters (its keys, and the tips when they are
   there) are a size under the rest's, 1x at the least.
