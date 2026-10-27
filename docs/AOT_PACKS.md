@@ -21,7 +21,18 @@ before it starts a pack build:
 
 `Game O2 / cache O2` is accepted. `Game O2 / cache O0` is refused, and the same is true in reverse. The pack
 build would otherwise contain AOT code generated at one level and cached code generated at another; the two must
-agree for the pack to be coherent. The launcher says which two levels differ and the two ways to align them.
+agree for the pack to be coherent. The level the cache records is the JIT's, and the level the build was made with is
+the AOT's. The launcher names both: its side panel says `AOT build: O3, its JIT cache O2: a pack needs one level` in
+the failure colour, and the build itself says the same, with the two ways to align them. That refusal is the whole of
+it. The two levels are independent everywhere else: the JIT cache is keyed by its own level, the ABI, the LLVM, the
+runtime library, the CPU and the hooks, so another AOT level neither drops it nor makes it stale, and the shaders and
+their cache are keyed by the GPU, its driver and the build, so no level touches them. A game plays the same at any
+pair of levels until a pack is built.
+
+On Android and iOS the JIT compiles at O0, as any other level breaks it there, and its level is no setting at all: a
+phone's launcher lists no `JIT optimization` row. Every cache a phone writes is O0, and the launcher does not compare
+the two levels there, as a phone's AOT level could only be made to match by recompiling every game at 0. A pack built
+on a phone links the cached code as it is.
 
 The key also contains the ABI, LLVM version, runtime library, host CPU and its features, and the SVC/hook mode.
 Those must match too; the driver validates the full key when it opens the cache. A runtime rebuild can therefore

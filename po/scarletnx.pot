@@ -1789,11 +1789,12 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "AOT build: O%c%s"
+msgid "AOT build: O%c"
 msgstr ""
 
 #: src/gui/main.c
-msgid " (levels differ)"
+#, c-format
+msgid "AOT build: O%c, its JIT cache O%c: a pack needs one level"
 msgstr ""
 
 #: src/gui/main.c
@@ -3178,7 +3179,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "The JIT cache is O%c, but the game's AOT optimization is O%c. They must match: set Optimization level to O%c before building, or set JIT optimization to O%c and play once to make a matching cache."
+msgid "The JIT cache's level (JIT optimization O%c) and the game's AOT optimization O%c differ. An AOT pack needs them equal: set Optimization level to O%c before building, or set JIT optimization to O%c and play once to make a matching cache."
 msgstr ""
 
 #: src/gui/main.c
@@ -4302,7 +4303,7 @@ msgid "Optimization level"
 msgstr ""
 
 #: src/nx/runtime/settings.txt
-msgid "LLVM's optimization of the game's code when it is recompiled: 0 none, 3 the most, z the smallest. A game made already keeps its code until it is recompiled"
+msgid "LLVM's optimization of the game's code when it is recompiled: 0 none, 3 the most, z the smallest. A game made already keeps its code until it is recompiled. Only an AOT pack built from the game's JIT cache needs it to match JIT optimization"
 msgstr ""
 
 #: src/nx/runtime/settings.txt

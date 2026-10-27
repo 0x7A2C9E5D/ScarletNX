@@ -290,14 +290,20 @@ setting JIT threads
     words Auto|#
     help Threads compiling the code the recompiler missed: 0 = every CPU the game may use but two (at most 8).
     help They yield to the game
+# The JIT's level is the recompile's Optimization level by default (g_recompile_ini's opt, 2), as an AOT pack built from
+# the cache needs the cache's level and the pack's to agree. A phone has no such setting: its JIT compiles at O0, as any
+# other level breaks it (guest_jit.c), and cmake/settings.cmake leaves the block out
+# SNX_PHONE_BEGIN
 setting JIT optimization
     key jit_opt
     text 2
-    default 0
+    default 2
     startup
     words 0=O0|1=O1|2=O2|3=O3|s=Os|z=Oz
     help LLVM's optimization of the code the runtime JIT compiles when the game reaches code the recompiler missed:
-    help 0 none, 3 the most, s or z the smallest. It applies to the next run, which compiles its JIT code again
+    help 0 none, 3 the most, s or z the smallest. It is the recompile's Optimization level by default (2), which an AOT
+    help pack built from the cache needs to match. It applies to the next run, which compiles its JIT code again
+# SNX_PHONE_END
 
 # the on-screen controls' (platform/vpad.c): their settings in the game's menu's order, then a control's place in the
 # order of SNX_VPAD_ (VPAD_CONTROLS, which the list controls follows)
@@ -978,7 +984,8 @@ setting Optimization level
     default 2
     words 0=O0|1=O1|2=O2|3=O3|s=Os|z=Oz
     help LLVM's optimization of the game's code when it is recompiled: 0 none, 3 the most, z the smallest. A game
-    help made already keeps its code until it is recompiled
+    help made already keeps its code until it is recompiled. Only an AOT pack built from the game's JIT cache needs it
+    help to match JIT optimization
 setting AOT threads
     key aot_threads
     int 0 1024
