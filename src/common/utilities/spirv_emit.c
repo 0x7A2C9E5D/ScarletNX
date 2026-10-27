@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
+#include "common/utilities/bits.h"
 #include "common/utilities/spirv_emit.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -53,8 +54,8 @@ static void put_str(SpvWords* s, const char* str) {
 /* a type (the id first, at = 1) or constant (its type first, the id second, at = 2) of these words in types, made
    once */
 static uint32_t known(SpvEmitter* e, uint32_t op, size_t at, const uint32_t* operands, size_t count) {
-    uint64_t h = 0xcbf29ce484222325ull ^ op;
-    for (size_t i = 0; i < count; i++) h = (h ^ operands[i]) * 0x100000001b3ull;
+    uint64_t h = SNX_FNV_BASIS ^ op;
+    for (size_t i = 0; i < count; i++) h = snx_fnv_step(h, operands[i]);
     for (size_t k = 0; k < e->known_count; k++) {
         if (e->known[k].hash != h) continue;
         const uint32_t* w = e->types.words + e->known[k].at;

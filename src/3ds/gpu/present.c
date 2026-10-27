@@ -16,6 +16,7 @@
 #include "3ds/gpu/vk/vk_transfer.h"
 #include "3ds/gpu/vk/vk_y2r.h"
 #include "3ds/gpu/vk/vk_render.h"
+#include "common/utilities/bits.h"
 #include "common/gpu/vk/swapchain.h"
 #include "common/utilities/build_info.h"
 #include "common/utilities/common.h"
@@ -349,9 +350,8 @@ bool snx_ctr_present_frame(unsigned screen, uint32_t pa, unsigned width, unsigne
     if (readback) {
         const unsigned char* rgba = g_present.readback_view;
         if (hash) {
-            uint64_t h = 1469598103934665603ull;
-            for (uint64_t i = 0; i < (uint64_t)width * height * 4; ++i) h = (h ^ rgba[i]) * 1099511628211ull;
-            *hash = h;
+            /* not SNX_FNV_BASIS (a digit short of it), kept so the frame hashes stay what they were */
+            *hash = snx_fnv1a(1469598103934665603ull, rgba, (size_t)width * height * 4);
         }
         if (dump) write_ppm(screen, width, height, rgba);
     }

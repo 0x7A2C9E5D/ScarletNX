@@ -6,6 +6,7 @@
 /* Small integer helpers every part of the program had its own copy of: rounding to a multiple, clamping, and the
    FNV-1a hash the caches key their entries with. */
 
+#include "common/utilities/bits.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -33,6 +34,8 @@ static inline uint64_t snx_max_u64(uint64_t a, uint64_t b) { return a > b ? a : 
 /* 64-bit FNV-1a: SNX_FNV_BASIS to start, each call continuing the hash of the bytes before */
 #define SNX_FNV_BASIS 0xcbf29ce484222325ull
 #define SNX_FNV_PRIME 0x100000001b3ull
+/* one FNV-1a step over a whole value (a word, a hash of a part) instead of a byte */
+static inline uint64_t snx_fnv_step(uint64_t hash, uint64_t value) { return (hash ^ value) * SNX_FNV_PRIME; }
 static inline uint64_t snx_fnv1a(uint64_t hash, const void* bytes, size_t size) {
     const unsigned char* p = (const unsigned char*)bytes;
     for (size_t i = 0; i < size; ++i) hash = (hash ^ p[i]) * SNX_FNV_PRIME;

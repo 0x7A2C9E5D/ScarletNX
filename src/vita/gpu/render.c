@@ -791,18 +791,17 @@ static VkBlendOp blend_op(unsigned f) {
                                     VK_BLEND_OP_MIN, VK_BLEND_OP_MAX};
     return f < sizeof ops / sizeof *ops ? ops[f] : VK_BLEND_OP_ADD;
 }
-static uint64_t hash(uint64_t h, uint64_t v) { return (h ^ v) * 0x100000001b3ull; }
 static VkPipeline pipeline_for(struct VitaRender* r, GxmContext* c, const GxmVertexProgram* vp, Shader* vs,
                                const GxmFragmentProgram* fp, Shader* fs, VkPrimitiveTopology topology) {
-    uint64_t key = 0xcbf29ce484222325ull;
-    key = hash(key, (uintptr_t)vs), key = hash(key, (uintptr_t)fs), key = hash(key, fp->blend_info | (uint64_t)fp->blend << 32);
-    key = hash(key, topology), key = hash(key, c->cull_mode), key = hash(key, r->depth != NULL);
-    key = hash(key, r->color->vk_format), key = hash(key, r->depth ? r->depth->vk_format : 0);
-    key = hash(key, c->depth_func), key = hash(key, c->depth_write);
-    for (unsigned i = 0; i < vp->stream_count; ++i) key = hash(key, vp->streams[i].stride | (uint64_t)vp->streams[i].index_source << 16);
+    uint64_t key = SNX_FNV_BASIS;
+    key = snx_fnv_step(key, (uintptr_t)vs), key = snx_fnv_step(key, (uintptr_t)fs), key = snx_fnv_step(key, fp->blend_info | (uint64_t)fp->blend << 32);
+    key = snx_fnv_step(key, topology), key = snx_fnv_step(key, c->cull_mode), key = snx_fnv_step(key, r->depth != NULL);
+    key = snx_fnv_step(key, r->color->vk_format), key = snx_fnv_step(key, r->depth ? r->depth->vk_format : 0);
+    key = snx_fnv_step(key, c->depth_func), key = snx_fnv_step(key, c->depth_write);
+    for (unsigned i = 0; i < vp->stream_count; ++i) key = snx_fnv_step(key, vp->streams[i].stride | (uint64_t)vp->streams[i].index_source << 16);
     for (unsigned i = 0; i < vp->attribute_count; ++i) {
         const GxmAttribute* a = &vp->attributes[i];
-        key = hash(key, a->stream | (uint64_t)a->offset << 8 | (uint64_t)a->format << 24 | (uint64_t)a->components << 32 |
+        key = snx_fnv_step(key, a->stream | (uint64_t)a->offset << 8 | (uint64_t)a->format << 24 | (uint64_t)a->components << 32 |
                             (uint64_t)a->reg << 40);
     }
     unsigned slot = (unsigned)(key % PIPELINES);

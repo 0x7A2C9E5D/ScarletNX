@@ -9,6 +9,7 @@
    negative operand as Azahar's do then. */
 #include "3ds/gpu/vk/vsgen.h"
 #include "3ds/gpu/pica_internal.h"
+#include "common/utilities/bits.h"
 #include "common/utilities/spirv_emit.h"
 #include <stdlib.h>
 #include <string.h>
@@ -720,9 +721,9 @@ static void generate(Gen* g) {
 
 /* ---- the shader around the program ---- */
 uint64_t snx_ctr_vs_hash(const SnxCtrShaderSetup* setup) {
-    uint64_t h = 0xcbf29ce484222325ull;
-    for (unsigned i = 0; i < PROGRAM_END; ++i) h = (h ^ setup->code[i]) * 0x100000001b3ull;
-    for (unsigned i = 0; i < PROGRAM_END; ++i) h = (h ^ setup->swizzle[i]) * 0x100000001b3ull;
+    uint64_t h = SNX_FNV_BASIS;
+    for (unsigned i = 0; i < PROGRAM_END; ++i) h = snx_fnv_step(h, setup->code[i]);
+    for (unsigned i = 0; i < PROGRAM_END; ++i) h = snx_fnv_step(h, setup->swizzle[i]);
     return h;
 }
 void snx_ctr_vs_config(const SnxCtrPica* pica, SnxCtrVsConfig* c) {
