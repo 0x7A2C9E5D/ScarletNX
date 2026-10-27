@@ -2267,6 +2267,41 @@ static void pickers_asked(App* app, const char* temporary, const char* self) {
     focus_game(app, "picker game");
     key(app, SDLK_M);
     assert(app->addons_shown && addons_row(app, 0) == ROW_ADD_MOD && !app->addons_focus);
+    /* over Games, whose own swipes turn its pages, a finger's drag and the wheel move the box's focus, a row at a
+       time, stopping at its last row and its first where the keys go round: the rows a phone has no room for come
+       into view. The finger's lift neither turns Games' page nor taps a row */
+    {
+        SDL_Event e = {0};
+        int count = addons_rows(app);
+        size_t page = app->browser.page, selected = app->browser.selected;
+        float row = drag_row(app);
+        assert(count >= 3);
+        e.tfinger.fingerID = 7;
+        e.tfinger.x = 0.5f;
+        e.tfinger.y = 0.1f;
+        e.type = SDL_EVENT_FINGER_DOWN;
+        event(app, &e);
+        e.type = SDL_EVENT_FINGER_MOTION;
+        e.tfinger.y = 0.1f + 1.5f * row;
+        event(app, &e);
+        assert(app->addons_shown && app->addons_focus == 1);
+        e.tfinger.y = 0.1f + ((float)count + 1.5f) * row;
+        event(app, &e);
+        assert(app->addons_focus == count - 1);
+        e.type = SDL_EVENT_FINGER_UP;
+        event(app, &e);
+        assert(app->addons_shown && app->addons_focus == count - 1 && !app->finger && !app->confirm.shown);
+        assert(app->browser.page == page && app->browser.selected == selected && !app->message[0]);
+        e = (SDL_Event){0};
+        e.type = SDL_EVENT_MOUSE_WHEEL;
+        e.wheel.integer_y = count + 2;
+        event(app, &e);
+        assert(app->addons_focus == 0);
+        e.wheel.integer_y = -2;
+        event(app, &e);
+        assert(app->addons_focus == 2 && app->addons_shown);
+        app->addons_focus = 0;
+    }
     app->message[0] = 0;
     key(app, SDLK_RETURN);
     message_waited(app);

@@ -13193,9 +13193,32 @@ static void cancel(App* app) {
 static Uint64 finger_id(const SDL_TouchFingerEvent* f) {
     return (Uint64)f->fingerID | (f->touchID == SDL_PEN_TOUCHID ? 1ull << 63 : 0);
 }
-/* a row up or down for a finger's drag and the wheel, which stop at the first and last rows where the keys go round */
+/* the focus of the box over the screen, the one pointer() gives the pointer, and its rows; NULL with none shown */
+static int* box_focus(App* app, int* count) {
+    int rows[GUI_VIEW_BOX_ROWS];
+    GuiChoice* c = app->sizes_shown ? &app->sizes : app->dests_shown ? &app->dests : NULL;
+    if (c) {
+        *count = c->count;
+        return &c->focus;
+    }
+    *count = app->users_shown     ? g_user_count
+             : app->addons_shown  ? addons_rows(app)
+             : app->options_shown ? view_rows(app, rows)
+                                  : (int)app->states_count;
+    return app->users_shown     ? &app->users_focus
+           : app->addons_shown  ? &app->addons_focus
+           : app->options_shown ? &app->options_focus
+           : app->states_shown  ? &app->states_focus
+                                : NULL;
+}
+/* a row up or down for a finger's drag and the wheel, which stop at the first and last rows where the keys go round:
+   a box's over the screen first, whose rows past its room come into view as its focus moves */
 static void scroll(App* app, GuiKey key) {
-    int row;
+    int row, count, *focus = box_focus(app, &count);
+    if (focus) {
+        if (key == GUI_UP ? *focus > 0 : *focus + 1 < count) *focus += key == GUI_UP ? -1 : 1;
+        return;
+    }
     if (app->editing && app->form == GUI_FORM_PAD) {
         pad_did(app, snx_pad_screen_key(&app->pad, key == GUI_UP ? SNX_PAD_KEY_UP : SNX_PAD_KEY_DOWN));
         return;
@@ -13221,12 +13244,15 @@ static void scroll(App* app, GuiKey key) {
         menu_key(app, key == GUI_UP ? GUI_DOWN : GUI_UP); /* it went round: back */
 }
 /* a drag up or down from where the finger went down: on the menu, whether or not its rows all fit (the focus follows
-   it), and on a form */
+   it), on a form, and on a box over either or over Games, whose own swipes turn its pages */
 static bool drags(App* app, float x, float y) {
     float dx = x - app->finger_x, dy = y - app->finger_y;
-    return SDL_fabsf(dy) > 0.05f && SDL_fabsf(dy) > 2 * SDL_fabsf(dx) && app->menu.view != GUI_LOAD_GAMES &&
-           !app->menu.running && !app->finished && !app->setup_on &&
-           (app->editing ? app->form != GUI_FORM_PAD : !pick_screen(app));
+    int count;
+    if (SDL_fabsf(dy) <= 0.05f || SDL_fabsf(dy) <= 2 * SDL_fabsf(dx) || app->menu.running || app->finished ||
+        app->setup_on)
+        return false;
+    if (box_focus(app, &count)) return !app->confirm.shown; /* a question over the box has the finger */
+    return app->menu.view != GUI_LOAD_GAMES && (app->editing ? app->form != GUI_FORM_PAD : !pick_screen(app));
 }
 /* the share of the window's height the finger goes for a row: one of the menu's, or of the form's list the keys move
    in; a row of text where it has none */
@@ -13277,8 +13303,9 @@ static void drag(App* app, float y) {
    phone's lists scroll; a tap clicks there, is ESC on a finished run and on a running one's ESC line */
 static void touch(App* app, float x, float y) {
     float dx = x - app->finger_x, dy = y - app->finger_y, rx, ry;
-    int w, h;
-    bool games = app->menu.view == GUI_LOAD_GAMES && !app->menu.running && !app->finished;
+    int w, h, count;
+    /* Games' swipes turn its pages, but for a box over it, which a drag moves in (drags) */
+    bool games = app->menu.view == GUI_LOAD_GAMES && !app->menu.running && !app->finished && !box_focus(app, &count);
     if (SDL_fabsf(dx) > 0.1f && SDL_fabsf(dx) > 2 * SDL_fabsf(dy)) {
         if (games) menu_key(app, dx < 0 ? GUI_PAGE_DOWN : GUI_PAGE_UP);
         return;
@@ -13713,13 +13740,12 @@ static void event_take(App* app, const SDL_Event* e) {
         app->hovering = false;
         return;
     }
-    /* a notch of the wheel is a row, as a finger's drag, the way the system turns it; not under a box */
+    /* a notch of the wheel is a row, as a finger's drag, the way the system turns it: a box's over the screen first */
     if (e->type == SDL_EVENT_MOUSE_WHEEL) {
         int rows = e->wheel.integer_y;
         for (; app->setup_on && !app->splash && !app->confirm.shown && rows; rows += rows > 0 ? -1 : 1)
             setup_key(app, rows > 0 ? GUI_UP : GUI_DOWN);
         if (app->splash || app->menu.running || app->finished || app->confirm.shown || app->left_shown ||
-            app->users_shown || app->addons_shown || app->options_shown || app->states_shown ||
             (app->editing && app->editor.picking))
             return;
         for (; rows > 0; --rows) scroll(app, GUI_UP);
