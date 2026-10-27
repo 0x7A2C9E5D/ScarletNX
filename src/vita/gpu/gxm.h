@@ -67,6 +67,7 @@ typedef struct {
 #define GXM_DEPTH_TILED       0x10000u
 #define GXM_DEPTH_STRIDE_SHIFT 17u
 #define GXM_DEPTH_D16         0x2444u /* SCE_GXM_DEPTH_STENCIL_FORMAT_D16 >> 12 */
+#define GXM_DEPTH_S8D24       0x1266u /* SCE_GXM_DEPTH_STENCIL_FORMAT_S8D24 >> 12 */
 typedef struct {
     uint32_t control, depth, stencil;
     float background_depth;

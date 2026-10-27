@@ -40,7 +40,8 @@ typedef struct {
 typedef struct {
     uint32_t address, width, height, stride, format;
     bool depth;
-    VkFormat vk_format; /* its image's: a color surface's color_format, a depth surface's D16 or D32 */
+    VkFormat vk_format; /* its image's: a color surface's color_format, a depth surface's D16, D32 or one with stencil */
+    bool stencil;       /* a depth surface's image has stencil (an S8D24 surface's, as vk.h's stencil_format) */
     VkImage image;
     VkImageView view;
     VkDeviceMemory memory;
@@ -322,14 +323,19 @@ static Surface* surface(struct VitaRender* r, uint32_t address, uint32_t width, 
     if (!free_slot) return NULL;
     Surface* s = free_slot;
     VkComponentMapping identity = {0};
-    /* a D16 depth surface (format: its GXM_DEPTH_* format) as D16, which its memory holds, else D32 */
-    VkFormat vk = depth && format == GXM_DEPTH_D16 && r->vk->depth16_blit ? VK_FORMAT_D16_UNORM : VK_FORMAT_D32_SFLOAT;
+    /* a D16 depth surface (format: its GXM_DEPTH_* format) as D16, which its memory holds, an S8D24 one with its
+       stencil, else D32 */
+    bool stencil = depth && format == GXM_DEPTH_S8D24 && r->vk->stencil_format;
+    VkFormat vk = depth && format == GXM_DEPTH_D16 && r->vk->depth16_blit ? VK_FORMAT_D16_UNORM
+                  : stencil                                               ? r->vk->stencil_format
+                                                                          : VK_FORMAT_D32_SFLOAT;
     unsigned bytes;
     if (!depth && !color_format(format, &vk, &bytes)) return NULL;
     bool ok = depth ? image_make(r, vk, width, height, 1,
                                  VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                      VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                                 VK_IMAGE_ASPECT_DEPTH_BIT, identity, &s->image, &s->view, &s->memory)
+                                 VK_IMAGE_ASPECT_DEPTH_BIT | (stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0), identity,
+                                 &s->image, &s->view, &s->memory)
                     : image_make(r, vk, width, height, 1,
                                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
@@ -337,9 +343,29 @@ static Surface* surface(struct VitaRender* r, uint32_t address, uint32_t width, 
                                  VK_IMAGE_ASPECT_COLOR_BIT, identity, &s->image, &s->view, &s->memory);
     if (!ok) return NULL;
     s->address = address, s->width = width, s->height = height, s->stride = stride, s->format = format;
-    s->depth = depth, s->vk_format = vk;
+    s->depth = depth, s->vk_format = vk, s->stencil = stencil;
     s->layout = VK_IMAGE_LAYOUT_UNDEFINED;
     return s;
+}
+/* a depth surface's aspects, and its layout while it is drawn to */
+static VkImageAspectFlags depth_aspects(const Surface* s) {
+    return VK_IMAGE_ASPECT_DEPTH_BIT | (s->stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
+}
+static VkImageLayout depth_layout(const Surface* s) {
+    return s->stencil ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+}
+/* the scene's depth and stencil attachments, loaded (load, c unused) or cleared to the surface's background depth
+   and stencil (the low byte of its background control word) */
+static void depth_attachments(const struct VitaRender* r, const GxmContext* c, bool load,
+                              VkRenderingAttachmentInfo* depth, VkRenderingAttachmentInfo* stencil) {
+    *depth = (VkRenderingAttachmentInfo){.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                                         .imageView = r->depth->view,
+                                         .imageLayout = depth_layout(r->depth),
+                                         .loadOp = load ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                         .storeOp = VK_ATTACHMENT_STORE_OP_STORE, /* a texture's copy restarts the pass */
+                                         .clearValue.depthStencil = {load ? 0.0f : c->depth.background_depth,
+                                                                     load ? 0 : c->depth.background_control & 0xffu}};
+    *stencil = *depth;
 }
 
 /* ---- the renderer ---- */
@@ -636,31 +662,26 @@ void vita_render_begin_scene(VitaProcess* p, GxmContext* c) {
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
                 depth_blit(cb, d->samples, d->width * fx, d->height * fy, d->image, d->width, d->height);
             }
-            barrier(cb, d->image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+            barrier(cb, d->image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, depth_layout(d));
             depth_loaded = true;
         } else
-            barrier(cb, d->image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-                    VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-        d->layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            barrier(cb, d->image, depth_aspects(d), VK_IMAGE_LAYOUT_UNDEFINED, depth_layout(d));
+        d->layout = depth_layout(d);
     }
     VkRenderingAttachmentInfo color = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                                        .imageView = r->color->view,
                                        .imageLayout = color_layout(r),
                                        .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                                        .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
-    VkRenderingAttachmentInfo depth = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                                       .imageView = r->depth ? r->depth->view : VK_NULL_HANDLE,
-                                       .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                                       .loadOp = depth_loaded ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR,
-                                       .storeOp = VK_ATTACHMENT_STORE_OP_STORE, /* a texture's copy restarts the pass */
-                                       .clearValue.depthStencil = {c->depth.background_depth, 0}};
+    VkRenderingAttachmentInfo depth, stencil;
+    if (r->depth) depth_attachments(r, c, depth_loaded, &depth, &stencil);
     VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
                           .renderArea = {{0, 0}, {r->width, r->height}},
                           .layerCount = 1,
                           .colorAttachmentCount = 1,
                           .pColorAttachments = &color,
-                          .pDepthAttachment = r->depth ? &depth : NULL};
+                          .pDepthAttachment = r->depth ? &depth : NULL,
+                          .pStencilAttachment = r->depth && r->depth->stencil ? &stencil : NULL};
     vkCmdBeginRendering(cb, &ri);
     r->rendering = true;
 }
@@ -692,6 +713,7 @@ uint64_t vita_render_end_scene(VitaProcess* p, GxmContext* c) {
                 barrier(cb, d->samples, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
             }
+            memory_barrier(cb); /* after every earlier access to the memory, as a color store */
             VkBufferImageCopy store = {.bufferOffset = depth_at,
                                        .bufferRowLength = c->depth.control >> GXM_DEPTH_STRIDE_SHIFT,
                                        .imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1},
@@ -798,6 +820,10 @@ static VkPipeline pipeline_for(struct VitaRender* r, GxmContext* c, const GxmVer
     key = snx_fnv_step(key, topology), key = snx_fnv_step(key, c->cull_mode), key = snx_fnv_step(key, r->depth != NULL);
     key = snx_fnv_step(key, r->color->vk_format), key = snx_fnv_step(key, r->depth ? r->depth->vk_format : 0);
     key = snx_fnv_step(key, c->depth_func), key = snx_fnv_step(key, c->depth_write);
+    bool stencil = r->depth && r->depth->stencil;
+    if (stencil)
+        key = snx_fnv_step(key, c->stencil_func[0] | (uint64_t)c->stencil_ops[0][0] << 32 |
+                                    (uint64_t)c->stencil_ops[0][1] << 40 | (uint64_t)c->stencil_ops[0][2] << 48);
     for (unsigned i = 0; i < vp->stream_count; ++i) key = snx_fnv_step(key, vp->streams[i].stride | (uint64_t)vp->streams[i].index_source << 16);
     for (unsigned i = 0; i < vp->attribute_count; ++i) {
         const GxmAttribute* a = &vp->attributes[i];
@@ -861,11 +887,29 @@ static VkPipeline pipeline_for(struct VitaRender* r, GxmContext* c, const GxmVer
                                             VK_COMPARE_OP_EQUAL,         VK_COMPARE_OP_LESS_OR_EQUAL,
                                             VK_COMPARE_OP_GREATER,       VK_COMPARE_OP_NOT_EQUAL,
                                             VK_COMPARE_OP_GREATER_OR_EQUAL, VK_COMPARE_OP_ALWAYS};
+    /* SceGxmStencilOp: keep, zero, replace, increment and decrement (saturating), invert, increment and decrement
+       (wrapping); the function in bits 25 to 27, in the depth functions' order. Both faces take the front's, as they do
+       without two-sided mode (sceGxmSetTwoSidedEnable, not taken yet); the reference and masks are dynamic */
+    static const VkStencilOp ops[8] = {VK_STENCIL_OP_KEEP,
+                                       VK_STENCIL_OP_ZERO,
+                                       VK_STENCIL_OP_REPLACE,
+                                       VK_STENCIL_OP_INCREMENT_AND_CLAMP,
+                                       VK_STENCIL_OP_DECREMENT_AND_CLAMP,
+                                       VK_STENCIL_OP_INVERT,
+                                       VK_STENCIL_OP_INCREMENT_AND_WRAP,
+                                       VK_STENCIL_OP_DECREMENT_AND_WRAP};
+    VkStencilOpState face = {.failOp = ops[c->stencil_ops[0][0] & 7],
+                             .passOp = ops[c->stencil_ops[0][2] & 7],
+                             .depthFailOp = ops[c->stencil_ops[0][1] & 7],
+                             .compareOp = compares[(c->stencil_func[0] >> 25) & 7]};
     VkPipelineDepthStencilStateCreateInfo depth = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         .depthTestEnable = r->depth != NULL,
         .depthWriteEnable = r->depth != NULL && c->depth_write == 0, /* SCE_GXM_DEPTH_WRITE_ENABLED is 0 */
-        .depthCompareOp = compares[(c->depth_func >> 22) & 7]};
+        .depthCompareOp = compares[(c->depth_func >> 22) & 7],
+        .stencilTestEnable = stencil,
+        .front = face,
+        .back = face};
     uint32_t b = fp->blend_info;
     VkPipelineColorBlendAttachmentState blend = {
         .blendEnable = fp->blend,
@@ -886,16 +930,20 @@ static VkPipeline pipeline_for(struct VitaRender* r, GxmContext* c, const GxmVer
                      : 0,
         .attachmentCount = 1,
         .pAttachments = &blend};
-    VkDynamicState states[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkDynamicState states[5] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR,
+                                VK_DYNAMIC_STATE_STENCIL_REFERENCE, VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
+                                VK_DYNAMIC_STATE_STENCIL_WRITE_MASK};
     VkPipelineDynamicStateCreateInfo dynamic = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-                                                .dynamicStateCount = 2,
+                                                .dynamicStateCount = 5,
                                                 .pDynamicStates = states};
     VkFormat attachment = r->color->vk_format;
     VkPipelineRenderingCreateInfo rendering = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
                                                .colorAttachmentCount = 1,
                                                .pColorAttachmentFormats = &attachment,
                                                .depthAttachmentFormat = r->depth ? r->depth->vk_format
-                                                                                 : VK_FORMAT_UNDEFINED};
+                                                                                 : VK_FORMAT_UNDEFINED,
+                                               .stencilAttachmentFormat = stencil ? r->depth->vk_format
+                                                                                  : VK_FORMAT_UNDEFINED};
     VkGraphicsPipelineCreateInfo gi = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
                                        .pNext = &rendering,
                                        .stageCount = 2,
@@ -1023,6 +1071,9 @@ static bool color_copy(struct VitaRender* r, VkCommandBuffer cb, const Surface* 
     VkFormat vk;
     unsigned bytes;
     if (!color_format(s->format, &vk, &bytes)) return false;
+    /* a store after every earlier access to the memory: the surface's own load, the presenter's copy of it, a texture
+       read from it (the image's barrier orders only the image's accesses for the validation layer) */
+    if (store) memory_barrier(cb);
     VkBufferImageCopy copy = {.bufferOffset = at,
                               .bufferRowLength = s->stride,
                               .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
@@ -1083,17 +1134,15 @@ static void rendering_resume(struct VitaRender* r, VkCommandBuffer cb) {
                                        .imageLayout = color_layout(r),
                                        .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                                        .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
-    VkRenderingAttachmentInfo depth = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                                       .imageView = r->depth ? r->depth->view : VK_NULL_HANDLE,
-                                       .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                                       .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                                       .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
+    VkRenderingAttachmentInfo depth, stencil;
+    if (r->depth) depth_attachments(r, NULL, true, &depth, &stencil);
     VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
                           .renderArea = {{0, 0}, {r->width, r->height}},
                           .layerCount = 1,
                           .colorAttachmentCount = 1,
                           .pColorAttachments = &color,
-                          .pDepthAttachment = r->depth ? &depth : NULL};
+                          .pDepthAttachment = r->depth ? &depth : NULL,
+                          .pStencilAttachment = r->depth && r->depth->stencil ? &stencil : NULL};
     vkCmdBeginRendering(cb, &ri);
 }
 static uint32_t round_up(uint32_t v, uint32_t a) { return (v + a - 1) / a * a; }
@@ -1422,6 +1471,10 @@ static const char* draw(VitaProcess* p, GxmContext* c, uint32_t primitive, uint3
         scissor = (VkRect2D){{(int32_t)x0, (int32_t)y0}, {x1 > x0 ? x1 - x0 : 0, y1 > y0 ? y1 - y0 : 0}};
     }
     vkCmdSetScissor(cb, 0, 1, &scissor);
+    /* sceGxmSetFrontStencilRef's reference and sceGxmSetFrontStencilFunc's compare and write masks */
+    vkCmdSetStencilReference(cb, VK_STENCIL_FACE_FRONT_AND_BACK, c->stencil_ref[0] & 0xffu);
+    vkCmdSetStencilCompareMask(cb, VK_STENCIL_FACE_FRONT_AND_BACK, c->stencil_masks[0][0] & 0xffu);
+    vkCmdSetStencilWriteMask(cb, VK_STENCIL_FACE_FRONT_AND_BACK, c->stencil_masks[0][1] & 0xffu);
     push_constants(cb, r->layout, VK_SHADER_STAGE_VERTEX_BIT, &push, sizeof push);
     for (unsigned i = 0; i < vp->stream_count; ++i) {
         VkDeviceSize at = 0;
@@ -1471,7 +1524,9 @@ bool vita_render_picture(VitaProcess* p, uint32_t address, uint32_t pitch, uint3
         once(r, 18, "a decoded picture at 0x%08" PRIx32 " is not mapped for the GPU, or not aligned for it", address);
         return false;
     }
-    /* the planes' rows staged as they are, each exactly its width */
+    /* the planes' rows staged as they are, each exactly its width, in the recording's slot: begun first, as beginning
+       it waits for the slot's last submission and frees its staging, which the GPU may be reading until then */
+    VkCommandBuffer cb = vita_vk_commands();
     unsigned slot = vita_vk_slot();
     VkDeviceSize from = (r->staging[slot].used + align - 1) / align * align, size = y_bytes + 2 * (VkDeviceSize)c_bytes;
     if (from + size > STAGING) {
@@ -1486,7 +1541,6 @@ bool vita_render_picture(VitaProcess* p, uint32_t address, uint32_t pitch, uint3
     r->staging[slot].used = from + size;
     PictureParams params = {words, pitch * height, pitch, width, height, y_bytes, y_bytes + c_bytes,
                             pixel_type == 0x20, pixel_type == 0x20};
-    VkCommandBuffer cb = vita_vk_commands();
     if (r->rendering) rendering_pause(cb);
     bool ok = compute(r, cb, r->picture, r->staging[slot].buffer, from, m->buffer, at, total, &params, sizeof params, words);
     if (r->rendering) rendering_resume(r, cb);

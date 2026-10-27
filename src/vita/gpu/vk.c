@@ -91,6 +91,13 @@ static bool make_device(VkPhysicalDevice phys, uint32_t family, void* user) {
     const VkFormatFeatureFlags blit = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
                                       VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
     v->depth16_blit = (d16.optimalTilingFeatures & blit) == blit;
+    static const VkFormat stencils[2] = {VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT};
+    v->stencil_format = VK_FORMAT_UNDEFINED;
+    for (unsigned i = 0; i < 2 && !v->stencil_format; ++i) {
+        VkFormatProperties f;
+        vkGetPhysicalDeviceFormatProperties(phys, stencils[i], &f);
+        if (f.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) v->stencil_format = stencils[i];
+    }
     return true;
 }
 /* the window's swapchain, made anew for its size */
@@ -228,13 +235,14 @@ void vita_vk_present(VkBuffer buffer, VkDeviceSize offset, uint32_t pitch, uint3
     if (!frame_image(v, width, height)) return;
     unsigned slot = v->ring.slot;
     uint32_t index = 0;
-    VkResult r = vkAcquireNextImageKHR(v->device, v->swap.swapchain, UINT64_MAX, v->acquired[slot], VK_NULL_HANDLE,
-                                       &index);
+    /* an image the window can take now, or none this vblank: the game's threads run on this one, which a wait for
+       the display's refresh (FIFO) would stall each vblank. The framebuffer stays in guest memory for the next */
+    VkResult r = vkAcquireNextImageKHR(v->device, v->swap.swapchain, 0, v->acquired[slot], VK_NULL_HANDLE, &index);
     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
         swapchain_make(v);
         return;
     }
-    if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) return;
+    if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) return; /* VK_NOT_READY, VK_TIMEOUT: none free yet */
     VkCommandBuffer cb = vita_vk_commands();
     image_barrier(cb, g.frame, g.frame_layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                   VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);

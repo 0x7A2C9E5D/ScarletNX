@@ -175,7 +175,7 @@ static uint32_t create_context(VitaProcess* p, VitaThread* t) {
     c->depth_func = DEPTH_FUNC_ALWAYS;
     c->depth_write = 0;
     for (unsigned side = 0; side < 2; ++side) {
-        c->stencil_func[side] = 0x07000000u; /* SCE_GXM_STENCIL_FUNC_ALWAYS */
+        c->stencil_func[side] = 0x0e000000u; /* SCE_GXM_STENCIL_FUNC_ALWAYS */
         c->stencil_masks[side][0] = c->stencil_masks[side][1] = 0xff;
     }
     vita_write32(p, out, c->address);
