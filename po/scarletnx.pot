@@ -1140,14 +1140,6 @@ msgid "Run Anyway"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Revert"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Keep"
-msgstr ""
-
-#: src/gui/main.c
 msgid "Clean"
 msgstr ""
 
@@ -2388,6 +2380,16 @@ msgid "User %d is %s now"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Keep"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Back"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "Keep this UI scale? Back to %s in %d s"
 msgstr ""
@@ -2693,12 +2695,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Next"
-msgstr ""
-
-#. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
-#, snx-key
-msgid "Back"
 msgstr ""
 
 #: src/gui/main.c

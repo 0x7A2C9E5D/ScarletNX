@@ -202,21 +202,19 @@ static void test_first(App* app) {
         assert(x == row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app) && y > row.y);
     }
     shows(app, "< YoRHa >", rgb(app->theme.ink));
-    { /* UI scale: its slider, the size at the row's end (#613) */
-        char line[64];
+    { /* UI scale: the step's name alone, as App's row has it, lined up with the text of the others' values; its slider
+         is its dialog's */
         GuiSetupBoxes c;
         GuiAppearanceBoxes a;
         GuiRect row;
         int x, y;
-        snprintf(line, sizeof line, "Auto"); /* the step's name alone, as App's row has it */
         setup_boxes(app, &c);
         appearance_boxes(app, c.content, &a);
         row = appearance_row_box(app, &a, GUI_APPEARANCE_TEXT);
-        assert(find_text(app, line, rgb(app->theme.ink), 1, &x, &y));
-        assert(x + (int)strlen(line) * cell_w(app) <= row.x + row.w - cell_w(app) && x > row.x + row.w / 2);
+        assert(find_text(app, "Auto", rgb(app->theme.ink), 1, &x, &y));
+        assert(x == row.x + cell_w(app) / 2 + (appearance_column(app) + 2) * cell_w(app) && y > row.y);
         hides(app, "Auto (", rgb(app->theme.ink));
-        assert(app->slider_bar.w >= GUI_SIZE_STEPS * cell_w(app) && app->slider_bar.y == row.y &&
-               app->slider_bar.x == row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app));
+        assert(!app->slider_bar.w);
     }
     hides(app, "Next", rgb(app->theme.page)); /* drawn, not in focus */
     key(app, SDLK_RETURN);                    /* as Settings > App's Enter: the language a step on, the page kept */
@@ -266,7 +264,7 @@ static void test_first(App* app) {
         assert(app->setup_row == GUI_APPEARANCE_NEXT && page(app) == SNX_SETUP_LANGUAGE);
         point(app, appearance_row_box(app, &a, GUI_APPEARANCE_THEME), false);
         assert(app->setup_row == GUI_APPEARANCE_THEME);
-        { /* UI scale clicked on its name, off its slider: its box */
+        { /* UI scale clicked: its dialog */
             GuiRect text = appearance_row_box(app, &a, GUI_APPEARANCE_TEXT);
             mouse_px(app, text.x + 2 * cell_w(app), text.y + text.h / 2, true);
         }
@@ -305,26 +303,35 @@ static void test_first(App* app) {
     assert(app->setup_row == GUI_APPEARANCE_TEXT);
     render(app);
     shows_foot(app, "open", rgb(head_ink(app)));
-    key(app, SDLK_RETURN); /* its box, over the page */
-    assert(app->sizes_shown && app->sizes.focus == 3 && page(app) == SNX_SETUP_LANGUAGE);
+    key(app, SDLK_RETURN); /* its dialog, over the page, as App's */
+    assert(size_picking(app) && !app->size_pick && page(app) == SNX_SETUP_LANGUAGE);
+    key(app, SDLK_LEFT);
+    key(app, SDLK_LEFT);
     render(app);
-    shows(app, "0.5", rgb(app->theme.ink));
-    hides(app, "0.5 of", rgb(app->theme.ink)); /* the step's number alone */
-    key(app, SDLK_DOWN);
-    key(app, SDLK_RETURN);
-    assert(!app->sizes_shown && app->menu.text_size == 1 && app->confirm.shown && app->confirm.ask == GUI_ASK_TEXT);
+    shows(app, "0.5", rgb(app->theme.page));    /* on YoRHa's band of ink */
+    hides(app, "0.5 of", rgb(app->theme.page)); /* the step's number alone */
+    assert(app->size_pick == -2 && !app->menu.text_size);
+    key(app, SDLK_RIGHT);
+    key(app, SDLK_RIGHT);
+    key(app, SDLK_RIGHT);
+    key(app, SDLK_RETURN); /* OK on 1x */
+    assert(app->sizes_shown && app->size_until && app->menu.text_size == 1 && !app->confirm.shown);
     render(app);
-    key(app, SDLK_RIGHT); /* Keep */
+    shows(app, app->size_line, rgb(app->theme.page));
+    key(app, SDLK_UP); /* Keep */
     key(app, SDLK_RETURN);
-    assert(!app->confirm.shown && app->menu.text_size == 1 && app->setup_on && page(app) == SNX_SETUP_LANGUAGE);
+    assert(!app->sizes_shown && app->menu.text_size == 1 && app->setup_on && page(app) == SNX_SETUP_LANGUAGE);
     path = join(home, ".config/scarletnx/app.ini");
     assert(!snx_is_file(path)); /* kept for the setup's end, in the folders Install picks */
     free(path);
-    key(app, SDLK_LEFT); /* its slider a step back: Auto, asked about as App's is, ESC bringing 1x back */
-    assert(!app->menu.text_size && app->confirm.shown && app->confirm.ask == GUI_ASK_TEXT && app->size_slid);
+    key(app,
+        SDLK_LEFT); /* its dialog, its slider a step back: Auto, used on OK and asked about, ESC bringing 1x back */
+    assert(size_picking(app) && !app->size_pick && app->menu.text_size == 1);
+    key(app, SDLK_RETURN);
+    assert(!app->menu.text_size && app->size_until);
     key(app, SDLK_ESCAPE);
-    assert(!app->confirm.shown && app->menu.text_size == 1 && app->setup_row == GUI_APPEARANCE_TEXT);
-    key(app, SDLK_RETURN); /* its box again, closed by ESC */
+    assert(!app->sizes_shown && app->menu.text_size == 1 && app->setup_row == GUI_APPEARANCE_TEXT);
+    key(app, SDLK_RETURN); /* its dialog again, closed by ESC */
     assert(app->sizes_shown);
     key(app, SDLK_ESCAPE);
     assert(!app->sizes_shown && app->setup_on && page(app) == SNX_SETUP_LANGUAGE);

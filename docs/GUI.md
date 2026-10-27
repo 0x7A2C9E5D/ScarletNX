@@ -131,7 +131,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   dead zone, background input, Joy-Cons). A player's *Controller* is *Any*, the next to connect, until Enter on it
   and a press on a controller give it that one (ESC leaves it as it was, Del makes it *Any* again); its *Button
   map* is the page above on its own keys, its A and B as its *Swap A/B* says.
-  **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **UI scale**, a slider
+  **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **UI scale**, a dialog
   (below), **Animations** (On by default, `animations = 1` in `app.ini`: a screen comes in from the
   page's colour and a box's shade comes and goes, 0.15 s each; Off shows each at once), **Side panel** (below, F2 too),
   **Background recompile** (*Full*, `recompile_background = full` in `app.ini`: the queue's recompiles take every
@@ -245,12 +245,12 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Save (or Ctrl+S) writes `themes/<folder>/theme.ini` in the data folder and switches to it;
   a built-in is saved as a new theme, `mytheme` until renamed. ESC leaves, asking first if
   there are unsaved changes.
-- Settings > App's **UI scale** is a slider: a bar, a tick a size, with the size in use at its right, a number alone:
-  0.25, 0.5 and 0.75 (Auto's scale times it, rounded, 1x at the least), Auto (fit the screen), then 1x to 4x.
-  Left/Right step it, and a click or a tap on the bar takes the size under it, a drag along it following; Enter opens a
-  box of the sizes. The size taken is used at once, and a question asks to keep it: Keep keeps it in `app.ini`; Back,
-  ESC or no answer in 15 s bring the one before it back. While the slider's question shows, Left/Right go on stepping
-  it, the size before the first step the one to go back to, its 15 s again, and back on that size no question is left. Bigger
+- Settings > App's **UI scale** row shows the size in use, a number alone: 0.25, 0.5 and 0.75 (Auto's scale times it,
+  rounded, 1x at the least), Auto (fit the screen), then 1x to 4x. Enter, a click or a tap on it opens its dialog, and
+  so do Left/Right, a step that way: a slider, a tick a size, as wide whatever the size, the size picked named after it,
+  then OK and Cancel. Left/Right, a click or a tap on the bar (a drag along it following) pick a size, and nothing else
+  changes until OK; Cancel or ESC close it as it was. OK uses the size picked, and the dialog asks there to keep it,
+  Back in focus: Keep keeps it in `app.ini`; Back, ESC or no answer in 15 s bring the one before it back. Bigger
   letters scroll the menu. The foot's letters (its keys, and the tips when they are
   there) are a size under the rest's, 1x at the least.
 - Settings > App's **Language** goes round Auto, English and each language compiled in, by its own name. Auto,
@@ -334,8 +334,8 @@ they are, Keep, Later, the nickname `Player`), writes `setup.ini` and opens the 
 - **Appearance**: a box of Settings > App's Language, Theme, UI scale and Side panel, and Games' View and Icon size
   as its View box has them (Icon size greyed in the list), a row each, and Next (with Skip, on the first page) under
   them. Up/Down go over the rows and Next; Left/Right (or a click, on the left arrow back) change the language among
-  the menu's, the theme and the others, at once, the screen with them; UI scale is App's slider, the size taken asked about for
-  15 s as App's is; Enter does as App's (the language or the theme a step on, UI scale's box), and on
+  the menu's, the theme and the others, at once, the screen with them; UI scale opens App's dialog, the size taken
+  asked about for 15 s as App's is; Enter does as App's (the language or the theme a step on, UI scale's dialog), and on
   Next goes on. What was changed is kept in `app.ini` once the setup is done, in the folders Install picks; Auto
   stays Auto while the language is the system's.
 - **Install**: Installed, or Portable, which makes `.scarletnx/` beside the program and moves the menu's own files
@@ -542,7 +542,7 @@ every screen, 20 columns at the least, and a window under 45 columns shows the l
 Screen and Wide (a theme's `[head] place`, `[tips] place` and `[body] sizing` are deprecated, said as it loads:
 [DEPRECATIONS](DEPRECATIONS.md)), and so is every list
 (a theme's `[body] gap` and `[body] scroll` are deprecated too): the menu's, Games',
-the Settings' two, the theme editor's, the choices of a question, of UI scale's box, of the Recompile box and of the
+the Settings' two, the theme editor's, the choices of a question, of UI scale's dialog, of the Recompile box and of the
 setup's pages, the setup's Appearance rows, the box of users, that of a game's updates, DLCs and mods, and the OK of
 a box of files. Their rows are 2 pixels apart times the text's size (on Android and iOS 48 pixels high: a phone held wide gets
 2x by default, so 96, about 37 dp at a density of 2.6, Android's 48 dp touch target at 3x; the desktop's are 17), the focused one kept in the middle (on a
