@@ -164,7 +164,7 @@ msgstr ""
 
 #: src/gui/editor.c
 #, c-format
-msgid "Select to type it: a whole number from %g to %g"
+msgid "Select to type it: a whole number from %.0f to %.0f"
 msgstr ""
 
 #: src/gui/editor.c
@@ -201,7 +201,7 @@ msgstr ""
 
 #: src/gui/editor.c
 #, c-format
-msgid "%s is not a whole number from %g to %g"
+msgid "%s is not a whole number from %.0f to %.0f"
 msgstr ""
 
 #: src/gui/editor.c
@@ -220,7 +220,7 @@ msgstr ""
 
 #: src/gui/editor.c
 #, c-format
-msgid "Only the digits of a whole number from %g to %g"
+msgid "Only the digits of a whole number from %.0f to %.0f"
 msgstr ""
 
 #: src/gui/editor.c
@@ -243,12 +243,12 @@ msgstr ""
 
 #: src/gui/editor.c
 #, c-format
-msgid "A whole number from %g to %g; empty, the default %s"
+msgid "A whole number from %.0f to %.0f; empty, the default %s"
 msgstr ""
 
 #: src/gui/editor.c
 #, c-format
-msgid "A whole number from %g to %g"
+msgid "A whole number from %.0f to %.0f"
 msgstr ""
 
 #: src/gui/editor.c

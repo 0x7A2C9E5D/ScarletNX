@@ -63,7 +63,7 @@ static void change(GuiEditor* editor, const GuiThemeKey* key, int step) {
         *(uint32_t*)field = (uint32_t)(v<0 ? 0 : v>(long) key->max ? (long)key->max : v);
     } else if (key->type == GUI_KEY_TEXT && key->numeric) {
         if (key->whole)
-            snprintf(editor->note, sizeof editor->note, snx_tr("Select to type it: a whole number from %g to %g"),
+            snprintf(editor->note, sizeof editor->note, snx_tr("Select to type it: a whole number from %.0f to %.0f"),
                      key->lo, key->hi);
         else
             snprintf(editor->note, sizeof editor->note,
@@ -144,7 +144,7 @@ static void refused(GuiEditor* editor, const GuiThemeKey* key) {
         snprintf(editor->note, sizeof editor->note, snx_tr("%s is not a whole number from 0 to %lu"), t,
                  (unsigned long)key->max);
     else if (key->numeric && key->whole)
-        snprintf(editor->note, sizeof editor->note, snx_tr("%s is not a whole number from %g to %g"), t, key->lo,
+        snprintf(editor->note, sizeof editor->note, snx_tr("%s is not a whole number from %.0f to %.0f"), t, key->lo,
                  key->hi);
     else if (key->numeric)
         snprintf(editor->note, sizeof editor->note, snx_tr("%s is not a number from %g to %g, two decimals at most"), t,
@@ -278,7 +278,7 @@ void gui_editor_type(GuiEditor* editor, const char* text) {
         if (type_number(editor, key, text)) {
             if (key->whole)
                 snprintf(editor->note, sizeof editor->note,
-                         snx_tr("Only the digits of a whole number from %g to %g"), key->lo, key->hi);
+                         snx_tr("Only the digits of a whole number from %.0f to %.0f"), key->lo, key->hi);
             else
                 snprintf(editor->note, sizeof editor->note,
                          snx_tr("Only the digits of a number from %g to %g, three digits and two decimals at most"),
@@ -301,9 +301,10 @@ void gui_editor_takes(const GuiEditor* editor, char* out, size_t size) {
     else if (key->type == GUI_KEY_NUMBER)
         snprintf(out, size, snx_tr("A whole number from 0 to %lu"), (unsigned long)key->max);
     else if (key->numeric && key->whole && key->def && *key->def) /* nothing typed: the setting's default again */
-        snprintf(out, size, snx_tr("A whole number from %g to %g; empty, the default %s"), key->lo, key->hi, key->def);
+        snprintf(out, size, snx_tr("A whole number from %.0f to %.0f; empty, the default %s"), key->lo, key->hi,
+                 key->def);
     else if (key->numeric && key->whole)
-        snprintf(out, size, snx_tr("A whole number from %g to %g"), key->lo, key->hi);
+        snprintf(out, size, snx_tr("A whole number from %.0f to %.0f"), key->lo, key->hi);
     else if (key->numeric && key->def && *key->def)
         snprintf(out, size, snx_tr("A number from %g to %g, two decimals at most; empty, the default %s"), key->lo,
                  key->hi, key->def);
