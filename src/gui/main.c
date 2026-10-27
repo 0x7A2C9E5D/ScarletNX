@@ -9358,11 +9358,15 @@ static void setup_type(App* app) {
         say_failure(app, app->message);
         return;
     }
-    app->setup_typing = true;
+    app->setup_typing = true; /* its keyboard comes up with the next frame (setup_keyboard) */
     snprintf(app->setup_name, sizeof app->setup_name, "Player");
     app->setup_choice.count = 1;
     app->setup_choice.focus = 0;
-    SDL_StartTextInput(app->window);
+}
+/* the nickname's keyboard, a frame after its page asks for it: Skip types the nickname and takes it in one call, and
+   on Android a keyboard asked for and dropped before it showed stays up (SDL hides only one Android says is shown) */
+static void setup_keyboard(App* app) {
+    if (app->setup_on && app->setup_typing && !SDL_TextInputActive(app->window)) SDL_StartTextInput(app->window);
 }
 /* the notices' choices: Next (OK on the last), Back before it past the first; the focus on Back while back says so and
    there is one, else on Next */
@@ -10839,6 +10843,7 @@ static void tell(App* app);
 static void pump(App* app) {
     keys_left(app);
     text_left(app);
+    setup_keyboard(app);
     warn_tick(app);
     job_pump(app);
 #ifdef SDL_PLATFORM_IOS
@@ -11795,16 +11800,20 @@ static int program_driver(const char* program) {
            : system == SNX_SYSTEM_GBA  ? GUI_GBA
                                        : GUI_SWITCH;
 }
-/* the driver that plays row i of games: a package its console's, a dump the Switch's, and a made game, ready to run,
-   the one of the console its folder says; a heading the Switch's, which runs nothing */
-static int row_driver(const GuiGames* games, size_t i) {
-    const char* name = games->names[i];
-    if (gui_games_heading(games, i)) return GUI_SWITCH;
+/* the driver a file's name says: a package its console's, a dump the Switch's; -1 for a name that says none */
+static int named_driver(const char* name) {
     return gui_is_cia(name)    ? GUI_3DS
            : gui_is_vpk(name)  ? GUI_VITA
            : gui_is_gba(name)  ? GUI_GBA
            : gui_is_dump(name) ? GUI_SWITCH
-                               : program_driver(games->paths[i]);
+                               : -1;
+}
+/* the driver that plays row i of games: a package its console's, a dump the Switch's, and a made game, ready to run,
+   the one of the console its folder says; a heading the Switch's, which runs nothing */
+static int row_driver(const GuiGames* games, size_t i) {
+    if (gui_games_heading(games, i)) return GUI_SWITCH;
+    int named = named_driver(games->names[i]);
+    return named >= 0 ? named : program_driver(games->paths[i]);
 }
 /* a game of Games' page, at index of the list, played by its row's driver (row_driver) */
 static void open_game(App* app, size_t index) {
@@ -12159,6 +12168,22 @@ static void install_keys_document(App* app, const char* uri) {
     if (!data || !gui_keys_text(data, size)) keys_result(app, false);
     free(data);
 }
+/* a file dropped or picked on a load whose name says another console's (Android's picker shows every file): refused,
+   saying the load that opens it, or the driver it needs that is not there; true then */
+static bool drop_elsewhere(App* app, const char* path) {
+    int named = named_driver(path);
+    if (named < 0 || named == app->menu.selected) return false;
+    app->loads_at = 0; /* looked for again, as Enter on a load does */
+    if (loads_off(app) >> named & 1u)
+        snprintf(app->message, sizeof app->message,
+                 snx_tr("%s opens with %s: cannot find %s beside ScarletNX or on PATH."), last_part(path),
+                 snx_tr(entry_text(named)), driver_name(named));
+    else
+        snprintf(app->message, sizeof app->message, snx_tr("%s opens with %s, not %s."), last_part(path),
+                 snx_tr(entry_text(named)), snx_tr(entry_text(app->menu.selected)));
+    say_failure(app, app->message);
+    return true;
+}
 static void drop(App* app, const char* value, bool text_drop) {
     if ((app->menu.view != GUI_LOAD_DROP && app->menu.view != GUI_LOAD_KEYS) || app->menu.running || app->finished)
         return;
@@ -12177,7 +12202,10 @@ static void drop(App* app, const char* value, bool text_drop) {
     } else {
         /* Hovering another main item must not change the driver for this drop. */
         app->menu.selected = app->menu.active;
-        launch(app, absolute, false);
+        if (!drop_elsewhere(app, absolute))
+            launch(app, absolute, false);
+        else
+            free(absolute);
     }
 }
 /* the system's file picker answers on its own thread: the choice comes back to event() as an app->picked event */

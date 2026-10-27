@@ -4,6 +4,14 @@
    first start goes through and what each writes (a portable copy, the language, the games and dumps folders, the keys,
    the first user), what it refuses, the user's page with users.ini there, the fixed uid kept for its saves, a notice
    alone after an update, --debug, the question's place as options-dialog says, and Skip */
+#include <SDL3/SDL.h>
+/* the keyboards main.c asks for: SDL keeps no count, and one asked for and dropped in a frame stays up on Android */
+static int keyboards;
+static bool keyboard_asked(SDL_Window* window) {
+    ++keyboards;
+    return SDL_StartTextInput(window);
+}
+#define SDL_StartTextInput keyboard_asked
 #define SNX_GUI_NO_MAIN
 #include "gui/main.c"
 #define SNX_SCREEN_TEST "gui_setup.c"
@@ -737,8 +745,11 @@ static void test_skip(App* app) {
     assert(!strcmp(choice_label(app), "Skip"));
     render(app);
     shows(app, "\xfe Skip", rgb(app->theme.page)); /* in focus, on YoRHa's band */
+    keyboards = 0;
     key(app, SDLK_RETURN);
+    pump(app);
     assert(!app->setup_on && !app->setup_failed && !app->confirm.shown && !app->message[0]);
+    assert(!keyboards && !SDL_TextInputActive(app->window)); /* the nickname typed and taken: no keyboard asked for */
     holds(config, "setup.ini", seen);
     holds(app->users_dir, "users.ini", "nickname=Player\n"); /* the nickname's page took its Player */
     now = text_of(config, "app.ini");
@@ -784,8 +795,11 @@ static void test_skip(App* app) {
         setup_start(app);
         key(app, SDLK_UP);
         assert(page(app) == SNX_SETUP_LANGUAGE && !strcmp(choice_label(app), "Skip"));
+        keyboards = 0;
         key(app, SDLK_RETURN);
-        assert(app->setup_on && page(app) == SNX_SETUP_USER && app->setup_failed && app->setup_typing);
+        assert(app->setup_on && page(app) == SNX_SETUP_USER && app->setup_failed && app->setup_typing && !keyboards);
+        pump(app); /* the page stays on its nickname, whose keyboard comes up with the next frame */
+        assert(keyboards == 1 && SDL_TextInputActive(app->window));
         assert(strstr(app->message, "No user written: ") && app->confirm.shown && app->confirm.ask == GUI_ASK_ERROR);
         key(app, SDLK_RETURN);
         free(app->users_dir);

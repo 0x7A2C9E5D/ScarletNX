@@ -5585,6 +5585,40 @@ int main(int argc, char** argv) {
     e.drop.data = "one\ntwo";
     event(&app, &e);
     assert(app.menu.view == GUI_LOAD_DROP && !app.menu.running);
+    /* a file whose name says another console's, as Android's picker hands any: refused, saying the load that opens it,
+       or the driver it needs where that is not there, looked for again at once; nothing runs or queues */
+    {
+        char* card = snx_path_join(temporary, "a card.cci");
+#ifdef _WIN32
+        char* ctr = snx_path_join(app.drivers, "scarletnx-3ds.exe");
+#else
+        char* ctr = snx_path_join(app.drivers, "scarletnx-3ds");
+#endif
+        char* aside = snx_format("%s.aside", ctr);
+        char* path = SDL_strdup(getenv("PATH"));
+        set_env("PATH", "/nonexistent"); /* none of the machine's own */
+        assert(!snx_write_file(card, "card", 4));
+        drop(&app, card, false);
+        assert(app.menu.selected == GUI_SWITCH && !app.menu.running && !app.queue.count);
+        assert(!strcmp(app.message, "a card.cci opens with Load 3DS game, not Load Switch NSP/XCI/NRO."));
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR);
+        key(&app, SDLK_RETURN);
+        assert(!app.confirm.shown && app.menu.view == GUI_LOAD_DROP);
+        assert(!rename(ctr, aside)); /* gone within the second the loads were looked for in */
+        drop(&app, card, false);
+        assert(!app.menu.running && !app.queue.count && app.confirm.shown);
+        assert(!strcmp(app.message,
+                       "a card.cci opens with Load 3DS game: cannot find scarletnx-3ds beside ScarletNX or on PATH."));
+        key(&app, SDLK_RETURN);
+        assert(!rename(aside, ctr));
+        set_env("PATH", path);
+        SDL_free(path);
+        free(aside);
+        free(ctr);
+        remove(card);
+        free(card);
+        app.message[0] = 0;
+    }
     e.type = SDL_EVENT_DROP_FILE;
     e.drop.data = input;
     free(app.run_log);                                      /* Folders' Logs may have set one */
@@ -5624,7 +5658,10 @@ int main(int argc, char** argv) {
     key(&app, SDLK_DOWN);
     key(&app, SDLK_SPACE);
     assert(app.menu.selected == GUI_LINUX && app.menu.view == GUI_LOAD_DROP);
-    char* quoted = snx_format("\"%s\"", input);
+    /* a Linux program's name says no console (an .nro there would be the Switch's, refused above) */
+    char* program = snx_path_join(temporary, "game with spaces;literal");
+    assert(!snx_write_file(program, "1", 1));
+    char* quoted = snx_format("\"%s\"", program);
     e.type = SDL_EVENT_DROP_TEXT;
     e.drop.data = quoted;
     event(&app, &e);
@@ -5632,9 +5669,11 @@ int main(int argc, char** argv) {
     assert(app.menu.running);
     finish(&app, 7);
     size_t size;
-    unsigned char* runs = snx_read_file(input, &size);
+    unsigned char* runs = snx_read_file(program, &size);
     assert(runs && size == 1 && runs[0] == '2');
     free(runs);
+    remove(program);
+    free(program);
     char* flags_input = snx_path_join(temporary, "option flags.nro");
     assert(!snx_write_file(flags_input, "fixture", 7));
     input_made = made_game(&app, flags_input, "option flags");
