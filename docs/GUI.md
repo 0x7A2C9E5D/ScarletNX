@@ -191,7 +191,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   its title, the text with its cursor in a field, what the row takes under it with its numbers (`A number from 0.25 to
   16, two decimals at most; empty, the default 1`), then OK and Cancel. Enter or A is OK, ESC or B Cancel, Backspace
   takes a letter out; a click off the dialog is Cancel. A phone's keyboard comes up with it, its number pad for a whole
-  number never under 0 (SDL's pad has no point and no minus). Nothing changes before OK. A setting not picked shows
+  number never under 0 (SDL's pad has no point and no minus). Nothing changes before OK, and OK takes nothing the
+  row does not take whole, a number past its range too: the dialog stays, saying the value typed and what holds
+  (`20 is not a number from 0.25 to 16, two decimals at most`, `Ab is not a nickname: ...`). A setting not picked shows
   the runtime's default and `[default]` (*Off [default]*):
   the run takes the game's `.ini`'s, which starts as that; one picked goes to every
   Switch run as `--key=value`, over the `.ini` ([USAGE](USAGE.md)), and is kept for every game:

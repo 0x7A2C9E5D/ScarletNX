@@ -185,35 +185,33 @@ msgid "Select to type it: #RRGGBB"
 msgstr ""
 
 #: src/gui/editor.c
-msgid "A folder name: letters, digits, spaces, - _ and ., not starting with ."
+#, c-format
+msgid "%s is not a folder name: letters, digits, spaces, - _ and ., not starting with ."
 msgstr ""
 
 #: src/gui/editor.c
 #, c-format
-msgid "A whole number from %g to %g, not \"%s\""
+msgid "%s is not a color #RRGGBB, as #1A2B3C"
 msgstr ""
 
 #: src/gui/editor.c
 #, c-format
-msgid "A number from %g to %g, three digits and two decimals at most, not \"%s\""
+msgid "%s is not a whole number from 0 to %lu"
 msgstr ""
 
 #: src/gui/editor.c
 #, c-format
-msgid "At most %u bytes"
-msgstr ""
-
-#: src/gui/editor.c
-msgid "A color: #RRGGBB, as #1A2B3C"
-msgstr ""
-
-#: src/gui/editor.c
-msgid "A whole number, 0 to 10000"
+msgid "%s is not a whole number from %g to %g"
 msgstr ""
 
 #: src/gui/editor.c
 #, c-format
-msgid "Closest value in range: %s"
+msgid "%s is not a number from %g to %g, two decimals at most"
+msgstr ""
+
+#: src/gui/editor.c
+#, c-format
+msgid "%s is more than %u bytes"
 msgstr ""
 
 #: src/gui/editor.c
@@ -228,6 +226,14 @@ msgstr ""
 #: src/gui/editor.c
 #, c-format
 msgid "Only the digits of a number from %g to %g, three digits and two decimals at most"
+msgstr ""
+
+#: src/gui/editor.c
+msgid "A folder name: letters, digits, spaces, - _ and ., not starting with ."
+msgstr ""
+
+#: src/gui/editor.c
+msgid "A color: #RRGGBB, as #1A2B3C"
 msgstr ""
 
 #: src/gui/editor.c
@@ -2402,11 +2408,6 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s is not a nickname: %s"
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
 msgid "User %d keeps %s: %s"
 msgstr ""
 
@@ -2496,6 +2497,11 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Non-standard resolution, experimental."
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s is not a nickname: %s"
 msgstr ""
 
 #: src/gui/main.c

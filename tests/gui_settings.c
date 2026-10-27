@@ -239,7 +239,8 @@ int main(int argc, char** argv) {
     gui_editor_key(&form, GUI_LEFT);
     assert(!strcmp(gui_settings_value(&s, "fullscreen"), "1"));
     /* the resolution typed, not stepped: 1.61 taken as any scale, a third decimal and a letter left out, and 3x's
-       digits are all that reach the row; a value past the range clamps to the closest in it */
+       digits are all that reach the row; a value past the range is refused, said with the value typed and the range,
+       the row keeping what it had and the typing going on */
     form.row = at(&s, "resolution");
     gui_editor_key(&form, GUI_RIGHT);
     assert(strstr(form.note, "0.25") && strstr(form.note, "16") && strstr(form.note, "two decimals"));
@@ -259,7 +260,10 @@ int main(int argc, char** argv) {
     while (form.text[0]) gui_editor_erase(&form);
     gui_editor_type(&form, "20");
     gui_editor_key(&form, GUI_SELECT);
-    assert(!strcmp(gui_settings_value(&s, "resolution"), "16") && strstr(form.note, "Closest value in range: 16"));
+    assert(!strcmp(gui_settings_value(&s, "resolution"), "2.22") && form.typing);
+    assert(!strcmp(form.note, "20 is not a number from 0.25 to 16, two decimals at most"));
+    gui_editor_key(&form, GUI_CANCEL);
+    assert(!form.typing && !strcmp(gui_settings_value(&s, "resolution"), "2.22"));
     gui_editor_key(&form, GUI_SELECT); /* emptied, Select shows the row's default, which is the value in use */
     while (form.text[0]) gui_editor_erase(&form);
     gui_editor_key(&form, GUI_SELECT);

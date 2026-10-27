@@ -7730,10 +7730,7 @@ static void users_commit(App* app) {
     if (number < 1 || number > g_user_count) return;
     nick = app->users_form.nick[number - 1];
     if (!strcmp(nick, g_users[number - 1].nickname)) return;
-    if (!snx_users_nickname_valid(nick))
-        snprintf(app->editor.note, sizeof app->editor.note, snx_tr("%s is not a nickname: %s"), nick,
-                 snx_tr(SAY_SETUP_NICKNAME));
-    else if (!app->users_dir || snx_users_rename(app->users_dir, number, nick, why, sizeof why)) {
+    if (!app->users_dir || snx_users_rename(app->users_dir, number, nick, why, sizeof why)) {
         snprintf(app->editor.note, sizeof app->editor.note, snx_tr("User %d keeps %s: %s"), number,
                  g_users[number - 1].nickname, app->users_dir ? why : snx_tr("no users/ folder"));
         say_failure(app, app->editor.note);
@@ -8596,6 +8593,12 @@ static void editor_key(App* app, GuiKey key) {
     if (app->warn_until) app->editor.note[0] = 0;
     app->warn_until = 0;
     app->warn_key[0] = 0;
+    if (app->form == GUI_FORM_USERS && app->editor.typing && key == GUI_SELECT && app->editor.row > 0 &&
+        !snx_users_nickname_valid(app->editor.text)) { /* a nickname refused in its dialog, which goes on */
+        snprintf(app->editor.note, sizeof app->editor.note, snx_tr("%s is not a nickname: %s"), app->editor.text,
+                 snx_tr(SAY_SETUP_NICKNAME));
+        return;
+    }
     /* a player's map row opens its button map, as every player's Button map page does; its Controller row waits for
        a press on the controller it takes */
     if (app->form == GUI_FORM_GROUP && key == GUI_SELECT && !app->editor.typing &&

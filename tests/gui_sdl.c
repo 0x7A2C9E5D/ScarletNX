@@ -3692,19 +3692,31 @@ int main(int argc, char** argv) {
     assert(setting_is(&app, "resolution", "1"));
     render(&app);
     shows(&app, "- resolution    1", yellow); /* the default itself, not [default] */
-    /* past 4x and under 0.5x: the row's own warning line, while the value clamps to the nearest in range */
+    /* past the range: refused, OK leaving its dialog up, saying the value typed and the range, the row as it was;
+       past 4x and under 0.5x in the range: the row's own warning line */
     key(&app, SDLK_RETURN);
     key(&app, SDLK_BACKSPACE);
     typed(&app, "20");
     key(&app, SDLK_RETURN);
-    assert(setting_is(&app, "resolution", "16") && strstr(app.editor.note, "Over 4x"));
+    assert(app.editor.typing && setting_is(&app, "resolution", "1"));
+    assert(!strcmp(app.editor.note, "20 is not a number from 0.25 to 16, two decimals at most"));
+    render(&app);
+    shows(&app, app.editor.note, rgb(app.theme.warning)); /* in its dialog */
+    key(&app, SDLK_BACKSPACE);
+    key(&app, SDLK_BACKSPACE);
+    typed(&app, "8");
+    key(&app, SDLK_RETURN);
+    assert(!app.editor.typing && setting_is(&app, "resolution", "8") && strstr(app.editor.note, "Over 4x"));
     render(&app); /* the row in its warning flash */
     key(&app, SDLK_RETURN);
     key(&app, SDLK_BACKSPACE);
-    key(&app, SDLK_BACKSPACE);
     typed(&app, "0.05");
     key(&app, SDLK_RETURN);
-    assert(setting_is(&app, "resolution", "0.25") && strstr(app.editor.note, "Under 0.5x"));
+    assert(app.editor.typing && setting_is(&app, "resolution", "8") && strstr(app.editor.note, "0.05 is not a number"));
+    for (int i = 0; i < 4; ++i) key(&app, SDLK_BACKSPACE);
+    typed(&app, "0.3");
+    key(&app, SDLK_RETURN);
+    assert(setting_is(&app, "resolution", "0.3") && strstr(app.editor.note, "Under 0.5x"));
     render(&app);
     /* a scale that is no whole number and does not halve to 1 gets Eden's line */
     key(&app, SDLK_RETURN);
@@ -9840,11 +9852,10 @@ int main(int argc, char** argv) {
                 key(&app, SDLK_RETURN);
                 for (int i = 0; i < 8; ++i) key(&app, SDLK_BACKSPACE);
                 typed(&app, "Ab");
-                key(&app, SDLK_RETURN);
+                key(&app, SDLK_RETURN); /* refused in its dialog, which goes on */
                 assert(!strcmp(app.editor.note, "Ab is not a nickname: nickname 4 to 20 of A-Z a-z 0-9 space . _ -") &&
-                       !strcmp(app.users_form.nick[0], "Aogo 55"));
-                key(&app, SDLK_RETURN); /* back as the tests below know it */
-                for (int i = 0; i < 8; ++i) key(&app, SDLK_BACKSPACE);
+                       !strcmp(app.users_form.nick[0], "Aogo 55") && app.editor.typing);
+                for (int i = 0; i < 8; ++i) key(&app, SDLK_BACKSPACE); /* back as the tests below know it */
                 typed(&app, "Aogo");
                 key(&app, SDLK_RETURN);
                 assert(!strcmp(app.user_name, "Aogo"));

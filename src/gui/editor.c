@@ -132,43 +132,45 @@ static int zero_text(const char* s) {
     while (*end == ' ' || *end == '\t') end++;
     return !*end && d == 0;
 }
-/* what was typed into the focused row: kept, clamped to what the row takes, the default for a scale emptied or given
-   0, or the note says what it takes */
+/* what was typed, which the focused row does not take, said with what it takes */
+static void refused(GuiEditor* editor, const GuiThemeKey* key) {
+    const char* t = editor->text;
+    if (!key)
+        snprintf(editor->note, sizeof editor->note,
+                 snx_tr("%s is not a folder name: letters, digits, spaces, - _ and ., not starting with ."), t);
+    else if (key->type == GUI_KEY_COLOUR)
+        snprintf(editor->note, sizeof editor->note, snx_tr("%s is not a color #RRGGBB, as #1A2B3C"), t);
+    else if (key->type == GUI_KEY_NUMBER)
+        snprintf(editor->note, sizeof editor->note, snx_tr("%s is not a whole number from 0 to %lu"), t,
+                 (unsigned long)key->max);
+    else if (key->numeric && key->whole)
+        snprintf(editor->note, sizeof editor->note, snx_tr("%s is not a whole number from %g to %g"), t, key->lo,
+                 key->hi);
+    else if (key->numeric)
+        snprintf(editor->note, sizeof editor->note, snx_tr("%s is not a number from %g to %g, two decimals at most"), t,
+                 key->lo, key->hi);
+    else
+        snprintf(editor->note, sizeof editor->note, snx_tr("%s is more than %u bytes"), t, (unsigned)key->size - 1);
+}
+/* what was typed into the focused row: kept, the default for a scale emptied or given 0; one the row does not take
+   whole (a number past its range too) is refused, the note saying why and the typing going on, nothing changed */
 static void take(GuiEditor* editor) {
     const GuiThemeKey* key = gui_editor_key_of(editor, editor->row);
-    int took = 1, zero = key && key->numeric && !key->whole && zero_text(editor->text);
+    int zero = key && key->numeric && !key->whole && zero_text(editor->text);
     if (!key) {
         if (!folder_name(editor->text)) {
-            snprintf(editor->note, sizeof editor->note, "%s",
-                     snx_tr("A folder name: letters, digits, spaces, - _ and ., not starting with ."));
+            refused(editor, key);
             return;
         }
         snprintf(editor->id, sizeof editor->id, "%s", editor->text);
     } else {
         if (zero && key->def && *key->def) /* a scale is never 0 or empty: its default shows */
             snprintf(editor->text, sizeof editor->text, "%s", key->def);
-        took = gui_theme_set(object(editor), key, editor->text);
-        if (!took) {
-            if (key->numeric && key->whole)
-                snprintf(editor->note, sizeof editor->note, snx_tr("A whole number from %g to %g, not \"%s\""), key->lo,
-                         key->hi, editor->text);
-            else if (key->numeric)
-                snprintf(editor->note, sizeof editor->note,
-                         snx_tr("A number from %g to %g, three digits and two decimals at most, not \"%s\""),
-                         key->lo, key->hi, editor->text);
-            else if (key->type == GUI_KEY_TEXT)
-                snprintf(editor->note, sizeof editor->note, snx_tr("At most %u bytes"), (unsigned)key->size - 1);
-            else
-                snprintf(editor->note, sizeof editor->note, "%s",
-                         key->type == GUI_KEY_COLOUR ? snx_tr("A color: #RRGGBB, as #1A2B3C")
-                                                     : snx_tr("A whole number, 0 to 10000"));
+        if (gui_theme_check(key, editor->text) != 1) {
+            refused(editor, key);
             return;
         }
-        if (took > 1) { /* a number past its range: the closest in it, which the row now holds */
-            char value[80];
-            gui_editor_value(editor, editor->row, value, sizeof value);
-            snprintf(editor->note, sizeof editor->note, snx_tr("Closest value in range: %s"), value);
-        }
+        gui_theme_set(object(editor), key, editor->text);
     }
     editor->typing = false;
     editor->dirty = true;
