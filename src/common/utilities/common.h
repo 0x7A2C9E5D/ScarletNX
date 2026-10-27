@@ -23,6 +23,14 @@ void* snx_alloc(size_t size);
 void* snx_realloc(void* ptr, size_t size);
 char* snx_strdup(const char* s);
 char* snx_format(const char* fmt, ...);
+/* 1 when text ends with ending, ASCII letters of either case alike (a file's extension) */
+int snx_ends_with_nocase(const char* text, const char* ending);
+/* a shared library (a DLL on Windows, its UTF-8 path widened) loaded with its symbols bound now and kept to itself
+   (RTLD_NOW | RTLD_LOCAL); NULL with "cannot load PATH: reason" in error when it can't be */
+void* snx_library_open(const char* path, char* error, size_t error_size);
+/* a symbol of a library snx_library_open loaded, NULL when it has none of that name */
+void* snx_library_symbol(void* library, const char* name);
+void snx_library_close(void* library);
 /* a path's / turned into \ on Windows, the separator its system shows (C:\Users\...); nothing elsewhere */
 void snx_path_native(char* path);
 /* the room of a path made in a caller's buffer: Linux's PATH_MAX, past what Windows takes without its long paths */
@@ -44,6 +52,14 @@ char* snx_os_error(char* out, size_t size);
 char* snx_path_join(const char* a, const char* b);
 char* snx_dirname(const char* path);
 char* snx_absolute(const char* path);
+/* the last part of a path, after its last '/' or '\\' (either, on any host: names from other systems' paths too) */
+const char* snx_path_leaf(const char* path);
+/* the full path of a game's folder: outdir/title when outdir is given, else title's folder under recompiled/ in repo
+   or, without one, in the data folder beside the program argv0 names (snx_data_dir); made first when make is set.
+   NULL when it cannot be resolved (or made), the reason in errno (snx_os_error). The caller's to free */
+char* snx_game_folder(const char* repo, const char* outdir, const char* argv0, const char* title, int make);
+/* a run length in seconds from text ("90", "2.5"): above zero, at most 1e9, nothing after the number. 0 otherwise */
+int snx_parse_seconds(const char* text, double* seconds);
 /* whether path is a full one, from a root (a drive's or a share's on Windows), not one relative to a working folder */
 int snx_path_is_full(const char* path);
 char* snx_executable(const char* argv0);
