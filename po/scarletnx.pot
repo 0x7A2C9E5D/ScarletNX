@@ -231,6 +231,36 @@ msgid "Only the digits of a number from %g to %g, three digits and two decimals 
 msgstr ""
 
 #: src/gui/editor.c
+#, c-format
+msgid "A whole number from 0 to %lu"
+msgstr ""
+
+#: src/gui/editor.c
+#, c-format
+msgid "A whole number from %g to %g; empty, the default %s"
+msgstr ""
+
+#: src/gui/editor.c
+#, c-format
+msgid "A whole number from %g to %g"
+msgstr ""
+
+#: src/gui/editor.c
+#, c-format
+msgid "A number from %g to %g, two decimals at most; empty, the default %s"
+msgstr ""
+
+#: src/gui/editor.c
+#, c-format
+msgid "A number from %g to %g, two decimals at most"
+msgstr ""
+
+#: src/gui/editor.c
+#, c-format
+msgid "Text, up to %u bytes"
+msgstr ""
+
+#: src/gui/editor.c
 msgid "Folder"
 msgstr ""
 
@@ -2510,6 +2540,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Ctrl+S saves too"
+msgstr ""
+
+#: src/gui/main.c
+msgid "A nickname, 4 to 20 of A-Z a-z 0-9 space . _ -"
 msgstr ""
 
 #: src/gui/main.c

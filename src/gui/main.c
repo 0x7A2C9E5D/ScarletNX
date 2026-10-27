@@ -100,7 +100,13 @@ enum { GUI_PLACE_DATA, GUI_PLACE_GAMES, GUI_PLACE_WORK, GUI_PLACE_STATE, GUI_PLA
 /* Games' options, the rows of the View box its V opens, in the order of their keys in app.ini's [app] */
 enum { GUI_OPTION_RECENT, GUI_OPTION_DUMPS, GUI_OPTION_SORT, GUI_OPTION_VIEW, GUI_OPTION_ICONS, GUI_OPTIONS };
 /* whose choices the scene Choices shows (app->choices_of while it is drawn or hit) */
-typedef enum { GUI_CHOICES_SETUP, GUI_CHOICES_ASK, GUI_CHOICES_SIZES, GUI_CHOICES_DESTS } GuiChoicesOf;
+typedef enum {
+    GUI_CHOICES_SETUP,
+    GUI_CHOICES_ASK,
+    GUI_CHOICES_SIZES,
+    GUI_CHOICES_DESTS,
+    GUI_CHOICES_TYPED
+} GuiChoicesOf;
 /* the lists whose first row App's firsts keeps between frames: Choices' a GuiChoicesOf each, then the others */
 enum {
     GUI_LIST_USERS = GUI_CHOICES_DESTS + 1,
@@ -1912,9 +1918,9 @@ static unsigned screen_mark(const App* app) {
 /* what changed since the last frame: a screen come, whose fade starts now, a box opened or closed, whose shade does */
 static void fades_mark(App* app) {
     unsigned mark = screen_mark(app);
-    bool boxed = app->confirm.shown || app->sizes_shown || app->users_shown || app->addons_shown ||
-                 app->options_shown || app->states_shown || app->cleaned_shown || app->left_shown || app->dests_shown ||
-                 app->help_shown;
+    bool boxed = app->confirm.shown || app->sizes_shown || (app->editing && app->editor.typing) || app->users_shown ||
+                 app->addons_shown || app->options_shown || app->states_shown || app->cleaned_shown ||
+                 app->left_shown || app->dests_shown || app->help_shown;
     if (mark != app->screen_was && app->screen_was) app->switch_ms = SDL_max(now_ms(app), 1);
     if (boxed != app->boxed_was) app->box_ms = SDL_max(now_ms(app), 1);
     app->screen_was = mark;
@@ -8583,6 +8589,7 @@ static void warn_tick(App* app) {
     app->warn_key[0] = 0;
     app->editor.note[0] = 0;
 }
+static void typed_keyboard(App* app);
 static void editor_key(App* app, GuiKey key) {
     GuiEditorDo what;
     int was_typing = app->editor.typing;
@@ -8669,10 +8676,7 @@ static void editor_key(App* app, GuiKey key) {
         SDL_SetWindowFullscreen(app->window, !fullscreen || strcmp(fullscreen, "0"));
     }
 #endif
-    if (app->editor.typing && !SDL_TextInputActive(app->window))
-        SDL_StartTextInput(app->window); /* a phone's keyboard comes up */
-    else if (!app->editor.typing && SDL_TextInputActive(app->window))
-        SDL_StopTextInput(app->window);
+    typed_keyboard(app); /* a phone's keyboard comes up with the dialog */
 }
 /* keys and typed text: while a value is typed, Space and the letters are its text */
 static void editor_input(App* app, const SDL_Event* e) {
@@ -8858,37 +8862,27 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
 static int form_room(const App* app, int width) {
     return (ui_row_box(app, gui_rect(0, 0, width, 0)).w - cell_w(app) * 3 / 2) / cell_w(app);
 }
-/* a numeric setting's field: four value slots (0.25, 16.0) right-aligned, and the cursor's after them, so the value
-   keeps its place whether it is being typed or is only shown */
+/* a numeric setting's value right-aligned in four slots (0.25, 16.0), the group's numbers in a column */
 #define GUI_NUMBER_VALUE 4
-#define GUI_NUMBER_FIELD (GUI_NUMBER_VALUE + 1)
 /* a row of a form as its box shows it, its marker first: its label, the value past the widest label (labels
-   columns); one being typed ends where the typing is, its start giving way, in room columns */
+   columns), in room columns; a value typed is typed in its dialog (render_typed) */
 static void form_line(App* app, const GuiEditor* e, int r, int labels, int room, char* line, size_t size) {
     char label[256], value[400];
     const GuiThemeKey* k = gui_editor_key_of(e, r);
     const char* path;
-    int typing = e->typing && r == e->row, pad, srow = -1;
-    size_t n;
+    int pad, srow = -1;
     gui_editor_label(e, r, label, sizeof label);
     if (k && k->numeric && !k->whole && e->object == (char*)app->settings.values)
         srow = e->keys == app->view_keys   ? app->view_rows[k - app->view_keys]
                : e->keys == app->peek_keys ? app->peek_rows[k - app->peek_keys]
                                            : (int)(k - app->settings.keys);
-    if (typing) {
-        if (srow >= 0) { /* right in its four slots, the cursor in the fifth */
-            int cols = gui_text_cols(e->text);
-            snprintf(value, sizeof value, "%*s%.*s_", SDL_max(GUI_NUMBER_VALUE - cols, 0), "",
-                     SDL_min(cols, GUI_NUMBER_VALUE), e->text);
-        } else
-            snprintf(value, sizeof value, "%s_", e->text);
-    } else if (srow >= 0) { /* its value right in four slots, the fifth the cursor's while typing */
+    if (srow >= 0) { /* its value right in four slots */
         const GuiSetting* s = &app->settings.values[srow];
         const char* picked = gui_settings_value(&app->settings, s->key);
         const char* number = picked ? picked : s->fallback ? s->fallback : "";
         int cols = gui_text_cols(number);
-        snprintf(value, sizeof value, "%*s%.*s %s", SDL_max(GUI_NUMBER_VALUE - cols, 0), "",
-                 SDL_min(cols, GUI_NUMBER_VALUE), number, picked ? "" : snx_tr("[default]"));
+        snprintf(value, sizeof value, "%*s%.*s%s%s", SDL_max(GUI_NUMBER_VALUE - cols, 0), "",
+                 SDL_min(cols, GUI_NUMBER_VALUE), number, picked ? "" : " ", picked ? "" : snx_tr("[default]"));
     } else if (k && e->object == (char*)app->settings.values) { /* a setting: a pick, else its default and [default] */
         int row = e->keys == app->view_keys   ? app->view_rows[k - app->view_keys]
                   : e->keys == app->peek_keys ? app->peek_rows[k - app->peek_keys]
@@ -8924,11 +8918,6 @@ static void form_line(App* app, const GuiEditor* e, int r, int labels, int room,
         snprintf(line, size, "%s%s%*s %s", app->theme.marker, label, pad, "", value);
     } else /* no value to line up: padding would make a short row too long for its box, and slide */
         snprintf(line, size, "%s%s", app->theme.marker, label);
-    n = (size_t)gui_text_cols(line);
-    if (typing && room > 4 && n > (size_t)room && !(k && k->numeric && !k->whole)) { /* the typed end in view */
-        const char* tail = gui_cols_skip(value, (int)(n - (size_t)room + 3));
-        snprintf(line, size, "%s%s%*s ...%s", app->theme.marker, label, pad, "", tail);
-    }
 }
 static int clean_inis(App* app, GuiCleaned* done);
 static int settings_unread(App* app, char* out, size_t size);
@@ -9099,6 +9088,106 @@ static void folder_frames(App* app, const GuiFormBoxes* f) {
     }
 }
 static void draw_picker(App* app);
+/* ---- a value typed: in a dialog over its form, as UI scale's is, the row's label its title, then the text with its
+   cursor in a field, what the row takes, and what the editor says of what was typed; OK and Cancel under them ---- */
+#define GUI_TYPED_FIELD 24 /* the field's columns at the least */
+static const char* const typed_choices[2] = {SNX_TR_NOOP("OK"), SNX_TR_NOOP("Cancel")};
+#define SAY_NICKNAME_TAKES SNX_TR_NOOP("A nickname, 4 to 20 of A-Z a-z 0-9 space . _ -")
+/* what the row typed takes, in out: its key's, a nickname's on Settings > User */
+static void typed_takes(const App* app, char* out, size_t size) {
+    if (app->form == GUI_FORM_USERS && app->editor.row > 0)
+        snprintf(out, size, "%s", snx_tr(SAY_NICKNAME_TAKES));
+    else
+        gui_editor_takes(&app->editor, out, size);
+}
+/* the dialog's boxes: its choices' (box the whole dialog's), the field, what it takes and the editor's note */
+typedef struct {
+    GuiChoices c;
+    GuiRect field, takes, note;
+} GuiTypedBoxes;
+static void typed_place(App* app, GuiTypedBoxes* b) {
+    GuiChoices* c = &b->c;
+    int s = app->scale, cw = cell_w(app), ch = cell_h(app), width, height, cols, takes_rows, note_rows = 0, fixed;
+    int list_h, y;
+    char title[256], takes[256];
+    const char* text;
+    area(app, &width, &height);
+    memset(b, 0, sizeof *b);
+    c->of = GUI_CHOICES_TYPED;
+    gui_editor_label(&app->editor, app->editor.row, title, sizeof title);
+    typed_takes(app, takes, sizeof takes);
+    cols = SDL_max(SDL_max(gui_text_cols(title) + 2, gui_text_cols(takes)), GUI_TYPED_FIELD);
+    for (; (text = choice_text(app, c->of, c->count, app->row_text, sizeof app->row_text)); ++c->count)
+        cols = SDL_max(cols, gui_text_cols(text) + gui_text_cols(app->theme.marker) + 2);
+    cols = SDL_min(cols, width / cw - 4);
+    takes_rows = wrap_rows(app, takes, cols, 0);
+    if (app->editor.note[0]) note_rows = wrap_rows(app, app->editor.note, cols, 0);
+    fixed = head_h(app) + 4 * s + ch + 4 * s + 4 * s + takes_rows * ch + (note_rows ? 4 * s + note_rows * ch : 0) +
+            6 * s + 4 * s;
+    list_h = rows_h(ui_choices_layout, ui_choices_row, c->rects, UI_CHOICES_ROWS, s, c->count);
+    list_h = SDL_min(list_h, SDL_max(0, height - fixed)); /* the box kept in the area */
+    c->box = over_rect(app, cols, fixed + list_h);
+    y = c->box.y + head_h(app) + 4 * s;
+    b->field = gui_rect(c->box.x + cw, y, c->box.w - 2 * cw, ch + 4 * s);
+    y += ch + 8 * s;
+    b->takes = gui_rect(c->box.x + cw, y, c->box.w - 2 * cw, takes_rows * ch);
+    y += takes_rows * ch;
+    if (note_rows) {
+        b->note = gui_rect(c->box.x + cw, y + 4 * s, c->box.w - 2 * cw, note_rows * ch);
+        y += 4 * s + note_rows * ch;
+    }
+    c->at = gui_rect(c->box.x + cw, y + 6 * s, c->box.w - 2 * cw, list_h);
+    choices_rows(app, c, 0); /* OK's look: Enter takes it */
+}
+/* the dialog over its form: the text framed in the focus's colour, its end and the cursor in view; what it takes in
+   the soft colour, the editor's note in the warning's */
+static void render_typed(App* app) {
+    const GuiTheme* t = &app->theme;
+    GuiTypedBoxes b;
+    char title[256], takes[256], line[sizeof app->editor.text + 4];
+    int cw = cell_w(app), room;
+    typed_place(app, &b);
+    gui_editor_label(&app->editor, app->editor.row, title, sizeof title);
+    over_box(app, b.c.box, title);
+    outline(app, b.field, t->focus);
+    snprintf(line, sizeof line, "%s_", app->editor.text);
+    room = (b.field.w - cw) / cw;
+    text_in(app, b.field, b.field.x + cw / 2, b.field.y + 2 * app->scale,
+            gui_cols_skip(line, SDL_max(gui_text_cols(line) - room, 0)), rgb(t->ink));
+    typed_takes(app, takes, sizeof takes);
+    wrap_in(app, b.takes, b.takes.x, b.takes.y, takes, 0, rgb(t->soft));
+    if (app->editor.note[0]) wrap_in(app, b.note, b.note.x, b.note.y, app->editor.note, 0, rgb(t->warning));
+    app->choices_of = b.c.of;
+    ui_choices_draw(app, b.c.rects, app->scale, b.c.lists);
+}
+/* choice i of the dialog: OK takes what was typed, as Enter, Cancel leaves the row as it was, as ESC */
+static void typed_choice(App* app, int i) { editor_key(app, i ? GUI_CANCEL : GUI_SELECT); }
+/* the pointer on the dialog: a choice under it takes the focus and a click takes it; a click on the field brings a
+   phone's keyboard back, one off the box is Cancel */
+static void typed_pointer(App* app, float x, float y, bool click) {
+    GuiTypedBoxes b;
+    bool on;
+    typed_place(app, &b);
+    if (choices_pointer(app, &b.c, x, y, click, &on) || !click) return;
+    if (in_rect(b.field, x, y))
+        SDL_StartTextInput(app->window);
+    else if (!on)
+        typed_choice(app, 1);
+}
+/* the system's keyboard while a value is typed, a phone's a number pad for a whole number that is never under 0 (SDL's
+   number pad has no point and no minus), else its letters; none once it is not */
+static void typed_keyboard(App* app) {
+    const GuiThemeKey* k = gui_editor_key_of(&app->editor, app->editor.row);
+    bool pad = k && ((k->numeric && k->whole && k->lo >= 0) || k->type == GUI_KEY_NUMBER);
+    if (app->editor.typing && !SDL_TextInputActive(app->window)) {
+        SDL_PropertiesID props = SDL_CreateProperties();
+        SDL_SetNumberProperty(props, SDL_PROP_TEXTINPUT_TYPE_NUMBER,
+                              pad ? SDL_TEXTINPUT_TYPE_NUMBER : SDL_TEXTINPUT_TYPE_TEXT);
+        SDL_StartTextInputWithProperties(app->window, props);
+        SDL_DestroyProperties(props);
+    } else if (!app->editor.typing && SDL_TextInputActive(app->window))
+        SDL_StopTextInput(app->window);
+}
 static void draw_form(App* app) {
     GuiFormBoxes f;
     char keys[256], line[1100];
@@ -9189,11 +9278,8 @@ static void draw_picker(App* app) {
         int focused = e->channel == i, band = focused && t->focus_bar, y = r.y + 3 * s;
         SDL_Color ink = rgb(band ? t->page : focused ? t->focus : t->ink);
         if (band) fill_rect(app, r, t->focus);
-        if (i == GUI_PICK_HEX) { /* the colour as typed, the one it is now and the one it had */
-            if (e->typing)
-                snprintf(line, sizeof line, "%s_", e->text);
-            else
-                gui_editor_value(e, e->row, line, sizeof line);
+        if (i == GUI_PICK_HEX) { /* the colour as #RRGGBB, typed in its dialog, the one it is now and the one it had */
+            gui_editor_value(e, e->row, line, sizeof line);
             text_in(app, r, r.x + cw / 2, y, line, ink);
             x = r.x + cw / 2 + 10 * cw;
             was = gui_text_cols(snx_tr("was"));
@@ -9242,10 +9328,9 @@ static void picker_pointer(App* app, float x, float y, bool press) {
             y < (float)(p.rows[i].y + p.rows[i].h))
             break;
     app->pick_press = i < 3 ? i + 1 : GUI_PICK_ROWS + 1;
-    if (e->typing && i != GUI_PICK_HEX) editor_key(app, GUI_CANCEL);
     if (i < 3)
         picker_set(app, &p, i, x);
-    else if (i == GUI_PICK_HEX && !e->typing) {
+    else if (i == GUI_PICK_HEX) {
         e->channel = GUI_PICK_HEX;
         editor_key(app, GUI_SELECT);
     } else if (i == GUI_PICK_ROWS && (x < (float)p.box.x || x >= (float)(p.box.x + p.box.w) || y < (float)p.box.y ||
@@ -9254,12 +9339,10 @@ static void picker_pointer(App* app, float x, float y, bool press) {
 }
 /* a row of a form under the pointer: focused, or on the focused one Select, as a key would */
 static void form_row_pointer(App* app, int r) {
-    if (r == app->editor.row && !app->editor.typing)
+    if (r == app->editor.row)
         editor_key(app, GUI_SELECT);
-    else if (r != app->editor.row) {
-        if (app->editor.typing) editor_key(app, GUI_CANCEL);
+    else
         app->editor.row = r;
-    }
 }
 /* FormList's row under the pointer. The theme editor's keys and the groups take the focus as it goes over them, a
    click on the focused one selecting it; on a group's screen, whose keys move in its rows, a click opens another group
@@ -9269,12 +9352,11 @@ void ui_form_list_rows_row_action_cb(App* app, size_t row, uint32_t hit) {
     if (app->form == GUI_FORM_THEME || app->form == GUI_FORM_SETTINGS) {
         if (hit & UI_HIT_CLICK)
             form_row_pointer(app, r);
-        else if (!app->editor.typing)
+        else
             app->editor.row = r;
         return;
     }
     if (!(hit & UI_HIT_CLICK)) return;
-    if (app->editor.typing) editor_key(app, GUI_CANCEL);
     keep_settings(app);
     leave_editor(app);
     settings_top(app, r);
@@ -9287,7 +9369,7 @@ void ui_form_side_rows_row_action_cb(App* app, size_t row, uint32_t hit) {
     int r = (int)row, group;
     if (app->form == GUI_FORM_FOLDERS && (r = folder_entry_row(app, r, &group)) < 0) return;
     if (!(hit & UI_HIT_CLICK)) {
-        if (app->form != GUI_FORM_SETTINGS && !app->editor.typing) app->editor.row = r;
+        if (app->form != GUI_FORM_SETTINGS) app->editor.row = r;
         return;
     }
     if (app->form == GUI_FORM_SETTINGS) {
@@ -10334,6 +10416,8 @@ static void render(App* app) {
         draw_form(app);
         if (app->confirm.shown)
             render_ask(app); /* a folder picked on the folders' screen, a UI scale picked */
+        else if (app->editor.typing)
+            render_typed(app); /* over the picker too, its #RRGGBB typed */
         else if (app->sizes_shown)
             render_sizes(app);
         else if (app->users_shown)
@@ -12835,6 +12919,7 @@ static const char* choice_text(App* app, int of, int i, char* out, size_t size) 
             return out;
         case GUI_CHOICES_SIZES: return i < 2 ? snx_tr(size_choices[app->size_until != 0][i]) : NULL;
         case GUI_CHOICES_DESTS: return dest_label(app, i, out, size);
+        case GUI_CHOICES_TYPED: return i < 2 ? snx_tr(typed_choices[i]) : NULL;
         default: return i < setup_labels(app, labels) ? labels[i] : NULL;
     }
 }
@@ -12861,6 +12946,9 @@ void ui_choices_rows_row_action_cb(App* app, size_t row, uint32_t hit) {
         case GUI_CHOICES_DESTS:
             app->dests.focus = i;
             if (hit & UI_HIT_CLICK) dest_take(app, i);
+            break;
+        case GUI_CHOICES_TYPED:
+            if (hit & UI_HIT_CLICK) typed_choice(app, i);
             break;
         default:
             app->setup_choice.focus = i;
@@ -13170,6 +13258,8 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
     }
     if (app->confirm.shown) /* over a run, the menu, Games or a form */
         ask_pointer(app, x, y, click);
+    else if (app->editing && app->editor.typing)
+        typed_pointer(app, x, y, click);
     else if (app->sizes_shown)
         sizes_pointer(app, x, y, click);
     else if (app->dests_shown)

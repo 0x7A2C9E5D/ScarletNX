@@ -289,6 +289,27 @@ void gui_editor_type(GuiEditor* editor, const char* text) {
     memcpy(editor->text + n, text, add);
     editor->text[n + add] = 0;
 }
+void gui_editor_takes(const GuiEditor* editor, char* out, size_t size) {
+    const GuiThemeKey* key = gui_editor_key_of(editor, editor->row);
+    size_t most = sizeof editor->text - 1;
+    if (!key)
+        snprintf(out, size, "%s", snx_tr("A folder name: letters, digits, spaces, - _ and ., not starting with ."));
+    else if (key->type == GUI_KEY_COLOUR)
+        snprintf(out, size, "%s", snx_tr("A color: #RRGGBB, as #1A2B3C"));
+    else if (key->type == GUI_KEY_NUMBER)
+        snprintf(out, size, snx_tr("A whole number from 0 to %lu"), (unsigned long)key->max);
+    else if (key->numeric && key->whole && key->def && *key->def) /* nothing typed: the setting's default again */
+        snprintf(out, size, snx_tr("A whole number from %g to %g; empty, the default %s"), key->lo, key->hi, key->def);
+    else if (key->numeric && key->whole)
+        snprintf(out, size, snx_tr("A whole number from %g to %g"), key->lo, key->hi);
+    else if (key->numeric && key->def && *key->def)
+        snprintf(out, size, snx_tr("A number from %g to %g, two decimals at most; empty, the default %s"), key->lo,
+                 key->hi, key->def);
+    else if (key->numeric)
+        snprintf(out, size, snx_tr("A number from %g to %g, two decimals at most"), key->lo, key->hi);
+    else
+        snprintf(out, size, snx_tr("Text, up to %u bytes"), (unsigned)(key->size - 1 < most ? key->size - 1 : most));
+}
 void gui_editor_erase(GuiEditor* editor) {
     size_t n = strlen(editor->text);
     while (n && ((unsigned char)editor->text[n - 1] & 0xC0) == 0x80) --n; /* a UTF-8 character's continuation */
