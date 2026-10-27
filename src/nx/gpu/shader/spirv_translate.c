@@ -974,11 +974,8 @@ static void alpha_test(DirectCtx* c, u32 push, u32 push_pointer, u32 alpha) {
     spv_emit_label(&c->emit, merge);
 }
 
-/* A fragment program's texel fetch from a render target: targets are scaled (resolution=) and FragCoord is made the
-   guest's, so the game's texel p is at the scale times its centre, p + 0.5, in the image, and a size query answers the
-   guest's size, the image's over the scale. The draw sets the texture's bit in the uvec4 after the stage's push
-   constants, x for slots 0 to 31 and y for 32 to 63 (vk/render.c); other textures are the guest's size. A target
-   whose size vk_sc rounded or clamped to 1 is off by up to a texel at its edge */
+/* Fragment fetches from a scaled render target (resolution=): texel p is at (p + 0.5) * scale, and TXQ answers the
+   size over the scale. The texture's bit is in the push constants' uvec4, x for slots 0-31, y for 32-63 */
 _Static_assert(SH_MAXTEX <= 64, "the scaled textures' mask has a bit a slot");
 static void scaled_coords(DirectCtx* c, u32 push, int slot, int size, u32 i32_type, u32* x, u32* y) {
     u32 one = spv_emit_constant_u32(&c->emit, c->u32_type, 1);
@@ -988,7 +985,7 @@ static void scaled_coords(DirectCtx* c, u32 push, int slot, int size, u32 i32_ty
         &c->emit, c->u32_type,
         spv_emit_shift_right_u32(&c->emit, c->u32_type, bits, spv_emit_constant_u32(&c->emit, c->u32_type, slot & 31)),
         one);
-    /* the uniform's component 2 is the scale, 0 its reciprocal (frame_consts) */
+    /* component 2 is the scale, 0 its reciprocal (frame_consts) */
     u32 factor = spv_emit_uniform_component(&c->emit, c->scale_pointer, c->scale_buffer, c->zero, c->zero,
                                             size ? c->zero : spv_emit_constant_u32(&c->emit, c->u32_type, 2),
                                             c->f32_type);
@@ -1002,11 +999,11 @@ static void scaled_coords(DirectCtx* c, u32 push, int slot, int size, u32 i32_ty
         spv_emit_no_contraction(&c->emit, f);
         f = spv_emit_fmul(&c->emit, c->f32_type, f, factor);
         spv_emit_no_contraction(&c->emit, f);
-        if (size) { /* rounded, as vk_sc rounds the scaled size */
+        if (size) { /* rounded, as vk_sc */
             f = spv_emit_fadd(&c->emit, c->f32_type, f, half);
             spv_emit_no_contraction(&c->emit, f);
             *v[k] = spv_emit_convert_f_to_u(&c->emit, c->u32_type, f);
-        } else /* floored, so a coordinate below 0 stays out of the image */
+        } else /* floored: below 0 stays outside */
             *v[k] = spv_emit_convert_f_to_s(&c->emit, i32_type,
                                             spv_emit_glsl_unary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FLOOR, f));
     }
@@ -3663,8 +3660,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
             if (shadow && texs_dref(encoding, b) < 255) used[texs_dref(encoding, b)] = 1;
             texs_mark_outputs(insn[i], used);
         }
-        /* a fragment program's texel fetches and size queries may read a render target, which is scaled
-           (scaled_coords) */
+        /* fragment fetches and size queries may read a scaled target (scaled_coords) */
         if ((op->id == O_TLD || op->id == O_TLD_B || op->id == O_TLDS || op->id == O_TXQ || op->id == O_TXQ_B) &&
             stage == ST_FS)
             needs_texel_scale = needs_glsl = 1;
@@ -4701,7 +4697,7 @@ static u32* to_spirv(const u8* code, const u64* insn, u32 max_bytes, int stage, 
     }
     u32 push = 0, push_pointer = 0;
     if ((stage == ST_FS && ((target & 15) || needs_point_coord || needs_texel_scale)) || depth_fix || needs_instance) {
-        /* the fragment stage's uvec4 after its vec4 holds the mask of its scaled textures (scaled_coords) */
+        /* the fragment stage's uvec4: its scaled textures (scaled_coords) */
         push = spv_emit_push_vec4(&c->emit, vec4, c->f32_type, stage == ST_FS ? 16 : 0,
                                   stage == ST_FS && needs_texel_scale ? vec4_u32 : 0, &push_pointer);
         interfaces[count++] = push;

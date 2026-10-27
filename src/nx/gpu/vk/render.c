@@ -1539,8 +1539,7 @@ static VkDescriptorSet desc_set_cached(VkDescriptorSetLayout layout, DescWrites*
 }
 static VkDescriptorSet stage_set_(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro,
                                   u32* fb, u64* scaled, TexRes* res, const VkDrawStorage* draw, DrawImages* images);
-/* scaled: the texture slots whose bound image is a scaled render target, a bit each, for the fragment program's texel
-   fetches and size queries (scaled_coords in spirv_translate.c) */
+/* scaled: a bit for each texture slot bound to a scaled render target (scaled_coords in spirv_translate.c) */
 static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro, u32* fb,
                                  u64* scaled, TexRes* res, const VkDrawStorage* draw, DrawImages* images) {
     SNX_ZONE(z, "stage set");

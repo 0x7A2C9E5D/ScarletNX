@@ -2785,10 +2785,7 @@ static void tlds_fp16(void) {
     }
 }
 
-/* Render targets are scaled (resolution=) and a fragment program's FragCoord is the guest's: its texel fetches from a
-   target the draw binds read at the scale times their centre, and its size queries answer the guest's size, picked by
-   the texture's bit in the push constants. Below 1 one game's lighting pass otherwise drew the scene into the top-left
-   corner (issue #730) */
+/* fragment TLD and TXQ of a scaled target take the scale its texture's bit selects (issue #730) */
 static void scaled_texel_fetch(void) {
     static const u64 tld_2d[] = {0xdc00000000000000ull | 7ull << 51 | 0xfull << 31 | 2ull << 28 | 0x10ull << 36 |
                                  0xffull << 20 | 7ull << 16 | 2ull << 8}; /* TLD.LZ R0, R2, RZ, 2D */
