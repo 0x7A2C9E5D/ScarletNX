@@ -3886,7 +3886,8 @@ int main(int argc, char** argv) {
             sizes_place(&app, &b);
             bar = sizes_bar(&app, &b);
             assert(!memcmp(&bar, &first, sizeof bar) && app.scale == scale && app.menu.text_size == start);
-            text_px_is(&app, bar.x + bar.w + cw, b.body.y, name, rgb(app.theme.ink), rgb(app.theme.page));
+            text_px_is(&app, bar.x + bar.w + cw, b.body.y, name, rgb(k == 3 ? app.theme.soft : app.theme.ink),
+                       rgb(app.theme.page)); /* 4x greyed: 800 pixels high are short of its 1024 */
         }
         app.size_pick = start;
         key(&app, SDLK_RIGHT);
@@ -4041,6 +4042,80 @@ int main(int argc, char** argv) {
             SDL_Color ink;
             assert(!strcmp(form_about(&app, &ink), "1x to 4x. A new one asks to be kept"));
         }
+    }
+    /* a size the window shows as a smaller one (layout keeps 16 rows) greyed in the dialog: its tick and its name, the
+       slider still going over it and saying why with the numbers, OK greyed and taking nothing; a kept one the window
+       cannot hold stays kept, App's row saying the one in use; a taller window greys none */
+    {
+        GuiSizesBoxes b;
+        GuiRect bar;
+        int w, h, width, height, cw, span, k;
+        char why[128];
+        assert(SDL_GetWindowSize(app.window, &w, &h) && SDL_SetWindowSize(app.window, 1280, 720));
+        SDL_SyncWindow(app.window);
+        render(&app);
+        area(&app, &width, &height);
+        assert(height < rows_height(GUI_LEAST_ROWS, 3) && height >= rows_height(GUI_LEAST_ROWS, 2) && app.scale == 2);
+        key(&app, SDLK_RETURN);
+        key(&app, SDLK_RIGHT);
+        key(&app, SDLK_RIGHT); /* 4x */
+        render(&app);
+        sizes_place(&app, &b);
+        bar = sizes_bar(&app, &b);
+        cw = cell_w(&app);
+        span = bar.w - cw;
+        for (k = 0; k < GUI_SIZE_STEPS - 1; ++k) /* the ticks off the knob, above the line: 1x and 2x in ink, 3x soft */
+            assert(same_colour(pixel(&app, (float)(bar.x + cw / 2 + k * span / (GUI_SIZE_STEPS - 1)),
+                                     (float)(bar.y + bar.h / 2 - 2 * app.scale)),
+                               rgb(k < 2 ? app.theme.ink : app.theme.soft)));
+        text_px_is(&app, bar.x + bar.w + cw, b.body.y, "4x", rgb(app.theme.soft), rgb(app.theme.page));
+        snprintf(why, sizeof why, "4x needs a window 1024 pixels high: this one is %d", height);
+        shows(&app, why, rgb(app.theme.warning));
+        shows(&app, "- OK", rgb(app.theme.soft)); /* greyed, in focus */
+        key(&app, SDLK_RETURN);                   /* OK: nothing taken, the dialog and why stay */
+        assert(size_picking(&app) && app.size_pick == 4 && app.menu.text_size == start && !app.size_until);
+        point(&app, choice_box(&app, &b.c, 0), true); /* clicked too */
+        assert(size_picking(&app) && app.menu.text_size == start && !app.size_until);
+        render(&app);
+        shows(&app, why, rgb(app.theme.warning));
+        key(&app, SDLK_LEFT);
+        render(&app);
+        snprintf(why, sizeof why, "3x needs a window 768 pixels high: this one is %d", height);
+        shows(&app, why, rgb(app.theme.warning));
+        key(&app, SDLK_LEFT);
+        render(&app);
+        hides(&app, "needs a window", rgb(app.theme.warning)); /* 2x, which fits */
+        sizes_place(&app, &b);
+        assert(!memcmp(&bar, &(GuiRect){sizes_bar(&app, &b).x, sizes_bar(&app, &b).y, bar.w, bar.h}, sizeof bar));
+        key(&app, SDLK_ESCAPE);
+        app.menu.text_size = 4; /* as a taller window kept it */
+        render(&app);
+        assert(app.menu.text_size == 4 && app.scale == 2 && !strcmp(app.app_form.text, "4x (2x in this window)"));
+        assert(SDL_SetWindowSize(app.window, 1280, 1024));
+        SDL_SyncWindow(app.window);
+        render(&app);
+        assert(app.scale == 4 && !strcmp(app.app_form.text, "4x"));
+        app.menu.text_size = start;
+        key(&app, SDLK_RETURN);
+        app.size_pick = 4;
+        render(&app);
+        sizes_place(&app, &b);
+        bar = sizes_bar(&app, &b);
+        cw = cell_w(&app);
+        span = bar.w - cw;
+        for (k = 0; k < GUI_SIZE_STEPS - 1; ++k)
+            assert(same_colour(pixel(&app, (float)(bar.x + cw / 2 + k * span / (GUI_SIZE_STEPS - 1)),
+                                     (float)(bar.y + bar.h / 2 - 2 * app.scale)),
+                               rgb(app.theme.ink)));
+        text_px_is(&app, bar.x + bar.w + cw, b.body.y, "4x", rgb(app.theme.ink), rgb(app.theme.page));
+        hides(&app, "needs a window", rgb(app.theme.warning));
+        key(&app, SDLK_RETURN); /* OK on 4x: in use, and asked about */
+        assert(app.menu.text_size == 4 && app.scale == 4 && app.size_until);
+        key(&app, SDLK_ESCAPE);
+        assert(!app.sizes_shown && app.menu.text_size == start);
+        assert(SDL_SetWindowSize(app.window, w, h));
+        SDL_SyncWindow(app.window);
+        render(&app);
     }
     assert(app.menu.text_size == start && app.editor.row == GUI_APP_TEXT);
     /* the App's picks kept at once in app.ini, which the next start reads back */

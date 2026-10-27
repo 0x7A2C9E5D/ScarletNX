@@ -196,7 +196,7 @@ typedef struct {
 } GuiDumpIcons;
 /* the App screen's values, as its rows show them, and Folders' (what each row's folder is, past its path) */
 typedef struct {
-    char theme[64], text[16], language[64], animations[16], side[16], background[16], places[48], moves[32];
+    char theme[64], text[64], language[64], animations[16], side[16], background[16], places[48], moves[32];
     char folder[GUI_FOLDER_ROWS][64];
 } GuiAppForm;
 /* the head's measures: the row of tabs (its height and the tabs' width), the title's height and width (0: none), the
@@ -1441,6 +1441,15 @@ static void recent_open(App* app, char* file) {
 static int entering(const App* app) {
     return app->entering_ms && now_ms(app) < app->entering_ms + app->theme.fade_out_ms;
 }
+/* the rows a UI scale keeps at the least on any screen: one that leaves fewer shows the largest under it that does */
+#define GUI_LEAST_ROWS 16
+/* the pixels high rows rows of letters take at scale */
+static int rows_height(int rows, int scale) { return rows * 16 * scale; }
+/* the largest scale from scale down, 1x at the least, whose rows rows fit a window height pixels high */
+static int scale_fits(int scale, int height, int rows) {
+    while (scale > 1 && height < rows_height(rows, scale)) --scale;
+    return scale;
+}
 /* the rows a start's UI scale keeps at the least: a phone held wide is short, and its menu needs room for its items,
    a finger's row each, and the setup's boxes for their lines: 2x on the phones of 1080 and 1156 rows of pixels */
 #define GUI_AUTO_ROWS_PHONE 30
@@ -1453,9 +1462,7 @@ static int entering(const App* app) {
    100% gets 2x and a phone's letters come out as big to the eye, as long as rows rows fit in a window height pixels
    high */
 static int pick_auto_scale(float display_scale, int height, int rows) {
-    int scale = SDL_max(1, (int)(2.0f * display_scale));
-    while (scale > 1 && height / (16 * scale) < rows) --scale;
-    return scale;
+    return scale_fits(SDL_max(1, (int)(2.0f * display_scale)), height, rows);
 }
 /* what a screen has besides its title and foot: the status box (unless the footer's style is none), the tabs (a run
    has none), a list with the side box beside it (one box without), a wide list (a run's output, the theme editor's
@@ -1516,6 +1523,7 @@ static void run_place(App* app, GuiPlace* p) {
     place_screen(app, p, snx_tr(SAY_ABORT), GUI_SHOWS_STATUS | GUI_SHOWS_WIDE | GUI_SHOWS_SIDE);
 }
 static void job_console_size(App* app, int* cols, int* rows);
+static void size_shown(const App* app, char* out, size_t n);
 static void layout(App* app) {
     int run;
     int width, height, whole_width, whole_height;
@@ -1525,15 +1533,14 @@ static void layout(App* app) {
        and the safe area be short. The window then keeps room for 16 rows of them */
     if (!app->auto_scale && SDL_GetWindowSizeInPixels(app->window, &whole_width, &whole_height) && whole_height > 0) {
         app->auto_scale = pick_auto_scale(SDL_GetWindowDisplayScale(app->window), whole_height, GUI_AUTO_ROWS);
-        SDL_SetWindowMinimumSize(
-            app->window, 800,
-            SDL_max(480, (int)SDL_ceilf(256.0f * (float)app->auto_scale / SDL_GetWindowPixelDensity(app->window))));
+        SDL_SetWindowMinimumSize(app->window, 800,
+                                 SDL_max(480, (int)SDL_ceilf((float)rows_height(GUI_LEAST_ROWS, app->auto_scale) /
+                                                             SDL_GetWindowPixelDensity(app->window))));
     }
     if (!app->menu.text_size) app->menu.text_size = app->auto_scale; /* a start with none in app.ini: a number then */
-    app->scale = SDL_max(app->menu.text_size, 1);
-    /* as long as 16 rows still fit: a start's always do on a computer, a phone's not while Fullscreen is off */
-    while (app->scale > 1 && height / (16 * app->scale) < 16) --app->scale;
-    if (app->scale < 1) app->scale = 1;
+    /* as long as GUI_LEAST_ROWS still fit: a start's always do on a computer, a phone's not while Fullscreen is off */
+    app->scale = scale_fits(SDL_max(app->menu.text_size, 1), height, GUI_LEAST_ROWS);
+    size_shown(app, app->app_form.text, sizeof app->app_form.text); /* App's row, with the one in use if lower */
     app->cols = SDL_min(width / (8 * app->scale), GUI_MAX_COLS);
     app->rows = SDL_min(height / (16 * app->scale), GUI_MAX_ROWS);
     run = (app->menu.running || app->finished) && !entering(app);
@@ -6515,12 +6522,19 @@ static void data_relative(const App* app, const char* path, char* out, size_t si
 #define GUI_SIZE_STEPS GUI_TEXT_MAX
 /* a text_size as Settings show it, the scale in effect: 1x while a start has yet to measure its window */
 static void size_name(int size, char* out, size_t n) { snprintf(out, n, "%dx", SDL_max(size, 1)); }
+/* the UI scale as Settings show it: the one kept, and the one in use where the window is too short for it (layout) */
+static void size_shown(const App* app, char* out, size_t n) {
+    if (app->scale < app->menu.text_size)
+        snprintf(out, n, snx_tr("%dx (%dx in this window)"), app->menu.text_size, app->scale);
+    else
+        size_name(app->menu.text_size, out, n);
+}
 static void app_values(App* app) {
     GuiAppForm* f = &app->app_form;
     char games[4200], work[4200];
     int moved;
     snprintf(f->theme, sizeof f->theme, "%s", app->theme.name);
-    size_name(app->menu.text_size, f->text, sizeof f->text);
+    size_shown(app, f->text, sizeof f->text);
     if (app->language)
         snprintf(f->language, sizeof f->language, "%s", snx_gui_languages[app->language - 1].name);
     else /* and what it is now */
@@ -7820,7 +7834,27 @@ static int size_name_cols(void) {
     size_name(GUI_TEXT_MAX, name, sizeof name);
     return gui_text_cols(name);
 }
-/* the dialog's boxes: its choices' (box the whole dialog's), the slider's row and the question's rows under it */
+/* a size the window of now shows as a smaller one (scale_fits, as layout keeps its rows): greyed in the dialog */
+static bool size_grey(const App* app, int size) {
+    int width, height;
+    area(app, &width, &height);
+    return scale_fits(size, height, GUI_LEAST_ROWS) < size;
+}
+/* why size is greyed, in out: the height it needs and the window's */
+static void size_reason(const App* app, int size, char* out, size_t n) {
+    int width, height;
+    area(app, &width, &height);
+    snprintf(out, n, snx_tr("%dx needs a window %d pixels high: this one is %d"), size,
+             rows_height(GUI_LEAST_ROWS, size), height);
+}
+/* the size picked greyed, so OK does not take it: true, and why in out (n 0 for none) */
+static bool size_why(const App* app, char* out, size_t n) {
+    if (!size_picking(app) || !size_grey(app, app->size_pick)) return false;
+    if (n) size_reason(app, app->size_pick, out, n);
+    return true;
+}
+/* the dialog's boxes: its choices' (box the whole dialog's), the slider's row and the question's rows under it, or
+   why the size picked is greyed */
 typedef struct {
     GuiChoices c;
     GuiRect body, line;
@@ -7831,6 +7865,7 @@ static void sizes_place(App* app, GuiSizesBoxes* b) {
     GuiChoices* c = &b->c;
     int s = app->scale, cw = cell_w(app), ch = cell_h(app), width, height, cols, rows = 0, top, line_h, list_h;
     const char* text;
+    char why[128];
     area(app, &width, &height);
     memset(b, 0, sizeof *b);
     c->of = GUI_CHOICES_SIZES;
@@ -7840,9 +7875,13 @@ static void sizes_place(App* app, GuiSizesBoxes* b) {
     if (app->size_until) {
         cols = SDL_max(cols, gui_text_cols(app->size_line));
         rows = wrap_rows(app, app->size_line, SDL_min(cols, width / cw - 4), 0);
+    } else if (size_grey(app, GUI_TEXT_MAX)) { /* room for why, the largest's: the box still while the slider steps */
+        size_reason(app, GUI_TEXT_MAX, why, sizeof why);
+        cols = SDL_max(cols, gui_text_cols(why));
+        rows = wrap_rows(app, why, SDL_min(cols, width / cw - 4), 0);
     }
     top = head_h(app) + 4 * s;             /* the slider's row, under the head */
-    line_h = rows ? rows * ch + 4 * s : 0; /* the question's, under it */
+    line_h = rows ? rows * ch + 4 * s : 0; /* the question's or why, under it */
     list_h = rows_h(ui_choices_layout, ui_choices_row, c->rects, UI_CHOICES_ROWS, s, c->count);
     list_h = SDL_min(list_h, SDL_max(0, height - top - ch - line_h - 10 * s)); /* the box kept in the area */
     c->box = over_rect(app, cols, top + ch + line_h + 6 * s + list_h + 4 * s);
@@ -7856,28 +7895,38 @@ static GuiRect sizes_bar(const App* app, const GuiSizesBoxes* b) {
     int cols = SDL_clamp(b->body.w / cell_w(app) - 1 - size_name_cols(), GUI_SIZE_STEPS, GUI_SIZE_BAR);
     return gui_rect(b->body.x, b->body.y, cols * cell_w(app), cell_h(app));
 }
-static void slider_draw(App* app, GuiRect bar, int at, bool focused);
+static void slider_draw(App* app, GuiRect bar, int at, bool focused, unsigned grey);
 /* the dialog, a box over the screen: its head, the slider on the size picked (in the focus's colour while it picks)
-   and its name after it, the question in the warning's, then its choices */
+   and its name after it, the steps the window shows as smaller ones greyed; the question or why the size picked is
+   greyed in the warning's colour, then its choices */
 static void render_sizes(App* app) {
     const GuiTheme* t = &app->theme;
     GuiSizesBoxes b;
     GuiRect bar;
-    char name[64];
+    char name[64], why[128];
+    unsigned grey = 0;
+    int k;
+    for (k = 0; k < GUI_SIZE_STEPS; ++k)
+        if (size_grey(app, k + 1)) grey |= 1u << k;
     sizes_place(app, &b);
     over_box(app, b.c.box, snx_tr("UI scale"));
     bar = sizes_bar(app, &b);
-    slider_draw(app, bar, app->size_pick - 1, size_picking(app));
+    slider_draw(app, bar, app->size_pick - 1, size_picking(app), grey);
     size_name(app->size_pick, name, sizeof name);
-    text_in(app, b.body, bar.x + bar.w + cell_w(app), b.body.y, name, rgb(t->ink));
-    if (app->size_until) wrap_in(app, b.line, b.line.x, b.line.y, app->size_line, 0, rgb(t->warning));
+    text_in(app, b.body, bar.x + bar.w + cell_w(app), b.body.y, name,
+            rgb(grey >> (app->size_pick - 1) & 1u ? t->soft : t->ink));
+    if (app->size_until)
+        wrap_in(app, b.line, b.line.x, b.line.y, app->size_line, 0, rgb(t->warning));
+    else if (size_why(app, why, sizeof why))
+        wrap_in(app, b.line, b.line.x, b.line.y, why, 0, rgb(t->warning));
     app->choices_of = b.c.of;
     ui_choices_draw(app, b.c.rects, app->scale, b.c.lists);
 }
 static void text_left(App* app);
 /* OK: the size picked in use, asked about until GUI_TEXT_KEEP_MS from now, Back in focus; the one in use already
-   closes the dialog, with nothing to ask */
+   closes the dialog, with nothing to ask; a greyed one is not taken, the dialog saying why as it does */
 static void size_take(App* app) {
+    if (size_why(app, NULL, 0)) return;
     if (app->size_pick == app->menu.text_size) {
         app->sizes_shown = false;
         return;
@@ -7894,18 +7943,20 @@ static void size_take(App* app) {
 static void slider_to(App* app, int k) {
     if (size_picking(app)) app->size_pick = SDL_clamp(k, 0, GUI_SIZE_STEPS - 1) + 1;
 }
-/* the slider in bar: a line, a tick a step, the knob on step at, in the focus's colour while focused; kept for the
-   pointer (slider_at) */
-static void slider_draw(App* app, GuiRect bar, int at, bool focused) {
+/* the slider in bar: a line, a tick a step, the knob on step at, in the focus's colour while focused; the steps of
+   grey's bits (step k's 1 << k) and the knob on one in the soft colour, as a greyed row's text; kept for the pointer
+   (slider_at) */
+static void slider_draw(App* app, GuiRect bar, int at, bool focused, unsigned grey) {
     const GuiTheme* t = &app->theme;
     int s = app->scale, cw = cell_w(app), k, mid = bar.y + bar.h / 2;
     int span = bar.w - cw; /* the knob a cell wide, its left from bar.x to bar.x + span */
-    GuiRgb line = t->soft, knob = focused ? t->focus : t->ink;
+    GuiRgb line = t->soft, knob = grey >> at & 1u ? t->soft : focused ? t->focus : t->ink;
     app->slider_bar = bar;
     if (span <= 0) return;
     fill_rect(app, gui_rect(bar.x + cw / 2, mid - s, span, 2 * s), line);
     for (k = 0; k < GUI_SIZE_STEPS; ++k)
-        fill_rect(app, gui_rect(bar.x + cw / 2 + k * span / (GUI_SIZE_STEPS - 1) - s / 2, mid - 3 * s, s, 6 * s), line);
+        fill_rect(app, gui_rect(bar.x + cw / 2 + k * span / (GUI_SIZE_STEPS - 1) - s / 2, mid - 3 * s, s, 6 * s),
+                  grey >> k & 1u ? t->soft : t->ink);
     fill_rect(
         app, gui_rect(bar.x + at * span / (GUI_SIZE_STEPS - 1), mid - cell_h(app) / 2 + 2 * s, cw, cell_h(app) - 4 * s),
         knob);
@@ -9894,7 +9945,7 @@ static void appearance_row(const App* app, int i, char* out, size_t size) {
         snprintf(value, sizeof value, "< %s >", snx_tr(option_keys[o].shown[app->options[o]]));
     } else {
         char shown[96];
-        size_name(app->menu.text_size, shown, sizeof shown);
+        size_shown(app, shown, sizeof shown);
         snprintf(value, sizeof value, "  %s", shown);
     }
     snprintf(out, size, "%s%s%*s%s", app->theme.marker, snx_tr(appearance_names[i]), pad, "", value);
@@ -12791,6 +12842,7 @@ static const char* choice_text(App* app, int of, int i, char* out, size_t size) 
 bool ui_choices_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info) {
     (void)width; /* a choice too long for its row slides, as the menu's rows do */
     info->label = row < 64 ? choice_text(app, app->choices_of, (int)row, app->row_text, sizeof app->row_text) : NULL;
+    if (app->choices_of == GUI_CHOICES_SIZES && !row && size_why(app, NULL, 0)) info->attr |= UI_ATTR_OFF; /* OK */
     return info->label != NULL;
 }
 /* a choice under the pointer takes the focus, and a click takes it: the question's pressed, UI scale's size or the

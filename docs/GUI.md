@@ -250,7 +250,11 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - Settings > App's **UI scale** row shows the size in use, 1x to 4x, the letters' whole sizes. Enter, a click or a
   tap on it opens its dialog, and so do Left/Right, a step that way: a box in the middle of the screen whatever the
   theme's dialogs, as the View box, its title on its head, then a slider, a tick a size, as wide whatever the size,
-  the size picked named after it, and under them OK and Cancel. Left/Right, a click or a tap
+  the size picked named after it, and under them OK and Cancel. A size the window is too short for (16 rows of its
+  letters, 256 pixels high a scale: 3x and 4x in one 720 high) is greyed, its tick and its name: the slider still
+  goes over it, saying why, `4x needs a window 1024 pixels high: this one is 720`, and OK, greyed too, takes nothing
+  there. A size kept that the window cannot hold stays kept, shown at the largest that fits, the row saying
+  `4x (2x in this window)`. Left/Right, a click or a tap
   on the bar (a drag along it following) pick a size, and nothing else changes until OK; Cancel or ESC close it as it
   was. OK uses the size picked, and the dialog asks there to keep it,
   Back in focus: Keep keeps it in `app.ini`; Back, ESC or no answer in 15 s bring the one before it back. Bigger

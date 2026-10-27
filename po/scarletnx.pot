@@ -2003,6 +2003,11 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "%dx (%dx in this window)"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "Auto: %s"
 msgstr ""
 
@@ -2392,6 +2397,11 @@ msgstr ""
 #: src/gui/main.c
 #, snx-key
 msgid "Back"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%dx needs a window %d pixels high: this one is %d"
 msgstr ""
 
 #: src/gui/main.c
