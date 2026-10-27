@@ -48,7 +48,6 @@ typedef struct {
     /* a multisampled D16 depth surface's samples, as its memory holds them (depth_memory), made at its first load or
        store */
     VkImage samples;
-    VkImageView samples_view;
     VkDeviceMemory samples_memory;
 } Surface;
 typedef struct {
@@ -261,6 +260,7 @@ static bool image_make(struct VitaRender* r, VkFormat format, uint32_t width, ui
     if (vkAllocateMemory(v->device, &ai, NULL, memory) != VK_SUCCESS ||
         vkBindImageMemory(v->device, *image, *memory, 0) != VK_SUCCESS)
         return false;
+    if (!view) return true; /* an image only copied to and from */
     vi.image = *image;
     return vkCreateImageView(v->device, &vi, NULL, view) == VK_SUCCESS;
 }
@@ -497,7 +497,6 @@ void vita_render_free(VitaProcess* p) {
             vkDestroyImage(d, r->surfaces[i].image, NULL);
             vkFreeMemory(d, r->surfaces[i].memory, NULL);
             if (r->surfaces[i].samples) {
-                vkDestroyImageView(d, r->surfaces[i].samples_view, NULL);
                 vkDestroyImage(d, r->surfaces[i].samples, NULL);
                 vkFreeMemory(d, r->surfaces[i].samples_memory, NULL);
             }
@@ -556,7 +555,7 @@ static const Import* depth_memory(struct VitaRender* r, VitaProcess* p, const Gx
         Surface* s = r->depth;
         if (!image_make(r, VK_FORMAT_D16_UNORM, s->width * *fx, s->height * *fy, 1,
                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_ASPECT_DEPTH_BIT,
-                        identity, &s->samples, &s->samples_view, &s->samples_memory))
+                        identity, &s->samples, NULL, &s->samples_memory))
             return NULL;
     }
     return m;
@@ -851,6 +850,7 @@ static VkPipeline pipeline_for(struct VitaRender* r, GxmContext* c, const GxmVer
     /* SceGxmCullMode: none, clockwise, counter-clockwise; the viewport flips y, so a face's winding is the console's */
     VkPipelineRasterizationStateCreateInfo raster = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .depthClampEnable = r->vk->depth_clamp, /* the console clips no primitive by its depth, it clamps it */
         .polygonMode = VK_POLYGON_MODE_FILL,
         .cullMode = c->cull_mode ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE,
         .frontFace = c->cull_mode == 1 ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE,
@@ -1296,10 +1296,11 @@ static uint32_t stage_uniforms(struct VitaRender* r, VitaProcess* p, const UsseS
     r->staging[slot].used = at + size;
     return (uint32_t)at;
 }
-void vita_render_draw(VitaProcess* p, GxmContext* c, uint32_t primitive, uint32_t index_format, uint32_t indices,
-                      uint32_t count, uint32_t instances) {
+/* a draw recorded into the scene, or why it isn't */
+static const char* draw(VitaProcess* p, GxmContext* c, uint32_t primitive, uint32_t index_format, uint32_t indices,
+                        uint32_t count, uint32_t instances) {
     struct VitaRender* r = render_of(p);
-    if (!r || !r->rendering) return;
+    if (!r || !r->rendering) return "no scene being drawn";
     VitaGxm* g = p->gxm;
     GxmVertexProgram* vp = &g->vertex[(c->vertex_program - GXM_HANDLE_VERTEX) / GXM_PROGRAM_HANDLE];
     GxmFragmentProgram* fp = &g->fragment[(c->fragment_program - GXM_HANDLE_FRAGMENT) / GXM_PROGRAM_HANDLE];
@@ -1313,7 +1314,7 @@ void vita_render_draw(VitaProcess* p, GxmContext* c, uint32_t primitive, uint32_
     for (unsigned i = 0; i < USSE_TEXTURES; ++i) fh.texture_formats[i] = gxm_texture_format(&c->textures[i]);
     Shader* vs = shader_for(r, p, &vp->shader, vp->program, &vh);
     Shader* fs = shader_for(r, p, &fp->shader, fp->program, &fh);
-    if (!vs || !fs || vs->failed || fs->failed) return;
+    if (!vs || !fs || vs->failed || fs->failed) return "a program not translated";
     /* SceGxmPrimitiveType: triangles, lines, points, a strip, a fan (bits 26 to 28) */
     static const VkPrimitiveTopology topologies[6] = {
         VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
@@ -1321,7 +1322,7 @@ void vita_render_draw(VitaProcess* p, GxmContext* c, uint32_t primitive, uint32_
     unsigned kind = primitive >> 26;
     if (kind >= 6) {
         once(r, 10, "primitive type 0x%08" PRIx32, primitive);
-        return;
+        return "its primitive type";
     }
     VkCommandBuffer cb = vita_vk_commands();
     /* the textures first: copying one ends the rendering for a moment */
@@ -1330,7 +1331,7 @@ void vita_render_draw(VitaProcess* p, GxmContext* c, uint32_t primitive, uint32_
         images[i] = (VkDescriptorImageInfo){0};
         if (!(fs->meta.sampler_mask & (1u << i))) continue;
         Texture* t = texture_for(r, p, cb, &c->textures[i]);
-        if (!t) return;
+        if (!t) return "a texture";
         /* a strided texture's min and mip filter bits are its stride's: its min filter is its mag filter */
         bool strided = gxm_texture_type(&c->textures[i]) == GXM_TEXTURE_LINEAR_STRIDED;
         unsigned linear = (!strided && gxm_texture_min_filter(&c->textures[i]) != 0) ||
@@ -1341,21 +1342,21 @@ void vita_render_draw(VitaProcess* p, GxmContext* c, uint32_t primitive, uint32_
                                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     }
     VkPipeline pipeline = pipeline_for(r, c, vp, vs, fp, fs, topologies[kind]);
-    if (!pipeline) return;
+    if (!pipeline) return "no pipeline";
     uint32_t vertex_at = stage_uniforms(r, p, &vs->meta, c->vertex_uniform);
     uint32_t fragment_at = stage_uniforms(r, p, &fs->meta, c->fragment_uniform);
     if (vertex_at == UINT32_MAX || fragment_at == UINT32_MAX) {
         once(r, 11, "the uniform staging ring is full");
-        return;
+        return "the uniform staging ring full";
     }
     if (fs->meta.reads_color && !r->vk->local_read) {
         once(r, 19, "a fragment program reads its pixel's color, which this device can't give it in place");
-        return;
+        return "its program reads its pixel's color";
     }
     VkDescriptorSet set = vita_vk_set(r->set_layout);
     if (!set) {
         once(r, 12, "out of descriptor sets");
-        return;
+        return "out of descriptor sets";
     }
     unsigned slot = vita_vk_slot();
     VkDescriptorBufferInfo buffers[2] = {{r->staging[slot].buffer, 0, vs->meta.buffer_words ? vs->meta.buffer_words * 4 : 4},
@@ -1413,7 +1414,7 @@ void vita_render_draw(VitaProcess* p, GxmContext* c, uint32_t primitive, uint32_
     VkRect2D scissor = {{0, 0}, {r->width, r->height}};
     /* SceGxmRegionClipMode: none, all (0x40000000: nothing drawn), outside (0x80000000: drawing inside the rectangle
        only), inside (drawn whole, as Vita3K does) */
-    if (c->region_clip_mode == 0x40000000u) return;
+    if (c->region_clip_mode == 0x40000000u) return "its region clip";
     if (c->region_clip_mode == 0x80000000u) {
         uint32_t x0 = c->clip_x0 < r->width ? c->clip_x0 : r->width, y0 = c->clip_y0 < r->height ? c->clip_y0 : r->height;
         uint32_t x1 = c->clip_x1 + 1 < r->width ? c->clip_x1 + 1 : r->width;
@@ -1427,7 +1428,7 @@ void vita_render_draw(VitaProcess* p, GxmContext* c, uint32_t primitive, uint32_
         const Import* m = c->streams[i] ? buffer_of(r, p, c->streams[i], 1, &at) : NULL;
         if (!m) {
             once(r, 13, "vertex stream %u at 0x%08" PRIx32 " is not mapped for the GPU", i, c->streams[i]);
-            return;
+            return "a vertex stream unmapped";
         }
         vkCmdBindVertexBuffers(cb, i, 1, &m->buffer, &at);
     }
@@ -1435,13 +1436,24 @@ void vita_render_draw(VitaProcess* p, GxmContext* c, uint32_t primitive, uint32_
     const Import* m = buffer_of(r, p, indices, count * (index_format ? 4u : 2u), &at);
     if (!m) {
         once(r, 14, "indices at 0x%08" PRIx32 " are not mapped for the GPU", indices);
-        return;
+        return "its indices unmapped";
     }
     vkCmdBindIndexBuffer(cb, m->buffer, at, index_format ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
     vkCmdDrawIndexed(cb, count, instances, 0, 0, 0);
-    if (g_settings.vita_gxm_trace)
-        printf("gxm: draw %u indices, primitive %u, program 0x%08" PRIx32 "/0x%08" PRIx32 "\n", (unsigned)count, kind,
-               vp->program, fp->program);
+    return NULL;
+}
+void vita_render_draw(VitaProcess* p, GxmContext* c, uint32_t primitive, uint32_t index_format, uint32_t indices,
+                      uint32_t count, uint32_t instances) {
+    const char* skipped = draw(p, c, primitive, index_format, indices, count, instances);
+    if (!g_settings.vita_gxm_trace) return;
+    VitaGxm* g = p->gxm;
+    uint32_t vp = g->vertex[(c->vertex_program - GXM_HANDLE_VERTEX) / GXM_PROGRAM_HANDLE].program;
+    const GxmFragmentProgram* f = &g->fragment[(c->fragment_program - GXM_HANDLE_FRAGMENT) / GXM_PROGRAM_HANDLE];
+    printf("gxm: draw %u indices, primitive %u, program 0x%08" PRIx32 "/0x%08" PRIx32 ", depth 0x%08" PRIx32
+           " write %u, cull %u, z %g %+g, blend %u 0x%08" PRIx32 "%s%s\n",
+           (unsigned)count, (unsigned)(primitive >> 26), vp, f->program, c->depth_func, (unsigned)c->depth_write,
+           (unsigned)c->cull_mode, c->viewport_scale[2], c->viewport_offset[2], (unsigned)f->blend, f->blend_info,
+           skipped ? " skipped: " : "", skipped ? skipped : "");
 }
 
 /* ---- decoded pictures ---- */

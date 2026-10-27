@@ -940,6 +940,12 @@ setting Vita press length
     int 0 INT_MAX
     default 300
     help How long each press of the Vita game's script is held, in ms (--press_len= too)
+setting Vita screenshot interval
+    key vita_shot_every
+    int 0 INT_MAX
+    default 0
+    help With --shot=PATH, also a screenshot every this many vblanks (60 a second), PATH_0000.ppm on; 0 = only the
+    help last frame's
 
 section Game: g_game_ini
 section Display: g_display_ini

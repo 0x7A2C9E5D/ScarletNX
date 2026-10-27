@@ -1867,6 +1867,8 @@ static void uniforms(T* t) {
         uint32_t runtime = spv_emit_type_runtime_array(&t->e, t->t_u32, 4), zero = 0;
         uint32_t block = spv_emit_type_struct(&t->e, &runtime, &zero, 1);
         spv_emit_decorate(&t->e, block, SPV_DECORATION_BLOCK, NULL, 0);
+        /* only read: a vertex stage may write no storage buffer without vertexPipelineStoresAndAtomics */
+        spv_emit_member_decorate(&t->e, block, 0, SPV_DECORATION_NON_WRITABLE, NULL, 0);
         uint32_t buffer = spv_emit_resource(&t->e, SPV_STORAGE_STORAGE_BUFFER, block, 0, t->fragment ? 1 : 0);
         global(t, buffer);
         t->buffer = buffer;
@@ -1942,11 +1944,11 @@ static void vertex_outputs(T* t) {
         uint32_t field[5];
         for (unsigned i = 0; i < 5; ++i)
             field[i] = SPV(&t->e, SPV_OP_LOAD, t->t_f32, SPV(&t->e, SPV_OP_ACCESS_CHAIN, pointer, t->push, cu(t, i)));
-        /* enabled: z' = (z_offset + z_scale * z / w) * w, clamped at 0; disabled: x, y from window coordinates, z = w */
+        /* enabled: z' = z_scale * z + z_offset * w, whose z' / w is the viewport's z_offset + z_scale * z / w, linear in
+           clip space for the clipper to interpolate (the depth clamp, where the device has it, keeps what lies past
+           [0, 1] as the console does); disabled: x, y from window coordinates, z = w */
         uint32_t enabled = op2(t, SPV_OP_F_ORD_GREATER_THAN, t->t_bool, field[0], cf(t, 0.5f));
-        uint32_t zw = op2(t, SPV_OP_F_DIV, t->t_f32, pos.c[2], pos.c[3]);
-        uint32_t z = ext2(t, t->t_f32, SPV_GLSL_F_MAX, ext3(t, t->t_f32, SPV_GLSL_FMA, zw, field[4], field[3]), cf(t, 0));
-        z = op2(t, SPV_OP_F_MUL, t->t_f32, z, pos.c[3]);
+        uint32_t z = ext3(t, t->t_f32, SPV_GLSL_FMA, pos.c[2], field[4], op2(t, SPV_OP_F_MUL, t->t_f32, pos.c[3], field[3]));
         uint32_t sx = op2(t, SPV_OP_F_SUB, t->t_f32, op2(t, SPV_OP_F_MUL, t->t_f32, pos.c[0],
                                                           op2(t, SPV_OP_F_DIV, t->t_f32, cf(t, 2), field[1])), cf(t, 1));
         uint32_t sy = op2(t, SPV_OP_F_SUB, t->t_f32, op2(t, SPV_OP_F_MUL, t->t_f32, pos.c[1],
@@ -1976,6 +1978,14 @@ static void vertex_outputs(T* t) {
         global(t, variable);
         SPV_VOID(&t->e, SPV_OP_STORE, variable, SPV(&t->e, SPV_OP_COMPOSITE_CONSTRUCT, t->t_v4f, v.c[0], v.c[1], v.c[2], v.c[3]));
         o += outputs[i].components;
+    }
+    /* the varyings it doesn't write as zero, as its output registers start: a fragment program may read one (a game
+       pairs programs so), which a missing output would leave undefined */
+    for (unsigned i = 0; i < 13; ++i) {
+        if (outputs[i].present) continue;
+        uint32_t variable = spv_emit_location(&t->e, SPV_STORAGE_OUTPUT, t->t_v4f, outputs[i].location);
+        global(t, variable);
+        SPV_VOID(&t->e, SPV_OP_STORE, variable, SPV(&t->e, SPV_OP_COMPOSITE_CONSTRUCT, t->t_v4f, cf(t, 0), cf(t, 0), cf(t, 0), cf(t, 0)));
     }
     if (vo1 & 0x100) {
         out.num = o;

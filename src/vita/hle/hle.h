@@ -111,11 +111,12 @@ void vita_audio_free(VitaProcess* p);
 void vita_gxm_display_next(VitaProcess* p, VitaThread* t);
 void vita_gxm_display_done(VitaProcess* p, VitaThread* t);
 void vita_gxm_free(VitaProcess* p);
-/* mp4.c, videodec.c, audiodec.c: their state, freed with the process; the size of the unit SceMp4 last copied to
-   address (0 for none), which a raw AAC frame doesn't say itself */
+/* mp4.c, videodec.c, audiodec.c, ngs.c: their state, freed with the process; the size of the unit SceMp4 last
+   copied to address (0 for none), which a raw AAC frame doesn't say itself */
 void vita_mp4_free(VitaProcess* p);
 void vita_videodec_free(VitaProcess* p);
 void vita_audiodec_free(VitaProcess* p);
+void vita_ngs_free(VitaProcess* p);
 uint32_t vita_mp4_unit_size(VitaProcess* p, uint32_t address);
 /* fiber.c: the running fiber's entry returned: the thread goes on after its sceFiberRun */
 void vita_fiber_ended(VitaProcess* p, VitaThread* t);

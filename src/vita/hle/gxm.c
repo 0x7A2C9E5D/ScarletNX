@@ -474,9 +474,11 @@ static uint32_t begin_scene(VitaProcess* p, VitaThread* t) {
     c->in_scene = true;
     ++p->gxm->scenes;
     if (g_settings.vita_gxm_trace)
-        printf("gxm: scene %" PRIu64 " on %ux%u, color 0x%08" PRIx32 " format 0x%08" PRIx32 "\n", p->gxm->scenes,
-               (unsigned)r->width, (unsigned)r->height, c->has_color ? c->color.data : 0,
-               c->has_color ? c->color.format : 0);
+        printf("gxm: scene %" PRIu64 " on %ux%u, color 0x%08" PRIx32 " format 0x%08" PRIx32 " stride %u, depth 0x%08" PRIx32
+               " control 0x%08" PRIx32 "\n",
+               p->gxm->scenes, (unsigned)r->width, (unsigned)r->height, c->has_color ? c->color.data : 0,
+               c->has_color ? c->color.format : 0, c->has_color ? (unsigned)c->color.stride : 0,
+               c->has_depth ? c->depth.depth : 0, c->has_depth ? c->depth.control : 0);
     vita_render_begin_scene(p, c);
     return 0;
 }

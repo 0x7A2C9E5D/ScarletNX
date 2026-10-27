@@ -315,6 +315,7 @@ void vita_process_free(VitaProcess* p) {
     vita_mp4_free(p);
     vita_videodec_free(p);
     vita_audiodec_free(p);
+    vita_ngs_free(p);
     vita_net_free(p);
     vita_trophy_free(p);
     vita_gxm_free(p);

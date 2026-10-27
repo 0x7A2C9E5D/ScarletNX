@@ -42,8 +42,9 @@ and plays its sound test.
 | Keyboard, mouse (touch), gamepads and scripted presses (`--script=ms:hex,...`, SceCtrl's button bits, each held for `--press_len=` ms) | `src/vita/platform/input.c` |
 
 The driver's settings (`--key=value`) are the `g_vita_debug_ini` table of `src/nx/runtime/settings.txt`: `vita_hle_trace` prints each import call,
-`vita_jit_trace` each block compiled at run time, `vita_gxm_trace` each scene and draw. `--vulkan_video=1` (the
-Switch runtime's setting) stops the game when it makes an AVC decoder: decoding the Vita's movies with Vulkan Video is
+`vita_jit_trace` each block compiled at run time, `vita_gxm_trace` each scene and draw (and why a draw was
+skipped). `--shot_every=N` (`vita_shot_every`, with `--shot=PATH`) saves a screenshot every N vblanks, as
+`PATH_0000.ppm` on. `--vulkan_video=1` (the Switch runtime's setting) stops the game when it makes an AVC decoder: decoding the Vita's movies with Vulkan Video is
 not implemented yet, and FFmpeg decodes them on the CPU.
 
 ## The shader corpus
@@ -87,7 +88,9 @@ bugs this driver ran into were found.
   reads. Any of these makes the program fail to translate with its name in the log.
 - One guest thread runs at a time.
 - PGF fonts, networking and the common dialogs answer as unavailable.
-- SceNgs is silent: its voices finish at once. A C++ exception the game throws ends it.
+- SceNgs plays 16-bit PCM and HE-ADPCM players through their patches into the master buss. Its equalizer, envelope,
+  pauser and filter modules pass the sound unchanged, and module callbacks aren't made. A C++ exception the game
+  throws ends it.
 
 ## Sources
 
