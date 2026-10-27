@@ -30,10 +30,9 @@ static int core_idle_nl(const KThread* t) {
         if (((t->affinity >> j) & 1) && !g_hle.thread.core_owner[j]) return j;
     return -1;
 }
-/* the holder of core k is asked to let go (CPU.poll, read by generated code) when a waiter would preempt it, while
-   the game is paused, so that it reaches a hold point, and when a thread waits for its core and the holder's mask has
-   an idle core, to move there (core_preempt): the console's scheduler moves a core's running thread to an idle core
-   when another thread is ready on its core, whatever their priorities */
+/* the holder of core k is asked to let go (CPU.poll, read by generated code) when a waiter would preempt it, and while
+   the game is paused, so that it reaches a hold point. Also when its core has a waiter and its mask an idle core: it
+   moves there, as the console's scheduler does at any priority */
 /* stored only when it changes: the holder's code reads poll at each backward branch, and a store of the same value
    still takes its cache line away from the holder's core */
 static void core_flag_nl(int k) {
@@ -93,7 +92,7 @@ static void core_handoff_nl(int k) {
                     from = j;
                 }
         }
-    if (!best) { /* a holder elsewhere with a waiter may move here instead */
+    if (!best) { /* a holder with a waiter elsewhere may move here */
         for (j = 0; j < NCORES; j++)
             if (j != k && g_hle.thread.core_wait[j]) core_flag_nl(j);
         return;
@@ -175,7 +174,7 @@ void core_preempt(KThread* t) {
         core_release_nl(t);
         core_take_nl(t);
     } else if (k >= 0 && g_hle.thread.core_wait[k] && (j = core_idle_nl(t)) >= 0) {
-        core_release_nl(t); /* its core goes to the waiter, and t to the idle core */
+        core_release_nl(t); /* the waiter takes k, t the idle core */
         core_give_nl(j, t);
     } else
         __atomic_store_n(&t->cpu.poll, 0u, __ATOMIC_RELAXED);
