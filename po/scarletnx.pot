@@ -2006,11 +2006,6 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s of Auto: %dx"
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
 msgid "Auto: %s"
 msgstr ""
 
@@ -2393,18 +2388,6 @@ msgid "User %d is %s now"
 msgstr ""
 
 #: src/gui/main.c
-msgid "0.25 of Auto"
-msgstr ""
-
-#: src/gui/main.c
-msgid "0.5 of Auto"
-msgstr ""
-
-#: src/gui/main.c
-msgid "0.75 of Auto"
-msgstr ""
-
-#: src/gui/main.c
 #, c-format
 msgid "Keep this UI scale? Back to %s in %d s"
 msgstr ""
@@ -2775,11 +2758,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Tip: nickname 4 to 20 of A-Z a-z 0-9 space . _ -"
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
-msgid "Auto (%dx)"
 msgstr ""
 
 #: src/gui/main.c

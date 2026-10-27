@@ -208,12 +208,13 @@ static void test_first(App* app) {
         GuiAppearanceBoxes a;
         GuiRect row;
         int x, y;
-        snprintf(line, sizeof line, "Auto (%dx)", app->auto_scale);
+        snprintf(line, sizeof line, "Auto"); /* the step's name alone, as App's row has it */
         setup_boxes(app, &c);
         appearance_boxes(app, c.content, &a);
         row = appearance_row_box(app, &a, GUI_APPEARANCE_TEXT);
         assert(find_text(app, line, rgb(app->theme.ink), 1, &x, &y));
         assert(x + (int)strlen(line) * cell_w(app) <= row.x + row.w - cell_w(app) && x > row.x + row.w / 2);
+        hides(app, "Auto (", rgb(app->theme.ink));
         assert(app->slider_bar.w >= GUI_SIZE_STEPS * cell_w(app) && app->slider_bar.y == row.y &&
                app->slider_bar.x == row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app));
     }
@@ -307,7 +308,8 @@ static void test_first(App* app) {
     key(app, SDLK_RETURN); /* its box, over the page */
     assert(app->sizes_shown && app->sizes.focus == 3 && page(app) == SNX_SETUP_LANGUAGE);
     render(app);
-    shows(app, "0.5 of Auto", rgb(app->theme.ink));
+    shows(app, "0.5", rgb(app->theme.ink));
+    hides(app, "0.5 of", rgb(app->theme.ink)); /* the step's number alone */
     key(app, SDLK_DOWN);
     key(app, SDLK_RETURN);
     assert(!app->sizes_shown && app->menu.text_size == 1 && app->confirm.shown && app->confirm.ask == GUI_ASK_TEXT);

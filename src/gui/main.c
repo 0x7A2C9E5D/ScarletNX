@@ -6499,22 +6499,21 @@ static void data_relative(const App* app, const char* path, char* out, size_t si
     else
         snprintf(out, size, "%s", path ? path : "");
 }
-/* a text_size as Settings show it: Auto, a part of Auto with the scale it gives, or a scale */
-static void size_name(const App* app, int size, char* out, size_t n) {
-    if (size > 0)
-        snprintf(out, n, "%dx", size);
-    else if (size < 0)
-        snprintf(out, n, snx_tr("%s of Auto: %dx"), text_quarters[-size - 1],
-                 SDL_max(1, (app->auto_scale * -size + 2) / 4));
-    else
-        snprintf(out, n, "%s", snx_tr("Auto"));
-}
+/* UI scale's steps as Settings show them, the smallest first: Auto's parts, Auto, then 1x to 4x */
+#define GUI_SIZE_STEPS (GUI_TEXT_MAX + 4)
+static const char* const size_labels[GUI_SIZE_STEPS] = {"0.25", "0.5", "0.75", SNX_TR_NOOP("Auto"),
+                                                        "1x",   "2x",  "3x",   "4x"};
+/* step k's text_size, and a text_size's step */
+static int size_of_choice(int k) { return k < 3 ? -(k + 1) : k - 3; }
+static int size_step(int size) { return size < 0 ? -size - 1 : size + 3; }
+/* a text_size as Settings show it: its step's label */
+static void size_name(int size, char* out, size_t n) { snprintf(out, n, "%s", snx_tr(size_labels[size_step(size)])); }
 static void app_values(App* app) {
     GuiAppForm* f = &app->app_form;
     char games[4200], work[4200];
     int moved;
     snprintf(f->theme, sizeof f->theme, "%s", app->theme.name);
-    size_name(app, app->menu.text_size, f->text, sizeof f->text);
+    size_name(app->menu.text_size, f->text, sizeof f->text);
     if (app->language)
         snprintf(f->language, sizeof f->language, "%s", snx_gui_languages[app->language - 1].name);
     else /* and what it is now */
@@ -7795,18 +7794,9 @@ static void settings_reset_ask(App* app);
 #define GUI_TEXT_KEEP_MS 15000
 #define GUI_WARN_MS       3500 /* a resolution warning's line and its row's flash */
 #define GUI_WARN_BLINK_MS 150  /* the flash's on and off, the row in the warning colour then its own */
-static const char* const size_labels[GUI_TEXT_MAX + 4] = {SNX_TR_NOOP("0.25 of Auto"),
-                                                          SNX_TR_NOOP("0.5 of Auto"),
-                                                          SNX_TR_NOOP("0.75 of Auto"),
-                                                          SNX_TR_NOOP("Auto"),
-                                                          "1x",
-                                                          "2x",
-                                                          "3x",
-                                                          "4x"};
-static int size_of_choice(int i) { return i < 3 ? -(i + 1) : i - 3; }
 static void sizes_open(App* app) {
-    app->sizes.count = GUI_TEXT_MAX + 4;
-    app->sizes.focus = app->menu.text_size < 0 ? -app->menu.text_size - 1 : app->menu.text_size + 3;
+    app->sizes.count = GUI_SIZE_STEPS;
+    app->sizes.focus = size_step(app->menu.text_size);
     app->sizes_shown = true;
 }
 static void sizes_place(App* app, GuiChoices* c) {
@@ -7831,9 +7821,6 @@ static void size_take(App* app, int size) {
     gui_confirm_open(&app->confirm, GUI_ASK_TEXT, false);
     app_values(app);
 }
-/* UI scale's slider: its steps, size_labels' order (Auto's parts, Auto, 1x to 4x), step k's size and size's step */
-#define GUI_SIZE_STEPS (GUI_TEXT_MAX + 4)
-static int size_step(int size) { return size < 0 ? -size - 1 : size + 3; }
 /* the slider at step k (Left/Right, a drag, a tap): used at once, the screen with it, and asked about as a size the box
    picks is; steps taken while it is asked keep the size before them to go back to, its 15 s again, and on that size
    no question is left */
@@ -7930,7 +7917,7 @@ static void text_left(App* app) {
         size_answer(app, false);
         return;
     }
-    size_name(app, app->size_was, was, sizeof was);
+    size_name(app->size_was, was, sizeof was);
     snprintf(app->size_line, sizeof app->size_line, snx_tr("Keep this UI scale? Back to %s in %d s"), was,
              (int)((app->size_until - now + 999) / 1000));
 }
@@ -9021,7 +9008,7 @@ static void form_slider(App* app, const GuiFormBoxes* f) {
     char value[64];
     if (e->keys != app_keys) return;
     labels = form_labels(e);
-    size_name(app, app->menu.text_size, value, sizeof value);
+    size_name(app->menu.text_size, value, sizeof value);
     for (i = 0; i < n; ++i)
         if (l->first + i == GUI_APP_TEXT) {
             GuiRect row = ui_form_side_row(f->right, s, UI_FORM_SIDE_ROWS, i), b = ui_row_box(app, row);
@@ -9861,13 +9848,6 @@ static int appearance_slider(const App* app, int room, const char* value) {
     int bar = room - appearance_column(app) - gui_text_cols(value) - 1;
     return bar >= GUI_SIZE_STEPS ? bar : 0;
 }
-/* UI scale's value as the page shows it: Auto's with the scale it has now */
-static void appearance_size(const App* app, char* out, size_t size) {
-    if (app->menu.text_size)
-        size_name(app, app->menu.text_size, out, size);
-    else
-        snprintf(out, size, snx_tr("Auto (%dx)"), app->auto_scale);
-}
 /* row i as it reads in room columns: its name, then from appearance_column its value, between the arrows Left and Right
    go by, or for UI scale its slider and its value at the row's end, without room for the slider the dots of the box
    Enter opens */
@@ -9886,7 +9866,7 @@ static void appearance_row(const App* app, int i, int room, char* out, size_t si
     } else {
         char shown[96];
         int bar;
-        appearance_size(app, shown, sizeof shown);
+        size_name(app->menu.text_size, shown, sizeof shown);
         bar = appearance_slider(app, room, shown);
         if (bar)
             snprintf(value, sizeof value, "%*s %s", bar, "", shown);
@@ -10189,7 +10169,7 @@ static void appearance_slider_draw(App* app, const GuiAppearanceBoxes* a) {
     int s = app->scale, cw = cell_w(app), bar;
     size_t i, n = ui_appearance_shown(a->rects, s, UI_APPEARANCE_ROWS);
     char value[96];
-    appearance_size(app, value, sizeof value);
+    size_name(app->menu.text_size, value, sizeof value);
     for (i = 0; i < n; ++i)
         if (l->first + i == GUI_APPEARANCE_TEXT) {
             GuiRect row = ui_appearance_row(a->rects, s, UI_APPEARANCE_ROWS, i), b = ui_row_box(app, row);

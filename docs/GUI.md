@@ -245,8 +245,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Save (or Ctrl+S) writes `themes/<folder>/theme.ini` in the data folder and switches to it;
   a built-in is saved as a new theme, `mytheme` until renamed. ESC leaves, asking first if
   there are unsaved changes.
-- Settings > App's **UI scale** is a slider: a bar, a tick a size, with the size in use at its right: a quarter, half
-  or three quarters of Auto (Auto's scale times it, rounded, 1x at the least), Auto (fit the screen), then 1x to 4x.
+- Settings > App's **UI scale** is a slider: a bar, a tick a size, with the size in use at its right, a number alone:
+  0.25, 0.5 and 0.75 (Auto's scale times it, rounded, 1x at the least), Auto (fit the screen), then 1x to 4x.
   Left/Right step it, and a click or a tap on the bar takes the size under it, a drag along it following; Enter opens a
   box of the sizes. The size taken is used at once, and a question asks to keep it: Keep keeps it in `app.ini`; Back,
   ESC or no answer in 15 s bring the one before it back. While the slider's question shows, Left/Right go on stepping

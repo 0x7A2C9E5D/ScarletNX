@@ -3899,10 +3899,10 @@ int main(int argc, char** argv) {
         GuiChoices c;
         render(&app);
         sizes_place(&app, &c);
-        point(&app, choice_box(&app, &c, 1), true); /* 0.5 of Auto clicked */
+        point(&app, choice_box(&app, &c, 1), true); /* 0.5 clicked */
     }
     assert(app.menu.text_size == -2 && app.scale == SDL_max(1, (app.auto_scale * 2 + 2) / 4) &&
-           strstr(app.app_form.text, "0.5 of Auto: "));
+           !strcmp(app.app_form.text, "0.5")); /* the step's number alone */
     app.clock = 1000 + GUI_TEXT_KEEP_MS - 1;
     pump(&app);
     assert(app.confirm.shown && strstr(app.size_line, "in 1 s"));
