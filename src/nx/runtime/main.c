@@ -33,6 +33,7 @@
 #include "nx/runtime/platform/backend.h"
 #include "nx/runtime/platform/hud.h"
 #include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/overlay.h"
 #include "nx/runtime/platform/prepare_screen.h"
 #include "nx/runtime/platform/plat.h"
 #include "nx/runtime/platform/tracy.h"
@@ -573,7 +574,8 @@ static void frontend_loop(void) {
             }
 #endif
         }
-        if (shown != frames || paused) { /* a paused game shows nothing new, and isn't stalled */
+        /* a paused game shows nothing new, and isn't stalled; nor is one that waits for the keyboard's box */
+        if (shown != frames || paused || overlay_keyboard_shown()) {
             frames = shown;
             changed = now;
         } else if (now - changed >= STALL_NS && stalls < 4) {

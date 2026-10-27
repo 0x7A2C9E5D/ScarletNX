@@ -6,6 +6,7 @@
 #define SNX_BACKEND_H
 #include "common/cpu/aarch64/cpu.h"
 #include "nx/runtime/ini.h"
+#include "nx/runtime/platform/overlay.h"
 
 /* the window, titled after the game and, when addons is not "", the updates and DLCs it plays with ("Update 1.2.0,
    DLC 1") */
@@ -40,6 +41,11 @@ const char* backend_pressed(void);
 char* backend_launcher_folder(void);
 /* changes whenever the surface comes back, so the renderer knows to make a new Vulkan surface */
 u32 backend_window_generation(void);
+/* The software keyboard's box over the game (overlay.h), from any thread: 0 shown, in place of one that shows, or -1
+   with no window to show it in (headless). The main thread turns the window's text input on while it shows, and hands
+   its answer to am_keyboard_answered (services.h). Hide takes the box of that ticket away unanswered */
+int backend_keyboard_show(const OverlayKeyboard* k);
+void backend_keyboard_hide(u32 ticket);
 
 /* fatal's message box. Called on every platform and from any thread; does nothing where there is no box */
 void win_fatal_box(const char* msg);
