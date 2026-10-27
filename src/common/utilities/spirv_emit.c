@@ -81,7 +81,7 @@ static uint32_t known(SpvEmitter* e, uint32_t op, size_t at, const uint32_t* ope
 }
 
 void spv_emit_init(SpvEmitter* e, size_t estimated_function_words) {
-    memset(e, 0, sizeof *e);
+    *e = (SpvEmitter){0};
     e->next_id = 1;
     e->version = 0x00010600; /* SPIR-V 1.6 */
     /* Most instructions are in function bodies. Reserve from the guest program size once. */
@@ -97,7 +97,7 @@ void spv_emit_destroy(SpvEmitter* e) {
     free(e->nonuniform);
     free(e->constants);
     free(e->constant_ids);
-    memset(e, 0, sizeof *e);
+    *e = (SpvEmitter){0};
 }
 
 uint32_t spv_emit_id(SpvEmitter* e) {
@@ -625,8 +625,8 @@ uint32_t spv_emit_output_component(SpvEmitter* e, uint32_t type, uint32_t locati
 
 void spv_emit_xfb_capture(SpvEmitter* e, uint32_t variable, uint32_t buffer, uint32_t stride, uint32_t offset) {
     static const uint32_t decorations[3] = {36, 37, 35}; /* XfbBuffer, XfbStride, Offset */
-    uint32_t values[3] = {buffer, stride, offset}, i;
-    for (i = 0; i < 3; i++) {
+    uint32_t values[3] = {buffer, stride, offset};
+    for (uint32_t i = 0; i < 3; i++) {
         instruction(&e->decorations, SPV_OP_DECORATE, 4);
         put(&e->decorations, variable);
         put(&e->decorations, decorations[i]);
@@ -653,14 +653,12 @@ uint32_t spv_emit_layer_output(SpvEmitter* e, uint32_t i32_type) {
 uint32_t spv_emit_clip_distance_output(SpvEmitter* e, uint32_t f32_type, uint32_t u32_type, uint32_t length) {
     uint32_t length_id = spv_emit_constant_u32(e, u32_type, length);
     uint32_t array_type = spv_emit_id(e);
-    uint32_t pointer_type;
-    uint32_t id;
     instruction(&e->types, SPV_OP_TYPE_ARRAY, 4);
     put(&e->types, array_type);
     put(&e->types, f32_type);
     put(&e->types, length_id);
-    pointer_type = spv_emit_type_pointer(e, 3, array_type);
-    id = spv_emit_id(e);
+    uint32_t pointer_type = spv_emit_type_pointer(e, 3, array_type);
+    uint32_t id = spv_emit_id(e);
     instruction(&e->decorations, SPV_OP_DECORATE, 4);
     put(&e->decorations, id);
     put(&e->decorations, 11); /* BuiltIn */
@@ -735,7 +733,7 @@ void spv_emit_capability(SpvEmitter* e, uint32_t capability) {
 
 uint32_t spv_emit_interface_variable(SpvEmitter* e, uint32_t storage, uint32_t type, uint32_t u32_type, uint32_t count,
                                      uint32_t builtin, uint32_t location, int patch) {
-    uint32_t id = spv_emit_id(e), pointer_type;
+    uint32_t id = spv_emit_id(e);
     assert(storage == 1 || storage == 3);
     if (count) {
         uint32_t length = spv_emit_constant_u32(e, u32_type, count);
@@ -746,7 +744,7 @@ uint32_t spv_emit_interface_variable(SpvEmitter* e, uint32_t storage, uint32_t t
         put(&e->types, length);
         type = array_type;
     }
-    pointer_type = spv_emit_type_pointer(e, storage, type);
+    uint32_t pointer_type = spv_emit_type_pointer(e, storage, type);
     instruction(&e->decorations, SPV_OP_DECORATE, 4);
     put(&e->decorations, id);
     put(&e->decorations, builtin == SPV_NOT_BUILTIN ? 30 : 11); /* Location, BuiltIn */
@@ -813,8 +811,7 @@ static void nonuniform(SpvEmitter* e, uint32_t id) {
     put(&e->decorations, 5300); /* NonUniform */
 }
 static int is_nonuniform(const SpvEmitter* e, uint32_t id) {
-    size_t i;
-    for (i = 0; i < e->nonuniform_count; i++)
+    for (size_t i = 0; i < e->nonuniform_count; i++)
         if (e->nonuniform[i] == id) return 1;
     return 0;
 }
@@ -838,11 +835,10 @@ static uint32_t image_of(const SpvEmitter* e, uint32_t sampled_type) {
 
 uint32_t spv_emit_sampler_image(SpvEmitter* e, uint32_t scalar_type, uint32_t set, uint32_t binding, uint32_t type,
                                 int array, int shadow, int multisample, uint32_t* sampled_type) {
-    uint32_t pointer, sampler;
     assert(sampled_type);
     *sampled_type = sampled_image_type(e, scalar_type, type, array, shadow, multisample);
-    pointer = spv_emit_type_pointer(e, 0, *sampled_type); /* UniformConstant */
-    sampler = spv_emit_id(e);
+    uint32_t pointer = spv_emit_type_pointer(e, 0, *sampled_type); /* UniformConstant */
+    uint32_t sampler = spv_emit_id(e);
     instruction(&e->decorations, SPV_OP_DECORATE, 4);
     put(&e->decorations, sampler);
     put(&e->decorations, 34); /* DescriptorSet */
@@ -919,18 +915,17 @@ uint32_t spv_emit_image_texel_pointer(SpvEmitter* e, uint32_t scalar_type, uint3
 uint32_t spv_emit_sampler_image_array(SpvEmitter* e, uint32_t scalar_type, uint32_t u32_type, uint32_t set,
                                       uint32_t binding, uint32_t type, int array, int shadow, uint32_t count,
                                       uint32_t* sampled_type) {
-    uint32_t length, array_type, pointer, variable;
     *sampled_type = sampled_image_type(e, scalar_type, type, array, shadow, 0);
     spv_emit_capability(e, SPV_CAPABILITY_SHADER_NON_UNIFORM);
     spv_emit_capability(e, SPV_CAPABILITY_SAMPLED_IMAGE_ARRAY_NON_UNIFORM_INDEXING);
-    length = spv_emit_constant_u32(e, u32_type, count);
-    array_type = spv_emit_id(e);
+    uint32_t length = spv_emit_constant_u32(e, u32_type, count);
+    uint32_t array_type = spv_emit_id(e);
     instruction(&e->types, SPV_OP_TYPE_ARRAY, 4);
     put(&e->types, array_type);
     put(&e->types, *sampled_type);
     put(&e->types, length);
-    pointer = spv_emit_type_pointer(e, 0, array_type); /* UniformConstant */
-    variable = spv_emit_id(e);
+    uint32_t pointer = spv_emit_type_pointer(e, 0, array_type); /* UniformConstant */
+    uint32_t variable = spv_emit_id(e);
     instruction(&e->decorations, SPV_OP_DECORATE, 4);
     put(&e->decorations, variable);
     put(&e->decorations, 34); /* DescriptorSet */
@@ -1662,14 +1657,12 @@ uint32_t spv_emit_imul_u32(SpvEmitter* e, uint32_t u32_type, uint32_t left, uint
 
 uint32_t spv_emit_umul_high_u32(SpvEmitter* e, uint32_t u32_type, uint32_t left, uint32_t right) {
     uint32_t pair_type = spv_emit_id(e);
-    uint32_t pair;
-    uint32_t high;
     instruction(&e->types, SPV_OP_TYPE_STRUCT, 4);
     put(&e->types, pair_type);
     put(&e->types, u32_type);
     put(&e->types, u32_type);
-    pair = binary(e, SPV_OP_U_MUL_EXTENDED, pair_type, left, right);
-    high = spv_emit_id(e);
+    uint32_t pair = binary(e, SPV_OP_U_MUL_EXTENDED, pair_type, left, right);
+    uint32_t high = spv_emit_id(e);
     instruction(&e->functions, SPV_OP_COMPOSITE_EXTRACT, 5);
     put(&e->functions, u32_type);
     put(&e->functions, high);

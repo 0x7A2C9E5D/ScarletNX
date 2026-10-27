@@ -38,6 +38,11 @@ get wrong and points to the skills that carry the procedures.
   a product that can overflow gets a wider intermediate. `-DSNX_TRAPV=ON` builds our code and that library with
   `-ftrapv` and a trap on left shifts of negative values (which `-fwrapv` also defined and `-ftrapv` misses) to find
   the ones left (a build for the tests and a game run, never one to ship).
+- **Language over library calls, one copy of each helper.** Declare a local where it first gets its value, not in a
+  block at the top. Zero with `= {0}` or `*p = (T){0}` and copy a struct by assignment. `memset`/`memcpy` stay only
+  where padding bytes matter (hashed, compared, written out) or the types differ. Small helpers (ASCII classes, hex,
+  align, clamp, FNV, endian loads) come from `common/utilities/` (`ascii.h`, `bits.h`, `endian.h`, `common.h`), never a
+  local copy. Details in the `snx-code-quality` skill.
 - **Test-only code lives in `tests/`.** `src/` holds what ScarletNX's programs build and ship. A CPU reference the
   GPU's output is checked against, a decoder or a helper that only tests compile goes in `tests/support/` (the CPU
   decoders of ASTC, ETC2 and BCn, the `*_ref.c` engine references, the NVN decoders), with its declarations in a

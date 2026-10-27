@@ -142,7 +142,7 @@ static void frame_free(Frame* f) {
     if (f->view) vkDestroyImageView(v->device, f->view, NULL);
     if (f->image) vkDestroyImage(v->device, f->image, NULL);
     if (f->memory) vkFreeMemory(v->device, f->memory, NULL);
-    memset(f, 0, sizeof *f);
+    *f = (Frame){0};
 }
 
 static bool semaphores(const SnxCtrVk* v, const VkSemaphoreCreateInfo* si) {

@@ -33,5 +33,7 @@ static inline int snx_is_separator(int c) {
     return c == '/';
 #endif
 }
+/* '/' or '\\' on any host: a guest's or an archive's path, or one shown whichever system wrote it */
+static inline int snx_is_any_separator(int c) { return c == '/' || c == '\\'; }
 
 #endif
