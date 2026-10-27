@@ -526,6 +526,9 @@ int main(int argc, char** argv) {
         assert(!strcmp(key(&s, "gamepad_rumble")->words[1], "Off") && !key(&s, "controls_a"));
         assert(gui_settings_set(&s, "fullscreen", "0") && gui_settings_set(&s, "touch", "1"));
         assert(gui_settings_set(&s, "controls", "0") && key(&s, "resolution")->type == GUI_KEY_TEXT);
+        /* a range as settings.txt has it, a large one to the last digit, which a typed value's dialog says */
+        assert(key(&s, "map_limit_mb")->numeric && key(&s, "map_limit_mb")->hi == 1048576.0);
+        assert(key(&s, "resolution")->lo == 0.25 && key(&s, "resolution")->hi == 16.0);
         page = at(&s, "Buttons");
         assert(page > 0 && s.values[page].count == 1 + 17 && !strcmp(s.keys[page + 2].key, "L"));
         gui_settings_free(&s);
