@@ -5794,8 +5794,11 @@ static void draw_games(App* app) {
             gui_size_text(size, sizeof size, app->aot_info.size);
             snprintf(line, sizeof line, snx_tr("JIT cache: %s, O%c"), size, app->aot_info.opt);
             y += wrap_in(app, r, r.x, y, line, 0, soft) * cell_h(app);
-            snprintf(line, sizeof line, snx_tr("AOT build: O%c%s"), app->aot_build_opt,
-                     app->aot_match ? "" : snx_tr(" (levels differ)"));
+            if (app->aot_match)
+                snprintf(line, sizeof line, snx_tr("AOT build: O%c"), app->aot_build_opt);
+            else /* the two the pack needs equal, named: the cache's JIT level and the build's AOT level */
+                snprintf(line, sizeof line, snx_tr("AOT build: O%c, its JIT cache O%c: a pack needs one level"),
+                         app->aot_build_opt, app->aot_info.opt);
             y += wrap_in(app, r, r.x, y, line, 0, app->aot_match ? soft : failure) * cell_h(app);
         } else if (app->aot_state == GUI_AOT_NO_CACHE) {
             y += wrap_in(app, r, r.x, y, snx_tr("JIT cache: none yet. Play once to collect one."), 0, soft) *
@@ -12030,9 +12033,9 @@ static void aot_focus(App* app) {
     build = opt && opt[0] ? opt[0] : '2';
     if (!gui_aot_levels_match(opt, info.opt)) {
         snprintf(app->message, sizeof app->message,
-                 snx_tr("The JIT cache is O%c, but the game's AOT optimization is O%c. They must match: set "
-                        "Optimization level to O%c before building, or set JIT optimization to O%c and play once to "
-                        "make a matching cache."),
+                 snx_tr("The JIT cache's level (JIT optimization O%c) and the game's AOT optimization O%c differ. An "
+                        "AOT pack needs them equal: set Optimization level to O%c before building, or set JIT "
+                        "optimization to O%c and play once to make a matching cache."),
                  info.opt, build, info.opt, build);
         goto done;
     }
