@@ -17,6 +17,7 @@
 #include "vita/gpu/swizzle_spv.h"
 #include "vita/gpu/yuv_spv.h"
 #include "common/utilities/endian.h"
+#include "common/utilities/bits.h"
 #include "snx_settings.h"
 #include <inttypes.h>
 #include <stdarg.h>
