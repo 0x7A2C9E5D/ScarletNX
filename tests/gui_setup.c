@@ -202,20 +202,24 @@ static void test_first(App* app) {
         assert(x == row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app) && y > row.y);
     }
     shows(app, "< YoRHa >", rgb(app->theme.ink));
-    { /* UI scale: its slider, the size at the row's end (#613) */
-        char line[64];
+    { /* UI scale: the start's number, as App's row has it, lined up with the text of the others' values; its slider
+         is its dialog's */
         GuiSetupBoxes c;
         GuiAppearanceBoxes a;
         GuiRect row;
         int x, y;
-        snprintf(line, sizeof line, "Auto (%dx)", app->auto_scale);
+        assert(app->menu.text_size == 2 && app->auto_scale == 2); /* the test's window's */
         setup_boxes(app, &c);
         appearance_boxes(app, c.content, &a);
         row = appearance_row_box(app, &a, GUI_APPEARANCE_TEXT);
-        assert(find_text(app, line, rgb(app->theme.ink), 1, &x, &y));
-        assert(x + (int)strlen(line) * cell_w(app) <= row.x + row.w - cell_w(app) && x > row.x + row.w / 2);
-        assert(app->slider_bar.w >= GUI_SIZE_STEPS * cell_w(app) && app->slider_bar.y == row.y &&
-               app->slider_bar.x == row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app));
+        assert(find_text(app, "2x", rgb(app->theme.ink), 1, &x, &y));
+        assert(x == row.x + cell_w(app) / 2 + (appearance_column(app) + 2) * cell_w(app) && y > row.y);
+        {
+            UiRowInfo info = {0};
+            assert(ui_appearance_rows_get_row_info(app, GUI_APPEARANCE_TEXT, row.w, &info) &&
+                   !strstr(info.label, "Auto"));
+        }
+        assert(!app->slider_bar.w);
     }
     hides(app, "Next", rgb(app->theme.page)); /* drawn, not in focus */
     key(app, SDLK_RETURN);                    /* as Settings > App's Enter: the language a step on, the page kept */
@@ -265,7 +269,7 @@ static void test_first(App* app) {
         assert(app->setup_row == GUI_APPEARANCE_NEXT && page(app) == SNX_SETUP_LANGUAGE);
         point(app, appearance_row_box(app, &a, GUI_APPEARANCE_THEME), false);
         assert(app->setup_row == GUI_APPEARANCE_THEME);
-        { /* UI scale clicked on its name, off its slider: its box */
+        { /* UI scale clicked: its dialog */
             GuiRect text = appearance_row_box(app, &a, GUI_APPEARANCE_TEXT);
             mouse_px(app, text.x + 2 * cell_w(app), text.y + text.h / 2, true);
         }
@@ -304,25 +308,46 @@ static void test_first(App* app) {
     assert(app->setup_row == GUI_APPEARANCE_TEXT);
     render(app);
     shows_foot(app, "open", rgb(head_ink(app)));
-    key(app, SDLK_RETURN); /* its box, over the page */
-    assert(app->sizes_shown && app->sizes.focus == 3 && page(app) == SNX_SETUP_LANGUAGE);
+    key(app, SDLK_RETURN); /* its dialog, over the page, as App's */
+    assert(size_picking(app) && app->size_pick == 2 && page(app) == SNX_SETUP_LANGUAGE);
+    key(app, SDLK_RIGHT);
     render(app);
-    shows(app, "0.5 of Auto", rgb(app->theme.ink));
-    key(app, SDLK_DOWN);
-    key(app, SDLK_RETURN);
-    assert(!app->sizes_shown && app->menu.text_size == 1 && app->confirm.shown && app->confirm.ask == GUI_ASK_TEXT);
+    assert(app->size_pick == 3 && app->menu.text_size == 2);
+    { /* in YoRHa too a box in the middle of the screen, as the View box is, not its foot: its title on its head, then
+         the slider and the step picked, above OK and Cancel */
+        GuiSizesBoxes b;
+        GuiRect bar;
+        int width, height, x, y;
+        sizes_place(app, &b);
+        bar = sizes_bar(app, &b);
+        area(app, &width, &height);
+        assert(app->theme.dialog == GUI_DIALOG_YORHA && app->theme.panels == GUI_PANELS_FILL);
+        assert(b.c.box.x * 2 + b.c.box.w == width && b.c.box.y + b.c.box.h < height - cell_h(app));
+        assert(find_text(app, "UI scale", rgb(app->theme.page), 1, &x, &y)); /* on the head's band of ink */
+        assert(x == b.c.box.x + cell_w(app) && y == b.c.box.y + 2 * app->scale);
+        assert(b.body.y >= b.c.box.y + head_h(app) && bar.y + bar.h <= choice_box(app, &b.c, 0).y);
+        assert(find_text(app, "3x", rgb(app->theme.ink), 1, &x, &y) && x == bar.x + bar.w + cell_w(app));
+    }
+    key(app, SDLK_LEFT);
+    key(app, SDLK_LEFT);
+    key(app, SDLK_LEFT);   /* 1x, the first: it stays */
+    key(app, SDLK_RETURN); /* OK on 1x */
+    assert(app->sizes_shown && app->size_until && app->menu.text_size == 1 && !app->confirm.shown);
     render(app);
-    key(app, SDLK_RIGHT); /* Keep */
+    shows(app, app->size_line, rgb(app->theme.warning));
+    key(app, SDLK_UP); /* Keep */
     key(app, SDLK_RETURN);
-    assert(!app->confirm.shown && app->menu.text_size == 1 && app->setup_on && page(app) == SNX_SETUP_LANGUAGE);
+    assert(!app->sizes_shown && app->menu.text_size == 1 && app->setup_on && page(app) == SNX_SETUP_LANGUAGE);
     path = join(home, ".config/scarletnx/app.ini");
     assert(!snx_is_file(path)); /* kept for the setup's end, in the folders Install picks */
     free(path);
-    key(app, SDLK_LEFT); /* its slider a step back: Auto, asked about as App's is, ESC bringing 1x back */
-    assert(!app->menu.text_size && app->confirm.shown && app->confirm.ask == GUI_ASK_TEXT && app->size_slid);
+    key(app, SDLK_RIGHT); /* its dialog, its slider a step on: 2x, used on OK and asked about, ESC bringing 1x back */
+    assert(size_picking(app) && app->size_pick == 2 && app->menu.text_size == 1);
+    key(app, SDLK_RETURN);
+    assert(app->menu.text_size == 2 && app->size_until);
     key(app, SDLK_ESCAPE);
-    assert(!app->confirm.shown && app->menu.text_size == 1 && app->setup_row == GUI_APPEARANCE_TEXT);
-    key(app, SDLK_RETURN); /* its box again, closed by ESC */
+    assert(!app->sizes_shown && app->menu.text_size == 1 && app->setup_row == GUI_APPEARANCE_TEXT);
+    key(app, SDLK_RETURN); /* its dialog again, closed by ESC */
     assert(app->sizes_shown);
     key(app, SDLK_ESCAPE);
     assert(!app->sizes_shown && app->setup_on && page(app) == SNX_SETUP_LANGUAGE);
@@ -816,6 +841,32 @@ static void test_skip(App* app) {
     puts("PASS Skip on the first page, every page's defaults taken, and where a default fails");
 }
 
+/* a start whose app.ini has no UI scale (an older version's, or a hand's): the number a start takes in its window,
+   written there at once when the setup has nothing to ask, with nothing to say */
+static void test_start_scale(App* app) {
+    size_t size = 0;
+    char *was = (char*)snx_read_file(app->app_file, &size), *now, line[64];
+    assert(was && strstr(was, "ui_scale = "));
+    put(app->app_file, "[app]\ntheme = yorha\n");
+    app->menu.text_size = 0;
+    layout(app); /* as a start measures its window */
+    assert(app->menu.text_size == app->auto_scale && app->auto_scale == 2);
+    app->message[0] = 0;
+    app_load(app);
+    now = (char*)snx_read_file(app->app_file, &size);
+    assert(app->menu.text_size == 2 && app->scale_new && !app->message[0] && now && !strstr(now, "ui_scale"));
+    free(now);
+    setup_start(app); /* setup.ini done: no page to ask */
+    assert(!app->setup_on && !app->scale_new && !app->message[0]);
+    snprintf(line, sizeof line, "theme = yorha\nui_scale = %d\n", app->auto_scale);
+    now = (char*)snx_read_file(app->app_file, &size);
+    assert(now && strstr(now, line));
+    free(now);
+    put(app->app_file, was);
+    free(was);
+    puts("PASS a start without a UI scale in app.ini writes the one it takes");
+}
+
 /* name set (NULL: unset) where getenv reads it as well as SDL: on Windows the C runtime keeps a copy of its own, which
    SDL_setenv_unsafe leaves naming the real user's folders */
 static void set_env(const char* name, const char* value) {
@@ -860,6 +911,7 @@ int main(void) {
     test_translated(&app);
     test_places(&app);
     test_skip(&app);
+    test_start_scale(&app);
     cleanup(&app);
     assert(!snx_remove_tree(root));
     free(home);

@@ -953,6 +953,11 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "%s: %s is no longer a UI scale: ui_scale = %d now"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "Recent Games not kept: %s could not be written."
 msgstr ""
 
@@ -1137,14 +1142,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Run Anyway"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Revert"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Keep"
 msgstr ""
 
 #: src/gui/main.c
@@ -1937,7 +1934,7 @@ msgid "UI scale"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Auto fits the screen. A new scale asks to be kept"
+msgid "1x to 4x. A new one asks to be kept"
 msgstr ""
 
 #: src/gui/main.c
@@ -2006,7 +2003,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s of Auto: %dx"
+msgid "%dx (%dx in this window)"
 msgstr ""
 
 #: src/gui/main.c
@@ -2393,15 +2390,18 @@ msgid "User %d is %s now"
 msgstr ""
 
 #: src/gui/main.c
-msgid "0.25 of Auto"
+msgid "Keep"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Back"
 msgstr ""
 
 #: src/gui/main.c
-msgid "0.5 of Auto"
-msgstr ""
-
-#: src/gui/main.c
-msgid "0.75 of Auto"
+#, c-format
+msgid "%dx needs a window %d pixels high: this one is %d"
 msgstr ""
 
 #: src/gui/main.c
@@ -2712,12 +2712,6 @@ msgstr ""
 msgid "Next"
 msgstr ""
 
-#. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
-#, snx-key
-msgid "Back"
-msgstr ""
-
 #: src/gui/main.c
 msgid "Skip"
 msgstr ""
@@ -2775,11 +2769,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Tip: nickname 4 to 20 of A-Z a-z 0-9 space . _ -"
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
-msgid "Auto (%dx)"
 msgstr ""
 
 #: src/gui/main.c
@@ -4313,6 +4302,18 @@ msgstr ""
 
 #: src/common/utilities/setup.c
 msgid "off, as LLVM 23 can break a module with it: Settings > Debug turns it on"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "The launcher's UI scale"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "Auto, and 0.25, 0.5 and 0.75 of it"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "1x to 4x: the number Auto gave that screen"
 msgstr ""
 
 #: src/nx/runtime/settings.txt
