@@ -636,7 +636,7 @@ typedef struct {
     u64 tex_int, tex_sint;
     u32 image, image_sint;
 } CsKey;
-static CsPipe g_cs_alloc_failed = {.failed = 1}; /* a program without memory to translate it, tried again later */
+static CsPipe g_cs_alloc_failed = {.failed = 1}; /* out of memory: not cached, retried */
 static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm, CsKey k) {
     u32 blen;
     u64 key = vk_shader_hash(code, 0x10000 + 80, &blen, cs_cb_read) ^ ((u64)lx << 40) ^ ((u64)ly << 48) ^
@@ -877,7 +877,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     struct cs_fast {
         u64 addr;
         u64 shader_generation;
-        u64 code_hash; /* of the window cs_read_code read, which cs_pipe sized and translated */
+        u64 code_hash; /* of the code window cs_pipe translated */
         u32 epoch, lx, ly, lz, shm;
         CsPipe* p;
     };
@@ -891,9 +891,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         static u8 code_buf[0x10000 + 80]; /* compute programs have no header: 80 zero bytes stand in for one */
         CsKey unkeyed = {0};
         cs_read_code(pa, code_buf);
-        /* every submit expires the address: the same window, with the constant buffer words translation read (which
-           hold the ones sizing the program read) unchanged, is the same program, so walking it again for its hash
-           (vk_shader_hash), about 5% of the GPU thread in one game, is skipped */
+        /* same window and cbuf reads: same program, so skip vk_shader_hash's walk (5% of one game's GPU thread) */
         u64 h = vk_hash(code_buf, sizeof code_buf);
         if (!same || h != fe->code_hash) {
             p = cs_pipe(code_buf, lx, ly, lz, shm, unkeyed);
