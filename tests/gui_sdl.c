@@ -10736,6 +10736,48 @@ int main(int argc, char** argv) {
     players_view(&app);
     icons_named();
     step_line();
+    /* a row too long for its box with the labels' column gives the column up first, and slides only past that: 1280x720
+       at 2x leaves a group's rows fewer columns than Vulkan Video's label and a value, and Shadows ends its row whole and
+       still beside it, where Vulkan Video's slides */
+    {
+        static const char list[] =
+            "Graphics\tvideo\t0\tint\t0\t1\tVulkan Video\tVulkan Video decode (experimental)\t0=Off|1=On\n"
+            "Graphics\tshadows\t1\tint\t0\t1\tShadows\tShadows\t0=Off|1=On\n";
+        GuiFormBoxes f;
+        UiRowInfo info = {0};
+        char line[200];
+        int w, h, row, room;
+        assert(SDL_GetWindowSize(app.window, &w, &h) && SDL_SetWindowSize(app.window, 1280, 720));
+        SDL_SyncWindow(app.window);
+        app.menu.text_size = 2;
+        settings_forget(&app);
+        assert(!gui_settings_read(&app.settings, list));
+        gui_settings_mark(&app.settings);
+        open_settings(&app);
+        for (row = 0; row < app.groups && strcmp(app.group_keys[row].key, "Graphics"); ++row) {}
+        app.editor.row = row;      /* its rows beside the groups */
+        app.theme.scroll_ms = 120; /* YoRHa's: Default cuts a row too long */
+        for (app.clock = 0; !gui_slide(1, app.clock, app.theme.scroll_ms); app.clock += app.theme.scroll_ms) {}
+        render(&app);
+        assert(app.scale == 2);
+        form_boxes(&app, &f);
+        room = form_room(&app, ui_form_side_row(f.right, app.scale, UI_FORM_SIDE_ROWS, 1).w);
+        assert(room < 2 + 34 + 1 + 12 && room >= 2 + 7 + 1 + 12); /* the labels' column too wide, Shadows' row not */
+        snprintf(line, sizeof line, "- Shadows%*s On [default]", room - (2 + 7 + 1 + 12), "");
+        shows(&app, line, normal);
+        assert(ui_form_side_rows_get_row_info(&app, 1, ui_form_side_row(f.right, app.scale, UI_FORM_SIDE_ROWS, 1).w,
+                                              &info) &&
+               !strcmp(info.label, line + 2));
+        hides(&app, "- Vulkan Video", normal); /* a column on */
+        shows(&app, " Vulkan Video decode (experimental) Off", normal);
+        app.theme.scroll_ms = gui_theme_builtin("default")->scroll_ms;
+        app.clock = 0;
+        app.menu.text_size = 0;
+        assert(SDL_SetWindowSize(app.window, w, h));
+        SDL_SyncWindow(app.window);
+        leave_editor(&app);
+        render(&app);
+    }
     /* YoRHa's Settings: its groups' column wide enough for the last row with its cursor; a page of a group open, its
        name over its rows */
     {

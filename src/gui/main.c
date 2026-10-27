@@ -8830,9 +8830,11 @@ static void form_line(App* app, const GuiEditor* e, int r, int labels, int room,
     }
     pad = SDL_max(labels - gui_text_cols(label), 0); /* the labels' columns, not their bytes */
     if (k && k->numeric && !k->whole) pad = 0;      /* the scale's value left, its row under the box's width */
-    if (value[0])
+    if (value[0]) { /* a row too long for its box gives up the labels' column first, and slides only past that */
+        int over = gui_text_cols(app->theme.marker) + gui_text_cols(label) + pad + 1 + gui_text_cols(value) - room;
+        if (over > 0) pad = SDL_max(pad - over, 0);
         snprintf(line, size, "%s%s%*s %s", app->theme.marker, label, pad, "", value);
-    else /* no value to line up: padding would make a short row too long for its box, and slide */
+    } else /* no value to line up: padding would make a short row too long for its box, and slide */
         snprintf(line, size, "%s%s", app->theme.marker, label);
     n = (size_t)gui_text_cols(line);
     if (typing && room > 4 && n > (size_t)room && !(k && k->numeric && !k->whole)) { /* the typed end in view */
