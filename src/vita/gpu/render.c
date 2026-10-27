@@ -131,7 +131,7 @@ static void once(struct VitaRender* r, unsigned bit, const char* format, ...) {
     putchar('\n');
     va_end(list);
 }
-static void retire(unsigned slot);
+static void retire(unsigned slot, uint64_t serial);
 static void rendering_pause(VkCommandBuffer cb);
 static void rendering_resume(struct VitaRender* r, VkCommandBuffer cb);
 static bool color_copy(struct VitaRender* r, VkCommandBuffer cb, const Surface* s, const Import* m, VkDeviceSize at,
@@ -465,7 +465,8 @@ bool vita_render_init(VitaProcess* p) {
     }
     return true;
 }
-static void retire(unsigned slot) {
+static void retire(unsigned slot, uint64_t serial) {
+    (void)serial;
     if (g_retiring) g_retiring->staging[slot].used = 0, g_retiring->linear[slot].used = 0;
 }
 void vita_render_shader_free(VitaProcess* p, void* shader) {
@@ -580,7 +581,7 @@ void vita_render_begin_scene(VitaProcess* p, GxmContext* c) {
     struct VitaRender* r = render_of(p);
     if (!r) return;
     /* the scene before drawn first: the game's next writes are its own (the description above says why) */
-    vita_vk_wait(r->vk->submitted);
+    vita_vk_wait(r->vk->ring.submitted);
     ++r->scene;
     r->rendering = false;
     r->color = r->depth = NULL;
@@ -710,8 +711,8 @@ bool vita_render_done(VitaProcess* p, uint64_t serial) {
 bool vita_render_idle(VitaProcess* p, bool wait) {
     struct VitaRender* r = render_of(p);
     if (!r) return true;
-    if (wait) return vita_vk_wait(r->vk->submitted);
-    return vita_vk_poll() >= r->vk->submitted;
+    if (wait) return vita_vk_wait(r->vk->ring.submitted);
+    return vita_vk_poll() >= r->vk->ring.submitted;
 }
 bool vita_render_show(VitaProcess* p, uint32_t address, uint32_t pitch, uint32_t width, uint32_t height) {
     struct VitaRender* r = render_of(p);
@@ -724,7 +725,7 @@ bool vita_render_show(VitaProcess* p, uint32_t address, uint32_t pitch, uint32_t
 }
 uint64_t vita_render_submitted(VitaProcess* p) {
     struct VitaRender* r = render_of(p);
-    return r ? r->vk->submitted : 0;
+    return r ? r->vk->ring.submitted : 0;
 }
 
 /* ---- draws ---- */
@@ -1206,7 +1207,7 @@ static Texture* texture_for(struct VitaRender* r, VitaProcess* p, VkCommandBuffe
             free_slot = &r->textures[0];
             for (unsigned i = 1; i < TEXTURES; ++i)
                 if (r->textures[i].scene < free_slot->scene) free_slot = &r->textures[i];
-            vita_vk_wait(r->vk->submitted);
+            vita_vk_wait(r->vk->ring.submitted);
             vkDestroyImageView(r->vk->device, free_slot->view, NULL);
             vkDestroyImage(r->vk->device, free_slot->image, NULL);
             vkFreeMemory(r->vk->device, free_slot->memory, NULL);

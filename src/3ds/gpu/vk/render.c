@@ -494,8 +494,8 @@ static void levels(uint32_t pa, uint64_t size) {
     for (uint64_t at = pa & ~4095u; at < (uint64_t)pa + size; at += 4096) {
         PageState* page = page_state((uint32_t)at);
         if (!page) continue;
-        SnxCtrTrackLevel l = page->dirty || page->write > v->completed ? SNX_CTR_TRACK_OWN
-                             : page->kept || page->read > v->completed ? SNX_CTR_TRACK_WATCH
+        SnxCtrTrackLevel l = page->dirty || page->write > v->ring.completed ? SNX_CTR_TRACK_OWN
+                             : page->kept || page->read > v->ring.completed ? SNX_CTR_TRACK_WATCH
                                                                        : SNX_CTR_TRACK_NONE;
         snx_ctr_track_set(v->memory, (uint32_t)at, 4096, l);
     }
@@ -731,7 +731,7 @@ static Target* target_find(const TargetKey* k) {
         bury(&t->color, NULL, NULL);
         bury(&t->depth, &t->scratch, &t->scratch_memory);
     }
-    memset(t, 0, sizeof *t);
+    *t = (Target){0};
     if (!target_images(t, k->width, k->height)) return NULL;
     t->key = *k;
     if (t == &g.targets[g.target_count]) ++g.target_count;
