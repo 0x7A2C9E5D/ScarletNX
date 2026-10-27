@@ -225,9 +225,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   and YoRHa, then each folder of `themes/` (see [Themes](#themes)). The menu opens in YoRHa until one is picked.
   It is kept for the next start,
   as are UI scale and Language, in `app.ini` beside `settings.ini`: `[app]` with `theme` (a theme's folder
-  name), `ui_scale` (`auto` or 1 to 4; `text_size` before, still read and written again
-  as `ui_scale`, said once; `0.25`, `0.5` and `0.75` of older versions read as `auto` and written again so, said
-  once), `recompile_background` (`full`, the default, or `gentle`; a word it does not know named
+  name), `ui_scale` (1 to 4; a start without it takes twice the display's
+  scale, as many as fit 16 rows (30 on a phone), and writes it; `text_size` before, still read and written again as
+  `ui_scale`, said once; `auto`, `0.25`, `0.5` and `0.75` of older versions read as that number and written again so,
+  said once), `recompile_background` (`full`, the default, or `gentle`; a word it does not know named
   with the one kept, `recompile_background = slow (it keeps full)`) and `language` (`auto`, `en` or a language's BCP 47
   tag, as `pt-BR` or `zh-Hans-CN`), and once one
   is picked `[folders]` with Folders' `data`, `recompiled`, `work`, `state` (Logs) and `cache` (Caches) (a full path,
@@ -246,10 +247,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Save (or Ctrl+S) writes `themes/<folder>/theme.ini` in the data folder and switches to it;
   a built-in is saved as a new theme, `mytheme` until renamed. ESC leaves, asking first if
   there are unsaved changes.
-- Settings > App's **UI scale** row shows the size in use: Auto (fit the screen), then 1x to 4x, the letters' whole
-  sizes. Enter, a click or a tap on it opens its dialog, and so do Left/Right, a step that way: a box in the middle of
-  the screen whatever the theme's dialogs, as the View box, its title on its head, then a slider, a tick a size, as
-  wide whatever the size, the size picked named after it, and under them OK and Cancel. Left/Right, a click or a tap
+- Settings > App's **UI scale** row shows the size in use, 1x to 4x, the letters' whole sizes. Enter, a click or a
+  tap on it opens its dialog, and so do Left/Right, a step that way: a box in the middle of the screen whatever the
+  theme's dialogs, as the View box, its title on its head, then a slider, a tick a size, as wide whatever the size,
+  the size picked named after it, and under them OK and Cancel. Left/Right, a click or a tap
   on the bar (a drag along it following) pick a size, and nothing else changes until OK; Cancel or ESC close it as it
   was. OK uses the size picked, and the dialog asks there to keep it,
   Back in focus: Keep keeps it in `app.ini`; Back, ESC or no answer in 15 s bring the one before it back. Bigger

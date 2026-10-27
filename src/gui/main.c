@@ -285,7 +285,7 @@ typedef struct App {
     Uint64 keys_done; /* the keys screen's outcome shown since, 0 for none: then the menu by itself */
     bool keys_ok;
     int cols, rows, scale;
-    int auto_scale; /* UI scale Auto's scale, chosen when the window opens: a resize keeps the letters as they were */
+    int auto_scale; /* the UI scale a start takes with none in app.ini, chosen as the window opens (pick_auto_scale) */
     Uint64 sampled;
     bool has_output, finished, aborting, abnormal_exit;
     bool log_due; /* the last run ended abnormally, not by ESC, and its log is not saved since: Share Log blinks */
@@ -463,7 +463,8 @@ typedef struct App {
     int language;        /* Settings > App's Language: 0 Auto (the system's), else snx_gui_languages' index + 1 */
     char* games_key;     /* [folders] games = as app.ini had it, recompiled = before it was named so: written again */
     char* text_size_key; /* [app] text_size = as app.ini had it, ui_scale = before it was named so: written again */
-    char* scale_gone;    /* [app] ui_scale = or text_size = a part of Auto, "ui_scale = 0.75": Auto, written again */
+    char* scale_gone;    /* [app] ui_scale = or text_size = Auto or a part of it, "ui_scale = auto": written again */
+    bool scale_new;      /* no UI scale in app.ini as the start read it: the start's, written by setup_start */
     GuiCleaned cleaned;  /* what it did, in a box over the screen while cleaned_shown, until a key closes it */
     bool cleaned_shown;
     bool report_move; /* the box shows what Move Old Files did, not Clean Old Settings */
@@ -1073,9 +1074,9 @@ static const char* const side_names[] = {SNX_TR_NOOP("Auto"), SNX_TR_NOOP("On"),
 /* recompile_background's, full its default: the queue's recompiles at full speed, or gentle (job_gentle) */
 static const char* const background_words[] = {"full", "gentle"};
 static const char* const background_names[] = {SNX_TR_NOOP("Full"), SNX_TR_NOOP("Gentle")};
-/* the parts of Auto older versions had as UI scale, as their app.ini named them: read as Auto, said once
-   (docs/DEPRECATIONS.md) */
-static const char* const scale_parts_gone[] = {"0.25", "0.5", "0.75"};
+/* the UI scales older versions had besides 1 to 4, as their app.ini named them, Auto and its parts: read as the
+   number a start takes on that screen, said once (docs/DEPRECATIONS.md) */
+static const char* const scale_words_gone[] = {"auto", "0.25", "0.5", "0.75"};
 /* Games' options (GUI_OPTION_*): each one's key in app.ini, its row in the View box, and its two words or three in
    app.ini and as the row shows them, the first its default (games_defaults says where it is not) */
 static const struct {
@@ -1131,10 +1132,7 @@ static int app_write(App* app) {
     text = (char*)snx_alloc(size);
     n = snprintf(text, size, "; Settings > App and Games' View in the launcher, as they were left\n[app]\ntheme = %s\n",
                  app->theme.id);
-    if (app->menu.text_size)
-        n += snprintf(text + n, size - (size_t)n, "ui_scale = %d\n", app->menu.text_size);
-    else
-        n += snprintf(text + n, size - (size_t)n, "ui_scale = auto\n");
+    if (app->menu.text_size) n += snprintf(text + n, size - (size_t)n, "ui_scale = %d\n", app->menu.text_size);
     n += snprintf(text + n, size - (size_t)n, "language = %s\n",
                   app->language ? snx_gui_languages[app->language - 1].code : "auto");
     n += snprintf(text + n, size - (size_t)n, "animations = %d\n", !app->animations_off);
@@ -1207,7 +1205,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
     const char* const* dirs = (const char* const*)app->themes_dirs;
     int scale = app->menu.text_size, language = app->language, n = 0, count = 0, moved = 0;
     int options[GUI_OPTIONS];
-    bool still = app->animations_off, gentle = app->background_gentle, kept;
+    bool still = app->animations_off, gentle = app->background_gentle, kept, scale_read = false;
     int side = app->side_box;
     SnxIni ini;
     if (size) bad[0] = 0;
@@ -1255,14 +1253,15 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
             }
         } else if (!strcmp(ini.section, "app") && (!strcmp(key, "ui_scale") || !strcmp(key, "text_size"))) {
             int q, taken = 1;
-            for (q = 0; q < 3 && strcmp(value, scale_parts_gone[q]); ++q) {}
-            if (!strcmp(value, "auto") || q < 3)
-                scale = 0;
+            for (q = 0; q < 4 && strcmp(value, scale_words_gone[q]); ++q) {}
+            if (q < 4)
+                scale = SDL_max(1, app->auto_scale);
             else if (*value && !*end && number >= 1 && number <= GUI_TEXT_MAX)
                 scale = (int)number;
             else
                 taken = 0;
-            if (taken && apply && q < 3) { /* a part of Auto, a step no longer: Auto */
+            scale_read = scale_read || taken;
+            if (taken && apply && q < 4) { /* Auto or a part of it, steps no longer: the number a start takes here */
                 free(app->scale_gone);
                 app->scale_gone = snx_format("%s = %s", key, value);
             } else if (taken && apply && !strcmp(key, "text_size")) { /* ui_scale = as an older version named it */
@@ -1307,6 +1306,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
         if (n >= (int)size) n = (int)size - 1;
     }
     free(text);
+    if (apply) app->scale_new = !scale_read;
     if (apply) memcpy(app->options, options, sizeof options);
     if (apply && scale != app->menu.text_size) {
         app->menu.text_size = scale;
@@ -1358,8 +1358,8 @@ static void app_load(App* app) {
         m = strlen(app->message);
         snprintf(app->message + m, sizeof app->message - m, snx_tr("Not used from %s: %s"), app->app_file, bad);
     }
-    /* [folders] games = and [app] text_size =, the names an older version wrote, and a part of Auto as UI scale:
-       written again as recompiled =, ui_scale = and ui_scale = auto, each said once */
+    /* [folders] games = and [app] text_size =, the names an older version wrote, and Auto or a part of it as UI scale:
+       written again as recompiled =, ui_scale = and the number, each said once */
     if (app->games_key || app->text_size_key || app->scale_gone) {
         char said[sizeof app->message];
         int failed;
@@ -1383,8 +1383,8 @@ static void app_load(App* app) {
             size_t m = strlen(said);
             snprintf(said + m, sizeof said - m, "%s", m ? " " : "");
             m = strlen(said);
-            snprintf(said + m, sizeof said - m, snx_tr("%s: %s is no longer a UI scale: ui_scale = auto now"),
-                     app->app_file, app->scale_gone);
+            snprintf(said + m, sizeof said - m, snx_tr("%s: %s is no longer a UI scale: ui_scale = %d now"),
+                     app->app_file, app->scale_gone, app->menu.text_size);
         }
         if (!failed) snprintf(app->message, sizeof app->message, "%s", said);
         free(app->games_key);
@@ -1441,16 +1441,17 @@ static void recent_open(App* app, char* file) {
 static int entering(const App* app) {
     return app->entering_ms && now_ms(app) < app->entering_ms + app->theme.fade_out_ms;
 }
-/* the rows Auto keeps at the least: a phone held wide is short, and its menu needs room for its items, a finger's row
-   each, and the setup's boxes for their lines: 2x on the phones of 1080 and 1156 rows of pixels */
+/* the rows a start's UI scale keeps at the least: a phone held wide is short, and its menu needs room for its items,
+   a finger's row each, and the setup's boxes for their lines: 2x on the phones of 1080 and 1156 rows of pixels */
 #define GUI_AUTO_ROWS_PHONE 30
 #ifdef SNX_TOUCH_UI
 #define GUI_AUTO_ROWS GUI_AUTO_ROWS_PHONE
 #else
 #define GUI_AUTO_ROWS 16
 #endif
-/* UI scale Auto's scale: twice the display's own (Android's dpi / 160), so a computer at 100% gets 2x and a phone's
-   letters come out as big to the eye, as long as rows rows fit in a window height pixels high */
+/* the UI scale a start takes with none in app.ini: twice the display's own (Android's dpi / 160), so a computer at
+   100% gets 2x and a phone's letters come out as big to the eye, as long as rows rows fit in a window height pixels
+   high */
 static int pick_auto_scale(float display_scale, int height, int rows) {
     int scale = SDL_max(1, (int)(2.0f * display_scale));
     while (scale > 1 && height / (16 * scale) < rows) --scale;
@@ -1520,16 +1521,17 @@ static void layout(App* app) {
     int width, height, whole_width, whole_height;
     set_area(app);
     area(app, &width, &height);
-    /* Auto's letters are the opening window's, measured whole: a phone's system bars may still show over it then, and
-       the safe area be short. The window then keeps room for 16 rows of them */
+    /* a start's letters are the opening window's, measured whole: a phone's system bars may still show over it then,
+       and the safe area be short. The window then keeps room for 16 rows of them */
     if (!app->auto_scale && SDL_GetWindowSizeInPixels(app->window, &whole_width, &whole_height) && whole_height > 0) {
         app->auto_scale = pick_auto_scale(SDL_GetWindowDisplayScale(app->window), whole_height, GUI_AUTO_ROWS);
         SDL_SetWindowMinimumSize(
             app->window, 800,
             SDL_max(480, (int)SDL_ceilf(256.0f * (float)app->auto_scale / SDL_GetWindowPixelDensity(app->window))));
     }
-    app->scale = app->menu.text_size ? app->menu.text_size : app->auto_scale;
-    /* as long as 16 rows still fit: Auto's always do on a computer, a phone's not while Fullscreen is off */
+    if (!app->menu.text_size) app->menu.text_size = app->auto_scale; /* a start with none in app.ini: a number then */
+    app->scale = SDL_max(app->menu.text_size, 1);
+    /* as long as 16 rows still fit: a start's always do on a computer, a phone's not while Fullscreen is off */
     while (app->scale > 1 && height / (16 * app->scale) < 16) --app->scale;
     if (app->scale < 1) app->scale = 1;
     app->cols = SDL_min(width / (8 * app->scale), GUI_MAX_COLS);
@@ -6460,7 +6462,7 @@ static const GuiThemeKey app_keys[] = {
     {"", SNX_TR_NOOP("Theme"), GUI_KEY_ACTION, offsetof(GuiAppForm, theme), sizeof(((GuiAppForm*)0)->theme), NULL, 0,
      SNX_TR_NOOP("Built-in themes, then each themes/<name>/theme.ini"), 0, 0, 0, 0, NULL},
     {"", SNX_TR_NOOP("UI scale"), GUI_KEY_ACTION, offsetof(GuiAppForm, text), sizeof(((GuiAppForm*)0)->text), NULL, 0,
-     SNX_TR_NOOP("Auto fits the screen. A new scale asks to be kept"), 0, 0, 0, 0, NULL},
+     SNX_TR_NOOP("1x to 4x. A new one asks to be kept"), 0, 0, 0, 0, NULL},
     {"", SNX_TR_NOOP("Language"), GUI_KEY_ACTION, offsetof(GuiAppForm, language), sizeof(((GuiAppForm*)0)->language),
      NULL, 0, SNX_TR_NOOP("The launcher's language. Auto: the system's, else English"), 0, 0, 0, 0, NULL},
     {"", SNX_TR_NOOP("Animations"), GUI_KEY_ACTION, offsetof(GuiAppForm, animations),
@@ -6473,12 +6475,12 @@ static const GuiThemeKey app_keys[] = {
     {"", SNX_TR_NOOP("Background recompile"), GUI_KEY_ACTION, offsetof(GuiAppForm, background),
      sizeof(((GuiAppForm*)0)->background), NULL, 0,
      SNX_TR_NOOP("The Compile tab's: R's, B's and a game's first. Full: every core. Gentle: half of them, at a low "
-                 "priority. Either goes gently while a game plays"), 0, 0, 0, 0, NULL},
+                 "priority. Either goes gently while a game plays"),
+     0, 0, 0, 0, NULL},
     {"", SNX_TR_NOOP("Theme Editor"), GUI_KEY_ACTION, 0, 0, NULL, 0,
      SNX_TR_NOOP("This theme's keys with a preview, saved as themes/<name>/theme.ini"), 0, 0, 0, 0, NULL},
     {"", SNX_TR_NOOP("Folders"), GUI_KEY_ACTION, offsetof(GuiAppForm, places), sizeof(((GuiAppForm*)0)->places), NULL,
-     0,
-     SNX_TR_NOOP("The data and the extractions, and the libraries Games lists: recompiled games and dumps"), 0, 0, 0,
+     0, SNX_TR_NOOP("The data and the extractions, and the libraries Games lists: recompiled games and dumps"), 0, 0, 0,
      0, NULL},
     {"", SNX_TR_NOOP("Clean Old Settings"), GUI_KEY_ACTION, 0, 0, NULL, 0,
      SNX_TR_NOOP("Removes the settings this version no longer reads. Asks first"), 0, 0, 0, 0, NULL},
@@ -6509,11 +6511,10 @@ static void data_relative(const App* app, const char* path, char* out, size_t si
     else
         snprintf(out, size, "%s", path ? path : "");
 }
-/* UI scale's steps as Settings show them, a text_size each: Auto, then 1x to 4x */
-#define GUI_SIZE_STEPS (GUI_TEXT_MAX + 1)
-static const char* const size_labels[GUI_SIZE_STEPS] = {SNX_TR_NOOP("Auto"), "1x", "2x", "3x", "4x"};
-/* a text_size as Settings show it: its step's label */
-static void size_name(int size, char* out, size_t n) { snprintf(out, n, "%s", snx_tr(size_labels[size])); }
+/* UI scale's steps, 1x to 4x: step k is text_size k + 1 */
+#define GUI_SIZE_STEPS GUI_TEXT_MAX
+/* a text_size as Settings show it, the scale in effect: 1x while a start has yet to measure its window */
+static void size_name(int size, char* out, size_t n) { snprintf(out, n, "%dx", SDL_max(size, 1)); }
 static void app_values(App* app) {
     GuiAppForm* f = &app->app_form;
     char games[4200], work[4200];
@@ -7800,14 +7801,14 @@ static void settings_reset_ask(App* app);
 #define GUI_TEXT_KEEP_MS 15000
 #define GUI_WARN_MS       3500 /* a resolution warning's line and its row's flash */
 #define GUI_WARN_BLINK_MS 150  /* the flash's on and off, the row in the warning colour then its own */
-#define GUI_SIZE_BAR      21   /* the slider's columns where they fit: five a step, and the knob's */
+#define GUI_SIZE_BAR      19   /* the slider's columns where they fit: six a step, and the knob's */
 /* the dialog's choices while it picks, then while it asks */
 static const char* const size_choices[2][2] = {{SNX_TR_NOOP("OK"), SNX_TR_NOOP("Cancel")},
                                                {SNX_TR_NOOP("Keep"), SNX_TR_NOOP("Back")}};
 static bool size_picking(const App* app) { return app->sizes_shown && !app->size_until; }
 /* the dialog, its slider on the size in use a step on (step -1, 0 or 1), OK in focus */
 static void sizes_open(App* app, int step) {
-    app->size_pick = SDL_clamp(app->menu.text_size + step, 0, GUI_TEXT_MAX);
+    app->size_pick = SDL_clamp(app->menu.text_size + step, 1, GUI_TEXT_MAX);
     app->size_until = 0;
     app->sizes.count = 2;
     app->sizes.focus = 0;
@@ -7815,9 +7816,9 @@ static void sizes_open(App* app, int step) {
 }
 /* the columns the widest step's name takes, where the dialog shows the one picked */
 static int size_name_cols(void) {
-    int k, cols = 0;
-    for (k = 0; k < GUI_SIZE_STEPS; ++k) cols = SDL_max(cols, gui_text_cols(snx_tr(size_labels[k])));
-    return cols;
+    char name[16];
+    size_name(GUI_TEXT_MAX, name, sizeof name);
+    return gui_text_cols(name);
 }
 /* the dialog's boxes: its choices' (box the whole dialog's), the slider's row and the question's rows under it */
 typedef struct {
@@ -7866,7 +7867,7 @@ static void render_sizes(App* app) {
     sizes_place(app, &b);
     over_box(app, b.c.box, snx_tr("UI scale"));
     bar = sizes_bar(app, &b);
-    slider_draw(app, bar, app->size_pick, size_picking(app));
+    slider_draw(app, bar, app->size_pick - 1, size_picking(app));
     size_name(app->size_pick, name, sizeof name);
     text_in(app, b.body, bar.x + bar.w + cell_w(app), b.body.y, name, rgb(t->ink));
     if (app->size_until) wrap_in(app, b.line, b.line.x, b.line.y, app->size_line, 0, rgb(t->warning));
@@ -7891,7 +7892,7 @@ static void size_take(App* app) {
 }
 /* the slider at step k (Left/Right, a drag, a tap) while the dialog picks: nothing else changes until OK */
 static void slider_to(App* app, int k) {
-    if (size_picking(app)) app->size_pick = SDL_clamp(k, 0, GUI_TEXT_MAX);
+    if (size_picking(app)) app->size_pick = SDL_clamp(k, 0, GUI_SIZE_STEPS - 1) + 1;
 }
 /* the slider in bar: a line, a tick a step, the knob on step at, in the focus's colour while focused; kept for the
    pointer (slider_at) */
@@ -7933,7 +7934,7 @@ static void size_choice(App* app, int i) {
    the one in focus, ESC is Cancel or Back */
 static void sizes_key(App* app, GuiKey key) {
     if (size_picking(app) && (key == GUI_LEFT || key == GUI_RIGHT)) {
-        slider_to(app, app->size_pick + (key == GUI_LEFT ? -1 : 1));
+        slider_to(app, app->size_pick - 1 + (key == GUI_LEFT ? -1 : 1));
         return;
     }
     switch (gui_choice_key(&app->sizes, key)) {
@@ -9428,6 +9429,15 @@ static void setup_enter(App* app) {
         default: notice_choices(app, false); break; /* the notices' Next or OK, Back past the first */
     }
 }
+/* a start's UI scale where app.ini had none: written there now, or with the setup's picks once it is done, in the
+   folders Install picks */
+static void scale_keep(App* app) {
+    if (app->scale_new && app->setup_on)
+        app->setup_save = true;
+    else if (app->scale_new)
+        app_save(app);
+    app->scale_new = false;
+}
 /* the setup at the start, unless --no-setup leaves it out: the pages setup.ini has left, or none */
 static void setup_start(App* app) {
     char why[512], *file = snx_setup_file(app->home_dir ? app->home_dir : app->data_dir);
@@ -9436,6 +9446,7 @@ static void setup_start(App* app) {
     app->setup_count = app->setup_page = 0;
     if (snx_setup_skip || !file) {
         free(file);
+        scale_keep(app);
         return;
     }
     if (snx_setup_read(file, &app->setup, why, sizeof why))
@@ -9449,6 +9460,7 @@ static void setup_start(App* app) {
     app->setup_save = app->setup_moved = false;
     app->setup_language = app->language;
     if (app->setup_on) setup_enter(app);
+    scale_keep(app);
 }
 /* the last page done: setup.ini says so, the language picked kept in app.ini, the menu with the user its head shows */
 static void setup_finish(App* app) {

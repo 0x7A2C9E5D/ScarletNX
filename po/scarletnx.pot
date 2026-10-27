@@ -953,7 +953,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s: %s is no longer a UI scale: ui_scale = auto now"
+msgid "%s: %s is no longer a UI scale: ui_scale = %d now"
 msgstr ""
 
 #: src/gui/main.c
@@ -1934,7 +1934,7 @@ msgid "UI scale"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Auto fits the screen. A new scale asks to be kept"
+msgid "1x to 4x. A new one asks to be kept"
 msgstr ""
 
 #: src/gui/main.c
@@ -4299,11 +4299,11 @@ msgid "The launcher's UI scale"
 msgstr ""
 
 #: src/common/utilities/setup.c
-msgid "0.25, 0.5 and 0.75 of Auto"
+msgid "Auto, and 0.25, 0.5 and 0.75 of it"
 msgstr ""
 
 #: src/common/utilities/setup.c
-msgid "Auto, then 1x to 4x: the letters have whole sizes only"
+msgid "1x to 4x: the number Auto gave that screen"
 msgstr ""
 
 #: src/nx/runtime/settings.txt
