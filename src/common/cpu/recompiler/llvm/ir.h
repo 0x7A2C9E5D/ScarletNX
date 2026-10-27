@@ -246,6 +246,8 @@ void ir_store(SnxIr* ir, LLVMValueRef value, LLVMValueRef pointer);
 LLVMValueRef ir_tag_cpu(SnxIr* ir, LLVMValueRef access);
 LLVMValueRef ir_tag_guest(SnxIr* ir, LLVMValueRef access);
 LLVMValueRef ir_cpu_load(SnxIr* ir, LLVMTypeRef type, size_t offset);
+/* iN */
+static inline LLVMTypeRef ir_int_type(SnxIr* ir, unsigned bits) { return LLVMIntTypeInContext(ir->ctx, bits); }
 void ir_cpu_store(SnxIr* ir, LLVMValueRef value, size_t offset);
 size_t ir_off_x(unsigned n);
 size_t ir_off_v(unsigned n);
@@ -281,6 +283,8 @@ LLVMValueRef ir_call(SnxIr* ir, LLVMValueRef function, LLVMValueRef* args, unsig
 LLVMValueRef ir_call_helper(SnxIr* ir, int id, LLVMValueRef* args, unsigned count);
 /* an out-of-line function of the runtime library (cpu_helpers.c, rtlib.c), declared on first use */
 LLVMValueRef ir_extern(SnxIr* ir, const char* name, LLVMTypeRef ret, LLVMTypeRef* params, unsigned count);
+/* the enum attribute name (no value) at index of function */
+void ir_attribute(SnxIr* ir, LLVMValueRef function, LLVMAttributeIndex index, const char* name);
 /* c->rt-><field>(args...) */
 LLVMValueRef ir_rt_call(SnxIr* ir, size_t offset, LLVMTypeRef ret, LLVMTypeRef* params, LLVMValueRef* args,
                         unsigned count);
