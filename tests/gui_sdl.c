@@ -3643,33 +3643,80 @@ int main(int argc, char** argv) {
     key(&app, SDLK_RETURN);
     typed(&app, "0.5");
     render(&app);
-    shows(&app, "- resolution  0.5_", yellow); /* right in its field, the cursor in the fifth slot */
+    { /* typed in a dialog over the group, the row's label its title: the text and the cursor in its field, what the
+         row takes with its numbers, OK and Cancel; the row keeps its value until OK, ESC and a click off it leaving it
+         so, and a click on OK taking it as Enter does */
+        GuiTypedBoxes b;
+        char takes[128];
+        bool filled = app.theme.panels == GUI_PANELS_FILL;
+        int cw = cell_w(&app);
+        typed_place(&app, &b);
+        text_px_is(&app, b.c.box.x + cw, b.c.box.y + 2 * app.scale, "resolution",
+                   rgb(filled ? app.theme.page : app.theme.ink), rgb(filled ? app.theme.ink : app.theme.page));
+        text_px_is(&app, b.field.x + cw / 2, b.field.y + 2 * app.scale, "0.5_", rgb(app.theme.ink),
+                   rgb(app.theme.page));
+        gui_editor_takes(&app.editor, takes, sizeof takes);
+        assert(!strcmp(takes, "A number from 0.25 to 16, two decimals at most; empty, the default 1"));
+        shows(&app, takes, rgb(app.theme.soft));
+        shows(&app, "- OK", yellow);
+        shows(&app, "- Cancel", normal);
+        assert(SDL_TextInputActive(app.window) && !gui_settings_value(&app.settings, "resolution"));
+        key(&app, SDLK_ESCAPE);
+        assert(!app.editor.typing && !SDL_TextInputActive(app.window) &&
+               !gui_settings_value(&app.settings, "resolution"));
+        key(&app, SDLK_RETURN);
+        typed(&app, "3");
+        render(&app);
+        typed_place(&app, &b);
+        mouse_px(&app, b.c.box.x - 4, b.c.box.y + b.c.box.h / 2, true);
+        assert(!app.editor.typing && !gui_settings_value(&app.settings, "resolution"));
+        key(&app, SDLK_RETURN);
+        typed(&app, "0.5");
+        render(&app);
+    }
     key(&app, SDLK_RETURN);
-    assert(setting_is(&app, "resolution", "0.5"));
+    assert(setting_is(&app, "resolution", "0.5") && !app.editor.typing && !SDL_TextInputActive(app.window));
     key(&app, SDLK_RETURN);
     for (int i = 0; i < 3; ++i) key(&app, SDLK_BACKSPACE);
     typed(&app, "2.0");
-    key(&app, SDLK_RETURN);
-    assert(setting_is(&app, "resolution", "2"));
+    {
+        GuiTypedBoxes b;
+        render(&app);
+        typed_place(&app, &b);
+        point(&app, choice_box(&app, &b.c, 0), true); /* OK clicked */
+    }
+    assert(setting_is(&app, "resolution", "2") && !app.editor.typing);
     key(&app, SDLK_RETURN);
     key(&app, SDLK_BACKSPACE);
     key(&app, SDLK_RETURN);
     assert(setting_is(&app, "resolution", "1"));
     render(&app);
     shows(&app, "- resolution    1", yellow); /* the default itself, not [default] */
-    /* past 4x and under 0.5x: the row's own warning line, while the value clamps to the nearest in range */
+    /* past the range: refused, OK leaving its dialog up, saying the value typed and the range, the row as it was;
+       past 4x and under 0.5x in the range: the row's own warning line */
     key(&app, SDLK_RETURN);
     key(&app, SDLK_BACKSPACE);
     typed(&app, "20");
     key(&app, SDLK_RETURN);
-    assert(setting_is(&app, "resolution", "16") && strstr(app.editor.note, "Over 4x"));
+    assert(app.editor.typing && setting_is(&app, "resolution", "1"));
+    assert(!strcmp(app.editor.note, "20 is not a number from 0.25 to 16, two decimals at most"));
+    render(&app);
+    shows(&app, app.editor.note, rgb(app.theme.warning)); /* in its dialog */
+    key(&app, SDLK_BACKSPACE);
+    key(&app, SDLK_BACKSPACE);
+    typed(&app, "8");
+    key(&app, SDLK_RETURN);
+    assert(!app.editor.typing && setting_is(&app, "resolution", "8") && strstr(app.editor.note, "Over 4x"));
     render(&app); /* the row in its warning flash */
     key(&app, SDLK_RETURN);
     key(&app, SDLK_BACKSPACE);
-    key(&app, SDLK_BACKSPACE);
     typed(&app, "0.05");
     key(&app, SDLK_RETURN);
-    assert(setting_is(&app, "resolution", "0.25") && strstr(app.editor.note, "Under 0.5x"));
+    assert(app.editor.typing && setting_is(&app, "resolution", "8") && strstr(app.editor.note, "0.05 is not a number"));
+    for (int i = 0; i < 4; ++i) key(&app, SDLK_BACKSPACE);
+    typed(&app, "0.3");
+    key(&app, SDLK_RETURN);
+    assert(setting_is(&app, "resolution", "0.3") && strstr(app.editor.note, "Under 0.5x"));
     render(&app);
     /* a scale that is no whole number and does not halve to 1 gets Eden's line */
     key(&app, SDLK_RETURN);
@@ -8432,6 +8479,13 @@ int main(int argc, char** argv) {
                 key(&app, SDLK_RETURN);
                 mouse_px(&app, pk.rows[GUI_PICK_HEX].x + 4, pk.rows[GUI_PICK_HEX].y + 4, true);
                 assert(app.editor.typing && app.editor.channel == GUI_PICK_HEX && SDL_TextInputActive(app.window));
+                { /* typed in the dialog, over the picker */
+                    char takes[64];
+                    render(&app);
+                    gui_editor_takes(&app.editor, takes, sizeof takes);
+                    assert(!strcmp(takes, "A color: #RRGGBB, as #1A2B3C"));
+                    shows(&app, takes, rgb(app.theme.soft));
+                }
                 for (int i = 0; i < 7; ++i) key(&app, SDLK_BACKSPACE);
                 typed(&app, "#102030");
                 key(&app, SDLK_RETURN);
@@ -9308,20 +9362,25 @@ int main(int argc, char** argv) {
             assert(app.editor.typing);
             typed(&app, "a theme name long enough to run past its box's right edge");
             render(&app);
-            form_boxes(&app, &f);
-            b = form_row_box(&app, &f, false, row);
             {
-                int room = (b.w - cw * 3 / 2) / cw, end = b.x + cw / 2 + (room - 2) * cw, x, y;
-                text_px_is(&app, end, item_text_y(&app, b), "e_", yellow, black); /* its end, and the cursor */
-                /* wide letters typed in its place (tests/po/xx.po's Menu, 52 columns in 78 bytes): the end still in
-                   view, the last letter's two columns and the cursor's within the box, a column short of it at most */
+                GuiTypedBoxes tb;
+                int room, end, x, y, top;
+                typed_place(&app, &tb);
+                room = (tb.field.w - cw) / cw;
+                end = tb.field.x + cw / 2 + (room - 2) * cw;
+                top = tb.field.y + 2 * app.scale;
+                assert(room < 57);
+                text_px_is(&app, end, top, "e_", normal, black); /* in its dialog's field: its end, and the cursor */
+                /* wide letters typed (tests/po/xx.po's Menu, 52 columns in 78 bytes): the end still in view, the last
+                   letter's two columns and the cursor's within the field, a column short of it at most */
                 for (x = 0; x < 80; ++x) key(&app, SDLK_BACKSPACE);
                 assert(!app.editor.text[0]);
                 for (x = 0; x < 13; ++x) typed(&app, "\xe8\x8f\x9c\xe5\x8d\x95");
                 assert(strlen(app.editor.text) == 78);
                 render(&app);
-                assert(find_letters(&app, "\xe5\x8d\x95_", yellow, 1, &x, &y) && y == item_text_y(&app, b));
-                assert(x <= b.x + cw / 2 + (room - 3) * cw && x >= b.x + cw / 2 + (room - 4) * cw);
+                typed_place(&app, &tb);
+                assert(find_letters(&app, "\xe5\x8d\x95_", normal, 1, &x, &y) && y == top);
+                assert(x <= tb.field.x + cw / 2 + (room - 3) * cw && x >= tb.field.x + cw / 2 + (room - 4) * cw);
             }
             key(&app, SDLK_ESCAPE);
             key(&app, SDLK_ESCAPE);
@@ -9793,11 +9852,10 @@ int main(int argc, char** argv) {
                 key(&app, SDLK_RETURN);
                 for (int i = 0; i < 8; ++i) key(&app, SDLK_BACKSPACE);
                 typed(&app, "Ab");
-                key(&app, SDLK_RETURN);
+                key(&app, SDLK_RETURN); /* refused in its dialog, which goes on */
                 assert(!strcmp(app.editor.note, "Ab is not a nickname: nickname 4 to 20 of A-Z a-z 0-9 space . _ -") &&
-                       !strcmp(app.users_form.nick[0], "Aogo 55"));
-                key(&app, SDLK_RETURN); /* back as the tests below know it */
-                for (int i = 0; i < 8; ++i) key(&app, SDLK_BACKSPACE);
+                       !strcmp(app.users_form.nick[0], "Aogo 55") && app.editor.typing);
+                for (int i = 0; i < 8; ++i) key(&app, SDLK_BACKSPACE); /* back as the tests below know it */
                 typed(&app, "Aogo");
                 key(&app, SDLK_RETURN);
                 assert(!strcmp(app.user_name, "Aogo"));
