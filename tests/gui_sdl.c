@@ -88,9 +88,12 @@ static void share_pick(App* app, int i) {
 /* Enter on a Folders row, and choice i of its box taken: 0 Open Folder, then Change Folder and Reset to Default on a
    place, Remove from Library on an Extra */
 static void folder_pick(App* app, int i) {
+    int x, y;
     key(app, SDLK_RETURN);
     assert(app->picks_shown && app->picks_of == GUI_PICKS_FOLDER && app->pick_row == app->editor.row &&
            i < app->picks.count && !app->picks.focus);
+    render(app); /* drawn over the form, its first choice in focus */
+    assert(find_text(app, "Open Folder", yellow, 1, &x, &y));
     for (int k = 0; k < i; ++k) key(app, SDLK_DOWN);
     key(app, SDLK_RETURN);
     assert(!app->picks_shown);

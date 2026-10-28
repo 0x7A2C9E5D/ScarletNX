@@ -10470,6 +10470,8 @@ static void render(App* app) {
             render_typed(app); /* over the picker too, its #RRGGBB typed */
         else if (app->sizes_shown)
             render_sizes(app);
+        else if (app->picks_shown)
+            render_picks(app); /* a Folders row's box */
         else if (app->users_shown)
             render_users(app); /* opened from the form's head, as from the menu's */
     } else
