@@ -113,8 +113,11 @@ typedef struct {
     const unsigned char* functions; /* the body's function list, in the buffer */
     const unsigned char* object;
     size_t object_size, function_count;
+    SnxU64 table; /* the unit's table, once loaded: a load again publishes its code from it */
     char name[64];
-    int state; /* 0 not loaded yet, 1 loaded, -1 refused (its code changed since, or the loader refused it) */
+    int state; /* 0 not loaded yet, 1 loaded (and published again for a pc of it that is not done: its code was
+                  invalidated since and may still be what the record holds), -1 refused (its code changed since, or
+                  the loader refused it) */
 } CacheRecord;
 typedef struct {
     SnxU64 key; /* pc | 1, 0 for a free slot */
@@ -127,6 +130,7 @@ typedef struct {
     CacheSlot* index; /* the records' leaders, the newest record's for a pc in several, at most half full */
     size_t capacity;  /* a power of two */
     FILE* file;       /* appended to; NULL when there is no cache or it can't be written */
+    size_t size;      /* the file's bytes: a record that would take it past SNX_JIT_CACHE_MAX is left out */
 } Cache;
 
 struct SnxJitService {
@@ -686,8 +690,10 @@ static int cache_index(Cache* c) {
     return 0;
 }
 
-/* Opens the cache: reads what an earlier run with the same key wrote, and starts the file over when there is none, its
-   key differs, it is too large or a run left a record unfinished (rewritten with the whole ones) */
+/* Opens the cache: reads what an earlier run with the same key wrote, and starts the file over when there is none or
+   its key differs. A run that left a record unfinished, or a file past SNX_JIT_CACHE_MAX (an earlier build's appends
+   had no limit), is rewritten with the whole records the limit holds: refusing the file outright threw a full cache
+   away the run after it filled, so every other run started cold */
 static void cache_open(SnxJitService* s) {
     Cache* c = &s->cache;
     char* key = cache_key(s);
@@ -698,8 +704,8 @@ static void cache_open(SnxJitService* s) {
     size_t key_length = strlen(key);
     size_t header = 8 + 4 + key_length;
     if (f && !fseek(f, 0, SEEK_END)) length = ftell(f);
-    if (f && length >= (long)header && (size_t)length <= SNX_JIT_CACHE_MAX && !fseek(f, 0, SEEK_SET)) {
-        size = (size_t)length;
+    if (f && length >= (long)header && !fseek(f, 0, SEEK_SET)) {
+        size = (size_t)length < SNX_JIT_CACHE_MAX ? (size_t)length : SNX_JIT_CACHE_MAX;
         c->buffer = (unsigned char*)malloc(size);
         if (c->buffer && fread(c->buffer, 1, size, f) != size) {
             free(c->buffer);
@@ -724,8 +730,9 @@ static void cache_open(SnxJitService* s) {
             c->count = 0;
         }
     }
-    if (c->buffer && used == size) {
+    if (c->buffer && used == (size_t)length) {
         c->file = fopen(s->config.cache_path, "ab");
+        c->size = used;
     } else {
         /* a new file: the header, and the whole records of the old one */
         char* temporary = (char*)malloc(strlen(s->config.cache_path) + 8);
@@ -749,6 +756,7 @@ static void cache_open(SnxJitService* s) {
                 fclose(c->file);
                 remove(s->config.cache_path); /* Windows' rename doesn't replace */
                 c->file = rename(temporary, s->config.cache_path) ? NULL : fopen(s->config.cache_path, "ab");
+                c->size = header + (c->buffer ? used - header : 0);
             }
             free(temporary);
         }
@@ -821,11 +829,16 @@ static void cache_append(SnxJitService* s, const SnxCodegen* codegen, const char
         snx_st_le32(head, SNX_JIT_RECORD_MAGIC);
         snx_st_le64(head + 4, (SnxU64)body.size);
         out64(&body, h1);
+        /* a full file takes no more: past the limit the next run would read only the records before it */
+        if (!body.failed &&
+            (s->cache.size > SNX_JIT_CACHE_MAX - 12 || body.size > SNX_JIT_CACHE_MAX - 12 - s->cache.size))
+            body.failed = 1;
         if (!body.failed && (fwrite(head, 1, 12, s->cache.file) != 12 ||
                              fwrite(body.bytes, 1, body.size, s->cache.file) != body.size || fflush(s->cache.file))) {
             fclose(s->cache.file); /* a disk that failed once: no more records this run */
             s->cache.file = NULL;
-        }
+        } else if (!body.failed)
+            s->cache.size += 12 + body.size;
     }
     free(body.bytes);
     free(runs.bytes);
@@ -855,28 +868,34 @@ static int cache_load(SnxJitService* s, CacheRecord* r, const SnxCodeImage* imag
         }
         p += 4 + 12 * runs + 16;
     }
-    /* the object at whatever offset the file put it, copied where malloc aligns it: the ELF reader reads its headers,
-       sections and relocations in place. Without the memory, refused as the loader refuses */
-    unsigned char* object = (unsigned char*)malloc(r->object_size ? r->object_size : 1);
-    if (object) memcpy(object, r->object, r->object_size);
-    SnxLinkInput input;
-    input.data = object;
-    input.size = r->object_size;
-    input.name = r->name;
-    names[0] = r->name;
-    int refused = !object || snx_code_load(s->loader, &input, 1, names, 1, &table, error, sizeof(error));
-    free(object);
-    if (refused) {
-        r->state = -1;
-        return 0;
+    if (r->state == 1)
+        table = r->table; /* its code is in the arena still (code is never freed), compiled from what the check found */
+    else {
+        /* the object at whatever offset the file put it, copied where malloc aligns it: the ELF reader reads its
+           headers, sections and relocations in place. Without the memory, refused as the loader refuses */
+        unsigned char* object = (unsigned char*)malloc(r->object_size ? r->object_size : 1);
+        if (object) memcpy(object, r->object, r->object_size);
+        SnxLinkInput input;
+        input.data = object;
+        input.size = r->object_size;
+        input.name = r->name;
+        names[0] = r->name;
+        int refused = !object || snx_code_load(s->loader, &input, 1, names, 1, &table, error, sizeof(error));
+        free(object);
+        if (refused) {
+            r->state = -1;
+            return 0;
+        }
+        r->state = 1;
+        r->table = table;
     }
-    r->state = 1;
     /* publish: each function's leaders, into their empty slots and the service's table (compile's), unless memory
        changed since the record's code was checked */
     p = r->functions;
     lock(&s->lock);
     if (epoch != s->epoch) {
-        r->state = -1;
+        /* memory changed somewhere while it loaded, perhaps not under it: the next miss checks it again (its object
+           loaded, once it is) */
         unlock(&s->lock);
         return 0;
     }
@@ -915,7 +934,8 @@ static int cache_load(SnxJitService* s, CacheRecord* r, const SnxCodeImage* imag
             SnxU64 address = snx_ld_le64(p + 12 + 8 * k);
             Entry* e = add(s, address, DONE);
             GuestFn expected = NULL;
-            if (e && e->state == GONE) continue; /* invalidated while this record was loading */
+            /* a GONE pc was invalidated before the record's code was checked (epoch is unchanged since), and the check
+               found the record's code still there: published again, as a load after an invalidation is for */
             Region* region = region_of(s, address);
             if (region)
                 __atomic_compare_exchange_n(slot(region, address), &expected, code, 0, __ATOMIC_RELEASE,
@@ -1001,7 +1021,15 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count, SnxU64 st
         lock(&s->load_lock);
         for (size_t i = 0; i < count; ++i) {
             CacheRecord* record = cache_find(&s->cache, pcs[i]);
-            if (record && !record->state) cache_load(s, record, images, image_count);
+            if (!record || record->state < 0) continue;
+            /* a pc of a record loaded before is missed again when its code was invalidated since (a mapping or
+               permission change over it, which a mod loader's patching makes): the record is checked and loaded
+               again, not compiled. Compiling those took most of a cached run's waits, and appended their units again */
+            lock(&s->lock);
+            Entry* e = find(s, pcs[i]);
+            int done = e && e->state == DONE && e->code;
+            unlock(&s->lock);
+            if (!done) cache_load(s, record, images, image_count);
         }
         unlock(&s->load_lock);
         lock(&s->lock);
