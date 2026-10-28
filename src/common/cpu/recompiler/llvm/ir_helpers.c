@@ -387,13 +387,24 @@ static LLVMValueRef cas(SnxIr* ir, LLVMValueRef address, unsigned bits, LLVMValu
     return ir_bool32(ir, LLVMBuildExtractValue(B, x, 1, ""));
 }
 static LLVMValueRef exclusive_match(SnxIr* ir, LLVMValueRef a, LLVMValueRef size) {
+    /* The monitor is armed for an address, and a store-exclusive succeeds when that address is the same and the
+       monitor's range covers the store's: the console allows a store-exclusive at a smaller size than the load that
+       armed it, which games use to change part of a wider counter in place. Requiring the sizes to be equal made
+       such a store never land, so the game's retry loop spun on it for good and it never reached its own game. */
     LLVMValueRef on = ir_cpu_load(ir, ir->t_i32, offsetof(CPU, excl_on));
     LLVMValueRef address = ir_cpu_load(ir, ir->t_i64, offsetof(CPU, excl_addr));
     LLVMValueRef have = ir_cpu_load(ir, ir->t_i32, offsetof(CPU, excl_size));
+    /* the two size bits and the pair's flag: a pair's load sets the flag and its store names it too, so both sides
+       mask it off before the sizes are compared (a pair, 0x13, covers a single's 0x03 and so succeeds) */
+    LLVMValueRef mask = ir_i32(ir, 0x13);
+    LLVMValueRef armed_size =
+        LLVMBuildShl(B, ir_i64(ir, 8), LLVMBuildSExt(B, LLVMBuildAnd(B, have, mask, ""), ir->t_i64, ""), "");
+    LLVMValueRef this_size =
+        LLVMBuildShl(B, ir_i64(ir, 8), LLVMBuildSExt(B, LLVMBuildAnd(B, size, mask, ""), ir->t_i64, ""), "");
     return LLVMBuildAnd(B,
                         LLVMBuildAnd(B, LLVMBuildICmp(B, LLVMIntNE, on, ir_i32(ir, 0), ""),
                                      LLVMBuildICmp(B, LLVMIntEQ, address, a, ""), ""),
-                        LLVMBuildICmp(B, LLVMIntEQ, have, size, ""), "");
+                        LLVMBuildICmp(B, LLVMIntULE, this_size, armed_size, ""), "");
 }
 /* stx(c,M,a,sz,v) */
 static void build_stx(SnxIr* ir, LLVMValueRef function) {

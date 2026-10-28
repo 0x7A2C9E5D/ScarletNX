@@ -464,10 +464,16 @@ SNX_INLINE u64 ldx(CPU* c, u8* M, u64 a, u32 sz) {
     c->excl_on = 1;
     return v;
 }
-/* STXR/STLXR: the status, 0 when stored */
+/* STXR/STLXR: the status, 0 when stored. The monitor's range must cover the store's, as the console allows a
+   store-exclusive at a smaller size than the load that armed it: games deliberately pair a wide load-exclusive with a
+   narrow store-exclusive to change part of a wider counter in place, and requiring the sizes to be equal made such a
+   pair never store, so the game's retry loop spun on it for good. */
 SNX_INLINE u32 stx(CPU* c, u8* M, u64 a, u32 sz, u64 v) {
     u32 stored = 0;
-    if (c->excl_on && c->excl_addr == a && c->excl_size == sz) {
+    /* the size bits and a pair's flag, which a pair's load sets and its store names too: masked off on both sides,
+       so a pair (0x13) covers a single (0x03) and a single inside a wider single succeeds */
+    u64 armed = 8ull << (c->excl_size & 3), this = 8ull << (sz & 3);
+    if (c->excl_on && c->excl_addr == a && this <= armed) {
         if (sz == 0)
             stored = snx_cas8((u8*)MP(a), (u8)c->excl_val, (u8)v);
         else if (sz == 1)
