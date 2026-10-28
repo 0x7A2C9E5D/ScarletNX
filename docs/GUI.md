@@ -57,8 +57,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Back goes back, Tab to the next screen, Enter or Tap selects, Swipe turns the page). A key of
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
   presses the key when its words all press one. `Arrows`, `mouse`, `pad` and `D-pad` press nothing.
-- The menu, top to bottom: the three loads, **Install Keys**, **Settings**, **Share Log**, on
-  Android **Open Data Folder**, and **Exit**. The games, and the recent ones, are the Games tab's. A load whose driver
+- The menu, top to bottom: the three loads, **Install Keys**, **Settings**, **Share Log**,
+  **Folders**, and **Exit**. The games, and the recent ones, are the Games tab's. A load whose driver
   is neither beside ScarletNX nor on PATH, as those an app leaves out ([APPLE](APPLE.md)), is greyed out, still there,
   and Enter or a tap on it says which driver it misses rather than opening its screen; the drivers are looked for
   again each second, and with F5.
@@ -143,7 +143,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   - **App Folders**: **Data** (`recompiled/`, `dumps/`, `themes/` and `prod.keys`), **Settings**, shown only
     (`app.ini`, which names the others, and each game's `.ini`: `XDG_CONFIG_HOME` moves it, a portable copy keeps its
     own), **Logs** (the games' logs and `threads.txt`, `recent.txt`, `last-run.log`, `last-recompile.log` and the
-    launcher's `scarletnx-console.log` and `scarletnx-error.log`), **Caches** (the recompile's
+    launcher's `scarletnx-console-<date>.log` and `scarletnx-error.log`), **Caches** (the recompile's
     `units/`, the shader caches, the dumps' icons, and Extractions by default) and **Extractions**;
   - **Dumps Library**: its **Main**, the data folder's `dumps/` (with its subfolders, going with the data folder), then its
     **Extra** folders, whose dumps Games lists, and **Add a folder**;
@@ -237,7 +237,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   scale, as many as fit 16 rows (30 on a phone), and writes it; `text_size` before, still read and written again as
   `ui_scale`, said once; `auto`, `0.25`, `0.5` and `0.75` of older versions read as that number and written again so,
   said once), `recompile_background` (`full`, the default, or `gentle`; a word it does not know named
-  with the one kept, `recompile_background = slow (it keeps full)`) and `language` (`auto`, `en` or a language's BCP 47
+  with the one kept, `recompile_background = slow (it keeps full)`), `dumps_subfolders` (`on`, the default: dumps/'s
+  subfolders' dumps listed too; `off`: its own alone; Folders' row of it switches it) and `language` (`auto`, `en` or a
+  language's BCP 47
   tag, as `pt-BR` or `zh-Hans-CN`), and once one
   is picked `[folders]` with Folders' `data`, `recompiled`, `work`, `state` (Logs) and `cache` (Caches) (a full path,
   nothing for the default). A value the
@@ -275,15 +277,26 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   which it took. A language written in two scripts goes by its script, written or implied by its country (`zh-CN`,
   `zh-SG` simplified, `zh-TW`, `zh-HK`, `zh-MO` traditional): a system in one never takes a catalog of the other. The
   words change at once; a phrase the language has not translated stays English.
-- **Share Log** saves the last run's output, the queue's recompiles' (`last-recompile.log`), the launcher's own log
-  and its fatal errors (below) and the game log to `scarletnx.log`. After a run or a recompile of the queue that ended abnormally (not by ESC) it blinks red, as
-  Install Keys does, until its log is saved or a run ends well. On the
-  desktop it goes in the working folder with its path copied. On Android it goes to the
-  data folder's `state/` and is shared.
-- **Open Data Folder**, on Android, opens the data folder, the app's own storage, in the
-  system's Files app ([ANDROID](ANDROID.md)).
-- The launcher's log, `scarletnx-console.log` in its state folder (Settings > App > Folders' Logs; on iOS in `logs/`
-  of the app's Documents, [APPLE](APPLE.md)), holds what it says: its start (its build and data folder), each failure
+- **Share Log** asks how. **Share Zip** saves `scarletnx-logs-2026-10-28_14-05-33.zip`. Its `summary.txt` holds the message on the screen,
+  the newest game log's summary, the last run's output, the queue's recompiles' (`last-recompile.log`), the launcher's
+  own log and its fatal errors (below) and the game log. Beside it, whole, the launcher's logs (`launcher/`) and the
+  games' logs of the last 14 days, each game's runs under `games/<its name> [<its folder>]/` by when each was last
+  written; in every file a home folder is written `~`. **Share Log** saves that summary alone as `scarletnx.log`. Either
+  goes in `share/` of Folders' Logs (`~/.local/state/scarletnx/share/`; on iOS Documents' `logs/share/`, which the Files
+  app shows), emptied of what was shared before, and that folder opens in the system's file manager, to share from
+  there. **Open Logs Folder** opens Folders' Logs, where they all are. After a run or a recompile of the queue that
+  ended abnormally (not by ESC) it blinks red, as Install Keys does, until its logs are saved or a run ends well.
+- **Folders** opens Settings > App > Folders (ESC comes back to the menu). There Enter, or a tap, on a folder gives
+  **Open Folder**, which opens it in the system's file manager (on Android its Files app, the data folder through the
+  app's own storage, [ANDROID](ANDROID.md)), **Change Folder** and **Reset to Default**; on an Extra of a library
+  Open Folder and **Remove from Library**; on dumps/ and Settings, Open Folder. A row of the Dumps Library, dumps/ or an
+  Extra, also gives **Subfolders**, `(*)` while its subfolders' dumps are listed and `( )` while not: Enter switches
+  it, the box staying, kept at once (dumps/ in `app.ini`, an Extra in `folders.txt`). Del still puts a folder back to
+  its default, or takes an Extra off.
+- The launcher's log, a file a day, `scarletnx-console-2026-10-28.log` in its state folder (Settings > App > Folders'
+  Logs; on iOS in `logs/` of the app's Documents, [APPLE](APPLE.md)), the 14 newest days kept (a day's first line
+  deletes the older ones; the `scarletnx-console.log` older versions wrote stays as it is), holds what it says: its
+  start (its build and data folder), each failure
   once in a session (what the box over the screen says, shown or not), the warnings it gives as it opens, a dump whose
   icon the driver did not give with what the driver said. Each line starts with the time and the launcher's process
   ID, `2026-10-25 11:30:02 [4242] `, so two launchers open at once write theirs apart, and the lines go to stderr
@@ -312,7 +325,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   they go while the app is in testing: Android's Settings > Apps > ScarletNX > Storage > Clear storage, which takes
   every game, save and key in the app with them. The menu never reads them: it starts from its defaults.
 - **Recent Games**, at the top of Games, lists the last games run, newest first, three and a row that
-  shows the rest, by the name their run gave (the runner's `ScarletNX - <name>` line), else their file's.
+  shows the rest, by the name their run gave (the runner's `ScarletNX - <name>` line), else their file's. A dump not
+  made into a game yet stays in the list but has no row, as opening it would compile it; once made, by any run, its
+  game takes its place.
   The focus moves between them and the page's games in one ring, and the tips show the focused
   game's path. Choosing one runs it again with the driver it was
   loaded with and the options the menu has now; a game whose file is gone leaves the
@@ -379,7 +394,8 @@ GBA's. It reads the `recompiled/` of the
 folder the driver works in, which the menu passes it as `--data`: a portable copy's `.scarletnx/` beside the
 AppImage (or the GUI), else the user's data folder, a build tree's menu's too ([USAGE](USAGE.md#folders)), then each
 Extra of Settings > App > Folders. Each game is shown by the name in its `control.nacp`, which the recompile copies into
-its data, else by its folder's or file's name, sorted by it in each folder, with its icon: a game's own, a dump's
+its data, else by its folder's or file's name, sorted by it in each folder, with its icon (Wimsy in grey for one with
+none): a game's own, a dump's
 the one its driver gives (`scarletnx -x --icon`), asked once a session into Caches' `icons/`. A dump the driver gave
 none for says why after its kind (the side box, the tips), and the launcher's log has all the driver said (above); the
 next start asks again. Only immediate files are listed:
@@ -429,7 +445,9 @@ cannot be read is named and the others still listed.
   the page, that Enter opens for a game with updates, DLCs, mods or cheats beside it, and for a game with none of them
   too, whose **Add Mod** and **Add Cheats** copy a folder or a `.txt` the system's picker gives into the game's mods
   and cheats, **Open Folder** lists the game's folders to open (its dump's, its own, saves, settings, logs, caches; one
-  not there greyed) and **Clean Cache** deletes its shader and code caches, asked first ([USAGE](USAGE.md#mods)). On
+  not there greyed), **Save States** opens the box of its save states that S opens (greyed for a dump, which has
+  none; on a phone the way to them, with a tap on *Save states* at the foot) and **Clean Cache** deletes its shader
+  and code caches, asked first ([USAGE](USAGE.md#mods)). On
   another row, a dump, a package or another console's game, it says what it opens. The side panel of a recompiled
   game says how its code was made (`Made with: O2, AOT 81%`, `?` for one an older version made), or, in the failure
   colour, `Needs Recompile` when Play compiles it first.
