@@ -49,7 +49,7 @@ recompiles on the phone, then the game opens.
   game's menu over it, in the menu's look (a gamepad's Home does on every system): the on-screen controls'
   settings, the touch screen's, and *Exit*; back again returns to the game. Leaving it for the home screen keeps it:
   its window is made anew when it comes back.
-- **Share Log**, in the menu, saves the message on the screen, the last run's output (`last-run.log`, which the
+- **Share Log**, in the menu, asks how; its Share Zip saves the message on the screen, the last run's output (`last-run.log`, which the
   menu keeps on every system), the menu's own log and fatal errors (`scarletnx-console-<date>.log`, `scarletnx-error.log`,
   [GUI](GUI.md)) and the newest game log as `summary.txt` of `scarletnx-logs-<date>.zip` in the data folder's
   `state/`, the logs themselves beside it, then opens the share sheet with that zip.

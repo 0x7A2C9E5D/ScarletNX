@@ -80,6 +80,20 @@ static void key(App* app, SDL_Keycode code) {
     while (SDL_PollEvent(&e)) event(app, &e);
 }
 /* a finger down at pixel x, y of the render and lifted at to_x, to_y, as SDL gives it: 0 to 1 across the window */
+/* Share Log pressed on the menu, and choice i of its box taken: 0 the zip, 1 the log, 2 the logs' folder */
+static void share_pick(App* app, int i) {
+    key(app, SDLK_RETURN);
+    assert(app->picks_shown && app->picks_of == GUI_PICKS_SHARE && app->picks.count == 3 && !app->picks.focus);
+    for (int k = 0; k < i; ++k) key(app, SDLK_DOWN);
+    key(app, SDLK_RETURN);
+    assert(!app->picks_shown);
+}
+/* show_folder's URL, which the tests keep instead of opening a file manager on the machine */
+static char g_opened[4096];
+static bool record_url(const char* url) {
+    snprintf(g_opened, sizeof g_opened, "%s", url);
+    return true;
+}
 static void swipe_px(App* app, int x, int y, int to_x, int to_y) {
     SDL_Event e = {0};
     float wx, wy;
@@ -2805,7 +2819,7 @@ static void recompile_queue(App* app) {
         assert(log && strstr(log, "queue game one") && strstr(log, "queue game two") &&
                strstr(log, "queue game fails") && strstr(log, "[ended, status 3]"));
         free(log);
-        share_log(app);
+        share_log(app, true);
         shared = shared_path(app);
         log = zip_text(shared, "summary.txt");
         snprintf(line, sizeof line, "== the last recompile of the queue: %s ==", app->job_log);
@@ -10388,7 +10402,7 @@ int main(int argc, char** argv) {
         {
             char *state = snx_path_join(temporary, "state"), *logged = snx_path_join(state, "scarletnx");
             set_env("XDG_STATE_HOME", state);
-            key(&app, SDLK_RETURN);
+            share_pick(&app, 0);
             zip = shared_path(&app);
             assert(zip && snx_path_within(zip, logged) && !leaf_in(zip, temporary));
             text = zip_text(zip, "summary.txt");
@@ -10402,7 +10416,7 @@ int main(int argc, char** argv) {
         /* a portable copy's .scarletnx/: its state/, on every system */
         app.data_dir = snx_strdup(portable);
         snprintf(app.message, sizeof(app.message), "before the log");
-        key(&app, SDLK_RETURN);
+        share_pick(&app, 0);
         zip = shared_path(&app);
         assert(zip && snx_path_within(zip, kept) && snx_is_file(zip) && !leaf_in(zip, temporary));
         text = zip_text(zip, "summary.txt");
@@ -10442,7 +10456,7 @@ int main(int argc, char** argv) {
             free(text);
             assert(!snx_mkdirs(game) && !snx_write_file(log, crashed, sizeof crashed - 1));
             snprintf(app.message, sizeof(app.message), "before the log");
-            key(&app, SDLK_RETURN);
+            share_pick(&app, 0);
             zip = shared_path(&app);
             assert(zip && snx_path_within(zip, temporary) && snx_is_file(zip));
             { /* beside the summary: the launcher's logs whole, and the game's log under its game and its date */
@@ -10486,6 +10500,46 @@ int main(int argc, char** argv) {
             /* the log's copy, CR gone: no line ends in the '?' a CR would have become */
             assert(strstr(text, "ScarletNX - Some Game\n") && !strstr(text, "?\n"));
             free(text);
+            { /* the box's other two: the one log of before, alone, and the logs' folder opened; Back does neither */
+                char *one = snx_path_join(temporary, "scarletnx.log"), *want, *url;
+                snprintf(app.message, sizeof(app.message), "before the one log");
+                share_pick(&app, 1);
+                want = snx_format("Log saved to %s", one);
+                assert(!strncmp(app.message, want, strlen(want)) && !app.log_due);
+                text = (char*)snx_read_file(one, &size);
+                assert(text && strstr(text, "Message: before the one log") && strstr(text, "== the last run: "));
+                free(text);
+                free(want);
+                assert(!remove(one));
+                app.open_url = record_url;
+                g_opened[0] = 0;
+                share_pick(&app, 2); /* the test's Logs folder, which cannot be made: said, nothing opened */
+                want = snx_format("Cannot make %s: ", place_path(&app, GUI_PLACE_STATE));
+                assert(!strncmp(app.message, want, strlen(want)) && !g_opened[0]);
+                free(want);
+                {
+                    char* kept_state = app.state_dir;
+                    app.state_dir = snx_path_join(temporary, "logs place");
+                    share_pick(&app, 2);
+                    url = file_url(app.state_dir);
+                    want = snx_format("Opened %s", app.state_dir);
+                    assert(url && !strcmp(g_opened, url) && !strcmp(app.message, want) && snx_is_dir(app.state_dir));
+                    assert(!snx_remove_tree(app.state_dir));
+                    free(want);
+                    free(url);
+                    free(app.state_dir);
+                    app.state_dir = kept_state;
+                }
+                g_opened[0] = 0;
+                snprintf(app.message, sizeof(app.message), "before Back");
+                key(&app, SDLK_RETURN);
+                assert(app.picks_shown);
+                key(&app, SDLK_ESCAPE);
+                assert(!app.picks_shown && !g_opened[0] && !strcmp(app.message, "before Back") &&
+                       !snx_path_exists(one));
+                app.open_url = NULL;
+                free(one);
+            }
             assert(!snx_remove_tree(game));
             free(log);
             free(game);
@@ -10496,7 +10550,7 @@ int main(int argc, char** argv) {
                  *log = snx_path_join(gone, "scarletnx-logs-");
             char* said = snx_format("The logs could not be saved: %s", log);
             app.cwd = gone;
-            key(&app, SDLK_RETURN);
+            share_pick(&app, 0);
             assert(!strncmp(app.message, said, strlen(said)) && strstr(app.message, ".zip could not be written: ") &&
                    !snx_path_exists(gone));
             assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR && !strcmp(app.error_line, app.message));
@@ -10641,7 +10695,7 @@ int main(int argc, char** argv) {
         app.log_due = true; /* a crash's log: Share Log blinks in the failure colour until it is saved */
         assert((ui_menu_entries_attr_cb(&app, GUI_LOG) & (UI_ATTR_FAILURE | UI_ATTR_BLINK)) ==
                (UI_ATTR_FAILURE | UI_ATTR_BLINK));
-        share_log(&app);
+        share_log(&app, true);
         assert(!app.log_due && !(ui_menu_entries_attr_cb(&app, GUI_LOG) & UI_ATTR_FAILURE));
         path = shared_path(&app);
         text = zip_text(path, "summary.txt");

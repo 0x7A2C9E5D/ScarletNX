@@ -107,11 +107,14 @@ typedef enum {
     GUI_CHOICES_ASK,
     GUI_CHOICES_SIZES,
     GUI_CHOICES_DESTS,
-    GUI_CHOICES_TYPED
+    GUI_CHOICES_TYPED,
+    GUI_CHOICES_PICKS
 } GuiChoicesOf;
+/* whose few choices the picks box shows (picks_open) */
+typedef enum { GUI_PICKS_SHARE } GuiPicksOf;
 /* the lists whose first row App's firsts keeps between frames: Choices' a GuiChoicesOf each, then the others */
 enum {
-    GUI_LIST_USERS = GUI_CHOICES_DESTS + 1,
+    GUI_LIST_USERS = GUI_CHOICES_PICKS + 1,
     GUI_LIST_ADDONS,
     GUI_LIST_VIEW,
     GUI_LIST_MENU,
@@ -535,6 +538,10 @@ typedef struct App {
     bool room_ok;    /* asked and answered: the run goes */
     GuiChoice dests; /* Recompile: which of the recompiled library's folders a dump's game goes in */
     bool dests_shown;
+    bool picks_shown; /* a box of a few choices over the screen (picks_open): Share Log's */
+    GuiPicksOf picks_of;
+    GuiChoice picks;
+    bool (*open_url)(const char* url); /* SDL_OpenURL, which a test takes the place of (show_folder) */
     char* dest_file; /* the run asked about, as room_file, and its load */
     int dest_item;
     bool dest_prepared, dest_recompile;
@@ -1664,6 +1671,7 @@ static const char* dots(const App* app, bool finished) {
 }
 static void launch(App* app, char* absolute, bool prepared);
 static void render_dests(App* app);
+static void render_picks(App* app);
 /* the game's name as the run knows it: the runner's banner, else the file's own, in capitals */
 static void run_name_of(const GuiSteps* steps, bool native, const char* file, char* out, size_t size) {
     const char* q;
@@ -1921,7 +1929,7 @@ static void fades_mark(App* app) {
     unsigned mark = screen_mark(app);
     bool boxed = app->confirm.shown || app->sizes_shown || (app->editing && app->editor.typing) || app->users_shown ||
                  app->addons_shown || app->options_shown || app->states_shown || app->cleaned_shown ||
-                 app->left_shown || app->dests_shown || app->help_shown;
+                 app->left_shown || app->dests_shown || app->picks_shown || app->help_shown;
     if (mark != app->screen_was && app->screen_was) app->switch_ms = SDL_max(now_ms(app), 1);
     if (boxed != app->boxed_was) app->box_ms = SDL_max(now_ms(app), 1);
     app->screen_was = mark;
@@ -3655,7 +3663,7 @@ static void show_folder(App* app, const char* folder) {
     return;
 #endif
     url = file_url(folder);
-    if (url && SDL_OpenURL(url))
+    if (url && (app->open_url ? app->open_url : SDL_OpenURL)(url))
         snprintf(app->message, sizeof app->message, snx_tr("Opened %s"), folder);
     else
         snprintf(app->message, sizeof app->message, snx_tr("Could not open %s: %s"), folder,
@@ -6188,6 +6196,7 @@ static void draw_screen(App* app) {
         draw_menu(app);
     if (app->confirm.shown) render_ask(app);
     if (idle && app->dests_shown && !app->confirm.shown) render_dests(app);
+    if (idle && app->picks_shown && !app->confirm.shown) render_picks(app);
     if (idle && app->users_shown && !app->confirm.shown) render_users(app);
     if (idle && app->addons_shown && !app->confirm.shown) render_addons(app);
     if (idle && app->options_shown && !app->confirm.shown) render_view(app);
@@ -11212,6 +11221,56 @@ static void dests_pointer(App* app, float x, float y, bool click) {
     dests_place(app, &c, question, sizeof question);
     if (!choices_pointer(app, &c, x, y, click, &on) && click && !on) dest_take(app, -1);
 }
+/* the picks box's choices, a NULL after the last: Share Log's, how the logs go */
+static const char* const share_picks[] = {SNX_TR_NOOP("Share Zip"), SNX_TR_NOOP("Share Log"),
+                                          SNX_TR_NOOP("Open Logs Folder"), NULL};
+static const char* pick_label(App* app, int i) {
+    const char* const* picks = share_picks; /* GUI_PICKS_SHARE's, the one kind so far */
+    int n = 0;
+    (void)app;
+    while (picks[n]) ++n;
+    return i >= 0 && i < n ? snx_tr(picks[i]) : NULL;
+}
+static void picks_open(App* app, GuiPicksOf of) {
+    app->picks_of = of;
+    app->picks.focus = 0;
+    for (app->picks.count = 0; pick_label(app, app->picks.count);) ++app->picks.count;
+    app->picks_shown = true;
+}
+static void picks_place(App* app, GuiChoices* c) {
+    choices_place(app, GUI_CHOICES_PICKS, choices_over(app), snx_tr("How to share the logs?"), snx_tr("Share Log"),
+                  app->picks.focus, c);
+}
+static void render_picks(App* app) {
+    GuiChoices c;
+    picks_place(app, &c);
+    box_shade(app);
+    choices_draw(app, &c, snx_tr("How to share the logs?"), snx_tr("Share Log"));
+}
+static void share_log(App* app, bool zip);
+/* choice i taken, or none (-1: Back): the logs as one zip, as the one log of before, or their folder opened */
+static void pick_take(App* app, int i) {
+    app->picks_shown = false;
+    if (i == 0 || i == 1)
+        share_log(app, i == 0);
+    else if (i == 2)
+        show_folder(app, place_path(app, GUI_PLACE_STATE)); /* Folders' Logs: the launcher's logs and the games' */
+}
+static void picks_key(App* app, GuiKey key) {
+    switch (gui_choice_key(&app->picks, key)) {
+        case GUI_CHOICE_TAKE: pick_take(app, app->picks.focus); break;
+        case GUI_CHOICE_BACK: pick_take(app, -1); break;
+        default: break;
+    }
+}
+/* a choice under the pointer takes the focus, a click takes it (ui_choices_rows_row_action_cb); a click off the box is
+   Back */
+static void picks_pointer(App* app, float x, float y, bool click) {
+    GuiChoices c;
+    bool on;
+    picks_place(app, &c);
+    if (!choices_pointer(app, &c, x, y, click, &on) && click && !on) pick_take(app, -1);
+}
 static void job_add(App* app, const char* const* argv, const char* file, bool native, bool prepared, GuiJobKind kind);
 /* file, a dump whose game is made: asked whether that game plays or the dump recompiles (GUI_ASK_MADE), file kept */
 static void made_ask(App* app, char* file) {
@@ -12565,11 +12624,11 @@ static void games_logs(const App* app, LogFiles* l) {
     free(state);
 }
 /* the message on the screen, the summary of the newest game log, the last run's output, the launcher's own log and its
-   fatal errors, and that game log, as summary.txt of scarletnx-logs-<when>.zip in the data folder's state folder (the
-   working folder without one: started from the desktop, that is the home folder), beside the launcher's logs and the
-   games' of the last GUI_LOG_DAYS days (gui/logzip.h); then on Android handed to the share sheet, elsewhere its path
-   copied */
-static void share_log(App* app) {
+   fatal errors, and that game log, in the data folder's state folder (the working folder without one: started from
+   the desktop, that is the home folder): with zip as summary.txt of scarletnx-logs-<when>.zip beside the launcher's
+   logs and the games' of the last GUI_LOG_DAYS days (gui/logzip.h), else as scarletnx.log alone; then on Android
+   handed to the share sheet, elsewhere its path copied */
+static void share_log(App* app, bool zip) {
     char *game, *run, *recompiled, *said, *fatal, *played, *summary, *text, *saved, *state = NULL;
     char console[4096], errors[4096];
     const char* folder;
@@ -12598,7 +12657,16 @@ static void share_log(App* app) {
         app->cleaned.count ? "Clean Old Settings:\n" : "", app->cleaned.text ? app->cleaned.text : "", summary,
         app->run_log ? app->run_log : "", run, app->job_log ? app->job_log : "", recompiled,
         console[0] ? console : "none", said, errors[0] ? errors : "none", fatal, game ? game : "no game log", played);
-    {
+    if (!zip) {
+        saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
+        written = saved && !snx_write_file(saved, text, strlen(text));
+        if (saved && !written) {
+            char why[256];
+            snprintf(app->message, sizeof(app->message), snx_tr("The log could not be saved to %s: %s"), saved,
+                     snx_os_error(why, sizeof why));
+            say_failure(app, app->message);
+        }
+    } else {
         char stamp[32], *zip_name, error[sizeof app->message], *at[3];
         LogFiles files = {0};
         /* the launcher's log's folder, and the run logs' wherever they are kept apart */
@@ -12626,21 +12694,25 @@ static void share_log(App* app) {
         for (int k = 0; k < 3; ++k) free(at[k]);
     }
     if (!saved) {
-        snprintf(app->message, sizeof(app->message), "%s", snx_tr("The logs could not be saved: no working folder"));
+        snprintf(app->message, sizeof(app->message), "%s",
+                 zip ? snx_tr("The logs could not be saved: no working folder")
+                     : snx_tr("The log could not be saved: no working folder"));
         say_failure(app, app->message);
     } else if (written) {
+        const char* done = zip ? snx_tr("Logs saved to %s") : snx_tr("Log saved to %s");
         app->log_due = false; /* the crash's log is out */
 #ifdef SDL_PLATFORM_ANDROID
         if (gui_android_share(saved, app->message, sizeof(app->message)))
-            snprintf(app->message, sizeof(app->message), snx_tr("Logs saved to %s"), saved);
+            snprintf(app->message, sizeof(app->message), done, saved);
 #elif defined(SDL_PLATFORM_APPLE)
         if (gui_apple_share(app->window, saved, app->message, sizeof(app->message)))
-            snprintf(app->message, sizeof(app->message), snx_tr("Logs saved to %s"), saved);
+            snprintf(app->message, sizeof(app->message), done, saved);
 #else
         if (SDL_SetClipboardText(saved))
-            snprintf(app->message, sizeof(app->message), snx_tr("Logs saved to %s (path copied)"), saved);
+            snprintf(app->message, sizeof(app->message),
+                     zip ? snx_tr("Logs saved to %s (path copied)") : snx_tr("Log saved to %s (path copied)"), saved);
         else
-            snprintf(app->message, sizeof(app->message), snx_tr("Logs saved to %s"), saved);
+            snprintf(app->message, sizeof(app->message), done, saved);
 #endif
     }
     free(saved);
@@ -12992,7 +13064,7 @@ static void menu_key(App* app, GuiKey key) {
     }
     switch (gui_menu_key(&app->menu, key)) {
         case GUI_MENU_SETTINGS: open_settings(app); break;
-        case GUI_MENU_LOG: share_log(app); break;
+        case GUI_MENU_LOG: picks_open(app, GUI_PICKS_SHARE); break;
         case GUI_MENU_STAY:
             if (app->menu.quit && jobs_live(app)) { /* Exit: the queue's recompiles go with the menu, asked first */
                 app->menu.quit = false;
@@ -13085,6 +13157,7 @@ static const char* choice_text(App* app, int of, int i, char* out, size_t size) 
             return out;
         case GUI_CHOICES_SIZES: return i < 2 ? snx_tr(size_choices[app->size_until != 0][i]) : NULL;
         case GUI_CHOICES_DESTS: return dest_label(app, i, out, size);
+        case GUI_CHOICES_PICKS: return pick_label(app, i);
         case GUI_CHOICES_TYPED: return i < 2 ? snx_tr(typed_choices[i]) : NULL;
         default: return i < setup_labels(app, labels) ? labels[i] : NULL;
     }
@@ -13112,6 +13185,10 @@ void ui_choices_rows_row_action_cb(App* app, size_t row, uint32_t hit) {
         case GUI_CHOICES_DESTS:
             app->dests.focus = i;
             if (hit & UI_HIT_CLICK) dest_take(app, i);
+            break;
+        case GUI_CHOICES_PICKS:
+            app->picks.focus = i;
+            if (hit & UI_HIT_CLICK) pick_take(app, i);
             break;
         case GUI_CHOICES_TYPED:
             if (hit & UI_HIT_CLICK) typed_choice(app, i);
@@ -13429,6 +13506,8 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
         sizes_pointer(app, x, y, click);
     else if (app->dests_shown)
         dests_pointer(app, x, y, click);
+    else if (app->picks_shown)
+        picks_pointer(app, x, y, click);
     else if (app->users_shown)
         users_pointer(app, x, y, click);
     else if (app->addons_shown)
@@ -13488,7 +13567,10 @@ static Uint64 finger_id(const SDL_TouchFingerEvent* f) {
 /* the focus of the box over the screen, the one pointer() gives the pointer, and its rows; NULL with none shown */
 static int* box_focus(App* app, int* count) {
     int rows[GUI_VIEW_BOX_ROWS];
-    GuiChoice* c = app->sizes_shown ? &app->sizes : app->dests_shown ? &app->dests : NULL;
+    GuiChoice* c = app->sizes_shown   ? &app->sizes
+                   : app->dests_shown ? &app->dests
+                   : app->picks_shown ? &app->picks
+                                      : NULL;
     if (c) {
         *count = c->count;
         return &c->focus;
@@ -13866,6 +13948,10 @@ static void event_take(App* app, const SDL_Event* e) {
     }
     if (app->dests_shown && !app->confirm.shown && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
         if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && menu_key_of(&e->key, &key)) dests_key(app, key);
+        return;
+    }
+    if (app->picks_shown && !app->confirm.shown && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
+        if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && menu_key_of(&e->key, &key)) picks_key(app, key);
         return;
     }
     if (app->users_shown && !app->confirm.shown && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
