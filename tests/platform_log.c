@@ -106,12 +106,11 @@ int main(int argc, char** argv) {
        down to the 4 newest: with this run's, 5; the player's file stays */
     {
         time_t when = (time_t)before;
-        struct tm tm;
+        struct tm* tm = localtime(&when); /* one thread: Windows has no localtime_r */
         static const char* const gone[] = {"2025-01-01_00-00-00.log", "2025-01-03_00-00-00.log"};
         static const char* const stay[] = {"2025-01-03_00-00-00-2.log", "2025-01-04_00-00-00.log",
                                            "2025-01-05_00-00-00.log", "notes.txt"}; /* -2 is the later of a second */
-        localtime_r(&when, &tm);
-        strftime(stamp, sizeof stamp, "%Y-%m-%d_%H-%M-%S", &tm);
+        CHECK(tm && strftime(stamp, sizeof stamp, "%Y-%m-%d_%H-%M-%S", tm), "the run before's time has no date");
         snprintf(path, sizeof path, "%s/%s.log", runs, stamp);
         CHECK(!strcmp(slurp(path), "the run before\n"), "the run before's log is not in logs/ by its date");
         for (i = 0; i < 2; i++) {
