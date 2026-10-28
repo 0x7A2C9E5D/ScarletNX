@@ -1673,7 +1673,7 @@ static void grid_view(App* app, const char* temporary) {
     { /* F1's box says the grid's keys: the arrows go over the tiles, PgUp and PgDn by the lines */
         char said[1024];
         assert(strstr(screen_said(app, true, said, sizeof said), "Arrows: select.") &&
-               strstr(said, "PgUp/PgDown: page.") && !strstr(said, "Left/Right/PgUp/PgDown: page.") &&
+               strstr(said, "PgUp/PgDown: scroll.") && !strstr(said, "Left/Right/PgUp/PgDown: scroll.") &&
                strstr(said, "V: view."));
     }
     /* Right and Left: the row after and before, past a label; nothing past the first */
@@ -7408,32 +7408,103 @@ int main(int argc, char** argv) {
         games_boxes(&app, &g);
         assert(g.place.list.w == m.place.list.w);
     }
-    key(&app, SDLK_PAGEDOWN);
-    assert(app.browser.page == 1 && app.browser.selected == 0);
-    /* the wheel goes over the pages as Up and Down do, a page's last game on to the next one's first and back, and
-       stops at the list's ends, where the keys go round */
+    /* one page of all of them, which scrolls: PgDn a screen of rows down, the list following the focus; the wheel the
+       rows alone, three a notch; the scroll bar beside them, its thumb at the top, then at the foot once dragged there
+       by the mouse; a finger's drag moves the rows with it, and let go fast they glide on, slowing, to a stop */
     {
         SDL_Event e = {0};
-        size_t pages = gui_browser_pages(&app.browser), last;
-        assert(pages >= 2);
-        e.type = SDL_EVENT_MOUSE_WHEEL;
-        app.browser.page = 0;
-        last = app.browser.head + gui_browser_items(&app.browser) - 1;
-        app.browser.selected = last;
+        GuiGamesBoxes g;
+        GuiRect track, thumb;
+        int row_h, total, view, w, h;
+        float max, at, wx, wy;
+        assert(gui_browser_pages(&app.browser) == 1 && app.browser.page_size == app.games.count);
+        render(&app);
+        games_boxes(&app, &g);
+        games_extent(&app, &g, &row_h, &total, &view);
+        max = games_max(&app, &g);
+        assert(total > view && max > 0 && app.games_y == 0 && games_bar(&app, &g, &track, &thumb) &&
+               thumb.y == track.y);
+        assert(same_colour(pixel(&app, (float)thumb.x + 1, (float)thumb.y + 1), rgb(app.theme.soft)));
+        key(&app, SDLK_PAGEDOWN);
+        assert(app.browser.selected == (size_t)(view / row_h - 1)); /* a screen of rows down, the last one shown */
+        render(&app);
+        assert(app.games_y == 0);
+        key(&app, SDLK_PAGEDOWN);
+        render(&app); /* the focus out of sight: the rows go up to show it, at once with Animations off */
+        games_boxes(&app, &g);
+        assert(app.games_y > 0 && g.lists[UI_GAMES_ROWS].focus * (size_t)row_h + (size_t)row_h <=
+                                      (size_t)(app.games_y + (float)view + 0.5f));
+        key(&app, SDLK_PAGEUP);
+        key(&app, SDLK_PAGEUP);
+        render(&app);
+        assert(app.browser.selected == 0 && app.games_y == 0);
+        e.type = SDL_EVENT_MOUSE_WHEEL; /* a notch down: three rows, the focus where it was */
         e.wheel.integer_y = -1;
         event(&app, &e);
-        assert(app.browser.page == 1 && app.browser.selected == app.browser.head);
+        render(&app);
+        assert(app.games_y == (float)(3 * row_h) && app.browser.selected == 0);
         e.wheel.integer_y = 1;
         event(&app, &e);
-        assert(app.browser.page == 0 && app.browser.selected == last);
-        app.browser.page = pages - 1;
-        last = app.browser.head + gui_browser_items(&app.browser) - 1;
-        app.browser.selected = last;
-        e.wheel.integer_y = -1;
+        render(&app);
+        assert(app.games_y == 0);
+        /* the thumb taken to the track's foot by the mouse: the last rows */
+        games_boxes(&app, &g);
+        assert(games_bar(&app, &g, &track, &thumb));
+        assert(
+            SDL_RenderCoordinatesToWindow(app.renderer, (float)track.x + 1, (float)(track.y + track.h - 1), &wx, &wy));
+        e = (SDL_Event){0};
+        e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+        e.button.button = SDL_BUTTON_LEFT;
+        e.button.x = wx;
+        e.button.y = wy;
         event(&app, &e);
-        assert(app.browser.page == pages - 1 && app.browser.selected == last);
-        app.browser.page = 1;
+        assert(app.bar_held && app.games_y == max);
+        e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+        event(&app, &e);
+        render(&app);
+        games_boxes(&app, &g);
+        assert(!app.bar_held && games_bar(&app, &g, &track, &thumb) && thumb.y + thumb.h == track.y + track.h);
+        app.games_y = app.games_to = 0;
+        /* a finger: down on the rows, up by two rows' height, the rows following it; no tap at its lift */
+        SDL_GetWindowSize(app.window, &w, &h);
+        games_boxes(&app, &g);
+        assert(SDL_RenderCoordinatesToWindow(app.renderer, (float)(g.rects[UI_GAMES_ROWS].x + 20),
+                                             (float)(g.rects[UI_GAMES_ROWS].y + view - row_h), &wx, &wy));
+        app.clock = 1000;
+        e = (SDL_Event){0};
+        e.type = SDL_EVENT_FINGER_DOWN;
+        e.tfinger.fingerID = 7;
+        e.tfinger.x = wx / (float)w;
+        e.tfinger.y = wy / (float)h;
+        event(&app, &e);
+        assert(!app.games_held);
+        at = wy;
+        for (int k = 1; k <= 4; ++k) { /* half a row each 10 ms */
+            float rx, ry;
+            app.clock += 10;
+            assert(SDL_RenderCoordinatesFromWindow(app.renderer, wx, at, &rx, &ry));
+            assert(SDL_RenderCoordinatesToWindow(app.renderer, rx, ry - (float)row_h / 2, &wx, &at));
+            e.type = SDL_EVENT_FINGER_MOTION;
+            e.tfinger.y = at / (float)h;
+            event(&app, &e);
+        }
+        assert(app.games_held && SDL_fabsf(app.games_y - (float)(2 * row_h)) < 2.0f && app.games_v > 0);
+        e.type = SDL_EVENT_FINGER_UP;
+        event(&app, &e);
+        assert(!app.games_held && !app.finger && app.games_v > 0 && !app.addons_shown && !app.menu.running);
+        at = app.games_y;
+        app.clock += 50;
+        render(&app); /* gliding on */
+        assert(app.games_y > at);
+        for (int k = 0; k < 400 && app.games_v != 0; ++k) {
+            app.clock += 16;
+            render(&app);
+        }
+        assert(app.games_v == 0 && app.games_y <= max && app.games_y > at);
+        app.clock = 0;
+        app.games_y = app.games_to = 0;
         app.browser.selected = 0;
+        render(&app);
     }
     /* a group's heading has no path: the focus on it, as the pointer over it puts it, offers no AOT pack, and M on it
        says what it opens, no box (it took the launcher down); so does M on a dump, which has no data folder */
@@ -7523,12 +7594,16 @@ int main(int argc, char** argv) {
     watch_pass(&app.watch);
     pump(&app);
     assert(!app.games_fresh);
-    assert(gui_browser_pages(&app.browser) > 1);
-    key(&app, SDLK_RIGHT);
-    key(&app, SDLK_DOWN);
-    assert(app.browser.page == 1 && app.browser.selected == 1);
-    /* a game put in while the list shows joins it, the list staying on its page and file; taken out, it leaves */
+    assert(gui_browser_pages(&app.browser) == 1);
+    key(&app, SDLK_PAGEDOWN);
+    key(&app, SDLK_PAGEDOWN); /* scrolled, the focus on a row past the first screen */
+    render(&app);
     {
+        size_t on = app.browser.selected;
+        float y = app.games_y;
+        assert(y > 0 && on > 1);
+        /* a game put in while the list shows joins it, the list staying where it is, on its file; taken out, it leaves */
+        {
 #ifdef _WIN32
         char* late = snx_path_join(app.games_dir, "Game35.exe");
 #else
@@ -7541,33 +7616,47 @@ int main(int argc, char** argv) {
         assert(app.games.count == 35);
         watch_pass(&app.watch);
         pump(&app);
-        assert(app.games.count == 36 && app.browser.page == 1 && app.browser.selected == 1);
+        render(&app);
+        assert(app.games.count == 36 && app.browser.selected == on && app.games_y == y);
         assert(!snx_remove_tree(late));
         watch_pass(&app.watch);
         pump(&app);
-        assert(app.games.count == 35 && app.browser.page == 1 && app.browser.selected == 1);
+        render(&app);
+        assert(app.games.count == 35 && app.browser.selected == on && app.games_y == y);
         free(late);
+        }
     }
     render(&app);
-    shows(&app, "\x1e", rgb(app.theme.soft)); /* games on the pages before and after */
-    shows(&app, "\x1f", rgb(app.theme.soft));
+    { /* rows above it and under it: the thumb between the track's ends, and no arrows on the rows, the bar says it */
+        GuiGamesBoxes g;
+        GuiRect track, thumb;
+        games_boxes(&app, &g);
+        assert(games_bar(&app, &g, &track, &thumb) && thumb.y > track.y && thumb.y + thumb.h < track.y + track.h);
+        hides(&app, "\x1e", rgb(app.theme.soft));
+        hides(&app, "\x1f", rgb(app.theme.soft));
+    }
     screenshot = getenv("SNX_GUI_BROWSER_SCREENSHOT");
     if (screenshot) {
         SDL_Surface* image = SDL_RenderReadPixels(app.renderer, NULL);
         assert(image && SDL_SaveBMP(image, screenshot));
         SDL_DestroySurface(image);
     }
-    key(&app, SDLK_PAGEDOWN);
-    assert(app.browser.page == 2 && gui_browser_items(&app.browser) == 35 - 2 * app.browser.page_size);
+    for (int k = 0; k < 4; ++k) key(&app, SDLK_PAGEDOWN); /* the last row, nothing under it */
     render(&app);
-    shows(&app, "\x1e", rgb(app.theme.soft));
-    hides(&app, "\x1f", rgb(app.theme.soft));
-    key(&app, SDLK_PAGEUP);
-    key(&app, SDLK_LEFT);
-    assert(app.browser.page == 0 && app.browser.selected == 1); /* the focus kept from page to page */
+    assert(app.browser.selected + 1 == app.browser.head + gui_browser_items(&app.browser));
+    {
+        GuiGamesBoxes g;
+        GuiRect track, thumb;
+        games_boxes(&app, &g);
+        assert(games_bar(&app, &g, &track, &thumb) && thumb.y + thumb.h == track.y + track.h);
+    }
+    for (int k = 0; k < 4; ++k) { /* the first, nothing over it, the list following each key as it is drawn */
+        key(&app, SDLK_PAGEUP);
+        render(&app);
+    }
+    key(&app, SDLK_DOWN);
     render(&app);
-    hides(&app, "\x1e", rgb(app.theme.soft));
-    shows(&app, "\x1f", rgb(app.theme.soft));
+    assert(app.browser.selected == 1 && app.games_y == 0);
     point(&app, game_box(&app, 1, false), false);
     assert(app.browser.selected == 1 && !app.menu.running && !app.browser.activated);
     render(&app);
@@ -9380,8 +9469,8 @@ int main(int argc, char** argv) {
         assert(app.menu.view == GUI_LOAD_KEYS);
         key(&app, SDLK_ESCAPE);
         assert(app.menu.view == GUI_LOAD_NONE && app.menu.selected == GUI_KEYS);
-        /* Games: Add Folder, then as many of a page's games as the list's box holds, the focused one's path beside
-           them and in the bar; Right turns the page, ESC goes back */
+        /* Games: all the games on one page, as many as the list's box holds shown, the focused one's path beside them
+           and in the bar; Right a screen of rows down, ESC goes back */
         {
             GuiGamesBoxes g;
             size_t page;
@@ -9390,8 +9479,8 @@ int main(int argc, char** argv) {
             render(&app);
             games_boxes(&app, &g);
             page = games_page(&app);
-            assert(app.browser.page_size == page &&
-                   ui_games_shown(g.rects, app.scale, UI_GAMES_ROWS) >= (size_t)g.lead + page);
+            assert(app.browser.page_size == page && page == app.games.count &&
+                   ui_games_shown(g.rects, app.scale, UI_GAMES_ROWS) < (size_t)g.lead + page);
             b = games_row_box(&app, &g, g.lead); /* the focus, first: the page's first game */
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- ", yellow, black);
             /* after its icon, Wimsy in grey without one of its own (ui_draw_row) */
@@ -9409,10 +9498,14 @@ int main(int argc, char** argv) {
                 text_px_is(&app, g.place.side.x + cw, g.place.side.y + head_h(&app) + 2 * s, start, normal, black);
             }
             key(&app, SDLK_RIGHT);
-            assert(app.browser.page == 1);
+            {
+                int row_h, total, view;
+                games_extent(&app, &g, &row_h, &total, &view);
+                assert(!app.browser.page && app.browser.selected == (size_t)(view / row_h - 1));
+            }
             render(&app);
             games_boxes(&app, &g);
-            assert(g.start == page);
+            assert(!g.start);
             key(&app, SDLK_ESCAPE);
             assert(app.menu.view == GUI_LOAD_NONE && app.menu.selected == GUI_KEYS);
         }
@@ -9895,25 +9988,30 @@ int main(int argc, char** argv) {
                 event(&app, &left);
                 assert(!app.hovering);
             }
-            /* Games, where each word of Left/Right/PgUp/PgDown turns the page its way, and its text, of words two ways,
-               none; Up/Down's each move the focus */
+            /* Games, where each word of Left/Right/PgUp/PgDown moves a screen of rows its way, and its text, of words two
+               ways, none; Up/Down's each move the focus */
             key(&app, SDLK_TAB);
-            assert(app.menu.view == GUI_LOAD_GAMES && app.browser.page == 0 && gui_browser_pages(&app.browser) > 1);
-            assert(hint_press(&app, "Left/Right/PgUp/PgDown", 18) && app.browser.page == 1);  /* PgDown */
-            assert(!hint_press(&app, "Left/Right/PgUp/PgDown", 24) && app.browser.page == 1); /* page */
-            assert(hint_press(&app, "Left/Right/PgUp/PgDown", 12) && app.browser.page == 0);  /* PgUp */
-            assert(hint_press(&app, "Left/Right/PgUp/PgDown", 10) && app.browser.page == 1);  /* Right's slash */
-            assert(hint_press(&app, "Left/Right/PgUp/PgDown", -1) &&
-                   app.browser.page == 0); /* the margin before Left */
+            assert(app.menu.view == GUI_LOAD_GAMES && gui_browser_pages(&app.browser) == 1);
             app.browser.selected = 0;
+            {
+                size_t screen;
+                assert(hint_press(&app, "Left/Right/PgUp/PgDown", 18) && app.browser.selected > 1); /* PgDown */
+                screen = app.browser.selected;
+                assert(!hint_press(&app, "Left/Right/PgUp/PgDown", 24) && app.browser.selected == screen); /* scroll */
+                assert(hint_press(&app, "Left/Right/PgUp/PgDown", 12) && !app.browser.selected);           /* PgUp */
+                assert(hint_press(&app, "Left/Right/PgUp/PgDown", 10) &&
+                       app.browser.selected == screen);                                          /* Right's / */
+                assert(hint_press(&app, "Left/Right/PgUp/PgDown", -1) && !app.browser.selected); /* before Left */
+            }
             assert(hint_press(&app, "Up/Down", 3) && app.browser.selected == 1);
             assert(hint_press(&app, "Up/Down", 0) && app.browser.selected == 0);
             press_key(&app, "ESC", 0, false, yellow); /* Games' own ESC, to the menu */
             assert(app.menu.view == GUI_LOAD_NONE);
             key(&app, SDLK_TAB);
-            /* Android's words: a swipe turns the page, Back goes back as ESC, a tap selects; Tap outside, the
-               picker's, presses nothing (a tap off the picker keeps the colour) */
-            assert(hint_press(&app, "Swipe", 0) && app.browser.page == 1);
+            /* Android's words: Drag, the finger's, presses nothing (the rows follow the finger), Back goes back as ESC, a
+               tap selects; Tap outside, the picker's, presses nothing (a tap off the picker keeps the colour) */
+            app.browser.selected = 0;
+            assert(!hint_press(&app, "Drag", 0) && !app.browser.selected);
             assert(!hint_press(&app, "Tap outside", 0));
             go_tab(&app, GUI_TAB_MENU);
             assert(hint_press(&app, "Back", 0) && app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT);
@@ -10560,21 +10658,27 @@ int main(int argc, char** argv) {
         key(&app, SDLK_AC_BACK);
         assert(app.menu.view == GUI_LOAD_NONE);
         app.menu.view = GUI_LOAD_GAMES;
-        app.browser = (GuiBrowser){.count = 1000};
+        app.browser = (GuiBrowser){.count = app.games.count, .page_size = app.games.count};
+        app.games_y = app.games_to = app.games_v = 0;
         layout(&app);
-        swipe_px(&app, 60 * 8 * app.scale, 10 * ch, 10 * 8 * app.scale, 11 * ch);
-        assert(app.browser.page == 1);
-        swipe_px(&app, 10 * 8 * app.scale, 10 * ch, 60 * 8 * app.scale, 10 * ch);
-        assert(app.browser.page == 0);
-        { /* up or down too, as a phone's lists scroll: up to the next page, down back; a short one turns none */
+        { /* Games' list: a finger's drag up or down moves its rows with it, a sideways one nothing, a short one (a tap's
+             reach) nothing either; the focus stays */
             int h, w;
+            float y;
             area(&app, &w, &h); /* the render's pixels, as swipe_px takes them */
-            swipe_px(&app, 30 * 8 * app.scale, 3 * h / 4, 31 * 8 * app.scale, h / 4);
-            assert(app.browser.page == 1);
-            swipe_px(&app, 30 * 8 * app.scale, h / 4, 30 * 8 * app.scale, 3 * h / 4);
-            assert(app.browser.page == 0);
-            swipe_px(&app, 30 * 8 * app.scale, h / 2, 30 * 8 * app.scale, h / 2 - h / 20);
-            assert(app.browser.page == 0);
+            swipe_px(&app, 30 * 8 * app.scale, 10 * ch, 10 * 8 * app.scale, 10 * ch); /* on the rows, not the bar */
+            assert(app.games_y == 0 && !app.browser.selected);
+            swipe_px(&app, 30 * 8 * app.scale, 3 * h / 4, 30 * 8 * app.scale, h / 2);
+            y = app.games_y;
+            assert(y > 0 && !app.browser.selected && !app.games_held);
+            app.games_v = 0;
+            swipe_px(&app, 30 * 8 * app.scale, h / 2, 30 * 8 * app.scale, h / 2 + h / 8);
+            assert(app.games_y < y && !app.browser.selected);
+            y = app.games_y;
+            app.games_v = 0;
+            swipe_px(&app, 30 * 8 * app.scale, h / 2, 30 * 8 * app.scale, h / 2 - ch / 4);
+            assert(app.games_y == y);
+            app.games_y = app.games_to = 0;
             (void)w;
         }
         app.menu.view = GUI_LOAD_NONE;

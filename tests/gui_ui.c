@@ -63,6 +63,14 @@ void ui_draw_tile(App* app, GuiRect r, const char* text, const void* image, unsi
     g_gui_ui.drawn[g_gui_ui.ndrawn - 1].tile = 1;
 }
 const char* ui_tr(const char* english) { return english; }
+/* the area the drawing is kept in while a list draws shifted: none (all of it) when its width is 0 */
+static GuiRect g_clip;
+static int g_clips; /* the times it was set */
+void ui_clip(App* app, const GuiRect* r) {
+    (void)app;
+    g_clip = r ? *r : (GuiRect){0, 0, 0, 0};
+    g_clips += r != NULL;
+}
 void ui_draw_label(App* app, GuiRect r, const char* text, unsigned color) {
     ui_draw_row(app, r, text, 0, NULL, color, 0, false);
     g_gui_ui.drawn[g_gui_ui.ndrawn - 1].label = 1;
@@ -240,6 +248,16 @@ static void test_draw(void) {
 #endif
     assert(!strcmp(d[4].text, "Game 1") && d[4].attr == (UI_ATTR_FAILURE | UI_ATTR_MORE_UP));
     assert(!strcmp(d[6].text, "Game 3") && d[6].attr == 0);
+    /* scrolled between two rows: each drawn up by shift, kept inside the list's area while they are, as before after */
+    lists[UI_MAIN_GAMES].first = 0;
+    lists[UI_MAIN_GAMES].shift = 7;
+    g_clips = 0;
+    g_gui_ui.ndrawn = 0;
+    ui_main_draw(&app, r, 1, lists);
+    assert(!strcmp(d[4].text, "Game 0") && d[4].r.y == 154 - 7 && d[7].r.y == 154 + 3 * 19 - 7 && g_clips == 1 &&
+           !g_clip.w);
+    lists[UI_MAIN_GAMES].shift = 0;
+    lists[UI_MAIN_GAMES].first = 1;
     /* the code's attributes: Load Switch with no keys; a scene's button */
     app.keys_missing = true;
     lists[UI_MAIN_LOAD_LIST].first = 0;
@@ -296,6 +314,16 @@ static void test_hit(void) {
     assert(ui_main_hit(&app, r, 1, lists, 20, 154 + 19 + 3, UI_HIT_RELEASE, &item, &row) ==
            (UI_HIT_HOVER | UI_HIT_RELEASE));
     assert(item == UI_MAIN_GAMES && row == 2);
+    /* shifted up by 10: the row under a point is the one drawn there, and a point over the list's area is none of it */
+    lists[UI_MAIN_GAMES].shift = 10;
+    assert(ui_main_hit(&app, r, 1, lists, 20, 154 + 19 + 3 - 10, 0, &item, &row) && item == UI_MAIN_GAMES && row == 2);
+    assert(ui_main_hit(&app, r, 1, lists, 20, 158, 0, &item, &row) && item == UI_MAIN_GAMES && row == 1);
+    item = 0;
+    ui_main_hit(&app, r, 1, lists, 20, r[UI_MAIN_GAMES].y - 1, 0, &item, &row);
+    assert(item != UI_MAIN_GAMES);
+    lists[UI_MAIN_GAMES].shift = 0;
+    item = UI_MAIN_GAMES;
+    row = 2;
     ui_main_act(&app, item, row, UI_HIT_RELEASE);
     assert(app.calls[GAMES] == 1 && app.rows[GAMES] == 2 && app.hits[GAMES] == UI_HIT_RELEASE);
     /* a row past get_row_info's last is not there; each asked with its width */
