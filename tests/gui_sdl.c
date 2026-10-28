@@ -6716,7 +6716,7 @@ int main(int argc, char** argv) {
             shows(&app, "Recent Games", soft);
             shows(&app, "Alpha", yellow); /* the focus, the first row, after Wimsy in grey (no icon of its own) */
             shows(&app, "Charlie", normal);
-            shows(&app, "- Show More", normal);
+            shows(&app, "- " ICON_PLUS " Show More", normal); /* its icon a + */
             hides(&app, "Delta", normal);
             {
                 UiRowInfo info = {0};
@@ -6726,7 +6726,7 @@ int main(int argc, char** argv) {
             app.browser.selected = 3; /* the row that shows the rest */
             app.message[0] = 0;       /* the gone game's, over the tips */
             render(&app);
-            shows(&app, "- Show More", yellow);
+            shows(&app, "- " ICON_PLUS " Show More", yellow);
             { /* in the tips under the head, not again beside the list */
                 GuiGamesBoxes g;
                 int tx, ty;
@@ -10442,7 +10442,7 @@ int main(int argc, char** argv) {
                 games_boxes(&app, &g);
                 assert(g.lead == 5 && ui_games_shown(g.rects, app.scale, UI_GAMES_ROWS) > (size_t)g.lead);
                 shows(&app, "Recent Games", rgb(app.theme.soft));
-                shows(&app, "\xfe Show More", rgb(app.theme.ink));
+                shows(&app, "\xfe " ICON_PLUS " Show More", rgb(app.theme.ink));
             }
             go_tab(&app, GUI_TAB_MENU);
             app.recent = kept;

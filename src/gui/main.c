@@ -5677,6 +5677,7 @@ bool ui_games_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info
                  queued);
         info->label = label;
         if (r) info->image = r->driver == GUI_SWITCH ? game_icon(app, r->path) : NULL;
+        if (!r) info->icon = GUI_ICON_PLUS;                  /* Show More */
         if (r && !info->image) info->image = icon_none(app); /* a game with none of its own */
         return true;
     }

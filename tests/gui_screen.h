@@ -58,6 +58,7 @@ static inline const uint8_t* font_rows(int c) {
 #define ICON_HARD_DRIVE_DOWNLOAD "\uE023"
 #define ICON_ACTIVITY            "\uE024"
 #define ICON_INFO                "\uE025"
+#define ICON_PLUS                "\uE026"
 static inline void is_icon(const char* text, unsigned icon) {
     const char* at = text;
     assert(gui_utf8_step(&at) == icon && !*at);
@@ -101,6 +102,7 @@ static inline void icons_are(void) {
     is_icon(ICON_HARD_DRIVE_DOWNLOAD, GUI_ICON_HARD_DRIVE_DOWNLOAD);
     is_icon(ICON_ACTIVITY, GUI_ICON_ACTIVITY);
     is_icon(ICON_INFO, GUI_ICON_INFO);
+    is_icon(ICON_PLUS, GUI_ICON_PLUS);
 }
 /* where a font's pixel k (from a glyph's corner) is read with letters half halves of a cell big: a whole scale s (2 * s
    of them) its block's corner, k * s, so a glyph is found at its corner alone; a half step's pixels, a pixel and two by
