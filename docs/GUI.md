@@ -290,8 +290,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   **Open Folder**, which opens it in the system's file manager (on Android its Files app, the data folder through the
   app's own storage, [ANDROID](ANDROID.md)), **Change Folder** and **Reset to Default**; on an Extra of a library
   Open Folder and **Remove from Library**; on dumps/ and Settings, Open Folder. A row of the Dumps Library, dumps/ or an
-  Extra, also gives **Only This Folder** while it says *+ subfolders*, else **With Subfolders**: its subfolders' dumps
-  listed or not from then on, kept (dumps/ in `app.ini`, an Extra in `folders.txt`). Del still puts a folder back to
+  Extra, also gives **Subfolders**, `(*)` while its subfolders' dumps are listed and `( )` while not: Enter switches
+  it, the box staying, kept at once (dumps/ in `app.ini`, an Extra in `folders.txt`). Del still puts a folder back to
   its default, or takes an Extra off.
 - The launcher's log, a file a day, `scarletnx-console-2026-10-28.log` in its state folder (Settings > App > Folders'
   Logs; on iOS in `logs/` of the app's Documents, [APPLE](APPLE.md)), the 14 newest days kept (a day's first line

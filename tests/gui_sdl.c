@@ -86,7 +86,7 @@ static void share_pick(App* app, int i) {
     assert(!app->picks_shown);
 }
 /* Enter on a Folders row, and choice i of its box taken: 0 Open Folder, then Change Folder and Reset to Default on a
-   place; on a dumps row the subfolders switched at 1; Remove from Library on an Extra (2 on a dumps one) */
+   place; Remove from Library on an Extra (2 on a dumps one, after its Subfolders) */
 static void folder_pick(App* app, int i) {
     int x, y;
     key(app, SDLK_RETURN);
@@ -96,6 +96,29 @@ static void folder_pick(App* app, int i) {
     assert(find_text(app, "Open Folder", yellow, 1, &x, &y));
     for (int k = 0; k < i; ++k) key(app, SDLK_DOWN);
     key(app, SDLK_RETURN);
+    assert(!app->picks_shown);
+}
+/* Enter on a dumps library row, then its Subfolders taken: the box stays, drawn, the mark before it the other way */
+static void subfolders_pick(App* app) {
+    char before[96];
+    int x, y;
+    key(app, SDLK_RETURN);
+    assert(app->picks_shown && app->picks_of == GUI_PICKS_FOLDER && app->pick_row == app->editor.row);
+    key(app, SDLK_DOWN);
+    snprintf(before, sizeof before, "%s", pick_label(app, 1));
+    assert(!strcmp(before, "(*) Subfolders") || !strcmp(before, "( ) Subfolders"));
+    key(app, SDLK_RETURN);
+    assert(app->picks_shown && app->picks.focus == 1 &&
+           !strcmp(pick_label(app, 1), before[1] == '*' ? "( ) Subfolders" : "(*) Subfolders"));
+    { /* (*) while its subfolders' games are listed */
+        int at, group;
+        bool on =
+            folder_row(app, app->pick_row, &at, &group) == GUI_ROW_DUMPS ? !app->dumps_shallow : app->folders_deep[at];
+        assert(!strcmp(pick_label(app, 1), on ? "(*) Subfolders" : "( ) Subfolders"));
+    }
+    render(app);
+    assert(find_text(app, pick_label(app, 1), yellow, 1, &x, &y));
+    key(app, SDLK_ESCAPE);
     assert(!app->picks_shown);
 }
 /* show_folder's URL, which the tests keep instead of opening a file manager on the machine */
@@ -5202,7 +5225,7 @@ int main(int argc, char** argv) {
             char *dumps = snx_path_join(app.data_dir, "dumps"), *ini, *note;
             size_t got;
             assert(row == FOLDER_ROW(GUI_ROW_FOLDER, 0) && !app.folders_deep[0]);
-            folder_pick(&app, 1); /* With Subfolders */
+            subfolders_pick(&app); /* ( ) to (*) */
             kept = (char*)snx_read_file(app.folders_file, &got);
             snprintf(line, sizeof line, "dumps %s" GUI_FOLDER_DEEP "\n", kept_as);
             note = snx_format("%s: its subfolders' games are listed too", app.folders[0]);
@@ -5210,12 +5233,12 @@ int main(int argc, char** argv) {
                    !strcmp(app.app_form.folder[row], "+ subfolders") && !strcmp(app.editor.note, note));
             free(note);
             free(kept);
-            folder_pick(&app, 1); /* Only This Folder */
+            subfolders_pick(&app); /* (*) to ( ) */
             note = snx_format("%s: its own games alone are listed, not its subfolders'", app.folders[0]);
             assert(!app.folders_deep[0] && !app.app_form.folder[row][0] && !strcmp(app.editor.note, note));
             free(note);
             app.editor.row = main; /* its value "not found" while the data folder has no dumps/ */
-            folder_pick(&app, 1);  /* dumps/: Only This Folder, from its default */
+            subfolders_pick(&app); /* dumps/: (*), its default, to ( ) */
             ini = (char*)snx_read_file(app.app_file, &got);
             note = snx_format("%s: its own games alone are listed, not its subfolders'", dumps);
             assert(app.dumps_shallow && ini && strstr(ini, "dumps_subfolders = off\n") &&
@@ -5223,7 +5246,7 @@ int main(int argc, char** argv) {
                    !strcmp(app.editor.note, note));
             free(note);
             free(ini);
-            folder_pick(&app, 1); /* With Subfolders again */
+            subfolders_pick(&app); /* and (*) again */
             ini = (char*)snx_read_file(app.app_file, &got);
             assert(!app.dumps_shallow && ini && strstr(ini, "dumps_subfolders = on\n") &&
                    !strcmp(app.app_form.folder[main], snx_is_dir(dumps) ? "+ subfolders" : "not found"));

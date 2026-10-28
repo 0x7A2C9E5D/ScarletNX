@@ -3160,6 +3160,10 @@ msgid "Remove from Library"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Subfolders"
+msgstr ""
+
+#: src/gui/main.c
 msgid "How to share the logs?"
 msgstr ""
 

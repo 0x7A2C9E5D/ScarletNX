@@ -301,6 +301,7 @@ typedef struct App {
     bool has_output, finished, aborting, abnormal_exit;
     bool log_due; /* the last run ended abnormally, not by ESC, and its log is not saved since: Share Log blinks */
     char row_text[700]; /* the text of the row a list of ui.txt asked for last, until it is drawn (get_row_info) */
+    char pick_text[96]; /* a picks box's choice with its mark, "(*) Subfolders" (pick_label) */
     GuiConfirm confirm; /* the question before a run is aborted, when ask_abort says to ask it */
     int choices_of;     /* whose choices ui.txt's scene Choices draws or hits now (GuiChoicesOf) */
     bool ask_abort;     /* ESC asks first: on a phone it is Back, an edge swipe easily made by mistake */
@@ -11297,29 +11298,32 @@ static const char* const place_picks[] = {SNX_TR_NOOP("Open Folder"), SNX_TR_NOO
                                           SNX_TR_NOOP("Reset to Default"), NULL};
 static const char* const extra_picks[] = {SNX_TR_NOOP("Open Folder"), SNX_TR_NOOP("Remove from Library"), NULL};
 static const char* const open_picks[] = {SNX_TR_NOOP("Open Folder"), NULL};
-/* a dumps library row's: its subfolders' games listed or not, the choice the other way from how it is */
-#define SAY_ONLY_THIS SNX_TR_NOOP("Only This Folder")
-#define SAY_WITH_SUB  SNX_TR_NOOP("With Subfolders")
-static const char* const dumps_deep_picks[] = {SNX_TR_NOOP("Open Folder"), SAY_ONLY_THIS, NULL};
-static const char* const dumps_flat_picks[] = {SNX_TR_NOOP("Open Folder"), SAY_WITH_SUB, NULL};
-static const char* const dumps_extra_deep_picks[] = {SNX_TR_NOOP("Open Folder"), SAY_ONLY_THIS,
-                                                     SNX_TR_NOOP("Remove from Library"), NULL};
-static const char* const dumps_extra_flat_picks[] = {SNX_TR_NOOP("Open Folder"), SAY_WITH_SUB,
-                                                     SNX_TR_NOOP("Remove from Library"), NULL};
+/* a dumps library row's: its subfolders' games listed or not, (*) or ( ) before it as they are */
+#define SAY_SUBFOLDERS SNX_TR_NOOP("Subfolders")
+static const char* const dumps_picks[] = {SNX_TR_NOOP("Open Folder"), SAY_SUBFOLDERS, NULL};
+static const char* const dumps_extra_picks[] = {SNX_TR_NOOP("Open Folder"), SAY_SUBFOLDERS,
+                                                SNX_TR_NOOP("Remove from Library"), NULL};
 static const char* const* picks_list(const App* app) {
     int at, group, kind;
     if (app->picks_of == GUI_PICKS_SHARE) return share_picks;
     kind = folder_row(app, app->pick_row, &at, &group);
-    if (kind == GUI_ROW_DUMPS) return app->dumps_shallow ? dumps_flat_picks : dumps_deep_picks;
-    if (kind == GUI_ROW_FOLDER && app->folders_library[at] == GUI_LIBRARY_DUMPS)
-        return app->folders_deep[at] ? dumps_extra_deep_picks : dumps_extra_flat_picks;
+    if (kind == GUI_ROW_DUMPS) return dumps_picks;
+    if (kind == GUI_ROW_FOLDER && app->folders_library[at] == GUI_LIBRARY_DUMPS) return dumps_extra_picks;
     return kind == GUI_ROW_PLACE ? place_picks : kind == GUI_ROW_FOLDER ? extra_picks : open_picks;
 }
 static const char* pick_label(App* app, int i) {
     const char* const* picks = picks_list(app);
-    int n = 0;
+    int n = 0, at, group;
     while (picks[n]) ++n;
-    return i >= 0 && i < n ? snx_tr(picks[i]) : NULL;
+    if (i < 0 || i >= n) return NULL;
+    if (strcmp(picks[i], SAY_SUBFOLDERS)) return snx_tr(picks[i]);
+    snprintf(
+        app->pick_text, sizeof app->pick_text, "%s %s",
+        (folder_row(app, app->pick_row, &at, &group) == GUI_ROW_DUMPS ? !app->dumps_shallow : app->folders_deep[at])
+            ? "(*)"
+            : "( )",
+        snx_tr(SAY_SUBFOLDERS));
+    return app->pick_text;
 }
 static void picks_open(App* app, GuiPicksOf of) {
     app->picks_of = of;
@@ -11413,9 +11417,12 @@ static void pick_take(App* app, int i) {
         open_folder_picker(app);
     } else if (kind == GUI_ROW_PLACE)
         place_default_ask(app, at);
-    else if (!strcmp(picks_list(app)[i], SAY_ONLY_THIS) || !strcmp(picks_list(app)[i], SAY_WITH_SUB))
+    else if (!strcmp(picks_list(app)[i], SAY_SUBFOLDERS)) { /* the box stays, its mark as it is now */
+        int row = app->pick_row;
         subfolders_switch(app, kind, at);
-    else if (kind == GUI_ROW_FOLDER)
+        picks_open_row(app, row);
+        app->picks.focus = i;
+    } else if (kind == GUI_ROW_FOLDER)
         folder_off_ask(app, at);
 }
 static void picks_key(App* app, GuiKey key) {
