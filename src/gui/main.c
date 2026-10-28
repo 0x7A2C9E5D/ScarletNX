@@ -371,6 +371,7 @@ typedef struct App {
     SDL_Texture* user_picture; /* drawn user_side pixels square, in the shape it was drawn for */
     GuiIcon icons[GUI_ICONS];  /* the games' icons drawn so far (game_icon), the oldest replaced first */
     SDL_Texture* icon_loading; /* what a dump's row shows while the driver is asked for its icon */
+    SDL_Texture* icon_none;    /* what a game's row shows with no icon of its own: Wimsy in grey */
     GuiDumpIcons dump_icons;   /* the dumps' icons asked of the driver */
     unsigned dump_icons_seen;  /* the answers the rows were drawn after */
     size_t icons_next;
@@ -1446,12 +1447,26 @@ static void recent_note(App* app) {
         memmove(at, at + cut, strlen(at + cut) + 1);
     }
 }
+/* a recent game Games shows: a game made, or a Linux program, which runs as it is. A dump not made yet stays in the
+   list, so that its game takes its place once made (recent_as_games), but is not shown: opening it would recompile it */
+static bool recent_game(const GuiRecentGame* r) { return r->prepared || r->driver == GUI_LINUX; }
+static int recent_games(const App* app) {
+    int n = 0;
+    for (int i = 0; i < app->recent.count; ++i) n += recent_game(&app->recent.game[i]);
+    return n;
+}
+/* the list's index of the k-th recent game shown (k under recent_games) */
+static int recent_index(const App* app, int k) {
+    for (int i = 0; i < app->recent.count; ++i)
+        if (recent_game(&app->recent.game[i]) && !k--) return i;
+    return 0;
+}
 /* the recent games shown, none with Recent Games off, and whether a row under them shows the rest */
 static int recent_shown(const App* app) {
     if (!recent_on(app)) return 0;
-    return app->recent_all ? app->recent.count : SDL_min(app->recent.count, GUI_RECENT_SHOWN);
+    return app->recent_all ? recent_games(app) : SDL_min(recent_games(app), GUI_RECENT_SHOWN);
 }
-static int recent_more(const App* app) { return recent_on(app) && recent_shown(app) < app->recent.count; }
+static int recent_more(const App* app) { return recent_on(app) && recent_shown(app) < recent_games(app); }
 /* the rows over Games' games: the recent games and the row that shows the rest (P, the foot's, adds a folder) */
 static size_t games_head(const App* app) { return (size_t)(recent_shown(app) + recent_more(app)); }
 /* the list as the menu and the file have it */
@@ -3362,6 +3377,31 @@ static SDL_Texture* icon_loading(App* app) {
     free(pixels);
     return app->icon_loading;
 }
+/* count ARGB pixels, premultiplied, made grey: each colour its light (BT.601), under the same alpha */
+static void icon_grey(Uint32* pixels, int count) {
+    for (int i = 0; i < count; ++i) {
+        Uint32 p = pixels[i], r = (p >> 16) & 255, g = (p >> 8) & 255, b = p & 255;
+        Uint32 y = (r * 77 + g * 150 + b * 29) >> 8;
+        pixels[i] = (p & 0xff000000u) | y << 16 | y << 8 | y;
+    }
+}
+/* Wimsy in grey, as a game with no icon of its own shows: the splash's drawing */
+static SDL_Texture* icon_none(App* app) {
+    Uint32* pixels;
+    if (app->icon_none) return app->icon_none;
+    if (!(pixels = (Uint32*)malloc((size_t)GUI_ICON_SIDE * GUI_ICON_SIDE * 4))) return NULL;
+    snx_splash_picture(NULL, 0, GUI_ICON_SIDE, 0, pixels, GUI_ICON_SIDE * 4);
+    icon_grey(pixels, GUI_ICON_SIDE * GUI_ICON_SIDE);
+    app->icon_none = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, GUI_ICON_SIDE,
+                                       GUI_ICON_SIDE);
+    if (app->icon_none && (!SDL_UpdateTexture(app->icon_none, NULL, pixels, GUI_ICON_SIDE * 4) ||
+                           !SDL_SetTextureBlendMode(app->icon_none, SDL_BLENDMODE_BLEND_PREMULTIPLIED))) {
+        SDL_DestroyTexture(app->icon_none);
+        app->icon_none = NULL;
+    }
+    free(pixels);
+    return app->icon_none;
+}
 static SDL_Texture* game_icon(App* app, const char* path) {
     GuiIcon* icon;
     char* file;
@@ -3385,7 +3425,8 @@ static SDL_Texture* game_icon(App* app, const char* path) {
     jpeg = file ? snx_read_file(file, &size) : NULL;
     pixels = jpeg ? malloc((size_t)GUI_ICON_SIDE * GUI_ICON_SIDE * 4) : NULL;
     if (pixels && snx_splash_picture(jpeg, size, GUI_ICON_SIDE, 0, pixels, GUI_ICON_SIDE * 4))
-        snprintf(app->message, sizeof app->message, snx_tr("%s could not be drawn: the game shows no icon"), file);
+        snprintf(app->message, sizeof app->message, snx_tr("%s could not be drawn: the game shows Wimsy in grey"),
+                 file);
     else if (pixels) {
         icon->texture = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
                                           GUI_ICON_SIDE, GUI_ICON_SIDE);
@@ -4794,8 +4835,9 @@ static void states_focus(App* app) {
     size_t row = app->browser.selected, head = app->browser.head;
     size_t index = app->browser.page * app->browser.page_size + row - head;
     bool recent = row && row < head && (int)row - 1 < recent_shown(app), game = row >= head && index < app->games.count;
-    if (recent && app->recent.game[row - 1].driver == GUI_SWITCH && app->recent.game[row - 1].prepared)
-        states_open(app, app->recent.game[row - 1].path, app->recent.game[row - 1].name);
+    const GuiRecentGame* r = recent ? &app->recent.game[recent_index(app, (int)row - 1)] : NULL;
+    if (r && r->driver == GUI_SWITCH && r->prepared)
+        states_open(app, r->path, r->name);
     else if (game && !gui_is_cia(app->games.names[index]) && !gui_is_dump(app->games.names[index]))
         states_open(app, app->games.paths[index], app->games.shown[index]);
     else
@@ -5626,15 +5668,15 @@ bool ui_games_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info
     if (row < lead) {
         int index = (int)row - 1;
         char queued[64];
-        job_suffix(app, index < recent_shown(app) ? app->recent.game[index].path : NULL, queued, sizeof queued);
-        snprintf(label, sizeof app->row_text, "%s%s%s",
-                 index < recent_shown(app) ? app->recent.game[index].name : snx_tr("Show More"),
+        const GuiRecentGame* r = index < recent_shown(app) ? &app->recent.game[recent_index(app, index)] : NULL;
+        job_suffix(app, r ? r->path : NULL, queued, sizeof queued);
+        snprintf(label, sizeof app->row_text, "%s%s%s", r ? r->name : snx_tr("Show More"),
                  index < recent_shown(app) && (app->debug_picks || app->recent_debug[index]) ? snx_tr("  (Debug on)")
                                                                                              : "",
                  queued);
         info->label = label;
-        if (index < recent_shown(app) && app->recent.game[index].driver == GUI_SWITCH)
-            info->image = game_icon(app, app->recent.game[index].path);
+        if (r) info->image = r->driver == GUI_SWITCH ? game_icon(app, r->path) : NULL;
+        if (r && !info->image) info->image = icon_none(app); /* a game with none of its own */
         return true;
     }
     i = row - lead;
@@ -5647,6 +5689,7 @@ bool ui_games_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info
     game_label(app, &app->games, start + i, label, sizeof app->row_text);
     info->label = label + strlen(app->theme.marker); /* ui_draw_row puts the marker */
     info->image = game_icon(app, app->games.paths[start + i]);
+    if (!info->image) info->image = icon_none(app);
     if (app->browser.activated && app->browser.active == start + i) info->attr |= UI_ATTR_ACTIVE;
     if (i == 0 && app->browser.page > 0) info->attr |= UI_ATTR_MORE_UP;
     if (i + 1 == items && app->browser.page + 1 < gui_browser_pages(&app->browser)) info->attr |= UI_ATTR_MORE_DOWN;
@@ -5714,18 +5757,9 @@ static void recent_kind(const App* app, const GuiRecentGame* r, char* kind, size
             game_kind(app, &app->games, i, kind, size);
             return;
         }
+    /* shown, it is a game made or a Linux program (recent_game) */
     snprintf(kind, size, "%s",
-             r->driver == GUI_LINUX  ? snx_tr("Linux ARM ELF, run with scarletnx-gnuabi")
-             : r->prepared           ? ready_kind(r->driver)
-             : r->driver == GUI_3DS  ? snx_tr("3DS game, opened with scarletnx-3ds")
-             : r->driver == GUI_VITA ? snx_tr("Vita VPK, opened with scarletnx-vita")
-             : r->driver == GUI_GBA  ? snx_tr("GBA ROM, played with scarletnx-agb")
-             : gui_is_dump(r->path)  ? snx_tr("A dump, prepared when it runs")
-                                     : snx_tr("Ready to run"));
-    if (!r->prepared && gui_is_dump(r->path)) {
-        size_t n = strlen(kind);
-        icon_why_said(app, r->path, kind + n, size - n);
-    }
+             r->driver == GUI_LINUX ? snx_tr("Linux ARM ELF, run with scarletnx-gnuabi") : ready_kind(r->driver));
 }
 static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** about, char* kind, size_t size) {
     size_t selected = app->browser.selected, head = app->browser.head;
@@ -5735,7 +5769,7 @@ static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** ab
         return snx_tr("No games");
     }
     if (selected < head && (int)selected < recent_shown(app)) {
-        const GuiRecentGame* r = &app->recent.game[selected];
+        const GuiRecentGame* r = &app->recent.game[recent_index(app, (int)selected)];
         recent_kind(app, r, kind, size);
         *about = r->path;
         return r->name;
@@ -5772,7 +5806,8 @@ static const char* games_focused_path(const App* app, bool* recent) {
     size_t selected = app->browser.selected, head = app->browser.head;
     size_t index = app->browser.page * app->browser.page_size + selected - head;
     *recent = selected < head;
-    if (selected < head) return (int)selected < recent_shown(app) ? app->recent.game[selected].path : NULL;
+    if (selected < head)
+        return (int)selected < recent_shown(app) ? app->recent.game[recent_index(app, (int)selected)].path : NULL;
     if (selected >= head + gui_browser_items(&app->browser) || gui_games_heading(&app->games, index)) return NULL;
     return app->games.paths[index];
 }
@@ -7094,7 +7129,7 @@ static bool games_game_focus(const App* app, bool* mods) {
     size_t index = app->browser.page * app->browser.page_size + row - head;
     *mods = false;
     if (row < head && (int)row < recent_shown(app)) {
-        const GuiRecentGame* r = &app->recent.game[row];
+        const GuiRecentGame* r = &app->recent.game[recent_index(app, (int)row)];
         if (r->driver == GUI_LINUX) return false;
         *mods = r->driver == GUI_SWITCH && !gui_is_dump(r->path);
         return true;
@@ -12105,8 +12140,9 @@ static void queue_key(App* app, GuiKey key) {
         free(game);
     }
 }
-/* a recent game, run as the menu would: its driver, the options the menu has now */
-static void open_recent(App* app, int index) {
+/* the recent game shown at row shown, run as the menu would: its driver, the options the menu has now */
+static void open_recent(App* app, int shown) {
+    int index = recent_index(app, shown);
     GuiRecentGame game = app->recent.game[index];
     if (!snx_is_file(game.path)) {
         snprintf(app->message, sizeof(app->message), snx_tr("%s is gone (%s): it left the recent games."), game.name,
@@ -12182,7 +12218,7 @@ static void recompile_focus(App* app) {
          game = row >= head && index < app->games.count && !gui_games_heading(&app->games, index);
     if (!recent && !game)
         snprintf(app->message, sizeof app->message, "%s", snx_tr("No game in focus to recompile."));
-    else if (recent && app->recent.game[row].driver == GUI_LINUX)
+    else if (recent && app->recent.game[recent_index(app, (int)row)].driver == GUI_LINUX)
         snprintf(app->message, sizeof app->message, "%s", snx_tr("R recompiles games: a Linux program runs as it is."));
     else {
         app->recompile = true;
@@ -12222,7 +12258,7 @@ static int game_debug(App* app, const char* path, int picks, char* out, size_t s
 /* the recent rows' .ini's part, as list_games reads the others' */
 static void recent_debug_read(App* app) {
     for (int i = 0; i < recent_shown(app); ++i)
-        app->recent_debug[i] = game_debug(app, app->recent.game[i].path, 0, NULL, 0) > 0;
+        app->recent_debug[i] = game_debug(app, app->recent.game[recent_index(app, i)].path, 0, NULL, 0) > 0;
 }
 /* the focused row's Debug settings, for the side panel: looked at again when the focus moves or a second passes */
 static void debug_focus_update(App* app) {
@@ -12242,8 +12278,8 @@ static int aot_focus_game(App* app, AotFocus* f) {
     f->path = NULL;
     f->folder = f->name = NULL;
     if (recent) {
-        if (app->recent.game[row].driver != GUI_SWITCH) return 0;
-        path = app->recent.game[row].path;
+        if (app->recent.game[recent_index(app, (int)row)].driver != GUI_SWITCH) return 0;
+        path = app->recent.game[recent_index(app, (int)row)].path;
     } else if (game) {
         if (gui_games_heading(&app->games, index) || gui_is_cia(app->games.names[index]) ||
             gui_is_vpk(app->games.names[index]) || gui_is_gba(app->games.names[index]))
@@ -12405,9 +12441,9 @@ static void mods_focus(App* app) {
          game = row >= head && index < app->games.count && !gui_games_heading(&app->games, index); /* it has no path */
     const char *path = NULL, *title = NULL;
     char* folder = NULL;
-    if (recent && app->recent.game[row].driver == GUI_SWITCH) {
-        path = app->recent.game[row].path;
-        title = app->recent.game[row].name;
+    if (recent && app->recent.game[recent_index(app, (int)row)].driver == GUI_SWITCH) {
+        path = app->recent.game[recent_index(app, (int)row)].path;
+        title = app->recent.game[recent_index(app, (int)row)].name;
     } else if (game) {
         path = app->games.paths[index];
         title = app->games.shown[index];
@@ -13068,6 +13104,7 @@ static void list_games(App* app) {
     app->games_debug = (bool*)snx_alloc((app->games.count + 1) * sizeof *app->games_debug);
     for (size_t i = 0; i < app->games.count; ++i)
         app->games_debug[i] = app->games.paths[i] && game_debug(app, app->games.paths[i], 0, NULL, 0) > 0;
+    recent_as_games(app); /* a recent dump made since, by any run, shows as its game */
     recent_debug_read(app);
     app->debug_checked = 0; /* and the focused row's, at the next draw */
     app->games_fresh = true;
@@ -14510,6 +14547,7 @@ static void forget(App* app) {
     watch_stop(app);
     dump_icons_stop(app);
     SDL_DestroyTexture(app->icon_loading);
+    SDL_DestroyTexture(app->icon_none);
     space_stop(app);
     space_end(&app->left_space, &app->left_counter);
     settings_forget(app);

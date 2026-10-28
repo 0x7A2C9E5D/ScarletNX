@@ -1293,7 +1293,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "%s could not be drawn: the game shows no icon"
+msgid "%s could not be drawn: the game shows Wimsy in grey"
 msgstr ""
 
 #: src/gui/main.c

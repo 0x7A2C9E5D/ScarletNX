@@ -325,7 +325,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   they go while the app is in testing: Android's Settings > Apps > ScarletNX > Storage > Clear storage, which takes
   every game, save and key in the app with them. The menu never reads them: it starts from its defaults.
 - **Recent Games**, at the top of Games, lists the last games run, newest first, three and a row that
-  shows the rest, by the name their run gave (the runner's `ScarletNX - <name>` line), else their file's.
+  shows the rest, by the name their run gave (the runner's `ScarletNX - <name>` line), else their file's. A dump not
+  made into a game yet stays in the list but has no row, as opening it would compile it; once made, by any run, its
+  game takes its place.
   The focus moves between them and the page's games in one ring, and the tips show the focused
   game's path. Choosing one runs it again with the driver it was
   loaded with and the options the menu has now; a game whose file is gone leaves the
@@ -392,7 +394,8 @@ GBA's. It reads the `recompiled/` of the
 folder the driver works in, which the menu passes it as `--data`: a portable copy's `.scarletnx/` beside the
 AppImage (or the GUI), else the user's data folder, a build tree's menu's too ([USAGE](USAGE.md#folders)), then each
 Extra of Settings > App > Folders. Each game is shown by the name in its `control.nacp`, which the recompile copies into
-its data, else by its folder's or file's name, sorted by it in each folder, with its icon: a game's own, a dump's
+its data, else by its folder's or file's name, sorted by it in each folder, with its icon (Wimsy in grey for one with
+none): a game's own, a dump's
 the one its driver gives (`scarletnx -x --icon`), asked once a session into Caches' `icons/`. A dump the driver gave
 none for says why after its kind (the side box, the tips), and the launcher's log has all the driver said (above); the
 next start asks again. Only immediate files are listed:

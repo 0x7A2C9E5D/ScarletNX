@@ -1258,7 +1258,7 @@ static void view_box(App* app, const char* temporary) {
     cia = snx_path_join(app->games_dir, "gamma.cia"); /* in the dumps' group, with them */
     assert(!snx_mkdirs(dumps) && !snx_write_file(dump, "dump", 4) && !snx_write_file(cia, "cia", 3));
     app->recent = (GuiRecent){0};
-    assert(!gui_recent_add(&app->recent, game, GUI_SWITCH, 0));
+    assert(!gui_recent_add(&app->recent, game, GUI_SWITCH, 1)); /* a game, as Games opens one */
     go_tab(app, GUI_TAB_GAMES);
     assert(recent_on(app) && dumps_on(app) && app->browser.head == 1 && games_lists(app, "Dumps") &&
            games_lists(app, "beta dump.nsp") && games_lists(app, "gamma.cia") && games_lists(app, "alpha game"));
@@ -1501,7 +1501,7 @@ static void grid_view(App* app, const char* temporary) {
         assert(!snx_write_file(icon, jpeg.data, (size_t)jpeg.size));
         free(icon);
     }
-    for (int i = 6; i >= 2; --i) assert(!gui_recent_add(&app->recent, games[i], GUI_SWITCH, 0));
+    for (int i = 6; i >= 2; --i) assert(!gui_recent_add(&app->recent, games[i], GUI_SWITCH, 1)); /* games */
     assert(!snx_mkdirs(dumps));
     for (int i = 0; i < 2; ++i) {
         char* dump = snx_format("%s/dump %c.nsp", dumps, 'x' + i);
@@ -2620,7 +2620,7 @@ static void recompile_queue(App* app) {
     job_step(app, 50);
     render(app);
     shows(app, "Compile 50%", normal);
-    shows(app, "- queue game one  50%", yellow);
+    shows(app, "queue game one  50%", yellow);                        /* after its icon */
     shows(app, "Compiling: RECOMPILE: QUEUE GAME ONE 2 / 4", normal); /* the side box of its row: the theme's amount */
     assert(SDL_fabsf(SDL_GetWindowProgressValue(app->window) - 0.5f) < 0.001f);
     /* R on another game while one runs: it joins the queue, the tips saying where; one runs at a time */
@@ -6379,13 +6379,24 @@ int main(int argc, char** argv) {
                 app.browser.selected = 0;
                 assert(games_focus(&app, &none, &about, kind, sizeof kind) == app.recent.game[0].name &&
                        about == app.recent.game[0].path && !strcmp(kind, listed));
+                /* a dump, package or ROM not made yet stays in the list but is no recent row: opening it would compile
+                   it; a Linux program runs as it is and is one */
                 for (k = 0; k < sizeof unlisted / sizeof unlisted[0]; ++k) {
                     char* path = snx_path_join(temporary, unlisted[k].file);
+                    int shown = recent_shown(&app), count = app.recent.count;
+                    bool linux_one = unlisted[k].driver == GUI_LINUX;
                     assert(!gui_recent_add(&app.recent, path, unlisted[k].driver, 0));
                     recent_changed(&app);
                     app.browser.selected = 0;
-                    games_focus(&app, &none, &about, kind, sizeof kind);
-                    assert(!strcmp(kind, unlisted[k].kind));
+                    about = NULL;
+                    assert(games_focus(&app, &none, &about, kind, sizeof kind) && about);
+                    assert(app.recent.count == SDL_min(count + 1, GUI_RECENT_MAX) &&
+                           !strcmp(app.recent.game[0].path, path));
+                    if (linux_one)
+                        assert(!strcmp(kind, unlisted[k].kind) && !strcmp(about, path) &&
+                               recent_shown(&app) == shown + 1);
+                    else
+                        assert(strcmp(about, path) && recent_shown(&app) <= shown);
                     free(path);
                 }
                 app.recent = was;
@@ -6399,6 +6410,21 @@ int main(int argc, char** argv) {
                 SDL_Texture* drawn;
                 icons_free(&app);
                 assert(!game_icon(&app, program));
+                list_games(&app); /* none of its own: its row shows Wimsy in grey */
+                {
+                    UiRowInfo info = {0};
+                    size_t k, lead = (size_t)games_lead(&app);
+                    for (k = 0;
+                         k < app.games.count && !(app.games.paths[k] && snx_same_file(app.games.paths[k], program));
+                         ++k) {}
+                    assert(k < app.games.count && ui_games_rows_get_row_info(&app, lead + k, 300, &info) &&
+                           info.image && info.image == icon_none(&app));
+                }
+                {
+                    Uint32 coloured[2] = {0xff3366ccu, 0x80402010u};
+                    icon_grey(coloured, 2);
+                    assert(coloured[0] == 0xff626262u && coloured[1] == 0x80272727u);
+                }
                 assert(!snx_splash_jpeg("wimsy-fuddles", 32, 90, icon_jpeg_write, &jpeg));
                 assert(!snx_write_file(icon, jpeg.data, (size_t)jpeg.size));
                 assert(!game_icon(&app, program)); /* as it was drawn, until the list is read again */
@@ -6420,7 +6446,7 @@ int main(int argc, char** argv) {
                 icons_free(&app);
                 app.message[0] = 0;
                 assert(!game_icon(&app, program) && strstr(app.message, icon) &&
-                       strstr(app.message, "could not be drawn"));
+                       strstr(app.message, "could not be drawn: the game shows Wimsy in grey"));
                 icons_free(&app);
                 assert(!remove(icon));
                 free(icon);
@@ -6437,7 +6463,6 @@ int main(int argc, char** argv) {
                 char *console = console_in(logs), *said, *line, reason[160], kind[256];
                 size_t said_size = 0;
                 unsigned answered;
-                GuiRecentGame recent_dump = {0};
                 set_env("XDG_CACHE_HOME", cache);
                 assert(!snx_write_file(with, "x", 1) && !snx_write_file(without, "x", 1) &&
                        !snx_write_file(hung, "x", 1) && !snx_mkdirs(logs));
@@ -6471,10 +6496,19 @@ int main(int argc, char** argv) {
                 assert(snx_is_dir(dir) && !snx_path_exists(why)); /* the driver's folder, nothing of the answer kept */
                 assert(dump_icon_why(&app, without, reason, sizeof reason) &&
                        strstr(reason, "no icon.nsp: it has no Control NCA"));
-                snprintf(recent_dump.path, sizeof recent_dump.path, "%s", without); /* its kind says it, a row's too */
-                recent_kind(&app, &recent_dump, kind, sizeof kind);
-                assert(!strncmp(kind, "A dump, prepared when it runs. No icon: ", 40) &&
-                       strstr(kind, "it has no Control NCA"));
+                { /* its Games row's kind says it */
+                    GuiGames listed = {0};
+                    char error[256], *folder = snx_dirname(without);
+                    size_t k;
+                    assert(folder && gui_games_add(&listed, folder, GUI_GAMES_DUMP, error, sizeof error));
+                    for (k = 0; k < listed.count && !(listed.paths[k] && snx_same_file(listed.paths[k], without));
+                         ++k) {}
+                    assert(k < listed.count);
+                    game_kind(&app, &listed, k, kind, sizeof kind);
+                    assert(strstr(kind, "No icon: ") && strstr(kind, "it has no Control NCA"));
+                    gui_games_free(&listed);
+                    free(folder);
+                }
                 icons_free(&app);
                 assert(!game_icon(&app, without) && !app.dump_icons.count); /* said once: not asked again */
                 said = (char*)snx_read_file(console, &said_size);
@@ -6588,32 +6622,41 @@ int main(int argc, char** argv) {
         free(argv_got);
         driver_will(NULL, 0, NULL);
         free(got);
-        assert(app.recent.count == 1 && app.browser.head == 1 && !strcmp(app.recent.game[0].name, "option flags"));
+        assert(app.recent.count == 1 && !app.browser.head && !strcmp(app.recent.game[0].name, "option flags"));
         assert(app.recent.game[0].driver == GUI_SWITCH && !app.recent.game[0].prepared);
         gui_recent_load(&kept, recent_file);
         assert(kept.count == 1 && !strcmp(kept.game[0].name, "option flags"));
         assert(!strcmp(kept.game[0].path, app.recent.game[0].path));
-        /* in Games, not the menu: a title and the game, then the games; the focus on it, first */
+        /* not made: kept in the list, but no row of Recent Games, as opening it would compile it */
         render(&app);
-        hides(&app, "Recent Games", soft); /* the game itself shows in the last output, beside the items */
+        hides(&app, "Recent Games", soft);
         go_tab(&app, GUI_TAB_GAMES);
+        render(&app);
+        hides(&app, "Recent Games", soft);
+        /* made since, by any run: its game in its place, the first row, the focus on it; Enter plays it, whatever item
+           the menu last had, with no question about compiling it */
+        again_made = made_game(&app, again, "option flags");
+        {
+            char* program = snx_path_join(again_made, "option flags");
+            assert(!snx_copy_file(self, program) && !snx_make_executable(program));
+            free(program);
+        }
+        list_games(&app);
+        assert(app.recent.count == 1 && app.recent.game[0].prepared && app.browser.head == 1 &&
+               app.browser.selected == 0);
         render(&app);
         hides(&app, "- Add Folder", normal);
         shows(&app, "Recent Games", soft);
-        assert(app.browser.selected == 0);
-        shows(&app, "option flags", yellow); /* a dump's: the loading mark between the marker and its name */
+        shows(&app, "option flags", yellow);
         {
             char start[21]; /* the tips: where it is */
             snprintf(start, sizeof start, "%s", app.recent.game[0].path);
             shows(&app, start, normal);
         }
-        /* made since, it plays from there, whatever item the menu last had: its own driver, the options of now; the
-           menu keeps its item */
-        again_made = made_game(&app, again, "option flags");
         app.menu.selected = GUI_LINUX;
         key(&app, SDLK_RETURN);
-        play_made(&app);
-        assert(app.menu.running && app.menu.selected == GUI_LINUX && app.recent.game[0].driver == GUI_SWITCH);
+        assert(!app.confirm.shown && app.menu.running && app.menu.selected == GUI_LINUX &&
+               app.recent.game[0].driver == GUI_SWITCH);
         finish(&app, 0);
         assert(app.recent.count == 1 && app.menu.view == GUI_LOAD_NONE);
         /* the mouse over the game: the focus on it */
@@ -6638,20 +6681,25 @@ int main(int argc, char** argv) {
         hides(&app, "Recent Games", soft);
         /* five: three of them, and a row that shows the rest */
         {
-            const char* names[] = {"e", "d", "c", "b", "a"}; /* added oldest first: a is the newest */
-            for (int i = 0; i < 5; ++i) {
-                char* path = snx_format("%s/%s.nro", temporary, names[i]);
-                assert(!gui_recent_add(&app.recent, path, GUI_SWITCH, 0));
+            const char* names[] = {"Echo", "Delta", "Charlie", "Bravo", "Alpha"}; /* oldest first: Alpha the newest */
+            for (int i = 0; i < 5; ++i) { /* games made: a dump not made has no row */
+                char* path = snx_format("%s/%s", temporary, names[i]);
+                assert(!gui_recent_add(&app.recent, path, GUI_SWITCH, 1));
                 free(path);
             }
             recent_changed(&app);
             assert(app.recent.count == 5 && app.browser.head == 4 && !app.recent_all);
             render(&app);
             shows(&app, "Recent Games", soft);
-            shows(&app, "- a", yellow); /* the focus, the first row */
-            shows(&app, "- c", normal);
+            shows(&app, "Alpha", yellow); /* the focus, the first row, after Wimsy in grey (no icon of its own) */
+            shows(&app, "Charlie", normal);
             shows(&app, "- Show More", normal);
-            hides(&app, "- d", normal);
+            hides(&app, "Delta", normal);
+            {
+                UiRowInfo info = {0};
+                assert(ui_games_rows_get_row_info(&app, 1, 300, &info) && !strncmp(info.label, "Alpha", 5) &&
+                       info.image == icon_none(&app));
+            }
             app.browser.selected = 3; /* the row that shows the rest */
             app.message[0] = 0;       /* the gone game's, over the tips */
             render(&app);
@@ -6668,8 +6716,8 @@ int main(int argc, char** argv) {
             key(&app, SDLK_RETURN); /* all five, the focus on the first that was hidden */
             assert(!app.menu.running && app.recent_all && app.browser.head == 5 && app.browser.selected == 3);
             render(&app);
-            shows(&app, "- d", yellow);
-            shows(&app, "- e", normal);
+            shows(&app, "Delta", yellow);
+            shows(&app, "Echo", normal);
             app.recent = (GuiRecent){0};
             app.recent_all = false;
             recent_changed(&app);
@@ -9312,7 +9360,9 @@ int main(int argc, char** argv) {
                    ui_games_shown(g.rects, app.scale, UI_GAMES_ROWS) >= (size_t)g.lead + page);
             b = games_row_box(&app, &g, g.lead); /* the focus, first: the page's first game */
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- ", yellow, black);
-            text_px_is(&app, b.x + cw / 2 + 2 * cw, item_text_y(&app, b), app.games.names[0], yellow, black);
+            /* after its icon, Wimsy in grey without one of its own (ui_draw_row) */
+            text_px_is(&app, b.x + cw / 2 + 2 * cw + user_side(&app, b.h) + cw / 2, item_text_y(&app, b),
+                       app.games.names[0], yellow, black);
             text_px_is(&app, g.place.side.x + cw, g.place.side.y + 2 * s, app.games.names[0], normal, black);
             { /* its kind in the tips, its path in the box under its name, from a drive's letter on Windows */
                 char start[9], kind[96];
@@ -10355,6 +10405,7 @@ int main(int argc, char** argv) {
                 snprintf(app.recent.game[n].name, sizeof app.recent.game[n].name, "Game %d", n);
                 snprintf(app.recent.game[n].path, sizeof app.recent.game[n].path, "/games/Game %d", n);
                 app.recent.game[n].driver = GUI_SWITCH;
+                app.recent.game[n].prepared = 1; /* games: a dump not made has no row */
             }
             app.recent_all = false;
             recent_changed(&app);
