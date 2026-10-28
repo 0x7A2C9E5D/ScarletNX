@@ -1767,8 +1767,8 @@ static void add_mod(App* app, const char* temporary) {
          *file = snx_path_join(root, "x");
     char *to = snx_path_join(mods, "Better Fonts"), *to_first = snx_path_join(mods, "A first"), want[2048];
     const char* cloud = "content://com.example.cloud.documents/tree/abc%3Amods";
-    static const int tail[] = {ROW_ADD_MOD,     ROW_MODS_FOLDER, ROW_ADD_CHEATS, ROW_CHEATS_FOLDER,
-                               ROW_OPEN_FOLDER, ROW_CLEAN_CACHE, ROW_SAVE,       ROW_PLAY};
+    static const int tail[] = {ROW_ADD_MOD, ROW_MODS_FOLDER, ROW_ADD_CHEATS, ROW_CHEATS_FOLDER, ROW_OPEN_FOLDER,
+                               ROW_STATES,  ROW_CLEAN_CACHE, ROW_SAVE,       ROW_PLAY};
     size_t index = 0;
     int i, nx, ny;
     while (index < app->games.count &&
@@ -7615,6 +7615,27 @@ int main(int argc, char** argv) {
                 assert(app.states_shown && app.states_count == 3 && !app.confirm.shown);
                 app.pad_driven = false;
             }
+            { /* a finger's way: the foot's word, and the game's box (M) with its Save States row, which gives way */
+                int pick = hint_pick("Save states", 0, false), row;
+                char said_row[256], *data = snx_path_join(own, "0100ABCD12350000_data"); /* a game folder: M's box */
+                assert(pick >= 0 && hint_keys[pick].key == SDLK_S && !hint_keys[pick].mod);
+                assert(data && !snx_mkdirs(data));
+                key(&app, SDLK_ESCAPE);
+                key(&app, SDLK_M);
+                row = addons_row_of(&app, ROW_STATES);
+                assert(app.addons_shown && addons_row(&app, row) == ROW_STATES && !app.states_shown);
+                addons_label(&app, row, said_row, sizeof said_row);
+                assert(strstr(said_row, "Save States"));
+                {
+                    UiRowInfo info = {0};
+                    assert(ui_addons_rows_get_row_info(&app, (size_t)row, 0, &info) && !(info.attr & UI_ATTR_OFF));
+                }
+                app.addons_focus = row;
+                key(&app, SDLK_RETURN);
+                assert(!app.addons_shown && app.states_shown && app.states_count == 3);
+                assert(!snx_remove_tree(data)); /* the rest plays the program alone */
+                free(data);
+            }
             render(&app);
             assert(find_text(&app, "Slot 1", rgb(app.theme.ink), 1, &nx, &ny));
             states_boxes(&app, &d);
@@ -7731,13 +7752,14 @@ int main(int argc, char** argv) {
                 8);
             key(&app, SDLK_RETURN);
             /* rows: Update 1.2.0, Update 1.0.0, No update, DLC 1, A mod, B mod, 60 FPS, Infinite HP, Speed x2|x4, Add
-               Mod, Open Mods Folder, Add Cheats, Open Cheats Folder, Open Folder, Clean Cache, Save, Play */
+               Mod, Open Mods Folder, Add Cheats, Open Cheats Folder, Open Folder, Save States, Clean Cache, Save, Play */
             assert(app.addons_shown && !app.menu.running && app.addons.count == 3 && app.mods_count == 2 &&
-                   app.cheats_count == 3 && addons_rows(&app) == 17);
+                   app.cheats_count == 3 && addons_rows(&app) == 18);
             assert(addons_row(&app, 9) == ROW_ADD_MOD && addons_row(&app, 10) == ROW_MODS_FOLDER &&
                    addons_row(&app, 11) == ROW_ADD_CHEATS && addons_row(&app, 12) == ROW_CHEATS_FOLDER &&
-                   addons_row(&app, 13) == ROW_OPEN_FOLDER && addons_row(&app, 14) == ROW_CLEAN_CACHE &&
-                   addons_row(&app, 15) == ROW_SAVE && addons_row(&app, 16) == ROW_PLAY);
+                   addons_row(&app, 13) == ROW_OPEN_FOLDER && addons_row(&app, 14) == ROW_STATES &&
+                   addons_row(&app, 15) == ROW_CLEAN_CACHE && addons_row(&app, 16) == ROW_SAVE &&
+                   addons_row(&app, 17) == ROW_PLAY);
             build_ids(&app, dirs);
             assert(!app.addons_checked[0] && !app.addons_checked[1] && app.addons_checked[2]);
             assert(app.mods_on[0] && !app.mods_on[1] && !strcmp(app.mods[0], "A mod"));
@@ -7826,8 +7848,8 @@ int main(int argc, char** argv) {
             assert(!app.cheats_on[0] && app.cheats_on[1] && app.addons_focus == 8 &&
                    !strcmp(app.message,
                            "\"Speed x2|x4\" always runs: a | in its name, which cheats_off= puts between two"));
-            for (i = 0; i < 7; i++) key(&app, SDLK_DOWN); /* past Open Folder and Clean Cache */
-            assert(app.addons_focus == 15);
+            for (i = 0; i < 8; i++) key(&app, SDLK_DOWN); /* past Open Folder, Save States and Clean Cache */
+            assert(app.addons_focus == 16);
             key(&app, SDLK_RETURN);
             assert(!app.addons_shown && !app.menu.running && strstr(app.message, "kept"));
             checked = snx_ini_value(ini, "addons");
@@ -7861,8 +7883,8 @@ int main(int argc, char** argv) {
             key(&app, SDLK_DOWN);
             key(&app, SDLK_DOWN);
             key(&app, SDLK_RETURN);
-            for (i = 0; i < 14; i++) key(&app, SDLK_DOWN); /* Recompile, the last row */
-            assert(app.addons_focus == 16);
+            for (i = 0; i < 15; i++) key(&app, SDLK_DOWN); /* Recompile, the last row */
+            assert(app.addons_focus == 17);
             key(&app, SDLK_RETURN);
             assert(!app.addons_shown && !app.menu.running && !app.recompile && gui_queue_running(&app.queue) == 0);
             {
@@ -7927,7 +7949,8 @@ int main(int argc, char** argv) {
                 focus_game(&app, "0100ABCD12340000");
                 key(&app, SDLK_RETURN);
                 assert(app.addons_shown && addons_row(&app, 13) == ROW_OPEN_FOLDER);
-                assert(addons_icon(&app, 13) == GUI_ICON_FOLDER_OPEN && addons_icon(&app, 14) == GUI_ICON_ERASER);
+                assert(addons_icon(&app, 13) == GUI_ICON_FOLDER_OPEN && addons_icon(&app, 14) == GUI_ICON_SAVE &&
+                       addons_icon(&app, 15) == GUI_ICON_ERASER);
                 app.addons_focus = 13;
                 key(&app, SDLK_RETURN);
                 assert(app.addons_folders_shown && addons_rows(&app) == GUI_GAME_FOLDERS && !app.addons_focus);
@@ -7973,9 +7996,9 @@ int main(int argc, char** argv) {
                 assert(caches[0] && caches[1] && !snx_path_exists(caches[0]) && !snx_path_exists(caches[1]));
                 assert(snx_path_within(caches[0], own) && snx_path_within(caches[1], own)); /* the test's own */
                 info = (UiRowInfo){0};
-                assert(ui_addons_rows_get_row_info(&app, 14, 0, &info) && addons_row(&app, 14) == ROW_CLEAN_CACHE &&
+                assert(ui_addons_rows_get_row_info(&app, 15, 0, &info) && addons_row(&app, 15) == ROW_CLEAN_CACHE &&
                        (info.attr & UI_ATTR_OFF));
-                app.addons_focus = 14;
+                app.addons_focus = 15;
                 key(&app, SDLK_RETURN);
                 snprintf(want, sizeof want, "%s has no cache to delete: no %s, no %s", app.addons_title, caches[0],
                          caches[1]);
@@ -7987,7 +8010,7 @@ int main(int argc, char** argv) {
                 keep = snx_path_join(saves, "user.1");
                 assert(!snx_mkdirs(saves) && !snx_write_file(keep, "save", 4));
                 info = (UiRowInfo){0};
-                assert(ui_addons_rows_get_row_info(&app, 14, 0, &info) && !(info.attr & UI_ATTR_OFF));
+                assert(ui_addons_rows_get_row_info(&app, 15, 0, &info) && !(info.attr & UI_ATTR_OFF));
                 key(&app, SDLK_RETURN);
                 gui_size_text(size, sizeof size, sizeof bytes);
                 assert(app.confirm.shown && app.confirm.ask == GUI_ASK_CACHE && strstr(app.ask_line, size) &&

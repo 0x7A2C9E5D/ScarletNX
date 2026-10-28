@@ -333,6 +333,12 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
+msgid "Save states."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
 msgid "Back."
 msgstr ""
 
@@ -1390,6 +1396,10 @@ msgid "Clean Cache"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Save States"
+msgstr ""
+
+#: src/gui/main.c
 msgid "  (Debug on)"
 msgstr ""
 
@@ -1537,6 +1547,11 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "Not added: %s came back after the box it was picked for closed"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s is a dump: its recompiled game keeps the save states"
 msgstr ""
 
 #: src/gui/main.c
@@ -3590,6 +3605,12 @@ msgstr ""
 #: src/gui/main.c
 #, snx-key
 msgid "S"
+msgstr ""
+
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Save states"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word

@@ -429,7 +429,9 @@ cannot be read is named and the others still listed.
   the page, that Enter opens for a game with updates, DLCs, mods or cheats beside it, and for a game with none of them
   too, whose **Add Mod** and **Add Cheats** copy a folder or a `.txt` the system's picker gives into the game's mods
   and cheats, **Open Folder** lists the game's folders to open (its dump's, its own, saves, settings, logs, caches; one
-  not there greyed) and **Clean Cache** deletes its shader and code caches, asked first ([USAGE](USAGE.md#mods)). On
+  not there greyed), **Save States** opens the box of its save states that S opens (greyed for a dump, which has
+  none; on a phone the way to them, with a tap on *Save states* at the foot) and **Clean Cache** deletes its shader
+  and code caches, asked first ([USAGE](USAGE.md#mods)). On
   another row, a dump, a package or another console's game, it says what it opens. The side panel of a recompiled
   game says how its code was made (`Made with: O2, AOT 81%`, `?` for one an older version made), or, in the failure
   colour, `Needs Recompile` when Play compiles it first.

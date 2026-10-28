@@ -613,9 +613,10 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #endif
 #define SAY_GAMES_GRID SAY_GAMES /* a finger's are the list's */
 /* Games' focused row, each when it can be done there (games_said) */
-#define SAY_GAMES_R    SNX_TR_KEYS("Recompile.")
-#define SAY_GAMES_M    SNX_TR_KEYS("Mods.")
-#define SAY_GAMES_AOT  SNX_TR_KEYS("AOT pack.")
+#define SAY_GAMES_R      SNX_TR_KEYS("Recompile.")
+#define SAY_GAMES_M      SNX_TR_KEYS("Mods.")
+#define SAY_GAMES_AOT    SNX_TR_KEYS("AOT pack.")
+#define SAY_GAMES_STATES SNX_TR_KEYS("Save states.")
 #ifdef SDL_PLATFORM_ANDROID
 #define SAY_KEYS_HOW SNX_TR_KEYS("Back.")
 #else
@@ -3685,6 +3686,8 @@ static size_t addons_updates(const App* app) {
     while (n < app->addons.count && addon_kind(app, n) == SNX_ADDON_UPDATE) n++;
     return n;
 }
+/* whether game, a program's path, keeps save states: a recompiled game's, not a dump's or a CIA's (states_focus's) */
+static bool states_kept(const char* game) { return !gui_is_cia(game) && !gui_is_dump(game); }
 /* the box's rows: the updates and No update (with any update), the DLCs, the mods, the cheats, then addons_tail's */
 enum {
     ROW_NO_UPDATE = -1,
@@ -3695,12 +3698,14 @@ enum {
     ROW_ADD_MOD = -6,
     ROW_ADD_CHEATS = -7,
     ROW_OPEN_FOLDER = -8,
-    ROW_CLEAN_CACHE = -9
+    ROW_CLEAN_CACHE = -9,
+    ROW_STATES = -10
 };
 /* the rows after the cheats: Add Mod and Add Cheats, each with its folder's Open after it, Open Folder (the game's other
-   folders), Clean Cache, Save and Play; on every system, a phone's Files app showing the folders */
-static const int addons_tail[] = {ROW_ADD_MOD,     ROW_MODS_FOLDER, ROW_ADD_CHEATS, ROW_CHEATS_FOLDER,
-                                  ROW_OPEN_FOLDER, ROW_CLEAN_CACHE, ROW_SAVE,       ROW_PLAY};
+   folders), Save States (S's box, the way a finger has to it), Clean Cache, Save and Play; on every system, a phone's
+   Files app showing the folders */
+static const int addons_tail[] = {ROW_ADD_MOD, ROW_MODS_FOLDER, ROW_ADD_CHEATS, ROW_CHEATS_FOLDER, ROW_OPEN_FOLDER,
+                                  ROW_STATES,  ROW_CLEAN_CACHE, ROW_SAVE,       ROW_PLAY};
 #define ADDONS_TAIL ((int)SDL_arraysize(addons_tail))
 /* the box's rows; on Open Folder's page, a folder of the game's each */
 static int addons_rows(const App* app) {
@@ -3932,7 +3937,7 @@ static unsigned addons_icon(const App* app, int row) {
            : item == ROW_MODS_FOLDER || item == ROW_CHEATS_FOLDER || item == ROW_OPEN_FOLDER ? GUI_ICON_FOLDER_OPEN
            : item == ROW_CLEAN_CACHE                                                         ? GUI_ICON_ERASER
            : item == ROW_ADD_CHEATS                                                          ? GUI_ICON_FILE_PLUS
-           : item == ROW_SAVE                                                                ? GUI_ICON_SAVE
+           : item == ROW_SAVE || item == ROW_STATES                                          ? GUI_ICON_SAVE
            : item == ROW_PLAY && app->addons_recompile                                       ? GUI_ICON_HAMMER
            : item == ROW_PLAY                                                                ? GUI_ICON_PLAY
                                                                                              : GUI_ICON_NONE;
@@ -3975,6 +3980,8 @@ static void addons_label(const App* app, int row, char* label, size_t size) {
         snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Open Folder"));
     else if (item == ROW_CLEAN_CACHE)
         snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Clean Cache"));
+    else if (item == ROW_STATES)
+        snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Save States"));
     else if (item == ROW_SAVE)
         snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Save"));
     else
@@ -4014,11 +4021,12 @@ bool ui_addons_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* inf
     addons_label(app, (int)row, app->row_text, sizeof app->row_text);
     info->label = app->row_text + strlen(app->theme.marker);
     info->icon = addons_icon(app, (int)row);
-    /* greyed: a folder Open Folder cannot open, Clean Cache with none */
+    /* greyed: a folder Open Folder cannot open, Clean Cache with none, Save States of a dump (which has none) */
     if (app->addons_folders_shown)
         addons_folder_off(app, (int)row, why, sizeof why);
     else
-        why[0] = addons_row(app, (int)row) == ROW_CLEAN_CACHE && !caches_there(app);
+        why[0] = (addons_row(app, (int)row) == ROW_CLEAN_CACHE && !caches_there(app)) ||
+                 (addons_row(app, (int)row) == ROW_STATES && !states_kept(app->addons_game));
     if (why[0]) info->attr |= UI_ATTR_OFF;
     return true;
 }
@@ -4405,6 +4413,7 @@ static void addons_picked(App* app, const char* picked, const char* error, bool 
         cheats_add(app, picked);
 }
 static void launch(App* app, char* absolute, bool prepared);
+static void states_open(App* app, const char* game, const char* title);
 /* row pressed: an update picked (the others not: one runs at a time), No update, a DLC's, a mod's or a cheat's box
    checked or not; Add Mod or Add Cheats, the picker, whose folder or file goes into the mods or cheats folder (mod_add,
    cheats_add); Open Mods Folder or Open Cheats Folder, the folder opened; Open Folder, its page of the game's other
@@ -4427,6 +4436,18 @@ static void addons_press(App* app, int row) {
     }
     if (item == ROW_CLEAN_CACHE) {
         caches_ask(app);
+        return;
+    }
+    if (item == ROW_STATES) { /* the box goes, since it would take the keys from the states' */
+        char *game = snx_strdup(app->addons_game), *title = snx_strdup(app->addons_title);
+        addons_close(app);
+        if (states_kept(game))
+            states_open(app, game, title);
+        else
+            snprintf(app->message, sizeof app->message,
+                     snx_tr("%s is a dump: its recompiled game keeps the save states"), title);
+        free(game);
+        free(title);
         return;
     }
     if (addons_mod(app, item) >= 0) {
@@ -7054,10 +7075,8 @@ static void games_said(const App* app, bool pad, const char** parts, int* n) {
     if (!games_game_focus(app, &mods)) return;
     said_add(parts, n, pad ? SAY_PAD_GAMES_R : SAY_GAMES_R);
     if (mods && (pad ? SAY_PAD_GAMES_M : SAY_GAMES_M)) said_add(parts, n, pad ? SAY_PAD_GAMES_M : SAY_GAMES_M);
-#ifndef SDL_PLATFORM_ANDROID
-    if (mods && !pad) said_add(parts, n, SAY_GAMES_STATES); /* its save states' box, S */
-#endif
-    if (mods && pad) said_add(parts, n, SAY_PAD_GAMES_STATES); /* and a pad's X */
+    if (mods)
+        said_add(parts, n, pad ? SAY_PAD_GAMES_STATES : SAY_GAMES_STATES); /* its save states' box: S, a pad's X */
 }
 /* a setting's Del (X), said where the focused row is not at its default */
 static void settings_said(const App* app, bool pad, const char** parts, int* n) {
@@ -13100,6 +13119,7 @@ static const struct {
                  {SNX_TR_KEY("V"), SDLK_V, 0, false},
                  {SNX_TR_KEY("View"), SDLK_V, 0, false},
                  {SNX_TR_KEY("S"), SDLK_S, 0, false},
+                 {SNX_TR_KEY("Save states"), SDLK_S, 0, false}, /* a finger's, on Games */
                  {SNX_TR_KEY("Ctrl+S"), SDLK_S, SDL_KMOD_CTRL, false},
                  {SNX_TR_KEY("Ctrl+V"), SDLK_V, SDL_KMOD_CTRL, false},
                  {SNX_TR_KEY("F5"), SDLK_F5, 0, false},
