@@ -203,6 +203,12 @@ u32 host1x_ioctl(H1Ch* t, u32 cmd, u8* d, u32 n) {
     return 0;
 }
 void host1x_forget_handle(u32 h) { (void)h; }
+/* nvdrv.c asks the kernel whether a range is locked before FREE reports it; the test has no memory layer, so no
+   range is ever locked */
+int svc_mem_range_locked(u64 addr, u64 size) {
+    (void)addr, (void)size;
+    return 0;
+}
 
 /* guest memory: the request's buffers */
 enum { IN0 = 0x1000, IN1 = 0x2000, OUT0 = 0x3000, OUT1 = 0x4000, PATH = 0x5000 };

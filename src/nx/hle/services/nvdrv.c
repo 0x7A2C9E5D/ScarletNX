@@ -914,7 +914,7 @@ static u32 nvmap_ioc_free(u8* d) {
         if (m->refs) m->refs--;
         last = !m->refs && !m->pins;
         if (last) {
-            if (!(svc_mem_range_locked && svc_mem_range_locked(m->addr, m->size))) {
+            if (!svc_mem_range_locked(m->addr, m->size)) {
                 wr64(d, NVMAP_FREE_ADDRESS, m->addr);
                 wr32(d, NVMAP_FREE_SIZE, m->size);
                 wr32(d, NVMAP_FREE_FLAGS, (m->flags & NVMAP_ALLOC_UNCACHED) ? NVMAP_FREE_WAS_UNCACHED : 0);
