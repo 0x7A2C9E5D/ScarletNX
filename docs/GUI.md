@@ -279,11 +279,11 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   the newest game log's summary, the last run's output, the queue's recompiles' (`last-recompile.log`), the launcher's
   own log and its fatal errors (below) and the game log. Beside it, whole, the launcher's logs (`launcher/`) and the
   games' logs of the last 14 days, each game's runs under `games/<its name> [<its folder>]/` by when each was last
-  written; in every file a home folder is written `~`. **Share Log** saves that summary alone as `scarletnx.log`, and
-  **Open Logs Folder** opens Folders' Logs, where they all are. After a run or a recompile of the queue that ended abnormally
-  (not by ESC) it blinks red, as Install Keys does, until its logs are saved or a run ends well. On the
-  desktop it goes in the working folder with its path copied. On Android it goes to the
-  data folder's `state/` and is shared.
+  written; in every file a home folder is written `~`. **Share Log** saves that summary alone as `scarletnx.log`. Either
+  goes in `share/` of Folders' Logs (`~/.local/state/scarletnx/share/`; on iOS Documents' `logs/share/`, which the Files
+  app shows), emptied of what was shared before, and that folder opens in the system's file manager, to share from
+  there. **Open Logs Folder** opens Folders' Logs, where they all are. After a run or a recompile of the queue that
+  ended abnormally (not by ESC) it blinks red, as Install Keys does, until its logs are saved or a run ends well.
 - **Folders** opens Settings > App > Folders (ESC comes back to the menu). There Enter, or a tap, on a folder gives
   **Open Folder**, which opens it in the system's file manager (on Android its Files app, the data folder through the
   app's own storage, [ANDROID](ANDROID.md)), **Change Folder** and **Reset to Default**; on an Extra of a library

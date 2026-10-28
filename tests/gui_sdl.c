@@ -27,13 +27,21 @@ static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255
                        pink = {255, 85, 255, 255}, black = {0, 0, 0, 255};
 
 /* the question's box and its choices, as the theme places them (ask_place) */
-/* the zip Share Log's message names ("Logs saved to <path>", " (path copied)" after it or not), owned; NULL for none */
+/* the file Share Log's message names ("<file> is in <folder>, opened", or "; " and why it did not open), owned; NULL
+   for none */
 static char* shared_path(const App* app) {
-    const char *at = strstr(app->message, "Logs saved to "), *end;
-    if (at != app->message) return NULL;
-    at += 14;
-    end = strstr(at, " (path copied)");
-    return snx_format("%.*s", (int)(end ? (size_t)(end - at) : strlen(at)), at);
+    const char *in = strstr(app->message, " is in "), *end;
+    char *leaf, *folder, *path;
+    if (!in) return NULL;
+    end = strstr(in + 7, ", opened");
+    if (!end) end = strstr(in + 7, "; ");
+    if (!end) return NULL;
+    leaf = snx_format("%.*s", (int)(in - app->message), app->message);
+    folder = snx_format("%.*s", (int)(end - in - 7), in + 7);
+    path = snx_path_join(folder, leaf);
+    free(leaf);
+    free(folder);
+    return path;
 }
 /* the file named name of the zip at path, as text, owned; NULL when it has none */
 static char* zip_text(const char* path, const char* name) {
@@ -50,17 +58,6 @@ static char* zip_text(const char* path, const char* name) {
     mz_free(data);
     free(bytes);
     return text;
-}
-/* whether folder holds a file of path's name: the zip went there, not only to where path is */
-static bool leaf_in(const char* path, const char* folder) {
-    const char* leaf = path + strlen(path);
-    char* there;
-    bool found;
-    while (leaf > path && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
-    there = snx_path_join(folder, leaf);
-    found = snx_path_exists(there);
-    free(there);
-    return found;
 }
 /* the launcher's log of today in folder (gui_log_console_name), owned */
 static char* console_in(const char* folder) {
@@ -103,6 +100,11 @@ static char g_opened[4096];
 static bool record_url(const char* url) {
     snprintf(g_opened, sizeof g_opened, "%s", url);
     return true;
+}
+/* a system whose file manager does not open */
+static bool refuse_url(const char* url) {
+    (void)url;
+    return SDL_SetError("no file manager here");
 }
 static void swipe_px(App* app, int x, int y, int to_x, int to_y) {
     SDL_Event e = {0};
@@ -2829,8 +2831,15 @@ static void recompile_queue(App* app) {
         assert(log && strstr(log, "queue game one") && strstr(log, "queue game two") &&
                strstr(log, "queue game fails") && strstr(log, "[ended, status 3]"));
         free(log);
-        share_log(app, true);
-        shared = shared_path(app);
+        { /* in share/ of a Logs folder beside the games */
+            char* logs = app->state_dir;
+            app->state_dir = snx_format("%s-logs", app->games_dir);
+            share_log(app, true);
+            shared = shared_path(app);
+            assert(shared && snx_path_within(shared, app->state_dir));
+            free(app->state_dir);
+            app->state_dir = logs;
+        }
         log = zip_text(shared, "summary.txt");
         snprintf(line, sizeof line, "== the last recompile of the queue: %s ==", app->job_log);
         assert(log && strstr(log, line) && strstr(log, "[ended, status 3]") && !app->log_due);
@@ -3125,6 +3134,7 @@ int main(int argc, char** argv) {
     set_env("XDG_CACHE_HOME", "/nonexistent/snx-gui-test/cache");
     /* the menu runs Switch inputs with the runtime it is part of, the other drivers from beside it */
     assert(initialize(&app, "/nonexistent/snx-gui-test/bin/scarletnx"));
+    app.open_url = record_url; /* no file manager opens on the machine */
     assert(!strcmp(app.self, "/nonexistent/snx-gui-test/bin/scarletnx"));
     assert(!strcmp(app.drivers, "/nonexistent/snx-gui-test/bin"));
     assert(!strcmp(app.theme.id, "yorha"));    /* the menu opens in YoRHa everywhere */
@@ -5033,7 +5043,6 @@ int main(int argc, char** argv) {
         /* the box's Reset to Default says the same; its Open Folder opens the row's folder */
         folder_pick(&app, 2);
         assert(!app.confirm.shown && !strcmp(app.editor.note, line));
-        app.open_url = record_url;
         g_opened[0] = 0;
         folder_pick(&app, 0);
         {
@@ -5041,7 +5050,6 @@ int main(int argc, char** argv) {
             assert(url && !strcmp(g_opened, url));
             free(url);
         }
-        app.open_url = NULL;
         /* Enter on it, Change Folder, picks where games go: the picker's own answer first (none here), then a folder;
            that folder is the row's, and Del asks before it puts back the default, only the setting changing */
         folder_pick(&app, 1);
@@ -8185,7 +8193,7 @@ int main(int argc, char** argv) {
         app.clock = 1; /* a description too long for its box rests before it slides */
         render(&app);
         shows(&app, "- " ICON_SHARE_2 " Share Log", yellow);
-        shows_half(&app, "Shares the logs as", normal);
+        shows_half(&app, "Saves the logs as", normal);
         app.clock = 0;
         {
             GuiMenuBoxes m;
@@ -10417,46 +10425,35 @@ int main(int argc, char** argv) {
         app.browser = (GuiBrowser){0};
         app.theme = *gui_theme_builtin("default");
     }
-    /* Share Log off Android: scarletnx-logs-<when>.zip, its summary.txt with the message and the last run's output, in
-       the state folder of a data folder that keeps its kinds apart, else in the working folder */
+    /* Share Log, on every system: share/ of Folders' Logs emptied of what was shared before, scarletnx-logs-<when>.zip
+       in it (its summary.txt with the message and the last run's output), and that folder opened */
     {
-        char *installed_dir = app.data_dir, *portable = snx_path_join(temporary, ".scarletnx");
-        char *kept = snx_path_join(portable, "state"), *zip;
+        char *installed_dir = app.data_dir, *own_state = app.state_dir, *share, *stale, *zip, *url, *want;
         size_t size = 0;
         char* text;
         SDL_free(app.cwd);
         app.cwd = SDL_strdup(temporary);
+        app.state_dir = snx_path_join(temporary, "shared logs");
+        share = snx_path_join(app.state_dir, "share");
+        stale = snx_path_join(share, "shared before.log");
+        assert(!snx_mkdirs(share) && !snx_write_file(stale, "old", 3));
         snprintf(app.message, sizeof(app.message), "before the log");
         app.menu.selected = GUI_LOG;
-#ifdef SNX_XDG
-        /* an installed build's in its state folder, as the working folder is the home folder from the desktop */
-        {
-            char *state = snx_path_join(temporary, "state"), *logged = snx_path_join(state, "scarletnx");
-            set_env("XDG_STATE_HOME", state);
-            share_pick(&app, 0);
-            zip = shared_path(&app);
-            assert(zip && snx_path_within(zip, logged) && !leaf_in(zip, temporary));
-            text = zip_text(zip, "summary.txt");
-            assert(text && strstr(text, "Message: before the log"));
-            free(text);
-            free(zip);
-            free(logged);
-            free(state);
-        }
-#endif
-        /* a portable copy's .scarletnx/: its state/, on every system */
-        app.data_dir = snx_strdup(portable);
-        snprintf(app.message, sizeof(app.message), "before the log");
+        g_opened[0] = 0;
         share_pick(&app, 0);
         zip = shared_path(&app);
-        assert(zip && snx_path_within(zip, kept) && snx_is_file(zip) && !leaf_in(zip, temporary));
+        url = file_url(share);
+        want = snx_format(" is in %s, opened", share);
+        assert(zip && snx_path_within(zip, share) && snx_is_file(zip) && !snx_path_exists(stale) && url &&
+               !strcmp(g_opened, url) && !strncmp(app.message, "scarletnx-logs-", 15) && strstr(app.message, want));
         text = zip_text(zip, "summary.txt");
         assert(text && strstr(text, "Message: before the log"));
         free(text);
         free(zip);
-        /* any other build's (a checkout) in the working folder, with the newest game log's summary at its top: how the
-           run ended, demangled, before the run's output and the log itself */
-        free(app.data_dir);
+        free(want);
+        free(url);
+        /* with the newest game log's summary at its top: how the run ended, demangled, before the run's output and the
+           log itself */
         app.data_dir = snx_strdup(temporary);
         {
             char *game = snx_path_join(app.games_dir, "Some Game"), *log = snx_path_join(game, "Some Game.log");
@@ -10531,18 +10528,20 @@ int main(int argc, char** argv) {
             /* the log's copy, CR gone: no line ends in the '?' a CR would have become */
             assert(strstr(text, "ScarletNX - Some Game\n") && !strstr(text, "?\n"));
             free(text);
-            { /* the box's other two: the one log of before, alone, and the logs' folder opened; Back does neither */
-                char *one = snx_path_join(temporary, "scarletnx.log"), *want, *url;
+            { /* the box's other two: the one log of before, alone, the zip gone, and the logs' folder opened; Back does
+                 neither */
+                char *one = snx_path_join(share, "scarletnx.log"), *want, *url, *before = shared_path(&app);
                 snprintf(app.message, sizeof(app.message), "before the one log");
+                assert(before && snx_is_file(before));
                 share_pick(&app, 1);
-                want = snx_format("Log saved to %s", one);
-                assert(!strncmp(app.message, want, strlen(want)) && !app.log_due);
+                want = snx_format("scarletnx.log is in %s, opened", share);
+                assert(!strcmp(app.message, want) && !app.log_due && !snx_path_exists(before));
+                free(before);
                 text = (char*)snx_read_file(one, &size);
                 assert(text && strstr(text, "Message: before the one log") && strstr(text, "== the last run: "));
                 free(text);
                 free(want);
                 assert(!remove(one));
-                app.open_url = record_url;
                 g_opened[0] = 0;
                 {
                     /* a Logs folder no one can make, under a file, root too: said, nothing opened */
@@ -10574,34 +10573,69 @@ int main(int argc, char** argv) {
                 key(&app, SDLK_ESCAPE);
                 assert(!app.picks_shown && !g_opened[0] && !strcmp(app.message, "before Back") &&
                        !snx_path_exists(one));
-                app.open_url = NULL;
                 free(one);
             }
             assert(!snx_remove_tree(game));
             free(log);
             free(game);
         }
-        /* a working folder that is gone: the file it was to be and the system's reason */
+        { /* a file manager that does not open: where the file is, and why */
+            char* said = snx_format("scarletnx.log is in %s; Could not open %s: no file manager here", share, share);
+            app.open_url = refuse_url;
+            share_pick(&app, 1);
+            app.open_url = record_url;
+            assert(!strcmp(app.message, said) && !app.confirm.shown);
+            free(said);
+            said = snx_path_join(share, "scarletnx.log");
+            assert(!remove(said)); /* share/ holds the stuck one alone below */
+            free(said);
+        }
+#ifndef _WIN32
+        { /* a file shared before that cannot be deleted, share/ read-only (not as root): it, and nothing saved */
+            char *stuck = snx_path_join(share, "stuck.log"), *probe = snx_path_join(share, "probe"), *said;
+            bool held;
+            assert(!snx_write_file(stuck, "old", 3) && !chmod(share, 0555));
+            held = snx_write_file(probe, "x", 1) != 0; /* root writes there all the same */
+            if (!held) assert(!remove(probe));
+            said =
+                snx_format("The logs could not be saved: %s, of what was shared before, could not be deleted: ", stuck);
+            g_opened[0] = 0;
+            share_pick(&app, 1);
+            assert(!held || (!strncmp(app.message, said, strlen(said)) && app.message[strlen(said)] && !g_opened[0] &&
+                             snx_is_file(stuck) && app.confirm.shown));
+            if (app.confirm.shown) key(&app, SDLK_RETURN);
+            assert(!chmod(share, 0755));
+            free(said);
+            free(probe);
+            free(stuck);
+        }
+#endif
+        /* a Logs folder no one can make, under a file: the share folder it was to be and the system's reason */
         {
-            char *cwd = app.cwd, *gone = snx_path_join(temporary, "gone"),
-                 *log = snx_path_join(gone, "scarletnx-logs-");
-            char* said = snx_format("The logs could not be saved: %s", log);
-            app.cwd = gone;
+            char *logs = app.state_dir, *file = snx_path_join(temporary, "a file"), *gone, *said;
+            assert(!snx_write_file(file, "x", 1));
+            app.state_dir = snx_path_join(file, "logs");
+            gone = snx_path_join(app.state_dir, "share");
+            said = snx_format("The logs could not be saved: cannot make %s: ", gone);
+            g_opened[0] = 0;
             share_pick(&app, 0);
-            assert(!strncmp(app.message, said, strlen(said)) && strstr(app.message, ".zip could not be written: ") &&
-                   !snx_path_exists(gone));
+            assert(!strncmp(app.message, said, strlen(said)) && app.message[strlen(said)] && !g_opened[0]);
             assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ERROR && !strcmp(app.error_line, app.message));
             key(&app, SDLK_RETURN); /* in the box too, whole, until OK */
-            app.cwd = cwd;
+            free(app.state_dir);
+            app.state_dir = logs;
+            assert(!remove(file));
             free(said);
-            free(log);
             free(gone);
+            free(file);
         }
         free(app.data_dir);
         app.data_dir = installed_dir;
-        assert(!snx_remove_tree(portable));
-        free(kept);
-        free(portable);
+        assert(!snx_remove_tree(app.state_dir));
+        free(app.state_dir);
+        app.state_dir = own_state;
+        free(stale);
+        free(share);
     }
     /* two launchers open on one Logs folder: the first holds last-run.log and last-recompile.log, the next takes
        last-run-2.log and last-recompile-2.log, its log saying so; the first gone, the pair is free again (#675) */
@@ -10732,13 +10766,19 @@ int main(int argc, char** argv) {
         app.log_due = true; /* a crash's log: Share Log blinks in the failure colour until it is saved */
         assert((ui_menu_entries_attr_cb(&app, GUI_LOG) & (UI_ATTR_FAILURE | UI_ATTR_BLINK)) ==
                (UI_ATTR_FAILURE | UI_ATTR_BLINK));
-        share_log(&app, true);
-        assert(!app.log_due && !(ui_menu_entries_attr_cb(&app, GUI_LOG) & UI_ATTR_FAILURE));
-        path = shared_path(&app);
-        text = zip_text(path, "summary.txt");
-        assert(path && snx_path_within(path, state) && text && strstr(text, SAY_LEFT_CLEAR "\n"));
-        free(text);
-        free(path);
+        { /* in share/ of Logs, at its default the folder's own state/ */
+            char *logs = app.state_dir, *share = snx_path_join(state, "share");
+            app.state_dir = state;
+            share_log(&app, true);
+            app.state_dir = logs;
+            assert(!app.log_due && !(ui_menu_entries_attr_cb(&app, GUI_LOG) & UI_ATTR_FAILURE));
+            path = shared_path(&app);
+            text = zip_text(path, "summary.txt");
+            assert(path && snx_path_within(path, share) && text && strstr(text, SAY_LEFT_CLEAR "\n"));
+            free(text);
+            free(path);
+            free(share);
+        }
         /* every older file where it was, as it was */
         for (i = 0; i < 6; ++i) {
             path = snx_path_join(old, olds[i][0]);
@@ -10787,6 +10827,7 @@ int main(int argc, char** argv) {
         char *run = snx_path_join(old, "last-run.log"), *folder, *expected = snx_path_join(state, "scarletnx"), *now;
         assert(!snx_mkdirs(old) && !snx_write_file(recent, "recent", 6) && !snx_write_file(run, "run", 3));
         set_env("XDG_DATA_HOME", data);
+        set_env("XDG_STATE_HOME", state);
         folder = menu_folder(&app, SNX_USER_STATE, true);
         assert(folder && !strcmp(folder, expected) && snx_file_size(recent) == 6 && snx_file_size(run) == 3);
         now = snx_path_join(folder, "recent.txt");

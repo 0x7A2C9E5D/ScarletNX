@@ -90,7 +90,7 @@ else()
 endif()
 if(APPLE)
     # the iOS and macOS frontend (docs/APPLE.md), as Android's is MainActivity and android.c: apple.m is the menu's
-    # side, dist/apple/Frontend.swift the system's (iOS's document picker and share sheet, the Finder on macOS)
+    # side, dist/apple/Frontend.swift the system's (iOS's document picker)
     add_library(snx_apple_frontend STATIC "${PROJECT_SOURCE_DIR}/dist/apple/Frontend.swift")
     # Swift 5's checks: the functions apple.m calls run on the main thread, which Swift 6 would want them to prove
     set_target_properties(snx_apple_frontend PROPERTIES Swift_LANGUAGE_VERSION 5)

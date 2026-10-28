@@ -21,8 +21,6 @@ void gui_apple_start(void);
    it cannot open */
 int gui_apple_pick(SDL_Window* window, int folder, SDL_DialogFileCallback done, void* data, char* message,
                    size_t size);
-/* A file to the user: iOS's share sheet, the Finder showing it on macOS; 0 with message when it cannot */
-int gui_apple_share(SDL_Window* window, const char* path, char* message, size_t size);
 /* iOS: the runtime's arguments (argv[0] the first, NULL-terminated) for the game the menu plays once it has closed,
    in this process, which is the only one an iOS app has */
 void gui_apple_play(const char* const* argv);

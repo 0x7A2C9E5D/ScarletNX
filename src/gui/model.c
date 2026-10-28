@@ -147,7 +147,9 @@ void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_byte
 const char* gui_setting_description(const GuiMenu* menu) {
     switch (menu->selected) {
         case GUI_SETTINGS: return snx_tr("The game's .ini settings, the launcher's for the next runs, and its theme");
-        case GUI_LOG: return snx_tr("Shares the logs as one zip or as scarletnx.log, or opens their folder");
+        case GUI_LOG:
+            return snx_tr(
+                "Saves the logs as one zip or as scarletnx.log in a folder it opens to share from, or opens their folder");
         case GUI_FOLDERS:
             return snx_tr(
                 "Where the app keeps each kind of its files, and the libraries: each folder opened or changed");

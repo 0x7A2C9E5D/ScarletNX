@@ -35,11 +35,6 @@ msgstr ""
 msgid "No window to show the picker over."
 msgstr ""
 
-#: src/gui/apple.m
-#, c-format
-msgid "The log could not be shown: it is at %s"
-msgstr ""
-
 #: src/gui/browser.c
 #, c-format
 msgid "DLC %u"
@@ -3402,8 +3397,21 @@ msgid "Drop one local file path, not a list or remote URL."
 msgstr ""
 
 #: src/gui/main.c
+msgid "the launcher's log has no folder in Documents"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Settings > App > Folders' Logs names no folder"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
-msgid "The log could not be saved to %s: %s"
+msgid "The logs could not be saved: cannot make %s: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "The logs could not be saved: %s, of what was shared before, could not be deleted: %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -3412,31 +3420,18 @@ msgid "The logs could not be saved: %s"
 msgstr ""
 
 #: src/gui/main.c
-msgid "The logs could not be saved: no working folder"
-msgstr ""
-
-#: src/gui/main.c
-msgid "The log could not be saved: no working folder"
+#, c-format
+msgid "The log could not be saved to %s: %s"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Logs saved to %s"
+msgid "%s is in %s, opened"
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Log saved to %s"
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
-msgid "Logs saved to %s (path copied)"
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
-msgid "Log saved to %s (path copied)"
+msgid "%s is in %s; %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -3810,7 +3805,7 @@ msgid "The game's .ini settings, the launcher's for the next runs, and its theme
 msgstr ""
 
 #: src/gui/model.c
-msgid "Shares the logs as one zip or as scarletnx.log, or opens their folder"
+msgid "Saves the logs as one zip or as scarletnx.log in a folder it opens to share from, or opens their folder"
 msgstr ""
 
 #: src/gui/model.c

@@ -3655,28 +3655,32 @@ static char* file_url(const char* folder) {
     return url;
 }
 /* folder opened in the system's file manager (Android's and iOS's Files app), made first when it isn't there:
-   app->message says where it is, or why it could not be opened */
-static void show_folder(App* app, const char* folder) {
+   app->message says where it is, or why it could not be opened; whether it opened */
+static bool show_folder(App* app, const char* folder) {
     char why[256], *url;
+    bool opened;
     if (snx_mkdirs(folder)) {
         snprintf(app->message, sizeof app->message, snx_tr("Cannot make %s: %s"), folder,
                  snx_os_error(why, sizeof why));
-        return;
+        return false;
     }
 #ifdef SDL_PLATFORM_ANDROID /* a file:// URL is no app's to open there: the Files app through MainActivity */
-    if (gui_android_open_folder(folder, why, sizeof why))
+    opened = gui_android_open_folder(folder, why, sizeof why);
+    if (opened)
         snprintf(app->message, sizeof app->message, snx_tr("Opened %s"), folder);
     else
         snprintf(app->message, sizeof app->message, snx_tr("Could not open %s: %s"), folder, why);
-    return;
+    return opened;
 #endif
     url = file_url(folder);
-    if (url && (app->open_url ? app->open_url : SDL_OpenURL)(url))
+    opened = url && (app->open_url ? app->open_url : SDL_OpenURL)(url);
+    if (opened)
         snprintf(app->message, sizeof app->message, snx_tr("Opened %s"), folder);
     else
         snprintf(app->message, sizeof app->message, snx_tr("Could not open %s: %s"), folder,
                  url ? SDL_GetError() : snx_tr("out of memory"));
     free(url);
+    return opened;
 }
 /* the game's folder and name, owned, from its program's path */
 static void addons_where(const App* app, char** folder, char** name) {
@@ -11292,6 +11296,8 @@ static void render_picks(App* app) {
     choices_draw(app, &c, question, tab);
 }
 static void share_log(App* app, bool zip);
+static char* logs_folder(const App* app);
+static const char* logs_none(void);
 /* choice i taken, or none (-1: Back): the logs as one zip, as the one log of before, or their folder opened; a Folders
    row's folder opened, another picked, its default asked for or its Extra taken off */
 static void pick_take(App* app, int i) {
@@ -11299,10 +11305,14 @@ static void pick_take(App* app, int i) {
     app->picks_shown = false;
     if (i < 0) return;
     if (app->picks_of == GUI_PICKS_SHARE) {
+        char* logs = i < 2 ? NULL : logs_folder(app); /* the launcher's logs and the games' */
         if (i < 2)
             share_log(app, i == 0);
+        else if (logs)
+            show_folder(app, logs);
         else
-            show_folder(app, place_path(app, GUI_PLACE_STATE)); /* Folders' Logs: the launcher's logs and the games' */
+            snprintf(app->message, sizeof app->message, "%s", logs_none());
+        free(logs);
     } else if (i == 0) {
         const char* path = folder_row_path(app, app->pick_row);
         if (path)
@@ -12687,23 +12697,58 @@ static void games_logs(const App* app, LogFiles* l) {
     snx_free_strings(names, count);
     free(state);
 }
-/* the message on the screen, the summary of the newest game log, the last run's output, the launcher's own log and its
-   fatal errors, and that game log, in the data folder's state folder (the working folder without one: started from
-   the desktop, that is the home folder): with zip as summary.txt of scarletnx-logs-<when>.zip beside the launcher's
-   logs and the games' of the last GUI_LOG_DAYS days (gui/logzip.h), else as scarletnx.log alone; then on Android
-   handed to the share sheet, elsewhere its path copied */
-static void share_log(App* app, bool zip) {
-    char *game, *run, *recompiled, *said, *fatal, *played, *summary, *text, *saved, *state = NULL;
-    char console[4096], errors[4096];
-    const char* folder;
-    bool written;
-    folder = app->cwd;
-    if (app->data_dir && snx_app_dir(app->data_dir)) state = snx_app_kind_dir(app->data_dir, SNX_USER_STATE);
-    if (state && snx_mkdirs(state)) {
-        free(state);
-        state = NULL;
+/* the folder Open Logs Folder opens and Share Log's share/ is in, owned: Folders' Logs; on iOS Documents' logs/, the
+   launcher's own log's, as the Files app shows Documents alone and Logs is in Library. NULL for none */
+static char* logs_folder(const App* app) {
+#ifdef SDL_PLATFORM_IOS
+    char console[4096];
+    gui_log_path(SNX_CONSOLE_LOG, console, sizeof console);
+    (void)app;
+    return console[0] ? snx_dirname(console) : NULL;
+#else
+    const char* logs = place_path(app, GUI_PLACE_STATE);
+    return logs ? snx_strdup(logs) : NULL;
+#endif
+}
+/* why logs_folder gave none */
+static const char* logs_none(void) {
+#ifdef SDL_PLATFORM_IOS
+    return snx_tr("the launcher's log has no folder in Documents");
+#else
+    return snx_tr("Settings > App > Folders' Logs names no folder");
+#endif
+}
+/* Share Log's folder, share/ in logs_folder, emptied of its files: 0, else -1 with why in app->message */
+static int share_folder_empty(App* app, const char* share) {
+    char why[256], **names = NULL;
+    size_t count = 0, i;
+    int rc = 0;
+    if (snx_mkdirs(share) || snx_list_dir(share, &names, &count)) {
+        snprintf(app->message, sizeof app->message, snx_tr("The logs could not be saved: cannot make %s: %s"), share,
+                 snx_os_error(why, sizeof why));
+        return -1;
     }
-    if (state) folder = state;
+    for (i = 0; i < count && !rc; ++i) {
+        char* path = snx_path_join(share, names[i]);
+        if (path && snx_is_file(path) && remove(path)) {
+            snprintf(app->message, sizeof app->message,
+                     snx_tr("The logs could not be saved: %s, of what was shared before, could not be deleted: %s"),
+                     path, snx_os_error(why, sizeof why));
+            rc = -1;
+        }
+        free(path);
+    }
+    snx_free_strings(names, count);
+    return rc;
+}
+/* the message on the screen, the summary of the newest game log, the last run's output, the launcher's own log and its
+   fatal errors, and that game log, in share/ of logs_folder, emptied first: with zip as summary.txt of
+   scarletnx-logs-<when>.zip beside the launcher's logs and the games' of the last GUI_LOG_DAYS days (gui/logzip.h),
+   else as scarletnx.log alone; then that folder opened in the system's file manager, to share from there */
+static void share_log(App* app, bool zip) {
+    char *game, *run, *recompiled, *said, *fatal, *played, *summary, *text, *saved = NULL, *share, *logs;
+    char console[4096], errors[4096];
+    bool written = false, ready;
     left_behind(app);
     game = newest_log(app);
     run = log_tail(app->run_log, 1 << 20);
@@ -12721,16 +12766,19 @@ static void share_log(App* app, bool zip) {
         app->cleaned.count ? "Clean Old Settings:\n" : "", app->cleaned.text ? app->cleaned.text : "", summary,
         app->run_log ? app->run_log : "", run, app->job_log ? app->job_log : "", recompiled,
         console[0] ? console : "none", said, errors[0] ? errors : "none", fatal, game ? game : "no game log", played);
-    if (!zip) {
-        saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
+    logs = logs_folder(app);
+    share = logs ? snx_path_join(logs, "share") : NULL;
+    if (!share) snprintf(app->message, sizeof(app->message), snx_tr("The logs could not be saved: %s"), logs_none());
+    ready = share && !share_folder_empty(app, share); /* else why, in the message */
+    if (ready && !zip) {
+        saved = snx_path_join(share, "scarletnx.log");
         written = saved && !snx_write_file(saved, text, strlen(text));
         if (saved && !written) {
             char why[256];
             snprintf(app->message, sizeof(app->message), snx_tr("The log could not be saved to %s: %s"), saved,
                      snx_os_error(why, sizeof why));
-            say_failure(app, app->message);
         }
-    } else {
+    } else if (ready) {
         char stamp[32], *zip_name, error[sizeof app->message], *at[3];
         LogFiles files = {0};
         /* the launcher's log's folder, and the run logs' wherever they are kept apart */
@@ -12747,39 +12795,30 @@ static void share_log(App* app, bool zip) {
         games_logs(app, &files);
         log_stamp((SnxU64)time(NULL), stamp, sizeof stamp);
         zip_name = snx_format("scarletnx-logs-%s.zip", stamp);
-        saved = folder ? snx_path_join(folder, zip_name) : NULL;
+        saved = snx_path_join(share, zip_name);
         written = saved && !gui_logs_zip(saved, text, files.files, files.count, error, sizeof error);
-        if (saved && !written) {
+        if (saved && !written)
             snprintf(app->message, sizeof(app->message), snx_tr("The logs could not be saved: %s"), error);
-            say_failure(app, app->message);
-        }
         log_files_free(&files);
         free(zip_name);
         for (int k = 0; k < 3; ++k) free(at[k]);
     }
-    if (!saved) {
-        snprintf(app->message, sizeof(app->message), "%s",
-                 zip ? snx_tr("The logs could not be saved: no working folder")
-                     : snx_tr("The log could not be saved: no working folder"));
-        say_failure(app, app->message);
-    } else if (written) {
-        const char* done = zip ? snx_tr("Logs saved to %s") : snx_tr("Log saved to %s");
+    if (written) {
+        const char* leaf = saved + strlen(saved);
+        char said_open[sizeof app->message];
+        while (leaf > saved && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
         app->log_due = false; /* the crash's log is out */
-#ifdef SDL_PLATFORM_ANDROID
-        if (gui_android_share(saved, app->message, sizeof(app->message)))
-            snprintf(app->message, sizeof(app->message), done, saved);
-#elif defined(SDL_PLATFORM_APPLE)
-        if (gui_apple_share(app->window, saved, app->message, sizeof(app->message)))
-            snprintf(app->message, sizeof(app->message), done, saved);
-#else
-        if (SDL_SetClipboardText(saved))
-            snprintf(app->message, sizeof(app->message),
-                     zip ? snx_tr("Logs saved to %s (path copied)") : snx_tr("Log saved to %s (path copied)"), saved);
-        else
-            snprintf(app->message, sizeof(app->message), done, saved);
-#endif
-    }
+        if (show_folder(app, share)) /* the system's file manager shares it from there, as it shares any file */
+            snprintf(app->message, sizeof(app->message), snx_tr("%s is in %s, opened"), leaf, share);
+        else {
+            snprintf(said_open, sizeof said_open, "%s", app->message);
+            snprintf(app->message, sizeof(app->message), snx_tr("%s is in %s; %s"), leaf, share, said_open);
+        }
+    } else
+        say_failure(app, app->message);
     free(saved);
+    free(share);
+    free(logs);
     free(text);
     free(summary);
     free(played);
@@ -12788,7 +12827,6 @@ static void share_log(App* app, bool zip) {
     free(recompiled);
     free(run);
     free(game);
-    free(state);
 }
 /* gui_games_group's made: a dump a game of recompiled/ was made from already, of made_read's */
 static bool made_dump(const char* path, const void* made) { return made_program((const MadeGames*)made, path) != NULL; }

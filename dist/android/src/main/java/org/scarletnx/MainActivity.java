@@ -137,27 +137,21 @@ public class MainActivity extends SDLActivity {
     /** src/gui/android.c: the folder picked, its tree's URI as UTF-8; null for none */
     private static native void folderPicked(byte[] uri);
 
-    /** src/gui/android.c: the saved log, as a file, to the app the user picks */
-    public void share(String path) {
-        share(this, path);
-    }
-
-    /** the menu's Share Log (its logs' zip) and a stopped game's (GameActivity, a text log), from the activity that
-        shows them: a file of the data folder through DataProvider, another through the media store */
+    /** a stopped game's Share Log (GameActivity, a text log), from the activity that shows it: a file of the data
+        folder through DataProvider, another through the media store */
     static void share(Activity activity, String path) {
-        String type = path.endsWith(".zip") ? "application/zip" : "text/plain";
         Uri document = DataProvider.documentUri(activity, new java.io.File(path));
         if (document != null) {
-            send(activity, document, type);
+            send(activity, document);
             return;
         }
-        MediaScannerConnection.scanFile(activity, new String[] {path}, new String[] {type}, (file, uri) -> {
-            if (uri != null) send(activity, uri, type);
+        MediaScannerConnection.scanFile(activity, new String[] {path}, new String[] {"text/plain"}, (file, uri) -> {
+            if (uri != null) send(activity, uri);
         });
     }
 
-    private static void send(Activity activity, Uri uri, String type) {
-        Intent send = new Intent(Intent.ACTION_SEND).setType(type).putExtra(Intent.EXTRA_STREAM, uri);
+    private static void send(Activity activity, Uri uri) {
+        Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_STREAM, uri);
         activity.startActivity(
             Intent.createChooser(send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "ScarletNX log"));
     }

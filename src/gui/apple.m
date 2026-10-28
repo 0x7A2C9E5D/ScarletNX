@@ -21,7 +21,6 @@
 
 /* dist/apple/Frontend.swift. window is the SDL window's UIWindow or NSWindow; done gets the path picked, NULL for none */
 extern bool snx_apple_pick(void* window, bool folder, void (*done)(void* data, const char* path), void* data);
-extern bool snx_apple_share(void* window, const char* path);
 
 #if TARGET_OS_IPHONE
 extern size_t os_proc_available_memory(void); /* <os/proc.h>, which not every SDK header set declares the same way */
@@ -193,13 +192,6 @@ int gui_apple_pick(SDL_Window* window, int folder, SDL_DialogFileCallback done, 
     pick_done = NULL;
     snprintf(message, size, "%s",
              native ? snx_tr("The document picker did not open.") : snx_tr("No window to show the picker over."));
-    return 0;
-}
-
-int gui_apple_share(SDL_Window* window, const char* path, char* message, size_t size) {
-    void* native = native_window(window);
-    if (native && snx_apple_share(native, path)) return 1;
-    snprintf(message, size, snx_tr("The log could not be shown: it is at %s"), path);
     return 0;
 }
 
