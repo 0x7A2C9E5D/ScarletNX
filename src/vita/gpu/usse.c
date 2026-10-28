@@ -114,8 +114,11 @@ static bool fail(T* t, const char* format, ...) {
 static void global(T* t, uint32_t id) {
     if (t->global_count < GLOBALS) t->globals[t->global_count++] = id;
 }
+/* a module-scope variable; a register bank (Private) starts as zeros, so a read of a register the program didn't
+   write is the same on every device */
 static uint32_t var(T* t, uint32_t storage, uint32_t type) {
-    uint32_t id = spv_emit_variable(&t->e, storage, type);
+    uint32_t id = storage == SPV_STORAGE_PRIVATE ? spv_emit_variable_zeroed(&t->e, storage, type)
+                                                 : spv_emit_variable(&t->e, storage, type);
     global(t, id);
     return id;
 }
@@ -1666,6 +1669,8 @@ static void vertex_inputs(T* t) {
                 for (unsigned i = 0; i < 4 && s * 4 + i < words; ++i)
                     store_word(t, B_PA, resource + s * 4 + i, SPV(&t->e, SPV_OP_COMPOSITE_EXTRACT, t->t_u32, vec, i));
             }
+            /* a three-component float parameter's fourth is 1, as a typed one's (a position's w) */
+            if (words == 3 && components == 3 && type == T_F32) store_word(t, B_PA, resource + 3, cu(t, 0x3f800000u));
             slot += (words + 3) / 4;
             continue;
         }
@@ -1731,6 +1736,13 @@ static uint32_t frag_coord(T* t) {
     }
     return t->frag_coord;
 }
+/* the components to store for an input of n components into regs registers of type: as many as the registers hold,
+   up to four, and at least n */
+static unsigned input_components(unsigned n, unsigned regs, Type type) {
+    unsigned fit = regs * packed_count(type);
+    fit = fit > 4 ? 4 : fit;
+    return fit > n ? fit : n;
+}
 static void fragment_inputs(T* t) {
     const unsigned char* gxp = t->gxp;
     const unsigned char* varyings = gxp_at(gxp, GXP_VARYINGS);
@@ -1774,8 +1786,11 @@ static void fragment_inputs(T* t) {
                 }
                 vec = SPV(&t->e, SPV_OP_LOAD, t->t_v4f, *input);
             }
-            store_input(t, B_PA, pa, type, vector_value(t, vec, n, K_FLOAT));
-            pa += ((size >> 4) & 3) + 1;
+            /* the registers the varying takes, whole: the iterator writes them all, and a program reads past its
+               components (a three-component one's fourth register), which the vertex program's outputs give */
+            unsigned regs = ((size >> 4) & 3) + 1;
+            store_input(t, B_PA, pa, type, vector_value(t, vec, input_components(n, regs, type), K_FLOAT));
+            pa += regs;
         }
         uint32_t coord_index = info & 0x40f;
         if (coord_index != 0xf) { /* a non-dependent texture read, into PA (texture.cpp: do_texture_queries) */
@@ -1806,8 +1821,10 @@ static void fragment_inputs(T* t) {
                 uint32_t xy = SPV(&t->e, SPV_OP_VECTOR_SHUFFLE, t->t_v2f, coord, coord, 0, 1);
                 sampled = SPV(&t->e, SPV_OP_IMAGE_SAMPLE_IMPLICIT_LOD, t->t_v4f, sampler, xy);
             }
-            store_input(t, B_PA, pa, type, vector_value(t, sampled, texture_components(format), K_FLOAT));
-            pa += ((size >> 6) & 3) + 1;
+            unsigned regs = ((size >> 6) & 3) + 1; /* its registers, whole, as a varying's */
+            store_input(t, B_PA, pa, type,
+                        vector_value(t, sampled, input_components(texture_components(format), regs, type), K_FLOAT));
+            pa += regs;
         }
     }
 }
@@ -1923,10 +1940,12 @@ static void uniforms(T* t) {
         uint32_t texture = snx_ld_le16(d + i * 4) / 4, reg = base + snx_ld_le16(d + i * 4 + 2);
         if (texture < USSE_TEXTURES && reg < BANK_WORDS) t->dependent[reg] = (uint8_t)(texture + 1);
     }
-    /* the literals: (SA offset, float) pairs */
+    /* the literals: (register, word) pairs, the register from container 19's base as the dependent samplers' (at 0 the
+       program's uniforms would be overwritten, and the registers it reads left as they were) */
     uint32_t literals = snx_ld_le32(gxp + GXP_LITERALS_COUNT);
     const unsigned char* l = gxp_at(gxp, GXP_LITERALS);
-    for (uint32_t i = 0; i < literals; ++i) store_word(t, B_SA, snx_ld_le32(l + i * 8), cu(t, snx_ld_le32(l + i * 8 + 4)));
+    for (uint32_t i = 0; i < literals; ++i)
+        store_word(t, B_SA, base + snx_ld_le32(l + i * 8), cu(t, snx_ld_le32(l + i * 8 + 4)));
 }
 /* the vertex outputs (gxp.cpp: get_vertex_outputs) from O0 on, in order, and the position's viewport transform
    (make_vert_finalize_function) */
