@@ -6716,8 +6716,19 @@ int main(int argc, char** argv) {
             shows(&app, "Recent Games", soft);
             shows(&app, "Alpha", yellow); /* the focus, the first row, after Wimsy in grey (no icon of its own) */
             shows(&app, "Charlie", normal);
-            shows(&app, "- " ICON_PLUS " Show More", normal); /* its icon a + */
+            shows(&app, "Show More", normal); /* after its cover, a + */
             hides(&app, "Delta", normal);
+            { /* Show More's cover, as big as a game's: a grey + on white, as Wimsy's */
+                UiRowInfo info = {0};
+                Uint32 plus[64 * 64];
+                assert(ui_games_rows_get_row_info(&app, 4, 300, &info) && !strcmp(info.label, "Show More") &&
+                       info.image == icon_more(&app) && !info.icon);
+                plus_pixels(plus, 64);
+                assert(plus[32 * 64 + 32] == 0xff626262u && plus[32 * 64 + 13] == 0xff626262u &&
+                       plus[13 * 64 + 32] == 0xff626262u && plus[28 * 64 + 32] == 0xff626262u &&
+                       plus[32 * 64 + 12] == 0xffffffffu && plus[12 * 64 + 32] == 0xffffffffu &&
+                       plus[20 * 64 + 20] == 0xffffffffu && plus[0] == 0xffffffffu);
+            }
             {
                 UiRowInfo info = {0};
                 assert(ui_games_rows_get_row_info(&app, 1, 300, &info) && !strncmp(info.label, "Alpha", 5) &&
@@ -6726,7 +6737,7 @@ int main(int argc, char** argv) {
             app.browser.selected = 3; /* the row that shows the rest */
             app.message[0] = 0;       /* the gone game's, over the tips */
             render(&app);
-            shows(&app, "- " ICON_PLUS " Show More", yellow);
+            shows(&app, "Show More", yellow);
             { /* in the tips under the head, not again beside the list */
                 GuiGamesBoxes g;
                 int tx, ty;
@@ -10442,7 +10453,7 @@ int main(int argc, char** argv) {
                 games_boxes(&app, &g);
                 assert(g.lead == 5 && ui_games_shown(g.rects, app.scale, UI_GAMES_ROWS) > (size_t)g.lead);
                 shows(&app, "Recent Games", rgb(app.theme.soft));
-                shows(&app, "\xfe " ICON_PLUS " Show More", rgb(app.theme.ink));
+                shows(&app, "Show More", rgb(app.theme.ink));
             }
             go_tab(&app, GUI_TAB_MENU);
             app.recent = kept;

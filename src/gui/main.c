@@ -373,6 +373,7 @@ typedef struct App {
     GuiIcon icons[GUI_ICONS];  /* the games' icons drawn so far (game_icon), the oldest replaced first */
     SDL_Texture* icon_loading; /* what a dump's row shows while the driver is asked for its icon */
     SDL_Texture* icon_none;    /* what a game's row shows with no icon of its own: Wimsy in grey */
+    SDL_Texture* icon_more;    /* Show More's, as a game's cover: a grey + on white */
     GuiDumpIcons dump_icons;   /* the dumps' icons asked of the driver */
     unsigned dump_icons_seen;  /* the answers the rows were drawn after */
     size_t icons_next;
@@ -3378,6 +3379,32 @@ static SDL_Texture* icon_loading(App* app) {
     free(pixels);
     return app->icon_loading;
 }
+/* a + on a white square into side by side ARGB pixels, as Wimsy's cover is drawn: two bars an eighth of the side
+   thick and three fifths of it long, in a grey of Wimsy's */
+static void plus_pixels(Uint32* pixels, int side) {
+    const int c = side / 2, half = side * 3 / 10, thick = side / 16;
+    for (int i = 0; i < side * side; ++i) pixels[i] = 0xffffffffu;
+    for (int y = c - half; y < c + half; ++y)
+        for (int x = c - half; x < c + half; ++x)
+            if ((x >= c - thick && x < c + thick) || (y >= c - thick && y < c + thick))
+                pixels[y * side + x] = 0xff626262u;
+}
+/* Show More's cover, as big as a game's: a + (plus_pixels) */
+static SDL_Texture* icon_more(App* app) {
+    Uint32* pixels;
+    if (app->icon_more) return app->icon_more;
+    if (!(pixels = (Uint32*)malloc((size_t)GUI_ICON_SIDE * GUI_ICON_SIDE * sizeof *pixels))) return NULL;
+    plus_pixels(pixels, GUI_ICON_SIDE);
+    app->icon_more = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, GUI_ICON_SIDE,
+                                       GUI_ICON_SIDE);
+    if (app->icon_more && (!SDL_UpdateTexture(app->icon_more, NULL, pixels, GUI_ICON_SIDE * 4) ||
+                           !SDL_SetTextureBlendMode(app->icon_more, SDL_BLENDMODE_BLEND_PREMULTIPLIED))) {
+        SDL_DestroyTexture(app->icon_more);
+        app->icon_more = NULL;
+    }
+    free(pixels);
+    return app->icon_more;
+}
 /* count ARGB pixels, premultiplied, made grey: each colour its light (BT.601), under the same alpha */
 static void icon_grey(Uint32* pixels, int count) {
     for (int i = 0; i < count; ++i) {
@@ -5677,7 +5704,7 @@ bool ui_games_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info
                  queued);
         info->label = label;
         if (r) info->image = r->driver == GUI_SWITCH ? game_icon(app, r->path) : NULL;
-        if (!r) info->icon = GUI_ICON_PLUS;                  /* Show More */
+        if (!r) info->image = icon_more(app);                /* Show More's cover */
         if (r && !info->image) info->image = icon_none(app); /* a game with none of its own */
         return true;
     }
@@ -14556,6 +14583,7 @@ static void forget(App* app) {
     dump_icons_stop(app);
     SDL_DestroyTexture(app->icon_loading);
     SDL_DestroyTexture(app->icon_none);
+    SDL_DestroyTexture(app->icon_more);
     space_stop(app);
     space_end(&app->left_space, &app->left_counter);
     settings_forget(app);
