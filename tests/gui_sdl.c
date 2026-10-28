@@ -10544,12 +10544,18 @@ int main(int argc, char** argv) {
                 assert(!remove(one));
                 app.open_url = record_url;
                 g_opened[0] = 0;
-                share_pick(&app, 2); /* the test's Logs folder, which cannot be made: said, nothing opened */
-                want = snx_format("Cannot make %s: ", place_path(&app, GUI_PLACE_STATE));
-                assert(!strncmp(app.message, want, strlen(want)) && !g_opened[0]);
-                free(want);
                 {
-                    char* kept_state = app.state_dir;
+                    /* a Logs folder no one can make, under a file, root too: said, nothing opened */
+                    char *kept_state = app.state_dir, *file = snx_path_join(temporary, "a file");
+                    assert(!snx_write_file(file, "x", 1));
+                    app.state_dir = snx_path_join(file, "logs");
+                    share_pick(&app, 2);
+                    want = snx_format("Cannot make %s: ", app.state_dir);
+                    assert(!strncmp(app.message, want, strlen(want)) && !g_opened[0]);
+                    free(want);
+                    free(app.state_dir);
+                    assert(!remove(file));
+                    free(file);
                     app.state_dir = snx_path_join(temporary, "logs place");
                     share_pick(&app, 2);
                     url = file_url(app.state_dir);

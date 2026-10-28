@@ -170,13 +170,14 @@ int main(int argc, char** argv) {
         whole = snx_read_file(log, &size);
         CHECK(whole && size <= (1u << 20) && size > (1u << 19) / 2, "the cut log is not between a quarter and 1 MiB");
         t = whole ? (const char*)whole : "";
-        CHECK(t[0] == '[' && !strncmp(t + 8, "] early 00 ", 11) && strstr(t, "] after the module\n"),
+        CHECK(t[0] == '[' && !strncmp(t + 8, "] early 00 ", 11) &&
+                  strstr(t, "] after the module"), /* read in binary: \r\n on Windows */
               "the run's start was cut");
         mark = strstr(t, "] log: reached log_max=1 MiB: ");
         CHECK(mark && strstr(mark, " MiB of lines between the run's start and here cut (Debug > Log size limit") &&
                   count(t, "] log: reached log_max=") == 1,
               "not one line says what the cuts took");
-        first = strstr(t, "] short\n"); /* the run's start, to the line before the long one */
+        first = strstr(t, "] short"); /* the run's start, to the line before the long one */
         CHECK(first && mark && first < mark && !strstr(t, "yyyy") && !strstr(t, "cut test 000000") &&
                   strstr(t, "cut test 029999"),
               "the cut did not keep the start and the end, the middle gone");
