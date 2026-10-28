@@ -228,11 +228,11 @@ static bool frame_image(VitaVk* v, uint32_t width, uint32_t height) {
     g.frame_layout = VK_IMAGE_LAYOUT_UNDEFINED;
     return true;
 }
-void vita_vk_present(VkBuffer buffer, VkDeviceSize offset, uint32_t pitch, uint32_t width, uint32_t height) {
+bool vita_vk_present(VkBuffer buffer, VkDeviceSize offset, uint32_t pitch, uint32_t width, uint32_t height) {
     VitaVk* v = &g.vk;
-    if (!g.up || !v->host.surface) return;
-    if (!v->swap.swapchain && !swapchain_make(v)) return;
-    if (!frame_image(v, width, height)) return;
+    if (!g.up || !v->host.surface) return false;
+    if (!v->swap.swapchain && !swapchain_make(v)) return false;
+    if (!frame_image(v, width, height)) return false;
     unsigned slot = v->ring.slot;
     uint32_t index = 0;
     /* an image the window can take now, or none this vblank: the game's threads run on this one, which a wait for
@@ -240,9 +240,9 @@ void vita_vk_present(VkBuffer buffer, VkDeviceSize offset, uint32_t pitch, uint3
     VkResult r = vkAcquireNextImageKHR(v->device, v->swap.swapchain, 0, v->acquired[slot], VK_NULL_HANDLE, &index);
     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
         swapchain_make(v);
-        return;
+        return false;
     }
-    if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) return; /* VK_NOT_READY, VK_TIMEOUT: none free yet */
+    if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) return false; /* VK_NOT_READY, VK_TIMEOUT: none free yet */
     VkCommandBuffer cb = vita_vk_commands();
     image_barrier(cb, g.frame, g.frame_layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                   VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
@@ -286,4 +286,5 @@ void vita_vk_present(VkBuffer buffer, VkDeviceSize offset, uint32_t pitch, uint3
                            .pImageIndices = &index};
     r = vkQueuePresentKHR(v->queue, &pi);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) swapchain_make(v);
+    return r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR;
 }

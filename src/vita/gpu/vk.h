@@ -55,6 +55,6 @@ uint32_t vita_vk_memory_type(uint32_t bits, VkMemoryPropertyFlags properties);
 /* the renderer's per-submission resources, freed when the slot's submission is done */
 void vita_vk_on_retire(void (*retire)(unsigned slot, uint64_t serial));
 /* Shows the framebuffer: width by height pixels, pitch pixels a row, R8G8B8A8 bytes at offset in buffer, scaled into
-   the window. Nothing without a window */
-void vita_vk_present(VkBuffer buffer, VkDeviceSize offset, uint32_t pitch, uint32_t width, uint32_t height);
+   the window. False when nothing was shown: no window, or no swapchain image free this time */
+bool vita_vk_present(VkBuffer buffer, VkDeviceSize offset, uint32_t pitch, uint32_t width, uint32_t height);
 #endif
