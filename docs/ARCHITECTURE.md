@@ -206,6 +206,7 @@ function's arguments, or a field added into a struct's tail padding: for those t
 | 12 | `RtAPI.cas128`, and `snx_cas128` takes the CPU |
 | 13 | the AOT module's `snx_variants()` table, read as optional |
 | 14 | `RtAPI.code_changed` for IC IVAU, and `SnxModule`'s function table with the byte each AOT function checks first |
+| 15 | `stx`'s result for a store-exclusive whose range the armed monitor covers |
 
 #### Code the game patches
 
