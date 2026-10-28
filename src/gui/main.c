@@ -111,7 +111,7 @@ typedef enum {
     GUI_CHOICES_PICKS
 } GuiChoicesOf;
 /* whose few choices the picks box shows (picks_open) */
-typedef enum { GUI_PICKS_SHARE } GuiPicksOf;
+typedef enum { GUI_PICKS_SHARE, GUI_PICKS_FOLDER } GuiPicksOf;
 /* the lists whose first row App's firsts keeps between frames: Choices' a GuiChoicesOf each, then the others */
 enum {
     GUI_LIST_USERS = GUI_CHOICES_PICKS + 1,
@@ -446,6 +446,7 @@ typedef struct App {
     int listened_count;
     bool theme_from_app;       /* the theme editor goes back to the App's rows */
     bool folders_from_games;   /* Folders goes back to Games, whose P opened it */
+    bool folders_from_menu;    /* and to the menu, whose Folders opened it */
     int half;                  /* the letters in halves of a cell while text_half has them so, else 0: the scale's */
     bool help_shown;           /* F1's box over the screen: every key it has (screen_said) */
     SnxPadScreen pad;          /* the button map's, on the row gamepad_map, A and B as gamepad_swap_ab says */
@@ -538,9 +539,10 @@ typedef struct App {
     bool room_ok;    /* asked and answered: the run goes */
     GuiChoice dests; /* Recompile: which of the recompiled library's folders a dump's game goes in */
     bool dests_shown;
-    bool picks_shown; /* a box of a few choices over the screen (picks_open): Share Log's */
+    bool picks_shown; /* a box of a few choices over the screen (picks_open): Share Log's, a Folders row's */
     GuiPicksOf picks_of;
     GuiChoice picks;
+    int pick_row;                      /* the Folders row the box is of */
     bool (*open_url)(const char* url); /* SDL_OpenURL, which a test takes the place of (show_folder) */
     char* dest_file; /* the run asked about, as room_file, and its load */
     int dest_item;
@@ -600,7 +602,7 @@ typedef char gui_entries_in_order[GUI_ENTRY(GUI_LINUX) == UI_MENU_ENTRIES_LOAD_L
                                           GUI_ENTRY(GUI_KEYS) == UI_MENU_ENTRIES_INSTALL_KEYS &&
                                           GUI_ENTRY(GUI_SETTINGS) == UI_MENU_ENTRIES_SETTINGS &&
                                           GUI_ENTRY(GUI_LOG) == UI_MENU_ENTRIES_SHARE_LOG &&
-                                          GUI_ENTRY(GUI_DATA) == UI_MENU_ENTRIES_OPEN_DATA_FOLDER &&
+                                          GUI_ENTRY(GUI_FOLDERS) == UI_MENU_ENTRIES_FOLDERS &&
                                           GUI_ENTRY(GUI_EXIT) == UI_MENU_ENTRIES_EXIT &&
                                           GUI_ENTRY(GUI_ITEM_COUNT) == UI_MENU_ITEMS
                                       ? 1
@@ -665,9 +667,11 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_FOLDERS SNX_TR_KEYS("Refresh.")
 #endif
 /* Folders' focused row, each when it can be done there: a finger has no Del, the default is Reset to Defaults' */
-#define SAY_CHANGE  SNX_TR_KEYS("Tap: change.")
+#define SAY_CHANGE  SNX_TR_KEYS("Tap: open or change.")
 #define SAY_DEFAULT NULL
-#define SAY_DELETE  SNX_TR_KEYS("Tap: delete.")
+#define SAY_DELETE  NULL /* a finger has no Del: its Tap's box removes it */
+#define SAY_PICK    SNX_TR_KEYS("Tap: open or remove.")
+#define SAY_OPEN    SNX_TR_KEYS("Tap: open.")
 #define SAY_ADD     SNX_TR_KEYS("Tap: add.")
 #define SAY_RESET   SNX_TR_KEYS("Tap: reset.")
 #ifdef SDL_PLATFORM_ANDROID
@@ -713,9 +717,11 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_APP              SNX_TR_KEYS("Up/Down: row. Left/Right: change. Enter: change or open. ESC: back.")
 #define SAY_FOLDERS          SNX_TR_KEYS("Up/Down: folder. F5: refresh. ESC: back.")
 /* Folders' focused row, each when it can be done there */
-#define SAY_CHANGE           SNX_TR_KEYS("Enter: change.")
+#define SAY_CHANGE           SNX_TR_KEYS("Enter: open or change.")
 #define SAY_DEFAULT          SNX_TR_KEYS("Del: default.")
 #define SAY_DELETE           SNX_TR_KEYS("Del: delete.")
+#define SAY_PICK             SNX_TR_KEYS("Enter: open or remove.")
+#define SAY_OPEN             SNX_TR_KEYS("Enter: open.")
 #define SAY_ADD              SNX_TR_KEYS("Enter: add.")
 #define SAY_RESET            SNX_TR_KEYS("Enter: reset.")
 #define SAY_PAD              SNX_TR_KEYS("Arrows/pad: move, change. Enter/A: select. Del: default. ESC: back.")
@@ -746,7 +752,9 @@ static const char* entry_text(int item) { return ui_menu_texts + ui_menu_items[G
 #define SAY_PAD_GROUPS           SNX_TR_KEYS("D-pad: group. A: open. B: back.")
 #define SAY_PAD_APP              SNX_TR_KEYS("D-pad: row, change. A: change or open. B: back.")
 #define SAY_PAD_FOLDERS          SNX_TR_KEYS("D-pad: folder. Start: refresh. B: back.")
-#define SAY_PAD_CHANGE           SNX_TR_KEYS("A: change.")
+#define SAY_PAD_CHANGE           SNX_TR_KEYS("A: open or change.")
+#define SAY_PAD_PICK             SNX_TR_KEYS("A: open or remove.")
+#define SAY_PAD_OPEN             SNX_TR_KEYS("A: open.")
 #define SAY_PAD_DEFAULT          SNX_TR_KEYS("X: default.")
 #define SAY_PAD_DELETE           SNX_TR_KEYS("X: delete.")
 #define SAY_PAD_ADD              SNX_TR_KEYS("A: add.")
@@ -7102,7 +7110,10 @@ static void folders_said(const App* app, bool pad, const char** parts, int* n) {
     if (kind == GUI_ROW_PLACE) said_add(parts, n, pad ? SAY_PAD_CHANGE : SAY_CHANGE);
     if (kind == GUI_ROW_PLACE && app->place[at] && (pad ? SAY_PAD_DEFAULT : SAY_DEFAULT))
         said_add(parts, n, pad ? SAY_PAD_DEFAULT : SAY_DEFAULT);
-    if (kind == GUI_ROW_FOLDER) said_add(parts, n, pad ? SAY_PAD_DELETE : SAY_DELETE);
+    if (kind == GUI_ROW_FOLDER) said_add(parts, n, pad ? SAY_PAD_PICK : SAY_PICK);
+    if (kind == GUI_ROW_FOLDER && (pad ? SAY_PAD_DELETE : SAY_DELETE))
+        said_add(parts, n, pad ? SAY_PAD_DELETE : SAY_DELETE);
+    if (kind == GUI_ROW_DUMPS || kind == GUI_ROW_CONFIG) said_add(parts, n, pad ? SAY_PAD_OPEN : SAY_OPEN);
     if (kind == GUI_ROW_ADD) said_add(parts, n, pad ? SAY_PAD_ADD : SAY_ADD);
     if (kind < 0 && picked) said_add(parts, n, pad ? SAY_PAD_RESET : SAY_RESET);
 }
@@ -7614,20 +7625,22 @@ static void folders_from_games(App* app) {
     app->folders_from_games = true;
     space_start(app);
 }
-/* Select (with del, Del) on a row of Folders: a place picks another folder (Del: asks before its default); dumps/ says
-   what it is; an Extra asks before it is taken off; Add a folder opens the picker for its library */
+static void picks_open_row(App* app, int row);
+/* Select (with del, Del) on a row of Folders: a folder's box, to open it or, as the row allows, change it, put back its
+   default or take it off the library (picks_open_row; dumps/ and Settings say what they are too); Del on a place asks
+   before its default, on an Extra before it is taken off; Add a folder opens the picker for its library */
 static void folder_select(App* app, int row, bool del) {
     int at, group, kind = folder_row(app, row, &at, &group);
     if (kind == GUI_ROW_PLACE && del)
         place_default_ask(app, at);
-    else if (kind == GUI_ROW_PLACE) {
-        app->place_row = at;
-        open_folder_picker(app);
-    } else if (kind == GUI_ROW_DUMPS || kind == GUI_ROW_CONFIG)
+    else if (kind == GUI_ROW_FOLDER && del)
+        folder_off_ask(app, at);
+    else if ((kind == GUI_ROW_DUMPS || kind == GUI_ROW_CONFIG) && !del) {
         snprintf(app->editor.note, sizeof app->editor.note, "%s",
                  snx_tr(kind == GUI_ROW_DUMPS ? dumps_row : config_row));
-    else if (kind == GUI_ROW_FOLDER)
-        folder_off_ask(app, at);
+        picks_open_row(app, row);
+    } else if ((kind == GUI_ROW_PLACE || kind == GUI_ROW_FOLDER) && !del)
+        picks_open_row(app, row);
     else if (kind == GUI_ROW_ADD && !del) {
         app->adding = at;
         open_folder_picker(app);
@@ -7831,7 +7844,9 @@ static void leave_form(App* app) {
     else if (form == GUI_FORM_FOLDERS && app->folders_from_games) { /* Games again, its list with what was added */
         app->folders_from_games = false;
         list_games(app);
-    } else if (form == GUI_FORM_FOLDERS)
+    } else if (form == GUI_FORM_FOLDERS && app->folders_from_menu)
+        app->folders_from_menu = false; /* the menu again */
+    else if (form == GUI_FORM_FOLDERS)
         open_app(app, GUI_APP_PLACES);
     else if (form == GUI_FORM_THEME && app->theme_from_app) {
         app->theme_from_app = false;
@@ -11221,13 +11236,23 @@ static void dests_pointer(App* app, float x, float y, bool click) {
     dests_place(app, &c, question, sizeof question);
     if (!choices_pointer(app, &c, x, y, click, &on) && click && !on) dest_take(app, -1);
 }
-/* the picks box's choices, a NULL after the last: Share Log's, how the logs go */
+/* the picks box's choices, a NULL after the last: Share Log's, how the logs go; a Folders row's, as its kind allows
+   (a place's changed or put back to its default, an Extra taken off the library, dumps/ and Settings only opened) */
 static const char* const share_picks[] = {SNX_TR_NOOP("Share Zip"), SNX_TR_NOOP("Share Log"),
                                           SNX_TR_NOOP("Open Logs Folder"), NULL};
+static const char* const place_picks[] = {SNX_TR_NOOP("Open Folder"), SNX_TR_NOOP("Change Folder"),
+                                          SNX_TR_NOOP("Reset to Default"), NULL};
+static const char* const extra_picks[] = {SNX_TR_NOOP("Open Folder"), SNX_TR_NOOP("Remove from Library"), NULL};
+static const char* const open_picks[] = {SNX_TR_NOOP("Open Folder"), NULL};
+static const char* const* picks_list(const App* app) {
+    int at, group, kind;
+    if (app->picks_of == GUI_PICKS_SHARE) return share_picks;
+    kind = folder_row(app, app->pick_row, &at, &group);
+    return kind == GUI_ROW_PLACE ? place_picks : kind == GUI_ROW_FOLDER ? extra_picks : open_picks;
+}
 static const char* pick_label(App* app, int i) {
-    const char* const* picks = share_picks; /* GUI_PICKS_SHARE's, the one kind so far */
+    const char* const* picks = picks_list(app);
     int n = 0;
-    (void)app;
     while (picks[n]) ++n;
     return i >= 0 && i < n ? snx_tr(picks[i]) : NULL;
 }
@@ -11237,24 +11262,61 @@ static void picks_open(App* app, GuiPicksOf of) {
     for (app->picks.count = 0; pick_label(app, app->picks.count);) ++app->picks.count;
     app->picks_shown = true;
 }
-static void picks_place(App* app, GuiChoices* c) {
-    choices_place(app, GUI_CHOICES_PICKS, choices_over(app), snx_tr("How to share the logs?"), snx_tr("Share Log"),
-                  app->picks.focus, c);
+static void picks_open_row(App* app, int row) {
+    app->pick_row = row;
+    picks_open(app, GUI_PICKS_FOLDER);
+}
+/* the box's question into out and its tab: how the logs go, or the Folders row's name and its folder from home */
+static void picks_question(App* app, char* out, size_t size, const char** tab) {
+    char home[512];
+    const char* path;
+    *tab = app->picks_of == GUI_PICKS_SHARE ? snx_tr("Share Log") : snx_tr("Folders");
+    if (app->picks_of == GUI_PICKS_SHARE) {
+        snprintf(out, size, "%s", snx_tr("How to share the logs?"));
+        return;
+    }
+    path = folder_row_path(app, app->pick_row);
+    snx_home_short(path ? path : "", home, sizeof home);
+    snprintf(out, size, "%s: %s", snx_tr(app->folder_keys[app->pick_row].key), path ? home : snx_tr("none"));
+}
+static void picks_place(App* app, GuiChoices* c, char* question, size_t size, const char** tab) {
+    picks_question(app, question, size, tab);
+    choices_place(app, GUI_CHOICES_PICKS, choices_over(app), question, *tab, app->picks.focus, c);
 }
 static void render_picks(App* app) {
     GuiChoices c;
-    picks_place(app, &c);
+    char question[640];
+    const char* tab;
+    picks_place(app, &c, question, sizeof question, &tab);
     box_shade(app);
-    choices_draw(app, &c, snx_tr("How to share the logs?"), snx_tr("Share Log"));
+    choices_draw(app, &c, question, tab);
 }
 static void share_log(App* app, bool zip);
-/* choice i taken, or none (-1: Back): the logs as one zip, as the one log of before, or their folder opened */
+/* choice i taken, or none (-1: Back): the logs as one zip, as the one log of before, or their folder opened; a Folders
+   row's folder opened, another picked, its default asked for or its Extra taken off */
 static void pick_take(App* app, int i) {
+    int at, group, kind = folder_row(app, app->pick_row, &at, &group);
     app->picks_shown = false;
-    if (i == 0 || i == 1)
-        share_log(app, i == 0);
-    else if (i == 2)
-        show_folder(app, place_path(app, GUI_PLACE_STATE)); /* Folders' Logs: the launcher's logs and the games' */
+    if (i < 0) return;
+    if (app->picks_of == GUI_PICKS_SHARE) {
+        if (i < 2)
+            share_log(app, i == 0);
+        else
+            show_folder(app, place_path(app, GUI_PLACE_STATE)); /* Folders' Logs: the launcher's logs and the games' */
+    } else if (i == 0) {
+        const char* path = folder_row_path(app, app->pick_row);
+        if (path)
+            show_folder(app, path);
+        else
+            snprintf(app->editor.note, sizeof app->editor.note, snx_tr("%s has no folder to open"),
+                     snx_tr(app->folder_keys[app->pick_row].key));
+    } else if (kind == GUI_ROW_PLACE && i == 1) {
+        app->place_row = at;
+        open_folder_picker(app);
+    } else if (kind == GUI_ROW_PLACE)
+        place_default_ask(app, at);
+    else if (kind == GUI_ROW_FOLDER)
+        folder_off_ask(app, at);
 }
 static void picks_key(App* app, GuiKey key) {
     switch (gui_choice_key(&app->picks, key)) {
@@ -11267,8 +11329,10 @@ static void picks_key(App* app, GuiKey key) {
    Back */
 static void picks_pointer(App* app, float x, float y, bool click) {
     GuiChoices c;
+    char question[640];
+    const char* tab;
     bool on;
-    picks_place(app, &c);
+    picks_place(app, &c, question, sizeof question, &tab);
     if (!choices_pointer(app, &c, x, y, click, &on) && click && !on) pick_take(app, -1);
 }
 static void job_add(App* app, const char* const* argv, const char* file, bool native, bool prepared, GuiJobKind kind);
@@ -12937,7 +13001,7 @@ static void go_tab(App* app, int tab) {
         if (app->form == GUI_FORM_PAD) pad_close(app);
         device_stop(app);
         leave_editor(app);
-        app->theme_from_app = app->folders_from_games = false;
+        app->theme_from_app = app->folders_from_games = app->folders_from_menu = false;
     }
     if (tab == tab_shown(app)) return;
     app->message[0] = 0;
@@ -13071,11 +13135,11 @@ static void menu_key(App* app, GuiKey key) {
                 gui_confirm_open(&app->confirm, GUI_ASK_EXIT, false);
             }
             break;
-#ifdef SDL_PLATFORM_ANDROID
-        case GUI_MENU_DATA: gui_android_open_data(app->message, sizeof app->message); break;
-#else
-        case GUI_MENU_DATA: show_folder(app, app->data_dir); break; /* never NULL: the cwd's when none is found */
-#endif
+        case GUI_MENU_FOLDERS: /* Settings > App > Folders, as P opens it from Games: Back comes here again */
+            app->group = 0;
+            open_folders(app, 0);
+            app->folders_from_menu = true;
+            break;
         default: break;
     }
     if (key == GUI_CANCEL || (key == GUI_SELECT && pick_screen(app))) app->message[0] = 0;
@@ -13285,7 +13349,7 @@ void ui_menu_entries_load_gba_rom_action_cb(App* app, uint32_t hit) { menu_entry
 void ui_menu_entries_install_keys_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_KEYS, hit); }
 void ui_menu_entries_settings_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_SETTINGS, hit); }
 void ui_menu_entries_share_log_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_LOG, hit); }
-void ui_menu_entries_open_data_folder_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_DATA, hit); }
+void ui_menu_entries_folders_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_FOLDERS, hit); }
 void ui_menu_entries_exit_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_EXIT, hit); }
 /* the keys the foot names, a word each ("Up/Down" is two): what a click or a tap on the word presses. Space selects
    where the foot names it, as Enter; Add a folder's opens the folder picker, as Enter on its row. A word is found by

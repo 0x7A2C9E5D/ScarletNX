@@ -58,7 +58,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
   presses the key when its words all press one. `Arrows`, `mouse`, `pad` and `D-pad` press nothing.
 - The menu, top to bottom: the three loads, **Install Keys**, **Settings**, **Share Log**,
-  **Open Data Folder**, and **Exit**. The games, and the recent ones, are the Games tab's. A load whose driver
+  **Folders**, and **Exit**. The games, and the recent ones, are the Games tab's. A load whose driver
   is neither beside ScarletNX nor on PATH, as those an app leaves out ([APPLE](APPLE.md)), is greyed out, still there,
   and Enter or a tap on it says which driver it misses rather than opening its screen; the drivers are looked for
   again each second, and with F5.
@@ -284,8 +284,11 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   (not by ESC) it blinks red, as Install Keys does, until its logs are saved or a run ends well. On the
   desktop it goes in the working folder with its path copied. On Android it goes to the
   data folder's `state/` and is shared.
-- **Open Data Folder** opens the data folder, with recompiled/ and dumps/, in the system's file manager; on Android
-  the app's own storage in the system's Files app ([ANDROID](ANDROID.md)).
+- **Folders** opens Settings > App > Folders (ESC comes back to the menu). There Enter, or a tap, on a folder gives
+  **Open Folder**, which opens it in the system's file manager (on Android its Files app, the data folder through the
+  app's own storage, [ANDROID](ANDROID.md)), **Change Folder** and **Reset to Default**; on an Extra of a library
+  Open Folder and **Remove from Library**; on dumps/ and Settings, Open Folder. Del still puts a folder back to its
+  default, or takes an Extra off.
 - The launcher's log, a file a day, `scarletnx-console-2026-10-28.log` in its state folder (Settings > App > Folders'
   Logs; on iOS in `logs/` of the app's Documents, [APPLE](APPLE.md)), the 14 newest days kept (a day's first line
   deletes the older ones; the `scarletnx-console.log` older versions wrote stays as it is), holds what it says: its

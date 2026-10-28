@@ -16,7 +16,7 @@ recompiles on the phone, then the game opens.
   (`/data/data/org.scarletnx/files`): `games/` goes there, the extractions in its `cache/work/`, the games' logs in
   its `state/` and the menu's own files in its `config/` and `state/` ([USAGE](USAGE.md#folders)). It needs no permission and nothing slows it down as the shared storage's
   FUSE does; it goes with the app, which Android 10 and later ask about before uninstalling it. The system's Files app
-  shows it as *ScarletNX*, to copy dumps, keys and saves in and out, and the menu's *Open Data Folder* opens it there.
+  shows it as *ScarletNX*, to copy dumps, keys and saves in and out, and the Data row's *Open Folder* in the menu's *Folders* (Settings > App > Folders) opens it there.
   Settings > App > Folders may move the data, the games or the extractions to the shared storage; it asks first, as
   games may run slower there, and takes the folder at a second tap.
   `HOME` stays the app's own files, for `.switch/prod.keys`. An older version kept the data in `/sdcard/ScarletNX`

@@ -423,7 +423,13 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: delete."
+msgid "Tap: open or change."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap: open or remove."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -617,13 +623,25 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Enter: change."
+msgid "Enter: open or change."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
 msgid "Del: delete."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Enter: open or remove."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Enter: open."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -781,7 +799,19 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "A: change."
+msgid "A: open or change."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "A: open or remove."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "A: open."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -1688,7 +1718,7 @@ msgid "Install"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
+#: src/gui/main.c src/gui/ui.txt
 #, snx-key
 msgid "Folders"
 msgstr ""
@@ -3123,7 +3153,24 @@ msgid "Open Logs Folder"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Change Folder"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Reset to Default"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Remove from Library"
+msgstr ""
+
+#: src/gui/main.c
 msgid "How to share the logs?"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s has no folder to open"
 msgstr ""
 
 #: src/gui/main.c
@@ -3763,19 +3810,11 @@ msgid "The game's .ini settings, the launcher's for the next runs, and its theme
 msgstr ""
 
 #: src/gui/model.c
-msgid "Saves the last run's output and game log to scarletnx.log in the data folder, then shares it"
+msgid "Shares the logs as one zip or as scarletnx.log, or opens their folder"
 msgstr ""
 
 #: src/gui/model.c
-msgid "Saves the last run's output and game log to scarletnx.log and copies its path"
-msgstr ""
-
-#: src/gui/model.c
-msgid "Opens the data folder, recompiled/ and the keys in it, in the system's Files app"
-msgstr ""
-
-#: src/gui/model.c
-msgid "Opens the data folder, recompiled/ and dumps/ in it, in the system's file manager"
+msgid "Where the app keeps each kind of its files, and the libraries: each folder opened or changed"
 msgstr ""
 
 #: src/gui/process_posix.c
@@ -4238,10 +4277,6 @@ msgstr ""
 
 #: src/gui/ui.txt
 msgid "Install Keys"
-msgstr ""
-
-#: src/gui/ui.txt
-msgid "Open Data Folder"
 msgstr ""
 
 #: src/common/utilities/setup.c

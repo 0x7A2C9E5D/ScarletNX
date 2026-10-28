@@ -68,10 +68,10 @@ int main(void) {
     menu.running = false;
     gui_menu_key(&menu, GUI_DOWN);
     assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_LOG && menu.selected == GUI_LOG && !menu.quit);
-    /* Open Data Folder, on every system, before Exit */
+    /* Folders, on every system, before Exit: Settings > App > Folders */
     gui_menu_key(&menu, GUI_DOWN);
-    assert(menu.selected == GUI_DATA && strstr(gui_setting_description(&menu), "the data folder"));
-    assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_DATA && !menu.quit);
+    assert(menu.selected == GUI_FOLDERS && strstr(gui_setting_description(&menu), "each folder opened or changed"));
+    assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_FOLDERS && !menu.quit);
     gui_menu_key(&menu, GUI_DOWN);
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.quit);

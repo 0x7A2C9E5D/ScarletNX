@@ -88,6 +88,16 @@ static void share_pick(App* app, int i) {
     key(app, SDLK_RETURN);
     assert(!app->picks_shown);
 }
+/* Enter on a Folders row, and choice i of its box taken: 0 Open Folder, then Change Folder and Reset to Default on a
+   place, Remove from Library on an Extra */
+static void folder_pick(App* app, int i) {
+    key(app, SDLK_RETURN);
+    assert(app->picks_shown && app->picks_of == GUI_PICKS_FOLDER && app->pick_row == app->editor.row &&
+           i < app->picks.count && !app->picks.focus);
+    for (int k = 0; k < i; ++k) key(app, SDLK_DOWN);
+    key(app, SDLK_RETURN);
+    assert(!app->picks_shown);
+}
 /* show_folder's URL, which the tests keep instead of opening a file manager on the machine */
 static char g_opened[4096];
 static bool record_url(const char* url) {
@@ -5020,9 +5030,21 @@ int main(int argc, char** argv) {
         snprintf(line, sizeof line, "Recompiled: %s, the default", app.games_dir);
         assert(!app.confirm.shown && !strcmp(app.editor.note, line) && !app.folder_count &&
                !app.place[GUI_PLACE_GAMES]);
-        /* Enter on it picks where games go: the picker's own answer first (none here), then a folder; that folder is
-           the row's, and Del asks before it puts back the default, only the setting changing */
-        key(&app, SDLK_RETURN);
+        /* the box's Reset to Default says the same; its Open Folder opens the row's folder */
+        folder_pick(&app, 2);
+        assert(!app.confirm.shown && !strcmp(app.editor.note, line));
+        app.open_url = record_url;
+        g_opened[0] = 0;
+        folder_pick(&app, 0);
+        {
+            char* url = file_url(app.games_dir);
+            assert(url && !strcmp(g_opened, url));
+            free(url);
+        }
+        app.open_url = NULL;
+        /* Enter on it, Change Folder, picks where games go: the picker's own answer first (none here), then a folder;
+           that folder is the row's, and Del asks before it puts back the default, only the setting changing */
+        folder_pick(&app, 1);
         assert(app.place_row == GUI_PLACE_GAMES);
         {
             SDL_Event answer;
@@ -5162,7 +5184,7 @@ int main(int argc, char** argv) {
         picker_box_closed(&app);
         assert(app.folder_count == 1 && (!strcmp(app.editor.note, "No folder was picked.") ||
                                          !strncmp(app.editor.note, "The folder picker could not open: ", 34)));
-        /* Enter or Del on an Extra asks before it is taken off, as the tips say; Back keeps it */
+        /* Enter's Remove from Library or Del on an Extra asks before it is taken off, as the tips say; Back keeps it */
         app.editor.row = FOLDER_ROW(GUI_ROW_FOLDER, 0);
         app.editor.note[0] = 0; /* the picker's answer above, over the tips */
         render(&app);
@@ -5170,7 +5192,7 @@ int main(int argc, char** argv) {
         {
             char *asked = snx_format("Remove %s from the Dumps Library? Its games stay in the folder.", app.folders[0]),
                  *done = snx_format("%s removed from the library. Its games stay in the folder", app.folders[0]);
-            key(&app, SDLK_RETURN);
+            folder_pick(&app, 1);
             assert(app.confirm.shown && app.confirm.ask == GUI_ASK_FOLDER && !strcmp(app.ask_line, asked));
             render(&app);
             shows(&app, "- Remove", normal);
@@ -5419,10 +5441,10 @@ int main(int argc, char** argv) {
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(!kept || !strstr(kept, "[folders]"));
         free(kept);
-        /* Enter opens the folder picker for the focused row; its answer is that row's folder at once, kept, and the
-           folder before keeps what it has */
+        /* Enter's Change Folder opens the folder picker for the focused row; its answer is that row's folder at once,
+           kept, and the folder before keeps what it has */
         assert(!snx_mkdirs(picked));
-        key(&app, SDLK_RETURN);
+        folder_pick(&app, 1);
         assert(app.place_row == GUI_PLACE_GAMES);
         {
             SDL_Event answer;
@@ -5505,8 +5527,8 @@ int main(int argc, char** argv) {
             app.editor.row = FOLDER_ROW(GUI_ROW_PLACE, GUI_PLACE_STATE);
             { /* a key the focused row cannot do now is not said: Del on a default; F1's box the same */
                 char said[512];
-                assert(!strstr(screen_said(&app, true, said, sizeof said), "Del:") && strstr(said, "Enter: change.") &&
-                       strstr(said, "F5: refresh."));
+                assert(!strstr(screen_said(&app, true, said, sizeof said), "Del:") &&
+                       strstr(said, "Enter: open or change.") && strstr(said, "F5: refresh."));
             }
             place_set(&app, GUI_PLACE_STATE, logs);
             {
@@ -5564,8 +5586,11 @@ int main(int argc, char** argv) {
             assert(app.config_dir && !strcmp(folder_row_path(&app, app.editor.row), app.config_dir) &&
                    !strcmp(app.app_form.folder[app.editor.row], "read-only") &&
                    !strcmp(form_note(&app), app.config_dir));
-            key(&app, SDLK_RETURN);
-            assert(!strcmp(app.editor.note, config_row) && app.place_row == -1);
+            key(&app, SDLK_RETURN); /* says why, its one choice to open it */
+            assert(!strcmp(app.editor.note, config_row) && app.place_row == -1 && app.picks_shown &&
+                   app.picks.count == 1 && !strcmp(pick_label(&app, 0), "Open Folder"));
+            key(&app, SDLK_ESCAPE);
+            assert(!app.picks_shown && app.editing);
             { /* its foot: refresh and back, neither a pick nor Del */
                 char said[512];
                 screen_said(&app, false, said, sizeof said);
@@ -7046,6 +7071,12 @@ int main(int argc, char** argv) {
     assert(app.form == GUI_FORM_FOLDERS && app.folders_from_games);
     key(&app, SDLK_TAB);
     assert(!app.editing && !app.folders_from_games && app.menu.view == GUI_LOAD_NONE);
+    /* the menu's Folders, clicked: the same page from its top, and ESC is the menu again */
+    ui_menu_entries_folders_action_cb(&app, UI_HIT_CLICK);
+    assert(app.editing && app.form == GUI_FORM_FOLDERS && app.folders_from_menu && !app.folders_from_games &&
+           !app.editor.row);
+    key(&app, SDLK_ESCAPE);
+    assert(!app.editing && !app.folders_from_menu && app.menu.view == GUI_LOAD_NONE);
     go_tab(&app, GUI_TAB_GAMES);
     assert(app.menu.view == GUI_LOAD_GAMES);
     for (int i = 0; i < 35; ++i) {
@@ -8154,7 +8185,7 @@ int main(int argc, char** argv) {
         app.clock = 1; /* a description too long for its box rests before it slides */
         render(&app);
         shows(&app, "- " ICON_SHARE_2 " Share Log", yellow);
-        shows_half(&app, "Saves the last run", normal);
+        shows_half(&app, "Shares the logs as", normal);
         app.clock = 0;
         {
             GuiMenuBoxes m;

@@ -41,7 +41,7 @@ GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
                 case GUI_KEYS: menu->view = GUI_LOAD_KEYS; break;
                 case GUI_SETTINGS: return GUI_MENU_SETTINGS;
                 case GUI_LOG: return GUI_MENU_LOG;
-                case GUI_DATA: return GUI_MENU_DATA;
+                case GUI_FOLDERS: return GUI_MENU_FOLDERS;
                 case GUI_EXIT: menu->quit = true; break;
                 default: break;
             }
@@ -147,21 +147,10 @@ void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_byte
 const char* gui_setting_description(const GuiMenu* menu) {
     switch (menu->selected) {
         case GUI_SETTINGS: return snx_tr("The game's .ini settings, the launcher's for the next runs, and its theme");
-        case GUI_LOG:
-#ifdef __ANDROID__
+        case GUI_LOG: return snx_tr("Shares the logs as one zip or as scarletnx.log, or opens their folder");
+        case GUI_FOLDERS:
             return snx_tr(
-                "Saves the last run's output and game log to scarletnx.log in the data folder, then shares it");
-#elif defined(SNX_XDG)
-            return snx_tr("Saves the last run's output and game log to scarletnx.log and copies its path");
-#else
-            return snx_tr("Saves the last run's output and game log to scarletnx.log and copies its path");
-#endif
-        case GUI_DATA:
-#ifdef __ANDROID__
-            return snx_tr("Opens the data folder, recompiled/ and the keys in it, in the system's Files app");
-#else
-            return snx_tr("Opens the data folder, recompiled/ and dumps/ in it, in the system's file manager");
-#endif
+                "Where the app keeps each kind of its files, and the libraries: each folder opened or changed");
         default: return "";
     }
 }

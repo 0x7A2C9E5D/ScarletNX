@@ -162,12 +162,6 @@ public class MainActivity extends SDLActivity {
             Intent.createChooser(send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "ScarletNX log"));
     }
 
-    /** src/gui/android.c: the data folder in the system's Files app, through DataProvider. Its viewer is the Files app
-        itself where the system names none (some makers' own) */
-    public void openData() {
-        view(DataProvider.rootUri(this), "vnd.android.document/root");
-    }
-
     /** src/gui/android.c: a folder in the system's Files app: one of the data folder through DataProvider, one of the
         shared storage (a dump's in Download/) through the system's own provider of it. Another is refused */
     public void openFolder(String path) {

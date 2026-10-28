@@ -27,8 +27,6 @@ int gui_android_play(const char* const* argv, char* message, size_t size);
 int gui_android_share(const char* path, char* message, size_t size);
 /* The app behind the others, as it is, for Back on the menu's first screen; 0 with message when it cannot */
 int gui_android_background(char* message, size_t size);
-/* Opens the data folder in the system's Files app; 0 with why in message when it cannot */
-int gui_android_open_data(char* message, size_t size);
 /* Opens a folder of the data folder or of the shared storage in the system's Files app; 0 with why in message when it
    cannot (one elsewhere, which no app's provider shows) */
 int gui_android_open_folder(const char* path, char* message, size_t size);

@@ -18,7 +18,7 @@ enum {
     GUI_KEYS,
     GUI_SETTINGS, /* the game's .ini settings, the launcher's own for the runs and its App: settings.h */
     GUI_LOG,      /* the logs in one file, for a bug report: a phone has no terminal to copy them from */
-    GUI_DATA, /* the data folder in the system's file manager: Android's the app's own storage (dist/android's DataProvider) */
+    GUI_FOLDERS,  /* Settings > App > Folders, where each folder opens */
     GUI_EXIT,
     GUI_ITEM_COUNT
 };
@@ -36,7 +36,7 @@ typedef struct {
     int text_size;
 } GuiMenu;
 /* what a key on the menu asks of the GUI: nothing more, the Settings or the logs shared */
-typedef enum { GUI_MENU_STAY, GUI_MENU_SETTINGS, GUI_MENU_LOG, GUI_MENU_DATA } GuiMenuDo;
+typedef enum { GUI_MENU_STAY, GUI_MENU_SETTINGS, GUI_MENU_LOG, GUI_MENU_FOLDERS } GuiMenuDo;
 GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key);
 /* The menu's questions, one box for all (main.c's render_ask): shown or not, which one, the choice in focus (the first
    stays first: it keeps things as they are), and whether its second choice takes a second press */
