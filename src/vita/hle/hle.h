@@ -88,6 +88,8 @@ uint32_t vita_heap_in_use(VitaProcess* p, uint32_t heap);
 /* the waits other modules meet (vita/runtime/process.c asks): true when met, with the thread's result set */
 bool vita_kernel_wait_try(VitaProcess* p, VitaThread* t, uint64_t now);
 bool vita_gxm_wait_try(VitaProcess* p, VitaThread* t, uint64_t now);
+/* the notifications of the scenes the GPU drew since written (gxm.c): at each vblank too, for a game that reads them */
+void vita_gxm_poll(VitaProcess* p);
 
 /* net.c: what an offline console's network library answers for a function the runtime doesn't know: its library's
    error, 0 for a library that isn't the network's */

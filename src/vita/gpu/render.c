@@ -5,8 +5,9 @@
    back when it ends, vertices and indices are read where the game wrote them, textures are copied from their memory
    once a scene, all on the GPU. Each program becomes a SPIR-V shader (usse.h) at its first draw. The uniform buffers
    a draw reads are copied into a staging ring of the submission's, as the console's reserved ring space is the
-   game's to reuse once the draw is made. A scene is submitted when it ends; the next begins once the GPU is done with
-   it, so the game's next writes to its vertices and textures can't race the draws reading them */
+   game's to reuse once the draw is made. A scene is submitted when it ends, and the next is recorded while the GPU
+   draws it: the game waits for a scene's notifications (hle/gxm.c writes them once its submission is done) before it
+   writes what the scene reads, as on the console */
 #include "vita/gpu/render.h"
 #include "vita/gpu/gxp.h"
 #include "vita/gpu/usse.h"
@@ -40,6 +41,7 @@ typedef struct {
 } Import;
 typedef struct {
     uint32_t address, width, height, stride, format;
+    uint32_t type; /* a color surface's SceGxmColorSurfaceType (GXM_COLOR_SURFACE_*) */
     bool depth;
     VkFormat vk_format; /* its image's: a color surface's color_format, a depth surface's D16, D32 or one with stencil */
     bool stencil;       /* a depth surface's image has stencil (an S8D24 surface's, as vk.h's stencil_format) */
@@ -69,7 +71,7 @@ typedef struct {
 } Texture;
 /* swizzle.comp's, yuv.comp's, picture.comp's and rgb24.comp's push constants, member for member */
 typedef struct {
-    uint32_t words, elements, src_base, es, width, wl, k, tiled, tiles_x;
+    uint32_t words, elements, src_base, es, width, wl, k, tiled, tiles_x, reverse, dst_base;
 } SwizzleParams;
 typedef struct {
     uint32_t pixels, width, height, y_at, c_at, stride, packed, first_v, rv, gu, gv, bu;
@@ -324,12 +326,12 @@ static bool color_format(uint32_t format, VkFormat* vk, unsigned* bytes) {
 }
 /* the surface for a color surface's memory (or a depth surface), made at its first scene */
 static Surface* surface(struct VitaRender* r, uint32_t address, uint32_t width, uint32_t height, uint32_t stride,
-                        uint32_t format, bool depth) {
+                        uint32_t format, uint32_t type, bool depth) {
     Surface* free_slot = NULL;
     for (unsigned i = 0; i < SURFACES; ++i) {
         Surface* s = &r->surfaces[i];
         if (s->image && s->address == address && s->width == width && s->height == height && s->stride == stride &&
-            s->format == format && s->depth == depth)
+            s->format == format && s->type == type && s->depth == depth)
             return s;
         if (!s->image && !free_slot) free_slot = s;
     }
@@ -356,7 +358,7 @@ static Surface* surface(struct VitaRender* r, uint32_t address, uint32_t width, 
                                  VK_IMAGE_ASPECT_COLOR_BIT, identity, &s->image, &s->view, &s->memory);
     if (!ok) return NULL;
     s->address = address, s->width = width, s->height = height, s->stride = stride, s->format = format;
-    s->depth = depth, s->vk_format = vk, s->stencil = stencil;
+    s->type = type, s->depth = depth, s->vk_format = vk, s->stencil = stencil;
     s->layout = VK_IMAGE_LAYOUT_UNDEFINED;
     return s;
 }
@@ -619,8 +621,6 @@ static uint32_t color_bytes(const GxmContext* c) {
 void vita_render_begin_scene(VitaProcess* p, GxmContext* c) {
     struct VitaRender* r = render_of(p);
     if (!r) return;
-    /* the scene before drawn first: the game's next writes are its own (the description above says why) */
-    vita_vk_wait(r->vk->ring.submitted);
     ++r->scene;
     r->rendering = false;
     r->color = r->depth = NULL;
@@ -635,7 +635,8 @@ void vita_render_begin_scene(VitaProcess* p, GxmContext* c) {
     const GxmTarget* target = &p->gxm->targets[c->target];
     r->width = c->color.width < target->width ? c->color.width : target->width;
     r->height = c->color.height < target->height ? c->color.height : target->height;
-    r->color = surface(r, c->color.data, c->color.width, c->color.height, c->color.stride, c->color.format, false);
+    r->color = surface(r, c->color.data, c->color.width, c->color.height, c->color.stride, c->color.format,
+                       c->color.type, false);
     VkDeviceSize at;
     const Import* m = r->color ? buffer_of(r, p, c->color.data, color_bytes(c), &at) : NULL;
     if (!m) {
@@ -645,7 +646,7 @@ void vita_render_begin_scene(VitaProcess* p, GxmContext* c) {
     }
     if (c->has_depth && c->depth.depth)
         r->depth = surface(r, c->depth.depth, c->color.width, c->color.height, 0,
-                           c->depth.control & GXM_DEPTH_FORMAT_MASK, true);
+                           c->depth.control & GXM_DEPTH_FORMAT_MASK, 0, true);
     VkCommandBuffer cb = vita_vk_commands();
     /* the surface's memory into the image: what the CPU or other surfaces left there, unless the image still holds
        what it stored last */
@@ -753,6 +754,10 @@ uint64_t vita_render_end_scene(VitaProcess* p, GxmContext* c) {
 bool vita_render_done(VitaProcess* p, uint64_t serial) {
     struct VitaRender* r = render_of(p);
     return !r || vita_vk_poll() >= serial;
+}
+bool vita_render_wait(VitaProcess* p, uint64_t serial) {
+    struct VitaRender* r = render_of(p);
+    return !r || vita_vk_wait(serial);
 }
 bool vita_render_idle(VitaProcess* p, bool wait) {
     struct VitaRender* r = render_of(p);
@@ -1087,14 +1092,43 @@ static bool deswizzle(struct VitaRender* r, VkCommandBuffer cb, VkBuffer source,
     uint32_t smaller = columns < rows ? columns : rows;
     while ((1u << k) < smaller) ++k;
     SwizzleParams params = {words, elements, (uint32_t)((offset - base) / 4), es, columns, wl, k, tiled,
-                            (columns + 31) >> 5};
+                            (columns + 31) >> 5, 0, 0};
     VkBuffer ring = r->linear[vita_vk_slot()].buffer;
     if (!compute(r, cb, r->swizzle, source, base, ring, at, size, &params, sizeof params, words)) return false;
     *out = ring, *out_offset = at;
     return true;
 }
+/* A swizzled or tiled 32-bit color surface's memory into its image, or its image into the memory (store): rows in the
+   slot's ring between them, made from the memory or laid out into it by swizzle.comp. A game renders one and reads it
+   as a swizzled texture (one draws its character's pencil sketch so). False without room, or past the import */
+static bool laid_out_copy(struct VitaRender* r, VkCommandBuffer cb, const Surface* s, const Import* m, VkDeviceSize at,
+                          bool store) {
+    bool tiled = s->type == GXM_COLOR_SURFACE_TILED;
+    VkBufferImageCopy copy = {.bufferRowLength = s->width,
+                              .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                              .imageExtent = {s->width, s->height, 1}};
+    if (!store) {
+        VkBuffer rows;
+        if (!deswizzle(r, cb, m->buffer, at, tiled, s->width, s->height, 4, &rows, &copy.bufferOffset)) return false;
+        vkCmdCopyBufferToImage(cb, rows, s->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        return true;
+    }
+    uint32_t words = s->width * s->height, wl = 0, k = 0, smaller = s->width < s->height ? s->width : s->height;
+    while ((1u << wl) < s->width) ++wl;
+    while ((1u << k) < smaller) ++k;
+    /* the memory's words from an aligned base: a tiled surface's whole tiles */
+    uint32_t span = tiled ? (((s->width + 31) >> 5) * ((s->height + 31) >> 5)) << 10 : words;
+    VkDeviceSize rows, align = storage_align(r), base = at / align * align, size = at - base + (VkDeviceSize)span * 4;
+    if ((at & 3) || base + size > m->size || !linear_room(r, (VkDeviceSize)words * 4, &rows)) return false;
+    VkBuffer ring = r->linear[vita_vk_slot()].buffer;
+    copy.bufferOffset = rows;
+    vkCmdCopyImageToBuffer(cb, s->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, ring, 1, &copy);
+    SwizzleParams params = {words, words, 0, 2, s->width, wl, k, tiled, (s->width + 31) >> 5, 1,
+                            (uint32_t)((at - base) / 4)};
+    return compute(r, cb, r->swizzle, ring, rows, m->buffer, base, size, &params, sizeof params, words);
+}
 /* A color surface's memory (at in m) into its image (in TRANSFER_DST), or the image (in TRANSFER_SRC) into its memory
-   (store). A 24-bit surface goes through R8G8B8A8 rows in the slot's ring, made from its memory or made its memory by
+   (store). A swizzled or tiled one is laid out on the GPU (laid_out_copy). A 24-bit surface goes through R8G8B8A8 rows in the slot's ring, made from its memory or made its memory by
    rgb24.comp, which keeps the bytes of the rows' padding. False when the ring has no room for them */
 static bool color_copy(struct VitaRender* r, VkCommandBuffer cb, const Surface* s, const Import* m, VkDeviceSize at,
                        bool store) {
@@ -1104,6 +1138,11 @@ static bool color_copy(struct VitaRender* r, VkCommandBuffer cb, const Surface* 
     /* a store after every earlier access to the memory: the surface's own load, the presenter's copy of it, a texture
        read from it (the image's barrier orders only the image's accesses for the validation layer) */
     if (store) memory_barrier(cb);
+    if (s->type != GXM_COLOR_SURFACE_LINEAR) {
+        bool pow2 = !(s->width & (s->width - 1)) && !(s->height & (s->height - 1)); /* a swizzle's sides */
+        if (bytes == 4 && (s->type == GXM_COLOR_SURFACE_TILED || pow2)) return laid_out_copy(r, cb, s, m, at, store);
+        once(r, 22, "a color surface of type 0x%08" PRIx32 " and %u-byte pixels is drawn as rows", s->type, bytes);
+    }
     VkBufferImageCopy copy = {.bufferOffset = at,
                               .bufferRowLength = s->stride,
                               .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},

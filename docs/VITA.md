@@ -71,10 +71,13 @@ bugs this driver ran into were found.
 
 ## Limits
 
-- Color surfaces are A8B8G8R8. Textures are U8U8U8U8, U8, BC1 to BC3 (UBC1 to UBC3) and linear YUV420 (a movie's
+- Color surfaces are A8B8G8R8, linear, or swizzled or tiled (laid out on the GPU both ways, `swizzle.comp`), and
+  stencil is drawn (S8D24). Textures are U8U8U8U8, U8, BC1 to BC3 (UBC1 to UBC3) and linear YUV420 (a movie's
   frames, made RGBA on the GPU, `yuv.comp`), linear, swizzled or tiled (a swizzled or tiled one made linear on the GPU,
-  `swizzle.comp`), with their mipmaps laid out as Vita3K does. Other formats, cube textures, MSAA and stencil are not
-  yet.
+  `swizzle.comp`), with their mipmaps laid out as Vita3K does. Other formats, cube textures and MSAA (a scene drawn
+  at one sample a pixel) are not yet.
+- A scene's notifications are written once the GPU drew it, and the next scene is recorded meanwhile, as on the
+  console: a game waits for them (sceGxmNotificationWait) before it writes what a scene reads.
 - A fragment program that reads its pixel's color (`GXP_FLAG_FRAGCOLOR_USED`, a program that blends itself) reads
   the color target as an input attachment in place, which needs `VK_KHR_dynamic_rendering_local_read`. With
   `VK_EXT_rasterization_order_attachment_access` the primitives of one draw see each other's colors in order as on
