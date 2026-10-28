@@ -5667,8 +5667,8 @@ static size_t grid_first(App* app, const GuiGamesBoxes* g, size_t focus) {
     }
     return 0;
 }
-/* the scroll bar's width at the list's right, its thumb wide enough for a thumb */
-static int games_bar_w(const App* app) { return SDL_max(4 * app->scale, cell_w(app) / 2); }
+/* the scroll bar's width at the list's right: a letter's, its thumb wide enough to see and take */
+static int games_bar_w(const App* app) { return cell_w(app); }
 /* the list's rows: their height a row's step, how many pixels they take all together and how many the area shows */
 static void games_extent(App* app, const GuiGamesBoxes* g, int* row_h, int* total, int* view) {
     GuiRect a = ui_games_row(g->rects, app->scale, UI_GAMES_ROWS, 0),
@@ -5786,8 +5786,8 @@ static void games_scroll_step(App* app) {
     else
         app->games_y += (app->games_to - app->games_y) * SDL_min(1.0f, dt * 14.0f);
 }
-/* a finger on the list at window pixel x, y, as it goes down (0), moves (1) and lifts (2): on the scroll bar it takes
-   the thumb there; elsewhere, once it has moved more than a tap may, the rows follow it, and let go they glide on at
+/* a finger on the list at window pixel x, y, as it goes down (0), moves (1) and lifts (2): on the scroll bar, or two
+   letters from its right edge (a thumb's reach, wider than it is drawn), it takes the thumb there; elsewhere, once it has moved more than a tap may, the rows follow it, and let go they glide on at
    the speed of its last move. A tap moves nothing (touch takes it) */
 static void games_finger(App* app, float x, float y, int phase) {
     GuiGamesBoxes g;
@@ -5802,7 +5802,7 @@ static void games_finger(App* app, float x, float y, int phase) {
         app->games_hold_y = app->games_y;
         app->games_hold_at = app->games_last_y = ry;
         app->games_last_ms = now;
-        app->bar_held = games_bar(app, &g, &track, &thumb) && rx >= (float)(track.x - track.w) &&
+        app->bar_held = games_bar(app, &g, &track, &thumb) && rx >= (float)(track.x + track.w - 2 * cell_w(app)) &&
                         ry >= (float)track.y && ry < (float)(track.y + track.h);
         if (app->bar_held) games_bar_to(app, ry);
         return;

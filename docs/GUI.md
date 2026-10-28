@@ -452,8 +452,9 @@ cannot be read is named and the others still listed.
   another row, a dump, a package or another console's game, it says what it opens. The side panel of a recompiled
   game says how its code was made (`Made with: O2, AOT 81%`, `?` for one an older version made), or, in the failure
   colour, `Needs Recompile` when Play compiles it first.
-- The list is one page that scrolls, by pixels: past its height a scroll bar at its right, its thumb as tall as the
-  share of the rows shown and where they are, which a click or a finger takes there and drags. Up/Down move the focus
+- The list is one page that scrolls, by pixels: past its height a scroll bar a letter wide at its right, its thumb as
+  tall as the share of the rows shown and where they are, which a click takes there and drags, and a finger too from
+  two letters of the bar's right edge. Up/Down move the focus
   and the rows glide to show it (at once with Animations off); Left/Right and PgUp/PgDown move it a screen of rows,
   stopping at the first and the last; a notch of the wheel glides the rows three rows, the focus staying. The count
   of the games is shown beside them.

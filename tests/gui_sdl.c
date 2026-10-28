@@ -7465,6 +7465,27 @@ int main(int argc, char** argv) {
         games_boxes(&app, &g);
         assert(!app.bar_held && games_bar(&app, &g, &track, &thumb) && thumb.y + thumb.h == track.y + track.h);
         app.games_y = app.games_to = 0;
+        /* a finger takes the thumb two letters from the bar's right edge, wider than the bar; a little further left it
+           is on the rows */
+        for (int k = 0; k < 2; ++k) {
+            float bx = (float)(track.x + track.w - 2 * cell_w(&app)) + (k ? -2.0f : 1.0f);
+            SDL_GetWindowSize(app.window, &w, &h);
+            assert(SDL_RenderCoordinatesToWindow(app.renderer, bx, (float)(track.y + track.h - 2), &wx, &wy));
+            e = (SDL_Event){0};
+            e.type = SDL_EVENT_FINGER_DOWN;
+            e.tfinger.fingerID = 6;
+            e.tfinger.x = wx / (float)w;
+            e.tfinger.y = wy / (float)h;
+            event(&app, &e);
+            assert(app.bar_held == !k && (k || app.games_y == max));
+            e.type = SDL_EVENT_FINGER_UP;
+            event(&app, &e);
+            assert(!app.bar_held && !app.finger);
+            app.games_y = app.games_to = 0;
+            app.browser.selected = 0;
+            app.addons_shown = false;
+            render(&app);
+        }
         /* a finger: down on the rows, up by two rows' height, the rows following it; no tap at its lift */
         SDL_GetWindowSize(app.window, &w, &h);
         games_boxes(&app, &g);
@@ -10666,17 +10687,17 @@ int main(int argc, char** argv) {
             int h, w;
             float y;
             area(&app, &w, &h); /* the render's pixels, as swipe_px takes them */
-            swipe_px(&app, 30 * 8 * app.scale, 10 * ch, 10 * 8 * app.scale, 10 * ch); /* on the rows, not the bar */
+            swipe_px(&app, 20 * 8 * app.scale, 10 * ch, 5 * 8 * app.scale, 10 * ch); /* on the rows, far from the bar */
             assert(app.games_y == 0 && !app.browser.selected);
-            swipe_px(&app, 30 * 8 * app.scale, 3 * h / 4, 30 * 8 * app.scale, h / 2);
+            swipe_px(&app, 20 * 8 * app.scale, 3 * h / 4, 20 * 8 * app.scale, h / 2);
             y = app.games_y;
             assert(y > 0 && !app.browser.selected && !app.games_held);
             app.games_v = 0;
-            swipe_px(&app, 30 * 8 * app.scale, h / 2, 30 * 8 * app.scale, h / 2 + h / 8);
+            swipe_px(&app, 20 * 8 * app.scale, h / 2, 20 * 8 * app.scale, h / 2 + h / 8);
             assert(app.games_y < y && !app.browser.selected);
             y = app.games_y;
             app.games_v = 0;
-            swipe_px(&app, 30 * 8 * app.scale, h / 2, 30 * 8 * app.scale, h / 2 - ch / 4);
+            swipe_px(&app, 20 * 8 * app.scale, h / 2, 20 * 8 * app.scale, h / 2 - ch / 4);
             assert(app.games_y == y);
             app.games_y = app.games_to = 0;
             (void)w;
