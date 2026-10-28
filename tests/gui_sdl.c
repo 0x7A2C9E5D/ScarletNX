@@ -86,7 +86,7 @@ static void share_pick(App* app, int i) {
     assert(!app->picks_shown);
 }
 /* Enter on a Folders row, and choice i of its box taken: 0 Open Folder, then Change Folder and Reset to Default on a
-   place, Remove from Library on an Extra */
+   place; on a dumps row the subfolders switched at 1; Remove from Library on an Extra (2 on a dumps one) */
 static void folder_pick(App* app, int i) {
     int x, y;
     key(app, SDLK_RETURN);
@@ -1401,6 +1401,25 @@ static void view_box(App* app, const char* temporary) {
         app->message[0] = 0;
     }
     games_defaults(app, false);
+    { /* dumps/'s subfolders: their dumps listed with dumps_subfolders on, its default, not with it off; its Folders
+         row says which */
+        char *sub = snx_path_join(dumps, "more"), *deep = snx_path_join(sub, "deep dump.nsp");
+        int row = folder_row_of(app, GUI_ROW_DUMPS, -1);
+        assert(!snx_mkdirs(sub) && !snx_write_file(deep, "dump", 4) && !app->dumps_shallow);
+        list_games(app);
+        open_folders(app, row);
+        assert(games_lists(app, "deep dump.nsp") && !strcmp(app->app_form.folder[row], "+ subfolders"));
+        app->dumps_shallow = true;
+        list_games(app);
+        open_folders(app, row);
+        assert(!games_lists(app, "deep dump.nsp") && games_lists(app, "beta dump.nsp") &&
+               !app->app_form.folder[row][0]);
+        app->dumps_shallow = false;
+        leave_editor(app);
+        assert(!snx_remove_tree(sub));
+        free(deep);
+        free(sub);
+    }
     app->recent = was_recent;
     app->recent_file = was_recent_file;
     app->folder_count = was_folders;
@@ -4265,8 +4284,9 @@ int main(int argc, char** argv) {
         snprintf(id, sizeof id, "%s", app.theme.id);
         assert(strcmp(id, first_id));
         snprintf(expected, sizeof expected,
-                 APP_INI_HEAD "theme = %s\nui_scale = 1\nlanguage = auto\n"
-                              "animations = 0\nside_box = auto\nrecompile_background = full\n" GAMES_DEFAULTS,
+                 APP_INI_HEAD
+                 "theme = %s\nui_scale = 1\nlanguage = auto\n"
+                 "animations = 0\nside_box = auto\nrecompile_background = full\ndumps_subfolders = on\n" GAMES_DEFAULTS,
                  id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -4307,11 +4327,12 @@ int main(int argc, char** argv) {
                 assert(app.menu.text_size == start && !app.message[0]);
             }
         }
-        snprintf(expected, sizeof expected,
-                 APP_INI_HEAD
-                 "theme = %s\nui_scale = 2\n"
-                 "language = auto\nanimations = 0\nside_box = auto\nrecompile_background = full\n" GAMES_DEFAULTS,
-                 first_id);
+        snprintf(
+            expected, sizeof expected,
+            APP_INI_HEAD
+            "theme = %s\nui_scale = 2\n"
+            "language = auto\nanimations = 0\nside_box = auto\nrecompile_background = full\ndumps_subfolders = on\n" GAMES_DEFAULTS,
+            first_id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
         free(kept);
@@ -4378,11 +4399,12 @@ int main(int argc, char** argv) {
         assert(app.language == 1 && snx_tr_language() == 0 && !strcmp(app.app_form.language, "English"));
         key(&app, SDLK_RETURN); /* Enter goes round too */
         assert(app.language == 2 && snx_tr_language() == 1 && !strcmp(app.app_form.language, "Test\303\252s"));
-        snprintf(expected, sizeof expected,
-                 APP_INI_HEAD
-                 "theme = %s\nui_scale = 2\n"
-                 "language = xx\nanimations = 0\nside_box = auto\nrecompile_background = full\n" GAMES_DEFAULTS,
-                 app.theme.id);
+        snprintf(
+            expected, sizeof expected,
+            APP_INI_HEAD
+            "theme = %s\nui_scale = 2\n"
+            "language = xx\nanimations = 0\nside_box = auto\nrecompile_background = full\ndumps_subfolders = on\n" GAMES_DEFAULTS,
+            app.theme.id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
         free(kept);
@@ -4863,6 +4885,16 @@ int main(int argc, char** argv) {
         snprintf(said, sizeof said, "Not used from %s: recompile_background = slow (it keeps gentle)", app.app_file);
         assert(app.background_gentle && strstr(app.message, said));
         free(text);
+        /* dumps_subfolders: on its default, off kept, another word said with the one in use */
+        assert(strstr(kept, "dumps_subfolders = on\n") && !app.dumps_shallow);
+        text = snx_format("%sdumps_subfolders = off\ndumps_subfolders = some\n", kept);
+        assert(!snx_write_file(app.app_file, text, strlen(text)));
+        app.message[0] = 0;
+        app_load(&app);
+        snprintf(said, sizeof said, "Not used from %s: dumps_subfolders = some (it keeps off)", app.app_file);
+        assert(app.dumps_shallow && strstr(app.message, said));
+        app.dumps_shallow = false;
+        free(text);
         text = snx_format(APP_INI_HEAD "theme = %s\nside_box = auto\n", app.theme.id);
         assert(!snx_write_file(app.app_file, text, strlen(text)));
         app.background_gentle = false; /* as the menu opens */
@@ -5163,6 +5195,42 @@ int main(int argc, char** argv) {
             free(dumps);
             free(moved);
         }
+        /* a dumps row's subfolders, switched from its box: kept (an Extra in folders.txt, dumps/ in app.ini), the row
+           and its note saying which, and the games listed again */
+        {
+            int row = app.editor.row, main = FOLDER_ROW(GUI_ROW_DUMPS, -1);
+            char *dumps = snx_path_join(app.data_dir, "dumps"), *ini, *note;
+            size_t got;
+            assert(row == FOLDER_ROW(GUI_ROW_FOLDER, 0) && !app.folders_deep[0]);
+            folder_pick(&app, 1); /* With Subfolders */
+            kept = (char*)snx_read_file(app.folders_file, &got);
+            snprintf(line, sizeof line, "dumps %s" GUI_FOLDER_DEEP "\n", kept_as);
+            note = snx_format("%s: its subfolders' games are listed too", app.folders[0]);
+            assert(kept && !strcmp(kept, line) && app.folders_deep[0] &&
+                   !strcmp(app.app_form.folder[row], "+ subfolders") && !strcmp(app.editor.note, note));
+            free(note);
+            free(kept);
+            folder_pick(&app, 1); /* Only This Folder */
+            note = snx_format("%s: its own games alone are listed, not its subfolders'", app.folders[0]);
+            assert(!app.folders_deep[0] && !app.app_form.folder[row][0] && !strcmp(app.editor.note, note));
+            free(note);
+            app.editor.row = main; /* its value "not found" while the data folder has no dumps/ */
+            folder_pick(&app, 1);  /* dumps/: Only This Folder, from its default */
+            ini = (char*)snx_read_file(app.app_file, &got);
+            note = snx_format("%s: its own games alone are listed, not its subfolders'", dumps);
+            assert(app.dumps_shallow && ini && strstr(ini, "dumps_subfolders = off\n") &&
+                   !strcmp(app.app_form.folder[main], snx_is_dir(dumps) ? "" : "not found") &&
+                   !strcmp(app.editor.note, note));
+            free(note);
+            free(ini);
+            folder_pick(&app, 1); /* With Subfolders again */
+            ini = (char*)snx_read_file(app.app_file, &got);
+            assert(!app.dumps_shallow && ini && strstr(ini, "dumps_subfolders = on\n") &&
+                   !strcmp(app.app_form.folder[main], snx_is_dir(dumps) ? "+ subfolders" : "not found"));
+            free(ini);
+            app.editor.row = row;
+            free(dumps);
+        }
         /* a folder too long for its row: cut in its middle, its end kept, never sliding; whole under the rows. Its
            middle folder is longer than the row, so that whatever root it has (C:\ is shorter than /tmp/), the end
            kept is games alone */
@@ -5203,7 +5271,7 @@ int main(int argc, char** argv) {
         {
             char *asked = snx_format("Remove %s from the Dumps Library? Its games stay in the folder.", app.folders[0]),
                  *done = snx_format("%s removed from the library. Its games stay in the folder", app.folders[0]);
-            folder_pick(&app, 1);
+            folder_pick(&app, 2);
             assert(app.confirm.shown && app.confirm.ask == GUI_ASK_FOLDER && !strcmp(app.ask_line, asked));
             render(&app);
             shows(&app, "- Remove", normal);

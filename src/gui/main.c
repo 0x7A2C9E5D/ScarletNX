@@ -497,6 +497,7 @@ typedef struct App {
     int files_top, files_shown;     /* the box of files over the screen (render_files): its first file, and how many */
     char* folders[GUI_FOLDERS_MAX]; /* the player's game folders, listed after recompiled/ and dumps/ */
     bool folders_deep[GUI_FOLDERS_MAX];   /* each with its subfolders' games too */
+    bool dumps_shallow; /* dumps/ of the data folder without its subfolders' games: app.ini's dumps_subfolders = off */
     int folders_library[GUI_FOLDERS_MAX]; /* each one's GUI_LIBRARY_* */
     int adding;                           /* the library Add a folder adds to, -1: the one its games say */
     int asked_holds;                      /* folder_asked's libraries, 1 << GUI_LIBRARY_* */
@@ -1160,6 +1161,7 @@ static int app_write(App* app) {
     n += snprintf(text + n, size - (size_t)n, "animations = %d\n", !app->animations_off);
     n += snprintf(text + n, size - (size_t)n, "side_box = %s\n", side_words[app->side_box]);
     n += snprintf(text + n, size - (size_t)n, "recompile_background = %s\n", background_words[app->background_gentle]);
+    n += snprintf(text + n, size - (size_t)n, "dumps_subfolders = %s\n", app->dumps_shallow ? "off" : "on");
     for (i = 0; i < GUI_OPTIONS; ++i)
         n += snprintf(text + n, size - (size_t)n, "%s = %s\n", option_keys[i].key,
                       option_keys[i].words[app->options[i]]);
@@ -1228,6 +1230,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
     int scale = app->menu.text_size, language = app->language, n = 0, count = 0, moved = 0;
     int options[GUI_OPTIONS];
     bool still = app->animations_off, gentle = app->background_gentle, kept, scale_read = false;
+    bool shallow = app->dumps_shallow;
     int side = app->side_box;
     SnxIni ini;
     if (size) bad[0] = 0;
@@ -1305,6 +1308,11 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
                 still = !strcmp(value, "0");
                 continue;
             }
+        } else if (!strcmp(ini.section, "app") && !strcmp(key, "dumps_subfolders")) {
+            if (!strcmp(value, "on") || !strcmp(value, "off")) {
+                shallow = !strcmp(value, "off");
+                continue;
+            }
         } else if (!strcmp(ini.section, "app") && !strcmp(key, "language")) {
             int found = snx_tr_find(value);
             if (!strcmp(value, "auto") || found >= 0) {
@@ -1325,6 +1333,8 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
                           option_keys[option].words[options[option]]);
         else if (n < (int)size && !strcmp(ini.section, "app") && !strcmp(key, "recompile_background"))
             n += snprintf(bad + n, size - (size_t)n, snx_tr(" (it keeps %s)"), background_words[kept]);
+        else if (n < (int)size && !strcmp(ini.section, "app") && !strcmp(key, "dumps_subfolders"))
+            n += snprintf(bad + n, size - (size_t)n, snx_tr(" (it keeps %s)"), shallow ? "off" : "on");
         if (n >= (int)size) n = (int)size - 1;
     }
     free(text);
@@ -1339,6 +1349,7 @@ static int app_read(App* app, bool apply, char* bad, size_t size, char* renamed,
         language_apply(app);
     }
     if (apply) app->animations_off = still;
+    if (apply) app->dumps_shallow = shallow;
     if (apply) app->background_gentle = gentle;
     if (apply && side != app->side_box) {
         app->side_box = side;
@@ -6717,8 +6728,8 @@ static int folders_save(App* app) {
 static void open_folders(App* app, int row);
 static int folder_row_of(const App* app, int kind, int at);
 /* the dumps library's Main row: dumps/ of the data folder, which goes with it */
-static const char dumps_row[] =
-    SNX_TR_NOOP("Dumps put here are listed, its subfolders' too: .nsp, .xci and .nro files. It stays on the list");
+static const char dumps_row[] = SNX_TR_NOOP("Dumps put here are listed (.nsp, .xci and .nro), its subfolders' too "
+                                            "while it says + subfolders. It stays on the list");
 /* whether path is dumps/ of the data folder, which the Library always lists */
 static bool is_dumps_dir(const App* app, const char* path) {
     char* dumps = app->data_dir ? snx_path_join(app->data_dir, "dumps") : NULL;
@@ -7178,9 +7189,10 @@ static void open_folders(App* app, int row) {
             k->key = kind == GUI_ROW_DUMPS ? SNX_TR_NOOP("Main") : SNX_TR_NOOP("Extra");
             k->about = kind == GUI_ROW_DUMPS ? dumps_row : extra_row;
             snprintf(value, size, "%s",
-                     !path || !snx_is_dir(path)                       ? snx_tr("not found")
-                     : kind == GUI_ROW_DUMPS || app->folders_deep[at] ? snx_tr("+ subfolders")
-                                                                      : "");
+                     !path || !snx_is_dir(path) ? snx_tr("not found")
+                     : kind == GUI_ROW_DUMPS    ? (app->dumps_shallow ? "" : snx_tr("+ subfolders"))
+                     : app->folders_deep[at]    ? snx_tr("+ subfolders")
+                                                : "");
         }
     }
     gui_editor_form(&app->editor, app->folder_keys, rows, &app->app_form, SNX_TR_NOOP("Reset to Defaults"));
@@ -11250,10 +11262,22 @@ static const char* const place_picks[] = {SNX_TR_NOOP("Open Folder"), SNX_TR_NOO
                                           SNX_TR_NOOP("Reset to Default"), NULL};
 static const char* const extra_picks[] = {SNX_TR_NOOP("Open Folder"), SNX_TR_NOOP("Remove from Library"), NULL};
 static const char* const open_picks[] = {SNX_TR_NOOP("Open Folder"), NULL};
+/* a dumps library row's: its subfolders' games listed or not, the choice the other way from how it is */
+#define SAY_ONLY_THIS SNX_TR_NOOP("Only This Folder")
+#define SAY_WITH_SUB  SNX_TR_NOOP("With Subfolders")
+static const char* const dumps_deep_picks[] = {SNX_TR_NOOP("Open Folder"), SAY_ONLY_THIS, NULL};
+static const char* const dumps_flat_picks[] = {SNX_TR_NOOP("Open Folder"), SAY_WITH_SUB, NULL};
+static const char* const dumps_extra_deep_picks[] = {SNX_TR_NOOP("Open Folder"), SAY_ONLY_THIS,
+                                                     SNX_TR_NOOP("Remove from Library"), NULL};
+static const char* const dumps_extra_flat_picks[] = {SNX_TR_NOOP("Open Folder"), SAY_WITH_SUB,
+                                                     SNX_TR_NOOP("Remove from Library"), NULL};
 static const char* const* picks_list(const App* app) {
     int at, group, kind;
     if (app->picks_of == GUI_PICKS_SHARE) return share_picks;
     kind = folder_row(app, app->pick_row, &at, &group);
+    if (kind == GUI_ROW_DUMPS) return app->dumps_shallow ? dumps_flat_picks : dumps_deep_picks;
+    if (kind == GUI_ROW_FOLDER && app->folders_library[at] == GUI_LIBRARY_DUMPS)
+        return app->folders_deep[at] ? dumps_extra_deep_picks : dumps_extra_flat_picks;
     return kind == GUI_ROW_PLACE ? place_picks : kind == GUI_ROW_FOLDER ? extra_picks : open_picks;
 }
 static const char* pick_label(App* app, int i) {
@@ -11300,6 +11324,33 @@ static void render_picks(App* app) {
 static void share_log(App* app, bool zip);
 static char* logs_folder(const App* app);
 static const char* logs_none(void);
+/* a dumps library row's subfolders listed from now on, or no longer: kept (dumps/ in app.ini, an Extra in folders.txt),
+   the games listed again and the row's note saying which; one that cannot be kept holds until the menu closes, said */
+static void subfolders_switch(App* app, int kind, int at) {
+    char note[sizeof app->editor.note];
+    const char* path;
+    int row = app->pick_row, failed;
+    bool deep;
+    if (kind == GUI_ROW_DUMPS) {
+        app->dumps_shallow = !app->dumps_shallow;
+        deep = !app->dumps_shallow;
+        failed = app_save(app);
+    } else {
+        deep = app->folders_deep[at] = !app->folders_deep[at];
+        failed = folders_save(app);
+    }
+    path = folder_row_path(app, row);
+    if (failed)
+        snprintf(note, sizeof note, "%s", app->editor.note);
+    else
+        snprintf(note, sizeof note,
+                 deep ? snx_tr("%s: its subfolders' games are listed too")
+                      : snx_tr("%s: its own games alone are listed, not its subfolders'"),
+                 path ? path : "");
+    list_games(app);
+    open_folders(app, row);
+    snprintf(app->editor.note, sizeof app->editor.note, "%s", note);
+}
 /* choice i taken, or none (-1: Back): the logs as one zip, as the one log of before, or their folder opened; a Folders
    row's folder opened, another picked, its default asked for or its Extra taken off */
 static void pick_take(App* app, int i) {
@@ -11327,6 +11378,8 @@ static void pick_take(App* app, int i) {
         open_folder_picker(app);
     } else if (kind == GUI_ROW_PLACE)
         place_default_ask(app, at);
+    else if (!strcmp(picks_list(app)[i], SAY_ONLY_THIS) || !strcmp(picks_list(app)[i], SAY_WITH_SUB))
+        subfolders_switch(app, kind, at);
     else if (kind == GUI_ROW_FOLDER)
         folder_off_ask(app, at);
 }
@@ -12851,7 +12904,8 @@ static void games_scan(App* app, GuiGames* games, char* message, size_t size) {
     free(old);
     /* Dumps off: the dumps' folders not read, and the dumps and CIAs the others hold left out of the groups */
     if (dumps_on(app) && dumps && snx_is_dir(dumps) && /* none: places_apply said it could not be made */
-        !gui_games_add_deep(games, dumps, GUI_GAMES_DUMP | GUI_GAMES_CIA, GUI_FOLDER_DEPTH, error, sizeof error) &&
+        !gui_games_add_deep(games, dumps, GUI_GAMES_DUMP | GUI_GAMES_CIA, app->dumps_shallow ? 0 : GUI_FOLDER_DEPTH,
+                            error, sizeof error) &&
         !message[0])
         snprintf(message, size, "%s", error);
     for (i = 0; i < app->folder_count; ++i) /* a library's folder, its library's games */
@@ -12920,7 +12974,7 @@ static int watch_dirs(const App* app, char** dirs, int* depths) {
         depths[n++] = app->folders_deep[i] ? GUI_FOLDER_DEPTH : 0;
     }
     dirs[n] = app->data_dir ? snx_path_join(app->data_dir, "dumps") : NULL;
-    depths[n++] = GUI_FOLDER_DEPTH;
+    depths[n++] = app->dumps_shallow ? 0 : GUI_FOLDER_DEPTH;
     dirs[n] = games_old(app);
     depths[n++] = 0;
     return n;

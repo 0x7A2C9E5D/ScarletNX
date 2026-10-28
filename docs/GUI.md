@@ -237,7 +237,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   scale, as many as fit 16 rows (30 on a phone), and writes it; `text_size` before, still read and written again as
   `ui_scale`, said once; `auto`, `0.25`, `0.5` and `0.75` of older versions read as that number and written again so,
   said once), `recompile_background` (`full`, the default, or `gentle`; a word it does not know named
-  with the one kept, `recompile_background = slow (it keeps full)`) and `language` (`auto`, `en` or a language's BCP 47
+  with the one kept, `recompile_background = slow (it keeps full)`), `dumps_subfolders` (`on`, the default: dumps/'s
+  subfolders' dumps listed too; `off`: its own alone; Folders' row of it switches it) and `language` (`auto`, `en` or a
+  language's BCP 47
   tag, as `pt-BR` or `zh-Hans-CN`), and once one
   is picked `[folders]` with Folders' `data`, `recompiled`, `work`, `state` (Logs) and `cache` (Caches) (a full path,
   nothing for the default). A value the
@@ -287,8 +289,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - **Folders** opens Settings > App > Folders (ESC comes back to the menu). There Enter, or a tap, on a folder gives
   **Open Folder**, which opens it in the system's file manager (on Android its Files app, the data folder through the
   app's own storage, [ANDROID](ANDROID.md)), **Change Folder** and **Reset to Default**; on an Extra of a library
-  Open Folder and **Remove from Library**; on dumps/ and Settings, Open Folder. Del still puts a folder back to its
-  default, or takes an Extra off.
+  Open Folder and **Remove from Library**; on dumps/ and Settings, Open Folder. A row of the Dumps Library, dumps/ or an
+  Extra, also gives **Only This Folder** while it says *+ subfolders*, else **With Subfolders**: its subfolders' dumps
+  listed or not from then on, kept (dumps/ in `app.ini`, an Extra in `folders.txt`). Del still puts a folder back to
+  its default, or takes an Extra off.
 - The launcher's log, a file a day, `scarletnx-console-2026-10-28.log` in its state folder (Settings > App > Folders'
   Logs; on iOS in `logs/` of the app's Documents, [APPLE](APPLE.md)), the 14 newest days kept (a day's first line
   deletes the older ones; the `scarletnx-console.log` older versions wrote stays as it is), holds what it says: its
