@@ -3718,6 +3718,10 @@ msgstr ""
 msgid "Opens the data folder, recompiled/ and the keys in it, in the system's Files app"
 msgstr ""
 
+#: src/gui/model.c
+msgid "Opens the data folder, recompiled/ and dumps/ in it, in the system's file manager"
+msgstr ""
+
 #: src/gui/process_posix.c
 #, c-format
 msgid "Cannot start the run: %s"

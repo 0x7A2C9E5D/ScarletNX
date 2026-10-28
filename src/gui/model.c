@@ -41,9 +41,7 @@ GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
                 case GUI_KEYS: menu->view = GUI_LOAD_KEYS; break;
                 case GUI_SETTINGS: return GUI_MENU_SETTINGS;
                 case GUI_LOG: return GUI_MENU_LOG;
-#ifdef __ANDROID__
                 case GUI_DATA: return GUI_MENU_DATA;
-#endif
                 case GUI_EXIT: menu->quit = true; break;
                 default: break;
             }
@@ -158,9 +156,11 @@ const char* gui_setting_description(const GuiMenu* menu) {
 #else
             return snx_tr("Saves the last run's output and game log to scarletnx.log and copies its path");
 #endif
-#ifdef __ANDROID__
         case GUI_DATA:
+#ifdef __ANDROID__
             return snx_tr("Opens the data folder, recompiled/ and the keys in it, in the system's Files app");
+#else
+            return snx_tr("Opens the data folder, recompiled/ and dumps/ in it, in the system's file manager");
 #endif
         default: return "";
     }

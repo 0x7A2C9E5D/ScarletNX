@@ -18,9 +18,7 @@ enum {
     GUI_KEYS,
     GUI_SETTINGS, /* the game's .ini settings, the launcher's own for the runs and its App: settings.h */
     GUI_LOG,      /* the logs in one file, for a bug report: a phone has no terminal to copy them from */
-#ifdef __ANDROID__
-    GUI_DATA, /* the data folder, the app's own storage, in the system's Files app (dist/android's DataProvider) */
-#endif
+    GUI_DATA, /* the data folder in the system's file manager: Android's the app's own storage (dist/android's DataProvider) */
     GUI_EXIT,
     GUI_ITEM_COUNT
 };

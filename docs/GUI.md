@@ -57,8 +57,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Back goes back, Tab to the next screen, Enter or Tap selects, Swipe turns the page). A key of
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
   presses the key when its words all press one. `Arrows`, `mouse`, `pad` and `D-pad` press nothing.
-- The menu, top to bottom: the three loads, **Install Keys**, **Settings**, **Share Log**, on
-  Android **Open Data Folder**, and **Exit**. The games, and the recent ones, are the Games tab's. A load whose driver
+- The menu, top to bottom: the three loads, **Install Keys**, **Settings**, **Share Log**,
+  **Open Data Folder**, and **Exit**. The games, and the recent ones, are the Games tab's. A load whose driver
   is neither beside ScarletNX nor on PATH, as those an app leaves out ([APPLE](APPLE.md)), is greyed out, still there,
   and Enter or a tap on it says which driver it misses rather than opening its screen; the drivers are looked for
   again each second, and with F5.
@@ -280,8 +280,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Install Keys does, until its log is saved or a run ends well. On the
   desktop it goes in the working folder with its path copied. On Android it goes to the
   data folder's `state/` and is shared.
-- **Open Data Folder**, on Android, opens the data folder, the app's own storage, in the
-  system's Files app ([ANDROID](ANDROID.md)).
+- **Open Data Folder** opens the data folder, with recompiled/ and dumps/, in the system's file manager; on Android
+  the app's own storage in the system's Files app ([ANDROID](ANDROID.md)).
 - The launcher's log, `scarletnx-console.log` in its state folder (Settings > App > Folders' Logs; on iOS in `logs/`
   of the app's Documents, [APPLE](APPLE.md)), holds what it says: its start (its build and data folder), each failure
   once in a session (what the box over the screen says, shown or not), the warnings it gives as it opens, a dump whose

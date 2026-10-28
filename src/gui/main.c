@@ -591,9 +591,7 @@ typedef char gui_entries_in_order[GUI_ENTRY(GUI_LINUX) == UI_MENU_ENTRIES_LOAD_L
                                           GUI_ENTRY(GUI_KEYS) == UI_MENU_ENTRIES_INSTALL_KEYS &&
                                           GUI_ENTRY(GUI_SETTINGS) == UI_MENU_ENTRIES_SETTINGS &&
                                           GUI_ENTRY(GUI_LOG) == UI_MENU_ENTRIES_SHARE_LOG &&
-#ifdef SDL_PLATFORM_ANDROID
                                           GUI_ENTRY(GUI_DATA) == UI_MENU_ENTRIES_OPEN_DATA_FOLDER &&
-#endif
                                           GUI_ENTRY(GUI_EXIT) == UI_MENU_ENTRIES_EXIT &&
                                           GUI_ENTRY(GUI_ITEM_COUNT) == UI_MENU_ITEMS
                                       ? 1
@@ -12840,6 +12838,8 @@ static void menu_key(App* app, GuiKey key) {
             break;
 #ifdef SDL_PLATFORM_ANDROID
         case GUI_MENU_DATA: gui_android_open_data(app->message, sizeof app->message); break;
+#else
+        case GUI_MENU_DATA: show_folder(app, app->data_dir); break; /* never NULL: the cwd's when none is found */
 #endif
         default: break;
     }
@@ -13045,9 +13045,7 @@ void ui_menu_entries_load_gba_rom_action_cb(App* app, uint32_t hit) { menu_entry
 void ui_menu_entries_install_keys_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_KEYS, hit); }
 void ui_menu_entries_settings_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_SETTINGS, hit); }
 void ui_menu_entries_share_log_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_LOG, hit); }
-#ifdef SDL_PLATFORM_ANDROID
 void ui_menu_entries_open_data_folder_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_DATA, hit); }
-#endif
 void ui_menu_entries_exit_action_cb(App* app, uint32_t hit) { menu_entry(app, GUI_EXIT, hit); }
 /* the keys the foot names, a word each ("Up/Down" is two): what a click or a tap on the word presses. Space selects
    where the foot names it, as Enter; Add a folder's opens the folder picker, as Enter on its row. A word is found by

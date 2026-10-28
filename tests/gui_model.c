@@ -68,6 +68,10 @@ int main(void) {
     menu.running = false;
     gui_menu_key(&menu, GUI_DOWN);
     assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_LOG && menu.selected == GUI_LOG && !menu.quit);
+    /* Open Data Folder, on every system, before Exit */
+    gui_menu_key(&menu, GUI_DOWN);
+    assert(menu.selected == GUI_DATA && strstr(gui_setting_description(&menu), "the data folder"));
+    assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_DATA && !menu.quit);
     gui_menu_key(&menu, GUI_DOWN);
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.quit);

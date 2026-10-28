@@ -34,7 +34,6 @@
 			icon = share-2
 		}
 		[button]"Open Data Folder" {
-			for-platform = android
 			icon = folder-open
 		}
 		[button]"Exit" {
