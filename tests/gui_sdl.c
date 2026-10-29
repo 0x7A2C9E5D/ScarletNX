@@ -8880,6 +8880,37 @@ int main(int argc, char** argv) {
                     SDL_SyncWindow(app.window);
                     render(&app);
                 }
+                { /* the groups and the side panel beside them one screen: going between them no new screen's fade
+                     (which blinked as a finger crossed); with the side box off the group's rows take the screen,
+                     which fades in */
+                    int was = app.side_box;
+                    app.clock = 5000;
+                    app.switch_ms = 0;
+                    key(&app, SDLK_RETURN);
+                    render(&app);
+                    assert(app.form == GUI_FORM_GROUP && app.form_beside && !app.switch_ms);
+                    key(&app, SDLK_ESCAPE);
+                    render(&app);
+                    assert(app.form == GUI_FORM_SETTINGS && !app.switch_ms);
+                    key(&app, SDLK_DOWN); /* another group's rows, the same screen */
+                    render(&app);
+                    key(&app, SDLK_RETURN);
+                    render(&app);
+                    assert(app.form != GUI_FORM_SETTINGS && app.group == group + 1 && !app.switch_ms);
+                    key(&app, SDLK_ESCAPE);
+                    key(&app, SDLK_UP);
+                    render(&app);
+                    assert(app.form == GUI_FORM_SETTINGS && app.editor.row == group && !app.switch_ms);
+                    app.side_box = GUI_SIDE_OFF;
+                    render(&app);
+                    key(&app, SDLK_RETURN);
+                    render(&app);
+                    assert(app.form == GUI_FORM_GROUP && !app.form_beside && app.switch_ms == 5000);
+                    key(&app, SDLK_ESCAPE);
+                    app.side_box = was;
+                    app.clock = 0;
+                    render(&app);
+                }
                 key(&app, SDLK_RETURN); /* the group, of 4 rows or more */
                 assert(app.form == GUI_FORM_GROUP);
             }

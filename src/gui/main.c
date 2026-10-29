@@ -527,6 +527,7 @@ typedef struct App {
     bool options_shown;       /* the View box over Games, a row an option, options_focus's in focus */
     int options_focus;
     unsigned screen_was; /* the screen drawn last (screen_mark), for when another comes */
+    bool form_beside;    /* the form laid out last showed the groups and the side panel's rows beside them */
     bool boxed_was;      /* a box over it then */
     Uint64 switch_ms, box_ms;
     Uint64 closing_ms; /* the short screen of what the menu keeps, shown as it closes, from then; 0 for none */
@@ -1984,11 +1985,18 @@ static void shade(App* app, Uint8 alpha) {
     SDL_SetRenderViewport(app->renderer, &safe);
 }
 /* the screen as one number, which another screen changes: a tab, a form, a group, a load's screen, the setup's page;
-   never 0, which screen_was holds before the first frame */
+   never 0, which screen_was holds before the first frame. The Settings' groups with the side panel's rows beside them
+   are one screen, whichever has the focus and whichever group's rows show */
 static unsigned screen_mark(const App* app) {
-    return (unsigned)app->editing | (unsigned)app->form << 1 | (unsigned)app->menu.view << 5 |
-           (unsigned)app->setup_on << 9 | (unsigned)app->setup_page << 10 | (unsigned)app->group << 16 |
-           (unsigned)(app->page + 1) << 22 | 1u << 31;
+    int form = app->form, group = app->group, page = app->page;
+    if (app->editing && app->form_beside &&
+        (form == GUI_FORM_SETTINGS || form == GUI_FORM_GROUP || form == GUI_FORM_APP || form == GUI_FORM_USERS)) {
+        form = GUI_FORM_SETTINGS;
+        group = 0;
+        page = -1;
+    }
+    return (unsigned)app->editing | (unsigned)form << 1 | (unsigned)app->menu.view << 5 | (unsigned)app->setup_on << 9 |
+           (unsigned)app->setup_page << 10 | (unsigned)group << 16 | (unsigned)(page + 1) << 22 | 1u << 31;
 }
 /* what changed since the last frame: a screen come, whose fade starts now, a box opened or closed, whose shade does */
 static void fades_mark(App* app) {
@@ -9308,6 +9316,8 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
         f->place.side = f->place.list; /* no side box: the open group's rows the whole column, the groups out */
         f->place.list = gui_rect(f->place.list.x, f->place.list.y, 0, 0);
     }
+    app->form_beside = !theme && app->form != GUI_FORM_FOLDERS && f->place.list.w && f->place.list.h &&
+                       f->place.side.w && f->place.side.h;
     { /* the note whole, a half step under the text's letters */
         int s = app->scale, w = inner(app, f->place.side).w, line, half = text_half(app);
         rows = note ? wrap_rows(app, note, w / cell_w(app), 0) : 1;
