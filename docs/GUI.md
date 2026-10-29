@@ -54,7 +54,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   map page and a Controller row waiting for a press read the pads themselves. While a run goes the menu lets go of the
   pads, for the game.
 - The keys at the foot are buttons: a click or a tap on one presses it, as the keyboard does (ESC or
-  Back goes back, Tab to the next screen, Enter or Tap selects, Swipe turns the page). A key of
+  Back goes back, Tab to the next screen, Enter or Tap selects; Drag says what the finger does). A key of
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
   presses the key when its words all press one. `Arrows`, `mouse`, `pad` and `D-pad` press nothing.
 - The menu, top to bottom: the three loads, **Install Keys**, **Settings**, **Share Log**,
@@ -67,8 +67,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   stays pink while another item is hovered in yellow. Mouse controls also work
   on Games' rows.
 - A finger taps an item anywhere on its row, as a click does on its label, and a drag up or down on the menu or the
-  Settings moves the focus a row each time it passes one, whether or not the rows all fit; a swipe turns Games'
-  pages, left or up to the next as a phone's lists scroll, right or down back; a tap on a finished run returns to the menu, and one on a
+  Settings moves the focus a row each time it passes one, whether or not the rows all fit; on Games' list the rows
+  follow the finger, and let go fast they glide on, slowing to a stop (the grid's swipes go a screen of its lines);
+  a tap on a finished run returns to the menu, and one on a
   running run's ESC line aborts it. Android's back button is ESC. On a screen packed with
   pixels (a phone) the text takes the display's own scale, as far as the menu still fits.
 - **Load Switch NSP/XCI/NRO**, **Load Linux ARM ELF**, **Load 3DS game**, **Load Vita VPK** and
@@ -328,7 +329,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   shows the rest, by the name their run gave (the runner's `ScarletNX - <name>` line), else their file's. A dump not
   made into a game yet stays in the list but has no row, as opening it would compile it; once made, by any run, its
   game takes its place.
-  The focus moves between them and the page's games in one ring, and the tips show the focused
+  The focus moves between them and the games in one ring, and the tips show the focused
   game's path. Choosing one runs it again with the driver it was
   loaded with and the options the menu has now; a game whose file is gone leaves the
   list instead. The list is kept in `recent.txt`, beside `last-run.log`, at the root of the menu's state
@@ -406,8 +407,8 @@ names only), so a game put in or taken out shows in the open list; a folder that
 cannot be read is named and the others still listed.
 
 - **P** (on a phone a tap on *Folders* at the foot) opens Settings > App > Folders at the recompiled library's Add a
-  folder, where ESC comes back to Games and its list read again. The recent games are over every page, then the
-  page's games. ESC returns to the menu.
+  folder, where ESC comes back to Games and its list read again. The recent games are over the games. ESC returns to
+  the menu.
 - **V** (on a phone a tap on *View* at the foot) opens the View box over the list, an option a row, its value between
   the arrows: **Recent Games** (*On*, `recent_games = on` in `app.ini`: the recent games over the list; *Off*: none),
   **Dumps** (*On*, `games_dumps = on`: the dumps of `dumps/` and of the dumps library's folders under their
@@ -415,7 +416,7 @@ cannot be read is named and the others still listed.
   `games_sort = title`: by the name shown, in each folder; *Last opened*, `games_sort = last_opened`: the game whose
   log a run wrote last first, as every run writes its game's log again, then the games never run in their order,
   each group on its own, its dumps, CIAs and VPKs in theirs) and **View** (*List*, `games_view = list`: a row a game,
-  in pages; *Grid*, `games_view = grid`: a tile a game, its icon over its name, as many a line as fit, on one page
+  all on one page that scrolls; *Grid*, `games_view = grid`: a tile a game, its icon over its name, as many a line as fit, on one page
   that scrolls, the list three fifths of the screen as a run's output is, Recent Games and a group's heading each on
   a line of its own; the arrows go to the tile beside, above or under the focus, its column or the line's last,
   PgUp and PgDn by the lines that show, a click or a tap on a tile opens it, and the side box says the focused one as
@@ -451,9 +452,11 @@ cannot be read is named and the others still listed.
   another row, a dump, a package or another console's game, it says what it opens. The side panel of a recompiled
   game says how its code was made (`Made with: O2, AOT 81%`, `?` for one an older version made), or, in the failure
   colour, `Needs Recompile` when Play compiles it first.
-- In the list, Left/Right and PgUp/PgDown go to the previous/next page. The page number and
-  total file count are shown. Paging stops at the first and last pages.
-- Resizing adjusts the page size while keeping the selected file visible.
+- The list is one page that scrolls, by pixels: past its height a scroll bar at its right, as every list has (below),
+  which a click and a finger take. Up/Down move the focus
+  and the rows glide to show it (at once with Animations off); Left/Right and PgUp/PgDown move it a screen of rows,
+  stopping at the first and the last; a notch of the wheel glides the rows three rows, the focus staying. The count
+  of the games is shown beside them.
 - Empty or missing directories show a diagnostic, and the side box says P adds a folder.
 
 A recompiled game, in a folder of its own (`recompiled/<id>/<id>`), runs with the Settings through the menu's own
@@ -558,8 +561,8 @@ phone, the words to tap, whole, in the text's letters, each row of them as tall 
 the text's size) for a finger, and so are the tabs. The tips and the keys each in a box with a bar down
 its left (`[tips] box`, `[footer] box`) or on the page, each key with what it does a button as a tab is: a box as the
 theme's are (filled in the dim colour, framed in it, or on the foot's band framed in the soft one), its text a column
-inside, a column between two, as tall as a tab where it has a row of its own. Games lists the recent games and a
-page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
+inside, a column between two, as tall as a tab where it has a row of its own. Games lists the recent games and the
+games, as many as the list's box holds and the rest a scroll away, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
 opens the picker). The Settings list their groups, and beside them the focused group's
 rows: Enter, or a click on a row, opens the group, its rows taking the focus, the group shown as the focused one; a
@@ -580,8 +583,12 @@ setup's pages, the setup's Appearance rows, the box of users, that of a game's u
 a box of files. Their rows are 2 pixels apart times the text's size (on Android and iOS 48 pixels high: a phone held wide gets
 2x by default, so 96, about 37 dp at a density of 2.6, Android's 48 dp touch target at 3x; the desktop's are 17), the focused one kept in the middle (on a
 group's screen, the group open in the groups' list; Games' grid by its lines) as the keys, a pad, the wheel or a drag
-move it, and a list still when the mouse, a pen or a tap moves it, the cursor and the arrows of hidden rows inside
-each row, which a click takes whole as a tap does. That is the **Side panel**'s *Auto*, the
+move it, and a list still when the mouse, a pen or a tap moves it, the cursor inside each row, which a click takes
+whole as a tap does. Every list whose rows do not all show, Games' grid too, has a scroll bar a letter wide at its
+right, the rows beside it: its thumb as tall as the share of the rows shown and where they are, which a click takes
+there and drags, and a finger too from two letters of the bar's right edge; the rows stay where the thumb put them,
+the focus where it was, until a key, a pad or the wheel moves the focus. Under a box over the screen, only the box's
+bars take a press. That is the **Side panel**'s *Auto*, the
 default (`side_box = auto` in `app.ini`, Settings > App); *On* shows it on every screen, under the list where both do
 not fit, and *Off* never, the list taking the whole width without the Status box, a group's rows its column. F2 shows
 it where it is hidden and hides it where it shows, kept as *On* or *Off*. A text too long for its box wraps over

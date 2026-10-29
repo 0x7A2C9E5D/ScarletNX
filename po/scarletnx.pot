@@ -298,13 +298,13 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: open. Swipe: page. Refresh. Back."
+msgid "Tap: open. Drag: scroll. Refresh. Back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Tap: open. Swipe: page. Refresh."
+msgid "Tap: open. Drag: scroll. Refresh."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -510,13 +510,13 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: select. Enter/Space: open. Left/Right/PgUp/PgDown: page. F5: refresh."
+msgid "Up/Down: select. Enter/Space: open. Left/Right/PgUp/PgDown: scroll. F5: refresh."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Arrows: select. Enter/Space: open. PgUp/PgDown: page. F5: refresh."
+msgid "Arrows: select. Enter/Space: open. PgUp/PgDown: scroll. F5: refresh."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -716,7 +716,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "D-pad: select. A: open. LT/RT: page. Start: refresh. B: back."
+msgid "D-pad: select. A: open. LT/RT: scroll. Start: refresh. B: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -1916,11 +1916,6 @@ msgstr ""
 #: src/gui/main.c
 #, c-format
 msgid "%zu game(s)"
-msgstr ""
-
-#: src/gui/main.c
-#, c-format
-msgid "Page %zu/%zu, %zu game(s)"
 msgstr ""
 
 #: src/gui/main.c
@@ -3636,12 +3631,6 @@ msgstr ""
 #: src/gui/main.c
 #, snx-key
 msgid "PgDown"
-msgstr ""
-
-#. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
-#, snx-key
-msgid "Swipe"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word
