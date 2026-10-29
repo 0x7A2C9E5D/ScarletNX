@@ -1680,28 +1680,78 @@ static void ngword2_file_write(u32 i, u8* out) {
     memcpy(out, i < NGWORD2_AC_COUNT ? ngword2_ac : ngword2_version, ngword2_file_size(i));
 }
 
-/* MiiModel, the Mii parts' shapes and textures, as a placeholder with no parts in it. The SDK's resource loader (as a
-   game links it, nn::mii::detail) reads each file whole and indexes it from its start, checking nothing of its
-   header: after 0xc bytes (a magic, NFTR for the textures and NFSR for the shapes as Eden's stand-in has them in
-   system_archive/mii_model.cpp, then a version), two arrays of a u32 per part type, each type's largest decompressed
-   part and its alignment, then a table of entries per type, {offset, decompressed size, compressed size, ...}: 28
-   bytes each from 0x64 in a texture file, 88 from 0x6c in a shape file, which two more tables follow (72 bytes per
-   hair type, then 36 per face type). A part whose decompressed size is 0 is absent and skipped, so all-nought tables
-   hold no part, and the files must be as long as the tables, or the loader reads past them */
+/* MiiModel, the Mii parts' shapes and textures, as a placeholder with no textures in it and every shape one degenerate
+   triangle, ported from nxnative's dm/host/hle_mii.c. The SDK's resource loader (as a game links it, nn::mii::detail)
+   reads each file whole and indexes it from its start, checking nothing of its header: the first 0xc bytes are a magic
+   (NFTR for the textures, NFSR for the shapes), then a version, then two arrays of a u32 per part kind, each kind's
+   largest decompressed part and its alignment, then a table of entries, then the hair and faceline transforms. A part
+   whose decompressed size is 0 is absent and skipped, so nought tables hold no texture; the shapes may not all be
+   absent, because a model draws its faceline without checking that it has one (a null buffer read), and the largest
+   sizes may not be 0 either, since they size the model's memory pool and its first alignment is the pool's.
+   The firmware's own files are not ours to ship, so the stand-in holds no texture and no real geometry: it builds,
+   and draws nothing */
 #define MIIMODEL_DATA_ID      0x0100000000000802ull
 #define MIIMODEL_FILES        6
-#define MIIMODEL_TEXTURE_SIZE 0x2428u  /* 0x64 + 327 entries of 28 bytes */
-#define MIIMODEL_SHAPE_SIZE   0x14dd4u /* 0x6c + 1027 entries of 88, 132 of 72, 12 of 36 */
+/* a texture file: 0xc bytes of header, then 11 largest sizes (a page each) and their alignments from +0xc, then one
+   0x1c-byte entry per part from +0x64: 327 entries of texture (hats 132, eyes 62, eyebrows 24, beards 2, wrinkles 12,
+   make-up 12, glasses 20, moles 2, mouths 37, mustaches 6, noselines 18) */
+#define MIIMODEL_TEXTURE_SIZE (0x64u + 0x1cu * 327u)
+/* a shape file: 0xc bytes of header, then 12 largest sizes and their alignments from +0xc, then from +0x6c one 0x58-byte
+   entry per part: offset, inflated size, stored size, a u32 of zlib parameters, the five vertex attribute offsets and
+   their sizes, the index offset and its byte size, and a bounding box. 857 entries of shape (beards 4, facelines 12,
+   masks 12, hats, foreheads and hair in normal and cap form 132 each, glasses 1, noses 18, noselines 18), then the hair
+   transforms (132 of 72 bytes) and the faceline transforms (12 of 36) */
+#define MIIMODEL_SHAPE_TABLES (0x6cu + 0x58u * 857u + 0x48u * 132u + 0x24u * 12u)
+/* the one mesh every shape entry names: one vertex at the origin (attribute 0, four halves) and the triangle (0, 0, 0)
+   (three u16 indices at +0x10), 32 bytes of zeros in a zlib block, past the tables on its own 16-byte alignment */
+#define MIIMODEL_MESH_AT      0x14de0u
+#define MIIMODEL_MESH         0x20u
+/* zlib of 32 zero bytes: its header, then a stored block of them (BFINAL, the length 32 and its complement), then the
+   Adler-32 of 32 zeros, 0x00200001, in the big-endian order the format gives it */
+#define MIIMODEL_MESH_Z_SIZE  (7u + MIIMODEL_MESH + 4u)
+#define MIIMODEL_SHAPE_SIZE   (MIIMODEL_MESH_AT + MIIMODEL_MESH_Z_SIZE)
+_Static_assert(MIIMODEL_TEXTURE_SIZE == 0x2428u, "the MiiModel texture stand-in's size");
+_Static_assert(MIIMODEL_SHAPE_TABLES == 0x14dd4u, "the MiiModel shape stand-in's tables");
 static void miimodel_name(u32 i, char name[32]) {
     static const char* const names[MIIMODEL_FILES] = {"NXTextureLowLinear.dat", "NXTextureLowSRGB.dat",
                                                       "NXTextureMidLinear.dat", "NXTextureMidSRGB.dat",
-                                                      "ShapeHigh.dat",          "ShapeMid.dat"};
+                                                      "ShapeMid.dat",           "ShapeHigh.dat"};
     snprintf(name, 32, "%s", names[i]);
 }
 static u32 miimodel_file_size(u32 i) { return i < 4 ? MIIMODEL_TEXTURE_SIZE : MIIMODEL_SHAPE_SIZE; }
+/* every shape entry names the one mesh: its offset and sizes, attribute 0 as one 8-byte vertex, and the three indices.
+   The entries are zero to begin with, so only these fields need setting and the others keep their absent value */
+static void miimodel_shapes(u8* b) {
+    u32 i;
+    for (i = 0; i < 857; i++) {
+        u32* e = (u32*)(void*)(b + 0x6c + 0x58 * i);
+        e[0] = MIIMODEL_MESH_AT;                /* the data's offset in the file */
+        e[1] = MIIMODEL_MESH;                   /* its inflated size */
+        e[2] = MIIMODEL_MESH_Z_SIZE;            /* its stored size */
+        e[9] = 8;                               /* attribute 0's size: one vertex, the others absent */
+        e[14] = 0x10;                           /* the indices' offset in the mesh */
+        e[15] = 6;                              /* their byte size: three of them */
+    }
+}
 static void miimodel_file_write(u32 i, u8* out) {
+    static const u8 mesh[] = {
+        0x78, 0x01,                                     /* zlib's header */
+        0x01, 0x20, 0x00, 0xdf, 0xff,                   /* a stored block of 32 bytes: final, the length, its complement */
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, /* the vertex: four halves at the origin */
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, /* and 16 more bytes of it, the indices among them */
+        0x00, 0x20, 0x00, 0x01,                         /* the Adler-32 of 32 zeros, big-endian */
+    };
+    u32 kinds = i < 4 ? 11 : 12, k;
     memcpy(out, i < 4 ? "NFTR" : "NFSR", 4);
     put32(out + 4, 1);
+    for (k = 0; k < kinds; k++) {
+        put32(out + 0xc + 4 * k, 0x1000);                /* each kind's largest decompressed part */
+        put32(out + 0xc + 4 * kinds + 4 * k, 0x1000);    /* and its alignment, which the pool takes from the first */
+    }
+    if (i >= 4) {
+        miimodel_shapes(out);
+        memcpy(out + MIIMODEL_MESH_AT, mesh, sizeof mesh);
+    }
 }
 
 /* a synthesized archive's files, in a RomFS laid out like romfs_build's with every file in its root folder, into m
