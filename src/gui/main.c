@@ -124,8 +124,17 @@ enum {
     GUI_LIST_FORM_SIDE,
     GUI_LIST_APPEARANCE,
     GUI_LIST_QUEUE,
+    GUI_LIST_STATES,
     GUI_LISTS
 };
+/* a scene list's scroll bar drawn this frame (ui_bar): its track and thumb, the rows it has and shows from first,
+   kept in App's firsts[list] */
+typedef struct {
+    GuiRect track, thumb;
+    size_t count, shown;
+    int list;
+} GuiBar;
+#define GUI_BARS         16 /* the scene lists one frame shows at most, a box's over a screen's */
 #define GUI_GROUPS_MAX   32
 #define GUI_FOLDERS_MAX  16    /* the player's game folders, past recompiled/ and dumps/ */
 #define GUI_FOLDER_DEPTH 4     /* how deep the games of a folder kept with its subfolders are looked for */
@@ -358,6 +367,12 @@ typedef struct App {
        its first row as last shown (firsts, a GUI_LIST_* each) while the focus shows; a key's goes in its middle */
     bool pointed;
     size_t firsts[GUI_LISTS];
+    /* the scroll bars drawn this frame beside a scene's list whose rows do not all show (ui_bar), under a box none but
+       its own; the list whose thumb a press holds, plus one (bar_hold, 0: none), and for each list whose first row the thumb
+       put, its focus plus one then (SIZE_MAX: not seen since): it stays there until the focus moves (0: it follows) */
+    GuiBar bars[GUI_BARS];
+    int nbars, bar_hold;
+    size_t bar_focus[GUI_LISTS];
     /* Games' list (View List), one page that scrolls: its top games_y pixels down its rows, going to games_to (the
        focus a key moved, the wheel) or flung at games_v pixels a second once a finger let go; a finger holding it
        (games_held: the list's y where it went down and the finger's then, games_hold_*, its last move for the fling),
@@ -1946,7 +1961,10 @@ static float faded(const App* app, Uint64 at) {
     return (float)(now > at ? now - at : 0) / (float)GUI_FADE_MS;
 }
 /* a box's shade over the screen under it, coming in as the box opens */
-static void box_shade(App* app) { shade(app, (Uint8)(128 * faded(app, app->box_ms))); }
+static void box_shade(App* app) {
+    app->nbars = 0; /* the screen's under it, which no press reaches now */
+    shade(app, (Uint8)(128 * faded(app, app->box_ms)));
+}
 static void shade(App* app, Uint8 alpha) {
     static const GuiRgb black = {0, 0, 0};
     SDL_Rect safe;
@@ -2285,6 +2303,11 @@ static void list_follow(App* app, int which, void (*follow)(const GuiRect*, int,
                         const GuiRect* rects, int item, size_t count, UiList* list) {
     list->first = app->firsts[which];
     list->pointed = app->pointed;
+    list->count = count;
+    list->store = &app->firsts[which];
+    if (app->bar_focus[which] == SIZE_MAX) app->bar_focus[which] = list->focus + 1;
+    list->free = app->bar_focus[which] && app->bar_focus[which] == list->focus + 1; /* the thumb's, until it moves */
+    if (!list->free) app->bar_focus[which] = 0;
     follow(rects, app->scale, item, count, list);
     app->firsts[which] = list->first;
 }
@@ -2709,6 +2732,41 @@ void ui_clip(App* app, const GuiRect* r) {
         SDL_SetRenderClipRect(app->renderer, &clip);
     } else
         SDL_SetRenderClipRect(app->renderer, app->clip_had ? &app->clip_was : NULL);
+}
+/* the room a scroll bar takes at a list's right: a letter, and a pixel between it and the rows */
+static int bar_room(const App* app) { return cell_w(app) + app->scale; }
+/* a scroll bar a letter wide at the right of area, for view of total (rows or pixels) shown from at: its track, as
+   tall as area, and its thumb, as tall as the share shown (twice as tall as wide at least) and where that share is
+   among them; false while all show */
+static bool bar_place(const App* app, GuiRect area, long long total, long long view, long long at, GuiRect* track,
+                      GuiRect* thumb) {
+    int w = cell_w(app), h;
+    if (view <= 0 || total <= view) return false;
+    *track = gui_rect(area.x + area.w - w, area.y, w, area.h);
+    h = SDL_min(area.h, SDL_max(2 * w, (int)((long long)area.h * view / total)));
+    at = SDL_clamp(at, 0, total - view);
+    *thumb = gui_rect(track->x, track->y + (int)((long long)(area.h - h) * at / (total - view)), w, h);
+    return true;
+}
+/* a scroll bar: its track faint, its thumb in the soft colour, lit while held */
+static void bar_draw(App* app, GuiRect track, GuiRect thumb, bool held) {
+    fill(app, (float)track.x, (float)track.y, (float)track.w, (float)track.h, app->theme.soft, 72);
+    fill_rect(app, thumb, held ? app->theme.focus : app->theme.soft);
+}
+/* the bar drawn, a press there taking its thumb (bar_at), unless a frame already has all it holds */
+static void bar_keep(App* app, GuiRect track, GuiRect thumb, size_t count, size_t shown, int list) {
+    if (app->nbars < GUI_BARS) app->bars[app->nbars++] = (GuiBar){track, thumb, count, shown, list};
+}
+int ui_bar_width(App* app, size_t count, size_t shown) { return shown && count > shown ? bar_room(app) : 0; }
+int ui_bar(App* app, GuiRect r, const UiList* list, size_t count, size_t shown) {
+    GuiRect track, thumb;
+    int which = list->store ? (int)(list->store - app->firsts) : -1; /* list_follow's, in firsts */
+    if (!ui_bar_width(app, count, shown) ||
+        !bar_place(app, r, (long long)count, (long long)shown, (long long)list->first, &track, &thumb))
+        return 0;
+    bar_draw(app, track, thumb, which >= 0 && which + 1 == app->bar_hold);
+    if (which >= 0) bar_keep(app, track, thumb, count, shown, which);
+    return bar_room(app);
 }
 void ui_draw_row(App* app, GuiRect r, const char* text, unsigned icon, const void* image, unsigned color, unsigned attr,
                  bool focused) {
@@ -3615,7 +3673,7 @@ bool ui_users_rows_get_row_info(App* app, size_t row, int width, UiRowInfo* info
     return true;
 }
 /* each row drawn, then the user's picture against its box's right, two pixels in, as high as the row less four; left of
-   the arrows' cell while some are hidden */
+   the scroll bar while some are hidden */
 static void render_users(App* app) {
     GuiUsersBoxes u;
     size_t i, n;
@@ -3624,7 +3682,7 @@ static void render_users(App* app) {
     over_box(app, u.box, snx_tr(SAY_USERS_TITLE));
     ui_users_draw(app, u.rects, s, u.lists);
     n = ui_users_shown(u.rects, s, UI_USERS_ROWS);
-    arrows = n < (size_t)g_user_count ? cell_w(app) : 0;
+    arrows = ui_bar_width(app, (size_t)g_user_count, n);
     for (i = 0; i < n && u.lists[UI_USERS_ROWS].first + i < (size_t)g_user_count; ++i) {
         int user = (int)(u.lists[UI_USERS_ROWS].first + i);
         GuiRect b = ui_row_box(app, ui_users_row(u.rects, s, UI_USERS_ROWS, i));
@@ -4907,7 +4965,8 @@ static void states_boxes(App* app, GuiStatesBoxes* d) {
         s, d->rects);
     memset(d->lists, 0, sizeof d->lists);
     d->lists[UI_STATES_ROWS].focus = (size_t)app->states_focus;
-    ui_states_follow(d->rects, s, UI_STATES_ROWS, (size_t)count, &d->lists[UI_STATES_ROWS]);
+    list_follow(app, GUI_LIST_STATES, ui_states_follow, d->rects, UI_STATES_ROWS, (size_t)count,
+                &d->lists[UI_STATES_ROWS]);
     area(app, &width, &height);
     if (d->box.x + d->box.w + 4 * s + w <= width)
         d->picture = gui_rect(d->box.x + d->box.w + 4 * s, d->box.y, w, h);
@@ -5635,11 +5694,48 @@ static void grid_flow(App* app, const GuiGamesBoxes* g, UiFlow* f) {
    show, as Rows keeps its focus; for a focus the pointer put there, from the line shown first last (firsts), or as
    little moved as it takes for the focus's line to show whole. From where the last line is at the bottom once the
    lines after the focus all show; the focus's line itself where it is taller than the list */
+/* the grid's first row whose line starts at from pixels down its rows or past it */
+static size_t grid_row_at(App* app, const GuiGamesBoxes* g, int from) {
+    UiFlow f;
+    GuiRect at, area = g->grid_rects[UI_GAMES_GRID_TILES];
+    size_t rows = games_rows(app), r;
+    int line = -1;
+    grid_flow(app, g, &f);
+    for (r = 0; r < rows && ui_flow_next(&f, games_row_label(app, r), &at); ++r) {
+        if (f.line == line) continue; /* a line's first alone */
+        line = f.line;
+        if (at.y - area.y >= from) return r;
+    }
+    return 0;
+}
+/* how many pixels down the grid's rows row first's line starts, and how tall they all are */
+static void grid_extent(App* app, const GuiGamesBoxes* g, size_t first, int* top, int* bottom) {
+    UiFlow f;
+    GuiRect at, area = g->grid_rects[UI_GAMES_GRID_TILES];
+    size_t rows = games_rows(app), r;
+    *top = *bottom = 0;
+    grid_flow(app, g, &f);
+    for (r = 0; r < rows && ui_flow_next(&f, games_row_label(app, r), &at); ++r) {
+        if (r == first) *top = at.y - area.y;
+        *bottom = at.y + at.h - area.y;
+    }
+}
+/* the grid's scroll bar while its rows are taller than the area, as Rows' (games_bar) */
+static bool grid_bar(App* app, const GuiGamesBoxes* g, GuiRect* track, GuiRect* thumb) {
+    GuiRect area = g->grid_rects[UI_GAMES_GRID_TILES];
+    int top, bottom;
+    grid_extent(app, g, g->grid_lists[UI_GAMES_GRID_TILES].first, &top, &bottom);
+    return bar_place(app, gui_rect(g->place.list.x, area.y, g->place.list.w, area.h), bottom, area.h, top, track,
+                     thumb);
+}
 static size_t grid_first(App* app, const GuiGamesBoxes* g, size_t focus) {
     UiFlow f;
     GuiRect at, area = g->grid_rects[UI_GAMES_GRID_TILES];
     size_t rows = games_rows(app), r, kept = app->firsts[GUI_LIST_GRID];
-    int top = 0, height = 0, bottom = 0, shown = -1, from, line = -1;
+    int top = 0, height = 0, bottom = 0, shown = -1, from;
+    if (app->bar_focus[GUI_LIST_GRID] == SIZE_MAX) app->bar_focus[GUI_LIST_GRID] = focus + 1;
+    if (app->bar_focus[GUI_LIST_GRID] == focus + 1) return kept; /* where the thumb put it, until the focus moves */
+    app->bar_focus[GUI_LIST_GRID] = 0;
     grid_flow(app, g, &f);
     for (r = 0; r < rows && ui_flow_next(&f, games_row_label(app, r), &at); ++r) {
         if (r == focus) {
@@ -5658,17 +5754,8 @@ static size_t grid_first(App* app, const GuiGamesBoxes* g, size_t focus) {
         from = top + height - area.h;
     else
         from = shown;
-    from = SDL_min(SDL_min(from, bottom - area.h), top);
-    grid_flow(app, g, &f);
-    for (r = 0; r < rows && ui_flow_next(&f, games_row_label(app, r), &at); ++r) {
-        if (f.line == line) continue; /* a line's first alone */
-        line = f.line;
-        if (at.y - area.y >= from) return r;
-    }
-    return 0;
+    return grid_row_at(app, g, SDL_min(SDL_min(from, bottom - area.h), top));
 }
-/* the scroll bar's width at the list's right: a letter's, its thumb wide enough to see and take */
-static int games_bar_w(const App* app) { return cell_w(app); }
 /* the list's rows: their height a row's step, how many pixels they take all together and how many the area shows */
 static void games_extent(App* app, const GuiGamesBoxes* g, int* row_h, int* total, int* view) {
     GuiRect a = ui_games_row(g->rects, app->scale, UI_GAMES_ROWS, 0),
@@ -5690,7 +5777,14 @@ static void games_boxes(App* app, GuiGamesBoxes* g) {
     g->grid_lists[UI_GAMES_GRID_TILES].tile_h = icon_tiles[app->options[GUI_OPTION_ICONS]].h;
     g->lists[UI_GAMES_ROWS].focus = selected < head ? selected + 1 : (size_t)g->lead + selected - head;
     if (games_grid(app)) {
+        int top, bottom;
         g->grid_lists[UI_GAMES_GRID_TILES].focus = g->lists[UI_GAMES_ROWS].focus;
+        grid_extent(app, g, 0, &top, &bottom);
+        if (bottom > g->grid_rects[UI_GAMES_GRID_TILES].h) { /* past the area: the scroll bar, the tiles beside it */
+            GuiRect list = g->place.list;
+            list.w -= bar_room(app);
+            ui_games_grid_layout(list, app->scale, g->grid_rects);
+        }
         g->grid_lists[UI_GAMES_GRID_TILES].first = app->firsts[GUI_LIST_GRID] =
             grid_first(app, g, g->lists[UI_GAMES_ROWS].focus);
         return;
@@ -5703,7 +5797,7 @@ static void games_boxes(App* app, GuiGamesBoxes* g) {
         games_extent(app, g, &row_h, &total, &view);
         if (total > view) {
             GuiRect list = g->place.list;
-            list.w -= games_bar_w(app) + app->scale;
+            list.w -= bar_room(app);
             ui_games_layout(list, app->scale, g->rects);
         }
         y = SDL_clamp(app->games_y, 0.0f, (float)SDL_max(0, total - view));
@@ -5724,16 +5818,10 @@ static float games_max(App* app, const GuiGamesBoxes* g) {
 /* the scroll bar beside the rows: its track, the list's height, and its thumb, as tall as the share of the rows shown
    and where they are among them; false while they all show */
 static bool games_bar(App* app, const GuiGamesBoxes* g, GuiRect* track, GuiRect* thumb) {
-    int row_h, total, view, h;
-    float y;
+    int row_h, total, view;
     games_extent(app, g, &row_h, &total, &view);
-    if (total <= view) return false;
-    *track = gui_rect(g->place.list.x + g->place.list.w - games_bar_w(app), g->rects[UI_GAMES_ROWS].y, games_bar_w(app),
-                      view);
-    h = SDL_max(2 * games_bar_w(app), (int)((long long)view * view / total));
-    y = SDL_clamp(app->games_y, 0.0f, (float)(total - view));
-    *thumb = gui_rect(track->x, track->y + (int)((float)(view - h) * y / (float)(total - view)), track->w, h);
-    return true;
+    return bar_place(app, gui_rect(g->place.list.x, g->rects[UI_GAMES_ROWS].y, g->place.list.w, view), total, view,
+                     (long long)app->games_y, track, thumb);
 }
 /* the list scrolled to pixel y of the bar's track, the thumb's middle there */
 static void games_bar_to(App* app, float y) {
@@ -6063,17 +6151,23 @@ static void draw_games(App* app) {
     games_scroll_step(app);
     games_boxes(app, &g);
     chrome(app, &g.place);
-    if (games_grid(app))
+    if (games_grid(app)) {
+        GuiRect track, thumb;
+        int top, bottom;
+        app->rows_barred = grid_bar(app, &g, &track, &thumb);
         ui_games_grid_draw(app, g.grid_rects, app->scale, g.grid_lists);
-    else {
+        app->rows_barred = false;
+        grid_extent(app, &g, g.grid_lists[UI_GAMES_GRID_TILES].first, &top, &bottom);
+        if (grid_bar(app, &g, &track, &thumb)) {
+            bar_draw(app, track, thumb, app->bar_hold == GUI_LIST_GRID + 1);
+            bar_keep(app, track, thumb, (size_t)bottom, (size_t)g.grid_rects[UI_GAMES_GRID_TILES].h, GUI_LIST_GRID);
+        }
+    } else {
         GuiRect track, thumb;
         app->rows_barred = games_bar(app, &g, &track, &thumb);
         ui_games_draw(app, g.rects, app->scale, g.lists);
         app->rows_barred = false;
-        if (games_bar(app, &g, &track, &thumb)) { /* the scroll bar: its track faint, its thumb in the ink, held lit */
-            fill(app, (float)track.x, (float)track.y, (float)track.w, (float)track.h, app->theme.soft, 72);
-            fill_rect(app, thumb, app->bar_held ? app->theme.focus : app->theme.soft);
-        }
+        if (games_bar(app, &g, &track, &thumb)) bar_draw(app, track, thumb, app->bar_held);
     }
     /* beside it the focused row: what it is and its path, whole; the page, and where the games are looked for. The
        tips say what it is (a game's kind) or does, which the box does not say again */
@@ -9133,9 +9227,13 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
     if (g >= 0)
         list_follow(app, GUI_LIST_FORM_LIST, ui_form_list_follow, f->left, UI_FORM_LIST_ROWS, (size_t)count,
                     &f->left_lists[UI_FORM_LIST_ROWS]);
+    else /* from its first row, its scroll bar there */
+        f->left_lists[UI_FORM_LIST_ROWS].count = (size_t)count;
     if (!theme && app->form != GUI_FORM_SETTINGS) f->left_lists[UI_FORM_LIST_ROWS].focus = SIZE_MAX;
     if (theme || app->form == GUI_FORM_SETTINGS) { /* nothing, or the rows to see before opening their group */
+        GuiEditor peek;
         f->right_lists[UI_FORM_SIDE_ROWS].focus = SIZE_MAX;
+        if (!theme) f->right_lists[UI_FORM_SIDE_ROWS].count = (size_t)gui_editor_rows(form_rows(app, &peek));
         return;
     }
     count = app->form == GUI_FORM_FOLDERS ? folder_entries(app) : gui_editor_rows(&app->editor);
@@ -9340,11 +9438,14 @@ static void form_swatches(App* app, const GuiFormBoxes* f) {
     const UiList* l = &f->left_lists[UI_FORM_LIST_ROWS];
     int labels = form_labels(e), cw = cell_w(app), s = app->scale;
     size_t i, n = ui_form_list_shown(f->left, s, UI_FORM_LIST_ROWS);
+    int bw = ui_bar_width(app, (size_t)gui_editor_rows(e), n);
     for (i = 0; i < n && l->first + i < (size_t)gui_editor_rows(e); ++i) {
         int r = (int)(l->first + i), x;
         const GuiThemeKey* k = gui_editor_key_of(e, r);
-        GuiRect row = ui_form_list_row(f->left, s, UI_FORM_LIST_ROWS, i), b = ui_row_box(app, row);
+        GuiRect row = ui_form_list_row(f->left, s, UI_FORM_LIST_ROWS, i), b;
         char line[700];
+        row.w -= bw; /* beside the scroll bar, as drawn */
+        b = ui_row_box(app, row);
         if (!k || k->type != GUI_KEY_COLOUR) continue;
         form_line(app, e, r, labels, form_room(app, row.w), line, sizeof line);
         x = b.x + cw / 2 + gui_text_cols(line) * cw + cw;
@@ -9354,11 +9455,11 @@ static void form_swatches(App* app, const GuiFormBoxes* f) {
     }
 }
 /* Folders' groups, a box each as far as it shows: from its title down to its last row shown, half a cell wider
-   either side, Defaults' too; drawn under them */
+   either side, Defaults' too, the right one at the rows' end beside a scroll bar; drawn under them */
 static void folder_frames(App* app, const GuiFormBoxes* f) {
     const UiList* l = &f->right_lists[UI_FORM_SIDE_ROWS];
     size_t i, n = ui_form_side_shown(f->right, app->scale, UI_FORM_SIDE_ROWS);
-    int g, group, cw = cell_w(app);
+    int g, group, cw = cell_w(app), bw = ui_bar_width(app, (size_t)folder_entries(app), n);
     for (g = 0; g <= GUI_FOLDER_GROUPS; ++g) {
         GuiRect a = {0}, z = {0}, box;
         for (i = 0; i < n && l->first + i < (size_t)folder_entries(app); ++i) {
@@ -9368,7 +9469,7 @@ static void folder_frames(App* app, const GuiFormBoxes* f) {
             if (!a.h) a = z;
         }
         if (!a.h) continue;
-        box = gui_rect(a.x - cw / 2, a.y, a.w + cw, z.y + z.h - a.y);
+        box = gui_rect(a.x - cw / 2, a.y, bw ? a.w - bw + cw / 2 : a.w + cw, z.y + z.h - a.y);
         if (app->theme.panels == GUI_PANELS_FILL) fill_rect(app, box, app->theme.page);
         outline(app, box, app->theme.dim);
     }
@@ -10686,6 +10787,7 @@ static void render_help(App* app) {
 static void render(App* app) {
     layout(app);
     app->slider_bar = gui_rect(0, 0, 0, 0); /* none until a screen with UI scale's draws it */
+    app->nbars = 0;
     if (splash_shown(app)) return;
     if (app->closing_ms) {
         draw_closing(app);
@@ -13863,6 +13965,41 @@ static bool foot_press(App* app, float x, float y) {
     return hit.key[0] && hint_press(app, hit.key, hit.col);
 }
 /* the window's pixel x, y on UI scale's slider as last drawn, its dialog picking with no question over it */
+/* the scroll bar a press at x, y takes, the last drawn first: on its track, a finger's within two letters of its
+   right edge (a thumb's reach, wider than it is drawn); -1 for none */
+static int bar_at(const App* app, float x, float y, bool touch) {
+    int i;
+    for (i = app->nbars - 1; i >= 0; --i) {
+        GuiRect t = app->bars[i].track;
+        if (x >= (float)(touch ? t.x + t.w - 2 * cell_w(app) : t.x) && x < (float)(t.x + t.w) && y >= (float)t.y &&
+            y < (float)(t.y + t.h))
+            return i;
+    }
+    return -1;
+}
+static bool on_bar(App* app, float window_x, float window_y) {
+    float x, y;
+    return SDL_RenderCoordinatesFromWindow(app->renderer, window_x, window_y, &x, &y) && bar_at(app, x, y, true) >= 0;
+}
+/* the held bar's thumb moved to pixel y of its track, its middle there: its list's first row as far among the rows
+   past those shown, the grid's the first of the line as far down, kept there until the list's focus moves */
+static void bar_to(App* app, float y) {
+    const GuiBar* b;
+    float room, at;
+    int i;
+    for (i = app->nbars - 1; i >= 0 && app->bars[i].list + 1 != app->bar_hold; --i) continue;
+    if (i < 0) return;
+    b = &app->bars[i];
+    room = (float)(b->track.h - b->thumb.h);
+    at = room > 0 ? SDL_clamp((y - (float)b->track.y - (float)b->thumb.h / 2) / room, 0.0f, 1.0f) : 0;
+    if (b->list == GUI_LIST_GRID) {
+        GuiGamesBoxes g;
+        games_boxes(app, &g);
+        app->firsts[b->list] = grid_row_at(app, &g, (int)(at * (float)(b->count - b->shown) + 0.5f));
+    } else
+        app->firsts[b->list] = (size_t)(at * (float)(b->count - b->shown) + 0.5f);
+    app->bar_focus[b->list] = SIZE_MAX;
+}
 static bool on_slider(App* app, float window_x, float window_y) {
     float x, y;
     return !app->confirm.shown && size_picking(app) &&
@@ -13897,7 +14034,18 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
         slider_to(app, slider_at(app, x, y));
         return;
     }
-    /* Games' scroll bar: a press on it takes the thumb there, and the drag goes on until the button lifts */
+    /* a list's scroll bar: a press on it takes the thumb there, and the drag goes on until the button or the finger
+       lifts */
+    if (app->bar_hold && !click) {
+        bar_to(app, y);
+        return;
+    }
+    if (click && bar_at(app, x, y, touch) >= 0) {
+        app->bar_hold = app->bars[bar_at(app, x, y, touch)].list + 1;
+        bar_to(app, y);
+        return;
+    }
+    /* Games' own, its rows scrolled by the pixel */
     if (app->bar_held && !click && !touch) {
         games_bar_to(app, y);
         return;
@@ -14505,6 +14653,9 @@ static void event_take(App* app, const SDL_Event* e) {
         else if (on_slider(app, e->tfinger.x * (float)w, e->tfinger.y * (float)h)) { /* so does UI scale's slider */
             pointer(app, e->tfinger.x * (float)w, e->tfinger.y * (float)h, true, true);
             app->pick_press = 1; /* its moves its drag's, its lift no tap */
+        } else if (on_bar(app, e->tfinger.x * (float)w, e->tfinger.y * (float)h)) { /* a list's scroll bar too */
+            pointer(app, e->tfinger.x * (float)w, e->tfinger.y * (float)h, true, true);
+            app->pick_press = 1;
         } else if (games_scrolls(app) && !box_shown(app)) /* the list, which a drag scrolls, or its bar */
             games_finger(app, e->tfinger.x * (float)w, e->tfinger.y * (float)h, 0);
         return;
@@ -14521,10 +14672,11 @@ static void event_take(App* app, const SDL_Event* e) {
         return;
     }
     if ((e->type == SDL_EVENT_FINGER_UP || e->type == SDL_EVENT_FINGER_CANCELED) &&
-        finger_id(&e->tfinger) == app->finger && app->pick_press) { /* the picker or the slider had it: no tap */
+        finger_id(&e->tfinger) == app->finger && app->pick_press) { /* the picker, the slider or a bar had it: no tap */
         app->finger = 0;
         app->pick_press = 0;
         app->slider_drag = false;
+        app->bar_hold = 0;
         return;
     }
     if ((e->type == SDL_EVENT_FINGER_UP || e->type == SDL_EVENT_FINGER_CANCELED) &&
@@ -14602,8 +14754,9 @@ static void event_take(App* app, const SDL_Event* e) {
         return;
     }
     if (e->type == SDL_EVENT_MOUSE_BUTTON_UP && e->button.button == SDL_BUTTON_LEFT) {
-        app->pick_press = 0; /* a drag on the picker's bar ends, and one on UI scale's slider, and Games' thumb */
+        app->pick_press = 0; /* a drag on the picker's bar ends, and one on UI scale's slider, and a list's thumb */
         app->slider_drag = app->bar_held = false;
+        app->bar_hold = 0;
         return;
     }
     if (e->type != SDL_EVENT_KEY_DOWN) return;

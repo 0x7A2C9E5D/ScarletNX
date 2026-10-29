@@ -201,6 +201,12 @@ static SDL_Color pixel(App* app, float x, float y) {
     return out;
 }
 static int same_colour(SDL_Color a, SDL_Color b) { return a.r == b.r && a.g == b.g && a.b == b.b; }
+/* the scroll bar of a list (a GUI_LIST_* or a GuiChoicesOf) drawn the last frame; NULL for none */
+static const GuiBar* bar_of(const App* app, int list) {
+    for (int i = 0; i < app->nbars; ++i)
+        if (app->bars[i].list == list) return &app->bars[i];
+    return NULL;
+}
 /* the menu's item i's box, as drawn (its row past the cursor); none while it is scrolled out */
 static GuiRect menu_entry_box(const App* app, const GuiMenuBoxes* m, int item) {
     size_t first = m->lists[UI_MENU_ENTRIES].first;
@@ -1767,6 +1773,34 @@ static void grid_view(App* app, const char* temporary) {
         f.max = rows;
         for (r = 0; r < first; ++r) assert(ui_flow_next(&f, games_row_label(app, r), &at));
         assert(f.col >= f.cols || games_row_label(app, first)); /* a line's first: the one before ends its line */
+    }
+    /* the lines taller than the area: the grid's scroll bar at the list's right, the tiles beside it, its thumb at the
+       foot for the last game; pressed at the top of its track, the first lines show, the focus where it was, until
+       a key moves it */
+    render(app);
+    games_boxes(app, &g);
+    {
+        const GuiBar* bar = bar_of(app, GUI_LIST_GRID);
+        GuiRect area = g.grid_rects[UI_GAMES_GRID_TILES];
+        size_t focus = g.grid_lists[UI_GAMES_GRID_TILES].focus;
+        SDL_Event e = {0};
+        assert(bar && bar->track.x == g.place.list.x + g.place.list.w - cell_w(app) && bar->track.y == area.y &&
+               bar->track.h == area.h && area.x + area.w <= bar->track.x - app->scale);
+        assert(bar->thumb.y + bar->thumb.h == bar->track.y + bar->track.h && bar->thumb.y > bar->track.y);
+        mouse_px(app, bar->track.x + 1, bar->track.y + 1, true);
+        assert(app->bar_hold == GUI_LIST_GRID + 1);
+        e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+        e.button.button = SDL_BUTTON_LEFT;
+        event(app, &e);
+        assert(!app->bar_hold);
+        render(app);
+        games_boxes(app, &g);
+        assert(!g.grid_lists[UI_GAMES_GRID_TILES].first && g.grid_lists[UI_GAMES_GRID_TILES].focus == focus);
+        assert(bar_of(app, GUI_LIST_GRID)->thumb.y == bar_of(app, GUI_LIST_GRID)->track.y);
+        app->pointed = false;
+        key(app, SDLK_LEFT);
+        games_boxes(app, &g);
+        assert(g.grid_lists[UI_GAMES_GRID_TILES].focus == focus - 1 && g.grid_lists[UI_GAMES_GRID_TILES].first > 0);
     }
     /* the pointer on a tile of a line that shows moves no line, where a key puts the focus's line in the middle: at a
        size five lines show at, the focus on a game by the keys, the last tile shown hovered, then Left and Right back
@@ -4103,8 +4137,9 @@ int main(int argc, char** argv) {
         mouse_px(&app, b.c.box.x - 4, b.c.box.y + b.c.box.h / 2, true);
         assert(!app.sizes_shown && app.menu.text_size == start && !app.confirm.shown);
     }
-    { /* a question's choices in an area too short for them: the rows that fit, from the focus's; the arrow of those
-         hidden above in the first row's box, at its right; YoRHa's rows from the area's top down to the question */
+    { /* a question's choices in an area too short for them: the rows that fit, from the focus's; a scroll bar at their
+         right, its thumb at the foot of its track for the last row, where no arrow says the row hidden above; YoRHa's
+         rows from the area's top down to the question */
         GuiChoices c;
         GuiTheme was = app.theme;
         GuiRect first, short_area;
@@ -4118,13 +4153,19 @@ int main(int argc, char** argv) {
         assert(c.lists[UI_CHOICES_ROWS].first == (size_t)c.count - rows && c.box.y + c.box.h <= short_area.h);
         SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
         SDL_RenderClear(app.renderer); /* the dialog alone */
+        app.nbars = 0;
         choices_draw(&app, &c, "UI scale", NULL);
-        first = choice_box(&app, &c, c.count - (int)rows);
+        first = ui_choices_row(c.rects, app.scale, UI_CHOICES_ROWS, 0);
         {
-            int x, y;
-            assert(find_text(&app, "\x1e", rgb(app.theme.soft), 1, &x, &y));
-            assert(x == first.x + first.w - cw && y == item_text_y(&app, first));
-            hides(&app, "\x1f", rgb(app.theme.soft)); /* the last in focus: none hidden below */
+            const GuiBar* bar = &app.bars[0];
+            assert(app.nbars == 1 && bar->list == GUI_CHOICES_SIZES && bar->count == 2 && bar->shown == 1);
+            assert(bar->track.x == first.x + first.w - cw && bar->track.w == cw && bar->track.y == first.y &&
+                   bar->track.h == first.h);
+            assert(bar->thumb.y + bar->thumb.h == bar->track.y + bar->track.h); /* the last row */
+            assert(same_colour(pixel(&app, (float)bar->track.x + 1, (float)(bar->track.y + bar->track.h - 2)),
+                               rgb(app.theme.soft)));
+            hides(&app, "\x1e", rgb(app.theme.soft));
+            hides(&app, "\x1f", rgb(app.theme.soft));
         }
         app.theme = *gui_theme_builtin("yorha");
         short_area.h = 3 * cell_h(&app) + cell_h(&app) / 2 + item_h(&app) * 3 / 2;
@@ -8465,14 +8506,15 @@ int main(int argc, char** argv) {
             assert(l->focus >= l->first && l->focus < l->first + ui_menu_shown(m.rects, app.scale, UI_MENU_ENTRIES));
         }
     }
-    /* a text size too big for the window (800x1024 at 4x: the foot's keys over more rows): the list scrolls as the focus goes down, then back, an arrow where boxes
-       are hidden, and a size that would leave fewer than 16 rows falls back */
+    /* a text size too big for the window (800x1024 at 4x: the foot's keys over more rows): the list scrolls as the
+       focus goes down, then back, its scroll bar's thumb where the rows shown are and no arrow, the thumb taken by the
+       mouse and a finger; a size that would leave fewer than 16 rows falls back */
     {
         GuiMenuBoxes m;
         SDL_Color soft = rgb(app.theme.soft);
         int shown;
         /* Install Keys blinks, no keys being in use: the clock on a half where it has its usual look, so an
-           arrow in its row is drawn soft wherever the row lands */
+           arrow in its row would be drawn soft wherever the row lands */
         assert(app.theme.blink_ms);
         app.clock = app.theme.blink_ms;
         assert(SDL_SetWindowSize(app.window, 800, 1024));
@@ -8492,14 +8534,18 @@ int main(int argc, char** argv) {
         shown = (int)ui_menu_shown(m.rects, app.scale, UI_MENU_ENTRIES);
         assert(app.scale == GUI_TEXT_MAX && app.rows == 16 && shown < GUI_ITEM_COUNT &&
                !m.lists[UI_MENU_ENTRIES].first);
+        {
+            const GuiBar* bar = bar_of(&app, GUI_LIST_MENU);
+            GuiRect top = ui_menu_row(m.rects, app.scale, UI_MENU_ENTRIES, 0),
+                    last = ui_menu_row(m.rects, app.scale, UI_MENU_ENTRIES, (size_t)shown - 1);
+            assert(bar && bar->count == GUI_ITEM_COUNT && bar->shown == (size_t)shown);
+            assert(bar->track.x == top.x + top.w - cell_w(&app) && bar->track.y == top.y &&
+                   bar->track.y + bar->track.h == last.y + last.h && bar->thumb.y == bar->track.y);
+            assert(same_colour(pixel(&app, (float)bar->thumb.x + 1, (float)bar->thumb.y + 1), soft));
+        }
         hides(&app, "\x1e", soft);
-        shows(&app, "\x1f", soft);           /* items below the last row */
+        hides(&app, "\x1f", soft);           /* the bar says the items below the last row */
         assert(shown + 2 <= GUI_ITEM_COUNT); /* room to hide rows above and below the ones shown */
-        app.clock = 2 * app.theme.blink_ms;  /* the arrow as the last row's text: page on a failing one, else soft */
-        render(&app);
-        shows(&app, "\x1f",
-              rgb(ui_menu_entries_attr_cb(&app, shown - 1) & UI_ATTR_FAILURE ? app.theme.page : app.theme.soft));
-        app.clock = app.theme.blink_ms;
         /* ui.txt's scroll, center: each focus the keys put in the middle of the rows shown, the ends where the list
            has no more to move */
         app.pointed = false;
@@ -8513,18 +8559,108 @@ int main(int argc, char** argv) {
         render(&app);
         menu_boxes(&app, &m);
         assert(m.lists[UI_MENU_ENTRIES].first == 1 && 1 + shown < GUI_ITEM_COUNT); /* hidden above and below */
-        shows(&app, "\x1e", soft);
-        shows(&app, "\x1f", soft);
+        {
+            const GuiBar* bar = bar_of(&app, GUI_LIST_MENU);
+            assert(bar && bar->thumb.y > bar->track.y && bar->thumb.y + bar->thumb.h < bar->track.y + bar->track.h);
+        }
+        hides(&app, "\x1e", soft);
+        hides(&app, "\x1f", soft);
         app.menu.selected = GUI_EXIT;
         render(&app);
         menu_boxes(&app, &m);
         assert((int)m.lists[UI_MENU_ENTRIES].first + shown == GUI_ITEM_COUNT && m.lists[UI_MENU_ENTRIES].first > 0);
-        shows(&app, "\x1e", soft);
+        assert(bar_of(&app, GUI_LIST_MENU)->thumb.y + bar_of(&app, GUI_LIST_MENU)->thumb.h ==
+               bar_of(&app, GUI_LIST_MENU)->track.y + bar_of(&app, GUI_LIST_MENU)->track.h);
+        hides(&app, "\x1e", soft);
         hides(&app, "\x1f", soft);
         app.menu.selected = GUI_SWITCH;
         render(&app);
         menu_boxes(&app, &m);
         assert(!m.lists[UI_MENU_ENTRIES].first);
+        { /* the thumb pressed at its track's foot and held up to its top: the rows follow it, the focus where it was
+             (off the rows shown, which stay), lit while held; the button up lets it go, and a key's focus shows again */
+            const GuiBar* bar = bar_of(&app, GUI_LIST_MENU);
+            GuiRect track = bar->track;
+            assert(!app.bar_hold);
+            mouse_px(&app, track.x + 1, track.y + track.h - 1, true);
+            assert(app.bar_hold == GUI_LIST_MENU + 1 && app.menu.selected == GUI_SWITCH);
+            render(&app);
+            menu_boxes(&app, &m);
+            assert((int)m.lists[UI_MENU_ENTRIES].first + shown == GUI_ITEM_COUNT);
+            bar = bar_of(&app, GUI_LIST_MENU);
+            assert(same_colour(pixel(&app, (float)bar->thumb.x + 1, (float)bar->thumb.y + 1), rgb(app.theme.focus)));
+            mouse_px(&app, track.x + 1, track.y + 1, false); /* moved, the button held */
+            render(&app);
+            menu_boxes(&app, &m);
+            assert(!m.lists[UI_MENU_ENTRIES].first && app.menu.selected == GUI_SWITCH);
+            mouse_px(&app, track.x + 1, track.y + track.h - 1, false);
+            {
+                SDL_Event e = {0};
+                e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+                e.button.button = SDL_BUTTON_LEFT;
+                event(&app, &e);
+            }
+            assert(!app.bar_hold);
+            render(&app);
+            render(&app);
+            menu_boxes(&app, &m);
+            assert((int)m.lists[UI_MENU_ENTRIES].first + shown == GUI_ITEM_COUNT && app.menu.selected == GUI_SWITCH);
+            mouse_px(&app, track.x + 1, track.y + track.h / 2, false); /* the button up: a move takes nothing */
+            menu_boxes(&app, &m);
+            assert((int)m.lists[UI_MENU_ENTRIES].first + shown == GUI_ITEM_COUNT);
+            app.pointed = false;
+            key(&app, SDLK_DOWN);
+            menu_boxes(&app, &m);
+            assert(app.menu.selected == GUI_SWITCH + 1 && m.lists[UI_MENU_ENTRIES].first <= (size_t)GUI_SWITCH + 1);
+            key(&app, SDLK_UP);
+            render(&app);
+            menu_boxes(&app, &m);
+            assert(app.menu.selected == GUI_SWITCH && !m.lists[UI_MENU_ENTRIES].first);
+        }
+        { /* a finger takes the thumb two letters from the bar's right edge, wider than the bar, a little further left
+             it is on a row; its lift taps nothing */
+            const GuiBar* bar = bar_of(&app, GUI_LIST_MENU);
+            GuiRect track = bar->track;
+            int w, h;
+            float wx, wy;
+            SDL_GetWindowSize(app.window, &w, &h);
+            for (int k = 0; k < 2; ++k) {
+                SDL_Event e = {0};
+                float bx = (float)(track.x + track.w - 2 * cell_w(&app)) + (k ? -2.0f : 1.0f);
+                assert(SDL_RenderCoordinatesToWindow(app.renderer, bx, (float)(track.y + track.h - 2), &wx, &wy));
+                e.type = SDL_EVENT_FINGER_DOWN;
+                e.tfinger.fingerID = 6;
+                e.tfinger.x = wx / (float)w;
+                e.tfinger.y = wy / (float)h;
+                event(&app, &e);
+                assert(app.bar_hold == (k ? 0 : GUI_LIST_MENU + 1));
+                if (!k) {
+                    e.type = SDL_EVENT_FINGER_UP;
+                    event(&app, &e);
+                    assert(!app.bar_hold && !app.finger && !app.menu.running && app.menu.view == GUI_LOAD_NONE);
+                    render(&app);
+                    menu_boxes(&app, &m);
+                    assert((int)m.lists[UI_MENU_ENTRIES].first + shown == GUI_ITEM_COUNT);
+                    app.pointed = false;
+                    app.bar_focus[GUI_LIST_MENU] = 0;
+                    render(&app);
+                } else {
+                    e.type = SDL_EVENT_FINGER_CANCELED; /* no tap on the row */
+                    event(&app, &e);
+                }
+            }
+            app.menu.selected = GUI_SWITCH;
+            render(&app);
+            menu_boxes(&app, &m);
+            assert(!m.lists[UI_MENU_ENTRIES].first);
+        }
+        /* a box over the screen: the screen's bar, under its shade, is no press's */
+        app.users_shown = true;
+        render(&app);
+        assert(!bar_of(&app, GUI_LIST_MENU));
+        app.users_shown = false;
+        render(&app);
+        assert(bar_of(&app, GUI_LIST_MENU));
         app.clock = 0;
         /* the pointer on a row that shows moves nothing, where a key puts the focus in the middle: the last row shown
            hovered, then Up and Down back to it */
@@ -8781,20 +8917,32 @@ int main(int argc, char** argv) {
             render(&app);
             shows(&app, "THEME EDITOR  /  mytheme", normal);
             shows(&app, "- Save", yellow); /* its first row */
-            /* more rows than the box holds: an arrow down at first, both in the middle, up at the end */
+            /* more rows than the box holds: its scroll bar's thumb at the top at first, between the ends in the
+               middle, at the foot at the end, and no arrows */
             form_boxes(&app, &f);
             assert(app.editor.row == 0 && form_shown(&app, &f, false) < (size_t)gui_editor_rows(&app.editor));
+            assert(bar_of(&app, GUI_LIST_FORM_LIST) &&
+                   bar_of(&app, GUI_LIST_FORM_LIST)->count == (size_t)gui_editor_rows(&app.editor) &&
+                   bar_of(&app, GUI_LIST_FORM_LIST)->thumb.y == bar_of(&app, GUI_LIST_FORM_LIST)->track.y);
             hides(&app, "\x1e", soft);
-            shows(&app, "\x1f", soft);
+            hides(&app, "\x1f", soft);
             app.editor.row = gui_editor_rows(&app.editor) / 2;
             render(&app);
             form_boxes(&app, &f);
             assert(form_first(&f, false) > 0);
-            shows(&app, "\x1e", soft);
-            shows(&app, "\x1f", soft);
+            {
+                const GuiBar* bar = bar_of(&app, GUI_LIST_FORM_LIST);
+                assert(bar->thumb.y > bar->track.y && bar->thumb.y + bar->thumb.h < bar->track.y + bar->track.h);
+            }
+            hides(&app, "\x1e", soft);
+            hides(&app, "\x1f", soft);
             app.editor.row = gui_editor_rows(&app.editor) - 1;
             render(&app);
-            shows(&app, "\x1e", soft);
+            {
+                const GuiBar* bar = bar_of(&app, GUI_LIST_FORM_LIST);
+                assert(bar->thumb.y + bar->thumb.h == bar->track.y + bar->track.h);
+            }
+            hides(&app, "\x1e", soft);
             hides(&app, "\x1f", soft);
             app.editor.row = 0;
             render(&app);
@@ -10578,7 +10726,7 @@ int main(int argc, char** argv) {
             app.recent = kept;
             recent_changed(&app);
         }
-        /* letters too big for the screen: the list scrolls, the focus in view, an arrow where entries are hidden. At
+        /* letters too big for the screen: the list scrolls, the focus in view, its scroll bar beside the rows. At
            768 high the menu takes 3x, its foot's letters 2x; 960 wide is under 45 columns (ui.txt's narrow_below),
            where side_box = on (F2) puts the side box under the list, three fifths of the height left to the list */
         assert(SDL_SetWindowSize(app.window, 960, 768));
@@ -10598,8 +10746,13 @@ int main(int argc, char** argv) {
             assert(shown < GUI_ITEM_COUNT && l->first > 0 && l->focus < l->first + shown);
             b = menu_entry_box(&app, &m, (int)l->first);
         }
-        text_px_is(&app, b.x + b.w - 8 * app.scale, item_text_y(&app, b), "\x1e", rgb(app.theme.soft),
-                   rgb(app.theme.panels == GUI_PANELS_FILL ? app.theme.dim : app.theme.page)); /* in its box */
+        {
+            const GuiBar* bar = bar_of(&app, GUI_LIST_MENU);
+            GuiRect row = ui_menu_row(m.rects, app.scale, UI_MENU_ENTRIES, 0);
+            assert(bar && bar->track.x == row.x + row.w - cell_w(&app) && bar->track.y == row.y &&
+                   bar->thumb.y + bar->thumb.h == bar->track.y + bar->track.h); /* Exit, the last */
+            hides(&app, "\x1e", rgb(app.theme.soft));
+        }
         app.side_box = GUI_SIDE_AUTO;
         /* and with side_box = auto, the list alone: no side box, no status */
         render(&app);
